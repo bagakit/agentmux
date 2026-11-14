@@ -4,7 +4,7 @@ import { AGENTMUX_GOAL_SKILL_ENTRY } from './goal-role-guidance.js'
 import { AMUX_PROTOCOL_DEFINITIONS } from './amux-protocol-definition.js'
 import { DOMImplementation, XMLSerializer } from '@xmldom/xmldom'
 import { AGENTMUX_SELF_CONTEXT_VERB } from './agent-self-context.js'
-import { AGENTMUX_AGENT_MESSAGING_ENTRY } from './agent-messaging-guidance.js'
+import { AGENTMUX_AGENT_MESSAGING_ENTRY, AGENTMUX_SESSION_NAMING_ENTRY } from './agent-messaging-guidance.js'
 import { browserInputContextJson, type BrowserInputContext } from './browser-input-context.js'
 import { agentLaunchContextExceedsBudget } from './agent-prompt-budget.js'
 
@@ -126,6 +126,8 @@ export function composeAgentLaunchPrompt(
   // 只有当 AgentMux 确实要说话时，才引出用户段——否则一个空信封只会徒增噪音。
   const compose = () => {
     const parts = [...amuxParts, ...selected].filter(part => part.trim())
+    // Reuse an existing creation packet; an empty disabled-guide launch stays empty.
+    if (!injectAgentMuxGuide && (userRequest || parts.length > 0) && !parts.includes(AGENTMUX_SESSION_NAMING_ENTRY)) parts.unshift(AGENTMUX_SESSION_NAMING_ENTRY)
     if (parts.length > 0) parts.unshift(userRequest ? USER_REQUEST_FOLLOWS : task ? PLATFORM_TASK_REQUESTED : AWAIT_USER_REQUEST)
     return composeAgentPrompt(userRequest, parts.join('\n\n'))
   }
