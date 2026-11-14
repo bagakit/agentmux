@@ -5,7 +5,7 @@ import { act, createElement, type ReactNode } from 'react'
 import { type Root } from 'react-dom/client'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { webcrypto } from 'node:crypto'
-import { mkdtemp, rm, symlink } from 'node:fs/promises'
+import { appendFile, mkdir, mkdtemp, readFile, rm, symlink } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -15,9 +15,13 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 import { parseAgentMuxControlReceipt, parseAgentMuxControlRequest } from '@agentmux/core'
 import { AgentMuxControlServer, connectAgentMuxRpc } from '../../../packages/core/src/control-host'
 import { objectCliEnvironment } from '../../../packages/core/test/helpers/object-cli-rpc'
-import type { AgentMuxControlResult, AgentMuxDesktopFocusResult, AgentMuxDesktopFocusTarget } from '@agentmux/core/control'
+import type { AgentMuxControlRequest, AgentMuxControlResult, AgentMuxDesktopFocusResult, AgentMuxDesktopFocusTarget } from '@agentmux/core/control'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts'
 import { api } from '../src/renderer/src/lib/api'
+import { SpatialLinkIngress } from '../src/main/spatial-link-ingress'
+import { callPublicGoalControl } from '@agentmux/core'
+import { publicGoalRecord } from '@agentmux/host/goal-projection'
+import { goalLinkBuildPlugin, goalLinkOwnerFixture } from './helpers/goal-link-owner'
 import { App } from '../src/renderer/src/App'
 import { useAppStore } from '../src/renderer/src/store'
 import { addWorkbenchRegion, createWorkbenchTab, focusWorkbenchTabRegion, removeWorkbenchRegion } from '../src/renderer/src/lib/workbench-tabs'
@@ -1350,3 +1354,272 @@ describe('Settings semantic navigation', () => {
     expect(useAppStore.getState().agentComposerDrafts[source.id]).toBe('Unsent original draft')
   })
 })
+
+
+it('source-qualified Goal links distinguish stores on one real semantic Runtime and survive its original process restart', async () => {
+  const fixture = await goalLinkOwnerFixture()
+  try {
+    vi.spyOn(document.documentElement, 'clientWidth', 'get').mockReturnValue(1280)
+    vi.spyOn(document.documentElement, 'clientHeight', 'get').mockReturnValue(800)
+    const first = await fixture.open('original')
+    vi.spyOn(api.goals, 'execute').mockImplementation(request => callPublicGoalControl(request, (method, input) => first.client.call(method, input as never)))
+    const a = await first.client.call('goal.create', { goalId: 'exact', title: 'Original source Goal', risk: 'low', confirmation: 'user' })
+    await act(async () => useAppStore.setState({ demands: { exact: { ...publicGoalRecord(a.goal), source: 'default-topic' } } }))
+    const second = await fixture.open('other')
+    const listProof = JSON.parse(await readFile(join(fixture.native.env.AGENTMUX_STATE_DIRECTORY!, 'goal-list-proof.json'), 'utf8'))
+    expect(listProof).toMatchObject({ scope: 'original', items: [{ id: 'exact', title: 'Original source Goal' }] })
+    expect(listProof.items[0].address).toBeDefined()
+    const b = await second.client.call('goal.create', { goalId: 'exact', title: 'Other source Goal', risk: 'low', confirmation: 'user' })
+    expect(a.goal.address).toBeDefined(); expect(b.goal.address).toBeDefined()
+    const address = a.goal.address!, other = b.goal.address!
+    expect(address.runtimeId).toBe(fixture.native.owner.runtimeId)
+    expect(address.runtimeId).not.toBe(fixture.native.owner.ownerInstanceId)
+    expect(address.namespace).not.toBe(other.namespace)
+    expect(other.runtimeId).toBe(address.runtimeId)
+    expect(JSON.stringify(address)).not.toContain(first.root)
+    const request = parseAgentMuxControlRequest({ schemaVersion: 5, requestId: 'original-reading', operation: 'focus',
+      target: { kind: 'goal', goalId: 'exact', runtimeId: address.runtimeId, namespace: address.namespace, section: 'plan' }, inputPolicy: 'preserve' })
+    const before = useAppStore.getState()
+    const outcome = await control(request.target as AgentMuxDesktopFocusTarget).then(result => ({ result }), error => ({ error: String(error) }))
+    expect(outcome).not.toHaveProperty('error')
+    const rejected = 'result' in outcome ? outcome.result! : undefined
+    expect(rejected!.navigation.state).toBe('rejected')
+    expect(rejected!.issues.some(issue => issue.code === 'GOAL_SOURCE_UNCONFIRMED')).toBe(true)
+    expect(useAppStore.getState().selectedDemandId).toBe(before.selectedDemandId)
+    expect(useAppStore.getState().agentFocus).toBe(before.agentFocus)
+    expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+    const oldOwner = fixture.native.owner
+    await fixture.open('original')
+    const read = await first.client.call('goal.inspect', { goalId: 'exact' })
+    expect(fixture.native.owner.runtimeId).toBe(oldOwner.runtimeId)
+    expect(fixture.native.owner.ownerInstanceId).not.toBe(oldOwner.ownerInstanceId)
+    expect(read.goal!.address).toEqual(address)
+    expect((await control(request.target as AgentMuxDesktopFocusTarget)).navigation.state).not.toBe('rejected')
+    await act(async () => useAppStore.setState({ demands: { exact: { ...publicGoalRecord(b.goal), source: 'default-topic' } } }))
+    const bare = await control({ kind: 'goal', goalId: 'exact' })
+    expect(bare.navigation.state).toMatch(/applied|unchanged/u)
+    expect(container.querySelector('[data-goal-detail-id="exact"]')?.textContent).toContain('Other source Goal')
+  } finally { await fixture.close() }
+}, 60_000)
+
+it('copied Goal plan links and the real CLI reveal the original graph without creating work or stealing the retained draft', async () => {
+  const fixture = await goalLinkOwnerFixture(), owner = await fixture.open('original')
+  let server: AgentMuxControlServer | undefined, client: Awaited<ReturnType<typeof connectAgentMuxRpc>> | undefined
+  const lifecycle = [vi.spyOn(api.sessions, 'launchAgent'), vi.spyOn(api.sessions, 'submitPrompt'), vi.spyOn(api.sessions, 'resume'), vi.spyOn(api.sessions, 'stop')]
+  try {
+    vi.spyOn(document.documentElement, 'clientWidth', 'get').mockReturnValue(1280)
+    vi.spyOn(document.documentElement, 'clientHeight', 'get').mockReturnValue(800)
+    vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockImplementation(function(this: HTMLElement) {
+      const reading = this.closest<HTMLElement>('[data-goal-reading-section]')
+      const base = reading?.dataset.goalReadingSection === 'plan' ? 900 : reading?.dataset.goalReadingSection === 'activity' ? 1800 : 100
+      const top = reading ? base - (this.closest<HTMLElement>('.goals-detail')?.scrollTop ?? 0) : 0
+      return { x: 0, y: top, top, left: 0, right: 600, bottom: top + 400, width: 600, height: 400, toJSON: () => ({}) }
+    })
+    vi.spyOn(api.goals, 'execute').mockImplementation(request => callPublicGoalControl(request, (method, input) => owner.client.call(method, input as never)))
+    const created = await owner.client.call('goal.create', { goalId: 'exact', title: 'An addressable Goal', risk: 'low', confirmation: 'user' })
+    const address = created.goal.address!
+    if (process.env.GOAL_LINK_EVIDENCE) await appendFile(process.env.GOAL_LINK_EVIDENCE, JSON.stringify({ phase: 'empty-original-goal', goal: created.goal, config, owner: fixture.native.owner }) + '\n')
+    await act(async () => useAppStore.setState({ demands: { exact: { ...publicGoalRecord(created.goal), source: 'default-topic' } }, selectedDemandId: null }))
+    const writes = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+    const requests: AgentMuxControlRequest[] = []
+    const execute = async (request: AgentMuxControlRequest, signal?: AbortSignal) => {
+      requests.push(request)
+      let pending!: Promise<AgentMuxControlResult>
+      await act(async () => { pending = useAppStore.getState().executeControl(request, signal); await Promise.resolve() })
+      return pending
+    }
+    const ingress = new SpatialLinkIngress(), issues = vi.fn()
+    ingress.ready(execute, issues)
+    await ingress.receive(address.goalUrl)
+    expect(issues).not.toHaveBeenCalled()
+    const copy = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Copy plan link')
+    expect(copy).toBeDefined(); await act(async () => copy!.click())
+    expect(writes).toHaveBeenCalledWith(address.planUrl)
+    await act(async () => useAppStore.getState().setMainSurface('survey'))
+    await settle()
+    outside.focus(); outside.value = 'Original unsent draft'; outside.setSelectionRange(2, 7)
+    const original = useAppStore.getState()
+    await ingress.receive(writes.mock.calls[0]![0])
+    expect(issues).not.toHaveBeenCalled()
+    expect(container.querySelector('[data-goal-plan-empty]')).not.toBeNull()
+    expect(container.querySelector<HTMLElement>('.goals-detail')!.scrollTop).toBeGreaterThan(0)
+    expect(document.activeElement).toBe(outside); expect(outside.value).toBe('Original unsent draft')
+    expect([outside.selectionStart, outside.selectionEnd]).toEqual([2, 7])
+    expect(useAppStore.getState().agentFocus).toBe(original.agentFocus)
+    const proposal = { summary: 'Read the original plan', criteria: [{ id: 'read', text: 'The original graph is visible' }], openQuestions: [] }
+    await owner.client.call('goal.update', { goalId: 'exact', patch: { alignment: proposal } })
+    await owner.client.call('goal.plan.revise', { goalId: 'exact', revision: { operationId: 'original-plan', expectedRevision: 0, alignmentRevision: 1,
+      nodes: [{ id: 'read', title: 'Read original graph', outcome: 'The original graph is visible', criterionIds: ['read'], dependsOn: [], check: 'Inspect the original graph', executor: null }] } })
+    const saved = await owner.client.call('goal.inspect', { goalId: 'exact' })
+    if (process.env.GOAL_LINK_EVIDENCE) await appendFile(process.env.GOAL_LINK_EVIDENCE, JSON.stringify({ phase: 'saved-original-goal', goal: saved.goal, config, owner: fixture.native.owner }) + '\n')
+    await act(async () => useAppStore.setState({ demands: { exact: { ...publicGoalRecord(saved.goal!), source: 'default-topic' } } }))
+    const cliDirectory = join(fixture.directory, 'cli'); await mkdir(cliDirectory)
+    const cli = join(cliDirectory, 'amux.mjs'), require = createRequire(import.meta.url), core = dirname(require.resolve('../../../packages/core/package.json'))
+    await symlink(join(core, 'node_modules'), join(cliDirectory, 'node_modules'), 'dir')
+    await require(join(core, 'node_modules/esbuild')).build({ entryPoints: [join(core, 'src/agentmux.ts')], outfile: cli, bundle: true, platform: 'node', format: 'esm', packages: 'external', logLevel: 'silent', plugins: [goalLinkBuildPlugin('actual-public-CLI')] })
+    server = new AgentMuxControlServer({ socketPath: join(fixture.directory, 'desktop.sock'), coreClients: () => [], execute: (request, _name, context) => execute(request, context?.signal) })
+    await server.start()
+    client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
+    const receipt = await client.call('goal.focus', { goalId: 'exact', runtimeId: address.runtimeId, namespace: address.namespace, section: 'plan' })
+    expect(receipt.presentation.goal).toEqual({ goalId: 'exact', runtimeId: address.runtimeId, namespace: address.namespace, section: 'plan' })
+    const cliCall = async (args: string[]) => {
+      const child = spawn(process.execPath, [cli, '--endpoint', 'unix:' + server!.path, ...args], { env: objectCliEnvironment(fixture.directory), stdio: ['ignore', 'pipe', 'pipe'] })
+      return new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
+        let stdout = '', stderr = ''; const deadline = setTimeout(() => { child.kill(); reject(Error('The exact Goal CLI request exceeded its deadline.')) }, 10_000)
+        child.stdout.on('data', value => { stdout += value }); child.stderr.on('data', value => { stderr += value }); child.once('error', error => { clearTimeout(deadline); reject(error) })
+        child.once('close', code => { clearTimeout(deadline); resolve({ code, stdout, stderr }) })
+      })
+    }
+    const requestsBeforeDiscovery = requests.length
+    const help = await cliCall(['goal', 'focus', '--help']), skill = await cliCall(['goal', '--skill']), spaceSkill = await cliCall(['space', '--skill'])
+    expect(help.code, help.stderr).toBe(0); expect(help.stdout).toContain('--namespace ID'); expect(help.stdout).toContain('--section plan')
+    expect(skill.code, skill.stderr).toBe(0); expect(skill.stdout).toContain('goal.address'); expect(skill.stdout).toContain('presentation.goal')
+    expect(spaceSkill.code, spaceSkill.stderr).toBe(0); expect(spaceSkill.stdout).toContain('capsule, mote, host and goal'); expect(spaceSkill.stdout).toContain('goal focus --goal ID --runtime ID --namespace ID --section plan')
+    expect(requests).toHaveLength(requestsBeforeDiscovery)
+    const result = await cliCall(['goal', 'focus', '--goal', 'exact', '--runtime', address.runtimeId, '--namespace', address.namespace, '--section', 'plan'])
+    expect(result.code, result.stderr).toBe(0)
+    expect(JSON.parse(result.stdout).result.presentation.goal).toEqual(receipt.presentation.goal)
+    expect(container.querySelector('[data-goal-plan-node="read"]')).not.toBeNull()
+    const editor = container.querySelector<HTMLTextAreaElement>('[aria-label="Goal title"]')!
+    const { editGoalDraft } = await import('../src/renderer/src/lib/goal-edit-drafts')
+    await act(async () => editGoalDraft('exact', 'title', 'A retained local edit'))
+    await ingress.receive(address.planUrl)
+    expect(container.querySelector('[aria-label="Goal title"]')).toBe(editor)
+    expect(editor.value).toBe('A retained local edit')
+    const invoke = vi.mocked(api.goals.execute).getMockImplementation()!
+    const anchorButton = (label: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === label)!
+    for (const choice of ['Activity', 'Overview']) {
+      await act(async () => anchorButton('Overview').click())
+      const detail = container.querySelector<HTMLElement>('.goals-detail')!, originalScroll = detail.scrollTop
+      let release!: () => void, reached!: () => void
+      const held = new Promise<void>(resolve => { release = resolve }), reachedSource = new Promise<void>(resolve => { reached = resolve })
+      vi.mocked(api.goals.execute).mockImplementationOnce(async request => { const read = await invoke(request); reached(); await held; return read })
+      const pending = ingress.receive(address.planUrl)
+      await reachedSource; await settle()
+      expect(useAppStore.getState().goalReadingEntry?.phase).toBe('pending')
+      expect(detail.scrollTop, 'A pending source read cannot reveal the plan before confirmation').toBe(originalScroll)
+      await act(async () => anchorButton(choice).click())
+      expect(useAppStore.getState().goalReadingEntry).toBeNull()
+      const selectedScroll = detail.scrollTop, draft = useAppStore.getState().goalEditDrafts.exact
+      try { release(); expect(await pending).toContain('NAVIGATION_CHANGED') } finally { release() }
+      expect(detail.scrollTop).toBe(selectedScroll)
+      expect(useAppStore.getState().goalEditDrafts.exact).toBe(draft)
+      expect(container.querySelector('[aria-label="Goal title"]')).toBe(editor)
+    }
+    let release!: () => void, reached!: () => void
+    const held = new Promise<void>(resolve => { release = resolve }), sourceReached = new Promise<void>(resolve => { reached = resolve })
+    vi.mocked(api.goals.execute).mockImplementationOnce(async request => { const read = await invoke(request); reached(); await held; return read })
+    const delayed = ingress.receive(address.planUrl)
+    await sourceReached
+    await act(async () => useAppStore.getState().setMainSurface('recall'))
+    const later = useAppStore.getState()
+    try { release(); expect(await delayed).toContain('NAVIGATION_CHANGED') } finally { release() }
+    expect(useAppStore.getState().mainSurface).toBe('recall')
+    expect(useAppStore.getState().agentFocus).toBe(later.agentFocus)
+    expect(useAppStore.getState().goalEditDrafts.exact).toEqual(later.goalEditDrafts.exact)
+
+    expect(requests.every(request => request.operation === 'focus')).toBe(true)
+    expect((await owner.client.call('goal.inspect', { goalId: 'exact' })).goal!.plan!.revision).toBe(1)
+    for (const action of lifecycle) expect(action).not.toHaveBeenCalled()
+  } finally { await client?.dispose(); await server?.stop(); await fixture.close() }
+}, 60_000)
+
+
+it('malformed optional diagnostics never hide a real owner Goal or its valid original address', async () => {
+  const fixture = await goalLinkOwnerFixture()
+  try {
+    const owner = await fixture.open('original')
+    await owner.client.call('goal.create', { goalId: 'original', title: 'A real original Goal', risk: 'low', confirmation: 'user' })
+    const read = await callPublicGoalControl({ schemaVersion: 5, requestId: 'metadata-original', operation: 'demand.show', demandId: 'original' },
+      (method, input) => owner.client.call(method, input as never))
+    if (read.operation !== 'demand.show' || !read.demand) throw Error('The real original Goal read is required')
+    expect(read.demand.address).toBeDefined()
+    for (const issue of [7, { message: 'A malformed optional diagnostic' }]) for (const includeAddress of [true, false]) {
+      const { address: originalAddress, ...body } = read.demand
+      let parsed: ReturnType<typeof parseAgentMuxControlReceipt> | undefined, failure: unknown
+      try { parsed = parseAgentMuxControlReceipt({ schemaVersion: 5, requestId: 'metadata-reading', operation: 'demand.show', ok: true,
+        result: { demand: { ...body, ...(includeAddress ? { address: originalAddress } : {}), addressIssue: issue }, goalContinuations: [] } }) } catch (error) { failure = error }
+      expect(failure, 'An optional address diagnostic cannot hide the original Goal').toBeUndefined()
+      expect(parsed?.ok).toBe(true)
+      if (parsed?.ok && parsed.operation === 'demand.show') {
+        expect(parsed.result.demand).toMatchObject({ id: read.demand.id, title: read.demand.title })
+        if (includeAddress) expect(parsed.result.demand?.address).toEqual(originalAddress)
+        else { expect(parsed.result.demand?.address).toBeUndefined(); expect(parsed.result.demand?.addressIssue).toContain('unconfirmed') }
+      }
+    }
+  } finally { await fixture.close() }
+}, 60_000)
+
+it('an actual Goal focus receipt rejects another presented Goal while preserving the legacy bare receipt', async () => {
+  vi.spyOn(document.documentElement, 'clientWidth', 'get').mockReturnValue(1280)
+  vi.spyOn(document.documentElement, 'clientHeight', 'get').mockReturnValue(800)
+  const { operation, ...body } = await control({ kind: 'goal', goalId: 'exact' })
+  expect(body.navigation.state).toMatch(/applied|unchanged/u)
+  expect(body.presentation.goal?.goalId).toBe('exact')
+  const frame = { schemaVersion: 5, requestId: 'original-goal-reading', operation, ok: true, result: body }
+  expect(() => parseAgentMuxControlReceipt(frame)).not.toThrow()
+  const other = { ...body, presentation: { ...body.presentation, goal: { ...body.presentation.goal, goalId: 'another-goal' } } }
+  expect(() => parseAgentMuxControlReceipt({ ...frame, result: other })).toThrow('Goal receipt target is mismatched')
+  const { goal: _reading, ...legacy } = body.presentation
+  expect(() => parseAgentMuxControlReceipt({ ...frame, result: { ...body, presentation: legacy } })).not.toThrow()
+})
+
+it('a literal self Goal keeps its original identity through copied links and the real focus CLI', async () => {
+  const { parseAmuxObjectLink } = await import('@agentmux/core/sharing')
+  const fixture = await goalLinkOwnerFixture(), owner = await fixture.open('original')
+  let server: AgentMuxControlServer | undefined
+  const lifecycle = [vi.spyOn(api.sessions, 'launchAgent'), vi.spyOn(api.sessions, 'submitPrompt'), vi.spyOn(api.sessions, 'resume'), vi.spyOn(api.sessions, 'stop')]
+  try {
+    vi.spyOn(document.documentElement, 'clientWidth', 'get').mockReturnValue(1280)
+    vi.spyOn(document.documentElement, 'clientHeight', 'get').mockReturnValue(800)
+    vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockImplementation(function(this: HTMLElement) {
+      const reading = this.closest<HTMLElement>('[data-goal-reading-section]')
+      const top = reading?.dataset.goalReadingSection === 'plan' ? 900 - (this.closest<HTMLElement>('.goals-detail')?.scrollTop ?? 0) : 0
+      return { x: 0, y: top, top, left: 0, right: 600, bottom: top + 400, width: 600, height: 400, toJSON: () => ({}) }
+    })
+    vi.spyOn(api.goals, 'execute').mockImplementation(request => callPublicGoalControl(request, (method, input) => owner.client.call(method, input as never)))
+    const created = await owner.client.call('goal.create', { goalId: 'self', title: 'A literal record identity', risk: 'low', confirmation: 'user' })
+    expect(created.goal.id).toBe('self')
+    const address = created.goal.address!
+    expect(parseAmuxObjectLink(address.planUrl)).toMatchObject({ kind: 'goal', goalId: 'self' })
+    await act(async () => useAppStore.setState({ demands: { self: { ...publicGoalRecord(created.goal), source: 'default-topic' } } }))
+    const requests: AgentMuxControlRequest[] = []
+    const execute = async (request: AgentMuxControlRequest, signal?: AbortSignal) => {
+      requests.push(request)
+      let pending!: Promise<AgentMuxControlResult>
+      await act(async () => { pending = useAppStore.getState().executeControl(request, signal); await Promise.resolve() })
+      return pending
+    }
+    const ingress = new SpatialLinkIngress(), issues = vi.fn(), writes = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+    ingress.ready(execute, issues)
+    await ingress.receive(address.goalUrl)
+    expect(issues, 'A literal Goal ID cannot be rejected as a spatial self selector').not.toHaveBeenCalled()
+    const copy = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Copy plan link')
+    expect(copy).toBeDefined(); await act(async () => copy!.click())
+    expect(writes).toHaveBeenCalledWith(address.planUrl)
+    await ingress.receive(writes.mock.calls[0]![0])
+    expect(issues).not.toHaveBeenCalled()
+    expect(container.querySelector('[data-goal-detail-id="self"]')).not.toBeNull()
+    expect(container.querySelector('[data-goal-plan-origin]')).not.toBeNull()
+    server = new AgentMuxControlServer({ socketPath: join(fixture.directory, 'desktop.sock'), coreClients: () => [], execute: (request, _name, context) => execute(request, context?.signal) })
+    await server.start()
+    const cliDirectory = join(fixture.directory, 'cli'); await mkdir(cliDirectory)
+    const cli = join(cliDirectory, 'amux.mjs'), require = createRequire(import.meta.url), core = dirname(require.resolve('../../../packages/core/package.json'))
+    await symlink(join(core, 'node_modules'), join(cliDirectory, 'node_modules'), 'dir')
+    await require(join(core, 'node_modules/esbuild')).build({ entryPoints: [join(core, 'src/agentmux.ts')], outfile: cli, bundle: true, platform: 'node', format: 'esm', packages: 'external', logLevel: 'silent', plugins: [goalLinkBuildPlugin('actual-public-CLI')] })
+    const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
+      const child = spawn(process.execPath, [cli, '--endpoint', 'unix:' + server!.path, 'goal', 'focus', '--goal', 'self', '--runtime', address.runtimeId, '--namespace', address.namespace, '--section', 'plan'], { env: objectCliEnvironment(fixture.directory), stdio: ['ignore', 'pipe', 'pipe'] })
+      let stdout = '', stderr = ''; const deadline = setTimeout(() => { child.kill(); reject(Error('The literal Goal CLI request exceeded its deadline.')) }, 10_000)
+      child.stdout.on('data', value => { stdout += value }); child.stderr.on('data', value => { stderr += value }); child.once('error', error => { clearTimeout(deadline); reject(error) })
+      child.once('close', code => { clearTimeout(deadline); resolve({ code, stdout, stderr }) })
+    })
+    expect(result.code, result.stderr).toBe(0)
+    const receipt = JSON.parse(result.stdout)
+    expect(receipt).toMatchObject({ ok: true, operation: 'goal.focus', result: { navigation: { requested: { goalId: 'self' }, selection: { goalId: 'self' } } } })
+    expect(receipt.result.presentation.goal).toEqual({ goalId: 'self', runtimeId: address.runtimeId, namespace: address.namespace, section: 'plan' })
+    expect(() => parseAgentMuxControlRequest({ schemaVersion: 5, requestId: 'spatial-reading', operation: 'focus', target: { kind: 'space', regionId: 'self' } })).toThrow('requires an exact ID')
+    expect((await owner.client.call('goal.inspect', { goalId: 'self' })).goal!.plan).toBeUndefined()
+    expect(requests.every(request => request.operation === 'focus')).toBe(true)
+    for (const action of lifecycle) expect(action).not.toHaveBeenCalled()
+  } finally { await server?.stop(); await fixture.close() }
+}, 60_000)
