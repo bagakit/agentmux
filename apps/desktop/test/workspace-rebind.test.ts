@@ -2,7 +2,7 @@ import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-valu
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { rebindLocalFolder, type RebindPorts } from '../src/main/workspace-rebind.js'
-import type { AppConfig } from '../src/shared/contracts.js'
+import type { AppConfig, WorkspaceRecord } from '../src/shared/contracts.js'
 
 // ---------------------------------------------------------------------------
 // 一次重绑，从头跑到尾。
@@ -57,6 +57,14 @@ function ports(overrides: Partial<RebindPorts> = {}): RebindPorts & { recorded: 
 }
 
 describe('重绑一个本地文件夹 Workspace', () => {
+  it('keeps the reserved Scratch container out of the ordinary directory chooser and writer', async () => {
+    const scratch: WorkspaceRecord = { id: '__scratch__', name: 'Topics', hostId: 'local', path: _hygiene_fixturePath('scratch'), kind: 'folder' }
+    const original = { ...CONFIG, workspaces: [...CONFIG.workspaces, scratch] }, p = ports()
+    await expect(rebindLocalFolder(scratch.id, original, p)).rejects.toThrow('reserved Scratch')
+    expect(p.recorded.defaultPaths).toEqual([]); expect(p.recorded.saved).toEqual([])
+    expect(original.workspaces.at(-1)).toBe(scratch)
+  })
+
   it('只换那一条记录的 path，id 与名字不动，兄弟不受影响', async () => {
     const p = ports()
     const result = await rebindLocalFolder('moved', CONFIG, p)

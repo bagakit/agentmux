@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
-import { dirname } from 'node:path'
+import { dirname, join } from 'node:path'
+import { readFile, writeFile } from 'node:fs/promises'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createMoteApp, moteClick, moteType, settleMoteApp } from './fixtures/mote-app'
 import { moteAgent } from './fixtures/mote-workface'
@@ -19,6 +20,9 @@ import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { MoteWorkface } from '../src/renderer/src/components/MoteWorkface'
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
 import { DesktopClientUiProvider } from '../src/renderer/src/components/DesktopClientUiProvider'
+import { moteQuickBaseline } from '../../../packages/core/src/mote-preferences'
+import { scratchTopicLogicalPath } from '../../host/src/mote-topic-model'
+import { moteGoalContext } from '../src/renderer/src/lib/mote-goals'
 
 vi.mock('electron', () => ({ app: { isPackaged: false }, nativeImage: {} }))
 const originalSend = useAppStore.getState().send, originalEnqueue = useAppStore.getState().enqueueAgentSteer
@@ -28,19 +32,38 @@ const button = (root: ParentNode, label: string) => [...root.querySelectorAll<HT
   .find(node => node.textContent?.trim() === label || node.getAttribute('aria-label') === label)!
 async function wait(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check() }, { timeout: 8_000 }) }
 
-async function actualApp() {
+async function actualApp(policy: 'idle' | 'executor-change' = 'idle', observation?: 'missing-directory' | 'directory-read-failed') {
   const dispose = await useAppStore.getState().initialize(); dispose?.()
   const app = createMoteApp(); closes.push(app.dispose)
   const f = await createMoteConversationStartFixture({ providerId: 'claude' }); closes.push(f.close)
-  await f.start('later-intent-original-main', 'Earlier original question'); await f.setup('later-intent-original-main')
-  const idle = await f.qualifyMainIdle(1), reference = idle.snapshot.current!, native = idle.session!
+  await f.start('later-intent-original-main', 'Earlier original question'); const initialSetup = await f.setup('later-intent-original-main')
+  const idle = policy === 'idle' ? await f.qualifyMainIdle(1) : { snapshot: await f.main.readCurrentMoteMain(f.target) }
+  const reference = idle.snapshot.current!, native = (await f.h.client.readAgentSession(reference.sessionId))!
+  if (policy === 'executor-change') {
+    const path = join(f.h.root, 'configuration.json'), config = JSON.parse(await readFile(path, 'utf8'))
+    config.executors.second = { ...config.executors.saved, label: 'Second same-Provider Executor', env: { EXECUTOR_CHANGE: 'desktop-original-config' } }
+    await writeFile(path, JSON.stringify(config))
+    const baseline = moteQuickBaseline(await f.quick.read({ kind: 'quick', target: f.target }))!
+    const inputs = f.h.inner.kernel.input.mock.calls.length
+    const saved = await f.rpc.call('space.mote.preferences.save', { kind: 'quick', target: f.target, operationId: 'desktop-choose-second', baseline,
+      values: { ...baseline.defaults, executorId: 'second', conversationRollover: { kind: 'keep-current' } },
+      destination: { kind: 'occurrence', displayWorkspaceId: reference.displayWorkspaceId, groupId: reference.groupId, tabId: reference.tabId, regionId: reference.regionId } })
+    expect(saved.status, saved.message ?? '').toBe('saved')
+    expect(f.h.started).toHaveLength(1); expect(f.h.inner.kernel.input).toHaveBeenCalledTimes(inputs)
+    expect((await f.main.readCurrentMoteMain(f.target)).current).toEqual(reference)
+  }
   const workspace = { id: f.target.expectedResource.workspaceId, hostId: f.target.expectedResource.hostId,
     path: f.target.expectedResource.workspacePath, name: 'Original', kind: 'folder' as const }
   const scratch = new ScratchTopics()
   const originalDirectory = (await scratch.readForDirectory(workspace, dirname(f.path)))!
   const foreignOrigin = await scratch.ensureMote(workspace, 'launcher:foreign-later-intent')
-  const topics = await scratch.list(workspace)
-  const topic = topics.find(item => item.id === originalDirectory.id)!, foreign = topics.find(item => item.id === foreignOrigin.id)!
+  const originalTopics = await scratch.list(workspace)
+  const topic = originalTopics.find(item => item.id === originalDirectory.id)!, foreign = originalTopics.find(item => item.id === foreignOrigin.id)!
+  const issue = observation === 'directory-read-failed' ? 'Original directory observation unavailable' : null
+  // The original Core content identity/physical home survives an incomplete
+  // directory observation, whose logical address has not been confirmed.
+  const topics = observation ? originalTopics.map(item => item.id === topic.id
+    ? { ...item, directoryPath: undefined, ...(issue ? { readError: issue } : {}) } as unknown as typeof item : item) : originalTopics
   const state = (await f.spatial.read())!, spaceId = directoryIdentity('local', foreignOrigin.identityDirectoryPath!), zoneId = homeZoneId(spaceId)
   await f.spatial.commit({ expectedRevision: state.revision, graph: { ...state.graph,
     spaces: [...state.graph.spaces, { spaceId, kind: 'mote', topicId: foreign.id, name: 'Other Mote', hostId: 'local', directoryPath: foreignOrigin.physicalDirectoryPath!, projectId: null }],
@@ -61,7 +84,8 @@ async function actualApp() {
     scratchTopicSnapshots: { [workspace.id]: { scope: scratchTopicsScope(workspace), revision: 0, topics, error: null, reading: false } },
     send: originalSend, enqueueAgentSteer: originalEnqueue, agentSteerQueues: {}, agentComposerDrafts: {}, moteMainCreationReferences: {},
     refreshScratchTopics: vi.fn(async () => {}), dirtyDocuments: {}, documentIssues: {} }))
-  vi.mocked(api.scratch.listTopics).mockResolvedValue(topics)
+  if (issue) vi.mocked(api.scratch.listTopics).mockRejectedValue(new Error(issue))
+  else vi.mocked(api.scratch.listTopics).mockResolvedValue(topics)
   vi.mocked(api.scratch.ensureMote).mockImplementation(async (_workspace, id) => topics.find(item => item.id === id)!)
   vi.mocked(api.scratch.readTopic).mockImplementation(async (_workspace, id) => topics.find(item => item.id === id) ?? null)
   vi.spyOn(api.motePreferences, 'read').mockImplementation(input => f.rpc.call('space.mote.preferences.read', input))
@@ -89,10 +113,11 @@ async function actualApp() {
   await act(async () => requestPmoTeamsTopicFloatingOpen({ targetTopicId: topic.id }))
   const body = () => app.panel().querySelector<HTMLElement>('.mote-workface__original:not([hidden])')
   await wait(() => expect(body()?.querySelector('[aria-label="Message Agent"]'), app.panel().textContent ?? '').toBeTruthy())
-  return { app, f, reference, session, topic, foreign, submit, open, advance, body, resume, decisionReady: () => decisionReady }
+  return { app, f, reference, native, initialSetup, session, topic, observedTopic: topics.find(item => item.id === topic.id)!, workspace,
+    foreign, submit, open, advance, body, resume, decisionReady: () => decisionReady }
 }
-async function pendingQuery() {
-  const f = await actualApp(), prompt = 'Continue this original Q after my later choice'
+async function pendingQuery(policy: 'idle' | 'executor-change' = 'idle') {
+  const f = await actualApp(policy), prompt = 'Continue this original Q after my later choice'
   const editor = f.body()!.querySelector<HTMLElement>('[aria-label="Message Agent"]')!
   await moteType(editor, prompt); await moteClick(button(f.body()!, 'Send'))
   await wait(() => expect(f.submit).toHaveBeenCalledOnce())
@@ -104,8 +129,8 @@ async function pendingQuery() {
   return { ...f, prompt, original, editor, inputsBefore }
 }
 
-it('actual App late Core rollover respects later same-Agent member, keeps Q and offers an explicit single continuation', async () => {
-  const f = await pendingQuery()
+it.each(['idle', 'executor-change'] as const)('actual App late Core %s rollover respects later same-Agent member, keeps Q and offers an explicit single continuation', async policy => {
+  const f = await pendingQuery(policy)
   await moteType(f.editor, 'Later unsent member draft')
   // The original Agent/object entry carries an explicit member intent, even for
   // the same Host/Session as Main. The Threads inventory omits the current Main.
@@ -132,6 +157,13 @@ it('actual App late Core rollover respects later same-Agent member, keeps Q and 
   expect(f.open).toHaveBeenCalledOnce(); expect(f.open.mock.calls[0]![0].operationId).toBe(retained.mainRollover!.creationOperationId)
   const accepted = await f.f.setup(retained.mainRollover!.creationOperationId, false)
   expect(accepted.record?.moteMain?.deferredInput).toMatchObject({ operationId: f.original.operationId, prompt: f.prompt })
+  expect(accepted.record?.moteMain?.rollover?.policy).toMatchObject(policy === 'executor-change'
+    ? { kind: 'executor-change', previousExecutorId: 'saved', executorId: 'second' } : { kind: 'idle' })
+  expect((await f.f.h.client.readAgentSession(accepted.reference!.sessionId))?.executorId).toBe(policy === 'executor-change' ? 'second' : 'saved')
+  if (policy === 'executor-change') expect(f.f.h.started[1].env).toMatchObject({ EXECUTOR_CHANGE: 'desktop-original-config' })
+  expect((await f.f.h.client.readAgentSession(f.reference.sessionId))?.run).toEqual(f.native.run)
+  expect((await f.f.rpc.call('space.mote.dialogue.input.inspect', { target: f.f.target, operationId: 'later-intent-original-main_query' })).route).toEqual(f.initialSetup.deferredInput!.route)
+  expect((await f.f.spatial.read())!.graph.resources['tab:old-tab']).toEqual({ draft: 'original draft' })
   expect(useAppStore.getState().agentComposerDrafts[f.session.id]).toBe('Later unsent member draft')
   expect(f.f.h.started).toHaveLength(2); expect(f.f.h.inner.kernel.stop).not.toHaveBeenCalled()
 }, 45_000)
@@ -171,4 +203,25 @@ it('an actual App Query survives the real Composer and Workface rejecting anothe
   expect(f.open).toHaveBeenCalledOnce()
   expect(f.f.h.started).toHaveLength(2); expect(f.submit).toHaveBeenCalledOnce()
   expect(f.f.h.inner.kernel.stop).not.toHaveBeenCalled()
+}, 45_000)
+
+it.each(['missing-directory', 'directory-read-failed'] as const)('actual Main retains its healthy workface when the logical directory is %s', async observation => {
+  const f = await actualApp('idle', observation), state = useAppStore.getState()
+  const editor = f.body()!.querySelector<HTMLElement>('[aria-label="Message Agent"]')!
+  expect(scratchTopicLogicalPath(f.workspace, f.observedTopic)).toBeNull()
+  expect(moteGoalContext(state, { workspace: f.workspace, topic: f.observedTopic, rootPath: f.topic.directoryPath })).toMatchObject({
+    sourceUnconfirmed: true, contentRef: null, sessionIds: []
+  })
+  expect(f.observedTopic.physicalDirectoryPath).toBe(f.topic.physicalDirectoryPath)
+  expect(f.app.panel().textContent).toContain(observation === 'directory-read-failed'
+    ? 'Original directory observation unavailable' : 'Mote metadata is not confirmed')
+  await moteType(editor, 'Original healthy Main draft while directory is unknown')
+  await settleMoteApp()
+  expect(f.body()!.querySelector('[aria-label="Message Agent"]')).toBe(editor)
+  expect(useAppStore.getState().agentComposerDrafts[f.session.id]).toBe('Original healthy Main draft while directory is unknown')
+  expect(useAppStore.getState().tabs[f.reference.tabId]).toBe(state.tabs[f.reference.tabId])
+  expect((await f.f.main.readCurrentMoteMain(f.f.target)).current).toEqual(f.reference)
+  expect((await f.f.h.client.readAgentSession(f.reference.sessionId))?.run).toEqual(f.native.run)
+  expect(f.f.h.started).toHaveLength(1); expect(f.f.h.inner.kernel.stop).not.toHaveBeenCalled()
+  expect(f.open).not.toHaveBeenCalled(); expect(f.advance).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled()
 }, 45_000)

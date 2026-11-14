@@ -132,6 +132,7 @@ it.runIf(business)('original Files UI checkpoints the directory packet before re
   cleanup.push(async () => { await act(async () => root.unmount()); element.remove() })
   await act(async () => root.render(createElement(SourceFilesAccess, { workspace: f.workspace, visible: true })))
   await vi.waitFor(() => expect(element.textContent).toContain('Use this folder for Files'))
+  expect(f.store.getState().sourceFilesInputs.selections[f.workspace.id]).toBeUndefined()
   if (process.env.AGENTMUX_TEST_FILE_CLIENT_VISUAL_DOM) await visualScene(f, 'folder-needed', 'Source Files · choose the original folder')
   const use = [...element.querySelectorAll('button')].find(button => button.textContent === 'Use this folder for Files')!
   await act(async () => use.click())
@@ -230,6 +231,113 @@ it.runIf(business)('same-Source copies replace pending directory readers and a n
   expect(tree.dirCache.child?.children[0]?.depth).toBe(1)
   await act(async () => setRoot('child'))
   await vi.waitFor(() => expect(tree.rootCache?.children[0]?.depth).toBe(0))
+}, 60000)
+
+it.runIf(business)('a default Source probe remains observation while original Files consumers stay usable', async () => {
+  const f = await fixture(), ordinary = new OrdinaryWorkspaceFiles()
+  const original = { ...f.workspace, hostId: 'local' }
+  await writeFile(join(f.source.project, 'healthy-original.txt'), 'Original readable file')
+  const directories = vi.spyOn(f.api.files, 'readDirectory').mockImplementation(async (id, path) => { expect(id).toBe(f.workspace.id); return ordinary.readDirectory(original, path) })
+  vi.spyOn(f.api.files, 'list').mockImplementation(async id => { expect(id).toBe(f.workspace.id); return ordinary.listFiles(original) })
+  vi.spyOn(f.api.files, 'read').mockImplementation(async (id, path) => { expect(id).toBe(f.workspace.id); return ordinary.read(original, path) })
+  await f.store.getState().openFile('healthy-original.txt', 'file-group', undefined, f.workspace.id)
+  const documentKey = f.workspace.id + '\0healthy-original.txt', retained = f.store.getState().documents[documentKey]
+  let entered!: () => void, release!: () => void
+  const enteredProbe = new Promise<void>(resolve => { entered = resolve }), gate = new Promise<void>(resolve => { release = resolve })
+  cleanup.push(() => release())
+  vi.mocked(f.api.sourceFiles.resolve).mockImplementationOnce(async () => { entered(); await gate; return { status: 'unconfirmed', issue: { code: 'CONTROL_UNAVAILABLE', message: 'Original Source probe unavailable' } } })
+  const { SourceFilesAccess } = await import('../src/renderer/src/components/SourceFilesAccess.js')
+  const { useWorkspaceFileTree } = await import('../src/renderer/src/components/file-tree/useWorkspaceFileTree.js')
+  const { QuickOpenFiles } = await import('../src/renderer/src/components/QuickOpenFiles.js')
+  let tree!: ReturnType<typeof useWorkspaceFileTree>
+  const expanded = new Set<string>(), element = document.createElement('div'), root = createRoot(element); document.body.append(element)
+  cleanup.push(async () => { await act(async () => root.unmount()); element.remove() })
+  function Probe() { tree = useWorkspaceFileTree(f.workspace.id, expanded); return createElement(Fragment, null,
+    createElement(SourceFilesAccess, { workspace: f.workspace, visible: true }), createElement(QuickOpenFiles, { onClose() {} })) }
+  await act(async () => root.render(createElement(Probe)))
+  await enteredProbe
+  await act(async () => { await tree.refreshDir('') })
+  expect(tree.rootCache?.children.some(entry => entry.name === 'healthy-original.txt')).toBe(true)
+  expect(tree.rootError).toBeNull()
+  await vi.waitFor(() => expect(element.textContent).toContain('healthy-original.txt'))
+  await act(async () => release())
+  await vi.waitFor(() => expect(element.textContent).toContain('Original Source probe unavailable'))
+  expect(f.store.getState().sourceFilesInputs.selections[f.workspace.id]).toBeUndefined()
+  await act(async () => { await tree.refreshDir('') })
+  expect(tree.rootError).toBeNull(); expect(directories.mock.calls.length).toBeGreaterThan(0)
+  expect(f.store.getState().documents[documentKey]).toBe(retained)
+  expect(retained?.content).toBe('Original readable file')
+  vi.mocked(f.api.sourceFiles.resolve).mockRejectedValueOnce(new Error('Original Source transport unavailable'))
+  await expect(f.store.getState().resolveFilesSource(f.workspace.id)).rejects.toThrow('transport unavailable')
+  expect(f.store.getState().sourceFilesInputs.selections[f.workspace.id]).toBeUndefined()
+  await act(async () => { await tree.refreshDir('') }); expect(tree.rootError).toBeNull()
+}, 60000)
+
+it.runIf(business)('the real Explorer keeps reserved Scratch out of ordinary folder rebind while normal Folder recovery stays available', async () => {
+  const f = await fixture(), { FileExplorer } = await import('../src/renderer/src/components/FileExplorer.js')
+  installFileTreeGeometry()
+  vi.spyOn(f.api.files, 'readDirectory').mockRejectedValue(new Error('Original directory unavailable'))
+  const rebind = vi.spyOn(f.api.workspaces, 'rebindLocalFolder')
+  const scratch = { ...f.workspace, id: '__scratch__', hostId: 'local' }
+  f.store.setState(state => ({ config: { ...state.config!, workspaces: [scratch, f.workspace] } }))
+  const element = document.createElement('div'), root = createRoot(element); document.body.append(element)
+  cleanup.push(async () => { await act(async () => root.unmount()); element.remove() })
+  await act(async () => root.render(createElement(FileExplorer, { workspaceId: scratch.id, active: true })))
+  await vi.waitFor(() => expect(element.textContent).toContain('Could not read workspace'))
+  expect([...element.querySelectorAll('button')].some(button => button.textContent === 'Retry')).toBe(true)
+  expect(element.textContent).not.toContain('Choose new folder'); expect(rebind).not.toHaveBeenCalled()
+  const folder = { ...f.workspace, hostId: 'local' }
+  f.store.setState(state => ({ config: { ...state.config!, workspaces: [scratch, folder] } }))
+  await act(async () => root.render(createElement(FileExplorer, { workspaceId: folder.id, active: true })))
+  await vi.waitFor(() => expect(element.textContent).toContain('Choose new folder'))
+}, 60000)
+
+it.runIf(business)('a failed Source re-observation retains its locator and reads only the original selected Source', async () => {
+  const f = await fixture(); await connectFolder(f)
+  const retained = f.store.getState().sourceFilesInputs.selections[f.workspace.id]!.locator
+  const main = vi.spyOn(f.api.files, 'readDirectory').mockRejectedValue(new Error('Another Main must not be read'))
+  vi.mocked(f.api.sourceFiles.resolve).mockResolvedValueOnce({ status: 'unconfirmed', issue: { code: 'CONTROL_UNAVAILABLE', message: 'Original directory probe unavailable' } })
+  await expect(f.store.getState().resolveFilesSource(f.workspace.id)).resolves.toMatchObject({ status: 'unconfirmed' })
+  expect(f.store.getState().sourceFilesInputs.selections[f.workspace.id]).toMatchObject({ locator: retained, issue: 'Original directory probe unavailable' })
+  const { readWorkspaceDirectory } = await import('../src/renderer/src/lib/source-files-discovery.js')
+  const actual = await readWorkspaceDirectory(f.workspace.id, '', f.store.getState)
+  expect(actual.entries.some(entry => entry.name === 'original.txt')).toBe(true)
+  expect(main).not.toHaveBeenCalled()
+  expect(f.api.sourceFiles.call).toHaveBeenCalledWith(expect.anything(), 'file.list', expect.objectContaining({ expectedResource: expect.objectContaining({ workspacePath: f.workspace.path }) }))
+}, 60000)
+
+it.runIf(business)('a held unknown Source request cannot select Main while its presentation selection is unavailable', async () => {
+  const f = await fixture(); await connectFolder(f)
+  const selected = f.store.getState().sourceFilesInputs.selections[f.workspace.id]!, call = f.bridge.files.call
+  let writes = 0
+  vi.mocked(f.api.sourceFiles.call).mockImplementation(async (...args) => {
+    const response = await call(...args)
+    if (args[1] === 'file.mkdir') { writes++; throw new Error('Original mkdir reply lost') }
+    return response
+  })
+  await expect(f.store.getState().createPath({ kind: 'directory', path: 'held-original-directory' }, f.workspace.id)).rejects.toThrow('Original mkdir reply lost')
+  const pending = f.store.getState().sourceFilesInputs.pending, operationIds = Object.keys(pending)
+  expect(operationIds).toHaveLength(1); expect((await stat(join(f.source.project, 'held-original-directory'))).isDirectory()).toBe(true)
+  f.store.setState(state => ({ sourceFilesInputs: { ...state.sourceFilesInputs, selections: {} } }))
+  const mainNames = vi.spyOn(f.api.files, 'list'), mainDirectories = vi.spyOn(f.api.files, 'readDirectory')
+  const { listWorkspaceFileNames, readWorkspaceDirectory } = await import('../src/renderer/src/lib/source-files-discovery.js')
+  await expect(listWorkspaceFileNames(f.workspace.id, f.store.getState)).rejects.toThrow('original Source directory')
+  await expect(readWorkspaceDirectory(f.workspace.id, '', f.store.getState)).rejects.toThrow('original Source directory')
+  expect(mainNames).not.toHaveBeenCalled(); expect(mainDirectories).not.toHaveBeenCalled()
+  expect(f.store.getState().sourceFilesInputs.pending).toBe(pending)
+  // A later explicit Workspace resource is independent of the old request; sharing an ID cannot merge roots.
+  const nextRoot = join(f.root, 'another-display-root'); await mkdir(nextRoot); await writeFile(join(nextRoot, 'new-root.txt'), 'Independent exact resource')
+  const ordinary = new OrdinaryWorkspaceFiles()
+  mainNames.mockImplementation(async id => ordinary.listFiles({ id, hostId: 'local', path: nextRoot }))
+  f.store.setState(state => ({ config: { ...state.config!, workspaces: [{ ...f.workspace, path: nextRoot }] } }))
+  expect((await listWorkspaceFileNames(f.workspace.id, f.store.getState)).files).toContain('new-root.txt')
+  expect(f.store.getState().sourceFilesInputs.pending).toBe(pending)
+  f.store.setState(state => ({ config: { ...state.config!, workspaces: [f.workspace] }, sourceFilesInputs: { ...state.sourceFilesInputs, selections: { [f.workspace.id]: selected } } }))
+  await f.store.getState().inspectFilesMutation(operationIds[0]!)
+  expect(f.api.sourceFiles.call).toHaveBeenLastCalledWith(selected.target, 'file.mutation.inspect', expect.objectContaining({ operationId: operationIds[0], expectedResource: pending[operationIds[0]!]!.request.expectedResource }))
+  const held = f.store.getState().sourceFilesInputs.pending[operationIds[0]!]
+  if (held) { expect(held.request).toEqual(pending[operationIds[0]!]!.request); expect(held.target).toEqual(pending[operationIds[0]!]!.target) }
+  expect(writes).toBe(1)
 }, 60000)
 
 it.runIf(business)('Source Explorer and Quick Open discover original Native candidates including empty directories without a Main alias', async () => {

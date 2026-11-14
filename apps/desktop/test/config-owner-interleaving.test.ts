@@ -11,6 +11,22 @@ const lane: WorkspaceRecord = { id: 'lane', name: 'Lane', hostId: 'local', path:
 const sibling: WorkspaceRecord = { id: 'sibling', name: 'Other', hostId: 'local', path: _hygiene_fixturePath("other"), kind: 'folder' }
 
 describe('Main configuration short transactions', () => {
+  it('protects the exact reserved root at Main admission and the original disk writer without repairing old contamination', async () => {
+    const scratch: WorkspaceRecord = { id: '__scratch__', name: 'Topics', hostId: 'local', path: _hygiene_fixturePath('motes/original-home'), kind: 'folder' }
+    const f = await configOwnerFixture({ workspaces: [scratch, folder] }), before = f.owner.current, bytes = await f.bytes()
+    for (const workspaces of [[{ ...scratch, path: _hygiene_fixturePath('motes/motes/other') }, folder], [{ ...scratch, hostId: 'other' }, folder], [folder]]) {
+      await expect(f.owner.edit(before, { ...before, workspaces })).rejects.toThrow('reserved Scratch')
+      expect(await f.bytes()).toBe(bytes); expect(f.owner.current).toBe(before)
+    }
+    expect(f.runtime.prepare).not.toHaveBeenCalled(); expect(f.publish).not.toHaveBeenCalled()
+    await expect(f.store.save({ ...before, workspaces: [{ ...scratch, path: _hygiene_fixturePath('scratch') }, folder] })).rejects.toThrow('reserved Scratch')
+    expect(await f.bytes()).toBe(bytes)
+    // An unrelated normal setting still saves, retaining even an already-contaminated original root.
+    await f.owner.edit(before, { ...before, copyPathsAsAbsolute: true })
+    expect((await f.disk()).workspaces.find(workspace => workspace.id === scratch.id)).toEqual(scratch)
+    expect(f.owner.current.copyPathsAsAbsolute).toBe(true)
+  })
+
   it('merges simultaneous disjoint drafts from the same baseline and publishes each durable fact once', async () => {
     const f = await configOwnerFixture({ workspaces: [folder, lane] })
     const before = structuredClone(f.owner.current)
