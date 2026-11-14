@@ -9,6 +9,8 @@ import { composerConfig, composerDOM, composerSession } from './helpers/composer
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
+import { originalSourceEntryForSelection, originalSourceWorkspaceId } from '../src/renderer/src/lib/original-space-navigation'
+import { directoryIdentity, workspaceZoneId } from '../src/shared/space-addresses'
 import { initializeSpatialControlFixture } from './helpers/spatial-control-owner-fixture'
 vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: () => null }))
 const dom = composerDOM()
@@ -27,7 +29,7 @@ async function scene() {
   const tabs = Object.fromEntries(sessions.map((session, index) => { const workspace = workspaces.find(workspace => workspace.path === session.workspacePath && workspace.hostId === session.hostId)!; const tab = createWorkbenchTab('tab-' + index, { kind: 'agent', phase: 'attached', regionId: 'r-' + index, workspaceId: workspace.id, sessionId: session.id }); return [tab.id, tab] }))
   const now = Date.now()
   useAppStore.setState({ config: { ...composerConfig, workspaces, hosts: [...composerConfig.hosts, { id: 'remote', kind: 'ssh', label: 'Other Host', target: 'private.invalid' } as typeof composerConfig.hosts[number]] },
-    mainSurface: 'agents', activeWorkspaceId: 'alpha', selectedSpaceMount: null, sessions, tabs,
+    mainSurface: 'agents', activeWorkspaceId: 'alpha', sessions, tabs,
     layouts: Object.fromEntries(workspaces.map(workspace => [workspace.id, createWorkspaceLayout('g-' + workspace.id, Object.values(tabs).filter(tab => tab.workspaceId === workspace.id).map(tab => tab.id))])),
     timelines: Object.fromEntries(sessions.map(session => [session.id, { agentSessionId: session.id, revision: 1, items: [] }])),
     agentNames: {}, workbenchSpaceSelection: null,
@@ -98,7 +100,24 @@ it('unknown or mounted-source project selection never borrows the old local proj
   await scene()
   await act(async () => useAppStore.setState({ activeWorkspaceId: 'not-confirmed' }))
   expect(scope()).toEqual([])
-  await act(async () => useAppStore.setState({ activeWorkspaceId: 'alpha', selectedSpaceMount: 'unavailable-original-source' }))
+
+  const resource = { ...composerConfig.workspaces[0]!, id: 'original-folder', name: 'Original Folder',
+    path: composerConfig.workspaces[0]!.path + '/original-source' }
+  const spaceId = directoryIdentity(resource.hostId, resource.path)
+  const target = { hostId: 'remote', reference: { runtimeId: 'original-runtime', spaceId },
+    zoneId: workspaceZoneId(spaceId, resource.id), workspaceId: resource.id }
+  await act(async () => {
+    useAppStore.getState().openOriginalSpaceLocation({ target, resource }, false)
+    // Simulate the previously selected rail resource being held alongside the new Source.
+    useAppStore.setState({ activeWorkspaceId: 'alpha' })
+  })
+  const state = useAppStore.getState()
+  expect(state.workbenchSpaceSelection).toMatchObject({
+    sourceRuntimeId: target.reference.runtimeId, spaceId, zoneId: target.zoneId,
+    workspaceId: originalSourceWorkspaceId(target), tabId: null, groupId: null, regionId: null
+  })
+  expect(originalSourceEntryForSelection(state)).toMatchObject({ target, input: { resource } })
+  expect(state.activeWorkspaceId).toBe('alpha')
   expect(scope()).toEqual([])
 })
 
