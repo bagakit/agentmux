@@ -170,13 +170,13 @@ it('opaque unreadable authored records remain retained; form code exchanges pres
   const unreadable = { 'original-runtime': { bytes: 'original input' } }; expect(restoredMeshDrafts(unreadable)).toEqual(unreadable); expect(() => meshDraftForRuntime(unreadable, 'original-runtime')).toThrow()
   const code = meshPeerCode({ ...settings, identity: { peerId: 'peer-original', publicKey: 'public-key', epoch: 2 }, configuration: { ...configuration, advertisedIngress: [{ endpoint: 'gateway.example:443', useTls: true }] } })!
   const form = { ...meshForm(configuration), peers: code, clientKeys: 'device-public-key' }
-  expect(meshConfiguration(form, configuration)).toMatchObject({ members: [{ peerId: 'peer-original', publicKey: 'public-key' }], peers: [{ peerId: 'peer-original', endpoints: [{ endpoint: 'gateway.example:443', useTls: true }] }], endpointAccess: { allowedClientKeys: ['device-public-key'] } })
+  expect(meshConfiguration(form, configuration)).toMatchObject({ members: [{ peerId: 'peer-original', publicKey: 'public-key' }], peers: [{ peerId: 'peer-original', endpoints: [{ endpoint: 'gateway.example', useTls: true }] }], endpointAccess: { allowedClientKeys: ['device-public-key'] } })
   expect(() => meshConfiguration({ ...form, networkId: 'different-network' }, configuration)).toThrow('belong to this network')
 })
 it('production Mesh editors exchange codes and save through Renderer/Main into two real original Unix Cores; outbound-only participant authenticates and CAS rejection recovers', async () => {
   const { pathToFileURL } = await import('node:url'), { resolve } = await import('node:path'), { EventEmitter } = await import('node:events')
   const { createRequire } = await import('node:module')
-  const { privateCore } = createRequire(import.meta.url)(resolve('apps/desktop/scripts/fixtures/mesh-settings/private-core.mjs'))
+  const { privateCore, privateGatewayOperator } = createRequire(import.meta.url)(resolve('apps/desktop/scripts/fixtures/mesh-settings/private-core.mjs'))
   const { registerMeshNetworkIpc } = await import('../src/main/mesh-network-ipc'), { createRendererMeshNetwork } = await import('../src/renderer/src/lib/mesh-network-client')
   const a = await privateCore(); let b: typeof a; try { b = await privateCore({host:true}) } catch (cause) { await a.close(); throw cause }; const cores = [a,b]
   class Sender extends EventEmitter { id=52; isDestroyed(){return false} }
@@ -189,7 +189,16 @@ it('production Mesh editors exchange codes and save through Renderer/Main into t
     return vi.spyOn(api.mesh,'call').mockImplementation(renderer.call)
   }
   const wait = async (read:()=>Promise<any>, check:(v:any)=>boolean) => { let value:any;for(let i=0;i<200;i++){value=await read();if(check(value))return value;await new Promise(done=>setTimeout(done,20))}throw Error('Real Mesh not observed: '+JSON.stringify(value)+' UI: '+dom.container.textContent+' calls: '+JSON.stringify(calls.map(c=>({method:c.method,params:c.params})))) }
+  let operator: Awaited<ReturnType<typeof privateGatewayOperator>>
+  const previousConfig = useAppStore.getState().config
+  const selectHost = async (label: string, id: string) => {
+    const field = dom.container.querySelector<HTMLSelectElement>(`select[aria-label="${label}"]`)!
+    const option = [...field.options].find(option => option.textContent?.includes(id))!
+    await act(async () => { field.value = option.value; field.dispatchEvent(new Event('change', { bubbles: true })) })
+  }
   try {
+    operator = await privateGatewayOperator(b, a)
+    useAppStore.setState({ config: { ...previousConfig!, hosts: [...previousConfig!.hosts, operator.host] } })
     const initialA=await a.client.call('settings.mesh.inspect',{}), initialB=await b.client.call('settings.mesh.inspect',{})
     // First use the production editor for the original gateway, then publish its actual port.
     let bridge=connect(a); await dom.render(<Editor active key="real-a"/>);await ready()
@@ -200,18 +209,44 @@ it('production Mesh editors exchange codes and save through Renderer/Main into t
     const firstA=await a.client.call('settings.mesh.inspect',{}), observedA=await a.client.call('mesh.inspect',{})
     const origin=`http://127.0.0.1:${observedA.gateway.listener.port}`
     await input('Mesh published origins',origin)
-    const bCode=meshPeerCode({...initialB,configuration:{...initialB.configuration,networkId:'gui-original-network'}})!
-    await input('Mesh peer codes',bCode);await dom.click('[data-settings-save-bar] button')
+    await dom.click('[data-settings-save-bar] button')
     const savedA=await wait(()=>a.client.call('settings.mesh.inspect',{}),v=>v.revision!==firstA.revision)
-    expect(savedA.configuration.peers).toEqual([{peerId:initialB.identity.peerId,endpoints:[]}])
-    const aCode=meshPeerCode(savedA)!
+    const copyCode = async () => {
+      const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+      await dom.click('.mesh-code-action button')
+      const code = clipboard.mock.calls.at(-1)![0]
+      clipboard.mockRestore()
+      return code
+    }
+    const addPeer = async (code: string) => {
+      await input('Paste a connection code', code)
+      expect(dom.container.querySelector('.mesh-peer-preview')?.textContent).toContain('gui-original-network')
+      await dom.click('.mesh-peer-pairing button')
+    }
+    await settled(()=>dom.container.textContent?.includes('Mesh settings saved') ?? false)
+    const aCode=await copyCode()
+    expect(aCode).toBe(meshPeerCode(savedA))
     bridge.mockRestore();bridge=connect(b);await dom.render(<Editor active key="real-b"/>);await ready()
-    await chooseRole('participant');await input('Mesh network','gui-original-network');await input('Mesh peer codes',aCode);await input('Mesh device public keys',b.devicePublicKey);await dom.click('[data-settings-save-bar] button')
+    await addPeer(aCode)
+    expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Mesh network"]')!.value).toBe('gui-original-network')
+    await input('Mesh device public keys',b.devicePublicKey);await dom.click('[data-settings-save-bar] button')
+    const savedB=await wait(()=>b.client.call('settings.mesh.inspect',{}),v=>v.revision!==initialB.revision)
+    expect(savedB.configuration.peers).toEqual([{peerId:initialA.identity.peerId,endpoints:savedA.configuration.advertisedIngress}])
+    await settled(()=>dom.container.textContent?.includes('Mesh settings saved') ?? false)
+    const bCode=await copyCode()
+    expect(bCode).toBe(meshPeerCode(savedB))
+    bridge.mockRestore();bridge=connect(operator);await dom.render(<Editor active key="real-a-approve"/>);await selectHost('Device to manage',operator.host.id);await ready()
+    await chooseRole('participant')
+    await addPeer(bCode);await dom.click('[data-settings-save-bar] button')
+    expect(calls.filter(row=>row.method==='settings.mesh.configure').at(-1)?.params.target).toMatchObject({hostId:operator.host.id,expectedRuntimeId:initialA.owner.runtimeId,expectedOwnerInstanceId:initialA.owner.ownerInstanceId})
+    const pairedA=await wait(()=>a.client.call('settings.mesh.inspect',{}),v=>v.revision!==savedA.revision)
+    expect(pairedA.configuration).toMatchObject({role:'gateway',listen:savedA.configuration.listen,advertisedIngress:savedA.configuration.advertisedIngress,peers:[{peerId:initialB.identity.peerId,endpoints:[]}]})
     const joined=await wait(()=>a.client.call('mesh.inspect',{}),v=>v.network?.peers.some((p:any)=>p.peerId===initialB.identity.peerId&&p.state==='connected'))
     expect(joined.network.peers[0].state).toBe('connected')
     expect((await b.client.call('settings.mesh.inspect',{})).configuration.listen).toBeUndefined()
     const originalBEndpoint=await wait(()=>b.client.call('mesh.inspect',{}),v=>v.endpoint.state==='available')
-    bridge.mockRestore();bridge=connect(a);await dom.render(<Editor active key="real-a-link"/>);await ready()
+    bridge.mockRestore();bridge=connect(operator);await dom.render(<Editor active key="real-a-link"/>);await ready()
+    await selectHost('Issuing gateway',operator.host.id)
     await input('Original Mesh endpoint offer',JSON.stringify(originalBEndpoint.endpoint.offer));await dom.click('[data-settings-field="mesh-link"] > button')
     await settled(()=>Boolean(dom.container.querySelector('[aria-label="Mesh access link"]')))
     const linkUrl=dom.container.querySelector<HTMLInputElement>('[aria-label="Mesh access link"]')!.value
@@ -233,7 +268,7 @@ it('production Mesh editors exchange codes and save through Renderer/Main into t
     expect(calls.filter(row=>row.method==='settings.mesh.configure')).toHaveLength(writesBefore+1)
     expect(initialA.owner.runtimeId).not.toBe(initialB.owner.runtimeId)
     const {writeFile}=await import('node:fs/promises');await writeFile(resolve(process.env.AGENTMUX_MESH_UI_EVIDENCE ?? '.local/state/mesh-network-access', 'ui-joined-behavior.json'),JSON.stringify({passed:true,scope:'Actual production Mesh editor→Renderer protocol wrapper→registered fixed Main IPC→original Unix Core→official private Native owners. Controlled peer endpoints only; no user Runtime touched.',originalOwners:[initialA.owner,initialB.owner],privateRoots:cores.map(c=>c.directory),privatePids:cores.flatMap(c=>c.pids),authenticatedOutboundOnly:initialB.identity.peerId,gatewayPeer:initialA.identity.peerId,casRejectedWithoutReplay:true,originalPinsRetained:true,originalHostEndpoint:originalBEndpoint.endpoint.offer.serverId,originalEncryptionKey:originalBEndpoint.endpoint.offer.daemonPublicKeyB64,guiLinkUsedByOriginalDevice:true,deviceSettingsDenied:true,methodCounts:Object.fromEntries(['settings.mesh.inspect','settings.mesh.configure','mesh.inspect'].map(method=>[method,calls.filter(c=>c.method===method).length]))},null,2))
-  } finally { await dom.render(<div/>);for(const owner of owners)owner.dispose();vi.restoreAllMocks();for(const core of cores.reverse())await core.close(); const {access,writeFile}=await import('node:fs/promises'); const roots=await Promise.all(cores.map(async c=>({path:c.directory,absent:await access(c.directory).then(()=>false,()=>true)}))); const pids=cores.flatMap(c=>c.pids).map(pid=>{let exited=false;try{process.kill(pid,0)}catch(error){exited=(error as NodeJS.ErrnoException).code==='ESRCH'}return{pid,exited}});await writeFile(resolve(process.env.AGENTMUX_MESH_UI_EVIDENCE ?? '.local/state/mesh-network-access', 'ui-joined-cleanup.json'),JSON.stringify({passed:roots.every(r=>r.absent)&&pids.every(p=>p.exited),roots,pids},null,2));expect(roots.every(r=>r.absent)&&pids.every(p=>p.exited)).toBe(true) }
+  } finally { await dom.render(<div/>);useAppStore.setState({config:previousConfig});await operator?.close();for(const owner of owners)owner.dispose();vi.restoreAllMocks();for(const core of cores.reverse())await core.close(); const {access,writeFile}=await import('node:fs/promises'); const roots=await Promise.all(cores.map(async c=>({path:c.directory,absent:await access(c.directory).then(()=>false,()=>true)}))); const pids=cores.flatMap(c=>c.pids).map(pid=>{let exited=false;try{process.kill(pid,0)}catch(error){exited=(error as NodeJS.ErrnoException).code==='ESRCH'}return{pid,exited}});await writeFile(resolve(process.env.AGENTMUX_MESH_UI_EVIDENCE ?? '.local/state/mesh-network-access', 'ui-joined-cleanup.json'),JSON.stringify({passed:roots.every(r=>r.absent)&&pids.every(p=>p.exited),roots,pids},null,2));expect(roots.every(r=>r.absent)&&pids.every(p=>p.exited)).toBe(true) }
 },90000)
 it('late original endpoint link cannot appear beside later offer input', async () => {
   let finish!: (value: unknown) => void
@@ -355,4 +390,53 @@ it('choosing gateway again preserves its authored listener mode and explicitly c
   expect(dom.container.querySelector('.mesh-code-action')?.textContent).toContain('Save changes before sharing')
   await dom.click('.mesh-code-action button')
   expect(clipboard).toHaveBeenCalledWith(meshPeerCode(savedIdentity))
+})
+
+it('a code from another network leaves the existing sole gateway and its authored text intact', async () => {
+  const gateway = { ...settings, configuration: { ...configuration, role: 'gateway' as const } }
+  const read = vi.spyOn(api.mesh, 'call').mockImplementation(async method => structuredClone(method === 'mesh.inspect' ? observation(gateway) : gateway) as never)
+  await dom.render(<Editor active />); await ready()
+  const code = meshPeerCode({ ...settings, configuration: { ...configuration, networkId: 'different-network' }, identity: { peerId: 'remote-peer', publicKey: 'remote-key', epoch: 1 } })!
+  await input('Paste a connection code', code)
+  await dom.click('.mesh-peer-pairing button')
+  expect(dom.container.querySelector('.mesh-peer-pairing [role=alert]')?.textContent).toContain('another network')
+  expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Paste a connection code"]')!.value).toBe(code)
+  expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Mesh network"]')!.value).toBe('original-network')
+  expect(read.mock.calls.some(([method]) => method === 'settings.mesh.configure')).toBe(false)
+})
+
+it('an acknowledgement after switching away settles only the selected gateway draft', async () => {
+  const config = useAppStore.getState().config!
+  const remote = { ...settings, owner: { runtimeId: 'gateway-runtime', ownerInstanceId: 'gateway-instance' }, configuration: { ...configuration, role: 'gateway' as const } }
+  let acknowledge!: () => void
+  const bridge = vi.spyOn(api.mesh, 'call').mockImplementation(async (method, params, options) => {
+    const selected = params.target ? remote : settings
+    if (method === 'mesh.inspect') return observation(selected) as never
+    if (method === 'settings.mesh.inspect') return structuredClone(selected) as never
+    if (method !== 'settings.mesh.configure' || !('operationId' in params)) throw Error('Unexpected request')
+    expect(params.target).toEqual({ hostId: 'gateway', expectedRuntimeId: remote.owner.runtimeId })
+    expect(options?.expectedOwner).toEqual(remote.owner)
+    return await new Promise(done => {
+      acknowledge = () => done({ diskDurability: 'confirmed', settings: { ...remote, revision: 'next' } } as never)
+    })
+  })
+  const select = async (value: string) => {
+    const field = dom.container.querySelector<HTMLSelectElement>('[aria-label="Device to manage"]')!
+    await act(async () => { field.value = value; field.dispatchEvent(new Event('change', { bubbles: true })) })
+  }
+  try {
+    useAppStore.setState({ config: { ...config, hosts: [...config.hosts, { id: 'gateway', kind: 'ssh', hostname: 'gateway.invalid', label: 'Saved gateway', runtimeId: remote.owner.runtimeId }] } })
+    await dom.render(<Editor active />); await ready()
+    const field = dom.container.querySelector<HTMLSelectElement>('[aria-label="Device to manage"]')!
+    await select([...field.options].find(option => option.textContent?.includes('Saved gateway'))!.value); await ready()
+    await input('Mesh network', 'gateway-edit'); await dom.click('[data-settings-save-bar] button')
+    await settled(() => typeof acknowledge === 'function')
+    await select(''); await ready()
+    await input('Mesh network', 'local-work')
+    await act(async () => acknowledge())
+    expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Mesh network"]')!.value).toBe('local-work')
+    expect(meshDraftForRuntime(useAppStore.getState().meshSettingsDrafts, settings.owner.runtimeId)?.form.networkId).toBe('local-work')
+    expect(meshDraftForRuntime(useAppStore.getState().meshSettingsDrafts, remote.owner.runtimeId)?.pending).toBeUndefined()
+    expect(bridge.mock.calls.filter(([method]) => method === 'settings.mesh.configure')).toHaveLength(1)
+  } finally { useAppStore.setState({ config }) }
 })

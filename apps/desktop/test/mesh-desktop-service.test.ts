@@ -43,14 +43,24 @@ it('compiled CLI and fixed Main IPC cross the production Desktop Unix service in
   if (live.gateway.state !== 'listening' || !live.gateway.listener || live.endpoint.state !== 'available') throw Error('Original Mesh live endpoint missing')
   const throughMain = await f.renderer.call('settings.mesh.inspect', {})
   expect(throughMain.revision).toBe(saved.settings.revision)
-  const advertised = { ...throughMain.configuration, advertisedIngress: [{ endpoint: '127.0.0.1:' + live.gateway.listener.port, useTls: false }] }
+  const advertised = { ...throughMain.configuration, advertisedIngress: [{ endpoint: 'other.example', useTls: true }, { endpoint: '127.0.0.1:' + live.gateway.listener.port, useTls: false }] }
   const mainSave = await f.renderer.call('settings.mesh.configure', { expectedRevision: throughMain.revision, operationId: 'desktop-original-main-save', configuration: advertised }, { expectedOwner: initial.owner })
   expect(mainSave.diskDurability).toBe('confirmed')
   const mainCall = f.calls.find(call => call.method === 'settings.mesh.configure' && (call.params as { operationId: string }).operationId === 'desktop-original-main-save')!
   expect(mainCall.context.runtimeFence).toEqual(initial.owner)
   expect(mainCall.context.principal).toEqual({ kind: 'user', id: `local-user:${process.getuid?.() ?? 'current'}` })
   await until(() => f.renderer.call('mesh.inspect', {}), value => value.activeRevision === mainSave.settings.revision, 'original Core applied the exact Main save')
-  const linked = result<MeshNetworkLink>(await f.cli(['mesh', 'link', '--input', '-'], { offer: live.endpoint.offer }))
+  const pairing = result<{ owner: typeof initial.owner; code: string }>(await f.cli(['mesh', 'code']))
+  expect(pairing.owner).toEqual(initial.owner)
+  const preview = result<{ networkId: string; peerId: string; endpoints: unknown[] }>(await f.cli(['mesh', 'code', 'read', pairing.code]))
+  expect(preview).toMatchObject({ networkId: advertised.networkId, peerId: initial.identity!.peerId, endpoints: advertised.advertisedIngress })
+  const ingress = advertised.advertisedIngress[1]!
+  const linked = result<MeshNetworkLink>(await f.cli(['mesh', 'link', '--input', '-'], { offer: live.endpoint.offer, ingress }))
+  expect(linked.observation.ingress).toEqual(ingress)
+  expect(linked.offer.relay).toEqual(ingress)
+  const foreign = await f.cli(['mesh', 'link', '--input', '-'], { offer: live.endpoint.offer, ingress: { endpoint: 'not-advertised.example', useTls: true } })
+  expect(foreign.code).not.toBe(0)
+  expect(JSON.parse(foreign.stderr).error.code).toBe('MESH_LINK_UNAVAILABLE')
   expect(linked.offer.serverId).toBe(live.endpoint.offer.serverId)
   expect(linked.offer.daemonPublicKeyB64).toBe(live.endpoint.offer.daemonPublicKeyB64)
   const device = await connectAgentMuxRpc({ endpoint: { transport: 'relay', offer: linked.offer }, relayKeyPair: deviceKey }); cleanup.push(() => device.dispose())

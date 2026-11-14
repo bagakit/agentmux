@@ -29,3 +29,29 @@ export async function privateCore(options = {}) {
   throw Error('Original Mesh identity unavailable')
  } catch(error) { await close();throw error }
 }
+
+/** The original Desktop operator entry selects this one saved private gateway. */
+export async function privateGatewayOperator(managing, gateway) {
+  const { AgentMuxControlServer } = await import('../../../../../packages/core/dist/public-rpc-server.js')
+  const { connectHostedAgentMux } = await import('../../../../../packages/core/dist/hosted-client.js')
+  const host = { id: 'saved-gateway', kind: 'ssh', label: 'Test gateway', hostname: 'gateway.invalid', runtimeId: gateway.owner.runtimeId }
+  const remote = await connectHostedAgentMux({ connectOnDemand: true, rpc: gateway.client, expectedRuntimeId: host.runtimeId,
+    forwardRpc: (method, params, options = {}) => gateway.client.call(method, params, options) })
+  const server = new AgentMuxControlServer({ socketPath: join(managing.directory, 'management.sock'),
+    hostConfiguration: id => id === host.id ? host : null,
+    coreClients: id => id === undefined || id === host.id ? [{ hostId: host.id, client: remote }] : [],
+    callOriginalCore: (id, method, params, context) => {
+      if (context.principal?.kind === 'device') throw Error('Device delegation is outside this private operator fixture.')
+      return (id === 'local' ? managing : gateway).client.call(method, params, {
+        ...(context.signal ? { signal: context.signal } : {}), ...(context.runtimeFence ? { runtimeFence: context.runtimeFence } : {}),
+        ...(context.caller ? { credentials: context.caller } : {})
+      })
+    } })
+  let client
+  async function close() { await client?.dispose(); await server.stop(); await remote.dispose() }
+  try {
+    await server.start()
+    client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
+    return { owner: managing.owner, client, host, close }
+  } catch (cause) { await close(); throw cause }
+}

@@ -10,6 +10,8 @@ process.env.AGENTMUX_RESOURCE_LIBRARY_SECTION = 'hosts'
 process.env.AGENTMUX_FOCUS_IDENTITY_SLICE = 'mote-avatar'
 const edits: Record<string, [string, string, string]> = {
   'foreign-observation': ['renderer/src/components/settings/MeshNetworkSettings.tsx', 'const snapshot = networkSnapshot && (!settings || networkSnapshot.owner.runtimeId === settings.owner.runtimeId && networkSnapshot.owner.ownerInstanceId === settings.owner.ownerInstanceId) ? networkSnapshot : undefined', 'const snapshot = networkSnapshot'],
+  'save-on-entry': ['renderer/src/components/settings/MeshNetworkSettings.tsx', "api.mesh.call('settings.mesh.configure', { ...destination, expectedRevision:", "api.mesh.call('settings.mesh.configure', { expectedRevision:"],
+  'join-drops-listener': ['renderer/src/components/settings/MeshNetworkSettings.tsx', "role: form.role === 'gateway' ? 'gateway' : 'participant'", "role: 'participant'"],
   'overwrite-listener': ['renderer/src/components/settings/MeshNetworkSettings.tsx', "onClick={() => change({ role: 'gateway' })}", "onClick={() => change({ role: 'gateway', listen: true })}"],
   'lost-independent-read': ['renderer/src/components/settings/MeshNetworkSettings.tsx', '    // Network observation and editable settings are independent capabilities.\n    void inspectNetwork(controller.signal)', ''],
   'invented-empty-network': ['renderer/src/components/settings/MeshNetworkSettings.tsx', '{hasTopology ? <MeshNetworkMap', '{true ? <MeshNetworkMap'],
@@ -33,6 +35,8 @@ const edits: Record<string, [string, string, string]> = {
 }
 if (mutant && !edits[mutant]) throw Error('Unknown Mesh UI mutant')
 const targetedIncludes: Record<string, string[]> = {
+  'save-on-entry': ['apps/desktop/test/mesh-settings.test.tsx'],
+  'join-drops-listener': ['apps/desktop/test/mesh-settings.test.tsx'],
   'lost-fence': ['apps/desktop/test/mesh-network-ipc.test.ts'], 'wrong-method': ['apps/desktop/test/mesh-network-ipc.test.ts'],
   'lost-draft': ['apps/desktop/test/mesh-settings.test.tsx'], 'lost-unknown': ['apps/desktop/test/mesh-settings.test.tsx'],
   'new-identity-imports-backup': ['apps/desktop/test/mesh-settings.test.tsx'],

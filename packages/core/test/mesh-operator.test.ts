@@ -101,6 +101,15 @@ it('a wrong original Runtime is refused before configuration with a not-applied 
   expect((await f.bRpc.call('settings.mesh.inspect', {})).revision).toBe(f.settings.revision)
 })
 
+it('the settings writer refuses a changed gateway process before dispatching its draft', async () => {
+  const f = await pair()
+  const changed = { ...f.target, expectedOwnerInstanceId: 'previous-gateway-instance' }
+  await expect(f.rpc.call('settings.mesh.configure', { ...f.input('gateway-process-changed'), target: changed }))
+    .rejects.toMatchObject({ code: 'RUNTIME_OWNER_MISMATCH', controlFailure: { disposition: 'not_applied' } })
+  expect(f.received.filter(row => row.method === 'settings.mesh.configure')).toHaveLength(0)
+  expect((await f.bRpc.call('settings.mesh.inspect', {})).revision).toBe(f.settings.revision)
+})
+
 it('the entry Core rejects an invalid original Agent capability before borrowing the operator carrier', async () => {
   const f = await pair()
   const invalid = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: f.as.path }, credentials: { ...f.a.credentials, capability: 'invalid-original-capability' } }); cleanup.push(() => invalid.dispose())
