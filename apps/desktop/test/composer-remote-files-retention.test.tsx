@@ -14,7 +14,7 @@ it('the original remote Files callback opens the owned project, inserts into the
   useAppStore.setState({ sessions: [remote], config: { ...composerConfig,
     workspaces: composerConfig.workspaces.map(workspace => ({ ...workspace, hostId: remote.hostId })) } })
   const choose = vi.spyOn(api.ui, 'chooseFiles').mockResolvedValue(null)
-  const read = vi.spyOn(api.files, 'readDirectory').mockResolvedValue([{ name: 'original.ts', path: 'original.ts', isDirectory: false }])
+  const read = vi.spyOn(api.files, 'readDirectory').mockResolvedValue([{ name: 'original.ts', path: 'original.ts', isDirectory: false, isSymlink: false }])
   await dom.render(<AgentSessionComposer sessionId={session.id} />)
   const editor = dom.container.querySelector('.tiptap')
   await act(async () => useAppStore.setState({ sessions: [{ ...remote, updatedAt: 2 }], agentComposerDrafts: { [session.id]: 'Current original draft' } }))
