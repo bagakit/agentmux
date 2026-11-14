@@ -52,7 +52,9 @@ async function editorAction(text: string) {
   expect(action).not.toBeUndefined(); await act(async () => action.click())
 }
 async function configure(mode: string, projectId: string, hostId?: string, startupId?: string) {
-  await openEditor(); await editorMode(mode); await editorField('Working folder for this arrangement', projectId)
+  await openEditor(); await editorMode(mode)
+  expect(editor().querySelector('[aria-label="Working folder for this arrangement"]')).toBeNull()
+  expect(editor().querySelector('.agent-work-end')?.textContent).toContain(useAppStore.getState().config!.workspaces.find(item => item.id === projectId)!.path)
   if (hostId !== undefined) await editorField('Agent runs on', hostId)
   if (startupId !== undefined) await editorField('Agent starts in', startupId)
   await editorAction('Apply arrangement')
@@ -176,37 +178,48 @@ it('explains unsupported Mote dual execution while retaining normal launch, all 
 })
 
 
-it('opens every work direction from one anchored editor without early Agent creation', async () => {
-  const f = await mount(), launch = vi.spyOn(api.sessions, 'launchAgent'), home = vi.mocked(api.hosts.home)
-  expect(workMode().textContent).toContain('Local')
+it.each([false, true])('keeps the project read-only and offers only its two work modes without remote preparation, remote=%s', async reverse => {
+  const f = await mount(reverse), launch = vi.spyOn(api.sessions, 'launchAgent'), home = vi.mocked(api.hosts.home), add = vi.spyOn(api.workspaces, 'add')
+  const discover = vi.mocked(api.executors.discover); discover.mockClear()
   await openEditor()
-  expect([...editor().querySelectorAll<HTMLInputElement>('input[type=radio]')].map(input => input.value)).toEqual(['local', 'remote-project', 'remote-agent', 'remote-workspace'])
-  await editorMode('remote-agent'); await editorField('Agent runs on', remote.id)
-  expect(useAppStore.getState().tabs).toBe(f.before.tabs); expect(home).not.toHaveBeenCalled(); expect(launch).not.toHaveBeenCalled()
+  const expected = reverse ? ['remote-project', 'remote-workspace'] : ['local', 'remote-agent']
+  expect([...editor().querySelectorAll<HTMLInputElement>('input[type=radio]')].map(input => input.value)).toEqual(expected)
+  expect(editor().querySelector('[aria-label="Working folder for this arrangement"], [aria-label="Working folder device"]')).toBeNull()
+  expect(editor().querySelector('.agent-work-end')?.textContent).toContain(f.project.name)
+  expect(editor().querySelector('.agent-work-end')?.textContent).toContain(f.project.path)
+  await editorMode(reverse ? 'remote-project' : 'remote-agent')
+  if (!reverse) await editorField('Agent runs on', remote.id)
+  expect(useAppStore.getState().tabs).toBe(f.before.tabs)
+  expect(home).not.toHaveBeenCalled(); expect(add).not.toHaveBeenCalled(); expect(discover).not.toHaveBeenCalled(); expect(launch).not.toHaveBeenCalled()
   await editorAction('Apply arrangement')
-  expect(useAppStore.getState().tabs.launch!.regions.input).toMatchObject({ workspaceId: 'workspace', agentWorkspaceId: remoteProject.id })
-  expect(useAppStore.getState().agentComposerDrafts).toBe(f.before.agentComposerDrafts); expect(launch).not.toHaveBeenCalled()
+  expect(home).toHaveBeenCalledExactlyOnceWith(reverse ? composerConfig.hosts[0]! : remote, expect.objectContaining({ signal: expect.any(AbortSignal) }))
+  expect(add).not.toHaveBeenCalled()
+  expect(useAppStore.getState().tabs.launch!.regions.input).toMatchObject({ workspaceId: f.project.id, agentWorkspaceId: reverse ? 'workspace' : remoteProject.id })
+  expect(useAppStore.getState().agentComposerDrafts).toBe(f.before.agentComposerDrafts)
+  expect(useAppStore.getState().launcherNameDrafts).toBe(f.before.launcherNameDrafts)
+  expect(useAppStore.getState().launcherOptionDrafts).toBe(f.before.launcherOptionDrafts)
+  expect(launch).not.toHaveBeenCalled()
 })
-it.each(['remote-project', 'remote-workspace'])('%s opens the exact project’s own Launcher without moving relative input', async desiredMode => {
-  await mount()
+it.each(['remote-project', 'remote-workspace'])('%s stays in the original remote project and preserves relative input', async desiredMode => {
+  await mount(true)
   const prompt = 'Inspect [original.md](agentmux-file:%40original.md) and keep @relative/path here.'
   await act(async () => useAppStore.getState().setAgentComposerDraft('input', prompt))
   const before = useAppStore.getState(), launch = vi.spyOn(api.sessions, 'launchAgent'), home = vi.mocked(api.hosts.home)
-  await openEditor(); await editorMode(desiredMode); await editorField('Working folder for this arrangement', remoteProject.id)
-  expect(editor().textContent).toContain('Original drafts stay with their project')
+  await openEditor(); await editorMode(desiredMode)
+  expect(editor().querySelector('[aria-label="Working folder for this arrangement"]')).toBeNull()
   expect(useAppStore.getState().tabs).toBe(before.tabs); expect(home).not.toHaveBeenCalled()
   await editorAction('Cancel')
   expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().agentComposerDrafts.input).toBe(prompt)
   await configure(desiredMode, remoteProject.id)
-  const after = useAppStore.getState(), created = Object.values(after.tabs).filter(tab => !before.tabs[tab.id])
-  expect(created).toHaveLength(1)
-  const destination = created[0]!, region = destination.regions[destination.layout.activeRegionId]!
+  const after = useAppStore.getState(), region = after.tabs.launch!.regions.input!
+  expect(Object.keys(after.tabs)).toEqual(Object.keys(before.tabs))
   expect(region).toMatchObject({ kind: 'launcher', workspaceId: remoteProject.id })
   if (desiredMode === 'remote-project') expect(region).toMatchObject({ agentWorkspaceId: 'workspace' })
   else expect(region).not.toHaveProperty('agentWorkspaceId')
-  expect(after.tabs.launch).toBe(before.tabs.launch); expect(after.agentComposerDrafts.input).toBe(prompt)
-  expect(after.agentComposerDrafts[region.regionId] ?? '').toBe('')
-  expect(after.launcherNameDrafts[region.regionId]).toBeUndefined(); expect(after.launcherOptionDrafts[region.regionId]).toBeUndefined()
+  expect(after.tabs.launch!.regions.sibling).toBe(before.tabs.launch!.regions.sibling)
+  expect(after.agentComposerDrafts.input).toBe(prompt)
+  expect(after.agentComposerDrafts).toBe(before.agentComposerDrafts)
+  expect(after.launcherNameDrafts).toBe(before.launcherNameDrafts); expect(after.launcherOptionDrafts).toBe(before.launcherOptionDrafts)
   expect(after.sessions).toBe(before.sessions); expect(after.warmTerminals).toBe(before.warmTerminals); expect(launch).not.toHaveBeenCalled()
 })
 it('an explicit device choice uses its home and returning to this device follows the original project', async () => {
