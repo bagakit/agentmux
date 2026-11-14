@@ -15,6 +15,7 @@ import { resolveGoalsCommonActions, resolveGoalsPreferences, type GoalsPreferenc
 import { resolveNotesPreferences, type NotesPreferences } from './notes-preferences'
 import { resolveMarkdownPreferences, type MarkdownPreferences } from './markdown-preferences'
 import { resolveBrowserStartPage, type BrowserStartPageConfig } from './browser-start-page'
+import { resolveSurveyThumbnailLayout, type SurveyThumbnailLayout } from './survey-thumbnail-layout'
 import { resolveBrowserAgentControl, type BrowserAgentControlPreferences } from './browser-agent-control'
 import { resolveAutomationPreferences, type AutomationPreferences } from './automation-preferences'
 
@@ -42,6 +43,7 @@ const preferenceDomains = new Map<string, PreferenceDomain>(Object.entries({
   automation: { resolve: value => resolveAutomationPreferences(value as AutomationPreferences | undefined), merge: 'authored' },
   'browser.agentControl': { resolve: value => resolveBrowserAgentControl(value as Partial<BrowserAgentControlPreferences> | undefined), merge: 'authored' },
   'browser.startPage': { resolve: value => resolveBrowserStartPage(value as Partial<BrowserStartPageConfig> | undefined), merge: 'authored' },
+  'browser.surveyThumbnails': { resolve: value => resolveSurveyThumbnailLayout(value as Partial<SurveyThumbnailLayout> | undefined), merge: 'authored' },
   continuity: { resolve: value => normalizeAgentContinuityPolicy(value as Partial<AgentMuxContinuityPolicy> | undefined), merge: 'authored' },
   profile: { resolve: value => resolveUserProfile(value as Partial<UserProfile> | undefined), merge: 'resolved' },
   focus: { resolve: value => value ?? { recentActivityHours: resolveFocusRecentActivityHours(undefined) }, merge: 'resolved', fields: {

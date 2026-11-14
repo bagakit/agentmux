@@ -1,4 +1,5 @@
 import { NOTE_FILE_EXTENSION } from '@agentmux/client-ui/note/note-format'
+import { surveyThumbnailStyle } from '../../../shared/survey-thumbnail-layout'
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { mintObjectId } from '@agentmux/core/object-id'
@@ -732,7 +733,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const windowControlsInset = isMacPlatform() ? <span className="survey-window-controls-inset" aria-hidden="true" /> : undefined
 
   return <section ref={surfaceRef} className="global-survey-surface" data-sidebar-collapsed={sidebarCollapsed} data-native-window-controls={isMacPlatform()}
-    style={{ '--survey-navigation-width': `${sidebarCollapsed ? 40 : effectiveSidebarWidth}px` } as CSSProperties} aria-label="Survey" hidden={!visible} inert={!visible} aria-hidden={!visible}>
+    style={{ ...surveyThumbnailStyle(config?.browser.surveyThumbnails), '--survey-navigation-width': `${sidebarCollapsed ? 40 : effectiveSidebarWidth}px` } as CSSProperties} aria-label="Survey" hidden={!visible} inert={!visible} aria-hidden={!visible}>
     <nav ref={sidebarRef} className={`survey-navigation${isResizing ? ' survey-tabs--resizing' : ''}`} aria-label="Exploration navigation" data-collapsed={sidebarCollapsed} inert={controlsCoverPage}>
       <div className="survey-titlebar project-rail-titlebar" role="group" aria-label="Survey window controls">
         <button type="button" className="survey-icon-button" aria-label={sidebarCollapsed ? 'Show Survey items' : 'Hide Survey items'} title={sidebarCollapsed ? 'Show Survey items' : 'Hide Survey items'} onClick={() => setSidebarCollapsed(!sidebarCollapsed)}>{sidebarCollapsed ? <ThemeLayoutOpenLeftIcon size={16} /> : <ThemeLayoutCloseLeftIcon size={16} />}</button>

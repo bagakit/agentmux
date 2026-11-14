@@ -1,5 +1,5 @@
 /* Navigation and controls use one light material; original content keeps its own surface. */
-:is(.global-survey-surface, .global-recall-surface), .survey-topic-menu {
+:is(.global-survey-surface, .global-recall-surface), .survey-topic-menu, .survey-thumbnail-preview {
   --survey-glass: color-mix(in srgb, var(--surface-1) 92%, transparent);
   --survey-edge: color-mix(in srgb, var(--text) 11%, transparent);
 }
@@ -234,9 +234,9 @@
 .global-survey-surface .survey-item-shortcuts button:hover { color: var(--text); background: var(--wash-2); }
 .global-survey-surface .survey-item-row > .survey-item { padding-right: 34px; }
 /* Study members share one quiet frame; each card retains its own current state. */
-.survey-item-tabs { position: relative; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; gap: 6px; margin: 0; }
+.survey-item-tabs { position: relative; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, max(64px, calc((100% - (var(--survey-thumbnail-columns) - 1) * 6px) / var(--survey-thumbnail-columns)))), 1fr)); align-items: stretch; gap: 6px; margin: 0; }
 .survey-tab-column { display: flex; flex-direction: column; align-items: stretch; gap: 5px; width: 100%; min-width: 0; padding: 3px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); cursor: pointer; text-align: left; font: inherit; font-size: var(--fs-meta); }
-.survey-tab-preview { position: relative; display: block; width: 100%; aspect-ratio: 16 / 10; overflow: hidden; border-radius: var(--radius-sm); background: var(--surface-3); }
+.survey-tab-preview { position: relative; display: block; flex: none; width: 100%; height: var(--survey-thumbnail-height); overflow: hidden; border-radius: var(--radius-sm); background: var(--surface-3); }
 .survey-tab-preview__image { display: block; width: 100%; height: 100%; object-fit: cover; }
 .survey-tab-preview__placeholder { position: absolute; inset: 0; background: linear-gradient(145deg, var(--surface-2), transparent); }
 .survey-tab-preview__placeholder::before { content: ''; position: absolute; inset: 31% 19% 18%; border: 1px solid var(--survey-edge); border-radius: 3px; }
@@ -261,13 +261,6 @@
 .survey-tab-column:focus-visible .survey-tab-label > span { width: max-content; overflow: visible; text-overflow: clip; transform: translateX(var(--survey-title-travel, 0px)); transition: transform var(--survey-title-duration, 3s) linear 300ms; }
 @media (hover: hover) {
   .survey-tab-column:hover .survey-tab-label > span { width: max-content; overflow: visible; text-overflow: clip; transform: translateX(var(--survey-title-travel, 0px)); transition: transform var(--survey-title-duration, 3s) linear 300ms; }
-}
-@container survey-navigation (max-width: 250px) {
-  .survey-item-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .survey-tab-preview { min-height: 52px; }
-}
-@container survey-navigation (min-width: 365px) {
-  .survey-item-tabs { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 @media (prefers-reduced-motion: reduce) {
   .survey-tab-column:is(:hover, :focus-visible) .survey-tab-label > span { width: auto; overflow: hidden; text-overflow: ellipsis; transform: none; transition: none; }

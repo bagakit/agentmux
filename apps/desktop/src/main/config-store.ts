@@ -1,4 +1,5 @@
 import { parseGoalsCommonActions } from '@agentmux/core'
+import { SURVEY_THUMBNAIL_HEIGHT, SURVEY_THUMBNAIL_COLUMNS } from '../shared/survey-thumbnail-layout.js'
 import { APP_ICON_IDS } from '@agentmux/client-ui/app-icon-catalog'
 import { validateComposerInputConfig } from '@agentmux/client-ui/composer-input-config'
 import { AgentMuxNotesStorage } from '@agentmux/core/notebook-store'
@@ -179,6 +180,10 @@ const appearanceSchema = z.object({
     .transform((value) => (value === undefined ? undefined : clampTerminalFontSize(value)))
 }).strict()
 const browserSchema = z.object({
+  surveyThumbnails: z.object({
+    height: z.number().int().min(SURVEY_THUMBNAIL_HEIGHT.min).max(SURVEY_THUMBNAIL_HEIGHT.max).optional(),
+    maxColumns: z.number().int().min(SURVEY_THUMBNAIL_COLUMNS.min).max(SURVEY_THUMBNAIL_COLUMNS.max).optional()
+  }).strict().optional(),
   agentControl: z.object({
     showCursor: z.boolean().optional(),
     showCursorLabel: z.boolean().optional(),

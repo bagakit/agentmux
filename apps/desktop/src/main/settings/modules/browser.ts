@@ -1,6 +1,7 @@
 import { BROWSER_TOOLBAR_ITEM_ORDER } from '../../../shared/browser-toolbar.js'
 import { DEFAULT_CONFIG } from '../../config-store.js'
-import { booleanSetting, textSetting, invalid } from '../scalar-setting.js'
+import { booleanSetting, integerSetting, textSetting, invalid } from '../scalar-setting.js'
+import { DEFAULT_SURVEY_THUMBNAIL_LAYOUT, SURVEY_THUMBNAIL_HEIGHT, SURVEY_THUMBNAIL_COLUMNS, resolveSurveyThumbnailLayout } from '../../../shared/survey-thumbnail-layout.js'
 import type { ScalarSetting } from '../scalar-setting.js'
 import { browserAgentControlSettings } from './browser-agent-control.js'
 import { validBrowserProfileExitCheckUrl } from '../../browser-profile-exit-check.js'
@@ -14,6 +15,10 @@ export const browserSettings = [
     config => config.browser.automaticMemoryRelease !== false,
     (config, automaticMemoryRelease) => ({ ...config, browser: { ...config.browser, automaticMemoryRelease } })),
   ...browserAgentControlSettings,
+  ...(['height', 'maxColumns'] as const).map(key => integerSetting(`browser.surveyThumbnails.${key}`,
+    key === 'height' ? SURVEY_THUMBNAIL_HEIGHT : SURVEY_THUMBNAIL_COLUMNS, DEFAULT_SURVEY_THUMBNAIL_LAYOUT[key],
+    config => resolveSurveyThumbnailLayout(config.browser.surveyThumbnails)[key],
+    (config, value) => ({ ...config, browser: { ...config.browser, surveyThumbnails: { ...config.browser.surveyThumbnails, [key]: value } } }))),
   textSetting('browser.startPage.title', config => resolveBrowserStartPage(config.browser.startPage).title,
     (config, value) => writeStartPage(config, 'title', value), value => validBrowserStartPageText(value, BROWSER_START_PAGE_TITLE_LIMIT), DEFAULT_BROWSER_START_PAGE.title),
   textSetting('browser.startPage.subtitle', config => resolveBrowserStartPage(config.browser.startPage).subtitle,
