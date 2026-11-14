@@ -1471,3 +1471,43 @@ it.runIf(business)('a pending file move serializes saves only inside its own Top
     expect(waiting).toBe(true)
   } finally { release(); await Promise.all([operation, same, other]) }
 })
+
+it.runIf(business)('file.create in an original Topic refreshes only the affected catalog detail at each catalog size', async () => {
+  const f = await fixture({ scratch: true })
+  f.routes.set('local', { client: f.source.client })
+  const workspace = { id: '__scratch__', hostId: 'local', path: f.source.scratch, name: 'Scratch', kind: 'folder' as const }
+  const { ScratchTopics } = await import('../../host/src/mote-resources')
+  const { scratchTopicDirectoryName, scratchTopicPhysicalPath } = await import('@agentmux/host/mote-model')
+  const owner = new ScratchTopics()
+  f.store.setState(state => ({ config: { ...state.config!, workspaces: [...state.config!.workspaces, workspace] } }))
+  const list = vi.spyOn(f.api.scratch, 'listTopics')
+  const detail = vi.spyOn(f.api.scratch, 'readTopic').mockImplementation((_workspace, id) => owner.read(workspace, id))
+
+  for (const count of [1, 10, 100]) {
+    const id = mintObjectId()
+    await f.source.rpc.call('topic.create', { topicId: id, title: 'Original Topic' })
+    const topic = (await owner.read(workspace, id))!
+    const root = scratchTopicDirectoryName(id), physical = scratchTopicPhysicalPath(workspace, topic)
+    const catalog = [topic, ...Array.from({ length: count - 1 }, () => {
+      const neighbor = mintObjectId(), directoryPath = scratchTopicDirectoryName(neighbor)
+      return { id: neighbor, title: 'Other Topic', directoryPath, topicPath: directoryPath + '/topic.md', summary: '', collaborators: [] }
+    })]
+    list.mockResolvedValue(catalog)
+    const app = f.store.getState()
+    await app.refreshScratchTopics(workspace.id, true)
+    list.mockClear()
+    detail.mockClear()
+
+    await app.createPath({ path: root + '/work.md', kind: 'file' }, workspace.id, root)
+    expect(await readFile(join(physical, 'work.md'), 'utf8')).toBe('')
+    await app.refreshScratchTopics(workspace.id)
+    expect(detail).not.toHaveBeenCalled()
+    expect(list).not.toHaveBeenCalled()
+
+    await app.createPath({ path: root + '/SOUL.md', kind: 'file' }, workspace.id, root)
+    expect(await readFile(join(physical, 'SOUL.md'), 'utf8')).toBe('')
+    expect(detail).toHaveBeenCalledExactlyOnceWith(workspace.id, id)
+    expect(list).not.toHaveBeenCalled()
+    expect(f.store.getState().scratchTopicSnapshots[workspace.id]!.topics!.map(item => item.id)).toEqual(catalog.map(item => item.id))
+  }
+}, 60000)

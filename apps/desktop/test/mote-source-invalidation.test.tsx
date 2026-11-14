@@ -18,39 +18,22 @@ const read = (params: FileReadParams, revision = 'sha256:' + 'a'.repeat(64)): Fi
   resource: { ...params.expectedResource, zoneId: params.zoneId, zonePath: scratchWorkspace.path + '/' + root, path: root + '/' + params.path },
   result: { status: 'read', document: { path: root + '/' + params.path, content: 'Selected saved source', revision } }
 })
-beforeEach(() => { app = createMoteApp(); vi.spyOn(api.files, 'create').mockResolvedValue(undefined) })
+beforeEach(() => { app = createMoteApp() })
 afterEach(async () => { await app.dispose() })
-for (const count of [1, 10, 100]) it(`keeps unrelated actual create mutations independent of a ${count}-object catalog`, async () => {
-  const topics = Array.from({ length: count }, (_, index) => ({ ...moteTopics[0]!, id: 'launcher:cost-' + index, title: 'Mote ' + index,
-    directoryPath: scratchTopicDirectoryName('launcher:cost-' + index) }))
-  vi.mocked(api.scratch.listTopics).mockResolvedValue(topics)
-  vi.mocked(api.scratch.readTopic).mockImplementation(async (_workspace, id) => topics.find(topic => topic.id === id) ?? null)
-  await useAppStore.getState().refreshScratchTopics(SCRATCH_WORKSPACE_ID, true)
-  vi.mocked(api.scratch.listTopics).mockClear(); vi.mocked(api.scratch.readTopic).mockClear()
-  // Original Store producer bumps the Workspace revision. Original roster consumer then reacts.
-  await useAppStore.getState().createPath({ path: 'unrelated-note.md', kind: 'file' }, SCRATCH_WORKSPACE_ID)
-  await useAppStore.getState().refreshScratchTopics(SCRATCH_WORKSPACE_ID)
-  expect(api.files.create).toHaveBeenCalledOnce()
-  expect(api.scratch.listTopics).not.toHaveBeenCalled(); expect(api.scratch.readTopic).not.toHaveBeenCalled()
-  await useAppStore.getState().createPath({ path: topics[0]!.directoryPath + '/SOUL.md', kind: 'file' }, SCRATCH_WORKSPACE_ID)
-  expect(api.scratch.readTopic).toHaveBeenCalledExactlyOnceWith(SCRATCH_WORKSPACE_ID, topics[0]!.id)
-  expect(api.scratch.listTopics).not.toHaveBeenCalled()
-  expect(useAppStore.getState().scratchTopicSnapshots[SCRATCH_WORKSPACE_ID]!.topics!.map(topic => topic.id)).toEqual(topics.map(topic => topic.id))
-})
 it('discovers structural membership, preserves last facts on failed target refresh, and honors confirmed kind transitions', async () => {
   vi.mocked(api.scratch.readTopic).mockRejectedValueOnce(new Error('Selected detail temporarily unavailable'))
-  await useAppStore.getState().createPath({ path: root + '/SOUL.md', kind: 'file' }, SCRATCH_WORKSPACE_ID)
+  await useAppStore.getState().invalidateScratchTopicPaths(SCRATCH_WORKSPACE_ID, [root + '/SOUL.md'], true)
   expect(useAppStore.getState().scratchTopicSnapshots[SCRATCH_WORKSPACE_ID]!.topics).toEqual(moteTopics.map(topic => topic.id === PMO_TEAMS_TOPIC_ID ? { ...topic, readError: expect.stringContaining('temporarily unavailable') } : topic))
   expect(useAppStore.getState().scratchTopicSnapshots[SCRATCH_WORKSPACE_ID]!.error).toContain('temporarily unavailable')
   const target = moteTopics.find(topic => topic.id !== PMO_TEAMS_TOPIC_ID && topic.soul)!
   vi.mocked(api.scratch.readTopic).mockResolvedValueOnce({ ...target, soul: undefined, moteArchive: undefined, kind: 'topic' })
-  await useAppStore.getState().createPath({ path: target.directoryPath + '/SOUL.md', kind: 'file' }, SCRATCH_WORKSPACE_ID)
+  await useAppStore.getState().invalidateScratchTopicPaths(SCRATCH_WORKSPACE_ID, [target.directoryPath + '/SOUL.md'], true)
   expect(useAppStore.getState().scratchTopicSnapshots[SCRATCH_WORKSPACE_ID]!.topics!.find(topic => topic.id === target.id)?.kind).toBe('topic')
   vi.mocked(api.scratch.listTopics).mockClear()
-  await useAppStore.getState().createPath({ path: scratchTopicDirectoryName('launcher:new-object'), kind: 'directory' }, SCRATCH_WORKSPACE_ID)
+  await useAppStore.getState().invalidateScratchTopicPaths(SCRATCH_WORKSPACE_ID, [scratchTopicDirectoryName('launcher:new-object')], true)
   expect(api.scratch.listTopics).toHaveBeenCalledOnce()
 })
-for (const mode of ['cooperation', 'idea'] as const) it(`keeps ${mode} preparation after an unrelated actual file mutation and rechecks selected closed sources`, async () => {
+for (const mode of ['cooperation', 'idea'] as const) it(`keeps ${mode} preparation after saving another Topic's file and rechecks selected closed sources`, async () => {
   let finish!: (value: FileReadResult) => void, selected!: FileReadParams
   vi.spyOn(api.files, 'readPublic').mockImplementation(async params => read(params))
     .mockImplementationOnce(params => { selected = params; return new Promise(resolve => { finish = resolve }) })
@@ -59,21 +42,21 @@ for (const mode of ['cooperation', 'idea'] as const) it(`keeps ${mode} preparati
   const key = documentKey(SCRATCH_WORKSPACE_ID, otherPath)
   useAppStore.setState(state => ({ tabs: { ...state.tabs, [otherTab.id]: otherTab }, documents: { ...state.documents, [key]: { path: otherPath, content: 'Before unrelated save', revision: 'old' } },
     documentGenerations: { ...state.documentGenerations, [key]: 0 }, dirtyDocuments: { ...state.dirtyDocuments, [key]: false } }))
-  vi.spyOn(api.files, 'write').mockResolvedValue({ status: 'written', revision: 'saved-unrelated' })
-  vi.spyOn(api.files, 'move').mockResolvedValue({ status: 'moved' } as Awaited<ReturnType<typeof api.files.move>>)
+  const write = vi.spyOn(api.files, 'write').mockResolvedValue({ status: 'written', revision: 'saved-unrelated' })
   vi.mocked(api.scratch.readTopic).mockImplementation(async (_workspace, id) => moteTopics.find(topic => topic.id === id) ?? null)
   const pending = mode === 'cooperation'
     ? prepareMoteCooperationDraft(scope(), undefined, { question: 'Original user question' }, () => true)
     : prepareMoteIdeaDraft(scope(), undefined, { direction: 'Original user direction', includeDiscussion: false }, null, () => true)
-  await useAppStore.getState().createPath({ path: 'unrelated-during-read.md', kind: 'file' }, SCRATCH_WORKSPACE_ID)
   useAppStore.getState().updateDocument(otherTab.id, 'Unrelated saved title', 'unrelated-file-region')
   await useAppStore.getState().saveDocument(otherTab.id, 'unrelated-file-region')
-  await useAppStore.getState().renamePath(scratchTopicDirectoryName(customMoteId) + '/note.md', scratchTopicDirectoryName(customMoteId) + '/renamed-note.md', SCRATCH_WORKSPACE_ID)
+  expect(write).toHaveBeenCalledOnce()
+  expect(api.scratch.readTopic).toHaveBeenCalledWith(SCRATCH_WORKSPACE_ID, customMoteId)
   finish(read(selected))
   const result = await pending
   const selection = 'selection' in result ? result.selection : result
   expect(useAppStore.getState().agentComposerDrafts[selection.regionId]).toContain('Original user')
-  expect(api.files.readPublic).toHaveBeenCalledTimes(2)
+  const expectedSources = mode === 'cooperation' ? ['BEHAVIOR.md', 'SOUL.md'] : ['SOUL.md']
+  expect(vi.mocked(api.files.readPublic).mock.calls.map(([params]) => params.path).sort()).toEqual([...expectedSources, ...expectedSources].sort())
   expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled()
 })
 for (const mode of ['cooperation', 'idea'] as const) it(`rejects changed closed selected source before ${mode} admission and keeps original drafts`, async () => {
@@ -113,8 +96,15 @@ it('keeps a catalog discovery failure visible through a successful targeted refr
 })
 
 for (const mode of ['cooperation','idea'] as const) for (const action of ['later-input','navigation-return'] as const) it(`rejects ${mode} ${action} during final selected-source verification`,async()=>{
- let release!:()=>void;let readingSecond=false,stillCurrent=true,calls=0
- vi.spyOn(api.files,'readPublic').mockImplementation(async params=>{calls++;if(calls===2){readingSecond=true;await new Promise<void>(resolve=>{release=resolve})}return read(params)})
+ let release!: () => void
+ let readingSecond = false, stillCurrent = true, soulReads = 0
+ vi.spyOn(api.files, 'readPublic').mockImplementation(async params => {
+   if (params.path === 'SOUL.md' && ++soulReads === 2) {
+     readingSecond = true
+     await new Promise<void>(resolve => { release = resolve })
+   }
+   return read(params)
+ })
  const before=useAppStore.getState()
  const pending=mode==='cooperation'?prepareMoteCooperationDraft(scope(),undefined,{question:'Earlier original question'},()=>stillCurrent):prepareMoteIdeaDraft(scope(),undefined,{direction:'Earlier original direction',includeDiscussion:false},null,()=>stillCurrent)
  // Attach rejection immediately so no intentionally rejected original preparation becomes unhandled.
