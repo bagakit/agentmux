@@ -4,6 +4,7 @@ import { decodeHostedValue } from './hosted-value.js'
 import { AGENTMUX_HOSTED_RPC_FIELDS } from './hosted-client-contract.js'
 import { parseSpaceMemberIdentity, SPACE_MEMBER_CALLS, SPACE_MEMBER_STREAMS, SPACE_MEMBER_INVOCATIONS, parseSpaceMemberAdmission, type SpaceMemberTarget, type SpaceMemberParams } from './space-member.js'
 import { validateAgentInputWaitRef } from './agent-input-wait.js'
+import { parseConversationTimelineReadInput, parseConversationCheckpointInput, parseConversationChangesInput, parseConversationWatchInput, parseConversationViewReleaseInput } from './conversation-changes.js'
 
 function mismatch(): never { throw new AgentMuxError('This operation does not identify the original Space member and Run. Its Session and other controls are retained.', 'SPACE_MEMBER_TARGET_MISMATCH') }
 export { parseSpaceMemberIdentity } from './space-member.js'
@@ -23,6 +24,12 @@ export function assertSpaceMemberCall(target: SpaceMemberTarget, call: { method:
   if (fence.runtimeId !== target.runtimeId) mismatch()
   rpcString(fence.ownerInstanceId, 'Original execution owner'); rpcString(p.consumerId, 'Original reader')
   if (call.method === 'runtime.release-consumer') return
+  if (call.method === 'runtime.conversation-watch') {
+    const ref = parseConversationWatchInput(p.reference)
+    if (ref.hostId !== 'local' || ref.agentSessionId !== target.agentSessionId) mismatch()
+    rpcRecord(p.options ?? {}, [])
+    return
+  }
   if (call.method === 'runtime.bootstrap' || call.method === 'runtime.events') {
     if (!Array.isArray(p.agentSessionIds) || p.agentSessionIds.length !== 1 || p.agentSessionIds[0] !== target.agentSessionId || p.sessions !== undefined && p.sessions !== 'full') mismatch()
     return
@@ -36,6 +43,17 @@ export function assertSpaceMemberCall(target: SpaceMemberTarget, call: { method:
   const invocation = rpcRecord(decodeHostedValue(p.invocation), ['method', 'args'])
   if (!(SPACE_MEMBER_INVOCATIONS as readonly unknown[]).includes(invocation.method) || !Array.isArray(invocation.args)) throw new AgentMuxError('This invocation is outside the original Space member controls.', 'CONTROL_PERMISSION_DENIED')
   const [first] = invocation.args
+  const conversationParser = invocation.method === 'readAgentConversation' ? parseConversationTimelineReadInput
+    : invocation.method === 'conversationCheckpoint' ? parseConversationCheckpointInput
+      : invocation.method === 'readConversationChanges' ? parseConversationChangesInput
+        : invocation.method === 'releaseConversationView' ? parseConversationViewReleaseInput : undefined
+  if (conversationParser) {
+    if (invocation.args.length < 1 || invocation.args.length > (invocation.method === 'releaseConversationView' ? 1 : 2)) mismatch()
+    const ref = conversationParser(first)
+    if (ref.hostId !== 'local' || ref.agentSessionId !== target.agentSessionId) mismatch()
+    if (invocation.args.length === 2) rpcRecord(invocation.args[1], [])
+    return
+  }
   if (invocation.method === 'rejoinAgentInputWaiting') {
     if (invocation.args.length !== 1) throw new AgentMuxError('Member rejoin accepts only its original waiting reference.', 'INVALID_CONTROL_REQUEST')
     const input = rpcRecord(first, ['ref']), ref = validateAgentInputWaitRef(input.ref)

@@ -29,6 +29,7 @@ export function SpaceMemberWorkface({ target, visible, active, mountKey, tabId, 
     void api.spaceMounts.member(target, event => {
       if (controller.signal.aborted || currentKey.current !== key) return
       if (event.type === 'runtime') { for (const listener of [...listeners]) listener(event.event) }
+      else if (event.type === 'conversation') { /* This terminal reader has not requested conversation content. */ }
       else if (event.type === 'observation-error') issue(event.error.message, 'watchIssue')
       else if (event.type === 'error') { issue(event.error.message, 'watchIssue'); setReader(undefined) }
       else if (event.session.kind === 'agent' && event.session.control.agentSessionId === target.target.agentSessionId && event.session.control.run.runId === target.target.expectedRun.runId) setRead({ key, session: event.session })

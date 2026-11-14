@@ -5,7 +5,7 @@ import type { AgentMuxRpcClient } from '@agentmux/core'
 import type { SessionSnapshot } from '../shared/contracts.js'
 import type { SpaceMountMemberTarget, SpaceMountMemberSurface, SpaceMountMemberEvent, SpaceMountMemberMethods } from '../shared/space-mount.js'
 
-type Actions = { [M in keyof SpaceMountMemberMethods]: (input: SpaceMountMemberMethods[M]['input']) => Promise<SpaceMountMemberMethods[M]['result']> }
+type Actions = { [M in keyof SpaceMountMemberMethods]: (input: SpaceMountMemberMethods[M]['input'], signal?: AbortSignal) => Promise<SpaceMountMemberMethods[M]['result']> }
 /** A sender-owned original SDK reader, not another Session or attachment owner. */
 export async function createSpaceMemberSurface(input: SpaceMountMemberTarget, ports: {
   rpc: Pick<AgentMuxRpcClient, 'call' | 'subscribe'>; assertCurrent(): void
@@ -16,6 +16,13 @@ export async function createSpaceMemberSurface(input: SpaceMountMemberTarget, po
     hostId: JSON.stringify(['space-member', input.hostId, input.target.reference, input.target.runtimeId]) }
   let closed = false, reading: Promise<SessionSnapshot> | undefined
   const leases = new Set<string>()
+  const views = new Set<string>(), conversationReference = { hostId: 'local', agentSessionId: input.target.agentSessionId }
+  const conversations = new Map<string, Awaited<ReturnType<typeof client.observeConversation>>>()
+  const conversationInput = <T extends object>(value: T): T => {
+    if (!value || typeof value !== 'object' || Array.isArray(value) || 'hostId' in value || 'agentSessionId' in value) throw new AgentMuxError(
+      'This fixed member reader accepts conversation options only; its original Host and Session cannot be replaced.', 'SPACE_MEMBER_TARGET_MISMATCH')
+    return value
+  }
   const check = () => { signal.throwIfAborted(); ports.assertCurrent(); if (closed) throw new AgentMuxError('This original member view closed. Its Agent remains available.', 'CONTROL_CANCELLED') }
   const read = async () => {
     check()
@@ -54,6 +61,38 @@ export async function createSpaceMemberSurface(input: SpaceMountMemberTarget, po
   }
   const actions: Actions = {
     read,
+    conversationRead: async (value, requestSignal) => {
+      const page = await client.readAgentConversation({ ...conversationInput(value.input), ...conversationReference }, requestSignal ? { signal: requestSignal } : {})
+      if (closed) { if (page.window.view) await client.releaseConversationView({ ...conversationReference, view: page.window.view }); check() }
+      if (page.window.view) views.add(page.window.view)
+      check(); return page
+    },
+    conversationCheckpoint: async (value, requestSignal) => {
+      const page = await client.conversationCheckpoint({ ...conversationInput(value.input), ...conversationReference }, requestSignal ? { signal: requestSignal } : {})
+      check(); return page
+    },
+    conversationChanges: async (value, requestSignal) => {
+      const page = await client.readConversationChanges({ ...conversationInput(value.input), ...conversationReference }, requestSignal ? { signal: requestSignal } : {})
+      if (closed) { if (page.window.view) await client.releaseConversationView({ ...conversationReference, view: page.window.view }); check() }
+      if (page.window.view) views.add(page.window.view)
+      check(); return page
+    },
+    conversationRelease: async value => {
+      const result = await client.releaseConversationView({ ...conversationReference, view: value.view })
+      views.delete(value.view); check(); return result
+    },
+    conversationWatch: async (value, requestSignal) => {
+      const readerId = mintObjectId()
+      const opened = await client.observeConversation({ ...value, ...conversationReference }, observation => {
+        if (!closed && conversations.has(readerId)) emit({ type: 'conversation', readerId, observation })
+      }, requestSignal ? { signal: requestSignal } : {})
+      if (closed) { opened.dispose(); check() }
+      conversations.set(readerId, opened)
+      const released = () => { if (conversations.get(readerId) === opened) conversations.delete(readerId) }
+      opened.closed.addEventListener('abort', released, { once: true }); if (opened.closed.aborted) released()
+      check(); return { readerId, hostId: opened.hostId, agentSessionId: opened.agentSessionId, sourceHostId: opened.sourceHostId, scope: opened.scope, coverage: opened.coverage }
+    },
+    conversationUnwatch: async value => { const reader = conversations.get(value.readerId); conversations.delete(value.readerId); reader?.dispose() },
     attach: value => attach(value.afterByte),
     refreshAttachment: value => attach(value.afterByte, value.attachmentId),
     replay: async value => { check(); requireLease(value.attachmentId); const result = await client.readRunReplay(input.target.expectedRun, value.afterByte, 'terminal'); check(); return { replay: result.replay, gap: result.gap } },
@@ -71,9 +110,17 @@ export async function createSpaceMemberSurface(input: SpaceMountMemberTarget, po
     inspectInput: async value => { check(); if (value.key.agentSessionId !== input.target.agentSessionId || value.key.expectedRun.runId !== input.target.expectedRun.runId) throw new AgentMuxError('This input key belongs to another original member.', 'SPACE_MEMBER_TARGET_MISMATCH'); return await client.inspectAgentInput({ key: value.key }) },
     inspectInteraction: async value => { check(); return await client.inspectAgentInteractionOperation({ agentSessionId: input.target.agentSessionId, operationId: value.operationId }) }
   }
-  const dispose = async () => { if (closed) return; closed = true; signal.removeEventListener('abort', abort); unlisten(); leases.clear(); await client.dispose() }
+  const dispose = async () => {
+    if (closed) return
+    closed = true; for (const reader of conversations.values()) reader.dispose(); conversations.clear()
+    signal.removeEventListener('abort', abort); unlisten(); leases.clear()
+    const retained = [...views]; views.clear()
+    const releases = await Promise.allSettled(retained.map(view => client.releaseConversationView({ ...conversationReference, view })))
+    for (const release of releases) if (release.status === 'rejected') console.warn('[space-member] Conversation view release unconfirmed', release.reason)
+    await client.dispose()
+  }
   const abort = () => { void dispose().catch(report) }; signal.addEventListener('abort', abort, { once: true })
   if (signal.aborted) { await dispose(); signal.throwIfAborted() }
-  return { initial, call: async (method, value, requestSignal) => { requestSignal?.throwIfAborted(); check(); const result = await actions[method](value); requestSignal?.throwIfAborted(); return result },
+  return { initial, call: async (method, value, requestSignal) => { requestSignal?.throwIfAborted(); check(); const result = await actions[method](value, requestSignal); requestSignal?.throwIfAborted(); return result },
     start: () => { void client.connect().then(refresh).catch(report) }, dispose }
 }

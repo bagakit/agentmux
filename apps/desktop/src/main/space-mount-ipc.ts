@@ -120,6 +120,7 @@ export function registerSpaceMountIpc(ports: {
   }))
   const memberFields: { [M in keyof SpaceMountMemberMethods]: string[] } = {
     read: [], attach: ['afterByte'], refreshAttachment: ['attachmentId','afterByte'], replay: ['attachmentId','afterByte'], detach: ['attachmentId'],
+    conversationRead: ['input'], conversationCheckpoint: ['input'], conversationChanges: ['input'], conversationRelease: ['view'], conversationWatch: ['view'], conversationUnwatch: ['readerId'],
     resize: ['attachmentId','cols','rows'], write: ['data','source','observation'], paste: ['text','terminalData','observation'],
     submitPrompt: ['prompt','operationId','binding'], inspectInput: ['key'], inspectInteraction: ['operationId']
   }

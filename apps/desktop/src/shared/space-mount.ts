@@ -61,10 +61,17 @@ export type SpaceMountMemberIdentity = { id: string; hostId: string }
 export type SpaceMountMemberEvent =
   | { type: 'session'; session: import('./contracts').SessionSnapshot }
   | { type: 'runtime'; event: import('./contracts').RuntimeEvent }
+  | { type: 'conversation'; readerId: string; observation: import('@agentmux/core/conversation').ConversationObservation }
   | { type: 'observation-error'; error: { code: string; message: string } }
   | { type: 'error'; error: { code: string; message: string } }
 export type SpaceMountMemberMethods = {
   read: { input: Record<string, never>; result: import('./contracts').SessionSnapshot }
+  conversationRead: { input: { input: Omit<import('@agentmux/core/conversation').ConversationTimelineReadInput, 'hostId' | 'agentSessionId'> }; result: import('@agentmux/core/conversation').AgentConversationReadPage }
+  conversationCheckpoint: { input: { input: Omit<import('@agentmux/core/conversation').ConversationCheckpointInput, 'hostId' | 'agentSessionId'> }; result: import('@agentmux/core/conversation').ConversationCheckpointPage }
+  conversationChanges: { input: { input: Omit<import('@agentmux/core/conversation').ConversationChangesInput, 'hostId' | 'agentSessionId'> }; result: import('@agentmux/core/conversation').ConversationChangesPage }
+  conversationRelease: { input: { view: string }; result: import('@agentmux/core/conversation').ConversationViewReleaseResult }
+  conversationWatch: { input: { view?: string }; result: import('@agentmux/core/conversation').ConversationWatchOpening & { readerId: string } }
+  conversationUnwatch: { input: { readerId: string }; result: void }
   attach: { input: { afterByte: number }; result: import('./contracts').SessionAttachResult }
   refreshAttachment: { input: { attachmentId: string | null; afterByte: number }; result: import('./contracts').SessionAttachResult }
   replay: { input: { attachmentId: string; afterByte: number }; result: import('./contracts').SessionReplayResult }

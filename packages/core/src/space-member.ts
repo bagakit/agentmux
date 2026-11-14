@@ -33,10 +33,11 @@ export const SPACE_MEMBER_INVOCATIONS = [
   'releaseRunAttachment', 'resizeTerminal', 'writeAgent', 'pasteAgent', 'submitAgentPrompt',
   'inspectAgentInteractionOperation', 'inspectAgentInput', 'inspectAgentPromptSubmission',
   'rejoinAgentInputWaiting',
+  'readAgentConversation', 'conversationCheckpoint', 'readConversationChanges', 'releaseConversationView',
 ] as const
 export type SpaceMemberInvocation = typeof SPACE_MEMBER_INVOCATIONS[number]
 export const SPACE_MEMBER_CALLS = ['runtime.owner.identity', 'runtime.bootstrap', 'runtime.invoke', 'runtime.release-consumer'] as const
-export const SPACE_MEMBER_STREAMS = ['runtime.events', 'runtime.attachment-watch', 'runtime.replay-watch'] as const
+export const SPACE_MEMBER_STREAMS = ['runtime.events', 'runtime.attachment-watch', 'runtime.replay-watch', 'runtime.conversation-watch'] as const
 export type SpaceMemberCallMethod = typeof SPACE_MEMBER_CALLS[number]
 export type SpaceMemberStreamMethod = typeof SPACE_MEMBER_STREAMS[number]
 export type SpaceMemberHostedCall<M extends SpaceMemberCallMethod = SpaceMemberCallMethod> = {
