@@ -103,6 +103,15 @@ export function createSeekQueue(seek: (time: number) => void, ready = true): See
   }
 }
 
+/**
+ * A frame preview seeks a second decoder in the same bytes, so it needs one file with a bounded duration and a
+ * decoded picture, which failed main playback no longer has. A playlist would fetch whole segments for every
+ * pointed time, and a live stream has no fixed past.
+ */
+export function timelinePreviewAvailable(source: 'audio' | 'video' | 'playlist', stream: MediaStreamClass, picture: boolean): boolean {
+  return source === 'video' && stream === 'on-demand' && picture
+}
+
 export type MediaPlayerAction =
   | { kind: 'toggle-play' } | { kind: 'toggle-mute' } | { kind: 'fullscreen' }
   | { kind: 'seek-by'; seconds: number } | { kind: 'seek-to-fraction'; fraction: number }
