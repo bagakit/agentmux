@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
-import { basename, join, relative, resolve } from 'node:path'
+import { basename, dirname, join, relative, resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '../../..')
 const mode = process.argv[2] ?? '--self-test'
@@ -19,6 +19,7 @@ function validate(review, directory) {
   const receiptPath = resolve(directory, review.captureReceipt.path)
   assert.equal(sha(readFileSync(receiptPath)), review.captureReceipt.sha256, 'Capture receipt must match the reviewed candidate')
   const capture = read(receiptPath)
+  const receiptDirectory = dirname(receiptPath)
   assert.equal(capture.sourceIdentity, review.sourceIdentity, 'Review and capture must share sourceIdentity')
   for (const [file, digest] of Object.entries(review.sourceHashes ?? {})) {
     assert.equal(capture.sources?.[file], digest, `Reviewed source hash must match capture: ${file}`)
@@ -31,7 +32,7 @@ function validate(review, directory) {
   assert.ok(captured.length > 0, 'Capture must declare its actual image set')
   assert.deepEqual(declared, captured, 'Review must cover exactly every captured image and no unrelated file')
   for (const image of review.images) {
-    const path = resolve(directory, image.path)
+    const path = resolve(receiptDirectory, image.path)
     assert.equal(sha(readFileSync(path)), image.sha256, `Reviewed PNG must be unchanged: ${image.path}`)
     assert.ok(image.conclusion, `Every image needs a concrete conclusion: ${image.path}`)
   }
@@ -58,6 +59,14 @@ function selfTest() {
   writeFileSync(image, Buffer.from('controlled-png-content'))
   review.actualViews = []
   assert.throws(() => validate(review, directory), /Every declared image must be actually viewed/)
+  const nested = join(directory, 'nested')
+  mkdirSync(nested, { recursive: true })
+  const nestedImage = join(nested, 'node.png')
+  writeFileSync(nestedImage, Buffer.from('controlled-png-content'))
+  const nestedReceiptPath = join(nested, 'capture.json')
+  writeFileSync(nestedReceiptPath, JSON.stringify({ sourceIdentity, sources: source, images: [{ path: 'node.png' }] }))
+  const nestedReview = { ...review, actualViews: ['node.png'], captureReceipt: { path: 'nested/capture.json', sha256: sha(readFileSync(nestedReceiptPath)) }, images: [{ path: 'node.png', sha256: sha(readFileSync(nestedImage)), conclusion: 'Nested receipt owns its image root' }] }
+  assert.deepEqual(validate(nestedReview, directory), { reviewer: 'independent-ui-reviewer', images: 1, sourceIdentity })
   return { selfTest: 'passed', directory: relative(root, directory) }
 }
 
