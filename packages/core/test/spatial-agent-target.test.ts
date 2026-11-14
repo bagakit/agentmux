@@ -10,7 +10,7 @@ import { AgentMuxSpatialStateStore } from '../src/spatial-state.js'
 import { spatialAgentOpenRecord, isHeadlessSpatialAgentOpen, isBackgroundLocalAgentOpen } from '../src/spatial-agent-open.js'
 import { readSpaceSnapshot } from '../src/space-authority-stream.js'
 import { parseAgentMuxCliInvocation } from '../src/agentmux-cli-commands.js'
-import { rpcControlRequest } from '../src/rpc-business-codec.js'
+import { rpcControlRequest, parseRpcControlResult } from '../src/rpc-business-codec.js'
 import { runSourceObjectCli as originalSourceObjectCli } from './helpers/source-object-cli.js'
 const runSourceObjectCli: typeof originalSourceObjectCli = (args,env,stdin,timeout,loader) => originalSourceObjectCli(args,env,stdin,timeout,loader ?? (process.env.T012_CLI_LOADER ? new URL(process.env.T012_CLI_LOADER) : undefined))
 import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
@@ -44,7 +44,8 @@ async function fixture(sourceContext = '  Source business context\n') {
     hostEnvironment: vi.fn(async () => ({ homeDirectory: '/d/home' })), createHostAgentWithDelivery: create }
   const bindings = { create: vi.fn(async (input: AgentExecutionOpenInput) => {
       frozen = structuredClone(input)
-      if (pending) throw new AgentMuxError('Original helper preparation remains unconfirmed.', 'EXECUTION_HELPER_UNAVAILABLE')
+      if (pending) throw new AgentMuxError('Original helper preparation remains unconfirmed.', 'EXECUTION_HELPER_UNAVAILABLE', undefined, undefined, undefined, undefined, undefined,
+        { reference: { bindingId: input.bindingId, agentSessionId: input.agent.agentSessionId, createOperationId: input.agent.createOperationId }, hostId: input.resourceHostId, role: 'executor', stage: 'prepare' })
       const created = await create(input.agent)
       bindingConnected = !partialAfterStart
       if (partialAfterStart) throw new AgentMuxError('The Agent exists but its original binding is not connected.', 'EXECUTION_READER_UNAVAILABLE')
@@ -63,15 +64,73 @@ async function fixture(sourceContext = '  Source business context\n') {
     executionHost: vi.fn(async (hostId: string) => { expect(hostId).toBe('D-in-B'); return { runtimeId, client } }), executionBindings: bindings } as unknown as AgentMuxHeadlessRuntime
   const control = createHostSpatialAgentControl({ configurationPath: join(root, 'unused-local-executor-config.json'), spatial, runtime: () => runtime,
     agentMuxContext: async () => sourceContext })
-  const server = new AgentMuxControlServer({ socketPath: join(root, 'rpc.sock'), spatialState: spatial, coreClients: () => [], spatialAgentControl: control,
+  const server = new AgentMuxControlServer({ socketPath: join(root, 'rpc.sock'), spatialState: spatial, coreClients: () => [], spatialAgentControl: control, executionBindings: bindings as never,
     hostedRuntime: () => ({ call: async () => ({ owner: identity }), assertFence: () => {}, subscribe: async () => { throw Error('General Host events are not a source admission prerequisite.') } }) as never })
+  Object.assign(runtime, { server })
   releases.push(() => server.stop()); await server.start()
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); releases.push(() => rpc.dispose())
   const input = { operationId: 'source-create-operation', content: { kind: 'new-agent' as const, executorId: 'd-executor', agentTarget: { hostId: 'D-in-B', runtimeId } },
     destination: { spaceId: folder.spaceId, zoneId: folder.zoneId, newTab: true as const }, focus: false }
-  return { root, rpc, spatial, runtime, client, create, bindings, input, folder, control, agentInput,
+  return { root, rpc, spatial, runtime, server, client, create, bindings, input, folder, control, agentInput,
     pending: () => { pending = true }, partialAfterStart: () => { partialAfterStart = true }, changeRuntime: () => { runtimeId = 'another-runtime' }, frozen: () => frozen }
 }
+
+it('the actual Source and CLI return the original binding before Agent creation without another Start or input', async () => {
+  const f = await fixture(); f.pending()
+  const initial = await f.rpc.call('agent.open', f.input)
+  expect(initial).toMatchObject({ outcome: 'unknown', agent: null, execution: { coordinatorRuntimeId: 'runtime-b',
+    reference: { agentSessionId: 'original-d-session', createOperationId: f.input.operationId }, inspection: { state: 'unavailable', continuation: { agentSessionId: 'original-d-session', createOperationId: f.input.operationId } } } })
+  expect(initial.issues).toContainEqual(expect.objectContaining({ step: 'creation', executionFailure: expect.objectContaining({ hostId: 'local', role: 'executor', stage: 'prepare' }) }))
+  expect(f.create).not.toHaveBeenCalled(); expect(f.agentInput).not.toHaveBeenCalled()
+  const cli = await runSourceObjectCli(['--endpoint', 'unix:' + f.server.path, 'space', 'inspect', '--operation-id', f.input.operationId], objectCliEnvironment(f.root))
+  // CLI retains the business-unknown exit status while returning a successful
+  // read and the exact original diagnostic; unknown is not a completed Agent.
+  expect(cli.code, cli.stderr + '\n' + cli.stdout).toBe(1)
+  const response = JSON.parse(cli.stdout)
+  expect(response.ok).toBe(true)
+  const report = response.result.request.report
+  expect(report.agent).toBeNull()
+  expect(report.execution).toEqual(initial.execution)
+  expect(report.issues).toContainEqual(expect.objectContaining({ step: 'observation', code: 'AGENT_CREATION_UNKNOWN' }))
+  expect(f.bindings.create).toHaveBeenCalledTimes(1); expect(f.bindings.continueOriginal).not.toHaveBeenCalled()
+  expect(f.create).not.toHaveBeenCalled(); expect(f.agentInput).not.toHaveBeenCalled()
+})
+
+it('a managed observer cannot obtain protected binding facts through Source inspection and its error is not a creation failure', async () => {
+  const f = await fixture(); f.pending(); await f.rpc.call('agent.open', f.input)
+  const count = f.bindings.inspect.mock.calls.length
+  const value = await f.control({ operation: 'space.inspect', target: { requestId: f.input.operationId } } as never,
+    { transport: 'unix', principal: { kind: 'user', id: 'private-local-user' }, caller: { agentSessionId: 'managed-observer', capability: 'private-fixture-capability' } } as never)
+  expect(value?.operation).toBe('space.inspect')
+  const report = value?.operation === 'space.inspect' ? value.request?.report : undefined
+  expect(report?.execution).toBeUndefined()
+  expect(report?.issues).toContainEqual(expect.objectContaining({ step: 'observation', code: 'CONTROL_PERMISSION_DENIED' }))
+  expect(report?.issues.some(item => item.code === 'CONTROL_PERMISSION_DENIED' && item.step === 'creation')).toBe(false)
+  expect(f.bindings.inspect.mock.calls.length).toBe(count)
+  expect(f.bindings.create).toHaveBeenCalledTimes(1); expect(f.bindings.continueOriginal).not.toHaveBeenCalled(); expect(f.create).not.toHaveBeenCalled()
+})
+
+it('the public Source codec refuses another creation inside either the original continuation or preparation failure', async () => {
+  const f = await fixture(); f.pending()
+  const original = await f.rpc.call('agent.open', f.input)
+  const changedContinuation = structuredClone(original)
+  changedContinuation.execution!.inspection!.continuation!.createOperationId = 'another-original-operation'
+  expect(() => parseRpcControlResult('agent.open', changedContinuation, f.input)).toThrow('another original creation')
+  const changedFailure = structuredClone(original)
+  const failure = changedFailure.issues.find(item => item.executionFailure)!
+  failure.executionFailure!.reference.createOperationId = 'another-original-operation'
+  expect(() => parseRpcControlResult('agent.open', changedFailure, f.input)).toThrow('another original creation')
+  expect(f.bindings.create).toHaveBeenCalledTimes(1); expect(f.create).not.toHaveBeenCalled(); expect(f.agentInput).not.toHaveBeenCalled()
+})
+
+it('the public Source codec rejects a wrong-SID failure against a confirmed Agent even when the execution view is absent', async () => {
+  const f = await fixture(), original = await f.rpc.call('agent.open', f.input)
+  const { execution: _execution, ...withoutExecution } = original
+  const value = { ...withoutExecution, issues: [{ step: 'creation', code: 'EXECUTION_CREATION_UNCONFIRMED', message: 'Original failure', recovery: 'Inspect the original request.',
+    executionFailure: { reference: { bindingId: 'wrong-binding', agentSessionId: 'wrong-agent', createOperationId: f.input.operationId }, hostId: 'D-in-B', role: 'agent', stage: 'create' } }] }
+  expect(() => parseRpcControlResult('agent.open', value, f.input)).toThrow('another original creation')
+  expect(original.agent?.agentSessionId).toBe('original-d-session')
+})
 
 it('the public Source describes its actual owner and preserves complete CLI launch fields into the foreign child', async () => {
   const f = await fixture()
@@ -152,6 +211,8 @@ it('a started Agent with an incomplete binding continues the same public Host op
   expect(f.create).toHaveBeenCalledTimes(1)
   const inspected = await f.rpc.call('space.inspect', { target: { operationId: f.input.operationId } })
   expect(inspected.request?.report).toMatchObject({ outcome: 'partial', agent: first.agent })
+  expect(inspected.request?.report?.issues).toContainEqual(expect.objectContaining({ step: 'observation', code: 'EXECUTION_READER_UNAVAILABLE' }))
+  expect(inspected.request?.report?.issues.some(item => item.step === 'creation' && item.code === 'EXECUTION_READER_UNAVAILABLE')).toBe(false)
   expect(f.bindings.continueOriginal).not.toHaveBeenCalled()
   const result = await f.rpc.call('agent.open', structuredClone(f.input))
   expect(f.bindings.continueOriginal).toHaveBeenCalledExactlyOnceWith(original.executionBinding, expect.anything())
@@ -177,7 +238,8 @@ it('a same-SID binding receipt for another creation operation cannot complete th
   const first = await f.rpc.call('agent.open', f.input)
   const binding = await f.bindings.inspect(f.frozen()!.bindingId)
   if (!binding) throw Error('The fixture must retain its original binding.')
-  f.bindings.inspect.mockResolvedValueOnce({ ...binding, state: 'connected',
+  const { diagnostic: _diagnostic, ...connected } = binding
+  f.bindings.inspect.mockResolvedValueOnce({ ...connected, state: 'connected',
     continuation: { ...binding.continuation, createOperationId: 'another-creation-operation' } })
   const result = await f.rpc.call('space.inspect', { target: { operationId: f.input.operationId } })
   expect(result.request?.report).toMatchObject({ outcome: 'partial', agent: first.agent, to: first.to })
@@ -234,10 +296,13 @@ it('the background local Host creator preserves the same ordinary fields without
     if (!input.agentSessionId || !input.createOperationId) throw Error('Original local creation identities are required')
     return await f.create({...input,agentSessionId:input.agentSessionId,createOperationId:input.createOperationId,executorRevision:'local-config-revision'})
   })
-  Object.assign(f.runtime.client,{resolveAgentCreationSessionId:f.client.resolveAgentCreationSessionId,inspectAgentCreation:f.client.inspectAgentCreation,createAgentWithDelivery:create})
+  Object.assign(f.runtime.client,{resolveAgentCreationSessionId:f.client.resolveAgentCreationSessionId,inspectAgentCreation:f.client.inspectAgentCreation,createHostAgentWithDelivery:create,
+    listHostExecutors:async()=>({runtimeId:'runtime-b',executors:[{executorId:'d-executor',configRevision:'local-config-revision',creationContract:{ordinaryLaunch:1}}]}),
+    agentCreationAuthority:async()=>({runtimeId:'runtime-b'})})
   const {agentTarget:_target,...content} = f.input.content
   const fields = {agentMuxNote:'  caller note\n',launchOptions:{model:'selected'},cols:117,rows:39}
-  expect(await f.rpc.call('agent.open',{...f.input,content:{...content,...fields,prompt:'  original task\n'}})).toMatchObject({outcome:'opened'})
+  const result = await f.rpc.call('agent.open',{...f.input,content:{...content,...fields,prompt:'  original task\n'}})
+  expect(result, JSON.stringify(result.issues)).toMatchObject({outcome:'opened'})
   expect(create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({...fields,prompt:'  original task\n',sourceAgentMuxNote:'  Source business context\n'}))
   expect(f.runtime.executionHost).not.toHaveBeenCalled();expect(f.bindings.create).not.toHaveBeenCalled()
 })
