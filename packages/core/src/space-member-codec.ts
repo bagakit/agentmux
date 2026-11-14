@@ -63,6 +63,7 @@ export function assertSpaceMemberCall(target: SpaceMemberRoute, call: { method: 
     if (invocation.args.length === 2) rpcRecord(invocation.args[1], [])
     return
   }
+  if (invocation.method === 'readAgentInputEpoch') { if (invocation.args.length !== 0) mismatch(); return }
   if (!('expectedRun' in target)) throw new AgentMuxError('This original member target grants conversation reading only, without Native or input control.', 'CONTROL_PERMISSION_DENIED')
   if (invocation.method === 'rejoinAgentInputWaiting') {
     if (invocation.args.length !== 1) throw new AgentMuxError('Member rejoin accepts only its original waiting reference.', 'INVALID_CONTROL_REQUEST')

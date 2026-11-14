@@ -4,7 +4,8 @@ import { folderDirectoryResourceKey, retainFolderDirectoryIdentity } from './spa
 import { mintObjectId } from './object-id.js';
 import { watch, type FSWatcher } from 'node:fs';
 import { createRequire } from 'node:module';
-import { mkdir, open, readFile, type FileHandle } from 'node:fs/promises';
+import { lstat, mkdir, open, readFile, type FileHandle } from 'node:fs/promises';
+import { snapshotRecoveryFile, restoreMissingRecoveryFile, type RecoverySource, type RecoverySourceMember } from './storage-recovery.js';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { isDeepStrictEqual } from 'node:util';
@@ -133,14 +134,61 @@ export class AgentMuxSpatialStateStore {
     if (!isAbsolute(path))
       invalid('Spatial state path must be absolute.');
   }
+  /** The original topology owner contributes data; reading/restoring never executes a stored operation. */
+  storageRecoverySource(): RecoverySource {
+    return { id: 'core.spatial', ownedPaths: [this.path, this.path + '.previous'],
+      capture: async directory => {
+        const members: RecoverySourceMember[] = [], gaps: Array<{ sourceId: string; memberId?: string; code: string }> = []
+        let revision = 'unavailable'
+        for (const [id, target] of [['original', this.path], ['previous', this.path + '.previous']] as const) {
+          const file = join(directory, id)
+          try {
+            const stamp = await snapshotRecoveryFile(target, file), point = this.decode(await readFile(file, 'utf8'))
+            members.push({ id, file, target, kind: 'file', revision: stamp, capturedAt: Date.now() })
+            if (id === 'original') revision = 'original:' + point.revision
+          } catch (error) { gaps.push({ sourceId: 'core.spatial', memberId: id, code: (error as NodeJS.ErrnoException).code ?? 'SPATIAL_RECOVERY_SOURCE_UNAVAILABLE' }) }
+        }
+        if (!members.some(member => member.id === 'original')) {
+          const previous = members.find(member => member.id === 'previous')
+          if (previous) {
+            // This is an explicit retained recovery point, never a live-read
+            // empty/default fallback or a reconstructed write acknowledgment.
+            const point = this.decode(await readFile(previous.file, 'utf8')); revision = 'previous-original:' + point.revision
+            members.unshift({ ...previous, id: 'original', target: this.path })
+          }
+        }
+        return { revision, members, gaps }
+      },
+      restoreMissing: async member => {
+        const target = member.id === 'original' ? this.path : member.id === 'previous' ? this.path + '.previous' : null
+        if (member.kind !== 'file' || !target || target !== member.target) throw new AgentMuxError('The spatial restore selected another original owner.', 'STORAGE_RECOVERY_INVALID')
+        const point = this.decode(await readFile(member.file, 'utf8'))
+        return await this.locked(async () => {
+          if (member.id === 'original') try {
+            const previous = this.decode(await readFile(this.path + '.previous', 'utf8'))
+            if (previous.revision > point.revision) throw new AgentMuxError('A newer retained original topology exists. Capture that original owner before restoring this earlier point.', 'SPATIAL_RECOVERY_NEWER_ORIGINAL_AVAILABLE')
+          } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+          return await restoreMissingRecoveryFile(member.file, target, member.sha256)
+        })
+      },
+      subscribe: (changed, unavailable) => {
+        const watcher = watch(dirname(this.path), (_event, name) => { if (name && [basename(this.path), basename(this.path) + '.previous'].includes(String(name))) changed() })
+        watcher.on('error', error => { unavailable?.({ sourceId: 'core.spatial', code: (error as NodeJS.ErrnoException).code ?? 'RECOVERY_WATCH_UNAVAILABLE' }); changed() })
+        return () => watcher.close()
+      }
+    }
+  }
   async read(): Promise<AgentMuxSpatialState | null> {
     let source: string;
     try {
       source = await readFile(this.path, 'utf8');
     }
     catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT')
-        return null;
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        try { await lstat(this.path + '.previous'); }
+        catch (previousError) { if ((previousError as NodeJS.ErrnoException).code === 'ENOENT') return null; throw previousError; }
+        throw new AgentMuxError('The original topology document is missing and its retained original remains available. Restore that owner; no empty topology was initialized.', 'SPATIAL_STATE_READ_UNCONFIRMED');
+      }
       throw error;
     }
     return this.decode(source);

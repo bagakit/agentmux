@@ -5,6 +5,8 @@ export type AgentMuxAgentResumeInput = {
   /** Explicit host-generated context, separate from original user text. */
   agentMuxNote?: string
   prompt: string
+  /** Frozen with this original input; reconnect cannot renew it. */
+  inputEpoch?: string
   args?: readonly string[]
   env?: Readonly<Record<string, string>>
   commandOverride?: string
@@ -12,7 +14,7 @@ export type AgentMuxAgentResumeInput = {
   rows?: number
 }
 
-export type AgentMuxAgentReopenInput = Omit<AgentMuxAgentResumeInput, 'prompt' | 'agentMuxNote'> & {
+export type AgentMuxAgentReopenInput = Omit<AgentMuxAgentResumeInput, 'prompt' | 'agentMuxNote' | 'inputEpoch'> & {
   expectedRetiredAt: number
   launchOptions?: LaunchOptionSelection
 }

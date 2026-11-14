@@ -107,6 +107,7 @@ export type Demand = {
   /** New Host creation only; absent original records retain unknown discussion provenance. */
   discussionOperationId?: string
   discussionIntent?: import('./discussion.js').DemandDiscussionIntent
+  discussionInputs?: import('./discussion.js').DemandDiscussionInput[]
   /** Append-only original content provenance, not execution or display ownership. */
   contentRefs?: DemandContentReference[]
   /** Explicit Start provenance. Historical relations and activity never author this fact. */
@@ -165,7 +166,7 @@ export type DemandCreateOptions = {
   context?: DemandNameContext
   participation?: DemandParticipationSource
   /** Creation policy snapshot admitted by the original host. */
-  creationOrigin?: { requesterAsSupervisor: boolean }
+  creationOrigin?: { requesterAsSupervisor: boolean; inputEpoch?: string; inputRuntimeId?: string }
 }
 
 export type DemandReceipt = {

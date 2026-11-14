@@ -5,7 +5,7 @@ import { parseAutomaticInputSource, sameAutomaticInputSource, type AutomaticInpu
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { parseAgentScheduleCheckIn, parseAgentScheduleTiming, type AgentScheduleTiming } from './agent-schedule.js'
-import { agentPromptInputId, validateAgentPromptCondition } from './agent-prompt-condition.js'
+import { optionalInputEpoch, agentPromptInputId, validateAgentPromptCondition } from './agent-prompt-condition.js'
 import { isAgentSchedule, validateContinuousProgressPause, type ContinuousProgressLoop, type ContinuousProgressTarget } from './continuous-progress-scheduler.js'
 import type { AgentMuxRpcCallContext } from './public-rpc-service.js'
 
@@ -14,7 +14,7 @@ export type ScheduleScope = Pick<ContinuousProgressTarget, 'hostId' | 'workspace
 export type ScheduleParamsMap = {
   'schedule.list': { target?: ContinuousProgressTarget; scope?: never } | { scope: ScheduleScope; target?: never }
   'schedule.inspect': { scheduleId?: string; operationId?: string }
-  'schedule.create': { target: ContinuousProgressTarget; prompt: string; operationId: string; managedSource?: AutomaticInputSource } & AgentScheduleTiming
+  'schedule.create': { target: ContinuousProgressTarget; prompt: string; operationId: string; inputEpoch?:string; managedSource?: AutomaticInputSource } & AgentScheduleTiming
   'schedule.update': ScheduleMutation & { everyMs: number }
   'schedule.pause': ScheduleMutation
   'schedule.resume': ScheduleMutation
@@ -56,7 +56,7 @@ export function parseScheduleTarget(value: unknown, code = 'INVALID_CONTROL_REQU
 export function parseScheduleRpcParams<M extends ScheduleMethod>(method: M, value: unknown): ScheduleParamsMap[M] {
   const code = 'INVALID_CONTROL_REQUEST'
   const p = rpcRecord(value, method === 'schedule.list' ? ['target','scope'] : method === 'schedule.inspect' ? ['scheduleId','operationId'] :
-    method === 'schedule.create' ? ['target','calendar','afterMs','everyMs','prompt','operationId','checkIn','managedSource'] : method === 'schedule.update' ? ['scheduleId','expectedRevision','operationId','everyMs'] : ['scheduleId','expectedRevision','operationId'], code)
+    method === 'schedule.create' ? ['inputEpoch','target','calendar','afterMs','everyMs','prompt','operationId','checkIn','managedSource'] : method === 'schedule.update' ? ['scheduleId','expectedRevision','operationId','everyMs'] : ['scheduleId','expectedRevision','operationId'], code)
   if (method === 'schedule.list') {
     if (p.target !== undefined && p.scope !== undefined) invalid('Choose an exact schedule target or execution-directory scope, not both.', code)
     if (p.target !== undefined) parseScheduleTarget(p.target)
@@ -69,6 +69,7 @@ export function parseScheduleRpcParams<M extends ScheduleMethod>(method: M, valu
     if ((p.scheduleId !== undefined) === (p.operationId !== undefined)) invalid('Inspect requires exactly one schedule ID or original operation ID.', code)
     string(p.scheduleId ?? p.operationId, code)
   } else if (method === 'schedule.create') {
+    optionalInputEpoch(p.inputEpoch)
     if (p.managedSource !== undefined) parseAutomaticInputSource(p.managedSource)
     parseScheduleTarget(p.target); string(p.prompt, code, 64 * 1024); string(p.operationId, code)
     parseAgentScheduleTiming({ calendar: p.calendar, afterMs: p.afterMs, everyMs: p.everyMs, checkIn: p.checkIn }, code)
@@ -77,7 +78,8 @@ export function parseScheduleRpcParams<M extends ScheduleMethod>(method: M, valu
 }
 export function parseScheduleRecord(value: unknown): ContinuousProgressLoop {
   const code = 'CONTROL_PROTOCOL_ERROR'
-  const p = rpcRecord(value, ['loopId','hostId','agentSessionId','providerId','workspacePath','calendar','afterMs','everyMs','checkIn','checkInState','revision','creationOperationId','lastMutation','futureIntentId','lastOccurrenceAt','intervalMs','prompt','nextCheckAt','status','pause','pendingCompletion','lastCompletionId','lastTickId','lastOutcome','lastTickAt','lastDecision','taskSource','managedSource','currentDefinition','guidanceAdoptions','lastInputRef'], code)
+  const p = rpcRecord(value, ['inputEpoch','loopId','hostId','agentSessionId','providerId','workspacePath','calendar','afterMs','everyMs','checkIn','checkInState','revision','creationOperationId','lastMutation','futureIntentId','lastOccurrenceAt','intervalMs','prompt','nextCheckAt','status','pause','pendingCompletion','lastCompletionId','lastTickId','lastOutcome','lastTickAt','lastDecision','taskSource','managedSource','currentDefinition','guidanceAdoptions','lastInputRef'], code)
+  optionalInputEpoch(p.inputEpoch)
   if (p.managedSource !== undefined) parseAutomaticInputSource(p.managedSource)
   if (p.currentDefinition !== undefined) parseContinuousProgressDefinition(p.currentDefinition)
   if (p.guidanceAdoptions !== undefined) parseContinuousProgressGuidanceAdoptions(p.guidanceAdoptions)
@@ -167,7 +169,7 @@ export function validateScheduleRpcResult<M extends ScheduleMethod>(method: M, v
         if (scope && (schedule.hostId !== scope.hostId || schedule.workspacePath !== scope.workspacePath)) invalid('Schedule list returned another execution-directory scope.', code)
       } else if (method === 'schedule.create') {
         const request = params as ScheduleParamsMap['schedule.create']
-        if (schedule.creationOperationId !== request.operationId || schedule.prompt !== request.prompt || JSON.stringify(schedule.calendar) !== JSON.stringify(request.calendar) || schedule.afterMs !== request.afterMs || schedule.everyMs !== request.everyMs || JSON.stringify(schedule.checkIn) !== JSON.stringify(request.checkIn) || !sameAutomaticInputSource(schedule.managedSource, request.managedSource) ||
+        if (schedule.inputEpoch !== request.inputEpoch || schedule.creationOperationId !== request.operationId || schedule.prompt !== request.prompt || JSON.stringify(schedule.calendar) !== JSON.stringify(request.calendar) || schedule.afterMs !== request.afterMs || schedule.everyMs !== request.everyMs || JSON.stringify(schedule.checkIn) !== JSON.stringify(request.checkIn) || !sameAutomaticInputSource(schedule.managedSource, request.managedSource) ||
             ['hostId','agentSessionId','providerId','workspacePath'].some(key => schedule[key as keyof ContinuousProgressTarget] !== request.target[key as keyof ContinuousProgressTarget])) invalid('Schedule receipt belongs to different intent or target.', code)
       } else if (method === 'schedule.inspect') {
         const request = params as ScheduleParamsMap['schedule.inspect']

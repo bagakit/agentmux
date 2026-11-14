@@ -219,6 +219,8 @@ export type AgentProvider = {
   listNativeSessions?(context: AgentProviderNativeSessionListContext): Promise<Omit<AgentNativeSessionCatalog, 'capabilities'>>
   /** Recheck only this exact selected source before starting its native resume. */
   assertNativeResumeSource?(context: AgentProviderNativeResumeContext): Promise<void>
+  /** Original native recovery cohort; this read grants neither input nor resume authority. */
+  recoveryFiles?(context: AgentProviderSessionHistoryContext): Promise<{ files: { id: string; path: string; format: 'file' | 'sqlite' }[]; gaps: string[]; assertCurrent?(): Promise<void> }>
   readSessionHistoryPage?(context: AgentProviderSessionHistoryContext): Promise<AgentProviderSessionHistoryPage>
   readConversationChanges?(context: ProviderConversationChangesContext): Promise<ProviderConversationChangesPage>
   readSessionHistoryRecord?(context: AgentProviderSessionHistoryRecordContext): Promise<AgentSessionHistoryItem>
@@ -286,6 +288,7 @@ export type AgentProviderDefinition = {
   discoverNativeSession?: (context: AgentProviderNativeSessionDiscoveryContext) => Promise<AgentProviderNativeSessionDiscovery | null>
   listNativeSessions?: AgentProvider['listNativeSessions']
   assertNativeResumeSource?: AgentProvider['assertNativeResumeSource']
+  recoveryFiles?: AgentProvider['recoveryFiles']
   readSessionHistoryPage?: (context: AgentProviderSessionHistoryContext) => Promise<AgentProviderSessionHistoryPage>
   readConversationChanges?: AgentProvider['readConversationChanges']
   readSessionHistoryRecord?: (context: AgentProviderSessionHistoryRecordContext) => Promise<AgentSessionHistoryItem>
@@ -543,6 +546,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     ...(definition.discoverNativeSession ? { discoverNativeSession: definition.discoverNativeSession } : {}),
     ...(definition.listNativeSessions ? { listNativeSessions: definition.listNativeSessions } : {}),
     ...(definition.assertNativeResumeSource ? { assertNativeResumeSource: definition.assertNativeResumeSource } : {}),
+    ...(definition.recoveryFiles ? { recoveryFiles: definition.recoveryFiles } : {}),
     ...(definition.readConversationChanges ? { readConversationChanges: definition.readConversationChanges } : {}),
     ...(definition.readSessionHistoryPage ? { readSessionHistoryPage: definition.readSessionHistoryPage } : {}),
     ...(definition.readSessionHistoryRecord ? { readSessionHistoryRecord: definition.readSessionHistoryRecord } : {}),

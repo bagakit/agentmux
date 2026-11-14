@@ -1,3 +1,4 @@
+import { optionalInputEpoch } from './agent-prompt-condition.js'
 import { parseFocusParams, parseFocusResult, parseFocusSource } from './focus-control.js'
 import { formatGoalAddress } from './sharing.js'
 import { parseGoalAgentReference, parseGoalAgentReferences, parseGoalQualifiedAccess, parseGoalInspectionAccess, parseGoalRelationAccesses } from './goal-agent-reference.js'
@@ -678,7 +679,7 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
   }
   if (source.operation === 'demand.assign') {
     if (typeof source.start !== 'boolean') throw new AgentMuxError('Demand assignment start flag is invalid.', 'INVALID_CONTROL_REQUEST')
-    return { ...(source.relationAccess === undefined ? {} : { relationAccess: parseGoalRelationAccesses(source.relationAccess) }), schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'), ...(source.projectId === undefined ? {} : { projectId: source.projectId === null ? null : spaceControlId(source.projectId, 'Project id is invalid.', 'INVALID_CONTROL_REQUEST', true) }), ...(source.assigneeSessionIds === undefined ? {} : { assigneeSessionIds: parseGoalAgentReferences(source.assigneeSessionIds) }), ...(source.supervisorSessionId === undefined ? {} : { supervisorSessionId: source.supervisorSessionId === null ? null : parseGoalAgentReference(source.supervisorSessionId) }), ...(source.expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt: finiteNumber(source.expectedUpdatedAt, 'Expected Goal version is invalid.') }), ...(source.sessionId === undefined ? {} : { sessionId: id(source.sessionId, 'Agent Session id is invalid.', 'INVALID_CONTROL_REQUEST') }), start: source.start }
+    return { ...(source.relationAccess === undefined ? {} : { relationAccess: parseGoalRelationAccesses(source.relationAccess) }), schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, ...optionalInputEpoch(source.inputEpoch), requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'), ...(source.projectId === undefined ? {} : { projectId: source.projectId === null ? null : spaceControlId(source.projectId, 'Project id is invalid.', 'INVALID_CONTROL_REQUEST', true) }), ...(source.assigneeSessionIds === undefined ? {} : { assigneeSessionIds: parseGoalAgentReferences(source.assigneeSessionIds) }), ...(source.supervisorSessionId === undefined ? {} : { supervisorSessionId: source.supervisorSessionId === null ? null : parseGoalAgentReference(source.supervisorSessionId) }), ...(source.expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt: finiteNumber(source.expectedUpdatedAt, 'Expected Goal version is invalid.') }), ...(source.sessionId === undefined ? {} : { sessionId: id(source.sessionId, 'Agent Session id is invalid.', 'INVALID_CONTROL_REQUEST') }), start: source.start }
   }
   if (source.operation === 'demand.start') {
     if (source.agentReference !== undefined || source.access !== undefined || source.resumeOriginal !== undefined) {
@@ -687,7 +688,7 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
         throw new AgentMuxError('A qualified finite Start requires its exact Source reference and access, separately from a legacy Session or continuation.', 'INVALID_CONTROL_REQUEST')
       if (source.expectedUpdatedAt !== undefined && (!Number.isSafeInteger(source.expectedUpdatedAt) || Number(source.expectedUpdatedAt) < 0)) throw new AgentMuxError('Expected Goal version is invalid.', 'INVALID_CONTROL_REQUEST')
       const caller = optionalCaller(source.caller)
-      return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'),
+      return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, ...optionalInputEpoch(source.inputEpoch), requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'),
         agentReference, access: parseGoalQualifiedAccess(source.access), ...(source.resumeOriginal === true ? { resumeOriginal: true } : {}),
         ...(source.expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt: Number(source.expectedUpdatedAt) }), ...(caller ? { caller } : {}) }
     }
@@ -699,7 +700,7 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     }
     const owner = optionalCaller(source.caller)
     if (source.expectedUpdatedAt !== undefined && (!Number.isSafeInteger(source.expectedUpdatedAt) || (source.expectedUpdatedAt as number) < 0)) throw new AgentMuxError('Expected Goal version is invalid.', 'INVALID_CONTROL_REQUEST')
-    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, ...(source.expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt: source.expectedUpdatedAt as number }), demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'), ...(source.sessionId === undefined ? {} : { sessionId: id(source.sessionId, 'Agent Session id is invalid.', 'INVALID_CONTROL_REQUEST') }), ...(continuation ? { continuation } : {}), ...(owner ? { caller: owner } : {}) }
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, ...optionalInputEpoch(source.inputEpoch), requestId, operation: source.operation, ...(source.expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt: source.expectedUpdatedAt as number }), demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'), ...(source.sessionId === undefined ? {} : { sessionId: id(source.sessionId, 'Agent Session id is invalid.', 'INVALID_CONTROL_REQUEST') }), ...(continuation ? { continuation } : {}), ...(owner ? { caller: owner } : {}) }
   }
   if (source.operation === 'demand.continuation-action') {
     if (!['pause', 'resume', 'stop', 'check'].includes(source.action as string) || !Number.isSafeInteger(source.expectedRevision) || (source.expectedRevision as number) < 1) throw new AgentMuxError('Goal continuation action or revision is invalid.', 'INVALID_CONTROL_REQUEST')
@@ -744,7 +745,7 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     const target = sessionSelector(source.target), owner = optionalCaller(source.caller)
     if (target.kind === 'self' && !owner) throw new AgentMuxError('A self target requires a managed caller.', 'INVALID_CONTROL_REQUEST')
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, target,
-      ...(source.operation === 'resume' ? { text: source.text === undefined ? '' : text(source.text, 'Resume text') } : {}), ...(owner ? { caller: owner } : {}) } as AgentMuxControlRequest
+      ...(source.operation === 'resume' ? { ...optionalInputEpoch(source.inputEpoch), text: source.text === undefined ? '' : text(source.text, 'Resume text') } : {}), ...(owner ? { caller: owner } : {}) } as AgentMuxControlRequest
   }
   if (source.operation === 'focus') return parseDesktopFocusRequest(source)
   if (source.operation === 'browser.create' || source.operation === 'browser.close') {

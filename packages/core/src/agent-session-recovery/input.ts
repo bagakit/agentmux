@@ -4,11 +4,11 @@ import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import { matchesProviderNativeSessionTarget } from '../agent-native-locator.js'
 import { AgentMuxError } from '../errors.js'
-import { agentPromptNotApplied } from '../agent-prompt-condition.js'
+import { assertAgentInputEpoch, optionalInputEpoch, agentPromptNotApplied } from '../agent-prompt-condition.js'
 import type { AgentPromptInputKey } from '../agent-prompt-condition.js'
 import type { AgentInputCallContext } from '../agent-input-wait.js'
 import type { AgentMuxContinuityInputDelivery, AgentMuxContinuityOperation, AgentMuxContinuityInputRequest, AgentMuxContinuityLaunchInput } from './continuity-contract.js'
-export type RecoveryPromptInput = { agentSessionId: string; expectedRun: import('../types.js').AgentMuxRunRef; afterSubmissionId: null; operationId: string; prompt: string; signal: AbortSignal; agentMuxNote?: string }
+export type RecoveryPromptInput = { agentSessionId: string; expectedRun: import('../types.js').AgentMuxRunRef; afterSubmissionId: null; operationId: string; prompt: string; signal: AbortSignal; agentMuxNote?: string; inputEpoch?: string }
 import type { AgentMuxStoredAgentSession, AgentPromptSubmissionRecord, AgentCatalogEntry, AgentMuxRunRef } from '../types.js'
 import type { AgentProviderRegistry } from '../agent-provider.js'
 import type { CtxmuxAdapterRun } from '../ctxmux-run-adapter.js'
@@ -41,7 +41,7 @@ export function prepareContinuityLaunchInput(operation: AgentMuxContinuityOperat
   const inputContext = captured?.inputContext ?? (input.inputContext === undefined ? undefined : parseBrowserInputContext(input.inputContext))
   const composed = composeAgentResumePrompt(input.prompt, input.agentMuxNote, inputContext)
   if (!composed.text.trim()) return
-  return { input: structuredClone(input), prompt: composed.text, digest: digest(composed.text),
+  return { ...optionalInputEpoch(operation.inputEpoch), input: structuredClone(input), prompt: composed.text, digest: digest(composed.text),
     message: { ...(input.prompt.trim() ? { userContent: input.prompt } : {}), ...(composed.systemContext ? { systemContext: composed.systemContext } : {}),
       ...(inputContext ? { inputContext, inputContextSource, ...(captured ? { inputContextCaptureProof: captured.inputContextCaptureProof } : {}) } : {}),
       ...(input.authorHuman === true ? { authorHuman: true as const } : {}), sourceChannel: normalizeMessageChannel(input.sourceChannel ?? 'api'),
@@ -71,6 +71,7 @@ export function createContinuityInputDelivery(operation: AgentMuxContinuityOpera
   const systemContext = composeAgentResumePrompt(inputs.continuation, reminder).systemContext
   const part = (text: string) => ({ selected: Boolean(text.trim()), status: text.trim() ? 'waiting' as const : 'not-selected' as const, text, digest: digest(text) })
   return {
+    ...optionalInputEpoch(operation.inputEpoch),
     context: { agentSessionId: operation.agentSessionId, previousRun: { ...operation.previousRun }, newRun: { ...operation.newRun },
       nativeTarget: structuredClone(operation.nativeTarget), interruptedWorking: true, runEvidence: structuredClone(operation.evidence), previousInput: structuredClone(previousInput) },
     key: operation.launchInput?.key ?? { kind: 'prompt', agentSessionId: operation.agentSessionId, expectedRun: { ...operation.newRun },
@@ -266,6 +267,8 @@ export class AgentSessionContinuityInputs {
     if (!operation?.newRun || !operation.nativeTarget || operation.kind !== 'resumed' || !operation.interruptedWorking || operation.trigger === 'input' ||
       !isDeepStrictEqual(operation.recoveryDelivery?.key, delivery.key) || operation.recoveryDelivery?.phase === 'superseded' || session.run.runId !== delivery.key.expectedRun.runId ||
       !matchesProviderNativeSessionTarget(operation.nativeTarget, session.nativeHandle)) throw new AgentMuxError('The original recovery input target changed. Its text and key are kept.', 'CONTINUITY_INPUT_SUPERSEDED')
+    assertAgentInputEpoch(session, delivery)
+    assertAgentInputEpoch(operation, delivery)
     const observed = session.observedNativeHandle, source = session.nativeSourceObservation
     if (!hasSelectedNativeTarget(session) && (source?.run.runId === session.run.runId && source.state === 'changed' || observed &&
       (observed.kind !== 'provider' || observed.providerId !== operation.nativeTarget.providerId || observed.sessionId !== operation.nativeTarget.sessionId))) {
@@ -314,6 +317,7 @@ export class AgentSessionContinuityInputs {
       await this.qualify(id, operationId, delivery)
       await this.phase(id, operationId, 'dispatching', 'original-input-dispatching')
       await this.deps.submit({ agentSessionId: id, expectedRun: delivery.key.expectedRun, afterSubmissionId: null,
+        ...optionalInputEpoch(delivery.inputEpoch),
         operationId: delivery.key.submissionId, prompt: delivery.continuation.text, signal: this.controller.signal,
         ...(recoverySystemContext(delivery) === undefined ? {} : { agentMuxNote: recoverySystemContext(delivery)! }) }, {
         requestSignal: this.controller.signal, nativeIdleOnly: true, assertCurrent: () => this.qualify(id, operationId, delivery, true)

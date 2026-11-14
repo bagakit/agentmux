@@ -1,4 +1,5 @@
 import { createHostWorkspaceResources } from './workspace-resources.js'
+import { createDesktopStorageRecoverySource } from './desktop-storage-recovery.js'
 import { createHostFolderDirectoryOwner } from './folder-directory-owner.js'
 import { createHostFolderSpaceResource } from './folder-space-resource.js'
 import { createHostMoteMainReader, createHostMoteDialogue } from './mote-dialogue.js'
@@ -259,7 +260,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     ...(mobileIncidents ? { clientIncidents: mobileIncidents.clientIncidents, mobileWebReports: mobileIncidents.mobileWebReports } : {}),
     ...(configurationPath ? { settingsResources: createHostSettingsResourceRead(configurationPath), appearance: createHostAppearanceObservation(configurationPath) } : {}),
     ...content,
-    ...(goals ? { goalControl: goals.execute, goalParticipation: goals.participation, nameHistory: goals.nameHistory, goalChanges: goals.goalChanges, progress: goals.progress, schedules: goals.schedules, goalDelegations: goals.goalDelegations, automaticInput: goals.automaticInput } : {}),
+    ...(goals ? { goalControl: goals.execute, goalInputEpoch: goals.inputEpoch, goalParticipation: goals.participation, nameHistory: goals.nameHistory, goalChanges: goals.goalChanges, progress: goals.progress, schedules: goals.schedules, goalDelegations: goals.goalDelegations, automaticInput: goals.automaticInput } : {}),
     snapshot: createHostSnapshotObservation(configurationPath, () => [...(runtime ? [{ hostId: 'local', client: runtime.client }] : []), ...(options.connections?.clients?.() ?? [])],workspaceResources),
     spatialPresentation: createHostSpatialPresentation({ ...(configurationPath ? { configurationPath } : {}), clients: () => [...(runtime ? [{ hostId: 'local', client: runtime.client }] : []), ...(options.connections?.clients?.() ?? [])] }),
     mobileAssets,
@@ -390,6 +391,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     // is never displaced or adopted by speculative workflow probes.
     const externalInputAuthority = options.externalInputAuthority ?? connectionOwner?.authority
     runtime = await startHeadlessAgentMux({ inputResources: { inspect: identity => fileUploads.inspect(identity), read: (identity, maxBytes) => fileUploads.read?.(identity, maxBytes) ?? Promise.resolve(null) }, ...(options.prepareExecutionEnvironment ? { prepareExecutionEnvironment: options.prepareExecutionEnvironment } : {}), store: options.store, socketPath: path, shutdown: options.shutdown ?? closeResources,
+      recoverySources: [createDesktopStorageRecoverySource(() => desktopClient({ transport: 'unix' }))],
       ...(options.relayGateway === undefined ? {} : { relayGateway: options.relayGateway }),
       meshEndpoint: async signal => {
         const owner = await getAuthority()

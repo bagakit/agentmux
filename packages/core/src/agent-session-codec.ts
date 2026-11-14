@@ -1,10 +1,11 @@
+import { parseInputRestoration } from './agent-input-epoch.js'
 import { parseAgentMuxCreationOrigin } from './agent-creation-admission.js'
 import { parseCreationResolution } from './agent-creation-resolution.js'
 import { parseAgentForkSource } from './agent-fork.js'
 import { isAgentHookLifecycleEvent, canonicalHookLifecycleEvent } from './agent-hook-event.js'
 import { normalizeAgentInteractionResponse } from './agent-interaction.js'
 import { normalizeNativeSessionId, normalizeNativeTranscriptPath } from './agent-native-locator.js'
-import { validateAgentPromptInputKey, agentPromptInputId } from './agent-prompt-condition.js'
+import { validateAgentPromptInputKey, agentPromptInputId, optionalInputEpoch } from './agent-prompt-condition.js'
 import { normalizeAgentContinuityOperation } from './agent-session-recovery/continuity-contract.js'
 import { parseAgentContinuityControlReceipts } from './agent-session-recovery/control-contract.js'
 import { parseAgentSpawnCreator } from './agent-spawn.js'
@@ -104,6 +105,8 @@ export function normalizeSessionHistoryMetadata(value: unknown): AgentSessionHis
     throw new AgentMuxError('History locator belongs to another Provider.', 'INVALID_AGENT_SESSION_STORE')
   }
   return {
+    ...optionalInputEpoch(source.inputEpoch),
+    ...(source.inputRestoration === undefined ? {} : { inputRestoration: parseInputRestoration(source.inputRestoration,source.inputEpoch) }),
     providerId,
     executorId: string(source.executorId, 'history.executorId'),
     workspacePath: string(source.workspacePath, 'history.workspacePath', MAX_PATH_BYTES),
@@ -799,7 +802,7 @@ export function parseAgentCreationFact(value: unknown): NonNullable<AgentMuxAgen
     if (Object.keys(p).some(key => !['step', 'code', 'message'].includes(key)) || typeof p.step !== 'string' || !['session-commit', 'hook-bind', 'handshake'].includes(p.step)) throw new AgentMuxError('Invalid creation failure step.', 'INVALID_AGENT_SESSION_STORE')
     failure = { step: p.step as NonNullable<typeof failure>['step'], code: string(p.code, 'creation.failure.code'), message: text(p.message, 'creation.failure.message') }
   }
-  return { createOperationId: string(creation.createOperationId, 'creation.createOperationId'), initialPrompt: initialPrompt as NonNullable<AgentMuxAgentSession['creation']>['initialPrompt'],
+  return { ...optionalInputEpoch(creation.inputEpoch), ...(creation.inputRuntimeId === undefined ? {} : { inputRuntimeId: string(creation.inputRuntimeId, 'creation.inputRuntimeId') }), createOperationId: string(creation.createOperationId, 'creation.createOperationId'), initialPrompt: initialPrompt as NonNullable<AgentMuxAgentSession['creation']>['initialPrompt'],
     ...(creation.resolution === undefined ? {} : { resolution: parseCreationResolution(creation.resolution) }),
     ...(creation.workspaceTrust === undefined ? {} : { workspaceTrust: parseWorkspaceTrustPreparation(creation.workspaceTrust) }),
     ...(creation.spatialIntent === undefined ? {} : { spatialIntent: parseAgentCreationSpatialIntent(creation.spatialIntent) }),
@@ -829,6 +832,8 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
   const priorRuns = retiredRuns(source.retiredRuns, currentRun)
   const session: AgentMuxAgentSession = {
     kind: 'agent',
+    ...optionalInputEpoch(source.inputEpoch),
+    ...(source.inputRestoration === undefined ? {} : { inputRestoration: parseInputRestoration(source.inputRestoration,source.inputEpoch) }),
     ...(source.toolExecution === undefined ? {} : { toolExecution: parseAgentToolExecutionBinding(source.toolExecution) }),
     ...(source.continuityControlReceipts === undefined ? {} : { continuityControlReceipts: parseAgentContinuityControlReceipts(source.continuityControlReceipts, String(source.agentSessionId)) }),
     ...(source.continuity === undefined ? {} : { continuity: normalizeAgentContinuityOperation(source.continuity) }),
@@ -882,7 +887,7 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
         const userContent = message.userContent === undefined ? undefined : text(message.userContent, 'future prompt content', MAX_STORED_TEXT_BYTES)
         const systemContext = message.systemContext === undefined ? undefined : text(message.systemContext, 'future prompt context', MAX_STORED_TEXT_BYTES)
         if (userContent === undefined && systemContext === undefined) throw new AgentMuxError('Future prompt source is empty.', 'INVALID_AGENT_SESSION_STORE')
-        return [id, { ...(intent.continuitySource === undefined ? {} : { continuitySource: parseAutomaticInputSource(intent.continuitySource) }), operationId: string(intent.operationId, 'future intent operation'), prompt: text(intent.prompt, 'future prompt', MAX_STORED_TEXT_BYTES), active: intent.active,
+        return [id, { ...optionalInputEpoch(intent.inputEpoch), ...(intent.continuitySource === undefined ? {} : { continuitySource: parseAutomaticInputSource(intent.continuitySource) }), operationId: string(intent.operationId, 'future intent operation'), prompt: text(intent.prompt, 'future prompt', MAX_STORED_TEXT_BYTES), active: intent.active,
           message: { ...(userContent === undefined ? {} : { userContent }), ...(systemContext === undefined ? {} : { systemContext }),
             ...(message.authorAgentSessionId === undefined ? {} : { authorAgentSessionId: string(message.authorAgentSessionId, 'future prompt author') }),
             ...(message.sourceDevice === undefined ? {} : { sourceDevice: normalizeOperationDevice(message.sourceDevice) }) },

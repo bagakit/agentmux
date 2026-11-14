@@ -5,7 +5,7 @@ import { parseAgentInputImageReference, type AgentInputImageReference } from './
 import { AgentMuxError } from './errors.js'
 import { parseAgentInputMoteSource, type AgentInputMoteSource } from './mote/input-source.js'
 import { rpcRecord } from './rpc-data.js'
-import { validateAgentDirectedPromptTarget, validateAgentPromptCondition, validateAgentPromptInputKey, type AgentPromptCondition, type AgentDirectedPromptTarget } from './agent-prompt-condition.js'
+import { validateAgentDirectedPromptTarget, validateAgentPromptCondition, validateAgentPromptInputKey, optionalInputEpoch, type AgentPromptCondition, type AgentDirectedPromptTarget } from './agent-prompt-condition.js'
 import { parseBrowserInputContext, type BrowserInputContext } from './browser-input-context.js'
 import type { AgentMuxRunRef, AgentPromptExecution, AgentPromptSubmissionRecord } from './types.js'
 import type { AgentInputSubmissionReceipt } from './agent-input-wait.js'
@@ -14,7 +14,7 @@ import { normalizeMessageChannel } from './message-origin.js'
 
 /** Unmanaged transport intake. Author, platform notes and automatic fences are not business arguments. */
 export type AgentInputSubmit = {
-  agentSessionId: string; operationId: string; prompt: string; inputContext?: BrowserInputContext
+  agentSessionId: string; operationId: string; prompt: string; inputEpoch?: string; inputContext?: BrowserInputContext
   inputImages?: AgentInputImageReference[]
   /** Selects fixed app-owned guidance only; author and role authority remain transport/Host-owned. */
   moteGuidance?: true
@@ -34,7 +34,7 @@ export type AgentInputSubmitResult = {
   record: AgentPromptSubmissionRecord | null
   input?: AgentInputSubmissionReceipt | null
 }
-export const AGENT_INPUT_SUBMIT_FIELDS = ['agentSessionId', 'operationId', 'prompt', 'inputImages', 'inputContext', 'capturedContext', 'moteSource', 'moteGuidance', 'focusTask', 'sourceChannel', 'preparationRetry', 'expectedRun', 'afterSubmissionId', 'admissionIntent', 'execution', 'allowUncertainTurn'] as const
+export const AGENT_INPUT_SUBMIT_FIELDS = ['agentSessionId', 'operationId', 'prompt', 'inputImages', 'inputContext', 'capturedContext', 'moteSource', 'moteGuidance', 'focusTask', 'sourceChannel', 'preparationRetry', 'expectedRun', 'afterSubmissionId', 'inputEpoch', 'admissionIntent', 'execution', 'allowUncertainTurn'] as const
 export function parseAgentInputSubmit(value: unknown): AgentInputSubmit {
   const p = rpcRecord(value, AGENT_INPUT_SUBMIT_FIELDS)
   const key = validateAgentPromptInputKey({ kind: 'prompt', agentSessionId: p.agentSessionId, expectedRun: p.expectedRun, submissionId: p.operationId })
@@ -56,7 +56,7 @@ export function parseAgentInputSubmit(value: unknown): AgentInputSubmit {
       typeof retry.nativeSourceId !== 'string' || !retry.nativeSourceId || retry.nativeSourceId.length > 4096) throw new AgentMuxError('Preparation retry retains its original finite input and native-source fence.', 'INVALID_AGENT_PROMPT')
     preparationRetry = { inputByte: retry.inputByte as number, nativeSourceId: retry.nativeSourceId }
   }
-  const common = { agentSessionId: key.agentSessionId, operationId: p.operationId as string, prompt: p.prompt,
+  const common = { agentSessionId: key.agentSessionId, operationId: p.operationId as string, prompt: p.prompt, ...optionalInputEpoch(p.inputEpoch),
     ...(p.sourceChannel === undefined ? {} : {sourceChannel:normalizeMessageChannel(p.sourceChannel)}),
     ...(p.moteGuidance === true ? {moteGuidance:true as const} : {}),
     ...(p.focusTask === undefined ? {} : { focusTask: parseFocusTaskReference(p.focusTask) }),
@@ -69,7 +69,7 @@ export function parseAgentInputSubmit(value: unknown): AgentInputSubmit {
     if (Object.hasOwn(p, 'afterSubmissionId') || p.execution !== 'immediate') throw new AgentMuxError('Directed input retains its exact Run and immediate execution intent.', 'INVALID_AGENT_PROMPT')
     return { ...common, expectedRun: key.expectedRun, admissionIntent: validateAgentDirectedPromptTarget(p.admissionIntent), execution: 'immediate' }
   }
-  return { ...common, ...validateAgentPromptCondition({ expectedRun: key.expectedRun, ...(Object.hasOwn(p, 'afterSubmissionId') ? { afterSubmissionId: p.afterSubmissionId } : {}) }),
+  return { ...common, ...validateAgentPromptCondition({ expectedRun: key.expectedRun, ...optionalInputEpoch(p.inputEpoch), ...(Object.hasOwn(p, 'afterSubmissionId') ? { afterSubmissionId: p.afterSubmissionId } : {}) }),
     ...(preparationRetry === undefined ? {} : { preparationRetry }),
     ...(p.execution === undefined ? {} : { execution: p.execution as AgentPromptExecution }) }
 }

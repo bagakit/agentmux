@@ -33,6 +33,9 @@ export type AgentMuxAgentCreateInput = {
   workspacePath: string
   injectAgentMuxGuide: boolean
   prompt?: string
+  /** Original target namespace cut, captured before the first possibly executing request. */
+  inputRuntimeId?: string
+  inputEpoch?: string
   /** Authenticated author of this creation's original prompt; Core owns its durable message. */
   initialMessage?: { callerAgentSessionId: string; capability: string; threadId?: string }
   /** Authenticated creation caller, independent of whether an initial message is requested. */
@@ -63,7 +66,7 @@ export type AgentMuxAgentCreateInput = {
 
 /** Target-owned configuration, with a frozen revision; no source machine argv or environment. */
 export type AgentMuxHostAgentCreateInput = Pick<AgentMuxAgentCreateInput,
-  'toolExecution' | 'agentSessionId' | 'createOperationId' | 'executorId' | 'workspacePath' | 'prompt' | 'agentMuxNote' | 'sourceAgentMuxNote' | 'agentMuxTask' | 'optionalContext' |
+  'toolExecution' | 'agentSessionId' | 'createOperationId' | 'executorId' | 'workspacePath' | 'prompt' | 'inputEpoch' | 'inputRuntimeId' | 'agentMuxNote' | 'sourceAgentMuxNote' | 'agentMuxTask' | 'optionalContext' |
   'launchOptions' | 'cols' | 'rows' | 'nativeResumeSource' | 'spatialIntent'> & {
   executorRevision: string
   /** Existing signed creation intent admission; an initial body is optional. */
@@ -115,7 +118,7 @@ type AgentMuxAgentPromptContent = {
 
 export type AgentMuxAgentPromptInput = AgentMuxAgentPromptContent & (
   (AgentPromptCondition & { admissionIntent?: never }) |
-  { expectedRun: AgentMuxRunRef; afterSubmissionId?: never;
+  { expectedRun: AgentMuxRunRef; inputEpoch?: string; afterSubmissionId?: never;
     admissionIntent: import('./agent-prompt-condition.js').AgentDirectedPromptTarget; execution: 'immediate'; expectedCompletionId?: never;
     expectedFutureIntent?: never; expectedInputByte?: never; preparationRetry?: never }
 )

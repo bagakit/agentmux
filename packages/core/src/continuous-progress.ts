@@ -6,7 +6,7 @@ import type { AgentFuturePromptOccurrence } from './types.js'
 
 /** The scheduler's deliberately small, provider-neutral observation contract. */
 export type ContinuousProgressObservation = {
-  session: Pick<AgentMuxAgentSession, 'agentSessionId' | 'hostId' | 'providerId' | 'workspacePath' | 'run' | 'semanticStatus' | 'pendingInteraction' | 'promptCompletionAdmission' | 'futurePromptIntents'>
+  session: Pick<AgentMuxAgentSession, 'agentSessionId' | 'hostId' | 'providerId' | 'workspacePath' | 'run' | 'semanticStatus' | 'pendingInteraction' | 'promptCompletionAdmission' | 'futurePromptIntents' | 'inputEpoch'>
   observation: AgentObservation
   tickId: string
   now: number

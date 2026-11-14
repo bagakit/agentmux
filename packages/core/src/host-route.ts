@@ -24,7 +24,7 @@ export type HostRouteExecutors = { routeId: string; agentTarget: HostRouteAgentT
 
 /** Only the real split-execution/Space consumers, not the Hosted SDK as a whole. */
 export const HOST_ROUTE_INVOCATIONS = [
-  'agentCreationAuthority', 'listHostExecutors', 'hostEnvironment', 'readAgentSession',
+  'readAgentInputEpoch', 'agentCreationAuthority', 'listHostExecutors', 'hostEnvironment', 'readAgentSession',
   'resolveAgentCreationSessionId', 'inspectAgentCreation', 'createHostAgentWithDelivery',
   'prepareAgentExecutionHelper', 'inspectPreparedTerminal', 'createPreparedTerminal',
   'attachTerminal', 'readRunReplay', 'writeTerminal', 'releaseRunAttachment', 'runtimeIdentity', 'runtimeSubject',
@@ -86,7 +86,7 @@ export type HostRouteSpatialOperation = {
   launchDigest?: string
   destination: Record<string, string | boolean>; agentRoute?: AdoptedHostRoute
 }
-export type HostRouteReadOperation = { kind: 'space-reader'; runtimeId: string; spaceId: string } | { kind: 'creation-reader'; createOperationId: string }
+export type HostRouteReadOperation = { kind: 'input-epoch-reader'; targetRuntimeId: string; agentRoute?: AdoptedHostRoute } | { kind: 'space-reader'; runtimeId: string; spaceId: string } | { kind: 'creation-reader'; createOperationId: string }
 export type HostRouteObservationScope = { kind: 'observation'; targetRuntimeId: string; agentSessionIds: string[]; source: HostRouteReadOperation }
 /** A safe projection of one exact current-viewer call, not a creator's input grant. */
 export type HostRouteMemberOperation = { kind: 'space-member'; runtimeId: string; spaceId: string; regionId: string; targetRuntimeId: string; agentSessionId: string; method: string; paramsDigest: string; expectedAdmission?: SpaceMemberAdmission } & ({ runId: string; access?: never } | { access: 'conversation'; runId?: never })
@@ -236,6 +236,13 @@ export function parseHostRouteOperation(value: unknown): HostRouteOperation {
     const p = rpcRecord(value, ['kind','runtimeId','spaceId'])
     return { kind, runtimeId: rpcString(p.runtimeId, 'Original Space Runtime'), spaceId: rpcString(p.spaceId, 'Original Space') }
   }
+  if (kind === 'input-epoch-reader') {
+    const p = rpcRecord(value, ['kind','targetRuntimeId','agentRoute'])
+    const targetRuntimeId = rpcString(p.targetRuntimeId, 'Original input Runtime')
+    const agentRoute = p.agentRoute === undefined ? undefined : parseAdoptedHostRoute(p.agentRoute)
+    if (agentRoute && agentRoute.hops.at(-1)!.target.runtimeId !== targetRuntimeId) invalid('The input reader route names another Runtime.')
+    return { kind, targetRuntimeId, ...(agentRoute ? { agentRoute } : {}) }
+  }
   if (kind === 'creation-reader') {
     const p = rpcRecord(value, ['kind','createOperationId'])
     return { kind, createOperationId: rpcString(p.createOperationId, 'Original creation operation') }
@@ -279,9 +286,9 @@ export function parseHostRouteExecutionAuthorization(value: unknown): HostRouteE
   } else if (rpcRecord(p.scope).kind === 'observation') {
     const s = rpcRecord(p.scope, ['kind','targetRuntimeId','agentSessionIds','source'])
     const source = parseHostRouteOperation(s.source)
-    if (source.kind !== 'space-reader' && source.kind !== 'creation-reader') invalid('An observation must retain its original read scope.')
+    if (source.kind !== 'space-reader' && source.kind !== 'creation-reader' && source.kind !== 'input-epoch-reader') invalid('An observation must retain its original read scope.')
     const agentSessionIds = list(s.agentSessionIds, 'Exact observed Sessions').map(id => rpcString(id, 'Original member SID'))
-    if (!agentSessionIds.length || new Set(agentSessionIds).size !== agentSessionIds.length) invalid('An observation needs distinct original members.')
+    if ((source.kind === 'input-epoch-reader' ? agentSessionIds.length !== 0 || s.targetRuntimeId !== source.targetRuntimeId : !agentSessionIds.length) || new Set(agentSessionIds).size !== agentSessionIds.length) invalid('An observation needs distinct original members.')
     scope = { kind: 'observation', targetRuntimeId: rpcString(s.targetRuntimeId, 'Original Session Runtime'), agentSessionIds, source: source as HostRouteReadOperation }
   } else if (rpcRecord(p.scope).kind === 'preparation') {
     const s = rpcRecord(p.scope, ['kind','targetRuntimeId','createOperationId','executorId'])

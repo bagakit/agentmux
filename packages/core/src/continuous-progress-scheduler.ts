@@ -1,3 +1,4 @@
+import { optionalInputEpoch } from './agent-prompt-condition.js'
 export * from './continuous-progress-definition.js'
 import type { ContinuousProgressDefinition, ContinuousProgressGuidanceAdoption } from './continuous-progress-definition.js'
 import type { ContinuousProgressInputReference } from './continuous-progress-input.js'
@@ -39,6 +40,8 @@ export function validateContinuousProgressPause(value: unknown): asserts value i
 }
 
 export type ContinuousProgressLoop = ContinuousProgressTarget & {
+  /** Frozen by the original arrangement request; automatic ticks never refresh it. */
+  inputEpoch?: string
   managedSource?: import('./automatic-input-source.js').AutomaticInputSource
   taskSource?: ContinuousProgressTaskSource
   loopId: string
@@ -174,25 +177,25 @@ export class ContinuousProgressScheduler {
     this.indexLoop(loop, ordinal)
   }
 
-  create(input: ContinuousProgressTarget & { intervalMs: number; prompt: string; taskSource?: ContinuousProgressTaskSource; operationId?: string; initialDelivery?: ContinuousProgressLoop['initialDelivery'] }): ContinuousProgressLoop {
+  create(input: ContinuousProgressTarget & { intervalMs: number; prompt: string; taskSource?: ContinuousProgressTaskSource; operationId?: string; inputEpoch?:string; initialDelivery?: ContinuousProgressLoop['initialDelivery'] }): ContinuousProgressLoop {
     if (!input.hostId || !input.agentSessionId || !input.providerId || !input.workspacePath || !input.prompt.trim()) throw new Error('Continuous progress needs an exact target and a nonempty prompt.')
     if (!Number.isFinite(input.intervalMs) || input.intervalMs <= 0) throw new Error('Loop interval must be positive.')
     if (this.list({ hostId: input.hostId, agentSessionId: input.agentSessionId }).some(loop => !isAgentSchedule(loop) && loop.status !== 'stopped')) {
       throw new Error(`A loop already exists for Agent ${input.agentSessionId}.`)
     }
     const now = this.now()
-    const loop: ContinuousProgressLoop = { loopId: this.id(), hostId: input.hostId, agentSessionId: input.agentSessionId, providerId: input.providerId, workspacePath: input.workspacePath, intervalMs: input.intervalMs, prompt: input.prompt, nextCheckAt: now + input.intervalMs, status: input.initialDelivery ? 'paused' : 'active', ...(input.taskSource ? { taskSource: { ...input.taskSource } } : {}), ...(input.operationId ? { creationOperationId: input.operationId, revision: 1 } : {}), ...(input.initialDelivery ? { initialDelivery: structuredClone(input.initialDelivery) } : {}) }
+    const loop: ContinuousProgressLoop = { ...optionalInputEpoch(input.inputEpoch),loopId: this.id(), hostId: input.hostId, agentSessionId: input.agentSessionId, providerId: input.providerId, workspacePath: input.workspacePath, intervalMs: input.intervalMs, prompt: input.prompt, nextCheckAt: now + input.intervalMs, status: input.initialDelivery ? 'paused' : 'active', ...(input.taskSource ? { taskSource: { ...input.taskSource } } : {}), ...(input.operationId ? { creationOperationId: input.operationId, revision: 1 } : {}), ...(input.initialDelivery ? { initialDelivery: structuredClone(input.initialDelivery) } : {}) }
     this.setLoop(loop)
     return { ...loop }
   }
 
   requestCheck(loopId: string): ContinuousProgressLoop { return this.update(loopId, { nextCheckAt: this.now() }) }
 
-  createSchedule(input: ContinuousProgressTarget & AgentScheduleTiming & { prompt: string; nextDue: number; operationId: string; managedSource?: import('./automatic-input-source.js').AutomaticInputSource }): ContinuousProgressLoop {
+  createSchedule(input: ContinuousProgressTarget & AgentScheduleTiming & { prompt: string; nextDue: number; operationId: string; inputEpoch?:string; managedSource?: import('./automatic-input-source.js').AutomaticInputSource }): ContinuousProgressLoop {
     if (!input.hostId || !input.agentSessionId || !input.providerId || !input.workspacePath || !input.prompt.trim() || (!Number.isSafeInteger(input.nextDue) || input.nextDue < 0)) throw new Error('An exact schedule target, message and next occurrence are required.')
     const timing = parseAgentScheduleTiming({ calendar: input.calendar, afterMs: input.afterMs, everyMs: input.everyMs, checkIn: input.checkIn })
     const loopId = this.id()
-    const loop: ContinuousProgressLoop = { loopId, hostId: input.hostId, agentSessionId: input.agentSessionId, providerId: input.providerId, workspacePath: input.workspacePath,
+    const loop: ContinuousProgressLoop = { ...optionalInputEpoch(input.inputEpoch),loopId, hostId: input.hostId, agentSessionId: input.agentSessionId, providerId: input.providerId, workspacePath: input.workspacePath,
       ...timing, ...(input.managedSource ? { managedSource: { ...input.managedSource } } : {}), revision: 1, creationOperationId: input.operationId, futureIntentId: `${loopId}-1`, intervalMs: 1000, prompt: input.prompt, nextCheckAt: input.nextDue, status: 'active' }
     this.setLoop(loop)
     return structuredClone(loop)
@@ -264,6 +267,7 @@ export function parseGoalContinuationLoop(value: unknown): ContinuousProgressLoo
       typeof loop.pendingCompletion.prompt !== 'string' || !validId(loop.pendingCompletion.condition?.expectedRun?.runId) ||
       !Object.hasOwn(loop.pendingCompletion.condition, 'afterSubmissionId') || !(loop.pendingCompletion.condition.afterSubmissionId === null || validId(loop.pendingCompletion.condition.afterSubmissionId)))) throw new Error('Original continuation transaction is unconfirmed.')
   if (loop.lastMutation && (!validId(loop.lastMutation.operationId) || !['pause', 'resume', 'stop', 'check'].includes(loop.lastMutation.action) || !Number.isSafeInteger(loop.lastMutation.expectedRevision))) throw new Error('Original continuation mutation is unconfirmed.')
+  optionalInputEpoch(loop.inputEpoch)
   if (loop.pause !== undefined) validateContinuousProgressPause(loop.pause)
   return structuredClone(loop)
 }

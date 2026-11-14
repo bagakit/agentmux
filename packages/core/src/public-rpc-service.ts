@@ -1,5 +1,7 @@
+import { parseGoalInputEpochInput, parseGoalInputEpoch } from './goal-input-epoch.js'
 import { parseCreationInspectParams, parseCreationResolveParams } from './agent-creation-resolution.js'
 import { parseCreationInspection, parseCreationInspectionResult } from './agent-creation-inspection.js'
+import { isStorageRecoveryMethod, parseStorageRecoveryParams, parseStorageRecoveryResult, type StorageRecoveryMethod, type StorageRecoveryPort, type StorageRecoveryExportsPort, type StorageRecoveryParamsMap } from './storage-recovery-rpc.js'
 import { isCaptureSequenceMethod, parseCaptureSequenceParams, parseCaptureSequenceResult, type CaptureSequencePort, type CaptureSequenceMethod } from './capture-sequence.js'
 import { FOCUS_METHODS, parseFocusParams, parseFocusResult, type FocusMethod } from './focus-control.js'
 import { spatialDestination } from './spatial-destination.js'
@@ -10,7 +12,7 @@ import { isMeshNetworkMethod, parseMeshNetworkParams, parseMeshNetworkResult, me
 import { isNameControlMethod, parseNameControlParams, parseNameControlResult, type NameControlParams } from './name-control.js'
 import { parseAgentMuxRelayInspection, type AgentMuxRelayInspection } from './public-rpc-relay-gateway.js'
 import { inspectOwnedName, changeOwnedName, sourceMemberName } from './name-control-owner.js'
-import { AGENT_OPEN_LAUNCH_FIELDS, parseAgentOpenDescribe, parseAgentOpenDescription } from './agent-open-contract.js'
+import { AGENT_OPEN_LAUNCH_FIELDS, parseAgentOpenLaunchFields, parseAgentOpenDescribe, parseAgentOpenDescription } from './agent-open-contract.js'
 import { parseTerminalCreationRetire, parseTerminalCreationInspect, parseTerminalCreationInspection } from './terminal-creation.js'
 import { avatarActorIdentity, isObjectAvatarMethod, parseObjectAvatarParams, parseObjectAvatarResult, parseAvatarActor, type AvatarExecutionContext, type ObjectAvatarMethod, type ObjectAvatarPort } from './object-avatar.js'
 import { SPACE_CLOSE_METHODS, parseSpaceCloseParams, parseSpaceCloseResult, type SpaceCloseMethod, type SpaceCloseActor } from './space-close.js'
@@ -167,7 +169,7 @@ import { readAgentRoleBindings, registerAgentRole, resolveAgentRole } from './ag
 import { DurableAgentMuxMessageQueue, readRoutedInputMailbox, appendGlobalMessage, prepareGlobalMessagePrompt, recordGlobalMessageDelivery,
   recordGlobalMessageDeliveryIssue } from './agent-global-message-queue.js'
 import { assertAgentMessageRouteIntent, type AgentMessageRoute } from './agent-message-route.js'
-import { agentPromptCondition, agentPromptNotApplied, validateAgentPromptCondition, validateAgentPromptInputKey, validateAgentPromptAdmissionIntent } from './agent-prompt-condition.js'
+import { optionalInputEpoch, agentPromptCondition, agentPromptNotApplied, validateAgentPromptCondition, validateAgentPromptInputKey, validateAgentPromptAdmissionIntent } from './agent-prompt-condition.js'
 import { AGENT_INPUT_SUBMIT_FIELDS, agentInputGuidance, parseAgentInputSubmit } from './agent-input-submit.js'
 import { parseAgentInputChangesRead, parseAgentInputChangesPage } from './agent-input-changes.js'
 import { parseAgentInputMailboxRead } from './agent-input-mailbox.js'
@@ -204,7 +206,7 @@ import { parsePostureSet, parsePostureInspect, parsePostureSetResult, parsePostu
 import { parseTerminalTarget, parseTerminalOutputParams, parseTerminalInspection, parseTerminalListParams, parseTerminalListResult } from './terminal-observation.js'
 
 export type AgentMuxRpcCorePort = import('./agent-execution-coordinator.js').AgentExecutionHostPort & Pick<AgentMuxClient,
-  'restartAgent' | 'inspectAgentRestart' | 'inspectAgentStop' | 'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentMessageQueuePath' | 'readAgentSession' | 'readAgentSessions' | 'readAgentSessionHistory' | 'readAgentSessionUsage' | 'inspectAgentSessionRecord' | 'deleteAgentSessionRecord' | 'recordExternalConversationMessage' | 'readAgentConversation' | 'listConversationSnapshots' | 'releaseConversationSnapshot' | 'releaseConversationView' | 'observeConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
+  'restartAgent' | 'inspectAgentRestart' | 'inspectAgentStop' | 'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentMessageQueuePath' | 'readAgentInputEpoch' | 'readAgentSession' | 'readAgentSessions' | 'readAgentSessionHistory' | 'readAgentSessionUsage' | 'inspectAgentSessionRecord' | 'deleteAgentSessionRecord' | 'recordExternalConversationMessage' | 'readAgentConversation' | 'listConversationSnapshots' | 'releaseConversationSnapshot' | 'releaseConversationView' | 'observeConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
   'resolveAgentCreationSessionId' | 'inspectAgentCreation' | 'resolveAgentCreation' | 'continueAgentCreation' | 'recoverTerminal' | 'ensureAgentContinuity' | 'controlAgentContinuity' | 'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
   'inspectAgentExecutionOperation' | 'inspectAgentInteractionOperation' | 'respondAgentInteraction' | 'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'notifyMessages' | 'inspectMessageNotification' | 'inspectAgentPromptSubmission' | 'readAgentInputActivity' | 'startDiscussion' | 'checkDeliveries' |
   'submitAgentPrompt' | 'readAgentInputMailbox' | 'readAgentInputChanges' | 'inspectAgentInput' | 'inspectMoteInput' | 'readAgentInputResource' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' | 'listAgentSpawns' |
@@ -273,6 +275,8 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
   /** Original semantic owner identity; never ctxmux identity or a route alias. */
   diagnosticCoreAuthority?(scope: AgentMuxRpcCoreClient): import('./diagnostic-evidence.js').AgentMuxDiagnosticAuthorityObservation | Promise<import('./diagnostic-evidence.js').AgentMuxDiagnosticAuthorityObservation>
   conversationLandmarks?: ConversationLandmarkStore
+  storageRecovery?: StorageRecoveryPort
+  storageRecoveryExports?: StorageRecoveryExportsPort
   notesStorage?: NotesStoragePort
   notebookStore?: AgentMuxNotebookStore
   notebookObservation?: NotebookObservationPort
@@ -288,6 +292,7 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
   /** Original Host resource reads; editable application settings keep their existing owner. */
   settingsResources?(request: Extract<import('./control.js').AgentMuxControlSettingsResourceRequest,
     { operation: 'settings.resource.list' | 'settings.resource.get' }>): Promise<import('./control.js').AgentMuxControlSettingsResourceResult>
+  goalInputEpoch?(input: import('./goal-input-epoch.js').GoalInputEpochInput, context: AgentMuxRpcCallContext): Promise<import('./goal-input-epoch.js').GoalInputEpoch>
   goalParticipation?: import('./goal-participation.js').GoalParticipationOwner
   goalChanges?: GoalChangePort
   progress?: AgentProgressOwner
@@ -308,6 +313,7 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
   /** Original Host policy over Core-owned spatial creation associations, without a screen. */
   spatialAgentControl?: ((request: AgentMuxControlRequest, context: AgentMuxRpcCallContext) => Promise<AgentMuxControlResult | undefined>) & {
     describe?(): import('./agent-open-contract.js').AgentOpenContracts
+    describeExecution?(input: import('./agent-open-contract.js').AgentOpenExecutionSelector, context: AgentMuxRpcCallContext): Promise<import('./agent-open-contract.js').AgentOpenExecutionDescription>
   }
   /** Read only original host metadata; topology and execution remain with their Core owners. */
   spatialPresentation?(input: { graph: import('./spatial-graph.js').AgentMuxSpatialGraph;
@@ -455,7 +461,8 @@ const NATIVE_FIELDS = {
   'notebook.ls': [], 'notebook.inspect': ['notebookId','noteId','operationId','content','maxBytes'], 'notebook.graph': ['notebookId','noteId','maxBytes'], 'notebook.resolve': ['mode','query','limit','text','select','maxBytes'], 'notebook.apply': ['expectedRevision','operationId','change'],
   'space.folder.register': ['runtimeId','workspaceId','expectedResource','directory'],
   'space.folder.inspect': ['runtimeId','path','expectedResource'],
-  'agent.open.describe': ['expectedRuntimeId'],
+  'goal.input.epoch': ['agentReference','access'],
+  'agent.open.describe': ['expectedRuntimeId','execution','executionOnly'],
   'space.member.call': ['target','call'], 'space.member.watch': ['target','call'],
   'space.sessions.watch': ['reference'],
   'space.link.ensure': ['target','operationId'], 'space.link.resolve': ['address'],
@@ -495,7 +502,7 @@ const NATIVE_FIELDS = {
   'agent.context': ['hostId', 'agentSessionId', 'cursor', 'limit'],
   'agent.interaction.respond': ['agentSessionId', 'expectedRun', 'operationId', 'expectedRequest', 'response', 'externalAction', 'moteSource'],
   'agent.interaction.inspect': ['agentSessionId', 'operationId'],
-  'agent.question.reply': ['agentSessionId', 'source', 'turnId', 'recordId', 'answers', 'operationId', 'expectedRun', 'afterSubmissionId', 'allowUncertainTurn', 'sourceChannel', 'externalAction', 'moteSource'],
+  'agent.question.reply': ['agentSessionId', 'source', 'turnId', 'recordId', 'answers', 'operationId', 'expectedRun', 'afterSubmissionId', 'inputEpoch', 'allowUncertainTurn', 'sourceChannel', 'externalAction', 'moteSource'],
   'agent.history.resource': ['hostId', 'agentSessionId', 'source', 'turnId', 'recordId', 'partIndex', 'expectedReference', 'maxBytes', 'offsetBytes', 'representation'],
   'agent.conversation.record': ['hostId', 'agentSessionId', 'ingressId', 'authoritySource'],
   'agent.conversation.snapshot.ls': ['hostId', 'agentSessionId', 'source', 'after', 'limit'],
@@ -514,10 +521,11 @@ const NATIVE_FIELDS = {
   'agent.reopen': ['agentSessionId', 'expectedRetiredAt', 'operationId', 'args', 'env', 'commandOverride', 'launchOptions', 'cols', 'rows'], 'agent.reopen.check': ['agentSessionId', 'expectedRetiredAt', 'operationId'], 'agent.role.ls': ['workspacePath'],
   'agent.role.register': ['role', 'providerId'], 'agent.role.resolve': ['role', 'workspacePath'],
   'agent.input.changes': ['hostId', 'agentSessionId', 'limit', 'cursor', 'after'],
+  'agent.input.epoch': ['hostId'],
   'agent.input.ls': ['hostId', 'agentSessionId', 'limit', 'cursor', 'maxBytes'],
   'agent.input.submit': AGENT_INPUT_SUBMIT_FIELDS,
   'agent.progress.list': ['target'],
-  'agent.progress.create': ['target','intervalMs','prompt','taskSource','operationId'],
+  'agent.progress.create': ['inputEpoch','target','intervalMs','prompt','taskSource','operationId'],
   'agent.progress.action': ['target','loopId','action','expectedLoop','operationId'],
   'agent.progress.update': ['target','loopId','expectedLoop','intervalMs','prompt','operationId'],
   'agent.automation.pause': ['agentSessionId', 'expectedRun', 'ownerInstanceId', 'operationId'],
@@ -527,8 +535,8 @@ const NATIVE_FIELDS = {
   'agent.input.inspect': ['key', 'kind', 'originalControlOperationId', 'activity'],
   'agent.input.observation': ['agentSessionId','observationId'],
   'agent.input.stop': ['ref', 'cancelOperationId'], 'agent.input.rejoin': ['ref'],
-  'agent.send': ['target', 'text', 'messageId', 'threadId', 'correlationId', 'replyTo', 'operationId', 'execution', 'expectedRun', 'sourceChannel', 'admissionIntent', 'application'],
-  'agent.broadcast': ['operationId', 'recipientSessionIds', 'text', 'sourceChannel'],
+  'agent.send': ['recipientInputEpoch', 'target', 'text', 'messageId', 'threadId', 'correlationId', 'replyTo', 'operationId', 'execution', 'expectedRun', 'sourceChannel', 'admissionIntent', 'application'],
+  'agent.broadcast': ['recipientInputEpochs','operationId', 'recipientSessionIds', 'text', 'sourceChannel'],
   'agent.broadcast.inspect': ['operationId', 'hostId'],
   'agent.discuss': ['executorId', 'providerId', 'text', 'operationId'],
   'agent.takeover.ls': ['expectedRuntimeId', 'direction', 'subject', 'cursor', 'limit'],
@@ -541,7 +549,7 @@ const NATIVE_FIELDS = {
   'app.mobile.report': ['documentId', 'buildId', 'namespaceDigest', 'occurrenceId', 'observedAt', 'observation', 'reporter'],
   'message.delivery.inspect': ['logId', 'hostId'], 'message.delivery.report': ['hostId', 'record'],
   'message.inbox.check': ['limit'], 'message.inbox.ack': ['generation', 'readerRun'],
-  'message.notify': ['operationId', 'messageIds', 'hostId'],
+  'message.notify': ['operationId', 'messageIds', 'hostId','inputEpoch'],
   'message.notify.inspect': ['operationId', 'hostId'],
   'message.read': ['operationId', 'messageId', 'notificationId', 'field', 'cursor', 'maxBytes', 'hostId'],
   'message.ls': ['hostId', 'participantSessionId', 'direction', 'beforeSequence', 'limit'],
@@ -560,7 +568,7 @@ const NATIVE_FIELDS = {
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit'],
   'system.storage': ['hostId', 'runId'], 'system.doctor': ['workspacePath'], 'system.endpoint': [], 'system.relay.inspect': [],
   'system.subscription.cancel': ['subscriptionId']
-} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, FocusMethod | MoteDialogueMethod | CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | AgentPromotionMethod | TopicMethod | ConnectionMethod | ObjectAvatarMethod | TailcatConfigurationMethod | NotesStorageMethod | ProviderCatalogMethod | HostSettingsMethod | MeshNetworkMethod | NodePublishingMethod | NodeLocatorMethod | import('./public-rpc-tailcat-key.js').TailcatKeyMethod | import('./public-rpc-host-maintenance.js').HostMaintenanceMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | ImageMethod | NativeDesktopMethod | keyof typeof HOST_ROUTE_METHODS>, readonly string[]>
+} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, StorageRecoveryMethod | FocusMethod | MoteDialogueMethod | CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | AgentPromotionMethod | TopicMethod | ConnectionMethod | ObjectAvatarMethod | TailcatConfigurationMethod | NotesStorageMethod | ProviderCatalogMethod | HostSettingsMethod | MeshNetworkMethod | NodePublishingMethod | NodeLocatorMethod | import('./public-rpc-tailcat-key.js').TailcatKeyMethod | import('./public-rpc-host-maintenance.js').HostMaintenanceMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | ImageMethod | NativeDesktopMethod | keyof typeof HOST_ROUTE_METHODS>, readonly string[]>
 
 /** Home follows an exact execution route; its display name does not identify that route. */
 function homeHostRoute(configuration: import('./control.js').AgentMuxControlSettingsResourceFields | null) {
@@ -714,13 +722,13 @@ export class AgentMuxRpcService {
       if (executorId !== undefined) throw new AgentMuxError('A fork continues the source Provider; remove --executor.', 'INVALID_CONTROL_REQUEST')
       const native = session.nativeHandle
       if (native?.kind !== 'provider') throw new AgentMuxError('The source native conversation is not confirmed; it cannot be forked. Inspect the Session first.', 'AGENT_FORK_UNSUPPORTED')
-      return { ...rest, content: { kind: 'fork-agent', source: { agentSessionId: session.agentSessionId, expectedRun: { runId: session.run.runId }, expectedNativeHandle: native }, prompt: action.instruction } } as AgentMuxRpcParams<'agent.open'>
+      return { ...rest, content: { kind: 'fork-agent', source: { agentSessionId: session.agentSessionId, expectedRun: { runId: session.run.runId }, expectedNativeHandle: native }, ...parseAgentOpenLaunchFields(request.content), prompt: action.instruction } } as AgentMuxRpcParams<'agent.open'>
     }
     const chosen = executorId ?? action.executorId
     if (!chosen) throw new AgentMuxError('Choose the Agent with --executor; this action has no default Agent.', 'INVALID_CONTROL_REQUEST')
     const prompt = agentDerivedActionPrompt(action, { hostId: owner.hostId, agentSessionId: session.agentSessionId, cwd: session.workspacePath,
       executorId: session.executorId, label: session.agentSessionId, diagnostic: 'Started from the public derived action command; read the complete context for the current state.' })
-    return { ...rest, content: { kind: 'new-agent', executorId: chosen, prompt } } as AgentMuxRpcParams<'agent.open'>
+    return { ...rest, content: { kind: 'new-agent', executorId: chosen, ...parseAgentOpenLaunchFields(request.content), prompt } } as AgentMuxRpcParams<'agent.open'>
   }
   private async spaceMemberRuntime(input: import('./space-member.js').SpaceMemberParams[keyof import('./space-member.js').SpaceMemberParams], context: AgentMuxRpcCallContext) {
     const source = await this.hosted('runtime.owner.identity', { expectedRuntimeId: input.target.reference.runtimeId }, context)
@@ -994,6 +1002,35 @@ export class AgentMuxRpcService {
     context: AgentMuxRpcCallContext = {}): Promise<AgentMuxRpcResult<M>> {
     this.assertExposed(method)
     await assertHostRouteDispatch(context, method, params, false)
+    if (isStorageRecoveryMethod(method)) {
+      if (context.transport !== 'unix' || context.principal?.kind !== 'user' || !context.principal.id || context.caller !== undefined || context.routeDelegation !== undefined)
+        throw new AgentMuxError('Storage recovery requires the original local Unix user without an Agent caller or delegated route.', 'CONTROL_PERMISSION_DENIED')
+      const input = parseStorageRecoveryParams(method, params)
+      context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
+      context.signal?.throwIfAborted()
+      if (method === 'storage.source.capture' || method === 'storage.source.release' || method === 'storage.source.inspect' || method === 'storage.source.prepare' || method === 'storage.source.restore') {
+        const exports = this.ports.storageRecoveryExports
+        if (!exports) throw new AgentMuxError('The original local storage source owner is unavailable. No replacement source was selected.', 'CONTROL_UNAVAILABLE')
+        const captureId = (input as { captureId: string }).captureId
+        const result = method === 'storage.source.inspect' ? await exports.inspect()
+          : method === 'storage.source.capture' ? await exports.capture(captureId)
+          : method === 'storage.source.prepare' ? await exports.prepare(captureId, (input as StorageRecoveryParamsMap['storage.source.prepare']).members)
+          : method === 'storage.source.restore' ? { outcome: await exports.restore((input as StorageRecoveryParamsMap['storage.source.restore']).member) }
+          : await exports.release(captureId)
+        return parseStorageRecoveryResult(method, result, input) as AgentMuxRpcResult<M>
+      }
+      const owner = this.ports.storageRecovery
+      if (!owner) throw new AgentMuxError('The original storage recovery owner is unavailable. Existing Sessions and recovery sources remain retained.', 'CONTROL_UNAVAILABLE')
+      const result = method === 'storage.backup.create' ? { generation: await owner.capture() }
+        : method === 'storage.backup.import' ? { generation: await owner.importSessionBackup(input as { sourcePath: string; sha256: string }) }
+        : method === 'storage.backup.list' ? { generations: await owner.list() }
+        : method === 'storage.backup.inspect' ? { generation: await owner.inspect((input as { generationId: string }).generationId) }
+        : method === 'storage.restore.preflight' ? { operation: await owner.restorePreflight(input as import('./storage-restore.js').RestorePreflight) }
+        : method === 'storage.restore.apply' ? { operation: await owner.restoreApply((input as { operationId: string }).operationId) }
+        : method === 'storage.restore.inspect' ? { operation: await owner.restoreInspect((input as { operationId: string }).operationId) }
+        : { status: owner.status() }
+      return parseStorageRecoveryResult(method, result, input) as AgentMuxRpcResult<M>
+    }
     if (Object.hasOwn(FOCUS_METHODS, method)) {
       const selected = method as FocusMethod, input = parseFocusParams(selected, params)
       await this.authenticated(context)
@@ -1052,6 +1089,14 @@ export class AgentMuxRpcService {
         : await this.localAgentName(method as 'agent.name.inspect' | 'agent.name.change', input, context, nameContext)
       return parseNameControlResult(method, result, input) as AgentMuxRpcResult<M>
     }
+    if (method === 'goal.input.epoch') {
+      const input = parseGoalInputEpochInput(params)
+      await this.authenticated(context)
+      context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
+      if (this.ports.callOriginalCore) return parseGoalInputEpoch(await this.ports.callOriginalCore('local', 'goal.input.epoch', input, context), input) as AgentMuxRpcResult<M>
+      if (!this.ports.goalInputEpoch) throw new AgentMuxError('The original Goal input qualification owner is unavailable. Keep this new request unsubmitted.', 'CONTROL_UNAVAILABLE')
+      return parseGoalInputEpoch(await this.ports.goalInputEpoch(input, context), input) as AgentMuxRpcResult<M>
+    }
     if (method === 'agent.open.describe') {
       const input = parseAgentOpenDescribe(params)
       await this.authenticated(context)
@@ -1059,9 +1104,13 @@ export class AgentMuxRpcService {
       if (this.ports.callOriginalCore) return await this.ports.callOriginalCore('local', 'agent.open.describe', input, context) as AgentMuxRpcResult<M>
       const endpoint = await this.ports.hostedRuntime?.()
       if (!endpoint) throw new AgentMuxError('The original Source launch owner is unconfirmed. Existing requests and healthy Agents remain available.', 'AGENT_OPEN_CONTRACT_UNCONFIRMED')
-      const { owner } = await endpoint.call('runtime.owner.identity', input, context)
-      const contracts = this.ports.spatialAgentControl?.describe?.() ?? { ordinaryLaunch: null, externalAssociation: null, takeover: null }
-      return parseAgentOpenDescription({ source: { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId }, contracts }, input) as AgentMuxRpcResult<M>
+      const { owner } = await endpoint.call('runtime.owner.identity', { expectedRuntimeId: input.expectedRuntimeId }, context)
+      let contracts: import('./agent-open-contract.js').AgentOpenContracts = { ordinaryLaunch: null, externalAssociation: null, takeover: null }
+      let sourceIssue: { code: string; message: string } | undefined
+      if (!input.executionOnly) try { contracts = this.ports.spatialAgentControl?.describe?.() ?? contracts }
+      catch (error) { sourceIssue = { code: error instanceof AgentMuxError ? error.code : 'AGENT_OPEN_CONTRACT_UNCONFIRMED', message: error instanceof Error ? error.message : String(error) } }
+      const execution = input.execution ? await this.ports.spatialAgentControl?.describeExecution?.(input.execution, context) : undefined
+      return parseAgentOpenDescription({ source: { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId }, contracts, ...(execution ? { execution } : {}), ...(sourceIssue ? { sourceIssue } : {}) }, input) as AgentMuxRpcResult<M>
     }
     if (method === 'space.folder.inspect') {
       const input = parseFolderDirectoryInspectInput(params), caller = await this.authenticated(context)
@@ -3708,7 +3757,7 @@ export class AgentMuxRpcService {
         if (owner.client.forwardRpc) { result = { ...await owner.client.forwardRpc('message.notify', { ...p, hostId: 'local' } as AgentMuxRpcParams<'message.notify'>, await this.inputForwardContext(context)), hostId }; break }
         if (!Array.isArray(p.messageIds)) throw new AgentMuxError('Select original Inbox message IDs.', 'INVALID_A2A_NOTIFICATION')
         result = { ...await owner.client.notifyMessages({ operationId: rpcString(p.operationId, 'Notification operation ID'),
-          messageIds: p.messageIds.map(id => rpcString(id, 'Original message ID')), ...auth }, this.inputCallContext(context)), hostId }
+          messageIds: p.messageIds.map(id => rpcString(id, 'Original message ID')), ...optionalInputEpoch(p.inputEpoch), ...auth }, this.inputCallContext(context)), hostId }
         break
       }
       case 'agent.broadcast.inspect': case 'message.read': case 'message.ls': case 'message.events': case 'message.dispatch.read': case 'message.dispatch.ls': {
@@ -3832,6 +3881,19 @@ export class AgentMuxRpcService {
           const { hostId: _sourceRoute, ...page } = forwarded
           result = { ...parseAgentInputChangesPage(page, input), hostId }
         } else result = { ...await client.readAgentInputChanges(input, caller ? { agentSessionId: caller.agentSessionId, capability: caller.capability } : undefined), hostId }
+        break
+      }
+      case 'agent.input.epoch': {
+        const hostId = rpcString(p.hostId, 'Original input Host ID')
+        if (caller && caller.hostId !== hostId || !caller && (!context.principal || !['user','device'].includes(context.principal.kind))) throw new AgentMuxError('Input namespace reading requires its original Host and an authenticated caller.', 'CONTROL_PERMISSION_DENIED')
+        const scopes=(caller ? [caller] : await this.clients()).filter(scope=>scope.hostId===hostId)
+        if(scopes.length!==1 || this.endpointUnverified(scopes[0]!.client)) throw new AgentMuxError('The original input namespace Host is unavailable or ambiguous.', 'CONTROL_UNAVAILABLE')
+        const client=scopes[0]!.client
+        if(client.forwardRpc) {
+          const read=await client.forwardRpc('agent.input.epoch',{hostId:'local'},context)
+          if(read.hostId!=='local') throw new AgentMuxError('The original input namespace Host response changed.', 'CONTROL_PROTOCOL_ERROR')
+          result={hostId,inputEpoch:read.inputEpoch}
+        } else result={hostId,inputEpoch:await client.readAgentInputEpoch() ?? null}
         break
       }
       case 'agent.input.ls': {
@@ -4224,7 +4286,7 @@ export class AgentMuxRpcService {
       const created=await owners[0]!.client.inspectAgentCreation(record.agentSessionId)
       if(created.kind!=='agent'||created.creation?.createOperationId!==record.requestId)throw new AgentMuxError('The original created Main is unconfirmed. Its Query is retained.','CONTROL_UNAVAILABLE')
       const key=await this.spatial.claimMoteMainInput(record.requestId,field,{kind:'prompt',agentSessionId:record.agentSessionId,expectedRun:created.run,submissionId:body.operationId})
-      return await this.moteMainInput('space.mote.dialogue.input.submit',{target:intent.target,expectedRoleRevision:moteMainBindingDefaults(record).conversationRevision!,input:{...body,agentSessionId:key.agentSessionId,expectedRun:key.expectedRun,admissionIntent:{kind:'session-conversation'},execution:'immediate'}},context)
+      return await this.moteMainInput('space.mote.dialogue.input.submit',{target:intent.target,expectedRoleRevision:moteMainBindingDefaults(record).conversationRevision!,input:{...body,...optionalInputEpoch(record.execution.inputEpoch),agentSessionId:key.agentSessionId,expectedRun:key.expectedRun,admissionIntent:{kind:'session-conversation'},execution:'immediate'}},context)
     }
     const retainIssue = (cause: unknown) => { result.issue=[result.issue,cause instanceof Error?cause.message:String(cause)].filter(Boolean).join('\n') }
     if(intent.handover&&intent.baseline.defaults.conversation) {
@@ -4544,6 +4606,7 @@ export class AgentMuxRpcService {
     if (caller && caller.client !== owner.client) {
       const { packet } = await caller.client.prepareFederatedMessage({ caller: { agentSessionId: caller.agentSessionId, capability: caller.capability },
         ...(route.targetKeyFingerprint === undefined ? {} : { targetKeyFingerprint: route.targetKeyFingerprint }),
+        ...(route.recipientInputEpoch===undefined?{}:{recipientInputEpoch:route.recipientInputEpoch}),
         target: { runtimeId: route.runtimeId!, agentSessionId: route.agentSessionId, runId: route.expectedRun.runId }, text: rpcText(p.text, 'Message text'), operationId: route.operationId, messageId: route.messageId,
         ...(p.application === undefined ? {} : { application: parseMessageApplication(p.application) }),
         ...(p.threadId === undefined ? {} : { threadId: rpcString(p.threadId, 'Thread ID') }), ...(p.correlationId === undefined ? {} : { correlationId: rpcString(p.correlationId, 'Correlation ID') }),
@@ -4553,7 +4616,7 @@ export class AgentMuxRpcService {
       return receipt
     }
     return await owner.client.forwardRpc!('agent.send', { ...p, operationId: route.operationId, messageId: route.messageId,
-      expectedRun: route.expectedRun, target: { kind: 'agent-session', agentSessionId: route.agentSessionId } } as AgentMuxRpcParams<'agent.send'>,
+      recipientInputEpoch:route.recipientInputEpoch, expectedRun: route.expectedRun, target: { kind: 'agent-session', agentSessionId: route.agentSessionId } } as AgentMuxRpcParams<'agent.send'>,
     await this.inputForwardContext(context))
   }
   private async broadcast(p: Record<string, unknown>, caller: Awaited<ReturnType<AgentMuxRpcService['authenticated']>>, context: AgentMuxRpcCallContext) {
@@ -4575,7 +4638,7 @@ export class AgentMuxRpcService {
       },
       send: async (intent, target) => this.send({ target: { kind: 'agent-session', agentSessionId: target.agentSessionId },
         text: intent.body, operationId: target.operationId, messageId: target.messageId,
-        expectedRun: { runId: target.runId }, sourceChannel: intent.sourceChannel }, owner, context)
+        recipientInputEpoch:target.recipientInputEpoch, expectedRun: { runId: target.runId }, sourceChannel: intent.sourceChannel }, owner, context)
     })
   }
 
@@ -4588,6 +4651,7 @@ export class AgentMuxRpcService {
       if (p.execution !== undefined && p.execution !== 'default' || p.admissionIntent !== undefined) throw new AgentMuxError('A signed remote reply retains its original Inbox execution.', 'INVALID_CONTROL_REQUEST')
       const prepared = await owner.client.prepareFederatedMessage({ caller: { agentSessionId: owner.agentSessionId, capability: owner.capability },
         ...(p.expectedRun === undefined ? {} : { expectedRun: { runId: rpcString(rpcRecord(p.expectedRun, ['runId']).runId, 'Expected recipient Run') } }),
+        ...(p.recipientInputEpoch===undefined?{}:{recipientInputEpoch:optionalInputEpoch(p.recipientInputEpoch).inputEpoch}),
         replySourceMessageId: rpcString(target.sourceMessageId, 'Original reply source'), text: rpcText(p.text, 'Message text'), operationId, messageId,
         ...(p.application === undefined ? {} : { application: parseMessageApplication(p.application) }),
         ...(p.threadId === undefined ? {} : { threadId: rpcString(p.threadId, 'Thread ID') }),
@@ -4613,7 +4677,7 @@ export class AgentMuxRpcService {
     const intentDigest = createHash('sha256').update(JSON.stringify({ text, execution, sourceChannel, sourceDevice,
       sender: caller ? { hostId: caller.hostId, agentSessionId: caller.agentSessionId, runId: caller.session.run.runId } : null,
       principal: caller ? null : context.principal ?? null,
-      threadId, correlationId, replyTo,
+      threadId, correlationId, replyTo, ...(p.recipientInputEpoch===undefined?{}:{recipientInputEpoch:p.recipientInputEpoch}),
       admissionIntent: addressed ?? null, application: p.application === undefined ? null : parseMessageApplication(p.application) })).digest('hex')
     const routes = await this.messageRouteJournal()
     const routed = await routes.readMessageRoute(operationId, messageId)
@@ -4691,6 +4755,7 @@ export class AgentMuxRpcService {
       const route = await routes.claimMessageRoute({ operationId, messageId, hostId: recipientOwner.hostId,
         ...(messageAuthority ? { targetKeyFingerprint: messageAuthority.fingerprint } : {}),
         runtimeId: recipientOwner.client.runtimeOwnerIdentity?.()?.runtimeId ?? null,
+        ...(p.recipientInputEpoch===undefined?{}:{recipientInputEpoch:optionalInputEpoch(p.recipientInputEpoch).inputEpoch}),
         agentSessionId: recipientId, expectedRun: { ...recipientOwner.session.run },
         target: target as AgentMuxRpcParams<'agent.send'>['target'], intentDigest })
       if (expectedRun && expectedRun.runId !== route.expectedRun.runId) throw new AgentMuxError('Expected Run conflicts with the first concurrent message route.', 'MESSAGE_RECIPIENT_MISMATCH')
@@ -4705,7 +4770,7 @@ export class AgentMuxRpcService {
     if (referenceIntake && terminalManual) throw new AgentMuxError(
       'The original Inbox intake cannot be changed into direct input. Use message.notify for its retained references.',
       'AGENT_PROMPT_OPERATION_CONFLICT', undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
-    const directIntent = addressed ?? { kind: 'manual-actor' as const, expectedRun: { ...durable.run } }
+    const directIntent = addressed ?? { kind: 'manual-actor' as const, expectedRun: { ...durable.run },...optionalInputEpoch(p.recipientInputEpoch) }
     if (original?.admissionIntent && addressed && !isDeepStrictEqual(original.admissionIntent, addressed)) throw new AgentMuxError('The original native target cannot be changed by a retry.', 'AGENT_PROMPT_OPERATION_CONFLICT')
     // A new direct producer saves its exact durable target before requiring a
     // Runtime connection. Catalog selects a contract, never Native readiness.
@@ -4718,7 +4783,8 @@ export class AgentMuxRpcService {
       recipient: { kind: 'agent-session' as const, agentSessionId: recipientId },
       threadId, correlationId, replyTo, workspaceId: null,
       senderSessionId: caller?.agentSessionId ?? null, senderRunId: original ? original.envelope.senderRunId : caller?.session.run.runId ?? null,
-      recipientSessionId: recipientId, recipientRunId: original ? original.envelope.recipientRunId : recipient.run.runId, body: text, ...(p.application === undefined ? {} : { application: parseMessageApplication(p.application) }) }
+      recipientSessionId: recipientId, recipientRunId: original ? original.envelope.recipientRunId : recipient.run.runId,
+      ...(p.recipientInputEpoch===undefined?{}:{recipientInputEpoch:optionalInputEpoch(p.recipientInputEpoch).inputEpoch}), body: text, ...(p.application === undefined ? {} : { application: parseMessageApplication(p.application) }) }
     // Both participant bindings came from their current Core owners. Public
     // inputs cannot supply sender or Run facts; rechecking a cached registry here
     // would reject a valid capability rotation or a recipient on another Host.

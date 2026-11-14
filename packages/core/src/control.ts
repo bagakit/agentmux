@@ -441,7 +441,7 @@ export type AgentMuxControlInterruptRequest = RequestBase & {
   operation: 'interrupt'; target: AgentMuxSessionSelector; caller?: AgentMuxControlCaller
 }
 export type AgentMuxControlResumeRequest = RequestBase & {
-  operation: 'resume'; target: AgentMuxSessionSelector; text: string; caller?: AgentMuxControlCaller
+  operation: 'resume'; target: AgentMuxSessionSelector; text: string; inputEpoch?: string; caller?: AgentMuxControlCaller
 }
 export type AgentMuxControlStopRequest = RequestBase & { operation: 'stop'; caller?: AgentMuxControlCaller } & (
   | { target: AgentMuxSessionSelector; expectedRun?: never }
@@ -545,6 +545,7 @@ export type AgentMuxControlGoalConfirmRequest = RequestBase & { operation: 'dema
 export type AgentMuxControlGoalAcceptRequest = RequestBase & { operation: 'demand.accept'; demandId: string; expectedAlignmentRevision: number; expectedSubmissionId: string; acceptGaps: boolean; finish?: boolean }
 export type AgentMuxControlDemandAssignRequest = RequestBase & {
   operation: 'demand.assign'
+  inputEpoch?: string
   relationAccess?: GoalRelationAccess[]
   demandId: string
   sessionId?: string
@@ -556,6 +557,7 @@ export type AgentMuxControlDemandAssignRequest = RequestBase & {
 }
 type GoalStartRequestBase = RequestBase & {
   operation: 'demand.start'
+  inputEpoch?: string
   demandId: string
   expectedUpdatedAt?: number
   caller?: AgentMuxControlCaller

@@ -123,7 +123,7 @@ async function confirmOriginalIncarnation(path: string, incarnation: string): Pr
 
 function validate(db: DatabaseSync, acknowledged: string | null): string {
   if (db.prepare('PRAGMA application_id').get()?.application_id !== applicationId ||
-    ![1, 2].includes(Number(db.prepare('PRAGMA user_version').get()?.user_version))) throw new Error('Not an AgentMux Session database.')
+    ![1, 2, 3].includes(Number(db.prepare('PRAGMA user_version').get()?.user_version))) throw new Error('Not an AgentMux Session database.')
   const incarnation = db.prepare('SELECT incarnation FROM identity').get()?.incarnation
   if (typeof incarnation !== 'string' || acknowledged !== null && acknowledged !== incarnation) {
     throw new Error('The acknowledged Session database identity changed. Restore its original file; no facts have been re-imported.')

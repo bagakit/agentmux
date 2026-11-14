@@ -15,11 +15,12 @@ import { decodePreparedRun, type PreparedRun } from './prepared-run.js'
 import { parseCreationRuntime, type AgentMuxCreationRuntime } from './terminal-creation-retirement.js'
 import { rpcRecord } from './rpc-data.js'
 import { parseAgentToolExecutionBinding } from './agent-tool-execution.js'
+import { readInputNamespace } from './agent-input-epoch.js'
 import { mintObjectId } from './object-id.js'
 import { parseAgentExternalInteractionAuthor } from './external-author.js'
 import { parseAgentContinuityControlReceipts, type AgentMuxContinuityControlReceipt } from './agent-session-recovery/control-contract.js'
 import { normalizeAgentContinuityOperation, normalizeAgentContinuityLaunchInput, normalizeAgentContinuityPolicy, type AgentMuxContinuityOperation } from './agent-session-recovery/continuity-contract.js'
-import { agentPromptInputId, validateAgentPromptInputKey } from './agent-prompt-condition.js'
+import { agentPromptInputId, validateAgentPromptInputKey, optionalInputEpoch, assertAgentInputEpoch } from './agent-prompt-condition.js'
 import { MAX_STORED_TEXT_BYTES, parsePromptSubmissionRecord, normalizePromptCompletionAdmission, terminalPromptSubmission, terminalPromptReadinessSource, mergePtyPromptRecord } from './prompt-submission-record.js'
 export { parsePromptSubmissionRecord, normalizePromptCompletionAdmission } from './prompt-submission-record.js'
 import { normalizeOperationDevice } from './operation-device.js'
@@ -35,7 +36,7 @@ import { agentSpawnIndexes, agentSpawnPage, parseAgentSpawnQuery, readAgentSpawn
 import { assertCurrentAgentCapabilityBinding, type AgentCapabilityBinding } from './agent-capability.js'
 import { agentActivityTimelineItem } from './agent-activity-state.js'
 import { createHash } from 'node:crypto'
-import { mkdir, open, readFile, unlink } from 'node:fs/promises'
+import { chmod, mkdir, open, readFile, unlink } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
@@ -43,6 +44,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { openSessionDatabase, initializeLegacyClosedCreationSchema, promptAdmissionSchema, promptSubmissionIndexSchema, retiredCreationIndexSchema, readCurrentSessionDatabase, syncSessionDatabase } from './agent-session-database.js'
 import { defaultAgentMuxStateDirectory } from './runtime-paths.js'
 import { durableWriteFile, DurableWriteError } from './durable-write.js'
+import { requireRecoverySpace, restoreMissingRecoveryFile, type RecoveryGap, type RecoverySourceMember, type RecoveryRestoreMember } from './storage-recovery.js'
 import { normalizeAgentInteractionResponse } from './agent-interaction.js'
 import { canonicalHookLifecycleEvent, isAgentHookLifecycleEvent } from './agent-hook-event.js'
 import { parseAgentRestartInput, type AgentMuxAgentRestartInput } from './agent-session-recovery/restart-contract.js'
@@ -318,6 +320,9 @@ function retainedExecutionDirectories(sessions: readonly AgentMuxStoredAgentSess
 }
 
 export type AgentMuxAgentSessionStore = {
+  /** Original namespace cut, independent of whether a new SID already exists. */
+  readInputEpoch(): Promise<string | undefined>
+
   /** Exact active/retired Run ownership, including preceding admitted binding writes. */
   hasAgentRun(run: AgentMuxRunRef): Promise<boolean>
   /** Cold Files mutation admission; distinct paths from the original metadata owner. */
@@ -671,6 +676,15 @@ function reservationNativeCreationKeys(reservation: AgentMuxLifecycleReservation
 function ordinaryNativeCreationKeys(current:AgentMuxStoredAgentSession|null|undefined,next:AgentMuxStoredAgentSession):AgentMuxStoredAgentSession {
   const {nativeCreationKeys:_untrusted,...rest}=next
   return {...rest,...(current?.nativeCreationKeys?{nativeCreationKeys:current.nativeCreationKeys}:{})}
+}
+function ordinaryInputEpoch(current: AgentMuxStoredAgentSession | null | undefined, next: AgentMuxStoredAgentSession): AgentMuxStoredAgentSession {
+  if (!current) return next // A new embedding-owned record can retain its original, stricter cut.
+  if (!current?.inputEpoch) {
+    if (next.inputEpoch !== undefined || next.inputRestoration !== undefined) throw new AgentMuxError('Only the original recovery preparation owner can advance the input cut.', 'INVALID_AGENT_SESSION_STORE')
+    return next
+  }
+  if (next.inputEpoch !== undefined && next.inputEpoch !== current.inputEpoch || next.inputRestoration !== undefined && !isDeepStrictEqual(next.inputRestoration, current.inputRestoration)) throw new AgentMuxError('Ordinary Session updates cannot change the restored input cut.', 'INVALID_AGENT_SESSION_STORE')
+  return { ...next, inputEpoch: current.inputEpoch, ...(current.inputRestoration ? { inputRestoration: current.inputRestoration } : {}) }
 }
 function committedNativeCreationKeys(reservation:AgentMuxLifecycleReservation,current?:AgentMuxStoredAgentSession):NativeCreationKeys {
   return reservation.nativeCreationKeys??appendNativeCreationKeys({keys:current?.nativeCreationKeys?.keys??[],coverage:'partial'},reservation.kind==='stop'?(reservation.supersededResume?[reservation.supersededResume.lifecycleOperationId]:[]):[reservation.operationId])
@@ -1136,7 +1150,7 @@ function assertRetiredAgentSessions(
 function normalizeInitialInput(value: unknown, agentSessionId: string): NonNullable<AgentMuxStoredAgentSession['initialInput']> {
   const p = record(value, 'initialInput'), input = record(p.input, 'initialInput.input'), message = record(p.message, 'initialInput.message')
   const body = (value: unknown) => typeof value === 'string' && value.length > 0 && Buffer.byteLength(value) <= MAX_STORED_TEXT_BYTES
-  if (Object.keys(p).some(key => !['input', 'prompt', 'message', 'digest', 'delivery', 'lifecycleOperationId', 'launchPlan', 'state', 'key', 'receipt'].includes(key)) ||
+  if (Object.keys(p).some(key => !['inputEpoch', 'input', 'prompt', 'message', 'digest', 'delivery', 'lifecycleOperationId', 'launchPlan', 'state', 'key', 'receipt'].includes(key)) ||
       Object.keys(input).some(key => !['submissionId', 'prompt'].includes(key)) ||
       Object.keys(message).some(key => !['userContent', 'systemContext', 'authorAgentSessionId'].includes(key)) ||
       typeof input.prompt !== 'string' || Buffer.byteLength(input.prompt) > MAX_STORED_TEXT_BYTES ||
@@ -1883,7 +1897,7 @@ function assertLifecycleCommit(
     throw new AgentMuxError('Lifecycle commit does not match its Agent Session.', 'INVALID_AGENT_SESSION_STORE')
   }
   if (reservation.kind === 'create' && reservation.preparedCreation) {
-    const { nativeCreationKeys: _privateNativeKeys, run, retiredRuns, creation, terminalPromptReadiness, initialInput, ...actual } = next
+    const { nativeCreationKeys: _privateNativeKeys, inputEpoch: _epoch, inputRestoration: _restoration, run, retiredRuns, creation, terminalPromptReadiness, initialInput, ...actual } = next
     const { creation: intended, initialInput: preparedInput, ...prepared } = reservation.preparedCreation
     const { createdRun, initialInputKey, resolution, ...creationIntent } = creation!
     if (!isDeepStrictEqual(resolution, reservation.creationResolution ? { ...reservation.creationResolution.receipt, outcome: 'retained', retainedRun: next.run } : undefined)) throw new AgentMuxError('Creation commit must preserve its exact admitted resolution and input hold.', 'AGENT_CREATION_RESOLUTION_CONFLICT')
@@ -1976,6 +1990,8 @@ type MemoryCapturedHistory = { stream: AgentCapturedTimelinePage['stream'];
   versions: AgentCapturedTimelinePage['records']; retirementAfterSequence?: number }
 
 export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStore {
+  async readInputEpoch(): Promise<string | undefined> { return undefined }
+
   private readonly closedCreations = new Map<string, AgentMuxClosedCreation>()
   private readonly sessionRunIds = new Set<string>()
   private retiredRunIds = new Set<string>()
@@ -2229,7 +2245,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     if (reservation && (!next || !expected || next.run.runId !== expected.run.runId)) throw new AgentMuxError('Agent Session has a lifecycle operation in progress.', 'AGENT_SESSION_BUSY')
     assertLifecycleReceiptFence(reservation, current, next)
     if (!next) return this.stageSession(id, null)
-    const normalized = normalizeStoredAgentSession(ordinaryNativeCreationKeys(current,agentSessionMetadata(next)))
+    const normalized = normalizeStoredAgentSession(ordinaryInputEpoch(current, ordinaryNativeCreationKeys(current,agentSessionMetadata(next))))
     assertInitialInputWrite(current, normalized)
     const values = [...this.sessions.values()].filter(session => session.agentSessionId !== id).map(agentSessionMetadata)
     const all = normalizeAgentSessions([...values, normalized])
@@ -2605,7 +2621,9 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
       this.retiredAgentSessions
     )
     const previous = this.sessions.get(reservation.agentSessionId)
-    const normalized = next ? normalizeStoredAgentSession({...preserveContinuityOperations(previous, next, currentReservation.kind === 'resume' ? currentReservation.resolution?.receipt.originalOperationId : undefined),nativeCreationKeys:committedNativeCreationKeys(currentReservation,previous)}) : null
+    const history = currentReservation.kind === 'reopen' ? currentReservation.expectedRetirement.history : undefined
+    const epochOwner = previous ?? (next && history ? { ...next, ...optionalInputEpoch(history.inputEpoch), ...(history.inputRestoration ? { inputRestoration: history.inputRestoration } : {}) } : undefined)
+    const normalized = next ? normalizeStoredAgentSession(ordinaryInputEpoch(epochOwner, {...preserveContinuityOperations(previous, next, currentReservation.kind === 'resume' ? currentReservation.resolution?.receipt.originalOperationId : undefined),nativeCreationKeys:committedNativeCreationKeys(currentReservation,previous)})) : null
     assertLifecycleReceiptFence(currentReservation, previous ?? null, normalized, true)
     assertLifecycleCommit(currentReservation, normalized)
     const values = [...this.sessions.values()].filter(
@@ -2870,6 +2888,39 @@ function sessionRuns(...values: Array<AgentMuxStoredAgentSession | null>): Agent
 }
 
 export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore {
+  async readInputEpoch(): Promise<string | undefined> {
+    await this.tail
+    return await this.withReadDatabase(db => readInputNamespace(db).inputEpoch, () => undefined)
+  }
+
+  /** Apply-only maintenance on this original namespace; no Session/ACK replacement or business input. */
+  async admitRecoveryInputCut(input: {operationId:string;sourceSHA256:string}) {
+    const helpers=await import('./session-input-restoration.js')
+    const ids=(await this.loadMetadata()).map(session=>session.agentSessionId).sort()
+    let result: {state:'admitted';inputEpoch:string;heldInitialInputs:number;heldFutureIntents:number}|{state:'unavailable';selectors:import('./session-input-restoration.js').RestoredInputSelector[]}|undefined
+    const execute=async()=>{await this.enqueue(async()=>{
+      const currentIds=this.db.prepare('SELECT id FROM sessions ORDER BY id').all().map(row=>String(row.id))
+      if(!isDeepStrictEqual(ids,currentIds))throw new AgentMuxError('The original input owners changed before cut admission. Retry this same operation.', 'STORAGE_RECOVERY_INPUT_CUT_UNCONFIRMED')
+      const namespace=helpers.recoveryInputNamespace(String(this.db.prepare('SELECT incarnation FROM identity').get()!.incarnation),input.operationId,input.sourceSHA256)
+      const current=readInputNamespace(this.db)
+      if(current.inputEpoch===namespace.inputEpoch){this.dirty=true;result={state:'admitted',inputEpoch:namespace.inputEpoch,heldInitialInputs:0,heldFutureIntents:0};return}
+      const selectors=helpers.sessionInputRestoreSelectors(this.db)
+      if(selectors.length){result={state:'unavailable',selectors};return}
+      const held=helpers.holdSessionInputRestore(this.db,namespace);this.dirty=true
+      result={state:'admitted',inputEpoch:namespace.inputEpoch,...held}
+    },undefined,CROSS_SESSION_WRITE)}
+    // The same original prompt locks fence in-flight Native admissions; never hold the Store writer while waiting for them.
+    const locked=async(index:number):Promise<void>=>index===ids.length?execute():this.withPromptSubmission(ids[index]!,()=>locked(index+1))
+    await locked(0)
+    return result!
+  }
+
+  /** Prepare only an isolated original snapshot; never open or mutate this live owner. */
+  async prepareRecoveryRestore(input: import('./session-input-restoration.js').SessionInputRestorePreparation) {
+    const { prepareSessionInputRestore } = await import('./session-input-restoration.js')
+    return await prepareSessionInputRestore(this.path, input)
+  }
+
   /** Pending original writes only, never ownership or receipt facts. */
   private readonly runBindingWrites = new Map<string, Set<Promise<unknown>>>()
 
@@ -2994,6 +3045,88 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   }
 
   constructor(readonly path = defaultAgentMuxAgentSessionStorePath()) {}
+
+  private readonly durableChangeObservers = new Set<() => void>()
+  /** Background maintenance observes accepted changes without joining the writer's ACK. */
+  observeDurableChanges(changed: () => void): () => void {
+    this.durableChangeObservers.add(changed); return () => this.durableChangeObservers.delete(changed)
+  }
+
+  /** Open the original identity under its lock; SQLite's online backup owns the later consistent cut. */
+  async captureRecovery(directory: string): Promise<{ revision: string; members: RecoverySourceMember[]; gaps: RecoveryGap[] }> {
+    await this.tail
+    const release = await this.acquireLock(), members: RecoverySourceMember[] = []
+    let db: DatabaseSync | null = null, incarnation: string
+    try {
+      db = await readCurrentSessionDatabase(this.path, { readOnly: true })
+      if (!db) throw new AgentMuxError('The original Session database has not been initialized; no empty backup was substituted.', 'RECOVERY_SOURCE_UNAVAILABLE')
+      incarnation = String(db.prepare('SELECT incarnation FROM identity').get()!.incarnation)
+    } catch (error) { db?.close(); throw error }
+    finally { await release() }
+    // Do not hold a read transaction or the original writer flock across slow
+    // backup/fsync. SQLite backup steps yield to current writers and restart
+    // their own snapshot as needed, without replaying a business mutation.
+    try {
+        const { backup } = await import('node:sqlite')
+        await mkdir(directory, { recursive: true, mode: 0o700 })
+        const file = join(directory, 'database.sqlite')
+        const bytes = BigInt(Number(db!.prepare('PRAGMA page_size').get()!.page_size)) * BigInt(Number(db!.prepare('PRAGMA page_count').get()!.page_count))
+        await requireRecoverySpace(directory, bytes)
+        await backup(db!, file)
+        await chmod(file, 0o600)
+        await syncSessionDatabase(file)
+        const verified = await readCurrentSessionDatabase(file, { readOnly: true })
+        try { if (!verified || verified.prepare('PRAGMA quick_check').get()?.quick_check !== 'ok' || verified.prepare('SELECT incarnation FROM identity').get()?.incarnation !== incarnation)
+          throw new Error('The Session recovery snapshot failed its original identity/integrity check.') }
+        finally { verified?.close() }
+        members.push({ id: 'database', file, target: this.path, kind: 'session-database', capturedAt: Date.now() })
+    } finally { db!.close() }
+      // The marker is the same immutable incarnation, captured at this SQLite cut.
+      for (const [id, suffix] of [['incarnation', '.sqlite-identity'], ['incarnation-original', '.sqlite-identity.original']] as const) {
+        const file = join(directory, id)
+        await durableWriteFile(file, incarnation, { mode: 0o600, requireDirectorySync: true })
+        members.push({ id, file, target: this.path + suffix, kind: 'file', capturedAt: Date.now() })
+      }
+    return { revision: incarnation, members, gaps: [] }
+  }
+
+  /** Restore only absent physical members, never replace a live or newer catalog. */
+  async previewRecoveryPromptAdmission(source: AgentPromptSubmissionRecord): Promise<{ current: AgentPromptSubmissionRecord; next: AgentPromptSubmissionRecord }> {
+    const id = source.admission?.submissionId ?? source.terminalPromptSubmission?.submissionId ?? source.admission?.operationId
+    if (!id) throw new AgentMuxError('The retained input has no original claim identity.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+    const current = await this.readPromptAdmission(source.agentSessionId, source.run, id)
+    if (!current) throw new AgentMuxError('The current original input claim is unavailable. No new claim was manufactured.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+    const next = structuredClone(source)
+    assertPromptRecordWrite(current, next, true); assertPromptSettlement(current, next)
+    return { current, next }
+  }
+
+  async restoreRecoveryMember(member: RecoveryRestoreMember): Promise<'restored' | 'same' | 'conflict'> {
+    const targets: Record<string, string> = { database: this.path, incarnation: this.path + '.sqlite-identity', 'incarnation-original': this.path + '.sqlite-identity.original' }
+    if (targets[member.id] !== member.target || member.kind !== (member.id === 'database' ? 'session-database' : 'file')) throw new AgentMuxError('The Session recovery member targets another original owner or format.', 'STORAGE_RECOVERY_INVALID')
+    await this.tail
+    const release = await this.acquireLock()
+    try {
+      if (member.kind === 'session-database') {
+        const source = await readCurrentSessionDatabase(member.file, { readOnly: true })
+        if (!source) throw new AgentMuxError('The original recovery database is unavailable.', 'STORAGE_RECOVERY_INVALID')
+        let incarnation: string
+        try { incarnation = String(source.prepare('SELECT incarnation FROM identity').get()!.incarnation) } finally { source.close() }
+        for (const suffix of ['.sqlite-identity', '.sqlite-identity.original']) {
+          try { if (await readFile(this.path + suffix, 'utf8') !== incarnation) return 'conflict' }
+          catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+        }
+      } else {
+        const sourceIncarnation = await readFile(member.file, 'utf8')
+        const current = await readCurrentSessionDatabase(this.path, { readOnly: true })
+        if (current) try { if (String(current.prepare('SELECT incarnation FROM identity').get()?.incarnation) !== sourceIncarnation) return 'conflict' } finally { current.close() }
+        const counterpart = member.id === 'incarnation' ? this.path + '.sqlite-identity.original' : this.path + '.sqlite-identity'
+        try { if (await readFile(counterpart, 'utf8') !== sourceIncarnation) return 'conflict' }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+      }
+      return await restoreMissingRecoveryFile(member.file, member.target, member.sha256)
+    } finally { await release() }
+  }
 
   async withPromptSubmission<T>(agentSessionId: string, operation: () => Promise<T>): Promise<T> {
     string(agentSessionId, 'agentSessionId')
@@ -3130,6 +3263,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
 
   async settlePromptAdmission(expected: AgentPromptSubmissionRecord, next: AgentPromptSubmissionRecord, signal?: AbortSignal): Promise<void> {
     expected = structuredClone(expected); next = structuredClone(next)
+    // This existing input claim does not create or consume the creation namespace.
     await this.enqueue(async () => {
       const id = expected.admission?.submissionId ?? expected.terminalPromptSubmission?.submissionId ?? expected.admission?.operationId
       if (!id) throw new AgentMuxError('The original input has no retained settlement identity.', 'AGENT_PROMPT_OPERATION_CONFLICT')
@@ -3143,7 +3277,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       }
       this.savePromptAdmission(this.db, next, true)
       this.dirty = true
-    }, signal, expected.agentSessionId)
+    }, signal, expected.agentSessionId, undefined, false)
   }
 
   async readHistorySource(agentSessionId: string, signal?: AbortSignal): Promise<AgentSessionHistoryDescriptor | null> {
@@ -3435,7 +3569,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     assertLifecycleReceiptFence(reservation, current, next)
     if (future && !isDeepStrictEqual(this.futureIntent(this.db, id, future.intentId), future.expected)) throw new AgentMuxError('The exact future intent changed before admission.', 'AGENT_FUTURE_INTENT_CHANGED')
     if (next) {
-      const normalized = normalizeStoredAgentSession(ordinaryNativeCreationKeys(current,complete ? next : agentSessionMetadata(next)))
+      const normalized = normalizeStoredAgentSession(ordinaryInputEpoch(current, ordinaryNativeCreationKeys(current,complete ? next : agentSessionMetadata(next))))
       assertInitialInputWrite(current, normalized)
       this.saveSession(this.db, normalized, complete)
     }
@@ -4185,6 +4319,11 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     const metadata = this.sessionMetadata(db, id)
     if (!metadata) throw new AgentMuxError('Future intent has no current Session owner.', 'STALE_AGENT_SESSION')
     const intent = normalizeStoredAgentSession({ ...metadata, futurePromptIntents: { [change.intentId]: change.next } }).futurePromptIntents![change.intentId]!
+    if(intent.active&&!isDeepStrictEqual(change.expected,intent)){
+      let namespace:ReturnType<typeof readInputNamespace>
+      try{namespace=readInputNamespace(db)}catch{throw new AgentMuxError('The original future input namespace is unconfirmed. Keep its recipe and inspect the original owner.','AGENT_PROMPT_INPUT_UNCONFIRMED','unknown')}
+      assertAgentInputEpoch(namespace.inputEpoch?{...metadata,...namespace}:metadata,intent)
+    }
     const existing = db.prepare('SELECT ordinal FROM future_intents WHERE session_id=? AND intent_id=?').get(id, change.intentId)
     const ordinal = existing ? Number(existing.ordinal) : Number(db.prepare('SELECT COALESCE(MAX(ordinal),0)+1 AS next FROM future_intents WHERE session_id=?').get(id)!.next)
     db.prepare('INSERT INTO future_intents VALUES (?, ?, ?, ?) ON CONFLICT(session_id,intent_id) DO UPDATE SET json=excluded.json')
@@ -4199,8 +4338,12 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     const original = row ? JSON.parse(String(row.json)) as AgentPromptSubmissionRecord : undefined
     if (isDeepStrictEqual(original, value)) return
     assertPromptRecordWrite(original, value, receipt)
+    // Keep the original stored receipt order; the parser's read projection is
+    // also hashed by already-admitted recovery operations and stays unchanged.
+    const { nativeResult, ...stored } = value
+    const bytes = JSON.stringify(nativeResult === undefined ? stored : { ...stored, nativeResult })
     db.prepare('INSERT INTO prompt_admissions VALUES (?, ?, ?, ?) ON CONFLICT(session_id,run_id,record_id) DO UPDATE SET json=excluded.json')
-      .run(value.agentSessionId, value.run.runId, promptRecordId(value), JSON.stringify(value))
+      .run(value.agentSessionId, value.run.runId, promptRecordId(value), bytes)
   }
   private preservePromptAdmission(db: DatabaseSync, id: string): AgentMuxStoredAgentSession | null {
     const row = db.prepare('SELECT json FROM sessions WHERE id=?').get(id)
@@ -4217,7 +4360,21 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     db.prepare('DELETE FROM native_bindings WHERE session_id=?').run(id)
   }
   private saveSession(db: DatabaseSync, session: AgentMuxStoredAgentSession, replaceFuture: boolean, receipt = false, captureNewInput = true): void {
-    const id = session.agentSessionId, metadata = agentSessionMetadata(session)
+    const id = session.agentSessionId
+    const current = this.sessionMetadata(db, id)
+    const createsInput=!receipt&&captureNewInput&&newPromptClaim(current??undefined,session)
+    let namespace:ReturnType<typeof readInputNamespace>={}
+    try{namespace=readInputNamespace(db)}catch(error){
+      if(createsInput)throw new AgentMuxError('The original input namespace is unconfirmed. Keep this original request and inspect its owner.','AGENT_PROMPT_INPUT_UNCONFIRMED','unknown')
+      // Preserve current identity/ACK observations. This branch never admits a new input claim.
+    }
+    const priorEpoch=namespace.inputEpoch?{...session,...namespace}:current
+    session=ordinaryInputEpoch(priorEpoch,session)
+    if(createsInput){
+      const frozen=session.promptCompletionAdmission?.intent?.admissionIntent
+      assertAgentInputEpoch(session,frozen?.kind==='exact-condition'?frozen.condition:frozen??{})
+    }
+    const metadata = agentSessionMetadata(session)
     const retired = db.prepare('SELECT 1 FROM retired_sessions WHERE id=?').get(id)
     if (retired) throw new AgentMuxError('Retired Agent Session conflicts with current identity.', 'INVALID_AGENT_SESSION_STORE')
     for (const run of [session.run, ...session.retiredRuns]) {
@@ -4244,8 +4401,9 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     db.prepare('DELETE FROM native_bindings WHERE session_id=?').run(id)
     if (native) db.prepare('INSERT INTO native_bindings VALUES (?, ?)').run(native, id)
     if (replaceFuture || session.futurePromptIntents !== undefined) {
+      const changes=Object.entries(session.futurePromptIntents??{}).map(([intentId,next])=>({intentId,expected:this.futureIntent(db,id,intentId),next}))
       db.prepare('DELETE FROM future_intents WHERE session_id=?').run(id)
-      for (const [intentId, intent] of Object.entries(session.futurePromptIntents ?? {})) this.saveFutureIntent(db, id, { intentId, expected: null, next: intent })
+      for(const change of changes)this.saveFutureIntent(db,id,change)
     }
   }
 
@@ -4469,7 +4627,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   }
 
   private async enqueue(operation: () => Promise<void>, signal?: AbortSignal, sessionId?: string | typeof CROSS_SESSION_WRITE,
-    settlement?: MetadataTimelineSettlement): Promise<void> {
+    settlement?: MetadataTimelineSettlement, initializeCreationSchema = true): Promise<void> {
     const current = this.tail.then(async () => {
       signal?.throwIfAborted()
       if (this.pendingLockRelease) {
@@ -4487,8 +4645,9 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         this.dirty = false
         stage = 'begin'; this.db.exec('BEGIN IMMEDIATE'); began = true
         // Existing validated databases acquire the same owner's internal table
-        // in this transaction; absence never means an old input was unapplied.
-        if (initializeLegacyClosedCreationSchema(this.db)) this.dirty = true
+        // in this transaction; an existing input-only settlement does not initialize it.
+        // Absence never means an old input was unapplied.
+        if (initializeCreationSchema && initializeLegacyClosedCreationSchema(this.db)) this.dirty = true
         if (!this.db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='prompt_admissions'").get()) {
           this.db.exec(promptAdmissionSchema); this.dirty = true
         }
@@ -4505,6 +4664,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         stage = 'commit'; await this.commit(signal, () => { commitAttempted = true }); committed = true
         if (this.dirty) {
           try { await syncSessionDatabase(this.path) } catch (error) { throw new AgentMuxSessionDurabilityError(error) }
+          for (const changed of this.durableChangeObservers) queueMicrotask(() => { try { changed() } catch { /* Maintenance cannot revoke the original commit. */ } })
         }
       } catch (error) {
         // A failed SQLite COMMIT can leave the old transaction active (known rollback), or

@@ -1,3 +1,4 @@
+import { optionalInputEpoch } from './agent-prompt-condition.js'
 import { parseAdoptedHostRoute } from './host-route.js'
 import { isDeepStrictEqual } from 'node:util'
 import { isAbsolute } from 'node:path'
@@ -17,7 +18,7 @@ export function parseAgentExecutionBindingObservation(value: unknown, bindingId:
 }
 
 export const AGENT_EXECUTION_CREATE_FIELDS = ['bindingId', 'agentHostId', 'agentRuntimeId', 'resourceHostId', 'resourceRuntimeId', 'resourceWorkspacePath', 'resourceGrant', 'agent', 'agentRoute', 'resourceRoute', 'sourceRequestDigest'] as const
-const agentFields = ['agentSessionId', 'createOperationId', 'executorId', 'executorRevision', 'workspacePath', 'prompt', 'agentMuxNote', 'sourceAgentMuxNote', 'agentMuxTask',
+const agentFields = ['agentSessionId', 'createOperationId', 'inputEpoch', 'inputRuntimeId', 'executorId', 'executorRevision', 'workspacePath', 'prompt', 'agentMuxNote', 'sourceAgentMuxNote', 'agentMuxTask',
   'optionalContext', 'launchOptions', 'cols', 'rows', 'nativeResumeSource', 'spatialIntent', 'initialMessageAdmission', 'threadId'] as const
 const invalid = (message: string, code: string): never => { throw new AgentMuxError(message, code) }
 function identity(value: unknown, code: string): string {
@@ -49,6 +50,8 @@ export function parseAgentExecutionCreate(value: unknown): AgentExecutionOpenInp
   const agent = rpcRecord(input.agent, agentFields, code)
   for (const field of ['agentSessionId', 'createOperationId', 'executorId', 'executorRevision']) identity(agent[field], code)
   workspace(agent.workspacePath, code)
+  optionalInputEpoch(agent.inputEpoch)
+  if (agent.inputRuntimeId !== undefined) identity(agent.inputRuntimeId, code)
   for (const field of ['prompt', 'agentMuxNote', 'sourceAgentMuxNote', 'agentMuxTask']) if (agent[field] !== undefined) text(agent[field], code)
   if (agent.threadId !== undefined) identity(agent.threadId, code)
   for (const field of ['cols', 'rows']) if (agent[field] !== undefined && (!Number.isSafeInteger(agent[field]) || Number(agent[field]) <= 0)) invalid('Terminal dimensions must be positive safe integers.', code)

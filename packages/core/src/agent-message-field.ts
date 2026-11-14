@@ -22,7 +22,7 @@ export function parseMessageFieldPage(value: unknown, input: AgentMuxMessageFiel
   const p = object(value, ['field', 'sequence', 'envelope', 'entry', 'budgetBytes', 'nextCursor'])
   if (p.field !== input.field || !Number.isSafeInteger(p.sequence) || Number(p.sequence) < 1 ||
     p.budgetBytes !== (input.maxBytes ?? 16 * 1024) || p.nextCursor !== null && (typeof p.nextCursor !== 'string' || !p.nextCursor || p.nextCursor.length > 131072)) return fail()
-  const raw = object(p.envelope, ['schema', 'messageId', 'operationId', 'createdAt', 'sender', 'recipient', 'threadId', 'correlationId', 'replyTo', 'workspaceId', 'senderSessionId', 'senderRunId', 'recipientSessionId', 'recipientRunId'])
+  const raw = object(p.envelope, ['schema', 'messageId', 'operationId', 'createdAt', 'sender', 'recipient', 'threadId', 'correlationId', 'replyTo', 'workspaceId', 'senderSessionId', 'senderRunId', 'recipientSessionId', 'recipientRunId', 'recipientInputEpoch','senderRuntimeId','recipientRuntimeId','application'])
   const envelope = validateAgentMuxMessageEnvelope({ ...raw, body: '' })
   if ((input.messageId === undefined ? envelope.operationId !== input.operationId : envelope.messageId !== input.messageId) ||
     callerSessionId && envelope.senderSessionId !== callerSessionId && envelope.recipientSessionId !== callerSessionId) return fail()

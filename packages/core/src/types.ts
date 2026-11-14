@@ -883,6 +883,8 @@ export type AgentSessionHistoryCollaboration =
 /** Durable reading and provenance only; no authority to control a current Run or send input. */
 export type AgentSessionHistoryMetadata = Pick<AgentMuxStoredAgentSession,
   'providerId' | 'executorId' | 'workspacePath' | 'toolExecution' | 'nativeHandle' | 'observedNativeHandle' | 'createdAt' | 'creation' | 'forkedFrom'> & {
+  inputEpoch?: string
+  inputRestoration?: NonNullable<AgentMuxAgentSession['inputRestoration']>
   previousNativeHandle?: Extract<AgentNativeSessionHandle, { kind: 'provider' }>
 }
 
@@ -1278,6 +1280,9 @@ export type AgentMuxAgentCreationInspection = AgentMuxAgentSession |
     observation?: { runtimeId: string; retainedRun: AgentMuxRunRef } }
 
 export type AgentMuxAgentSession = {
+  /** Restore-cut fence only; never a new Session identity or input permission. */
+  inputEpoch?: string
+  inputRestoration?: { operationId: string; sourceSHA256: string; reason: 'restored-snapshot' }
   toolExecution?: import('./agent-tool-execution.js').AgentToolExecutionBinding
   /** Read-only admissions retained through explicit retirement and reopen. */
   continuityControlReceipts?: Record<string, import('./agent-session-recovery/control-contract.js').AgentMuxContinuityControlReceipt>
@@ -1441,6 +1446,9 @@ export type AgentPromptSubmissionRecord = {
 export type AgentMuxAgentCreationSpatialIntent = { tabId: string; regionId: string; executionWorkspaceId: string }
 
 export type AgentMuxAgentCreationFact = {
+  /** Original create admission cut; current Session input qualification is independent. */
+  inputRuntimeId?: string
+  inputEpoch?: string
   /** Explicit original-creation resolution; its old automatic initial input remains held. */
   resolution?: import('./agent-creation-resolution.js').AgentMuxCreationResolution
   /** Original Takeover work source and admitted destination, separate from creator/fork identity. */
@@ -1495,6 +1503,8 @@ export type AgentPromptMessageContent = {
 
 export type AgentFuturePromptOccurrence = { intentId: string; occurrenceAt: number }
 export type AgentFuturePromptIntent = {
+  /** Original explicit activation, never renewed by an observer. */
+  inputEpoch?: string
   continuitySource?: import('./automatic-input-source.js').AutomaticInputSource
   operationId: string
   prompt: string

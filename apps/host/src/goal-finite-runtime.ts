@@ -1,3 +1,4 @@
+import { optionalInputEpoch } from '@agentmux/core/prompt-condition'
 import { AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS } from '@agentmux/core/control'
 import { observeRead } from '@agentmux/core/observation-read'
 import { inspectCoordinatorAgentRecord } from '@agentmux/core/agent-open-reference'
@@ -11,7 +12,7 @@ import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 
 type Rpc = Awaited<ReturnType<typeof goalSourceRpc>>
 type GoalFiniteCarrier = { runId: string; client: Pick<AgentMuxHostedClient,
-  'readAgentSession' | 'submitAgentPrompt' | 'inspectAgentInput' | 'inspectAgentPromptSubmission' | 'rejoinAgentInputWaiting' | 'dispose'> }
+  'readAgentSession' | 'readAgentInputEpoch' | 'submitAgentPrompt' | 'inspectAgentInput' | 'inspectAgentPromptSubmission' | 'rejoinAgentInputWaiting' | 'dispose'> }
 /** Read one original Source member's Run. This observes related Space metadata,
  * never the observer's same-SID Session, provider history or terminal. */
 async function creationRun(rpc: Rpc, reference: DemandSpaceMemberReference, signal?: AbortSignal): Promise<string> {
@@ -109,15 +110,15 @@ export async function openGoalFiniteInspection(options: Parameters<typeof openGo
 }
 
 /** Bind the already qualified carrier to its one original member and Run. */
-export function goalFiniteInputPort(client: Pick<AgentMuxHostedClient, 'submitAgentPrompt' | 'inspectAgentInput' | 'inspectAgentPromptSubmission' | 'rejoinAgentInputWaiting' | 'dispose'>,
+export function goalFiniteInputPort(client: Pick<AgentMuxHostedClient, 'readAgentInputEpoch' | 'submitAgentPrompt' | 'inspectAgentInput' | 'inspectAgentPromptSubmission' | 'rejoinAgentInputWaiting' | 'dispose'>,
   reference: DemandSpaceMemberReference, runId: string): GoalFiniteInputPort {
   const assertTarget = (value: DemandQualifiedDispatchIntent) => assertOriginalTarget(reference, runId, value)
   return {
     ...originalInputReader(client, reference, runId),
-    readCurrent: async () => ({ runId }),
+    readCurrent: async () => ({ runId, ...optionalInputEpoch(await client.readAgentInputEpoch()) }),
     submit: async value => {
       assertTarget(value)
-      const receipt = await client.submitAgentPrompt({ agentSessionId: reference.execution.agentSessionId, expectedRun: { runId }, operationId: value.operationId,
+      const receipt = await client.submitAgentPrompt({ agentSessionId: reference.execution.agentSessionId, expectedRun: { runId }, ...optionalInputEpoch(value.inputEpoch), operationId: value.operationId,
         admissionIntent: { kind: 'session-conversation' }, execution: 'immediate', authorHuman: false, sourceChannel: 'api', prompt: value.prompt,
         ...(value.agentMuxNote === undefined ? {} : { agentMuxNote: value.agentMuxNote }) })
       if (!receipt || !('key' in receipt)) throw new AgentMuxError('The original controlled input receipt is unconfirmed. Keep this same Goal operation; no alternate input path was used.', 'CONTROL_UNAVAILABLE')
@@ -150,4 +151,22 @@ function originalInputReader(client: Pick<AgentMuxHostedClient, 'inspectAgentInp
     },
     dispose: async () => { await client.dispose() }
   }
+}
+
+/** Same Source qualification and independent Coordinator access as finite Start, without a Run reader. */
+export async function readGoalInputEpoch(options: Parameters<typeof openGoalFiniteCarrier>[0],
+  input: import('@agentmux/core').GoalInputEpochInput, context: AgentMuxRpcCallContext): Promise<import('@agentmux/core').GoalInputEpoch> {
+  const reference = input.agentReference
+  const source = await goalSourceRpc(options, input.access.source, reference.source.runtimeId, context)
+  const fact = await assertGoalSourceRelation(source, reference, context.signal)
+  const client = fact.kind === 'creation'
+    ? await connectSpaceMember(source, { kind: 'conversation', reference: { runtimeId: reference.source.runtimeId, spaceId: reference.source.spaceId },
+      regionId: reference.source.regionId, runtimeId: reference.execution.runtimeId, agentSessionId: reference.execution.agentSessionId, expectedAdmission: reference.source.admission })
+    : await (async () => {
+      if (!input.access.coordinator) throw new AgentMuxError('Read the original association through its independently authorized Coordinator. Source membership supplies no input access.', 'CONTROL_UNAVAILABLE')
+      const coordinator = await goalSourceRpc(options, input.access.coordinator, reference.execution.runtimeId, context)
+      return await connectHostedAgentMux({ rpc: coordinator, connectOnDemand: true, expectedRuntimeId: reference.execution.runtimeId })
+    })()
+  try { return { runtimeId: reference.execution.runtimeId, inputEpoch: await client.readAgentInputEpoch() ?? null } }
+  finally { await client.dispose() }
 }

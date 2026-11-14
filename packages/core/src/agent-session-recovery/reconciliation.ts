@@ -4,7 +4,7 @@ import { observeResumedTurnInterruption } from './resumed-interruption.js'
 import type { AgentSessionContinuityInputs } from './input.js'
 import { isDeepStrictEqual } from 'node:util'
 import { matchesProviderNativeSessionTarget } from '../agent-native-locator.js'
-import { agentPromptNotApplied } from '../agent-prompt-condition.js'
+import { assertAgentInputEpoch, optionalInputEpoch, agentPromptNotApplied } from '../agent-prompt-condition.js'
 import { sameRun } from '../agent-session-identity.js'
 import { type CtxmuxAdapterRun } from '../ctxmux-run-adapter.js'
 import { AgentMuxError } from '../errors.js'
@@ -106,8 +106,14 @@ export class AgentSessionRecoveryReconciler {
   }
 
   async assertRecoveryInputCurrent(session: AgentMuxStoredAgentSession, operationId?: string, automatic = false): Promise<void> {
-    if (this.signal.aborted || !await this.exactRecoverySession(session, operationId, automatic)) throw new AgentMuxError(
+    const current = await this.exactRecoverySession(session, operationId, automatic)
+    if (this.signal.aborted || !current) throw new AgentMuxError(
       'The original recovery input was cancelled before dispatch. Its key and retained input remain available.', 'AGENT_CONTINUITY_SUPERSEDED')
+    const input = operationId ? current.continuityOperations?.[operationId]?.launchInput : current.initialInput
+    if (input) {
+      assertAgentInputEpoch(current, input)
+      assertAgentInputEpoch(optionalInputEpoch(await this.ports.sessions.store.readInputEpoch()), input)
+    }
   }
 
   async bindInitializedNativeSession(session: AgentMuxStoredAgentSession, run: CtxmuxAdapterRun,
@@ -208,7 +214,7 @@ export class AgentSessionRecoveryReconciler {
     if (!original && input.state === 'prepared' && run.state.type === 'running') {
       await this.ports.input.deliverPostLaunchPrompt(this.ports.providers.providers.get(session.providerId),
         exact, run, input.lifecycleOperationId, input.prompt, input.message, input.input.submissionId, nativeSource,
-        () => this.assertRecoveryInputCurrent(exact, operationId))
+        () => this.assertRecoveryInputCurrent(exact, operationId), input.inputEpoch)
       original = await this.ports.input.inspectAgentPromptSubmission(input.key)
     }
     // No claim is no dispatch evidence. An old unknown plan never creates one.

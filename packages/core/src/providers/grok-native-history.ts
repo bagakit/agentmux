@@ -1,5 +1,5 @@
 import { constants } from 'node:fs'
-import { lstat, open, stat } from 'node:fs/promises'
+import { lstat, open, readdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { blake3 } from '@noble/hashes/blake3.js'
@@ -40,6 +40,27 @@ const GROK_SUMMARY_FILE = 'summary.json'
 const GROK_SESSION_ID_MAX_LENGTH = 128
 const MAX_DIRNAME_BYTES = 255
 const MAX_SUMMARY_BYTES = 1024 * 1024 // 1 MB upper bound for summary metadata
+
+/** Keep the complete available cohort of this exact summary-qualified native Session, including compressed originals. */
+export async function grokRecoveryFiles(context: AgentProviderSessionHistoryContext): Promise<{ files: { id: string; path: string; format: 'file' }[]; gaps: string[]; assertCurrent(): Promise<void> }> {
+  const path = await resolveGrokUpdatesPath(context), directory = dirname(path)
+  await verifyGrokSummaryIdentity(directory, context, { bytesRead: 0, startedAt: Date.now() }, true)
+  const observe = async () => {
+    const observed = []
+    for (const name of (await readdir(directory)).sort()) { const file = await lstat(join(directory, name), { bigint: true }); observed.push([name, file.dev, file.ino, file.size, file.mtimeNs, file.ctimeNs].map(String).join(':')) }
+    return JSON.stringify(observed)
+  }
+  const before = await observe(), files: { id: string; path: string; format: 'file' }[] = [], gaps: string[] = []
+  for (const name of (await readdir(directory)).sort()) {
+    const target = join(directory, name), attributes = await lstat(target)
+    if (attributes.isFile()) files.push({ id: name, path: target, format: 'file' })
+    else gaps.push('RECOVERY_NATIVE_NON_FILE_UNSUPPORTED')
+  }
+  return { files, gaps, assertCurrent: async () => {
+    await verifyGrokSummaryIdentity(directory, context, { bytesRead: 0, startedAt: Date.now() }, true)
+    if (await observe() !== before) throw new AgentMuxError('The exact native recovery cohort changed during capture. Its original files and Run remain retained.', 'RECOVERY_NATIVE_COHORT_CHANGED')
+  } }
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)

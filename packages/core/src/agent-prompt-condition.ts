@@ -7,11 +7,13 @@ import type { AgentMuxHostedAgentSessionSummary } from './hosted-session-summary
 export type AgentPromptCondition = {
   expectedRun: AgentMuxRunRef
   afterSubmissionId: string | null
+  /** Captured with the original request; never renewed on reconnect or retry. */
+  inputEpoch?: string
 }
 
 /** Host intake binding: explicit new manual input or the original exact condition. */
 export type AgentPromptInputBinding = AgentPromptCondition |
-  { expectedRun: AgentMuxRunRef; admissionIntent: AgentDirectedPromptTarget; afterSubmissionId?: never }
+  { expectedRun: AgentMuxRunRef; inputEpoch?: string; admissionIntent: AgentDirectedPromptTarget; afterSubmissionId?: never }
 
 /** An explicit selected native source is independent of the TUI's current editor/selection. */
 export type AgentDirectedPromptTarget = { kind: 'manual-actor' } | { kind: 'session-conversation' } |
@@ -20,9 +22,9 @@ export type AgentDirectedPromptTarget = { kind: 'manual-actor' } | { kind: 'sess
 export function validateAgentPromptInputBinding(value: unknown): AgentPromptInputBinding {
   const input = value as AgentPromptInputBinding | undefined
   if (input && 'admissionIntent' in input) {
-    if (Object.keys(input).some(key => !['expectedRun', 'admissionIntent'].includes(key)) ||
+    if (Object.keys(input).some(key => !['expectedRun', 'inputEpoch', 'admissionIntent'].includes(key)) ||
         !inputRun(input.expectedRun)) throw new AgentMuxError('The original directed input binding is invalid.', 'INVALID_AGENT_PROMPT')
-    return { expectedRun: { ...input.expectedRun }, admissionIntent: validateAgentDirectedPromptTarget(input.admissionIntent) }
+    return { expectedRun: { ...input.expectedRun }, ...optionalInputEpoch(input.inputEpoch), admissionIntent: validateAgentDirectedPromptTarget(input.admissionIntent) }
   }
   return validateAgentPromptCondition(value)
 }
@@ -30,7 +32,7 @@ export function validateAgentPromptInputBinding(value: unknown): AgentPromptInpu
 /** Explicit caller intent. A coordination predecessor never supplies manual authority. */
 export type AgentPromptAdmissionIntent =
   | { kind: 'exact-condition'; condition: AgentPromptCondition }
-  | (AgentDirectedPromptTarget & { expectedRun: AgentMuxRunRef })
+  | (AgentDirectedPromptTarget & { expectedRun: AgentMuxRunRef; inputEpoch?: string })
 
 export type AgentPromptInputKey = (
   | { kind: 'prompt'; agentSessionId: string; expectedRun: AgentMuxRunRef; submissionId: string }
@@ -87,8 +89,8 @@ export function validateAgentPromptAdmissionIntent(value: unknown): AgentPromptA
     return { kind: v.kind, condition: validateAgentPromptCondition(v.condition) }
   }
   if ((v?.kind === 'manual-actor' || v?.kind === 'session-conversation' || v?.kind === 'native-conversation') && inputRun(v.expectedRun)) {
-    const { expectedRun, ...target } = v
-    return { ...validateAgentDirectedPromptTarget(target), expectedRun: { ...expectedRun } }
+    const { expectedRun, inputEpoch, ...target } = v
+    return { ...validateAgentDirectedPromptTarget(target), expectedRun: { ...expectedRun }, ...optionalInputEpoch(inputEpoch) }
   }
   throw new AgentMuxError('The input admission intent is invalid.', 'INVALID_AGENT_PROMPT')
 }
@@ -113,17 +115,17 @@ export function validateAgentPromptCondition(value: unknown): AgentPromptConditi
     (typeof condition.afterSubmissionId !== 'string' || !condition.afterSubmissionId.trim())) throw new AgentMuxError(
       'The original prompt delivery condition is missing. Your message is kept; use the terminal while its delivery is reviewed.',
       'AGENT_PROMPT_INPUT_UNCONFIRMED', 'unknown')
-  return { expectedRun: { ...condition.expectedRun }, afterSubmissionId: condition.afterSubmissionId }
+  return { expectedRun: { ...condition.expectedRun }, afterSubmissionId: condition.afterSubmissionId, ...optionalInputEpoch(condition.inputEpoch) }
 }
 
 export function agentPromptCondition(
-  session: Pick<AgentMuxAgentSession, 'run' | 'promptCompletionAdmission'>
+  session: Pick<AgentMuxAgentSession, 'run' | 'promptCompletionAdmission' | 'inputEpoch'>
 ): AgentPromptCondition {
   const afterSubmissionId = agentPromptPredecessor(session)
   if (afterSubmissionId === undefined) throw new AgentMuxError(
     'The previous prompt admission has no logical identity. Your message is kept; use the terminal while its delivery is reviewed.',
     'AGENT_PROMPT_INPUT_UNCONFIRMED', 'unknown')
-  return { expectedRun: { ...session.run }, afterSubmissionId }
+  return { expectedRun: { ...session.run }, afterSubmissionId, ...optionalInputEpoch(session.inputEpoch) }
 }
 
 /** A missing logical identity is unknown; only absent admission proves an empty predecessor. */
@@ -165,4 +167,19 @@ export function agentPromptNotApplied(
         [submission.prepare?.interrupt, submission.payload, submission.submit].some(phase => phase?.chunks?.some(chunk => chunk.acknowledged))) return undefined
   }
   return { submissionId: admission.submissionId, run: { ...session.run } }
+}
+
+/** Absence stays absent for namespaces that have never restored a snapshot. */
+export function optionalInputEpoch(value: unknown): { inputEpoch?: string } {
+  if (value === undefined) return {}
+  if (!inputIdentity(value)) throw new AgentMuxError('The original input restore epoch is invalid.', 'INVALID_AGENT_PROMPT')
+  return { inputEpoch: value }
+}
+
+/** A matching Run/predecessor cannot prove absence beyond a restored cut. */
+export function assertAgentInputEpoch(session: { inputEpoch?: string }, binding: { inputEpoch?: string }): void {
+  optionalInputEpoch(binding.inputEpoch)
+  if (session.inputEpoch !== binding.inputEpoch) throw new AgentMuxError(
+    'This input belongs to an earlier or unconfirmed storage cut. Its original key and history are retained; inspect it before composing a new independent input.',
+    'AGENT_PROMPT_INPUT_UNCONFIRMED', 'unknown')
 }

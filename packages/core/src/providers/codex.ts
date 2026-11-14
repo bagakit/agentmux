@@ -5,7 +5,7 @@ import { planCodexQuestionReply } from './codex-question.js'
 import { observeCodexTerminalFrontend, reconnectCodexTerminalFrontend } from './codex-managed-frontend.js'
 import { readCodexPromptExecutionEvidence, createCodexPromptExecutionTransportVerifier } from './codex-prompt-execution-evidence.js'
 import { readCodexResumedTurnInterruption } from './codex-resumed-turn-interruption.js'
-import { listCodexNativeSessions, assertCodexNativeResumeSource } from './codex-native-catalog.js'
+import { listCodexNativeSessions, assertCodexNativeResumeSource, codexRecoveryFiles } from './codex-native-catalog.js'
 import { createCodexPromptTransportPreparation } from './codex-prompt-transport-preparation.js'
 import { inspectCodexPromptExecution, inspectCodexPromptPreparationWait } from './codex-prompt-execution.js'
 import { observeCodexSessionStatus } from './codex-session-status.js'
@@ -220,6 +220,7 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
     assertNativeResumeSource: assertCodexNativeResumeSource,
     readConversationChanges: readCodexSavedConversationChanges,
     readSessionHistoryPage: context => context.transcriptPath ? readCodexSavedSessionHistoryPage(context) : readAppServerSessionHistoryPage(context),
+    recoveryFiles: codexRecoveryFiles,
     readSessionHistoryRecord: context => context.transcriptPath ? readCodexSavedSessionHistoryRecord(context) : readAppServerSessionHistoryRecord(context),
     observeSessionHistory: observeNativeJsonlHistory,
     inspectHookActivation: inspectCodexHookActivation,

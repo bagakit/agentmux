@@ -1,3 +1,4 @@
+import { optionalInputEpoch } from './agent-prompt-condition.js'
 import type { AgentMuxAgentStopProgress, AgentMuxAgentStopRecord, AgentMuxStopSupersededResume } from './agent-stop-receipt.js'
 import type { ResumeResolutionRequest } from './agent-prepared-resume.js'
 import type { AgentMuxCreationRuntime } from './terminal-creation-retirement.js'
@@ -513,8 +514,22 @@ export class AgentMuxAgentSessionRegistry {
     session: AgentMuxStoredAgentSession | null,
     stop?: AgentMuxAgentStopRecord
   ): Promise<{ session: AgentMuxStoredAgentSession | null; retired: AgentMuxRetiredAgentSession | null }> {
-    const normalized = session ? normalizeStoredAgentSession(session) : null
+    let normalized = session ? normalizeStoredAgentSession(session) : null
     return await this.enqueue(reservation.agentSessionId, async () => {
+      if (normalized) {
+        // Lifecycle observations keep their exact original SID/Run even when input-namespace bookkeeping is unavailable.
+        const previous=await this.store.readMetadata(reservation.agentSessionId)
+        const history=reservation.kind==='reopen'?reservation.expectedRetirement.history:undefined
+        const prepared=reservation.kind==='resume'||reservation.kind==='reopen'?reservation.preparedSession:undefined
+        const inherited=previous??history??prepared
+        const birth=reservation.kind==='create'?reservation.preparedCreation?.creation as {inputEpoch?:unknown}|undefined:undefined
+        let inputEpoch=inherited?.inputEpoch??optionalInputEpoch(birth?.inputEpoch).inputEpoch??normalized.inputEpoch
+        try{inputEpoch=(await this.store.readInputEpoch())??inputEpoch}catch{/* Input uncertainty cannot erase the already observed original Run or inherited cut. */}
+        const {inputEpoch:_oldEpoch,inputRestoration:_oldSource,...projection}=normalized
+        if(inputEpoch!==undefined)normalized=normalizeStoredAgentSession({...projection,inputEpoch,
+          ...(inherited?.inputRestoration&&inherited.inputEpoch===inputEpoch?{inputRestoration:inherited.inputRestoration}:{})})
+      }
+
       const commit: { retired: AgentMuxRetiredAgentSession | null } = { retired: null }
       await this.persist(normalized, async () => { commit.retired = await this.store.commitLifecycle(reservation, normalized, stop) })
       const previous = this.sessions.get(reservation.agentSessionId)

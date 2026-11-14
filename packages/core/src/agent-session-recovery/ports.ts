@@ -19,7 +19,7 @@ import type { AgentMuxHostExecutorOwner } from '../executor-owner.js'
 /** Explicit original Core resources; no client or recovery-decision callback crosses this port. */
 export type AgentSessionRecoveryPorts = {
   sessions: {
-    readonly store: Pick<AgentMuxAgentSessionStore, "readMetadata" | "readFuturePromptIntent" | "readContinuityControlReceipt" | "recordRestartAdmission" | "recordResumeResolutionFailure" | "releaseResumeResolutionOwner" | "readLifecycleReservation" | "loadResumeCorrelation" | "readRetiredAgentSession" | "readRecordDeletion">;
+    readonly store: Pick<AgentMuxAgentSessionStore, "readMetadata" | "readInputEpoch" | "readFuturePromptIntent" | "readContinuityControlReceipt" | "recordRestartAdmission" | "recordResumeResolutionFailure" | "releaseResumeResolutionOwner" | "readLifecycleReservation" | "loadResumeCorrelation" | "readRetiredAgentSession" | "readRecordDeletion">;
     readonly registry: Pick<AgentMuxAgentSessionRegistry, "get" | "isDurabilityUnconfirmed" | "resolveMetadata" | "refresh" | "claimRestart" | "reserveRestart" | "load" | "claimReopen" | "commitLifecycle" | "reserveReopen" | "reserveExisting" | "prepareReopen" | "admitResumeResolution" | "handoffResumeResolution" | "prepareResume" | "recordRestartStartNotApplied" | "update" | "rememberStartedResume" | "releaseLifecycle" | "stoppablePreparedResume">;
     resolveRawAgentSession(agentSessionId: string): Promise<AgentMuxStoredAgentSession>;
     currentStoredAgentSession(agentSessionId: string): Promise<AgentMuxStoredAgentSession>;
@@ -108,7 +108,8 @@ export type AgentSessionRecoveryPorts = {
     message: AgentPromptMessageContent,
     originalSubmissionId?: string,
     requiredNativeSource?: { providerId: string; nativeSessionId: string },
-    assertCurrent?: () => Promise<void>
+    assertCurrent?: () => Promise<void>,
+    inputEpoch?: string
   ): Promise<boolean>;
     recordAcceptedInput(key: AgentPromptInputKey, at: number): Promise<void>;
     recordPromptMessageAfterSideEffect(

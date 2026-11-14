@@ -1,3 +1,4 @@
+import { optionalInputEpoch } from '@agentmux/core/prompt-condition'
 import { awaitUntilCancelled } from './await-until-cancelled.js'
 import { AutomaticInputNotDispatchedError } from './automatic-input-not-dispatched.js'
 import { sameAutomaticInputSource } from '@agentmux/core/automatic-input-source'
@@ -23,7 +24,7 @@ export type GoalProgressOwner = {
   subscribe?(listener: (changes: ReadonlyMap<string, GoalProgressRecord | null>, revision: number, goals: readonly GoalProgressRecord[]) => void): () => void
   inspectInitial(loop: ContinuousProgressLoop): Promise<'confirmed' | 'pending' | 'unconfirmed'>
 }
-export type GoalProgressStart = ContinuousProgressTarget & { goalId: string; alignmentRevision: number; intervalMs: number; operationId: string; prompt: string }
+export type GoalProgressStart = ContinuousProgressTarget & { goalId: string; alignmentRevision: number; intervalMs: number; operationId: string; prompt: string; inputEpoch?:string }
 
 export type FutureProgressInputOwner = {
   saveFutureIntent(loop: ContinuousProgressLoop, active: boolean, context?: AgentMuxRpcCallContext): Promise<void>
@@ -307,7 +308,7 @@ export class ContinuousProgressLoopManager {
       if (existing) {
         if (existing.taskSource?.kind !== 'goal' || existing.taskSource.goalId !== input.goalId || existing.taskSource.alignmentRevision !== input.alignmentRevision ||
             existing.intervalMs !== input.intervalMs || existing.initialDelivery?.prompt !== input.prompt ||
-            ['hostId', 'agentSessionId', 'providerId', 'workspacePath'].some(key => existing[key as keyof ContinuousProgressTarget] !== input[key as keyof ContinuousProgressTarget])) throw new AgentMuxError('The original start operation belongs to different Goal content or target.', 'CONTROL_REQUEST_CONFLICT')
+            existing.inputEpoch!==input.inputEpoch || ['hostId', 'agentSessionId', 'providerId', 'workspacePath'].some(key => existing[key as keyof ContinuousProgressTarget] !== input[key as keyof ContinuousProgressTarget])) throw new AgentMuxError('The original start operation belongs to different Goal content or target.', 'CONTROL_REQUEST_CONFLICT')
         return existing
       }
       // Reconciliation above belongs to the frozen original operation. Only a new loop
@@ -322,7 +323,8 @@ export class ContinuousProgressLoopManager {
       const observation = await this.observe({ ...input, loopId: input.operationId, prompt: input.prompt, nextCheckAt: this.now(), status: 'paused' }, input.operationId, this.now(), new AbortController().signal)
       if (observation.session.agentSessionId !== input.agentSessionId || observation.session.hostId !== input.hostId || observation.session.providerId !== input.providerId || observation.session.workspacePath !== input.workspacePath) throw new AgentMuxError('The exact original Agent target is unconfirmed.', 'STALE_AGENT_SESSION')
       if (observation.inputOccupied) throw new AgentMuxError('Keep your draft and queued messages. Clear them before enabling automatic progress.', 'CONTROL_REQUEST_CONFLICT')
-      const initialDelivery = { operationId: input.operationId, prompt: input.prompt, condition: agentPromptCondition(observation.session), state: 'prepared' as const, startedAt: this.now() }
+      const {inputEpoch:_currentEpoch,...originalCondition}=agentPromptCondition(observation.session)
+      const initialDelivery = { operationId: input.operationId, prompt: input.prompt, condition: {...originalCondition,...optionalInputEpoch(input.inputEpoch)}, state: 'prepared' as const, startedAt: this.now() }
       const prompt = `Continue the original Goal ${goal.id} within its confirmed scope r${input.alignmentRevision}. Inspect it with amux goal inspect --goal ${JSON.stringify(goal.id)} before working. Report real progress, decisions and file evidence through the original Goal. Stop when done or cancelled; do not claim human acceptance.\n\n${goal.description.trim() || goal.title}\n\nConfirmed criteria:\n${goal.alignment!.criteria.map(c => '- ' + c.text).join('\n')}`
       assertCurrent()
       const loop = this.scheduler.create({ ...input, prompt, taskSource: source, operationId: input.operationId, initialDelivery })
@@ -548,7 +550,7 @@ export class ContinuousProgressLoopManager {
       await this.authorizeCaller(p.target, context)
       const existing = this.list().find(loop => loop.creationOperationId === p.operationId)
       if (existing) {
-        if (!sameAutomaticInputSource(existing.managedSource, p.managedSource) || existing.prompt !== p.prompt || JSON.stringify(existing.calendar) !== JSON.stringify(p.calendar) || existing.afterMs !== p.afterMs || existing.everyMs !== p.everyMs || JSON.stringify(existing.checkIn) !== JSON.stringify(p.checkIn) || ['hostId','agentSessionId','providerId','workspacePath'].some(key => existing[key as keyof ContinuousProgressTarget] !== p.target[key as keyof ContinuousProgressTarget])) throw new AgentMuxError('Schedule operation was reused with conflicting target or content.', 'SCHEDULE_OPERATION_CONFLICT')
+        if (!sameAutomaticInputSource(existing.managedSource, p.managedSource) || existing.prompt !== p.prompt || existing.inputEpoch!==p.inputEpoch || JSON.stringify(existing.calendar) !== JSON.stringify(p.calendar) || existing.afterMs !== p.afterMs || existing.everyMs !== p.everyMs || JSON.stringify(existing.checkIn) !== JSON.stringify(p.checkIn) || ['hostId','agentSessionId','providerId','workspacePath'].some(key => existing[key as keyof ContinuousProgressTarget] !== p.target[key as keyof ContinuousProgressTarget])) throw new AgentMuxError('Schedule operation was reused with conflicting target or content.', 'SCHEDULE_OPERATION_CONFLICT')
         if (!this.futureInputs) throw new AgentMuxError('Future-message admission durability is unconfirmed.', 'SCHEDULE_INPUT_OWNER_UNAVAILABLE')
         const retryCreation = existing.status === 'paused' && existing.lastOutcome === 'unknown' && !existing.lastTickId && !existing.lastMutation
         try { await this.saveFutureIntent(existing, retryCreation || existing.status === 'active', context); assertCurrent?.() }
@@ -570,7 +572,7 @@ export class ContinuousProgressLoopManager {
       if (nextDue !== null && (!Number.isSafeInteger(nextDue) || nextDue < 0 || p.everyMs !== undefined && !Number.isFinite(new Date(nextDue).getTime()))) throw new AgentMuxError('The requested delay exceeds the safe absolute schedule clock. Choose a representable delay; the Agent and manual input remain available.', 'INVALID_CONTROL_REQUEST')
       if (nextDue === null) throw new AgentMuxError('This one-time civil occurrence is past or falls in a skipped DST gap. Choose a valid future time.', 'SCHEDULE_NO_FUTURE_OCCURRENCE')
       assertCurrent?.()
-      const loop = this.scheduler.createSchedule({ ...p.target, prompt: p.prompt, nextDue, operationId: p.operationId, ...(p.managedSource ? { managedSource: p.managedSource } : {}), ...(p.calendar ? { calendar: p.calendar, ...(p.checkIn ? { checkIn: p.checkIn } : {}) } : p.afterMs !== undefined ? { afterMs: p.afterMs } : { everyMs: p.everyMs! }) })
+      const loop = this.scheduler.createSchedule({ ...p.target,...optionalInputEpoch(p.inputEpoch), prompt: p.prompt, nextDue, operationId: p.operationId, ...(p.managedSource ? { managedSource: p.managedSource } : {}), ...(p.calendar ? { calendar: p.calendar, ...(p.checkIn ? { checkIn: p.checkIn } : {}) } : p.afterMs !== undefined ? { afterMs: p.afterMs } : { everyMs: p.everyMs! }) })
       this.pauseWithReason(loop.loopId, 'preparation')
       try { await this.persist(loop.loopId); assertCurrent?.(); await this.saveFutureIntent(loop, true, context); assertCurrent?.(); this.patch(loop.loopId, { status: 'active' }); await this.persist(loop.loopId) }
       catch (error) { this.pauseWithReason(loop.loopId, 'preparation'); this.patch(loop.loopId, { lastOutcome: 'unknown', lastDecision: 'Saving the future-message intent is unconfirmed. Inspect the original operation; manual input remains available. ' + String(error) }); await this.persist(loop.loopId); await this.saveFutureIntent(this.require(loop.loopId), false, context); throw error }
@@ -661,7 +663,7 @@ export class ContinuousProgressLoopManager {
         const p = input as import('@agentmux/core').AgentProgressParams['agent.progress.create']
         const original = this.list().find(loop => loop.creationOperationId === p.operationId)
         if (original) {
-          if (!matches(original) || original.intervalMs !== p.intervalMs || original.prompt !== p.prompt || JSON.stringify(original.taskSource) !== JSON.stringify(p.taskSource)) throw new AgentMuxError('The original progress creation belongs to another exact intent.', 'CONTROL_REQUEST_CONFLICT')
+          if (!matches(original) || original.intervalMs !== p.intervalMs || original.prompt !== p.prompt || original.inputEpoch!==p.inputEpoch || JSON.stringify(original.taskSource) !== JSON.stringify(p.taskSource)) throw new AgentMuxError('The original progress creation belongs to another exact intent.', 'CONTROL_REQUEST_CONFLICT')
           await this.persist(original.loopId)
           return { loop: this.require(original.loopId), diskDurability: 'confirmed' as const }
         }
@@ -669,7 +671,7 @@ export class ContinuousProgressLoopManager {
         if (observed.inputOccupied) throw new AgentMuxError('Your original explicit input intent pauses automatic progress. Manual input remains available.', 'CONTROL_REQUEST_CONFLICT')
         context.signal?.throwIfAborted(); await context.assertCurrent?.()
         assertCurrent()
-        return { loop: await this.create({ ...target, intervalMs: p.intervalMs, prompt: p.prompt, operationId: p.operationId, ...(p.taskSource ? { taskSource: p.taskSource } : {}) }, assertCurrent), diskDurability: 'confirmed' as const }
+        return { loop: await this.create({ ...target,...optionalInputEpoch(p.inputEpoch), intervalMs: p.intervalMs, prompt: p.prompt, operationId: p.operationId, ...(p.taskSource ? { taskSource: p.taskSource } : {}) }, assertCurrent), diskDurability: 'confirmed' as const }
       })
       const pAction = input as import('@agentmux/core').AgentProgressParams['agent.progress.action']
       const loop = this.require(pAction.loopId)
@@ -701,7 +703,7 @@ export class ContinuousProgressLoopManager {
     })
     return value as import('@agentmux/core').AgentProgressResults[M]
   }
-  async create(input: ContinuousProgressTarget & { intervalMs: number; prompt: string; taskSource?: ContinuousProgressTaskSource; operationId?: string }, assertCurrent?: () => void): Promise<ContinuousProgressLoop> {
+  async create(input: ContinuousProgressTarget & { intervalMs: number; prompt: string; taskSource?: ContinuousProgressTaskSource; operationId?: string; inputEpoch?:string }, assertCurrent?: () => void): Promise<ContinuousProgressLoop> {
     await this.start()
     if (input.taskSource !== undefined) validateContinuousProgressTaskSource(input.taskSource)
     assertCurrent?.()
@@ -976,6 +978,7 @@ export class ContinuousProgressLoopManager {
         if (preflightFailed) throw preflightFailure
         const observation = await awaitUntilCancelled(() => this.observe(claim.loop, claim.tickId, now ?? Date.now(), controller.signal), controller.signal)
         if (!isCurrent()) break delivery
+        if(claim.loop.inputEpoch!==observation.session.inputEpoch){outcome='unknown';this.pauseWithReason(claim.loop.loopId,'preparation');this.patch(claim.loop.loopId,{lastOutcome:'unknown',lastDecision:'This original arrangement belongs to an earlier or unconfirmed input storage cut. Its definition and unknown inputs are retained; create a new explicit arrangement for new work.'});await this.persist(claim.loop.loopId);break delivery}
         if (claim.loop.taskSource?.kind === 'goal' && observation.session.run.runId !== claim.loop.initialDelivery?.condition.expectedRun.runId) { await this.pauseForSource(claim.loop, { action: 'pause', reason: 'The original executing Run changed. Inspect this Goal before explicitly starting new work; manual input remains available.' }); break delivery }
         const futureIntent = isAgentSchedule(claim.loop) && claim.loop.futureIntentId ? { intentId: claim.loop.futureIntentId, occurrenceAt: claim.loop.nextCheckAt } : undefined
         const decision = futureIntent ? decideFutureProgress(observation, futureIntent) : decideContinuousProgress({ ...observation, ...(claim.loop.lastCompletionId ? { lastCompletionId: claim.loop.lastCompletionId } : {}) })
@@ -1007,7 +1010,7 @@ export class ContinuousProgressLoopManager {
               agentMuxNote = original.message.systemContext
             }
             pending = { id: futureIntent ? `${futureIntent.intentId}@${futureIntent.occurrenceAt}` : decision.completionId, operationId: claim.tickId,
-              condition: agentPromptCondition(observation.session), inputByte: observation.inputByte,
+              condition: (()=>{const {inputEpoch:_current,...condition}=agentPromptCondition(observation.session);return {...condition,...optionalInputEpoch(claim.loop.inputEpoch)}})(), inputByte: observation.inputByte,
               prompt, ...(agentMuxNote === undefined ? {} : { agentMuxNote }), ...(futureIntent ? { futureIntent } : {}) }
           }
           if (futureIntent || pending.id === decision.completionId) {

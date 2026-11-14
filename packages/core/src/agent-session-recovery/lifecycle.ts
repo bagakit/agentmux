@@ -1,3 +1,4 @@
+import { assertAgentInputEpoch, optionalInputEpoch } from '../agent-prompt-condition.js'
 import { deletedAgentSessionRecord } from '../agent-session-record.js'
 import type { AgentMuxCreationRuntime } from '../terminal-creation-retirement.js'
 import { assertPreparedResumeBinding, resumeResolutionRequest, resumeResolutionDigest } from '../agent-prepared-resume.js'
@@ -233,6 +234,8 @@ export class AgentSessionRunLifecycle {
         throw new AgentMuxError('The original resume result is unconfirmed. Inspect the same operation; no Start or input was repeated.',
           'AGENT_RESUME_UNCONFIRMED', undefined, { disposition: 'unknown', confirmedInputBytes: null })
       }
+      assertAgentInputEpoch(canonical, input)
+      assertAgentInputEpoch(optionalInputEpoch(await this.ports.sessions.store.readInputEpoch()), input)
       await this.ports.sessions.registry.refresh(input.agentSessionId)
       return await this.resumeAgentRun(input, canonical.run, undefined, undefined, requestDigest)
     })
@@ -471,7 +474,7 @@ export class AgentSessionRunLifecycle {
         'AGENT_RESUME_ORIGINAL_RUN_UNCONFIRMED')
       if (directRequestDigest && (!restartReservation || !continuity)) {
         const now = Date.now()
-        continuity = { operationId: input.operationId, agentSessionId: current.agentSessionId, trigger: restartReservation ? 'manual' : 'input',
+        continuity = { operationId: input.operationId, ...optionalInputEpoch(input.inputEpoch), agentSessionId: current.agentSessionId, trigger: restartReservation ? 'manual' : 'input',
           ...(restartReservation ? { action: 'restart' as const } : {}),
           policy: normalizeAgentContinuityPolicy(), previousRun: { ...current.run }, nativeTarget: structuredClone(current.nativeHandle),
           admittedAt: now, observedAt: now, rechecks: 0, kind: 'starting', reason: 'explicit-request', requestDigest: directRequestDigest,
@@ -642,7 +645,8 @@ export class AgentSessionRunLifecycle {
           throw error
         }
       }
-      const run = await this.admitDirectory(current.workspacePath, () => {
+      const run = await this.admitDirectory(current.workspacePath, async () => {
+        await this.assertLaunchInputEpoch(current.agentSessionId, continuity)
         launchAttempted = true
         return dispatch
           ? this.ports.runtime.kernel.startPrepared(decodePreparedRun(dispatch.prepared).request, lifecycleOperationId, dispatch.runtime)
@@ -1046,6 +1050,17 @@ export class AgentSessionRunLifecycle {
       reservation.operationId, undefined, dispatch.runtime)
   }
 
+  /** The original request grants launch-carried input, never a current projection. */
+  private async assertLaunchInputEpoch(id: string, operation: AgentMuxContinuityOperation | undefined): Promise<void> {
+    if (!operation?.launchInput && !operation?.messageInput) return
+    const binding = operation.launchInput ?? operation.messageInput!.admissionIntent
+    assertAgentInputEpoch(operation, binding)
+    const current = await this.ports.sessions.store.readMetadata(id)
+    if (!current) throw new AgentMuxError('The original launch input Session is unconfirmed.', 'AGENT_PROMPT_INPUT_UNCONFIRMED', 'unknown')
+    assertAgentInputEpoch(current, binding)
+    assertAgentInputEpoch(optionalInputEpoch(await this.ports.sessions.store.readInputEpoch()), binding)
+  }
+
   /** An original gate without any carrier claim can first enter only this retained Start. */
   async continuePreparedMessageInput(ref: import('../agent-input-wait.js').AgentInputWaitRef,
     carrier: Extract<import('../agent-input-handoff.js').AgentInputCarrier, { kind: 'launch' }>): Promise<void> {
@@ -1062,7 +1077,8 @@ export class AgentSessionRunLifecycle {
     await this.ports.input.claimContinuityMessage(recipe, recipe.plan)
     let run: CtxmuxAdapterRun, dispatched = false
     try {
-      run = await this.admitDirectory(prepared.workspacePath, () => {
+      run = await this.admitDirectory(prepared.workspacePath, async () => {
+        await this.assertLaunchInputEpoch(prepared.agentSessionId, prepared.continuity)
         dispatched = true
         return this.ports.runtime.kernel.startPrepared(decodePreparedRun(dispatch.prepared).request, reservation.operationId, dispatch.runtime)
       })

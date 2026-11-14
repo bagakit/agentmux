@@ -273,15 +273,15 @@ export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_C
       const agentTarget = originalTarget && { hostId: spaceControlId(originalTarget.hostId, 'Agent Host', code), runtimeId: spaceControlId(originalTarget.runtimeId, 'Agent Runtime', code), ...(originalTarget.adoptedRoute === undefined ? {} : { adoptedRoute: parseAdoptedHostRoute(originalTarget.adoptedRoute) }) }
       content = { ...(agentTarget ? { agentTarget } : {}), kind: 'takeover-agent', executorId: spaceControlId(input.executorId, 'Executor', code), source: parseAgentTakeoverSource(input.source), ...parseAgentOpenLaunchFields(input, code) }
     } else if (input.kind === 'fork-agent') {
-      fields(input, ['kind', 'source', 'prompt'], code)
+      fields(input, ['kind', 'source', 'prompt', 'inputEpoch', 'inputRuntimeId'], code)
       if (target.newZone) fail('Fork preserves its source execution directory; select an existing destination.', code)
-      content = { kind: 'fork-agent', source: parseAgentForkSource(input.source),
+      content = { kind: 'fork-agent', ...parseAgentOpenLaunchFields(input, code), source: parseAgentForkSource(input.source),
         ...(Object.hasOwn(input, 'prompt') ? { prompt: string(input.prompt, 'Initial prompt', code) } : {}) }
     } else if (input.kind === 'derived-action') {
-      fields(input, ['kind', 'actionId', 'source', 'executorId'], code)
+      fields(input, ['kind', 'actionId', 'source', 'executorId', 'inputEpoch', 'inputRuntimeId'], code)
       if (target.newZone) fail('A derived action keeps its source execution directory; select an existing destination.', code)
       const origin = fields(input.source, ['agentSessionId'], code)
-      content = { kind: 'derived-action', actionId: spaceControlId(input.actionId, 'Derived action', code), source: { agentSessionId: spaceControlId(origin.agentSessionId, 'Source Session', code) },
+      content = { kind: 'derived-action', ...parseAgentOpenLaunchFields(input, code), actionId: spaceControlId(input.actionId, 'Derived action', code), source: { agentSessionId: spaceControlId(origin.agentSessionId, 'Source Session', code) },
         ...(Object.hasOwn(input, 'executorId') ? { executorId: spaceControlId(input.executorId, 'Executor', code) } : {}) }
     } else if (input.kind === 'agent-session') {
       if (Object.hasOwn(input, 'reference')) {

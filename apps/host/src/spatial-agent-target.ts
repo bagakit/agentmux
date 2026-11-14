@@ -1,3 +1,4 @@
+import { assertAgentInputEpoch, optionalInputEpoch } from '@agentmux/core/prompt-condition'
 import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import { parseAgentOpenLaunchFields } from '@agentmux/core/agent-open-contract'
@@ -89,10 +90,14 @@ export async function openSpatialAgentTarget(options: {
         save: { layoutApplied: false, clientStateWritten: false, storageFlushRequested: false, diskDurability: 'unconfirmed' as const, reason: 'The original Agent has no confirmed association with this source Space.' },
         issues: [{ step: 'creation', code: 'SPATIAL_CREATION_UNCONFIRMED', message: 'The original creation has no confirmed source placement.', recovery: 'Inspect the original creation; do not recreate or resend its input.' }] }
     } catch (error) { if (!(error instanceof AgentMuxError) || error.code !== 'AGENT_CREATION_UNKNOWN') throw error }
-    const execution = previous?.execution ?? { hostId: executionHostId, runtimeId: host.runtimeId,
+    const execution = previous?.execution ?? { hostId: executionHostId, ...optionalInputEpoch(launch.inputEpoch), runtimeId: host.runtimeId,
       workspacePath: originalAgent ? originalAgent.workspacePath : sameRuntime ? placement.workspacePath : (await host.client.hostEnvironment({ agentSessionId })).agentWorkspace.workspacePath,
       workspaceId: sameRuntime ? placement.workspaceId : null, executorRevision: originalAgent?.executorRevision ?? matches![0]!.configRevision,
       ...(adoptedRoute ? { adoptedRoute } : {}) }
+    if (!previous && !retained) {
+      if (launch.inputRuntimeId !== undefined && launch.inputRuntimeId !== host.runtimeId) throw new AgentMuxError('The original input belongs to another execution Runtime.', 'RUNTIME_OWNER_MISMATCH')
+      assertAgentInputEpoch(optionalInputEpoch(await host.client.readAgentInputEpoch()), launch)
+    }
     if (!execution.runtimeId || !execution.executorRevision) throw new AgentMuxError('The original target admission has no confirmed execution identity. Keep its request; no new target was chosen.', 'SPATIAL_CREATION_UNCONFIRMED')
     const admit = () => options.spatial.admitAgentOpen({ request, agentSessionId, placement, execution,
       ...(context.agentTakeover ? { takeover: { preparation: context.agentTakeover.preparation, requestDigest: context.agentTakeover.requestDigest, ...(note === undefined ? {} : { sourceAgentMuxNote: note }) } } : {}),

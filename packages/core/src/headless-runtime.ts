@@ -4,7 +4,7 @@ import { connectHostedAgentMux } from './hosted-client.js'
 import { mintObjectId } from './object-id.js'
 import { createHash, generateKeyPairSync } from 'node:crypto'
 import { AGENTMUX_RUNTIME_OWNER_PROTOCOL_VERSION } from './runtime-owner-protocol.js'
-import { chmod, lstat, mkdir, open, readdir, type FileHandle } from 'node:fs/promises'
+import { chmod, lstat, mkdir, open, readFile, readdir, type FileHandle } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { basename, dirname, join } from 'node:path'
 import { AgentMuxClient } from './client.js';
@@ -26,6 +26,8 @@ import { executionRouteRpc } from './host-route-rpc.js'
 import type { AdoptedHostRoute } from './host-route.js'
 import type { AgentMuxRuntimeOwnerIdentity, AgentMuxHostedClient, AgentMuxHostedRpcPort, AgentMuxHostedStreamEvent } from './hosted-client-contract.js'
 import { CapsuleRunManager, type CapsuleDesktopAdapters } from './capsule-run-manager.js'
+import { AgentMuxStorageRecovery, type RecoverySource } from './storage-recovery.js'
+import { legacySessionRecoverySource, semanticRecoverySource, sessionRecoverySource } from './storage-recovery-sources.js'
 
 export type AgentMuxHeadlessRuntimeOptions = AgentMuxClientOptions & {
   socketPath?: string
@@ -50,6 +52,8 @@ export type AgentMuxHeadlessRuntimeOptions = AgentMuxClientOptions & {
   capsuleAdapters?: CapsuleDesktopAdapters
   /** The outer process owner may close its complete service after a fenced public shutdown. */
   shutdown?: () => void | Promise<void>
+  /** Original local owners contribute their own snapshots; no RPC caller supplies filesystem sources. */
+  recoverySources?: readonly RecoverySource[]
 }
 export type AgentMuxHeadlessRuntime = {
   readonly client: AgentMuxClient
@@ -61,6 +65,7 @@ export type AgentMuxHeadlessRuntime = {
   /** Borrow the same original configured execution route used by the coordinator. */
   executionHost(hostId: string, adoptedRoute?: AdoptedHostRoute, access?: HostRouteExecutionAccess): Promise<{ runtimeId: string; client: AgentMuxRpcCoreClient['client']; executionPort: AgentExecutionHostPort; adoptedRoute?: AdoptedHostRoute; dispose?(): Promise<void> }>
   readonly executionBindings: NonNullable<AgentMuxRpcServiceOptions['executionBindings']>
+  readonly storageRecovery: AgentMuxStorageRecovery | undefined
   stop(): Promise<void>
 }
 const native = createRequire(import.meta.url)('fs-native-extensions') as { tryLock(fd: number): boolean }
@@ -71,6 +76,20 @@ async function acquireOwner(path: string): Promise<FileHandle> {
   return handle
 }
 
+async function retainedSessionRecovery(stateDirectory: string, storePath: string): Promise<boolean> {
+  const directory = join(stateDirectory, 'recovery', 'generations')
+  let names: string[]
+  try { names = await readdir(directory) } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error }
+  for (const name of names.filter(name => /^[A-Za-z0-9_-]{1,100}\.json$/u.test(name))) {
+    const path = join(directory, name), attributes = await lstat(path)
+    if (!attributes.isFile() || (attributes.mode & 0o077) !== 0) throw new AgentMuxError('The retained original recovery namespace is unconfirmed.', 'AGENT_SESSION_STORE_UNAVAILABLE')
+    let manifest: { schema?: unknown; sources?: Array<{ id?: string; members?: Array<{ id?: string; target?: string }> }> }
+    try { manifest = JSON.parse(await readFile(path, 'utf8')) } catch { throw new AgentMuxError('The retained original recovery namespace is unreadable.', 'AGENT_SESSION_STORE_UNAVAILABLE') }
+    if (manifest.schema !== 'agentmux.recovery-generation.v1' || !Array.isArray(manifest.sources)) throw new AgentMuxError('The retained original recovery namespace is unconfirmed.', 'AGENT_SESSION_STORE_UNAVAILABLE')
+    if (manifest.sources.some(source => source.id === 'core.sessions' && source.members?.some(member => member.id === 'database' && member.target === storePath))) return true
+  }
+  return false
+}
 async function priorSemanticNamespace(stateDirectory: string, storePath: string): Promise<boolean> {
   for (const path of [join(stateDirectory, 'agent-creation-identity.json'), join(stateDirectory, 'agent-creation-identity.json.original')]) {
     try { await lstat(path); return true } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
@@ -90,7 +109,7 @@ async function priorSemanticNamespace(stateDirectory: string, storePath: string)
     try { if ((await readdir(dirname(storePath))).some(name => name.startsWith(basename(storePath) + '.original-'))) return true }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
   }
-  return false
+  return await retainedSessionRecovery(stateDirectory, storePath)
 }
 /** The one explicitly launched semantic owner, usable independently of any UI or client Host. */
 export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOptions = {}): Promise<AgentMuxHeadlessRuntime> {
@@ -109,6 +128,7 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
   let executionBindings: AgentExecutionBindingService | undefined
   let executionReader: Promise<AgentMuxHostedClient> | undefined
   let hostRoutes: HostRouteGateway | undefined
+  let storageRecovery: AgentMuxStorageRecovery | undefined
   try {
     endpointLease = await acquireOwner(socketPath + '.owner.lock')
     const identityPath = join(stateDirectory, 'semantic-runtime.json')
@@ -148,6 +168,11 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
       })
       runtimeId = state.runtimeId
       originalCreationIdentity = state.creationIdentity ?? null
+      try { await lstat(storePath) }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        if (await retainedSessionRecovery(stateDirectory, storePath)) throw new AgentMuxError('The original Session database is missing and its retained recovery source is available. Use the original storage recovery owner; no empty database was initialized.', 'AGENT_SESSION_STORE_UNAVAILABLE')
+      }
     }
     const ownerInstanceId = mintObjectId()
     const ownerIdentity = (): AgentMuxRuntimeOwnerIdentity => {
@@ -160,7 +185,7 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
       producerLeaseActive = false // revoke borrowing synchronously, before any close/observer await
       return stopping ??= (async () => {
       try { await server?.stop() }
-      finally { try { try { hostRoutes?.dispose(); await executionBindings?.dispose(); await (await executionReader)?.dispose(); await capsules?.dispose(); await hosted?.dispose() } finally { await client?.dispose() } }
+      finally { try { try { await storageRecovery?.dispose(); hostRoutes?.dispose(); await executionBindings?.dispose(); await (await executionReader)?.dispose(); await capsules?.dispose(); await hosted?.dispose() } finally { await client?.dispose() } }
         finally { await endpointLease?.close(); await semanticLease.close() } }
       })()
     }
@@ -268,7 +293,15 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
       resolveHost: async (hostId, route, access) => { const host = await executionHost(hostId, route, access); return { runtimeId: host.runtimeId, client: host.executionPort,
         ...(host.adoptedRoute ? { adoptedRoute: host.adoptedRoute } : {}), ...(host.dispose ? { dispose: host.dispose } : {}) } }
     }, options.service?.spatialState ? { spatial: options.service.spatialState, runtimeId: () => runtimeId } : undefined)
+    if (store instanceof AgentMuxFileAgentSessionStore) {
+      const directory = join(stateDirectory, 'recovery')
+      storageRecovery = new AgentMuxStorageRecovery(directory, runtimeId, [sessionRecoverySource(store),
+        legacySessionRecoverySource(store.path), semanticRecoverySource(stateDirectory, directory, [identityPath, identityPath + '.original', ...creationAuthority.recoveryPaths(), join(stateDirectory, 'host-executors.json')]), ...client.storageRecoverySources(),
+        ...(options.service?.spatialState ? [options.service.spatialState.storageRecoverySource()] : []),
+        ...(options.recoverySources ?? [])], 5, { admit: input => store.admitRecoveryInputCut(input) })
+    }
     server = new AgentMuxControlServer({ ...options.service, socketPath, meshState: { directory: stateDirectory, owner: { runtimeId, ownerInstanceId } }, ...(options.http ? { http: options.http } : {}),
+      ...(storageRecovery ? { storageRecovery } : {}),
       ...(options.relayGateway === undefined ? {} : { relayGateway: options.relayGateway }),
       ...(options.meshEndpoint ? { meshEndpoint: options.meshEndpoint } : {}),
       ...(options.forwardingPeer ? { forwardingPeer: options.forwardingPeer } : {}),
@@ -284,6 +317,7 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
       hostedRuntime: () => hosted!,
       onControlEndpointState: state => hosted?.publishControlEndpointState(state) })
     await server.start()
+    storageRecovery?.start()
     capsules.start()
     hosted.publishControlEndpointState(server.controlEndpointState())
     // The Client publishes scoped failures and continues its original observation. Metadata
@@ -293,10 +327,10 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
       // failure does not close the public owner or another healthy capability.
     })
     return { client, hosted, server, socketPath, hostRoutes: options.service?.hostRoutes ?? hostRoutes!, ownerIdentity, executionHost,
-      executionBindings: options.service?.executionBindings ?? executionBindings!, stop }
+      executionBindings: options.service?.executionBindings ?? executionBindings!, storageRecovery, stop }
   } catch (error) {
     producerLeaseActive = false
-    await server?.stop().catch(() => {}); hostRoutes?.dispose(); await executionBindings?.dispose().catch(() => {}); await capsules?.dispose().catch(() => {}); await hosted?.dispose().catch(() => {}); await client?.dispose().catch(() => {})
+    await server?.stop().catch(() => {}); await storageRecovery?.dispose().catch(() => {}); hostRoutes?.dispose(); await executionBindings?.dispose().catch(() => {}); await capsules?.dispose().catch(() => {}); await hosted?.dispose().catch(() => {}); await client?.dispose().catch(() => {})
     await endpointLease?.close().catch(() => {}); await semanticLease.close().catch(() => {})
     throw error
   }

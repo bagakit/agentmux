@@ -1,3 +1,4 @@
+import { optionalInputEpoch } from './agent-prompt-condition.js'
 import { isDeepStrictEqual } from 'node:util'
 import type { AgentMuxMessageTarget } from './control.js'
 import { messageEnvelopeString } from './agent-message-envelope.js'
@@ -10,6 +11,7 @@ export type AgentMessageRoute = {
   hostId: string
   runtimeId: string | null
   targetKeyFingerprint?: string
+  recipientInputEpoch?: string
   agentSessionId: string
   expectedRun: { runId: string }
   target: AgentMuxMessageTarget
@@ -22,6 +24,7 @@ export function validateAgentMessageRoute(route: AgentMessageRoute): AgentMessag
   messageEnvelopeString(route.expectedRun.runId, 'Message route Run')
   if (route.runtimeId !== null) messageEnvelopeString(route.runtimeId, 'Message route Runtime')
   if (route.targetKeyFingerprint !== undefined && !/^[a-f0-9]{64}$/u.test(route.targetKeyFingerprint)) throw new AgentMuxError('Original message target key is invalid.', 'MESSAGE_ENVELOPE_INVALID')
+  optionalInputEpoch(route.recipientInputEpoch)
   const target = route.target
   if (target.kind === 'agent-session') messageEnvelopeString(target.agentSessionId, 'Message route target Session')
   else if (target.kind === 'region') messageEnvelopeString(target.regionId, 'Message route target Region')

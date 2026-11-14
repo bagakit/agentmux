@@ -1,3 +1,4 @@
+import { assertAgentInputEpoch, optionalInputEpoch } from '@agentmux/core/prompt-condition'
 import { takeoverRequiresPromotion } from '@agentmux/core/agent-takeover'
 import { assertPromotionEnabled } from './promotion-policy.js'
 import { isDeepStrictEqual } from 'node:util'
@@ -31,7 +32,7 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
     const create: AgentMuxHostAgentCreateInput = { executorId: record.executorId, executorRevision: record.execution.executorRevision,
       agentSessionId: record.agentSessionId, createOperationId: record.requestId, workspacePath: record.execution.workspacePath,
       spatialIntent: { tabId: record.address.tabId, regionId: record.address.regionId, executionWorkspaceId: record.execution.workspaceId },
-      ...parseAgentOpenLaunchFields(content), sourceAgentMuxNote: record.takeoverSourceAgentMuxNote,
+      ...parseAgentOpenLaunchFields(content), ...optionalInputEpoch(record.execution.inputEpoch), sourceAgentMuxNote: record.takeoverSourceAgentMuxNote,
       ...(record.takeoverOptionalContext === undefined ? {} : { optionalContext: record.takeoverOptionalContext }),
       ...(content.prompt === undefined ? {} : { prompt: content.prompt }) }
     await options.runtime().client.createSpatialHostAgentWithDelivery(create, options.spatial,
@@ -248,7 +249,10 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
     const requestedExecutor = request.content.executorId
     const executors = inventory.executors.filter(item => item.executorId === requestedExecutor)
     if (executors.length !== 1) throw new AgentMuxError('Choose an Executor configured on the original execution Host.', 'UNKNOWN_EXECUTOR')
-    const executor = executors[0]!, frozenExecution = { ...execution, runtimeId: authority.runtimeId, executorRevision: executor.configRevision }
+    const executor = executors[0]!
+    if (request.content.inputRuntimeId !== undefined && request.content.inputRuntimeId !== authority.runtimeId) throw new AgentMuxError('The original input belongs to another execution Runtime.', 'RUNTIME_OWNER_MISMATCH')
+    assertAgentInputEpoch(optionalInputEpoch(await client.readAgentInputEpoch()), request.content)
+    const frozenExecution = { ...execution, ...optionalInputEpoch(request.content.inputEpoch), runtimeId: authority.runtimeId, executorRevision: executor.configRevision }
     let raw: unknown, configurationIssue: unknown
     try { raw = await readOriginalMoteConfiguration(options.configurationPath) } catch (error) { configurationIssue = error }
     if (!object(raw)) configurationIssue ??= new AgentMuxError('The original Profile and Topic directory configuration is unconfirmed.', 'EXECUTOR_CONFIGURATION_UNAVAILABLE')
@@ -278,7 +282,7 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
         const create: AgentMuxHostAgentCreateInput = { executorId: request.content.executorId, executorRevision: executor.configRevision,
           agentSessionId, createOperationId: request.requestId, workspacePath: execution.workspacePath,
           spatialIntent: { tabId: admission.record.address.tabId, regionId: admission.record.address.regionId, executionWorkspaceId: execution.workspaceId },
-          ...parseAgentOpenLaunchFields(request.content),
+          ...parseAgentOpenLaunchFields(request.content), ...optionalInputEpoch(admission.record.execution.inputEpoch),
           ...(note ? { sourceAgentMuxNote: note } : {}), ...(prepared ? { optionalContext: prepared.optionalContext } : {}),
           ...(request.content.prompt === undefined ? {} : { prompt: request.content.prompt }) }
         if (request.caller) await client.createLocalHostAgentWithDelivery(create, { agentSessionId: request.caller.agentSessionId, capability: request.caller.capability ?? '' })
@@ -291,5 +295,16 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
       }
       return { operation: 'agent.open', ...observed }
     } catch (error) { return { operation: 'agent.open', ...await reconcile(admission.record, context, error) } }
-  }, { describe: () => ({ ordinaryLaunch: { revision: 1 as const, destination: 'source-zone-background' as const }, externalAssociation: 1 as const, takeover: 1 as const }) })
+  }, { describe: () => ({ ordinaryLaunch: { revision: 1 as const, destination: 'source-zone-background' as const }, externalAssociation: 1 as const, takeover: 1 as const }),
+    describeExecution: async (input: import('@agentmux/core/agent-open-contract').AgentOpenExecutionSelector, context: AgentMuxRpcCallContext) => {
+      if (context.caller || !context.principal || !['user','device'].includes(context.principal.kind)) throw new AgentMuxError('Preparing a new input cut requires the original person or device.', 'CONTROL_PERMISSION_DENIED')
+      const runtime = options.runtime(), target = input.agentTarget
+      if (!target) return { hostId: 'local', runtimeId: runtime.ownerIdentity().runtimeId, inputEpoch: await runtime.client.readAgentInputEpoch() ?? null }
+      const host = await runtime.executionHost(target.hostId, target.adoptedRoute, { context, observation: { kind: 'observation', targetRuntimeId: target.runtimeId,
+        agentSessionIds: [], source: { kind: 'input-epoch-reader', targetRuntimeId: target.runtimeId, ...(target.adoptedRoute ? { agentRoute: target.adoptedRoute } : {}) } } })
+      try {
+        if (host.runtimeId !== target.runtimeId) throw new AgentMuxError('The exact input target answers for another Runtime.', 'RUNTIME_OWNER_MISMATCH')
+        return { hostId: target.hostId, runtimeId: host.runtimeId, inputEpoch: await host.client.readAgentInputEpoch() ?? null }
+      } finally { await host.dispose?.() }
+    } })
 }

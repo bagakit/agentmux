@@ -1,3 +1,4 @@
+import { optionalInputEpoch } from './agent-prompt-condition.js'
 import { sameConnectionApplication } from './connections-contract.js'
 import { AgentMuxError } from './errors.js'
 import { parseAgentExternalMessageAuthor, type AgentExternalMessageAuthor } from './external-author.js'
@@ -55,6 +56,8 @@ export type AgentMuxMessageEnvelope = {
   readonly recipientRunId: string | null
   readonly senderRuntimeId?: string
   readonly recipientRuntimeId?: string
+  /** Frozen by the original producer; never filled by Inbox intake or notification recovery. */
+  readonly recipientInputEpoch?: string
   readonly application?: AgentMuxMessageApplication
   readonly body: string
   /** Frozen reading metadata, independent of the sender's original authorization. */
@@ -126,6 +129,7 @@ export function validateAgentMuxMessageEnvelope(value: unknown): AgentMuxMessage
     ...(source.senderRuntimeId === undefined ? {} : { senderRuntimeId: messageEnvelopeString(source.senderRuntimeId, 'Message sender Runtime') }),
     ...(source.recipientRuntimeId === undefined ? {} : { recipientRuntimeId: messageEnvelopeString(source.recipientRuntimeId, 'Message recipient Runtime') }),
     ...(source.application === undefined ? {} : { application: parseMessageApplication(source.application) }),
+    ...(source.recipientInputEpoch===undefined?{}:{recipientInputEpoch:optionalInputEpoch(source.recipientInputEpoch).inputEpoch}),
     body: source.body,
     ...(channelProfile ? { channelProfile } : {}), ...(channelQuote ? { channelQuote } : {})
   })

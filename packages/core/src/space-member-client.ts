@@ -8,7 +8,7 @@ import type { AgentMuxHostedClient, AgentMuxHostedRpcPort, AgentMuxHostedStreamE
 import type { SpaceMemberTarget, SpaceMemberReadingTarget, SpaceMemberRoute } from './space-member.js'
 
 export type SpaceMemberClient = Pick<AgentMuxHostedClient, 'connect' | 'dispose' | 'onEvent' | 'onRunEvent' | 'runtimeOwnerIdentity' | 'runtimeIdentity' |
-  'catalog' | 'providers' | 'agentSessions' | 'agentSession' | 'readAgentSession' | 'reattachAgent' | 'attachTerminal' |
+  'readAgentInputEpoch' | 'catalog' | 'providers' | 'agentSessions' | 'agentSession' | 'readAgentSession' | 'reattachAgent' | 'attachTerminal' |
   'refreshRunAttachment' | 'readRunReplay' | 'releaseRunAttachment' | 'resizeTerminal' | 'writeAgent' | 'pasteAgent' |
   'submitAgentPrompt' | 'statusAgent' | 'inspectAgentInteractionOperation' | 'inspectAgentInput' | 'inspectAgentPromptSubmission' |
   'stopAgentInputWaiting' | 'signalAgent' |
@@ -21,7 +21,7 @@ export type SpaceMemberClient = Pick<AgentMuxHostedClient, 'connect' | 'dispose'
 
 /** Reuse the original exact-SID Hosted client and its reader/attachment machinery.
  * The carrier cannot invoke an arbitrary remote method or change this member. */
-export type SpaceMemberReadingClient = Pick<SpaceMemberClient, 'dispose' | 'readAgentConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'releaseConversationView' | 'observeConversation'>
+export type SpaceMemberReadingClient = Pick<SpaceMemberClient, 'readAgentInputEpoch' | 'dispose' | 'readAgentConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'releaseConversationView' | 'observeConversation'>
 export function connectSpaceMember(rpc: Pick<AgentMuxRpcClient, 'call' | 'subscribe'>, value: SpaceMemberTarget): Promise<SpaceMemberClient>
 export function connectSpaceMember(rpc: Pick<AgentMuxRpcClient, 'call' | 'subscribe'>, value: SpaceMemberReadingTarget): Promise<SpaceMemberReadingClient>
 export function connectSpaceMember(rpc: Pick<AgentMuxRpcClient, 'call' | 'subscribe'>, value: SpaceMemberRoute): Promise<SpaceMemberClient | SpaceMemberReadingClient>

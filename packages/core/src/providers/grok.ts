@@ -6,7 +6,7 @@ import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.j
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
 import { formatHookToolOutput } from '../hook-tool-outcome.js'
-import { observeGrokSessionHistory, readGrokSessionHistoryPage, readGrokConversationChanges, readGrokSessionHistoryRecord } from './grok-native-history.js'
+import { observeGrokSessionHistory, readGrokSessionHistoryPage, readGrokConversationChanges, readGrokSessionHistoryRecord, grokRecoveryFiles } from './grok-native-history.js'
 import { catalog, hookToolFields, runScopedHookCommand, hookCommandTimeout } from './shared.js'
 import { normalizeNativeSessionId } from '../agent-native-locator.js'
 import { readGrokInputInitialization } from './grok-input-initialization.js'
@@ -194,6 +194,7 @@ export function createGrokProvider(defineAgentProvider: ProviderFactory): AgentP
     hook: GROK_HOOKS,
     launchOptions: GROK_LAUNCH_OPTIONS,
     readSessionHistoryPage: readGrokSessionHistoryPage,
+    recoveryFiles: grokRecoveryFiles,
     readSessionHistoryRecord: readGrokSessionHistoryRecord,
     observeSessionHistory: observeGrokSessionHistory,
     readConversationChanges: readGrokConversationChanges,

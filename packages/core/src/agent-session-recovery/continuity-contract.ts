@@ -19,7 +19,7 @@ import type { AgentLaunchPromptInputPlan } from '../types.js'
 import { validateAgentInputWaitRef, type AgentInputWaitRef } from '../agent-input-wait.js'
 import { parseAgentContinuityControlReceipts } from './control-contract.js'
 import type { AgentMuxContinuityControlReceipt } from './control-contract.js'
-import { validateAgentLaunchPromptInputPlan, validateAgentPromptAdmissionIntent, validateAgentPromptInputKey, type AgentPromptAdmissionIntent, type AgentPromptInputKey } from '../agent-prompt-condition.js'
+import { optionalInputEpoch, validateAgentLaunchPromptInputPlan, validateAgentPromptAdmissionIntent, validateAgentPromptInputKey, type AgentPromptAdmissionIntent, type AgentPromptInputKey } from '../agent-prompt-condition.js'
 import { browserInputContextFields, parseBrowserInputContext } from '../browser-input-context.js'
 import { AgentMuxError } from '../errors.js'
 import { parseMoteMainEntrySource, type MoteMainEntrySource } from '../mote/main-entry-source.js'
@@ -111,6 +111,7 @@ export type AgentMuxContinuityPreviousInput = {
   key?: AgentPromptInputKey
 }
 export type AgentMuxContinuityInputDelivery = {
+  inputEpoch?: string
   context: {
     agentSessionId: string
     previousRun: AgentMuxRunRef
@@ -151,6 +152,7 @@ export type AgentMuxContinuityInputRequest = {
 
 /** The original lifecycle owner, never a fabricated terminal or Native acceptance ACK. */
 export type AgentMuxContinuityLaunchInput = {
+  inputEpoch?: string
   input: AgentMuxContinuityInputRequest
   prompt: string
   message: AgentPromptMessageContent
@@ -231,6 +233,8 @@ export type AgentMuxContinuitySupervision = {
 }
 
 export type AgentMuxContinuityOperation = {
+  /** Original authored/standing admission cut, never derived from a later observation. */
+  inputEpoch?: string
   /** This original recovery's pre-launch receipt; not live input qualification. */
   workspaceTrust?: AgentWorkspaceTrustPreparation
   moteMainEntry?: MoteMainEntrySource
@@ -285,6 +289,7 @@ export type AgentMuxContinuityOperation = {
 
 export function normalizeAgentContinuityLaunchInput(value: unknown): AgentMuxContinuityLaunchInput {
   const input = value as AgentMuxContinuityLaunchInput
+  optionalInputEpoch(input?.inputEpoch)
   if (!input || typeof input !== 'object' || !input.input || typeof input.input.submissionId !== 'string' || !input.input.submissionId ||
       typeof input.input.prompt !== 'string' || input.input.agentMuxNote !== undefined && typeof input.input.agentMuxNote !== 'string' ||
       input.input.authorHuman !== undefined && typeof input.input.authorHuman !== 'boolean' ||
@@ -307,6 +312,8 @@ export function normalizeAgentContinuityLaunchInput(value: unknown): AgentMuxCon
 export function normalizeAgentContinuityOperation(value: unknown): AgentMuxContinuityOperation {
   if (!value || typeof value !== 'object') throw new TypeError('Invalid continuity operation.')
   const op = value as AgentMuxContinuityOperation
+  optionalInputEpoch(op.inputEpoch)
+  if (op.recoveryDelivery) optionalInputEpoch(op.recoveryDelivery.inputEpoch)
   const trigger = parseAgentContinuityTrigger(op.trigger)
   if (op.workspaceTrust !== undefined) parseWorkspaceTrustPreparation(op.workspaceTrust)
   if (op.resolution !== undefined) {
@@ -430,6 +437,7 @@ export function normalizeAgentContinuityOperation(value: unknown): AgentMuxConti
 }
 
 export type AgentMuxAgentContinuityInput = {
+  inputEpoch?: string
   moteMainEntry?: MoteMainEntrySource
   standingIntent?: AgentStandingIntentReference
   agentSessionId: string

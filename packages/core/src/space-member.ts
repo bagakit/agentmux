@@ -32,7 +32,7 @@ export type PinnedSpaceMemberIdentity = SpaceMemberIdentity & { expectedAdmissio
 export type SpaceMemberReadingTarget = PinnedSpaceMemberIdentity & { kind: 'conversation' }
 export type SpaceMemberRoute = SpaceMemberTarget | SpaceMemberReadingTarget
 export const SPACE_MEMBER_INVOCATIONS = [
-  'readAgentSession', 'runtimeSubject', 'attachTerminal', 'refreshRunAttachment', 'readRunReplay',
+  'readAgentInputEpoch', 'readAgentSession', 'runtimeSubject', 'attachTerminal', 'refreshRunAttachment', 'readRunReplay',
   'releaseRunAttachment', 'resizeTerminal', 'writeAgent', 'pasteAgent', 'submitAgentPrompt',
   'statusAgent', 'inspectAgentInteractionOperation', 'inspectAgentInput', 'inspectAgentPromptSubmission',
   'stopAgentInputWaiting', 'rejoinAgentInputWaiting', 'signalAgent',

@@ -2,7 +2,7 @@ import { parseAgentTakeoverProvenance } from './agent-takeover.js'
 import { safeId } from './agent-identifiers.js'
 import { deriveObjectId } from './object-id.js'
 import { parseMoteMainRolloverDecision, type MoteMainRolloverDecision } from './mote/main-period.js'
-import { validateAgentPromptInputKey } from './agent-prompt-condition.js'
+import { optionalInputEpoch, validateAgentPromptInputKey } from './agent-prompt-condition.js'
 import { parseAgentInputSubmit } from './agent-input-submit.js'
 import type { AgentMuxAgentSession } from './types.js'
 import type { AgentMuxSpaceAgentFact, AgentMuxSpaceAddress, AgentMuxSpaceControlRequest } from './space-control.js'
@@ -97,7 +97,7 @@ export type AgentMuxSpatialAgentOpenRecord = {
   takeoverOptionalContext?: readonly import('./agent-outbound-message.js').AgentMuxOptionalContext[]
   takeoverContent?: Extract<AgentMuxSpatialAgentOpenRequest['content'], {kind:'new-agent'}>
   requestId: string; digest: string; agentSessionId: string; executorId: string; address: AgentMuxSpaceAddress
-  execution: { hostId: string; workspacePath: string; workspaceId: string | null; runtimeId?: string; executorRevision?: string; adoptedRoute?: import('./host-route.js').AdoptedHostRoute }
+  execution: { inputEpoch?: string; hostId: string; workspacePath: string; workspaceId: string | null; runtimeId?: string; executorRevision?: string; adoptedRoute?: import('./host-route.js').AdoptedHostRoute }
   /** Source-owned resource/placement; an execution home is never its substitute. */
   placement?: { runtimeId: string; hostId: string; workspacePath: string; workspaceId: string }
   executionBinding?: import('./agent-execution-contract.js').AgentExecutionReference
@@ -214,6 +214,7 @@ export function spatialAgentOpenRecord(graph: AgentMuxSpatialGraph, requestId: s
   if (original.requestId !== requestId || typeof original.digest !== 'string' || typeof original.agentSessionId !== 'string' ||
       !original.address || !original.execution || typeof original.execution.hostId !== 'string' || typeof original.execution.workspacePath !== 'string') throw new AgentMuxError(
     'The exact spatial creation association is unconfirmed. Keep its Session and original request.', 'SPATIAL_CREATION_UNCONFIRMED')
+  optionalInputEpoch(original.execution.inputEpoch)
   if (original.placement && (typeof original.placement.runtimeId !== 'string' || !original.placement.runtimeId || typeof original.placement.hostId !== 'string' || !original.placement.hostId ||
       typeof original.placement.workspaceId !== 'string' || !original.placement.workspaceId || typeof original.placement.workspacePath !== 'string' ||
       !original.placement.workspacePath || !original.execution.runtimeId || !original.execution.executorRevision) ||

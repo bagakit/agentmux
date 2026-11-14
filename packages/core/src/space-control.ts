@@ -350,9 +350,9 @@ export type AgentMuxSpaceControlRequest = Base & (
   | { operation: 'agent.open'; content:
       | ({ kind: 'new-agent'; executorId: string; agentTarget?: AgentMuxSpaceAgentTarget; executionWorkspaceId?: string; toolWorkspaceId?: string; nativeResumeSource?: import('./types.js').AgentNativeResumeSource; prompt?: string } & import('./agent-open-contract.js').AgentOpenLaunchFields)
       | ({ kind: 'takeover-agent'; executorId: string; agentTarget?: AgentMuxSpaceAgentTarget; source: import('./agent-takeover.js').AgentTakeoverSource } & import('./agent-open-contract.js').AgentOpenLaunchFields)
-      | { kind: 'fork-agent'; source: import('./agent-fork.js').AgentMuxAgentForkSource; prompt?: string }
+      | ({ kind: 'fork-agent'; source: import('./agent-fork.js').AgentMuxAgentForkSource; prompt?: string } & Pick<import('./agent-open-contract.js').AgentOpenLaunchFields, 'inputEpoch' | 'inputRuntimeId'>)
       /** A public request only: the Core service expands it into new-agent or fork-agent content before admission. */
-      | { kind: 'derived-action'; actionId: string; source: { agentSessionId: string }; executorId?: string }
+      | ({ kind: 'derived-action'; actionId: string; source: { agentSessionId: string }; executorId?: string } & Pick<import('./agent-open-contract.js').AgentOpenLaunchFields, 'inputEpoch' | 'inputRuntimeId'>)
       | { kind: 'agent-session'; agentSessionId: string; reference?: never; expectedResource?: never }
       | { kind: 'agent-session'; reference: import('./agent-open-contract.js').CoordinatorAgentReference; expectedResource: import('./agent-open-contract.js').AgentAssociationResource; agentSessionId?: never };
       destination: AgentMuxSpaceDestination; focus: boolean;

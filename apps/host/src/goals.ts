@@ -1,4 +1,5 @@
-import { openGoalFiniteInput, openGoalFiniteInspection } from './goal-finite-runtime.js'
+import { optionalInputEpoch } from '@agentmux/core/prompt-condition'
+import { readGoalInputEpoch, openGoalFiniteInput, openGoalFiniteInspection } from './goal-finite-runtime.js'
 import { demandAgentReferenceKey, type DemandSpaceMemberReference } from '@agentmux/demand/relations'
 import { createHash } from 'node:crypto'
 import { realpath } from 'node:fs/promises'
@@ -217,10 +218,12 @@ export function createHostGoals(options: {
       const participation = participant(name, 'create')
       await current(context)
       await assertNewGoalSourceRelations(await demands.get(goalId) ?? undefined, req, req.relationAccess, (access, runtimeId) => goalSourceRpc({ runtime: options.runtime, clients }, access, runtimeId, context), context.signal)
+      const priorGoal = await demands.get(goalId)
+      const birth = priorGoal?.creationOrigin ?? { ...optionalInputEpoch(await options.runtime().client.readAgentInputEpoch()), inputRuntimeId: options.runtime().ownerIdentity().runtimeId }
       const saved = await demands.create({ id: goalId, title: req.title, description: req.description ?? '', projectId: req.projectId ?? null, projectName: selected?.name ?? null,
         ...(req.priority ? { priority: req.priority } : {}), ...(req.status ? { status: req.status } : {}), ...(req.assigneeSessionIds ? { assigneeSessionIds: req.assigneeSessionIds } : {}),
         ...(req.supervisorSessionId === undefined ? {} : { supervisorSessionId: req.supervisorSessionId }), ...(req.sessionIds ? { sessionIds: req.sessionIds } : {}), ...(req.tags ? { tags: req.tags } : {}), ...(req.plannedStartAt === undefined ? {} : { plannedStartAt: req.plannedStartAt }), ...(req.targetAt === undefined ? {} : { targetAt: req.targetAt }), ...(req.parentDemandId === undefined ? {} : { parentDemandId: req.parentDemandId }), ...(req.phaseIndex === undefined ? {} : { phaseIndex: req.phaseIndex }),  ...(req.contentRefs ? { contentRefs: req.contentRefs } : {}) },
-        { operationId: req.requestId, discussionOperationId: await goalPmoOperation({ goalId, creationOperationId: req.requestId }, 'create'), ...(name ? { context: name } : {}), ...(participation ? { participation } : {}), creationOrigin: { requesterAsSupervisor: resolveGoalsPreferences(preferences as GoalsPreferences).requesterAsSupervisor } })
+        { operationId: req.requestId, discussionOperationId: await goalPmoOperation({ goalId, creationOperationId: req.requestId }, 'create'), ...(name ? { context: name } : {}), ...(participation ? { participation } : {}), creationOrigin: { ...optionalInputEpoch(birth.inputEpoch), ...(birth.inputRuntimeId === undefined ? {} : { inputRuntimeId: birth.inputRuntimeId }), requesterAsSupervisor: resolveGoalsPreferences(preferences as GoalsPreferences).requesterAsSupervisor } })
       if (req.decision) await saveDecision(saved.demand.id, req.decision, req.requestId, context)
       return { operation: req.operation, demand: await projectGoal(await get(saved.demand.id)), receipt: { demandId: saved.demand.id, createdAt: saved.demand.createdAt } }
     }
@@ -280,18 +283,18 @@ export function createHostGoals(options: {
       const saved = await update(goal, { ...(req.assigneeSessionIds ? { assigneeSessionIds: req.assigneeSessionIds } : req.operation === 'demand.handoff' && req.sessionId ? { assigneeSessionIds: [req.sessionId] } : {}),
         ...(req.supervisorSessionId === undefined ? {} : { supervisorSessionId: req.supervisorSessionId }), ...(req.operation === 'demand.assign' && req.projectId !== undefined ? { projectId: req.projectId } : {}) }, req.requestId, name, context, req.expectedUpdatedAt ?? goal.updatedAt, req.relationAccess)
       if (req.operation === 'demand.assign') {
-        if (req.start) await startGoal(saved.demand, req.sessionId, req.requestId, context)
+        if (req.start) await startGoal(saved.demand, req.sessionId, req.requestId, context, undefined, undefined, req.inputEpoch)
         return { operation: req.operation, demand: await projectGoal((await get(goal.id))), receipt: { demandId: goal.id, assignedAt: saved.demand.updatedAt, startRequested: req.start } }
       }
       return { operation: req.operation, demand: await projectGoal(saved.demand), receipt: { demandId: goal.id, handedOffAt: saved.demand.updatedAt, sessionId: req.sessionId ?? null } }
     }
     if (req.operation === 'demand.start') return req.agentReference
       ? await startQualifiedGoal(goal, req, context, name)
-      : await startGoal(goal, req.sessionId, req.requestId, context, req.continuation, req.expectedUpdatedAt)
+      : await startGoal(goal, req.sessionId, req.requestId, context, req.continuation, req.expectedUpdatedAt, req.inputEpoch)
     return undefined
   }
   const startGoal = async (goal: Demand, sessionId: string | undefined, operationId: string, context: AgentMuxRpcCallContext,
-    continuation?: { intervalMs: number; alignmentRevision: number }, expectedUpdatedAt?: number): Promise<Extract<AgentMuxControlResult, { operation: 'demand.start' }>> => {
+    continuation?: { intervalMs: number; alignmentRevision: number }, expectedUpdatedAt?: number, inputEpoch?: string): Promise<Extract<AgentMuxControlResult, { operation: 'demand.start' }>> => {
     const original = await demands.inspectDispatch(goal.id, operationId)
     if (original && 'target' in original) throw new AgentMuxError('The original qualified Start needs its frozen Source reference and current access, not a legacy Session alias.', 'CONTROL_REQUEST_CONFLICT')
     if (original && (sessionId !== undefined && original.agentSessionId !== sessionId || Boolean(continuation) !== (original.execution === 'continue'))) throw new AgentMuxError('The original Goal Start target or execution changed. Inspect that operation without replaying it.', 'CONTROL_REQUEST_CONFLICT')
@@ -307,10 +310,11 @@ export function createHostGoals(options: {
     await runtime.authorizeFutureIntent({ hostId: resolved.hostId, agentSessionId: selected, providerId: session.providerId, workspacePath: session.workspacePath }, context)
     if (original && original.runId !== session.run.runId) throw new AgentMuxError('The original Goal Start belongs to another Run. Its unknown input is retained without resending.', 'CONTROL_REQUEST_CONFLICT')
     const loop = continuation ? await progress.prepareGoal({ goalId: goal.id, agentSessionId: selected, hostId: resolved.hostId, providerId: session.providerId, workspacePath: session.workspacePath,
-      intervalMs: continuation.intervalMs, alignmentRevision: continuation.alignmentRevision, operationId, prompt: original?.prompt ?? (goal.description.trim() || goal.title) }, context) : undefined
+      intervalMs: continuation.intervalMs, alignmentRevision: continuation.alignmentRevision, ...optionalInputEpoch(original ? original.inputEpoch : inputEpoch), operationId, prompt: original?.prompt ?? (goal.description.trim() || goal.title) }, context) : undefined
     const prompt = original?.prompt ?? loop?.initialDelivery?.prompt ?? (goal.description.trim() || goal.title)
     await current(context)
-    const prepared = await demands.prepareDispatch(goal.id, { operationId, agentSessionId: selected, hostId: resolved.hostId, runId: session.run.runId,
+    const birthCut = original ?? optionalInputEpoch(inputEpoch)
+    const prepared = await demands.prepareDispatch(goal.id, { operationId, ...optionalInputEpoch(birthCut.inputEpoch), agentSessionId: selected, hostId: resolved.hostId, runId: session.run.runId,
       execution: loop ? 'continue' : 'finite', prompt, ...(loop ? { loopId: loop.loopId, alignmentRevision: continuation!.alignmentRevision } : {}) }, original ? undefined : expectedUpdatedAt ?? goal.updatedAt).catch(error => {
         const cause = isDemandStoreError(error) && record(error.cause) ? error.cause : undefined
         if (!original && cause?.kind === 'goal-start-version-conflict' && cause.goalId === goal.id && cause.operationId === operationId &&
@@ -319,11 +323,12 @@ export function createHostGoals(options: {
         throw error
       })
     const savedStart = preparedStart(prepared, operationId)
-    const condition = loop?.initialDelivery?.condition ?? agentPromptCondition(session)
+    const predecessor = loop?.initialDelivery?.condition ?? agentPromptCondition(session)
+    const condition = { expectedRun: predecessor.expectedRun, afterSubmissionId: predecessor.afterSubmissionId, ...optionalInputEpoch(savedStart.inputEpoch) }
     const control = { kind: 'agent' as const, hostId: resolved.hostId, agentSessionId: selected, run: session.run }
     const note = goalRoleInputNote(undefined, { role: 'executor', goalId: goal.id, agentSessionId: selected, runId: session.run.runId,
       source: { kind: loop ? 'goal-native-continuation' : 'goal-start', operationId } }, await runtime.inspectGoalStart(savedStart))
-    await dispatch.submit({ goalId: goal.id, operationId }, control, operationId, prompt, async () => {
+    await dispatch.submit({ goalId: goal.id, operationId, ...optionalInputEpoch(savedStart.inputEpoch) }, control, operationId, prompt, async () => {
       await current(context)
       if (loop) await progress.submitGoalInitial(control, goal.id, loop.loopId, operationId, prompt, condition,
         async (isCurrent, signal) => { await runtime.submitPrompt(control, prompt, operationId, condition, { isCurrent, signal }, undefined, false, note, undefined, undefined, context) })
@@ -346,7 +351,7 @@ export function createHostGoals(options: {
           (actor.kind === 'agent' ? !context.caller : actor.kind !== 'user' && actor.kind !== 'device'))
         throw new AgentMuxError('Saving a Goal Start request requires its original authenticated business author. The Agent and private request remain retained.', 'CONTROL_PERMISSION_DENIED')
       await current(context)
-      const receipt = await demands.requestDispatch(goal.id, { operationId: request.requestId, target: request.agentReference }, request.expectedUpdatedAt)
+      const receipt = await demands.requestDispatch(goal.id, { ...optionalInputEpoch(request.inputEpoch), operationId: request.requestId, target: request.agentReference }, request.expectedUpdatedAt)
       original = receipt.demand.dispatches?.find(item => item.operationId === request.requestId) ?? null
       fresh = receipt.replayed !== true
     }
@@ -369,7 +374,7 @@ export function createHostGoals(options: {
         role: 'executor', goalId: goal.id, agentSessionId: original.target.execution.agentSessionId, runId,
         source: { kind: 'goal-start', operationId: request.requestId } }, null)
       await current(context)
-      const prepared = await demands.prepareDispatch(goal.id, { operationId: request.requestId, target: original.target, runId,
+      const prepared = await demands.prepareDispatch(goal.id, { operationId: request.requestId, target: original.target, runId, ...optionalInputEpoch(original.inputEpoch),
         execution: 'finite', prompt, ...(agentMuxNote === undefined ? {} : { agentMuxNote }) })
       const savedStart = preparedStart(prepared, request.requestId)
       await dispatch.submitQualified(reference, port, request.resumeOriginal === true, () => current(context))
@@ -380,7 +385,7 @@ export function createHostGoals(options: {
         startedAt: savedStart.preparedAt, agentReference: original.target, run: { runId } } }
     } finally { await port.dispose().catch(error => { console.warn('Closing this exact Goal input reader was unconfirmed.', error) }) }
   }
-  return { execute, goalChanges: { subscribe: async (listener: (change: import('@agentmux/core').GoalChanges) => void | Promise<void>, _end: (error?: Error) => void | Promise<void>, signal: AbortSignal) => {
+  return { execute, inputEpoch: (input: import('@agentmux/core').GoalInputEpochInput, context: AgentMuxRpcCallContext) => readGoalInputEpoch({ runtime: options.runtime, clients }, input, context), goalChanges: { subscribe: async (listener: (change: import('@agentmux/core').GoalChanges) => void | Promise<void>, _end: (error?: Error) => void | Promise<void>, signal: AbortSignal) => {
       signal.throwIfAborted(); changeReaders.add(listener)
       try { const initial = { goalIds: (await demands.list()).map(goal => goal.id) }; signal.throwIfAborted(); return { initial, dispose: () => { changeReaders.delete(listener) } } }
       catch (error) { changeReaders.delete(listener); throw error }

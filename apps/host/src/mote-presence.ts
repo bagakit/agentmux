@@ -1,3 +1,4 @@
+import { optionalInputEpoch } from '@agentmux/core/prompt-condition'
 import { awaitUntilCancelled } from './await-until-cancelled.js'
 import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
@@ -163,11 +164,11 @@ export function createHostMotePresence(options: {
       }
       if (original.agentSessionId !== main.current.sessionId || original.hostId !== 'local' && original.hostId !== main.current.hostId) throw new Error('The original main execution identity changed.')
       await read(() => options.main.assertCurrent(main)); assertOpen()
-      if (!loop) loop = (await options.schedules.call('schedule.create', { target: { hostId: main.current.hostId, agentSessionId: original.agentSessionId, providerId: original.providerId, workspacePath: original.workspacePath }, everyMs: preference.intervalMs, prompt: heartbeat(target), managedSource: { sourceId, revision: main.roleRevision }, operationId: 'mote-presence-' + digest([sourceId, main.roleRevision]) })).schedule
+      if (!loop) loop = (await options.schedules.call('schedule.create', { ...optionalInputEpoch(original.creation?.inputEpoch),target: { hostId: main.current.hostId, agentSessionId: original.agentSessionId, providerId: original.providerId, workspacePath: original.workspacePath }, everyMs: preference.intervalMs, prompt: heartbeat(target), managedSource: { sourceId, revision: main.roleRevision }, operationId: 'mote-presence-' + digest([sourceId, main.roleRevision]) })).schedule
       else if (loop.status === 'paused' && loop.lastOutcome === 'unknown' && !loop.lastTickId && !loop.pendingCompletion && !loop.lastMutation) {
         // This is the original unconfirmed configuration write, not an unknown input.
         // Reuse its complete immutable request; the original scheduler converges the same Future Intent.
-        loop = (await options.schedules.call('schedule.create', { target: { hostId: loop.hostId, agentSessionId: loop.agentSessionId, providerId: loop.providerId, workspacePath: loop.workspacePath }, everyMs: loop.everyMs!, prompt: loop.prompt, managedSource: loop.managedSource!, operationId: loop.creationOperationId! })).schedule
+        loop = (await options.schedules.call('schedule.create', { ...optionalInputEpoch(loop.inputEpoch),target: { hostId: loop.hostId, agentSessionId: loop.agentSessionId, providerId: loop.providerId, workspacePath: loop.workspacePath }, everyMs: loop.everyMs!, prompt: loop.prompt, managedSource: loop.managedSource!, operationId: loop.creationOperationId! })).schedule
       }
       if (loop.status !== 'stopped' && loop.everyMs !== preference.intervalMs) loop = (await options.schedules.call('schedule.update', { scheduleId: loop.loopId, expectedRevision: loop.revision!, operationId: 'mote-interval-' + digest([loop.loopId, loop.revision, preference.intervalMs]), everyMs: preference.intervalMs })).schedule
       readings.set(id, { status: loop.status === 'active' ? 'active' : 'paused', schedule: loop, issue: loop.status === 'active' ? null : loop.status === 'stopped'

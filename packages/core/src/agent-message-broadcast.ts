@@ -1,3 +1,4 @@
+import { optionalInputEpoch } from './agent-prompt-condition.js'
 import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import { AgentMuxError } from './errors.js'
@@ -13,6 +14,7 @@ export type AgentMuxMessageBroadcastInput = {
   recipientSessionIds: readonly string[]
   text: string
   sourceChannel?: AgentMessageChannel
+  recipientInputEpochs?: Readonly<Record<string,string>>
 }
 export type AgentMuxBroadcastAuthor = { hostId: string; agentSessionId: string; runId: string }
 export type AgentMuxBroadcastIssue = { code: string; message: string }
@@ -20,6 +22,7 @@ export type AgentMuxBroadcastTarget = {
   agentSessionId: string
   hostId: string | null
   runId: string | null
+  recipientInputEpoch?:string
   operationId: string
   messageId: string
   unavailable?: AgentMuxBroadcastIssue
@@ -56,7 +59,7 @@ export type AgentMuxMessageBroadcastReceipt = {
   targets: readonly AgentMuxBroadcastTargetResult[]
 }
 
-export function normalizeBroadcastInput(value: AgentMuxMessageBroadcastInput): Required<AgentMuxMessageBroadcastInput> {
+export function normalizeBroadcastInput(value: AgentMuxMessageBroadcastInput): Required<Omit<AgentMuxMessageBroadcastInput,'recipientInputEpochs'>>&Pick<AgentMuxMessageBroadcastInput,'recipientInputEpochs'> {
   const operationId = messageEnvelopeString(value.operationId, 'Broadcast operation ID')
   if (typeof value.text !== 'string' || !Array.isArray(value.recipientSessionIds) || !value.recipientSessionIds.length) throw new AgentMuxError(
     'A broadcast requires an original body and an explicit nonempty Session ID array.', 'INVALID_CONTROL_REQUEST')
@@ -64,7 +67,10 @@ export function normalizeBroadcastInput(value: AgentMuxMessageBroadcastInput): R
     if (typeof id !== 'string' || id !== id.trim()) throw new AgentMuxError('Broadcast recipients require complete exact Session IDs.', 'INVALID_CONTROL_REQUEST')
     return messageEnvelopeString(id, 'Broadcast recipient Session ID')
   }))].sort()
-  return { operationId, recipientSessionIds: ids, text: value.text, sourceChannel: normalizeMessageChannel(value.sourceChannel ?? 'api') }
+  const epochs=value.recipientInputEpochs
+  if(epochs!==undefined&&(!epochs||typeof epochs!=='object'||Array.isArray(epochs)||Object.keys(epochs).some(id=>!ids.includes(id))))throw new AgentMuxError('Broadcast input epochs must name only its original recipients.','INVALID_CONTROL_REQUEST')
+  const recipientInputEpochs=epochs===undefined?undefined:Object.fromEntries(Object.entries(epochs).map(([id,epoch])=>[id,optionalInputEpoch(epoch).inputEpoch!]))
+  return { ...(recipientInputEpochs?{recipientInputEpochs}:{}),operationId, recipientSessionIds: ids, text: value.text, sourceChannel: normalizeMessageChannel(value.sourceChannel ?? 'api') }
 }
 export function broadcastTargetIdentity(operationId: string, agentSessionId: string): Pick<AgentMuxBroadcastTarget, 'operationId' | 'messageId'> {
   const digest = createHash('sha256').update(JSON.stringify(['broadcast-target', operationId, agentSessionId])).digest('hex')
@@ -75,6 +81,7 @@ export function validateBroadcastIntent(value: AgentMuxMessageBroadcastIntent): 
   for (const item of Object.values(value.author)) messageEnvelopeString(item, 'Broadcast original author')
   if (!Number.isFinite(value.createdAt) || !isDeepStrictEqual(value.targets.map(target => target.agentSessionId), input.recipientSessionIds)) throw new AgentMuxError('The frozen broadcast target set is invalid.', 'BROADCAST_INTENT_CONFLICT')
   for (const target of value.targets) {
+    optionalInputEpoch(target.recipientInputEpoch)
     if (target.hostId !== null) messageEnvelopeString(target.hostId, 'Broadcast target Host')
     if (target.runId !== null) messageEnvelopeString(target.runId, 'Broadcast target Run')
     if (!isDeepStrictEqual(broadcastTargetIdentity(value.operationId, target.agentSessionId), { operationId: target.operationId, messageId: target.messageId }) ||
@@ -84,9 +91,9 @@ export function validateBroadcastIntent(value: AgentMuxMessageBroadcastIntent): 
   return structuredClone({ ...value, sourceChannel: input.sourceChannel,
     ...(value.sourceDevice === undefined ? {} : { sourceDevice: normalizeOperationDevice(value.sourceDevice) }) })
 }
-export function assertBroadcastIntent(intent: AgentMuxMessageBroadcastIntent, input: Required<AgentMuxMessageBroadcastInput>, author: AgentMuxBroadcastAuthor, device?: AgentOperationDevice): void {
+export function assertBroadcastIntent(intent: AgentMuxMessageBroadcastIntent, input: Required<Omit<AgentMuxMessageBroadcastInput,'recipientInputEpochs'>>&Pick<AgentMuxMessageBroadcastInput,'recipientInputEpochs'>, author: AgentMuxBroadcastAuthor, device?: AgentOperationDevice): void {
   if (intent.body !== input.text || intent.sourceChannel !== input.sourceChannel || !isDeepStrictEqual(intent.author, author) ||
-      !isDeepStrictEqual(intent.targets.map(target => target.agentSessionId), input.recipientSessionIds) || !isDeepStrictEqual(intent.sourceDevice, device)) throw new AgentMuxError(
+      intent.targets.some(target=>target.recipientInputEpoch!==input.recipientInputEpochs?.[target.agentSessionId]) || !isDeepStrictEqual(intent.targets.map(target => target.agentSessionId), input.recipientSessionIds) || !isDeepStrictEqual(intent.sourceDevice, device)) throw new AgentMuxError(
     'This original broadcast already names another author, body or recipient set. Keep its original operation and target message IDs.', 'BROADCAST_INTENT_CONFLICT')
 }
 const issue = (error: unknown): AgentMuxBroadcastIssue => ({ code: error instanceof AgentMuxError ? error.code : 'BROADCAST_TARGET_UNCONFIRMED',
@@ -113,8 +120,8 @@ export async function runAgentMessageBroadcast(input: AgentMuxMessageBroadcastIn
         const target = await ports.resolve(agentSessionId)
         if (target.agentSessionId !== agentSessionId) throw new AgentMuxError('Broadcast requires the complete original Session ID, not a prefix.', 'INVALID_CONTROL_REQUEST')
         if (target.hostId !== author.hostId) throw new AgentMuxError('Broadcast does not grant cross-owner Agent authority.', 'CONTROL_PERMISSION_DENIED')
-        return { agentSessionId, hostId: target.hostId, runId: target.runId, ...identity }
-      } catch (error) { return { agentSessionId, hostId: null, runId: null, ...identity, unavailable: issue(error) } }
+        return { agentSessionId, hostId: target.hostId, runId: target.runId,...(normalized.recipientInputEpochs?.[agentSessionId]===undefined?{}:{recipientInputEpoch:normalized.recipientInputEpochs[agentSessionId]}), ...identity }
+      } catch (error) { return { agentSessionId, hostId: null, runId: null,...(normalized.recipientInputEpochs?.[agentSessionId]===undefined?{}:{recipientInputEpoch:normalized.recipientInputEpochs[agentSessionId]}), ...identity, unavailable: issue(error) } }
     }))
     original = await ports.queue.claimBroadcast({ operationId: normalized.operationId, author, body: normalized.text,
       sourceChannel: normalized.sourceChannel, ...(ports.sourceDevice ? { sourceDevice: ports.sourceDevice } : {}), createdAt: Date.now(), targets }, reauthorize)

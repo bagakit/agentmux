@@ -16,7 +16,10 @@ import type { AgentMuxMessageQuery, AgentMuxMessagePage, AgentMuxMessageMetadata
 import { isDeepStrictEqual } from 'node:util'
 import { mintObjectId } from './object-id.js'
 import { chmod, mkdir } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { watch, type FSWatcher } from 'node:fs'
+import { basename, dirname, relative, sep } from 'node:path'
+import type { RecoverySource } from './storage-recovery.js'
+import { openMessageJournalMutex, messageRestorationHold, restoreMessageJournalMember, captureMessageJournalRecovery } from './agent-message-journal.js'
 import { setTimeout as delay } from 'node:timers/promises'
 import type { DatabaseSync } from 'node:sqlite'
 import { AgentMuxError } from './errors.js'
@@ -34,7 +37,7 @@ import { renderAgentMuxMessageEnvelope } from './agent-message-render.js'
 import { prepareMessageInputRepresentation, messageInputWireMatches } from './agent-message-input.js'
 import { browserInputContextFields } from './browser-input-context.js'
 import { normalizeOperationDevice } from './operation-device.js'
-import { configureMessageJournal, initializeInputDeliveryIndex, initializeInputWaitingIndex, inputControlJournalSchema, messageRouteJournalSchema, mainInputRouteJournalSchema, messageObservationJournalSchema, messageObservationQuery, dispatchDiscoveryJournalSchema, dispatchReplyJournalSchema, initializeMessageEventIndex, messageBroadcastJournalSchema, openMessageJournal, openMessageJournalSnapshot, syncMessageJournal } from './agent-message-journal.js'
+import { configureMessageJournal, initializeRestorationHoldIndex, initializeInputDeliveryIndex, initializeInputWaitingIndex, inputControlJournalSchema, messageRouteJournalSchema, mainInputRouteJournalSchema, messageObservationJournalSchema, messageObservationQuery, dispatchDiscoveryJournalSchema, dispatchReplyJournalSchema, initializeMessageEventIndex, messageBroadcastJournalSchema, openMessageJournal, openMessageJournalSnapshot, syncMessageJournal } from './agent-message-journal.js'
 import { assertAgentMessageRouteIntent, validateAgentMessageRoute, type AgentMessageRoute } from './agent-message-route.js'
 import { agentInputJournalKey, agentInputDeliveryKey, validateAgentInputRetry, validateAgentInputControlId, validateAgentInputDeliveryKey, validateAgentInputWaitRef, isRestorableLocalPromptInput,
   type AgentInputJournalIntent, type AgentInputJournalEntry, type AgentInputSelector, type AgentInputWaitControl,
@@ -148,6 +151,7 @@ type InputMailboxJournalItem = { sequence: number; recordedAt: number } & (
 
 export type AgentMuxMessageJournalRecord =
   | AgentInputWaitJournalRecord
+  | { readonly kind: 'restored-input-hold'; readonly sequence: number; readonly operationId: string; readonly throughSequence: number; readonly sourceSHA256: string; readonly sourceMutexSHA256: string }
   | { readonly kind: 'mote-input-observation'; readonly sequence: number; readonly observation: MoteInputObservation }
   | { readonly kind: 'broadcast'; readonly sequence: number; readonly intent: AgentMuxMessageBroadcastIntent }
   | { readonly kind: 'broadcast-target'; readonly sequence: number; readonly operationId: string; readonly agentSessionId: string; readonly at: number }
@@ -225,7 +229,28 @@ function assertGeneration(value: number): void {
   }
 }
 
+type QueueRecoveryMember=import('./storage-recovery.js').RecoveryRestoreMember & {originalSHA256?:string}
+type QueueRecoveryContext={original(memberId:string):Promise<QueueRecoveryMember|null>;inputCutSourceSHA256:string}
+type QueueRecoveryPreparation={state:'prepared';members:QueueRecoveryMember[];metadata?:Record<string,string|number|boolean>}|{state:'unavailable';selectors:Array<{memberId?:string;reason:string}>}
 export class DurableAgentMuxMessageQueue {
+  /** Stage the original complete pair and hold before any target publication. */
+  async prepareRecoveryRestore(input: import('./agent-message-journal.js').MessageJournalRestorePreparation) {
+    const { prepareMessageJournalRestore } = await import('./agent-message-journal.js')
+    const prepared = await prepareMessageJournalRestore(this.path, input)
+    try {
+      const staged = new DurableAgentMuxMessageQueue(prepared.file)
+      const throughSequence = await staged.holdRestoredInputs(input.operationId, prepared.sourceSHA256, prepared.sourceMutexSHA256)
+      return { ...prepared, throughSequence, operationId: input.operationId }
+    } catch (error) {
+      const { rm } = await import('node:fs/promises')
+      await rm(input.stagingPath, { recursive: true, force: true }); throw error
+    }
+  }
+
+  async restoreRecoveryMember(member: import('./storage-recovery.js').RecoveryRestoreMember & {originalSHA256?:string}) {
+    return restoreMessageJournalMember(this.path,member)
+  }
+
   readonly queueId: string
   private database: DatabaseSync | undefined
 
@@ -240,6 +265,77 @@ export class DurableAgentMuxMessageQueue {
 
   constructor(readonly path = defaultAgentMuxMessageQueuePath()) {
     this.queueId = queueIdFor(path)
+  }
+
+  /** This owner exports only its exact journal namespace; capture never opens a writer or initializes absent files. */
+  storageRecoverySource(): RecoverySource & {readonly ownedPaths:readonly string[];requiresInputCut:true;prepareRestore(members:QueueRecoveryMember[],directory:string,context?:QueueRecoveryContext):Promise<QueueRecoveryPreparation>} {
+    const owned = [this.path, this.path + '.mutex.sqlite'].flatMap(path => [path, path + '-journal', path + '-wal', path + '-shm'])
+    const directory = dirname(this.path), base = basename(this.path), archivePrefix = base + '.original-'
+    const watchers = new Set<{ ensure(): void; active(): boolean }>()
+    return { id: 'core.message-intents', requiresInputCut:true,
+      prepareRestore:async(members,directory,context)=>{
+        const unavailable=(reason:string):QueueRecoveryPreparation=>({state:'unavailable',selectors:members.map(member=>({memberId:member.id,reason}))})
+        if(members.some(member=>member.id==='mutex'))return unavailable('original-mutex-writer-quiescence-unconfirmed')
+        const archives=members.filter(member=>/^original-[a-f0-9]{64}$/u.test(member.id)),selected=members.filter(member=>!archives.includes(member))
+        if(archives.some(member=>member.target!==this.path+'.'+member.id))return unavailable('original-archive-target-unconfirmed')
+        if(selected.length>1||selected.some(member=>member.id!=='journal'||member.target!==this.path)||selected.length&&!context)return unavailable('qualified-original-message-pair-required')
+        const {snapshotRecoveryFile,hashRecoveryFile}=await import('./storage-recovery.js'),{join}=await import('node:path'),{rm,lstat}=await import('node:fs/promises')
+        let pair:{journal:QueueRecoveryMember;mutex:QueueRecoveryMember;incarnation:string}|undefined
+        if(selected.length){
+          if(!/^[a-f0-9]{64}$/u.test(context!.inputCutSourceSHA256))return unavailable('qualified-input-cut-source-required')
+          const journal=await context!.original('journal'),mutex=await context!.original('mutex')
+          if(!journal||!mutex||journal.target!==this.path||mutex.target!==this.path+'.mutex.sqlite'||journal.operationId!==selected[0]!.operationId||mutex.operationId!==journal.operationId)return unavailable('qualified-original-message-pair-required')
+          try{const present=await lstat(this.path+'.mutex.sqlite');if(!present.isFile()||present.isSymbolicLink())return unavailable('original-mutex-writer-quiescence-unconfirmed')}catch{return unavailable('original-mutex-writer-quiescence-unconfirmed')}
+          const {DatabaseSync}=await import('node:sqlite'),db=new DatabaseSync(journal.file,{readOnly:true})
+          try{pair={journal,mutex,incarnation:String(db.prepare('SELECT incarnation FROM metadata').get()?.incarnation)}}finally{db.close()}
+        }
+        await mkdir(directory,{mode:0o700})
+        try{
+          const output:QueueRecoveryMember[]=[],metadata:Record<string,string|number|boolean>={inertArchives:!pair}
+          if(pair){
+            const {journal,mutex,incarnation}=pair
+            const prepared=await this.prepareRecoveryRestore({sourcePath:journal.file,sourceMutexPath:mutex.file,stagingPath:join(directory,'journal'),operationId:journal.operationId,expectedIncarnation:incarnation})
+            if(prepared.sourceSHA256!==(journal.originalSHA256??journal.sha256)||prepared.sourceMutexSHA256!==(mutex.originalSHA256??mutex.sha256)){await rm(directory,{recursive:true,force:true});return unavailable('original-message-pair-changed')}
+            output.push({...journal,file:prepared.file,sha256:(await hashRecoveryFile(prepared.file)).sha256,originalSHA256:prepared.sourceSHA256})
+            Object.assign(metadata,{throughSequence:prepared.throughSequence,sourceMutexSHA256:prepared.sourceMutexSHA256,inputCutSourceSHA256:context!.inputCutSourceSHA256})
+          }
+          for(const member of archives){const file=join(directory,member.id);await snapshotRecoveryFile(member.file,file);output.push({...member,file,sha256:(await hashRecoveryFile(file)).sha256})}
+          return {state:'prepared',members:output,metadata}
+        }catch(error){await rm(directory,{recursive:true,force:true});throw error}
+      }, restoreMissing:member=>this.restoreRecoveryMember(member), get ownedPaths() { return [...owned] },
+      capture: async output => {
+        for (const watcher of watchers) watcher.ensure()
+        const { archives, ...capture } = await captureMessageJournalRecovery(this.path, output)
+        for (const path of archives) if (!owned.includes(path)) owned.push(path)
+        if ([...watchers].some(watcher => !watcher.active())) capture.gaps.push({ sourceId: 'core.message-intents', code: 'RECOVERY_MESSAGE_WATCH_UNAVAILABLE' })
+        return capture
+      },
+      subscribe: changed => {
+        let watcher: FSWatcher | undefined, disposed = false
+        const notify = () => { if (!disposed) try { changed() } catch { /* Maintenance observers cannot revoke original queue work. */ } }
+        const attach = (path = directory): void => {
+          if (disposed) return
+          try {
+            watcher = watch(path, { persistent: false }, (_event, name) => {
+              const entry = name === null ? null : String(name)
+              if (path !== directory) {
+                if (entry !== null && entry !== relative(path, directory).split(sep)[0]) return
+                watcher?.close(); watcher = undefined; attach(); notify(); return
+              }
+              if (entry === null || owned.some(target => basename(target) === entry) ||
+                  entry.startsWith(archivePrefix) && /^[a-f0-9]{64}$/u.test(entry.slice(archivePrefix.length))) notify()
+            })
+            watcher.on('error', () => { watcher?.close(); watcher = undefined; notify() })
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === 'ENOENT' && dirname(path) !== path) attach(dirname(path))
+            else queueMicrotask(notify)
+          }
+        }
+        const observation = { ensure: () => { if (!watcher) attach() }, active: () => watcher !== undefined }
+        watchers.add(observation); attach()
+        return () => { disposed = true; watcher?.close(); watchers.delete(observation) }
+      }
+    }
   }
 
   /** Rebuild only the derived Mote positions once, in the journal's writer transaction.
@@ -279,7 +375,7 @@ export class DurableAgentMuxMessageQueue {
     // check-then-unlink race. A legacy orphan .lock file is deliberately ignored.
     const mutexPath = `${this.path}.mutex.sqlite`
     let mutex: DatabaseSync | undefined
-    let acquired = false
+    let acquired = false, freshMutex = false, initializedMutex = false, mutexIdentity:string|undefined
     let failed = false
     let failure: unknown
     let result!: T
@@ -289,13 +385,14 @@ export class DurableAgentMuxMessageQueue {
       await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
       // Loading the queue's validator or CLI help must not initialize SQLite or put an
       // experimental-module warning in the machine-readable error receipt stream.
-      const { DatabaseSync } = await import('node:sqlite')
       // Only lock acquisition waits. No operation/body has run, so this never resends an effect.
       // Match the local Session Store's bounded 300 attempts at a 5–15ms async cadence.
       for (let attempt = 0; ; attempt++) {
         transaction.signal?.throwIfAborted()
         try {
-          stage = 'mutex-open'; mutex = new DatabaseSync(mutexPath)
+          stage = 'mutex-open'; const opened=await openMessageJournalMutex(this.path);mutex=opened.mutex
+          if(mutexIdentity!==undefined&&mutexIdentity!==opened.identity)throw new Error('The original message mutex changed while waiting for its lock.')
+          mutexIdentity=opened.identity;freshMutex ||= opened.fresh
           stage = 'mutex-configure'; await chmod(mutexPath, 0o600); configureMessageJournal(mutex)
           // A failed IMMEDIATE attempt can retain a SHARED read lease and block the holder's
           // commit. Exclusive acquisition + closing each failed handle keeps waiters harmless.
@@ -313,13 +410,14 @@ export class DurableAgentMuxMessageQueue {
         this.database = await openMessageJournal(this.path, mutex, (db, record) => {
           this.database = db
           try { this.applyRecord(record) } finally { this.database = undefined }
-        })
+        },freshMutex,()=>{initializedMutex=true})
         stage = 'journal-acquire'
         this.db.exec('BEGIN IMMEDIATE')
         // Existing journals are validated before their owner adds internal projections.
         this.db.exec(inputControlJournalSchema)
         initializeInputDeliveryIndex(this.db)
         initializeInputWaitingIndex(this.db)
+        initializeRestorationHoldIndex(this.db)
         this.db.exec(messageBroadcastJournalSchema)
         this.db.exec(messageRouteJournalSchema)
         this.db.exec(mainInputRouteJournalSchema)
@@ -356,7 +454,7 @@ export class DurableAgentMuxMessageQueue {
         this.database = undefined
       }
       if (acquired) {
-        try { mutex?.exec('ROLLBACK') } catch (error) { cleanup.push({ stage: 'mutex-rollback', error }) }
+        try { mutex?.exec(initializedMutex?'COMMIT':'ROLLBACK') } catch (error) { cleanup.push({ stage: initializedMutex?'mutex-cutover-confirm':'mutex-rollback', error }) }
       }
       try { mutex?.close() } catch (error) { cleanup.push({ stage: 'mutex-close', error }) }
       if (cleanup.length) {
@@ -437,8 +535,9 @@ export class DurableAgentMuxMessageQueue {
     const row = this.db.prepare(`SELECT json_extract(original.json, '$.envelope.senderSessionId') AS sender_id,
       json_extract(original.json, '$.envelope.recipientSessionId') AS recipient_id,
       json_extract(original.json, '$.envelope.recipientRunId') AS run_id,
+      json_extract(original.json, '$.envelope.recipientInputEpoch') AS input_epoch,
       json_extract(original.json, '$.deliveryMode') AS delivery_mode,
-      position.notification_id, position.submitted FROM messages m
+      m.message_sequence, position.notification_id, position.submitted FROM messages m
       JOIN records original ON original.sequence=m.message_sequence
       LEFT JOIN a2a_message_notifications position ON position.message_id=m.message_id WHERE m.message_id=?`).get(messageId)
     return row
@@ -506,29 +605,32 @@ export class DurableAgentMuxMessageQueue {
 
   /** Only unfinished participants, not historical messages or unrelated Sessions. */
   async pendingNotificationRecipients(): Promise<readonly string[]> {
-    return this.withLock(async () => this.db.prepare(`SELECT recipient_id FROM a2a_message_notifications
-      WHERE submitted=0 AND notification_id IS NULL UNION SELECT recipient_id FROM a2a_notifications WHERE active=1`).all()
-      .map(row => String(row.recipient_id)))
+    return this.withLock(async () => {this.restoredInputFrontier();return this.db.prepare(`SELECT recipient_id FROM a2a_message_notifications
+      WHERE submitted=0 AND notification_id IS NULL AND message_sequence>(SELECT COALESCE(MAX(frontier),0) FROM restoration_holds) UNION SELECT recipient_id FROM a2a_notifications WHERE active=1 AND original_sequence>(SELECT COALESCE(MAX(frontier),0) FROM restoration_holds)`).all()
+      .map(row => String(row.recipient_id))})
   }
 
   async hasPendingNotification(agentSessionId: string): Promise<boolean> {
-    return this.withLock(async () => Boolean(this.db.prepare('SELECT 1 FROM a2a_message_notifications WHERE recipient_id=? AND submitted=0 UNION ALL SELECT 1 FROM a2a_notifications WHERE recipient_id=? AND active=1 LIMIT 1').get(agentSessionId,agentSessionId)))
+    return this.withLock(async () => {this.restoredInputFrontier();return Boolean(this.db.prepare('SELECT 1 FROM a2a_message_notifications WHERE recipient_id=? AND submitted=0 AND message_sequence>(SELECT COALESCE(MAX(frontier),0) FROM restoration_holds) UNION ALL SELECT 1 FROM a2a_notifications WHERE recipient_id=? AND active=1 AND original_sequence>(SELECT COALESCE(MAX(frontier),0) FROM restoration_holds) LIMIT 1').get(agentSessionId,agentSessionId))})
   }
 
   /** New original references distinguish work at the same idle boundary from outcome observations. */
-  async pendingNotificationPosition(agentSessionId: string, sourceRuns: readonly string[]): Promise<number> {
-    return this.withLock(async () => Number(this.db.prepare(`SELECT COALESCE(MAX(message_sequence),0) AS position
+  async pendingNotificationPosition(agentSessionId: string, sourceRuns: readonly string[], inputEpoch?:string): Promise<number> {
+    return this.withLock(async () => {this.restoredInputFrontier();return Number(this.db.prepare(`SELECT COALESCE(MAX(message_sequence),0) AS position
       FROM a2a_message_notifications WHERE recipient_id=? AND run_id IN (SELECT value FROM json_each(?)) AND submitted=0 AND notification_id IS NULL
+      AND message_sequence>(SELECT COALESCE(MAX(frontier),0) FROM restoration_holds)
+      AND (SELECT json_extract(r.json,'$.envelope.recipientInputEpoch') FROM records r WHERE r.sequence=a2a_message_notifications.message_sequence) IS ?
       AND NOT EXISTS (SELECT 1 FROM a2a_unresolved_notification_references refs WHERE refs.message_id=a2a_message_notifications.message_id)`)
-      .get(agentSessionId, JSON.stringify(sourceRuns))!.position))
+      .get(agentSessionId, JSON.stringify(sourceRuns),inputEpoch??null)!.position)})
   }
 
   /** A missing recovery relationship is an observation gap, scoped to untouched references only. */
-  async excludedNotificationPosition(agentSessionId: string, sourceRuns: readonly string[]): Promise<number> {
-    return this.withLock(async () => Number(this.db.prepare(`SELECT COALESCE(MAX(message_sequence),0) AS position
-      FROM a2a_message_notifications WHERE recipient_id=? AND run_id NOT IN (SELECT value FROM json_each(?)) AND submitted=0 AND notification_id IS NULL
+  async excludedNotificationPosition(agentSessionId: string, sourceRuns: readonly string[], inputEpoch?:string): Promise<number> {
+    return this.withLock(async () => {this.restoredInputFrontier();return Number(this.db.prepare(`SELECT COALESCE(MAX(message_sequence),0) AS position
+      FROM a2a_message_notifications WHERE recipient_id=? AND (run_id NOT IN (SELECT value FROM json_each(?)) OR (SELECT json_extract(r.json,'$.envelope.recipientInputEpoch') FROM records r WHERE r.sequence=a2a_message_notifications.message_sequence) IS NOT ?) AND submitted=0 AND notification_id IS NULL
+      AND message_sequence>(SELECT COALESCE(MAX(frontier),0) FROM restoration_holds)
       AND NOT EXISTS (SELECT 1 FROM a2a_unresolved_notification_references refs WHERE refs.message_id=a2a_message_notifications.message_id)`)
-      .get(agentSessionId, JSON.stringify(sourceRuns))!.position))
+      .get(agentSessionId, JSON.stringify(sourceRuns),inputEpoch??null)!.position)})
   }
 
   /** Explicit user notification also resolves IDs without loading opaque original bodies. */
@@ -548,11 +650,12 @@ export class DurableAgentMuxMessageQueue {
   async prepareMoteInputNotification(id: string, phase: MoteInputNoticePhase, attempt: number, condition: AgentPromptCondition,
     idle: NonNullable<AgentMuxMessageNotification['idle']>): Promise<AgentMuxMessageNotification> {
     return this.withLock(async () => {
-      const row = this.db.prepare('SELECT r.json FROM mote_input_observations m JOIN records r ON r.sequence=m.state_sequence WHERE m.id=?').get(id)
+      const row = this.db.prepare('SELECT m.state_sequence,r.json FROM mote_input_observations m JOIN records r ON r.sequence=m.state_sequence WHERE m.id=?').get(id)
       if (!row) throw new AgentMuxError('The original Mote input observation is unavailable.', 'MOTE_INPUT_OBSERVATION_UNCONFIRMED')
       const observation = parseMoteInputObservation((JSON.parse(String(row.json)) as Extract<JournalRecord, {kind:'mote-input-observation'}>).observation)
       const notificationId = moteInputNoticeId(id, phase, attempt)
       const existing = this.notification(notificationId)
+      if (Number(row.state_sequence) <= this.restoredInputFrontier()) this.refuseRestoredInput()
       if (existing) return existing
       if (!observation.binding || observation.binding.primary.hostId !== 'local') throw new AgentMuxError('The original primary input owner is unavailable here.', 'MOTE_INPUT_OBSERVATION_UNCONFIRMED')
       if (phase === 'result' ? !observation.result : !['admitted','terminal-confirmed'].includes(observation.input)) throw new AgentMuxError('The original input or result is not confirmed.', 'MOTE_INPUT_OBSERVATION_UNCONFIRMED')
@@ -573,20 +676,23 @@ export class DurableAgentMuxMessageQueue {
       const condition = validateAgentPromptCondition(input.condition)
       const existing = this.notification(input.notificationId)
       if (existing) {
+        if (Number(this.db.prepare('SELECT original_sequence FROM a2a_notifications WHERE notification_id=?').get(input.notificationId)!.original_sequence) <= this.restoredInputFrontier()) this.refuseRestoredInput()
         if (existing.key.agentSessionId !== input.agentSessionId || existing.key.expectedRun.runId !== condition.expectedRun.runId ||
             input.messageIds && !isDeepStrictEqual(existing.messageIds, input.messageIds)) throw new AgentMuxError('This notification operation already names another target or reference set.', 'A2A_NOTIFICATION_CONFLICT')
         return existing
       }
       const positions = input.messageIds ? input.messageIds.map(id => ({ message_id: id })) : this.db.prepare(`SELECT message_id FROM a2a_message_notifications
         WHERE recipient_id=? AND run_id IN (SELECT value FROM json_each(?)) AND submitted=0 AND notification_id IS NULL
+        AND message_sequence>(SELECT COALESCE(MAX(frontier),0) FROM restoration_holds)
+        AND (SELECT json_extract(r.json,'$.envelope.recipientInputEpoch') FROM records r WHERE r.sequence=a2a_message_notifications.message_sequence) IS ?
         AND NOT EXISTS (SELECT 1 FROM a2a_unresolved_notification_references refs WHERE refs.message_id=a2a_message_notifications.message_id)
         ORDER BY message_sequence LIMIT 100`)
-        .all(input.agentSessionId, JSON.stringify(input.sourceRuns ?? [condition.expectedRun.runId]))
+        .all(input.agentSessionId, JSON.stringify(input.sourceRuns ?? [condition.expectedRun.runId]),condition.inputEpoch??null)
       if (!positions.length) {
         // A turn-end decision only carries new references; it never answers with an earlier notice's wire.
         if (input.turnEnd) return null
         const active = this.db.prepare(`SELECT n.notification_id FROM a2a_notifications n JOIN records original ON original.sequence=n.original_sequence
-          WHERE n.recipient_id=? AND n.run_id=? AND n.active=1 AND json_extract(original.json, '$.notification.mode')='idle' ORDER BY n.original_sequence LIMIT 1`)
+          WHERE n.recipient_id=? AND n.run_id=? AND n.active=1 AND n.original_sequence>(SELECT COALESCE(MAX(frontier),0) FROM restoration_holds) AND json_extract(original.json, '$.notification.mode')='idle' ORDER BY n.original_sequence LIMIT 1`)
           .get(input.agentSessionId, condition.expectedRun.runId)
         return active ? this.notification(String(active.notification_id))! : null
       }
@@ -594,7 +700,9 @@ export class DurableAgentMuxMessageQueue {
       let wire = ''
       for (const position of positions) {
         const original = this.messageReference(String(position.message_id))
+        if (original && Number(original.message_sequence) <= this.restoredInputFrontier()) this.refuseRestoredInput()
         if (!original || typeof original.sender_id !== 'string') throw new AgentMuxError('An original peer message is required.', 'MESSAGE_NOT_FOUND')
+        if(!input.messageIds && (original.input_epoch??undefined)!==condition.inputEpoch)this.refuseRestoredInput()
         const candidate = { senderSessionId: original.sender_id, messageId: String(position.message_id) }
         const candidateWire = renderAgentMuxMessageReferences([...references, candidate], AGENTMUX_A2A_REFERENCE_REMINDER)
         let selectedWire = candidateWire
@@ -683,7 +791,7 @@ export class DurableAgentMuxMessageQueue {
     return await this.withLock(async () => {
       const rows = this.db.prepare(`SELECT json_extract(original.json, '$.intent.key') AS key FROM input_waiting w
         JOIN records original ON original.sequence=w.intent_sequence
-        WHERE w.intent_sequence>? ${agentSessionId === undefined ? '' : 'AND w.recipient_id=?'}
+        WHERE w.intent_sequence>? AND w.intent_sequence>(SELECT COALESCE(MAX(frontier),0) FROM restoration_holds) ${agentSessionId === undefined ? '' : 'AND w.recipient_id=?'}
         ORDER BY w.intent_sequence LIMIT ?`).all(afterSequence, ...(agentSessionId === undefined ? [] : [agentSessionId]), limit)
       return rows.flatMap(row => {
         const current = this.input(validateAgentPromptInputKey(JSON.parse(String(row.key))))
@@ -994,6 +1102,7 @@ export class DurableAgentMuxMessageQueue {
       signal?.throwIfAborted()
       const current = this.input(ref.key)
       if (!current || !isDeepStrictEqual(current.control.ref, ref)) return null
+      if (this.inputRestorationHeld(ref.key)) this.refuseRestoredInput()
       const continuing = current.control.state === 'dispatch-authorized' && owner?.continueOriginalGate === true && current.control.handoff !== undefined
       if (current.control.state !== 'enabled' && !continuing) return null
       if (owner) assertAgentInputClaimLease(owner.lease, this, this.queueId, physicalKey, continuing ? current.control.handoff!.storeScope : undefined)
@@ -1116,9 +1225,41 @@ export class DurableAgentMuxMessageQueue {
   }
 
   /** Admission and projection update are the same code for the one import and every new fact. */
+  private restoredInputFrontier(): number {
+    try { return messageRestorationHold(this.db)?.throughSequence ?? 0 } catch { return this.refuseRestoredInput() }
+  }
+  private inputRestorationHeld(key: AgentPromptInputKey): boolean {
+    const row = this.db.prepare('SELECT intent_sequence FROM input_intents WHERE input_id=?').get(agentInputJournalKey(this.inputOwnerKey(key)))
+    return Boolean(row && Number(row.intent_sequence) <= this.restoredInputFrontier())
+  }
+  private refuseRestoredInput(): never {
+    throw new AgentMuxError('The original input is held after restoring an earlier journal cut. Its gate, content and unknown effects are retained; inspect this original input. New independent input remains available.', 'AGENT_PROMPT_INPUT_UNCONFIRMED', 'unknown')
+  }
+  private async holdRestoredInputs(operationId: string, sourceSHA256: string, sourceMutexSHA256: string) {
+    return this.withLock(async () => {
+      const prior = this.db.prepare('SELECT r.json FROM restoration_holds h JOIN records r ON r.sequence=h.sequence WHERE h.operation_id=?').get(operationId)
+      if (prior) {
+        const original = JSON.parse(String(prior.json)) as Extract<JournalRecord, {kind:'restored-input-hold'}>
+        if (original.sourceSHA256 !== sourceSHA256 || original.sourceMutexSHA256 !== sourceMutexSHA256) throw new AgentMuxError('This original restoration operation names another source cut.', 'STORAGE_RECOVERY_INVALID')
+        return original.throughSequence
+      }
+      const throughSequence = this.nextSequence - 1
+      await this.appendRecord({kind:'restored-input-hold',sequence:this.nextSequence,operationId,throughSequence,sourceSHA256,sourceMutexSHA256})
+      this.db.exec('PRAGMA user_version=2')
+      return throughSequence
+    }, true)
+  }
+
   private applyRecord(record: JournalRecord): void {
     if (!Number.isSafeInteger(record.sequence) || record.sequence < this.nextSequence) {
       throw new AgentMuxError('Message journal sequence is invalid or out of order.', 'MESSAGE_QUEUE_UNAVAILABLE')
+    }
+    if (record.kind === 'restored-input-hold') {
+      nonEmpty(record.operationId, 'Original restore operation')
+      if (!Number.isSafeInteger(record.throughSequence) || record.throughSequence < 0 || record.throughSequence >= record.sequence ||
+          !/^[a-f0-9]{64}$/u.test(record.sourceSHA256) || !/^[a-f0-9]{64}$/u.test(record.sourceMutexSHA256)) throw new AgentMuxError('The original restoration hold is invalid.', 'MESSAGE_QUEUE_UNAVAILABLE')
+      this.db.prepare('INSERT INTO restoration_holds VALUES (?, ?, ?)').run(record.operationId,record.throughSequence,record.sequence)
+      this.db.prepare('INSERT INTO records VALUES (?, ?)').run(record.sequence,JSON.stringify(record)); return
     }
     if (record.kind === 'mote-main-input-route') {
       const route = parseMoteDialogueInputRoute(record.route)
@@ -1274,9 +1415,9 @@ export class DurableAgentMuxMessageQueue {
   async listMoteInputObservations(participant?: string): Promise<MoteInputObservation[]> {
     return this.withLock(async () => {
       const rows = participant === undefined
-        ? this.db.prepare('SELECT r.json FROM mote_input_observations m JOIN records r ON r.sequence=m.state_sequence WHERE m.active=1').all()
+        ? this.db.prepare('SELECT r.json FROM mote_input_observations m JOIN records r ON r.sequence=m.state_sequence WHERE m.active=1 AND m.state_sequence>(SELECT COALESCE(MAX(frontier),0) FROM restoration_holds)').all()
         : this.db.prepare(`SELECT r.json FROM (SELECT state_sequence FROM mote_input_observations WHERE member_id=? AND active=1
-            UNION SELECT state_sequence FROM mote_input_observations WHERE primary_id=? AND active=1) m JOIN records r ON r.sequence=m.state_sequence`).all(participant, participant)
+            UNION SELECT state_sequence FROM mote_input_observations WHERE primary_id=? AND active=1) m JOIN records r ON r.sequence=m.state_sequence WHERE m.state_sequence>(SELECT COALESCE(MAX(frontier),0) FROM restoration_holds)`).all(participant, participant)
       return rows.map(row => parseMoteInputObservation((JSON.parse(String(row.json)) as Extract<JournalRecord, {kind:'mote-input-observation'}>).observation))
     })
   }

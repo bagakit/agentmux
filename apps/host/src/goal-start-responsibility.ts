@@ -1,3 +1,4 @@
+import { optionalInputEpoch } from '@agentmux/core/prompt-condition'
 import { createHash } from 'node:crypto'
 import { agentPromptCondition, decideFutureProgress, type AgentMuxClientEvent, type AgentPromptSubmissionRecord } from '@agentmux/core'
 import type { Demand, DemandDispatch, DemandStore, DemandStoreChanges, DemandStoreSnapshot, GoalStartObservation } from '@agentmux/demand'
@@ -133,7 +134,7 @@ export class GoalStartResponsibilityOwner {
     const signal = AbortSignal.any([this.controller.signal, scope.controller.signal])
     if (!attention) {
       const digest = createHash('sha256').update(JSON.stringify([goal.id, start.operationId, start.hostId, start.agentSessionId, start.runId])).digest('hex')
-      await this.demands.prepareDispatchAttention(goal.id, start.operationId, { operationId: 'goal-start-attention-' + digest,
+      await this.demands.prepareDispatchAttention(goal.id, start.operationId, { ...optionalInputEpoch(start.inputEpoch), operationId: 'goal-start-attention-' + digest,
         intentId: 'goal-start-attention-' + digest, hostId: start.hostId, supervisorAgentSessionId: supervisor.agentSessionId,
         supervisorRunId: supervisor.run.runId, occurrenceAt: start.preparedAt,
         agentMuxNote: JSON.stringify({ schema: 'agentmux.goal-start-attention.v1', goalId: goal.id, startOperationId: start.operationId,
@@ -158,7 +159,7 @@ export class GoalStartResponsibilityOwner {
     if (!attempted || !exact || closed(attempted) || attempted.supervisorSessionId !== attention.supervisorAgentSessionId) return
     this.issues.delete(key(goal.id, start.operationId))
     await this.runtime.submitPrompt({ kind: 'agent', hostId: attention.hostId, agentSessionId: attention.supervisorAgentSessionId, run: { runId: attention.supervisorRunId } },
-      '', attention.operationId, agentPromptCondition(observation.session), { futureIntent: occurrence, inputByte: observation.inputByte!,
+      '', attention.operationId, { expectedRun: observation.session.run, afterSubmissionId: agentPromptCondition(observation.session).afterSubmissionId, ...optionalInputEpoch(attention.inputEpoch) }, { futureIntent: occurrence, inputByte: observation.inputByte!,
         isCurrent: () => !signal.aborted, signal }, undefined, undefined, attention.agentMuxNote, 'api')
     this.changed([goal.id])
   }

@@ -12,7 +12,7 @@ import type { SpaceMemberParams } from './space-member.js'
 import type { AgentExecutionOpenInput } from './agent-execution-coordinator.js'
 import type { HostRouteCall, HostRouteExecutionScope, HostRouteOperation, HostRouteExecutionAuthorization, HostRouteStatement, HostRouteMemberOperation, HostRouteMemberNameOperation } from './host-route.js'
 import { hostRouteExecutorOperation } from './host-route.js'
-import { parseAgentOpenLaunchFields } from './agent-open-contract.js'
+import { parseAgentOpenDescribe, parseAgentOpenLaunchFields } from './agent-open-contract.js'
 import { parseHostEnvironmentSelector } from './host-environment.js'
 
 function deny(): never { throw new AgentMuxError('This child does not belong to the original authorized creation and exact target.', 'HOST_ROUTE_DERIVATION_MISMATCH') }
@@ -59,6 +59,10 @@ export function hostRouteOperation(call: HostRouteCall): HostRouteOperation | un
   if (call.method === 'space.inspect') {
     const p = rpcRecord(call.params.target)
     if (typeof p.operationId === 'string') return { kind: 'creation-reader', createOperationId: p.operationId }
+  }
+  if (call.method === 'agent.open.describe') {
+    const input = parseAgentOpenDescribe(call.params), target = input.execution?.agentTarget
+    if (target) return { kind: 'input-epoch-reader', targetRuntimeId: target.runtimeId, ...(target.adoptedRoute ? { agentRoute: target.adoptedRoute } : {}) }
   }
   if (call.method !== 'agent.open') return undefined
   // A routed write must already have its retained business ID. A route nonce is not a creation ID.
@@ -152,6 +156,14 @@ export function assertExecutionChild(statement: HostRouteStatement, call: HostRo
     if (destination === scope.resourceRuntimeId && isDeepStrictEqual(statement.route, scope.resourceRoute)) roles.push('executor')
     if (!roles.length) deny()
   } else if (destination !== scope.targetRuntimeId) deny()
+  if (scope.kind === 'observation' && scope.source.kind === 'input-epoch-reader') {
+    if (stream || !isDeepStrictEqual(statement.route, scope.source.agentRoute)) deny()
+    if (call.method === 'runtime.owner.identity') return
+    if (call.method !== 'runtime.invoke') deny()
+    const invocation = rpcRecord(decodeHostedValue(call.params.invocation), ['method','args'])
+    if (invocation.method !== 'readAgentInputEpoch' || !Array.isArray(invocation.args) || invocation.args.length !== 0) deny()
+    return
+  }
   const observed = scope.kind === 'observation' ? scope.agentSessionIds : scope.kind === 'execution' && destination === scope.agentRuntimeId ? [scope.agentSessionId] : []
   if (call.method === 'runtime.owner.identity' || call.method === 'runtime.release-consumer') return
   if (call.method === 'runtime.bootstrap' || call.method === 'runtime.events') {

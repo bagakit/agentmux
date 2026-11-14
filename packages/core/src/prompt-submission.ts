@@ -19,7 +19,7 @@ import {
   type CtxmuxAdapterRun
 } from './ctxmux-run-adapter.js'
 import { AgentMuxError, agentMuxCancellationError } from './errors.js'
-import { agentPromptInputId, agentPromptNotApplied, validateAgentPromptInputKey, type AgentPromptAdmissionIntent, type AgentPromptInputKey, type AgentPromptCondition } from './agent-prompt-condition.js'
+import { agentPromptInputId, agentPromptNotApplied, validateAgentPromptInputKey, assertAgentInputEpoch, type AgentPromptAdmissionIntent, type AgentPromptInputKey, type AgentPromptCondition } from './agent-prompt-condition.js'
 import { AgentScreenEvidenceStore } from './screen-evidence.js'
 import { createNativeInputCorrelation, nativeInputSourceId } from './native-input-correlation.js'
 import { agentInteractionActiveRequest, agentInteractionResponseUnavailableReason } from './agent-interaction-state.js'
@@ -381,6 +381,7 @@ export class AgentPromptSubmissionCoordinator {
           // observation for human input; preserve its raw cancellation reason,
           // since the exact historical receipt below has not yet been read.
           let current = await observeInput(diagnostic, 'session-state', () => this.deps.registry.refresh(session.agentSessionId, session.run, undefined, renderSignal))
+          assertAgentInputEpoch(current, binding)
           completePromptPreparationPhase(boundary)
           beginPromptPreparationPhase(boundary, 'current-run')
           let currentRun = await observeInput(diagnostic, 'current-run', () => this.deps.kernel.status(run.runId))
@@ -642,6 +643,7 @@ export class AgentPromptSubmissionCoordinator {
       (admissionIntent?.kind === 'native-conversation' || admissionIntent?.kind === 'session-conversation') &&
       expectedCompletionId === undefined && expectedFutureIntent === undefined && !control?.idleOnly && !control?.nativeIdleOnly
     const assertInteraction = (current: AgentMuxAgentSession): void => {
+      assertAgentInputEpoch(current, admissionIntent?.kind === 'exact-condition' ? admissionIntent.condition : admissionIntent ?? {})
       assertSession?.(current)
       if (transportQualification && (transportQualification.agentSessionId !== current.agentSessionId ||
           !sameRun(transportQualification.run, current.run) ||

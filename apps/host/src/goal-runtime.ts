@@ -1,3 +1,4 @@
+import { optionalInputEpoch } from '@agentmux/core/prompt-condition'
 import { awaitUntilCancelled } from './await-until-cancelled.js'
 import type { DemandSpaceMemberReference } from '@agentmux/demand/relations'
 import type { GoalQualifiedAccess, GoalInspectionAccess } from '@agentmux/core/control'
@@ -24,7 +25,7 @@ import { readOriginalScheduledInput } from './scheduled-input-source.js'
 
 /** One explicit Goal operation borrows this exact original input carrier. */
 export type GoalFiniteInputPort = {
-  readCurrent(): Promise<{ runId: string }>
+  readCurrent(): Promise<{ runId: string; inputEpoch?: string }>
   submit(input: DemandQualifiedDispatchIntent): Promise<AgentInputSubmissionReceipt>
   inspectOriginal(input: DemandQualifiedDispatchIntent): Promise<AgentInputSubmissionReceipt | null>
   rejoinOriginal(input: DemandQualifiedDispatchIntent, ref: AgentInputWaitRef): Promise<AgentInputSubmissionReceipt>
@@ -35,17 +36,18 @@ export type GoalFiniteInspectionInput = { reference: DemandSpaceMemberReference;
 export type GoalFiniteAccessInput = { reference: DemandSpaceMemberReference; access: GoalQualifiedAccess; originalRunId?: string }
 
 export type GoalAgentControl = { kind: 'agent'; hostId: string; agentSessionId: string; run: AgentMuxRunRef }
-export type GoalDispatchReference = { goalId: string; operationId: string }
+export type GoalDispatchReference = { goalId: string; operationId: string; inputEpoch?: string }
 export type GoalExecutionClient = AgentMuxClient | AgentMuxHostedClient
 type Automation = { completionId?: string; futureIntent?: { intentId: string; occurrenceAt: number };
   inputByte?: number; isCurrent(): boolean; signal: AbortSignal }
-type Attention = { hostId: string; supervisorAgentSessionId: string; supervisorRunId: string; operationId: string; producer?: 'message' }
+type Attention = { inputEpoch?: string; hostId: string; supervisorAgentSessionId: string; supervisorRunId: string; operationId: string; producer?: 'message' }
 
 /** The existing Goal mechanisms borrow typed Core operations, never an editor controller. */
 export interface GoalRuntimePort {
   openFinite(input: GoalFiniteAccessInput, context: AgentMuxRpcCallContext): Promise<GoalFiniteInputPort>
   openFiniteInspection(input: GoalFiniteInspectionInput, context: AgentMuxRpcCallContext): Promise<GoalFiniteInspectionPort>
   spatialCreationCandidates(tabId: string, regionId: string): Promise<AgentMuxAgentSession[]>
+  readInputEpoch(hostId: string): Promise<string | undefined>
   agentCreation(hostId: string, agentSessionId: string): Promise<AgentMuxAgentCreationInspection>
   observeGoalAgent(hostId: string, agentSessionId: string): Promise<AgentMuxAgentRuntimeStatus>
   resolveGoalAgent(agentSessionId: string, expectedHostId?: string): Promise<{ hostId: string; status: AgentMuxAgentRuntimeStatus }>
@@ -63,7 +65,7 @@ export interface GoalRuntimePort {
   inspectGoalAttention(input: Attention): Promise<AgentPromptSubmissionRecord | null>
   inspectGoalStart(input: DemandDispatch): Promise<AgentPromptSubmissionRecord | null>
   authorizeFutureIntent(target: ContinuousProgressTarget, context?: AgentMuxRpcCallContext): Promise<void>
-  saveFutureIntent(loop: ContinuousProgressTarget & Pick<ContinuousProgressLoop, 'futureIntentId' | 'creationOperationId' | 'managedSource' | 'prompt' | 'checkIn' | 'currentDefinition' | 'guidanceAdoptions'>, active: boolean, context?: AgentMuxRpcCallContext): Promise<void>
+  saveFutureIntent(loop: ContinuousProgressTarget & Pick<ContinuousProgressLoop, 'futureIntentId' | 'creationOperationId' | 'managedSource' | 'prompt' | 'checkIn' | 'currentDefinition' | 'guidanceAdoptions' | 'inputEpoch'>, active: boolean, context?: AgentMuxRpcCallContext): Promise<void>
   inspectFutureIntent(loop: ContinuousProgressLoop): Promise<{ active: boolean }>
   inspectInput(loop: ContinuousProgressLoop): Promise<import('@agentmux/core').ContinuousProgressInputReading | undefined>
   observeCheckIn(target: ContinuousProgressTarget, now: number, signal: AbortSignal): Promise<CheckInObservation>
@@ -122,6 +124,7 @@ export function createGoalRuntime(options: {
       return { ...value, hostId }
     },
     observeGoalAgent: status,
+    readInputEpoch: hostId => exact(hostId).readAgentInputEpoch(),
     resolveGoalAgent: async (sessionId, expectedHostId) => {
       const matches = options.clients().filter(entry => { if (expectedHostId !== undefined && entry.hostId !== expectedHostId) return false; try { return entry.client.agentSession(sessionId).agentSessionId === sessionId } catch { return false } })
       if (matches.length !== 1) throw new AgentMuxError('The exact Goal Agent has no unique retained Host binding. Reconnect its original owner; no unrelated Host was probed.', 'CONTROL_UNAVAILABLE')
@@ -197,7 +200,7 @@ export function createGoalRuntime(options: {
       const observed = await status(input.hostId, input.supervisorAgentSessionId)
       if (observed.session.run.runId !== input.supervisorRunId) throw new AgentMuxError('The original Goal reminder Run changed; inspect its saved intent.', 'STALE_AGENT_SESSION')
       await exact(input.hostId).saveAgentFuturePromptIntent({ agentSessionId: input.supervisorAgentSessionId, intentId: input.intentId,
-        operationId: input.operationId, prompt: '', agentMuxNote: input.agentMuxNote, active: true, expectedRun: { runId: input.supervisorRunId } })
+        operationId: input.operationId, ...optionalInputEpoch(input.inputEpoch), prompt: '', agentMuxNote: input.agentMuxNote, active: true, expectedRun: { runId: input.supervisorRunId } })
     },
     disableGoalAttention: async input => {
       const client = exact(input.hostId), original = await client.readAgentFuturePromptIntent(input.supervisorAgentSessionId, input.intentId)
@@ -238,7 +241,7 @@ export function createGoalRuntime(options: {
       await client.saveAgentFuturePromptIntent({ agentSessionId: loop.agentSessionId, intentId: loop.futureIntentId, operationId,
         expectedRun: observed.session.run, ...(loop.managedSource ? { continuitySource: loop.managedSource } : {}),
         prompt: loop.prompt, ...(agentMuxNote === undefined ? {} : { agentMuxNote }),
-        active, ...(context?.caller ? { caller: context.caller } : {}) })
+        ...optionalInputEpoch(loop.inputEpoch),active, ...(context?.caller ? { caller: context.caller } : {}) })
     },
     inspectFutureIntent: async loop => {
       const client = exact(loop.hostId), session = client.agentSession(loop.agentSessionId)

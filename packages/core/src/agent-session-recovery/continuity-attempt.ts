@@ -14,7 +14,7 @@ import { continuityExecutorEntries, readContinuityExecutor, unconfirmedContinuit
 import { composeAgentPrompt } from '../agent-outbound-message.js'
 import { type ResolvedAgentInputContextCapture } from '../agent-input-context-capture-resolve.js'
 import { AGENT_TERMINAL_HANDSHAKE_FAILED } from '../agent-terminal-handshake-outcome.js'
-import { agentPromptNotApplied } from '../agent-prompt-condition.js'
+import { assertAgentInputEpoch, optionalInputEpoch, agentPromptNotApplied } from '../agent-prompt-condition.js'
 import { sameRun } from '../agent-session-identity.js'
 import { AgentMuxError } from '../errors.js'
 import { executorUnavailableError } from '../executable-probe.js'
@@ -192,7 +192,7 @@ export async function performAgentContinuity(
     if ((input.trigger !== 'manual' || retained.kind === 'pending' || retained.kind === 'starting') &&
         (retained.initializationRecovery || current.nativeActor?.initializationControl)) return await performAgentContinuity(context, { agentSessionId: input.agentSessionId,
       expectedRun: { ...input.expectedRun }, operationId: retained.operationId, trigger: retained.trigger, policy: retained.policy,
-      ...(retained.timingOverride ? { timingOverride: retained.timingOverride } : {}), ...(retained.standingIntent ? { standingIntent: retained.standingIntent } : {}) }, retained.intentOperationId)
+      ...optionalInputEpoch(retained.inputEpoch), ...(retained.timingOverride ? { timingOverride: retained.timingOverride } : {}), ...(retained.standingIntent ? { standingIntent: retained.standingIntent } : {}) }, retained.intentOperationId)
     supervisor.observe(current, true)
     let run: AgentMuxRun | null = null
     let evidence: import('./continuity-contract.js').AgentMuxAgentContinuityRunEvidence = { kind: 'run-unknown', observedAt: Date.now(), message: 'Original recovery observation is pending.' }
@@ -244,6 +244,7 @@ export async function performAgentContinuity(
   }
   if (prior && !isDeepStrictEqual(prior.standingIntent, input.standingIntent)) throw new AgentMuxError('The original recovery has a different standing source.', 'AGENT_CONTINUITY_OPERATION_CONFLICT')
   if (prior && !isDeepStrictEqual(prior.moteMainEntry, input.moteMainEntry)) throw new AgentMuxError('The original recovery has a different Mote main admission.', 'AGENT_CONTINUITY_OPERATION_CONFLICT')
+  if (prior && input.inputEpoch !== undefined && input.inputEpoch !== prior.inputEpoch) throw new AgentMuxError('The original recovery input cut changed.', 'AGENT_PROMPT_OPERATION_CONFLICT')
   const standing = input.standingIntent
   const assertStanding = (intent: import('../types.js').AgentFuturePromptIntent | null | undefined, session: AgentMuxStoredAgentSession) => {
     if (!standing) return
@@ -253,11 +254,17 @@ export async function performAgentContinuity(
   if (priorFailure) throw priorFailure
   const now = Date.now(), policy = prior?.policy ?? normalizeAgentContinuityPolicy(input.policy)
   let receipt: AgentMuxContinuityOperation = prior ? structuredClone(prior) : {
-    operationId: input.operationId, agentSessionId: input.agentSessionId, trigger: input.trigger ?? 'manual',
+    operationId: input.operationId, ...optionalInputEpoch(input.inputEpoch), agentSessionId: input.agentSessionId, trigger: input.trigger ?? 'manual',
     ...(input.moteMainEntry ? { moteMainEntry: structuredClone(input.moteMainEntry) } : {}),
     ...(input.timingOverride ? { timingOverride: input.timingOverride } : {}), ...(standing ? { standingIntent: { ...standing } } : {}), policy,
     previousRun: { ...input.expectedRun }, admittedAt: now, observedAt: now, rechecks: 0,
     kind: 'pending', reason: 'runtime-unverified', evidence: { kind: 'run-unknown', observedAt: now, message: 'Not yet observed.' }
+  }
+  if (!prior && standing && current) {
+    const original = await ports.sessions.store.readFuturePromptIntent(input.agentSessionId, standing.intentId)
+    assertStanding(original, current)
+    if (input.inputEpoch !== undefined) assertAgentInputEpoch(original!, input)
+    Object.assign(receipt, optionalInputEpoch(original!.inputEpoch))
   }
   const executorRoot = receipt.intentOperationId ?? receipt.operationId
   let authoredExecutor: AgentContinuityExecutor | undefined
@@ -290,13 +297,16 @@ export async function performAgentContinuity(
     const recipe = normalizeAgentContinuityMessageInput(await ports.input.prepareContinuityMessage(input.messageInputRef, lifecycleOperationId))
     if (!isDeepStrictEqual(recipe.ref, input.messageInputRef) || recipe.lifecycleOperationId !== lifecycleOperationId || recipe.plan) throw new AgentMuxError(
       'The original recovery message preparation changed its owner or acquired a launch before dispatch.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+    const binding = recipe.admissionIntent
+    if (input.inputEpoch !== undefined) assertAgentInputEpoch(binding, input)
+    Object.assign(receipt, optionalInputEpoch(binding.inputEpoch))
     receipt.messageInput = recipe
   }
   receipt.observedAt = now
   delete receipt.nextActionAt
   const originalLaunch = (value: AgentMuxStoredAgentSession) => {
     const saved = value.continuityOperations?.[receipt.operationId]?.launchInput
-    if (saved && receipt.launchInput && !isDeepStrictEqual(saved.input, receipt.launchInput.input)) throw new AgentMuxError(
+    if (saved && receipt.launchInput && (!isDeepStrictEqual(saved.input, receipt.launchInput.input) || saved.inputEpoch !== receipt.launchInput.inputEpoch)) throw new AgentMuxError(
       'This original recovery input already has another frozen body or source.', 'AGENT_PROMPT_OPERATION_CONFLICT')
     return saved && (['launch-carried', 'terminal-confirmed', 'native-admitted', 'not-applied'].includes(saved.state) ||
       receipt.launchInput?.state === 'prepared' && saved.state !== 'prepared') ? saved : receipt.launchInput ?? saved
@@ -806,7 +816,7 @@ export async function performAgentContinuity(
       'The original waiting recovery was cancelled before its first Start was admitted.', 'AGENT_CONTINUITY_SUPERSEDED', undefined,
       { disposition: 'not_applied', confirmedInputBytes: null })
     const frozen = value.continuityOperations?.[receipt.operationId]?.launchInput
-    if (frozen && receipt.launchInput && !isDeepStrictEqual(frozen.input, receipt.launchInput.input)) throw new AgentMuxError(
+    if (frozen && receipt.launchInput && (!isDeepStrictEqual(frozen.input, receipt.launchInput.input) || frozen.inputEpoch !== receipt.launchInput.inputEpoch)) throw new AgentMuxError(
       'The original recovery input was already frozen with another body or source.', 'AGENT_PROMPT_OPERATION_CONFLICT')
     const messageInput = originalMessage(value)
     const original = { ...structuredClone(receipt), ...(messageInput ? { messageInput } : {}) }
@@ -815,7 +825,7 @@ export async function performAgentContinuity(
   }, standing?.intentId)
   reevaluatedPolicy = undefined // The new operation now owns its separately admitted lifecycle.
   try {
-    const session = await lifecycle.resumeAgentRun({ agentSessionId: input.agentSessionId, operationId: input.operationId,
+    const session = await lifecycle.resumeAgentRun({ agentSessionId: input.agentSessionId, operationId: input.operationId, ...optionalInputEpoch(receipt.inputEpoch),
       ...(input.args === undefined ? {} : { args: input.args }), ...(input.env === undefined ? {} : { env: input.env }),
       ...(input.commandOverride === undefined ? {} : { commandOverride: input.commandOverride }),
       ...(input.cols === undefined ? {} : { cols: input.cols }), ...(input.rows === undefined ? {} : { rows: input.rows }),

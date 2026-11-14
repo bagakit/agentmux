@@ -2,7 +2,7 @@ import { prepareClaudeToolExecutionLaunch } from './claude-tool-execution-launch
 import { prepareClaudeExecutionHelper } from './claude-execution-helper.js'
 import { CLAUDE_USAGE_CAPABILITY } from './claude-usage.js'
 import { inspectClaudeHookActivation } from './claude-hook-activation.js'
-import { listClaudeNativeSessions, assertClaudeNativeResumeSource } from './claude-native-catalog.js'
+import { listClaudeNativeSessions, assertClaudeNativeResumeSource, claudeRecoveryFiles } from './claude-native-catalog.js'
 import { readClaudeSessionHistoryPage, readClaudeSessionHistoryRecord, readClaudeConversationChanges } from './claude-native-history.js'
 import { discoverClaudeNativeSession } from './claude-native-session.js'
 import { prepareClaudeNativeInput } from './claude-native-input.js'
@@ -216,6 +216,7 @@ export function createClaudeProvider(defineAgentProvider: ProviderFactory): Agen
     prepareOwnedWorkspaceTrust: prepareClaudeOwnedWorkspaceTrust,
     readInputInitialization: readClaudeInputInitialization,
     readSessionHistoryPage: readClaudeSessionHistoryPage,
+    recoveryFiles: claudeRecoveryFiles,
     readSessionHistoryRecord: readClaudeSessionHistoryRecord,
     readConversationChanges: readClaudeConversationChanges,
     discoverNativeSession: discoverClaudeNativeSession,

@@ -27,7 +27,7 @@ function qualifiedReceiptFor(input: DemandQualifiedDispatchIntent, value: AgentI
   if (!original || !message) throw new AgentMuxError('The original Core claim does not expose this input’s frozen content. Keep the original Goal request and inspect its original owner.', 'CONTROL_UNAVAILABLE')
   if (message.userContent !== input.prompt || message.systemContext !== input.agentMuxNote || message.authorHuman === true || message.authorAgentSessionId !== undefined ||
       message.authorExternal !== undefined || message.a2aNotificationId !== undefined || message.questionReply !== undefined ||
-      (message.sourceChannel ?? 'api') !== 'api' || original.execution !== 'immediate' || original.admissionIntent?.kind !== 'session-conversation')
+      (message.sourceChannel ?? 'api') !== 'api' || original.execution !== 'immediate' || original.admissionIntent?.kind !== 'session-conversation' || original.admissionIntent.inputEpoch !== input.inputEpoch)
     throw new AgentMuxError('This input key belongs to another frozen Goal content or source. No original input was replaced or rejoined.', 'CONTROL_REQUEST_CONFLICT')
   return { kind: 'core-input', inputKey: { kind: 'prompt', agentSessionId: key.agentSessionId, expectedRun: { runId: input.runId }, submissionId: input.operationId },
     outcome: value.status, observedAt: Date.now() }
@@ -58,7 +58,7 @@ export class GoalDispatchInputOwner {
     if ('target' in original) throw new AgentMuxError('The qualified Goal input cannot use a legacy Session carrier.', 'CONTROL_REQUEST_CONFLICT')
     if ((original.execution === 'continue') !== Boolean(continuation) || continuation && (continuation.goalId !== reference.goalId || continuation.loopId !== original.loopId))
       throw new AgentMuxError('The original Goal continuation input owner changed.', 'CONTROL_REQUEST_CONFLICT')
-    if (reference.operationId !== operationId || original.hostId !== session.hostId || original.agentSessionId !== session.agentSessionId || original.prompt !== prompt)
+    if (reference.inputEpoch !== original.inputEpoch || reference.operationId !== operationId || original.hostId !== session.hostId || original.agentSessionId !== session.agentSessionId || original.prompt !== prompt)
       throw new AgentMuxError('The frozen Goal Start target or input changed. Keep the original operation and manual input.', 'CONTROL_REQUEST_CONFLICT')
     if (original.stage === 'confirmed') { await this.reconcile(reference); return }
     // Before a retry, recover an original durable Core receipt. An observation failure does

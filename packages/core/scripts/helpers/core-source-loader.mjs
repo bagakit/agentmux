@@ -3,9 +3,11 @@ import { registerHooks, createRequire } from 'node:module'
 import { appendFileSync, existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createHash } from 'node:crypto'
+import { join } from 'node:path'
 const ts = createRequire(new URL('../../package.json', import.meta.url))('typescript')
 const mutation = JSON.parse(process.env.AGENTMUX_SOURCE_MUTATION_JSON ?? '[]'), applied = new Set()
 const hash = value => createHash('sha256').update(value).digest('hex')
+const repo = fileURLToPath(new URL('../../../../', import.meta.url))
 function record(path, original, loaded = original, kind = 'module-load') {
   if (process.env.AGENTMUX_SOURCE_LOAD_LOG) appendFileSync(process.env.AGENTMUX_SOURCE_LOAD_LOG, JSON.stringify({ pid: process.pid, path,
     sourceSHA256: hash(original), loadedSHA256: hash(loaded), mutations: [...applied], kind }) + '\n', { mode: 0o600 })
@@ -18,6 +20,19 @@ process.on('exit', () => {
 })
 registerHooks({
   resolve(specifier, context, next) {
+    // Host consumers use the published package names. Resolve their actual export
+    // metadata to this checkout's sources instead of another checkout's old dist.
+    const owner = ['core', 'demand'].find(name => specifier === `@agentmux/${name}` || specifier.startsWith(`@agentmux/${name}/`))
+    if (owner) {
+      const packagePath = join(repo, 'packages', owner, 'package.json'), bytes = readFileSync(packagePath)
+      const subpath = specifier.slice(`@agentmux/${owner}`.length), entry = JSON.parse(bytes).exports[subpath ? '.' + subpath : '.']
+      const target = typeof entry === 'string' ? entry : entry?.import ?? entry?.default
+      if (typeof target !== 'string' || !target.startsWith('./dist/')) throw new Error(`Unconfirmed source export: ${specifier}`)
+      record(packagePath, bytes, undefined, 'actual-source-export-resolution')
+      const exported = target.slice('./dist/'.length), source = join(repo, 'packages', owner, exported.startsWith('src/') ? exported : 'src/' + exported).replace(/\.js$/u, '.ts')
+      if (!existsSync(source)) throw new Error(`The original source export is unavailable: ${specifier}`)
+      return { url: pathToFileURL(source).href, shortCircuit: true }
+    }
     if (specifier.endsWith('.js') && (specifier.startsWith('file:') || specifier.startsWith('/') || specifier.startsWith('.') && context.parentURL?.startsWith('file:'))) {
       const path = fileURLToPath(new URL(specifier, context.parentURL ?? 'file:///')), source = path.slice(0, -3) + '.ts'
       if (!existsSync(path) && existsSync(source)) return { url: pathToFileURL(source).href, shortCircuit: true }

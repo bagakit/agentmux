@@ -1,6 +1,8 @@
+import { parseGoalInputEpoch, parseGoalInputEpochInput } from './goal-input-epoch.js'
 import { parseRpcAgentSession } from './agent-session-codec.js'
 import { parseCreationInspectParams, parseCreationResolveParams } from './agent-creation-resolution.js'
 import { parseCreationInspectionResult } from './agent-creation-inspection.js'
+import { isStorageRecoveryMethod, parseStorageRecoveryParams, parseStorageRecoveryResult } from './storage-recovery-rpc.js'
 import { isCaptureSequenceMethod, parseCaptureSequenceParams, parseCaptureSequenceResult } from './capture-sequence.js'
 import { FOCUS_METHODS, parseFocusParams, parseFocusResult, type FocusMethod } from './focus-control.js'
 import { parseAgentTakeoverPage, type AgentTakeoverQuery } from './agent-takeover.js'
@@ -483,6 +485,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     if (isMeshNetworkMethod(method)) return parseMeshNetworkResult(method, value, parseMeshNetworkParams(method, params)) as unknown as Record<string, unknown>
     if (isNodePublishingMethod(method)) return parseNodePublishingResult(method, value, parseNodePublishingParams(method, params)) as unknown as Record<string, unknown>
     if (method === 'settings.hosts.tailcat.inspect' || method === 'settings.hosts.tailcat.configure') return parseTailcatConfigurationResult(method, value, parseTailcatConfigurationParams(method, params)) as unknown as Record<string, unknown>
+    if (isStorageRecoveryMethod(method)) return parseStorageRecoveryResult(method, value, parseStorageRecoveryParams(method, params)) as unknown as Record<string, unknown>
     if (method === 'notebook.storage.inspect' || method === 'notebook.storage.change') return parseNotesStorageInspection(value, parseNotesStorageParams(method, params).operationId) as unknown as Record<string, unknown>
     if (method === 'agent.provider.ls') return parseProviderCatalogObservation(value, parseProviderCatalogQuery(params)) as unknown as Record<string, unknown>
     if (isHostSettingsMethod(method)) return parseHostSettingsResult(method, value, parseHostSettingsParams(method, params)) as unknown as Record<string, unknown>
@@ -808,6 +811,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       case 'agent.role.register': case 'agent.role.resolve': { record(p, ['binding']); const binding = role(p.binding)
         if (binding.role !== input.role || input.workspacePath !== undefined && binding.workspacePath !== input.workspacePath ||
           method === 'agent.role.register' && credentials && binding.agentSessionId !== credentials.agentSessionId) fail(); break }
+      case 'goal.input.epoch': return parseGoalInputEpoch(value, parseGoalInputEpochInput(params)) as unknown as Record<string, unknown>
       case 'goal.participation.confirm': {
         const original = parseGoalParticipationConfirm(input)
         record(p, ['goal','operationId','diskDurability'])
@@ -853,6 +857,12 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         const { hostId: _route, ...page } = p
         const { hostId: _target, ...read } = input
         parseAgentInputChangesPage(page, read as import('./agent-input-changes.js').AgentInputChangesRead)
+        break
+      }
+      case 'agent.input.epoch': {
+        record(p, ['hostId','inputEpoch'])
+        if(p.hostId!==input.hostId) fail()
+        if(p.inputEpoch!==null) string(p.inputEpoch)
         break
       }
       case 'agent.input.ls': {
@@ -939,6 +949,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         if (p.sourceChannel !== undefined) normalizeMessageChannel(p.sourceChannel)
         if (p.sourceDevice !== undefined) normalizeOperationDevice(p.sourceDevice)
         const envelope = message(p)
+        if(envelope.recipientInputEpoch!==input.recipientInputEpoch)fail()
         if (input.expectedRun !== undefined) {
           const intent = p.admissionIntent === undefined ? undefined : validateAgentPromptAdmissionIntent(p.admissionIntent)
           const capturedRun = envelope.recipientRunId ?? (p.promptCondition === undefined || p.promptCondition === null ? undefined :

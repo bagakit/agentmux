@@ -1,3 +1,4 @@
+import { optionalInputEpoch } from '@agentmux/core/prompt-condition'
 import { join } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { durableWriteFile } from '@agentmux/core'
@@ -25,6 +26,7 @@ export class ContinuousProgressLoopStore {
         if (!item || typeof item !== 'object' || !['loopId', 'hostId', 'agentSessionId', 'providerId', 'workspacePath', 'prompt'].every(key => typeof item[key] === 'string' && item[key].trim()) ||
             !Number.isFinite(item.intervalMs) || item.intervalMs <= 0 || !Number.isFinite(item.nextCheckAt) ||
             !['active', 'paused', 'stopped'].includes(item.status)) throw new Error('Continuous progress configuration is unconfirmed. Its stored records are kept; review the loop configuration.')
+        optionalInputEpoch(item.inputEpoch)
         if (item.taskSource !== undefined) validateContinuousProgressTaskSource(item.taskSource)
         if (item.pause !== undefined) validateContinuousProgressPause(item.pause)
         if (isAgentSchedule(item)) parseScheduleRecord(item)

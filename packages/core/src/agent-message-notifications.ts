@@ -118,17 +118,17 @@ export class AgentMuxMessageNotifications {
       : { nativeEvidence: { sourceId: nativeIdle!.sourceId, id: nativeIdle!.id }, inputByte }
     const condition = agentPromptCondition(session)
     const sourceRuns = sessionSemanticResumeSourceRuns(session)
-    const position = await this.deps.queue.pendingNotificationPosition(agentSessionId, sourceRuns)
+    const position = await this.deps.queue.pendingNotificationPosition(agentSessionId, sourceRuns,session.inputEpoch)
     // Failure to explain excluded historical references is a weak observation dependency:
     // publish its service window, then continue this writer's independently qualified work.
     try {
-      const excluded = await this.deps.queue.excludedNotificationPosition(agentSessionId, sourceRuns)
+      const excluded = await this.deps.queue.excludedNotificationPosition(agentSessionId, sourceRuns,session.inputEpoch)
       if (!excluded) this.unconfirmedSources.delete(agentSessionId)
       else {
         const gap = JSON.stringify([session.run.runId, sourceRuns, excluded])
         if (this.unconfirmedSources.get(agentSessionId) !== gap) {
           this.unconfirmedSources.set(agentSessionId, gap)
-          this.deps.unavailable(agentSessionId, new Error('A retained Inbox reference belongs to a historical Run whose semantic recovery relationship to this writer is unconfirmed. Read the original Inbox or explicitly notify its MID; no original input was replayed.'), session.run)
+          this.deps.unavailable(agentSessionId, new Error('A retained Inbox reference belongs to a historical Run or storage cut whose input qualification for this writer is unconfirmed. Read the original Inbox or explicitly notify its MID; no original input was replayed.'), session.run)
         }
       }
     } catch (error) {

@@ -12,7 +12,16 @@ export type DemandParticipation = DemandParticipationSource & {
   operationId: string
   recordedAt: number
 }
+export function optionalDemandInputEpoch(value: unknown): { inputEpoch?: string } {
+  if (value === undefined) return {}
+  const inputEpoch = identity(value)
+  if (new TextEncoder().encode(inputEpoch).byteLength > 512) throw new Error('The original Goal input cut is invalid.')
+  return { inputEpoch }
+}
 export type DemandCreationOrigin = {
+  /** Original PMO creation admission, never a later Session observation. */
+  inputEpoch?: string
+  inputRuntimeId?: string
   operationId: string
   requesterAsSupervisor: boolean
   requesterParticipationId: string | null
@@ -50,8 +59,10 @@ export function parseDemandParticipations(value: unknown): DemandParticipation[]
   })
 }
 export function parseDemandCreationOrigin(value: unknown): DemandCreationOrigin {
-  const data = fields(value, ['operationId', 'requesterAsSupervisor', 'requesterParticipationId', 'supervisorDefaultPending'])
+  const data = fields(value, ['inputRuntimeId', 'inputEpoch', 'operationId', 'requesterAsSupervisor', 'requesterParticipationId', 'supervisorDefaultPending'], ['operationId', 'requesterAsSupervisor', 'requesterParticipationId', 'supervisorDefaultPending'])
   if (typeof data.requesterAsSupervisor !== 'boolean' || typeof data.supervisorDefaultPending !== 'boolean' || (!data.requesterAsSupervisor && data.supervisorDefaultPending)) throw new Error('Goal first-default policy is invalid.')
-  return { operationId: identity(data.operationId), requesterAsSupervisor: data.requesterAsSupervisor,
+  const inputEpoch = data.inputEpoch === undefined ? undefined : identity(data.inputEpoch)
+  if (inputEpoch !== undefined && new TextEncoder().encode(inputEpoch).byteLength > 512) throw new Error('The original PMO input cut is invalid.')
+  return { ...(inputEpoch === undefined ? {} : { inputEpoch }), ...(data.inputRuntimeId === undefined ? {} : { inputRuntimeId: identity(data.inputRuntimeId) }), operationId: identity(data.operationId), requesterAsSupervisor: data.requesterAsSupervisor,
     requesterParticipationId: data.requesterParticipationId === null ? null : identity(data.requesterParticipationId), supervisorDefaultPending: data.supervisorDefaultPending }
 }

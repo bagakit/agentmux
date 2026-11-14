@@ -1,11 +1,11 @@
 import { parseDemandAgentReference, parseDemandAgentReferences, demandAgentReferenceKey, mergeDemandAgentReferences, type DemandAgentReference } from './agent-reference.js'
-import { parseDemandDiscussionIntent, type DemandDiscussionIntent } from './discussion.js'
+import { parseDemandDiscussionInput, parseDemandDiscussionInputs, parseDemandDiscussionIntent, type DemandDiscussionInput, type DemandDiscussionIntent } from './discussion.js'
 import { demandPatrolScope, completedGoalPlanRequest, assertPatrolExecutions, parseDemandPatrols, parseDemandPatrolAttempt, parseDemandPatrolReportInput, type DemandPatrolPreparation, type DemandPatrolAttempt, type DemandPatrolReportInput } from './goal-patrol.js'
 import { parseDemandDispatch, parseDemandDispatchIntent, parseDemandDispatchRequest, parseDemandDispatches, qualifiedDemandDispatch, runBoundDemandDispatch, sameDemandDispatchIntent, type DemandDispatch, type DemandDispatchIntent, type DemandDispatchRequest, type DemandDispatchRejection } from './dispatch.js'
 import { parseDemandDelegationRuntimeIdentity, type DemandDelegationRuntimeIdentity, parseDemandDelegationIntent, parseDemandDelegations, parseDemandDelegationReportInput, parseDemandDelegationCollectionInput, parseDemandDelegationCollector, sameDemandDelegationIntent, validateDemandDelegationReport,
   parseDemandDelegationAttentionInput, sameDemandDelegationAttention, delegationWorkerHostId,
   type DemandDelegation, type DemandDelegationIntent, type DemandDelegationReportInput, type DemandDelegationCollectionInput, type DemandDelegationCollector, type DemandDelegationAttentionInput } from './delegations.js'
-import { parseDemandParticipations, parseDemandCreationOrigin, parseDemandParticipationSource, type DemandParticipationSource } from './collaboration.js'
+import { optionalDemandInputEpoch, parseDemandParticipations, parseDemandCreationOrigin, parseDemandParticipationSource, type DemandParticipationSource } from './collaboration.js'
 import { appendDemandContentReferences, parseDemandContentReferences } from './content-references.js'
 import { demandExecutionReferences, demandExecutionKey, demandHandoffDestinations, demandResponsibilityScope, parseDemandProgressInput, parseDemandProgressUpdates,
   parseDemandResponsibilityBasis, sameDemandExecution, type DemandProgressInput, type DemandProgress, type DemandResponsibilityBasis } from './responsibility.js'
@@ -189,6 +189,7 @@ function parseDemand(value: unknown, label: string): Demand {
     'creationOrigin',
     'discussionOperationId',
     'discussionIntent',
+    'discussionInputs',
     'contentRefs',
     'dispatches',
     'delegations',
@@ -201,7 +202,7 @@ function parseDemand(value: unknown, label: string): Demand {
     'grounding',
     'createdAt',
     'updatedAt',
-  ], label, ['tags', 'plannedStartAt', 'targetAt', 'parentDemandId', 'phaseIndex', 'alignment', 'grounding', 'contentRefs', 'assigneeSessionIds', 'supervisorSessionId', 'participations', 'creationOrigin', 'discussionOperationId', 'discussionIntent', 'dispatches', 'delegations', 'progressUpdates', 'patrols', 'plan'])
+  ], label, ['tags', 'plannedStartAt', 'targetAt', 'parentDemandId', 'phaseIndex', 'alignment', 'grounding', 'contentRefs', 'assigneeSessionIds', 'supervisorSessionId', 'participations', 'creationOrigin', 'discussionOperationId', 'discussionIntent', 'discussionInputs', 'dispatches', 'delegations', 'progressUpdates', 'patrols', 'plan'])
   if (!isDemandStatus(record.status)) throw new Error(`${label}.status is invalid`)
   if (!isDemandPriority(record.priority)) throw new Error(`${label}.priority is invalid`)
   if (!Array.isArray(record.activities)) throw new Error(`${label}.activities must be an array`)
@@ -236,6 +237,7 @@ function parseDemand(value: unknown, label: string): Demand {
     sessionIds, assigneeSessionIds, supervisorSessionId, participations,
     ...(creationOrigin === undefined ? {} : { creationOrigin }),
     ...(record.discussionOperationId === undefined ? {} : { discussionOperationId: nonEmptyString(record.discussionOperationId, `${label}.discussionOperationId`) }),
+    ...(record.discussionInputs === undefined ? {} : { discussionInputs: parseDemandDiscussionInputs(record.discussionInputs) }),
     ...(record.discussionIntent === undefined ? {} : { discussionIntent: parseDemandDiscussionIntent(record.discussionIntent) }),
     ...(record.contentRefs === undefined ? {} : { contentRefs: parseDemandContentReferences(record.contentRefs) }),
     dispatches: parseDemandDispatches(record.dispatches ?? [], nonEmptyString(record.id, `${label}.id`)),
@@ -458,7 +460,7 @@ export class DemandStore {
         assigneeSessionIds: [...(input.assigneeSessionIds ?? [])],
         supervisorSessionId: input.supervisorSessionId ?? null,
         participations: [],
-        ...(options.creationOrigin ? { creationOrigin: { operationId, requesterAsSupervisor: options.creationOrigin.requesterAsSupervisor,
+        ...(options.creationOrigin ? { creationOrigin: { operationId, ...optionalDemandInputEpoch(options.creationOrigin.inputEpoch), ...(options.creationOrigin.inputRuntimeId === undefined ? {} : { inputRuntimeId: options.creationOrigin.inputRuntimeId }), requesterAsSupervisor: options.creationOrigin.requesterAsSupervisor,
           requesterParticipationId: null, supervisorDefaultPending: options.creationOrigin.requesterAsSupervisor && !Object.hasOwn(input, 'supervisorSessionId') } } : {}),
         ...(options.discussionOperationId === undefined ? {} : { discussionOperationId: nonEmptyString(options.discussionOperationId, 'discussionOperationId') }),
         ...(input.contentRefs === undefined ? {} : { contentRefs: [...input.contentRefs] }),
@@ -673,7 +675,7 @@ export class DemandStore {
       const original = owner?.dispatches?.find(dispatch => dispatch.operationId === intent.operationId)
       if (original) {
         if (owner!.id === id && original.stage === 'requested' && qualifiedDemandDispatch(intent) &&
-            demandAgentReferenceKey(original.target) === demandAgentReferenceKey(intent.target) && original.prompt === intent.prompt) {
+            demandAgentReferenceKey(original.target) === demandAgentReferenceKey(intent.target) && original.prompt === intent.prompt && original.inputEpoch === intent.inputEpoch) {
           demand.dispatches = demand.dispatches!.map(value => value.operationId === intent.operationId
             ? { ...intent, stage: 'prepared', preparedAt: Date.now(), request: original.request, resultBasis: original.resultBasis } : value)
           demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
@@ -1103,6 +1105,21 @@ export class DemandStore {
       demand.discussionIntent = intent; demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
       return demand
     }, undefined, operationId)
+  }
+
+  /** Freeze this exact later PMO input in its original Goal before crossing Core. */
+  async prepareDiscussionInput(id: string, input: DemandDiscussionInput): Promise<DemandReceipt> {
+    const intent = parseDemandDiscussionInput(input)
+    return this.mutate('discussion-input-prepare', snapshot => {
+      const demand = findDemand(snapshot, id, this.storePath), original = demand.discussionInputs?.find(item => item.operationId === intent.operationId)
+      if (original) {
+        if (JSON.stringify(original) !== JSON.stringify(intent)) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'The original discussion input is frozen.')
+        return { unchanged: demand }
+      }
+      demand.discussionInputs = [...(demand.discussionInputs ?? []), intent]
+      demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
+      return demand
+    }, undefined, intent.operationId)
   }
 
   async recordParticipation(id: string, source: DemandParticipationSource, options: { operationId: string; expectedUpdatedAt?: number }): Promise<DemandReceipt> {
@@ -1602,7 +1619,7 @@ function rejectProvenanceInput(value: object): void {
   if (Object.hasOwn(value, 'progressUpdates') || Object.hasOwn(value, 'patrols')) throw new DemandStoreError('INVALID_INPUT', 'validate', '', 'Only the original responsibility owner records progress and inspection facts')
   if (Object.hasOwn(value, 'delegations')) throw new DemandStoreError('INVALID_INPUT', 'validate', '', 'Only the actual delegation owner can prepare, link, report or collect original business work.')
   if (Object.hasOwn(value, 'plan')) throw new DemandStoreError('INVALID_INPUT', 'validate', '', 'Revise the Goal plan through its plan revision, and record node verdicts through plan review.')
-  if (['participations', 'creationOrigin', 'discussionOperationId', 'discussionIntent', 'requesterParticipationId', 'requesterAsSupervisor', 'supervisorDefaultPending', 'assigneeExecutorId'].some(key => Object.hasOwn(value, key)))
+  if (['participations', 'creationOrigin', 'discussionOperationId', 'discussionIntent', 'discussionInputs', 'requesterParticipationId', 'requesterAsSupervisor', 'supervisorDefaultPending', 'assigneeExecutorId'].some(key => Object.hasOwn(value, key)))
     throw new DemandStoreError('INVALID_INPUT', 'validate', '', 'Original Goal provenance is authored only by the trusted host; assign accurate Sessions.')
   if (Object.hasOwn(value, 'executorId')) throw new DemandStoreError('INVALID_INPUT', 'validate', '', 'Executor is creation configuration, not a Goal assignee. Assign accurate Sessions.')
 }

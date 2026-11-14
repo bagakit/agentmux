@@ -1,3 +1,4 @@
+import { optionalInputEpoch } from './agent-prompt-condition.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { parseScheduleTarget, parseScheduleRecord, parseProgressTaskSource } from './public-rpc-schedules.js'
@@ -5,7 +6,7 @@ import { isAgentSchedule, type ContinuousProgressLoop, type ContinuousProgressTa
 import type { AgentMuxRpcCallContext } from './public-rpc-service.js'
 export type AgentProgressParams = {
   'agent.progress.list': { target: ContinuousProgressTarget }
-  'agent.progress.create': { target: ContinuousProgressTarget; intervalMs: number; prompt: string; taskSource?: Exclude<ContinuousProgressTaskSource, { kind: 'goal' }>; operationId: string }
+  'agent.progress.create': { target: ContinuousProgressTarget; intervalMs: number; prompt: string; taskSource?: Exclude<ContinuousProgressTaskSource, { kind: 'goal' }>; operationId: string; inputEpoch?:string }
   'agent.progress.action': { target: ContinuousProgressTarget; loopId: string; action: 'pause' | 'resume' | 'stop' | 'check'; expectedLoop: ContinuousProgressLoop; operationId: string }
   'agent.progress.update': { target: ContinuousProgressTarget; loopId: string; expectedLoop: ContinuousProgressLoop; intervalMs: number; prompt: string; operationId: string }
 }
@@ -16,7 +17,8 @@ export const AGENT_PROGRESS_METHODS = { 'agent.progress.list': 'short', 'agent.p
 export const isAgentProgressMethod = (value: string): value is AgentProgressMethod => Object.hasOwn(AGENT_PROGRESS_METHODS, value)
 const id = (v: unknown): v is string => typeof v === 'string' && !!v.trim() && !/[\0\r\n]/u.test(v)
 export function parseAgentProgressParams<M extends AgentProgressMethod>(method: M, input: unknown): AgentProgressParams[M] {
-  const p = rpcRecord(input, method === 'agent.progress.list' ? ['target'] : method === 'agent.progress.create' ? ['target','intervalMs','prompt','taskSource','operationId'] : method === 'agent.progress.update' ? ['target','loopId','expectedLoop','intervalMs','prompt','operationId'] : ['target','loopId','action','expectedLoop','operationId'])
+  const p = rpcRecord(input, method === 'agent.progress.list' ? ['target'] : method === 'agent.progress.create' ? ['inputEpoch','target','intervalMs','prompt','taskSource','operationId'] : method === 'agent.progress.update' ? ['target','loopId','expectedLoop','intervalMs','prompt','operationId'] : ['target','loopId','action','expectedLoop','operationId'])
+  if(method==='agent.progress.create')optionalInputEpoch(p.inputEpoch)
   parseScheduleTarget(p.target)
   if (method !== 'agent.progress.list' && !id(p.operationId)) throw new AgentMuxError('Continuous progress requires its original operation identity.', 'INVALID_CONTROL_REQUEST')
   if (method === 'agent.progress.create' || method === 'agent.progress.update') {
@@ -37,7 +39,7 @@ export function parseAgentProgressResult<M extends AgentProgressMethod>(method: 
   for (const value of loops) {
     const loop = parseScheduleRecord(value)
     if (isAgentSchedule(loop) || loop.taskSource?.kind === 'goal' || ['hostId','agentSessionId','providerId','workspacePath'].some(key => loop[key as keyof ContinuousProgressTarget] !== input.target[key as keyof ContinuousProgressTarget])) throw new AgentMuxError('Continuous progress returned another exact target.', 'CONTROL_PROTOCOL_ERROR')
-    if (method === 'agent.progress.create' && (loop.creationOperationId !== (input as AgentProgressParams['agent.progress.create']).operationId || loop.prompt !== (input as AgentProgressParams['agent.progress.create']).prompt || loop.intervalMs !== (input as AgentProgressParams['agent.progress.create']).intervalMs)) throw new AgentMuxError('Continuous progress returned another original creation.', 'CONTROL_PROTOCOL_ERROR')
+    if (method === 'agent.progress.create' && (loop.inputEpoch !== (input as AgentProgressParams['agent.progress.create']).inputEpoch || loop.creationOperationId !== (input as AgentProgressParams['agent.progress.create']).operationId || loop.prompt !== (input as AgentProgressParams['agent.progress.create']).prompt || loop.intervalMs !== (input as AgentProgressParams['agent.progress.create']).intervalMs)) throw new AgentMuxError('Continuous progress returned another original creation.', 'CONTROL_PROTOCOL_ERROR')
     if (method === 'agent.progress.action' && loop.loopId !== (input as AgentProgressParams['agent.progress.action']).loopId) throw new AgentMuxError('Continuous progress returned another original loop.', 'CONTROL_PROTOCOL_ERROR')
     if (method === 'agent.progress.update') {
       const request = input as AgentProgressParams['agent.progress.update']

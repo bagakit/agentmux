@@ -4,11 +4,20 @@ import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import { setTimeout as delay } from 'node:timers/promises'
 import { AgentMuxError } from './errors.js'
+import { recoveryDirectorySource, type RecoverySource } from './storage-recovery.js'
+import { relative } from 'node:path'
 const native = createRequire(import.meta.url)('fs-native-extensions') as { tryLock(fd: number): boolean }
 /** Empty stable per-key coordination only. Roles remain in the original Agent Store. */
 export class NativeCreationAdmission {
   private readonly observedRetirements = new Set<string>()
   constructor(readonly directory: string, private readonly memberDirectory = join(directory, 'terminal-recoveries')) {}
+  storageRecoverySource(): RecoverySource {
+    const source = recoveryDirectorySource('core.native-admission', this.directory, { watchPaths: [this.directory], recursive: false, exclude: path => {
+      const name = relative(this.directory, path)
+      return name !== '' && !/^terminal-retirement-admission-[a-f0-9]{64}\.claim$/u.test(name)
+    } })
+    return { ...source, ownedPaths: [] }
+  }
   noteRetirement(key: string): void { this.observedRetirements.add(key) }
   retirementMemberPath(key: string): string { return join(this.memberDirectory, createHash('sha256').update(key).digest('hex') + '.retirement.json') }
   retirementPath(key: string): string { return join(this.directory, `terminal-retirement-admission-${createHash('sha256').update(key).digest('hex')}.claim`) }

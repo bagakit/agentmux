@@ -1,3 +1,4 @@
+import { optionalDemandInputEpoch } from './collaboration.js'
 import { parseGroundingProposal, type DemandCriterion, type DemandGroundingProposal } from './goals.js'
 
 /** Task material provenance. Discovery and actual adoption are separate claims. */
@@ -52,6 +53,7 @@ export type DemandDelegationCollection = DemandDelegationCollectionInput & {
 }
 /** One frozen responsibility notice reference; Core owns its original input. */
 export type DemandDelegationAttentionInput = {
+  inputEpoch?: string
   operationId: string
   intentId: string
   hostId: string
@@ -141,11 +143,11 @@ export function parseDemandDelegationCollectionInput(value: unknown): DemandDele
   const data = record(value, 'delegation.collection', ['operationId', 'replyMessageId'])
   return { operationId: identity(data.operationId, 'collection.operationId'), replyMessageId: identity(data.replyMessageId, 'collection.replyMessageId') }
 }
-const attentionKeys = ['operationId', 'intentId', 'hostId', 'supervisorAgentSessionId', 'supervisorRunId', 'occurrenceAt', 'agentMuxNote']
+const attentionKeys = ['inputEpoch', 'operationId', 'intentId', 'hostId', 'supervisorAgentSessionId', 'supervisorRunId', 'occurrenceAt', 'agentMuxNote']
 export function parseDemandDelegationAttentionInput(value: unknown): DemandDelegationAttentionInput {
   const data = record(value, 'delegation.attention', attentionKeys)
   if (typeof data.agentMuxNote !== 'string' || !data.agentMuxNote.trim() || data.agentMuxNote.includes('\0')) throw new Error('attention.agentMuxNote must be a nonempty frozen platform note')
-  return { operationId: identity(data.operationId, 'attention.operationId'), intentId: identity(data.intentId, 'attention.intentId'), hostId: identity(data.hostId, 'attention.hostId'),
+  return { ...optionalDemandInputEpoch(data.inputEpoch), operationId: identity(data.operationId, 'attention.operationId'), intentId: identity(data.intentId, 'attention.intentId'), hostId: identity(data.hostId, 'attention.hostId'),
     supervisorAgentSessionId: identity(data.supervisorAgentSessionId, 'attention.supervisorAgentSessionId'), supervisorRunId: identity(data.supervisorRunId, 'attention.supervisorRunId'),
     occurrenceAt: positive(data.occurrenceAt, 'attention.occurrenceAt'), agentMuxNote: data.agentMuxNote }
 }

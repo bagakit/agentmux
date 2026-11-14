@@ -4,6 +4,7 @@ import { basename, isAbsolute, join, resolve } from 'node:path'
 import { AgentMuxError } from '../errors.js'
 import { normalizeNativeSessionId } from '../agent-native-locator.js'
 import type { AgentNativeSessionCandidate, AgentNativeSessionCatalog, AgentProviderNativeResumeContext, AgentProviderNativeSessionListContext } from '../types.js'
+import type { AgentProvider } from '../agent-provider.js'
 import { assertNativeCatalogPath, nativeCatalogFiles, nativeCatalogIssue, readNativeCatalogFile } from './native-session-catalog-files.js'
 
 function root(context: AgentProviderNativeSessionListContext): string {
@@ -51,4 +52,16 @@ export async function assertClaudeNativeResumeSource(context: AgentProviderNativ
       actual.source.workspacePath !== source.workspacePath || actual.source.revision !== source.revision) {
     throw new AgentMuxError('The selected Claude conversation changed. Refresh native conversations; the original Agent is retained.', 'AGENT_NATIVE_RESUME_SOURCE_CHANGED')
   }
+}
+
+export const claudeRecoveryFiles: NonNullable<AgentProvider['recoveryFiles']> = async context => {
+  const path = context.transcriptPath
+  if (!path || context.source.providerId !== 'claude') throw new AgentMuxError('The exact original Claude transcript is unavailable.', 'RECOVERY_NATIVE_LOCATOR_UNAVAILABLE')
+  await assertNativeCatalogPath(path, [root(context)])
+  const original = await candidate(path, context)
+  if (!original || original.source.nativeHandle.sessionId !== context.source.nativeSessionId || original.source.workspacePath !== context.workspacePath)
+    throw new AgentMuxError('The retained native locator answers for another original Claude Session.', 'RECOVERY_NATIVE_SOURCE_CHANGED')
+  return { files: [{ id: 'transcript', path, format: 'file' }], gaps: [], assertCurrent: async () => {
+    await assertClaudeNativeResumeSource({ env: context.env, signal: context.signal, source: original.source })
+  } }
 }
