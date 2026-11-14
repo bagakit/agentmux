@@ -102,11 +102,13 @@ it.each(['existing', 'missing'] as const)('source-only first Launcher saves its 
   await vi.waitFor(() => expect(write).toHaveBeenCalledTimes(1))
   await vi.waitFor(() => expect(useAppStore.getState().scratchTopicSnapshots[SCRATCH_WORKSPACE_ID]?.topics?.find(t => t.id === quietMoteId)?.quickMode?.status).toBe('saved'))
   expect(f.discovery.catalog).toHaveBeenCalledTimes(1) // The changed Main save still validates its own location.
+  await vi.waitFor(async () => {
+    expect(parseMoteQuickMode(await f.bytes())).toMatchObject({ status: 'valid', defaults: { conversation: {
+      hostId: 'local', sessionId: result!.created.agentSessionId, displayWorkspaceId: SCRATCH_WORKSPACE_ID,
+      groupId: 'mote-group', tabId: quietTab.id, regionId: quietTab.layout.activeRegionId
+    } } })
+  })
   const parsed = parseMoteQuickMode(await f.bytes())
-  expect(parsed).toMatchObject({ status: 'valid', defaults: { conversation: {
-    hostId: 'local', sessionId: result!.created.agentSessionId, displayWorkspaceId: SCRATCH_WORKSPACE_ID,
-    groupId: 'mote-group', tabId: quietTab.id, regionId: quietTab.layout.activeRegionId
-  } } })
   if (state === 'existing') {
     expect(parsed).toMatchObject({ defaults: { executorId: 'fixture' } })
     expect(await f.bytes()).toContain('# Keep my cooperation notes.')
