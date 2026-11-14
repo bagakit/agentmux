@@ -2,7 +2,7 @@
 
 本文定义 Work → Goals 中的目标讨论、人的确认、执行关联和结果接受。公开单项称 Goal，底层沿同一 Demand 领域身份与文件事实；Mote 是协调对象，AgentSession／Run 是执行身份，Tab／Region 是空间身份。以下要求不代签实现或安装验收。
 
-在[多层注意力](../multi-layer-attention.md#各层替人吸收什么)中，Goal 是以小时到天计的一层：替人跟住多条执行、委派、报告与证据，让每条执行都有下一步负责人；人给出意图与关键取舍，确认目标、接受结果。
+Goal 同时是 Agent 的协作看板和人的信息看板。双方读同一个目标、成功标准、分工和交付记录。Agent 据此确定依赖、接手工作、交付证据并协调下一位负责人。人用这些事实看清整体进展与待决定事项，给出意图与关键取舍，确认目标、接受结果。在[多层注意力](../multi-layer-attention.md#各层替人吸收什么)中，Goal 以小时到天为尺度，替人跟住多条执行、委派和报告。
 
 [返回交互合同](../agentmux-desktop-interaction.md) · [同主题视觉](../presentation/goals-and-demand.md)
 
