@@ -208,10 +208,26 @@ function selectBrandRealm(id,focus=false) {
   if(focus)$(`[data-brand-realm="${CSS.escape(id)}"]`)?.focus();
 }
 function authoredRoles(glyph) {return data.roles.filter(role=>role.glyph===glyph);}
+function moteFamilyCard({id,label,note,markup,candidate=false,role}) {
+  return `<article class="mote-family-card" data-mote-family="${escape(id)}"><div class="mote-family-heading"><h3>${escape(label)}</h3><span class="design-kind">${candidate?'待采用候选':'当前主题'}</span></div><div class="mote-family-mark">${markup(48)}</div><div class="mote-family-sizes">${[14,16,24].map(size=>`<span>${markup(size)}<small>${size}px</small></span>`).join('')}</div><p>${escape(note)}</p>${role?`<button type="button" class="button" data-role="${escape(role)}">编辑当前图标 ↗</button>`:''}</article>`;
+}
+function renderMoteFamily() {
+  const main=futureDesigns.find(item=>item.id==='mote-main-session');
+  const compact=data.glyphs['agent-unit'].map(([tag,attrs])=>[tag,{...attrs,transform:'translate(.96 .96) scale(.92)'}]);
+  const roles=[
+    {id:'agent',label:'Agent',note:'普通执行会话。当前方头与双眼留白，保持静止。',role:'object.agent',markup:size=>semantic('object.agent',size)},
+    {id:'mote',label:'Mote',note:'持久搭档身份。保留单侧抬起、偏置双眼的原轮廓。',role:'object.mote',markup:size=>semantic('object.mote',size)},
+    {id:main.id,label:'Mote 主会话',note:main.description,candidate:true,markup:size=>drawingMarkup(main.shapes,size)}
+  ];
+  const promotions=futureDesigns.filter(item=>['mote-promotion-b','mote-promotion-b2'].includes(item.id));
+  return `<section class="mote-family" aria-label="Mote 图标家族"><p class="eyebrow">IDENTITY / ROLE / ACTION</p><h2>Mote，与它一起工作的角色</h2><p class="mote-family-intro">先分清身份、主会话角色与晋升动作，再比较小尺寸。当前图形随主题；候选尚未进入产品。</p><div class="mote-family-grid">${roles.map(moteFamilyCard).join('')}</div>
+    <section class="mote-agent-comparison" aria-label="Agent 体量比较"><div><h3>方头 Agent，收小一点</h3><p>候选将默认绘图收至 92%，图标槽与点击区域不变。先比较视觉重量，尚未修改默认。</p></div><div class="mote-agent-pairs">${[14,16,24].map(size=>`<span><span>${drawingMarkup(data.glyphs['agent-unit'],size)}${drawingMarkup(compact,size)}</span><small>${size}px · 原 / 候选</small></span>`).join('')}</div></section>
+    <section class="mote-promotion-family" aria-label="晋升图标候选"><div class="mote-family-subhead"><h3>合作，成为伙伴</h3><p>晋升是动作，不是新角色。B 是已认可方向，B2 是精修建议。</p></div><div class="mote-promotion-grid">${promotions.map(item=>moteFamilyCard({id:item.id,label:item.label,note:item.description,candidate:true,markup:size=>drawingMarkup(item.shapes,size)})).join('')}</div></section></section>`;
+}
 function renderMote() {
   const role=roleById.get('object.mote'), drawing=drawingLabel(role);
-  $('#result-count').textContent='真实组件 · 靠近、悬停、聚焦与按压';
-  $('#inventory-content').innerHTML=`<div class="mote-showcase">
+  $('#result-count').textContent='Mote 图标家族 · 当前图形与待采用候选';
+  $('#inventory-content').innerHTML=`${renderMoteFamily()}<div class="mote-showcase">
     <section class="mote-stage" id="mote-stage" data-interactive="true">
       <p class="eyebrow">A QUIET COMPANION</p><h2>一个有回应的搭档</h2>
       <p>把指针移近，停留片刻，或轻轻按住。</p>
