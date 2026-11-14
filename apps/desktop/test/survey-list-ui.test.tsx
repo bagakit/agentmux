@@ -31,6 +31,7 @@ beforeEach(async () => {
   fixture = await arrangeSurveyListUi()
   Object.defineProperty(window, 'innerWidth', { value: 1440, configurable: true })
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    if (this.closest('[hidden]')) return new DOMRect(0, 0, 0, 0)
     const rectangles = new Map<Element, DOMRect>(), list = document.querySelector('.survey-page-list')
     let top = 80
     const ungrouped = list?.querySelector('.survey-list-ungrouped')
@@ -199,6 +200,81 @@ async function keyboardDrag(target: HTMLElement, direction: 'ArrowDown' | 'Arrow
   await key(target, cancel ? 'Escape' : ' ', cancel ? 'Escape' : 'Space')
   await vi.waitFor(() => expect(dom.container.querySelector('.survey-page-list')?.hasAttribute('data-dragging')).toBe(false))
 }
+
+async function pointer(target: EventTarget, type: string, x: number, y: number, pointerType = 'mouse') {
+  await act(async () => target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, button: 0,
+    buttons: type === 'pointerup' ? 0 : 1, pointerId: 7, pointerType, isPrimary: true, clientX: x, clientY: y })))
+}
+async function pickUp(target: HTMLElement, x: number, y: number, pointerType = 'mouse') {
+  await pointer(target, 'pointerdown', x, y, pointerType)
+  await pointer(document, 'pointermove', x + 6, y, pointerType)
+  await vi.waitFor(() => expect(dom.container.querySelector('.survey-page-list')?.getAttribute('data-dragging')).toBe('true'))
+  await new Promise(resolve => setTimeout(resolve, 30))
+}
+async function drop(x: number, y: number, pointerType = 'mouse') {
+  await pointer(document, 'pointermove', x, y, pointerType)
+  await new Promise(resolve => setTimeout(resolve, 30))
+  await pointer(document, 'pointerup', x, y, pointerType)
+  await vi.waitFor(() => expect(dom.container.querySelector('.survey-page-list')?.hasAttribute('data-dragging')).toBe(false))
+}
+
+it.each(['original row', 'same-container gap', 'outside', 'Escape'] as const)('[survey-pointer-cancel] %s does not write or move the original workface', async destination => {
+  await write({ ungrouped: [...fixture.zones], groups: [] })
+  const commit = vi.spyOn(useAppStore.getState(), 'setSurveyOrganization')
+  await render()
+  const before = protectedFacts(), original = organization(), persisted = localStorage.getItem('agentmux-workbench-v1')
+  const target = button('Move survey item: Research A')
+  await pickUp(target, 50, 100)
+  expect(dom.container.querySelector<HTMLElement>('.survey-list-ungrouped')?.dataset.dropOver,
+    'The original container does not advertise a drop that will be cancelled').not.toBe('true')
+  // Move away first so returning to the source is a real pointer gesture, not a click/no activation.
+  await pointer(document, 'pointermove', 50, 190)
+  await new Promise(resolve => setTimeout(resolve, 30))
+  if (destination === 'Escape') await key(target, 'Escape')
+  else await drop(destination === 'outside' ? 500 : 50, destination === 'original row' ? 100 : destination === 'same-container gap' ? 160 : 500)
+  expect(commit).not.toHaveBeenCalled(); expect(organization()).toBe(original)
+  expect(localStorage.getItem('agentmux-workbench-v1')).toBe(persisted); unchanged(before)
+})
+
+it('[survey-pointer-cancel] a gap inside the original named group is not an implicit append', async () => {
+  await write({ ungrouped: [], groups: [{ groupId: 'all', name: 'Original group', collapsed: false, zoneIds: [...fixture.zones] }] })
+  const commit = vi.spyOn(useAppStore.getState(), 'setSurveyOrganization')
+  await render(); const before = protectedFacts(), original = organization()
+  // Empty ungrouped area occupies 50px; group header begins at 130, then A at 170..240.
+  await pickUp(button('Move survey item: Research A'), 50, 190)
+  await drop(50, 250)
+  expect(commit).not.toHaveBeenCalled(); expect(organization()).toBe(original); unchanged(before)
+})
+
+it.each(['mouse', 'touch'])('[survey-pointer-cancel] %s input still moves a row to the explicit final row', async pointerType => {
+  await write({ ungrouped: [...fixture.zones], groups: [] })
+  const commit = vi.spyOn(useAppStore.getState(), 'setSurveyOrganization')
+  await render(); const before = protectedFacts()
+  await pickUp(button('Move survey item: Research A'), 50, 100, pointerType)
+  await drop(50, 300, pointerType)
+  await vi.waitFor(() => expect(organization().ungrouped).toEqual([fixture.zones[1], fixture.zones[2], fixture.zones[0]]))
+  expect(commit).toHaveBeenCalledTimes(1)
+  unchanged(before)
+})
+
+it('[survey-pointer-cancel] a row dropped on the first row inserts before it', async () => {
+  await write({ ungrouped: [...fixture.zones], groups: [] }); await render(); const before = protectedFacts()
+  await pickUp(button('Move survey item: Research C'), 50, 300)
+  await drop(50, 100)
+  await vi.waitFor(() => expect(organization().ungrouped).toEqual([fixture.zones[2], fixture.zones[0], fixture.zones[1]]))
+  unchanged(before)
+})
+
+it.each([false, true])('[survey-pointer-cancel] a pointer enters a different group with collapsed=%s', async collapsed => {
+  const next = groups(); next.groups[0]!.collapsed = collapsed
+  await write(next); await render(); const before = protectedFacts()
+  await pickUp(button('Move survey item: Research C'), 50, 100)
+  await drop(50, collapsed ? 190 : 235)
+  await vi.waitFor(() => expect(organization().ungrouped).toEqual([]))
+  expect(organization().groups[0], JSON.stringify(organization())).toMatchObject({ collapsed, zoneIds: collapsed ? [fixture.zones[0], fixture.zones[2]] : [fixture.zones[2], fixture.zones[0]] })
+  unchanged(before)
+})
+
 it('[survey-list-ui] dnd-kit keyboard movement sorts in both directions and Escape cancels without mutating work', async () => {
   await write({ ungrouped: [...fixture.zones], groups: [] }); await render(); const before = protectedFacts()
   await keyboardDrag(button('Move survey item: Research A'), 'ArrowDown')
