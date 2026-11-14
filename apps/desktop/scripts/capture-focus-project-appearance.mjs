@@ -116,7 +116,7 @@ try {
   receipt.process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), html, privateRoot, evidence, ...(containerOrder ? ['--container-order'] : [])], { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 60000, onLine: line => logs.push(line) })
   receipt.actual = JSON.parse(await readFile(join(evidence, 'actual.json'), 'utf8')); assert.equal(receipt.process.exitCode, 0, receipt.actual.failure?.message); assert.equal(receipt.actual.passed, true)
   receipt.frames = await Promise.all(receipt.actual.frames.map(async frame => ({ ...frame, sha256: hash(await readFile(join(evidence, frame.file))) })))
-  assert.ok(receipt.frames.length >= (containerOrder ? 6 : 10), 'Actual complete App frames cover the selected bounded scenario')
+  assert.ok(receipt.frames.length >= (containerOrder ? 8 : 10), 'Actual complete App frames cover the selected bounded scenario')
   receipt.sourceAfter = Object.fromEntries(await Promise.all([...inputs.keys()].map(async path => {
     try { return [relative(root, path), hash(await readFile(path))] }
     catch (error) { if (error.code === 'ENOENT') return [relative(root, path), null]; throw error }
