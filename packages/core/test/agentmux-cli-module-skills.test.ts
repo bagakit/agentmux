@@ -320,9 +320,9 @@ describe('local progressive AgentMux module skills', () => {
     expect(guidance.split(AGENTMUX_GOAL_SKILL_ENTRY)).toHaveLength(2)
     expect(agentMuxPmoPlaybook().document).toContain(goalRoleGuidance({ role: 'manager' }))
     expect(agentMuxModuleSkill('goal')).toContain(goalRoleGuidanceContract())
-    expect(goalRoleGuidance({ role: 'executor' })).toContain('Return delivery evidence for every delegated criterion')
-    expect(guidance).toContain('perform the inspection')
-    expect(guidance).toContain('do not complete a Goal')
+    expect(goalRoleGuidance({ role: 'executor' })).toContain('Report each criterion as met, gap or unknown with evidence')
+    expect(guidance).toContain('inspect the frozen scope')
+    expect(guidance).toContain('do not establish acceptance')
   })
 
   it('actual compiled CLI keeps literal --skill input on the original command route', async () => {
