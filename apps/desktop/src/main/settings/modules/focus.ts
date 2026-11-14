@@ -2,8 +2,18 @@ import { FOCUS_RECENT_ACTIVITY_HOURS, DEFAULT_FOCUS_RECENT_ACTIVITY_HOURS, resol
 import type { AppConfig } from '../../../shared/contracts.js'
 import { enumSetting, invalid, type ScalarSetting } from '../scalar-setting.js'
 import { parseFocusProjects } from '../../../shared/focus-project-preferences.js'
+import { parseFocusZonePresentations } from '../../../shared/focus-zone-presentation.js'
 
 export const focusSettings = [
+  {
+    key: 'focus.zonePresentations',
+    entry(config: AppConfig) { return { key: this.key, kind: 'string' as const, value: JSON.stringify(config.focus?.zonePresentations ?? []), default: '[]' } },
+    apply(config: AppConfig, value: string): AppConfig {
+      const zonePresentations = parseFocusZonePresentations(JSON.parse(value))
+      if (JSON.stringify(zonePresentations) === this.entry(config).value) return config
+      return { ...config, focus: { recentActivityHours: resolveFocusRecentActivityHours(config.focus?.recentActivityHours), ...config.focus, zonePresentations } }
+    }
+  },
   {
     key: 'focus.recentActivityHours',
     entry(config: AppConfig) { return { key: this.key, kind: 'number' as const,

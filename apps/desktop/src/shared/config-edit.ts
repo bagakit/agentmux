@@ -51,7 +51,7 @@ const preferenceDomains = new Map<string, PreferenceDomain>(Object.entries({
   focus: { resolve: value => value ?? { recentActivityHours: resolveFocusRecentActivityHours(undefined) }, merge: 'resolved', fields: {
     recentActivityHours: resolveFocusRecentActivityHours, topicPresentation: resolveFocusTopicPresentation,
     linkDestination: resolveFocusLinkDestination, replyLines: resolveFocusReplyLines, previewTrigger: resolveFocusPreviewTrigger,
-    recentInputs: resolveFocusRecentInputs, mapMotion: resolveFocusMapMotion, projects: value => value ?? []
+    recentInputs: resolveFocusRecentInputs, mapMotion: resolveFocusMapMotion, projects: value => value ?? [], zonePresentations: value => value ?? []
   } },
   'focus.map': { resolve: value => resolveFocusMapPreferences(value as FocusMapPreferences | undefined), merge: 'resolved' },
   notes: { resolve: value => resolveNotesPreferences(value as NotesPreferences | undefined), merge: 'authored' },
@@ -159,6 +159,18 @@ export function applyConfigEdit(current: AppConfig, before: AppConfig, after: Ap
     if (/^executors\.[^.]+\.env$/.test(path)) {
       if (!configValuesEqual(actual, expected)) throw new ConfigConflict(path)
       return requested
+    }
+    // Each exact container authors one display choice; unrelated containers merge independently.
+    if (path === 'focus.zonePresentations') {
+      type Choice = { key: string; presentation: string }
+      const index = (value: unknown) => new Map(((value ?? []) as Choice[]).map(item => [item.key, item]))
+      const old = index(expected), next = index(requested), live = index(actual), result = new Map(live)
+      for (const key of new Set([...old.keys(), ...next.keys()])) {
+        const value = merge(live.get(key), old.get(key), next.get(key), `${path}[${JSON.stringify(key)}]`)
+        if (value === undefined) result.delete(key)
+        else result.set(key, value as Choice)
+      }
+      return [...result.values()]
     }
     if (Array.isArray(expected) && Array.isArray(requested) && Array.isArray(actual) &&
         (path === 'workspaces' || path === 'hosts' || path === 'composerShortcuts' || path === 'toolkit.tools' || path === 'agentDerivedActions.actions')) {
