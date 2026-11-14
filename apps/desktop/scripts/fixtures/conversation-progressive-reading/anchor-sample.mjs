@@ -16,13 +16,13 @@ export async function beginAnchorSample(read, debuggerClient, feedSelector) {
     if (getSelection()?.isCollapsed === false) throw Error('Measure ordinary reading after the selected-original check')
     const tailDistance = feed.scrollHeight - feed.clientHeight - feed.scrollTop
     const original = root.querySelectorAll, rootNodeCount = original.call(root, '*').length
-    let layoutKeyQueries = 0, request = 0, last = performance.now()
+    let layoutKeyQueries = 0, request = 0, last = null
     const frames = []
     root.querySelectorAll = function (query) {
       if (query === '[data-conversation-layout-key]') layoutKeyQueries++
       return original.call(this, query)
     }
-    const next = at => { frames.push(at - last); last = at; request = requestAnimationFrame(next) }
+    const next = at => { if (last !== null) frames.push(at - last); last = at; request = requestAnimationFrame(next) }
     request = requestAnimationFrame(next)
     window.readingAnchorSample = () => {
       delete root.querySelectorAll

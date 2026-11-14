@@ -70,8 +70,20 @@ export async function runMobile({BrowserWindow,setup,evidence,phase,scene,preloa
     assert.equal(typeof latestNativeId,'string','The original current window exposes its latest native record')
     assert.equal(initial.facts.owner.runtimeId,mobile.runtimeId)
     if (readingPattern) {
-      await wheel(-250)
-      await until(`(() => { const feed=document.querySelector('.mobile-conversation__reading'); return feed.scrollHeight-feed.clientHeight-feed.scrollTop>64 })()`, 'normal reading gesture leaves the live tail')
+      const start = await read(`(() => {
+        const feed=document.querySelector('.mobile-conversation__reading'), bounds=feed.getBoundingClientRect();
+        for (const part of [.35, .45, .55]) {
+          const x=bounds.left+bounds.width*.4, y=bounds.top+bounds.height*part;
+          if (feed.contains(document.elementFromPoint(x,y))) return {x,y};
+        }
+        throw Error('No native hit belongs to the original Mobile reader');
+      })()`)
+      const touch = (type, y) => win.webContents.debugger.sendCommand('Input.dispatchTouchEvent',
+        { type, touchPoints: y === undefined ? [] : [{ x: start.x, y, id: 1 }] })
+      await touch('touchStart', start.y)
+      for (let frame = 1; frame <= 10; frame++) await touch('touchMove', start.y + 24 * frame)
+      await touch('touchEnd')
+      await until(`(() => { const feed=document.querySelector('.mobile-conversation__reading'); return feed.scrollHeight-feed.clientHeight-feed.scrollTop>64 })()`, 'normal touch gesture leaves the live tail')
       await capture('current')
       const finish = await beginAnchorSample(read, win.webContents.debugger, '.mobile-conversation__reading')
       const ordinary = await appendDuringSelection('seed-anchor-sample')
