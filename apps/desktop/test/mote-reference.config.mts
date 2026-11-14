@@ -4,6 +4,7 @@ import { relative } from 'node:path'
 import { defineConfig } from 'vitest/config'
 import base from './mote-object-navigation.config.mts'
 const variants = {
+  'address-as-local-space': ['target.spaceId === undefined ? null : ', ''],
   'wrong-open': ["onOpen={() => void api.ui.openObjectLink(uri)", "onOpen={() => void api.ui.openObjectLink(target.spaceId)"],
   'borrow-identity': ["if (address?.spaceId !== spaceId) return []", "if (false && address?.spaceId !== spaceId) return []"],
   'drop-event': ["revision.version : undefined, selection)", "revision.version : undefined)"],

@@ -4,7 +4,8 @@ import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
 import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
-import { formatMoteAddress } from '@agentmux/core/sharing'
+import { formatMoteAddress, formatAmuxObjectLink } from '@agentmux/core/sharing'
+import { mintObjectId } from '@agentmux/core/object-id'
 import type { MoteDialogueRead, MoteDialoguePage } from '@agentmux/core/mote-dialogue'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { seedMoteWorkface, scratchWorkspace, moteTopics, defaultAgent, defaultTab } from './fixtures/mote-workface'
@@ -133,4 +134,22 @@ it('does not rescan the Mote directory or open source reads for unrelated Sessio
   expect(reads).not.toHaveBeenCalled()
   expect(refs()).toHaveLength(2)
   expect(refs()[0]!.textContent).toContain('小脏手')
+})
+
+it('keeps an address-only reference unknown locally while its original link remains actionable', async () => {
+  const uri = formatAmuxObjectLink({ kind: 'mote', address: { runtimeId: 'original-link-runtime', linkId: mintObjectId() } })
+  useAppStore.setState(state => ({ spaceZoneBindings: {}, scratchTopicSnapshots: { ...state.scratchTopicSnapshots,
+    [scratchWorkspace.id]: { ...state.scratchTopicSnapshots[scratchWorkspace.id]!, topics: [{ ...moteTopics[0]!,
+      title: 'Unconfirmed local identity', readError: 'Original directory unavailable', identityDirectoryPath: undefined }] }
+  } }))
+  await render(uri)
+  expect(refs()).toHaveLength(1)
+  const reference = refs()[0]!
+  expect(reference.textContent).not.toContain('Unconfirmed local identity')
+  expect(reads).not.toHaveBeenCalled()
+  await focus(reference.querySelector<HTMLButtonElement>('button')!)
+  await vi.waitFor(() => expect(document.querySelector('.mote-reference__details')?.textContent).toContain('原 Mote 资料尚未确认'))
+  expect(reads).not.toHaveBeenCalled()
+  await click(reference.querySelector<HTMLButtonElement>('button')!)
+  expect(open).toHaveBeenCalledExactlyOnceWith(uri)
 })
