@@ -56,3 +56,28 @@ unconfirmed request without creating a user Browser. The named Phone settings
 control records its original `mobile` target. Controlled online-device facts
 and full images need independent review; this proves no live Host or OS
 clipboard result and does not rerun unrelated Toolkit frame mutants.
+
+## TUI pending launch
+
+```sh
+node apps/desktop/scripts/capture-toolkit-pending-launch.mjs --evidence "$PWD/.local/toolkit-pending-launch/gui"
+node apps/desktop/scripts/capture-toolkit-pending-launch.mjs --evidence "$PWD/.local/toolkit-pending-launch/gui-mutation" --mutation stop-options
+```
+
+The [TUI Toolkit recovery contract](../../../../../docs/design/behavior/settings-and-observation.md#tui-toolkit)
+is exercised through the real status-bar popover, production TUI Result, preload,
+and Toolkit Main IPC. An isolated in-memory port supplies a dispatched launch
+without a terminal. It rejects the first end request. The second one reaches
+the owner but the retirement remains unconfirmed until the user checks again.
+The port validates both stop requests against the original execution.
+Trusted Chromium pointer events open, check, and end the launch. The receipt
+checks action hit targets and confirms that opening, checking, ending and
+reopening the popover never call run, action, or evaluate. The saved command
+becomes available after confirmed retirement and the original draft is checked
+on reopening.
+
+The six whole-window PNGs include wide dark and narrow light pending and ended
+states, plus both unconfirmed retirement states. The fixture issues no command
+and starts no Runtime. The negative case compiles a preload that omits the stop
+options and requires the exact IPC argument assertion to fail. Core retirement
+and durable recovery require separate verification.
