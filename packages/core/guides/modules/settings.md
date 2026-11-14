@@ -17,6 +17,16 @@ by unregister; it removes only the exact registered override. After unknown, dis
 current facts; an absent/changed registration does not prove a lost historical ACK and must
 not trigger automatic replay. No private args/environment are returned.
 
+For managed Hooks, read runtimeId and configRevision from settings executors discover
+--host HOST --executor EXECUTOR --refresh false. Then use settings executors hooks-inspect
+--host HOST --runtime RUNTIME --executor EXECUTOR --config-revision REV --workspace PATH.
+PATH is an absolute directory on the target Host. The check is read-only. A legacy direct
+runner can still be declared alongside the current Hook. Use hooks-update with the same
+flags as a transport-approved user to write the managed configuration and inspect it again.
+The update result and remaining issues are separate. Old callbacks whose original dependency
+is unknown stay in place. A write does not establish loading by an existing Run.
+If the update reply is unknown, inspect before deciding whether to retry.
+
 settings hosts tailcat inspect reads the answering App's local incoming configuration and
 the original Host listener separately. settings hosts tailcat configure --input FILE|-
 accepts {expected,candidate}; null is absent, explicit enabled:false remains saved data.
