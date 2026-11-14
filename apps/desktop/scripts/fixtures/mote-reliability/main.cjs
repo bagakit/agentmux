@@ -5,6 +5,7 @@ const [html, privateRoot, phase, evidence] = process.argv.slice(2)
 app.setPath('userData', path.join(privateRoot, 'user-data'))
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
 const result = { passed: false, phase, pid: process.pid, frames: [], input: [], errors: [] }
+const watch = process.env.MOTE_WATCH_CAPTURE === '1'
 app.whenReady().then(async () => {
   let win
   try {
@@ -26,7 +27,7 @@ app.whenReady().then(async () => {
     const counts = calls => Object.fromEntries(['stop', 'launchAgent', 'launchTerminal', 'write', 'submitPrompt'].map(operation => [operation, calls.filter(call => call.operation === operation).length]))
     const button = (label, scope = 'document') => `[...${scope}.querySelectorAll('button,[role="tab"]')].filter(e=>!e.closest('[hidden],[inert]')&&e.getClientRects().length).find(e=>e.getAttribute('aria-label')===${JSON.stringify(label)}||e.textContent.trim()===${JSON.stringify(label)})`
     const click = async (expression, settle = 180) => {
-      const point = await read(`(()=>{const e=${expression};if(!e)throw Error('Missing control: '+${JSON.stringify(expression)});e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`)
+      const point = await read(`(()=>{const e=${expression};if(!e)throw Error('Missing control: '+${JSON.stringify(expression)});e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2,hit=document.elementFromPoint(x,y);if(x<0||y<0||x>=innerWidth||y>=innerHeight||!hit||!e.contains(hit))throw Error('Control is not reachable: '+${JSON.stringify(expression)}+' '+JSON.stringify({x,y,hit:hit?.className,width:innerWidth,height:innerHeight}));return{x,y}})()`)
       for (const type of ['mousePressed', 'mouseReleased']) await input('Input.dispatchMouseEvent', { type, ...point, button: 'left', clickCount: 1 })
       result.input.push({ kind: 'click', expression }); if (settle) await pause(settle)
     }
@@ -64,14 +65,33 @@ app.whenReady().then(async () => {
       result.persistedInputs = await read('window.moteReliability.persistedInputs()')
       assert.deepEqual(result.persistedInputs, seeded.persistedInputs, 'The original persisted inputs survive the independent process')
       result.draftRecovery = { originalNonempty: true, hydratedBeforeFixture: true, restoreFixtureWrites: 0, exactPersistedInputs: true, exactWorkface: true }
+      if (watch) {
+        await click(button('Discussion', 'document.querySelector(".mote-space-frame__header")'))
+        await until(`[...document.querySelectorAll('[aria-label="Message Agent"]')].some(e=>!e.closest('[hidden],[inert],[aria-hidden="true"]')&&e.getClientRects().length&&e.textContent.includes(${JSON.stringify(seeded.draftWitness.agent)}))`)
+        result.draftRecovery.originalComposerVisible = true
+        await capture('restored-original-main-draft')
+      }
       await profile(); await capture('restored-heartbeat-dark-wide')
+      if (watch) {
+        await until('window.moteReliability.careFacts().notifications.data?.items.some(item=>item.subject.kind==="zone")')
+        result.careRestored = await read('window.moteReliability.careFacts()')
+        const rows = result.careRestored.notifications.data.items.filter(item => item.subject.kind === 'zone')
+        assert.equal(rows.length, 1); assert.equal(rows[0].unread, false, 'Original episode stays read across the independent process')
+        assert.equal(result.careRestored.lamp, 'attention', 'Reading a reminder never clears the original pause')
+        assert.deepEqual(result.careRestored.receipts, seeded.careRead.receipts, 'Original notification read receipts were hydrated')
+        await click('document.querySelector(".global-system-notices__trigger")'); await capture('restored-care-read-current')
+      }
       result.passed = true; return
     }
     for (const [theme, width, height] of [['dark', 1180, 820], ['dark', 420, 740], ['light', 1180, 820], ['light', 420, 740]]) {
       win.setContentSize(width, height); await read(`window.moteInit.theme(${JSON.stringify(theme)})`); await pause(180)
       await profile(); await read('window.moteReliability.variant("paused")'); await refresh()
       await capture('paused-profile-' + theme + '-' + (width > 600 ? 'wide' : 'narrow'))
-      await click(button('Configure heartbeat'), 25)
+      if (watch) {
+        await click(button('Discussion', 'document.querySelector(".mote-space-frame__header")'))
+        await capture('care-attention-discussion-' + theme + '-' + (width > 600 ? 'wide' : 'narrow'))
+        await click('document.querySelector(".mote-space-frame__header .mote-heartbeat-lamp")', 25)
+      } else await click(button('Configure heartbeat'), 25)
       await until('document.querySelector(".mote-quick-mode-dialog [data-mote-maintenance-status=paused]")')
       if (theme === 'dark' && width === 1180) await capture('heartbeat-opening-intermediate', 0)
       await capture('heartbeat-dialog-' + theme + '-' + (width > 600 ? 'wide' : 'narrow'))
@@ -86,6 +106,31 @@ app.whenReady().then(async () => {
     await until(`document.querySelector('[aria-label="Mote startup"]')`)
     await capture('startup-guidance-dark-narrow')
     win.setContentSize(1180, 820); await read('window.moteInit.theme("light")'); await capture('startup-guidance-light-wide')
+    if (watch) {
+      await profile(); await read('window.moteInit.theme("dark");window.moteReliability.variant("manual")'); await refresh(); await capture('care-manual-dark-wide')
+      await read('window.moteReliability.variant("legacy")'); await refresh(); await capture('care-legacy-dark-wide')
+      await read('window.moteReliability.variant("paused")'); await refresh()
+      await read('window.moteReliability.variant("unavailable")'); await refresh(); await capture('care-observation-unavailable-dark-wide')
+      await read('window.moteReliability.variant("paused")'); await refresh()
+      await until('window.moteReliability.careFacts().notifications.data?.items.some(item=>item.subject.kind==="zone")')
+      await click('document.querySelector(".global-system-notices__trigger")'); await capture('care-unread-notification-dark-wide')
+      await click('document.querySelector(".notification-item[data-notice-id^=\\"mote-heartbeat:\\"] .notification-item__read")')
+      await until('window.moteReliability.careFacts().notifications.data.items.filter(item=>item.subject.kind==="zone").length===1&&window.moteReliability.careFacts().notifications.data.items.filter(item=>item.subject.kind==="zone").every(item=>!item.unread)')
+      result.careRead = await read('window.moteReliability.careFacts()')
+      assert.equal(result.careRead.lamp, 'attention', 'Read receipt does not settle the pause')
+      assert.equal(result.careRead.notifications.data.items.filter(item => item.subject.kind === 'zone').length, 1, 'The read pause remains in Current')
+      await capture('care-read-still-paused-dark-wide')
+      await click(button('Inspect original heartbeat')); await until('document.querySelector(".mote-quick-mode-dialog")'); await capture('care-notification-original-inspection')
+      await escape()
+      const careDeadline = Date.now() + 15000
+      do {
+        result.carePersisted = await read('window.moteReliability.persistedCare()')
+        if (JSON.stringify(result.carePersisted) === JSON.stringify(result.careRead.receipts)) break
+        await pause(30)
+      } while (Date.now() < careDeadline)
+      assert.deepEqual(result.carePersisted, result.careRead.receipts)
+      await click(button('Discussion', 'document.querySelector(".mote-space-frame__header")'))
+    }
     result.draftWitness = { agent: 'Original Agent draft · ' + randomUUID() + ' · 原输入跨进程保留。', launcher: 'Original Launcher draft · ' + randomUUID() + '\n原草稿不可重新播种。' }
     const editors = `[...document.querySelectorAll('[aria-label="Message Agent"]')].filter(e=>!e.closest('[hidden],[inert],[aria-hidden="true"]')&&e.getClientRects().length)`
     await until(editors + '.length===1')
@@ -109,7 +154,10 @@ app.whenReady().then(async () => {
     assert.equal(result.original.drafts['private-mote-reliability-original-draft'].prompt, result.draftWitness.launcher)
     await until('window.sharedFrameProof.persistence().spatial?.graph.tabs.some(tab=>tab.tabId==="original-initialization-tab")')
     result.persisted = await read('window.sharedFrameProof.persistence()'); result.passed = true
-  } catch (error) { result.failure = { message: error.message, stack: error.stack }; try { result.failedFacts = await win.webContents.executeJavaScript('window.moteReliability?.facts()') } catch {} }
+  } catch (error) { result.failure = { message: error.message, stack: error.stack }; try {
+    result.failedFacts = await win.webContents.executeJavaScript('window.moteReliability?.facts()')
+    result.failedLayout = await win.webContents.executeJavaScript(`[...document.querySelectorAll('.mote-space-frame,.mote-workface,.mote-details-panel,.mote-quick-mode,.mote-quick-mode-dialog,[data-space-content-presentation]')].map(e=>({class:e.className,hidden:e.hidden,rect:e.getBoundingClientRect().toJSON(),style:{display:getComputedStyle(e).display,visibility:getComputedStyle(e).visibility,opacity:getComputedStyle(e).opacity},ancestors:(()=>{const parents=[];for(let p=e.parentElement;p;p=p.parentElement)parents.push(p);return parents})().map(p=>({class:p.className,rect:p.getBoundingClientRect().toJSON(),overflow:getComputedStyle(p).overflow,display:getComputedStyle(p).display}))}))`)
+  } catch {} }
   finally {
     await fs.writeFile(path.join(evidence, phase + '.json'), JSON.stringify(result, null, 2))
     if (win && !win.isDestroyed()) { win.webContents.session.flushStorageData(); win.destroy() }

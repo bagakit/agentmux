@@ -10,6 +10,7 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName, parseMoteQuickMode, serializeMoteQuickMode, topicPublicCopy } from '@agentmux/host/mote-model'
 import { directoryIdentity, homeZoneId } from '../../../src/shared/space-addresses'
 import { useLauncherState } from '../../../src/renderer/src/lib/launcher-state'
+import { moteMainRoleRevision } from '@agentmux/core/mote-dialogue'
 import { effectiveMoteQuickSave } from '@agentmux/core/mote-preferences'
 import { readResolvedTheme, updateThemeSelection } from '@agentmux/client-ui/theme'
 
@@ -58,7 +59,7 @@ api.motePreferences.save = async input => {
   files[root + '/MOTE.md'] = serializeMoteQuickMode(files[root + '/MOTE.md'], effectiveMoteQuickSave(input)); revisions.set(files[root + '/MOTE.md'], await digest(files[root + '/MOTE.md'])); remember(); calls.push({ operation: 'save-quick', operationId: input.operationId })
   return { kind: 'quick', target: input.target, operationId: input.operationId, status: 'saved', source: { resource: resource('MOTE.md'), document: read(root + '/MOTE.md').document, defaults: defaults() }, message: null }
 }
-api.moteDialogue.read = async input => ({ main: { target: input.target, identity: { hostId: scratch.hostId, moteId: topicId }, status: 'ready', resource: resource('MOTE.md'), documentRevision: revision(files[root + '/MOTE.md']), roleRevision: 'original-empty-role', current: null, issue: null },
+api.moteDialogue.read = async input => ({ main: { target: input.target, identity: { hostId: scratch.hostId, moteId: topicId }, status: 'ready', resource: resource('MOTE.md'), documentRevision: revision(files[root + '/MOTE.md']), roleRevision: moteMainRoleRevision(defaults(), revision(files[root + '/MOTE.md'])), current: defaults().conversation ?? null, issue: null },
   links: [], incarnation: 'private-original-dialogue', throughSequence: 0, next: null, coverage: 'linked-sources-only', sourceStatus: 'read', sourceIssue: null })
 remember()
 const cck3 = { label: 'cck3', providerId: 'codex', command: 'not-executed', args: [], env: {}, injectAgentMuxGuide: false }

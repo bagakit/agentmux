@@ -2,6 +2,20 @@ import { api } from '../../../src/renderer/src/lib/api'
 import { parseConversationReadPage, projectConversationTimeline } from '@agentmux/core/conversation'
 import { DEFAULT_AGENT_CONTINUITY_POLICY } from '@agentmux/core/agent-session-recovery'
 
+// The production App mounts in the shared fixture before this fixture binds its
+// controlled Mote owner. Hold only those read requests; never publish a fake
+// unbound result during the port handoff (especially after a real restart).
+let preferenceReader = api.motePreferences.read, releasePreferences
+const preferencesReady = new Promise(resolve => { releasePreferences = resolve })
+const waitingPreferences = (...args) => preferencesReady.then(() => preferenceReader(...args))
+Object.defineProperty(api.motePreferences, 'read', { configurable: true,
+  get: () => waitingPreferences, set: value => { preferenceReader = value } })
+export const stagedMotePreferenceReader = () => preferenceReader
+export function bindMotePreferenceReader() {
+  Object.defineProperty(api.motePreferences, 'read', { configurable: true, writable: true, value: preferenceReader })
+  releasePreferences()
+}
+
 api.sessions.inputMailbox = async (source, options) => ({ agentSessionId: source.agentSessionId, queueId: 'original-private-inputs', cut: { incarnation: 'original-private-incarnation', throughSequence: 0 },
   budgetBytes: options?.maxBytes ?? 65536, items: [], nextCursor: null, coverage: { kind: 'recorded-inputs', unrecorded: 'unconfirmed' } })
 function conversation(input) {

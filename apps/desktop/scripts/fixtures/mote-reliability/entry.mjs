@@ -1,5 +1,5 @@
 // Complete production App and ordinary initialize, sharing the existing private public-port fixture.
-import './ports.mjs'
+import { stagedMotePreferenceReader, bindMotePreferenceReader } from './ports.mjs'
 import '../mote-initialization/entry.mjs'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
@@ -7,6 +7,9 @@ import { initializeLauncherState, useLauncherState } from '../../../src/renderer
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { serializeMoteQuickMode, PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { parseScheduleRpcParams } from '@agentmux/core/schedule-rpc'
+import { moteMainRoleRevision } from '@agentmux/core/mote-dialogue'
+import { observeNotifications } from '../../../src/renderer/src/lib/notification-observation'
+import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 
 await initializeLauncherState()
 const original = useAppStore.getState(), session = original.sessions.find(value => value.id === 'mote-primary')
@@ -36,19 +39,32 @@ const path = scratchTopicDirectoryName(PMO_TEAMS_TOPIC_ID) + '/MOTE.md'
 const document = await api.files.read(SCRATCH_WORKSPACE_ID, path)
 if (document.status !== 'read') throw Error('Original controlled Mote file required')
 await api.files.write(SCRATCH_WORKSPACE_ID, { path, content: serializeMoteQuickMode(document.document.content, { executorId: 'cck3', conversation: reference, presence: { enabled: true, intervalMs: 1800000 } }), expectedRevision: document.document.revision })
-const readPreferences = api.motePreferences.read
+const readPreferences = stagedMotePreferenceReader()
+const currentDocument = await api.files.read(SCRATCH_WORKSPACE_ID, path)
+if (currentDocument.status !== 'read') throw Error('Current original Mote file required')
+const roleRevision = moteMainRoleRevision({ conversation: reference }, currentDocument.document.revision)
+const heartbeatReads = []
 let variant = 'paused'
 const schedule = () => ({ loopId: 'original-mote-heartbeat', hostId: reference.hostId, agentSessionId: reference.sessionId, providerId: session.providerId, workspacePath: session.workspacePath,
-  everyMs: 1800000, intervalMs: 1800000, revision: variant === 'active' ? 5 : 4, prompt: 'Check current work and unfinished commitments.',
+  managedSource: { sourceId: 'mote-main:private-original', revision: roleRevision },
+  everyMs: 1800000, intervalMs: 1800000, revision: variant === 'active' ? 5 : 4, creationOperationId: 'original-mote-heartbeat-creation', futureIntentId: 'original-mote-heartbeat-standing-intent', prompt: 'Check current work and unfinished commitments.',
   status: variant === 'active' ? 'active' : 'paused', nextCheckAt: Date.now() + 25 * 60000, lastTickAt: Date.now() - 5 * 60000,
   lastOutcome: variant === 'active' ? 'sent' : 'unknown', lastDecision: variant === 'active' ? 'The original input was accepted.' : 'The original Host connection was unavailable. Delivery remains unconfirmed.',
+  ...(variant === 'active' || variant === 'legacy' ? {} : { pause: { reason: variant === 'manual' ? 'manual' : 'input-unconfirmed', episodeId: 'private-original-pause', pausedAt: 1794362400000 } }),
   ...(variant === 'active' ? {} : { pendingCompletion: { id: 'original-occurrence', operationId: 'original-heartbeat-input', condition: { expectedRun: session.control.run, afterSubmissionId: null }, prompt: 'Check current work and unfinished commitments.', agentMuxNote: 'Original maintenance input.' } }) })
-api.motePreferences.read = async input => ({ ...await readPreferences(input), maintenance: variant === 'unbound' ? { status: 'unbound', schedule: null, issue: null }
-  : { status: variant === 'active' ? 'active' : 'paused', schedule: schedule(), issue: variant === 'active' ? null : 'Delivery remains unconfirmed. The original input is kept; check its original schedule.' } })
+api.motePreferences.read = async input => {
+  heartbeatReads.push({ method: 'preferences', target: input.target })
+  if (variant === 'unavailable') throw Error('The original heartbeat observation is unavailable. Its last reading is kept.')
+  return { ...await readPreferences(input), maintenance: variant === 'unbound' ? { status: 'unbound', schedule: null, issue: null }
+    : { status: variant === 'active' ? 'active' : 'paused', schedule: schedule(), issue: variant === 'active' ? null : 'Delivery remains unconfirmed. The original input is kept; check its original schedule.' } }
+}
 api.schedule.list = async input => { parseScheduleRpcParams('schedule.list', input); return { schedules: [schedule()], executionScope: 'connected-host' } }
-api.moteDialogue.read = async ({ target }) => ({ main: { target, identity: { hostId: 'local', moteId: PMO_TEAMS_TOPIC_ID }, status: 'ready', resource: null,
-  documentRevision: document.document.revision, roleRevision: 'original-main-role', current: reference, issue: null }, links: [], incarnation: 'original-dialogue', throughSequence: 0, next: null,
-  coverage: 'linked-sources-only', sourceStatus: 'read', sourceIssue: null })
+api.schedule.inspect = async input => {
+  parseScheduleRpcParams('schedule.inspect', input); heartbeatReads.push({ method: 'inspect', scheduleId: input.scheduleId })
+  if (variant === 'unavailable') throw Error('The original heartbeat observation is unavailable.')
+  return { schedule: input.scheduleId === 'original-mote-heartbeat' ? schedule() : null, executionScope: 'connected-host' }
+}
+bindMotePreferenceReader()
 await useAppStore.getState().refreshScratchTopics(SCRATCH_WORKSPACE_ID, true, PMO_TEAMS_TOPIC_ID)
 const retainedKey = 'private-mote-reliability-original-draft'
 if (!restoring) { useLauncherState.getState().setDraft(retainedKey, 'prompt', 'Original retained Mote draft across a real Renderer restart.'); fixtureWrites.push('launcher-draft') }
@@ -68,6 +84,11 @@ window.moteReliability = { ready: true, reference,
     return { agentDrafts: document.state?.agentComposerDrafts ?? null,
       drafts: typeof launcher === 'string' ? JSON.parse(launcher).state?.drafts ?? null : null }
   },
+  careFacts: () => ({ reads: [...heartbeatReads], receipts: useAppStore.getState().noticeReadReceipts,
+    lamp: globalThis.document.querySelector('.mote-space-frame__header .mote-heartbeat-lamp')?.dataset.moteCare,
+    notifications: observeNotifications({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'private-care-notice-reading', operation: 'inspect.notifications',
+      target: { domain: 'client.notifications', hostId: 'local', list: { section: 'current', category: 'operations', limit: 32 } }, includeRaw: true, maxBytes: 65536 }) }),
+  persistedCare: async () => { const raw = await api.ui.readWorkbenchState(); return raw ? JSON.parse(raw).state?.noticeReadReceipts ?? null : null },
   variant(value) { variant = value },
   startup() {
     originalCreation = { createOperationId: 'original-start-operation', initialPrompt: 'unconfirmed', createdRun: session.control.run,
