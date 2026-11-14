@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { AgentMuxSpaceMutationReport } from '@agentmux/core/control'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { hostExecutorInventoryMatches, executorsForHost } from '../lib/executors'
-import { focusTakeoverResult, inspectTakeover, takeOverSession, type TakeoverSource } from '../lib/session-takeover'
+import { focusTakeoverResult, inspectTakeover, retainsTakeoverRequest, takeOverSession, type TakeoverSource } from '../lib/session-takeover'
 import { useAppStore } from '../store'
 import { AgentExecutorPicker } from './AgentExecutorPicker'
 import { AgentAvatar } from './AgentAvatar'
@@ -52,6 +52,9 @@ export function SessionTakeoverSurface({ source, active, onClose, onOpened, onSu
   const [unconfirmed, setUnconfirmed] = useState(false)
   const [closedRequest, setClosedRequest] = useState<string | null>(null)
   const [previousRequest, setPreviousRequest] = useState<string | undefined>()
+  // A source taken over before keeps its deterministic request. A retirement Core confirms
+  // before this choice is presented makes the choice itself the explicit successor.
+  const earlierRetirement = useRef<Promise<string | undefined> | null>(null)
   const [closing, setClosing] = useState(false)
   const [destinationKey, setDestinationKey] = useState('')
   const destinations = useMemo(() => {
@@ -87,6 +90,14 @@ export function SessionTakeoverSurface({ source, active, onClose, onOpened, onSu
     return () => clearTimeout(timer)
   }, [closing])
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
+  useEffect(() => {
+    if (!active || earlierRetirement.current) return
+    // A failed read leaves the choice to the normal path, which re-inspects and reports it.
+    const read = earlierRetirement.current = retainsTakeoverRequest(source)
+      .then(retained => retained ? inspectTakeover(source) : null)
+      .then(report => report?.outcome === 'retired' ? report.requestId : undefined, () => undefined)
+    void read.then(requestId => { if (requestId && mounted.current && !admitted.current) setPreviousRequest(current => current ?? requestId) })
+  }, [active, source])
   useEffect(() => {
     if (active && source.hostId && (host?.kind === 'ssh' ? !hostExecutorInventoryMatches(inventory, host) : executors.some(item => !item.detection))) void detect(source.hostId)
   }, [active, source.hostId, host, inventory, executors, detect])
@@ -188,7 +199,7 @@ export function SessionTakeoverSurface({ source, active, onClose, onOpened, onSu
         <span className="session-takeover__destination">{source.derived ? <ThemeDerivedActionIcon size={13} aria-hidden="true" /> : null}{actionLabel}</span>
       </div>
       <header className="session-takeover__heading">
-        <div><h2>{source.derived ? source.derived.label : 'Keep the work moving.'}</h2><p>{source.derived ? 'Choose an Agent to start this from the original work.' : previousRequest ? 'Choose an Agent to take over again.' : 'Choose an Agent to take over.'}</p></div>
+        <div><h2>{source.derived ? source.derived.label : 'Keep the work moving.'}</h2><p>{source.derived ? 'Choose an Agent to start this from the original work.' : previousRequest ? 'The earlier takeover Agent was closed. Choose an Agent to take over again.' : 'Choose an Agent to take over.'}</p></div>
         <button type="button" className="icon-button session-takeover__cancel" aria-label="Cancel takeover" title="Cancel · Esc" onClick={() => close()}><ThemeActionCancelIcon size={16} /></button>
       </header>
       {source.derived ? <details className="session-takeover__instruction" open={source.derived.instruction.trim().length <= 220}>

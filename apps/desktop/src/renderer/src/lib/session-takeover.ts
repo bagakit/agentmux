@@ -191,6 +191,11 @@ async function nameTakeover(source: TakeoverSource, report: AgentMuxSpaceMutatio
   return report
 }
 
+/** Only a locally retained request for this exact source can carry an earlier result. */
+export async function retainsTakeoverRequest(source: TakeoverSource): Promise<boolean> {
+  return Boolean(source.hostId) && Object.hasOwn(useAppStore.getState().spatialRequests, await takeoverRequestId(source))
+}
+
 export async function inspectTakeover(source: TakeoverSource): Promise<AgentMuxSpaceMutationReport | null> {
   // Reading an already-admitted Session intent does not require that its old
   // source Run still be current. Creation below retains the full source fence.
