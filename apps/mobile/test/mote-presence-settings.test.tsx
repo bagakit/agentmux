@@ -42,7 +42,12 @@ function original(defaults: MoteQuickDefaults = {}) {
   f.client.runtimeOwnerIdentity = () => ({ runtimeId: 'original-settings-runtime', ownerInstanceId: 'original-settings-process', availability: 'connected' }) as ReturnType<AgentMuxHostedClient['runtimeOwnerIdentity']>
   const rpc = vi.fn(async (method: string, input: any, _context?: unknown, _fence?: unknown) => {
     if (method === 'space.ls') return { catalog: { motePresentation: [fact] } }
-    if (method === 'space.mote.preferences.read') return structuredClone(reads())
+    if (method === 'space.mote.preferences.read') {
+      const result = reads(), choices = input.includeChoices === false ? null : input.includeChoices === 'executors'
+        ? { executors: result.choices.executors, conversations: null, destinations: null }
+        : input.includeChoices === 'locations' ? { executors: null, conversations: result.choices.conversations, destinations: result.choices.destinations } : result.choices
+      return structuredClone({ ...result, choices })
+    }
     if (method === 'space.mote.preferences.save') {
       if (pendingSave) return pendingSave.promise
       return { kind: 'quick', target, operationId: input.operationId, status: 'saved', source: { resource: fileResource, document, defaults: effectiveMoteQuickSave(input) }, message: null }
@@ -126,7 +131,7 @@ it('presents unconfirmed actual maintenance independently from readable settings
   expect(view.element.textContent).not.toContain('已安排自动心跳')
   const before = f.rpc.mock.calls.filter(([method]) => method === 'space.mote.preferences.read').length
   await click(button(view.element, '刷新实际安排'))
-  await wait(() => expect(f.rpc.mock.calls.filter(([method]) => method === 'space.mote.preferences.read').length).toBe(before + 1))
+  await wait(() => expect(f.rpc.mock.calls.filter(([method]) => method === 'space.mote.preferences.read').slice(before).map(([, input]) => input.includeChoices)).toEqual([false, 'executors', 'locations']))
   expect(f.f.submit).not.toHaveBeenCalled()
 })
 
