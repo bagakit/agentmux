@@ -52,6 +52,16 @@ import { mobileInteractionLabels } from '../presentation/interaction'
 const inShellSlot = (target: HTMLElement | null | undefined, node: ReactNode) =>
   target === undefined ? node : target && node ? createPortal(node, target) : null
 
+/** Touch has no hover, so a tap on a message is what shows its copy and details; one message at a time. */
+function revealMessageActions(reading: HTMLElement, target: EventTarget) {
+  if (!(target instanceof Element) || target.closest('a, button, summary, input, textarea, select, label, [contenteditable="true"]')) return
+  if (reading.ownerDocument.getSelection()?.isCollapsed === false) return
+  const message = target.closest('.log-turn')
+  const current = reading.querySelector('.log-turn[data-actions-revealed]')
+  current?.removeAttribute('data-actions-revealed')
+  if (message && message !== current && reading.contains(message)) message.setAttribute('data-actions-revealed', '')
+}
+
 const mobileConversationToolLabels: NonNullable<ClientUiPlatform['conversationToolLabels']> = {
   copy: '复制', copying: '正在复制…', copied: '已复制', retryCopy: '重新复制',
   formatJson: '格式化 JSON', formatJsonHint: '格式化便于阅读；复制时保留原文', self: '我'
@@ -456,7 +466,7 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
         })}
       </details>}
       <div className="mobile-conversation__reader">
-      <div ref={feed} className="mobile-conversation__reading" onScroll={event => {
+      <div ref={feed} className="mobile-conversation__reading" onClick={event => revealMessageActions(event.currentTarget, event.target)} onScroll={event => {
         const node = event.currentTarget
         const programmatic = consumeProgrammaticReadingScroll(node)
         follow.current = programmatic === 'restore' ? { ...follow.current, lastScrollTop: node.scrollTop } : onScroll(follow.current, { scrollTop: node.scrollTop, scrollHeight: node.scrollHeight, clientHeight: node.clientHeight })
