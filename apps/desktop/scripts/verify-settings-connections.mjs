@@ -190,7 +190,7 @@ async function capture() {
       assert.equal(bytes.readUInt32BE(16), frame.pngPixels.width); assert.equal(bytes.readUInt32BE(20), frame.pngPixels.height)
       receipt.supplementalImages.push({ path: frame.image, bytes: bytes.length, sha256: sha(bytes), width: frame.width, theme: frame.theme, scenario: frame.scenario })
     }
-    if (section === 'hosts') assert.equal(receipt.supplementalImages.length, operation === '--network-capture' ? 18 : 31, 'Nonempty original management plus application editor, plan, unknown, verified and Retro scenes')
+    if (section === 'hosts') assert.equal(receipt.supplementalImages.length, operation === '--network-capture' ? 18 : 32, 'Nonempty original management plus application editor, plan, unknown, verified and Retro scenes')
     receipt.cssInputs = [...cssInputs].map(file => relative(root, file)).sort(); receipt.compiled = compiled
     receipt.aestheticReview = 'pending independent actual PNG review'
   } finally {

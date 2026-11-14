@@ -253,7 +253,7 @@ app.whenReady().then(async () => {
       await until(`[...document.querySelectorAll(${JSON.stringify(running)})].some(node=>node.checkVisibility()&&node.textContent==='4')`)
       assert.ok(await read(`[...document.querySelectorAll(${JSON.stringify(runtime + ' .host-runtime__resources > div:nth-child(2) strong')})].some(node=>node.checkVisibility()&&node.textContent==='3')`))
       assert.ok(await read(`[...document.querySelectorAll(${JSON.stringify(runtime + ' .host-runtime__resources > div:nth-child(3) strong')})].some(node=>node.checkVisibility()&&node.textContent==='12 MiB')`))
-      await click(`${runtime} .host-runtime__details > summary`)
+      if (!await read(`document.querySelector(${JSON.stringify(runtime + ' .host-runtime__details[data-diagnostics]')}).open`)) await click(`${runtime} .host-runtime__details[data-diagnostics] > summary`)
       const identities = await read(`Object.fromEntries([...document.querySelectorAll(${JSON.stringify(runtime + ' dl > div')})].map(row=>[row.querySelector('dt').textContent,row.querySelector('dd').textContent]))`)
       assert.equal(identities['Host route'],target,'The Host route remains its own identity')
       assert.equal(identities['Semantic Runtime'],host.runtimeId ?? 'controlled-semantic-runtime')
@@ -265,13 +265,24 @@ app.whenReady().then(async () => {
       assert.equal(await read(`document.querySelectorAll(${JSON.stringify(runtime + ' [data-native-capability]')}).length`),6,'Six original Native declarations are individually consumed')
       assert.ok(await read(`document.querySelector(${JSON.stringify(runtime + ' .host-runtime__capabilities time')})?.dateTime`),'Declaration source read time remains explicit')
       if (theme==='dark' && width!==640) {
-        await read(`document.querySelector(${JSON.stringify(runtime + ' .host-runtime__capabilities')}).scrollIntoView({block:'center'})`)
+        await until(`document.querySelector(${JSON.stringify(runtime + ' .host-runtime__capabilities header')})?.checkVisibility()`, 'The actual capability details are expanded')
+        await read(`document.querySelector(${JSON.stringify(runtime + ' .host-runtime__capabilities header')}).scrollIntoView({block:'center'})`)
         await settle()
+        const capabilityView = await read(`(()=>{const n=document.querySelector(${JSON.stringify(runtime + ' .host-runtime__capabilities header')}),r=n.getBoundingClientRect(),hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);return {bounds:r.toJSON(),visible:n.checkVisibility(),hit:!!hit&&(hit===n||n.contains(hit))}})()`)
+        assert.ok(capabilityView.visible && capabilityView.hit && capabilityView.bounds.top>=0 && capabilityView.bounds.bottom<=980, 'The Native capabilities heading is actually visible in its capture: '+JSON.stringify(capabilityView))
         const image=`hosts-${width}-${theme}-native-capabilities.png`,png=(await win.webContents.capturePage()).toPNG()
         fs.writeFileSync(path.join(evidence,image),png)
         result.supplementalFrames.push({section,width,theme,scenario:'native-capabilities',image,pngPixels:{width:png.readUInt32BE(16),height:png.readUInt32BE(20)}})
+        if (width===320) {
+          const last = `${runtime} .host-runtime__capabilities [data-native-capability]:last-child`
+          await read(`document.querySelector(${JSON.stringify(last)}).scrollIntoView({block:'center'})`)
+          await settle()
+          const visible = await read(`(()=>{const n=document.querySelector(${JSON.stringify(last)}),r=n.getBoundingClientRect(),hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);return n.checkVisibility()&&!!hit&&(hit===n||n.contains(hit))})()`)
+          assert.ok(visible, 'The last Native capability is visible in the narrow tail capture')
+          await supplemental(width,theme,'native-capabilities-tail')
+        }
       }
-      await click(`${runtime} .host-runtime__details > summary`)
+      await click(`${runtime} .host-runtime__details[data-diagnostics] > summary`)
       const resourceSample = `(()=>{const nodes=[...document.querySelectorAll(${JSON.stringify(sample)})].filter(node=>node.checkVisibility()&&!node.closest('[hidden],[inert]')&&node.textContent.startsWith('Resource sample '));return nodes.length===1?nodes[0].textContent:null})()`
       await until(resourceSample, 'The visible original Runtime resource sample is available')
       const originalSample = await read(resourceSample)
@@ -326,7 +337,10 @@ app.whenReady().then(async () => {
         const localName = await read(`window.connectionsProof.current().then(config=>config.hosts.find(host=>host.id==='local').label)`)
         assert.ok(await read(`document.querySelector(${JSON.stringify(related+' .application-access__header')}).textContent.includes(${JSON.stringify('Manage application access involving '+localName+'.')})`),'Source Host is a related environment, not a claimed target')
         await read(`document.querySelector(${JSON.stringify(related)}).scrollIntoView({block:'start'})`)
-        await settle();await supplemental(width,theme,'application-source')
+        await settle()
+        const refreshLines = await read(`(()=>{const button=document.querySelector(${JSON.stringify(related + ' .application-access__header button')}),range=document.createRange();range.selectNodeContents(button);return [...range.getClientRects()].map(rect=>rect.toJSON())})()`)
+        assert.equal(refreshLines.length, 1, 'The application Refresh label stays on one readable line')
+        await supplemental(width,theme,'application-source')
         await click(relatedAction('Edit rule'))
         const targetSelect = related + ' [aria-label="Target environment"]'
         await until(`!!document.querySelector(${JSON.stringify(targetSelect)})`)
