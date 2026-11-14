@@ -74,12 +74,14 @@ export function GlobalBoardSurface() {
   const retainedStarts = useAppStore(useShallow(retainedStartsSelector))
   const selectedDemand = projectedDemands.find((demand) => demand.id === selectedDemandId) ?? null
   const projects = useMemo(() => projectWorkspaces((config?.workspaces ?? []).filter((workspace) => workspace.id !== SCRATCH_WORKSPACE_ID)), [config?.workspaces])
-  const scopedDemands = useMemo(() => projectedDemands.filter((demand) => {
+  const scopedDemands = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase()
-    const matchesQuery = !normalized || `${demand.title} ${demand.description} ${demand.projectName ?? ''}`.toLocaleLowerCase().includes(normalized)
-    const matchesRouting = routingFilter === 'all' || (routingFilter === 'unassigned' ? !demand.projectId || !demand.assigneeSessionIds?.length : Boolean(demand.projectId && demand.assigneeSessionIds?.length))
-    return matchesQuery && (statusFilter === 'all' || demand.status === statusFilter) && (projectFilter === 'all' || demand.projectId === projectFilter) && matchesRouting && (assigneeFilter === 'all' || demand.assigneeSessionIds?.some(ref => demandAgentReferenceKey(ref) === assigneeFilter))
-  }), [assigneeFilter, projectFilter, query, routingFilter, statusFilter, projectedDemands])
+    return projectedDemands.filter(demand => {
+      const matchesQuery = !normalized || `${demand.title} ${demand.description} ${demand.projectName ?? ''}`.toLocaleLowerCase().includes(normalized)
+      const matchesRouting = routingFilter === 'all' || (routingFilter === 'unassigned' ? !demand.projectId || !demand.assigneeSessionIds?.length : Boolean(demand.projectId && demand.assigneeSessionIds?.length))
+      return matchesQuery && (statusFilter === 'all' || demand.status === statusFilter) && (projectFilter === 'all' || demand.projectId === projectFilter) && matchesRouting && (assigneeFilter === 'all' || demand.assigneeSessionIds?.some(ref => demandAgentReferenceKey(ref) === assigneeFilter))
+    })
+  }, [assigneeFilter, projectFilter, query, routingFilter, statusFilter, projectedDemands])
   const acknowledgementFailed = (id: string) => Boolean(acknowledgementFeedback[id]?.failure)
   const filteredDemands = useMemo(() => showHistory || statusFilter !== 'all' ? scopedDemands : scopedDemands.filter(demand =>
     demand.status !== 'cancelled' && (demand.status !== 'done' || !isCurrentGroundingAccepted(demand.alignment, demand.grounding))),

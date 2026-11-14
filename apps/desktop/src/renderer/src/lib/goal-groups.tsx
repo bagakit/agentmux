@@ -30,7 +30,9 @@ export function groupGoals(goals: readonly DemandProjection[], acknowledgementFa
   const buckets = new Map<GoalStage, DemandProjection[]>()
   for (const goal of goals) {
     const stage = acknowledgementFailed(goal.id) ? 'you' : goalNextStepFact(goal, retainedStart(goal.id)).stage
-    buckets.set(stage, [...buckets.get(stage) ?? [], goal])
+    const bucket = buckets.get(stage)
+    if (bucket) bucket.push(goal)
+    else buckets.set(stage, [goal])
   }
   return GOAL_GROUP_ORDER.flatMap(stage => buckets.get(stage)?.length ? [{ stage, goals: buckets.get(stage)! }] : [])
 }
