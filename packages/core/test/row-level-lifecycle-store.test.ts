@@ -61,6 +61,30 @@ function bindings(path: string) {
   } finally { db.close() }
 }
 
+function auditBindingWrites(path: string) {
+  const db = new DatabaseSync(path)
+  try {
+    db.exec('CREATE TABLE binding_writes (binding_table TEXT, operation TEXT, binding_key TEXT)')
+    for (const [table, key] of [['run_bindings', 'run_id'], ['native_bindings', 'native_key']] as const) {
+      for (const [action, row] of [['INSERT', 'new'], ['UPDATE', 'new'], ['DELETE', 'old']] as const) {
+        db.exec(`CREATE TRIGGER audit_${table}_${action} AFTER ${action} ON ${table}
+          BEGIN INSERT INTO binding_writes VALUES ('${table}', '${action}', ${row}.${key}); END`)
+      }
+    }
+  } finally { db.close() }
+  return () => {
+    const reader = new DatabaseSync(path, { readOnly: true })
+    try {
+      return reader.prepare('SELECT binding_table, operation, binding_key FROM binding_writes ORDER BY binding_table, operation, binding_key')
+        .all().map(row => [row.binding_table, row.operation, row.binding_key])
+    } finally { reader.close() }
+  }
+}
+
+function nativeKey(id: string) {
+  return JSON.stringify(['provider', 'codex', `native-${id}`])
+}
+
 async function facts(store: AgentMuxAgentSessionStore) {
   const sessions = await store.loadMetadata()
   return {
@@ -83,6 +107,86 @@ function derived(current: readonly AgentMuxStoredAgentSession[], retiredRuns: re
       .sort(([a], [b]) => String(a).localeCompare(String(b))))
   }
 }
+
+describe('metadata saves reconcile only changed binding rows', () => {
+  it('writes no binding rows when the current and historical identities stay the same', async () => {
+    const { file, path } = await pair()
+    const original = session('target', 'run-target', Array.from({ length: 32 }, (_, index) => `prior-${index}`))
+    await file.compareAndSwapMetadata(null, original)
+    const current = (await file.readMetadata('target'))!
+    const readWrites = auditBindingWrites(path)
+    const next = { ...current, updatedAt: current.updatedAt + 1 }
+
+    await file.compareAndSwapMetadata(current, next)
+
+    expect(await file.readMetadata('target')).toEqual(next)
+    expect(bindings(path)).toEqual(derived([next], []))
+    expect(readWrites()).toEqual([])
+  })
+
+  it.each(['replace', 'remove'] as const)('changes only the exact Run and native keys when native identity is set to %s', async nativeChange => {
+    const { file, path } = await pair()
+    const original = session('target', 'run-target', ['prior-stays', 'prior-leaves'])
+    const neighbor = session('neighbor', 'run-neighbor')
+    await file.compareAndSwapMetadata(null, original)
+    await file.compareAndSwapMetadata(null, neighbor)
+    await file.retireRuns([{ runId: 'reserved-by-retirement' }])
+    const current = (await file.readMetadata('target'))!
+    const readWrites = auditBindingWrites(path)
+    const next = { ...current, run: { runId: 'run-new' }, retiredRuns: [{ runId: 'prior-stays' }, current.run] }
+    if (nativeChange === 'replace') next.nativeHandle = { kind: 'provider', providerId: 'codex', sessionId: 'native-new' }
+    else delete next.nativeHandle
+
+    await file.compareAndSwapMetadata(current, next)
+
+    expect(bindings(path)).toEqual(derived([next, neighbor], ['reserved-by-retirement']))
+    expect(readWrites()).toEqual([
+      ['native_bindings', 'DELETE', nativeKey('target')],
+      ...(nativeChange === 'replace' ? [['native_bindings', 'INSERT', nativeKey('new')]] : []),
+      ['run_bindings', 'DELETE', 'prior-leaves'],
+      ['run_bindings', 'INSERT', 'run-new']
+    ])
+  })
+
+  it('repairs missing and stale physical bindings during an unchanged identity save', async () => {
+    const { file, path } = await pair()
+    await file.compareAndSwapMetadata(null, session('target', 'run-target', ['prior-stays']))
+    const current = (await file.readMetadata('target'))!
+    const db = new DatabaseSync(path)
+    try {
+      db.prepare('DELETE FROM run_bindings WHERE run_id=?').run('prior-stays')
+      db.prepare('DELETE FROM native_bindings WHERE native_key=?').run(nativeKey('target'))
+      db.prepare('INSERT INTO run_bindings VALUES (?, ?)').run('run-stale', 'target')
+      db.prepare('INSERT INTO native_bindings VALUES (?, ?)').run(nativeKey('stale'), 'target')
+    } finally { db.close() }
+    const readWrites = auditBindingWrites(path)
+
+    await file.compareAndSwapMetadata(current, { ...current, updatedAt: current.updatedAt + 1 })
+
+    expect(bindings(path)).toEqual(derived([current], []))
+    expect(readWrites()).toEqual([
+      ['native_bindings', 'DELETE', nativeKey('stale')],
+      ['native_bindings', 'INSERT', nativeKey('target')],
+      ['run_bindings', 'DELETE', 'run-stale'],
+      ['run_bindings', 'INSERT', 'prior-stays']
+    ])
+  })
+
+  it.each(['Run', 'native'] as const)('refuses to claim another current Session’s %s binding', async kind => {
+    const { file, path } = await pair()
+    const neighbor = session('neighbor', 'run-neighbor', ['run-neighbor-prior'])
+    await file.compareAndSwapMetadata(null, neighbor)
+    await file.compareAndSwapMetadata(null, session('target', 'run-target'))
+    const current = (await file.readMetadata('target'))!
+    const expected = kind === 'Run' ? 'Run conflicts with another current or retired Session.' : 'Native identity conflicts with another Session.'
+    const next = kind === 'Run' ? { ...current, retiredRuns: [...neighbor.retiredRuns] } : { ...current, nativeHandle: neighbor.nativeHandle! }
+
+    await expect(file.compareAndSwapMetadata(current, next)).rejects.toMatchObject({ code: 'INVALID_AGENT_SESSION_STORE', message: expected })
+
+    expect(bindings(path)).toEqual(derived([current, neighbor], []))
+    expect(await file.readMetadata('target')).toEqual(current)
+  })
+})
 
 describe('every lifecycle commits one Session by its own rows', () => {
   it('agrees with the in-memory reference across creates, resumes, reopens, Stops, releases and retired Runs', async () => {
@@ -139,7 +243,7 @@ describe('every lifecycle commits one Session by its own rows', () => {
   }, 60_000) // 80 steps against two stores; each File step is one fsync-confirmed transaction.
 
   it('refuses a commit that would bind a retired Run to another Session', async () => {
-    const { file } = await pair()
+    const { file, path } = await pair()
     const first = session('first', 'run-1')
     const reservation = create('first')
     await file.reserveLifecycle(reservation); await file.commitLifecycle(reservation, first)
@@ -150,6 +254,7 @@ describe('every lifecycle commits one Session by its own rows', () => {
     await expect(file.commitLifecycle(thief, session('thief', 'run-1'))).rejects.toThrow('Run conflicts with another current or retired Session')
     expect((await file.loadMetadata()).map(item => item.agentSessionId)).toEqual([])
     expect(await file.readLifecycleReservation('thief')).toEqual(expect.objectContaining({ kind: 'create' }))
+    expect(bindings(path)).toEqual(derived([], ['run-1']))
   })
 
   it('keeps one terminal prompt operation on one current Session', async () => {
