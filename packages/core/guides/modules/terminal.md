@@ -1,6 +1,6 @@
 ---
-summary: "Raw Terminal creation, exact observation and semantic recovery"
-roles: "Agents preparing an authorized terminal workface"
+summary: "Raw Terminal creation, observation, control and recovery"
+roles: "Authorized workface creation; person/device raw observation and control"
 when: "Open a terminal after inspecting its intended workface"
 ---
 
@@ -48,3 +48,30 @@ Start is observed, never replayed; an explicit continue first fences the origina
 creation before a successor. Keep its canonical operation receipt. Closing a view
 does not stop that recovered Run. This raw Runtime action requires the original
 transport-approved user or device; Agent Sessions use semantic recovery.
+
+For one durable control, use terminal input/interrupt/stop --input FILE|-.
+The original terminal inspect result supplies target, runtime.instanceId and the
+separate run.acceptedInputBytes input cursor. Input JSON is:
+
+{"target":{"hostId":"HOST","runtimeId":"NATIVE_RUNTIME","run":{"runId":"RUN"}},"operationId":"ORIGINAL_OP","ownerInstanceId":"NATIVE_INSTANCE","expectedByte":0,"dataBase64":"YQ=="}
+
+Use the actual original values. Interrupt and Stop use the same shape without
+expectedByte/dataBase64. Input is exact canonical base64 bytes: no shell quoting,
+newline or Prompt submit is added. Empty bytes are an explicit no-op without a
+Native write or cursor advance. A stale input cursor is refused; it is never
+refreshed behind the caller. Interrupt uses native SIGINT, not a Ctrl-C byte.
+Stop freezes the original native Stop token and reports its graceful/forced
+quiescence receipt; request submission alone is not a stopped Run.
+
+These controls require the original transport-approved person/device without a
+managed Agent caller. Active/retired Agent Runs stay on their semantic owner.
+Read terminal operation inspect --host HOST --run RUN --operation-id ORIGINAL_OP
+for the retained request outcome; optional --runtime NATIVE_RUNTIME checks an
+original known pin. This lookup works without an active Native owner and never
+inputs, interrupts, stops, starts or recovers anything. Current status/input cursor
+can be read separately and do not prove an old ACK. Keep unknown outcomes and the
+original operation ID; do not call a mutator to inspect it. Native ACK, disk
+confirmation and no-op remain separate; a cold disk read cannot reconstruct the
+previous producer's directory-sync ACK. Cancelling a CLI reader does not undo a
+submitted native intent or authorize another dispatcher. Live GUI typing retains
+its original input channel and does not journal every key.
