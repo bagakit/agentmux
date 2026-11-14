@@ -4511,6 +4511,8 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     noteCanvasLayouts: state.noteCanvasLayouts,
     dirtyDocuments: state.dirtyDocuments,
     tabs: coreSpatialReady ? undefined : state.tabs,
+    // Memo dependency for thin Source/legacy pointers; never another persisted layout.
+    readNamespaceTopology: state.tabs,
     layouts: coreSpatialReady ? undefined : state.layouts,
     unclaimedTerminalSessionIds: state.unclaimedTerminalSessionIds,
     // 拖出来的顺序是用户意图，重开应该还在。它只是偏好：恢复时对不上磁盘的条目会被 orderTopics 丢掉。
@@ -4593,7 +4595,7 @@ function partializeAppState(state: AppState): PersistedAppState {
   if (previousPersistedInputs && previousPersistedProjection && previousCoreSpatialReady===coreSpatialReady && shallow(previousPersistedInputs, inputs)) {
     return previousPersistedProjection
   }
-  const { tabs, layouts, projectGroups, spaceZoneBindings, documents, dirtyDocuments, documentIssues, ...presentation } = inputs
+  const { tabs, layouts, readNamespaceTopology: _readNamespaceTopology, projectGroups, spaceZoneBindings, documents, dirtyDocuments, documentIssues, ...presentation } = inputs
   const legacyMainNoteReferences = { ...state.legacyMainNoteReferences }
   const referenceKeys = new Set<string>()
   let hasSourcePointers = Boolean(Object.keys(state.sourceFilesInputs.readSources ?? {}).length)
