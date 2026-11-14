@@ -1,6 +1,4 @@
-import { mintObjectId } from '@agentmux/core/object-id'
 import { Extension, Mark, Node, getSchema } from '@tiptap/core'
-import UniqueID from '@tiptap/extension-unique-id'
 import StarterKit from '@tiptap/starter-kit'
 import { NoteImageNode, NoteTaskItemNode, NoteTaskListNode, NoteBulletListNode, NoteOrderedListNode, NoteTableNode, NoteTableRowNode, NoteTableCellNode, NoteTableHeaderNode, NoteTableEnter } from './note-rich-blocks.js'
 export { NoteImageNode, NoteTaskItemNode, NoteTaskListNode, NoteTableNode, NoteTableCellNode, NoteTableHeaderNode } from './note-rich-blocks.js'
@@ -73,13 +71,3 @@ export function noteContentExtensions() {
   return [StarterKit.configure({ trailingNode: false, bulletList: false, orderedList: false }), BlockIdentity, NoteBlockReferenceNode, NoteIncludeNode, NoteInlineLinkNode, NoteWikiLiteral, NoteImageNode, NoteBulletListNode, NoteOrderedListNode, NoteTaskListNode, NoteTaskItemNode, NoteTableNode, NoteTableRowNode, NoteTableCellNode, NoteTableHeaderNode, NoteTableEnter, NoteRawBlockNode, NoteMathInlineNode, NoteMathBlockNode]
 }
 export const noteContentSchema: ReturnType<typeof getSchema> = getSchema(noteContentExtensions())
-
-/** Reading never allocates identities. New reference occurrences are authored by editor transactions;
- * missing semantic block IDs are assigned only by the original file writer. */
-export function noteIdentityExtensions() {
-  return [
-    UniqueID.extend({ name: 'noteBlockUniqueId', onCreate() {} }).configure({ attributeName: 'blockId', types: [...NOTE_BLOCK_TYPES], generateID: () => null, filterTransaction: transaction => !transaction.getMeta('preventUpdate') && !transaction.getMeta('noteSelectionRestore') }),
-    UniqueID.extend({ name: 'noteReferenceUniqueId', onCreate() {} }).configure({ attributeName: 'referenceId', types: [NoteBlockReferenceNode.name, NoteIncludeNode.name, NoteInlineLinkNode.name], generateID: () => mintObjectId(), filterTransaction: transaction => !transaction.getMeta('preventUpdate') && !transaction.getMeta('noteSelectionRestore') })
-  ]
-}
-export { closeHistory } from '@tiptap/pm/history'
