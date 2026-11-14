@@ -9,7 +9,7 @@ recorded transport never submits another PMO input.
 Run the capture with an existing Electron binary and a source JSON path:
 
 ```sh
-node apps/desktop/scripts/verify-goal-responsibility-journey.mjs --source SOURCE_JSON --electron EXISTING_ELECTRON
+node apps/desktop/scripts/verify-goal-responsibility-journey.mjs --evidence OUTPUT_DIR --source SOURCE_JSON --electron EXISTING_ELECTRON
 ```
 
 `--capture-only` performs the same strict source/CLI/candidate/build checks and
@@ -32,17 +32,24 @@ original capture receipt and its exact images. Changed evidence or candidates fa
 `--prepare-only` builds the actual Renderer and records its graph without starting
 Electron. It is preparation, not a passing visual or lifecycle gate. The default
 capture requires current source/CLI hashes to match the original journey receipt.
-Without arguments it reads `.tmp/goal-responsibility/t005/source/journey.json` and
-the existing binary named by `AGENTMUX_PROOF_ELECTRON_PATH`. It reads, rather than
-reruns, the original Native responsibility, typed workface restart and cost
-receipts. Their defaults are `.tmp/goal-responsibility/t005/native/receipt.json`,
-`.tmp/typed-native-restart/last/receipt.json` and
-`.tmp/goal-responsibility/t005/cost-receipt.json`. The respective
+All output is placed in an explicit `--evidence DIR` (or the explicit
+`AGENTMUX_GOAL_RESPONSIBILITY_EVIDENCE` value). Inputs have no implicit location:
+provide `--source FILE` or an exact `--capture-receipt FILE`. The combined gate
+also requires `--native-receipt FILE`, `--workface-receipt FILE` and
+`--cost-receipt FILE`; their respective
 `AGENTMUX_GOAL_RESPONSIBILITY_NATIVE_RECEIPT`,
 `AGENTMUX_GOAL_RESPONSIBILITY_WORKFACE_RECEIPT` and
-`AGENTMUX_GOAL_RESPONSIBILITY_COST_RECEIPT` environment values can select their
-exact original receipts. A pointer contains only the original repository-relative
-`path` and `sha256`; it does not summarize or replace evidence.
+`AGENTMUX_GOAL_RESPONSIBILITY_COST_RECEIPT` values remain explicit alternatives.
+A pointer contains only the original repository-relative or absolute `path`
+and `sha256`; it does not summarize or replace evidence.
+
+The other Goal verification runners likewise require `--evidence DIR`.
+Responsibility mutations select `--slice responsibility|patrol|cost|delegation`;
+the cost pointer is written inside that chosen output directory. Read-only
+`--check-qualified POINTER` can derive its evidence scope from the explicit
+pointer's directory. Native responsibility accepts an optional `--electron FILE`.
+Plan discovery always runs the current committed product suite and current
+routing/consumer mutations; it does not reuse an earlier checkout's history.
 
 The source schema is `agentmux.goal-responsibility-visual-source.v1`:
 
