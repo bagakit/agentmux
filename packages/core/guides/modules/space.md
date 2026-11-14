@@ -33,6 +33,18 @@ SDK callers use the same typed `space.link.ensure` and `space.link.resolve` meth
 Core before navigating, preserving input by default. Query-free saved Mote/thread URIs
 remain literal original Space/event inputs; they are not rewritten or guessed as tokens.
 
+## Read-only presentation cost
+
+`space ls` / `space inspect` omit presentation by default and retain original topology.
+`--presentation-status` maps to JSON `presentation: "status"`: original names, object
+appearance and current status, without timeline, history, recap or conversation-derived
+result classification. Use it for ordinary directories and needs-you observations.
+`--presentation` still maps to `presentation: true` for full original recap and Focus
+ordering. These flags are mutually exclusive. JSON `false` also omits enrichment;
+unknown selector strings are rejected. Reading or cancelling either form changes no
+Session, Run, input authority, saved reference or draft. Cancellation ends this reader;
+a lower-level read already running without cancellation support may finish independently.
+
 ## Saved Survey pages and research
 
 Survey references are client preferences over the original Browser/Region or Zone, not
