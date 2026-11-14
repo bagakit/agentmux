@@ -72,7 +72,7 @@ import { MobileLocalDraftsOwner } from './conversation/local-drafts-owner'
 import { useMobileWebAttachmentOwner } from './mobile-web/update-safety'
 import { MobileMoteComposer, mobileSessionComposerSource, mobileWelcomeComposerSource } from './conversation/mote-composer'
 import { useEdgeBack } from './navigation/use-edge-back'
-import { MobileSheetHandle } from './navigation/MobileSheetHandle'
+import { MobileSheetHeader } from './navigation/MobileSheetHeader'
 import { useMobileWorkfaceLayout } from './layout/use-mobile-workface-layout'
 import { MobileWorkfaceFrame, MobileWorkfacePane } from './layout/MobileWorkfaceFrame'
 import { workfacePanes } from './layout/workface-presentation'
@@ -97,7 +97,6 @@ const ThemeStatusInfoIcon = semanticIconComponent('status.info')
 const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
 const ThemeActionMenuIcon = semanticIconComponent('action.menu')
 const ThemeObjectTerminalIcon = semanticIconComponent('object.terminal')
-const ThemeActionCloseIcon = semanticIconComponent('action.close')
 const ThemeOpenSidebarIcon = semanticIconComponent('layout.open-left')
 const ThemeCloseSidebarIcon = semanticIconComponent('layout.close-left')
 const ThemeNavigationSurveyIcon = semanticIconComponent('navigation.survey')
@@ -788,7 +787,7 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
         }
         if (!current.focusComposer()) setNotice('输入区暂时未准备好，请稍后再试。')
       }}>
-        <MobileSheetHandle onClose={() => setSheet(null)} /><div className="mobile-sheet-title"><Dialog.Title>{sheet === 'team' ? `${team?.name ?? moteTitle} · 团队` : sheet === 'agent' ? menuTarget?.identity.name ?? 'Agent' : sheet === 'notices' ? '提醒与诊断' : sheet === 'identity' ? profileIdentity?.mote ? profileIdentity.mote.name ?? 'Mote 名称未确认' : profileIdentity?.name ?? 'Mote' : sheet === 'actions' ? '当前对话' : sheet === 'settings' ? 'AgentMux' : workspaceVisible ? '连接与设备' : '连接你的 Mac'}</Dialog.Title><Dialog.Close asChild><IconButton className="mobile-icon-button" aria-label="关闭面板"><ThemeActionCloseIcon size={19} /></IconButton></Dialog.Close></div>
+        <MobileSheetHeader onClose={() => setSheet(null)} title={sheet === 'team' ? `${team?.name ?? moteTitle} · 团队` : sheet === 'agent' ? menuTarget?.identity.name ?? 'Agent' : sheet === 'notices' ? '提醒与诊断' : sheet === 'identity' ? profileIdentity?.mote ? profileIdentity.mote.name ?? 'Mote 名称未确认' : profileIdentity?.name ?? 'Mote' : sheet === 'actions' ? '当前对话' : sheet === 'settings' ? 'AgentMux' : workspaceVisible ? '连接与设备' : '连接你的 Mac'} closeLabel="关闭面板" />
         {sheet === 'team' ? <>
           <Dialog.Description id="mobile-sheet-description">团队的当前工作与请求</Dialog.Description>
           <MobileMoteTeamPanel team={team} issue={teamReading.issue} currentSessionId={workface.selectedSessionId} currentHostId={selected?.hostId}

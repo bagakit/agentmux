@@ -6,7 +6,7 @@ import type { MobileConversationClient } from './mobile-conversation-client'
 import { conversationRecordId, projectSessionInputs, type ConversationInputEntity } from '@agentmux/core/conversation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
-import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AgentMuxAgentSession, AgentSessionUserMessage } from '@agentmux/core'
 import { ConversationMessage, type ConversationReadingProps } from '@agentmux/client-ui/components/ConversationMessage'
 import { speakerOfUserMessage, type DescribeSpeaker } from '@agentmux/client-ui/conversation-speaker'
@@ -14,7 +14,7 @@ import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
 import { InputHistoryList, InputHistoryOriginalRecords, type InputHistoryLocalEntry } from '@agentmux/client-ui/components/InputHistoryList'
 import { useAgentInputHistory, type InputHistoryRead } from '@agentmux/client-ui/use-agent-input-history'
 import type { PromptAttempt } from './local-drafts'
-import { MobileSheetHandle } from '../navigation/MobileSheetHandle'
+import { MobileSheetHeader } from '../navigation/MobileSheetHeader'
 
 const ThemeObjectMailboxIcon = semanticIconComponent('object.mailbox')
 const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
@@ -118,7 +118,7 @@ export function MobileMailbox({ client, session, connected, messages, inputs, so
   return <Dialog.Root open={open} onOpenChange={changeOpen}>
     <Dialog.Trigger className="mobile-message-tools__trigger" aria-label={`输入历史与通信记录 · ${label}`} title="输入历史与通信记录"><ThemeObjectMailboxIcon size={18} /><span className="mobile-visually-hidden">历史</span><i data-state={state ?? 'unknown'} /></Dialog.Trigger>
     <Dialog.Portal container={platform.overlayContainer()}><Dialog.Overlay className="mobile-sheet-backdrop" /><Dialog.Content className="mobile-sheet mobile-message-tools" aria-describedby="mobile-message-tools-description">
-      <MobileSheetHandle onClose={() => changeOpen(false)} /><div className="mobile-sheet-title"><Dialog.Title>输入历史与通信记录</Dialog.Title><Dialog.Close className="mobile-icon-button" aria-label="关闭通信记录"><SemanticIcon name="action.close" size={19} /></Dialog.Close></div>
+      <MobileSheetHeader onClose={() => changeOpen(false)} title="输入历史与通信记录" closeLabel="关闭通信记录" />
       <Dialog.Description id="mobile-message-tools-description">{session?.providerId ?? 'Agent'} · {label}</Dialog.Description>
       <div className="mobile-message-tools__actions"><button className="mobile-text-button" onClick={() => { refresh(); history.search(); void mailbox.refresh() }}><ThemeActionRefreshIcon size={16} />刷新消息</button>{terminal && <button className="mobile-text-button" onClick={() => { changeOpen(false); terminal() }}><ThemeObjectTerminalIcon size={16} />查看 Terminal</button>}</div>
       <section className="mobile-message-tools__records" aria-label="通信记录">

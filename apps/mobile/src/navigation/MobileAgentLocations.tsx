@@ -2,10 +2,9 @@ import { useEffect, useId, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxSpaceAddress, AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
-import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { describeAgentWorkLocationChoices, type AgentWorkLocationAddressField } from '@agentmux/client-ui/patterns/agent-work-location'
-import { MobileSheetHandle } from './MobileSheetHandle'
+import { MobileSheetHeader } from './MobileSheetHeader'
 import { mobileMemberSelection } from './mobile-member-target'
 import { confirmsAgentLocation, locationContextKey, locationPositionKey, type MobileAgentLocationChoice, type MobileAgentLocations as Locations } from './mobile-agent-locations'
 import './agent-locations.css'
@@ -93,8 +92,7 @@ export function MobileAgentLocations({ client, catalog, locations, agentSessionI
   return <Dialog.Root open={open} onOpenChange={changeOpen}><Dialog.Trigger asChild>
     <button ref={anchor} type="button" className="mobile-menu-row mobile-agent-locations-entry" aria-label={`${name} · ${label}`} title="查看展示位置"><SemanticIcon name="object.region" size={15} /><span>查看展示位置<small>{label}</small></span><SemanticIcon name="navigation.disclosure" size={16} /></button>
   </Dialog.Trigger><Dialog.Portal><Dialog.Overlay className="mobile-sheet-backdrop" /><Dialog.Content className="mobile-sheet mobile-agent-locations-sheet" aria-describedby={description}>
-    <MobileSheetHandle onClose={() => changeOpen(false)} /><div className="mobile-sheet-title"><Dialog.Title>{name}的位置</Dialog.Title>
-      <Dialog.Close asChild><IconButton className="mobile-icon-button" aria-label="关闭位置选择"><SemanticIcon name="action.close" size={18} /></IconButton></Dialog.Close></div>
+    <MobileSheetHeader onClose={() => changeOpen(false)} title={`${name}的位置`} closeLabel="关闭位置选择" />
     <Dialog.Description id={description}>{label}{known && locations && locations.addresses.length > summary.count ? `，${locations.addresses.length} 个空间入口` : ''}{locations?.hostId ? ` · 执行端 ${locations.hostId}` : ''}</Dialog.Description>
     {(issue || pending) && <p role="status" className="mobile-agent-locations-issue">{pending ? '正在核对这个位置…' : issue}</p>}
     {!locations?.addresses.length && <p>{known ? '当前目录没有展示位置，对话入口仍可使用。' : '位置还没确认，对话入口仍可使用；请返回目录刷新。'}</p>}

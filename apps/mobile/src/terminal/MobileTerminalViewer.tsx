@@ -14,7 +14,7 @@ import { subscribeTerminalInput } from '@agentmux/client-ui/terminal/input'
 import { bindMobileTerminalGestures, MOBILE_TERMINAL_FONT_DEFAULT } from './gestures'
 import '@xterm/xterm/css/xterm.css'
 import './terminal.css'
-import { MobileSheetHandle } from '../navigation/MobileSheetHandle'
+import { MobileSheetHeader } from '../navigation/MobileSheetHeader'
 
 const noticeSummary = (message: string) => message.split(/[；。]/u, 1)[0]
 
@@ -197,7 +197,7 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
     {serviceMessage && <aside className="mobile-terminal-notice" role="status">{serviceMessage}</aside>}
     <Dialog.Root open={readingOpen} onOpenChange={setReadingOpen}>
       <Dialog.Portal container={platform.overlayContainer()}><Dialog.Overlay className="mobile-sheet-backdrop" /><Dialog.Content className="mobile-sheet mobile-terminal-reading-sheet">
-        <MobileSheetHandle onClose={() => setReadingOpen(false)} /><div className="mobile-sheet-title"><Dialog.Title>终端阅读</Dialog.Title><Dialog.Close className="mobile-icon-button" aria-label="关闭终端阅读"><SemanticIcon name="action.close" size={19} /></Dialog.Close></div>
+        <MobileSheetHeader onClose={() => setReadingOpen(false)} title="终端阅读" closeLabel="关闭终端阅读" />
         <Dialog.Description>缩放只改变手机上的显示，Mac 上的终端大小不变。</Dialog.Description>
         <div className="mobile-terminal-reading-tools" aria-label="本机终端阅读">
           <button aria-label="缩小终端文字" onClick={() => gestures.current?.zoom(fontSize - 1)}><SemanticIcon name="action.decrease-font-size" size={18} /></button>
