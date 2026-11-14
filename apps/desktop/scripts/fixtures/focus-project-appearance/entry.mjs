@@ -110,6 +110,28 @@ window.appearanceProof = {
   settings: requestDesktopSettingsNavigation,
   selectionPreferences() { return useAppStore.getState().config.focus },
   remember() { preserved = useAppStore.getState() },
+  seedSavedHistory() {
+    const now = Date.now(), day = 86_400_000
+    const saved = (sessionId, name, focusedAt, workspace = root) => ({
+      sessionId, focusedAt,
+      identity: {
+        name, kind: 'agent', providerId: 'codex', hostId: workspace.hostId, workspacePath: workspace.path,
+        project: { id: workspace.id, name: workspace.name },
+        ...(workspace.branch ? { branch: workspace.branch } : {})
+      }
+    })
+    const anotherHost = { ...root, hostId: 'proof-other-device' }
+    const archive = { ...root, id: 'archived-project', name: 'Archived design notes', path: root.path + '-archived' }
+    const history = [
+      saved('alpha-working', 'Previous task name, now current', now - 120_000),
+      saved('saved-layout-review', 'Review the original project layout', now - 240_000, { ...root, branch: 'interface' }),
+      saved('retained-design', 'Preserve the original conversation while reviewing the workspace', now - 7 * day),
+      saved('saved-routing-investigation', 'Independent routing investigation', now - 6 * day),
+      saved('saved-other-host', 'Same-named project on a different device', now - 180_000, anotherHost),
+      saved('saved-archived-project', 'Read the old design decision', now - 10 * day, archive)
+    ]
+    useAppStore.setState(state => ({ agentFocus: { ...state.agentFocus, execution: { ...state.agentFocus.execution, history } } }))
+  },
   copiedInputs, collectionKey,
   projectAddress(id) { const matches=arranged.config.workspaces.filter(p=>p.id===id);if(matches.length!==1)throw Error('Exact original fixture Project required');return formatSpaceAddress({spaceId:folderSpaceFacts(matches[0]).space.spaceId}) },
   discussionFacts() { const state=useAppStore.getState();return {activeWorkspaceId:state.activeWorkspaceId,savedMote:useLauncherState.getState().moteTopicId,originalDraft:state.agentComposerDrafts['alpha-working'],originalTabsPreserved:Object.entries(preserved.tabs).every(([id,tab])=>state.tabs[id]===tab),launchers:Object.values(state.tabs).flatMap(tab=>Object.values(tab.regions).filter(region=>region.kind==='launcher').map(region=>({tabId:tab.id,regionId:region.regionId,workspaceId:region.workspaceId,prompt:state.agentComposerDrafts[region.regionId]??'',note:state.agentComposerNotes[region.regionId]??''}))),controls:window.filterProof.facts().calls} },

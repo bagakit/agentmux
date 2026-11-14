@@ -36,6 +36,18 @@ let root: Root, container: HTMLDivElement
 const projection = () => createFocusProjectionSelector()(useAppStore.getState()).laneContexts
 const boardRows = () => [...container.querySelectorAll<HTMLElement>('.focus-project-board__live .focus-project-lanes__row')]
 const headingLabels = (lane: HTMLElement) => [...lane.querySelectorAll('.focus-project-lanes__label')].map(label => label.textContent)
+
+function savedVisit(sessionId: string, title: string, ageHours: number, hostId = 'local') {
+  return {
+    sessionId,
+    focusedAt: Date.now() - ageHours * 3_600_000,
+    identity: {
+      name: title, kind: 'agent' as const, providerId: 'codex', hostId,
+      workspacePath: workspaces[1]!.path, project: { id: 'other', name: 'Other project' },
+    },
+  }
+}
+
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
@@ -82,6 +94,82 @@ it('scans rootless project branches together through actual Focus filters and cu
   expect(timeline).toBeTruthy()
   expect(state.sessions.map(session => session.control)).toEqual(controls)
   expect(state.agentComposerDrafts['branch-a']).toBe('Keep the original draft')
+})
+
+it('keeps Saved visits under one current project heading and leaves a same-name Host history separate', async () => {
+  const before = useAppStore.getState()
+  const unrelated = savedVisit('unrelated-past', 'Unrelated archived task', 96)
+  unrelated.identity.project = { id: 'past', name: 'Historical project' }
+  const history = [
+    savedVisit('saved-local', 'Original local archived task', 96),
+    savedVisit('saved-remote', 'Remote original task', 1, 'other'), unrelated,
+  ]
+  useAppStore.setState({ agentFocus: { ...before.agentFocus, execution: { ...before.agentFocus.execution, history } } })
+  await act(async () => root.render(createElement(GlobalFocusSurface)))
+  const local = focusProjectKey('local', 'other'), remote = focusProjectKey('other', 'other')
+  const frame = [...container.querySelectorAll<HTMLElement>('.focus-project-frame')].find(node => node.dataset.projectGroupKey === local)!
+  expect(frame).toBeDefined()
+  expect(boardRows().filter(row => row.dataset.projectKey === local)).toHaveLength(1)
+  const saved = frame.querySelector<HTMLElement>('[data-project-history]')!
+  expect(saved).not.toBeNull()
+  const disclosure = saved.querySelector<HTMLButtonElement>('button[aria-expanded]')!
+  expect(disclosure.getAttribute('aria-expanded')).toBe('false')
+  expect(disclosure.textContent).toContain('1')
+  expect(saved.querySelector('[data-saved-focus-session]')).toBeNull()
+  const past = container.querySelector<HTMLButtonElement>('[aria-label="Retained projects"]')!
+  expect(past).not.toBeNull()
+  await act(async () => past.click())
+  expect([...container.querySelectorAll<HTMLElement>('[data-retained-project]')].map(row => row.dataset.retainedProject))
+    .toEqual([focusProjectKey('local', 'past')])
+  const remoteRow = boardRows().find(row => row.dataset.projectKey === remote)
+  expect(remoteRow?.querySelector('[data-saved-focus-session="saved-remote"]')).toBeTruthy()
+  await act(async () => disclosure.click())
+  expect(disclosure.getAttribute('aria-expanded')).toBe('true')
+  const localCard = saved.querySelector('[data-saved-focus-session="saved-local"]')
+  expect(localCard?.textContent).toContain('Original local archived task')
+  expect(localCard?.querySelector('button')?.title.split('\n')[0]).toBe('Original local archived task')
+  expect(saved.querySelector('[data-saved-focus-session="saved-remote"]')).toBeNull()
+  expect(saved.querySelector('.focus-retained-projects__row')?.textContent).toContain('View in timeline')
+  await act(async () => disclosure.click())
+  expect(disclosure.getAttribute('aria-expanded')).toBe('false')
+  await act(async () => {
+    const input = container.querySelector<HTMLInputElement>('[aria-label="Search contexts"]')!
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'Original local archived task')
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  expect(boardRows().some(row => row.dataset.projectKey === local)).toBe(false)
+  const historicalProject = [...container.querySelectorAll<HTMLElement>('[data-retained-project]')].find(row => row.dataset.retainedProject === local)
+  expect(historicalProject?.closest('.focus-retained-projects__project')?.textContent).toContain('Original local archived task')
+  expect(useAppStore.getState().sessions).toBe(before.sessions)
+  expect(useAppStore.getState().agentFocus.execution.history).toBe(history)
+  expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+})
+
+it('keeps the remaining original Saved card and its focus when the first current Session arrives', async () => {
+  const before = useAppStore.getState()
+  const history = [savedVisit('other', 'Saved task now observed', 1), savedVisit('still-saved', 'Keep my saved card', 2)]
+  useAppStore.setState({ sessions: [], agentFocus: { ...before.agentFocus, execution: { ...before.agentFocus.execution, history } } })
+  await act(async () => root.render(createElement(GlobalFocusSurface)))
+  const target = '[data-saved-focus-session="still-saved"] button'
+  let card = container.querySelector<HTMLButtonElement>(target)!
+  expect(card).not.toBeNull()
+  await act(async () => card.focus())
+  expect(document.activeElement).toBe(card)
+  await act(async () => useAppStore.setState({ sessions: before.sessions }))
+  expect(container.querySelector('[data-saved-focus-session="other"]')).toBeNull()
+  expect(container.querySelector('[data-project-history] ' + target)).toBe(card)
+  expect(document.activeElement).toBe(card)
+  expect(container.querySelector('[data-lane-id] [data-session-id="other"]')).not.toBeNull()
+  const localHistory = container.querySelector<HTMLButtonElement>('[data-project-history] button[aria-expanded]')!
+  await act(async () => { localHistory.focus(); localHistory.click() })
+  expect(container.querySelector(target)).toBeNull()
+  await act(async () => useAppStore.setState({ sessions: [] }))
+  card = container.querySelector<HTMLButtonElement>(target)!
+  expect(card).not.toBeNull()
+  await act(async () => card.focus())
+  await act(async () => useAppStore.setState({ sessions: before.sessions }))
+  expect(container.querySelector('[data-project-history] ' + target)).toBe(card)
+  expect(document.activeElement).toBe(card)
 })
 
 it('keeps registered-root identities and stable branch adjacency when project activity ties', () => {
