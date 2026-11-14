@@ -256,6 +256,8 @@ Mailbox 原生输入阅读的来源更新、有界窗口与观察恢复归[《Me
 
 普通 raw Terminal 有独立于 AgentSession 的公共发现、输出读取、原始字节输入、SIGINT／停止及原操作查询。目标固定原执行 Host、持久 Runtime、原 Run 和已确认 owner 代次；不能把 Run ID 当 SID，也不能以当前显示 Workspace、cwd 或名称猜目标。原 Agent 的 active／retired Run 不能借 raw 入口绕过语义输入与权限边界。
 
+输入与控制对 Agent 归属的核对沿原 Store 的准确 Run 事实，不因无关 Session 或退休历史增长而反复扫描全域。原 owner 已准入、尚未完成的该 Run 绑定写仍须核对，不能以暂未落库当作无归属；无关 Run 的排队写不成为本次操作的等待条件。读取或相关写入失败只使这次准确归属未确认，不猜安全，不撤销已有健康能力。
+
 输出沿原 ctxmux／Core 独立 reader，初始与后续回执保 Run、byte cursor、可读区间、Gap、非 UTF-8 bytes 与结束来源；取消或慢读只结束该 reader，不全局 detach GUI，也不停止 Run。每块工作量随该 reader 的相关事实和 backlog 增长，不随无关 Session 放大。输入显式固定原 owner incarnation、输入 byte 前提与完整字节，不自动加换行、引用或转成 Prompt；SIGINT沿原信号 API，不用写入 `^C` 代替。
 
 控制沿原 Core／ctxmux API，只为这些显式公共动作保准确 operation 意图、派发与已取得的原 ACK；不把记账加入 GUI 逐键热路径。原始写入／信号／停止仍须原传输认证的人或设备，CLI不铸造新授权。停止请求、原停止结果与当前 Run 状态分别表达；派发后缺 ACK 可持续 unknown，只读 inspect 不重调 input、interrupt、stop 或恢复 mutator，当前 cursor／exited 不代签历史 ACK。新动作可以明确发起，旧 unknown不成为全局输入或读取门禁。本合同不要求为 CLI 更换 Native Runtime 或升级原生协议。
