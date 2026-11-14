@@ -178,11 +178,12 @@ export default defineConfig({...base,root:${JSON.stringify(root)},plugins:[...(b
     assert.deepEqual(await hashes(), receipt.inputsBefore, 'Readonly proof modified an original Source/compiled/caller input')
   }
   const outside = await fs.readFile(path.join(root, caller), 'utf8')
-  assert.match(outside, /await installApplication\(join\(import\.meta\.dirname, '\.\.\/release\/mac\/AgentMux\.app'\), \{ intent: uiOnly \? 'ui-only' : 'full' \}\)/)
+  assert.match(outside, /await packageMacos\(\{[^}]*install: true[^}]*\}\)/)
+  assert.match(source[products[0]], /if \(install\) reportInstallTransaction\(await installApplication\(outputApp\)\)/)
   assert.match(source[products[0]], /const semanticOwner = semanticHost \? \(await inspectSemanticHostForInstall\(semanticHost\)\)\.row : null/)
   assert.match(source[products[1]], /await inspectSemanticHostForInstall\(plan, ops\)/)
   receipt.productionCallers = [
-    { path: caller, sha256: receipt.inputsBefore[caller], relationship: 'Actual update-local calls the full installer with its default quit; no quit override is supplied' },
+    { path: caller, sha256: receipt.inputsBefore[caller], relationship: 'Local App updates request installation from the packager, which supplies its qualified App to the installer with the default quit' },
     { path: products[0], sha256: receipt.inputsBefore[products[0]], relationship: 'Actual installApplication passes its prepared semantic plan to default quit, which consumes the external owning semantic fence' }
   ]
   assert.ok(receipt.productionCallers.length > 0)

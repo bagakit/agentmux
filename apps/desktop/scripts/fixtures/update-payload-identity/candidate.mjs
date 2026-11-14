@@ -14,7 +14,7 @@ export async function prepareCandidate(repository, candidate) {
     await mkdir(dirname(join(candidate, path)), { recursive: true })
     await cp(join(repository, path), join(candidate, path), { recursive: true })
   }
-  for (const path of ['package.json', 'tsconfig.base.json', 'THIRD_PARTY_NOTICES.md', 'scripts/package-dependencies.mjs',
+  for (const path of ['package.json', 'tsconfig.base.json', 'THIRD_PARTY_NOTICES.md', 'scripts/package-dependencies.mjs', 'scripts/package-artifact-publisher.mjs',
     'apps/desktop/scripts', 'apps/desktop/package.json', 'apps/desktop/electron.vite.config.ts',
     'apps/desktop/src/shared', 'apps/desktop/browser-extension', 'apps/host/src', 'apps/host/package.json',
     'packages/git/src', 'packages/git/package.json', 'packages/git/tsconfig.json', 'packages/git/tsconfig.build.json',

@@ -19,7 +19,7 @@ const temporary = await realpath(await mkdtemp(join(tmpdir(), 'agentmux-update-p
 const snapshots = join(temporary, 'snapshots'), application = join(temporary, 'AgentMux.app'), appResources = join(application, 'Contents/Resources/app')
 const sourcePaths = ['apps/desktop/package.json', 'apps/desktop/electron.vite.config.ts', 'apps/host/src/index.ts',
   'packages/git/src/project-identity.ts', 'packages/git/tsconfig.build.json', 'packages/git/tsconfig.json', 'tsconfig.base.json',
-  'apps/desktop/scripts/update-local.mjs', 'apps/desktop/scripts/update-renderer.mjs', 'apps/desktop/src/shared/update-policy.ts',
+  'apps/desktop/scripts/local-update-route.mjs', 'apps/desktop/scripts/update-local.mjs', 'apps/desktop/scripts/update-renderer.mjs', 'apps/desktop/src/shared/update-policy.ts',
   'apps/desktop/test/package-staging-copy.test.ts', 'apps/desktop/test/browser-package-declarations.test.ts',
   'apps/desktop/test/git-package-runtime.test.ts', 'apps/desktop/test/package-smoke-diagnostics.test.ts',
   'apps/desktop/test/runtime-artifact-identity.test.ts', 'apps/desktop/test/package-main-hashing-runtime.test.ts',
@@ -67,15 +67,17 @@ async function route(before, after, expected, label) {
   assert.equal(updateRoute(before.identity, after.identity), expected, `${label}: actual payload must choose ${expected}`)
   const homeDirectory = join(temporary, 'route-home')
   await put(join(homeDirectory, 'Applications/AgentMux.app/Contents/Resources/app/out/renderer/release.json'), JSON.stringify(before))
-  // Actual updater, stopped at its exact subprocess boundary before any copy/install/user process action.
-  const result = await node(label + '-public-route', `import assert from 'node:assert/strict';import os from 'node:os';import cp from 'node:child_process';import{syncBuiltinESMExports}from'node:module';
-os.homedir=()=>${JSON.stringify(homeDirectory)};let selected;cp.spawnSync=(command,args)=>{selected={command,args};throw Error('PRIVATE_ROUTE_BOUNDARY')};syncBuiltinESMExports();
-let error;try{await import('./apps/desktop/scripts/update-local.mjs')}catch(value){error=value}
-const expected=${JSON.stringify(expected)};if(expected==='runtime-review'){assert.match(error.message,/ctxmux changed/);assert.equal(selected,undefined)}else{assert.equal(error.message,'PRIVATE_ROUTE_BOUNDARY');assert.ok(selected.args[0].endsWith(expected==='renderer'?'/update-renderer.mjs':'/package-macos.mjs'))}console.log(JSON.stringify({expected,selected: selected??null}));`)
+  // The command tests cover dispatch. Here the original payload selects the route without starting a second build.
+  const result = await node(label + '-installed-route', `import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {installedUpdateRoute} from './apps/desktop/scripts/local-update-route.mjs';
+const release=JSON.parse(await readFile('./apps/desktop/out/renderer/release.json','utf8'));
+const route=await installedUpdateRoute(${JSON.stringify(join(homeDirectory, 'Applications/AgentMux.app'))},release);
+assert.equal(route,${JSON.stringify(expected)});console.log(JSON.stringify({route}));`)
   const renderer = await node(label + '-renderer-route', `import assert from 'node:assert/strict';import os from 'node:os';import cp from 'node:child_process';import fs from 'node:fs/promises';import{syncBuiltinESMExports}from'node:module';import{promisify}from'node:util';
 os.homedir=()=>${JSON.stringify(homeDirectory)};let copies=0;cp.execFile=Object.assign(()=>{throw Error('Unexpected direct execFile')},{[promisify.custom]:async(command,args)=>{assert.equal(command,'/usr/libexec/PlistBuddy');return{stdout:'dev.agentmux.private-proof\\n',stderr:''}}});fs.cp=async()=>{copies++;throw Error('PRIVATE_RENDERER_COPY_BOUNDARY')};syncBuiltinESMExports();
-let error;try{await import('./apps/desktop/scripts/update-renderer.mjs')}catch(value){error=value}const expected=${JSON.stringify(expected)};if(expected==='renderer'){assert.equal(copies,1);assert.equal(error.message,'PRIVATE_RENDERER_COPY_BOUNDARY')}else{assert.equal(copies,0);assert.match(error.message,/Host or runtime changed/)}console.log(JSON.stringify({expected,copies}));`)
-  return { expected, before: before.identity, after: after.identity, updater: result.stdout.trim(), renderer: renderer.stdout.trim() }
+let error;try{await import('./apps/desktop/scripts/update-renderer.mjs')}catch(value){error=value}const expected=${JSON.stringify(expected)};if(expected==='renderer'){assert.equal(copies,1);assert.equal(error.message,'PRIVATE_RENDERER_COPY_BOUNDARY')}else{assert.equal(copies,0);assert.match(error.message,expected==='runtime-review'?/--runtime-reviewed=/:/--app-only/)}console.log(JSON.stringify({expected,copies}));`)
+  return { expected, before: before.identity, after: after.identity, installedRoute: result.stdout.trim(), renderer: renderer.stdout.trim() }
 }
 async function unchangedOutputs() {
   await restore(mainOutput, join(snapshots, 'main-original'))
