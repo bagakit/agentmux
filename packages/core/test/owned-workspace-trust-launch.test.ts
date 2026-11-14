@@ -274,6 +274,24 @@ describe('Core pre-trusts a Host-confirmed home before resuming a Provider there
     expect(parseRpcAgentSession(JSON.parse(JSON.stringify(resumed))).continuity?.workspaceTrust).toEqual(resumed.continuity?.workspaceTrust)
   })
 
+  it('prepares exact-owned-leaf trust when resuming a bound tool execution', async () => {
+    const ownedSplit = await split('resumed-session')
+    const original = ended(ownedSplit.locator.workspacePath)
+    original.toolExecution = ownedSplit.toolExecution
+    await store.compareAndSwap(null, original)
+    status = runId => run(ownedSplit.locator.workspacePath, runId, { type: 'interrupted', reason: 'daemon_restart' })
+
+    const resumed = await client.resumeAgent({ agentSessionId: 'resumed-session', operationId: 'resume-original', prompt: 'continue' })
+    const target = await realpath(ownedSplit.locator.workspacePath)
+    expect(trust).toHaveBeenCalledExactlyOnceWith({ ownedRoot: target, workspacePath: target, env: {} })
+    expect(trust.mock.invocationCallOrder[0]!).toBeLessThan(startPrepared.mock.invocationCallOrder[0]!)
+    expect(resumed.continuity?.workspaceTrust).toMatchObject({
+      status: 'trusted', step: 'trust-record', workspacePath: ownedSplit.locator.workspacePath, trustKey: target
+    })
+    expect(resumed.continuityOperations?.['resume-original']?.workspaceTrust).toEqual(resumed.continuity?.workspaceTrust)
+    expect(owned).not.toHaveBeenCalled()
+  })
+
   it('leaves a resumed user Project to the Provider\'s own prompt', async () => {
     await resume(project)
     expect(trust).not.toHaveBeenCalled()
