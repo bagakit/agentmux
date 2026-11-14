@@ -161,7 +161,7 @@ export type GuideSlots = {
   "modules/native": never
   "modules/node": never
   "modules/notebook": never
-  "modules/route": "command:route.call" | "command:route.configure" | "command:route.identity" | "command:route.inspect" | "command:route.watch"
+  "modules/route": "command:route.call" | "command:route.configure" | "command:route.edge.inspect" | "command:route.edges" | "command:route.identity" | "command:route.inspect" | "command:route.watch"
   "modules/runtime": never
   "modules/schedule": never
   "modules/settings": "protocol-catalog"
