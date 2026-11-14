@@ -417,6 +417,8 @@ export function gitDiffIdentity(workspaceId: string, comparison: GitDiffDescript
   ])}`
 }
 
+export const fileViewPointerKey = (tabId: string, regionId: string) => tabId + '\0' + regionId
+
 export function documentKey(workspaceId: string, path: string): string {
   return `${workspaceId}\0${path}`
 }

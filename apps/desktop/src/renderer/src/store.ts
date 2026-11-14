@@ -460,6 +460,7 @@ import {
   addWorkbenchRegion,
   createWorkbenchTab,
   documentKey,
+  fileViewPointerKey,
   findWorkbenchRegion,
   focusWorkbenchTabRegion,
   inheritedTopicIdForNewTab,
@@ -4734,7 +4735,7 @@ function fileViewOccurrences(tabs: AppState['tabs']): readonly FileViewOccurrenc
   if (tabs === fileOccurrenceTabs) return fileOccurrences
   fileOccurrenceTabs = tabs
   fileOccurrences = Object.values(tabs).flatMap(tab => workbenchSurfaces(tab).flatMap(surface => surface.kind === 'file' ?
-    [{ pointerKey: tab.id + '\0' + surface.regionId, key: documentKey(surface.workspaceId, surface.path), workspaceId: surface.workspaceId, path: surface.path }] : []))
+    [{ pointerKey: fileViewPointerKey(tab.id, surface.regionId), key: documentKey(surface.workspaceId, surface.path), workspaceId: surface.workspaceId, path: surface.path }] : []))
   return fileOccurrences
 }
 let previousPersistedInputs: ReturnType<typeof selectPersistedInputs> | null = null

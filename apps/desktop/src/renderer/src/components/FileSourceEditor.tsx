@@ -1,3 +1,4 @@
+import { fileViewAbsolutePath, fileViewHost, fileViewReadSource } from '../lib/file-view-path'
 import '../monaco'
 import { setNoteComposition } from '../lib/note-live-merge'
 import { mintObjectId } from '@agentmux/core/object-id'
@@ -214,15 +215,14 @@ export function FileSourceEditor({ tabId, surface, visible = true, viewState }: 
           const doc = state.documents[currentKey]
           if (!doc) return
           const workspace = state.config?.workspaces.find((item) => item.id === surface.workspaceId)
-          const workspaceRoot = workspace?.path
-          if (workspaceRoot === undefined) return
+          const source = fileViewReadSource(state, tabId, surface)
           const selection = ed.getSelection()
           const model = ed.getModel()
           const startLine = selection?.startLineNumber ?? ed.getPosition()?.lineNumber ?? 1
           const endLine = selection?.endLineNumber ?? startLine
           const input: CopyActionInput = {
-            relativePath: doc.path,
-            workspaceRoot,
+            relativePath: source?.query.path ?? surface.path,
+            absolutePath: () => fileViewAbsolutePath(state, surface, source),
             startLine,
             endLine,
             selectedText: selection && model ? model.getValueInRange(selection) : '',
@@ -231,8 +231,9 @@ export function FileSourceEditor({ tabId, surface, visible = true, viewState }: 
           // 只有本机绝对路径动作才缩写 home；相对/行号/上下文块不含 home 前缀，套上去也是 no-op，
           // 但对非本机 workspace 明确不缩写——本机 home 在对面不存在。
           const built = action.buildText(input)
+          if (built === null) return
           const text =
-            action.id === 'agentmux.copyAbsolutePath' && workspace?.hostId === 'local'
+            action.id === 'agentmux.copyAbsolutePath' && fileViewHost(source, workspace?.hostId) === 'local'
               ? applyCopyPathStyle(built, { home: state.localHome, copyPathsAsAbsolute: state.config?.copyPathsAsAbsolute })
               : built
           void copyTextToClipboard(text, state.reportError)

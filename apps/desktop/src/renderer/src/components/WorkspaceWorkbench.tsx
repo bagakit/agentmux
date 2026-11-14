@@ -130,7 +130,7 @@ import { canStopSessionRun, sessionTabTooltip, surfaceTabTooltip } from '../lib/
 import { addressableAgentSessionId, copyableAgentSessionIdForTab } from '../lib/tab-control-handoff'
 import { handleTopicRenameKeyDown } from '../lib/topic-rename'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
-import { api } from '../lib/api'
+import { fileViewAbsolutePath, fileViewHost, fileViewReadSource, revealFileInFileManager } from '../lib/file-view-path'
 import { useAppStore } from '../store'
 import type { SessionStopOutcome } from '../lib/session-stop-intent'
 import { useSessionStopElapsed } from '../lib/use-session-stop-elapsed'
@@ -246,29 +246,16 @@ function SortableWorkbenchTab({
   const noteName = useTabNoteName(tab)
   const displayName = workbenchTabDisplayName(tab, sessions, agentNames, timelines, sessionNameMetadata, noteName)
   const copyableAgentSessionId = copyableAgentSessionIdForTab(tab)
-  // 文件 Tab 才有路径复制与「在文件管理器中显示」；其余类型缺席，那三项整组不出现。workspaceRoot 用于把
-  // 相对 path 接成绝对路径（走共用的 formatPathsForCopy 出口）；reveal 走 FileExplorer 同一条 api.files.reveal。
-  const fileActions =
-    surface.kind === 'file'
-      ? (() => {
-          const workspace = config?.workspaces.find((candidate) => candidate.id === surface.workspaceId)
-          if (!workspace || workspace.hostId !== 'local') return undefined
-          return {
-            path: surface.path,
-            workspaceRoot: workspace.path,
-            revealLabel: revealInFileManagerLabel(),
-            home: localHome,
-            copyPathsAsAbsolute: config?.copyPathsAsAbsolute,
-            onReveal: async () => {
-              try {
-                await api.files.reveal(surface.workspaceId, surface.path)
-              } catch (error) {
-                reportError(error)
-              }
-            }
-          }
-        })()
-      : undefined
+  const source = useAppStore(state => surface.kind === 'file' ? fileViewReadSource(state, tab.id, surface) : undefined)
+  const fileHost = surface.kind === 'file' ? fileViewHost(source, config?.workspaces.find(item => item.id === surface.workspaceId)?.hostId) : undefined
+  const fileActions = surface.kind === 'file' && (source || fileHost === 'local') ? {
+    path: source?.query.path ?? surface.path,
+    absolutePath: () => fileViewAbsolutePath(useAppStore.getState(), surface, source),
+    revealLabel: revealInFileManagerLabel(),
+    ...(fileHost === 'local' ? { onReveal: () => revealFileInFileManager(surface.workspaceId, surface.path, reportError, source) } : {}),
+    home: fileHost === 'local' ? localHome : '',
+    copyPathsAsAbsolute: config?.copyPathsAsAbsolute
+  } : undefined
   // Only a Session projection can be moved, and only the Region actually carrying it. A file or
   // launcher View has no Session identity to relocate, so it offers no destinations at all. The
   // destinations and the click action come from ONE decision in the lib — see moveSessionViewMenu

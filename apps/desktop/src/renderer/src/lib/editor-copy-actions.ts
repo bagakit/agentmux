@@ -7,11 +7,8 @@
  * 函数、把「有哪些动作、各自的门槛」做成纯数据，让它们能被直接断言；壳（EditorPane）只负责把编辑器
  * 里的选区/光标读出来、把文本交给共用的剪贴板出口。
  *
- * 复制路径不在这里重造：绝对 / 相对路径一律走 `clipboard-copy` 的 `formatPathsForCopy`（复制路径的
- * 唯一出口），本模块只是把它接到编辑器语境上，并补两个编辑器独有的形状——「路径:行号」与「面向
- * Agent 的上下文块」。写盘则统一走 `copyTextToClipboard`，本模块不碰剪贴板。
+ * 路径来自原文件 View。本模块负责行号和 Agent 上下文的格式，写入由 copyTextToClipboard 负责。
  */
-import { formatPathsForCopy } from './clipboard-copy'
 import { formatAmuxSharing } from '@agentmux/core/sharing'
 
 /**
@@ -35,8 +32,8 @@ export const EDITOR_COPY_MENU_GROUP = 'agentmux'
 export type CopyActionInput = {
   /** 文件在工作区内的相对路径（用户在标题栏看到的那个）。 */
   relativePath: string
-  /** 工作区根的绝对路径，用于拼出绝对路径。 */
-  workspaceRoot: string
+  /** 点击复制时解析原文件的物理路径。 */
+  absolutePath(): string | null
   /** 选区（或光标）起始行，1 起。 */
   startLine: number
   /** 选区结束行，1 起；无选区时等于 startLine。 */
@@ -56,7 +53,7 @@ export type EditorCopyActionDef = {
   label: string
   order: number
   precondition?: string
-  buildText: (input: CopyActionInput) => string
+  buildText: (input: CopyActionInput) => string | null
 }
 
 /** 选区是否跨了多行——Agent 上下文块动作是否该出现的唯一判据。单行（含无选区）为 false。 */
@@ -80,7 +77,7 @@ export function formatAgentContextBlock(input: CopyActionInput): string {
 /**
  * 全部编辑器复制动作，按菜单顺序排列。
  *
- * - 绝对 / 相对路径：直接复用 `formatPathsForCopy`（复制路径唯一出口），本模块不重写拼接。
+ * - 绝对 / 相对路径均保留原文件的地址。
  * - 路径:行号：取选区（或光标）起始行，产出 `相对路径:行号`，方便丢给别人或 agent 定位。
  * - Agent 上下文块：只在多行选区时出现（`precondition` 指向多行上下文键），产出可直接粘贴的上下文。
  */
@@ -89,15 +86,13 @@ export const EDITOR_COPY_ACTIONS: readonly EditorCopyActionDef[] = [
     id: 'agentmux.copyAbsolutePath',
     label: 'Copy Absolute Path',
     order: 1,
-    buildText: ({ relativePath, workspaceRoot }) =>
-      formatPathsForCopy([relativePath], 'absolute', workspaceRoot)
+    buildText: ({ absolutePath }) => absolutePath()
   },
   {
     id: 'agentmux.copyRelativePath',
     label: 'Copy Relative Path',
     order: 2,
-    buildText: ({ relativePath, workspaceRoot }) =>
-      formatPathsForCopy([relativePath], 'relative', workspaceRoot)
+    buildText: ({ relativePath }) => relativePath
   },
   {
     id: 'agentmux.copyPathWithLine',

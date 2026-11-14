@@ -9,7 +9,6 @@ import {
 } from '../lib/workbench-tab-actions'
 import type { SplitDirection } from '@agentmux/layout'
 import { formatSessionAddress, formatTabAddress } from '../lib/agent-address'
-import { formatPathsForCopy } from '../lib/clipboard-copy'
 import { applyCopyPathStyle } from '../lib/copy-path-display'
 import { WorkbenchLayoutMenuRows } from './WorkbenchLayoutMenuRows'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
@@ -59,9 +58,9 @@ export type WorkbenchTabCopyModel = {
 
 export type WorkbenchTabFileActions = {
   path: string
-  workspaceRoot: string
+  absolutePath(): string | null
   revealLabel: string
-  onReveal(): Promise<void>
+  onReveal?(): Promise<void>
   home: string
   copyPathsAsAbsolute: boolean | undefined
 }
@@ -107,31 +106,27 @@ export function createWorkbenchTabCopyModel({
             id: 'copy-path' as const,
             label: 'Copy Path',
             icon: ThemeActionCopyIcon,
-            onSelect: async () =>
-              copy(
-                applyCopyPathStyle(formatPathsForCopy([file.path], 'absolute', file.workspaceRoot), {
-                  home: file.home,
-                  copyPathsAsAbsolute: file.copyPathsAsAbsolute
-                }),
-                'Copy Path'
-              )
+            onSelect: async () => {
+              const path = file.absolutePath()
+              if (path !== null) await copy(applyCopyPathStyle(path, { home: file.home, copyPathsAsAbsolute: file.copyPathsAsAbsolute }), 'Copy Path')
+            }
           },
           copyRelativePath: {
             id: 'copy-relative-path' as const,
             label: 'Copy Relative Path',
             icon: ThemeActionCopyRelativePathIcon,
             onSelect: async () =>
-              copy(formatPathsForCopy([file.path], 'relative', file.workspaceRoot), 'Copy Relative Path')
+              copy(file.path, 'Copy Relative Path')
           },
-          reveal: {
+          ...(file.onReveal ? { reveal: {
             // 这一项的文案跟平台走，由组件从 `lib/host-platform` 取好传进来（本模块不认平台）。
             // 它是 label 唯一一处非字面量的地方——`id` 承担稳定键的职责，所以这里不需要兜底值，
             // 也就没有「忘了传就掉回一个恰好合法的中性值」这条静默降级路。
             id: 'reveal' as const,
             label: file.revealLabel,
             icon: ThemeActionRevealFileIcon,
-            onSelect: async () => file.onReveal()
-          }
+            onSelect: file.onReveal
+          } } : {})
         }
       : {})
   }

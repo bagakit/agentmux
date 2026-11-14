@@ -4,10 +4,11 @@ import { Button } from '@agentmux/client-ui/components/Button'
 import { NoteRecoveryDrawer, NoteRecoverySummary, type NoteRecoverySection } from './NoteRecoveryDrawer'
 import { WorkbenchPresentationContext, useWorkbenchBrowserPresentation } from '../lib/workbench-presentation'
 import { RetainedDocumentDraftNotice, useNoteConversionObservation } from './RetainedDocumentDraftNotice'
-import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { NoteViewToolbarContext } from '../lib/note-view-toolbar'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { api } from '../lib/api'
+import { createWorkspaceResourceSelector } from '../hooks/useWorkspaceResource'
+import { fileViewHost, fileViewReadSource, revealFileInFileManager } from '../lib/file-view-path'
 import { effectiveFileRegionMode } from '../lib/file-region-presentation'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { revealInFileManagerLabel } from '../lib/host-platform'
@@ -21,7 +22,6 @@ import * as DropdownMenu from './HoverDropdownMenu'
 import { EditorReleasedState } from './EditorReleasedState'
 import { loadFileSourceEditor } from '../lib/file-surface-loading'
 import type { FileEditorViewState } from './FileSourceEditor'
-import { useWorkspaceResource } from '../hooks/useWorkspaceResource'
 import { canFormatFile } from '@agentmux/editor-extensions/engines/format-support'
 import { cancelFileRegionFormat, formatFileRegion, type FileFormatResult } from '../lib/file-formats/format-file-region'
 
@@ -73,23 +73,6 @@ export function EditorUnavailableState({
     </section>
   )
 }
-
-// Routes the failure-state reveal through the SAME channel the file tree uses (api.files.reveal →
-// files:reveal → localPathForReveal). A deleted target is handled downstream by falling back to its
-// nearest existing ancestor, so this stays a plain call; when reveal still cannot land, the error
-// surfaces on the shared reportError banner rather than replacing the pane with a second dead end.
-export async function revealFileInFileManager(
-  workspaceId: string,
-  path: string,
-  reportError: (error: unknown) => void
-): Promise<void> {
-  try {
-    await api.files.reveal(workspaceId, path)
-  } catch (error) {
-    reportError(error)
-  }
-}
-
 
 export function EditorPane({
   tabId,
@@ -150,7 +133,10 @@ export function EditorPane({
   const refresh = useAppStore((state) => state.refreshDocument)
   const sourceFilesLocator = useAppStore(state => state.sourceFilesInputs.selections[surface.workspaceId]?.locator)
   const overwrite = useAppStore((state) => state.overwriteDocument)
-  const isLocalWorkspace = useWorkspaceResource(surface.workspaceId)?.hostId === 'local'
+  const source = useAppStore(state => fileViewReadSource(state, tabId, surface))
+  const workspaceSelector = useMemo(() => createWorkspaceResourceSelector(surface.workspaceId), [surface.workspaceId])
+  const workspace = useAppStore(workspaceSelector)
+  const canReveal = fileViewHost(source, workspace?.hostId) === 'local'
   const reportError = useAppStore((state) => state.reportError)
   const attachPersistedDocument = useAppStore((state) => state.attachPersistedFileDocument)
   // Word wrap is one global viewing preference (like a theme), not a document property: it is read
@@ -217,8 +203,8 @@ export function EditorPane({
       <EditorUnavailableState
         {...(previewReadsSavedFile && onTogglePreview ? { onPreview: onTogglePreview } : {})}
         {...(issue.kind === 'read-error' ? { message: issue.message, onRetry: () => { void reload(tabId, surface.regionId) } } : {})}
-        canReveal={isLocalWorkspace}
-        onReveal={() => void revealFileInFileManager(surface.workspaceId, surface.path, reportError)}
+        canReveal={canReveal}
+        onReveal={() => void revealFileInFileManager(surface.workspaceId, surface.path, reportError, source)}
       />
     )
   }
