@@ -66,7 +66,8 @@ export function signedRoomAdapter(adapterId = 'signed-room') {
       const original = server
       const close = () => { original.close(); if (server === original) endpoint = undefined }
       signal.addEventListener('abort', close, { once: true })
-      return { close, observation: () => observation(authenticated) }
+      // The local HTTP receiver never ends by itself; only its owner closes it.
+      return { close, closed: new AbortController().signal, lifecycle: () => ({ state: 'ready' as const }), observation: () => observation(authenticated) }
     } }
   }
   const encode = (message: SignedRoomMessage) => { const raw = JSON.stringify(message); return { raw, transportProof: createHmac('sha256', 'fixture-signing-key').update(raw).digest('hex') } }
