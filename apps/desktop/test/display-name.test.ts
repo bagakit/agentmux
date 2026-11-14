@@ -49,6 +49,30 @@ describe('resolveAgentName：优先级链', () => {
     expect(resolved.name.length).toBeLessThanOrEqual(48)
   })
 
+  it('跳过开头连续的粘贴图片引用，从后面的首行正文派生', () => {
+    const firstPrompt = '  @/Users/alex/.agentmux/pasted/first.png\n\n@/Users/alex/.agentmux/pasted/second.webp  修复   接手目的地选择\n保留后续任务细节'
+    expect(resolveAgentName({ firstPrompt, fallback: 'Codex · repo' }))
+      .toEqual({ name: '修复 接手目的地选择', source: 'derived' })
+    expect(firstPrompt).toContain('@/Users/alex/.agentmux/pasted/first.png')
+  })
+
+  it('只有图片时沿原兜底，正文后的图片不被删除，普通文件引用仍是正文', () => {
+    expect(resolveAgentName({ firstPrompt: '@/Users/alex/.agentmux/pasted/only.jpg \n', fallback: 'Codex · repo' }))
+      .toEqual({ name: 'Codex · repo', source: 'fallback' })
+    expect(resolveAgentName({ firstPrompt: '修复图中问题 @/Users/a/.agentmux/pasted/a.png', fallback: 'Codex' }).name)
+      .toBe('修复图中问题 @/Users/a/.agentmux/pasted/a.png')
+    expect(resolveAgentName({ firstPrompt: '@/repo/README.md 检查说明', fallback: 'Codex' }).name)
+      .toBe('@/repo/README.md 检查说明')
+  })
+
+  it('图片开头的自动来源仍不覆盖启动指定名或用户手改名', () => {
+    const firstPrompt = '@/Users/alex/.agentmux/pasted/a.gif 由正文派生'
+    expect(resolveAgentName({ firstPrompt, launchName: '启动名称', fallback: 'Codex' }))
+      .toEqual({ name: '启动名称', source: 'launch' })
+    expect(resolveAgentName({ firstPrompt, userName: '保留手改', launchName: '启动名称', fallback: 'Codex' }))
+      .toEqual({ name: '保留手改', source: 'user' })
+  })
+
   it('全部上层缺席（或只有空白）时落到 Provider·Workspace 兜底', () => {
     expect(resolveAgentName({ fallback: 'Codex · repo' }))
       .toEqual({ name: 'Codex · repo', source: 'fallback' })
