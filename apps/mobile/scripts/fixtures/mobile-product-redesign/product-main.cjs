@@ -54,7 +54,7 @@ app.whenReady().then(async () => {
     const selected = await read(`(()=>{const n=${namedButton(label, scope)};if(!n)throw Error('Actual named button unavailable '+${JSON.stringify(label)});const marker='capture-control-'+Math.random().toString(36).slice(2);n.setAttribute('data-capture-control',marker);return marker})()`)
     await tap('[data-capture-control=' + JSON.stringify(selected) + ']', label)
   }
-  const capture = async name => {
+  const capture = async (name, { motion = false } = {}) => {
     if (mode === 'mote-start' && phase === 'visual-fixes' && !['mote-start-draft-390-short-light','mote-start-history-detail-320-dark','mote-start-unknown-keeps-reader-390-light','mote-start-unknown-details-390-light','mote-start-policy-manual-390-light'].includes(name)) return
     if (mode === 'quiet-run-status' && phase === 'details-only' && name !== 'quiet-run-status-member-details-390-light') return
     if (mode === 'commands-entry' && !name.startsWith('commands-')) return
@@ -62,16 +62,23 @@ app.whenReady().then(async () => {
     if (mode === 'notice-light' && !['notices-settings-light-short', 'notices-restored-light-short'].includes(name)) return
     if (mode === 'parity-final' && !['focus-overview-phone', 'space-directory-430', 'focus-result-conversation-narrow', 'unknown-details-short-viewport', 'offline-retained-short'].includes(name)) return
     if (mode === 'source-recovery' && !['navigation-offline-source-restored-narrow', 'navigation-reconnected-source-narrow'].includes(name)) return
-    await pause(120)
+    if (!motion) await pause(120)
     win.webContents.invalidate()
     await read('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
     // A capture shows a settled screen; an in-flight push, pop or tab-bar entrance is motion, not layout.
-    await until('![...document.querySelectorAll(".mobile-main, .mobile-navigation-bar")].some(n=>n.getAnimations().some(a=>a.playState==="running"))')
-    await pause(40)
+    if (!motion) await until('![...document.querySelectorAll(".mobile-main, .mobile-navigation-bar")].some(n=>n.getAnimations().some(a=>a.playState==="running"))')
+    if (!motion) await pause(40)
     const facts = await read(`(()=>{const n=document.querySelector('.mobile-app'),e=document.querySelector('[contenteditable=true]');return {text:n.innerText,overlay:document.querySelector('[role=dialog]')?.innerText,overflow:n.scrollWidth>n.clientWidth,root:n.getBoundingClientRect().toJSON(),structure:Object.fromEntries(['.mobile-header','.mobile-main','.mobile-conversation-panel','.mobile-conversation','.mobile-conversation__connection','.mobile-conversation__reading'].map(selector=>{const n=document.querySelector(selector);return[selector,n?{rect:n.getBoundingClientRect().toJSON(),scrollTop:n.scrollTop,position:getComputedStyle(n).position,overflow:getComputedStyle(n).overflowY}:null]})),viewport:{width:innerWidth,height:innerHeight,visualHeight:visualViewport.height,top:visualViewport.offsetTop},selectedSession:document.querySelector('[data-agent-session-id]')?.getAttribute('data-agent-session-id'),editor:{text:e?.textContent,visible:!!e?.getClientRects().length,rect:e?.getBoundingClientRect().toJSON(),sameOriginal:e===window.originalCaptureEditor,focused:document.activeElement===e},...mobileProductScene.facts()}})()`)
     await fs.writeFile(path.join(evidence, name + '.png'), (await win.webContents.capturePage()).toPNG())
     result.images.push(name + '.png'); result.operations.push({ action: 'capture', name, ...facts })
-    if (!baseline) assert.equal(facts.overflow, false, 'Actual mobile app does not overflow horizontally')
+    if (!baseline && !motion) assert.equal(facts.overflow, false, 'Actual mobile app does not overflow horizontally')
+  }
+  const openGoal = async () => {
+    await until('!!document.querySelector(".mobile-header .mobile-conversation__goal")')
+    const direct = await visible('.mobile-header .mobile-conversation__goal')
+    await read(`window.captureGoalReturn=document.querySelector(${JSON.stringify(direct ? '.mobile-header .mobile-conversation__goal' : '.mobile-header [aria-label="当前对话操作"]')})`)
+    if (direct) await tap('.mobile-header .mobile-conversation__goal', 'Open original Goal work')
+    else { await button('当前对话操作', '.mobile-header'); await button('目标与结果', '[role=dialog]') }
   }
   const gap = description => { if (!baseline) throw Error(description); result.gaps.push(description) }
   const openMote = async () => {
@@ -128,7 +135,7 @@ app.whenReady().then(async () => {
     result.passed = true; return
   }
   if (mode === 'floating-tools') {
-    await require('./floating-tools.cjs')({ win, read, until, resize, tap, button, capture, result, evidence })
+    await require('./floating-tools.cjs')({ win, read, until, resize, tap, button, capture, openGoal, result, evidence })
     result.passed = true; return
   }
   if (mode === 'directory-notices') {
@@ -147,12 +154,20 @@ app.whenReady().then(async () => {
     await require('./focus-state.cjs')({ win, read, until, resize, tap, button, capture, result, evidence })
     result.passed = true; return
   }
+  if (mode === 'chrome-motion') {
+    await require('./chrome-motion.cjs')({ win, read, until, resize, tap, button, capture, result })
+    result.passed = true; return
+  }
+  if (mode === 'terminal-restore') {
+    await require('./terminal-restore.cjs')({ win, read, until, resize, tap, button, capture, result, evidence, phase })
+    result.passed = true; return
+  }
   if (mode === 'chat-start') {
     await require('./chat-start.cjs')({ win, read, until, resize, tap, button, capture, result, evidence, phase })
     result.passed = true; return
   }
   if (mode === 'conversation-controls') {
-    await require('./conversation-controls.cjs')({ win, read, until, resize, tap, button, capture, result })
+    await require('./conversation-controls.cjs')({ win, read, until, resize, tap, button, capture, openGoal, result })
     result.passed = true; return
   }
   if (mode === 'web-update') {

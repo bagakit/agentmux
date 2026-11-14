@@ -7,6 +7,9 @@ import { relative, resolve } from 'node:path'
 // load or timeout failure is not mutation proof. Usage: verify-capture-mutations.mjs --<subset> <id>...
 const root = resolve(import.meta.dirname, '../../../../..'), capture = resolve(import.meta.dirname, 'capture-ui.mjs')
 const bearing = {
+  'header-extra-pixel': 'mote-main keeps one 52px header',
+  'dismiss-button-highlight': 'Dismiss has no inherited button highlight',
+  'narrow-avatar-hidden': 'Narrow headers retain the original identity avatar',
   'actions-always-visible': 'An unchosen message shows no copy or details icons on touch',
   'human-bubble-icons': "The person's bubble carries no icon row at rest",
   'dismiss-small-hit': 'Dismiss keeps a 44px touch target'

@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict')
-module.exports = async ({ win, read, until, resize, tap, button, capture, result }) => {
+module.exports = async ({ win, read, until, resize, tap, button, capture, openGoal, result }) => {
   const flush = () => read('new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)))')
   const editor = '.mobile-conversation [contenteditable=true]'
   const visiblePanel = kind => read(`!!document.querySelector('.mobile-${kind}-panel:not([hidden])')`)
@@ -30,13 +30,13 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
       assert.equal(await visiblePanel('terminal'),true,'Actual top action switches the original panel to Terminal')
       await tap('.mobile-header .mobile-session-view-toggle','Top Conversation'); await flush()
       assert.equal(await visiblePanel('conversation'),true)
-      await tap('.mobile-conversation__goal','Floating original Goal'); await flush()
+      await openGoal(); await flush()
       assert.equal(await visiblePanel('goal'),true,'Actual floating Goal action opens the original Goal owner')
       await until(`mobileProductScene.facts().calls.some(c=>c.method==="goal.ls"&&c.params.agentSessionId===${JSON.stringify(original.sid)})`)
       assert.equal(await read('mobileProductScene.facts().calls.filter(c=>c.method==="goal.ls").at(-1).params.agentSessionId'),original.sid)
       await tap('.mobile-header [data-mobile-back]','Return from original Goal'); await flush()
       assert.equal(await visiblePanel('conversation'),true)
-      assert.equal(await read('document.activeElement===document.querySelector(".mobile-conversation__goal")'),true,'Goal returns focus to the original floating trigger')
+      assert.equal(await read('document.activeElement===window.captureGoalReturn'),true,'Goal returns focus to the original floating trigger')
       await tap('.mobile-conversation__floating-tools .mobile-message-tools__trigger','Floating original History')
       await until('!!document.querySelector("[role=dialog] .mobile-message-tools__records")')
       if(context==='mote'&&width===320&&appearance==='light') await capture('controls-history-narrow-light')

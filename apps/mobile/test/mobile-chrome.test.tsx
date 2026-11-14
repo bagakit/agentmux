@@ -116,6 +116,54 @@ afterEach(async () => {
 })
 
 describe('actual phone chrome around work', () => {
+  it('opens the new narrow Goal via conversation actions and returns to the original Composer and More focus without input or recovery', async () => {
+    const viewport = (window as unknown as { happyDOM: { setWindowSize(size: { width: number; height: number }): void } }).happyDOM
+    const originalSize = { width: window.innerWidth, height: window.innerHeight }
+    viewport.setWindowSize({ width: 320, height: 720 })
+    try {
+      const chromePath = '../src/conversation/chrome.css'
+      const style = Object.assign(document.createElement('style'), { textContent: readFileSync(new URL(chromePath, import.meta.url), 'utf8') })
+      style.dataset.mobileChrome = ''; document.head.append(style)
+      expect(window.matchMedia('(max-width: 359px)').matches).toBe(true)
+      const f = originalClient(), recover = vi.fn()
+      Object.assign(f.client, { ensureAgentContinuity: recover })
+      const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
+      await openPrimary(view.element, 'Focus')
+      await openRow(view.element, '.mobile-focus-project', 'Original Agent')
+      expectWork(view.element, 'original narrow conversation', '返回 Focus')
+      const surface = view.element.querySelector('.mobile-conversation-slot')!.firstElementChild
+      const originalEditor = editor(view.element), originalRunId = f.client.agentSession('session-original').run.runId
+      await paste(view.element, '窄屏目标菜单往返保留的原草稿')
+      const fixedGoal = await find('the mounted Goal shortcut', () => header(view.element).querySelector<HTMLElement>('.mobile-conversation__goal'))
+      expect(getComputedStyle(fixedGoal).display, 'the shipped narrow media rule leaves Goal in the More panel').toBe('none')
+      const more = button(header(view.element), '当前对话操作')
+      more.focus(); await click(more)
+      const sheet = await waitForElement<HTMLElement>(document.body, '.mobile-sheet--agent')
+      const entry = sheet.querySelector<HTMLButtonElement>('.mobile-goal-menu-entry[aria-label="目标与结果"]')
+      expect(entry, 'the narrow conversation actions keep the Goal entry reachable').not.toBeNull()
+      await click(entry!)
+      await waitForElement(view.element, '.mobile-goal-panel:not([hidden]) .mobile-goal-work')
+      expect(document.querySelector('[role="dialog"]')).toBeNull()
+      expectWork(view.element, 'narrow Goal work', '返回对话')
+      expect(f.rpc.mock.calls.some(([method, params]) => method === 'goal.ls' && params.agentSessionId === 'session-original')).toBe(true)
+      expect(view.element.querySelector('.mobile-conversation-slot')!.firstElementChild).toBe(surface)
+      expect(view.element.querySelector('.mobile-conversation')?.getAttribute('data-agent-session-id')).toBe('session-original')
+      const back = button(header(view.element), '返回对话')
+      back.focus(); await click(back)
+      await find('the retained conversation after Goal work', () => shown(view.element, '.mobile-conversation-panel .mobile-conversation')[0])
+      expectWork(view.element, 'returned narrow conversation', '返回 Focus')
+      expect(view.element.querySelector('.mobile-conversation-slot')!.firstElementChild).toBe(surface)
+      expect(editor(view.element)).toBe(originalEditor)
+      expect(originalEditor.textContent).toBe('窄屏目标菜单往返保留的原草稿')
+      expect(getDeviceWorkface().snapshot().record.selectedSessionId).toBe('session-original')
+      expect(f.client.agentSession('session-original').run.runId).toBe(originalRunId)
+      await vi.waitFor(() => expect(document.activeElement, 'Goal return restores the visible original More trigger').toBe(more))
+      expect(f.submit).not.toHaveBeenCalled(); expect(f.respond).not.toHaveBeenCalled()
+      expect(f.rejoinInput).not.toHaveBeenCalled(); expect(f.signalAgent).not.toHaveBeenCalled()
+      expect(recover).not.toHaveBeenCalled(); expect(f.calls('goal.discuss')).toBe(0)
+    } finally { await act(async () => { viewport.setWindowSize(originalSize) }) }
+  }, 30000)
+
   it('opens the original new Goal form from the header and keeps project selection there', async () => {
     const f = originalClient(), view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
     await openPrimary(view.element, 'Goals')

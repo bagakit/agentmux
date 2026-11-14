@@ -9,6 +9,7 @@ module.exports = async ({ read, until, resize, tap, button, capture, result, evi
     assert.deepEqual(retained, [original], 'Exact original Goal operation survives a new OS process')
     result.originalGoalRequest = original
   }
+  await require('./restart-chrome.cjs')({ read, until, resize, tap, button, capture, result, evidence, phase, prefix: 'goal-restart' })
   // Startup opens the original chat; the settings menu leads the directory header one step back.
   await button('返回 Mote', '.mobile-header')
   await button('手机设置与连接')
@@ -29,5 +30,7 @@ module.exports = async ({ read, until, resize, tap, button, capture, result, evi
     assert.equal(await read('mobileProductScene.facts().calls.filter(call=>call.method.startsWith("goal.") && call.method!=="goal.ls").length'), 0, 'Restart does not replay an original Goal request')
     await capture('goal-recovery-restarted')
   }
+  const calls = await read('mobileProductScene.facts().calls')
+  assert.equal(calls.filter(call => ['sdk.ensureAgentContinuity', 'agent.open', 'sdk.submitAgentPrompt', 'sdk.respondAgentInteraction'].includes(call.method)).length, 0)
   result.goalRecoveryBoundary = 'Actual MobileApp and device workface across private Electron OS process restart with controlled Host facts; no live Host or physical phone claim.'
 }

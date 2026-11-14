@@ -10,16 +10,18 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
     const original = JSON.parse(await fs.readFile(path.join(evidence, 'renderer-result.json'), 'utf8')).recoveryOriginal
     const restored = (await facts()).record
     for (const key of ['selectedSessionId', 'conversation', 'agentCreates']) assert.deepEqual(restored[key], original[key], `Original ${key} survives a new OS process`)
-    assert.equal(restored.presentation.recentMoteSpaceId, 'mote-resources')
+    assert.equal(restored.presentation.recentMoteSpaceId, original.presentation.recentMoteSpaceId)
     assert.deepEqual(restored.presentation.identity, original.presentation.identity)
-    assert.equal(restored.selectedSessionId, 'session-mote', 'Recent conversation wins over the last visited Mote directory')
+    assert.equal(restored.selectedSessionId, 'session-mote', 'The selected original chat survives the last directory visit')
     await until('document.querySelector("[contenteditable=true]")?.textContent.includes("原草稿在重启后保留")')
     await capture('chat-start-restored-phone')
+    await require('./restart-chrome.cjs')({ win, read, until, resize, tap, button, capture, result, evidence, phase, prefix: 'chat-restart' })
     await noLifecycle(); result.recoveryRestored = restored; return
   }
   assert.equal((await facts()).record.selectedSessionId, 'session-mote', 'Fresh entry opens the primary Mote saved main Session')
   assert.equal((await facts()).record.presentation.identity.context.regionId, 'region-mote', 'Original occurrence wins over the same SID elsewhere')
   await noLifecycle()
+  await require('./restart-chrome.cjs')({ win, read, until, resize, tap, button, capture, result, evidence, phase, prefix: 'chat-restart' })
   await capture('chat-start-primary-phone')
   await tap('.mobile-conversation-panel [contenteditable=true]', 'Retain original draft')
   win.webContents.insertText('原草稿在重启后保留')
@@ -40,10 +42,8 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
   await until('!!document.querySelector(".mobile-mote-profile")')
   await capture('chat-start-profile-light-narrow')
   await button('关闭面板', '[role=dialog]')
-  await button('打开 Mote 主对话 · 资料协作', '.mobile-spatial-panel')
-  await until('mobileProductScene.facts().record.presentation.recentMoteSpaceId==="mote-resources"')
-  await capture('chat-start-secondary-light-narrow')
-  await button('返回 Mote', '.mobile-header')
+  // Returning from Profile retains the selected original chat. No explicit Main
+  // entry is used here: that action owns a separate continuity operation.
   await until('mobileProductScene.facts().record.presentation.showSession===false')
   await read('mobileProductScene.seedSpatialRecovery()')
   result.recoveryOriginal = (await facts()).record

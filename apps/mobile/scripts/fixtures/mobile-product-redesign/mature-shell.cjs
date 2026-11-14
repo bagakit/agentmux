@@ -150,7 +150,7 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
   }
   const decision = await read(`(()=>{const r=n=>n.getBoundingClientRect().toJSON(),actions=document.querySelector('[data-request-id=request-next] .agent-interaction__actions'),dismiss=actions.querySelector('.agent-interaction__dismiss')
     const status=[...document.querySelectorAll('.mobile-conversation-panel:not([hidden]) .mobile-send-status[data-original-response]')].filter(n=>!n.closest('.agent-interaction')).at(-1),line=status?.querySelector('.mobile-send-status__line')
-    return {dismiss:{rect:r(dismiss),background:getComputedStyle(dismiss).backgroundColor},verdicts:[...actions.querySelectorAll(':scope > button:not(.agent-interaction__dismiss)')].map(b=>({primary:b.classList.contains('is-primary'),rect:r(b)})),
+    return {dismiss:{rect:r(dismiss),background:getComputedStyle(dismiss).backgroundColor,shadow:getComputedStyle(dismiss).boxShadow,border:getComputedStyle(dismiss).borderTopWidth},verdicts:[...actions.querySelectorAll(':scope > button:not(.agent-interaction__dismiss)')].map(b=>({primary:b.classList.contains('is-primary'),rect:r(b)})),
       status:status&&line?{rect:r(status),line:r(line),text:line.textContent,truncated:line.scrollWidth>line.clientWidth}:null}})()`)
   result.matureDecision = decision
   assert.ok(decision.verdicts.length >= 2, 'The request card offers its verdicts')
@@ -163,6 +163,8 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
   assert.ok(decision.dismiss.rect.height >= 44, 'Dismiss keeps a 44px touch target')
   assert.ok(decision.dismiss.rect.top >= Math.max(...decision.verdicts.map(verdict => verdict.rect.bottom)), 'Dismiss sits apart from the verdicts, on its own row')
   assert.equal(decision.dismiss.background, 'rgba(0, 0, 0, 0)', 'Dismiss reads as a text action, not a third verdict')
+  assert.equal(decision.dismiss.shadow, 'none', 'Dismiss has no inherited button highlight')
+  assert.equal(decision.dismiss.border, '0px', 'Dismiss has no button outline')
   assert.ok(decision.status, 'The answered request keeps its reply status in the conversation')
   const gutter = Math.min(...reading.turns.map(turn => turn.rect.left))
   assert.ok(decision.status.rect.height <= 48 && decision.status.truncated === false, `The kept reply status is one complete line: ${JSON.stringify(decision.status)}`)
@@ -216,10 +218,11 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
       const header=document.querySelector('.mobile-header'),section=document.querySelector('.mobile-terminal-panel:not([hidden]) .mobile-terminal'),canvas=section.querySelector('.mobile-terminal-canvas')
       const kids=[...section.children],above=kids.slice(0,kids.indexOf(canvas)).filter(shown),toolbar=section.querySelector('.mobile-terminal-toolbar')
       const chrome=[...document.querySelector('.mobile-app').children].filter(n=>shown(n)&&!n.matches('.mobile-main, .mobile-notice-stack'))
-      return {header:r(header),toolbar:r(toolbar),canvas:r(canvas),above:above.map(n=>n.className),chrome:chrome.map(n=>n.className),strip:!!document.querySelector('.mobile-mote-context'),
+      return {header:r(header),avatar:r(header.querySelector('.mobile-object-avatar')),toolbar:r(toolbar),canvas:r(canvas),above:above.map(n=>n.className),chrome:chrome.map(n=>n.className),strip:!!document.querySelector('.mobile-mote-context'),
         mode:toolbar.querySelector('.mobile-terminal-mode-state')?.textContent,state:r(toolbar.querySelector('.mobile-terminal-mode-state')),
         buttons:[...toolbar.querySelectorAll('button')].map(b=>({label:b.getAttribute('aria-label')??b.textContent,rect:r(b)})),overflow:document.querySelector('.mobile-app').scrollWidth>innerWidth}})()`)
     assert.equal(geometry.strip, false, 'The terminal carries no Mote context strip')
+    assert.ok(geometry.avatar?.width >= 30 && geometry.avatar?.height >= 30, 'Narrow headers retain the original identity avatar')
     assert.deepEqual(geometry.chrome.map(name => name.includes('mobile-header--session')), [true], 'Only the conversation header sits above the terminal')
     assert.deepEqual(geometry.above, ['mobile-terminal-toolbar'], 'Exactly one toolbar row precedes the output')
     assert.ok(Math.abs(geometry.toolbar.top - geometry.header.bottom) <= 1 && Math.abs(geometry.canvas.top - geometry.toolbar.bottom) <= 1, `Header, toolbar and output stack without a gap: ${JSON.stringify(geometry)}`)
@@ -271,17 +274,19 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
         await resize(width, 760)
         const trigger = '.mobile-page-header .mobile-avatar-notice > .mobile-notice__body > details > summary'
         await tap(trigger, 'Read original appearance issues from the header')
-        const notice = await read(`(()=>{const n=document.querySelector('.mobile-page-header .mobile-avatar-notice__list'),r=n.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,originals:n.querySelectorAll('.mobile-avatar-notice__item').length,footer:!!document.querySelector('.mobile-notice-stack .mobile-avatar-notice')}})()`)
+        const notice = await read(`(()=>{const n=document.querySelector('.mobile-page-header .mobile-avatar-notice__list'),r=n.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,originals:n.querySelectorAll('.mobile-avatar-notice__item').length,explanations:[...n.querySelectorAll('.mobile-avatar-notice__item > p')].map(p=>p.getBoundingClientRect().height),footer:!!document.querySelector('.mobile-notice-stack .mobile-avatar-notice')}})()`)
         assert.ok(notice.left >= 0 && notice.right <= width && notice.top >= 0 && notice.bottom <= 760, 'Original appearance details fit the phone')
         assert.ok(notice.originals > 0); assert.equal(notice.footer, false)
+        assert.ok(notice.explanations.every(height=>height>0), 'Original appearance explanations stay visible in the header')
         await capture(`mature-space-appearance-${width}-dark`)
         await tap(trigger, 'Fold original appearance details')
       }
       await resize(390, 844)
     }
     if (label === 'Goals') {
-      const entry = await read(`(()=>{const h=document.querySelector('.mobile-goals .mobile-page-header'),b=h.querySelector('[aria-label="新建目标"]');return {create:!!b,hit:b?.getBoundingClientRect().height,lookup:!!h.querySelector('.mobile-goal-lookup'),firstRow:!!document.querySelector('.mobile-goal-create__form:not([hidden])')}})()`)
+      const entry = await read(`(()=>{const h=document.querySelector('.mobile-goals .mobile-page-header'),b=h.querySelector('[aria-label="新建目标"]');return {create:!!b,hit:b?.getBoundingClientRect().height,lookup:!!h.querySelector('.mobile-goal-lookup'),actions:[...h.querySelectorAll('.mobile-section-actions > button,.mobile-goal-lookup > summary')].map(n=>n.getBoundingClientRect().toJSON()),firstRow:!!document.querySelector('.mobile-goal-create__form:not([hidden])')}})()`)
       assert.equal(entry.create, true); assert.ok(entry.hit >= 44); assert.equal(entry.lookup, true); assert.equal(entry.firstRow, false)
+      for (let i=1;i<entry.actions.length;i++) assert.ok(entry.actions[i].left-entry.actions[i-1].right<=12, 'Goal header actions remain one compact group')
       await tap('.mobile-goals-new', 'New Goal from the header')
       await until('!!document.querySelector(".mobile-goal-create__form:not([hidden])")')
       await capture('mature-goals-create-390-dark')

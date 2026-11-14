@@ -1,5 +1,9 @@
 /** Production mutations for the phone chrome; each must turn exactly its bearing test red through an assertion. */
 export const mobileChromeMutations = {
+  'narrow-goal-menu-missing': { file: 'apps/mobile/src/MobileApp.tsx',
+    before: '{workface.selectedSessionId && <button type="button" className="mobile-menu-row mobile-goal-menu-entry" aria-label="目标与结果" onClick={event => { showConversationGoals(sessionActionsButton.current ?? event.currentTarget); setSheet(null) }}><ThemeObjectGoalIcon size={18} /><span>目标与结果</span></button>}',
+    after: '{null}',
+    target: 'opens the new narrow Goal via conversation actions' },
   'goals-create-missing': { file: 'apps/mobile/src/goals/MobileGoalsSurface.tsx',
     before: '<button type="button" className="mobile-icon-button mobile-goals-new" aria-label="新建目标" title="新建目标" aria-expanded={createOpen} onClick={() => setCreateOpen(value => !value)}><SemanticIcon name="action.add-item" size={20} /></button>',
     after: '{null}',
