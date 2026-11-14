@@ -17,8 +17,12 @@ import { openHostGoalTransport } from './host-goal-transport'
 /** Actual Host discussion, public spatial creation, Core input and stores; only Native I/O is controlled. */
 export async function openHostGoalDiscussionFixture(config: AppConfig) {
   let core: Awaited<ReturnType<typeof injectedContextCore>>
+  const owner: ReturnType<AgentMuxHeadlessRuntime['ownerIdentity']> = {
+    runtimeId: 'private-goal-discussion-runtime', ownerInstanceId: 'private-goal-discussion-owner',
+    processId: process.pid, protocolVersion: 2, availability: 'connected', ctxmux: null
+  }
   const host = await openHostGoalTransport({ config: () => useAppStore.getState().config,
-    runtime: () => ({ client: core.core }) as AgentMuxHeadlessRuntime })
+    runtime: () => ({ client: core.core, ownerIdentity: () => owner }) as AgentMuxHeadlessRuntime })
   const coreRoot = join(host.directory, 'core'), scratchRoot = join(host.directory, 'scratch')
   await mkdir(coreRoot); await mkdir(scratchRoot)
   const listenerAsset = process.env.AGENTMUX_PRIVATE_LISTENER_ASSET
