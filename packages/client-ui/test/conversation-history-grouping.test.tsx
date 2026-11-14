@@ -65,21 +65,22 @@ it('hides original additional step shells and a pure system process without regr
   expect(read.kind).toBe('complete'); if (read.kind !== 'complete') throw Error('Original private read must finish')
   const value = projectConversationWindow(read.snapshot)
   expect(value.records.filter(record => record.original.kind === 'native' && record.original.item.recordPurpose === 'system-event')).toHaveLength(2)
-  await draw({ ...value, page: value.historyPage })
+  await draw({ ...value, page: value.historyPage ?? null })
   const parents = [...host.querySelectorAll<HTMLElement>('.conversation-record-process')]
   expect(parents).toHaveLength(2)
   await act(async () => parents[0]!.querySelector<HTMLButtonElement>('.wf-head')!.click())
+  await act(async () => parents[1]!.querySelector<HTMLButtonElement>('.wf-head')!.click())
   const only = host.querySelector<HTMLElement>('[data-native-step-id="system-only"]')!, middle = host.querySelector<HTMLElement>('[data-native-step-id="system-between"]')!
   expect(only).not.toBeNull(); expect(middle).not.toBeNull()
   const onlyShell = only.closest<HTMLElement>('.native-process-observation__step')!, middleShell = middle.closest<HTMLElement>('.native-process-observation__step')!
-  await draw({ ...value, page: value.historyPage }, {}, 'simple')
+  await draw({ ...value, page: value.historyPage ?? null }, {}, 'simple')
   expect([...host.querySelectorAll('.conversation-record-process')]).toEqual(parents)
   expect(parents[0]!.hidden, 'pure-system-process-shell-must-not-leave-a-heading').toBe(true)
   expect(parents[1]!.hidden).toBe(false)
   expect(middleShell.hidden, 'additional-step-shell-must-not-leave-spacing').toBe(true)
   expect(middleShell.inert).toBe(true); expect(onlyShell.hidden).toBe(true)
   expect(host.querySelector('[data-native-step-id="system-only"]')).toBe(only)
-  await draw({ ...value, page: value.historyPage })
+  await draw({ ...value, page: value.historyPage ?? null })
   expect(parents[0]!.hidden).toBe(false); expect(middleShell.hidden).toBe(false)
   expect(host.querySelector('[data-native-step-id="system-only"]')).toBe(only)
   expect(host.querySelector('[data-native-step-id="system-between"]')).toBe(middle)
@@ -99,7 +100,8 @@ it('keeps original per-record usage visible when its raw system record is hidden
   expect(read.kind).toBe('complete'); if (read.kind !== 'complete') throw Error('Original private read must finish')
   const value = projectConversationWindow(read.snapshot)
   expect(value.records.map(record => record.rawId)).toEqual(['before', 'usage', 'original-observation', 'after'])
-  await draw({ ...value, page: value.historyPage }, {}, 'simple')
+  await draw({ ...value, page: value.historyPage ?? null }, {}, 'simple')
+  await click('.wf-head')
   const raw = host.querySelector('[data-native-step-id="usage"]')!
   expect(raw).not.toBeNull(); expect(raw.closest('.conversation-detail-record[hidden]')).not.toBeNull()
   const usage = host.querySelector('.conversation-metrics__inline')!
@@ -140,7 +142,7 @@ it('retains the original collapsed disclosure for two real response metrics with
   for (const control of f.controls) expect(control).not.toHaveBeenCalled()
 })
 
-it('initially opens the latest visible tool process instead of a hidden trailing system-only group', async () => {
+it('starts the latest visible tool process collapsed and preserves explicit expansion beside a hidden system group', async () => {
   const f = await nativeHistoryFixture('codex', root => jsonl([
     { type: 'session_meta', payload: { id: 'native-main', cwd: root } },
     { type: 'response_item', payload: { id: 'visible-tool', type: 'function_call', call_id: 'original-call', name: 'inspect', arguments: '{"file":"src/change.ts"}' } },
@@ -151,14 +153,15 @@ it('initially opens the latest visible tool process instead of a hidden trailing
   expect(read.kind).toBe('complete'); if (read.kind !== 'complete') throw Error('Original private read must finish')
   const value = projectConversationWindow(read.snapshot)
   expect(value.records).toHaveLength(3)
-  await draw({ ...value, page: value.historyPage }, {}, 'simple')
+  await draw({ ...value, page: value.historyPage ?? null }, {}, 'simple')
   const parents = [...host.querySelectorAll<HTMLElement>('.conversation-record-process')]
   expect(parents).toHaveLength(2); expect(parents[1]!.hidden).toBe(true)
-  expect(parents[0]!.querySelector('.wf-head')?.getAttribute('aria-expanded'), 'latest-visible-tool-keeps-initial-disclosure').toBe('true')
-  expect(host.querySelector('[data-native-step-id="visible-tool"]')).not.toBeNull()
+  expect(parents[0]!.querySelector('.wf-head')?.getAttribute('aria-expanded'), 'latest-position-does-not-expand-original-tools').toBe('false')
+  expect(host.querySelector('[data-native-step-id="visible-tool"]')).toBeNull()
   await act(async () => parents[0]!.querySelector<HTMLButtonElement>('.wf-head')!.click())
-  await draw({ ...value, page: value.historyPage }, {}, 'simple')
-  expect(parents[0]!.querySelector('.wf-head')?.getAttribute('aria-expanded')).toBe('false')
+  await draw({ ...value, page: value.historyPage ?? null }, {}, 'simple')
+  expect(parents[0]!.querySelector('.wf-head')?.getAttribute('aria-expanded')).toBe('true')
+  expect(host.querySelector('[data-native-step-id="visible-tool"]')).not.toBeNull()
   for (const control of f.controls) expect(control).not.toHaveBeenCalled()
 })
 
@@ -167,7 +170,7 @@ it.each(['source', 'turn', 'user', 'answer', 'failed'] as const)('keeps the read
   const original = reason === 'source' ? frame([step('barrier')], { ...source, nativeSessionId: 'other-original' }).records[0]!
     : frame([{ ...step('barrier', reason === 'turn' ? 'other-turn' : 'original-turn'),
       ...(reason === 'user' ? { kind: 'user-message' as const } : reason === 'answer' ? { kind: 'assistant-message' as const, messagePhase: 'final' as const }
-        : reason === 'failed' ? { turnOutcome: { status: 'failed' as const } } : {}) }]).records[0]!
+        : reason === 'failed' ? { turnOutcome: { status: 'failed' as const, failure: { code: 'fixture_recorded_failure', message: 'Original failure', recovery: 'Inspect the original failure', nativeTurnId: 'original-turn' } } } : {}) }]).records[0]!
   const result = project([a, original, c], 'original-scope', undefined, key(original))
   const divider = result.rows.findIndex(row => row.kind === 'boundary')
   expect(divider).toBe(1); expect(result.rows[0]?.kind).toBe('process')
@@ -208,7 +211,7 @@ it('uses the same accepted internal boundary for deferred precommit and a select
   expect(read.kind).toBe('complete'); if (read.kind !== 'complete') throw Error('Original private read must finish')
   const value = projectConversationWindow(read.snapshot), controller = { current: null as ConversationPresentationController | null }
   expect(value.records).toHaveLength(2); expect(value.records.every(record => record.original.kind === 'deferred')).toBe(true)
-  await draw({ ...value, page: value.historyPage }, { recordBoundary: boundary('boundary'), presentation: { controller, pending: false, onRelease: () => {} } })
+  await draw({ ...value, page: value.historyPage ?? null }, { recordBoundary: boundary('boundary'), presentation: { controller, pending: false, onRelease: () => {} } })
   const divider = host.querySelector('[data-history-cut]')!, parent = divider.closest('.conversation-record-process')!
   expect(parent, 'deferred-divider-owned-by-compatible-process').not.toBeNull()
   const range = select(divider.firstChild!)
@@ -232,7 +235,7 @@ it('retains actual Core invocation payload, Range, original Copy, pin and draft 
   const locate = vi.fn(async () => ({ kind: 'located' as const }))
   function Surface({ records }: { records: readonly ConversationRecord[] }) {
     const [selected, select] = useState<string | null>(null)
-    return <ConversationProcessSurface><ConversationView sessionId={sid} executionHostId="local" page={value.historyPage} records={records}
+    return <ConversationProcessSurface><ConversationView sessionId={sid} executionHostId="local" page={value.historyPage ?? null} records={records}
       originalRecords={records} recordBoundary={boundary(output!.rawId)}
       renderProcess={process => <ConversationProcessObservation process={process} scope="original-scope" selected={selected} onSelect={select} active onLocate={locate} />} />
       <ConversationProcessDockSlot /><input aria-label="Unsent original draft" defaultValue="Keep original draft" /></ConversationProcessSurface>
@@ -240,6 +243,8 @@ it('retains actual Core invocation payload, Range, original Copy, pin and draft 
   async function show(records: readonly ConversationRecord[]) { await act(async () => root.render(<ClientUiProvider platform={platform}><Surface records={records} /></ClientUiProvider>)) }
   await show(value.records)
   expect(host.querySelectorAll('.conversation-record-process'), 'actual-core-history-cut-must-not-split').toHaveLength(1)
+  expect(host.querySelector('.wf-head')?.getAttribute('aria-expanded')).toBe('false')
+  await click('.wf-head')
   const parent = host.querySelector('.conversation-record-process')!, divider = host.querySelector('[data-history-cut]')!
   const inputId = input!.rawId, outputId = output!.rawId
   const row = host.querySelector<HTMLButtonElement>(`[data-native-step-id="${inputId}"] .wf-tool-row--observation`)!
