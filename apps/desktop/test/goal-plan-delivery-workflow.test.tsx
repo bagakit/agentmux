@@ -77,7 +77,10 @@ async function fixture() {
 const button = (text: string) => [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === text)!
 async function openDelivery() {
   const entry = dom.container.querySelector<HTMLButtonElement>('[data-goal-review-delivery="api"]')!
-  expect(entry).not.toBeNull(); await act(async () => entry.click())
+  expect(entry).not.toBeNull(); expect(entry.getAttribute('aria-expanded')).toBe('false')
+  await act(async () => entry.click())
+  expect(entry.getAttribute('aria-expanded')).toBe('true')
+  expect(document.getElementById(entry.getAttribute('aria-controls')!)).toBe(dom.container.querySelector('.goal-plan__reading'))
   expect(document.activeElement).toBe(dom.container.querySelector('.goal-plan__reading h3'))
   expect(dom.container.querySelector('.goal-delivery__report')?.textContent).toContain('API implementation and evidence')
   expect(dom.container.querySelector<HTMLDetailsElement>('.goal-delivery__form')?.open).toBe(false)
@@ -92,6 +95,12 @@ const stateOf = (id: string) => dom.container.querySelector(`[data-goal-plan-nod
 
 it('a person requests changes then passes the new exact delivery through the original owner, unlocking only its dependent node', async () => {
   const f = await fixture(); expect(stateOf('consumer')).toBe('waiting')
+  const entry = dom.container.querySelector<HTMLButtonElement>('[data-goal-review-delivery="api"]')!
+  await openDelivery()
+  await act(async () => button('Back to node').click())
+  expect(document.activeElement).toBe(entry)
+  expect(entry.getAttribute('aria-expanded')).toBe('false')
+  expect(f.delivery.mock.calls.filter(([method]) => method === 'goal.plan.review')).toHaveLength(0)
   await openDelivery(); await fill('Review note', 'The API must preserve the original source')
   await act(async () => button('Request changes').click())
   await vi.waitFor(() => expect(stateOf('api')).toBe('changes'))
@@ -100,7 +109,9 @@ it('a person requests changes then passes the new exact delivery through the ori
   expect(changed).toMatchObject({ delegationOperationId: 'delegation-1', verdict: 'changes', reviewer: { kind: 'user' } })
   expect(useAppStore.getState().goalEditDrafts[goalId]?.planReviews).toBeUndefined()
   await f.deliver(2); await act(async () => applyGoalDelegationResult(await f.read()))
-  await act(async () => button('Back to node').click()); await openDelivery(); await passFields()
+  await act(async () => button('Back to node').click())
+  expect(document.activeElement).toBe(dom.container.querySelector('[data-goal-plan-node="api"] .goal-plan-node__head'))
+  await openDelivery(); await passFields()
   await act(async () => button('Pass node').click())
   await vi.waitFor(() => expect(stateOf('api')).toBe('done'))
   expect(stateOf('consumer')).toBe('ready')
