@@ -221,9 +221,12 @@ export function AgentSessionComposer({
   const viewMode = useObservedAppStore('composer', visible, consumerScope, viewModeSelector)
   const setViewMode = useAppStore.getState().setViewMode
   const userName = useObservedAppStore('composer', visible, consumerScope, (state) => state.agentNames?.[sessionId])
-  const timeline = useObservedAppStore('composer', visible, consumerScope, (state) => state.timelines?.[sessionId])
+  // The original input owner reconciles queue receipts independently of the Composer.
+  // A confirmed hidden Agent's rich input history is only needed on presentation.
+  const readTimeline = visible || Boolean(source) || session?.kind !== 'agent'
+  const timeline = useObservedAppStore('composer', visible, consumerScope, (state) => readTimeline ? state.timelines?.[sessionId] : undefined)
   // A published preview revision may append to the same original timeline object.
-  useObservedAppStore('composer', visible, consumerScope, state => state.timelines?.[sessionId]?.revision)
+  useObservedAppStore('composer', visible, consumerScope, state => readTimeline ? state.timelines?.[sessionId]?.revision : undefined)
   const inputHistory = useComposerInputHistory({ sessionId: ownerKey, draftOwner,
     control: source ? undefined : session?.kind === 'agent' ? session.control : undefined, visible, readOnly: readOnly || disabled,
     insertion: insertionRef, ...(timeline ? { timeline } : {}), ...(source?.inputReading ? { originalReading: source.inputReading } : {}) })

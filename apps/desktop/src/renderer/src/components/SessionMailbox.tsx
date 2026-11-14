@@ -275,7 +275,7 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
   const effectiveControl: AgentSessionControl | undefined =
     propControl === null ? undefined : propControl ?? (storeSession?.kind === 'agent' ? storeSession.control : undefined)
 
-  const scope = JSON.stringify([effectiveControl?.hostId, effectiveControl?.agentSessionId, effectiveControl?.run.runId, timeline?.agentSessionId,
+  const scope = JSON.stringify([effectiveControl?.hostId, effectiveControl?.agentSessionId ?? timeline?.agentSessionId, effectiveControl?.run.runId,
     inputHistory?.reference?.hostId, inputHistory?.reference?.agentSessionId, ...(originalMail ? [originalMail.identity] : [])])
   const previousScope = useRef(scope)
   const navigationGeneration = useRef(0)
