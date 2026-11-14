@@ -228,7 +228,7 @@ assert.equal(mobile.candidate, candidate)
 assert.ok(mobile.passed && mobile.executed && mobile.sourceBound && mobile.cleanup.privateRootRemoved)
 assert.equal(mobile.phases.length, 6)
 assert.ok(mobile.phases.every(phase => phase.actual.mobile?.passed && phase.actual.mobile.anchorSample?.stillMounted))
-bind(['apps/mobile/src/MobileApp.tsx', 'apps/mobile/src/conversation/MobileConversationSurface.tsx'],
+bind(['apps/mobile/src/conversation/MobileConversationSurface.tsx', 'apps/mobile/src/platform/browser.tsx'],
   mobile.mobileVariants.candidate.source)
 const reading = evidence(paths.readingQualification)
 const paired = reading.data
