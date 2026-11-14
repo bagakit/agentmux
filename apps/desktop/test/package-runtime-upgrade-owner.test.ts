@@ -6,17 +6,28 @@ import { createHash } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import { appendFileSync, fstatSync, readSync } from 'node:fs'
-import { copyFile, link, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { copyFile, cp, link, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { promisify } from 'node:util'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const hooks = vi.hoisted(() => ({ exec: vi.fn(), spawn: vi.fn(), live: vi.fn(), closeFailure: undefined as Error | undefined,
   openDrift: false }))
 vi.mock('node:child_process', () => {
-  const execFile = Object.assign(() => {}, { [Symbol.for('nodejs.util.promisify.custom')]: hooks.exec })
+  const execFile = Object.assign(() => {}, { [Symbol.for('nodejs.util.promisify.custom')]: (...args: unknown[]) => {
+    const pending = hooks.exec(...args)
+    return pending.child ? pending : Object.assign(pending, { child: { pid: undefined, kill: vi.fn() } })
+  } })
   return { execFile, spawn: hooks.spawn }
 })
 vi.mock('../../../packages/core/src/socket-liveness.ts', () => ({ probeSocketLiveness: hooks.live }))
+// The install transaction must not discover or stop a user's GUI or semantic Host.
+vi.mock('../scripts/package-process-scope.mjs', async original => ({ ...await original<typeof import('../scripts/package-process-scope.mjs')>(),
+  observeApplicationProcesses: async () => ({ serving: [], admissions: [], processes: [] }) }))
+vi.mock('../scripts/package-semantic-host.mjs', () => ({ prepareSemanticHostReload: async () => null,
+  stopSemanticHostForInstall: async () => { throw new Error('The original preflight must fail before service stop') },
+  confirmSemanticHostReload: async () => { throw new Error('The original preflight must fail before service reload') } }))
+
 vi.mock('node:fs/promises', async importOriginal => {
   const actual = await importOriginal<typeof import('node:fs/promises')>()
   return { ...actual, open: async (...args: Parameters<typeof actual.open>) => {
@@ -32,6 +43,9 @@ vi.mock('node:fs/promises', async importOriginal => {
 })
 const helper = process.env.AGENTMUX_UPGRADE_OWNER_PATH ?? resolve(import.meta.dirname, '../scripts/package-runtime-upgrade.mjs')
 const installer = await import(pathToFileURL(helper).href)
+const realProcesses = await vi.importActual<typeof import('node:child_process')>('node:child_process')
+const realExec = promisify(realProcesses.execFile)
+const signalPrivateTestProcess = process.kill.bind(process)
 const roots: string[] = []
 const plans: any[] = []
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
@@ -97,57 +111,63 @@ async function fixture(ledger: 'stale' | 'missing' | 'invalid' = 'stale', declar
     return `f${fd}\ntREG\nD0x${metadata.dev.toString(16)}\ni${wrongInode && fd === 'txt' && mappingReads > 1 ? metadata.ino + 1n : metadata.ino}\nn${path}\n`
   }
   hooks.live.mockResolvedValue('alive')
-  hooks.exec.mockImplementation(async (executable: string, args: string[], options?: import('node:child_process').ExecFileOptions) => {
-    if (executable === binaries[0] && args.length === 1 && args[0] === '--version') {
-      expect(signalled).toBe(false)
-      return { stdout: outgoingVersion }
-    }
-    if (executable === binaries[1] && args.length === 1 && args[0] === '--version') {
+  hooks.exec.mockImplementation((executable: string, args: string[], options?: import('node:child_process').ExecFileOptions) => {
+    if (executable === binaries[1] && args.length === 1 && args[0] === '--version' && declarationDelayMs) {
       expect(signalled).toBe(false); versionCalls++
-      if (declarationDelayMs) {
-        const native = await vi.importActual<typeof import('node:child_process')>('node:child_process')
-        const started = performance.now(), receipt = { pid: null as number | null, elapsedMs: 0, timeout: options?.timeout ?? null, maxBuffer: options?.maxBuffer ?? null,
-          exitConfirmed: false, closeConfirmed: false, code: null as number | null, signal: null as NodeJS.Signals | null, killed: false }
-        declarationReaders.push(receipt)
-        // The selected fixture image is actually executed. Pass production options
-        // through unchanged so restoring the old timeout really kills this child.
-        return await new Promise((resolve, reject) => {
-          const child = native.execFile(executable, args, options ?? {}, (error, stdout, stderr) => {
-            receipt.elapsedMs = performance.now() - started; receipt.killed = child.killed
-            if (error) reject(error); else resolve({ stdout: stdout.toString(), stderr: stderr.toString() })
-          })
-          receipt.pid = child.pid ?? null
-          child.once('exit', (code, signal) => { receipt.exitConfirmed = true; receipt.code = code; receipt.signal = signal })
-          child.once('close', () => { receipt.closeConfirmed = true })
-        })
+      const started = performance.now(), receipt = { pid: null as number | null, elapsedMs: 0, timeout: options?.timeout ?? null, maxBuffer: options?.maxBuffer ?? null,
+        exitConfirmed: false, closeConfirmed: false, code: null as number | null, signal: null as NodeJS.Signals | null, killed: false }
+      declarationReaders.push(receipt)
+      // Preserve promisify(execFile)'s actual ChildProcess. Cancellation must reach this exact query.
+      const pending = realExec(executable, args, options ?? {}), child = pending.child
+      receipt.pid = child.pid ?? null
+      child.once('exit', (code, signal) => { receipt.exitConfirmed = true; receipt.code = code; receipt.signal = signal })
+      child.once('close', () => { receipt.closeConfirmed = true })
+      const settled = pending.then(value => { receipt.elapsedMs = performance.now() - started; receipt.killed = child.killed; return value }, error => {
+        receipt.elapsedMs = performance.now() - started; receipt.killed = child.killed; throw error
+      })
+      return Object.assign(settled, { child })
+    }
+    return (async () => {
+      if (executable === binaries[0] && args.length === 1 && args[0] === '--version') {
+        expect(signalled).toBe(false)
+        return { stdout: outgoingVersion }
       }
-      if (versionError) throw versionError
-      if (versionChange === 'bytes') await writeFile(binaries[1]!, 'changed-private-image')
-      if (versionChange === 'inode') { const next = `${binaries[1]}.next`; await copyFile(binaries[1]!, next); await rename(next, binaries[1]!) }
-      return { stdout: version }
-    }
-    if (executable === '/usr/bin/codesign') return { stdout: '', stderr: display ? `CDHash=${sha(await readFile(args.at(-1)!)).slice(0, 40)}\n` : 'Changed human-readable signature display\n' }
-    if (executable === '/usr/bin/python3') return { stdout: JSON.stringify({ valid: true, cdHash: sha(await readFile(mapped)).slice(0, 40),
-      pid, uid: kernelUid, startSeconds, startMicroseconds: missingBirth ? undefined : startMicroseconds + (insideBirthDrift && kernelReads++ > 0 ? 1 : 0) }) }
-    if (executable === '/usr/bin/tar') return { stdout: '' }
-    if (executable === '/bin/ps') return { stdout: changeBirth ? `${displayBirth}-changed` : displayBirth }
-    if (executable === '/usr/sbin/lsof') {
-      if (args.includes('-U')) return { stdout: `p${pid}\nu${uid}\nf7u\ntunix\nn${socket}\n` }
-      mappingReads++
-      const stdout = `p${pid}\nu${uid}\n${await fields('txt', mapped)}${await fields('11u', currentLock)}${extraLock ? await fields('12u', currentLock) : ''}`
-      if (insideImage) { mapped = insideImage; insideImage = undefined }
-      if (insideLock) { currentLock = insideLock; insideLock = undefined }
-      return { stdout }
-    }
-    if (executable === process.execPath) {
-      if (args.includes('--status')) return { stdout: JSON.stringify([{ ...run, state: { type: 'running' } }]) }
-      return { stdout: JSON.stringify({ protocol: 18, runtime, running: [run] }) }
-    }
-    throw new Error(`Unexpected owning fixture command: ${executable}`)
+      if (executable === binaries[1] && args.length === 1 && args[0] === '--version') {
+        expect(signalled).toBe(false); versionCalls++
+        if (versionError) throw versionError
+        if (versionChange === 'bytes') await writeFile(binaries[1]!, 'changed-private-image')
+        if (versionChange === 'inode') { const next = `${binaries[1]}.next`; await copyFile(binaries[1]!, next); await rename(next, binaries[1]!) }
+        return { stdout: version }
+      }
+      if (executable === '/usr/bin/codesign') return { stdout: '', stderr: display ? `CDHash=${sha(await readFile(args.at(-1)!)).slice(0, 40)}\n` : 'Changed human-readable signature display\n' }
+      if (executable === '/usr/bin/python3') return { stdout: JSON.stringify({ valid: true, cdHash: sha(await readFile(mapped)).slice(0, 40),
+        pid, uid: kernelUid, startSeconds, startMicroseconds: missingBirth ? undefined : startMicroseconds + (insideBirthDrift && kernelReads++ > 0 ? 1 : 0) }) }
+      if (executable === '/usr/bin/tar') return { stdout: '' }
+      if (executable === '/bin/ps') return { stdout: changeBirth ? `${displayBirth}-changed` : displayBirth }
+      if (executable === '/usr/sbin/lsof') {
+        if (args.includes('-U')) return { stdout: `p${pid}\nu${uid}\nf7u\ntunix\nn${socket}\n` }
+        mappingReads++
+        const stdout = `p${pid}\nu${uid}\n${await fields('txt', mapped)}${await fields('11u', currentLock)}${extraLock ? await fields('12u', currentLock) : ''}`
+        if (insideImage) { mapped = insideImage; insideImage = undefined }
+        if (insideLock) { currentLock = insideLock; insideLock = undefined }
+        return { stdout }
+      }
+      if (executable === process.execPath) {
+        if (args.includes('--status')) return { stdout: JSON.stringify([{ ...run, state: { type: 'running' } }]) }
+        return { stdout: JSON.stringify({ protocol: 18, runtime, running: [run] }) }
+      }
+      throw new Error(`Unexpected owning fixture command: ${executable}`)
+    })()
   })
   // This is a controlled native reader port, not a claim that these unsigned
   // fixture files have signatures. Its only file source is the inherited FD.
   hooks.spawn.mockImplementation((command: string, args: string[], options: any) => {
+    if (command === 'shasum') return realProcesses.spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] })
+    if (command === 'codesign') {
+      const child = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough() })
+      queueMicrotask(() => { child.stdout.end(); child.stderr.end(); child.emit('exit', 0, null) })
+      return child
+    }
     expect(command).toBe('/usr/bin/python3'); expect(args.slice(0, 2)).toEqual(['-I', '-c'])
     const child = Object.assign(new EventEmitter(), { stdout: new PassThrough(), stderr: new PassThrough(),
       kill: vi.fn(() => true), unref: vi.fn() })
@@ -230,6 +250,8 @@ async function fixture(ledger: 'stale' | 'missing' | 'invalid' = 'stale', declar
 it('waits for the selected private declaration child to exit naturally beyond the former ten-second observation window', async () => {
   const f = await fixture('stale', 11_250)
   const previous = await readFile(f.receiptPath)
+  const output: string[] = []
+  vi.spyOn(process.stdout, 'write').mockImplementation((chunk: string | Uint8Array) => { output.push(String(chunk)); return true })
   let outcome: unknown
   try {
     const plan = await f.prepare()
@@ -238,6 +260,12 @@ it('waits for the selected private declaration child to exit naturally beyond th
     expect(f.declarationReaders[0]).toMatchObject({ timeout: null, maxBuffer: 4096, exitConfirmed: true, closeConfirmed: true, code: 0, signal: null, killed: false })
     expect(f.declarationReaders[0]!.pid).toBeGreaterThan(0)
     expect(f.declarationReaders[0]!.elapsedMs).toBeGreaterThan(10_000)
+    const progress = output.filter(line => line.startsWith('runtime_version_wait=')).map(line => JSON.parse(line.slice('runtime_version_wait='.length)))
+      .filter(row => row.candidate === f.binaries[1])
+    expect(progress.length).toBeGreaterThanOrEqual(3)
+    expect(progress.map(row => row.pid)).toEqual(progress.map(() => f.declarationReaders[0]!.pid))
+    expect(progress[0].waitedMs).toBeLessThan(progress[1].waitedMs)
+    expect(progress.at(-1).waitedMs).toBeGreaterThanOrEqual(10_000)
     expect(await readFile(f.receiptPath)).toEqual(previous)
     expect(f.signal).not.toHaveBeenCalled()
     outcome = { state: 'prepared', candidate: plan.candidate.daemonPath, running: plan.before.running }
@@ -445,3 +473,61 @@ it('keeps the original service when a candidate has no verifiable public handoff
   expect(hooks.exec.mock.calls.map(([command]) => command).filter(command => command !== '/usr/bin/codesign').sort()).toEqual([...f.binaries].sort())
   expect(await readFile(f.receiptPath)).toEqual(receipt)
 })
+
+it.each(['SIGINT', 'SIGTERM'] as const)('the actual preflight handles %s by closing only its declaration child and cleaning signal observers', async signal => {
+  const f = await fixture('stale', 11_250), before = await readFile(f.receiptPath)
+  const listeners = { SIGINT: process.listenerCount('SIGINT'), SIGTERM: process.listenerCount('SIGTERM') }
+  const pending = f.prepare().then(value => ({ value }), error => ({ error }))
+  await vi.waitFor(() => expect(f.declarationReaders[0]?.pid).toBeGreaterThan(0), { interval: 5 })
+  // Send a real OS signal to this private Vitest worker, never the user's Agent or Runtime.
+  signalPrivateTestProcess(process.pid, signal)
+  const result = await pending
+  expect(result).toHaveProperty('error.stage', 'runtime-version')
+  expect(result).toHaveProperty('error.interruption', signal)
+  expect(result).toHaveProperty('error.candidate', f.binaries[1])
+  expect(result).toHaveProperty('error.queryPid', f.declarationReaders[0]!.pid)
+  expect(f.declarationReaders[0]).toMatchObject({ exitConfirmed: true, closeConfirmed: true, code: null, signal: 'SIGTERM', killed: true })
+  expect(f.signal).not.toHaveBeenCalled(); expect(await readFile(f.receiptPath)).toEqual(before)
+  expect(process.listenerCount('SIGINT')).toBe(listeners.SIGINT)
+  expect(process.listenerCount('SIGTERM')).toBe(listeners.SIGTERM)
+}, 30_000)
+
+it('an interrupted version query returns through the original full-install failure receipt and retains the verified stage', async () => {
+  const f = await fixture('stale', 11_250), home = join(f.root, 'private-home')
+  const current = join(home, 'Applications/AgentMux.app'), stage = join(home, 'Applications/.AgentMux.install-12345.app'), source = join(f.root, 'signed-source.app')
+  const originalSuffix = f.binaries[0]!.slice(f.old.length), candidateSuffix = f.binaries[1]!.slice(f.candidate.length)
+  const identity = { sourceCommit: 'a'.repeat(40), sourceTree: 'b'.repeat(40), appVersion: '0.1.0', platform: process.platform, arch: process.arch }
+  for (const app of [f.old, f.candidate]) for (const [path, body] of Object.entries({
+    'Contents/Resources/app/package-identity.json': JSON.stringify(identity),
+    'Contents/MacOS/AgentMux': 'Private signed application image',
+    'Contents/_CodeSignature/CodeResources': 'Private signature seal; OS signature verification is controlled'
+  })) { const target = join(app, path); await mkdir(dirname(target), { recursive: true }); await writeFile(target, body) }
+  await mkdir(dirname(current), { recursive: true }); await cp(f.candidate, source, { recursive: true }); await rename(f.old, current); await rename(f.candidate, stage)
+  f.binaries[0] = current + originalSuffix; f.binaries[1] = stage + candidateSuffix
+  const review = join(f.root, 'private-runtime-review.md'); await writeFile(review, 'Actual private preflight continuity exercise')
+  const stageFiles = [join(stage, 'Contents/_CodeSignature/CodeResources'), join(stage, 'Contents/MacOS/AgentMux'), f.binaries[1]!]
+  const before = await Promise.all(stageFiles.map(path => readFile(path))), outgoing = await readFile(f.binaries[0]!)
+  const draft = join(f.root, 'original-workface-and-draft.json'); await writeFile(draft, '{"session":"original","draft":"unsent original input"}')
+  const quit = vi.fn(), launch = vi.fn()
+  process.argv.push(`--runtime-reviewed=${review}`)
+  try {
+    vi.resetModules()
+    const { installApplication } = await import('../scripts/package-macos.mjs')
+    const pending = installApplication(source, { intent: 'full', homeDirectory: home, preparedApplicationPath: stage, quit, launch })
+      .then(value => ({ value }), error => ({ error }))
+    await vi.waitFor(() => expect(f.declarationReaders[0]?.pid).toBeGreaterThan(0), { interval: 5 })
+    signalPrivateTestProcess(process.pid, 'SIGINT')
+    const result = await pending
+    expect(result).toHaveProperty('error.stage', 'runtime-version')
+    expect(result).toHaveProperty('error.candidate', f.binaries[1])
+    expect(result).toHaveProperty('error.transaction.intent', 'full')
+    expect(result).toHaveProperty('error.transaction.ui.status', 'not-started')
+    expect(result).toHaveProperty('error.transaction.native.status', 'unchanged')
+    expect(f.declarationReaders[0]).toMatchObject({ exitConfirmed: true, closeConfirmed: true, signal: 'SIGTERM', killed: true })
+    expect(hooks.spawn.mock.calls.filter(([command]) => command === 'codesign').map(([, args]) => args.at(-1))).toEqual([stage])
+    expect(quit).not.toHaveBeenCalled(); expect(launch).not.toHaveBeenCalled(); expect(f.signal).not.toHaveBeenCalled()
+    expect(await Promise.all(stageFiles.map(path => readFile(path)))).toEqual(before)
+    expect(await readFile(f.binaries[0]!)).toEqual(outgoing)
+    expect(await readFile(draft, 'utf8')).toBe('{"session":"original","draft":"unsent original input"}')
+  } finally { process.argv = process.argv.filter(value => value !== `--runtime-reviewed=${review}`) }
+}, 30_000)
