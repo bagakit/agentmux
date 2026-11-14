@@ -1,5 +1,5 @@
-import { parseGoalInputEpoch, parseGoalInputEpochInput } from './goal-input-epoch.js'
 import { parseRpcAgentSession } from './agent-session-codec.js'
+import { parseGoalInputEpoch, parseGoalInputEpochInput } from './goal-input-epoch.js'
 import { parseCreationInspectParams, parseCreationResolveParams } from './agent-creation-resolution.js'
 import { parseCreationInspectionResult } from './agent-creation-inspection.js'
 import { isStorageRecoveryMethod, parseStorageRecoveryParams, parseStorageRecoveryResult } from './storage-recovery-rpc.js'
@@ -44,6 +44,7 @@ import { MOTE_INPUT_GUIDANCE } from './mote/input-source.js'
 import { isMoteDialogueMethod, parseMoteDialogueParams, parseMoteDialogueResult } from './mote/dialogue.js'
 import { parseCreationContinueParams, parseCreationContinueResult } from './agent-creation-continue.js'
 import { parseMessageFieldPage, validateMessageFieldRead } from './agent-message-field.js'
+import { parseMessageParticipantSelection, messageHasParticipant } from './agent-message-query.js'
 import { parseAgentExecutionCreate, parseAgentExecutionBinding, parseAgentExecutionInspection, parseAgentExecutionBindingObservation } from './public-rpc-agent-execution.js'
 import { parseAgentInputResourceRead, parseAgentInputResourceResult } from './agent-input-resource.js'
 import { parseAgentInputJournalCut } from './agent-input-conversation.js'
@@ -314,6 +315,8 @@ function dispatchObservation(value: unknown, params: Record<string, unknown>): v
   string(p.hostId); if (params.hostId !== undefined && p.hostId !== params.hostId) fail()
   dispatch(p.dispatch, params)
   const supervision = p.dispatch as Record<string, unknown>, source = message(p.source)
+  const participant = parseMessageParticipantSelection(params)
+  if (participant && !messageHasParticipant(source, participant.participantSessionId, participant.participantRuntimeId)) fail()
   const packet = (value: unknown) => { const original = record(value); return parseSignedMessage({ envelope: original.envelope, execution: original.execution, sourceChannel: original.sourceChannel, provenance: original.provenance }) }
   if (p.remoteSource !== undefined) verifyAgentMessageInboxReceipt(parseRecipientInboxReceipt(p.remoteSource, packet(p.source)))
   if (source.messageId !== supervision.sourceMessageId || source.senderSessionId !== supervision.ownerAgentSessionId ||
@@ -374,6 +377,9 @@ function dispatchPage(value: unknown, params: Record<string, unknown>): void {
     const item = record(value)
     dispatch(item, { sourceMessageId: item.sourceMessageId })
     if (sources.has(item.sourceMessageId) || item.ownerAgentSessionId !== p.participantSessionId && item.workerAgentSessionId !== p.participantSessionId) fail()
+    if (params.participantRuntimeId !== undefined && !(item.ownerAgentSessionId === p.participantSessionId &&
+      (item.ownerRuntimeId === undefined || item.ownerRuntimeId === params.participantRuntimeId) || item.workerAgentSessionId === p.participantSessionId &&
+      (item.workerRuntimeId === undefined || item.workerRuntimeId === params.participantRuntimeId))) fail()
     sources.add(item.sourceMessageId)
   })
   if (p.nextSourceMessageId !== null) {
@@ -1067,6 +1073,8 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
           const original = record(p.message, ['sequence', 'envelope', 'delivery', 'deliveryMode', 'notification', 'promptCondition', 'execution', 'admissionIntent', 'sourceChannel', 'sourceDevice', 'inputOrigin', 'provenance', 'transport', 'peerInbox'])
           if (original.inputOrigin !== null) parseAgentInputJournalCut(original.inputOrigin)
           const envelope = message(original, input.notificationId as string | undefined)
+          const participant = parseMessageParticipantSelection(input)
+          if (participant && !messageHasParticipant(envelope, participant.participantSessionId, participant.participantRuntimeId)) fail()
           if ((input.messageId === undefined ? envelope.operationId !== input.operationId : envelope.messageId !== input.messageId) || credentials && envelope.senderSessionId !== credentials.agentSessionId &&
             envelope.recipientSessionId !== credentials.agentSessionId) fail()
           if (original.execution !== undefined) member(original.execution, ['default', 'immediate'])
@@ -1107,6 +1115,8 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
           if (envelope.sender.kind !== 'agent-session' || envelope.recipient.kind !== 'agent-session' ||
             envelope.sender.agentSessionId !== envelope.senderSessionId || envelope.recipient.agentSessionId !== envelope.recipientSessionId ||
             envelope[p.direction === 'incoming' ? 'recipientSessionId' : 'senderSessionId'] !== p.participantSessionId || seen.has(envelope.messageId)) fail()
+          const runtimeId = envelope[p.direction === 'incoming' ? 'recipientRuntimeId' : 'senderRuntimeId']
+          if (input.participantRuntimeId !== undefined && runtimeId !== undefined && runtimeId !== input.participantRuntimeId) fail()
           seen.add(envelope.messageId)
         })
         if ((p.messages as unknown[]).length > (limit as number)) fail()

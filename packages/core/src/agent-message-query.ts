@@ -2,6 +2,25 @@ import type { AgentMuxMessageEnvelope } from './agent-message-envelope.js'
 import type { DurableAgentMuxMessage, AgentMuxMessageDeliveryState } from './agent-global-message-queue.js'
 import type { ChannelTranscriptQuote } from './channel-quote.js'
 import type { JsonReadEntry } from './json-read-fragments.js'
+import { AgentMuxError } from './errors.js'
+
+/** An optional narrowing read selector, never additional journal authority. */
+export type AgentMuxMessageParticipantSelection =
+  | { participantSessionId: string; participantRuntimeId: string }
+  | { participantSessionId?: never; participantRuntimeId?: never }
+export function parseMessageParticipantSelection(input: { participantSessionId?: unknown; participantRuntimeId?: unknown }):
+  { participantSessionId: string; participantRuntimeId: string } | undefined {
+  if (input.participantSessionId === undefined && input.participantRuntimeId === undefined) return undefined
+  if (![input.participantSessionId, input.participantRuntimeId].every(value => typeof value === 'string' && !!value.trim() && !/[\0\r\n]/u.test(value)))
+    throw new AgentMuxError('Select the original participant Session and Runtime together.', 'INVALID_CONTROL_REQUEST')
+  return { participantSessionId: input.participantSessionId as string, participantRuntimeId: input.participantRuntimeId as string }
+}
+/** Missing Runtime fields retain the original journal's local legacy meaning. */
+export function messageHasParticipant(envelope: Pick<AgentMuxMessageEnvelope, 'senderSessionId' | 'recipientSessionId' | 'senderRuntimeId' | 'recipientRuntimeId'>,
+  agentSessionId: string, runtimeId?: string): boolean {
+  return envelope.senderSessionId === agentSessionId && (envelope.senderRuntimeId === undefined || envelope.senderRuntimeId === runtimeId) ||
+    envelope.recipientSessionId === agentSessionId && (envelope.recipientRuntimeId === undefined || envelope.recipientRuntimeId === runtimeId)
+}
 
 /** Derived original-owner reading facts; never persisted back into the message journal. */
 export type AgentMuxMessageReadView = DurableAgentMuxMessage & {
@@ -22,7 +41,7 @@ export function originalMessageInputKey(message: DurableAgentMuxMessage): Extrac
 export type AgentMuxMessageRead = (
   | { operationId: string; messageId?: never }
   | { messageId: string; operationId?: never }
-  ) & {
+  ) & AgentMuxMessageParticipantSelection & {
   /** Select this exact notification's metadata for the original message, without consuming it. */
   notificationId?: string
 }
@@ -51,6 +70,8 @@ export type AgentMuxMessageFieldPage = {
 export type AgentMuxMessageDirection = 'incoming' | 'outgoing'
 export type AgentMuxMessageQuery = {
   participantSessionId: string
+  /** Restrict to this journal's original local Runtime participant, including its legacy records. */
+  participantRuntimeId?: string
   direction: AgentMuxMessageDirection
   /** Exclusive original sequence cursor; no offsets or mutable timestamps. */
   beforeSequence?: number

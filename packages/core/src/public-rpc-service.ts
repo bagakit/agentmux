@@ -24,6 +24,8 @@ import { parseGoalActivityHistoryParams, pageGoalActivity } from './goal-activit
 import { parseNotesStorageParams, parseNotesStorageInspection, notesStorageOperationInspection, type NotesStorageMethod, type NotesStoragePort } from './public-rpc-notes-storage.js'
 import { parseProviderCatalogQuery, parseProviderCatalogObservation, type ProviderCatalogMethod } from './public-rpc-provider-catalog.js'
 import { parseSpaceMemberParams } from './space-member-codec.js'
+import { SPACE_MEMBER_NATIVE_MAIL_CALLS } from './space-member.js'
+import { parseMessageParticipantSelection } from './agent-message-query.js'
 import { spaceMemberRuntime } from './space-member-runtime.js'
 import { HOST_ROUTE_METHODS, parseHostRouteParams } from './host-route.js'
 import { assertHostRouteDispatch, delegatedHostRouteActor, delegatedHostRouteMemberName, hostRouteActorScope, type HostRouteGateway, type VerifiedHostRouteDelegation } from './host-route-gateway.js'
@@ -551,16 +553,16 @@ const NATIVE_FIELDS = {
   'message.inbox.check': ['limit'], 'message.inbox.ack': ['generation', 'readerRun'],
   'message.notify': ['operationId', 'messageIds', 'hostId','inputEpoch'],
   'message.notify.inspect': ['operationId', 'hostId'],
-  'message.read': ['operationId', 'messageId', 'notificationId', 'field', 'cursor', 'maxBytes', 'hostId'],
-  'message.ls': ['hostId', 'participantSessionId', 'direction', 'beforeSequence', 'limit'],
+  'message.read': ['operationId', 'messageId', 'notificationId', 'field', 'cursor', 'maxBytes', 'hostId', 'participantSessionId', 'participantRuntimeId'],
+  'message.ls': ['hostId', 'participantSessionId', 'participantRuntimeId', 'direction', 'beforeSequence', 'limit'],
   'message.events': ['hostId', 'participantSessionId', 'afterSequence', 'latest', 'beforeSequence', 'throughSequence', 'incarnation', 'messageId', 'broadcastOperationId', 'limit'],
   'message.federation.dispatch-intake': ['event'],
   'message.federation.intake': ['packet'],
   'message.federation.export': ['authority'],
   'message.dispatch.sync': ['sourceMessageId', 'hostId'],
   'message.dispatch.open': ['sourceMessageId'], 'message.dispatch.inspect': ['sourceMessageId'],
-  'message.dispatch.read': ['sourceMessageId', 'hostId'],
-  'message.dispatch.ls': ['hostId', 'participantSessionId', 'afterSourceMessageId', 'limit'],
+  'message.dispatch.read': ['sourceMessageId', 'hostId', 'participantSessionId', 'participantRuntimeId'],
+  'message.dispatch.ls': ['hostId', 'participantSessionId', 'participantRuntimeId', 'afterSourceMessageId', 'limit'],
   'message.dispatch.report': ['sourceMessageId', 'replyMessageId', 'kind'],
   'app.search': ['mode', 'query', 'hostId', 'agentSessionId', 'source', 'limit', 'scanLimit', 'maxBytes', 'cursor'],
   'app.snapshot': ['projectId', 'workspaceId', 'topicId', 'agentSessionId', 'goalId', 'executorId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit', 'include'],
@@ -736,7 +738,7 @@ export class AgentMuxRpcService {
     return await spaceMemberRuntime({ store: this.spatial, clients: hostId => this.clients(hostId, { signal: context.openingSignal ?? context.signal }),
       ...(this.ports.hostRoutes ? { gateway: this.ports.hostRoutes } : {}), local: {
         call: async (method, params, original) => {
-          if (method === 'skill.ls' || isAgentProgressMethod(method) || method === 'file.upload' || method === 'file.upload.inspect') return await this.callOwnedBusiness(method, params as AgentMuxRpcParams<typeof method>, original)
+          if (method === 'skill.ls' || isAgentProgressMethod(method) || method === 'file.upload' || method === 'file.upload.inspect' || (SPACE_MEMBER_NATIVE_MAIL_CALLS as readonly string[]).includes(method)) return await this.callOwnedBusiness(method, params as AgentMuxRpcParams<typeof method>, original)
           const endpoint = await this.hosted(method as AgentMuxRpcMethod, params, original); return await endpoint.owner.call(method, endpoint.params, original)
         },
         subscribe: async (method, params, emit, original) => { const endpoint = await this.hosted(method as AgentMuxRpcMethod, params, original); return await endpoint.owner.subscribe(method, endpoint.params, emit, original) }
@@ -3776,7 +3778,10 @@ export class AgentMuxRpcService {
           'Message reading requires an authenticated Agent participant or a transport-approved user/device. Original communication and Runs are retained.', 'CONTROL_PERMISSION_DENIED')
         if (method === 'message.read' && (p.operationId !== undefined) === (p.messageId !== undefined)) throw new AgentMuxError(
           'Choose exactly one original message operationId or messageId.', 'INVALID_CONTROL_REQUEST')
+        const participant = p.participantRuntimeId !== undefined || (method === 'message.read' || method === 'message.dispatch.read') && p.participantSessionId !== undefined
+          ? parseMessageParticipantSelection({ participantSessionId: p.participantSessionId ?? caller?.agentSessionId, participantRuntimeId: p.participantRuntimeId }) : undefined
         const messageSelector: import('./agent-message-query.js').AgentMuxMessageReadRequest | undefined = method !== 'message.read' ? undefined : {
+          ...participant,
           ...(p.messageId === undefined ? { operationId: rpcString(p.operationId, 'Original message operation ID') }
             : { messageId: rpcString(p.messageId, 'Original message ID') }),
           ...(p.notificationId === undefined ? {} : { notificationId: rpcString(p.notificationId, 'Original notification ID') }),
@@ -3786,7 +3791,7 @@ export class AgentMuxRpcService {
         const hostId = p.hostId === undefined ? caller?.hostId : rpcString(p.hostId, 'Original message Host ID')
         if (hostId === undefined) throw new AgentMuxError('A trusted reader must select the exact original message Host.', 'INVALID_CONTROL_REQUEST')
         if (caller && caller.hostId !== hostId) throw new AgentMuxError('Agent authority cannot read another semantic Host journal.', 'CONTROL_PERMISSION_DENIED')
-        if (method === 'message.read' && hostId === 'local') {
+        if (method === 'message.read' && hostId === 'local' && !participant) {
           const route = await (await this.messageRouteJournal()).readMessageRoute(messageSelector!.operationId, messageSelector!.messageId)
           const localOwners = route && !caller ? (await this.clients()).filter(scope => scope.hostId === 'local') : []
           const sourceOwner = caller?.client ?? (localOwners.length === 1 ? localOwners[0]!.client : undefined)
@@ -3816,6 +3821,7 @@ export class AgentMuxRpcService {
           if (p.direction !== 'incoming' && p.direction !== 'outgoing') throw new AgentMuxError('Message direction must be incoming or outgoing.', 'INVALID_CONTROL_REQUEST')
           result = { ...await owner.client.listMessages({
             participantSessionId: rpcString(p.participantSessionId ?? caller?.agentSessionId, 'Participant Session ID'),
+            ...(participant ? { participantRuntimeId: participant.participantRuntimeId } : {}),
             direction: p.direction, ...(p.beforeSequence === undefined ? {} : { beforeSequence: rpcCount(p.beforeSequence, -1, Number.MAX_SAFE_INTEGER) }),
             limit: rpcCount(p.limit, 50, 100), ...auth }), hostId }
         }
@@ -3826,9 +3832,10 @@ export class AgentMuxRpcService {
           ...auth }), hostId }
         }
         else if (method === 'message.dispatch.read') result = { ...await owner.client.readDispatch({
-          sourceMessageId: rpcString(p.sourceMessageId, 'Source message ID'), ...auth }), hostId }
+          sourceMessageId: rpcString(p.sourceMessageId, 'Source message ID'), ...participant, ...auth }), hostId }
         else result = { ...await owner.client.listDispatches({
           participantSessionId: p.participantSessionId === undefined ? this.requireCaller(caller).agentSessionId : rpcString(p.participantSessionId, 'Participant Session ID'),
+          ...(participant ? { participantRuntimeId: participant.participantRuntimeId } : {}),
           ...(p.afterSourceMessageId === undefined ? {} : { afterSourceMessageId: rpcString(p.afterSourceMessageId, 'Original page source message ID') }),
           limit: rpcCount(p.limit, 50, 100), ...auth }), hostId }
         break

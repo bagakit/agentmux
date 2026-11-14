@@ -43,7 +43,7 @@ import { parsePreparedAuthorProfile, publicAuthorProfile } from './author-profil
 import { parseAgentInputChangesRead, type AgentInputChangesRead, type AgentInputChangesPage } from './agent-input-changes.js'
 import { imageBytes } from './session-history-resource.js'
 import { resolveAgentInputImages, parseAgentInputResourceRead, inputImageMatches, type AgentInputResourceOwner, type AgentInputResourceRead, type AgentInputResourceResult } from './agent-input-resource.js';
-import { originalMessageInputKey } from './agent-message-query.js'
+import { originalMessageInputKey, parseMessageParticipantSelection, messageHasParticipant } from './agent-message-query.js'
 import { validateMessageFieldRead } from './agent-message-field.js'
 import { readMessageField } from './agent-message-field-reader.js'
 import type { AgentMuxMessageRead, AgentMuxMessageReadRequest, AgentMuxMessageFieldRead, AgentMuxMessageReadView, AgentMuxMessageFieldPage } from './agent-message-query.js'
@@ -5562,14 +5562,16 @@ export class AgentMuxClient {
   async readMessage(input: AgentMuxMessageReadRequest & { caller?: { agentSessionId: string; capability: string } }): Promise<AgentMuxMessageReadView | AgentMuxMessageFieldPage | null>
   async readMessage(input: AgentMuxMessageReadRequest & { caller?: { agentSessionId: string; capability: string } }): Promise<AgentMuxMessageReadView | AgentMuxMessageFieldPage | null> {
     validateMessageFieldRead(input)
+    const participant = parseMessageParticipantSelection(input)
+    this.messageParticipantRuntime(participant, input.caller?.agentSessionId)
     if ((input.operationId !== undefined) === (input.messageId !== undefined)) throw new AgentMuxError(
       'Choose exactly one original message operationId or messageId.', 'INVALID_CONTROL_REQUEST')
     const reauthorize = async (message: DurableAgentMuxMessage | null) => {
-      if (!input.caller) return
       const caller = input.caller
-      await this.authorizeRetainedAgentCaller(caller.capability, caller.agentSessionId)
-      if (message && !await this.localMessageParticipant(message.envelope, caller.agentSessionId)) throw new AgentMuxError(
-        'Only an original message participant can read it with Agent authority.', 'MESSAGE_PARTICIPANT_MISMATCH')
+      if (caller) await this.authorizeRetainedAgentCaller(caller.capability, caller.agentSessionId)
+      const sessionId = participant?.participantSessionId ?? caller?.agentSessionId
+      if (message && sessionId && !await this.localMessageParticipant(message.envelope, sessionId)) throw new AgentMuxError(
+        'Only the selected original Runtime-qualified participant can read this message.', 'MESSAGE_PARTICIPANT_MISMATCH')
     }
     const message = await (input.messageId === undefined
       ? this.messageQueue.readByOperationId(input.operationId!, reauthorize, input.notificationId)
@@ -5587,8 +5589,14 @@ export class AgentMuxClient {
 
   private async localMessageParticipant(envelope: Pick<AgentMuxMessageEnvelope, 'senderSessionId' | 'recipientSessionId' | 'senderRuntimeId' | 'recipientRuntimeId'>, agentSessionId: string): Promise<boolean> {
     const runtimeId = envelope.senderRuntimeId || envelope.recipientRuntimeId ? this.requireCreationAuthority().runtimeId : undefined
-    return envelope.senderSessionId === agentSessionId && (envelope.senderRuntimeId === undefined || envelope.senderRuntimeId === runtimeId) ||
-      envelope.recipientSessionId === agentSessionId && (envelope.recipientRuntimeId === undefined || envelope.recipientRuntimeId === runtimeId)
+    return messageHasParticipant(envelope, agentSessionId, runtimeId)
+  }
+
+  private messageParticipantRuntime(participant: { participantSessionId: string; participantRuntimeId: string } | undefined, callerSessionId?: string): string | null | undefined {
+    if (participant && (participant.participantRuntimeId !== this.requireCreationAuthority().runtimeId ||
+      callerSessionId !== undefined && participant.participantSessionId !== callerSessionId)) throw new AgentMuxError(
+      'This reader can only narrow to its original local Runtime participant.', 'MESSAGE_PARTICIPANT_MISMATCH')
+    return participant?.participantRuntimeId ?? (callerSessionId ? this.creationAuthority?.runtimeId ?? null : undefined)
   }
 
   /** A saved reference still waiting for an automatic path names it; an unknown recipient or Provider stays absent. */
@@ -5608,7 +5616,7 @@ export class AgentMuxClient {
         'An Agent can only browse its own original messages.', 'MESSAGE_PARTICIPANT_MISMATCH')
       this.messageReadUsed = true
       void this.observeMessageReads()?.refresh()
-      const runtimeId = caller ? this.creationAuthority?.runtimeId ?? null : undefined
+      const runtimeId = this.messageParticipantRuntime(input.participantRuntimeId === undefined ? undefined : parseMessageParticipantSelection(input), caller?.agentSessionId)
       const page = await this.messageQueue.listMessages(input, async () => {
         if (caller) await this.authorizeRetainedAgentCaller(caller.capability, caller.agentSessionId)
       }, runtimeId)
@@ -5667,23 +5675,26 @@ export class AgentMuxClient {
   }
 
   /** SDK callers are trusted Host readers; managed authority is checked again under the journal lock. */
-  async readDispatch(input: { sourceMessageId: string; caller?: { agentSessionId: string; capability: string } }): Promise<DispatchObservation> {
+  async readDispatch(input: { sourceMessageId: string; caller?: { agentSessionId: string; capability: string } } & import('./agent-message-query.js').AgentMuxMessageParticipantSelection): Promise<DispatchObservation> {
     const caller = input.caller
+    const participant = parseMessageParticipantSelection(input)
+    this.messageParticipantRuntime(participant, caller?.agentSessionId)
+    const sessionId = participant?.participantSessionId ?? caller?.agentSessionId
     return this.messageQueue.readDispatch({ sourceMessageId: input.sourceMessageId,
-      ...(caller ? { callerAgentSessionId: caller.agentSessionId } : {}) }, async messages => {
+      ...(sessionId ? { callerAgentSessionId: sessionId } : {}) }, async messages => {
       if (caller) await this.authorizeRetainedAgentCaller(caller.capability, caller.agentSessionId)
-      if (caller && !await this.localMessageParticipant(messages[0]!, caller.agentSessionId)) throw new AgentMuxError('Only an original Runtime-qualified participant can read this Dispatch.', 'DISPATCH_PARTICIPANT_MISMATCH')
+      if (sessionId && !await this.localMessageParticipant(messages[0]!, sessionId)) throw new AgentMuxError('Only an original Runtime-qualified participant can read this Dispatch.', 'DISPATCH_PARTICIPANT_MISMATCH')
       return this.dispatchIdentityDiagnostics(messages)
     })
   }
 
-  async listDispatches(input: { participantSessionId: string; afterSourceMessageId?: string; limit?: number;
+  async listDispatches(input: { participantSessionId: string; participantRuntimeId?: string; afterSourceMessageId?: string; limit?: number;
     caller?: { agentSessionId: string; capability: string } }): Promise<DispatchPage> {
     return await this.withSessionRecordRead(input.participantSessionId, async () => {
       const caller = input.caller
       if (caller && caller.agentSessionId !== input.participantSessionId) throw new AgentMuxError(
         'An Agent can only list its own Dispatch participation.', 'DISPATCH_PARTICIPANT_MISMATCH')
-      const runtimeId = caller ? this.creationAuthority?.runtimeId ?? null : undefined
+      const runtimeId = this.messageParticipantRuntime(input.participantRuntimeId === undefined ? undefined : parseMessageParticipantSelection(input), caller?.agentSessionId)
       return this.messageQueue.listDispatches(input, async () => {
         if (caller) await this.authorizeRetainedAgentCaller(caller.capability, caller.agentSessionId)
       }, runtimeId)

@@ -2,7 +2,7 @@ import { AgentMuxError } from './errors.js'
 import { rpcRecord, rpcString } from './rpc-data.js'
 import { decodeHostedValue } from './hosted-value.js'
 import { AGENTMUX_HOSTED_RPC_FIELDS } from './hosted-client-contract.js'
-import { parseSpaceMemberIdentity, SPACE_MEMBER_CALLS, SPACE_MEMBER_STREAMS, SPACE_MEMBER_INVOCATIONS, SPACE_MEMBER_NATIVE_SESSION_CALLS, parseSpaceMemberAdmission, type SpaceMemberTarget, type SpaceMemberRoute, type SpaceMemberParams } from './space-member.js'
+import { parseSpaceMemberIdentity, SPACE_MEMBER_CALLS, SPACE_MEMBER_STREAMS, SPACE_MEMBER_INVOCATIONS, SPACE_MEMBER_NATIVE_SESSION_CALLS, SPACE_MEMBER_NATIVE_MAIL_CALLS, parseSpaceMemberAdmission, type SpaceMemberTarget, type SpaceMemberRoute, type SpaceMemberParams } from './space-member.js'
 import { validateAgentInputControlId, validateAgentInputWaitRef } from './agent-input-wait.js'
 import { parseConversationTimelineReadInput, parseConversationCheckpointInput, parseConversationChangesInput, parseConversationWatchInput, parseConversationViewReleaseInput } from './conversation-changes.js'
 import { validateSessionHistoryReadInput, type AgentSessionHistoryReadInput } from './session-history-read-codec.js'
@@ -10,8 +10,10 @@ import { parseSessionHistoryResourceParams } from './session-history-resource.js
 import { parseAgentInputMailboxRead } from './agent-input-mailbox.js'
 import { isAgentProgressMethod, parseAgentProgressParams } from './agent-progress.js'
 import { parseFileUploadParams, parseFileUploadIdentity } from './public-rpc-files.js'
+import { parseMessageParticipantSelection } from './agent-message-query.js'
+import { validateMessageFieldRead } from './agent-message-field.js'
 
-function mismatch(): never { throw new AgentMuxError('This operation does not identify the original Space member and Run. Its Session and other controls are retained.', 'SPACE_MEMBER_TARGET_MISMATCH') }
+function mismatch(): never { throw new AgentMuxError('This operation does not identify the original Space member target. Its Session and other controls are retained.', 'SPACE_MEMBER_TARGET_MISMATCH') }
 export { parseSpaceMemberIdentity } from './space-member.js'
 export function parseSpaceMemberTarget(value: unknown): SpaceMemberTarget {
   const p = rpcRecord(value, ['reference', 'regionId', 'runtimeId', 'agentSessionId', 'expectedRun', 'expectedAdmission'])
@@ -35,6 +37,26 @@ export function assertSpaceMemberCall(target: SpaceMemberRoute, call: { method: 
   if (call.method === 'skill.ls') {
     const p = rpcRecord(call.params, ['hostId', 'agentSessionId'])
     if (p.hostId !== 'local' || p.agentSessionId !== target.agentSessionId) mismatch()
+    return
+  }
+  if ((SPACE_MEMBER_NATIVE_MAIL_CALLS as readonly string[]).includes(call.method)) {
+    const p = rpcRecord(call.params, ['hostId', 'participantSessionId', 'participantRuntimeId', ...(call.method === 'message.read'
+      ? ['messageId', 'operationId', 'notificationId', 'field', 'cursor', 'maxBytes'] : call.method === 'message.ls'
+        ? ['direction', 'beforeSequence', 'limit'] : call.method === 'message.dispatch.read' ? ['sourceMessageId'] : ['afterSourceMessageId', 'limit'])])
+    const participant = parseMessageParticipantSelection(p)
+    if (!target.expectedAdmission || p.hostId !== 'local' || participant?.participantSessionId !== target.agentSessionId || participant.participantRuntimeId !== target.runtimeId) mismatch()
+    if (call.method === 'message.read') {
+      if ((p.messageId !== undefined) === (p.operationId !== undefined)) mismatch()
+      rpcString(p.messageId ?? p.operationId, 'Original message selector')
+      if (p.notificationId !== undefined) rpcString(p.notificationId, 'Original notification')
+      validateMessageFieldRead(p as import('./agent-message-query.js').AgentMuxMessageReadRequest)
+    } else if (call.method === 'message.dispatch.read') rpcString(p.sourceMessageId, 'Original Dispatch source')
+    else {
+      if (call.method === 'message.ls' && p.direction !== 'incoming' && p.direction !== 'outgoing') mismatch()
+      if (p.limit !== undefined && (!Number.isSafeInteger(p.limit) || Number(p.limit) < 1 || Number(p.limit) > 100)) mismatch()
+      if (p.beforeSequence !== undefined && (!Number.isSafeInteger(p.beforeSequence) || Number(p.beforeSequence) < 1)) mismatch()
+      if (p.afterSourceMessageId !== undefined) rpcString(p.afterSourceMessageId, 'Original Dispatch cursor')
+    }
     return
   }
   if (isAgentProgressMethod(call.method)) {

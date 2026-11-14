@@ -398,8 +398,8 @@ type NativeParams = StorageRecoveryParamsMap & FocusParams & SpaceLinkParams & M
   'message.dispatch.sync': { sourceMessageId: string; hostId: string }
   'message.dispatch.open': { sourceMessageId: string }
   'message.dispatch.inspect': { sourceMessageId: string }
-  'message.dispatch.read': { sourceMessageId: string; hostId?: string }
-  'message.dispatch.ls': { hostId?: string; participantSessionId?: string; afterSourceMessageId?: string; limit?: number }
+  'message.dispatch.read': { sourceMessageId: string; hostId?: string } & import('./agent-message-query.js').AgentMuxMessageParticipantSelection
+  'message.dispatch.ls': { hostId?: string; participantSessionId?: string; participantRuntimeId?: string; afterSourceMessageId?: string; limit?: number }
   'message.dispatch.report': { sourceMessageId: string; replyMessageId: string; kind: import('./agent-handoff.js').DispatchEventKind }
   'app.search': import('./search-contract.js').AgentMuxSearchInput
   'app.snapshot': AgentMuxRpcSnapshotParams

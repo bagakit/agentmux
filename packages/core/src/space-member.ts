@@ -47,7 +47,9 @@ export type SpaceMemberInvocation = typeof SPACE_MEMBER_INVOCATIONS[number]
 export const SPACE_MEMBER_HOSTED_CALLS = ['runtime.owner.identity', 'runtime.bootstrap', 'runtime.invoke', 'runtime.release-consumer'] as const
 /** Original public owners, not additional Hosted SDK invocations. */
 export const SPACE_MEMBER_NATIVE_SESSION_CALLS = ['skill.ls', 'agent.progress.list', 'agent.progress.create', 'agent.progress.action', 'agent.progress.update'] as const
-export const SPACE_MEMBER_NATIVE_READING_CALLS = ['skill.ls', 'agent.progress.list', 'file.upload.inspect'] as const
+export const SPACE_MEMBER_NATIVE_MAIL_CALLS = ['message.ls', 'message.read', 'message.dispatch.ls', 'message.dispatch.read'] as const
+export type SpaceMemberNativeMailMethod = typeof SPACE_MEMBER_NATIVE_MAIL_CALLS[number]
+export const SPACE_MEMBER_NATIVE_READING_CALLS = ['skill.ls', 'agent.progress.list', 'file.upload.inspect', ...SPACE_MEMBER_NATIVE_MAIL_CALLS] as const
 export const SPACE_MEMBER_NATIVE_WRITING_CALLS = ['agent.progress.create', 'agent.progress.action', 'agent.progress.update', 'file.upload'] as const
 export const SPACE_MEMBER_NATIVE_CALLS = [...SPACE_MEMBER_NATIVE_READING_CALLS, ...SPACE_MEMBER_NATIVE_WRITING_CALLS] as const
 export function isSpaceMemberNativeWrite(method: string): boolean {

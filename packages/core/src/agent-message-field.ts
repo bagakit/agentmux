@@ -4,6 +4,7 @@ import { validateAgentMuxMessageEnvelope } from './agent-message-envelope.js'
 import { parseChannelTranscriptQuote } from './channel-quote.js'
 import { decodeBase64, encodeBase64 } from './hosted-value.js'
 import type { AgentMuxMessageReadRequest, AgentMuxMessageFieldPage, AgentMuxMessageFieldRead } from './agent-message-query.js'
+import { parseMessageParticipantSelection, messageHasParticipant } from './agent-message-query.js'
 
 export function validateMessageFieldRead(input: AgentMuxMessageReadRequest): void {
   if (input.field === undefined ? input.cursor !== undefined || input.maxBytes !== undefined
@@ -24,6 +25,8 @@ export function parseMessageFieldPage(value: unknown, input: AgentMuxMessageFiel
     p.budgetBytes !== (input.maxBytes ?? 16 * 1024) || p.nextCursor !== null && (typeof p.nextCursor !== 'string' || !p.nextCursor || p.nextCursor.length > 131072)) return fail()
   const raw = object(p.envelope, ['schema', 'messageId', 'operationId', 'createdAt', 'sender', 'recipient', 'threadId', 'correlationId', 'replyTo', 'workspaceId', 'senderSessionId', 'senderRunId', 'recipientSessionId', 'recipientRunId', 'recipientInputEpoch','senderRuntimeId','recipientRuntimeId','application'])
   const envelope = validateAgentMuxMessageEnvelope({ ...raw, body: '' })
+  const participant = parseMessageParticipantSelection(input)
+  if (participant && !messageHasParticipant(envelope, participant.participantSessionId, participant.participantRuntimeId)) return fail()
   if ((input.messageId === undefined ? envelope.operationId !== input.operationId : envelope.messageId !== input.messageId) ||
     callerSessionId && envelope.senderSessionId !== callerSessionId && envelope.recipientSessionId !== callerSessionId) return fail()
   const entry = object(p.entry, ['kind', 'item', 'itemId', 'encoding', 'sha256', 'offsetBytes', 'totalBytes', 'dataBase64'])
