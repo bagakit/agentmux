@@ -1,7 +1,11 @@
+import { parseFocusTaskReference } from '@agentmux/core/focus-control'
+import type { MoteMainDeferredInput } from '@agentmux/core/mote-dialogue'
 import { parseMotePreferencesTarget, type MotePreferencesTarget } from '@agentmux/core/mote-preferences'
 /** Caller intent and its original creation pointer. Session, role and delivery facts stay with Core. */
 export type MoteMainCreationReference = { target: MotePreferencesTarget; operationId: string;
-  deferredInput?: { operationId: string; prompt: string } | undefined }
+  deferredInput?: MoteMainDeferredInput | undefined
+  /** A damaged optional task remains recoverable through its original Core creation. */
+  deferredInputIssue?: string; unconfirmedDeferredInput?: unknown }
 export function restoredMoteMainCreationReferences(value: unknown): Record<string, MoteMainCreationReference> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
   return Object.fromEntries(Object.entries(value).flatMap(([key, raw]) => {
@@ -13,8 +17,18 @@ export function restoredMoteMainCreationReferences(value: unknown): Record<strin
       // pointer. Its original Core operation remains independently inspectable.
       const readable = query && typeof query === 'object' && typeof query.operationId === 'string' && query.operationId.trim() &&
         !/[\0\r\n]/u.test(query.operationId) && typeof query.prompt === 'string' && query.prompt.trim()
+      if (readable && query.focusTask !== undefined) {
+        try { parseFocusTaskReference(query.focusTask) }
+        catch {
+          return [[key, { target, operationId: reference.operationId,
+            deferredInputIssue: 'The saved task reference is unconfirmed. Its complete original input is retained; inspect the original Main creation before continuing.',
+            unconfirmedDeferredInput: query }]]
+        }
+      }
       return [[key, { target, operationId: reference.operationId,
-        ...(readable ? { deferredInput: { operationId: query.operationId, prompt: query.prompt } } : {}) }]]
+        ...(readable ? { deferredInput: { ...query, operationId: query.operationId, prompt: query.prompt,
+          ...(query.focusTask ? { focusTask: parseFocusTaskReference(query.focusTask) } : {}) } } : {}),
+        ...(reference.deferredInputIssue ? { deferredInputIssue: reference.deferredInputIssue, unconfirmedDeferredInput: reference.unconfirmedDeferredInput } : {}) }]]
     } catch { return [] }
   }))
 }
