@@ -97,6 +97,44 @@ it('a managed caller cannot acquire a member control identity through the public
   expect(await f.b.core.readAgentSession(sid)).toMatchObject({ run: session.run })
 })
 
+it('routes original input waiting controls and SIGINT through the finite member SDK only', async () => {
+  const f = await createSpaceSessionsFixture(cleanup), sid = 'same-control-sid'
+  await f.b.put(sid); const session = await f.d.put(sid), admission = await f.admit('D-in-B', f.d.owner.runtimeId, sid, 'original-control-C')
+  const target = { reference: f.reference, regionId: admission.address.regionId, runtimeId: f.d.owner.runtimeId,
+    agentSessionId: sid, expectedRun: session.run, expectedAdmission: { kind: 'creation' as const, operationId: 'original-control-C' } }
+  const client = await connectSpaceMember(f.b.rpc, target); cleanup.push(() => client.dispose())
+  const key = { kind: 'prompt' as const, agentSessionId: sid, expectedRun: session.run, submissionId: 'original-control-input' }
+  const ref = { key, waitGeneration: 1 }
+  const stop = vi.spyOn(f.d.core, 'stopAgentInputWaiting').mockResolvedValue({ ref, cancelOperationId: 'original-cancel', outcome: 'observation-stopped', at: 1 })
+  const observerStop = vi.spyOn(f.b.core, 'stopAgentInputWaiting').mockRejectedValue(Error('The observer must not stop this input'))
+  const rejoin = vi.spyOn(f.d.core, 'rejoinAgentInputWaiting').mockResolvedValue({ key, ref, persistence: 'confirmed', status: 'waiting', observation: 'owned', admission: null,
+    control: { ref, state: 'enabled', at: 1, waiting: { phase: 'session', reason: 'session-resume-needed', wake: 'session-restored' } } })
+  const signal = vi.spyOn(f.d.core, 'signalAgent').mockResolvedValue()
+  const observerSignal = vi.spyOn(f.b.core, 'signalAgent').mockRejectedValue(Error('The observer must not signal this Run'))
+  await expect(client.stopAgentInputWaiting({ ref, cancelOperationId: 'original-cancel' })).resolves.toMatchObject({ ref, outcome: 'observation-stopped' })
+  await expect(client.rejoinAgentInputWaiting({ ref })).resolves.toMatchObject({ key, ref })
+  await client.signalAgent(sid, session.run, 'SIGINT')
+  expect(stop).toHaveBeenCalledExactlyOnceWith({ ref, cancelOperationId: 'original-cancel' })
+  expect(rejoin).toHaveBeenCalledOnce(); expect(rejoin.mock.calls[0]?.[0]).toEqual({ ref })
+  expect(signal).toHaveBeenCalledExactlyOnceWith(sid, session.run, 'SIGINT')
+  expect(observerStop).not.toHaveBeenCalled(); expect(observerSignal).not.toHaveBeenCalled()
+  await expect(client.signalAgent(sid, session.run, 'SIGTERM')).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  await expect(client.stopAgentInputWaiting({ ref: { ...ref, key: { ...key, agentSessionId: 'another-sid' } }, cancelOperationId: 'wrong-member' })).rejects.toMatchObject({ code: 'SPACE_MEMBER_TARGET_MISMATCH' })
+  expect(signal).toHaveBeenCalledOnce(); expect(stop).toHaveBeenCalledOnce()
+})
+
+it('member input control codecs reject another target, arbitrary signals and injected caller arguments', () => {
+  const target = { reference: { runtimeId: 'B', spaceId: 'project' }, regionId: 'region', runtimeId: 'D', agentSessionId: 'sid', expectedRun: { runId: 'run' } }
+  const input = (method: string, args: unknown[]) => ({ target, call: { method: 'runtime.invoke', params: { consumerId: 'reader', fence: { runtimeId: 'D', ownerInstanceId: 'D-instance' }, invocation: { method, args } } } })
+  const key = { kind: 'prompt', agentSessionId: 'sid', expectedRun: { runId: 'run' }, submissionId: 'input' }
+  expect(() => parseSpaceMemberParams('space.member.call', input('statusAgent', ['sid']))).not.toThrow()
+  expect(() => parseSpaceMemberParams('space.member.call', input('statusAgent', ['other-sid']))).toThrow()
+  expect(() => parseSpaceMemberParams('space.member.call', input('signalAgent', ['sid', { runId: 'run' }, 'SIGINT']))).not.toThrow()
+  expect(() => parseSpaceMemberParams('space.member.call', input('signalAgent', ['sid', { runId: 'run' }, 'SIGKILL']))).toThrow()
+  expect(() => parseSpaceMemberParams('space.member.call', input('stopAgentInputWaiting', [{ ref: { key, waitGeneration: 1 }, cancelOperationId: 'cancel', caller: { agentSessionId: 'sid', capability: 'fabricated' } }]))).toThrow()
+  expect(() => parseSpaceMemberParams('space.member.call', input('submitAgentPrompt', [{ agentSessionId: 'sid', expectedRun: { runId: 'run' }, operationId: 'input', prompt: 'body' }, { caller: 'fabricated' }]))).toThrow()
+})
+
 it('stable member input reuses the original opened-file index instead of parsing the whole graph for every key', async () => {
   const f = await createSpaceSessionsFixture(cleanup), sid = 'indexed-member'
   const session = await f.d.put(sid), admission = await f.admit('D-in-B', f.d.owner.runtimeId, sid, 'indexed-member-op')
