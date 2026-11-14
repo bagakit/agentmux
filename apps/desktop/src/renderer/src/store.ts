@@ -1722,7 +1722,7 @@ export type AppState = GitReadingActions & {
   controlSessionContinuity(sessionId: string, intentOperationId: string, action: 'continue' | 'cancel', additionalAttempts?: number): Promise<import('@agentmux/core/agent-session-recovery').AgentMuxContinuityControlResult>
   reconcileSessionContinuityControl(hostId: string, sessionId: string, operationId: string): Promise<import('@agentmux/core/agent-session-recovery').AgentMuxContinuityControlResult>
   refreshSession(sessionId: string): Promise<SessionSnapshot | undefined>
-  reopenRetiredSession(source: SessionHistoryDescriptor, operationId?: string, observeOnly?: boolean): Promise<SessionSnapshot | undefined>
+  reopenRetiredSession(source: SessionHistoryDescriptor, operationId?: string, observeOnly?: boolean, reveal?: () => boolean): Promise<SessionSnapshot | undefined>
   resumeNativeSession(input: import('../../shared/contracts').AgentLaunchInput, source: import('@agentmux/core').AgentNativeSessionCandidate, capabilities: AgentCapabilities, reveal?: () => boolean, retry?: boolean): Promise<SessionSnapshot | undefined>
   recoverSession(sessionId: string, operationId?: string, options?: { moteMain?: MoteMainInputSelection; inputImages?: readonly import('@agentmux/core').AgentInputImageReference[]; preserveView?: boolean; stillCurrent?: () => boolean; trigger?: import('@agentmux/core/agent-session-recovery').AgentMuxContinuityTrigger; timingOverride?: 'startup' | 'on-open'; input?: NonNullable<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput['input']>; inputControl?: Extract<SessionSnapshot, { kind: 'agent' }>['control'] }): Promise<SessionSnapshot | undefined>
   restartSession(control: AgentSessionControl, operationId: string, observeOnly?: boolean): Promise<import('../../shared/contracts').SessionRestartResult>
@@ -5536,7 +5536,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   async setWorkspaceAgentOrder(workspaceId, order) {
     return await executeWorkspaceAgentOrder({ get, resolveExecution: agentRegionExecution,
       set: (id, value) => set(state => ({ workspaceAgentOrder: { ...state.workspaceAgentOrder, [id]: value } })),
-      save: () => saveWorkbenchSelection(false)
+      save: () => saveWorkbenchSelection(false, false)
     }, { schemaVersion: 5, requestId: mintObjectId(), operation: 'space.agent-order', displayWorkspaceId: workspaceId, order: workspaceAgentOrderMembers(order) })
   },
   recentMoteAgents: {},
@@ -6637,7 +6637,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       set, hasZone: confirmedSurveyZones(get()), hasPage: reference => Boolean(surveyPageOwner(get().tabs,reference)), save: () => saveWorkbenchSelection(false, false) }, request) }
     if (request.operation === 'space.agent-order') return { operation: request.operation, ...await executeWorkspaceAgentOrder({ get, resolveExecution: agentRegionExecution,
       set: (id, value) => set(state => ({ workspaceAgentOrder: { ...state.workspaceAgentOrder, [id]: value } })),
-      save: () => saveWorkbenchSelection(false)
+      save: () => saveWorkbenchSelection(false, false)
     }, request) }
     if (request.operation === 'agent.view') return await executeWorkfaceAgentView({
       get: () => ({ ...get(), originalSpatialGraph: coreSpatialPersistence?.current?.graph ?? null }),
@@ -12844,14 +12844,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
     } finally { stopObservingView() }
   },
-  async reopenRetiredSession(source, operationId = mintObjectId(), observeOnly = false) {
+  async reopenRetiredSession(source, operationId = mintObjectId(), observeOnly = false, reveal) {
     if (source.state !== 'retired' || source.retiredAt === undefined) {
       throw new Error('This conversation has no confirmed closed Session identity. Read its current state before continuing.')
     }
     const reference = { hostId: source.hostId, agentSessionId: source.agentSessionId }
     const before = get()
-    if (!workbenchViewCloseAllowsSession(before.closingWorkbenchViews, reference.agentSessionId) ||
-      !hasAttachedSessionView(before.tabs, reference.agentSessionId)) {
+    if (!reveal && (!workbenchViewCloseAllowsSession(before.closingWorkbenchViews, reference.agentSessionId) ||
+      !hasAttachedSessionView(before.tabs, reference.agentSessionId))) {
       throw new Error('The original conversation Region is no longer open. No Session was started.')
     }
     const matches = (session: SessionSnapshot): boolean => session.kind === 'agent' &&
@@ -12893,6 +12893,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
     }
     const session = reopened
+    if (reveal) {
+      set(state => ({ ...projectRecoveredSession(state, reference.agentSessionId, session),
+        viewModes: { ...state.viewModes, [reference.agentSessionId]: 'terminal' as const } }))
+      if (reveal()) get().selectSession(session.id)
+      return session
+    }
     let attached = false
     set(state => {
       if (!workbenchViewCloseAllowsSession(state.closingWorkbenchViews, reference.agentSessionId) ||

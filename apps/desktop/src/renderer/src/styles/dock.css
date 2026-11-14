@@ -193,7 +193,15 @@
 .workspace-agents-tool__actions .workspace-agents-tool__close:hover:not(:disabled) { color: var(--red-text); background: var(--red-bg); }
 .workspace-agents-tool__notice { margin: var(--sp-2) 0 0; color: var(--text-2); font-size: var(--fs-micro); overflow-wrap: anywhere; }
 .workspace-agent-list { display: grid; gap: var(--sp-2); }
+.workspace-agent-group { display: grid; gap: var(--sp-2); min-width: 0; }
+.workspace-agent-group.is-dragging { position: relative; z-index: 1; border-radius: var(--radius); box-shadow: 0 4px 14px var(--scrim-2); background: var(--surface-1); }
+.workspace-agents-tool__closed { display: inline-flex; align-items: center; gap: var(--sp-1); min-height: 25px; padding-inline: 5px; color: var(--text-3); font-size: var(--fs-micro); cursor: pointer; }
+.workspace-agents-tool__closed:has(input:checked) { color: var(--text); }
+.workspace-agents-tool__closed input { margin: 0; accent-color: var(--focus-line); }
+.workspace-agent-list-item__resume { align-self: center; margin-inline-end: 6px; padding: 4px; border: 0; border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-2); font: var(--fs-micro)/1.3 var(--font-sans); cursor: pointer; }
+.workspace-agent-list-item__resume:hover { background: var(--surface-3); color: var(--text); }
 .workspace-agent-list-item { display: flex; align-items: stretch; min-width: 0; position: relative; border: 1px solid transparent; border-radius: var(--radius); background: color-mix(in srgb, var(--surface-1) 65%, transparent); }
+.workspace-agent-list-item[data-agent-depth]:not([data-agent-depth='0'])::before { content: ''; position: absolute; inset-inline-start: -7px; top: -6px; bottom: -6px; border-inline-start: 1px solid var(--line-soft); pointer-events: none; }
 .workspace-agent-list-item:hover, .workspace-agent-list-item:focus-within { background: var(--surface-1); }
 .workspace-agent-list-item.is-selected { border-color: var(--focus-line); background: var(--surface-3); }
 .workspace-agent-list-item.is-dragging { z-index: 1; box-shadow: 0 4px 14px var(--scrim-2); }
