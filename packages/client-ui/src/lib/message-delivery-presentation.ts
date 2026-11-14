@@ -92,7 +92,7 @@ export function presentMessageDeliveryFailure(input: MessageDeliveryDiagnostic) 
   return { kind: noInput ? 'failed' : 'unknown', title: input.context === 'tool' ? '操作未完成' : '发送未完成',
     compactCause: readable ? presented.message : undefined,
     state: readable ? presented.message : '未能确认这次操作的结果，完整原因保留在技术详情中。',
-    action: input.context === 'tool' ? '草稿已保留，可以重试此操作。' : noInput ? '原消息已保留，可以重试。' : '输入结果未知，请先核对原对话与投递记录。' }
+    action: input.context === 'tool' ? '草稿已保留，请查看具体原因与可用动作。' : noInput ? '原消息已保留，可以重试。' : '输入结果未知，请先核对原对话与投递记录。' }
 }
 
 function diagnosticJSON(value: unknown, space = 2): string {
