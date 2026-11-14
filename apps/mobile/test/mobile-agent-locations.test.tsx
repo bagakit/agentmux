@@ -60,7 +60,13 @@ afterEach(async () => { for (const item of mounted.splice(0)) { await act(async 
 it('mobile locations actual App folds aliases without folding context or cross-Host SID and retains original unknown input', async () => {
   localStorage.setItem('agentmux-mobile-home', 'focus')
   await getDeviceWorkface().replaceBackup({ ...emptyDeviceWorkface(), selectedSessionId: 'session-original' })
-  const f = fixture(), value = catalog(); f.client.forwardRpc = rpc(f, () => value)
+  const f = fixture(), value = catalog()
+  f.sessions.get('session-original')!.hostId = 'local'
+  value.agentPresentation![0]!.projectGroup!.hostId = 'local'
+  for (const region of value.regions) {
+    if (region.execution?.hostId === 'host-original') region.execution.hostId = 'local'
+  }
+  f.client.forwardRpc = rpc(f, () => value)
   f.submit.mockRejectedValueOnce(Object.assign(new Error('original ACK unavailable'), { code: 'TRANSPORT_LOST', controlFailure: { disposition: 'unknown', confirmedInputBytes: 9 } }))
   const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
   await waitForElement(view.element, '[contenteditable="true"]')
@@ -77,6 +83,9 @@ it('mobile locations actual App folds aliases without folding context or cross-H
   expect(choices()).toHaveLength(3)
   expect(sheet().querySelectorAll('.mobile-agent-location-group')).toHaveLength(2)
   expect(sheet().textContent).toContain('2 个位置，3 个空间入口')
+  expect(sheet().textContent).toContain('执行端 local')
+  expect(new Set([...sheet().querySelectorAll('.mobile-agent-location-group')].map(group => group.getAttribute('aria-label'))).size).toBe(2)
+  expect(choices()[0]?.textContent).not.toBe(choices()[1]?.textContent)
   expect(choices()[0]?.closest('.mobile-agent-location-group')).toBe(choices()[1]?.closest('.mobile-agent-location-group'))
   expect(choices()[2]?.closest('.mobile-agent-location-group')).not.toBe(choices()[0]?.closest('.mobile-agent-location-group'))
   expect(sheet().closest('.mobile-agent-row'), 'The location list overlays the directory instead of entering its row flow').toBeNull()
@@ -89,7 +98,9 @@ it('mobile locations actual App folds aliases without folding context or cross-H
   await click(entry); await click(choices()[1]!)
   await settled(() => expect(getDeviceWorkface().snapshot().record.presentation?.identity?.context).toEqual(alias))
   expect(getDeviceWorkface().snapshot().record.selectedSessionId).toBe('session-original')
-  expect(f.client.forwardRpc).toHaveBeenCalledWith('space.inspect', { target: { spaceId: 'space-b', zoneId: 'zone', displayWorkspaceId: 'display-a', groupId: 'group-a', tabId: 'tab', regionId: 'region-a' }, presentation: true })
+  const inspections = f.client.forwardRpc.mock.calls.filter(([method]) => method === 'space.inspect')
+  expect(inspections).toEqual([['space.inspect', { target: { spaceId: 'space-b', zoneId: 'zone', displayWorkspaceId: 'display-a', groupId: 'group-a', tabId: 'tab', regionId: 'region-a' }, presentation: 'status' }, { signal: expect.any(AbortSignal) }]])
+  expect(getDeviceWorkface().snapshot().record.presentation?.identity?.member).toBeUndefined()
   expect(editor(view.element)).toBe(input); expect(input.textContent).toContain('preserved unsent draft'); expect(attempts()).toEqual(retained)
   await click(button(view.element.querySelector('.mobile-session-toolbar') as HTMLElement, '返回 Focus'))
   await openPrimary(view.element, 'Space')
@@ -101,7 +112,7 @@ it('mobile locations actual App folds aliases without folding context or cross-H
   expect(editor(view.element)).toBe(input); expect(attempts()).toEqual(retained)
   await click(button(view.element.querySelector('.mobile-session-toolbar') as HTMLElement, '返回 Space'))
   await openPrimary(view.element, 'Focus')
-  for (const region of value.regions) if (region.execution?.hostId === 'host-original') region.execution = null
+  for (const region of value.regions) if (region.execution?.hostId === 'local') region.execution = null
   const focus = [...view.element.querySelectorAll<HTMLElement>('.mobile-spatial-panel')].find(panel => !panel.closest('[hidden]'))!
   await click(button(focus, '刷新空间目录'))
   expect((await openLocations(focus)).getAttribute('aria-label')).toBe('Original Agent · 位置待确认')
@@ -114,14 +125,30 @@ it('mobile locations actual App folds aliases without folding context or cross-H
 })
 
 it('mobile locations Zone uses the original exact tuple and keeps a failed selection separate from healthy primary opening', async () => {
-  const f = fixture(), value = catalog(), open = vi.fn(); f.client.forwardRpc = rpc(f, () => value)
+  const f = fixture(), value = catalog(), open = vi.fn()
+  const member = value.regions.find(region => region.regionId === second.regionId)!
+  member.execution = { ...member.execution!, runtimeId: 'execution-runtime' }
+  member.creationOperationId = 'original-creation'
+  f.client.forwardRpc = rpc(f, () => value)
   const view = await mount(<ZoneWithMenu client={f.client} name="Original Zone" zoneId="zone" visible openSession={open} />)
   const entry = await openLocations(view.element)
   expect(entry.getAttribute('aria-label')).toContain('2 个位置')
   await click(entry); expect(choices()).toHaveLength(3); expect(sheet().closest('.mobile-agent-row')).toBeNull()
+  await click(choices()[0]!)
+  expect(open, 'A confirmed address with unconfirmed member admission cannot replace the original route').not.toHaveBeenCalled()
+  expect(sheet().textContent).toContain('Source、执行身份或 C/L 尚未确认')
+  member.runId = 'currently-observed-run'
   await click(choices()[2]!)
-  expect(open).toHaveBeenCalledExactlyOnceWith('session-original', { name: 'Original Agent', project: 'Original Project', context: second })
+  expect(open).toHaveBeenCalledExactlyOnceWith('session-original', { name: 'Original Agent', project: 'Original Project', context: second,
+    member: { sourceRuntimeId: 'original-runtime', target: { reference: { runtimeId: 'original-runtime', spaceId: second.spaceId },
+      regionId: second.regionId, runtimeId: 'execution-runtime', agentSessionId: 'session-original',
+      expectedAdmission: { kind: 'creation', operationId: 'original-creation' }, expectedRun: { runId: 'currently-observed-run' } } } })
   open.mockClear(); await click(entry)
+  member.creationOperationId = 'rebound-creation'
+  await click(choices()[2]!)
+  expect(open, 'A same-SID rebind cannot replace the choice’s original admission').not.toHaveBeenCalled()
+  expect(sheet().textContent).toContain('这个位置已变化或还没确认')
+  member.creationOperationId = 'original-creation'
   value.locations = value.locations.filter(place => place.regionId !== 'region-b')
   await click(choices()[2]!)
   expect(open).not.toHaveBeenCalled(); expect(sheet().textContent).toContain('这个位置已变化或还没确认')
@@ -144,10 +171,19 @@ it('mobile locations rejects late exact reads after client SID Runtime or cancel
     await click(await openLocations(view.element))
     f.client.forwardRpc.mockImplementationOnce(() => pending.promise)
     await click(choices()[0]!)
+    expect(sheet().textContent).toContain('正在核对这个位置')
     if (change === 'client') await view.render(render(other.client))
     if (change === 'sid') { value.regions[0]!.agentSessionId = 'other'; await view.render(render()); await click(button(view.element, '刷新讨论')) }
     if (change === 'runtime' || change === 'runtime-reject') owner = 'runtime-replaced'
-    if (change === 'cancel') { await click(button(sheet(), '关闭位置选择')); await click(document.body.querySelector('.mobile-agent-locations-entry')!) }
+    if (change === 'cancel') {
+      const read = f.client.forwardRpc.mock.calls.find(([method]) => method === 'space.inspect')
+      const signal = read?.[2]?.signal
+      expect(signal).toBeInstanceOf(AbortSignal)
+      expect(signal?.aborted).toBe(false)
+      await click(button(sheet(), '关闭位置选择'))
+      expect(signal?.aborted).toBe(true)
+      await click(document.body.querySelector('.mobile-agent-locations-entry')!)
+    }
     await act(async () => change === 'runtime-reject' ? pending.reject(new Error('old-runtime rejection body')) : pending.resolve({ catalog: catalog() }))
     expect(open, `Late ${change} read cannot retarget local navigation`).not.toHaveBeenCalled()
     expect(sheet()).not.toBeNull()
