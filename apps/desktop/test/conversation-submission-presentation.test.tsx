@@ -88,6 +88,14 @@ function capturedCard(id: string): HTMLElement {
   const key = conversationMessageSourceKey(sid, { kind: 'captured', recordId: id })
   return [...host.querySelectorAll<HTMLElement>('.log-turn[data-message-source-key]')].find(node => node.dataset.messageSourceKey === key)!
 }
+async function openCapturedReceipt(id: string): Promise<HTMLElement> {
+  const key = conversationMessageSourceKey(sid, { kind: 'captured', recordId: id })
+  const receipt = [...host.querySelectorAll<HTMLElement>('.conversation-send-receipt')].find(node => node.dataset.messageSourceKey === key)!
+  const details = receipt.querySelector<HTMLDetailsElement>(':scope > details')!
+  expect(details.hidden).toBe(false)
+  await openDetails(details)
+  return capturedCard(id)
+}
 it.each(['shared', 'desktop'])('uses one original message card when the exactly related native body is empty in %s', async surface => {
   const emptyNative: AgentSessionHistoryPage = { ...page(), items: page().items.map(item => ({ ...item, contentParts: [] })) }
   const t = snapshot([submission('native-empty-input')])
@@ -110,6 +118,9 @@ it.each(['shared', 'desktop'])('keeps unassociated originals as independently re
   const t = snapshot([submission('same-text', false)]), copy = vi.spyOn(platform, 'copyText')
   await render(surface === 'shared' ? <ConversationView sessionId={sid} page={page()} timeline={t} />
     : <ActivityView sessionId={sid} items={t.items} nativeHistoryPage={page()} timelineSnapshot={t} capability="complete-events" />)
+  expect(host.querySelectorAll('[data-conversation-event-id]')).toHaveLength(1)
+  expect(capturedCard('same-text')).toBeUndefined()
+  await openCapturedReceipt('same-text')
   expect(host.querySelectorAll('[data-conversation-event-id]')).toHaveLength(2)
   expect([...host.querySelectorAll('.log-turn__body')].map(paragraphs)).toEqual([original, original])
   const card = capturedCard('same-text'), key = card.dataset.messageSourceKey
@@ -130,7 +141,7 @@ it.each(['failed', 'streaming'] as const)('keeps the original %s input and actua
 })
 it.each(['missing', 'unread'] as const)('keeps complete captured content and exact unknown when native is %s', async kind => {
   await render(<ConversationView sessionId={sid} {...(kind === 'unread' ? { page: page(false) } : {})} timeline={snapshot([submission()])} />)
-  const card = capturedCard('original-input')
+  const card = await openCapturedReceipt('original-input')
   expect(paragraphs(card.querySelector('.log-turn__body')!)).toBe(original)
   expect(card.textContent).toContain('Agent 接收未确认')
   expect(host.querySelector('[data-conversation-gap="CONVERSATION_ANCHOR_UNREAD"]')).not.toBeNull()
@@ -138,7 +149,7 @@ it.each(['missing', 'unread'] as const)('keeps complete captured content and exa
 it('keeps the selected original body and focus when an exact native contribution arrives', async () => {
   const draw = (native: boolean) => <ConversationView sessionId={sid} page={page(native)} timeline={snapshot([submission('selected-input')])} />
   await render(draw(false))
-  const card = capturedCard('selected-input'), body = card.querySelector('.log-turn__body')!, text = body.querySelector('p')!.firstChild!
+  const card = await openCapturedReceipt('selected-input'), body = card.querySelector('.log-turn__body')!, text = body.querySelector('p')!.firstChild!
   const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 8); getSelection()!.addRange(range)
   const action = card.querySelector<HTMLButtonElement>('[aria-label="Copy message"]')!; await act(async () => action.focus())
   await render(draw(true))
@@ -198,7 +209,10 @@ it.each(['independent', 'native'] as const)('reads the %s attachment only with i
     expect(read).not.toHaveBeenCalled()
     const entry = host.querySelector<HTMLElement>('[data-submission-record]')!
     await openDetails(entry.querySelector<HTMLDetailsElement>('details')!); card = entry
-  } else card = capturedCard('resource-input')
+  } else {
+    expect(read).not.toHaveBeenCalled()
+    card = await openCapturedReceipt('resource-input')
+  }
   expect(read).toHaveBeenCalledExactlyOnceWith(path); expect(card.querySelector('img')).not.toBeNull()
   await act(async () => card.querySelector<HTMLButtonElement>('[aria-label="Copy message"]')!.click())
   expect(copy.mock.calls.at(-1)?.[0]).toBe(content)
@@ -208,8 +222,9 @@ it('keeps an explicitly expanded long original after blur and exact coalescence,
   const input = { ...submission('long-original-input', false), content, authorHuman: true }
   const draw = (linked: boolean) => <ConversationView sessionId={sid} page={page()} timeline={snapshot([{ ...input, ...(linked ? { conversation: { sameEvent: ref } } : {}) }])} />
   await render(draw(false))
-  const card = capturedCard(input.id), detail = card.querySelector<HTMLDetailsElement>('.message-disclosure')!
-  expect(detail.open).toBe(false); await openDetails(detail)
+  const card = await openCapturedReceipt(input.id), detail = card.querySelector<HTMLDetailsElement>('.message-disclosure')!
+  // Opening the exact receipt already records this original's explicit intent.
+  expect(detail.open).toBe(true)
   expect(paragraphs(card.querySelector('.log-turn__body')!)).toBe(content.split('\n\n').map(paragraph => paragraph.trimEnd()).join('\n\n'))
   await act(async () => (document.activeElement as HTMLElement)?.blur()); getSelection()?.removeAllRanges()
   await render(draw(true))

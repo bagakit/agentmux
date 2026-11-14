@@ -7,8 +7,8 @@ const root = resolve(import.meta.dirname, '../../..')
 const file = 'packages/client-ui/src/components/ConversationSubmissionMetadata.tsx'
 const changes: Record<string, [string, string]> = {
   'guess-native-received': ["const confirmed = status === 'admitted' || nativeAccepted", 'const confirmed = true'],
-  'lose-compact': ["const compact = !original && (!show || state.confirmed && confirmedMode !== 'keep')", 'const compact = false'],
-  'off-keeps-full-card': ["const compact = !original && (!show || state.confirmed && confirmedMode !== 'keep')", "const compact = !original && state.confirmed && (confirmedMode !== 'keep' || !show)"],
+  'lose-compact': ["const compact = !original && (!show || deliveredUnconfirmed || state.confirmed && confirmedMode !== 'keep')", 'const compact = false'],
+  'off-keeps-full-card': ["const compact = !original && (!show || deliveredUnconfirmed || state.confirmed && confirmedMode !== 'keep')", "const compact = !original && state.confirmed && (confirmedMode !== 'keep' || !show)"],
   'lose-unique-original': ['const hide = !state.attention && nativeReadable &&', 'const hide = !state.attention &&'],
   'keep-motion-after-admission': ["const pending = !confirmed && item?.status !== 'failed' && status === 'waiting' && item?.inputSubmission?.observation === 'owned'", "const pending = item?.status !== 'failed'"],
   'ignore-document-visibility': ["animation={visible ? 'spin' : 'none'}", 'animation="spin"']

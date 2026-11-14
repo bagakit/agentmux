@@ -67,6 +67,40 @@ it.each(['terminal-confirmed', 'launch-carried', 'unknown', 'stopped', 'not-appl
   expect(message().querySelector('[data-icon-animation]')).toBeNull()
 })
 
+it.each([['terminal-confirmed', false], ['terminal-confirmed', true], ['launch-carried', false], ['launch-carried', true]] as const)('defaults an unconfirmed %s receipt to a truthful compact original beside separate native text (desktop=%s)', async (status, desktop) => {
+  await draw(submission(status), {}, { native: page(), desktop })
+  expect(receipt().dataset.receiptConfirmed).toBe('false')
+  expect(receipt().dataset.receiptMode).toBe('compact')
+  expect(disclosure().hidden).toBe(false); expect(disclosure().open).toBe(false)
+  expect(disclosure().querySelector('summary')?.textContent).toContain('Agent 接收待核实')
+  expect(disclosure().querySelector('.message-disclosure__preview')?.textContent).toContain('The complete submitted message.')
+  expect(message()).toBeNull()
+  expect(receipt().querySelector('[data-icon-animation]')).toBeNull()
+  expect([...element.querySelectorAll('[data-native-record-id="native-input"] .log-turn__body p')].map(node => node.textContent)).toEqual(original.split('\n\n'))
+  await toggle(disclosure(), true)
+  expect(element.querySelectorAll('[data-conversation-event-id]')).toHaveLength(2)
+  expect(message().querySelector('.log-turn__body')?.textContent).toContain('Keep this original final paragraph.')
+  await act(async () => message().querySelector<HTMLButtonElement>('[aria-label="Copy message"]')!.click())
+  expect(base.copyText).toHaveBeenLastCalledWith(original, expect.any(Function))
+  await draw(submission(status), {}, { native: page(), desktop })
+  expect(disclosure().open).toBe(true)
+  expect(receipt().dataset.receiptConfirmed).toBe('false')
+})
+
+it('terminal confirmation preserves the selected original reader and compacts only after reading protection ends', async () => {
+  await draw(submission())
+  const body = message().querySelector('.log-turn__body')!, text = body.querySelector('p')!.firstChild!
+  const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 8)
+  await act(async () => { getSelection()!.addRange(range) })
+  await draw(submission('terminal-confirmed'), {}, { native: page() })
+  expect(receipt().dataset.receiptConfirmed).toBe('false'); expect(disclosure().open).toBe(true)
+  expect(message().querySelector('.log-turn__body')).toBe(body); expect(getSelection()!.getRangeAt(0)).toBe(range)
+  await act(async () => { getSelection()!.removeAllRanges(); document.dispatchEvent(new Event('selectionchange')) })
+  expect(disclosure().open).toBe(false)
+  await toggle(disclosure(), true)
+  expect(message().querySelector('.log-turn__body')).toBe(body)
+})
+
 it('consumes only the accepted exact Core relationship and hides the receipt without hiding the native message', async () => {
   await draw(submission('terminal-confirmed', true), {}, { native: page() })
   expect(element.querySelectorAll('[data-conversation-event-id]')).toHaveLength(1)
