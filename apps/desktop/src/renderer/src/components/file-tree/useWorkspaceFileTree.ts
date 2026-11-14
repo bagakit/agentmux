@@ -43,7 +43,7 @@ export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<
   const resource = useWorkspaceResource(workspaceId)
   const source = useAppStore(state => state.sourceFilesInputs.selections[workspaceId])
   const readSources = useAppStore(state => state.sourceFilesInputs.readSources)
-  const namespace = useMemo(() => sourceFilesDiscoveryNamespace(workspaceId, resource, source, readSources), [workspaceId, resource?.hostId, resource?.path, source?.target, source?.locator, readSources])
+  const namespace = useMemo(() => JSON.stringify([rootPath, sourceFilesDiscoveryNamespace(workspaceId, resource, source, readSources)]), [rootPath, workspaceId, resource?.hostId, resource?.path, source?.target, source?.locator, readSources])
   const cachedNamespace = useRef(namespace)
   const [dirCache, setDirCache] = useState<Record<string, DirCache>>({})
   const cacheRef = useRef(dirCache)
@@ -115,7 +115,12 @@ export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<
   }, [loadScope])
 
   useEffect(() => {
-    if (cachedNamespace.current === namespace) return
+    if (cachedNamespace.current === namespace) {
+      // A changed selection/status cancels old reader tokens. Preserve completed
+      // observations, but replace each cancelled in-flight read in the new scope.
+      for (const [path, cached] of Object.entries(cacheRef.current)) if (cached.loading) void loadDir(path, { force: true })
+      return
+    }
     cachedNamespace.current = namespace
     staleDirsRef.current.clear()
     // The expanded-path effect runs in the same commit. Clear its synchronous
