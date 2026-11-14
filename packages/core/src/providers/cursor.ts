@@ -24,7 +24,7 @@ type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
  * - `preToolUse`/`postToolUse`/`postToolUseFailure`：一次工具调用的事前、成功事后、失败事后。
  *   三条都带 `tool_use_id`，故能收敛到时间轴上的同一条。
  * - `beforeShellExecution`/`beforeMCPExecution`：授权门。装它们不是为了回决定（我们不回），
- *   是为了让「Agent 正卡在一个授权提示上」这件事对 Core 可见。
+ *   而是让 shell / MCP 执行的起点对 Core 可见。
  * - `afterAgentResponse`：助手正文（`text`）。
  * - `stop`：一轮收尾，且是 Cursor 唯一带 token 用量的事件。
  */
@@ -46,9 +46,10 @@ export const CURSOR_HOOK_EVENTS = [
  * "aborted" 取消收尾使用已有诚实语义 state: 'unknown'，lifecycleEvent: 'turn-end'（无 completion 身份）；
  * 未知或缺席的 status 不得猜成功亦不能断定已结束，映射为 state: 'unknown'，lifecycleEvent: null。
  *
- * 两个授权门判 waiting 而非 working：它们触发的时刻，Cursor 正把这次执行按住等一个决定。我们不回
- * 决定（见 catalog 的 permission: 'observe'），于是它会落到 Cursor 自己的 TUI 提示上等用户——
- * 那正是 waiting 的定义。判成 working 会让「等我点一下」和「正在干活」在界面上长得一模一样。
+ * 两个授权门判 working 而非 waiting：Cursor 对每一次 shell / MCP 执行都触发它们，包括按 allowlist
+ * 自动放行、根本不出提示的执行；负载里没有「是否会向用户提示」的事实。判 waiting 会让每条正在跑的
+ * 命令都显示成等用户处理，中途被打断时还会一直停在 waiting。Cursor 的 TUI 授权提示今天没有 hook
+ * 协议事实，保持未知，不从门事件猜。
  *
  * nativeHandle 与 subagent 隔离：
  * Cursor 运行时的会话标识统一为 UUID（执行循环中的 `Mt`），它同时用作 `conversationId` 和 chat 目录名；
@@ -67,15 +68,14 @@ export const CURSOR_HOOKS: AgentNativeHookSpecification = {
   // 固定第一方版本同时提供 hook_event_name；托管配置继续显式用 --event 传递事件名。
   eventNameSource: { kind: 'flag' },
   rules: [
-    // 授权门：Cursor 正等一个决定。
-    { events: ['beforeShellExecution', 'beforeMCPExecution'], state: 'waiting' },
     { events: ['stop'], matches: payload => payload.status === 'completed', state: 'done', lifecycleEvent: 'turn-end' },
     { events: ['stop'], matches: payload => payload.status === 'error', state: 'error', lifecycleEvent: 'turn-end' },
     { events: ['stop'], matches: payload => payload.status === 'aborted', state: 'unknown', lifecycleEvent: 'turn-end' },
     { events: ['stop'], state: 'unknown', lifecycleEvent: null },
     {
       events: [
-        'beforeSubmitPrompt', 'preToolUse', 'postToolUse', 'postToolUseFailure', 'afterAgentResponse'
+        'beforeSubmitPrompt', 'preToolUse', 'postToolUse', 'postToolUseFailure',
+        'beforeShellExecution', 'beforeMCPExecution', 'afterAgentResponse'
       ],
       state: 'working'
     }
@@ -197,6 +197,11 @@ export function createCursorProvider(defineAgentProvider: ProviderFactory): Agen
     }),
     launchOptions: CURSOR_LAUNCH_OPTIONS,
     buildArgs: (prompt, args) => [...args, ...(prompt ? [prompt] : [])],
+    // Cursor's input parser accepts bracketed paste and CSI-u key events. A raw
+    // CR batched with text is treated as pasted content, leaving it unsubmitted.
+    // Encode Enter as a key event (kitty keyboard protocol), outside the paste;
+    // one durable phase needs neither a rendering observation nor a timer.
+    planPromptInput: prompt => ({ kind: 'single-phase', data: `\u001b[200~${prompt}\u001b[201~\u001b[13u` }),
     hook: CURSOR_HOOKS,
     discoverNativeSession: discoverCursorNativeSession,
     readSessionHistoryPage: readCursorSessionHistoryPage,
