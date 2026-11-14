@@ -82,7 +82,8 @@ it('explicit ordinary preparation reads the original Source catalogue and regist
   } finally { releaseChoices() }
 })
 
-async function routedLauncher(catalogue?: Promise<void>, explicit = true, observation?: { availability: 'missing' | 'check-failed'; cause: { code: string; message: string } }, withoutConfiguration = false) {
+async function routedLauncher(catalogue?: Promise<void>, explicit = true, observation?: { availability: 'missing' | 'check-failed'; cause: { code: string; message: string } }, withoutConfiguration = false,
+  options: { afterMount?(): Promise<void>; waitForSelection?: boolean; emptyInventory?: boolean } = {}) {
   const route = await createHostRouteInventoryFixture(cleanup as Array<() => Promise<void>>)
   if (withoutConfiguration) {
     const registered = (await route.original.client.listHostExecutors()).executors.find(item => item.executorId === 'same-executor')!
@@ -107,6 +108,10 @@ async function routedLauncher(catalogue?: Promise<void>, explicit = true, observ
     }
     if (method === 'space.inspect') { const input = params as AgentMuxRpcParams<'space.inspect'>; if (!('operationId' in input.target)) throw Error('Only the original operation is inspected.'); return { request: inspected ? { known: true, operationId: input.target.operationId, report: inspected } : { known: false, operationId: input.target.operationId } } }
     if (method === 'route.executors' && !(params as AgentMuxRpcParams<'route.executors'>).executorId) await catalogue
+    if (method === 'route.executors' && options.emptyInventory) {
+      const reply = await route.rpc.call('route.executors', params as AgentMuxRpcParams<'route.executors'>, context)
+      return { ...reply, inventory: { ...reply.inventory, executors: [] } }
+    }
     if (method === 'route.executors' && observation) {
       const reply = await route.rpc.call('route.executors', params as AgentMuxRpcParams<'route.executors'>, context)
       return { ...reply, inventory: { ...reply.inventory, executors: reply.inventory.executors.map(item => item.executorId === 'same-executor' ? { ...item, ...observation } : item) } }
@@ -125,10 +130,54 @@ async function routedLauncher(catalogue?: Promise<void>, explicit = true, observ
     launchAgent: localLaunch, detectExecutors: detect, prewarmTerminal: vi.fn(), sessions: [] })
   useLauncherState.setState({ drafts: { 'region:original-slot': { browser: '', note: '', sourceExecution: source } }, sections: {}, executors: {} })
   await dom.render(<NewTabSurface tabId={tab.id} regionId="original-slot" tabGroupId="group" />)
+  await options.afterMount?.()
   if (withoutConfiguration) await vi.waitFor(() => expect(dom.container.textContent).toContain('Other Agent types'))
-  await vi.waitFor(async () => { await act(async () => {}); expect(button('Launch').disabled).toBe(withoutConfiguration) })
+  if (options.waitForSelection !== false) await vi.waitFor(async () => { await act(async () => {}); expect(button('Launch').disabled).toBe(withoutConfiguration) })
   return { route, source, opens, methods, localLaunch, detect, checkpoint, unsupported: () => { supported = false }, inspect: (value: typeof inspected) => { inspected = value } }
 }
+
+it('an unread original catalogue never claims that the Agent device has no configuration', async () => {
+  let release!: () => void
+  const catalogue = new Promise<void>(resolve => { release = resolve })
+  try {
+    await routedLauncher(catalogue, false, undefined, false, { afterMount: async () => {
+      expect(dom.container.textContent).not.toContain('No Agent is configured')
+      expect(dom.container.textContent).toContain('Agent configurations are unconfirmed')
+      expect(dom.container.textContent).toContain('Reading the original Agent device configurations')
+      expect(button('Launch').disabled).toBe(true)
+      expect(useAppStore.getState().agentComposerDrafts['original-slot']).toBe('  original task\n')
+      release()
+    } })
+    expect(dom.container.querySelector('[data-executor-id="same-executor"]')).not.toBeNull()
+    expect(dom.container.textContent).not.toContain('Agent configurations are unconfirmed')
+  } finally { release() }
+})
+
+it('a failed original catalogue keeps its cause and offers an original-source retry without an empty-configuration claim', async () => {
+  let fail!: (cause: Error) => void
+  const catalogue = new Promise<void>((_resolve, reject) => { fail = reject })
+  const f = await routedLauncher(catalogue, false, undefined, false, { waitForSelection: false })
+  await act(async () => fail(new Error('ORIGINAL_INVENTORY_UNAVAILABLE')))
+  await vi.waitFor(() => expect(dom.container.textContent).toContain('ORIGINAL_INVENTORY_UNAVAILABLE'))
+  expect(dom.container.textContent).not.toContain('No Agent is configured')
+  const retry = dom.container.querySelector<HTMLButtonElement>('[aria-label="Refresh agents on this device"]')!
+  expect(retry.disabled).toBe(false)
+  const reads = f.methods.filter(item => item.method === 'route.executors').length
+  await act(async () => retry.click())
+  await vi.waitFor(() => expect(f.methods.filter(item => item.method === 'route.executors').length).toBeGreaterThan(reads))
+  expect(f.localLaunch).not.toHaveBeenCalled()
+  expect(f.detect).not.toHaveBeenCalled()
+  expect(useAppStore.getState().agentComposerDrafts['original-slot']).toBe('  original task\n')
+})
+
+it('only a successful empty original catalogue shows no configuration and never suggests local Agent settings', async () => {
+  await routedLauncher(undefined, false, undefined, false, { waitForSelection: false, emptyInventory: true })
+  await vi.waitFor(() => expect(dom.container.textContent).toContain('No Agent is configured on the original Agent device'))
+  expect(dom.container.textContent).not.toContain('Agent configurations are unconfirmed')
+  expect(dom.container.textContent).not.toContain('Add one in Settings')
+  expect(dom.container.textContent).not.toContain('Reading the selected Agent’s declarations')
+  expect(button('Launch').disabled).toBe(true)
+})
 
 it('real ordinary Launcher uses selected D declarations and the complete Source request; unknown retains both names and Check never replays', async () => {
   const f = await routedLauncher(), before = useAppStore.getState()
