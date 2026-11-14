@@ -14,6 +14,7 @@ import { DurableAgentMuxMessageQueue } from '../../src/agent-global-message-queu
 import type { MoteInputOwner } from '../../src/mote/input-owner.js'
 import { createHostMoteInputSource } from '../../../../apps/host/src/mote-input-source.js'
 import { createHostContent } from '../../../../apps/host/src/content-owner.js'
+import { AgentMuxNotesStorage } from '../../src/notes-storage.js'
 import { directoryIdentity, homeZoneId, serializeMoteQuickMode, scratchTopicDirectoryName } from '../../../../apps/host/src/mote-model.js'
 import { rpcOwnerFixture } from './public-rpc-owner.js'
 import { runSourceObjectCli } from './source-object-cli.js'
@@ -124,7 +125,7 @@ export async function createMoteInputFixture(options: {
   }
   const spatial = new AgentMuxSpatialStateStore(join(f.root, 'spatial.json'))
   await spatial.commit({ expectedRevision: 0, graph })
-  const content = createHostContent({ configurationPath, spatial })
+  const content = createHostContent({ configurationPath, spatial, storage: new AgentMuxNotesStorage(join(f.root, 'notes-location.json'), join(f.root, 'notes')) })
   resolveSource = createHostMoteInputSource({ configurationPath, spatial, files: content.files! })
   expect(await resolveSource({ source, agentSessionId: 'member' })).toMatchObject({
     primary: { agentSessionId: 'primary' }
