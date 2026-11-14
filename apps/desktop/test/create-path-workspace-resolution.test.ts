@@ -1,50 +1,10 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { readFileSync } from 'node:fs'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
 })
-
-import type { AppConfig } from '../src/shared/contracts.js'
-import { createWorkspaceLayout } from '@agentmux/layout'
-import { documentKey } from '../src/renderer/src/lib/workbench-tabs.js'
-import { useAppStore } from '../src/renderer/src/store.js'
-import { api } from '../src/renderer/src/lib/api.js'
-
-const initialState = useAppStore.getState()
-
-afterEach(() => {
-  vi.restoreAllMocks()
-  useAppStore.setState(initialState, true)
-})
-
-const config: AppConfig = {
-  version: 9,
-  hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
-  executors: {},
-  workspaces: [
-    { id: 'workspace', name: 'Project', hostId: 'local', path: _hygiene_fixturePath("repo"), kind: 'folder' },
-    { id: 'other', name: 'Other', hostId: 'local', path: _hygiene_fixturePath("other"), kind: 'folder' }
-  ],
-  appearance: { terminalTheme: 'graphite' },
-  browser: {
-    toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true }
-  }
-}
-
-function twoWorkspaceFixture(): void {
-  // 两个 Workspace 都要有 layout：否则 openFile 会在「没有 layout」那一支静默 return，
-  // 缺陷会退化成「什么都没发生」，测不出更坏的那一种（真的把 B 的同名文件打开了）。
-  useAppStore.setState({
-    config,
-    activeWorkspaceId: 'workspace',
-    layouts: {
-      workspace: createWorkspaceLayout('pane'),
-      other: createWorkspaceLayout('other-pane')
-    }
-  })
-}
 
 // ---------------------------------------------------------------------------
 // 「建在 A、却按当前 Workspace 去打开」这一类。#269 修的是 createNote 那条，这里守的是
@@ -57,53 +17,10 @@ function twoWorkspaceFixture(): void {
 //
 // 修法是让 createPath 返回它实际用的那个 id，下游拿着走，于是全程只解析一次。
 // ---------------------------------------------------------------------------
-describe('createPath 交出它实际用的 Workspace', () => {
-  it('返回值就是它建文件时用的那个 workspaceId，不是调用时刻的活动 Workspace', async () => {
-    twoWorkspaceFixture()
-    const used: Array<string> = []
-    const realCreate = api.files.create
-    vi.spyOn(api.files, 'create').mockImplementation(async (workspaceId, input) => {
-      used.push(workspaceId)
-      await realCreate(workspaceId, input)
-      // 在 create 落地之后把活动 Workspace 切走——模拟用户在等待期间点了侧栏。
-      useAppStore.setState({ activeWorkspaceId: 'other' })
-    })
-
-    const returned = await useAppStore
-      .getState()
-      .createPath({ path: `reso-${crypto.randomUUID()}.ts`, kind: 'file' })
-
-    // 前提自检：活动 Workspace 确实在这次调用期间变了，否则下面那条恒真。
-    expect(useAppStore.getState().activeWorkspaceId).toBe('other')
-    expect(used).toEqual(['workspace'])
-    // 承重：返回的是**写入实际落在**哪里，不是「现在活动的是谁」。返回后者的实现会让
-    // 下游把 B 当成目的地，而那正是这一族缺陷。
-    expect(returned).toBe('workspace')
-  })
-
-  it('走到一半用户切了 Workspace：新建的文件绝不在另一个项目里打开', async () => {
-    twoWorkspaceFixture()
-    const path = `drift-${crypto.randomUUID()}.ts`
-    const realCreate = api.files.create
-    vi.spyOn(api.files, 'create').mockImplementation(async (workspaceId, input) => {
-      await realCreate(workspaceId, input)
-      useAppStore.setState({ activeWorkspaceId: 'other' })
-    })
-
-    // 这是组件 commitEdit 的形状：建 → （await）→ 用建出来的那个 id 打开。
-    // 刻意不替换 openFile：判据必须落在它真正解析出来的 Workspace 上，
-    // 而不是一个只会回显 activeWorkspaceId 的桩（那测的是桩，不是产品）。
-    const createdIn = await useAppStore.getState().createPath({ path, kind: 'file' })
-    await useAppStore.getState().openFile(path, undefined, undefined, createdIn)
-
-    const documents = useAppStore.getState().documents
-    // 承重：**绝不能**在 other 里开出一份文档。读侧的 mock 只按 path 索引，于是
-    // 「文件在盘上」这个前提对两个 Workspace 都成立——把 createdIn 换成 undefined 时
-    // openFile 会重解析出 other 并真的开出一份，这条就红。
-    expect(documents[documentKey('other', path)]).toBeUndefined()
-    expect(documents[documentKey('workspace', path)]).toBeDefined()
-  })
-})
+// The former in-memory files.create cases now execute the real Source gateway,
+// Native file and Store consumer in file-path-client-projection.test.ts:
+// "Source file creation returns its captured display Workspace across a late active Workspace switch".
+// Both original assertions (returned Workspace and opened document ownership) remain there.
 
 // ---------------------------------------------------------------------------
 // 上面两条守的是 store 一侧算得对。但组件那一侧「有没有把返回值接上」照旧无人守——

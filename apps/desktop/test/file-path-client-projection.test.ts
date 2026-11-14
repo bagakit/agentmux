@@ -76,6 +76,24 @@ async function fixture(options: { sharedProject?: boolean } = {}) {
   return { ...f, source, bridge, api, store, workspace, user, watchReady: () => watchReady }
 }
 
+async function connectCloseOwner(f: Awaited<ReturnType<typeof fixture>>) {
+  const { DesktopControlIpcBridge } = await import('../src/main/control-ipc-bridge.js')
+  const { createDesktopWorkbenchCloseOwner } = await import('../src/main/workbench-close-owner.js')
+  const { spaceCloseDigest } = await import('@agentmux/core')
+  let bridge: InstanceType<typeof DesktopControlIpcBridge>
+  bridge = new DesktopControlIpcBridge({ isAvailable: () => true, sendCancellation: () => {}, sendRequest(request) {
+    if (!request.operation.startsWith('workbench.close.')) throw new Error('Unexpected private close bridge request')
+    void f.store.getState().executeWorkbenchClose(request as import('../src/shared/workbench-close-control.js').WorkbenchCloseRendererRequest).then(result => {
+      bridge.accept({ requestId: request.requestId, ok: true, result })
+    }, error => { bridge.accept({ requestId: request.requestId, ok: false, error: { code: 'CONTROL_UNAVAILABLE', message: error.message } }) })
+  } })
+  cleanup.push(() => bridge.dispose())
+  const owner = createDesktopWorkbenchCloseOwner({ store: f.user, bridge, runtime: f.runtime, closeBrowser: async () => {},
+    authority: () => ({ ownerId: spaceCloseDigest(f.user.path), endpoint: 'private-desktop', documentGeneration: 'private-file-client' }) })
+  vi.spyOn(f.api.workbenchClose, 'call').mockImplementation((method, params) => owner.call(method, params, { actor: { kind: 'user', id: 'private-user' } }))
+  return owner
+}
+
 it.runIf(native)('original Files UI checkpoints the directory packet before registration and CLI delete retains a clean body in actual UserState', async () => {
   const f = await fixture(), { SourceFilesAccess } = await import('../src/renderer/src/components/SourceFilesAccess.js')
   const element = document.createElement('div'); document.body.append(element); const root = createRoot(element)
@@ -110,6 +128,30 @@ it.runIf(native)('original Files UI checkpoints the directory packet before regi
   const state = f.store.getState(), tab = Object.values(state.tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'file' && region.path === 'original.txt'))!
   const frozen = captureWorkbenchClose(state, { operationId: 'clean-deleted-close', target: { kind: 'tab-occurrence', displayWorkspaceId: f.workspace.id, groupId: 'file-group', tabId: tab.id }, keepAgentSessions: true })
   expect(frozen.drafts).toHaveLength(1)
+  await connectCloseOwner(f)
+  const { useWorkbenchTabsClose } = await import('../src/renderer/src/hooks/useWorkbenchTabsClose.js')
+  const { installNativePopover } = await import('./fixtures/mote-workface.js')
+  cleanup.push(installNativePopover())
+  const { createClientUiRoot } = await import('./helpers/client-ui-render.js')
+  const closeNode = document.createElement('div'); document.body.append(closeNode); const closeRoot = createClientUiRoot(closeNode)
+  cleanup.push(async () => { await act(async () => closeRoot.unmount()); closeNode.remove() })
+  function CloseConsumer() {
+    const close = useWorkbenchTabsClose()
+    return createElement('div', null, createElement('button', { onClick: () => void close.request({ workspaceId: f.workspace.id,
+      group: { id: 'file-group', tabOrder: [tab.id] }, tabIds: [tab.id], subject: 'Original deleted file' }) }, 'Close retained file'), close.dialog)
+  }
+  await act(async () => closeRoot.render(createElement(CloseConsumer)))
+  await act(async () => closeNode.querySelector<HTMLButtonElement>('button')!.click())
+  await vi.waitFor(() => expect(document.body.textContent).toContain('Discard editor contents?'))
+  expect(f.store.getState().tabs[tab.id]).toBeDefined(); expect(f.store.getState().documents[key]?.content).toBe(original.content)
+  // The user's old confirmation cannot discard input arriving while the dialog is open.
+  f.store.getState().updateDocument(tab.id, 'Later input after the delete confirmation', Object.values(tab.regions).find(region => region.kind === 'file')!.regionId)
+  const discard = [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Discard & Close')!
+  await act(async () => discard.click())
+  await vi.waitFor(() => expect(f.store.getState().error).toBeTruthy())
+  expect(f.store.getState().tabs[tab.id]).toBeDefined()
+  expect(f.store.getState().documents[key]?.content).toBe('Later input after the delete confirmation')
+  await expect(readFile(join(f.source.project, 'original.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
 }, 60000)
 
 async function connectFolder(f: Awaited<ReturnType<typeof fixture>>) {
@@ -302,4 +344,128 @@ it.runIf(native)('two real Notes owners with the same Note ID keep their creator
   expect(await readFile(main.path)).toEqual(mainRoot)
   expect(await main.readHistory({ noteId, resource: mainResource, eventId: 'main-only-event', includeContent: true })).toEqual(mainHistory)
   expect(await main.readProvenance({ noteId, resource: mainResource, revision: noteHistoryRevision(original), blockIds: [blockId] })).toEqual(mainProvenance)
+}, 60000)
+
+it.runIf(native)('Source text saves keep older sharing requests and cleanup separate; new promotions and late-bound Main retries never dispatch', async () => {
+  const f = await fixture(), path = 'references.note.md', note = newNoteDocument('Original ordinary text', 'reference-note', 'reference-block', 'References')
+  note.content.content!.push({ type: 'noteInclude', attrs: { noteId: 'saved-shared-note', path: 'saved-shared.note.md', referenceId: 'saved-reference' } })
+  const original = serializeNoteDocument(note)
+  await writeFile(join(f.source.project, path), original); await connectFolder(f)
+  await f.store.getState().openFile(path, 'file-group', undefined, f.workspace.id)
+  const key = f.workspace.id + '\0' + path, tab = Object.values(f.store.getState().tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'file' && region.path === path))!
+  const regionId = Object.values(tab.regions).find(region => region.kind === 'file')!.regionId, before = f.store.getState().documents[key]!, binding = before.readSource!
+  const mainUndo = vi.spyOn(f.api.files, 'shareUndoPublic'), mainShare = vi.spyOn(f.api.files, 'sharePublic'), mainInspect = vi.spyOn(f.api.files, 'inspectSharePublic')
+  const cleaned = newNoteDocument('Ordinary text after removing a saved reference', 'reference-note', 'reference-block', 'References')
+  f.store.getState().updateDocument(tab.id, serializeNoteDocument(cleaned), regionId)
+  await f.store.getState().saveDocument(tab.id, regionId)
+  expect(await readFile(join(f.source.project, path), 'utf8')).toContain('Ordinary text after removing a saved reference')
+  expect(f.store.getState().dirtyDocuments[key]).not.toBe(true)
+  expect(f.store.getState().documents[key]?.noteEditing?.receipt?.noteHistory?.status).toBe('committed')
+  expect(f.store.getState().documents[key]?.noteEditing?.shareCleanupIssue?.referenceIds).toEqual(['saved-reference'])
+  expect(mainUndo).not.toHaveBeenCalled(); expect(mainShare).not.toHaveBeenCalled(); expect(mainInspect).not.toHaveBeenCalled()
+  // A complete pre-existing request is retained as a request; it is not relabelled as a Source action.
+  const params = { destination: { ...binding.query, expectedResource: { ...binding.resource, hostId: f.workspace.hostId, workspaceId: f.workspace.id },
+    content: original, baseContent: original, expectedRevision: noteHistoryRevision(original), operationId: 'retained-main-cleanup' }, referenceIds: ['saved-reference'], preserveNoteIds: [] }
+  const originalDocument = f.store.getState().documents[key]!
+  f.store.setState(state => ({ documents: { ...state.documents, [key]: { ...originalDocument, noteEditing: { ...originalDocument.noteEditing, shareUndo: { params } } } } }))
+  await f.store.getState().inspectNoteShareUndo(f.workspace.id, path)
+  await f.store.getState().continueNoteShareUndo(f.workspace.id, path)
+  expect(mainInspect).not.toHaveBeenCalled(); expect(mainUndo).not.toHaveBeenCalled()
+  f.store.getState().updateDocument(tab.id, serializeNoteDocument(cleaned).replace('Ordinary text after removing a saved reference', 'Another ordinary Source save'), regionId)
+  await f.store.getState().saveDocument(tab.id, regionId)
+  expect(await readFile(join(f.source.project, path), 'utf8')).toContain('Another ordinary Source save')
+  expect(f.store.getState().documents[key]?.noteEditing?.shareUndo?.params).toEqual(params)
+  const { stageNoteShare, pendingNoteShares } = await import('../src/renderer/src/lib/note-share-staging.js')
+  const include = stageNoteShare(key, { version: 1, source: { hostId: f.workspace.hostId, workspaceId: f.workspace.id, workspacePath: f.workspace.path, path, noteId: 'reference-note' },
+    read: binding.query, block: { path: [0], fingerprint: 'frozen-copy', blockId: 'reference-block' } })
+  const staged = newNoteDocument('Staged draft kept', 'reference-note', 'reference-block', 'References')
+  staged.content.content!.push({ type: 'noteInclude', attrs: include })
+  f.store.getState().updateDocument(tab.id, serializeNoteDocument(staged), regionId)
+  const beforeStaged = await readFile(join(f.source.project, path), 'utf8')
+  await f.store.getState().saveDocument(tab.id, regionId)
+  expect(await readFile(join(f.source.project, path), 'utf8')).toBe(beforeStaged)
+  expect(pendingNoteShares(key).get(include.referenceId)?.include).toEqual(include)
+  expect(f.store.getState().documents[key]?.content).toContain('Staged draft kept')
+  expect(mainShare).not.toHaveBeenCalled()
+  // The same request starts unbound, then the document is rebound while its read-only inspection waits.
+  let release!: (value: any) => void
+  mainInspect.mockImplementation(() => new Promise(resolve => { release = resolve }))
+  f.store.setState(state => ({ documents: { ...state.documents, [key]: { ...state.documents[key]!, readSource: undefined } } }))
+  const continuing = f.store.getState().continueNoteShareUndo(f.workspace.id, path)
+  await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+  f.store.setState(state => ({ documents: { ...state.documents, [key]: { ...state.documents[key]!, readSource: binding } } }))
+  const observed = { operationId: params.destination.operationId, status: 'unknown' as const, destination: null, collections: [], message: 'Original owner observation remains unknown' }
+  release({ mode: 'undo', result: observed }); await continuing
+  expect(mainUndo).not.toHaveBeenCalled()
+  expect(f.store.getState().documents[key]?.noteEditing?.shareUndo).toEqual({ params, observed })
+  expect(f.store.getState().documents[key]?.content).toContain('Staged draft kept')
+}, 60000)
+
+it.runIf(native)('GUI Source Note creation waits on the original Notes lease while an ordinary file remains writable', async () => {
+  const f = await fixture(); await connectFolder(f)
+  const notes = new AgentMuxNotebookStore(undefined, new AgentMuxNotesStorage(join(f.source.state, 'notes-location.json')))
+  let release!: () => void, entered!: () => void
+  const held = new Promise<void>(resolve => { entered = resolve }), gate = new Promise<void>(resolve => { release = resolve })
+  const blocker = notes.runWithWriteLease(async () => { entered(); await gate }); await held
+  cleanup.push(() => { release(); return blocker })
+  const creating = f.store.getState().createPath({ path: 'late.note.md', kind: 'file' }, f.workspace.id)
+  await f.store.getState().createPath({ path: 'ordinary-independent.txt', kind: 'file' }, f.workspace.id)
+  expect(await readFile(join(f.source.project, 'ordinary-independent.txt'), 'utf8')).toBe('')
+  await expect(readFile(join(f.source.project, 'late.note.md'))).rejects.toMatchObject({ code: 'ENOENT' })
+  release(); await blocker; expect(await creating).toBe(f.workspace.id)
+  expect(await readFile(join(f.source.project, 'late.note.md'), 'utf8')).toBe('')
+}, 60000)
+
+it.runIf(native)('GUI directory move and Note deletion borrow the same original Source Notes lease', async () => {
+  const f = await fixture(); await connectFolder(f)
+  const note = serializeNoteDocument(newNoteDocument('Original Note body', 'lease-note', 'lease-block', 'Lease Note'))
+  await mkdir(join(f.source.project, 'original')); await writeFile(join(f.source.project, 'original', 'inside.note.md'), note)
+  await writeFile(join(f.source.project, 'deleted.note.md'), note.replace('lease-note', 'deleted-lease-note'))
+  const notes = new AgentMuxNotebookStore(undefined, new AgentMuxNotesStorage(join(f.source.state, 'notes-location.json')))
+  let release!: () => void, entered!: () => void
+  const held = new Promise<void>(resolve => { entered = resolve }), gate = new Promise<void>(resolve => { release = resolve })
+  const blocker = notes.runWithWriteLease(async () => { entered(); await gate }); await held
+  cleanup.push(() => { release(); return blocker })
+  let moveEntered!: () => void
+  const observed = new Promise<void>(resolve => { moveEntered = resolve }), call = f.bridge.files.call
+  vi.mocked(f.api.sourceFiles.call).mockImplementation(async (target, method, params, signal) => {
+    if (method === 'file.move') moveEntered()
+    return await call(target, method, params, signal)
+  })
+  const moving = f.store.getState().renamePath('original', 'moved', f.workspace.id)
+  await observed
+  expect(await readFile(join(f.source.project, 'original', 'inside.note.md'), 'utf8')).toBe(note)
+  await expect(readFile(join(f.source.project, 'moved', 'inside.note.md'))).rejects.toMatchObject({ code: 'ENOENT' })
+  release(); await blocker; await moving
+  expect(await readFile(join(f.source.project, 'moved', 'inside.note.md'), 'utf8')).toBe(note)
+  // Freeze a separate lease interval for the delete producer, after the prior operation settles.
+  let releaseDelete!: () => void, enteredDelete!: () => void, dispatchedDelete!: () => void
+  const deleteGate = new Promise<void>(resolve => { releaseDelete = resolve }), deleteHeld = new Promise<void>(resolve => { enteredDelete = resolve })
+  const deletingLease = notes.runWithWriteLease(async () => { enteredDelete(); await deleteGate }); await deleteHeld
+  cleanup.push(() => { releaseDelete(); return deletingLease })
+  const deleteDispatched = new Promise<void>(resolve => { dispatchedDelete = resolve })
+  vi.mocked(f.api.sourceFiles.call).mockImplementation(async (target, method, params, signal) => { if (method === 'file.delete') dispatchedDelete(); return await call(target, method, params, signal) })
+  const deleting = f.store.getState().deletePath('deleted.note.md', f.workspace.id); await deleteDispatched
+  expect(await readFile(join(f.source.project, 'deleted.note.md'), 'utf8')).toContain('Original Note body')
+  releaseDelete(); await deletingLease; await deleting
+  await expect(readFile(join(f.source.project, 'deleted.note.md'))).rejects.toMatchObject({ code: 'ENOENT' })
+}, 60000)
+
+it.runIf(native)('Source file creation returns its captured display Workspace across a late active Workspace switch', async () => {
+  const f = await fixture(); await connectFolder(f)
+  const other = { ...f.workspace, id: 'other-display', name: 'Other display' }
+  f.store.setState(state => ({ config: { ...state.config!, workspaces: [...state.config!.workspaces, other] }, layouts: { ...state.layouts, [other.id]: createWorkspaceLayout('other-group', []) } }))
+  const call = f.bridge.files.call, used: string[] = []
+  vi.mocked(f.api.sourceFiles.call).mockImplementation(async (target, method, params, signal) => {
+    const result = await call(target, method, params, signal)
+    if (method === 'file.create') { used.push(target.hostId); f.store.setState({ activeWorkspaceId: other.id }) }
+    return result
+  })
+  const returned = await f.store.getState().createPath({ path: 'created-here.txt', kind: 'file' })
+  expect(f.store.getState().activeWorkspaceId).toBe(other.id); expect(used).toEqual([f.source.id]); expect(returned).toBe(f.workspace.id)
+  await f.store.getState().openFile('created-here.txt', undefined, undefined, returned)
+  expect(f.store.getState().documents[other.id + '\0created-here.txt']).toBeUndefined()
+  expect(f.store.getState().documents[f.workspace.id + '\0created-here.txt']?.content).toBe('')
+  expect(await readFile(join(f.source.project, 'created-here.txt'), 'utf8')).toBe('')
+  await expect(readFile(join(f.sources[0]!.project, 'created-here.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
 }, 60000)

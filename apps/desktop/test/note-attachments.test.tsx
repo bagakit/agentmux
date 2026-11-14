@@ -105,3 +105,35 @@ it('attachment opening resolves the authored directory and refuses a changed ori
   await expect(openDesktopNoteLink(resource, '../../outside.pdf')).rejects.toThrow('cannot be resolved')
   expect(open).toHaveBeenCalledTimes(1)
 })
+
+it('Source-bound attachment selection is retained for export without a Main import or a dangling inserted reference', async () => {
+  const { editor } = await setup(), key = resource.workspaceId + '\0' + resource.path
+  const files = [new File(['Original selected bytes'], 'kept.txt')], imports = vi.spyOn(api.files, 'importPublic')
+  useAppStore.setState(state => ({ documents: { ...state.documents, [key]: { path: resource.path, content: source(editor), revision: 'original',
+    readSource: { target: { hostId: 'source-carrier', expectedRuntimeId: 'source-runtime' }, resource: { ...resource, hostId: 'local', zoneId: 'source-zone', zonePath: resource.workspacePath }, query: { zoneId: 'source-zone', path: resource.path } } } } }))
+  await selectFiles(files)
+  expect(imports).not.toHaveBeenCalled()
+  expect(editor.getText()).toBe('Original'); expect(editor.getJSON().content?.some(node => node.type === 'image')).toBe(false)
+  expect(dom.container.textContent).toContain('Attachment import is not confirmed for this Source')
+  expect([...dom.container.querySelectorAll('button')].some(button => button.textContent === 'Save kept.txt')).toBe(true)
+  const create = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:kept-original-file'), revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+  await act(async () => [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Save kept.txt')!.click())
+  expect(create).toHaveBeenCalledWith(files[0]); create.mockRestore(); revoke.mockRestore()
+  useAppStore.setState(state => ({ documents: Object.fromEntries(Object.entries(state.documents).filter(([id]) => id !== key)) }))
+})
+
+it('attachment arrayBuffer await cannot cross a newly bound Source into Main import', async () => {
+  const { editor } = await setup(), key = resource.workspaceId + '\0' + resource.path
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve }), file = new File(['Late selected bytes'], 'late.txt'), original = file.arrayBuffer.bind(file)
+  vi.spyOn(file, 'arrayBuffer').mockImplementation(async () => { await gate; return await original() })
+  const imports = vi.spyOn(api.files, 'importPublic')
+  await selectFiles([file]); await vi.waitFor(() => expect(file.arrayBuffer).toHaveBeenCalled())
+  useAppStore.setState(state => ({ documents: { ...state.documents, [key]: { path: resource.path, content: source(editor), revision: 'original',
+    readSource: { target: { hostId: 'source-carrier', expectedRuntimeId: 'source-runtime' }, resource: { ...resource, hostId: 'local', zoneId: 'source-zone', zonePath: resource.workspacePath }, query: { zoneId: 'source-zone', path: resource.path } } } } }))
+  await act(async () => release())
+  await vi.waitFor(() => expect(dom.container.textContent).toContain('became Source-bound before import'))
+  expect(imports).not.toHaveBeenCalled(); expect(editor.getText()).toBe('Original'); expect(editor.getJSON().content?.some(node => node.type === 'image')).toBe(false)
+  expect(dom.container.textContent).toContain('Save late.txt')
+  useAppStore.setState(state => ({ documents: Object.fromEntries(Object.entries(state.documents).filter(([id]) => id !== key)) }))
+})
