@@ -57,7 +57,7 @@ Launcher 内创建的 Agent 由 Main 在 Core 创建回执确认后，经 [`Agen
 
 Desktop 的 `workbench-user-state.json` 位于同一应用 `userData` 根，由应用生命周期内唯一的 [`WorkbenchUserStateStore`](../../apps/desktop/src/main/workbench-user-state.ts) 持有。受信 preload 端口只操作这一私有文档，不向公共 RPC 暴露草稿正文或任意路径写入。Renderer 的批处理写入器保留最新用户投影，Main 沿 `durableWriteFile` 完成文件与目录同步后返回包含路径、摘要、字节数和确认时间的原写入回执。
 
-主 Workbench 投影和固定 `desktopFragments` 共用原 Renderer root 缓存及同一批处理写入器。片段包含 Launcher 草稿与原请求、Agent 书签、Mote 浮层偏好、头像原保存请求和全局巡查 operation 引用，不新增任意 KV 或路径接口。片段缺席才交接原来源，显式空值防止已退休的旧请求复活；损坏或读取未知时保留原字节和用户在等待期间的编辑。需要先保留原请求的业务动作显式等待准确用户文档 ACK，再沿原业务 owner 执行，不以同步 setter 接受输入代签持久保存。
+主 Workbench 投影和固定 `desktopFragments` 共用原 Renderer root 缓存及同一批处理写入器。Renderer 解码原文档后，状态恢复和批处理直接读取这份对象的投影。片段包含 Launcher 草稿与原请求、Agent 书签、Mote 浮层偏好、头像原保存请求和全局巡查 operation 引用，不新增任意 KV 或路径接口。片段缺席才交接原来源，显式空值防止已退休的旧请求复活；损坏或读取未知时保留原字节和用户在等待期间的编辑。需要先保留原请求的业务动作显式等待准确用户文档 ACK，再沿原业务 owner 执行，不以同步 setter 接受输入代签持久保存。
 
 首次读取只在宿主文档确认不存在时导入既有 Web Storage 字节；原子导入与普通写入共用同一宿主队列。新的宿主文档存在后只读取原文件，读取失败保留原数据。旧内容仅在准确写入确认后清理。普通读取、目录存在和相同摘要都不产生新的写入确认；历史 `lastConfirmedWrite` 与当前读取分别表达。
 
