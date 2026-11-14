@@ -13,7 +13,7 @@ import { DesktopClientUiProvider } from '../components/DesktopClientUiProvider'
 import { observeWorkbenchDocumentReturn, workbenchDocumentHasPlacement, workbenchDocumentIdentity, workbenchDocuments } from '../lib/workbench-window-registry'
 import type { WorkbenchWindowDocument } from '../../../shared/workbench-windows'
 
-export type WorkbenchTabsCloseRequest = { workspaceId: string; group: Pick<TabGroup, 'id' | 'tabOrder'>; tabIds: readonly string[]; subject: string }
+export type WorkbenchTabsCloseRequest = { workspaceId: string; group: Pick<TabGroup, 'id' | 'tabOrder'>; tabIds: readonly string[]; subject: string; keepAgentSessions?: boolean }
 type CloseRequest = WorkbenchTabsCloseRequest & { regionId?: string }
 type Pending = { request: CloseRequest; remaining: string[]; record: SpaceCloseReceipt; keep: SpaceCloseReceipt | null; confirmation: LastViewCloseConfirmation }
 /** Each GUI confirmation applies exactly the same durable plan as the public CLI. */
@@ -33,7 +33,7 @@ export function useWorkbenchTabsClose() {
         const target = request.regionId
           ? { kind: 'region' as const, displayWorkspaceId: request.workspaceId, groupId: request.group.id, tabId, regionId: request.regionId }
           : { kind: 'tab-occurrence' as const, displayWorkspaceId: request.workspaceId, groupId: request.group.id, tabId }
-        const record = await state.prepareWorkbenchClose({ target, keepAgentSessions: false })
+        const record = await state.prepareWorkbenchClose({ target, keepAgentSessions: request.keepAgentSessions === true })
         const confirmation = preparedCloseConfirmation(record, useAppStore.getState())
         if (confirmation) {
           const keep = lastViewCloseStops(confirmation) ? await state.prepareWorkbenchClose({ target: record.plan.target, keepAgentSessions: true }) : null
@@ -51,13 +51,13 @@ export function useWorkbenchTabsClose() {
     try { await advance(input, input.tabIds.filter(id => input.group.tabOrder.includes(id))) }
     finally { running.current = false; setClosing(false) }
   }
-  async function requestRegion(reference: WorkbenchProjectionSelection, subject: string): Promise<void> {
+  async function requestRegion(reference: WorkbenchProjectionSelection, subject: string, options?: { keepAgentSessions?: boolean }): Promise<void> {
     const state = useAppStore.getState(), tab = state.tabs[reference.tabId]
     const group = state.layouts[reference.displayWorkspaceId]?.groups.find(group => group.id === reference.groupId && group.tabOrder.includes(reference.tabId))
     if (!group || !tab?.regions[reference.regionId]) {
       state.reportError(new Error('This Region display location changed. Its Agent and inputs are retained; choose its current exact position before closing.')); return
     }
-    await request({ workspaceId: reference.displayWorkspaceId, group, tabIds: [reference.tabId], regionId: reference.regionId, subject })
+    await request({ workspaceId: reference.displayWorkspaceId, group, tabIds: [reference.tabId], regionId: reference.regionId, subject, ...options })
   }
   async function confirm(keepAgentSessions = false): Promise<void> {
     if (running.current || !pending) return
@@ -107,13 +107,13 @@ export function WorkbenchCloseRequests() {
       state.clearCloseTabRequest(tabRequest.nonce)
       const group = state.layouts[tabRequest.workspaceId]?.groups.find(group => group.id === tabRequest.tabGroupId && group.tabOrder.includes(tabRequest.tabId))
       if (!group) { state.reportError(new Error('This Tab display location changed. Its content is retained; choose its current exact position before closing.')); return }
-      void close.request({ workspaceId: tabRequest.workspaceId, group, tabIds: [tabRequest.tabId], subject: state.tabs[tabRequest.tabId]?.name ?? 'Workface' })
+      void close.request({ workspaceId: tabRequest.workspaceId, group, tabIds: [tabRequest.tabId], subject: state.tabs[tabRequest.tabId]?.name ?? 'Workface', ...(tabRequest.keepAgentSessions ? { keepAgentSessions: true } : {}) })
     } else if (regionRequest && state.closeRegionRequest === regionRequest) {
       if (!present(regionRequest.originWindow)) return
       state.clearCloseRegionRequest(regionRequest.nonce)
       const groups = state.layouts[regionRequest.workspaceId]?.groups.filter(group => group.tabOrder.includes(regionRequest.tabId) && (!regionRequest.groupId || group.id === regionRequest.groupId)) ?? []
       if (groups.length !== 1) { state.reportError(new Error('This Region has no single confirmed display occurrence. Its content is retained; choose its exact position before closing.')); return }
-      void close.requestRegion({ displayWorkspaceId: regionRequest.workspaceId, groupId: groups[0]!.id, tabId: regionRequest.tabId, regionId: regionRequest.regionId }, state.tabs[regionRequest.tabId]?.name ?? 'Workface')
+      void close.requestRegion({ displayWorkspaceId: regionRequest.workspaceId, groupId: groups[0]!.id, tabId: regionRequest.tabId, regionId: regionRequest.regionId }, state.tabs[regionRequest.tabId]?.name ?? 'Workface', regionRequest.keepAgentSessions ? { keepAgentSessions: true } : undefined)
     }
     // The existing intent and active confirmation, not function identities, drive consumption.
     // eslint-disable-next-line react-hooks/exhaustive-deps

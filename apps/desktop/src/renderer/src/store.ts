@@ -1185,8 +1185,8 @@ export type AppState = GitReadingActions & {
   closingWorkbenchViews: Record<string, WorkbenchViewCloseReservation>
   // Transient view intents; the stable App consumer presents the same Main-owned close plan.
   // originWindow only locates this confirmation. These intents are never persisted or control authority.
-  closeTabRequest: { workspaceId: string; tabGroupId: string; tabId: string; nonce: number; originWindow?: WorkbenchWindowDocument | null } | null
-  closeRegionRequest: { workspaceId: string; groupId?: string; tabId: string; regionId: string; nonce: number; originWindow?: WorkbenchWindowDocument | null } | null
+  closeTabRequest: { workspaceId: string; tabGroupId: string; tabId: string; nonce: number; originWindow?: WorkbenchWindowDocument | null; keepAgentSessions?: boolean } | null
+  closeRegionRequest: { workspaceId: string; groupId?: string; tabId: string; regionId: string; nonce: number; originWindow?: WorkbenchWindowDocument | null; keepAgentSessions?: boolean } | null
   // 「把打字光标（DOM caret）搬进这一格」的一次性意图，按 regionId 定位——同 closeRegionRequest 的
   // consume-and-clear 套路。存在的理由：键盘方向导航搬焦点时只改 activeRegionId（绿环），而看不见的
   // DOM 焦点仍停在上一格的 xterm/Monaco 上，敲的字全进了上一格。承载被点名那格的表面（TerminalView /
@@ -1600,10 +1600,10 @@ export type AppState = GitReadingActions & {
   // Closing an Agent's last View stops its Run unless `keepAgentSessions`; the Region confirmation asks first.
   closeRegion(workspaceId: string, tabId: string, regionId: string, options?: { keepAgentSessions?: boolean; approved?: SpaceCloseReceipt }): Promise<void>
   // 键盘关 Tab 的入口：只投意图，真正的关闭（含确认）由活动 Tab 组件消费。见 closeTabRequest 状态注释。
-  requestCloseTab(workspaceId: string, tabGroupId: string, tabId: string, originWindow?: WorkbenchWindowDocument | null): void
+  requestCloseTab(workspaceId: string, tabGroupId: string, tabId: string, originWindow?: WorkbenchWindowDocument | null, options?: { keepAgentSessions?: boolean }): void
   clearCloseTabRequest(nonce: number): void
   // 键盘关某一格的入口：只投意图，含未保存确认的真正关闭由承载该格的组件消费。见 closeRegionRequest 注释。
-  requestCloseRegion(workspaceId: string, tabId: string, regionId: string, groupId?: string, originWindow?: WorkbenchWindowDocument | null): void
+  requestCloseRegion(workspaceId: string, tabId: string, regionId: string, groupId?: string, originWindow?: WorkbenchWindowDocument | null, options?: { keepAgentSessions?: boolean }): void
   clearCloseRegionRequest(nonce: number): void
   updateRegionSplitRatio(workspaceId: string, tabId: string, nodePath: string, ratio: number): void
   updateSplitRatio(workspaceId: string, nodePath: string, ratio: number): void
@@ -4913,7 +4913,7 @@ export type AgentRegionReference = { tabId: string; regionId: string; agentSessi
 export function agentRegionLocationsKnown(): boolean { return coreSpatialPersistence?.current !== null && coreSpatialPersistence?.current !== undefined }
 
 /** Confirmed raw occurrences stay in the ordinary workface; only absent/unknown occurrences gain a Source projection. */
-function confirmedOriginalRawLocations(state: AppState, target: SpaceMountRecord, graph = currentCoreSpatialGraph()) {
+export function confirmedOriginalRawLocations(state: AppState, target: SpaceMountRecord, graph = currentCoreSpatialGraph()) {
   if (target.hostId !== 'local' || !graph || !originalSourceScopeFromGraph(target, graph)) return []
   const locations = workbenchSelectionCatalog(state).locations.filter(location => location.spaceId === target.reference.spaceId &&
     location.zoneId === target.zoneId && location.workspaceId === target.workspaceId && originalRawSourceOccurrenceConfirmed(state, graph, {
@@ -6306,7 +6306,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (snapshot && before?.snapshot?.source.ownerInstanceId === snapshot.source.ownerInstanceId && snapshot.revision < before.snapshot.revision) return state
       const ordinaryLocalOccurrence = confirmedOriginalRawLocations(state, target).length > 0
       const reconciled = snapshot?.scope.space ? reconcileOriginalSourceProjection(state, target, snapshot) : {}
-      const projection = ordinaryLocalOccurrence ? { mountedSpaceInputs: reconciled.mountedSpaceInputs } : reconciled
+      const projection = ordinaryLocalOccurrence ? { mountedSpaceInputs: reconciled.mountedSpaceInputs ?? state.mountedSpaceInputs } : reconciled
       return { ...projection, mountedSpaceObservations: { ...state.mountedSpaceObservations, [key]: { ...before, ...observation,
         ...(snapshot?.scope.space ? { lastPresentSnapshot: snapshot } : {}) } } }
     })
@@ -9290,12 +9290,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       await get().applyWorkbenchClose(record)
     } catch (error) { get().reportError(error) }
   },
-  requestCloseTab(workspaceId, tabGroupId, tabId, originWindow) {
+  requestCloseTab(workspaceId, tabGroupId, tabId, originWindow, options) {
     // 只投意图，不在这里关：真正的关闭要经组件的 requestTabsClose（未保存/在跑 Agent 的确认对话框只活在
     // 组件里）。nonce 让「连按两次 Cmd+W 关同一张 Tab」也能各触发一次——同一 tabId 重复投递不会因对象
     // 相等而被 selector 忽略。
     set((state) => ({
-      closeTabRequest: { workspaceId, tabGroupId, tabId, nonce: (state.closeTabRequest?.nonce ?? 0) + 1,
+      closeTabRequest: { workspaceId, tabGroupId, tabId, ...(options?.keepAgentSessions ? { keepAgentSessions: true } : {}), nonce: (state.closeTabRequest?.nonce ?? 0) + 1,
         ...(originWindow === undefined ? {} : { originWindow: originWindow && { windowId: originWindow.windowId, documentGeneration: originWindow.documentGeneration } }) }
     }))
   },
@@ -9303,11 +9303,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // 只清掉自己消费的那一条：若清的瞬间已被更晚一次按键覆盖成新 nonce，别把新意图也抹掉。
     set((state) => (state.closeTabRequest?.nonce === nonce ? { closeTabRequest: null } : state))
   },
-  requestCloseRegion(workspaceId, tabId, regionId, groupId, originWindow) {
+  requestCloseRegion(workspaceId, tabId, regionId, groupId, originWindow, options) {
     // 只投意图，不在这里关：真正的关闭（含未保存确认）在承载该格的组件里，与鼠标点这一格的 X 同一条路。
     // nonce 让「连按两次 Cmd+W 关同一格」也能各触发一次——同一 regionId 重复投递不会因对象相等被 selector 忽略。
     set((state) => ({
       closeRegionRequest: {
+        ...(options?.keepAgentSessions ? { keepAgentSessions: true } : {}),
         ...(groupId ? { groupId } : {}),
         ...(originWindow === undefined ? {} : { originWindow: originWindow && { windowId: originWindow.windowId, documentGeneration: originWindow.documentGeneration } }),
         workspaceId,

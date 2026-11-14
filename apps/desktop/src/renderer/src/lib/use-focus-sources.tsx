@@ -11,7 +11,7 @@ import { api } from './api'
 import { agentDisplayName, sourceRegionProjectionReference } from './workbench-tabs'
 import { requestWorkbenchReferenceClose } from './workbench-close-request'
 import { requestDesktopFocusWorkfaceReveal } from './desktop-presentation'
-import { agentRegionLocationBindings, ordinaryAgentSpaceMember, useAppStore } from '../store'
+import { agentRegionLocationBindings, confirmedOriginalRawLocations, ordinaryAgentSpaceMember, useAppStore } from '../store'
 import { workbenchSelectionCatalog } from './desktop-focus-navigation'
 import { mountedSpaceInputs, mountedSpaceRegions, mountedSpaceTarget, type MountedSpaceRegion } from './space-mount-view'
 import { mountedSessionFacts } from './space-mount-sessions'
@@ -320,14 +320,22 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
       const first = candidate.locations[0]!, workspace = focusSourceWorkspace(first.source, first.member, first.snapshot, config, runtimes)
       let focusedContext: FocusContext | undefined
       const navigate = (surface: 'agents' | 'workbench' | 'close', requested?: FocusContextAccess['locations'][number]) => {
+        const rawLocations = (location: Location) => {
+          const state = useAppStore.getState(), target = mountedSpaceTarget(state.mountedSpaceInputs, spaceMountKey(location.source.reference))
+          if (!target || target.hostId !== location.source.hostId || target.zoneId !== location.source.zoneId || target.workspaceId !== location.source.workspaceId) return []
+          return confirmedOriginalRawLocations(state, target).filter(reference => {
+            const region = state.tabs[reference.tabId]?.regions[reference.regionId]
+            return reference.tabId === location.tabId && reference.regionId === location.regionId && region?.kind === 'agent' && region.sessionId === candidate.sid
+          })
+        }
         // Closing addresses an existing display occurrence; it never opens a Source to create one.
         const locations = surface !== 'close' ? candidate.locations : candidate.locations.flatMap(location => {
           if (location.reference) return [location]
-          const positions = catalog.locations.filter(reference => {
+          const positions = [...rawLocations(location), ...catalog.locations.filter(reference => {
             const source = sourceRegionProjectionReference(tabs[reference.tabId]?.regions[reference.regionId])
             return source && spaceMountKey(source.reference) === spaceMountKey(location.source.reference) &&
               source.tabId === location.tabId && source.regionId === location.regionId && source.agentSessionId === candidate.sid
-          })
+          })]
           return positions.length ? positions.map(reference => ({ ...location, reference: { displayWorkspaceId: reference.displayWorkspaceId,
             groupId: reference.groupId, tabId: reference.tabId, regionId: reference.regionId } })) : [location]
         })
@@ -341,14 +349,18 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
               const member = !source && reference && current?.kind === 'agent' ? ordinaryAgentSpaceMember({ tabId: reference.tabId, regionId: reference.regionId, sessionId: current.sessionId }) : undefined
               const original = source ? spaceMountKey(source.reference) === spaceMountKey(location.source.reference) &&
                 source.tabId === location.tabId && source.regionId === location.regionId && source.agentSessionId === candidate.sid
-                : member?.kind === 'foreign' && spaceMountKey(member.source.reference) === spaceMountKey(location.source.reference) &&
+                : (member?.kind === 'foreign' && member.source.hostId === location.source.hostId &&
+                  member.source.zoneId === location.source.zoneId && member.source.workspaceId === location.source.workspaceId &&
+                  spaceMountKey(member.source.reference) === spaceMountKey(location.source.reference) &&
                   member.presentation.tab.tabId === location.tabId && member.presentation.region.regionId === location.regionId &&
-                  member.metadataMember.runtimeId === candidate.runtimeId && member.metadataMember.agentSessionId === candidate.sid
+                  member.metadataMember.runtimeId === candidate.runtimeId && member.metadataMember.agentSessionId === candidate.sid ||
+                  reference && rawLocations(location).some(position => position.displayWorkspaceId === reference.displayWorkspaceId &&
+                  position.groupId === reference.groupId && position.tabId === reference.tabId && position.regionId === reference.regionId))
               if (!reference || !original) {
                 state.reportError(Error('This original workface position is unconfirmed or changed. Its Agent and inputs are retained; choose its current exact position before closing.'))
                 return
               }
-              requestWorkbenchReferenceClose(reference)
+              requestWorkbenchReferenceClose(reference, { keepAgentSessions: true })
               return
             }
             const selected = openSourceLocation(location, surface, onSelectLocation)
