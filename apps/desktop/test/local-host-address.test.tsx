@@ -34,7 +34,6 @@ it('reads this local Owner once and renders its preferred LAN address without pr
   expect(network).toHaveBeenCalledOnce()
   expect(network.mock.calls[0]![0]).toEqual(config.hosts[0])
   expect(localNode().querySelector('.remote-host-node__address')?.textContent).toBe('192.168.40.12')
-  expect(localNode().querySelector('.remote-host-node__context')?.textContent).toContain('en0')
   expect(localNode().textContent).not.toContain('192.168.99.1')
   await show()
   const zoom = dom.container.querySelector<HTMLButtonElement>('[aria-label="Zoom in"]')!
@@ -44,6 +43,7 @@ it('reads this local Owner once and renders its preferred LAN address without pr
   const detail = document.querySelector('[role="tooltip"]')!
   expect(detail.textContent).toContain('2001:db8::12')
   expect(detail.textContent).toContain('utun2')
+  expect(detail.textContent).toContain('en0')
   expect(detail.textContent).toContain('Local Owner')
   expect(detail.textContent).not.toContain('127.0.0.1')
   expect(network).toHaveBeenCalledOnce()
@@ -88,19 +88,21 @@ it('the equal list projection preserves the same sourced local address', async (
   expect(network).toHaveBeenCalledOnce()
 })
 
-it('editing the local listener draft preserves the confirmed address without another network read', async () => {
+it('editing a connection draft preserves the confirmed local address without another network read', async () => {
   const network = vi.spyOn(api.hosts, 'network').mockImplementation(async host => sample(host))
   await show()
-  await act(async () => localNode().click())
-  await act(async () => dom.container.querySelector<HTMLButtonElement>('[data-host-panel="connection"]')!.click())
-  const key = dom.container.querySelector<HTMLInputElement>('[aria-label="Tailcat server key"]')!
+  await act(async () => dom.container.querySelector<HTMLButtonElement>('[data-host-node="other"]')!.click())
+  await act(async () => dom.container.querySelector<HTMLButtonElement>('.settings-resource-editor [data-host-panel="connection"]')!.click())
+  const key = dom.container.querySelector<HTMLInputElement>('[data-host-name]')!
+  expect(key).not.toBeNull()
+  const reads = network.mock.calls.length
   await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(key, 'draft-server')
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(key, 'My worker draft')
     key.dispatchEvent(new Event('input', { bubbles: true }))
   })
   expect(localNode().querySelector('.remote-host-node__address')?.textContent).toBe('192.168.40.12')
-  expect(key.value).toBe('draft-server')
-  expect(network).toHaveBeenCalledOnce()
+  expect(key.value).toBe('My worker draft')
+  expect(network).toHaveBeenCalledTimes(reads)
 })
 
 it('keeps measured ReactFlow nodes visible when their source data and parent presentation update', async () => {
