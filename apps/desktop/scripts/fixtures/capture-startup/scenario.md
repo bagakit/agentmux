@@ -9,10 +9,10 @@ Before the complete gate, the execution owner writes the local, untracked
 with the exact pre-optimization Git `ref`. A moving branch, invented tree, identical
 candidate or stale baseline fails. Baseline and candidate each build their own production
 Main, shared contracts, preload, screenshot Renderer and annotation editor from their own
-Git tree. The fixture driver may be shared, but every production input records its actual
-consumed hash. Workspace packages reached through dependency links are labeled as shared
-workspace dependencies rather than misattributed to the baseline Git tree. Mixing an old
-Main with the current Renderer is not a complete A/B proof.
+Git tree. Workspace imports resolve to the owning tree's source; a remaining shared file
+must be byte-identical to both Git blobs. The fixture driver may be shared, but every
+production input records its actual consumed hash. Mixing an old Main with the current
+Renderer is not a complete A/B proof.
 
 The production mutation suite removes window/native overlap, skips current-input readiness,
 strands an early load on cancel, reorders background delivery, drops the final deferred
@@ -22,12 +22,13 @@ is required; collection, transform, process timeout and external termination are
 infrastructure failures.
 
 For each initial background and virtual-display count, four independent baseline/candidate
-process pairs run in an alternating order. Every process has fresh temporary userData and
-invokes the real registered shortcut callback → GlobalScreenshot → ScreenCapture →
-CaptureSurface path twice, providing the first/repeat cells. Thus every
-first/repeat × one/two-display × included/excluded cell has four independent pairs and no
-outlier removal. The candidate's actualShown median must improve by at least 100 ms and 15%
-in every cell; a missing cell or a threshold miss fails without cross-cell averaging.
+process pairs run in an alternating order for first capture, and another four independent
+pairs run for repeat capture. Every process has fresh temporary userData and invokes the
+real registered shortcut callback → GlobalScreenshot → ScreenCapture → CaptureSurface path
+exactly once for its assigned iteration. Thus every first/repeat × one/two-display ×
+included/excluded cell has four independent process pairs, 64 independent processes in all,
+and no outlier removal. The candidate's actualShown median must improve by at least 100 ms
+and 15% in every cell; a missing cell or a threshold miss fails without cross-cell averaging.
 
 Each actual Native-port invocation constructs a new solid PNG with a per-capture nonce using
 `nativeImage.createFromBitmap/toPNG`. Every display has its own real producer delay: 200 ms
