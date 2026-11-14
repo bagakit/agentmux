@@ -44,7 +44,8 @@ describe('explicit continuation of the retained original mobile request', () => 
     Object.assign(f.client, { readAgentSession: read })
     const view = await mount(<MobileConversationSurface {...props(f)} />)
     await act(async () => { f.emit({ type: 'connection-state', state: 'lost', evidence }); f.emit({ type: 'connection-state', state: 'restored', evidence }) })
-    expect(read).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled()
+    expect(read.mock.calls.length).toBeGreaterThan(0); expect(read.mock.calls.every(([id]) => id === 'session-original')).toBe(true); expect(f.submit).not.toHaveBeenCalled()
+    read.mockClear()
     await click(retry(view.element)!)
     expect(read).toHaveBeenCalledExactlyOnceWith('session-original')
     expect(f.submit).toHaveBeenCalledExactlyOnceWith({ agentSessionId: 'session-original', operationId: op,
@@ -55,9 +56,11 @@ describe('explicit continuation of the retained original mobile request', () => 
 
   it('keeps the original unknown and its edited draft when the exact full read fails, with explicit retry still reachable', async () => {
     retainOriginal('不能丢的新草稿')
-    const f = fixture(), full = admitted(), read = vi.fn().mockRejectedValueOnce(new Error('Original full read unavailable')).mockResolvedValue(full)
+    const f = fixture(), full = admitted(), read = vi.fn().mockResolvedValue(full)
     f.sessions.set('session-original', hostedAgentSessionSummary(full)); Object.assign(f.client, { readAgentSession: read })
     const view = await mount(<MobileConversationSurface {...props(f)} />)
+    await vi.waitFor(() => expect(read).toHaveBeenCalledWith('session-original'))
+    read.mockClear(); read.mockRejectedValueOnce(new Error('Original full read unavailable'))
     await click(retry(view.element)!)
     expect(read).toHaveBeenCalledExactlyOnceWith('session-original'); expect(f.submit).not.toHaveBeenCalled()
     expect(stored().attempts[0][1]).toMatchObject({ operationId: op, draft: body, phase: 'unknown' })
@@ -69,11 +72,13 @@ describe('explicit continuation of the retained original mobile request', () => 
     expect(editor(view.element).textContent).toBe('不能丢的新草稿')
   })
 
-  it('does not fetch a full body for an unrelated summary operation', async () => {
-    retainOriginal(); const f = fixture(), other = admitted(), read = vi.fn()
+  it('does not fetch another full body for an unrelated original summary operation', async () => {
+    retainOriginal(); const f = fixture(), other = admitted(), read = vi.fn().mockImplementation(async () => other)
     other.promptCompletionAdmission!.submissionId = 'other-operation'
     f.sessions.set('session-original', hostedAgentSessionSummary(other)); Object.assign(f.client, { readAgentSession: read })
     const view = await mount(<MobileConversationSurface {...props(f)} />)
+    await vi.waitFor(() => expect(read).toHaveBeenCalledWith('session-original'))
+    read.mockClear()
     await click(retry(view.element)!)
     expect(read).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled()
     expect(stored().attempts[0][1]).toMatchObject({ operationId: op, draft: body, phase: 'unknown' })
