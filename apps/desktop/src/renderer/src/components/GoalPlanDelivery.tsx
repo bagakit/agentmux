@@ -41,7 +41,7 @@ function PreviousAttemptAuthor({ attempt }: { attempt: DemandDelegation }) {
 }
 
 /** Human review reaches the existing public owner; no command is executed here. */
-export function GoalPlanDelivery({ demand, item, historical, author, draft, onDraft, previousDrafts, onReadGoal, onConfirmed }: { demand: DemandProjection; item: GoalPlanNodeView; historical: boolean; author: ReactNode;
+export function GoalPlanDelivery({ demand, item, historical, author, context, draft, onDraft, previousDrafts, onReadGoal, onConfirmed }: { demand: DemandProjection; item: GoalPlanNodeView; historical: boolean; author: ReactNode; context: ReactNode;
   draft?: GoalPlanReviewDraft | undefined; onDraft(value: GoalPlanReviewDraft): void; previousDrafts: Readonly<Record<string, GoalPlanReviewDraft>>; onReadGoal(): void; onConfirmed(request: NonNullable<GoalPlanReviewDraft['request']>): void }) {
   const delegation = item.delegation, report = delegation?.report
   const current = draft ?? { command: item.node.check, result: '', evidence: '', note: '' }
@@ -91,7 +91,6 @@ export function GoalPlanDelivery({ demand, item, historical, author, draft, onDr
   }
   const acknowledged = Boolean(recorded)
   return <section className="goal-delivery" aria-label={`Delivery for ${item.node.title}`} data-goal-delivery={delegation.operationId}>
-    <div className="goal-delivery__byline">Report by {author}<span>Attempt {item.attempts}</span></div>
     <DeliveryReport delegation={delegation} />
     {item.review ? <div className="goal-delivery__verdict" data-goal-plan-verdict={item.review.verdict}>
       {item.staleCriteria.length ? <p className="goals-caption">Previous review · criteria changed</p> : null}<strong>{item.review.verdict === 'pass' ? 'Passed' : 'Changes requested'}</strong><span> by {item.review.reviewer.id}</span>
@@ -116,7 +115,10 @@ export function GoalPlanDelivery({ demand, item, historical, author, draft, onDr
       </details> : null}
       {request ? <details><summary>Original review request</summary><pre>{JSON.stringify(request, null, 2)}</pre></details> : null}
     </div> : null}
-    <GoalPlanThread delegation={delegation} />
+    <details className="goal-delivery__source"><summary>Original attempt</summary>
+      <div className="goal-delivery__byline">Report by {author}<span>Attempt {item.attempts}</span></div>
+      {context}<GoalPlanThread delegation={delegation} />
+    </details>
     {previous.length ? <details className="goal-delivery__history"><summary>Previous attempts · {previous.length}</summary>{previous.map(attempt => <article key={attempt.operationId} data-goal-delivery-history={attempt.operationId}>
       <PreviousAttemptAuthor attempt={attempt} /><DeliveryReport delegation={attempt} />
       {(demand.plan?.reviews ?? []).filter(review => review.delegationOperationId === attempt.operationId).map(review => <div key={review.operationId}>

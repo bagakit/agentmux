@@ -1,11 +1,15 @@
 import { useLayoutEffect, useMemo, useRef } from 'react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { delegationWorkerHostId } from '@agentmux/demand/delegations'
 import type { DemandRecord } from '../lib/global-demand-board'
-import type { GoalPlanReadingTarget } from './GoalPlanGraph'
+import type { GoalPlanNodeView, GoalPlanReadingTarget } from './GoalPlanGraph'
+import { GoalPlanMark, goalPlanStateLabel } from './GoalPlanState'
 
 type Event = { id: string; at: number; label: string }
 type Row = { id: string; title: string; number?: number; target?: GoalPlanReadingTarget; events: Event[]; active?: { from: number; to: number } }
 const format = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+const clock = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' })
+const TimelineIcon = semanticIconComponent('object.workflow')
 
 /** Receipt times are events. Only an exact, confirmed activity observation can supply a live span. */
 export function goalExecutionRows(demand: Pick<DemandRecord, 'plan' | 'delegations' | 'dispatches' | 'responsibility'>): Row[] {
@@ -44,42 +48,57 @@ export function goalExecutionRows(demand: Pick<DemandRecord, 'plan' | 'delegatio
     if (start.receipt) events.push({ id: 'receipt', at: start.receipt.kind === 'core-input' ? start.receipt.observedAt : start.receipt.createdAt, label: 'Original input recorded' })
     rows.set(`start:${start.operationId}`, { id: `start:${start.operationId}`, title: 'One-time task', events })
   }
-  return [...rows.values()]
+  const order = new Map([...nodes.keys()].map((id, index) => [id, index]))
+  return [...rows.values()].sort((a, b) => (order.get(a.target?.nodeId ?? '') ?? order.size) - (order.get(b.target?.nodeId ?? '') ?? order.size))
 }
 
-export function GoalExecutionTimeline({ demand, selected, onSelect }: { demand: DemandRecord; selected: GoalPlanReadingTarget | null;
+export function GoalExecutionTimeline({ demand, nodes, selected, onSelect }: { demand: DemandRecord; nodes: readonly GoalPlanNodeView[]; selected: GoalPlanReadingTarget | null;
   onSelect: (target: GoalPlanReadingTarget, trigger: HTMLButtonElement) => void }) {
   const timeline = useRef<HTMLDetailsElement>(null)
-  const rows = useMemo(() => goalExecutionRows(demand), [demand.plan, demand.delegations, demand.dispatches, demand.responsibility])
+  const recorded = useMemo(() => goalExecutionRows(demand), [demand.plan, demand.delegations, demand.dispatches, demand.responsibility])
+  const rows: Row[] = recorded.length ? recorded : nodes.map(item => ({ id: `node:${item.node.id}`, title: item.node.title,
+    target: { nodeId: item.node.id, ...(item.wholeGoal ? { wholeGoal: true } : {}) }, events: [] }))
+  const byId = new Map(nodes.map(item => [item.node.id, item]))
   let start = Infinity, end = -Infinity
   for (const row of rows) for (const at of [...row.events.map(event => event.at), ...(row.active ? [row.active.from, row.active.to] : [])]) {
     start = Math.min(start, at); end = Math.max(end, at)
   }
-  const hasTimes = Number.isFinite(start)
   useLayoutEffect(() => {
     if (timeline.current) timeline.current.open = (timeline.current.closest('.goals-detail')?.clientWidth ?? 0) >= 960
-  }, [hasTimes])
-  if (!hasTimes) return null
+  }, [demand.id])
+  const hasTimes = Number.isFinite(start), span = end - start
+  const ticks = !hasTimes ? [] : span < 60_000 ? [start] : span < 240_000 ? [start, end]
+    : [start, start + span / 3, start + span * 2 / 3, end]
+  const tickFormat = hasTimes && new Date(start).toDateString() === new Date(end).toDateString() ? clock : format
   const offset = (at: number) => (at - start) / Math.max(1, end - start) * 100
   return <details ref={timeline} className="goal-execution-time" data-goal-execution-time>
-    <summary>Execution history</summary>
-    <div className="goal-execution-time__scroll"><div className="goal-execution-time__rows">
-      <div className="goal-execution-time__row goal-execution-time__axis"><span>Task and attempt</span><div><time>{format.format(start)}</time>{end > start ? <time>{format.format(end)}</time> : null}</div></div>
+    <summary><TimelineIcon size={14} aria-hidden="true" />Execution history</summary>
+    <div className="goal-execution-time__scroll"><div className="goal-execution-time__rows" data-timed={hasTimes || undefined}>
+      {hasTimes ? <div className="goal-execution-time__row goal-execution-time__axis"><span>Task and attempt</span>
+        <div>{ticks.map(at => <time key={at} dateTime={new Date(at).toISOString()} title={format.format(at)}>{tickFormat.format(at)}</time>)}</div></div> : null}
       {rows.map(row => {
         const { target } = row
-        const active = target && selected?.nodeId === target.nodeId && selected.attemptId === target.attemptId
+        const active = target && selected?.nodeId === target.nodeId && selected.attemptId === target.attemptId && selected.wholeGoal === target.wholeGoal
+        const item = target && byId.get(target.nodeId)
+        const previous = Boolean(target?.attemptId && item?.delegation?.operationId !== target.attemptId)
+        const state = previous ? 'Previous attempt' : item ? goalPlanStateLabel(item) : undefined
         return <div className="goal-execution-time__row" key={row.id} data-goal-time-row={row.id} data-selected={active || undefined}>
-          <div>{target ? <button type="button" aria-pressed={Boolean(active)} onClick={event => onSelect(target, event.currentTarget)}>{row.title}</button> : <strong>{row.title}</strong>}
-            {row.number ? <small>Attempt {row.number}</small> : !row.events.length ? <small>No attempt recorded</small> : null}</div>
-          <div className="goal-execution-time__track" aria-label={row.events.map(event => `${event.label}, ${format.format(event.at)}`).join(' · ') || 'No attempt recorded'}>
+          <div className="goal-execution-time__task">{item && !previous ? <GoalPlanMark item={item} /> : null}
+            <div>{target ? <button type="button" aria-pressed={Boolean(active)} onClick={event => onSelect(target, event.currentTarget)}>{row.title}</button> : <strong>{row.title}</strong>}
+              {state || row.number ? <small>{state}{row.number && row.number > 1 ? ` · Attempt ${row.number}` : ''}</small> : null}</div>
+          </div>
+          {row.events.length || row.active ? <div className="goal-execution-time__track" role="img" aria-label={[
+            ...row.events.map(event => `${event.label}, ${format.format(event.at)}`),
+            ...(row.active ? [`Observed activity, ${format.format(row.active.from)} – ${format.format(row.active.to)}`] : [])
+          ].join(' · ')}>
+            {ticks.slice(1, -1).map(at => <span className="goal-execution-time__guide" key={at} style={{ left: `${offset(at)}%` }} aria-hidden="true" />)}
             {row.active ? <span className="goal-execution-time__live" data-goal-observed-activity style={{ left: `${offset(row.active.from)}%`, width: `${offset(row.active.to) - offset(row.active.from)}%` }}
-              title={`Observed active through ${format.format(row.active.to)}`} /> : null}
+              title={`Observed activity · ${format.format(row.active.from)} – ${format.format(row.active.to)}`} /> : null}
             {row.events.map(event => <span className="goal-execution-time__point" key={event.id} data-goal-time-event={event.label} style={{ left: `${offset(event.at)}%` }}
               title={`${event.label} · ${format.format(event.at)}`} />)}
-          </div>
+          </div> : <span className="goal-execution-time__unrecorded">No attempt recorded</span>}
         </div>
       })}
     </div></div>
-    <p className="goals-caption">Dots mark saved events. A dashed bar ends at the last confirmed activity observation.</p>
   </details>
 }

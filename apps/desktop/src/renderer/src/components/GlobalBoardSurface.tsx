@@ -92,10 +92,7 @@ export function GlobalBoardSurface() {
     shownStages.current = stageIndex(groups)
     if (moved.size) setChangedStages(moved)
   }, [groups])
-  const collectionView = selectedDemandId ? 'list' : view
-  useEffect(() => {
-    if (selectedDemandId) surfaceRef.current?.querySelector<HTMLElement>('[data-demand-id][aria-pressed="true"]')?.scrollIntoView?.({ block: 'nearest' })
-  }, [selectedDemandId])
+  const collectionView = view
   const queue = selectedDemandId ? goalQueuePosition(groups, selectedDemandId) : null
   function moveFocus(from: HTMLElement, step: 1 | -1) {
     const id = adjacentGoalId(groups, from.dataset.demandId ?? null, step)
@@ -111,7 +108,8 @@ export function GlobalBoardSurface() {
   function clearConditions() { setQuery(''); setStatusFilter('all'); setProjectFilter('all'); setRoutingFilter('all'); setAssigneeFilter('all'); setFiltersOpen(false); queueMicrotask(() => searchRef.current?.focus()) }
 
   function closeDetail() {
-    const row = surfaceRef.current?.querySelector<HTMLElement>('[data-demand-id][aria-pressed="true"]') ?? selectedRowRef.current
+    const row = selectedRowRef.current ?? surfaceRef.current?.querySelector<HTMLElement>('[data-demand-id][aria-pressed="true"]')
+    selectedRowRef.current = null
     setSelectedDemand(null); queueMicrotask(() => { if (row?.isConnected) row.focus(); else newGoalRef.current?.focus() })
   }
   async function openMote(demandId: string, mode?: 'grill' | 'grounding' | 'plan') {

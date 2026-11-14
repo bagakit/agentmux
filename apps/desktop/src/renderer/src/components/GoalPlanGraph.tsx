@@ -1,49 +1,35 @@
-import { Fragment, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
-import type { GoalPlanNodeProjection, GoalPlanNodeState, GoalPlanUnknownReason } from '@agentmux/demand/goal-plan'
+import type { GoalPlanNodeProjection } from '@agentmux/demand/goal-plan'
 import { Button } from '@agentmux/client-ui/components/Button'
 import { AgentWorkModeBadge } from './AgentWorkModeBadge'
 import { useAppStore } from '../store'
 import type { DemandProjection, DemandRecord } from '../lib/global-demand-board'
 import { useGoalAgentPresentation } from '../lib/goal-discussion-recipient'
 import { GoalPlanThread } from './GoalPlanThread'
-import { delegationWorkerHostId } from '@agentmux/demand/delegations'
+import { delegationWorkerHostId, type DemandDelegation } from '@agentmux/demand/delegations'
 import { GoalPlanRequest } from './GoalPlanRequest'
 import { GoalExecutionTimeline } from './GoalExecutionTimeline'
 import { GoalPlanDelivery, type GoalPlanReviewDraft } from './GoalPlanDelivery'
 import { clearGoalPlanReviewDraft, editGoalPlanReviewDraft, goalPlanReviewDraftKey } from '../lib/goal-edit-drafts'
 import { goalNextStepFact, type GoalNextStepFact } from '../lib/goal-presentation'
+import { GoalPlanMark, goalPlanStateLabel, type GoalPlanNodePresentation } from './GoalPlanState'
 
-/** One distinct glyph per node state, so a node still reads without its color. */
-const STATE_ICON_NAMES = {
-  waiting: 'status.queued', ready: 'action.start', working: 'status.working', review: 'action.review-source',
-  changes: 'status.gap', done: 'status.completed', cancelled: 'status.disabled', unknown: 'status.unknown'
-} as const satisfies Record<GoalPlanNodeState, string>
-const STATE_ICONS = Object.fromEntries(Object.entries(STATE_ICON_NAMES).map(([state, name]) => [state, semanticIconComponent(name)])) as
-  Record<GoalPlanNodeState, ReturnType<typeof semanticIconComponent>>
-export const GOAL_PLAN_STATE_LABELS: Record<Exclude<GoalPlanNodeState, 'unknown'>, string> = {
-  waiting: 'Waiting on dependencies', ready: 'Ready to start', working: 'In progress', review: 'Awaiting review',
-  changes: 'Changes requested', done: 'Done', cancelled: 'Cancelled'
-}
-const UNKNOWN_LABELS: Record<GoalPlanUnknownReason, string> = { criteria: 'Criteria need review', 'dispatch-link': 'Delivery unconfirmed' }
 /** A node as its Goal owner derived it; `state` is null when the owner returned no derivation. */
 export type GoalPlanReadingTarget = { nodeId: string; attemptId?: string; wholeGoal?: true }
 export type GoalPlanReveal = { target: GoalPlanReadingTarget; trigger: HTMLButtonElement; restore?: () => void }
-export type GoalPlanNodeView = Omit<GoalPlanNodeProjection, 'state'> & { state: GoalPlanNodeState | null; wholeGoal?: { conclusion: string; assignees: number } }
+type GoalPlanSelection = Omit<GoalPlanReveal, 'trigger'> & { trigger?: HTMLButtonElement }
+export type GoalPlanNodeView = Omit<GoalPlanNodeProjection, 'state' | 'unknown'> & GoalPlanNodePresentation
 /** A revision belongs to the saved breakdown. The whole Goal is revision-free. */
 export type GoalPlanView = { revision: number | null; nodes: GoalPlanNodeView[]; next: string[]; progress: { done: number; total: number } | null }
-/** An unknown node names every reason it needs reconciliation; other states read as themselves. */
-export function goalPlanStateLabel(item: Pick<GoalPlanNodeView, 'state' | 'unknown' | 'wholeGoal'>): string {
-  if (item.wholeGoal) return item.wholeGoal.conclusion
-  return item.state === null ? 'State unavailable' : item.state === 'unknown' ? item.unknown.map(reason => UNKNOWN_LABELS[reason]).join(' · ') : GOAL_PLAN_STATE_LABELS[item.state]
+export function goalPlanDeliveries(plan: GoalPlanView) {
+  return plan.nodes.filter((item): item is GoalPlanNodeView & { delegation: DemandDelegation } => item.state === 'review' && Boolean(item.delegation?.report))
 }
 const ThemeObjectWorkflowIcon = semanticIconComponent('object.workflow')
 const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
-const ThemeObjectGoalIcon = semanticIconComponent('object.goal')
-const ReviewChevron = semanticIconComponent('navigation.forward')
 
 /** Columns by dependency depth; within a column the plan order is kept. */
 export function goalPlanColumns(projection: GoalPlanView): GoalPlanNodeView[][] {
@@ -104,18 +90,21 @@ function useEdges(root: React.RefObject<HTMLElement | null>, projection: GoalPla
   useLayoutEffect(() => {
     const element = root.current
     if (!element) return
+    const cards = element.querySelectorAll<HTMLElement>('[data-goal-plan-node]')
     const measure = () => {
       const box = element.getBoundingClientRect()
       const content = element.querySelector<HTMLOListElement>('.goal-plan__columns')!
-      const anchor = (id: string) => element.querySelector<HTMLElement>(`[data-goal-plan-node="${CSS.escape(id)}"] .goal-plan-node__head`)
+      const anchors = new Map([...cards].map(card => {
+        const rect = card.getBoundingClientRect(), head = card.querySelector('.goal-plan-node__head')!.getBoundingClientRect()
+        const left = rect.left - box.left + element.scrollLeft, right = rect.right - box.left + element.scrollLeft
+        return [card.dataset.goalPlanNode!, { left, right, y: head.top + head.height / 2 - box.top + element.scrollTop }]
+      }))
       const edges: Edge[] = []
       for (const item of projection.nodes) for (const dependency of item.node.dependsOn) {
-        const source = anchor(dependency), target = anchor(item.node.id)
+        const source = anchors.get(dependency), target = anchors.get(item.node.id)
         if (!source || !target) continue
-        const a = source.getBoundingClientRect(), b = target.getBoundingClientRect()
-        const sourceCard = source.closest<HTMLElement>('.goal-plan-node')!.getBoundingClientRect(), targetCard = target.closest<HTMLElement>('.goal-plan-node')!.getBoundingClientRect()
-        const from = { x: sourceCard.right - box.left + element.scrollLeft, y: a.top + a.height / 2 - box.top + element.scrollTop }
-        const to = { x: targetCard.left - box.left + element.scrollLeft, y: b.top + b.height / 2 - box.top + element.scrollTop }
+        const from = { x: source.right, y: source.y }
+        const to = { x: target.left, y: target.y }
         if (to.x <= from.x) continue
         edges.push({ from: dependency, to: item.node.id, d: goalPlanEdgePath(from, to), live: item.state === 'ready' || item.state === 'changes' })
       }
@@ -129,7 +118,7 @@ function useEdges(root: React.RefObject<HTMLElement | null>, projection: GoalPla
     if (typeof ResizeObserver === 'undefined') return
     const observer = new ResizeObserver(measure)
     observer.observe(element)
-    for (const card of element.querySelectorAll('.goal-plan-node')) observer.observe(card)
+    for (const card of cards) observer.observe(card)
     return () => observer.disconnect()
   }, [root, projection, layoutKey])
   return state
@@ -169,28 +158,31 @@ function NodeDetail({ demand, item, historical, dependencyNames, onIssue, draft,
     }
     catch (error) { onIssue(error instanceof Error ? error.message : String(error)) }
   }
-  return <div className="goal-plan-node__detail" data-goal-plan-detail={item.node.id}>
-    {item.node.outcome ? item.wholeGoal && !demand.alignment?.summary
-      ? <div className="goals-intent__reading"><AgentMarkdown content={item.node.outcome} className="goals-intent__prose" readOnly /></div>
-      : <p className="goal-plan-node__outcome">{item.node.outcome}</p> : null}
-    <dl className="goal-plan-node__facts">
+  const facts = <dl className="goal-plan-node__facts">
       {item.wholeGoal ? <>
         <div><dt>Status</dt><dd>{item.wholeGoal.conclusion}</dd></div>
         {demand.alignment?.criteria.length ? <div><dt>Success criteria</dt><dd><ul>{demand.alignment.criteria.map(criterion => <li key={criterion.id}>{criterion.text}</li>)}</ul></dd></div> : null}
       </> : <div><dt>Check</dt><dd><code>{item.node.check}</code></dd></div>}
+      {!item.delegation?.report && (item.delegation || item.node.executor) ? <div><dt>Executor</dt><dd><NodeExecutor item={item} /></dd></div> : null}
       {dependencyNames.length ? <div><dt>Depends on</dt><dd title={item.node.dependsOn.join(', ')}><DependencyNames names={dependencyNames} /></dd></div> : null}
       {item.delegation ? <div><dt>Thread</dt><dd><code>{item.delegation.threadId}</code>{item.attempts > 1 ? ` · attempt ${item.attempts}` : ''}</dd></div> : null}
       {item.unknown.includes('criteria') ? <div><dt>Criteria</dt><dd className="goal-plan-node__stale">{item.staleCriteria.length
         ? `Changed or unavailable in the current goal: ${item.staleCriteria.join(', ')}` : 'Covers no success criterion of the current goal. Revise the plan to name what this node delivers.'}</dd></div> : null}
       {item.unknown.includes('dispatch-link') ? <div><dt>Delivery</dt><dd className="goal-plan-node__stale">The original delegation link is unconfirmed. Read its receipt before acting; it is never resent automatically.</dd></div> : null}
     </dl>
-    {item.wholeGoal && onOpenGoalWork ? <div className="goal-plan-node__actions"><Button type="button" onClick={onOpenGoalWork}>View current work</Button></div> : null}
-    {item.delegation?.report ? <GoalPlanDelivery key={item.delegation.operationId} demand={demand} item={item} historical={historical} author={<NodeExecutor item={item} />} draft={draft} onDraft={onDraft} previousDrafts={previousDrafts} onReadGoal={onReadGoal} onConfirmed={onConfirmed} /> : null}
-    {item.delegation ? <div className="goal-plan-node__actions">
+  const actions = item.delegation ? <div className="goal-plan-node__actions">
       <Button type="button" data-goal-plan-open="executor" onClick={() => void open(item.delegation!.workerAgentSessionId, delegationWorkerHostId(item.delegation!))}>Open executor</Button>
       <Button type="button" data-goal-plan-open="owner" onClick={() => void open(item.delegation!.ownerAgentSessionId, item.delegation!.hostId)}>Open owner</Button>
-    </div> : null}
-    {item.delegation && !item.delegation.report ? <GoalPlanThread key={JSON.stringify([item.delegation.hostId, item.delegation.sourceMessageId])} delegation={item.delegation} /> : null}
+    </div> : null
+  return <div className="goal-plan-node__detail" data-goal-plan-detail={item.node.id}>
+    {item.node.outcome ? item.wholeGoal && !demand.alignment?.summary
+      ? <div className="goals-intent__reading"><AgentMarkdown content={item.node.outcome} className="goals-intent__prose" readOnly /></div>
+      : <p className="goal-plan-node__outcome">{item.node.outcome}</p> : null}
+    {item.delegation?.report ? <GoalPlanDelivery key={item.delegation.operationId} demand={demand} item={item} historical={historical} author={<NodeExecutor item={item} />} context={<>{facts}{actions}</>} draft={draft} onDraft={onDraft} previousDrafts={previousDrafts} onReadGoal={onReadGoal} onConfirmed={onConfirmed} /> : <>
+      {facts}{actions}
+      {item.delegation ? <GoalPlanThread key={JSON.stringify([item.delegation.hostId, item.delegation.sourceMessageId])} delegation={item.delegation} /> : null}
+    </>}
+    {item.wholeGoal && onOpenGoalWork ? <div className="goal-plan-node__actions"><Button type="button" onClick={onOpenGoalWork}>View current work</Button></div> : null}
   </div>
 }
 
@@ -199,37 +191,54 @@ function NodeDetail({ demand, item, historical, dependencyNames, onIssue, draft,
  * dependency, joined to what it depends on by a smooth connector. State comes only from the
  * Goal owner's derivation; this view never decides it.
  */
-export function GoalPlanGraph({ demand, nextStep, onOpenGoalWork, onRequestPlan, pending = false, busy = false, reveal }: {
+export function GoalPlanGraph({ demand, projection: provided, planLink, onOpenGoalWork, onRequestPlan, pending = false, busy = false, reveal }: {
   demand: DemandProjection
-  nextStep?: GoalNextStepFact; onOpenGoalWork?: (() => void) | undefined
+  projection?: GoalPlanView; planLink?: ReactNode; onOpenGoalWork?: (() => void) | undefined
   onRequestPlan?: () => void; pending?: boolean; busy?: boolean; reveal?: GoalPlanReveal | null
 }) {
-  const projection = useMemo(() => goalPlanProjection(demand, nextStep), [demand, nextStep])
+  const projection = useMemo(() => provided ?? goalPlanProjection(demand), [demand, provided])
   const wholeGoal = projection.revision === null
-  const [selection, setSelection] = useState<GoalPlanReveal | null>(null)
-  const open = Boolean(selection?.target.wholeGoal) === wholeGoal ? selection?.target.nodeId : undefined
+  const firstDelivery = goalPlanDeliveries(projection)[0]
+  const [selection, setSelection] = useState<GoalPlanSelection | null>()
+  const defaultNode = firstDelivery?.node.id, defaultAttempt = firstDelivery?.delegation.operationId
+  const selectedTarget = selection === undefined && defaultNode && defaultAttempt ? { nodeId: defaultNode, attemptId: defaultAttempt } : selection?.target
+  const open = Boolean(selectedTarget && 'wholeGoal' in selectedTarget && selectedTarget.wholeGoal) === wholeGoal ? selectedTarget?.nodeId : undefined
   const [issue, setIssue] = useState<string | null>(null)
   const [readingState, setReadingState] = useState(false)
   const retainedReviews = useAppStore(state => state.goalEditDrafts[demand.id]?.planReviews)
   const [reviewNotices, setReviewNotices] = useState<Record<string, Pick<GoalPlanReviewDraft, 'pending' | 'issue' | 'reread'>>>({})
   const canvas = useRef<HTMLDivElement>(null)
-  const reading = useRef<HTMLDivElement>(null), readingId = useId()
+  const reading = useRef<HTMLDivElement>(null), readingId = useId(), arrowId = useId()
   const readingHeading = useRef<HTMLHeadingElement>(null)
   const { edges, width, height, scrollable } = useEdges(canvas, projection, open ?? '')
   useLayoutEffect(() => { if (reveal) setSelection(reveal) }, [reveal])
   useLayoutEffect(() => {
-    if (!selection) return
+    // Retain the first automatic choice while its report becomes reviewed or new work arrives.
+    if (defaultNode && defaultAttempt) setSelection(current => current === undefined ? { target: { nodeId: defaultNode, attemptId: defaultAttempt } } : current)
+  }, [defaultNode, defaultAttempt])
+  useLayoutEffect(() => {
+    const viewport = canvas.current
+    const card = open && viewport?.querySelector(`[data-goal-plan-node="${CSS.escape(open)}"]`)
+    if (!viewport || !card) return
+    const bounds = viewport.getBoundingClientRect(), selected = card.getBoundingClientRect()
+    if (selected.bottom > bounds.bottom) viewport.scrollTop += selected.bottom - bounds.bottom
+    else if (selected.top < bounds.top) viewport.scrollTop += selected.top - bounds.top
+    if (selected.right > bounds.right) viewport.scrollLeft += selected.right - bounds.right
+    else if (selected.left < bounds.left) viewport.scrollLeft += selected.left - bounds.left
+  }, [open])
+  useLayoutEffect(() => {
+    if (!selection?.trigger) return
     reading.current?.scrollIntoView?.({ block: 'nearest' })
     readingHeading.current?.focus({ preventScroll: true })
   }, [selection])
   function select(target: GoalPlanReadingTarget, trigger: HTMLButtonElement) { setSelection({ target, trigger }) }
   function toggleNode(item: GoalPlanNodeView, trigger: HTMLButtonElement) {
     const attemptId = item.delegation?.operationId
-    if (open === item.node.id && selection?.target.attemptId === attemptId) closeNode(item.node.id)
+    if (selection?.trigger && open === item.node.id && selection.target.attemptId === attemptId) closeNode(item.node.id)
     else select({ nodeId: item.node.id, ...(attemptId ? { attemptId } : {}), ...(item.wholeGoal ? { wholeGoal: true } : {}) }, trigger)
   }
   function closeNode(id: string) {
-    const target = selection?.trigger.isConnected ? selection.trigger
+    const target = selection?.trigger?.isConnected ? selection.trigger
       : canvas.current?.querySelector<HTMLButtonElement>(`[data-goal-plan-node="${CSS.escape(id)}"] .goal-plan-node__head`)
     if (target) {
       if (selection?.restore) { selection.restore(); requestAnimationFrame(() => target.focus()) }
@@ -252,7 +261,7 @@ export function GoalPlanGraph({ demand, nextStep, onOpenGoalWork, onRequestPlan,
   const columns = goalPlanColumns(projection), highlight = goalPlanHighlight(projection)
   const byId = new Map(projection.nodes.map(item => [item.node.id, item]))
   const selectedNode = open ? byId.get(open) : undefined
-  const attemptId = selection?.target.attemptId
+  const attemptId = open ? selectedTarget?.attemptId : undefined
   const attempts = selectedNode ? (demand.delegations ?? []).filter(attempt => attempt.planNodeId === selectedNode.node.id) : []
   const exact = attemptId ? attempts.find(attempt => attempt.operationId === attemptId) : undefined
   const historical = Boolean(attemptId && selectedNode?.delegation?.operationId !== attemptId)
@@ -260,71 +269,62 @@ export function GoalPlanGraph({ demand, nextStep, onOpenGoalWork, onRequestPlan,
     attempts: exact ? attempts.indexOf(exact) + 1 : 0, unknown: [], staleCriteria: [],
     review: exact ? demand.plan?.reviews.filter(entry => entry.nodeId === selectedNode.node.id && entry.delegationOperationId === exact.operationId).at(-1) ?? null : null }
     : selectedNode
-  const deliveries = projection.nodes.filter(item => item.state === 'review' && item.delegation?.report)
   const reviewKey = selected?.delegation && goalPlanReviewDraftKey(selected.node.id, selected.delegation.operationId)
   const reviewNoticeKey = JSON.stringify([demand.id, reviewKey])
-  const { progress } = projection, ratio = progress?.total ? progress.done / progress.total : 0
+  const { progress } = projection
   return <section className={`goal-plan${wholeGoal || progress ? '' : ' goal-plan--unavailable'}`} aria-label="Goal plan" data-goal-plan-revision={projection.revision ?? undefined}>
     <div className="goals-section-heading">
       <h2><ThemeObjectWorkflowIcon size={14} aria-hidden="true" /> Execution plan</h2>
-      {wholeGoal ? <span className="goals-caption">1 node</span> : <span className="goals-caption" data-goal-plan-progress>{progress ? `${progress.done} of ${progress.total} done · ` : ''}revision {projection.revision}</span>}
+      <div className="goal-plan__tools">
+        {wholeGoal ? <span className="goals-caption">1 node</span> : <span className="goals-caption" data-goal-plan-progress>Revision {projection.revision}</span>}
+        {planLink}
+      </div>
     </div>
     {requestAction ? <div className="goals-inline-actions goal-plan__revise">{requestAction}</div> : null}
-    {progress ? <div className="goal-plan__progress" aria-hidden="true"><span style={{ transform: `scaleX(${ratio})` }} /></div> : stateService}
+    {stateService}
     {issue ? <p className="goals-service" role="status">{issue}</p> : null}
     <div className="goal-plan__workbench">
       <nav className="goal-plan__assignments" aria-label="Task assignments">
         <h3>Assignments</h3>
         {projection.nodes.map(item => <button key={item.node.id} type="button"
           aria-current={open === item.node.id ? 'true' : undefined} onClick={event => toggleNode(item, event.currentTarget)}>
-          <strong>{item.node.title}</strong><span>{goalPlanStateLabel(item)}</span><NodeExecutor item={item} compact />
+          <GoalPlanMark item={item} /><strong>{item.node.title}</strong>
+          <span className="goal-plan__assignment-fact"><NodeExecutor item={item} compact /><span>{goalPlanStateLabel(item)}</span></span>
         </button>)}
       </nav>
+    <div className="goal-plan__stage">
     <div className="goal-plan__canvas" ref={canvas} tabIndex={0} aria-label="Execution graph">
       <svg className="goal-plan__edges" width={width} height={height} aria-hidden="true">
-        {edges.map(edge => <path key={`${edge.from}>${edge.to}`} d={edge.d} data-goal-plan-edge={`${edge.from}>${edge.to}`} className={edge.live ? 'goal-plan__edge goal-plan__edge--live' : 'goal-plan__edge'} />)}
+        <defs><marker id={arrowId} markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto" viewBox="0 0 6 6"><path d="M0 0 L6 3 L0 6 Z" fill="context-stroke" /></marker></defs>
+        {edges.map(edge => <path key={`${edge.from}>${edge.to}`} d={edge.d} markerEnd={`url(#${arrowId})`} data-goal-plan-edge={`${edge.from}>${edge.to}`} className={edge.live ? 'goal-plan__edge goal-plan__edge--live' : 'goal-plan__edge'} />)}
       </svg>
-      <ol className="goal-plan__columns">
+      <ol className="goal-plan__columns" data-single-column={columns.length === 1 || undefined}>
         {columns.map((column, index) => <li key={index} className="goal-plan__column" data-goal-plan-column={index}>
           <ol className="goal-plan__nodes">
             {column.map(item => {
-              const Icon = item.wholeGoal ? ThemeObjectGoalIcon : STATE_ICONS[item.state ?? 'unknown']
               const state = item.wholeGoal ? 'goal' : item.state ?? 'unavailable', expanded = open === item.node.id
-              return <li key={item.node.id} className={`goal-plan-node${item.node.id === highlight ? ' goal-plan-node--next' : ''}`}
+              return <li key={item.node.id} className={`goal-plan-node${!open && item.node.id === highlight ? ' goal-plan-node--next' : ''}`}
                 data-goal-plan-node={item.node.id} data-goal-plan-origin={item.wholeGoal ? item.node.id : undefined} data-goal-plan-state={state} {...(item.node.dependsOn.length ? { 'data-goal-plan-depends': item.node.dependsOn.join(' ') } : {})}>
-                <button type="button" className="goal-plan-node__head" aria-expanded={expanded} aria-controls={expanded ? readingId : undefined} onClick={event => toggleNode(item, event.currentTarget)}>
-                  <span className="goal-plan-node__mark" data-goal-plan-state={state} aria-hidden="true"><Icon size={12} strokeWidth={1.8} animation="none" /></span>
+                <button type="button" className="goal-plan-node__head" data-goal-review-delivery={item.state === 'review' && item.delegation?.report ? item.node.id : undefined} aria-expanded={expanded} aria-controls={expanded ? readingId : undefined} onClick={event => toggleNode(item, event.currentTarget)}>
+                  <GoalPlanMark item={item} />
                   <span className="goal-plan-node__title">{item.node.title}</span>
                 </button>
                 <span className="goal-plan-node__state" {...(item.unknown.length ? { 'data-goal-plan-unknown': item.unknown.join(' ') } : {})}>{goalPlanStateLabel(item)}</span>
                 {item.node.dependsOn.length ? <span className={`goal-plan-node__depends${item.state === 'waiting' ? ' goal-plan-node__depends--waiting' : ''}`}>
                   Depends on · <DependencyNames names={item.node.dependsOn.map(id => byId.get(id)!.node.title)} />
                 </span> : null}
-                <NodeExecutor item={item} />
+                <NodeExecutor item={item} compact />
               </li>
             })}
           </ol>
         </li>)}
       </ol>
     </div>
-    </div>
     {scrollable ? <p className="goal-plan__scroll-hint">Scroll to explore the full plan</p> : null}
-    {deliveries.length ? <section className="goal-plan__deliveries" aria-label="Current deliveries awaiting review">
-      <h3>Ready for review{deliveries.length > 1 ? ` · ${deliveries.length}` : ''}</h3>
-      <ul>{deliveries.map(item => {
-        const expanded = open === item.node.id && attemptId === item.delegation?.operationId
-        const ReviewMark = STATE_ICONS.review
-        return <li key={item.node.id}><button type="button" className="goal-plan__delivery-row" data-goal-review-delivery={item.node.id}
-          aria-label={`Review delivery · ${item.node.title}`} aria-expanded={expanded} aria-controls={expanded ? readingId : undefined}
-          onClick={event => toggleNode(item, event.currentTarget)}>
-          <span className="goal-plan__delivery-icon"><ReviewMark size={14} aria-hidden="true" animation="none" /></span>
-          <span className="goal-plan__delivery-copy"><strong>{item.node.title}</strong><small>{expanded ? 'Reading delivery' : 'Review delivery'}</small></span>
-          <ReviewChevron className="goal-plan__delivery-chevron" size={14} aria-hidden="true" />
-        </button></li>
-      })}</ul>
-    </section> : null}
     {selected ? <div className="goal-plan__reading" ref={reading} id={readingId}>
-      <div className="goals-section-heading"><h3 ref={readingHeading} tabIndex={-1}>{selected.node.title}</h3><Button type="button" onClick={() => closeNode(selected.node.id)}>Back to node</Button></div>
+      <div className="goal-plan__reading-header"><GoalPlanMark item={selected} /><h3 ref={readingHeading} tabIndex={-1}>{selected.node.title}</h3>
+        {!historical ? <span className="goal-plan__reading-status" data-goal-plan-state={selected.state ?? undefined}>{goalPlanStateLabel(selected)}</span> : null}
+        <Button type="button" onClick={() => closeNode(selected.node.id)}>Back to node</Button></div>
       {historical ? <p className="goals-caption" role={!exact ? 'status' : undefined}>{exact ? 'Previous attempt' : 'The selected original attempt is unavailable.'}</p> : null}
       {(!historical || exact) ? <NodeDetail key={JSON.stringify([demand.id, selected.node.id, attemptId])} demand={demand} item={selected} historical={historical} dependencyNames={selected.node.dependsOn.map(id => byId.get(id)!.node.title)} onIssue={setIssue} onOpenGoalWork={onOpenGoalWork}
         draft={reviewKey && retainedReviews?.[reviewKey] ? { ...retainedReviews[reviewKey], ...reviewNotices[reviewNoticeKey] } : undefined} onDraft={value => {
@@ -340,7 +340,9 @@ export function GoalPlanGraph({ demand, nextStep, onOpenGoalWork, onRequestPlan,
           setReviewNotices(previous => { if (!previous[reviewNoticeKey]) return previous; const { [reviewNoticeKey]: _notice, ...retained } = previous; return retained })
         }} /> : null}
     </div> : null}
-    <GoalExecutionTimeline demand={demand} selected={selection?.target ?? null} onSelect={select} />
+    </div>
+    </div>
+    <GoalExecutionTimeline demand={demand} nodes={projection.nodes} selected={open ? selectedTarget ?? null : null} onSelect={select} />
   </section>
 }
 

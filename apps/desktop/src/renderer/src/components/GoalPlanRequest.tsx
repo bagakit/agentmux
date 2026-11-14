@@ -27,6 +27,7 @@ export function GoalPlanRequest({ demand, onRequest, pending, busy }: { demand: 
   const requests = (demand.patrols ?? []).filter(item => item.purpose === 'plan')
   const original = requests.find(item => item.operationId === retained?.requestId || item.requestOperationIds?.includes(retained?.requestId ?? '')) ?? requests.at(-1)
   const observed = original && demand.patrolObservations?.find(item => item.operationId === original.operationId)
+  const pendingRead = original ? observed?.state !== 'planned' : Boolean(retained)
   const attempt = original?.attempts.at(-1), target = attempt?.target.agentSessionId ?? original?.supervisorAgentSessionId ?? demand.supervisorSessionId
   const supervisorHosts = goalSupervisorHostWitnesses(demand), currentHostId = supervisorHosts.length === 1 ? supervisorHosts[0] : undefined
   const targetHostId = original ? attempt?.target.hostId : currentHostId
@@ -80,7 +81,7 @@ export function GoalPlanRequest({ demand, onRequest, pending, busy }: { demand: 
       throw error
     }
   }
-  return <div className="goal-plan__request" data-goal-plan-request-feedback>
+  const controls = <>
     {!demand.supervisorSessionId ? <>
       <Button type="button" data-goal-plan-request={original ? undefined : true} disabled={working} onClick={chooseSupervisor}>{split ? 'Choose Supervisor to split work' : 'Choose Supervisor to revise plan'}</Button>
     </> : null}
@@ -114,5 +115,10 @@ export function GoalPlanRequest({ demand, onRequest, pending, busy }: { demand: 
       : retained ? <p className="goals-caption" role="status">Your planning request is retained. {demand.supervisorSessionId ? 'Check the original request before sending again.' : 'Choose a Supervisor, then explicitly send it.'}</p> : null}
     {issue ? <p className="goals-service" role="status">{issue} Your original request and work are retained.</p> : null}
     {choose ? <GoalAgentPicker demand={demand} role="supervisor" onSave={saveSupervisor} onClose={() => setChoose(false)} /> : null}
+  </>
+  return <div className="goal-plan__request" data-goal-plan-request-feedback>
+    {split ? controls : <details open={Boolean(pendingRead || pending || choose || issue) || undefined}>
+      <summary>Plan actions</summary>{controls}
+    </details>}
   </div>
 }

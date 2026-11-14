@@ -7,8 +7,8 @@ import { GoalFiniteStartControl } from './GoalFiniteStartControl'
 import { readGoalFiniteStartIntent } from '../lib/goal-finite-start'
 
 /** The original work and its original controls share one reading area, never another execution owner. */
-export function GoalWorkArea({ demand, plan, overview, onRevealResults, active = true, primary = true }: {
-  demand: DemandProjection; plan?: ReactNode; overview?: ReactNode; onRevealResults?: (() => void) | undefined; active?: boolean; primary?: boolean
+export function GoalWorkArea({ demand, overview, onRevealResults, active = true, primary = true }: {
+  demand: DemandProjection; overview?: ReactNode; onRevealResults?: (() => void) | undefined; active?: boolean; primary?: boolean
 }) {
   const current = useAppStore(state => active ? state.demands[demand.id] ?? demand : demand)
   const rawIntent = useAppStore(state => state.goalFiniteStartIntents[demand.id])
@@ -23,6 +23,6 @@ export function GoalWorkArea({ demand, plan, overview, onRevealResults, active =
   return <section className="goal-work-area" data-goal-work-area={current.id} data-goal-work-context={hasWork ? 'recorded' : 'fresh'} aria-label="Goal work">
     <div className="goals-section-heading"><h2>Work</h2><span className="goals-caption">{hasWork ? 'Original execution and requests' : 'Planning and execution'}</span></div>
     <GoalDelegationWork demand={current} active={active} embedded focus={fact.source} primary={primary && !finitePrimary}
-      beforeRecords={hasWork && (rawIntent !== undefined || pending) ? finite : undefined} afterRecords={!hasWork ? finite : rawIntent === undefined && !pending ? another : undefined} overview={overview} plan={plan} onRevealResults={onRevealResults} />
+      beforeRecords={hasWork && (rawIntent !== undefined || pending) ? finite : undefined} afterRecords={!hasWork ? finite : rawIntent === undefined && !pending ? another : undefined} overview={overview} onRevealResults={onRevealResults} />
   </section>
 }
