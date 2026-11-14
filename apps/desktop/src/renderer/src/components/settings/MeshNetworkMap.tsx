@@ -81,6 +81,8 @@ function MeshGateways({ snapshot, peers, selected, stale, savedTargets, savedIss
   </section>
 }
 
+type MeshMapView = 'geography' | 'connections' | 'list'
+
 /** The source's current network observation; selecting and arranging never changes network policy. */
 type MeshMapProps = {
   snapshot?: MeshNetworkInspection | undefined; active?: boolean; actions?: ReactNode; reading?: boolean; stale?: boolean
@@ -89,16 +91,18 @@ type MeshMapProps = {
   locations?: MeshMapLocations | undefined; onLocation?: ((hostId: string) => void) | undefined
 }
 export function MeshNetworkMap({ snapshot, active = true, reading = false, stale = false, hosts = NO_HOSTS, ...props }: MeshMapProps) {
+  const [view, setView] = useState<MeshMapView>(props.localClient ? 'geography' : 'connections')
   const [selectedHostId, selectHost] = useState<string>()
   return <MeshTopologyExplorer key={meshTopologySource(snapshot)} {...props} snapshot={snapshot} active={active}
-    hosts={hosts} selectedHostId={selectedHostId} selectHost={selectHost} reading={reading} stale={stale} />
+    hosts={hosts} view={view} setView={setView} selectedHostId={selectedHostId} selectHost={selectHost} reading={reading} stale={stale} />
 }
-function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, localClient, locations, onLocation, selectedHostId, selectHost, onGateway, savedTargets, savedIssue, reading, stale }: MeshMapProps & {
+function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, localClient, view, setView, locations, onLocation, selectedHostId, selectHost, onGateway, savedTargets, savedIssue, reading, stale }: MeshMapProps & {
+  view: MeshMapView; setView: (view: MeshMapView) => void
   active: boolean; reading: boolean; stale: boolean; hosts: readonly HostConfig[]
   selectedHostId: string | undefined; selectHost: (id: string | undefined) => void
 }) {
   const model = useMemo(() => meshTopologyModel(snapshot), [snapshot])
-  const [selected, select] = useState<MeshTopologySelection>(), [view, setView] = useState<'topology' | 'list'>('topology')
+  const [selected, select] = useState<MeshTopologySelection>()
   const [narrow, setNarrow] = useState(false)
   const points = useMemo(() => {
     const positions = new Map<string, XYPosition>()
@@ -110,12 +114,12 @@ function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, loca
     if (here) positions.set(SAVED_CLIENT_ID, projectMeshLocation(here))
     return positions
   }, [hosts, localClient, locations])
-  const geographic = points.size > 0
+  const geographic = view === 'geography'
   const localPlaced = points.has(SAVED_CLIENT_ID)
   const hasRelayPeers = model.peers.some(peer => !peer.own)
   const mixed = hosts.length > 0 && hasRelayPeers
   const portrait = mixed && narrow
-  const hasMap = hosts.length > 0 || hasRelayPeers || localPlaced
+  const hasMap = localClient || hosts.length > 0 || hasRelayPeers || localPlaced
   const selectedHost = hosts.find(host => host.id === selectedHostId)
   const [scope, setScope] = useState<'network' | 'selection'>('network')
   const [chosenCategory, setCategory] = useState<'peers' | 'routes' | 'circuits' | 'hosts'>(() => model.routes.length ? 'routes' : 'peers')
@@ -144,10 +148,10 @@ function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, loca
   const chooseHost = useCallback((id: string) => { select(undefined); selectHost(id); setScope('network'); setCategory('hosts'); requestViewport() }, [selectHost, requestViewport])
   const focused = hasRelayPeers && scope === 'selection' && path.length > 0
   // MeshPathsPane obtains this observation directly from the original local Core.
-  const sharedPeerId = localClient && (hosts.length || localPlaced) ? model.peers.find(peer => peer.own)?.id : undefined
+  const sharedPeerId = localClient ? model.peers.find(peer => peer.own)?.id : undefined
   const peerNodeId = (id: string) => id === sharedPeerId ? SAVED_CLIENT_ID : `relay:${id}`
   const peerSize = mixed ? COMPACT_PEER_SIZE : SIZE
-  const savedNodes = savedConnectionNodes(hosts, narrow || mixed, selectedHostId, host => !focused && matchesHost(host), chooseHost, localPlaced)
+  const savedNodes = savedConnectionNodes(hosts, narrow || mixed, selectedHostId, host => !focused && matchesHost(host), chooseHost, localClient || localPlaced)
   const clientPosition = savedNodes[0]?.position
   const visiblePeers = hasRelayPeers ? model.peers : model.peers.filter(peer => peer.id === sharedPeerId)
   const projectedNodes: MapNode[] = [
@@ -172,7 +176,7 @@ function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, loca
         return { ...measured, ...node }
       })
     })
-  }, [snapshot, hosts, points, narrow, selected, selectedHostId, scope, query, setNodes, choosePeer, chooseHost, sharedPeerId])
+  }, [snapshot, hosts, points, narrow, selected, selectedHostId, scope, query, geographic, setNodes, choosePeer, chooseHost, sharedPeerId])
   const visiblePeerIds = new Set(visiblePeers.map(peer => peer.id))
   const links = [
     ...model.edges.filter(edge => visiblePeerIds.has(edge.source) && visiblePeerIds.has(edge.target))
@@ -185,7 +189,7 @@ function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, loca
     const from = nodePositions.get(source), to = nodePositions.get(target)
     const dx = (to?.x ?? 0) - (from?.x ?? 0), dy = (to?.y ?? 0) - (from?.y ?? 0)
     const horizontal = Math.abs(dx) > Math.abs(dy)
-    const sourcePoint = points.get(source), targetPoint = points.get(target)
+    const sourcePoint = geographic ? points.get(source) : undefined, targetPoint = geographic ? points.get(target) : undefined
     return {
       id, source, target, type: 'meshArc', selectable: false,
       data: { ...(sourcePoint ? { sourcePoint } : {}), ...(targetPoint ? { targetPoint } : {}) },
@@ -210,7 +214,7 @@ function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, loca
   // retaining their positions, so a narrow overview never leaves the original Core off-canvas.
   useEffect(() => {
     const element = canvas.current
-    if (!active || view !== 'topology' || !element) return
+    if (!active || view === 'list' || !element) return
     let frame: number | undefined, previous = ''
     const resize = () => {
       const { width, height } = element.getBoundingClientRect()
@@ -231,7 +235,7 @@ function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, loca
   // A deliberate selection can open the inspector and narrow the canvas after a user pan.
   // Wait for its new dimensions, then fit once. Observations do not request a viewport change.
   useEffect(() => {
-    if (!active || view !== 'topology' || focusRequest === focusedRequest.current) return
+    if (!active || view === 'list' || focusRequest === focusedRequest.current) return
     focusedRequest.current = focusRequest
     let settled: number | undefined
     const frame = requestAnimationFrame(() => { settled = requestAnimationFrame(() => { if (canvasResizeRevision.current === focusResizeRevision.current) fit() }) })
@@ -239,7 +243,7 @@ function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, loca
   }, [focusRequest, active, view, fit])
   // Geometry is finite and off-thread. Counters, RTT and selection do not relayout the network.
   useEffect(() => {
-    if (!active || view !== 'topology' || !hasRelayPeers || geographic) return
+    if (!active || view === 'list' || !hasRelayPeers || geographic) return
     const ids = projectedNodes.map(node => node.id), force = arrangedAttempt.current !== arrangeAttempt
     if (!force && ids.every(id => positions.has(id))) return
     let worker: Worker
@@ -321,16 +325,19 @@ function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, loca
   </span> : null
   const summary = [hosts.length ? `${hosts.length} saved route${hosts.length === 1 ? '' : 's'}` : '', (stale ? 'Last confirmed · ' : '') + relaySummary].filter(Boolean).join(' · ')
   return <section className="mesh-network-map mesh-explorer" aria-label="Observed Mesh topology" data-mesh-topology data-mesh-overview={onGateway ? true : undefined}>
-    <header className="mesh-explorer__header"><div className="mesh-explorer__heading"><h3>Network map{snapshot?.network?.networkId ? <small>{snapshot.network.networkId}</small> : null}</h3><p>{summary}</p></div>{actions}</header>
+    <header className="mesh-explorer__header"><div className="mesh-explorer__heading"><h3>Network map{snapshot?.network?.networkId ? <small>{snapshot.network.networkId}</small> : null}</h3><p>{localClient ? 'From this device · ' : ''}{summary}</p></div>{actions}</header>
     {hasMap ? <div className="mesh-explorer__toolbar"><label className="mesh-explorer__search"><TextInput aria-label={hosts.length ? hasRelayPeers ? 'Find a device, peer or path' : 'Find a device' : 'Find a peer, endpoint or circuit'} value={query} onChange={event => setQuery(event.target.value)} placeholder={hosts.length ? hasRelayPeers ? 'Find a device, peer or path' : 'Find a device' : 'Find a peer or path'} /></label>
-      <div className="mesh-explorer__segments" role="group" aria-label="Network view"><button type="button" aria-pressed={view === 'topology'} onClick={() => setView('topology')}>Map</button><button type="button" aria-pressed={view === 'list'} onClick={() => setView('list')}>List</button></div>
+      <div className="mesh-explorer__segments" role="group" aria-label="Network view">
+        {([['geography', 'Geography'], ['connections', 'Connections'], ['list', 'List']] as const).map(([mode, label]) =>
+          <button type="button" key={mode} aria-pressed={view === mode} onClick={() => setView(mode)}>{label}</button>)}
+      </div>
       {hasRelayPeers ? <div className="mesh-explorer__segments" role="group" aria-label="Network scope"><button type="button" aria-pressed={!focused} onClick={() => { setScope('network'); requestViewport() }}>Network</button><button type="button" aria-pressed={focused} disabled={!path.length} onClick={() => { setScope('selection'); requestViewport() }}>Selected path</button></div> : null}
     </div> : null}
     <div className="mesh-explorer__body" data-empty={!hasMap || undefined}><div className="mesh-explorer__workspace">
       {view === 'list' ? directory : null}
-      {view === 'topology' && legend ? <div className="mesh-explorer__map-key" data-geographic={geographic || undefined}>{legend}
-        <span>{geography ? `${geography.marks.length} located · ${geography.unknown} location unknown` : 'Connection diagram · Device locations unknown'}</span></div> : null}
-      {hasMap ? <div className="mesh-explorer__graph" hidden={view !== 'topology'}>
+      {view !== 'list' && legend ? <div className="mesh-explorer__map-key" data-geographic={geographic || undefined}>{legend}
+        <span>{geography ? `${geography.marks.length} located · ${geography.unknown} location unknown` : 'Connection diagram'}</span></div> : null}
+      {hasMap ? <div className="mesh-explorer__graph" hidden={view === 'list'}>
         <div ref={canvas} className="mesh-explorer__canvas" data-mixed={mixed || undefined} data-saved={hosts.length > 0 || undefined} data-narrow={narrow || undefined}
           data-geographic={geographic || undefined} aria-label="Network relationship canvas">
           <ReactFlow<MapNode, MapEdge> nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onInit={value => { instance.current = value; if (geographic) requestViewport() }}
@@ -344,19 +351,19 @@ function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, loca
         <strong>{reading ? 'Reading connections…' : 'No connections to show'}</strong>
         <p>{onGateway ? 'Add a device below or configure Mesh Relay.' : networkState}</p>
       </div>}
-      {onGateway && hasRelayPeers && view === 'topology' ? directory : null}
+      {onGateway && hasRelayPeers && view !== 'list' ? directory : null}
       {!onGateway || view === 'list' ? inspector : null}
     </div>
     {onGateway ? <div className="mesh-explorer__companion">
-      {view === 'topology' ? inspector : null}
+      {view !== 'list' ? inspector : null}
       <MeshGateways snapshot={snapshot} peers={model.peers} selected={selected} stale={stale} savedTargets={savedTargets} savedIssue={savedIssue} onGateway={onGateway} onPeer={showPeer} />
     </div> : null}
     </div>
-    {!onGateway && view === 'topology' && hasRelayPeers ? directory : null}
+    {!onGateway && view !== 'list' && hasRelayPeers ? directory : null}
 
     <footer className="mesh-explorer__footer">
       <span>{snapshot ? `Mesh observed ${new Date(snapshot.observedAt).toLocaleTimeString()}${snapshot.network && !snapshot.coverage.complete ? ' · Partial network view' : ''}` : 'No Relay observation yet'}</span>
-      <details><summary>Mesh observation source</summary><p>Runtime <code>{snapshot?.owner.runtimeId ?? 'unconfirmed'}</code>, instance <code>{snapshot?.owner.ownerInstanceId ?? 'unconfirmed'}</code>. The map shows logical connections.</p></details>
+      <details><summary>Mesh observation source</summary><p>Runtime <code>{snapshot?.owner.runtimeId ?? 'unconfirmed'}</code>, instance <code>{snapshot?.owner.ownerInstanceId ?? 'unconfirmed'}</code>.</p></details>
     </footer>
   </section>
 }
