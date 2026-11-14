@@ -275,4 +275,6 @@
 .mesh-explorer__canvas[data-geographic][data-narrow] .mesh-explorer-node strong { font-size: 21px; }
 .mesh-explorer__canvas[data-geographic][data-narrow] .mesh-explorer-node__state { font-size: 15px; }
 
-.mesh-geography__marks [data-approximate] circle { fill: var(--surface-1); stroke-dasharray: 2 2; }
+.mesh-geography__marks .mesh-geography__estimate-ring { fill: none; stroke: var(--blue); stroke-width: 1.8; stroke-dasharray: 3 2; }
+.mesh-saved-client small { font-size: var(--fs-micro); }
+.mesh-explorer-node__kind[title] { white-space: nowrap; letter-spacing: 0; }

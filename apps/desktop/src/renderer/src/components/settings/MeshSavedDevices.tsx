@@ -6,7 +6,7 @@ import { api } from '../../lib/api'
 import { MeshPorts } from './MeshSavedConnections'
 
 export type SavedDevice = { id: string; serverId: string; routes: { url: string; gateway: string }[] }
-export type DeviceNode = Node<{ device: SavedDevice; selected: boolean; dimmed: boolean; choose(id: string): void }, 'device'>
+export type DeviceNode = Node<{ locationHint?: string; device: SavedDevice; selected: boolean; dimmed: boolean; choose(id: string): void }, 'device'>
 
 export function savedMeshDevices(urls: readonly string[]) {
   const devices = new Map<string, SavedDevice>()
@@ -24,7 +24,7 @@ export function savedMeshDevices(urls: readonly string[]) {
 export function SavedDeviceNode({ data }: NodeProps<DeviceNode>) {
   return <><MeshPorts type="target" /><button type="button" className="mesh-explorer-node nopan" data-mesh-device={data.device.serverId}
     aria-pressed={data.selected} data-dimmed={data.dimmed || undefined} onClick={() => data.choose(data.device.id)}>
-    <span className="mesh-explorer-node__kind">Device endpoint</span>
+    <span className="mesh-explorer-node__kind" title={data.locationHint ? 'Estimated from public egress · ' + data.locationHint : undefined}>{data.locationHint ?? 'Device endpoint'}</span>
     <strong title={data.device.serverId}>{data.device.serverId}</strong>
     <span className="mesh-explorer-node__state">Saved access link</span>
   </button></>

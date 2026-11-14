@@ -7,8 +7,8 @@ import { useAppStore } from '../../store'
 import { HostIcon } from '../HostBadge'
 import { useHostConnectionHint } from '../HostConnectionTooltip'
 
-export type SavedHostNode = Node<{ host: HostConfig; selected: boolean; dimmed: boolean; onSelect: (id: string) => void }, 'savedHost'>
-export type SavedClientNode = Node<Record<string, never>, 'savedClient'>
+export type SavedHostNode = Node<{ locationHint?: string; host: HostConfig; selected: boolean; dimmed: boolean; onSelect: (id: string) => void }, 'savedHost'>
+export type SavedClientNode = Node<{ locationHint?: string }, 'savedClient'>
 export const savedHostId = (id: string) => `saved:host:${id}`
 export const SAVED_CLIENT_ID = 'saved:client'
 const HOST_SIZE = { width: 158, height: 64 }
@@ -26,15 +26,15 @@ export function MeshSavedHost({ data }: NodeProps<SavedHostNode>) {
     <MeshPorts type="target" />
     <button type="button" className="mesh-explorer-node mesh-saved-host nopan" data-host-node={host.id} data-dimmed={dimmed || undefined}
       aria-pressed={selected} title={connection.detail} onClick={() => onSelect(host.id)}>
-      <span className="mesh-explorer-node__kind"><HostIcon kind={host.kind} size={12} />{hostTransportLabel(host)}{selected ? <span aria-label="Selected">✓</span> : null}</span>
+      <span className="mesh-explorer-node__kind" title={data.locationHint ? 'Estimated from public egress · ' + data.locationHint : undefined}><HostIcon kind={host.kind} size={12} />{data.locationHint ?? hostTransportLabel(host)}{selected ? <span aria-label="Selected">✓</span> : null}</span>
       <strong>{host.label}</strong>
       <span className="mesh-explorer-node__state">{connection.summary.replace(/^Current: /, '')}</span>
     </button>
   </>
 }
 
-export function MeshSavedClient() {
-  return <div className="mesh-saved-client"><HostIcon kind="local" size={15} /><strong>This device</strong><MeshPorts type="source" /></div>
+export function MeshSavedClient({ data }: NodeProps<SavedClientNode>) {
+  return <div className="mesh-saved-client"><HostIcon kind="local" size={15} /><strong>This device</strong>{data.locationHint && <small>{data.locationHint}</small>}<MeshPorts type="source" /></div>
 }
 
 export function savedConnectionNodes(hosts: readonly HostConfig[], twoBanks: boolean,

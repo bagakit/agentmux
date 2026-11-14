@@ -14,7 +14,7 @@ import { MeshPorts, MeshSavedClient, MeshSavedHost, SAVED_CLIENT_ID, SavedConnec
 
 import { SavedDeviceNode, SavedDeviceDetails, type DeviceNode, type SavedDevice } from './MeshSavedDevices'
 
-type PeerNode = Node<{ peer: MeshTopologyPeer; sharedLocal: boolean; selected: boolean; onPath: boolean; dimmed: boolean; onSelect(id: string): void }, 'meshPeer'>
+type PeerNode = Node<{ locationHint?: string; peer: MeshTopologyPeer; sharedLocal: boolean; selected: boolean; onPath: boolean; dimmed: boolean; onSelect(id: string): void }, 'meshPeer'>
 type MapNode = PeerNode | SavedHostNode | SavedClientNode | DeviceNode
 type MapEdge = Edge<{ sourcePoint?: XYPosition; targetPoint?: XYPosition }>
 const SIZE = { width: 188, height: 64 }
@@ -27,7 +27,7 @@ function MeshPeer({ data }: NodeProps<PeerNode>) {
   const { peer, sharedLocal } = data
   return <><MeshPorts type="target" />
     <button type="button" className="mesh-explorer-node nopan" data-peer-state={peer.state} data-shared-local={sharedLocal || undefined} data-on-path={data.onPath || undefined} data-dimmed={data.dimmed || undefined} aria-pressed={data.selected} onClick={() => data.onSelect(peer.id)}>
-      <span className="mesh-explorer-node__kind"><span className="mesh-explorer-node__socket" aria-hidden="true" />{sharedLocal ? 'LOCAL DEVICE' : peer.own ? 'THIS CORE' : peer.ingress.length ? 'GATEWAY INGRESS' : 'PEER'}{data.selected ? <span aria-label="Selected">✓</span> : null}</span>
+      <span className="mesh-explorer-node__kind" title={data.locationHint ? 'Estimated from public egress · ' + data.locationHint : undefined}><span className="mesh-explorer-node__socket" aria-hidden="true" />{data.locationHint ?? (sharedLocal ? 'LOCAL DEVICE' : peer.own ? 'THIS CORE' : peer.ingress.length ? 'GATEWAY INGRESS' : 'PEER')}{data.selected ? <span aria-label="Selected">✓</span> : null}</span>
       <strong title={peer.id}>{sharedLocal ? 'This device' : meshPeerLabel(peer)}</strong>
       <span className="mesh-explorer-node__state">{sharedLocal ? 'Saved links · Relay' : meshPeerState(peer)}{peer.rttMs === null ? '' : ` · ${meshRtt(peer.rttMs)}`}</span>
     </button><MeshPorts type="source" /></>
@@ -197,7 +197,7 @@ function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, loca
           dimmed: !pathSet.has(peer.id) && (focused || Boolean(needle && !matchedPeers.has(peer.id))), onSelect: choosePeer } }
     }),
   ]
-  const geography = geographic ? placeGeographicNodes(projectedNodes, points, narrow) : undefined
+  const geography = geographic ? placeGeographicNodes(projectedNodes, points, narrow, deviceLocations) : undefined
   const placedNodes = geography?.placements ?? projectedNodes.map(node => ({ ...node, position: positions.get(node.id) ?? node.position }))
   const [nodes, setNodes, onNodesChange] = useNodesState<MapNode>(placedNodes)
   useEffect(() => {

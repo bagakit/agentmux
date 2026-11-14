@@ -37,7 +37,7 @@ export function MeshAtlas({ children }: { children?: ReactNode }) {
   </div>
 }
 
-export function placeGeographicNodes<N extends Node>(nodes: readonly N[], points: ReadonlyMap<string, XYPosition>, narrow: boolean) {
+export function placeGeographicNodes<N extends Node>(nodes: readonly N[], points: ReadonlyMap<string, XYPosition>, narrow: boolean, locations: ReadonlyMap<string, { source: string; accuracyKm?: number }>) {
   const labels: { position: XYPosition; width: number; height: number }[] = []
   const marks: { id: string; point: XYPosition; label: XYPosition }[] = []
   const unplaced = nodes.filter(node => !points.has(node.id))
@@ -55,7 +55,10 @@ export function placeGeographicNodes<N extends Node>(nodes: readonly N[], points
     }
     labels.push({ position, width, height })
     marks.push({ id: node.id, point, label: { x: position.x + width / 2, y: position.y + (position.y < point.y ? height : 0) } })
-    return [{ ...node, position, draggable: false, className: 'mesh-geographic-node' }]
+    const location = locations.get(node.id)
+    const hint = location?.source === 'public-egress'
+      ? (location.accuracyKm === undefined ? 'IP estimate' : 'IP · ±' + location.accuracyKm + ' km') : undefined
+    return [{ ...node, data: { ...node.data, locationHint: hint }, position, draggable: false, className: 'mesh-geographic-node' }]
   })
   const extent = labels.reduce((box, { position, width, height }) => ({
     left: Math.min(box.left, position.x),
@@ -100,6 +103,7 @@ export function MeshGeography({ marks, unknown, tray, locations }: Pick<ReturnTy
         {marks.map(({ id, point, label }) => <g key={id} data-geographic-point={id} data-approximate={locations.get(id)?.source === 'public-egress' || undefined}>
           <line x1={point.x} y1={point.y} x2={label.x} y2={label.y} />
           <circle cx={point.x} cy={point.y} r="5" />
+          {locations.get(id)?.source === 'public-egress' && <circle className="mesh-geography__estimate-ring" cx={point.x} cy={point.y} r="10" />}
         </g>)}
       </svg>
     </div>
