@@ -14,6 +14,17 @@ import { SurveyZoneItem } from '../src/renderer/src/components/SurveyZoneItem'
 
 // Real editors and menus are mounted. Only the external asynchronous name
 // owner is deferred; Core persistence and ACK semantics have their own suite.
+// This suite supplies a synthetic ACK; the adjacent owner suite exercises real revision and recovery.
+vi.mock('../src/renderer/src/store', async importOriginal => {
+  const actual = await importOriginal<typeof import('../src/renderer/src/store')>()
+  return { ...actual, focusAgentNameEditor: (id: string) => ({
+    ...actual.focusAgentNameEditor(id),
+    save: async (value: string | null, revision: number) => ({
+      operationId: 'fixture-name', applied: await actual.useAppStore.getState().renameAgent(id, value, revision),
+      nameRevision: revision + 1, diskDurability: 'confirmed', issue: null,
+    }),
+  }) }
+})
 const baseline = useAppStore.getState()
 const tabId = 'pending-name-tab'
 let root: Root, container: HTMLDivElement, context: FocusContext

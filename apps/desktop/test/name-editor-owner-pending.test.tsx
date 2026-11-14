@@ -11,6 +11,8 @@ import { displayLabel, type AgentMuxDisplayLabelMutation, type AgentMuxDisplayLa
   type AgentMuxNameContext, type AgentMuxNameTarget } from '../../../packages/core/src/spatial-graph'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { api } from '../src/renderer/src/lib/api'
+import { spaceMountKey } from '../src/shared/space-mount'
+import { originalSourceActionUnavailable } from '../src/renderer/src/lib/original-space-navigation'
 import { currentDisplayNameRevision, useAppStore } from '../src/renderer/src/store'
 import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
 import { createFocusProjectionSelector, type FocusContext } from '../src/renderer/src/lib/focus-context'
@@ -144,7 +146,7 @@ afterEach(async test => {
       JSON.stringify({ kind: 'cleanup', test: test.task.name, directory, removed }) + '\n')
   }
 })
-async function mount(kind: Kind) {
+async function mount(kind: Kind, list = false) {
   function SurveyFixture() {
     const [editing, setEditing] = useState(true)
     const title = useAppStore(state => state.surveyExplorationNames[zone.zoneId] ?? 'Original exploration')
@@ -152,7 +154,7 @@ async function mount(kind: Kind) {
       onEdit={setEditing} onRename={(name, revision) => useAppStore.getState().setSurveyExplorationName(zone.zoneId, name, revision)} onSelect={() => {}} />
   }
   await act(async () => root!.render(kind === 'Agent row'
-    ? createElement(FocusContextRow, { context, selected: true, onSelect() {} })
+    ? createElement(FocusContextRow, { context, selected: true, list, onSelect() {} })
     : kind === 'Focus Tab' ? createElement(FocusToolbar, { children: null, selectedId: context.id, selected: context, tab: useAppStore.getState().tabs[tabId]!, onReview() {}, onCloseWorkspace() {} })
     : kind === 'Survey Zone' ? createElement(SurveyFixture)
     : createElement(WorkspaceWorkbench, { workspaceId: context.workspaceId, visible: true })))
@@ -259,4 +261,83 @@ it.each(['Workbench Tab', 'Workbench Agent'] as const)('%s retains the advanced 
   expect(next.result.applied).toBe(true); await deliver(1)
   expect(edit.input()).toBeNull()
   expect(displayLabel((await new AgentMuxSpatialStateStore(owner.path).read())!.graph, nameTarget)).toMatchObject({ value: 'Newest draft C', nameRevision: initial + 2 })
+})
+
+it.each([false, true])('Focus Agent save follows the row with an unrelated Source selected (List %s)', async list => {
+  const edit = await mount('Agent row', list), nameTarget = target('Agent row')
+  const selected = { hostId: 'local', workspaceId: 'another-workspace', zoneId: 'another-zone',
+    reference: { runtimeId: 'other-original-runtime', spaceId: 'other-original-space' } }
+  const mounted = spaceMountKey(selected.reference)
+  await act(async () => useAppStore.setState({
+    activeWorkspaceId: selected.workspaceId,
+    workbenchSpaceSelection: { workspaceId: selected.workspaceId, zoneId: selected.zoneId, spaceId: selected.reference.spaceId,
+      tabId: null, groupId: null, regionId: null, topicId: null },
+    mountedSpaceInputs: { [mounted]: { target: selected, drafts: {} } },
+  }))
+  expect(originalSourceActionUnavailable(useAppStore.getState(), selected.workspaceId, 'rename')).toBeInstanceOf(Error)
+  await value(edit.input()!, 'Exact original Focus name')
+  await act(async () => edit.input()!.blur())
+  expect(api.spatial.renameLabel).not.toHaveBeenCalled()
+  await act(async () => edit.input()!.focus())
+  await edit.submit()
+  expect(container.textContent).toContain('Saving name…')
+  const sent = await request(0, 'Exact original Focus name')
+  expect(sent.input.target).toEqual(nameTarget)
+  await deliver(0)
+  expect(edit.input()).toBeNull()
+  expect(document.activeElement).toBe(container.querySelector('button.focus-context'))
+  expect(displayLabel((await owner.read())!.graph, nameTarget)?.value).toBe('Exact original Focus name')
+  expect(useAppStore.getState().workbenchSpaceSelection?.workspaceId).toBe(selected.workspaceId)
+})
+
+it('Focus Agent conflict keeps the draft and requires a fresh read before an explicit new save', async () => {
+  const edit = await mount('Agent row', true), nameTarget = target('Agent row')
+  const initial = currentDisplayNameRevision(nameTarget.kind, nameTarget.id)
+  await owner.mutateDisplayLabel({ operationId: 'another-editor', target: nameTarget, value: 'Other writer',
+    source: 'manual', expectedNameRevision: initial }, ui)
+  await value(edit.input()!, 'Keep my draft')
+  await edit.submit()
+  expect((await request(0, 'Keep my draft')).result.applied).toBe(false)
+  await deliver(0)
+  expect(edit.input()?.value).toBe('Keep my draft')
+  expect(container.querySelector('[role="status"]')?.textContent).toMatch(/Name changed since/)
+  await edit.submit()
+  expect(api.spatial.renameLabel).toHaveBeenCalledTimes(1)
+  const read = [...container.querySelectorAll('button')].find(button => button.textContent === 'Check current name')!
+  await act(async () => read.click())
+  await vi.waitFor(() => expect(container.textContent).toContain('Current name: Other writer.'))
+  expect(edit.input()?.value).toBe('Keep my draft')
+  expect(api.spatial.renameLabel).toHaveBeenCalledTimes(1)
+  const save = [...container.querySelectorAll('button')].find(button => button.textContent === 'Save name')!
+  await act(async () => save.click())
+  const newOperation = await request(1, 'Keep my draft')
+  expect(newOperation.input.operationId).not.toBe(held[0]?.input.operationId)
+  expect(newOperation.input.expectedNameRevision).toBe(initial + 1)
+  await deliver(1)
+  expect(edit.input()).toBeNull()
+  expect(displayLabel((await owner.read())!.graph, nameTarget)?.value).toBe('Keep my draft')
+})
+
+it('Focus Agent confirmation keeps the draft when another owner has since changed the name', async () => {
+  const edit = await mount('Agent row', true), nameTarget = target('Agent row')
+  const initial = currentDisplayNameRevision(nameTarget.kind, nameTarget.id)
+  await value(edit.input()!, 'My submitted name')
+  const save = [...container.querySelectorAll('button')].find(button => button.textContent === 'Save name')!
+  await act(async () => save.click())
+  const earlier = await request(0, 'My submitted name')
+  expect(earlier.result.applied).toBe(true)
+  earlier.result.diskDurability = 'unconfirmed'
+  await deliver(0)
+  const confirm = [...container.querySelectorAll('button')].find(button => button.textContent === 'Confirm saved name')!
+  await act(async () => {
+    const other = await owner.mutateDisplayLabel({ operationId: 'later-confirmed-name', target: nameTarget, value: 'Later editor choice',
+      source: 'manual', expectedNameRevision: initial + 1 }, ui)
+    expect(other.applied).toBe(true)
+    confirm.click()
+  })
+  await vi.waitFor(() => expect(container.textContent).toContain('The name has changed since then.'))
+  expect(api.spatial.confirmNameCommit).toHaveBeenCalledWith(earlier.input.operationId)
+  expect(api.spatial.renameLabel).toHaveBeenCalledTimes(1)
+  expect(edit.input()?.value).toBe('My submitted name')
+  expect(displayLabel((await owner.read())!.graph, nameTarget)?.value).toBe('Later editor choice')
 })

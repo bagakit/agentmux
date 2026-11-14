@@ -14,7 +14,10 @@ import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { createFocusProjectionSelector } from '../src/renderer/src/lib/focus-context'
 import { formatSessionAddress } from '../src/renderer/src/lib/agent-address'
-vi.mock('../src/renderer/src/components/AgentAvatar', () => ({ AgentAvatar: () => createElement('span') }))
+vi.mock('../src/renderer/src/components/AgentAvatar', async importOriginal => ({
+  ...await importOriginal<typeof import('../src/renderer/src/components/AgentAvatar')>(),
+  AgentAvatar: () => createElement('span')
+}))
 import { FocusContextRow } from '../src/renderer/src/components/FocusContextRow'
 
 const initial = useAppStore.getState(), first = 'card-first', second = 'card-second'
@@ -178,11 +181,12 @@ it('renames only the exact Agent, cancels safely, and clearing restores the exis
   expect(useAppStore.getState().agentNames[second]).toBeUndefined(); expect(card().querySelector('strong')!.textContent).toBe('Derived task for ' + second)
   expect(useAppStore.getState().agentFocus).toBe(before.agentFocus); expect(useAppStore.getState().sessions).toBe(before.sessions)
 })
-it('preserves IME editing and commits blur without taking later input focus', async () => {
+it('preserves IME editing and the unsent name when focus moves to a later input', async () => {
   await menu(); await choose('Rename Agent'); const input = await value('中文名称')
   for (const key of ['Enter', 'Escape']) await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key, isComposing: true })))
   expect(container.querySelector('.focus-context__rename')).toBe(input); expect(useAppStore.getState().agentNames[second]).toBe('Same visible Agent')
   await act(async () => destination.focus()); await advance(1)
-  await act(async () => { await vi.waitFor(() => expect(useAppStore.getState().agentNames[second]).toBe('中文名称')) })
-  expect(useAppStore.getState().agentNames[second]).toBe('中文名称'); expect(document.activeElement).toBe(destination)
+  expect(input.value).toBe('中文名称'); expect(container.querySelector('.focus-context__rename')).toBe(input)
+  expect(useAppStore.getState().agentNames[second]).toBe('Same visible Agent'); expect(api.spatial.renameLabel).not.toHaveBeenCalled()
+  expect(document.activeElement).toBe(destination)
 })

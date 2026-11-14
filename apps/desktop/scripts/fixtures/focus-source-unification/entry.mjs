@@ -12,15 +12,17 @@ import { spaceMountKey } from '../../../src/shared/space-mount'
 import '../../../src/renderer/src/styles/index.css'
 import { prepareTakeoverFeedback } from './feedback.mjs'
 import { prepareSourceConnection } from './connection.mjs'
+import { prepareInlineRename } from './inline-rename.mjs'
 
 // Original authority/Native process IO are controlled preview leaves. The App,
 // source adapter, normal Context/lane/card/Reader/filter/menu remain production.
 const memberStateMode=window.__memberStateScene===true,unconfirmedMode=window.__unconfirmedScene===true
+const localTaskScene=window.__taskLayoutScene||window.__inlineRenameScene
 const config=await api.config.get(),initial=await api.sessions.snapshot(),base=initial.sessions.find(s=>s.kind==='agent')
 if(!base?.control?.run?.runId)throw Error('Existing typed preview Agent required')
 const {pendingInteraction:_pending,...agent}=base,now=Date.now(),path='/original/analysis-project'
 const workspace={id:'ordinary-analysis',hostId:'local',kind:'folder',path,name:'业务分析项目'}
-const branches = window.__taskLayoutScene ? [
+const branches = localTaskScene ? [
   { name: 'web', taskId: 'branch-web' },
   { name: 'api', taskId: 'branch-api' },
 ].map(({name, taskId}) => ({ workspace: { ...workspace, id: 'analysis-' + name, name,
@@ -28,7 +30,7 @@ const branches = window.__taskLayoutScene ? [
 const workspaces = [workspace, ...branches.map(branch => branch.workspace)]
 const definitions=[['working','核对发布版本与业务数据','working','running',now],['reading','核查跨版本分析记录','working','running',now-20*60000],['interrupted','继续上次保留的分析任务','disconnected','interrupted',now]]
 const sessions=definitions.map(([id,label,state,processState,at])=>({...agent,id,hostId:'local',workspacePath:path,label,processState,status:{state,source:'native-hook',observedAt:at},semanticStatus:{state:'working',source:'native-hook',observedAt:at,stateEnteredAt:at},control:{...agent.control,hostId:'local',agentSessionId:id,run:{runId:'original-run-'+id}}}))
-if(window.__taskLayoutScene){
+if(localTaskScene){
  for (const [index, {workspace: checkout, taskId}] of branches.entries()) {
   const observedAt = now + index - 1000
   sessions.push({...sessions[0], id: taskId, label: '核对灰度报告与原始数据', workspacePath: checkout.path,
@@ -63,7 +65,7 @@ if(window.__taskLayoutScene){
 const localReply='已核对原始数据与发布记录，接下来定位异常项并给出可验证的结论。'
 const timelines=Object.fromEntries(sessions.map(s=>[s.id,{agentSessionId:s.id,revision:1,items:[{id:'original-answer-'+s.id,agentSessionId:s.id,kind:'assistant_message',title:'Original answer',source:'native-hook',status:'complete',content:s.id==='working'?localReply:'原始分析内容与恢复位置仍然保留。',createdAt:now-30000,updatedAt:now-30000}]}]))
 const tab=createWorkbenchTab('ordinary-tab',{regionId:'ordinary-region',workspaceId:workspace.id,kind:'agent',phase:'attached',sessionId:'working'})
-const originalTabs = [tab, ...(window.__taskLayoutScene ? sessions.filter(item => item.id !== 'working').map(item => {
+const originalTabs = [tab, ...(localTaskScene ? sessions.filter(item => item.id !== 'working').map(item => {
  const location = workspaces.find(candidate => candidate.path === item.workspacePath)
  return createWorkbenchTab('tab-'+item.id,{regionId:'region-'+item.id,workspaceId:location.id,kind:'agent',phase:'attached',sessionId:item.id})
 }) : [])]
@@ -73,7 +75,7 @@ api.scratch.listTopics=async()=>[]
 const reference={runtimeId:'original-local-runtime',spaceId:'original-project-space'},source={runtimeId:reference.runtimeId,ownerInstanceId:'original-source-instance'},key=spaceMountKey(reference)
 const target={hostId:'local',reference,zoneId:'original-zone',workspaceId:workspace.id}
 const members=[['working',reference.runtimeId,'local'],['interrupted',reference.runtimeId,'local'],['reading',reference.runtimeId,'local'],['working','original-other-runtime','original-agent-device'],['unobserved','unavailable-original-runtime','unavailable-agent-device']]
-if(window.__taskLayoutScene)members[0]=['coverage',reference.runtimeId,'local']
+if(localTaskScene)members[0]=['coverage',reference.runtimeId,'local']
 const sourceTabs=members.map((_,i)=>({tabId:'source-tab-'+i,zoneId:target.zoneId,workspaceId:workspace.id,name:null,regionIds:['source-region-'+i]}))
 const sourceRegions=members.map(([sid,runtimeId,hostId],i)=>({regionId:'source-region-'+i,tabId:'source-tab-'+i,kind:'agent',agentSessionId:sid,runId:'source-run-'+i,creationOperationId:'source-create-'+i,execution:{hostId,runtimeId,cwd:path}}))
 if(unconfirmedMode){
@@ -109,12 +111,12 @@ api.spaceMounts.member=async(input,_listener)=>{
 const restoreLayout = window.__taskLayoutScene && localStorage.getItem('agentmux-workbench-v1') !== null
 const restoreWorkbench = window.__feedbackRestoreSerialized || restoreLayout
 useAppStore.setState({loading:false,initialize:async()=>()=>{},config:{...config,workspaces,hosts:[{id:'local',kind:'local',label:'Original local device'}],
- ...(window.__taskLayoutScene ? {focus:{...config.focus,previewTrigger:'keyboard'}} : {})},
+ ...(localTaskScene ? {focus:{...config.focus,previewTrigger:'keyboard'}} : {})},
  sessions,agentNames:Object.fromEntries(sessions.map(s=>[s.id,s.label])),timelines,
  tabs:restoreWorkbench?{}:Object.fromEntries(originalTabs.map(item => [item.id,item])),
  layouts:restoreWorkbench?{}:Object.fromEntries(workspaces.map((item,index) => [item.id,createWorkspaceLayout(index ? item.id+'-group' : 'ordinary-group',originalTabs.filter(tab => tab.workspaceId === item.id).map(tab => tab.id))])),
  activeWorkspaceId:workspace.id,mainSurface:'agents',focusView:'list',toolsOpen:false,projectRailOpen:false,agentFocus:{execution:{sessionId:null,history:[]},pmo:{sessionId:null}},agentComposerDrafts:restoreWorkbench?{}:{working:'原未发送草稿'},mountedSpaceInputs:{[key]:{target,drafts:{}}},mountedSpaceObservations:{},mountedSpaceSessions:{},selectedSpaceMount:null})
-if(window.__taskLayoutScene){
+if(localTaskScene){
 
  api.ui.requestStorageFlush=async()=>{}
  await useAppStore.persist.rehydrate()
@@ -136,6 +138,7 @@ if(window.__taskLayoutScene){
  globalThis.__taskLayoutAdmitWriter()
  window.taskLayoutProof={restored:restoreLayout,topology:()=>{const state=useAppStore.getState();return {tabs:state.tabs,layouts:state.layouts,drafts:state.agentComposerDrafts}},checkpoint:async()=>{await checkpointAgentOperations();return JSON.parse(localStorage.getItem('agentmux-workbench-v1')).state.focusTaskLayout}}
 }
+if(window.__inlineRenameScene)prepareInlineRename({api,useAppStore})
 if(window.__sourceConnectionScene)prepareSourceConnection({api,snapshot,opening})
 if(window.__takeoverFeedbackScene)await prepareTakeoverFeedback({api,useAppStore,workspace,sessions,tab})
 createRoot(document.getElementById('root')).render(createElement(App))

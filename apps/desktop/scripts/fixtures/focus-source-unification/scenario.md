@@ -18,6 +18,12 @@ Pass `--task-layout` to compare Cards with List. The actual Focus owns selection
 
 The two Electron processes share one private user-data directory. They compare the actual persisted layout choice, original Tabs, split layouts and the unsent draft. Session observations and PTY paint come from the fixture.
 
+## Inline Agent name editing
+
+Pass `--inline-rename` to exercise the real Focus row menu and editor in private Electron. The name transport holds a renderer request, exposes a controlled storage failure and simulates another editor updating the original name. Check reads the original revision while preserving the draft. The next explicit save receives an applied receipt with unconfirmed disk durability, then confirms that exact operation. A keyboard save in List returns to the original row. A later save leaves the user's subsequent Search focus intact. Closing the editor during a pending write allows the original request to settle without reopening the editor. The scene checks the original Session and Run identities, Tab and Region layout, and unsent workface draft.
+
+The scene records wide dark Cards and light List and Cards at 360 and 420 px with reduced motion. The isolated transport models receipt timing and storage outcomes. Independent review checks the inline feedback and the keyboard focus in the actual task layout against [Focus behavior](../../../../../docs/design/behavior/focus-context.md#卡片内容预览与-agent-操作) and [Focus presentation](../../../../../docs/design/presentation/focus-context.md#focus-执行台与底部视频编辑器式音轨).
+
 ## Original Session observation states
 
 Run the same entry with `--member-state` to follow an unavailable original task from its actual ordinary Focus card into the shared Region stage. The controlled original Source delivers an authority-qualified `missing`, then real `pending` after the visible Check again action; a source IO error changes pending to parked, another check clears that error, and the exact same original target returns as observed. There is no create, resume, restart or input port in the scene.

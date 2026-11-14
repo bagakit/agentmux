@@ -12,8 +12,9 @@ user Runtime, real Run/PID, OS input, restart or installation qualification.
 At 1200, 640 and 360 px it exercises long-name card density, delayed hover,
 natural pointer transfer, text selection and internal reading scroll; the second
 same-name SID's pointer and Shift+F10 menus; Escape; real Rename Agent draft,
-cancel, commit, clearing to derived name and blur to a later input. Opening a
-menu does not select. The actions are Rename Agent, Copy Agent Link and a separated Stop Agent.
+cancel, explicit commit, clearing to the derived name and keeping the unsent name
+draft while moving focus to a later input. Opening a menu does not select. The
+actions are Rename Agent, Copy Agent Link and a separated Stop Agent.
 At 1200 and 360 px, Stop opens the original confirmation, initially focuses Cancel,
 then returns to the exact card without sending a stop request. The address already
 carries message command examples. The Agent name stays a single ellipsized line
