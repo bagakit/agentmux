@@ -1,6 +1,7 @@
 const { app, BrowserWindow } = require('electron')
 const assert = require('node:assert/strict'), fs = require('node:fs/promises'), path = require('node:path'), crypto = require('node:crypto')
 const [html, privateRoot, evidence] = process.argv.slice(2)
+const protocolCards = process.argv.includes('--protocol-cards')
 app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 let win
@@ -38,6 +39,45 @@ async function bounded(expression, label) {
   assert.ok(bounds.scrollWidth <= bounds.clientWidth + 1, label + ' has no horizontal content loss')
   return bounds
 }
+async function protocolScenario(width, theme, generation) {
+  await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width, height:960, deviceScaleFactor:1, mobile:false })
+  const source=await evaluate(`a2aOriginalReading.seed(${JSON.stringify(theme)},${generation},'declarations')`)
+  await waitFor("document.querySelectorAll('[data-protocol-kind]').length===4")
+  for(const [kind,wire] of Object.entries(source.declared)) {
+    const card=`document.querySelector('[data-protocol-kind=${kind}]')`, raw=card+".querySelector('details.conversation-protocol__original')"
+    assert.equal(await evaluate(`${card}.querySelectorAll('[data-protocol-kind]').length`),0)
+    assert.equal(await evaluate(`${raw}.open`),false)
+    assert.equal(await evaluate(`${raw}.querySelector('pre').textContent`),wire)
+    assert.ok((await evaluate(`${card}.innerText`)).includes(source.bodies[kind]),'Default card exposes the original body')
+    await bounded(card,'Protocol card '+kind)
+  }
+  await frame('protocol-cards-'+theme)
+  const heart="document.querySelector('[data-protocol-kind=heartbeat] details')"
+  await click(heart+".querySelector('summary')")
+  assert.equal(await evaluate(heart+".open"),true)
+  await frame('protocol-expanded-'+theme)
+  await evaluate(`a2aOriginalReading.seed(${JSON.stringify(theme)},${generation+1},'original')`)
+  await waitFor('a2aOriginalReading.facts().pending===1')
+  await evaluate("a2aOriginalReading.settle('original')")
+  await waitFor(original)
+  const positions=await evaluate(`(()=>{const record=${notice},original=${original},details=record.querySelector('.conversation-a2a-notice__details');return {record:record.className,seen:original.innerText,below:!!details && original.getBoundingClientRect().bottom<=details.getBoundingClientRect().top+1,count:record.querySelectorAll('[data-a2a-original-message-id]').length,details:details?.className}})()`)
+  assert.ok(positions.seen.includes('原始协作消息') && positions.count===1)
+  assert.ok(positions.below,'Original body precedes the notification details: '+JSON.stringify(positions))
+  const footer=await evaluate(`(()=>{const part=${original},body=part.querySelector('.log-turn__body').getBoundingClientRect(),timing=part.querySelector('.conversation-a2a-timing').getBoundingClientRect();return {body:body.toJSON(),timing:timing.toJSON()}})()`)
+  assert.ok(footer.timing.width>=footer.body.width-2 && footer.timing.top>=footer.body.bottom-1,'Notification timing shares the original text column: '+JSON.stringify(footer))
+  await frame('received-original-'+theme)
+  await evaluate(`a2aOriginalReading.seed(${JSON.stringify(theme)},${generation+2},'captured')`)
+  await waitFor("document.querySelectorAll('[data-protocol-kind]').length===3")
+  for(const kind of ['heartbeat','calendar','automation']) {
+    const card=`document.querySelector('[data-protocol-kind=${kind}]')`
+    assert.ok((await evaluate(`${card}.innerText`)).includes(source.bodies[kind]))
+    assert.equal(await evaluate(`${card}.closest('.log-turn').querySelector('.log-turn__who').textContent`),'自动触发')
+    assert.equal(await evaluate(`${card}.querySelector('pre,details.conversation-protocol__original')`),null,'Public text carries no original wire')
+    await bounded(card,'Captured public body '+kind)
+  }
+  await frame('captured-public-'+theme)
+  receipt.scenarios.push({width,theme,bodies:source.bodies,positions})
+}
 async function scenario(width, theme, generation) {
   const height = width < 400 ? 1050 : 760
   receipt.stage = { width, theme, action: 'seed' }
@@ -45,14 +85,12 @@ async function scenario(width, theme, generation) {
   const source = await evaluate(`a2aOriginalReading.seed(${JSON.stringify(theme)},${generation})`)
   await waitFor(`document.querySelector('[data-generation="${generation}"]')`)
   await painted()
+  await waitFor('a2aOriginalReading.facts().pending===1')
   receipt.stage.action = 'unqualified-wire'
   await click(`${unqualified}.querySelector('.log-turn__system-toggle')`)
-  assert.equal(await evaluate('a2aOriginalReading.facts().calls.length'), 0, 'An ordinary wire reference never borrows original-notice authority')
+  assert.equal(await evaluate('a2aOriginalReading.facts().calls.length'), 1, 'Only the qualified notice reads its exact original')
   assert.equal(await evaluate(`${unqualified}.querySelector('[data-a2a-original-message-id]')`), null)
   await click(`${unqualified}.querySelector('.log-turn__system-toggle')`)
-  receipt.stage.action = 'open-original-notice'
-  await click(`${notice}.querySelector('.log-turn__system-toggle')`)
-  await waitFor('a2aOriginalReading.facts().pending===1')
   await click(draft)
   const focusedDraft = await evaluate('a2aOriginalReading.facts()')
   assert.equal(focusedDraft.draftFocused, true)
@@ -88,8 +126,8 @@ async function scenario(width, theme, generation) {
   assert.ok(textGeometry.length > 8, 'Visible original text has nonempty measured lines')
   assert.ok(textGeometry.every(area => area.x >= 0 && area.right <= width + 1 && area.y >= 0 && area.bottom <= height), 'Complete original text, including long reference and tail, is visible without clipping')
   await frame(`${theme}-${width}-original`)
-  await click(`${notice}.querySelector('.log-turn__system-toggle')`)
-  assert.equal(await evaluate('a2aOriginalReading.facts().calls.length'), 2, 'Closing the original reader performs no additional read or input operation')
+  await click(`${notice}.querySelector('.conversation-a2a-notice__details > summary')`)
+  assert.equal(await evaluate('a2aOriginalReading.facts().calls.length'), 2, 'Inspecting the notification source performs no additional read or input operation')
   receipt.scenarios.push({ width, theme, source, calls: facts.calls, failedGeometry, originalGeometry,
     ordinaryWireReadCount: 0, explicitRetryCount: 1, preservedDraftAndFocus: true, originalMarkdownVisible: true })
 }
@@ -99,11 +137,14 @@ app.whenReady().then(async () => {
     win = new BrowserWindow({ show: false, width: 960, height: 1050, webPreferences: { backgroundThrottling: false, sandbox: false } })
     win.webContents.on('console-message', details => { if (details.level === 'error') receipt.consoleErrors.push(details.message) })
     win.webContents.debugger.attach('1.3')
-    await win.loadFile(html)
+    await win.loadFile(html,{query:protocolCards?{protocolCards:'1'}:{}})
     await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
-    await waitFor(`window.a2aOriginalReading?.ready && ${notice}`)
+    await waitFor('window.a2aOriginalReading?.ready && document.querySelector("[data-generation]")')
     let generation = 0
-    for (const theme of ['dark', 'light']) for (const width of [960, 332]) await scenario(width, theme, ++generation)
+    if(protocolCards) {
+      await protocolScenario(960,'dark',1)
+      await protocolScenario(360,'light',4)
+    } else for (const theme of ['dark', 'light']) for (const width of [960, 332]) await scenario(width, theme, ++generation)
     assert.equal(receipt.frames.length, 8)
     assert.deepEqual(receipt.consoleErrors, [], 'Actual Renderer has no console errors')
     receipt.passed = true

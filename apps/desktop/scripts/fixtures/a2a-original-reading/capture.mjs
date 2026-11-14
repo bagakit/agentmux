@@ -10,7 +10,8 @@ import { mutateMessageSlotScope } from './layout-mutations.mjs'
 import { candidateAlias, candidateModule } from '../../candidate-package-resolve.mjs'
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
-export async function captureA2aOriginalReading({ root, evidence, layout = false, styleMutation = null }) {
+export async function captureA2aOriginalReading({ root, evidence, layout = false, protocolCards = false, styleMutation = null }) {
+  assert.ok(!(layout && protocolCards))
   assert.ok(!styleMutation || layout, 'Slot mutations belong to the layout proof')
   const desktop = resolve(root, 'apps/desktop'), fixture = resolve(desktop, 'scripts/fixtures/a2a-original-reading')
   const require = createRequire(resolve(desktop, 'package.json')), { build } = await import(pathToFileURL(require.resolve('vite')).href)
@@ -66,7 +67,7 @@ export async function captureA2aOriginalReading({ root, evidence, layout = false
     ]) assert.ok(inputs[target], 'Actual product consumer is compiled: ' + target)
     const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
     const lines = []
-    receipt.process = await runProbeProcess(require('electron'), [resolve(fixture, layout ? 'layout-main.cjs' : 'main.cjs'), resolve(compiled, layout ? 'layout.html' : 'index.html'), privateRoot, evidence],
+    receipt.process = await runProbeProcess(require('electron'), [resolve(fixture, layout ? 'layout-main.cjs' : 'main.cjs'), resolve(compiled, layout ? 'layout.html' : 'index.html'), privateRoot, evidence, ...(protocolCards ? ['--protocol-cards'] : [])],
       { cwd: root, env, timeoutMs: 60000, onLine: line => lines.push(line) })
     await writeFile(resolve(evidence, 'process.log'), lines.join('\n') + '\n')
     receipt.render = JSON.parse(await readFile(resolve(evidence, 'render.json')))
