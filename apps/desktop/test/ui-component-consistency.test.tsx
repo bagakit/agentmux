@@ -13,6 +13,7 @@ const expectedSelectionConsumers = [
   'LaunchOptionControls', 'MailboxCollaboration', 'MoteBotSetup', 'MoteConnectionIdentity', 'MoteCurrentWork', 'MotePrivateChat',
   'MoteQuickMode', 'NoteConflictReview', 'RetainedDocumentDraftNotice', 'SessionLearningSurface', 'SessionTakeoverSurface',
   'SourceAgentTargetSetup', 'SurveyMoveTabsDialog', 'SurveyProfilePicker', 'settings/BotEnrollmentPane', 'settings/BrowserSettingsPane',
+  'settings/FocusMapSettings', 'settings/AgentSettingsPane', 'FocusTimelineRulerSettings', 'settings/RemoteRoutesPane',
 ].map(name => `apps/desktop/src/renderer/src/components/${name}.tsx`)
 let inventory
 
@@ -38,7 +39,6 @@ describe('production UI component inventory', () => {
     for (const file of [
       'apps/desktop/src/renderer/src/components/settings/HostSettingsPane.tsx',
       'apps/desktop/src/renderer/src/components/settings/NetworkNodeSettingsPane.tsx',
-      'apps/desktop/src/renderer/src/components/settings/FocusMapSettings.tsx',
       'apps/mobile/src/goals/MobileGoalsSurface.tsx',
       'apps/mobile/src/goals/MobileGoalCreate.tsx',
     ]) expect(nativeFiles.has(file)).toBe(true)
