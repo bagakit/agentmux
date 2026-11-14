@@ -8,7 +8,7 @@ import { parseDemandDispatch, parseDemandDispatches, runBoundDemandDispatch, typ
 import { parseFileReadParams, type FileReadParams } from './public-rpc-files.js'
 import { parseDemandDelegationIntent, parseDemandDelegations, parseDemandDelegationReportInput, parseDemandDelegationCollectionInput, validateDemandDelegationReport } from '@agentmux/demand/delegations'
 import { parseAlignment, parseGrounding } from '@agentmux/demand/goals'
-import { parseGoalPlan, parseGoalPlanReviewInput, parseGoalPlanRevisionInput, type GoalPlan, type GoalPlanReviewInput, type GoalPlanRevisionInput, type GoalPlanState } from '@agentmux/demand/goal-plan'
+import { parseGoalPlanAssignment, type GoalPlanAssignment, parseGoalPlan, parseGoalPlanReviewInput, parseGoalPlanRevisionInput, type GoalPlan, type GoalPlanReviewInput, type GoalPlanRevisionInput, type GoalPlanState } from '@agentmux/demand/goal-plan'
 import { parseOwnerGoalPlanState } from './goal-plan-state.js'
 import type { DemandDelegation, DemandDelegationIntent, DemandDelegationReportInput, DemandDelegationCollectionInput } from '@agentmux/demand/delegations'
 import type { DemandGrounding } from '@agentmux/demand/goals'
@@ -25,6 +25,9 @@ import { goalDelegationReportBody, goalReportApplication, readGoalDelegationSour
 export { goalDelegationReportBody, goalDelegationApplication, goalReportApplication, readGoalDelegationSource, readGoalReportApplication, assertGoalSourceReport } from './goal-delegation-source.js'
 export type { GoalDelegationSourceData } from './goal-delegation-source.js'
 
+type GoalPlanTarget = { goalId: string; expectedOwner?: Pick<import('./sharing.js').AmuxGoalAddress, 'runtimeId' | 'namespace'> }
+type GoalPlanNodeWrite = GoalPlanTarget & { nodeId: string; expectedRevision: number; operationId: string }
+
 /** Goal owns business intent and reports; this port never owns a message queue. */
 export type GoalDelegationParamsMap = {
   'goal.delegation.prepare': { goalId: string; intent: DemandDelegationIntent; materials?: FileReadParams[] }
@@ -37,7 +40,9 @@ export type GoalDelegationParamsMap = {
   'goal.patrol': { goalId: string; operationId: string }
   'goal.patrol.continue': { goalId: string; patrolOperationId: string; operationId: string; expectedRunId: string }
   'goal.patrol.report': { goalId: string; patrolOperationId: string; report: DemandPatrolReportInput }
-  'goal.plan': { goalId: string }
+  'goal.plan': GoalPlanTarget
+  'goal.plan.assignment': GoalPlanNodeWrite & { assignment: GoalPlanAssignment }
+  'goal.plan.claim': GoalPlanNodeWrite
   'goal.plan.revise': { goalId: string; revision: GoalPlanRevisionInput }
   'goal.plan.review': { goalId: string; review: GoalPlanReviewInput }
 }
@@ -70,8 +75,29 @@ export function parseGoalDelegationParams<M extends GoalDelegationMethod>(method
     return { goalId: id(p.goalId), ...(method === 'goal.patrol.report' ? { patrolOperationId: id(p.patrolOperationId), report: parseDemandPatrolReportInput(p.report) }
       : { operationId: id(p.operationId), ...(method === 'goal.patrol.continue' ? { patrolOperationId: id(p.patrolOperationId), expectedRunId: id(p.expectedRunId) } : {}) }) } as GoalDelegationParamsMap[M]
   }
-  if (method === 'goal.plan' || method === 'goal.plan.revise' || method === 'goal.plan.review') {
-    const p = record(value, method === 'goal.plan' ? ['goalId'] : method === 'goal.plan.revise' ? ['goalId', 'revision'] : ['goalId', 'review'])
+  if (method === 'goal.plan' || method === 'goal.plan.assignment' || method === 'goal.plan.claim') {
+    const keys = ['goalId', 'expectedOwner']
+    if (method !== 'goal.plan') keys.push('nodeId', 'expectedRevision', 'operationId')
+    if (method === 'goal.plan.assignment') keys.push('assignment')
+    const p = record(value, keys)
+    const target: GoalPlanTarget = { goalId: id(p.goalId) }
+    if (p.expectedOwner !== undefined) {
+      const owner = record(p.expectedOwner, ['runtimeId', 'namespace'])
+      target.expectedOwner = { runtimeId: id(owner.runtimeId), namespace: id(owner.namespace) }
+    }
+    if (method === 'goal.plan') return target as GoalDelegationParamsMap[M]
+    if (typeof p.expectedRevision !== 'number' || !Number.isSafeInteger(p.expectedRevision) || p.expectedRevision < 1)
+      throw new AgentMuxError('Read the original saved plan and supply its positive revision.', 'INVALID_CONTROL_REQUEST')
+    const node = { ...target, nodeId: id(p.nodeId), expectedRevision: p.expectedRevision, operationId: id(p.operationId) }
+    if (method === 'goal.plan.claim') return node as GoalDelegationParamsMap[M]
+    try {
+      return { ...node, assignment: parseGoalPlanAssignment(p.assignment) } as GoalDelegationParamsMap[M]
+    } catch (error) {
+      throw new AgentMuxError(error instanceof Error ? error.message : String(error), 'INVALID_CONTROL_REQUEST')
+    }
+  }
+  if (method === 'goal.plan.revise' || method === 'goal.plan.review') {
+    const p = record(value, method === 'goal.plan.revise' ? ['goalId', 'revision'] : ['goalId', 'review'])
     try {
       return { goalId: id(p.goalId), ...(method === 'goal.plan.revise' ? { revision: parseGoalPlanRevisionInput(p.revision) } : method === 'goal.plan.review' ? { review: parseGoalPlanReviewInput(p.review) } : {}) } as GoalDelegationParamsMap[M]
     } catch (error) {
@@ -105,7 +131,28 @@ export function parseGoalDelegationRpcResult<M extends GoalDelegationMethod>(met
     return { kind: 'report-submission', goalId: request.goalId, delegationOperationId: request.operationId,
       sourceMessageId: request.sourceMessageId, submission } as GoalDelegationResultMap[M]
   }
-  return parseGoalDelegationResult(value, input) as GoalDelegationResultMap[M]
+  const result = parseGoalDelegationResult(value, input)
+  if (method === 'goal.plan.assignment' || method === 'goal.plan.claim') {
+    const { plan } = result
+    const write = input as GoalDelegationParamsMap['goal.plan.assignment' | 'goal.plan.claim']
+    const requested = 'assignment' in write ? write.assignment : { kind: 'claim' as const }
+    const saved = plan?.history[write.expectedRevision]
+    const action = saved?.change?.assignment
+    if (!plan || !saved || saved.operationId !== write.operationId || saved.change?.nodeId !== write.nodeId ||
+        action?.kind !== requested.kind || (action.kind === 'assign' && requested.kind === 'assign' &&
+          (action.executor.hostId !== requested.executor.hostId || action.executor.agentSessionId !== requested.executor.agentSessionId)) ||
+        (action.kind === 'claim' && (saved.author.kind !== 'agent' || !saved.author.hostId || !saved.author.runtimeId)))
+      throw new AgentMuxError('The saved plan did not confirm this original node operation. Read its plan history.', 'CONTROL_PROTOCOL_ERROR')
+    if (saved.revision === plan.revision) {
+      const node = plan.nodes.find(node => node.id === write.nodeId)
+      const executor = action.kind === 'claim' ? { hostId: saved.author.hostId, agentSessionId: saved.author.id }
+        : action.kind === 'assign' ? action.executor : null
+      if (!node || Boolean(node.claimOpen) !== (action.kind === 'open') ||
+          (executor ? node.executor?.hostId !== executor.hostId || node.executor?.agentSessionId !== executor.agentSessionId : node.executor !== null))
+        throw new AgentMuxError('The saved node differs from its original assignment receipt. Read the current plan.', 'CONTROL_PROTOCOL_ERROR')
+    }
+  }
+  return result as GoalDelegationResultMap[M]
 }
 export function parseGoalDelegationResult(value: unknown, input: { goalId: string }): GoalDelegationResult {
   const p = record(value, ['goalId', 'goalUpdatedAt', 'delegations', 'plan', 'planState', 'planStateIssue', 'grounding', 'diskDurability', 'observations', 'dispatches', 'startObservations', 'progressUpdates', 'responsibility', 'patrols', 'patrolObservations', 'goalState'])

@@ -1467,9 +1467,12 @@ export async function registerIpc(args: {
   handleWithEvent('goals:execute', async (event, request: AgentMuxControlRequest) => {
     return executeGoal(parseAgentMuxControlRequest(request))
   })
-  handleWithEvent('demands:delegation', async (event, method: 'goal.delegations' | 'goal.collect' | 'goal.patrol' | 'goal.patrol.continue' | 'goal.plan.review', input: GoalDelegationParamsMap['goal.delegations' | 'goal.collect' | 'goal.patrol' | 'goal.patrol.continue' | 'goal.plan.review']) => {
-    if (!['goal.delegations', 'goal.collect', 'goal.patrol', 'goal.patrol.continue', 'goal.plan.review'].includes(method)) throw new AgentMuxError('This action requires its exact public Goal operation.', 'INVALID_CONTROL_REQUEST')
-    return callUserRpc(method, parseGoalDelegationParams(method, input))
+  handleWithEvent('demands:delegation', async (event, method: 'goal.delegations' | 'goal.collect' | 'goal.patrol' | 'goal.patrol.continue' | 'goal.plan.review' | 'goal.plan' | 'goal.plan.assignment', input: GoalDelegationParamsMap['goal.delegations' | 'goal.collect' | 'goal.patrol' | 'goal.patrol.continue' | 'goal.plan.review' | 'goal.plan' | 'goal.plan.assignment']) => {
+    if (!['goal.delegations', 'goal.collect', 'goal.patrol', 'goal.patrol.continue', 'goal.plan.review', 'goal.plan', 'goal.plan.assignment'].includes(method)) throw new AgentMuxError('This action requires its exact public Goal operation.', 'INVALID_CONTROL_REQUEST')
+    const request = parseGoalDelegationParams(method, input)
+    if (method === 'goal.plan.assignment' && !('expectedOwner' in request && request.expectedOwner))
+      throw new AgentMuxError('Open the original Goal to confirm its Runtime and namespace before changing a node.', 'INVALID_CONTROL_REQUEST')
+    return callUserRpc(method, request)
   })
   handle('demands:list', async () => readDesktopGoals(args.runtime))
   handleWithEvent('demands:inputEpoch', async (event, input: import('@agentmux/core').AgentMuxRpcParams<'goal.input.epoch'>) =>
