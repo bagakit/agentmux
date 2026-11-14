@@ -16,6 +16,8 @@ import { AgentProviderRegistry } from '../../../packages/core/src/agent-provider
 import { DEFAULT_CONFIG } from '../src/main/config-store'
 import { spaceMountTransport } from './helpers/space-mount-fixture'
 import { spaceMountKey } from '../src/shared/space-mount'
+import { originalSourceInputOwnerKey } from '../src/renderer/src/lib/original-space-navigation'
+import { promptCarrierWaiting } from './helpers/prompt-carrier-receipt'
 
 vi.mock('electron', () => ({ app: { getPath: () => tmpdir() } }))
 // Only glyph/DOM measurement and Native leaves are controlled. Production TerminalView,
@@ -81,14 +83,53 @@ async function fixture(suffix = 'a') {
   const target = { hostId: 'source-carrier-' + suffix, target: { reference: f.reference, regionId: admitted.address.regionId, runtimeId: f.d.owner.runtimeId, agentSessionId: sid, expectedRun: original.run } }
   const key = spaceMountKey(f.reference), tabId = admitted.address.tabId!; const zoneId = admitted.address.zoneId!
   useAppStore.getState().mountSpace({ hostId: target.hostId, reference: f.reference, zoneId, workspaceId: 'original-b-project' })
-  useAppStore.getState().editSpaceMountDraft(key, tabId, admitted.address.regionId, 'Private draft remains unsent ' + suffix)
-  const view = (visible = true, interactiveResize = false) => <DesktopClientUiProvider><SpaceMemberWorkface target={target} visible={visible} active={visible} interactiveResize={interactiveResize} mountKey={key} tabId={tabId} /></DesktopClientUiProvider>
+  useAppStore.getState().setAgentComposerDraft(originalSourceInputOwnerKey(target.target.runtimeId, sid), 'Private draft remains unsent ' + suffix)
+  const view = (visible = true, interactiveResize = false) => <DesktopClientUiProvider><SpaceMemberWorkface target={target} visible={visible} active={visible} interactiveResize={interactiveResize} sourceTabId={tabId} /></DesktopClientUiProvider>
   return { ...f, sid, original, subject, attach, release, resize, writes, prompt, main, target, key, tabId, view }
 }
 async function click(label: string) {
   const button = Array.from(container.querySelectorAll('button')).find(b => b.textContent === label)
   expect(button, label).toBeDefined(); await act(async () => button!.click())
 }
+
+it('the original member stream updates only its canonical input queue and frozen admission', async () => {
+  const f = await fixture('input-receipt'), target = { ...f.target, target: { ...f.target.target,
+    expectedAdmission: { kind: 'creation' as const, operationId: 'original-creation-input-receipt' } } }
+  const owner = originalSourceInputOwnerKey(target.target.runtimeId, f.sid), operationId = 'original-live-input'
+  const waiting = promptCarrierWaiting(f.sid, f.original.run.runId, operationId)
+  const entry = { operationId, text: 'Original pending input', status: 'deferred' as const, promptCondition: null,
+    runId: f.original.run.runId, originalMember: target, inputReceipt: waiting,
+    directInputControl: { kind: 'agent' as const, hostId: 'local', agentSessionId: f.sid, run: f.original.run },
+    directInputBinding: { expectedRun: f.original.run, admissionIntent: { kind: 'manual-actor' as const } } }
+  const otherOwner = originalSourceInputOwnerKey('unrelated-runtime', f.sid)
+  useAppStore.setState({ agentSteerQueues: { [owner]: [entry], [otherOwner]: [{ ...entry,
+    originalMember: { ...target, target: { ...target.target, runtimeId: 'unrelated-runtime' } } }] } })
+  let observed: Parameters<typeof api.spaceMounts.member>[1] | undefined
+  const open = vi.mocked(api.spaceMounts.member).getMockImplementation()!
+  vi.mocked(api.spaceMounts.member).mockImplementation((request, listener, signal) => {
+    observed = listener; return open(request, listener, signal)
+  })
+  await act(async () => root.render(<DesktopClientUiProvider><SpaceMemberWorkface target={target} visible active /></DesktopClientUiProvider>))
+  await vi.waitFor(() => expect(f.resize).toHaveBeenCalled())
+  const ref = { key: waiting.key, waitGeneration: 2 }
+  const stopped = { ...waiting, ref, status: 'stopped' as const, observation: 'closed' as const,
+    control: { ref, state: 'stopped-before-dispatch' as const, at: 2 } }
+  const publisher = (f.d.core as unknown as { publisher: { publish(event: unknown): void } }).publisher
+  await act(async () => publisher.publish({ type: 'agent-input', receipt: stopped }))
+  await vi.waitFor(() => expect(useAppStore.getState().agentSteerQueues[owner]![0]!.inputReceipt).toEqual(stopped))
+  expect(useAppStore.getState().agentSteerQueues[otherOwner]![0]!.inputReceipt).toEqual(waiting)
+  const replacement = { ...target, target: { ...target.target,
+    expectedAdmission: { kind: 'creation' as const, operationId: 'another-original-creation' } } }
+  useAppStore.setState({ agentSteerQueues: { [owner]: [{ ...entry, originalMember: replacement }] } })
+  await act(async () => publisher.publish({ type: 'agent-input', receipt: stopped }))
+  await new Promise(done => setTimeout(done, 40))
+  expect(useAppStore.getState().agentSteerQueues[owner]![0]!.inputReceipt).toEqual(waiting)
+  await act(async () => root.render(null))
+  await act(async () => observed!({ type: 'runtime', event: { type: 'core', hostId: target.hostId,
+    event: { type: 'agent-input', receipt: stopped } } }))
+  expect(useAppStore.getState().agentSteerQueues[owner]![0]!.inputReceipt).toEqual(waiting)
+  expect(f.writes).not.toHaveBeenCalled(); expect(f.prompt).not.toHaveBeenCalled()
+})
 
 it('settles the actual original member viewport, suspends only during drag and resumes same-Run resize after show', async () => {
   const f = await fixture(), sessions = useAppStore.getState().sessions
@@ -171,7 +212,7 @@ it('a failed conversation read preserves the original Terminal, draft and input 
   await vi.waitFor(() => expect(container.textContent).toContain('Original conversation temporarily unavailable'))
   await click('Terminal')
   expect(container.querySelector('.mounted-space-agent__terminal')?.hasAttribute('hidden')).toBe(false)
-  expect(container.querySelector('[aria-label="Send new message"]')).not.toBeNull()
+  expect(container.querySelector('.composer-send')).not.toBeNull()
   expect(container.querySelector('[role="textbox"]')?.textContent).toContain('Private draft remains unsent read-failed')
   expect(local).not.toHaveBeenCalled(); expect(f.writes).not.toHaveBeenCalled(); expect(f.prompt).not.toHaveBeenCalled()
 })
@@ -205,9 +246,9 @@ it('actual private Native retains the original Run/PID and receives settled and 
   vi.spyOn(api.spaceMounts, 'member').mockImplementation(main.api.member)
   const key = spaceMountKey(f.reference), target = { hostId: 'private-source-carrier', target: { reference: f.reference, regionId: admission.address.regionId, runtimeId: f.d.owner.runtimeId, agentSessionId: sid, expectedRun: original.run } }
   useAppStore.getState().mountSpace({ hostId: target.hostId, reference: f.reference, zoneId: admission.address.zoneId!, workspaceId: 'original-b-project' })
-  useAppStore.getState().editSpaceMountDraft(key, admission.address.tabId!, admission.address.regionId, 'Private Native proof draft')
+  useAppStore.getState().setAgentComposerDraft(originalSourceInputOwnerKey(f.d.owner.runtimeId, sid), 'Private Native proof draft')
   const sessions = useAppStore.getState().sessions
-  const view = (visible = true, interactiveResize = false) => <DesktopClientUiProvider><SpaceMemberWorkface target={target} visible={visible} active={visible} interactiveResize={interactiveResize} mountKey={key} tabId={admission.address.tabId!} /></DesktopClientUiProvider>
+  const view = (visible = true, interactiveResize = false) => <DesktopClientUiProvider><SpaceMemberWorkface target={target} visible={visible} active={visible} interactiveResize={interactiveResize} sourceTabId={admission.address.tabId!} /></DesktopClientUiProvider>
   const facts: unknown[] = []
   async function sameGrid(cols: number, rows: number) {
     await vi.waitFor(async () => {
@@ -259,7 +300,7 @@ it('late prior-Run session events cannot replace the new original target or eras
   f.attach.mockResolvedValue({ run: { ...f.subject.run, runId: next.run.runId }, gap: null, resizeRevision: 0, terminal: { type: 'unknown', reason: 'origin_unknown' },
     replay: [{ type: 'data', runId: next.run.runId, startByte: 0, endByte: dataBytes.length, data, dataBytes }] })
   const target = { ...f.target, target: { ...f.target.target, expectedRun: next.run } }
-  await act(async () => root.render(<DesktopClientUiProvider><SpaceMemberWorkface target={target} visible active mountKey={f.key} tabId={f.tabId} /></DesktopClientUiProvider>))
+  await act(async () => root.render(<DesktopClientUiProvider><SpaceMemberWorkface target={target} visible active sourceTabId={f.tabId} /></DesktopClientUiProvider>))
   await vi.waitFor(() => expect(f.resize).toHaveBeenCalledWith(next.run, 117, 31))
   await act(async () => priorListener!({ type: 'session', session: { ...priorSnapshot, label: 'Late old Run must not appear' } }))
   expect(container.textContent).not.toContain('Late old Run must not appear')

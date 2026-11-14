@@ -11,10 +11,10 @@ async function fixture() {
   const f = await createSpaceSessionsFixture(cleanup), sid = 'same-original-input-sid'
   await f.b.put(sid)
   const session = await f.d.put(sid), admitted = await f.admit('D-in-B', f.d.owner.runtimeId, sid, 'original-input-C')
-  const member: SpaceMountMemberTarget = { hostId: 'original-b-carrier', target: {
+  const member = { hostId: 'original-b-carrier', target: {
     reference: f.reference, regionId: admitted.address.regionId, runtimeId: f.d.owner.runtimeId,
     agentSessionId: sid, expectedRun: session.run, expectedAdmission: { kind: 'creation', operationId: 'original-input-C' }
-  } }
+  } } satisfies SpaceMountMemberTarget
   const target: AgentInputTarget = { kind: 'space-member-target', target: member }
   const hosts = new Map([['original-b-carrier', { client: {
     forwardRpc: f.b.rpc.call.bind(f.b.rpc), subscribeRpc: f.b.rpc.subscribe.bind(f.b.rpc)

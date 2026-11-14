@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, useEffect } from 'react'
+import { act, useEffect, useRef } from 'react'
 import { beforeEach, afterEach, expect, it, vi } from 'vitest'
 import type { Root } from 'react-dom/client'
 import type { SessionSnapshot } from '../src/shared/contracts'
@@ -10,6 +10,8 @@ import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
+import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
+import { usePendingDeliveryLayout } from '../src/renderer/src/lib/pending-delivery-layout'
 
 const geometry = vi.hoisted(() => ({ active: 0, reads: [] as string[], top: 470 }))
 // SessionPane, its explicit refs, original Composer/queue/request and Store are real.
@@ -45,7 +47,7 @@ beforeEach(() => {
   style = document.createElement('style'); style.textContent = '.composer-pending__cards{padding:6px}'; document.head.append(style)
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     if (this.classList.contains('composer')) return new DOMRect(100, 600, 700, 50)
-    if (this.classList.contains('agent-interaction-source') || this.classList.contains('agent-interaction')) return new DOMRect(500, 500, 300, 70)
+    if (this.classList.contains('agent-interaction-source') || this.classList.contains('agent-interaction') || this.classList.contains('saved-input-recovery')) return new DOMRect(500, 500, 300, 70)
     return new DOMRect(100, 80, 700, 570)
   })
   vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(40)
@@ -79,6 +81,19 @@ function preserved() {
   expect(useAppStore.getState().agentSteerQueues[session.id]?.map(item => item.operationId)).toEqual(['original-pending'])
   for (const control of controls) expect(control).not.toHaveBeenCalled()
 }
+it('keeps the original pending cards above a workface recovery surface without changing input custody', async () => {
+  function Workface() {
+    const boundaryRef=useRef<HTMLDivElement>(null),protectedRef=useRef<HTMLDetailsElement>(null)
+    const layout=usePendingDeliveryLayout({boundaryRef,protectedRef})
+    return <div ref={boundaryRef}><details ref={protectedRef} className="saved-input-recovery" open><summary>Saved input</summary><button>Append to current draft</button></details>
+      <AgentSessionComposer sessionId={session.id} pendingLayout={layout}/></div>
+  }
+  await act(async()=>root.render(<Workface/>))
+  await vi.waitFor(()=>expect(pending()?.dataset.positioned).toBe('true'))
+  expect(top()+40).toBeLessThanOrEqual(498)
+  expect(host.querySelector('.saved-input-recovery button')).not.toBeNull()
+  preserved()
+})
 it('passes the exact primary terminal port through the original Composer and releases it while hidden', async () => {
   await render(); expect(geometry.active).toBe(1); expect(top() + 40).toBeLessThanOrEqual(geometry.top - 2)
   expect(new Set(geometry.reads)).toEqual(new Set([session.control.run.runId])); preserved()
