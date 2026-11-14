@@ -22,6 +22,7 @@ async function fixture() {
   // These tests isolate metadata/event ordering. Native observation is a named collaborator;
   // the official Native/public lifecycle is exercised by the separate integration test.
   vi.spyOn(core, 'connect').mockResolvedValue()
+  vi.spyOn(core, 'connectRuntime').mockResolvedValue()
   vi.spyOn(core, 'runtimeProjection').mockResolvedValue({ hostId: 'local', subjects: [] })
   const inner = core as unknown as { registry: AgentMuxAgentSessionRegistry; publishSession(session: AgentMuxStoredAgentSession): void }
   await inner.registry.put(original)

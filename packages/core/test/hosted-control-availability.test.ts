@@ -20,7 +20,7 @@ await (core as any).registry.load('local'); (core as any).connected = true
 let physicalInputs = 0, transportConnected = true
 ;(core as any).kernel = { isConnected: () => transportConnected, identity: () => ({ buildIdentity: 'private-fixture', protocolVersion: 1, daemonInstanceId: 'private-native-owner' }),
   disconnect: async () => { transportConnected = false },
-  input: async (_run, op) => { physicalInputs++; return { run: { acceptedInputBytes: op.expectedByte + 1 },
+  input: async (runId, op) => { physicalInputs++; return { run: { runId, acceptedInputBytes: op.expectedByte + 1 },
     appliedByteRange: { startByte: op.expectedByte, endByte: op.expectedByte + 1 } } } }
 const fence = { runtimeId: 'private-review-runtime', ownerInstanceId: 'private-review-owner' }
 const service = new AgentMuxHostedRuntimeService(core, null, () => ({ ...fence, protocolVersion: 2,
@@ -82,7 +82,8 @@ try {
   await new Promise(resolve => setImmediate(resolve)); assert.equal(physicalInputs, 5)
   await assert.rejects(service.call('runtime.invoke', { fence: { ...fence, ownerInstanceId: 'foreign-owner' }, consumerId: 'private-partial-review', invocation: { method: 'writeTerminal', args: [{ runId: 'healthy-run' }, operation(5)] } }), error => error.code === 'RUNTIME_OWNER_CHANGED')
   assert.equal(physicalInputs, 5)
-  assert.ok(diagnostics.some(event => event.type === 'connection-state' && event.state === 'lost'))
+  assert.ok(diagnostics.some(event => event.type === 'session-observation-state' && event.observation.state === 'unavailable'))
+  assert.ok(!diagnostics.some(event => event.type === 'connection-state' && event.observationOrigin.boundary === 'consumer-core'))
   result.result = 'accepted'; result.physicalInputs = physicalInputs; result.coldBootstrap = 'bounded summaries'; result.exactFutureBody = 'all 511 retained, exact and paged read'; result.observationFailure = 'persistent diagnostic; independently authorized input retained'; result.unknownInput = 'not replayed'; result.foreignFence = 'rejected'
   await sdk.dispose()
 } finally { await live?.dispose(); await service.dispose(); await core.dispose() }

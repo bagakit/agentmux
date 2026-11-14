@@ -1,4 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
+import { writeFile } from 'node:fs/promises'
 import { observeSpaceSessionStates } from '../src/space-session-stream.js'
 import { parseAgentMuxCliInvocation } from '../src/agentmux-cli-commands.js'
 import { createSpaceSessionsFixture } from './helpers/space-session-fixture.js'
@@ -53,14 +54,16 @@ it('keeps legacy foreign identity unknown and exact original absence missing, wi
   const f = await createSpaceSessionsFixture(cleanup), old = await f.admit('D-in-B', 'runtime-d', 'legacy-sid', 'legacy-op')
   await f.b.put('legacy-sid'); await f.admit('D-in-B', 'runtime-d', 'missing-d-sid', 'missing-op')
   const state = (await f.b.spatial.read())!
-  await f.b.spatial.commit({ expectedRevision: state.revision, graph: { ...state.graph, regions: state.graph.regions.map(region => {
+  // Prior on-disk input is the boundary here: a current layout commit correctly
+  // retains an admitted identity and cannot manufacture a legacy missing reference.
+  await writeFile(f.b.spatial.path, JSON.stringify({ ...state, graph: { ...state.graph, regions: state.graph.regions.map(region => {
     if (region.regionId !== old.address.regionId) return region
     const { creationOperationId, ...original } = region; return original
-  }) } })
+  }) } }))
   const observed: SpaceSessionsObservation[] = [], reader = await observeSpaceSessionStates(f.b.rpc, { reference: f.reference }, { onObservation: value => observed.push(value) })
   cleanup.push(() => reader.dispose())
   await vi.waitFor(() => expect(observed, JSON.stringify(observed)).toContainEqual(expect.objectContaining({type:'member',member:{hostId:'D-in-B',runtimeId:'runtime-d',agentSessionId:'missing-d-sid'},state:{status:'missing',authority:{runtimeId:'runtime-d',ownerInstanceId:'runtime-d-instance'}}})))
-  expect(observed).toContainEqual(expect.objectContaining({ type: 'member', member: { hostId: 'D-in-B', runtimeId: 'runtime-d', agentSessionId: 'legacy-sid' }, state: { status: 'unknown', issue: expect.objectContaining({ code: 'SPACE_SESSION_REFERENCE_UNCONFIRMED' }) } }))
+  expect(observed, JSON.stringify(observed)).toContainEqual(expect.objectContaining({ type: 'member', member: { hostId: 'D-in-B', runtimeId: 'runtime-d', agentSessionId: 'legacy-sid' }, state: { status: 'unknown', issue: expect.objectContaining({ code: 'SPACE_SESSION_REFERENCE_UNCONFIRMED' }) } }))
   expect(observed.some(value => value.type === 'member' && value.member.agentSessionId === 'legacy-sid' && value.state.status === 'observed')).toBe(false)
 })
 it('the public CLI parser exposes one exact Space metadata reader with no all-Host or history flags', async () => {
@@ -92,5 +95,7 @@ it('a disconnected D metadata reader becomes unavailable, then reopens the same 
   expect((await f.b.spatial.read())!.graph.regions).toMatchObject([{agentSessionId:sid}])
   await f.d.put(sid,2); await f.d.reconnect()
   await vi.waitFor(()=>expect(observed.some(value=>value.type==='member'&&value.state.status==='observed'&&value.state.authority.ownerInstanceId===f.d.owner.ownerInstanceId&&value.state.session.updatedAt===2)).toBe(true),{timeout:5000})
+  expect(observed.some(value => value.type === 'runtime' && value.event.type === 'session-observation-state'),
+    'SDK-local directory state is consumed by the member owner, never forwarded as Space Runtime facts').toBe(false)
   expect(failures).toEqual([]); expect(f.d.inventory).not.toHaveBeenCalled()
 })

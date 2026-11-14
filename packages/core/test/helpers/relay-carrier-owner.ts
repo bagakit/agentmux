@@ -39,8 +39,8 @@ type Frame = { id?: unknown; method?: string; params?: Record<string, unknown>; 
 type Request = { connection: number; frame: Frame; at: number }
 
 /** Actual Host/headless/LocalRelay/DeviceAuthority; only the original native Runtime I/O is controlled. */
-export async function actualRelayOwner(configuration: { outboundRelay?: { relay: { endpoint: string; useTls: boolean }; publisherToken: string; allowedClientKeys: string[] } } = {}) {
-  const original = await rpcOwnerFixture(['caller'], core)
+export async function actualRelayOwner(configuration: { sessionIds?: string[]; outboundRelay?: { relay: { endpoint: string; useTls: boolean }; publisherToken: string; allowedClientKeys: string[] } } = {}) {
+  const original = await rpcOwnerFixture(configuration.sessionIds ?? ['caller'], core)
   cleanups.push(original.close)
   roots.push(original.root)
   await original.client.dispose()
