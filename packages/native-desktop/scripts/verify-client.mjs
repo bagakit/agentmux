@@ -10,6 +10,9 @@ execFileSync(process.execPath, [fileURLToPath(new URL('../../../node_modules/typ
 const test = join(root, 'test/client.mjs')
 execFileSync(process.execPath, ['--test', test], { stdio: 'inherit' })
 const mutations = [
+  { file: 'client.js', before: 'return await connection.request(method, params, requestOptions);',
+    after: `if (isNativeMutation(method, params) && options.operationId) this.submittedOperationIds.add(options.operationId);\n        return await connection.request(method, params, requestOptions);`,
+    test: 'host dispatch admission preserves an unsent ID' },
   { file: 'client.js', before: 'response.instanceId !== this.instance', after: 'false', test: 'spoofed response instance' },
   { file: 'client.js', before: 'response.operationId !== pending.operation?.operationId', after: 'false', test: 'wrong operation receipt' },
   { file: 'image.js', before: 'dimensions.width !== image.width', after: 'false', test: 'PNG limits and metadata' },

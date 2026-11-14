@@ -8,12 +8,11 @@ const native = await import(process.env.NATIVE_TEST_ENTRY ?? '@agentmux/native-d
 const { NativeConnection, NativeDesktop, capturePageImage, pngBytes, pngFromBytes } = native
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=', 'base64')
 
-async function fixture(run, handler = () => ({})) {
+async function fixture(run, handler = () => ({}), owner, instanceId = 'instance-original') {
   const directory = await mkdtemp(join(tmpdir(), 'amux-native-test-'))
   const socketPath = join(directory, 'native.sock')
   const calls = []
   const sockets = new Set()
-  const instanceId = 'instance-original'
   const server = createServer(socket => {
     sockets.add(socket)
     socket.on('error', () => {})
@@ -39,7 +38,7 @@ async function fixture(run, handler = () => ({})) {
   await chmod(socketPath, 0o600)
   let connection
   try {
-    connection = await NativeConnection.connect({ socketPath, token: 'exact-token', requestTimeoutMs: 1000 })
+    connection = await NativeConnection.connect({ socketPath, token: 'exact-token', requestTimeoutMs: 1000 }, owner?.submittedOperationIds)
     await run({ connection, calls, socketPath, instanceId })
   } finally {
     connection?.close()
@@ -138,18 +137,80 @@ test('old-instance operation inspection never launches replacement', () => {
 })
 
 test('host owner refuses duplicate operation after native reconnect', async () => {
+  const desktop = new NativeDesktop({})
   await fixture(async ({ connection, calls }) => {
-    const desktop = new NativeDesktop({})
     desktop.launch = async () => connection
     await desktop.request('clipboardWrite', { format: 'text', data: 'original' }, { operationId: 'owner-op' })
     // Replace the connection with another protocol fixture while retaining the host owner.
     await fixture(async ({ connection: replacement }) => {
       desktop.connection = replacement
       await assert.rejects(desktop.request('clipboardWrite', { format: 'text', data: 'original' }, { operationId: 'owner-op' }), { code: 'duplicate_operation' })
-    })
+    }, undefined, desktop, 'replacement-instance')
     assert.equal(calls.filter(call => call.method === 'clipboardWrite').length, 1)
     await desktop.dispose()
+  }, undefined, desktop)
+})
+
+async function hostFixture(run, handler) {
+  const desktop = new NativeDesktop({})
+  await fixture(async original => {
+    desktop.launch = async () => original.connection
+    try { await run({ ...original, desktop }) } finally { await desktop.dispose() }
+  }, handler, desktop)
+}
+
+test('host dispatch admission preserves an unsent ID through qualification failure and concurrent retry', async () => {
+  await hostFixture(async ({ desktop, connection, calls, instanceId }) => {
+    await assert.rejects(desktop.request('click', {}, { operationId: 'qualified-op', beforeSubmit() { throw new Error('authority revoked') } }), /authority revoked/)
+    assert.equal(calls.length, 1)
+    assert.equal(connection.inspectOperation('qualified-op'), undefined)
+    let release
+    const gate = new Promise(resolve => { release = resolve })
+    const options = { operationId: 'qualified-op', beforeSubmit: () => gate }
+    const requests = [desktop.request('click', {}, options), desktop.request('click', {}, options)]
+    release()
+    const results = await Promise.allSettled(requests)
+    assert.equal(results.filter(result => result.status === 'fulfilled').length, 1)
+    assert.equal(results.find(result => result.status === 'rejected').reason.code, 'duplicate_operation')
+    assert.equal(calls.filter(call => call.method === 'click').length, 1)
+    assert.equal(desktop.inspectOperation('qualified-op', instanceId).state, 'completed')
   })
+})
+
+test('host dispatch admission checks frame size before reserving an unsent ID', async () => {
+  await hostFixture(async ({ desktop, connection, calls }) => {
+    await assert.rejects(desktop.request('clipboardWrite', { format: 'text', data: 'x'.repeat(26 * 1024 * 1024) }, { operationId: 'oversized-op' }), { code: 'request_too_large' })
+    assert.equal(calls.length, 1)
+    assert.equal(connection.inspectOperation('oversized-op'), undefined)
+    await desktop.request('clipboardWrite', { format: 'text', data: 'original' }, { operationId: 'oversized-op' })
+    assert.equal(calls.filter(call => call.method === 'clipboardWrite').length, 1)
+  })
+})
+
+test('host dispatch admission checks a closed connection before reserving an unsent ID', async () => {
+  await hostFixture(async ({ desktop, connection, calls }) => {
+    await assert.rejects(desktop.request('click', {}, { operationId: 'closed-op', beforeSubmit() { connection.close() } }), { code: 'unavailable' })
+    assert.equal(calls.length, 1)
+    await fixture(async ({ connection: replacement, calls: nextCalls, instanceId }) => {
+      desktop.launch = async () => replacement
+      await desktop.request('click', {}, { operationId: 'closed-op', expectedInstanceId: instanceId })
+      assert.equal(nextCalls.filter(call => call.method === 'click').length, 1)
+    }, undefined, desktop, 'replacement-instance')
+  })
+})
+
+test('host dispatch admission keeps a timed-out write unknown across native reconnect without replay', async () => {
+  await hostFixture(async ({ desktop, connection, calls, instanceId }) => {
+    await assert.rejects(desktop.request('click', {}, { operationId: 'unknown-owner-op', timeoutMs: 10 }), { code: 'operation_unknown' })
+    assert.equal(calls.filter(call => call.method === 'click').length, 1)
+    connection.close()
+    await fixture(async ({ connection: replacement, calls: nextCalls }) => {
+      desktop.launch = async () => replacement
+      await assert.rejects(desktop.request('click', {}, { operationId: 'unknown-owner-op' }), { code: 'duplicate_operation' })
+      assert.equal(nextCalls.length, 1)
+      assert.equal(desktop.inspectOperation('unknown-owner-op', instanceId).state, 'unknown')
+    }, undefined, desktop, 'replacement-instance')
+  }, () => undefined)
 })
 
 test('dispose during launch prevents original action submission', async () => {
