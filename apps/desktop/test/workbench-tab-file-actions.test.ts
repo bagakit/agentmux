@@ -48,7 +48,7 @@ const HOME = _hygiene_fixturePath("w")
 
 const FILE = {
   path: 'src/app/main.ts',
-  workspaceRoot: _hygiene_fixturePath("w/repo"),
+  absolutePath: () => _hygiene_fixturePath("w/repo/src/app/main.ts"),
   revealLabel: 'Reveal in Finder',
   onReveal: async () => {},
   home: HOME,

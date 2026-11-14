@@ -50,9 +50,9 @@ vi.mock('../src/renderer/src/lib/api.js', () => ({
 
 import {
   EditorPane,
-  EditorUnavailableState,
-  revealFileInFileManager
+  EditorUnavailableState
 } from '../src/renderer/src/components/EditorPane.js'
+import { revealFileInFileManager } from '../src/renderer/src/lib/file-view-path.js'
 import { EditorReleasedState } from '../src/renderer/src/components/EditorReleasedState.js'
 import { WorkspaceFiles, localExistingAncestorWithin } from '../src/main/workspace-files.js'
 

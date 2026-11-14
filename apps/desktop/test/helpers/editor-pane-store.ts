@@ -27,6 +27,8 @@ const EDITOR_PANE_SOURCE = new URL('../../src/renderer/src/components/EditorPane
 export function editorPaneStoreState(): Record<string, unknown> {
   return {
     documents: {},
+    sourceFilesInputs: { selections: {}, pending: {}, creations: {}, folderRequests: {} },
+    scratchTopicSnapshots: {},
     retainedDocumentDrafts: {},
     dirtyDocuments: {},
     documentIssues: {},

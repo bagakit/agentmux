@@ -24,7 +24,7 @@ import {
 function input(overrides: Partial<CopyActionInput> = {}): CopyActionInput {
   return {
     relativePath: 'src/app.ts',
-    workspaceRoot: _hygiene_fixturePath("work"),
+    absolutePath: () => _hygiene_fixturePath("work/src/app.ts"),
     startLine: 12,
     endLine: 12,
     selectedText: '',

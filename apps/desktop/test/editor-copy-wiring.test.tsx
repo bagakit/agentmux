@@ -177,6 +177,22 @@ describe('点了真的把正确文本写进剪贴板（run 变 no-op / 产错文
     expect(lastCopiedText()).toBe(_hygiene_fixturePath("work/src/app.ts"))
   })
 
+  it('copies the original Source paths after the display Workspace changes', () => {
+    mount()
+    const sourceRoot = _hygiene_fixturePath("original-zone")
+    const relative = 'nested/original.ts'
+    const base = { hostId: 'local', workspaceId: 'original-workspace', workspacePath: sourceRoot }
+    fixture.state.documents = { [KEY]: { path: PATH, content: 'retained draft', revision: 'original', readSource: {
+      target: { hostId: 'local', expectedRuntimeId: 'original-runtime' }, resource: { ...base, zonePath: sourceRoot, zoneId: 'original-zone', path: relative },
+      query: { zoneId: 'original-zone', expectedResource: base, path: relative } } } }
+    run('agentmux.copyAbsolutePath')
+    expect(lastCopiedText()).toBe(sourceRoot + '/' + relative)
+    run('agentmux.copyRelativePath')
+    expect(lastCopiedText()).toBe(relative)
+    run('agentmux.copyPathWithLine')
+    expect(lastCopiedText()).toBe(relative + ':1')
+  })
+
   it('复制相对路径：原样', () => {
     mount()
     run('agentmux.copyRelativePath')
