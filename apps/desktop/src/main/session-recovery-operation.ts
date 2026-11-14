@@ -8,7 +8,10 @@ export async function sessionRecoveryOperationResult(operation: () => Promise<Se
   try { return { ok: true, value: await operation() } }
   catch (error) {
     const failure = deliveryFailure(error)
-    return { ok: false, reply: isAgentMuxRpcReplyUnconfirmed(error) ? 'unconfirmed' : 'received',
-      error: { ...failure, code: failure.code ?? 'SESSION_RECOVERY_FAILED' } }
+    const reply = isAgentMuxRpcReplyUnconfirmed(error) ? 'unconfirmed' : 'received'
+    const source = error instanceof Error ? error as Error & { moteMainRollover?: import('@agentmux/core/mote-dialogue').MoteMainRolloverDecision } : null
+    return { ok: false, reply,
+      error: { ...failure, code: failure.code ?? 'SESSION_RECOVERY_FAILED',
+        ...(reply === 'received' && source?.moteMainRollover ? { moteMainRollover: source.moteMainRollover } : {}) } }
   }
 }

@@ -3,7 +3,8 @@ import { unwrapSessionInputOperationResult } from './session-input-result'
 
 export type SessionRecoveryOperationReply =
   | Extract<SessionInputOperationResult<SessionRecoveryResult>, { ok: true }>
-  | (Extract<SessionInputOperationResult<SessionRecoveryResult>, { ok: false }> & { reply: 'received' | 'unconfirmed' })
+  | (Extract<SessionInputOperationResult<SessionRecoveryResult>, { ok: false }> & { reply: 'received' | 'unconfirmed';
+      error: { moteMainRollover?: import('@agentmux/core/mote-dialogue').MoteMainRolloverDecision } })
 
 const unconfirmedRecoveryReplies = new WeakSet<Error>()
 export function isSessionRecoveryReplyUnconfirmed(error: unknown): boolean {

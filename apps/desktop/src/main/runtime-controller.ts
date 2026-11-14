@@ -2002,6 +2002,13 @@ export class RuntimeController {
     }
   }
 
+  /** The original Core decision is a continuation handoff, never a recovery or input ACK. */
+  private handoffMoteMainRollover(result: import('@agentmux/core/mote-dialogue').MoteDialogueInputInspection): void {
+    if (result.disposition === 'rollover-required' && result.rollover?.status === 'due' && result.rollover.decision) throw Object.assign(
+      new AgentMuxError('The original Mote policy requires a new Main period. This Query was not delivered to the previous Main.', 'MOTE_MAIN_ROLLOVER_REQUIRED'),
+      { moteMainRollover: result.rollover.decision })
+  }
+
   async submitPrompt(
     control: Extract<SessionControl, { kind: 'agent' }> | AgentInputTarget,
     prompt: string,
@@ -2035,9 +2042,7 @@ export class RuntimeController {
         : { ...content, ...capturedCondition, ...(choice.execution ? { execution: choice.execution } : {}), ...(choice.preparationRetry ? { preparationRetry: choice.preparationRetry } : {}) }
       const result = await this.trackHostOperation(route.hostId, () => this.callOriginalCore(
         choice.moteMain!.target.expectedResource.hostId, 'space.mote.dialogue.input.submit', { ...choice.moteMain!, input }, { transport: 'unix' }))
-      if (result.disposition === 'rollover-required' && result.rollover?.status === 'due' && result.rollover.decision) throw Object.assign(
-        new AgentMuxError('The original Mote policy requires a new Main period. This Query was not delivered to the previous Main.', 'MOTE_MAIN_ROLLOVER_REQUIRED'),
-        { moteMainRollover: result.rollover.decision })
+      this.handoffMoteMainRollover(result)
       if ('admissionIntent' in capturedCondition) {
         if (!result.input) throw new AgentMuxError('The original main input has no confirmed receipt yet. Its role and operation are retained; inspect the original request before sending again.', 'MOTE_MAIN_INPUT_UNCONFIRMED')
         return result.input
@@ -2413,6 +2418,7 @@ export class RuntimeController {
             ...(original.agentMuxNote === undefined ? {} : { agentMuxNote: original.agentMuxNote }) } } : {})
         }
       }, { transport: 'unix' })
+      this.handoffMoteMainRollover(result)
       const recovery = result.recovery
       if (!recovery || recovery.kind !== 'resumed' || !recovery.newRun) throw new AgentMuxError(
         'The original main recovery input is unconfirmed. Its operation, captured context and source are retained; inspect that original request.', 'MOTE_MAIN_INPUT_UNCONFIRMED')
