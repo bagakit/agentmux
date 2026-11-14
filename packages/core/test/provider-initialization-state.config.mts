@@ -9,6 +9,7 @@ const coreAliases = Object.entries(coreExports).flatMap(([key, entry]) => entry.
 }] : [])
 export default defineConfig({ root, resolve: { alias: [
   ...coreAliases,
+  { find: '@agentmux/providers/grok/input-initialization', replacement: resolve(root, 'packages/providers/src/grok/input-initialization.ts') },
   { find: /^@agentmux\/browser$/, replacement: resolve(root, 'packages/browser/src/index.ts') },
   { find: /^@agentmux\/browser\/(.+)$/, replacement: resolve(root, 'packages/browser/src/$1.ts') }
 ] }, cacheDir: resolve(root, '.local/provider-initialization-state/cache'), test: {

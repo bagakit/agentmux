@@ -23,7 +23,7 @@ import { sessionRecoverySource } from '../src/storage-recovery-sources.js'
 import { AgentMuxFileAgentSessionStore, normalizeStoredAgentSession } from '../src/agent-session-store.js'
 import { claudeRecoveryFiles } from '../src/providers/claude-native-catalog.js'
 import { codexRecoveryFiles } from '../src/providers/codex-native-catalog.js'
-import { grokRecoveryFiles } from '../src/providers/grok-native-history.js'
+import { grokRecoveryFiles } from '../src/providers/grok-history.js'
 import { recoveryDirectorySource, hashRecoveryFile } from '../src/storage-recovery.js'
 import { semanticRecoverySource } from '../src/storage-recovery-sources.js'
 

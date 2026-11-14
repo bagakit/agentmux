@@ -8,7 +8,7 @@ import { runSourceObjectCli } from '../../../packages/core/test/helpers/source-o
 import { decodePreparedRun } from '../../../packages/core/src/prepared-run.js'
 import { AgentMuxError } from '../../../packages/core/src/errors.js'
 import { readGrokPromptExecutionEvidence, observeGrokSessionStatus } from '../../../packages/core/src/providers/grok-session-status.js'
-import { encodeCwdDirname } from '../../../packages/core/src/providers/grok-native-history.js'
+import { encodeCwdDirname } from '../../../packages/providers/src/grok/native-history.js'
 import { grokUser, grokDone } from '../../../packages/core/test/fixtures/grok-updates.js'
 import { createGoalRuntime } from '../src/goal-runtime.js'
 import { ContinuousProgressLoopManager } from '../src/continuous-progress-loop-manager.js'

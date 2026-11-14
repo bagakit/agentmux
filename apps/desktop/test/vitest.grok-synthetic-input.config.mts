@@ -2,12 +2,14 @@ import { defineConfig } from 'vitest/config'
 import base from './vitest.conversation-unified-consumers.config.mts'
 import { appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { relative } from 'node:path'
+import { relative, resolve } from 'node:path'
 const root = process.cwd(), mutation = process.env.AGENTMUX_GROK_SYNTHETIC_MUTATION, loaded = process.env.AGENTMUX_GROK_SYNTHETIC_LOADED
 export default defineConfig({ ...base, cacheDir: '.tmp/grok-synthetic-input/cache', plugins: [...base.plugins ?? [], {
-  name: 'original-grok-synthetic-input', enforce: 'pre', transform(source, id) {
+  name: 'original-grok-synthetic-input', enforce: 'pre',
+  resolveId(specifier) { if (specifier === '@agentmux/providers/grok/native-history') return resolve(root, 'packages/providers/src/grok/native-history.ts') },
+  transform(source, id) {
     const file = relative(root, id.split('?')[0]!)
-    if (file !== 'packages/core/src/providers/grok-native-history.ts') return
+    if (file !== 'packages/providers/src/grok/native-history.ts') return
     const needle = mutation === 'omit-purpose' ? ", recordPurpose: 'system-event' as const" : "isRecord(update._meta) && update._meta.syntheticPrompt === true"
     if (mutation && source.split(needle).length !== 2) throw Error('Grok source mutation must hit one actual owner contribution')
     const code = mutation ? source.replace(needle, mutation === 'omit-purpose' ? '' : 'false') : source

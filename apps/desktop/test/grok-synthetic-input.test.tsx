@@ -160,7 +160,7 @@ it.each(['shared', 'desktop'])('the %s product reader keeps synthetic notificati
   expect(host.querySelectorAll('.log-turn[data-speaker-role="human"]')).toHaveLength(1)
   expect(await readFile(f.path)).toEqual(f.before.native); expect(f.controls.flatMap(control => control.mock.calls)).toEqual([])
   if (surface === 'shared' && uiFrame) {
-    const owner = 'packages/core/src/providers/grok-native-history.ts'
+    const owner = 'packages/providers/src/grok/native-history.ts'
     await writeFile(uiFrame, JSON.stringify({ snapshot, provider: { path: owner, sha256: createHash('sha256').update(await readFile(owner)).digest('hex') },
       originals: { nativeSessionId: native, notificationId: record.original.item.id, notice, input: 'Ordinary original input.', answer }, qualification: 'Actual Grok Provider → FileStore Core public Unix RPC → complete window. Original bytes and runtime controls unchanged; illustrative native records, not a vendor process.' }, null, 2))
   }

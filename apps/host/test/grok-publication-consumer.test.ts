@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { expect, it, vi } from 'vitest'
 import { moteChatJourneyFixture } from '../../../packages/connectors/test/fixtures/mote-chat-journey.js'
 import { MoteChatStore } from '../../../packages/connectors/src/mote-chat-store.js'
-import { encodeCwdDirname } from '../../../packages/core/src/providers/grok-native-history.js'
+import { encodeCwdDirname } from '../../../packages/providers/src/grok/native-history.js'
 import { grokChunk, grokDone } from '../../../packages/core/test/fixtures/grok-updates.js'
 const facts = (value: unknown) => { if (process.env.T043_FACTS) appendFileSync(process.env.T043_FACTS, JSON.stringify(value) + '\n') }
 

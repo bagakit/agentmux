@@ -34,7 +34,7 @@ export const grokStatusMutationCases = {
   'forget-predecessor': '^same source predecessor', 'old-run-overwrites-successor': '^original private environment',
   'old-end-overwrites-new-hook': '^a newer original Hook', 'older-write-clears-new-ingress': '^an older completion write'
 }
-const owners = new Set([client, leaf, 'packages/core/src/native-jsonl-history-reader.ts', 'packages/core/src/providers/index.ts', 'packages/core/src/providers/grok-native-history.ts',
+const owners = new Set([client, leaf, 'packages/core/src/native-jsonl-history-reader.ts', 'packages/core/src/providers/index.ts', 'packages/providers/src/grok/native-history.ts',
   'packages/core/src/public-rpc-service.ts', 'apps/host/src/goal-runtime.ts', 'apps/host/src/continuous-progress-loop-manager.ts', 'apps/host/src/continuous-progress-delivery.ts'])
 export function instrumentGrokStatus(source, file) {
   if (!owners.has(file)) return source

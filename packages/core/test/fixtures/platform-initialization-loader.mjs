@@ -19,6 +19,9 @@ function compiledCore(file) {
   }
 }
 registerHooks({ resolve(specifier, context, next) {
+  if (!compiled && specifier === '@agentmux/providers/grok/input-initialization') {
+    return next(pathToFileURL(resolve(root, 'packages/providers/src/grok/input-initialization.ts')).href, context)
+  }
   const file = specifier.startsWith('file:') ? fileURLToPath(specifier)
     : specifier.startsWith('.') && context.parentURL?.startsWith('file:')
       ? resolve(dirname(fileURLToPath(context.parentURL)), specifier) : specifier

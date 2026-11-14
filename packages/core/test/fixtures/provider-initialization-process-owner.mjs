@@ -9,14 +9,16 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const [root, compiled] = process.argv.slice(2)
 if (!root || !compiled) throw new Error('An exact private directory and compiled Core are required.')
+const initialization = '@agentmux/providers/grok/input-initialization'
+const initializationURL = import.meta.resolve(initialization)
 const observedModules = new Set(['client.js', 'ctxmux-run-adapter.js', 'agent-native-process.js',
-  'providers/grok-input-initialization.js', 'agent-initialization.js', 'agent-input-receipt-codec.js'])
+  initialization, 'agent-initialization.js', 'agent-input-receipt-codec.js'])
 const mutation = process.env.AMX_SESSION_STATE_COMPILED_MUTATION
 if (mutation && mutation !== 'additive-environment') throw new Error('Unknown compiled environment mutation.')
 registerHooks({ load(url, context, next) {
   const result = next(url, context)
   if (!url.startsWith('file:')) return result
-  const path = relative(compiled, fileURLToPath(url))
+  const path = url === initializationURL ? initialization : relative(compiled, fileURLToPath(url))
   if (!observedModules.has(path)) return result
   const original = typeof result.source === 'string' ? result.source : Buffer.from(result.source).toString('utf8')
   let source = original

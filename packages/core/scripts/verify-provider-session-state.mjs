@@ -53,6 +53,7 @@ for (const file of [config, 'packages/core/test/provider-initialization-state.co
   'packages/core/test/native-completion-authority.test.ts',
   'packages/core/test/fixtures/activity-certainty-client.ts', 'packages/core/test/fixtures/provider-session-state-owner.mjs',
   'packages/core/test/provider-initialization-process.test.ts', 'packages/core/test/fixtures/provider-initialization-process-owner.mjs',
+  'packages/providers/src/grok/input-initialization.ts',
   'packages/core/test/fixtures/platform-initialization-loader.mjs', 'packages/core/test/fixtures/platform-initialization-owner.mjs']) before[file] = hash(await read(file))
 
 // One private compiled candidate belongs only to this gate mode; no shared dist is replaced.
@@ -76,9 +77,10 @@ if (process.platform === 'darwin') {
   assert.equal(result.code, 0, 'The private candidate native helper must compile with the production flags.')
   nativeHelper = { sourceSHA256: before['packages/core/native/native-socket-peer.c'], executableSHA256: hash(await readFile(helper)) }
 }
+const initialization = '@agentmux/providers/grok/input-initialization'
 const compiledInputs = Object.fromEntries(await Promise.all(['client.js', 'ctxmux-run-adapter.js', 'agent-native-process.js',
-  'providers/grok-input-initialization.js', 'agent-initialization.js', 'agent-input-receipt-codec.js'].map(async path =>
-  [path, hash(await readFile(join(candidate, 'dist', path)))])))
+  initialization, 'agent-initialization.js', 'agent-input-receipt-codec.js'].map(async path =>
+  [path, hash(await readFile(path === initialization ? new URL(import.meta.resolve(path)) : join(candidate, 'dist', path)))])))
 
 async function execute(label, testMode = mode, mutation) {
   const loadedPath = join(evidence, label + '.loaded.jsonl'), reportPath = join(evidence, label + '.json')
@@ -108,7 +110,7 @@ async function execute(label, testMode = mode, mutation) {
   const compiledLoaded = (await readFile(compiledLoadedPath, 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line))
   for (const input of compiledLoaded) assert.equal(input.originalSHA256, compiledInputs[input.path], 'Wrong compiled candidate loaded: ' + input.path)
   if (testMode === 'process-environment' || testMode === 'initialization') for (const path of ['client.js', 'ctxmux-run-adapter.js',
-    'agent-native-process.js', 'providers/grok-input-initialization.js']) assert.ok(compiledLoaded.some(input => input.path === path),
+    'agent-native-process.js', initialization]) assert.ok(compiledLoaded.some(input => input.path === path),
     'The compiled original environment must traverse the actual owning implementation: ' + path)
   if (testMode === 'activity' || testMode === 'integration') for (const path of [
     'apps/desktop/src/renderer/src/lib/agent-observation.ts', 'apps/desktop/src/renderer/src/lib/session-state.ts'

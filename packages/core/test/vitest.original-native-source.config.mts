@@ -3,7 +3,9 @@ import source from '../../../apps/desktop/scripts/fixtures/agent-schedules/vites
 import { relative, resolve } from 'node:path'
 import { instrument } from './helpers/grok-original-source-mutations.mjs'
 const root = resolve(import.meta.dirname, '../../..')
-export default defineConfig({ ...source, plugins: [...(source.plugins ?? []), { name: 'original-grok-source', enforce: 'pre', transform(code, id) {
+export default defineConfig({ ...source, plugins: [...(source.plugins ?? []), { name: 'original-grok-source', enforce: 'pre',
+  resolveId(specifier) { if (specifier === '@agentmux/providers/grok/native-history') return resolve(root, 'packages/providers/src/grok/native-history.ts') },
+  transform(code, id) {
   const changed = instrument(code, relative(root, id.split('?')[0]!)); return changed === code ? undefined : { code: changed, map: null }
 } }], test: { ...source.test,
   include: process.env.MOTE_GROK_ORIGINAL_MUTATION ? [process.env.MOTE_GROK_ORIGINAL_MUTATION === 'emit-before-cut-completes'

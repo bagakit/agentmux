@@ -6,7 +6,7 @@ import { grokChunk, grokDone, grokUpdate, grokUser } from '../fixtures/grok-upda
 import { AgentProviderRegistry } from '../../src/agent-provider.js'
 import { NativeJsonlHistoryReader } from '../../src/native-jsonl-history-reader.js'
 import * as nativeValues from '../../src/native-history-value.js'
-import { encodeCwdDirname, slugify, urlencodeRfc3986 } from '../../src/providers/grok-native-history.js'
+import { encodeCwdDirname, slugify, urlencodeRfc3986 } from '../../../providers/src/grok/native-history.js'
 import { readSessionHistoryTextResource } from '../../src/session-history-content.js'
 import type { AgentSessionHistoryItem } from '../../src/types.js'
 import type { ProviderConversationChangesContext } from '../../src/session-history-changes.js'

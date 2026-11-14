@@ -16,8 +16,8 @@ export const mutations = {
   'accept-read-only-source': [source, [["file.access === 'w' || file.access === 'u'", 'true']], '^a read-only OS descriptor'],
   'accept-foreign-native': [source, [['row.session_id !== handle.sessionId || ', '']], '^an original OS descriptor cannot borrow a wrong native'],
   'accept-child-source': [source, [["row.session_relationship !== 'primary' || ", '']], '^an original OS descriptor cannot borrow a wrong child'],
-  'accept-foreign-cwd': ['packages/core/src/providers/grok-native-history.ts', [['if (!cwd || cwd !== context.workspacePath)', 'if (false)']], '^an original OS descriptor cannot borrow a wrong cwd'],
-  'ignore-summary-rewrite': ['packages/core/src/providers/grok-native-history.ts', [['if (before) {', 'if (before && false) {']], '^a summary rewritten'],
+  'accept-foreign-cwd': ['packages/providers/src/grok/native-history.ts', [['if (!cwd || cwd !== context.workspacePath)', 'if (false)']], '^an original OS descriptor cannot borrow a wrong cwd'],
+  'ignore-summary-rewrite': ['packages/providers/src/grok/native-history.ts', [['if (before) {', 'if (before && false) {']], '^a summary rewritten'],
   'ignore-original-birth': [source, [['if (await nativeProcessBirth(processId, active) !== birth || await nativeProcessBirth(original.processId, active) !== writerBirth) throw unavailable()', '', 2]], '^the original process birth'],
   'block-on-replaced-fifo': [source, [[' | constants.O_NONBLOCK', '']], '^a FIFO replacing'],
   'accept-replaced-updates': [status, [['BigInt(actual.dev) !== original.stat.dev || BigInt(actual.ino) !== original.stat.ino', 'false']], '^an updates replacement'],
@@ -25,7 +25,7 @@ export const mutations = {
   'use-stale-path-extent': [status, [['if (reader.sourceSizeBytes !== extent)', 'if (reader.sourceSizeBytes !== Number(original.stat.size))']], '^a complete native append.*finite'],
   'emit-before-cut-completes': [status, [['consumed = entry.end; turns.accept(entry)', 'consumed = entry.end; turns.accept(entry); const premature = turns.observation(); if (premature) emit(premature)']], '^a whole native cut']
 }
-const owners = new Set([status, source, 'packages/core/src/providers/grok-native-history.ts', 'packages/core/src/providers/index.ts',
+const owners = new Set([status, source, 'packages/providers/src/grok/native-history.ts', 'packages/core/src/providers/index.ts',
   'packages/core/src/native-jsonl-history-reader.ts', 'packages/core/src/client.ts', 'packages/core/src/public-rpc-service.ts',
   'apps/host/src/goal-runtime.ts', 'apps/host/src/continuous-progress-loop-manager.ts', 'apps/host/src/continuous-progress-delivery.ts'])
 export function instrument(code, file) {

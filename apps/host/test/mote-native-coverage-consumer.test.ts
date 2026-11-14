@@ -6,7 +6,7 @@ import * as core from '@agentmux/core'
 import { moteChatDiagnosisKey } from '@agentmux/core/mote-chat'
 import { MoteChatStore } from '../../../packages/connectors/src/mote-chat-store.js'
 import { moteChatJourneyFixture } from '../../../packages/connectors/test/fixtures/mote-chat-journey.js'
-import { encodeCwdDirname } from '../../../packages/core/src/providers/grok-native-history.js'
+import { encodeCwdDirname } from '../../../packages/providers/src/grok/native-history.js'
 import { objectCliEnvironment } from '../../../packages/core/test/helpers/object-cli-rpc.js'
 import { runSourceObjectCli } from '../../../packages/core/test/helpers/source-object-cli.js'
 

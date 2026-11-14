@@ -18,7 +18,7 @@ export const initializationMutations = {
     ['if (!this.nativeSessionStarting(session, intent)) return null', 'if (false) return null'],
     ['if (!this.nativeSessionStarting(current, intent)) return null', 'if (false) return null'],
     ['const initializationWait = this.nativeSessionStarting(current, saved.intent.admissionIntent) && await', 'const initializationWait = await']]],
-  'current-environment': ['packages/core/src/providers/grok-input-initialization.ts', [
+  'current-environment': ['packages/providers/src/grok/input-initialization.ts', [
     ["const env = Object.fromEntries(Object.entries(context.env).filter((entry): entry is [string, string] => entry[1] !== undefined))", 'const env = { ...process.env, ...context.env, HOME: process.env.HOME, GROK_HOME: process.env.GROK_HOME }']]],
   'history-start-veto': ['packages/core/src/client.ts', [
     ["sameRun(session.nativeSourceObservation.run, session.run) && session.nativeSourceObservation.state !== 'unknown'", 'sameRun(session.nativeSourceObservation.run, session.run)']]],
@@ -31,7 +31,7 @@ export const initializationMutations = {
 }
 const observed = new Set(['packages/core/src/client.ts', 'packages/core/src/public-rpc-service.ts', 'packages/core/src/agent-provider.ts',
   'packages/core/src/agent-input-wait.ts', 'packages/core/src/agent-message-journal.ts', 'packages/core/src/agent-global-message-queue.ts',
-  'packages/core/src/providers/index.ts', 'packages/core/src/providers/grok-input-initialization.ts',
+  'packages/core/src/providers/index.ts', 'packages/providers/src/grok/input-initialization.ts',
   'packages/core/src/agent-native-source.ts', 'packages/core/src/prompt-submission.ts', 'packages/core/src/client-event-publisher.ts',
   'packages/core/test/platform-initialization-input.test.ts', 'packages/core/test/native-history-input-continuity.test.ts',
   'packages/core/test/platform-initialization-diagnostic-lifetime.test.ts', 'apps/host/test/mote-existing-platform-input.test.ts',

@@ -86,7 +86,7 @@ try {
   await tests('restored')
   const paths = ['storage-recovery.ts', 'storage-recovery-sources.ts', 'agent-session-store.ts', 'agent-creation-authority.ts',
     'headless-runtime.ts', 'client.ts', 'agent-provider.ts', 'native-creation-admission.ts', 'providers/claude-native-catalog.ts',
-    'providers/codex-native-catalog.ts', 'providers/grok-native-history.ts']
+    'providers/codex-native-catalog.ts', '../../providers/src/grok/native-history.ts']
   for (const path of paths) receipt.sourceHashes['packages/core/src/' + path] = sha(await readFile(join(root, 'packages/core/src', path)))
   const verificationPaths = ['packages/core/scripts/helpers/recovery-dependency-proof.mjs','packages/core/scripts/verify-recovery-backup.mjs', 'packages/core/test/storage-recovery-capture.config.mts', 'packages/core/test/storage-restore.config.mts', 'packages/core/test/storage-recovery-capture.test.ts', 'packages/core/test/storage-restore.test.ts', 'packages/core/test/helpers/prompt-receipt-source-loader.mjs', 'packages/core/test/helpers/storage-recovery-source-cli.ts', 'packages/core/test/helpers/prompt-receipt-reader.mjs', 'packages/core/test/helpers/prompt-receipt-process.ts', 'packages/core/test/helpers/storage-spatial-reader.mjs', process.execPath]
   for (const path of verificationPaths) receipt.verificationHashes[path] = sha(await readFile(isAbsolutePath(path) ? path : join(root, path)))
