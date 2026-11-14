@@ -45,14 +45,15 @@ app.whenReady().then(async () => {
     const profile = async () => { await click(button('Profile', 'document.querySelector(".mote-space-frame__header")')); await until('document.querySelector("[data-mote-page=profile]")') }
     const refresh = async () => { await click(button('Refresh actual schedule', 'document.querySelector(".mote-quick-mode")')) }
     if (process.env.MOTE_HEARTBEAT_ICON === '1') {
-      const cues = 'document.querySelectorAll(\'.mote-heartbeat-entry [data-icon-animation="feedback"], .mote-space-frame__header .mote-heartbeat-lamp__signal [data-icon-animation="feedback"]\')'
+      const cues = 'document.querySelectorAll(\'.pmo-teams-topic-compact-launcher__delivery, .mote-space-frame__header .mote-heartbeat-lamp__signal [data-icon-animation="feedback"]\')'
       const sprite = 'document.getElementById("agentmux-icon-object.heartbeat")'
-      assert.equal(await read(`${sprite}.querySelectorAll('[data-semantic-icon-part="heartbeat-pendulum"]').length`), 2)
+      assert.equal(await read(`${sprite}.querySelectorAll('path[fill="currentColor"][stroke="none"]').length`), 2)
       const launcher = 'document.querySelector(".pmo-teams-topic-compact-launcher__surface")'
       await until(`${launcher}?.querySelector('[data-space-silhouette="low-poly"]')`)
-      const fractions = await read(`(() => { const root = ${launcher}; const avatar = root.querySelector('.mote-silhouette-art').getBoundingClientRect(); const badge = root.querySelector('.mote-heartbeat-entry'); const outline = badge.getBoundingClientRect(); const online = root.querySelector('.pmo-teams-topic-compact-launcher__status').getBoundingClientRect();
-        return { noBacking: getComputedStyle(badge).backgroundColor === 'rgba(0, 0, 0, 0)' && getComputedStyle(badge).borderTopWidth === '0px', aboveAvatar: outline.top < avatar.top, rightOfCenter: outline.left > avatar.left + avatar.width / 2, separateFromOnline: outline.bottom < online.top } })()`)
-      assert.deepEqual(fractions, { noBacking: true, aboveAvatar: true, rightOfCenter: true, separateFromOnline: true })
+      const fractions = await read(`(() => { const root = ${launcher}; const avatar = root.querySelector('.mote-silhouette-art').getBoundingClientRect(); const rim = root.querySelector('.pmo-teams-topic-compact-launcher__rim'); const circle = rim.getBoundingClientRect(); const online = root.querySelector('.pmo-teams-topic-compact-launcher__status').getBoundingClientRect();
+        return { ownPerimeter: Math.abs(circle.width - root.getBoundingClientRect().width) <= 2 && circle.top < avatar.top, masked: getComputedStyle(rim).maskImage.includes('radial-gradient'), onlineVisible: online.width > 0 } })()`)
+      assert.deepEqual(fractions, { ownPerimeter: true, masked: true, onlineVisible: true })
+      const rimStates = new Set()
       for (const [theme, width, facts, state, icon] of [
         ['dark', 1180, 'active', 'active', 'object.heartbeat'],
         ['light', 420, 'active', 'active', 'object.heartbeat'],
@@ -64,39 +65,41 @@ app.whenReady().then(async () => {
         await profile(); await refresh()
         await click(button('Discussion', 'document.querySelector(".mote-space-frame__header")'))
         const mark = `[data-mote-care="${state}"] svg[data-semantic-icon="${icon}"]`
-        for (const [surface, size] of [['.mote-heartbeat-entry', 13], ['.mote-space-frame__header .mote-heartbeat-lamp', 14]])
-          await until(`document.querySelector(${JSON.stringify(surface + mark)})?.getBoundingClientRect().width === ${size}`)
+        await until(`document.querySelector(${JSON.stringify('.mote-space-frame__header .mote-heartbeat-lamp' + mark)})?.getBoundingClientRect().width === 14`)
+        await until(`${launcher}.dataset.moteCare === ${JSON.stringify(state)}`)
+        rimStates.add(await read(`getComputedStyle(${launcher}.querySelector('.pmo-teams-topic-compact-launcher__rim')).backgroundImage`))
         assert.equal(await read(`${cues}.length`), 0)
-        await capture('heartbeat-icon-' + state + '-' + theme)
+        await capture('heartbeat-rim-' + state + '-' + theme)
       }
+      assert.ok(rimStates.size >= 3, 'The care states have different filled perimeter shapes')
       win.setContentSize(680, 740)
       await read('window.moteReliability.variant("active")'); await profile(); await refresh()
       await click(button('Discussion', 'document.querySelector(".mote-space-frame__header")'))
       await until('document.querySelector(".mote-space-frame__header .mote-heartbeat-lamp[data-mote-care=active]")')
       const beats = []
       win.webContents.debugger.on('message', (_event, method, packet) => {
-        if (method === 'Animation.animationStarted' && packet.animation.name === 'semantic-icon-heartbeat-once') beats.push(packet.animation)
+        if (method === 'Animation.animationStarted' && ['semantic-icon-heartbeat-once', 'mote-care-rim-delivery'].includes(packet.animation.name)) beats.push(packet.animation)
       })
       await input('Animation.enable')
       await capture('heartbeat-motion-rest')
       await input('Animation.setPlaybackRate', { playbackRate: 0.1 })
       await read('window.moteReliability.advanceHeartbeatIcon()')
       await until(`${cues}.length === 2`)
-      assert.equal(beats.length, 4, 'Both parts of each original pendulum move')
-      assert.ok(beats.every(beat => beat.source.iterations === 1 && beat.source.duration === 220), 'One finite authored motion')
+      assert.equal(beats.length, 2, 'One flare on the original rim and one compact beat in Discussion')
+      assert.ok(beats.every(beat => beat.source.iterations === 1 && [320, 560].includes(beat.source.duration)), 'One finite authored motion')
       const animations = beats.map(beat => beat.id)
       await input('Animation.setPaused', { animations, paused: true })
-      await input('Animation.seekAnimations', { animations, currentTime: 99 })
+      await input('Animation.seekAnimations', { animations, currentTime: 140 })
       await capture('heartbeat-motion-crest')
       await input('Animation.setPlaybackRate', { playbackRate: 1 })
       await input('Animation.setPaused', { animations, paused: false })
-      await capture('heartbeat-motion-settled', 280)
+      await capture('heartbeat-motion-settled', 580)
       await input('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
       await read(`window.previousHeartbeatCue = ${cues}[0]; window.moteReliability.advanceHeartbeatIcon()`)
       await until(`${cues}.length === 2 && ${cues}[0] !== window.previousHeartbeatCue`)
-      assert.equal(await read(`getComputedStyle(${cues}[0]).getPropertyValue('--icon-feedback-heartbeat').trim()`), 'none')
+      assert.equal(await read(`getComputedStyle(document.querySelector('.pmo-teams-topic-compact-launcher__delivery')).display`), 'none')
       await capture('heartbeat-motion-reduced')
-      assert.equal(beats.length, 4, 'Reduced motion does not start a new drawing animation')
+      assert.equal(beats.length, 2, 'Reduced motion does not start a new drawing animation')
       result.heartbeatMotion = { carriers: await read(`${cues}.length`), movingParts: beats.length, durationMs: beats[0].source.duration, iterations: beats[0].source.iterations, reducedMotionStarted: 0 }
       result.passed = true; return
     }

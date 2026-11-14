@@ -85,7 +85,7 @@ it.each([
   ['attention', 'status.warning', 'Check delivery'],
   ['unknown', 'status.unknown', 'Care unconfirmed'],
   ['off', 'status.heartbeat-off', 'Care off'],
-] as const)('uses the same semantic heartbeat mark for %s in the launcher and the conversation', async (state, icon, label) => {
+] as const)('renders care state %s on the original rim and in the conversation', async (state, icon, label) => {
   if (state === 'active') maintenance = { status: 'active', schedule: { ...loop(), status: 'active', lastOutcome: 'sent' }, issue: null }
   if (state === 'paused' || state === 'attention') maintenance.schedule!.pause = {
     reason: state === 'paused' ? 'manual' : 'input-unconfirmed', episodeId: 'current-pause', pausedAt: 1794210000500,
@@ -94,14 +94,16 @@ it.each([
   await app.mount()
   await vi.waitFor(() => {
     const lamp = document.querySelector('.mote-space-frame__header .mote-heartbeat-lamp')
-    const badge = document.querySelector('.mote-heartbeat-entry')
+    const launcher = document.querySelector('.pmo-teams-topic-compact-launcher__surface')
     expect(lamp?.getAttribute('aria-label')).toContain(label)
     expect(lamp?.querySelector('[data-semantic-icon]')?.getAttribute('data-semantic-icon')).toBe(icon)
-    expect(badge?.getAttribute('data-mote-care')).toBe(state)
-    expect(badge?.querySelector('[data-semantic-icon]')?.getAttribute('data-semantic-icon')).toBe(icon)
+    expect(launcher?.getAttribute('data-mote-care')).toBe(state)
+    expect(launcher?.querySelector('.pmo-teams-topic-compact-launcher__rim')).not.toBeNull()
+    expect(launcher?.querySelector('.pmo-teams-topic-compact-launcher__status .status__dot')).not.toBeNull()
+    expect(launcher?.querySelector('svg[data-semantic-icon="' + icon + '"]')).toBeNull()
     if (state === 'active') {
-      const drawing = document.getElementById(badge?.querySelector('svg use')?.getAttribute('href')?.slice(1) ?? '')
-      expect(drawing?.querySelectorAll('[data-semantic-icon-part="heartbeat-pendulum"]')).toHaveLength(2)
+      const drawing = document.getElementById(lamp?.querySelector('svg use')?.getAttribute('href')?.slice(1) ?? '')
+      expect(drawing?.querySelectorAll('path[fill="currentColor"][stroke="none"]')).toHaveLength(2)
     }
   })
   retained()
@@ -120,7 +122,7 @@ it('plays the heartbeat delivery cue once for a newly confirmed input in the ori
   maintenance = { status: 'active', schedule: { ...schedule, lastInputRef: receipt.reference }, issue: null }
   let readings: readonly MoteHeartbeatNoticeReading[] = []
   function Probe() { readings = useMoteHeartbeatNoticeReadings(); return null }
-  const cues = () => [...document.querySelectorAll('.mote-heartbeat-entry [data-icon-animation="feedback"], .mote-space-frame__header .mote-heartbeat-lamp__signal [data-icon-animation="feedback"]')]
+  const cues = () => [...document.querySelectorAll('.pmo-teams-topic-compact-launcher__delivery, .mote-space-frame__header .mote-heartbeat-lamp__signal [data-icon-animation="feedback"]')]
   await app.mount(createElement(Probe))
   expect(readings[0]?.saved?.maintenance?.input?.reference).toEqual(receipt.reference)
   expect(cues()).toHaveLength(0)
@@ -155,7 +157,7 @@ it('the real conversation and daily entry share one original reading while Profi
   await app.mount()
   const lamp = document.querySelector<HTMLButtonElement>('.mote-space-frame__header .mote-heartbeat-lamp')!
   await vi.waitFor(() => expect(lamp?.dataset.moteCare).toBe('attention'))
-  expect(document.querySelector('.mote-heartbeat-entry')?.getAttribute('data-mote-care')).toBe('attention')
+  expect(document.querySelector('.pmo-teams-topic-compact-launcher__surface')?.getAttribute('data-mote-care')).toBe('attention')
   expect(document.querySelector('.mote-quick-mode-dialog')).toBeNull()
   const beforeProfile = vi.mocked(api.motePreferences.read).mock.calls.filter(([input]) => input.kind === 'quick').length
   await moteClick(button('Profile'))
@@ -334,7 +336,7 @@ it('confirmed off settings keep the lamp quiet while the original Host still ret
   source.mockImplementation(async input => { const result = await read(input); return { ...result, defaults: { ...result.defaults!, presence: { enabled: false, intervalMs: 1800000 } } } })
   await app.mount()
   await vi.waitFor(() => expect(document.querySelector('.mote-space-frame__header .mote-heartbeat-lamp')?.getAttribute('data-mote-care')).toBe('off'))
-  expect(document.querySelector('.mote-heartbeat-entry')?.getAttribute('data-mote-care')).toBe('off'); retained()
+  expect(document.querySelector('.pmo-teams-topic-compact-launcher__surface')?.getAttribute('data-mote-care')).toBe('off'); retained()
 })
 it.each(['another-main', 'another-role-revision'])('a successful setting read with %s cannot paint the previous arrangement as current care', async mismatch => {
   maintenance = { status: 'active', schedule: { ...loop(), ...(mismatch === 'another-main' ? { agentSessionId: 'another-main' } : { managedSource: { sourceId: 'original-mote-source', revision: 'another-role' } }), status: 'active', lastOutcome: 'sent' }, issue: null }
