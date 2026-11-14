@@ -82,9 +82,12 @@ function hostRegion(frame: any, content: { x: number; y: number; width: number; 
 type Color = 'host-initial' | 'host-changed' | 'overlay-marker'
 function colorPixels(png: string, region: { x: number; y: number; width: number; height: number }, color: Color) {
   const image = nativeImage.createFromBuffer(Buffer.from(png, 'base64'))
+  assert.equal(image.isEmpty(), false, 'every real capture must decode to a nonempty image')
   const size = image.getSize(), bytes = image.toBitmap()
+  assert.ok(size.width > 0 && size.height > 0, 'every real capture has positive pixel dimensions')
   const x0 = Math.max(0, Math.floor(region.x)), y0 = Math.max(0, Math.floor(region.y))
   const x1 = Math.min(size.width, Math.ceil(region.x + region.width)), y1 = Math.min(size.height, Math.ceil(region.y + region.height))
+  assert.ok(x1 > x0 && y1 > y0, 'pixel absence claims require a nonempty sampling area')
   let matches = 0
   for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
     const offset = (y * size.width + x) * 4
@@ -118,15 +121,15 @@ async function painted(window: BrowserWindow): Promise<void> {
   await window.webContents.executeJavaScript('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
 }
 async function captureForSurface(options: { includeHostWindows?: boolean } = {}): Promise<any> {
-  const includeHostWindows = options.includeHostWindows === true
-  if (deferredAlternate?.phase === currentPhase && includeHostWindows !== (deferredAlternate.background === 'included')) {
+  const includeHostWindows = options.includeHostWindows === true, phase = currentPhase
+  if (deferredAlternate?.phase === phase && includeHostWindows !== (deferredAlternate.background === 'included')) {
     deferredAlternate.waiting = true
     await deferredAlternate.promise
   }
   const result = await native!.captureDisplays({ includeHostWindows })
-  receipt.nativeCalls.push({ phase: currentPhase, includeHostWindows, capturedAt: result.capturedAt })
-  nativeResults.push({ phase: currentPhase, includeHostWindows, result })
-  if (currentPhase === 'cancelled-old' && includeHostWindows) {
+  receipt.nativeCalls.push({ phase, includeHostWindows, capturedAt: result.capturedAt })
+  nativeResults.push({ phase, includeHostWindows, result })
+  if (phase === 'cancelled-old' && includeHostWindows) {
     heldNativeResult = true
     await new Promise<void>(resolve => { releaseHeld = resolve })
   }
@@ -371,13 +374,18 @@ async function run(): Promise<void> {
   oldOverlays[0]!.destroy()
   assert.deepEqual(await oldOutcome, { state: 'cancelled' })
   check('early cancellation destroys every old real overlay', oldOverlays.every(window => window.isDestroyed()))
-  const replacement = await openCapture('included', 'replacement')
-  process.stdout.write('capture-live stage: replacement opened; release old result\n')
-  const requestIds = replacement.inputs.map(input => input.requestId)
-  const callsBeforeLateRelease = receipt.nativeCalls.length
+  const callsBeforeReplacement = receipt.nativeCalls.length
+  const replacementPending = openCapture('included', 'replacement')
+  await wait(100)
+  check('replacement native work waits for the old producer after immediate UI cancellation', receipt.nativeCalls.length === callsBeforeReplacement)
+  process.stdout.write('capture-live stage: release old result for replacement\n')
   releaseHeld?.(); releaseHeld = undefined
+  const replacement = await replacementPending
+  const requestIds = replacement.inputs.map(input => input.requestId)
+  check('only the queued replacement adds exposures after the old producer settles', receipt.nativeCalls.length === callsBeforeReplacement + 2)
+  const callsAfterReplacement = receipt.nativeCalls.length
   await wait(300)
-  check('a cancelled request late real result starts no additional native exposure', receipt.nativeCalls.length === callsBeforeLateRelease)
+  check('a cancelled request late real result starts no additional native exposure', receipt.nativeCalls.length === callsAfterReplacement)
   const currentIds: string[] = []
   for (const overlay of replacement.overlays) {
     const input = await overlay.webContents.executeJavaScript('window.captureSurface.load()') as CaptureSurfaceInput
@@ -387,7 +395,7 @@ async function run(): Promise<void> {
     && replacement.overlays.every(window => !window.isDestroyed() && window.isVisible()))
   check('late-result isolation leaves every host opacity untouched', exactHostOpacity())
   await cancelCapture(replacement)
-  receipt.cases.push({ label: 'late-result-isolation', nativeCallsBeforeRelease: callsBeforeLateRelease, nativeCallsAfterRelease: receipt.nativeCalls.length })
+  receipt.cases.push({ label: 'late-result-isolation', nativeCallsBeforeRelease: callsBeforeReplacement, nativeCallsAfterRelease: receipt.nativeCalls.length })
 
   check('hidden and minimized windows were never touched', receipt.opacityWrites.every((row: any) => row.window !== 'hidden' && row.window !== 'minimized'))
   check('the entire lifecycle has zero host opacity writes', receipt.opacityWrites.length === 0)

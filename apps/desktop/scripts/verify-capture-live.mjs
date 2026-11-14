@@ -24,7 +24,7 @@ const receipt = {
 await writeFile(join(out, 'receipt.json'), JSON.stringify(receipt, null, 2))
 
 function lockedSession() {
-  const registry = spawnSync('ioreg', ['-n', 'Root', '-d1', '-a'], { encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 })
+  const registry = spawnSync('ioreg', ['-n', 'Root', '-d1', '-a'], { encoding: 'utf8', maxBuffer: 4 * 1024 * 1024, timeout: 10000 })
   assert.equal(registry.status, 0, registry.stderr || 'Unable to read the macOS loginwindow state')
   const match = registry.stdout.match(/<key>IOConsoleLocked<\/key>\s*<(true|false)\s*\/>/)
   assert.ok(match, 'Unable to parse the exact IOConsoleLocked Boolean from the macOS loginwindow plist')
@@ -34,7 +34,7 @@ async function persist() {
   await writeFile(join(out, 'receipt.json'), JSON.stringify(receipt, null, 2))
 }
 function helperPids(executablePath) {
-  const result = spawnSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8' })
+  const result = spawnSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8', timeout: 10000 })
   assert.equal(result.status, 0, result.stderr)
   return result.stdout.split('\n').filter(line => line.includes(executablePath + ' --agent '))
     .map(line => Number(line.trim().split(/\s+/, 1)[0])).filter(Number.isSafeInteger)
@@ -114,7 +114,7 @@ if (lockedSession()) {
       let log = '', timeout = false, kill
       for (const stream of [child.stdout, child.stderr]) stream.on('data', bytes => { log += bytes; process.stdout.write(bytes) })
       const timer = setTimeout(() => { timeout = true; child.kill('SIGTERM'); kill = setTimeout(() => child.kill('SIGKILL'), 3000) }, 120000)
-      child.once('error', reject)
+      child.once('error', error => { clearTimeout(timer); clearTimeout(kill); reject(error) })
       child.once('exit', (code, signal) => { clearTimeout(timer); clearTimeout(kill); done({ code, signal, timeout, log }) })
     })
     await writeFile(receipt.log, result.log)
