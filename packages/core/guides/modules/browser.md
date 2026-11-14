@@ -63,6 +63,18 @@ Read only the matching local help:
   the confirmed credential write, so do not repeat that write to reconnect a page.
   browser profile network check --profile ID observes the configured HTTPS address
   through that Profile's session. Unknown leaves the Profile and its pages available.
+  browser profile network probe --profile ID [--operation-id ID] records a separate
+  TCP/SOCKS5 sign-in/Profile exit diagnostic for the exact current configuration.
+  TCP and RFC1929 authentication use a direct socket to that proxy; authentication
+  success does not certify Chromium's authenticated SOCKS, UDP or QUIC traffic.
+  The exit observation alone uses the original Profile session. Credentials remain
+  inside their original encrypted Main owner and never enter reports or history.
+  Read network history --profile ID [--operation-id ID | --before ID] after an unknown
+  reply. Pages contain at most twenty original records; nextCursor names the oldest
+  item in this page. Original unfinished records survive restart and are not replayed.
+  A missing result remains unconfirmed. History updates do not invalidate settings
+  drafts, change native routes or close healthy pages; the original exit check remains
+  available independently of diagnostic history storage.
 - amux browser targets --help: discover available exact targets and their readiness.
   A target's optional objectLink is its stable original resource reference; url remains the
   actual document loading address, including its route. Neither grants input permission.

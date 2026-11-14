@@ -57,6 +57,7 @@ Browser Profiles 沿 Agents／Hosts 的资源库与单对象编辑构图：左�
 - **回收确认先于离开列表。** 原 owner 确认完整记录与原位完整分区转为归档持有前，保留原活动 Profile 与数据；回收已确认不显示为已释放磁盘或独立备份完成。恢复、保留期与永久删除使用不同动作和准确范围；占用或读写未知保留原对象、当前运行能力与就近恢复入口。数据与身份合同只见[Profile 管理、环境与指纹编辑](../behavior/browser-workface.md#profile-管理环境与指纹编辑)。
 - **Agents 是一个开关。** 编辑区的 Agents 一节只有「Let agents use Browsers in this Profile」，沿原 owner 的准确 Profile 编辑版本就地提交；开关下一行说明当前实际效果：Agent 可用这个 Profile 的登录态操作、此处拒绝 Agent 但人仍可运行自己的步骤，或总开关已关、此刻没有 Agent 使用任何 Profile。控件复用 Settings › Browser 总开关的同一种开关，看得出它收窄的正是那个总开关。
 - **出口检查只在人要求时发一次。** 编辑区「Exit check」写出这个 Profile 的路线（跟随系统、直连或代理服务器）；Settings › Browser 填了 https 检查地址后才提供 Check，否则给去设置的入口。Check 经这个 Profile 自己的 session 在其路线生效后发一次请求，一行写出到达的地址（仅当返回体只是一个 IP）、HTTP 状态与耗时；失败写明未知及原因，可重试，不阻断页面，不留历史，也不推测国家或时区。
+- **代理诊断按观察层呈现。** 在原 Profile 编辑区并列显示 TCP、SOCKS5 登录和 Profile 出口；每一层分别表达本次已确认结果或未知。直接代理探针与原 Browser session 的范围就近说明，不用单一绿色「可用」替代三项证据。历史渐进展开、分页读取，未完成检查保留原身份并提供只读核对入口；丢回执后不把「再查原记录」变成新探针。配置变化后，旧观察明确属于先前配置；历史服务失败保留当前表单、页面和可用操作。
 - **站点数据按站点清理。** 「Sites with sign-ins」在人点开时才读取，只列站点名与 Cookie 数；每行「Clear…」在行内确认、聚焦 Cancel、Escape 取消，清完说明已从该站点登出并提示重新加载其已打开页面，失败保留该行与原因。
 - **刷新失败不拿走能力。** 列表读取失败只给一行服务说明与 Retry，保留最后一份列表与全部动作；写入资格由 Main 按 revision 判定。
 
