@@ -1,6 +1,8 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
+import { symlink } from 'node:fs/promises'
+import { build } from '../../../packages/core/node_modules/esbuild/lib/main.js'
 import { pathToFileURL } from 'node:url'
 import { afterEach, expect, it, vi } from 'vitest'
 const native = vi.hoisted(() => ({ options: [] as unknown[], shown: 0, focused: 0 }))
@@ -33,22 +35,28 @@ const created = (sequence: number, extra = {}) => ({ type: 'core', hostId: 'loca
 } }) as RuntimeEvent
 
 it('only live background original creations notify once; receipt/catch-up/boot/mute and the visible recipient remain quiet', async () => {
-  const notify = vi.fn(async () => {}), owner = createA2AMessageNotifier(notify)
-  const input = { config, sessions: [session('reader'), session('sender')], ready: true, windowFocused: false, visibleSessionIds: new Set<string>() }
-  await owner.observe({ ...input, event: created(1) })
-  expect(notify).toHaveBeenCalledOnce(); expect(notify).toHaveBeenLastCalledWith({ sessionId: 'desktop-reader', title: 'New Agent message', body: 'Agent sender → Agent reader', mode: 'standard', sound: false })
-  await owner.observe({ ...input, event: created(1) })
-  for (const recordKind of ['delivery', 'delivery-issue', 'a2a-notification', 'a2a-notification-result']) await owner.observe({ ...input, event: created(9, { recordKind, messageSequence: 2 }) })
-  await owner.observe({ ...input, event: created(3, { live: false }) })
-  await owner.observe({ ...input, ready: false, event: created(4) })
-  await owner.observe({ ...input, event: created(4) })
-  await owner.observe({ ...input, windowFocused: true, visibleSessionIds: new Set(['desktop-reader']), event: created(5) })
-  await owner.observe({ ...input, config: { ...config, a2a: { notifications: 'silent' } }, event: created(6) })
-  await owner.observe({ ...input, event: created(6) })
-  await owner.observe({ ...input, event: created(7, { senderSessionId: 'reader' }) })
-  await owner.observe({ ...input, event: { ...created(8), hostId: 'another-host' } })
+  const notify = vi.fn(async () => {})
+  let input = { config, sessions: [session('reader'), session('sender')], ready: true, windowFocused: false, visibleSessionIds: new Set<string>(), agentNames: {}, timelines: {} }
+  const owner = createA2AMessageNotifier({ notify, snapshot: () => input, listMessages: async (_reference, options) => ({
+    hostId: 'local', participantSessionId: 'reader', direction: options.direction, messages: [{ sequence: options.beforeSequence! - 1,
+      envelope: { messageId: `mid-${options.beforeSequence! - 1}`, senderSessionId: 'sender', recipientSessionId: 'reader' },
+      bodyPreview: 'Please review the notification copy.' } as never], nextBeforeSequence: null
+  }) })
+  const observe = async (next: typeof input, event: RuntimeEvent) => { input = next; await owner.observe(event) }
+  await observe(input, created(1))
+  expect(notify).toHaveBeenCalledOnce(); expect(notify).toHaveBeenLastCalledWith({ sessionId: 'desktop-reader', title: 'Agent sender → Agent reader', body: 'Please review the notification copy.', mode: 'standard', sound: false })
+  await observe(input, created(1))
+  for (const recordKind of ['delivery', 'delivery-issue', 'a2a-notification', 'a2a-notification-result']) await observe(input, created(9, { recordKind, messageSequence: 2 }))
+  await observe(input, created(3, { live: false }))
+  await observe({ ...input, ready: false }, created(4))
+  await observe({ ...input, ready: true }, created(4))
+  await observe({ ...input, windowFocused: true, visibleSessionIds: new Set(['desktop-reader']) }, created(5))
+  await observe({ ...input, windowFocused: false, config: { ...config, a2a: { notifications: 'silent' } } }, created(6))
+  await observe({ ...input, config }, created(6))
+  await observe(input, created(7, { senderSessionId: 'reader' }))
+  await observe(input, { ...created(8), hostId: 'another-host' })
   expect(notify).toHaveBeenCalledOnce()
-  await owner.observe({ ...input, windowFocused: true, config: { ...config, a2a: { notifications: 'notify' }, notifications: { mode: 'off', sound: true } }, event: created(10) })
+  await observe({ ...input, windowFocused: true, visibleSessionIds: new Set(), config: { ...config, a2a: { notifications: 'notify' }, notifications: { mode: 'off', sound: true } } }, created(10))
   expect(notify).toHaveBeenCalledTimes(2); expect(notify.mock.calls.at(-1)?.[0]).toMatchObject({ mode: 'standard', sound: true })
 })
 
@@ -61,26 +69,39 @@ it('strict Host event decoding rejects missing or inconsistent authority without
 
 it('a cross-process original journal write reaches the actual public Hosted consumer and Main Notification.show without opening a mailbox', async () => {
   const f = await rpcOwnerFixture(['reader', 'sender']); closes.push(f.close)
+  // Build only these exact public consumers privately: an old installed/dist decoder cannot
+  // qualify the current source journal, and this test must not rebuild a shared workspace.
+  await symlink(resolve(import.meta.dirname, '../../../packages/core/node_modules'), join(f.root, 'node_modules'), 'dir')
+  const sourceCli = join(f.root, 'source-cli.mjs'), sourceQueue = join(f.root, 'source-queue.mjs')
+  const options = { bundle: true, packages: 'external' as const, platform: 'node' as const, format: 'esm' as const, target: 'node24', logLevel: 'silent' as const }
+  await Promise.all([
+    build({ ...options, entryPoints: [resolve(import.meta.dirname, '../../../packages/core/src/agentmux.ts')], outfile: sourceCli }),
+    build({ ...options, entryPoints: [resolve(import.meta.dirname, '../../../packages/core/src/agent-global-message-queue.ts')], outfile: sourceQueue })
+  ])
   const service = new AgentMuxHostedRuntimeService(f.client, f.store.path, () => hostedTestOwner(f.client)); closes.push(() => service.dispose())
   const server = new AgentMuxControlServer({ coreClients: f.coreClients, hostedRuntime: () => service }, join(f.root, 'notify.sock'))
   await server.start(); closes.push(() => server.stop())
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); closes.push(() => rpc.dispose())
   const hosted = await connectHostedAgentMux({ rpc, waitForReady: true }); closes.push(() => hosted.dispose())
   const host = createAgentNotifier({ window: { isDestroyed: () => false, isMinimized: () => false, focus: () => native.focused++ } as never, onActivate: () => {} }); closes.push(() => host.dispose())
-  const delivered: Promise<void>[] = [], owner = createA2AMessageNotifier(async request => { expect(host.notify(request)).toMatchObject({ status: 'shown' }) })
+  let reader = hosted
+  const delivered: Promise<void>[] = [], owner = createA2AMessageNotifier({
+    notify: async request => { expect(host.notify(request)).toMatchObject({ status: 'shown' }) },
+    snapshot: () => ({ config, sessions: [session('reader'), session('sender')], agentNames: {}, timelines: {}, ready: true, windowFocused: false, visibleSessionIds: new Set() }),
+    listMessages: async (reference, options) => ({ ...await reader.listMessages({ ...options, participantSessionId: reference.agentSessionId }), hostId: reference.hostId })
+  })
   const events: AgentMuxClientEvent[] = []
-  closes.push(hosted.onEvent(event => { events.push(event); delivered.push(owner.observe({ event: { type: 'core', hostId: 'local', event }, config,
-    sessions: [session('reader'), session('sender')], ready: true, windowFocused: false, visibleSessionIds: new Set() })) }))
+  closes.push(hosted.onEvent(event => { events.push(event); delivered.push(owner.observe({ type: 'core', hostId: 'local', event })) }))
   // The Host lease activates observation independently of all list/read methods.
   const coreEvents: AgentMuxClientEvent[] = []; closes.push(f.client.onEvent(event => { coreEvents.push(event) }, { observeMessages: true }))
   await vi.waitFor(() => expect(coreEvents.some(event => event.type === 'agent-message-observation' && event.state === 'available')).toBe(true))
   const writer = async (mode: string, id: string) => promisify(execFile)(process.execPath, [join(import.meta.dirname, '../../../packages/core/test/fixtures/message-journal-writer.mjs'),
-    pathToFileURL(join(import.meta.dirname, '../../../packages/core/dist/index.js')).href, mode, f.client.agentMessageQueuePath(), id], { timeout: 10000 })
+    pathToFileURL(sourceQueue).href, mode, f.client.agentMessageQueuePath(), id], { timeout: 10000 })
   await writer('append', 'original-arrival')
   await vi.waitFor(() => expect(native.shown).toBe(1)); await Promise.all(delivered)
   expect(events.find(event => event.type === 'agent-message-changed')).toMatchObject({ recordKind: 'message', messageSequence: 1, sequence: 1, live: true, messageId: 'original-arrival' })
-  expect(native.options).toEqual([{ title: 'New Agent message', body: 'Agent sender → Agent reader', silent: true, timeoutType: 'default' }])
-  const cliEvents = async () => JSON.parse((await promisify(execFile)(process.execPath, [join(import.meta.dirname, '../../../packages/core/bin/amux'),
+  expect(native.options).toEqual([{ title: 'Agent sender → Agent reader', body: 'Original private body <reminder>authored</reminder> original-arrival', silent: true, timeoutType: 'default' }])
+  const cliEvents = async () => JSON.parse((await promisify(execFile)(process.execPath, [sourceCli,
     '--endpoint', `unix:${server.path}`, 'message', 'events', '--host', 'local', '--participant', 'reader', '--message-id', 'original-arrival'],
     { timeout: 10000, env: { ...process.env, AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined } })).stdout).result
   const createdEvents = await cliEvents()
@@ -96,8 +117,8 @@ it('a cross-process original journal write reaches the actual public Hosted cons
   await hosted.dispose()
   await writer('append', 'while-hosted-reader-closed')
   const reopened = await connectHostedAgentMux({ rpc, waitForReady: true }); closes.push(() => reopened.dispose())
-  closes.push(reopened.onEvent(event => { delivered.push(owner.observe({ event: { type: 'core', hostId: 'local', event }, config,
-    sessions: [session('reader'), session('sender')], ready: true, windowFocused: false, visibleSessionIds: new Set() })) }))
+  reader = reopened
+  closes.push(reopened.onEvent(event => { delivered.push(owner.observe({ type: 'core', hostId: 'local', event })) }))
   await writer('append', 'after-hosted-reconnect')
   await vi.waitFor(() => expect(native.shown).toBe(2)); await Promise.all(delivered)
   expect(native.options).toHaveLength(2)

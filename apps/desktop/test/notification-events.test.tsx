@@ -33,6 +33,10 @@ beforeEach(async () => {
   vi.spyOn(api.sessions, 'historySources').mockImplementation(historySourcesReader())
   vi.spyOn(api.sessions, 'onEvent').mockImplementation(listener => { emit = listener; return () => {} })
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions, timelines: {}, recoveryCandidates: [] })
+  vi.spyOn(api.sessions, 'listMessages').mockImplementation(async (reference, options) => ({ hostId: reference.hostId,
+    participantSessionId: reference.agentSessionId, direction: options.direction, messages: [{ sequence: options.beforeSequence! - 1,
+      envelope: { messageId: `original-${options.beforeSequence! - 1}`, senderSessionId: 'notification-sender', recipientSessionId: 'notification-reader' },
+      bodyPreview: 'Please review the notification copy.' } as never], nextBeforeSequence: null }))
   vi.spyOn(api.ui, 'setAgentAttentionCount').mockResolvedValue(true)
   vi.spyOn(api.ui, 'notifyAgentAttention').mockResolvedValue({ status: 'shown', presentation: 'as-requested' })
   useAppStore.setState({ ...initial, loading: true }, true)
@@ -166,7 +170,7 @@ it.each(['unsupported', 'downgraded'] as const)('App attention and initialize A2
   await act(async () => read(first.id))
   await act(async () => emit(message(1)))
   expect(notify).toHaveBeenCalledTimes(2)
-  expect(notify).toHaveBeenLastCalledWith(expect.objectContaining({ sessionId: 'notification-reader', title: 'New Agent message' }))
+  expect(notify).toHaveBeenLastCalledWith(expect.objectContaining({ sessionId: 'notification-reader', title: 'codex · notification-sender → notification-reader', body: 'Please review the notification copy.' }))
   expect(records()).toHaveLength(1)
   expect(records()[0]).toMatchObject({ id: first.id, occurrences: 2 })
   expect(useAppStore.getState().noticeReadReceipts['global:events']?.[first.id]).toBe('read')
@@ -254,5 +258,17 @@ it('saves shared sound with Agent status banners off and delivers enabled A2A al
   await transition('done')
   expect(notify).not.toHaveBeenCalled()
   await act(async () => emit(message(1)))
-  expect(notify).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ title: 'New Agent message', mode: 'standard', sound: true }))
+  expect(notify).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ title: 'codex · notification-sender → notification-reader', body: 'Please review the notification copy.', mode: 'standard', sound: true }))
+})
+
+it('the actual App subscription delivers the original preview with current task names and leaves drafts and read receipts intact', async () => {
+  const notify = vi.mocked(api.ui.notifyAgentAttention), list = vi.mocked(api.sessions.listMessages)
+  await act(async () => useAppStore.setState({ agentNames: { 'notification-sender': 'Notification design', 'notification-reader': 'Main coordination' } }))
+  const before = useAppStore.getState()
+  await act(async () => emit(message(1)))
+  expect(list).toHaveBeenCalledExactlyOnceWith({ hostId: 'local', agentSessionId: 'notification-reader' }, { direction: 'incoming', beforeSequence: 2, limit: 1 })
+  expect(notify).toHaveBeenCalledExactlyOnceWith({ sessionId: 'notification-reader', title: 'Notification design → Main coordination',
+    body: 'Please review the notification copy.', mode: 'standard', sound: false })
+  expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+  expect(useAppStore.getState().noticeReadReceipts).toBe(before.noticeReadReceipts)
 })
