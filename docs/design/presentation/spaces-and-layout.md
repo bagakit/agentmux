@@ -247,6 +247,8 @@ Region 移位属于低频布局动作，放入右键菜单，不增加常驻按�
 
 跨视图共享目标、准确关联与选择范围只见交互 SSOT[《Work、Survey、Recall 与 Mote 的导航上下文》](../behavior/spaces-and-layout.md#worksurveyrecall-与-mote-的导航上下文)，本层不另定义选中规则。切换器只换主表面投影；Space 的原 Region、Focus 的右侧观察面与 Goals 已确认关联的执行事实保持清楚可读，原工作面及 Session／Run 保留。不要为跨视图连续性新增重复卡片、隐藏 Session 或复制会话。
 
+多位置选择复用既有快速切换器的紧凑列表与键盘／输入法行为，只列当前 Session 的准确候选。Tab 名称为主，显示 Workspace、机器与 Group／Region 为次层，完整地址按需可读；失效或读取问题在同一选择面简短说明，长名和窄面仍可操作。
+
 ### 全局工作面标题栏留白与名称
 
 Focus 在 Project Rail 缺席时，必要过滤控件从系统窗口控制区右侧开始，不额外保留标题栏；Goals 的顶栏标题从该控制区右侧开始；macOS 的三色按钮和文字不能叠放。让位属于顶栏 chrome，使用与已有窗口按钮留白相同的几何来源，不在各自的内容面板里另加一份边距。非 macOS 不因 macOS 按钮预留无意义的空白，窄窗中次级面包屑可截断，主名称仍可读。

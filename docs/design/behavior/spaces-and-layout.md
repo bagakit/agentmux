@@ -72,6 +72,8 @@ flowchart LR
 
 已有 Session 投影的进入动作（包括观察面里的 Open Session 与 Continue in Session）以该投影持久保存的 Workspace/Tab/Region 位置为导航事实。执行 cwd 只能为没有投影的 Session 提供新展示来源，不能在进入已有展示时把整个 Tab、Topic 或其他 Region 搬回执行目录所属 Workspace、重复加入另一个布局或改写额外投影。启动快照暂时没有 Session 事实时，仍可进入已保留的持久投影查看恢复状态；导航不能伪造新的 Session/Run 或触发重新启动。
 
+同一 Session 的多个合法展示位置不能由调用者的明确 Group 或已确认持有的位置消歧时，Open Session 等进入动作须提供可操作的位置选择。候选保留准确的显示 Workspace／Group／Tab／Region，用可辨名称及按需完整地址帮助区分；展示顺序或名称不授权选择首项。选择前与取消不导航、不改布局或草稿。激活时由原导航 owner 重新核对本次 Session 与完整地址；候选移除或被替换时保留选择面并就地说明，不能改投别处、为此新建投影或恢复／重启 Run。读取未知时保已有工作面与可用能力，不把观察缺口当成会话终局。
+
 普通 Topic 对应原 Zone，Category 对应 Space；该知识层级及本地承接只见[《Topics 知识库的层级与沉淀》](#topics-知识库的层级与沉淀)。公共发现、目标语法及实施边界见[《公共控制与跨客户端接入》](public-control.md)，本节不代签 CUI、实际工作面或迁移验收。既有 Renderer 文案与视觉不作全仓机械改名，原实体、目录和合法绑定继续保全。
 
 #### Agent 的自身位置与邻居发现
