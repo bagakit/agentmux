@@ -22,8 +22,8 @@ is checked before returning observation.revision={status:"observed",revision:"sh
 Directories, symlinks, other entries and absence return {status:"not-applicable"}; a failed requested
 observation remains unknown. Unrequested stats never hash. This does not relax Note body retention
 limits; file read still supplies editable body/revision pairs. Explicit hashing is a cold operation
-with IO proportional to file size and the existing long request timeout; a timeout leaves the
-readonly observation unknown and does not authorize deletion or stop an Agent.
+with IO proportional to file size. A finite request waits for its original owner result; cancellation
+or transport failure leaves this observation unknown and does not authorize deletion or stop an Agent.
 
 For one direct directory use file mkdir --input FILE|- with
 {operationId,zoneId,path,expectedResource:COMPLETE_STAT_RESOURCE,expectedAbsent:true,
@@ -70,6 +70,21 @@ directory ancestors stay protected. Before Note unlink, the original history own
 current body, revision and deletion actor; unreadable or conflicting Note identity retains the claim.
 The catalog, original creators and history remain. A missing prior-history source reference grants
 no source/actor/undo authority. Physical deletion does not authorize discarding client drafts.
+
+Discover saved bodies after recursive deletion with file delete snapshots --input FILE|- using
+{operationId,zoneId,path,expectedResource:COMPLETE_ORIGINAL_STAT_RESOURCE,spaceId?,limit?,cursor?}.
+No child Note ID is required. Pages default to 25 references, at most 50, and examine at most 100
+original metadata objects without reading bodies or Runs. An empty page with hasMore:true is an
+intermediate page; continue its cursor. A changed Notebook root returns unknown and keeps that cursor;
+explicitly restart from the first page to observe its new generation. This is a cold metadata query,
+not a producer replay or acknowledgement of a lost deletion reply. It does not create a batch index.
+Each reference separates originalResource from currentHistoryResource, with its original event ID,
+batch and saved status. An available historyQuery supplies the exact current real Zone/resource:
+use file history --zone QUERY.zoneId --path QUERY.path --resource QUERY.expectedResource --note REF.noteId
+--event-id REF.eventId --content. If historyUnavailable is present, keep the stable reference and use
+the original Source resource discovery/registration to recover its current mapping; never invent a Zone.
+The ordinary deletion fingerprint checks retained history correlation only; Native still requires its
+original six-field generation, held FD and body hash. No query supplies undo or draft-discard approval.
 
 After a missing/unknown mkdir, move or delete reply use file mutation inspect --input FILE|- with
 {operationId,zoneId,path,expectedResource:COMPLETE_ORIGINAL_STAT_RESOURCE,spaceId?}.
