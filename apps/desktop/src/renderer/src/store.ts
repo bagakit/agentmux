@@ -1593,12 +1593,6 @@ export type AppState = GitReadingActions & {
   refreshDocument(workspaceId: string, path: string): Promise<void>
   inspectNoteHistory(tabId: string, regionId: string, noteId: string): Promise<NoteHistoryInspection>
   applyNoteHistory(tabId: string, regionId: string, selection: NoteHistorySelection): Promise<void>
-  launchBoardAgent(
-    workspaceId: string,
-    executorId: string,
-    prompt: string,
-    topicId?: string
-  ): Promise<void>
   launchAgent(
     executorId: string,
     prompt: string,
@@ -10288,26 +10282,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   inspectNoteHistory: (tabId, regionId, noteId) => readNoteHistoryTarget(tabId, regionId, noteId, true),
   applyNoteHistory: enqueueNoteHistoryAction,
-  async launchBoardAgent(workspaceId, executorId, prompt, topicId) {
-    await get().selectWorkspace(workspaceId)
-    set({ mainSurface: 'board' })
-    // Topic 行的 Inbox 带 Topic 上下文起 Agent。绑定不在这里重造：`openScratchTopic` 已经是
-    // 「找到或新建一个绑到该 Topic 的 View」的唯一路径，走它一遍，新 Agent 的 workspacePath 与
-    // scratchTopicId 就与从 Topic 面板起的完全一致——Board 不是第二条 Topic 绑定路径。
-    if (topicId) await get().openScratchTopic(topicId, undefined, { reveal: false })
-    const layout = get().layouts[workspaceId]
-    if (!layout) throw new Error('Workspace layout is unavailable')
-    const group = findGroup(layout, layout.activeGroupId)
-    const boundTab = topicId && group?.activeTabId ? get().tabs[group.activeTabId] : undefined
-    if (topicId && boundTab?.topicId !== topicId) {
-      throw new Error('Scratch Topic View is unavailable')
-    }
-    const launcher = boundTab &&
-      boundTab.regions[boundTab.layout.activeRegionId]?.kind === 'launcher'
-      ? { tabId: boundTab.id, regionId: boundTab.layout.activeRegionId }
-      : undefined
-    await get().launchAgent(executorId, prompt, layout.activeGroupId, launcher)
-  },
   async launchAgent(executorId, prompt, tabGroupId, launcher, launchOptions, names, agentMuxNote, pmo) {
     const state = get()
     const launcherTab = launcher ? state.tabs[launcher.tabId] : undefined

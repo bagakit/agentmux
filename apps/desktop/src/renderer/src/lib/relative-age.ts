@@ -1,5 +1,5 @@
 /**
- * Shared elapsed-time tiers for WorkspaceBoard, LauncherResumePicker and SessionRecap.
+ * Shared elapsed-time tiers for LauncherResumePicker, FocusProjectLanes and SessionRecap.
  * Callers own the timestamp fact and optional suffix. This formatter does not infer
  * Agent activity from a Session update, maintain a clock, or read any Session data.
  */

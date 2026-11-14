@@ -33,7 +33,7 @@ const ThemeKeyDownIcon = semanticIconComponent('control.key-down')
 
 // One modal overlay a single keystroke summons to jump anywhere in the window — any agent session or
 // any open non-session tab — without reaching for the mouse. It reuses the Radix Dialog shell the app
-// already ships (BranchesPanel, BoardDiscussionCanvas) rather than adding a second modal primitive,
+// already ships (BranchesPanel) rather than adding a second modal primitive,
 // and every activation runs through the Store verbs that are already the only way to switch:
 // selectSession for a session row, activateTab for a tab row. Ranking is state-aware (quick-switch.ts)
 // so the agents that need you float to the top: the switcher doubles as an attention router.
