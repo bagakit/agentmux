@@ -1,6 +1,7 @@
 import type { AgentMuxMessageApplication } from './agent-message-envelope.js'
 import type { DurableAgentMuxMessage } from './agent-global-message-queue.js'
 import { AgentMuxError } from './errors.js'
+import { parseAmuxObjectLink } from './sharing.js'
 import { parseDemandDelegationReportInput, parseGoalPlanPredecessors, type GoalPlanPredecessor, type DemandDelegation, type DemandDelegationReportInput } from '@agentmux/demand/delegations'
 import { parseAlignmentProposal, type DemandCriterion } from '@agentmux/demand/goals'
 
@@ -10,6 +11,7 @@ export type GoalDelegationSourceData = {
   alignmentRevision: number
   criteria: DemandCriterion[]
   planNodeId?: string
+  ticketLink?: string
   predecessors?: GoalPlanPredecessor[]
 }
 function record(value: unknown, required: string[], optional: string[] = []): Record<string, unknown> {
@@ -23,24 +25,35 @@ function id(value: unknown): string {
 }
 
 /** Explicit application bytes, signed by Core together with the original request envelope. */
-export function goalDelegationApplication(goalId: string, saved: Pick<DemandDelegation, 'operationId' | 'alignmentRevision' | 'capturedCriteria' | 'planNodeId' | 'predecessors'>): AgentMuxMessageApplication {
+export function goalDelegationApplication(goalId: string, saved: Pick<DemandDelegation, 'operationId' | 'alignmentRevision' | 'capturedCriteria' | 'planNodeId' | 'predecessors'>, ticketLink?: string): AgentMuxMessageApplication {
   return { schema: 'agentmux.goal-delegation.v1', data: { goalId, delegationOperationId: saved.operationId,
     alignmentRevision: saved.alignmentRevision, criteria: saved.capturedCriteria, ...(saved.planNodeId ? { planNodeId: saved.planNodeId } : {}),
-    ...(saved.predecessors ? { predecessors: saved.predecessors } : {}) } }
+    ...(saved.predecessors ? { predecessors: saved.predecessors } : {}), ...(ticketLink ? { ticketLink } : {}) } }
 }
 
 /** Reads only the strict application protocol. Human body text never grants report authority. */
 export function readGoalDelegationSource(message: DurableAgentMuxMessage): GoalDelegationSourceData {
   const application = message.envelope.application
   if (application?.schema !== 'agentmux.goal-delegation.v1') throw new AgentMuxError('The original source has no authenticated Goal delegation application. Keep the source; do not infer it from display text.', 'CONTROL_PROTOCOL_ERROR')
-  const p = record(application.data, ['goalId', 'delegationOperationId', 'alignmentRevision', 'criteria'], ['planNodeId', 'predecessors'])
+  const p = record(application.data, ['goalId', 'delegationOperationId', 'alignmentRevision', 'criteria'], ['planNodeId', 'predecessors', 'ticketLink'])
   if (typeof p.alignmentRevision !== 'number' || !Number.isSafeInteger(p.alignmentRevision) || p.alignmentRevision < 1)
     throw new AgentMuxError('The original delegated proposal revision is invalid.', 'CONTROL_PROTOCOL_ERROR')
   let criteria: DemandCriterion[]
   try { criteria = parseAlignmentProposal({ summary: 'Delegated standards', criteria: p.criteria, openQuestions: [] }).criteria }
   catch (error) { throw new AgentMuxError(error instanceof Error ? error.message : String(error), 'CONTROL_PROTOCOL_ERROR') }
   if (!criteria.length) throw new AgentMuxError('The original Goal delegation has no standards to report.', 'CONTROL_PROTOCOL_ERROR')
-  return { goalId: id(p.goalId), delegationOperationId: id(p.delegationOperationId), alignmentRevision: p.alignmentRevision, criteria,
+  const goalId = id(p.goalId)
+  const ticketLink = p.ticketLink === undefined ? undefined : id(p.ticketLink)
+  if (ticketLink) {
+    try {
+      const target = parseAmuxObjectLink(ticketLink)
+      if (target.kind !== 'goal' || target.goalId !== goalId || target.ticket === undefined || p.planNodeId === undefined)
+        throw new Error('Does not name a Ticket of this original Goal.')
+    } catch (error) {
+      throw new AgentMuxError(error instanceof Error ? error.message : String(error), 'CONTROL_PROTOCOL_ERROR')
+    }
+  }
+  return { goalId, ...(ticketLink ? { ticketLink } : {}), delegationOperationId: id(p.delegationOperationId), alignmentRevision: p.alignmentRevision, criteria,
     ...(p.planNodeId === undefined ? {} : { planNodeId: id(p.planNodeId) }),
     ...(p.predecessors === undefined ? {} : { predecessors: parseGoalPlanPredecessors(p.predecessors) }) }
 }

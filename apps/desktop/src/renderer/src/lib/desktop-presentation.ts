@@ -227,11 +227,12 @@ export function readMoteLinkPresentation(target: { spaceId: string; eventId?: st
 
 
 /** Observe only the original mounted reading section intersecting its actual clipping owners. */
-export function readGoalReadingPresentation(target: { goalId: string; runtimeId?: string; namespace?: string; section?: 'plan' }): AgentMuxDesktopPresentation['goal'] | null {
+export function readGoalReadingPresentation(target: { goalId: string; runtimeId?: string; namespace?: string; section?: 'plan'; ticket?: number }): AgentMuxDesktopPresentation['goal'] | null {
   if (typeof document === 'undefined' || appReader?.().overlays.settings || appReader?.().overlays.quickSwitcher) return null
+  const readingSection = target.ticket === undefined ? target.section : 'plan'
   const matches = [...document.querySelectorAll<HTMLElement>('[data-goal-reading-section]')].filter(element =>
     element.dataset.goalReadingId === target.goalId && (target.runtimeId === undefined || element.dataset.goalReadingRuntime === target.runtimeId && element.dataset.goalReadingNamespace === target.namespace) &&
-    (target.section === undefined || element.dataset.goalReadingSection === target.section) && desktopElementVisible(element))
+    (readingSection === undefined || element.dataset.goalReadingSection === readingSection) && desktopElementVisible(element))
   const intersects = (element: HTMLElement) => {
     if (!desktopElementVisible(element)) return false
     const rect = element.getBoundingClientRect()
@@ -244,10 +245,11 @@ export function readGoalReadingPresentation(target: { goalId: string; runtimeId?
     return right > left && bottom > top && rect.bottom > top && rect.top < bottom && rect.right > left && rect.left < right
   }
   const visible = matches.filter(element => intersects(element) && (element.dataset.goalReadingSection !== 'plan' ||
-    [...element.querySelectorAll<HTMLElement>('[data-goal-plan-node], [data-goal-plan-origin]')].some(intersects)))
+    [...element.querySelectorAll<HTMLElement>('[data-goal-plan-node], [data-goal-plan-origin]')].some(node =>
+      (target.ticket === undefined || node.dataset.goalTicket === String(target.ticket) && node.querySelector('[aria-expanded="true"]') !== null) && intersects(node))))
   const element = visible[0], section = element?.dataset.goalReadingSection
   if (!element || !['overview', 'plan', 'activity'].includes(section ?? '') || visible.some(other => other.dataset.goalReadingId !== element.dataset.goalReadingId || other.dataset.goalReadingRuntime !== element.dataset.goalReadingRuntime || other.dataset.goalReadingNamespace !== element.dataset.goalReadingNamespace)) return null
-  return { goalId: target.goalId, runtimeId: element.dataset.goalReadingRuntime || null, namespace: element.dataset.goalReadingNamespace || null, section: section as 'overview' | 'plan' | 'activity' }
+  return { goalId: target.goalId, runtimeId: element.dataset.goalReadingRuntime || null, namespace: element.dataset.goalReadingNamespace || null, ...(target.ticket === undefined ? {} : { ticket: target.ticket }), section: section as 'overview' | 'plan' | 'activity' }
 }
 
 /** Only an in-flight cold navigation listens. No steady observer, output scan or polling loop. */

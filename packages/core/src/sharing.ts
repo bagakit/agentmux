@@ -2,6 +2,7 @@ import { formatSpaceLink, parseSpaceLinkAddress, type SpaceLinkAddress } from '.
 export { parseSpaceLinkResult } from './space-link.js'
 import { AMUX_PROTOCOL_DEFINITIONS } from './amux-protocol-definition.js'
 import { nodeAlias } from './node-publishing.js'
+import { deriveObjectId } from '@agentmux/identity'
 
 /** Plain-text sharing. Identity fields describe objects; they never authenticate a sender. */
 export type AmuxSharingKind = 'File' | 'Browser'
@@ -35,7 +36,7 @@ export type AmuxHostAddress = {
 /** Semantic and spatial identities remain different object kinds. */
 export type AmuxObjectLinkTarget =
   | ({ kind: 'host' } & AmuxHostAddress)
-  | { kind: 'goal'; goalId: string; runtimeId: string; namespace: string; section?: 'plan' }
+  | ({ kind: 'goal' } & AmuxGoalLinkTarget)
   | { kind: 'agent'; agentSessionId: string }
   | { kind: 'region'; regionId: string }
   | { kind: 'tab'; tabId: string }
@@ -45,18 +46,61 @@ export type AmuxObjectLinkTarget =
   | { kind: 'mote'; spaceId: string; eventId?: string; address?: never }
   | { kind: 'mote'; address: SpaceLinkAddress; spaceId?: never; eventId?: never }
 
-export type AmuxGoalAddress = { runtimeId: string; namespace: string; goalUrl: string; planUrl: string }
+export type AmuxGoalLinkTarget = { goalId: string } & (
+  | { runtimeId: string; namespace: string; section?: 'plan'; ticket?: number }
+  | { runtimeId?: never; namespace?: never; section?: never; ticket: number }
+)
+export type AmuxGoalAddress = { runtimeId: string; namespace: string; goalUrl: string; planUrl: string; creationOperationId?: string }
 
-export function formatGoalAddress(goalId: string, runtimeId: string, namespace: string): AmuxGoalAddress {
-  return { runtimeId, namespace, goalUrl: formatAmuxObjectLink({ kind: 'goal', goalId, runtimeId, namespace }),
+export function deriveBoundGoalId(runtimeId: string, namespace: string, creationOperationId: string): string {
+  return deriveObjectId('agentmux.goal-root.v1', JSON.stringify([runtimeId, namespace, creationOperationId]))
+}
+
+export function hasOriginalGoalBinding(goalId: string, address: AmuxGoalAddress): boolean {
+  return typeof address.creationOperationId === 'string' && address.creationOperationId.length > 0 &&
+    goalId === deriveBoundGoalId(address.runtimeId, address.namespace, address.creationOperationId)
+}
+
+export function formatGoalTicketLink(goalId: string, address: AmuxGoalAddress, ticket: number): string {
+  return formatAmuxObjectLink(hasOriginalGoalBinding(goalId, address) ? { kind: 'goal', goalId, ticket }
+    : { kind: 'goal', goalId, ticket, runtimeId: address.runtimeId, namespace: address.namespace })
+}
+
+export function isGoalTicketNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+}
+
+export function formatGoalAddress(goalId: string, runtimeId: string, namespace: string, creationOperationId?: string): AmuxGoalAddress {
+  return { runtimeId, namespace, ...(creationOperationId && goalId === deriveBoundGoalId(runtimeId, namespace, creationOperationId) ? { creationOperationId } : {}),
+    goalUrl: formatAmuxObjectLink({ kind: 'goal', goalId, runtimeId, namespace }),
     planUrl: formatAmuxObjectLink({ kind: 'goal', goalId, runtimeId, namespace, section: 'plan' }) }
+}
+
+export function parseGoalAddress(value: unknown, goalId: string): AmuxGoalAddress {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('An original Goal address is required.')
+  const a = value as Record<string, unknown>
+  if (typeof a.runtimeId !== 'string' || !a.runtimeId || typeof a.namespace !== 'string' || !a.namespace ||
+      (a.creationOperationId !== undefined && (typeof a.creationOperationId !== 'string' || !a.creationOperationId)))
+    throw new TypeError('The original Goal address is incomplete.')
+  const expected = formatGoalAddress(goalId, a.runtimeId, a.namespace, a.creationOperationId)
+  if (Object.keys(a).length !== Object.keys(expected).length || a.goalUrl !== expected.goalUrl ||
+      a.planUrl !== expected.planUrl || a.creationOperationId !== expected.creationOperationId)
+    throw new TypeError('The original Goal address does not match its binding.')
+  return expected
 }
 
 export function formatAmuxObjectLink(target: AmuxObjectLinkTarget): string {
   if (target.kind === 'mote' && target.address) return formatSpaceLink(target.address)
   if (target.kind === 'goal') {
-    if (typeof target.goalId !== 'string' || !target.goalId || typeof target.runtimeId !== 'string' || !target.runtimeId || typeof target.namespace !== 'string' || !target.namespace || target.section !== undefined && target.section !== 'plan') throw new TypeError('An exact Goal and its original Runtime are required.')
-    return `${AMUX_PROTOCOL_DEFINITIONS.link.tag}goal/${encodeURIComponent(target.goalId)}${target.section === 'plan' ? '/plan' : ''}?runtime=${encodeURIComponent(target.runtimeId)}&namespace=${encodeURIComponent(target.namespace)}`
+    if (typeof target.goalId !== 'string' || !target.goalId || target.ticket !== undefined && !isGoalTicketNumber(target.ticket) ||
+        target.section !== undefined && (target.section !== 'plan' || target.ticket !== undefined))
+      throw new TypeError('An exact Goal and a valid reading target are required.')
+    const root = `${AMUX_PROTOCOL_DEFINITIONS.link.tag}goal/${encodeURIComponent(target.goalId)}`
+    const fragment = target.ticket === undefined ? '' : `#T${target.ticket}`
+    if (target.runtimeId === undefined && target.namespace === undefined && fragment) return root + fragment
+    if (typeof target.runtimeId !== 'string' || !target.runtimeId || typeof target.namespace !== 'string' || !target.namespace)
+      throw new TypeError('Both original Goal owner coordinates are required.')
+    return `${root}${target.section === 'plan' ? '/plan' : ''}?runtime=${encodeURIComponent(target.runtimeId)}&namespace=${encodeURIComponent(target.namespace)}${fragment}`
   }
   if (target.kind === 'host') {
     const alias = nodeAlias(target.alias)
@@ -88,9 +132,13 @@ export function parseAmuxObjectLink(raw: string): AmuxObjectLinkTarget {
     if (formatSpaceLink(address) !== raw) throw new TypeError('The public Mote address encoding is not canonical.')
     return {kind:'mote',address}
   }
-  const goal = /^amux:\/\/goal\/([^/?#]+)(\/plan)?\?runtime=([^&#?]+)&namespace=([^&#?]+)$/u.exec(raw)
+  const goal = /^amux:\/\/goal\/([^/?#]+)(\/plan)?(?:\?runtime=([^&#?]+)&namespace=([^&#?]+))?(?:#T([1-9][0-9]*))?$/u.exec(raw)
   if (goal) {
-    const target = { kind: 'goal' as const, goalId: decodeURIComponent(goal[1]!), runtimeId: decodeURIComponent(goal[3]!), namespace: decodeURIComponent(goal[4]!), ...(goal[2] ? { section: 'plan' as const } : {}) }
+    const goalId = decodeURIComponent(goal[1]!)
+    const target: AmuxObjectLinkTarget = goal[3] !== undefined
+      ? { kind: 'goal', goalId, runtimeId: decodeURIComponent(goal[3]), namespace: decodeURIComponent(goal[4]!),
+        ...(goal[2] ? { section: 'plan' as const } : {}), ...(goal[5] ? { ticket: Number(goal[5]) } : {}) }
+      : { kind: 'goal', goalId, ticket: Number(goal[5]) }
     if (formatAmuxObjectLink(target) !== raw) throw new TypeError('The Goal link encoding is not canonical.')
     return target
   }

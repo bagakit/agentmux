@@ -2,12 +2,11 @@ import { optionalInputEpoch } from '@agentmux/core/prompt-condition'
 import { readGoalInputEpoch, openGoalFiniteInput, openGoalFiniteInspection } from './goal-finite-runtime.js'
 import { demandAgentReferenceKey, type DemandSpaceMemberReference } from '@agentmux/demand/relations'
 import { createHash } from 'node:crypto'
-import { realpath } from 'node:fs/promises'
-import { formatGoalAddress } from '@agentmux/core/sharing'
+import { mkdir, realpath } from 'node:fs/promises'
+import { deriveBoundGoalId } from '@agentmux/core/sharing'
 import { assertNewGoalSourceRelations, goalSourceRpc } from './goal-source-relations.js'
 import { createHostGoalDiscussions } from './goal-discussions.js'
 import { resolveGoalsPreferences, type GoalsPreferences } from './goals-preferences.js'
-import { deriveObjectId } from '@agentmux/core/object-id'
 import { goalPmoOperation } from './goal-pmo-origin.js'
 import { dirname, join } from 'node:path'
 import { AgentMuxError, agentPromptCondition, type AgentMuxHeadlessRuntime, type AgentMuxRpcCallContext,
@@ -32,7 +31,7 @@ import { createGoalParticipationOwner } from './goal-participation-owner.js'
 import { admittedDemandParticipation } from './demand-participation.js'
 import { hostNameHistory } from './name-history.js'
 import { ScratchTopics } from './mote-resources.js'
-import { projectHostGoal } from './goal-projection.js'
+import { hostGoalAddress, projectHostGoal } from './goal-projection.js'
 import { createGoalAutomationPause } from './goal-automation-pause.js'
 import { readOriginalMoteConfiguration } from './mote-resources.js'
 import type { FileReadParams, FileReadResult } from '@agentmux/core/files'
@@ -75,8 +74,8 @@ export function createHostGoals(options: {
   const projectGoals = async (goals: Demand[]) => {
     if (!goals.length) return []
     try {
-      const { runtimeId, namespace } = await planOwner()
-      return goals.map(goal => projectHostGoal(goal, formatGoalAddress(goal.id, runtimeId, namespace)))
+      const owner = await planOwner()
+      return goals.map(goal => projectHostGoal(goal, hostGoalAddress(goal, owner)))
     } catch (error) {
       return goals.map(goal => ({ ...projectHostGoal(goal), addressIssue: `Goal link source is unconfirmed: ${error instanceof Error ? error.message : String(error)} The original Goal and work are retained.` }))
     }
@@ -215,9 +214,14 @@ export function createHostGoals(options: {
       return { operation: req.operation, demand: goal ? await projectGoal(goal) : null, goalContinuations: await progress.listGoals(req.demandId) }
     }
     if (req.operation === 'demand.create') {
-      const goalId = req.demandId ?? deriveObjectId('goal-create', req.requestId)
       const selected = await project(req.projectId)
       if (!req.decision || req.decision.risk === 'unknown' || req.decision.confirmation === 'pending') throw new AgentMuxError('The original Goal write requires its explicit confirmation and resolved routing.', 'CONTROL_REQUEST_CONFLICT')
+      let goalId = req.demandId ?? await demands.originalGoalCreationId(req.requestId)
+      if (!goalId) {
+        await mkdir(demands.root, { recursive: true })
+        const owner = await planOwner()
+        goalId = deriveBoundGoalId(owner.runtimeId, owner.namespace, req.requestId)
+      }
       const raw = await readOriginalMoteConfiguration(options.configurationPath), preferences = record(raw) && record(raw.goals) ? raw.goals : {}
       const participation = participant(name, 'create')
       await current(context)

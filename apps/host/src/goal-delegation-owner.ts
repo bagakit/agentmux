@@ -9,12 +9,13 @@ import type { GoalDelegationAuthority, GoalDelegationMethod, GoalDelegationParam
   GoalDelegationResult, GoalDelegationResultMap, GoalDelegationObservation, GoalDelegationsOwner } from '@agentmux/core/goal-delegation'
 import type { AgentMuxRpcMethod, AgentMuxRpcParams, AgentMuxRpcResult, AgentMuxRun, AgentMuxRpcCallContext } from '@agentmux/core'
 import { delegationWorkerHostId, validateDemandDelegationReport, type DemandDelegation, type DemandDelegationReportInput } from '@agentmux/demand/delegations'
-import { hostGoalPlan } from './goal-projection.js'
+import { hostGoalAddress, hostGoalPlan } from './goal-projection.js'
 import { submitGoalSourceReport } from './goal-source-report.js'
 import { changeGoalPlanAssignment } from './goal-plan-assignment.js'
 import { isGoalSupervisor } from './goal-supervisor-identity.js'
 import type { DurableAgentMuxMessage } from '@agentmux/core'
 import type { DemandStore, Demand, DemandDispatch, GoalStartObservation } from '@agentmux/demand'
+import { formatGoalTicketLink } from '@agentmux/core/sharing'
 import type { GoalRuntimePort } from './goal-runtime.js'
 import type { GoalPatrolOwner } from './goal-patrol-owner.js'
 import type { GoalResponsibilityOwner } from './goal-responsibility-owner.js'
@@ -43,7 +44,7 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
     context: AgentMuxRpcCallContext, authority: GoalDelegationAuthority): Promise<GoalDelegationResultMap[M]> {
     context.signal?.throwIfAborted()
     const planRequest = method === 'goal.plan' || method === 'goal.plan.assignment' || method === 'goal.plan.claim'
-    const owner = planRequest ? await this.planOwner?.().catch(() => undefined) : undefined
+    const owner = planRequest || method === 'goal.plan.revise' || method === 'goal.plan.review' ? await this.planOwner?.().catch(() => undefined) : undefined
     if (planRequest) {
       const expected = (input as GoalDelegationParamsMap['goal.plan']).expectedOwner
       if (expected) {
@@ -168,13 +169,17 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
         if (!existing.message || reconcileRemote) {
           if (method === 'goal.delegation.bind') throw new AgentMuxError('The original message became unavailable before binding. Keep its original source and body.', 'CONTROL_UNAVAILABLE')
           if (!existing.message && authority.runId !== saved.ownerRunId) throw new AgentMuxError('The saved task owner Run changed before its first submission. Read the original delegation and explicitly continue its responsibility.', 'CONTROL_REQUEST_CONFLICT')
-          const workerRuntimeId = existing.message ? undefined : await this.demands.confirmDelegationSubmission(input.goalId, saved.operationId)
+          const submission = existing.message ? undefined : await this.demands.confirmDelegationSubmission(input.goalId, saved.operationId)
+          const owner = submission?.ticket ? await this.planOwner?.().catch(() => undefined) : undefined
+          const ticketLink = owner && submission?.ticket ? formatGoalTicketLink(input.goalId,
+            hostGoalAddress({ id: input.goalId, ...(submission.creationOrigin ? { creationOrigin: submission.creationOrigin } : {}) }, owner), submission.ticket) : undefined
+          const application = existing.message?.envelope.application ?? goalDelegationApplication(input.goalId, saved, ticketLink)
           // Only an explicit delegate retries this original outbox operation. A local save
           // cannot attest receipt; Core reconciles the exact target without renotifying it.
           const received = await core.call(saved.hostId, 'agent.send', { target: { kind: 'agent-session', agentSessionId: saved.workerAgentSessionId, hostId: delegationWorkerHostId(saved) },
             operationId: saved.operationId, messageId: saved.sourceMessageId, threadId: saved.threadId,
-            correlationId: saved.sourceMessageId, text: saved.text, application: goalDelegationApplication(input.goalId, saved), expectedRun: { runId: saved.workerRunId },
-            ...(workerRuntimeId ? { expectedRecipientRuntimeId: workerRuntimeId } : {}) }, context)
+            correlationId: saved.sourceMessageId, text: saved.text, application, expectedRun: { runId: saved.workerRunId },
+            ...(submission?.workerRuntimeId ? { expectedRecipientRuntimeId: submission.workerRuntimeId } : {}) }, context)
           this.assertSource(saved, received, input.goalId)
           if (remote && (!received.provenance || received.deliveryMode !== 'reference' || received.transport?.state !== 'received' ||
               received.transport.targetRuntimeId !== received.provenance.target.runtimeId || received.envelope.recipientRuntimeId !== received.provenance.target.runtimeId ||
@@ -257,7 +262,9 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
       : await Promise.all((goal.delegations ?? []).map(delegation => this.observeDelegation(input.goalId, delegation, context, authority, goal)))
     const startObservations = quiet || !this.readStart ? undefined
       : await Promise.all((goal.dispatches ?? []).filter(start => start.execution === 'finite').map(start => this.readStart!(goal, start)))
-    const result: GoalDelegationResult = { goalId: goal.id, goalUpdatedAt: goal.updatedAt, delegations: goal.delegations ?? [], ...hostGoalPlan(goal, owner),
+    const address = owner && goal.plan?.ticketNodes ? hostGoalAddress(goal, owner) : undefined
+    const ticketLinks = address ? goal.plan!.ticketNodes!.map((_, index) => formatGoalTicketLink(goal.id, address, index + 1)) : undefined
+    const result: GoalDelegationResult = { ...(address && ticketLinks ? { address, ticketLinks } : {}), goalId: goal.id, goalUpdatedAt: goal.updatedAt, delegations: goal.delegations ?? [], ...hostGoalPlan(goal, owner),
       goalState: { status: goal.status, supervisorSessionId: goal.supervisorSessionId, ...(goal.alignment ? { alignment: goal.alignment } : {}) },
       ...(startObservations ? { dispatches: goal.dispatches ?? [], startObservations } : {}),
       ...(observations ? { observations } : {}),

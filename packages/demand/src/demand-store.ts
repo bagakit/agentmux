@@ -405,6 +405,13 @@ export class DemandStore {
     return { ...clone(content), activities: projectActivities(activities, read.namesById) }
   }
 
+  async originalGoalCreationId(operationId: string): Promise<string | undefined> {
+    const { snapshot } = await this.readConfirmedSnapshot()
+    const matches = snapshot.demands.filter(goal => goal.creationOrigin?.operationId === operationId)
+    if (matches.length > 1) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'The original Goal creation operation names multiple Goals; use its exact Goal ID.')
+    return matches[0]?.id
+  }
+
   async read(id: string): Promise<Demand | null> {
     return this.get(id)
   }
@@ -846,8 +853,14 @@ export class DemandStore {
           this.rejectDelegation(`Plan node ${node.id} must write at least one success criterion, all from the current Goal proposal. Unchanged existing criteria and recorded work are retained.`)
       }
       const now = Date.now(), next = (current?.revision ?? 0) + 1
+      const nodeIds = new Set(revision.nodes.map(node => node.id))
+      const ticketNodes = current?.ticketNodes ?? []
+      const removedTicket = ticketNodes.find(nodeId => !nodeIds.has(nodeId))
+      if (removedTicket) this.rejectDelegation('Published Ticket ' + removedTicket + ' retains its original number. Mark it cancelled to retire it.')
+      const numbered = new Set(ticketNodes)
+      const published = [...ticketNodes, ...revision.nodes.flatMap(node => numbered.has(node.id) ? [] : [node.id])]
       const changedNodes = goalPlanChangedNodes(current?.nodes ?? [], revision.nodes)
-      demand.plan = { revision: next, alignmentRevision: revision.alignmentRevision, nodes: clone(revision.nodes), reviews: current?.reviews ?? [],
+      demand.plan = { revision: next, alignmentRevision: revision.alignmentRevision, nodes: clone(revision.nodes), ticketNodes: published, reviews: current?.reviews ?? [],
         history: [...(current?.history ?? []), { operationId: revision.operationId, revision: next, author, revisedAt: now, ...(changedNodes.length ? { changedNodes } : {}) }] }
       demand.updatedAt = Math.max(now, demand.updatedAt + 1)
       validateNewDemand(demand, this.storePath)
@@ -944,11 +957,15 @@ export class DemandStore {
   }
 
   /** Confirm a saved intent can still be submitted for the first time. Original message reconciliation reads remain independent. */
-  async confirmDelegationSubmission(id: string, operationId: string): Promise<string | undefined> {
+  async confirmDelegationSubmission(id: string, operationId: string): Promise<{
+    workerRuntimeId?: string
+    ticket?: number
+    creationOrigin?: Demand['creationOrigin']
+  }> {
     return enqueue(this.root, () => this.withWriterLock(async () => {
       const snapshot = await this.readSnapshot(), demand = findDemand(snapshot, id, this.storePath)
       const entry = this.findDelegation(demand, operationId)
-      if (!entry.planNodeId) return
+      if (!entry.planNodeId) return {}
       const target = demand.plan && projectGoalPlan(demand.plan, demand.delegations ?? [], demand.alignment?.criteria ?? [])
         .nodes.find(item => item.node.id === entry.planNodeId)
       if (!target || target.delegation?.operationId !== operationId || target.node.cancelled || target.staleCriteria.length ||
@@ -959,7 +976,10 @@ export class DemandStore {
       if (entry.claimOperationId && (entry.claimOperationId !== assignment?.operationId || !assignment.author.runtimeId))
         this.rejectDelegation('The attempt’s original claim was superseded or its worker Runtime is unconfirmed. Retain the original intent and read the current plan.')
       await this.confirmSnapshot()
-      return entry.claimOperationId ? assignment!.author.runtimeId : undefined
+      const ticket = (demand.plan!.ticketNodes?.indexOf(entry.planNodeId) ?? -1) + 1
+      const workerRuntimeId = entry.claimOperationId ? assignment!.author.runtimeId : undefined
+      return { ...(workerRuntimeId ? { workerRuntimeId } : {}), ...(ticket ? { ticket } : {}),
+        ...(demand.creationOrigin ? { creationOrigin: clone(demand.creationOrigin) } : {}) }
     }))
   }
 

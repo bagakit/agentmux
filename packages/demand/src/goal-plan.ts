@@ -50,6 +50,8 @@ export type GoalPlan = {
   /** The Goal proposal version the node criteria were written against. */
   alignmentRevision: number
   nodes: GoalPlanNodeInput[]
+  /** Stable 1-based ordering of published Ticket numbers by original node. */
+  ticketNodes?: string[]
   reviews: GoalPlanReview[]
   /** Append-only provenance of each accepted revision. */
   history: GoalPlanRevisionRecord[]
@@ -163,10 +165,13 @@ export function validateGoalPlanNodes(nodes: readonly GoalPlanNodeInput[]): void
 }
 
 export function parseGoalPlan(value: unknown): GoalPlan {
-  const data = object(value, 'plan', ['revision', 'alignmentRevision', 'nodes', 'reviews', 'history'])
+  const data = object(value, 'plan', ['revision', 'alignmentRevision', 'nodes', 'reviews', 'history', 'ticketNodes'], ['ticketNodes'])
   if (!Array.isArray(data.nodes) || !Array.isArray(data.reviews) || !Array.isArray(data.history)) throw new Error('plan nodes, reviews and history must be arrays')
   const nodes = data.nodes.map(parseGoalPlanNode)
   validateGoalPlanNodes(nodes)
+  const ticketNodes = data.ticketNodes === undefined ? undefined : identities(data.ticketNodes, 'plan Ticket nodes')
+  if (ticketNodes && (ticketNodes.length !== nodes.length || nodes.some(node => !ticketNodes.includes(node.id))))
+    throw new Error('Published Ticket numbers must identify the exact original plan nodes')
   const reviews = data.reviews.map(value => {
     const item = object(value, 'plan review', ['operationId', 'nodeId', 'delegationOperationId', 'verdict', 'check', 'note', 'reviewer', 'reviewedAt'])
     const { reviewer, reviewedAt, ...input } = item
@@ -189,7 +194,7 @@ export function parseGoalPlan(value: unknown): GoalPlan {
   const revision = positive(data.revision, 'plan revision')
   if (new Set(history.map(record => record.operationId)).size !== history.length) throw new Error('plan history repeats an operation')
   if (history.length !== revision || history.some((record, index) => record.revision !== index + 1)) throw new Error('plan history must record every revision in order')
-  return { revision, alignmentRevision: positive(data.alignmentRevision, 'plan alignmentRevision'), nodes, reviews, history }
+  return { revision, alignmentRevision: positive(data.alignmentRevision, 'plan alignmentRevision'), nodes, ...(ticketNodes ? { ticketNodes } : {}), reviews, history }
 }
 
 export function parseGoalPlanRevisionInput(value: unknown): GoalPlanRevisionInput {

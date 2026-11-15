@@ -46,7 +46,7 @@ import { parseBrowserTaskCreateInput, type BrowserTaskCreateInput } from '@agent
 import { persistedAgentOperations, restoredAgentOperations } from './lib/agent-operation'
 import { DeviceHomeError, type DeviceHomeStep } from './lib/device-home-feedback'
 import { restoredMoteMainCreationReferences, type MoteMainCreationReference } from '../../shared/mote-main-action'
-import { parseAmuxObjectLink } from '@agentmux/core/sharing'
+import { hasOriginalGoalBinding, parseAmuxObjectLink } from '@agentmux/core/sharing'
 import { createGitReadingActions, type GitReadingActions } from './store/git-reading-actions'
 import { runIndependentCheckpoints } from './store/storage-checkpoint'
 import { MOTE_INPUT_GUIDANCE } from './lib/mote-input-source'
@@ -1380,7 +1380,7 @@ export type AppState = GitReadingActions & {
   focusPmoSession(id: string | null): void
   selectedDemandId: string | null
   /** One transient reading intent; neither business state nor a persisted navigation queue. */
-  goalReadingEntry: { goalId: string; runtimeId?: string; namespace?: string; section?: 'plan'; phase: 'pending' | 'ready'; token: string } | null
+  goalReadingEntry: { goalId: string; runtimeId?: string; namespace?: string; section?: 'plan'; ticketNodeId?: string; phase: 'pending' | 'ready'; token: string } | null
   demandArrangement: DemandArrangement
   setSelectedDemand(id: string | null): void
   setDemandArrangement(arrangement: DemandArrangement): void
@@ -8292,19 +8292,32 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       })
       signal?.addEventListener('abort', stopObservingNavigation, { once: true })
       const issues: AgentMuxSpatialIssue[] = []
+      const goalTarget = request.target.kind === 'goal' ? request.target : undefined
+      const ticket = goalTarget?.ticket, goalSection = ticket === undefined ? goalTarget?.section : 'plan'
+      const needsGoalOwner = goalTarget && (goalTarget.runtimeId !== undefined || ticket !== undefined)
       let sourceGoal: AgentMuxDemand | undefined, sourceFailure: unknown, goalReadingToken: string | undefined
-      if (request.target.kind === 'goal' && request.target.runtimeId !== undefined) {
+      let ticketNodeId: string | undefined
+      if (needsGoalOwner) {
         goalReadingToken = mintObjectId()
-        set({ goalReadingEntry: { goalId: request.target.goalId, runtimeId: request.target.runtimeId, namespace: request.target.namespace!,
-          ...(request.target.section ? { section: request.target.section } : {}), phase: 'pending', token: goalReadingToken } })
+        set({ goalReadingEntry: { goalId: goalTarget.goalId, ...(goalSection ? { section: goalSection } : {}), phase: 'pending', token: goalReadingToken } })
       }
       try {
-        if (request.target.kind === 'goal' && request.target.runtimeId !== undefined) try {
-          const read = await api.goals.execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(), operation: 'demand.show', demandId: request.target.goalId })
-          if (read.operation !== 'demand.show' || read.demand?.id !== request.target.goalId || read.demand.address?.runtimeId !== request.target.runtimeId || read.demand.address.namespace !== request.target.namespace)
-            throw new DesktopFocusFailure({ step: 'target', code: 'GOAL_SOURCE_UNCONFIRMED', message: 'The original Goal owner did not confirm this Runtime and namespace.',
-              recovery: 'Keep the exact original link and current workface. Read that original Goal source; another store with the same Goal ID is not a replacement.' })
-          sourceGoal = read.demand
+        if (needsGoalOwner) try {
+          const read = await api.goals.execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(), operation: 'demand.show', demandId: goalTarget.goalId })
+          const demand = read.operation === 'demand.show' ? read.demand : null
+          const address = demand?.address
+          const exact = address && (goalTarget.runtimeId !== undefined ? address.runtimeId === goalTarget.runtimeId && address.namespace === goalTarget.namespace
+            : hasOriginalGoalBinding(goalTarget.goalId, address))
+          if (demand?.id !== goalTarget.goalId || !exact)
+            throw new DesktopFocusFailure({ step: 'target', code: 'GOAL_SOURCE_UNCONFIRMED', message: 'The source could not confirm the original Goal binding.',
+              recovery: 'Keep the exact link and current workface. Read the original Goal source.' })
+          if (ticket !== undefined) {
+            ticketNodeId = demand.plan?.ticketNodes?.[ticket - 1]
+            if (!ticketNodeId || !demand.plan?.nodes.some(node => node.id === ticketNodeId))
+              throw new DesktopFocusFailure({ step: 'target', code: 'TICKET_UNKNOWN', message: 'The original Goal has no confirmed node for this Ticket.',
+                recovery: 'Keep this link and read the original plan for its published Ticket numbers.' })
+          }
+          sourceGoal = demand
         } catch (error) { sourceFailure = error }
       } finally { stopObservingNavigation(); signal?.removeEventListener('abort', stopObservingNavigation) }
       const currentFacts = get()
@@ -8342,9 +8355,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             message: 'The exact Goal is not currently in the complete Demand projection.', recovery: 'List Goals and choose an existing Demand ID.' })
           // Viewing a Goal never selects its associated execution workface.
           get().setSelectedDemand(request.target.goalId)
-          goalReadingToken = request.target.section ? goalReadingToken ?? mintObjectId() : undefined
+          goalReadingToken = goalSection ? goalReadingToken ?? mintObjectId() : undefined
+          const address = sourceGoal?.address
           set({ mainSurface: 'board', regionCaretFocus: null, workbenchNavigationInputPolicy: request.inputPolicy,
-            goalReadingEntry: request.target.section ? { goalId: request.target.goalId, ...(request.target.runtimeId === undefined ? {} : { runtimeId: request.target.runtimeId, namespace: request.target.namespace! }), section: request.target.section, phase: 'ready', token: goalReadingToken! } : null })
+            goalReadingEntry: goalSection ? { goalId: request.target.goalId, ...(address ? { runtimeId: address.runtimeId, namespace: address.namespace } : {}),
+              section: goalSection, ...(ticketNodeId ? { ticketNodeId } : {}), phase: 'ready', token: goalReadingToken! } : null })
         } else if (request.target.kind === 'mote') {
           if (request.target.address) throw new DesktopFocusFailure({step:'target',code:'SPACE_LINK_UNRESOLVED',message:'Resolve the exact public Mote address at its original Core before navigation.',recovery:'Keep the original link and use space link resolve; the current workface is kept.'})
           const resolved = resolveDesktopMoteSelection(get(), catalog, request.target.spaceId)
@@ -8397,12 +8412,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           set({ workbenchSpaceSelection: expected.space, workbenchNavigationInputPolicy: request.inputPolicy })
         }
       }
+      const goalPresentationTarget = goalTarget && { ...goalTarget, ...(sourceGoal?.address ? { runtimeId: sourceGoal.address.runtimeId, namespace: sourceGoal.address.namespace } : {}) }
       if (navigationState !== 'rejected') await awaitDesktopPresentation(() => {
         const actual = readSelection()
         if (request.target.kind === 'mote' && !request.target.address) return get().moteDiscussionEntry?.token !== moteEntryToken ||
           actual.space?.spaceId !== request.target.spaceId || Boolean('spaceId' in request.target && readMoteLinkPresentation(request.target))
         if (JSON.stringify(actual) !== JSON.stringify(expected)) return true
-        if (request.target.kind === 'goal' && request.target.section) return get().goalReadingEntry?.token !== goalReadingToken || Boolean(readGoalReadingPresentation(request.target))
+        if (goalPresentationTarget && goalSection) return get().goalReadingEntry?.token !== goalReadingToken || Boolean(readGoalReadingPresentation(goalPresentationTarget))
         const observed = readDesktopPresentation(actual, get().tabs, independent)
         if (request.target.kind === 'settings') return request.target.sectionId === null ? observed.overlays.settings === false :
           observed.overlays.settingsPage?.sectionId === request.target.sectionId && observed.overlays.settingsPage.visible === true && (request.target.hostId === undefined || observed.overlays.settingsPage.hostId === request.target.hostId)
@@ -8436,10 +8452,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         issues.push({ step: 'presentation', code: 'SURFACE_WINDOW_CHANGED', message: 'The original surface window changed during this navigation.',
           recovery: 'Inspect the current window and the saved selection before navigating again.' })
       }
-      const goalPresentation = request.target.kind === 'goal' ? readGoalReadingPresentation(request.target) : null
+      const goalPresentation = goalPresentationTarget ? readGoalReadingPresentation(goalPresentationTarget) : null
       if (goalPresentation) observed.presentation = { ...observed.presentation, goal: goalPresentation }
-      if (navigationState !== 'rejected' && request.target.kind === 'goal' && (request.target.runtimeId !== undefined || request.target.section) &&
-        (!goalPresentation || request.target.section && get().goalReadingEntry?.token !== goalReadingToken)) {
+      if (navigationState !== 'rejected' && (needsGoalOwner || goalSection) &&
+        (!goalPresentation || goalSection && get().goalReadingEntry?.token !== goalReadingToken)) {
         navigationState = 'unconfirmed'
         issues.push({ step: 'presentation', code: 'GOAL_READING_UNCONFIRMED', message: 'The exact original Goal reading position has not been visibly confirmed.',
           recovery: 'The original link, later selection and drafts are retained. Open that same Goal again when its original source is available.' })

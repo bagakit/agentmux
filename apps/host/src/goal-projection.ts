@@ -1,6 +1,6 @@
-import type { AmuxGoalAddress } from '@agentmux/core/sharing'
+import { formatGoalAddress, type AmuxGoalAddress } from '@agentmux/core/sharing'
 import type { Demand } from '@agentmux/demand'
-import { goalPlanState, projectGoalPlan } from '@agentmux/demand/goal-plan'
+import { goalPlanState, projectGoalPlan, type GoalPlanOwner } from '@agentmux/demand/goal-plan'
 import type { AgentMuxDemand } from '@agentmux/core/control'
 
 /** Every plan this owner returns carries its derivation of the node states. */
@@ -38,4 +38,9 @@ export function hostGoalRecord(goal: AgentMuxDemand): Demand & Pick<AgentMuxDema
 export function publicGoalRecord(goal: import('@agentmux/core').AgentMuxRpcGoal): ReturnType<typeof hostGoalRecord> {
   const { parentGoalId, ...record } = goal
   return hostGoalRecord({ ...record, ...(parentGoalId === undefined ? {} : { parentDemandId: parentGoalId }) })
+}
+
+export function hostGoalAddress(goal: Pick<Demand, 'id' | 'creationOrigin'>, owner: GoalPlanOwner): AmuxGoalAddress {
+  return formatGoalAddress(goal.id, owner.runtimeId, owner.namespace,
+    goal.creationOrigin?.inputRuntimeId === owner.runtimeId ? goal.creationOrigin.operationId : undefined)
 }

@@ -1,6 +1,6 @@
 import { optionalInputEpoch } from './agent-prompt-condition.js'
 import { parseFocusParams, parseFocusResult, parseFocusSource } from './focus-control.js'
-import { formatGoalAddress } from './sharing.js'
+import { parseGoalAddress } from './sharing.js'
 import { parseGoalAgentReference, parseGoalAgentReferences, parseGoalQualifiedAccess, parseGoalInspectionAccess, parseGoalRelationAccesses } from './goal-agent-reference.js'
 import { demandAgentReferenceKey } from '@agentmux/demand/relations'
 import { parseBrowserAgentWorkspaceParams, parseBrowserAgentWorkspaceResult } from './browser-agent-workspace.js'
@@ -1112,9 +1112,9 @@ function parseDemand(value: unknown): AgentMuxDemand {
   let addressRead: Pick<AgentMuxDemand, 'address' | 'addressIssue'> = {}
   try {
     if (source.address !== undefined) {
-      const address = object(source.address, 'Goal address is invalid.', 'CONTROL_PROTOCOL_ERROR')
-      const expected = formatGoalAddress(id(source.id, 'Goal ID is invalid.', 'CONTROL_PROTOCOL_ERROR'), id(address.runtimeId, 'Goal Runtime is invalid.', 'CONTROL_PROTOCOL_ERROR'), id(address.namespace, 'Goal namespace is invalid.', 'CONTROL_PROTOCOL_ERROR'))
-      if (Object.keys(address).length !== 4 || address.goalUrl !== expected.goalUrl || address.planUrl !== expected.planUrl) throw new Error('Goal address does not match its original identity.')
+      const expected = parseGoalAddress(source.address, id(source.id, 'Goal ID is invalid.', 'CONTROL_PROTOCOL_ERROR'))
+      if (expected.creationOperationId !== undefined && (expected.creationOperationId !== creationOrigin?.operationId || expected.runtimeId !== creationOrigin.inputRuntimeId))
+        throw new Error('Goal address does not match the original creation receipt.')
       addressRead = { address: expected }
     } else if (source.addressIssue !== undefined) addressRead = { addressIssue: text(source.addressIssue, 'Goal address observation', 'CONTROL_PROTOCOL_ERROR') }
   } catch (error) { addressRead = { addressIssue: `Goal link source is unconfirmed. ${error instanceof Error ? error.message : String(error)} The original Goal and work are retained.` } }

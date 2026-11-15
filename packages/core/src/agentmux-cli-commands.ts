@@ -1220,7 +1220,19 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   goal('confirm', '--goal ID --revision N', 'Confirm the exact original Goal proposal as an authenticated person or device.', { '--revision': 'value' }, f => numbers(f, { '--revision': 'expectedRevision' }), true),
   goal('accept', '--goal ID --revision N --submission ID [--accept-gaps] [--finish]', 'Accept the exact original result submission as an authenticated person; --finish also ends this Goal, keeping gaps and original Runs.', { '--revision': 'value', '--submission': 'data', '--accept-gaps': 'boolean', '--finish': 'boolean' }, f => ({ ...numbers(f, { '--revision': 'expectedAlignmentRevision' }), expectedSubmissionId: id(f, '--submission', true), acceptGaps: f.booleans.has('--accept-gaps'), ...(f.booleans.has('--finish') ? { finish: true } : {}) }), true),
   goal('handoff', '--goal ID [--assignees JSON] [--session ID] [--supervisor SESSION|--supervisor-ref JSON|--clear-supervisor] [--relation-access JSON] [--expected-updated-at MS]', 'Save accurate handoff relations without starting or rebinding an existing Loop.', { '--session': 'data', '--expected-updated-at': 'value', ...RELATION_FLAGS }, f => ({ ...fields(f, { '--session': 'sessionId' }), ...relationFields(f), ...numbers(f, { '--expected-updated-at': 'expectedUpdatedAt' }) }), true),
-  goal('focus', '--goal ID [--runtime ID --namespace ID] [--section plan]', 'Read one exact Goal workspace or its original plan while preserving eligible conversation input; no work is created or sent.', { '--runtime': 'data', '--namespace': 'data', '--section': 'value' }, f => ({ input: 'preserve', ...fields(f, { '--runtime': 'runtimeId', '--namespace': 'namespace', '--section': 'section' }) }), true),
+  command('goal.focus', '--goal ID [--runtime ID --namespace ID] [--section plan] | --link URL', 'Read the original Goal, plan or Ticket while preserving eligible conversation input.', {
+    '--goal': 'data', '--runtime': 'data', '--namespace': 'data', '--section': 'value', '--link': 'data', ...OP,
+  }, f => {
+    const link = value(f, '--link')
+    if (link === undefined) return { input: 'preserve', goalId: id(f, '--goal', true), ...operation(f),
+      ...fields(f, { '--runtime': 'runtimeId', '--namespace': 'namespace', '--section': 'section' }) }
+    if (['--goal', '--runtime', '--namespace', '--section'].some(flag => f.values.has(flag))) invalid('Use the exact Goal link or explicit Goal coordinates.')
+    let target
+    try { target = parseAmuxObjectLink(link) } catch { invalid('The original Goal link is invalid.') }
+    if (!target || target.kind !== 'goal') return invalid('This link must name an original Goal or Ticket.')
+    const { kind: _kind, ...coordinates } = target
+    return { ...coordinates, input: 'preserve', ...operation(f) }
+  }, 'Copy the original Ticket address from goal plan. Navigation opens its exact node without sending input.'),
   goal('link-session', '--goal ID --session ID', 'Link an actual Session to the original Goal.', { '--session': 'data' }, f => ({ sessionId: id(f, '--session') }), true),
   goal('link-project', '--goal ID --project ID', 'Link a real Project to the original Goal.', { '--project': 'data' }, f => ({ projectId: id(f, '--project') }), true),
   goal('decisions', '--goal ID', 'Read original Goal decision records.', {}, () => ({})),

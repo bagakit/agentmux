@@ -206,6 +206,7 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
     if (state.mainSurface !== 'board' || state.selectedDemandId !== demand.id || state.goalReadingEntry?.token !== readingEntry.token || !planRef.current) return
     if (readingEntry.runtimeId !== undefined && readingEntry.runtimeId !== demand.address?.runtimeId || readingEntry.namespace !== undefined && readingEntry.namespace !== demand.address?.namespace) return
     revealedEntry.current = readingEntry.token
+    if (readingEntry.ticketNodeId) setPlanReveal({ target: { nodeId: readingEntry.ticketNodeId } })
     revealWork(planRef.current, false)
     desktopPresentationCommitted()
   }, [readingEntry, demand.id])

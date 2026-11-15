@@ -110,7 +110,7 @@ export class SpatialLinkIngress {
       if (target.kind === 'host') {
         request = { ...base, target: { kind: 'settings', sectionId: 'hosts', hostId: node!.hostId } }
       } else if (target.kind === 'goal') {
-        request = { ...base, target: { kind: 'goal', goalId: target.goalId, runtimeId: target.runtimeId, namespace: target.namespace, ...(target.section ? { section: target.section } : {}) } }
+        request = { ...base, target }
       } else if (target.kind === 'mote') {
         request = { ...base, target }
       } else if (target.kind === 'agent') {
