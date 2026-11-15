@@ -370,26 +370,30 @@ describe('actual Store persistence relevance', () => {
     expect(writes.map(({ at }) => at - start)).toEqual([400])
     expect(saved().state.toolsOpen).toBe(false)
     expect((await savedWorkbench()).tabs[tab.id]?.regions['browser-region']).toEqual({
-      regionId: 'browser-region', kind: 'browser', workspaceId, browserId: browser.id, profileId: browser.profileId, url: next.url, title: next.title
+      regionId: 'browser-region', kind: 'browser', workspaceId, browserId: browser.id, profileId: browser.profileId,
+      url: next.url, title: next.title, viewport: 'desktop'
     })
     expect(store.getState().tabs[tab.id]?.regions['browser-region']).toMatchObject({ loading: false, driving: true })
   })
 
-  it('admits real run removal without treating Runtime retirement as deletion of the durable workface', async () => {
+  it('keeps the original workface through an observed Run exit and saves an explicit retirement', async () => {
     await initialize()
     const tab = agentTab()
     store.setState({ tabs: { [tab.id]: tab }, layouts: { [workspaceId]: createWorkspaceLayout('agent-group', [tab.id]) } })
     vi.advanceTimersByTime(400)
     expect(Object.keys((await savedWorkbench()).tabs)).toEqual([tab.id])
     store.getState().applyEvent({ type: 'core', hostId: 'local', event: {
-      type: 'run-removed', agentSessionId: sessionId, run: { runId }, evidence: { source: 'run-process', observedAt: 2, run: { runId } }
+      type: 'process-state', agentSessionId: sessionId, run: { runId }, state: 'exited',
+      evidence: { source: 'run-process', observedAt: 2, run: { runId } }
     } })
-    vi.advanceTimersByTime(400)
+    expect(store.getState().sessions[0]?.processState).toBe('exited')
+    expect((await savedWorkbench()).tabs[tab.id]?.regions[`${tab.id}-region`]).toMatchObject({ sessionId })
+    store.getState().applyEvent({ type: 'core', hostId: 'local', event: {
+      type: 'run-removed', agentSessionId: sessionId, run: { runId }, evidence: { source: 'user', observedAt: 3, run: { runId } }
+    } })
     expect(store.getState().sessions).toEqual([])
     expect(store.getState().tabs).toEqual({})
-    // A Run event withdraws its live projection. Deleting the Core-owned entity
-    // requires an explicit view close, rather than absence from a Runtime list.
-    expect((await savedWorkbench()).tabs[tab.id]?.regions[`${tab.id}-region`]).toMatchObject({ sessionId })
+    expect((await savedWorkbench()).tabs).toEqual({})
   })
 
   it('never queues startup defaults and explicitly saves the restored shell after opening the fence', async () => {
