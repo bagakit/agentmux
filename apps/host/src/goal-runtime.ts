@@ -50,6 +50,7 @@ export interface GoalRuntimePort {
   readInputEpoch(hostId: string): Promise<string | undefined>
   agentCreation(hostId: string, agentSessionId: string): Promise<AgentMuxAgentCreationInspection>
   observeGoalAgent(hostId: string, agentSessionId: string): Promise<AgentMuxAgentRuntimeStatus>
+  goalHostRuntimeId(hostId: string): Promise<string>
   locateGoalAgentHost(agentSessionId: string, expectedHostId?: string): string
   resolveGoalAgent(agentSessionId: string, expectedHostId?: string): Promise<{ hostId: string; status: AgentMuxAgentRuntimeStatus }>
   observeOriginalRun(hostId: string, runId: string): Promise<Pick<AgentMuxRun, 'runId' | 'state'>>
@@ -115,6 +116,13 @@ export function createGoalRuntime(options: {
     ? { kind: 'message', agentSessionId: input.supervisorAgentSessionId, expectedRun: { runId: input.supervisorRunId }, messageId: input.operationId }
     : { kind: 'prompt', agentSessionId: input.supervisorAgentSessionId, expectedRun: { runId: input.supervisorRunId }, submissionId: input.operationId })
   const runtime: GoalRuntimePort = {
+    goalHostRuntimeId: async hostId => {
+      const client = exact(hostId)
+      const identity = 'runtimeOwnerIdentity' in client ? client.runtimeOwnerIdentity() : await client.agentCreationAuthority()
+      if (!identity?.runtimeId || exact(hostId) !== client)
+        throw new AgentMuxError('The original Ticket execution Runtime is unconfirmed. Keep the original Goal and request.', 'CONTROL_UNAVAILABLE')
+      return identity.runtimeId
+    },
     openFinite: async (input, context) => {
       if (!options.openFinite) throw new AgentMuxError('The current Source access for this finite Goal input is unavailable. Its original request and Agent remain retained.', 'CONTROL_UNAVAILABLE')
       return await options.openFinite(input, context)

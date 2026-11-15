@@ -22,7 +22,7 @@ import type { GoalPatrolOwner } from './goal-patrol-owner.js'
 import type { GoalResponsibilityOwner } from './goal-responsibility-owner.js'
 
 export type GoalDelegationCoreMethod = Extract<AgentMuxRpcMethod,
-  'message.read' | 'agent.send' | 'message.dispatch.open' | 'message.dispatch.read' | 'message.dispatch.report' | 'message.dispatch.sync' | 'runtime.owner.identity'>
+  'message.read' | 'agent.send' | 'message.dispatch.open' | 'message.dispatch.read' | 'message.dispatch.report' | 'message.dispatch.sync'>
 export interface GoalDelegationCorePort {
   call<M extends GoalDelegationCoreMethod>(hostId: string, method: M, params: AgentMuxRpcParams<M>, context: AgentMuxRpcCallContext): Promise<AgentMuxRpcResult<M>>
   readDispatch?(hostId: string, sourceMessageId: string): Promise<AgentMuxRpcResult<'message.dispatch.read'>>
@@ -32,7 +32,7 @@ export interface GoalDelegationCorePort {
 /** Original Demand owner and original Host clients; no private journal or second queue. */
 export class GoalDelegationOwner implements GoalDelegationsOwner {
   constructor(private readonly demands: DemandStore,
-    private readonly runtime: Pick<GoalRuntimePort, 'agentCreation'> & Partial<Pick<GoalRuntimePort, 'resolveGoalAgent' | 'locateGoalAgentHost'>>,
+    private readonly runtime: Pick<GoalRuntimePort, 'agentCreation'> & Partial<Pick<GoalRuntimePort, 'resolveGoalAgent' | 'locateGoalAgentHost' | 'goalHostRuntimeId'>>,
     private readonly readMaterials?: (input: FileReadParams) => Promise<FileReadResult>,
     private readonly core?: GoalDelegationCorePort,
     private readonly readAttention?: (goalId: string, delegation: DemandDelegation) => Promise<GoalDelegationObservation['attention']>,
@@ -181,7 +181,8 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
       if (intent.planNodeId && !original && authority.runtimeId) {
         const workerHost = delegationWorkerHostId(intent)
         const workerRuntimeId = workerHost === intent.hostId ? authority.runtimeId
-          : existingSource?.provenance?.target.runtimeId ?? (await this.requireCore().call(workerHost, 'runtime.owner.identity', {}, context)).owner.runtimeId
+          : existingSource?.provenance?.target.runtimeId ?? await this.runtime.goalHostRuntimeId?.(workerHost)
+        if (!workerRuntimeId) throw new AgentMuxError('The original Ticket worker Runtime is unconfirmed. Retain the request.', 'CONTROL_UNAVAILABLE')
         participants = { ownerRuntimeId: authority.runtimeId, workerRuntimeId }
       }
       await this.demands.prepareDelegation(input.goalId, intent, authority.actor.id, participants)
