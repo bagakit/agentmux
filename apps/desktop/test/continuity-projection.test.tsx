@@ -4,9 +4,8 @@ import{afterEach,beforeEach,expect,it,vi}from'vitest'
 import{appendFile}from'node:fs/promises'
 import{webcrypto}from'node:crypto'
 vi.hoisted(()=>vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__',true))
-import type{AgentMuxAgentSession}from'@agentmux/core'
-import{DEFAULT_AGENT_CONTINUITY_POLICY,type AgentMuxContinuityOperation}from'@agentmux/core/agent-session-recovery'
-import type{AgentSessionRecoveryCandidate,SessionRecoveryResult}from'../src/shared/contracts'
+import{DEFAULT_AGENT_CONTINUITY_POLICY}from'@agentmux/core/agent-session-recovery'
+import type{AgentSessionRecoveryCandidate,DesktopAgentSessionDisplay,DesktopContinuityOperation,SessionRecoveryResult}from'../src/shared/contracts'
 import{useAppStore,recoveryCandidateSession}from'../src/renderer/src/store'
 import{reduceAgentMembershipSnapshot,type SessionProjectionState}from'../src/renderer/src/lib/session-state'
 import{originalSessionRestart}from'../src/renderer/src/lib/session-original-recovery'
@@ -20,13 +19,13 @@ const dom=composerDOM(),clone=structuredClone
 const generated='Task013 generated projection payload 0123456789\n'.repeat(42000).slice(0,1_855_168)
 function fixture(){
  const session=composerSession('projection-original'),nativeTarget={kind:'provider' as const,providerId:'codex',sessionId:'original-native'}
- const key={kind:'message' as const,agentSessionId:session.id,expectedRun:session.control.run,messageId:'original-message'}
- const operation:AgentMuxContinuityOperation={operationId:'original-continuity',agentSessionId:session.id,trigger:'startup',policy:{...DEFAULT_AGENT_CONTINUITY_POLICY},previousRun:session.control.run,nativeTarget,admittedAt:1,observedAt:2,rechecks:0,kind:'pending',reason:'operation-unconfirmed',evidence:{kind:'run-running',observedAt:2},
+ const operation:DesktopContinuityOperation={operationId:'original-continuity',agentSessionId:session.id,trigger:'startup',policy:{...DEFAULT_AGENT_CONTINUITY_POLICY},previousRun:session.control.run,nativeTarget,admittedAt:1,observedAt:2,rechecks:0,kind:'pending',reason:'operation-unconfirmed',evidence:{kind:'run-running',observedAt:2},
   resumedInputBoundary:{initialInputByte:0,protocolInput:{operationId:'original-protocol-ACK',startByte:0,endByte:2}},
   supervision:{phase:'paused',activeAttemptOperationId:'original-continuity',attemptCount:1,attemptLimit:1,observedAt:2,reason:'retry-budget-exhausted'},
   previousInput:{scope:'typed-prompt',outcome:'unknown',key:{kind:'prompt',agentSessionId:session.id,expectedRun:session.control.run,submissionId:'unknown-original-input'}},
-  messageInput:{ref:{key,waitGeneration:1},key,admissionIntent:{kind:'session-conversation',expectedRun:session.control.run},prompt:'Frozen original composed input',message:{userContent:generated,authorHuman:true},lifecycleOperationId:'original-lifecycle'}}
- const core:AgentMuxAgentSession={kind:'agent',agentSessionId:session.id,providerId:session.providerId,executorId:session.executorId,hostId:session.hostId,workspacePath:session.workspacePath,run:session.control.run,retiredRuns:[],nativeHandle:nativeTarget,createdAt:session.createdAt,updatedAt:2,continuity:clone(operation),continuityOperations:{[operation.operationId]:clone(operation)}}
+  launchInput:{input:{submissionId:'original-submission',prompt:'Original draft',authorHuman:true},prompt:'Frozen original composed input',
+    message:{userContent:generated,authorHuman:true},digest:'original-digest',delivery:'post-launch',lifecycleOperationId:'original-lifecycle',state:'not-applied'}}
+ const core:DesktopAgentSessionDisplay={kind:'agent',agentSessionId:session.id,providerId:session.providerId,executorId:session.executorId,hostId:session.hostId,workspacePath:session.workspacePath,run:session.control.run,retiredRuns:[],nativeHandle:nativeTarget,createdAt:session.createdAt,updatedAt:2,continuity:clone(operation),continuityOperations:{[operation.operationId]:clone(operation)}}
  return{session:{...session,nativeHandle:nativeTarget},operation,core}
 }
 let f:ReturnType<typeof fixture>
@@ -41,7 +40,7 @@ beforeEach(()=>{
 })
 afterEach(()=>vi.restoreAllMocks())
 function current(){const session=useAppStore.getState().sessions.find(session=>session.id===f.session.id)!;if(session.kind!=='agent')throw Error('Original Agent projection lost');return session}
-function apply(core:AgentMuxAgentSession,hostId='local'){useAppStore.getState().applyEvent({type:'core',hostId,event:{type:'agent-session',session:core}})}
+function apply(core:DesktopAgentSessionDisplay,hostId='local'){useAppStore.getState().applyEvent({type:'core',hostId,event:{type:'agent-session',session:core}})}
 function Surface(){const session=useAppStore(state=>state.sessions.find(session=>session.id==='projection-original'))!;return session.kind==='agent'?<><ContinuitySupervisionNotice session={session}/><SessionRunEndedActions session={session}/></>:null}
 function retainedHandler(text:string){const button=[...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent?.trim()===text)!;expect(button,text).toBeDefined();const key=Object.keys(button).find(key=>key.startsWith('__reactProps$'))!;const handler=Reflect.get(button,key).onClick as()=>void;expect(handler).toBeTypeOf('function');return handler}
 function bodyBytes(value:unknown,seen=new Set<object>()):number{
@@ -67,9 +66,9 @@ it('actual AppStore events and mounted retained callbacks keep one isolated comp
  expect(after-before,'Unrelated actual product observations must copy zero large continuity body bytes').toBe(0)
  expect(new Set(snapshots.map(session=>session.continuity)).size).toBe(1)
  expect(snapshots.every(session=>session.continuity===session.continuityOperations?.[f.operation.operationId])).toBe(true)
- f.core.continuity!.messageInput!.message.userContent='Caller changed its original source after intake'
- f.core.continuityOperations![f.operation.operationId]!.messageInput!.message.userContent='Caller changed its original map after intake'
- expect(original.continuity?.messageInput?.message.userContent===generated).toBe(true)
+ f.core.continuity!.launchInput!.message.userContent='Caller changed its original source after intake'
+ f.core.continuityOperations![f.operation.operationId]!.launchInput!.message.userContent='Caller changed its original map after intake'
+ expect(original.continuity?.launchInput?.message.userContent===generated).toBe(true)
  vi.spyOn(api.sessions,'refresh').mockImplementation(async()=>current())
  await act(async()=>callbacks[0]!())
  expect(api.sessions.refresh).toHaveBeenCalledWith(f.session.control)
@@ -78,10 +77,10 @@ it('actual AppStore events and mounted retained callbacks keep one isolated comp
 })
 it('same-ID and same-timestamp full body or protocol ACK changes produce isolated new facts while optional clearing removes their old projection',()=>{
  apply(f.core);const original=current(),first=clone(f.core)
- first.continuity!.messageInput!.message.userContent='Changed full body at the same timestamps';first.continuityOperations![f.operation.operationId]!.messageInput!.message.userContent='Changed full body at the same timestamps'
+ first.continuity!.launchInput!.message.userContent='Changed full body at the same timestamps';first.continuityOperations![f.operation.operationId]!.launchInput!.message.userContent='Changed full body at the same timestamps'
  apply(first);const body=current()
- expect(body.continuity?.messageInput?.message.userContent==='Changed full body at the same timestamps').toBe(true);expect(body.continuity).not.toBe(original.continuity)
- expect(original.continuity?.messageInput?.message.userContent===generated).toBe(true)
+ expect(body.continuity?.launchInput?.message.userContent==='Changed full body at the same timestamps').toBe(true);expect(body.continuity).not.toBe(original.continuity)
+ expect(original.continuity?.launchInput?.message.userContent===generated).toBe(true)
  const ack=clone(first);ack.continuity!.resumedInputBoundary!.protocolInput!.endByte=4;ack.continuityOperations![f.operation.operationId]!.resumedInputBoundary!.protocolInput!.endByte=4
  apply(ack);expect(current().continuity?.resumedInputBoundary?.protocolInput?.endByte).toBe(4);expect(body.continuity?.resumedInputBoundary?.protocolInput?.endByte).toBe(2)
  ack.continuity!.resumedInputBoundary!.protocolInput!.endByte=99;expect(current().continuity?.resumedInputBoundary?.protocolInput?.endByte).toBe(4)
@@ -97,14 +96,14 @@ it('changed operation observations retain one shared frozen input body across ev
  }
  expect(new Set(snapshots.map(session=>session.continuity)).size).toBe(5)
  expect(snapshots.map(session=>session.continuity?.supervision?.observedAt)).toEqual([2,10,11,12,13])
- expect(new Set(snapshots.map(session=>session.continuity?.messageInput)).size,'Every retained version must share one frozen input body').toBe(1)
- expect(new Set(snapshots.map(session=>session.continuityOperations?.[f.operation.operationId]?.messageInput)).size).toBe(1)
- expect(snapshots.at(-1)!.continuity?.messageInput).not.toBe(f.core.continuity?.messageInput)
- f.core.continuity!.messageInput!.message.userContent='Caller changed its original source after intake'
- expect(snapshots.every(session=>session.continuity?.messageInput?.message.userContent===generated)).toBe(true)
- const changed=clone(f.core);changed.continuity!.messageInput!.message.userContent='Changed frozen body';changed.continuityOperations![f.operation.operationId]!.messageInput!.message.userContent='Changed frozen body'
- apply(changed);expect(current().continuity?.messageInput?.message.userContent).toBe('Changed frozen body');expect(current().continuity?.messageInput?.ref).toBe(snapshots.at(-1)!.continuity?.messageInput?.ref)
- expect(snapshots.at(-1)!.continuity?.messageInput?.message.userContent===generated).toBe(true)
+ expect(new Set(snapshots.map(session=>session.continuity?.launchInput)).size,'Every retained version must share one frozen input body').toBe(1)
+ expect(new Set(snapshots.map(session=>session.continuityOperations?.[f.operation.operationId]?.launchInput)).size).toBe(1)
+ expect(snapshots.at(-1)!.continuity?.launchInput).not.toBe(f.core.continuity?.launchInput)
+ f.core.continuity!.launchInput!.message.userContent='Caller changed its original source after intake'
+ expect(snapshots.every(session=>session.continuity?.launchInput?.message.userContent===generated)).toBe(true)
+ const changed=clone(f.core);changed.continuity!.launchInput!.message.userContent='Changed frozen body';changed.continuityOperations![f.operation.operationId]!.launchInput!.message.userContent='Changed frozen body'
+ apply(changed);expect(current().continuity?.launchInput?.message.userContent).toBe('Changed frozen body');expect(current().continuity?.launchInput?.input).toBe(snapshots.at(-1)!.continuity?.launchInput?.input)
+ expect(snapshots.at(-1)!.continuity?.launchInput?.message.userContent===generated).toBe(true)
  expect(api.sessions.recover).not.toHaveBeenCalled();expect(api.sessions.write).not.toHaveBeenCalled()
 })
 it('a pointer that becomes equal to its map operation again shares that one operation after distinct same-ID facts',()=>{
@@ -135,14 +134,14 @@ it('normal membership reuses only the same original subject and clones changed o
  const changed=reduceAgentMembershipSnapshot(next,{...snapshot,sessions:[foreign]}),projected=changed.sessions.find(session=>session.id===incoming.id)!
  if(projected.kind!=='agent')throw Error('Membership source was not projected as its original Agent')
  expect(projected.continuity).not.toBe(original.continuity);expect(projected.continuity).not.toBe(foreign.continuity)
- foreign.continuity!.messageInput!.message.userContent='Foreign source mutated';expect(projected.continuity?.messageInput?.message.userContent===generated).toBe(true)
+ foreign.continuity!.launchInput!.message.userContent='Foreign source mutated';expect(projected.continuity?.launchInput?.message.userContent===generated).toBe(true)
 })
 it.each(['pending','unavailable']as const)('actual %s recovery result installs one isolated full operation graph with original controls and no input replay',async kind=>{
  const operation=clone(f.operation),result:SessionRecoveryResult=kind==='pending'?{kind,agentSessionId:f.session.id,previousRun:f.session.control.run,reason:'operation-unconfirmed',evidence:{kind:'run-running',observedAt:2},continuity:operation}:{kind,agentSessionId:f.session.id,previousRun:f.session.control.run,reason:'provider-unavailable',evidence:{kind:'run-ended',state:'interrupted',observedAt:2},continuity:operation}
  vi.mocked(api.sessions.recover).mockResolvedValue(result)
  await useAppStore.getState().recoverSession(f.session.id,'original-recovery',{inputControl:f.session.control})
  const projected=current();expect(projected.continuity).toBe(projected.continuityOperations?.[operation.operationId]);expect(projected.continuity).not.toBe(operation);expect(projected.continuity).toEqual(operation)
- operation.messageInput!.message.userContent='Returned receipt source mutated';expect(projected.continuity?.messageInput?.message.userContent===generated).toBe(true)
+ operation.launchInput!.message.userContent='Returned receipt source mutated';expect(projected.continuity?.launchInput?.message.userContent===generated).toBe(true)
  expect(api.sessions.recover).toHaveBeenCalledOnce();expect(vi.mocked(api.sessions.recover).mock.calls[0]!.slice(0,3)).toEqual([f.session.control,f.session.workspacePath,'original-recovery'])
  expect(projected.control).toEqual(f.session.control);expect(api.sessions.launchAgent).not.toHaveBeenCalled();expect(api.sessions.write).not.toHaveBeenCalled();expect(useAppStore.getState().agentComposerDrafts[f.session.id]).toBe('Original unsent draft')
 })
@@ -151,14 +150,14 @@ it('original recovery candidate explicitly installs its returned current operati
  const projected=recoveryCandidateSession(candidate,{kind:'pending',detail:'Original recovery is unconfirmed'})
  if(projected.kind!=='agent')throw Error('Original recovery candidate lost its Agent identity')
  expect(projected.continuity).toBe(projected.continuityOperations?.[f.operation.operationId]);expect(projected.continuity).toEqual(candidate.continuity);expect(projected.continuity).not.toBe(candidate.continuity)
- candidate.continuity!.messageInput!.message.userContent='Candidate changed';expect(projected.continuity?.messageInput?.message.userContent===generated).toBe(true)
+ candidate.continuity!.launchInput!.message.userContent='Candidate changed';expect(projected.continuity?.launchInput?.message.userContent===generated).toBe(true)
 })
 it('an actual successful recovery result retains its complete new-Run operation once without borrowing the returned graph or replaying input',async()=>{
  const operation={...clone(f.operation),kind:'resumed' as const,newRun:{runId:'original-session-resumed-run'}},session={...f.session,control:{...f.session.control,run:operation.newRun},continuity:clone(operation),continuityOperations:{[operation.operationId]:clone(operation)}}
  vi.mocked(api.sessions.recover).mockResolvedValue({kind:'resumed',session})
  await useAppStore.getState().recoverSession(f.session.id,'original-success',{inputControl:f.session.control})
  const projected=current();expect(projected.control).toEqual(session.control);expect(projected.continuity).toBe(projected.continuityOperations?.[operation.operationId]);expect(projected.continuity).not.toBe(session.continuity)
- expect(projected.continuity).toEqual(operation);session.continuity.messageInput!.message.userContent='Returned successful source changed';expect(projected.continuity?.messageInput?.message.userContent===generated).toBe(true)
+ expect(projected.continuity).toEqual(operation);session.continuity.launchInput!.message.userContent='Returned successful source changed';expect(projected.continuity?.launchInput?.message.userContent===generated).toBe(true)
  expect(api.sessions.recover).toHaveBeenCalledOnce();expect(api.sessions.launchAgent).not.toHaveBeenCalled();expect(api.sessions.write).not.toHaveBeenCalled()
 })
 it('a mounted retained Resume callback keeps its original control and cannot replace a newer accepted Run when Core returns that exact conflict',async()=>{
@@ -183,12 +182,12 @@ it('changed metadata reaches mounted recovery consumers without re-cloning the u
   await act(async()=>apply(incoming));callbacks.push(retainedHandler('Re-read original'))
   expect(current().continuity?.policy.retryMaxAttempts).toBe(2+index)
   expect(current().continuity?.supervision?.observedAt).toBe(10+index)
-  expect(current().continuity?.messageInput).toBe(original.continuity?.messageInput)
+  expect(current().continuity?.launchInput).toBe(original.continuity?.launchInput)
  }
  const bytes=copies.reduce((a,b)=>a+b,0)-before
  if(process.env.CONTINUITY_PROJECTION_FACTS)await appendFile(process.env.CONTINUITY_PROJECTION_FACTS,JSON.stringify({testName:'changed metadata with mounted recovery consumers',payloadBytes:Buffer.byteLength(generated),observations:6,projectionBodyCloneBytesAfterWarmup:bytes,boundary:'Logical payload bytes entering the production structuredClone boundary, not V8 allocated or user RSS bytes. Transport input clones excluded; same body across changed metadata.'})+'\n')
  expect(bytes,'Changed metadata must clone zero unchanged large input body bytes').toBe(0)
- expect(current().continuity?.messageInput?.message.userContent).toBe(generated)
+ expect(current().continuity?.launchInput?.message.userContent).toBe(generated)
  expect(original.continuity?.policy.retryMaxAttempts).toBe(DEFAULT_AGENT_CONTINUITY_POLICY.retryMaxAttempts)
  vi.spyOn(api.sessions,'refresh').mockImplementation(async()=>current())
  await act(async()=>callbacks[0]!());expect(api.sessions.refresh).toHaveBeenCalledWith(f.session.control)
@@ -197,17 +196,17 @@ it('changed metadata reaches mounted recovery consumers without re-cloning the u
 })
 it('changed Browser input facts preserve arrays, nulls, own keys and source isolation through actual Session events',()=>{
  const context={kind:'browser' as const,version:1 as const,capturedAt:2,browser:{hostId:'local',browserId:'original-browser',navigationId:'original-nav'},page:{url:'https://fixture.invalid/',title:'Original page'},selection:{kind:'element' as const,capturedAt:2,source:{hostId:'local',browserId:'original-browser',navigationId:null,association:'unknown' as const},viewport:{width:100,height:80,deviceScaleFactor:null},element:{tagName:'div',role:'region',accessibleName:'Original',selector:'#original',text:'Original',nearbyText:['first','second'],attributes:JSON.parse('{"__proto__":"recorded value","constructor":"recorded constructor","data-id":"first"}') as Record<string,string>,html:'<div />'}}}
- for(const operation of[f.core.continuity!,f.core.continuityOperations![f.operation.operationId]!])operation.messageInput!.message.inputContext=clone(context)
+ for(const operation of[f.core.continuity!,f.core.continuityOperations![f.operation.operationId]!])operation.launchInput!.message.inputContext=clone(context)
  apply(f.core);const original=current()
  const incoming=clone(f.core)
  for(const operation of[incoming.continuity!,incoming.continuityOperations![f.operation.operationId]!]){
   operation.observedAt=3
-  const input=operation.messageInput!.message.inputContext!
+  const input=operation.launchInput!.message.inputContext!
   delete input.page.title;input.browser.navigationId=null
   input.selection!.element!.nearbyText=['second','first','third']
   input.selection!.element!.attributes=Object.fromEntries([['__proto__','changed own value'],['constructor','changed constructor'],['data-id','second']])
  }
- apply(incoming);const projected=current().continuity!.messageInput!.message.inputContext!
+ apply(incoming);const projected=current().continuity!.launchInput!.message.inputContext!
  expect(projected.selection!.element!.nearbyText,'Changed arrays retain their full order and length').toEqual(['second','first','third'])
  expect(projected.page,'Optional clearing must remove the old own property').not.toHaveProperty('title')
  expect(projected.browser.navigationId,'A changed null is a complete recorded fact').toBeNull()
@@ -216,13 +215,13 @@ it('changed Browser input facts preserve arrays, nulls, own keys and source isol
  expect(Object.hasOwn(attrs,'__proto__'),'__proto__ must remain an own data property').toBe(true)
  expect(attrs['__proto__']).toBe('changed own value');expect(attrs.constructor).toBe('changed constructor')
  expect(Object.getPrototypeOf(attrs)).toBe(Object.prototype)
- incoming.continuity!.messageInput!.message.inputContext!.selection!.element!.nearbyText.push('caller mutation')
- incoming.continuityOperations![f.operation.operationId]!.messageInput!.message.inputContext!.selection!.element!.attributes['data-id']='caller mutation'
+ incoming.continuity!.launchInput!.message.inputContext!.selection!.element!.nearbyText.push('caller mutation')
+ incoming.continuityOperations![f.operation.operationId]!.launchInput!.message.inputContext!.selection!.element!.attributes['data-id']='caller mutation'
  expect(projected.selection!.element!.nearbyText,'Source arrays must stay isolated').toEqual(['second','first','third'])
  expect(attrs['data-id'],'Source own data must stay isolated').toBe('second')
- expect(original.continuity!.messageInput!.message.inputContext).toEqual(context)
+ expect(original.continuity!.launchInput!.message.inputContext).toEqual(context)
  const cleared=clone(incoming)
- for(const operation of[cleared.continuity!,cleared.continuityOperations![f.operation.operationId]!])operation.messageInput!.message.inputContext!.selection!.element!.nearbyText=[]
- apply(cleared);expect(current().continuity!.messageInput!.message.inputContext!.selection!.element!.nearbyText,'Empty arrays clear all old entries').toEqual([])
+ for(const operation of[cleared.continuity!,cleared.continuityOperations![f.operation.operationId]!])operation.launchInput!.message.inputContext!.selection!.element!.nearbyText=[]
+ apply(cleared);expect(current().continuity!.launchInput!.message.inputContext!.selection!.element!.nearbyText,'Empty arrays clear all old entries').toEqual([])
  expect(api.sessions.recover).not.toHaveBeenCalled();expect(api.sessions.write).not.toHaveBeenCalled()
 })

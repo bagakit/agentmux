@@ -198,7 +198,7 @@ it('keeps the original recovery message in Core and out of Desktop Session carri
     const assertDisplay = (value: unknown) => {
       expect(JSON.stringify(value), 'Original recovery body must stay in Core').not.toContain('FROZEN_ORIGINAL_MESSAGE_')
       expect(JSON.stringify(value), 'Future Core operation fields require explicit Desktop admission').not.toContain('FROZEN_CORE_ONLY_RECOVERY_EXTENSION_')
-      expect(value).toMatchObject({ continuity: { operationId, hasMessageInput: true } })
+      expect(value).toMatchObject({ continuity: { operationId, trigger: 'input' } })
       expect(value).not.toHaveProperty('continuity.messageInput')
       expect(value).not.toHaveProperty('continuity.coreOnlyExtension')
     }
@@ -273,7 +273,7 @@ it('keeps the original recovery message in Core and out of Desktop Session carri
   function assertNoRecipe(value: unknown) {
     expect(JSON.stringify(value)).not.toContain('FROZEN_ORIGINAL_MESSAGE_')
     expect(JSON.stringify(value)).not.toContain('FROZEN_CORE_ONLY_RECOVERY_EXTENSION_')
-    expect(value).toHaveProperty(['continuityOperations', operationId, 'hasMessageInput'], true)
+    expect(value).toHaveProperty(['continuityOperations', operationId, 'trigger'], 'input')
     expect(value).not.toHaveProperty(['continuityOperations', operationId, 'messageInput'])
   }
 })

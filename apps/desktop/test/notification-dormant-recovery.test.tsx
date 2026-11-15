@@ -60,10 +60,11 @@ it('carried input, an unsent message, a running Run or another recovery state is
     agent('active-delay', { reason: 'active-delay' }),
     // Only a startup admission is the idle policy at work; another automatic trigger stays a problem.
     agent('progress', { trigger: 'progress' }),
+    agent('input-trigger', { trigger: 'input' }),
     agent('attempted', { supervision: { attemptCount: 1 } }),
     agent('observing', { supervision: { phase: 'observing' } })
   ]
-  expect(problems.map(dormantByRecoveryPolicy)).toEqual([false, false, false, false, false, false])
+  for (const session of problems) expect(dormantByRecoveryPolicy(session), session.id).toBe(false)
   const queued = agent('unsent-message')
   useAppStore.setState({ sessions: [...problems, queued], agentSteerQueues: { [queued.id]: [{ operationId: 'original-unsent', text: 'Original unsent message',
     status: 'queued', runId: queued.control.run.runId, promptCondition: null }] } })
