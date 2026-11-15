@@ -28,6 +28,7 @@ const native = String.raw`
     const request=JSON.parse(line);fs.appendFileSync(process.argv[1],request.method+'\n');
     if(request.method==='hang')continue;
     if(request.method==='die')process.exit(3);
+    if(request.method==='echo-exit'){fs.writeSync(1,JSON.stringify({jsonrpc:'2.0',id:request.id,result:{last:true}})+'\n');process.exit(0);}
     if(request.method==='notice')continue;
     if(request.method==='echo-event')process.stdout.write(JSON.stringify({jsonrpc:'2.0',method:'native-event',params:{sequence:1}})+'\n');
     if(request.method==='hold-save'){fs.appendFileSync(process.argv[2],'effect\n');count++;await new Promise(resolve=>{const check=()=>{if(fs.existsSync(process.argv[3])){watcher.close();resolve();}};const watcher=fs.watch(require('node:path').dirname(process.argv[3]),check);check();});}
@@ -59,7 +60,7 @@ async function fixture(executable = process.execPath, contribution: Pick<AgentEx
       const p = payload as { id: number; method?: string; params?: Record<string, unknown>; result?: unknown }
       if (Object.hasOwn(p, 'result')) return { kind: 'response', requestId: p.id, payload: p }
       if (p.method === 'notice') return { kind: 'notification', method: p.method, payload: p }
-      if (!['hello', 'save', 'hold-save', 'echo', 'echo-event', 'hang', 'die', 'open-resource', 'use-resource', 'close-resource'].includes(p.method!)) {
+      if (!['hello', 'save', 'hold-save', 'echo', 'echo-event', 'echo-exit', 'hang', 'die', 'open-resource', 'use-resource', 'close-resource'].includes(p.method!)) {
         return { kind: 'rejected', requestId: p.id, code: -32601, reason: 'Unknown native method', payload: p }
       }
       const intent: AgentExecutionIntent = { kind: ['save', 'hold-save'].includes(p.method!) ? 'write' : 'control', paths: [] }
@@ -241,6 +242,49 @@ describe('resource executor original native stream', () => {
     expect((await h.reply(4)).payload!.error!.code).toBe(-32002)
     await h.initialize('fresh')
     expect(await h.journal.inspect({ bindingId: 'fixed-binding', streamGeneration: 'original', nativeRequestId: 1 })).toMatchObject({ outcome: 'unknown' })
+  })
+
+  it('drains output before reporting exit and only settles stranded native requests', async () => {
+    let finishProvider!: () => void, finishFirstReply!: () => void
+    const providerRunning = new Promise<void>(resolve => { finishProvider = resolve })
+    const holdFirstReply = new Promise<void>(resolve => { finishFirstReply = resolve })
+    const h = await fixture(process.execPath, { async execute(request) {
+      if (request.method !== 'save') return undefined
+      await providerRunning
+      return { jsonrpc: '2.0', id: request.requestId, result: { fromHelper: true } }
+    } })
+    await h.initialize()
+    const child = vi.mocked(spawn).mock.results.at(-1)!.value as ChildProcessWithoutNullStreams
+    const originalComplete = h.journal.complete.bind(h.journal)
+    const complete = vi.spyOn(h.journal, 'complete').mockImplementation(async (key, digest, value) => {
+      if (key.nativeRequestId === 1) await holdFirstReply
+      return originalComplete(key, digest, value)
+    })
+    const unknown = vi.spyOn(h.journal, 'markUnknown')
+    const phase = (id: number) => h.journal.inspect({ bindingId: 'fixed-binding', streamGeneration: 'original', nativeRequestId: id })
+    try {
+      h.send(1, 'echo')
+      await vi.waitFor(() => expect(complete).toHaveBeenCalledWith(expect.objectContaining({ nativeRequestId: 1 }), expect.anything(), expect.anything()))
+      h.send(4, 'save')
+      await vi.waitFor(async () => expect(await phase(4)).toMatchObject({ phase: 'dispatched' }))
+      h.send(3, 'hang')
+      const exit = once(child, 'exit')
+      h.send(2, 'echo-exit')
+      await exit
+      expect(unknown).not.toHaveBeenCalled()
+      finishFirstReply()
+      expect((await h.reply(2)).payload?.result).toEqual({ last: true })
+      expect((await h.reply(3)).payload?.error?.code).toBe(-32603)
+      await h.wait(frame => frame.code === 'NATIVE_CONNECTION_ENDED')
+      expect(unknown.mock.calls.map(([key]) => key.nativeRequestId)).toEqual([3])
+      finishProvider()
+      expect((await h.reply(4)).payload?.result).toEqual({ fromHelper: true })
+      expect(await phase(2)).toMatchObject({ phase: 'completed' })
+      expect(await phase(3)).toMatchObject({ phase: 'unknown' })
+      expect(await phase(4)).toMatchObject({ phase: 'completed' })
+    } finally {
+      finishFirstReply(); finishProvider()
+    }
   })
 
   it('forwards Provider-confirmed server notifications without admitting client notification injection', async () => {
