@@ -64,6 +64,7 @@ export class AgentExecutionBridge {
     persist(state: AgentExecutionBridgeState): Promise<void>
     /** Idempotent observation only: replay may repeat frames; this callback grants no new action. */
     onFrame(side: Side, frame: unknown): Promise<void>
+    onObservationError?(side: Side, error: unknown): void
     onError(error: Error): void
     /** Exact helper facts; no Session lifecycle or native operation inference. */
     onConnection?(side: Side, connection: AgentExecutionBridgeConnection): void
@@ -230,7 +231,10 @@ export class AgentExecutionBridge {
         await this.save({ ...this.state, pending: { source: side, sourceStartByte: this.state[side].outputByte, sourceEndByte, digest, operation, chunk: { offset: 0, bytes: inputChunkBytes(this.state[target].runId, operation) } } })
         await this.deliverPending(original)
       } else {
-        await this.options.onFrame(side, frame)
+        try { await this.options.onFrame(side, frame) }
+        catch (error) {
+          try { this.options.onObservationError?.(side, error) } catch { /* Diagnostic publication is independent of the transport. */ }
+        }
         await this.save({ ...this.state, [side]: { ...this.state[side], outputByte: sourceEndByte } })
       }
       from = newline + 1

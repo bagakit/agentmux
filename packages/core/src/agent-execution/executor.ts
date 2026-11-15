@@ -62,9 +62,11 @@ export function createAgentExecutionExecutor(options: {
       await report(key.streamGeneration, code, key)
     }
   }
-  const respond = (generation: string, bytes: Uint8Array, request: Request) => {
+  const replyCommitted = async (key: AgentExecutionOperationKey, bytes: Uint8Array, request: Request): Promise<void> => {
     const response = JSON.parse(Buffer.from(bytes).toString('utf8')) as Record<string, unknown>
-    return channel.send({ type: 'response', generation, payload: options.protocol.projectResponse?.(request, response) ?? response })
+    const generation = key.streamGeneration
+    await channel.send({ type: 'response', generation, payload: options.protocol.projectResponse?.(request, response) ?? response })
+    await completed(key)
   }
   const completed = (key: AgentExecutionOperationKey) => channel.send({ type: 'operation-completed', generation: key.streamGeneration, operation: key })
   const settle = async (pending: Pending, state?: Generation): Promise<void> => {
@@ -91,8 +93,7 @@ export function createAgentExecutionExecutor(options: {
     const operations = retained.get(generation)
     operations?.delete(requestKey(pending.key.nativeRequestId))
     if (!operations?.size) retained.delete(generation)
-    await completed(pending.key)
-    await respond(generation, pending.response, pending.request)
+    await replyCommitted(pending.key, pending.response, pending.request)
   }
   const start = (generation: string): Generation => {
     const spec = options.protocol.executor
@@ -194,8 +195,7 @@ export function createAgentExecutionExecutor(options: {
           try { result = await options.journal.readResult(key, operation.payloadDigest) }
           catch { await storageUnconfirmed(key, 'RESPONSE_READ_UNCONFIRMED'); return }
           if (!result) { await storageUnconfirmed(key, 'RESPONSE_READ_UNCONFIRMED'); return }
-          await completed(key)
-          await respond(generation, result, message)
+          await replyCommitted(key, result, message)
           return
         }
         if (operation.phase !== 'prepared') {

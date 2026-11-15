@@ -100,6 +100,7 @@ export class AgentExecutionCoordinator {
   private readonly lanes = new Map<string, Promise<unknown>>()
   private readonly bridges = new Map<string, { bridge: AgentExecutionBridge; dispose(): Promise<void> }>()
   private readonly observations = new Map<string, AgentExecutionInspection>()
+  private readonly projectionFailures = new Map<string, AgentExecutionDiagnostic>()
   private readonly connectionFailures = new Map<string, Diagnostic & { protocolFrame?: Pick<ExecutionProtocolFrameError, 'side' | 'frame'> }>()
   private readonly helperConnections = new Map<string, Map<AgentExecutionBridgeSide, AgentExecutionBridgeConnection>>()
   private disposed = false
@@ -223,6 +224,8 @@ export class AgentExecutionCoordinator {
     if (retained) notices = this.qualificationNotices(retained)
     const diagnostic = this.connectionDiagnostic(input.bindingId)
     const diagnostics = retained ? this.localDiagnostics(retained) : []
+    const projectionFailure = this.projectionFailures.get(input.bindingId)
+    if (projectionFailure) diagnostics.push(projectionFailure)
     const value: AgentExecutionInspection = { bindingId: input.bindingId, agentHostId: input.agentHostId, resourceHostId: input.resourceHostId,
       agentSessionId: input.agent.agentSessionId, resourceWorkspacePath: input.resourceWorkspacePath,
       ...(input.agentRoute ? { agentRoute: input.agentRoute } : {}), ...(input.resourceRoute ? { resourceRoute: input.resourceRoute } : {}),
@@ -343,9 +346,11 @@ export class AgentExecutionCoordinator {
             ? { ...base, ...subject, side: 'executor', scope: 'operation', generation: operation.streamGeneration, operation }
             : value.scope === 'helper' || value.scope === 'request' || value.scope === 'generation'
               ? { ...base, ...subject, scope: value.scope } : { ...base, ...subject, scope: 'unclassified' }
-          record.diagnostics ??= []
-          if (!record.diagnostics.some(retained => isDeepStrictEqual(retained, diagnostic))) record.diagnostics.push(diagnostic)
-          this.save(record); this.observe(record.input)
+          const retained = record.diagnostics ?? []
+          if (retained.some(value => isDeepStrictEqual(value, diagnostic))) return
+          const diagnostics = [...retained, diagnostic]
+          this.save({ ...record, diagnostics }); record.diagnostics = diagnostics
+          this.observe(record.input)
         }
         if (side === 'executor' && value.type === 'operation-completed' && originalOperation(value.operation, record.input.bindingId, value.generation)) {
           // The resource helper emits this fact only after its original journal
@@ -356,9 +361,15 @@ export class AgentExecutionCoordinator {
           // The bridge already commits its cursor. An ordinary completed tool
           // with no matching issue needs no second write or UI observation.
           if (unresolved.length === retained.length) return
-          record.diagnostics = unresolved
-          this.save(record); this.observe(record.input)
+          this.save({ ...record, diagnostics: unresolved }); record.diagnostics = unresolved
+          this.observe(record.input)
         }
+      },
+      onObservationError: side => {
+        this.projectionFailures.set(id, { scope: 'helper', side, runId: record.bridge![side].runId,
+          code: 'EXECUTION_DIAGNOSTIC_PROJECTION_UNCONFIRMED',
+          message: 'The original helper diagnostic could not be recorded. Inspect the original tool operation for its result.' })
+        this.observe(record.input)
       },
       onConnection: (side, connection) => {
         const before = this.connectionDiagnostic(id)
