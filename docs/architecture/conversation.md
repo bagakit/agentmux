@@ -382,6 +382,20 @@ Mobile Surface 组合两个独立控制器：[`useMobilePromptController`](../..
 
 [`SessionPane`](../../apps/desktop/src/renderer/src/components/SessionPane.tsx) 经 [`usePendingDeliveryLayout`](../../apps/desktop/src/renderer/src/lib/pending-delivery-layout.ts) 提供当前工作面的边界，以及 interaction wrapper／卡片的显式 ref；只有显示终端的 Region 提供该 Session／Run 的 [`TerminalInputGeometry`](../../apps/desktop/src/renderer/src/lib/terminal-view-observation.ts)。辅助阅读面使用自己的边界，不借用主终端的几何。端口沿 Composer／Mailbox 传给 [`ComposerPendingDelivery`](../../apps/desktop/src/renderer/src/components/ComposerPendingDelivery.tsx)，浮层测量自己的 composer 并复用 Floating UI 与 RAF 合并，不从祖先或兄弟节点发现终端或请求。终端 owner 保留有界的输入行与 textarea 观察，可见性与身份变化时解除订阅。这些引用只服务呈现，不授予发送或权限资格，也不进入父工作面高频更新的 React state。
 
+### 人工输入与定时安排的交接
+
+人工输入沿原客户端发送路径及时可用。编辑观察通过同一公共 RPC 通知原 Host，安排和输入分别在各自 owner 核对。行为约束见[自动推进的触发、暂停与认领](../design/behavior/agent-capabilities-and-messaging.md#自动推进的触发暂停与认领)。
+
+| 模块 | 持有的事实与失败范围 |
+| --- | --- |
+| Desktop 与 Mobile | 客户端观察明确的编辑边沿，只向准确的 Host、Session 和 Run 通知。Desktop 复用 [输入观察](../../apps/desktop/src/renderer/src/lib/continuous-progress-input.ts)与 [主进程入口](../../apps/desktop/src/main/ipc.ts)，Mobile 经[对话输入控制器](../../apps/mobile/src/conversation/use-mobile-prompt-controller.ts)发送同一请求。草稿仍由客户端持有。 |
+| Host 输入保护 | [`goal-automation-pause`](../../apps/host/src/goal-automation-pause.ts)核对原 owner instance、Run 和操作回执，再委托原调度器。保护回执的未知只描述这个请求。 |
+| Host 调度 | [`ContinuousProgressLoopManager`](../../apps/host/src/continuous-progress-loop-manager.ts)持有原安排的时钟、操作和生命周期。编辑信号仅让未交接的当次定时检查让路，普通持续推进和驻留心跳沿各自规则处理。重复确认已完成的创建只涉及原 Host 保存。原创建的准备可以继续，以后发生的明确控制由同一安排保持。 |
+| Core 输入与 Provider | [`deliverContinuousProgress`](../../apps/host/src/continuous-progress-delivery.ts)完成交接前观察，[Host 的 Core 适配](../../apps/host/src/goal-runtime.ts)在实际调用 Core 时标记交接。[Core 输入 owner](../../packages/core/src/prompt-submission.ts)核对原 Session、Run、输入字节、到期项与 Provider 条件，持有原认领与回执。交接后的未知结果沿原输入键核对。 |
+
+操作发现与参数见 [`agent` 模块](../../packages/core/guides/modules/agent.md)和 [`schedule` 模块](../../packages/core/guides/modules/schedule.md)。
+Desktop 的 [Mote 快捷配置](../../apps/desktop/src/renderer/src/components/MoteQuickMode.tsx)和 [Mobile 配置控制器](../../apps/mobile/src/navigation/useMoteQuickDraft.ts)读取原恢复操作和控制阶段。查看准备状态保留原请求，用户明确继续时复用同一操作。调度控制和原输入投递分别核对回执。
+
 ## Connector publication
 
 ### 连接器的 Host 组合与设置路由

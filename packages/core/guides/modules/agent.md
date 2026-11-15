@@ -135,6 +135,13 @@ Resume restores ordinary progress and immediately checks that Agent; check requi
 active loop. Both evaluate eligibility rather than force a prompt. Read the returned
 loop outcome and decision; a completed check does not by itself confirm a new Agent turn.
 
+`agent automation pause` gives observed human input priority for the exact Session, Run
+and Host owner. It can pause ordinary progress. Saved arrangements remain enabled and yield
+the due input that has yet to reach Core. Standing Mote maintenance may defer its due time.
+The command grants no input authority. Read `agent automation inspect` with the same owner,
+Session, Run and operation after an unconfirmed response. Use the `schedule` module to
+pause, resume or cancel a saved arrangement.
+
 agent conversation checkpoint cuts current native and captured positions by default.
 Use --native-position beginning only when the consuming owner explicitly needs the original
 native source start. It returns a Provider-owned beginning cursor without reading or skipping

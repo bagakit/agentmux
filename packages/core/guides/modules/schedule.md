@@ -59,7 +59,19 @@ countdown processes the original occurrence. One confirmed input delivery ends a
 The original Host owns scheduling independently of Desktop windows. Its serving process and
 the target Runtime must remain available; sleep or offline delivery is not promised. Closing
 Desktop does not transfer that responsibility to a window or confirm delivery. Busy Agents,
-user input and permission waits keep the original occurrence pending.
+user input and permission waits can defer a due occurrence while the arrangement stays active.
+An input already handed to Core keeps its original input key and receipt. Use the schedule's
+own pause, resume or cancel command to change its lifecycle.
+
+After unconfirmed creation, inspect the original operation. Repeating its unchanged request
+can finish a still-preparing creation. A confirmed creation returns the current original
+schedule without rewriting the Core input intent. Later explicit pause and cancel operations
+remain effective when an earlier create completes or is retried.
+An updated interval keeps its original creation identity. For an older revised record whose
+creation parameters cannot be confirmed, inspect by the original `operationId`.
+An already confirmed pause, resume or cancel can return its current matching arrangement
+without rewriting the Core input intent. If the arrangement has since changed, inspect it
+before issuing a new control operation.
 
 Use schedule update --data <FILE|-> with {scheduleId,expectedRevision,operationId,everyMs}
 to change an original repeating interval. It preserves the current deadline and any claimed input,
