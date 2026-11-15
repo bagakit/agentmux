@@ -34,7 +34,7 @@ function original(defaults: MoteQuickDefaults = {}) {
     providerId: 'codex', workspacePath, everyMs: 1800000, intervalMs: 1000, prompt: 'Original frozen internal heartbeat', nextCheckAt: fixtureEpoch(2), status: 'paused',
     revision: 7, creationOperationId: 'original-arrangement-create', futureIntentId: 'original-future-intent' } }
   let pendingSave: ReturnType<typeof deferred<any>> | undefined
-  let loseResumeReceipt = false
+  let loseResumeReceipt = false, prepareResumeOnly = false
   const source = { resource: fileResource, result: { status: 'read' as const, document } }
   const fact = { spaceId: target.spaceId, content: { ...resource, zoneId: target.zoneId }, quickMode: { status: 'saved' as const, defaults: savedDefaults, version: 'original-version' }, conversation: main }
   const reads = () => ({ kind: 'quick', target, status: 'ready', source, defaults: savedDefaults, choices: { executors: [], conversations: [{ reference: main, label: '原主对话' }],
@@ -57,6 +57,11 @@ function original(defaults: MoteQuickDefaults = {}) {
       if (!stored || stored.phase !== 'sending' || stored.input.scheduleId !== maintenance.schedule?.loopId) throw Error('Original complete intent must be durable before its actual resume')
       const schedule = { ...maintenance.schedule!, status: 'active' as const, revision: input.expectedRevision + 1,
         lastMutation: { action: 'resume' as const, operationId: input.operationId, expectedRevision: input.expectedRevision } }
+      if (prepareResumeOnly) {
+        prepareResumeOnly = false
+        maintenance = { status: 'paused', issue: null, schedule: { ...schedule, status: 'paused', lastMutation: { ...schedule.lastMutation, phase: 'prepared' } } }
+        throw Error('The original resume is still preparing')
+      }
       maintenance = { status: 'active', schedule, issue: null }
       if (loseResumeReceipt) throw Error('Original resume receipt lost after apply')
       return { schedule, diskDurability: 'confirmed', executionScope: 'connected-host' }
@@ -74,6 +79,7 @@ function original(defaults: MoteQuickDefaults = {}) {
   }
   return { f, rpc, target, document, savedDefaults, open, render, maintenance(value: MotePresenceReading) { maintenance = value },
     holdSave() { pendingSave = deferred<any>(); return pendingSave }, loseResumeReceipt() { loseResumeReceipt = true },
+    prepareResumeOnly() { prepareResumeOnly = true },
     stopArrangement() { maintenance = { ...maintenance, status: 'paused', schedule: { ...maintenance.schedule!, status: 'stopped' } } } }
 }
 
@@ -165,6 +171,21 @@ it('inspects an unknown original resume without replay and keeps its read observ
   expect(originalResume.input).toEqual(packet); expect(originalResume.phase).toBe('observed')
   expect(originalResume.result).not.toHaveProperty('diskDurability')
   expect(f.f.submit).not.toHaveBeenCalled()
+})
+
+it('lets the person continue the exact prepared heartbeat resume after inspecting it', async () => {
+  const f = original(); f.prepareResumeOnly(); const view = await f.open()
+  await click(button(view.element, '恢复心跳安排'))
+  await wait(() => expect(getDeviceWorkface().snapshot().record.moteQuickDrafts?.[0]?.maintenanceAttempts?.[0]?.phase).toBe('unknown'))
+  const pending = getDeviceWorkface().snapshot().record.moteQuickDrafts![0]!.maintenanceAttempts![0]!
+  await click([...view.element.querySelectorAll('summary')].find(node => node.textContent?.startsWith('心跳恢复请求'))!)
+  await click(button(view.element, '核对这次恢复'))
+  expect(f.rpc.mock.calls.filter(([method]) => method === 'schedule.resume')).toHaveLength(1)
+  await wait(() => expect(button(view.element, '继续这次恢复')).toBeDefined())
+  await click(button(view.element, '继续这次恢复'))
+  await wait(() => expect(getDeviceWorkface().snapshot().record.moteQuickDrafts?.[0]?.maintenanceAttempts?.[0]?.phase).toBe('confirmed'))
+  const originalWrites = f.rpc.mock.calls.filter(([method]) => method === 'schedule.resume')
+  expect(originalWrites.map(([, params]) => params)).toEqual([pending.input, pending.input])
 })
 
 it('presents the actual stopped arrangement before the compatibility paused status without offering resume or creating a replacement', async () => {

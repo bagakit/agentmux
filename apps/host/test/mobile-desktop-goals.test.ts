@@ -34,9 +34,14 @@ it('the same original Goal and real continuation survive Desktop exit and Host r
   expect(participation).toMatchObject({ error: { code: 'CONTROL_UNAVAILABLE' } })
   expect((await desktop.call('goal.inspect', { goalId })).goal.participations).toEqual([])
   await until(() => invalidations, values => values.some(ids => ids.includes(goalId)), 'actual original Goal invalidation')
-  const arrangement = await desktop.call('schedule.create', { target, afterMs: 3_600_000, prompt: 'Original authorized future message.', operationId: 'original-future-message' })
+  const scheduleRequest = { target, everyMs: 3_600_000, prompt: 'Original authorized future message.', operationId: 'original-future-message' }
+  const originalArrangement = await desktop.call('schedule.create', scheduleRequest)
   await f.stopMain()
   const phone = await f.relay()
+  const arrangement = await phone.call('schedule.update', { scheduleId: originalArrangement.schedule.loopId,
+    expectedRevision: originalArrangement.schedule.revision!, everyMs: 7_200_000, operationId: 'update-original-interval' })
+  expect(await phone.call('schedule.create', scheduleRequest)).toEqual(arrangement)
+  await expect(phone.call('schedule.create', { ...scheduleRequest, everyMs: 7_200_000 })).rejects.toMatchObject({ code: 'SCHEDULE_OPERATION_CONFLICT' })
   const aligned = await phone.call('goal.update', { goalId, patch: { alignment: { summary: 'Preserve the authorized original work.', criteria: [{ id: 'original-criterion', text: 'Original Goal, Session and execution remain observable.' }], openQuestions: [] } }, operationId: 'original-goal-alignment' })
   expect(aligned.goal.alignment).toBeTruthy()
   await phone.call('goal.confirm', { goalId, expectedRevision: aligned.goal.alignment!.revision, operationId: 'original-goal-confirm' })

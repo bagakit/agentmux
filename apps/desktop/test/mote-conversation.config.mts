@@ -13,7 +13,7 @@ const mutations:Record<string,[string,string,string]>={
  'main-missing-receipt':['apps/desktop/src/main/runtime-controller.ts','if (!result.input) throw new AgentMuxError','if (false) throw new AgentMuxError'],
  'resource-host':['apps/desktop/src/main/mote-dialogue-ipc.ts','input.target.expectedResource.hostId',"'local'"],
  'host-guidance-owner':['apps/desktop/src/renderer/src/store.ts','(!(entry.moteMain && !original.input.inputContextCapture) && receipt.input.agentMuxNote !== entry.agentMuxNote)','receipt.input.agentMuxNote !== entry.agentMuxNote'],
- 'resume-unknown-replay':['apps/desktop/src/renderer/src/components/MoteQuickMode.tsx','const result = existing ? await api.schedule.inspect','const result = false ? await api.schedule.inspect'],
+ 'resume-unknown-replay':['apps/desktop/src/renderer/src/components/MoteQuickMode.tsx','const result = existing && !retryPrepared ? await api.schedule.inspect','const result = false ? await api.schedule.inspect'],
  'recovery-body':['apps/desktop/src/renderer/src/store.ts',"!matchesBrowserInputMessage(entry.browserInput, receipt.message) || receipt.message.userContent !== (entry.text.trim() ? entry.text : undefined) ||\n      receipt.input.submissionId !== entry.operationId || receipt.input.prompt !== entry.text ||","!matchesBrowserInputMessage(entry.browserInput, receipt.message) || receipt.input.submissionId !== entry.operationId ||"],
  'retained-reader':['packages/client-ui/src/lib/use-mote-dialogue.ts','if (!value) { value = createProjection','if (true) { value = createProjection']
 }

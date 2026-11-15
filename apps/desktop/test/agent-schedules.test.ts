@@ -213,6 +213,154 @@ describe('original schedule owner', () => {
     const duplicate = await h.manager.call('schedule.create', request, context)
     expect(duplicate.schedule.status).toBe('paused'); expect(calls.at(-1)!.active).toBe(false)
   })
+  it('keeps a confirmed schedule eligible when a duplicate create loses its Host save', async () => {
+    const dispatched = vi.fn(async () => 'sent' as const), coreIntent = vi.fn(async () => {})
+    const h = await owner(dispatched, coreIntent)
+    const request = { target, everyMs: 60_000, prompt: 'Retained message', operationId: 'original-create' }
+    const { schedule } = await h.manager.call('schedule.create', request)
+    const storeWrite = vi.spyOn(h.store, 'save').mockRejectedValueOnce(Error('Duplicate save unavailable'))
+    coreIntent.mockRejectedValue(Error('Core unavailable to a duplicate'))
+    await expect(h.manager.call('schedule.create', request)).rejects.toThrow('Duplicate save unavailable')
+    expect(coreIntent).toHaveBeenCalledOnce()
+    expect((await h.reload())[0]).toEqual(schedule)
+    expect((await h.manager.call('schedule.create', request)).schedule).toEqual(schedule)
+    expect(coreIntent).toHaveBeenCalledOnce()
+    storeWrite.mockRestore()
+    h.set({ now: schedule.nextCheckAt }); await h.manager.check(schedule.nextCheckAt)
+    expect(dispatched).toHaveBeenCalledOnce()
+  })
+  it('continues the durable original preparation after a Host restart before Core activation', async () => {
+    const coreIntent = vi.fn(async () => {}), h = await owner(undefined, coreIntent)
+    const request = { target, afterMs: 90_000, prompt: 'Original message', operationId: 'original-preparation' }
+    const save = h.store.save.bind(h.store)
+    vi.spyOn(h.store, 'save').mockImplementationOnce(async loops => {
+      await save(loops)
+      throw Error('Host exited after saving the preparation')
+    })
+    await expect(h.manager.call('schedule.create', request)).rejects.toThrow('exited after saving')
+    expect(coreIntent).not.toHaveBeenCalled()
+    const [prepared] = await h.reload()
+    expect(prepared).toMatchObject({ status: 'paused', pause: { reason: 'preparation' } })
+    expect(prepared?.lastOutcome).toBeUndefined()
+    await h.manager.stop()
+    const restarted = h.reopen()
+    const confirmed = await restarted.call('schedule.create', request)
+    expect(confirmed.schedule).toMatchObject({ status: 'active', loopId: prepared!.loopId, nextCheckAt: prepared!.nextCheckAt })
+    expect(coreIntent).toHaveBeenCalledOnce()
+    expect(await h.reload()).toEqual([confirmed.schedule])
+  })
+  it.each([false, true])('preserves a later explicit pause and interval edit after a late creation result (unknown=%s)', async unknown => {
+    const entered = deferred(), release = deferred()
+    let coreActive = false
+    const h = await owner(undefined, async (_loop, active) => {
+      if (active) { entered.resolve(); await release.promise }
+      coreActive = active
+      if (active && unknown) throw Error('Original Core activation response was lost')
+    })
+    const request = { target, everyMs: 60_000, prompt: 'Next', operationId: 'create-before-pause' }
+    const creation = h.manager.call('schedule.create', request).catch(error => error)
+    try {
+      await entered.promise
+      const [candidate] = h.manager.list()
+      const paused = await h.manager.call('schedule.pause', { scheduleId: candidate!.loopId, expectedRevision: 1, operationId: 'original-explicit-pause' })
+      const latest = await h.manager.call('schedule.update', { scheduleId: paused.schedule.loopId, expectedRevision: 2, everyMs: 120_000, operationId: 'original-interval-update' })
+      release.resolve()
+      const result = await creation
+      if (unknown) expect(result).toMatchObject({ message: 'Original Core activation response was lost' })
+      else expect(result).toEqual(latest)
+      expect(await h.reload()).toEqual([latest.schedule])
+      expect((await h.manager.call('schedule.create', request)).schedule).toEqual(latest.schedule)
+      expect(coreActive).toBe(false)
+    } finally { release.resolve(); await creation }
+  })
+  it('keeps a newer resume active when a late create has to settle an earlier pause', async () => {
+    const creating = deferred(), releaseCreate = deferred(), repairing = deferred(), releaseRepair = deferred()
+    let firstActivation = true, pauseWrites = 0, coreActive = false
+    const h = await owner(undefined, async (_loop, active) => {
+      if (active && firstActivation) { firstActivation = false; creating.resolve(); await releaseCreate.promise }
+      if (!active && ++pauseWrites === 2) { repairing.resolve(); await releaseRepair.promise }
+      coreActive = active
+    })
+    const creation = h.manager.call('schedule.create', { target, afterMs: 60_000, prompt: 'Original', operationId: 'create-before-controls' })
+    try {
+      await creating.promise
+      const scheduleId = h.manager.list()[0]!.loopId
+      await h.manager.call('schedule.pause', { scheduleId, expectedRevision: 1, operationId: 'original-pause' })
+      releaseCreate.resolve(); await repairing.promise
+      const resume = h.manager.call('schedule.resume', { scheduleId, expectedRevision: 2, operationId: 'original-resume' })
+      releaseRepair.resolve()
+      await creation
+      const result = await resume
+      expect(await h.reload()).toEqual([result.schedule])
+      expect(result.schedule).toMatchObject({ status: 'active', revision: 3 })
+      expect(coreActive).toBe(true)
+    } finally { releaseCreate.resolve(); releaseRepair.resolve(); await creation.catch(() => {}) }
+  })
+  it('keeps a newer resume active after an earlier failed creation rolls back its intent', async () => {
+    const entered = deferred(), release = deferred()
+    let phase = 'create', coreActive = false
+    const h = await owner(undefined, async (_loop, active) => {
+      if (phase === 'create' && active) { phase = 'rollback'; throw Error('Original activation unavailable') }
+      if (phase === 'rollback' && !active) { phase = 'resume'; entered.resolve(); await release.promise }
+      coreActive = active
+    })
+    const creation = h.manager.call('schedule.create', { target, afterMs: 60_000, prompt: 'Original', operationId: 'failing-create' }).catch(error => error)
+    try {
+      await entered.promise
+      const scheduleId = h.manager.list()[0]!.loopId
+      const resume = h.manager.call('schedule.resume', { scheduleId, expectedRevision: 1, operationId: 'later-resume' })
+      release.resolve()
+      expect(await creation).toMatchObject({ message: 'Original activation unavailable' })
+      expect((await resume).schedule).toMatchObject({ status: 'active', revision: 2 })
+      expect(coreActive).toBe(true)
+    } finally { release.resolve(); await creation }
+  })
+  it('validates the original timing request across a changed interval and JSON field order', async () => {
+    const h = await owner()
+    const request = { target, everyMs: 60_000, prompt: 'Original message', operationId: 'interval-create' }
+    const first = await h.manager.call('schedule.create', request)
+    const updated = await h.manager.call('schedule.update', { scheduleId: first.schedule.loopId, expectedRevision: 1, everyMs: 120_000, operationId: 'interval-update' })
+    const replay = await h.manager.call('schedule.create', request)
+    expect(replay.schedule).toEqual(updated.schedule)
+    expect(validateScheduleRpcResult('schedule.create', replay, request)).toEqual(replay)
+    await expect(h.manager.call('schedule.create', { ...request, everyMs: 120_000 })).rejects.toMatchObject({ code: 'SCHEDULE_OPERATION_CONFLICT' })
+    expect(() => validateScheduleRpcResult('schedule.create', replay, { ...request, everyMs: 120_000 })).toThrow()
+    const { weekday, ...rule } = rules('weekly', { weekday: 2 })
+    const calendarRequest = { target, calendar: { weekday, ...rule }, prompt: 'Calendar message', operationId: 'unordered-calendar' }
+    const calendarReceipt = await h.manager.call('schedule.create', calendarRequest)
+    expect(validateScheduleRpcResult('schedule.create', calendarReceipt, calendarRequest)).toEqual(calendarReceipt)
+  })
+  it('keeps an in-flight occurrence eligible when saving a new interval fails', async () => {
+    const entered = deferred(), release = deferred()
+    const h = await owner(async () => { entered.resolve(); await release.promise; return 'sent' })
+    const { schedule } = await h.manager.call('schedule.create', { target, everyMs: 60_000, prompt: 'Next', operationId: 'interval-source' })
+    h.set({ now: schedule.nextCheckAt })
+    const check = h.manager.check(schedule.nextCheckAt)
+    try {
+      await entered.promise
+      const input = h.manager.inspectLoop(schedule.loopId)!.lastInputRef
+      vi.spyOn(h.store, 'save').mockRejectedValueOnce(Error('Interval save unavailable'))
+      await expect(h.manager.call('schedule.update', { scheduleId: schedule.loopId, expectedRevision: 1, everyMs: 120_000, operationId: 'interval-edit' })).rejects.toThrow('Interval save unavailable')
+      expect(h.manager.inspectLoop(schedule.loopId)).toMatchObject({ status: 'active', lastInputRef: input })
+      release.resolve(); await check
+      expect(h.manager.inspectLoop(schedule.loopId)).toMatchObject({ status: 'active', lastOutcome: 'sent', lastInputRef: input })
+    } finally { release.resolve(); await check }
+  })
+  it.each(['pause', 'resume', 'cancel'] as const)('does not repeat an already confirmed %s across a Host restart', async action => {
+    const coreIntent = vi.fn(async () => {}), h = await owner(undefined, coreIntent)
+    const { schedule } = await h.manager.call('schedule.create', { target, afterMs: 60_000, prompt: 'Original message', operationId: 'original-create' })
+    const scheduleId = schedule.loopId
+    if (action === 'resume') await h.manager.call('schedule.pause', { scheduleId, expectedRevision: 1, operationId: 'original-pause' })
+    const request = { scheduleId, expectedRevision: action === 'resume' ? 2 : 1, operationId: 'original-control' }
+    const method = `schedule.${action}` as const
+    const result = await h.manager.call(method, request)
+    expect(result.schedule.lastMutation).toMatchObject({ phase: 'settled' })
+    await h.manager.stop()
+    const restarted = h.reopen()
+    coreIntent.mockClear().mockRejectedValue(Error('No extra Core write was needed'))
+    expect(await restarted.call(method, request)).toEqual(result)
+    expect(coreIntent).not.toHaveBeenCalled()
+  })
   it('rejects swapped identities, old interval records and counterfeit public receipts', async () => {
     const h = await owner(), params = { target, calendar: rules('daily'), prompt: 'next', operationId: 'create' }
     const receipt = await h.manager.call('schedule.create', params)
@@ -258,7 +406,10 @@ it.each(['pause','resume','cancel'] as const)('retries the original %s action af
   fail = true
   const request = { scheduleId: created.schedule.loopId, expectedRevision: revision, operationId: 'original-action' }
   await expect(h.manager.call(`schedule.${action}`, request)).rejects.toThrow('Core save unknown')
-  const retried = await h.manager.call(`schedule.${action}`, request)
+  await h.manager.stop()
+  const restarted = h.reopen()
+  const retried = await restarted.call(`schedule.${action}`, request)
+  expect(retried.schedule.lastOutcome).toBeUndefined()
   expect(attempts).toBe(2)
   expect(retried.schedule.status).toBe(action === 'resume' ? 'active' : action === 'pause' ? 'paused' : 'stopped')
   expect(retried.schedule.revision).toBe(revision + 1)
@@ -284,7 +435,7 @@ describe('ended schedule boundary', () => {
     await expect(h.manager.call('schedule.pause', { scheduleId: created.schedule.loopId, expectedRevision: 1, operationId: 'stale' })).rejects.toMatchObject({ code: 'SCHEDULE_REVISION_CONFLICT' })
     await expect(h.manager.call('schedule.resume', cancel)).rejects.toMatchObject({ code: 'SCHEDULE_OPERATION_CONFLICT' })
     const retried = await h.manager.call('schedule.cancel', cancel)
-    expect(retried).toEqual(ended); expect(saves).toEqual([true, false, false])
+    expect(retried).toEqual(ended); expect(saves).toEqual([true, false])
   })
 
   it.each(['pause', 'resume'] as const)('does not reapply an old %s operation after the exact schedule ended', async action => {

@@ -46,7 +46,9 @@ it('a later role cannot rewrite or retarget an existing original operation',()=>
 async function settings(defaults:MoteQuickDefaults={},status:'paused'|'disabled'|'unconfirmed'='paused',schedule:any=null){
  const topic=moteTopics[0]!,scope={topic,workspace:scratchWorkspace,rootPath:topic.directoryPath.slice(scratchWorkspace.path.length+1)}
  const source=(target:any)=>({resource:{...target.expectedResource,zoneId:target.zoneId,zonePath:topic.directoryPath,path:scope.rootPath+'/MOTE.md'},result:{status:'read' as const,document:{path:scope.rootPath+'/MOTE.md',content:'# Original settings',revision:'sha256:'+'b'.repeat(64)}}})
- vi.spyOn(api.motePreferences,'read').mockImplementation(async input=>({...input,status:'ready',source:source(input.target),defaults,choices:{executors:[],conversations:[],destinations:[]},main:true,issue:null,maintenance:{status,schedule,issue:status==='unconfirmed'?'原安排尚未确认':null}} as any))
+ vi.spyOn(api.motePreferences,'read').mockImplementation(async input=>({kind:'quick',target:input.target,status:'ready',source:source(input.target),defaults,
+   choices:input.includeChoices===false?null:{executors:input.includeChoices==='locations'?null:[],conversations:input.includeChoices==='executors'?null:[],destinations:input.includeChoices==='executors'?null:[]},
+   main:true,issue:null,maintenance:{status,schedule,issue:status==='unconfirmed'?'原安排尚未确认':null}} as any))
  const save=vi.spyOn(api.motePreferences,'save').mockImplementation(async(input:any)=>({kind:'quick',target:input.target,operationId:input.operationId,status:'saved',source:{resource:source(input.target).resource,document:source(input.target).result.document,defaults:effectiveMoteQuickSave(input)},message:null}))
  await app.mount(<MoteQuickModeDialog scope={scope} onOpenPath={async()=>{}} onClose={()=>{}} returnFocus={()=>null}/>);await vi.waitFor(()=>expect(document.querySelector<HTMLInputElement>('[aria-label="Heartbeat interval (minutes)"]')?.value).toBe(String((defaults.presence?.intervalMs??1800000)/60000)))
  return {save}
@@ -58,15 +60,20 @@ it('actual Desktop settings default to 30 minutes, save an edited interval and k
  expect(f.save.mock.calls[0]![0]).toMatchObject({values:{presence:{enabled:true,intervalMs:420000}}})
  expect(document.body.textContent).not.toContain('Last delivery confirmed'); await vi.waitFor(()=>expect(document.body.textContent).not.toContain('unconfirmed. Keep this request'))
 })
-it('the actual paused-heartbeat button freezes one original resume and only inspects an unknown reply',async()=>{
- const schedule={loopId:'original-paused-heartbeat',hostId:'execution-host',agentSessionId:defaultAgent.id,providerId:'fixture',workspacePath:scratchWorkspace.path,intervalMs:1800000,everyMs:1800000,prompt:'original heartbeat',nextCheckAt:1800000,status:'paused',revision:6}
- await settings({conversation:reference},'paused',schedule)
+it('the actual paused-heartbeat button inspects an unknown resume and can retry its prepared operation',async()=>{
+ const schedule={loopId:'original-paused-heartbeat',hostId:reference.hostId,agentSessionId:defaultAgent.id,providerId:'fixture',workspacePath:scratchWorkspace.path,intervalMs:1800000,everyMs:1800000,prompt:'original heartbeat',nextCheckAt:1800000,status:'paused',revision:6}
+ await settings({conversation:reference,presence:{enabled:true,intervalMs:1800000}},'paused',schedule)
  const resume=vi.spyOn(api.schedule,'resume').mockRejectedValue(new Error('原恢复回执丢失'))
- const inspect=vi.spyOn(api.schedule,'inspect').mockResolvedValue({schedule:{...schedule,status:'active'},executionScope:'connected-host'} as any)
+ const inspect=vi.spyOn(api.schedule,'inspect')
+ await vi.waitFor(()=>expect(button(document,'Resume saved heartbeat'),document.querySelector('.mote-quick-mode-dialog')?.textContent ?? '').toBeDefined())
  await moteClick(button(document,'Resume saved heartbeat'));await vi.waitFor(()=>expect(button(document,'Inspect original resume')).toBeDefined())
  const original=resume.mock.calls[0]![0];expect(original).toMatchObject({scheduleId:schedule.loopId,expectedRevision:6});expect(resume.mock.calls[0]![1]).toBe('local')
+ const mutation={operationId:original.operationId,action:'resume' as const,expectedRevision:original.expectedRevision}
+ inspect.mockResolvedValue({schedule:{...schedule,revision:7,lastMutation:{...mutation,phase:'prepared'}},executionScope:'connected-host'} as any)
  await moteClick(button(document,'Inspect original resume'));expect(resume).toHaveBeenCalledTimes(1);expect(inspect).toHaveBeenCalledExactlyOnceWith({operationId:original.operationId},'local')
- expect(document.body.textContent).toContain('Automatic heartbeat scheduled')
+ resume.mockResolvedValueOnce({schedule:{...schedule,status:'active',revision:7,lastMutation:{...mutation,phase:'settled'}},executionScope:'connected-host',diskDurability:'confirmed'} as any)
+ await moteClick(button(document,'Retry original resume'));expect(resume).toHaveBeenLastCalledWith(original,'local')
+ expect(document.querySelector('.mote-quick-mode-dialog')?.textContent).toContain('Heartbeat scheduled')
 })
 it('invalid interval cannot silently save the previous value and unknown maintenance keeps original healthy input',async()=>{
  const f=await settings({presence:{enabled:false,intervalMs:900000}},'unconfirmed')
