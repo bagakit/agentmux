@@ -15,7 +15,7 @@ node apps/desktop/scripts/capture-message-delivery-diagnostics.mjs
 
 ## 诊断摘要与完整资料（density）
 
-`--only=queued-editor` 从同一 WorkspaceWorkbench 的悬浮待发卡片打开编辑，在 640px 和 320px 分屏中分别采集明暗主题，核对编辑框通栏、底栏命中和原终端几何。长文在字段内滚动。真实复制、取消和保存经过现有 Renderer 与队列 owner。窄浅色另外复现保存冲突，检查原编辑稿、完整诊断及 Save 同时可达，再从邮箱的同一条 Inputs 记录打开共享编辑器，验证 Escape 取消后原队列不变。
+`--only=queued-editor` 从同一 WorkspaceWorkbench 的悬浮待发卡片打开编辑，在 640px 和 320px 分屏中分别采集明暗主题，核对编辑框通栏、底栏命中和原终端几何。窄面采集展开正文的状态，核对原字段、原选区及动作，插入更长正文验证字段内滚动，再用键盘收起并撤销原生输入。真实复制、取消和保存经过现有 Renderer 与队列 owner。窄浅色另外复现保存冲突，检查原编辑稿、字段关联的完整诊断及 Save 同时可达，再从邮箱的同一条 Inputs 记录打开共享编辑器，验证 Escape 取消后原队列不变。
 
 `--only=annotation-editor` 使用[原对话批注工作面](../conversation-annotation-note/entry.tsx)的 SessionPane、Core 阅读投影和产品样式，覆盖 640px／320px 明暗及窄面加草稿失败。选择原文第二处短语、打开批注并输入，核对共享底栏和发送主次。关闭重开后验证原稿，再调用真正的加入草稿入口。窄面检查实际输入的名称、说明与拒绝反馈，共享字段在拒绝后保留节点、焦点、选区及内容。Chromium 的组字开始和撤销在实际输入中执行，带组字标记的 Escape 单独检查。原文位于合成阅读页，私有适配器拒绝 Run 控制，不发送用户消息。
 

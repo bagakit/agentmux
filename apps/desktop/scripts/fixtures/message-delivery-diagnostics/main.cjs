@@ -35,6 +35,7 @@ async function queuedEditorScene(width, appearance) {
   const field = `${editor}.querySelector('textarea')`
   const save = `${editor}.querySelector('[aria-label="保存待发消息"]')`
   const copy = `${editor}.querySelector('.composer-pending__copy')`
+  const resize = `${editor}.querySelector('.composer-edit-footer button[aria-controls]')`
   const cancel = `[...${editor}.querySelectorAll('.composer-edit-footer button')].find(button=>button.textContent==='取消')`
   const long = width === 320
   const seed = await evaluate(`deliveryDiagnostics.seedQueuedEditor(${JSON.stringify(appearance)},${long})`)
@@ -49,7 +50,7 @@ async function queuedEditorScene(width, appearance) {
   const geometry = await evaluate(`(()=>{const c=${card},e=${editor},f=${field},s=${save};
     const rect=node=>node.getBoundingClientRect().toJSON()
     const ink=getComputedStyle(f)
-    const parts=[${copy},${cancel},s]
+    const parts=[${copy},${cancel},s,${resize}]
     return {card:rect(c),owner:rect(${surface}),field:rect(f),footer:rect(e.querySelector('.composer-edit-footer')),
       title:e.querySelector('label').textContent, focus:f===document.activeElement, scrolls:f.scrollHeight>f.clientHeight,
       fullButtons:parts.every(button=>{const r=rect(button);return button.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}),
@@ -76,6 +77,42 @@ async function queuedEditorScene(width, appearance) {
     await waitFor(`${field}.value===${JSON.stringify(text)}`)
   }
   const edited = '只更新这条待发消息。\n继续保留当前输入草稿。'
+  let expanded
+  if (long) {
+    await evaluate(`window.queuedEditorOriginalField=${field};${field}.setSelectionRange(2, 8, 'backward')`)
+    await click(resize)
+    await waitFor(`${resize}.getAttribute('aria-expanded')==='true'`)
+    await painted()
+    expanded = await evaluate(`(() => {
+      const f=${field},toggle=${resize},r=toggle.getBoundingClientRect(),save=${save}.getBoundingClientRect()
+      return { sameNode: f===queuedEditorOriginalField, value:f.value, selection:[f.selectionStart,f.selectionEnd,f.selectionDirection],
+        fieldHeight:f.getBoundingClientRect().height, scrolls:f.scrollHeight>f.clientHeight, terminal:${terminal}.getBoundingClientRect().toJSON(),
+        fieldFocused:document.activeElement===f, control:toggle.getAttribute('aria-controls')===f.id,
+        actionReachable:${save}.contains(document.elementFromPoint(save.x+save.width/2,save.y+save.height/2)) && toggle.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)) }
+    })()`)
+    assert.ok(expanded.fieldHeight > geometry.field.height, 'The expanded original queue textarea must give long drafts more room')
+    assert.ok(expanded.sameNode && expanded.control && expanded.actionReachable && expanded.fieldFocused, JSON.stringify(expanded))
+    assert.deepEqual(expanded.terminal, before.terminal)
+    assert.deepEqual(expanded.selection, [2, 8, 'backward'])
+    assert.equal(expanded.value, seed.entry.text)
+    await capture(width, `queued-editor-expanded-${appearance}`)
+  }
+  if (long) {
+    await insert(Array.from({ length: 24 }, (_, index) => `原正文第 ${index + 1} 行`).join('\n'))
+    assert.ok(await evaluate(`${field}.scrollHeight>${field}.clientHeight`), 'An expanded field still bounds and scrolls very long drafts')
+    await key('Tab', 'Tab', 9)
+    await key('Tab', 'Tab', 9)
+    assert.equal(await evaluate(`document.activeElement===${resize}`), true, 'The original size toggle remains reachable by keyboard')
+    await key(' ', 'Space', 32)
+    await waitFor(`${resize}.getAttribute('aria-expanded')==='false'`)
+    assert.equal(await evaluate(`document.activeElement===${resize}`), true, 'Keyboard activation keeps its original focus')
+    await evaluate(`${field}.focus({preventScroll:true})`)
+    for (const type of ['keyDown', 'keyUp']) await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type, key:'z', code:'KeyZ',
+      modifiers: process.platform === 'darwin' ? 4 : 2, windowsVirtualKeyCode:90, ...(type === 'keyDown' ? { commands:['undo'] } : {}) })
+    await waitFor(`${field}.value===${JSON.stringify(seed.entry.text)}`)
+    assert.equal(await evaluate(`${field}===queuedEditorOriginalField`), true, 'Closing the expanded view retains the native undo stack')
+    expanded.undoRestoredOriginal = true
+  }
   await insert(edited)
   await click(copy)
   await waitFor(`deliveryDiagnostics.facts().copies.at(-1)===${JSON.stringify(seed.entry.text)}`)
@@ -90,6 +127,8 @@ async function queuedEditorScene(width, appearance) {
     await click(save)
     await waitFor(`${editor}.querySelector('[role=alert]')`)
     assert.equal(await evaluate(`${field}.value`), edited, 'A stale save preserves the edited text')
+    assert.equal(await evaluate(`document.getElementById(${field}.getAttribute('aria-describedby'))===${editor}.querySelector('[role=alert]')`), true,
+      'The field describes the original save error')
     await painted()
     assert.ok(await evaluate(`(()=>{
       const list=${floating}.querySelector('.composer-pending__cards'), viewport=list.getBoundingClientRect()
@@ -130,7 +169,7 @@ async function queuedEditorScene(width, appearance) {
     await waitFor(`!${mailboxField}`)
     assert.deepEqual((await evaluate('deliveryDiagnostics.facts()')).queues, after.queues)
   }
-  result.events.push({ width, appearance, geometry, copyCancelSavePassed: true })
+  result.events.push({ width, appearance, geometry, expanded, copyCancelSavePassed: true })
 }
 
 async function annotationEditorScene(width, appearance) {
@@ -268,7 +307,7 @@ app.whenReady().then(async () => {
         await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width: width * 2 + 1, height: 820, deviceScaleFactor: 1, mobile: false })
         await queuedEditorScene(width, appearance)
       }
-      assert.equal(result.frames.length, 6)
+      assert.equal(result.frames.length, 8)
       result.passed = true
       return
     }
