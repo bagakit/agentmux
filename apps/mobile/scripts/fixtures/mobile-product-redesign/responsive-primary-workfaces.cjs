@@ -166,9 +166,11 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
   const conversationKey=await read(`mobileProductScene.facts().record.conversation.drafts.find(([,text])=>text===${JSON.stringify(conversationDraft)})[0]`)
   assert.ok(conversationKey)
   await read('window.responsiveComposer=document.querySelector(".mobile-conversation-panel [contenteditable=true]");window.responsiveReading=document.querySelector(".mobile-conversation__reading");true')
+  await capture('responsive-mote-workface-390')
   await resize(951, 585); await appearance('dark')
-  await until('document.querySelector(".mobile-focus-pane h1")?.textContent==="Focus"&&document.querySelectorAll(".mobile-focus-pane .mobile-agent-row__open").length===mobileProductScene.facts().sessionIds.length')
-  await split('Mote original Agent workface', '.mobile-focus-pane', '.mobile-primary-pane')
+  await until('document.querySelector(".mobile-mote-pane:not([hidden]) h1")?.textContent==="Mote"&&document.querySelectorAll(".mobile-mote-pane .mobile-mote-choice").length>0')
+  assert.equal(await read('document.querySelector(".mobile-focus-pane").hidden'), true)
+  await split('Mote original Agent workface', '.mobile-mote-pane', '.mobile-primary-pane')
   await capture('responsive-mote-workface-951-dark')
 
   await button('Goals', '.mobile-navigation'); await resize(812, 600)

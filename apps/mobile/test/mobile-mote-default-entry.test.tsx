@@ -166,14 +166,48 @@ it('keeps a saved Main reference navigable when Session metadata and its origina
 })
 
 it('does not let a delayed explicit Main lookup replace later navigation or an explicit member selection', async () => {
-  const f = await original(), pending = f.delayEntry()
+  const f = await original()
+  await openPrimary(f.view.element, 'Mote'); await wait(() => mainIsVisible(f)); await f.directory()
+  const priorEnsures = f.ensure.mock.calls.length, pending = f.delayEntry()
   await openPrimary(f.view.element, 'Mote'); await waitForElement(f.view.element, '.mobile-mote-agents')
   await click(f.view.element.querySelector<HTMLButtonElement>('.mobile-mote-agents .mobile-agent-row__open')!)
   await wait(() => expect(f.owner.snapshot().record.selectedSessionId).toBe(workerSid))
   await act(async () => pending.resolve({ catalog: f.facts }))
   expect(f.owner.snapshot().record.selectedSessionId).toBe(workerSid)
   expect(f.owner.snapshot().record.presentation?.moteView).toMatchObject({ section: 'threads', directAgent: true })
-  expect(f.ensure).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled()
+  expect(f.ensure).toHaveBeenCalledTimes(priorEnsures); expect(f.submit).not.toHaveBeenCalled()
+})
+
+it('retains the current page until the exact Mote resolves and shows the Mote directory alongside it on a wide display', async () => {
+  vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(1050)
+  vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(730)
+  const f = await original(), pending = f.delayEntry()
+  await openPrimary(f.view.element, 'Mote')
+  expect(f.view.element.querySelector('.mobile-app[data-focus-root]')).toBeTruthy()
+  expect(f.view.element.querySelector('.mobile-mote-directory')).toBeNull()
+  await act(async () => pending.resolve({ catalog: f.facts }))
+  await wait(() => mainIsVisible(f))
+  const sidebar = f.view.element.querySelector<HTMLElement>('.mobile-app > aside:not([hidden])')!
+  expect(sidebar.getAttribute('aria-label')).toBe('Mote 目录')
+  expect(sidebar.querySelector('[aria-label="查找 Mote"]')).toBeTruthy()
+  expect(sidebar.querySelectorAll('.mobile-mote-choice')).toHaveLength(2)
+  expect(sidebar.querySelector('.mobile-focus-facet')).toBeNull()
+  expect(f.submit).not.toHaveBeenCalled()
+})
+
+it('opens the original Mote directory with feedback when the exact Main lookup fails', async () => {
+  const f = await original(), pending = f.delayEntry()
+  await openPrimary(f.view.element, 'Mote')
+  expect(f.view.element.querySelector('.mobile-app[data-focus-root]')).toBeTruthy()
+  await act(async () => pending.reject(Error('Exact Main unavailable')))
+  await wait(() => {
+    expect(f.view.element.querySelector('.mobile-mote-pane[role="main"]')).toBeTruthy()
+    expect(f.view.element.querySelector('.mobile-mote-pane .mobile-mote-choice')).toBeTruthy()
+    expect(document.body.textContent).toContain('Exact Main unavailable')
+  })
+  expect(f.owner.snapshot().record.selectedSessionId).toBe('session-original')
+  expect(f.ensure).not.toHaveBeenCalled()
+  expect(f.submit).not.toHaveBeenCalled()
 })
 
 it('does not let the prior client or Runtime return take over a later primary workface', async () => {

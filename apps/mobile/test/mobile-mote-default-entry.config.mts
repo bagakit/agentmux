@@ -10,6 +10,8 @@ const root = resolve(import.meta.dirname, '../../..')
 const mobileRequire = createRequire(resolve(root, 'apps/mobile/package.json'))
 const runtime = `export const identityRuntimeSource = ${JSON.stringify((await bundleIdentityRuntime()).source)};\n`
 const mutations: Record<string, { before: string; after: string; target?: string }> = {
+  'intermediate-directory': { before: '    const showDirectory = (issue: string) => {', after: "    setHome('mote'); setSecondary(null); setShowSession(false)\n    const showDirectory = (issue: string) => {", target: 'retains the current page' },
+  'focus-in-mote': { before: 'const focusShown = focusRoot || sidebarShown && !moteConversation\n  const moteDirectoryShown = moteDirectoryRoot || sidebarShown && moteConversation', after: 'const focusShown = focusRoot || sidebarShown\n  const moteDirectoryShown = moteDirectoryRoot', target: 'retains the current page' },
   'bottom-entry': { before: "if (value === 'mote') { void enterMote(recentMoteSpaceId); return }", after: "if (value === 'mote') { setHome('mote'); setSecondary(null); setShowSession(false); return }" },
   'row-entry': { before: 'void enterMote(id)', after: 'setRecentMoteSpaceId(id)' },
   'late-entry': { before: 'if (!isCurrent()) return\n      const owner = mobileMoteOwner', after: 'if (false) return\n      const owner = mobileMoteOwner' },
