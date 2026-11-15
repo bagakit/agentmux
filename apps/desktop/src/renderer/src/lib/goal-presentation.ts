@@ -83,7 +83,14 @@ export function goalNextStepFact(demand: GoalNextStepInput, retainedInput?: unkn
       return { stage: retainedStart.phase === 'not-attempted' ? 'attention' : 'unknown',
         text: retainedStart.phase === 'not-attempted' ? 'Original task retained · Not submitted' : 'Original task input unconfirmed',
         source: { kind: 'start', operationId: retainedStart.operationId, ...(retainedStart.agentReference ? { agentReference: retainedStart.agentReference } : { agentSessionId: retainedStart.sessionId }) } }
-    const patrol = demand.patrols?.findLast(item => item.purpose === undefined)
+    const patrols = demand.patrols ?? []
+    let patrol: (typeof patrols)[number] | undefined
+    for (let index = patrols.length - 1; index >= 0; index--) {
+      const candidate = patrols[index]!
+      if (candidate.purpose !== undefined) continue
+      patrol = candidate
+      break
+    }
     const observed = patrol && demand.patrolObservations?.find(item => item.operationId === patrol.operationId)
     if (patrol && !patrol.report && observed && observed.state !== 'stale' && observed.state !== 'reported' && observed.state !== 'planned') {
       const text = { unknown: 'Original inspection input unconfirmed', missing: 'Inspection saved · Not delivered',
