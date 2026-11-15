@@ -84,7 +84,7 @@ export function gitFailureError(
 }
 
 /**
- * Parse `git status --porcelain=v1 -z --branch --untracked-files=all` output.
+ * Parse NUL-delimited `git status --porcelain=v1 --branch` output.
  *
  * `-z` is the whole point: entries are separated by NUL, which disables git's C-quoting, so a path
  * with a space, a quote, a newline, or CJK bytes arrives verbatim between two NULs — no unescaping,
@@ -1029,9 +1029,10 @@ export class GitRepository {
     // Run at the working-tree root so porcelain's root-relative paths and the root-relative pathspec
     // used by `stage` describe the same file. `--untracked-files=all` lists new files individually
     // rather than collapsing a new directory into one entry the user cannot stage piecemeal.
+    // Changes only needs the branch name. `aheadBehind` measures the effective upstream separately.
     const result = await host.run(
       'git',
-      ['-C', repoPath, 'status', '--porcelain=v1', '-z', '--branch', '--untracked-files=all'],
+      ['-C', repoPath, 'status', '--porcelain=v1', '-z', '--branch', '--no-ahead-behind', '--untracked-files=all'],
       GIT_RUN_OPTIONS
     )
     this.assertGit(result, 'Could not read Git status')
