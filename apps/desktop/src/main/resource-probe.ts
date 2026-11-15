@@ -477,7 +477,15 @@ async function closeProbeFile(window: BrowserWindow, runtime: RuntimeController,
   })
 }
 
-async function stopProbeTerminal(description: string, runtime: RuntimeController, control: SessionControl): Promise<void> {
+async function stopProbeTerminalTab(description: string, window: BrowserWindow, runtime: RuntimeController,
+  workspaceId: string, terminal: SessionSnapshot): Promise<void> {
+  const workspace = workspaceSlotSelector(workspaceId)
+  const sessionSelector = `${workspace} .workbench-tab[${DESKTOP_SESSION_ATTRIBUTE}=${JSON.stringify(terminal.id)}]`
+  const tabId = await window.webContents.executeJavaScript(
+    `document.querySelector(${JSON.stringify(sessionSelector)})?.getAttribute('data-workbench-tab-id')`
+  ) as unknown
+  if (typeof tabId !== 'string' || !tabId) throw new Error(`${description} original Terminal Tab was not found.`)
+  const control = terminal.control
   const receipt = await runtime.stopSession(control)
   if (control.kind !== 'terminal' || !receipt || !('action' in receipt) || receipt.action !== 'terminal-stop' ||
       receipt.target.run.runId !== control.runId || receipt.target.hostId !== control.hostId || receipt.phase !== 'settled' ||
@@ -486,6 +494,10 @@ async function stopProbeTerminal(description: string, runtime: RuntimeController
       receipt.acknowledgement.runId !== control.runId) {
     throw new Error(`${description} did not confirm the original Native Terminal Stop.`)
   }
+  const tabSelector = `${workspace} [data-workbench-tab-id=${JSON.stringify(tabId)}]`
+  await waitFor(`${description} original Terminal Tab removal`, async () => !await rendererBoolean(
+    window, `document.querySelector(${JSON.stringify(tabSelector)})`
+  ))
 }
 
 function ownersEqual(left: ResourceOwners, right: ResourceOwners): boolean {
@@ -513,12 +525,25 @@ function runningTerminal(sessions: readonly SessionSnapshot[], sessionId: string
   )) ?? null
 }
 
+function sameTerminalRun(current: SessionSnapshot, expected: SessionSnapshot): boolean {
+  return current.control.kind === 'terminal' && expected.control.kind === 'terminal' &&
+    current.control.hostId === expected.control.hostId && current.control.runId === expected.control.runId
+}
+
 const claimTerminalSelector = desktopActionSelector('claimReusableTerminal')
 const readyTerminalSelector = `${claimTerminalSelector}[${DESKTOP_SESSION_ATTRIBUTE}]`
 const openBrowserSelector = desktopActionSelector('openBrowser')
 
 function workspaceSlotSelector(workspaceId: string): string {
   return `.workspace-workbench-slot[data-workspace-id=${JSON.stringify(workspaceId)}]`
+}
+
+async function openProbeLauncher(window: BrowserWindow, workspaceId: string): Promise<void> {
+  const selector = `${workspaceSlotSelector(workspaceId)}[data-visible="true"] button[aria-label="New Tab"]`
+  const source = `[...document.querySelectorAll(${JSON.stringify(selector)})].find(button => ` +
+    `!button.disabled && button.getClientRects().length > 0 && !button.closest('[hidden], [inert]'))`
+  await waitFor('visible Workspace New Tab control', () => rendererBoolean(window, source))
+  await click(window, source)
 }
 
 async function launcherTerminalSessionId(window: BrowserWindow, workspaceId?: string): Promise<string | null> {
@@ -547,7 +572,7 @@ async function waitForReadyLauncherTerminal(options: {
   config: AppConfig
   workspaceId?: string
   usedSessionIds?: ReadonlySet<string>
-  expectedSessionId?: string
+  expectedTerminal?: SessionSnapshot
   expectedOwners?: ResourceOwners
   ownerPredicate?: (owners: ResourceOwners) => boolean
 }): Promise<SessionSnapshot> {
@@ -560,11 +585,11 @@ async function waitForReadyLauncherTerminal(options: {
     if (
       !sessionId ||
       options.usedSessionIds?.has(sessionId) ||
-      (options.expectedSessionId && sessionId !== options.expectedSessionId)
+      (options.expectedTerminal && sessionId !== options.expectedTerminal.id)
     ) return false
     const current = runningTerminal((await options.runtime.snapshot(options.config)).sessions, sessionId)
     running = current !== null
-    if (!current) return false
+    if (!current || (options.expectedTerminal && !sameTerminalRun(current, options.expectedTerminal))) return false
     const owners = observedOwners = await ownerCounts(options.window, options.runtime)
     if (options.expectedOwners
       ? !ownersEqual(owners, options.expectedOwners)
@@ -575,8 +600,9 @@ async function waitForReadyLauncherTerminal(options: {
     }
     ready = current
     return true
-  }).catch(error => {
+  }).catch(async error => {
     traceResourceProbe(`${options.description}: ${JSON.stringify({ sessionId, running, owners: observedOwners })}`)
+    if (RESOURCE_PROBE_DEBUG) traceResourceProbe(await rendererProbeSummary(options.window))
     throw error
   })
   if (!ready) throw new Error(`Desktop resource probe lost ${options.description}.`)
@@ -592,13 +618,23 @@ async function claimLauncherTerminal(
   workspaceId?: string
 ): Promise<void> {
   await click(window, desktopActionSource(claimTerminalSelector, terminal.id, workspaceId))
-  await waitFor(description, async () => (
-    await launcherTerminalSessionId(window, workspaceId) !== terminal.id &&
-    await rendererBoolean(window, workspaceId
+  let remainingLauncher: string | null = null
+  let openedTerminal = false
+  let observedOwners: ResourceOwners | null = null
+  await waitFor(description, async () => {
+    remainingLauncher = await launcherTerminalSessionId(window, workspaceId)
+    if (remainingLauncher === terminal.id) return false
+    openedTerminal = await rendererBoolean(window, workspaceId
       ? `document.querySelector(${JSON.stringify(`${workspaceSlotSelector(workspaceId)} .terminal-view .xterm`)})`
-      : "document.querySelector('.terminal-view .xterm')") &&
-    ownersEqual(await ownerCounts(window, runtime), expectedOwners)
-  ))
+      : "document.querySelector('.terminal-view .xterm')")
+    if (!openedTerminal) return false
+    observedOwners = await ownerCounts(window, runtime)
+    return ownersEqual(observedOwners, expectedOwners)
+  }).catch(async error => {
+    traceResourceProbe(`${description}: ${JSON.stringify({ remainingLauncher, openedTerminal, observedOwners, expectedOwners })}`)
+    if (RESOURCE_PROBE_DEBUG) traceResourceProbe(await rendererProbeSummary(window))
+    throw error
+  })
 }
 
 export async function selectWorkspace(window: BrowserWindow, workspaceId: string): Promise<void> {
@@ -781,8 +817,7 @@ export async function runDesktopResourceProbe(options: {
       workspaceC.id
     )
     const workspaceCPrimary = workspaceCLauncher
-    const workspaceCPrimaryControl = workspaceCLauncher.control
-    await click(options.window, `document.querySelector(${JSON.stringify(`${workspaceSlotSelector(workspaceC.id)} button[title="New tab"]`)})`)
+    await openProbeLauncher(options.window, workspaceC.id)
     workspaceCLauncher = await waitForReadyLauncherTerminal({
       description: 'second ready launcher Tab in Workspace C',
       window: options.window,
@@ -834,15 +869,9 @@ export async function runDesktopResourceProbe(options: {
       multipleHiddenWorkspaceOwners,
       workspaceC.id
     )
-    // Leave the measurement Terminal as the sole Region in C's group. Stopping a Session
-    // removes its projection from the canonical Store; with another C Tab present there would
-    // be no launcher to measure in the release cycles.
-    await stopProbeTerminal('hidden Workspace C Terminal', options.runtime, workspaceCPrimaryControl)
-    activeTerminalControls.delete(workspaceCPrimaryControl)
-    await waitFor('hidden Workspace C terminal projection removal', async () => !await rendererBoolean(
-      options.window,
-      `document.querySelector(${JSON.stringify(`${workspaceSlotSelector(workspaceC.id)} [${DESKTOP_SESSION_ATTRIBUTE}=${JSON.stringify(workspaceCPrimary.id)}]`)})`
-    ))
+    // Leave the measurement Terminal as the sole Region in C's group for the release cycles.
+    await stopProbeTerminalTab('hidden Workspace C Terminal', options.window, options.runtime, workspaceC.id, workspaceCPrimary)
+    activeTerminalControls.delete(workspaceCPrimary.control)
     launcherTerminal = workspaceCLauncher
     const terminalBaselineOwners = await ownerCounts(options.window, options.runtime)
     const terminalBaseline = await sample('terminal-baseline', options.window, options.runtime, config, identity)
@@ -874,9 +903,10 @@ export async function runDesktopResourceProbe(options: {
       ...terminalBaselineOwners, monacoState: 'observed', monacoEditors: 0, monacoModels: 0
     }
     await closeProbeFile(options.window, options.runtime, workspaceC.id, filePath, firstFile, releaseBaselineOwners, 'initial')
-    await stopProbeTerminal('first claimed Terminal', options.runtime, terminalControl)
+    await stopProbeTerminalTab('first claimed Terminal', options.window, options.runtime, workspaceC.id, launcherTerminal)
     activeTerminalControls.delete(terminalControl)
     terminalControl = null
+    await openProbeLauncher(options.window, workspaceC.id)
     launcherTerminal = await waitForReadyLauncherTerminal({
       description: 'fresh reusable Terminal after first release',
       window: options.window,
@@ -908,9 +938,10 @@ export async function runDesktopResourceProbe(options: {
       traceResourceProbe(`cycle ${cycle} after resource file click ${await rendererProbeSummary(options.window)}`)
       await waitForProbeEditor(options.window, options.runtime, file, releaseBaselineOwners, `cycle ${cycle}`)
       await closeProbeFile(options.window, options.runtime, workspaceC.id, filePath, file, releaseBaselineOwners, `cycle ${cycle}`)
-      await stopProbeTerminal(`cycle ${cycle} claimed Terminal`, options.runtime, terminalControl)
+      await stopProbeTerminalTab(`cycle ${cycle} claimed Terminal`, options.window, options.runtime, workspaceC.id, current)
       activeTerminalControls.delete(terminalControl)
       terminalControl = null
+      await openProbeLauncher(options.window, workspaceC.id)
       launcherTerminal = await waitForReadyLauncherTerminal({
         description: `cycle ${cycle} fresh reusable Terminal after release`,
         window: options.window,
@@ -939,20 +970,22 @@ export async function runDesktopResourceProbe(options: {
     if (!ownersEqual(browser.owners, browserOwners)) {
       throw new Error(`Desktop Browser did not release reusable Terminal view owners: ${JSON.stringify(browser.owners)}`)
     }
-    if (!runningTerminal((await options.runtime.snapshot(config)).sessions, browserWarmTerminal.id)) {
+    const retainedBrowserTerminal = runningTerminal((await options.runtime.snapshot(config)).sessions, browserWarmTerminal.id)
+    if (!retainedBrowserTerminal || !sameTerminalRun(retainedBrowserTerminal, browserWarmTerminal)) {
       throw new Error('Desktop Browser did not retain the reusable Terminal backend.')
     }
     await click(options.window, `document.querySelector(${JSON.stringify(`${workspaceSlotSelector(workspaceC.id)} [aria-label="Close New Tab"]`)})`)
     await waitFor('Browser WebContents release', async () => (
       (await ownerCounts(options.window, options.runtime)).browserWebContents === browserOwnerBefore
     ))
+    await openProbeLauncher(options.window, workspaceC.id)
     launcherTerminal = await waitForReadyLauncherTerminal({
       description: 'same reusable Terminal after Browser release',
       window: options.window,
       runtime: options.runtime,
       config,
       workspaceId: workspaceC.id,
-      expectedSessionId: browserWarmTerminal.id,
+      expectedTerminal: browserWarmTerminal,
       expectedOwners: releaseBaselineOwners
     })
     const browserReleased = await sample('browser-released', options.window, options.runtime, config, identity)
