@@ -1,3 +1,4 @@
+import { goalTicketSigner, type GoalTicketSigner } from '@agentmux/demand/goal-ticket-crypto'
 import { mintObjectId } from './object-id.js'
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign, verify, type KeyObject } from 'node:crypto'
 import { link, lstat, mkdir, open, readFile, readdir, unlink } from 'node:fs/promises'
@@ -209,6 +210,11 @@ export class AgentMuxCreationAuthority {
     } catch (error) { return failure('The original Agent creation identity cannot be verified. Its file was retained; restore that identity before creating a new attestation.', 'AGENT_CREATION_AUTHORITY_INVALID', error) }
   }
   async identity(): Promise<AgentMuxCreationAuthorityIdentity> { return (await this.loadIdentity()).identity }
+  async prepareGoalTicketSigner(owner: { runtimeId: string; namespace: string }): Promise<GoalTicketSigner> {
+    const { identity, privateKey } = await this.loadIdentity()
+    if (identity.runtimeId !== owner.runtimeId) return failure('The requested Goal namespace belongs to another Runtime.', 'GOAL_TICKET_OWNER_MISMATCH')
+    return goalTicketSigner(owner, identity.publicKey, identity.fingerprint, privateKey)
+  }
   /** Private composition locations; no source bytes or signing grants cross RPC. */
   recoveryPaths(): readonly string[] { return [this.identityPath, this.identityPath + '.original', this.trustDirectory, this.messageTrustDirectory] }
   /** One exact routed call purpose, independent from creation/message trust. */

@@ -22,7 +22,7 @@ import type { GoalPatrolOwner } from './goal-patrol-owner.js'
 import type { GoalResponsibilityOwner } from './goal-responsibility-owner.js'
 
 export type GoalDelegationCoreMethod = Extract<AgentMuxRpcMethod,
-  'message.read' | 'agent.send' | 'message.dispatch.open' | 'message.dispatch.read' | 'message.dispatch.report' | 'message.dispatch.sync'>
+  'message.read' | 'agent.send' | 'message.dispatch.open' | 'message.dispatch.read' | 'message.dispatch.report' | 'message.dispatch.sync' | 'runtime.owner.identity'>
 export interface GoalDelegationCorePort {
   call<M extends GoalDelegationCoreMethod>(hostId: string, method: M, params: AgentMuxRpcParams<M>, context: AgentMuxRpcCallContext): Promise<AgentMuxRpcResult<M>>
   readDispatch?(hostId: string, sourceMessageId: string): Promise<AgentMuxRpcResult<'message.dispatch.read'>>
@@ -177,7 +177,14 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
             authority.runId !== intent.ownerRunId) throw new AgentMuxError(
           'The original delegation Session or Run changed before preparation. Inspect the same Goal and keep the original Agent and input.', 'CONTROL_REQUEST_CONFLICT')
       }
-      await this.demands.prepareDelegation(input.goalId, intent, authority.actor.id)
+      let participants: { ownerRuntimeId: string; workerRuntimeId: string } | undefined
+      if (intent.planNodeId && !original && authority.runtimeId) {
+        const workerHost = delegationWorkerHostId(intent)
+        const workerRuntimeId = workerHost === intent.hostId ? authority.runtimeId
+          : existingSource?.provenance?.target.runtimeId ?? (await this.requireCore().call(workerHost, 'runtime.owner.identity', {}, context)).owner.runtimeId
+        participants = { ownerRuntimeId: authority.runtimeId, workerRuntimeId }
+      }
+      await this.demands.prepareDelegation(input.goalId, intent, authority.actor.id, participants)
       if (method === 'goal.delegate' || method === 'goal.delegation.bind') {
         const saved = (await this.demands.inspectDelegation(input.goalId, intent.operationId))!
         const core = this.requireCore()

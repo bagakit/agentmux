@@ -61,7 +61,8 @@ export function createHostGoals(options: {
   subscribeInputOccupation?: Parameters<typeof createGoalRuntime>[0]['subscribeInputOccupation']
 }) {
   const root = dirname(options.configurationPath)
-  const demands = openDemandStore({ root: join(root, 'demands') })
+  const demands = openDemandStore({ root: join(root, 'demands'),
+    goalTicketSigner: async () => options.runtime().client.prepareGoalTicketSigner(await planOwner()) })
   const planOwner = async () => {
     const runtimeId = options.runtime().ownerIdentity().runtimeId
     if (!runtimeId) throw new AgentMuxError('The original semantic Runtime identity is unavailable.', 'CONTROL_UNAVAILABLE')

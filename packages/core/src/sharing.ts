@@ -3,7 +3,7 @@ export { parseSpaceLinkResult } from './space-link.js'
 import { AMUX_PROTOCOL_DEFINITIONS } from './amux-protocol-definition.js'
 import { nodeAlias } from './node-publishing.js'
 import { deriveObjectId } from '@agentmux/identity'
-import { isGoalPlanIdentity } from '@agentmux/demand/goal-plan'
+import { isGoalTicketHash } from '@agentmux/demand/goal-plan'
 
 /** Plain-text sharing. Identity fields describe objects; they never authenticate a sender. */
 export type AmuxSharingKind = 'File' | 'Browser'
@@ -89,7 +89,7 @@ export function parseGoalAddress(value: unknown, goalId: string): AmuxGoalAddres
 export function formatAmuxObjectLink(target: AmuxObjectLinkTarget): string {
   if (target.kind === 'mote' && target.address) return formatSpaceLink(target.address)
   if (target.kind === 'goal') {
-    if (typeof target.goalId !== 'string' || !target.goalId || target.nodeId !== undefined && !isGoalPlanIdentity(target.nodeId) ||
+    if (typeof target.goalId !== 'string' || !target.goalId || target.nodeId !== undefined && !isGoalTicketHash(target.nodeId) ||
         target.section !== undefined && (target.section !== 'plan' || target.nodeId !== undefined))
       throw new TypeError('An exact Goal and a valid reading target are required.')
     const root = `${AMUX_PROTOCOL_DEFINITIONS.link.tag}goal/${encodeURIComponent(target.goalId)}`

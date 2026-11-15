@@ -1,3 +1,4 @@
+import { isGoalTicketHash, parseGoalTicketProof, type GoalTicketProof } from './goal-ticket-proof.js'
 import { optionalDemandInputEpoch } from './collaboration.js'
 import { parseGroundingProposal, type DemandCriterion, type DemandGroundingProposal } from './goals.js'
 
@@ -39,13 +40,13 @@ export type DemandDelegationReportInput = {
   grounding: DemandGroundingProposal
 }
 export type GoalDeliveryScope = { ownerRuntimeId: string; namespace: string; authorRuntimeId: string }
-export type GoalDeliveryReceipt = { schema: 'agentmux.ticket-delivery.v1'; hash: string; authorRuntimeId: string }
+export type GoalDeliveryReceipt = { schema: 'agentmux.ticket-delivery.v2'; hash: string; authorRuntimeId: string }
 export function isGoalDeliveryHash(value: unknown): value is string {
   return typeof value === 'string' && /^[a-f0-9]{64}$/u.test(value)
 }
 function parseGoalDeliveryReceipt(value: unknown): GoalDeliveryReceipt {
   const data = record(value, 'Ticket delivery receipt', ['schema', 'hash', 'authorRuntimeId'])
-  if (data.schema !== 'agentmux.ticket-delivery.v1' || !isGoalDeliveryHash(data.hash)) throw new Error('Invalid Ticket delivery receipt')
+  if (data.schema !== 'agentmux.ticket-delivery.v2' || !isGoalDeliveryHash(data.hash)) throw new Error('Invalid Ticket delivery receipt')
   return { schema: data.schema, hash: data.hash, authorRuntimeId: identity(data.authorRuntimeId, 'Delivery author Runtime') }
 }
 export type DemandDelegationReport = DemandDelegationReportInput & {
@@ -81,24 +82,30 @@ export function parseDemandDelegationRuntimeIdentity(value: unknown): DemandDele
   return { ownerRuntimeId: identity(data.ownerRuntimeId, 'runtimeIdentity.ownerRuntimeId'), workerRuntimeId: identity(data.workerRuntimeId, 'runtimeIdentity.workerRuntimeId') }
 }
 /** Direct links to the exact passing inputs of this attempt. */
-export type GoalPlanPredecessor = { nodeId: string; delegationOperationId: string; reportOperationId: string; reviewOperationId: string; deliveryHash?: string }
+export type GoalPlanPredecessor = { nodeId: string; delegationOperationId: string; reportOperationId: string; reviewOperationId: string; deliveryHash?: string; completionHash?: string }
 
 export function sameGoalPlanPredecessors(expected: readonly GoalPlanPredecessor[], actual: readonly GoalPlanPredecessor[] | null | undefined): boolean {
   if (!actual || expected.length !== actual.length) return false
   return expected.every((ref, index) => {
     const other = actual[index]!
     return ref.nodeId === other.nodeId && ref.delegationOperationId === other.delegationOperationId &&
-      ref.reportOperationId === other.reportOperationId && ref.reviewOperationId === other.reviewOperationId && ref.deliveryHash === other.deliveryHash
+      ref.reportOperationId === other.reportOperationId && ref.reviewOperationId === other.reviewOperationId && ref.deliveryHash === other.deliveryHash && ref.completionHash === other.completionHash
   })
+}
+
+function ticketHash(value: unknown): string {
+  if (!isGoalTicketHash(value)) throw new Error('Invalid predecessor completion proof hash')
+  return value
 }
 
 export function parseGoalPlanPredecessors(value: unknown): GoalPlanPredecessor[] {
   if (!Array.isArray(value)) throw new Error('Goal plan predecessors must be an array')
   const refs = value.map(entry => {
-    const item = record(entry, 'Goal plan predecessor', ['nodeId', 'delegationOperationId', 'reportOperationId', 'reviewOperationId', 'deliveryHash'], ['deliveryHash'])
+    const item = record(entry, 'Goal plan predecessor', ['nodeId', 'delegationOperationId', 'reportOperationId', 'reviewOperationId', 'deliveryHash', 'completionHash'], ['deliveryHash', 'completionHash'])
     if (item.deliveryHash !== undefined && !isGoalDeliveryHash(item.deliveryHash)) throw new Error('Invalid predecessor delivery hash')
     return {
       ...(typeof item.deliveryHash === 'string' ? { deliveryHash: item.deliveryHash } : {}),
+      ...(item.completionHash === undefined ? {} : { completionHash: ticketHash(item.completionHash) }),
       nodeId: identity(item.nodeId, 'predecessor node'),
       delegationOperationId: identity(item.delegationOperationId, 'predecessor delegation'),
       reportOperationId: identity(item.reportOperationId, 'predecessor report'),
@@ -112,6 +119,7 @@ export function parseGoalPlanPredecessors(value: unknown): GoalPlanPredecessor[]
 export type DemandDelegation = DemandDelegationIntent & {
   predecessors?: GoalPlanPredecessor[]
   claimOperationId?: string
+  dispatchProof?: GoalTicketProof
   preparedAt: number
   /** Owner-captured standards retain the meaning of late, old-version reports. */
   capturedCriteria: DemandCriterion[]
@@ -201,7 +209,7 @@ export function sameDemandDelegationIntent(left: DemandDelegationIntent, right: 
     .every(key => JSON.stringify(left[key as keyof DemandDelegationIntent]) === JSON.stringify(right[key as keyof DemandDelegationIntent]))
 }
 export function parseDemandDelegation(value: unknown): DemandDelegation {
-  const data = record(value, 'delegation', [...intentKeys, 'preparedAt', 'capturedCriteria', 'linkedAt', 'runtimeIdentity', 'report', 'collection', 'attention', 'predecessors', 'claimOperationId'], ['context', 'requestText', 'planNodeId', 'workerHostId', 'linkedAt', 'runtimeIdentity', 'report', 'collection', 'attention', 'predecessors', 'claimOperationId'])
+  const data = record(value, 'delegation', [...intentKeys, 'preparedAt', 'capturedCriteria', 'linkedAt', 'runtimeIdentity', 'report', 'collection', 'attention', 'predecessors', 'claimOperationId', 'dispatchProof'], ['context', 'requestText', 'planNodeId', 'workerHostId', 'linkedAt', 'runtimeIdentity', 'report', 'collection', 'attention', 'predecessors', 'claimOperationId', 'dispatchProof'])
   const intent = parseDemandDelegationIntent(Object.fromEntries(intentKeys.filter(key => data[key] !== undefined).map(key => [key, data[key]])))
   if (!Array.isArray(data.capturedCriteria)) throw new Error('delegation.capturedCriteria must be an array')
   const capturedCriteria = data.capturedCriteria.map(value => {
@@ -240,8 +248,12 @@ export function parseDemandDelegation(value: unknown): DemandDelegation {
       ...(item.attemptedAt === undefined ? {} : { attemptedAt: positive(item.attemptedAt, 'attention.attemptedAt') }) }
     if (attention.hostId !== intent.hostId || data.linkedAt === undefined) throw new Error('delegation attention lacks its original linked Host')
   }
+  const dispatchProof = data.dispatchProof === undefined ? undefined : parseGoalTicketProof(data.dispatchProof)
+  if (dispatchProof && (dispatchProof.record.kind !== 'dispatch' || dispatchProof.record.ticketId !== intent.planNodeId ||
+      dispatchProof.record.operationId !== intent.operationId || data.claimOperationId !== undefined))
+    throw new Error('Goal Ticket dispatch proof belongs to another execution')
   if ((data.predecessors !== undefined || data.claimOperationId !== undefined) && !intent.planNodeId) throw new Error('Goal plan predecessors require an original node')
-  return { ...intent, capturedCriteria, preparedAt: positive(data.preparedAt, 'delegation.preparedAt'),
+  return { ...intent, capturedCriteria, ...(dispatchProof ? { dispatchProof } : {}), preparedAt: positive(data.preparedAt, 'delegation.preparedAt'),
     ...(data.predecessors === undefined ? {} : { predecessors: parseGoalPlanPredecessors(data.predecessors) }),
     ...(data.claimOperationId === undefined ? {} : { claimOperationId: identity(data.claimOperationId, 'delegation.claimOperationId') }),
     ...(data.linkedAt === undefined ? {} : { linkedAt: positive(data.linkedAt, 'delegation.linkedAt') }),

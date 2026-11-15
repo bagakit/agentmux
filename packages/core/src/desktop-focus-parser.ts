@@ -1,4 +1,4 @@
-import { isGoalPlanIdentity } from '@agentmux/demand/goal-plan'
+import { isGoalTicketHash } from '@agentmux/demand/goal-plan'
 import { parseSpaceLinkAddress, parseSpaceLinkTarget } from './space-link.js'
 import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, type AgentMuxControlFocusRequest, type AgentMuxControlSuccessReceipt } from './control.js'
 import { AgentMuxError } from './errors.js'
@@ -89,8 +89,8 @@ function parseDesktopFocusTarget(value: unknown, code: Code): AgentMuxDesktopFoc
     fields(source, ['kind', 'goalId', 'runtimeId', 'namespace', 'section', 'nodeId'], code)
     if ((source.runtimeId === undefined) !== (source.namespace === undefined)) fail('Goal reading source requires its original Runtime and namespace together.', code)
     const nodeId = source.nodeId
-    if (nodeId !== undefined && (!isGoalPlanIdentity(nodeId) || source.section !== undefined)) fail('A Goal Ticket requires its exact node ID and no separate section.', code)
-    return { kind: 'goal', ...(isGoalPlanIdentity(nodeId) ? { nodeId } : {}), goalId: goalId(source.goalId, 'Goal ID', code),
+    if (nodeId !== undefined && (!isGoalTicketHash(nodeId) || source.section !== undefined)) fail('A Goal Ticket requires its exact node ID and no separate section.', code)
+    return { kind: 'goal', ...(isGoalTicketHash(nodeId) ? { nodeId } : {}), goalId: goalId(source.goalId, 'Goal ID', code),
       ...(source.runtimeId === undefined ? {} : { runtimeId: spaceControlId(source.runtimeId, 'Goal Runtime', code) }),
       ...(source.namespace === undefined ? {} : { namespace: spaceControlId(source.namespace, 'Goal namespace', code) }),
       ...(source.section === undefined ? {} : { section: member(source.section, ['plan'] as const, 'Goal reading section', code) }) }
@@ -182,9 +182,9 @@ function presentation(value: unknown, code: Code): AgentMuxDesktopPresentation {
   const goal = source.goal === undefined ? undefined : (() => {
     const value = fields(source.goal, ['goalId', 'runtimeId', 'namespace', 'section', 'nodeId'], code)
     const nodeId = value.nodeId
-    if (nodeId !== undefined && (!isGoalPlanIdentity(nodeId) || value.section !== 'plan' || !value.runtimeId || !value.namespace))
+    if (nodeId !== undefined && (!isGoalTicketHash(nodeId) || value.section !== 'plan' || !value.runtimeId || !value.namespace))
       fail('A presented Ticket requires its original Goal owner and visible plan.', code)
-    return { ...(isGoalPlanIdentity(nodeId) ? { nodeId } : {}), goalId: goalId(value.goalId, 'Presented Goal', code), runtimeId: nullableId(value.runtimeId, 'Presented Goal Runtime', code), namespace: nullableId(value.namespace, 'Presented Goal namespace', code),
+    return { ...(isGoalTicketHash(nodeId) ? { nodeId } : {}), goalId: goalId(value.goalId, 'Presented Goal', code), runtimeId: nullableId(value.runtimeId, 'Presented Goal Runtime', code), namespace: nullableId(value.namespace, 'Presented Goal namespace', code),
       section: member(value.section, ['overview', 'plan', 'activity'] as const, 'Presented Goal section', code) }
   })()
   const result = { ...(goal ? { goal } : {}), ...(mote ? { mote } : {}), provenance: provenance(source.provenance, code), state: member(source.state, ['main-visible', 'floating', 'window', 'covered', 'pending', 'unknown'], 'Presentation', code),

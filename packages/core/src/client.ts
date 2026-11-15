@@ -238,6 +238,7 @@ import { agentTimelineMutationFromAcpEvent } from './session-timeline.js'
 import { acceptsAgentActivityState, advanceAgentActivityCommit, agentActivityTimelineItem } from './agent-activity-state.js'
 import type { AgentActivityObservation, AgentSemanticState, AgentActivityState, AgentCapabilitySnapshot, AgentCatalogEntry, AgentExecutorId, AgentProviderId, AgentMuxAgentPasteInput, AgentMuxAgentWriteInput, AgentMuxAgentSession, AgentMuxAgentCreationInspection, AgentNativeActivityEvent, AgentCurrentActivity, AgentMuxNativeSessionConfirmationInput, AgentMuxNativeSessionConfirmation, AgentPromptMessageContent, AgentMuxClientEvent, AgentMuxClientEventListener, AgentMuxClientEventListenerOptions, AgentMuxObservationOrigin, AgentMuxInteractionRequest, AgentMuxInteractionResponse, AgentMuxInteractionOperationReceipt, AgentMuxRun, AgentMuxRunAppliedSize, AgentMuxRunAttachment, AgentMuxRunAttachmentView, AgentMuxRunDataEvent, AgentMuxRunInputAck, AgentMuxRunInputData, AgentMuxRunInputOperation, AgentMuxRunRef, AgentMuxStoredAgentSession, AgentMuxRuntimeDiagnostics, AgentMuxRuntimeIdentity, AgentMuxRuntimeResourceSnapshot, AgentNativeSessionHandle, AgentNativeResumeSource, AgentNativeSessionCatalog, AgentNativeSessionCandidate, AgentNativeHistoryReadOptions, AgentProviderSessionHistoryPage, AgentNativeHistoryResourceReadOptions, AgentProviderSessionHistoryResourceReadResult, AgentSessionHistoryMetadata, AgentSessionHistoryPage, AgentSessionHistoryPageOptions, AgentSessionHistoryResourceReadOptions, AgentSessionHistoryResourceReadResult, AgentSessionQuestionReplyReceipt, AgentSessionHistorySource, AgentSessionHistoryDescriptor, AgentSessionHistoryObservation, AgentSessionHistoryObservationOptions, AgentSessionHistoryObservationHandle, AgentTerminalCapabilityState, AgentTerminalOutputChannelState, AgentTimelineItem, AgentTimelineMutation, AgentTimelineSnapshot, AgentStatus, NativeHookEnvelope } from './types.js';
 import { normalizeSessionHistoryPage, SESSION_HISTORY_TIMEOUT_MS, watchSessionHistoryProgress } from './session-history.js'
+import type { GoalTicketSigner } from '@agentmux/demand/goal-ticket-crypto'
 import { AgentMuxCreationAuthority, agentCreationIntentDigest } from './agent-creation-authority.js'
 import { messagePacketDigest, parseSignedMessage, parseMessageReadAuthority, parseFederatedThread, parseSignedDispatchEvent, dispatchEventDigest,
   type AgentMuxSignedMessage, type AgentMuxMessageParticipant, type AgentMuxMessageReadAuthority, type AgentMuxFederatedThread,
@@ -511,6 +512,10 @@ export class AgentMuxClient {
   }
 
   async agentCreationAuthority() { return await this.requireCreationAuthority().identity() }
+  /** Host composition only. The Runtime key and signing capability do not cross RPC. */
+  async prepareGoalTicketSigner(owner: { runtimeId: string; namespace: string }): Promise<GoalTicketSigner> {
+    return this.requireCreationAuthority().prepareGoalTicketSigner(owner)
+  }
   async agentMessageAuthority() { return await this.requireCreationAuthority().identity() }
   async listTrustedMessageSources() { return this.requireCreationAuthority().listTrustedMessageSources() }
   async trustMessageSource(input: import('./agent-message-federation.js').AgentMuxMessageTrustInput, principal?: import('./agent-creation-admission.js').AgentMuxCreationUserPrincipal) {

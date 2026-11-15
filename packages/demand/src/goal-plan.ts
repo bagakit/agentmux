@@ -1,6 +1,9 @@
 import { deriveObjectId, isObjectId } from '@agentmux/identity'
 import type { DemandCriterion } from './goals.js'
+import { isGoalTicketHash, parseGoalTicketProof, type GoalTicketProof, type GoalTicketTask } from './goal-ticket-proof.js'
 import { delegationWorkerHostId, isGoalDeliveryHash, parseGoalPlanPredecessors, sameGoalPlanPredecessors, type DemandDelegation, type GoalPlanPredecessor } from './delegations.js'
+
+export { isGoalTicketHash } from './goal-ticket-proof.js'
 
 /**
  * A Goal's plan: a dependency graph of nodes inside one Goal. The plan holds only structure,
@@ -13,7 +16,7 @@ export type GoalPlanNodeState = (typeof GOAL_PLAN_NODE_STATES)[number]
 /** An exact Agent identity; placement (local, remote Host or remote project) is the Host's fact. */
 export type GoalPlanExecutor = { hostId: string; agentSessionId: string }
 export type GoalPlanNodeInput = {
-  /** Original Ticket ID, minted by the creating client and retained across revisions. */
+  /** Published Ticket ID, or a revision-local reference when introducing a node. */
   id: string
   title: string
   /** The result this node must deliver, in the plan author's words. */
@@ -40,15 +43,15 @@ export type GoalPlanReviewInput = {
   note: string
 }
 export type GoalPlanReviewer = { kind: 'agent' | 'user' | 'device'; id: string; hostId?: string; runtimeId?: string }
-export type GoalPlanReview = GoalPlanReviewInput & { reviewer: GoalPlanReviewer; reviewedAt: number }
+export type GoalPlanReview = GoalPlanReviewInput & { reviewer: GoalPlanReviewer; reviewedAt: number; completion?: GoalTicketProof }
 export type GoalPlanAssignment = { kind: 'open' } | { kind: 'close' } | { kind: 'assign'; executor: GoalPlanExecutor }
 export type GoalPlanAssignmentChange = { nodeId: string; assignment: GoalPlanAssignment | { kind: 'claim' } }
 export type GoalPlanOwner = { runtimeId: string; namespace: string }
 export type GoalPlanClaimScope = GoalPlanOwner & { goalId: string }
-export type GoalPlanClaim = { token: string; basis: string; predecessors: GoalPlanPredecessor[] }
+export type GoalPlanClaim = { token: string; basis: string; predecessors: GoalPlanPredecessor[]; proof: GoalTicketProof }
 export type GoalPlanProposal = { nodeId: string; delegationOperationId: string; replyMessageId: string }
 export type GoalPlanProposalReceipt = GoalPlanProposal & { sourceMessageId: string; proposalOperationId: string; author: { agentSessionId: string; runtimeId: string } }
-export type GoalPlanRevisionRecord = { operationId: string; revision: number; author: GoalPlanReviewer; revisedAt: number; change?: GoalPlanAssignmentChange; claim?: GoalPlanClaim; changedNodes?: string[]; createdNodes?: string[]; proposals?: GoalPlanProposalReceipt[] }
+export type GoalPlanRevisionRecord = { operationId: string; revision: number; author: GoalPlanReviewer; revisedAt: number; change?: GoalPlanAssignmentChange; claim?: GoalPlanClaim; changedNodes?: string[]; requestHash?: string; createdTickets?: GoalTicketProof[]; proposals?: GoalPlanProposalReceipt[] }
 export type GoalPlan = {
   revision: number
   /** The Goal proposal version the node criteria were written against. */
@@ -191,29 +194,47 @@ export function parseGoalPlan(value: unknown): GoalPlan {
   if (!Array.isArray(data.nodes) || !Array.isArray(data.reviews) || !Array.isArray(data.history)) throw new Error('plan nodes, reviews and history must be arrays')
   const nodes = data.nodes.map(parseGoalPlanNode)
   validateGoalPlanNodes(nodes)
+  const ids = new Set(nodes.map(node => node.id)), issued = new Set<string>()
   const reviews = data.reviews.map(value => {
-    const item = object(value, 'plan review', ['operationId', 'nodeId', 'delegationOperationId', 'verdict', 'check', 'note', 'reviewer', 'reviewedAt', 'deliveryHash'], ['deliveryHash'])
-    const { reviewer, reviewedAt, ...input } = item
-    return { ...parseGoalPlanReviewInput(input), reviewer: actor(reviewer, 'plan reviewer'), reviewedAt: positive(reviewedAt, 'plan review reviewedAt') }
+    const item = object(value, 'plan review', ['operationId', 'nodeId', 'delegationOperationId', 'verdict', 'check', 'note', 'reviewer', 'reviewedAt', 'deliveryHash', 'completion'], ['deliveryHash', 'completion'])
+    const { reviewer, reviewedAt, completion: proof, ...input } = item
+    const review = parseGoalPlanReviewInput(input), author = actor(reviewer, 'plan reviewer')
+    const completion = proof === undefined ? undefined : parseGoalTicketProof(proof)
+    if (completion && (review.verdict !== 'pass' || completion.record.kind !== 'completed' || completion.record.ticketId !== review.nodeId ||
+        completion.record.operationId !== review.operationId || completion.record.attemptId !== review.delegationOperationId || completion.record.deliveryHash !== review.deliveryHash ||
+        JSON.stringify(completion.record.actor) !== JSON.stringify(author) || JSON.stringify(completion.record.check) !== JSON.stringify(review.check) || completion.record.note !== review.note))
+      throw new Error('Goal Ticket completion belongs to another verdict or delivery')
+    return { ...review, reviewer: author, reviewedAt: positive(reviewedAt, 'plan review reviewedAt'), ...(completion ? { completion } : {}) }
   })
   if (new Set(reviews.map(review => review.operationId)).size !== reviews.length) throw new Error('plan reviews repeat an operation')
-  if (reviews.some(review => !nodes.some(node => node.id === review.nodeId))) throw new Error('plan review names an absent node')
+  if (reviews.some(review => !ids.has(review.nodeId))) throw new Error('plan review names an absent node')
   const history = data.history.map(value => {
-    const item = object(value, 'plan revision record', ['operationId', 'revision', 'author', 'revisedAt', 'change', 'claim', 'changedNodes', 'createdNodes', 'proposals'], ['change', 'claim', 'changedNodes', 'createdNodes', 'proposals'])
+    const item = object(value, 'plan revision record', ['operationId', 'revision', 'author', 'revisedAt', 'change', 'claim', 'changedNodes', 'requestHash', 'createdTickets', 'proposals'], ['change', 'claim', 'changedNodes', 'requestHash', 'createdTickets', 'proposals'])
     const change = item.change === undefined ? undefined : parseAssignmentChange(item.change)
-    const claim = item.claim === undefined ? undefined : object(item.claim, 'plan claim', ['token', 'basis', 'predecessors'])
+    const claim = item.claim === undefined ? undefined : object(item.claim, 'plan claim', ['token', 'basis', 'predecessors', 'proof'])
     const changedNodes = item.changedNodes === undefined ? undefined : identities(item.changedNodes, 'plan changed nodes')
-    const createdNodes = item.createdNodes === undefined ? undefined : identities(item.createdNodes, 'created Ticket nodes')
+    if (item.createdTickets !== undefined && !Array.isArray(item.createdTickets)) throw new Error('Issued Tickets must be an array')
+    const createdTickets = (item.createdTickets as unknown[] | undefined)?.map(parseGoalTicketProof)
+    for (const proof of createdTickets ?? []) {
+      if (proof.record.kind !== 'issued' || proof.record.operationId !== item.operationId || !ids.has(proof.hash) || issued.has(proof.hash))
+        throw new Error('Each issued Ticket must belong to its original revision and plan')
+      issued.add(proof.hash)
+    }
+    if (item.requestHash !== undefined && !isGoalDeliveryHash(item.requestHash)) throw new Error('Invalid plan revision request hash')
     if (item.proposals !== undefined && !Array.isArray(item.proposals)) throw new Error('Ticket proposal receipts must be an array')
     const proposals = (item.proposals as unknown[] | undefined)?.map(proposalReceipt)
-    if ((changedNodes || createdNodes || proposals) && change) throw new Error('An assignment cannot revise node definitions')
-    if (proposals && (new Set(proposals.map(p => p.nodeId)).size !== proposals.length || proposals.some(p => !createdNodes?.includes(p.nodeId))))
+    if ((changedNodes || createdTickets || proposals || item.requestHash) && change) throw new Error('An assignment cannot revise node definitions')
+    if (proposals && (new Set(proposals.map(p => p.nodeId)).size !== proposals.length || proposals.some(p => !createdTickets?.some(proof => proof.hash === p.nodeId))))
       throw new Error('Ticket proposals must refer to nodes created by the same operation')
     if (claim && (change?.assignment.kind !== 'claim' || !isObjectId(claim.token) || !isObjectId(claim.basis))) throw new Error('plan claim lacks its original assignment and token')
+    const proof = claim ? parseGoalTicketProof(claim.proof) : undefined
+    if (proof && (proof.record.kind !== 'claim' || proof.record.ticketId !== change?.nodeId || proof.record.operationId !== item.operationId))
+      throw new Error('Goal Ticket claim proof belongs to another operation or Ticket')
     return { operationId: identity(item.operationId, 'plan revision operationId'), revision: positive(item.revision, 'plan revision'),
       ...(change ? { change } : {}), ...(changedNodes ? { changedNodes } : {}),
-      ...(createdNodes ? { createdNodes } : {}), ...(proposals ? { proposals } : {}),
-      ...(claim ? { claim: { token: claim.token as string, basis: claim.basis as string, predecessors: parseGoalPlanPredecessors(claim.predecessors) } } : {}),
+      ...(createdTickets ? { createdTickets } : {}), ...(proposals ? { proposals } : {}),
+      ...(typeof item.requestHash === 'string' ? { requestHash: item.requestHash } : {}),
+      ...(claim && proof ? { claim: { token: claim.token as string, basis: claim.basis as string, predecessors: parseGoalPlanPredecessors(claim.predecessors), proof } } : {}),
       author: actor(item.author, 'plan revision author'), revisedAt: positive(item.revisedAt, 'plan revision revisedAt') }
   })
   const revision = positive(data.revision, 'plan revision')
@@ -234,6 +255,15 @@ export function parseGoalPlanRevisionInput(value: unknown): GoalPlanRevisionInpu
     throw new Error('Each proposed Ticket must appear once in this revision')
   return { operationId: identity(data.operationId, 'plan revision operationId'), ...(proposals?.length ? { proposals } : {}), expectedRevision: data.expectedRevision,
     alignmentRevision: positive(data.alignmentRevision, 'plan alignmentRevision'), nodes }
+}
+
+export function goalTicketTask(node: GoalPlanNodeInput, criteria: readonly DemandCriterion[]): GoalTicketTask {
+  const byId = new Map(criteria.map(criterion => [criterion.id, criterion]))
+  return { outcome: node.outcome, check: node.check, criteria: [...node.criterionIds].sort().map(id => {
+    const criterion = byId.get(id)
+    if (!criterion) throw new Error('Goal Ticket needs the original version of every success criterion')
+    return { id: criterion.id, text: criterion.text }
+  }) }
 }
 
 /** Published nodes keep their identity. Recorded work also keeps its task contract. */
@@ -347,7 +377,8 @@ export function projectGoalPlan(plan: GoalPlan, delegations: readonly DemandDele
       if (source.state !== 'done' || !source.delegation?.report || !source.review) break
       refs.push({ nodeId: id, delegationOperationId: source.delegation.operationId,
         reportOperationId: source.delegation.report.operationId, reviewOperationId: source.review.operationId,
-        ...(source.review.deliveryHash ? { deliveryHash: source.review.deliveryHash } : {}) })
+        ...(source.review.deliveryHash ? { deliveryHash: source.review.deliveryHash } : {}),
+        ...(source.review.completion ? { completionHash: source.review.completion.hash } : {}) })
     }
     const predecessors = refs.length === node.dependsOn.length ? refs : null
     const unknown: GoalPlanUnknownReason[] = node.cancelled ? [] : [
