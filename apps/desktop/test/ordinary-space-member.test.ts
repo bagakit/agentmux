@@ -1,7 +1,8 @@
 import { afterEach, expect, it } from 'vitest'
 import { createSpaceSessionsFixture } from '../../../packages/core/test/helpers/space-session-fixture'
-import { observeMountedSessions } from '../src/renderer/src/lib/space-mount-sessions'
-import { ordinarySpaceMember, ordinaryMemberRouteOccurrence } from '../src/renderer/src/lib/ordinary-space-member'
+import { AgentProviderRegistry } from '../../../packages/core/src/agent-provider'
+import { mountedSessionFacts, observeMountedSessions } from '../src/renderer/src/lib/space-mount-sessions'
+import { ordinarySpaceMember, ordinaryMemberObservation } from '../src/renderer/src/lib/ordinary-space-member'
 import { mountedRegionKey } from '../src/renderer/src/lib/space-mount-view'
 import { sourceInputRecoveryRows } from '../src/renderer/src/lib/source-composer-handoff'
 import { originalSourceInputOwnerKey } from '../src/renderer/src/lib/original-space-navigation'
@@ -13,6 +14,7 @@ afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await
 
 async function originalOccurrence() {
   const f = await createSpaceSessionsFixture(cleanup), sid = 'same-raw-session'
+  f.d.core.providers.register(new AgentProviderRegistry().get('codex'))
   const original = await f.d.put(sid), admission = await f.admit('D-in-B', f.d.owner.runtimeId, sid, 'original-foreign-create')
   await f.b.spatial.settleAgentOpen(admission.requestId, original, { workspaceId: 'original-b-project', phase: 'attached',
     agentPresentation: { sessionId: sid, agentSessionId: sid, hostId: 'D-in-B', runtimeId: f.d.owner.runtimeId } })
@@ -39,11 +41,17 @@ it('the original Core admission locates a foreign ordinary Region without borrow
   const metadata = observeMountedSessions(fact.source, undefined, { observation: {
     type: 'member', reference: snapshot.reference, source: snapshot.source, revision: snapshot.revision,
     member: fact.metadataMember, state: { status: 'pending' }, occurrences: [occurrence] } })
-  expect(ordinaryMemberRouteOccurrence(fact, snapshot, metadata)).toBe(occurrence)
-  expect(ordinaryMemberRouteOccurrence(fact, { ...snapshot, revision: snapshot.revision + 1 }, metadata)).toBeUndefined()
-  expect(ordinaryMemberRouteOccurrence({ ...fact, creationOperationId: 'another-original-CID' }, snapshot, metadata)).toBeUndefined()
-  expect(ordinaryMemberRouteOccurrence({ ...fact, metadataMember: { ...fact.metadataMember, runtimeId: 'another-original-Runtime' } }, snapshot, metadata)).toBeUndefined()
-  expect(ordinaryMemberRouteOccurrence(fact, { ...snapshot, reference: { ...snapshot.reference, runtimeId: 'another-source' } }, metadata)).toBeUndefined()
+  const subject = ordinaryMemberObservation(fact, snapshot, metadata)
+  expect(subject.relation).toBe(occurrence)
+  expect(subject.current).toBe(mountedSessionFacts(snapshot, metadata).get(fact.presentation.key)?.current)
+  expect(ordinaryMemberObservation(fact, { ...snapshot, revision: snapshot.revision + 1 }, metadata).relation).toBeUndefined()
+  expect(ordinaryMemberObservation({ ...fact, creationOperationId: 'another-original-CID' }, snapshot, metadata).relation).toBeUndefined()
+  expect(ordinaryMemberObservation({ ...fact, metadataMember: { ...fact.metadataMember, runtimeId: 'another-original-Runtime' } }, snapshot, metadata).relation).toBeUndefined()
+  expect(ordinaryMemberObservation(fact, { ...snapshot, reference: { ...snapshot.reference, runtimeId: 'another-source' } }, metadata).relation).toBeUndefined()
+
+  // Reading one registered Region must never enlist unrelated member facts.
+  const exactMembers = new Proxy(metadata.members, { ownKeys() { throw Error('A scoped read enumerated the source roster') } })
+  expect(ordinaryMemberObservation(fact, snapshot, { ...metadata, members: exactMembers }).relation).toBe(occurrence)
 
   const local = structuredClone(document.graph), localRegion = local.regions.find(region => region.regionId === reference.regionId)!
   localRegion.execution = { ...localRegion.execution!, hostId: 'local', runtimeId: f.b.owner.runtimeId }

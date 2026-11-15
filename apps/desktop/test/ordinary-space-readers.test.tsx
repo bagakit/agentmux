@@ -1,11 +1,19 @@
 // @vitest-environment happy-dom
-import { act } from 'react'
+import { act, Profiler } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createSpaceSessionsFixture } from '../../../packages/core/test/helpers/space-session-fixture'
+import { AgentProviderRegistry } from '../../../packages/core/src/agent-provider'
 import { spaceMountTransport } from './helpers/space-mount-fixture'
 import { api } from '../src/renderer/src/lib/api'
+import * as rendererStore from '../src/renderer/src/store'
 import { useAppStore } from '../src/renderer/src/store'
+import { readSpaceSnapshot } from '@agentmux/core'
+import { spaceSessionMemberKey, type SpaceSessionMember, type SpaceSessionState } from '@agentmux/core/space-sessions'
+import { hostedAgentSessionSummary } from '../../../packages/core/src/hosted-session-summary'
+import * as mountedTerminal from '../src/renderer/src/components/MountedSpaceAgent'
+import { OrdinarySpaceMemberViewport } from '../src/renderer/src/components/OrdinarySpaceMemberViewport'
+import { ordinarySpaceMember } from '../src/renderer/src/lib/ordinary-space-member'
 import { SpaceSourceReaders, useSpaceSourceReader } from '../src/renderer/src/components/SpaceSourceReaders'
 import { useFocusSources } from '../src/renderer/src/lib/use-focus-sources'
 import { spaceMountKey } from '../src/shared/space-mount'
@@ -25,6 +33,64 @@ function VisibleConsumer({ target, visible, label }: { target: SpaceMountRecord;
   return visible ? <button onClick={refresh}>{label}</button> : null
 }
 function FocusReaders({ visible }: { visible: boolean }) { return useFocusSources({ visible, contexts: [], onCloseOriginal: () => {} }).readers }
+
+it('the original Region stays mounted without refreshing for another member of its Space', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  const f = await createSpaceSessionsFixture(cleanup)
+  f.d.core.providers.register(new AgentProviderRegistry().get('codex'))
+  const member = async (sid: string) => {
+    const session = await f.d.put(sid)
+    const admission = await f.admit('D-in-B', f.d.owner.runtimeId, sid, sid + '-creation')
+    await f.b.spatial.settleAgentOpen(admission.requestId, session, { workspaceId: 'original-b-project', phase: 'attached',
+      agentPresentation: { sessionId: sid, agentSessionId: sid, hostId: 'D-in-B', runtimeId: f.d.owner.runtimeId } })
+    return { session, tabId: admission.address.tabId!, regionId: admission.address.regionId, sessionId: sid }
+  }
+  const primary = await member('original-member')
+  const secondary = await member('neighboring-member')
+  const document = await f.b.spatial.readForLayout()
+  const snapshot = await readSpaceSnapshot(f.b.rpc, f.reference)
+  const occurrence = ordinarySpaceMember(document?.graph, primary, 'original-B')
+  if (occurrence.kind !== 'foreign') throw Error('The fixture must resolve the actual original Region')
+  vi.spyOn(rendererStore, 'ordinaryAgentSpaceMember').mockReturnValue(occurrence)
+  vi.spyOn(mountedTerminal, 'SpaceMemberWorkface').mockImplementation(({ target }) =>
+    <output data-run={target.target.expectedRun.runId}>Original terminal</output>)
+  const key = spaceMountKey(f.reference)
+  useAppStore.setState({ mountedSpaceObservations: { [key]: { snapshot, reading: false } }, mountedSpaceSessions: {},
+    agentComposerDrafts: { original: 'Keep the unrelated draft' } })
+  const observe = (member: SpaceSessionMember, state: SpaceSessionState) => useAppStore.getState().observeSpaceMountSessions(occurrence.source, {
+    observation: { type: 'member', reference: snapshot.reference, source: snapshot.source, revision: snapshot.revision, member, state }
+  })
+  const observed = (session: typeof primary.session): SpaceSessionState =>
+    ({ status: 'observed', authority: f.d.owner, session: hostedAgentSessionSummary(session) })
+  observe(occurrence.metadataMember, observed(primary.session))
+  const node = window.document.createElement('div'); window.document.body.append(node); root = createRoot(node)
+  const render = vi.fn()
+  await act(async () => root!.render(<Profiler id="original Region" onRender={render}>
+    <OrdinarySpaceMemberViewport tabId={primary.tabId} regionId={primary.regionId} sessionId={primary.sessionId}
+      visible={false} active={false}>Local appearance</OrdinarySpaceMemberViewport>
+  </Profiler>))
+  const original = node.querySelector('output')
+  expect(original?.getAttribute('data-run')).toBe(primary.session.run.runId)
+  render.mockClear()
+  const neighbor = { ...occurrence.metadataMember, agentSessionId: secondary.sessionId }
+  for (let i = 0; i < 10; i++) {
+    await act(async () => observe(neighbor, observed({ ...secondary.session, updatedAt: i + 2 })))
+  }
+  expect(useAppStore.getState().mountedSpaceSessions[key]?.members[spaceSessionMemberKey(neighbor)]?.state)
+    .toMatchObject({ status: 'observed', session: { updatedAt: 11 } })
+  expect(render).toHaveBeenCalledTimes(0)
+  expect(node.querySelector('output')).toBe(original)
+
+  const next = await f.d.put(primary.sessionId, 12, 'original-recovered-run')
+  await act(async () => observe(occurrence.metadataMember, observed(next)))
+  expect(render).toHaveBeenCalledOnce()
+  expect(node.querySelector('output')).toBe(original)
+  expect(original?.getAttribute('data-run')).toBe(next.run.runId)
+  await act(async () => useAppStore.getState().observeSpaceMountSessions(occurrence.source, { error: 'Original metadata source unavailable' }))
+  expect(render).toHaveBeenCalledTimes(2)
+  expect(original?.getAttribute('data-run')).toBe(next.run.runId)
+  expect(useAppStore.getState().agentComposerDrafts.original).toBe('Keep the unrelated draft')
+})
 it('ordinary source readers share the existing real Main/Core scope and only the last visible consumer releases it', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   const f = await createSpaceSessionsFixture(cleanup)

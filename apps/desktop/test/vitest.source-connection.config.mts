@@ -10,7 +10,12 @@ const mutations: Record<string, [string, string, string]> = {
   'wrong-host': ['apps/desktop/src/renderer/src/lib/session-events.ts', '? [...semantic, ...(observations.get(event.hostId) ?? [])]\n      : semantic', '? [...semantic, ...[...observations.values()].flatMap(readers => [...readers])]\n      : semantic'],
   'forget-early-recovery': [reader, "if (generation > (kind === 'space' ? spaceGeneration : sessionsGeneration)) reopen()", 'if (false) reopen()'],
   'refresh-healthy': [reader, 'if (failed.size) reopen()', 'reopen()'],
-  'clear-error-on-begin': ['apps/desktop/src/renderer/src/lib/space-mount-sessions.ts', 'if (update.begin) return { ...before, members: {}, reading: true }', 'if (update.begin) return { ...before, members: {}, reading: true, error: undefined }']
+  'clear-error-on-begin': ['apps/desktop/src/renderer/src/lib/space-mount-sessions.ts', 'if (update.begin) return { ...before, members: {}, reading: true }', 'if (update.begin) return { ...before, members: {}, reading: true, error: undefined }'],
+  'whole-source-region-subscription': ['apps/desktop/src/renderer/src/components/OrdinarySpaceMemberViewport.tsx',
+    'sourceError: observation?.error ?? source?.error', 'sourceError: observation?.error ?? source?.error, roster: observation'],
+  'scan-whole-member-roster': ['apps/desktop/src/renderer/src/lib/space-mount-sessions.ts',
+    'return values[spaceSessionMemberKey({ hostId, runtimeId, agentSessionId })]',
+    'return Object.values(values).find(fact => spaceSessionMemberKey(fact.member) === spaceSessionMemberKey({ hostId, runtimeId, agentSessionId }))']
 }
 const mutation = process.env.AGENTMUX_SOURCE_CONNECTION_MUTATION
 if (mutation) assert.ok(mutations[mutation], 'Known source connection mutation')
@@ -27,5 +32,5 @@ export default defineConfig({ ...base, cacheDir: resolve(base.root!, '.tmp/sourc
     if (process.env.AGENTMUX_SOURCE_CONNECTION_LOADED) appendFileSync(process.env.AGENTMUX_SOURCE_CONNECTION_LOADED, JSON.stringify({ path, originalSHA256: createHash('sha256').update(original).digest('hex'), loadedSHA256: createHash('sha256').update(code).digest('hex'), mutation: code === original ? null : mutation }) + '\n')
     if (code !== original) return { code, map: null }
   } }],
-  test: { ...base.test, include: ['apps/desktop/test/ordinary-space-readers.test.tsx', 'apps/desktop/test/focus-source-recovery.test.tsx'], setupFiles: [], globalSetup: [], passWithNoTests: false, maxWorkers: 1, fileParallelism: false, testTimeout: 20000 }
+  test: { ...base.test, include: ['apps/desktop/test/ordinary-space-readers.test.tsx', 'apps/desktop/test/ordinary-space-member.test.ts', 'apps/desktop/test/focus-source-recovery.test.tsx'], setupFiles: [], globalSetup: [], passWithNoTests: false, maxWorkers: 1, fileParallelism: false, testTimeout: 20000 }
 })
