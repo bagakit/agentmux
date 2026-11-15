@@ -25,4 +25,4 @@ export default defineConfig({ ...crossHost, plugins: [...(crossHost.plugins ?? [
     process.stderr.write('Goal claim mutation loaded: ' + change.path + '\n')
     return source.replace(change.from, change.to)
   } }], test: { ...crossHost.test, testTimeout: 120_000, include: ['apps/host/test/goal-claim-role.test.ts', 'apps/host/test/goal-node-claims.test.ts',
-      'apps/host/test/goal-active-cost.test.ts', 'apps/host/test/goal-plan-revision-product.test.ts', 'packages/demand/test/goal-plan-revision.test.ts', 'packages/demand/test/goal-plan.test.ts'] } })
+      'apps/host/test/goal-active-cost.test.ts', 'apps/host/test/goal-ticket-journeys.test.ts', 'apps/host/test/goal-plan-revision-product.test.ts', 'packages/demand/test/goal-plan-revision.test.ts', 'packages/demand/test/goal-plan.test.ts'] } })
