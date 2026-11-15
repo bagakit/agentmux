@@ -25,7 +25,7 @@ export function MobileMoteFileEditor({ target, client, visible, copyText, onClos
       ? pending.phase === 'failed' ? '保存未完成，可以重试。' : '保存还没确认，可以核对文件。'
       : status}</MobileNotice>
     <form onSubmit={event => { event.preventDefault(); void model.save() }}>
-      <label>正文<ComposerTextarea aria-label="Mote 文件正文" rows={10} value={draft.body} onValueChange={model.edit} /></label>
+      <label>正文<ComposerTextarea syntax="markdown" aria-label="Mote 文件正文" rows={10} value={draft.body} onValueChange={model.edit} /></label>
       <div className="mobile-mote-file-editor__actions">
         <button type="submit" className="mobile-text-button" disabled={model.saving || model.adopting}>保存</button>
         <button type="button" className="mobile-text-button" onClick={() => copy(draft.body)}>复制</button>

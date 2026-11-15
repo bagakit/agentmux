@@ -165,7 +165,7 @@ export function MobileTopicKnowledgeEditor({ rpc: _rpc, target, onClose, onSaved
     <h2>{original.entry ? '编辑知识' : original.isNew ? '新建知识' : '知识草稿'}</h2>
     <form onSubmit={event => { event.preventDefault(); void editor.save() }}>
       <label>标题<TextInput aria-label="知识标题" value={draft.title} maxLength={120} onChange={event => editor.edit('title', event.target.value)} /></label>
-      <label>正文<ComposerTextarea aria-label="知识正文" value={draft.content} rows={10} onValueChange={value => editor.edit('content', value)} /></label>
+      <label>正文<ComposerTextarea syntax="markdown" aria-label="知识正文" value={draft.content} rows={10} onValueChange={value => editor.edit('content', value)} /></label>
       <div className="mobile-topics-actions"><label>形式<select value={draft.form} onChange={event => editor.edit('form', event.target.value)}><option value="derived">整理成果</option><option value="reference">来源引用</option></select></label>
         <label>性质<select value={draft.certainty} onChange={event => editor.edit('certainty', event.target.value)}>{Object.entries(certaintyLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>
       <label>适用范围<TextInput aria-label="知识适用范围" value={draft.authoringScope} onChange={event => editor.edit('authoringScope', event.target.value)} /></label>

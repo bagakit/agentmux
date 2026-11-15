@@ -18,7 +18,7 @@ export function MobileGoalDraftEditor({ model, editing, onEditingChange, refresh
       if (Object.keys(patch).length) void model.save(patch)
     }}>
       <label>标题<TextInput aria-label="目标草稿标题" value={draft.title} required onChange={event => model.editText('title', event.target.value)} /></label>
-      <label>目标说明<ComposerTextarea aria-label="目标正文草稿" value={draft.description} onValueChange={value => model.editText('description', value)} /></label>
+      <label>目标说明<ComposerTextarea syntax="markdown" aria-label="目标正文草稿" value={draft.description} onValueChange={value => model.editText('description', value)} /></label>
       <div className="mobile-goal-editor-actions"><button disabled={saving}>保存正文</button><button type="button" onClick={() => {
         if (!copyText) { setCopyNotice('复制通道暂不可用，当前正文仍可选中后手动复制。'); return }
         void copyText(`${draft.title}\n\n${draft.description}`, error => setCopyNotice(`复制未完成：${error instanceof Error ? error.message : String(error)}；当前正文保留。`))

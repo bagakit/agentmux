@@ -147,7 +147,7 @@ export function MoteBehaviorDialog({ scope, reference, onOpenPath, onClose, retu
               <MoteBehaviorAction label="Try a cooperation question" expanded={extra === 'trial'} onClick={() => setExtra(value => value === 'trial' ? null : 'trial')}><ThemeObjectConversationIcon size={16} /></MoteBehaviorAction>
               <MoteBehaviorAction label="Open original behavior file" onClick={() => void inspect()}><ThemeFileTextIcon size={16} /></MoteBehaviorAction>
             </div>
-            {extra === 'custom' ? <label className="mote-behavior-extra">Extra preferences<ComposerTextarea aria-label="Custom cooperation preferences" rows={3}
+            {extra === 'custom' ? <label className="mote-behavior-extra">Extra preferences<ComposerTextarea syntax="markdown" aria-label="Custom cooperation preferences" rows={3}
               value={draft.custom} onValueChange={value => update({ ...form.current, custom: value })} placeholder="What helps us work together?" /></label> : null}
             {extra === 'trial' ? <div className="mote-behavior-extra"><label htmlFor={id + '-trial'}>Try your own question</label>
               <InputGroup variant="prompt">

@@ -46,7 +46,7 @@ export function TopicKnowledgeEditor({ target, onClose, onSaved }: {
           <label>Title<TextInput ref={input} value={title} maxLength={120} disabled={busy} onChange={event => setTitle(event.target.value)} /></label>
           <div className="topic-dialog__row"><label>Form<select value={form} disabled={busy} onChange={event => setForm(event.target.value as TopicKnowledge['form'])}><option value="derived">Written knowledge</option>{sources.length ? <option value="reference">Source reference</option> : null}</select></label>
             <label>Status<select value={certainty} disabled={busy} onChange={event => setCertainty(event.target.value as TopicKnowledge['certainty'])}><option value="proposal">Proposal</option><option value="inference">Inference</option><option value="fact">Fact</option><option value="decision">Decision</option></select></label></div>
-          <label>Knowledge<ComposerTextarea value={content} rows={9} disabled={busy} placeholder="What should future discussions be able to find?" onValueChange={setContent} /></label>
+          <label>Knowledge<ComposerTextarea syntax="markdown" value={content} rows={9} disabled={busy} placeholder="What should future discussions be able to find?" onValueChange={setContent} /></label>
           <label>Applies to<TextInput value={scope} disabled={busy} placeholder="Optional context or limits" onChange={event => setScope(event.target.value)} /></label>
           {sources.length ? <details className="topic-knowledge-sources"><summary>{sources.length} original source{sources.length === 1 ? '' : 's'}</summary>{sources.map((source, index) => <p key={index}>{knowledgeSourceLabel(source)}</p>)}</details> : null}
           {error ? <p role="alert" className="surface-inline-error">{error}</p> : null}
