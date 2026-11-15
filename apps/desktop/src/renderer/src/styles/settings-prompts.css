@@ -36,7 +36,7 @@
 .prompt-editor__status[data-prompt-status='unsaved'] { color: var(--amber-text); }
 .prompt-editor__status[data-prompt-status='invalid'] { color: var(--red-text); }
 .prompt-editor__name input { font: 600 var(--fs-title)/1.4 var(--font-sans); }
-.prompt-editor__instruction > span,
+.prompt-editor__instruction > span:first-child,
 .prompt-editor__instruction-heading label { color: var(--text-2); font-size: var(--fs-meta); font-weight: 550; }
 .prompt-editor__instruction-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
 .prompt-editor__instruction-heading .prompt-editor__room { color: var(--text-2); }

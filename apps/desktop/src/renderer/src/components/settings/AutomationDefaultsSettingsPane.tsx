@@ -60,7 +60,7 @@ export function AutomationDefaultsSettingsPane({ preferences, onSave }: {
         <summary><span>Default progress prompt<small>{draft.value.progressPrompt.trim() ? 'Custom instruction for new progress tasks' : 'Optional · starts blank'}</small></span></summary>
         <div className="automation-defaults-prompt">
           <p id={`${id}-prompt-hint`} className="continuity-hint">Review this instruction when creating each task.</p>
-          <ComposerTextarea variant="compact" id={`${id}-prompt`} aria-label="Default progress prompt" aria-describedby={`${id}-prompt-hint`} value={draft.value.progressPrompt} onValueChange={value => draft.setField('progressPrompt', value)} />
+          <ComposerTextarea variant="compact" syntax="markdown" id={`${id}-prompt`} aria-label="Default progress prompt" aria-describedby={`${id}-prompt-hint`} value={draft.value.progressPrompt} onValueChange={value => draft.setField('progressPrompt', value)} />
         </div>
       </details>
     </section>

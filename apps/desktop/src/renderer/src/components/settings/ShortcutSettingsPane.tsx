@@ -236,7 +236,7 @@ export function ShortcutSettingsPane({ config, active, onOpenGoals }: {
                   }}
                   onClick={() => setExpanded(value => !value)}>{expanded ? 'Less space' : 'More space'}</Button>
               </div>
-              <ComposerTextarea variant="compact" expanded={expanded} ref={instructionInput} id={instructionId}
+              <ComposerTextarea variant="compact" expanded={expanded} syntax="markdown" ref={instructionInput} id={instructionId}
                 aria-invalid={errors.some((error) => error.field === 'Prompt')} aria-describedby={`${descriptionId}-body`}
                 aria-keyshortcuts="Meta+Enter Control+Enter" value={prompt.body}
                 onValueChange={value => update(prompt.id, { body: value })}
