@@ -232,6 +232,8 @@ ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux
 
 全量工作面投影消费已确认的 Native Run 事实与原持久 Session／退休记录，不以所有 Session 的握手或整体恢复观察完成为前置。冷语义 owner 尚未装入活动 registry 时，仍须从原元数据 owner 取得准确绑定，不能把已有 Agent 误作普通 Terminal，也不能覆盖期间已受理的绑定或复活退休 Run。单个握手的失败、未知回执与实际输入资格继续由原 owner 保留和表达；可读取进程投影不证明握手成功，不授予新的输入或恢复权限。
 
+Desktop 的普通会话快照和状态更新只交付恢复界面需要的原身份、状态、动作和回执摘要。冻结输入正文和完整操作记录归 Core。展开详情时沿准确 Host／Session／原操作向原 owner 读取所需内容。待定及未知回执仍保持原操作和继续入口，详情读取失败只影响该详情。普通状态更新的传输与视图驻留成本独立于冻结正文长度。
+
 ### 长期 Host 与客户端生命周期
 
 尚未收口的原创建与恢复操作必须跨准确 SDK／Host owner 的结束保留完整来源及显式续办入口。派发前冻结原请求、Runtime 与身份绑定；读取正向 Run witness 时核对完整原主体，不仅凭 key／cwd 接纳另一执行来源。缺 witness 保持未知，显式结清只通过原 Runtime 对准确请求的观察或退休 fence，不冒称历史未执行、不自动换 SID 或重发首句。历史缺失来源不由当前配置补造。
