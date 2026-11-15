@@ -110,6 +110,7 @@ export function MoteGroupDetails({ group, candidates, topicCandidates, call, onR
   const [busy, setBusy] = useState(false)
   const active = group.members.filter(activeMember)
   const available = candidates.filter(candidate => !active.some(member => member.moteId === candidate.target.spaceId))
+  const selectedInvitees = available.filter(candidate => invite.includes(candidate.target.spaceId))
   const ready = Boolean(group.revision)
   const current = { avatarMoteIds: group.avatarMoteIds ?? [], announcement: group.announcement?.body ?? '', topic: group.topic ?? null }
   const staleEdit = edit !== null && edit.revision !== group.revision
@@ -177,12 +178,19 @@ export function MoteGroupDetails({ group, candidates, topicCandidates, call, onR
           <input type="checkbox" disabled={changing} checked={invite.includes(candidate.target.spaceId)} onChange={event => setInvite(
             event.target.checked ? [...invite, candidate.target.spaceId] : invite.filter(id => id !== candidate.target.spaceId))} />
           {candidate.name}</label>)}</div>
-        <Button variant="primary" disabled={changing || !invite.length} onClick={() => void submit({ method: 'space.mote.group.members.add',
-          input: { ...base(), members: available.filter(candidate => invite.includes(candidate.target.spaceId)).map(candidate => candidate.target) } })}>邀请成员</Button>
+        <Button variant="primary" disabled={changing || !selectedInvitees.length} onClick={() => void submit({ method: 'space.mote.group.members.add',
+          input: { ...base(), members: selectedInvitees.map(candidate => candidate.target) } })}>邀请成员</Button>
       </details> : null}
     </> : <>
       {staleEdit && !changing ? <Notice tone="warning" density="compact" messageRole="status"
-        actions={<Button onClick={() => setEdit({ revision: group.revision, baseline: current, value: { ...current, ...changedSettings(edit) } })}>按新版本继续编辑</Button>}>
+        actions={<Button onClick={() => {
+          const changes = changedSettings(edit)
+          if (changes.avatarMoteIds?.length) {
+            const retained = changes.avatarMoteIds.filter(id => active.some(member => member.moteId === id))
+            changes.avatarMoteIds = retained.length ? retained : current.avatarMoteIds
+          }
+          setEdit({ revision: group.revision, baseline: current, value: { ...current, ...changes } })
+        }}>按新版本继续编辑</Button>}>
         群资料已更新。可以把当前修改带到新版本再确认。
       </Notice> : null}
       <MoteGroupSettingsFields value={edit?.value ?? current} members={active} topicCandidates={topicCandidates} renderMoteAvatar={renderMoteAvatar}
