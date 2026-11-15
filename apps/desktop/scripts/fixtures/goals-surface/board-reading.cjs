@@ -137,6 +137,19 @@ module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result
     await waitFor(q(attention) + '.getAttribute("aria-pressed") === "false"')
     assert.deepEqual(await ids(), visible)
     await open(startGoal)
+    if (inventory.find(goal => goal.id === startGoal)?.plan == null) {
+      assert.equal(await evaluate(q('.goal-plan__assignment-toggle') + ' === null'), true)
+      const discussion = '[aria-label^="Open discussion for "]'
+      assert.equal(await evaluate('document.querySelectorAll(' + JSON.stringify(discussion) + ').length'), 1)
+      const discussionPlacement = await evaluate(`(() => {
+        const header = ${q('.goals-detail__overview-heading')}, title = header.querySelector('h2').getBoundingClientRect(),
+          button = header.querySelector(${JSON.stringify(discussion)}).getBoundingClientRect();
+        return { gap: button.left - title.right, centers: Math.abs((title.top + title.bottom - button.top - button.bottom) / 2) };
+      })()`)
+      assert.ok(discussionPlacement.gap >= 0 && discussionPlacement.gap <= 28 && discussionPlacement.centers < 3,
+        'Discussion stays visually attached to the overview title: ' + JSON.stringify(discussionPlacement))
+      await take(width + '-' + theme + '-goal-detail', width)
+    }
     const originalInspection = '.goals-detail__current-work'
     if (await evaluate(q(originalInspection) + '?.textContent === "View original inspection"')) {
       await click(q(originalInspection))

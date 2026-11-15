@@ -109,10 +109,20 @@ module.exports = async ({ evaluate, size, click, pointer, capture, waitFor, pain
   assert.equal(await evaluate(hasSection('Goal overview')), true)
   assert.equal(await evaluate(`Boolean(${query('[data-goal-reading-section="overview"] [aria-label="Criteria and results"]')})`), true)
   await capture('1600-dark-overview', 1600)
+  const discussion = '[aria-label^="Open discussion for "]'
+  const assignments = '.goal-plan__assignments'
+  const assignmentToggle = '.goal-plan__assignment-toggle'
+  assert.equal(await evaluate(`document.querySelectorAll(${JSON.stringify(discussion)}).length`), 1)
+  assert.equal(await evaluate(`Boolean(${query('.goals-detail__overview-heading ' + discussion)})`), true)
   await jump('execution')
   assert.equal(await evaluate(hasSection('Execution records')), true)
   await capture('1600-dark-execution', 1600)
   await jump('plan')
+  assert.equal(await evaluate(`${query(assignments)}.hidden`), true)
+  await clickVisible(assignmentToggle)
+  assert.equal(await evaluate(`${query(assignments)}.nextElementSibling === ${query('.goal-plan__workbench')} && !${query(assignments)}.hidden`), true)
+  await capture('1600-dark-assignments', 1600)
+  await clickVisible(assignmentToggle)
   await evaluate(`(() => {
     window.goalProbeCard = ${query(node('workspace'))}
     window.goalProbeEdge = ${query('[data-goal-plan-edge="outline>workspace"]')}
@@ -169,6 +179,10 @@ module.exports = async ({ evaluate, size, click, pointer, capture, waitFor, pain
     .map(element => ({ transition: getComputedStyle(element).transitionDuration, running: element.getAnimations().length }))`)
   assert.ok(reducedEffects.every(effect => effect.running === 0 && effect.transition.split(',').every(time => parseFloat(time) === 0)), JSON.stringify(reducedEffects))
   await capture('620-light-path-reduced', 620)
+  await clickVisible(assignmentToggle)
+  assert.equal(await evaluate(`${query(assignmentToggle)}.getAttribute('aria-expanded')`), 'true')
+  await capture('620-light-assignments', 620)
+  await clickVisible(assignmentToggle)
   await clickVisible(outline)
   assert.equal(await evaluate(`${query(menu)}.getAnimations().filter(a => a.playState === 'running').length`), 0)
   await capture('620-light-outline-reduced', 620)

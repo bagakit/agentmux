@@ -28,12 +28,12 @@ const goal = (patch: Partial<DemandProjection> = {}): DemandProjection => ({ id:
     history: [{ operationId: 'plan-operation', revision: 1, author: { kind: 'agent', id: 'plan-author', hostId: 'plan-host', runtimeId: 'plan-runtime' }, revisedAt: 5 }] },
   delegations: [delegation('old-attempt')], ...patch })
 let container: HTMLDivElement, root: Root
-const discussion = vi.fn(), reveal = vi.fn()
-const render = async (demand: DemandProjection) => { await act(async () => root.render(<GoalSupervisorRail demand={demand} onOpenDiscussion={discussion} onRevealAttempt={reveal} />)) }
+const reveal = vi.fn()
+const render = async (demand: DemandProjection) => { await act(async () => root.render(<GoalSupervisorRail demand={demand} onRevealAttempt={reveal} />)) }
 const click = async (selector: string) => { const button = container.querySelector<HTMLButtonElement>(selector)!; expect(button).not.toBeNull(); await act(async () => button.click()); return button }
 const showAll = async () => { const button = [...container.querySelectorAll('button')].find(button => button.textContent?.startsWith('Show ')); if (button) await act(async () => button.click()) }
 
-beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); container = document.createElement('div'); document.body.append(container); root = createRoot(container); discussion.mockClear(); reveal.mockClear() })
+beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); container = document.createElement('div'); document.body.append(container); root = createRoot(container); reveal.mockClear() })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals() })
 
 describe('Goal Supervisor reading rail', () => {
@@ -49,11 +49,9 @@ describe('Goal Supervisor reading rail', () => {
     expect(container.textContent).toContain('Supervisor Host is conflicting')
     await render(goal({ delegations: [], supervisorSessionId: null }))
     expect(container.textContent).toContain('No Supervisor assigned')
-    await click('.goal-supervisor-rail__discussion')
-    expect(discussion).toHaveBeenCalledTimes(1)
   })
 
-  it('shows one original coordination responsibility and keeps discussion available when observations are unknown', async () => {
+  it('shows one original coordination responsibility and keeps the reason available when observations are unknown', async () => {
     const execution = { kind: 'delegation' as const, operationId: 'old-attempt', hostId: 'source-host', agentSessionId: 'worker', runId: 'worker-run' }
     const common = { execution, binding: 'confirmed' as const, reason: 'Original owner reason', basis: { stateEnteredAt: null, activityRevision: null, inputSubmissionId: null } }
     await render(goal({ responsibility: { scope: 'scope', observedAt: 20, supervisor: { agentSessionId: 'supervisor', state: 'unknown', reason: 'Observation unavailable' }, executions: [
@@ -67,8 +65,6 @@ describe('Goal Supervisor reading rail', () => {
     const source = container.querySelector<HTMLDetailsElement>('[data-goal-supervisor-source]')!
     expect(source.open).toBe(false)
     expect(source.textContent).toContain('Observation unavailable')
-    await click('.goal-supervisor-rail__discussion')
-    expect(discussion).toHaveBeenCalledTimes(1)
     expect(reveal).not.toHaveBeenCalled()
   })
 

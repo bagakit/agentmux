@@ -69,8 +69,9 @@ module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result
       await paint()
       await capture(`${width}-${theme}-open-node`, width)
       const index = '.goal-plan__assignments'
-      assert.equal(await evaluate(`${query(index)}.open`), false)
-      await hitControl(index + ' > summary')
+      assert.equal(await evaluate(`${query(index)}.hidden`), true)
+      await hitControl('.goal-plan__assignment-toggle')
+      assert.equal(await evaluate(`${query(index)}.hidden`), false)
       assert.equal(await evaluate(`${query(index)}.querySelectorAll('nav button').length`), 7)
       await hitControl(index + ' nav button')
       assert.ok(await evaluate(`Boolean(${query('.goal-plan__reading h3')})`))

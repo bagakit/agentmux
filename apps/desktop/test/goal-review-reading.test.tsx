@@ -178,7 +178,7 @@ it('presents a normal confirmed goal without a report as one closed compact read
   expect(disclosure().querySelector('summary')?.textContent).toContain('Confirmed by you · 2 success criteria · No report yet')
   expect(body().querySelector('.goal-review--compact')).toBeTruthy()
   expect(body().querySelector('.goals-no-results')?.closest('.goal-review__body')).toBeNull()
-  const discussion = body().querySelector<HTMLButtonElement>('.goals-no-results [aria-label="Open discussion for Read one current result"]')!
+  const discussion = document.querySelector<HTMLButtonElement>('.goals-detail__overview-heading [aria-label="Open discussion for Read one current result"]')!
   expect(discussion).not.toBeNull()
   expect(discussion.closest('details:not([open])')).toBeNull()
   expect(discussion.disabled).toBe(false)

@@ -133,6 +133,7 @@ describe('Goal plan graph', () => {
     expect(team.getAttribute('aria-pressed')).toBe('false')
     expect(goalOutlineTrigger(detail).getAttribute('aria-label')).toBe(originalReading)
     expect(dom.container.querySelectorAll('[aria-label="Open discussion for Ship the plan"]')).toHaveLength(1)
+    expect(dom.container.querySelector('[aria-label="Open discussion for Ship the plan"]')?.closest('.goals-detail__overview-heading')).not.toBeNull()
     expect(graph()!.textContent).not.toContain('Open goal discussion')
   })
 
@@ -148,7 +149,14 @@ describe('Goal plan graph', () => {
     expect(graph()!.querySelector('[aria-label="Execution graph"]')?.getAttribute('tabindex')).toBe('0')
     const delivery = graph()!.querySelector('[data-goal-delivery="d-api"]')!
     expect(delivery, 'The first Plan paint shows the original current delivery').not.toBeNull()
-    expect(delivery.closest('.goal-plan__stage')?.parentElement?.querySelector('[aria-label="Task assignments"] [aria-current] strong')?.textContent).toBe('Node api')
+    const index = graph()!.querySelector<HTMLElement>('.goal-plan__assignments')!
+    const indexToggle = graph()!.querySelector<HTMLButtonElement>('.goal-plan__assignment-toggle')!
+    expect(indexToggle.closest('.goal-plan__tools')).not.toBeNull()
+    expect(index.hidden).toBe(true)
+    await act(async () => indexToggle.click())
+    expect(index.hidden).toBe(false)
+    expect(index.nextElementSibling).toBe(delivery.closest('.goal-plan__workbench'))
+    expect(index.querySelector('[aria-current] strong')?.textContent).toBe('Node api')
     expect(graph()!.querySelector('[data-goal-time-row="d-api"][data-selected]')).not.toBeNull()
     expect(document.activeElement).not.toBe(graph()!.querySelector('.goal-plan__reading h3'))
     const view = [...dom.container.querySelectorAll('button')].find(button => button.textContent === 'View delivery')!
@@ -309,7 +317,7 @@ describe('Goal plan graph', () => {
     const origin = graph()!.querySelector('[data-goal-plan-origin="goal"]')!
     expect(origin).not.toBeNull()
     expect(origin.closest('[aria-label="Execution graph"]')).not.toBeNull()
-    expect(graph()!.querySelector('[aria-label="Task assignments"] button strong')?.textContent).toBe(record.title)
+    expect(graph()!.querySelector('.goal-plan__assignment-toggle')).toBeNull()
     expect(graph()!.querySelector('[data-goal-plan-edge]')).toBeNull()
     expect(graph()!.querySelector('[data-goal-plan-progress]')).toBeNull()
     expect(graph()!.querySelector('h2')!.textContent).toContain('Execution plan')

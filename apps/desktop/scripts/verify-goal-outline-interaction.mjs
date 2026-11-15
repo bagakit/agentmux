@@ -47,8 +47,10 @@ async function run(mutation) {
   if (mutation) {
     assert.equal(report.numFailedTests, 1)
     assert.equal(originalTest.status, 'failed')
-    assert.match(originalTest.failureMessages.join('\n'), /choosing Goal brief focuses the original brief/)
-    console.log(phase + ': the original Goal brief focus assertion rejected the wrong destination.')
+    assert.match(originalTest.failureMessages.join('\n'), mutation === 'orphaned-discussion'
+      ? /Goal discussion belongs beside the overview heading/
+      : /choosing Goal brief focuses the original brief/)
+    console.log(phase + ': the mounted Goal workspace rejected the mutation.')
   } else {
     assert.equal(originalTest.status, 'passed')
     assert.equal(report.numPassedTests, assertions.length)
@@ -59,6 +61,7 @@ async function run(mutation) {
 try {
   await run('')
   await run('wrong-destination')
+  await run('orphaned-discussion')
 } finally {
   await rm(proof, { recursive: true, force: true })
 }

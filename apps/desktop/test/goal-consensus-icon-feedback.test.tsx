@@ -16,7 +16,7 @@ function Panel({ id = goalId, active = true }: { id?: string; active?: boolean }
   const [feedback, setFeedback] = useState(EMPTY_GOAL_ACKNOWLEDGEMENT)
   const demand = projectDemands(composerConfig, [], records).find(row => row.id === id)!
   return <WorkbenchPresentationContext.Provider value={{ active, retainedRegionId: null }}><GoalAlignment demand={demand} feedback={feedback}
-    onFeedbackChange={patch => setFeedback(value => ({ ...value, ...patch }))} onGrill={() => {}} onGrounding={() => {}} onOpenMote={() => {}} /></WorkbenchPresentationContext.Provider>
+    onFeedbackChange={patch => setFeedback(value => ({ ...value, ...patch }))} onGrill={() => {}} onGrounding={() => {}} /></WorkbenchPresentationContext.Provider>
 }
 const icon = () => dom.container.querySelector('[data-semantic-icon="object.goal"]')
 const cue = () => dom.container.querySelector('[data-icon-animation="feedback"]')

@@ -10,6 +10,7 @@ const mutations = {
   'manual-reading': ["detail.addEventListener('scroll', scheduleReadingSection, { passive: true })", "detail.addEventListener('unused-scroll', scheduleReadingSection, { passive: true })"],
   'selected-reading': ["aria-current={here ? 'location' : undefined}", 'aria-current={undefined}'],
   'wrong-destination': ["readingTargets[id].current", "id === 'overview' ? planRef.current : readingTargets[id].current"],
+  'orphaned-discussion': ['className="goals-section-heading goals-detail__overview-heading"', 'className="goals-section-heading"'],
   'properties-disclosure': ['<details className="goals-detail__properties"', '<details open className="goals-detail__properties"']
 } as const
 const mutationOwner = mutation === 'selected-reading' ? outline : owner
