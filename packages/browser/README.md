@@ -30,3 +30,5 @@ Keep each lifecycle operation id. A lost acknowledgement or an unconfirmed durab
 Library hosts can compose `StandaloneBrowserHost` or `serveStandaloneBrowser`. Importing either starts no engine. Platform-specific input, file access, visible feedback and native connections remain host ports; the shared kernel does not create an Agent Runtime.
 
 The shared page dispatcher owns issued refs and sends commands through the original host transport. Page wait policies use that transport and the host's current navigation observation. Program owners retain their native control obligations and share cleanup warning and history receipt rules. A cleanup warning describes the resource or history write left unconfirmed, separately from the original program result. [Page dispatch](src/browser-page-dispatch.ts) · [Program completion](src/browser-program-completion.ts)
+
+Network-idle waits track CDP requests by request and session identity. Redirect hops share one active request until its final completion or failure. [Page waits](src/browser-page-waits.ts)
