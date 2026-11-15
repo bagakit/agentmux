@@ -285,7 +285,15 @@ export function GoalPlanGraph({ demand, projection: provided, planLink, planning
   const readingHeading = useRef<HTMLHeadingElement>(null)
   const { edges, width, height, scrollable } = useEdges(canvas, projection)
   useGoalPlanPath(canvas, projection.nodes, edges, open)
-  useLayoutEffect(() => { if (reveal) setSelection(reveal) }, [reveal])
+  useLayoutEffect(() => {
+    if (!reveal) return
+    setSelection(current => {
+      if (reveal.trigger || current?.target.nodeId !== reveal.target.nodeId || current.target.wholeGoal) return reveal
+      const latest = projection.nodes.find(item => item.node.id === reveal.target.nodeId)?.delegation?.operationId
+      // The same live reader keeps its placement and focused draft when opened by a link.
+      return current.target.attemptId === undefined || current.target.attemptId === latest ? current : reveal
+    })
+  }, [reveal])
   useLayoutEffect(() => {
     // Retain the first automatic choice while its report becomes reviewed or new work arrives.
     if (defaultNode && defaultAttempt) setSelection(current => current === undefined ? { target: { nodeId: defaultNode, attemptId: defaultAttempt } } : current)
@@ -293,7 +301,7 @@ export function GoalPlanGraph({ demand, projection: provided, planLink, planning
   useLayoutEffect(() => {
     const viewport = canvas.current
     const card = open && viewport?.querySelector(`[data-goal-plan-node="${CSS.escape(open)}"]`)
-    if ((!selection?.trigger && selection !== reveal) || !viewport || !card) return
+    if ((!selection?.trigger && reveal?.target.nodeId !== open) || !viewport || !card) return
     const bounds = viewport.getBoundingClientRect(), selected = card.getBoundingClientRect()
     if (selected.bottom > bounds.bottom) viewport.scrollTop += selected.bottom - bounds.bottom
     else if (selected.top < bounds.top) viewport.scrollTop += selected.top - bounds.top
@@ -308,13 +316,21 @@ export function GoalPlanGraph({ demand, projection: provided, planLink, planning
     else heading?.scrollIntoView?.({ block: 'nearest' })
     heading?.focus({ preventScroll: true })
   }, [selection])
-  function select(target: GoalPlanReadingTarget, trigger: HTMLButtonElement) { setSelection({ target, trigger }) }
+  function supersedePendingTicketRead() {
+    const pending = useAppStore.getState().goalReadingEntry
+    if (pending?.goalId === demand.id && pending.phase === 'pending') useAppStore.setState({ goalReadingEntry: null })
+  }
+  function select(target: GoalPlanReadingTarget, trigger: HTMLButtonElement) {
+    supersedePendingTicketRead()
+    setSelection({ target, trigger })
+  }
   function toggleNode(item: GoalPlanNodeView, trigger: HTMLButtonElement) {
     const attemptId = item.delegation?.operationId
     if (selection?.trigger && open === item.node.id && selection.target.attemptId === attemptId) closeNode(item.node.id)
     else select({ nodeId: item.node.id, ...(attemptId ? { attemptId } : {}), ...(item.wholeGoal ? { wholeGoal: true } : {}) }, trigger)
   }
   function closeNode(id: string) {
+    supersedePendingTicketRead()
     const target = selection?.trigger?.isConnected ? selection.trigger
       : canvas.current?.querySelector<HTMLButtonElement>(`[data-goal-plan-node="${CSS.escape(id)}"] .goal-plan-node__head`)
     if (target) {

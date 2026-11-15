@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from 'node:util'
 import { prepareGoalDelegationMaterials } from './goal-delegation-materials.js'
 import type { FileReadParams, FileReadResult } from '@agentmux/core/files'
 import { AgentMuxError, sessionSemanticResumeSourceRuns } from '@agentmux/core'
-import { assertGoalDelegationSource, assertGoalDelegationReply, readGoalDelegationWireReport, goalDelegationReportBody, goalDelegationApplication, goalReportApplication } from '@agentmux/core/goal-delegation'
+import { assertGoalDelegationSource, assertGoalDelegationReply, readGoalDelegationWireReport, readGoalDelegationSource, goalDelegationReportBody, goalDelegationApplication, goalReportApplication } from '@agentmux/core/goal-delegation'
 export { goalDelegationReportBody } from '@agentmux/core/goal-delegation'
 import type { GoalDelegationAuthority, GoalDelegationMethod, GoalDelegationParamsMap,
   GoalDelegationResult, GoalDelegationResultMap, GoalDelegationObservation, GoalDelegationsOwner } from '@agentmux/core/goal-delegation'
@@ -15,7 +15,7 @@ import { changeGoalPlanAssignment } from './goal-plan-assignment.js'
 import { isGoalSupervisor } from './goal-supervisor-identity.js'
 import type { DurableAgentMuxMessage } from '@agentmux/core'
 import type { DemandStore, Demand, DemandDispatch, GoalStartObservation } from '@agentmux/demand'
-import { formatGoalTicketLink } from '@agentmux/core/sharing'
+import { formatGoalTicketLink, hasOriginalGoalBinding, parseAmuxObjectLink } from '@agentmux/core/sharing'
 import type { GoalRuntimePort } from './goal-runtime.js'
 import type { GoalPatrolOwner } from './goal-patrol-owner.js'
 import type { GoalResponsibilityOwner } from './goal-responsibility-owner.js'
@@ -163,7 +163,10 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
         // A successful exact journal read is the only proof that an original logical message
         // does not exist. Delivery/input observation and dispatch absence cannot substitute.
         const existing = await core.call(saved.hostId, 'message.read', { hostId: saved.hostId, operationId: saved.operationId }, context)
-        if (existing.message) this.assertSource(saved, existing.message, input.goalId)
+        if (existing.message) {
+          this.assertSource(saved, existing.message, input.goalId)
+          if (saved.linkedAt === undefined) await this.assertTicketLink(input.goalId, saved, existing.message)
+        }
         const remote = delegationWorkerHostId(saved) !== saved.hostId
         const reconcileRemote = remote && saved.linkedAt === undefined && method === 'goal.delegate'
         if (!existing.message || reconcileRemote) {
@@ -192,6 +195,7 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
           ? await core.call(saved.hostId, 'message.dispatch.sync', { hostId: delegationWorkerHostId(saved), sourceMessageId: saved.sourceMessageId }, context)
           : await core.call(saved.hostId, 'message.dispatch.read', { hostId: saved.hostId, sourceMessageId: saved.sourceMessageId }, context)
         this.assertSource(saved, observed.source, input.goalId)
+        if (saved.linkedAt === undefined && !existing.message) await this.assertTicketLink(input.goalId, saved, observed.source)
         if (confirmBinding) this.assertRemoteSourceReceipt(saved, observed)
         await this.demands.linkDelegation(input.goalId, saved.operationId, saved.sourceMessageId, authority.actor.id,
           observed.source.provenance && observed.source.envelope.senderRuntimeId && observed.source.envelope.recipientRuntimeId
@@ -288,6 +292,21 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
     if (!this.core) throw new AgentMuxError('The original Core communication owner is unavailable. Frozen input and original Agents are retained.', 'CONTROL_UNAVAILABLE')
     return this.core
   }
+  private async assertTicketLink(goalId: string, saved: DemandDelegation, message: DurableAgentMuxMessage): Promise<void> {
+    if (!message.envelope.application) return
+    const { ticketLink } = readGoalDelegationSource(message)
+    if (!ticketLink) return
+    const [goal, owner] = await Promise.all([this.demands.get(goalId), this.planOwner?.().catch(() => undefined)])
+    const target = parseAmuxObjectLink(ticketLink)
+    if (!goal || !owner || target.kind !== 'goal' || target.ticket === undefined)
+      throw new AgentMuxError('The original Ticket address is unconfirmed. Retain this source and its original body.', 'CONTROL_UNAVAILABLE')
+    const address = hostGoalAddress(goal, owner)
+    const ownerMatches = target.runtimeId === undefined ? hasOriginalGoalBinding(goalId, address)
+      : target.runtimeId === address.runtimeId && target.namespace === address.namespace
+    if (!ownerMatches || target.goalId !== goalId || goal.plan?.ticketNodes?.[target.ticket - 1] !== saved.planNodeId)
+      throw new AgentMuxError('The original Core source names another Goal owner or Ticket. Retain the original input.', 'CONTROL_REQUEST_CONFLICT')
+  }
+
   private assertSource = assertGoalDelegationSource
   private async replyRuns(saved: DemandDelegation, reply: DurableAgentMuxMessage) {
     if (reply.provenance) return undefined

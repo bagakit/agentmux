@@ -134,6 +134,8 @@ export type DemandStoreSnapshot = {
   demands: Demand[]
   /** Survives deletion of the named object; title and history share this snapshot commit. */
   nameHistory: DemandNameChangeRecord[]
+  /** Removed identities are reserved so published pages and Tickets cannot be retargeted. */
+  retiredGoals?: { id: string; creationOperationId?: string }[]
 }
 
 export type CreateDemandInput = {

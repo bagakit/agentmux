@@ -258,7 +258,7 @@ function parseDemand(value: unknown, label: string): Demand {
 function parseSnapshot(value: unknown, storePath: string): DemandStoreSnapshot {
   try {
     const record = object(value, 'snapshot')
-    exactKeys(record, ['schema', 'revision', 'updatedAt', 'demands', 'nameHistory'], 'snapshot', ['nameHistory'])
+    exactKeys(record, ['schema', 'revision', 'updatedAt', 'demands', 'nameHistory', 'retiredGoals'], 'snapshot', ['nameHistory', 'retiredGoals'])
     if (record.schema !== DEMAND_STORE_SCHEMA) throw new Error('snapshot.schema is invalid')
     if (typeof record.revision !== 'number' || !Number.isSafeInteger(record.revision) || record.revision < 0) {
       throw new Error('snapshot.revision must be a non-negative integer')
@@ -267,6 +267,18 @@ function parseSnapshot(value: unknown, storePath: string): DemandStoreSnapshot {
     const demands = record.demands.map((entry, index) => parseDemand(entry, `snapshot.demands[${index}]`))
     if (new Set(demands.map((demand) => demand.id)).size !== demands.length) {
       throw new Error('snapshot.demands contains duplicate IDs')
+    }
+    if (record.retiredGoals !== undefined && !Array.isArray(record.retiredGoals)) throw new Error('snapshot.retiredGoals must be an array')
+    const retiredGoals = (record.retiredGoals ?? [] as unknown[]).map(value => {
+      const item = object(value, 'retired Goal')
+      exactKeys(item, ['id', 'creationOperationId'], 'retired Goal', ['creationOperationId'])
+      return { id: nonEmptyString(item.id, 'retired Goal ID'),
+        ...(item.creationOperationId === undefined ? {} : { creationOperationId: nonEmptyString(item.creationOperationId, 'retired Goal creation operation') }) }
+    })
+    const allIds = new Set(demands.map(demand => demand.id))
+    for (const goal of retiredGoals) {
+      if (allIds.has(goal.id)) throw new Error('snapshot reuses a retired Goal ID')
+      allIds.add(goal.id)
     }
     const activityOperations = demands.flatMap(demand => demand.activities.flatMap(activity => activity.operationId === undefined ? [] : [activity.operationId]))
     if (new Set(activityOperations).size !== activityOperations.length) throw new Error('snapshot.activities contains duplicate operation IDs')
@@ -284,6 +296,7 @@ function parseSnapshot(value: unknown, storePath: string): DemandStoreSnapshot {
       updatedAt: timestamp(record.updatedAt, 'snapshot.updatedAt'),
       demands,
       nameHistory,
+      ...(retiredGoals.length ? { retiredGoals } : {}),
     }
   } catch (error) {
     throw new DemandStoreError('INVALID_SNAPSHOT', 'validate', storePath, `Invalid Demand snapshot at ${storePath}: ${error instanceof Error ? error.message : String(error)}`, error)
@@ -407,6 +420,8 @@ export class DemandStore {
 
   async originalGoalCreationId(operationId: string): Promise<string | undefined> {
     const { snapshot } = await this.readConfirmedSnapshot()
+    if (snapshot.retiredGoals?.some(goal => goal.creationOperationId === operationId))
+      throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'This creation operation belongs to a removed Goal. Use a new Goal identity for new work.')
     const matches = snapshot.demands.filter(goal => goal.creationOrigin?.operationId === operationId)
     if (matches.length > 1) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'The original Goal creation operation names multiple Goals; use its exact Goal ID.')
     return matches[0]?.id
@@ -436,6 +451,8 @@ export class DemandStore {
       if (!title) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'title is required')
       const id = input.id ?? mintObjectId()
       inputString(id, 'id')
+      if (snapshot.retiredGoals?.some(goal => goal.id === id || goal.creationOperationId === operationId))
+        throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'This original Goal identity or creation operation has been retired.')
       const original = snapshot.demands.find(goal => goal.id === id)
       if (original && options.discussionOperationId && original.discussionOperationId === options.discussionOperationId && original.creationOrigin?.operationId === operationId) {
         const expected = { title, description: input.description ?? '', projectId: input.projectId ?? null, priority: input.priority ?? 'normal', status: input.status ?? 'backlog',
@@ -1325,7 +1342,10 @@ export class DemandStore {
     return this.mutate('remove', (snapshot) => {
       const index = snapshot.demands.findIndex((entry) => entry.id === id)
       if (index < 0) throw new DemandStoreError('NOT_FOUND', 'validate', this.storePath, `Demand ${id} was not found`)
-      return snapshot.demands.splice(index, 1)[0]!
+      const [removed] = snapshot.demands.splice(index, 1)
+      const creationOperationId = removed!.creationOrigin?.operationId
+      snapshot.retiredGoals = [...(snapshot.retiredGoals ?? []), { id, ...(creationOperationId ? { creationOperationId } : {}) }]
+      return removed!
     }) as Promise<{ schema: typeof DEMAND_RECEIPT_SCHEMA; operation: 'remove'; operationId: string; revision: number; demand: Demand }>
   }
 
