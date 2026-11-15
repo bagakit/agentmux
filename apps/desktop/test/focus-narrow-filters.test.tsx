@@ -77,7 +77,7 @@ it('actual App uses one shared filter entry, all real projects and four task gro
     expect([...f.menu().querySelectorAll('[data-focus-project]')].map(node=>[node.getAttribute('data-focus-project'),node.querySelector('.focus-filter-menu__name')?.textContent])).toEqual([['all','All projects'],[JSON.stringify([f.alpha.hostId,'alpha']),f.alpha.name],[JSON.stringify([f.alpha.hostId,'beta']),'Beta']])
     const counts=[...f.menu().querySelectorAll('[data-focus-state]')].map(node=>[node.querySelector('.focus-filter-menu__name')?.textContent,node.querySelector('.focus-filter-menu__count')?.textContent??null])
     expect(counts).toEqual([['All states',null],['Attention','1'],['Working','2'],['Results','1'],['Idle / Recovery','3'],['Activity unknown','2'],['Needs recovery','1']])
-    expect([...f.menu().querySelectorAll('[role="menuitem"]')].map(node => node.textContent)).toEqual(['Clear filters', 'Search all retained conversation text', 'Done'])
+    expect([...f.menu().querySelectorAll('[role="menuitem"]')].map(node => node.textContent)).toEqual(['Clear filters', 'Done'])
     expect(f.menu().querySelectorAll('[aria-checked="true"]')).toHaveLength(3)
     await f.escape(); expect(f.ids()).toEqual(['attention','beta-agent','healthy-lost','idle','offline','results','working'])
   } finally {await f.close()}

@@ -97,6 +97,11 @@ if (window.__taskLayoutScene) {
  timelines.working.items.push({id:'read-release-checks',agentSessionId:'working',kind:'tool_call',title:'Read release checklist',toolName:'Read',toolInput:JSON.stringify({file_path:path+'/release-checklist.md'}),source:'native-hook',status:'streaming',createdAt:now-1000,updatedAt:now-1000})
  timelines.audit.items[0].content='**退款材料已复核**，原始记录保留。'
  timelines.reading.items[0] = {...timelines.reading.items[0],kind:'user_message',content:'保留跨版本分析的原工作位置。'}
+ for (const [id, author] of [['branch-api', {authorHuman:true}], ['coverage', {authorAgentSessionId:'automated-peer'}]]) {
+  const createdAt = now - 10 * 60_000
+  timelines[id].items.unshift({id:'held-input-'+id,agentSessionId:id,kind:'user_message',title:'Observed submitted input',
+   source:'agentmux',status:'complete',content:'保留原任务范围。',createdAt,updatedAt:createdAt,...author})
+ }
 }
 const tab=createWorkbenchTab('ordinary-tab',{regionId:'ordinary-region',workspaceId:workspace.id,kind:'agent',phase:'attached',sessionId:'working'})
 const originalTabs = [tab, ...(localTaskScene ? sessions.filter(item => item.id !== 'working').map(item => {
@@ -148,6 +153,14 @@ const projectVisits = window.__taskLayoutScene ? [
  ['saved-release-check', '复查上一轮的发布清单'], ['saved-chart-check', '核对历史图表口径'], ['saved-workface', '继续保留的分析工作面'],
 ].map(([sessionId, name], index) => ({ sessionId, focusedAt: now - (index + 1) * 60000,
  identity: {kind:'agent', providerId:'codex', hostId:'local', name, workspacePath:path, project:{id:workspace.id,name:workspace.name}} })) : []
+if (window.__taskLayoutScene) {
+ for (const [sessionId, minutes] of [['working', 4], ['reading', 45]]) {
+  projectVisits.push({sessionId, focusedAt:now - minutes * 60_000, identity:{
+   kind:'agent', providerId:'codex', hostId:'local', name:sessions.find(item=>item.id===sessionId).label,
+   workspacePath:path,project:{id:workspace.id,name:workspace.name}
+  }})
+ }
+}
 useAppStore.setState({loading:false,initialize:async()=>()=>{},config:{...config,workspaces,hosts:[{id:'local',kind:'local',label:'Original local device'}],
  ...(localTaskScene || agentPinsScene ? {focus:{...config.focus,previewTrigger:'keyboard'}} : {})},
  sessions,agentNames:Object.fromEntries(sessions.map(s=>[s.id,s.label])),timelines,
