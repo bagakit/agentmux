@@ -62,8 +62,9 @@ export function diagnosticWorkingSet(actualKiB: number, limitKiB: number): {
 
 type ResourceOwners = {
   browserWebContents: number
-  monacoEditors: number
-  monacoModels: number
+  monacoEditors: number | null
+  monacoModels: number | null
+  monacoState: 'cold' | 'observed' | 'missing'
   documents: number
   fileWatchers: number
   runtimeSubscriptions: number
@@ -110,8 +111,9 @@ type ResourceAttribution = {
     terminalViews: number
     terminalAddons: number
     terminalListeners: number
-    monacoEditors: number
-    monacoModels: number
+    monacoEditors: number | null
+    monacoModels: number | null
+    monacoState: ResourceOwners['monacoState']
     documents: number
     fileWatchers: number
     browserWebContents: number
@@ -194,33 +196,41 @@ async function ownerCounts(
   window: BrowserWindow,
   runtime: RuntimeController
 ): Promise<ResourceOwners> {
-  const renderer = await window.webContents.executeJavaScript(`(() => {
+  const { monacoSourceRequested, monacoRegistryPresent, ...renderer } = await window.webContents.executeJavaScript(`(() => {
     const event = new CustomEvent('agentmux:resource-owner-counts', { detail: { observed: false } })
     window.dispatchEvent(event)
     if (!event.detail.observed) throw new Error('Renderer resource owner observer is not installed')
     const { observed: _observed, ...owners } = event.detail
     return owners
   })()`) as {
-    monacoEditors: number
-    monacoModels: number
+    monacoEditors: number | null
+    monacoModels: number | null
+    monacoSourceRequested: boolean
+    monacoRegistryPresent: boolean
     documents: number
     runtimeSubscriptions: number
     terminalViews: number
     terminalAddons: number
     terminalListeners: number
   }
+  const { monacoEditors, monacoModels, ...otherRenderer } = renderer
+  const observed = (value: number | null): value is number => value !== null && Number.isSafeInteger(value) && value >= 0
   const owners = {
     browserWebContents: webContents.getAllWebContents().filter((item) => item !== window.webContents).length,
     fileWatchers: workspaceFileObserverCount(),
-    ...renderer,
+    ...otherRenderer,
     ...runtime.resourceOwnerCounts()
   }
   for (const [name, value] of Object.entries(owners)) {
-    if (!Number.isInteger(value) || value < 0) {
+    if (!Number.isSafeInteger(value) || value < 0) {
       throw new Error(`Invalid resource owner count for ${name}.`)
     }
   }
-  return owners
+  const monacoState = monacoRegistryPresent === true && observed(monacoEditors) && observed(monacoModels)
+    ? 'observed'
+    : monacoSourceRequested === false && monacoRegistryPresent === false && monacoEditors === null && monacoModels === null
+      ? 'cold' : 'missing'
+  return { ...owners, monacoState, monacoEditors, monacoModels }
 }
 
 function delay(ms: number): Promise<void> {
@@ -315,6 +325,7 @@ async function sample(
         terminalViews: owners.terminalViews,
         terminalAddons: owners.terminalAddons,
         terminalListeners: owners.terminalListeners,
+        monacoState: owners.monacoState,
         monacoEditors: owners.monacoEditors,
         monacoModels: owners.monacoModels,
         documents: owners.documents,
@@ -408,63 +419,89 @@ async function click(window: BrowserWindow, source: string): Promise<void> {
   if (!clicked) throw new Error(`Desktop resource probe could not find UI control: ${source}`)
 }
 
-/**
- * Open the fixture through the same FileExplorer click path a user would use, but make the
- * asynchronous boundary explicit.  A renderer that has just flushed a large Terminal output can
- * acknowledge the DOM click before React has committed the new File Tab; retrying only while the
- * expected deterministic Tab id is absent keeps this probe from turning that scheduling race into
- * a false leak/budget failure.  Once the Tab exists we never click again, so a delayed first event
- * cannot create a duplicate document.
- */
-async function openProbeFile(
-  window: BrowserWindow,
-  workspaceId: string,
-  path: string,
-  description: string
-): Promise<void> {
+type ProbeFileOccurrence = { tabId: string; regionId: string }
+
+async function observeProbeFile(window: BrowserWindow, workspaceId: string, path: string): Promise<ProbeFileOccurrence | null> {
+  return await window.webContents.executeJavaScript(`(() => {
+    const event = new CustomEvent('agentmux:resource-owner-counts', { detail: { observed: false, file: ${JSON.stringify({ workspaceId, path })} } })
+    window.dispatchEvent(event)
+    if (!event.detail.observed || event.detail.occurrence === undefined) throw new Error('Original File occurrence observation is unavailable')
+    return event.detail.occurrence
+  })()`) as ProbeFileOccurrence | null
+}
+
+async function openProbeFile(window: BrowserWindow, workspaceId: string, path: string, description: string): Promise<ProbeFileOccurrence> {
   const rowSelector = `[data-tree-path=${JSON.stringify(path)}]`
-  const rowSource = `document.querySelector(${JSON.stringify(rowSelector)})`
-  const tabSelector = `${workspaceSlotSelector(workspaceId)} [data-workbench-tab-id=${JSON.stringify(`file:${workspaceId}:${path}`)}]`
-  await waitFor(`${description} resource probe file row`, async () => await rendererBoolean(
-    window,
-    `document.querySelector(${JSON.stringify(rowSelector)})`
-  ))
-  let lastError: unknown = null
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    if (await rendererBoolean(window, `document.querySelector(${JSON.stringify(tabSelector)})`)) return
-    await click(window, rowSource)
-    try {
-      await waitFor(
-        `${description} file tab`,
-        async () => await rendererBoolean(window, `document.querySelector(${JSON.stringify(tabSelector)})`),
-        4_000
-      )
-      return
-    } catch (error) {
-      lastError = error
-      traceResourceProbe(`${description} file tab retry ${attempt + 1}: ${error instanceof Error ? error.message : String(error)}`)
-    }
+  const rowSource = `[...document.querySelectorAll(${JSON.stringify(rowSelector)})].find(row => row.getClientRects().length > 0 && !row.closest('[hidden], [inert]'))`
+  await waitFor(`${description} resource probe file row`, () => rendererBoolean(window, rowSource))
+  if (await observeProbeFile(window, workspaceId, path)) throw new Error(`${description} file is already open before its FileExplorer action.`)
+  await click(window, rowSource)
+  let occurrence: ProbeFileOccurrence | null = null
+  await waitFor(`${description} original File occurrence`, async () => {
+    occurrence = await observeProbeFile(window, workspaceId, path)
+    return Boolean(occurrence)
+  })
+  if (!occurrence) throw new Error(`${description} original File occurrence is unconfirmed.`)
+  return occurrence
+}
+
+function hasEditorOwners(owners: ResourceOwners, baseline: ResourceOwners): boolean {
+  // The active Terminal may drop its visible WebGL owner while the File is in front.
+  return owners.terminalAddons <= baseline.terminalAddons && owners.terminalAddons >= baseline.terminalAddons - 1 &&
+    ownersEqual(owners, { ...baseline, terminalAddons: owners.terminalAddons,
+      monacoState: 'observed', monacoEditors: 1, monacoModels: 1, documents: 1, fileWatchers: 1 })
+}
+
+async function waitForProbeEditor(window: BrowserWindow, runtime: RuntimeController, file: ProbeFileOccurrence, baseline: ResourceOwners, description: string): Promise<void> {
+  const selector = `[data-workbench-region-id=${JSON.stringify(file.regionId)}] .monaco-editor`
+  let latest: ResourceOwners | undefined
+  await waitFor(`${description} original Monaco editor and model owners`, async () => {
+    latest = await ownerCounts(window, runtime)
+    return hasEditorOwners(latest, baseline) && await rendererBoolean(window,
+      `[...document.querySelectorAll(${JSON.stringify(selector)})].some(editor => editor.getClientRects().length > 0 && !editor.closest('[hidden], [inert]'))`)
+  }).catch(error => {
+    throw new Error(`${description} Monaco owner coverage is unconfirmed: ${JSON.stringify(latest)}`, { cause: error })
+  })
+}
+
+async function closeProbeFile(window: BrowserWindow, runtime: RuntimeController, workspaceId: string, path: string,
+  file: ProbeFileOccurrence, expected: ResourceOwners, description: string): Promise<void> {
+  const closeSelector = `.workbench-tab[data-workbench-tab-id=${JSON.stringify(file.tabId)}] .workbench-tab__close`
+  await click(window, `document.querySelector(${JSON.stringify(closeSelector)})`)
+  let latest: ResourceOwners | undefined
+  await waitFor(`${description} original File and editor owner release`, async () => {
+    latest = await ownerCounts(window, runtime)
+    return ownersEqual(latest, expected) && !await observeProbeFile(window, workspaceId, path)
+  }).catch(error => {
+    throw new Error(`${description} File owner release did not converge: ${JSON.stringify(latest)}`, { cause: error })
+  })
+}
+
+async function stopProbeTerminal(description: string, runtime: RuntimeController, control: SessionControl): Promise<void> {
+  const receipt = await runtime.stopSession(control)
+  if (control.kind !== 'terminal' || !receipt || !('action' in receipt) || receipt.action !== 'terminal-stop' ||
+      receipt.target.run.runId !== control.runId || receipt.target.hostId !== control.hostId || receipt.phase !== 'settled' ||
+      !((receipt.outcome === 'applied' && receipt.acknowledgement?.kind === 'stop') ||
+        (receipt.outcome === 'no-op' && receipt.acknowledgement?.kind === 'stop-absent')) ||
+      receipt.acknowledgement.runId !== control.runId) {
+    throw new Error(`${description} did not confirm the original Native Terminal Stop.`)
   }
-  throw lastError instanceof Error
-    ? lastError
-    : new Error(`Timed out waiting for ${description} file tab.`)
 }
 
 function ownersEqual(left: ResourceOwners, right: ResourceOwners): boolean {
-  return Object.entries(left).every(([name, value]) => right[name as keyof ResourceOwners] === value)
+  return left.monacoState !== 'missing' && Object.entries(left).every(([name, value]) => right[name as keyof ResourceOwners] === value)
 }
 
 function isReadyLauncherOwnerBaseline(owners: ResourceOwners): boolean {
   return (
     owners.browserWebContents === 0 &&
-    owners.monacoEditors === 0 &&
-    owners.monacoModels === 0 &&
+    (owners.monacoState === 'cold' || (owners.monacoState === 'observed' && owners.monacoEditors === 0 && owners.monacoModels === 0)) &&
     owners.documents === 0 &&
     owners.fileWatchers === 0 &&
     owners.runtimeSubscriptions === 4 &&
     owners.terminalViews === 1 &&
-    (owners.terminalAddons === 3 || owners.terminalAddons === 4) &&
-    owners.terminalListeners === 7 &&
+    owners.terminalAddons >= 1 &&
+    owners.terminalListeners >= 1 &&
     owners.sessionAttachmentOwners === 1 &&
     owners.sessionAttachmentLeases === 1
   )
@@ -546,17 +583,6 @@ async function waitForReadyLauncherTerminal(options: {
   return ready
 }
 
-async function waitForStoppedTerminal(
-  description: string,
-  runtime: RuntimeController,
-  config: AppConfig,
-  sessionId: string
-): Promise<void> {
-  await waitFor(description, async () => (
-    runningTerminal((await runtime.snapshot(config)).sessions, sessionId) === null
-  ))
-}
-
 async function claimLauncherTerminal(
   description: string,
   window: BrowserWindow,
@@ -589,6 +615,7 @@ function launcherOwnerPredicate(
 ): (owners: ResourceOwners) => boolean {
   return (owners) => (
     owners.browserWebContents === previous.browserWebContents &&
+    owners.monacoState === previous.monacoState &&
     owners.monacoEditors === previous.monacoEditors &&
     owners.monacoModels === previous.monacoModels &&
     owners.documents === previous.documents &&
@@ -810,9 +837,8 @@ export async function runDesktopResourceProbe(options: {
     // Leave the measurement Terminal as the sole Region in C's group. Stopping a Session
     // removes its projection from the canonical Store; with another C Tab present there would
     // be no launcher to measure in the release cycles.
-    await options.runtime.stopSession(workspaceCPrimaryControl)
+    await stopProbeTerminal('hidden Workspace C Terminal', options.runtime, workspaceCPrimaryControl)
     activeTerminalControls.delete(workspaceCPrimaryControl)
-    await waitForStoppedTerminal('hidden Workspace C terminal stop', options.runtime, config, workspaceCPrimary.id)
     await waitFor('hidden Workspace C terminal projection removal', async () => !await rendererBoolean(
       options.window,
       `document.querySelector(${JSON.stringify(`${workspaceSlotSelector(workspaceC.id)} [${DESKTOP_SESSION_ATTRIBUTE}=${JSON.stringify(workspaceCPrimary.id)}]`)})`
@@ -832,33 +858,25 @@ export async function runDesktopResourceProbe(options: {
       throw new Error(`Desktop claimed Terminal owners diverged from the multiple-workspace baseline: ${JSON.stringify(terminalSample.owners)}`)
     }
 
-    await openProbeFile(options.window, workspaceC.id, 'resource-probe.ts', 'initial')
+    const filePath = 'resource-probe.ts'
+    const firstFile = await openProbeFile(options.window, workspaceC.id, filePath, 'initial')
     traceResourceProbe(`after resource file click ${await rendererProbeSummary(options.window)}`)
-    await waitFor('Monaco editor', async () => await rendererBoolean(options.window, `document.querySelector(${JSON.stringify(`${workspaceSlotSelector(workspaceC.id)} .monaco-editor`)})`))
+    await waitForProbeEditor(options.window, options.runtime, firstFile, terminalBaselineOwners, 'initial')
     const editorSample = await sample('monaco', options.window, options.runtime, config, identity)
-    const editorOwners: ResourceOwners = {
-      ...terminalBaselineOwners,
-      monacoEditors: 1,
-      monacoModels: 1,
-      documents: 1,
-      fileWatchers: 1
-    }
-    if (!ownersEqual(editorSample.owners, editorOwners)) {
+    if (!hasEditorOwners(editorSample.owners, terminalBaselineOwners)) {
       throw new Error(`Desktop editor did not own exactly one Document, Monaco Editor, and Monaco Model: ${JSON.stringify(editorSample.owners)}`)
     }
     if (!runningTerminal((await options.runtime.snapshot(config)).sessions, launcherTerminal.id)) {
       throw new Error('Desktop editor did not retain the claimed Terminal backend.')
     }
 
-    await click(options.window, `document.querySelector(${JSON.stringify(`${workspaceSlotSelector(workspaceC.id)} [aria-label="Close resource-probe.ts"]`)})`)
-    await waitFor('Monaco disposal', async () => !await rendererBoolean(options.window, `document.querySelector(${JSON.stringify(`${workspaceSlotSelector(workspaceC.id)} .monaco-editor`)})`))
-    await waitFor('Main file observer release', async () => (
-      (await ownerCounts(options.window, options.runtime)).fileWatchers === 0
-    ))
-    await options.runtime.stopSession(terminalControl)
+    const releaseBaselineOwners: ResourceOwners = {
+      ...terminalBaselineOwners, monacoState: 'observed', monacoEditors: 0, monacoModels: 0
+    }
+    await closeProbeFile(options.window, options.runtime, workspaceC.id, filePath, firstFile, releaseBaselineOwners, 'initial')
+    await stopProbeTerminal('first claimed Terminal', options.runtime, terminalControl)
     activeTerminalControls.delete(terminalControl)
     terminalControl = null
-    await waitForStoppedTerminal('first claimed Terminal stop', options.runtime, config, launcherTerminal.id)
     launcherTerminal = await waitForReadyLauncherTerminal({
       description: 'fresh reusable Terminal after first release',
       window: options.window,
@@ -866,9 +884,8 @@ export async function runDesktopResourceProbe(options: {
       config,
       usedSessionIds: usedTerminalSessionIds,
       workspaceId: workspaceC.id,
-      expectedOwners: terminalBaselineOwners
+      expectedOwners: releaseBaselineOwners
     })
-    const releaseBaselineOwners = await ownerCounts(options.window, options.runtime)
     const released = await sample('released-panes', options.window, options.runtime, config, identity)
     const releaseCycles = [released]
     for (let cycle = 1; cycle < RELEASE_CYCLES; cycle += 1) {
@@ -887,24 +904,13 @@ export async function runDesktopResourceProbe(options: {
       await waitFor(`cycle ${cycle} bounded Terminal output`, async () => (
         (runningTerminal((await options.runtime.snapshot(config)).sessions, current.id)?.latestOutputBytes ?? 0) >= 300_000
       ))
-      await openProbeFile(options.window, workspaceC.id, 'resource-probe.ts', `cycle ${cycle}`)
+      const file = await openProbeFile(options.window, workspaceC.id, filePath, `cycle ${cycle}`)
       traceResourceProbe(`cycle ${cycle} after resource file click ${await rendererProbeSummary(options.window)}`)
-      await waitFor(`cycle ${cycle} Monaco editor`, async () => await rendererBoolean(
-        options.window,
-        `document.querySelector(${JSON.stringify(`${workspaceSlotSelector(workspaceC.id)} .monaco-editor`)})`
-      ))
-      await click(options.window, `document.querySelector(${JSON.stringify(`${workspaceSlotSelector(workspaceC.id)} [aria-label="Close resource-probe.ts"]`)})`)
-      await waitFor(`cycle ${cycle} Monaco disposal`, async () => !await rendererBoolean(
-        options.window,
-        `document.querySelector(${JSON.stringify(`${workspaceSlotSelector(workspaceC.id)} .monaco-editor`)})`
-      ))
-      await waitFor(`cycle ${cycle} Main file observer release`, async () => (
-        (await ownerCounts(options.window, options.runtime)).fileWatchers === 0
-      ))
-      await options.runtime.stopSession(terminalControl)
+      await waitForProbeEditor(options.window, options.runtime, file, releaseBaselineOwners, `cycle ${cycle}`)
+      await closeProbeFile(options.window, options.runtime, workspaceC.id, filePath, file, releaseBaselineOwners, `cycle ${cycle}`)
+      await stopProbeTerminal(`cycle ${cycle} claimed Terminal`, options.runtime, terminalControl)
       activeTerminalControls.delete(terminalControl)
       terminalControl = null
-      await waitForStoppedTerminal(`cycle ${cycle} claimed Terminal stop`, options.runtime, config, current.id)
       launcherTerminal = await waitForReadyLauncherTerminal({
         description: `cycle ${cycle} fresh reusable Terminal after release`,
         window: options.window,
@@ -919,25 +925,18 @@ export async function runDesktopResourceProbe(options: {
     const browserOwnerBefore = releaseBaselineOwners.browserWebContents
     const browserWarmTerminal = launcherTerminal
     await click(options.window, desktopActionSource(openBrowserSelector, undefined, workspaceC.id))
-    await waitFor('Main-owned Browser WebContents', async () => (
-      (await ownerCounts(options.window, options.runtime)).browserWebContents === browserOwnerBefore + 1
-    ))
-    const browser = await sample('browser', options.window, options.runtime, config, identity)
     const browserOwners: ResourceOwners = {
       ...releaseBaselineOwners,
       browserWebContents: browserOwnerBefore + 1,
-      terminalViews: Math.max(0, releaseBaselineOwners.terminalViews - 1),
-      terminalAddons: Math.max(0, releaseBaselineOwners.terminalAddons - 3),
-      terminalListeners: Math.max(0, releaseBaselineOwners.terminalListeners - 7),
-      sessionAttachmentOwners: Math.max(0, releaseBaselineOwners.sessionAttachmentOwners - 1),
-      sessionAttachmentLeases: Math.max(0, releaseBaselineOwners.sessionAttachmentLeases - 1)
+      terminalViews: releaseBaselineOwners.terminalViews - 1,
+      terminalAddons: releaseBaselineOwners.terminalAddons - readyLauncherOwners.terminalAddons,
+      terminalListeners: releaseBaselineOwners.terminalListeners - readyLauncherOwners.terminalListeners,
+      sessionAttachmentOwners: releaseBaselineOwners.sessionAttachmentOwners - 1,
+      sessionAttachmentLeases: releaseBaselineOwners.sessionAttachmentLeases - 1
     }
-    if (
-      browser.owners.browserWebContents !== browserOwners.browserWebContents ||
-      browser.owners.terminalViews !== browserOwners.terminalViews ||
-      browser.owners.sessionAttachmentOwners !== browserOwners.sessionAttachmentOwners ||
-      browser.owners.sessionAttachmentLeases !== browserOwners.sessionAttachmentLeases
-    ) {
+    await waitFor('Browser WebContents and Launcher resource transition', async () => ownersEqual(await ownerCounts(options.window, options.runtime), browserOwners))
+    const browser = await sample('browser', options.window, options.runtime, config, identity)
+    if (!ownersEqual(browser.owners, browserOwners)) {
       throw new Error(`Desktop Browser did not release reusable Terminal view owners: ${JSON.stringify(browser.owners)}`)
     }
     if (!runningTerminal((await options.runtime.snapshot(config)).sessions, browserWarmTerminal.id)) {
@@ -1083,19 +1082,7 @@ export async function runDesktopResourceProbe(options: {
       }
     }
     for (const phase of [released, ...releaseCycles, browserReleased]) {
-      if (
-        phase.owners.monacoModels !== releaseBaselineOwners.monacoModels ||
-        phase.owners.monacoEditors !== releaseBaselineOwners.monacoEditors ||
-        phase.owners.documents !== releaseBaselineOwners.documents ||
-        phase.owners.fileWatchers !== releaseBaselineOwners.fileWatchers ||
-        phase.owners.browserWebContents !== releaseBaselineOwners.browserWebContents ||
-        phase.owners.runtimeSubscriptions !== releaseBaselineOwners.runtimeSubscriptions ||
-        phase.owners.terminalViews !== releaseBaselineOwners.terminalViews ||
-        phase.owners.terminalAddons !== releaseBaselineOwners.terminalAddons ||
-        phase.owners.terminalListeners !== releaseBaselineOwners.terminalListeners ||
-        phase.owners.sessionAttachmentOwners !== releaseBaselineOwners.sessionAttachmentOwners ||
-        phase.owners.sessionAttachmentLeases !== releaseBaselineOwners.sessionAttachmentLeases
-      ) {
+      if (!ownersEqual(phase.owners, releaseBaselineOwners)) {
         throw new Error(`Desktop resource owners did not converge at ${phase.label}.`)
       }
     }

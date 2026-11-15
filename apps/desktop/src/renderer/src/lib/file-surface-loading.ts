@@ -1,7 +1,16 @@
 import { workspaceFileFormat } from '@agentmux/editor-extensions/catalog'
 import type { EditorRegionMode } from './file-region-presentation'
 
-export const loadFileSourceEditor = async () => ({ default: (await import('../components/FileSourceEditor')).FileSourceEditor })
+let sourceEditorRequested = false
+
+export function fileSourceEditorWasRequested(): boolean {
+  return sourceEditorRequested
+}
+
+export async function loadFileSourceEditor() {
+  sourceEditorRequested = true
+  return { default: (await import('../components/FileSourceEditor')).FileSourceEditor }
+}
 
 /** Module preparation overlaps the original read; it grants no data or navigation authority. */
 export function prepareFileSurface(path: string, mode: EditorRegionMode): void {

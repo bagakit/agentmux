@@ -167,7 +167,7 @@ import type { NoteBlockTarget } from '@agentmux/client-ui/note/note-document'
 import type { FileOpenPlacement, FileOpenResult, ConfirmedExistingFileSpace } from './lib/file-workbench-state'
 import type { EditorRegionMode } from './lib/file-region-presentation'
 import { effectiveFileRegionMode } from './lib/file-region-presentation'
-import { prepareFileSurface } from './lib/file-surface-loading'
+import { fileSourceEditorWasRequested, prepareFileSurface } from './lib/file-surface-loading'
 import { executionFocusPresentation } from './lib/focus-tab-projection'
 import { workbenchProjectionMatches, sameWorkbenchProjectionSelection, type WorkbenchProjection } from './lib/workbench-projection'
 import { projectWorkspaces, workspaceProjectId } from './lib/workspace-projects'
@@ -4216,8 +4216,23 @@ export function readRendererResourceOwnerCounts() {
 
 if (typeof window !== 'undefined') {
   window.addEventListener('agentmux:resource-owner-counts', (event) => {
-    const target = event as CustomEvent<Record<string, number | boolean | null>>
-    Object.assign(target.detail, readRendererResourceOwnerCounts())
+    const target = event as CustomEvent<{
+      observed: boolean
+      file?: { workspaceId: string; path: string }
+      occurrence?: { tabId: string; regionId: string } | null
+      monacoSourceRequested?: boolean
+      monacoRegistryPresent?: boolean
+    }>
+    if (target.detail.file) {
+      const { workspaceId, path } = target.detail.file
+      const found = findFileWorkbenchSurface(useAppStore.getState(), workspaceId, path)
+      target.detail.occurrence = found ? { tabId: found.tab.id, regionId: found.surface.regionId } : null
+    } else {
+      Object.assign(target.detail, readRendererResourceOwnerCounts())
+      target.detail.monacoSourceRequested = fileSourceEditorWasRequested()
+      target.detail.monacoRegistryPresent =
+        '__agentmuxMonacoEditorCount' in window || '__agentmuxMonacoModelCount' in window
+    }
     target.detail.observed = true
   })
 }
