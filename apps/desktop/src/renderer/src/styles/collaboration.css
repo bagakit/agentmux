@@ -1,6 +1,22 @@
 /* Focus owns the view choice; the canvas owns only its controls and reading surface. */
 .focus-view-switch { margin: 0; align-items: center; -webkit-app-region: no-drag; }
 .focus-view-switch button { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); min-height: 26px; height: auto; padding: var(--sp-1) var(--sp-4); font-weight: 500; }
+.focus-view-switch [data-surface-mode='list']:has(+ .focus-view-switch__layout) { padding-inline-end: var(--sp-2); }
+.focus-view-switch > .liquid-selection:has(~ .focus-view-switch__layout),
+.focus-view-switch [data-surface-mode='list']:has(+ .focus-view-switch__layout) { border-start-end-radius: 0; border-end-end-radius: 0; }
+.focus-view-switch button.focus-view-switch__layout {
+  flex: 0 0 24px;
+  margin-inline-start: calc(-1 * var(--sp-1));
+  padding: 0;
+  border-inline-start: 1px solid var(--line);
+  border-start-start-radius: 0;
+  border-end-start-radius: 0;
+  color: var(--text-2);
+  background: var(--surface-3);
+}
+.focus-view-switch button.focus-view-switch__layout:is(:hover, [aria-expanded='true']) { color: var(--text); background: var(--surface-2); }
+.focus-view-layout-menu { min-inline-size: 145px; }
+.focus-view-layout-menu__check { margin-inline-start: auto; display: inline-flex; min-inline-size: 13px; }
 .collaboration-map button:focus-visible, .collaboration-filter-menu [role=menuitemcheckbox]:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
 .focus-toolbar > .top-row-leading-chrome { flex: 0 0 auto; }
 .focus-toolbar > .focus-view-switch { margin-right: 8px; }

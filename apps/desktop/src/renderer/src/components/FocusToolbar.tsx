@@ -6,7 +6,7 @@ import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import type { FocusContext } from '../lib/focus-context'
 import type { WorkbenchTab } from '../lib/workbench-tabs'
@@ -50,11 +50,11 @@ function FocusTabMenuContent({ name, actions, Label, Item }: {
 }
 
 
-export function FocusToolbar({ active = true, children, selectedId, selected, tab, reference, onReview, onCloseWorkspace, regionOnly, onToggleRegion, onOpenCollaboration }: {
-  active?: boolean; children: ReactNode; selectedId: string | null; selected: FocusContext | undefined; tab: WorkbenchTab | null; reference?: WorkbenchProjectionSelection | undefined; onReview(): void; onCloseWorkspace(): void; regionOnly?: boolean | undefined; onToggleRegion?: (() => void) | undefined; onOpenCollaboration?: (() => void) | undefined
+export function FocusToolbar({ active = true, children, layoutRows, selectedId, selected, tab, reference, onReview, onCloseWorkspace, regionOnly, onToggleRegion, onOpenCollaboration }: {
+  active?: boolean; children: ReactNode; layoutRows?: RefObject<HTMLDivElement | null>; selectedId: string | null; selected: FocusContext | undefined; tab: WorkbenchTab | null; reference?: WorkbenchProjectionSelection | undefined; onReview(): void; onCloseWorkspace(): void; regionOnly?: boolean | undefined; onToggleRegion?: (() => void) | undefined; onOpenCollaboration?: (() => void) | undefined
 }) {
   return <header className="focus-toolbar">
-    <TopRowLeadingChrome /><FocusViewSwitch />
+    <TopRowLeadingChrome /><FocusViewSwitch layoutRows={layoutRows} active={active} />
     <div className="focus-toolbar__filters">{children}</div>
     {onOpenCollaboration ? <IconButton type="button" aria-label="Locate Agent in map" title="Locate in map" onClick={onOpenCollaboration}><ThemeObjectCollaborationIcon size={15} /></IconButton> : null}
     {(tab || selectedId) ? <FocusToolbarContext active={active} key={JSON.stringify([selectedId, tab?.id])} selectedId={selectedId} selected={selected} tab={tab} reference={reference} onReview={onReview} onCloseWorkspace={onCloseWorkspace} regionOnly={regionOnly} onToggleRegion={onToggleRegion} /> : null}

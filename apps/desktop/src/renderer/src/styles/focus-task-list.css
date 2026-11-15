@@ -119,8 +119,6 @@
 
 @media (prefers-reduced-motion: no-preference) {
   [data-task-layout='list'] .focus-project-disclosure > svg { transition: transform var(--dur-fast) var(--ease-enter); }
-  .focus-task-layout:has(.segmented-control__option:active:not(:disabled)) .segmented-control__indicator { scale: .97; }
-  .focus-task-layout .segmented-control__indicator { transition-property: transform, scale; }
   [data-task-layout='list'] .focus-zone-layout__modes button:not(:disabled) { transition: background-color var(--dur-fast) var(--ease-enter), scale var(--dur-fast) var(--ease-enter); }
   [data-task-layout='list'] .focus-zone-layout__modes button:active:not(:disabled) { scale: .97; }
 }
