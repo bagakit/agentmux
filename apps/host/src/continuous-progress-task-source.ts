@@ -84,11 +84,18 @@ function decideGoalPlanProgress(prefix: string, plan: GoalPlan, delegations: rea
 
 /** Freeze identifiers from the same owner snapshot that qualified this occurrence. Node bodies stay in goal plan. */
 function goalPlanContinuation(source: Extract<ContinuousProgressTaskSource, { kind: 'goal' }>, projection: GoalPlanProjection): string {
-  const nodes = projection.nodes.filter(item => ['ready', 'working', 'review', 'changes', 'unknown'].includes(item.state)).map(item => ({
-    id: item.node.id, state: item.state, executor: item.node.executor, unknown: item.unknown,
-    attempt: item.delegation ? { delegationOperationId: item.delegation.operationId, sourceMessageId: item.delegation.sourceMessageId,
-      threadId: item.delegation.threadId, workerHostId: delegationWorkerHostId(item.delegation), workerAgentSessionId: item.delegation.workerAgentSessionId } : null
-  }))
-  return `Manage the original Goal ${source.goalId} within its confirmed scope r${source.alignmentRevision} as its Supervisor. Read amux goal plan --goal ${JSON.stringify(source.goalId)} for the node outcomes and checks. Delegate ready work, independently review reported work, return requested changes along the original thread, and reconcile unknown nodes by their named reasons before acting. Keep each original delegation and thread; do not resend an unknown delivery. Plan completion still requires a person to accept the Goal results.\n\n`
+  const nodes = projection.nodes.filter(item => ['ready', 'working', 'review', 'changes', 'unknown'].includes(item.state)).map(item => {
+    const attempt = item.delegation
+    const deliveryHash = attempt?.report?.delivery?.hash
+    const next = item.state === 'review' && attempt && deliveryHash
+      ? { kind: 'review', delegationOperationId: attempt.operationId, deliveryHash }
+      : item.state === 'ready' && item.node.executor && item.predecessors
+        ? { kind: 'dispatch', executor: item.node.executor, predecessors: item.predecessors }
+        : item.state === 'unknown' ? { kind: 'reconcile', reasons: item.unknown } : null
+    return { id: item.node.id, state: item.state, executor: item.node.executor, unknown: item.unknown, next,
+      attempt: attempt ? { delegationOperationId: attempt.operationId, sourceMessageId: attempt.sourceMessageId,
+        threadId: attempt.threadId, workerHostId: delegationWorkerHostId(attempt), workerAgentSessionId: attempt.workerAgentSessionId } : null }
+  })
+  return `Manage the original Goal ${source.goalId} within its confirmed scope r${source.alignmentRevision} as its Supervisor. Read amux goal plan active --goal ${JSON.stringify(source.goalId)} to confirm the current actionable Tickets. For a review, verify the frozen delivery hash, run the node’s declared check independently, and record its actual result using goal plan review. If you delivered the work, arrange an independent reviewer. For dispatch, use the assigned executor and the current original predecessor receipts. Keep the original operation, delegation and thread after an uncertain response. Reconcile an unknown receipt before advancing. When all relevant Tickets have passed, collect the result evidence and wait for a person to accept the Goal.\n\n`
     + JSON.stringify({ schema: 'agentmux.goal-plan-continuation.v1', goalId: source.goalId, alignmentRevision: source.alignmentRevision, planRevision: projection.revision, nodes })
 }
