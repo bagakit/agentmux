@@ -137,12 +137,16 @@ api.spaceMounts.member=async(input,_listener)=>{
 }
 const restoreLayout = (window.__taskLayoutScene || agentPinsScene) && localStorage.getItem('agentmux-workbench-v1') !== null
 const restoreWorkbench = window.__feedbackRestoreSerialized || restoreLayout
+const projectVisits = window.__taskLayoutScene ? [
+ ['saved-release-check', '复查上一轮的发布清单'], ['saved-chart-check', '核对历史图表口径'], ['saved-workface', '继续保留的分析工作面'],
+].map(([sessionId, name], index) => ({ sessionId, focusedAt: now - (index + 1) * 60000,
+ identity: {kind:'agent', providerId:'codex', hostId:'local', name, workspacePath:path, project:{id:workspace.id,name:workspace.name}} })) : []
 useAppStore.setState({loading:false,initialize:async()=>()=>{},config:{...config,workspaces,hosts:[{id:'local',kind:'local',label:'Original local device'}],
  ...(localTaskScene || agentPinsScene ? {focus:{...config.focus,previewTrigger:'keyboard'}} : {})},
  sessions,agentNames:Object.fromEntries(sessions.map(s=>[s.id,s.label])),timelines,
  tabs:restoreWorkbench?{}:Object.fromEntries(originalTabs.map(item => [item.id,item])),
  layouts:restoreWorkbench?{}:Object.fromEntries(workspaces.map((item,index) => [item.id,createWorkspaceLayout(index ? item.id+'-group' : 'ordinary-group',originalTabs.filter(tab => tab.workspaceId === item.id).map(tab => tab.id))])),
- activeWorkspaceId:workspace.id,mainSurface:'agents',focusView:'list',toolsOpen:false,projectRailOpen:false,agentFocus:{execution:{sessionId:null,history:[]},pmo:{sessionId:null}},agentComposerDrafts:restoreWorkbench?{}:{working:'原未发送草稿'},mountedSpaceInputs:{[key]:{target,drafts:{}}},mountedSpaceObservations:{},mountedSpaceSessions:{},selectedSpaceMount:null})
+ activeWorkspaceId:workspace.id,mainSurface:'agents',focusView:'list',toolsOpen:false,projectRailOpen:false,agentFocus:{execution:{sessionId:null,history:projectVisits},pmo:{sessionId:null}},agentComposerDrafts:restoreWorkbench?{}:{working:'原未发送草稿'},mountedSpaceInputs:{[key]:{target,drafts:{}}},mountedSpaceObservations:{},mountedSpaceSessions:{},selectedSpaceMount:null})
 if(localTaskScene || agentPinsScene){
 
  api.ui.requestStorageFlush=async()=>{}

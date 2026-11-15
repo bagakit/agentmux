@@ -194,6 +194,30 @@ it('opens saved-history actions by keyboard and scopes recovery to the original 
   expect(useAppStore.getState().sessions).toBe(before.sessions)
 })
 
+it('keeps in-project History folded when live data arrives before anyone reads it', async () => {
+  const before = useAppStore.getState()
+  const history = [savedVisit('still-saved', 'Keep this original visit', 1)]
+  const savedRow = '[data-saved-focus-session="still-saved"] button'
+  useAppStore.setState({ sessions: [], agentFocus: { ...before.agentFocus, execution: { ...before.agentFocus.execution, history } } })
+  await act(async () => root.render(createElement(GlobalFocusSurface)))
+  expect(container.querySelector(savedRow)).not.toBeNull()
+
+  await act(async () => useAppStore.setState({ sessions: before.sessions }))
+  const disclosure = container.querySelector<HTMLButtonElement>('[data-project-history] button[aria-expanded]')!
+  expect(disclosure.getAttribute('aria-expanded')).toBe('false')
+  expect(disclosure.textContent).toContain('1')
+  expect(container.querySelector(savedRow)).toBeNull()
+  expect(container.querySelector('.focus-task-toolbar')).toBeNull()
+  expect(container.querySelectorAll('.focus-toolbar [aria-label="Arrange projects by recent activity"]')).toHaveLength(1)
+
+  await act(async () => disclosure.click())
+  expect(disclosure.getAttribute('aria-expanded')).toBe('true')
+  expect(container.querySelector(savedRow)?.textContent).toContain('Keep this original visit')
+  await act(async () => disclosure.click())
+  expect(container.querySelector(savedRow)).toBeNull()
+  expect(useAppStore.getState().agentFocus.execution.history).toBe(history)
+})
+
 it('keeps the remaining original Saved card and its focus when the first current Session arrives', async () => {
   const before = useAppStore.getState()
   const history = [savedVisit('other', 'Saved task now observed', 1), savedVisit('still-saved', 'Keep my saved card', 2)]

@@ -34,6 +34,11 @@ const mutations: Record<string, { path: string; before: string; after: string }>
     before: 'onFocusCapture={keepRecentHistoryOpen} onPointerDownCapture={keepRecentHistoryOpen}',
     after: '',
   },
+  'prefill-history-expansion': {
+    path: lanes,
+    before: 'const [expanded, setExpanded] = useState(false)\n  const showHistory',
+    after: 'const [expanded, setExpanded] = useState(!withinProject)\n  const showHistory',
+  },
 }
 const mode = process.env.AGENTMUX_PROJECT_HISTORY_MUTATION
 const mutation = mode ? mutations[mode] : undefined

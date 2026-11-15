@@ -7,6 +7,13 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
   const viewButton = (surface, value) => surface + ' .focus-view-switch [data-surface-mode="' + value + '"]'
   const layout = () => read('document.querySelector(' + JSON.stringify(root) + ')?.dataset.taskLayout')
   const task = id => root + ' button.focus-context[data-session-id="' + id + '"]'
+  const historyToggle = root + ' .focus-project-history__toggle'
+  const arrange = root + ' .focus-toolbar [aria-label="Arrange projects by recent activity"]'
+  const history = () => read(`(() => {
+    const toggle = document.querySelector(${JSON.stringify(historyToggle)})
+    return { expanded: toggle?.getAttribute('aria-expanded'), count: toggle?.textContent.trim(),
+      saved: Boolean(document.querySelector('[data-project-history] [data-saved-focus-session="saved-release-check"]')) }
+  })()`)
   const expectLayout = value => until('task layout ' + value, async () => await layout() === value)
   const key = async (value, code, virtualKeyCode) => {
     for (const type of ['keyDown', 'keyUp']) await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {
@@ -93,6 +100,10 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
     throw Error('Could not size real split List to ' + target + ' px')
   }
   await until('Focus task layout control and original tasks', () => read('!!window.taskLayoutProof && document.querySelectorAll(".focus-context[data-session-id]").length >= 4 && !!document.querySelector(' + JSON.stringify(trigger) + ')'))
+  await until('the original project has a folded History count', async () => (await history()).expanded === 'false')
+  assert.deepEqual(await history(), { expanded: 'false', count: 'History3', saved: false })
+  assert.equal(await read(`document.querySelectorAll(${JSON.stringify(arrange)}).length`), 1)
+  assert.equal(await read(`Boolean(document.querySelector('.focus-task-toolbar'))`), false)
   if (restoreOnly) {
     await expectLayout('list')
     assert.equal(await read('window.taskLayoutProof.restored'), true)
@@ -115,7 +126,6 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
   const cardsHeight = await rowHeight()
   await read('window.unifiedFocusProof.theme("dark")')
   await frame('cards-dark', 'Default Cards in the original Focus project')
-  assert.equal(await read(`Boolean(document.querySelector('.focus-task-toolbar button[aria-label="Task layout"]'))`), false)
   await motion('no-preference')
   await layouts.open()
   await layouts.checked('cards')
@@ -186,6 +196,17 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
   result.refinement.staleRow = staleRow
   await settle()
   await frame('list-results-dark', 'Results stay single-line with the rest of the Focus list')
+  await read(`document.querySelector(${JSON.stringify(historyToggle)}).scrollIntoView({block:'center'})`)
+  result.projectHistory = { initial: await history() }
+  await frame('history-folded-wide', 'The original project has only the folded History count')
+  await click(historyToggle)
+  await until('the original saved task is visible in the open project History', async () => (await history()).saved)
+  result.projectHistory.opened = await history()
+  await read(`document.querySelector('[data-project-history] [role="list"]').lastElementChild.scrollIntoView({block:'end'})`)
+  await settle()
+  await frame('history-open-wide', 'Explicitly opening History reveals the original saved tasks')
+  await click(historyToggle)
+  assert.equal((await history()).saved, false)
   await read('document.querySelector(".focus-project-lanes__rows").scrollTop = 0')
 
   win.setContentSize(420, 800)
@@ -193,6 +214,13 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
   await motion('reduce')
   await settle()
   assert.equal(await read(`getComputedStyle(document.querySelector(${JSON.stringify(first)})).transitionDuration`), '0s')
+  result.projectHistory.narrowArrangeVisible = await read(`(() => {
+    const button = document.querySelector(${JSON.stringify(arrange)})
+    const bounds = button?.getBoundingClientRect()
+    const toolbar = button?.parentElement.getBoundingClientRect()
+    return Boolean(bounds?.width && bounds.left >= toolbar.left && bounds.right <= Math.min(toolbar.right, innerWidth))
+  })()`)
+  assert.equal(result.projectHistory.narrowArrangeVisible, true, 'Arrange stays in reach at the narrow viewport')
   await frame('list-narrow-light', 'Light 420px scan in reduced motion')
   await layouts.open()
   await layouts.checked('list')
