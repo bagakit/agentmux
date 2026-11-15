@@ -157,7 +157,9 @@ A source can defer process bodies only when its existing owner supports exact re
 
 ## Reading and projection
 
-Standalone consumers can call `projectConversationStream` with accepted source records, source scope and coverage. The result retains those record objects and their original versions and reports the events, relationships and known gaps. Read cursors and source validation belong to the caller's read boundary. See the [module boundary](../architecture/conversation.md#语义流的模块边界) for package entry points.
+Standalone consumers can call `projectConversationStream` with accepted source records, source scope and coverage for one AgentMux Session. Each call covers at most one selected native history and one captured stream. The two sources can be interleaved in `records` as long as each keeps its original oldest-first order, including when timestamps move backward. To read a different native history or captured stream, project its scope separately. Represent a source with no accepted records through its actual scope and coverage.
+
+The result retains the original record objects and versions and reports events, relationships and known gaps. Read cursors and source validation belong to the caller's read boundary. See the [module boundary](../architecture/conversation.md#语义流的模块边界) for package entry points.
 
 `@agentmux/core/conversation` is browser-safe. `projectConversationRecords` projects an already accepted native history page and/or captured timeline. Each record preserves its original source and item, ordered content parts, recorded author facts and source-qualified identity. Equal text in different records remains distinct. Reading does not infer a human author, input adoption, interaction completion or task success.
 
