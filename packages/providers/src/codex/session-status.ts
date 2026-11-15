@@ -2,7 +2,7 @@ import { constants } from 'node:fs'
 import { lstat, open } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
 import { codexTurnRecordId } from './turn-outcome.js'
-import { codexNativeSourceId, codexTurnRecordEvidence, readCodexPromptExecutionEvidence, type CodexEvidenceContext, type CodexPromptEvidence } from './turn-evidence.js'
+import { codexNativeSourceId, codexSubagentCompletion, codexTurnRecordEvidence, readCodexPromptExecutionEvidence, type CodexEvidenceContext, type CodexPromptEvidence } from './turn-evidence.js'
 import type { NativeProviderError } from '../provider-error.js'
 
 type CodexSessionStatus = {
@@ -21,6 +21,7 @@ type StatusContext = CodexEvidenceContext & {
   workspacePath: string
   signal: AbortSignal
   onStatus(status: CodexSessionStatus): void
+  onSubagentCompletion?(completion: NonNullable<ReturnType<typeof codexSubagentCompletion>>): void
   onUnavailable(code: string, message: string): void
 }
 type HistoryObservation = { kind: 'invalidated' } | { kind: 'unavailable'; code: string; message: string }
@@ -87,11 +88,18 @@ export function createCodexSessionStatus({ AgentMuxError, observeNativeJsonlHist
       }
       // Keep the predecessor's ordering/terminal fence even when its display is suppressed.
       const { nativePromptPredecessor: _predecessor, ...sourceContext } = context
-      const initial = await readCodexPromptExecutionEvidence(sourceContext)
+      const initialChildren = new Map<string, NonNullable<ReturnType<typeof codexSubagentCompletion>>>()
+      const initial = await readCodexPromptExecutionEvidence(sourceContext, context.onSubagentCompletion && (value => {
+        const completion = codexSubagentCompletion(value, handle.sessionId)
+        if (completion && completion.observedAt > (initialChildren.get(completion.nativeAgentId)?.observedAt ?? 0)) {
+          initialChildren.set(completion.nativeAgentId, completion)
+        }
+      }))
       if (!initial) throw new AgentMuxError('The current native turn status is unknown. No completion was inferred.', 'AGENT_NATIVE_STATUS_UNCONFIRMED')
       if (initial && initial.sourceId !== sourceId) throw new AgentMuxError('Native status source changed during the read.', 'AGENT_NATIVE_STATUS_SOURCE_CHANGED')
       latest = initial
       emit(initial, true)
+      for (const completion of initialChildren.values()) context.onSubagentCompletion?.(completion)
       offset = Number(stat.size)
       // Do not join an incomplete pre-watch suffix to an unrelated subsequent line.
       const lastByte = Buffer.alloc(1)
@@ -129,6 +137,8 @@ export function createCodexSessionStatus({ AgentMuxError, observeNativeJsonlHist
                 from = end + 1
                 if (!line.length) continue
                 const value = JSON.parse(decoder.decode(line))
+                const completion = codexSubagentCompletion(value, handle.sessionId)
+                if (completion) context.onSubagentCompletion?.(completion)
                 const evidence = codexTurnRecordEvidence(value, sourceId, handle.sessionId, latest)
                 if (evidence === null) throw new AgentMuxError('The appended native turn status is unknown. No completion was inferred.', 'AGENT_NATIVE_STATUS_UNCONFIRMED')
                 if (evidence) {

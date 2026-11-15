@@ -27,12 +27,33 @@ const HEADER_BYTES = 512 * 1024
 export const codexNativeSourceId = (sessionId: string, source: { dev: bigint; ino: bigint }): string =>
   createHash('sha256').update(`[${JSON.stringify(sessionId)},${source.dev},${source.ino}]`).digest('base64url')
 
+type CodexTurnRecord = { timestamp?: unknown; type?: unknown; ordinal?: unknown; payload?: {
+  type?: unknown; turn_id?: unknown; thread_id?: unknown; completed_at_ms?: unknown
+  item?: { type?: unknown; id?: unknown; kind?: unknown; agent_thread_id?: unknown }
+} }
+
+function isSubagentActivity(record: CodexTurnRecord): boolean {
+  return record?.type === 'event_msg' && record.payload?.type === 'item_completed' && record.payload.item?.type === 'SubAgentActivity'
+}
+
+/** Codex emits this item only for a confirmed successful child turn. */
+export function codexSubagentCompletion(value: unknown, nativeSessionId: string): {
+  nativeSessionId: string; nativeAgentId: string; observedAt: number
+} | undefined {
+  const record = value as CodexTurnRecord, event = record?.payload
+  if (!isSubagentActivity(record) || event?.thread_id !== nativeSessionId || event.item?.kind !== 'completed' ||
+    typeof event.turn_id !== 'string' || !event.turn_id || typeof event.item.id !== 'string' || !event.item.id) return
+  const nativeAgentId = event.item.agent_thread_id, observedAt = event.completed_at_ms
+  if (typeof nativeAgentId !== 'string' || !nativeAgentId.trim() || nativeAgentId === nativeSessionId ||
+    typeof observedAt !== 'number' || !Number.isSafeInteger(observedAt) || observedAt <= 0) return
+  return { nativeSessionId, nativeAgentId, observedAt }
+}
+
 /** Undefined ignores an unrelated/older record; null means a malformed native turn fact. */
 export function codexTurnRecordEvidence(value: unknown, sourceId: string, nativeSessionId: string,
   previous: CodexPromptEvidence | null = null): CodexPromptEvidence | null | undefined {
-  const item = value as { timestamp?: unknown; type?: unknown; ordinal?: unknown; payload?: {
-    type?: unknown; turn_id?: unknown; thread_id?: unknown; reason?: unknown; error?: unknown
-  } }
+  const item = value as CodexTurnRecord
+  if (isSubagentActivity(item)) return undefined
   const event = item?.payload
   const boundary = item?.type === 'event_msg' && ['task_started', 'task_complete', 'turn_aborted'].includes(String(event?.type))
   const turnRecord = item?.type === 'turn_context' || (item?.type === 'event_msg' &&
@@ -59,7 +80,7 @@ export function codexTurnRecordEvidence(value: unknown, sourceId: string, native
  * Native pending steers are not written here; the complete visible pane guards them.
  * A truncated suffix without an actual turn boundary remains unknown.
  */
-export async function readCodexPromptExecutionEvidence(context: CodexEvidenceContext): Promise<CodexPromptEvidence | null> {
+export async function readCodexPromptExecutionEvidence(context: CodexEvidenceContext, observeRecord?: (record: unknown) => void): Promise<CodexPromptEvidence | null> {
   const handle = context.nativeHandle
   if (handle?.kind !== 'provider' || handle.providerId !== 'codex' || !handle.transcriptPath || !isAbsolute(handle.transcriptPath)) return null
   const file = await open(handle.transcriptPath, constants.O_RDONLY | constants.O_NOFOLLOW)
@@ -97,6 +118,7 @@ export async function readCodexPromptExecutionEvidence(context: CodexEvidenceCon
     let recordOffset = start + first
     for (const line of lines) {
       const value = JSON.parse(line)
+      observeRecord?.(value)
       const evidence = codexTurnRecordEvidence(value, sourceId, handle.sessionId, latest)
       // A malformed current boundary cannot resurrect a prior success.
       if (evidence === null) return null

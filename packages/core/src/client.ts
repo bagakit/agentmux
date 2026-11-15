@@ -11197,9 +11197,16 @@ export class AgentMuxClient {
       key, controller: new AbortController(), pending: Promise.resolve(), unconfirmed: true
     }
     this.nativeStatusWatches.set(session.agentSessionId, watch)
+    const currentWatch = () => this.currentSessionObservation(target) && !watch.controller.signal.aborted &&
+      this.nativeStatusWatches.get(session.agentSessionId) === watch
+    const trackSettlement = (): void => {
+      const pending = watch.pending
+      this.nativeStatusSettlements.add(pending)
+      void pending.then(() => this.nativeStatusSettlements.delete(pending))
+    }
     let unavailableObservation = false
     const unavailable = (code: string, message: string): void => {
-      if (!this.currentSessionObservation(target) || watch.controller.signal.aborted || this.nativeStatusWatches.get(session.agentSessionId) !== watch) return
+      if (!currentWatch()) return
       unavailableObservation = true
       watch.unconfirmed = true
       this.publishSession(this.requireAgentSession(session.agentSessionId))
@@ -11216,16 +11223,41 @@ export class AgentMuxClient {
       watch.observer = await provider.observeSessionStatus({ ...await this.providerNativeContext(session, await this.requireCurrentAgentRun(session)),
         nativeHandle: structuredClone(session.nativeHandle),
         signal: watch.controller.signal, onUnavailable: unavailable,
+        onSubagentCompletion: completion => {
+          watch.pending = watch.pending.then(async () => {
+            if (!currentWatch()) return
+            let applied = false
+            const next = await this.updateExactAgentSession(session.agentSessionId, session.run, saved => {
+              applied = false
+              const roster = saved.nativeSubagents
+              if (!currentWatch() || !sameNativeHandle(saved.nativeHandle, session.nativeHandle) ||
+                !subagentScopeMatches(roster, saved) || roster.nativeSessionId !== completion.nativeSessionId ||
+                !Number.isSafeInteger(completion.observedAt) || completion.observedAt <= 0) return saved
+              const index = roster.sessions.findIndex(child => child.nativeAgentId === completion.nativeAgentId)
+              const child = roster.sessions[index]
+              // A retained completion may settle its known start. Native time is
+              // kept so rereading the transcript cannot refresh or close a later start.
+              if (!child || child.phase !== 'running' || completion.observedAt < child.observedAt) return saved
+              const { waitingFor: _waiting, ...original } = child
+              const children = roster.sessions.slice()
+              children[index] = { ...original, phase: 'ended', state: 'done', outcome: 'completed', observedAt: completion.observedAt }
+              applied = true
+              return { ...saved, nativeSubagents: { ...roster, sessions: children }, updatedAt: Math.max(saved.updatedAt, completion.observedAt) }
+            }, undefined, undefined, watch.controller.signal)
+            if (applied && currentWatch()) this.publishSession(next)
+          }).catch(error => unavailable(error instanceof AgentMuxError ? error.code : 'AGENT_NATIVE_SUBAGENT_STATUS_PERSIST_FAILED',
+            error instanceof Error ? error.message : 'The native subagent completion could not be saved.'))
+          trackSettlement()
+        },
         onStatus: observation => {
           const latestSequence = watch.ingressSequence ?? watch.sequence
-          if (this.currentSessionObservation(target) &&
-              !watch.controller.signal.aborted && this.nativeStatusWatches.get(session.agentSessionId) === watch && observation.recordId !== (watch.ingressRecordId ?? watch.recordId) &&
+          if (currentWatch() && observation.recordId !== (watch.ingressRecordId ?? watch.recordId) &&
               (latestSequence === undefined || observation.sequence === undefined || observation.sequence > latestSequence)) {
             watch.unconfirmed = true
             watch.ingressRecordId = observation.recordId; watch.ingressSequence = observation.sequence
           }
           watch.pending = watch.pending.then(async () => {
-            if (!this.currentSessionObservation(target) || watch.controller.signal.aborted || this.nativeStatusWatches.get(session.agentSessionId) !== watch ||
+            if (!currentWatch() ||
               observation.recordId === watch.recordId || (watch.sequence !== undefined && observation.sequence !== undefined && observation.sequence <= watch.sequence)) return
             const current = this.requireAgentSession(session.agentSessionId)
             if (!sameRun(current.run, session.run) || current.providerId !== session.providerId || !sameNativeHandle(current.nativeHandle, session.nativeHandle) || this.endedRuns.has(current.run.runId)) return
@@ -11368,9 +11400,7 @@ export class AgentMuxClient {
               evidence: { source: 'native-transcript', run: { ...next.run }, observedAt: status.observedAt } })
           }).catch(error => unavailable(error instanceof AgentMuxError ? error.code : 'AGENT_NATIVE_STATUS_PERSIST_FAILED',
             error instanceof Error ? error.message : 'The native status could not be saved.'))
-          const pending = watch.pending
-          this.nativeStatusSettlements.add(pending)
-          void pending.then(() => this.nativeStatusSettlements.delete(pending))
+          trackSettlement()
         }
       })
       if (!this.currentSessionObservation(target) || watch.controller.signal.aborted || this.nativeStatusWatches.get(session.agentSessionId) !== watch) {

@@ -201,6 +201,8 @@ export type AgentProviderPreparedNativeInput = {
 }
 export type AgentProviderSessionStatusObservationContext = AgentProviderSessionStatusContext & {
   onStatus(status: AgentProviderSessionStatus): void
+  /** A successful end from the exact original child source, independent of main-turn status. */
+  onSubagentCompletion?(completion: { nativeSessionId: string; nativeAgentId: string; observedAt: number }): void
   onUnavailable(code: string, message: string): void
 }
 
