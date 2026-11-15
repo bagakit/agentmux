@@ -71,7 +71,7 @@ without trimming or changing the original ID. Supported kinds are agent, region,
 A Goal link retains its original Runtime and Goal-store namespace. Read `goal --skill`
 for the exact `goal focus --goal ID --runtime ID --namespace ID --section plan` reading path;
 opening the link never creates a plan or executes work. For a Ticket use
-\`goal focus --link URL\` with the exact copied address. A short \`amux://goal/ID#T42\`
+`goal focus --link URL` with the exact copied address. A short `amux://goal/ID#T-<nodeId>`
 requires proof of the original Goal binding. Keep the owner coordinates when they
 appear in the URI.
 For amux://agent/<SID>, use agent inspect --session SID or agent send --to-session SID --text TEXT.

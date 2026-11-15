@@ -42,15 +42,19 @@ is uncertain. Never-attempted requests can continue on the recovered same Sessio
 input. A saved plan revision completes planning.
 
 A node names its outcome, dependencies, criteria, repeatable check and optional executor.
-Once it has work, preserve its outcome, check and criterion set. Cancel it and add a new
-node for different work. Explicit reassignment to a different executor supersedes the
+For each new Ticket, run `goal plan new-id` locally and use the returned `nodeId`
+as the node's `id` in the revision. The same ID is usable in `dependsOn` before
+publication. Keep it through retries and plan reordering. ID generation makes no
+connection and creates no Goal or Ticket.
+Retire a published node by cancelling it. Once it has work, preserve its outcome,
+check and criterion set. Create a new node for different work. Explicit reassignment to a different executor supersedes the
 newest unreviewed attempt. Clearing the executor does not. A passed node stays done.
 The previous attempt and its thread remain readable. For input and revision rules use
 `goal plan revise --help`.
 
-Read \`goal plan\` for \`plan.ticketNodes\` and \`ticketLinks\`. The entry at position
-one is T1. Use \`goal focus --link URL\` to open the exact Ticket. If your workflow
-uses Git, the published URL is the value for a \`Goal-Node\` trailer.
+Read `goal plan` for `plan.nodes` and `ticketLinks`. Each link carries the original
+node ID in its `#T-<nodeId>` fragment. Use `goal focus --link URL` to open the exact
+Ticket. If your workflow uses Git, use the published URL as the `Goal-Node` trailer.
 
 Use \`goal plan active\` for the Agent’s own claimable Tickets. Use
 \`goal plan active --goal ID\` for one Goal’s in-flight work and uncertain states
