@@ -2,6 +2,7 @@ import { createRoot } from 'react-dom/client'
 import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'
 import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
 import { BrowserPane } from '../../../src/renderer/src/components/BrowserPane'
+import type { WorkbenchBrowserPresentation } from '../../../src/renderer/src/components/BrowserPresentationStage'
 import { useNativeOverlayChrome } from '../../../src/renderer/src/hooks/useNativeOverlayChrome'
 import { rendererPerformance } from '../../../src/renderer/src/lib/renderer-performance'
 import '../../../src/renderer/src/styles/tokens.css'
@@ -38,17 +39,24 @@ HTMLCanvasElement.prototype.toBlob = function (callback, type, quality) {
 }
 const theme = mountThemeRuntime(window)
 const setup = await (window as any).screenshotNative.call('setup')
+const presentation: WorkbenchBrowserPresentation = {
+  occurrence: { presentationId: 'private-original-presentation', layoutHost: 'sole',
+    location: { displayWorkspaceId: 'private-workspace', groupId: 'private-original-group', tabId: 'private-original-tab', regionId: 'private-original-region' } },
+  stageHostId: 'private-original-host', visible: true, active: true, yieldToFocusRing: false,
+  target: { hostId: 'private-original-host', active: true, surface: 'space' }
+}
 let warning: string | undefined
 function Fixture() {
   warning = useNativeOverlayChrome()
   return <DesktopClientUiProvider><main className="screenshot-native-fixture">
     <header><strong>Browser screenshot</strong><span>Private native workface</span></header>
     <section className="screenshot-native-fixture__original">
-      <BrowserPane tab={{ ...setup.original, browserId: setup.original.id, kind: 'browser', regionId: 'private-original-region', workspaceId: 'private-workspace' }} visible />
+      <BrowserPane tab={{ ...setup.original, browserId: setup.original.id, kind: 'browser', regionId: 'private-original-region', workspaceId: 'private-workspace' }}
+        primaryStage={presentation} visible />
     </section>
   </main></DesktopClientUiProvider>
 }
-const root = createRoot(document.getElementById('root')!)
+const root = createRoot(document.getElementById('root')!, { onCaughtError: error => errors.push(String(error)) })
 root.render(<Fixture />)
 ;(window as any).screenshotProbe = {
   read() {

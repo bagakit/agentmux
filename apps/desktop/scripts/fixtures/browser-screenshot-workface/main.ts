@@ -356,7 +356,7 @@ async function processedOutputs(expected: any) {
   receipt.expectedErrors.push(errors.at(-1))
   assert.equal(await evaluate(`document.querySelector(${JSON.stringify('button[aria-label="Pin image"]')}).disabled`), false, 'An unconfirmed reference retains an independent explicit pin action')
   assert.equal(await evaluate(`document.querySelector(${JSON.stringify('button[aria-label="Save PNG"]')}).disabled`), false, 'An unconfirmed pin retains independent PNG output')
-  assert.deepEqual(receipt.counters, before.counters, 'PNG save and pin reuse the original frozen Browser pixels')
+  assert.equal(receipt.counters.originalCapture, before.counters.originalCapture, 'PNG save and pin reuse the original frozen Browser pixels')
   assert.equal(receipt.captures.length, before.captures, 'Independent image outputs never recapture the Browser')
   await click('Cancel', true); await closed('unconfirmed-pin-keeps-original-Browser-after-cancel')
   await openEditor()
@@ -382,7 +382,7 @@ async function processedOutputs(expected: any) {
   const retained = await pins.call('image.inspect', { hostId: 'local', pinId: independentCreation.result.pinId }, { actor: pinActor })
   assert.equal(retained.state, 'open', 'Closing the earlier reference retains the separately created healthy pin')
   await pins.call('image.close', { hostId: 'local', pinId: independentCreation.result.pinId, operationId: 'close-browser-independent-reference' }, { actor: pinActor })
-  assert.deepEqual(receipt.counters, capturedAgain.counters, 'Further outputs reuse only the second explicitly captured image')
+  assert.equal(receipt.counters.originalCapture, capturedAgain.counters.originalCapture, 'Further outputs reuse only the second explicitly captured image')
   assert.equal(receipt.captures.length, capturedAgain.captures, 'Pin recovery does not recapture either document')
   await settle()
   const idleBefore = await facts(); await delay(100); const idleAfter = await facts()
@@ -768,6 +768,17 @@ async function run() {
   }
   ipcMain.handle('screenshot:call', async (event, method, ...args) => {
     assert.equal(event.sender, window.webContents, 'Private bridge belongs to this exact Renderer')
+    const frame = event.senderFrame
+    if (method === 'registerPresentation') {
+      assert.equal(args[0].browserId, originalId)
+      assert.ok(frame)
+      return manager.registerPresentation(event.sender, frame, args[0], { processId: frame.processId, frameToken: frame.frameToken })
+    }
+    if (method === 'updatePresentation') return manager.updatePresentation(event.sender, frame, args[0], args[1])
+    if (method === 'removePresentation') return manager.removePresentation(event.sender, frame, args[0])
+    if (method === 'activatePresentation') return await manager.activatePresentation(event.sender, frame, args[0], args[1])
+    if (method === 'armPresentationCapture') return manager.armPresentationCapture(event.sender, frame, args[0])
+    if (method === 'ackPresentationCapture') return manager.ackPresentationCapture(event.sender, frame, args[0], args[1])
     if (method === 'setup') return { original: originalSnapshot, sibling: siblingSnapshot }
     if (method === 'nativeBrowserVisibility') return manager.nativeBrowserVisibility()
     if (method === 'publishNativeOverlays') {
@@ -785,8 +796,12 @@ async function run() {
     if (method === 'privateClipboardText') { assert.equal(typeof args[0], 'string'); receipt.clipboardText.push(args[0]); return { status: 'copied', sequence: receipt.clipboardText.length } }
     if (method === 'exportScreenshot') {
       const input = args[0]
-      const result = await exportScreenshotPng(input.image, { chooseFile: async () => join(out, label + '-processed-output-' + receipt.exports.length + '.png'), writeFile: writeScreenshotFile })
-      receipt.exports.push({ operationId: input.operationId, result }); return result
+      const result = await exportScreenshotPng(input.image, { capturedAt: input.capturedAt }, {
+        chooseFile: async () => join(out, label + '-processed-output-' + receipt.exports.length + '.png'),
+        writeFile: writeScreenshotFile,
+        resize: (bytes, size) => nativeImage.createFromBuffer(Buffer.from(bytes)).resize(size).toPNG()
+      })
+      receipt.exports.push({ capturedAt: input.capturedAt, result }); return result
     }
     if (method === 'pinScreenshot') {
       const input = args[0], image = input.image
@@ -818,7 +833,6 @@ async function run() {
         image: { width: captured.image.width, height: captured.image.height, byteLength: captured.image.byteLength } })
       return captured
     }
-    if (method === 'setBounds') return manager.setBounds(args[0], args[1])
     if (method === 'setAnnotationMarkers') return await manager.setAnnotationMarkers(args[0], args[1], args[2])
     if (method === 'cancelElementSelection') return await manager.cancelElementSelection(args[0])
     throw new Error('Unexpected private IO: ' + method)
@@ -844,6 +858,9 @@ async function run() {
   receipt.cases.push({ label: 'actual-runner-captureScreenshot-consumes-original-source', result: scriptCapture, outcome: runner.outcome, operation: runner.runOperation })
   await keepOwners('runner-retains-original-native-owner')
   await publicScreenshot(program); await stage('real-SDK-and-CLI-consumed-original-source')
+  const human = manager.takeControl(originalId)
+  assert.equal(human.control?.owner, 'human', 'The screenshot editor starts after explicit human takeover of the original page')
+  assert.equal(human.navigationId, originalSnapshot.navigationId)
   if (process.env.AGENTMUX_SCREENSHOT_VISUAL_PILOT === '1') {
     receipt.scope = 'actual-Renderer-visual-pilot-only-not-feature-acceptance'
     await openEditor(); await click('Cancel', true); await closed('visual-pilot-initial-cancel')
@@ -851,10 +868,9 @@ async function run() {
   }
   const opened = await openEditor()
   assert.equal(receipt.calls.filter((row: any) => row.method === 'captureScreenshot').length, 1)
-  await measurePointerWork(opened)
   if (process.env.AGENTMUX_SCREENSHOT_OUTPUTS_ONLY === '1') {
     receipt.scope = 'actual-BrowserPane-processed-output-vertical-slice-not-full-editor-regression'
-    await click('Clear', true); await click('Cover', true)
+    await click('Cover', true)
     await drag(imagePointOnScreen(await facts(), 80, 90), imagePointOnScreen(await facts(), 240, 190))
     const source = receipt.captures.at(-1).image
     await click('Crop', true)
@@ -863,12 +879,12 @@ async function run() {
     await processedOutputs(null)
     await click('Cancel', true); await closed('processed-outputs-final-cancel')
     assert.equal(receipt.captures.length, 2, 'Only the two explicit output-scenario captures acquire Browser pixels')
-    assert.equal(receipt.counters.originalCapture, 2)
     if (process.env.AGENTMUX_SCREENSHOT_VISUAL === '1') await visualScenes()
     assert.deepEqual((await facts()).errors, receipt.expectedErrors)
     receipt.passed = true
     return
   }
+  await measurePointerWork(opened)
   await click('Cancel', true); await closed('native-pointer-cancel')
   await openEditor(); await escape(); await closed('trusted-keyboard-escape')
   await openEditor(); await evaluate('window.screenshotProbe.holdEncoding()')

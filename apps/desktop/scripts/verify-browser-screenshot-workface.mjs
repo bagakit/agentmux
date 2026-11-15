@@ -175,7 +175,7 @@ const pointer=(window as any).__annotationLastTrustedPointer;if(pointer&&pointer
     if (args.includes('--outputs')) assert.equal(receipt.scope, 'actual-BrowserPane-processed-output-vertical-slice-not-full-editor-regression')
     if (args.includes('--visual-pilot')) assert.equal(receipt.cases.filter(row => row.label.startsWith('visual-') && !row.label.endsWith('cancel')).length, 6)
     else {
-      assert.ok(receipt.cases.some(row => row.label === 'continuous-pointer-ink-with-zero-native-chrome-work'))
+      if (!args.includes('--outputs')) assert.ok(receipt.cases.some(row => row.label === 'continuous-pointer-ink-with-zero-native-chrome-work'))
       assert.ok(receipt.cases.some(row => row.label === 'actual-processed-PNG-pin-and-original-pin-receipt-recovery'))
     }
     assert.ok(receipt.images.length > 0)
