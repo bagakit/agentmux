@@ -313,7 +313,7 @@ function sameLaneFacts(a: FocusContext, b: FocusContext): boolean {
  * requested coordination metadata. Coordination never enters execution history. */
 function createFocusProjectionCache() {
   let groupSequence = 0
-  const cache = new Map<string, { group: { key: string; enteredAt: number | null; sequence: number } | null; session: SessionSnapshot | undefined; activitySemantic: AgentObservation['semantic']; timeline: AgentTimelineSnapshot | undefined; stamp: FocusTimelineStamp | undefined; deferred: boolean; conversation: FocusConversationFacts | undefined; name: string | undefined; config: AppConfig | null; workspace: WorkspaceRecord | undefined; topicId: string | null; lane: AgentFocusLane | null; model: FocusContext | null; laneModel: FocusContext | null; coordinationModel: FocusContext | null }>()
+  const cache = new Map<string, { group: { key: string; enteredAt: number | null; sequence: number } | null; session: SessionSnapshot | undefined; activitySemantic: AgentObservation['semantic']; timeline: AgentTimelineSnapshot | undefined; stamp: FocusTimelineStamp | undefined; deferred: boolean; conversation: FocusConversationFacts | undefined; name: string | undefined; config: AppConfig | null; workspace: WorkspaceRecord | undefined; topicId: string | null; lane: AgentFocusLane | null; archived: boolean; model: FocusContext | null; laneModel: FocusContext | null; coordinationModel: FocusContext | null }>()
   let previous: Inputs | undefined
   let previousMode: 'full' | 'metadata' | undefined
   let previousCoordination = false
@@ -372,7 +372,7 @@ function createFocusProjectionCache() {
         if (old.model) { rows.push(old.model); laneRows.push(old.laneModel!) }
         else if (old.lane === 'pmo') {
           if (coordination) coordinationRows.push(old.coordinationModel!)
-          if (focusBucketForSession(session, false) === 'attention') pmoAttention.push(session.id)
+          if (!old.archived && focusBucketForSession(session, false) === 'attention') pmoAttention.push(session.id)
         }
         continue
       }
@@ -383,9 +383,11 @@ function createFocusProjectionCache() {
       let laneModel: FocusContext | null = null
       let coordinationModel: FocusContext | null = null
       let conversation: FocusConversationFacts | undefined
-      const lane = focusLaneForSession(topicId, scratchTopicsForWorkspace(input.scratchTopicSnapshots, workspace))
+      const topics = scratchTopicsForWorkspace(input.scratchTopicSnapshots, workspace)
+      const lane = focusLaneForSession(topicId, topics)
+      const archived = sameOwner ? old.archived : lane === 'pmo' && topics?.find(topic => topic.id === topicId)?.moteArchive?.state === 'archived'
       if (lane === 'pmo') {
-        if (focusBucketForSession(session, false) === 'attention') pmoAttention.push(session.id)
+        if (!archived && focusBucketForSession(session, false) === 'attention') pmoAttention.push(session.id)
         if (coordination) {
           // Metadata only: no first prompt, retained body or new conversation
           // projection. Explicit null also prevents an unsolicited card recap read.
@@ -416,7 +418,7 @@ function createFocusProjectionCache() {
         laneModel = old?.laneModel && sameLaneFacts(old.laneModel, model) ? old.laneModel : model
         laneRows.push(laneModel)
       }
-      cache.set(session.id, { group, session, activitySemantic, timeline, stamp: conversation ?? (mode !== undefined ? focusTimelineStamp(timeline) : undefined), deferred, conversation, name, config: input.config, workspace, topicId, lane, model, laneModel, coordinationModel })
+      cache.set(session.id, { group, session, activitySemantic, timeline, stamp: conversation ?? (mode !== undefined ? focusTimelineStamp(timeline) : undefined), deferred, conversation, name, config: input.config, workspace, topicId, lane, archived, model, laneModel, coordinationModel })
     }
     for (const id of cache.keys()) if (!retained.has(id)) cache.delete(id)
     // Card detail updates keep the established group-entry order. Lane facts
