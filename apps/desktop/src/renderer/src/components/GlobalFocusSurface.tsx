@@ -15,7 +15,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { agentRegionExecution, agentRegionLocationsKnown, agentRegionLocationBindings, useAppStore } from '../store'
 import { useShallow } from 'zustand/react/shallow'
 import { createFocusProjectionSelector, agentContextForSession, retainedFocusContext } from '../lib/focus-context'
-import { FocusContextCards } from './FocusContextCards'
+import { createFocusCardViewport, FocusContextCards } from './FocusContextCards'
 import { useFocusHierarchy } from '../lib/use-focus-hierarchy'
 import { deriveFocusProjectLanes, deriveRetainedFocusProjects, focusWorkspaceProject, focusProjectKey, focusLaneProjectKey, focusLanesByContext, type FocusProjectLane } from '../lib/focus-project-lanes'
 import { useFocusHistorySources } from '../lib/focus-history-sources'
@@ -333,6 +333,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const taskLayout = useAppStore(state => state.focusTaskLayout)
   const list = taskLayout === 'list'
   const boardRowsRef = useRef<HTMLDivElement>(null)
+  const [cardViewport] = useState(createFocusCardViewport)
   const [arrangeProjects, setArrangeProjects] = useState(0)
   const separateRevealRef = useRef<HTMLDivElement>(null)
   const filterContexts = useMemo(() => [...executionRows, ...coordinationContexts], [executionRows, coordinationContexts])
@@ -587,7 +588,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   }
   const laneRows = (lane: typeof boardLanes[number], heading: ReactNode, compact = false) => <FocusScanLaneContent list={list} lane={lane} compact={compact}
     contexts={lane.zones ? [...new Map(lane.zones.flatMap(zone => rowsByLane.get(zone.id) ?? []).map(context => [focusTopicContextKey(context.hostId, context.id), context])).values()] : rowsByLane.get(lane.id) ?? []} heading={heading} metrics={laneMetrics} replyLines={replyLines} topicPresentation={topicPresentation}
-    renderCards={(grouped, columns, topics, sections) => <FocusContextCards list={list} allowPin contexts={grouped} columns={columns} layoutReady={list || laneMetrics.measured}
+    renderCards={(grouped, _columns, topics, sections) => <FocusContextCards list={list} allowPin contexts={grouped} viewport={cardViewport} layoutReady={list || laneMetrics.measured}
       replyLines={replyLines} topics={topics} sections={sections} visits={focusVisits} scrollRef={boardRowsRef} visible={!compact && visible && documentActive}
       selectedId={shownSessionId} selectedKey={selectedContextKey} revealRequest={agentReveal} onRevealed={finishReveal}
       goalLinks={goalLinks} identities={contextIdentities} activity={listActivity} onSelect={focusExecutionSession} />} />
@@ -595,7 +596,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
       {coordinationResults.length ? <section className="focus-coordination-results" aria-label="Matching Mote coordination contexts">
         <header><strong>Mote coordination</strong><span>{coordinationResults.length}</span><small>Independent coordination focus</small></header>
         <WorkbenchPresentationContext.Provider value={cardPresentation}><div>
-          <FocusContextCards list={list} contexts={coordinationResults} columns={1} scrollRef={boardRowsRef} visible={visible && documentActive}
+          <FocusContextCards list={list} contexts={coordinationResults} viewport={cardViewport} scrollRef={boardRowsRef} visible={visible && documentActive}
             selectedId={selectedMoteId} goalLinks={goalLinks} identities={contextIdentities} activity={listActivity} onSelect={openMoteContext} />
         </div></WorkbenchPresentationContext.Provider>
       </section> : null}
@@ -648,7 +649,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
       </div> : null}
       {revealedContext && revealedContext.lane !== 'execution' ? <div className="focus-agent-reveal-card" ref={separateRevealRef} data-focus-reveal-scroll>
         <WorkbenchPresentationContext.Provider value={cardPresentation}>
-          <FocusContextCards list={list} contexts={[revealedContext.context]} columns={1} scrollRef={separateRevealRef} visible={visible && documentActive}
+          <FocusContextCards list={list} contexts={[revealedContext.context]} viewport={cardViewport} scrollRef={separateRevealRef} visible={visible && documentActive}
             selectedId={null} selectedKey={selectedContextKey} revealRequest={agentReveal} onRevealed={finishReveal}
             goalLinks={goalLinks} identities={contextIdentities} activity={listActivity} onSelect={() => {}} />
         </WorkbenchPresentationContext.Provider>
