@@ -42,10 +42,11 @@ is uncertain. Never-attempted requests can continue on the recovered same Sessio
 input. A saved plan revision completes planning.
 
 A node names its outcome, dependencies, criteria, repeatable check and optional executor.
-For each new Ticket, run `goal plan new-id` locally and use the returned `nodeId`
-as the node's `id` in the revision. The same ID is usable in `dependsOn` before
-publication. Keep it through retries and plan reordering. ID generation makes no
-connection and creates no Goal or Ticket.
+Name each new node with a distinct draft ID inside the revision. New dependencies
+can point to a draft ID from that revision or to an already published node ID.
+The original owner issues signed Ticket records in dependency order and returns
+canonical IDs in `plan.nodes`. Match each original draft to its `createdTickets`
+record, then use the issued ID for assignments, delegation, and links.
 Retire a published node by cancelling it. Once it has work, preserve its outcome,
 check and criterion set. Create a new node for different work. Explicit reassignment to a different executor supersedes the
 newest unreviewed attempt. Clearing the executor does not. A passed node stays done.
@@ -61,6 +62,13 @@ Use \`goal plan active\` for the Agent’s own claimable Tickets. Use
 as its Supervisor or as a person. For a bounded claim query on one Goal use
 \`--goal ID --view claimable\`. The read uses the original owner’s current index.
 If it is rebuilding, read the original plan for history and retry the active query.
+
+The owner signs a stable proof during claim or direct dispatch, then signs the
+completion when independent review passes. Its referenced hashes identify exact
+upstream completions and the original execution. If a receiver needs offline
+validation, use `goal plan verify --input FILE --goal ID --hash HASH --fingerprint SHA256`.
+Use the expected hash from the original link or related proof and a signing key
+fingerprint independently approved for this Goal and purpose.
 
 For a reviewed Ticket, use the exact delivery hash from its original report receipt.
 The core records the authenticated author and verified source references. The review
