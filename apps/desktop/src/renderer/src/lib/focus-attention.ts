@@ -9,12 +9,16 @@ const recorded = (at: number | null | undefined, now: number): at is number => a
 export function focusVisitTimes(history: readonly AgentFocusHistoryEntry[], now = Date.now()) {
   const visits = new Map<string, number>()
   for (const entry of history) if (entry.identity?.hostId && recorded(entry.focusedAt, now)) {
-    const key = JSON.stringify([entry.identity.hostId, entry.sessionId])
+    const source = entry.identity.source
+    const key = source?.runtimeId ? JSON.stringify(['source', source.runtimeId, source.agentSessionId])
+      : JSON.stringify([entry.identity.hostId, entry.sessionId])
     visits.set(key, Math.max(visits.get(key) ?? 0, entry.focusedAt))
   }
   return visits
 }
 export function focusContextVisit(context: FocusContext, visits: ReadonlyMap<string, number>) {
+  const source = context.access?.identity
+  if (source?.runtimeId) return visits.get(JSON.stringify(['source', source.runtimeId, source.agentSessionId]))
   const presentation = visits.get(JSON.stringify([context.hostId, context.id]))
   const original = context.control ? visits.get(JSON.stringify([context.control.hostId, context.control.agentSessionId])) : undefined
   return Math.max(presentation ?? 0, original ?? 0) || undefined

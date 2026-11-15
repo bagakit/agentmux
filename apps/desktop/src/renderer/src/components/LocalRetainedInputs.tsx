@@ -14,7 +14,7 @@ import { archivedInputMatchesSession } from '../lib/workbench-input-archive'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { useWorkbenchDocumentVisibility } from '../lib/workbench-window-registry'
 
-const SavedInputIcon = semanticIconComponent('action.save')
+const DraftIcon = semanticIconComponent('object.file')
 
 function savedInputReceipt(entry: NonNullable<LocalRetainedInput['entry']>): string {
   const receipt = entry.inputReceipt
@@ -87,7 +87,7 @@ export function LocalRetainedInputDetails({ target, visible = true }: { target: 
 export function LocalRetainedInputsPanel() {
   const [open, setOpen] = useState(false)
   return <Dialog.Root open={open} onOpenChange={setOpen}>
-    <Dialog.Trigger asChild><button type="button" className="focus-local-inputs-trigger" title="Saved drafts and retained queue entries" aria-label="Drafts & queue"><SavedInputIcon size={14} /><span>Drafts &amp; queue</span></button></Dialog.Trigger>
+    <Dialog.Trigger asChild><button type="button" className="focus-local-inputs-trigger" title="Saved drafts and retained queue entries" aria-label="Drafts & queue"><DraftIcon size={14} /><span>Drafts<span className="focus-local-inputs-trigger__queue"> &amp; queue</span></span></button></Dialog.Trigger>
     <DocumentOverlayPortal component={Dialog.Portal}>
       <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
       <Dialog.Content className="dialog-surface session-record-dialog focus-local-inputs" onPointerDownCapture={event => event.stopPropagation()}>

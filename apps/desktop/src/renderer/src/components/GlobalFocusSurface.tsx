@@ -32,7 +32,7 @@ import { useFocusProjectOrder } from '../lib/use-focus-project-order'
 import { FocusGroupDiscussion } from './FocusGroupDiscussion'
 import { focusVisitTimes, focusQuietProject } from '../lib/focus-attention'
 import { focusLaneOrigins, type FocusSourceType } from '../lib/focus-lane-origin'
-import { EMPTY_FOCUS_FILTERS, FOCUS_FILTER_STATES, focusMatchesProject, focusMatchesState, focusMatchesTypes, type FocusFilters as FocusFilterSelection } from '../lib/focus-filters'
+import { EMPTY_FOCUS_FILTERS, FOCUS_FILTER_STATES, focusInteractionTime, focusMatchesProject, focusMatchesState, focusMatchesTypes, type FocusFilters as FocusFilterSelection } from '../lib/focus-filters'
 import { FocusFilters } from './FocusFilters'
 import { readSurveyPresentation } from '../lib/mobile-presentation'
 import { focusCardTrackHeight, type FocusLaneMetrics } from '../lib/focus-lane-layout'
@@ -72,7 +72,8 @@ import { useCollaborationActivity } from '../lib/use-collaboration-reading'
 import { focusListActivityKey, indexFocusListActivity, type FocusListActivity } from '../lib/focus-list-activity'
 
 const ThemeActionSearchIcon = semanticIconComponent('action.search')
-const ArrangeProjectsIcon = semanticIconComponent('object.history')
+const ArrangeProjectsIcon = semanticIconComponent('action.move-down')
+const ConversationSearchIcon = semanticIconComponent('object.conversation')
 const ThemeObjectTeamIcon = semanticIconComponent('object.team')
 
 
@@ -115,6 +116,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const pinnedAgents = useAppStore(state => state.pinnedItems[FOCUS_AGENT_PIN_SCOPE] ?? EMPTY_FOCUS_AGENT_PINS)
   const [query, setQuery] = useState('')
   const [filters, setFilters] = useState<FocusFilterSelection>(EMPTY_FOCUS_FILTERS)
+  const [, invalidateInteractionClock] = useState(0)
   const [inspectingFilters, setInspectingFilters] = useState(false)
   const [allTimelineProjects, setAllTimelineProjects] = useState(false)
   const toggleTimelineProjects = useCallback(() => setAllTimelineProjects(value => !value), [])
@@ -122,7 +124,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     if (filters.projects.length && !next.projects.length) setAllTimelineProjects(false)
     setFilters(next)
   }
-  const filtering = Boolean(query.trim() || filters.projects.length || filters.states.length || filters.types.length)
+  const filtering = Boolean(query.trim() || filters.projects.length || filters.states.length || filters.types.length || filters.interactionMinutes !== undefined)
   const contextSelector = useMemo(createFocusProjectionSelector, [])
   const {contexts: ordinaryRows, laneContexts: ordinaryLaneContexts, coordinationContexts, pmoAttention} = useAppStore(state => contextSelector(state, visible, query.trim() ? 'full' : 'metadata', filtering || inspectingFilters))
   const [sourceChoices, setSourceChoices] = useState<{ locations: FocusContextAccess['locations']; choose(location: FocusContextAccess['locations'][number]): void } | null>(null)
@@ -424,7 +426,23 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     const lanes = lanesByContext.get(focusTopicContextKey(row.hostId, row.id)) ?? []
     return [...new Set(lanes.flatMap(lane => laneOrigins.get(lane.id)?.contextTypes?.get(focusTopicContextKey(row.hostId, row.id)) ?? ['unknown' as const]))]
   }
-  const searched = filterContexts.filter(row => searchResult.contextKeys.has(focusSearchContextKey(row.hostId, row.id, row.kind)))
+  const localHosts = useMemo(() => new Set(config?.hosts.filter(host => host.kind === 'local').map(host => host.id)), [config?.hosts])
+  const now = Date.now()
+  const interactionDuration = filters.interactionMinutes === undefined ? undefined : filters.interactionMinutes * 60_000
+  let nextInteractionExpiry = Infinity
+  const searched = filterContexts.filter(row => {
+    if (!searchResult.contextKeys.has(focusSearchContextKey(row.hostId, row.id, row.kind))) return false
+    if (interactionDuration === undefined) return true
+    const interactionAt = focusInteractionTime(row, focusVisits, localHosts, now)
+    if (!interactionAt || interactionAt + interactionDuration < now) return false
+    nextInteractionExpiry = Math.min(nextInteractionExpiry, interactionAt + interactionDuration + 1)
+    return true
+  })
+  useEffect(() => {
+    if (!visible || !Number.isFinite(nextInteractionExpiry)) return
+    const timer = setTimeout(() => invalidateInteractionClock(clock => clock + 1), Math.max(0, nextInteractionExpiry - Date.now()))
+    return () => clearTimeout(timer)
+  }, [nextInteractionExpiry, visible])
   const matching = searched.filter(row => (filters.projects.length === 0 || projectsForRow(row).some(key => focusMatchesProject(key, filters.projects))) && focusMatchesTypes(typesForRow(row), filters.types))
   const matched = matching.filter(row => focusMatchesState(row, filters.states))
   const revealRow = revealedContext?.lane === 'execution' ? revealedContext.context : null
@@ -461,7 +479,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const protectedLanes = new Set(boardLanes.filter(lane => (rowsByLane.get(lane.id) ?? []).some(row =>
     row.bucket === 'attention' || row.bucket === 'working' || row.activitySemantic !== 'idle' || row.runUnobserved || row.detailKind === 'service')).map(lane => lane.id))
   const revealedLaneIds = new Set(agentReveal && revealedContext ? (scansByContext.get(focusTopicContextKey(revealedContext.context.hostId, revealedContext.context.id)) ?? []).map(item => item.scanId) : [])
-  const filteredRetainedProjects = retainedProjects.filter(item => focusMatchesProject(item.key, filters.projects) && filters.states.length === 0 && focusMatchesTypes(['unknown'], filters.types)
+  const filteredRetainedProjects = retainedProjects.filter(item => interactionDuration === undefined && focusMatchesProject(item.key, filters.projects) && filters.states.length === 0 && focusMatchesTypes(['unknown'], filters.types)
     && searchResult.projectKeys.has(item.key))
   const currentProjectKeys = new Set(boardLanes.map(focusScanProjectKey))
   const boardHistory = filteredRetainedProjects.filter(item => item.recent || currentProjectKeys.has(item.key))
@@ -617,12 +635,14 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     <FocusToolbar layoutRows={boardRowsRef} onOpenCollaboration={!sourceSelection && mapContext?.kind === 'agent' ? () => useAppStore.getState().openCollaborationMap({ kind: 'focus', subject: { hostId: mapContext.control?.hostId ?? mapContext.hostId, agentSessionId: mapContext.control?.agentSessionId ?? mapContext.id }, name: mapContext.name }) : undefined} active={visible} selectedId={sourceSelection?.context.id ?? shownSessionId} selected={selected} tab={sourceSelection ? null : selectedTab} reference={projection?.selection.length === 1 ? projection.selection[0] : undefined} onReview={() => setRequestId(shownSessionId)} onCloseWorkspace={closeWorkspace} regionOnly={regionOnly} onToggleRegion={projection || sourceSelection ? onToggleRegion : undefined}>
       <div className="focus-filters">
         <div className="global-board-toolbar__controls">
-          <label className="global-board-search"><ThemeActionSearchIcon size={13} /><TextInput ref={searchRef} aria-label="Search contexts" placeholder="Search text, IDs or amux links" title="Filter names, activity, paths and original object IDs or links. Enter searches case-sensitive text in retained conversations." onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); historySearch.start() } }} value={query} onChange={(event) => setQuery(event.target.value)} /></label>
-          <Button type="button" className="focus-search-history-trigger" aria-label="Search retained conversation text" title="Search retained conversation text · Enter" disabled={!query.trim()} onClick={() => historySearch.start()}><ThemeActionSearchIcon size={13} /><span>History</span></Button>
-          <LocalRetainedInputsPanel />
           <FocusFilters value={filters} onChange={changeFilters} onInspectChange={setInspectingFilters} visible={visible} onClear={clearLocalFilters} onHistory={() => historySearch.start()} historyAvailable={Boolean(trimmedQuery)}
+            search={<>
+              <label className="global-board-search"><ThemeActionSearchIcon size={13} /><TextInput ref={searchRef} aria-label="Search contexts" placeholder="Find agents, IDs or links" title="Filter names, activity, paths and original object IDs or links. Enter searches case-sensitive text in retained conversations." onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); historySearch.start() } }} value={query} onChange={(event) => setQuery(event.target.value)} /></label>
+              {trimmedQuery ? <button type="button" className="focus-search-history-trigger" aria-label="Search retained conversation text" title="Search conversations · Enter" onClick={() => historySearch.start()}><ConversationSearchIcon size={13} /><span>Search conversations</span></button> : null}
+            </>}
             options={{ projects: projectOptions.map(option => ({ ...option, count: projectCounts.get(option.id) ?? 0 })), states: stateCounts, types: typeCounts }} />
-          <IconButton type="button" aria-label="Arrange projects by recent activity" title="Arrange unpinned projects by recent activity. Otherwise project positions stay fixed." onClick={() => setArrangeProjects(value => value + 1)}><ArrangeProjectsIcon size={13} /></IconButton>
+          <LocalRetainedInputsPanel />
+          <button type="button" className="focus-project-sort" aria-label="Arrange projects by recent activity" title="Sort unpinned projects by recent activity. Other project positions stay fixed." onClick={() => setArrangeProjects(value => value + 1)}><ArrangeProjectsIcon size={13} /><span>Sort<span className="focus-project-sort__basis"> by activity</span></span></button>
           <FocusSourceStatus sourceError={catalogue.error} loading={catalogue.loading} laneErrors={hierarchyErrors}
             onRetrySources={catalogue.refresh} onRetryLanes={refreshHierarchy} visible={visible && documentActive} />
         </div>
@@ -667,7 +687,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
             {hasBoardLanes || leadingResults ? <FocusProjectLanes resourceMenus renderDiscussion={(lane, slot) => <FocusGroupDiscussion lane={lane} contexts={filterContexts} active={slot.active && visible && documentActive} container={slot.container} />} quietLanes={quietLanes} protectedLanes={protectedLanes} forceExpanded={filtering} revealedLaneIds={revealedLaneIds} leading={leadingResults} visible={visible && documentActive} origins={laneOrigins} lanes={boardLanes} boardHistory={boardHistory} revealHistory={Boolean(trimmedQuery)} onRead={readProjectHistory} selectedProjectKey={filters.projects.length === 1 ? filters.projects[0]!.id : 'all'} currentLaneId={displayedCurrentLaneId} revealRequestId={agentReveal?.pending ? agentReveal.requestId : undefined} onSelect={key => setFilters(value => ({ ...value, projects: [{ id: key, name: projectOptions.find(option => option.id === key)?.name ?? key }] }))} renderLane={laneRows} rowsRef={boardRowsRef} /> : null}
             {filtered.length === 0 && filteredRetainedProjects.length === 0 && coordinationResults.length === 0 ? <p className="focus-project-lanes__empty">
               <span>No contexts match these local filters.</span>
-              {query || filters.projects.length || filters.states.length || filters.types.length ? <button type="button" className="focus-project-lanes__clear" onClick={clearLocalFilters}>Clear filters</button> : null}
+              {filtering ? <button type="button" className="focus-project-lanes__clear" onClick={clearLocalFilters}>Clear filters</button> : null}
             </p> : null}
           </div></WorkbenchPresentationContext.Provider>
           <FocusRetainedProjects projects={pastProjects} total={pastProjectCount} onRead={readProjectHistory} />

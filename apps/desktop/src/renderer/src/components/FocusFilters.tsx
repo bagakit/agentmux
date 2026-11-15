@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState, type ButtonHTMLAttributes } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type ReactNode } from 'react'
 import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import * as Menu from './HoverDropdownMenu'
-import { EMPTY_FOCUS_FILTERS, FOCUS_FILTER_STATES, type FocusFilters as Selection, type FocusStateFilter } from '../lib/focus-filters'
+import { EMPTY_FOCUS_FILTERS, FOCUS_FILTER_STATES, FOCUS_INTERACTION_RANGES, type FocusFilters as Selection, type FocusStateFilter } from '../lib/focus-filters'
 import { FOCUS_SOURCE_TYPES, type FocusSourceType } from '../lib/focus-lane-origin'
 
 const FilterIcon = semanticIconComponent('action.filter')
@@ -22,15 +22,18 @@ function ExplicitFilterTrigger({ onClick, ...props }: ButtonHTMLAttributes<HTMLB
 }
 
 /** Only presentation conditions live here. Original owner facts and card membership stay at Focus. */
-export function FocusFilters({ value, onChange, onInspectChange, options, visible, onClear, onHistory, historyAvailable }: {
+export function FocusFilters({ value, onChange, onInspectChange, options, visible, onClear, onHistory, historyAvailable, search }: {
   value: Selection; onChange(value: Selection): void; options: FocusFilterOptions; visible: boolean
   onInspectChange?(open: boolean): void
   onClear(): void; onHistory(): void; historyAvailable: boolean
+  search?: ReactNode
 }) {
   const [open, setOpen] = useState(false)
   const [optionQuery, setOptionQuery] = useState('')
   const triggerRef = useRef<HTMLButtonElement>(null)
   const optionSearchRef = useRef<HTMLInputElement>(null)
+  const interactionRef = useRef<HTMLInputElement>(null)
+  const interactionId = useId()
   const originRef = useRef<HTMLButtonElement | null>(null)
   const selectedNames = useRef(new Map<string, string>())
   useEffect(() => {
@@ -47,8 +50,11 @@ export function FocusFilters({ value, onChange, onInspectChange, options, visibl
   const stateNames = value.states.map(id => FOCUS_FILTER_STATES.find(option => option.id === id)!.name)
   const typeNames = value.types.map(id => TYPE_NAMES[id])
   const projectNames = value.projects.map(item => { const current = projects.find(option => option.id === item.id); return current?.unavailable ? `${current.name} · Unavailable` : current?.name ?? item.name })
-  const count = Number(value.projects.length > 0) + Number(value.states.length > 0) + Number(value.types.length > 0)
-  const summary = [projectNames.join(' or ') || 'All projects', stateNames.join(' or ') || 'All states', typeNames.join(' or ') || 'All types'].join(' · ')
+  const rangeIndex = FOCUS_INTERACTION_RANGES.findIndex(range => range.minutes === value.interactionMinutes)
+  const activeRange = FOCUS_INTERACTION_RANGES[rangeIndex]!
+  const count = Number(value.projects.length > 0) + Number(value.states.length > 0) + Number(value.types.length > 0) + Number(activeRange.minutes !== undefined)
+  const summary = [projectNames.join(' or ') || 'All projects', stateNames.join(' or ') || 'All states', typeNames.join(' or ') || 'All types',
+    ...(activeRange.minutes === undefined ? [] : [`Interacted · ${activeRange.label}`])].join(' · ')
   const toggleState = (id: FocusStateFilter) => onChange({ ...value, states: value.states.includes(id) ? value.states.filter(item => item !== id) : [...value.states, id] })
   const toggleType = (id: FocusSourceType) => onChange({ ...value, types: value.types.includes(id) ? value.types.filter(item => item !== id) : [...value.types, id] })
   const match = (name: string) => name.toLocaleLowerCase().includes(optionQuery.trim().toLocaleLowerCase())
@@ -60,19 +66,33 @@ export function FocusFilters({ value, onChange, onInspectChange, options, visibl
     <span className="focus-filter-menu__name">{item.name}{item.unavailable ? <small>Unavailable · Original condition kept</small> : null}</span>
     {item.id !== 'all' ? <span className="focus-filter-menu__count">{item.count}</span> : null}
   </Menu.CheckboxItem>
-  const chip = (field: 'projects' | 'states' | 'types', label: string, names: readonly string[]) => names.length ? <span className="focus-filter-chip" key={field} data-focus-project-scope-control={field === 'projects' || undefined}>
+  const chip = (label: string, names: readonly string[], clear: () => void) => names.length ? <span className="focus-filter-chip" key={label}
+    data-focus-interaction-chip={label === 'Interaction' || undefined} data-focus-project-scope-control={label === 'Project' || undefined}>
     <ExplicitFilterTrigger type="button" className="focus-filter-chip__value" title={names.join(' or ')} aria-label={`Edit ${label} filter: ${names.join(' or ')}`} onClick={event => { originRef.current = event.currentTarget; setOptionQuery(''); changeOpen(true) }}><span>{label}</span><strong>{names.length > 1 ? `${names[0]} +${names.length - 1}` : names[0]}</strong></ExplicitFilterTrigger>
-    <button type="button" className="focus-filter-chip__remove" aria-label={`Remove ${label} filter`} onClick={() => { onChange({ ...value, [field]: [] }); triggerRef.current?.focus() }}><CloseIcon size={11} /></button>
+    <button type="button" className="focus-filter-chip__remove" aria-label={`Remove ${label} filter`} onClick={() => { clear(); triggerRef.current?.focus() }}><CloseIcon size={11} /></button>
   </span> : null
   return <Menu.Root open={visible && open} onOpenChange={changeOpen}>
-    <div className="focus-filter-chips" aria-label="Applied Focus filters">{chip('projects', 'Project', projectNames)}{chip('states', 'State', stateNames)}{chip('types', 'Type', typeNames)}</div>
+    <div className={search ? 'focus-search-group' : undefined}>
+      {search}
       <Menu.Trigger asChild><button ref={triggerRef} type="button" className="focus-filter-trigger" data-focus-project-scope-control aria-label="Focus filters" aria-description={summary} title={summary} data-active={count > 0 || undefined} onPointerDown={() => { originRef.current = triggerRef.current }} onKeyDown={() => { originRef.current = triggerRef.current }}>
-        <FilterIcon size={14} /><span className="focus-filter-trigger__summary">Filter</span>{count ? <span className="focus-filter-trigger__count">{count}</span> : null}
+        <FilterIcon size={14} /><span className="focus-filter-trigger__summary">Filter</span>
+        {activeRange.minutes === undefined ? null : <span className="focus-filter-trigger__range">{activeRange.short}</span>}
+        {count ? <span className="focus-filter-trigger__count" data-focus-single-range={count === 1 && activeRange.minutes !== undefined || undefined}>{count}</span> : null}
       </button></Menu.Trigger>
+    </div>
+    <div className="focus-filter-chips" aria-label="Applied Focus filters">
+      {chip('Interaction', activeRange.minutes === undefined ? [] : [activeRange.short], () => onChange({ ...value, interactionMinutes: undefined }))}
+      {chip('Project', projectNames, () => onChange({ ...value, projects: [] }))}
+      {chip('State', stateNames, () => onChange({ ...value, states: [] }))}
+      {chip('Type', typeNames, () => onChange({ ...value, types: [] }))}
+    </div>
       <Menu.Portal><Menu.Content className="tab-context-menu focus-filter-menu" align="end" sideOffset={4} collisionPadding={8} onKeyDown={event => {
-        // Radix menus reserve Tab for dismissal prevention. Give the embedded
-        // option search a direct keyboard route without changing hover focus.
-        if (event.key === 'Tab') { event.preventDefault(); optionSearchRef.current?.focus() }
+        if (event.key !== 'Tab') return
+        event.preventDefault()
+        if (event.target === interactionRef.current && !event.shiftKey)
+          event.currentTarget.querySelector<HTMLElement>('[role="menuitemcheckbox"]')?.focus()
+        else if (event.target === optionSearchRef.current) interactionRef.current?.focus()
+        else optionSearchRef.current?.focus()
       }} onCloseAutoFocus={event => {
         const focused = document.activeElement
         if (focused instanceof HTMLElement && focused.isConnected && focused !== document.body
@@ -84,6 +104,16 @@ export function FocusFilters({ value, onChange, onInspectChange, options, visibl
         }
       }}>
         <Menu.Label className="focus-filter-menu__heading">Filter contexts</Menu.Label>
+        <div className="focus-interaction-filter">
+          <label htmlFor={interactionId}>Interacted within <span>{activeRange.label}</span></label>
+          <input ref={interactionRef} id={interactionId} type="range" min={0} max={FOCUS_INTERACTION_RANGES.length - 1} step={1}
+            value={rangeIndex} aria-label="Interacted within" aria-valuetext={activeRange.label}
+            style={{ '--focus-interaction-progress': `${rangeIndex / (FOCUS_INTERACTION_RANGES.length - 1) * 100}%` } as CSSProperties}
+            onKeyDown={event => { if (event.key !== 'Escape' && event.key !== 'Tab') event.stopPropagation() }}
+            onChange={event => onChange({ ...value, interactionMinutes: FOCUS_INTERACTION_RANGES[event.currentTarget.valueAsNumber]?.minutes })} />
+          <div aria-hidden="true"><span>15 min</span><span>Any time</span></div>
+          <small>Opened here or sent a message</small>
+        </div>
         <div className="focus-filter-menu__search"><TextInput ref={optionSearchRef} aria-label="Find Focus filter options" placeholder="Find a project, state or type…" value={optionQuery} onChange={event => setOptionQuery(event.target.value)} onKeyDown={event => {
           if (event.key === 'ArrowDown') { event.preventDefault(); event.currentTarget.closest('[role="menu"]')?.querySelector<HTMLElement>('[role="menuitemcheckbox"]')?.focus() }
           else if (event.key !== 'Escape' && event.key !== 'Tab') event.stopPropagation()
@@ -107,7 +137,7 @@ export function FocusFilters({ value, onChange, onInspectChange, options, visibl
         <Menu.Separator className="tab-context-menu__separator" />
         <Menu.Label className="focus-filter-menu__scope">Match all groups · Any value within a group. Types may overlap.</Menu.Label>
         <Menu.Item className="tab-context-menu__item" data-focus-project-scope-control onSelect={() => { onChange(EMPTY_FOCUS_FILTERS); onClear() }}>Clear filters</Menu.Item>
-        <Menu.Item className="tab-context-menu__item" disabled={!historyAvailable} onSelect={onHistory}>Search all retained conversation text</Menu.Item>
+        {historyAvailable ? <Menu.Item className="tab-context-menu__item" onSelect={onHistory}>Search conversations</Menu.Item> : null}
         <Menu.Item className="tab-context-menu__item" onSelect={() => {}}>Done</Menu.Item>
       </Menu.Content></Menu.Portal>
     </Menu.Root>

@@ -37,6 +37,7 @@ export type FocusContext = {
   executorId?: string
   hostId: string; topicId: string | null; workspaceId: string; workspaceName: string; workspacePath: string; liveAgent: boolean; actionable: boolean
   lastActivityAt: number | null
+  lastHumanInputAt?: number
   runId: string; workingEnteredAt: number | null
   stateEnteredAt?: number
   workspace: WorkspaceRecord | undefined
@@ -151,6 +152,19 @@ type FocusConversationFacts = FocusTimelineStamp & {
 function sameConversationFacts(facts: FocusTimelineStamp, timeline: AgentTimelineSnapshot | undefined): boolean {
   return facts.revision === timeline?.revision && facts.sourceHostId === timeline?.sourceHostId && facts.agentSessionId === timeline?.agentSessionId && facts.streamEpoch === timeline?.stream?.epoch
 }
+const humanInputTimes = new WeakMap<AgentTimelineSnapshot['items'], { revision: number; at: number }>()
+function focusLatestHumanInput(items: AgentTimelineSnapshot['items'], revision: number): number | undefined {
+  if (!items.length) return undefined
+  const held = humanInputTimes.get(items)
+  if (held && held.revision === revision) return held.at || undefined
+  let latest = 0
+  for (const item of items) {
+    if (item.kind === 'user_message' && item.status === 'complete' && item.authorHuman === true &&
+      !item.authorAgentSessionId && !item.authorExternal && Number.isSafeInteger(item.createdAt)) latest = Math.max(latest, item.createdAt)
+  }
+  humanInputTimes.set(items, { revision, at: latest })
+  return latest || undefined
+}
 // Focus, its transient navigation preview and the Space directory read the same
 // accepted Timeline. Share only its small derived text facts, never row order or
 // Session state; weak keys do not retain a retired Timeline or another reader.
@@ -208,6 +222,7 @@ function agentContextWithConversation(session: SessionSnapshot, timeline: AgentT
   const nativeSubagents = session.kind === 'agent' ? focusNativeSubagents(session, now) : undefined
   const name = session.kind === 'agent' ? agentDisplayName({ userName, firstPrompt: conversation?.firstPrompt ?? firstPromptFromTimeline(timeline), fallbackLabel: session.label, providerLabel: session.providerId }) : userName ?? session.label
   const lastActivityAt = focusLastTaskActivityAt(items, focusActivityEntryTime(session), now)
+  const lastHumanInputAt = timeline ? focusLatestHumanInput(items, timeline.revision) : undefined
   const stateEnteredAt = session.kind === 'agent' && session.currentActivity ? undefined : agentStateEnteredAt(session, now)
   let detail = 'No activity details observed', detailIsMessage = false
   let detailKind: FocusContext['detailKind'] = pending || bucket === 'attention' || state === 'disconnected' || state === 'exited' ? 'service' : undefined
@@ -253,6 +268,7 @@ function agentContextWithConversation(session: SessionSnapshot, timeline: AgentT
     ...(session.kind === 'agent' ? { executorId: session.executorId, control: session.control, ...(session.workPlacement ? { workPlacement: session.workPlacement } : {}), ...(session.toolExecution ? { toolExecution: session.toolExecution } : {}) } : {}),
     hostId: session.hostId, topicId, workspace, workspaceId: workspace?.id ?? `${session.hostId}:${session.workspacePath}`, workspaceName: workspace?.name ?? session.workspacePath.split('/').filter(Boolean).at(-1) ?? 'Unassigned', workspacePath: session.workspacePath,
     liveAgent: session.kind === 'agent' && session.processState === 'running', actionable: pending || isNeedsYouState(state) || session.kind === 'agent' && state === 'error', lastActivityAt,
+    ...(lastHumanInputAt === undefined ? {} : { lastHumanInputAt }),
     runId: session.control.run.runId, ...(stateEnteredAt === undefined ? {} : { stateEnteredAt }), workingEnteredAt: activitySemantic === 'active' && !(session.kind === 'agent' && session.currentActivity) ? workingEntryTime(session) : null, recap, detailIsRecap, ...(detailKind ? { detailKind } : {}),
     ...(activitySemantic === undefined ? {} : { activitySemantic }), ...(nativeSubagents ? { nativeSubagents } : {}) }
 }

@@ -343,7 +343,6 @@
 .focus-search-details dt { color: var(--text-3); }
 .focus-search-details dd { margin: 0; overflow-wrap: anywhere; user-select: text; }
 .focus-search-result__read.small-button { margin: 2px 6px; justify-content: flex-start; }
-.focus-search-history-trigger { flex: 0 0 auto; gap: 4px; }
 .focus-history-search { display: flex; flex: 0 0 auto; flex-direction: column; gap: 6px; min-width: 0; max-height: 60%; overflow: auto; padding: 8px; border-bottom: 1px solid var(--line); }
 .focus-history-search > header { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .focus-history-search > header > strong { flex: 1; min-width: 0; overflow-wrap: anywhere; }
@@ -362,7 +361,6 @@
 .focus-history-hit__provenance > div { display: flex; gap: 4px; min-width: 0; }
 .focus-history-hit__provenance dt { flex: none; }
 .focus-history-hit__provenance dd { margin: 0; overflow-wrap: anywhere; color: var(--text-2); }
-@container (max-width: 400px) { .focus-search-history-trigger > span { display: none; } }
 .focus-history-coverage { font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
 .focus-history-coverage > summary { color: var(--text-muted); cursor: pointer; }
 
@@ -437,9 +435,8 @@
 .focus-local-inputs-trigger { display: inline-flex; flex: none; align-items: center; justify-content: flex-start; gap: 5px; min-width: 28px; height: 28px; padding: 0 7px; border: 1px solid var(--line); border-radius: 4px; background: transparent; color: var(--text-2); font: inherit; font-size: var(--fs-meta); white-space: nowrap; cursor: pointer; }
 .focus-local-inputs-trigger:hover, .focus-local-inputs-trigger:focus-visible { background: var(--surface-2); color: var(--text); }
 .focus-local-inputs-trigger svg { flex: none; }
-@container focus-filter-area (max-width: 680px) {
-  .focus-local-inputs-trigger { width: 28px; padding: 0; gap: 0; justify-content: center; }
-  .focus-local-inputs-trigger > span { display: none; }
+@container focus-filter-area (max-width: 540px) {
+  .focus-local-inputs-trigger__queue { display: none; }
 }
 .local-retained-inputs { min-width: 0; font-size: 12px; }
 .local-retained-inputs > p { margin: 8px 0; }
