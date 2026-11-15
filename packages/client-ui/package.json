@@ -343,6 +343,11 @@
       "browser": "./src/components/MoteConversationStart.tsx",
       "import": "./dist/components/MoteConversationStart.js"
     },
+    "./components/MoteGroupConversation": {
+      "types": "./src/components/MoteGroupConversation.tsx",
+      "browser": "./src/components/MoteGroupConversation.tsx",
+      "import": "./dist/components/MoteGroupConversation.js"
+    },
     "./components/MoteConversationThreads": {
       "types": "./src/components/MoteConversationThreads.tsx",
       "browser": "./src/components/MoteConversationThreads.tsx",

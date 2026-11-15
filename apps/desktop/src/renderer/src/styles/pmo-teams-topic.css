@@ -108,3 +108,18 @@
 }
 /* The shared Threads toolbar blends with the floating panel it sits on. */
 .pmo-teams-topic-floating { --mote-threads-surface: var(--surface-1); }
+
+.pmo-teams-topic-floating__mote { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.pmo-teams-topic-floating__mote[hidden] { display: none; }
+.pmo-teams-topic-floating__mote > .workspace-workbench { flex: 1; min-height: 0; width: 100%; height: auto; }
+.mote-chooser__group-icon svg { padding: 5px; width: 32px; height: 32px; border-radius: 10px; background: color-mix(in srgb, var(--blue) 10%, var(--surface-3)); }
+.mote-chooser__group-selection { width: 13px; height: 5px; border-radius: 6px; background: var(--text-3); }
+.mote-chooser__choice[aria-pressed="true"] .mote-chooser__group-selection { background: var(--text); }
+.mote-chooser__group-more { align-self: center; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.mote-thread-groups { flex: none; padding: 6px 10px; border-radius: var(--radius); background: var(--surface-1); color: var(--text); }
+.mote-thread-groups summary { padding: 4px; cursor: pointer; font-weight: 600; }
+.mote-thread-groups summary > span, .mote-thread-groups__row > :last-child { color: var(--text-2); font-weight: 400; font-size: var(--fs-meta); }
+.mote-thread-groups__row { display: flex; align-items: center; gap: 7px; width: 100%; padding: 7px; border: 0; border-radius: var(--radius-sm); background: transparent; color: inherit; text-align: start; cursor: pointer; }
+.mote-thread-groups__row:hover { background: var(--surface-2); }
+.mote-thread-groups__row > :last-child { margin-inline-start: auto; }
+.mote-thread-groups__issue { display: flex; align-items: center; gap: 8px; padding: 6px; color: var(--text-2); }

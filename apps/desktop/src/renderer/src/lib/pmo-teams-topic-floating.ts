@@ -53,6 +53,7 @@ export type PmoTeamsTopicFloatingState = {
   /** Exact selected occurrence; null keeps an unconfirmed saved placement. */
   reference?: WorkbenchProjectionSelection | null | undefined
   /** Navigation presentation only; unrelated to an Agent's explicit view mode. */
+  groupSelection?: { groupId: string; moteId?: string | undefined; members?: boolean | undefined } | undefined
   railMode?: 'cards' | 'avatars' | undefined
   size?: PmoTeamsTopicFloatingSize | undefined
   /** Focus Chat recipient: absent follows floating; null retains an unconfirmed saved choice. */
@@ -97,6 +98,10 @@ function readState(): PmoTeamsTopicFloatingState {
       ...(Object.hasOwn(value, 'reference') ? { reference: validReference(value.reference) ? value.reference : null } : {}),
       ...(value.targetAgent && typeof value.targetAgent.hostId === 'string' && typeof value.targetAgent.sessionId === 'string' && typeof value.targetAgent.presentationSessionId === 'string' ? { targetAgent: { hostId: value.targetAgent.hostId, sessionId: value.targetAgent.sessionId, presentationSessionId: value.targetAgent.presentationSessionId } } : {}),
       ...(value.agentTarget && (value.agentTarget.agentSessionId === null || typeof value.agentTarget.agentSessionId === 'string') ? { agentTarget: value.agentTarget } : {}),
+      ...(typeof value.groupSelection?.groupId === 'string' && value.groupSelection.groupId.trim() ? { groupSelection: {
+        groupId: value.groupSelection.groupId,
+        ...(typeof value.groupSelection.moteId === 'string' && value.groupSelection.moteId ? { moteId: value.groupSelection.moteId } : {})
+      } } : {}),
       ...(value.railMode === 'cards' || value.railMode === 'avatars' ? { railMode: value.railMode } : {}),
       ...(validSize(value.size) ? { size: value.size } : {}),
       ...(invalidChoice ? { focusChatTopicId: null, preferenceIssue: 'The saved Chat recipient is unconfirmed. Select a Mote to confirm the recipient.' } : typeof value.focusChatTopicId === 'string' ? { focusChatTopicId: value.focusChatTopicId.trim() } : {}) }
@@ -117,7 +122,8 @@ function update(next: Partial<PmoTeamsTopicFloatingState>, persist = true): void
     (Object.hasOwn(next, 'reference') && JSON.stringify(next.reference) !== JSON.stringify(current.reference))
   const resolved = { ...current, ...(retargeted && !Object.hasOwn(next, 'reference') ? { reference: undefined } : {}),
     ...(retargeted && !Object.hasOwn(next, 'targetAgent') ? { targetAgent: undefined } : {}), ...next }
-  if (resolved.open === current.open && resolved.preview === current.preview &&
+  const groupChanged = JSON.stringify(resolved.groupSelection) !== JSON.stringify(current.groupSelection)
+  if (!groupChanged && resolved.open === current.open && resolved.preview === current.preview &&
     resolved.targetTopicId === current.targetTopicId && resolved.targetTabId === current.targetTabId &&
     JSON.stringify(resolved.reference) === JSON.stringify(current.reference) && JSON.stringify(resolved.targetAgent) === JSON.stringify(current.targetAgent) &&
     JSON.stringify(resolved.agentTarget) === JSON.stringify(current.agentTarget) && resolved.entryMessage === current.entryMessage &&
@@ -125,9 +131,9 @@ function update(next: Partial<PmoTeamsTopicFloatingState>, persist = true): void
     resolved.railMode === current.railMode && sameSize(resolved.size, current.size) && resolved.focusChatTopicId === current.focusChatTopicId &&
     resolved.preferenceIssue === current.preferenceIssue && resolved.conversationEntry === current.conversationEntry && resolved.conversationIntent === current.conversationIntent && resolved.threadsEntry === current.threadsEntry && !retryPreference) return
   state = resolved
-  if (persist && (resolved.open !== current.open || JSON.stringify(resolved.agentTarget) !== JSON.stringify(current.agentTarget) || resolved.targetTopicId !== current.targetTopicId || resolved.targetTabId !== current.targetTabId || JSON.stringify(resolved.reference) !== JSON.stringify(current.reference) || JSON.stringify(resolved.targetAgent) !== JSON.stringify(current.targetAgent) || resolved.railMode !== current.railMode || !sameSize(resolved.size, current.size) || resolved.focusChatTopicId !== current.focusChatTopicId || retryPreference)) {
+  if (persist && (groupChanged || resolved.open !== current.open || JSON.stringify(resolved.agentTarget) !== JSON.stringify(current.agentTarget) || resolved.targetTopicId !== current.targetTopicId || resolved.targetTabId !== current.targetTabId || JSON.stringify(resolved.reference) !== JSON.stringify(current.reference) || JSON.stringify(resolved.targetAgent) !== JSON.stringify(current.targetAgent) || resolved.railMode !== current.railMode || !sameSize(resolved.size, current.size) || resolved.focusChatTopicId !== current.focusChatTopicId || retryPreference)) {
     try { desktopUserFragments.write('moteFloating', JSON.stringify({ open: resolved.open, agentTarget: resolved.agentTarget,
-      targetTopicId: resolved.targetTopicId, targetTabId: resolved.targetTabId, targetAgent: resolved.targetAgent, reference: resolved.reference, railMode: resolved.railMode, size: resolved.size, focusChatTopicId: resolved.focusChatTopicId }))
+      targetTopicId: resolved.targetTopicId, targetTabId: resolved.targetTabId, targetAgent: resolved.targetAgent, reference: resolved.reference, groupSelection: resolved.groupSelection, railMode: resolved.railMode, size: resolved.size, focusChatTopicId: resolved.focusChatTopicId }))
       state = { ...resolved, preferenceIssue: undefined }
     } catch { state = { ...resolved, preferenceIssue: 'Mote preferences could not be saved. This window keeps your choice and size; select the Mote or resize again to retry.' } }
   }
@@ -317,8 +323,15 @@ export function keepPmoTeamsTopicFloatingPreview(): void { cancelClose() }
 export function requestPmoTeamsTopicFloatingThreads(topicId: string): boolean {
   const current = snapshot()
   if (!current.open || current.agentTarget || pmoTeamsTopicFloatingTargetTopicId(current, useAppStore.getState().tabs) !== topicId) return false
-  update({ threadsEntry: nextConversationEntry() })
+  update({ threadsEntry: nextConversationEntry(), groupSelection: undefined })
   return true
+}
+
+/** Show a group while retaining the current Mote or original Agent placement underneath. */
+export function requestMoteGroupFloatingOpen(groupId: string, moteId?: string): void {
+  cancelClose()
+  captureFocus()
+  update({ open: true, preview: false, groupSelection: { groupId, ...(moteId ? { moteId } : {}) } })
 }
 
 /** Pinning reuses the visible surface and the original input/focus owners. */
@@ -337,7 +350,7 @@ export function requestPmoTeamsTopicFloatingOpen(options?: { targetTopicId?: str
   const tabId = options?.targetTabId?.trim() ?? options?.reference?.tabId
   const topicId = options?.targetTopicId?.trim() ?? (tabId ? current.tabs[tabId]?.topicId : undefined)
   const retargeted = Boolean(topicId && topicId !== previous.targetTopicId || tabId && tabId !== previous.targetTabId)
-  let next: PmoTeamsTopicFloatingState = { ...previous, open: true, preview: false, threadsEntry: undefined, agentTarget: undefined, entryMessage: undefined, entryContext: undefined, ...(topicId ? { targetTopicId: topicId } : {}),
+  let next: PmoTeamsTopicFloatingState = { ...previous, open: true, preview: false, ...(topicId || tabId || suppliedReference ? { groupSelection: undefined } : {}), threadsEntry: undefined, agentTarget: undefined, entryMessage: undefined, entryContext: undefined, ...(topicId ? { targetTopicId: topicId } : {}),
     ...(tabId ? { targetTabId: tabId } : topicId && topicId !== previous.targetTopicId ? { targetTabId: undefined } : {}),
     ...(suppliedReference ? { reference: suppliedReference } : retargeted ? { reference: undefined } : {}),
     ...(tabId || suppliedReference || retargeted ? { targetAgent: undefined } : {}) }
@@ -405,7 +418,7 @@ export function requestAgentConversationFloatingOpen(agentSessionId: string | nu
   const previous = snapshot(), { sameOriginal, session, selection } = agentConversationSelection(agentSessionId, hostId, originalReference)
   const sameEntry = Boolean(sameOriginal && entryContext && previous.entryContext && JSON.stringify(entryContext) === JSON.stringify(previous.entryContext))
   const conversationEntry = sameEntry && previous.conversationEntry !== undefined ? previous.conversationEntry : nextConversationEntry()
-  update({ open: true, preview: false, ...selection, entryMessage, entryContext, conversationEntry })
+  update({ open: true, preview: false, groupSelection: undefined, ...selection, entryMessage, entryContext, conversationEntry })
   if (session && selection.reference) useAppStore.getState().setViewMode(session.id, 'activity', { focus: false })
   requestAnimationFrame(() => {
     if (snapshot().open && snapshot().conversationEntry === conversationEntry)

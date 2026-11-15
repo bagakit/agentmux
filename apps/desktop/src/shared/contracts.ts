@@ -6,6 +6,9 @@ import type { DeliveryAttempt, DeliveryAttemptLookup } from '@agentmux/core'
 import type { PastedImage } from '@agentmux/client-ui/pasted-images'
 import type { AgentMuxBrowserTarget, AgentMuxExternalBrowserPairing } from '@agentmux/core'
 import type { AgentMuxRpcParams, AgentMuxRpcResult } from '@agentmux/core'
+import type { MoteGroupMethod } from '@agentmux/core/mote/group'
+
+export type MoteGroupClientMethod = Exclude<MoteGroupMethod, 'space.mote.group.reply'>
 import type { ToolkitDesktopApi } from './toolkit.js'
 import type { BrowserViewport } from './browser-viewport.js'
 import type { BrowserPageShortcutAction } from './browser-page-shortcuts.js'
@@ -1908,6 +1911,7 @@ export type AgentMuxDesktopApi = {
   moteConnections: {
     call<M extends import('@agentmux/core').MoteConnectionMethod>(method: M, params: import('@agentmux/core').MoteConnectionParamsMap[M], target?: ConnectionHostingTarget): Promise<import('@agentmux/core').MoteConnectionResultMap[M]>
   }
+  moteGroup: { call<M extends MoteGroupClientMethod>(method: M, input: AgentMuxRpcParams<M>): Promise<AgentMuxRpcResult<M>> }
   moteDialogue: {
     inspectSetup(params: import('@agentmux/core/mote-dialogue').MoteMainSetupRequest): Promise<import('@agentmux/core/mote-dialogue').MoteMainSetupResult>
     advanceSetup(params: import('@agentmux/core/mote-dialogue').MoteMainSetupRequest): Promise<import('@agentmux/core/mote-dialogue').MoteMainSetupResult>

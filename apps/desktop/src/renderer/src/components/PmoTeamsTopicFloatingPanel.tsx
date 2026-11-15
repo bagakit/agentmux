@@ -26,6 +26,9 @@ import { agentSessionPresentationIndex, sessionPresentationById } from '../lib/s
 import { useAppStore } from '../store'
 import { WorkspaceWorkbench } from './WorkspaceWorkbench'
 import { MoteWorkface } from './MoteWorkface'
+import { DesktopMoteGroup, DesktopMoteGroupRail } from './DesktopMoteGroup'
+import { moteConnectionTarget } from '../lib/mote-connection-default'
+import { useMoteGroups, type MoteGroupReadingPositions } from '@agentmux/client-ui/components/MoteGroupConversation'
 import { MoteProfilePopover } from './MoteProfilePopover'
 import { WorkbenchPresentationContext } from '../lib/workbench-presentation'
 import { StatusDot } from './StatusDot'
@@ -49,6 +52,7 @@ import { MoteContextStatus } from './MoteContextStatus'
 import { formatSessionAddress } from '@agentmux/core/sharing'
 import type { PmoTeamsTopicTarget } from '../lib/pmo-teams-topic-target'
 
+const ThemeMoteGroupNewIcon = semanticIconComponent('action.add-item')
 const ThemeStatusNeutralIcon = semanticIconComponent('status.neutral')
 const ThemeStatusUnknownIcon = semanticIconComponent('status.unknown')
 const ThemeNeedsInputIcon = semanticIconComponent('status.needs-input')
@@ -289,7 +293,8 @@ function MoteIdentityTip({ anchor }: { anchor: HTMLButtonElement }) {
   return <div ref={ref} role="tooltip" className="mote-chooser__identity">{label}</div>
 }
 
-const MoteChooser = memo(function MoteChooser({ topics, topicId, tabId, railMode, onToggleMode, onSelect, onClose, onArchive, pending, container, onRename, onAvatar, onOpenMoteSpace, catalog, reference, targetAgent, onReferenceSelect }: {
+const MoteChooser = memo(function MoteChooser({ topics, topicId, tabId, railMode, onToggleMode, onSelect, onClose, onArchive, pending, container, onRename, onAvatar, onOpenMoteSpace, catalog, reference, targetAgent, onReferenceSelect, groupRows, groupActions, groupActive }: {
+  groupRows?: React.ReactNode; groupActions?: React.ReactNode; groupActive: boolean
   catalog?: AgentMuxSpaceCatalog | null | undefined; reference?: WorkbenchProjectionSelection | null | undefined
   targetAgent?: PmoTeamsTopicFloatingState['targetAgent']
   onReferenceSelect(topicId: string, reference: WorkbenchProjectionSelection): void
@@ -307,9 +312,11 @@ const MoteChooser = memo(function MoteChooser({ topics, topicId, tabId, railMode
   }, [railMode])
   return <div className="mote-chooser">
     <div className="mote-chooser__choices" role="group" aria-label="Clubs">
-      {topics.filter(topic => topic.moteArchive?.state !== 'archived' || showArchived).map(topic => <MoteChoice key={topic.id} topic={topic} selected={topic.id === topicId} savedTabId={tabId} railMode={railMode} onSelect={onSelect} onIdentity={showIdentity} onArchive={onArchive} pending={pending} container={container} currentTopicId={topicId} onRename={onRename} onAvatar={onAvatar} onOpenSpace={onOpenMoteSpace} catalog={catalog} reference={reference} targetAgent={targetAgent} onReferenceSelect={onReferenceSelect} />)}
+      {topics.filter(topic => topic.moteArchive?.state !== 'archived' || showArchived).map(topic => <MoteChoice key={topic.id} topic={topic} selected={!groupActive && topic.id === topicId} savedTabId={tabId} railMode={railMode} onSelect={onSelect} onIdentity={showIdentity} onArchive={onArchive} pending={pending} container={container} currentTopicId={topicId} onRename={onRename} onAvatar={onAvatar} onOpenSpace={onOpenMoteSpace} catalog={catalog} reference={reference} targetAgent={targetAgent} onReferenceSelect={onReferenceSelect} />)}
+      {groupRows}
     </div>
     <div className="mote-chooser__actions">
+      {groupActions}
       <button type="button" className="mote-chooser__archive" aria-label="Show archived Clubs" aria-pressed={showArchived} title={showArchived ? 'Hide archived Clubs' : 'Show archived Clubs'} onClick={() => setShowArchived(value => !value)}><ThemeActionArchiveIcon size={13} /><span>{topics.filter(topic => topic.moteArchive?.state === 'archived').length}</span></button>
       <button type="button" aria-label="Show Mote avatars only" aria-pressed={railMode === 'avatars'} title={railMode === 'cards' ? 'Show avatars only' : 'Show Mote cards'} onClick={onToggleMode}>
         {railMode === 'cards' ? <ThemeLayoutCloseLeftIcon size={14} /> : <ThemeLayoutOpenLeftIcon size={14} />}
@@ -350,6 +357,28 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
   const discussionChoices = useMemo(() => Object.values(tabs).filter(tab =>
     tab.workspaceId === SCRATCH_WORKSPACE_ID && tab.topicId === target.topicId), [tabs, target.topicId])
   const visible = floating.open || floating.preview
+  const [creatingGroup, setCreatingGroup] = useState(false)
+  const spaceZoneBindings = useAppStore(state => state.spaceZoneBindings)
+  const groupCandidates = useMemo(() => creatingGroup && scratch ? motes.flatMap(topic => {
+    const rootPath = scratchTopicLogicalPath(scratch, topic)
+    if (rootPath === null || topic.moteArchive?.state === 'archived') return []
+    const original = moteConnectionTarget({ workspace: scratch, topic, rootPath }, spaceZoneBindings)
+    return original ? [{ target: original, name: topic.title }] : []
+  }) : [], [creatingGroup, scratch, motes, spaceZoneBindings])
+  const groupSelection = floating.groupSelection
+  const showingGroup = visible && (creatingGroup || Boolean(groupSelection))
+  const readingMote = visible && !showingGroup
+  const groupReadingPositions = useRef<MoteGroupReadingPositions>(new Map())
+  const groupDirectory = useMoteGroups(api.moteGroup.call, { enabled: visible })
+  function openGroup(groupId: string, members = false) {
+    pinPmoTeamsTopicFloating()
+    setCreatingGroup(false)
+    setFloating({ groupSelection: { groupId, members } })
+  }
+  function exitGroup() {
+    setCreatingGroup(false)
+    setFloating({ groupSelection: undefined })
+  }
   const railMode = floating.railMode ?? 'cards'
   const panelRef = useRef<HTMLDivElement>(null)
   const menuContainer = useCallback(() => panelRef.current, [])
@@ -429,7 +458,7 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
     [floating.open, floating.preview, target.topicId, target.tabId, floating.reference?.displayWorkspaceId,
       floating.reference?.groupId, floating.reference?.tabId, floating.reference?.regionId])
   useEffect(() => {
-    if (!floating.open || floating.agentTarget || floating.targetTabId === null) return
+    if (!readingMote || !floating.open || floating.agentTarget || floating.targetTabId === null) return
     const selected = projectionState?.activeReference
     if (selected) {
       const reference = workbenchDisplayReferenceMatches(useAppStore.getState().layouts[selected.displayWorkspaceId], selected) ? selected : undefined
@@ -444,17 +473,17 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
       setFloating({ targetTopicId: target.topicId, ...(target.tabId ? { targetTabId: target.tabId } : {}) })
     else if (floating.targetTabId === undefined && !target.tabId && discussionChoices.length === 0 && motes.some(topic => topic.id === target.topicId))
       setFloating({ targetTabId: null })
-  }, [floating.open, floating.agentTarget, floating.targetTopicId, floating.targetTabId, target.topicId, target.tabId, target.tab, discussionChoices.length, motes, setFloating, projectionState?.activeReference])
+  }, [readingMote, floating.open, floating.agentTarget, floating.targetTopicId, floating.targetTabId, target.topicId, target.tabId, target.tab, discussionChoices.length, motes, setFloating, projectionState?.activeReference])
   useEffect(() => {
     const reference = projectionState?.projection?.selection[0]
-    if (floating.open && floating.targetTabId !== null && floating.reference === undefined && projectionState?.projection?.selectionMode !== undefined && reference?.tabId === target.tabId)
+    if (readingMote && floating.open && floating.targetTabId !== null && floating.reference === undefined && projectionState?.projection?.selectionMode !== undefined && reference?.tabId === target.tabId)
       setFloating({ reference })
-  }, [floating.open, floating.targetTabId, floating.reference, target.tabId, projectionState?.projection, setFloating])
+  }, [readingMote, floating.open, floating.targetTabId, floating.reference, target.tabId, projectionState?.projection, setFloating])
   useEffect(() => {
-    if (floating.open && !floating.agentTarget && target.session && pmoFocusSessionId(useAppStore.getState().agentFocus) !== target.session.id) focusPmoSession(target.session.id)
-  }, [floating.open, floating.agentTarget, target.session, focusPmoSession])
+    if (readingMote && floating.open && !floating.agentTarget && target.session && pmoFocusSessionId(useAppStore.getState().agentFocus) !== target.session.id) focusPmoSession(target.session.id)
+  }, [readingMote, floating.open, floating.agentTarget, target.session, focusPmoSession])
   useEffect(() => {
-    if (!floating.open || floating.agentTarget || !scratch || target.identityIssue) return
+    if (!readingMote || !floating.open || floating.agentTarget || !scratch || target.identityIssue) return
     let current = true
     const captured: MoteContextTarget = { workspaceId: SCRATCH_WORKSPACE_ID, hostId: scratch.hostId, directoryPath: scratch.path,
       topicId: target.topicId, tabId: target.tabId ?? null, reference: capturedContextReference(floatingRef.current.reference) }
@@ -477,7 +506,7 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
         }
       })
     return () => { current = false; settleContextOperation(operation, 'unconfirmed') }
-  }, [floating.open, floating.agentTarget, scratch, target.topicId, target.tabId, target.identityIssue, preparationAttempt, openScratchTopic])
+  }, [readingMote, floating.open, floating.agentTarget, scratch, target.topicId, target.tabId, target.identityIssue, preparationAttempt, openScratchTopic])
 
   useLayoutEffect(() => {
     const panel = panelRef.current
@@ -808,24 +837,36 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
       }} /> : null}
     {visible ? <MoteChooser onReferenceSelect={selectFileReference} catalog={projectionState?.catalog} reference={floating.reference} targetAgent={floating.targetAgent} topics={motes} topicId={target.topicId} tabId={floating.targetTabId === null ? null : target.tabId} railMode={railMode}
       onToggleMode={() => { pinPmoTeamsTopicFloating(); setFloating({ railMode: railMode === 'cards' ? 'avatars' : 'cards' }) }}
-      onSelect={selectMote} onClose={close} onArchive={archive.change} pending={archive.pending} container={menuContainer}
+      groupActive={showingGroup}
+      groupRows={<><DesktopMoteGroupRail groups={groupDirectory.groups} selectedId={creatingGroup ? undefined : groupSelection?.groupId} avatars={railMode === 'avatars'} open={openGroup} />
+        {groupDirectory.error ? <Button className="mote-chooser__group-more" onClick={groupDirectory.refresh} title={groupDirectory.error}>重读群聊</Button> : null}
+        {groupDirectory.hasMore ? <Button className="mote-chooser__group-more" disabled={groupDirectory.loading} onClick={groupDirectory.loadMore}>更多群聊</Button> : null}</>}
+      groupActions={<button type="button" aria-label="创建群聊" title="创建群聊" onClick={() => {
+        pinPmoTeamsTopicFloating()
+        setCreatingGroup(true)
+      }}><ThemeMoteGroupNewIcon size={16} /></button>}
+      onSelect={(topicId, tabId) => { exitGroup(); selectMote(topicId, tabId) }} onClose={close} onArchive={archive.change} pending={archive.pending} container={menuContainer}
       onRename={topic => { actionTopicId.current = topic.id; setRenameTarget(topic) }}
       onAvatar={icon => { actionTopicId.current = icon.avatarTarget?.topicId ?? null; setAvatarTarget(icon) }}
       onOpenMoteSpace={openSpace} /> : null}
     <div className="pmo-teams-topic-floating__content">
     {floating.preferenceIssue ? <div role="status" className="workbench-restore-notice mote-size-notice">{floating.preferenceIssue}</div> : null}
-    {!floating.agentTarget && selectedMote?.moteArchive?.state === 'archived' ? <div role="status" className="workbench-restore-notice mote-context-notice" data-mote-archived={selectedMote.id}>
+    {!showingGroup && !floating.agentTarget && selectedMote?.moteArchive?.state === 'archived' ? <div role="status" className="workbench-restore-notice mote-context-notice" data-mote-archived={selectedMote.id}>
       <span>{selectedMote.title} · Archived. The original work surface remains available.</span>
       <Button type="button" disabled={archive.pending === selectedMote.id} onClick={() => void archive.change(selectedMote, false)}>Restore Mote</Button>
     </div> : null}
-    {!floating.agentTarget ? <MoteArchiveNotice workspaceId={SCRATCH_WORKSPACE_ID} issue={archive.issue ?? (selectedMote?.moteArchive?.state === 'unknown' ? selectedMote.moteArchive.issue : null)} failure={archive.failure} targetName={selectedMote?.title} /> : null}
-    {!scratch && !floating.agentTarget ? <div role="status" className="workbench-restore-notice">Original Mote retained · Workspace is still restoring</div> : null}
-    {visible && !floating.agentTarget && (directoryError || !topics || !motes.some(mote => mote.id === target.topicId)) ? <div role="status" className="workbench-restore-notice mote-context-notice">
+    {!showingGroup && !floating.agentTarget ? <MoteArchiveNotice workspaceId={SCRATCH_WORKSPACE_ID} issue={archive.issue ?? (selectedMote?.moteArchive?.state === 'unknown' ? selectedMote.moteArchive.issue : null)} failure={archive.failure} targetName={selectedMote?.title} /> : null}
+    {!showingGroup && !scratch && !floating.agentTarget ? <div role="status" className="workbench-restore-notice">Original Mote retained · Workspace is still restoring</div> : null}
+    {readingMote && !floating.agentTarget && (directoryError || !topics || !motes.some(mote => mote.id === target.topicId)) ? <div role="status" className="workbench-restore-notice mote-context-notice">
       <span>{directoryError ? 'Mote directory could not be refreshed: ' + directoryError : 'Mote directory is not confirmed yet.'} The current work surface is retained.</span>
       <Button type="button" onClick={() => void refreshTopics(SCRATCH_WORKSPACE_ID, true)}>Retry directory</Button>
     </div> : null}
     <div className="pmo-teams-topic-floating__body">
-      {floating.agentTarget ? <OriginalAgentConversation floating={floating} target={target} projectionState={projectionState} visible={visible}
+      {showingGroup ? <DesktopMoteGroup groupId={groupSelection?.groupId ?? null} moteId={groupSelection?.moteId} members={groupSelection?.members}
+        candidates={groupCandidates} creating={creatingGroup} onOpen={openGroup} onClose={creatingGroup ? () => setCreatingGroup(false) : exitGroup} onChanged={groupDirectory.refresh} positions={groupReadingPositions.current}
+        onPerspectiveChange={moteId => { if (groupSelection) setFloating({ groupSelection: { groupId: groupSelection.groupId, moteId } }) }} /> : null}
+      <div className="pmo-teams-topic-floating__mote" hidden={showingGroup}>
+      {floating.agentTarget ? <OriginalAgentConversation floating={floating} target={target} projectionState={projectionState} visible={readingMote}
         onSelect={reference => {
           const state = useAppStore.getState(), region = state.tabs[reference.tabId]?.regions[reference.regionId]
           const session = region?.kind === 'agent' ? sessionPresentationById(state.sessions).get(region.sessionId) : undefined
@@ -837,17 +878,17 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
           setFloating({ targetTabId: reference.tabId, reference, agentTarget: floating.agentTarget,
             targetAgent: { hostId: session.control.hostId, sessionId: session.control.agentSessionId, presentationSessionId: session.id } })
         }} /> : <MoteProfilePopover workspaceId={SCRATCH_WORKSPACE_ID} topicId={target.topicId} reference={floating.reference}
-        active={visible} onReferenceSelect={selectFileReference}>{profileTrigger =>
+        active={readingMote} onReferenceSelect={selectFileReference}>{profileTrigger =>
       !target.tabId && discussionChoices.length === 0 && !motes.some(topic => topic.id === target.topicId) ?
         <div role="status" className="workbench-restore-notice" data-workbench-pending-owner>Original Mote retained · Topic directory is still being confirmed</div> :
-        <MoteWorkface workspaceId={SCRATCH_WORKSPACE_ID} topicId={target.topicId} floating visible={visible} recoverOnOpen={floating.open && !target.identityIssue} reference={floating.reference} conversationEntry={target.identityIssue ? undefined : floating.conversationEntry} memberEntry={floating.conversationIntent === 'member'} threadsEntry={floating.threadsEntry} navigationActions={<>{profileTrigger}<button type="button" className="pane-action" aria-label="Open Mote in Space" title="Open Mote in Space" onClick={() => openSpace()}><ThemeNavigationSpaceIcon size={14} /></button></>} onTabSelect={selectDiscussion} onReferenceSelect={(reference, intent) => {
+        <MoteWorkface workspaceId={SCRATCH_WORKSPACE_ID} topicId={target.topicId} floating visible={readingMote} recoverOnOpen={readingMote && floating.open && !target.identityIssue} reference={floating.reference} conversationEntry={target.identityIssue ? undefined : floating.conversationEntry} memberEntry={floating.conversationIntent === 'member'} threadsEntry={floating.threadsEntry} navigationActions={<>{profileTrigger}<button type="button" className="pane-action" aria-label="Open Mote in Space" title="Open Mote in Space" onClick={() => openSpace()}><ThemeNavigationSpaceIcon size={14} /></button></>} onTabSelect={selectDiscussion} onReferenceSelect={(reference, intent) => {
           const state = useAppStore.getState()
           if (!workbenchDisplayReferenceMatches(state.layouts[reference.displayWorkspaceId], reference)) return false
           spaceActionRef.current?.abort(); state.rememberMoteAgent(reference)
           setFloating({ targetTabId: reference.tabId, reference, targetAgent: undefined, conversationIntent: intent ?? 'member' }); return true
         }}>
             <MoteContextStatus scope={JSON.stringify(['mote-context', scratch?.hostId, scratch?.path, target.topicId, target.tabId, capturedContextReference(floating.reference)])}
-              visible={visible} failures={contextFailures} pending={failure => (failure.step === 'open-space' ? spaceOpening : preparation)?.state === 'pending'}
+              visible={readingMote} failures={contextFailures} pending={failure => (failure.step === 'open-space' ? spaceOpening : preparation)?.state === 'pending'}
               identityIssue={target.identityIssue ?? null} projection={projectionState}
               onRetry={failure => failure.step === 'open-space' ? openSpace() : setPreparationAttempt(attempt => attempt + 1)}
               onSelect={reference => setFloating({ targetTabId: reference.tabId, reference })}
@@ -855,9 +896,10 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
         <WorkspaceWorkbench workspaceId={projectionState?.projection?.displayWorkspaceId ?? SCRATCH_WORKSPACE_ID}
           topicId={target.topicId} topicIsolation="bound-only" viewOwnership="projection"
           projection={projectionState?.projection ?? undefined} viewHostPrefix={PMO_FLOATING_TAB_SLOT_PREFIX}
-          retainedTabId={target.tabId} visible={visible} interactiveResize={false}
+          retainedTabId={target.tabId} visible={readingMote} interactiveResize={false}
           onTabSelect={selectDiscussion} onRecoverTab={tabId => selectDiscussion(tabId, undefined, undefined, true)} /></MoteWorkface>}
       </MoteProfilePopover>}
+      </div>
     </div>
     </div>
     <MoteRenameDialog target={renameTarget && scratch ? { topic: renameTarget, workspace: scratch } : null} onClose={() => setRenameTarget(null)} returnFocus={returnToMote} />

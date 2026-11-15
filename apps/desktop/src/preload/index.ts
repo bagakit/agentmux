@@ -401,6 +401,7 @@ const api: AgentMuxPreloadApi = {
   },
   moteChat: { call: async (method, params, target) => unwrapSessionInputOperationResult(await ipcRenderer.invoke('moteChat:call', method, params, ...(target === undefined ? [] : [target]))) },
   moteConnections: { call: (method, params, target) => ipcRenderer.invoke('moteConnections:call', method, params, ...(target === undefined ? [] : [target])) },
+  moteGroup: { call: (method, input) => ipcRenderer.invoke('moteGroup:call', method, input) },
   moteDialogue: { inspectSetup: params => ipcRenderer.invoke('moteDialogue:setup:inspect', params), advanceSetup: params => ipcRenderer.invoke('moteDialogue:setup:advance', params), read: params => ipcRenderer.invoke('moteDialogue:read', params), link: params => ipcRenderer.invoke('moteDialogue:link', params),
     ensureRecovery: params => ipcRenderer.invoke('moteDialogue:recovery:ensure', params), inspectRecovery: params => ipcRenderer.invoke('moteDialogue:recovery:inspect', params) },
   motePreferences: {

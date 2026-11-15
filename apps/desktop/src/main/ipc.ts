@@ -108,6 +108,7 @@ import { FileReadOwner } from '@agentmux/host/file-read-owner'
 import { parseFileHistoryParams, parseFileHistoryResult, parseFileRestoreParams, parseFileRestoreResult, parseFileUndoParams, parseFileUndoResult } from '@agentmux/core/files'
 import { registerMotePreferencesIpc } from './mote-preferences-ipc.js'
 import { registerMoteDialogueIpc } from './mote-dialogue-ipc.js'
+import { isMoteGroupMethod, parseMoteGroupParams } from '@agentmux/core/mote/group'
 import { HtmlFilePreviews } from './html-file-previews.js'
 import { WorkspaceMediaStreams } from './workspace-media-streams.js'
 import { FilePreviewResources } from './file-preview-resources.js'
@@ -2806,6 +2807,10 @@ export async function registerIpc(args: {
   registerMoteChatIpc({ handleWithEvent, runtime: args.runtime })
   registerMoteConnectionIpc({ handleWithEvent, runtime: args.runtime })
   registerMoteDialogueIpc({ handleWithEvent, runtime: args.runtime })
+  handle('moteGroup:call', (method: unknown, params: unknown) => {
+    if (!isMoteGroupMethod(method) || method === 'space.mote.group.reply') throw new Error('This is not a Mote Group client action.')
+    return args.runtime.callOriginalCore('local', method, parseMoteGroupParams(method, params), { transport: 'unix' })
+  })
   registerMotePreferencesIpc({ handleWithEvent, socketPath: desktopBusinessSocketPath(), runtime: args.runtime })
   const executionBindingTransport = createDesktopExecutionBindings(args.runtime)
   const { bindings: executionBindings, readers: executionBindingReaders } = executionBindingTransport

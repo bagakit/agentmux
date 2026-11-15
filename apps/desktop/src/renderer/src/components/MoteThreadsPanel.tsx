@@ -12,6 +12,7 @@ import { workbenchNavigationTabs } from '../lib/workbench-navigation-catalog'
 import { sameWorkbenchProjectionSelection, type WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { useAppStore } from '../store'
 import { api } from '../lib/api'
+import { DesktopMoteThreadGroups } from './DesktopMoteGroup'
 import { MoteCooperation } from './MoteCooperation'
 import { MotePrivateConversations } from './MotePrivateConversations'
 import { copyMoteAddress } from '../lib/mote-address-copy'
@@ -75,6 +76,7 @@ export function MoteThreadsPanel({ scope, active, observe = active, onSelect, on
   }
   if (!dialogue) return null
   return <div className="mote-threads-panel" hidden={!active}>
+    <DesktopMoteThreadGroups moteId={dialogue.target?.spaceId} active={active} />
     <MoteWorkThreads page={work?.page ?? null} issue={work?.issue ?? requestedIssue} loading={work?.loading ?? false} visible={active} readWork={readWork} requestedEvent={requestedEvent} view={view} onViewChange={onViewChange} showViews={view === undefined}
       renderEventActions={event => dialogue.target ? <button type="button" className="mote-conversation__link" aria-label="复制 thread 链接" onClick={() => {
         void copyMoteAddress({ spaceId: dialogue.target!.spaceId, eventId: event.id }, useAppStore.getState().reportError)
