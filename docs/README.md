@@ -38,6 +38,7 @@
 | 查什么 | 源码机制入口 |
 | --- | --- |
 | 系统分层、对象身份、空间绑定与导航 | [系统职责总图](architecture/system-ownership.md) · [空间状态与导航机制](architecture/spatial-state.md) |
+| 跨设备的身份、路由、分端执行与断连恢复 | [跨设备执行架构](architecture/cross-device-execution.md) |
 | Session 恢复与终端 | [Session 恢复模块](architecture/agent-session-recovery.md) · [字节、Attachment 与 viewport](architecture/terminal-runtime.md) · [复制、粘贴、键盘与 IME](architecture/terminal-interaction-layers.md) · [ANSI palette 与 OSC 颜色](architecture/terminal-appearance.md) |
 | 对话来源、阅读、输入与外部渠道 | [对话机制总览](architecture/conversation.md) · [Desktop 阅读链](architecture/conversation.md#desktop-阅读链) · [输入与 Mailbox](architecture/conversation.md#输入与-mailbox) · [Connector publication](architecture/conversation.md#connector-publication) |
 | 客户端、宿主与更新 | [UI 弹层与原生 Browser](architecture/ui-layering.md) · [原生 Desktop](architecture/native-desktop.md) · [Desktop 更新](architecture/desktop-updates.md) |
