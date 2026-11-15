@@ -21,9 +21,9 @@ const functions = names.map(name => {
 }).join('\n')
 const execute = promisify(execFile), roots: string[] = []
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })
-const { applicationBranding } = await import(pathToFileURL(resolve(process.env.AGENTMUX_BROWSER_SOURCE_ROOT ?? '.', 'apps/desktop/scripts/macos-application-brand.mjs')).href)
-const { brandApplication, verifyIdentity } = new Function('run', 'join', 'rename', 'cp', 'rm', 'lstat', 'desktopRoot', 'PRODUCT_NAME', 'BUNDLE_ID', 'manifest', 'applicationBranding', `${functions}; return { brandApplication, verifyIdentity }`)(
-  async (command: string, args: string[]) => execute(command, args), join, rename, cp, rm, lstat, resolve('apps/desktop'), 'AgentMux', 'dev.agentmux.desktop', { version: '0.1.0' }, applicationBranding
+const { applicationBranding, MAP_LOCATION_USAGE } = await import(pathToFileURL(resolve(process.env.AGENTMUX_BROWSER_SOURCE_ROOT ?? '.', 'apps/desktop/scripts/macos-application-brand.mjs')).href)
+const { brandApplication, verifyIdentity } = new Function('run', 'join', 'rename', 'cp', 'rm', 'lstat', 'desktopRoot', 'PRODUCT_NAME', 'BUNDLE_ID', 'manifest', 'applicationBranding', 'MAP_LOCATION_USAGE', `${functions}; return { brandApplication, verifyIdentity }`)(
+  async (command: string, args: string[]) => execute(command, args), join, rename, cp, rm, lstat, resolve('apps/desktop'), 'AgentMux', 'dev.agentmux.desktop', { version: '0.1.0' }, applicationBranding, MAP_LOCATION_USAGE
 ) as { brandApplication(app: string): Promise<void>; verifyIdentity(app: string): Promise<void> }
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'amux-browser-plist-')); roots.push(root)
@@ -47,4 +47,10 @@ it.runIf(process.platform === 'darwin')('real package verification rejects a mis
   await expect(verifyIdentity(app)).rejects.toThrow('Viewer declarations are wrong')
   await execute('/usr/bin/plutil', ['-remove', 'CFBundleDocumentTypes', plist])
   await expect(verifyIdentity(app)).rejects.toThrow()
+})
+
+it.runIf(process.platform === 'darwin')('real package verification rejects a changed location purpose', async () => {
+  const app = await fixture(); await brandApplication(app); const plist = join(app, 'Contents/Info.plist')
+  await execute('/usr/bin/plutil', ['-replace', 'NSLocationUsageDescription', '-string', 'Changed purpose', plist])
+  await expect(verifyIdentity(app)).rejects.toThrow('Packaged location usage text is wrong.')
 })
