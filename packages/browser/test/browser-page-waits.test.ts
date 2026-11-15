@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { createBrowserPageDispatch } from '@agentmux/browser/browser-page-dispatch'
-import type { BrowserPageTransport } from '@agentmux/browser/browser-page-transport'
+import { createBrowserPageDispatch } from '../src/browser-page-dispatch.js'
+import type { BrowserPageTransport } from '../src/browser-page-transport.js'
 
 /** A page whose accessibility tree and URL the test changes between polls. */
 function page(state: { url: string; navigationId: string; nodes: { role: string; name: string }[] }) {
