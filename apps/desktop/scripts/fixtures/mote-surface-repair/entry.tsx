@@ -98,15 +98,16 @@ if (calendarNavigation || rosterProof) {
   api.schedule.history = async params => validateScheduleRpcResult('schedule.history', { scheduleId: params.scheduleId, from: params.from, to: params.to, nextCursor: null,
     executionScope: 'connected-host', coverage: 'recorded-inputs', entries: [], ...(params.bucketStarts ? { buckets: [] } : {}) }, params)
 }
+const rosterReplyAt = Date.now() - 60_000
 if (rosterProof) {
   const ref = { hostId: session.control.hostId, agentSessionId: session.control.agentSessionId }
   const items: AgentTimelineItem[] = [
     { id: 'roster-prompt', agentSessionId: ref.agentSessionId, kind: 'user_message', source: 'user', status: 'complete',
-      title: 'User message', content: 'We have the first result.', publicContent: 'confirmed', authorHuman: true, sourceChannel: 'api', createdAt: 1, updatedAt: 1 },
+      title: 'User message', content: 'We have the first result.', publicContent: 'confirmed', authorHuman: true, sourceChannel: 'api', createdAt: rosterReplyAt - 60_000, updatedAt: rosterReplyAt - 60_000 },
     { id: 'roster-reply', agentSessionId: ref.agentSessionId, kind: 'assistant_message', source: 'native-hook', status: 'complete',
-      title: 'Assistant response', content: 'Let’s compare the last two options tomorrow.', createdAt: 2, updatedAt: 2 },
+      title: 'Assistant response', content: 'Let’s compare the last two options tomorrow.', createdAt: rosterReplyAt, updatedAt: rosterReplyAt },
     { id: 'roster-process', agentSessionId: ref.agentSessionId, kind: 'tool_call', source: 'native-hook', status: 'complete',
-      title: 'Private tool trace', toolName: 'Read', createdAt: 3, updatedAt: 3 }
+      title: 'Private tool trace', toolName: 'Read', createdAt: rosterReplyAt + 30_000, updatedAt: rosterReplyAt + 30_000 }
   ]
   const stream = { epoch: 'roster-original-stream', sequence: items.length, revision: items.length, origin: 'beginning' as const, gaps: [],
     positions: items.map((item, index) => ({ id: item.id, firstSequence: index + 1, sequence: index + 1, revision: conversationRevision(item) })) }
@@ -216,6 +217,13 @@ function Scene() {
     open: () => requestPmoTeamsTopicFloatingOpen({targetTopicId: topic.id, targetTabId: tab.id, reference: conversation}), close: () => requestPmoTeamsTopicFloatingClose({restoreFocus: false}),
     mode: (mode: 'activity' | 'terminal') => useAppStore.getState().setViewMode(session.id, mode, {focus: false}),
     floatSize: (width: number,height: number, railMode: 'cards' | 'avatars' = 'avatars') => setFloating({size: {width,height},railMode}),
+    rosterReplyAt,
+    rosterStatus: (kind: 'working' | 'waiting' | 'other-host' | 'unobserved') => {
+      const waiting = { ...session, status: { ...session.status, state: 'waiting' as const } }
+      const otherHost = { ...waiting, id: 'other-host-display-session', hostId: 'other-host', control: { ...waiting.control, hostId: 'other-host' } }
+      useAppStore.setState({ sessions: kind === 'other-host' ? [session, otherHost] : kind === 'working' ? [session]
+        : [{ ...waiting, ...(kind === 'unobserved' ? { runUnobserved: true } : {}) }] })
+    },
     theme: (light: boolean) => {
       const appearance = light ? 'light' : 'dark'
       if (calendarNavigation || rosterProof) updateThemeSelection({ appAppearance: appearance })

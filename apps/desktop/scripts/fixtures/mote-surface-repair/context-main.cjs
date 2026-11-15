@@ -41,8 +41,11 @@ app.whenReady().then(async () => {
       await read("moteQuick.floatSize(920,700,'cards')")
       const panel = '[data-pmo-teams-topic-floating]:popover-open'
       const preview = panel + ' [data-mote-message-preview="message"]'
+      const lead = panel + ' [data-mote-row="launcher:leader"]'
       const avatar = panel + ' [aria-label="Open profile for Analyst"]'
       const analyst = panel + ' [data-mote-topic-id="launcher:analyst"]'
+      const attention = panel + ' [data-mote-attention="needs-input"]'
+      const time = lead + ' time'
       const profile = '.mote-profile-popover'
       const close = profile + ' [aria-label="Close Mote profile"]'
       await wait(`document.querySelector(${JSON.stringify(preview)})?.textContent.startsWith('Let’s compare')`)
@@ -51,15 +54,62 @@ app.whenReady().then(async () => {
         assert.ok(displayed.width > 40 && displayed.height > 0 && displayed.text === 'Let’s compare the last two options tomorrow.', 'The latest original message is visible in the roster')
       }
       await verifyPreview()
-      const mutant = await window.webContents.insertCSS(preview + ' {display:none!important}')
-      try { await assert.rejects(verifyPreview, /latest original message/) }
-      finally { await window.webContents.removeInsertedCSS(mutant) }
+      const verifyTime = async () => {
+        const shown = await read(`(()=>{
+          const time=document.querySelector(${JSON.stringify(time)});
+          const headings=time?.closest('.mote-chooser__headline');
+          const title=headings?.querySelector('.mote-chooser__name');
+          const date=new Date(moteQuick.rosterReplyAt);
+          const label=date.toDateString() === new Date().toDateString()
+            ? date.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit',hourCycle:'h23'})
+            : date.toLocaleDateString(undefined,{month:'numeric',day:'numeric'});
+          return !!(time?.getBoundingClientRect().width && title?.getBoundingClientRect().width > 21 &&
+            time.dateTime===date.toISOString() && time.textContent.trim()===label && title.getBoundingClientRect().right<=time.getBoundingClientRect().left);
+        })()`)
+        assert.equal(shown, true, 'The timestamp belongs to the exact visible message and leaves the name legible')
+      }
+      await verifyTime()
+      for (const [name, selector, verify, message] of [
+        ['hidden-preview', preview, verifyPreview, /latest original message/],
+        ['hidden-message-time', time, verifyTime, /timestamp belongs to the exact visible message/],
+      ]) {
+        const mutant = await window.webContents.insertCSS(selector + ' {display:none!important}')
+        try { await assert.rejects(verify, message) }
+        finally { await window.webContents.removeInsertedCSS(mutant) }
+        await verify()
+        result.actions.push({ action: 'mutation', name, restored: true })
+      }
       await verifyPreview()
-      result.actions.push({ action: 'mutation', name: 'hidden-preview', restored: true })
       const original = (await facts()).source
       assert.ok(original.calls.some(call => call.operation === 'conversation.read' && call.path === 'original-core-session:24'))
       await wait(`!!document.querySelector('${panel} .mote-chooser__status .status--working')`)
       await capture('mote-roster-wide-dark')
+      for (const status of ['other-host', 'unobserved']) {
+        await read(`moteQuick.rosterStatus(${JSON.stringify(status)})`)
+        await read('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+        assert.equal(await read(`document.querySelectorAll(${JSON.stringify(attention)}).length`), 0, status + ' cannot create an actionable request')
+      }
+      await read("moteQuick.rosterStatus('waiting')")
+      await wait(`document.querySelector(${JSON.stringify(attention)})?.closest('[data-mote-row]')?.dataset.moteRow==='launcher:leader'`)
+      assert.equal(await read(`document.querySelectorAll(${JSON.stringify(attention)}).length`), 1)
+      await capture('mote-roster-attention-dark')
+      await read("moteQuick.rosterStatus('working')")
+      await wait(`!document.querySelector(${JSON.stringify(attention)})`)
+
+      const leadAvatar = lead + ' .mote-chooser__profile'
+      const leadHint = lead + ' .mote-chooser__profile-hint'
+      const hover = await read(`(()=>{const box=document.querySelector(${JSON.stringify(leadAvatar)}).getBoundingClientRect();return {x:Math.round(box.x+box.width/2),y:Math.round(box.y+box.height/2)}})()`)
+      window.webContents.sendInputEvent({ type: 'mouseMove', ...hover })
+      await wait(`getComputedStyle(document.querySelector(${JSON.stringify(leadHint)})).visibility==='visible'`)
+      assert.equal(await read(`(()=>{
+        const hint=document.querySelector(${JSON.stringify(leadHint)}), next=document.querySelector(${JSON.stringify(analyst)});
+        return !document.querySelector(${JSON.stringify(profile)}) && hint.textContent==='Profile' &&
+          hint.getBoundingClientRect().bottom<=next.getBoundingClientRect().top &&
+          getComputedStyle(next.querySelector('.mote-chooser__preview')).opacity==='1';
+      })()`), true, 'The first avatar explains Profile within its row and leaves its next neighbor readable')
+      await capture('mote-roster-profile-entry-dark')
+      window.webContents.sendInputEvent({ type: 'mouseMove', x: hover.x + 68, y: hover.y })
+      await wait(`getComputedStyle(document.querySelector(${JSON.stringify(leadHint)})).visibility==='hidden'`)
 
       await click(avatar)
       await wait(`document.querySelector('${profile} [data-mote-details]')?.dataset.moteDetails==='launcher:analyst'`)
@@ -76,6 +126,7 @@ app.whenReady().then(async () => {
       await read("moteQuick.theme(true);moteQuick.floatSize(438,540,'cards')")
       await wait("document.documentElement.dataset.appearance==='light'")
       await verifyPreview()
+      await verifyTime()
       assert.equal(await read(`(()=>{const row=document.querySelector(${JSON.stringify(analyst)}),label=row.querySelector('.mote-chooser__preview');return label.scrollWidth<=label.clientWidth+1})()`), true)
       await capture('mote-roster-narrow-light')
       await click(avatar)
@@ -90,6 +141,8 @@ app.whenReady().then(async () => {
       assert.deepEqual((await facts()).source.drafts, original.drafts)
       await click(panel + ' [aria-label="Show Mote avatars only"]')
       await wait(`!!document.querySelector('[data-mote-navigation="avatars"]') && !document.querySelector(${JSON.stringify(preview)})`)
+      await read("moteQuick.rosterStatus('waiting')")
+      await wait(`document.querySelector(${JSON.stringify(attention)})?.getAttribute('aria-label')?.includes('Needs your input')`)
       await read(`document.querySelector(${JSON.stringify(avatar)}).focus()`)
       for (const type of ['keyDown', 'keyUp']) window.webContents.sendInputEvent({ type, keyCode: 'Tab' })
       await wait(`document.querySelector(${JSON.stringify(analyst)})?.matches(':focus-visible') && document.querySelector('.mote-chooser__identity')?.textContent.startsWith('Analyst')`)
@@ -103,6 +156,9 @@ app.whenReady().then(async () => {
       })()`)
       assert.equal(hintClear, true, 'The compact roster hint leaves the original conversation recovery action visible')
       await capture('mote-roster-avatar-rail-light')
+      for (const type of ['keyDown', 'keyUp']) window.webContents.sendInputEvent({ type, keyCode: 'Tab', modifiers: ['shift'] })
+      await wait(`document.querySelector(${JSON.stringify(avatar)})?.matches(':focus-visible') && getComputedStyle(document.querySelector(${JSON.stringify(avatar + ' .mote-chooser__profile-glyph')})).display!=='none'`)
+      await capture('mote-roster-avatar-profile-focus-light')
       assert.deepEqual(result.errors, [])
       result.passed = true
       return
