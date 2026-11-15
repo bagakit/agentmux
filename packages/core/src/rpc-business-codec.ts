@@ -1,5 +1,6 @@
 import { isBrowserProfileStorageOperation } from './browser-profile-storage.js'
 import { demandAgentReferenceKey } from '@agentmux/demand/relations'
+import { currentGoalConfirmationNotice } from '@agentmux/demand/goal-patrol'
 import { isBrowserProfileCookieFileOperation } from './browser-profile-cookie-files.js'
 import { isBrowserProfileBookmarkOperation } from './browser-profile-bookmarks.js'
 import { isBrowserProfileExtensionOperation } from './browser-profile-extensions.js'
@@ -15,7 +16,7 @@ import { parseRendererAnimationsResult } from './renderer-animations.js'
 import { parseRendererTraceResult } from './renderer-trace.js'
 import { isDeepStrictEqual } from 'node:util'
 import { parseGitOpenResult } from './public-rpc-git.js'
-import { AGENTMUX_CONTROL_SCHEMA_VERSION, type AgentMuxControlRequest,
+import { AGENTMUX_CONTROL_SCHEMA_VERSION, type AgentMuxControlRequest, type AgentMuxDemand,
   type AgentMuxControlResult, type AgentMuxControlCaller } from './control.js'
 import { parseAgentMuxControlRequest, parseAgentMuxControlReceipt } from './control-codec.js'
 import { AgentMuxError } from './errors.js'
@@ -399,9 +400,13 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
         actual.receipt && (actual.receipt as Record<string, unknown>).demandId !== request.demandId) fail()
       if (request.operation === 'demand.discuss' && ((actual.receipt as Record<string, unknown>).requestId !== request.requestId || (actual.receipt as Record<string, unknown>).mode !== request.mode)) fail()
       if (request.operation === 'demand.confirm') {
-        const goal = actual.demand as AgentMuxControlResult & { alignment?: { revision: number; confirmedAt: number } }
+        const goal = actual.demand as AgentMuxDemand
         const receipt = actual.receipt as Record<string, unknown>
         if (receipt.confirmedRevision !== request.expectedRevision || goal.alignment?.revision !== request.expectedRevision || goal.alignment.confirmedAt !== receipt.confirmedAt || !(Number(receipt.confirmedAt) > 0)) fail()
+        if (request.continueWith) {
+          const notice = currentGoalConfirmationNotice(goal)
+          if (notice?.supervisorAgentSessionId !== request.continueWith.agentSessionId || notice.recipientHostId !== request.continueWith.hostId) fail()
+        }
       }
       if (request.operation === 'demand.accept') {
         const goal = actual.demand as { status: string; alignment?: { revision: number }; grounding?: { alignmentRevision: number; submissionId: string; acceptedAt: number; checks: { outcome: string }[] } }

@@ -546,7 +546,8 @@ export type AgentMuxGoalDiscussionReceipt = { demandId: string; requestId: strin
   | { route: 'supervisor'; mode: 'plan'; requestOperationId: string; agentSessionId: string; hostId: string | null; runId: string | null })
 export type AgentMuxControlGoalDiscussRequest = RequestBase & { operation: 'demand.discuss'; demandId: string; mode: 'open' | 'grill' | 'grounding' | 'plan'; executorId?: string }
 export type AgentMuxControlGoalPatrolAllRequest = RequestBase & { operation: 'demand.patrol-all'; executorId?: string; caller?: { agentSessionId: string; capability?: string } }
-export type AgentMuxControlGoalConfirmRequest = RequestBase & { operation: 'demand.confirm'; demandId: string; expectedRevision: number }
+export type AgentMuxControlGoalConfirmRequest = RequestBase & { operation: 'demand.confirm'; demandId: string; expectedRevision: number;
+  continueWith?: import('@agentmux/demand/goal-patrol').GoalConfirmationRecipient }
 export type AgentMuxControlGoalAcceptRequest = RequestBase & { operation: 'demand.accept'; demandId: string; expectedAlignmentRevision: number; expectedSubmissionId: string; acceptGaps: boolean; finish?: boolean }
 export type AgentMuxControlDemandAssignRequest = RequestBase & {
   operation: 'demand.assign'

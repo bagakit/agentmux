@@ -258,7 +258,16 @@ export function createHostGoals(options: {
       return { operation: req.operation, demand: await projectGoal(saved), receipt: { demandId: goal.id, updatedAt: saved.updatedAt } }
     }
     if (req.operation === 'demand.confirm') {
-      const saved = await demands.confirmAlignment(goal.id, req.expectedRevision)
+      let continuation
+      if (req.continueWith) {
+        const actor = context.principal
+        if (context.caller !== undefined || !actor || actor.kind !== 'user' && actor.kind !== 'device')
+          throw new AgentMuxError('Goal confirmation and continuation require the original user or device.', 'CONTROL_PERMISSION_DENIED')
+        const goalUrl = hostGoalAddress(goal, await planOwner()).goalUrl
+        await current(context)
+        continuation = { operationId: req.requestId, recipient: req.continueWith, goalUrl, requestedBy: { kind: actor.kind, id: actor.id } } as const
+      }
+      const saved = await demands.confirmAlignment(goal.id, req.expectedRevision, continuation)
       return { operation: req.operation, demand: await projectGoal(saved.demand), receipt: { demandId: goal.id, confirmedRevision: saved.demand.alignment!.revision, confirmedAt: saved.demand.alignment!.confirmedAt! } }
     }
     if (req.operation === 'demand.accept') {

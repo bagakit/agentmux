@@ -1,7 +1,7 @@
 import { isDeepStrictEqual } from 'node:util'
 import { parseDemandAgentReference, parseDemandAgentReferences, demandAgentReferenceKey, mergeDemandAgentReferences, type DemandAgentReference } from './agent-reference.js'
 import { parseDemandDiscussionInput, parseDemandDiscussionInputs, parseDemandDiscussionIntent, type DemandDiscussionInput, type DemandDiscussionIntent } from './discussion.js'
-import { demandPatrolScope, completedGoalPlanRequest, assertPatrolExecutions, parseDemandPatrols, parseDemandPatrolAttempt, parseDemandPatrolReportInput, type DemandPatrolPreparation, type DemandPatrolAttempt, type DemandPatrolReportInput } from './goal-patrol.js'
+import { demandPatrolScope, completedGoalPlanRequest, currentGoalConfirmationNotice, assertPatrolExecutions, parseDemandPatrols, parseDemandPatrolAttempt, parseDemandPatrolReportInput, type DemandPatrolPreparation, type DemandPatrolAttempt, type DemandPatrolReportInput, type GoalConfirmationRecipient } from './goal-patrol.js'
 import { parseDemandDispatch, parseDemandDispatchIntent, parseDemandDispatchRequest, parseDemandDispatches, qualifiedDemandDispatch, runBoundDemandDispatch, sameDemandDispatchIntent, type DemandDispatch, type DemandDispatchIntent, type DemandDispatchRequest, type DemandDispatchRejection } from './dispatch.js'
 import { parseDemandDelegationRuntimeIdentity, type DemandDelegationRuntimeIdentity, parseDemandDelegationIntent, parseDemandDelegations, parseDemandDelegationReportInput, parseDemandDelegationCollectionInput, parseDemandDelegationCollector, sameDemandDelegationIntent, validateDemandDelegationReport,
   parseDemandDelegationAttentionInput, sameDemandDelegationAttention, delegationWorkerHostId, sameGoalPlanPredecessors,
@@ -684,6 +684,7 @@ export class DemandStore {
     return this.mutate('patrol.report', snapshot => {
       const goal = findDemand(snapshot, id, this.storePath), patrol = goal.patrols?.find(p => p.operationId === patrolId)
       if (patrol?.purpose === 'plan') this.rejectDelegation('A planning request is completed by saving a Goal plan, not by an inspection report. Read goal plan and goal plan revise.')
+      if (patrol?.purpose === 'confirmation') this.rejectDelegation('A confirmation notice is only an input request. Continue the original Goal and use its normal reporting path.')
       if (!patrol || patrol.supervisorAgentSessionId !== author.agentSessionId) this.rejectDelegation('Only the original PMO can return this retained inspection.')
       const duplicate = snapshot.demands.flatMap(g => g.patrols ?? []).find(p => p.report?.operationId === report.operationId)
       if (duplicate && duplicate !== patrol) this.rejectDelegation('This report operation belongs to another original patrol.')
@@ -1452,7 +1453,9 @@ export class DemandStore {
   }
 
   /** Human acknowledgement. Hosts expose this through an explicit user action, never Agent update. */
-  async confirmAlignment(id: string, expectedRevision: number): Promise<DemandReceipt> {
+  async confirmAlignment(id: string, expectedRevision: number, continuation?: {
+    operationId: string; recipient: GoalConfirmationRecipient; goalUrl: string; requestedBy: { kind: 'user' | 'device'; id: string }
+  }): Promise<DemandReceipt> {
     return this.mutate('confirm-alignment', snapshot => {
       const demand = findDemand(snapshot, id, this.storePath)
       if (!demand.alignment || demand.alignment.revision !== expectedRevision) {
@@ -1460,11 +1463,27 @@ export class DemandStore {
       }
       const issue = alignmentConfirmationIssue(demand.alignment)
       if (issue) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, issue)
+      const original = continuation ? currentGoalConfirmationNotice(demand) : undefined
+      if (continuation && (demand.supervisorSessionId !== continuation.recipient.agentSessionId ||
+        demand.status === 'done' || demand.status === 'cancelled' ||
+        original && (original.supervisorAgentSessionId !== continuation.recipient.agentSessionId || original.recipientHostId !== continuation.recipient.hostId)))
+        this.rejectDelegation('The confirmation recipient or Goal changed. Read the current Goal before requesting continuation.')
+      if (demand.alignment.confirmedAt !== null && (!continuation || original)) return { unchanged: demand }
+      const now = Date.now()
       if (demand.alignment.confirmedAt === null) {
-        demand.alignment.confirmedAt = Date.now()
+        demand.alignment.confirmedAt = now
         demand.activities.push({ id: mintObjectId(), kind: 'goal-confirmed', message: `User confirmed goal revision ${expectedRevision}.`, createdAt: demand.alignment.confirmedAt, actorId: null })
       }
-      demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
+      if (continuation) {
+        const { operationId, recipient, requestedBy, goalUrl } = continuation
+        if (demand.patrols?.some(item => item.operationId === operationId || item.requestOperationIds?.includes(operationId)))
+          this.rejectDelegation('This operation already identifies an original Goal request. Keep that request.')
+        const notice = parseDemandPatrols([{ purpose: 'confirmation', operationId, expectedScope: demandPatrolScope(demand, 'confirmation'),
+          alignment: demand.alignment, executions: [], context: JSON.stringify({ goalId: id, goalUrl, alignmentRevision: expectedRevision, operationId }),
+          supervisorAgentSessionId: recipient.agentSessionId, recipientHostId: recipient.hostId, requestedBy, requestedAt: now, attempts: [] }])[0]!
+        demand.patrols = [...demand.patrols ?? [], notice]
+      }
+      demand.updatedAt = Math.max(now, demand.updatedAt + 1)
       return demand
     })
   }

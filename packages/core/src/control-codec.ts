@@ -3,6 +3,7 @@ import { parseFocusParams, parseFocusResult, parseFocusSource } from './focus-co
 import { parseGoalAddress } from './sharing.js'
 import { parseGoalAgentReference, parseGoalAgentReferences, parseGoalQualifiedAccess, parseGoalInspectionAccess, parseGoalRelationAccesses } from './goal-agent-reference.js'
 import { demandAgentReferenceKey } from '@agentmux/demand/relations'
+import { parseGoalConfirmationRecipient } from '@agentmux/demand/goal-patrol'
 import { parseBrowserAgentWorkspaceParams, parseBrowserAgentWorkspaceResult } from './browser-agent-workspace.js'
 import { isSettingsPreferenceMethod, parseSettingsPreferenceParams, parseSettingsPreferenceResult } from './settings-preferences.js'
 import { parseBrowserLifecycleIntent, parseBrowserLifecycleReceipt } from './browser-lifecycle.js'
@@ -674,7 +675,14 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     }
     const revision = source.operation === 'demand.confirm' ? source.expectedRevision : source.expectedAlignmentRevision
     if (!Number.isSafeInteger(revision) || (revision as number) < 1) throw new AgentMuxError('The exact positive Goal alignment revision is required.', 'INVALID_CONTROL_REQUEST')
-    if (source.operation === 'demand.confirm') return { ...base, operation: source.operation, expectedRevision: revision as number }
+    if (source.operation === 'demand.confirm') {
+      let continueWith: ReturnType<typeof parseGoalConfirmationRecipient> | undefined
+      if (source.continueWith !== undefined) {
+        try { continueWith = parseGoalConfirmationRecipient(source.continueWith) }
+        catch { throw new AgentMuxError('Goal continuation requires the exact Supervisor Host and Agent Session.', 'INVALID_CONTROL_REQUEST') }
+      }
+      return { ...base, operation: source.operation, expectedRevision: revision as number, ...(continueWith ? { continueWith } : {}) }
+    }
     if (typeof source.acceptGaps !== 'boolean') throw new AgentMuxError('Result gaps require an explicit acceptance choice.', 'INVALID_CONTROL_REQUEST')
     if (source.finish !== undefined && typeof source.finish !== 'boolean') throw new AgentMuxError('Finishing a Goal requires an explicit boolean choice.', 'INVALID_CONTROL_REQUEST')
     return { ...base, operation: source.operation, expectedAlignmentRevision: revision as number, expectedSubmissionId: id(source.expectedSubmissionId, 'Goal submission id is invalid.', 'INVALID_CONTROL_REQUEST'), acceptGaps: source.acceptGaps, ...(source.finish === undefined ? {} : { finish: source.finish }) }
