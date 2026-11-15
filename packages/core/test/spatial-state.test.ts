@@ -1,5 +1,5 @@
 import { fixturePath } from './helpers/fixture-values.js'
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, readFile, rm, writeFile, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -31,15 +31,16 @@ async function fixture() {
   return {dir,store:new AgentMuxSpatialStateStore(join(dir,'spatial-state.json'))}
 }
 afterEach(async () => { for (const server of servers.splice(0)) await server.stop(); for (const dir of directories.splice(0)) await rm(dir,{recursive:true,force:true}) })
-let cli: string, worker: string
+let cli: string, worker: string, cliDirectory: string | undefined
 beforeAll(async () => {
-  const output = resolve('.tmp/durable-spatial-index')
-  await symlink('../../packages/core/node_modules',join(output,'node_modules'),'dir').catch(error => { if(error.code !== 'EEXIST') throw error })
+  const output = cliDirectory = await mkdtemp(join(tmpdir(), 'amux-spatial-cli-'))
+  await symlink(resolve('packages/core/node_modules'), join(output, 'node_modules'), 'dir')
   cli = join(output,'cli.mjs'); worker = join(output,'worker.mjs')
   const compiled = await build({entryPoints:['packages/core/src/agentmux.ts'],outfile:cli,bundle:true,platform:'node',format:'esm',packages:'external',metafile:true,logLevel:'silent'})
   await writeFile(join(output,'cli-inputs.json'),JSON.stringify(compiled.metafile,null,2))
   await build({stdin:{contents:`import {AgentMuxSpatialStateStore} from './packages/core/src/spatial-state.ts'; const store=new AgentMuxSpatialStateStore(process.argv[2]); const action=process.argv[3]; if(action==='read') console.log(JSON.stringify(await store.read())); else { const input=JSON.parse(process.argv[4]); try{console.log(JSON.stringify(await store.commit(input)))}catch(e){console.log(JSON.stringify({code:e.code}));process.exitCode=2}}`,resolveDir:process.cwd()},outfile:worker,bundle:true,platform:'node',format:'esm',packages:'external',logLevel:'silent'})
 })
+afterAll(async () => { if (cliDirectory) await rm(cliDirectory, { recursive: true, force: true }) })
 function run(file: string,args: string[],env: NodeJS.ProcessEnv = {},input = '') {
   return new Promise<{code:number;result:any;stderr:string}>((ok,fail) => {
     const child = spawn(process.execPath,[file,...args],{env:{...process.env,AGENTMUX_AGENT_SESSION_ID:undefined,AGENTMUX_AGENT_CAPABILITY:undefined,AGENTMUX_RPC_ENDPOINT:undefined,...env},stdio:['pipe','pipe','pipe']})
@@ -146,6 +147,26 @@ describe('Core durable spatial owner without an App',() => {
     expect(spatialCatalog(g,{regionId:'agent'}).tabs.map(t=>t.tabId)).toEqual(['tab'])
     const root={type:'split',direction:'horizontal',ratio:0.5,first:{type:'leaf',groupId:'g'},second:{type:'leaf',groupId:'g'}}
     expect(()=>parseAgentMuxSpatialGraph({...g,layouts:{resource:{root,groups:[g.layouts.resource!.groups[0],{id:'second',tabOrder:[],recentTabIds:[],activeTabId:null}],activeGroupId:'g'}}})).toThrow()
+  })
+  it.each([4, 430])('derives only the exact Tab and Region with %i unrelated Tabs', (unrelated) => {
+    const state = graph()
+    const touched = { names: 0, regions: 0 }
+    const unrelatedIds = Array.from({ length: unrelated }, (_, index) => {
+      const tabId = `unrelated-tab-${index}`
+      state.tabs.push({ tabId, zoneId: 'zone', workspaceId: 'resource',
+        get name() { touched.names++; return null },
+        get regionIds() { touched.regions++; return [`unrelated-region-${index}`] } })
+      return tabId
+    })
+    state.layouts.resource = createWorkspaceLayout('g', ['tab', ...unrelatedIds])
+    const selected = spatialCatalog(state, { tabId: 'tab', regionId: 'agent' })
+    expect(selected.tabs).toEqual([{ ...state.tabs[0], nameRevision: 0 }])
+    expect(selected.regions).toEqual([state.regions[0]])
+    expect(selected.locations.map(location => [location.displayWorkspaceId, location.groupId, location.spaceId])).toEqual([
+      ['resource', 'g', 'a'], ['resource', 'g', 'b'], ['foreign', 'other', 'a'], ['foreign', 'other', 'b']
+    ])
+    expect(resolveSpatialRegion(state, { tabId: 'tab', regionId: 'agent', direction: 'right' }).locations).toHaveLength(4)
+    expect(touched).toEqual({ names: 0, regions: 0 })
   })
   it('rejects unrepresentable resource metadata without silently stripping it',() => {
     expect(()=>parseAgentMuxSpatialGraph({...graph(),resources:{tab:{draft:undefined}}})).toThrow()
