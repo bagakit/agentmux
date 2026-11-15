@@ -12,6 +12,7 @@ import { BrowserRequestFailure, type BrowserProgramPort, type BrowserProgramTarg
 import { createBrowserPageDispatch } from './browser-page-dispatch.js'
 import { runBrowserScript } from './browser-script-runner.js'
 import { browserOperationPhaseFromOutcome, browserRunOutcomeFromFailure } from './browser-run-outcome.js'
+import { finishBrowserProgramReceipt, finishBrowserProgramStep } from './browser-program-completion.js'
 import { recordBrowserOperationTarget, startBrowserOperationStep, summarizeBrowserValue } from './browser-operation-step.js'
 import type { BrowserOperationJournal } from './browser-operation-journal.js'
 import type { BrowserRefLedgerStore } from './browser-ref-ledger-store.js'
@@ -96,7 +97,6 @@ export class BrowserProgramOwner {
     let session: BrowserProgramSession | undefined
     let interrupts: BrowserPageInterrupts | undefined
     let feedback: BrowserProgramFeedback | undefined
-    let feedbackEnded = false
     const pageCleanups: (() => Promise<void>)[] = []
     let release = () => {}
     const notes: string[] = []
@@ -209,8 +209,6 @@ export class BrowserProgramOwner {
             if (waits.has(method) && !active.controller.signal.aborted) await this.stores.journal.setPhase(operation.id, 'running', { summary: 'Agent is operating the Browser' })
           }
         } })
-      await ownedFeedback.end(run.completed && attached.endedReason === null && !active.stopped)
-      feedbackEnded = true
       const uncertain = attached.endedReason ?? (binding.connection?.id !== connectionId || binding.status !== 'ready' ? binding.warning : undefined)
       const outcome = active.stopped ? { kind: 'stopped' as const, message: active.stoppedMessage ?? 'The Browser operation was stopped. Inspect the original Browser before another action.' } :
         uncertain || notes.length ? { kind: 'indeterminate' as const, message: [uncertain, ...notes].filter(Boolean).join('\n') } :
@@ -229,21 +227,17 @@ export class BrowserProgramOwner {
       return { result: undefined, logs: [], outcome, runOperation: active.operation }
     } finally {
       active.controller.abort()
-      for (const cleanup of pageCleanups) await cleanup()
-      if (!feedbackEnded) await feedback?.end(false)
-      release()
-      await interrupts?.dispose()
-      const warning = await session?.detach()
       const operation = active.operation
-      if (warning && operation) operation.warning ??= warning
+      for (const cleanup of pageCleanups) await finishBrowserProgramStep(operation, 'page resource release', cleanup)
+      if (feedback) await finishBrowserProgramStep(operation, 'feedback cleanup', () => feedback?.end(operation?.phase === 'completed'))
+      await finishBrowserProgramStep(operation, 'availability subscription release', release)
+      if (interrupts) await finishBrowserProgramStep(operation, 'dialog observer release', () => interrupts?.dispose())
+      if (session) await finishBrowserProgramStep(operation, 'debugger detach', () => session?.detach())
+      if (this.active.get(id) === active) this.active.delete(id)
       if (operation) {
         this.operations.delete(operation.id)
-        await this.stores.journal.finish(operation.id, operation.phase === 'preparing' || operation.phase === 'running' || operation.phase === 'waiting' || operation.phase === 'human' ? 'indeterminate' : operation.phase,
-          { summary: operation.summary, ...(operation.warning ? { warning: operation.warning } : {}) })
-        const persistenceWarning = this.stores.journal.getPersistenceWarning()
-        if (persistenceWarning) operation.warning ??= persistenceWarning
+        await finishBrowserProgramReceipt(this.stores.journal, operation)
       }
-      if (this.active.get(id) === active) this.active.delete(id)
     }
   }
   async dispose(): Promise<void> {

@@ -93,6 +93,7 @@ import { capturePageImage } from '@agentmux/native-desktop/image'
 import { browserPagePixels, exportBrowserPageImage } from './browser-image.js'
 import { createBrowserPageDispatch } from '@agentmux/browser/browser-page-dispatch'
 import { browserOperationPhaseFromOutcome, browserRunOutcomeFromFailure } from '@agentmux/browser/browser-run-outcome'
+import { appendBrowserWarning as appendWarning, finishBrowserProgramReceipt, finishBrowserProgramStep } from '@agentmux/browser/browser-program-completion'
 import { safeBrowserUrl, startBrowserOperationStep, recordBrowserOperationTarget, summarizeBrowserValue } from '@agentmux/browser/browser-operation-step'
 import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
 import {
@@ -337,9 +338,6 @@ const INPUT_ISOLATION_WARNING = 'Native Browser input isolation is unconfirmed. 
 const INPUT_ISOLATION_HISTORY = 'Native input isolation was unconfirmed during this operation.'
 const ASSOCIATION_OPERATOR_NOTICE = 'This program started with a different operator from the Browser’s associated Agent. The original association and message recipient were retained.'
 const ADDRESS_COPY_WARNING = 'Could not confirm the address was copied. Right-click the original target to try again.'
-function appendWarning(current: string | undefined, warning: string): string {
-  return current && (`\n${current}\n`).includes(`\n${warning}\n`) ? current : [current, warning].filter(Boolean).join('\n')
-}
 function removeWarning(current: string | undefined, warning: string): string | undefined {
   return current?.split('\n').filter(line => line !== warning).join('\n') || undefined
 }
@@ -2960,8 +2958,9 @@ export class BrowserViewManager {
           })
         : localOperation
     } catch (error) {
+      await finishBrowserProgramStep(localOperation, 'debugger detach', () => session.detach())
       entry.runInFlight = false
-      const cleanupWarning = session.detach()
+      const cleanupWarning = localOperation.warning
       if (cleanupWarning) {
         entry.activity = { ...entry.activity, warning: [entry.activity.warning, cleanupWarning].filter(Boolean).join(' ') }
         const failure = error instanceof Error ? error : new Error(String(error))
@@ -2979,13 +2978,12 @@ export class BrowserViewManager {
       operation.summary = 'Browser control changed before program dispatch'
       operation.finishedAt = Date.now()
       operation.warning = 'The original program was stopped before dispatch. Returning control does not resume it; inspect the page before submitting a fresh program.'
-      const cleanupWarning = session.detach()
-      if (cleanupWarning) operation.warning += ` ${cleanupWarning}`
+      await finishBrowserProgramStep(operation, 'debugger detach', () => session.detach())
       entry.runInFlight = false
       operation.control = this.owns(entry, runView) ? this.controlState(entry) : {
         owner: 'unknown', activeOperationId: null, revision: entry.controlRevision, inputIsolation: 'unconfirmed'
       }
-      await this.operationJournal?.finish(operation.id, 'stopped', { summary: operation.summary, warning: operation.warning })
+      if (this.operationJournal) await finishBrowserProgramReceipt(this.operationJournal, operation)
       return { result: undefined, logs: [], outcome: { kind: 'stopped', message: operation.warning }, runOperation: operation }
     }
     if (caller) {
@@ -3214,7 +3212,8 @@ export class BrowserViewManager {
       return { result: undefined, logs: run.logs, outcome, runOperation: operation }
     } finally {
       stopController.abort()
-      for (const cleanup of pageCleanups) await cleanup()
+      const warningBeforeCleanup = operation.warning
+      for (const cleanup of pageCleanups) await finishBrowserProgramStep(operation, 'page resource release', cleanup)
       // Execution ends independently of Browser ownership. Only an explicit human
       // handoff releases the page's input shield and ownership decoration.
       entry.driving = false
@@ -3222,27 +3221,19 @@ export class BrowserViewManager {
       // The original source can end before the live target is projected again.
       // Its returned operation still reports the final dispatch/control facts.
       operation.control = this.controlState(entry)
-      await feedback.end(operation.phase === 'completed')
-      await interrupts?.dispose()
-      const cleanupWarning = session.detach()
-      if (cleanupWarning) {
-        operation.warning ??= cleanupWarning
-        entry.activity = { ...entry.activity, warning: entry.activity.warning ?? cleanupWarning }
+      await finishBrowserProgramStep(operation, 'feedback cleanup', () => feedback.end(operation.phase === 'completed'))
+      if (interrupts) await finishBrowserProgramStep(operation, 'dialog observer release', () => interrupts?.dispose())
+      await finishBrowserProgramStep(operation, 'debugger detach', () => session.detach())
+      if (operation.warning && operation.warning !== warningBeforeCleanup) {
+        entry.activity = { ...entry.activity, warning: appendWarning(entry.activity.warning, operation.warning) }
       }
       entry.runInFlight = false
       if (this.operationJournal) {
         this.projectInputIsolationNotice(entry)
-        const finalPhase = operation.phase === 'completed' || operation.phase === 'failed' || operation.phase === 'indeterminate' || operation.phase === 'stopped'
-          ? operation.phase
-          : 'indeterminate'
-        await this.operationJournal.finish(operation.id, finalPhase, {
-          summary: operation.summary,
-          ...(operation.warning ? { warning: operation.warning } : {})
-        })
-        const persistenceWarning = this.operationJournal.getPersistenceWarning()
-        if (persistenceWarning) {
-          operation.warning ??= persistenceWarning
-          entry.activity = { ...entry.activity, warning: entry.activity.warning ?? persistenceWarning }
+        const warningBeforeReceipt = operation.warning
+        await finishBrowserProgramReceipt(this.operationJournal, operation)
+        if (operation.warning && operation.warning !== warningBeforeReceipt && entry.activity.operation === operation) {
+          entry.activity = { ...entry.activity, warning: appendWarning(entry.activity.warning, operation.warning) }
         }
       }
       this.emit(entry)
