@@ -52,6 +52,18 @@ Read \`goal plan\` for \`plan.ticketNodes\` and \`ticketLinks\`. The entry at po
 one is T1. Use \`goal focus --link URL\` to open the exact Ticket. If your workflow
 uses Git, the published URL is the value for a \`Goal-Node\` trailer.
 
+Use \`goal plan active\` for the Agent’s own claimable Tickets. Use
+\`goal plan active --goal ID\` for one Goal’s in-flight work and uncertain states
+as its Supervisor or as a person. For a bounded claim query on one Goal use
+\`--goal ID --view claimable\`. The read uses the original owner’s current index.
+If it is rebuilding, read the original plan for history and retry the active query.
+
+For a reviewed Ticket, use the exact delivery hash from its original report receipt.
+The core records the authenticated author and verified source references. The review
+must supply that hash if the original report has one. An appended Ticket can point to
+its proposal reply by including a revision proposal with \`nodeId\`,
+\`delegationOperationId\` and \`replyMessageId\`.
+
 ### Reconcile before advancing
 
 - `dispatch-link` unknown means read the original Core delivery receipt. Keep the same
