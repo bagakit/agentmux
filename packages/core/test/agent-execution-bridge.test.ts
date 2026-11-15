@@ -70,6 +70,20 @@ const inputText = (data: AgentMuxRunInputOperation['data']): string => typeof da
 const request = '  ' + JSON.stringify({ type: 'request', generation: 'original', payload: { id: 1, method: 'write', params: { text: '中文' } } }) + ' \n'
 
 describe('execution bridge original Runtime continuation', () => {
+  it('forwards responses despite a failed completion projection', async () => {
+    const response = (id: number) => JSON.stringify({ type: 'response', generation: 'original', payload: { id, result: {} } }) + '\n'
+    const completion = JSON.stringify({ type: 'operation-completed' }) + '\n'
+    const f = port('front', ''), e = port('exec', response(1) + completion + response(2))
+    const issue = Error('Completion observation storage unavailable'), observed: unknown[] = []
+    const bridge = new AgentExecutionBridge({ state: state(), ports: { frontend: f.api, executor: e.api }, persist: async () => {},
+      onFrame: async () => { throw issue }, onObservationError: (side, error) => observed.push([side, error]), onError: error => { throw error } })
+    try {
+      await bridge.start()
+      expect(f.writes.map(operation => Buffer.from(operation.data).toString())).toEqual([response(1), response(2)])
+      expect(observed).toEqual([['executor', issue]])
+    } finally { await bridge.close() }
+  })
+
   it('forwards the original frame through the public recoverable Input and saves its exact receipt', async () => {
     const f = port('front', request), e = port('exec', '')
     let saved = state()

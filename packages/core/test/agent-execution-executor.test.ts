@@ -95,6 +95,17 @@ async function fixture(executable = process.execPath, contribution: Pick<AgentEx
 }
 
 describe('resource executor original native stream', () => {
+  it('returns the committed response before its completion observation', async () => {
+    const h = await fixture()
+    await h.initialize()
+    h.send(1, 'save')
+    const response = await h.reply(1)
+    const completion = await h.wait(frame => frame.type === 'operation-completed' && frame.operation?.nativeRequestId === 1)
+    expect(h.frames.indexOf(response)).toBeLessThan(h.frames.indexOf(completion))
+    expect(await h.journal.inspect(completion.operation!)).toMatchObject({ phase: 'completed' })
+    expect(await readFile(h.effects, 'utf8')).toBe('effect\n')
+  })
+
   it.each(['native stdio', 'Provider operation'] as const)('returns an unconfirmed write to its original WebSocket request through %s', async (execution) => {
     let effectFile: string
     const h = await fixture(process.execPath, execution === 'Provider operation' ? {
@@ -267,6 +278,7 @@ describe('resource executor original native stream', () => {
     const cursor = h.frames.length
     h.send(1, 'save'); expect((await h.reply(1, cursor)).payload!.result!.count).toBe(1)
     expect(complete).toHaveBeenCalledTimes(2)
+    await h.wait(frame => frame.type === 'operation-completed' && frame.operation?.nativeRequestId === 1, cursor)
     expect(h.frames.filter(frame => frame.type === 'operation-completed' && frame.operation?.nativeRequestId === 1)).toEqual([{ type: 'operation-completed', generation: 'original', operation: { bindingId: 'fixed-binding', streamGeneration: 'original', nativeRequestId: 1 } }])
     expect(await readFile(h.effects, 'utf8')).toBe('effect\n')
   })
