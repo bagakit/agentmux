@@ -233,6 +233,8 @@ Tab 切换不卸载工作面。[WorkspaceWorkbench](../../apps/desktop/src/rende
 
 ## 5. Attachment 回放、历史只读与尺寸同步
 
+首次 fit 后画面错乱或静止时单列抖动，可按[终端交互分层的重排判别](terminal-interaction-layers.md#5-重排与-replay)定位。
+
 ### 5.1 历史 Run 只读
 
 `TerminalView` 以 `canControlRun = session.processState === 'running'` 作为总闸：键盘输入、OSC 回复的 `sendInput` 与 viewport 的 live 尺寸同步，都只在 `canControlRun` 时发生。因此已退出的历史 Run 在 UI 上是只读回放，不会向已结束的进程写入按键、尺寸或 OSC 回复。多个 Renderer View 同时附着同一个 Run 时，Main 复用同一个 ctxmux Attachment，后续 View 走 `readRunReplay`（`runtime-controller.ts`）。

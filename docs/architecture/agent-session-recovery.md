@@ -33,6 +33,19 @@ Provider 解释原生初始化、会话创建／恢复及前台连接协议，�
 
 GUI 与 CLI 仅消费 Core 的原阶段和结果。原 Run 存活只证明物理运行，不能代签前台恢复、原生上下文或输入接受。故障诊断正文可供阅读，但不参与权限、身份、恢复资格或成功判定。
 
+## 持久 Session 与保存确认
+
+Core Session Store 在原 Session 路径使用 SQLite 保存身份与生命周期事实，物理事务和一次格式切换归 [Session database](../../packages/core/src/agent-session-database.ts)。原稳定 inode 的跨进程锁持续保护写入；旧完整文档先校验全部事实、按内容摘要保全原字节，再以已同步事务原子切换，完成身份标记防止后来替换文件被误当作旧事实重新导入。切换中断从原文件或已发布事务重开，不另建空 Session。损坏旧文档的局部救援保持只读，不把部分救回的事实发布为完整转换结果。
+
+Session 元数据与每条未来消息正文分行持久化。Registry 只保留元数据，目录读取不带累计未来正文；准确 Session 读取、元数据 CAS 与单条未来消息读写只访问目标事实。未来消息正文、原 Session／Run 与 occurrence 领取在同一事务内核对，元数据更新不会因未携带正文而删除它。显式 `Store.load()`／完整 CAS 保持完整业务事实合同；普通控制使用名称明确的 metadata／单条／有界分页接口。SQLite 提交及文件、目录同步分别确认；提交结果未知或同步未确认不冒充未发生，也不停止健康 Run，原绑定可重新读取并在同一 owner 确认保存。
+
+Session 元数据与历史贡献可以在一次提交中合并：
+
+- 普通 Tool Hook 由 [`AgentMuxClient`](../../packages/core/src/client.ts) 在 Registry 更新队列中先计算 current→next，再判断这一条历史贡献能否与回执合并。只有不带 outcome、活动边界、待 flush、交互或 continuity 变更的稳态贡献，才调用 Store 接口 `AgentMuxAgentSessionStore`（[agent-session-store.ts](../../packages/core/src/agent-session-store.ts)）的 `compareAndSwapMetadataWithTimeline`；首次 handover 与复杂贡献仍走各自的路径。Registry 复用同一 CAS、身份与 durability owner，Session 与历史的提交结果分别返回。
+- File Store（代码名 `AgentMuxFileAgentSessionStore`）在 timeline 顺序、writer 与 SQLite 事务中保存 metadata，用内部 SAVEPOINT 隔离可选的历史。只有 writer 确认 COMMIT 从未尝试、整个事务已回滚、handle 与 lease 已释放时，才允许按同一 expected／next 只做 metadata CAS；COMMIT 结果未知或提交后 sync 失败时不重写。
+- Memory Store（代码名 `AgentMuxMemoryAgentSessionStore`）先同步 stage 受影响的 metadata、输入记录与一条历史版本，再修改内存中的 map。
+- 必需 metadata 的错误保留真实类型与原因，历史错误只作为辅助明细；仅在准备阶段出现的错误不会把本次回执标为保存未确认。保存承诺见[本地持久化合同](../design/behavior/persistence.md#保存合同)。
+
 ## Provider 差异（恢复判定内）
 
 部分 Provider 在第一轮对话前不保存可续接的原生会话：原生 resume 会找不到记录。这是 Provider 的持久化合同；AgentMux 不改写、补造或伪装它的保存。Core 的 [`agentSessionHasNoNativeConversation`](../../packages/core/src/agent-session-recovery/continuity-policy.ts)／[`agentSessionHoldsNativeEvidence`](../../packages/core/src/agent-session-recovery/continuity-policy.ts) 只根据已确认的 Session 保存事实、托管身份通道与 ctxmux 输入计数判定，不推断 Provider 磁盘上保存过什么。[`performAgentContinuity`](../../packages/core/src/agent-session-recovery/continuity-attempt.ts) 在该情形下给出 `native-conversation-absent`，替代自动准入，不代替 supervised／resident 授权检查。用户可见表述见 [Session 恢复](../design/behavior/session-recovery.md)。

@@ -62,6 +62,10 @@ Node consumers can import the theme model to resolve light and dark tokens witho
 
 Use `syntax="markdown"` on `Textarea` or `ComposerTextarea` to color CommonMark and GFM directly in the field. Import `input/styles.css`. Syntax colors keep delimiters, whitespace, form values and clipboard text intact. The field retains native selection, undo, IME and forced colors. Drafts larger than 4,096 UTF-16 units and input that exceeds the parser budget remain fully editable as plain text.
 
+### Markdown preview
+
+The [shared Markdown renderer](src/lib/markdown-render.ts) limits math input to 4 KiB, code input to 64 KiB, and generated output to 256 KiB of HTML and 3,000 elements. The input check runs before starting a terminable worker. KaTeX uses `trust: false` and `strict: 'error'`. The worker checks generated output against the same budget before returning it. When rendering exceeds a limit, the preview keeps the original source visible and explains why.
+
 ## Workspace modules
 
 Imports in the table use the prefix `@agentmux/client-ui/`. The package manifest records the complete workspace export map.
@@ -133,6 +137,10 @@ Semantic icons come from `@agentmux/client-ui/icons` and the shared styles. Inst
 The animation presets are `none`, `work`, `stream`, `execute`, `wait`, `orbit`, `feedback`, `selection` and `spin`. A preset affects only that instance, respects reduced motion and does not change saved themes or imply Runtime state. `createSemanticIconElement` takes the same options: a static call returns an SVG, and an animated call can return an HTML element that contains the SVG, so keep the returned node rather than assuming it is an SVG.
 
 The shared catalog owns semantic IDs and glyph defaults. Hosts can use the same catalog for their icon pickers and theme settings.
+
+### Theme runtime
+
+Desktop's preload [projects the saved theme snapshot](../../apps/desktop/src/preload/theme-bootstrap.ts) onto the document before the first paint. The shared [theme runtime](src/theme/runtime.ts) then owns that window's media and selection subscriptions. It projects the resolved colors, typography and elevation as [CSS variables](src/theme/css-variables.ts) on `documentElement` and emits `agentmux-theme-change`. Components consume those variables and subscribe to that projection when they need to observe changes.
 
 ## Styles and dialogs
 

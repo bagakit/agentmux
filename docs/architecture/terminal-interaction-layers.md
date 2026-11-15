@@ -214,6 +214,8 @@ A 的三种触发共用选区这一个数据源，所以它们同时失效时，
 
 ## 5. 重排与 replay
 
+Attachment 的恢复、揭示与尺寸提交见 [Terminal Runtime 的回放和尺寸同步](terminal-runtime.md#5-attachment-回放历史只读与尺寸同步)。本节按画面或输入现象定位 xterm 与宿主间的交接。
+
 ### 5.1 replay 的字节先落地，第一次 fit 后到
 
 **机制**：xterm 以 80×24 构造，retained scrollback 的字节在第一次确定性 fit 之前就写进解析器。如果第一次 live fit 改变了网格，刚 replay 出来的那屏就是按错误宽度排版的。
@@ -234,7 +236,7 @@ A 的三种触发共用选区这一个数据源，所以它们同时失效时，
 
 **机制**：WebGL/DOM 的单元格度量在重渲染时可能抖一列：`proposeDimensions` 差一列，容器 CSS 像素却没变。把它当成真实 resize 去 `fit()`，xterm 会 reflow 一列再弹回，把刚画好的 TUI 画花。
 
-**当前机制**：只有容器 CSS 像素真的变化才 `fit()`，即 [terminal-viewport-sync.ts](../../apps/desktop/src/renderer/src/lib/terminal-viewport-sync.ts) 的 `samePixels` 闸。抖动基线由每次 fit 建立，replay 阶段的 fit 也要留下基线，否则进入 live 后第一次抖动时这道闸是空的。
+**当前机制**：静止容器的单列抖动由 [Terminal Runtime 的尺寸判定](terminal-runtime.md#53-resize-只提交稳定最新的网格)处理。replay 阶段的 fit 也建立像素基线，使第一次 live fit 有值可比较。
 
 **判别**：拖拽与重渲染已停（像素固定），却又 fit 了一次。
 

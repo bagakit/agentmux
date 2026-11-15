@@ -1,6 +1,6 @@
 # 文件与 Git 的实现
 
-本文说明 Desktop 读写 Workspace 文件、移动与改名、Git 仓库操作、PR 创建、worktree 与扇出的当前源码机制，以及书签文件与提交作者头像的读取方式。必须成立的行为约束见[文件、编辑与 Git](../design/behavior/files-and-git.md)，分层归属见[系统职责地图](system-ownership.md#从哪一层接入)。源码机制不代表某个安装或运行实例已通过验收。
+本文说明 Desktop 读写 Workspace 文件、移动与改名、扩展文件格式、Git 仓库操作、PR 创建、worktree 与扇出的当前源码机制，以及书签文件与提交作者头像的读取方式。必须成立的行为约束见[文件、编辑与 Git](../design/behavior/files-and-git.md)，分层归属见[系统职责地图](system-ownership.md#从哪一层接入)。源码机制不代表某个安装或运行实例已通过验收。
 
 ## 文件读写与修订
 
@@ -43,6 +43,27 @@ Mote 归档由 [`ScratchTopics`](../../apps/host/src/mote-resources.ts) 从同�
 - `documentLifetime`／`advanceDocumentLifetime`：文档代次。关闭文档面时代次加一，迟到的读写结果先比对代次，代次变了就丢弃，不落到新打开的同路径文档上。
 - `fileReadRequestIds`、`fileReadInFlightCounts`：读请求去抖与在途去重；`fileInvalidationSequences`：外部改动到达时递增，让在途读取知道自己已过期。
 - `fileSaveTails`、`workspaceFileMutationTails`、`withWorkspaceFileMutation`、`transferFileSaveTail`：同一文件的保存，以及同一子树的写入与结构变更，按尾链串行，改名时把保存尾链转移到新路径。
+
+## 文件工作面的宿主组装
+
+Desktop 二级内容由 [`WorkspaceFilesTool`](../../apps/desktop/src/renderer/src/components/WorkspaceFilesTool.tsx) 按原对象选择组装，统一的 [`WorkspaceFilesFrame`](../../apps/desktop/src/renderer/src/components/WorkspaceFilesFrame.tsx) 只持有上下文栏、文件树和分割布局。[Project](../../apps/desktop/src/renderer/src/components/ProjectFilesTool.tsx)、[Topic](../../apps/desktop/src/renderer/src/components/TopicFilesTool.tsx)、[Mote](../../apps/desktop/src/renderer/src/components/MoteFilesTool.tsx) 各自提供原数据、准确文件范围、动作和内容；普通项目不自动订阅 Scratch 目录或分类，Git 历史缓存由分割框架上方的原 Git owner 保留。显式知识收集仍沿原操作读取来源，不建立另一份空间或业务状态。
+
+## 文件格式的扩展位置
+
+格式编辑、呈现与原生工具留在 Desktop，沿原 FileRegion 和 FileDocument 派发；可移植文件与知识领域 owner 由 Host 提供，Core 只公开准确目标、动作和结果类型。行为要求见[格式能力与按需扩展](../design/behavior/files-and-git.md#格式能力与按需扩展)，当前模块按以下职责增长。
+
+| 职责 | 当前来源与扩展方式 |
+| --- | --- |
+| 轻量格式能力 | [`editor-extensions/catalog`](../../packages/editor-extensions/src/catalog.ts) 集中后缀、复合后缀、语言、MIME、预览、格式化和默认模式；查询不导入引擎。二进制格式继续消费原 `workspace-file-preview` 元数据。 |
+| 原工作面与正文 | [`FileSurfaceView`](../../apps/desktop/src/renderer/src/components/FileSurfaceView.tsx) 保有原 Region／正文／模式上下文；[`SourceFilePreview`](../../apps/desktop/src/renderer/src/components/file-preview/SourceFilePreview.tsx) 只选择当前可见格式的 lazy 组件。 |
+| 格式实现 | [`components/file-preview/`](../../apps/desktop/src/renderer/src/components/file-preview/) 放呈现与临时资源生命周期，[`lib/file-formats/`](../../apps/desktop/src/renderer/src/lib/file-formats/) 放解析、诊断、Worker 和引擎适配；类型模块不加载重依赖。 |
+| 源码着色与格式化 | [`register-file-formats`](../../apps/desktop/src/renderer/src/lib/monaco-languages/register-file-formats.ts) 注册轻量语言规则；[`format-file-region`](../../apps/desktop/src/renderer/src/lib/file-formats/format-file-region.ts) 经原 Monaco adapter 对同一草稿作一次可撤销编辑，显式 Worker 才导入格式化器。 |
+| 宿主隔离与文件资源 | [`WorkspaceFiles`](../../apps/desktop/src/main/workspace-files.ts) 持有原资源与读取边界；[`FileDiagramRenderer`](../../apps/desktop/src/main/file-diagram-renderer.ts) 持有独立图计算页面；[`FileBuilds`](../../apps/desktop/src/main/file-builds.ts) 持有显式编译的进程组、日志和私有产物。 |
+| 公共消费 | Core [`space-control`](../../packages/core/src/space-control.ts)／[`public-rpc`](../../packages/core/src/public-rpc.ts) 定义目标和回执，Renderer [`store`](../../apps/desktop/src/renderer/src/store.ts) 将公开请求委托给 GUI 同一格式化／构建 owner。Core 不导入格式库。 |
+
+新增格式先补轻量能力声明，再添加所属适配器并接入可穷尽派发；已有 parser、Worker、PDF reader 与资源 owner 可直接复用。格式各自持有适合自身的语义，不强行转成统一 AST，也不为后缀建立独立 editor 包、文件 watcher 或可执行插件层。Markdown 的图通过 `ClientUiPlatform.renderMarkdownDiagram` 注入宿主能力，共享 UI 不依赖 Desktop Main。
+
+编译 owner 当前只在原本地 Host 显式启动本机 Tectonic／Typst，不自动安装编译器或在本地执行远程 Host 的请求。Tectonic 仅使用已有缓存；Typst 遵循已安装 CLI 的包缓存与下载行为，联网或依赖失败保留编译诊断和 Source。Typst 的私有草稿 overlay 保留原工作区相对引用，产物进入原 PDF reader；用户文件与持久工作面不存储编译器临时文件或 PDF bytes。
 
 ## Git 仓库操作
 
