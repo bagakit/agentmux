@@ -68,29 +68,37 @@ function ExecutorCount({ providerId, observations }: { providerId: string; obser
   return <ComparisonFact label={label} icon={count === undefined ? 'status.unknown' : 'object.terminal'} tone={executorState === 'ready' ? undefined : 'muted'} />
 }
 
-export function ProviderComparisonPane({ hosts, active, requestedHostId, onExecutors, maintenance }: {
+export function ProviderComparisonPane({ hosts, active, destination, onExecutors, onHooks, maintenance }: {
   hosts: readonly HostConfig[]
   active: boolean
-  requestedHostId?: string | undefined
+  destination?: { hostId: string | undefined } | undefined
   onExecutors(hostId: string, providerId: string): void
+  onHooks(hostId: string, providerId: string, label: string): void
   maintenance?: ((host: HostConfig) => ReactNode) | undefined
 }) {
-  const [hostId, setHostId] = useState(() => requestedHostId ?? hosts.find(host => host.kind === 'local')?.id ?? hosts[0]?.id ?? '')
+  const [hostId, setHostId] = useState(() => destination?.hostId ?? hosts.find(host => host.kind === 'local')?.id ?? hosts[0]?.id ?? '')
   const [refresh, setRefresh] = useState(0)
   const [query, setQuery] = useState('')
   const [selection, setSelection] = useState(noSelection)
   const selectedFilter = useRef<HTMLButtonElement>(null)
+  const hookOpener = useRef<HTMLButtonElement>(null)
   const [read, setRead] = useState<CatalogRead>()
   const host = hosts.find(item => item.id === hostId)
   const current = read?.host === host ? read : undefined
   const observations = useProviderObservations(host, active, refresh)
 
   useEffect(() => {
-    if (requestedHostId) {
-      setHostId(requestedHostId)
+    if (destination?.hostId) {
+      setHostId(destination.hostId)
       setSelection(noSelection)
     }
-  }, [requestedHostId])
+  }, [destination])
+  useEffect(() => {
+    if (active && hookOpener.current) {
+      hookOpener.current.focus()
+      hookOpener.current = null
+    }
+  }, [active])
   useEffect(() => {
     if (!active || !host) return
     let current = true
@@ -157,7 +165,7 @@ export function ProviderComparisonPane({ hosts, active, requestedHostId, onExecu
               {visibleEntries.length === entries.length ? entries.length : `${visibleEntries.length} of ${entries.length}`} {entries.length === 1 ? 'provider' : 'providers'}
             </span> : null}
           </div>
-          <p>Base capabilities declared by this Host. Open an Executor to inspect its CLI and Hook.</p>
+          <p>Base capabilities declared by this Host.</p>
         </div>
         {selectedCount || maintenanceControl ? <div className="provider-comparison__matrix-actions">
           {selectedCount ? <button ref={selectedFilter} className={`small-button${selectedOnly ? ' small-button--active' : ''}`} type="button"
@@ -199,6 +207,10 @@ export function ProviderComparisonPane({ hosts, active, requestedHostId, onExecu
             {comparisons.map(column => <td role="cell" key={column.id}>
               <span className="provider-comparison__cell-title" aria-hidden="true">{column.title}</span>
               <ComparisonFact {...column.value(entry)} />
+              {column.id === 'hooks' ? <button className="provider-comparison__open" type="button" aria-label={`View ${entry.label} Hooks`}
+                onClick={event => { hookOpener.current = event.currentTarget; onHooks(hostId, entry.id, entry.label) }}>
+                Hooks <SemanticIcon name="navigation.disclosure" size={12} aria-hidden="true" />
+              </button> : null}
             </td>)}
           </tr>)}</tbody>
         </table>

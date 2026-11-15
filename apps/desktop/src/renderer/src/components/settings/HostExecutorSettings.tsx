@@ -1,8 +1,7 @@
 import { missingExecutableLabel } from '../../lib/executor-detection'
 import { ExecutorLaunchPreview } from './ExecutorLaunchPreview'
 import { ComposerTextarea, NativeSelect, Switch, TextInput } from '@agentmux/client-ui/input'
-import { useEffect, useRef, useState } from 'react'
-import type { AgentMuxRpcResult } from '@agentmux/core'
+import { useEffect, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { configValuesEqual } from '../../../../shared/config-edit'
 import type { AppConfig, HostConfig, HostExecutorConfiguration } from '../../../../shared/contracts'
@@ -39,33 +38,31 @@ type Registration = {
   accepted?: { host: HostConfig | undefined; value: RegistrationDraft; receipt: HostExecutorConfiguration }
 }
 
-type HookResult = AgentMuxRpcResult<'settings.executors.hooks-inspect'>
-type HookObservation = { pending?: 'check' | 'update'; result?: HookResult; error?: string }
-const hookHealth = { current: 'Configuration current', issue: 'Hook needs attention', unknown: 'Hook state unconfirmed', 'not-managed': 'No managed Hook' }
+export type HostExecutorDestination = { hostId?: string | undefined; providerId?: string | undefined; executorId?: string | undefined }
 
 /** Read the executing Host's registry. Registration is an explicit complete configuration. */
-export function HostExecutorSettings({ config, active, requestedHostId, requestedProviderId, hookNavigation }: {
-  config: AppConfig; active: boolean; requestedHostId?: string | undefined; requestedProviderId?: string | undefined
-  hookNavigation?: { executorId: string } | undefined
+export function HostExecutorSettings({ config, active, destination, onHooks }: {
+  config: AppConfig; active: boolean; destination?: HostExecutorDestination | undefined
+  onHooks?: ((hostId: string, providerId: string, executorId: string) => void) | undefined
 }) {
-  const [hostId, setHostId] = useState(() => config.workspaces.find(workspace => workspace.id === useAppStore.getState().activeWorkspaceId)?.hostId ?? config.hosts[0]?.id ?? '')
-  useEffect(() => { if (requestedHostId) setHostId(requestedHostId) }, [requestedHostId])
+  const [hostId, setHostId] = useState(() => destination?.hostId ?? config.workspaces.find(workspace => workspace.id === useAppStore.getState().activeWorkspaceId)?.hostId ?? config.hosts[0]?.id ?? '')
   const inventory = useAppStore(state => state.hostExecutorInventories[hostId])
   const detect = useAppStore(state => state.discoverHostExecutors)
   const providers = useAppStore(state => state.providerCatalog)
-  const [selected, setSelected] = useState<string | null>(null)
+  const [selected, setSelected] = useState<string | null>(destination?.executorId ?? null)
   const [query, setQuery] = useState('')
-  const [providerFilter, setProviderFilter] = useState(requestedProviderId)
-  useEffect(() => {
-    setProviderFilter(requestedProviderId)
-    if (requestedProviderId) { setSelected(null); setQuery('') }
-  }, [requestedHostId, requestedProviderId])
-  useEffect(() => {
-    if (hookNavigation) { setProviderFilter(undefined); setSelected(hookNavigation.executorId); setQuery('') }
-  }, [hookNavigation])
+  const [providerFilter, setProviderFilter] = useState(destination?.providerId)
   const [registration, setRegistration] = useState<Registration>(() => ({ adding: false, value: {
     executorId: '', label: '', providerId: providers[0]?.id ?? '', command: '', args: '', env: '{}', guide: true
   } }))
+  useEffect(() => {
+    if (!destination) return
+    if (destination.hostId) setHostId(destination.hostId)
+    setProviderFilter(destination.providerId)
+    setSelected(destination.executorId ?? null)
+    setQuery('')
+    if (destination.executorId) setRegistration(current => current.adding ? { ...current, adding: false } : current)
+  }, [destination])
   const { adding, value, accepted } = registration
   const { executorId, label, providerId, command, args, env, guide } = value
   const update = (patch: Partial<RegistrationDraft>) => setRegistration(current => ({ ...current, value: { ...current.value, ...patch } }))
@@ -83,45 +80,6 @@ export function HostExecutorSettings({ config, active, requestedHostId, requeste
   const visibleDescriptors = descriptors.filter(item => (!providerFilter || item.providerId === providerFilter) &&
     `${item.label} ${item.executorId} ${item.command}`.toLowerCase().includes(queryText))
   const selectedExecutor = descriptors.find(item => item.executorId === selected && (!providerFilter || item.providerId === providerFilter))
-  const runtimeId = observed?.result?.runtimeId
-  const workspaces = config.workspaces.filter(workspace => workspace.hostId === hostId && !workspace.closeout)
-  const [workspaceSelection, setWorkspaceSelection] = useState<{ hostId: string; executorId: string; revision: string; path: string }>()
-  const workspacePath = selectedExecutor && workspaceSelection?.hostId === hostId && workspaceSelection.executorId === selectedExecutor.executorId &&
-    workspaceSelection.revision === selectedExecutor.configRevision ? workspaceSelection.path : ''
-  function chooseWorkspace(path: string) {
-    if (selectedExecutor) setWorkspaceSelection({ hostId, executorId: selectedExecutor.executorId, revision: selectedExecutor.configRevision, path })
-  }
-  const [hookObservations, setHookObservations] = useState<Record<string, HookObservation>>({})
-  const pendingHooks = useRef(new Set<string>())
-  const hookKey = (item: { executorId: string; configRevision: string }) =>
-    JSON.stringify([hostId, runtimeId, workspacePath, item.executorId, item.configRevision])
-  const selectedHookKey = selectedExecutor ? hookKey(selectedExecutor) : null
-  const hook = selectedHookKey ? hookObservations[selectedHookKey] : undefined
-  const needsWorkspace = hook?.result?.inspection.code === 'HOOK_WORKSPACE_REQUIRED' ||
-    hook?.result?.inspection.code === 'HOOK_NATIVE_LOADING_UNCONFIRMED'
-  async function maintainHook(updateHook: boolean) {
-    if (!selectedExecutor || !selectedHookKey || !runtimeId || pendingHooks.current.has(selectedHookKey)) return
-    const key = selectedHookKey
-    pendingHooks.current.add(key)
-    setHookObservations(current => ({ ...current, [key]: {
-      ...(current[key]?.result ? { result: current[key].result } : {}), pending: updateHook ? 'update' : 'check'
-    } }))
-    try {
-      const result = await api.executors.hooks({ hostId, runtimeId, ...(workspacePath ? { workspacePath } : {}), executorId: selectedExecutor.executorId,
-        configRevision: selectedExecutor.configRevision }, updateHook)
-      setHookObservations(current => ({ ...current, [key]: { result } }))
-    } catch (cause) {
-      setHookObservations(current => ({ ...current, [key]: {
-        ...(current[key]?.result ? { result: current[key].result } : {}), error: presentError(cause)
-      } }))
-    } finally {
-      pendingHooks.current.delete(key)
-    }
-  }
-  const autoCheckScope = !workspacePath || workspaces.some(workspace => workspace.path === workspacePath)
-  useEffect(() => {
-    if (active && !adding && selectedHookKey && autoCheckScope && !hook) void maintainHook(false)
-  }, [active, adding, selectedHookKey, autoCheckScope, hook])
   const checking = inventory?.state === 'checking'
   useEffect(() => {
     if (active && host && !hostExecutorInventoryMatches(inventory, host)) void refresh()
@@ -198,45 +156,13 @@ export function HostExecutorSettings({ config, active, requestedHostId, requeste
         items={visibleDescriptors.length === 0 && observed?.state !== 'ready' ? null : visibleDescriptors.map(item => ({ id: item.executorId, name: item.label,
           detail: `${agentProviderLabel(item.providerId)} · ${item.executorId}`,
           mark: <AgentAvatar executorId={item.executorId} providerId={item.providerId} label={item.label} size={22} />,
-          status: <><span>{inventory?.state === 'error' ? 'Check failed' : item.availability === 'available' ? 'Available' : item.availability === 'missing' ? missingExecutableLabel(item.cause) : item.availability === 'check-failed' ? 'Check failed' : 'Not checked'}</span>
-            {hookObservations[hookKey(item)]?.result?.health === 'issue' ? <span className="settings-hook-problem-dot" role="img" aria-label="Hook needs attention" title="Hook needs attention" /> : null}</>
+          status: <span>{inventory?.state === 'error' ? 'Check failed' : item.availability === 'available' ? 'Available' : item.availability === 'missing' ? missingExecutableLabel(item.cause) : item.availability === 'check-failed' ? 'Check failed' : 'Not checked'}</span>
         }))} />
       <div className="settings-resource-editor">{selectedExecutor ? <section className="agent-settings-card"><header className="agent-settings-card__header"><AgentAvatar executorId={selectedExecutor.executorId} providerId={selectedExecutor.providerId} label={selectedExecutor.label} size={22} /><strong>{selectedExecutor.label}</strong></header>
         <dl className="settings-executor-identity"><div><dt>Host</dt><dd>{host?.label ?? hostId}</dd></div><div><dt>Command</dt><dd><code>{selectedExecutor.command}</code></dd></div><div><dt>Resolved executable</dt><dd><code>{selectedExecutor.executable ?? 'Not confirmed'}</code></dd></div><div><dt>Source</dt><dd>{selectedExecutor.source === 'registered' ? 'Registered on this Host' : selectedExecutor.source === 'configured' ? 'Saved on this Host' : 'Provider default'}</dd></div></dl>
-        <section className="settings-executor-hooks" aria-label="Managed Hook">
-          <div className="settings-host-executor-actions">
-            <strong>Managed Hook</strong>
-            <button className="small-button" type="button" disabled={!runtimeId || Boolean(hook?.pending)} onClick={() => void maintainHook(false)}>Check Hook</button>
-            {hook?.result?.canUpdate ? <button className="small-button" type="button" disabled={Boolean(hook.pending) || Boolean(hook.error) || hook.result.update.status === 'unconfirmed'} onClick={() => void maintainHook(true)}>Update configuration</button> : null}
-          </div>
-          {needsWorkspace || workspacePath ? <label className="settings-compact-field"><span>Workspace</span>{workspaces.length > 0
-            ? <NativeSelect aria-label="Hook workspace" value={workspacePath} onChange={event => chooseWorkspace(event.target.value)}>
-              <option value="">Choose a workspace</option>
-              {workspaces.map(workspace => <option key={workspace.id} value={workspace.path}>{workspace.name}</option>)}
-            </NativeSelect>
-            : <TextInput aria-label="Hook workspace" placeholder="Absolute path on this Host" value={workspacePath} onChange={event => chooseWorkspace(event.target.value)} />}
-          </label> : null}
-          <div className="settings-executor-hooks__result" role="status">
-            <strong>{hook?.pending === 'update' ? 'Updating Hook…' : hook?.pending ? 'Checking Hook…' : hook?.error ? 'Hook check unconfirmed' : hook?.result ? hookHealth[hook.result.health] : 'Hook not checked'}</strong>
-            {hook?.error ? <p>{hook.error}</p> : null}
-            {hook?.result?.inspection.targets.map(target => <div key={target.path}>
-              <code>{target.path}</code>
-              {target.expectedRevision ? <dl className="settings-executor-identity">
-                <div><dt>Observed config revision</dt><dd>{target.observedRevision
-                  ? <code title={target.observedRevision}>{target.observedRevision.slice(0, 12)}</code>
-                  : target.status === 'not_present' ? 'Not present' : 'Unconfirmed'}</dd></div>
-                <div><dt>Expected config revision</dt><dd><code title={target.expectedRevision}>{target.expectedRevision.slice(0, 12)}</code></dd></div>
-              </dl> : null}
-              {target.legacyDeclarations ? <p>{target.legacyDeclarations} older {target.legacyDeclarations === 1 ? 'declaration' : 'declarations'}{target.missingLegacyEntrypoints ? ` · ${target.missingLegacyEntrypoints} with a missing executable or runner` : ''}</p> : null}
-            </div>)}
-            {hook?.result?.inspection.action ? <p>{hook.result.inspection.action}</p> : null}
-            {hook?.result?.inspection.targets.length ? <p>Delivery to existing runs is not checked here.</p> : null}
-            {hook?.result?.update.status === 'updated' ? <p>Managed configuration updated. Loading by existing Runs is unconfirmed.</p> : null}
-            {hook?.result?.update.status === 'unchanged' ? <p>The managed configuration required no write.</p> : null}
-            {hook?.result?.update.status === 'unconfirmed' ? <p>Update unconfirmed ({hook.result.update.code}). Check the Hook again before retrying.</p> : null}
-            {hook?.result?.update.status === 'not-applicable' ? <p>This Hook has no configuration update for the selected Executor.</p> : null}
-          </div>
-        </section>
+        {onHooks ? <div className="settings-host-executor-actions settings-executor-hook-link">
+          <button className="small-button" type="button" onClick={() => onHooks(hostId, selectedExecutor.providerId, selectedExecutor.executorId)}>View Hook scope</button>
+        </div> : null}
         {selectedExecutor.source === 'registered' ? <div>
           <p className="settings-group-note">Remove only this Host registration. A same-ID Provider default may remain. Retained Sessions, history and admitted launches keep their required registration.</p>
           <div className="settings-host-executor-actions"><button className="small-button" disabled={saving || !selectedExecutor.registrationRevision} onClick={() => void unregister()}>Remove registration</button></div>

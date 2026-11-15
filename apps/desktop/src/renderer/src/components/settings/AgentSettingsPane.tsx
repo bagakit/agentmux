@@ -15,13 +15,14 @@ import { ComposerTextarea, NativeSelect, Switch, TextInput } from '@agentmux/cli
 import { withUnrestrictedLaunchArgs } from '@agentmux/core/provider-launch-options'
 import { parseExecutorArgs } from '../../lib/executors'
 export { parseExecutorArgs } from '../../lib/executors'
-import { HostExecutorSettings } from './HostExecutorSettings'
+import { HostExecutorSettings, type HostExecutorDestination } from './HostExecutorSettings'
 import { currentExecutorDetection, executorDetectionLabel } from '../../lib/executor-detection'
 import { useResourceDrafts } from './use-resource-drafts'
 import { SettingsResourceLibrary } from './SettingsResourceLibrary'
 import { SelectionField } from '../SelectionField'
 import { ProviderCatalogPane } from './ProviderCatalogPane'
 import { ProviderComparisonPane } from './ProviderComparisonPane'
+import { ProviderHooksPane, type ProviderHookDestination } from './ProviderHooksPane'
 import { api } from '../../lib/api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { SettingsNavigationRequest } from '../SettingsNavigation'
@@ -125,13 +126,21 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
   const [hostId] = useState(initialHost)
   const [scope, setScope] = useState<'providers' | 'templates' | 'host'>(() =>
     navigationRequest?.field === 'providers' ? 'providers' : navigationRequest?.field === 'host-executors' ? 'host' : 'templates')
-  const [hookNavigation, setHookNavigation] = useState<{ executorId: string }>()
-  const [hostDestination, setHostDestination] = useState<{ hostId: string; providerId: string }>()
+  const [hookDestination, setHookDestination] = useState<ProviderHookDestination>()
+  const [providerDestination, setProviderDestination] = useState<{ hostId: string | undefined } | undefined>(() =>
+    navigationRequest?.field === 'providers' ? { hostId: navigationRequest.hostId } : undefined)
+  const [hostDestination, setHostDestination] = useState<HostExecutorDestination | undefined>(() =>
+    navigationRequest?.field === 'host-executors' ? { hostId: navigationRequest.hostId } : undefined)
+  const hookHost = config.hosts.find(host => host.id === hookDestination?.hostId)
   useEffect(() => {
-    if (navigationRequest?.field === 'providers') setScope('providers')
+    if (navigationRequest?.field === 'providers') {
+      setProviderDestination({ hostId: navigationRequest.hostId })
+      setHookDestination(undefined)
+      setScope('providers')
+    }
     if (navigationRequest?.field === 'executors') setScope(current => current === 'providers' ? 'templates' : current)
     if (navigationRequest?.field === 'host-executors') {
-      setHostDestination(undefined)
+      setHostDestination({ hostId: navigationRequest.hostId })
       setScope('host')
     }
   }, [navigationRequest])
@@ -384,25 +393,35 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
     counts[draft.providerId] = (counts[draft.providerId] ?? 0) + 1
     return counts
   }, {})
+  function openHostExecutors(hostId: string, providerId: string, executorId?: string) {
+    setHostDestination({ hostId, providerId, executorId })
+    setHookDestination(undefined)
+    setScope('host')
+  }
   return (
     <div className="settings-agent-pane" data-editor-view={scope === 'templates' ? view : scope}>
-      <ProviderComparisonPane hosts={config.hosts} active={active && scope === 'providers'} requestedHostId={navigationRequest?.field === 'providers' ? navigationRequest.hostId : undefined}
-        onExecutors={(hostId, providerId) => {
-          setHostDestination({ hostId, providerId })
-          setHookNavigation(undefined)
-          setScope('host')
-        }}
+      <ProviderComparisonPane hosts={config.hosts} active={active && scope === 'providers' && !hookDestination}
+        destination={providerDestination} onExecutors={openHostExecutors}
+        onHooks={(hostId, providerId, label) => setHookDestination({ hostId, providerId, label })}
         maintenance={() => <details className="provider-skill-versions">
           <summary className="small-button" data-provider-skill-versions><ThemeObjectSkillIcon size={14} /> Skill versions <ThemeNavigationDownIcon size={12} /></summary>
           <div className="provider-skill-versions__detail" data-provider-skill-help>
             In the original Session, open <strong>Skills</strong> in the message composer to see each file’s declared version and source. Update the Skill through its original source.
           </div>
         </details>} />
+      {scope === 'providers' && hookDestination ? <ProviderHooksPane key={JSON.stringify([hookDestination.hostId, hookDestination.providerId])}
+        active={active} destination={hookDestination} host={hookHost} workspaces={config.workspaces}
+        onBack={() => setHookDestination(undefined)} onExecutor={openHostExecutors} /> : null}
       <div className="settings-pane-toolbar settings-agent-toolbar" data-settings-field="executors" hidden={scope === 'providers'}>
         {scopeControl}
         <span className="settings-resource-count">{scope === 'templates' ? `${executors.length} global templates` : null}</span>
       </div>
-      <div className="settings-agent-body" data-settings-field="host-executors" hidden={scope !== 'host'}><HostExecutorSettings config={config} active={active && scope === 'host'} requestedHostId={hostDestination?.hostId ?? (navigationRequest?.field === 'host-executors' ? navigationRequest.hostId : undefined)} requestedProviderId={hostDestination?.providerId} hookNavigation={hookNavigation} /></div>
+      <div className="settings-agent-body" data-settings-field="host-executors" hidden={scope !== 'host'}><HostExecutorSettings config={config} active={active && scope === 'host'}
+        destination={hostDestination} onHooks={(hostId, providerId, executorId) => {
+          setProviderDestination({ hostId })
+          setHookDestination({ hostId, providerId, executorId, label: providerCatalog.find(provider => provider.id === providerId)?.label ?? agentProviderLabel(providerId) })
+          setScope('providers')
+        }} /></div>
       <div hidden={scope !== 'templates'} className="settings-agent-templates">
         <ProviderCatalogPane entries={providerCatalog} read={catalogRead} executorCounts={executorCounts}
           selectedId={providerId} onSelect={selectProvider} onRefresh={() => void refreshProviders()} />
@@ -443,7 +462,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
                 <label><span>Arguments <small>shell-style quoting</small></span><ComposerTextarea aria-label="Executor arguments" value={draft.args} onValueChange={(value) => update(id, { args: value })} placeholder={'--model "model name" --effort high'} rows={2} /></label>
                 <ExecutorLaunchPreview command={draft.command} args={draft.args} />
                 <p className="settings-group-note">Used for new sessions. Running agents keep their current configuration. Save changes before checking availability.</p>
-                {Object.hasOwn(resource.expected, id) ? <div><button type="button" className="small-button" onClick={() => { setHookNavigation({ executorId: id }); setScope('host') }}>Manage Hook on Host</button></div> : null}
+                {Object.hasOwn(resource.expected, id) ? <div><button type="button" className="small-button" onClick={() => { setHostDestination({ executorId: id }); setScope('host') }}>View Host Executor</button></div> : null}
                 <div className="agent-avatar-settings__row">
                   <span className="agent-avatar-settings__name"><strong>Appearance</strong><small>Recognize this executor across your workspace</small></span>
                   <label>Tint<input type="color" aria-label={`${draft.label} avatar tint`} value={avatar?.tint ?? '#8ab4f8'} onChange={(event) => updateAvatar(id, { ...avatar, tint: event.target.value })} /></label>

@@ -23,8 +23,8 @@ export const agentsSettingsModule = {
   description: 'Providers, CLI availability and launch configurations.',
   subpages: [{ field: 'providers', title: 'Providers' }, { field: 'executors', title: 'Executors' }],
   searchTargets: [
-    { id: 'providers', title: 'Provider capabilities', keywords: 'compare history streaming permissions resume adapter', kind: 'info' },
-    { id: 'host-executors', title: 'Host Executors and managed Hooks', keywords: 'check hook update configuration workspace scope', kind: 'info' }
+    { id: 'providers', title: 'Provider capabilities and Hooks', keywords: 'compare history streaming permissions resume adapter check update hook configuration workspace scope', kind: 'info' },
+    { id: 'host-executors', title: 'Host Executors', keywords: 'register command configuration availability', kind: 'info' }
   ],
   icon: ThemeObjectAgentIcon,
   keywords: `${AGENT_PROVIDER_KEYWORDS} agent agents cli clis executor launch startup command args env installed provider`,

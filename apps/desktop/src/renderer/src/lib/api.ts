@@ -985,11 +985,14 @@ const mockApi: AgentMuxDesktopApi = {
     forHost: async hostId => {
       if (!mockConfig.hosts.some(host => host.id === hostId)) throw new Error('The selected Preview Host is unavailable.')
       return { routeHostId: hostId, runtimeId: null, observedAt: Date.now(), catalog: await mockProviderCatalog() }
-    }
+    },
+    listHookScopes: async () => { throw new Error('Hook scopes are available on the executing Host.') },
+    inspectHookScope: async () => { throw new Error('Hook checks are available on the executing Host.') },
+    updateHookScope: async () => { throw new Error('Hook updates are available on the executing Host.') },
+    inspectHookActivation: async () => { throw new Error('Native Hook inspection is available on the executing Host.') }
   },
   executors: {
     unregister: async () => { throw new Error('Registration removal requires its original executing Host. The registration and existing work are retained.') },
-    hooks: async () => { throw new Error('Managed Hook maintenance requires the original executing Host.') },
     discover: async (hostId) => ({ routeHostId: hostId, runtimeId: `preview:${hostId}`, executors: Object.entries(mockConfig.executors).map(([executorId, config]) => ({
       executorId, label: config.label, providerId: config.providerId, command: config.providerId,
       source: 'provider-default' as const, configRevision: `preview:${hostId}:${executorId}`, availability: 'unknown' as const

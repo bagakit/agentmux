@@ -608,7 +608,11 @@ const api: AgentMuxPreloadApi = {
   providers: {
     list: (options?: { observation: true }) => options === undefined
       ? ipcRenderer.invoke('providers:list') : ipcRenderer.invoke('providers:list', options),
-    forHost: hostId => ipcRenderer.invoke('providers:forHost', hostId)
+    forHost: hostId => ipcRenderer.invoke('providers:forHost', hostId),
+    listHookScopes: async input => unwrapSessionInputOperationResult(await ipcRenderer.invoke('providers:listHookScopes', input)),
+    inspectHookScope: async input => unwrapSessionInputOperationResult(await ipcRenderer.invoke('providers:inspectHookScope', input)),
+    updateHookScope: async input => unwrapSessionInputOperationResult(await ipcRenderer.invoke('providers:updateHookScope', input)),
+    inspectHookActivation: async input => unwrapSessionInputOperationResult(await ipcRenderer.invoke('providers:inspectHookActivation', input))
   },
   executors: {
     detect: (executorId: AgentExecutorId, hostId: string) => ipcRenderer.invoke('executors:detect', executorId, hostId),
@@ -616,8 +620,7 @@ const api: AgentMuxPreloadApi = {
       ? ipcRenderer.invoke('executors:discover', hostId)
       : ipcRenderer.invoke('executors:discover', hostId, options.refresh),
     register: (hostId: string, input: import('@agentmux/core').AgentMuxHostExecutorConfigureInput) => ipcRenderer.invoke('executors:register', hostId, input),
-    unregister: async input => unwrapSessionInputOperationResult(await ipcRenderer.invoke('executors:unregister', input)),
-    hooks: async (input, update) => unwrapSessionInputOperationResult(await ipcRenderer.invoke('executors:hooks', input, update))
+    unregister: async input => unwrapSessionInputOperationResult(await ipcRenderer.invoke('executors:unregister', input))
   },
   control: {
     onRequest(listener) {

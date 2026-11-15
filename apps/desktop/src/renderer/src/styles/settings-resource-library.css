@@ -167,11 +167,7 @@
 .settings-host-executor-actions input { width: 14px; height: 14px; margin: 0; }
 
 .settings-hook-problem-dot { flex: none; width: 6px; height: 6px; margin-inline-start: var(--sp-2); border-radius: 50%; background: var(--red); }
-.settings-executor-hooks { display: grid; gap: var(--sp-3); padding-block: var(--sp-3); border-block-start: 1px solid var(--line-soft); }
-.settings-executor-hooks > .settings-host-executor-actions { justify-content: flex-start; padding: 0; gap: var(--sp-2); }
-.settings-executor-hooks > .settings-host-executor-actions > strong { margin-inline-end: auto; }
-.settings-executor-hooks__result { display: grid; gap: var(--sp-1); color: var(--text-2); font-size: var(--fs-meta); overflow-wrap: anywhere; }
-.settings-executor-hooks__result p { margin: 0; }
+.settings-host-executor-actions.settings-executor-hook-link { justify-content: flex-start; padding: 0; }
 
 .settings-resource-library--horizontal .settings-resource-library__viewport { display: flex; align-items: center; gap: var(--sp-2); }
 .settings-resource-library--horizontal .settings-resource-library__list { flex: 1; min-width: 0; scrollbar-width: thin; }

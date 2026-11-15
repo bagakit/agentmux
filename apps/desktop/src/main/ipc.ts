@@ -1903,6 +1903,14 @@ export async function registerIpc(args: {
     return await args.runtime.providerCatalog(options)
   })
   handleWithEvent('providers:forHost', (_event, hostId: string) => callUserRpc('agent.provider.ls', { hostId }))
+  handleWithEvent('providers:listHookScopes', (_event, input: import('@agentmux/core').AgentMuxRpcParams<'settings.providers.hooks-list'>) =>
+    sessionInputOperationResult(() => callUserRpc('settings.providers.hooks-list', input)))
+  handleWithEvent('providers:inspectHookScope', (_event, input: import('@agentmux/core').AgentMuxRpcParams<'settings.providers.hooks-inspect'>) =>
+    sessionInputOperationResult(() => callUserRpc('settings.providers.hooks-inspect', input)))
+  handleWithEvent('providers:updateHookScope', (_event, input: import('@agentmux/core').AgentMuxRpcParams<'settings.providers.hooks-update'>) =>
+    sessionInputOperationResult(() => callUserRpc('settings.providers.hooks-update', input)))
+  handleWithEvent('providers:inspectHookActivation', (_event, input: import('@agentmux/core').AgentMuxRpcParams<'settings.executors.hooks-inspect'>) =>
+    sessionInputOperationResult(() => callUserRpc('settings.executors.hooks-inspect', input)))
   handle('executors:detect', async (executorId: AgentExecutorId, hostId: string) => await refreshSettingsExecutor(executorId, hostId, configOwner, runtimeIncidents ?? args.runtime))
   handle('executors:discover', async (hostId: string, refresh = true) => {
     if (typeof hostId !== 'string' || !hostId.length) throw new TypeError('An exact execution Host ID is required.')
@@ -1911,8 +1919,6 @@ export async function registerIpc(args: {
   })
   handleWithEvent('executors:unregister', (_event, input: import('@agentmux/core').AgentMuxRpcParams<'settings.executors.unregister'>) =>
     sessionInputOperationResult(() => callUserRpc('settings.executors.unregister', input)))
-  handleWithEvent('executors:hooks', (_event, input: import('@agentmux/core').AgentMuxRpcParams<'settings.executors.hooks-inspect'>, update: unknown) =>
-    sessionInputOperationResult(() => callUserRpc(update === true ? 'settings.executors.hooks-update' : 'settings.executors.hooks-inspect', input)))
   handle('executors:register', async (hostId: string, input: import('@agentmux/core').AgentMuxHostExecutorConfigureInput) => {
     if (typeof hostId !== 'string' || !hostId.length) throw new TypeError('An exact execution Host ID is required.')
     return await args.runtime.configureExecutor(hostId, input)

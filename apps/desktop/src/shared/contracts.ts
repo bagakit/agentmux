@@ -2086,13 +2086,16 @@ export type AgentMuxDesktopApi = {
     list(options: { observation: true }): Promise<ProviderCatalogObservation>
     list(): Promise<AgentCatalogEntry[]>
     forHost(hostId: string): Promise<AgentMuxRpcResult<'agent.provider.ls'>>
+    listHookScopes(input: AgentMuxRpcParams<'settings.providers.hooks-list'>): Promise<AgentMuxRpcResult<'settings.providers.hooks-list'>>
+    inspectHookScope(input: AgentMuxRpcParams<'settings.providers.hooks-inspect'>): Promise<AgentMuxRpcResult<'settings.providers.hooks-inspect'>>
+    updateHookScope(input: AgentMuxRpcParams<'settings.providers.hooks-update'>): Promise<AgentMuxRpcResult<'settings.providers.hooks-update'>>
+    inspectHookActivation(input: AgentMuxRpcParams<'settings.executors.hooks-inspect'>): Promise<AgentMuxRpcResult<'settings.executors.hooks-inspect'>>
   }
   executors: {
     detect(executorId: AgentExecutorId, hostId: string): Promise<ExecutorDetection>
     discover(hostId: string, options?: { refresh?: boolean }): Promise<HostExecutorInventory>
     register(hostId: string, input: import('@agentmux/core').AgentMuxHostExecutorConfigureInput): Promise<HostExecutorConfiguration>
     unregister(input: import('@agentmux/core').AgentMuxRpcParams<'settings.executors.unregister'>): Promise<import('@agentmux/core').AgentMuxRpcResult<'settings.executors.unregister'>>
-    hooks(input: AgentMuxRpcParams<'settings.executors.hooks-inspect'>, update: boolean): Promise<AgentMuxRpcResult<'settings.executors.hooks-inspect'>>
   }
   control: {
     onRequest(listener: (
