@@ -94,7 +94,7 @@ export async function qualify(directory, materialsOnly = false, preview = false,
       css: { postcss: { plugins: [{ postcssPlugin: 'bind-proof-css', async OnceExit(tree) {
         const sources = new Map(); tree.walk(node => { if (node.source?.input?.file) sources.set(node.source.input.file, node.source.input.css) })
         for (const [filename, source] of sources) await bind(filename, source)
-      } }] } }, build: { target: 'esnext', outDir: path.join(directory, 'compiled'), emptyOutDir: true, minify: false, rollupOptions: { onwarn(warning, report) { if (warning.code !== 'MODULE_LEVEL_DIRECTIVE') report(warning) } } } })
+      } }] } }, build: { target: 'esnext', outDir: path.join(directory, 'compiled'), emptyOutDir: true, minify: options.minify ?? false, rollupOptions: { onwarn(warning, report) { if (warning.code !== 'MODULE_LEVEL_DIRECTIVE') report(warning) } } } })
     const viteRequire = createRequire(viteFile)
     const { build: bundle, transform } = await import(pathToFileURL(viteRequire.resolve('esbuild')).href)
     // Keep Core's native ESM boundaries. Bundling its cyclic RPC/Provider graph can

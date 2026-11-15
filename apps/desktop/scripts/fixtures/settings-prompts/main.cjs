@@ -19,7 +19,9 @@ app.whenReady().then(async () => {
     const store = new ConfigStore(path.join(privateRoot, 'userData', 'config.json'))
     const initial = !fs.existsSync(store.filePath)
     const editorNavigation = mode === 'settings-editor-navigation'
-    assert.equal(initial, ['settings-editor-navigation', 'control', 'materials', 'preview', 'liquid-settings', 'liquid-prompts', 'keyboard-shortcuts', 'message-tool-settings', 'settings-inputs-workflows', 'settings-editor-density', 'appearance-preview', 'appearance-preview-glyphs', 'session-continuity-settings', 'session-continuity-delivery'].includes(mode), 'Restart must reuse durable config, never seed again')
+    const markdownInput = mode === 'settings-markdown-input'
+    const editorDensity = mode === 'settings-editor-density' || markdownInput
+    assert.equal(initial, editorDensity || ['settings-editor-navigation', 'control', 'materials', 'preview', 'liquid-settings', 'liquid-prompts', 'keyboard-shortcuts', 'message-tool-settings', 'settings-inputs-workflows', 'appearance-preview', 'appearance-preview-glyphs', 'session-continuity-settings', 'session-continuity-delivery'].includes(mode), 'Restart must reuse durable config, never seed again')
     let current = initial ? await store.save({ ...structuredClone(DEFAULT_CONFIG), ...(editorNavigation ? {
       toolkit: { tools: [{ id: 'audit-tool', revision: 'audit-tool-revision', name: 'Audit tool', script: 'console.log(0)', workspacePath: privateRoot,
         enabled: false, args: [], actions: [], icon: 'terminal', statusBar: 'icon' }] }
@@ -27,7 +29,7 @@ app.whenReady().then(async () => {
       { id: 'explain', label: 'Explain simply', keyword: 'eli5', body: '用大白话说说这次做了什么，指出关键变化、验证结果与还没确认的部分。', states: ['done', 'error'] },
       { id: 'review', label: 'Review changes', keyword: 'review', providerId: 'codex', states: ['waiting', 'done'], body: Array.from({ length: 10 }, (_, i) => `${i + 1}. Review the current changes for correctness, scope, readability and recovery. Explain concrete risks, cite the relevant code and propose the smallest complete fix.`).join('\n') },
       { id: 'continue', label: 'Continue improving without losing the original work surface', keyword: 'continue', providerId: 'proof-provider', states: ['working'], body: 'Continue improving the current task. Preserve the original workspace, healthy sessions and unsent drafts; report what changed and verify the result.' },
-      ...(mode === 'settings-editor-density' ? Array.from({ length: 14 }, (_, index) => ({
+      ...(editorDensity ? Array.from({ length: 14 }, (_, index) => ({
         id: `sample-${index}`, label: `Working note ${index + 1}`, keyword: `working-note-${index + 1}`,
         body: 'Record the decision and its evidence.'
       })) : [])
@@ -129,8 +131,9 @@ app.whenReady().then(async () => {
     await until('window.promptsProbe?.ready && !!document.querySelector(".window-status-bar [aria-label=Settings]")')
     await read('window.promptsProbe.beginSurface()')
     await click(q('.window-status-bar [aria-label="Settings"]')); await section('prompts')
-    if (editorNavigation || mode === 'settings-inputs-workflows' || mode === 'settings-editor-density') {
-      await require(`../${mode}/scenario.cjs`).run({ win, read, q, button, until, settle, click, type, scene, capture, result, originalProxy })
+    if (editorNavigation || mode === 'settings-inputs-workflows' || editorDensity) {
+      const scenario = markdownInput ? '../settings-editor-density/scenario-markdown.cjs' : `../${mode}/scenario.cjs`
+      await require(scenario).run({ win, read, q, button, until, settle, click, type, scene, capture, result, originalProxy })
       if (profileStore) result.profiles = await profileStore.read()
       result.disk = JSON.parse(fs.readFileSync(store.filePath, 'utf8'))
       assert.deepEqual(result.disk, owner.current)
