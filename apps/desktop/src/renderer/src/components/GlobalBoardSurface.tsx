@@ -16,6 +16,7 @@ import { executionFocusSessionId } from '../lib/agent-focus'
 import { DEMAND_STATUS_IDS, DEMAND_STATUS_LABELS, demandColumns, projectDemands, type DemandProjection, type DemandStatus } from '../lib/global-demand-board'
 import { requestPmoTeamsTopicFloatingOpen } from '../lib/pmo-teams-topic-floating'
 import { DIRECT_GOAL_TITLE, directGoalRequest, retryDirectGoal, saveDirectGoal, startDirectGoal, subscribeDirectGoalRequest } from '../lib/goals-direct-pmo'
+import { GoalActiveTickets } from './GoalActiveTickets'
 import { GoalDetail } from './GoalDetail'
 import { GoalBoardWorkflow, GoalRow, GoalsCollectionBody } from './GoalsCollection'
 import { EMPTY_GOAL_ACKNOWLEDGEMENT, type GoalAcknowledgementFeedback } from './GoalAlignment'
@@ -44,7 +45,9 @@ export function GlobalBoardSurface() {
   const requestDemandPmoTask = useAppStore((state) => state.requestDemandPmoTask)
   const openDemandPmo = useAppStore((state) => state.openDemandPmo)
   const [query, setQuery] = useState('')
-  const [view, setView] = useState(() => resolveGoalsPreferences(config?.goals).defaultView)
+  const [view, setView] = useState<'list' | 'board' | 'tickets'>(() => resolveGoalsPreferences(config?.goals).defaultView)
+  const tickets = view === 'tickets'
+  const goalQuery = tickets ? '' : query
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [stageFilter, setStageFilter] = useState<GoalStage | null>(null)
   const [statusFilter, setStatusFilter] = useState<DemandStatus | 'all'>('all')
@@ -75,13 +78,13 @@ export function GlobalBoardSurface() {
   const selectedDemand = projectedDemands.find((demand) => demand.id === selectedDemandId) ?? null
   const projects = useMemo(() => projectWorkspaces((config?.workspaces ?? []).filter((workspace) => workspace.id !== SCRATCH_WORKSPACE_ID)), [config?.workspaces])
   const scopedDemands = useMemo(() => {
-    const normalized = query.trim().toLocaleLowerCase()
+    const normalized = goalQuery.trim().toLocaleLowerCase()
     return projectedDemands.filter(demand => {
       const matchesQuery = !normalized || `${demand.title} ${demand.description} ${demand.projectName ?? ''}`.toLocaleLowerCase().includes(normalized)
       const matchesRouting = routingFilter === 'all' || (routingFilter === 'unassigned' ? !demand.projectId || !demand.assigneeSessionIds?.length : Boolean(demand.projectId && demand.assigneeSessionIds?.length))
       return matchesQuery && (statusFilter === 'all' || demand.status === statusFilter) && (projectFilter === 'all' || demand.projectId === projectFilter) && matchesRouting && (assigneeFilter === 'all' || demand.assigneeSessionIds?.some(ref => demandAgentReferenceKey(ref) === assigneeFilter))
     })
-  }, [assigneeFilter, projectFilter, query, routingFilter, statusFilter, projectedDemands])
+  }, [assigneeFilter, projectFilter, goalQuery, routingFilter, statusFilter, projectedDemands])
   const acknowledgementFailed = (id: string) => Boolean(acknowledgementFeedback[id]?.failure)
   const filteredDemands = useMemo(() => showHistory || statusFilter !== 'all' ? scopedDemands : scopedDemands.filter(demand =>
     demand.status !== 'cancelled' && (demand.status !== 'done' || !isCurrentGroundingAccepted(demand.alignment, demand.grounding))),
@@ -106,19 +109,18 @@ export function GlobalBoardSurface() {
     shownStages.current = stageIndex(workflowGroups)
     if (moved.size) setChangedStages(moved)
   }, [workflowGroups])
-  const collectionView = view
-  const queue = selectedDemandId ? goalQueuePosition(groups, selectedDemandId) : null
+  const queue = selectedDemandId && !tickets ? goalQueuePosition(groups, selectedDemandId) : null
   function moveFocus(from: HTMLElement, step: 1 | -1) {
     const id = adjacentGoalId(groups, from.dataset.demandId ?? null, step)
     if (id) surfaceRef.current?.querySelector<HTMLElement>(`[data-demand-id="${CSS.escape(id)}"]`)?.focus()
   }
   const visibleStatuses = statusFilter === 'all' ? DEMAND_STATUS_IDS : [statusFilter]
   const appliedFilters = [
-    ...(stageFilter ? [{ label: GOAL_GROUP_LABELS[stageFilter], clear: () => setStageFilter(null) }] : []),
-    ...(statusFilter !== 'all' ? [{ label: DEMAND_STATUS_LABELS[statusFilter], clear: () => setStatusFilter('all') }] : []),
+    ...(!tickets && stageFilter ? [{ label: GOAL_GROUP_LABELS[stageFilter], clear: () => setStageFilter(null) }] : []),
+    ...(!tickets && statusFilter !== 'all' ? [{ label: DEMAND_STATUS_LABELS[statusFilter], clear: () => setStatusFilter('all') }] : []),
     ...(projectFilter !== 'all' ? [{ label: projects.find((project) => project.id === projectFilter)?.name ?? 'Project unavailable', clear: () => setProjectFilter('all') }] : []),
-    ...(routingFilter !== 'all' ? [{ label: routingFilter === 'unassigned' ? 'Needs routing' : 'Assigned', clear: () => setRoutingFilter('all') }] : []),
-    ...(assigneeFilter !== 'all' ? [{ label: assigneeName(assigneeFilter), clear: () => setAssigneeFilter('all') }] : [])
+    ...(!tickets && routingFilter !== 'all' ? [{ label: routingFilter === 'unassigned' ? 'Needs routing' : 'Assigned', clear: () => setRoutingFilter('all') }] : []),
+    ...(!tickets && assigneeFilter !== 'all' ? [{ label: assigneeName(assigneeFilter), clear: () => setAssigneeFilter('all') }] : [])
   ]
   function clearConditions() { setStageFilter(null); setQuery(''); setStatusFilter('all'); setProjectFilter('all'); setRoutingFilter('all'); setAssigneeFilter('all'); setFiltersOpen(false); queueMicrotask(() => searchRef.current?.focus()) }
 
@@ -164,7 +166,7 @@ export function GlobalBoardSurface() {
       <header className="goals-page-header">
         {projectedDemands.length && !selectedDemandId ? <img className="goals-page-header__art" src={goalsHeaderArtUrl} alt="" aria-hidden="true" width={139} height={96} draggable={false} onError={event => { event.currentTarget.hidden = true }} /> : null}
         <div className="goals-page-header__title"><span className="goals-page-header__mark" aria-hidden="true"><ThemeObjectGoalIcon size={16} /></span><h1>Goals</h1></div>
-        {projectedDemands.length && view !== 'board' ? <p className="goals-page-header__summary" aria-live="polite">{summaryGroups.map(group => <span key={group.stage} data-goal-summary-stage={group.stage}>{goalGroupSummary(group.stage, group.goals.length)}</span>)}{!groups.some(group => group.stage === 'you') ? <span data-goal-summary-clear>Nothing waits on you</span> : null}</p> : null}
+        {projectedDemands.length && view === 'list' ? <p className="goals-page-header__summary" aria-live="polite">{summaryGroups.map(group => <span key={group.stage} data-goal-summary-stage={group.stage}>{goalGroupSummary(group.stage, group.goals.length)}</span>)}{!groups.some(group => group.stage === 'you') ? <span data-goal-summary-clear>Nothing waits on you</span> : null}</p> : null}
         <div className="goals-page-header__actions">
           <GlobalGoalPatrolControl />
           <button ref={newGoalRef} type="button" className={selectedDemandId ? 'small-button' : 'primary-button'} aria-label="New Goal" aria-describedby="goals-create-effect" data-new-goal disabled={Boolean(creation)} onClick={createGoal}><ThemeActionCreateIcon size={14} />New Goal<span id="goals-create-effect" className="goals-visually-hidden">Draft + discussion</span></button>
@@ -172,28 +174,32 @@ export function GlobalBoardSurface() {
         <GoalsCommonActions contextCompact={Boolean(selectedDemandId)} onReturnToCommon={() => setSelectedDemand(null)} />
       </header>
       <header className="goals-toolbar">
-        <SearchInput className="goals-search" ref={searchRef} aria-label="Search goals" placeholder="Search goals…"
+        <SearchInput className="goals-search" ref={searchRef} aria-label={tickets ? 'Search tickets' : 'Search goals'} placeholder={tickets ? 'Search tickets…' : 'Search goals…'}
           clearLabel="Clear search" value={query} onValueChange={setQuery} />
-        <button ref={filterRef} type="button" className={`small-button${appliedFilters.length ? ' small-button--active' : ''}`} aria-label="Goal filters" aria-expanded={filtersOpen} aria-controls="goals-filters" onClick={() => setFiltersOpen(!filtersOpen)}><ThemeActionAdjustIcon size={13} /><span>Filter</span>{appliedFilters.length ? <span>{appliedFilters.length}</span> : null}</button>
-        {!selectedDemandId ? <SurfaceModeSwitch value={view} onChange={setView} active ariaLabel="Goal view" options={[{ value: 'list', label: <ThemeObjectListIcon size={14} />, ariaLabel: 'List view' }, { value: 'board', label: <ThemeLayoutColumns3Icon size={14} />, ariaLabel: 'Board view' }]} /> : null}
+        <button ref={filterRef} type="button" className={`small-button${appliedFilters.length ? ' small-button--active' : ''}`} aria-label={tickets ? 'Ticket filters' : 'Goal filters'} aria-expanded={filtersOpen} aria-controls="goals-filters" onClick={() => setFiltersOpen(!filtersOpen)}><ThemeActionAdjustIcon size={13} /><span>Filter</span>{appliedFilters.length ? <span>{appliedFilters.length}</span> : null}</button>
+        {!selectedDemandId ? <SurfaceModeSwitch value={view} onChange={setView} active ariaLabel="Goal view" options={[{ value: 'list', label: <ThemeObjectListIcon size={14} />, ariaLabel: 'List view' }, { value: 'board', label: <ThemeLayoutColumns3Icon size={14} />, ariaLabel: 'Board view' }, { value: 'tickets', label: 'Tickets' }]} /> : null}
       </header>
-      {filtersOpen ? <div id="goals-filters" className="goals-filters" aria-label="Filter goals">
-        <label>Work status<SelectionField label="Filter work status" value={statusFilter} onValueChange={value => setStatusFilter(value as typeof statusFilter)} options={[{ value: 'all', label: showHistory ? 'All statuses' : 'All active' }, ...DEMAND_STATUS_IDS.map(value => ({ value, label: DEMAND_STATUS_LABELS[value] }))]} /></label>
+      {filtersOpen ? <div id="goals-filters" className="goals-filters" aria-label={tickets ? 'Filter tickets' : 'Filter goals'}>
+        {!tickets ? <label>Work status<SelectionField label="Filter work status" value={statusFilter} onValueChange={value => setStatusFilter(value as typeof statusFilter)} options={[{ value: 'all', label: showHistory ? 'All statuses' : 'All active' }, ...DEMAND_STATUS_IDS.map(value => ({ value, label: DEMAND_STATUS_LABELS[value] }))]} /></label> : null}
         <label>Project<SelectionField label="Filter project" value={projectFilter} onValueChange={setProjectFilter} options={[{ value: 'all', label: 'All projects' }, ...(projectFilter !== 'all' && !projects.some(project => project.id === projectFilter) ? [{ value: projectFilter, label: 'Project unavailable', disabled: true }] : []), ...projects.map(project => ({ value: project.id, label: project.name }))]} /></label>
-        <label>Routing<SelectionField label="Filter routing" value={routingFilter} onValueChange={value => setRoutingFilter(value as typeof routingFilter)} options={[{ value: 'all', label: 'All routing' }, { value: 'unassigned', label: 'Needs routing' }, { value: 'assigned', label: 'Assigned' }]} /></label>
-        <label>Assignee<SelectionField label="Filter assignee" value={assigneeFilter} onValueChange={setAssigneeFilter} options={[{ value: 'all', label: 'Any assignee' }, ...assigneeIds.map(value => ({ value, label: assigneeName(value) }))]} /></label>
+        {!tickets ? <label>Routing<SelectionField label="Filter routing" value={routingFilter} onValueChange={value => setRoutingFilter(value as typeof routingFilter)} options={[{ value: 'all', label: 'All routing' }, { value: 'unassigned', label: 'Needs routing' }, { value: 'assigned', label: 'Assigned' }]} /></label> : null}
+        {!tickets ? <label>Assignee<SelectionField label="Filter assignee" value={assigneeFilter} onValueChange={setAssigneeFilter} options={[{ value: 'all', label: 'Any assignee' }, ...assigneeIds.map(value => ({ value, label: assigneeName(value) }))]} /></label> : null}
       </div> : null}
       {appliedFilters.length ? <div className="goals-filter-chips">{appliedFilters.map((filter) => <button type="button" key={filter.label} onClick={filter.clear} aria-label={`Clear ${filter.label} filter`}>{filter.label}<ThemeActionClearIcon size={11} /></button>)}<button type="button" className="goals-filter-chips__clear" data-goal-clear-all onClick={clearConditions}>Clear all</button></div> : null}
       {creation ? <div className="goals-service goals-creation" role="status" data-direct-goal-id={creation.id}>
         {creation.pending ? creation.phase === 'save' ? 'Saving goal…' : 'Goal saved. Preparing its discussion…' : creation.phase === 'save' ? creation.notSaved ? 'The goal is not saved. Save this same goal to continue.' : 'Goal save is unconfirmed. Read this same goal before continuing.' : 'Goal saved. Its discussion is unconfirmed; the original workface is kept.'}
         {creation.error ? <><span>{creation.error}</span><Button type="button" variant="primary" onClick={() => void (creation.notSaved ? saveDirectGoal() : retryDirectGoal())}>{creation.phase === 'save' ? creation.notSaved ? 'Save this goal' : 'Read goal again' : 'Retry goal discussion'}</Button></> : null}
       </div> : null}
-      {collectionView === 'board' && projectedDemands.length > 0 ? <GoalBoardWorkflow groups={workflowGroups} selected={stageFilter}
-        onSelect={value => setStageFilter(current => current === value ? null : value)} /> : null}
-      <div className={`goals-collection goals-collection--${collectionView}`} role="region" aria-label="Global goals">
-        <GoalsCollectionBody view={collectionView} groups={groups} columns={columns} visibleStatuses={visibleStatuses} hasGoals={projectedDemands.length > 0} hasMatches={visibleDemands.length > 0} query={query} filterCount={appliedFilters.length} hideStart={creation?.phase === 'save' && !creation.notSaved} onClearConditions={clearConditions} onShowFinished={() => setShowHistory(true)} renderRow={renderRow} />
-      </div>
-      <footer className="goals-footer"><span>{visibleDemands.length} of {projectedDemands.length} goals{collectionView === 'board' ? ' · Work status' : ''}</span><button type="button" aria-pressed={showHistory} onClick={() => setShowHistory(!showHistory)}>{showHistory ? 'Hide finished' : 'Show finished'}</button></footer>
+      {tickets ? <GoalActiveTickets demands={demands} project={projectFilter} query={query} onOpen={trigger => { selectedRowRef.current = trigger }}
+        onShowGoals={() => { setView('list'); queueMicrotask(() => surfaceRef.current?.querySelector<HTMLButtonElement>('[data-surface-mode="list"]')?.focus()) }}
+        onClearConditions={clearConditions} /> : <>
+        {view === 'board' && projectedDemands.length > 0 ? <GoalBoardWorkflow groups={workflowGroups} selected={stageFilter}
+          onSelect={value => setStageFilter(current => current === value ? null : value)} /> : null}
+        <div className={`goals-collection goals-collection--${view}`} role="region" aria-label="Global goals">
+          <GoalsCollectionBody view={view} groups={groups} columns={columns} visibleStatuses={visibleStatuses} hasGoals={projectedDemands.length > 0} hasMatches={visibleDemands.length > 0} query={query} filterCount={appliedFilters.length} hideStart={creation?.phase === 'save' && !creation.notSaved} onClearConditions={clearConditions} onShowFinished={() => setShowHistory(true)} renderRow={renderRow} />
+        </div>
+        <footer className="goals-footer"><span>{visibleDemands.length} of {projectedDemands.length} goals{view === 'board' ? ' · Work status' : ''}</span><button type="button" aria-pressed={showHistory} onClick={() => setShowHistory(!showHistory)}>{showHistory ? 'Hide finished' : 'Show finished'}</button></footer>
+      </>}
     </div>
     {selectedDemand ? <GoalDetail
       key={selectedDemand.id}

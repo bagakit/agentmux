@@ -1724,6 +1724,10 @@ export type HostMessageTrustSnapshot = {
 
 export type ThemeFileExportResult = { status: 'saved'; path: string } | { status: 'cancelled' } | { status: 'download-requested' }
 
+export const DESKTOP_GOAL_DELEGATION_METHODS = ['goal.delegations', 'goal.collect', 'goal.patrol', 'goal.patrol.continue',
+  'goal.plan.review', 'goal.plan', 'goal.plan.assignment', 'goal.plan.active'] as const
+export type DesktopGoalDelegationMethod = typeof DESKTOP_GOAL_DELEGATION_METHODS[number]
+
 export type AgentMuxDesktopApi = {
   capsules: import('@agentmux/core/capsule').CapsulePort
   /** Trusted App chrome addresses an exact Browser's original Capsule, never a page-supplied Host. */
@@ -1965,7 +1969,7 @@ export type AgentMuxDesktopApi = {
   }
   demands: {
     inputEpoch(input: AgentMuxRpcParams<'goal.input.epoch'>): Promise<AgentMuxRpcResult<'goal.input.epoch'>>
-    delegation<M extends 'goal.delegations' | 'goal.collect' | 'goal.patrol' | 'goal.patrol.continue' | 'goal.plan.review' | 'goal.plan' | 'goal.plan.assignment'>(method: M, input: import('@agentmux/core/goal-delegation').GoalDelegationParamsMap[M]): Promise<import('@agentmux/core/goal-delegation').GoalDelegationResult>
+    delegation<M extends DesktopGoalDelegationMethod>(method: M, input: import('@agentmux/core/goal-delegation').GoalDelegationParamsMap[M]): Promise<import('@agentmux/core/goal-delegation').GoalDelegationResultMap[M]>
     onObservationIssue(listener: (message: string) => void): () => void
     onChanged(listener: (goalIds: string[], snapshot: boolean) => void): () => void
     inspectDispatch(reference: import('./goal-dispatch').GoalDispatchReference): Promise<import('@agentmux/demand').DemandDispatch | null>

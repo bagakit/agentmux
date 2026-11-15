@@ -80,6 +80,7 @@ import type { WorkbenchWindows } from './workbench-windows.js'
 import { WORKBENCH_WINDOW_RESPONSE } from '../shared/workbench-windows.js'
 import { goalRoleInputNote } from '@agentmux/host/goal-role-input'
 import { registerConnectorIpc } from './connector-ipc.js'
+import { DESKTOP_GOAL_DELEGATION_METHODS, type DesktopGoalDelegationMethod } from '../shared/contracts.js'
 import { parseGoalDelegationParams, parseGoalDelegationResult, type GoalDelegationParamsMap } from '@agentmux/core/goal-delegation'
 import { observeTerminalBrightness, terminalPaletteChanged, terminalPaletteForAppearance } from './terminal-theme.js'
 import { exportThemeFile, writeThemeFile } from './theme-file-export.js'
@@ -1522,8 +1523,8 @@ export async function registerIpc(args: {
   handleWithEvent('goals:execute', async (event, request: AgentMuxControlRequest) => {
     return executeGoal(parseAgentMuxControlRequest(request))
   })
-  handleWithEvent('demands:delegation', async (event, method: 'goal.delegations' | 'goal.collect' | 'goal.patrol' | 'goal.patrol.continue' | 'goal.plan.review' | 'goal.plan' | 'goal.plan.assignment', input: GoalDelegationParamsMap['goal.delegations' | 'goal.collect' | 'goal.patrol' | 'goal.patrol.continue' | 'goal.plan.review' | 'goal.plan' | 'goal.plan.assignment']) => {
-    if (!['goal.delegations', 'goal.collect', 'goal.patrol', 'goal.patrol.continue', 'goal.plan.review', 'goal.plan', 'goal.plan.assignment'].includes(method)) throw new AgentMuxError('This action requires its exact public Goal operation.', 'INVALID_CONTROL_REQUEST')
+  handleWithEvent('demands:delegation', async (event, method: DesktopGoalDelegationMethod, input: GoalDelegationParamsMap[DesktopGoalDelegationMethod]) => {
+    if (!DESKTOP_GOAL_DELEGATION_METHODS.includes(method)) throw new AgentMuxError('This action requires its exact public Goal operation.', 'INVALID_CONTROL_REQUEST')
     const request = parseGoalDelegationParams(method, input)
     if (method === 'goal.plan.assignment' && !('expectedOwner' in request && request.expectedOwner))
       throw new AgentMuxError('Open the original Goal to confirm its Runtime and namespace before changing a node.', 'INVALID_CONTROL_REQUEST')

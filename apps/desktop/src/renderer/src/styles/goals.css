@@ -111,6 +111,11 @@
 .goals-filter-chips button { min-height: 24px; background: var(--surface-2); font-size: var(--fs-meta); }
 .goals-collection { min-height: 0; flex: 1; overflow: auto; scroll-padding-bottom: var(--sp-7); }
 .goals-collection--list { width: 100%; }
+.goals-toolbar .surface-mode-switch [data-surface-mode='tickets'] { flex: none; width: auto; min-width: max-content; padding-inline: var(--sp-4); white-space: nowrap; }
+.goals-row.goals-ticket-row { grid-template-columns: minmax(0, 1fr) auto; align-items: center; width: 100%; border: 0; color: var(--text-3); background: transparent; font: inherit; text-align: left; }
+.goals-row.goals-ticket-row:hover { background: var(--surface-1); }
+.goals-ticket-row + .goals-ticket-row::before { left: var(--sp-5); }
+.goals-service.goals-ticket-service { margin: 0 var(--sp-6); }
 .goals-list { display: grid; gap: var(--sp-5); padding: var(--sp-5) var(--sp-5) var(--sp-7); }
 .goals-group { min-width: 0; }
 .goals-group__heading { display: flex; align-items: center; gap: var(--sp-3); margin: 0 0 var(--sp-2); padding: 0 var(--sp-5); color: var(--text-2); font: 600 var(--fs-meta)/24px var(--font-sans); letter-spacing: .02em; }
@@ -139,10 +144,10 @@
 .goals-row > .goal-stage-mark[data-goal-stage='you'] + .goals-row__copy > .goals-row__next { color: var(--text); font-weight: 550; }
 @container (min-width: 641px) {
   .goals-surface:not(.goals-surface--detail-open) .goals-list .goals-row { padding-block: var(--sp-3); }
-  .goals-surface:not(.goals-surface--detail-open) .goals-list .goals-row__copy { grid-template-columns: minmax(0, 1fr) minmax(170px, 34%); column-gap: var(--sp-7); }
-  .goals-surface:not(.goals-surface--detail-open) .goals-list .goals-row__copy > strong { grid-column: 1; grid-row: 1; }
-  .goals-surface:not(.goals-surface--detail-open) .goals-list .goals-row__footer { grid-column: 1 / -1; grid-row: 2; }
-  .goals-surface:not(.goals-surface--detail-open) .goals-list .goals-row__next { grid-column: 2; grid-row: 1; }
+  .goals-surface:not(.goals-surface--detail-open) .goals-collection--list .goals-row__copy { grid-template-columns: minmax(0, 1fr) minmax(170px, 34%); column-gap: var(--sp-7); }
+  .goals-surface:not(.goals-surface--detail-open) .goals-collection--list .goals-row__copy > strong { grid-column: 1; grid-row: 1; }
+  .goals-surface:not(.goals-surface--detail-open) .goals-collection--list .goals-row__footer { grid-column: 1 / -1; grid-row: 2; }
+  .goals-surface:not(.goals-surface--detail-open) .goals-collection--list .goals-row__next { grid-column: 2; grid-row: 1; }
 }
 .goals-row > :is(.goals-row__selected, .goals-row__open) { color: var(--text-3); margin-top: var(--sp-2); }
 .goals-row--compact { gap: var(--sp-3); padding: var(--sp-4); min-height: 0; }
