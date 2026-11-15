@@ -3,6 +3,7 @@ import { inputChunkBytes, retainedInputFits } from '../recoverable-input-frame.j
 import type { AgentMuxClient } from '../client.js'
 import type { AgentMuxClientEvent, AgentMuxRunDataEvent, AgentMuxRunInputOperation, AgentMuxNativeService, AgentMuxRunState } from '../types.js'
 import { AgentMuxError } from '../errors.js'
+import { observeRead } from '../observation-read.js'
 import { EXECUTION_FRAME_LIMIT } from './channel.js'
 
 export type AgentExecutionBridgeSide = 'frontend' | 'executor'
@@ -22,11 +23,26 @@ export interface AgentExecutionBridgePosition {
   outputByte: number
   inputByte: number
 }
+type PendingInput = { source: Side; sourceStartByte: number; sourceEndByte: number; digest: string; operation: Omit<AgentMuxRunInputOperation, 'data'>; chunk?: { offset: number; bytes: number } }
 export interface AgentExecutionBridgeState {
   bindingId: string
   frontend: AgentExecutionBridgePosition
   executor: AgentExecutionBridgePosition
-  pending?: { source: Side; sourceStartByte: number; sourceEndByte: number; digest: string; operation: Omit<AgentMuxRunInputOperation, 'data'>; chunk?: { offset: number; bytes: number } }
+  pending?: PendingInput
+  /** An independently outstanding Input from the opposite helper. */
+  concurrentPending?: PendingInput
+}
+
+const sides = ['frontend', 'executor'] as const
+const opposite = (side: Side): Side => side === 'frontend' ? 'executor' : 'frontend'
+const pendingFor = (state: AgentExecutionBridgeState, side: Side): PendingInput | undefined =>
+  state.pending?.source === side ? state.pending : state.concurrentPending?.source === side ? state.concurrentPending : undefined
+
+function setPending(state: AgentExecutionBridgeState, side: Side, value?: PendingInput): AgentExecutionBridgeState {
+  const other = pendingFor(state, opposite(side))
+  const { pending: _pending, concurrentPending: _concurrentPending, ...positions } = state
+  const primary = other ?? value
+  return { ...positions, ...(primary ? { pending: primary } : {}), ...(other && value ? { concurrentPending: value } : {}) }
 }
 
 const chunkOperationId = (binding: string, side: Side, endByte: number, offset: number): string =>
@@ -48,13 +64,15 @@ export class ExecutionProtocolFrameError extends AgentMuxError {
  */
 export class AgentExecutionBridge {
   private state: AgentExecutionBridgeState
-  private tail: Promise<void> = Promise.resolve()
+  private readonly tails: Record<Side, Promise<void>> = { frontend: Promise.resolve(), executor: Promise.resolve() }
+  private persistence = Promise.resolve()
+  private readonly reader = new AbortController()
   private releases: (() => void)[] = []
   private stopped = false
   private firstFailure: Error | undefined
   private firstFailureSide: Side | undefined
   private readonly connections: Record<Side, AgentExecutionBridgeConnection>
-  private queuedBytes = 0
+  private readonly queuedBytes: Record<Side, number> = { frontend: 0, executor: 0 }
   private readonly partial: Record<Side, { parts: Buffer[]; bytes: number }> = { frontend: { parts: [], bytes: 0 }, executor: { parts: [], bytes: 0 } }
   private readonly readThrough: Record<Side, number>
   constructor(private readonly options: {
@@ -70,16 +88,25 @@ export class AgentExecutionBridge {
     onConnection?(side: Side, connection: AgentExecutionBridgeConnection): void
   }) {
     this.state = structuredClone(options.state)
-    this.connections = Object.fromEntries((['frontend', 'executor'] as const).map(side => [side, { runId: this.state[side].runId, process: 'unobserved', reader: 'unobserved' }])) as Record<Side, AgentExecutionBridgeConnection>
+    this.connections = Object.fromEntries(sides.map(side => [side, { runId: this.state[side].runId, process: 'unobserved', reader: 'unobserved' }])) as Record<Side, AgentExecutionBridgeConnection>
     this.readThrough = { frontend: this.state.frontend.outputByte, executor: this.state.executor.outputByte }
     if (this.state.frontend.runId === this.state.executor.runId && options.ports.frontend === options.ports.executor)
       throw new AgentMuxError('Execution bridge requires distinct original helper Runs.', 'INVALID_EXECUTION_BINDING')
   }
   private publishConnection(side: Side): void { this.options.onConnection?.(side, structuredClone(this.connections[side])) }
   snapshot(): AgentExecutionBridgeState { return structuredClone(this.state) }
-  private async save(next: AgentExecutionBridgeState): Promise<void> {
-    await this.options.persist(structuredClone(next))
-    this.state = next
+  private save(update: (state: AgentExecutionBridgeState) => AgentExecutionBridgeState): Promise<void> {
+    // Only the journal writer is shared. Each commit merges into the latest
+    // acknowledged state without holding this writer across either runtime I/O.
+    const commit = this.persistence.then(async () => {
+      this.assertOpen()
+      const next = update(this.state)
+      try { await this.options.persist(structuredClone(next)) }
+      catch (error) { throw this.fail(error) }
+      this.state = next
+    })
+    this.persistence = commit.catch(() => {})
+    return commit
   }
   get failureSide(): Side | undefined { return this.firstFailureSide }
   private fail(error: unknown, side?: Side): Error {
@@ -87,6 +114,7 @@ export class AgentExecutionBridge {
     this.firstFailure = error instanceof Error ? error : new Error(String(error))
     this.firstFailureSide = side
     this.stopped = true
+    this.reader.abort(this.firstFailure)
     for (const release of this.releases.splice(0)) { try { release() } catch { /* Cleanup cannot replace the original reader failure. */ } }
     this.options.onError(this.firstFailure)
     return this.firstFailure
@@ -101,14 +129,14 @@ export class AgentExecutionBridge {
   }
   private enqueue(side: Side, data: { startByte: number; endByte: number; dataBytes: Uint8Array }): void {
     if (this.stopped) return
-    this.queuedBytes += data.dataBytes.byteLength
-    if (this.queuedBytes > EXECUTION_FRAME_LIMIT * 2) {
+    this.queuedBytes[side] += data.dataBytes.byteLength
+    if (this.queuedBytes[side] > EXECUTION_FRAME_LIMIT * 2) {
       this.fail(new AgentMuxError('The execution reader is backpressured; retain its original byte cursor and reattach.', 'EXECUTION_READER_BACKPRESSURED'), side)
       return
     }
     const frozen = { ...data, dataBytes: Buffer.from(data.dataBytes) }
-    this.tail = this.tail.then(async () => { if (!this.stopped) await this.consume(side, frozen) })
-      .catch(error => { this.fail(error) }).finally(() => { this.queuedBytes -= frozen.dataBytes.byteLength })
+    this.tails[side] = this.tails[side].then(async () => { if (!this.stopped) await this.consume(side, frozen) })
+      .catch(error => { this.fail(error) }).finally(() => { this.queuedBytes[side] -= frozen.dataBytes.byteLength })
   }
   async start(): Promise<void> {
     try { await this.open() }
@@ -122,8 +150,10 @@ export class AgentExecutionBridge {
     this.assertOpen()
     // Retry only the Runtime's ORIGINAL recoverable Input claim. No new native
     // operation or process may be synthesized from an uncertain acknowledgement.
-    if (this.state.pending) await this.deliverPending()
-    for (const side of ['frontend', 'executor'] as const) {
+    for (const side of sides) if (pendingFor(this.state, side)) {
+      this.tails[side] = this.deliverPending(side).catch(error => { this.fail(error) })
+    }
+    for (const side of sides) {
       this.assertOpen()
       const port = this.options.ports[side], position = this.state[side]
       const identity = await this.endpoint(side, () => port.runtimeIdentity())
@@ -194,7 +224,7 @@ export class AgentExecutionBridge {
       opening = false
       for (const data of waiting) this.enqueue(side, data)
     }
-    await this.tail
+    await Promise.all(Object.values(this.tails))
     this.assertOpen()
   }
   private async consume(side: Side, data: Pick<AgentMuxRunDataEvent, 'startByte' | 'endByte' | 'dataBytes'>): Promise<void> {
@@ -222,28 +252,29 @@ export class AgentExecutionBridge {
       const sourceEndByte = data.startByte + newline + 1
       const forward = side === 'frontend' ? ['request', 'closed', 'agent-rpc-context', 'agent-rpc-response', 'agent-rpc-closed'].includes(String(frame.type)) : ['response', 'agent-rpc-request', 'agent-rpc-close'].includes(String(frame.type))
       if (forward) {
-        const target = side === 'frontend' ? 'executor' : 'frontend'
+        const target = opposite(side)
         const operationId = chunkOperationId(this.state.bindingId, side, sourceEndByte, 0)
         const operation = { ownerInstanceId: this.state[target].ownerInstanceId, operationId,
           expectedByte: this.state[target].inputByte }
         const original = Buffer.concat([line, Buffer.from('\n')])
         const digest = createHash('sha256').update(original).digest('hex')
-        await this.save({ ...this.state, pending: { source: side, sourceStartByte: this.state[side].outputByte, sourceEndByte, digest, operation, chunk: { offset: 0, bytes: inputChunkBytes(this.state[target].runId, operation) } } })
-        await this.deliverPending(original)
+        await this.save(state => setPending(state, side, { source: side, sourceStartByte: state[side].outputByte, sourceEndByte, digest, operation, chunk: { offset: 0, bytes: inputChunkBytes(state[target].runId, operation) } }))
+        await this.deliverPending(side, original)
       } else {
-        try { await this.options.onFrame(side, frame) }
+        try { await observeRead(this.options.onFrame(side, frame), this.reader.signal) }
         catch (error) {
+          if (this.stopped) return
           try { this.options.onObservationError?.(side, error) } catch { /* Diagnostic publication is independent of the transport. */ }
         }
-        await this.save({ ...this.state, [side]: { ...this.state[side], outputByte: sourceEndByte } })
+        await this.save(state => ({ ...state, [side]: { ...state[side], outputByte: sourceEndByte } }))
       }
       from = newline + 1
     }
     this.readThrough[side] = data.endByte
   }
-  private async deliverPending(data?: Uint8Array): Promise<void> {
-    const pending = this.state.pending!
-    const target = pending.source === 'frontend' ? 'executor' : 'frontend'
+  private async deliverPending(side: Side, data?: Uint8Array): Promise<void> {
+    const pending = pendingFor(this.state, side)!
+    const target = opposite(side)
     const position = this.state[target]
     const identity = await this.endpoint(target, () => this.options.ports[target].runtimeIdentity())
     if (identity.instanceId !== pending.operation.ownerInstanceId) throw this.fail(new AgentMuxError(
@@ -253,7 +284,7 @@ export class AgentExecutionBridge {
       const originalSourceOwner = await this.endpoint(pending.source, () => this.options.ports[pending.source].runtimeIdentity())
       if (originalSourceOwner.instanceId !== source.ownerInstanceId) throw this.fail(new AgentMuxError(
         'The original execution source Runtime changed; its Input was not resent.', 'EXECUTION_RUNTIME_CHANGED'), pending.source)
-      const replay = await this.endpoint(pending.source, () => this.options.ports[pending.source].readRunReplay({ runId: source.runId }, pending.sourceStartByte, 'raw'))
+      const replay = await this.endpoint(side, () => observeRead(this.options.ports[side].readRunReplay({ runId: source.runId }, pending.sourceStartByte, 'raw'), this.reader.signal))
       const observedSourceOwner = await this.endpoint(pending.source, () => this.options.ports[pending.source].runtimeIdentity())
       if (observedSourceOwner.instanceId !== source.ownerInstanceId) throw this.fail(new AgentMuxError(
         'The execution source Runtime changed during replay; its Input was not resent.', 'EXECUTION_RUNTIME_CHANGED'), pending.source)
@@ -273,8 +304,8 @@ export class AgentExecutionBridge {
     }
     if (data.byteLength !== pending.sourceEndByte - pending.sourceStartByte || createHash('sha256').update(data).digest('hex') !== pending.digest)
       throw new AgentMuxError('The original pending Input bytes do not match their retained claim.', 'EXECUTION_INPUT_SOURCE_MISMATCH')
-    while (this.state.pending) {
-      const current = this.state.pending
+    for (let current = pendingFor(this.state, side); current; current = pendingFor(this.state, side)) {
+      this.assertOpen()
       const offset = current.chunk?.offset ?? 0
       const limit = current.chunk?.bytes ?? data.byteLength
       if (!Number.isSafeInteger(offset) || offset < 0 || offset >= data.byteLength || !Number.isSafeInteger(limit) || limit < 1 ||
@@ -283,33 +314,34 @@ export class AgentExecutionBridge {
       // A previously persisted whole-frame operation has no chunk layout. Its ID
       // and bytes remain exact: an oversized unknown claim is never repartitioned.
       const part = data.subarray(offset, Math.min(data.byteLength, offset + limit))
-      const receipt = await this.endpoint(target, () => this.options.ports[target].writeTerminal({ runId: position.runId }, { ...current.operation, data: part }))
-      const end = current.operation.expectedByte + part.byteLength
-      if (receipt.runId !== position.runId || receipt.appliedByteRange?.startByte !== current.operation.expectedByte ||
+      const operation = current.operation
+      const receipt = await this.endpoint(target, () => observeRead(this.options.ports[target].writeTerminal({ runId: position.runId }, { ...operation, data: part }), this.reader.signal))
+      const end = operation.expectedByte + part.byteLength
+      if (receipt.runId !== position.runId || receipt.appliedByteRange?.startByte !== operation.expectedByte ||
         receipt.appliedByteRange.endByte !== end || receipt.acceptedThroughByte === null || receipt.acceptedThroughByte < end)
         throw this.fail(new AgentMuxError('Execution Input receipt does not identify the original byte range.', 'EXECUTION_INPUT_RECEIPT_MISMATCH'), target)
       const through = offset + part.byteLength
       if (through < data.byteLength) {
-        const operation = { ...current.operation, expectedByte: end,
+        const nextOperation = { ...operation, expectedByte: end,
           operationId: chunkOperationId(this.state.bindingId, current.source, current.sourceEndByte, through) }
         // Keep the source cursor at the start of the entire JSON frame. A new
         // reader must reassemble and verify that frame before resuming this chunk.
-        await this.save({ ...this.state, [target]: { ...this.state[target], inputByte: end },
-          pending: { ...current, operation, chunk: { offset: through, bytes: limit } } })
+        const next = { ...current, operation: nextOperation, chunk: { offset: through, bytes: limit } }
+        await this.save(state => setPending({ ...state, [target]: { ...state[target], inputByte: end } }, side, next))
       } else {
-        const next = { ...this.state, [target]: { ...this.state[target], inputByte: end },
-          [current.source]: { ...this.state[current.source], outputByte: current.sourceEndByte } }
-        delete next.pending
-        await this.save(next)
-        this.readThrough[current.source] = Math.max(this.readThrough[current.source], current.sourceEndByte)
+        const sourceEndByte = current.sourceEndByte
+        await this.save(state => setPending({ ...state, [target]: { ...state[target], inputByte: end },
+          [side]: { ...state[side], outputByte: sourceEndByte } }, side))
+        this.readThrough[side] = Math.max(this.readThrough[side], sourceEndByte)
       }
     }
   }
   async close(): Promise<void> {
     this.stopped = true
+    this.reader.abort(new AgentMuxError('The original execution reader was closed. Its helpers and admitted operations remain retained.', 'EXECUTION_READER_UNAVAILABLE'))
     for (const release of this.releases.splice(0)) release()
-    await this.tail
-    await Promise.allSettled((['frontend', 'executor'] as const).map(side =>
+    await Promise.all(Object.values(this.tails))
+    await Promise.allSettled(sides.map(side =>
       this.options.ports[side].releaseRunAttachment({ runId: this.state[side].runId })))
   }
 }

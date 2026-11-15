@@ -104,7 +104,8 @@ export class AgentExecutionCoordinator {
   private readonly connectionFailures = new Map<string, Diagnostic & { protocolFrame?: Pick<ExecutionProtocolFrameError, 'side' | 'frame'> }>()
   private readonly helperConnections = new Map<string, Map<AgentExecutionBridgeSide, AgentExecutionBridgeConnection>>()
   private disposed = false
-  private constructor(private readonly db: DatabaseSync, private readonly lease: FileHandle, private readonly options: AgentExecutionCoordinatorOptions) {}
+  private constructor(private readonly db: DatabaseSync, private readonly lease: FileHandle,
+    private readonly options: AgentExecutionCoordinatorOptions, private journalVersion: number) {}
   static async open(directory: string, options: AgentExecutionCoordinatorOptions): Promise<AgentExecutionCoordinator> {
     if (!isAbsolute(directory)) throw fail('The exact execution coordinator state root must be absolute.')
     const created = await mkdir(directory, { recursive: true, mode: 0o700 })
@@ -127,10 +128,11 @@ export class AgentExecutionCoordinator {
         PRAGMA application_id=1095587906; PRAGMA user_version=1;
         COMMIT;
       `)
-      if (Number(db.prepare('PRAGMA application_id').get()!.application_id) !== 1095587906 || Number(db.prepare('PRAGMA user_version').get()!.user_version) !== 1)
+      const version = Number(db.prepare('PRAGMA user_version').get()!.user_version)
+      if (Number(db.prepare('PRAGMA application_id').get()!.application_id) !== 1095587906 || (version !== 1 && version !== 2))
         throw fail('The original execution binding store is unconfirmed; it was not replaced.', 'EXECUTION_STORAGE_UNCONFIRMED')
       const fd = await open(directory, 'r'); try { await fd.sync() } finally { await fd.close() }
-      return new AgentExecutionCoordinator(db, lease, options)
+      return new AgentExecutionCoordinator(db, lease, options, version)
     } catch (error) { db.close(); await lease.close(); throw error }
   }
   private read(bindingId: string): RecordValue | null {
@@ -152,6 +154,12 @@ export class AgentExecutionCoordinator {
     const cancellation = this.read(record.input.bindingId)?.cancellation
     if (cancellation && record.cancellation && !isDeepStrictEqual(cancellation, record.cancellation)) throw fail('The original binding has another cancellation control.', 'AGENT_CREATION_CANCELLATION_CONFLICT')
     if (cancellation) record.cancellation = cancellation
+    // Fence older readers before a row can contain a second Input claim.
+    // Existing rows and original claim IDs are left intact.
+    if (record.bridge?.concurrentPending && this.journalVersion === 1) {
+      this.db.exec('PRAGMA user_version=2')
+      this.journalVersion = 2
+    }
     const { input, ...state } = record
     const encoded = JSON.stringify(state)
     const changed = this.db.prepare('UPDATE bindings SET record=? WHERE id=?').run(encoded, input.bindingId)
@@ -325,7 +333,10 @@ export class AgentExecutionCoordinator {
     Object.assign(record, latest)
     this.helperConnections.set(id, new Map())
     const bridge = new AgentExecutionBridge({ state: record.bridge!, ports: { frontend: hosts.agent, executor: hosts.resource },
-      persist: async state => { record.bridge = state; this.save(record) },
+      persist: async state => {
+        const next = { ...record, bridge: state }
+        this.save(next); Object.assign(record, next)
+      },
       onFrame: async (side, frame) => {
         if (!frame || typeof frame !== 'object' || Array.isArray(frame)) return
         const value = frame as { type?: string; scope?: unknown; code?: string; stage?: unknown; state?: unknown; generation?: unknown; operation?: OperationKey }
