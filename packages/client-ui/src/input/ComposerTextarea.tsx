@@ -1,5 +1,5 @@
-import { Textarea } from './Textarea.js'
-import { useState, type ComponentPropsWithRef } from 'react'
+import { Textarea, type TextareaProps } from './Textarea.js'
+import { useState } from 'react'
 import {
   composerCompositionHandlers,
   composerRenderValue,
@@ -9,7 +9,7 @@ import {
 /** Controlled native multiline input; the DOM owns its in-progress composition preview.
  * Callers retain the draft, keyboard actions, validation and native ref. */
 export type ComposerTextareaProps = Omit<
-  ComponentPropsWithRef<'textarea'>,
+  TextareaProps,
   'value' | 'onChange' | 'onCompositionStart' | 'onCompositionUpdate' | 'onCompositionEnd'
 > & {
   value: string

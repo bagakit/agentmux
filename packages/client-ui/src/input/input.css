@@ -175,3 +175,43 @@ input.ui-switch[type="checkbox"]:disabled { cursor: default; opacity: .6; }
   .ui-search-field:focus-within { border-color: Highlight; }
   .ui-search-field > .ui-search-clear:focus-visible { outline-color: Highlight; }
 }
+
+/* Keep the native field's border, background, caret, selection and scrollbars. Only the
+   decorative glyphs use the mirrored text, clipped to the original client viewport. */
+.ui-textarea-source {
+  display: grid;
+  position: relative;
+  min-width: 0;
+}
+.ui-textarea-source > textarea,
+.ui-textarea-source__preview {
+  font-kerning: none;
+  font-variant-ligatures: none;
+}
+.ui-textarea-source__preview {
+  position: absolute;
+  box-sizing: border-box;
+  display: block;
+  visibility: hidden;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+  color: var(--text);
+}
+.ui-textarea-source__preview[data-trailing-line]::after { content: '\200B'; }
+
+@media (forced-colors: none) {
+  .ui-textarea-source > textarea[data-ui-markdown-painted] {
+    color: transparent;
+    text-shadow: none;
+    caret-color: var(--text);
+  }
+  .ui-textarea-source > textarea[data-ui-markdown-painted]::selection { color: transparent; }
+  .ui-textarea-source > textarea[data-ui-markdown-painted] + .ui-textarea-source__preview { visibility: visible; }
+
+  [data-markdown-token="heading"] { color: var(--green); }
+  [data-markdown-token="list-marker"], [data-markdown-token="quote-marker"] { color: var(--text-2); }
+  [data-markdown-token="emphasis"] { color: var(--purple); }
+  [data-markdown-token="link"] { color: var(--blue); }
+  [data-markdown-token="code"], [data-markdown-token="math"] { color: var(--amber-text); }
+}
