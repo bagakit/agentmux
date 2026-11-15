@@ -14,7 +14,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { RuntimeEvent, SessionSnapshot } from '../src/shared/contracts'
 import { TerminalView } from '../src/renderer/src/components/TerminalView'
 import { yieldTerminalWork } from '@agentmux/client-ui/terminal/replay'
-import { terminalResourceOwnerCounts } from '../src/renderer/src/lib/terminal-resource-owners'
+import { terminalAddonOwnerCounts, terminalResourceOwnerCounts } from '../src/renderer/src/lib/terminal-resource-owners'
 import * as terminalResourceOwners from '../src/renderer/src/lib/terminal-resource-owners'
 import * as clientIncidents from '../src/renderer/src/lib/client-incident-recorder'
 import type { AgentMuxAgentSession, AgentMuxNativeService } from '@agentmux/core'
@@ -272,11 +272,13 @@ it('releases only the GPU when hidden, parses ordered hidden bytes, and refreshe
   const terminal = fixture.terminals[0]!
   const first = fixture.webgl[0]!
   expect(terminalResourceOwnerCounts()).toEqual({ terminalViews: 1, terminalAddons: 2, terminalListeners: 10 })
+  expect(terminalAddonOwnerCounts()).toEqual({ terminalBaseAddons: 1, terminalWebglAddons: 1, terminalWebglAddonViews: 1 })
 
   await render(false)
   expect(first.disposed).toHaveBeenCalledOnce()
   expect(first.contextLossDisposed).toHaveBeenCalledOnce()
   expect(terminalResourceOwnerCounts()).toEqual({ terminalViews: 1, terminalAddons: 1, terminalListeners: 10 })
+  expect(terminalAddonOwnerCounts()).toEqual({ terminalBaseAddons: 1, terminalWebglAddons: 0, terminalWebglAddonViews: 0 })
   // Split an ANSI parser sequence across separate hidden writes, in byte order.
   await hiddenOutput('\u001b[3', 7)
   await hiddenOutput('1mhidden\u001b[0m', 10)
@@ -296,11 +298,13 @@ it('releases only the GPU when hidden, parses ordered hidden bytes, and refreshe
   expect(terminal.refresh).toHaveBeenCalledWith(0, terminal.rows - 1)
   expect(terminal.buffer.active.getLine(0)?.translateToString(true)).toBe('before hidden')
   expect(terminalResourceOwnerCounts().terminalAddons).toBe(2)
+  expect(terminalAddonOwnerCounts().terminalWebglAddons).toBe(1)
   const second = fixture.webgl[1]!
   await act(async () => second.loseContext())
   expect(second.disposed).toHaveBeenCalledOnce()
   expect(second.contextLossDisposed).toHaveBeenCalledOnce()
   expect(terminalResourceOwnerCounts().terminalAddons).toBe(1)
+  expect(terminalAddonOwnerCounts().terminalWebglAddons).toBe(0)
   await render(false)
   expect(second.disposed).toHaveBeenCalledOnce()
   await act(async () => root!.unmount())
@@ -310,6 +314,7 @@ it('releases only the GPU when hidden, parses ordered hidden bytes, and refreshe
   expect(fixture.detach).toHaveBeenCalledExactlyOnceWith('attachment-retained')
   expect(fixture.unsubscribe).toHaveBeenCalledOnce()
   expect(terminalResourceOwnerCounts()).toEqual({ terminalViews: 0, terminalAddons: 0, terminalListeners: 0 })
+  expect(terminalAddonOwnerCounts()).toEqual({ terminalBaseAddons: 0, terminalWebglAddons: 0, terminalWebglAddonViews: 0 })
 })
 
 // The actual mounted consumer owns these operations. Only native-leaf work advances

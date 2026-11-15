@@ -121,7 +121,7 @@ const READY_LAUNCHER_OWNERS = {
   fileWatchers: 0,
   runtimeSubscriptions: 4,
   terminalViews: 1,
-  terminalAddons: 1,
+  terminalBaseAddons: 1,
   terminalListeners: 10,
   sessionAttachmentOwners: 1,
   sessionAttachmentLeases: 1
@@ -130,7 +130,7 @@ const READY_LAUNCHER_OWNERS = {
 /** One mounted Terminal view's worth of owners, added on navigation / new Tab, removed on release. */
 const TERMINAL_VIEW_BUNDLE = {
   terminalViews: 1,
-  terminalAddons: 1,
+  terminalBaseAddons: 1,
   terminalListeners: 10,
   sessionAttachmentOwners: 1,
   sessionAttachmentLeases: 1
@@ -149,12 +149,13 @@ const EXPECTED_SAMPLE_COUNT = 15
 type FailurePoint = 'none' | 'terminal-write' | 'cold-observation-failed' | 'loaded-observation-failed' |
   'editor-owner-missing-next-cycle' | 'release-observation-failed' | 'model-retained-after-close' |
   'stop-receipt-missing' | 'stop-receipt-wrong-run' | 'stop-projection-retained' | 'new-tab-unavailable' |
-  'browser-replacement-run'
+  'browser-replacement-run' | 'unreported-webgl' | 'duplicate-webgl' | 'webgl-with-no-view' |
+  'base-addon-leak' | 'released-tab-retains-base-addon' | 'browser-retains-webgl'
 
 function createWorld(options: { plan: readonly number[]; failAt: FailurePoint; rejectStopIds?: readonly string[]; webgl?: boolean }) {
   const owners: Record<string, number> = { ...READY_LAUNCHER_OWNERS }
   const visibleWebgl = options.webgl ? 1 : 0
-  owners.terminalAddons += visibleWebgl
+  let webglAddons = visibleWebgl
   const launcher: Record<WorkspaceKey, string | null> = { a: null, b: null, c: null }
   const running = new Map<string, Record<string, unknown>>()
   const terminalTabs = new Map<string, { workspace: WorkspaceKey; tabId: string }>()
@@ -212,25 +213,28 @@ function createWorld(options: { plan: readonly number[]; failAt: FailurePoint; r
   const handleClick = (rawSource: string) => {
     const source = plain(rawSource)
     const key = workspaceOf(rawSource)
-    // Claiming promotes the ready launcher into the measured Terminal. Owner-neutral by design:
-    // `claimLauncherTerminal` waits for the counts to equal its `expectedOwners`.
+    // Promotion retains the base owner bundle. The replacement View can use the DOM renderer.
     if (source.includes(`getAttribute("${DESKTOP_SESSION_ATTRIBUTE}") ===`)) {
       const id = launcher[key]
       if (!id) throw new Error('No ready Launcher to claim')
       terminalTabs.set(id, { workspace: key, tabId: `opaque-terminal-tab-${id}` })
       launcher[key] = null
+      webglAddons = 0
+      if (options.failAt === 'base-addon-leak' && key === 'a') owners.terminalBaseAddons += 1
       return
     }
     if (source.includes(openBrowserSelector)) {
       browserWarmSession = launcher[key]
       launcher[key] = null
-      adjust({ ...TERMINAL_VIEW_BUNDLE, terminalAddons: TERMINAL_VIEW_BUNDLE.terminalAddons + visibleWebgl }, -1)
+      adjust(TERMINAL_VIEW_BUNDLE, -1)
+      if (options.failAt !== 'browser-retains-webgl') webglAddons = 0
       owners.browserWebContents += 1
       return
     }
     if (source.includes('button[aria-label="New Tab"]')) {
       if (!newTabAvailable(key)) throw new Error('No visible New Tab control')
       newTabWorkspaces.push(key)
+      webglAddons = visibleWebgl
       if (browserWarmSession && !owners.browserWebContents) {
         launcher[key] = browserWarmSession
         if (options.failAt === 'browser-replacement-run') {
@@ -239,7 +243,7 @@ function createWorld(options: { plan: readonly number[]; failAt: FailurePoint; r
             control: { kind: 'terminal', hostId: WORKSPACES[key].hostId, runId: 'different-run', run: { runId: 'different-run' } } })
         }
         browserWarmSession = null
-        adjust({ ...TERMINAL_VIEW_BUNDLE, terminalAddons: TERMINAL_VIEW_BUNDLE.terminalAddons + visibleWebgl }, 1)
+        adjust(TERMINAL_VIEW_BUNDLE, 1)
         return
       }
       spawnLauncher(key)
@@ -250,7 +254,7 @@ function createWorld(options: { plan: readonly number[]; failAt: FailurePoint; r
       monaco[key] = false
       openFile = null
       adjust({ monacoEditors: 1, monacoModels: options.failAt === 'model-retained-after-close' ? 0 : 1, documents: 1, fileWatchers: 1 }, -1)
-      owners.terminalAddons += visibleWebgl
+      webglAddons = visibleWebgl
       return
     }
     if (source.includes('aria-label="Close New Tab"')) {
@@ -261,6 +265,7 @@ function createWorld(options: { plan: readonly number[]; failAt: FailurePoint; r
       visible = key
       spawnLauncher(key)
       adjust(TERMINAL_VIEW_BUNDLE, 1)
+      webglAddons = options.failAt === 'duplicate-webgl' ? 2 : visibleWebgl
       return
     }
     if (source.includes('data-tree-path')) {
@@ -269,7 +274,7 @@ function createWorld(options: { plan: readonly number[]; failAt: FailurePoint; r
       monaco[key] = true
       const editors = options.failAt === 'editor-owner-missing-next-cycle' && fileOpenCount > 1 ? 0 : 1
       adjust({ monacoEditors: editors, monacoModels: 1, documents: 1, fileWatchers: 1 }, 1)
-      owners.terminalAddons -= visibleWebgl
+      webglAddons = 0
     }
   }
 
@@ -293,8 +298,11 @@ function createWorld(options: { plan: readonly number[]; failAt: FailurePoint; r
         monacoModels: fileOpenCount === 0 ? null : owners.monacoModels,
         documents: owners.documents,
         runtimeSubscriptions: owners.runtimeSubscriptions,
-        terminalViews: owners.terminalViews,
-        terminalAddons: owners.terminalAddons,
+        terminalViews: options.failAt === 'webgl-with-no-view' ? 0 : owners.terminalViews,
+        terminalAddons: owners.terminalBaseAddons + webglAddons,
+        terminalBaseAddons: owners.terminalBaseAddons,
+        terminalWebglAddons: options.failAt === 'unreported-webgl' ? 0 : webglAddons,
+        terminalWebglAddonViews: options.failAt === 'unreported-webgl' ? 0 : Math.min(webglAddons, 1),
         terminalListeners: owners.terminalListeners
       }
     }
@@ -388,6 +396,7 @@ function createWorld(options: { plan: readonly number[]; failAt: FailurePoint; r
         if (tab && !(options.failAt === 'stop-projection-retained' && stopCount === 2)) terminalTabs.delete(control.runId)
         for (const key of ['a', 'b', 'c'] as const) if (launcher[key] === control.runId) launcher[key] = null
         if (existed) adjust(TERMINAL_VIEW_BUNDLE, -1)
+        if (options.failAt === 'released-tab-retains-base-addon' && stopCount === 1) owners.terminalBaseAddons += 1
         if (options.failAt === 'stop-receipt-missing') return undefined
         return { action: 'terminal-stop', phase: 'settled', outcome: 'applied',
           target: { hostId: 'local', run: { runId: control.runId } },
@@ -513,6 +522,28 @@ describe('desktop resource probe behaviour', () => {
     for (const phase of [...drive.report?.releaseCycles ?? [], drive.report?.phases.browserReleased]) {
       expect(phase.owners).toMatchObject({ monacoState: 'observed', monacoEditors: 0, monacoModels: 0, documents: 0, fileWatchers: 0 })
     }
+  })
+
+  it('records the real graphics transitions without waiving base addon and Browser ownership', async () => {
+    const drive = await driveProbe({ plan: ASCENDING_PLAN, webgl: true })
+    expect(drive.resolved).toBe(true)
+    expect(drive.report?.phases.idle.owners).toMatchObject({ terminalBaseAddons: 1, terminalWebglAddons: 1, terminalAddons: 2 })
+    expect(drive.report?.phases.terminal.owners).toMatchObject({ terminalBaseAddons: 3, terminalWebglAddons: 0, terminalAddons: 3 })
+    expect(drive.report?.phases.browser.owners).toMatchObject({ terminalBaseAddons: 2, terminalWebglAddons: 0, terminalAddons: 2 })
+    expect(drive.report?.phases.browserReleased.owners).toMatchObject({ terminalBaseAddons: 3, terminalWebglAddons: 1, terminalAddons: 4 })
+  })
+
+  it.each([
+    ['unreported-webgl', 'Invalid Terminal addon ownership'],
+    ['duplicate-webgl', 'Invalid Terminal addon ownership'],
+    ['webgl-with-no-view', 'Invalid Terminal addon ownership'],
+    ['base-addon-leak', 'reusable Terminal promotion in Workspace A'],
+    ['released-tab-retains-base-addon', 'terminal-baseline has unexpected base Terminal addon ownership'],
+    ['browser-retains-webgl', 'Browser WebContents and Launcher resource transition']
+  ] as const)('rejects unsupported Terminal ownership for %s', async (failAt, expected) => {
+    const drive = await driveProbe({ plan: ASCENDING_PLAN, failAt, webgl: true })
+    expect(drive.resolved).toBe(false)
+    expect(drive.report?.error).toContain(expected)
   })
 
   it.each([
