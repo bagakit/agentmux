@@ -910,20 +910,21 @@ export class DemandStore {
         const signer = this.requireTicketSigner(signing)
         assertIssuedGoalTicket(signer, id, demand.plan, node.id)
         const dependencies = freezeGoalTicketDependencies(signer, id, demand.plan, predecessors)
+        const task = goalTicketTask(node, id => alignment.criteria.find(criterion => criterion.id === id))
         if (claim) {
           signer.verify(claim.proof)
           const record = claim.proof.record
           if (record.kind !== 'claim' || record.scope.goalId !== id || record.ticketId !== node.id ||
               record.executor.id !== intent.workerAgentSessionId || record.executor.hostId !== delegationWorkerHostId(intent) ||
               participants && record.executor.runtimeId !== participants.workerRuntimeId || !isDeepStrictEqual(record.predecessors, dependencies) ||
-              !isDeepStrictEqual(record.task, goalTicketTask(node, alignment.criteria)))
+              !isDeepStrictEqual(record.task, task))
             this.rejectDelegation('The original signed Ticket claim differs from this exact execution')
         } else {
           dispatchProof = signer.issue({ kind: 'dispatch', scope: { ...signer.owner, goalId: id }, ticketId: node.id,
             operationId: intent.operationId, actor: { kind: 'agent', id: actorSessionId, hostId: intent.hostId,
               ...(participants ? { runtimeId: participants.ownerRuntimeId } : {}) },
             executor: { id: intent.workerAgentSessionId, hostId: delegationWorkerHostId(intent), ...(participants ? { runtimeId: participants.workerRuntimeId } : {}) },
-            task: goalTicketTask(node, alignment.criteria), predecessors: dependencies })
+            task, predecessors: dependencies })
         }
       }
       demand.delegations = [...(demand.delegations ?? []), { ...intent, ...(predecessors ? { predecessors } : {}), ...(claimRecord ? { claimOperationId: claimRecord.operationId } : {}), ...(dispatchProof ? { dispatchProof } : {}), preparedAt: Date.now(),
@@ -1034,7 +1035,7 @@ export class DemandStore {
           if (!basis || !owner || !isDeepStrictEqual(owner, signer.owner)) this.rejectDelegation('The original Ticket claim scope is unconfirmed')
           assertIssuedGoalTicket(signer, id, plan, node.id)
           claim = { ...basis, proof: signer.issue({ kind: 'claim', scope: { ...signer.owner, goalId: id }, ticketId: node.id, operationId, actor: author,
-            executor: { id: author.id, hostId: author.hostId, runtimeId: author.runtimeId }, task: goalTicketTask(node, demand.alignment!.criteria),
+            executor: { id: author.id, hostId: author.hostId, runtimeId: author.runtimeId }, task: goalTicketTask(node, id => demand.alignment!.criteria.find(criterion => criterion.id === id)),
             predecessors: freezeGoalTicketDependencies(signer, id, plan, basis.predecessors) }) }
           node.executor = { hostId: author.hostId, agentSessionId: author.id }
         } else if (action.kind === 'assign') {
@@ -1113,14 +1114,17 @@ export class DemandStore {
   }
 
   /** Confirm a saved intent can still be submitted for the first time. Original message reconciliation reads remain independent. */
-  async confirmDelegationSubmission(id: string, operationId: string): Promise<{
+  async confirmDelegationSubmission(id: string, original: Pick<DemandDelegation, 'operationId' | 'planNodeId'>): Promise<{
     workerRuntimeId?: string
     creationOrigin?: Demand['creationOrigin']
   }> {
-    const signing = await this.readTicketSigner()
+    const { operationId, planNodeId } = original
+    const signing = planNodeId ? await this.readTicketSigner() : undefined
     return enqueue(this.root, () => this.withWriterLock(async () => {
       const snapshot = await this.readSnapshot(), demand = findDemand(snapshot, id, this.storePath)
       const entry = this.findDelegation(demand, operationId)
+      if (entry.planNodeId !== planNodeId)
+        this.rejectDelegation('The prepared attempt no longer matches its original Ticket association')
       if (!entry.planNodeId) return {}
       const target = demand.plan && projectGoalPlan(demand.plan, demand.delegations ?? [], demand.alignment?.criteria ?? [])
         .nodes.find(item => item.node.id === entry.planNodeId)

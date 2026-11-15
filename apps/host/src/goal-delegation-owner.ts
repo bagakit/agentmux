@@ -201,7 +201,7 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
         if (!existing.message || reconcileRemote) {
           if (method === 'goal.delegation.bind') throw new AgentMuxError('The original message became unavailable before binding. Keep its original source and body.', 'CONTROL_UNAVAILABLE')
           if (!existing.message && authority.runId !== saved.ownerRunId) throw new AgentMuxError('The saved task owner Run changed before its first submission. Read the original delegation and explicitly continue its responsibility.', 'CONTROL_REQUEST_CONFLICT')
-          const submission = existing.message ? undefined : await this.demands.confirmDelegationSubmission(input.goalId, saved.operationId)
+          const submission = existing.message ? undefined : await this.demands.confirmDelegationSubmission(input.goalId, saved)
           const owner = submission && saved.planNodeId ? await this.planOwner?.().catch(() => undefined) : undefined
           const ticketLink = owner && submission && saved.planNodeId ? formatGoalTicketLink(input.goalId,
             hostGoalAddress({ id: input.goalId, ...(submission.creationOrigin ? { creationOrigin: submission.creationOrigin } : {}) }, owner), saved.planNodeId) : undefined

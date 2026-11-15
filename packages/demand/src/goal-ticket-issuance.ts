@@ -10,21 +10,28 @@ export function issueGoalTickets(issuer: GoalTicketSigner, goalId: string, opera
   const ids = new Map(Array.from(originalIds, id => [id, id]))
   const input = new Map(nodes.map(node => [node.id, node]))
   const proposalByNode = new Map(proposals.map(proposal => [proposal.nodeId, proposal]))
+  const byCriterion = new Map(criteria.map(criterion => [criterion.id, criterion]))
   const createdTickets: GoalTicketProof[] = [], verified = new Set<string>()
+  let previousProofs: Map<string, GoalTicketProof> | undefined
   const resolve = (id: string): string => {
     const known = ids.get(id)
     if (known) return known
     const node = input.get(id)!
     const predecessors = node.dependsOn.map(dependency => {
       if (previous && originalIds.has(dependency) && !verified.has(dependency)) {
-        assertIssuedGoalTicket(issuer, goalId, previous, dependency)
+        if (!previousProofs) {
+          previousProofs = new Map()
+          for (const revision of previous.history)
+            for (const proof of revision.createdTickets ?? []) previousProofs.set(proof.hash, proof)
+        }
+        verifyIssuedTicket(issuer, goalId, previousProofs.get(dependency))
         verified.add(dependency)
       }
       return resolve(dependency)
     }).sort()
     const proposal = proposalByNode.get(id)
     const proof = issuer.issue({ kind: 'issued', scope: { ...issuer.owner, goalId }, operationId, actor, draftId: id,
-      task: goalTicketTask(node, criteria), predecessors, ...(proposal ? { proposal: {
+      task: goalTicketTask(node, id => byCriterion.get(id)), predecessors, ...(proposal ? { proposal: {
         attemptId: proposal.delegationOperationId, replyId: proposal.replyMessageId,
         author: { kind: 'agent', id: proposal.author.agentSessionId, runtimeId: proposal.author.runtimeId },
       } } : {}) })
@@ -40,7 +47,14 @@ export function issueGoalTickets(issuer: GoalTicketSigner, goalId: string, opera
 }
 
 export function assertIssuedGoalTicket(issuer: GoalTicketSigner, goalId: string, plan: GoalPlan, nodeId: string): void {
-  const proof = plan.history.find(entry => entry.createdTickets?.some(proof => proof.hash === nodeId))?.createdTickets?.find(proof => proof.hash === nodeId)
+  for (const revision of plan.history) {
+    const proof = revision.createdTickets?.find(proof => proof.hash === nodeId)
+    if (proof) return verifyIssuedTicket(issuer, goalId, proof)
+  }
+  throw new Error('The original Ticket issuance is unavailable')
+}
+
+function verifyIssuedTicket(issuer: GoalTicketSigner, goalId: string, proof: GoalTicketProof | undefined): void {
   if (!proof || proof.record.kind !== 'issued' || proof.record.scope.goalId !== goalId) throw new Error('The original Ticket issuance is unavailable')
   issuer.verify(proof)
 }

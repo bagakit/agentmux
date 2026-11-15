@@ -257,10 +257,9 @@ export function parseGoalPlanRevisionInput(value: unknown): GoalPlanRevisionInpu
     alignmentRevision: positive(data.alignmentRevision, 'plan alignmentRevision'), nodes }
 }
 
-export function goalTicketTask(node: GoalPlanNodeInput, criteria: readonly DemandCriterion[]): GoalTicketTask {
-  const byId = new Map(criteria.map(criterion => [criterion.id, criterion]))
+export function goalTicketTask(node: GoalPlanNodeInput, criterionById: (id: string) => DemandCriterion | undefined): GoalTicketTask {
   return { outcome: node.outcome, check: node.check, criteria: [...node.criterionIds].sort().map(id => {
-    const criterion = byId.get(id)
+    const criterion = criterionById(id)
     if (!criterion) throw new Error('Goal Ticket needs the original version of every success criterion')
     return { id: criterion.id, text: criterion.text }
   }) }
@@ -303,11 +302,8 @@ export function staleGoalPlanCriteria(node: GoalPlanNodeInput, criteria: readonl
   })
 }
 
-/**
- * Why a node needs reconciliation: its criteria do not apply as written to the current Goal
- * (changed, removed or none at all), or its current attempt's original dispatch link is unconfirmed.
- */
-export const GOAL_PLAN_UNKNOWN_REASONS = ['criteria', 'dispatch-link', 'predecessors'] as const
+/** The current criteria or a required dispatch, predecessor or completion receipt is unconfirmed. */
+export const GOAL_PLAN_UNKNOWN_REASONS = ['criteria', 'dispatch-link', 'predecessors', 'completion-proof'] as const
 export type GoalPlanUnknownReason = (typeof GOAL_PLAN_UNKNOWN_REASONS)[number]
 export type GoalPlanNodeProjection = {
   node: GoalPlanNodeInput
@@ -385,6 +381,7 @@ export function projectGoalPlan(plan: GoalPlan, delegations: readonly DemandDele
       ...(staleCriteria.length || !node.criterionIds.length ? ['criteria' as const] : []),
       ...(current && !review && current.linkedAt === undefined ? ['dispatch-link' as const] : []),
       ...(current?.predecessors && !sameGoalPlanPredecessors(current.predecessors, predecessors) ? ['predecessors' as const] : []),
+      ...(review?.verdict === 'pass' && !review.completion ? ['completion-proof' as const] : []),
     ]
     const state: GoalPlanNodeState = node.cancelled ? 'cancelled' : unknown.length ? 'unknown'
       : review ? review.verdict === 'pass' ? 'done' : 'changes'
