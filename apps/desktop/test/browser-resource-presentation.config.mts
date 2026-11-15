@@ -9,6 +9,8 @@ const hostAliases = Object.entries(hostExports).map(([key, value]) => ({
   find: '@agentmux/host' + (key === '.' ? '' : key.slice(1)), replacement: resolve(root, 'apps/host/src', value.import.slice(7).replace(/\.js$/u, '.ts'))
 })).sort((a, b) => b.find.length - a.find.length)
 const mutations = {
+  'preference-fanout': ['apps/desktop/src/renderer/src/components/settings/BrowserSettingsPane.tsx',
+    '<BrowserManagementSettings active={active} />', '{BrowserManagementSettings({ active })}'],
   uploads: ['apps/desktop/src/renderer/src/components/settings/RetainedBrowserUploads.tsx', 'if (!active) return', '/* visibility guard removed */'],
   shared: ['apps/desktop/src/renderer/src/lib/browser-resource-view.ts',
     'const measured = [...counts.keys()].map(key => samples.get(key))',

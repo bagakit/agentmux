@@ -46,6 +46,8 @@ function execute(env) {
   })
 }
 const mutants = [
+  { id: 'preference-fanout', file: 'apps/desktop/src/renderer/src/components/settings/BrowserSettingsPane.tsx',
+    expected: 'keeps explicit comparison order and keyboard target while original process readings update' },
   { id: 'uploads', file: 'apps/desktop/src/renderer/src/components/settings/RetainedBrowserUploads.tsx',
     expected: 'scopes the real retained Settings observer to active visibility and preserves catalog pairing and automation draft' },
   { id: 'shared', file: 'apps/desktop/src/renderer/src/lib/browser-resource-view.ts',

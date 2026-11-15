@@ -20,6 +20,7 @@ import '../src/preload/index'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
+import * as draftHooks from '../src/renderer/src/components/settings/use-setting-draft'
 import { composerConfig } from './helpers/composer-dom-fixture'
 import { MobileRegionContent } from '../../mobile/src/navigation/MobileRegionContent'
 import { parseBrowserTargetsResult } from '../../../packages/core/src/control-browser-targets'
@@ -45,7 +46,22 @@ const listenerSet = () => wire.listeners.get('browser:targetsChanged') ?? new Se
 const settle = () => act(async () => { for (let i = 0; i < 8; i++) await Promise.resolve() })
 const section = () => container.querySelector<HTMLElement>('.external-browser-connections')!
 const text = () => container.textContent ?? ''
-const render = async (visible: boolean) => { await act(async () => root.render(<SettingsPanel visible={visible} initialSection="browser" onClose={() => {}} />)); await settle() }
+const management = () => container.querySelector<HTMLDetailsElement>('.settings-browser > details')!
+async function setManagementOpen(open: boolean) {
+  const details = management()
+  if (details.open === open) return
+  await act(async () => {
+    details.querySelector('summary')!.click()
+    await new Promise(resolve => setTimeout(resolve, 0))
+  })
+  expect(details.open).toBe(open)
+  await settle()
+}
+const render = async (visible: boolean, openManagement = visible) => {
+  await act(async () => root.render(<SettingsPanel visible={visible} initialSection="browser" onClose={() => {}} />))
+  if (visible && openManagement) await setManagementOpen(true)
+  await settle()
+}
 const change = async () => { await act(async () => { for (const listener of [...listenerSet()]) listener() }); await settle() }
 const click = async (name: string) => { const button = [...section().querySelectorAll('button')].find(button => button.textContent?.trim() === name)
   expect(button).toBeDefined(); await act(async () => button!.click()); await settle() }
@@ -148,7 +164,9 @@ it('scopes the real retained Settings observer to active visibility and preserve
   await render(false); expect(read).not.toHaveBeenCalled()
   expect(listenerSet().size).toBe(0); expect(uploadRead).not.toHaveBeenCalled()
   await change(); expect(read).not.toHaveBeenCalled(); expect(uploadRead).not.toHaveBeenCalled()
-  await render(true); expect(read).toHaveBeenCalledTimes(1)
+  await render(true, false); expect(read).not.toHaveBeenCalled()
+  expect(metricIds.size).toBe(0); expect(uploadRead).not.toHaveBeenCalled()
+  await setManagementOpen(true); expect(read).toHaveBeenCalledTimes(1)
   expect(metricIds.size).toBe(1); expect(uploadRead).toHaveBeenCalledTimes(1)
   const activeListeners = [...listenerSet()]; expect(activeListeners).toHaveLength(2)
   await click('Connect extension');
@@ -161,7 +179,7 @@ it('scopes the real retained Settings observer to active visibility and preserve
   await change()
   const count = read.mock.calls.length
   const uploadCount = uploadRead.mock.calls.length
-  await render(false); expect(activeListeners.every(listener => !listenerSet().has(listener))).toBe(true)
+  await setManagementOpen(false); expect(activeListeners.every(listener => !listenerSet().has(listener))).toBe(true)
   expect(metricIds.size).toBe(0)
   expect(listenerSet().size).toBe(0); await change(); expect(read).toHaveBeenCalledTimes(count)
   expect(uploadRead).toHaveBeenCalledTimes(uploadCount)
@@ -270,10 +288,12 @@ it('keeps explicit comparison order and keyboard target while original process r
   expect([...resources().querySelectorAll('[data-browser-resource]')].map(item => item.getAttribute('data-browser-resource'))).toEqual(['b', 'a'])
   expect(row('a').querySelector('.browser-resources__memory')?.textContent).toContain('0 MiB')
   const originalButton = row('b').querySelector<HTMLButtonElement>('button')!; originalButton.focus()
+  const preferenceRenders = vi.spyOn(draftHooks, 'useSettingDraftRecord')
   data.processes[0]!.rssKib = 999999
   await act(async () => { for (const id of metricIds) for (const listener of wire.listeners.get(TOOLKIT_CHANGED_CHANNEL) ?? []) listener({}, { id, snapshot: structuredClone(metricSnapshot) }) }); await settle()
   expect([...resources().querySelectorAll('[data-browser-resource]')].map(item => item.getAttribute('data-browser-resource'))).toEqual(['b', 'a'])
   expect(document.activeElement).toBe(originalButton)
+  expect(preferenceRenders).not.toHaveBeenCalled()
   expect(release).not.toHaveBeenCalled(); expect(restore).not.toHaveBeenCalled()
 })
 
@@ -324,7 +344,7 @@ it('saves both Browser fields through the module and preload with original expec
   await act(async () => automatic.click()); expect(automatic.checked).toBe(true)
   await act(async () => { useAppStore.setState({ config: next }); saving.resolve(next) }); await settle()
   expect(automatic.checked).toBe(true)
-  expect(container.querySelector('[data-settings-save-bar] [role="status"]')?.textContent).toBe('Unsaved changes')
+  expect(container.querySelector('[data-settings-save-bar] [role="status"]')?.textContent).toBe('Browser preferences: unsaved changes')
   expect(release).not.toHaveBeenCalled(); expect(restore).not.toHaveBeenCalled()
 })
 

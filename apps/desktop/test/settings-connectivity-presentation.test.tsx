@@ -14,8 +14,8 @@ it('Browser keeps both original preference drafts while its saved permission sum
   const save = vi.spyOn(api.config, 'save').mockResolvedValue(composerConfig)
   const close = () => {}
   await dom.render(<SettingsPanel initialSection="browser" onClose={close} />)
-  const automation = dom.container.querySelector<HTMLInputElement>('.browser-automation-toggle input')!
-  const automatic = dom.container.querySelector<HTMLInputElement>('.browser-resources__policy input')!
+  const automation = dom.container.querySelector<HTMLInputElement>('[data-settings-field="agent-automation"] input')!
+  const automatic = dom.container.querySelector<HTMLInputElement>('[data-settings-field="automatic-memory-release"] input')!
   expect(automation.checked).toBe(false)
   expect(automatic.checked).toBe(true)
   await act(async () => { automation.click(); automatic.click() })
@@ -23,10 +23,10 @@ it('Browser keeps both original preference drafts while its saved permission sum
   expect(automatic.checked).toBe(false)
   expect(dom.container.querySelector('.settings-browser__preferences')?.contains(automatic)).toBe(true)
   expect(dom.container.querySelector('.browser-resources')?.contains(automatic)).toBe(false)
-  expect(dom.container.querySelector('[data-settings-field="agent-automation"] header')?.textContent).toContain('Saved: Off')
+  expect(automation.closest('section')?.querySelector('header')?.textContent).toContain('Saved: Off')
   await dom.render(<SettingsPanel initialSection="overview" onClose={close} />)
   await dom.render(<SettingsPanel initialSection="browser" onClose={close} />)
-  expect(dom.container.querySelector('.browser-automation-toggle input')).toBe(automation)
+  expect(dom.container.querySelector('[data-settings-field="agent-automation"] input')).toBe(automation)
   expect(automation.checked).toBe(true)
   expect(automatic.checked).toBe(false)
   expect(save).not.toHaveBeenCalled()
@@ -69,6 +69,8 @@ it('Browser summarizes a failed observation while retaining the original reason 
   const release = vi.spyOn(api.browser, 'release')
   const restore = vi.spyOn(api.browser, 'restoreResource')
   await dom.render(<SettingsPanel initialSection="browser" onClose={() => {}} />)
+  await dom.click('.settings-browser > details > summary')
+  await vi.waitFor(() => expect(dom.container.querySelector('.browser-resources__notices')).not.toBeNull())
   const issue = dom.container.querySelector('.browser-resources .browser-resources__notices')!
   expect(issue.querySelector('[role="status"]')?.textContent).toContain('Previous entries are kept.')
   const details = issue.querySelector<HTMLDetailsElement>('details')!

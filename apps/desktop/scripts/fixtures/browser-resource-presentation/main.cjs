@@ -15,7 +15,9 @@ app.whenReady().then(async () => {
   await win.loadFile(process.env.AGENTMUX_RESOURCE_VISUAL_HTML)
   const evaluate = code => win.webContents.executeJavaScript(code)
   const until = async (code, label) => { const end = Date.now() + 10000; while (Date.now() < end) { if (await evaluate(code)) return; await wait(40) } throw new Error(label) }
-  await until('Boolean(window.resourceSettingsVisual?.ready && document.querySelectorAll("[data-browser-resource]").length===5)', 'The actual Settings directory must mount')
+  await until('Boolean(window.resourceSettingsVisual?.ready && document.querySelector(".settings-browser > details > summary"))', 'The actual Settings management entrance must mount')
+  await evaluate('document.querySelector(".settings-browser > details > summary").click()')
+  await until('document.querySelectorAll("[data-browser-resource]").length===5', 'The actual Settings directory must mount')
   await evaluate('resourceSettingsVisual.markPrevious()')
   await until('document.querySelector("[data-browser-resource=unconfirmed]").textContent.includes("Previously observed")', 'The original partial read retains its previous row')
   const firstBox = 'document.querySelector("[data-browser-resource=documentation] input")'
