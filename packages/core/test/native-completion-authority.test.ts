@@ -1,5 +1,5 @@
 import { fixtureEpoch as reshapeFixtureEpoch } from './helpers/fixture-values.js'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { appendFile, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -11,6 +11,7 @@ import type { AgentMuxClientEvent, AgentMuxStoredAgentSession, AgentProviderId }
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
+import type { DesktopRuntimeClient } from '../../../apps/desktop/src/main/desktop-host.js'
 import type { AppConfig } from '../../../apps/desktop/src/shared/contracts.js'
 
 vi.mock('electron', () => ({ app: { isPackaged: false } }))
@@ -35,11 +36,23 @@ const generic: AgentNativeHookSpecification = {
 // Controlled SDK/native observations are the fixture boundary. Actual candidate Core owns the bound
 // HTTP ingress, normalization, registry, public status, event reader, native observer and raw input.
 // Built-in declarations are exercised below; this does not claim that a real vendor emitted them.
-async function fixture(providerId: AgentProviderId, hook = native.get(providerId).hook, observeNative = false) {
+async function fixture(providerId: AgentProviderId, hook = native.get(providerId).hook, observeNative: boolean | 'codex-rollout' | 'codex-retained' = false) {
   const root = await mkdtemp(join(tmpdir(), 'amx-completion-'))
   for (const key of Object.keys(process.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key)) vi.stubEnv(key, undefined)
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', root); vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(root, 'state'))
   vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'messages.ndjson'))
+  const codexRollout = observeNative === 'codex-rollout' || observeNative === 'codex-retained'
+  const transcriptPath = join(root, 'native-rollout.jsonl')
+  let ordinal = 0
+  const appendNative = (...events: Record<string, unknown>[]) => appendFile(transcriptPath, events.map(payload => JSON.stringify({
+    type: 'event_msg', ordinal: ++ordinal, timestamp: new Date().toISOString(), payload,
+  }) + '\n').join(''))
+  const retainedAt = Date.now() - 20
+  if (codexRollout) {
+    await writeFile(transcriptPath, JSON.stringify({ type: 'session_meta', payload: { id: 'original-native' } }) + '\n')
+    await appendNative({ type: 'task_started', thread_id: 'original-native', turn_id: 'original-turn' })
+    if (observeNative === 'codex-retained') await appendNative(codexChildItem('retained-child', retainedAt + 10))
+  }
   let nativeObserver: AgentProviderSessionStatusObservationContext | undefined
   const provider = defineAgentProvider({ catalog: {
     id: providerId, label: 'Private native completion fixture', executable: 'private-agent', expectedProcess: 'private-agent',
@@ -48,12 +61,17 @@ async function fixture(providerId: AgentProviderId, hook = native.get(providerId
     capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: false, replyCorrelation: 'none' }
   }, buildArgs: (_prompt, args) => [...args], hook,
     ...(observeNative ? { observeSessionStatus: async (context: AgentProviderSessionStatusObservationContext) => {
-      nativeObserver = context; return { dispose() {} }
+      nativeObserver = context
+      return codexRollout ? native.get('codex').observeSessionStatus!(context) : { dispose() {} }
     } } : {}) })
   const original: AgentMuxStoredAgentSession = { kind: 'agent', agentSessionId: 'original-agent', providerId, executorId: providerId,
     hostId: 'local', workspacePath: root, run: { runId: 'original-run' }, retiredRuns: [],
     hookBindingId: 'b'.repeat(43), hookToken: 't'.repeat(43), createdAt: reshapeFixtureEpoch(0, 0, 1), updatedAt: reshapeFixtureEpoch(0, 0, 1),
-    nativeHandle: { kind: 'provider', providerId, sessionId: 'original-native' } }
+    nativeHandle: { kind: 'provider', providerId, sessionId: 'original-native', ...(codexRollout ? { transcriptPath } : {}) },
+    ...(observeNative === 'codex-retained' ? { updatedAt: retainedAt, nativeSubagents: {
+      run: { runId: 'original-run' }, providerId, nativeSessionId: 'original-native', unconfirmed: false,
+      sessions: [{ nativeAgentId: 'retained-child', phase: 'running', state: 'working', hookReceiptId: 'retained-start', observedAt: retainedAt }]
+    } } : {}) }
   const store = new AgentMuxMemoryAgentSessionStore(); await store.compareAndSwap(null, original)
   const client = new AgentMuxClient({ store, providers: [provider] }), inner = client as any
   await inner.registry.load('local'); inner.connected = true
@@ -97,9 +115,15 @@ async function fixture(providerId: AgentProviderId, hook = native.get(providerId
   const saved = async () => (await store.load() as readonly AgentMuxStoredAgentSession[])[0]!
   cleanup.push(async () => { await client.dispose(); 
     expect(inner.kernel.start).not.toHaveBeenCalled(); expect(inner.kernel.stop).not.toHaveBeenCalled(); await rm(root, { recursive: true, force: true }) })
-  return { client, events, feed, saved, original, root, store,
+  // The source-mode resolver supplies the same runtime class to Desktop; published declarations have separate private member identities.
+  return { client, desktopClient: client as unknown as DesktopRuntimeClient, events, feed, saved, original, root, store, appendNative,
     rawInput: () => client.writeAgent({ agentSessionId: original.agentSessionId, expectedRun: original.run, source: 'user', data: 'private raw input\r' }),
     observer: async () => { await client.statusAgent(original.agentSessionId); expect(nativeObserver).toBeDefined(); return nativeObserver! } }
+}
+
+function codexChildItem(nativeAgentId: string, at: number, kind = 'completed', parent = 'original-native') {
+  return { type: 'item_completed', thread_id: parent, turn_id: 'original-turn', completed_at_ms: at,
+    item: { type: 'SubAgentActivity', id: 'native-item-' + nativeAgentId, kind, agent_thread_id: nativeAgentId, agent_path: '/root/review' } }
 }
 
 const gates = [
@@ -147,7 +171,7 @@ describe('native completion authority through actual Core consumers', () => {
     await vi.waitFor(async () => expect((await h.saved()).semanticStatus?.state).toBe('done'))
     const config: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private fixture' }], executors: {}, workspaces: [],
       appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
-    const controller = new RuntimeController(h.store, async () => h.client)
+    const controller = new RuntimeController(h.store, async () => h.desktopClient)
     controller.commit(await controller.prepare(config)); cleanup.push(async () => controller.dispose())
     const snapshot = await controller.snapshot(config)
     let view = { sessions: snapshot.sessions, timelines: {}, pendingAgentLaunches: {}, tabs: {}, layouts: {}, viewModes: {} }
@@ -334,6 +358,76 @@ describe('native completion authority through actual Core consumers', () => {
     expect(mainActivityFact(await h.saved())).toEqual(mainActivityFact(endedMain))
     expect((await h.client.statusAgent(h.original.agentSessionId)).observation.semantic).toBe('idle')
     expect(agentTurnCompletionIdentity(await h.saved())).toBeDefined()
+  })
+
+  it('Codex observed completion reaches the original CLI and Focus child without altering the main turn', async () => {
+    const [{ RuntimeController }, { projectRuntimeEvent }, { agentContextForSession }] = await Promise.all([
+      import('../../../apps/desktop/src/main/runtime-controller.js'), import('../../../apps/desktop/src/renderer/src/lib/session-state.js'),
+      import('../../../apps/desktop/src/renderer/src/lib/focus-context.js'),
+    ])
+    const h = await fixture('codex', generic, 'codex-rollout')
+    await h.feed('begin', {}); await h.feed('child-begin', { workerId: 'first' }); await h.feed('child-begin', { workerId: 'second' })
+    await h.observer()
+    const firstStart = (await h.saved()).nativeSubagents!.sessions[0]!.observedAt
+    await h.appendNative(
+      codexChildItem('first', firstStart - 1),
+      codexChildItem('first', Date.now(), 'completed', 'another-native'),
+      codexChildItem('second', Date.now(), 'interacted'),
+      codexChildItem('unobserved-child', Date.now()),
+      { type: 'subagent_stop', thread_id: 'original-native', agent_id: 'second' },
+      { type: 'task_complete', thread_id: 'original-native', turn_id: 'original-turn' },
+    )
+    await vi.waitFor(async () => expect((await h.saved()).semanticStatus).toMatchObject({ state: 'done', source: 'native-transcript' }))
+    const original = await h.saved()
+    expect(original.nativeSubagents?.sessions.map(child => [child.nativeAgentId, child.phase])).toEqual([['first', 'running'], ['second', 'running']])
+    expect((await h.client.statusAgent(h.original.agentSessionId)).observation).toMatchObject({ semantic: 'active', mainSession: { semantic: 'idle' } })
+
+    const config: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private fixture' }], executors: {}, workspaces: [],
+      appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, more: true, saveBookmark: true } } }
+    const controller = new RuntimeController(h.store, async () => h.desktopClient)
+    controller.commit(await controller.prepare(config)); cleanup.push(async () => controller.dispose())
+    const snapshot = await controller.snapshot(config)
+    const view = { sessions: snapshot.sessions, timelines: {}, pendingAgentLaunches: {}, tabs: {}, layouts: {}, viewModes: {} }
+    const eventStart = h.events.length, firstEnd = Date.now()
+    await h.appendNative(codexChildItem('first', firstEnd))
+    await vi.waitFor(async () => expect((await h.saved()).nativeSubagents?.sessions[0]).toMatchObject({
+      nativeAgentId: 'first', phase: 'ended', state: 'done', outcome: 'completed', observedAt: firstEnd,
+    }))
+    const sessionEvent = await vi.waitFor(() => {
+      const event = h.events.slice(eventStart).find(event => event.type === 'agent-session' && event.session.nativeSubagents?.sessions[0]?.phase === 'ended')
+      expect(event).toBeDefined()
+      return event!
+    })
+    const projected = projectRuntimeEvent(view, { type: 'core', hostId: 'local', event: sessionEvent }).state
+    expect(projected.tabs).toBe(view.tabs); expect(projected.layouts).toBe(view.layouts)
+    const focus = agentContextForSession(projected.sessions[0]!, undefined, undefined, undefined, null)
+    expect(focus.nativeSubagents?.rows).toEqual([{ id: 'first', state: 'completed' }, { id: 'second', state: 'running' }])
+    expect((await h.saved()).semanticStatus).toEqual(original.semanticStatus)
+    expect(h.events.slice(eventStart).filter(event => event.type === 'agent-status')).toEqual([])
+    expect((await h.rawInput()).appliedByteRange).not.toBeNull()
+
+    const server = new AgentMuxControlServer({ socketPath: join(h.root, 'child-state.sock'), coreClients: () => [{ hostId: 'local', client: h.client }] })
+    await server.start(); cleanup.push(() => server.stop())
+    const cli = await runCompiledObjectCli(['--endpoint', `unix:${server.path}`, 'agent', 'inspect', '--session', h.original.agentSessionId], objectCliEnvironment(h.root))
+    expect(cli.code, cli.stderr).toBe(0)
+    expect(JSON.parse(cli.stdout).result.status).toMatchObject({ run: { runId: h.original.run.runId }, observation: {
+      semantic: 'active', subagentSessions: { sessions: [{ nativeAgentId: 'first', outcome: 'completed' }, { nativeAgentId: 'second', phase: 'running' }] }
+    } })
+    await h.appendNative(codexChildItem('second', Date.now()))
+    await vi.waitFor(async () => expect((await h.client.statusAgent(h.original.agentSessionId)).observation.semantic).toBe('idle'))
+    expect((await h.saved()).semanticStatus).toEqual(original.semanticStatus)
+  })
+
+  it('Codex retained completion settles a known child when the original native source is first watched', async () => {
+    const h = await fixture('codex', generic, 'codex-retained')
+    await h.client.statusAgent(h.original.agentSessionId)
+    await vi.waitFor(async () => expect((await h.saved()).nativeSubagents?.sessions[0]).toMatchObject({
+      nativeAgentId: 'retained-child', hookReceiptId: 'retained-start', phase: 'ended', state: 'done', outcome: 'completed',
+    }))
+    const done = (await h.saved()).nativeSubagents
+    for (let attempt = 0; attempt < 2; attempt++) await h.client.statusAgent(h.original.agentSessionId)
+    expect((await h.saved()).nativeSubagents).toEqual(done)
+    expect(done?.run).toEqual(h.original.run)
   })
 
   it('actual original native outcomes retain independent unresolved child observations', async () => {
