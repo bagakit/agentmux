@@ -7,6 +7,7 @@ import type { ScratchTopicSnapshot } from '../src/shared/contracts'
 import { directoryIdentity, homeZoneId, type SpaceZoneBindings } from '../src/shared/space-addresses'
 import { scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { SurfaceToolDock } from '../src/renderer/src/components/SurfaceToolDock'
+import { SpaceTopicsTree } from '../src/renderer/src/components/SpaceTopicsTree'
 import { api } from '../src/renderer/src/lib/api'
 import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
@@ -78,6 +79,48 @@ beforeEach(async () => {
       topics, error: null, reading: false } }, agentComposerDrafts: { 'one-open': 'Original unsent input' } })
   vi.spyOn(api.spatial, 'read').mockResolvedValue({ schemaVersion: 1, revision: 1, graph: desktopSpatialGraph(useAppStore.getState(), topics) })
   await initializeSpatialControlFixture(topics)
+})
+
+it('keeps the actual Space Agents tool scoped to the selected Collection, including a newly empty one', async () => {
+  const directoryPath = scratch.path + '/empty-category'
+  const empty = { ...category, categoryId: 'empty-category', title: 'New Collection', directoryPath, spaceId: directoryIdentity(scratch.hostId, directoryPath) }
+  await act(async () => useAppStore.setState({ topicCategories: [category, empty] }))
+  const before = useAppStore.getState(), stop = vi.spyOn(api.sessions, 'stop')
+  await dom.render(<><SpaceTopicsTree workspace={scratch} visible={false} icons={{}} onChangeIcon={() => {}} /><SurfaceToolDock workspace={scratch} /></>)
+  const openCollectionAgents = async (title: string) => {
+    await act(async () => button(title + ' overview').click())
+    await act(async () => button('Agents').click())
+    expect(dom.container.querySelector('.workspace-agents-tool__identity strong')?.textContent).toBe(title)
+  }
+  await openCollectionAgents(empty.title)
+  expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ spaceId: empty.spaceId, zoneId: null, topicId: null })
+  expect(ids()).toEqual([])
+  expect(dom.container.querySelector('[aria-label="0 Agents · Startup order"]')).not.toBeNull()
+
+  await openCollectionAgents(category.title)
+  expect(ids()).toEqual(['one-open', 'one-closed', 'two-agent'])
+  await act(async () => useAppStore.setState({ scratchTopicSnapshots: { [scratch.id]: {
+    scope: scratchTopicsScope(scratch), revision: 2, topics: null, error: 'Original directory observation unavailable', reading: false
+  } } }))
+  expect(ids()).toEqual(['one-open', 'one-closed', 'two-agent'])
+  await act(async () => useAppStore.setState({ topicCategories: [] }))
+  expect(dom.container.querySelector('.workspace-agents-tool__identity strong')?.textContent).toBe(category.title)
+  expect(ids()).toEqual(['one-open', 'one-closed', 'two-agent'])
+  const removedZone = address(topics[1]!).zoneId
+  await act(async () => useAppStore.setState({ spaceZoneBindings: { ...bindings, [removedZone]: {
+    ...bindings[removedZone]!, relations: { [category.spaceId]: false }
+  } } }))
+  expect(ids()).toEqual(['one-open', 'one-closed'])
+
+  await act(async () => useAppStore.setState({ workbenchSpaceSelection: choice(topics[2]!) }))
+  expect(ids()).toEqual(['mote-agent'])
+  await act(async () => useAppStore.setState({ workbenchSpaceSelection: null }))
+  expect(ids()).toEqual(['one-open', 'one-closed', 'two-agent', 'mote-agent', 'unbound'])
+  expect(useAppStore.getState().sessions).toBe(before.sessions)
+  expect(useAppStore.getState().tabs).toEqual(before.tabs)
+  expect(useAppStore.getState().layouts).toBe(before.layouts)
+  expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+  expect(stop).not.toHaveBeenCalled()
 })
 
 it('the production Dock follows the explicit Topic and Mote while keeping off-Tab originals and clearing management selection', async () => {
