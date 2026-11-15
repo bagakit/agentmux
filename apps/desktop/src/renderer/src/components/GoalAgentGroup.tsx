@@ -1,11 +1,11 @@
-import { Fragment, memo, useId, useMemo, useState, type ReactNode } from 'react'
+import { Fragment, memo, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { AvatarGroup } from '@agentmux/client-ui/components/AvatarGroup'
 import { compactReferenceId } from '@agentmux/client-ui/display-name'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { demandAgentReferenceKey, goalSupervisorHostWitnesses, type DemandAgentReference, type DemandSpaceMemberReference } from '@agentmux/demand/relations'
+import { demandAgentReferenceKey, type DemandAgentReference, type DemandSpaceMemberReference } from '@agentmux/demand/relations'
 import type { DemandProjection } from '../lib/global-demand-board'
 import { agentSessionPresentationIndex, createFirstPromptSelector, sessionStatusLabel } from '../lib/session-presentation'
-import { goalAgentPresentation } from '../lib/goal-agent-selection'
+import { goalAgentPresentation, goalSupervisorPresentationHosts } from '../lib/goal-agent-selection'
 import { agentDisplayName, topicIdForSession, workspaceForSession } from '../lib/workbench-tabs'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { agentContextForSession } from '../lib/focus-context'
@@ -13,6 +13,7 @@ import { useAgentInformationPreview } from './AgentInformationPreview'
 import * as Menu from './HoverDropdownMenu'
 import { useAppStore } from '../store'
 import { executorAvatarAppearance, ResolvedAgentAvatar } from './AgentAvatar'
+import { useWorkbenchNameTooltip, useWorkbenchTooltipFocus } from './WorkbenchNameTooltip'
 import '@agentmux/client-ui/styles/avatar-group.css'
 import '../styles/goal-agent-group.css'
 
@@ -39,7 +40,7 @@ function createGoalAgentGroupSelector(demand: DemandProjection) {
       const key = demandAgentReferenceKey(reference), original = assignments.get(key)
       assignments.set(key, { reference, roles: [...new Set([...original?.roles ?? [], role])] })
     }
-  const supervisorHosts = goalSupervisorHostWitnesses(demand)
+  const supervisorHosts = goalSupervisorPresentationHosts(demand)
   const prompts = new Map<string, ReturnType<typeof createFirstPromptSelector>>()
   let held: readonly Face[] = []
   return (state: ReturnType<typeof useAppStore.getState>): readonly Face[] => {
@@ -90,8 +91,27 @@ function faceContext(face: Face) {
   const topics = scratchTopicsForConfig(state.config, state.scratchTopicSnapshots)
   return agentContextForSession(session, state.timelines[session.id], state.agentNames[session.id], workspaceForSession(state.config, session, topics), topicIdForSession(state.config, session, topics))
 }
-function FaceAvatar({ face }: { face: Face }) {
-  return <ResolvedAgentAvatar label={face.name ?? face.roles} providerId={face.providerId} executorId={face.executorId} appearance={face.appearance} size={22} />
+function FaceAvatar({ face, size = 22 }: { face: Face; size?: number }) {
+  return <ResolvedAgentAvatar label={face.name ?? face.roles} providerId={face.providerId} executorId={face.executorId} appearance={face.appearance} size={size} />
+}
+export function useGoalConfirmationSupervisor(demand: DemandProjection, enabled: boolean) {
+  const selector = useMemo(() => createGoalAgentGroupSelector({ ...demand, assigneeSessionIds: [] }), [demand])
+  const unambiguous = enabled && goalSupervisorPresentationHosts(demand).length === 1
+  return useAppStore(state => {
+    if (!unambiguous) return undefined
+    const face = selector(state)[0]
+    return face?.subject ? face : undefined
+  })
+}
+export function GoalConfirmationSupervisorAvatar({ face }: { face: Face }) {
+  const name = face.name ?? face.label
+  const status = useAppStore(state => { const session = faceSession(face, state); return session ? sessionStatusLabel(session) : LOCATION_UNCONFIRMED })
+  const tooltip = useWorkbenchNameTooltip(name, `Supervisor · ${status}`, false, { placement: 'top', pointerPassThrough: true })
+  const anchor = useRef<HTMLSpanElement>(null)
+  useWorkbenchTooltipFocus(anchor, tooltip, false, face.key)
+  return <><span ref={anchor} className="goal-review__confirm-agent" data-goal-confirm-agent {...tooltip.props}>
+    <FaceAvatar face={face} size={18} /><span className="goal-review__confirm-name">{name}</span>
+  </span>{tooltip.content}</>
 }
 function GoalAgentButton({ face, row = false, branch }: { face: Face; row?: boolean; branch?: ReturnType<typeof Menu.useHoverMenuBranch> }) {
   const preview = useAgentInformationPreview(undefined, true, undefined, undefined, () => { useAppStore.getState().selectSession(face.subject!.id) },

@@ -1450,7 +1450,7 @@ export type AppState = GitReadingActions & {
   openDemandPmo(demandId: string, onReceipt?: (receipt: GoalPmoReceipt) => void): Promise<string>
   requestDemandPmoTask(demandId: string, mode: GoalDiscussionTaskMode, options?: { newRequest?: boolean; creationOperationId?: string | undefined; onReceipt?: ((receipt: GoalPmoReceipt) => void) | undefined }): Promise<string | null>
   refreshDemand(demandId: string): Promise<void>
-  confirmDemandGoal(demandId: string, expectedRevision: number): Promise<void>
+  confirmDemandGoal(demandId: string, expectedRevision: number, continueWith?: import('@agentmux/demand/goal-patrol').GoalConfirmationRecipient): Promise<void>
   acceptDemandResult(demandId: string, expectedAlignmentRevision: number, expectedSubmissionId: string, acceptGaps?: boolean, finish?: boolean): Promise<void>
   createDemand(input: {
     id?: string
@@ -10062,8 +10062,9 @@ export const useAppStore = create<AppState>()<[['zustand/persist', PersistedAppS
     set(state => ({ demands: { ...state.demands, [id]: demandRecordFromFilesystem(hostGoalRecord(result.demand), state.demands[id]) } }))
     refreshKnownGoalResponsibilities([id])
   },
-  async confirmDemandGoal(id, expectedRevision) {
-    const result = await api.goals.execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, operation: 'demand.confirm', requestId: mintObjectId(), demandId: id, expectedRevision })
+  async confirmDemandGoal(id, expectedRevision, continueWith) {
+    const result = await api.goals.execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, operation: 'demand.confirm', requestId: mintObjectId(), demandId: id, expectedRevision,
+      ...(continueWith ? { continueWith } : {}) })
     if (result.operation !== 'demand.confirm') throw controlFailure('CONTROL_PROTOCOL_ERROR', 'The original Goal confirmation changed.')
     set(state => ({ demands: { ...state.demands, [id]: demandRecordFromFilesystem(hostGoalRecord(result.demand), state.demands[id]) } }))
     refreshKnownGoalResponsibilities([id])

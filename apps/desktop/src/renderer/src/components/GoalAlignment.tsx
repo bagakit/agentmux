@@ -1,6 +1,7 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useRef, useState } from 'react'
 import { alignmentConfirmationIssue, groundingAcceptanceIssue, isCurrentGroundingAccepted, type DemandGroundingCheck } from '@agentmux/demand/goals'
+import { currentGoalConfirmationNotice, type GoalConfirmationRecipient } from '@agentmux/demand/goal-patrol'
 import { Button } from '@agentmux/client-ui/components/Button'
 import { useAppStore } from '../store'
 import type { DemandProjection } from '../lib/global-demand-board'
@@ -8,6 +9,8 @@ import { useIconFeedback } from '../lib/use-icon-feedback'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { goalNextStepFact, goalResultExplanation } from '../lib/goal-presentation'
 import { GoalEvidence } from './GoalEvidence'
+import { GoalConfirmationSupervisorAvatar, useGoalConfirmationSupervisor } from './GoalAgentGroup'
+import { refreshGoalDelegations } from '../lib/goal-delegation-work'
 import { useGoalDiscussionRecipient } from '../lib/goal-discussion-recipient'
 import '../styles/goal-review.css'
 
@@ -19,7 +22,7 @@ const ThemeStatusGapIcon = semanticIconComponent('status.gap')
 const ThemeStatusUnknownIcon = semanticIconComponent('status.unknown')
 
 
-type Acknowledgement = { kind: 'confirm'; revision: number } | { kind: 'accept'; revision: number; submissionId: string; gaps: boolean; finish?: boolean }
+type Acknowledgement = { kind: 'confirm'; revision: number; continueWith?: GoalConfirmationRecipient } | { kind: 'accept'; revision: number; submissionId: string; gaps: boolean; finish?: boolean }
 export type GoalAcknowledgementFeedback = { pending: boolean; failure: { attempt: Acknowledgement; message: string } | null; reloadError: string | null }
 export const EMPTY_GOAL_ACKNOWLEDGEMENT: GoalAcknowledgementFeedback = { pending: false, failure: null, reloadError: null }
 export function GoalAcknowledgementRecovery({ goalId, feedback, onFeedbackChange }: {
@@ -48,6 +51,10 @@ export function GoalAlignment({ demand, emphasis, onGrill, onGrounding, motePend
   const cue = useIconFeedback(JSON.stringify([demand.id, alignment?.revision]), active, heading)
   const focus = emphasis === undefined ? goalNextStepFact(demand).source.kind : emphasis
   const confirmIssue = alignmentConfirmationIssue(alignment)
+  const supervisor = useGoalConfirmationSupervisor(demand, active && Boolean(demand.address && alignment && !alignment.confirmedAt && !confirmIssue &&
+    demand.status !== 'done' && demand.status !== 'cancelled'))
+  const confirmation = currentGoalConfirmationNotice(demand)
+  const notification = confirmation && demand.patrolObservations?.find(item => item.operationId === confirmation.operationId)
   const gapIssue = groundingAcceptanceIssue(alignment, grounding, true)
   const stale = Boolean(alignment && grounding && grounding.alignmentRevision !== alignment.revision)
   const accepted = isCurrentGroundingAccepted(alignment, grounding)
@@ -59,7 +66,7 @@ export function GoalAlignment({ demand, emphasis, onGrill, onGrounding, motePend
     acknowledgementPending.current = true; onFeedbackChange({ pending: true, failure: null, reloadError: null })
     try {
       if (attempt.kind === 'confirm') {
-        await confirmDemandGoal(demand.id, attempt.revision)
+        await confirmDemandGoal(demand.id, attempt.revision, attempt.continueWith)
         const confirmed = useAppStore.getState().demands[demand.id]?.alignment
         // Decoration consumes the original owner result; it never grants confirmation.
         if (confirmed?.revision === attempt.revision && confirmed.confirmedAt != null) {
@@ -96,7 +103,13 @@ export function GoalAlignment({ demand, emphasis, onGrill, onGrounding, motePend
     {!accepted && gapIssue === null && demand.status !== 'done' ? <p className="goals-caption">Accept and finish also closes the goal.</p> : null}
   </> : null
   const definitionActions = <div className="goals-inline-actions">
-    {!failure && alignment && !alignment.confirmedAt && !confirmIssue ? <button type="button" className={needsDefinition ? 'primary-button' : 'small-button'} data-goal-confirm disabled={pending} onClick={() => void acknowledge({ kind: 'confirm', revision: alignment.revision })}>{pending ? 'Saving…' : 'Confirm goal'}<ThemeActionConfirmIcon size={13} /></button> : null}
+    {!failure && alignment && !alignment.confirmedAt && !confirmIssue ? <button type="button" className={needsDefinition ? 'primary-button' : 'small-button'} data-goal-confirm disabled={pending}
+      aria-label={pending || !supervisor ? undefined : `Confirm goal and let ${supervisor.name ?? supervisor.label} continue`}
+      onClick={() => {
+        const target = supervisor?.subject
+        void acknowledge({ kind: 'confirm', revision: alignment.revision, ...(target ? { continueWith: { hostId: target.hostId, agentSessionId: target.agentSessionId } } : {}) })
+      }}>{pending ? 'Saving…' : supervisor ? <>Confirm goal and let <GoalConfirmationSupervisorAvatar face={supervisor} /> continue</>
+        : <>Confirm goal<ThemeActionConfirmIcon size={13} /></>}</button> : null}
     {goalRequestButton}{goalRequestNote}
   </div>
   const resultChecks = alignment && currentReport ? alignment.criteria.map(criterion => ({ ...criterion, check: checks.get(criterion.id) })) : []
@@ -134,10 +147,18 @@ export function GoalAlignment({ demand, emphasis, onGrill, onGrounding, motePend
   </section> : null
   const noResults = <div className={`goals-no-results${compactAgreement ? ' goal-review__no-results--compact' : ''}`} data-goal-result-state="missing">
     {!compactAgreement && !missingDoneReport ? <div className="goals-section-heading"><h2>Results review</h2><span className="goals-caption">No report yet</span></div> : null}
-    {missingDoneReport ? <p className="goals-muted">Ask the agent to check the finished work against the confirmed criteria.</p> : <p className="goals-muted">Agents work on this goal next. Ask for a result check when the work is ready.</p>}
+    {missingDoneReport ? <p className="goals-muted">Ask the agent to check the finished work against the confirmed criteria.</p>
+      : !confirmation ? <p className="goals-muted">Agents work on this goal next. Ask for a result check when the work is ready.</p> : null}
     {resultRequest ? <div className="goals-inline-actions">{resultRequest}</div> : null}
   </div>
   return <>
+    {confirmation ? <div className="goal-review__notification" data-goal-confirmation-notification={notification?.state ?? 'checking'}>
+      <span role="status" title={notification?.reason}>{notification?.state === 'delivered' ? notification.reason
+        : notification?.state === 'stale' ? notification.reason
+        : notification?.state === 'unknown' || demand.delegationObservationIssue ? 'Goal confirmed · Supervisor notification unconfirmed'
+        : 'Goal confirmed · Waiting to notify Supervisor'}</span>
+      {notification?.state !== 'delivered' && notification?.state !== 'stale' ? <Button type="button" onClick={() => void refreshGoalDelegations(demand.id)}>Check notification</Button> : null}
+    </div> : null}
     {currentReport ? report : alignment ? <section className={`goals-alignment goal-review${compactAgreement ? ' goal-review--compact' : ''}`} aria-label="Goal definition" data-goal-id={demand.id} data-goal-alignment-revision={alignment.revision} data-goal-confirmation-state={alignment.confirmedAt ? 'confirmed' : 'unconfirmed'}>
       <details className="goal-review__disclosure" open={!compactAgreement}>
       <summary className="goals-section-heading"><h2 ref={heading}><ThemeObjectGoalIcon key={cue.key} size={14} aria-hidden="true" animation={cue.animation} onAnimationEnd={cue.stop} />Goal definition</h2><span className="goals-caption">{alignment.confirmedAt ? `Confirmed by you · ${alignment.criteria.length} success criteria${compactAgreement ? ' · No report yet' : ''}` : confirmIssue ? alignment.openQuestions.length ? 'Decisions needed' : 'Define success criteria' : 'Needs your confirmation'}</span></summary>

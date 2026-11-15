@@ -1,5 +1,5 @@
 import { parseGoalRelationAccesses, type GoalRelationAccess } from '@agentmux/core/goal-agent-reference'
-import { parseDemandAgentReference, demandAgentReferenceKey, mergeDemandAgentReferences, type DemandAgentReference } from '@agentmux/demand/relations'
+import { parseDemandAgentReference, demandAgentReferenceKey, goalSupervisorHostWitnesses, mergeDemandAgentReferences, type DemandAgentReference } from '@agentmux/demand/relations'
 import type { AgentMuxControlRequest } from '@agentmux/core/control'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import type { SessionSnapshot } from '../../../shared/contracts'
@@ -12,6 +12,12 @@ import { scratchTopicsForConfig, scratchTopicKind } from './scratch-topic-snapsh
 import { sessionStatusLabel } from './session-presentation'
 
 export type GoalAgentRole = 'assignees' | 'related' | 'supervisor'
+export function goalSupervisorPresentationHosts(goal: DemandRecord): readonly string[] {
+  const witnesses = goalSupervisorHostWitnesses(goal)
+  const observed = goal.responsibility?.supervisor
+  return observed?.hostId && observed.agentSessionId === goal.supervisorSessionId && !witnesses.includes(observed.hostId)
+    ? [...witnesses, observed.hostId] : witnesses
+}
 export type GoalAgentCreationDraft = {
   goalId: string
   role: 'assignees' | 'related'

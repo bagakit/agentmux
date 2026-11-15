@@ -46,7 +46,7 @@ export function GoalResponsibilitySummary({ demand, compact = false, active = tr
   const hasExecutionRecords = Boolean(current.delegations?.length || current.dispatches?.some(item => item.execution === 'finite'))
   // With nothing observed and nothing dispatched, Collaboration already states the absence; a patrol
   // or a retained issue still needs this block.
-  const patrolPresent = !embedded && Boolean(current.patrols?.some(item => item.purpose !== 'plan'))
+  const patrolPresent = !embedded && Boolean(current.patrols?.some(item => item.purpose === undefined))
   if (!observed && !hasExecutionRecords && !patrolPresent && !retained && !issue && !current.delegationObservationIssue) return null
   const body = <div className={`goal-responsibility${compact ? ' goal-responsibility--compact' : ''}`} aria-label="Execution responsibility" data-goal-responsibility={current.id}>
     {!compact && !embedded ? <strong className="goal-responsibility__heading">Execution responsibility</strong> : null}
@@ -76,7 +76,7 @@ export function GoalResponsibilitySummary({ demand, compact = false, active = tr
     </div>)}
     {compact && rows.length > visible.length ? <span className="goal-responsibility__pending">{rows.length - visible.length} more original executions · Read details</span> : null}
     {compact && hiddenAttention > 0 ? <span className="goal-responsibility__notice" role="status">{hiddenAttention} more need attention · Read details</span> : null}
-    {observed && !observed.executions.length && !compact ? <span className="goal-responsibility__pending">No confirmed execution binding; a relationship or historical Session is not an execution binding.</span> : null}
+    {observed && !observed.executions.length && !compact ? <span className="goal-responsibility__pending">{hasExecutionRecords ? 'Execution binding unconfirmed' : 'No execution recorded'}</span> : null}
     {!embedded ? <GoalPatrolControl demand={current} compact={compact} primary={primary} /> : null}
     {retained || issue || !embedded && current.delegationObservationIssue ? <p className="goal-responsibility__reason" role="status">{issue ?? (!embedded ? current.delegationObservationIssue : undefined) ?? 'Refreshing responsibility; last confirmed facts remain visible.'}</p> : null}
   </div>

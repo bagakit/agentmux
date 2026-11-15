@@ -20,7 +20,7 @@ export function GoalPatrolControl({ demand, compact = false, embedded = false, p
   const [busy, setBusy] = useState(false), [issue, setIssue] = useState<string | null>(null)
   const [supervisorGoalId, setSupervisorGoalId] = useState<string | null>(null)
   const flight = useRef(false), scope = useRef(demand.id); scope.current = demand.id
-  const patrol = demand.patrols?.filter(item => item.purpose !== 'plan').at(-1), observed = patrol && demand.patrolObservations?.find(item => item.operationId === patrol.operationId)
+  const patrol = demand.patrols?.filter(item => item.purpose === undefined).at(-1), observed = patrol && demand.patrolObservations?.find(item => item.operationId === patrol.operationId)
   const pending = Boolean(patrol && !patrol.report && observed?.state !== 'stale')
   const manager = demand.responsibility?.supervisor, attempt = patrol?.attempts.at(-1)
   const targetSessionId = pending ? attempt?.target.agentSessionId ?? patrol?.supervisorAgentSessionId ?? null : typeof demand.supervisorSessionId === 'string' ? demand.supervisorSessionId : demand.supervisorSessionId ? null : manager?.agentSessionId ?? null
@@ -31,7 +31,7 @@ export function GoalPatrolControl({ demand, compact = false, embedded = false, p
   const firstDestination = goalRequestFirstDestination(demand, pending ? patrol : undefined)
   const firstName = useGoalAgentName(firstDestination?.agentSessionId, firstDestination?.hostId)
   const firstHostName = useAppStore(state => firstDestination ? state.config?.hosts.find(host => host.id === firstDestination.hostId)?.label ?? firstDestination.hostId : null)
-  const latestReport = [...demand.patrols ?? []].reverse().find(item => item.purpose !== 'plan' && item.report)
+  const latestReport = [...demand.patrols ?? []].reverse().find(item => item.purpose === undefined && item.report)
   const entryContext = { kind: 'goal-patrol' as const, goalId: demand.id, scope: demand.responsibility?.scope ?? null,
     afterReportOperationId: latestReport?.report?.operationId ?? null }
   const attention = demand.responsibility?.executions.some(row => row.alert !== null) || Boolean(demand.responsibility?.executions.length && manager && !['available', 'busy'].includes(manager.state))
@@ -63,7 +63,7 @@ export function GoalPatrolControl({ demand, compact = false, embedded = false, p
     const operationId = await operation('goal-patrol-request', [goalId, basis, patrol?.report?.operationId ?? null]), cut = beginGoalDelegationRead()
     const result = await api.demands.delegation('goal.patrol', { goalId, operationId })
     applyGoalDelegationResult(result, cut)
-    const saved = result.patrols?.find(item => item.purpose !== 'plan' && item.operationId === operationId) ?? result.patrols?.find(item => item.purpose !== 'plan' && !item.report && item.expectedScope === basis)
+    const saved = result.patrols?.find(item => item.purpose === undefined && item.operationId === operationId) ?? result.patrols?.find(item => item.purpose === undefined && !item.report && item.expectedScope === basis)
     bindOriginalTarget(expectedEntry, saved)
     // This click explicitly starts work. Only an authoritative ended original Run
     // may use the existing same-Session Core recovery, and only never-attempted input continues.

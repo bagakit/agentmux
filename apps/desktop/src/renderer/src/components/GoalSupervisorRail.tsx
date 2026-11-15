@@ -1,10 +1,11 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { demandAgentReferenceLabel, goalSupervisorHostWitnesses } from '@agentmux/demand/relations'
+import { demandAgentReferenceLabel } from '@agentmux/demand/relations'
 import { delegationWorkerHostId, type DemandDelegation } from '@agentmux/demand/delegations'
 import type { GoalPlanReviewer } from '@agentmux/demand/goal-plan'
 import { Button } from '@agentmux/client-ui/components/Button'
 import type { DemandProjection } from '../lib/global-demand-board'
+import { goalSupervisorPresentationHosts } from '../lib/goal-agent-selection'
 import { useGoalAgentName } from '../lib/goal-discussion-recipient'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { GoalPatrolControl } from './GoalPatrolControl'
@@ -66,7 +67,7 @@ function coordinationEntries(demand: DemandProjection): CoordinationEntry[] {
       label: 'Report collected', author: delegation.collection.collector, sourceKind: 'Operation', sourceId: delegation.collection.operationId, attempt })
   }
   for (const patrol of demand.patrols ?? []) {
-    entries.push({ key: `patrol:${patrol.operationId}`, at: patrol.requestedAt, label: patrol.purpose === 'plan' ? 'Plan requested' : 'Inspection requested',
+    entries.push({ key: `patrol:${patrol.operationId}`, at: patrol.requestedAt, label: patrol.purpose === 'plan' ? 'Plan requested' : patrol.purpose === 'confirmation' ? 'Confirmed · Continuation requested' : 'Inspection requested',
       author: patrol.requestedBy, sourceKind: 'Operation', sourceId: patrol.operationId })
     if (patrol.report) entries.push({ key: `patrol-report:${patrol.operationId}`, at: patrol.report.reportedAt,
       label: patrol.report.applied ? 'Inspection recorded' : 'Inspection reported · not applied',
@@ -93,7 +94,7 @@ export function GoalSupervisorRail({ demand, onChooseSupervisor, onAddAssignee, 
   const [progressOpened, setProgressOpened] = useState(false)
   const [all, setAll] = useState(false)
   const entries = useMemo(() => coordinationEntries(demand), [demand.plan, demand.delegations, demand.patrols, demand.decisions])
-  const supervisor = demand.supervisorSessionId, hosts = goalSupervisorHostWitnesses(demand)
+  const supervisor = demand.supervisorSessionId, hosts = goalSupervisorPresentationHosts(demand)
   const observation = demand.responsibility?.supervisor
   const diagnostic = observation && { ended: 'Supervisor Run ended', blocked: 'Supervisor needs attention', unknown: 'Supervisor observation unconfirmed', missing: 'Supervisor unassigned', available: '', busy: '' }[observation.state]
   const hostUnconfirmed = typeof supervisor === 'string' && hosts.length !== 1

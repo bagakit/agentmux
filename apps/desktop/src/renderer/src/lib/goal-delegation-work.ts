@@ -1,4 +1,5 @@
 import { demandAgentReferenceKey } from '@agentmux/demand/relations'
+import { currentGoalConfirmationNotice } from '@agentmux/demand/goal-patrol'
 import { useEffect } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { GoalDelegationResult } from '@agentmux/core/goal-delegation'
@@ -102,7 +103,8 @@ export function refreshKnownGoalResponsibilities(goalIds: readonly string[]): vo
   const goals = useAppStore.getState().demands
   for (const id of goalIds) {
     const goal = goals[id]
-    if (goal && goal.status !== 'done' && goal.status !== 'cancelled' && (goal.delegations?.length || goal.dispatches?.some(item => item.execution === 'finite')))
+    if (goal && goal.status !== 'done' && goal.status !== 'cancelled' &&
+      (goal.delegations?.length || goal.dispatches?.some(item => item.execution === 'finite') || currentGoalConfirmationNotice(goal)))
       void refreshGoalDelegations(id)
   }
 }

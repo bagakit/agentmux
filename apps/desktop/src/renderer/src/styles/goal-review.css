@@ -6,6 +6,9 @@
 .goal-review__no-results--compact { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-4) var(--sp-5); margin-top: var(--sp-5); }
 .goal-review__no-results--compact > .goals-muted { flex: 1 1 260px; margin: 0; font-size: var(--fs-body); }
 .goal-review__no-results--compact > .goals-inline-actions { margin: 0; }
+.goal-review__confirm-agent { display: inline-flex; min-width: 0; align-items: center; gap: var(--sp-2); }
+.goal-review__confirm-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.goal-review__notification { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3) var(--sp-4); font-size: var(--fs-meta); }
 .goal-review__extra-checks { margin-top: var(--sp-6); }
 .goal-review__extra-checks h3 { margin-bottom: var(--sp-4); color: var(--text-2); font-size: var(--fs-body); font-weight: 500; }
 
