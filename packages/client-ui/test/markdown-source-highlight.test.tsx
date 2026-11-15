@@ -59,6 +59,17 @@ describe('Markdown source highlight ranges', () => {
     expect(parse).toHaveBeenCalledTimes(1)
   })
 
+  it('bounds repeated nesting across normal-length lines and still colors ordinary long drafts', () => {
+    const parse = vi.spyOn(grammar, 'parseMarkdownSource')
+    const denseDraft = ('- '.repeat(32) + 'last\n').repeat(20)
+    expect(highlighted(denseDraft)).toEqual([])
+    expect(parse).not.toHaveBeenCalled()
+
+    const ordinaryDraft = '# Review\n\n- Fix **this** issue and cite the `result`.\n'.repeat(72)
+    expect(highlighted(ordinaryDraft)).toHaveLength(288)
+    expect(parse).toHaveBeenCalledOnce()
+  })
+
   it('drops only coloring when the shared grammar fails and permits the next source to be highlighted', () => {
     vi.spyOn(grammar, 'parseMarkdownSource').mockImplementationOnce(() => { throw new RangeError('parser stack') })
     expect(highlighted('# Heading')).toEqual([])
