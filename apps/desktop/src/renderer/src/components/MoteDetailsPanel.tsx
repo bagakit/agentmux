@@ -8,7 +8,7 @@ import { MoteDiscussions } from './MoteDiscussions'
 import { MoteConnectionIdentity } from './MoteConnectionIdentity'
 import { MotePrivateChat } from './MotePrivateChat'
 import { MOTE_QUICK_MODE_PATH, TOPIC_AGENT_INSTRUCTIONS_PATH, MOTE_MEMORY_PATH, MOTE_SOUL_PATH } from '@agentmux/host/mote-model'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useShallow } from 'zustand/react/shallow'
@@ -20,7 +20,7 @@ import { topicSpaceIconTarget, type SpaceIconTarget } from '../lib/space-object-
 import { documentKey } from '../lib/workbench-tabs'
 import { listMoteMaterials, readMoteMaterial, readMoteBehavior, type SavedMoteBehavior } from '../lib/mote-cooperation'
 import type { FileDirectoryEntry } from '@agentmux/core/files'
-import { MOTE_BEHAVIOR_AXES, MOTE_BEHAVIOR_PATH, moteBehaviorIntroduction } from '../lib/mote-behavior'
+import { MOTE_BEHAVIOR_AXES, MOTE_BEHAVIOR_PATH } from '../lib/mote-behavior'
 import { MoteBehaviorAction, MoteBehaviorDialog } from './MoteBehaviorDialog'
 import { useAppStore } from '../store'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
@@ -80,8 +80,8 @@ export function MoteDetailsPanel({ scope, reference, onOpenPath, onCreateNote, a
   const icon = useAppStore(state => iconTarget ? state.spaceObjectIcons[iconTarget.key] ?? null : null)
   const returnFocus = (invoker: { node: HTMLButtonElement; key: string } | null) =>
     iconTarget && invoker?.key === iconTarget.key && invoker.node.isConnected ? invoker.node : null
-  const identity = <>
-    <div className="mote-details__identity">
+  const profile = (personality: ReactNode) => <section className="mote-details__profile" aria-label="Mote identity" hidden={section !== 'profile' || discussion}>
+      <div className="mote-details__identity">
           <IconButton type="button" className="mote-details__avatar" aria-label="Change Mote avatar" title="Change Mote avatar" onClick={event => {
             if (!iconTarget) { useAppStore.getState().reportError(new Error('The original avatar identity is unconfirmed. Its existing appearance and workface are kept; repair the same directory record.')); return }
             avatarInvoker.current = { node: event.currentTarget, key: iconTarget.key }
@@ -96,22 +96,20 @@ export function MoteDetailsPanel({ scope, reference, onOpenPath, onCreateNote, a
             setRename({ topic: { ...scope.topic }, workspace: { ...scope.workspace } })
           }}><ThemeActionEditIcon size={12} /></IconButton></div></div>
         </div>
-  </>
-  return <section className="mote-details" data-mote-details={scope.topic.id} data-section={discussion ? 'discussion' : section} data-shared-navigation={space ? 'true' : undefined}>
-    {!space ? <div className="mote-details__navigation-bar">{section !== 'profile' ? <strong className="mote-space-frame__name" title={scope.topic.title}>{scope.topic.title}</strong> : null}<SurfaceModeSwitch value={section} active={active} ariaLabel="Mote details"
-      options={[{ value: 'profile', label: 'Profile' }, { value: 'ideas', label: 'Ideas' }, { value: 'calendar', label: 'Calendar' }]} onChange={setSection} />
-    </div> : null}
-    <header className="mote-details__profile" aria-label="Mote identity" hidden={section !== 'profile' || discussion}>
-      <div className="mote-details__cover" aria-hidden="true" />{identity}
       {scope.topic.summary ? <div className="mote-details__introduction" data-expanded={introductionOpen || scope.topic.summary.length <= 160}>
         <p>{scope.topic.summary}</p>
         {scope.topic.summary.length > 160 ? <button type="button" aria-expanded={introductionOpen} onClick={() => setIntroductionOpen(value => !value)}>{introductionOpen ? 'Less' : 'Read more'}</button> : null}
       </div> : null}
+      {personality}
       <div className="mote-details__profile-facts">
         <dl><div><dt>Workspace</dt><dd>{scope.workspace.name}</dd></div></dl>
         <button type="button" className="mote-details__edit-profile" onClick={event => { profileInvoker.current = event.currentTarget; setProfileOpen(true) }}><ThemeActionEditIcon size={12} />Edit profile</button>
       </div>
-    </header>
+    </section>
+  return <section className="mote-details" data-mote-details={scope.topic.id} data-section={discussion ? 'discussion' : section} data-shared-navigation={space ? 'true' : undefined}>
+    {!space ? <div className="mote-details__navigation-bar">{section !== 'profile' ? <strong className="mote-space-frame__name" title={scope.topic.title}>{scope.topic.title}</strong> : null}<SurfaceModeSwitch value={section} active={active} ariaLabel="Mote details"
+      options={[{ value: 'profile', label: 'Profile' }, { value: 'ideas', label: 'Ideas' }, { value: 'calendar', label: 'Calendar' }]} onChange={setSection} />
+    </div> : null}
     {profileOpen ? <MoteProfileDialog key={JSON.stringify([scope.workspace.hostId, scope.workspace.id, scope.topic.id, scope.rootPath])} scope={scope} reference={reference} onOpenPath={onOpenPath}
       onClose={() => setProfileOpen(false)} returnFocus={() => profileInvoker.current?.isConnected ? profileInvoker.current : null} /> : null}
     <div className="mote-details__main">
@@ -120,7 +118,7 @@ export function MoteDetailsPanel({ scope, reference, onOpenPath, onCreateNote, a
     </div> : null}
     <div className="mote-details__mode" hidden={discussion || section === 'calendar'}>
     <MoteContent key={JSON.stringify([scope.workspace.id, scope.workspace.hostId, scope.workspace.path, scope.topic.id, scope.topic.directoryPath, scope.rootPath])}
-      scope={scope} reference={reference} active={active && !discussion && section !== 'calendar'} section={contentSection.current} sharedQuestion={!!space}
+      scope={scope} reference={reference} profile={profile} active={active && !discussion && section !== 'calendar'} section={contentSection.current} sharedQuestion={!!space}
       onShowIdeas={() => setSection('ideas')} onShowCalendar={showCalendar} onOpenPath={onOpenPath} onCreateNote={onCreateNote} />
     </div>
     <div className="mote-details__mode" hidden={discussion || section !== 'calendar'}>
@@ -132,8 +130,9 @@ export function MoteDetailsPanel({ scope, reference, onOpenPath, onCreateNote, a
   </section>
 }
 
-function MoteContent({ scope, reference, section, onShowIdeas, onShowCalendar, onOpenPath, onCreateNote, active, sharedQuestion }: {
+function MoteContent({ scope, reference, profile, section, onShowIdeas, onShowCalendar, onOpenPath, onCreateNote, active, sharedQuestion }: {
   scope: MoteWorkfaceScope; reference?: WorkbenchProjectionSelection | null | undefined; section: Exclude<MoteSection, 'calendar'>; active: boolean; sharedQuestion: boolean; onShowIdeas(): void; onShowCalendar(scheduleId?: string): void
+  profile(personality: ReactNode): ReactNode
   onOpenPath(path: string): Promise<unknown>; onCreateNote?: (() => void) | undefined
 }) {
   const content = useRef<HTMLDivElement>(null)
@@ -238,9 +237,10 @@ function MoteContent({ scope, reference, section, onShowIdeas, onShowCalendar, o
   return <div ref={content} className="mote-details__content" role="tabpanel" aria-label={section === 'profile' ? 'Mote profile' : 'Mote ideas'}
     onScroll={event => { if (active) readingPositions.current[section] = event.currentTarget.scrollTop }}>
     <div className="mote-profile" hidden={section !== 'profile'}>
-      <MoteBehaviorSummary scope={scope} active={profileActive} onEdit={() => { behaviorInvoker.current = document.activeElement as HTMLElement; setBehaviorOpen(true) }} onOpenPath={onOpenPath} />
+      {profile(<MoteBehaviorSummary scope={scope} active={profileActive} onOpenPath={onOpenPath}
+        onEdit={() => { behaviorInvoker.current = document.activeElement as HTMLElement; setBehaviorOpen(true) }} />)}
+      <div className="mote-profile__activity">
       {sharedQuestion ? <MoteDiscussions scope={scope} active={profileActive} limit={3} /> : null}
-      <MoteMemory scope={scope} active={profileActive} onOpenPath={onOpenPath} />
       <div className="mote-profile__columns">
       <div className="mote-profile__work">
       <MoteCurrentWork scope={scope} reference={reference} active={profileActive} />
@@ -253,6 +253,7 @@ function MoteContent({ scope, reference, section, onShowIdeas, onShowCalendar, o
         {emptyIdeas ? <button type="button" className="mote-details__invitation" onClick={onShowIdeas}>A place for your next idea.<ThemeNavigationForwardIcon size={12} /></button> : null}
         {directory.status === 'complete' && !recent.length && notes.length > 0 ? <p className="mote-details__hint">Recent updates are not confirmed. All notes remain in Ideas.</p> : null}
       </div>
+      <MoteMemory scope={scope} active={profileActive} onOpenPath={onOpenPath} />
       </div>
       <aside className="mote-profile__about" aria-label="Cooperation settings">
       {!sharedQuestion ? <section className="mote-profile__start" aria-label="Work together">
@@ -265,6 +266,7 @@ function MoteContent({ scope, reference, section, onShowIdeas, onShowCalendar, o
         <MoteConnectionIdentity key={JSON.stringify([scope.workspace.id, scope.workspace.hostId, scope.topic.id])} scope={scope} active={profileActive && preferencesOpen} />
       </details>
       </aside>
+      </div>
       </div>
       {behaviorOpen ? <MoteBehaviorDialog scope={scope} reference={reference} onOpenPath={onOpenPath}
         onClose={() => setBehaviorOpen(false)} returnFocus={() => behaviorInvoker.current?.isConnected ? behaviorInvoker.current : null} /> : null}
@@ -362,19 +364,26 @@ function MoteBehaviorSummary({ scope, onEdit, onOpenPath, active }: {
   const confirmed = !loading && !issue && !documentIssue && !(saved?.legacySoul && soulIssue) ? saved : null
   const choices = confirmed ? MOTE_BEHAVIOR_AXES.map(axis => ({ axis, choice: axis.choices.find(choice => choice.value === confirmed.preferences[axis.id]) })) : []
   const hasPreferences = !!confirmed && (choices.some(({ choice }) => !!choice) || !!confirmed.preferences.custom)
-  const summary = hasPreferences ? moteBehaviorIntroduction(confirmed!.preferences, 'summary') : null
-  return <div className="mote-details__self mote-behavior-summary">
-    <div className="mote-details__section-actions"><h3>Personality &amp; working style</h3><MoteBehaviorAction label="Edit behavior settings" onClick={onEdit}><ThemeActionEditIcon size={14} /></MoteBehaviorAction></div>
-    {confirmed ? <div className="mote-behavior-summary__saved" title={summary!}>
-      {confirmed.code ? <span className="mote-behavior-summary__tag">MBTI style · {confirmed.code}</span> : null}
+  return <section className="mote-behavior-summary" aria-label="Personality">
+    <div className="mote-behavior-summary__heading">
+      <h3>Personality</h3>
+      {confirmed?.code ? <span className="mote-behavior-summary__tag"><small>MBTI style · </small>{confirmed.code}</span> : null}
+      <MoteBehaviorAction label="Edit behavior settings" onClick={onEdit}><ThemeActionEditIcon size={14} /></MoteBehaviorAction>
+    </div>
+    {confirmed ? <div className="mote-behavior-summary__saved">
       <dl className="mote-behavior-summary__choices">{choices.map(({ axis, choice }) => <div key={axis.id} data-behavior-axis={axis.id}>
-        <dt>{axis.label}</dt><dd><strong>{choice?.title ?? 'Not selected'}</strong>{choice ? <p>{choice.rule}</p> : null}</dd>
+        <dt>{axis.label}</dt><dd data-empty={!choice || undefined}><strong>{choice?.title ?? 'Not selected'}</strong></dd>
       </div>)}</dl>
-      {confirmed.preferences.custom ? <p className="mote-behavior-summary__custom">{confirmed.preferences.custom}</p> : null}
+      {hasPreferences ? <details className="mote-behavior-summary__details">
+        <summary>How we work together<ThemeNavigationDownIcon size={12} /></summary>
+        <dl>{choices.flatMap(({ axis, choice }) => choice ? [<div key={axis.id} data-behavior-rule={axis.id}><dt>{axis.label}</dt><dd>{choice.rule}</dd></div>] : [])}</dl>
+        {confirmed.preferences.custom ? <div className="mote-behavior-summary__custom"><strong>Custom preferences</strong><p>{confirmed.preferences.custom}</p></div> : null}
+      </details> : null}
       {confirmed.legacySoul ? <p className="mote-details__hint">Saved in your original SOUL. Save settings once to move them into BEHAVIOR.md.</p> : null}
       {!hasPreferences ? <button type="button" className="mote-details__invitation" onClick={onEdit}>Choose how we work together.<ThemeNavigationForwardIcon size={12} /></button> : null}
-    </div> : <p className="mote-details__hint">{loading ? 'Reading saved behavior…' : !admitted.current ? 'Saved behavior not read yet.' : 'Saved behavior is unconfirmed.'}</p>}
-    {issue ? <div role="status" className="mote-details__issue">{issue}<Button type="button" onClick={() => setAttempt(value => value + 1)}>Retry settings</Button></div> : null}
+    </div> : !issue ? <p className="mote-details__hint">{loading ? 'Reading saved behavior…' : !admitted.current ? 'Saved behavior not read yet.' : 'Saved behavior is unconfirmed.'}</p> : null}
+    {issue ? <Notice tone="unknown" density="compact" messageRole="status"
+      actions={<Button type="button" onClick={() => setAttempt(value => value + 1)}>Retry settings</Button>}>{issue}</Notice> : null}
     <details className="mote-details__soul" onToggle={event => setSoulOpen(event.currentTarget.open)}><summary><ThemeFileTextIcon size={12} />Original files<ThemeNavigationDownIcon size={12} /></summary>
       {soulOpen && scope.topic.summary ? <div className="mote-details__original-context"><span className="mote-details__hint">topic.md · saved context</span><p>{scope.topic.summary}</p><Button type="button" onClick={() => void onOpenPath(scope.rootPath + '/topic.md')}>Open original context</Button></div> : null}
       {soulOpen ? <p className="mote-details__hint">SOUL.md · self instructions</p> : null}
@@ -384,7 +393,7 @@ function MoteBehaviorSummary({ scope, onEdit, onOpenPath, active }: {
       <p className="mote-details__hint">Saved changes apply to new Sessions. Current discussions keep their context; your current directions take priority.</p>
       <Button type="button" onClick={() => void onOpenPath(scope.rootPath + '/' + MOTE_SOUL_PATH)}>Open original SOUL</Button>
     </details>
-  </div>
+  </section>
 }
 
 /** Pause only automatic observation; the last displayed original revision remains honest. */
