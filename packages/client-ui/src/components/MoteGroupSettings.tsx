@@ -69,7 +69,15 @@ export function MoteGroupSettingsFields({ value, members, topicCandidates, rende
 
 type SettingsMethod = 'space.mote.group.update' | 'space.mote.group.members.add' | 'space.mote.group.members.remove'
 type Pending = { [M in SettingsMethod]: { method: M; input: AgentMuxRpcParams<M> } }[SettingsMethod]
-const activeMember = (member: MoteGroupMember) => (member.state ?? 'active') === 'active'
+const activeMember = (member: MoteGroupMember) => member.state === 'active'
+const invitationLabel = { pending: '入群通知待送', accepted: '已收到入群通知', failed: '入群通知未送达', unknown: '入群通知待核对' } as const
+function memberSummary(member: MoteGroupMember) {
+  if (member.state === 'left') return '已退群'
+  if (member.state === 'removed') return '已移出'
+  if (member.role === 'admin') return '管理员'
+  if (member.invitation) return invitationLabel[member.invitation.status]
+  return member.thread ? '查看群内会话' : '尚未参与发言'
+}
 
 export function MoteGroupDetails({ group, candidates, topicCandidates, call, onUpdated, onPerspective, renderMoteAvatar }: {
   group: MoteGroupSummary
@@ -127,7 +135,7 @@ export function MoteGroupDetails({ group, candidates, topicCandidates, call, onU
         <button type="button" onClick={() => onPerspective(member.moteId)}>
           <span className="mote-group__avatar" aria-hidden="true">{renderMoteAvatar?.(member.moteId, member.name) ?? Array.from(member.name.trim())[0] ?? '·'}</span>
           <strong>{member.name}</strong>
-          <span>{member.state === 'left' ? '已退群' : member.state === 'removed' ? '已移出' : member.role === 'admin' ? '管理员' : member.thread ? '查看群内会话' : '尚未参与发言'}</span>
+          <span title={member.invitation?.issue} aria-description={member.invitation ? invitationLabel[member.invitation.status] : undefined}>{memberSummary(member)}</span>
         </button>
         {ready && activeMember(member) ? <div className="mote-group-settings__member-actions">
           <Button disabled={Boolean(pending)} onClick={() => {
