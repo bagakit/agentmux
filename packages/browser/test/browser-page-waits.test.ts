@@ -3,16 +3,16 @@ import { createBrowserPageDispatch } from '../src/browser-page-dispatch.js'
 import type { BrowserPageTransport } from '../src/browser-page-transport.js'
 
 /** A page whose accessibility tree and URL the test changes between polls. */
-function page(state: { url: string; navigationId: string; nodes: { role: string; name: string }[] }) {
+function page(state: { url: string; navigationId: string; nodes: { role: string; name: string }[] }, readyState?: () => string) {
   const session: BrowserPageTransport = {
-    sendCommand: async (method) => {
+    sendCommand: async (method, params) => {
       if (method === 'Page.createIsolatedWorld') return { executionContextId: 1 }
       if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: 'main-document', loaderId: 'loader-main' } } }
       if (method === 'Accessibility.getFullAXTree') {
         return { nodes: [{ nodeId: 'root', role: { value: 'RootWebArea' }, name: { value: 'r' }, childIds: state.nodes.map((_, i) => String(i + 1)) },
           ...state.nodes.map((node, i) => ({ nodeId: String(i + 1), backendDOMNodeId: 11 + i, role: { value: node.role }, name: { value: node.name }, childIds: [] }))] }
       }
-      if (method === 'Runtime.evaluate') return { result: { value: '[]' } }
+      if (method === 'Runtime.evaluate') return { result: { value: params?.expression === 'document.readyState' ? readyState?.() : '[]' } }
       return {}
     },
     frames: new Map(), endedReason: null, frameDiscoveryFailure: null, observe: () => () => {}
@@ -24,6 +24,20 @@ function page(state: { url: string; navigationId: string; nodes: { role: string;
 }
 
 describe('waiting for the page', () => {
+  it('checks the ready state again when the original document changes during the read', async () => {
+    const state = { url: 'https://example.test/start', navigationId: 'original-document', nodes: [] }
+    let reads = 0
+    const dispatch = page(state, () => {
+      if (++reads === 1) {
+        state.url = 'https://example.test/end'
+        state.navigationId = 'new-document'
+      }
+      return 'complete'
+    })
+    await expect(dispatch('waitForLoad', [2_000])).resolves.toEqual({ url: state.url, navigationId: 'new-document' })
+    expect(reads).toBe(2)
+  })
+
   it('waitForUrl returns the document the page reached, for a full URL, a part or a pattern', async () => {
     const state = { url: 'https://example.test/start', navigationId: 'nav-1', nodes: [] }
     const dispatch = page(state)
