@@ -73,6 +73,7 @@ export interface AgentExecutionInspection {
 const nativeLock = createRequire(import.meta.url)('fs-native-extensions') as { tryLock(fd: number): boolean }
 const fail = (message: string, code = 'EXECUTION_BINDING_CONFLICT') => new AgentMuxError(message, code)
 const routedIntentSchema = 'agentmux.routed-execution-intent.v1'
+const readerTransportFailures = new Set(['CONTROL_CONNECTION_FAILED', 'CONTROL_TIMEOUT', 'CONTROL_UNAVAILABLE', 'CTXMUX_DISCONNECTED', 'RUNTIME_OWNER_CHANGED'])
 const creationId = (binding: string, role: string) => createHash('sha256').update(JSON.stringify([binding, role])).digest('hex')
 const reference = (input: AgentExecutionOpenInput): AgentExecutionReference => ({ bindingId: input.bindingId, agentSessionId: input.agent.agentSessionId, createOperationId: input.agent.createOperationId })
 function executionFailure(error: unknown, input: AgentExecutionOpenInput, step: Omit<AgentExecutionFailure, 'reference'>): AgentMuxError {
@@ -99,6 +100,7 @@ type ResolvedHosts = { agent: AgentExecutionHostPort; resource: AgentExecutionHo
 export class AgentExecutionCoordinator {
   private readonly lanes = new Map<string, Promise<unknown>>()
   private readonly bridges = new Map<string, { bridge: AgentExecutionBridge; dispose(): Promise<void> }>()
+  private readonly readerRecovery = new Map<string, ReturnType<typeof setTimeout>>()
   private readonly observations = new Map<string, AgentExecutionInspection>()
   private readonly projectionFailures = new Map<string, AgentExecutionDiagnostic>()
   private readonly connectionFailures = new Map<string, Diagnostic & { protocolFrame?: Pick<ExecutionProtocolFrameError, 'side' | 'frame'> }>()
@@ -276,15 +278,44 @@ export class AgentExecutionCoordinator {
   }
   /** Resume only retained bridge readers. This never creates or restores an Agent Run. */
   async rejoin(bindingId: string, context?: AgentMuxRpcCallContext): Promise<AgentExecutionInspection> {
-    return await this.serialize(bindingId, async () => {
-      const record = this.read(bindingId)
-      if (!record?.bridge) throw fail('The original execution bridge has no confirmed helper pair.', 'EXECUTION_HELPER_UNAVAILABLE')
-      try {
-        await this.options.authorize?.(record.input, context, record.routeAuthorization, true)
-        const hosts = await this.hosts(record)
-        try { await this.attach(record, hosts); return this.inspect(bindingId)! } finally { if (!hosts.adopted) await hosts.dispose() }
-      } catch (error) { this.observeFailure(record.input, error); throw error }
-    })
+    const before = { bridge: this.bridges.get(bindingId)?.bridge, unavailable: !!this.connectionDiagnostic(bindingId) }
+    return await this.serialize(bindingId, () => this.rejoinOriginal(bindingId, context, 0, before))
+  }
+  private async rejoinOriginal(bindingId: string, context: AgentMuxRpcCallContext | undefined, attempt: number,
+    before?: { bridge: AgentExecutionBridge | undefined; unavailable: boolean }): Promise<AgentExecutionInspection> {
+    const record = this.read(bindingId)
+    if (!record?.bridge) throw fail('The original execution bridge has no confirmed helper pair.', 'EXECUTION_HELPER_UNAVAILABLE')
+    try {
+      await this.options.authorize?.(record.input, context, record.routeAuthorization, true)
+      const current = this.bridges.get(bindingId)?.bridge
+      // A queued rejoin can share a reader recovered since its original observation.
+      if (before && current && (before.unavailable || current !== before.bridge) && !this.connectionDiagnostic(bindingId))
+        return this.inspect(bindingId)!
+      const hosts = await this.hosts(record)
+      try { await this.attach(record, hosts, attempt); return this.inspect(bindingId)! } finally { if (!hosts.adopted) await hosts.dispose() }
+    } catch (error) { this.observeFailure(record.input, error); throw error }
+  }
+  private clearReaderRecovery(bindingId: string): void {
+    clearTimeout(this.readerRecovery.get(bindingId))
+    this.readerRecovery.delete(bindingId)
+  }
+  private scheduleReaderRecovery(bindingId: string, code: string, attempt = 0): void {
+    if (this.disposed || this.readerRecovery.has(bindingId) || !readerTransportFailures.has(code)) return
+    // The binding owns reader lifetime. No polling is needed after attachment,
+    // and RPC transports still make single attempts on behalf of this reader.
+    const window = Math.min(250 * 2 ** attempt, 30_000)
+    const timer = setTimeout(() => {
+      void this.serialize(bindingId, async () => {
+        if (this.readerRecovery.get(bindingId) !== timer) return
+        this.readerRecovery.delete(bindingId)
+        try { await this.rejoinOriginal(bindingId, undefined, attempt + 1) }
+        catch (error) {
+          if (error instanceof AgentMuxError && error.executionFailure) this.scheduleReaderRecovery(bindingId, error.code, attempt + 1)
+        }
+      }).catch(() => { /* This owner may have closed while the lane was queued. */ })
+    }, Math.floor(window * (0.5 + Math.random() * 0.5)))
+    timer.unref()
+    this.readerRecovery.set(bindingId, timer)
   }
   private observeFailure(input: AgentExecutionOpenInput, error: unknown): void {
     const frame = error instanceof ExecutionProtocolFrameError ? error : error instanceof Error && error.cause instanceof ExecutionProtocolFrameError ? error.cause : undefined
@@ -325,13 +356,19 @@ export class AgentExecutionCoordinator {
     this.bridges.delete(id)
     try { await owned.bridge.close() } finally { await owned.dispose() }
   }
-  private async attach(record: RecordValue, hosts: ResolvedHosts): Promise<void> {
+  private async attach(record: RecordValue, hosts: ResolvedHosts, attempt = 0): Promise<void> {
     const id = record.input.bindingId
     await this.closeBridge(id)
     const latest = this.read(id)
     if (!latest || !isDeepStrictEqual(latest.input, record.input)) throw fail('The original execution binding changed while its reader was closing.')
     Object.assign(record, latest)
     this.helperConnections.set(id, new Map())
+    let attachedAt: number | undefined
+    const recoverReader = (code: string) => {
+      if (attachedAt === undefined) return
+      const stable = performance.now() - attachedAt >= 30_000
+      this.scheduleReaderRecovery(id, code, stable ? 0 : attempt)
+    }
     const bridge = new AgentExecutionBridge({ state: record.bridge!, ports: { frontend: hosts.agent, executor: hosts.resource },
       persist: async state => {
         const next = { ...record, bridge: state }
@@ -385,11 +422,19 @@ export class AgentExecutionCoordinator {
       onConnection: (side, connection) => {
         const before = this.connectionDiagnostic(id)
         this.helperConnections.get(id)!.set(side, connection)
+        const after = this.connectionDiagnostic(id)
         // Native byte counters advance independently of the public connection
         // fact. Retain their revision without rereading the durable creation intent.
-        if (!isDeepStrictEqual(before, this.connectionDiagnostic(id))) this.observe(record.input)
+        if (!isDeepStrictEqual(before, after)) this.observe(record.input)
+        if (connection.process === 'running' && connection.reader === 'unavailable' && connection.readerDiagnostic)
+          recoverReader(connection.readerDiagnostic.code)
+        // The Hosted attachment may independently recover before the binding retry.
+        if (before && !after) this.clearReaderRecovery(id)
       },
-      onError: error => this.observeFailure(record.input, error) })
+      onError: error => {
+        this.observeFailure(record.input, error)
+        if (bridge.failureSide && error instanceof AgentMuxError) recoverReader(error.code)
+      } })
     this.bridges.set(id, { bridge, dispose: hosts.dispose }); hosts.adopted = true
     try { await bridge.start() }
     catch (error) {
@@ -398,6 +443,8 @@ export class AgentExecutionCoordinator {
       if (side) throw executionFailure(error, record.input, { hostId: side === 'frontend' ? record.input.agentHostId : record.input.resourceHostId, role: side, stage: 'attach' })
       throw error
     }
+    attachedAt = performance.now()
+    this.clearReaderRecovery(id)
     this.connectionFailures.delete(id)
     this.observe(record.input, undefined, record.notices)
   }
@@ -563,10 +610,16 @@ export class AgentExecutionCoordinator {
 
   async restoreReaders(): Promise<void> {
     const ids = this.db.prepare('SELECT id FROM bindings').all().map(row => String(row.id))
-    await Promise.allSettled(ids.map(id => this.rejoin(id)))
+    await Promise.all(ids.map(async id => {
+      try { await this.rejoin(id) }
+      catch (error) {
+        if (error instanceof AgentMuxError && error.executionFailure) this.scheduleReaderRecovery(id, error.code)
+      }
+    }))
   }
   async dispose(): Promise<void> {
     this.disposed = true
+    for (const bindingId of this.readerRecovery.keys()) this.clearReaderRecovery(bindingId)
     await Promise.allSettled([...this.lanes.values()])
     await Promise.allSettled([...this.bridges.keys()].map(id => this.closeBridge(id)))
     this.bridges.clear(); this.db.close(); await this.lease.close()
