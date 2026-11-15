@@ -119,9 +119,18 @@ function unique(values: readonly string[], code: Code): void {
 function target(value: unknown, code: Code): MotePreferencesTarget {
   return parseMotePreferencesTarget(value, code)
 }
-function page(p: Record<string, unknown>, code: Code): void {
-  if (p.limit !== undefined) number(p.limit, code, 1, 100)
-  if (p.beforeSequence !== undefined) number(p.beforeSequence, code, 1)
+const requestCode = 'INVALID_CONTROL_REQUEST' as const
+function field(name: string, expected: string, validate: () => unknown): void {
+  try { validate() }
+  catch (error) {
+    if (!(error instanceof AgentMuxError) || error.code !== requestCode) throw error
+    throw new AgentMuxError(`Invalid Group field "${name}". ${expected}`, requestCode)
+  }
+}
+
+function page(p: Record<string, unknown>): void {
+  if (p.limit !== undefined) field('limit', 'Use an integer from 1 to 100.', () => number(p.limit, requestCode, 1, 100))
+  if (p.beforeSequence !== undefined) field('beforeSequence', 'Use the original positive page cursor.', () => number(p.beforeSequence, requestCode, 1))
 }
 const requestFields = {
   'space.mote.group.list': ['moteId', 'beforeSequence', 'limit'],
@@ -141,13 +150,17 @@ function nonemptyUnique<T>(entries: T[], identity: (value: T) => string, code: C
   if (!entries.length) invalid(code)
   unique(entries.map(identity), code)
 }
-function editableSettings(p: Record<string, unknown>, code: Code, nullable: boolean) {
-  if (p.avatarMoteIds !== undefined) {
-    unique(list(p.avatarMoteIds, code, 4, entry => string(entry, code)), code)
+function editableSettings(p: Record<string, unknown>, nullable: boolean) {
+  const ids = (name: 'avatarMoteIds' | 'adminMoteIds', max: number) => {
+    if (p[name] !== undefined) field(name, `Use up to ${max} distinct Mote IDs.`,
+      () => unique(list(p[name], requestCode, max, entry => string(entry, requestCode)), requestCode))
   }
-  if (p.adminMoteIds !== undefined) unique(list(p.adminMoteIds, code, 32, entry => string(entry, code)), code)
-  if (p.announcement !== undefined && (!nullable || p.announcement !== null)) string(p.announcement, code, MOTE_GROUP_MAX_BODY_LENGTH, true)
-  if (p.topic !== undefined && (!nullable || p.topic !== null)) target(p.topic, code)
+  ids('avatarMoteIds', 4)
+  ids('adminMoteIds', 32)
+  if (p.announcement !== undefined && (!nullable || p.announcement !== null)) field('announcement',
+    'Use nonempty announcement text.', () => string(p.announcement, requestCode, MOTE_GROUP_MAX_BODY_LENGTH, true))
+  if (p.topic !== undefined && (!nullable || p.topic !== null)) field('topic',
+    'Use the original Topic with spaceId, zoneId and expectedResource.', () => target(p.topic, requestCode))
 }
 function filePath(value: unknown, code: Code, root: boolean): string {
   const path = string(value, code, 8192)
@@ -158,48 +171,63 @@ function filePath(value: unknown, code: Code, root: boolean): string {
 }
 
 export function parseMoteGroupParams<M extends MoteGroupMethod>(method: M, value: unknown): MoteGroupParamsMap[M] {
-  const code = 'INVALID_CONTROL_REQUEST', p = rpcRecord(value, requestFields[method], code)
+  const code = requestCode, p = rpcRecord(value, requestFields[method], code)
+  const id = (name: string) => field(name, 'Use a nonempty original ID.', () => string(p[name], code))
+  const numeric = (name: string, max = Number.MAX_SAFE_INTEGER) => field(name, `Use a positive integer up to ${max}.`, () => number(p[name], code, 1, max))
+  const members = () => field('members', 'Use 1 to 32 distinct Mote targets with spaceId, zoneId and expectedResource.',
+    () => nonemptyUnique(list(p.members, code, 32, entry => target(entry, code)), member => member.spaceId, code))
+  const ids = (name: 'memberIds' | 'recipientIds', required: boolean) => field(name, 'Use distinct Mote IDs.',
+    () => {
+      const values = list(p[name], code, 32, entry => string(entry, code))
+      if (required && !values.length) return invalid(code)
+      unique(values, code)
+    })
   if (method === 'space.mote.group.list') {
-    page(p, code)
-    if (p.moteId !== undefined) string(p.moteId, code)
+    page(p)
+    if (p.moteId !== undefined) id('moteId')
   } else if (method === 'space.mote.group.create') {
-    string(p.operationId, code); string(p.name, code, 120)
-    nonemptyUnique(list(p.members, code, 32, entry => target(entry, code)), member => member.spaceId, code)
-    editableSettings(p, code, false)
+    id('operationId')
+    field('name', 'Use a nonempty name up to 120 characters.', () => string(p.name, code, 120))
+    members()
+    editableSettings(p, false)
   } else {
-    string(p.groupId, code)
-    if (method === 'space.mote.group.inspect') page(p, code)
+    id('groupId')
+    if (method === 'space.mote.group.inspect') page(p)
     else if (method === 'space.mote.group.retry') {
-      string(p.messageId, code); string(p.memberId, code)
+      id('messageId')
+      id('memberId')
     } else if (method === 'space.mote.group.file.list' || method === 'space.mote.group.file.read') {
-      if (p.inputOperationId !== undefined) string(p.inputOperationId, code)
-      if (method === 'space.mote.group.file.list') {
-        if (p.path !== undefined) filePath(p.path, code, true)
-        if (p.limit !== undefined) number(p.limit, code, 1, 20000)
-      } else {
-        filePath(p.path, code, false)
-        if (p.maxBytes !== undefined) number(p.maxBytes, code, 1, 512 * 1024)
-      }
+      if (p.inputOperationId !== undefined) id('inputOperationId')
+      const root = method === 'space.mote.group.file.list'
+      if (!root || p.path !== undefined) field('path', root
+        ? 'Use "." for the Topic root, or a relative path such as "notes/drafts".'
+        : 'Use a Topic-relative file path such as "notes/draft.md".', () => filePath(p.path, code, root))
+      if (root && p.limit !== undefined) numeric('limit', 20000)
+      if (!root && p.maxBytes !== undefined) numeric('maxBytes', 512 * 1024)
     } else if (method === 'space.mote.group.update' || method === 'space.mote.group.members.add' ||
         method === 'space.mote.group.members.remove' || method === 'space.mote.group.members.leave') {
-      string(p.operationId, code); number(p.expectedRevision, code, 1)
+      id('operationId')
+      field('expectedRevision', 'Use group.revision from Group inspect.', () => number(p.expectedRevision, code, 1))
       if (method === 'space.mote.group.update') {
-        if (Object.keys(p).every(field => (groupEdits as readonly string[]).includes(field))) return invalid(code)
-        editableSettings(p, code, true)
+        if (Object.keys(p).every(name => (groupEdits as readonly string[]).includes(name)))
+          throw new AgentMuxError('Group update requires avatarMoteIds, announcement, topic or adminMoteIds.', code)
+        editableSettings(p, true)
       }
-      if (method === 'space.mote.group.members.add') nonemptyUnique(list(p.members, code, 32, entry => target(entry, code)), member => member.spaceId, code)
-      if (method === 'space.mote.group.members.remove') nonemptyUnique(list(p.memberIds, code, 32, entry => string(entry, code)), entry => entry, code)
+      if (method === 'space.mote.group.members.add') members()
+      if (method === 'space.mote.group.members.remove') ids('memberIds', true)
     } else {
-      string(p.operationId, code); string(p.body, code, MOTE_GROUP_MAX_BODY_LENGTH, true)
-      if (method === 'space.mote.group.reply') string(p.inputOperationId, code)
+      id('operationId')
+      field('body', `Use nonempty reply or message text up to ${MOTE_GROUP_MAX_BODY_LENGTH} UTF-16 code units.`, () => string(p.body, code, MOTE_GROUP_MAX_BODY_LENGTH, true))
+      if (method === 'space.mote.group.reply') id('inputOperationId')
       else {
-        unique(list(p.recipientIds, code, 32, entry => string(entry, code)), code)
-        if (p.replyToMessageId !== undefined) string(p.replyToMessageId, code)
+        ids('recipientIds', false)
+        if (p.replyToMessageId !== undefined) id('replyToMessageId')
       }
     }
   }
-  return structuredClone(p) as MoteGroupParamsMap[M]
+  return p as MoteGroupParamsMap[M]
 }
+
 export function parseMoteGroupDelivery(value: unknown): MoteGroupDelivery {
   const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['moteId', 'operationId', 'status', 'issue'], code)
   string(p.moteId, code); string(p.operationId, code)

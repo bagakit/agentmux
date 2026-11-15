@@ -187,9 +187,12 @@ export class MoteGroupStore {
     })
   }
 
-  async summary(groupId: string): Promise<MoteGroupSummary> {
-    const result = await this.read(null, db => this.group(db, this.originalGroup(db, groupId)))
-    return result ?? groupFailure('The original Group was not found.', 'UNKNOWN_MOTE_GROUP')
+  async boundTopic(groupId: string): Promise<MotePreferencesTarget | null> {
+    const result = await this.read(null, db => {
+      this.originalGroup(db, groupId)
+      return { topic: this.settings(db, groupId).topic }
+    })
+    return (result ?? groupFailure('The original Group was not found.', 'UNKNOWN_MOTE_GROUP')).topic
   }
 
   async inspect(groupId: string, before: number, limit: number): Promise<{ group: MoteGroupSummary; messages: MoteGroupMessage[]; nextBeforeSequence: number | null }> {
@@ -359,14 +362,34 @@ export class MoteGroupStore {
     })
   }
 
+  async noteInvitationIssue(groupId: string, moteId: string, generation: string, issue: string): Promise<void> {
+    await this.write(db => {
+      const current = this.originalMember(db, groupId, moteId)
+      const invitation = current.invitation
+      if (current.member.state !== 'active' || invitation?.operationId !== generation ||
+          invitation.input?.delivery.status === 'accepted') return
+      const input: GroupDeliveryRecord = { ...invitation.input, memberGeneration: generation,
+        delivery: { moteId, operationId: generation, status: 'unknown', issue } }
+      this.writeMember(db, groupId, { ...current, invitation: { ...invitation, input } })
+    })
+  }
+
+  private publishedMessage(db: DatabaseSync, groupId: string, operationId: string): StoredMessage | null {
+    const row = db.prepare('SELECT * FROM messages WHERE group_id=? AND operation_id=?').get(groupId, operationId)
+    return row ? { message: this.message(db, row), digest: String(row.digest) } : null
+  }
+
+  async messageOperation(groupId: string, operationId: string): Promise<StoredMessage | null> {
+    return this.read(null, db => this.publishedMessage(db, groupId, operationId))
+  }
+
   async append(operationId: string, digest: string, body: MessageBody, recipients: MoteGroupDelivery[], actor?: GroupMemberAuthority): Promise<{ message: MoteGroupMessage; fresh: boolean }> {
     return this.write(db => {
       this.originalGroup(db, body.groupId)
-      const find = db.prepare('SELECT * FROM messages WHERE group_id=? AND operation_id=?')
-      const prior = find.get(body.groupId, operationId)
+      const prior = this.publishedMessage(db, body.groupId, operationId)
       if (prior) {
         if (prior.digest !== digest) return groupFailure('This Group operation already has another original message.', 'MOTE_GROUP_OPERATION_CONFLICT')
-        return { message: this.message(db, prior), fresh: false }
+        return { message: prior.message, fresh: false }
       }
       if (actor) this.assertActive(this.originalMember(db, body.groupId, actor.moteId), actor.generation)
       if (body.replyToMessageId && !db.prepare('SELECT id FROM messages WHERE group_id=? AND id=?').get(body.groupId, body.replyToMessageId))
@@ -381,7 +404,7 @@ export class MoteGroupStore {
         .run(body.id, body.groupId, operationId, digest, JSON.stringify(body))
       const insert = db.prepare('INSERT INTO deliveries(message_id,mote_id,operation_id,data) VALUES (?,?,?,?)')
       for (const record of selected) insert.run(body.id, record.delivery.moteId, record.delivery.operationId, JSON.stringify(record))
-      return { message: this.message(db, find.get(body.groupId, operationId)!), fresh: true }
+      return { message: this.publishedMessage(db, body.groupId, operationId)!.message, fresh: true }
     })
   }
 
