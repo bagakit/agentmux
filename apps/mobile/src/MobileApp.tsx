@@ -315,31 +315,33 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
   const enterMote = useCallback(async (spaceId: string | null) => {
     const revision = ++navigationRevision.current, source = client
     const runtime = source?.runtimeOwnerIdentity?.(), recordId = getDeviceWorkface().recordIdentity()
-    setHome('mote'); setSecondary(null); setShowSession(false); setShowGoalWork(false)
-    if (spaceId) setRecentMoteSpaceId(spaceId)
+    const showDirectory = (issue: string) => {
+      setHome('mote'); setSecondary(null); setShowSession(false); setShowGoalWork(false); setNotice(issue)
+    }
     const isCurrent = () => {
       const current = source?.runtimeOwnerIdentity?.()
       return navigationRevision.current === revision && originalConnection.current.client === source && originalConnection.current.connected &&
         current?.runtimeId === runtime?.runtimeId && current?.ownerInstanceId === runtime?.ownerInstanceId && getDeviceWorkface().recordIdentity() === recordId
     }
-    if (!source?.forwardRpc || !connected) { setNotice('暂时无法核对 Mote 主对话，可以从 Mote 目录继续对话。'); return }
+    if (!source?.forwardRpc || !connected) { showDirectory('暂时无法核对 Mote 主对话，可以从 Mote 目录继续对话。'); return }
     try {
       let discovered: AgentMuxSpaceCatalog['spaces'][number] | undefined
       if (!spaceId) {
         const { catalog } = await source.forwardRpc('space.ls', { target: {} })
         if (!isCurrent()) return
         discovered = mobileMoteOwner(catalog, null)
-        if (!discovered) { setNotice('还没确认是哪个 Mote，请在 Mote 目录中选择。'); return }
+        if (!discovered) { showDirectory('还没确认是哪个 Mote，请在 Mote 目录中选择。'); return }
         spaceId = discovered.spaceId
       }
       const { catalog } = await source.forwardRpc('space.ls', { target: { spaceId }, presentation: true })
       if (!isCurrent()) return
       const owner = mobileMoteOwner(catalog, spaceId, discovered)
-      if (!owner) { setNotice('还没确认是哪个 Mote，请在 Mote 目录中选择。'); return }
+      if (!owner) { showDirectory('还没确认是哪个 Mote，请在 Mote 目录中选择。'); return }
       // This entry is for one exact object; an unbound Mote cannot borrow another Main.
       const target = mobileChatStart({ ...catalog, spaces: [owner] }, owner.spaceId)
       const facts = target.identity?.mote?.facts
       const main = facts?.quickMode.status === 'saved' ? facts.quickMode.defaults.conversation : undefined
+      setHome('mote'); setSecondary(null); setShowGoalWork(false); setRecentMoteSpaceId(owner.spaceId)
       setMoteEntryIssue(target.issue ? { client: source, spaceId: owner.spaceId, message: target.issue } : null)
       if (target.sessionId && target.identity && main) openMainAgent(target.sessionId, target.identity, main.hostId)
       else if (target.identity) {
@@ -350,8 +352,8 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
         setMoteView({ spaceId: owner.spaceId, section: 'discussion', detail: false }); setSheet(null)
         setWorkface(value => ({ ...value, selectedSessionId: null, panel: 'conversation' })); setShowSession(true)
       }
-    } catch (error) { if (isCurrent()) setNotice(`Mote 主对话核对未完成：${error instanceof Error ? error.message : String(error)}。可以从 Mote 目录重试。`) }
-  }, [client, connected, openMainAgent, openProfile, objectIdentity, identityRecipient, workface.selectedSessionId])
+    } catch (error) { if (isCurrent()) showDirectory(`Mote 主对话核对未完成：${error instanceof Error ? error.message : String(error)}。可以从 Mote 目录重试。`) }
+  }, [client, connected, openMainAgent, objectIdentity, identityRecipient, workface.selectedSessionId])
   const selectMote = useCallback((id: string) => { void enterMote(id) }, [enterMote])
   const [profileBack, setProfileBack] = useState<(() => void) | null>(null)
   const [spatialBack, setSpatialBack] = useState<(() => void) | null>(null)
@@ -398,8 +400,14 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
   const backRef = useRef(requestBack)
   // Left-edge swipe back runs the same Back as the header button, only while something is behind.
   const mainRef = useRef<HTMLElement>(null)
+  const moteDirectoryRef = useRef<HTMLElement>(null)
+  const [moteDirectoryTarget, setMoteDirectoryTarget] = useState<HTMLElement | null>(null)
+  const attachMoteDirectory = useCallback((element: HTMLElement | null) => {
+    moteDirectoryRef.current = element; setMoteDirectoryTarget(element)
+  }, [])
   const swipeBack = useCallback(() => backRef.current(), [])
   useEdgeBack(mainRef, (connected || hasConnected) && hasBack, swipeBack, navigationRevision.current)
+  useEdgeBack(moteDirectoryRef, (connected || hasConnected) && hasBack && current.directory === 'mote', swipeBack, navigationRevision.current)
   backRef.current = requestBack
   const [notice, setNoticeValue] = useState<string | null>(initial.current.issue)
   const [noticeDetail, setNoticeDetail] = useState<string | undefined>()
@@ -542,10 +550,13 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
   const wideShell = layout.split && workspaceVisible
   const wideWorkface = wideShell && current.session
   const focusRoot = workspaceVisible && current.directory === 'focus'
-  const focusShown = focusRoot || wideWorkface && !sidebarCollapsed
+  const moteDirectoryRoot = workspaceVisible && current.directory === 'mote'
+  const sidebarShown = wideWorkface && !sidebarCollapsed
+  const focusShown = focusRoot || sidebarShown && !moteConversation
+  const moteDirectoryShown = moteDirectoryRoot || sidebarShown && moteConversation
   const focusVisible = exposed && focusShown
   const spatialPresented = current.directory === 'mote' || current.directory === 'space' || current.directory === 'focus'
-  const directoryVisible = exposed && spatialPresented
+  const directoryVisible = exposed && (spatialPresented || moteDirectoryShown)
   const openFocusSession = useCallback((id: string, identity: MobileObjectIdentity) => {
     setHome('focus'); setSecondary(null); openSession(id, identity)
   }, [openSession])
@@ -664,10 +675,13 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
   </div> : null
   const moteTabsId = useId()
   const moteContext = workspaceVisible && current.session && teamSpaceId && !workPanel ? moteRoot ? 'main' as const : 'member' as const : null
-  return <MobileLocalDraftsOwner><MobileHeaderMenuContext.Provider value={menuButton}><MobileAgentMenuContext.Provider value={openAgentMenu}><MobileNoticeScope owner={client} identity={[ getDeviceWorkface().recordIdentity()]}><MobileGoalOperationSafety /><div className="mobile-app" data-wide-shell={wideShell || undefined} data-wide-workface={wideWorkface || undefined} data-short={layout.short || undefined} data-sidebar-collapsed={sidebarCollapsed || undefined} data-focus-root={focusRoot || undefined} data-connection={connection.state} data-mobile-workface={moteConversation ? 'mote' : 'workspace'} data-page-header={primaryHeader ? 'inline' : 'shell'}>
-    <aside ref={setFocusTarget} className="mobile-focus-pane" role={focusRoot ? 'main' : undefined} aria-label="Focus 会话列表" hidden={!focusShown} />
+  const spatialRoot = focusRoot || moteDirectoryRoot
+  const sidebarLabel = moteConversation ? ' Mote 目录' : '会话列表'
+  return <MobileLocalDraftsOwner><MobileHeaderMenuContext.Provider value={menuButton}><MobileAgentMenuContext.Provider value={openAgentMenu}><MobileNoticeScope owner={client} identity={[ getDeviceWorkface().recordIdentity()]}><MobileGoalOperationSafety /><div className="mobile-app" data-wide-shell={wideShell || undefined} data-wide-workface={wideWorkface || undefined} data-short={layout.short || undefined} data-sidebar-collapsed={sidebarCollapsed || undefined} data-focus-root={focusRoot || undefined} data-spatial-root={spatialRoot || undefined} data-connection={connection.state} data-mobile-workface={moteConversation ? 'mote' : 'workspace'} data-page-header={primaryHeader ? 'inline' : 'shell'}>
+    <aside ref={setFocusTarget} className="mobile-companion-pane mobile-focus-pane" role={focusRoot ? 'main' : undefined} aria-label="Focus 会话列表" hidden={!focusShown} />
+    <aside ref={attachMoteDirectory} className="mobile-companion-pane mobile-mote-pane" role={moteDirectoryRoot ? 'main' : undefined} aria-label="Mote 目录" hidden={!moteDirectoryShown} />
     <div className="mobile-primary-pane">
-    {wideWorkface && <button type="button" className="mobile-sidebar-toggle mobile-icon-button" aria-label={sidebarCollapsed ? '展开会话列表' : '收起会话列表'} aria-expanded={!sidebarCollapsed} onClick={() => setSidebarCollapsed(value => !value)}>{sidebarCollapsed ? <ThemeOpenSidebarIcon size={18} /> : <ThemeCloseSidebarIcon size={18} />}</button>}
+    {wideWorkface && <button type="button" className="mobile-sidebar-toggle mobile-icon-button" aria-label={`${sidebarCollapsed ? '展开' : '收起'}${sidebarLabel}`} aria-expanded={!sidebarCollapsed} onClick={() => setSidebarCollapsed(value => !value)}>{sidebarCollapsed ? <ThemeOpenSidebarIcon size={18} /> : <ThemeCloseSidebarIcon size={18} />}</button>}
     {!primaryHeader && <header className={`mobile-header${workspaceVisible && current.session ? ' mobile-header--session' : ''}`}>
       {workspaceVisible && current.session ? <div className="mobile-session-toolbar">
         <button type="button" className="mobile-session-origin" data-mobile-back aria-label={sessionBackLabel} title={sessionBackLabel} {...(backBadge ? { 'aria-description': attention.unconfirmed ? '需要你列表尚未确认，可打开 Focus 重新读取' : `另有 ${needsYouElsewhere} 个需要你` } : {})} onClick={requestBack}><ThemeNavigationBackIcon size={20} />{backBadge ? <span className="mobile-back-badge" aria-hidden="true" data-count={attention.unconfirmed ? undefined : needsYouElsewhere} data-unconfirmed={attention.unconfirmed || undefined}>{attention.unconfirmed ? '?' : needsYouElsewhere > 99 ? '99+' : needsYouElsewhere}</span> : null}</button>
@@ -691,10 +705,10 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
         : '主角色待核对' : mobileMoteRecipient(team, workface.selectedSessionId, selected?.hostId)}
       onTeam={() => setSheet('team')} onMain={() => returnToMoteMain()}
       showMain={Boolean(team?.main?.confirmed && (team.main.reference.sessionId !== workface.selectedSessionId || team.main.reference.hostId !== selected?.hostId))} /> : null}
-    <main ref={mainRef} aria-hidden={focusRoot || undefined} className="mobile-main" tabIndex={-1} {...(screenMotion ? { 'data-motion': screenMotion.kind, 'data-motion-phase': screenMotion.key % 2 } : {})}>
+    <main ref={mainRef} aria-hidden={spatialRoot || undefined} className="mobile-main" tabIndex={-1} {...(screenMotion ? { 'data-motion': screenMotion.kind, 'data-motion-phase': screenMotion.key % 2 } : {})}>
       {!workspaceVisible && <MobileConnectPage {...(gatewayEndpoint ? { gatewayEndpoint } : {})} connection={connection} appIcon={hostAppearance.appIcon} panel={connectionPanel} onDetails={() => setSheet('connection')} />}
       {workspaceVisible && <>
-        <div className="mobile-spatial-host" hidden={!spatialPresented}><MobileSpatialNavigation wide={wideShell} loadingLabel={focusShown ? 'Focus' : home === 'mote' ? 'Mote' : home === 'focus' ? 'Focus' : 'Space'} loadWhen={spatialPresented || focusVisible} focusTarget={focusTarget} fallbackTarget={focusShown ? focusTarget : null} focusVisible={focusVisible} focusSelected={focusSelected} openFocusSession={openFocusSession} onLoadReturn={returnToConversation} onCreateAgent={createAgent} visible={directoryVisible} home={home} client={client} connected={connected} openSession={openSession} onPresentation={attention.publish} needsYou={needsYou} openMainAgent={openMainAgent} openProfile={openProfile} onBackChange={registerSpatialBack}
+        <div className="mobile-spatial-host" hidden={!spatialPresented}><MobileSpatialNavigation wide={wideShell} loadingLabel={focusShown ? 'Focus' : home === 'mote' ? 'Mote' : 'Space'} loadWhen={spatialPresented || moteDirectoryShown || focusVisible} focusTarget={focusTarget} moteDirectoryTarget={moteDirectoryTarget} fallbackTarget={focusShown ? focusTarget : moteDirectoryShown ? moteDirectoryTarget : null} focusVisible={focusVisible} focusSelected={focusSelected} openFocusSession={openFocusSession} onLoadReturn={returnToConversation} onCreateAgent={createAgent} visible={directoryVisible} home={home} client={client} connected={connected} openSession={openSession} onPresentation={attention.publish} needsYou={needsYou} openMainAgent={openMainAgent} openProfile={openProfile} onBackChange={registerSpatialBack}
           recentMoteSpaceId={recentMoteSpaceId} onSelectMote={selectMote}
           initialContext={spatialContext} onContextChange={updateSpatialContext} openHttpLink={openBrowserHttpLink} /></div>
         <MobileWorkfaceFrame className="mobile-topics-host" presentation={sourcePanes} data-source-active={topicSourceActive || undefined} hidden={!topicsPresented}><MobileWorkfacePane className="mobile-topics-directory-host" pane="navigation" presentation={sourcePanes.navigation}><MobileTopicsSurface wide={wideShell} navigation={topicsNavigation} loadWhen={topicsPresented && sourcePanes.navigation.presented} onLoadReturn={returnToConversation} rpc={rpc} visible={sourcePanes.navigation.observed}
@@ -769,7 +783,7 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
         <span>网页有新版本</span><button type="button" onClick={() => setSheet('settings')}>前往更新</button>
       </MobileNotice>}
       {!directoryVisible && !focusVisible && attention.issue && <MobileAttentionNotice owner={client} issue={attention.issue} retry={attention.refresh} />}
-      {!primaryHeader && !focusVisible && <MobileAvatarNoticeOutlet />}
+      {!primaryHeader && !focusVisible && !moteDirectoryShown && <MobileAvatarNoticeOutlet />}
       {(serviceNotices.length > 0 || !canPersist) && <MobileNotice owner={client} kind="feedback" identity={[notice,noticeDetail,hostAppearance.issue,connection.issue,connection.state,canPersist]} className="mobile-service-notice"><span className="mobile-notice-mark"><ThemeStatusInfoIcon size={15} /></span><div>{serviceNotices.map(message => <p key={message}>{message}</p>)}{notice && noticeDetail && <details><summary>技术信息</summary><p>{noticeDetail}</p></details>}{!canPersist && <button onClick={restoreNavigationStorage}>用当前工作面替换记录</button>}</div></MobileNotice>}
     </div>
     {rootPage && <footer className="mobile-navigation-bar" {...(tabBar.current.entering ? { 'data-motion': 'enter' } : {})}><MobilePrimaryNavigation current={primary === 'survey' ? null : primary} onSelect={openPrimaryWorkface} needsYou={needsYou.length} needsYouUnconfirmed={attention.unconfirmed} /></footer>}

@@ -545,18 +545,19 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-mote-source-status button { min-height: 44px; padding: 8px 14px; border: 0; border-radius: var(--mobile-radius-sm); background: var(--surface-2); box-shadow: var(--hl); color: var(--text); font: inherit; font-size: var(--fs-body); cursor: pointer; }
 @media (prefers-reduced-motion: reduce) { .mobile-mote-source-status[open] .mobile-mote-source-status__panel { animation: none; } .mobile-mote-source-status__chevron { transition: none; } }
 
-/* The same Focus facet and primary workface keep their DOM positions at every width. */
+/* The directory and primary workface keep their own DOM positions at every width. */
 .mobile-primary-pane { display: contents; }
 .mobile-main { padding-inline: var(--mobile-safe-left) var(--mobile-safe-right); }
 .mobile-primary-pane > :is(.mobile-header, .mobile-main, .mobile-mote-context, .mobile-notice-stack, .mobile-navigation-bar) { grid-column: 2; }
-.mobile-focus-pane { grid-column: 2; grid-row: 3; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; padding-inline: var(--mobile-safe-left) var(--mobile-safe-right); }
-.mobile-app[data-focus-root] > .mobile-primary-pane > .mobile-main { visibility: hidden; pointer-events: none; }
+.mobile-companion-pane { grid-column: 2; grid-row: 3; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; padding-inline: var(--mobile-safe-left) var(--mobile-safe-right); }
+.mobile-app[data-spatial-root] > .mobile-primary-pane > .mobile-main { visibility: hidden; pointer-events: none; }
+.mobile-app .mobile-mote-pane .mobile-spatial-search input { padding-inline-start: 36px; }
 .mobile-sidebar-toggle { display: none; }
 .mobile-app[data-wide-shell] { max-width: none; }
 .mobile-app[data-wide-workface] { grid-template-columns: minmax(0, calc(var(--mobile-workface-navigation-width) + var(--mobile-safe-left))) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
 .mobile-app[data-wide-workface]:not([data-sidebar-collapsed]) .mobile-main { padding-left: 0; }
-.mobile-app[data-wide-workface] > .mobile-focus-pane { padding-right: 0; }
-.mobile-app[data-wide-workface] > .mobile-focus-pane { grid-column: 1; grid-row: 1; border-right: 1px solid var(--line-soft); background: var(--mobile-page); padding-top: env(safe-area-inset-top, 0px); }
+.mobile-app[data-wide-workface] > .mobile-companion-pane { padding-right: 0; }
+.mobile-app[data-wide-workface] > .mobile-companion-pane { grid-column: 1; grid-row: 1; border-right: 1px solid var(--line-soft); background: var(--mobile-page); padding-top: env(safe-area-inset-top, 0px); }
 .mobile-app[data-wide-workface] > .mobile-primary-pane { grid-column: 2; min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto auto; position: relative; }
 .mobile-app[data-wide-workface][data-sidebar-collapsed] { grid-template-columns: minmax(0, 0px) minmax(0, 1fr); }
 .mobile-app[data-wide-workface] > .mobile-primary-pane > :is(.mobile-header, .mobile-main, .mobile-mote-context, .mobile-notice-stack, .mobile-navigation-bar) { grid-column: 1; }
@@ -564,9 +565,9 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-app[data-wide-workface] .mobile-primary-pane > .mobile-header { padding-left: 44px; }
 .mobile-app[data-wide-workface][data-sidebar-collapsed] .mobile-primary-pane > .mobile-header { padding-left: calc(44px + var(--mobile-safe-left)); }
 .mobile-app[data-wide-workface][data-sidebar-collapsed] .mobile-sidebar-toggle { left: var(--mobile-safe-left); }
-.mobile-app[data-wide-workface] .mobile-focus-facet > .mobile-page-header { display: flex; min-height: 52px; align-items: center; padding: 4px 0; gap: 4px; }
-.mobile-app[data-wide-workface] .mobile-focus-facet > .mobile-page-header h1 { font-size: var(--fs-title); font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mobile-app[data-wide-workface] .mobile-focus-facet > .mobile-page-header p { display: none; }
+.mobile-app[data-wide-workface] .mobile-companion-pane .mobile-page-header { display: flex; min-height: 52px; align-items: center; padding: 4px 0; gap: 4px; }
+.mobile-app[data-wide-workface] .mobile-companion-pane .mobile-page-header h1 { font-size: var(--fs-title); font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mobile-app[data-wide-workface] .mobile-companion-pane .mobile-page-header p { display: none; }
 .mobile-app[data-wide-workface] .mobile-focus-facet .mobile-row-detail { gap: 2px; }
 .mobile-focus-facet .mobile-agent-row[data-current] { background: var(--mobile-group-press); border-radius: var(--mobile-radius-sm); }
 .mobile-focus-facet .mobile-agent-row__open[aria-current="true"] .mobile-row-title strong { font-weight: 700; }

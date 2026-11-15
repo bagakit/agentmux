@@ -38,7 +38,7 @@ export type MobileSpatialContext = { spaceId: string | null; tabId: string | nul
 export type MobileSpatialNavigationProps = { home: MobileHome; client: AgentMuxHostedClient | null; connected: boolean;
   wide?: boolean;
   /** A view of this same directory, without retargeting its Space/Mote context. */
-  focusTarget?: HTMLElement | null; focusVisible?: boolean;
+  focusTarget?: HTMLElement | null; moteDirectoryTarget?: HTMLElement | null; focusVisible?: boolean;
   focusSelected?: { hostId: string; agentSessionId: string } | null;
   openFocusSession?(id: string, identity: MobileObjectIdentity): void;
   recentMoteSpaceId?: string | null; onSelectMote?(spaceId: string): void;
@@ -54,7 +54,7 @@ type SessionReference = Pick<AgentMuxAgentSession, 'agentSessionId'> & Partial<P
 type ContentTarget = { key: string; spaceId: string; spaceName: string; tabName: string; tabId: string; zoneId: string | null; region: Region; zone?: Catalog['zones'][number] }
 const EMPTY_CONTEXT: MobileSpatialContext = { spaceId: null, tabId: null, regionId: null }
 const contentKey = (spaceId: string, zoneId: string | null, region: Region) => JSON.stringify([spaceId, zoneId, region.tabId, region.regionId, region.kind, region.browserId ?? null, region.file ?? null])
-export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ home, wide = false, client, connected, sessions, openSession, openMainAgent, openProfile, openHttpLink, initialContext, onContextChange, onBackChange, onCreateAgent, recentMoteSpaceId, onSelectMote, needsYou = [], onPresentation, visible = true, focusTarget, focusVisible, focusSelected, openFocusSession }: MobileSpatialNavigationProps) {
+export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ home, wide = false, client, connected, sessions, openSession, openMainAgent, openProfile, openHttpLink, initialContext, onContextChange, onBackChange, onCreateAgent, recentMoteSpaceId, onSelectMote, needsYou = [], onPresentation, visible = true, focusTarget, moteDirectoryTarget, focusVisible, focusSelected, openFocusSession }: MobileSpatialNavigationProps) {
   const observeCatalog = useMobileWebCatalogObservation()
   const [catalogObservation, setCatalogObservation] = useState<CatalogObservation | null>(null)
   const observation = catalogObservation?.client === client ? catalogObservation : null
@@ -449,13 +449,13 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
       {availableSessions.length > 0 && <section className="mobile-focus-available" aria-label="已有会话"><h2 className="mobile-spatial-subheading">已有会话<span>项目与排序待确认</span></h2><ul className="mobile-session-list">{availableSessions.map(session => sessionRow(session, session.agentSessionId, undefined, undefined, undefined, undefined, true))}</ul></section>}
 
   </section></MobileNoticeScope> : null
-  return <>{contentVisited.current && <MobileNoticeScope owner={client} identity={[home,spaceId,context.tabId,context.regionId]}><MobileWorkfaceFrame className="mobile-spatial-panel" presentation={panes} data-wide-space={wideSpace || undefined} hidden={home === 'focus'}>
+  const directoryView = contentVisited.current && <MobileNoticeScope owner={client} identity={[home,spaceId,context.tabId,context.regionId]}><MobileWorkfaceFrame className="mobile-spatial-panel" presentation={panes} data-wide-space={wideSpace || undefined} hidden={home === 'focus'}>
     <MobileWorkfacePane className="mobile-space-navigation" pane="navigation" presentation={panes.navigation}>
     <div className="mobile-section-heading mobile-page-header"><MobileHeaderMenu /><div><h1>{home === 'mote' ? 'Mote' : home === 'focus' ? 'Focus' : 'Space'}</h1>
       <p>{home === 'mote' ? '与你的协调 Agent 继续讨论' : home === 'focus' ? '需要你处理的事项与最近执行' : '按 Mac 上的工作空间继续'}</p></div>
       <div className="mobile-section-actions">{contentVisible && <MobileAvatarNoticeOutlet header />}<MobileDirectoryNotice issues={[...(issue ? [{ source: '空间目录', message: issue }] : []), ...(metadata.issue ? [{ source: '会话目录', message: metadata.issue }] : []), ...presentationIssues]} retry={retryDirectory} />{onCreateAgent && <IconButton className="mobile-icon-button" aria-label="新建 Agent" onClick={() => onCreateAgent(spaceId ? { spaceId } : {})}><SemanticIcon name="action.create-agent" size={18} /></IconButton>}<IconButton className="mobile-icon-button" aria-label="刷新空间目录" onClick={retryDirectory}><SemanticIcon name="action.refresh" size={18} animation={pending ? 'spin' : 'none'} /></IconButton></div></div>
     {!connected && <MobileNotice owner={client} identity={[connected]} className="mobile-spatial-notice" role="status">连接暂不可用，显示的是最近一次读取的目录。</MobileNotice>}
-    <label className="mobile-spatial-search"><SemanticIcon name="action.search" size={16} /><TextInput value={query} onChange={event => setQuery(event.target.value)} placeholder={home === 'focus' ? '查找 Agent 或工作空间' : '查找工作空间'} aria-label="查找" /></label>
+    <label className="mobile-spatial-search"><SemanticIcon name="action.search" size={16} /><TextInput value={query} onChange={event => setQuery(event.target.value)} placeholder={home === 'mote' ? '查找 Mote' : '查找工作空间'} aria-label={home === 'mote' ? '查找 Mote' : '查找'} /></label>
       {spaceId && !space && <MobileNotice identity={[spaceId]} className="mobile-spatial-notice" role="status">空间绑定还没重新确认，可以刷新目录。</MobileNotice>}
       {catalog ? <MobileSpaceDirectory key={home} catalog={catalog} home={home === 'mote' ? 'mote' : 'space'} query={query} selectedSpaceId={spaceId}
         onSelect={owner => { setContext(owner ? { spaceId: owner.spaceId, tabId: null, regionId: null } : EMPTY_CONTEXT); setSelectedKey(null); if (owner?.kind === 'mote') onSelectMote?.(owner.spaceId) }}
@@ -477,5 +477,6 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
         kind={target.region.kind} browserId={target.region.browserId} {...(target.region.file ? { file: target.region.file } : {})} {...(openHttpLink ? { openHttpLink } : {})} />}
     </div>)}
     </MobileWorkfacePane>
-  </MobileWorkfaceFrame></MobileNoticeScope>}{focusTarget ? createPortal(focusView, focusTarget) : home === 'focus' ? focusView : null}</>
+  </MobileWorkfaceFrame></MobileNoticeScope>
+  return <>{home === 'mote' && moteDirectoryTarget ? createPortal(directoryView, moteDirectoryTarget) : directoryView}{focusTarget ? createPortal(focusView, focusTarget) : home === 'focus' ? focusView : null}</>
 })
