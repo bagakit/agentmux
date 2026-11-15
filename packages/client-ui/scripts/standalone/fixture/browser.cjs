@@ -182,6 +182,13 @@ app.whenReady().then(async () => {
       await primary.expect(lock, 'Closing the second document preserves the first document lock')
       await closeBoard(primary)
       assert.equal(await secondary.read('document.querySelector("#popup-draft").value'), 'Keep the second board draft')
+      await secondary.expect(`(() => {
+        const field = document.querySelector('#popup-markdown')
+        const paint = field?.nextElementSibling
+        return paint?.querySelector('[data-markdown-token="heading"]')?.textContent === '# Review'
+          && paint.textContent === field.value && getComputedStyle(paint).visibility === 'visible'
+      })()`, 'Installed native Markdown input loads its syntax and styles in the second document')
+      result.cases.push('installed-markdown-source-in-second-document')
       assert.equal(await primary.read(originalDraft), 'Keep the original board draft')
       result.cases.push('two-document-focus-dismissal-and-scroll-lock-ownership')
     }

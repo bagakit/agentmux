@@ -5,7 +5,7 @@ import { Button } from '@agentmux/client-ui/components/Button'
 import { FormRow } from '@agentmux/client-ui/components/FormRow'
 import * as Modal from '@agentmux/client-ui/components/Modal'
 import * as Menu from '@agentmux/client-ui/components/HoverDropdownMenu'
-import { TextInput } from '@agentmux/client-ui/input'
+import { Textarea, TextInput } from '@agentmux/client-ui/input'
 import { ClientUiOverlayProvider } from '@agentmux/client-ui/overlay-host'
 import { mountThemeRuntime } from '@agentmux/client-ui/theme'
 import overlayCSS from '@agentmux/client-ui/styles/overlays.css?inline'
@@ -67,9 +67,14 @@ function Board({ owner, name }: { owner: Document; name: string }) {
           </Modal.Content>
         </Modal.Portal>
       </Modal.Root>
-      {name === 'Primary board' ? <Locations /> : <label className="board-draft">Working draft
-        <TextInput id="popup-draft" defaultValue="Keep the second board draft" />
-      </label>}
+      {name === 'Primary board' ? <Locations /> : <>
+        <label className="board-draft">Working draft
+          <TextInput id="popup-draft" defaultValue="Keep the second board draft" />
+        </label>
+        <label className="board-draft">Review notes
+          <Textarea id="popup-markdown" syntax="markdown" defaultValue={'# Review\nKeep the original `notes`.'} />
+        </label>
+      </>}
     </main>
   </ClientUiOverlayProvider>
 }
