@@ -19,6 +19,8 @@ Core 状态目录中的 `spatial-state.json` 保存同一空间图；`AGENTMUX_S
 
 [`defaultAgentMuxSpatialStatePath` / `AgentMuxSpatialStateStore`](../../packages/core/src/spatial-state.ts) 负责路径、读取、revision 提交、锁与订阅；原子写入沿 [`durableWriteFile`](../../packages/core/src/durable-write.ts)。
 
+原文件解码得到当前读取所拥有的 graph，随后沿原拓扑约束验证。公开结果 codec 在既有协议解码边界执行同一验证。需要隔离调用方持有的输入时，原 parser 生成独立副本。目录查询用原 Tab、Region、Group 和绑定缩小候选，再生成名称及位置投影。查询仍按原顺序保留多个展示位置，也能读取没有展示位置的原实体。
+
 ### 原权威 Space 的公共业务投影
 
 Core 的 `space.snapshot`／`space.watch` 以准确 `{runtimeId,spaceId}` 读取同一原文件 owner，SDK 的 `readSpaceSnapshot`／`observeSpace` 与 CLI 消费同一公共订阅端口。快照 begin／part／complete 和后续实体 delta 复用已有 Hosted 分帧、取消与背压；累计 Space 不受单个传输值预算限制，单条实体仍沿原 Hosted 编码／在途内存边界，失败只结束本次读取并保留源文档；源图 revision 是原 CAS 版本，重新连接明确给全范围快照及 cursor gap，不承诺持久事件日志。来源 Runtime 或 reader instance 不符只拒本次观察，不把原 Run 判为终局。
