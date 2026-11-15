@@ -27,7 +27,7 @@ describe('Focus Tab projection', () => {
     const durable = { root: { type: 'leaf' as const, groupId: 'original-group' }, groups: [{ id: 'original-group', activeTabId: 'first', tabOrder: ['first', 'second'], recentTabIds: ['first', 'second'] }], activeGroupId: 'original-group' }
     const config = await api.config.get()
     const catalog = spatialCatalog({ config: { ...config, workspaces: [{ id: 'workspace', kind: 'folder', hostId: 'local', path: _hygiene_fixturePath("private/workspace"), name: 'Workspace' }] },
-      sessions: [], tabs: restored, layouts: { workspace: durable }, spaceZoneBindings: {}, spatialRequests: {} }, [])
+      sessions: [], tabs: restored, layouts: { workspace: durable }, spaceZoneBindings: {} }, [])
     const reference = { displayWorkspaceId: 'workspace', groupId: 'original-group', tabId: 'second', regionId: 'second:region' }
     expect(catalog.locations.filter(location => location.tabId === 'second').map(location => location.regionId)).toEqual(['second:region'])
     const projected = projectWorkbenchProjection(durable, restored, { entity: { kind: 'tab', tabId: selected!.id },

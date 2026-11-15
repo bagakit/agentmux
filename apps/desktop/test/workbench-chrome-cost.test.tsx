@@ -26,6 +26,7 @@ const slots = () => [...dom.container.querySelectorAll<HTMLElement>('.workspace-
 const region = (id: string) => dom.container.querySelector<HTMLElement>(`[data-workbench-region-id="${id}"]`)!
 const terminal = (id: string) => dom.container.querySelector<HTMLElement>(`[data-test-terminal="run-${id}"]`)!
 let checks = 0
+let layoutCalls: string[]
 let restorePopover: () => void
 
 beforeEach(() => {
@@ -34,6 +35,8 @@ beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} })
   vi.stubGlobal('__agentmuxCountWorkbenchChromeRead', () => { checks++ })
+  layoutCalls = []
+  vi.stubGlobal('__agentmuxCountWorkbenchLayout', (workspaceId: string) => { layoutCalls.push(workspaceId) })
   vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {})
 })
 afterEach(() => {
@@ -159,4 +162,55 @@ it('only observes window controls in the original workface of a Mote conversatio
   expect(header.hidden).toBe(false)
   expect(header.querySelector('[data-project-rail-toggle]')).not.toBeNull()
   expect(terminal(active.id)).toBe(originalTerminal)
+})
+
+it.each([4, 88])('projects layout only after relevant facts change among %i mounted Workspaces', async count => {
+  const { active, sessions, drafts } = scene(count)
+  await dom.render(<App />)
+  const retained = slots()
+  expect(retained).toHaveLength(count)
+  expect(new Set(layoutCalls)).toEqual(new Set(retained.map(slot => slot.dataset.workspaceId)))
+  const originalRegion = region('region-' + active.id)
+  const originalTerminal = terminal(active.id)
+  expect(originalRegion).not.toBeNull()
+  expect(originalTerminal).not.toBeNull()
+  const originalLayout = useAppStore.getState().layouts[active.id]
+  expect(originalLayout?.groups.map(group => group.id)).toEqual(['group-' + active.id, 'split-group'])
+
+  layoutCalls = []
+  await act(async () => useAppStore.setState({ selectedDemandId: 'other-goal' }))
+  await act(async () => useAppStore.setState(state => ({ spatialRequests: {
+    ...state.spatialRequests, 'other-request': { requestId: 'other-request', inputDigest: 'original-operation',
+      operation: 'space.mv', tabId: 'other-tab', regionId: 'other-region',
+      agentSessionId: 'other-session', createAgent: false, target: { zoneId: 'other-zone' } }
+  } })))
+  await act(async () => useAppStore.setState({ mainSurface: 'board' }))
+  await act(async () => useAppStore.setState({ mainSurface: 'workbench' }))
+  expect(layoutCalls.length, 'Unrelated navigation facts must not derive any Workbench layout').toBe(0)
+
+  const choice = { displayWorkspaceId: active.id, groupId: 'split-group', tabId: 'split-neighbor', regionId: 'split-neighbor-region' }
+  await act(async () => {
+    expect(useAppStore.getState().selectMainRegion(choice)).toBe(true)
+  })
+  expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({
+    workspaceId: active.id, groupId: choice.groupId, tabId: choice.tabId, regionId: choice.regionId
+  })
+  expect(new Set(layoutCalls), 'The actual selection reaches only the matching object projector').toEqual(new Set([active.id]))
+  expect(useAppStore.getState().layouts[active.id]).toBe(originalLayout)
+
+  layoutCalls = []
+  const added = createWorkbenchTab('new-original-tab', { kind: 'agent', phase: 'attached',
+    workspaceId: active.id, regionId: 'new-original-region', sessionId: 'new-original-agent' })
+  await act(async () => useAppStore.setState(state => {
+    const layout = state.layouts[active.id]!
+    return { tabs: { ...state.tabs, [added.id]: added }, layouts: { ...state.layouts, [active.id]: {
+      ...layout, groups: layout.groups.map(group => group.id === choice.groupId ? { ...group, tabOrder: [...group.tabOrder, added.id] } : group)
+    } } }
+  }))
+  expect(layoutCalls).toContain(active.id)
+  expect(dom.container.querySelector(`button[data-workbench-tab-id="${added.id}"]`)).not.toBeNull()
+  expect(region('region-' + active.id)).toBe(originalRegion)
+  expect(terminal(active.id)).toBe(originalTerminal)
+  expect(useAppStore.getState().sessions).toBe(sessions)
+  expect(useAppStore.getState().agentComposerDrafts).toBe(drafts)
 })
