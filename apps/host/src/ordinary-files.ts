@@ -280,13 +280,14 @@ export class OrdinaryWorkspaceFiles {
     if (!['related', 'unrelated', 'missing', 'unavailable'].includes(result.status ?? '')) throw new Error('The original native directory relation is unconfirmed.')
     return result.status as 'related' | 'unrelated' | 'missing' | 'unavailable'
   }
-  async read(workspace: FileWorkspace, requestedPath: string, budget?: WorkspaceFileReadBudget): Promise<FileDocumentReadResult> {
+  async read(workspace: FileWorkspace, requestedPath: string, budget?: WorkspaceFileReadBudget, confined = false): Promise<FileDocumentReadResult> {
     budget?.signal?.throwIfAborted()
     if (budget && (!Number.isSafeInteger(budget.maxFileBytes) || budget.maxFileBytes < 1 || budget.maxFileBytes > WORKSPACE_FILE_MAX_BYTES)) {
       throw new Error('A bounded original file read requires a byte cap inside the existing transfer budget.')
     }
     try {
-      const resolved = await localReadablePath(workspace, requestedPath)
+      const resolved = confined ? { ...await localExistingPathWithin(workspace, requestedPath), identityWithinWorkspace: true }
+        : await localReadablePath(workspace, requestedPath)
       // A directory is not a read failure: the caller reveals it in the file tree. Only Main can
       // tell — path detection in the Renderer is pure-string. `resolved.target` is already the
       // root-confined realpath, so this stat classifies exactly the object the worker would open.
@@ -365,8 +366,8 @@ export class OrdinaryWorkspaceFiles {
     })
   }
 
-  async readDirectory(workspace: FileWorkspace, requestedPath: string): Promise<WorkspaceDirectoryEntry[]> {
-    const directory = await localReadablePath(workspace, requestedPath || '.')
+  async readDirectory(workspace: FileWorkspace, requestedPath: string, confined = false): Promise<WorkspaceDirectoryEntry[]> {
+    const directory = await (confined ? localExistingPathWithin : localReadablePath)(workspace, requestedPath || '.')
     const entries = JSON.parse((await this.run(directory.target, directory.root, { action: 'list' })).toString('utf8')) as WorkspaceDirectoryEntry[]
     let mapped = entries.map(entry => ({ ...entry, path: posix.join(requestedPath || '.', entry.name) }))
     if (workspace.id === SCRATCH_WORKSPACE_ID && workspace.hostId === 'local' && (!requestedPath || requestedPath === '.')) {

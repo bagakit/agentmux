@@ -28,7 +28,10 @@ import { TopicKnowledgeOwner } from './topic-knowledge.js'
 import { TopicSpatialOwner } from './topic-spatial-owner.js'
 import { TopicSearchHistoryOwner } from './topic-search-history.js'
 
-type ContentPorts = Pick<AgentMuxRpcServiceOptions, 'files' | 'topics' | 'notebookStore' | 'notebookObservation' | 'agentPromotions'>
+import { createHostMoteGroupFiles } from './mote-group-files.js'
+import type { HostMoteGroupFiles } from './mote-group.js'
+
+type ContentPorts = { moteGroupFiles: HostMoteGroupFiles } & Pick<AgentMuxRpcServiceOptions, 'files' | 'topics' | 'notebookStore' | 'notebookObservation' | 'agentPromotions'>
 /** Borrows the original configuration, spatial graph and Notes storage. No Desktop connection. */
 export function createHostContent(options: {
   configurationPath: string
@@ -175,7 +178,10 @@ export function createHostContent(options: {
       if (matches.length !== 1) throw new AgentMuxError('The original Mote content Workspace is unconfirmed. Existing Agents and promotions are retained.', 'AGENT_PROMOTION_RESOURCE_UNAVAILABLE')
       return matches[0]!
     } })
-  return { files: publicFiles, notebookStore, notebookObservation, agentPromotions, topics: {
+  return { files: publicFiles, moteGroupFiles: createHostMoteGroupFiles({ spatial: options.spatial, workspace: async id => {
+    const matches = (await configuration()).workspaces.filter(workspace => workspace.id === id)
+    return matches.length === 1 ? matches[0] : undefined
+  }, topics: scratch, files: ordinary }), notebookStore, notebookObservation, agentPromotions, topics: {
     call: async (method, params, context) => {
       const content = await owners()
       const workspace = () => {
