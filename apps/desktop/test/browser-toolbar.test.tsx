@@ -38,17 +38,17 @@ const fixture = vi.hoisted(() => {
   }
 })
 
-vi.mock('../src/renderer/src/store.js', () => ({
-  useAppStore: Object.assign(
-    (selector: (state: typeof fixture.state) => unknown) => selector(fixture.state),
-    { getState: () => fixture.state, setState: vi.fn() }
-  )
-}))
+vi.mock('../src/renderer/src/store.js', async importOriginal => {
+  const actual = await importOriginal<typeof import('../src/renderer/src/store.js')>()
+  const read = () => ({ ...actual.useAppStore.getInitialState(), ...fixture.state })
+  return { ...actual, useAppStore: Object.assign(
+    (selector: (state: ReturnType<typeof read>) => unknown) => selector(read()),
+    { getState: read, getInitialState: read, setState: vi.fn(), subscribe: () => () => {} }
+  ) }
+})
 
-import {
-  browserCaptureMatchesIdentity,
-  BrowserPane
-} from '../src/renderer/src/components/BrowserPane.js'
+import { BrowserPane } from '../src/renderer/src/components/BrowserPane.js'
+import { browserCaptureMatchesIdentity } from '../src/renderer/src/components/BrowserCaptureTools.js'
 import { api } from '../src/renderer/src/lib/api.js'
 import { BrowserToolbarPreferences } from '../src/renderer/src/components/BrowserToolbarPreferences.js'
 import { BrowserAnnotationsPanel } from '../src/renderer/src/components/BrowserAnnotationsPanel.js'
