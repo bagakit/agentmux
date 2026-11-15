@@ -62,8 +62,11 @@
 }
 .goals-document .goals-detail__actions:empty, .goals-detail__edit-status:empty { display: none; }
 @container goal-detail (min-width: 960px) {
-  .goals-detail .goals-document { padding-inline: clamp(18px, 2.4cqw, 48px); padding-top: var(--sp-6); gap: clamp(20px, 2.3cqw, 42px); }
-  .goals-document .goals-detail__side { padding: var(--sp-5); border: 0; border-radius: var(--radius-lg); background: var(--surface-1); }
+  .goals-detail .goals-document { padding-inline: clamp(18px, 2.4cqw, 48px); padding-top: var(--sp-6); column-gap: clamp(20px, 2.3cqw, 42px); }
+  .goals-document .goals-detail__side {
+    padding: 0 var(--sp-5) var(--sp-5); border-radius: var(--radius-lg);
+    background: linear-gradient(transparent, var(--surface-1) 76px);
+  }
 }
 .goals-detail__main :is(button, summary, input, select, textarea, [tabindex='0']),
 .goals-detail :is([data-goal-work-operation], [data-goal-retained-operation]) { scroll-margin-top: var(--goal-detail-reading-offset, 90px); }

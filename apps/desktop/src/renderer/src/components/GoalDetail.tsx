@@ -238,8 +238,10 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
   const deliveries = useMemo(() => goalPlanDeliveries(projection), [projection])
   const currentDelivery = deliveries[0]
   const currentWork = !acknowledgementFeedback.failure && (fact.source.kind === 'start' || fact.source.kind === 'delegation' || fact.source.kind === 'patrol') ? fact.source : null
+  const currentDelegation = currentWork?.kind === 'delegation'
+    ? demand.delegations?.find(attempt => attempt.operationId === currentWork.operationId) : undefined
   const plan = <div ref={planRef} tabIndex={-1} className="goals-detail__plan" data-goal-reading-section="plan" data-goal-reading-id={demand.id} data-goal-reading-runtime={demand.address?.runtimeId} data-goal-reading-namespace={demand.address?.namespace}>
-    <GoalPlanGraph demand={demand} projection={projection} reveal={planReveal} onOpenGoalWork={currentWork ? () => revealOriginalWork(currentWork) : undefined}
+    <GoalPlanGraph demand={demand} projection={projection} reveal={planReveal} currentDelegation={currentDelegation} onOpenGoalWork={currentWork ? () => revealOriginalWork(currentWork) : undefined}
       planningLink={!finished ? <Button type="button" onClick={revealPlanningControls}>{demand.plan?.nodes.length ? 'Plan actions' : 'Plan with Supervisor'}<SupervisorPaneIcon size={14} aria-hidden="true" /></Button> : null}
       planLink={demand.address ? <button type="button" className="icon-button goal-plan__copy" title={copied === 'plan' ? 'Plan link copied' : 'Copy plan link'} onClick={() => void copyLink('plan')}>
         {copied === 'plan' ? <ThemeDoneIcon size={15} aria-hidden="true" /> : <CopyLinkIcon size={15} aria-hidden="true" />}
@@ -289,27 +291,29 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
     </header>
     <article className="goals-document">
       <div className="goals-detail__body">
-      <header className="goals-detail__head">
-        <div className="goals-detail__identity">
-          <div className="goals-detail__title">
-            <ComposerTextarea className="goals-title" aria-label="Goal title" value={title} onValueChange={value => editGoalDraft(demand.id, 'title', value)} rows={1} onBlur={() => { if (titleDirty && title.trim()) void saveGoalDrafts(demand.id, ['title']) }} />
-            <p className="goals-detail__stage"><span className="goals-detail__status"><GoalStageMark stage={stage} /><strong data-goal-detail-stage>{next}</strong></span>{currentWork ? <button type="button" className="goals-detail__current-work" onClick={() => revealOriginalWork(currentWork)}>{currentWork.kind === 'patrol' ? 'View original inspection' : 'View current work'}<ThemeNavigationForwardIcon size={12} aria-hidden="true" /></button> : null}</p>
-          </div>
+        <div className="goals-detail__intro">
+          <header className="goals-detail__head">
+            <div className="goals-detail__identity">
+              <div className="goals-detail__title">
+                <ComposerTextarea className="goals-title" aria-label="Goal title" value={title} onValueChange={value => editGoalDraft(demand.id, 'title', value)} rows={1} onBlur={() => { if (titleDirty && title.trim()) void saveGoalDrafts(demand.id, ['title']) }} />
+                <p className="goals-detail__stage"><span className="goals-detail__status"><GoalStageMark stage={stage} /><strong data-goal-detail-stage>{next}</strong></span>{currentWork ? <button type="button" className="goals-detail__current-work" onClick={() => revealOriginalWork(currentWork)}>{currentWork.kind === 'patrol' ? 'View original inspection' : 'View current work'}<ThemeNavigationForwardIcon size={12} aria-hidden="true" /></button> : null}</p>
+              </div>
+            </div>
+            <div className="goals-detail__actions">
+              {deliveries.length ? <span className="goals-detail__pending-review">{deliveries.length} awaiting review</span> : null}
+              {projection.progress ? <span className="goals-detail__progress" data-goal-meta-plan={`${projection.progress.done}/${projection.progress.total}`}>
+                Plan {projection.progress.done} of {projection.progress.total} done</span> : null}
+              {currentDelivery ? <Button variant="primary" onClick={event => revealAttempt(currentDelivery.node.id, currentDelivery.delegation.operationId, event.currentTarget)}>View delivery<ThemeNavigationForwardIcon size={13} aria-hidden="true" /></Button> : null}
+              {(readReport || readDefinition) && !acknowledgementFeedback.failure
+                ? <Button type="button" onClick={() => revealGoalReview(readDefinition)}>{readReport ? 'Read results' : demand.alignment?.criteria.length ? 'Read success criteria' : 'Read proposal'}</Button> : null}
+              {queue && queue.total > 1 ? <span className="goals-detail__queue" data-goal-queue><span>{GOAL_GROUP_LABELS[queue.stage]} · {queue.index} of {queue.total}</span>{queue.nextId ? <Button type="button" data-goal-queue-next aria-label={`Next goal that ${QUEUE_NAMES[queue.stage]}`} onClick={() => onOpenGoal?.(queue.nextId!)}>Next<ThemeNavigationForwardIcon size={13} /></Button> : null}</span> : null}
+            </div>
+            <p className="goals-detail__edit-status" aria-live="polite">{hasEditDraft ? draftIssue ? 'Edits kept · Save unconfirmed' : 'Unsaved edits' : null}</p>
+          </header>
+          {copyIssue ? <p className="goals-service" role="status">Link could not be copied. {copyIssue}</p> : null}
+          {moteError?.mode !== 'open' ? requestFeedback : null}
+          {acknowledgementFeedback.failure ? <GoalAcknowledgementRecovery goalId={demand.id} feedback={acknowledgementFeedback} onFeedbackChange={onAcknowledgementFeedbackChange} /> : null}
         </div>
-        <div className="goals-detail__actions">
-          {deliveries.length ? <span className="goals-detail__pending-review">{deliveries.length} awaiting review</span> : null}
-          {projection.progress ? <span className="goals-detail__progress" data-goal-meta-plan={`${projection.progress.done}/${projection.progress.total}`}>
-            Plan {projection.progress.done} of {projection.progress.total} done</span> : null}
-          {currentDelivery ? <Button variant="primary" onClick={event => revealAttempt(currentDelivery.node.id, currentDelivery.delegation.operationId, event.currentTarget)}>View delivery<ThemeNavigationForwardIcon size={13} aria-hidden="true" /></Button> : null}
-          {(readReport || readDefinition) && !acknowledgementFeedback.failure
-            ? <Button type="button" onClick={() => revealGoalReview(readDefinition)}>{readReport ? 'Read results' : demand.alignment?.criteria.length ? 'Read success criteria' : 'Read proposal'}</Button> : null}
-          {queue && queue.total > 1 ? <span className="goals-detail__queue" data-goal-queue><span>{GOAL_GROUP_LABELS[queue.stage]} · {queue.index} of {queue.total}</span>{queue.nextId ? <Button type="button" data-goal-queue-next aria-label={`Next goal that ${QUEUE_NAMES[queue.stage]}`} onClick={() => onOpenGoal?.(queue.nextId!)}>Next<ThemeNavigationForwardIcon size={13} /></Button> : null}</span> : null}
-        </div>
-        <p className="goals-detail__edit-status" aria-live="polite">{hasEditDraft ? draftIssue ? 'Edits kept · Save unconfirmed' : 'Unsaved edits' : null}</p>
-      </header>
-        {copyIssue ? <p className="goals-service" role="status">Link could not be copied. {copyIssue}</p> : null}
-        {moteError?.mode !== 'open' ? requestFeedback : null}
-        {acknowledgementFeedback.failure ? <GoalAcknowledgementRecovery goalId={demand.id} feedback={acknowledgementFeedback} onFeedbackChange={onAcknowledgementFeedbackChange} /> : null}
         <div className="goals-detail__main">
           {plan}
           <section ref={overviewRef} tabIndex={-1} className="goals-detail__overview" aria-label="Goal overview" data-goal-reading-section="overview"

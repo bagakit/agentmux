@@ -6,7 +6,7 @@ import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import type { GoalPlanNodeProjection } from '@agentmux/demand/goal-plan'
 import { isCurrentGroundingAccepted } from '@agentmux/demand/goals'
 import { Button } from '@agentmux/client-ui/components/Button'
-import { demandAgentReferenceLabel, type DemandAgentReference } from '@agentmux/demand/relations'
+import { demandAgentReferenceLabel, goalSupervisorHostWitnesses, type DemandAgentReference } from '@agentmux/demand/relations'
 import { agentSessionPresentationIndex } from '../lib/session-presentation'
 import { goalAgentPresentation } from '../lib/goal-agent-selection'
 import { useGoalPlanPath } from './useGoalPlanPath'
@@ -25,6 +25,8 @@ import { GoalPlanDelivery, type GoalPlanReviewDraft } from './GoalPlanDelivery'
 import { clearGoalPlanReviewDraft, editGoalPlanReviewDraft, goalPlanReviewDraftKey } from '../lib/goal-edit-drafts'
 import { goalNextStepFact, type GoalNextStepFact } from '../lib/goal-presentation'
 import { GoalPlanMark, goalPlanStateLabel, type GoalPlanNodePresentation } from './GoalPlanState'
+import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
+import { GoalContinuationAgent } from './GoalContinuationControl'
 
 /** A node as its Goal owner derived it; `state` is null when the owner returned no derivation. */
 export type GoalPlanReadingTarget = { nodeId: string; attemptId?: string; wholeGoal?: true }
@@ -38,6 +40,7 @@ export function goalPlanDeliveries(plan: GoalPlanView) {
 }
 const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
 const StartIcon = semanticIconComponent('action.start')
+const ForwardIcon = semanticIconComponent('navigation.forward')
 const finishIcons = {
   Succeeded: semanticIconComponent('status.completed'),
   'Closed with gaps': semanticIconComponent('status.gap'),
@@ -259,9 +262,10 @@ function NodeDetail({ demand, item, historical, dependencyNames, onIssue, draft,
  * dependency, joined to what it depends on by a smooth connector. State comes only from the
  * Goal owner's derivation; this view never decides it.
  */
-export function GoalPlanGraph({ demand, projection: provided, planLink, planningLink, onOpenGoalWork, reveal }: {
+export function GoalPlanGraph({ demand, projection: provided, planLink, planningLink, onOpenGoalWork, currentDelegation, reveal }: {
   demand: DemandProjection
   projection?: GoalPlanView; planLink?: ReactNode; onOpenGoalWork?: (() => void) | undefined
+  currentDelegation?: DemandDelegation | undefined
   planningLink?: ReactNode; reveal?: GoalPlanReveal | null
 }) {
   const projection = useMemo(() => provided ?? goalPlanProjection(demand), [demand, provided])
@@ -359,6 +363,8 @@ export function GoalPlanGraph({ demand, projection: provided, planLink, planning
     attempts: exact ? attempts.indexOf(exact) + 1 : 0, unknown: [], staleCriteria: [],
     review: exact ? demand.plan?.reviews.filter(entry => entry.nodeId === selectedNode.node.id && entry.delegationOperationId === exact.operationId).at(-1) ?? null : null }
     : selectedNode
+  const handoff = selectedNode && !wholeGoal ? selected?.delegation : currentDelegation
+  const handoffTitle = handoff?.planNodeId ? byId.get(handoff.planNodeId)?.node.title : demand.title
   const reviewKey = selected?.delegation && goalPlanReviewDraftKey(selected.node.id, selected.delegation.operationId)
   const reviewNoticeKey = JSON.stringify([demand.id, reviewKey])
   const { progress } = projection
@@ -392,6 +398,7 @@ export function GoalPlanGraph({ demand, projection: provided, planLink, planning
     </div> : null}
     <div className="goal-plan__workbench">
     <div className="goal-plan__stage">
+    {handoff && handoffTitle !== undefined ? <GoalPlanHandoff demand={demand} attempt={handoff} task={handoffTitle} /> : null}
     <div className="goal-plan__canvas" data-single-task={projection.nodes.length === 1 || undefined} ref={canvas} tabIndex={0} aria-label="Execution graph">
       <svg className="goal-plan__edges" width={width} height={height} aria-hidden="true">
         <defs><marker id={arrowId} markerWidth="6" markerHeight="6" refX="6" refY="3" orient="auto" viewBox="0 0 6 6"><path d="M0 0 L6 3 L0 6 Z" fill="context-stroke" /></marker></defs>
@@ -452,6 +459,37 @@ export function GoalPlanGraph({ demand, projection: provided, planLink, planning
     </div>
     </div>
   </section>
+}
+
+/** The arrow describes one recorded handoff, independently of the plan's task dependencies. */
+function GoalPlanHandoff({ demand, attempt, task }: { demand: DemandProjection; attempt: DemandDelegation; task: string }) {
+  const active = useWorkbenchPresentationActive()
+  const workerHost = delegationWorkerHostId(attempt)
+  if (attempt.ownerAgentSessionId === attempt.workerAgentSessionId && attempt.hostId === workerHost) return null
+
+  const supervisor = demand.supervisorSessionId
+  const hosts = typeof supervisor === 'string' && supervisor === attempt.ownerAgentSessionId ? goalSupervisorHostWitnesses(demand) : []
+  const isSupervisor = typeof supervisor === 'string' ? hosts.length === 1 && hosts[0] === attempt.hostId
+    : supervisor?.execution.agentSessionId === attempt.ownerAgentSessionId && supervisor.execution.runtimeId === attempt.runtimeIdentity?.ownerRuntimeId
+  const owner = { id: attempt.ownerAgentSessionId, host: attempt.hostId, role: isSupervisor ? 'Supervisor' : 'Task owner' }
+  const worker = { id: attempt.workerAgentSessionId, host: workerHost, role: 'Executor' }
+  const reported = attempt.report?.authorAgentSessionId === worker.id
+  const phase = reported ? 'Delivery reported' : attempt.linkedAt !== undefined ? 'Dispatch linked' : 'Dispatch prepared'
+  const [from, to] = reported ? [worker, owner] : [owner, worker]
+  const participant = (actor: typeof owner) => <div className="goal-plan-handoff__agent">
+    <small>{actor.role}</small>
+    <GoalContinuationAgent agentSessionId={actor.id} hostId={actor.host} active={active} size={18} />
+  </div>
+  return <aside className="goal-plan-handoff" aria-label="Task handoff" data-goal-handoff={attempt.operationId}>
+    <span className="goal-plan-handoff__task" title={task}>{task}</span>
+    <div className="goal-plan-handoff__flow">
+      {participant(from)}
+      <span className="goal-plan-handoff__transfer">
+        <span>{phase}<span className="goals-visually-hidden"> to</span></span><ForwardIcon size={13} aria-hidden="true" />
+      </span>
+      {participant(to)}
+    </div>
+  </aside>
 }
 
 /** A compact ring for the Goal row: done over live nodes, from the owner's derivation. */
