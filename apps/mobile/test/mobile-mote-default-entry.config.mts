@@ -29,7 +29,7 @@ const owners = new Set(['apps/mobile/src/MobileApp.tsx', 'apps/mobile/src/naviga
 const sha = (source: string) => createHash('sha256').update(source).digest('hex')
 // node node_modules/vitest/vitest.mjs run --config apps/mobile/test/mobile-mote-default-entry.config.mts
 export default defineConfig({ root, cacheDir: resolve(root, '.tmp/mobile-mote-default-entry', name ?? 'normal'),
-  define: { __AGENTMUX_WEB_PREVIEW__: 'true', __AGENTMUX_MOBILE_BUILD_ID__: JSON.stringify('reviewed-page-build') },
+  define: { __AGENTMUX_WEB_PREVIEW__: 'true' },
   plugins: [{ name: 'loaded-mobile-mote-default-entry', enforce: 'pre',
     resolveId(id) { if (id === '@agentmux/identity/runtime-source') return '\0mote-entry-identity'; return workspaceSourceExport(root, id) },
     load(id) { if (id === '\0mote-entry-identity') return runtime },
@@ -49,5 +49,7 @@ export default defineConfig({ root, cacheDir: resolve(root, '.tmp/mobile-mote-de
   } }], esbuild: { jsx: 'automatic' },
   resolve: { alias: ['react', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'react-dom', 'react-dom/client', 'react-dom/server', 'react-dom/test-utils'].map(name => ({ find: new RegExp('^' + name + '$'), replacement: mobileRequire.resolve(name) })), conditions: ['browser', 'module', 'import'], dedupe: ['react', 'react-dom'] },
   test: { include: ['apps/mobile/test/mobile-mote-default-entry.test.tsx', 'apps/mobile/test/mobile-chat-start.test.tsx'], testNamePattern: variant?.target, environment: 'happy-dom',
-    setupFiles: [resolve(root, 'apps/mobile/test/device-locks.ts')], passWithNoTests: false, maxWorkers: 1, fileParallelism: false, restoreMocks: true, testTimeout: 20000 }
+    env: { MOBILE_TEST_BUILD_ID: 'reviewed-page-build' },
+    setupFiles: [resolve(root, 'apps/mobile/test/device-locks.ts'), resolve(root, 'apps/mobile/test/mobile-build-identity-setup.ts')],
+    passWithNoTests: false, maxWorkers: 1, fileParallelism: false, restoreMocks: true, testTimeout: 20000 }
 })

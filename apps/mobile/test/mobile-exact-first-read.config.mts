@@ -34,7 +34,6 @@ const owners = new Set(['apps/mobile/src/main.tsx', 'apps/mobile/src/connection/
 export default { ...base, root: resolve(root, 'apps/mobile'), resolve: { ...base.resolve, alias: [...aliases,
   ...base.resolve!.alias as Array<{ find: RegExp; replacement: string }>],
   conditions: ['browser', 'module', 'import'], dedupe: ['react', 'react-dom'] },
-  define: { __AGENTMUX_MOBILE_BUILD_ID__: JSON.stringify('exact-first-read-product') },
   cacheDir: resolve(root, '.tmp/mobile-exact-first-read/cache'),
   plugins: [react(), ...base.plugins ?? [], { name: 'evaluated-mobile-exact-first-read', enforce: 'pre' as const, transform(code: string, id: string) {
     const file = relative(root, id.split('?')[0]!)

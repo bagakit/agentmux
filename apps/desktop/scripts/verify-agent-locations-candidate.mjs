@@ -91,11 +91,13 @@ try {
     assert.equal(`sha256:${sha(bytes)}`, file.digest)
   }
   receipt.mobileRelease = manifest
-  // Desktop packaging builds Mobile again with a new buildId. Keep the exact
-  // validated namespace available for explicit publication without rebuilding it.
+  // Keep this validated Web namespace available for explicit publication.
+  // A rebuild of identical output can reuse the copy after verifying its bytes.
   receipt.mobileReleasePath = path.relative(root, path.join(directory, `mobile-${manifest.buildId}`))
-  await cp(path.join(root, 'apps/mobile/dist'), path.join(root, receipt.mobileReleasePath), { recursive: true, force: false, errorOnExist: true })
-  for (const file of manifest.files) assert.equal(`sha256:${sha(await readFile(path.join(root, receipt.mobileReleasePath, file.path)))}`, file.digest)
+  const retained = path.join(root, receipt.mobileReleasePath)
+  await cp(path.join(root, 'apps/mobile/dist'), retained, { recursive: true, force: false })
+  assert.deepEqual(JSON.parse(await readFile(path.join(retained, 'mobile-release.json'), 'utf8')), manifest)
+  for (const file of manifest.files) assert.equal(`sha256:${sha(await readFile(path.join(retained, file.path)))}`, file.digest)
   assert.equal(git('rev-parse', 'HEAD'), receipt.sourceCommit, 'Source changed during validation')
   assert.equal(git('status', '--porcelain', '--untracked-files=all'), '', 'Build changed tracked source; commit generated inputs before validating')
   receipt.passed = true

@@ -13,7 +13,7 @@ if (mutation && !Object.hasOwn(variants, mutation)) throw Error('Unknown short l
 const variant = mutation ? variants[mutation as keyof typeof variants] : undefined
 const files = new Set(['packages/relay/src/connection-offer.ts','packages/core/src/public-rpc-device.ts','packages/core/src/public-rpc-client.ts','packages/core/src/mobile-web-codec.ts','apps/host/src/host.ts','packages/core/src/device-administration.ts','apps/host/src/mobile-assets-owner.ts','apps/mobile/src/main.tsx','apps/mobile/src/connection/MobileConnectionRoot.tsx','apps/mobile/src/mobile-web/page-identity.ts','apps/mobile/test/short-connection-entry.test.tsx','apps/host/test/short-mobile-http.test.ts','apps/host/test/mobile-link.test.ts'])
 const sha = (value: string) => createHash('sha256').update(value).digest('hex')
-export default defineConfig({ ...base, define: { ...base.define, __AGENTMUX_MOBILE_BUILD_ID__: JSON.stringify('short-page-build') },
+export default defineConfig({ ...base,
   plugins: [...base.plugins ?? [], { name: 'executed-short-mobile-link', enforce: 'pre', transform(original, id) {
     const file = relative(root, id.split('?')[0]!); if (!files.has(file)) return
     let loaded = original
@@ -21,4 +21,6 @@ export default defineConfig({ ...base, define: { ...base.define, __AGENTMUX_MOBI
     if (!trace) return loaded === original ? undefined : { code: loaded, map: null }
     const row = { file, sourceSHA256: sha(readFileSync(resolve(root,file),'utf8')), loadedSHA256: sha(loaded), mutation: variant?.file === file ? mutation : null }
     return { code: `import {appendFileSync as __shortLinkLoaded} from 'node:fs'; __shortLinkLoaded(${JSON.stringify(resolve(root,trace))},${JSON.stringify(JSON.stringify(row)+'\n')});\n` + loaded, map: null }
-  } }], test: { ...base.test, include: variant ? [variant.testFile] : ['packages/relay/test/connection-offer.test.ts','apps/mobile/test/short-connection-entry.test.tsx','apps/host/test/short-mobile-http.test.ts','apps/host/test/mobile-link.test.ts'], testNamePattern: variant?.target, testTimeout: 30000 } })
+  } }], test: { ...base.test, env: { MOBILE_TEST_BUILD_ID: 'short-page-build' },
+    setupFiles: [...base.test.setupFiles, resolve(root, 'apps/mobile/test/mobile-build-identity-setup.ts')],
+    include: variant ? [variant.testFile] : ['packages/relay/test/connection-offer.test.ts','apps/mobile/test/short-connection-entry.test.tsx','apps/host/test/short-mobile-http.test.ts','apps/host/test/mobile-link.test.ts'], testNamePattern: variant?.target, testTimeout: 30000 } })

@@ -10,7 +10,7 @@ const variants: Record<string, { file: string; before: string; after: string }> 
   'read-issue-text': { file: 'apps/mobile/src/mobile-web/reporter.ts', before: "if (!Object.hasOwn(space, 'issue')) continue", after: 'if (!space.issue) continue' },
   'release-real-io': { file: 'apps/mobile/src/mobile-web/reporter.ts', before: 'this.waiting = []; this.client = client; this.connected = false', after: 'this.active = null; this.waiting = []; this.client = client; this.connected = false' },
   'native-controls-reporting': { file: 'apps/mobile/src/mobile-web/reporter.ts', before: "if (event.observationOrigin?.kind === 'runtime-connection' && event.observationOrigin.boundary === 'consumer-core') this.connected", after: 'if (true) this.connected' },
-  'different-compiled-build': { file: 'apps/mobile/src/mobile-web/page-identity.ts', before: '? __AGENTMUX_MOBILE_BUILD_ID__ : null', after: "? 'another-served-build' : null" },
+  'different-compiled-build': { file: 'apps/mobile/src/mobile-web/page-identity.ts', before: "?.content || null", after: "?.content && 'another-served-build' || null" },
   'forget-original-namespace': { file: 'apps/mobile/src/mobile-web/page-identity.ts', before: 'documentId: mintObjectId(), buildId, namespaceDigest', after: 'documentId: mintObjectId(), buildId, namespaceDigest: null' },
   'build-only-current': { file: 'apps/mobile/src/mobile-web/use-mobile-web-observation.ts', before: '&& inspection.active.digest === value.page.namespaceDigest', after: '&& true' },
   'ignore-loaded-occurrence': { file: 'apps/mobile/src/mobile-web/use-mobile-web-observation.ts', before: 'target.loaded.occurrenceId !== loaded.occurrenceId ||', after: 'false ||' },
@@ -30,7 +30,6 @@ const aliases = Object.fromEntries(['core', 'relay', 'identity'].flatMap(name =>
 }))
 aliases['@agentmux/identity/runtime-source'] = resolve(root, 'packages/identity/dist/runtime-source.js')
 export default defineConfig({ root: resolve(root, 'apps/mobile'), cacheDir: resolve(root, '.tmp/mobile-web-ui', mutant ?? 'normal'),
-  define: { __AGENTMUX_MOBILE_BUILD_ID__: JSON.stringify('reviewed-page-build') },
   resolve: { alias: Object.entries(aliases).sort(([left], [right]) => right.length - left.length).map(([find, replacement]) => ({ find, replacement })),
     conditions: ['browser', 'module', 'import'], dedupe: ['react', 'react-dom'] },
   plugins: [react(), { name: 'loaded-mobile-web-source', enforce: 'pre', transform(original, id) {
@@ -49,6 +48,7 @@ export default defineConfig({ root: resolve(root, 'apps/mobile'), cacheDir: reso
     }
     return code === original ? undefined : { code, map: null }
   } }],
-  test: { include: ['test/mobile-web.test.tsx', 'test/mobile-web-update.test.tsx'], setupFiles: [resolve(root, 'apps/mobile/test/device-locks.ts')],
+  test: { include: ['test/mobile-web.test.tsx', 'test/mobile-web-update.test.tsx'], env: { MOBILE_TEST_BUILD_ID: 'reviewed-page-build' },
+    setupFiles: [resolve(root, 'apps/mobile/test/device-locks.ts'), resolve(root, 'apps/mobile/test/mobile-build-identity-setup.ts')],
     environment: 'happy-dom', passWithNoTests: false, maxWorkers: 1, fileParallelism: false, restoreMocks: true, testTimeout: 15000 }
 })

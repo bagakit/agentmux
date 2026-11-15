@@ -45,7 +45,7 @@ const runtime = `export const identityRuntimeSource = ${JSON.stringify((await bu
 const sha = (text: string) => createHash('sha256').update(text).digest('hex')
 export default defineConfig({ ...base,
   root: resolve(root, 'apps/mobile'), cacheDir: resolve(root, '.tmp/mobile-review-regressions', mutation ?? 'normal'),
-  define: { __AGENTMUX_WEB_PREVIEW__: 'true', __AGENTMUX_MOBILE_BUILD_ID__: JSON.stringify('reviewed-page-build') },
+  define: { __AGENTMUX_WEB_PREVIEW__: 'true' },
   resolve: { ...base.resolve, alias: ['react', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'react-dom', 'react-dom/client', 'react-dom/server', 'react-dom/test-utils'].map(name => ({ find: new RegExp('^' + name + '$'), replacement: mobileRequire.resolve(name) })) },
   plugins: [{ name: 'actual-mobile-review-owners', enforce: 'pre',
     resolveId(id) { if (id === '@agentmux/identity/runtime-source') return '\0mobile-review-identity'; return workspaceSourceExport(root, id) },
@@ -65,7 +65,8 @@ export default defineConfig({ ...base,
       return code === original ? undefined : { code, map: null }
     }
   }, ...(base.plugins ?? [])],
-  test: { ...base.test, setupFiles: [resolve(root, 'apps/mobile/test/device-locks.ts')],
+  test: { ...base.test, env: { MOBILE_TEST_BUILD_ID: 'reviewed-page-build' },
+    setupFiles: [resolve(root, 'apps/mobile/test/device-locks.ts'), resolve(root, 'apps/mobile/test/mobile-build-identity-setup.ts')],
     include: (variant ? [variant.suite] : suites).map(file => 'test/' + file),
     testNamePattern: variant?.target, passWithNoTests: false, maxWorkers: 1, fileParallelism: false, testTimeout: 15000 }
 })

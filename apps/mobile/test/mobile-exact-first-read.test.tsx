@@ -34,6 +34,7 @@ vi.mock('react-dom/client', async original => {
 })
 
 const browser = new Window({ url: 'http://127.0.0.1/' })
+browser.document.head.innerHTML = '<meta name="agentmux-mobile-build" content="exact-first-read-product">'
 // The existing Node socket implementation keeps its event classes separate
 // from this DOM realm while retaining actual TCP, WS and encrypted frames.
 const NodeWebSocket = createRequire(new URL('../../../packages/core/package.json', import.meta.url))('ws').WebSocket

@@ -17,7 +17,7 @@ const mutation = mutant ? variants[mutant] : null
 const owners = new Set([connection, 'apps/mobile/src/connection/prepare-mobile-app.ts', 'apps/mobile/src/main.tsx', 'apps/mobile/src/MobileApp.tsx',
   'apps/mobile/src/navigation/defer-mobile-surface.tsx', 'apps/mobile/src/recovery/device-storage-lock.ts', 'apps/mobile/src/recovery/device-workface.ts', 'apps/mobile/src/recovery/workface.ts',
   'apps/mobile/test/mobile-startup.test.tsx', 'apps/mobile/test/mobile-update-workface.test.tsx', 'apps/mobile/test/mobile-update-connection.test.tsx', 'apps/mobile/test/short-connection-entry.test.tsx'])
-export default { ...base, define: { ...base.define, __AGENTMUX_MOBILE_BUILD_ID__: JSON.stringify('short-page-build') }, cacheDir: resolve(root, '.tmp/mobile-loading-review/vitest', mutant ?? 'normal'), plugins: [...base.plugins ?? [], {
+export default { ...base, cacheDir: resolve(root, '.tmp/mobile-loading-review/vitest', mutant ?? 'normal'), plugins: [...base.plugins ?? [], {
   name: 'evaluated-mobile-startup', enforce: 'pre' as const, transform(original: string, id: string) {
     const file = relative(root, id.split('?')[0]!)
     if (!owners.has(file)) return
@@ -33,5 +33,7 @@ export default { ...base, define: { ...base.define, __AGENTMUX_MOBILE_BUILD_ID__
     }
     return code === original ? undefined : code
   }
-}], test: { ...base.test, include: process.env.MOBILE_STARTUP_RELATED ? ['test/mobile-update-workface.test.tsx', 'test/mobile-update-connection.test.tsx', 'test/short-connection-entry.test.tsx', 'test/connection-admission.test.tsx', 'test/mobile-recovery-connection.test.tsx'] : ['test/mobile-startup.test.tsx'],
+}], test: { ...base.test, env: { MOBILE_TEST_BUILD_ID: 'short-page-build' },
+  setupFiles: [...base.test.setupFiles, resolve(root, 'apps/mobile/test/mobile-build-identity-setup.ts')],
+  include: process.env.MOBILE_STARTUP_RELATED ? ['test/mobile-update-workface.test.tsx', 'test/mobile-update-connection.test.tsx', 'test/short-connection-entry.test.tsx', 'test/connection-admission.test.tsx', 'test/mobile-recovery-connection.test.tsx'] : ['test/mobile-startup.test.tsx'],
   ...(mutation ? { testNamePattern: mutation.target } : {}), maxWorkers: 1, fileParallelism: false, passWithNoTests: false } }
