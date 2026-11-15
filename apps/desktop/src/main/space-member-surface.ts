@@ -6,6 +6,7 @@ import { isSpaceMemberNativeWrite, SPACE_MEMBER_NATIVE_SESSION_CALLS, SPACE_MEMB
 import { fileUploadRevision, parseFileUploadIdentity, parseFileUploadResult } from '@agentmux/core/files'
 import { spaceMountMemberCallHasReceipt } from '../shared/space-mount.js'
 import type { AgentMuxRpcClient } from '@agentmux/core'
+import { projectDesktopRuntimeEvent } from './session-continuity-display'
 import type { SessionSnapshot, TerminalSessionSnapshot } from '../shared/contracts.js'
 import type { SpaceMountMemberRoute, SpaceMountMemberSurface, SpaceMountMemberEvent, SpaceMountMemberMethods } from '../shared/space-mount.js'
 
@@ -65,7 +66,7 @@ export async function createSpaceMemberSurface(input: SpaceMountMemberRoute, por
   const unlisten = client.onEvent(event => {
     if (closed || signal.aborted) return
     try { ports.assertCurrent() } catch (cause) { report(cause); return }
-    emit({ type: 'runtime', event: { type: 'core', hostId: initial.hostId, event } })
+    emit({ type: 'runtime', event: { type: 'core', hostId: initial.hostId, event: projectDesktopRuntimeEvent(event) } })
     if (!readingOnly && (event.type === 'agent-session' || event.type === 'agent-status' || event.type === 'process-state' || event.type === 'connection-state' && event.state === 'restored')) refresh()
   }, { observeMessages: false })
   const requireLease = (id: string) => { if (!leases.has(id)) throw new AgentMuxError('This attachment belongs to another original member view.', 'INVALID_ATTACHMENT') }

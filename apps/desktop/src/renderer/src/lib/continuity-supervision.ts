@@ -1,6 +1,5 @@
 import type { AgentNativeSessionHandle } from '@agentmux/core'
-import type { AgentMuxContinuityOperation } from '@agentmux/core/agent-session-recovery'
-import type { SessionSnapshot } from '../../../shared/contracts'
+import type { DesktopContinuityOperation, SessionSnapshot } from '../../../shared/contracts'
 
 type Agent = Extract<SessionSnapshot, { kind: 'agent' }>
 /** Presentation scope only: a missing original locator may be enriched; a known locator may not change. */
@@ -9,7 +8,7 @@ function displayedTargetMatches(original: AgentNativeSessionHandle | undefined, 
     original.sessionId === observed.sessionId && (original.transcriptPath === undefined || original.transcriptPath === observed.transcriptPath)
 }
 /** O(1) presentation join of the current attempt and its original durable intent. No action authority. */
-export function currentContinuitySupervision(session: Agent): { root: AgentMuxContinuityOperation; attempt: AgentMuxContinuityOperation; targetChanged: boolean; waitingForInitialAttempt: boolean } | null {
+export function currentContinuitySupervision(session: Agent): { root: DesktopContinuityOperation; attempt: DesktopContinuityOperation; targetChanged: boolean; waitingForInitialAttempt: boolean } | null {
   const pointer = session.continuity
   if (!pointer || pointer.agentSessionId !== session.id) return null
   const rootId = pointer.intentOperationId ?? pointer.operationId
@@ -41,7 +40,7 @@ export function dormantByRecoveryPolicy(session: SessionSnapshot): boolean {
   const { root } = joined
   return root.trigger === 'startup' && root.supervision!.phase === 'paused' &&
     (root.reason === 'idle-window-expired' || root.reason === 'idle-unknown') &&
-    !root.previousInput && !root.launchInput && !root.messageInput && !root.recoveryDelivery && !root.frontendReconnect && !root.standingIntent
+    !root.previousInput && !root.launchInput && !root.hasMessageInput && !root.recoveryDelivery && !root.frontendReconnect && !root.standingIntent
 }
 
 /** Session notices that hold the person's own input or answer; they stay visible for a dormant Agent. */

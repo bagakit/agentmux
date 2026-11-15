@@ -1,5 +1,6 @@
-import type { DesktopAgentSessionDisplay, TerminalSessionSnapshot } from '../shared/contracts'
-import { hostedPromptAdmissionSummary } from '@agentmux/core/hosted'
+import type { AgentMuxAgentSession } from '@agentmux/core'
+import type { DesktopContinuityControlResult, TerminalSessionSnapshot } from '../shared/contracts'
+import { projectContinuityOperation, projectDesktopRecoverySession, projectDesktopRuntimeEvent, projectSessionContinuity } from './session-continuity-display'
 import { parseFocusTaskReference } from '@agentmux/core/focus-control'
 import { createSpaceMemberSurface } from './space-member-surface.js'
 import { connectSpaceMember, type SpaceMemberClient } from '@agentmux/core/space-member-client'
@@ -306,8 +307,7 @@ function projectSession(
       ...(subject.agentSession.currentActivity ? { currentActivity: structuredClone(subject.agentSession.currentActivity) } : {}),
       ...(subject.agentSession.nativeSubagents ? { nativeSubagents: structuredClone(subject.agentSession.nativeSubagents) } : {}),
       ...(subject.agentSession.terminalFrontend ? { terminalFrontend: structuredClone(subject.agentSession.terminalFrontend) } : {}),
-      ...(subject.agentSession.continuity ? { continuity: structuredClone(subject.agentSession.continuity) } : {}),
-      ...(subject.agentSession.continuityOperations ? { continuityOperations: structuredClone(subject.agentSession.continuityOperations) } : {}),
+      ...structuredClone(projectSessionContinuity(subject.agentSession)),
       hostId: subject.hostId,
       workspacePath: subject.workspacePath,
       label: agentFallbackLabel(config, subject),
@@ -992,8 +992,7 @@ export class RuntimeController {
           ...(session.nativeHandle ? { nativeSessionId: session.nativeHandle.sessionId } : {}),
           capabilities: capabilitiesFor(session.providerId),
           ...(session.semanticStatus ? { semanticStatus: structuredClone(session.semanticStatus) } : {}),
-          ...(session.continuity ? { continuity: structuredClone(session.continuity) } : {}),
-          ...(session.continuityOperations ? { continuityOperations: structuredClone(session.continuityOperations) } : {}),
+          ...structuredClone(projectSessionContinuity(session)),
           ...(session.terminalCapability
             ? { terminalCapability: structuredClone(session.terminalCapability) }
             : {}),
@@ -1220,7 +1219,7 @@ export class RuntimeController {
         }
       }
       let preparedTopic: PreparedScratchAgentTopic | null = null
-      let created: AgentLaunchResult['created']
+      let created: AgentMuxAgentSession
       let creation: AgentLaunchResult['creation']
       try {
         if (request.scratchTopicId !== undefined) {
@@ -1348,8 +1347,8 @@ export class RuntimeController {
   }
 
   /** Presentation of an already-confirmed original creation; never starts a Session. */
-  async projectAgentCreation(hostId: string, original: AgentLaunchResult['created'], config: AppConfig, creation = original.creation): Promise<AgentLaunchResult> {
-      const client = this.configuredClient(hostId), created = { ...original, hostId }
+  async projectAgentCreation(hostId: string, original: AgentMuxAgentSession, config: AppConfig, creation = original.creation): Promise<AgentLaunchResult> {
+      const client = this.configuredClient(hostId), created = { ...projectDesktopRecoverySession(original), hostId }
       const result: AgentLaunchResult = { created, ...(creation ? { creation } : {}), projectionFailures: [] }
       try {
         const session = await this.sessionByTarget(
@@ -1432,7 +1431,8 @@ export class RuntimeController {
 
   async agentCreation(hostId: string, agentSessionId: string) {
     const client = await this.connectedClient(hostId)
-    return { ...await client.inspectAgentCreation(agentSessionId), hostId }
+    const result = await client.inspectAgentCreation(agentSessionId)
+    return { ...(result.kind === 'agent' ? projectDesktopRecoverySession(result) : result), hostId }
   }
 
   async continueAgentCreation(input: AgentMuxCreationContinueParams) {
@@ -2435,9 +2435,10 @@ export class RuntimeController {
   }
 
   /** Metadata control returns the original Core receipt even when presentation reads are unavailable. */
-  async controlContinuity(hostId: string, input: import('@agentmux/core/agent-session-recovery').AgentMuxContinuityControlInput): Promise<{ hostId: string; result: import('@agentmux/core/agent-session-recovery').AgentMuxContinuityControlResult }> {
+  async controlContinuity(hostId: string, input: import('@agentmux/core/agent-session-recovery').AgentMuxContinuityControlInput): Promise<{ hostId: string; result: DesktopContinuityControlResult }> {
     const client = this.configuredClient(hostId)
-    return { hostId, result: await client.controlAgentContinuity(input) }
+    const result = await client.controlAgentContinuity(input)
+    return { hostId, result: result.state === 'active' ? { ...result, session: projectDesktopRecoverySession(result.session) } : result }
   }
 
   /**
@@ -2522,35 +2523,20 @@ export class RuntimeController {
         )
       }
     }
-    let stored
-    try {
-      stored = client.agentSession(control.agentSessionId)
-    } catch {
-      const result = await client.ensureAgentContinuity({
-        agentSessionId: control.agentSessionId,
-        expectedRun: control.run,
-        operationId, ...(request ? { trigger: request.trigger, ...(request.timingOverride ? { timingOverride: request.timingOverride } : {}), ...(request.input ? { input: request.input, ...(request.inputEpoch === undefined ? {} : { inputEpoch: request.inputEpoch }) } : {}) } : {}), ...(config.continuity ? { policy: config.continuity } : {})
-      })
-      if (result.kind === 'reattachable' || result.kind === 'resumed') {
-        const session = await this.sessionByTarget(client,
-          { kind: 'agent-session', agentSessionId: control.agentSessionId }, config)
-        if (session.kind !== 'agent' || session.control.hostId !== control.hostId ||
-          session.control.agentSessionId !== control.agentSessionId || session.control.run.runId !== result.run.runId) {
-          throw new AgentMuxError('The original Core recovery Run changed before its result was projected.', 'STALE_AGENT_SESSION')
-        }
-        return { kind: result.kind, session }
-      }
-      return result
-    }
     // Target-owned Sessions reattach without a local template or a fresh command probe.
     // Core resolves its own Executor only if Level B recovery needs a new native Run.
+    let stored
+    try { stored = client.agentSession(control.agentSessionId) } catch { /* Core checks the original target. */ }
     const result = await client.ensureAgentContinuity({
       agentSessionId: control.agentSessionId,
       expectedRun: control.run,
       operationId, ...(request ? { trigger: request.trigger, ...(request.timingOverride ? { timingOverride: request.timingOverride } : {}), ...(request.input ? { input: request.input, ...(request.inputEpoch === undefined ? {} : { inputEpoch: request.inputEpoch }) } : {}) } : {}), ...(config.continuity ? { policy: config.continuity } : {}),
-      ...this.sessionExecutorOptions(control.hostId, client, config, stored)
+      ...(stored ? this.sessionExecutorOptions(control.hostId, client, config, stored) : {})
     })
-    if (result.kind !== 'reattachable' && result.kind !== 'resumed') return result
+    if (result.kind !== 'reattachable' && result.kind !== 'resumed') {
+      const { continuity, ...outcome } = result
+      return { ...outcome, ...(continuity ? { continuity: projectContinuityOperation(continuity) } : {}) }
+    }
     const session = await this.sessionByTarget(client,
       { kind: 'agent-session', agentSessionId: control.agentSessionId }, config)
     if (session.kind !== 'agent' || session.control.hostId !== control.hostId ||
@@ -3590,13 +3576,11 @@ export class RuntimeController {
         warningChange = null
       }
     }
-    let projectedEvent: RuntimeEvent['event'] = event
-    if (event.type === 'agent-session') {
-      const { promptCompletionAdmission, ...session } = event.session
-      const display: DesktopAgentSessionDisplay = { ...session, hostId,
-        ...(promptCompletionAdmission ? { promptCompletionAdmission: hostedPromptAdmissionSummary(promptCompletionAdmission) } : {}),
-        ...(event.session.toolExecution ? this.workPlacementProjection()(hostId, event.session.toolExecution) : {}) }
-      projectedEvent = { ...event, session: display }
+    const projectedEvent = projectDesktopRuntimeEvent(event)
+    if (projectedEvent.type === 'agent-session') {
+      const { session } = projectedEvent
+      projectedEvent.session = { ...session, hostId,
+        ...(session.toolExecution ? this.workPlacementProjection()(hostId, session.toolExecution) : {}) }
     }
     const runtimeEvent: RuntimeEvent = { type: 'core', hostId, event: projectedEvent,
       ...(event.type === 'connection-state' ? { hostTransport: this.hosts.has(hostId) ? hostTransportSnapshot(this.hosts.get(hostId)!.client) : null, hostTransportSequence: ++this.hostTransportSequence } : {}),

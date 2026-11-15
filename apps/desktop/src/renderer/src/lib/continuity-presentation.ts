@@ -1,19 +1,18 @@
-import type { AgentMuxContinuityOperation } from '@agentmux/core/agent-session-recovery'
-import type { SessionSnapshot } from '../../../shared/contracts'
+import type { DesktopContinuityOperation, SessionSnapshot } from '../../../shared/contracts'
 
 /** A display-only join; an older attempt cannot explain the current Run. */
 export function currentRunRecoveryOperation(session: {
   id?: string
   control?: { run: { runId: string } }
-  continuity?: AgentMuxContinuityOperation | undefined
-}): AgentMuxContinuityOperation | undefined {
+  continuity?: DesktopContinuityOperation | undefined
+}): DesktopContinuityOperation | undefined {
   const operation = session.continuity
   return operation?.agentSessionId === session.id && operation?.newRun && operation.newRun.runId === session.control?.run.runId
     ? operation : undefined
 }
 
 /** An explicit request remains reachable; Core still decides the exact Runtime/fence qualification. */
-export function currentUnconfirmedResumeOperation(session: SessionSnapshot): AgentMuxContinuityOperation | undefined {
+export function currentUnconfirmedResumeOperation(session: SessionSnapshot): DesktopContinuityOperation | undefined {
   if (session.kind !== 'agent') return
   const operation = session.continuity
   return operation && !operation.action && operation.agentSessionId === session.control.agentSessionId &&
@@ -49,7 +48,7 @@ export function agentContinuityPresentation(session: Extract<SessionSnapshot, { 
 }
 
 /** Presents a Core decision; never grants or denies recovery. */
-export function agentContinuityDetail(decision?: AgentMuxContinuityOperation): string {
+export function agentContinuityDetail(decision?: DesktopContinuityOperation): string {
   if (!decision) return 'The original Session is kept. Core will check its exact Run before restoring; you can send your next request or use Resume.'
   switch (decision.reason) {
     case 'runtime-unverified': return 'The original Run is unverified. Keep this Session and check the original Host again.'

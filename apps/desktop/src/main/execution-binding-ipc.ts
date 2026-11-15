@@ -1,5 +1,5 @@
 import { resolveOriginalExecutionBinding } from './execution-binding-reference'
-import { AgentMuxError, parseAgentExecutionReference, type AgentExecutionBindingService } from '@agentmux/core'
+import { AgentMuxError, parseAgentExecutionReference, type AgentExecutionBindingService, type AgentMuxAgentSession } from '@agentmux/core'
 import type { IpcMainInvokeEvent } from 'electron'
 import type { ExecutionBindingReaders } from './execution-binding-readers'
 import type { AgentExecutionRecoveryReference, AgentLaunchResult } from '../shared/contracts'
@@ -12,7 +12,7 @@ export function registerExecutionBindingIpc(args: {
   readers: ExecutionBindingReaders
   coordinatorTarget(): Promise<AgentExecutionRecoveryReference['coordinator']>
   coordinator(target: AgentExecutionRecoveryReference['coordinator']): Promise<void>
-  project(hostId: string, session: AgentLaunchResult['created']): Promise<AgentLaunchResult>
+  project(hostId: string, session: AgentMuxAgentSession): Promise<AgentLaunchResult>
 }): void {
   const id = (value: unknown): string => {
     if (typeof value !== 'string' || !value || /[\0\r\n]/u.test(value)) throw new AgentMuxError('An exact execution binding is required.', 'INVALID_CONTROL_REQUEST')

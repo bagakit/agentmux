@@ -2,7 +2,7 @@ import { spatialAgentFact as agentFact } from '@agentmux/core/spatial-graph'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { AgentMuxSpatialTargetError as SpatialFailure, exactSpatialDisplayLayout, selectSpatialCatalog, spatialDestination, type AgentMuxSpatialDestination as Destination } from '@agentmux/core/spatial-graph'
 import { zoneFileResource } from './zone-file-resource'
-import type { AgentMuxAgentSession, AgentMuxAgentCreationInspection } from '@agentmux/core'
+import type { AgentMuxAgentSession } from '@agentmux/core'
 import type {
   AgentMuxSpaceAddress, AgentMuxSpaceAgentFact, AgentMuxSpaceRegionFact, AgentMuxSpaceCatalog, AgentMuxSpaceControlRequest,
   AgentMuxSpaceControlResult, AgentMuxSpaceDestination, AgentMuxSpaceMutationReport,
@@ -10,7 +10,7 @@ import type {
 } from '@agentmux/core/control'
 import { addTabOrThrow, addTabOccurrence, createWorkspaceLayout, findGroupForTab, groupIds, insertTabAfter, regionIds,
   removeTab, replaceLeaf, type WorkspaceLayout } from '@agentmux/layout'
-import type { AgentLaunchInput, AgentLaunchResult, AppConfig, ScratchTopicSnapshot, SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
+import type { AgentLaunchInput, AgentLaunchResult, DesktopCreationInspection, AppConfig, ScratchTopicSnapshot, SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { projectResourceWorkspace, spatialSources, topicSpatialAddress, workspaceZoneId, homeZoneId, directoryIdentity, type SpaceZoneBindings, type SpatialRequestBinding,
   type SpaceZoneResourceInput, type SpaceZoneResourceResult } from '../../../shared/space-addresses'
@@ -51,7 +51,7 @@ export type SpatialControlPorts = {
   launch(input: AgentLaunchInput & { agentSessionId: string; createOperationId: string }): Promise<AgentLaunchResult>
   /** Core's binding for an operation identity: an existing creation, a queued message, or its deterministic derivation. Never minted here. */
   creationSessionId(hostId: string, createOperationId: string): Promise<string>
-  creation(hostId: string, sessionId: string): Promise<AgentMuxAgentCreationInspection>
+  creation(hostId: string, sessionId: string): Promise<DesktopCreationInspection>
   attach(regionId: string, result: AgentLaunchResult): Promise<void>
   save(layoutApplied: boolean): Promise<AgentMuxSpatialSave>
   focus(address: AgentMuxSpaceAddress): void
@@ -361,8 +361,8 @@ function observedAgent(sessions: readonly SessionSnapshot[], agentSessionId: str
  * Null covers both "Core holds none" and an unreadable answer: only a positive receipt
  * changes the flow, and Core's own idempotent creation still refuses any duplicate.
  */
-async function operationCreation(ports: SpatialControlPorts, hostId: string, agentSessionId: string, requestId: string): Promise<AgentMuxAgentCreationInspection | null> {
-  let created: AgentMuxAgentCreationInspection
+async function operationCreation(ports: SpatialControlPorts, hostId: string, agentSessionId: string, requestId: string): Promise<DesktopCreationInspection | null> {
+  let created: DesktopCreationInspection
   try { created = await ports.creation(hostId, agentSessionId) } catch { return null }
   if (created?.agentSessionId !== agentSessionId) return null
   const creation = created.kind === 'retired-agent' ? created.history?.creation : created.creation
@@ -645,7 +645,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
     const executionHostId = forkExecutionHostId ?? (operation === 'agent.open' && request.content.kind === 'new-agent'
       ? executionWorkspace?.hostId ?? resourceReference?.hostId ?? catalog.zones.find(zone => zone.zoneId === destination?.address.zoneId)?.hostId
       : existingAgent?.control.hostId)
-    let adopted: AgentMuxAgentCreationInspection | null = null
+    let adopted: DesktopCreationInspection | null = null
     let adoptedLocations: AgentMuxSpaceAddress[] = []
     if (operation === 'agent.open' && (request.content.kind === 'new-agent' || request.content.kind === 'fork-agent')) {
       // A deterministic operation ID (Take over, a derived action) outlives this client's

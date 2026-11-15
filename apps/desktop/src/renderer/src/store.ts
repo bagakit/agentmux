@@ -249,6 +249,7 @@ import { validateAgentPromptCondition, type AgentPromptCondition } from '@agentm
 import type {
   AgentLaunchInput,
   AgentLaunchResult,
+  DesktopContinuityControlResult,
   LaunchOptionSelection,
   AgentSessionControl,
   AgentInputTarget,
@@ -1868,8 +1869,8 @@ export type AppState = GitReadingActions & {
   setConfiguration(sessionId: string, expectedRevision: string, configId: string, value: string | boolean): Promise<void>
   setPosture(sessionId: string, modeId: string): Promise<void>
   interrupt(sessionId: string, originalMember?: SpaceMountMemberTarget): Promise<void>
-  controlSessionContinuity(sessionId: string, intentOperationId: string, action: 'continue' | 'cancel', additionalAttempts?: number): Promise<import('@agentmux/core/agent-session-recovery').AgentMuxContinuityControlResult>
-  reconcileSessionContinuityControl(hostId: string, sessionId: string, operationId: string): Promise<import('@agentmux/core/agent-session-recovery').AgentMuxContinuityControlResult>
+  controlSessionContinuity(sessionId: string, intentOperationId: string, action: 'continue' | 'cancel', additionalAttempts?: number): Promise<DesktopContinuityControlResult>
+  reconcileSessionContinuityControl(hostId: string, sessionId: string, operationId: string): Promise<DesktopContinuityControlResult>
   refreshSession(sessionId: string): Promise<SessionSnapshot | undefined>
   reopenRetiredSession(source: SessionHistoryDescriptor, operationId?: string, observeOnly?: boolean, reveal?: () => boolean): Promise<SessionSnapshot | undefined>
   resumeNativeSession(input: import('../../shared/contracts').AgentLaunchInput, source: import('@agentmux/core').AgentNativeSessionCandidate, capabilities: AgentCapabilities, reveal?: () => boolean, retry?: boolean): Promise<SessionSnapshot | undefined>
@@ -14066,7 +14067,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       try { reply = await api.sessions.controlContinuity(hostId, request) }
       catch (error) { ownerRejection = terminalContinuityControlRejection(error); throw error }
       if (reply.hostId !== hostId) throw new Error('Recovery control returned another Host route. The original request remains unconfirmed.')
-      const result = parseAgentContinuityControlResult(reply.result, request)
+      const verified = parseAgentContinuityControlResult(reply.result, request)
+      const result: DesktopContinuityControlResult = { ...reply.result, receipt: verified.receipt }
       set(state => {
         const current = readContinuityControlIntent(state.continuityControlIntents[key]?.[operationId], hostId, sessionId, operationId).intent
         if (!current || !sameAgentContinuityControlInput(current.request, request)) return state

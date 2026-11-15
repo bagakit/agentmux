@@ -12,7 +12,7 @@ import type {
 import { runInterruptionFact } from '../../../shared/contracts'
 import { nativeBindingKey, projectNativeSourceFacts } from '../../../shared/agent-native-source'
 import { configValuesEqual } from '../../../shared/config-edit'
-import type { AgentMuxAgentSession, AgentMuxEvidence, AgentMuxRunRef, AgentMuxAttachmentGapObservation, AgentMuxOutputGapCauses, AgentMuxLifecycleDiagnosticSource } from '@agentmux/core'
+import type { AgentMuxEvidence, AgentMuxRunRef, AgentMuxAttachmentGapObservation, AgentMuxOutputGapCauses, AgentMuxLifecycleDiagnosticSource } from '@agentmux/core'
 import { agentInteractionActiveRequest, agentInteractionResponseUnavailableReason } from '@agentmux/core/agent-interaction-state'
 import { agentPromptNotApplied, agentPromptPredecessor } from '@agentmux/core/prompt-condition'
 import { applyAgentTimelineEvent } from '@agentmux/core/timeline'
@@ -272,7 +272,7 @@ function acceptsAgentEvidence(session: SessionSnapshot, evidence: AgentMuxEviden
 
 function acceptsAgentSessionTransition(
   session: Extract<SessionSnapshot, { kind: 'agent' }>,
-  incoming: AgentMuxAgentSession
+  incoming: Extract<RuntimeEvent['event'], { type: 'agent-session' }>['session']
 ): boolean {
   if (session.control.agentSessionId !== incoming.agentSessionId) return false
   if (sameRun(session.control.run, incoming.run) && nativeBindingKey(session) === nativeBindingKey(incoming) &&

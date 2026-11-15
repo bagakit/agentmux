@@ -16,7 +16,7 @@ import type { ToolkitPreferences } from './toolkit-preferences'
 import type { WorkspaceFilePreviewReadOptions, WorkspaceFilePreviewResult } from './workspace-file-preview'
 import type { ContinuousProgressApi } from './continuous-progress'
 import type { AgentCatalogEntry, AgentPromptCondition, AgentPromptExecution, AgentMessageChannel, AgentMuxSessionQuestionReplyInput, AgentSessionQuestionReplyReceipt, AgentMuxAgentCreateInput, AgentMuxAgentSession, AgentMuxAgentCreationInspection, AgentMuxNativeSessionConfirmationInput, AgentMuxNativeSessionConfirmation, AgentCapabilities, AgentDisplayState, AgentStatus, AgentExecutorConfig as CoreAgentExecutorConfig, AgentExecutorId, AgentProviderId, LaunchOptionSelection, AgentMuxClientEvent, AgentMuxNativeService, AgentMuxControlFailure, AgentMuxEvidenceSource, AgentMuxInteractionRequest, AgentMuxInteractionResponse, AgentMuxRunDataEvent, AgentMuxRunAttachment, AgentMuxRunExitReason, AgentMuxRunInputData, AgentMuxAgentWriteInput, AgentMuxRunRef, AgentMuxRunReplayGap, AgentMuxRunState, AgentTerminalCapabilityState, AgentTerminalPromptDeliveryState, AgentTerminalOutputChannelState, AgentTurnUsage, AgentMuxControlError, AgentMuxControlErrorCode, AgentMuxControlBrowserRunOutcome, AgentMuxControlBrowserOperation, AgentMuxControlRequest, AgentMuxControlResult, AgentMuxControlCrashLogFact, AgentMuxExecutorProbeResult, AgentTimelineItem, AgentTimelineSnapshot, AgentSessionHistoryPage, AgentSessionHistoryResourceRequest, AgentSessionHistoryResourceReadResult, AgentSessionHistoryDescriptor, AgentSessionHistoryPageOptions, AgentSessionHistoryObservation, AgentSessionHistoryObservationHandle } from '@agentmux/core'
-import type { AgentMuxAgentContinuityResult, AgentMuxAgentContinuityConflictReason, AgentMuxAgentContinuityUnavailableReason } from '@agentmux/core/agent-session-recovery'
+import type { AgentMuxAgentContinuityResult, AgentMuxAgentContinuityConflictReason, AgentMuxAgentContinuityUnavailableReason, AgentMuxContinuityOperation, AgentMuxContinuityControlResult } from '@agentmux/core/agent-session-recovery'
 export type CrashLogRevealResult = Exclude<AgentMuxControlCrashLogFact, { outcome: 'present' }> | { path: string; outcome: 'requested' }
 
 import type { BrowserActivityState, BrowserOperator, BrowserOperation, BrowserReplayPlan } from '@agentmux/browser/model/browser-operation'
@@ -1041,15 +1041,37 @@ export type AgentWorkPlacement = { agentHostId: string; resourceHostId: string |
 /** Retained metadata with the same observer-relative route projection as live Sessions. */
 export type SessionHistoryDescriptor = AgentSessionHistoryDescriptor & { workPlacement?: AgentWorkPlacement }
 
-/** Main's display carrier; original member SDK events can still carry full Core facts. */
-export type DesktopAgentSessionDisplay = Omit<AgentMuxAgentSession, 'promptCompletionAdmission'> & {
+/** The Desktop wire contract admits these existing operation facts, with a presence marker for the Core recipe. */
+export const DESKTOP_CONTINUITY_OPERATION_FIELDS = [
+  'inputEpoch', 'workspaceTrust', 'moteMainEntry', 'standingIntent', 'operationId', 'agentSessionId', 'trigger', 'timingOverride',
+  'policy', 'intentOperationId', 'supervision', 'previousRun', 'newRun', 'nativeTarget', 'admittedAt', 'observedAt', 'rechecks',
+  'interruptedWorking', 'interruption', 'resumedInterruption', 'resumedInputBoundary', 'kind', 'reason', 'evidence', 'nextActionAt',
+  'error', 'requestDigest', 'resolution', 'action', 'restartLaunch', 'errorCode', 'recoveryInputs', 'previousInput', 'launchInput',
+  'recoveryDelivery', 'frontendReconnect', 'initializationRecovery'
+] as const satisfies readonly Exclude<keyof AgentMuxContinuityOperation, 'messageInput'>[]
+type DesktopContinuityOperationField = typeof DESKTOP_CONTINUITY_OPERATION_FIELDS[number]
+export type DesktopContinuityOperation = Pick<AgentMuxContinuityOperation, DesktopContinuityOperationField> & {
+  [Field in Exclude<keyof AgentMuxContinuityOperation, DesktopContinuityOperationField>]?: never
+} & {
+  hasMessageInput?: true
+}
+
+export type DesktopContinuityFacts = {
+  continuity?: DesktopContinuityOperation
+  continuityOperations?: Record<string, DesktopContinuityOperation>
+}
+
+export type DesktopRecoverySession = Omit<AgentMuxAgentSession, keyof DesktopContinuityFacts> & DesktopContinuityFacts
+export type DesktopCreationInspection = Exclude<AgentMuxAgentCreationInspection, AgentMuxAgentSession> | DesktopRecoverySession
+export type DesktopContinuityControlResult = Extract<AgentMuxContinuityControlResult, { state: 'retired' }> |
+  (Omit<Extract<AgentMuxContinuityControlResult, { state: 'active' }>, 'session'> & { session: DesktopRecoverySession })
+
+export type DesktopAgentSessionDisplay = Omit<DesktopRecoverySession, 'promptCompletionAdmission'> & {
   promptCompletionAdmission?: import('@agentmux/core/hosted').AgentMuxHostedPromptAdmissionSummary
   workPlacement?: AgentWorkPlacement
 }
-type DesktopRuntimeEvent = Exclude<AgentMuxClientEvent, { type: 'agent-session' }> |
-  (Omit<Extract<AgentMuxClientEvent, { type: 'agent-session' }>, 'session'> & {
-    session: DesktopAgentSessionDisplay | (AgentMuxAgentSession & { workPlacement?: AgentWorkPlacement })
-  })
+export type DesktopRuntimeEvent = Exclude<AgentMuxClientEvent, { type: 'agent-session' }> |
+  (Omit<Extract<AgentMuxClientEvent, { type: 'agent-session' }>, 'session'> & { session: DesktopAgentSessionDisplay })
 
 export type SessionSnapshot = SessionSnapshotBase & (
   | {
@@ -1077,8 +1099,8 @@ export type SessionSnapshot = SessionSnapshotBase & (
       currentActivity?: AgentMuxAgentSession['currentActivity']
       mainSessionActivity?: AgentMuxAgentSession['mainSessionActivity']
       nativeSubagents?: AgentMuxAgentSession['nativeSubagents']
-      continuity?: AgentMuxAgentSession['continuity']
-      continuityOperations?: AgentMuxAgentSession['continuityOperations']
+      continuity?: DesktopContinuityFacts['continuity']
+      continuityOperations?: DesktopContinuityFacts['continuityOperations']
       /** Core-owned terminal capability fact; absent means no active degradation marker. */
       terminalFrontend?: AgentMuxAgentSession['terminalFrontend']
       terminalCapability?: AgentTerminalCapabilityState
@@ -1270,8 +1292,8 @@ export type AgentSessionRecoveryCandidate = {
   capabilities: AgentCapabilities
   /** Core's last native semantic state; missing entry time remains unknown. */
   semanticStatus?: AgentStatus
-  continuity?: AgentMuxAgentSession['continuity']
-  continuityOperations?: AgentMuxAgentSession['continuityOperations']
+  continuity?: DesktopContinuityFacts['continuity']
+  continuityOperations?: DesktopContinuityFacts['continuityOperations']
   terminalCapability?: AgentTerminalCapabilityState
   label: string
   createdAt: number
@@ -1287,7 +1309,7 @@ export type AgentPlacementIssue = { scope: 'launcher-position' | 'goal-discussio
 export type AgentLaunchResult = {
   placementIssue?: AgentPlacementIssue
   /** One public Core creation receipt; missing display reads never revoke it. */
-  created: AgentMuxAgentSession
+  created: DesktopRecoverySession
   creation?: NonNullable<AgentMuxAgentSession['creation']>
   session?: Extract<SessionSnapshot, { kind: 'agent' }>
   timeline?: AgentTimelineSnapshot
@@ -1327,7 +1349,8 @@ export type SessionRecoveryResult =
   | { kind: 'terminal-restarted'; session: SessionSnapshot }
   | { kind: 'terminal-pending'; recovery: Extract<import('@agentmux/core').AgentMuxTerminalRecoveryResult, { kind: 'pending' }> }
   | { kind: 'reattachable' | 'resumed'; session: SessionSnapshot }
-  | Extract<AgentMuxAgentContinuityResult, { kind: 'unavailable' | 'retired' | 'conflict' | 'pending' }>
+  | (Extract<AgentMuxAgentContinuityResult, { kind: 'unavailable' | 'retired' | 'conflict' | 'pending' }> extends infer Outcome
+    ? Outcome extends { kind: string } ? Omit<Outcome, 'continuity'> & Pick<DesktopContinuityFacts, 'continuity'> : never : never)
 
 export type HostCheckResult = {
   input: HostConfig
@@ -2110,7 +2133,7 @@ export type AgentMuxDesktopApi = {
     launchAgent(input: AgentLaunchInput, goalPmo?: import('@agentmux/host/goal-pmo-origin').GoalPmoIntent): Promise<AgentLaunchResult>
     readInputEpoch(hostId: string): Promise<string | null>
     resolveCreationSessionId(hostId: string, createOperationId: string): Promise<string>
-    creation(hostId: string, agentSessionId: string): Promise<AgentMuxAgentCreationInspection>
+    creation(hostId: string, agentSessionId: string): Promise<DesktopCreationInspection>
     owner(hostId: string, expectedRuntimeId?: string): Promise<AgentMuxRpcResult<'runtime.owner.identity'>>
     takeovers(input: import('@agentmux/core/agent-takeover').AgentTakeoverQuery): Promise<import('@agentmux/core/agent-takeover').AgentTakeoverPage>
     takeoverCancel(input: import('@agentmux/core/agent-takeover').AgentTakeoverCancellationInput): Promise<import('@agentmux/core/agent-takeover').AgentTakeoverCancellationResult>
@@ -2181,7 +2204,7 @@ export type AgentMuxDesktopApi = {
       cols: number,
       rows: number
     ): Promise<{ cols: number; rows: number } | null>
-    controlContinuity(hostId: string, input: import('@agentmux/core/agent-session-recovery').AgentMuxContinuityControlInput): Promise<{ hostId: string; result: import('@agentmux/core/agent-session-recovery').AgentMuxContinuityControlResult }>
+    controlContinuity(hostId: string, input: import('@agentmux/core/agent-session-recovery').AgentMuxContinuityControlInput): Promise<{ hostId: string; result: DesktopContinuityControlResult }>
     refresh(session: SessionControl): Promise<SessionSnapshot>
     // Recover a session whose PTY was lost (daemon_restart / tmux_* interruption, or exit).
     // The physical PTY cannot be revived, so this mints a *fresh* Run in the same cwd:
