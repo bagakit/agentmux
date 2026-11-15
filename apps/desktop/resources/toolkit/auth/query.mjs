@@ -1,6 +1,6 @@
 // User-owned Auth tool. Argument 1: query executable; argument 2: @active or
-// an exact account_key. Edit any part for your own CLI and output. Only an
-// explicit Run queries; this never logs in, renews, switches accounts or uses cards.
+// an exact account_key. Edit any part for your own CLI and output. Each run
+// reads one snapshot. This script never logs in, renews, switches accounts or uses cards.
 import { spawnSync } from 'node:child_process'
 
 const [executable, accountKey, ...customArguments] = process.argv.slice(2)

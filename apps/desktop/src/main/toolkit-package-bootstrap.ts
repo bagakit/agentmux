@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import type { ToolkitPackageConfiguration } from '@agentmux/core/control'
 
-type InitialPackage = { id: string; directory: string; args: string[] }
+type InitialPackage = Pick<ToolkitPackageConfiguration, 'id' | 'enabled' | 'args'> & { directory: string }
 export type ToolkitPackageDeploymentIssue = { toolId: string; path: string; reason: string }
 
 /** Seed assets are copied once; existing user source and partially copied files are preserved. */
@@ -18,7 +18,7 @@ export async function bootstrapToolkitPackages(args: { resourceRoot: string; pac
       continue
     }
     const packagePath = join(args.packageRoot, seed.directory)
-    tools.push({ kind: 'package', id: seed.id, revision: mintObjectId(), packagePath, enabled: true,
+    tools.push({ kind: 'package', id: seed.id, revision: mintObjectId(), packagePath, enabled: seed.enabled,
       statusBar: 'icon', args: [...seed.args], workspacePath: args.workspacePath })
     try {
       await mkdir(args.packageRoot, { recursive: true })
