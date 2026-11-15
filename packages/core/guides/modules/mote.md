@@ -49,40 +49,28 @@ original records, rather than copying a whole conversation or inventing another 
 store. Unknown or missing associations stay unknown; original Sessions, drafts, workfaces
 and healthy capabilities remain available.
 
-## Publish to a built-in Group
+## Work in a built-in Group
 
-A Group has one public history. A Mote works in its own Session for that Group. Use the
-exact Group and accepted input references passed to that Session when explicitly publishing
-a public reply through `space mote group reply --input FILE|-` with
-`{groupId,operationId,inputOperationId,body}`. The original member capability and input receipt
-establish the audience. Normal Agent output remains in the work thread. Keep unrelated private
-work, other conversations and their files out of public replies. Keep the same operationId
-and original body if you need to confirm the same publication.
+Use `amux space mote group --help` to find commands. Read the leaf help for
+its JSON fields and target discovery. Inspect your Group from its authenticated
+Thread with `inspect`; `limit:1` reads current settings and one public message.
 
-The workspace owner can use `space mote group list`, `create`, `inspect`, `send` and `retry`.
-Group inspection reads the public stream and original member references without starting Agents.
-An active Group member can inspect its own Group from its original Thread. Send preserves the
-selected Motes with the original message. Retry addresses one member and retains the original
-input identity.
+Ordinary Agent output stays in your Thread. To publish in the Group, use the
+reply command attached to the addressed input. Share only material for the Group.
+If the result is unknown, repeat the same operationId, input reference and exact
+body to read the original publication receipt. A new publication needs an
+accepted input addressed to your current membership.
 
-`space mote group create --input FILE|-` accepts optional `avatarMoteIds` (up to four selected Motes,
-with an empty list for the default Group icon), `announcement`, `topic` and `adminMoteIds` in the same original operation. The Topic is
-an existing topicId, its exact home zoneId and its expected Workspace resource. Read current
-Group settings and revision with `space mote group inspect`. From its original authenticated
-Thread, an active administrator can use `space mote group update`, `members add` and
-`members remove`. Each takes `--input FILE|-` with `groupId`, `expectedRevision`, and a
-stable `operationId`. Read the leaf help for the exact change. Only the authenticated workspace
-owner assigns administrators. Any current Mote can use `members leave` in its own Group
-Thread. Leave and removal retain old messages and the exact work Thread. Use the same input
-to confirm an unknown operation. A public announcement change is a Group system entry.
-An invitation keeps that admission's announcement and has a separate member receipt. Pending
-invitations remain tied to the Group's Thread. Reading their status starts no Agent.
+Group administrators can invite or remove other Motes and edit Group settings
+from their own Thread. The workspace owner assigns administrators. Members can
+leave from their own Thread. Use the revision returned by `inspect` for changes.
+A version conflict means the change was refused. Read the current Group before
+confirming a new change. After an unknown result, keep the same request.
 
-Use `space mote group file list` or `file read` with `--input FILE|-` to read within a bound
-Topic. Include the exact `groupId`, the accepted `inputOperationId` passed to this Thread, and the
-relative `path` (`.` or omitted for a root list). This access comes from current membership,
-the exact input, and the confirmed Topic. It cannot follow an outside link, grants no ordinary
-workspace operations, and ends with the authorized membership generation.
+Use `file list` and `file read` with your original addressed inputOperationId
+to read within the currently bound Topic. The Group keeps its previous messages,
+Thread and accepted receipts after a member leaves or is removed. Retrieval of
+Group history and invitations starts no Agent.
 
 Online status and heartbeat arrangements require actual Core facts and original receipts.
 If a heartbeat is arranged, inspect the same current role and authorized commitments before
