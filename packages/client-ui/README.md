@@ -62,10 +62,6 @@ Node consumers can import the theme model to resolve light and dark tokens witho
 
 Use `syntax="markdown"` on `Textarea` or `ComposerTextarea` to color CommonMark and GFM directly in the field. Import `input/styles.css`. Syntax colors keep delimiters, whitespace, form values and clipboard text intact. The field retains native selection, undo, IME and forced colors. Drafts larger than 4,096 UTF-16 units and input that exceeds the parser budget remain fully editable as plain text.
 
-### Markdown preview
-
-The [shared Markdown renderer](src/lib/markdown-render.ts) limits math input to 4 KiB, code input to 64 KiB, and generated output to 256 KiB of HTML and 3,000 elements. The input check runs before starting a terminable worker. KaTeX uses `trust: false` and `strict: 'error'`. The worker checks generated output against the same budget before returning it. When rendering exceeds a limit, the preview keeps the original source visible and explains why.
-
 ## Workspace modules
 
 Imports in the table use the prefix `@agentmux/client-ui/`. The package manifest records the complete workspace export map.
@@ -110,6 +106,10 @@ Node consumers import a supported subpath directly. Interactive components requi
 Copy uses the original parts or the caller’s `copyText`. A host with a frozen source record can pass that original text.
 
 The optional `renderObjectLink` adapter receives an object URI and its parsed target. Markdown and conversation prose share inline rendering. Code, read-only previews and document mode keep plain text. The host resolves names, appearance, details and navigation. Stored text and Copy retain the original source.
+
+### Markdown preview
+
+The [shared Markdown renderer](src/lib/markdown-render.ts) limits math input to 4 KiB, code input to 64 KiB, and generated output to 256 KiB of HTML and 3,000 elements. The input check runs before starting a terminable worker. KaTeX uses `trust: false` and `strict: 'error'`. The worker checks generated output against the same budget before returning it. When rendering exceeds a limit, the preview keeps the original source visible and explains why.
 
 ## Terminal
 
