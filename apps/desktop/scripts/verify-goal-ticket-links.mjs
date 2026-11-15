@@ -22,6 +22,13 @@ const runs = [
     replacement: 'void readingEntry.ticketNodeId',
     failure: 'the original Ticket must be visibly selected and revealed',
   },
+  {
+    id: 'publication-order-id',
+    path: 'packages/core/src/sharing.ts',
+    anchor: '`#T-${encodeURIComponent(target.nodeId)}`',
+    replacement: "'#T-1'",
+    failure: 'Ticket links do not match their original Goal and node identity.',
+  },
   { id: 'restored' },
 ]
 const proof = await mkdtemp(join(tmpdir(), 'amux-goal-ticket-links-'))

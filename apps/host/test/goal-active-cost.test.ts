@@ -43,7 +43,7 @@ it('reads only current work at the original owner after a cold restart and keeps
     expect(await owner.call('worker', working)).toEqual(initial)
     expect(await owner.call('observer', working)).toMatchObject({ goals: [] })
     const managed = await owner.call(null, [...working, '--goal', goalId])
-    expect(managed.goals[0].nodes).toEqual([{ nodeId: node.id, title: node.title, ticket: 1, state: 'ready', unknown: [], predecessors: [] }])
+    expect(managed.goals[0].nodes).toEqual([{ nodeId: node.id, title: node.title, state: 'ready', unknown: [], predecessors: [] }])
     expect(fullRead, 'active reads must skip the original full snapshot').not.toHaveBeenCalled()
   } finally { fullRead.mockRestore() }
   await owner.call('worker', ['goal', 'plan', 'claim', '--goal', goalId, '--node', node.id, '--claim-token', claimToken, '--operation-id', 'claim-work'])

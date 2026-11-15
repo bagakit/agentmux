@@ -1590,8 +1590,8 @@ it('copied Goal plan links and the real CLI reveal the original graph without cr
     client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
     const receipt = await client.call('goal.focus', { goalId: 'exact', runtimeId: address.runtimeId, namespace: address.namespace, section: 'plan' })
     expect(receipt.presentation.goal).toEqual({ goalId: 'exact', runtimeId: address.runtimeId, namespace: address.namespace, section: 'plan' })
-    const cliCall = async (args: string[]) => {
-      const child = spawn(process.execPath, [cli, '--endpoint', 'unix:' + server!.path, ...args], { env: objectCliEnvironment(fixture.directory), stdio: ['ignore', 'pipe', 'pipe'] })
+    const cliCall = async (args: string[], endpoint = server!.path) => {
+      const child = spawn(process.execPath, [cli, '--endpoint', 'unix:' + endpoint, ...args], { env: objectCliEnvironment(fixture.directory), stdio: ['ignore', 'pipe', 'pipe'] })
       return new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
         let stdout = '', stderr = ''; const deadline = setTimeout(() => { child.kill(); reject(Error('The exact Goal CLI request exceeded its deadline.')) }, 10_000)
         child.stdout.on('data', value => { stdout += value }); child.stderr.on('data', value => { stderr += value }); child.once('error', error => { clearTimeout(deadline); reject(error) })
@@ -1602,19 +1602,20 @@ it('copied Goal plan links and the real CLI reveal the original graph without cr
     const help = await cliCall(['goal', 'focus', '--help']), skill = await cliCall(['goal', '--skill']), spaceSkill = await cliCall(['space', '--skill'])
     expect(help.code, help.stderr).toBe(0); expect(help.stdout).toContain('--namespace ID'); expect(help.stdout).toContain('--section plan')
     expect(skill.code, skill.stderr).toBe(0); expect(skill.stdout).toContain('goal.address'); expect(skill.stdout).toContain('presentation.goal')
+    expect(skill.stdout).toContain('goal plan new-id')
     expect(spaceSkill.code, spaceSkill.stderr).toBe(0); expect(spaceSkill.stdout).toContain('capsule, mote, host and goal'); expect(spaceSkill.stdout).toContain('goal focus --goal ID --runtime ID --namespace ID --section plan')
     expect(requests).toHaveLength(requestsBeforeDiscovery)
     const result = await cliCall(['goal', 'focus', '--goal', 'exact', '--runtime', address.runtimeId, '--namespace', address.namespace, '--section', 'plan'])
     const plan = await owner.client.call('goal.plan', { goalId: 'exact' })
     const [ticketUrl] = plan.ticketLinks ?? []
-    expect(ticketUrl).toBe(address.goalUrl + '#T1')
-    const rejectedTicket = await ingress.receive('amux://goal/exact#T1')
+    expect(ticketUrl, 'the link must preserve the original Ticket ID').toBe(address.goalUrl + '#T-read')
+    const rejectedTicket = await ingress.receive('amux://goal/exact#T-read')
     expect(rejectedTicket, 'a namesake without the original binding cannot receive a short Ticket link').toContain('GOAL_SOURCE_UNCONFIRMED')
     const preserved = { value: outside.value, start: outside.selectionStart, end: outside.selectionEnd }
     const ticketReply = await cliCall(['goal', 'focus', '--link', ticketUrl!])
     expect(ticketReply.code, 'the original Ticket must be visibly selected and revealed: ' + ticketReply.stderr).toBe(0)
     expect(JSON.parse(ticketReply.stdout).result.presentation.goal).toEqual({
-      goalId: 'exact', runtimeId: address.runtimeId, namespace: address.namespace, section: 'plan', ticket: 1,
+      goalId: 'exact', runtimeId: address.runtimeId, namespace: address.namespace, section: 'plan', nodeId: 'read',
     })
     const ticket = container.querySelector('[data-goal-plan-node="read"]')
     expect(ticket?.querySelector('[aria-expanded="true"]')).toBeTruthy()
@@ -1623,19 +1624,31 @@ it('copied Goal plan links and the real CLI reveal the original graph without cr
     expect({ value: outside.value, start: outside.selectionStart, end: outside.selectionEnd }).toEqual(preserved)
     expect(await ingress.receive(ticketUrl!)).toBeNull()
     const originalNode = plan.plan!.nodes[0]!
+    const mint = async () => {
+      const reply = await cliCall(['goal', 'plan', 'new-id'], join(fixture.directory, 'no-goal-owner.sock'))
+      expect(reply.code, 'new Ticket IDs must be generated without contacting the owner: ' + reply.stderr).toBe(0)
+      const nodeId = JSON.parse(reply.stdout).result.nodeId as string
+      expect(nodeId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/u)
+      return nodeId
+    }
+    const [first, second] = await Promise.all([mint(), mint()])
+    expect(first).not.toBe(second)
     const revised = await owner.client.call('goal.plan.revise', { goalId: 'exact',
       revision: { operationId: 'add-second-ticket', expectedRevision: 1, alignmentRevision: 1, nodes: [
-        { ...originalNode, id: 'another', title: 'Another Ticket' }, { ...originalNode, title: 'Renamed original Ticket', cancelled: true },
+        { ...originalNode, id: second, title: 'Another Ticket' }, { ...originalNode, title: 'Renamed original Ticket', cancelled: true },
+        { ...originalNode, id: first, title: 'A third Ticket' },
       ] },
     })
-    expect(revised.plan?.ticketNodes).toEqual(['read', 'another'])
-    expect(revised.ticketLinks?.[0]).toBe(ticketUrl)
+    expect(revised.plan?.nodes.map(node => node.id)).toEqual([second, 'read', first])
+    expect(revised.ticketLinks, 'links must carry the exact creating-side node ID in any publication order').toEqual([
+      address.goalUrl + '#T-' + second, ticketUrl, address.goalUrl + '#T-' + first,
+    ])
     const short = await owner.client.call('goal.create', { title: 'An owner-bound Goal', risk: 'low', confirmation: 'user', operationId: 'owner-bound-goal' })
     await owner.client.call('goal.update', { goalId: short.goal.id, patch: { alignment: proposal } })
     const shortPlan = await owner.client.call('goal.plan.revise', { goalId: short.goal.id,
       revision: { operationId: 'compact-ticket', expectedRevision: 0, alignmentRevision: 1, nodes: [originalNode] },
     })
-    expect(shortPlan.ticketLinks).toEqual(['amux://goal/' + short.goal.id + '#T1'])
+    expect(shortPlan.ticketLinks).toEqual(['amux://goal/' + short.goal.id + '#T-read'])
     expect(await ingress.receive(shortPlan.ticketLinks![0]!)).toBeNull()
     expect(container.querySelector('[data-goal-plan-node="read"] [aria-expanded="true"]')).toBeTruthy()
     expect(await ingress.receive(ticketUrl!)).toBeNull()
@@ -1652,10 +1665,10 @@ it('copied Goal plan links and the real CLI reveal the original graph without cr
     const delayedTicket = ingress.receive(ticketUrl!)
     await ticketStarted
     try {
-      await act(async () => container.querySelector<HTMLButtonElement>('[data-goal-plan-node="another"] .goal-plan-node__head')!.click())
+      await act(async () => container.querySelector<HTMLButtonElement>(`[data-goal-plan-node="${second}"] .goal-plan-node__head`)!.click())
       releaseTicket()
       expect(await delayedTicket, 'a late Ticket link must preserve the later node choice').toContain('NAVIGATION_CHANGED')
-      expect(container.querySelector('[data-goal-plan-node="another"] [aria-expanded="true"]')).toBeTruthy()
+      expect(container.querySelector(`[data-goal-plan-node="${second}"] [aria-expanded="true"]`)).toBeTruthy()
     } finally { releaseTicket() }
     expect(result.code, result.stderr).toBe(0)
     expect(JSON.parse(result.stdout).result.presentation.goal).toEqual(receipt.presentation.goal)

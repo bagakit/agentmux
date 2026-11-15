@@ -142,12 +142,12 @@ describe('node delegation and review', () => {
 
   it('delegates exactly the node criteria, preventing a partial task report from completing the whole node', async () => {
     await store.revisePlan('goal', { operationId: 'plan-2', expectedRevision: 1, alignmentRevision: 1,
-      nodes: [node('a', [], { criterionIds: ['api', 'ui'] })] }, supervisor)
+      nodes: [node('a', [], { criterionIds: ['api', 'ui'] }), node('b', [], { cancelled: true }), node('c', ['a', 'b'], { cancelled: true })] }, supervisor)
     await expect(store.prepareDelegation('goal', delegation('a'), 'mote')).rejects.toThrow('same success criteria')
     expect((await store.get('goal'))!.delegations ?? []).toEqual([])
     await deliver({ ...delegation('a'), criterionIds: ['ui', 'api'] })
     await store.reviewPlanNode('goal', pass('a', 'delegate-a-1'), { kind: 'agent', id: 'reviewer' })
-    expect(await states()).toEqual({ a: 'done' })
+    expect(await states()).toEqual({ a: 'done', b: 'cancelled', c: 'cancelled' })
   })
 
   it('sends a node only to the executor its plan names', async () => {

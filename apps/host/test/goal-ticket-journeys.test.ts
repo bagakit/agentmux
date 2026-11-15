@@ -12,6 +12,7 @@ afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await
 
 it('uses the original Git result as optional Ticket evidence and preserves explicit Goal acceptance', async () => {
   const owner = await crossHostOwner(cleanup, 'git-ticket', ['supervisor', 'worker', 'reviewer'])
+  const { nodeId } = await owner.call('supervisor', ['goal', 'plan', 'new-id'])
   const created = await owner.call('supervisor', ['goal', 'create', '--title', 'Deliver a checked repository result', '--status', 'in_progress',
     '--assignees', JSON.stringify(['supervisor', 'worker']), '--supervisor', 'supervisor', '--risk', 'low', '--confirm', 'user'])
   const goalId = created.goal.id
@@ -23,20 +24,21 @@ it('uses the original Git result as optional Ticket evidence and preserves expli
   const check = 'Read the original landed commit and its Goal-Node trailer'
   await owner.call('supervisor', ['goal', 'plan', 'revise', '--input', '-'], { goalId, revision: {
     operationId: 'define-git-ticket', expectedRevision: 0, alignmentRevision: 1,
-    nodes: [{ id: 'code', title: 'Land the change', outcome: 'A verified commit on main', executor: null, criterionIds: [criterion.id], dependsOn: [], check }],
+    nodes: [{ id: nodeId, title: 'Land the change', outcome: 'A verified commit on main', executor: null, criterionIds: [criterion.id], dependsOn: [], check }],
   } })
   await owner.call(null, ['goal', 'plan', 'assignment', '--input', '-'], {
-    goalId, nodeId: 'code', expectedRevision: 1, operationId: 'open-git-ticket', assignment: { kind: 'open' },
+    goalId, nodeId, expectedRevision: 1, operationId: 'open-git-ticket', assignment: { kind: 'open' },
   })
   const active = await owner.call('worker', ['goal', 'plan', 'active'])
-  const claim = await owner.call('worker', ['goal', 'plan', 'claim', '--goal', goalId, '--node', 'code',
+  expect(active.goals[0].nodes[0].nodeId).toBe(nodeId)
+  const claim = await owner.call('worker', ['goal', 'plan', 'claim', '--goal', goalId, '--node', nodeId,
     '--claim-token', active.goals[0].nodes[0].claimToken, '--operation-id', 'claim-git-ticket'])
   const ticketLink = claim.ticketLinks[0]
-  expect(ticketLink).toBe('amux://goal/' + goalId + '#T1')
+  expect(ticketLink).toBe('amux://goal/' + goalId + '#T-' + nodeId)
   await owner.call('supervisor', ['goal', 'delegate', '--input', '-'], { goalId, intent: {
     operationId: 'dispatch-git-ticket', sourceMessageId: 'source-git-ticket', threadId: 'thread-git-ticket',
     hostId: 'local', ownerAgentSessionId: 'supervisor', ownerRunId: 'run-supervisor', workerAgentSessionId: 'worker', workerRunId: 'run-worker',
-    text: 'Deliver and report the original repository result.', alignmentRevision: 1, criterionIds: [criterion.id], planNodeId: 'code',
+    text: 'Deliver and report the original repository result.', alignmentRevision: 1, criterionIds: [criterion.id], planNodeId: nodeId,
   } })
   const received = await owner.call('worker', ['message', 'read', '--host', 'local', '--message-id', 'source-git-ticket'])
   expect(received.message.envelope.application.data.ticketLink).toBe(ticketLink)
@@ -62,7 +64,7 @@ it('uses the original Git result as optional Ticket evidence and preserves expli
   } })
   const deliveryHash = submitted.delegations[0].report.delivery.hash
   await owner.call('reviewer', ['goal', 'plan', 'review', '--input', '-'], { goalId, review: {
-    operationId: 'review-git-ticket', nodeId: 'code', delegationOperationId: 'dispatch-git-ticket', deliveryHash, verdict: 'pass', note: '',
+    operationId: 'review-git-ticket', nodeId, delegationOperationId: 'dispatch-git-ticket', deliveryHash, verdict: 'pass', note: '',
     check: { command: check, result: 'Confirmed the commit content and its original Ticket trailer', evidence: [commitEvidence.href] },
   } })
   const collected = await owner.call('supervisor', ['goal', 'collect', '--input', '-'], { goalId, operationId: 'dispatch-git-ticket',
