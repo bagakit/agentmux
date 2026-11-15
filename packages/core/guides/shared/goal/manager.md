@@ -8,7 +8,8 @@ next responsible party and action against that execution.
 Read the plan revision with `goal plan --goal ID` and current work with
 `goal plan active --goal ID`. Publish with `goal plan revise` and use the issued Ticket IDs.
 Use `goal plan assignment` to open ready unassigned nodes, close claims or name an executor.
-Read back the assignment. Use `goal delegate` for ready work or rework with the named executor.
+Read the saved claim or assignment in `goal plan`. When execution is authorized, send ready
+work or rework with `goal delegate`, using the same `intent.planNodeId` and the recorded executor.
 Keep the same node and thread for rework. Use `goal collect` for original reports.
 An independent reviewer runs the declared check and uses `goal plan review` with the exact
 delivery hash. Advance dependents after the original signed completion is confirmed.

@@ -10,13 +10,10 @@ claim token, call `goal plan claim --goal ID --node NODE --claim-token TOKEN --o
 Confirm the saved operation and executor in `goal plan --goal ID` when uncertain. A claim
 records responsibility. Wait for the original dispatch before executing the task.
 
-Use the delegation’s `ticketLink` to refer to the Ticket and as the Git `Goal-Node` trailer.
-
-For a remote delegation, keep the Goal at its original owner. Read the received MID
-with `message read --message-id SOURCE`.
-Use the verified `envelope.application` (`agentmux.goal-delegation.v1`) to identify the
-Goal, delegation, proposal revision and criteria. A `planNodeId` binds the delivery to
-that node. Run its check for your own verification. An independent reviewer decides the verdict.
+For local or remote delegations, read the original message with `message read --message-id SOURCE`.
+Use the verified `envelope.application.data` for the Goal, attempt and frozen criteria.
+For a Ticket, use its `ticketLink` as the reference and, when using Git, as the `Goal-Node`
+trailer. Run the declared check. An independent reviewer decides the verdict.
 
 Use `goal report --input FILE` at your Core with the original operation, `sourceMessageId`
 and actual author. Report each criterion as met, gap or unknown with evidence.
