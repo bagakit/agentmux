@@ -33,6 +33,8 @@ Provider 解释原生初始化、会话创建／恢复及前台连接协议，�
 
 GUI 与 CLI 仅消费 Core 的原阶段和结果。原 Run 存活只证明物理运行，不能代签前台恢复、原生上下文或输入接受。故障诊断正文可供阅读，但不参与权限、身份、恢复资格或成功判定。
 
+Core 通过[持久 Hook 运行时](../../packages/core/src/managed-hook-runtime.ts)发布受托解释器与 worker。解释器的磁盘动态库须在受托闭包或系统目录内。Linux 内核注入的虚拟动态库由内核映射，直接复用宿主提供的映射。Hook 准备失败只影响对应身份和状态观察，运行中的 Agent 保持可用。
+
 ## 持久 Session 与保存确认
 
 Core Session Store 在原 Session 路径使用 SQLite 保存身份与生命周期事实，物理事务和一次格式切换归 [Session database](../../packages/core/src/agent-session-database.ts)。原稳定 inode 的跨进程锁持续保护写入；旧完整文档先校验全部事实、按内容摘要保全原字节，再以已同步事务原子切换，完成身份标记防止后来替换文件被误当作旧事实重新导入。切换中断从原文件或已发布事务重开，不另建空 Session。损坏旧文档的局部救援保持只读，不把部分救回的事实发布为完整转换结果。
