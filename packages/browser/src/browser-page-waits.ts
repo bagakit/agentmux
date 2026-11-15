@@ -83,22 +83,25 @@ export async function waitForBrowserUrl(context: WaitContext, wanted: unknown, t
 export async function waitForBrowserNetworkIdle(context: WaitContext, timeout: unknown) {
   const { session } = context
   const timeoutMs = typeof timeout === 'number' ? timeout : DEFAULT_WAIT_MS
-  // 数在途请求，**不是**睡一个固定时长。固定时长在慢网络上撒谎，而撒的谎是"加载完了"。
-  let inFlight = 0
+  const activeRequests = new Set<string>()
   let lastChange = Date.now()
-  await session.sendCommand('Network.enable')
-  const stop = session.observe((method) => {
+  const stop = session.observe((method, params, sessionId) => {
+    if (method !== 'Network.requestWillBeSent' && method !== 'Network.loadingFinished' && method !== 'Network.loadingFailed') return
+    const requestId = (params as { requestId?: unknown } | null)?.requestId
+    if (typeof requestId !== 'string') return
+    // CDP repeats the request ID for redirect hops. A child session owns a separate ID namespace.
+    const key = JSON.stringify([sessionId, requestId])
     if (method === 'Network.requestWillBeSent') {
-      inFlight += 1
+      activeRequests.add(key)
       lastChange = Date.now()
-    } else if (method === 'Network.loadingFinished' || method === 'Network.loadingFailed') {
-      inFlight = Math.max(0, inFlight - 1)
+    } else if (activeRequests.delete(key)) {
       lastChange = Date.now()
     }
   })
   try {
+    await session.sendCommand('Network.enable')
     await waitForBrowserCondition(context, 'the network to go quiet', timeoutMs, async () =>
-      inFlight === 0 && Date.now() - lastChange >= NETWORK_IDLE_QUIET_MS
+      activeRequests.size === 0 && Date.now() - lastChange >= NETWORK_IDLE_QUIET_MS
     )
   } finally {
     stop()
