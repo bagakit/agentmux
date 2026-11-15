@@ -12,7 +12,7 @@ import { topicSpaceIconTarget } from '../lib/space-object-appearance'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { api } from '../lib/api'
 import { checkpointLauncherState, useLauncherState } from '../lib/launcher-state'
-import { requestMoteGroupFloatingOpen } from '../lib/pmo-teams-topic-floating'
+import { requestMoteGroupFloatingOpen, requestPmoTeamsTopicFloatingClose } from '../lib/pmo-teams-topic-floating'
 import { MoteSessionConversation } from './MoteSessionConversation'
 
 const draftKey = (groupId: string) => 'mote-group:' + groupId
@@ -162,7 +162,10 @@ function DesktopGroupTopicFiles({ target, original, onClose }: {
       }}>返回上一级</Button> : null}
       {original ? <Button onClick={() => {
         void useAppStore.getState().openScratchTopic(original.topicId, target.expectedResource.workspaceId).then(opened => {
-          if (opened) onClose()
+          if (opened) {
+            onClose()
+            requestPmoTeamsTopicFloatingClose({ restoreFocus: false })
+          }
         }).catch(error => setIssue(error instanceof Error ? error.message : String(error)))
       }}>打开 Topic</Button> : null}
       {issue ? <Notice tone="warning" messageRole="status" actions={<Button onClick={() => setAttempt(value => value + 1)}>重读</Button>}>{issue}</Notice> : null}
