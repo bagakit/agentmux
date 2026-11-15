@@ -193,9 +193,11 @@ it('synchronously reveals newly inserted visible slots without waiting for an in
   await render({ order: contexts.slice(0, 3) })
   expect(full()).toHaveLength(3)
   const original = button(contexts[0]!.id)
+  const before = slotGeometryReads.length
   await render()
   expect(slots()).toHaveLength(279)
   expect(slots().slice(0, 12).every(slot => slot.dataset.focusCardBody === 'mounted')).toBe(true)
+  expect(slotGeometryReads.length - before, 'Bulk additions only measure the viewport and the next row').toBeLessThan(40)
   expect(button(contexts[0]!.id)).toBe(original)
 })
 
@@ -382,6 +384,23 @@ it('creates the first body tree only after the original column owner has resolve
     expect(realBodies().length).toBeGreaterThan(9); expect(realBodies().length).toBeLessThan(40)
     expect(slots().slice(0, 12).every(slot => slot.querySelector('.focus-context__identity'))).toBe(true)
   })
+})
+
+it('rebinds pending slots when the original layout becomes ready again', async () => {
+  await render()
+  const pending = slots().at(-1)!, owner = observers.find(observer => observer.targets.has(pending))!
+  expect(owner).toBeDefined()
+  expect(pending.dataset.focusCardBody).toBe('pending')
+  await render({ layoutReady: false })
+  expect(owner.targets.size).toBe(0)
+  await act(async () => owner.callback([intersection(pending)], {} as IntersectionObserver))
+  expect(pending.dataset.focusCardBody).toBe('pending')
+  await render()
+  const next = observers.find(observer => observer.targets.has(pending))!
+  expect(next).toBeDefined()
+  expect(next).not.toBe(owner)
+  await act(async () => next.callback([intersection(pending)], {} as IntersectionObserver))
+  expect(pending.dataset.focusCardBody).toBe('mounted')
 })
 
 it('keeps every original usable body when IntersectionObserver is unavailable', async () => {

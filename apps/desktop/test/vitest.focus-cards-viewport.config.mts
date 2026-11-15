@@ -16,12 +16,13 @@ export default defineConfig({
     if (path.endsWith('/FocusContextCards.tsx') && mutant) {
       const inverses: Record<string, [string, string]> = {
         eager: ['const full = visited.current.has(key) || requested', 'const full = true'],
-        'forget-visited': ['observation.current = null', 'observation.current = null; visited.current.clear()'],
+        'forget-visited': ['        observation.current = null', '        observation.current = null; visited.current.clear()'],
         'no-initial-scan': ['for (const slot of candidates) {', 'for (const slot of [] as CardSlot[]) {'],
         'queued-hidden': ['if (!visible) {\n      if (previous) {\n        stopObserving()', 'if (!visible) {\n      if (previous) {'],
         'queued-rejoin': ['entry.isIntersecting && current && entry.time >= current.observedAt', 'entry.isIntersecting && current'],
         'pointer-focus-replace': ['onMouseDown={event => { if (event.button === 0) event.preventDefault() }}', ''],
-        'initial-columns': ["if (!layoutReady && observable && typeof window?.ResizeObserver !== 'undefined') return", ''],
+        'initial-columns': ["if (!layoutReady && observable && typeof window?.ResizeObserver !== 'undefined') {\n      observation.current = null\n      return\n    }", ''],
+        'forget-deferred-viewport': ['      observation.current = null\n      return', '      return'],
         'scan-on-order': [
           'if (!changedViewport && !added.current.size) return',
           `if (!changedViewport && !added.current.size) {
