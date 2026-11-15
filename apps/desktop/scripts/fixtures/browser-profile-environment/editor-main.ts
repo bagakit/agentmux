@@ -13,7 +13,8 @@ import {
   registerBrowserProfileEditorIpc,
   readBrowserProfileSnapshot
 } from '../../../src/main/browser-profile-editor-ipc.js'
-import { assertAppDocumentSender } from '../../../src/main/ipc-sender-trust.js'
+import { assertAppDocumentSender, isAppDocumentSender } from '../../../src/main/ipc-sender-trust.js'
+import type { WorkbenchUserStateWrite } from '../../../src/shared/workbench-user-state.js'
 import {
   executeBrowserProfileControl,
   isBrowserProfileControlRequest
@@ -40,6 +41,7 @@ const compiled = process.env.AGENTMUX_EDITOR_COMPILED!,
   phase = process.env.AGENTMUX_EDITOR_PHASE!,
   url = process.env.AGENTMUX_EDITOR_URL!
 const report: any = { passed: false, phase, versions: process.versions, observations: [], screenshots: [] }
+const profileEdits: { profileId: unknown; edit: unknown; revision: unknown }[] = []
 const stage = (name: string) => {
   report.lastStage = name
   writeFileSync(output, JSON.stringify(report, null, 2))
@@ -54,7 +56,9 @@ let win: BrowserWindow | undefined,
 let holdAck = false,
   releaseAck: (() => void) | undefined,
   writeFailure = false,
-  readFailure = phase === 'read-failure'
+  readFailure = phase === 'read-failure',
+  blockedNameMarkerFor: string | undefined,
+  nameMarkerHeld = false
 app.on('window-all-closed', () => {})
 await app.whenReady()
 app.setActivationPolicy?.('prohibited')
@@ -86,6 +90,7 @@ try {
   ) => {
     ipcMain.handle(channel, async (event, ...args: A) => {
       assertAppDocumentSender(event, win!.webContents, sources)
+      if (channel === 'browser:updateProfile') profileEdits.push({ profileId: args[0], edit: args[1], revision: args[2] })
       const result = await listener(event, ...args)
       if (channel === 'browser:updateProfile' && holdAck) {
         holdAck = false
@@ -104,9 +109,13 @@ try {
     return userState.read()
   })
   handle('ui:importWorkbenchState', (_event, value: string) => userState.importIfAbsent(value))
-  handle('ui:writeWorkbenchState', (_event, value: string) => {
+  handle('ui:writeWorkbenchState', async (event, request: WorkbenchUserStateWrite) => {
     if (writeFailure) throw new Error('Private draft write ACK unconfirmed')
-    return userState.write(value)
+    if (blockedNameMarkerFor && JSON.parse(request.value).desktopFragments?.browserProfileTextDrafts?.[blockedNameMarkerFor]?.label?.[0]?.state === 'saving') {
+      nameMarkerHeld = true
+      return await new Promise<never>(() => {})
+    }
+    return userState.writeFromRenderer(event.senderFrame!, request, () => isAppDocumentSender(event, win!.webContents, sources))
   })
   handle('browser:listProfileSites', () => ({ ok: true, value: [] }))
   handle('browser:readProfileProxySignIn', () => ({ ok: true, value: null }))
@@ -210,14 +219,14 @@ try {
       })
     await wait(60)
   }
-  const button = async (text: string) => {
+  const button = async (text: string, scope = '.profile-environment') => {
     await evaluate(
-      `(()=>{const e=[...document.querySelectorAll('.profile-environment button')].find(e=>e.textContent===${JSON.stringify(text)});if(!e)throw new Error('Missing '+${JSON.stringify(text)});document.querySelectorAll('[data-proof-click]').forEach(e=>e.removeAttribute('data-proof-click'));e.setAttribute('data-proof-click','yes')})()`
+      `(()=>{const e=[...document.querySelectorAll(${JSON.stringify(scope + ' button')})].find(e=>e.textContent===${JSON.stringify(text)});if(!e)throw new Error('Missing '+${JSON.stringify(text)});document.querySelectorAll('[data-proof-click]').forEach(e=>e.removeAttribute('data-proof-click'));e.setAttribute('data-proof-click','yes')})()`
     )
     await click('[data-proof-click="yes"]')
   }
   const type = async (label: string, value: string) => {
-    const selector = `input[aria-label="${label}"]`
+    const selector = `:is(input, textarea)[aria-label="${label}"]`
     await click(selector)
     await evaluate(`document.querySelector(${JSON.stringify(selector)}).select()`)
     await win!.webContents.debugger.sendCommand('Input.insertText', { text: value })
@@ -245,7 +254,147 @@ try {
   await until(
     'Boolean(window.environmentEditorProof?.preloadAvailable && document.querySelector(".profile-environment"))'
   )
-  if (phase === 'read-failure') {
+  if (phase.startsWith('text-')) {
+    const owner = (await cli(['inspect', '--profile', id])).profile
+    const secondName = 'Independent Profile'
+    if (phase === 'text-seed') await cli(['create', '--operation-id', mintObjectId(), '--label', secondName])
+    const second = (await cli(['ls'])).profiles.find((profile: { label: string }) => profile.label === secondName)
+    const note = 'textarea[aria-label="Notes"]'
+    const name = 'input[aria-label="Profile name"]'
+    const firstRaw = '  Original conflicting draft\n  '
+    const secondRaw = '  Newer typing while acknowledgement is held  '
+    const nameRaw = '  Name typed before its save marker  '
+    const notesFeedback = '[data-profile-text-draft="notes"]'
+    const selectProfile = async (name: string) => {
+      await evaluate(`(()=>{const e=[...document.querySelectorAll('[data-resource-row]')].find(e=>e.querySelector('strong')?.textContent===${JSON.stringify(name)});if(!e)throw new Error('Missing expected Profile');document.querySelectorAll('[data-proof-profile]').forEach(e=>e.removeAttribute('data-proof-profile'));e.setAttribute('data-proof-profile','yes')})()`)
+      await click('[data-proof-profile="yes"]')
+      await until(`document.querySelector('.browser-profile-editor').getAttribute('aria-label')===${JSON.stringify(name)}`)
+    }
+    const expectNote = (value: string) => until(`document.querySelector(${JSON.stringify(note)})?.value === ${JSON.stringify(value)}`)
+    const confirmedDocument = () => {
+      const observed = userState.observe(), confirmation = observed.lastConfirmedWrite
+      return confirmation?.diskDurability === 'confirmed' && observed.contentDigest === confirmation.contentDigest
+    }
+    assert.ok(second?.id && second.id !== id)
+    await until(`document.querySelector('.browser-profile-library').textContent.includes(${JSON.stringify(secondName)})`)
+    if (phase === 'text-seed') {
+      stage('a late original Profile acknowledgement cannot clear newer input or another Profile conflict')
+      await selectProfile(secondName)
+      await click('.browser-profile-editor__note')
+      await type('Notes', 'Earlier submitted value')
+      holdAck = true
+      await click('.settings-content__header')
+      for (const deadline = Date.now() + 15_000; !releaseAck && Date.now() < deadline;) await wait(40)
+      assert.equal(typeof releaseAck, 'function', 'The original Profile write must return before its single reply is held')
+      assert.equal((await cli(['inspect', '--profile', second.id])).profile.notes, 'Earlier submitted value')
+      await type('Notes', secondRaw)
+      await selectProfile(owner.label)
+      await click('.browser-profile-editor__note')
+      await type('Notes', firstRaw)
+      await cli(['update', '--profile', id, '--expected-revision', owner.revision, '--notes', 'Saved elsewhere'])
+      await click('.settings-content__header')
+      await until(`document.querySelector(${JSON.stringify(notesFeedback)})?.textContent.includes('Reload')`)
+      releaseAck!()
+      await expectNote(firstRaw)
+      await capture('profile-notes-conflict-light', 1180, 'light', '.browser-profile-editor')
+      await capture('profile-notes-conflict-narrow-dark', 520, 'dark', '.browser-profile-editor')
+      win.setContentSize(1180, 900)
+      await wait(180)
+      await selectProfile(secondName)
+      await expectNote(secondRaw)
+      assert.equal((await cli(['inspect', '--profile', second.id])).profile.notes, 'Earlier submitted value')
+      await selectProfile(owner.label)
+      await expectNote(firstRaw)
+      assert.deepEqual(profileEdits, [
+        { profileId: second.id, edit: { notes: 'Earlier submitted value' }, revision: second.revision },
+        { profileId: id, edit: { notes: firstRaw.trim() }, revision: owner.revision }
+      ])
+      const deadline = Date.now() + 15_000
+      let stored
+      while (Date.now() < deadline) {
+        const raw = await userState.read()
+        stored = raw === null ? undefined : JSON.parse(raw).desktopFragments?.browserProfileTextDrafts
+        if (stored?.[id]?.notes?.[0]?.state === 'conflict' && stored?.[second.id]?.notes?.[0]?.value === secondRaw &&
+            stored?.[second.id]?.notes?.[0]?.state === 'editing' && confirmedDocument()) break
+        await wait(40)
+      }
+      assert.equal(stored?.[id]?.notes?.[0]?.value, firstRaw)
+      assert.equal(stored?.[id]?.notes?.[0]?.state, 'conflict')
+      assert.equal(stored?.[second.id]?.notes?.[0]?.value, secondRaw)
+      assert.equal(stored?.[second.id]?.notes?.[0]?.state, 'editing')
+      assert.ok(confirmedDocument(), 'The exact readback digest must match the original native durability receipt')
+      report.observations.push({ kind: 'exact-late-ack-and-native-bounded-write', id, secondId: second.id, profileEdits })
+      stage('the original name save applies while its client attempt marker is held from disk')
+      const beforeName = (await cli(['inspect', '--profile', id])).profile
+      await click('.browser-profile-editor__name')
+      await type('Profile name', nameRaw)
+      const storedName = async () => JSON.parse((await userState.read())!).desktopFragments.browserProfileTextDrafts[id]?.label?.[0]
+      for (const limit = Date.now() + 15_000; (await storedName())?.value !== nameRaw || !confirmedDocument();) {
+        assert.ok(Date.now() < limit, 'The exact pre-save name draft must be durably written first')
+        await wait(40)
+      }
+      blockedNameMarkerFor = id
+      releaseAck = undefined
+      holdAck = true
+      await click('.settings-content__header')
+      for (const limit = Date.now() + 15_000; !nameMarkerHeld || !releaseAck;) {
+        assert.ok(Date.now() < limit, 'Only the new Desktop marker and original Browser reply should remain held')
+        await wait(40)
+      }
+      assert.deepEqual(profileEdits[2], { profileId: id, edit: { label: nameRaw.trim() }, revision: beforeName.revision })
+      assert.equal((await cli(['inspect', '--profile', id])).profile.label, nameRaw.trim())
+      assert.equal((await storedName()).state, 'editing')
+      assert.ok(confirmedDocument())
+      report.observations.push({ kind: 'name-write-applied-without-client-marker-or-reply', id, nameMarkerHeld, oldDocumentDigest: userState.observe().contentDigest })
+      report.passed = true
+      stage('both user drafts reached the original durable owner')
+      // This marker is observed by the parent of this isolated process only.
+      console.error('profile_text_crash_ready')
+      await new Promise<never>(() => {})
+    } else if (phase === 'text-restart') {
+      stage('read the original conflicted note after abrupt restart')
+      await expectNote(firstRaw)
+      await until(`document.querySelector(${JSON.stringify(notesFeedback)})?.textContent.includes('Reload')`)
+      await until(`document.querySelector(${JSON.stringify(name)})?.value === ${JSON.stringify(nameRaw)}`)
+      assert.equal(owner.label, nameRaw.trim())
+      await click(name)
+      await click('.settings-content__header')
+      assert.equal(await evaluate(`document.querySelector(${JSON.stringify(name)})?.value`), nameRaw)
+      assert.deepEqual(profileEdits, [])
+      assert.equal((await cli(['inspect', '--profile', id])).profile.notes, 'Saved elsewhere')
+      await selectProfile(secondName)
+      await expectNote(secondRaw)
+      assert.equal((await cli(['inspect', '--profile', second.id])).profile.notes, 'Earlier submitted value')
+      // A restored editing draft may be the older disk image of an in-flight save.
+      await click(note)
+      await click('.settings-content__header')
+      await expectNote(secondRaw)
+      await capture('profile-notes-other-draft-dark', 1180, 'dark', '.browser-profile-editor')
+      await selectProfile(owner.label)
+      await button('Discard draft', notesFeedback)
+      await until(`!document.querySelector(${JSON.stringify(note)})`)
+      assert.deepEqual(profileEdits, [])
+      const deadline = Date.now() + 15_000
+      for (;;) {
+        const raw = await userState.read()
+        const stored = raw === null ? undefined : JSON.parse(raw).desktopFragments?.browserProfileTextDrafts
+        assert.equal(stored?.[second.id]?.notes?.[0]?.value, secondRaw)
+        assert.equal(stored?.[id]?.label?.[0]?.value, nameRaw)
+        if (!stored?.[id]?.notes && confirmedDocument()) break
+        assert.ok(Date.now() < deadline, 'The exact discarded field must be removed by the original Desktop owner')
+        await wait(40)
+      }
+      report.observations.push({ kind: 'same-identities-abrupt-restart-and-explicit-discard', id, secondId: second.id, profileEdits })
+    } else {
+      stage('verify the discarded draft stays absent after the next app process starts')
+      assert.equal(await evaluate(`document.querySelector(${JSON.stringify(note)})?.value`), undefined)
+      await until(`document.querySelector(${JSON.stringify(name)})?.value === ${JSON.stringify(nameRaw)}`)
+      await selectProfile(secondName)
+      await expectNote(secondRaw)
+      assert.deepEqual(profileEdits, [])
+      report.observations.push({ kind: 'exact-discard-restart', id, secondId: second.id, profileEdits })
+    }
+  } else if (phase === 'read-failure') {
     stage('original Desktop document read unknown preserves healthy Profile Apply')
     await until('document.querySelector(".profile-environment")?.textContent.includes("Draft storage unconfirmed")')
     await type('Time zone', 'Europe/Paris')

@@ -393,6 +393,111 @@ describe('Settings › Browser Profiles keeps what the person typed', () => {
     const proto = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
     await act(async () => { Object.getOwnPropertyDescriptor(proto, 'value')!.set!.call(element, value); element.dispatchEvent(new Event('input', { bubbles: true })) })
   }
+  const notes = () => $<HTMLTextAreaElement>('textarea[aria-label="Notes"]')!
+  const name = () => $<HTMLInputElement>('input[aria-label="Profile name"]')!
+  const blur = async (element: HTMLInputElement | HTMLTextAreaElement) => {
+    await act(async () => element.dispatchEvent(new FocusEvent('focusout', { bubbles: true })))
+  }
+  const action = async (field: 'label' | 'notes', label: string) => {
+    const button = [...$(`[data-profile-text-draft="${field}"]`)!.querySelectorAll('button')].find(button => button.textContent === label)!
+    await act(async () => button.click())
+  }
+
+  it('keeps a conflicting raw note under its original Profile through switching, then discards only that draft', async () => {
+    const original = '  Retain this note\n'
+    await act(async () => $<HTMLButtonElement>('.browser-profile-editor__note')!.click())
+    await type(notes(), original)
+    await act(async () => port.commit([{ ...personal, notes: 'Saved elsewhere', revision: 'another-revision' }, client]))
+    await blur(notes())
+    expect(port.updateProfile).toHaveBeenCalledExactlyOnceWith(personal.id, { notes: original.trim() }, personal.revision)
+    await select(client.label)
+    expect(notes()).toBeNull()
+    await act(async () => $<HTMLButtonElement>('.browser-profile-editor__name')!.click())
+    await type(name(), '  Independent rename  ')
+    await select(personal.label)
+    expect(notes().value).toBe(original)
+    expect($('[data-profile-text-draft="notes"][role="alert"]')?.textContent).toContain('Reload')
+    await action('notes', 'Discard draft')
+    expect($('.browser-profile-editor__note')?.textContent).toBe('Saved elsewhere')
+    await select(client.label)
+    expect(name().value).toBe('  Independent rename  ')
+    await select(personal.label)
+    expect(notes()).toBeNull()
+    expect(port.updateProfile).toHaveBeenCalledTimes(1)
+  })
+
+  it('isolates simultaneous replies and uses a confirmed revision for the newer text left on the original Profile', async () => {
+    let release = () => {}
+    const held = new Promise<void>(resolve => { release = resolve })
+    const update = port.updateProfile.getMockImplementation()!
+    port.updateProfile.mockImplementationOnce(async (...args) => { const confirmed = await update(...args); await held; return confirmed })
+    await act(async () => $<HTMLButtonElement>('.browser-profile-editor__note')!.click())
+    await type(notes(), 'First value')
+    await blur(notes())
+    const confirmed = port.get().profiles.find(profile => profile.id === personal.id)!
+    await type(notes(), '  Later value  ')
+    await select(client.label)
+    await act(async () => $<HTMLButtonElement>('.browser-profile-editor__note')!.click())
+    await type(notes(), 'Other profile value')
+    await blur(notes())
+    expect(port.updateProfile).toHaveBeenCalledTimes(2)
+    expect($('.browser-profile-editor__note')?.textContent).toBe('Other profile value')
+    await select(personal.label)
+    await act(async () => release())
+    expect(notes().value).toBe('  Later value  ')
+    expect(port.updateProfile).toHaveBeenCalledTimes(2)
+    await action('notes', 'Save draft')
+    expect(port.updateProfile).toHaveBeenLastCalledWith(personal.id, { notes: 'Later value' }, confirmed.revision)
+  })
+
+  it('retains an unconfirmed rename through remount and checks the original Profile without replaying the save', async () => {
+    const update = port.updateProfile.getMockImplementation()!
+    port.updateProfile.mockImplementationOnce(async (...args) => {
+      await update(...args)
+      throw Object.assign(new Error('The save reply did not arrive.'), { code: 'BROWSER_PROFILE_WRITE_UNCONFIRMED' })
+    })
+    await act(async () => $<HTMLButtonElement>('.browser-profile-editor__name')!.click())
+    await type(name(), '  Owner may have renamed Profile  ')
+    await act(async () => name().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
+    await act(async () => root.unmount())
+    root = createRoot(container)
+    await act(async () => root.render(<BrowserProfilesSettingsPane active />))
+    expect(name().value).toBe('  Owner may have renamed Profile  ')
+    expect($('[data-profile-text-draft="label"][role="alert"]')?.textContent).toContain('save unconfirmed')
+    await blur(name())
+    await action('label', 'Check saved Profile')
+    expect($('[data-profile-text-draft="label"][role="alert"]')?.textContent).toContain('shows the submitted value')
+    expect($('[data-profile-text-draft="label"][role="alert"]')?.textContent).toContain('save unconfirmed')
+    expect(port.updateProfile).toHaveBeenCalledExactlyOnceWith(personal.id, { label: 'Owner may have renamed Profile' }, personal.revision)
+    await action('label', 'Discard draft')
+    expect(name()).toBeNull()
+    expect($('.browser-profile-editor__name')?.textContent).toBe('Owner may have renamed Profile')
+  })
+
+  it('keeps input during an IME blur followed by switching Profiles without submitting the intermediate value', async () => {
+    await act(async () => $<HTMLButtonElement>('.browser-profile-editor__note')!.click())
+    await act(async () => notes().dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true })))
+    await type(notes(), '仮の入力')
+    await blur(notes())
+    await select(client.label)
+    await select(personal.label)
+    expect(notes().value).toBe('仮の入力')
+    expect(port.updateProfile).not.toHaveBeenCalled()
+  })
+
+  it('recovers earlier draft bytes without converting focus and blur to a save', async () => {
+    await act(async () => $<HTMLButtonElement>('.browser-profile-editor__note')!.click())
+    await type(notes(), 'Unsubmitted or awaiting confirmation')
+    await act(async () => root.unmount())
+    root = createRoot(container)
+    await act(async () => root.render(<BrowserProfilesSettingsPane active />))
+    await act(async () => notes().focus())
+    await act(async () => $<HTMLButtonElement>('.browser-profile-editor__open')!.focus())
+    expect(notes().value).toBe('Unsubmitted or awaiting confirmation')
+    expect(port.updateProfile).not.toHaveBeenCalled()
+    await action('notes', 'Save draft')
+    expect(port.updateProfile).toHaveBeenCalledExactlyOnceWith(personal.id, { notes: 'Unsubmitted or awaiting confirmation' }, personal.revision)
+  })
 
   it('reopens a refused rename with the typed name and a refused note with the typed note', async () => {
     port.updateProfile.mockRejectedValueOnce(Object.assign(new Error('Browser Profiles changed since revision was read.'), { code: 'BROWSER_PROFILE_REVISION_CONFLICT' }))

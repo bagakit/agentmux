@@ -16,11 +16,12 @@ const { build } = browserSourceBuild(createRequire(require.resolve('vite/package
 const electron = require('electron'),
   sha = (bytes) => createHash('sha256').update(bytes).digest('hex')
 const fixture = join(desktop, 'scripts/fixtures/browser-profile-environment'),
-  outRoot = join(root, '.local/browser-profile-editor/native')
+  textDrafts = process.argv.includes('--text-drafts'),
+  outRoot = join(root, textDrafts ? '.local/browser-profile-text-drafts/native' : '.local/browser-profile-editor/native')
 await mkdir(outRoot, { recursive: true })
 const out = await mkdtemp(join(outRoot, 'attempt-'))
 const report = {
-  schema: 'agentmux.profile-environment-editor.native.v1',
+  schema: textDrafts ? 'agentmux.profile-text-drafts.native.v1' : 'agentmux.profile-environment-editor.native.v1',
   passed: false,
   out,
   sources: {},
@@ -52,11 +53,12 @@ for (const file of [
   'packages/core/dist/agentmux.js',
   'packages/core/src/agentmux-cli-commands.ts',
   'apps/desktop/src/main/ipc.ts',
-  'apps/desktop/scripts/verify-browser-profile-environment-editor.mjs'
+  'apps/desktop/scripts/verify-browser-profile-environment-editor.mjs',
+  ...(textDrafts ? ['apps/desktop/scripts/verify-browser-profile-editor-drafts.mjs'] : [])
 ])
   await source(join(root, file))
 try {
-  for (const name of process.argv.includes('--mutations') ? ['mutation', 'restored'] : ['candidate']) {
+  for (const name of textDrafts ? ['candidate', 'mutation'] : process.argv.includes('--mutations') ? ['mutation', 'restored'] : ['candidate']) {
     const compiled = join(out, name)
     await mkdir(compiled)
     const home = await mkdtemp('/tmp/amux-profile-editor-')
@@ -109,8 +111,15 @@ try {
             async transform(code, file) {
               if (file.includes('?')) return
               await source(file)
+              if (textDrafts && name === 'mutation' && file === join(desktop, 'src/renderer/src/lib/browser-profile-text-drafts.ts')) {
+                const anchor = 'const local = profiles, merged = { ...original }'
+                assert.equal(code.split(anchor).length - 1, 1)
+                const changed = code.replace(anchor, 'const local = profiles, merged = {}')
+                mutation = { file: relative(root, file), before: sha(code), after: sha(changed), behavior: 'Do not restore the original Desktop Profile text drafts on load' }
+                return changed
+              }
               if (
-                name === 'mutation' &&
+                !textDrafts && name === 'mutation' &&
                 file === join(desktop, 'src/renderer/src/lib/browser-profile-environment-form.ts')
               ) {
                 const anchor = 'timeZone: fields.timeZone.trim()'
@@ -170,7 +179,10 @@ try {
       inputs.has(join(desktop, 'src/renderer/src/components/settings/BrowserProfilesSettingsPane.tsx'))
     )
     assert.ok(inputs.has(join(desktop, 'src/main/browser-profile-editor-ipc.ts')))
-    for (const phase of process.argv.includes('--draft-read-proof') ? ['read-failure'] : name === 'mutation' ? ['seed'] : ['seed', 'restart']) {
+    if (textDrafts) assert.ok(inputs.has(join(desktop, 'src/renderer/src/lib/browser-profile-text-drafts.ts')))
+    const phases = textDrafts ? ['text-seed', 'text-restart', ...(name === 'mutation' ? [] : ['text-after-discard'])] :
+      process.argv.includes('--draft-read-proof') ? ['read-failure'] : name === 'mutation' ? ['seed'] : ['seed', 'restart']
+    for (const phase of phases) {
       const resultFile = join(compiled, phase + '.json'),
         bootstrap = join(home, phase + '-bootstrap.cjs')
       await writeFile(
@@ -195,14 +207,17 @@ try {
         AGENTMUX_EDITOR_URL: url,
         AGENTMUX_EDITOR_NODE: process.execPath
       })
+      let original
       const logs = [],
         processResult = await runProbeProcess(electron, [bootstrap], {
           cwd: home,
           env,
           timeoutMs: 180_000,
+          onSpawn: (_identity, child) => { original = child },
           onLine: (line) => {
             logs.push(line)
             console.log(`[${name}/${phase}] ${line}`)
+            if (phase === 'text-seed' && line === 'profile_text_crash_ready') assert.equal(original.kill('SIGKILL'), true)
           }
         })
       await writeFile(join(compiled, phase + '.log'), logs.join('\n'))
@@ -225,9 +240,13 @@ try {
       })
       await writeFile(join(out, 'receipt.json'), JSON.stringify(report, null, 2))
       assert.deepEqual(remaining, [])
-      if (name === 'mutation') {
+      if (phase === 'text-seed') {
+        assert.ok(logs.includes('profile_text_crash_ready'), actual.failure?.message)
+        assert.equal(processResult.exitSignal, 'SIGKILL')
+        assert.equal(actual.passed, true, actual.failure?.message)
+      } else if (name === 'mutation') {
         assert.equal(actual.passed, false)
-        assert.match(actual.failure?.message ?? '', /Europe\/Paris/)
+        assert.match(actual.failure?.message ?? '', textDrafts ? /Original conflicting draft/ : /Europe\/Paris/)
         assert.ok(mutation)
       } else {
         assert.equal(processResult.exitCode, 0, actual.failure?.message)
