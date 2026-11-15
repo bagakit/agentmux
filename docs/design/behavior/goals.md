@@ -105,7 +105,7 @@ Grill/Grounding 的领域事实属于独立 Demand 文件系统包，同一份�
 
 ## Goals、Focus 与执行工作面
 
-Goals 属于 Work；导航分组、入口和独立选择只见[空间导航合同](spaces-and-layout.md#左下角导航space-与-goals)。Goals 的清单／看板是同一 Goal 集合的投影；Board 只是历史名称或实现用语，不再定义 Branch／Topic × Agent 状态矩阵，也不是另一全局产品入口。Agent 注意力、请求和结果查看唯一归[Focus](focus-context.md#focus-执行上下文项目泳道与底部时间音轨)，具体 Session 的输入、回复和恢复沿原工作面完成。
+Goals 属于 Work；导航分组、入口和独立选择只见[空间导航合同](spaces-and-layout.md#左下角导航space-与-goals)。Goals 的清单／看板是同一 Goal 集合的投影。[Tickets](goal-plans-and-tickets.md#活跃任务与认领) 从原计划进入当前节点。Board 只是历史名称或实现用语，不再定义 Branch／Topic × Agent 状态矩阵，也不是另一全局产品入口。Agent 注意力、请求和结果查看唯一归[Focus](focus-context.md#focus-执行上下文项目泳道与底部时间音轨)，具体 Session 的输入、回复和恢复沿原工作面完成。
 
 选中 Goal 只更新该目标的同屏详情；没有详情时保持清单全宽，不留空右栏或用方向性重排冒充分屏。关联执行上下文、文件、Diff、Activity、决策、评论和对话在同一目标下可达，明确“进入原工作面”才导航。切换、键盘返回和重启保原选择及阅读位置；先恢复 durable Tab／Group／Region／布局和焦点，Session 恢复时机引用[冷启动合同](session-recovery.md#冷启动按需恢复p0-末位)。探测、握手或快照未知保原目标与关联，不以新实体代替恢复。
 

@@ -1,12 +1,13 @@
 # Goals 的呈现
 
-本文定义 Goals 的目标正文、清单／看板、详情与讨论入口的呈现。公开 Goal 与底层 Demand、Mote 协调对象、Session／Run 执行和 Tab／Region 空间事实均归行为 owner；以下约束不代签实现或安装验收。
+本文定义 Goals 的目标正文、清单／看板、活跃 Ticket、详情与讨论入口的呈现。公开 Goal 与底层 Demand、Mote 协调对象、Session／Run 执行和 Tab／Region 空间事实均归行为 owner；以下约束不代签实现或安装验收。
 
 [返回视觉与密度合同](../agentmux-surface-density.md) · [同主题交互](../behavior/goals.md)
 
 **本页章节**
 
 - [Goals 的列表与看板](#goals-的列表与看板)
+- [活跃 Ticket](#活跃-ticket)
 - [Goal 详情工作台](#goal-详情工作台)
 - [Goal 详情中的 Session Region 投影](#goal-详情中的-session-region-投影)
 - [Goals 工作区的 Surface](#goals-工作区的-surface)
