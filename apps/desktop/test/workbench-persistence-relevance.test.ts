@@ -81,7 +81,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   try {
-    if (store.getState().config) await (await import('../src/renderer/src/store.js')).prepareRendererUpdate('quit')
+    if (store?.persist.hasHydrated() && store.getState().config) await (await import('../src/renderer/src/store.js')).prepareRendererUpdate('quit')
   }
   finally {
     dispose?.()
@@ -483,6 +483,9 @@ describe('actual Store persistence relevance', () => {
     expect(store.getState().error).toContain('Saved workspace state could not be restored')
     expect(store.getState().agentComposerDrafts[sessionId]).toBe('Still usable in memory')
     expect(writes).toEqual([])
+    expect(backing.get(storageName)).toBe('{unreadable durable record')
+    const { prepareRendererUpdate } = await import('../src/renderer/src/store.js')
+    await expect(prepareRendererUpdate('quit')).rejects.toThrow('original storage is unreadable')
     expect(backing.get(storageName)).toBe('{unreadable durable record')
   })
 
