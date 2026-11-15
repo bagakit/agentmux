@@ -64,7 +64,8 @@ describe('local progressive AgentMux module skills', () => {
     for (const command of AGENTMUX_CLI_COMMANDS) {
       const help = agentMuxCommandHelp(command.method)
       expect(help, command.method).toContain(command.summary)
-      expect(help, command.method).toContain(`Module guide (local, read-only): amux ${command.method.split('.')[0]} --skill`)
+      const owner = command.method.startsWith('space.mote.group.') ? 'mote' : command.method.split('.')[0]
+      expect(help, command.method).toContain(`Module guide (local, read-only): amux ${owner} --skill`)
     }
   })
 

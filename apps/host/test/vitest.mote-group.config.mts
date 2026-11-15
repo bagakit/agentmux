@@ -8,11 +8,12 @@ const variants = {
   'duplicate-send': ['apps/host/src/mote-group.ts', 'if (!fresh) return { message: await readMessage(message) }', 'if (false) return { message: await readMessage(message) }'],
   'drop-quote': ['apps/host/src/mote-group.ts', 'note: inputNote(message.groupId, key.submissionId, quoted)', 'note: inputNote(message.groupId, key.submissionId, undefined)'],
   'reply-admission': ['apps/host/src/mote-group.ts',
-    "if (!accepted(receipt) || fact?.userContent !== original.body || !source.record.note || fact.systemContext !== source.record.note)\n      return groupFailure('The original Group member input",
-    "if (fact?.userContent !== original.body || !source.record.note || fact.systemContext !== source.record.note)\n      return groupFailure('The original Group member input"],
+    'if (!accepted(receipt) || fact?.userContent', 'if (fact?.userContent'],
+  'reply-readback': ['apps/host/src/mote-group.ts',
+    'if (prior) {\n      const { author } = prior.message', 'if (false && prior) {\n      const { author } = prior.message'],
   'membership-generation': ['apps/host/src/mote-group.ts',
-    "requireActive(membership, source.record.memberGeneration ?? 'original')\n    const original",
-    "requireActive(membership)\n    const original"],
+    "requireActive(source.membership, source.record.memberGeneration ?? 'original')",
+    "requireActive(source.membership)"],
   'topic-confinement': ['apps/host/src/mote-group-files.ts', 'readDirectory(physical, input.path, true)', 'readDirectory(physical, input.path)']
 } as const
 const variant = process.env.AMUX_MOTE_GROUP_MUTANT as keyof typeof variants | undefined

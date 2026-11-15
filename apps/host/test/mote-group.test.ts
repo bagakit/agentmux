@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
 import * as core from '@agentmux/core'
 import { hashAgentCapability } from '../../../packages/core/src/agent-capability.js'
@@ -22,6 +23,12 @@ afterEach(async () => {
   try { for (const close of closes.splice(0).reverse()) await close() }
   finally { vi.restoreAllMocks() }
 })
+
+function cliError(result: { stdout: string; stderr: string }) {
+  const failure = (result.stdout + '\n' + result.stderr).split('\n').find(line => line.startsWith('{'))
+  expect(failure, result.stdout + result.stderr).toBeDefined()
+  return JSON.parse(failure!).error
+}
 
 async function fixture(retainedRoot?: string) {
   const originalCore = retainedRoot ? {
@@ -159,8 +166,55 @@ it('publishes only explicit native CLI replies from the original Group member an
   const repeated = await f.cli('reply', input, thread.agentSessionId)
   expect(repeated.code, repeated.stderr + repeated.stdout).toBe(0)
   expect(JSON.parse(repeated.stdout).result.message).toEqual(reply)
+  const receiptObservation = vi.spyOn(f.client, 'inspectAgentInput').mockResolvedValue(null)
+  const readBack = await f.cli('reply', input, thread.agentSessionId)
+  expect(readBack.code, readBack.stderr + readBack.stdout).toBe(0)
+  expect(JSON.parse(readBack.stdout).result.message).toEqual(reply)
+  const conflicting = await f.cli('reply', { ...input, body: 'A different answer.' }, thread.agentSessionId)
+  expect(cliError(conflicting).code).toBe('MOTE_GROUP_OPERATION_CONFLICT')
   expect((await rpc.call('space.mote.group.inspect', { groupId: one.id })).messages.map(entry => entry.body)).toEqual([message.body, input.body])
+  receiptObservation.mockRestore()
+  await rpc.call('space.mote.group.members.remove', { groupId: one.id, expectedRevision: 1, operationId: 'remove-original', memberIds: ['mote-a'] })
+  const retired = await f.cli('reply', input, thread.agentSessionId)
+  expect(retired.code, retired.stderr + retired.stdout).toBe(0)
+  expect(JSON.parse(retired.stdout).result.message).toEqual(reply)
+  const refused = await f.cli('reply', { ...input, operationId: 'new-reply-after-removal' }, thread.agentSessionId)
+  expect(cliError(refused).code).toBe('CONTROL_PERMISSION_DENIED')
   expect(f.send).toHaveBeenCalledTimes(2)
+})
+
+it('shows an invitation transport error and delivers the addressed message independently', async () => {
+  const f = await fixture(), { rpc } = await f.start()
+  const submit = f.client.submitAgentPrompt.bind(f.client)
+  vi.spyOn(f.client, 'submitAgentPrompt').mockImplementation((input, authority) => {
+    if (input.prompt === '') throw new Error('Original invitation transport unavailable')
+    return submit(input, authority)
+  })
+  const { group } = await rpc.call('space.mote.group.create', { operationId: 'new-invitation', name: 'Support', members: [f.target('mote-a')] })
+  await rpc.call('space.mote.group.send', { groupId: group.id, operationId: 'ordinary-addressed', body: 'Please continue.', recipientIds: ['mote-a'] })
+  await vi.waitFor(async () => {
+    const observed = await rpc.call('space.mote.group.inspect', { groupId: group.id })
+    expect(observed.group.members[0]?.invitation).toMatchObject({ status: 'unknown', issue: 'Original invitation transport unavailable' })
+    expect(observed.messages[0]?.deliveries[0]?.status).toBe('accepted')
+  })
+})
+
+it('routes Group leaf help to the Mote guide and identifies invalid fields', async () => {
+  const help = await runSourceObjectCli(['space', 'mote', 'group', 'members', 'add', '--help'], process.env)
+  expect(help.code).toBe(0)
+  expect(help.stdout).toContain('amux mote --skill')
+  expect(help.stdout).toContain('group.revision')
+  expect(help.stdout).toContain('motePresentation')
+  const f = await fixture()
+  for (const [method, input, field] of [
+    ['reply', { groupId: 'room', operationId: 'post', inputOperationId: 'input', body: ' ' }, 'body'],
+    ['members add', { groupId: 'room', expectedRevision: 1, operationId: 'invite', members: ['mote-a'] }, 'members'],
+    ['file read', { groupId: 'room', path: './notes.md' }, 'path'],
+  ] as const) {
+    const result = await f.cli(method, input)
+    expect(result.code).not.toBe(0)
+    expect(cliError(result).message).toContain(`"${field}"`)
+  }
 })
 
 it('refuses the exact member reply until Core confirms its original acceptance', async () => {
@@ -313,7 +367,7 @@ it('retains the current invitation and original Thread across admin updates, rem
     const original = receipt?.admission?.admission?.intent?.message
     expect(original?.authorHuman).not.toBe(true)
     expect(original?.userContent).toBeUndefined()
-    expect(original?.systemContext).toContain('AgentMux added this exact Mote')
+    expect(original?.systemContext).toContain('You joined this AgentMux Group. No reply is needed.')
     return JSON.parse(original!.systemContext!.split('\n').at(-1)!)
   }
   expect(await coreNotice(admin)).toMatchObject({ groupId, moteId: 'mote-a', announcement: { body: inviteBody } })
@@ -402,4 +456,9 @@ it('uses real scoped Topic files for human and exact Group input, refusing trave
   expect(JSON.parse(read.stdout).result).toMatchObject({ result: { status: 'read', document: { content: 'Original shared text' } } })
   await rpc.call('space.mote.group.members.remove', { groupId, expectedRevision: 1, operationId: 'revoke-file-scope', memberIds: ['mote-a'] })
   expect((await f.cli('file read', { groupId, path, inputOperationId }, sid)).code).not.toBe(0)
+  const unrelated = (await rpc.call('space.mote.group.send', { groupId, operationId: 'unrelated-line', body: 'Another message', recipientIds: [] })).message
+  const db = new DatabaseSync(join(f.root, 'groups.sqlite'))
+  try { db.prepare('UPDATE messages SET data=? WHERE id=?').run('{}', unrelated.id) } finally { db.close() }
+  await expect(rpc.call('space.mote.group.inspect', { groupId })).rejects.toThrow()
+  expect(await rpc.call('space.mote.group.file.read', { groupId, path })).toMatchObject({ result: { status: 'read', document: { content: 'Original shared text' } } })
 })
