@@ -82,6 +82,36 @@ module.exports = async ({ evaluate, size, click, pointer, capture, waitFor, pain
     await waitFor("[...window.goalProbeMotion.effects].every(animation => animation.playState === 'finished' || animation.playState === 'idle')")
   }
   const hasSection = section => `${query(outline)}.getAttribute('aria-label').endsWith(${JSON.stringify(section)})`
+  const captureAgentSources = async (width, reduced) => {
+    const relationships = '.goals-detail__relationships > summary'
+    const clickRow = async selector => {
+      await evaluate(`${query(selector)}.scrollIntoView({ block: 'center', behavior: 'instant' })`)
+      await paint()
+      await clickVisible(selector)
+    }
+    await clickRow(relationships)
+    await waitFor(`${query(relationships)}.parentElement.open`)
+    if (!await evaluate(`${query('.goal-team__edit')}.open`)) await clickRow('.goal-team__edit > summary')
+    await waitFor(`${query('.goal-team__edit')}.open`)
+    await clickRow('[aria-label="Choose Goal assignees"]')
+    const source = '.goal-agent-picker [aria-label="Agent source"]'
+    const existing = source + ' [data-option="existing"]'
+    const mote = source + ' [data-option="mote"]'
+    const indicator = source + ' .segmented-control__indicator'
+    await waitFor(`${query(existing)}?.getAttribute('aria-checked') === 'true'`)
+    await capture(width + '-agent-sources', width)
+    await evaluate(query(existing) + '.focus()')
+    if (!reduced) await holdMidpoint(indicator, 'transitionrun')
+    await press('ArrowRight', 39)
+    await waitFor(`document.activeElement === ${query(mote)} && ${query(mote)}.getAttribute('aria-checked') === 'true'`)
+    await waitFor(`Boolean(${query('[aria-label="Mote for new Session"]')})`)
+    if (reduced) assert.equal(await evaluate(`getComputedStyle(${query(indicator)}).transitionDuration`), '0s')
+    else await captureMidpoint(width + '-agent-source-midpoint', width)
+    await capture(width + '-mote-source', width)
+    await press('Escape', 27)
+    await waitFor(`!${query('.goal-agent-picker')}`)
+    await clickRow(relationships)
+  }
   async function readOriginal() {
     const before = await evaluate('goalsSpace.facts()')
     assert.equal(before.id, await currentId())
@@ -163,6 +193,7 @@ module.exports = async ({ evaluate, size, click, pointer, capture, waitFor, pain
   assert.equal(await evaluate(`${query(canvas)}.dataset.goalTrace`), focused)
   await capture('1600-dark-keyboard-path', 1600)
   assert.equal(await evaluate(`Boolean(window.goalProbeCard && window.goalProbeEdge) && window.goalProbeCard === ${query(node('workspace'))} && window.goalProbeEdge === ${query('[data-goal-plan-edge="outline>workspace"]')}`), true)
+  await captureAgentSources(1600, false)
   assert.deepEqual(await evaluate('goalsSpace.facts()'), before)
 
   await media('reduce')
@@ -222,6 +253,9 @@ module.exports = async ({ evaluate, size, click, pointer, capture, waitFor, pain
   assert.ok(Math.abs(restored.scrollTop - scroll) <= 2 && Math.abs(restored.briefTop - initialPosition.briefTop) <= 2, JSON.stringify({ initialPosition, restored }))
   assert.equal(await evaluate(hasSection('Goal overview')), true)
   await capture('620-light-return', 620)
+  await clickVisible(toggle)
+  await captureAgentSources(620, true)
+  await clickVisible(toggle)
   await jump('overview')
   await capture('620-light-overview', 620)
   await jump('execution')

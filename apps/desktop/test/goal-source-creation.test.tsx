@@ -378,7 +378,14 @@ it('the original Mote producer keeps one legacy OP through actual Source Host pr
     throw Error('This fixture never sends the Goal task or substitutes another control operation.')
   })
   const render = () => dom.render(<GoalAgentPicker demand={goal} role="assignees" onSave={async () => false} onClose={() => {}} />)
-  await render(); await button('Mote · new Session'); await field('Mote for new Session', topic.id); await field('New Session Agent configuration', 'codex')
+  await render()
+  const modes = document.querySelector('[role="radiogroup"][aria-label="Agent source"]')!
+  expect(modes.querySelector('[data-option="existing"]')?.getAttribute('aria-checked')).toBe('true')
+  await button('Mote · new Session')
+  expect(modes.querySelector('[data-option="mote"]')?.getAttribute('aria-checked')).toBe('true')
+  await field('Mote for new Session', topic.id)
+  await field('New Session Agent configuration', 'codex')
+  expect(calls).toEqual([])
   await button('Create Mote Session'); await vi.waitFor(() => expect(document.body.textContent).toContain('Original Mote creation ACK lost'))
   expect(f.local.createHostAgentWithDelivery).toHaveBeenCalledOnce()
   const original = useAppStore.getState().goalAgentCreationDrafts[key]
