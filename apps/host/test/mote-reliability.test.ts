@@ -102,7 +102,10 @@ it('a final read can be cancelled without waiting for its offline Host, then its
 })
 it('a lost Core input ACK keeps the original unknown operation across later automatic checks and cancellation',async()=>{
   const f=await fixture(),entered=deferred(),gate=deferred()
-  f.runtime.submitPrompt.mockImplementation(async()=>{entered.resolve();await gate.promise;throw new Error('Core input ACK disconnected')})
+  f.runtime.submitPrompt.mockImplementation(async(_target,_prompt,_operation,_condition,automation)=>{
+    automation.onDispatch()
+    entered.resolve();await gate.promise;throw new Error('Core input ACK disconnected')
+  })
   const checking=f.manager.check(1000);await entered.promise
   const pending=structuredClone(f.manager.inspectLoop('original')!.pendingCompletion)
   f.manager.cancelTarget({hostId:'local',agentSessionId:'original'})
@@ -222,6 +225,8 @@ it('the same exact target serializes two due inputs and keeps a possibly written
     // The original input lane retains a person's queued write behind an already entered native operation.
     writing=f.client.writeAgent({agentSessionId:'original',expectedRun:run,data:'Human terminal input',source:'user'})
     expect(inner.kernel.stop).not.toHaveBeenCalled()
+    await new Promise<void>(resolve=>setImmediate(resolve))
+    expect(manager.inspectLoop(a.loopId)).toMatchObject({status:'active',pendingCompletion:pending})
     let stopped=false;stopping=manager.stop().then(()=>{stopped=true})
     await vi.waitFor(()=>expect(stopped).toBe(true))
     await checking
