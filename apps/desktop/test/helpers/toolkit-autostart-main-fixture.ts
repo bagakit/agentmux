@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { AgentMuxControlServer, AgentMuxMemoryAgentSessionStore } from '@agentmux/core'
-import { ConfigStore, DEFAULT_CONFIG } from '../../src/main/config-store.js'
+import { ConfigStore } from '../../src/main/config-store.js'
 import { ConfigOwner } from '../../src/main/config-owner.js'
 import { RuntimeController } from '../../src/main/runtime-controller.js'
 import { ToolkitOwner } from '../../src/main/toolkit-owner.js'
@@ -12,7 +12,7 @@ import { toolkitRuntime } from './toolkit-runtime.fixture.js'
 import { localRuntimeConnector } from './local-runtime-connector.js'
 
 const environment = vi.hoisted(() => ({ directory: process.cwd() }))
-vi.mock('electron', () => ({ app: { getPath: () => environment.directory, getAppPath: () => process.cwd() } }))
+vi.mock('electron', () => ({ app: { getPath: () => environment.directory, getAppPath: () => resolve('apps/desktop') } }))
 const execute = promisify(execFile)
 const evidence = process.env.AGENTMUX_TOOLKIT_EVIDENCE
 let endpoint = ''
@@ -35,8 +35,7 @@ export async function nativeMain() {
   vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(directory, 'messages.ndjson'))
   vi.stubEnv('AGENTMUX_AGENT_SESSION_STORE', join(directory, 'sessions.json'))
   endpoint = 'unix:' + join(directory, 'toolkit.sock')
-  let store = new ConfigStore(join(directory, 'config.json'))
-  await store.save({ ...structuredClone(DEFAULT_CONFIG), toolkit: { tools: [] } })
+  let store!: ConfigStore
   let runtime!: RuntimeController, toolkit!: ToolkitOwner, server!: AgentMuxControlServer
   async function open() {
     store = new ConfigStore(join(directory, 'config.json'))
@@ -49,7 +48,7 @@ export async function nativeMain() {
     toolkit = new ToolkitOwner({ config: owner, receiptPath: join(directory, 'toolkit-receipts.json'),
       openRunPort: () => runtime.toolkitRunPort(), enabled: () => false,
       launch: () => ({ runner: process.execPath, cli: resolve('packages/core/dist/agentmux.js'),
-        script: resolve('apps/desktop/resources/toolkit/performance.mjs'), cwd: directory, env: {} }) })
+        script: resolve('apps/desktop/resources/toolkit/performance.mjs'), cwd: directory, env: { PATH: directory } }) })
     server = new AgentMuxControlServer({ coreClients: () => [], execute: async () => { throw new Error('Unexpected non-Toolkit operation') }, toolkit }, join(directory, 'toolkit.sock'))
     await server.start()
     await toolkit.load()

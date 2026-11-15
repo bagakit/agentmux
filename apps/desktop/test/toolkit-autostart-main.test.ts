@@ -6,13 +6,19 @@ import type { ToolkitScriptSnapshot } from '@agentmux/core/control'
 
 it('compiled CLI and real Main load default scripts and opted-in packages once, preserving manual tools', async () => {
   const m = await nativeMain()
+  const inspect = async (id: string) => (await oneCli('toolkit', 'inspect', id)).result.snapshot as ToolkitScriptSnapshot
+  const expectDisabledAuth = async () => {
+    expect(await inspect('auth')).toMatchObject({ state: 'disabled', admission: null, latestConfirmed: null })
+    const tools = (await oneCli('toolkit', 'ls')).result.tools as Array<{ toolId: string }>
+    expect(tools.find(tool => tool.toolId === 'auth')).toMatchObject({ kind: 'package', enabled: false, autoStart: true })
+  }
+  await expectDisabledAuth()
   const marker = join(m.directory, 'automatic-executions')
   const script = `import {appendFileSync} from 'node:fs';appendFileSync(${JSON.stringify(marker)},'x');console.log('startup executed')`
   const fields = { name: 'Startup report', icon: 'terminal', enabled: true, statusBar: 'icon', workspacePath: m.directory, script, args: [] }
   const input = join(m.directory, 'tool.json')
   await writeFile(input, JSON.stringify(fields))
   await oneCli('toolkit', 'create', 'startup-report', '--input', input)
-  const inspect = async (id: string) => (await oneCli('toolkit', 'inspect', id)).result.snapshot as ToolkitScriptSnapshot
   await until(async () => expect((await inspect('startup-report')).state).toBe('succeeded'))
   expect(await readFile(marker, 'utf8')).toBe('x')
   const list = (await oneCli('toolkit', 'ls')).result.tools
@@ -49,6 +55,7 @@ it('compiled CLI and real Main load default scripts and opted-in packages once, 
 
   // Reopen actual durable stores through the production Main registration.
   await m.restart()
+  await expectDisabledAuth()
   await until(async () => {
     expect((await inspect('startup-report')).latestConfirmed!.executionId).not.toBe(first.executionId)
     expect((await inspect('startup-extension')).latestConfirmed!.executionId).not.toBe(packageFirst.executionId)

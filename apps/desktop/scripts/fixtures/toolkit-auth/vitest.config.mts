@@ -30,8 +30,8 @@ function consume(path: string, input: string) {
   return code
 }
 const aliases = [
-  { find: /^@agentmux\/core$/, replacement: resolve(import.meta.dirname, '../toolkit-custom-identity/core-entry.ts') },
   { find: /^@agentmux\/client-ui\/platform$/, replacement: resolve(root, 'packages/client-ui/src/platform.tsx') },
+  { find: /^@agentmux\/client-ui\/theme$/, replacement: resolve(root, 'packages/client-ui/src/theme/index.ts') },
   { find: /^@agentmux\/client-ui\/components\/(.*)$/, replacement: resolve(root, 'packages/client-ui/src/components/$1.tsx') },
   { find: /^@agentmux\/client-ui\/terminal\/(.*)$/, replacement: resolve(root, 'packages/client-ui/src/terminal/$1.ts') },
   { find: /^@agentmux\/client-ui\/(.*)$/, replacement: resolve(root, 'packages/client-ui/src/lib/$1.ts') },

@@ -30,7 +30,7 @@ describe('ordinary Auth initial local package configuration', () => {
   it('writes one normal package only for a missing config and reopens its exact persisted source reference', async () => {
     const { path, packagePath, store } = await fixture(), config = await store.get()
     expect(config.toolkit?.tools).toEqual([{ kind: 'package', id: INITIAL_TOOLKIT_PACKAGES[0]!.id,
-      revision: expect.any(String), packagePath, workspacePath: env.home, enabled: true, statusBar: 'icon', args: ['codexL', '@active'] }])
+      revision: expect.any(String), packagePath, workspacePath: env.home, enabled: false, statusBar: 'icon', args: ['codexL', '@active'] }])
     expect(JSON.parse(await readFile(path, 'utf8'))).toEqual(config)
     expect(await new ConfigStore(path).get()).toEqual(config)
     expect(DEFAULT_CONFIG.toolkit).toBeUndefined()
@@ -61,7 +61,7 @@ describe('ordinary Auth initial local package configuration', () => {
     const changedManifest = { schema: 'agentmux.toolkit.package.v1', name: 'My unrelated report', icon: 'terminal', entry: 'query.mjs', actions: [] }
     await writeFile(join(packagePath, 'manifest.json'), JSON.stringify(changedManifest))
     await writeFile(join(packagePath, 'query.mjs'), "console.log('authored source')")
-    const edited = { ...packageTool(config), enabled: false, statusBar: 'label' as const, args: ['my-own-query'] }
+    const edited = { ...packageTool(config), enabled: true, statusBar: 'label' as const, args: ['my-own-query'] }
     const inline = { id: 'original-inline', revision: 'original-inline-revision', name: 'Original', icon: 'terminal',
       enabled: true, statusBar: 'icon' as const, workspacePath: env.home, script: "console.log('retained original')", args: [] }
     const tools = [edited, inline, ...Array.from({ length: 126 }, (_, i) => ({ ...edited, id: `saved-${i}`, revision: `revision-${i}` }))]

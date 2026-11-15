@@ -10,9 +10,11 @@ const changes: Record<string, [string, string]> = {
   types: ['tool.enabled && tool.autoStart !== false', "!('kind' in tool) && tool.mode === 'tui' && tool.enabled && tool.autoStart !== false"],
   once: ['const added = [...enabled].filter(id => !this.autoStartingTools.has(id))', 'const added = [...enabled]'],
   terminal: ['if (tool.admission) return', 'return'],
-  bundled: ['toolkitTools(this.args.config.current).filter(tool => tool.enabled', 'this.configurations().filter(tool => tool.enabled']
+  bundled: ['toolkitTools(this.args.config.current).filter(tool => tool.enabled', 'this.configurations().filter(tool => tool.enabled'],
+  'seed-enabled': ['enabled: false', 'enabled: true']
 }
 assert.ok(!mutation || changes[mutation], 'Known startup mutation')
+const target = mutation === 'seed-enabled' ? 'apps/desktop/resources/toolkit/initial-packages.ts' : 'apps/desktop/src/main/toolkit-custom-owner.ts'
 export default { ...base, plugins: [...(base.plugins ?? []), {
   name: 'autostart-consumed-mutation', enforce: 'pre' as const,
   transform(source: string, id: string) {
@@ -21,7 +23,7 @@ export default { ...base, plugins: [...(base.plugins ?? []), {
       const sha256 = createHash('sha256').update(readFileSync(id.split('?')[0]!)).digest('hex')
       appendFileSync(process.env.AGENTMUX_AUTOSTART_INPUT_RECEIPT, JSON.stringify({ file, sha256 }) + '\n')
     }
-    if (!mutation || file !== 'apps/desktop/src/main/toolkit-custom-owner.ts') return
+    if (!mutation || file !== target) return
     const [from, to] = changes[mutation]!
     assert.equal(source.split(from).length, 2, 'Mutation changes one actual loaded owner expression')
     if (process.env.AGENTMUX_AUTOSTART_MUTATION_RECEIPT) appendFileSync(process.env.AGENTMUX_AUTOSTART_MUTATION_RECEIPT, JSON.stringify({ mutation, file: id }) + '\n')
