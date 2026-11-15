@@ -98,7 +98,7 @@ const pointer=(window as any).__annotationLastTrustedPointer;if(pointer&&pointer
     })
     if (mutant === 'disable-busy-cancel') build.onLoad({ filter: /ImageAnnotationEditor\.tsx$/ }, value => {
       assert.equal(value.path, editor)
-      const matches = [...editorSource.matchAll(/<button\b[^>]*onClick=\{onCancel\}[^>]*>/g)]
+      const matches = [...editorSource.matchAll(/<button\b[^>]*onClick=\{requestClose\}[^>]*>/g)]
       assert.equal(matches.length, 1, 'The actual Cancel action exists exactly once')
       const target = matches[0][0]
       assert.ok(!target.includes('disabled='), 'The original Cancel retains its existing enabled input capability')
@@ -112,9 +112,14 @@ const pointer=(window as any).__annotationLastTrustedPointer;if(pointer&&pointer
     })
     if (mutant === 'omit-processed-crop') build.onLoad({ filter: /ImageAnnotationEditor\.tsx$/ }, value => {
       assert.equal(value.path, editor)
-      const target = 'const input = { image: base, shapes, crop: documentState.crop, displayWidth: image.width, displayHeight: image.height }'
+      const target = 'const input = { image: base, shapes: currentShapes(), crop: documentState.crop, displayWidth: image.width, displayHeight: image.height }'
       assert.equal(editorSource.split(target).length - 1, 1, 'The actual processed image/context crop consumer exists exactly once')
       return { contents: editorSource.replace(target, target.replace('crop: documentState.crop', 'crop: null')), loader: 'tsx', resolveDir: dirname(editor) }
+    })
+    if (mutant === 'save-live-source-receipt') build.onLoad({ filter: /browser-screenshot\/ScreenshotEditor\.tsx$/ }, async value => {
+      const source = await readFile(value.path, 'utf8'), target = 'source: historical }, ANNOTATION_DOCUMENT_LIMITS)'
+      assert.equal(source.split(target).length - 1, 1, 'The original file consumes the projected source exactly once')
+      return { contents: source.replace(target, 'source }, ANNOTATION_DOCUMENT_LIMITS)'), loader: 'tsx', resolveDir: dirname(value.path) }
     })
     if (mutant === 'save-original-pixels' || mutant === 'pin-original-pixels') build.onLoad({ filter: /BrowserCaptureTools\.tsx$/ }, value => {
       assert.equal(value.path, captureTools)
@@ -165,10 +170,12 @@ const pointer=(window as any).__annotationLastTrustedPointer;if(pointer&&pointer
       'disable-busy-cancel': /busy-copy-must-keep-Cancel-action-available/,
       'omit-selected-move': /actual-Select-move-must-move-the-original-ink/,
       'omit-processed-crop': /actual-Crop-must-change-the-consumed-PNG-dimensions/,
+      'save-live-source-receipt': /the real input appears: Workspace file/,
       'save-original-pixels': /actual-Save-PNG-must-use-current-processed-pixels/,
       'pin-original-pixels': /actual-Pin-must-use-current-processed-pixels/
     }
     assert.match(receipt.failure?.message ?? '', failures[mutant])
+    if (mutant === 'save-live-source-receipt') assert.ok(receipt.failure.facts.errors.some(error => /AnnotationDocumentError.*unsupported fields/.test(error)))
   } else {
     assert.equal(result.code, 0, result.output + '\n' + receipt.failure?.message + '\nEvidence: ' + join(out, label + '.json'))
     assert.equal(receipt.passed, true)
@@ -191,6 +198,7 @@ try {
       await run('disable-busy-cancel', 'disable-busy-cancel')
       await run('omit-selected-move', 'omit-selected-move')
       await run('omit-processed-crop', 'omit-processed-crop')
+      await run('save-live-source-receipt', 'save-live-source-receipt')
     }
     await run('save-original-pixels', 'save-original-pixels')
     await run('pin-original-pixels', 'pin-original-pixels')

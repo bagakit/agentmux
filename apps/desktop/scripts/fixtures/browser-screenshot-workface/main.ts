@@ -31,6 +31,7 @@ const receipt: any = {
 }
 let window: BrowserWindow, manager: BrowserViewManager, overlays: NativeOverlaySurfaces, server: Server
 let original: WebContentsView, sibling: WebContentsView, originalSnapshot: any, siblingSnapshot: any
+let pendingOverlayPublications = 0
 let baseUrl: string
 let publicServer: AgentMuxControlServer
 let scriptCapture: any
@@ -115,8 +116,12 @@ async function keepOwners(caseLabel: string) {
 async function openEditor() {
   const toolbarVisible = await evaluate('document.querySelector("button[aria-label=Screenshot]")?.getBoundingClientRect().width > 0')
   if (!toolbarVisible) {
+    const publications = receipt.publications.length
     await click('More browser tools')
     await until('narrow original More menu Screenshot action', async () => await evaluate('document.querySelector("[role=menuitem][aria-label=Screenshot]")?.getBoundingClientRect().width > 0'))
+    await until('the native More overlay is ready', async () => pendingOverlayPublications === 0 &&
+      receipt.publications.length > publications &&
+      receipt.publications.at(-1)?.result.projected > 0)
   }
   await click('Screenshot')
   const opened = await until('original Pane mounts loaded editor', async () => {
@@ -157,7 +162,7 @@ async function drag(from: { x: number; y: number }, to: { x: number; y: number }
   await mouse('mouseReleased', to.x, to.y, 'left'); await settle()
 }
 async function fillField(name: string, text: string) {
-  const point = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(`[aria-label="${name}"]`)})??[...document.querySelectorAll('label')].find(l=>l.textContent.trim()===${JSON.stringify(name)})?.control;if(!e)return null;const r=e.getBoundingClientRect();let left=Math.max(0,r.left),right=Math.min(innerWidth,r.right),top=Math.max(0,r.top),bottom=Math.min(innerHeight,r.bottom);for(let p=e.parentElement;p;p=p.parentElement){const s=getComputedStyle(p),b=p.getBoundingClientRect();if(/auto|scroll|hidden|clip/.test(s.overflowX)){left=Math.max(left,b.left);right=Math.min(right,b.right)}if(/auto|scroll|hidden|clip/.test(s.overflowY)){top=Math.max(top,b.top);bottom=Math.min(bottom,b.bottom)}}const x=(left+right)/2,y=(top+bottom)/2;return right>left&&bottom>top?{x,y,hit:document.elementFromPoint(x,y)===e}:null})()`)
+  const point = await until('the real input appears: ' + name, () => evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(`[aria-label="${name}"]`)})??[...document.querySelectorAll('label')].find(l=>l.textContent.trim()===${JSON.stringify(name)})?.control;if(!e)return null;const r=e.getBoundingClientRect();let left=Math.max(0,r.left),right=Math.min(innerWidth,r.right),top=Math.max(0,r.top),bottom=Math.min(innerHeight,r.bottom);for(let p=e.parentElement;p;p=p.parentElement){const s=getComputedStyle(p),b=p.getBoundingClientRect();if(/auto|scroll|hidden|clip/.test(s.overflowX)){left=Math.max(left,b.left);right=Math.min(right,b.right)}if(/auto|scroll|hidden|clip/.test(s.overflowY)){top=Math.max(top,b.top);bottom=Math.min(bottom,b.bottom)}}const x=(left+right)/2,y=(top+bottom)/2;return right>left&&bottom>top?{x,y,hit:document.elementFromPoint(x,y)===e}:null})()`))
   assert.equal(point?.hit, true, 'The visible input point names this exact real field: ' + name)
   assert.ok(point, 'The actual editable field exists: ' + name)
   await mouse('mousePressed', point.x, point.y, 'left'); await mouse('mouseReleased', point.x, point.y, 'left')
@@ -166,16 +171,20 @@ async function fillField(name: string, text: string) {
   await until('the real Note field consumes input', async () => await evaluate(`window.screenshotProbe.field(${JSON.stringify(name)})`) === text)
   await settle()
 }
-async function capabilityEdits(opened: any) {
-  const box = opened.canvas, capturedImage = receipt.captures.at(-1).image
-  const from = imagePointOnScreen(opened, capturedImage.width * .08, capturedImage.height * .12)
-  const to = imagePointOnScreen(opened, capturedImage.width * .22, capturedImage.height * .18)
+async function capabilityEdits() {
+  const capturedImage = receipt.captures.at(-1).image
+  await click('Pen', true)
+  const drawing = await facts()
+  const from = imagePointOnScreen(drawing, capturedImage.width * .08, capturedImage.height * .12)
+  const to = imagePointOnScreen(drawing, capturedImage.width * .22, capturedImage.height * .18)
   await drag(from, to)
-  const beforeMove = await evaluate('window.screenshotProbe.inkPixels()')
-  assert.ok(beforeMove.count > 100 && beforeMove.redBounds, 'The actual object exists before selecting it')
   await click('Select', true)
   await settle()
-  const selectedFrom = imagePointOnScreen(await facts(), capturedImage.width * .08, capturedImage.height * .12)
+  const moving = await facts()
+  const beforeMove = await evaluate('window.screenshotProbe.inkPixels()')
+  assert.ok(beforeMove.count > 100 && beforeMove.redBounds, 'The actual object exists before selecting it')
+  // Drag the body of the line. The ends belong to the selection's resize handles.
+  const selectedFrom = imagePointOnScreen(moving, capturedImage.width * .15, capturedImage.height * .15)
   await drag(selectedFrom, { x: selectedFrom.x + 50, y: selectedFrom.y + 55 })
   const afterMove = await evaluate('window.screenshotProbe.inkPixels()')
   const afterMoveFacts = await facts(), sx = afterMove.width / afterMoveFacts.canvas.width, sy = afterMove.height / afterMoveFacts.canvas.height
@@ -187,7 +196,9 @@ async function capabilityEdits(opened: any) {
   await click('Undo', true); await settle()
   assert.ok((await evaluate('window.screenshotProbe.inkPixels()')).count > 100, 'Undo restores the original moved object')
   await click('Erase', true)
-  const movedStart = { x: selectedFrom.x + 50, y: selectedFrom.y + 55 }; await drag(movedStart, movedStart, 1)
+  const movedCenter = imagePointOnScreen(await facts(), capturedImage.width * .15 + 50 / moving.imageView.scale,
+    capturedImage.height * .15 + 55 / moving.imageView.scale)
+  await drag(movedCenter, movedCenter, 1)
   assert.ok((await evaluate('window.screenshotProbe.inkPixels()')).count < 20, 'The actual Erase tool removes the original hit object')
   await click('Undo', true); await settle()
   const pattern = await original.webContents.executeJavaScript('(()=>{const r=document.querySelector("#pattern").getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}})()')
@@ -208,7 +219,7 @@ async function capabilityEdits(opened: any) {
   await click('Numbered note', true)
   const notePoint = imagePointOnScreen(await facts(), capturedImage.width * .72, capturedImage.height * .58)
   await drag(notePoint, imagePointOnScreen(await facts(), capturedImage.width * .88, capturedImage.height * .78))
-  await fillField('Note text', 'Check original control')
+  await fillField('Marker note', 'Check original control')
   await click('Copy context', true)
   await until('the actual context handler writes its private text receipt', async () => receipt.clipboardText.length === 1)
   assert.ok(receipt.clipboardText[0].includes('Check original control') && receipt.clipboardText[0].includes(baseUrl + '/original'),
@@ -275,11 +286,18 @@ async function capabilityEdits(opened: any) {
   await processedOutputs(cropped)
 }
 async function measurePointerWork(opened: any) {
+  const box = opened.canvas, startPoint = imagePointOnScreen(opened, receipt.captures.at(-1).image.width * .08, receipt.captures.at(-1).image.height * .16)
+  const x = startPoint.x, y = startPoint.y, count = 300
+  await mouse('mouseMoved', x, y)
+  // A narrow Pane opens the screenshot from More. Wait for that menu's exact
+  // native removal receipt before measuring work caused by the stroke.
+  await until('the editor is idle with no original menu projection', async () =>
+    pendingOverlayPublications === 0 && receipt.publications.at(-1)?.count === 0 &&
+    receipt.publications.at(-1)?.result.projected === 0)
   await evaluate('window.screenshotProbe.rememberPixels()')
   const before = { counters: { ...receipt.counters }, publications: receipt.publications.length, facts: await facts(), ink: await evaluate('window.screenshotProbe.inkPixels()') }
-  const box = opened.canvas, startPoint = imagePointOnScreen(opened, receipt.captures.at(-1).image.width * .08, receipt.captures.at(-1).image.height * .16)
-  const x = startPoint.x, y = startPoint.y, count = 300, start = Date.now()
-  await mouse('mouseMoved', x, y); await mouse('mousePressed', x, y, 'left')
+  const start = Date.now()
+  await mouse('mousePressed', x, y, 'left')
   for (let i = 1; i <= count; i++) await mouse('mouseMoved', x + (i / count) * Math.min(300, box.width - 65), y + 40 * Math.sin(i / 25), 'left')
   await mouse('mouseReleased', x + Math.min(300, box.width - 65), y + 40 * Math.sin(count / 25), 'left')
   await settle()
@@ -289,6 +307,7 @@ async function measurePointerWork(opened: any) {
   assert.equal(trusted.filter((event: any) => event.type === 'pointerdown').length, 1); assert.equal(trusted.filter((event: any) => event.type === 'pointerup').length, 1)
   assert.ok(after.ink.count > before.ink.count + 100 && after.ink.changed > 100, 'Actual red drawing changes the captured base page; opaque source alpha is not ink')
   assert.deepEqual(after.counters, before.counters, 'drawing-must-not-capture-or-encode-native-chrome')
+  assert.equal(pendingOverlayPublications, 0, 'drawing-must-not-request-native-chrome')
   assert.equal(after.publications, before.publications, 'drawing-must-not-publish-native-chrome')
   const renderLatency = after.facts.canvasCost.scene.pointerToRenderMs.filter((value: number) => Number.isFinite(value) && value >= 0)
   assert.ok(renderLatency.length > 0 && renderLatency.length <= count + 1, 'Trusted Canvas pointer receipts produce nonempty observed render latency samples')
@@ -391,6 +410,18 @@ async function processedOutputs(expected: any) {
     originalCreation: originalCreation.operationId, originalPinId: originalCreation.result.pinId, independentCreation: independentCreation.operationId,
     inspection: receipt.pinInspections[0], before, capturedAgain, after: { counters: { ...receipt.counters }, captures: receipt.captures.length }, idle: { before: idleBefore.canvasCost, after: idleAfter.canvasCost } })
 }
+function assertSameContextGeometry(actual: any, expected: any, message: string) {
+  const { originalImagePixels: actualOriginal, pngPixels: actualPng, ...actualObject } = actual
+  const { originalImagePixels: expectedOriginal, pngPixels: expectedPng, ...expectedObject } = expected
+  assert.deepEqual(actualObject, expectedObject, message)
+  for (const [observed, original] of [[actualOriginal, expectedOriginal], [actualPng, expectedPng]]) {
+    assert.deepEqual(Object.keys(observed), Object.keys(original), message)
+    for (const key of Object.keys(original)) {
+      // Canvas transforms make a float32 round trip. Keep every coordinate within a thousandth of an image pixel.
+      assert.ok(Math.abs(observed[key] - original[key]) < .001, message + ': ' + key)
+    }
+  }
+}
 async function advancedAnnotationEdits() {
   let opened = await openEditor()
   const captured = receipt.captures.at(-1), width = captured.image.width, height = captured.image.height
@@ -413,7 +444,10 @@ async function advancedAnnotationEdits() {
   const resized = (await context()).annotations.find((shape: any) => shape.id === rectangle.id)
   assert.ok(resized.originalImagePixels.width > rectangle.originalImagePixels.width + 90 && resized.originalImagePixels.height > rectangle.originalImagePixels.height + 50,
     'actual-selected-handle-must-resize-the-original-object')
-  await click('Undo', true); assert.deepEqual((await context()).annotations, first.annotations, 'Actual Undo restores the same original geometry and ID')
+  await click('Undo', true)
+  const restored = (await context()).annotations
+  assert.equal(restored.length, 1)
+  assertSameContextGeometry(restored[0], rectangle, 'Actual Undo restores the same original geometry and ID')
   await click('Redo', true)
   const beforeZoom = await facts(); await click('Zoom in', true); await settle()
   const afterZoom = await facts(); assert.ok(afterZoom.imageView.scale > beforeZoom.imageView.scale, 'The actual zoom action changes painted magnification')
@@ -425,6 +459,7 @@ async function advancedAnnotationEdits() {
     'actual-pan-must-translate-the-painted-image')
   assert.deepEqual(panned.canvasPixels, beforeZoom.canvasPixels, 'View changes keep the real Canvas viewport allocation bounded')
   await click('Fit image', true)
+  await escape()
   const textAt = { x: width * .2, y: height * .12 }
   await click('Text', true); await drag(await point(textAt.x, textAt.y), await point(textAt.x, textAt.y), 1)
   await fillField('Screenshot text', 'Original editable text'); await key('Enter', 'Enter', 13, process.platform === 'darwin' ? 4 : 2); await settle()
@@ -434,10 +469,14 @@ async function advancedAnnotationEdits() {
   await click('Edit text', true); await fillField('Screenshot text', 'Edited existing text')
   if (process.env.AGENTMUX_SCREENSHOT_VISUAL === '1') await shot('pending-existing-text')
   await key('Enter', 'Enter', 13, process.platform === 'darwin' ? 4 : 2); await settle()
+  const editedText = (await context()).annotations.find((shape: any) => shape.id === originalText.id)
+  assert.ok(editedText, 'Actual text editing retains the original annotation ID')
+  const edited = editedText.originalImagePixels
   await click('Color #ffffff', true)
-  await drag(await point(textAt.x + 4, textAt.y + 4), await point(width - 8, height - 8))
+  await drag(await point(edited.x + edited.width * .1, edited.y + edited.height * .5), await point(width - 8, height - 8))
   const edgeText = (await context()).annotations.find((shape: any) => shape.id === originalText.id)
-  assert.ok(edgeText, 'The actual selected text moves to the original image edge')
+  assert.ok(edgeText?.originalImagePixels.x > width * .75 && edgeText.originalImagePixels.y > height * .8,
+    'The actual selected text moves to the original image edge')
   assert.equal(await evaluate(`document.querySelector(${JSON.stringify('button[aria-label="Color #ffffff"]')})?.getAttribute('aria-pressed')`), 'true',
     'The actual selected edge annotation uses the white palette color')
   const previousAppearance = (await facts()).appearance
@@ -465,17 +504,21 @@ async function advancedAnnotationEdits() {
   assert.deepEqual((await facts()).imageView, edgeView, 'Pending text focus preserves the painted view transform')
   if (process.env.AGENTMUX_SCREENSHOT_VISUAL === '1') await shot('pending-edge-existing-text-light')
   await key('Enter', 'Enter', 13, process.platform === 'darwin' ? 4 : 2); await settle()
-  assert.deepEqual((await context()).annotations.find((shape: any) => shape.id === originalText.id), edgeText,
+  assertSameContextGeometry((await context()).annotations.find((shape: any) => shape.id === originalText.id), edgeText,
     'UI input clamping retains the original object identity and processed image coordinates')
   receipt.edgeText = { ui: edgeUi, originalAnnotation: edgeText, paintedView: edgeView }
   await click('Undo', true); await click('Color #ef4444', true); await click('Fit image', true)
   assert.equal((await evaluate(`window.screenshotProbe.appearance(${JSON.stringify(previousAppearance)})`)).applied, true)
   const noteFrom = { x: width * .7, y: height * .15 }, noteTo = { x: width * .85, y: height * .3 }
   await click('Numbered note', true); await drag(await point(noteFrom.x, noteFrom.y), await point(noteTo.x, noteTo.y))
-  await fillField('Note text', 'MASKED_EDITABLE_NOTE_MUST_NOT_REACH_CONTEXT')
-  // Trusted reverse Tab reaches the real native select; ordinary keys select its Expected option.
-  await key('Tab', 'Tab', 9, 8); await key('Tab', 'Tab', 9, 8)
-  assert.equal((await facts()).activeElement, 'Note template', 'Trusted Tab reaches the actual note intent selector')
+  await fillField('Marker note', 'MASKED_EDITABLE_NOTE_MUST_NOT_REACH_CONTEXT')
+  // macOS Tab preferences differ. Give the visible select focus, then change it through native keys.
+  const focusedIntent = await evaluate(`(() => {
+    const field = document.querySelector('select[aria-label="Note template"]');
+    if (!field || !field.getBoundingClientRect().width) return false;
+    field.focus({ preventScroll: true }); return document.activeElement === field;
+  })()`)
+  assert.equal(focusedIntent, true, 'The real note intent selector receives focus')
   await key('Home', 'Home', 36); await key('ArrowDown', 'ArrowDown', 40); await key('ArrowDown', 'ArrowDown', 40)
   await key('Enter', 'Enter', 13)
   if (await evaluate('window.screenshotProbe.field("Note template")') !== 'expected') {
@@ -486,7 +529,8 @@ async function advancedAnnotationEdits() {
   assert.equal(await evaluate('window.screenshotProbe.field("Note template")'), 'expected', 'Native keyboard changes the actual note template')
   await click('Locate', true); await click('Fit image', true)
   await click('Cover', true)
-  await drag(await point(noteFrom.x - 50, noteFrom.y - 50), await point(noteTo.x + 50, noteTo.y + 50))
+  // Start clear of the existing note's hit area so Cover creates a new mark.
+  await drag(await point(width * .57, height * .06), await point(width * .94, height * .4))
   const processed = await context()
   assert.ok(processed.annotations.some((shape: any) => shape.kind === 'cover'), 'The real cover reaches the processed output')
   assert.ok(!JSON.stringify(processed).includes('MASKED_EDITABLE_NOTE_MUST_NOT_REACH_CONTEXT') && !processed.annotations.some((shape: any) => shape.kind === 'note'),
@@ -507,7 +551,10 @@ async function advancedAnnotationEdits() {
   const savedText = document.shapes.find((shape: any) => shape.kind === 'text'), savedNote = document.shapes.find((shape: any) => shape.kind === 'note')
   assert.equal(savedText.id, originalText.id); assert.equal(savedText.text, 'Edited existing text', 'Actual Edit text replaces the same saved object')
   assert.equal(savedNote.note, 'MASKED_EDITABLE_NOTE_MUST_NOT_REACH_CONTEXT'); assert.equal(savedNote.template, 'expected')
-  assert.deepEqual(document.source, captured.source); assert.equal(document.shapes.find((shape: any) => shape.kind === 'rect').id, rectangle.id)
+  const { url, title, viewport, viewportWarning, hostOverlays } = captured.source
+  assert.equal(hostOverlays, 'excluded', 'The live receipt carries native overlay evidence')
+  assert.deepEqual(document.source, { url, title, viewport, viewportWarning })
+  assert.equal(document.shapes.find((shape: any) => shape.kind === 'rect').id, rectangle.id)
   const savedCorner = document.shapes.find((shape: any) => shape.kind === 'rect').to
   assert.ok(Math.abs(savedCorner.x - to.x - 100) < .001 && Math.abs(savedCorner.y - to.y - 60) < .001,
     'Actual saved resize retains its trusted pointer endpoint in original pixels')
@@ -585,7 +632,7 @@ async function visualScene(kind: string, width: number, height: number, appearan
   await click('Numbered note', true)
   const noteView = await facts()
   await drag(imagePointOnScreen(noteView, source.width * .55, source.height * .4), imagePointOnScreen(noteView, source.width * .82, source.height * .65))
-  await fillField('Note text', 'Review this captured control')
+  await fillField('Marker note', 'Review this captured control')
   const noteLayout = await visualLayout(kind, true)
   await shot(kind + '-notes')
   await click('Pixelate', true)
@@ -762,8 +809,8 @@ async function run() {
   const chromeCapture = window.webContents.capturePage.bind(window.webContents)
   window.webContents.capturePage = async (...args) => {
     receipt.counters.rendererCapture++
-    const image = await chromeCapture(...args), encode = image.toDataURL.bind(image)
-    image.toDataURL = (...args) => { receipt.counters.rendererEncode++; return encode(...args) }
+    const image = await chromeCapture(...args), encode = image.toPNG.bind(image)
+    image.toPNG = (...args) => { receipt.counters.rendererEncode++; return encode(...args) }
     return image
   }
   ipcMain.handle('screenshot:call', async (event, method, ...args) => {
@@ -782,7 +829,12 @@ async function run() {
     if (method === 'setup') return { original: originalSnapshot, sibling: siblingSnapshot }
     if (method === 'nativeBrowserVisibility') return manager.nativeBrowserVisibility()
     if (method === 'publishNativeOverlays') {
-      const result = await overlays.update(args[0]); receipt.publications.push({ count: args[0].length, result }); return result
+      pendingOverlayPublications++
+      try {
+        const result = await overlays.update(args[0])
+        receipt.publications.push({ count: args[0].length, result })
+        return result
+      } finally { pendingOverlayPublications-- }
     }
     if (method === 'privateClipboard') {
       assert.equal(args[0].mimeType, 'image/png'); assert.ok(args[0].dataUrl.startsWith('data:image/png;base64,'))
@@ -866,6 +918,7 @@ async function run() {
     await openEditor(); await click('Cancel', true); await closed('visual-pilot-initial-cancel')
     await visualScenes(); assert.deepEqual((await facts()).errors, []); receipt.passed = true; return
   }
+  const originalCapturesBeforeEditing = receipt.counters.originalCapture
   const opened = await openEditor()
   assert.equal(receipt.calls.filter((row: any) => row.method === 'captureScreenshot').length, 1)
   if (process.env.AGENTMUX_SCREENSHOT_OUTPUTS_ONLY === '1') {
@@ -885,7 +938,7 @@ async function run() {
     return
   }
   await measurePointerWork(opened)
-  await click('Cancel', true); await closed('native-pointer-cancel')
+  await click('Cancel', true); await click('Discard', true); await closed('native-pointer-cancel')
   await openEditor(); await escape(); await closed('trusted-keyboard-escape')
   await openEditor(); await evaluate('window.screenshotProbe.holdEncoding()')
   await click('Copy PNG', true)
@@ -904,7 +957,7 @@ async function run() {
   assert.equal(receipt.clipboardText.length, 0, 'Cancelled actual context composition never reaches the private text sink')
   assert.equal((await facts()).editor, false)
   receipt.cases.push({ label: 'late-native-context-after-cancel-keeps-text-sink-and-workface', contextPending, after: await facts() })
-  const editing = await openEditor(); await capabilityEdits(editing)
+  await openEditor(); await capabilityEdits()
   await until('normal Copy completes and keeps the same Editor available', async () => receipt.clipboard.length === 2 && (await facts()).editor && !(await facts()).copying)
   assert.equal(original.getVisible(), false, 'Copy PNG keeps the original screenshot working surface')
   await click('Copy PNG', true)
@@ -913,7 +966,7 @@ async function run() {
   await click('Cancel', true); await closed('copy-followed-by-explicit-cancel')
   await stage('actual-edits-and-pending-copy-Cancel-complete')
   assert.equal(receipt.captures.length, 6, 'The six explicit Desktop capture entries each produce one original image')
-  assert.equal(receipt.counters.originalCapture, receipt.captures.length, 'Each Desktop image uses the original native capture consumer once')
+  assert.equal(receipt.counters.originalCapture - originalCapturesBeforeEditing, receipt.captures.length, 'Each Desktop image uses the original native capture consumer once')
   await advancedAnnotationEdits(); await stage('actual-annotation-file-and-geometry-consumers-complete')
   if (process.env.AGENTMUX_SCREENSHOT_VISUAL === '1') {
     await visualScenes()

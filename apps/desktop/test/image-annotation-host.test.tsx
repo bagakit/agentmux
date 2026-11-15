@@ -118,7 +118,11 @@ describe('Browser annotation host save and reopen consumers', () => {
     presentation.expectBounds({ x: 0, y: 0, width: 400, height: 300 })
   })
 
-  it('saves the exact captured document once, then uses only the revision explicitly reopened for the same path', async () => {
+  it.each([
+    { hostOverlays: 'excluded' as const },
+    { hostOverlays: 'unconfirmed' as const, region: { x: 10, y: 20, width: 100, height: 80, pixelRatio: 2 } }
+  ])('saves the original from a real capture source shape, then uses the revision explicitly reopened (%j)', async captureOnly => {
+    captured.mockResolvedValueOnce({ ...capture, source: { ...capture.source, ...captureOnly } })
     await mount(); const capturedEditor = await beginCapture()
     await click(capturedEditor, 'Save original'); await submit(' captured original.json ')
     expect(write).toHaveBeenCalledExactlyOnceWith(page.workspaceId, { path: ' captured original.json ', expectedRevision: null,
