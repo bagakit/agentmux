@@ -33,6 +33,8 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
     if (!button) return null
     const row = button.closest('[data-focus-card-key]')
     const title = button.querySelector('.focus-task-list__title')
+    const summary = button.querySelector('.focus-task-list__summary')
+    const detail = button.querySelector('.focus-task-list__detail')
     const status = button.querySelector('.focus-task-list__state')
     const time = button.querySelector('.focus-task-list__time')
     const subagents = button.querySelector('.focus-task-list__subagents')
@@ -47,6 +49,11 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
       width: button.getBoundingClientRect().width,
       height: button.getBoundingClientRect().height,
       titleWidth: title?.getBoundingClientRect().width,
+      titleFits: title?.scrollWidth <= title?.clientWidth + 1,
+      summary: visible(summary) ? { text: summary.textContent.trim(), top: summary.getBoundingClientRect().top,
+        emphasis: summary.querySelector('.markdown-excerpt strong')?.textContent } : null,
+      titleTop: title?.getBoundingClientRect().top,
+      hasDetail: visible(detail),
       mark: button.querySelector('[data-focus-state-icon]')?.dataset.focusStateIcon,
       bucket: button.dataset.bucket,
       activity: button.dataset.activity,
@@ -122,6 +129,9 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
   const listHeight = await rowHeight()
   assert.ok(listHeight < cardsHeight, 'The actual Agent layout becomes denser: ' + listHeight + ' vs ' + cardsHeight)
   result.refinement = { wide: await checkList(), narrow: [] }
+  const { ordinary } = result.refinement.wide
+  assert.match(ordinary.summary?.text ?? '', /release-checklist\.md/, 'Working shows the actual observed activity on its title line')
+  assert.ok(Math.abs(ordinary.summary.top - ordinary.titleTop) < 8 && !ordinary.hasDetail)
   assert.equal((await rowFacts('rollout'))?.subagents, null, 'A different Run cannot supply child observations to the current task')
   assert.equal((await rowFacts('retention'))?.subagents, null, 'A different native Session cannot supply child observations to the current task')
   const observedParent = await rowFacts('working')
@@ -152,17 +162,28 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
   await read(`Promise.allSettled(document.querySelector(${JSON.stringify(first)}).getAnimations().map(animation => {animation.play(); return animation.finished}))`)
   result.refinement.hoverStable = true
 
-  const [resultRow, recoveryRow] = await Promise.all(['audit','interrupted'].map(rowFacts))
+  const resultSelector = JSON.stringify(task('audit'))
+  await read(`document.querySelector(${resultSelector}).scrollIntoView({block:'center'})`)
+  await until('the visible result mounts its original recap', () => read(`document.querySelector(${resultSelector})?.closest('[data-focus-card-key]').dataset.focusCardBody === 'mounted'`))
+  const [resultRow, recoveryRow, staleRow, withoutRoster] = await Promise.all(['audit','interrupted','reading','coverage'].map(rowFacts))
   assert.equal(resultRow.bucket, 'results')
   assert.equal(resultRow.activity, 'unknown', 'The completed Result has separate unconfirmed child activity')
   assert.equal(resultRow.status, null, 'A completed Result cannot grow a second line for Idle')
   assert.match(resultRow.accessibleName, /Idle/)
+  assert.match(resultRow.summary?.text ?? '', /退款材料已复核/, 'Results reuse the original result excerpt')
+  assert.equal(resultRow.summary.emphasis, '退款材料已复核')
+  assert.match(resultRow.accessibleDescription, /退款材料已复核/)
+  assert.ok(Math.abs(resultRow.summary.top - resultRow.titleTop) < 8 && !resultRow.hasDetail)
   assert.match(resultRow.subagents.title, /coverage unknown/i, 'An incomplete roster does not claim zero observed children as complete coverage')
+  assert.equal(staleRow.bucket, 'idle')
+  assert.match(staleRow.summary?.text ?? '', /Activity signal expired/)
+  assert.match(staleRow.accessibleDescription, /Last confirmed working/)
+  assert.equal(staleRow.hasDetail, false, 'An expired activity observation stays on one line')
+  assert.equal(withoutRoster.subagents, null, 'A missing roster does not claim any child state')
   assert.match(recoveryRow.status, /Interrupted/)
   result.refinement.resultRow = resultRow
   result.refinement.recoveryRow = recoveryRow
-  const resultSelector = JSON.stringify(task('audit'))
-  await read(`document.querySelector(${resultSelector}).scrollIntoView({block:'center'})`)
+  result.refinement.staleRow = staleRow
   await settle()
   await frame('list-results-dark', 'Results stay single-line with the rest of the Focus list')
   await read('document.querySelector(".focus-project-lanes__rows").scrollTop = 0')
@@ -244,7 +265,8 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
     await read('document.querySelector(".focus-project-lanes__rows").scrollTop = 0')
     await settle()
     const rows = await checkList()
-    assert.ok(rows.ordinary.titleWidth > rows.ordinary.width / 2, 'The title takes most of the main row even in a narrow split')
+    assert.ok(rows.ordinary.titleFits, 'The original title remains readable in a narrow split')
+    assert.equal(rows.ordinary.summary, null, 'Optional activity copy yields to the task and subagent count')
     assert.equal(rows.ordinary.subagents.count, '4', 'The narrow split keeps the exact observed subagent count visible')
     assert.equal(rows.ordinary.subagents.states, null, 'The narrow split reserves detailed state text for Quick Look')
     assert.ok(rows.web.tagInViewport && rows.api.tagInViewport, 'The actual split screenshot includes both worktree Tags')

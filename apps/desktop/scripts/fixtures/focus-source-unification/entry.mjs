@@ -86,6 +86,11 @@ if (window.__taskLayoutScene) {
 }
 const localReply='已核对原始数据与发布记录，接下来定位异常项并给出可验证的结论。'
 const timelines=Object.fromEntries(sessions.map(s=>[s.id,{agentSessionId:s.id,revision:1,items:[{id:'original-answer-'+s.id,agentSessionId:s.id,kind:'assistant_message',title:'Original answer',source:'native-hook',status:'complete',content:s.id==='working'?localReply:'原始分析内容与恢复位置仍然保留。',createdAt:now-30000,updatedAt:now-30000}]}]))
+if (window.__taskLayoutScene) {
+ timelines.working.items.push({id:'read-release-checks',agentSessionId:'working',kind:'tool_call',title:'Read release checklist',toolName:'Read',toolInput:JSON.stringify({file_path:path+'/release-checklist.md'}),source:'native-hook',status:'streaming',createdAt:now-1000,updatedAt:now-1000})
+ timelines.audit.items[0].content='**退款材料已复核**，原始记录保留。'
+ timelines.reading.items[0] = {...timelines.reading.items[0],kind:'user_message',content:'保留跨版本分析的原工作位置。'}
+}
 const tab=createWorkbenchTab('ordinary-tab',{regionId:'ordinary-region',workspaceId:workspace.id,kind:'agent',phase:'attached',sessionId:'working'})
 const originalTabs = [tab, ...(localTaskScene ? sessions.filter(item => item.id !== 'working').map(item => {
  const location = workspaces.find(candidate => candidate.path === item.workspacePath)
