@@ -19,7 +19,9 @@ module.exports = async ({ evaluate, size, click, pointer, capture, waitFor, pain
   // The toolbar is sticky. Scrolling its buttons into view would move the document before the user's click.
   const clickVisible = async selector => {
     const point = await evaluate(`(() => {
-      const element = ${query(selector)}, rect = element.getBoundingClientRect()
+      const element = ${query(selector)}
+      if (!element) throw new Error(${JSON.stringify('Missing target ' + selector)})
+      const rect = element.getBoundingClientRect()
       const x = rect.x + rect.width / 2, y = rect.y + rect.height / 2
       if (!element.contains(document.elementFromPoint(x, y))) throw new Error('Occluded toolbar control')
       return { x, y }
@@ -126,6 +128,17 @@ module.exports = async ({ evaluate, size, click, pointer, capture, waitFor, pain
   const before = await readOriginal()
   await pointer(query('.goals-detail__toolbar'))
   assert.equal(await evaluate(`${query(toggle)}.getClientRects().length`), 0, 'The wide layout already exposes the Supervisor')
+  const stations = await evaluate(`['.goals-detail__head', '.goals-detail__main', '.goals-detail__side'].map(selector => {
+    const { top, bottom, left, right } = document.querySelector(selector).getBoundingClientRect()
+    return { top, bottom, left, right }
+  })`)
+  const [header, work, supervisor] = stations
+  assert.ok(Math.abs(header.left - work.left) <= 2 && Math.abs(header.right - supervisor.right) <= 2, JSON.stringify(stations))
+  assert.ok(Math.abs(work.top - supervisor.top) <= 2 && header.bottom <= work.top, JSON.stringify(stations))
+  const handoff = selector => query(`[data-goal-handoff="attempt:${selector}"]`)
+  const roles = selector => evaluate(`[...${handoff(selector)}.querySelectorAll('small')].map(element => element.textContent)`)
+  assert.deepEqual(await roles('drafts'), ['Executor', 'Supervisor'])
+  assert.match(await evaluate(`${handoff('drafts')}.textContent`), /Delivery reported/)
   await capture('1600-dark-workspace', 1600)
   await holdMidpoint(menu, 'animationstart')
   await clickVisible(outline)
@@ -266,9 +279,19 @@ module.exports = async ({ evaluate, size, click, pointer, capture, waitFor, pain
   await evaluate("goalsHierarchy.seed('pending-draft')")
   const draft = await evaluate('goalsSpace.facts()')
   assert.ok(draft.draft?.title?.value)
+  await waitFor(`Boolean(${query(outline)}) && ${query(article)}.dataset.goalDetailId === ${JSON.stringify(draft.id)}`)
   await jump('overview')
   await clickVisible(toggle)
   await clickVisible(toggle)
   assert.deepEqual(await evaluate('goalsSpace.facts()'), draft)
   result.observations.push({ width: 620, reducedMotion: true, restoredScrollTop: scroll, names: destinations, preservedDraft: draft.draft.title.value })
+
+  await evaluate("goalsPlan.seed(false, true); goalsVisual.appearance('light')")
+  await waitFor(`Boolean(${handoff('drafts')})`)
+  await jump('plan')
+  await clickVisible(node('workspace') + ' button')
+  assert.deepEqual(await roles('workspace'), ['Supervisor', 'Executor'])
+  assert.match(await evaluate(`${handoff('workspace')}.textContent`), /Dispatch linked/)
+  await evaluate(`${query(article)}.scrollTop = 0`)
+  await capture('620-light-dispatch-handoff', 620)
 }

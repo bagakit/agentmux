@@ -2,6 +2,7 @@
 import { act } from 'react'
 import { expect, it, vi } from 'vitest'
 import { goalPlanState, projectGoalPlan, type GoalPlan, type GoalPlanNodeInput } from '@agentmux/demand/goal-plan'
+import type { DemandDelegation } from '@agentmux/demand/delegations'
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface'
 import type { DemandRecord } from '../src/renderer/src/lib/global-demand-board'
 import { useAppStore } from '../src/renderer/src/store'
@@ -23,7 +24,7 @@ const record: DemandRecord = {
   alignment: { revision: 1, summary: 'Trace the dependencies', openQuestions: [], criteria, confirmedAt: 1 },
   planState: goalPlanState(projectGoalPlan(plan, [], criteria))
 }
-async function board() {
+async function board(demand = record) {
   // happy-dom has no layout engine. Give each real dependency column a horizontal position.
   const measure = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     const column = this.closest<HTMLElement>('[data-goal-plan-column]')
@@ -31,7 +32,7 @@ async function board() {
     const lowerBranch = ['other', 'beta'].includes(this.dataset.goalPlanNode ?? '')
     return new DOMRect(x, lowerBranch ? 112 : 20, this.classList.contains('goal-plan__canvas') ? 1000 : 100, 60)
   })
-  useAppStore.setState({ demands: { [record.id]: record }, selectedDemandId: record.id, mainSurface: 'board' })
+  useAppStore.setState({ demands: { [demand.id]: demand }, selectedDemandId: demand.id, mainSurface: 'board' })
   await dom.render(<GlobalBoardSurface />)
   const canvas = dom.container.querySelector<HTMLElement>('[aria-label="Execution graph"]')!
   const card = (id: string) => canvas.querySelector<HTMLElement>(`[data-goal-plan-node="${id}"]`)!
@@ -40,6 +41,40 @@ async function board() {
   const reading = () => dom.container.querySelector<HTMLElement>('.goal-plan__reading h3')
   return { canvas, card, edge, head, reading, measure }
 }
+
+it('reads the original task handoff and reverses direction only for a report from its executor', async () => {
+  const attempt: DemandDelegation = {
+    operationId: 'source-attempt', sourceMessageId: 'dispatch', planNodeId: 'source', hostId: 'local',
+    workerHostId: 'worker-host', ownerAgentSessionId: 'supervisor', workerAgentSessionId: 'agent-1',
+    ownerRunId: 'manager-run', workerRunId: 'worker-run', threadId: 'execution-thread', text: 'Verify recovery',
+    alignmentRevision: 1, criterionIds: ['check'], capturedCriteria: criteria, preparedAt: 2, linkedAt: 3,
+    report: { operationId: 'delivery', replyMessageId: 'reply', authorAgentSessionId: 'agent-1', submittedAt: 4,
+      grounding: { alignmentRevision: 1, summary: 'Original workspace recovered', checks: [] } }
+  }
+  const pending: DemandDelegation = { ...attempt, operationId: 'beta-attempt', planNodeId: 'beta',
+    ownerAgentSessionId: 'previous-owner', workerAgentSessionId: 'agent-2' }
+  delete pending.report
+  delete pending.linkedAt
+  const delegations = [attempt, pending]
+  const { head } = await board({ ...record, supervisorSessionId: 'supervisor', delegations,
+    planState: goalPlanState(projectGoalPlan(plan, delegations, criteria)) })
+  const handoff = () => dom.container.querySelector('[aria-label="Task handoff"]')
+  const actors = () => [...handoff()!.querySelectorAll('.goal-plan-handoff__agent')].map(person => [
+    person.querySelector('small')?.textContent, person.querySelector('strong')?.title.split('\n')[0]
+  ])
+  expect(handoff()?.getAttribute('data-goal-handoff')).toBe('source-attempt')
+  expect(handoff()?.textContent).toContain('Delivery reported')
+  expect(actors(), 'A report travels from the original executor to the recorded task owner.').toEqual([
+    ['Executor', 'agent-1'], ['Supervisor', 'supervisor']
+  ])
+  expect(handoff()?.querySelector('strong')?.title).toContain('Host worker-host')
+  await act(async () => head('beta').click())
+  expect(handoff()?.getAttribute('data-goal-handoff')).toBe('beta-attempt')
+  expect(handoff()?.textContent).toContain('Dispatch prepared')
+  expect(actors()).toEqual([['Task owner', 'previous-owner'], ['Executor', 'agent-2']])
+  await act(async () => head('other').click())
+  expect(handoff()).toBeNull()
+})
 
 it('traces only actual ancestors and descendants of a hovered node in the mounted board', async () => {
   const { canvas, card, edge, head, reading, measure } = await board()

@@ -5,6 +5,11 @@ export default defineConfig({
   ...original,
   plugins: [...original.plugins ?? [], {
     name: 'goal-plan-path-mutation', enforce: 'pre', transform(source, id) {
+      if (process.env.GOAL_PLAN_PATH_MUTATION === 'reverse-handoff' && id.endsWith('/GoalPlanGraph.tsx')) {
+        const direction = 'reported ? [worker, owner] : [owner, worker]'
+        if (source.split(direction).length !== 2) throw Error('Expected the original task handoff.')
+        return source.replace(direction, '[owner, worker]')
+      }
       if (process.env.GOAL_PLAN_PATH_MUTATION === 'unchecked-success' && id.endsWith('/GoalPlanGraph.tsx')) {
         const unchecked = "Unverified: semanticIconComponent('status.unknown')"
         if (source.split(unchecked).length !== 2) throw Error('Expected the unchecked Goal finish glyph.')
