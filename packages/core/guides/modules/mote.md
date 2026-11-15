@@ -49,6 +49,21 @@ original records, rather than copying a whole conversation or inventing another 
 store. Unknown or missing associations stay unknown; original Sessions, drafts, workfaces
 and healthy capabilities remain available.
 
+## Publish to a built-in Group
+
+A Group has one public history. A Mote works in its own Session for that Group. Use the
+exact Group and accepted input references passed to that Session when explicitly publishing
+a public reply through `space mote group reply --input FILE|-` with
+`{groupId,operationId,inputOperationId,body}`. The original member capability and input receipt
+establish the audience. Normal Agent output remains in the work thread. Keep unrelated private
+work, other conversations and their files out of public replies. Keep the same operationId
+and original body if you need to confirm the same publication.
+
+The workspace owner can use `space mote group list`, `create`, `inspect`, `send` and `retry`.
+Group inspection reads the public stream and original member references without starting Agents.
+Send preserves the selected Motes with the original message. Retry addresses one member and
+retains the original input identity.
+
 Online status and heartbeat arrangements require actual Core facts and original receipts.
 If a heartbeat is arranged, inspect the same current role and authorized commitments before
 acting; no change may warrant silence. It grants no new permission, external message or
