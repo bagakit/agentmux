@@ -1,5 +1,5 @@
 import type { AgentTimelineItem } from './types.js'
-import { claudeToolEdit } from '@agentmux/providers/claude/tool-edit'
+import { interpretRecordedToolEdit } from '@agentmux/providers/recorded-tool-edit'
 
 /** Original requested edits, not proof that the tool applied them. */
 export type ConversationToolEdit = {
@@ -7,13 +7,10 @@ export type ConversationToolEdit = {
   edits: readonly { before?: string; after: string }[]
 }
 
-/** Interpret only the Provider recorded for this exact input field. Raw input remains authoritative. */
+/** Use only the Provider recorded for this exact input field. Raw input remains authoritative. */
 export function capturedToolEdit(item: AgentTimelineItem): ConversationToolEdit | null {
   if (item.kind !== 'tool_call' || item.toolName === undefined || item.toolInput === undefined) return null
   const inputs = item.conversation?.invocations?.filter(part => part.selector.kind === 'captured-field' && part.selector.field === 'toolInput') ?? []
   if (inputs.length !== 1) return null
-  switch (inputs[0]!.invocation.source.providerId) {
-    case 'claude': return claudeToolEdit(item.toolName, item.toolInput)
-    default: return null
-  }
+  return interpretRecordedToolEdit(inputs[0]!.invocation.source.providerId, item.toolName, item.toolInput)
 }
