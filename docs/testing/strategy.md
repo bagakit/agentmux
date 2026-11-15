@@ -153,6 +153,8 @@ Fast 与 Native 分开是为了让失败归因清晰，不允许用 Mock 代替 
 
 代表工作面 Gate 沿同一资源入口，按[产品预算](../design/behavior/settings-and-observation.md#status-bar-cpumemory-资源面板)报告当前候选。用私有产品实例恢复持久 Tabs、Regions 和后台 Run，保持一个实际可交互的活跃终端。按实际主窗口文档绑定 Renderer PID，分别在暖态和有界输出、切换活动窗口采样。回执记录实现与运行身份、机器容量、实际恢复数量、采样区间、取到的主 Renderer 工作集及预算结果。验证负载成立后才判断性能；观测缺失或机器容量不符时保留缺测范围。原轻载资源循环继续核资源释放并记录多轮增长。真实 16 GiB 设备的结果用同样条件确认。
 
+默认资源命令运行两个场景。复用当前已构建的 Desktop 单独复测代表场景时，使用 `node apps/desktop/scripts/measure-desktop-resources.mjs --representative-only`。回执标明选中的场景，代表预算和证据要求保持相同。
+
 定向成本测试固定相关操作、目标与初始状态，只扩大无关数据或消费者。按实际产品链路选用读取和编码字节、解码次数、订阅唤醒、派生、绘制或保留 owner 数量等独立判据。每项同时证明相关变化仍及时到达，原对象、操作回执及恢复语义仍成立。变异恢复全量广播、历史读取或重复处理时，同一断言须能捕获增长。缓存场景覆盖首次加载、命中、相关版本变动和释放，分别保留相应成本与恢复结果。发布验证另测同一代表负载的内存、CPU 或交互响应预算，判级沿[任务验收](#任务验收与假绿防护)。
 
 live daemon `SIGKILL` 发生在 Run 与 Attachment 仍活跃时；fixture 证明 child 消失、同 Run ID 恢复为 historical/interrupted、崩溃前 Replay marker 保留，并由 replacement daemon 的不同 instance identity 证明没有复用死亡 Owner。slow Consumer 从 byte 0 读取时得到真实 Gap，另一 fast Consumer 仍连续收到超过 4 MiB 和最终 marker。
