@@ -26,8 +26,6 @@ import { StableWorkbenchView } from './StableWorkbenchView'
 import { createRef, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { flushSync } from 'react-dom'
 import {
-  type BrowserScreenshotCapture,
-  type BrowserElementSelection,
   type BrowserSnapshot,
   type AgentSessionControl,
   type BrowserReplayPlan,
@@ -37,17 +35,9 @@ import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import { narrowBrowserOperation, narrowBrowserReplayPlan, type BrowserOperation } from '@agentmux/browser/model/browser-operation'
 import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
-import { useScreenshotPin } from '../lib/use-screenshot-pin'
 import { useBrowserAnnotationMarkers } from '../hooks/useBrowserAnnotationMarkers'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
-import {
-  formatBrowserElementContext,
-  normalizeBrowserAnnotationNote,
-  type BrowserAnnotation
-} from '../lib/browser-annotations'
-import { composeScreenshot } from './image-annotation/compose'
-import { formatScreenshotContext } from './browser-screenshot/context'
-import { ComposerTextarea } from '@agentmux/client-ui/input'
+import type { BrowserAnnotation } from '../lib/browser-annotations'
 import { BrowserOperationHistory, BrowserOperatorPresence, BrowserOperationWarning, BrowserOperationTimeline, BrowserReplayPreview, type BrowserAgentLocationChoice } from './BrowserOperationSurface'
 import { BrowserStartPage } from './BrowserStartPage'
 import { BrowserRecoverySurface } from './BrowserRecoverySurface'
@@ -65,11 +55,7 @@ import type { BrowserTaskContent } from '../../../shared/browser-task-assets'
 import { BrowserStepEvidence } from './BrowserStepEvidence'
 import { useBrowserContextualComposer } from './BrowserContextualComposer'
 import { BrowserTraceReadingHost } from './BrowserTraceReadingHost'
-import {
-  ScreenshotEditor,
-  type ScreenshotCompleteInput,
-  type ScreenshotEditorHandle
-} from './browser-screenshot/ScreenshotEditor'
+import { useBrowserCaptureTools } from './BrowserCaptureTools'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { BrowserWorkbenchSurface, WorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
@@ -94,20 +80,16 @@ import { useLauncherState } from '../lib/launcher-state'
 import { useShallow } from 'zustand/react/shallow'
 import { browserProfiles, useBrowserProfiles } from '../lib/browser-profiles'
 
-const ThemeActionAddAnnotationIcon = semanticIconComponent('action.add-annotation')
 const ThemeActionSearchIcon = semanticIconComponent('action.search')
 const ThemeActionSubmitIcon = semanticIconComponent('action.submit')
 const ThemeStatusSavedIcon = semanticIconComponent('status.saved')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
 const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
-const ThemeActionInspectIcon = semanticIconComponent('action.inspect')
-const ThemeActionCopyIcon = semanticIconComponent('action.copy')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
 const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
 const ThemeNavigationForwardIcon = semanticIconComponent('navigation.forward')
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
-const ThemeActionCaptureIcon = semanticIconComponent('action.capture')
 const ThemeObjectToolsIcon = semanticIconComponent('object.tools')
 const ThemeObjectDisplayIcon = semanticIconComponent('object.display')
 const ThemeNavigationSubmenuIcon = semanticIconComponent('navigation.submenu')
@@ -120,7 +102,6 @@ const ThemeActionAdjustIcon = semanticIconComponent('action.adjust')
 
 const NO_BROWSER_ANNOTATIONS: readonly BrowserAnnotation[] = []
 
-type BrowserIdentity = Pick<BrowserSnapshot, 'id' | 'navigationId'>
 type BookmarkSource = Pick<BrowserWorkbenchSurface, 'browserId' | 'navigationId' | 'workspaceId' | 'url' | 'title' | 'objectLink'>
 type BookmarkSave = BookmarkSource & ({ status: 'saving' } | { status: 'saved'; path: string } | { status: 'error'; message: string })
 type UnconfirmedBookmark = BookmarkSource & { path: string | null; message: string }
@@ -128,13 +109,6 @@ type UnconfirmedBookmark = BookmarkSource & { path: string | null; message: stri
 function sameBookmarkSource(source: BookmarkSource, current: BookmarkSource): boolean {
   return source.browserId === current.browserId && source.navigationId === current.navigationId &&
     source.workspaceId === current.workspaceId && source.url === current.url && source.objectLink === current.objectLink
-}
-
-export function browserCaptureMatchesIdentity(
-  capture: Pick<BrowserScreenshotCapture, 'browserId' | 'navigationId'>,
-  identity: BrowserIdentity
-): boolean {
-  return capture.browserId === identity.id && capture.navigationId === identity.navigationId
 }
 
 /** Presentation React identity follows this original Region within its navigation context and Group.
@@ -382,15 +356,6 @@ function BrowserPaneContent({
     ? primaryStage.occurrence.presentationId : windowPresentation?.occurrence.presentationId ?? selectedBrowserPresentationId(presentations, state))
   const media = useBrowserPresentationCapture(tab.browserId)
   const stageRef = useRef<HTMLDivElement>(null)
-  const screenshotToken = useRef(0)
-  const selectionToken = useRef(0)
-  const [screenshot, setScreenshot] = useState<{ kind: 'capture'; capture: BrowserScreenshotCapture; key: number; capturedAt: number } | { kind: 'open'; key: number } | null>(null)
-  const browserIdentity = useRef<BrowserIdentity>({ id: tab.browserId, navigationId: tab.navigationId })
-  if (browserIdentity.current.id !== tab.browserId || browserIdentity.current.navigationId !== tab.navigationId) {
-    browserIdentity.current = { id: tab.browserId, navigationId: tab.navigationId }
-    if (screenshot?.kind !== 'open') screenshotToken.current += 1
-    selectionToken.current += 1
-  }
   const [address, setAddress] = useState(addressDraft.current.value)
   const observedPageAddress = useRef(tab.objectLink ?? tab.url)
   observedPageAddress.current = tab.objectLink ?? tab.url
@@ -405,6 +370,13 @@ function BrowserPaneContent({
   const bookmarkRequest = useRef<BookmarkSource | null>(null)
   const inSurvey = controlPanelOpen !== undefined
   const [busy, setBusy] = useState(false)
+  const browserIdentity = useRef({ id: tab.browserId, navigationId: tab.navigationId })
+  if (browserIdentity.current.id !== tab.browserId || browserIdentity.current.navigationId !== tab.navigationId) {
+    browserIdentity.current = { id: tab.browserId, navigationId: tab.navigationId }
+  }
+  const capture = useBrowserCaptureTools(tab, browserIdentity, busy, reportError)
+  const pageToolDisabled = tab.url === 'about:blank' || busy
+  const openDevTools = () => void runCommand(async () => await api.browser.openDevTools(tab.browserId))
   const [creatingAgent, setCreatingAgent] = useState(false)
   const [handingOffAgent, setHandingOffAgent] = useState(false)
   const [handoffNotice, setHandoffNotice] = useState<string | null>(null)
@@ -619,13 +591,6 @@ function BrowserPaneContent({
       catch (cause) { setAddressError(`Private page could not open: ${presentError(cause)}. The original page and exact preparation are kept; retry here.`) }
     })
   }
-  const screenshotEditor = useRef<ScreenshotEditorHandle>(null)
-  const [screenshotBusy, setScreenshotBusy] = useState(false)
-  const [screenshotCopied, setScreenshotCopied] = useState<string | null>(null)
-  const screenshotEdited = useCallback(() => setScreenshotCopied(null), [])
-  const screenshotPin = useScreenshotPin({ pin: input => api.ui.pinScreenshot(input), inspect: operationId => api.ui.inspectScreenshotPin(operationId) })
-  const [elementSelection, setElementSelection] = useState<BrowserElementSelection | null>(null)
-  const [selectionBusy, setSelectionBusy] = useState(false)
   // 「记住」的勾选是**这一问的草稿**，不是已保存的状态——真正记住发生在主进程，由回答那一次带过去。
   // 留在渲染进程做本地 state 而不是读 config：读 config 会让这个勾选看起来像已生效的设置。
   const [rememberAppLink, setRememberAppLink] = useState(false)
@@ -669,7 +634,6 @@ function BrowserPaneContent({
     return () => { current = false }
   }, [recoveryVisible, previewKey, tab.browserId])
   const currentRecoveryPreview = recoveryPreview?.key === previewKey ? recoveryPreview.result : undefined
-  const [annotationNote, setAnnotationNote] = useState('')
   const [replayPlan, setReplayPlan] = useState<BrowserReplayPlan | null>(null)
   const [replayBusy, setReplayBusy] = useState(false)
   const [replayOutcome, setReplayOutcome] = useState<BrowserScriptRunReport['outcome'] | undefined>()
@@ -696,7 +660,6 @@ function BrowserPaneContent({
   const taskRequest = useRef(0)
   const taskReliabilityRefresh = useBrowserTaskReliabilityRefresh(tab.browserId)
   const annotations = useAppStore((state) => state.browserAnnotationsByBrowserId[tab.browserId]) ?? NO_BROWSER_ANNOTATIONS
-  const addBrowserAnnotation = useAppStore((state) => state.addBrowserAnnotation)
 
   useEffect(() => {
     if (addressBrowser.current !== tab.browserId || !addressDraftEdited.current) {
@@ -725,20 +688,6 @@ function BrowserPaneContent({
     setSelectedTaskAssetId(null)
     setTaskAssetReview(null)
   }, [tab.browserId])
-
-  useEffect(() => () => {
-    screenshotToken.current += 1
-    selectionToken.current += 1
-    void api.browser.cancelElementSelection(tab.browserId).catch(() => {})
-  }, [])
-
-  useEffect(() => {
-    if (screenshot?.kind !== 'open') { setScreenshot(null); setScreenshotBusy(false) }
-    setElementSelection(null)
-    setAnnotationNote('')
-    setSelectionBusy(false)
-    void api.browser.cancelElementSelection(tab.browserId).catch(() => {})
-  }, [tab.browserId, tab.navigationId])
 
   const annotationOwnerPresent = useCallback(() => nativeLifecycleRef.current === 'present', [])
   const annotationSync = useBrowserAnnotationMarkers({
@@ -840,133 +789,6 @@ function BrowserPaneContent({
   async function takeBrowserControl(): Promise<void> {
     try { await api.browser.takeControl(tab.browserId) }
     catch (error) { reportError(error) }
-  }
-
-  async function beginScreenshot(): Promise<void> {
-    if (elementSelection || selectionBusy || screenshot || screenshotBusy || busy || tab.url === 'about:blank') return
-    const token = ++screenshotToken.current
-    setScreenshotCopied(null)
-    setScreenshotBusy(true)
-    try {
-      const capturedAt = Date.now(), captured = await api.browser.captureScreenshot(tab.browserId)
-      if (screenshotToken.current !== token) return
-      if (!browserCaptureMatchesIdentity(captured, browserIdentity.current)) {
-        throw new Error('Browser page changed before the screenshot editor opened')
-      }
-      setScreenshot({ kind: 'capture', capture: captured, key: token, capturedAt })
-    } catch (error) {
-      if (screenshotToken.current === token) reportError(error)
-    } finally {
-      if (screenshotToken.current === token) setScreenshotBusy(false)
-    }
-  }
-
-  async function beginElementSelection(): Promise<void> {
-    if (selectionBusy || screenshot || screenshotBusy || busy || tab.url === 'about:blank') return
-    const token = ++selectionToken.current
-    setElementSelection(null)
-    setAnnotationNote('')
-    setSelectionBusy(true)
-    try {
-      const selected = await api.browser.selectElement(tab.browserId)
-      if (selectionToken.current !== token || !selected) return
-      if (!browserCaptureMatchesIdentity(selected, browserIdentity.current)) {
-        throw new Error('Browser page changed before the element selection was delivered')
-      }
-      setElementSelection(selected)
-    } catch (error) {
-      if (selectionToken.current === token) reportError(error)
-    } finally {
-      if (selectionToken.current === token) setSelectionBusy(false)
-    }
-  }
-
-  function cancelElementSelection(): void {
-    selectionToken.current += 1
-    setSelectionBusy(false)
-    setElementSelection(null)
-    setAnnotationNote('')
-    void api.browser.cancelElementSelection(tab.browserId).catch(reportError)
-  }
-
-  async function copyElementContext(): Promise<void> {
-    if (!elementSelection) return
-    // 成功才收起选区：复制失败要把选区留着让用户重试，而不是既没进剪贴板又丢了选中目标。
-    if (await copyTextToClipboard(formatBrowserElementContext(elementSelection), reportError)) {
-      cancelElementSelection()
-    }
-  }
-
-  function addElementAnnotation(): void {
-    if (!elementSelection) return
-    addBrowserAnnotation({
-      id: mintObjectId(),
-      workspaceId: tab.workspaceId,
-      browserId: tab.browserId,
-      navigationId: tab.navigationId,
-      selection: elementSelection,
-      note: normalizeBrowserAnnotationNote(annotationNote)
-    })
-    cancelElementSelection()
-  }
-
-  function cancelScreenshot(): void {
-    screenshotToken.current += 1
-    setScreenshotBusy(false)
-    setScreenshot(null)
-    setScreenshotCopied(null)
-  }
-
-  // Resolves true only when the clipboard, file or pin owner confirms this exact output.
-  async function copyScreenshot(input: ScreenshotCompleteInput, kind: 'png' | 'context' | 'save-png' | 'pin' = 'png'): Promise<boolean> {
-    if (!screenshot || screenshotBusy) return false
-    const token = screenshotToken.current
-    setScreenshotBusy(true)
-    setScreenshotCopied(null)
-    try {
-      const image = await composeScreenshot({
-        image: input.image,
-        displayWidth: input.displayWidth,
-        displayHeight: input.displayHeight,
-        outputScale: 1,
-        shapes: input.shapes,
-        crop: input.crop
-      })
-      if (screenshotToken.current !== token) return false
-      let feedback = kind === 'png' ? 'PNG copied' : 'Context copied'
-      if (kind === 'save-png') {
-        const result = await api.ui.exportScreenshot({ image, capturedAt: screenshot.kind === 'capture' ? screenshot.capturedAt : Date.now() })
-        if (result.status === 'cancelled') return false
-        if (result.status !== 'saved') throw new Error(result.message)
-        feedback = 'PNG saved · ' + result.path
-      } else if (kind === 'pin') {
-        const result = await screenshotPin.pin(image)
-        if (result.recordedOperation?.state !== 'completed') throw new Error(result.recordedOperation?.message ?? 'The original pin is unconfirmed. Inspect that operation before another pin.')
-        feedback = result.state === 'open' ? 'Reference pinned' : 'Pinned reference closed'
-      } else if (kind === 'png') await api.ui.writeClipboardImage(image)
-      else if (!await copyTextToClipboard(formatScreenshotContext(input.capture, input, image, input.source), error => { if (screenshotToken.current === token) reportError(error) })) return false
-      if (screenshotToken.current !== token) return false
-      setScreenshotCopied(feedback)
-      return true
-    } catch (error) {
-      if (screenshotToken.current === token) reportError(error)
-      return false
-    } finally {
-      if (screenshotToken.current === token) setScreenshotBusy(false)
-    }
-  }
-
-  async function checkScreenshotPin(): Promise<void> {
-    if (screenshotBusy) return
-    const token = screenshotToken.current
-    setScreenshotBusy(true)
-    try {
-      const result = await screenshotPin.checkPin()
-      if (screenshotToken.current !== token || !result) return
-      if (result.recordedOperation?.state === 'completed') setScreenshotCopied(result.state === 'open' ? 'Original reference pinned' : 'Original pinned reference closed')
-      else reportError(new Error(result.recordedOperation?.message ?? 'The original pin did not complete. Your image is kept.'))
-    } catch (cause) { if (screenshotToken.current === token) reportError(cause) }
-    finally { if (screenshotToken.current === token) setScreenshotBusy(false) }
   }
 
   async function loadOperationHistory(): Promise<void> {
@@ -1125,11 +947,6 @@ function BrowserPaneContent({
   // operation after the user selects another record; the timeline and warning must share one identity.
   const timelineWarning = timelineOperation?.id === tab.activity?.operation?.id ? tab.activity?.warning : undefined
 
-  const selectElementDisabled = tab.url === 'about:blank' || busy || screenshotBusy || screenshot !== null || elementSelection !== null
-  const screenshotDisabled = tab.url === 'about:blank' || busy || screenshotBusy || screenshot !== null || selectionBusy || elementSelection !== null
-  const pageToolDisabled = tab.url === 'about:blank' || busy
-  const selectElement = () => selectionBusy ? cancelElementSelection() : void beginElementSelection()
-  const openDevTools = () => void runCommand(async () => await api.browser.openDevTools(tab.browserId))
   async function saveBookmark(): Promise<void> {
     // Only this original page's duplicate save waits. File I/O never owns navigation or page tools.
     if (busy || bookmarkRequest.current && sameBookmarkSource(bookmarkRequest.current, tab)) return
@@ -1238,29 +1055,12 @@ function BrowserPaneContent({
         onSelect: () => onRegionSplit(action.direction) }))}
       Item={DropdownMenu.Item} Group={DropdownMenu.Group} Label={DropdownMenu.Label} /> : null
     const connectionUnavailable = released || restoring || tab.nativeOwnerDeferred || tab.nativeOwnerUnavailable || restoreError !== null
-    const blocked = connectionUnavailable || screenshot !== null || elementSelection !== null || Boolean(tab.error) || Boolean(tab.certificateRequest) || tab.appLinkPrompt !== null || tab.url === 'about:blank' ||
+    const blocked = connectionUnavailable || capture.screenshotOpen || capture.selectionOpen || Boolean(tab.error) || Boolean(tab.certificateRequest) || tab.appLinkPrompt !== null || tab.url === 'about:blank' ||
       Boolean((stagePresentation?.target.controlsOpen ?? controlPanelOpen ?? toolsOpen) && window.innerWidth <= (inSurvey ? 1100 : 900))
     const stageContent = <>
 
-        {screenshot ? (
-          <ScreenshotEditor
-            ref={screenshotEditor}
-            key={screenshot.key}
-            {...(screenshot.kind === 'capture' ? { capture: screenshot.capture } : {})}
-            workspaceId={tab.workspaceId}
-            active={visible}
-            busy={screenshotBusy}
-            copied={screenshotCopied}
-            onCancel={cancelScreenshot}
-            onComplete={(input) => copyScreenshot(input)}
-            onCopyContext={(input) => copyScreenshot(input, 'context')}
-            onSavePng={(input) => copyScreenshot(input, 'save-png')}
-            onPin={(input) => copyScreenshot(input, 'pin')}
-            {...(screenshotPin.uncertain ? { onCheckPin: () => void checkScreenshotPin() } : {})}
-            onEdited={screenshotEdited}
-            onOriginalOpened={() => setScreenshot(current => current ? { kind: 'open', key: current.key } : null)}
-            onError={reportError}
-          /> ) : connectionUnavailable ? <BrowserRecoverySurface visible={visible}
+        {capture.screenshotOpen ? (
+          capture.screenshotView(visible) ) : connectionUnavailable ? <BrowserRecoverySurface visible={visible}
           url={tab.url} objectLink={tab.objectLink} title={tab.title} faviconDataUrl={tab.faviconDataUrl}
           preview={currentRecoveryPreview}
           heading={restoring ? 'Restoring browser' : restoreError ? 'Browser connection needs attention' : 'Browser parked'}
@@ -1278,30 +1078,8 @@ function BrowserPaneContent({
               requestId: request.requestId, navigationId: request.navigationId, fingerprint: request.fingerprint, allow
             })
             applyBrowserEvent({ type: 'updated', browser })
-          }} /> : elementSelection ? (
-          <section className="browser-selection-result" aria-label="Selected element context">
-            <header><ThemeActionInspectIcon size={17} /><span><strong>{elementSelection.accessibleName || `<${elementSelection.tagName}>`}</strong><small>{elementSelection.pageTitle || elementSelection.pageUrl}</small></span></header>
-            <dl>
-              <div><dt>Element</dt><dd>{`<${elementSelection.tagName}>${elementSelection.role ? ` · ${elementSelection.role}` : ''}`}</dd></div>
-              <div><dt>Selector</dt><dd>{elementSelection.selector || 'No stable selector'}</dd></div>
-              <div><dt>Text</dt><dd>{elementSelection.text || 'No visible text'}</dd></div>
-            </dl>
-            <label>
-              <span>Annotation note</span>
-              <ComposerTextarea
-                aria-label="Annotation note"
-                value={annotationNote}
-                maxLength={1_000}
-                placeholder="What should the Agent notice about this element?"
-                onValueChange={setAnnotationNote}
-              />
-            </label>
-            <footer>
-              <Button type="button" onClick={cancelElementSelection}>Cancel</Button>
-              <Button type="button" onClick={() => void copyElementContext()}><ThemeActionCopyIcon size={12} /> Copy context</Button>
-              <Button variant="primary" type="button" onClick={addElementAnnotation}><ThemeActionAddAnnotationIcon size={12} /> Add annotation</Button>
-            </footer>
-          </section>
+          }} /> : capture.selectionOpen ? (
+          capture.selectionView
         ) : tab.appLinkPrompt ? (
           <div className="pane-state browser-app-link-prompt">
             <ThemeActionOpenExternalIcon size={20} />
@@ -1443,30 +1221,7 @@ function BrowserPaneContent({
         />
         <button type="button" className="browser-toolbar__discussion" ref={visible ? discussion.buttonRef : undefined} aria-label="Message Browser operator"
           title="Send an opinion to the original Agent" onClick={event => { discussionOrigin.current = key; discussion.open(event.currentTarget, undefined, traceAnchors.current.get(key)) }}>{discussion.button}</button>
-        {toolbar?.selectElement ? (
-          <button
-            type="button"
-            className="browser-toolbar__secondary browser-toolbar__priority-tool"
-            aria-label={selectionBusy ? 'Cancel element selection' : 'Select element'}
-            title={selectionBusy ? 'Cancel element selection' : 'Select an element for context or annotation'}
-            disabled={selectElementDisabled}
-            onClick={selectElement}
-          >
-            {selectionBusy ? <ThemeStatusLoadingIcon animation="spin" size={14} /> : <ThemeActionInspectIcon size={14} />}
-          </button>
-        ) : null}
-        {toolbar?.screenshot ? (
-          <button
-            type="button"
-            className="browser-toolbar__secondary browser-toolbar__priority-tool"
-            aria-label="Screenshot"
-            title="Capture and mark up this viewport"
-            disabled={screenshotDisabled}
-            onClick={() => void beginScreenshot()}
-          >
-            {screenshotBusy && !screenshot ? <ThemeStatusLoadingIcon animation="spin" size={14} /> : <ThemeActionCaptureIcon size={14} />}
-          </button>
-        ) : null}
+        {capture.toolbarActions(toolbar)}
         {toolbar?.devTools ? (
           <button
             type="button"
@@ -1565,16 +1320,7 @@ function BrowserPaneContent({
                 <DropdownMenu.Item className="browser-menu__item" aria-label="Open human demonstration draft" onSelect={() => openOperationTimeline(key)}>
                   <ThemeObjectHistoryIcon size={12} /><span>Demonstration</span>
                 </DropdownMenu.Item>
-                {toolbar?.selectElement ? <DropdownMenu.Item className="browser-menu__item" aria-label={selectionBusy ? 'Cancel element selection' : 'Select element'} disabled={selectElementDisabled} onSelect={selectElement}>
-                  <ThemeActionInspectIcon size={12} /><span>{selectionBusy ? 'Cancel element selection' : 'Select element'}</span>
-                </DropdownMenu.Item> : null}
-                {toolbar?.screenshot ? <DropdownMenu.Item className="browser-menu__item" aria-label="Screenshot" disabled={screenshotDisabled} onSelect={() => void beginScreenshot()}>
-                  <ThemeActionCaptureIcon size={12} /><span>Screenshot</span>
-                </DropdownMenu.Item> : null}
-                {toolbar?.screenshot ? <DropdownMenu.Item className="browser-menu__item" aria-label="Open annotation original" disabled={screenshotBusy || selectionBusy || elementSelection !== null}
-                  onSelect={() => { if (screenshot) screenshotEditor.current?.openOriginal(); else { const key = ++screenshotToken.current; setScreenshotCopied(null); setScreenshot({ kind: 'open', key }) } }}>
-                  <ThemeActionOpenExternalIcon size={12} /><span>Open annotation original…</span>
-                </DropdownMenu.Item> : null}
+                {capture.menuActions(toolbar)}
                 {toolbar?.devTools ? <DropdownMenu.Item className="browser-menu__item" aria-label="Open DevTools" disabled={pageToolDisabled} onSelect={openDevTools}>
                   <ThemeObjectToolsIcon size={12} /><span>Open DevTools</span>
                 </DropdownMenu.Item> : null}
