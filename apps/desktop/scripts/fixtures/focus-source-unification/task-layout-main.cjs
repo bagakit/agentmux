@@ -28,6 +28,19 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
   const motion = value => win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', {
     features: [{name:'prefers-reduced-motion',value}],
   })
+  const watchDisclosure = (selector, eventName) => read(`document.querySelector(${JSON.stringify(selector)}).addEventListener(${JSON.stringify(eventName)}, event => {
+    if (event.currentTarget !== event.target) return
+    for (const animation of event.target.getAnimations()) {
+      animation.pause()
+      animation.currentTime = animation.effect.getTiming().duration * 0.2
+    }
+  }, {once:true})`)
+  const disclosureFrame = selector => read(`(() => {
+    const node = document.querySelector(${JSON.stringify(selector)})
+    const animation = node?.getAnimations().find(item => (item.transitionProperty === 'opacity' || item.animationName === 'focus-detail-reveal') && item.playState === 'paused')
+    return animation ? { duration: animation.effect.getTiming().duration, opacity: Number(getComputedStyle(node).opacity) } : null
+  })()`)
+  const playAnimations = expression => read(`Promise.allSettled((${expression}).getAnimations().map(animation => {animation.play(); return animation.finished}))`)
   const movePointer = async selector => {
     const point = await read(`(() => {
       const rect = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect()
@@ -61,6 +74,7 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
         emphasis: summary.querySelector('.markdown-excerpt strong')?.textContent } : null,
       titleTop: title?.getBoundingClientRect().top,
       hasDetail: visible(detail),
+      explanation: detail?.querySelector('.focus-task-list__explanation')?.textContent,
       mark: button.querySelector('[data-focus-state-icon]')?.dataset.focusStateIcon,
       bucket: button.dataset.bucket,
       activity: button.dataset.activity,
@@ -155,8 +169,9 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
   }
   result.subagents = { initial: summary, differentRun: 'excluded', differentNativeSession: 'excluded' }
   await frame('list-dark', 'Compact project rows at desktop width')
-  await read(`document.querySelector(${JSON.stringify(first)}).addEventListener('transitionrun', event => {
-    if (event.propertyName !== 'background-color') return
+  const firstRow = `document.querySelector(${JSON.stringify(first)}).closest('[data-focus-card-key]')`
+  await read(`${firstRow}.addEventListener('transitionrun', event => {
+    if (event.target !== event.currentTarget || event.propertyName !== 'background-color') return
     const animation = event.target.getAnimations().find(item => item.transitionProperty === 'background-color')
     if (animation) {
       animation.pause()
@@ -164,18 +179,26 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
     }
   }, {once:true})`)
   const originalY = await read(`document.querySelector(${JSON.stringify(first)}).getBoundingClientRect().top`)
+  const originalTag = await read(`${firstRow}.querySelector('[data-focus-zone-footer]').getBoundingClientRect().x`)
   await movePointer(first)
-  await until('row color transition in flight', () => read(`document.querySelector(${JSON.stringify(first)}).getAnimations().some(item => item.playState === 'paused' && item.transitionProperty === 'background-color')`))
+  await until('row color transition in flight', () => read(`${firstRow}.getAnimations().some(item => item.playState === 'paused' && item.transitionProperty === 'background-color')`))
   assert.equal(await read(`document.querySelector(${JSON.stringify(first)}).getBoundingClientRect().top`), originalY, 'Pointer feedback leaves the original task position stable')
+  assert.equal(await read(`${firstRow}.querySelector('[data-focus-zone-footer]').getBoundingClientRect().x`), originalTag)
   await frame('row-hover-transition', 'Actual List row hover halfway through its background-color transition')
+  await playAnimations(firstRow)
+  const press = await read(`(() => {const {x,y,width,height} = document.querySelector(${JSON.stringify(first)}).getBoundingClientRect(); return {x:x+width/2,y:y+height/2}})()`)
+  await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mousePressed',...press,button:'left',clickCount:1})
+  assert.ok(await read(`${firstRow}.matches(':active') && getComputedStyle(${firstRow}).transitionDuration==='0.08s'`))
   await movePointer(trigger)
-  await read(`Promise.allSettled(document.querySelector(${JSON.stringify(first)}).getAnimations().map(animation => {animation.play(); return animation.finished}))`)
+  await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseReleased',x:1,y:1,button:'left',clickCount:1})
+  assert.equal(await read(`${firstRow}.matches(':active')`), false)
   result.refinement.hoverStable = true
+  result.refinement.pressResponds = true
 
   const resultSelector = JSON.stringify(task('audit'))
   await read(`document.querySelector(${resultSelector}).scrollIntoView({block:'center'})`)
   await until('the visible result mounts its original recap', () => read(`document.querySelector(${resultSelector})?.closest('[data-focus-card-key]').dataset.focusCardBody === 'mounted'`))
-  const [resultRow, recoveryRow, staleRow, withoutRoster] = await Promise.all(['audit','interrupted','reading','coverage'].map(rowFacts))
+  const [resultRow, recoveryRow, staleRow, withoutRoster, unseen] = await Promise.all(['audit','interrupted','reading','coverage','unobserved-run'].map(rowFacts))
   assert.equal(resultRow.bucket, 'results')
   assert.equal(resultRow.activity, 'unknown', 'The completed Result has separate unconfirmed child activity')
   assert.equal(resultRow.status, null, 'A completed Result cannot grow a second line for Idle')
@@ -190,21 +213,46 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
   assert.match(staleRow.accessibleDescription, /Last confirmed working/)
   assert.equal(staleRow.hasDetail, false, 'An expired activity observation stays on one line')
   assert.equal(withoutRoster.subagents, null, 'A missing roster does not claim any child state')
-  assert.match(recoveryRow.status, /Interrupted/)
+  assert.equal(recoveryRow.hasDetail, false, 'A confirmed interruption stays on one line')
+  assert.equal(recoveryRow.summary?.text, 'Interrupted')
+  assert.equal(recoveryRow.height, ordinary.height)
+  assert.match(recoveryRow.accessibleDescription, /The Runtime restarted and interrupted this Run/)
+  assert.match(unseen.status, /Run not observed/)
+  assert.equal(unseen.hasDetail, true)
+  assert.equal(unseen.explanation, 'The original Run observation is unavailable.')
   result.refinement.resultRow = resultRow
   result.refinement.recoveryRow = recoveryRow
+  result.refinement.unobservedRow = unseen
   result.refinement.staleRow = staleRow
   await settle()
   await frame('list-results-dark', 'Results stay single-line with the rest of the Focus list')
+  const recovery = JSON.stringify(task('interrupted'))
+  await read(`document.querySelector(${recovery}).scrollIntoView({block:'center'}); document.querySelector(${recovery}).focus()`)
+  await frame('recovery-compact-wide', 'Confirmed interruption is inline; original unknown Run retains detail')
+  await key(' ', 'Space', 32)
+  await until('the original recovery reason opens in Quick Look', () => read(`document.querySelector('.agent-information-reader__service')?.textContent.includes('The Runtime restarted and interrupted this Run.')`))
+  await frame('recovery-quick-look', 'Keyboard Quick Look reads the original recovery reason')
+  await key('Escape', 'Escape', 27)
+  await until('closing the reason returns to its original interrupted row', () => read(`document.activeElement===document.querySelector(${recovery}) && !document.querySelector('.agent-information-reader')`))
   await read(`document.querySelector(${JSON.stringify(historyToggle)}).scrollIntoView({block:'center'})`)
   result.projectHistory = { initial: await history() }
   await frame('history-folded-wide', 'The original project has only the folded History count')
+  const historyContent = '.focus-project-history__content'
+  await watchDisclosure(historyContent, 'transitionrun')
   await click(historyToggle)
   await until('the original saved task is visible in the open project History', async () => (await history()).saved)
   result.projectHistory.opened = await history()
   await read(`document.querySelector('[data-project-history] [role="list"]').lastElementChild.scrollIntoView({block:'end'})`)
   await settle()
+  result.projectHistory.move = await disclosureFrame(historyContent)
+  assert.ok(result.projectHistory.move?.opacity < 1, 'History content visibly enters after the original explicit click')
+  await frame('history-opening', 'Opening frame of the original history disclosure')
+  await playAnimations(`document.querySelector(${JSON.stringify(historyContent)})`)
   await frame('history-open-wide', 'Explicitly opening History reveals the original saved tasks')
+  await read(`document.querySelector(${JSON.stringify(historyToggle)}).blur(); document.querySelector(${JSON.stringify(historyToggle)}).focus()`)
+  await settle()
+  assert.equal(await read(`document.querySelector(${JSON.stringify(historyContent)}).getAnimations().length`), 0, 'Refocusing open History does not restart the transition')
+  result.projectHistory.refocusQuiet = true
   await click(historyToggle)
   assert.equal((await history()).saved, false)
   await read('document.querySelector(".focus-project-lanes__rows").scrollTop = 0')
@@ -222,12 +270,22 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
   })()`)
   assert.equal(result.projectHistory.narrowArrangeVisible, true, 'Arrange stays in reach at the narrow viewport')
   await frame('list-narrow-light', 'Light 420px scan in reduced motion')
+  await read(`document.querySelector(${recovery}).scrollIntoView({block:'center'})`)
+  await frame('recovery-compact-narrow', 'Confirmed interruption at 420px with reduced motion')
+  await click(historyToggle)
+  assert.ok((await history()).saved)
+  await settle()
+  assert.equal(await read(`document.querySelector(${JSON.stringify(historyContent)}).getAnimations().length`), 0)
+  result.projectHistory.reducedMotion = true
+  await click(historyToggle)
+  await read('document.querySelector(".focus-project-lanes__rows").scrollTop = 0')
   await layouts.open()
   await layouts.checked('list')
   await frame('layout-menu-420', 'At 420 px the layout menu lists two choices and checks Compact list')
   await key('Escape', 'Escape', 27)
   await layouts.close()
   win.setContentSize(1440, 900)
+  await motion('no-preference')
   await settle()
   await read('document.querySelector(' + JSON.stringify(first) + ').focus()')
   await key('ArrowDown', 'ArrowDown', 40)
@@ -240,6 +298,7 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
   await until('Space opens the original reader', () => read('!!document.querySelector(".agent-information-reader")'))
   const details = '.agent-information-reader details.agent-subagent-details'
   await until('Quick Look contains the parent’s subagent disclosure', () => read(`Boolean(document.querySelector(${JSON.stringify(details + ' > summary')}))`))
+  await watchDisclosure(details + ' > ul', 'animationstart')
   await click(details + ' > summary')
   const childRows = () => read(`Array.from(document.querySelectorAll(${JSON.stringify(details + '[open] [data-subagent-id]')})).map(item => ({id: item.dataset.subagentId, state: item.dataset.subagentState, label: item.textContent.trim()}))`)
   const expectedChildren = new Map([
@@ -258,6 +317,11 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
   }
   assert.equal(await read(`Boolean(document.querySelector(${JSON.stringify(details + ' [data-subagent-id] button, ' + details + ' [data-subagent-id] a')}))`), false)
   result.subagents.details = children
+  await settle()
+  result.subagents.move = await disclosureFrame(details + ' > ul')
+  assert.ok(result.subagents.move?.opacity < 1, 'The original subagent disclosure has a visible entry')
+  await frame('subagents-opening', 'Opening frame of the original Agent subagent disclosure')
+  await playAnimations(`document.querySelector(${JSON.stringify(details + ' > ul')})`)
   await frame('quick-look-subagents', 'Original Agent Quick Look expands the read-only subagent states')
   await read('window.taskLayoutProof.settleChild()')
   await until('open Quick Look reflects the original child completion', async () =>

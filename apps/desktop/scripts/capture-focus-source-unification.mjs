@@ -16,7 +16,7 @@ const taskLayout=process.argv[4]==='--task-layout',inlineRename=process.argv[4]=
 const agentPins=process.argv[4]==='--agent-pins', pinMutation=process.env.AGENTMUX_FOCUS_PIN_MUTATION
 assert.ok(!agentPins || !pinMutation || pinMutation==='unqualified-sid','Known Focus Agent pin mutation')
 const layoutMutation=process.env.AGENTMUX_FOCUS_LAYOUT_MUTATION
-assert.ok(!taskLayout || !layoutMutation || ['omit-layout','hide-mandatory','repeat-result-idle','unqualified-subagents','omit-row-summary'].includes(layoutMutation),'Known Focus task layout mutation')
+assert.ok(!taskLayout || !layoutMutation || ['omit-layout','hide-mandatory','repeat-result-idle','unqualified-subagents','omit-row-summary','expand-known-recovery','omit-detail-motion'].includes(layoutMutation),'Known Focus task layout mutation')
 const sourceConnection=process.argv[4]==='--source-connection'
 const takeoverFeedback=process.argv[4]==='--takeover-feedback',sourceRecovery=process.argv[4]==='--source-recovery',primaryOnly=process.argv[4]==='--primary-only',memberState=process.argv[4]==='--member-state',unconfirmed=process.argv[4]==='--unconfirmed'||sourceRecovery
 const sourceOnly=taskLayout||inlineRename||agentPins||sourceRecovery||takeoverFeedback||sourceConnection
@@ -75,10 +75,10 @@ try{
     builder.onLoad({filter:/\.[cm]?[jt]sx?$/},async({path})=>{
     if(!path.startsWith(root+'/')||path.includes('/node_modules/'))return
     const source=await readFile(path,'utf8');inputs.set(path,hash(source));const component=path.slice(path.lastIndexOf('/')+1)
-    if(taskLayout && ['hide-mandatory','repeat-result-idle','omit-row-summary'].includes(layoutMutation) && component==='FocusTaskListContent.tsx'){
-      const target=layoutMutation==='omit-row-summary'?'const work = listWorkDetail(context)':"const showStatus = context.bucket !== 'results' && !inlineObservation && mandatoryAgentContextDetails(context, 'card')"
+    if(taskLayout && ['hide-mandatory','repeat-result-idle','omit-row-summary','expand-known-recovery'].includes(layoutMutation) && component==='FocusTaskListContent.tsx'){
+      const target=layoutMutation==='omit-row-summary'?'const work = listWorkDetail(context)':layoutMutation==='expand-known-recovery'?"const inlineRecovery = context.bucket === 'idle' && context.processState === 'interrupted'":"const showStatus = context.bucket !== 'results' && !inlineStatus && mandatoryAgentContextDetails(context, 'card')"
       assert.equal(source.split(target).length,2,'One owning task row visibility decision')
-      const replacement=layoutMutation==='omit-row-summary'?'const work = undefined':layoutMutation==='hide-mandatory'?'const showStatus = false':"const showStatus = !inlineObservation && mandatoryAgentContextDetails(context, 'card')"
+      const replacement=layoutMutation==='omit-row-summary'?'const work = undefined':layoutMutation==='expand-known-recovery'?'const inlineRecovery = false':layoutMutation==='hide-mandatory'?'const showStatus = false':"const showStatus = !inlineStatus && mandatoryAgentContextDetails(context, 'card')"
       const code=source.replace(target,replacement)
       transformations.push({path:relative(root,path),mutation:layoutMutation,sourceSHA256:hash(source),loadedSHA256:hash(code)})
       return {contents:code,loader:'tsx'}
@@ -138,7 +138,18 @@ try{
       return{contents:code,loader:'js'}
     }
     return{contents:source,loader:path.endsWith('tsx')?'tsx':path.endsWith('ts')?'ts':'js'}
-  });builder.onLoad({filter:/\.css$/},async({path})=>{if(!path.startsWith(root+'/')||path.includes('/node_modules/'))return;const source=await readFile(path,'utf8');inputs.set(path,hash(source));return{contents:source,loader:'css'}})}}
+  });builder.onLoad({filter:/\.css$/},async({path})=>{
+    if(!path.startsWith(root+'/')||path.includes('/node_modules/'))return
+    const source=await readFile(path,'utf8'); inputs.set(path,hash(source))
+    if(taskLayout && layoutMutation==='omit-detail-motion' && path.endsWith('/styles/focus.css')){
+      const target='transition: opacity 180ms var(--ease-enter), transform 180ms var(--ease-enter);'
+      assert.equal(source.split(target).length,2,'One actual Focus History disclosure transition')
+      const code=source.replace(target,'transition: none;')
+      transformations.push({path:relative(root,path),mutation:layoutMutation,sourceSHA256:hash(source),loadedSHA256:hash(code)})
+      return{contents:code,loader:'css'}
+    }
+    return{contents:source,loader:'css'}
+  })}}
   for(const file of ['main.cjs','entry.mjs',...(taskLayout||inlineRename||agentPins?['task-layout-controls.cjs']:[]),...(agentPins?['agent-pins.cjs']:[]),...(taskLayout?['task-layout-main.cjs']:[]),...(inlineRename?['inline-rename.mjs','inline-rename-main.cjs']:[]),...(takeoverFeedback?['feedback.mjs','feedback-main.cjs']:[]),...(sourceConnection?['connection.mjs','connection-main.cjs']:[])])inputs.set(join(fixture,file),hash(await readFile(join(fixture,file))))
   inputs.set(mainFixture,hash(await readFile(mainFixture)))
   inputs.set(new URL(import.meta.url).pathname,hash(await readFile(new URL(import.meta.url))))

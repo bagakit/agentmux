@@ -31,6 +31,13 @@ const branches = localTaskScene ? [
 const workspaces = [workspace, ...branches.map(branch => branch.workspace)]
 const definitions=[['working','核对发布版本与业务数据','working','running',now],['reading','核查跨版本分析记录','working','running',now-20*60000],['interrupted','继续上次保留的分析任务','disconnected','interrupted',now]]
 const sessions=definitions.map(([id,label,state,processState,at])=>({...agent,id,hostId:'local',workspacePath:path,label,processState,status:{state,source:'native-hook',observedAt:at},semanticStatus:{state:'working',source:'native-hook',observedAt:at,stateEnteredAt:at},control:{...agent.control,hostId:'local',agentSessionId:id,run:{runId:'original-run-'+id}}}))
+if (window.__taskLayoutScene) {
+ const interrupted = sessions.find(item => item.id === 'interrupted')
+ interrupted.status.detail = 'The Runtime restarted and interrupted this Run.'
+ sessions.push({...interrupted, id:'unobserved-run', label:'检查保留的原始运行', runUnobserved:true,
+  status:{...interrupted.status, detail:'The original Run observation is unavailable.'},
+  control:{...interrupted.control,agentSessionId:'unobserved-run',run:{runId:'original-run-unobserved'}}})
+}
 if(localTaskScene){
  for (const [index, {workspace: checkout, taskId}] of branches.entries()) {
   const observedAt = now + index - 1000
