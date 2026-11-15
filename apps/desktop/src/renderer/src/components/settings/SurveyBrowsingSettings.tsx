@@ -21,7 +21,7 @@ export function SurveyBrowsingSettings({ preferences, onSave }: {
   }
 
   return <section className="settings-group settings-survey-browsing" aria-label="Survey browsing">
-    <header><span>Browsing</span></header>
+    <header><span>Saved webpages</span></header>
     <label className="settings-survey-browsing__reuse" data-settings-field="reuse-open-pages">
       <span>Switch to an already open page
         <small>Matches the full link in the same browser environment.</small></span>

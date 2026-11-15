@@ -1,17 +1,29 @@
 .settings-browser { container: browser-settings / inline-size; }
-.settings-browser__preferences { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); }
-.settings-browser__preferences > .settings-group { display: grid; grid-template-columns: minmax(120px, .7fr) minmax(0, 2fr); gap: var(--sp-2) var(--sp-6); align-items: start; min-width: 0; margin: 0; padding: var(--sp-5); border: 0; border-radius: 0; background: transparent; }
-.settings-browser__preferences > .settings-group + .settings-group { border-top: 1px solid var(--line-soft); }
-.settings-browser .settings-browser__preferences header { display: flex; grid-column: 1; grid-row: 1 / span 3; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: var(--sp-2); margin: 0; padding: 0; text-align: left; }
-.settings-browser__preferences header small { max-width: 100%; padding: 2px var(--sp-2); border-radius: var(--radius-sm); background: var(--wash-1); color: var(--text-3); overflow-wrap: anywhere; }
-.settings-browser__preferences > .settings-group > :not(header) { grid-column: 2; }
-.settings-browser__preferences :is(.browser-automation-toggle, .browser-resources__policy label) { padding-top: 0; }
-.settings-browser__preferences :is(.browser-automation-toggle, .browser-resources__policy label) > span { flex: 1; min-width: 0; }
-.settings-browser__preferences :is(.browser-automation-toggle, .browser-resources__policy label) > input { order: 1; flex: none; margin-left: var(--sp-4); }
-.settings-browser__permission-note { margin: var(--sp-3) 0 0; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.6; }
-.settings-browser .browser-automation-toggle { padding: 0; align-items: flex-start; }
-.settings-browser .browser-automation-toggle input { flex: none; margin-top: 2px; }
-.settings-browser .browser-automation-toggle small { max-width: 76ch; line-height: 1.65; }
+.settings-browser__preferences > .settings-group { padding-bottom: var(--sp-4); }
+.settings-browser__preferences > .settings-group > header { padding-block: var(--sp-3); }
+.settings-page .settings-browser p.settings-browser__note {
+  margin: 0 0 var(--sp-3);
+  color: var(--text-3);
+  font-size: var(--fs-meta);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.settings-browser__toggle {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  cursor: pointer;
+}
+.settings-browser__toggle > span { display: grid; gap: var(--sp-1); min-width: 0; }
+.settings-browser__toggle > input { flex: none; margin-top: 1px; }
+.settings-browser__toggle strong { color: var(--text); font-size: var(--fs-meta); font-weight: 500; }
+.settings-browser__toggle small { max-width: 68ch; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.settings-browser__help { margin-top: var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }
+.settings-browser__help p { max-width: 68ch; margin: var(--sp-2) 0 0; line-height: 1.5; }
+.settings-browser__exit { margin-block: 0 var(--sp-2); }
+.settings-browser__preferences > .settings-pane-actions { margin-top: 0; }
+.settings-browser .settings-disclosure__body > .settings-group + .settings-group { margin-top: var(--sp-4); }
 .settings-browser .browser-resources__overview { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-5); margin: var(--sp-4) 0 var(--sp-2); }
 .settings-browser .browser-resources__overview > div { display: grid; align-content: start; gap: var(--sp-1); padding: var(--sp-3) 0; }
 .settings-browser .browser-resources__overview strong { font-size: var(--fs-title); font-weight: 550; line-height: 1.5; }
@@ -29,15 +41,17 @@
 .settings-browser .external-browser-connections__link { align-items: center; flex-wrap: nowrap; padding-inline-end: var(--sp-1); }
 .settings-browser .external-browser-connections__link > button { flex: none; }
 .settings-browser .external-browser-connections__actions { gap: var(--sp-3); margin-top: var(--sp-4); }
-.browser-new-page-placement { display: grid; gap: var(--sp-3); min-width: 0; }
-.browser-new-page-placement__row { display: grid; grid-template-columns: minmax(64px, .5fr) minmax(0, 1fr); align-items: center; gap: var(--sp-4); }
-.browser-new-page-placement__row > label { font-size: var(--fs-body); color: var(--text-2); }
+.browser-new-page-placement {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sp-3);
+}
+.browser-new-page-placement__row { display: grid; gap: var(--sp-2); align-items: center; min-width: 0; }
+.browser-new-page-placement__row > label { color: var(--text-2); font-size: var(--fs-meta); }
 .browser-new-page-placement__row > .selection-field { width: 100%; }
 .settings-browser summary { cursor: pointer; }
 .settings-browser summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; border-radius: var(--radius-sm); }
-@container browser-settings (width < 620px) {
-  .settings-browser__preferences > .settings-group { grid-template-columns: minmax(0, 1fr); padding: var(--sp-4); gap: var(--sp-3); }
-  .settings-browser .settings-browser__preferences header { grid-column: 1; grid-row: auto; flex-direction: row; align-items: baseline; flex-wrap: wrap; }
-  .settings-browser__preferences header small { margin-left: auto; }
-  .settings-browser__preferences > .settings-group > :not(header) { grid-column: 1; }
+@container browser-settings (width < 390px) {
+  .browser-new-page-placement { grid-template-columns: minmax(0, 1fr); }
+  .browser-new-page-placement__row { grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr); }
 }

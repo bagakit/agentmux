@@ -1,22 +1,20 @@
 import { Switch, TextInput } from '@agentmux/client-ui/input'
-import { useId, useState, type ReactNode } from 'react'
+import { useId, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { Button } from '@agentmux/client-ui/components/Button'
 import { BROWSER_START_PAGE_TITLE_LIMIT, BROWSER_START_PAGE_SUBTITLE_LIMIT, BROWSER_START_PAGE_HISTORY_LIMIT, resolveBrowserStartPage, validBrowserStartPageText, validBrowserStartPageImage, validBrowserStartPageHistoryLimit, type BrowserStartPageConfig } from '../../../../shared/browser-start-page'
 import { useSettingDraftRecord } from './use-setting-draft'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { StartPageImageField } from './StartPageImageField'
-import { SurveyIntroduction } from './SettingsConceptIntro'
 
 const SearchIcon = semanticIconComponent('action.search')
 const PreviewIcon = semanticIconComponent('action.preview')
 const validHistoryInput = (value: string) => String(Number(value)) === value && validBrowserStartPageHistoryLimit(Number(value))
 
-export function BrowserStartPageSettings({ config, onSave, onOpen, children }: {
+export function BrowserStartPageSettings({ config, onSave, onOpen }: {
   config?: Partial<BrowserStartPageConfig> | undefined
   onSave(value: Required<BrowserStartPageConfig>, expected: Required<BrowserStartPageConfig>): Promise<void>
   onOpen(): void
-  children?: ReactNode
 }) {
   const historyHintId = useId()
   const saved = resolveBrowserStartPage(config)
@@ -52,10 +50,8 @@ export function BrowserStartPageSettings({ config, onSave, onOpen, children }: {
       await onSave({ ...value, historyLimit: Number(value.historyLimit) }, { ...submitted.expected, historyLimit: Number(submitted.expected.historyLimit) })
     }))
   }
-  return <div className="settings-pane-stack settings-survey">
-    <SurveyIntroduction />
-    <section className="settings-group">
-      <header><span>Start page</span><Button type="button" onClick={onOpen}>Open Survey</Button></header>
+  return <div className="settings-survey">
+    <section aria-label="Edit start page">
       <div className="settings-survey__workspace"><div className="settings-survey__fields">
       <label className="browser-start-settings__field" data-settings-field="start-title"><span>Title</span><TextInput aria-label="Start page title" value={draft.value.title} maxLength={BROWSER_START_PAGE_TITLE_LIMIT} onChange={event => draft.setField('title', event.target.value)} /></label>
       <label className="browser-start-settings__field" data-settings-field="start-subtitle"><span>Subtitle</span><TextInput aria-label="Start page subtitle" value={draft.value.subtitle} maxLength={BROWSER_START_PAGE_SUBTITLE_LIMIT} onChange={event => draft.setField('subtitle', event.target.value)} /></label>
@@ -83,11 +79,11 @@ export function BrowserStartPageSettings({ config, onSave, onOpen, children }: {
           <div className="settings-survey__search" aria-hidden="true"><SearchIcon size={15} /><span>Search or enter an address</span></div>
           {draft.value.showHistory && <div className="settings-survey__history"><span>Example recent input · up to {draft.value.historyLimit || '…'} on first view</span><div><span>Documentation</span><span>Research notes</span></div></div>}
         </div>
-        <p className="settings-survey__caption">{unloadedImages ? 'Choose Preview images to load the image addresses. ' : ''}Example history only. Interactive background {draft.value.interactiveBackground ? 'on' : 'off'}. Save to apply your changes.</p>
+        {unloadedImages ? <p className="settings-survey__caption">Choose Preview images to load the image addresses.</p> : null}
         {imageNotice && <p role="status" className="settings-survey__image-notice">{imageNotice}</p>}
+        <footer><Button type="button" onClick={onOpen}>Open Survey</Button></footer>
       </aside></div>
     </section>
-    {children}
     <SettingsSaveBar save={save} dirty={draft.dirty} resolution={draft} scopeLabel="Start page" label="Save start page" onSave={() => void submit()} />
   </div>
 }

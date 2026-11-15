@@ -23,7 +23,7 @@ export const browserSettingsModule = {
   id: 'browser', archetype: 'preference',
   group: 'browser-use',
   title: 'Browser',
-  description: 'Manage webpage behavior, resource use and agent access.',
+  description: 'Choose where new pages open and manage memory and agent access.',
   icon: ThemeObjectBrowserIcon,
   keywords: 'browser resources memory release restore process idle agent automation drive page permission website new page window tab region space focus survey popup',
   searchTargets: [
@@ -31,6 +31,7 @@ export const browserSettingsModule = {
     { id: 'new-page-focus', title: 'New webpages in Focus', keywords: 'website new page window tab region destination' },
     { id: 'new-page-survey', title: 'New webpages in Survey', keywords: 'website new page window tab region destination' },
     { id: 'agent-automation', title: 'Agent automation', keywords: 'browser script page permission enable disable' },
+    { id: 'automatic-memory-release', title: 'Automatically release safe idle pages', keywords: 'browser resources memory release restore idle pages' },
     { id: 'browser-resources', title: 'Browser resources', keywords: 'memory process release restore idle pages' },
     { id: 'exit-check', title: 'Exit check', keywords: 'proxy exit ip address route network check' },
   ],

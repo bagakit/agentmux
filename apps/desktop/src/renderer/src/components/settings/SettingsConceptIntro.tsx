@@ -3,24 +3,10 @@ import capsuleArt from '@agentmux/client-ui/brand/illustrations/concepts/capsule
 import goalsArt from '@agentmux/client-ui/brand/illustrations/concepts/goals-companions.png'
 import spaceArt from '@agentmux/client-ui/brand/illustrations/concepts/space-workchamber.png'
 import focusArt from '@agentmux/client-ui/brand/illustrations/concepts/focus-workframe.png'
-import surveyArt from '@agentmux/client-ui/brand/illustrations/concepts/survey-prism.png'
 import recallArt from '@agentmux/client-ui/brand/illustrations/concepts/recall-fold.png'
 import './settings-concept-intro.css'
 
 /** Read-only illustrations. Configuration and execution remain with each pane. */
-export function SurveyIntroduction() {
-  const titleId = useId()
-  return <section className="settings-concept-intro settings-concept-intro--workview" data-concept="survey" aria-labelledby={titleId}>
-    <div className="settings-concept-intro__copy">
-      <h3 className="settings-concept-intro__title" id={titleId}>Follow the next clue.</h3>
-      <p className="settings-concept-intro__description">Start with a question. Browse sources, connect clues and keep exploring.</p>
-    </div>
-    <div className="settings-concept-intro__art" aria-hidden="true">
-      <img src={surveyArt} alt="" width="1536" height="1024" loading="lazy" decoding="async" draggable={false} />
-    </div>
-  </section>
-}
-
 export function RecallIntroduction() {
   const titleId = useId()
   return <section className="settings-concept-intro settings-concept-intro--workview" data-concept="recall" aria-labelledby={titleId}>

@@ -20,8 +20,7 @@ export function SurveyThumbnailSettings({ preferences, navigationWidth, onSave }
     const submitted = draft.beginSave()
     submitted.finish(await save.run(() => onSave(submitted.value, submitted.expected)))
   }
-  return <section className="settings-group settings-survey-thumbnails" aria-label="Research thumbnail layout">
-    <header><span>Research thumbnails</span><small>Navigation only</small></header>
+  return <section className="settings-survey-thumbnails" aria-label="Research thumbnail layout">
     <div className="settings-survey-thumbnails__workspace">
       <div className="settings-survey-thumbnails__controls">
         <label data-settings-field="thumbnail-height"><span>Thumbnail height<output>{draft.value.height} px</output></span>

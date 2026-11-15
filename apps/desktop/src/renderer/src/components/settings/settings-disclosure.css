@@ -1,0 +1,33 @@
+.settings-disclosure { min-width: 0; border-top: 1px solid var(--line-soft); }
+.settings-disclosure > summary {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3) 0;
+  color: var(--text);
+  cursor: pointer;
+  list-style: none;
+}
+.settings-disclosure > summary::-webkit-details-marker { display: none; }
+.settings-disclosure > summary > span { display: grid; gap: var(--sp-1); min-width: 0; }
+.settings-disclosure > summary strong { font-size: var(--fs-body); font-weight: 600; }
+.settings-disclosure > summary small { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.45; }
+.settings-disclosure > summary > svg { flex: none; color: var(--text-3); }
+.settings-disclosure[open] > summary > svg { transform: rotate(90deg); }
+.settings-disclosure > summary:hover strong { color: var(--green-text, var(--text)); }
+.settings-disclosure > summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; border-radius: var(--radius-sm); }
+.settings-disclosure__body { min-width: 0; padding-block: var(--sp-2) var(--sp-4); }
+
+.settings-page .settings-preference-surface .settings-pane-actions {
+  position: static;
+  margin-block: var(--sp-4) 0;
+  padding: var(--sp-3) 0 0;
+  border: 0;
+  border-top: 1px solid var(--line-soft);
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  backdrop-filter: none;
+}

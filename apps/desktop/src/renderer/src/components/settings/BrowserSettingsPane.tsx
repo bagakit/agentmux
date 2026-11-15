@@ -12,7 +12,7 @@ import { BrowserResources } from '../browser/BrowserResources'
 import { useBrowserDirectory } from '../../lib/use-browser-directory'
 import { usePerformanceObservation } from '../../lib/use-performance-observation'
 import { api } from '../../lib/api'
-import { SettingsConceptSummary } from './SettingsConceptSummary'
+import { SettingsDisclosure } from './SettingsDisclosure'
 import './browser-settings.css'
 
 export type BrowserPreferences = { agentAutomation: boolean; automaticMemoryRelease: boolean; exitCheckUrl: string;
@@ -32,17 +32,6 @@ function validExitCheckUrl(value: string): boolean {
   try { const url = new URL(value); return url.protocol === 'https:' && !url.username && !url.password } catch { return false }
 }
 
-/**
- * Agent 驱动浏览器的总开关。
- *
- * 这一节存在的直接理由：主进程在 `ipc.ts` 的 `browser:runScript` 闸门上拒绝时说的是
- * “Turn it on in Settings › Browser”，而在此之前 Settings 里**没有 Browser 这一节**——那句拒绝
- * 点名了一个到不了的地方。按 AGENTS.md:32-52，拒绝要给出能走通的下一步；点名一个不存在的位置
- * 比不说更糟，因为它听起来像已经存在（记忆 copy-must-name-an-action-reachable-from-this-state）。
- *
- * 只做一个开关，不做权限分级：`BrowserConfig.agentAutomation` 本身就是总开关，开了就是全套页面
- * 能力可用。在这里摆一排分项开关，会造出一份与主进程实际检查不符的第二事实源。
- */
 export function BrowserSettingsPane({ browser, active, onSave, onForget }: {
   browser: BrowserConfig
   active: boolean
@@ -56,8 +45,10 @@ export function BrowserSettingsPane({ browser, active, onSave, onForget }: {
     newPageSurvey: resolveBrowserNewPagePlacement(browser.newPagePlacement, 'survey') }
   const draft = useSettingDraftRecord(saved)
   const saveState = useSettingsSave()
-  const directory = useBrowserDirectory(active)
-  const observation = usePerformanceObservation(api.toolkit, active)
+  const [managementOpen, setManagementOpen] = useState(false)
+  const observing = active && managementOpen
+  const directory = useBrowserDirectory(observing)
+  const observation = usePerformanceObservation(api.toolkit, observing)
 
   async function save(): Promise<void> {
     const submitted = draft.beginSave()
@@ -65,12 +56,11 @@ export function BrowserSettingsPane({ browser, active, onSave, onForget }: {
   }
 
   return (
-    <div className="settings-pane-stack settings-browser">
-      <SettingsConceptSummary icon="object.browser" title="Pages, permissions and connections"
-        description="Choose where websites open new pages, manage agent access and inspect browser resources." />
+    <div className="settings-pane-stack settings-preference-surface settings-browser">
       <section className="settings-browser__preferences" aria-label="Browser preferences">
       <section className="settings-group" data-settings-field="new-page-placement">
         <header><span>New pages from websites</span></header>
+        <p className="settings-browser__note">Choose where a website opens a separate page. Region opens a split within the current tab.</p>
         <div className="browser-new-page-placement">
           {newPageFields.map(field => <div key={field.scene} className="browser-new-page-placement__row" data-settings-field={`new-page-${field.scene}`}>
             <label htmlFor={`browser-new-page-${field.scene}`}>{field.label}</label>
@@ -78,45 +68,43 @@ export function BrowserSettingsPane({ browser, active, onSave, onForget }: {
               value={draft.value[field.key]} options={newPageOptions} searchable={false}
               onValueChange={value => draft.setField(field.key, value as BrowserNewPageDestination)} />
           </div>)}
-          <p className="settings-browser__permission-note">Applies when a website opens a separate page. Navigation within a page stays in that page. Message and terminal links keep their Focus setting.</p>
         </div>
       </section>
-      <section className="settings-group" data-settings-field="agent-automation">
-        <header><span>Agent automation</span><small>Saved: {saved.agentAutomation ? 'On' : 'Off'}</small></header>
-        <label className="browser-automation-toggle">
-          <Switch
-            checked={draft.value.agentAutomation}
-            onChange={(event) => draft.setField('agentAutomation', event.target.checked)}
-          />
-          <span>
-            <strong>Let agents interact with browser pages</strong>
-            <small>Read pages, follow links and submit forms in all open browsers.</small>
-          </span>
+      <section className="settings-group">
+        <header><span>Idle pages</span>{draft.value.automaticMemoryRelease !== saved.automaticMemoryRelease ? <small>Saved: {saved.automaticMemoryRelease ? 'Automatic' : 'Manual'}</small> : null}</header>
+        <label className="settings-browser__toggle" data-settings-field="automatic-memory-release">
+          <span><strong>Automatically release safe idle pages</strong><small>Reduce memory use while keeping each page in its original workspace.</small></span>
+          <Switch aria-label="Automatically release safe idle pages" checked={draft.value.automaticMemoryRelease} onChange={event => draft.setField('automaticMemoryRelease', event.target.checked)} />
         </label>
-        <p className="settings-browser__permission-note">Uses your signed-in accounts, including actions that spend money. Off by default.</p>
+        <details className="settings-browser__help"><summary>What happens when I return?</summary><p>The page reloads in place. Forms and page state can be lost. Protected pages stay in use, and saving this preference does not release a page immediately.</p></details>
       </section>
-      <section className="settings-group browser-resources__policy" data-settings-field="automatic-memory-release">
-        <header><span>Idle pages</span><small>Saved: {saved.automaticMemoryRelease ? 'Automatic' : 'Manual'}</small></header>
-        <label><Switch checked={draft.value.automaticMemoryRelease} onChange={event => draft.setField('automaticMemoryRelease', event.target.checked)} />
-          <span><strong>Automatically release safe idle pages</strong><small>Reduce memory use while keeping each page in its original workspace.</small></span></label>
-        <details className="browser-resources__help"><summary>What happens when I return?</summary><p>The page reloads in place. Forms and arbitrary page state are not restored; protected pages stay in use. Saving this preference does not release a page immediately.</p></details>
+      <section className="settings-group">
+        <header><span>Agent access</span><small>Saved: {saved.agentAutomation ? 'On' : 'Off'}</small></header>
+        <label className="settings-browser__toggle" data-settings-field="agent-automation">
+          <span><strong>Let agents interact with browser pages</strong>
+            <small>Agents can use your signed-in accounts to read pages and submit forms, including actions that spend money. Each Profile can restrict this access.</small></span>
+          <Switch aria-label="Let agents interact with browser pages" checked={draft.value.agentAutomation}
+            onChange={event => draft.setField('agentAutomation', event.target.checked)} />
+        </label>
       </section>
-      <section className="settings-group" data-settings-field="exit-check">
-        <header><span>Exit check</span><small>{saved.exitCheckUrl ? 'Saved: ' + saved.exitCheckUrl : 'Off'}</small></header>
-        <label className="browser-start-settings__field"><span>Check address</span>
+      <SettingsDisclosure title="Network check" description="Optional address for testing a Profile’s connection.">
+        <label className="browser-start-settings__field settings-browser__exit" data-settings-field="exit-check"><span>Check address</span>
           <TextInput aria-label="Exit check address" type="url" inputMode="url" placeholder="https://" value={draft.value.exitCheckUrl}
             aria-describedby={exitCheckHintId} aria-invalid={!validExitCheckUrl(draft.value.exitCheckUrl.trim())} onChange={event => draft.setField('exitCheckUrl', event.target.value)} /></label>
-        <p id={exitCheckHintId} className="settings-browser__permission-note">{validExitCheckUrl(draft.value.exitCheckUrl.trim())
-          ? 'Check in Settings › Browser Profiles sends one request to this address through that Profile, to see where its route reaches. A service that answers with just your address shows it.'
+        <p id={exitCheckHintId} className="settings-browser__note">{validExitCheckUrl(draft.value.exitCheckUrl.trim())
+          ? 'Run the check from Browser Profiles. It sends one request through that Profile and can display the exit IP if the service returns it.'
           : 'Use an https:// address without a user name or password.'}</p>
-      </section>
+        {draft.value.exitCheckUrl !== saved.exitCheckUrl ? <p className="settings-browser__note">Saved: {saved.exitCheckUrl || 'Off'}</p> : null}
+      </SettingsDisclosure>
+      <SettingsSaveBar save={saveState} dirty={draft.dirty} resolution={draft} scopeLabel="Browser preferences" blocked={validExitCheckUrl(draft.value.exitCheckUrl.trim()) ? undefined : 'the exit check address must be https:// without a user name or password.'} label="Save browser" onSave={() => void save()} />
       </section>
       <AppLinkSchemes browser={browser} onForget={onForget} />
-      <BrowserResources active={active} directory={directory} app={observation.snapshot?.observation?.app} observationError={observation.error} />
-      <ExternalBrowserConnections targets={directory.rows.map(row => row.target).filter(target => target.source === 'external')}
-        observedIds={directory.observedIds} />
-      <RetainedBrowserUploads active={active} />
-      <SettingsSaveBar save={saveState} dirty={draft.dirty} resolution={draft} blocked={validExitCheckUrl(draft.value.exitCheckUrl.trim()) ? undefined : 'the exit check address must be https:// without a user name or password.'} label="Save browser" onSave={() => void save()} />
+      <SettingsDisclosure title="Browser management" description="Inspect open pages, shared tabs and selected files." onOpenChange={setManagementOpen}>
+        <BrowserResources active={observing} directory={directory} app={observation.snapshot?.observation?.app} observationError={observation.error} />
+        <ExternalBrowserConnections targets={directory.rows.map(row => row.target).filter(target => target.source === 'external')}
+          observedIds={directory.observedIds} />
+        <RetainedBrowserUploads active={observing} />
+      </SettingsDisclosure>
     </div>
   )
 }

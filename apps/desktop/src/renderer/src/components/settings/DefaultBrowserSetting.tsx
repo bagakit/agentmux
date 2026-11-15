@@ -44,16 +44,25 @@ export function DefaultBrowserSetting({ active }: { active: boolean }) {
     finally { if (live.current && request.current === token) { openingRef.current = false; setOpening(false) } }
   }
   return <section className="settings-group" data-settings-field="default-browser">
-    <header><span>Default browser</span><small>Survey</small></header>
-    <p className="settings-group-note">Choose AgentMux in your system settings to open web links in Survey.</p>
-    <p role="status">{fact ? stateLabel(fact) : reading ? 'Checking current default browser…' : 'Current default browser is unknown.'}</p>
-    {fact?.protocols && fact.outcome !== 'default' ? <p className="settings-group-note">{(['http', 'https'] as const).map(scheme => {
-      const protocol = fact.protocols![scheme]
-      return `${scheme.toUpperCase()}: ${protocol.state === 'known' ? protocol.application.name : `Unknown (${protocol.cause.message})`}`
-    }).join(' · ')}</p> : null}
-    <div className="settings-workflows__inline-action">
-      <Button type="button" disabled={opening || fact?.outcome === 'unsupported'} onClick={() => void open()}>{opening ? 'Opening…' : 'Set as default browser…'}</Button>
-      <Button type="button" disabled={reading} onClick={() => void read()}>Refresh status</Button>
+    <header><span>Default browser</span></header>
+    <div className="settings-survey__system">
+      <div>
+        <p className="settings-survey__system-state" role="status">{fact ? stateLabel(fact) : reading ? 'Checking current default browser…' : 'Current default browser is unknown.'}</p>
+        <p className="settings-group-note">Choose AgentMux in System Settings to open web links in Survey.</p>
+        {fact?.protocols && fact.outcome !== 'default' ? <details className="settings-survey__handlers">
+          <summary>HTTP and HTTPS handlers</summary>
+          <dl>{(['http', 'https'] as const).map(scheme => {
+            const protocol = fact.protocols![scheme]
+            return <div key={scheme}><dt>{scheme.toUpperCase()}</dt><dd>{protocol.state === 'known'
+              ? <span title={protocol.application.path}>{protocol.application.name} ({protocol.isCurrentApplication ? 'this installation' : 'another installation'})</span>
+              : `Unknown (${protocol.cause.message})`}</dd></div>
+          })}</dl>
+        </details> : null}
+      </div>
+      <div className="settings-workflows__inline-action">
+        <Button type="button" disabled={opening || fact?.outcome === 'unsupported'} onClick={() => void open()}>{opening ? 'Opening…' : 'Set as default browser…'}</Button>
+        <Button type="button" disabled={reading} onClick={() => void read()}>Refresh status</Button>
+      </div>
     </div>
     {requested ? <p className="settings-group-note" role="status">System Settings requested. In Desktop &amp; Dock → Default web browser, choose AgentMux. Refresh here to confirm your choice.</p> : null}
     {error ? <p className="settings-inline-error" role="alert">{error} Your settings and pages are kept.</p> : null}

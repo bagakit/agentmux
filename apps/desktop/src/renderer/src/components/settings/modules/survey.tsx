@@ -11,6 +11,7 @@ import { clampSurveySidebarWidth } from '../../../lib/survey-sidebar-width'
 import type { SurveyThumbnailLayout } from '../../../../../shared/survey-thumbnail-layout'
 import type { SurveyBrowsingPreferences } from '../../../../../shared/survey-browsing'
 import { SurveyBrowsingSettings } from '../SurveyBrowsingSettings'
+import { SettingsDisclosure } from '../SettingsDisclosure'
 
 const SurveyIcon = semanticIconComponent('navigation.survey')
 
@@ -18,7 +19,7 @@ const SurveyIcon = semanticIconComponent('navigation.survey')
 export const surveySettingsModule = {
   id: 'survey', archetype: 'preference', group: 'know', title: 'Survey', icon: SurveyIcon,
   selectionAnimation: true,
-  description: 'Shape your research navigation and browser start page.',
+  description: 'Organize saved webpages and customize your research workspace.',
   keywords: 'work survey research browser default system http https browsing exploration start page title subtitle icon background history cards count motion interactive thumbnail height columns density size preview 缩略图 高度 每行',
   searchTargets: [
     { id: 'reuse-open-pages', title: 'Switch to an already open page', keywords: 'survey duplicate reuse link 重复链接 复用' },
@@ -37,10 +38,19 @@ export const surveySettingsModule = {
   savedSummary: config => config.browser.startPage?.title ?? 'AMUX - Survey',
   Pane({ config, onClose, active }) {
     const sidebarWidth = useAppStore(state => state.surveySidebarWidth)
-    return <><SurveyBrowsingSettings preferences={config.browser.surveyBrowsing} onSave={saveBrowsing} />
-      <BrowserStartPageSettings config={config.browser.startPage} onSave={saveStartPage}
-      onOpen={() => { onClose(); void presentKnowledgeSurface('survey', useAppStore.getState().setMainSurface, { inputPolicy: 'target' }) }}><DefaultBrowserSetting active={active} /></BrowserStartPageSettings>
-      <SurveyThumbnailSettings preferences={config.browser.surveyThumbnails} navigationWidth={clampSurveySidebarWidth(sidebarWidth)} onSave={saveThumbnails} /></>
+    return <div className="settings-pane-stack settings-preference-surface settings-survey-pane">
+      <SurveyBrowsingSettings preferences={config.browser.surveyBrowsing} onSave={saveBrowsing} />
+      <div>
+        <SettingsDisclosure title="Research thumbnails" description="Adjust the size and density of research previews in the sidebar.">
+          <SurveyThumbnailSettings preferences={config.browser.surveyThumbnails} navigationWidth={clampSurveySidebarWidth(sidebarWidth)} onSave={saveThumbnails} />
+        </SettingsDisclosure>
+        <SettingsDisclosure title="Start page" description="Edit the welcome text, images and recent addresses.">
+          <BrowserStartPageSettings config={config.browser.startPage} onSave={saveStartPage}
+            onOpen={() => { onClose(); void presentKnowledgeSurface('survey', useAppStore.getState().setMainSurface, { inputPolicy: 'target' }) }} />
+        </SettingsDisclosure>
+      </div>
+      <DefaultBrowserSetting active={active} />
+    </div>
   }
 } as const satisfies SettingsModule
 
