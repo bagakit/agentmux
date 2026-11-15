@@ -40,7 +40,7 @@ export function dormantByRecoveryPolicy(session: SessionSnapshot): boolean {
   const { root } = joined
   return root.trigger === 'startup' && root.supervision!.phase === 'paused' &&
     (root.reason === 'idle-window-expired' || root.reason === 'idle-unknown') &&
-    !root.previousInput && !root.launchInput && !root.hasMessageInput && !root.recoveryDelivery && !root.frontendReconnect && !root.standingIntent
+    !root.previousInput && !root.launchInput && !root.recoveryDelivery && !root.frontendReconnect && !root.standingIntent
 }
 
 /** Session notices that hold the person's own input or answer; they stay visible for a dormant Agent. */

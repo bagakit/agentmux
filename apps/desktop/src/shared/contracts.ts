@@ -1041,7 +1041,7 @@ export type AgentWorkPlacement = { agentHostId: string; resourceHostId: string |
 /** Retained metadata with the same observer-relative route projection as live Sessions. */
 export type SessionHistoryDescriptor = AgentSessionHistoryDescriptor & { workPlacement?: AgentWorkPlacement }
 
-/** The Desktop wire contract admits these existing operation facts, with a presence marker for the Core recipe. */
+/** The Desktop wire contract admits these existing operation facts. */
 export const DESKTOP_CONTINUITY_OPERATION_FIELDS = [
   'inputEpoch', 'workspaceTrust', 'moteMainEntry', 'standingIntent', 'operationId', 'agentSessionId', 'trigger', 'timingOverride',
   'policy', 'intentOperationId', 'supervision', 'previousRun', 'newRun', 'nativeTarget', 'admittedAt', 'observedAt', 'rechecks',
@@ -1052,8 +1052,6 @@ export const DESKTOP_CONTINUITY_OPERATION_FIELDS = [
 type DesktopContinuityOperationField = typeof DESKTOP_CONTINUITY_OPERATION_FIELDS[number]
 export type DesktopContinuityOperation = Pick<AgentMuxContinuityOperation, DesktopContinuityOperationField> & {
   [Field in Exclude<keyof AgentMuxContinuityOperation, DesktopContinuityOperationField>]?: never
-} & {
-  hasMessageInput?: true
 }
 
 export type DesktopContinuityFacts = {

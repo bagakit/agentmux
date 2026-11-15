@@ -12,7 +12,6 @@ export function projectContinuityOperation(operation: AgentMuxContinuityOperatio
   for (const field of DESKTOP_CONTINUITY_OPERATION_FIELDS) {
     if (Object.hasOwn(operation, field)) display[field] = operation[field]
   }
-  if (operation.messageInput) display.hasMessageInput = true
   return display as DesktopContinuityOperation
 }
 
