@@ -20,6 +20,8 @@ const mutations: Record<string, [string, string, string]> = {
   'unconfirmed-position': ['apps/desktop/src/renderer/src/lib/focus-source-model.ts', 'const detail = !runtimeId && access.locations.length === 1 ? `Position ${access.locations[0]!.regionId} · ${observation}` : observation', 'const detail = observation'],
   'borrow-sid': ['apps/desktop/src/renderer/src/lib/focus-source-model.ts', 'runtimeByHost.get(context.control?.hostId ?? context.hostId) === runtimeId', 'true'],
   'disconnect-source': ['apps/desktop/src/renderer/src/components/GlobalFocusSurface.tsx', 'const executionRows = useMemo(() => [...ordinaryRows, ...sourceFacts.contexts]', 'const executionRows = useMemo(() => [...ordinaryRows]'],
+  'all-source-candidates': ['apps/desktop/src/renderer/src/lib/use-focus-sources.tsx', '    const sourceCandidates = new Map<string, SourceCandidates>(), result = new Map<string, Candidate>()', '    previousSources.current.clear()\n    const sourceCandidates = new Map<string, SourceCandidates>(), result = new Map<string, Candidate>()'],
+  'all-source-presentations': ['apps/desktop/src/renderer/src/lib/use-focus-sources.tsx', '    const previous = presentations.current, next = new Map<string, CandidatePresentation>()', '    presentations.current = undefined\n    const previous = presentations.current, next = new Map<string, CandidatePresentation>()'],
   'qualified-projection': ['apps/desktop/src/renderer/src/store.ts', '    if (reference) {', '    if (selected && reference) {'],
   'source-parent': ['apps/desktop/src/renderer/src/store.ts',
     '        const choice = tab.source ? { ...resolved, spaceId: target.reference.spaceId, zoneId: target.zoneId } : resolved', '        const choice = resolved']

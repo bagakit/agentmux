@@ -33,6 +33,8 @@ import { createWorkspaceLayout, splitWorkbenchRegion } from '@agentmux/layout'
 import { spaceMountKey } from '../src/shared/space-mount'
 import { originalSourceInputOwnerKey, originalSourceRegionProjectionId, originalSourceTabProjectionId, originalSourceWorkspaceId } from '../src/renderer/src/lib/original-space-navigation'
 import { mountedRegionKey, mountedSpaceInput } from '../src/renderer/src/lib/space-mount-view'
+import * as mountedSessions from '../src/renderer/src/lib/space-mount-sessions'
+import * as sourceModel from '../src/renderer/src/lib/focus-source-model'
 import { DEFAULT_CONFIG } from '../src/main/config-store'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import { spaceMountTransport } from './helpers/space-mount-fixture'
@@ -139,7 +141,8 @@ async function fixture(options: { foreign?: boolean; unavailable?: boolean; nati
   config.workspaces = [{ id: 'original-b-project', kind: 'folder', hostId: 'local', path: placementPath, name: 'Ordinary analysis project' }]
   const main = spaceMountTransport(cleanup, [
     { id: 'local', carrier: { forwardRpc: original.b.rpc.call.bind(original.b.rpc), subscribeRpc: original.b.rpc.subscribe.bind(original.b.rpc) } },
-    { id: 'source-route', carrier: { forwardRpc: original.b.rpc.call.bind(original.b.rpc), subscribeRpc: original.b.rpc.subscribe.bind(original.b.rpc) } }
+    { id: 'source-route', carrier: { forwardRpc: original.b.rpc.call.bind(original.b.rpc), subscribeRpc: original.b.rpc.subscribe.bind(original.b.rpc) } },
+    { id: 'original-d-route', carrier: { forwardRpc: original.d.rpc.call.bind(original.d.rpc), subscribeRpc: original.d.rpc.subscribe.bind(original.d.rpc) } }
   ], config)
   const sourceDocument = (await original.b.spatial.read())!
   const originalTab = sourceDocument.graph.tabs.find(tab => tab.tabId === admitted.address.tabId)!
@@ -185,9 +188,11 @@ async function fixture(options: { foreign?: boolean; unavailable?: boolean; nati
     return await main.api.call(method, input as never, signal) as never
   })
   vi.spyOn(api.spaceMounts, 'watch').mockImplementation(main.api.watch)
-  const sessionListeners = new Set<Parameters<typeof api.spaceMounts.sessions>[1]>()
+  const sessionListeners = new Map<Parameters<typeof api.spaceMounts.sessions>[1], string>()
+  const membershipComplete = new Map<string, number>()
   const sessionsRead = vi.spyOn(api.spaceMounts, 'sessions').mockImplementation(async (target, listener, signal) => {
-    sessionListeners.add(listener); signal?.addEventListener('abort', () => sessionListeners.delete(listener), { once: true })
+    const key = spaceMountKey(target.reference)
+    sessionListeners.set(listener, key); signal?.addEventListener('abort', () => sessionListeners.delete(listener), { once: true })
     if (options.metadataUnknown) {
       // The metadata observation edge is unavailable. Do not start its separate
       // optional Native observer while proving independent name/history IO.
@@ -198,7 +203,10 @@ async function fixture(options: { foreign?: boolean; unavailable?: boolean; nati
         state: { status: 'unknown', issue: { code: 'ORIGINAL_METADATA_UNCONFIRMED', message: 'Original metadata is unconfirmed.' } } } })
       return { initial: opening, dispose() {} }
     }
-    return await main.api.sessions(target, listener, signal)
+    return await main.api.sessions(target, event => {
+      if (event.type === 'observation' && event.observation.type === 'membership-complete') membershipComplete.set(key, event.observation.revision)
+      listener(event)
+    }, signal)
   })
   vi.spyOn(api.spaceMounts, 'reading').mockImplementation(main.api.reading)
   const member = vi.spyOn(api.spaceMounts, 'member').mockImplementation(async (input, listener, signal) => { const surface = await main.api.member(input, listener, signal); cleanup.push(() => surface.dispose()); return surface })
@@ -215,8 +223,17 @@ async function fixture(options: { foreign?: boolean; unavailable?: boolean; nati
   const navigate = vi.fn()
   await dom.render(<MainFocusFixture navigate={navigate} />)
   const settle = async (count: number) => { await vi.waitFor(async () => { await act(async () => {}); expect(useAppStore.getState().mountedSpaceObservations[spaceMountKey(target.reference)]?.snapshot).toBeDefined(); const members = Object.keys(useAppStore.getState().mountedSpaceSessions[spaceMountKey(target.reference)]?.members ?? {}); if (options.unconfirmed) expect(members.length).toBeGreaterThan(0); else expect(members).toHaveLength(1); expect(cards()).toHaveLength(count) }, { timeout: 10000 }) }
-  return { ...original, owner, session, admitted, main, config, target, key: spaceMountKey(target.reference), member, navigate, settle, local, sessionsRead, missingRead, beginOriginalCheck, finishOriginalCheck,
-    emitMetadataError: () => { for (const listener of sessionListeners) listener({ type: 'error', error: { code: 'ORIGINAL_METADATA_READER_UNAVAILABLE', message: 'The original metadata stream is unavailable; the independent member remains healthy.' } }) } }
+  return { ...original, owner, session, admitted, main, config, target, key: spaceMountKey(target.reference), member, navigate, settle, local, sessionsRead, membershipComplete, missingRead, beginOriginalCheck, finishOriginalCheck,
+    emitMetadataError: () => { for (const [listener, key] of sessionListeners) if (key === spaceMountKey(target.reference)) listener({ type: 'error', error: { code: 'ORIGINAL_METADATA_READER_UNAVAILABLE', message: 'The original metadata stream is unavailable; the independent member remains healthy.' } }) },
+    emitUnknownMetadata: () => {
+      const state = useAppStore.getState(), key = spaceMountKey(target.reference), snapshot = state.mountedSpaceObservations[key]!.snapshot!
+      const original = Object.values(state.mountedSpaceSessions[key]!.members)[0]!
+      for (const [listener, source] of sessionListeners) if (source === key) listener({ type: 'observation', observation: {
+        type: 'member', reference: snapshot.reference, source: snapshot.source, revision: snapshot.revision, member: original.member,
+        ...(original.occurrences ? { occurrences: original.occurrences } : {}),
+        state: { status: 'unknown', issue: { code: 'ORIGINAL_METADATA_UNCONFIRMED', message: 'Exact original member metadata is unconfirmed.' } }
+      } })
+    } }
 }
 const cards = () => [...dom.container.querySelectorAll<HTMLButtonElement>('.focus-context[data-session-id]')]
 const cardWith = (name: string) => { const card = cards().find(node => node.textContent?.includes(name)); expect(card, `Card carrying original task ${name}`).toBeDefined(); return card! }
@@ -285,6 +302,121 @@ it('keeps the real foreign Source projection through unrelated file metadata and
   expect(sourceProjectionObservation.value).not.toBe(before)
   expect(cardWith(localName).textContent).toContain(localRecap)
   expect(useAppStore.getState().agentComposerDrafts[SID]).toBe('Keep this original local draft')
+})
+
+it.each([1, 3])('source candidate scope keeps %i independent Spaces out of an original member update', async spaceCount => {
+  const f = await fixture({ foreign: true, sourceOnly: true })
+  const otherSpaces: Array<typeof f.target> = []
+  for (let index = 0; index < spaceCount; index++) {
+    const workspace = { id: `independent-project-${index}`, path: `/independent-project-${index}` }
+    const folder = await f.b.spatial.registerFolder({ ...workspace, hostId: 'local', name: workspace.id })
+    for (const sid of [index === 0 ? SID : `independent-${index}`, `another-independent-${index}`]) {
+      const session = await f.b.put(sid, 1, undefined, workspace.path)
+      await f.b.spatial.admitAgentOpen({ request: { schemaVersion: 5, requestId: `creation-${sid}`, operation: 'agent.open',
+        content: { kind: 'new-agent', executorId: 'test-executor' }, focus: false,
+        destination: { spaceId: folder.spaceId, zoneId: folder.zoneId, newTab: true } },
+        agentSessionId: session.agentSessionId, execution: { hostId: 'local', runtimeId: f.b.owner.runtimeId,
+          executorRevision: 'original-executor-revision', workspacePath: workspace.path, workspaceId: workspace.id }, regionResource: {} })
+    }
+    otherSpaces.push({ ...f.target, reference: { ...f.target.reference, spaceId: folder.spaceId }, zoneId: folder.zoneId, workspaceId: workspace.id })
+  }
+  await act(async () => { for (const target of otherSpaces) useAppStore.getState().mountSpace(target, false) })
+  await f.settle(1 + 2 * spaceCount)
+  await vi.waitFor(async () => {
+    await act(async () => {})
+    expect(cardWith('真正远端的独立任务').textContent).toContain(foreignRecap)
+    const state = useAppStore.getState()
+    for (const source of otherSpaces) {
+      const key = spaceMountKey(source.reference)
+      const snapshot = state.mountedSpaceObservations[key]?.snapshot
+      expect(snapshot).toBeDefined()
+      expect(f.membershipComplete.get(key)).toBe(snapshot!.revision)
+      const members = Object.values(state.mountedSpaceSessions[key]?.members ?? {})
+      expect(members.map(member => member.state.status)).toEqual(['observed', 'observed'])
+    }
+    expect(sourceProjectionObservation.value!.contexts.filter(row => row.access?.identity.agentSessionId === SID)
+      .map(row => row.access?.identity.runtimeId)).toEqual([f.d.owner.runtimeId, f.b.owner.runtimeId])
+  })
+  // Settle the initial member readers before measuring only the single fixture event.
+  await vi.waitFor(async () => {
+    await act(async () => {})
+    expect(sourceProjectionObservation.value!.contexts.every(row => row.access?.conversationPort && row.access.session)).toBe(true)
+  })
+  const ordinary = sourceProjectionObservation.value!.contexts.filter(row => row.access?.identity.runtimeId === f.b.owner.runtimeId)
+  const workface = useAppStore.getState().workbenchSpaceSelection
+  const candidateReads = vi.spyOn(mountedSessions, 'mountedSessionFacts')
+  const workspaceReads = vi.spyOn(sourceModel, 'focusSourceWorkspace')
+  const calls = [f.sessionsRead, f.member, vi.mocked(api.spaceMounts.reading), vi.mocked(api.spaceMounts.watch), vi.mocked(api.spaceMounts.call)]
+  const callsBefore = calls.map(read => read.mock.calls.length)
+  const before = useAppStore.getState().mountedSpaceSessions
+  // Measure React's synchronous work for this receipt before unrelated asynchronous readers can finish.
+  act(() => f.emitUnknownMetadata())
+  expect(useAppStore.getState().mountedSpaceSessions[f.key]).not.toBe(before[f.key])
+  for (const source of otherSpaces) {
+    const key = spaceMountKey(source.reference)
+    expect(useAppStore.getState().mountedSpaceSessions[key]).toBe(before[key])
+  }
+  expect(cardWith('真正远端的独立任务').textContent).toContain('Exact original member metadata is unconfirmed.')
+  expect(cardWith('真正远端的独立任务').textContent).toContain(foreignRecap)
+  const candidateScopes = candidateReads.mock.calls.map(([snapshot]) => snapshot?.reference.spaceId)
+  const workspaceScopes = workspaceReads.mock.calls.map(([target]) => target.reference.spaceId)
+  expect({ candidateScopes, workspaceScopes }).toEqual({ candidateScopes: [f.reference.spaceId], workspaceScopes: [f.reference.spaceId] })
+  expect(sourceProjectionObservation.value!.contexts.filter(row => row.access?.identity.runtimeId === f.b.owner.runtimeId))
+    .toStrictEqual(ordinary)
+  for (const row of ordinary) expect(sourceProjectionObservation.value!.contexts).toContain(row)
+  expect(calls.map(read => read.mock.calls.length)).toEqual(callsBefore)
+  expect(useAppStore.getState().workbenchSpaceSelection).toBe(workface)
+  expect(f.navigate).not.toHaveBeenCalled()
+})
+
+it('source candidate scope keeps one original member across two Spaces and changes routes when its first position leaves', async () => {
+  const f = await fixture({ foreign: true, sourceOnly: true })
+  await f.settle(1)
+  await vi.waitFor(() => expect(cardWith('真正远端的独立任务').textContent).toContain(foreignRecap))
+  const id = cards()[0]!.dataset.sessionId
+  const workspace = { id: 'original-d-project', path: f.session.workspacePath }
+  const folder = await f.d.spatial.registerFolder({ ...workspace, hostId: 'local', name: 'Original execution project' })
+  const second = (await f.d.spatial.admitAgentOpen({ request: { schemaVersion: 5, requestId: f.admitted.requestId, operation: 'agent.open',
+    content: { kind: 'new-agent', executorId: 'test-executor' }, focus: false,
+    destination: { spaceId: folder.spaceId, zoneId: folder.zoneId, newTab: true } },
+    agentSessionId: SID, execution: { hostId: 'local', runtimeId: f.d.owner.runtimeId,
+      executorRevision: 'original-executor-revision', workspacePath: workspace.path, workspaceId: workspace.id }, regionResource: {} })).record
+  const target = { hostId: 'original-d-route', reference: { runtimeId: f.d.owner.runtimeId, spaceId: folder.spaceId }, zoneId: folder.zoneId, workspaceId: workspace.id }
+  const reading = vi.mocked(api.spaceMounts.reading)
+  reading.mockClear()
+  await act(async () => useAppStore.getState().mountSpace(target, false))
+  await vi.waitFor(() => {
+    expect(sourceProjectionObservation.value?.contexts[0]?.access?.locations.map(location => [location.source.reference, location.regionId]))
+      .toEqual([[f.reference, f.admitted.address.regionId], [target.reference, second.address.regionId]])
+    expect(sourceProjectionObservation.value?.contexts).toHaveLength(1)
+    expect([...new Set(cards().map(card => card.dataset.sessionId))]).toEqual([id])
+    expect(cardWith('真正远端的独立任务').dataset.sessionId).toBe(id)
+    expect(cardWith('真正远端的独立任务').textContent).toContain(foreignRecap)
+  })
+  expect(reading).not.toHaveBeenCalled()
+  const current = sourceProjectionObservation.value!.contexts[0]!.access!
+  await act(async () => { expect(await current.rename!.save('同一任务的原始名称', current.nameRevision!)).toMatchObject({ applied: true }) })
+  expect(vi.mocked(api.spaceMounts.call).mock.calls.filter(([method]) => method === 'memberNameChange').at(-1)?.[1]).toMatchObject({
+    hostId: f.target.hostId, name: { target: { reference: f.reference, regionId: f.admitted.address.regionId } }
+  })
+  const before = (await f.b.spatial.read())!
+  await act(async () => { await f.b.spatial.commit({ expectedRevision: before.revision, graph: { ...before.graph,
+    regions: before.graph.regions.map(region => region.regionId !== f.admitted.address.regionId ? region : {
+      tabId: region.tabId, regionId: region.regionId, kind: 'launcher', agentSessionId: null, execution: null, runId: null
+    }) } }) })
+  await vi.waitFor(() => {
+    expect(sourceProjectionObservation.value?.contexts[0]?.access?.locations.map(location => [location.source.reference, location.regionId]))
+      .toEqual([[target.reference, second.address.regionId]])
+    expect(cards()).toHaveLength(1)
+    expect(cardWith('同一任务的原始名称').dataset.sessionId).toBe(id)
+    expect(cardWith('同一任务的原始名称').textContent).toContain(foreignRecap)
+  })
+  expect(reading.mock.calls[0]?.[0]).toMatchObject({ hostId: target.hostId,
+    target: { reference: target.reference, regionId: second.address.regionId, runtimeId: f.d.owner.runtimeId, agentSessionId: SID } })
+  await act(async () => cardWith('同一任务的原始名称').click())
+  expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ spaceId: target.reference.spaceId, zoneId: target.zoneId,
+    workspaceId: originalSourceWorkspaceId(target), tabId: originalSourceTabProjectionId(target, second.address.tabId),
+    regionId: originalSourceRegionProjectionId(target, second.address.regionId) })
 })
 
 it('an unavailable exact foreign Session remains an ordinary unknown card and is not classified as confirmed recovery', async () => {
