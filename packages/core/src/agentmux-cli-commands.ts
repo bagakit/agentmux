@@ -1224,7 +1224,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     '--goal': 'data', '--runtime': 'data', '--namespace': 'data', '--section': 'value', '--link': 'data', ...OP,
   }, f => {
     const link = value(f, '--link')
-    if (link === undefined) return { input: 'preserve', goalId: id(f, '--goal', true), ...operation(f),
+    if (link === undefined) return { input: 'preserve', goalId: id(f, '--goal'), ...operation(f),
       ...fields(f, { '--runtime': 'runtimeId', '--namespace': 'namespace', '--section': 'section' }) }
     if (['--goal', '--runtime', '--namespace', '--section'].some(flag => f.values.has(flag))) invalid('Use the exact Goal link or explicit Goal coordinates.')
     let target
