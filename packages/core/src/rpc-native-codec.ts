@@ -104,7 +104,7 @@ import { agentInputDeliveryKey, validateAgentInputWaitRef, type AgentInputSubmis
 import { parseFileUploadIdentity, parseFileUploadParams, parseFileUploadResult } from './public-rpc-files.js';
 
 import { isDeepStrictEqual } from 'node:util'
-import { parseAgentMuxSpatialGraph } from './spatial-graph.js'
+import { assertAgentMuxSpatialGraph } from './spatial-graph.js'
 import { normalizeAgentTimelineMutation } from './session-timeline.js'
 import { normalizeSessionHistoryPage, sessionHistoryWithoutMetrics } from './session-history.js'
 import { parseAgentContextParams } from './agent-context.js'
@@ -1238,7 +1238,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
           string(ack.operationId); const target = record(ack.target, ['kind', 'id']); string(target.kind); string(target.id)
           bool(ack.applied); member(ack.diskDurability, ['confirmed', 'unconfirmed']); if (ack.issue !== null) text(ack.issue)
         }
-        parseAgentMuxSpatialGraph(state.graph); break
+        assertAgentMuxSpatialGraph(state.graph); break
       }
       case 'name.history': {
         record(p, ['records', 'nextCursor', 'coverage', 'diskAcknowledgement']); array(p.records, item => parseNameChangeRecord(item)); string(p.nextCursor, true); member(p.coverage, ['spatial', 'host']); member(p.diskAcknowledgement, ['not-observed']); break
@@ -1246,7 +1246,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       case 'space.resolve': {
         record(p,['region','locations'])
         const graph = {spaces:[],zones:[],tabs:[],regions:p.region === null ? [] : [p.region],bindings:[],layouts:{},tabLayouts:{},resources:{}}
-        parseAgentMuxSpatialGraph(graph)
+        assertAgentMuxSpatialGraph(graph)
         if (p.region !== null && record(p.region).tabId !== record(params).tabId) fail()
         array(p.locations,item => { const l = record(item); if (l.tabId !== record(params).tabId || !p.region || l.regionId !== record(p.region).regionId) fail() })
         break

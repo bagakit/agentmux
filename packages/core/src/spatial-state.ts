@@ -15,7 +15,7 @@ import { AgentMuxError } from './errors.js';
 import { defaultAgentMuxStateDirectory } from './runtime-paths.js';
 import type { AgentMuxSpaceBindingTarget } from './space-control.js';
 import { addTabOccurrence, removeTab } from './spatial-layout.js';
-import { parseAgentMuxSpatialGraph, retainAdmittedAgentIdentity, type AgentMuxSpatialGraph, type AgentMuxSpatialState, type AgentMuxSpatialCommit, type SpatialJson } from './spatial-graph.js';
+import { assertAgentMuxSpatialGraph, parseAgentMuxSpatialGraph, retainAdmittedAgentIdentity, type AgentMuxSpatialGraph, type AgentMuxSpatialState, type AgentMuxSpatialCommit, type SpatialJson } from './spatial-graph.js';
 import { AGENTMUX_SPATIAL_AGENT_OPEN_RESOURCE, spatialAgentOpenDigest, admitSpatialAgentOpen, admitSpatialAgentAssociation, spatialAgentAssociationRecord, spatialAgentOpenRecord, retainedMoteMainBindingReceipt, parseMoteMainBaseline, sameMoteMainBaseline, type MoteMainFollowUpInput, spatialAgentOpenDocument, matchesMoteMainBindingInput, validateMoteMainBindingObservation, type MoteMainBindingObservation } from './spatial-agent-open.js';
 export * from './spatial-agent-open.js';
 import { AGENTMUX_DISPLAY_LABEL_RESOURCE, displayLabelDocument, setDisplayLabelDocument, projectSpatialState, nameTargetKey, validateNameIntent,
@@ -302,7 +302,8 @@ export class AgentMuxSpatialStateStore {
       const d = record(JSON.parse(source));
       if (d.schemaVersion !== 1 || !Number.isSafeInteger(d.revision) || (d.revision as number) < 1)
         invalid('Invalid spatial revision.');
-      const graph = parseAgentMuxSpatialGraph(d.graph);
+      const graph = d.graph;
+      assertAgentMuxSpatialGraph(graph);
       if (displayLabelDocument(graph).history !== 'complete') invalid('A layout history projection cannot replace the original record owner.');
       return { schemaVersion: 1, revision: d.revision as number, graph };
     }

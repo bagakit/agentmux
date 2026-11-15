@@ -1,7 +1,7 @@
 /** Pure original-Space wire codecs and projection reduction, shared by every client. */
 import { AgentMuxError } from './errors.js';
 import { rpcRecord } from './rpc-data.js';
-import { parseAgentMuxSpatialGraph, type AgentMuxSpatialGraph } from './spatial-graph.js';
+import { assertAgentMuxSpatialGraph, type AgentMuxSpatialGraph } from './spatial-graph.js';
 import { parseSpaceAuthorityRef, spaceIdentityString as rpcString, type SpaceAuthorityRef, type SpaceAuthoritySource } from './space-reference.js';
 export { parseSpaceAuthorityRef, type SpaceAuthorityRef, type SpaceAuthoritySource } from './space-reference.js';
 export type SpaceScope = {
@@ -140,7 +140,7 @@ export function parseSpaceSnapshot(value: unknown, reference: SpaceAuthorityRef)
             }
         }
     }
-    parseAgentMuxSpatialGraph({ spaces: scope.space === null ? [] : [scope.space], zones: scope.zones, tabs: scope.tabs, regions: scope.regions, bindings: scope.bindings, layouts: {}, tabLayouts: {}, resources: {} });
+    assertAgentMuxSpatialGraph({ spaces: scope.space === null ? [] : [scope.space], zones: scope.zones, tabs: scope.tabs, regions: scope.regions, bindings: scope.bindings, layouts: {}, tabLayouts: {}, resources: {} });
     if (scope.space !== null && (scope.space as SpaceScope['space'])?.spaceId !== ref.spaceId || (scope.bindings as SpaceScope['bindings']).some(binding => binding.spaceId !== ref.spaceId))
         invalid('The Space projection contains another scope.', 'CONTROL_PROTOCOL_ERROR');
     const zones = new Set((scope.bindings as SpaceScope['bindings']).map(binding => binding.zoneId));

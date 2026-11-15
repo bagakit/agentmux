@@ -122,7 +122,7 @@ export function retainAdmittedAgentIdentity(graph: AgentMuxSpatialGraph, previou
   return graph;
 }
 /** Validation preserves unknown references; observation gaps never delete facts. */
-export function parseAgentMuxSpatialGraph(value: unknown): AgentMuxSpatialGraph {
+export function assertAgentMuxSpatialGraph(value: unknown): asserts value is AgentMuxSpatialGraph {
   const g = record(value);
   if (g.projectGroups !== undefined) {
     facts(g.projectGroups, 'groupId', group => {
@@ -220,9 +220,11 @@ export function parseAgentMuxSpatialGraph(value: unknown): AgentMuxSpatialGraph 
   }
   json(g);
   record(g.resources);
-  const encoded = JSON.stringify(g);
-  const decoded = JSON.parse(encoded) as AgentMuxSpatialGraph;
-  return decoded;
+}
+/** Take an independent graph when the input is still owned by a caller. */
+export function parseAgentMuxSpatialGraph(value: unknown): AgentMuxSpatialGraph {
+  assertAgentMuxSpatialGraph(value);
+  return JSON.parse(JSON.stringify(value)) as AgentMuxSpatialGraph;
 }
 export function spatialCatalog(graph: AgentMuxSpatialGraph, target: AgentMuxSpaceSelector = {}): AgentMuxSpaceCatalog {
   const labels = displayLabelDocument(graph).labels;
