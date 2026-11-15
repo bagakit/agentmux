@@ -1605,6 +1605,43 @@ it('copied Goal plan links and the real CLI reveal the original graph without cr
     expect(spaceSkill.code, spaceSkill.stderr).toBe(0); expect(spaceSkill.stdout).toContain('capsule, mote, host and goal'); expect(spaceSkill.stdout).toContain('goal focus --goal ID --runtime ID --namespace ID --section plan')
     expect(requests).toHaveLength(requestsBeforeDiscovery)
     const result = await cliCall(['goal', 'focus', '--goal', 'exact', '--runtime', address.runtimeId, '--namespace', address.namespace, '--section', 'plan'])
+    const plan = await owner.client.call('goal.plan', { goalId: 'exact' })
+    const [ticketUrl] = plan.ticketLinks ?? []
+    expect(ticketUrl).toBe(address.goalUrl + '#T1')
+    const rejectedTicket = await ingress.receive('amux://goal/exact#T1')
+    expect(rejectedTicket, 'a namesake without the original binding cannot receive a short Ticket link').toContain('GOAL_SOURCE_UNCONFIRMED')
+    const preserved = { value: outside.value, start: outside.selectionStart, end: outside.selectionEnd }
+    const ticketReply = await cliCall(['goal', 'focus', '--link', ticketUrl!])
+    expect(ticketReply.code, 'the original Ticket must be visibly selected and revealed: ' + ticketReply.stderr).toBe(0)
+    expect(JSON.parse(ticketReply.stdout).result.presentation.goal).toEqual({
+      goalId: 'exact', runtimeId: address.runtimeId, namespace: address.namespace, section: 'plan', ticket: 1,
+    })
+    const ticket = container.querySelector('[data-goal-plan-node="read"]')
+    expect(ticket?.querySelector('[aria-expanded="true"]')).toBeTruthy()
+    expect(container.querySelector('[data-goal-plan-detail="read"]')).toBeTruthy()
+    expect(document.activeElement).toBe(outside)
+    expect({ value: outside.value, start: outside.selectionStart, end: outside.selectionEnd }).toEqual(preserved)
+    expect(await ingress.receive(ticketUrl!)).toBeNull()
+    const copyTicket = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Copy T1 link')
+    expect(copyTicket).toBeDefined(); await act(async () => copyTicket!.click())
+    expect(writes).toHaveBeenCalledWith(ticketUrl)
+    const originalNode = plan.plan!.nodes[0]!
+    const revised = await owner.client.call('goal.plan.revise', { goalId: 'exact',
+      revision: { operationId: 'add-second-ticket', expectedRevision: 1, alignmentRevision: 1, nodes: [
+        { ...originalNode, id: 'another', title: 'Another Ticket' }, { ...originalNode, title: 'Renamed original Ticket', cancelled: true },
+      ] },
+    })
+    expect(revised.plan?.ticketNodes).toEqual(['read', 'another'])
+    expect(revised.ticketLinks?.[0]).toBe(ticketUrl)
+    const short = await owner.client.call('goal.create', { title: 'An owner-bound Goal', risk: 'low', confirmation: 'user', operationId: 'owner-bound-goal' })
+    await owner.client.call('goal.update', { goalId: short.goal.id, patch: { alignment: proposal } })
+    const shortPlan = await owner.client.call('goal.plan.revise', { goalId: short.goal.id,
+      revision: { operationId: 'compact-ticket', expectedRevision: 0, alignmentRevision: 1, nodes: [originalNode] },
+    })
+    expect(shortPlan.ticketLinks).toEqual(['amux://goal/' + short.goal.id + '#T1'])
+    expect(await ingress.receive(shortPlan.ticketLinks![0]!)).toBeNull()
+    expect(container.querySelector('[data-goal-plan-node="read"] [aria-expanded="true"]')).toBeTruthy()
+    expect(await ingress.receive(ticketUrl!)).toBeNull()
     expect(result.code, result.stderr).toBe(0)
     expect(JSON.parse(result.stdout).result.presentation.goal).toEqual(receipt.presentation.goal)
     expect(container.querySelector('[data-goal-plan-node="read"]')).not.toBeNull()
@@ -1646,7 +1683,7 @@ it('copied Goal plan links and the real CLI reveal the original graph without cr
     expect(useAppStore.getState().goalEditDrafts.exact).toEqual(later.goalEditDrafts.exact)
 
     expect(requests.every(request => request.operation === 'focus')).toBe(true)
-    expect((await owner.client.call('goal.inspect', { goalId: 'exact' })).goal!.plan!.revision).toBe(1)
+    expect((await owner.client.call('goal.inspect', { goalId: 'exact' })).goal!.plan).toEqual(revised.plan)
     for (const action of lifecycle) expect(action).not.toHaveBeenCalled()
   } finally { await client?.dispose(); await server?.stop(); await fixture.close() }
 }, 60_000)

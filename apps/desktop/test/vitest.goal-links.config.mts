@@ -6,7 +6,7 @@ const owners = new Set(['packages/core/src/sharing.ts', 'packages/core/src/contr
   'apps/host/src/goals.ts', 'apps/host/src/goal-projection.ts', 'apps/desktop/src/main/desktop-goals.ts',
   'apps/desktop/src/main/spatial-link-ingress.ts', 'apps/desktop/src/renderer/src/store.ts',
   'apps/desktop/src/renderer/src/lib/desktop-presentation.ts', 'apps/desktop/src/renderer/src/components/InlineObjectLink.tsx',
-  'apps/desktop/src/renderer/src/components/GoalDetail.tsx'])
+  'apps/desktop/src/renderer/src/components/GoalDetail.tsx', 'apps/desktop/src/renderer/src/components/GoalPlanGraph.tsx'])
 const mutation = process.env.GOAL_LINK_MUTATION ? JSON.parse(process.env.GOAL_LINK_MUTATION) : null
 const sha = (value: string) => createHash('sha256').update(value).digest('hex')
 export default { ...current, plugins: [...current.plugins ?? [], { name: 'goal-link-loaded-owner', enforce: 'pre' as const,
