@@ -2,6 +2,8 @@
 
 `@agentmux/client-ui` is the design system shared by AgentMux clients. Its **components** give an individual action, field or reading surface consistent behavior. Its **interaction patterns** describe how a person completes a task that spans several controls, such as finding the work surfaces for an Agent. A host can implement a pattern with its own layout and navigation.
 
+The workspace entry `@agentmux/client-ui/image-annotation` supplies the editable mark model and undo history, selection geometry, keyboard commands, and Canvas layers. Browser and system screenshot editors use these pieces with their own image source, canvas elements and output actions. The host supplies the owning document and routes its shortcuts through the same command matcher as the focused editor. [Annotation source](src/image-annotation/index.ts)
+
 The package is private to the AgentMux workspace. The portable entries below use React and React DOM `^19.2.0`. The package also owns shared Note syntax and document-format helpers. Some domain-specific entries depend on the public types and functions of the workspace’s `@agentmux/core` package. Hosts supply observations and perform actions. The library has no application store, conversation log or Runtime client.
 
 ## Start here
