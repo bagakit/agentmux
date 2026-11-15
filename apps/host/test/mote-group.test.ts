@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { join } from 'node:path'
-import { readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
 import * as core from '@agentmux/core'
 import { hashAgentCapability } from '../../../packages/core/src/agent-capability.js'
 import { rpcOwnerFixture } from '../../../packages/core/test/helpers/public-rpc-owner.js'
@@ -8,7 +8,13 @@ import { runSourceObjectCli } from '../../../packages/core/test/helpers/source-o
 import { objectCliEnvironment } from '../../../packages/core/test/helpers/object-cli-rpc.js'
 import { createMoteChatAgents } from '../src/mote-chat-agents.js'
 import { MoteGroupStore } from '../src/mote-group-store.js'
-import { createHostMoteGroups } from '../src/mote-group.js'
+import { createHostMoteGroupFiles } from '../src/mote-group-files.js'
+import { OrdinaryWorkspaceFiles } from '../src/ordinary-files.js'
+import { ScratchTopics } from '../src/mote-resources.js'
+import { SCRATCH_WORKSPACE_ID } from '../src/mote-topic-model.js'
+import { registerKnowledgeTopic } from '../src/topic-spatial-owner.js'
+import { topicContentZoneId } from '../src/topic-categories.js'
+import { createHostMoteGroups, type HostMoteGroupFiles } from '../src/mote-group.js'
 import type { MoteChatResourcePort } from '../src/mote-resources.js'
 
 const closes: (() => void | Promise<void>)[] = []
@@ -79,8 +85,8 @@ async function fixture(retainedRoot?: string) {
     }
   } })
   const dbPath = join(workspacePath, 'groups.sqlite'), socketPath = join(f.root, 'group.sock')
-  const start = async () => {
-    const port = createHostMoteGroups({ store: new MoteGroupStore(dbPath), agents, client: () => f.client })
+  const start = async (files?: HostMoteGroupFiles) => {
+    const port = createHostMoteGroups({ store: new MoteGroupStore(dbPath), agents, client: () => f.client, ...(files ? { files } : {}) })
     const server = new core.AgentMuxControlServer({ socketPath, coreClients: f.coreClients, moteGroups: port })
     await server.start()
     closes.push(() => server.stop())
@@ -89,7 +95,7 @@ async function fixture(retainedRoot?: string) {
     return { server, rpc }
   }
   const cli = (action: string, body: unknown, agentSessionId?: string) =>
-    runSourceObjectCli(['--endpoint', 'unix:' + socketPath, 'space', 'mote', 'group', action, '--input', '-'],
+    runSourceObjectCli(['--endpoint', 'unix:' + socketPath, 'space', 'mote', 'group', ...action.split(' '), '--input', '-'],
       objectCliEnvironment(f.root, agentSessionId ? { AGENTMUX_AGENT_SESSION_ID: agentSessionId, AGENTMUX_AGENT_CAPABILITY: f.capability } : {}), JSON.stringify(body))
   return { ...f, start, target, created, send, cli, preparedTargets, holdNative: (barrier: Promise<void>) => { nativeBarrier = barrier }, unblockSecond: () => { blockSecond = false } }
 }
@@ -98,6 +104,7 @@ it('saves one original public message, starts only invited members and reuses ex
   const f = await fixture(), { rpc, server } = await f.start()
   const { group } = await rpc.call('space.mote.group.create', { operationId: 'original-group', name: 'Release room', members: [f.target('mote-a'), f.target('mote-b')] })
   expect(group.members.map(member => member.thread)).toEqual([null, null])
+  expect(group.avatarMoteIds).toEqual([])
   expect((await rpc.call('space.mote.group.inspect', { groupId: group.id })).messages).toEqual([])
   expect(f.created).not.toHaveBeenCalled()
   const request = { groupId: group.id, operationId: 'original-send', body: '  Keep the original words.\nUse this Group.  ', recipientIds: ['mote-a', 'mote-b'] }
@@ -111,7 +118,7 @@ it('saves one original public message, starts only invited members and reuses ex
     const actual = await f.client.inspectAgentInput({ key: { kind: 'prompt', agentSessionId, expectedRun: { runId: 'run-' + agentSessionId }, submissionId: delivery.operationId } })
     expect(delivery.status, JSON.stringify(actual?.control.waiting ?? delivery.issue)).toBe('accepted')
   })
-  expect(f.send).toHaveBeenCalledTimes(1)
+  expect(f.send).toHaveBeenCalledTimes(2)
   expect((await rpc.call('space.mote.group.send', request)).message.id).toBe(message.id)
   expect(f.created).toHaveBeenCalledTimes(1)
   expect(f.preparedTargets.mock.calls.map(([moteId]) => moteId).sort()).toEqual(['mote-a', 'mote-b'])
@@ -123,7 +130,7 @@ it('saves one original public message, starts only invited members and reuses ex
   expect(retry.delivery.operationId).toBe(message.deliveries[1]!.operationId)
   await vi.waitFor(async () => expect((await reopened.call('space.mote.group.inspect', { groupId: group.id })).messages[0]!.deliveries.map(entry => entry.status)).toEqual(['accepted', 'accepted']))
   expect(f.created).toHaveBeenCalledTimes(2)
-  expect(f.send).toHaveBeenCalledTimes(2)
+  expect(f.send).toHaveBeenCalledTimes(4)
   const page = await reopened.call('space.mote.group.inspect', { groupId: group.id })
   expect(page.messages.map(entry => entry.id)).toEqual([message.id])
   expect(page.messages[0]!.author).toEqual({ kind: 'human', id: page.viewerId })
@@ -153,7 +160,7 @@ it('publishes only explicit native CLI replies from the original Group member an
   expect(repeated.code, repeated.stderr + repeated.stdout).toBe(0)
   expect(JSON.parse(repeated.stdout).result.message).toEqual(reply)
   expect((await rpc.call('space.mote.group.inspect', { groupId: one.id })).messages.map(entry => entry.body)).toEqual([message.body, input.body])
-  expect(f.send).toHaveBeenCalledTimes(1)
+  expect(f.send).toHaveBeenCalledTimes(2)
 })
 
 it('refuses the exact member reply until Core confirms its original acceptance', async () => {
@@ -197,7 +204,7 @@ it('delivers only the exact quoted message from this Group as content in the fro
     expect(page.messages.at(-1)?.deliveries[0]?.status).toBe('accepted')
   })
   expect(f.created).toHaveBeenCalledOnce()
-  expect(f.send).toHaveBeenCalledOnce()
+  expect(f.send).toHaveBeenCalledTimes(2)
   const agentSessionId = f.created.mock.calls[0]![0] as string
   const receipt = await f.client.inspectAgentInput({ key: { kind: 'prompt', agentSessionId,
     expectedRun: { runId: 'run-' + agentSessionId }, submissionId: message.deliveries[0]!.operationId } })
@@ -208,7 +215,7 @@ it('delivers only the exact quoted message from this Group as content in the fro
   expect(JSON.parse(note.split('\n').at(-1)!)).toEqual({ messageId: quoted.id, body: quoted.body })
   expect(note).not.toContain(unselected.body)
   expect(note).not.toContain(outside.body)
-  const originalWire = f.send.mock.calls[0]![0]
+  const originalWire = f.send.mock.calls.at(-1)![0]
   expect(originalWire).toContain(quoted.id)
   expect(originalWire).toContain('&lt;/amux&gt;')
   expect(originalWire.endsWith(send.body)).toBe(true)
@@ -217,11 +224,19 @@ it('delivers only the exact quoted message from this Group as content in the fro
 const restartStage = process.env.MOTE_GROUP_RESTART_STAGE
 it.skipIf(!restartStage)('rejoins the exact frozen input in a new Host process after pre-Core termination', async () => {
   const root = process.env.MOTE_GROUP_RESTART_ROOT!
-  const witnessPath = join(root, 'before-core.json')
+  const witnessPath = join(root, 'before-core.json'), invitationCut = process.env.MOTE_GROUP_RESTART_CUT === 'invitation'
   const f = await fixture(root), { rpc } = await f.start()
   if (restartStage === 'seed') {
-    const { group } = await rpc.call('space.mote.group.create', { operationId: 'restart-group', name: 'Durable Group', members: [f.target('mote-a')] })
-    vi.spyOn(f.client, 'submitAgentPrompt').mockImplementationOnce(async input => {
+    const { group } = await rpc.call('space.mote.group.create', { operationId: 'restart-group', name: 'Durable Group',
+      members: [f.target('mote-a')], ...(invitationCut ? { announcement: 'Original announcement survives' } : {}) })
+    const submit = f.client.submitAgentPrompt.bind(f.client)
+    vi.spyOn(f.client, 'submitAgentPrompt').mockImplementation(async (input, context) => {
+      if (invitationCut ? input.authorHuman === true : input.authorHuman !== true) return submit(input, context)
+      if (!invitationCut) {
+        const invitation = group.members[0]!.invitation!
+        const key = { kind: 'prompt' as const, agentSessionId: input.agentSessionId, expectedRun: input.expectedRun, submissionId: invitation.operationId }
+        await vi.waitFor(async () => expect((await f.client.inspectAgentInput({ key }))?.status).toBe('admitted'))
+      }
       await writeFile(witnessPath, JSON.stringify({ pid: process.pid, fixtureDirectory: f.root, groupId: group.id, key: {
         kind: 'prompt', agentSessionId: input.agentSessionId, expectedRun: input.expectedRun, submissionId: input.operationId
       } }))
@@ -239,14 +254,152 @@ it.skipIf(!restartStage)('rejoins the exact frozen input in a new Host process a
   const before = await rpc.call('space.mote.group.inspect', { groupId: original.groupId })
   const message = before.messages[0]!
   expect(before.group.members[0]!.thread?.agentSessionId).toBe(original.key.agentSessionId)
-  expect(message.deliveries[0]).toMatchObject({ status: 'pending', operationId: core.agentPromptInputId(original.key) })
+  const originalOperationId = core.agentPromptInputId(original.key)
+  if (invitationCut) {
+    expect(before.group.members[0]!.invitation).toMatchObject({ operationId: originalOperationId, status: 'pending' })
+    expect(message.deliveries[0]).toMatchObject({ status: 'pending' })
+  } else expect(message.deliveries[0]).toMatchObject({ status: 'pending', operationId: originalOperationId })
   expect(await f.client.inspectAgentInput({ key: original.key })).toBeNull()
   const request = { groupId: original.groupId, messageId: message.id, memberId: 'mote-a' }
   await rpc.call('space.mote.group.retry', request)
   await vi.waitFor(async () => expect((await f.client.inspectAgentInput({ key: original.key }))?.status).toBe('admitted'))
-  expect((await rpc.call('space.mote.group.retry', request)).delivery).toMatchObject({ status: 'accepted', operationId: core.agentPromptInputId(original.key) })
+  await vi.waitFor(async () => expect((await rpc.call('space.mote.group.retry', request)).delivery)
+    .toMatchObject({ status: 'accepted', operationId: message.deliveries[0]!.operationId }))
+  if (invitationCut) {
+    const receipt = await f.client.inspectAgentInput({ key: original.key })
+    expect(receipt?.admission?.admission?.intent?.message?.systemContext).toContain('Original announcement survives')
+    expect((await rpc.call('space.mote.group.inspect', { groupId: original.groupId })).group.members[0]!.invitation)
+      .toMatchObject({ operationId: originalOperationId, status: 'accepted' })
+  }
   expect((await rpc.call('space.mote.group.inspect', { groupId: original.groupId })).messages.map(record => record.id)).toEqual([message.id])
   expect(f.created).not.toHaveBeenCalled()
-  expect(f.send).toHaveBeenCalledOnce()
+  expect(f.send).toHaveBeenCalledTimes(invitationCut ? 2 : 1)
   await writeFile(join(root, 'after-core.json'), JSON.stringify({ originalPid: original.pid, pid: process.pid, key: original.key }))
+})
+
+it('retains the current invitation and original Thread across admin updates, removal, self-leave and re-entry', async () => {
+  const f = await fixture(), { rpc } = await f.start()
+  const inviteBody = ' First invitation\nfor the original group only. '
+  const create = { operationId: 'managed-create', name: 'Review team', members: [f.target('mote-a')],
+    announcement: inviteBody, avatarMoteIds: ['mote-a'], adminMoteIds: ['mote-a'] }
+  const { group } = await rpc.call('space.mote.group.create', create)
+  const og = group.members[0]!, groupId = group.id
+  expect(group).toMatchObject({ revision: 1, avatarMoteIds: ['mote-a'], announcement: { body: inviteBody } })
+  expect(og).toMatchObject({ thread: null, role: 'admin', state: 'active', invitation: { status: 'pending' } })
+  expect(f.created).not.toHaveBeenCalled()
+  expect(f.send).not.toHaveBeenCalled()
+  async function action(name: string, body: unknown, caller?: string) {
+    const result = await f.cli(name, body, caller)
+    expect(result.code, result.stderr).toBe(0)
+    return JSON.parse(result.stdout).result
+  }
+  const posted = await action('update', { groupId, expectedRevision: 1, operationId: 'managed-announcement', announcement: 'Second announcement' })
+  expect(posted.group.lastMessage).toMatchObject({ author: { kind: 'system' }, event: { kind: 'announcement-updated' }, body: 'Second announcement' })
+  expect(f.created).not.toHaveBeenCalled()
+  async function address(operationId: string, recipient: string) {
+    const { message } = await rpc.call('space.mote.group.send', { groupId, operationId, body: 'Read this original delivery', recipientIds: [recipient] })
+    await vi.waitFor(async () => {
+      const original = (await rpc.call('space.mote.group.inspect', { groupId })).messages.find(entry => entry.id === message.id)
+      expect(original?.deliveries[0]?.status).toBe('accepted')
+    })
+    const current = (await rpc.call('space.mote.group.inspect', { groupId })).group.members.find(member => member.moteId === recipient)!
+    return { key: message.deliveries[0]!.operationId, ...current, sid: current.thread!.agentSessionId }
+  }
+  const admin = await address('work-as-admin', 'mote-a')
+  async function coreNotice(member: typeof admin) {
+    const receipt = await f.client.inspectAgentInput({ key: { kind: 'prompt', agentSessionId: member.sid,
+      expectedRun: { runId: 'run-' + member.sid }, submissionId: member.invitation!.operationId } })
+    expect(receipt?.status).toBe('admitted')
+    const original = receipt?.admission?.admission?.intent?.message
+    expect(original?.authorHuman).not.toBe(true)
+    expect(original?.userContent).toBeUndefined()
+    expect(original?.systemContext).toContain('AgentMux added this exact Mote')
+    return JSON.parse(original!.systemContext!.split('\n').at(-1)!)
+  }
+  expect(await coreNotice(admin)).toMatchObject({ groupId, moteId: 'mote-a', announcement: { body: inviteBody } })
+  const add = { groupId, expectedRevision: 2, operationId: 'invite-mote-b', members: [f.target('mote-b')] }
+  f.unblockSecond()
+  expect((await action('members add', add, admin.sid)).group.members[1]).toMatchObject({ role: 'member', state: 'active', thread: null })
+  expect(await action('members add', add, admin.sid)).toMatchObject({ group: { revision: 3 } })
+  const ordinary = await address('work-as-member', 'mote-b')
+  expect(await coreNotice(ordinary)).toMatchObject({ groupId, moteId: 'mote-b', announcement: { body: 'Second announcement' } })
+  const edit = { groupId, expectedRevision: 3, operationId: 'admin-update', avatarMoteIds: ['mote-b', 'mote-a'] }
+  expect((await f.cli('update', edit, ordinary.sid)).code).not.toBe(0)
+  expect((await f.cli('update', { ...edit, adminMoteIds: ['mote-b'] }, admin.sid)).code).not.toBe(0)
+  expect(await action('update', edit, admin.sid)).toMatchObject({ group: { revision: 4, avatarMoteIds: ['mote-b', 'mote-a'] } })
+  await expect(rpc.call('space.mote.group.update', { ...edit, operationId: 'old-revision' })).rejects.toMatchObject({ code: 'MOTE_GROUP_REVISION_CONFLICT' })
+  const remove = { groupId, expectedRevision: 4, operationId: 'admin-remove', memberIds: ['mote-b'] }
+  expect(await action('members remove', remove, admin.sid)).toMatchObject({ group: { revision: 5, members: [
+    { moteId: 'mote-a', state: 'active' }, { moteId: 'mote-b', state: 'removed', thread: ordinary.thread }
+  ] } })
+  const originalReply = { groupId, operationId: 'old-member-reply', inputOperationId: ordinary.key, body: 'Not allowed after removal' }
+  expect((await f.cli('reply', originalReply, ordinary.sid)).code).not.toBe(0)
+  await expect(rpc.call('space.mote.group.send', { groupId, operationId: 'address-removed', body: 'Must not dispatch', recipientIds: ['mote-b'] }))
+    .rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  expect((await rpc.call('space.mote.group.list', { moteId: 'mote-b' })).groups).toEqual([])
+  expect(await action('members add', { ...add, operationId: 'invite-b-again', expectedRevision: 5 }, admin.sid)).toMatchObject({
+    group: { revision: 6, members: [{ moteId: 'mote-a' }, { moteId: 'mote-b', state: 'active', thread: ordinary.thread }] } })
+  expect((await f.cli('reply', originalReply, ordinary.sid)).code).not.toBe(0)
+  const rejoined = await address('work-after-rejoin', 'mote-b')
+  expect(rejoined.sid).toBe(ordinary.sid)
+  expect(rejoined.invitation!.operationId).not.toBe(ordinary.invitation!.operationId)
+  expect(await coreNotice(rejoined)).toMatchObject({ groupId, moteId: 'mote-b' })
+  const leave = { groupId, expectedRevision: 6, operationId: 'self-leave' }
+  expect((await f.cli('members leave', leave)).code).not.toBe(0)
+  const left = await action('members leave', leave, rejoined.sid)
+  expect(left.group.members[1]).toMatchObject({ state: 'left', thread: ordinary.thread })
+  expect(await action('members leave', leave, rejoined.sid)).toEqual(left)
+  expect((await action('update', { groupId, expectedRevision: 7, operationId: 'default-avatar', avatarMoteIds: [] })).group.avatarMoteIds).toEqual([])
+  expect((await f.cli('inspect', { groupId }, rejoined.sid)).code).not.toBe(0)
+  expect((await rpc.call('space.mote.group.inspect', { groupId })).messages.filter(message => message.author.kind === 'system')).toHaveLength(1)
+  expect(await rpc.call('space.mote.group.create', create)).toMatchObject({ group: { id: groupId, revision: 8 } })
+  expect(f.created).toHaveBeenCalledTimes(2)
+})
+
+it('uses real scoped Topic files for human and exact Group input, refusing traversal and outside aliases', async () => {
+  const f = await fixture()
+  const workspace = { id: SCRATCH_WORKSPACE_ID, hostId: 'local', path: join(f.root, 'scratch'), name: 'Scratch' }
+  await mkdir(workspace.path)
+  const files = new OrdinaryWorkspaceFiles(), topics = new ScratchTopics({ files })
+  const topic = await topics.ensure(workspace, core.mintObjectId(), 'Files for the release')
+  const zoneId = topicContentZoneId(workspace, topic)
+  const spatial = new core.AgentMuxSpatialStateStore(join(f.root, 'topic-spatial.json'))
+  const graph: core.AgentMuxSpatialGraph = { spaces: [], zones: [], bindings: [], tabs: [], regions: [], layouts: {}, tabLayouts: {}, resources: {} }
+  registerKnowledgeTopic(graph, workspace, topic, { categoryId: 'fixture-category', spaceId: 'fixture-category-space',
+    title: 'Original category', hostId: 'local', directoryPath: join(f.root, 'category'), revision: null })
+  await spatial.commit({ graph, expectedRevision: 0 })
+  const root = topic.physicalDirectoryPath!
+  await mkdir(join(root, 'folder'))
+  await writeFile(join(root, 'folder', 'readme.md'), 'Original shared text')
+  await writeFile(join(f.root, 'private.txt'), 'Outside App Topic')
+  await symlink(join(f.root, 'private.txt'), join(root, 'outside-file'))
+  await symlink(f.root, join(root, 'outside-directory'))
+  const actualFiles = createHostMoteGroupFiles({ spatial, workspace: async id => id === workspace.id ? workspace : undefined, topics, files })
+  const { rpc } = await f.start(actualFiles)
+  const topicTarget = { zoneId, spaceId: topic.id, expectedResource: { workspaceId: workspace.id, hostId: workspace.hostId, workspacePath: workspace.path } }
+  const { group } = await rpc.call('space.mote.group.create', { operationId: 'file-group', name: 'Files group', members: [f.target('mote-a')], topic: topicTarget })
+  const groupId = group.id
+  expect(group.topic).toEqual(topicTarget)
+  const result = await f.cli('file list', { groupId, path: 'folder', limit: 1 })
+  expect(result.code, result.stderr).toBe(0)
+  expect(JSON.parse(result.stdout).result).toMatchObject({ resource: { zoneId }, result: { status: 'directory-listed', complete: true, entries: [{ name: 'readme.md' }] } })
+  const rootFiles = await rpc.call('space.mote.group.file.list', { groupId })
+  expect(JSON.stringify(rootFiles)).not.toContain(join(f.root, 'private.txt'))
+  for (const path of ['../private.txt', '/private.txt', 'folder/../private.txt', 'outside-directory/../private.txt', 'folder\\readme.md']) {
+    await expect(rpc.call('space.mote.group.file.read', { groupId, path })).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
+  }
+  await expect(rpc.call('space.mote.group.file.list', { groupId, path: 'outside-directory' })).rejects.toThrow()
+  expect(await rpc.call('space.mote.group.file.read', { groupId, path: 'outside-file' })).toMatchObject({ result: { status: 'error' } })
+  expect(f.created).not.toHaveBeenCalled()
+  const { message } = await rpc.call('space.mote.group.send', { groupId, operationId: 'file-input', body: 'Review', recipientIds: ['mote-a'] })
+  await vi.waitFor(async () => expect((await rpc.call('space.mote.group.inspect', { groupId })).messages[0]!.deliveries[0]!.status).toBe('accepted'))
+  const sid = (await rpc.call('space.mote.group.inspect', { groupId })).group.members[0]!.thread!.agentSessionId
+  const path = 'folder/readme.md', inputOperationId = message.deliveries[0]!.operationId
+  expect((await f.cli('file read', { groupId, path }, sid)).code).not.toBe(0)
+  expect((await f.cli('file read', { groupId, path, inputOperationId: 'another-input' }, sid)).code).not.toBe(0)
+  const read = await f.cli('file read', { groupId, path, inputOperationId }, sid)
+  expect(read.code, read.stderr).toBe(0)
+  expect(JSON.parse(read.stdout).result).toMatchObject({ result: { status: 'read', document: { content: 'Original shared text' } } })
+  await rpc.call('space.mote.group.members.remove', { groupId, expectedRevision: 1, operationId: 'revoke-file-scope', memberIds: ['mote-a'] })
+  expect((await f.cli('file read', { groupId, path, inputOperationId }, sid)).code).not.toBe(0)
 })
