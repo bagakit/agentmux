@@ -52,3 +52,5 @@ Object.assign(window, { moteDiscussionCapture: { ready: true, captureAt, facts: 
  longNames() { original.longNames() }, theme: original.theme,
  restore() { unbound = false; unavailable = false; original.restore(); seedTopics(); requestPmoTeamsTopicFloatingClose({ restoreFocus: false }); requestPmoTeamsTopicFloatingOpen({ targetTopicId: topic.id }) }
 } })
+
+if (query.has('nativeGroups')) await import('./native-groups-source').then(module => module.connectGroupFixture(target))

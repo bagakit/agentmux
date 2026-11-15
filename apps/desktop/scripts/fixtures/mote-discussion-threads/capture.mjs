@@ -8,13 +8,14 @@ import { listProbeProcesses, runProbeProcess, stopProbeProcesses } from '../../p
 import { radixOverlayAliases } from '../../../../../packages/client-ui/scripts/radix-overlay-aliases.ts'
 const root = path.resolve(import.meta.dirname, '../../../../..')
 const navigation = process.argv.includes('--top-navigation')
+const groups = process.argv.includes('--native-groups')
 const fixture = navigation ? path.join(import.meta.dirname, '../mote-thread-navigation') : import.meta.dirname
 const require = createRequire(path.join(root, 'apps/desktop/package.json'))
 const { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
 const directory = path.join(root, '.bagakit/mote-discussion-threads/desktop-ui', 'capture-' + crypto.randomUUID())
 const compiled = path.join(directory, 'compiled')
 await fs.mkdir(compiled, { recursive: true }); await fs.mkdir(path.join(directory, 'userData'))
-const receipt = { passed: false, captureOnly: true, aestheticReview: 'not-performed', captureSubset: 'mote-discussion-threads-full-app', source: {}, images: {},
+const receipt = { passed: false, captureOnly: true, aestheticReview: 'not-performed', captureSubset: groups ? 'mote-native-groups-full-app' : 'mote-discussion-threads-full-app', source: {}, images: {},
   boundary: 'Original App/PmoTeamsTopicFloatingPanel/MoteSpaceFrame/WorkspaceWorkbench/SessionPane/Composer/Store and CSS in private Electron. Original Core conversation projector/codec consumes controlled typed source pages. Exact private Sessions/Run/Space bindings and finite API/native ports only; no real user App/Run, Provider, model, package, install or native recovery claim.' }
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 try {
@@ -68,18 +69,18 @@ try {
     format: 'esm', platform: 'browser', conditions: ['browser', 'production'], target: 'esnext', jsx: 'automatic', logLevel: 'error', metafile: true, alias, plugins: [clientSources, workers],
     loader: { '.png': 'file', '.gif': 'file', '.svg': 'file', '.avif': 'file', '.woff': 'file', '.woff2': 'file', '.ttf': 'file' }, define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' } })
   for (const file of Object.keys({ ...built.metafile.inputs, ...workerInputs }).filter(file => !file.startsWith('original-worker:') && !file.startsWith('original-url:') && !file.startsWith('original-raw:'))) receipt.source[file] = sha(await fs.readFile(path.resolve(root, file)))
-  for (const file of [import.meta.filename, path.join(fixture, 'renderer-main.cjs'), ...navigation ? [] : [path.join(fixture, 'thread-discovery.cjs')]]) receipt.source[path.relative(root, file)] = sha(await fs.readFile(file))
+  for (const file of [import.meta.filename, path.join(fixture, 'renderer-main.cjs'), ...navigation ? [] : [path.join(fixture, 'thread-discovery.cjs'), ...(groups ? [path.join(fixture, 'native-groups.cjs')] : [])]]) receipt.source[path.relative(root, file)] = sha(await fs.readFile(file))
   for (const file of ['apps/desktop/src/renderer/src/App.tsx', 'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/components/PmoTeamsTopicFloatingPanel.tsx', 'apps/desktop/src/renderer/src/components/MoteSpaceFrame.tsx', 'apps/desktop/src/renderer/src/components/WorkspaceWorkbench.tsx', 'apps/desktop/src/renderer/src/components/SessionPane.tsx', 'apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx', 'apps/desktop/src/renderer/src/components/MoteCooperation.tsx'])
     assert.ok(receipt.source[file], 'Nonempty original product consumer is required: ' + file)
   await fs.writeFile(path.join(compiled, 'index.html'), '<!doctype html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="entry.css"></head><body><div id="root"></div><script>window.closedTabSetup={phase:"module-loading",errors:[]};window.addEventListener("error",e=>window.closedTabSetup.errors.push(String(e.error?.stack||e.message)));window.addEventListener("unhandledrejection",e=>window.closedTabSetup.errors.push(String(e.reason?.stack||e.reason)));</script><script type="module" src="entry.js"></script></body></html>')
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const logs = []
-  receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'renderer-main.cjs'), path.join(compiled, 'index.html'), directory, directory, ...(process.argv.includes('--notice-only') ? ['--notice-only'] : [])],
+  receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'renderer-main.cjs'), path.join(compiled, 'index.html'), directory, directory, ...(process.argv.includes('--notice-only') ? ['--notice-only'] : []), ...(groups ? ['--native-groups'] : [])],
     { cwd: root, env, timeoutMs: 90000, onLine: line => logs.push(line) })
   await fs.writeFile(path.join(directory, 'renderer.log'), logs.join('\n'))
   receipt.renderer = JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8'))
   assert.equal(receipt.process.exitCode, 0); assert.equal(receipt.renderer.passed, true)
-  assert.equal(receipt.renderer.images.length, navigation ? 15 : process.argv.includes('--notice-only') ? 2 : 15, 'Every named real product scene must be captured')
+  assert.equal(receipt.renderer.images.length, navigation ? 15 : groups ? 7 : process.argv.includes('--notice-only') ? 2 : 15, 'Every named real product scene must be captured')
   if (navigation) {
     receipt.restartProcess = await runProbeProcess(require('electron'), [path.join(fixture, 'renderer-main.cjs'), path.join(compiled, 'index.html'), directory, directory, '--restore'], { cwd: root, env, timeoutMs: 45000, onLine: line => logs.push(line) })
     receipt.restart = JSON.parse(await fs.readFile(path.join(directory, 'renderer-restart-result.json'), 'utf8'))

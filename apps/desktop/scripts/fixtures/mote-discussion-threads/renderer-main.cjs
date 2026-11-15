@@ -10,11 +10,11 @@ app.whenReady().then(async () => {
   Menu.setApplicationMenu(null)
   win = new BrowserWindow({ width: 1180, height: 850, useContentSize: true, show: false, webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false } })
   win.webContents.on('console-message', (_event, details) => { if (details.level === 'error') result.errors.push(details.message) })
-  const { read, until, settle, click } = nativeRendererInput(win, result.interactions, '')
+  const { read, until, settle, click, type } = nativeRendererInput(win, result.interactions, '')
   const panel = 'document.querySelector("[data-pmo-teams-topic-floating]:popover-open")'
   const findButton = label => `(()=>{const p=${panel};return [...p.querySelectorAll('button')].find(n=>n.checkVisibility()&&n.textContent.trim()===${JSON.stringify(label)})})()`
   async function load(initialDelay = false, initialUnbound = false) {
-   await win.loadFile(html, { query: { phase: 'seed', retained: '1', zoneSelection: '1', ...(initialDelay ? { initialDelay: '1' } : {}), ...(initialUnbound ? { initialUnbound: '1' } : {}) } })
+   await win.loadFile(html, { query: { phase: 'seed', retained: '1', zoneSelection: '1', ...(initialDelay ? { initialDelay: '1' } : {}), ...(initialUnbound ? { initialUnbound: '1' } : {}), ...(process.argv.includes('--native-groups') ? { nativeGroups: '1' } : {}) } })
    await until('window.moteDiscussionCapture?.ready && !!' + panel, 'Complete original App Mote entry')
    await read('window.__connectionsTrustedEvents=window.moteDiscussionCapture.facts().trustedEvents'); app.focus({ steal: true }); win.show(); win.focus(); win.webContents.focus(); if (!initialDelay) await until('document.hasFocus()'); await settle()
   }
@@ -29,6 +29,14 @@ app.whenReady().then(async () => {
   }
   await load(); await until(panel + '.innerText.includes("把协作体验补完整")', 'Original Main native messages')
   const before = await facts(); result.initial = before
+  if (process.argv.includes('--native-groups')) {
+   await until('window.moteNativeGroupsCapture', 'Native group source connected to original panel')
+   await require('./native-groups.cjs')({ win, panel, findButton, read, until, click, type, capture, theme: light => read('window.moteDiscussionCapture.theme(' + light + ')') })
+   result.final = await facts(); assert.deepEqual(result.final.identities, before.identities)
+   result.groupCalls = await read('window.moteNativeGroupsCapture.calls')
+   result.passed = true
+   return
+  }
   if (process.argv.includes('--notice-only')) {
    await read('window.moteDiscussionCapture.unavailable()'); await click('js:' + findButton('Threads')); await click('js:' + findButton('Discussion'))
    await until(panel + '.innerText.includes("原主角色暂未确认")', 'One local unknown role notice retains history')
