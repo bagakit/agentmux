@@ -16,7 +16,7 @@ export default defineConfig({ ...original, cacheDir: '.cache/conversation-source
       'advance-failed-captured': ['coverage[at] = unavailable(source, error, String(cut.sequence))', "cuts[cuts.indexOf(cut)] = { kind: 'captured', epoch: cut.epoch, sequence: cut.sequence + 1 }; coverage[at] = unavailable(source, error, String(cut.sequence))"],
       'ignore-captured-envelope': ['current.agentSessionId !== ref.agentSessionId || ', ''],
       'ignore-ordered-range': ['index > 0 && record.sequence <= page.records[index - 1]!.sequence', 'false'],
-      'ignore-position-witness': ["if (prior?.kind === 'captured-stream' && record.order.kind === 'captured-stream' &&", "if (false && prior?.kind === 'captured-stream' && record.order.kind === 'captured-stream' &&"],
+      'ignore-position-witness': ['(firstSequence !== undefined && record.firstSequence !== firstSequence)', 'false'],
       'accept-foreign-result': ['page.agentSessionId !== ref.agentSessionId || page.hostId !== ref.hostId ||', 'false || page.hostId !== ref.hostId ||']
     }
     let output = source

@@ -78,7 +78,11 @@ it.each(['refusal', 'epoch', 'future', 'range', 'foreign-current', 'foreign-page
       if (mode === 'range') throw new AgentMuxError('The exact captured range is unavailable.', 'AGENT_CONVERSATION_CAPTURED_GAP')
       if (mode === 'foreign-page') return { ...page, agentSessionId: 'foreign-page-source' }
       if (mode === 'unordered') return { ...page, records: [...page.records].reverse() }
-      if (mode === 'within-batch-position') { expect(page.records).toHaveLength(2); return { ...page, records: page.records.map((record, index) => ({ ...record, firstSequence: record.firstSequence + index })) } }
+      if (mode === 'within-batch-position') {
+        expect(page.records).toHaveLength(2)
+        expect(page.records[0]).toMatchObject({ item: null, recordId: 'same-batch-original' })
+        return { ...page, records: page.records.map((record, index) => ({ ...record, firstSequence: record.firstSequence + index })) }
+      }
       if (mode === 'changed-position') return { ...page, records: page.records.map(record => ({ ...record, firstSequence: record.firstSequence + 1 })) }
     }
     return page
@@ -96,7 +100,14 @@ it.each(['refusal', 'epoch', 'future', 'range', 'foreign-current', 'foreign-page
     const parsed = consumeConversationWindowPage(JSON.parse(result.stdout).result); expect(parsed.kind).toBe('complete')
     if (parsed.kind === 'complete') { expect(ids(parsed.snapshot)).toEqual(ids(after)); expect(cut(parsed.snapshot, 'captured')).toEqual(cut(before, 'captured')); expect(parsed.snapshot.coverage.find(source => source.source.kind === 'captured')!.current).toBe('unavailable') }
   }
-  leaf.mockRestore(); untouched(f)
+  leaf.mockRestore()
+  if (mode === 'within-batch-position') {
+    const retried = await availableFrame(f, after)
+    expect(retried.window.id).toBe(before.window.id)
+    expect(ids(retried)).toEqual(expect.arrayContaining(['same-batch-original', 'retained-captured', 'independent-native-progress']))
+    expect(cut(retried, 'captured')).not.toEqual(cut(before, 'captured'))
+  }
+  untouched(f)
 })
 it('foreign whole-input scope and modified signed view intent still reject before either source primitive runs', async () => {
   const f = await fixture(), before = await frame(f)
@@ -110,13 +121,17 @@ it('foreign whole-input scope and modified signed view intent still reject befor
 })
 
 it('a foreign result from an accurately selected native primitive is isolated before any of its rows or cut are admitted', async () => {
-  const f = await fixture(), before = await frame(f), original = f.client.readSessionHistoryChanges.bind(f.client)
-  vi.spyOn(f.client, 'readSessionHistoryChanges').mockImplementation(async (...args) => {
+  const f = await fixture(), before = await frame(f)
+  // Inject at the actual native port result, after the Provider's own source validation.
+  const original = f.client['nativeHistoryChangesPage'].bind(f.client)
+  const client = f.client as unknown as { nativeHistoryChangesPage: typeof original }
+  const leaf = vi.spyOn(client, 'nativeHistoryChangesPage').mockImplementation(async (...args) => {
     const result = await original(...args)
     return { ...result, agentSessionId: 'foreign-native-result', items: [{ id: 'unqualified-native-row', kind: 'user-message', contentParts: [{ kind: 'text', text: 'Unqualified source body' }] }] }
   })
   await captured(f, 'captured-with-rejected-native-result')
   const after = await availableFrame(f, before)
+  expect(leaf).toHaveBeenCalled()
   expect(ids(after)).toEqual(expect.arrayContaining(['retained-native', 'captured-with-rejected-native-result']))
   expect(ids(after)).not.toContain('unqualified-native-row'); expect(cut(after, 'native')).toEqual(cut(before, 'native'))
   expect(after.coverage.find(source => source.source.kind === 'native')!.current).toBe('unavailable'); untouched(f)
