@@ -1703,7 +1703,7 @@ it('copied Goal plan links and the real CLI reveal the original graph without cr
     expect(requests.every(request => request.operation === 'focus')).toBe(true)
     expect((await owner.client.call('goal.inspect', { goalId: 'exact' })).goal!.plan).toEqual(revised.plan)
     for (const action of lifecycle) expect(action).not.toHaveBeenCalled()
-    await owner.client.call('goal.delete', { goalId: 'exact' })
+    await owner.client.call('goal.delete', { goalId: 'exact', confirmation: 'delete' })
     await expect(owner.client.call('goal.create', {
       goalId: 'exact', title: 'Namesake after removal', risk: 'low', confirmation: 'user', operationId: 'namesake-create',
     })).rejects.toThrow('retired')

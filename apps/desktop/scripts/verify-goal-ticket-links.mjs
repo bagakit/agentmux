@@ -29,7 +29,7 @@ try {
   for (const { id, path, anchor, replacement, failure } of runs) {
     const loaded = join(proof, id + '.loaded')
     const result = await new Promise((resolve, reject) => {
-      const child = spawn(join(root, 'node_modules/.bin/vitest'), ['run', '--no-cache', '--reporter=json',
+      const child = spawn(join(root, 'node_modules/.bin/vitest'), ['run', '--configLoader', 'runner', '--no-cache', '--reporter=json',
         '--config', 'apps/desktop/test/vitest.goal-links.config.mts', 'apps/desktop/test/desktop-focus-navigation.test.tsx', '-t', title], {
         cwd: root, stdio: ['ignore', 'pipe', 'pipe'],
         env: { ...process.env, GOAL_LINK_LOADED: loaded,
