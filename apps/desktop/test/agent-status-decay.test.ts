@@ -12,6 +12,7 @@ import {
   nextAgentStatusDecayDelayMs
 } from '../src/renderer/src/lib/agent-status-decay.js'
 import { useAppStore } from '../src/renderer/src/store.js'
+import { focusNativeSubagents } from '../src/renderer/src/lib/focus-native-subagents.js'
 
 // ---------------------------------------------------------------------------
 // T-003：掉了 hook 流的 `working` 不该留一个永远转的圈。
@@ -134,6 +135,22 @@ describe('decayStaleAgentStatuses：把陈旧的 working 降成中性态', () =>
 })
 
 describe('nextAgentStatusDecayDelayMs：给定时器排下一个到点', () => {
+  it('refreshes an older native child while another child and the parent still have fresh work evidence', () => {
+    const original = agent('parent', 'working', 1000) as Extract<SessionSnapshot, { kind: 'agent' }>
+    const session: typeof original = { ...original, nativeSessionId: 'native-parent', nativeSubagents: {
+      providerId: original.providerId, run: original.control.run, nativeSessionId: 'native-parent', unconfirmed: false,
+      sessions: [
+        { nativeAgentId: 'older', hookReceiptId: 'start-older', state: 'working', phase: 'running', observedAt: 0 },
+        { nativeAgentId: 'newer', hookReceiptId: 'start-newer', state: 'working', phase: 'running', observedAt: 1000 },
+        { nativeAgentId: 'ended', hookReceiptId: 'end-child', state: 'done', phase: 'ended', outcome: 'completed', observedAt: 1000 },
+      ],
+    } }
+    expect(nextAgentStatusDecayDelayMs([session], STALE_AFTER_MS - 500)).toBe(500)
+    expect(focusNativeSubagents(session, STALE_AFTER_MS - 1)?.rows.map(row => row.state)).toEqual(['running', 'running', 'completed'])
+    expect(focusNativeSubagents(session, STALE_AFTER_MS)?.rows.map(row => row.state)).toEqual(['unknown', 'running', 'completed'])
+    expect(nextAgentStatusDecayDelayMs([session], STALE_AFTER_MS)).toBe(1000)
+    expect(focusNativeSubagents({ ...session, nativeSessionId: 'another-native-session' }, STALE_AFTER_MS)).toBeUndefined()
+  })
   it('working 刚落地时排满额 TTL', () => {
     expect(nextAgentStatusDecayDelayMs([agent('a', 'working', 0)], 0)).toBe(STALE_AFTER_MS)
   })
