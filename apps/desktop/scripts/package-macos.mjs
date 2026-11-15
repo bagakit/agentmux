@@ -200,7 +200,7 @@ async function verifyIdentity(appPath) {
   }
   assert(await plistValue(plist, 'CFBundleIconFile') === 'agentmux.icns', 'Packaged icon is wrong.')
   for (const key of ['NSLocationUsageDescription', 'NSLocationWhenInUseUsageDescription']) {
-    assert.equal(await plistValue(plist, key), MAP_LOCATION_USAGE, 'Packaged location usage text is wrong.')
+    assert(await plistValue(plist, key) === MAP_LOCATION_USAGE, 'Packaged location usage text is wrong.')
   }
   assert((await plistValue(plist, 'NSScreenCaptureUsageDescription')).length > 0, 'Packaged screen capture purpose is missing.')
   assert(!await pathExists(join(contents, 'Resources', 'default_app.asar')), 'Electron default app entered the package.')
@@ -1096,7 +1096,7 @@ async function main({ selectAfterBuild, install = installRequested, onlyApp = ap
     await verifyWorkspaceMoveHelper(stagedWorkspaceMoveHelper,
       await sha256(join(desktopRoot, 'resources', 'bin', 'agentmux-workspace-move')))
     const locationAddOn = 'agentmux-mac-location.node'
-    assert.equal(await sha256(join(dirname(stagedWorkspaceMoveHelper), locationAddOn)),
+    assert(await sha256(join(dirname(stagedWorkspaceMoveHelper), locationAddOn)) ===
       await sha256(join(desktopRoot, 'resources', 'bin', locationAddOn)), 'Packaged location add-on differs from the built candidate.')
     await verifyNativeDesktopCopy(stagedApp, repositoryRoot)
     process.stdout.write('Signing and verifying macOS candidate...\n')
