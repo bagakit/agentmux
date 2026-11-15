@@ -36,36 +36,47 @@ const generic: AgentNativeHookSpecification = {
 // Controlled SDK/native observations are the fixture boundary. Actual candidate Core owns the bound
 // HTTP ingress, normalization, registry, public status, event reader, native observer and raw input.
 // Built-in declarations are exercised below; this does not claim that a real vendor emitted them.
-async function fixture(providerId: AgentProviderId, hook = native.get(providerId).hook, observeNative: boolean | 'codex-rollout' | 'codex-retained' | 'codex-retained-unavailable' = false) {
+type NativeFixture = boolean | 'codex-rollout' | 'codex-retained' | 'codex-retained-unavailable'
+  | 'codex-retained-without-main' | 'codex-retained-oversized-suffix' | 'codex-retained-invalid-main'
+async function fixture(providerId: AgentProviderId, hook = native.get(providerId).hook, observeNative: NativeFixture = false) {
   const root = await mkdtemp(join(tmpdir(), 'amx-completion-'))
   for (const key of Object.keys(process.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key)) vi.stubEnv(key, undefined)
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', root); vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(root, 'state'))
   vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'messages.ndjson'))
-  const retainedChildren = observeNative === 'codex-retained' || observeNative === 'codex-retained-unavailable'
+  const retainedChildren = typeof observeNative === 'string' && observeNative !== 'codex-rollout'
   const codexRollout = observeNative === 'codex-rollout' || retainedChildren
   const transcriptPath = join(root, 'native-rollout.jsonl')
   let ordinal = 0
   const appendNative = (...events: Record<string, unknown>[]) => appendFile(transcriptPath, events.map(payload => JSON.stringify({
-    type: 'event_msg', ordinal: ++ordinal, timestamp: new Date().toISOString(), payload,
+    type: 'event_msg', ...(payload.type === 'sub_agent_activity' ? {} : { ordinal: ++ordinal }), timestamp: new Date().toISOString(), payload,
   }) + '\n').join(''))
   const retainedAt = Date.now() - 20
   if (codexRollout) {
-    await writeFile(transcriptPath, JSON.stringify({ type: 'session_meta', payload: { id: 'original-native' } }) + '\n')
+    await writeFile(transcriptPath, JSON.stringify({ type: 'session_meta', payload: { id: 'original-native', history_mode: 'paginated' } }) + '\n')
     await appendNative({ type: 'task_started', thread_id: 'original-native', turn_id: 'original-turn' })
     if (retainedChildren) {
       await appendNative(
         codexChildItem('retained-child', retainedAt + 1),
         codexChildItem('superseded-child', retainedAt + 2),
         codexChildItem('superseded-child', retainedAt + 3, 'interacted'),
+        codexChildItem('legacy-superseded-child', retainedAt + 4),
+        { type: 'sub_agent_activity', event_id: 'later-legacy-activity',
+          agent_thread_id: 'legacy-superseded-child', kind: 'interrupted' },
         codexChildItem('foreign-child', retainedAt + 4, 'completed', 'foreign-parent'),
         codexChildItem('unlisted-child', retainedAt + 5),
         codexChildItem('retained-child', retainedAt + 10),
       )
       if (observeNative === 'codex-retained-unavailable') await appendFile(transcriptPath, '{invalid native history\n')
-      // A regular multi-block native history places both starts and outcomes
-      // outside the status reader's recent window. The main turn remains readable.
-      for (let index = 0; index < 12; index++) await appendNative({ type: 'custom_note', text: 'x'.repeat(96 * 1024) })
-      await appendNative({ type: 'task_complete', thread_id: 'original-native', turn_id: 'original-turn' })
+      // A regular multi-block native history puts child outcomes outside the recent window.
+      if (observeNative === 'codex-retained-oversized-suffix') {
+        await appendNative({ type: 'custom_note', text: 'x'.repeat(768 * 1024) })
+      } else {
+        for (let index = 0; index < 12; index++) await appendNative({ type: 'custom_note', text: 'x'.repeat(96 * 1024) })
+      }
+      if (observeNative === 'codex-retained-invalid-main')
+        await appendNative({ type: 'task_complete', thread_id: 'original-native' })
+      else if (observeNative !== 'codex-retained-without-main' && observeNative !== 'codex-retained-oversized-suffix')
+        await appendNative({ type: 'task_complete', thread_id: 'original-native', turn_id: 'original-turn' })
     }
   }
   let nativeObserver: AgentProviderSessionStatusObservationContext | undefined
@@ -85,7 +96,7 @@ async function fixture(providerId: AgentProviderId, hook = native.get(providerId
     nativeHandle: { kind: 'provider', providerId, sessionId: 'original-native', ...(codexRollout ? { transcriptPath } : {}) },
     ...(retainedChildren ? { updatedAt: retainedAt, nativeSubagents: {
       run: { runId: 'original-run' }, providerId, nativeSessionId: 'original-native', unconfirmed: false,
-      sessions: ['retained-child', 'superseded-child', 'foreign-child'].map(nativeAgentId => ({
+      sessions: ['retained-child', 'superseded-child', 'legacy-superseded-child', 'foreign-child'].map(nativeAgentId => ({
         nativeAgentId, phase: 'running' as const, state: 'working' as const, hookReceiptId: `${nativeAgentId}-start`, observedAt: retainedAt,
       }))
     } } : {}) }
@@ -133,7 +144,7 @@ async function fixture(providerId: AgentProviderId, hook = native.get(providerId
   cleanup.push(async () => { await client.dispose(); 
     expect(inner.kernel.start).not.toHaveBeenCalled(); expect(inner.kernel.stop).not.toHaveBeenCalled(); await rm(root, { recursive: true, force: true }) })
   // The source-mode resolver supplies the same runtime class to Desktop; published declarations have separate private member identities.
-  return { client, desktopClient: client as unknown as DesktopRuntimeClient, events, feed, saved, original, root, store, appendNative,
+  return { client, desktopClient: client as unknown as DesktopRuntimeClient, events, feed, saved, original, root, store, transcriptPath, appendNative,
     rawInput: () => client.writeAgent({ agentSessionId: original.agentSessionId, expectedRun: original.run, source: 'user', data: 'private raw input\r' }),
     observer: async () => { await client.statusAgent(original.agentSessionId); expect(nativeObserver).toBeDefined(); return nativeObserver! } }
 }
@@ -459,7 +470,8 @@ describe('native completion authority through actual Core consumers', () => {
     controller.commit(await controller.prepare(config)); cleanup.push(async () => controller.dispose())
     const { sessions } = await controller.snapshot(config)
     expect(agentContextForSession(sessions[0]!, undefined, undefined, undefined, null).nativeSubagents?.rows).toEqual([
-      { id: 'retained-child', state: 'completed' }, { id: 'superseded-child', state: 'running' }, { id: 'foreign-child', state: 'running' },
+      { id: 'retained-child', state: 'completed' }, { id: 'superseded-child', state: 'running' },
+      { id: 'legacy-superseded-child', state: 'running' }, { id: 'foreign-child', state: 'running' },
     ])
     const server = new AgentMuxControlServer({ socketPath: join(h.root, 'child-state.sock'), coreClients: () => [{ hostId: 'local', client: h.client }] })
     await server.start(); cleanup.push(() => server.stop())
@@ -480,6 +492,41 @@ describe('native completion authority through actual Core consumers', () => {
     await vi.waitFor(async () => expect((await h.saved()).nativeSubagents?.sessions[0]).toMatchObject({
       nativeAgentId: 'retained-child', phase: 'ended', outcome: 'completed',
     }))
+  })
+
+  it.each([
+    'codex-retained-without-main', 'codex-retained-oversized-suffix',
+  ] as const)('Codex retained completion recovers independently with %s', async nativeFixture => {
+    const h = await fixture('codex', generic, nativeFixture)
+    await h.client.statusAgent(h.original.agentSessionId)
+    await vi.waitFor(async () => expect((await h.saved()).nativeSubagents?.sessions[0]).toMatchObject({
+      nativeAgentId: 'retained-child', phase: 'ended', outcome: 'completed',
+    }))
+    expect(h.events).toContainEqual(expect.objectContaining({ type: 'agent-error', code: 'AGENT_NATIVE_STATUS_GAP' }))
+    expect((await h.saved()).semanticStatus).toBeUndefined()
+    expect(h.events.filter(event => event.type === 'agent-status')).toEqual([])
+    expect((await h.rawInput()).appliedByteRange).not.toBeNull()
+    await h.appendNative({ type: 'task_complete', thread_id: 'original-native', turn_id: 'original-turn' })
+    await vi.waitFor(async () => expect((await h.saved()).semanticStatus).toMatchObject({ state: 'done', nativeTurnId: 'original-turn' }))
+    expect((await h.client.statusAgent(h.original.agentSessionId)).observation.subagentSessions?.sessions[0]?.outcome).toBe('completed')
+  })
+
+  it('Codex retained completion never reads a different native source as the original parent', async () => {
+    const h = await fixture('codex', generic, 'codex-retained-without-main')
+    await writeFile(h.transcriptPath, JSON.stringify({ type: 'session_meta', payload: { id: 'different-parent' } }) + '\n')
+    await h.appendNative(codexChildItem('retained-child', Date.now()))
+    await h.client.statusAgent(h.original.agentSessionId)
+    await vi.waitFor(() => expect(h.events).toContainEqual(expect.objectContaining({ type: 'agent-error', code: 'AGENT_NATIVE_STATUS_SOURCE_CHANGED' })))
+    expect((await h.saved()).nativeSubagents).toEqual(h.original.nativeSubagents)
+    expect((await h.rawInput()).appliedByteRange).not.toBeNull()
+  })
+
+  it('Codex retained completion does not treat malformed main evidence as an empty recent window', async () => {
+    const h = await fixture('codex', generic, 'codex-retained-invalid-main')
+    await h.client.statusAgent(h.original.agentSessionId)
+    await vi.waitFor(() => expect(h.events).toContainEqual(expect.objectContaining({ type: 'agent-error', code: 'AGENT_NATIVE_STATUS_UNCONFIRMED' })))
+    expect((await h.saved()).nativeSubagents).toEqual(h.original.nativeSubagents)
+    expect((await h.rawInput()).appliedByteRange).not.toBeNull()
   })
 
   it('actual original native outcomes retain independent unresolved child observations', async () => {
