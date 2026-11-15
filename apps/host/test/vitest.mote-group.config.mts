@@ -6,6 +6,7 @@ import { resolve } from 'node:path'
 const root = resolve(import.meta.dirname, '../../..')
 const variants = {
   'duplicate-send': ['apps/host/src/mote-group.ts', 'if (!fresh) return { message: await readMessage(message) }', 'if (false) return { message: await readMessage(message) }'],
+  'drop-quote': ['apps/host/src/mote-group.ts', 'note: inputNote(message.groupId, key.submissionId, quoted)', 'note: inputNote(message.groupId, key.submissionId, undefined)'],
   'reply-admission': ['apps/host/src/mote-group.ts', 'if (!accepted(receipt) || fact?.userContent', 'if (fact?.userContent']
 } as const
 const variant = process.env.AMUX_MOTE_GROUP_MUTANT as keyof typeof variants | undefined
