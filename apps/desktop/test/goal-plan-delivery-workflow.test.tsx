@@ -12,7 +12,7 @@ import { GoalDelegationOwner } from '../../host/src/goal-delegation-owner'
 import { publicGoalRecord } from '../../host/src/goal-projection'
 import type { DemandDelegationIntent } from '@agentmux/demand/delegations'
 import type { GoalPlanNodeInput } from '@agentmux/demand/goal-plan'
-import { GoalPlanGraph } from '../src/renderer/src/components/GoalPlanGraph'
+import { GoalPlanGraph, type GoalPlanReveal } from '../src/renderer/src/components/GoalPlanGraph'
 import { prepareRendererUpdate, useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { applyGoalDelegationResult } from '../src/renderer/src/lib/goal-delegation-work'
@@ -25,7 +25,10 @@ import { WorkbenchUserStateStore } from '../src/main/workbench-user-state'
 const dom = composerDOM(), cleanup: Array<() => unknown | Promise<unknown>> = []
 afterEach(async () => { try { await dom.render(null) } finally { for (const close of cleanup.splice(0).reverse()) await close() } })
 const goalId = 'original-delivery-goal'
-function MountedPlan() { const goal = useAppStore(state => state.demands[goalId]); return goal ? <GoalPlanGraph demand={goal as DemandProjection} /> : null }
+function MountedPlan({ reveal }: { reveal?: GoalPlanReveal } = {}) {
+  const goal = useAppStore(state => state.demands[goalId])
+  return goal ? <GoalPlanGraph demand={goal as DemandProjection} {...(reveal ? { reveal } : {})} /> : null
+}
 const node = (id: string, dependsOn: string[] = []): GoalPlanNodeInput => ({ id, title: id === 'api' ? 'Deliver the API' : 'Build its consumer', outcome: `Deliver ${id}`, dependsOn,
   criterionIds: ['result'], check: 'node --test checks/api.test.mjs', executor: { hostId: 'local', agentSessionId: 'worker' } })
 
@@ -128,6 +131,20 @@ it('a person requests changes then passes the new exact delivery through the ori
   expect(f.runtime.agentCreation).not.toHaveBeenCalled()
   expect(dom.container.querySelector('.goal-delivery__history')?.textContent).toContain('Changes requested')
   expect(document.activeElement).toBe(dom.container.querySelector('.goal-delivery__receipt'))
+})
+
+it('keeps the same focused review input when its live Ticket is revealed again', async () => {
+  await fixture()
+  await openDelivery()
+  await fill('Review note', 'Keep the current review draft')
+  const note = dom.container.querySelector<HTMLTextAreaElement>('[aria-label="Review note"]')!
+  note.focus()
+  note.setSelectionRange(5, 12)
+  await dom.render(<MountedPlan reveal={{ target: { nodeId: 'api' } }} />)
+  expect(dom.container.querySelector('[aria-label="Review note"]')).toBe(note)
+  expect(document.activeElement).toBe(note)
+  expect([note.selectionStart, note.selectionEnd]).toEqual([5, 12])
+  expect(note.value).toBe('Keep the current review draft')
 })
 
 it('keeps unsent inputs and an uncertain original operation across a detail unmount and actual user-document cold read, then reads the owner without resending', async () => {
