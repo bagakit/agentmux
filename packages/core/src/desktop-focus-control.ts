@@ -10,7 +10,7 @@ export type AgentMuxDesktopFocusTarget =
   | { kind: 'survey'; selection: AgentMuxSurveyPinReference; reference?: Pick<AgentMuxSpaceAddress, 'displayWorkspaceId' | 'groupId' | 'tabId' | 'regionId'> }
   | Extract<import('./sharing.js').AmuxObjectLinkTarget, {kind:'mote'}>
   | { kind: 'settings'; sectionId: string | null; hostId?: string }
-  | { kind: 'goal'; goalId: string; runtimeId?: string; namespace?: string; section?: 'plan'; ticket?: number }
+  | { kind: 'goal'; goalId: string; runtimeId?: string; namespace?: string; section?: 'plan'; nodeId?: string }
   | { kind: 'focus-agent'; hostId: string; agentSessionId: string }
   | { kind: 'surface'; surface: 'focus'; view?: AgentMuxDesktopFocusView }
   | { kind: 'surface'; surface: Exclude<AgentMuxDesktopSurface, 'focus'> }
@@ -48,7 +48,7 @@ export type AgentMuxDesktopPresentation = {
   tabId: string | null; regionId: string | null
   blockers: ('settings' | 'quick-switcher')[]
   /** Actual client presentation of one original Mote, distinct from the requested target. */
-  goal?: { goalId: string; runtimeId: string | null; namespace: string | null; section: 'overview' | 'plan' | 'activity'; ticket?: number }
+  goal?: { goalId: string; runtimeId: string | null; namespace: string | null; section: 'overview' | 'plan' | 'activity'; nodeId?: string }
   mote?: { spaceId: string; page: 'discussion' | 'threads'; eventId: string | null }
 }
 export type AgentMuxDesktopFloating = {

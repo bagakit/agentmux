@@ -194,9 +194,9 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
           if (method === 'goal.delegation.bind') throw new AgentMuxError('The original message became unavailable before binding. Keep its original source and body.', 'CONTROL_UNAVAILABLE')
           if (!existing.message && authority.runId !== saved.ownerRunId) throw new AgentMuxError('The saved task owner Run changed before its first submission. Read the original delegation and explicitly continue its responsibility.', 'CONTROL_REQUEST_CONFLICT')
           const submission = existing.message ? undefined : await this.demands.confirmDelegationSubmission(input.goalId, saved.operationId)
-          const owner = submission?.ticket ? await this.planOwner?.().catch(() => undefined) : undefined
-          const ticketLink = owner && submission?.ticket ? formatGoalTicketLink(input.goalId,
-            hostGoalAddress({ id: input.goalId, ...(submission.creationOrigin ? { creationOrigin: submission.creationOrigin } : {}) }, owner), submission.ticket) : undefined
+          const owner = submission && saved.planNodeId ? await this.planOwner?.().catch(() => undefined) : undefined
+          const ticketLink = owner && submission && saved.planNodeId ? formatGoalTicketLink(input.goalId,
+            hostGoalAddress({ id: input.goalId, ...(submission.creationOrigin ? { creationOrigin: submission.creationOrigin } : {}) }, owner), saved.planNodeId) : undefined
           const application = existing.message?.envelope.application ?? goalDelegationApplication(input.goalId, saved, ticketLink)
           // Only an explicit delegate retries this original outbox operation. A local save
           // cannot attest receipt; Core reconciles the exact target without renotifying it.
@@ -289,8 +289,8 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
       : await Promise.all((goal.delegations ?? []).map(delegation => this.observeDelegation(input.goalId, delegation, context, authority, goal)))
     const startObservations = quiet || !this.readStart ? undefined
       : await Promise.all((goal.dispatches ?? []).filter(start => start.execution === 'finite').map(start => this.readStart!(goal, start)))
-    const address = owner && goal.plan?.ticketNodes ? hostGoalAddress(goal, owner) : undefined
-    const ticketLinks = address ? goal.plan!.ticketNodes!.map((_, index) => formatGoalTicketLink(goal.id, address, index + 1)) : undefined
+    const address = owner && goal.plan ? hostGoalAddress(goal, owner) : undefined
+    const ticketLinks = address && goal.plan ? goal.plan.nodes.map(node => formatGoalTicketLink(goal.id, address, node.id)) : undefined
     const result: GoalDelegationResult = { ...(address && ticketLinks ? { address, ticketLinks } : {}), goalId: goal.id, goalUpdatedAt: goal.updatedAt, delegations: goal.delegations ?? [], ...hostGoalPlan(goal, owner),
       goalState: { status: goal.status, supervisorSessionId: goal.supervisorSessionId, ...(goal.alignment ? { alignment: goal.alignment } : {}) },
       ...(startObservations ? { dispatches: goal.dispatches ?? [], startObservations } : {}),
@@ -357,12 +357,12 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
     if (!ticketLink) return
     const [goal, owner] = await Promise.all([this.demands.get(goalId), this.planOwner?.().catch(() => undefined)])
     const target = parseAmuxObjectLink(ticketLink)
-    if (!goal || !owner || target.kind !== 'goal' || target.ticket === undefined)
+    if (!goal || !owner || target.kind !== 'goal' || target.nodeId === undefined)
       throw new AgentMuxError('The original Ticket address is unconfirmed. Retain this source and its original body.', 'CONTROL_UNAVAILABLE')
     const address = hostGoalAddress(goal, owner)
     const ownerMatches = target.runtimeId === undefined ? hasOriginalGoalBinding(goalId, address)
       : target.runtimeId === address.runtimeId && target.namespace === address.namespace
-    if (!ownerMatches || target.goalId !== goalId || goal.plan?.ticketNodes?.[target.ticket - 1] !== saved.planNodeId)
+    if (!ownerMatches || target.goalId !== goalId || target.nodeId !== saved.planNodeId)
       throw new AgentMuxError('The original Core source names another Goal owner or Ticket. Retain the original input.', 'CONTROL_REQUEST_CONFLICT')
   }
 

@@ -925,12 +925,6 @@ export class DemandStore {
           this.rejectDelegation(`Plan node ${node.id} must write at least one success criterion, all from the current Goal proposal. Unchanged existing criteria and recorded work are retained.`)
       }
       const now = Date.now(), next = (current?.revision ?? 0) + 1
-      const nodeIds = new Set(revision.nodes.map(node => node.id))
-      const ticketNodes = current?.ticketNodes ?? []
-      const removedTicket = ticketNodes.find(nodeId => !nodeIds.has(nodeId))
-      if (removedTicket) this.rejectDelegation('Published Ticket ' + removedTicket + ' retains its original number. Mark it cancelled to retire it.')
-      const numbered = new Set(ticketNodes)
-      const published = [...ticketNodes, ...revision.nodes.flatMap(node => numbered.has(node.id) ? [] : [node.id])]
       const previousIds = new Set(current?.nodes.map(node => node.id))
       const createdNodes = revision.nodes.filter(node => !previousIds.has(node.id)).map(node => node.id)
       for (const proposal of proposals) {
@@ -941,7 +935,7 @@ export class DemandStore {
           this.rejectDelegation('Ticket proposals must tie a new node to its original worker and attempt.')
       }
       const changedNodes = goalPlanChangedNodes(current?.nodes ?? [], revision.nodes)
-      demand.plan = { revision: next, alignmentRevision: revision.alignmentRevision, nodes: clone(revision.nodes), ticketNodes: published, reviews: current?.reviews ?? [],
+      demand.plan = { revision: next, alignmentRevision: revision.alignmentRevision, nodes: clone(revision.nodes), reviews: current?.reviews ?? [],
         history: [...(current?.history ?? []), { operationId: revision.operationId, revision: next, author, revisedAt: now, ...(changedNodes.length ? { changedNodes } : {}),
           ...(createdNodes.length ? { createdNodes } : {}), ...(proposals.length ? { proposals: clone(proposals) } : {}) }] }
       demand.updatedAt = Math.max(now, demand.updatedAt + 1)
@@ -1043,7 +1037,6 @@ export class DemandStore {
   /** Confirm a saved intent can still be submitted for the first time. Original message reconciliation reads remain independent. */
   async confirmDelegationSubmission(id: string, operationId: string): Promise<{
     workerRuntimeId?: string
-    ticket?: number
     creationOrigin?: Demand['creationOrigin']
   }> {
     return enqueue(this.root, () => this.withWriterLock(async () => {
@@ -1060,9 +1053,8 @@ export class DemandStore {
       if (entry.claimOperationId && (entry.claimOperationId !== assignment?.operationId || !assignment.author.runtimeId))
         this.rejectDelegation('The attempt’s original claim was superseded or its worker Runtime is unconfirmed. Retain the original intent and read the current plan.')
       await this.confirmSnapshot()
-      const ticket = (demand.plan!.ticketNodes?.indexOf(entry.planNodeId) ?? -1) + 1
       const workerRuntimeId = entry.claimOperationId ? assignment!.author.runtimeId : undefined
-      return { ...(workerRuntimeId ? { workerRuntimeId } : {}), ...(ticket ? { ticket } : {}),
+      return { ...(workerRuntimeId ? { workerRuntimeId } : {}),
         ...(demand.creationOrigin ? { creationOrigin: clone(demand.creationOrigin) } : {}) }
     }))
   }

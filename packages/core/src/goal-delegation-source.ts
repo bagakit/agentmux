@@ -47,7 +47,7 @@ export function readGoalDelegationSource(message: DurableAgentMuxMessage): GoalD
   if (ticketLink) {
     try {
       const target = parseAmuxObjectLink(ticketLink)
-      if (target.kind !== 'goal' || target.goalId !== goalId || target.ticket === undefined || p.planNodeId === undefined)
+      if (target.kind !== 'goal' || target.goalId !== goalId || target.nodeId === undefined || target.nodeId !== p.planNodeId)
         throw new Error('Does not name a Ticket of this original Goal.')
     } catch (error) {
       throw new AgentMuxError(error instanceof Error ? error.message : String(error), 'CONTROL_PROTOCOL_ERROR')

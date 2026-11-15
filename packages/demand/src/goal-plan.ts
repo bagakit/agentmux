@@ -13,6 +13,7 @@ export type GoalPlanNodeState = (typeof GOAL_PLAN_NODE_STATES)[number]
 /** An exact Agent identity; placement (local, remote Host or remote project) is the Host's fact. */
 export type GoalPlanExecutor = { hostId: string; agentSessionId: string }
 export type GoalPlanNodeInput = {
+  /** Original Ticket ID, minted by the creating client and retained across revisions. */
   id: string
   title: string
   /** The result this node must deliver, in the plan author's words. */
@@ -53,8 +54,6 @@ export type GoalPlan = {
   /** The Goal proposal version the node criteria were written against. */
   alignmentRevision: number
   nodes: GoalPlanNodeInput[]
-  /** Stable 1-based ordering of published Ticket numbers by original node. */
-  ticketNodes?: string[]
   reviews: GoalPlanReview[]
   /** Append-only provenance of each accepted revision. */
   history: GoalPlanRevisionRecord[]
@@ -68,8 +67,11 @@ function object(value: unknown, label: string, keys: readonly string[], optional
     throw new Error(`${label} has unsupported or missing fields`)
   return result
 }
+export function isGoalPlanIdentity(value: unknown): value is string {
+  return typeof value === 'string' && !!value.trim() && !/[\0\r\n\p{Surrogate}]/u.test(value)
+}
 function identity(value: unknown, label: string): string {
-  if (typeof value !== 'string' || !value.trim() || /[\0\r\n]/u.test(value)) throw new Error(`${label} must be a nonempty single-line identity`)
+  if (!isGoalPlanIdentity(value)) throw new Error(`${label} must be a nonempty single-line identity`)
   return value
 }
 function prose(value: unknown, label: string): string {
@@ -185,13 +187,10 @@ export function validateGoalPlanNodes(nodes: readonly GoalPlanNodeInput[]): void
 }
 
 export function parseGoalPlan(value: unknown): GoalPlan {
-  const data = object(value, 'plan', ['revision', 'alignmentRevision', 'nodes', 'reviews', 'history', 'ticketNodes'], ['ticketNodes'])
+  const data = object(value, 'plan', ['revision', 'alignmentRevision', 'nodes', 'reviews', 'history'])
   if (!Array.isArray(data.nodes) || !Array.isArray(data.reviews) || !Array.isArray(data.history)) throw new Error('plan nodes, reviews and history must be arrays')
   const nodes = data.nodes.map(parseGoalPlanNode)
   validateGoalPlanNodes(nodes)
-  const ticketNodes = data.ticketNodes === undefined ? undefined : identities(data.ticketNodes, 'plan Ticket nodes')
-  if (ticketNodes && (ticketNodes.length !== nodes.length || nodes.some(node => !ticketNodes.includes(node.id))))
-    throw new Error('Published Ticket numbers must identify the exact original plan nodes')
   const reviews = data.reviews.map(value => {
     const item = object(value, 'plan review', ['operationId', 'nodeId', 'delegationOperationId', 'verdict', 'check', 'note', 'reviewer', 'reviewedAt', 'deliveryHash'], ['deliveryHash'])
     const { reviewer, reviewedAt, ...input } = item
@@ -220,7 +219,7 @@ export function parseGoalPlan(value: unknown): GoalPlan {
   const revision = positive(data.revision, 'plan revision')
   if (new Set(history.map(record => record.operationId)).size !== history.length) throw new Error('plan history repeats an operation')
   if (history.length !== revision || history.some((record, index) => record.revision !== index + 1)) throw new Error('plan history must record every revision in order')
-  return { revision, alignmentRevision: positive(data.alignmentRevision, 'plan alignmentRevision'), nodes, ...(ticketNodes ? { ticketNodes } : {}), reviews, history }
+  return { revision, alignmentRevision: positive(data.alignmentRevision, 'plan alignmentRevision'), nodes, reviews, history }
 }
 
 export function parseGoalPlanRevisionInput(value: unknown): GoalPlanRevisionInput {
@@ -237,15 +236,15 @@ export function parseGoalPlanRevisionInput(value: unknown): GoalPlanRevisionInpu
     alignmentRevision: positive(data.alignmentRevision, 'plan alignmentRevision'), nodes }
 }
 
-/** Recorded work keeps its task contract; replacing that work means cancelling the old node. */
+/** Published nodes keep their identity. Recorded work also keeps its task contract. */
 export function assertGoalPlanKeepsRecordedNodes(previous: GoalPlan | undefined, next: readonly GoalPlanNodeInput[], delegations: readonly DemandDelegation[]): void {
   if (!previous) return
   const kept = new Map(next.map(node => [node.id, node]))
   for (const node of previous.nodes) {
+    const replacement = kept.get(node.id)
+    if (!replacement) throw new Error(`Published Ticket ${node.id} keeps its original identity; mark it cancelled instead of removing it`)
     const recorded = delegations.some(delegation => delegation.planNodeId === node.id) || previous.reviews.some(review => review.nodeId === node.id)
     if (!recorded) continue
-    const replacement = kept.get(node.id)
-    if (!replacement) throw new Error(`Plan node ${node.id} has delegations or reviews; mark it cancelled instead of removing it`)
     if (replacement.outcome !== node.outcome || replacement.check !== node.check || replacement.criterionIds.length !== node.criterionIds.length ||
       node.criterionIds.some(id => !replacement.criterionIds.includes(id)))
       throw new Error(`Plan node ${node.id} has recorded work; cancel it and add a new node to change its outcome, check or criteria`)

@@ -241,7 +241,7 @@ async function main(): Promise<number> {
   const invocation = await parseAgentMuxCliInvocation(process.argv.slice(2))
   operationId = typeof invocation.params.operationId === 'string' ? invocation.params.operationId : undefined
   const { method } = invocation.command
-  if (invocation.sourceHost !== undefined && (method === 'mesh.code.read' || method === 'mote.playbook.pmo' || method === 'system.metrics.profile.analyze' || method === 'system.endpoint' && !invocation.params.inspect)) {
+  if (invocation.sourceHost !== undefined && (method === 'mesh.code.read' || method === 'mote.playbook.pmo' || method === 'goal.plan.new-id' || method === 'system.metrics.profile.analyze' || method === 'system.endpoint' && !invocation.params.inspect)) {
     throw new AgentMuxError('--source-host selects a Source business service. This local/static command uses its original default or explicit endpoint.', 'INVALID_CLI_ARGUMENT')
   }
   if (method === 'mesh.code.read') {
@@ -249,6 +249,9 @@ async function main(): Promise<number> {
   }
   if (method === 'mote.playbook.pmo') {
     write({ ok: true, operation: method, result: agentMuxPmoPlaybook() }); return 0
+  }
+  if (method === 'goal.plan.new-id') {
+    write({ ok: true, operation: method, result: { nodeId: mintObjectId() } }); return 0
   }
   if (method === 'system.metrics.profile.analyze') {
     const result = await analyseLocalV8Profile(String(invocation.params.input))

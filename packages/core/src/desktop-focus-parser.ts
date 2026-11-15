@@ -1,4 +1,4 @@
-import { isGoalTicketNumber } from './sharing.js'
+import { isGoalPlanIdentity } from '@agentmux/demand/goal-plan'
 import { parseSpaceLinkAddress, parseSpaceLinkTarget } from './space-link.js'
 import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, type AgentMuxControlFocusRequest, type AgentMuxControlSuccessReceipt } from './control.js'
 import { AgentMuxError } from './errors.js'
@@ -53,7 +53,7 @@ function budget(value: unknown, code: Code): void {
 }
 
 function parseDesktopFocusTarget(value: unknown, code: Code): AgentMuxDesktopFocusTarget {
-  const source = fields(value, ['kind', 'spaceId', 'zoneId', 'tabId', 'regionId', 'displayWorkspaceId', 'groupId', 'goalId', 'surface', 'view', 'hostId', 'agentSessionId', 'sectionId', 'eventId', 'runtimeId', 'namespace', 'section', 'ticket', 'selection', 'reference', 'address'], code)
+  const source = fields(value, ['kind', 'spaceId', 'zoneId', 'tabId', 'regionId', 'displayWorkspaceId', 'groupId', 'goalId', 'surface', 'view', 'hostId', 'agentSessionId', 'sectionId', 'eventId', 'runtimeId', 'namespace', 'section', 'nodeId', 'selection', 'reference', 'address'], code)
   if (source.kind === 'survey') {
     fields(source, ['kind', 'selection', 'reference'], code)
     const selection = parseSurveyPinReference(source.selection, code)
@@ -86,11 +86,11 @@ function parseDesktopFocusTarget(value: unknown, code: Code): AgentMuxDesktopFoc
       ...(source.hostId === undefined ? {} : { hostId: spaceControlId(source.hostId, 'Settings Host ID', code) }) }
   }
   if (source.kind === 'goal') {
-    fields(source, ['kind', 'goalId', 'runtimeId', 'namespace', 'section', 'ticket'], code)
+    fields(source, ['kind', 'goalId', 'runtimeId', 'namespace', 'section', 'nodeId'], code)
     if ((source.runtimeId === undefined) !== (source.namespace === undefined)) fail('Goal reading source requires its original Runtime and namespace together.', code)
-    const ticket = source.ticket
-    if (ticket !== undefined && (!isGoalTicketNumber(ticket) || source.section !== undefined)) fail('A Goal Ticket requires one positive ticket number and no separate section.', code)
-    return { kind: 'goal', ...(isGoalTicketNumber(ticket) ? { ticket } : {}), goalId: goalId(source.goalId, 'Goal ID', code),
+    const nodeId = source.nodeId
+    if (nodeId !== undefined && (!isGoalPlanIdentity(nodeId) || source.section !== undefined)) fail('A Goal Ticket requires its exact node ID and no separate section.', code)
+    return { kind: 'goal', ...(isGoalPlanIdentity(nodeId) ? { nodeId } : {}), goalId: goalId(source.goalId, 'Goal ID', code),
       ...(source.runtimeId === undefined ? {} : { runtimeId: spaceControlId(source.runtimeId, 'Goal Runtime', code) }),
       ...(source.namespace === undefined ? {} : { namespace: spaceControlId(source.namespace, 'Goal namespace', code) }),
       ...(source.section === undefined ? {} : { section: member(source.section, ['plan'] as const, 'Goal reading section', code) }) }
@@ -180,11 +180,11 @@ function presentation(value: unknown, code: Code): AgentMuxDesktopPresentation {
     return { spaceId: spaceControlId(value.spaceId, 'Presented Mote Space', code, true), page, eventId }
   })() : undefined
   const goal = source.goal === undefined ? undefined : (() => {
-    const value = fields(source.goal, ['goalId', 'runtimeId', 'namespace', 'section', 'ticket'], code)
-    const ticket = value.ticket
-    if (ticket !== undefined && (!isGoalTicketNumber(ticket) || value.section !== 'plan' || !value.runtimeId || !value.namespace))
+    const value = fields(source.goal, ['goalId', 'runtimeId', 'namespace', 'section', 'nodeId'], code)
+    const nodeId = value.nodeId
+    if (nodeId !== undefined && (!isGoalPlanIdentity(nodeId) || value.section !== 'plan' || !value.runtimeId || !value.namespace))
       fail('A presented Ticket requires its original Goal owner and visible plan.', code)
-    return { ...(isGoalTicketNumber(ticket) ? { ticket } : {}), goalId: goalId(value.goalId, 'Presented Goal', code), runtimeId: nullableId(value.runtimeId, 'Presented Goal Runtime', code), namespace: nullableId(value.namespace, 'Presented Goal namespace', code),
+    return { ...(isGoalPlanIdentity(nodeId) ? { nodeId } : {}), goalId: goalId(value.goalId, 'Presented Goal', code), runtimeId: nullableId(value.runtimeId, 'Presented Goal Runtime', code), namespace: nullableId(value.namespace, 'Presented Goal namespace', code),
       section: member(value.section, ['overview', 'plan', 'activity'] as const, 'Presented Goal section', code) }
   })()
   const result = { ...(goal ? { goal } : {}), ...(mote ? { mote } : {}), provenance: provenance(source.provenance, code), state: member(source.state, ['main-visible', 'floating', 'window', 'covered', 'pending', 'unknown'], 'Presentation', code),
@@ -286,7 +286,7 @@ export function parseDesktopFocusSuccessReceipt(value: unknown): AgentMuxControl
       result.presentation.goal !== undefined && result.presentation.goal.goalId !== requested.goalId ||
       requested.runtimeId !== undefined && (result.presentation.goal?.runtimeId !== requested.runtimeId || result.presentation.goal?.namespace !== requested.namespace) ||
       requested.section !== undefined && result.presentation.goal?.section !== requested.section ||
-      requested.ticket !== undefined && result.presentation.goal?.ticket !== requested.ticket)) fail('Goal receipt target is mismatched.', code)
+      requested.nodeId !== undefined && result.presentation.goal?.nodeId !== requested.nodeId)) fail('Goal receipt target is mismatched.', code)
     if (requested.kind === 'surface' && (presentedSurface !== requested.surface || requested.surface === 'focus' && requested.view !== undefined && actual.focusView !== requested.view)) fail('Surface receipt target is mismatched.', code)
     if (requested.kind === 'mote') {
       const original=requested.address ? navigation.moteLink?.target : requested

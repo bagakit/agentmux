@@ -8294,8 +8294,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       signal?.addEventListener('abort', stopObservingNavigation, { once: true })
       const issues: AgentMuxSpatialIssue[] = []
       const goalTarget = request.target.kind === 'goal' ? request.target : undefined
-      const ticket = goalTarget?.ticket, goalSection = ticket === undefined ? goalTarget?.section : 'plan'
-      const needsGoalOwner = goalTarget && (goalTarget.runtimeId !== undefined || ticket !== undefined)
+      const nodeId = goalTarget?.nodeId, goalSection = nodeId === undefined ? goalTarget?.section : 'plan'
+      const needsGoalOwner = goalTarget && (goalTarget.runtimeId !== undefined || nodeId !== undefined)
       let sourceGoal: AgentMuxDemand | undefined, sourceFailure: unknown, goalReadingToken: string | undefined
       let ticketNodeId: string | undefined
       if (needsGoalOwner) {
@@ -8312,11 +8312,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           if (demand?.id !== goalTarget.goalId || !exact)
             throw new DesktopFocusFailure({ step: 'target', code: 'GOAL_SOURCE_UNCONFIRMED', message: 'The source could not confirm the original Goal binding.',
               recovery: 'Keep the exact link and current workface. Read the original Goal source.' })
-          if (ticket !== undefined) {
-            ticketNodeId = demand.plan?.ticketNodes?.[ticket - 1]
-            if (!ticketNodeId || !demand.plan?.nodes.some(node => node.id === ticketNodeId))
+          if (nodeId !== undefined) {
+            if (!demand.plan?.nodes.some(node => node.id === nodeId))
               throw new DesktopFocusFailure({ step: 'target', code: 'TICKET_UNKNOWN', message: 'The original Goal has no confirmed node for this Ticket.',
-                recovery: 'Keep this link and read the original plan for its published Ticket numbers.' })
+                recovery: 'Keep this link and read the original plan for the exact node ID.' })
+            ticketNodeId = nodeId
           }
           sourceGoal = demand
         } catch (error) { sourceFailure = error }

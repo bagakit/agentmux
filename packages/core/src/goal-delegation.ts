@@ -18,7 +18,7 @@ import type { AgentMuxRun } from './types.js'
 import type { DurableAgentMuxMessage } from './agent-global-message-queue.js'
 import type { DispatchObservation } from './agent-handoff.js'
 import { AgentMuxError } from './errors.js'
-import { isGoalTicketNumber, parseGoalAddress, formatGoalTicketLink, type AmuxGoalAddress } from './sharing.js'
+import { parseGoalAddress, formatGoalTicketLink, type AmuxGoalAddress } from './sharing.js'
 import { demandExecutionReferences, parseDemandProgressInput, parseDemandProgressUpdates, type DemandProgress, type DemandProgressInput } from '@agentmux/demand'
 import { parseGoalResponsibility, type GoalResponsibilityObservation } from './goal-responsibility.js'
 import type { AgentMuxRpcCallContext } from './public-rpc-service.js'
@@ -190,19 +190,19 @@ function parseGoalActivePlanResult(value: unknown, input: GoalActivePlanQuery): 
     goalIds.add(goalId)
     const nodeIds = new Set<string>()
     const nodes = summary.nodes.map(value => {
-      const node = record(value, ['nodeId', 'title', 'state', 'ticket', 'attemptOperationId', 'unknown', 'predecessors', 'claimToken'])
+      const node = record(value, ['nodeId', 'title', 'state', 'attemptOperationId', 'unknown', 'predecessors', 'claimToken'])
       const nodeId = id(node.nodeId)
       if (nodeIds.has(nodeId) || !['ready', 'working', 'review', 'changes', 'unknown'].includes(String(node.state)) ||
           (input.view === 'claimable' ? node.state !== 'ready' || !isObjectId(node.claimToken) : node.claimToken !== undefined) ||
           !Array.isArray(node.unknown) || node.unknown.some(reason => !GOAL_PLAN_UNKNOWN_REASONS.includes(reason)) ||
-          typeof node.title !== 'string' || !node.title.trim() || node.ticket !== undefined && !isGoalTicketNumber(node.ticket))
+          typeof node.title !== 'string' || !node.title.trim())
         return invalid()
       nodeIds.add(nodeId)
       return {
         nodeId, title: node.title, state: node.state as import('@agentmux/demand').GoalActiveNode['state'], unknown: node.unknown as import('@agentmux/demand').GoalActiveNode['unknown'],
         predecessors: node.predecessors === null ? null : parseGoalPlanPredecessors(node.predecessors),
         ...(node.attemptOperationId === undefined ? {} : { attemptOperationId: id(node.attemptOperationId) }),
-        ...(typeof node.ticket === 'number' ? { ticket: node.ticket } : {}), ...(typeof node.claimToken === 'string' ? { claimToken: node.claimToken } : {})
+        ...(typeof node.claimToken === 'string' ? { claimToken: node.claimToken } : {})
       }
     })
     return { goalId, goalUpdatedAt, nodes }
@@ -226,9 +226,9 @@ export function parseGoalDelegationResult(value: unknown, input: { goalId: strin
   if (p.address !== undefined || p.ticketLinks !== undefined) {
     try {
       const parsed = parseGoalAddress(p.address, input.goalId)
-      if (!plan?.ticketNodes || !Array.isArray(p.ticketLinks) || p.ticketLinks.length !== plan.ticketNodes.length ||
-          p.ticketLinks.some((link, index) => link !== formatGoalTicketLink(input.goalId, parsed, index + 1)))
-        throw new Error('Ticket links do not match their original Goal and stable node numbers.')
+      if (!plan || !Array.isArray(p.ticketLinks) || p.ticketLinks.length !== plan.nodes.length ||
+          p.ticketLinks.some((link, index) => link !== formatGoalTicketLink(input.goalId, parsed, plan.nodes[index]!.id)))
+        throw new Error('Ticket links do not match their original Goal and node identity.')
       address = parsed
       ticketLinks = p.ticketLinks as string[]
     } catch (error) {

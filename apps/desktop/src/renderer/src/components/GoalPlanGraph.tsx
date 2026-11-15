@@ -270,7 +270,6 @@ export function GoalPlanGraph({ demand, projection: provided, planLink, planning
 }) {
   const projection = useMemo(() => provided ?? goalPlanProjection(demand), [demand, provided])
   const wholeGoal = projection.revision === null
-  const tickets = useMemo(() => new Map(demand.plan?.ticketNodes?.map((nodeId, index) => [nodeId, index + 1])), [demand.plan?.ticketNodes])
   const firstDelivery = goalPlanDeliveries(projection)[0]
   const [selection, setSelection] = useState<GoalPlanSelection | null>()
   const defaultNode = firstDelivery?.node.id, defaultAttempt = firstDelivery?.delegation.operationId
@@ -419,7 +418,7 @@ export function GoalPlanGraph({ demand, projection: provided, planLink, planning
             {column.map(item => {
               const state = item.wholeGoal ? 'goal' : item.state ?? 'unavailable', expanded = open === item.node.id
               return <Fragment key={item.node.id}><li className={`goal-plan-node${!open && item.node.id === highlight ? ' goal-plan-node--next' : ''}`}
-                data-goal-plan-node={item.node.id} data-goal-ticket={tickets.get(item.node.id)} data-goal-plan-origin={item.wholeGoal ? item.node.id : undefined} data-goal-plan-state={state} {...(item.node.dependsOn.length ? { 'data-goal-plan-depends': item.node.dependsOn.join(' ') } : {})}>
+                data-goal-plan-node={item.node.id} data-goal-plan-origin={item.wholeGoal ? item.node.id : undefined} data-goal-plan-state={state} {...(item.node.dependsOn.length ? { 'data-goal-plan-depends': item.node.dependsOn.join(' ') } : {})}>
                 <GoalPlanNodeButton item={item} expanded={expanded} readingId={readingId}
                   dependencyNames={item.node.dependsOn.map(id => byId.get(id)!.node.title)} onToggle={trigger => toggleNode(item, trigger)} />
               </li>

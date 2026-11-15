@@ -9,7 +9,6 @@ export type GoalActiveNode = {
   nodeId: string
   title: string
   state: Exclude<GoalPlanNodeState, 'done' | 'cancelled' | 'waiting'>
-  ticket?: number
   attemptOperationId?: string
   unknown: GoalPlanUnknownReason[]
   predecessors: GoalPlanPredecessor[] | null
@@ -26,12 +25,9 @@ function activePlan(goal: Demand): GoalActivePlan | null {
   if (!goal.plan || goal.status === 'done' || goal.status === 'cancelled') return null
   const plan = goal.plan
   const projection = projectGoalPlan(plan, goal.delegations ?? [], goal.alignment?.criteria ?? [], undefined, goal.alignment?.revision)
-  const ticketNumbers = new Map(plan.ticketNodes?.map((nodeId, index) => [nodeId, index + 1]))
   const nodes = projection.nodes.flatMap(({ node, state, unknown, predecessors, delegation, claimBasis, claimOpeningOperationId }): GoalActiveNode[] => {
     if (state === 'done' || state === 'cancelled' || state === 'waiting') return []
-    const ticket = ticketNumbers.get(node.id)
     return [{ nodeId: node.id, title: node.title, state, unknown, predecessors,
-      ...(ticket === undefined ? {} : { ticket }),
       ...(delegation ? { attemptOperationId: delegation.operationId } : {}),
       ...(claimBasis && claimOpeningOperationId ? { claim: { openingOperationId: claimOpeningOperationId, basis: claimBasis } } : {}) }]
   })
