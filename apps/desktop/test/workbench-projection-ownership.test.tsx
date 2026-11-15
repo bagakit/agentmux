@@ -52,14 +52,15 @@ function publicProjection(onSelect = vi.fn()): WorkbenchProjection {
     catalog, selection: [firstReference], onSelect }
 }
 
-it.each(['board', 'agents'] as const)('lets only the window workbench own global chrome above %s', async (mainSurface) => {
-  useAppStore.setState({ mainSurface })
+it.each(['board', 'agents'] as const)('lets only the visible window workbench own global chrome above %s', async (mainSurface) => {
+  useAppStore.setState({ mainSurface, prewarmTerminal: vi.fn() })
   const projectionState = publicProjection()
-  await act(async () => root.render(createElement(Fragment, null,
-    createElement('div', { 'data-owner': true }, createElement(WorkspaceWorkbench, { workspaceId: SCRATCH_WORKSPACE_ID, visible: false })),
+  const render = (visible: boolean) => act(async () => root.render(createElement(Fragment, null,
+    createElement('div', { 'data-owner': true }, createElement(WorkspaceWorkbench, { workspaceId: SCRATCH_WORKSPACE_ID, visible })),
     createElement('div', { 'data-projection': true }, createElement(WorkspaceWorkbench, { workspaceId: SCRATCH_WORKSPACE_ID,
       topicId: PMO_TEAMS_TOPIC_ID, viewOwnership: 'projection', projection: projectionState }))
   )))
+  await render(true)
   const owner = container.querySelector('[data-owner]')!, projection = container.querySelector('[data-projection]')!
   expect(owner.querySelector('.top-row-leading-chrome')).not.toBeNull()
   expect(owner.querySelector('.breadcrumbs')?.textContent).toContain(mainSurface === 'board' ? 'Goals' : 'Focus')
@@ -68,6 +69,12 @@ it.each(['board', 'agents'] as const)('lets only the window workbench own global
   expect(projection.querySelectorAll('.workbench-tab')).toHaveLength(2)
   expect(projection.querySelector('.pane-tabbar__actions')).not.toBeNull()
   expect(projection.querySelector('[title="New tab"]')).not.toBeNull()
+  const originalTab = owner.querySelector('.workbench-tab')
+  expect(originalTab).not.toBeNull()
+  await render(false)
+  expect(owner.querySelector('.top-row-leading-chrome')).toBeNull()
+  expect(owner.querySelector('.workbench-tab')).toBe(originalTab)
+  expect(projection.querySelectorAll('.workbench-tab')).toHaveLength(2)
 })
 
 it('retains only the missing projection target slot while other Tabs are available', async () => {
