@@ -4,7 +4,7 @@ import { expect, it, vi } from 'vitest'
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface'
 import { FocusProjectLanes } from '../src/renderer/src/components/FocusProjectLanes'
 import { FocusScanLaneContent } from '../src/renderer/src/components/FocusScanLaneContent'
-import { FocusContextCards } from '../src/renderer/src/components/FocusContextCards'
+import { createFocusCardViewport, FocusContextCards } from '../src/renderer/src/components/FocusContextCards'
 import { FocusSettingsPreview } from '../src/renderer/src/components/settings/FocusSettingsPreview'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
@@ -88,11 +88,11 @@ it('two exact Zone footer actions and mandatory recovery stay available for one 
   const lane = (id: string, recovery: 'removed' | null): FocusScanLane => ({ id, workspaceId: id, projectId: 'root', projectWorkspaceId: 'root', hostId: 'local',
     name: 'Project / ' + id, labels: ['Project', 'original-long-worktree-' + id], path: fixturePath('footer/' + id), topicId: null, summary: 'Original Zone description ' + id,
     recovery, contextRefs: [{ hostId: 'local', id: 'shared' }], activeAgentRefs: [{ hostId: 'local', id: 'shared' }] })
-  const select = vi.fn()
+  const select = vi.fn(), viewport = createFocusCardViewport()
   useAppStore.setState({ config: { ...composerConfig, focus: { recentActivityHours: 48, zonePresentations: [{ key, presentation: 'cards' }] } } })
   await dom.render(<FocusProjectLanes resourceMenus lanes={[lane('first', 'removed'), lane('second', null)]} selectedProjectKey="" currentLaneId="second" onSelect={select}
     renderLane={(scan, heading) => <FocusScanLaneContent lane={scan} contexts={[context]} heading={heading} metrics={{ width: 240, padding: 4, gap: 2, cardGap: 2 }}
-      renderCards={(rows, columns, tags, sections) => <FocusContextCards contexts={rows} columns={columns} topics={tags} sections={sections} visible scrollRef={{ current: null }} selectedId={null} onSelect={() => {}} goalLinks={new Map()} identities={new Map()} />} />} />)
+      renderCards={(rows, _columns, tags, sections) => <FocusContextCards contexts={rows} viewport={viewport} topics={tags} sections={sections} visible scrollRef={{ current: null }} selectedId={null} onSelect={() => {}} goalLinks={new Map()} identities={new Map()} />} />} />)
   const body = card('shared'), footer = afterBody(body), wrapper = slot(body)
   const buttons = [...footer.querySelectorAll<HTMLButtonElement>('button[data-focus-project-scope-control]')]
   expect(buttons).toHaveLength(2)
@@ -125,7 +125,7 @@ it('the actual static Settings example shares the footer and keeps original sect
 it('an unmounted pending body keeps the same Topic footer and starts its accessible identity with the task', async () => {
   const context = agentContextForSession({ ...composerSession('pending'), label: 'Original pending task' }, undefined, undefined, undefined, null)
   const name = 'Full original Topic label kept outside the pending body'
-  await dom.render(<FocusContextCards contexts={[context]} columns={1} topics={new Map([[JSON.stringify([context.hostId, context.id]), { id: 'original-topic', name, summary: 'Original description' }]])}
+  await dom.render(<FocusContextCards contexts={[context]} viewport={createFocusCardViewport()} topics={new Map([[JSON.stringify([context.hostId, context.id]), { id: 'original-topic', name, summary: 'Original description' }]])}
     visible={false} scrollRef={{ current: null }} selectedId={null} onSelect={() => {}} goalLinks={new Map()} identities={new Map()} />)
   const body = card('pending'), footer = afterBody(body)
   expect(slot(body).dataset.focusCardBody).toBe('pending')

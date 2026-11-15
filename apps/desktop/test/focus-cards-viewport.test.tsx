@@ -1,32 +1,36 @@
 // @vitest-environment happy-dom
-import { act, useMemo, useRef } from 'react'
+import { act, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
 import { createFocusProjectionSelector, type FocusContext } from '../src/renderer/src/lib/focus-context'
-import { FocusContextCards } from '../src/renderer/src/components/FocusContextCards'
+import { createFocusCardViewport, FocusContextCards } from '../src/renderer/src/components/FocusContextCards'
+import type { FocusAgentReveal } from '../src/renderer/src/lib/focus-agent-navigation'
 import { WorkbenchPresentationContext } from '../src/renderer/src/lib/workbench-presentation'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 
-vi.mock('../src/renderer/src/components/AgentAvatar', () => ({ AgentAvatar: () => <span /> }))
+vi.mock(import('../src/renderer/src/components/AgentAvatar'), async importOriginal => ({ ...await importOriginal(), AgentAvatar: () => <span /> }))
 const baseline = useAppStore.getState()
 let root: Root, container: HTMLDivElement, contexts: readonly FocusContext[]
 let columns = 3, start = 0, viewport = 240
 const tall = new Set<string>()
 const slotGeometryReads: HTMLElement[] = []
 const groupGeometryReads: HTMLElement[] = []
+const viewportGeometryReads: HTMLElement[] = []
+const observed: Element[] = [], unobserved: Element[] = []
 const observers: { callback: IntersectionObserverCallback; targets: Set<Element>; options: IntersectionObserverInit }[] = []
 const select = vi.fn(), noLinks = new Map(), noIdentities = new Map()
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); columns = 3; start = 0; viewport = 240; select.mockClear(); observers.length = 0; tall.clear(); slotGeometryReads.length = 0; groupGeometryReads.length = 0
+  viewportGeometryReads.length = 0; observed.length = 0; unobserved.length = 0
   vi.stubGlobal('IntersectionObserver', class {
     record: typeof observers[number]
     constructor(callback: IntersectionObserverCallback, options: IntersectionObserverInit) { this.record = { callback, targets: new Set(), options }; observers.push(this.record) }
-    observe(element: Element) { this.record.targets.add(element) }
-    unobserve(element: Element) { this.record.targets.delete(element) }
+    observe(element: Element) { this.record.targets.add(element); observed.push(element) }
+    unobserve(element: Element) { this.record.targets.delete(element); unobserved.push(element) }
     disconnect() { this.record.targets.clear() }
   })
   vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) { return this.classList.contains('test-scroll') ? viewport : 52 })
@@ -43,6 +47,7 @@ beforeEach(() => {
       const offset = Array.from({ length: row }, (_, position) => rowHeight(position) + 2).reduce((sum, height) => sum + height, 0)
       return new DOMRect(index % columns * 200, top + offset, 200, rowHeight(row))
     }
+    if (this.classList.contains('test-scroll') || this.classList.contains('test-outer-scroll')) viewportGeometryReads.push(this)
     return new DOMRect(0, 0, 600, viewport)
   })
   vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(() => {})
@@ -58,24 +63,35 @@ afterEach(async () => {
   container.remove(); document.getElementById('agentmux-window-overlay-host')?.remove()
   useAppStore.setState(baseline, true); vi.restoreAllMocks(); vi.unstubAllGlobals()
 })
-function Scene({ order = contexts, visible = true, layoutReady = true }: { order?: readonly FocusContext[]; visible?: boolean; layoutReady?: boolean }) {
-  const scroll = useRef<HTMLDivElement>(null)
+function Scene({ order = contexts, visible = true, layoutReady = true, other, otherVisible = true, outerScroll = false, reveal, onRevealed }: {
+  order?: readonly FocusContext[]; visible?: boolean; layoutReady?: boolean
+  other?: readonly FocusContext[]; otherVisible?: boolean; outerScroll?: boolean
+  reveal?: FocusAgentReveal; onRevealed?: (id: string) => void
+}) {
+  const inner = useRef<HTMLDivElement>(null), outer = useRef<HTMLDivElement>(null)
+  const [cardViewport] = useState(createFocusCardViewport)
+  const scrollRef = outerScroll ? outer : inner
   // Keep the same surface owner that original cards consume for focus/menu.
   const presentation = useMemo(() => ({ active: visible, retainedRegionId: null }), [visible])
-  return <WorkbenchPresentationContext.Provider value={presentation}><div ref={scroll} className="test-scroll focus-project-lanes__rows">
-    <FocusContextCards contexts={order} columns={columns} scrollRef={scroll} visible={visible} layoutReady={layoutReady} selectedId={null} goalLinks={noLinks} identities={noIdentities} onSelect={select} />
-  </div><input aria-label="Later input" /></WorkbenchPresentationContext.Provider>
+  return <WorkbenchPresentationContext.Provider value={presentation}><div ref={outer} className="test-outer-scroll"><div ref={inner} className="test-scroll focus-project-lanes__rows">
+    <FocusContextCards contexts={order} viewport={cardViewport} scrollRef={scrollRef} visible={visible} layoutReady={layoutReady}
+      revealRequest={reveal} onRevealed={onRevealed} selectedId={null} goalLinks={noLinks} identities={noIdentities} onSelect={select} />
+    {other ? <FocusContextCards contexts={other} viewport={cardViewport} scrollRef={scrollRef} visible={visible && otherVisible}
+      layoutReady={layoutReady} selectedId={null} goalLinks={noLinks} identities={noIdentities} onSelect={select} /> : null}
+  </div></div><input aria-label="Later input" /></WorkbenchPresentationContext.Provider>
 }
 const full = () => [...container.querySelectorAll<HTMLElement>('.focus-context-group__cards > [data-focus-card-body="mounted"]')]
 const realBodies = () => container.querySelectorAll('.focus-context-group__cards .focus-context__identity')
 const slots = () => [...container.querySelectorAll<HTMLElement>('.focus-context-group__cards > [data-focus-card-body]')]
 const button = (id: string) => container.querySelector<HTMLButtonElement>(`button[data-session-id="${id}"]`)!
 const render = (props: Parameters<typeof Scene>[0] = {}) => act(async () => { root.render(<Scene {...props} />) })
+const intersection = (target: Element, isIntersecting = true, time = window.performance.now()) =>
+  ({ target, isIntersecting, time }) as IntersectionObserverEntry
 const intersect = () => {
   for (const observer of observers) {
     const entries = [...observer.targets].map(target => {
       const rect = target.getBoundingClientRect()
-      return { target, isIntersecting: rect.bottom >= -104 && rect.top <= viewport + 104 } as IntersectionObserverEntry
+      return intersection(target, rect.bottom >= -104 && rect.top <= viewport + 104)
     })
     observer.callback(entries, {} as IntersectionObserver)
   }
@@ -120,22 +136,41 @@ it('does not instantiate a distant one-row group until its actual scrollport int
   expect(full()).toHaveLength(1)
 })
 
-it('keeps the original geometry observer for new live facts in the same projected card slots', async () => {
+it.each([18, 279])('keeps viewport observation through live facts and sorting (%i slots)', async size => {
+  contexts = contexts.slice(0, size)
+  viewport = 145
   await render()
   const target = contexts[0]!, original = button(target.id)
-  const reads = { group: groupGeometryReads.length, slot: slotGeometryReads.length }, count = observers.length
-  expect(reads.group).toBeGreaterThan(0); expect(reads.slot).toBeGreaterThan(0); expect(count).toBeGreaterThan(0)
-  for (const name of ['First current name', 'Second current name']) {
-    await act(async () => useAppStore.setState(state => ({ agentNames: { ...state.agentNames, [target.id]: name } })))
-    const next = createFocusProjectionSelector()(useAppStore.getState()).contexts
-    expect(next.map(context => [context.hostId, context.id])).toEqual(contexts.map(context => [context.hostId, context.id]))
-    expect(next).not.toBe(contexts)
+  expect(slots()).toHaveLength(size)
+  const originalSlots = new Map(slots().map(slot => [slot.dataset.focusCardKey, slot] as const))
+  const reads = { viewport: viewportGeometryReads.length, group: groupGeometryReads.length, slot: slotGeometryReads.length }
+  const registrations = { observers: observers.length, observed: observed.length, unobserved: unobserved.length }
+  expect(reads.group).toBeGreaterThan(0); expect(reads.slot).toBeGreaterThan(0); expect(registrations.observed).toBeGreaterThan(0)
+  for (const [name, activity] of [['First current name', 'waiting'], ['Second current name', 'running']] as const) {
+    const at = Date.now()
+    await act(async () => useAppStore.setState(state => ({
+      agentNames: { ...state.agentNames, [target.id]: name },
+      sessions: state.sessions.map(session => session.id !== target.id || session.kind !== 'agent' ? session : {
+        ...session, status: { state: activity, source: 'native-hook', observedAt: at },
+        semanticStatus: { state: activity, source: 'native-hook', observedAt: at, stateEnteredAt: at }
+      })
+    })))
+    const next = createFocusProjectionSelector()(useAppStore.getState()).contexts.slice(0, size).reverse()
+    if (name.startsWith('Second')) next.push(next.shift()!)
     await render({ order: next })
     expect(button(target.id)).toBe(original); expect(original.textContent).toContain(name)
+    expect(original.dataset.state).toBe(activity)
+    expect(slots().map(slot => JSON.parse(slot.dataset.focusCardKey!)[1])).toEqual(next.map(card => card.id))
+    expect(slots().every(slot => originalSlots.get(slot.dataset.focusCardKey) === slot)).toBe(true)
   }
-  expect(groupGeometryReads.length, 'Changed facts need no synchronous grid measurement').toBe(reads.group)
-  expect(slotGeometryReads.length, 'Changed facts need no synchronous slot measurement').toBe(reads.slot)
-  expect(observers.length, 'The original observer still owns future intersections').toBe(count)
+  expect(viewportGeometryReads.length, 'Live facts and sorting need no synchronous viewport measurement').toBe(reads.viewport)
+  expect(groupGeometryReads.length, 'Live facts and sorting need no synchronous grid measurement').toBe(reads.group)
+  expect(slotGeometryReads.length, 'Live facts and sorting need no synchronous slot measurement').toBe(reads.slot)
+  expect(observers.length, 'The original observer still owns future intersections').toBe(registrations.observers)
+  expect(observed, 'Retained slots must not be observed again').toHaveLength(registrations.observed)
+  expect(unobserved, 'Retained slots must not be unobserved').toHaveLength(registrations.unobserved)
+  await act(async () => intersect())
+  expect(slots().slice(0, 12).every(slot => slot.dataset.focusCardBody === 'mounted')).toBe(true)
 })
 
 it('lets the original intersection owner reveal slots after a visited card changes height', async () => {
@@ -202,8 +237,88 @@ it('reveals a displaced later grid through IO even though its own dimensions and
 it('rejects queued intersections after hide and keeps already visited bodies', async () => {
   await render(); const pending = slots().at(-1)!, active = observers.find(observer => observer.targets.has(pending))!, count = full().length
   await render({ visible: false })
-  await act(async () => active.callback([{ target: pending, isIntersecting: true } as unknown as IntersectionObserverEntry], {} as IntersectionObserver))
+  await act(async () => active.callback([intersection(pending)], {} as IntersectionObserver))
   expect(full()).toHaveLength(count); expect(pending.dataset.focusCardBody).toBe('pending')
+})
+
+it('shares the actual scrollport across grids and registers only added and removed slots', async () => {
+  start = 1800
+  const first = contexts.slice(0, 3), other = contexts.slice(3, 6)
+  await render({ order: first, other })
+  const original = button(first[0]!.id), removed = slots()[1]!, sibling = slots()[4]!
+  expect(observers).toHaveLength(1)
+  const owner = observers[0]!
+  expect(owner.targets.size).toBe(6)
+  expect(owner.options.root).toBe(container.querySelector('.test-scroll'))
+
+  await render({ order: [first[0]!, contexts[6]!, first[2]!], other })
+  const added = slots()[1]!
+  expect(button(first[0]!.id)).toBe(original)
+  expect(sibling).toBe(slots()[4])
+  expect(observers).toHaveLength(1)
+  expect(observed).toHaveLength(7)
+  expect(observed.at(-1)).toBe(added)
+  expect(unobserved).toHaveLength(1)
+  expect(unobserved[0]).toBe(removed)
+  expect(owner.targets.size).toBe(6)
+  expect(owner.targets.has(removed)).toBe(false)
+  await act(async () => owner.callback([intersection(removed), intersection(added)], {} as IntersectionObserver))
+  expect(added.dataset.focusCardBody).toBe('mounted')
+  expect(sibling.dataset.focusCardBody).toBe('pending')
+})
+
+it('rejects a hidden grid’s earlier queued record after its slot rejoins the shared observation', async () => {
+  start = 1800
+  const order = contexts.slice(0, 3), other = contexts.slice(3, 6)
+  await render({ order, other })
+  const sibling = slots()[0]!, pending = slots().at(-1)!, owner = observers[0]!
+  const stale = intersection(pending)
+  await render({ order, other, otherVisible: false })
+  expect(owner.targets.has(pending)).toBe(false)
+  expect(owner.targets.has(sibling)).toBe(true)
+  await render({ order, other })
+  expect(slots().at(-1)).toBe(pending)
+  expect(observers).toHaveLength(1)
+  expect(owner.targets.has(pending)).toBe(true)
+  await act(async () => owner.callback([stale], {} as IntersectionObserver))
+  expect(pending.dataset.focusCardBody).toBe('pending')
+  await act(async () => owner.callback([intersection(pending)], {} as IntersectionObserver))
+  expect(pending.dataset.focusCardBody).toBe('mounted')
+})
+
+it('binds the same pending slot to the changed physical scrollport and rejects the previous owner', async () => {
+  start = 1800
+  await render()
+  const original = slots().at(-1)!, old = observers[0]!
+  await render({ outerScroll: true })
+  const next = observers[1]!
+  expect(slots().at(-1)).toBe(original)
+  expect(old.targets.size).toBe(0)
+  expect(next.options.root).toBe(container.querySelector('.test-outer-scroll'))
+  expect(next.targets.has(original)).toBe(true)
+  await act(async () => old.callback([intersection(original)], {} as IntersectionObserver))
+  expect(original.dataset.focusCardBody).toBe('pending')
+  await act(async () => next.callback([intersection(original)], {} as IntersectionObserver))
+  expect(original.dataset.focusCardBody).toBe('mounted')
+})
+
+it('measures only the exact requested card and scrollport for an explicit offscreen reveal', async () => {
+  await render()
+  const target = contexts.at(-1)!, requested = slots().at(-1)!, rows = container.querySelector<HTMLElement>('.test-scroll')!
+  const original = button(contexts[0]!.id), onRevealed = vi.fn(), scroll = vi.spyOn(rows, 'scrollBy')
+  const owner = observers.find(observer => observer.targets.has(requested))!
+  expect(owner).toBeDefined()
+  const reads = { viewport: viewportGeometryReads.length, group: groupGeometryReads.length, slot: slotGeometryReads.length }
+  await render({ reveal: { requestId: 'requested-agent', hostId: target.hostId, agentSessionId: target.id, pending: true }, onRevealed })
+  expect(requested.dataset.focusCardBody).toBe('mounted')
+  expect(requested.querySelector('.focus-context__identity')).not.toBeNull()
+  expect(button(contexts[0]!.id)).toBe(original)
+  expect(viewportGeometryReads.slice(reads.viewport)).toEqual([rows])
+  expect(groupGeometryReads).toHaveLength(reads.group)
+  expect(slotGeometryReads.slice(reads.slot)).toEqual([requested])
+  expect(scroll).toHaveBeenCalledExactlyOnceWith({ top: expect.any(Number), left: 0, behavior: 'instant' })
+  expect(onRevealed).toHaveBeenCalledExactlyOnceWith('requested-agent')
+  expect(owner.targets.has(requested)).toBe(false)
 })
 
 it('keeps ordinary pointer activation on the exact placeholder without replacing its mousedown focus target', async () => {

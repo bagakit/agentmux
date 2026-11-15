@@ -12,9 +12,9 @@ vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: () =
 vi.mock('../src/renderer/src/components/RecentFocusTimeline', () => ({ RecentFocusTimeline: () => null }))
 // This suite isolates the original column measurement owner. The viewport
 // consumer and its own real geometry observers have a separate mounted suite.
-vi.mock('../src/renderer/src/components/FocusContextCards', async () => {
+vi.mock(import('../src/renderer/src/components/FocusContextCards'), async importOriginal => {
   const { FocusContextRow } = await import('../src/renderer/src/components/FocusContextRow')
-  return { FocusContextCards: ({ contexts, selectedId, onSelect }: Parameters<typeof import('../src/renderer/src/components/FocusContextCards').FocusContextCards>[0]) =>
+  return { ...await importOriginal(), FocusContextCards: ({ contexts, selectedId, onSelect }: Parameters<typeof import('../src/renderer/src/components/FocusContextCards').FocusContextCards>[0]) =>
     <div className="focus-context-group__cards">{contexts.map(context => <FocusContextRow key={context.id} context={context} selected={selectedId === context.id} onSelect={onSelect} />)}</div> }
 })
 const initial = useAppStore.getState()

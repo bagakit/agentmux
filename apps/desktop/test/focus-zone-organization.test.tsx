@@ -4,7 +4,7 @@ import { expect, it, vi } from 'vitest'
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface'
 import { FocusProjectLanes } from '../src/renderer/src/components/FocusProjectLanes'
 import { FocusScanLaneContent } from '../src/renderer/src/components/FocusScanLaneContent'
-import { FocusContextCards } from '../src/renderer/src/components/FocusContextCards'
+import { createFocusCardViewport, FocusContextCards } from '../src/renderer/src/components/FocusContextCards'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { applyConfigEdit } from '../src/shared/config-edit'
@@ -65,9 +65,10 @@ const topic=(id:string):FocusScanLane=>({id,workspaceId:'topics',projectId:'topi
 async function collection(confirmed=true,multiple=false,global?:'cards'|'sections') {
  const topics=[topic('Alpha'),topic('Beta')], category={categoryId:'original-category',hostId:'local',directoryPath:fixturePath('category'),title:'Research',revision:'original',spaceId:'original-category-space'}
  const lane:FocusScanLane={...topic('aggregate'),id:'original-collection',name:'Research',labels:['Research'],topicId:null,collection:{confirmed,categories:multiple?[category,{...category,spaceId:'second-space'}]:[category],topics},contextRefs:topics.flatMap(t=>t.contextRefs),activeAgentRefs:topics.flatMap(t=>t.activeAgentRefs)}
+ const viewport=createFocusCardViewport()
  const contexts=topics.map(t=>agentContextForSession({...composerSession('task-'+t.topicId),label:'Task '+t.topicId,workspacePath:t.path,status:{state:'working',source:'native-hook',observedAt:Date.now()}},undefined,undefined,undefined,t.topicId))
  useAppStore.setState({config:{...composerConfig,focus:{recentActivityHours:48,...(global?{topicPresentation:global}:{})}}})
- await dom.render(<FocusProjectLanes resourceMenus lanes={[lane]} selectedProjectKey="" onSelect={()=>{}} renderLane={(scan,heading,compact)=><FocusScanLaneContent lane={scan} contexts={contexts} compact={compact} heading={heading} metrics={{width:600,padding:4,gap:2,cardGap:2}} renderCards={(rows,columns,tags,sections)=><FocusContextCards contexts={rows} columns={columns} topics={tags} sections={sections} visible scrollRef={{current:null}} selectedId={null} onSelect={()=>{}} goalLinks={new Map()} identities={new Map()}/>}/>}/> )
+ await dom.render(<FocusProjectLanes resourceMenus lanes={[lane]} selectedProjectKey="" onSelect={()=>{}} renderLane={(scan,heading,compact)=><FocusScanLaneContent lane={scan} contexts={contexts} compact={compact} heading={heading} metrics={{width:600,padding:4,gap:2,cardGap:2}} renderCards={(rows,_columns,tags,sections)=><FocusContextCards contexts={rows} viewport={viewport} topics={tags} sections={sections} visible scrollRef={{current:null}} selectedId={null} onSelect={()=>{}} goalLinks={new Map()} identities={new Map()}/>}/>}/> )
  return dom.container.querySelector<HTMLElement>('[data-focus-zone-presentation]')!
 }
 it('an unconfigured Collection uses sections and its original preferences present the same default',async()=>{
@@ -127,11 +128,12 @@ it('a conflicting header save keeps its intent for explicit review and retry ins
  expect(useAppStore.getState().config?.focus?.zonePresentations).toEqual([{key:zoneKey,presentation:'sections'}])
 })
 it('one original Context in two worktree Zones keeps both exact actionable labels and another Host does not borrow the override',async()=>{
+ const viewport=createFocusCardViewport()
  const contexts=[agentContextForSession({...composerSession('shared'),label:'One original task',status:{state:'working',source:'native-hook',observedAt:Date.now()}},undefined,undefined,undefined,null)]
  const lane=(id:string,hostId='local'):FocusScanLane=>({...topic(id),hostId,projectId:'root',workspaceId:id,projectWorkspaceId:'root',topicId:null,objectKind:undefined,labels:['Original project',id],contextRefs:[{hostId,id:'shared'}],activeAgentRefs:[{hostId,id:'shared'}]})
  useAppStore.setState({config:{...composerConfig,focus:{recentActivityHours:48,zonePresentations:[{key:zoneKey,presentation:'sections'}]}}})
  await dom.render(<FocusProjectLanes resourceMenus lanes={[lane('first'),lane('second'),lane('third','remote')]} selectedProjectKey={projectKey} currentLaneId="second" onSelect={()=>{}} renderLane={(scan,heading)=><FocusScanLaneContent lane={scan} contexts={scan.hostId==='local'?contexts:[]} heading={heading} metrics={{width:600,padding:4,gap:2,cardGap:2}}
- renderCards={(rows,columns,tags,sections)=><FocusContextCards contexts={rows} columns={columns} topics={tags} sections={sections} visible scrollRef={{current:null}} selectedId={null} onSelect={()=>{}} goalLinks={new Map()} identities={new Map()}/>}/>}/> )
+ renderCards={(rows,_columns,tags,sections)=><FocusContextCards contexts={rows} viewport={viewport} topics={tags} sections={sections} visible scrollRef={{current:null}} selectedId={null} onSelect={()=>{}} goalLinks={new Map()} identities={new Map()}/>}/>}/> )
  const frames=[...dom.container.querySelectorAll<HTMLElement>('[data-project-group-key]')]
  expect(frames.map(f=>f.dataset.focusZonePresentation)).toEqual(['sections','cards'])
  expect(frames[0]!.querySelectorAll('button.focus-context')).toHaveLength(1)

@@ -14,18 +14,40 @@ export default defineConfig({
     let code = original
     const mutant = process.env.AGENTMUX_FOCUS_CARDS_MUTANT
     if (path.endsWith('/FocusContextCards.tsx') && mutant) {
-      assert.ok(['eager', 'forget-visited', 'no-initial-scan', 'queued-hidden', 'pointer-focus-replace', 'initial-columns', 'live-facts-layout', 'ignore-slot-order'].includes(mutant))
       const inverses: Record<string, [string, string]> = {
-        eager: ['const full = visited.current.has(contextKey(context))', 'const full = true'],
-        'forget-visited': ['return () => { active = false; observer.disconnect() }', 'return () => { active = false; observer.disconnect(); visited.current.clear() }'],
-        'no-initial-scan': ['for (const slot of slots) {', 'for (const slot of [] as HTMLDivElement[]) {'],
-        'queued-hidden': ['if (!active) return', 'if (false) return'],
+        eager: ['const full = visited.current.has(key) || requested', 'const full = true'],
+        'forget-visited': ['observation.current = null', 'observation.current = null; visited.current.clear()'],
+        'no-initial-scan': ['for (const slot of candidates) {', 'for (const slot of [] as CardSlot[]) {'],
+        'queued-hidden': ['if (!visible) {\n      if (previous) {\n        stopObserving()', 'if (!visible) {\n      if (previous) {'],
+        'queued-rejoin': ['entry.isIntersecting && current && entry.time >= current.observedAt', 'entry.isIntersecting && current'],
         'pointer-focus-replace': ['onMouseDown={event => { if (event.button === 0) event.preventDefault() }}', ''],
-        'initial-columns': ["if (!layoutReady && rows && rows.clientWidth > 0 && rows.clientHeight > 0\n      && typeof ResizeObserver !== 'undefined' && typeof IntersectionObserver !== 'undefined') return", ''],
-        'live-facts-layout': ['[visible, layoutReady, columns, cardOrder, scrollRef, viewportMargin]', '[visible, layoutReady, columns, contexts, scrollRef, viewportMargin]'],
-        'ignore-slot-order': ["const cardOrder = contexts.map(contextKey).join('\\n')", "const cardOrder = ''"]
+        'initial-columns': ["if (!layoutReady && observable && typeof window?.ResizeObserver !== 'undefined') return", ''],
+        'scan-on-order': [
+          'if (!changedViewport && !added.current.size) return',
+          `if (!changedViewport && !added.current.size) {
+            rows?.getBoundingClientRect()
+            element.getBoundingClientRect()
+            for (const slot of watching.current.keys()) slot.node.getBoundingClientRect()
+            return
+          }`
+        ],
+        'rebuild-on-order': [
+          'if (!changedViewport && !added.current.size) return',
+          `if (!changedViewport && !added.current.size) {
+            if (rows) for (const slot of [...watching.current.keys()]) {
+              unwatch(slot)
+              watching.current.set(slot, viewport.observe(rows, viewportMargin, slot.node, () => {
+                mount(slot.key)
+                render()
+              }))
+            }
+            return
+          }`
+        ]
       }
-      const [from, to] = inverses[mutant]!
+      const inverse = inverses[mutant]
+      assert.ok(inverse, `Unknown Focus card mutation ${mutant}`)
+      const [from, to] = inverse
       assert.equal(code.split(from).length - 1, 1, 'Actual unique body/retention owner')
       code = code.replace(from, to)
       process.stderr.write(`MUTATION_APPLIED=${mutant}\n`)

@@ -7,8 +7,8 @@ const root = resolve(import.meta.dirname, '../../..')
 const mutations = {
   'top-placement': ['renderer/src/components/FocusContextCards.tsx', [
     ['      {full ? <FocusContextCardBody', '      <FocusZoneFooter zone={topic} />\n      {full ? <FocusContextCardBody'],
-    ['      <FocusZoneFooter zone={topic} />\n    </div>', '    </div>']]],
-  'topic-body': ['renderer/src/components/FocusContextCards.tsx', [['selected={selected} onSelect={onSelect} />', 'selected={selected} onSelect={onSelect} topic={topic?.content ? undefined : topic} />']]],
+    ['      <FocusZoneFooter zone={topic} />\n    </FocusCardSlot>', '    </FocusCardSlot>']]],
+  'topic-body': ['renderer/src/components/FocusContextCards.tsx', [['topic={list ? topic : undefined}', 'topic={topic?.content ? undefined : topic}']]],
   'multiple-zones': ['renderer/src/lib/focus-collection-lanes.ts', [['if (!held.some(item => item.id === heading.id)) held.push(heading)', 'held.splice(0, held.length, heading)']]],
   'drop-notice': ['renderer/src/lib/focus-collection-lanes.ts', [['notice: held.map(item => item.notice)', 'notice: undefined']]],
   'example-top': ['renderer/src/components/settings/FocusSettingsPreview.tsx', [

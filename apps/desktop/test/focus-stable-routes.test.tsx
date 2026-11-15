@@ -13,7 +13,7 @@ import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-sta
 import { initializeSpatialControlFixture } from './helpers/spatial-control-owner-fixture'
 import { configOwnerFixture } from './helpers/config-owner-fixture'
 import { executeSettingsControl } from '../src/main/settings-control'
-import { FocusContextCards } from '../src/renderer/src/components/FocusContextCards'
+import { createFocusCardViewport, FocusContextCards } from '../src/renderer/src/components/FocusContextCards'
 import { agentContextForSession } from '../src/renderer/src/lib/focus-context'
 import { createRef } from 'react'
 vi.mock('electron', async () => { const { tmpdir } = await import('node:os'); return { app: { getPath: () => tmpdir() } } })
@@ -172,8 +172,8 @@ it('the original card consumer defers hidden source reads and pauses summary dem
   const session = composerSession('external')
   const context = { ...agentContextForSession(session, undefined, 'External source', composerConfig.workspaces[0], null),
     access: { identity: { runtimeId: 'original-source', agentSessionId: 'external' }, locations: [], select() {}, open() {}, refresh() {}, readConversation: read } }
-  const ref = createRef<HTMLDivElement>()
-  const render = (visible: boolean, readConversation = read) => dom.render(<FocusContextCards contexts={[{ ...context, access: { ...context.access, readConversation } }]} columns={1} scrollRef={ref} visible={visible} selectedId={null} goalLinks={new Map()} identities={new Map()} onSelect={() => {}} />)
+  const ref = createRef<HTMLDivElement>(), viewport = createFocusCardViewport()
+  const render = (visible: boolean, readConversation = read) => dom.render(<FocusContextCards contexts={[{ ...context, access: { ...context.access, readConversation } }]} viewport={viewport} scrollRef={ref} visible={visible} selectedId={null} goalLinks={new Map()} identities={new Map()} onSelect={() => {}} />)
   await render(false)
   expect(read).not.toHaveBeenCalled()
   expect(dom.container.querySelector('[data-focus-card-body]')?.getAttribute('data-focus-card-body')).toBe('pending')
