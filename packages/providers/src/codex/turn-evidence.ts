@@ -36,16 +36,23 @@ function isSubagentActivity(record: CodexTurnRecord): boolean {
   return record?.type === 'event_msg' && record.payload?.type === 'item_completed' && record.payload.item?.type === 'SubAgentActivity'
 }
 
-/** Codex emits this item only for a confirmed successful child turn. */
-export function codexSubagentCompletion(value: unknown, nativeSessionId: string): {
-  nativeSessionId: string; nativeAgentId: string; observedAt: number
+export function codexSubagentActivity(value: unknown, nativeSessionId: string): {
+  nativeSessionId: string; nativeAgentId: string; observedAt: number; kind: unknown
 } | undefined {
-  const record = value as CodexTurnRecord, event = record?.payload
-  if (!isSubagentActivity(record) || event?.thread_id !== nativeSessionId || event.item?.kind !== 'completed' ||
-    typeof event.turn_id !== 'string' || !event.turn_id || typeof event.item.id !== 'string' || !event.item.id) return
-  const nativeAgentId = event.item.agent_thread_id, observedAt = event.completed_at_ms
+  const record = value as CodexTurnRecord, event = record?.payload, item = event?.item
+  if (!isSubagentActivity(record) || event?.thread_id !== nativeSessionId ||
+    typeof event.turn_id !== 'string' || !event.turn_id || typeof item?.id !== 'string' || !item.id) return
+  const nativeAgentId = item.agent_thread_id, observedAt = event.completed_at_ms
   if (typeof nativeAgentId !== 'string' || !nativeAgentId.trim() || nativeAgentId === nativeSessionId ||
     typeof observedAt !== 'number' || !Number.isSafeInteger(observedAt) || observedAt <= 0) return
+  return { nativeSessionId, nativeAgentId, observedAt, kind: item.kind }
+}
+
+/** Codex emits this kind only for a confirmed successful child turn. */
+export function codexSubagentCompletion(value: unknown, parent: string) {
+  const activity = codexSubagentActivity(value, parent)
+  if (activity?.kind !== 'completed') return
+  const { nativeSessionId, nativeAgentId, observedAt } = activity
   return { nativeSessionId, nativeAgentId, observedAt }
 }
 

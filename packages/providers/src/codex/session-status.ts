@@ -2,7 +2,8 @@ import { constants } from 'node:fs'
 import { lstat, open } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
 import { codexTurnRecordId } from './turn-outcome.js'
-import { codexNativeSourceId, codexSubagentCompletion, codexTurnRecordEvidence, readCodexPromptExecutionEvidence, type CodexEvidenceContext, type CodexPromptEvidence } from './turn-evidence.js'
+import { codexNativeSourceId, codexSubagentActivity, codexSubagentCompletion, codexTurnRecordEvidence, readCodexPromptExecutionEvidence, type CodexEvidenceContext, type CodexPromptEvidence } from './turn-evidence.js'
+import type { NativeJsonlHistoryReader } from '../jsonl-history-services.js'
 import type { NativeProviderError } from '../provider-error.js'
 
 type CodexSessionStatus = {
@@ -21,8 +22,14 @@ type StatusContext = CodexEvidenceContext & {
   workspacePath: string
   signal: AbortSignal
   onStatus(status: CodexSessionStatus): void
-  onSubagentCompletion?(completion: NonNullable<ReturnType<typeof codexSubagentCompletion>>): void
+  unsettledSubagents?: readonly { nativeAgentId: string; hookReceiptId: string; observedAt: number }[]
+  onSubagentCompletion?(completion: SubagentCompletion): void
+  onSubagentRecoveryUnavailable?(message: string): void
   onUnavailable(code: string, message: string): void
+}
+type SubagentCompletion = NonNullable<ReturnType<typeof codexSubagentCompletion>> & { startReceiptId?: string }
+type RetainedStatusHistory = Pick<NativeJsonlHistoryReader<never, unknown>, 'readPrevious' | 'verifyUnchanged' | 'close'> & {
+  readonly sourceIdentity: Readonly<{ dev: number; ino: number }>
 }
 type HistoryObservation = { kind: 'invalidated' } | { kind: 'unavailable'; code: string; message: string }
 
@@ -39,12 +46,49 @@ function status(evidence: CodexPromptEvidence | null, context: CodexEvidenceCont
     ...(evidence.failure ? { failure: evidence.failure } : {}) }
 }
 
-export function createCodexSessionStatus({ AgentMuxError, observeNativeJsonlHistory }: {
+export function createCodexSessionStatus({ AgentMuxError, observeNativeJsonlHistory, openNativeHistory }: {
   AgentMuxError: NativeProviderError
   observeNativeJsonlHistory(context: { source: { providerId: string; nativeSessionId: string }; transcriptPath: string;
     workspacePath: string; command: string; args: readonly string[]; env: Readonly<NodeJS.ProcessEnv>; signal: AbortSignal;
     onChange(observation: HistoryObservation): void }): Promise<{ dispose(): void }>
+  openNativeHistory(context: { nativeSessionId: string; transcriptPath: string; workspacePath: string; signal: AbortSignal }): Promise<RetainedStatusHistory>
 }) {
+  async function recoverSubagents(
+    historyContext: Parameters<typeof openNativeHistory>[0],
+    source: { dev: bigint; ino: bigint },
+    retainedBoundary: number,
+    unsettled: NonNullable<StatusContext['unsettledSubagents']>
+  ) {
+    const history = await openNativeHistory(historyContext)
+    try {
+      const identity = history.sourceIdentity
+      if (BigInt(identity.dev) !== source.dev || BigInt(identity.ino) !== source.ino) {
+        throw new AgentMuxError('The retained child history no longer identifies the original native source.', 'AGENT_NATIVE_STATUS_SOURCE_CHANGED')
+      }
+      await history.verifyUnchanged()
+      const remaining = new Map(unsettled.map(child => [child.nativeAgentId, child]))
+      const completions: SubagentCompletion[] = []
+      while (remaining.size) {
+        const entry = await history.readPrevious()
+        if (!entry) break
+        if (entry.end > retainedBoundary) continue
+        const activity = codexSubagentActivity(entry.value, historyContext.nativeSessionId)
+        if (!activity) continue
+        const child = remaining.get(activity.nativeAgentId)
+        if (!child) continue
+        // The newest original activity fences older successes, including later interactions
+        // that did not send another SubagentStart. A replay cannot renew its native time.
+        remaining.delete(activity.nativeAgentId)
+        if (activity.kind === 'completed' && activity.observedAt >= child.observedAt) {
+          completions.push({ nativeSessionId: activity.nativeSessionId, nativeAgentId: activity.nativeAgentId,
+            observedAt: activity.observedAt, startReceiptId: child.hookReceiptId })
+        }
+      }
+      await history.verifyUnchanged()
+      return completions
+    } finally { await history.close() }
+  }
+
   /** One exact source watch and bounded incremental bytes, independent of other Sessions/PTY traffic. */
   return async function observeCodexSessionStatus(context: StatusContext): Promise<{ dispose(): void }> {
     const handle = context.nativeHandle
@@ -53,13 +97,14 @@ export function createCodexSessionStatus({ AgentMuxError, observeNativeJsonlHist
     }
     const file = await open(handle.transcriptPath, constants.O_RDONLY | constants.O_NOFOLLOW)
     let observer: { dispose(): void } | undefined
+    let recovery: AbortController | undefined
     let disposed = false, reading = false, queued = false, offset = 0
     let carry: Buffer = Buffer.alloc(0)
     let latest: CodexPromptEvidence | null = null
     const decoder = new TextDecoder('utf8', { fatal: true })
     const dispose = (): void => {
       if (disposed) return
-      disposed = true; observer?.dispose(); context.signal.removeEventListener('abort', dispose)
+      disposed = true; observer?.dispose(); recovery?.abort(); context.signal.removeEventListener('abort', dispose)
       void file.close()
     }
     const unavailable = (error: unknown): void => {
@@ -88,10 +133,12 @@ export function createCodexSessionStatus({ AgentMuxError, observeNativeJsonlHist
       }
       // Keep the predecessor's ordering/terminal fence even when its display is suppressed.
       const { nativePromptPredecessor: _predecessor, ...sourceContext } = context
+      const recoveringIds = context.unsettledSubagents && new Set(context.unsettledSubagents.map(child => child.nativeAgentId))
       const initialChildren = new Map<string, NonNullable<ReturnType<typeof codexSubagentCompletion>>>()
       const initial = await readCodexPromptExecutionEvidence(sourceContext, context.onSubagentCompletion && (value => {
         const completion = codexSubagentCompletion(value, handle.sessionId)
-        if (completion && completion.observedAt > (initialChildren.get(completion.nativeAgentId)?.observedAt ?? 0)) {
+        if (completion && !recoveringIds?.has(completion.nativeAgentId) &&
+          completion.observedAt > (initialChildren.get(completion.nativeAgentId)?.observedAt ?? 0)) {
           initialChildren.set(completion.nativeAgentId, completion)
         }
       }))
@@ -109,6 +156,7 @@ export function createCodexSessionStatus({ AgentMuxError, observeNativeJsonlHist
         const newline = tail.lastIndexOf(10)
         carry = newline >= 0 ? tail.subarray(newline + 1) : Buffer.alloc(0)
       }
+      const retainedBoundary = lastByte[0] === 10 ? offset : Math.max(0, offset - Math.max(1, carry.length))
       const check = (): void => {
         queued = true
         if (reading || disposed) return
@@ -166,6 +214,18 @@ export function createCodexSessionStatus({ AgentMuxError, observeNativeJsonlHist
       context.signal.addEventListener('abort', dispose, { once: true })
       context.signal.throwIfAborted()
       check() // Close the initial read -> watch setup gap.
+      const { unsettledSubagents, onSubagentCompletion, onSubagentRecoveryUnavailable } = context
+      if (unsettledSubagents?.length && onSubagentCompletion) {
+        recovery = new AbortController()
+        void recoverSubagents({ nativeSessionId: handle.sessionId, transcriptPath: handle.transcriptPath,
+          workspacePath: context.workspacePath, signal: recovery.signal }, stat, retainedBoundary, unsettledSubagents)
+          .then(completions => {
+            if (!disposed) for (const completion of completions) onSubagentCompletion(completion)
+          }).catch(error => {
+            if (!disposed && !context.signal.aborted) onSubagentRecoveryUnavailable?.(
+              error instanceof Error ? error.message : 'The retained native child outcomes could not be read.')
+          })
+      }
       return { dispose }
     } catch (error) { dispose(); throw error }
   }

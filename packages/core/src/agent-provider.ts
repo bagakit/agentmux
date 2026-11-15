@@ -201,8 +201,12 @@ export type AgentProviderPreparedNativeInput = {
 }
 export type AgentProviderSessionStatusObservationContext = AgentProviderSessionStatusContext & {
   onStatus(status: AgentProviderSessionStatus): void
+  /** Already admitted children of this Run that still lack an end observation. */
+  unsettledSubagents?: readonly Pick<import('./agent-subagent-state.js').AgentSubagentSession, 'nativeAgentId' | 'hookReceiptId' | 'observedAt'>[]
   /** A successful end from the exact original child source, independent of main-turn status. */
-  onSubagentCompletion?(completion: { nativeSessionId: string; nativeAgentId: string; observedAt: number }): void
+  onSubagentCompletion?(completion: { nativeSessionId: string; nativeAgentId: string; observedAt: number; startReceiptId?: string }): void
+  /** Retained child reading failed while the original live observation remains usable. */
+  onSubagentRecoveryUnavailable?(message: string): void
   onUnavailable(code: string, message: string): void
 }
 

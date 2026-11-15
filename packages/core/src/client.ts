@@ -11279,9 +11279,19 @@ export class AgentMuxClient {
       }
     }
     try {
+      const unsettledSubagents = subagentScopeMatches(session.nativeSubagents, session)
+        ? session.nativeSubagents.sessions.filter(child => child.phase === 'running').map(({ nativeAgentId, hookReceiptId, observedAt }) => ({ nativeAgentId, hookReceiptId, observedAt }))
+        : undefined
       watch.observer = await provider.observeSessionStatus({ ...await this.providerNativeContext(session, await this.requireCurrentAgentRun(session)),
         nativeHandle: structuredClone(session.nativeHandle),
         signal: watch.controller.signal, onUnavailable: unavailable,
+        ...(unsettledSubagents?.length ? { unsettledSubagents } : {}),
+        onSubagentRecoveryUnavailable: message => {
+          if (!currentWatch()) return
+          this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId, code: 'AGENT_NATIVE_SUBAGENT_HISTORY_UNAVAILABLE',
+            message: `${message} Retained child states remain available. Live observation and input continue.`,
+            evidence: { source: 'agentmux', run: { ...session.run }, observedAt: Date.now() } })
+        },
         onSubagentCompletion: completion => {
           watch.pending = watch.pending.then(async () => {
             if (!currentWatch()) return
@@ -11296,7 +11306,8 @@ export class AgentMuxClient {
               const child = roster.sessions[index]
               // A retained completion may settle its known start. Native time is
               // kept so rereading the transcript cannot refresh or close a later start.
-              if (!child || child.phase !== 'running' || completion.observedAt < child.observedAt) return saved
+              if (!child || child.phase !== 'running' || completion.observedAt < child.observedAt ||
+                  completion.startReceiptId !== undefined && completion.startReceiptId !== child.hookReceiptId) return saved
               const { waitingFor: _waiting, ...original } = child
               const children = roster.sessions.slice()
               children[index] = { ...original, phase: 'ended', state: 'done', outcome: 'completed', observedAt: completion.observedAt }
