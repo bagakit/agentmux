@@ -63,6 +63,8 @@ async function describe(source: ManagedHookRuntimeSource): Promise<Description> 
     return unavailable('The original interpreter did not confirm a supported Node Hook runtime.')
   }
   for (const path of native.sharedObjects) {
+    // Linux maps this virtual object into each process. It has no file to retain.
+    if (process.platform === 'linux' && path === 'linux-vdso.so.1') continue
     if (typeof path !== 'string' || !isAbsolute(path)) return unavailable('The interpreter reported an unqualified library location.')
     const system = process.platform === 'darwin' ? path.startsWith('/usr/lib/') || path.startsWith('/System/Library/')
       : ['/lib/', '/lib64/', '/usr/lib/', '/usr/lib64/'].some(prefix => path.startsWith(prefix))
