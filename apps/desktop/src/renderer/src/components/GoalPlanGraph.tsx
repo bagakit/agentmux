@@ -1,8 +1,6 @@
 import { Fragment, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type CSSProperties } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
-import { formatGoalTicketLink } from '@agentmux/core/sharing'
-import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import type { GoalPlanNodeProjection } from '@agentmux/demand/goal-plan'
@@ -434,10 +432,6 @@ export function GoalPlanGraph({ demand, projection: provided, planLink, planning
       <div className="goal-plan__reading" id={readingId}>
       <div className="goal-plan__reading-header"><GoalPlanMark item={selected} /><h3 ref={readingHeading} tabIndex={-1}>{selected.node.title}</h3>
         {!historical && !selected.wholeGoal ? <span className="goal-plan__reading-status" data-goal-plan-state={selected.state ?? undefined}>{goalPlanStateLabel(selected)}</span> : null}
-        {demand.address && tickets.has(selected.node.id) ? <Button type="button" onClick={() => {
-          const link = formatGoalTicketLink(demand.id, demand.address!, tickets.get(selected.node.id)!)
-          void copyTextToClipboard(link, error => setIssue(error instanceof Error ? error.message : String(error)))
-        }}>Copy T{tickets.get(selected.node.id)} link</Button> : null}
         <Button type="button" onClick={() => closeNode(selected.node.id)}>Back to node</Button></div>
       {historical ? <p className="goals-caption" role={!exact ? 'status' : undefined}>{exact ? 'Previous attempt' : 'The selected original attempt is unavailable.'}</p> : null}
       {(!historical || exact) ? <NodeDetail key={JSON.stringify([demand.address?.runtimeId, demand.address?.namespace, demand.id, selected.node.id, attemptId])} demand={demand} item={selected} historical={historical} dependencyNames={selected.node.dependsOn.map(id => byId.get(id)!.node.title)} onIssue={setIssue} onOpenGoalWork={onOpenGoalWork}
