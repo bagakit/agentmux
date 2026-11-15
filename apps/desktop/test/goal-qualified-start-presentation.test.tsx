@@ -31,7 +31,7 @@ it('the real Start record view keeps qualified receipts distinct and never opens
   await dom.render(<GoalStartWork rows={goalStartRows(original)} supervisorSessionId={null} active={false} openAgent={openAgent} review={async () => {}} />)
   expect(dom.container.querySelectorAll('[data-goal-work-operation]')).toHaveLength(2)
   expect(dom.container.querySelector('[data-goal-work-operation="Start-D"] > strong')?.textContent).toBe('Original input receipt retained · Current execution unconfirmed')
-  expect(dom.container.querySelector('[data-goal-work-operation="Start-E"] > strong')?.textContent).toBe('Start observation unknown · Check original input')
+  expect(dom.container.querySelector('[data-goal-work-operation="Start-E"] > strong')?.textContent).toBe('Task start unconfirmed · Check original input')
   expect(dom.container.textContent).toContain('Runtime D'); expect(dom.container.textContent).toContain('Runtime E')
   expect(dom.container.textContent).not.toContain('[object Object]'); expect(dom.container.textContent).toContain('Start observation unknown')
   expect([...dom.container.querySelectorAll('button')].some(button => button.textContent === 'Open original Agent')).toBe(false)

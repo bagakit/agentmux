@@ -72,6 +72,7 @@ it('the mounted workspace tracks explicit reading and manual scroll without repl
   const discussions = detail.querySelectorAll('[aria-label^="Open discussion for "]')
   expect(discussions).toHaveLength(1)
   expect(discussions[0]!.parentElement, 'Goal discussion belongs beside the overview heading').toBe(overview.querySelector('.goals-detail__overview-heading'))
+  expect(discussions[0]!.querySelector('img[src][alt=""]'), 'The original discussion button carries its illustration').not.toBeNull()
   await chooseGoalSection(detail, 'execution')
   expect(document.activeElement).toBe(detail.querySelector('[data-goal-reading-section="execution"]'))
   expect(selected()).toBe('Jump to section: Execution records')

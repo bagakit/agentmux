@@ -70,9 +70,14 @@ it('the screenshot combination keeps its frozen inspection and origin above expa
   expect(Boolean(origin!.compareDocumentPosition(record!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
   const records = record!.closest('details')!
   expect(records.open).toBe(false)
-  expect(records.querySelector('summary')?.textContent).toBe('1 original execution · 1 to check')
+  const preview = records.querySelector('summary')!
+  expect(preview.querySelector('strong')?.textContent).toBe('One-time task')
+  const originalConclusion = record!.querySelector('strong')!.textContent!
+  expect(preview.textContent, 'The collapsed row must read the exact execution conclusion').toContain(originalConclusion)
+  const refresh = [...records.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Refresh reports')
+  expect(refresh?.closest('details')).toBe(records)
   const inputsBeforeReading = [...f.nativeInputs]
-  await act(async () => records.querySelector('summary')!.click())
+  await act(async () => preview.click())
   expect(records.open).toBe(true)
   expect(f.nativeInputs).toEqual(inputsBeforeReading)
   expect(work.querySelectorAll('[data-goal-work-operation="finite-start"]')).toHaveLength(1)

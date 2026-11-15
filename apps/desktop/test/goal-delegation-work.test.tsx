@@ -71,7 +71,7 @@ function startObservation(): GoalStartObservation {
 
 it('finite Start reading requires actual input and exact Run while Goal-level results retain unknown worker association', () => {
   const record = { ...goal(), delegations: [], dispatches: [finiteStart()] }
-  expect(goalNextStep(record)).toBe('Start observation unknown · Check original input')
+  expect(goalNextStep(record)).toBe('Task start unconfirmed · Check original input')
   const observed = startObservation()
   expect(goalStartRows({ ...record, startObservations: [observed] })[0]!.state).toBe('working')
   expect(goalStartRows({ ...record, startObservations: [{ ...observed, input: { state: 'unknown' } }] })[0]!.state).toBe('unknown')

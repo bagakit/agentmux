@@ -11,6 +11,7 @@ const mutations = {
   'selected-reading': ["aria-current={here ? 'location' : undefined}", 'aria-current={undefined}'],
   'wrong-destination': ["readingTargets[id].current", "id === 'overview' ? planRef.current : readingTargets[id].current"],
   'orphaned-discussion': ['className="goals-section-heading goals-detail__overview-heading"', 'className="goals-section-heading"'],
+  'missing-discussion-art': ['src={dialogueArtworkUrl}', 'data-omitted-src={dialogueArtworkUrl}'],
   'properties-disclosure': ['<details className="goals-detail__properties"', '<details open className="goals-detail__properties"']
 } as const
 const mutationOwner = mutation === 'selected-reading' ? outline : owner

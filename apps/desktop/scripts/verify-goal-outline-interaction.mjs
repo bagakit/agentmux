@@ -49,6 +49,7 @@ async function run(mutation) {
     assert.equal(originalTest.status, 'failed')
     assert.match(originalTest.failureMessages.join('\n'), mutation === 'orphaned-discussion'
       ? /Goal discussion belongs beside the overview heading/
+      : mutation === 'missing-discussion-art' ? /The original discussion button carries its illustration/
       : /choosing Goal brief focuses the original brief/)
     console.log(phase + ': the mounted Goal workspace rejected the mutation.')
   } else {
@@ -62,6 +63,7 @@ try {
   await run('')
   await run('wrong-destination')
   await run('orphaned-discussion')
+  await run('missing-discussion-art')
 } finally {
   await rm(proof, { recursive: true, force: true })
 }

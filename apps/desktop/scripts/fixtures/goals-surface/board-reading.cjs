@@ -148,6 +148,8 @@ module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result
       })()`)
       assert.ok(discussionPlacement.gap >= 0 && discussionPlacement.gap <= 28 && discussionPlacement.centers < 3,
         'Discussion stays visually attached to the overview title: ' + JSON.stringify(discussionPlacement))
+      const artwork = '.goals-detail__discussion img'
+      await waitFor(`${q(artwork)}?.complete && ${q(artwork)}.naturalWidth > 0`)
       await take(width + '-' + theme + '-goal-detail', width)
     }
     const originalInspection = '.goals-detail__current-work'
@@ -183,7 +185,25 @@ module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result
       }
     }
     const records = '[data-goal-other-work]'
-    if (await evaluate('Boolean(' + q(records) + ') && !' + q(records) + '.parentElement.open')) await click(q(records))
+    if (await evaluate('Boolean(' + q(records) + ') && !' + q(records) + '.parentElement.open')) {
+      await evaluate(`${q(records)}.scrollIntoView({ block: 'center', behavior: 'instant' })`)
+      await waitFor(`(() => {
+        const bounds = ${q(records)}.getBoundingClientRect()
+        return bounds.top > ${q('.goals-detail__toolbar')}.getBoundingClientRect().bottom &&
+          bounds.bottom < ${q(detail)}.getBoundingClientRect().bottom - 16
+      })()`)
+      await paint()
+      assert.ok(await evaluate(`Boolean(${q(records + ' strong')})`))
+      const refresh = '.goal-work-area__records .goal-work-area__refresh button'
+      assert.equal(await evaluate(`(() => {
+        const button = ${q(refresh)}
+        if (!button) return false
+        const bounds = button.getBoundingClientRect()
+        return button.contains(document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2))
+      })()`), false, 'A collapsed history does not expose refresh')
+      await take(width + '-' + theme + '-execution-history', width)
+      await click(q(records))
+    }
     await click(q(reader + ' > summary'))
     await waitFor('Boolean(' + q(reader + ' .goal-request-reader__document') + ')')
     // Position the real original work item exactly as a reader scrolling down to it would.
