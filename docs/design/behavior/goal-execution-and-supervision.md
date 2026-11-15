@@ -31,6 +31,12 @@ Source-qualified 新请求在任何连接或 Core 准备前，由同一 Demand �
 
 关键过程记录沿原 Demand activities owner，公共 Core/RPC/对象式 CLI 可追加并检查准确 operation。原 Session 作者由调用认证取得，业务正文不能冒充另一作者；稳定操作重读不重复写，同操作不同内容明确冲突。需求变化、进展、评审/测试证据、main SHA、发布版本、缺口和接手入口分类可读，证据保存路径/SHA 引用，不复制聊天全文或工具逐行输出。GUI 与 CLI 消费同条原活动，工作实现、main 集成、发布安装与人的成果接受分别成立。
 
+## 确认后接续原 Goal
+
+用户明确选择确认并接续时，Host 从同次保存的接续意图向所示原 Supervisor 投递一条带 Goal 地址、确认版本和操作身份的 amux 系统消息。Supervisor 读回原 Goal 和当前计划，从可推进的 Ticket 接续。已存在的执行、认领和评审关系保留。消息到达仅证明通知送达。
+
+通知沿既有 Core 输入资格与回执等待可用窗口，保留草稿、权限问答及健康 Run。读回确认、重试读回与打开页面都不发出第二条通知。角色或目标版本变化使仍未投递的原请求按原身份停止；回执未知时，只核对原操作。重启后从原持久请求继续观察，先核对是否已尝试投递。
+
 ## 委派回报与责任接续
 
 Goal 的委派沿 Core 原通信 dispatch 和实际独立 AgentSession，保存原 source message、operation、Host、owner／worker、Run、冻结任务正文及资料来源；Goal 持有业务关联和逐成功标准的报告，Core 持有通信、投递与回复事实。委派不更换 Supervisor，只有显式交接修改责任。Mote 的执行 cwd 与 Goal Project 分别成立，准确发现目标，不从名称、正文或显示位置推定执行身份。
