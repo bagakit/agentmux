@@ -290,6 +290,23 @@
 }
 .focus-saved-task:hover, .focus-saved-task[data-state='open'] { background: var(--surface-2); color: var(--text); }
 .focus-saved-task:focus-visible { outline: 1px solid var(--green); outline-offset: -1px; }
+@media (prefers-reduced-motion: no-preference) {
+  .global-focus-surface:not([inert]) :is(.focus-retained-projects__toggle, .focus-saved-task) {
+    transition: background-color var(--dur-fast) var(--ease-enter), color var(--dur-fast) var(--ease-enter);
+  }
+  .global-focus-surface:not([inert]) .focus-retained-projects__toggle > svg:first-child {
+    transition: transform var(--dur-fast) var(--ease-enter);
+  }
+  .global-focus-surface:not([inert]) .focus-project-history__content {
+    transition: opacity 180ms var(--ease-enter), transform 180ms var(--ease-enter);
+  }
+  @starting-style {
+    .global-focus-surface:not([inert]) .focus-project-history__toggle[aria-expanded='true']:focus:not(:disabled) + .focus-project-history__content:not([hidden]) {
+      opacity: .5;
+      transform: translateY(-4px);
+    }
+  }
+}
 .focus-saved-task > :first-child { flex: none; }
 .focus-saved-task > strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
 .focus-saved-task > time {

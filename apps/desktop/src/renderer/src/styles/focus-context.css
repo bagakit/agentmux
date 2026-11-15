@@ -258,6 +258,18 @@
 .agent-subagent-details [data-subagent-state='waiting'] > span { color: var(--amber); }
 .agent-subagent-details [data-subagent-state='failed'] > span { color: var(--red); }
 .agent-subagent-details > p { margin: 2px 6px; color: var(--text-2); }
+@media (prefers-reduced-motion: no-preference) {
+  .agent-information-reader:not([hidden]) .agent-subagent-details[open] > :is(ul, p) {
+    animation: focus-detail-reveal 180ms var(--ease-enter) both;
+  }
+  .agent-information-reader:not([hidden]) .agent-subagent-details > summary::after {
+    transition: rotate var(--dur-fast) var(--ease-enter);
+  }
+}
+@keyframes focus-detail-reveal {
+  from { opacity: .5; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
 .agent-information-reader__metadata { position: relative; background: var(--surface-2); }
 .agent-information-reader__metadata-heading { display: flex; align-items: center; gap: 9px; padding-top: 4px; }
 .agent-information-reader__metadata-heading > h3 { margin: 0; color: var(--text); font-size: var(--fs-body); font-weight: 600; }

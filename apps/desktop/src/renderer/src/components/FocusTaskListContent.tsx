@@ -42,10 +42,13 @@ export function FocusTaskListContent({ context, identity, placeholder = false }:
   identity?: ReactNode
   placeholder?: boolean
 }) {
-  const inlineObservation = context.detailKind === 'observation' && !context.access && !context.runUnobserved
-  const showStatus = context.bucket !== 'results' && !inlineObservation && mandatoryAgentContextDetails(context, 'card')
-  const showExplanation = showStatus || context.detailKind === 'service' || context.detailKind === 'observation' && !inlineObservation
+  const inlineRecovery = context.bucket === 'idle' && context.processState === 'interrupted'
+  const inlineStatus = !context.access && !context.runUnobserved && (context.detailKind === 'observation' || inlineRecovery)
+  const showStatus = context.bucket !== 'results' && !inlineStatus && mandatoryAgentContextDetails(context, 'card')
+  const showExplanation = !inlineStatus && (showStatus || context.detailKind === 'service' || context.detailKind === 'observation')
   const detail = showExplanation && !context.detailIsRecap && context.detail !== context.stateLabel ? context.detail : null
+  const statePrefix = `${context.stateLabel} · `
+  const explanation = showStatus && detail?.startsWith(statePrefix) ? detail.slice(statePrefix.length) : detail
   const work = listWorkDetail(context)
   const recap = placeholder ? undefined : listResultRecap(context)
   const activity = context.lastActivityAt
@@ -54,10 +57,10 @@ export function FocusTaskListContent({ context, identity, placeholder = false }:
   return <>
     <span className="focus-task-list__line">
       {identity ?? <AgentContextAvatar context={context} placeholder={placeholder} />}
-      <span className="focus-task-list__mark" title={inlineObservation ? context.detail : context.stateLabel}><FocusContextStateMark context={context} /></span>
+      <span className="focus-task-list__mark" title={inlineStatus ? context.detail : context.stateLabel}><FocusContextStateMark context={context} /></span>
       <span className="focus-task-list__copy">
         <strong className="focus-task-list__title">{context.name}</strong>
-        {inlineObservation ? <span className="focus-task-list__summary" title={context.detail}>{context.stateLabel}</span>
+        {inlineStatus ? <span className={`focus-task-list__summary${inlineRecovery ? ' focus-task-list__summary--recovery' : ''}`} title={context.detail}>{context.stateLabel}</span>
           : recap ? <span className="focus-task-list__summary focus-task-list__summary--excerpt"><MarkdownExcerpt content={launcherRecapExcerpt(recap)} /></span>
           : work ? <span className="focus-task-list__summary focus-task-list__summary--excerpt">{work}</span> : null}
       </span>
@@ -70,9 +73,9 @@ export function FocusTaskListContent({ context, identity, placeholder = false }:
         <span className="focus-task-list__clock">{hasTime ? <LastActivity at={activity} /> : null}</span>
       </span>
     </span>
-    {showStatus || detail ? <span className="focus-task-list__detail">
+    {showStatus || explanation ? <span className="focus-task-list__detail">
       {showStatus ? <span className="focus-task-list__state">{context.stateLabel}</span> : null}
-      {detail ? <span className="focus-task-list__explanation">{detail}</span> : null}
+      {explanation ? <span className="focus-task-list__explanation">{explanation}</span> : null}
     </span> : null}
   </>
 }

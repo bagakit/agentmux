@@ -358,7 +358,7 @@ const FocusProjectObservation = memo(function FocusProjectObservation({ project,
       <ThemeNavigationDisclosureIcon size={12} aria-hidden="true" /><ThemeObjectHistoryIcon size={13} aria-hidden="true" />
       <span>History</span><span className="focus-retained-projects__count">{project.observations.length}</span>
     </button> : null}
-    <div id={historyId} hidden={withinProject && !showHistory} onFocusCapture={keepRecentHistoryOpen} onPointerDownCapture={keepRecentHistoryOpen}>
+    <div id={historyId} className={withinProject ? 'focus-project-history__content' : undefined} hidden={withinProject && !showHistory} onFocusCapture={keepRecentHistoryOpen} onPointerDownCapture={keepRecentHistoryOpen}>
     {!withinProject || showHistory ? <button type="button" className={`focus-retained-projects__row${withinProject ? ' focus-project-history__read' : ''}`}
       data-retained-project={withinProject || recent ? undefined : project.key} data-recent-project={recent ? project.key : undefined}
     aria-label={`View ${project.name} focus history`} disabled={at === null}
