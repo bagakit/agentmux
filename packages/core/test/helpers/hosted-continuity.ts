@@ -14,6 +14,7 @@ import type { AgentMuxAgentSessionRegistry } from '../../src/agent-session-regis
 import type { AgentMuxHostedForwardRpc, AgentMuxHostedRpcPort } from '../../src/hosted-client-contract.js'
 import type { AgentMuxHostedSessionProjection } from '../../src/hosted-session-summary.js'
 import type { AgentMuxStoredAgentSession } from '../../src/types.js'
+import type { AgentProvider } from '../../src/agent-provider.js'
 
 export function continuitySession(id = 'continuity-original', operations = 12): AgentMuxStoredAgentSession {
   const run = { runId: 'run-' + id }
@@ -37,10 +38,10 @@ export function continuitySession(id = 'continuity-original', operations = 12): 
 
 /** Only transport and the unavailable Runtime are controlled; Core, SQLite Store,
  * Hosted codec/dispatch/SDK and the public inspection service remain production owners. */
-export async function hostedContinuityFixture(sessions = [continuitySession()]) {
+export async function hostedContinuityFixture(sessions = [continuitySession()], providers: readonly AgentProvider[] = []) {
   const directory = await mkdtemp(join(tmpdir(), 'amux-hosted-continuity-'))
   const store = new AgentMuxFileAgentSessionStore(join(directory, 'sessions.json'))
-  const core = new AgentMuxClient({ store, providers: [] })
+  const core = new AgentMuxClient({ store, providers })
   const inner = core as unknown as { registry: AgentMuxAgentSessionRegistry; publishSession(session: AgentMuxStoredAgentSession): void }
   try {
     for (const session of sessions) await inner.registry.put(session)

@@ -7,7 +7,9 @@ import type { WebContents } from 'electron'
 import type { AgentMuxAgentSession, AgentMuxStoredAgentSession, AgentMuxClientEvent } from '../../../packages/core/src/types'
 import { continuitySession, hostedContinuityFixture } from '../../../packages/core/test/helpers/hosted-continuity'
 import { agentPromptNotApplied, agentPromptPredecessor } from '../../../packages/core/src/agent-prompt-condition'
+import { BUILT_IN_AGENT_PROVIDERS } from '../../../packages/core/src/agent-provider'
 import { hostedPromptAdmissionSummary } from '@agentmux/core/hosted'
+import { projectAgentMuxRuntimeSubjects } from '@agentmux/core/runtime'
 import { hostedAgentSessionSummary } from '../../../packages/core/src/hosted-session-summary'
 import { RuntimeController } from '../src/main/runtime-controller'
 import { SESSION_EVENT_CHANNEL, type RuntimeEvent } from '../src/shared/contracts'
@@ -16,6 +18,8 @@ import { api } from '../src/renderer/src/lib/api'
 import { currentContinuitySupervision } from '../src/renderer/src/lib/continuity-supervision'
 import { ContinuitySupervisionNotice } from '../src/renderer/src/components/ContinuitySupervisionNotice'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
+import { spaceMountTransport } from './helpers/space-mount-fixture'
+import type { SpaceMountMemberEvent } from '../src/shared/space-mount'
 
 vi.mock('electron', () => ({ app: { getAppMetrics: () => [] }, nativeImage: {} }))
 const dom = composerDOM(), closes: Array<() => unknown | Promise<unknown>> = []
@@ -32,6 +36,7 @@ beforeEach(() => {
 afterEach(async () => { for (const close of closes.splice(0).reverse()) await close(); vi.restoreAllMocks() })
 function session() {
   const source = continuitySession('wire-original', 3), nativeTarget = { kind: 'provider' as const, providerId: 'codex', sessionId: 'original-native' }
+  source.executorId = 'codex'
   source.nativeHandle = nativeTarget
   const root = source.continuityOperations!['wire-original-operation-0']!
   root.nativeTarget = nativeTarget
@@ -55,7 +60,8 @@ function current() {
   return value
 }
 async function fixture(original = session()) {
-  const f = await hostedContinuityFixture([original]); closes.push(f.dispose)
+  const f = await hostedContinuityFixture([original], BUILT_IN_AGENT_PROVIDERS.filter(provider => provider.id === original.providerId))
+  closes.push(f.dispose)
   const client = await f.connect('full')
   const controller = new RuntimeController(f.store, async () => client); closes.push(() => controller.dispose())
   controller.commit(await controller.prepare(composerConfig))
@@ -145,6 +151,131 @@ it('narrows only actual registered-client admission bytes while original full re
   expect(f.destroyed).not.toHaveBeenCalled()
   expect(api.sessions.write).not.toHaveBeenCalled(); expect(api.sessions.submitPrompt).not.toHaveBeenCalled(); expect(api.sessions.recover).not.toHaveBeenCalled()
   fact({ kind: 'actual-carrier', samples, source: 'Core→HostedSDK→RuntimeController.attach→WebContents.send→AppStore + original queue/question/recovery notice', fullContinuityOperations: 3, rootAttemptJoined: true, oldRunLaunchReceipt: 'not-applied', noNewInput: true })
+})
+
+it('keeps the original recovery message in Core and out of Desktop Session carriers', async () => {
+  const f = await fixture(), initial = session(), control = current().control
+  vi.spyOn(f.client, 'runtimeIdentity').mockReturnValue({ hostId: 'local', buildIdentity: 'controlled-runtime',
+    protocolVersion: 2, processId: 1, instanceId: 'controlled-runtime-instance' })
+  const samples: Array<{ body: number; core: number; event: number; active: number; dormant: number; recovery: number; member: number }> = []
+  const operationId = 'wire-original-operation-0', key = { kind: 'message' as const,
+    agentSessionId: initial.agentSessionId, expectedRun: initial.run, messageId: 'owned-recovery-message' }
+  const run = { ...initial.run, kind: 'agent' as const, providerId: initial.providerId, executorId: initial.executorId,
+    agentSessionId: initial.agentSessionId, workspacePath: initial.workspacePath, pid: 1, state: 'running' as const,
+    cols: 80, rows: 24, observedAt: 2, latestOutputBytes: 0, acceptedInputBytes: 0, nativeService: null }
+  vi.spyOn(f.core, 'runtimeSubject').mockImplementation(async () => {
+    const original = await f.core.readAgentSession(initial.agentSessionId)
+    return projectAgentMuxRuntimeSubjects('local', [run], [original!])[0]!
+  })
+  // The selected transport routes its fixed member carrier to the same original Hosted owner.
+  const memberFrames: SpaceMountMemberEvent[] = [], runtimeId = f.owner.runtimeId
+  const mounted = spaceMountTransport(closes, [{ id: 'mounted-core', carrier: {
+    forwardRpc: async (_method, input) => {
+      const { call } = input as { call: { method: string; params: unknown } }
+      return await f.port.call(call.method as never, call.params as never) as never
+    },
+    subscribeRpc: async (_method, input, handlers) => {
+      const { call } = input as { call: { method: string; params: unknown } }
+      return await f.port.subscribe(call.method, call.params, handlers as never) as never
+    }
+  } }], composerConfig)
+  const member = await mounted.api.member({ hostId: 'mounted-core', target: { reference: { runtimeId, spaceId: 'original-space' },
+    runtimeId, regionId: 'original-region', agentSessionId: initial.agentSessionId, expectedRun: initial.run } }, event => memberFrames.push(structuredClone(event)))
+  closes.push(() => member.dispose())
+  await vi.waitFor(() => expect(memberFrames.some(event => event.type === 'session')).toBe(true))
+  for (const size of [1024, 1024 * 1024]) {
+    const original = structuredClone(initial), root = Object.assign(original.continuityOperations![operationId]!, {
+      coreOnlyExtension: 'FROZEN_CORE_ONLY_RECOVERY_EXTENSION_' + '界'.repeat(size)
+    })
+    const body = 'FROZEN_ORIGINAL_MESSAGE_' + '界'.repeat(size)
+    root.trigger = 'input'
+    root.kind = 'pending'
+    root.messageInput = { ref: { key, waitGeneration: 1 }, key, admissionIntent: { kind: 'manual-actor', expectedRun: original.run },
+      prompt: body, message: { userContent: body, authorHuman: true }, lifecycleOperationId: 'original-recovery-launch' }
+    original.continuity = root
+    const memberCut = memberFrames.length, frame = await f.publish(original), event = frame.event
+    if (event.type !== 'agent-session') throw Error('Expected actual Session carrier')
+    const assertDisplay = (value: unknown) => {
+      expect(JSON.stringify(value), 'Original recovery body must stay in Core').not.toContain('FROZEN_ORIGINAL_MESSAGE_')
+      expect(JSON.stringify(value), 'Future Core operation fields require explicit Desktop admission').not.toContain('FROZEN_CORE_ONLY_RECOVERY_EXTENSION_')
+      expect(value).toMatchObject({ continuity: { operationId, hasMessageInput: true } })
+      expect(value).not.toHaveProperty('continuity.messageInput')
+      expect(value).not.toHaveProperty('continuity.coreOnlyExtension')
+    }
+    assertDisplay(event.session)
+    assertDisplay(current())
+    await vi.waitFor(() => expect(memberFrames.slice(memberCut).some(value => value.type === 'runtime' && value.event.event.type === 'agent-session')).toBe(true))
+    const mountedEvent = memberFrames.slice(memberCut).find(value => value.type === 'runtime' && value.event.event.type === 'agent-session')
+    if (mountedEvent?.type !== 'runtime' || mountedEvent.event.event.type !== 'agent-session') throw Error('Expected mounted Member Session event')
+    assertDisplay(mountedEvent.event.event.session)
+    const mountedSession = await member.call('read', {})
+    assertDisplay(mountedSession)
+    expect(mountedSession.control.run).toEqual(original.run)
+    expect(event.session.continuityOperations?.[operationId]).toEqual(event.session.continuity)
+    expect(current().continuityOperations?.[operationId]).toEqual(current().continuity)
+    const full = f.internal.at(-1)
+    if (full?.type !== 'agent-session') throw Error('Expected original internal Session event')
+    expect(full.session.continuity?.messageInput?.prompt).toBe(body)
+    expect(full.session.continuity).toHaveProperty('coreOnlyExtension', root.coreOnlyExtension)
+    const inspected = await f.client.forwardRpc!('agent.inspect', { target: { kind: 'agent-session', agentSessionId: original.agentSessionId } })
+    expect(inspected.session.continuityOperations![operationId]!.messageInput).toEqual(root.messageInput)
+    expect(inspected.session.continuityOperations![operationId]).toHaveProperty('coreOnlyExtension', root.coreOnlyExtension)
+
+    vi.mocked(f.core.runtimeProjection).mockResolvedValueOnce({ hostId: 'local', subjects: [] })
+    const dormant = structuredClone(await f.controller.snapshot(composerConfig)).recoveryCandidates[0]!
+    assertDisplay(dormant)
+    expect(dormant.continuityOperations?.[operationId]).toEqual(event.session.continuity)
+    vi.mocked(f.core.runtimeProjection).mockResolvedValueOnce({ hostId: 'local',
+      subjects: projectAgentMuxRuntimeSubjects('local', [run], [inspected.session]) })
+    const active = structuredClone(await f.controller.snapshot(composerConfig)).sessions[0]!
+    assertDisplay(active)
+    expect(active.control.run).toEqual(original.run)
+    expect(active.processState).toBe('running')
+
+    // Controlled pending observation at the Core API. Hosted serialization and the Desktop recovery reply are production code.
+    const pending = { kind: 'pending' as const, agentSessionId: original.agentSessionId, previousRun: original.run,
+      reason: 'runtime-unverified' as const, evidence: { kind: 'run-unknown' as const, observedAt: 2, message: 'No Runtime observation' }, continuity: root }
+    f.ensure.mockResolvedValueOnce(pending)
+    const recovery = structuredClone(await f.controller.recoverSession(control, composerConfig, undefined, operationId))
+    assertDisplay(recovery)
+    expect(recovery).toMatchObject({ kind: 'pending', previousRun: original.run, reason: 'runtime-unverified', evidence: pending.evidence })
+    expect(current().control).toEqual(control)
+    samples.push({ body: Buffer.byteLength(body), core: bytes(full), event: bytes(frame), active: bytes(active),
+      dormant: bytes(dormant), recovery: bytes(recovery), member: bytes(mountedEvent) })
+  }
+  await dom.render(<ContinuitySupervisionNotice session={current()} />)
+  expect(dom.container.textContent).toContain('Attempt 2 of 2')
+  expect(dom.draft(initial.agentSessionId)).toBe('Unsent original draft')
+  expect(useAppStore.getState().agentSteerQueues[initial.agentSessionId]![0]).toMatchObject({ text: originalBody,
+    resumeInputReceipt: { state: 'not-applied', input: { prompt: originalBody } } })
+  const [short, long] = samples as [typeof samples[number], typeof samples[number]]
+  expect(long.core - short.core).toBeGreaterThan(6 * 1024 * 1024)
+  for (const carrier of ['event', 'active', 'dormant', 'recovery', 'member'] as const) expect(long[carrier], carrier).toBe(short[carrier])
+
+  const request = { agentSessionId: initial.agentSessionId, expectedRun: initial.run, intentOperationId: operationId,
+    operationId: 'own-recovery-control', action: 'cancel' as const }
+  const controlled = structuredClone(await f.controller.controlContinuity('local', request))
+  expect(controlled.result.receipt).toMatchObject({ request, outcome: 'cancelled' })
+  if (controlled.result.state !== 'active') throw Error('Expected a retained Session')
+  assertNoRecipe(controlled.result.session)
+  const repeated = await f.client.controlAgentContinuity(request)
+  expect(repeated.receipt).toEqual(controlled.result.receipt)
+  if (repeated.state !== 'active') throw Error('Expected original retained Core Session')
+  expect(repeated.session.continuityOperations![operationId]!.messageInput!.message.userContent).toContain('FROZEN_ORIGINAL_MESSAGE_')
+  const creation = structuredClone(await f.controller.agentCreation('local', initial.agentSessionId))
+  assertNoRecipe(creation)
+  const launch = structuredClone(await f.controller.projectAgentCreation('local', repeated.session, composerConfig))
+  expect(launch.created.run).toEqual(initial.run)
+  assertNoRecipe(launch.created)
+  assertNoRecipe(launch.session)
+  fact({ kind: 'original-recovery-message-carriers', samples, coreControlReceiptPreserved: true })
+
+  function assertNoRecipe(value: unknown) {
+    expect(JSON.stringify(value)).not.toContain('FROZEN_ORIGINAL_MESSAGE_')
+    expect(JSON.stringify(value)).not.toContain('FROZEN_CORE_ONLY_RECOVERY_EXTENSION_')
+    expect(value).toHaveProperty(['continuityOperations', operationId, 'hasMessageInput'], true)
+    expect(value).not.toHaveProperty(['continuityOperations', operationId, 'messageInput'])
+  }
 })
 
 it('keeps original admission discrimination through actual Store events, including confirmed and unknown phases', async () => {
