@@ -33,6 +33,11 @@ export default defineConfig({ ...base,
       if (source.split(anchor).length !== 2) throw Error('Missing late ACK mutation anchor')
       return { code: source.replace(anchor, 'true'), map: null }
     }
+    if (mutation === 'expose-archive-receipt' && file === 'apps/desktop/src/main/workbench-user-state.ts') {
+      const anchor = 'this.observation.lastConfirmedWrite = confirmation'
+      if (source.split(anchor).length !== 2) throw Error('Missing archive diagnostic receipt mutation anchor')
+      return { code: source.replace(anchor, 'this.observation.lastConfirmedWrite = receipt'), map: null }
+    }
     const queueMutation = mutation && queueMutations[mutation]
     if (queueMutation && file === 'apps/desktop/src/renderer/src/lib/workbench-user-storage.ts') {
       const [anchor, replacement] = queueMutation

@@ -5,7 +5,10 @@ import { join, resolve } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { appendFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { AgentMuxControlServer, connectAgentMuxRpc } from '@agentmux/core'
 import { WorkbenchUserStateStore } from '../src/main/workbench-user-state'
+import { inspectDesktopClient, observeWorkbenchUserState } from '../src/main/client-observation'
+import { parseDesktopClientObservation } from '../src/shared/client-observation'
 import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { providerCatalogReader, historySourcesReader } from './helpers/startup-observation-api-fixture'
@@ -305,7 +308,7 @@ it('actual Store moves input and draft in one small native transaction beside a 
   expect(f.api.sessions.stop).not.toHaveBeenCalled()
 })
 
-it('actual Store retires a newly confirmed cold row without a second save or loss of its original body', async () => {
+it('actual Store retires a newly confirmed cold row and app.inspect reads only its durable confirmation', async () => {
   const input = confirmedLocalInput('confirmed-before-archive', 'Exactly retained original input')
   const f = await fixture('Independent draft', false, undefined, [input])
   const sid = f.session.id
@@ -314,14 +317,41 @@ it('actual Store retires a newly confirmed cold row without a second save or los
   await prepareRendererUpdate('quit')
   expect(f.store.getState().agentSteerQueues[sid]?.map(entry => entry.operationId)).toEqual([input.operationId])
   const writer = vi.mocked(f.api.ui.writeWorkbenchState)
-  writer.mockClear()
-  await f.store.getState().archiveAgentSteer(sid, input.operationId, input.text, true)
-  await desktopUserDocument.persistent.flush()
-  expect(f.store.getState().agentSteerQueues[sid] ?? []).toEqual([])
-  expect(writer).toHaveBeenCalledOnce()
-  const saved = await f.user.readInputArchive({ ownerKey: sid, operationId: input.operationId })
-  expect(saved.entries).toEqual([{ ownerKey: sid, entry: { ...input, archived: true } }])
-  expect(JSON.parse((await f.user.read())!).state.agentComposerDrafts[sid]).toBe('Independent draft')
+  const socketPath = join(root, 'inspect.sock')
+  const renderer = { kind: 'bundled', id: 'a'.repeat(64), identity: { shell: 'original-shell', ctxmux: 'original-native' } } as const
+  const server = new AgentMuxControlServer({ socketPath, execute: request => inspectDesktopClient(request, {
+    pid: process.pid, package: null, renderer: () => renderer, generation: () => 1, runtimes: () => [],
+    execute: input => f.store.getState().executeControl(input), storage: () => observeWorkbenchUserState(f.user)
+  }) })
+  let rpc: Awaited<ReturnType<typeof connectAgentMuxRpc>> | undefined
+  try {
+    await server.start()
+    rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })
+    const ordinary = parseDesktopClientObservation((await rpc.call('app.inspect', {})).observation)
+    expect(ordinary.main.storage?.userState?.lastConfirmedWrite).toMatchObject({ path: f.user.path, diskDurability: 'confirmed' })
+
+    writer.mockClear()
+    await f.store.getState().archiveAgentSteer(sid, input.operationId, input.text, true)
+    await desktopUserDocument.persistent.flush()
+    expect(f.store.getState().agentSteerQueues[sid] ?? []).toEqual([])
+    expect(writer).toHaveBeenCalledOnce()
+    const receipt = await writer.mock.results[0]!.value
+    if (!receipt) throw new Error('The original save returned no receipt')
+    expect(receipt).toMatchObject({ inputQueueArchiveOwners: [sid],
+      inputQueueArchived: [{ ownerKey: sid, operationId: input.operationId }] })
+    const saved = await f.user.readInputArchive({ ownerKey: sid, operationId: input.operationId })
+    expect(saved.entries).toEqual([{ ownerKey: sid, entry: { ...input, archived: true } }])
+    expect(JSON.parse((await f.user.read())!).state.agentComposerDrafts[sid]).toBe('Independent draft')
+
+    const workface = f.store.getState()
+    const observed = parseDesktopClientObservation((await rpc.call('app.inspect', {})).observation)
+    expect(observed.main.storage?.userState?.lastConfirmedWrite).toEqual({ path: receipt.path, contentDigest: receipt.contentDigest,
+      sizeBytes: receipt.sizeBytes, diskDurability: 'confirmed', confirmedAt: receipt.confirmedAt })
+    expect(observed.workbench.tabs).toEqual(ordinary.workbench.tabs)
+    expect(JSON.stringify(observed)).not.toContain(input.text)
+    expect(writer).toHaveBeenCalledOnce()
+    expect(f.store.getState()).toBe(workface)
+  } finally { await rpc?.dispose(); await server.stop() }
 })
 
 it('native user persistence waiting does not block an exactly bound healthy prompt', async () => {
