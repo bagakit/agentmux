@@ -1272,9 +1272,9 @@ function PaneGroup({
       <header hidden={conversationChrome} className={`pane-tabbar ${isRootLeaf ? 'pane-tabbar--root' : ''} ${showWindowChrome ? 'pane-tabbar--chrome-owner' : ''}`}>
 
         <div className="pane-tabbar__workface" hidden={conversationChrome} inert={conversationChrome}>
-        {showWindowChrome ? (
-          <TopRowLeadingChrome />
-        ) : leadingChrome ?? null}
+        {showWindowChrome
+          ? surfaceVisible && !conversationChrome && <TopRowLeadingChrome />
+          : leadingChrome}
         {tabNavigation}
         <div className="pane-tabbar__actions">
 
