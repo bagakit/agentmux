@@ -5,6 +5,8 @@ import type { Root } from 'react-dom/client'
 import type { Terminal as BrowserTerminal } from '@xterm/xterm'
 import { afterEach, beforeEach, expect, it, vi, type MockInstance } from 'vitest'
 import { terminalHistoryBoundary } from '@agentmux/client-ui/terminal/replay'
+import { createWorkspaceLayout } from '@agentmux/layout'
+import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import type { RuntimeEvent, SessionAttachResult, SessionSnapshot } from '../src/shared/contracts'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
@@ -60,13 +62,16 @@ function scene(session: SessionSnapshot, readOnly = false, standalone = false, v
     <section data-original-region="">
       <AgentRegionHeader name={session.label} executorLabel="Original executor" sessionId={session.id} sessionKind={session.kind}
         executionHost={{ id: session.hostId, label: 'Original Host', configured: true, kind: 'local', cwd: session.workspacePath }}
-        regionId={origin.regionId} nativeSession={session} readOnly={readOnly} onHistory={undefined} />
+        regionId={origin.regionId} nativeSession={session.kind === 'agent' ? session : undefined} readOnly={readOnly} onHistory={undefined} />
       {terminal}
     </section>
   </RegionContextMenu>
 }
 async function mount(session: SessionSnapshot = original, readOnly = false, standalone = false) {
-  store.useAppStore.setState({ sessions: [session] })
+  const tab = createWorkbenchTab(origin.tabId, { regionId: origin.regionId, workspaceId: origin.workspaceId,
+    kind: session.kind, phase: 'attached', sessionId: session.id })
+  store.useAppStore.setState({ sessions: [session], tabs: { [tab.id]: tab },
+    layouts: { [origin.workspaceId]: createWorkspaceLayout(origin.tabGroupId, [tab.id]) } })
   await act(async () => root.render(scene(session, readOnly, standalone)))
   await act(async () => await vi.waitFor(() => expect(readTerminalViewObservation({ regionId: origin.regionId,
     sessionId: session.id, runId: session.control.run.runId })?.liveReady).toBe(true)))
@@ -142,8 +147,8 @@ beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('OffscreenCanvas', undefined)
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
-  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => ({ font: '',
-    measureText: () => ({ width: 8, actualBoundingBoxDescent: 2, actualBoundingBoxAscent: 10 }) }) as unknown as CanvasRenderingContext2D)
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(vi.fn().mockReturnValue({ font: '',
+    measureText: () => ({ width: 8, actualBoundingBoxDescent: 2, actualBoundingBoxAscent: 10 }) }))
   vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) { return this.classList.contains('xterm-char-measure-element') ? 256 : 640 })
   vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(16)
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, top: 0, left: 0, width: 640, height: 384, right: 640, bottom: 384, toJSON() {} })
@@ -223,7 +228,7 @@ it('retains the file action resolved under the real context pointer in its origi
   const path = opened.querySelector<HTMLElement>('[role="menuitem"][title*="src/original.txt"]')
   expect(path).not.toBeNull()
   await act(async () => path!.click())
-  expect(reveal).toHaveBeenCalledExactlyOnceWith(origin.workspaceId, 'src/original.txt')
+  expect(reveal).toHaveBeenCalledExactlyOnceWith({ kind: 'workspace', workspaceId: origin.workspaceId, path: 'src/original.txt' })
 })
 
 it('the real artifact pointer opens the original file through its typed system seam', async () => {
@@ -232,7 +237,7 @@ it('the real artifact pointer opens the original file through its typed system s
   const opened = await openBody()
   expect(opened.querySelectorAll('[role="menuitem"][title*="dist/original.dmg"]')).toHaveLength(2)
   await act(async () => item('Open with system', opened).click())
-  expect(openSystem).toHaveBeenCalledExactlyOnceWith(origin.workspaceId, 'dist/original.dmg')
+  expect(openSystem).toHaveBeenCalledExactlyOnceWith({ kind: 'workspace', workspaceId: origin.workspaceId, path: 'dist/original.dmg' })
 })
 
 it.each([{ key: 'ContextMenu', code: 'ContextMenu', keyCode: 93, shiftKey: false }, { key: 'F10', code: 'F10', keyCode: 121, shiftKey: true }])(

@@ -1,10 +1,12 @@
 // @vitest-environment happy-dom
 import { createRequire } from 'node:module'
 import { act } from 'react'
-import { expect, it, vi } from 'vitest'
+import { expect, expectTypeOf, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { fixturePath } from '../scripts/lib/fixture-values.mjs'
+import type { FileActionLocation } from '../src/shared/source-files'
+import type { CreateWorkspaceInput } from '../src/shared/contracts'
 import { api } from '../src/renderer/src/lib/api'
 import { createWorkbenchTab, documentKey, fileViewPointerKey } from '../src/renderer/src/lib/workbench-tabs'
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
@@ -29,6 +31,14 @@ async function select(label: string) {
   expect(item, label).toBeDefined()
   await act(async () => { item!.click() })
 }
+
+it('requires the originating location for Finder and folder registration', () => {
+  expectTypeOf(api.files.reveal).parameters.toEqualTypeOf<[FileActionLocation]>()
+  expectTypeOf(api.files.openSystem).parameters.toEqualTypeOf<[FileActionLocation]>()
+  expectTypeOf(api.workspaces.addFromFile).parameters.toEqualTypeOf<[FileActionLocation, CreateWorkspaceInput]>()
+  expectTypeOf<{ kind: 'source'; path: string }>().not.toMatchTypeOf<FileActionLocation>()
+  expectTypeOf<{ workspaceId: string; path: string }>().not.toMatchTypeOf<FileActionLocation>()
+})
 
 it('copies the physical Mote directory and reveals the exact cold Source View through the Tab and editor actions', async () => {
   const physical = fixturePath('mote-storage/original')
@@ -62,14 +72,20 @@ it('copies the physical Mote directory and reveals the exact cold Source View th
   expect(copy).toHaveBeenLastCalledWith(source.resource.zonePath + '/entry.md')
   await select('Copy Relative Path')
   expect(copy).toHaveBeenLastCalledWith('entry.md')
+  const otherMount = { hostId: 'local', reference: { runtimeId: 'other-runtime', spaceId: 'other-space' },
+    zoneId: 'other-zone', workspaceId: workspace.id }
+  await act(async () => { useAppStore.setState(state => ({ sourceFilesInputs: { ...state.sourceFilesInputs,
+    selections: { [workspace.id]: { workspace, target: otherMount, selection: { kind: 'mount', mount: otherMount },
+      locator: { mount: otherMount, resource: { ...source.resource, zoneId: otherMount.zoneId, zonePath: fixturePath('other-folder') } } } }
+  } })) })
   await select(revealInFileManagerLabel())
-  expect(reveal).toHaveBeenCalledExactlyOnceWith(workspace.id, view.path, source)
+  expect(reveal).toHaveBeenCalledExactlyOnceWith({ kind: 'source', source })
   reveal.mockClear()
   await dom.render(<EditorPane tabId={tab.id} surface={view} />)
   const button = [...dom.container.querySelectorAll('button')].find(item => item.textContent?.trim() === revealInFileManagerLabel())
   expect(button).toBeDefined()
   await act(async () => { button!.click() })
-  expect(reveal).toHaveBeenCalledExactlyOnceWith(workspace.id, view.path, source)
+  expect(reveal).toHaveBeenCalledExactlyOnceWith({ kind: 'source', source })
   await act(async () => { useAppStore.setState(state => ({ sourceFilesInputs: { ...state.sourceFilesInputs,
     readSources: { [fileViewPointerKey(tab.id, view.regionId)]: { workspaceId: view.workspaceId, path: view.path,
       source: { ...source, target: { ...source.target, hostId: 'remote' } } } } } })) })

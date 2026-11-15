@@ -146,8 +146,8 @@ describe('EditorUnavailableState', () => {
 describe('revealFileInFileManager', () => {
   it('routes through the existing api.files.reveal channel — no second path resolution', async () => {
     const reportError = vi.fn()
-    await revealFileInFileManager('workspace', 'src/gone.ts', reportError)
-    expect(filesApi.reveal).toHaveBeenCalledWith('workspace', 'src/gone.ts')
+    await revealFileInFileManager({ kind: 'workspace', workspaceId: 'workspace', path: 'src/gone.ts' }, reportError)
+    expect(filesApi.reveal).toHaveBeenCalledWith({ kind: 'workspace', workspaceId: 'workspace', path: 'src/gone.ts' })
     expect(reportError).not.toHaveBeenCalled()
   })
 
@@ -155,7 +155,7 @@ describe('revealFileInFileManager', () => {
     const boom = new Error('reveal blew up')
     filesApi.reveal.mockRejectedValueOnce(boom)
     const reportError = vi.fn()
-    await expect(revealFileInFileManager('workspace', 'src/gone.ts', reportError)).resolves.toBeUndefined()
+    await expect(revealFileInFileManager({ kind: 'workspace', workspaceId: 'workspace', path: 'src/gone.ts' }, reportError)).resolves.toBeUndefined()
     expect(reportError).toHaveBeenCalledWith(boom)
   })
 })

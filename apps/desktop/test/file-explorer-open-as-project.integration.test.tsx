@@ -20,7 +20,7 @@ vi.mock('../src/renderer/src/lib/api.js', () => ({
     config: { get: configGet },
     ui: { writeClipboardText: writeClipboard },
     scratch: { listTopics },
-    workspaces: { add: addWorkspace },
+    workspaces: { addFromFile: addWorkspace },
     files: { readDirectory: vi.fn(), reveal: vi.fn() }
   }
 }))
@@ -160,7 +160,7 @@ describe('FileExplorer directory context menu', () => {
     }
     expect(writeClipboard.mock.calls).toEqual([[physical], [logical]])
     expect(launch).toHaveBeenCalledExactlyOnceWith('files-group', undefined, physical)
-    expect(addWorkspace).toHaveBeenCalledExactlyOnceWith({ hostId: 'local', path: physical, name: logical })
+    expect(addWorkspace).toHaveBeenCalledExactlyOnceWith({ kind: 'workspace', workspaceId: owner.id, path: logical }, { hostId: 'local', path: physical, name: logical })
     expect(useAppStore.getState().agentComposerDrafts).toBe(draft)
     expect(useAppStore.getState().activeWorkspaceId).toBe(project.id)
   })
@@ -236,7 +236,7 @@ describe('FileExplorer directory context menu', () => {
     expect(menuItem, 'directory context menu did not expose Open as Project').not.toBeUndefined()
 
     await act(async () => { menuItem!.click() })
-    expect(addWorkspace).toHaveBeenCalledWith({ hostId: 'local', path: _hygiene_fixturePath("repo/packages/core"), name: 'core' })
+    expect(addWorkspace).toHaveBeenCalledWith({ kind: 'workspace', workspaceId: workspace.id, path: 'packages/core' }, { hostId: 'local', path: _hygiene_fixturePath("repo/packages/core"), name: 'core' })
     expect(useAppStore.getState().activeWorkspaceId).toBe('core-project')
     expect(useAppStore.getState().config?.workspaces).toContainEqual(created)
     await act(async () => root.unmount())
@@ -270,7 +270,7 @@ describe('FileExplorer directory context menu', () => {
     expect(item, '目录右键菜单未暴露 Open as Project').not.toBeUndefined()
     await act(async () => { item!.click() })
 
-    expect(addWorkspace).toHaveBeenCalledExactlyOnceWith({ hostId: 'local', path: existingPath, name: 'core' })
+    expect(addWorkspace).toHaveBeenCalledExactlyOnceWith({ kind: 'workspace', workspaceId: workspace.id, path: 'packages/core' }, { hostId: 'local', path: existingPath, name: 'core' })
     expect(configGet).not.toHaveBeenCalled()
     expect(useAppStore.getState().activeWorkspaceId).toBe('already-here')
     await act(async () => root.unmount())

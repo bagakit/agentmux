@@ -148,7 +148,7 @@ describe('Focus original File and link destinations', () => {
     await act(async () => root.render(<Links />))
     const before = useAppStore.getState().tabs, system = vi.spyOn(api.files, 'openSystem').mockResolvedValue(undefined)
     await act(async () => container.querySelector<HTMLButtonElement>('.md-link--file')!.dispatchEvent(new MouseEvent('click', { bubbles: true, metaKey: true })))
-    await flush(); expect(system).toHaveBeenCalledExactlyOnceWith('resource', 'review.md')
+    await flush(); expect(system).toHaveBeenCalledExactlyOnceWith({ kind: 'workspace', workspaceId: 'resource', path: 'review.md' })
     expect(useAppStore.getState().tabs).toBe(before); expect(api.files.read).not.toHaveBeenCalled()
   })
   it('the reply Files footer preserves Alt and system gestures instead of hiding an independent file entry', async () => {

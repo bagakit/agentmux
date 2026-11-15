@@ -116,7 +116,7 @@ for (const [mainSurface, destination, kind] of [['workbench', 'right', 'file'], 
       expect(after.agentFocus.execution.history).toBe(before.agentFocus.execution.history)
       expect(after.agentComposerDrafts).toEqual(before.agentComposerDrafts); privateWorkface.noLifecycle()
       if (destination === 'system') {
-        expect(system).toHaveBeenCalledWith('resource', path)
+        expect(system).toHaveBeenCalledWith({ kind: 'workspace', workspaceId: 'resource', path })
         expect(mainRegionReference(after.workbenchSpaceSelection)).toEqual(main)
       } else {
         expect(file).toBeDefined()

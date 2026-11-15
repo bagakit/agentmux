@@ -294,6 +294,20 @@ describe('survey-directory: Main actual registration recovery fence',()=>{
  })
 })
 
+it('registers the selected Workspace directory and rejects the same name under a different parent', async () => {
+  const f = await fixture()
+  try {
+    const [owner] = (await f.current()).workspaces
+    const path = join(owner!.path, 'selected', 'notes')
+    const location = { kind: 'workspace', workspaceId: owner!.id, path: 'selected/notes' }
+    const before = await f.bytes()
+    await expect(f.invoke('workspaces:addFromFile', location, { hostId: owner!.hostId, path: join(owner!.path, 'other', 'notes') })).rejects.toThrow('selected folder moved')
+    expect(await f.bytes()).toBe(before)
+    const project = await f.invoke<WorkspaceRecord>('workspaces:addFromFile', location, { hostId: owner!.hostId, path })
+    expect(project).toMatchObject({ hostId: owner!.hostId, path })
+  } finally { await f.dispose() }
+})
+
 it('keeps Finder and project registration on the original Source across a late carrier replacement', async () => {
   const files = new WorkspaceFiles(() => new LocalExecutionHost()), f = await fixture(files)
   try {
@@ -309,17 +323,17 @@ it('keeps Finder and project registration on the original Source across a late c
     const reply = { carrierCurrent: true, result: observed }
     const stat = vi.spyOn(f.runtime, 'sourceFilesCall').mockResolvedValue(reply)
     vi.mocked(shell.showItemInFolder).mockClear()
-    await f.invoke('files:reveal', '__scratch__', folder, location)
+    await f.invoke('files:reveal', { kind: 'source', source: location })
     expect(shell.showItemInFolder).toHaveBeenCalledExactlyOnceWith(path)
     expect(stat).toHaveBeenCalledExactlyOnceWith(location.target, 'file.stat', location.query)
     const removed = sourceTreeFileLocation({ mount, resource }, folder + '/deleted')
     stat.mockResolvedValueOnce({ carrierCurrent: true, result: { resource: removed.resource, result: {
       ...observed.result, observation: { ...observed.result.observation, entry: { kind: 'absent' } } } } })
-    await f.invoke('files:reveal', '__scratch__', removed.query.path, removed)
+    await f.invoke('files:reveal', { kind: 'source', source: removed })
     expect(shell.showItemInFolder).toHaveBeenNthCalledWith(2, path)
     stat.mockResolvedValueOnce({ carrierCurrent: true, result: { ...observed, resource: { ...observed.resource, zonePath: join(path, 'different') } } })
-    await expect(f.invoke('files:reveal', '__scratch__', folder, location)).rejects.toThrow('original Source file location')
-    await expect(f.invoke('files:reveal', '__scratch__', folder, { ...location, target: { ...location.target, hostId: 'another-host' } })).rejects.toThrow('local file manager')
+    await expect(f.invoke('files:reveal', { kind: 'source', source: location })).rejects.toThrow('original Source file location')
+    await expect(f.invoke('files:reveal', { kind: 'source', source: { ...location, target: { ...location.target, hostId: 'another-host' } } })).rejects.toThrow('local file manager')
     expect(shell.showItemInFolder).toHaveBeenCalledTimes(2)
     const input = { name: folder, hostId: 'local', path, expectedHost: DEFAULT_CONFIG.hosts[0]! }
     const before = await f.bytes()
@@ -327,17 +341,17 @@ it('keeps Finder and project registration on the original Source across a late c
       f.executionHost.mockReturnValue(new LocalExecutionHost())
       return reply
     })
-    await expect(f.invoke('workspaces:add', input, location)).rejects.toThrow()
+    await expect(f.invoke('workspaces:addFromFile', { kind: 'source', source: location }, input)).rejects.toThrow()
     expect(await f.bytes()).toBe(before)
     const symlink = { carrierCurrent: true, result: { ...observed, result: { ...observed.result, observation: {
       ...observed.result.observation, entry: { kind: 'symlink' as const, witness } } } } }
     stat.mockResolvedValueOnce(symlink).mockResolvedValueOnce({ carrierCurrent: true, result: { resource: location.resource,
       result: { status: 'unknown', code: 'NOT_A_DIRECTORY', message: 'The original link does not open a directory.' } } })
-    await expect(f.invoke('workspaces:add', input, location)).rejects.toThrow('confirmed directory')
+    await expect(f.invoke('workspaces:addFromFile', { kind: 'source', source: location }, input)).rejects.toThrow('confirmed directory')
     expect(await f.bytes()).toBe(before)
     stat.mockResolvedValueOnce(symlink).mockResolvedValueOnce({ carrierCurrent: true, result: { resource: location.resource,
       result: { status: 'directory-listed', entries: [], complete: true, partialReason: null } } })
-    const project = await f.invoke<WorkspaceRecord>('workspaces:add', input, location)
+    const project = await f.invoke<WorkspaceRecord>('workspaces:addFromFile', { kind: 'source', source: location }, input)
     expect(stat).toHaveBeenLastCalledWith(location.target, 'file.list', { ...location.query, mode: 'directory', limit: 1 })
     expect(project).toMatchObject({ name: folder, path, hostId: 'local' })
   } finally { await f.dispose(); await files.dispose() }

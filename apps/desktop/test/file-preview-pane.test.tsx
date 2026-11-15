@@ -12,7 +12,7 @@ import { FilePreviewPane } from '../src/renderer/src/components/FilePreviewPane'
 import { FileSurfaceView } from '../src/renderer/src/components/FileSurfaceView'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
-import { createWorkbenchTab, documentKey, fileTabId, initialWorkbenchRegionId, type FileWorkbenchSurface } from '../src/renderer/src/lib/workbench-tabs'
+import { createWorkbenchTab, documentKey, fileTabId, fileViewPointerKey, initialWorkbenchRegionId, type FileWorkbenchSurface } from '../src/renderer/src/lib/workbench-tabs'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { composerConfig } from './helpers/composer-dom-fixture'
 import { WorkbenchPresentationContext } from '../src/renderer/src/lib/workbench-presentation'
@@ -104,14 +104,31 @@ describe('real format preview pane', () => {
     await render(<CommitWitness path="b.png" />)
     expect(seen.find(item => item.path === 'b.png')).toEqual({ path: 'b.png', src: null })
   })
+  it('keeps both external exits on the saved Source for the previewed file', async () => {
+    const { file } = seed('same.png')
+    const base = { hostId: 'local', workspaceId: 'original', workspacePath: composerConfig.workspaces[0]!.path }
+    const source = { target: { hostId: 'local', expectedRuntimeId: 'original-runtime' },
+      resource: { ...base, zoneId: 'original-zone', zonePath: base.workspacePath, path: file.path },
+      query: { zoneId: 'original-zone', path: file.path, expectedResource: base } }
+    useAppStore.setState(state => ({ sourceFilesInputs: { ...state.sourceFilesInputs,
+      readSources: { [fileViewPointerKey('test-file-tab', file.regionId)]: { workspaceId: file.workspaceId, path: file.path, source } }
+    } }))
+    const open = vi.spyOn(api.files, 'openSystem').mockResolvedValue(undefined)
+    const reveal = vi.spyOn(api.files, 'reveal').mockResolvedValue(undefined)
+    await render(<FilePreviewPane tabId="test-file-tab" surface={file} />)
+    await click('Open file in system application')
+    await act(async () => container.querySelector<HTMLButtonElement>('button[title^="Reveal"]')!.click())
+    expect(open).toHaveBeenCalledExactlyOnceWith({ kind: 'source', source })
+    expect(reveal).toHaveBeenCalledExactlyOnceWith({ kind: 'source', source })
+  })
   it('states real read and decoder failures and routes external actions through the existing exact workspace API', async () => {
     const { file } = seed('broken.png')
     const open = vi.spyOn(api.files, 'openSystem').mockResolvedValue(undefined), reveal = vi.spyOn(api.files, 'reveal').mockResolvedValue(undefined)
     await render(<FilePreviewPane tabId="test-file-tab" surface={file} />)
     await act(async () => container.querySelector('img')!.dispatchEvent(new Event('error')))
     expect(container.textContent).toContain('Image could not be decoded'); expect(container.querySelector('[data-decode-state]')?.getAttribute('data-decode-state')).toBe('error')
-    await click('Open file in system application'); expect(open).toHaveBeenCalledExactlyOnceWith('workspace', 'broken.png')
-    const revealButton = container.querySelector<HTMLButtonElement>('button[title^="Reveal"]')!; expect(revealButton).not.toBeNull(); await act(async () => revealButton.click()); expect(reveal).toHaveBeenCalledExactlyOnceWith('workspace', 'broken.png')
+    await click('Open file in system application'); expect(open).toHaveBeenCalledExactlyOnceWith({ kind: 'workspace', workspaceId: 'workspace', path: 'broken.png' })
+    const revealButton = container.querySelector<HTMLButtonElement>('button[title^="Reveal"]')!; expect(revealButton).not.toBeNull(); await act(async () => revealButton.click()); expect(reveal).toHaveBeenCalledExactlyOnceWith({ kind: 'workspace', workspaceId: 'workspace', path: 'broken.png' })
     vi.mocked(api.files.readPreview).mockResolvedValue({ status: 'too-large', maxBytes: 16777216, message: 'Preview is limited to 16 MB.' })
     await click('Reload file preview'); expect(container.textContent).toContain('File exceeds the preview budget'); expect(container.textContent).toContain('16 MB'); expect(container.querySelector('img')).toBeNull()
   })
