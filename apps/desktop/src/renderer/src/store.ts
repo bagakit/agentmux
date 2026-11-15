@@ -329,7 +329,7 @@ import { regionFocusClaimsCaret, type RegionFocusCause } from './lib/region-focu
 import { scratchTopicsForWorkspace, scratchTopicsScope, scratchTopicKind, type ScratchTopicsSnapshot } from './lib/scratch-topic-snapshots'
 import { createNoteWithAvailableName } from './lib/note-names'
 import { rendererResourceOwnerCounts } from './lib/resource-owner-counts'
-import { terminalResourceOwnerCounts } from './lib/terminal-resource-owners'
+import { terminalAddonOwnerCounts, terminalResourceOwnerCounts } from './lib/terminal-resource-owners'
 import { retainedLaneReport, retentionReport } from './lib/worktree-removal-request'
 import {
   arrangeWorkbenchControlTab,
@@ -4228,7 +4228,7 @@ if (typeof window !== 'undefined') {
       const found = findFileWorkbenchSurface(useAppStore.getState(), workspaceId, path)
       target.detail.occurrence = found ? { tabId: found.tab.id, regionId: found.surface.regionId } : null
     } else {
-      Object.assign(target.detail, readRendererResourceOwnerCounts())
+      Object.assign(target.detail, readRendererResourceOwnerCounts(), terminalAddonOwnerCounts())
       target.detail.monacoSourceRequested = fileSourceEditorWasRequested()
       target.detail.monacoRegistryPresent =
         '__agentmuxMonacoEditorCount' in window || '__agentmuxMonacoModelCount' in window

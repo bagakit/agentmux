@@ -1,28 +1,43 @@
 let terminalViews = 0
-let terminalAddons = 0
+let terminalBaseAddons = 0
+let terminalWebglAddons = 0
+let terminalWebglAddonViews = 0
 let terminalListeners = 0
 
 export function acquireTerminalResourceOwners(input: {
   addons: number
   listeners: number
-}): { acquireAddon(): () => void; acquireListeners(listeners: number): () => void; release(): void } {
+}): { acquireAddon(kind?: 'webgl'): () => void; acquireListeners(listeners: number): () => void; release(): void } {
   terminalViews += 1
-  terminalAddons += input.addons
+  terminalBaseAddons += input.addons
   terminalListeners += input.listeners
   let listeners = input.listeners
-  let addons = input.addons
+  let baseAddons = input.addons
+  let webglAddons = 0
   let released = false
   return {
-    acquireAddon() {
+    acquireAddon(kind) {
       if (released) return () => {}
-      terminalAddons++
-      addons++
+      if (kind === 'webgl') {
+        if (webglAddons === 0) terminalWebglAddonViews++
+        terminalWebglAddons++
+        webglAddons++
+      } else {
+        terminalBaseAddons++
+        baseAddons++
+      }
       let active = true
       return () => {
         if (!active || released) return
         active = false
-        terminalAddons--
-        addons--
+        if (kind === 'webgl') {
+          terminalWebglAddons--
+          webglAddons--
+          if (webglAddons === 0) terminalWebglAddonViews--
+        } else {
+          terminalBaseAddons--
+          baseAddons--
+        }
       }
     },
     acquireListeners(count) {
@@ -41,12 +56,18 @@ export function acquireTerminalResourceOwners(input: {
       if (released) return
       released = true
       terminalViews -= 1
-      terminalAddons -= addons
+      terminalBaseAddons -= baseAddons
+      terminalWebglAddons -= webglAddons
+      if (webglAddons > 0) terminalWebglAddonViews--
       terminalListeners -= listeners
     }
   }
 }
 
 export function terminalResourceOwnerCounts() {
-  return { terminalViews, terminalAddons, terminalListeners }
+  return { terminalViews, terminalAddons: terminalBaseAddons + terminalWebglAddons, terminalListeners }
+}
+
+export function terminalAddonOwnerCounts() {
+  return { terminalBaseAddons, terminalWebglAddons, terminalWebglAddonViews }
 }

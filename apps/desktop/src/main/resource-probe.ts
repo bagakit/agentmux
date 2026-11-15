@@ -70,10 +70,15 @@ type ResourceOwners = {
   runtimeSubscriptions: number
   terminalViews: number
   terminalAddons: number
+  terminalBaseAddons: number
+  terminalWebglAddons: number
+  terminalWebglAddonViews: number
   terminalListeners: number
   sessionAttachmentOwners: number
   sessionAttachmentLeases: number
 }
+
+type StableResourceOwners = Omit<ResourceOwners, 'terminalAddons' | 'terminalWebglAddons' | 'terminalWebglAddonViews'>
 
 type ResourceIdentity = {
   agentmuxCommit: string | null
@@ -110,6 +115,9 @@ type ResourceAttribution = {
   rendererMainSurface: {
     terminalViews: number
     terminalAddons: number
+    terminalBaseAddons: number
+    terminalWebglAddons: number
+    terminalWebglAddonViews: number
     terminalListeners: number
     monacoEditors: number | null
     monacoModels: number | null
@@ -211,6 +219,9 @@ async function ownerCounts(
     runtimeSubscriptions: number
     terminalViews: number
     terminalAddons: number
+    terminalBaseAddons: number
+    terminalWebglAddons: number
+    terminalWebglAddonViews: number
     terminalListeners: number
   }
   const { monacoEditors, monacoModels, ...otherRenderer } = renderer
@@ -225,6 +236,11 @@ async function ownerCounts(
     if (!Number.isSafeInteger(value) || value < 0) {
       throw new Error(`Invalid resource owner count for ${name}.`)
     }
+  }
+  if (owners.terminalAddons !== owners.terminalBaseAddons + owners.terminalWebglAddons ||
+      owners.terminalWebglAddons !== owners.terminalWebglAddonViews ||
+      owners.terminalWebglAddonViews > owners.terminalViews) {
+    throw new Error(`Invalid Terminal addon ownership: ${JSON.stringify(owners)}.`)
   }
   const monacoState = monacoRegistryPresent === true && observed(monacoEditors) && observed(monacoModels)
     ? 'observed'
@@ -283,6 +299,10 @@ async function sample(
     privateKiB: metric.memory.privateBytes ?? 0
   }))
   const owners = await ownerCounts(window, runtime)
+  // This workload mounts one FitAddon per Terminal View and never opens Terminal Search.
+  if (owners.terminalBaseAddons !== owners.terminalViews) {
+    throw new Error(`Desktop ${label} has unexpected base Terminal addon ownership: ${JSON.stringify(owners)}.`)
+  }
   const snapshot = await runtime.snapshot(config)
   const processWorkingSetKiB: ResourceAttribution['rendererMainSurface']['processWorkingSetKiB'] = {
     main: 0,
@@ -324,6 +344,9 @@ async function sample(
       rendererMainSurface: {
         terminalViews: owners.terminalViews,
         terminalAddons: owners.terminalAddons,
+        terminalBaseAddons: owners.terminalBaseAddons,
+        terminalWebglAddons: owners.terminalWebglAddons,
+        terminalWebglAddonViews: owners.terminalWebglAddonViews,
         terminalListeners: owners.terminalListeners,
         monacoState: owners.monacoState,
         monacoEditors: owners.monacoEditors,
@@ -446,10 +469,8 @@ async function openProbeFile(window: BrowserWindow, workspaceId: string, path: s
 }
 
 function hasEditorOwners(owners: ResourceOwners, baseline: ResourceOwners): boolean {
-  // The active Terminal may drop its visible WebGL owner while the File is in front.
-  return owners.terminalAddons <= baseline.terminalAddons && owners.terminalAddons >= baseline.terminalAddons - 1 &&
-    ownersEqual(owners, { ...baseline, terminalAddons: owners.terminalAddons,
-      monacoState: 'observed', monacoEditors: 1, monacoModels: 1, documents: 1, fileWatchers: 1 })
+  return ownersEqual(owners, { ...stableOwners(baseline),
+    monacoState: 'observed', monacoEditors: 1, monacoModels: 1, documents: 1, fileWatchers: 1 })
 }
 
 async function waitForProbeEditor(window: BrowserWindow, runtime: RuntimeController, file: ProbeFileOccurrence, baseline: ResourceOwners, description: string): Promise<void> {
@@ -500,8 +521,14 @@ async function stopProbeTerminalTab(description: string, window: BrowserWindow, 
   ))
 }
 
-function ownersEqual(left: ResourceOwners, right: ResourceOwners): boolean {
-  return left.monacoState !== 'missing' && Object.entries(left).every(([name, value]) => right[name as keyof ResourceOwners] === value)
+function stableOwners(owners: ResourceOwners): StableResourceOwners {
+  const { terminalAddons: _total, terminalWebglAddons: _webgl, terminalWebglAddonViews: _webglViews, ...stable } = owners
+  return stable
+}
+
+function ownersEqual(left: ResourceOwners, right: StableResourceOwners): boolean {
+  return left.monacoState !== 'missing' &&
+    Object.entries(stableOwners(left)).every(([name, value]) => right[name as keyof StableResourceOwners] === value)
 }
 
 function isReadyLauncherOwnerBaseline(owners: ResourceOwners): boolean {
@@ -512,7 +539,7 @@ function isReadyLauncherOwnerBaseline(owners: ResourceOwners): boolean {
     owners.fileWatchers === 0 &&
     owners.runtimeSubscriptions === 4 &&
     owners.terminalViews === 1 &&
-    owners.terminalAddons >= 1 &&
+    owners.terminalBaseAddons === 1 &&
     owners.terminalListeners >= 1 &&
     owners.sessionAttachmentOwners === 1 &&
     owners.sessionAttachmentLeases === 1
@@ -658,7 +685,7 @@ function launcherOwnerPredicate(
     owners.fileWatchers === previous.fileWatchers &&
     owners.runtimeSubscriptions === previous.runtimeSubscriptions &&
     owners.terminalViews === previous.terminalViews + expectedAdditionalTerminalViews &&
-    owners.terminalAddons >= previous.terminalAddons &&
+    owners.terminalBaseAddons === previous.terminalBaseAddons + expectedAdditionalTerminalViews &&
     owners.terminalListeners >= previous.terminalListeners &&
     owners.sessionAttachmentOwners === previous.sessionAttachmentOwners + expectedAdditionalTerminalViews &&
     owners.sessionAttachmentLeases === previous.sessionAttachmentLeases + expectedAdditionalTerminalViews
@@ -956,18 +983,20 @@ export async function runDesktopResourceProbe(options: {
     const browserOwnerBefore = releaseBaselineOwners.browserWebContents
     const browserWarmTerminal = launcherTerminal
     await click(options.window, desktopActionSource(openBrowserSelector, undefined, workspaceC.id))
-    const browserOwners: ResourceOwners = {
-      ...releaseBaselineOwners,
+    const browserOwners: StableResourceOwners = {
+      ...stableOwners(releaseBaselineOwners),
       browserWebContents: browserOwnerBefore + 1,
       terminalViews: releaseBaselineOwners.terminalViews - 1,
-      terminalAddons: releaseBaselineOwners.terminalAddons - readyLauncherOwners.terminalAddons,
+      terminalBaseAddons: releaseBaselineOwners.terminalBaseAddons - readyLauncherOwners.terminalBaseAddons,
       terminalListeners: releaseBaselineOwners.terminalListeners - readyLauncherOwners.terminalListeners,
       sessionAttachmentOwners: releaseBaselineOwners.sessionAttachmentOwners - 1,
       sessionAttachmentLeases: releaseBaselineOwners.sessionAttachmentLeases - 1
     }
-    await waitFor('Browser WebContents and Launcher resource transition', async () => ownersEqual(await ownerCounts(options.window, options.runtime), browserOwners))
+    // Opening the Browser retires C's Launcher view and A and B remain hidden.
+    const browserOwnersMatch = (owners: ResourceOwners) => owners.terminalWebglAddons === 0 && ownersEqual(owners, browserOwners)
+    await waitFor('Browser WebContents and Launcher resource transition', async () => browserOwnersMatch(await ownerCounts(options.window, options.runtime)))
     const browser = await sample('browser', options.window, options.runtime, config, identity)
-    if (!ownersEqual(browser.owners, browserOwners)) {
+    if (!browserOwnersMatch(browser.owners)) {
       throw new Error(`Desktop Browser did not release reusable Terminal view owners: ${JSON.stringify(browser.owners)}`)
     }
     const retainedBrowserTerminal = runningTerminal((await options.runtime.snapshot(config)).sessions, browserWarmTerminal.id)

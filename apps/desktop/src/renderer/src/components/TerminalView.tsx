@@ -1007,7 +1007,7 @@ function TerminalViewOwner({
           incidents?.capture('terminal-context-lost', 'context-lost')
           releaseWebgl()
         })
-        releaseWebglAccounting = resourceOwners.acquireAddon()
+        releaseWebglAccounting = resourceOwners.acquireAddon('webgl')
       } catch (error) {
         releaseWebgl()
         console.warn('[terminal] WebGL unavailable; xterm DOM renderer remains active', error)
