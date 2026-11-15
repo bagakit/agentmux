@@ -4,7 +4,7 @@ import { InlineObjectLink } from '../src/renderer/src/components/InlineObjectLin
 import { api } from '../src/renderer/src/lib/api'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { expect, it, vi } from 'vitest'
-import { formatGoalAddress, parseAmuxObjectLink } from '../../../packages/core/src/sharing'
+import { deriveBoundGoalId, formatGoalAddress, formatGoalTicketLink, parseAmuxObjectLink } from '../../../packages/core/src/sharing'
 import { parseAgentMuxCliInvocation } from '../../../packages/core/src/agentmux-cli-commands'
 import { parseAgentMuxControlRequest, parseAgentMuxControlReceipt } from '../../../packages/core/src/control-codec'
 import { searchAgentMuxMetadata } from '../../../packages/core/src/search-metadata'
@@ -71,4 +71,13 @@ it('inline Goal plan links keep their exact source URI and own object kind for c
   expect(open).toHaveBeenCalledWith(address.planUrl)
   await dom.click('[aria-label="Copy Goal plan link"]')
   expect(copy).toHaveBeenCalledWith(address.planUrl)
+  const goalId = deriveBoundGoalId(address.runtimeId, address.namespace, 'create-original')
+  const original = formatGoalAddress(goalId, address.runtimeId, address.namespace, 'create-original')
+  const ticketUrl = formatGoalTicketLink(goalId, original, 42)
+  await dom.render(createElement(InlineObjectLink, { uri: ticketUrl, target: parseAmuxObjectLink(ticketUrl) }))
+  expect(ticketUrl).toBe('amux://goal/' + goalId + '#T42')
+  await dom.click('[aria-label="Copy Ticket T42 link"]')
+  expect(copy).toHaveBeenCalledWith(ticketUrl)
+  await dom.click('[data-object-link-open="goal"]')
+  expect(open).toHaveBeenCalledWith(ticketUrl)
 })

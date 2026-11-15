@@ -1622,9 +1622,6 @@ it('copied Goal plan links and the real CLI reveal the original graph without cr
     expect(document.activeElement).toBe(outside)
     expect({ value: outside.value, start: outside.selectionStart, end: outside.selectionEnd }).toEqual(preserved)
     expect(await ingress.receive(ticketUrl!)).toBeNull()
-    const copyTicket = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Copy T1 link')
-    expect(copyTicket).toBeDefined(); await act(async () => copyTicket!.click())
-    expect(writes).toHaveBeenCalledWith(ticketUrl)
     const originalNode = plan.plan!.nodes[0]!
     const revised = await owner.client.call('goal.plan.revise', { goalId: 'exact',
       revision: { operationId: 'add-second-ticket', expectedRevision: 1, alignmentRevision: 1, nodes: [
