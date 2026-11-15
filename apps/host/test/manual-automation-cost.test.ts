@@ -6,6 +6,7 @@ import { ContinuousProgressScheduler, observeAgent, type ContinuousProgressLoop,
 import { ContinuousProgressLoopManager, type FutureProgressInputOwner, type LoopObservationProvider } from '../src/continuous-progress-loop-manager.js'
 import { ContinuousProgressLoopStore } from '../src/continuous-progress-loop-store.js'
 import { createGoalAutomationPause } from '../src/goal-automation-pause.js'
+import { deliverContinuousProgress } from '../src/continuous-progress-delivery.js'
 
 const target = { hostId: 'local', agentSessionId: 'selected-session', providerId: 'fixture-provider', workspacePath: 'fixture-workspace' }
 const person = { principal: { kind: 'user' as const, id: 'original-person' } }
@@ -26,20 +27,19 @@ const busyObservation: LoopObservationProvider = async (loop, tickId, now) => {
   return { session: { ...loop, run: input.expectedRun, semanticStatus }, tickId, now, inputByte: 0, inputOccupied: false,
     observation: observeAgent({ process: 'running', status: semanticStatus, timelineCapability: 'complete-events', awaitingRequest: false, terminalCapabilityUnverified: false }, now) } as ContinuousProgressObservation
 }
-async function fixture(records: ContinuousProgressLoop[], options: { observe?: LoopObservationProvider; future?: FutureProgressInputOwner['saveFutureIntent']; listIntents?: () => Promise<{ intents: []; nextIntentId: null }> } = {}) {
+async function fixture(records: ContinuousProgressLoop[], options: { observe?: LoopObservationProvider; future?: FutureProgressInputOwner['saveFutureIntent']; tick?: ConstructorParameters<typeof ContinuousProgressLoopManager>[1] } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'amux-manual-automation-'))
   cleanup.push(() => rm(directory, { recursive: true, force: true }))
   const store = new ContinuousProgressLoopStore(join(directory, 'loops.json'))
   await store.save(records)
-  const future = vi.fn(options.future ?? (async () => {})), tick = vi.fn(async () => 'skipped' as const)
+  const future = vi.fn(options.future ?? (async () => {})), tick = vi.fn(options.tick ?? (async () => 'skipped' as const))
   const manager = new ContinuousProgressLoopManager(store, tick, () => 100, options.observe ?? busyObservation, { saveFutureIntent: future })
   cleanup.push(() => manager.stop())
   await manager.start()
   const save = vi.spyOn(store, 'save'), cancel = vi.fn()
   const owner = createGoalAutomationPause({ ownerInstanceId: () => input.ownerInstanceId, progress: manager, cancel, client: {
     agentSession: () => ({ agentSessionId: target.agentSessionId, run: input.expectedRun }),
-    readAgentSession: async () => ({ agentSessionId: target.agentSessionId, run: input.expectedRun }),
-    listAgentFuturePromptIntents: options.listIntents ?? (async () => ({ intents: [], nextIntentId: null }))
+    readAgentSession: async () => ({ agentSessionId: target.agentSessionId, run: input.expectedRun })
   } as never })
   return { manager, store, save, future, tick, owner, cancel }
 }
@@ -67,43 +67,130 @@ it('exact target lookup and cancellation never enumerate unrelated loop records,
   values.mockRestore()
 })
 
-it('one explicit pause durably saves the complete batch once and keeps each original schedule receipt', async () => {
+it('one input edge pauses continuation and retains active and explicitly paused schedules', async () => {
   const savedSchedules = schedules(), foreign = record('foreign', { hostId: 'foreign' }), stopped = record('stopped', { status: 'stopped' })
+  savedSchedules[1] = { ...savedSchedules[1]!, status: 'paused', pause: { reason: 'manual', pausedAt: 1, episodeId: 'original-explicit-pause' } }
   const records = [record('progress'), ...savedSchedules, foreign, stopped], f = await fixture(records)
   const result = await f.owner.pause(input, person)
-  expect(result.receipt).toMatchObject({ status: 'confirmed', pausedLoopIds: ['progress', ...savedSchedules.map(loop => loop.loopId)], disabledIntentIds: [], issues: [] })
+  expect(result.receipt).toMatchObject({ status: 'confirmed', pausedLoopIds: ['progress'], disabledIntentIds: [], issues: [] })
   expect(f.save).toHaveBeenCalledOnce()
   const persisted = await f.store.load()
   expect(persisted).toHaveLength(records.length)
-  expect(persisted.slice(0, 3).map(loop => loop.status)).toEqual(['paused', 'paused', 'paused'])
-  expect(persisted.slice(3)).toEqual([foreign, stopped])
-  expect(f.future.mock.calls.map(([loop, active]) => [loop.loopId, loop.futureIntentId, active])).toEqual(savedSchedules.map(loop => [loop.loopId, loop.futureIntentId, false]))
+  expect(persisted[0]?.status).toBe('paused')
+  expect(persisted.slice(1)).toEqual([...savedSchedules, foreign, stopped])
+  expect(f.future).not.toHaveBeenCalled()
   expect(f.cancel).toHaveBeenCalledExactlyOnceWith({ kind: 'agent', hostId: 'local', agentSessionId: target.agentSessionId, run: input.expectedRun })
   expect(await f.owner.inspect(input, person)).toEqual(result)
   expect(await f.owner.pause(input, person)).toEqual(result)
-  expect(f.save).toHaveBeenCalledOnce(); expect(f.future).toHaveBeenCalledTimes(2); expect(f.tick).not.toHaveBeenCalled()
+  expect(f.save).toHaveBeenCalledOnce(); expect(f.future).not.toHaveBeenCalled(); expect(f.tick).not.toHaveBeenCalled()
 })
 
-it('a failed schedule effect keeps independent batch outcomes and the original operation unknown', async () => {
-  const savedSchedules = schedules()
-  const f = await fixture([record('progress'), ...savedSchedules], { future: async loop => { if (loop.loopId === savedSchedules[0]!.loopId) throw Error('Original intent save unavailable') } })
+it('an input edge writes no schedule state and does not call the future intent owner', async () => {
+  const originals = schedules()
+  const f = await fixture(originals, { future: async () => { throw Error('Original intent save unavailable') } })
   const result = await f.owner.pause(input, person)
-  expect(result.receipt).toMatchObject({ status: 'unknown', pausedLoopIds: ['progress', savedSchedules[1]!.loopId], issues: [{ stage: 'pause-original-automatic-input', message: 'Original intent save unavailable' }] })
-  expect(f.save).toHaveBeenCalledOnce(); expect(f.future).toHaveBeenCalledTimes(2)
-  expect((await f.store.load()).map(loop => loop.status)).toEqual(['paused', 'paused', 'paused'])
+  expect(result.receipt).toMatchObject({ status: 'confirmed', pausedLoopIds: [], disabledIntentIds: [], issues: [] })
+  expect(f.save).not.toHaveBeenCalled(); expect(f.future).not.toHaveBeenCalled()
+  expect(await f.store.load()).toEqual(originals)
   expect(await f.owner.pause(input, person)).toEqual(result)
-  expect(f.future).toHaveBeenCalledTimes(2)
 })
 
-it('one failing loop observer cannot swallow another saved schedule outcome', async () => {
-  const [schedule] = schedules(), f = await fixture([record('progress'), schedule!])
-  const unsubscribe = f.manager.subscribe(loop => { if (loop.loopId === 'progress') throw Error('Original loop observer unavailable') })
+it('an input edge leaves a concurrently saved schedule and its future intent enabled', async () => {
+  const entered = Promise.withResolvers<void>(), released = Promise.withResolvers<void>()
+  const f = await fixture([], { future: async () => { entered.resolve(); await released.promise } })
+  const creating = f.manager.call('schedule.create', { target, afterMs: 60_000, prompt: 'Original saved message', operationId: 'create-during-edit' })
+  try {
+    await entered.promise
+    expect((await f.owner.pause(input, person)).receipt?.status).toBe('confirmed')
+    released.resolve()
+    const { schedule } = await creating
+    expect(schedule).toMatchObject({ status: 'active', nextCheckAt: 60_100, creationOperationId: 'create-during-edit' })
+    expect(f.future).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ loopId: schedule.loopId }), true, undefined)
+    expect(await f.store.load()).toEqual([schedule])
+  } finally { released.resolve(); await creating.catch(() => {}) }
+})
+
+const dueSchedule = () => ({ ...schedules()[0]!, nextCheckAt: 100 })
+const readySchedule: LoopObservationProvider = async (loop, tickId, now, signal) => {
+  const base = await busyObservation(loop, tickId, now, signal)
+  const semanticStatus = { state: 'done' as const, source: 'native-hook' as const, observedAt: now }
+  return { ...base, session: { ...base.session, semanticStatus, futurePromptIntents: {
+    [loop.futureIntentId!]: { operationId: loop.creationOperationId!, prompt: loop.prompt, message: { userContent: loop.prompt }, active: true }
+  } }, observation: observeAgent({ process: 'running', status: semanticStatus, timelineCapability: 'complete-events', awaitingRequest: false, terminalCapabilityUnverified: false }, now) }
+}
+
+it('yields the exact due check before dispatch and delivers the same occurrence on a later check', async () => {
+  const schedule = dueSchedule(), entered = Promise.withResolvers<void>(), released = Promise.withResolvers<void>()
+  let first = true
+  const f = await fixture([schedule], { observe: async (...args) => {
+    if (first) { first = false; entered.resolve(); await released.promise }
+    return readySchedule(...args)
+  }, tick: async () => 'sent' })
+  const firstCheck = f.manager.checkNow(schedule.loopId)
+  try {
+    await entered.promise
+    expect((await f.owner.pause(input, person)).receipt?.status).toBe('confirmed')
+    released.resolve()
+    expect(await firstCheck).toEqual(schedule)
+    expect(f.tick).not.toHaveBeenCalled()
+    expect(await f.manager.checkNow(schedule.loopId)).toMatchObject({ lastOutcome: 'sent', lastOccurrenceAt: schedule.nextCheckAt, status: 'stopped' })
+    expect(f.tick).toHaveBeenCalledOnce()
+  } finally { released.resolve(); await firstCheck.catch(() => {}) }
+})
+
+it('yields a saved preparation during the production delivery preflight before calling Core', async () => {
+  const schedule = dueSchedule(), entered = Promise.withResolvers<void>(), released = Promise.withResolvers<void>()
+  const submitPrompt = vi.fn(async () => {})
+  const f = await fixture([schedule], { observe: readySchedule, tick: (...args) => deliverContinuousProgress({
+    observeContinuousProgress: async (loop, op, now, signal) => {
+      entered.resolve(); await released.promise
+      return readySchedule(loop, op, now, signal!)
+    }, submitPrompt,
+  }, ...args) })
+  const checking = f.manager.checkNow(schedule.loopId)
+  try {
+    await entered.promise
+    expect((await f.store.load())[0]?.pendingCompletion).toBeDefined()
+    expect((await f.owner.pause(input, person)).receipt?.status).toBe('confirmed')
+    released.resolve()
+    expect(await checking).toMatchObject({ status: 'active', nextCheckAt: schedule.nextCheckAt })
+    expect((await f.store.load())[0]?.pendingCompletion).toBeUndefined()
+    expect((await f.store.load())[0]?.lastInputRef).toBeUndefined()
+    expect(submitPrompt).not.toHaveBeenCalled()
+  } finally { released.resolve(); await checking.catch(() => {}) }
+})
+
+it('does not cancel a due occurrence after its original input owner has started', async () => {
+  const schedule = dueSchedule(), entered = Promise.withResolvers<void>(), released = Promise.withResolvers<void>()
+  let originalSignal: AbortSignal | undefined
+  const f = await fixture([schedule], { observe: readySchedule, tick: async (_loop, _operation, _current, signal, onDispatch) => {
+    onDispatch()
+    originalSignal = signal
+    entered.resolve(); await released.promise
+    return 'sent'
+  } })
+  const checking = f.manager.checkNow(schedule.loopId)
+  try {
+    await entered.promise
+    const before = f.manager.list(target)[0]
+    expect(before?.lastInputRef).toBeTruthy()
+    expect((await f.owner.pause(input, person)).receipt?.status).toBe('confirmed')
+    expect(originalSignal?.aborted).toBe(false)
+    expect(f.manager.list(target)[0]).toEqual(before)
+    released.resolve()
+    expect(await checking).toMatchObject({ lastOutcome: 'sent', lastInputRef: before?.lastInputRef, status: 'stopped' })
+  } finally { released.resolve(); await checking.catch(() => {}) }
+})
+
+it('one failing loop observer cannot swallow a separate continuation pause result', async () => {
+  const [schedule] = schedules(), f = await fixture([record('progress'), record('next'), schedule!])
+  const unsubscribe = f.manager.subscribe(loop => { if (loop.loopId === 'progress') throw Error('Original observer failure') })
   try {
     const result = await f.owner.pause(input, person)
-    expect(result.receipt).toMatchObject({ status: 'unknown', pausedLoopIds: [schedule!.loopId], issues: [{ message: 'Original loop observer unavailable' }] })
+    expect(result.receipt).toMatchObject({ status: 'unknown', pausedLoopIds: ['next'], issues: [{ message: 'Original observer failure' }] })
     expect(f.save).toHaveBeenCalledOnce()
-    expect(f.future.mock.calls.map(([loop, active]) => [loop.loopId, active])).toEqual([[schedule!.loopId, false]])
-    expect((await f.store.load()).map(loop => loop.status)).toEqual(['paused', 'paused'])
+    expect(f.future).not.toHaveBeenCalled()
+    expect((await f.store.load()).map(loop => loop.status)).toEqual(['paused', 'paused', 'active'])
   } finally { unsubscribe() }
 })
 
@@ -143,38 +230,37 @@ it('a failed-save observer cannot prevent another original loop from reporting i
   } finally { unsubscribe() }
 })
 
-it('cancel discovery fences an already paused resume before the later intent read and batch save finish', async () => {
+it('input cancellation fences an already paused continuation resume before its save finishes', async () => {
   const observing = Promise.withResolvers<void>(), releaseObservation = Promise.withResolvers<void>()
-  const readingIntents = Promise.withResolvers<void>(), releaseIntents = Promise.withResolvers<void>()
+  const saving = Promise.withResolvers<void>(), releaseSave = Promise.withResolvers<void>()
   let held = false
   const original = record('paused', { status: 'paused' })
   const f = await fixture([original], {
-    observe: async (...args) => { if (!held) { held = true; observing.resolve(); await releaseObservation.promise } return busyObservation(...args) },
-    listIntents: async () => { readingIntents.resolve(); await releaseIntents.promise; return { intents: [], nextIntentId: null } }
+    observe: async (...args) => { if (!held) { held = true; observing.resolve(); await releaseObservation.promise } return busyObservation(...args) }
   })
+  f.save.mockImplementationOnce(async loops => { saving.resolve(); await releaseSave.promise; await ContinuousProgressLoopStore.prototype.save.call(f.store, loops) })
   const resume = f.manager.callProgress('agent.progress.action', { target, loopId: original.loopId, action: 'resume', expectedLoop: original, operationId: 'older-resume' }, person)
     .then(value => ({ value }), error => ({ error }))
   let pause: ReturnType<typeof f.owner.pause> | undefined
   try {
     await observing.promise
     pause = f.owner.pause(input, person)
-    await readingIntents.promise
+    await saving.promise
     releaseObservation.resolve()
     expect(await resume).toMatchObject({ error: { code: 'CONTROL_REQUEST_CONFLICT' } })
     expect(f.manager.list(target)[0]!.status).toBe('paused')
-    expect(f.save).not.toHaveBeenCalled()
-    releaseIntents.resolve()
+    expect(await f.store.load()).toEqual([original])
+    releaseSave.resolve()
     expect((await pause).receipt?.status).toBe('confirmed')
     expect(f.save).toHaveBeenCalledOnce(); expect(f.tick).not.toHaveBeenCalled()
-  } finally { releaseObservation.resolve(); releaseIntents.resolve(); await Promise.allSettled([resume, ...(pause ? [pause] : [])]) }
+  } finally { releaseObservation.resolve(); releaseSave.resolve(); await Promise.allSettled([resume, ...(pause ? [pause] : [])]) }
 })
 
 it('a person\'s input moves a Mote standing heartbeat one interval later and keeps it on, without a manual resume', async () => {
   const managedSource = { sourceId: 'mote-main:fixture', revision: 'role-1' }
   const heartbeat = schedules()[0]!, managed = { ...heartbeat, loopId: 'heartbeat', everyMs: 1_800_000, managedSource, nextCheckAt: 50 }
   delete (managed as Partial<ContinuousProgressLoop>).afterMs
-  const f = await fixture([record('progress'), managed], {
-    listIntents: async () => ({ intents: [{ intentId: managed.futureIntentId!, intent: { continuitySource: managedSource, operationId: 'standing', prompt: '', message: {}, active: true } }], nextIntentId: null }) as never })
+  const f = await fixture([record('progress'), managed])
   const result = await f.owner.pause(input, person)
   expect(result.receipt).toMatchObject({ status: 'confirmed', pausedLoopIds: ['progress'], deferredLoopIds: ['heartbeat'], disabledIntentIds: [], issues: [] })
   // The due occurrence now waits a full interval after the input (the fixture clock reads 100), saved durably.
@@ -182,6 +268,6 @@ it('a person\'s input moves a Mote standing heartbeat one interval later and kee
   expect(f.future).not.toHaveBeenCalled()
   // A heartbeat already later than one interval keeps its own time.
   const later = await f.owner.pause({ ...input, operationId: 'second-pause' }, person)
-  expect(later.receipt).toMatchObject({ deferredLoopIds: ['heartbeat'] })
+  expect(later.receipt).toMatchObject({ deferredLoopIds: [] })
   expect((await f.store.load()).find(loop => loop.loopId === 'heartbeat')).toMatchObject({ status: 'active', nextCheckAt: 100 + 1_800_000 })
 })

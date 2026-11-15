@@ -54,9 +54,13 @@ it('the same original Goal and real continuation survive Desktop exit and Host r
   expect(timeline.items.some(item => item.kind === 'user_message' && item.content.includes('Continue the original Goal ' + goalId))).toBe(true)
   const owner = (await phone.call('runtime.owner.identity', {})).owner
   const pause = { agentSessionId: sessionId, expectedRun: f.session.run, ownerInstanceId: owner.ownerInstanceId, operationId: 'original-user-input-intent' }
-  expect(await phone.call('agent.automation.pause', pause)).toMatchObject({ receipt: { status: 'confirmed', pausedLoopIds: expect.arrayContaining([observed.goalContinuations[0]!.loopId, arrangement.schedule.loopId]), disabledIntentIds: expect.arrayContaining([arrangement.schedule.futureIntentId!]) } })
+  expect(await phone.call('agent.automation.pause', pause)).toMatchObject({ receipt: { status: 'confirmed', pausedLoopIds: [observed.goalContinuations[0]!.loopId], disabledIntentIds: [] } })
+  const originalPause = await runCompiledObjectCli(['--endpoint', 'unix:' + f.native.socketPath, 'agent', 'automation', 'inspect', '--session', sessionId, '--run', f.session.run.runId, '--owner', pause.ownerInstanceId, '--operation-id', pause.operationId], f.native.env)
+  expect(originalPause.code, originalPause.stderr).toBe(0)
+  expect(JSON.parse(originalPause.stdout).result.receipt).toMatchObject({ ...pause, status: 'confirmed', pausedLoopIds: [observed.goalContinuations[0]!.loopId], disabledIntentIds: [] })
   expect((await phone.call('goal.inspect', { goalId })).goalContinuations[0]?.status).toBe('paused')
-  expect((await original.readAgentFuturePromptIntent(sessionId, arrangement.schedule.futureIntentId!))?.active).toBe(false)
+  expect((await original.readAgentFuturePromptIntent(sessionId, arrangement.schedule.futureIntentId!))?.active).toBe(true)
+  expect((await phone.call('schedule.inspect', { scheduleId: arrangement.schedule.loopId })).schedule).toEqual(arrangement.schedule)
   const stateDirectory = f.native.env.AGENTMUX_STATE_DIRECTORY!, configurationPath = join(stateDirectory, 'original-configuration.json')
   const config = JSON.parse(await readFile(configurationPath, 'utf8')), scratch = join(f.native.root, 'scratch')
   await mkdir(scratch)
@@ -170,10 +174,11 @@ it('the same original Goal and real continuation survive Desktop exit and Host r
   expect((await reconnected.sessionTimeline(sessionId)).items.filter(item => item.kind === 'user_message')).toEqual(before)
   const goalLoop = retained.goalContinuations[0]!
   await fresh.call('goal.continuation-action', { goalId, loopId: goalLoop.loopId, action: 'stop', expectedRevision: goalLoop.revision!, operationId: 'stop-original-goal-loop' })
-  expect((await fresh.call('schedule.inspect', { scheduleId: arrangement.schedule.loopId })).schedule?.status).toBe('paused')
+  expect((await fresh.call('schedule.inspect', { scheduleId: arrangement.schedule.loopId })).schedule).toEqual(arrangement.schedule)
   const generic = await fresh.call('agent.progress.create', { target, intervalMs: 60_000, prompt: 'Continue only the authorized original work.', operationId: 'original-ordinary-progress' })
   const paused = await fresh.call('agent.progress.action', { target, loopId: generic.loop.loopId, action: 'pause', operationId: 'pause-original-ordinary-progress', expectedLoop: { ...generic.loop, lastDecision: 'Different human-facing explanation must not change authority.' } })
-  expect(paused.loop.status).toBe('paused'); expect(paused.loop.revision).toBe(generic.loop.revision); expect(paused.loop.lastMutation).toBeUndefined()
+  expect(paused.loop).toMatchObject({ status: 'paused', revision: generic.loop.revision! + 1,
+    lastMutation: { action: 'pause', operationId: 'pause-original-ordinary-progress', expectedRevision: generic.loop.revision, phase: 'settled' } })
   const repeated = await fresh.call('agent.progress.action', { target, loopId: generic.loop.loopId, action: 'pause', operationId: 'pause-original-ordinary-progress', expectedLoop: { ...generic.loop, lastDecision: 'Different human-facing explanation must not change authority.' } })
   expect(repeated.loop).toEqual(paused.loop)
   const decisions = await fresh.call('goal.decisions', { goalId })

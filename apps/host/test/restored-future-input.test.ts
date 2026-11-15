@@ -26,7 +26,7 @@ import type { AgentMuxAgentSession, AgentMuxStoredAgentSession } from '../../../
 
 const closes: (() => unknown | Promise<unknown>)[] = []
 afterEach(async () => { for (const close of closes.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
-async function restored(providerId: 'codex' | 'grok' = 'codex', options: { missingOldRun?: boolean; sdkEnv?: boolean; ended?: boolean } = {}) {
+async function restored(providerId: 'codex' | 'grok' = 'codex', options: { missingOldRun?: boolean; sdkEnv?: boolean; ended?: boolean; oneShot?: boolean } = {}) {
   const root = process.env.RESTORED_FUTURE_ROOT ?? await mkdtemp(join(tmpdir(), 'amux-future-resume-')), reopen = process.env.RESTORED_FUTURE_STAGE === 'restore'
   closes.push(async () => { if (!process.env.RESTORED_FUTURE_ROOT) { await rm(root, { recursive: true, force: true }); await expect(access(root)).rejects.toMatchObject({ code: 'ENOENT' }); if (process.env.RESTORED_FUTURE_CLEANUP) await appendFile(process.env.RESTORED_FUTURE_CLEANUP, JSON.stringify({ root, absent: true, pid: process.pid }) + '\n') } })
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(root, 'runtime')); vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(root, 'state')); vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'messages.ndjson'))
@@ -82,11 +82,11 @@ async function restored(providerId: 'codex' | 'grok' = 'codex', options: { missi
   inner.ensureManagedHooks = async () => {}; inner.ensureTerminalHandshakeOrDegrade = async (session: AgentMuxAgentSession) => session
   const runtime = createGoalRuntime({ clients: () => [{ hostId: 'local', client: core }], checkIn: async () => ({ known: false, reason: 'No quiet check-in in this fixture' }) })
   let now = Date.now()
-  const manager = new ContinuousProgressLoopManager(new ContinuousProgressLoopStore(join(root, 'schedule.json')), (loop, op, current, signal) => deliverContinuousProgress(runtime, loop, op, current, signal), () => now,
+  const manager = new ContinuousProgressLoopManager(new ContinuousProgressLoopStore(join(root, 'schedule.json')), (...args) => deliverContinuousProgress(runtime, ...args), () => now,
     runtime.observeContinuousProgress, runtime)
   closes.push(() => manager.stop()); await manager.start()
   const created = reopen ? { schedule: manager.list()[0]! } : await manager.call('schedule.create', { target: { hostId: 'local', agentSessionId: old.agentSessionId, providerId: old.providerId, workspacePath: root },
-    operationId: 'original-arrangement', everyMs: 60000, prompt: 'Original saved heartbeat' }, { principal: { kind: 'user', id: 'private-person' } })
+    operationId: 'original-arrangement', ...(options.oneShot ? { afterMs: 60_000 } : { everyMs: 60_000 }), prompt: 'Original saved heartbeat' }, { principal: { kind: 'user', id: 'private-person' } })
   const loop = created.schedule
   oldMissing = options.missingOldRun === true
   const recovery = reopen ? { kind: 'resumed' as const } : await core.ensureAgentContinuity({ agentSessionId: old.agentSessionId, expectedRun: old.run, operationId: 'original-resume', trigger: 'manual',
@@ -247,10 +247,27 @@ it('a confirmed no-input refusal leaves a later independent occurrence eligible 
   const first = f.manager.inspectLoop(f.loop.loopId)!, key = first.lastInputRef!.inputKey
   const original = await f.core.inspectAgentPromptSubmission(key)
   expect(original?.admission?.notApplied).toBe(true); expect(f.send).not.toHaveBeenCalled(); expect(first.status).toBe('active')
+  expect(first.nextCheckAt).toBe(f.loop.nextCheckAt + first.everyMs!)
+  await f.manager.check(first.nextCheckAt - 1, first.loopId)
+  expect(f.manager.inspectLoop(first.loopId)).toEqual(first)
   await f.manager.check(first.nextCheckAt + first.everyMs!, first.loopId)
   expect(f.send, JSON.stringify(f.manager.inspectLoop(first.loopId))).toHaveBeenCalledTimes(1)
   expect(f.manager.inspectLoop(first.loopId)?.lastInputRef!.inputKey.submissionId).not.toBe(key.submissionId)
   expect(await f.core.inspectAgentPromptSubmission(key)).toEqual(original)
+})
+it('a rejected one-shot retains its exact Core claim and remains available for recovery', async () => {
+  const f = await restored('codex', { oneShot: true })
+  f.verifyNative.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('Original native source observation is temporarily unavailable'))
+  const due = f.advance()
+  await f.manager.check(due, f.loop.loopId)
+  const original = f.manager.inspectLoop(f.loop.loopId)!
+  expect(original).toMatchObject({ status: 'paused', nextCheckAt: due, pendingCompletion: { futureIntent: { occurrenceAt: due } } })
+  const key = original.lastInputRef!.inputKey
+  expect(original.pendingCompletion?.operationId).toBe(key.submissionId)
+  expect((await f.core.inspectAgentPromptSubmission(key))?.admission?.notApplied).toBe(true)
+  await f.manager.check(due + 60_000, f.loop.loopId)
+  expect(f.manager.inspectLoop(f.loop.loopId)).toEqual(original)
+  expect(f.send).not.toHaveBeenCalled()
 })
 it('a paused original arrangement does not read native activity or send due input', async () => {
   const f = await restored(), activity = vi.spyOn(f.core, 'readAgentInputActivity')

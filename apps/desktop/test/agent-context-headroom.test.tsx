@@ -148,7 +148,6 @@ beforeEach(async () => {
   transport.handlers.set('ui:requestStorageFlush', () => undefined)
   transport.handlers.set('schedule:list', () => ({ schedules: [] }))
   transport.handlers.set('continuousProgress:list', () => [])
-  transport.handlers.set('continuousProgress:pauseForInput', () => undefined)
   transport.handlers.set('sessions:inputOccupation', () => undefined)
   transport.handlers.set('connections:call', method => {
     expect(method).toBe('connection.binding.ls')
@@ -278,8 +277,8 @@ it('a native turn without capacity remains unknown and does not lock the healthy
   expect(composer('unknown').details.textContent).toContain('Native readings; context excludes the unsent draft')
   expect(composer('high').chip.textContent).toContain('90%')
   expect(useAppStore.getState().agentSteerQueues).toEqual({})
-  // Explicit input retains progress pause and input-occupation publication; usage adds no reads.
-  expect(transport.calls).toEqual([...renderedCalls, 'continuousProgress:pauseForInput', 'sessions:inputOccupation', 'continuousProgress:pauseForInput', 'sessions:inputOccupation'])
+  // Each edit publishes one exact input edge; usage adds no reads.
+  expect(transport.calls).toEqual([...renderedCalls, 'sessions:inputOccupation', 'sessions:inputOccupation'])
 })
 
 it('the published native usage is owned by the Store rather than its mutable incoming envelope', async () => {

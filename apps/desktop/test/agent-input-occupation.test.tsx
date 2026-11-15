@@ -93,7 +93,7 @@ it('does no additional Session-index work for one hundred unrelated Runtime even
   expect(index).not.toHaveBeenCalled()
 })
 
-it('notifies only actual changed Session controls while retaining ambiguous or loading input as unknown', () => {
+it('requires one exact occupied Session before notifying the Host', () => {
   const neighbor = moteAgent('unrelated-worker', null)
   useAppStore.setState({ sessions: [original, neighbor], agentComposerDrafts: { [neighbor.id]: 'Already present' } })
   vi.mocked(api.sessions.notifyInputOccupation).mockClear()
@@ -101,13 +101,11 @@ it('notifies only actual changed Session controls while retaining ambiguous or l
   expect(api.sessions.notifyInputOccupation).toHaveBeenCalledExactlyOnceWith(original.control)
   vi.mocked(api.sessions.notifyInputOccupation).mockClear()
   useAppStore.setState({ loading: true, agentComposerDrafts: { ...useAppStore.getState().agentComposerDrafts, [original.id]: '' } })
-  expect(api.sessions.notifyInputOccupation).toHaveBeenCalledExactlyOnceWith(original.control)
+  expect(api.sessions.notifyInputOccupation).not.toHaveBeenCalled()
   vi.mocked(api.sessions.notifyInputOccupation).mockClear()
   const second = { ...original, hostId: 'another-host', control: { ...original.control, hostId: 'another-host', run: { runId: 'another-original-run' } } }
-  useAppStore.setState({ loading: false, sessions: [original, second], agentComposerDrafts: { [original.id]: ' ' } })
-  expect(api.sessions.notifyInputOccupation).toHaveBeenCalledTimes(2)
-  expect(api.sessions.notifyInputOccupation).toHaveBeenCalledWith(original.control)
-  expect(api.sessions.notifyInputOccupation).toHaveBeenCalledWith(second.control)
+  useAppStore.setState({ loading: false, sessions: [original, second], agentComposerDrafts: { [original.id]: 'Draft without a confirmed owner' } })
+  expect(api.sessions.notifyInputOccupation).not.toHaveBeenCalled()
 })
 
 it('reports unavailable notification without deleting the original draft, stopping the Agent or feeding back into the subscription', async () => {

@@ -12,7 +12,11 @@ const mutations: Record<string, [string, string, string]> = {
     'if (pending.length) [persistence] = await Promise.allSettled([this.saveLoops()])',
     'if (pending.length) [persistence] = await Promise.allSettled([Promise.all(pending.map(() => this.saveLoops())).then(() => undefined)])'],
   cancel: ['apps/host/src/continuous-progress-loop-manager.ts',
-    'for (const loop of this.list(target)) this.cancelDelivery(loop.loopId)', 'void target']
+    'this.cancelDelivery(loop.loopId)\n        progress.push(loop.loopId)', 'progress.push(loop.loopId)'],
+  schedule: ['apps/host/src/continuous-progress-loop-manager.ts',
+    'if (!isAgentSchedule(loop)) {\n        this.cancelDelivery(loop.loopId)', 'if (true) {\n        this.cancelDelivery(loop.loopId)'],
+  'early-dispatch': ['apps/host/src/continuous-progress-loop-manager.ts',
+    'outcome = await this.onTick(this.require(loopId)', 'markDispatched(); outcome = await this.onTick(this.require(loopId)']
 }
 if (mutation && !mutations[mutation]) throw Error('Unknown manual automation mutation')
 const qualified = new Set(['packages/core/src/continuous-progress-scheduler.ts', 'apps/host/src/continuous-progress-loop-manager.ts',
