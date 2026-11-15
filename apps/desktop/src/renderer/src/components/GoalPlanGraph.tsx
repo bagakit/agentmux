@@ -30,7 +30,7 @@ import { GoalPlanMark, goalPlanStateLabel, type GoalPlanNodePresentation } from 
 export type GoalPlanReadingTarget = { nodeId: string; attemptId?: string; wholeGoal?: true }
 export type GoalPlanReveal = { target: GoalPlanReadingTarget; trigger: HTMLButtonElement; restore?: () => void }
 type GoalPlanSelection = Omit<GoalPlanReveal, 'trigger'> & { trigger?: HTMLButtonElement }
-export type GoalPlanNodeView = Omit<GoalPlanNodeProjection, 'state' | 'unknown'> & GoalPlanNodePresentation & { team?: DemandAgentReference[]; teamRole?: 'Task target' | 'Executor'; targetOnly?: true; claimed?: true; claimable?: true }
+export type GoalPlanNodeView = Omit<GoalPlanNodeProjection, 'state' | 'unknown' | 'predecessors' | 'claimBasis' | 'claimToken'> & GoalPlanNodePresentation & { team?: DemandAgentReference[]; teamRole?: 'Task target' | 'Executor'; targetOnly?: true; claimed?: true; claimable?: true }
 /** A revision belongs to the saved breakdown. The whole Goal is revision-free. */
 export type GoalPlanView = { revision: number | null; nodes: GoalPlanNodeView[]; next: string[]; progress: { done: number; total: number } | null }
 export function goalPlanDeliveries(plan: GoalPlanView) {

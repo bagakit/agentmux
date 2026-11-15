@@ -1,7 +1,7 @@
 import type { AgentMuxMessageApplication } from './agent-message-envelope.js'
 import type { DurableAgentMuxMessage } from './agent-global-message-queue.js'
 import { AgentMuxError } from './errors.js'
-import { parseDemandDelegationReportInput, type DemandDelegation, type DemandDelegationReportInput } from '@agentmux/demand/delegations'
+import { parseDemandDelegationReportInput, parseGoalPlanPredecessors, type GoalPlanPredecessor, type DemandDelegation, type DemandDelegationReportInput } from '@agentmux/demand/delegations'
 import { parseAlignmentProposal, type DemandCriterion } from '@agentmux/demand/goals'
 
 export type GoalDelegationSourceData = {
@@ -10,6 +10,7 @@ export type GoalDelegationSourceData = {
   alignmentRevision: number
   criteria: DemandCriterion[]
   planNodeId?: string
+  predecessors?: GoalPlanPredecessor[]
 }
 function record(value: unknown, required: string[], optional: string[] = []): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !required.includes(key) && !optional.includes(key)) || required.some(key => !Object.hasOwn(value, key)))
@@ -22,16 +23,17 @@ function id(value: unknown): string {
 }
 
 /** Explicit application bytes, signed by Core together with the original request envelope. */
-export function goalDelegationApplication(goalId: string, saved: Pick<DemandDelegation, 'operationId' | 'alignmentRevision' | 'capturedCriteria' | 'planNodeId'>): AgentMuxMessageApplication {
+export function goalDelegationApplication(goalId: string, saved: Pick<DemandDelegation, 'operationId' | 'alignmentRevision' | 'capturedCriteria' | 'planNodeId' | 'predecessors'>): AgentMuxMessageApplication {
   return { schema: 'agentmux.goal-delegation.v1', data: { goalId, delegationOperationId: saved.operationId,
-    alignmentRevision: saved.alignmentRevision, criteria: saved.capturedCriteria, ...(saved.planNodeId ? { planNodeId: saved.planNodeId } : {}) } }
+    alignmentRevision: saved.alignmentRevision, criteria: saved.capturedCriteria, ...(saved.planNodeId ? { planNodeId: saved.planNodeId } : {}),
+    ...(saved.predecessors ? { predecessors: saved.predecessors } : {}) } }
 }
 
 /** Reads only the strict application protocol. Human body text never grants report authority. */
 export function readGoalDelegationSource(message: DurableAgentMuxMessage): GoalDelegationSourceData {
   const application = message.envelope.application
   if (application?.schema !== 'agentmux.goal-delegation.v1') throw new AgentMuxError('The original source has no authenticated Goal delegation application. Keep the source; do not infer it from display text.', 'CONTROL_PROTOCOL_ERROR')
-  const p = record(application.data, ['goalId', 'delegationOperationId', 'alignmentRevision', 'criteria'], ['planNodeId'])
+  const p = record(application.data, ['goalId', 'delegationOperationId', 'alignmentRevision', 'criteria'], ['planNodeId', 'predecessors'])
   if (typeof p.alignmentRevision !== 'number' || !Number.isSafeInteger(p.alignmentRevision) || p.alignmentRevision < 1)
     throw new AgentMuxError('The original delegated proposal revision is invalid.', 'CONTROL_PROTOCOL_ERROR')
   let criteria: DemandCriterion[]
@@ -39,7 +41,8 @@ export function readGoalDelegationSource(message: DurableAgentMuxMessage): GoalD
   catch (error) { throw new AgentMuxError(error instanceof Error ? error.message : String(error), 'CONTROL_PROTOCOL_ERROR') }
   if (!criteria.length) throw new AgentMuxError('The original Goal delegation has no standards to report.', 'CONTROL_PROTOCOL_ERROR')
   return { goalId: id(p.goalId), delegationOperationId: id(p.delegationOperationId), alignmentRevision: p.alignmentRevision, criteria,
-    ...(p.planNodeId === undefined ? {} : { planNodeId: id(p.planNodeId) }) }
+    ...(p.planNodeId === undefined ? {} : { planNodeId: id(p.planNodeId) }),
+    ...(p.predecessors === undefined ? {} : { predecessors: parseGoalPlanPredecessors(p.predecessors) }) }
 }
 
 export function assertGoalSourceReport(data: GoalDelegationSourceData, report: DemandDelegationReportInput): void {

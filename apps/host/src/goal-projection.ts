@@ -4,8 +4,8 @@ import { goalPlanState, projectGoalPlan } from '@agentmux/demand/goal-plan'
 import type { AgentMuxDemand } from '@agentmux/core/control'
 
 /** Every plan this owner returns carries its derivation of the node states. */
-export function hostGoalPlan(goal: Pick<Demand, 'plan' | 'delegations' | 'alignment'>): Pick<AgentMuxDemand, 'plan' | 'planState'> {
-  return goal.plan ? { plan: goal.plan, planState: goalPlanState(projectGoalPlan(goal.plan, goal.delegations ?? [], goal.alignment?.criteria ?? [])) } : {}
+export function hostGoalPlan(goal: Pick<Demand, 'id' | 'plan' | 'delegations' | 'alignment'>, owner?: Pick<AmuxGoalAddress, 'runtimeId' | 'namespace'>): Pick<AgentMuxDemand, 'plan' | 'planState'> {
+  return goal.plan ? { plan: goal.plan, planState: goalPlanState(projectGoalPlan(goal.plan, goal.delegations ?? [], goal.alignment?.criteria ?? [], owner ? { ...owner, goalId: goal.id } : undefined, goal.alignment?.revision)) } : {}
 }
 
 /** Project the original durable record; no Renderer selection or cached board facts. */
@@ -18,7 +18,7 @@ export function projectHostGoal(goal: Demand, address?: AmuxGoalAddress): AgentM
     plannedStartAt: goal.plannedStartAt, targetAt: goal.targetAt, parentDemandId: goal.parentDemandId, phaseIndex: goal.phaseIndex ?? null,
     decisions: goal.decisions, activityLog: goal.activities.map(activity => `${activity.kind}: ${activity.message}`), activities: goal.activities,
     ...(goal.delegations ? { delegations: goal.delegations } : {}), ...(goal.dispatches ? { dispatches: goal.dispatches } : {}),
-    ...(goal.progressUpdates ? { progressUpdates: goal.progressUpdates } : {}), ...(goal.patrols ? { patrols: goal.patrols } : {}), ...hostGoalPlan(goal),
+    ...(goal.progressUpdates ? { progressUpdates: goal.progressUpdates } : {}), ...(goal.patrols ? { patrols: goal.patrols } : {}), ...hostGoalPlan(goal, address),
     sessionIds: [...goal.sessionIds], ...(goal.contentRefs ? { contentRefs: goal.contentRefs } : {}),
     createdAt: goal.createdAt, updatedAt: goal.updatedAt, source: 'default-topic',
     ...(goal.alignment ? { alignment: goal.alignment } : {}), ...(goal.grounding ? { grounding: goal.grounding } : {}) }

@@ -468,7 +468,7 @@ const NATIVE_FIELDS = {
   'goal.patrol.report': ['goalId', 'patrolOperationId', 'report'],
   'goal.plan': ['goalId', 'expectedOwner'],
   'goal.plan.assignment': ['goalId', 'nodeId', 'expectedRevision', 'operationId', 'expectedOwner', 'assignment'],
-  'goal.plan.claim': ['goalId', 'nodeId', 'expectedRevision', 'operationId', 'expectedOwner'],
+  'goal.plan.claim': ['goalId', 'nodeId', 'claimToken', 'operationId', 'expectedOwner'],
   'goal.plan.revise': ['goalId', 'revision'], 'goal.plan.review': ['goalId', 'review'],
   'goal.participation.confirm': ['goalId','creationOperationId','hostId','agentSessionId','expectedRun','evidence','operationId'],
   'goal.watch': [],
@@ -555,7 +555,7 @@ const NATIVE_FIELDS = {
   'agent.input.inspect': ['key', 'kind', 'originalControlOperationId', 'activity'],
   'agent.input.observation': ['agentSessionId','observationId'],
   'agent.input.stop': ['ref', 'cancelOperationId'], 'agent.input.rejoin': ['ref'],
-  'agent.send': ['recipientInputEpoch', 'target', 'text', 'messageId', 'threadId', 'correlationId', 'replyTo', 'operationId', 'execution', 'expectedRun', 'sourceChannel', 'admissionIntent', 'application'],
+  'agent.send': ['recipientInputEpoch', 'target', 'text', 'messageId', 'threadId', 'correlationId', 'replyTo', 'operationId', 'execution', 'expectedRun', 'sourceChannel', 'admissionIntent', 'application', 'expectedRecipientRuntimeId'],
   'agent.broadcast': ['recipientInputEpochs','operationId', 'recipientSessionIds', 'text', 'sourceChannel'],
   'agent.broadcast.inspect': ['operationId', 'hostId'],
   'agent.discuss': ['executorId', 'providerId', 'text', 'operationId'],
@@ -2456,12 +2456,7 @@ export class AgentMuxRpcService {
       const actor = caller ? { kind: 'agent' as const, id: caller.agentSessionId }
         : context.principal && ['user', 'device'].includes(context.principal.kind) ? context.principal : null
       if (!actor) throw new AgentMuxError('Goal delegation requires its authenticated Agent, person or device.', 'CONTROL_PERMISSION_DENIED')
-      let runtimeId = caller?.client.runtimeOwnerIdentity?.()?.runtimeId
-      if (caller && !runtimeId) {
-        // Original local identity is available without a new message handshake. Legacy
-        // clients may lack that proof; reads remain available and mutations judge it.
-        try { runtimeId = (await caller.client.agentCreationAuthority()).runtimeId } catch { /* unknown */ }
-      }
+      const runtimeId = caller ? await this.agentOwnerRuntimeId(caller.client) : undefined
       return parseGoalDelegationRpcResult(method, await this.ports.goalDelegations.call(method, input, context,
         { actor: actor as { kind: 'agent' | 'user' | 'device'; id: string },
           ...(caller ? { hostId: caller.hostId, runId: caller.session.run.runId, ...(runtimeId ? { runtimeId } : {}) } : {}) }), input) as AgentMuxRpcResult<M>
@@ -4873,9 +4868,21 @@ export class AgentMuxRpcService {
     })
   }
 
+  private async agentOwnerRuntimeId(client: Pick<AgentMuxRpcCorePort, 'runtimeOwnerIdentity' | 'agentCreationAuthority'>): Promise<string | undefined> {
+    const runtimeId = client.runtimeOwnerIdentity?.()?.runtimeId
+    if (runtimeId) return runtimeId
+    try { return (await client.agentCreationAuthority()).runtimeId } catch { return undefined }
+  }
+
   private async send(p: Record<string, unknown>, caller: Awaited<ReturnType<AgentMuxRpcService['authenticated']>>, context: AgentMuxRpcCallContext) {
     const target = rpcRecord(p.target)
+    const expectedRuntimeId = p.expectedRecipientRuntimeId === undefined ? undefined : rpcString(p.expectedRecipientRuntimeId, 'Expected recipient Runtime ID')
+    const assertRuntime = (actual: string | null | undefined) => {
+      if (expectedRuntimeId !== undefined && actual !== expectedRuntimeId) throw new AgentMuxError(
+        'This submission names a different or unconfirmed recipient Runtime. Original messages and Agent sessions are retained.', 'MESSAGE_RECIPIENT_MISMATCH')
+    }
     if (target.kind === 'reply') {
+      if (expectedRuntimeId !== undefined) throw new AgentMuxError('A reply uses the original source’s recipient address.', 'INVALID_CONTROL_REQUEST')
       rpcRecord(target, ['kind', 'sourceMessageId'])
       const owner = this.requireCaller(caller), operationId = rpcString(p.operationId, 'Operation ID')
       const messageId = p.messageId === undefined ? 'message-' + createHash('sha256').update(operationId).digest('hex') : rpcString(p.messageId, 'Message ID')
@@ -4913,6 +4920,7 @@ export class AgentMuxRpcService {
     const routes = await this.messageRouteJournal()
     const routed = await routes.readMessageRoute(operationId, messageId)
     if (routed) {
+      assertRuntime(routed.runtimeId)
       assertAgentMessageRouteIntent(routed, { messageId, intentDigest, target: target as AgentMuxRpcParams<'agent.send'>['target'] })
       if (expectedRun && expectedRun.runId !== routed.expectedRun.runId) throw new AgentMuxError('Expected Run conflicts with this original message route.', 'MESSAGE_RECIPIENT_MISMATCH')
       return await this.forwardMessageRoute(routed, p, caller, context)
@@ -4963,6 +4971,8 @@ export class AgentMuxRpcService {
       recipientId = candidates[0]!.agentSessionId
     } else throw new AgentMuxError('Message target is invalid.', 'INVALID_CONTROL_REQUEST')
     const recipientOwner = await this.owner(recipientId, false, target.kind === 'agent-session' && target.hostId !== undefined ? rpcString(target.hostId, 'Recipient Host') : undefined)
+    if (expectedRuntimeId !== undefined)
+      assertRuntime(original?.envelope.recipientRuntimeId ?? await this.agentOwnerRuntimeId(recipientOwner.client))
     if (recipientOwner.client.forwardRpc || recipientOwner.hostId === 'local' && this.ports.callOriginalCore) {
       if (caller && caller.client !== recipientOwner.client && (p.execution === 'immediate' || addressed)) throw new AgentMuxError('Remote managed messages use their original peer Inbox intake.', 'INVALID_CONTROL_REQUEST')
       // A local Hosted owner shares this journal. Its original first append is
@@ -4989,6 +4999,7 @@ export class AgentMuxRpcService {
         ...(p.recipientInputEpoch===undefined?{}:{recipientInputEpoch:optionalInputEpoch(p.recipientInputEpoch).inputEpoch}),
         agentSessionId: recipientId, expectedRun: { ...recipientOwner.session.run },
         target: target as AgentMuxRpcParams<'agent.send'>['target'], intentDigest })
+      assertRuntime(route.runtimeId)
       if (expectedRun && expectedRun.runId !== route.expectedRun.runId) throw new AgentMuxError('Expected Run conflicts with the first concurrent message route.', 'MESSAGE_RECIPIENT_MISMATCH')
       return await this.forwardMessageRoute(route, p, caller, context)
     }

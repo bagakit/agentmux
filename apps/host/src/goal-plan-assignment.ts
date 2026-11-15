@@ -2,7 +2,7 @@ import { AgentMuxError, type AgentMuxRpcCallContext } from '@agentmux/core'
 import type { GoalDelegationAuthority, GoalDelegationParamsMap } from '@agentmux/core/goal-delegation'
 import type { Demand, DemandStore } from '@agentmux/demand'
 import { delegationWorkerHostId } from '@agentmux/demand/delegations'
-import type { GoalPlanAssignmentChange } from '@agentmux/demand/goal-plan'
+import type { GoalPlanAssignmentChange, GoalPlanOwner } from '@agentmux/demand/goal-plan'
 import { goalSupervisorHostWitnesses, type DemandAgentReference } from '@agentmux/demand/relations'
 import type { GoalRuntimePort } from './goal-runtime.js'
 import { goalSupervisorRuntimeWitnesses } from './goal-supervisor-identity.js'
@@ -48,11 +48,11 @@ function assertWorkRole(goal: Demand, claiming: boolean, authority: GoalDelegati
 
 /** This writes the plan only. Starting a delegation still requires its own explicit action. */
 export async function changeGoalPlanAssignment(demands: DemandStore, runtime: Runtime, request: Request,
-  context: AgentMuxRpcCallContext, authority: GoalDelegationAuthority): Promise<void> {
+  context: AgentMuxRpcCallContext, authority: GoalDelegationAuthority, owner?: GoalPlanOwner): Promise<void> {
   const change: GoalPlanAssignmentChange = { nodeId: request.nodeId, assignment: 'assignment' in request ? request.assignment : { kind: 'claim' } }
   context.signal?.throwIfAborted()
   await context.assertCurrent?.()
-  await demands.changePlanAssignment(request.goalId, request.expectedRevision, request.operationId, change,
+  await demands.changePlanAssignment(request.goalId, 'claimToken' in request ? request.claimToken : request.expectedRevision, request.operationId, change,
     { ...authority.actor, ...(authority.hostId ? { hostId: authority.hostId } : {}), ...(authority.runtimeId ? { runtimeId: authority.runtimeId } : {}) }, current => {
       context.signal?.throwIfAborted()
       assertWorkRole(current, change.assignment.kind === 'claim', authority, runtime)
@@ -61,5 +61,5 @@ export async function changeGoalPlanAssignment(demands: DemandStore, runtime: Ru
         if (originalHost(runtime, target.agentSessionId, target.hostId) !== target.hostId)
           throw new AgentMuxError('The selected executor has no confirmed identity at this Host. Read its original Session.', 'CONTROL_UNAVAILABLE')
       }
-    })
+    }, owner)
 }

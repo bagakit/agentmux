@@ -1,5 +1,6 @@
+import { deriveObjectId, isObjectId } from '@agentmux/identity'
 import type { DemandCriterion } from './goals.js'
-import { delegationWorkerHostId, type DemandDelegation } from './delegations.js'
+import { delegationWorkerHostId, parseGoalPlanPredecessors, sameGoalPlanPredecessors, type DemandDelegation, type GoalPlanPredecessor } from './delegations.js'
 
 /**
  * A Goal's plan: a dependency graph of nodes inside one Goal. The plan holds only structure,
@@ -40,7 +41,10 @@ export type GoalPlanReviewer = { kind: 'agent' | 'user' | 'device'; id: string; 
 export type GoalPlanReview = GoalPlanReviewInput & { reviewer: GoalPlanReviewer; reviewedAt: number }
 export type GoalPlanAssignment = { kind: 'open' } | { kind: 'close' } | { kind: 'assign'; executor: GoalPlanExecutor }
 export type GoalPlanAssignmentChange = { nodeId: string; assignment: GoalPlanAssignment | { kind: 'claim' } }
-export type GoalPlanRevisionRecord = { operationId: string; revision: number; author: GoalPlanReviewer; revisedAt: number; change?: GoalPlanAssignmentChange }
+export type GoalPlanOwner = { runtimeId: string; namespace: string }
+export type GoalPlanClaimScope = GoalPlanOwner & { goalId: string }
+export type GoalPlanClaim = { token: string; basis: string; predecessors: GoalPlanPredecessor[] }
+export type GoalPlanRevisionRecord = { operationId: string; revision: number; author: GoalPlanReviewer; revisedAt: number; change?: GoalPlanAssignmentChange; claim?: GoalPlanClaim; changedNodes?: string[] }
 export type GoalPlan = {
   revision: number
   /** The Goal proposal version the node criteria were written against. */
@@ -171,9 +175,16 @@ export function parseGoalPlan(value: unknown): GoalPlan {
   if (new Set(reviews.map(review => review.operationId)).size !== reviews.length) throw new Error('plan reviews repeat an operation')
   if (reviews.some(review => !nodes.some(node => node.id === review.nodeId))) throw new Error('plan review names an absent node')
   const history = data.history.map(value => {
-    const item = object(value, 'plan revision record', ['operationId', 'revision', 'author', 'revisedAt', 'change'], ['change'])
+    const item = object(value, 'plan revision record', ['operationId', 'revision', 'author', 'revisedAt', 'change', 'claim', 'changedNodes'], ['change', 'claim', 'changedNodes'])
+    const change = item.change === undefined ? undefined : parseAssignmentChange(item.change)
+    const claim = item.claim === undefined ? undefined : object(item.claim, 'plan claim', ['token', 'basis', 'predecessors'])
+    const changedNodes = item.changedNodes === undefined ? undefined : identities(item.changedNodes, 'plan changed nodes')
+    if (changedNodes && change) throw new Error('An assignment cannot revise node definitions')
+    if (claim && (change?.assignment.kind !== 'claim' || !isObjectId(claim.token) || !isObjectId(claim.basis))) throw new Error('plan claim lacks its original assignment and token')
     return { operationId: identity(item.operationId, 'plan revision operationId'), revision: positive(item.revision, 'plan revision'),
-      ...(item.change === undefined ? {} : { change: parseAssignmentChange(item.change) }), author: actor(item.author, 'plan revision author'), revisedAt: positive(item.revisedAt, 'plan revision revisedAt') }
+      ...(change ? { change } : {}), ...(changedNodes ? { changedNodes } : {}),
+      ...(claim ? { claim: { token: claim.token as string, basis: claim.basis as string, predecessors: parseGoalPlanPredecessors(claim.predecessors) } } : {}),
+      author: actor(item.author, 'plan revision author'), revisedAt: positive(item.revisedAt, 'plan revision revisedAt') }
   })
   const revision = positive(data.revision, 'plan revision')
   if (new Set(history.map(record => record.operationId)).size !== history.length) throw new Error('plan history repeats an operation')
@@ -206,6 +217,20 @@ export function assertGoalPlanKeepsRecordedNodes(previous: GoalPlan | undefined,
   }
 }
 
+/** Compare the facts that can invalidate this node's eligibility, independently of display. */
+export function goalPlanChangedNodes(previous: readonly GoalPlanNodeInput[], next: readonly GoalPlanNodeInput[]): string[] {
+  const prior = new Map(previous.map(node => [node.id, node]))
+  const definition = (node: GoalPlanNodeInput) => [node.outcome, node.check, [...node.dependsOn].sort(),
+    [...node.criterionIds].sort(), node.executor, node.cancelled, node.claimOpen]
+  const changed: string[] = []
+  for (const node of next) {
+    const old = prior.get(node.id)
+    if (!old || JSON.stringify(definition(old)) !== JSON.stringify(definition(node))) changed.push(node.id)
+    prior.delete(node.id)
+  }
+  return [...changed, ...prior.keys()]
+}
+
 /** Compare the current task's frozen standards, not an unrelated Goal revision number. */
 export function staleGoalPlanCriteria(node: GoalPlanNodeInput, criteria: readonly DemandCriterion[], attempt?: Pick<DemandDelegation, 'capturedCriteria'> | null): string[] {
   return node.criterionIds.filter(id => {
@@ -218,7 +243,7 @@ export function staleGoalPlanCriteria(node: GoalPlanNodeInput, criteria: readonl
  * Why a node needs reconciliation: its criteria do not apply as written to the current Goal
  * (changed, removed or none at all), or its current attempt's original dispatch link is unconfirmed.
  */
-export const GOAL_PLAN_UNKNOWN_REASONS = ['criteria', 'dispatch-link'] as const
+export const GOAL_PLAN_UNKNOWN_REASONS = ['criteria', 'dispatch-link', 'predecessors'] as const
 export type GoalPlanUnknownReason = (typeof GOAL_PLAN_UNKNOWN_REASONS)[number]
 export type GoalPlanNodeProjection = {
   node: GoalPlanNodeInput
@@ -228,6 +253,9 @@ export type GoalPlanNodeProjection = {
   /** The newest delegation, unless an explicit executor revision superseded its unreviewed work. */
   delegation: DemandDelegation | null
   attempts: number
+  predecessors: GoalPlanPredecessor[] | null
+  claimToken?: string
+  claimBasis?: string
   review: GoalPlanReview | null
   staleCriteria: string[]
   /** Every reason the node needs reconciliation; nonempty exactly when its state is unknown. */
@@ -239,7 +267,7 @@ export type GoalPlanProjection = { revision: number; nodes: GoalPlanNodeProjecti
  * The only place node state is decided. It reads the plan, this Goal's delegations and the
  * current criteria; delivery or Agent idleness never reaches it.
  */
-export function projectGoalPlan(plan: GoalPlan, delegations: readonly DemandDelegation[], criteria: readonly DemandCriterion[]): GoalPlanProjection {
+export function projectGoalPlan(plan: GoalPlan, delegations: readonly DemandDelegation[], criteria: readonly DemandCriterion[], claimScope?: GoalPlanClaimScope, alignmentRevision = plan.alignmentRevision): GoalPlanProjection {
   const byId = new Map(plan.nodes.map(node => [node.id, node]))
   const column = new Map<string, number>()
   const depth = (id: string): number => {
@@ -249,6 +277,12 @@ export function projectGoalPlan(plan: GoalPlan, delegations: readonly DemandDele
     const value = node.dependsOn.length ? Math.max(...node.dependsOn.map(depth)) + 1 : 0
     column.set(id, value)
     return value
+  }
+  const assignment = new Map<string, GoalPlanRevisionRecord>()
+  const changedAt = new Map<string, number>()
+  for (const entry of plan.history) {
+    if (entry.change) assignment.set(entry.change.nodeId, entry)
+    for (const nodeId of entry.changedNodes ?? []) changedAt.set(nodeId, entry.revision)
   }
   const derived = new Map<string, Omit<GoalPlanNodeProjection, 'column'>>()
   const derive = (node: GoalPlanNodeInput): Omit<GoalPlanNodeProjection, 'column'> => {
@@ -261,14 +295,35 @@ export function projectGoalPlan(plan: GoalPlan, delegations: readonly DemandDele
     const current = reassigned ? null : latest
     const review = current ? latestReview : null
     const staleCriteria = staleGoalPlanCriteria(node, criteria, current)
+    const refs: GoalPlanPredecessor[] = []
+    for (const id of [...node.dependsOn].sort()) {
+      const source = derive(byId.get(id)!)
+      if (source.state !== 'done' || !source.delegation?.report || !source.review) break
+      refs.push({ nodeId: id, delegationOperationId: source.delegation.operationId,
+        reportOperationId: source.delegation.report.operationId, reviewOperationId: source.review.operationId })
+    }
+    const predecessors = refs.length === node.dependsOn.length ? refs : null
     const unknown: GoalPlanUnknownReason[] = node.cancelled ? [] : [
       ...(staleCriteria.length || !node.criterionIds.length ? ['criteria' as const] : []),
-      ...(current && !review && current.linkedAt === undefined ? ['dispatch-link' as const] : [])]
+      ...(current && !review && current.linkedAt === undefined ? ['dispatch-link' as const] : []),
+      ...(current?.predecessors && !sameGoalPlanPredecessors(current.predecessors, predecessors) ? ['predecessors' as const] : []),
+    ]
     const state: GoalPlanNodeState = node.cancelled ? 'cancelled' : unknown.length ? 'unknown'
       : review ? review.verdict === 'pass' ? 'done' : 'changes'
       : current ? current.report ? 'review' : 'working'
-      : node.dependsOn.every(dependency => derive(byId.get(dependency)!).state === 'done') ? 'ready' : 'waiting'
-    const value = { node, state, delegation: current, attempts: attempts.length, review, staleCriteria, unknown }
+      : predecessors ? 'ready' : 'waiting'
+    const lastAssignment = assignment.get(node.id)
+    const claimBasis = state === 'ready' && lastAssignment && (node.claimOpen || lastAssignment.claim)
+      ? deriveObjectId('agentmux.goal-plan-eligibility.v1', JSON.stringify([
+        node.id, node.outcome, node.check, changedAt.get(node.id), alignmentRevision, predecessors,
+        [...node.criterionIds].sort().map(id => criteria.find(criterion => criterion.id === id)),
+      ])) : undefined
+    const claimToken = claimScope && claimBasis && node.claimOpen && lastAssignment?.change?.assignment.kind === 'open'
+      ? deriveObjectId('agentmux.goal-plan-claim.v1', JSON.stringify([
+        claimScope.runtimeId, claimScope.namespace, claimScope.goalId, lastAssignment.operationId, claimBasis,
+      ])) : undefined
+    const value = { node, state, delegation: current, attempts: attempts.length, review, staleCriteria, unknown, predecessors,
+      ...(claimBasis ? { claimBasis } : {}), ...(claimToken ? { claimToken } : {}) }
     derived.set(node.id, value)
     return value
   }
@@ -280,12 +335,13 @@ export function projectGoalPlan(plan: GoalPlan, delegations: readonly DemandDele
 
 /** A reference to the same response's original delegation; all participant and thread facts stay there. */
 export type GoalPlanStateAttempt = { delegationOperationId: string; reported: boolean }
-export type GoalPlanStateNode = { id: string; state: GoalPlanNodeState; column: number; attempts: number; staleCriteria: string[]; unknown: GoalPlanUnknownReason[]; attempt: GoalPlanStateAttempt | null }
+export type GoalPlanStateNode = { id: string; state: GoalPlanNodeState; column: number; attempts: number; staleCriteria: string[]; unknown: GoalPlanUnknownReason[]; attempt: GoalPlanStateAttempt | null; claimToken?: string }
 /** The read-only form of the derivation that the Goal owner returns with its plan. */
 export type GoalPlanState = { revision: number; done: number; total: number; next: string[]; nodes: GoalPlanStateNode[] }
 export function goalPlanState(projection: GoalPlanProjection): GoalPlanState {
   return { revision: projection.revision, done: projection.done, total: projection.total, next: projection.next,
     nodes: projection.nodes.map(item => ({ id: item.node.id, state: item.state, column: item.column, attempts: item.attempts, staleCriteria: item.staleCriteria, unknown: item.unknown,
+      ...(item.claimToken ? { claimToken: item.claimToken } : {}),
       attempt: item.delegation ? { delegationOperationId: item.delegation.operationId, reported: Boolean(item.delegation.report) } : null })) }
 }
 
@@ -300,7 +356,7 @@ export function parseGoalPlanState(value: unknown, plan: GoalPlan, delegations: 
   if (!Array.isArray(data.nodes) || data.nodes.length !== plan.nodes.length) throw new Error('plan state must describe every plan node')
   const nodes = data.nodes.map((value, index): GoalPlanStateNode => {
     const id = plan.nodes[index]!.id, label = `plan state node ${id}`
-    const item = object(value, label, ['id', 'state', 'column', 'attempts', 'staleCriteria', 'unknown', 'attempt'])
+    const item = object(value, label, ['id', 'state', 'column', 'attempts', 'staleCriteria', 'unknown', 'attempt', 'claimToken'], ['claimToken'])
     if (item.id !== id) throw new Error('plan state nodes must follow the plan node order')
     const state = item.state as GoalPlanNodeState
     if (!GOAL_PLAN_NODE_STATES.includes(state)) throw new Error(`${label} has an invalid state`)
@@ -316,7 +372,10 @@ export function parseGoalPlanState(value: unknown, plan: GoalPlan, delegations: 
       return { delegationOperationId: delegation.operationId, reported: named.reported }
     })()
     if (attempt && attempts === 0) throw new Error(`${label} names a current attempt without attempts`)
-    return { id, state, column: count(item.column, `${label} column`), attempts, staleCriteria: identities(item.staleCriteria, `${label} staleCriteria`), unknown, attempt }
+    if (item.claimToken !== undefined && (!isObjectId(item.claimToken) || state !== 'ready' || !plan.nodes[index]!.claimOpen))
+      throw new Error(`${label} has a claim token for an ineligible node`)
+    return { id, state, column: count(item.column, `${label} column`), attempts, staleCriteria: identities(item.staleCriteria, `${label} staleCriteria`), unknown, attempt,
+      ...(typeof item.claimToken === 'string' ? { claimToken: item.claimToken } : {}) }
   })
   const next = identities(data.next, 'plan state next')
   if (next.some(id => !plan.nodes.some(node => node.id === id))) throw new Error('plan state next names a node outside the plan')
@@ -326,12 +385,12 @@ export function parseGoalPlanState(value: unknown, plan: GoalPlan, delegations: 
 }
 
 /** Whether a node may receive a new delegation now, and why not. */
-export function goalPlanDelegationIssue(plan: GoalPlan, delegations: readonly DemandDelegation[], criteria: readonly DemandCriterion[], nodeId: string, worker: GoalPlanExecutor): string | null {
-  const projection = projectGoalPlan(plan, delegations, criteria).nodes.find(item => item.node.id === nodeId)
+export function goalPlanDelegationIssue(projection: GoalPlanNodeProjection | undefined, nodeId: string, worker: GoalPlanExecutor): string | null {
   if (!projection) return `Plan node ${nodeId} is not in the current plan.`
   if (projection.node.claimOpen) return `Plan node ${nodeId} is open for claim. Assign or claim it before delegating.`
   if (projection.state !== 'ready' && projection.state !== 'changes')
     return `Plan node ${nodeId} is ${projection.state}${projection.unknown.length ? ` (${projection.unknown.join(', ')})` : ''}; only a ready node or one whose review requested changes can be delegated.`
+  if (!projection.predecessors) return `Plan node ${nodeId} needs current passing predecessor deliveries before dispatch.`
   const executor = projection.node.executor
   if (executor && (executor.hostId !== worker.hostId || executor.agentSessionId !== worker.agentSessionId))
     return `Plan node ${nodeId} names ${executor.agentSessionId} on ${executor.hostId} as its executor; revise the plan to reassign it.`

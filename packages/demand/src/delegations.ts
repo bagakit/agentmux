@@ -69,7 +69,36 @@ export function parseDemandDelegationRuntimeIdentity(value: unknown): DemandDele
   const data = record(value, 'delegation.runtimeIdentity', ['ownerRuntimeId', 'workerRuntimeId'])
   return { ownerRuntimeId: identity(data.ownerRuntimeId, 'runtimeIdentity.ownerRuntimeId'), workerRuntimeId: identity(data.workerRuntimeId, 'runtimeIdentity.workerRuntimeId') }
 }
+/** Direct links to the exact passing inputs of this attempt. */
+export type GoalPlanPredecessor = { nodeId: string; delegationOperationId: string; reportOperationId: string; reviewOperationId: string }
+
+export function sameGoalPlanPredecessors(expected: readonly GoalPlanPredecessor[], actual: readonly GoalPlanPredecessor[] | null | undefined): boolean {
+  if (!actual || expected.length !== actual.length) return false
+  return expected.every((ref, index) => {
+    const other = actual[index]!
+    return ref.nodeId === other.nodeId && ref.delegationOperationId === other.delegationOperationId &&
+      ref.reportOperationId === other.reportOperationId && ref.reviewOperationId === other.reviewOperationId
+  })
+}
+
+export function parseGoalPlanPredecessors(value: unknown): GoalPlanPredecessor[] {
+  if (!Array.isArray(value)) throw new Error('Goal plan predecessors must be an array')
+  const refs = value.map(entry => {
+    const item = record(entry, 'Goal plan predecessor', ['nodeId', 'delegationOperationId', 'reportOperationId', 'reviewOperationId'])
+    return {
+      nodeId: identity(item.nodeId, 'predecessor node'),
+      delegationOperationId: identity(item.delegationOperationId, 'predecessor delegation'),
+      reportOperationId: identity(item.reportOperationId, 'predecessor report'),
+      reviewOperationId: identity(item.reviewOperationId, 'predecessor review'),
+    }
+  })
+  if (new Set(refs.map(ref => ref.nodeId)).size !== refs.length) throw new Error('Goal plan predecessors repeat a node')
+  return refs
+}
+
 export type DemandDelegation = DemandDelegationIntent & {
+  predecessors?: GoalPlanPredecessor[]
+  claimOperationId?: string
   preparedAt: number
   /** Owner-captured standards retain the meaning of late, old-version reports. */
   capturedCriteria: DemandCriterion[]
@@ -159,7 +188,7 @@ export function sameDemandDelegationIntent(left: DemandDelegationIntent, right: 
     .every(key => JSON.stringify(left[key as keyof DemandDelegationIntent]) === JSON.stringify(right[key as keyof DemandDelegationIntent]))
 }
 export function parseDemandDelegation(value: unknown): DemandDelegation {
-  const data = record(value, 'delegation', [...intentKeys, 'preparedAt', 'capturedCriteria', 'linkedAt', 'runtimeIdentity', 'report', 'collection', 'attention'], ['context', 'requestText', 'planNodeId', 'workerHostId', 'linkedAt', 'runtimeIdentity', 'report', 'collection', 'attention'])
+  const data = record(value, 'delegation', [...intentKeys, 'preparedAt', 'capturedCriteria', 'linkedAt', 'runtimeIdentity', 'report', 'collection', 'attention', 'predecessors', 'claimOperationId'], ['context', 'requestText', 'planNodeId', 'workerHostId', 'linkedAt', 'runtimeIdentity', 'report', 'collection', 'attention', 'predecessors', 'claimOperationId'])
   const intent = parseDemandDelegationIntent(Object.fromEntries(intentKeys.filter(key => data[key] !== undefined).map(key => [key, data[key]])))
   if (!Array.isArray(data.capturedCriteria)) throw new Error('delegation.capturedCriteria must be an array')
   const capturedCriteria = data.capturedCriteria.map(value => {
@@ -196,7 +225,10 @@ export function parseDemandDelegation(value: unknown): DemandDelegation {
       ...(item.attemptedAt === undefined ? {} : { attemptedAt: positive(item.attemptedAt, 'attention.attemptedAt') }) }
     if (attention.hostId !== intent.hostId || data.linkedAt === undefined) throw new Error('delegation attention lacks its original linked Host')
   }
+  if ((data.predecessors !== undefined || data.claimOperationId !== undefined) && !intent.planNodeId) throw new Error('Goal plan predecessors require an original node')
   return { ...intent, capturedCriteria, preparedAt: positive(data.preparedAt, 'delegation.preparedAt'),
+    ...(data.predecessors === undefined ? {} : { predecessors: parseGoalPlanPredecessors(data.predecessors) }),
+    ...(data.claimOperationId === undefined ? {} : { claimOperationId: identity(data.claimOperationId, 'delegation.claimOperationId') }),
     ...(data.linkedAt === undefined ? {} : { linkedAt: positive(data.linkedAt, 'delegation.linkedAt') }),
     ...(runtimeIdentity ? { runtimeIdentity } : {}),
     ...(report === undefined ? {} : { report }), ...(collection === undefined ? {} : { collection }), ...(attention === undefined ? {} : { attention }) }

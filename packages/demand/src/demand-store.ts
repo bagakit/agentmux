@@ -4,7 +4,7 @@ import { parseDemandDiscussionInput, parseDemandDiscussionInputs, parseDemandDis
 import { demandPatrolScope, completedGoalPlanRequest, assertPatrolExecutions, parseDemandPatrols, parseDemandPatrolAttempt, parseDemandPatrolReportInput, type DemandPatrolPreparation, type DemandPatrolAttempt, type DemandPatrolReportInput } from './goal-patrol.js'
 import { parseDemandDispatch, parseDemandDispatchIntent, parseDemandDispatchRequest, parseDemandDispatches, qualifiedDemandDispatch, runBoundDemandDispatch, sameDemandDispatchIntent, type DemandDispatch, type DemandDispatchIntent, type DemandDispatchRequest, type DemandDispatchRejection } from './dispatch.js'
 import { parseDemandDelegationRuntimeIdentity, type DemandDelegationRuntimeIdentity, parseDemandDelegationIntent, parseDemandDelegations, parseDemandDelegationReportInput, parseDemandDelegationCollectionInput, parseDemandDelegationCollector, sameDemandDelegationIntent, validateDemandDelegationReport,
-  parseDemandDelegationAttentionInput, sameDemandDelegationAttention, delegationWorkerHostId,
+  parseDemandDelegationAttentionInput, sameDemandDelegationAttention, delegationWorkerHostId, sameGoalPlanPredecessors,
   type DemandDelegation, type DemandDelegationIntent, type DemandDelegationReportInput, type DemandDelegationCollectionInput, type DemandDelegationCollector, type DemandDelegationAttentionInput } from './delegations.js'
 import { optionalDemandInputEpoch, parseDemandParticipations, parseDemandCreationOrigin, parseDemandParticipationSource, type DemandParticipationSource } from './collaboration.js'
 import { appendDemandContentReferences, parseDemandContentReferences } from './content-references.js'
@@ -39,8 +39,8 @@ import {
   isDemandStatus,
 } from './demand-types.js'
 import { DemandStoreError } from './errors.js'
-import { assertGoalPlanKeepsRecordedNodes, goalPlanDelegationIssue, parseGoalPlan, parseGoalPlanReviewInput, parseGoalPlanRevisionInput, projectGoalPlan,
-  type GoalPlanAssignmentChange, type GoalPlanReviewer, type GoalPlanReviewInput, type GoalPlanRevisionInput } from './goal-plan.js'
+import { assertGoalPlanKeepsRecordedNodes, goalPlanChangedNodes, goalPlanDelegationIssue, parseGoalPlan, parseGoalPlanReviewInput, parseGoalPlanRevisionInput, projectGoalPlan,
+  type GoalPlanAssignmentChange, type GoalPlanRevisionRecord, type GoalPlanOwner, type GoalPlanReviewer, type GoalPlanReviewInput, type GoalPlanRevisionInput } from './goal-plan.js'
 import { demandNameContext, parseDemandNameChange } from './demand-name-change.js'
 import { alignmentConfirmationIssue, groundingAcceptanceIssue, parseAlignment, parseAlignmentProposal, parseGrounding, parseGroundingProposal, type DemandAlignmentProposal, type DemandGroundingProposal } from './goals.js'
 
@@ -779,15 +779,32 @@ export class DemandStore {
       const alignment = demand.alignment
       if (!alignment || alignment.revision !== intent.alignmentRevision || intent.criterionIds.some(criterionId => !alignment.criteria.some(criterion => criterion.id === criterionId)))
         this.rejectDelegation('A new delegation must reference the current proposal and its original success criteria.')
+      let predecessors: DemandDelegation['predecessors']
+      let claimRecord: GoalPlanRevisionRecord | undefined
       if (intent.planNodeId !== undefined) {
         if (!demand.plan) this.rejectDelegation('This Goal has no plan; delegate without a plan node or revise the plan first.')
-        const issue = goalPlanDelegationIssue(demand.plan, demand.delegations ?? [], alignment.criteria, intent.planNodeId, { hostId: delegationWorkerHostId(intent), agentSessionId: intent.workerAgentSessionId })
+        const target = projectGoalPlan(demand.plan, demand.delegations ?? [], alignment.criteria, undefined, alignment.revision).nodes.find(item => item.node.id === intent.planNodeId)
+        const issue = goalPlanDelegationIssue(target, intent.planNodeId, { hostId: delegationWorkerHostId(intent), agentSessionId: intent.workerAgentSessionId })
         if (issue) this.rejectDelegation(issue)
-        const node = demand.plan.nodes.find(item => item.id === intent.planNodeId)!
+        const { node } = target!
+        if (target!.state === 'ready') {
+          for (let index = demand.plan.history.length - 1; index >= 0; index--) {
+            const entry = demand.plan.history[index]!
+            if (entry.change?.nodeId !== node.id) continue
+            if (entry.claim && entry.author.id === intent.workerAgentSessionId && entry.author.hostId === delegationWorkerHostId(intent))
+              claimRecord = entry
+            break
+          }
+        }
+        const claim = claimRecord?.claim
+        if (claim && claim.basis !== target!.claimBasis)
+          this.rejectDelegation('This claim names earlier task requirements or predecessor deliveries. Read the original claim and confirm a current assignment before dispatch.')
+        predecessors = claim?.predecessors ?? target!.predecessors!
         if (intent.criterionIds.length !== node.criterionIds.length || node.criterionIds.some(id => !intent.criterionIds.includes(id)))
           this.rejectDelegation('A node delegation must carry the same success criteria as its plan node. The original node and Agents are retained.')
       }
-      demand.delegations = [...(demand.delegations ?? []), { ...intent, preparedAt: Date.now(), capturedCriteria: clone(alignment.criteria.filter(criterion => intent.criterionIds.includes(criterion.id))) }]
+      demand.delegations = [...(demand.delegations ?? []), { ...intent, ...(predecessors ? { predecessors } : {}), ...(claimRecord ? { claimOperationId: claimRecord.operationId } : {}), preparedAt: Date.now(),
+        capturedCriteria: clone(alignment.criteria.filter(criterion => intent.criterionIds.includes(criterion.id))) }]
       demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
       validateNewDemand(demand, this.storePath)
       return demand
@@ -829,8 +846,9 @@ export class DemandStore {
           this.rejectDelegation(`Plan node ${node.id} must write at least one success criterion, all from the current Goal proposal. Unchanged existing criteria and recorded work are retained.`)
       }
       const now = Date.now(), next = (current?.revision ?? 0) + 1
+      const changedNodes = goalPlanChangedNodes(current?.nodes ?? [], revision.nodes)
       demand.plan = { revision: next, alignmentRevision: revision.alignmentRevision, nodes: clone(revision.nodes), reviews: current?.reviews ?? [],
-        history: [...(current?.history ?? []), { operationId: revision.operationId, revision: next, author, revisedAt: now }] }
+        history: [...(current?.history ?? []), { operationId: revision.operationId, revision: next, author, revisedAt: now, ...(changedNodes.length ? { changedNodes } : {}) }] }
       demand.updatedAt = Math.max(now, demand.updatedAt + 1)
       validateNewDemand(demand, this.storePath)
       return demand
@@ -838,24 +856,29 @@ export class DemandStore {
   }
 
   /** Compare the observed plan and write one node under the original store's writer lock. */
-  async changePlanAssignment(id: string, expectedRevision: number, operationId: string, change: GoalPlanAssignmentChange,
-    author: GoalPlanReviewer, assertAuthorized: (current: Demand) => void): Promise<DemandReceipt> {
+  async changePlanAssignment(id: string, expected: number | string, operationId: string, change: GoalPlanAssignmentChange,
+    author: GoalPlanReviewer, assertAuthorized: (current: Demand) => void, owner?: GoalPlanOwner): Promise<DemandReceipt> {
     return this.mutate(change.assignment.kind === 'claim' ? 'plan.claim' : 'plan.assignment', snapshot => {
       const demand = findDemand(snapshot, id, this.storePath), plan = demand.plan
       if (!plan) this.rejectDelegation('This Goal has no saved plan.')
+      const claiming = change.assignment.kind === 'claim'
       const original = plan.history.find(record => record.operationId === operationId)
       if (original) {
         if (original.author.kind !== author.kind || original.author.id !== author.id || original.author.hostId !== author.hostId ||
-            original.author.runtimeId !== author.runtimeId || original.revision - 1 !== expectedRevision || !isDeepStrictEqual(original.change, change))
+            original.author.runtimeId !== author.runtimeId || (claiming ? original.claim?.token !== expected : original.revision - 1 !== expected) || !isDeepStrictEqual(original.change, change))
           this.rejectDelegation('This operation belongs to another original request or actor. Read plan history to reconcile it.')
         return { unchanged: demand }
       }
       assertAuthorized(demand)
-      if (expectedRevision !== plan.revision)
-        this.rejectDelegation(`The plan changed to revision ${plan.revision} after you read revision ${expectedRevision}. Read the current plan and its executor.`)
-      const projection = projectGoalPlan(plan, demand.delegations ?? [], demand.alignment?.criteria ?? []).nodes.find(item => item.node.id === change.nodeId)
+      if (!claiming && expected !== plan.revision)
+        this.rejectDelegation(`The plan changed to revision ${plan.revision} after you read revision ${expected}. Read the current plan and its executor.`)
+      const projection = projectGoalPlan(plan, demand.delegations ?? [], demand.alignment?.criteria ?? [],
+        owner ? { ...owner, goalId: demand.id } : undefined, demand.alignment?.revision).nodes.find(item => item.node.id === change.nodeId)
       if (!projection) this.rejectDelegation(`Plan node ${change.nodeId} is not in the current plan.`)
-      const { node } = projection, action = change.assignment
+      const { node, claimToken, claimBasis, predecessors } = projection, action = change.assignment
+      const claim = claimToken && claimToken === expected && claimBasis && predecessors ? { token: claimToken, basis: claimBasis, predecessors } : undefined
+      if (claiming && !claim)
+        this.rejectDelegation('This node or its prerequisites changed. Read the original node and its current claim token.')
       if (action.kind !== 'close' && (demand.status === 'done' || demand.status === 'cancelled' || projection.state !== 'ready' || projection.delegation))
         this.rejectDelegation(`This assignment requires an unfinished Goal and a ready node with no current delegation. Read the current plan (${demand.status}, ${projection.state}).`)
       if (action.kind === 'open') {
@@ -874,7 +897,8 @@ export class DemandStore {
       }
       const now = Date.now()
       plan.revision += 1
-      plan.history.push({ operationId, revision: plan.revision, author, revisedAt: now, change: clone(change) })
+      plan.history.push({ operationId, revision: plan.revision, author, revisedAt: now, change: clone(change),
+        ...(claim ? { claim } : {}) })
       demand.updatedAt = Math.max(now, demand.updatedAt + 1)
       validateNewDemand(demand, this.storePath)
       return demand
@@ -917,6 +941,26 @@ export class DemandStore {
       validateNewDemand(demand, this.storePath)
       return demand
     }, undefined, review.operationId)
+  }
+
+  /** Confirm a saved intent can still be submitted for the first time. Original message reconciliation reads remain independent. */
+  async confirmDelegationSubmission(id: string, operationId: string): Promise<string | undefined> {
+    return enqueue(this.root, () => this.withWriterLock(async () => {
+      const snapshot = await this.readSnapshot(), demand = findDemand(snapshot, id, this.storePath)
+      const entry = this.findDelegation(demand, operationId)
+      if (!entry.planNodeId) return
+      const target = demand.plan && projectGoalPlan(demand.plan, demand.delegations ?? [], demand.alignment?.criteria ?? [])
+        .nodes.find(item => item.node.id === entry.planNodeId)
+      if (!target || target.delegation?.operationId !== operationId || target.node.cancelled || target.staleCriteria.length ||
+          !target.predecessors || !sameGoalPlanPredecessors(entry.predecessors ?? [], target.predecessors) ||
+          demand.status === 'done' || demand.status === 'cancelled')
+        this.rejectDelegation('The saved attempt no longer has current task requirements or passing predecessor receipts. Read the original plan and retain the prepared input.')
+      const assignment = [...demand.plan!.history].reverse().find(record => record.change?.nodeId === entry.planNodeId)
+      if (entry.claimOperationId && (entry.claimOperationId !== assignment?.operationId || !assignment.author.runtimeId))
+        this.rejectDelegation('The attempt’s original claim was superseded or its worker Runtime is unconfirmed. Retain the original intent and read the current plan.')
+      await this.confirmSnapshot()
+      return entry.claimOperationId ? assignment!.author.runtimeId : undefined
+    }))
   }
 
   async inspectDelegation(id: string, operationId: string): Promise<DemandDelegation | null> {

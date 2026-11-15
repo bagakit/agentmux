@@ -18,7 +18,7 @@ const GOAL_PLAN_STATE_LABELS: Record<Exclude<GoalPlanNodeState, 'unknown'>, stri
   waiting: 'Waiting on dependencies', ready: 'Ready to start', working: 'In progress', review: 'Awaiting review',
   changes: 'Changes requested', done: 'Done', cancelled: 'Cancelled'
 }
-const UNKNOWN_LABELS: Record<GoalPlanUnknownReason, string> = { criteria: 'Criteria need review', 'dispatch-link': 'Delivery unconfirmed' }
+const UNKNOWN_LABELS: Record<GoalPlanUnknownReason, string> = { criteria: 'Criteria need review', 'dispatch-link': 'Delivery unconfirmed', predecessors: 'Predecessor evidence changed' }
 
 const ThemeObjectGoalIcon = semanticIconComponent('object.goal')
 
