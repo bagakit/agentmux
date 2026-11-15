@@ -84,6 +84,8 @@ its proposal reply by including a revision proposal with \`nodeId\`,
   a confirmed worker inbox entry without sending it.
 - `criteria` unknown means missing or changed criteria. Read the current proposal.
   An old passing review remains history. Unchanged criteria retain their accepted work.
+- `completion-proof` unknown means a passing review is missing its original signed
+  completion. Read the original owner’s review and receipt before advancing its dependents.
 - The Supervisor uses `goal collect` to retrieve original signed replies through the
   existing worker connection. An outbox receipt is local custody. A verified collection
   records the original report. Preserve those identities if retrieval is unavailable.
