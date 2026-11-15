@@ -149,7 +149,7 @@ Fast 与 Native 分开是为了让失败归因清晰，不允许用 Mock 代替 
 
 `test:resources` 由 [measure-desktop-resources.mjs](../../apps/desktop/scripts/measure-desktop-resources.mjs) 驱动 Main 的 [resource-probe.ts](../../apps/desktop/src/main/resource-probe.ts)，报告 schema 为 `agentmux.t001-desktop-resources.v2`，外层脚本以 `T017_DESKTOP_RESOURCE_RECEIPT=` 行输出并附加源码与 ctxmux 身份。它使用系统临时目录下的短、测试专属 Runtime。清理以 exact socket、daemon executable 与完整 argv 确认 owner，每次发信号前重验。Harness 先证明一个已 ready、尚无 receipt 的真实 test-owned daemon 能被精确清理，再运行 Desktop。
 
-轻载场景记录至少 300,000 字节的 xterm 输出、Monaco、Browser 和释放阶段的工作集增量。七轮包含两轮预热和五轮稳态观测。硬检查验证有限读数与 owner 收敛。实际 ready 的 reusable Terminal 建立 View、Addon、listener、Main Attachment 和 Renderer lease 基线。每轮 claim 继续使用同一 Run。Stop 核对原 Native 回执后，新的 reusable Terminal 恢复同等 owner。Browser 打开和关闭也分别核对释放和恢复。Monaco 首次请求前以原加载入口和 registry 缺席确认冷态。实际编辑以准确 File Tab／Region、Editor、Model、Document 和 watcher 确认，关闭后须读到加载后的真实零计数。加载后缺测单独报告。
+轻载场景记录至少 300,000 字节的 xterm 输出、Monaco、Browser 和释放阶段的工作集增量。七轮包含两轮预热和五轮稳态观测。硬检查验证有限读数与 owner 收敛。实际 ready 的 reusable Terminal 建立 View、Addon、listener、Main Attachment 和 Renderer lease 基线。每个 View 须持有一个基础 Fit Addon，可选 WebGL 按实际 View 的持有情况独立核对。Browser 打开后，隐藏终端须释放 WebGL。每轮 claim 继续使用同一 Run。Stop 核对原 Native 回执后，新的 reusable Terminal 恢复同等 owner。Browser 关闭后再次核对资源恢复。Monaco 首次请求前以原加载入口和 registry 缺席确认冷态。实际编辑以准确 File Tab／Region、Editor、Model、Document 和 watcher 确认，关闭后须读到加载后的真实零计数。加载后缺测单独报告。
 
 代表工作面 Gate 沿同一资源入口，按[产品预算](../design/behavior/settings-and-observation.md#status-bar-cpumemory-资源面板)报告当前候选。用私有产品实例恢复持久 Tabs、Regions 和后台 Run，保持一个实际可交互的活跃终端。按实际主窗口文档绑定 Renderer PID，分别在暖态和有界输出、切换活动窗口采样。回执记录实现与运行身份、机器容量、实际恢复数量、采样区间、取到的主 Renderer 工作集及预算结果。验证负载成立后才判断性能；观测缺失或机器容量不符时保留缺测范围。原轻载资源循环继续核资源释放并记录多轮增长。真实 16 GiB 设备的结果用同样条件确认。
 
