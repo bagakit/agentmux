@@ -1,9 +1,6 @@
-import remarkGfm from 'remark-gfm'
-import remarkParse from 'remark-parse'
-import remarkMath from 'remark-math'
-import { unified } from 'unified'
 import type { Blockquote, Definition, FootnoteDefinition, Link, Root, RootContent, PhrasingContent } from 'mdast'
 import { htmlBlocks, htmlInlines, type HtmlProjection } from './markdown-html.js'
+import { parseMarkdownSource } from './markdown-source.js'
 
 /** remark owns the grammar. This projection retains semantics as data, never executable HTML. */
 export type InlineNode =
@@ -50,7 +47,6 @@ export type BlockNode =
 export type MarkdownHeading = Extract<BlockNode, { kind: 'heading' }>
 export type MarkdownDocument = { blocks: BlockNode[]; headings: MarkdownHeading[] }
 
-const processor = unified().use(remarkParse).use(remarkGfm).use(remarkMath)
 type ParseContext = {
   source: string
   definitions: Map<string, Definition>
@@ -261,7 +257,7 @@ function blocksFrom(nodes: readonly RootContent[], context: ParseContext, projec
 function parseMarkdown(source: string, collectHeadings: boolean): MarkdownDocument {
   const headings: MarkdownHeading[] = []
   try {
-    const tree = processor.parse(source) as Root
+    const tree = parseMarkdownSource(source)
     const context: ParseContext = {
       source, definitions: new Map(), footnotes: new Map(), references: new Map(),
       anchors: new Set(), nextAnchorSuffix: new Map(), headings: collectHeadings ? headings : null, alertsAllowed: true, outline: true
