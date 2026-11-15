@@ -430,6 +430,7 @@ import {
   pendingAgentLaunchSource,
   restorePendingAgentLaunchWorkfaces,
   projectRuntimeEvent,
+  type SessionProjectionState,
   projectContinuityFacts,
   runtimeDiagnosticNotice,
   runtimeEventSession,
@@ -694,10 +695,10 @@ function reportRuntimeDiagnostic(event: RuntimeEvent): void {
     if (reportedRuntimeOperations.has(event)) return
     reportedRuntimeOperations.add(event)
   }
-  useAppStore.getState().reportError(diagnostic.message, { kind: 'indeterminate', summary: diagnostic.summary,
+  publishRuntimeObservation(state => projectErrorObservation(state, diagnostic.message, { kind: 'indeterminate', summary: diagnostic.summary,
     ...(diagnostic.subject ? { subject: diagnostic.subject } : {}),
     ...(diagnostic.runtimeOperation ? { runtimeOperation: diagnostic.runtimeOperation } : {}),
-    ...(diagnostic.cause ? { cause: diagnostic.cause } : {}) })
+    ...(diagnostic.cause ? { cause: diagnostic.cause } : {}) }))
 }
 
 type NotificationProjection = { current: NotificationEvent[]; history: NotificationEvent[]; owners: Map<string, NotificationEvent> }
@@ -783,6 +784,59 @@ function retainActivity(state: Pick<AppState, 'notificationEvents' | 'notificati
   return { notificationEvents: records.filter(record => !leaving.has(record)),
     notificationEventsNotRetained: state.notificationEventsNotRetained + leaving.size,
     ...(released.length ? { noticeReadReceipts: receipts } : {}) }
+}
+
+function projectErrorObservation(current: AppState, error: unknown, context?: ErrorNoticeContext): Partial<AppState> {
+  const message = presentError(error)
+  // Without an original producer or exact subject, identical prose is not proof of one failure.
+  // Mint once at intake and keep that receipt on both the latest error and its history record.
+  if (!context?.event && !context?.subject && !context?.runtimeOperation && !context?.lifecycle && !context?.startupSessionSnapshot && !context?.startupProviderCatalog) {
+    context = { kind: 'indeterminate', ...context, event: { source: 'operation', key: mintObjectId() } }
+  }
+  const observedAt = Date.now()
+  const observedRecord = (id: string, prior?: NotificationEvent): NotificationEvent => {
+    const firstObservedAt = prior?.id === id ? prior.firstObservedAt : observedAt
+    const previousObservations = context?.runtimeOperation && prior ? prior.message === message ? prior.previousObservations
+      : [...(prior.previousObservations ?? []), { message: prior.message, observedAt: prior.lastObservedAt ?? prior.firstObservedAt ?? observedAt }] : undefined
+    return { id, message, context: context ?? null,
+      ...(firstObservedAt === undefined ? {} : { firstObservedAt }), lastObservedAt: observedAt,
+      ...(previousObservations ? { previousObservations } : {}),
+      occurrences: prior?.id === id ? (prior.occurrences ?? 1) + 1 : 1 }
+  }
+  const owner = notificationSourceOwner(context)
+  if (owner) {
+    const id = notificationEventIdentity(message, context)
+    const prior = projectNotifications(current.notificationEvents).owners.get(owner) ??
+      (context?.runtimeOperation ? current.notificationEvents.find(record => record.id === id) : undefined)
+    // Confirmation of this immutable original operation is not revoked by a
+    // delayed observation. Another operation/phase has a different owner.
+    if (context?.runtimeOperation && prior?.context?.runtimeOperation?.resolvedAt !== undefined) return current
+    const record = observedRecord(id, prior)
+    // The failed operation owns this current record. Unrelated errors cannot replace it,
+    // and a later record cannot be settled by an older operation's successful receipt.
+    return { notificationEvents: [...(prior ? current.notificationEvents.filter(item => item !== prior) : current.notificationEvents), record] }
+  }
+  // Acknowledging the cleared latest event suppresses only the same exact notification identity.
+  // Current source-owned failures above are settled solely by their original operation/identity owner.
+  const id = notificationEventIdentity(message, context)
+  if (current.errorDismissed && current.lastError !== null &&
+    notificationEventIdentity(current.lastError, current.errorNoticeContext) === id) return current
+  // Startup retains its original producer reference; other failures have an independent record.
+  const retainEvent = !context?.startupSessionSnapshot && !context?.startupProviderCatalog
+  const existing = current.notificationEvents.find(item => item.id === id)
+  // Clearing activity is an explicit reading decision for this exact producer occurrence.
+  // Another channel observing it later must not recreate it after an unrelated latest error.
+  if (context?.event && !existing && current.noticeReadReceipts['global:events']?.[id] === 'read') return current
+  const event = observedRecord(id, existing)
+  const retained = !retainEvent ? { notificationEvents: current.notificationEvents }
+    : existing ? { notificationEvents: current.notificationEvents.map(item => item === existing ? event : item) }
+    // Only a new event takes a place; a repeat updates its original record above.
+    : retainActivity(current, [...current.notificationEvents, event])
+  // Ordinary failures have their own history now; they must not replace an unfinished startup source.
+  const preserveStartupSource = retainEvent &&
+    (current.errorNoticeContext?.startupSessionSnapshot || current.errorNoticeContext?.startupProviderCatalog)
+  return { ...(!preserveStartupSource
+    ? { error: message, lastError: message, errorNoticeContext: context ?? null, errorDismissed: false } : {}), ...retained }
 }
 
 function nativeIdentityNoticeResolved(sessions: readonly SessionSnapshot[], notice: ErrorNoticeContext | null | undefined): boolean {
@@ -1007,7 +1061,7 @@ function originalResumeInputReceipt(session: SessionSnapshot, entry: AgentSteerQ
   return receipt
 }
 
-function projectResumeInputReceipts(state: AppState, sessionId: string): Partial<AppState> {
+function projectResumeInputReceipts(state: Pick<AppState, 'agentSteerQueues' | 'sessions'>, sessionId: string): Partial<AppState> {
   const queue = state.agentSteerQueues[sessionId]
   if (!queue?.some(entry => entry.resumeInputIntent && !entry.resumeInputReceipt)) return {}
   const session = state.sessions.find(session => session.id === sessionId)
@@ -1052,7 +1106,7 @@ function projectInputReceipt(state: AppState, sessionId: string, receipt: AgentI
 /** Projection conflicts are observations, never a new writer or a replacement receipt. */
 function consumeInputReceipt(sessionId: string, receipt: AgentInputSubmissionReceipt): void {
   let failure: unknown
-  useAppStore.setState(state => {
+  publishRuntimeObservation(state => {
     try { return projectInputReceipt(state, sessionId, receipt) }
     catch (error) { failure = error; return state }
   })
@@ -4000,8 +4054,8 @@ function startSessionMembershipResync(
         let membershipGap = readOverflowed
         const timelineGaps = new Set(entry.timelineGaps)
         entry.timelineGaps.clear()
-        useAppStore.setState((state) => {
-          let projected = reduceAgentMembershipSnapshot(state, snapshot)
+        publishRuntimeObservation((state) => {
+          let projected = reduceAgentMembershipSnapshot(runtimeEventProjection(state), snapshot)
           projected = reduceTerminalMembershipSnapshot(projected, snapshot)
           for (const { candidate, sessionId } of startupCandidates) {
             if (projected.sessions.some((session) => session.id === sessionId)) continue
@@ -4051,7 +4105,7 @@ function startSessionMembershipResync(
               resolvedStartupNotice = { error: message, lastError: message, errorNoticeContext: updated }
             }
           }
-          let reconciled = { ...state, ...projected }
+          let reconciled = { ...projected, agentSteerQueues: state.agentSteerQueues }
           for (const session of snapshot.sessions) {
             if (!runtimeSnapshotHostUnavailable(snapshot, session.hostId)) reconciled = reconcileDeliveredSteers(reconciled, session.id)
           }
@@ -4074,7 +4128,8 @@ function startSessionMembershipResync(
               ? facts : { ...facts, [event.hostId]: event.hostTransport }
           }, snapshot.hostTransports ?? {})
           const next = { ...reconciled, hostTransports, localHome: snapshot.localHome ?? state.localHome, sessionNameMetadata: snapshot.sessionNameMetadataWarning ? state.sessionNameMetadata : sessionNameMetadataRecord(snapshot.sessionNameMetadata ?? [], state.sessionNameMetadata), sessionNameMetadataWarning: snapshot.sessionNameMetadataWarning ?? null, sessions: projectRuntimeEndpointSessions(reconciled.sessions, runtimeEndpointWarnings), ...resolvedStartupNotice, runtimeEndpointWarnings, runtimeOwnershipWarnings: snapshot.runtimeOwnershipWarnings ?? [], environmentWarning: snapshot.environmentWarning ?? null, appIconIssue: snapshot.appIconIssue === undefined ? state.appIconIssue : snapshot.appIconIssue }
-          return { ...next, ...resolvedNativeIdentityNotices({ ...state, ...next }) }
+          return { ...next, ...resolvedNativeIdentityNotices({ sessions: next.sessions, notificationEvents: state.notificationEvents,
+            noticeReadReceipts: next.noticeReadReceipts ?? state.noticeReadReceipts }) }
         })
         reconcileRetainedQuestionReplies()
         if (!entry.historyReading && historyAttempts < MAX_STARTUP_OBSERVATION_ATTEMPTS && (entry.startupNotice?.startupSessionSnapshot || restoredHistory)) {
@@ -4631,19 +4686,19 @@ export function restorePersistedUiState(
   }
 }
 
-// The durable-input whitelist lives here once. Runtime semantic changes retain these immutable
-// references, so they can reuse the projection without visiting unrelated workbench / file content.
-function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
+// Both runtime admission and workbench encoding use these source fields. Each field is read
+// by reference here so the admission check can inspect only the fields a reducer publishes.
+function workbenchSaveSources(state: AppState) {
   return {
     sourceFilesInputs: state.sourceFilesInputs,
     legacyMainNoteReferences: state.legacyMainNoteReferences,
     mountedSpaceInputs: state.mountedSpaceInputs,
-    pendingAgentLaunches: retainedPendingAgentLaunches(state.pendingAgentLaunches),
+    pendingAgentLaunches: state.pendingAgentLaunches,
     workbenchSpaceSelection: state.workbenchSpaceSelection,
-    projectGroups: coreSpatialReady ? undefined : state.projectGroups,
-    spaceZoneBindings: coreSpatialReady ? undefined : state.spaceZoneBindings,
+    projectGroups: state.projectGroups,
+    spaceZoneBindings: state.spaceZoneBindings,
     spatialRequests: state.spatialRequests,
-    agentOperations: persistedAgentOperations(state.agentOperations),
+    agentOperations: state.agentOperations,
     goalAgentSelectionDrafts: state.goalAgentSelectionDrafts,
     goalFiniteStartIntents: state.goalFiniteStartIntents,
     sessionRecordDeletionRequests: state.sessionRecordDeletionRequests,
@@ -4690,11 +4745,9 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     noteBlockSelections: state.noteBlockSelections,
     noteCanvasLayouts: state.noteCanvasLayouts,
     dirtyDocuments: state.dirtyDocuments,
-    tabs: coreSpatialReady ? undefined : state.tabs,
-    // Memo dependencies for thin Source/legacy pointers; never another persisted layout.
-    readNamespaceTopology: state.tabs,
-    readNamespaceLayout: state.layouts,
-    layouts: coreSpatialReady ? undefined : state.layouts,
+    // Also supplies thin Source/legacy pointers when Core owns ordinary layout.
+    tabs: state.tabs,
+    layouts: state.layouts,
     unclaimedTerminalSessionIds: state.unclaimedTerminalSessionIds,
     // 拖出来的顺序是用户意图，重开应该还在。它只是偏好：恢复时对不上磁盘的条目会被 orderTopics 丢掉。
     scratchTopicOrder: state.scratchTopicOrder,
@@ -4703,6 +4756,8 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     // Agent 手改名是用户意图，重开要还在。key 是 session id；已消失的 session 留一条死名字无害——
     // 它不投影到任何界面（没有对应 session），随机对象 ID 再次碰撞的概率极低。
     agentNames: state.agentNames,
+    nameAuthorityRevision: state.nameAuthorityRevision,
+    nameLabels: state.nameLabels,
     // Only the original Session mode owner writes this map; read-only defaults remain derived.
     viewModes: state.viewModes,
     noticeReadReceipts: state.noticeReadReceipts,
@@ -4715,8 +4770,10 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     recallNotebookId: state.recallNotebookId, recallNoteId: state.recallNoteId,
     recallZoneSelection: state.recallZoneSelection, recallSidebarCollapsed: state.recallSidebarCollapsed, recallSidebarWidth: state.recallSidebarWidth,
     surveyZoneSelection: state.surveyZoneSelection,
-    surveyProfileView: state.surveyProfileViewReadRecovery ? state.surveyProfileViewReadRecovery.source : state.surveyProfileView,
-    surveyPageReferences: state.surveyPageReadRecovery ? state.surveyPageReadRecovery.source : state.surveyPageReferences,
+    surveyProfileView: state.surveyProfileView,
+    surveyProfileViewReadRecovery: state.surveyProfileViewReadRecovery,
+    surveyPageReferences: state.surveyPageReferences,
+    surveyPageReadRecovery: state.surveyPageReadRecovery,
     surveyPageAddedAt: state.surveyPageAddedAt,
     surveyCompositionRecoveries: state.surveyCompositionRecoveries,
     surveyCollectedZones: state.surveyCollectedZones,
@@ -4731,7 +4788,7 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     focusTimelineRuler: state.focusTimelineRuler,
     selectedDemandId: state.selectedDemandId,
     demandArrangement: state.demandArrangement,
-    ...(Object.keys(state.demandPmoTabIds).length ? { demandPmoTabIds: state.demandPmoTabIds } : {}),
+    demandPmoTabIds: state.demandPmoTabIds,
     projectRailOpen: state.projectRailOpen,
     // 折叠了哪几组是用户意图，重开要还在。key 里带的是父目录路径——与同一份记录里已经逐字
     // 持久化的 file Region path 同一档事实，没有引入新的敏感面。
@@ -4740,8 +4797,8 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     explorerCollapsed: state.explorerCollapsed,
     // pin 住的 Topic/Branch 是用户意图，重开要还在。key 是派生的 scope（Scratch id 或 [hostId,repoPath]），
     // 与已逐字持久化的 file Region path、collapsedProjectGroups 的目录 key 同一档事实，没有新增敏感面。
-    pinnedItems: persistedSurveyPins(state),
-    ...(retainedSpaceIconHandoff === undefined ? {} : { spaceObjectIcons: retainedSpaceIconHandoff }),
+    pinnedItems: state.pinnedItems,
+    surveyPinReadRecovery: state.surveyPinReadRecovery,
     toolkitPresentation: state.toolkitPresentation,
     toolsOpen: state.toolsOpen,
     workspaceTool: state.workspaceTool,
@@ -4754,6 +4811,23 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     editorMinimap: state.editorMinimap,
     explorerShowHidden: state.explorerShowHidden,
     explorerShowIgnored: state.explorerShowIgnored
+  }
+}
+
+function selectPersistedInputs(sources: ReturnType<typeof workbenchSaveSources>, coreSpatialReady: boolean) {
+  const { surveyProfileViewReadRecovery, surveyPageReadRecovery, surveyPinReadRecovery,
+    demandPmoTabIds, ...inputs } = sources
+  return {
+    ...inputs,
+    projectGroups: coreSpatialReady ? undefined : inputs.projectGroups,
+    spaceZoneBindings: coreSpatialReady ? undefined : inputs.spaceZoneBindings,
+    pendingAgentLaunches: retainedPendingAgentLaunches(inputs.pendingAgentLaunches),
+    agentOperations: persistedAgentOperations(inputs.agentOperations),
+    surveyProfileView: surveyProfileViewReadRecovery ? surveyProfileViewReadRecovery.source : inputs.surveyProfileView,
+    surveyPageReferences: surveyPageReadRecovery ? surveyPageReadRecovery.source : inputs.surveyPageReferences,
+    pinnedItems: persistedSurveyPins({ pinnedItems: inputs.pinnedItems, surveyPinReadRecovery }),
+    ...(Object.keys(demandPmoTabIds).length ? { demandPmoTabIds } : {}),
+    ...(retainedSpaceIconHandoff === undefined ? {} : { spaceObjectIcons: retainedSpaceIconHandoff })
   }
 }
 
@@ -4774,33 +4848,33 @@ let previousPersistedProjection: PersistedAppState | null = null
 let previousCoreSpatialReady=false
 function partializeAppState(state: AppState): PersistedAppState {
   const coreSpatialReady = Boolean(coreSpatialPersistence?.ready)
-  const inputs = selectPersistedInputs(state, coreSpatialReady)
+  const inputs = selectPersistedInputs(workbenchSaveSources(state), coreSpatialReady)
   if (previousPersistedInputs && previousPersistedProjection && previousCoreSpatialReady===coreSpatialReady && shallow(previousPersistedInputs, inputs)) {
     return previousPersistedProjection
   }
-  const { tabs, layouts, readNamespaceTopology, readNamespaceLayout, projectGroups, spaceZoneBindings, documents, dirtyDocuments, documentIssues, ...presentation } = inputs
-  const legacyMainNoteReferences = { ...state.legacyMainNoteReferences }
+  const { tabs, layouts, projectGroups, spaceZoneBindings, documents, dirtyDocuments, documentIssues, nameAuthorityRevision, nameLabels, ...presentation } = inputs
+  const legacyMainNoteReferences = { ...presentation.legacyMainNoteReferences }
   const referenceKeys = new Set<string>()
-  let hasSourcePointers = Boolean(Object.keys(state.sourceFilesInputs.readSources ?? {}).length)
+  let hasSourcePointers = Boolean(Object.keys(presentation.sourceFilesInputs.readSources ?? {}).length)
   for (const [key, document] of Object.entries(documents)) {
     if (document.legacyMainNote) legacyMainNoteReferences[key] = document.legacyMainNote
     if (document.readSource) hasSourcePointers = true
     if (dirtyDocuments[key] || hasRecoverableFileBuffer(document, documentIssues[key])) referenceKeys.add(key)
   }
   const readSources: NonNullable<SourceFilesInputs['readSources']> = {}
-  if (hasSourcePointers || Object.keys(legacyMainNoteReferences).length) for (const occurrence of fileViewOccurrences(state.tabs)) {
+  if (hasSourcePointers || Object.keys(legacyMainNoteReferences).length) for (const occurrence of fileViewOccurrences(tabs)) {
     referenceKeys.add(occurrence.key)
-    const previous = state.sourceFilesInputs.readSources?.[occurrence.pointerKey]
+    const previous = presentation.sourceFilesInputs.readSources?.[occurrence.pointerKey]
     const source = documents[occurrence.key]?.readSource ??
       (previous?.workspaceId === occurrence.workspaceId && previous.path === occurrence.path ? previous.source : undefined)
     if (source) readSources[occurrence.pointerKey] = { workspaceId: occurrence.workspaceId, path: occurrence.path, source }
   }
   // Body edits share the existing structural projection; only topology or its owner transition invalidates it.
-  const sameTopology = previousPersistedInputs?.readNamespaceTopology === readNamespaceTopology &&
-    previousPersistedInputs.readNamespaceLayout === readNamespaceLayout && previousCoreSpatialReady === coreSpatialReady
+  const sameTopology = previousPersistedInputs?.tabs === tabs &&
+    previousPersistedInputs.layouts === layouts && previousCoreSpatialReady === coreSpatialReady
   const restoredWorkbench = sameTopology ? previousPersistedProjection?.restoredWorkbench :
-    !coreSpatialReady || Object.values(readNamespaceTopology).some(tab => tab.source) || Object.keys(readNamespaceLayout).some(isOriginalSourceWorkspaceProjection)
-      ? projectPersistedWorkbench({ tabs: readNamespaceTopology, layouts: readNamespaceLayout }) : undefined
+    !coreSpatialReady || Object.values(tabs).some(tab => tab.source) || Object.keys(layouts).some(isOriginalSourceWorkspaceProjection)
+      ? projectPersistedWorkbench({ tabs, layouts }) : undefined
   const projection: PersistedAppState = {
     ...presentation,
     sourceFilesInputs: { ...presentation.sourceFilesInputs, readSources },
@@ -4815,12 +4889,12 @@ function partializeAppState(state: AppState): PersistedAppState {
     ...(!coreSpatialReady ? { projectGroups: projectGroups!, spaceZoneBindings: spaceZoneBindings! } : {}),
     ...(restoredWorkbench ? { restoredWorkbench } : {})
   }
-  if (state.nameAuthorityRevision > 0) {
+  if (nameAuthorityRevision > 0) {
     // A name document revision confirms its exact targets, not an unrelated startup handoff.
     projection.agentNames = Object.fromEntries(Object.entries(projection.agentNames ?? {})
-      .filter(([id]) => !Object.hasOwn(state.nameLabels, nameTargetKey({ kind: 'agent-session', id }))))
+      .filter(([id]) => !Object.hasOwn(nameLabels, nameTargetKey({ kind: 'agent-session', id }))))
     projection.surveyExplorationNames = Object.fromEntries(Object.entries(projection.surveyExplorationNames ?? {})
-      .filter(([id]) => !Object.hasOwn(state.nameLabels, nameTargetKey({ kind: 'zone', id }))))
+      .filter(([id]) => !Object.hasOwn(nameLabels, nameTargetKey({ kind: 'zone', id }))))
     if (!Object.keys(projection.agentNames).length) delete projection.agentNames
     if (!Object.keys(projection.surveyExplorationNames).length) delete projection.surveyExplorationNames
   }
@@ -6344,7 +6418,39 @@ function prepareSourceFileEffect(location: FileMutationLocation): (effect: FileM
   }
 }
 
-export const useAppStore = create<AppState>()(persist<AppState, [], [], PersistedAppState>((set, get) => ({
+function runtimeEventProjection(state: AppState): SessionProjectionState {
+  const { sessions, timelines, pendingAgentLaunches, tabs, layouts, viewModes, displacedAgentSessionIds, noticeReadReceipts } = state
+  return { sessions, timelines, pendingAgentLaunches, tabs, layouts, viewModes, displacedAgentSessionIds, noticeReadReceipts }
+}
+
+type RuntimeUpdate = Partial<AppState> | ((state: AppState) => Partial<AppState>)
+let publishRuntimeObservation: (update: RuntimeUpdate) => void
+
+export const useAppStore = create<AppState>()<[['zustand/persist', PersistedAppState]]>((setState, getState, store) => {
+  publishRuntimeObservation = update => {
+    const before = getState()
+    const patch = typeof update === 'function' ? update(before) : update
+    // Use the same Store publication in both cases. Keeping the raw setter
+    // local leaves synchronous subscribers' normal edits on the existing writer.
+    let changed = false
+    for (const key of patch === before ? [] : Object.keys(patch) as (keyof AppState)[]) {
+      if (Object.is(before[key], patch[key])) continue
+      changed = true
+      if (!workbenchSaveSourceKeys.has(key)) continue
+      if (key === 'pendingAgentLaunches' && patch.pendingAgentLaunches &&
+        retainedPendingAgentLaunches(before.pendingAgentLaunches) === retainedPendingAgentLaunches(patch.pendingAgentLaunches)) continue
+      store.setState(patch)
+      return
+    }
+    if (changed) setState(patch)
+    // A synchronous subscriber may acknowledge ownership while publishing the
+    // observation. The new owner changes the encoding of the same Store inputs.
+    if (previousPersistedInputs && (previousCoreSpatialReady !== Boolean(coreSpatialPersistence?.ready) ||
+      !Object.is(previousPersistedInputs.spaceObjectIcons, retainedSpaceIconHandoff))) {
+      store.setState(getState())
+    }
+  }
+  return persist<AppState, [], [], PersistedAppState>((set, get) => ({
   restoredWorkbench: null,
   mountedSpaceInputs: {},
   mountedSpaceObservations: {},
@@ -7049,7 +7155,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         // Connection observations describe this wait; they do not need the Session
         // membership cut. Keep that cut buffered while the original loading surface
         // can explain the current Host's progress, including exact-boundary recovery.
-        if (event.endpointWarning !== undefined || event.endpointObservation) set(state => {
+        if (event.endpointWarning !== undefined || event.endpointObservation) publishRuntimeObservation(state => {
           const warnings = runtimeEndpointWarningsAfterObservation(state.runtimeEndpointWarnings, event.hostId, event.endpointWarning)
           const observation = event.endpointObservation
           return { runtimeEndpointWarnings: observation ? runtimeEndpointWarningsAfterObservation(
@@ -7395,7 +7501,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       for (const pending of drainSessionMembershipEvents(pendingSessionEvents)) get().applyEvent(pending.event)
       for (const sessionId of pendingSessionEvents.timelineGaps) void get().resyncTimeline(sessionId)
       for (const { hostId, warning, observationStep } of pendingSessionEvents.endpointWarnings.values()) {
-        set(state => {
+        publishRuntimeObservation(state => {
           const warnings = runtimeEndpointWarningsAfterObservation(state.runtimeEndpointWarnings, hostId, warning, observationStep)
           return { runtimeEndpointWarnings: warnings, sessions: projectRuntimeEndpointSessions(state.sessions, warnings) }
         })
@@ -14618,9 +14724,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             const current = get().sessions.find(candidate => candidate.kind === 'agent' && candidate.id === sessionId)
             if (!current || current.control.hostId !== session.control.hostId) continue
             const pendingBefore = get().agentSteerQueues[sessionId]
-            set((state) => {
-              const next = { ...state, ...reduceTimelineSnapshot(state, snapshot, sessionId, session.control) }
-              return reconcile ? reconcileDeliveredSteers(next, sessionId) : next
+            publishRuntimeObservation(state => {
+              const projected = reduceTimelineSnapshot(runtimeEventProjection(state), snapshot, sessionId, session.control)
+              return reconcile ? reconcileDeliveredSteers({ ...projected, agentSteerQueues: state.agentSteerQueues }, sessionId) : projected
             })
             if (reconcile && get().agentSteerQueues[sessionId] !== pendingBefore && !agentSteerDrains.has(sessionId)) {
               void get().flushAgentSteerQueue(sessionId)
@@ -14644,9 +14750,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const observationSource = rendererSessionEventSource(event.hostId, event.event)
     try {
     const core = event.event
-    if (event.hostTransport !== undefined) set(state => ({ hostTransports: { ...state.hostTransports, [event.hostId]: event.hostTransport! } }))
+    if (event.hostTransport !== undefined) publishRuntimeObservation(state => ({ hostTransports: { ...state.hostTransports, [event.hostId]: event.hostTransport! } }))
     if (core.type === 'agent-lifecycle-observed') {
-      set(state => observeRuntimeOperation(state, event))
+      publishRuntimeObservation(state => observeRuntimeOperation(state, event))
       return
     }
     if (core.type === 'agent-input') {
@@ -14657,13 +14763,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return
     }
     const endpointObservation = event.endpointObservation
-    if (endpointObservation) set(state => ({ runtimeEndpointWarnings: runtimeEndpointWarningsAfterObservation(
+    if (endpointObservation) publishRuntimeObservation(state => ({ runtimeEndpointWarnings: runtimeEndpointWarningsAfterObservation(
       state.runtimeEndpointWarnings, event.hostId, endpointObservation.warning, endpointObservation.step, endpointObservation.resolvedSteps) }))
     if (core.type === 'control-endpoint-state') {
       if (sessionMembershipResync) enqueueSessionMembershipEvent(sessionMembershipResync, event)
       return
     }
-    if (event.endpointWarning !== undefined && !(core.type === 'connection-state' && core.state === 'restored' && event.endpointWarning === null)) set((state) => {
+    if (event.endpointWarning !== undefined && !(core.type === 'connection-state' && core.state === 'restored' && event.endpointWarning === null)) publishRuntimeObservation((state) => {
       const runtimeEndpointWarnings = runtimeEndpointWarningsAfterObservation(state.runtimeEndpointWarnings, event.hostId, event.endpointWarning)
       return { runtimeEndpointWarnings, sessions: projectRuntimeEndpointSessions(state.sessions, runtimeEndpointWarnings) }
     })
@@ -14699,7 +14805,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (!runServiceProjection.apply(event) && core.agentSessionId) {
         if (get().pendingAgentLaunches[core.agentSessionId]) {
           const agentSessionId = core.agentSessionId
-          set(state => bufferPendingAgentEvent(state, event, agentSessionId))
+          publishRuntimeObservation(state => bufferPendingAgentEvent(runtimeEventProjection(state), event, agentSessionId))
         } else if (!sessionMembershipResync && !agentSessionPresentationIndex(get().sessions).has(core.agentSessionId)) {
           startSessionMembershipResync(event)
           return
@@ -14711,7 +14817,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (sessionMembershipResync) {
       const pendingLaunchAgentSessionId = pendingAgentLaunchEventId(get(), event)
       if (pendingLaunchAgentSessionId) {
-        set((state) => projectRuntimeEvent(state, event).state)
+        publishRuntimeObservation((state) => projectRuntimeEvent(runtimeEventProjection(state), event).state)
         if (core.type === 'agent-session' && get().questionReplies?.[core.session.agentSessionId])
           reconcileRetainedQuestionReplies([pendingLaunchAgentSessionId])
         enqueueSessionMembershipEvent(sessionMembershipResync, event, pendingLaunchAgentSessionId)
@@ -14728,19 +14834,20 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const pendingBefore = core.type === 'agent-timeline' && eventSourceId ? get().agentSteerQueues[eventSourceId] : undefined
     let timelineGapSessionId: string | undefined
     let sessionMembershipGap = false
-    set((state) => {
-      const reduced = projectRuntimeEvent(state, event)
+    publishRuntimeObservation((state) => {
+      const reduced = projectRuntimeEvent(runtimeEventProjection(state), event)
       if (core.type === 'run-removed') recordClosedWorkbenchEntities(state.tabs, reduced.state.tabs)
       timelineGapSessionId = reduced.timelineGapSessionId
       sessionMembershipGap = reduced.sessionMembershipGap === true
       const projected = reduced.state.sessions === state.sessions ? reduced.state
         : { ...reduced.state, sessions: projectRuntimeEndpointSessions(reduced.state.sessions, state.runtimeEndpointWarnings) }
       const next = core.type === 'agent-timeline' && eventSourceId
-        ? reconcileDeliveredSteers({ ...state, ...projected }, eventSourceId)
+        ? reconcileDeliveredSteers({ ...projected, agentSteerQueues: state.agentSteerQueues }, eventSourceId)
         : projected
       return core.type === 'agent-session' ? { ...next,
-        ...projectResumeInputReceipts({ ...state, ...next }, core.session.agentSessionId),
-        ...resolvedNativeIdentityNotices({ ...state, ...next }, {
+        ...projectResumeInputReceipts({ agentSteerQueues: state.agentSteerQueues, sessions: next.sessions }, core.session.agentSessionId),
+        ...resolvedNativeIdentityNotices({ sessions: next.sessions, notificationEvents: state.notificationEvents,
+          noticeReadReceipts: next.noticeReadReceipts ?? state.noticeReadReceipts }, {
           kind: 'agent', hostId: event.hostId, agentSessionId: core.session.agentSessionId, run: core.session.run
         }) } : next
     })
@@ -14769,7 +14876,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     } finally { rendererPerformance.sessionEvent(event.event.type, observationStarted, observationSource) }
   },
   decayStaleAgentStatuses(now) {
-    set((state) => {
+    publishRuntimeObservation((state) => {
       const decayed = computeDecayedAgentStatuses(state.sessions, now)
       // computeDecayedAgentStatuses 无变化时返回原引用——原样返回，Zustand 不做无谓写入。
       return decayed === state.sessions ? state : { sessions: decayed }
@@ -14816,57 +14923,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (placementRoutesChanged && get().sessions.some(session => session.kind === 'agent' && session.toolExecution)) startSessionMembershipResync(undefined, { reportFailure: false })
   },
   reportError(error, context) {
-    const message = presentError(error)
-    // Without an original producer or exact subject, identical prose is not proof of one failure.
-    // Mint once at intake and keep that receipt on both the latest error and its history record.
-    if (!context?.event && !context?.subject && !context?.runtimeOperation && !context?.lifecycle && !context?.startupSessionSnapshot && !context?.startupProviderCatalog) {
-      context = { kind: 'indeterminate', ...context, event: { source: 'operation', key: mintObjectId() } }
-    }
-    const observedAt = Date.now()
-    const observedRecord = (id: string, prior?: NotificationEvent): NotificationEvent => {
-      const firstObservedAt = prior?.id === id ? prior.firstObservedAt : observedAt
-      const previousObservations = context?.runtimeOperation && prior ? prior.message === message ? prior.previousObservations
-        : [...(prior.previousObservations ?? []), { message: prior.message, observedAt: prior.lastObservedAt ?? prior.firstObservedAt ?? observedAt }] : undefined
-      return { id, message, context: context ?? null,
-        ...(firstObservedAt === undefined ? {} : { firstObservedAt }), lastObservedAt: observedAt,
-        ...(previousObservations ? { previousObservations } : {}),
-        occurrences: prior?.id === id ? (prior.occurrences ?? 1) + 1 : 1 }
-    }
-    const owner = notificationSourceOwner(context)
-    if (owner) {
-      const current = get(), id = notificationEventIdentity(message, context)
-      const prior = projectNotifications(current.notificationEvents).owners.get(owner) ??
-        (context?.runtimeOperation ? current.notificationEvents.find(record => record.id === id) : undefined)
-      // Confirmation of this immutable original operation is not revoked by a
-      // delayed observation. Another operation/phase has a different owner.
-      if (context?.runtimeOperation && prior?.context?.runtimeOperation?.resolvedAt !== undefined) return
-      const record = observedRecord(id, prior)
-      // The failed operation owns this current record. Unrelated errors cannot replace it,
-      // and a later record cannot be settled by an older operation's successful receipt.
-      set({ notificationEvents: [...(prior ? current.notificationEvents.filter(item => item !== prior) : current.notificationEvents), record] })
-      return
-    }
-    // Acknowledging the cleared latest event suppresses only the same exact notification identity.
-    // Current source-owned failures above are settled solely by their original operation/identity owner.
-    const current = get(), id = notificationEventIdentity(message, context)
-    if (current.errorDismissed && current.lastError !== null &&
-      notificationEventIdentity(current.lastError, current.errorNoticeContext) === id) return
-    // Startup retains its original producer reference; other failures have an independent record.
-    const retainEvent = !context?.startupSessionSnapshot && !context?.startupProviderCatalog
-    const existing = current.notificationEvents.find(item => item.id === id)
-    // Clearing activity is an explicit reading decision for this exact producer occurrence.
-    // Another channel observing it later must not recreate it after an unrelated latest error.
-    if (context?.event && !existing && current.noticeReadReceipts['global:events']?.[id] === 'read') return
-    const event = observedRecord(id, existing)
-    const retained = !retainEvent ? { notificationEvents: current.notificationEvents }
-      : existing ? { notificationEvents: current.notificationEvents.map(item => item === existing ? event : item) }
-      // Only a new event takes a place; a repeat updates its original record above.
-      : retainActivity(current, [...current.notificationEvents, event])
-    // Ordinary failures have their own history now; they must not replace an unfinished startup source.
-    const preserveStartupSource = retainEvent &&
-      (current.errorNoticeContext?.startupSessionSnapshot || current.errorNoticeContext?.startupProviderCatalog)
-    set({ ...(!preserveStartupSource
-      ? { error: message, lastError: message, errorNoticeContext: context ?? null, errorDismissed: false } : {}), ...retained })
+    const current = get()
+    const next = projectErrorObservation(current, error, context)
+    if (next !== current) set(next)
   },
   dismissError() {
     if (!get().error) return
@@ -14972,7 +15031,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       agentComposerHistoryNavigation: {}, ...restoreSurveyPinPreferences(restoredPinnedItems(state.pinnedItems), state.pinnedItems), surveyProfileView: readSurveyProfileView(state.surveyProfileView).view, surveyProfileViewReadRecovery: readSurveyProfileView(state.surveyProfileView).recovery, surveyPageReferences: surveyPages.references, surveyPageAddedAt: surveyPageTimes(state.surveyPageAddedAt, surveyPages.references), surveyPageReadRecovery: surveyPages.recovery, surveyOrganization: restoreSurveyOrganization(state.surveyOrganization), surveyZoneSelection: restoredSurveySelection(state.surveyZoneSelection), recallZoneSelection: restoredSurveyZoneSelection(state.recallZoneSelection) }
   },
   partialize: partializeAppState
-}))
+})(setState, getState, store)
+})
+
+const workbenchSaveSourceKeys = new Set<keyof AppState>(
+  Object.keys(workbenchSaveSources(useAppStore.getInitialState())) as (keyof AppState)[]
+)
 
 if (!__AGENTMUX_WEB_PREVIEW__) desktopUserDocument.subscribeInputQueueEvictions(rows => {
   const byOwner = new Map<string, Set<unknown>>()
