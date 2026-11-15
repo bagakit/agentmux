@@ -1,6 +1,6 @@
 import type { AgentMuxSpaceCatalog } from '@agentmux/core'
 import type { ScratchTopicSnapshot } from '@agentmux/host/mote-model'
-import { spatialCatalog, type SpatialWorkbench } from './space-agent-control'
+import { spatialCatalog } from './space-agent-control'
 import { spatialCategorySeeds } from '../../../shared/space-addresses'
 import type { WorkbenchTab } from './workbench-tabs'
 
@@ -44,7 +44,7 @@ export function workbenchNavigationTabs(tabs: Tabs): Tabs {
   return value
 }
 
-type Facts = Omit<SpatialWorkbench, 'sessions' | 'tabs'> & { tabs: Tabs }
+type Facts = Omit<Parameters<typeof spatialCatalog>[0], 'sessions' | 'tabs'> & { tabs: Tabs }
 
 function sameNavigationLayouts(left: Facts['layouts'], right: Facts['layouts']): boolean {
   if (left === right) return true

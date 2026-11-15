@@ -87,8 +87,13 @@ export class DesktopFocusFailure extends Error {
 export type NavigationState = SpatialWorkbench & DesktopSelectionState & {
   scratchTopicSnapshots: Readonly<Record<string, ScratchTopicsSnapshot>>
 }
+type WorkbenchCatalogFacts = Parameters<typeof workbenchNavigationCatalog>[0] & Pick<NavigationState, 'scratchTopicSnapshots'>
+type DesktopPlacementFacts = Pick<DesktopSelectionState, 'tabs' | 'layouts'> &
+  Partial<Pick<SpatialWorkbench, 'spaceZoneBindings' | 'config' | 'topicCategories'>>
+export type WorkbenchObjectLayoutFacts = WorkbenchCatalogFacts & Pick<DesktopSelectionState, 'workbenchSpaceSelection'>
+
 /** Structural navigation facts do not subscribe to unrelated Runtime output or Session timelines. */
-export function workbenchSelectionCatalog(state: NavigationState): AgentMuxSpaceCatalog {
+export function workbenchSelectionCatalog(state: WorkbenchCatalogFacts): AgentMuxSpaceCatalog {
   const scratch = state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)
   const topics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, scratch)
   return workbenchNavigationCatalog(state, topics)
@@ -146,7 +151,7 @@ export function sessionWorkbenchLocationSummary(
 }
 
 /** A local focus keeps its explicit parent; an explicit jump can resolve another object. */
-export function resolveWorkbenchOccurrenceSelection(state: DesktopSelectionState, catalog: AgentMuxSpaceCatalog,
+export function resolveWorkbenchOccurrenceSelection(state: DesktopPlacementFacts & Pick<DesktopSelectionState, 'workbenchSpaceSelection'>, catalog: AgentMuxSpaceCatalog,
   reference: { workspaceId: string; groupId: string; tabId: string; regionId?: string }, intent: 'local' | 'navigation' = 'local'): AgentMuxDesktopSpaceSelection {
   const choice = state.workbenchSpaceSelection
   const tab = catalog.tabs.find(tab => tab.tabId === reference.tabId)
@@ -182,7 +187,7 @@ export function resolveWorkbenchOccurrenceSelection(state: DesktopSelectionState
 }
 
 /** Cold/restored positions derive from their exact occurrence, never a global Topic list. */
-export function workbenchObjectLayout(state: NavigationState, workspaceId: string, layout = state.layouts[workspaceId]) {
+export function workbenchObjectLayout(state: WorkbenchObjectLayoutFacts, workspaceId: string, layout = state.layouts[workspaceId]) {
   const catalog = workbenchSelectionCatalog(state)
   let choice = state.workbenchSpaceSelection?.workspaceId === workspaceId ? state.workbenchSpaceSelection : null
   if (choice?.spaceId === null && choice.zoneId === null && choice.tabId && choice.groupId && choice.regionId &&
@@ -305,7 +310,7 @@ export function resolveDesktopMoteSelection(state: Pick<SpatialWorkbench, 'confi
 }
 
 /** Resolve the durable placement, never execution cwd or the first unrelated Tab/Agent. */
-export function resolveDesktopSpaceSelection(state: DesktopSelectionState & Partial<Pick<SpatialWorkbench, 'spaceZoneBindings' | 'config' | 'topicCategories'>>, catalog: AgentMuxSpaceCatalog,
+export function resolveDesktopSpaceSelection(state: DesktopPlacementFacts, catalog: AgentMuxSpaceCatalog,
   target: AgentMuxSpaceSelector): AgentMuxDesktopSpaceSelection {
   const category = target.spaceId && !target.zoneId && !target.tabId && !target.regionId && !target.groupId
     ? state.topicCategories?.find(category => category.spaceId === target.spaceId) : undefined

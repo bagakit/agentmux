@@ -36,6 +36,8 @@ export type SpatialWorkbench = {
   spaceZoneBindings: SpaceZoneBindings
   spatialRequests: Record<string, SpatialRequestBinding>
 }
+type SpatialReadFacts = Pick<SpatialWorkbench, 'config' | 'sessions' | 'tabs' | 'layouts' | 'spaceZoneBindings' |
+  'topicCategories' | 'projectGroups' | 'originalSpatialGraph'>
 type SpatialPatch = Partial<Pick<SpatialWorkbench, 'config' | 'tabs' | 'layouts' | 'spaceZoneBindings' | 'spatialRequests'>>
 export type SpatialControlPorts = {
   get(): SpatialWorkbench
@@ -80,7 +82,7 @@ const unsaved = (layoutApplied = false): AgentMuxSpatialSave => ({ layoutApplied
   storageFlushRequested: false, diskDurability: 'unconfirmed', reason: 'No save has been observed by this read.' })
 
 /** Metadata only; every durable entity is indexed once, independent of display. */
-export function spatialCatalog(state: SpatialWorkbench, topics: readonly ScratchTopicSnapshot[], categorySeeds?: ReadonlyMap<string, string | null>): AgentMuxSpaceCatalog {
+export function spatialCatalog(state: SpatialReadFacts, topics: readonly ScratchTopicSnapshot[], categorySeeds?: ReadonlyMap<string, string | null>): AgentMuxSpaceCatalog {
   const sources = spatialSources(state.config, topics, state.spaceZoneBindings,
     // Source Tabs are display projections. Their Workspace cannot contribute an
     // execution resource for the original Zone (including a same-Runtime view).
@@ -171,7 +173,7 @@ function checkedParent(selector: LooseSelector, actual: Partial<Record<keyof Age
   if (!match(selector, actual)) failure('SPACE_PARENT_MISMATCH', 'The supplied identity does not match this exact reference.')
 }
 
-export function zoneContext(state: SpatialWorkbench, topics: readonly ScratchTopicSnapshot[], zone: AgentMuxZoneFact): string {
+export function zoneContext(state: SpatialReadFacts, topics: readonly ScratchTopicSnapshot[], zone: AgentMuxZoneFact): string {
   const saved = state.spaceZoneBindings[zone.zoneId]
   if (saved) {
     if (saved.workspaceId !== zone.workspaceId) failure('SPACE_CONTEXT_UNKNOWN', 'The saved Zone context contradicts its resource Workspace; its original facts are retained.')

@@ -1,18 +1,26 @@
 import { useMemo, useRef } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../store'
-import { workbenchObjectLayout } from '../lib/desktop-focus-navigation'
+import { workbenchObjectLayout, type WorkbenchObjectLayoutFacts } from '../lib/desktop-focus-navigation'
 import type { WorkspaceLayout } from '@agentmux/layout'
 import { workbenchNavigationTabs } from '../lib/workbench-navigation-catalog'
 
+const EMPTY_OBJECT_LAYOUT: ReturnType<typeof workbenchObjectLayout> = { layout: null, choice: null, confirmed: false, issues: [] }
+
 /** Retain only the last confirmed presentation of this same object during discovery gaps. */
 export function useWorkbenchObjectLayout(workspaceId: string, residentLayout?: WorkspaceLayout, enabled = true) {
-  const facts = useAppStore(useShallow(state => ({ config: state.config, tabs: workbenchNavigationTabs(state.tabs), layouts: state.layouts,
-    spaceZoneBindings: state.spaceZoneBindings, spatialRequests: state.spatialRequests, topicCategories: state.topicCategories, projectGroups: state.projectGroups,
-    scratchTopicSnapshots: state.scratchTopicSnapshots, workbenchSpaceSelection: state.workbenchSpaceSelection,
-    activeWorkspaceId: state.activeWorkspaceId, mainSurface: state.mainSurface, selectedDemandId: state.selectedDemandId })))
-  const current = useMemo(() => enabled ? workbenchObjectLayout({ ...facts, sessions: [] }, workspaceId, residentLayout)
-    : { layout: null, choice: null, confirmed: false, issues: [] }, [facts, workspaceId, residentLayout, enabled])
+  const facts = useAppStore(useShallow((state): WorkbenchObjectLayoutFacts | null => {
+    if (!enabled) return null
+    const choice = state.workbenchSpaceSelection
+    return {
+      config: state.config, tabs: workbenchNavigationTabs(state.tabs), layouts: state.layouts,
+      spaceZoneBindings: state.spaceZoneBindings, topicCategories: state.topicCategories, projectGroups: state.projectGroups,
+      scratchTopicSnapshots: state.scratchTopicSnapshots,
+      workbenchSpaceSelection: choice?.workspaceId === workspaceId ? choice : null
+    }
+  }))
+  const current = useMemo(() => facts ? workbenchObjectLayout(facts, workspaceId, residentLayout)
+    : EMPTY_OBJECT_LAYOUT, [facts, workspaceId, residentLayout])
   const choice = current.choice
   const identity = JSON.stringify([workspaceId, choice?.spaceId, choice?.zoneId,
     ...(choice?.spaceId === null && choice.zoneId === null

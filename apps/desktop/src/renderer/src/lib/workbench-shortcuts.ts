@@ -187,7 +187,7 @@ export function adjacentRegionId(
 }
 
 /** 落点解析 + 转发所需的最小 store 切片。App 直接把 store 快照传进来（它是这个类型的超集）。 */
-export type WorkbenchShortcutStore = Partial<Pick<NavigationState, 'config' | 'spaceZoneBindings' | 'spatialRequests' | 'scratchTopicSnapshots' | 'topicCategories' | 'workbenchSpaceSelection'>> & {
+export type WorkbenchShortcutStore = Partial<Pick<NavigationState, 'config' | 'spaceZoneBindings' | 'scratchTopicSnapshots' | 'topicCategories' | 'workbenchSpaceSelection'>> & {
   retainedSpatialFocus?: { regionId: string; tabId: string; workspaceId: string; topicId?: string } | null
   mainSurface: string
   activeWorkspaceId: string | null
@@ -226,9 +226,8 @@ export type WorkbenchShortcutStore = Partial<Pick<NavigationState, 'config' | 's
 
 function visibleShortcutLayout(store: WorkbenchShortcutStore, workspaceId: string, storedLayout: WorkspaceLayout) {
   if (store.config !== undefined) return workbenchObjectLayout({ ...store, config: store.config,
-    mainSurface: 'workbench', selectedDemandId: null, workbenchSpaceSelection: store.workbenchSpaceSelection ?? null,
-    sessions: [], tabs: { ...store.tabs }, layouts: { ...store.layouts }, spaceZoneBindings: store.spaceZoneBindings ?? {},
-    spatialRequests: store.spatialRequests ?? {}, scratchTopicSnapshots: store.scratchTopicSnapshots ?? {} }, workspaceId).layout
+    workbenchSpaceSelection: store.workbenchSpaceSelection ?? null, tabs: { ...store.tabs }, layouts: { ...store.layouts },
+    spaceZoneBindings: store.spaceZoneBindings ?? {}, scratchTopicSnapshots: store.scratchTopicSnapshots ?? {} }, workspaceId).layout
   return layoutForActiveTopic(storedLayout, store.tabs, activeTopicIdFromLayout(storedLayout, store.tabs), false)
 }
 
