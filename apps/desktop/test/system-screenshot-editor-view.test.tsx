@@ -7,7 +7,7 @@ import type { BrowserPng } from '../src/shared/contracts'
 import type { SystemScreenshotEditorApi, SystemScreenshotEditorInput } from '../src/shared/system-screenshot-editor'
 
 // The window host and the shared editor are production code; only raster drawing is replaced.
-vi.mock('../src/renderer/src/components/image-annotation/canvas-render', () => ({ renderCommittedLayer() {}, renderScreenshotScene() {} }))
+vi.mock('@agentmux/client-ui/image-annotation', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/client-ui/image-annotation')>(), renderCommittedLayer() {}, renderScreenshotScene() {} }))
 const image: BrowserPng = { mimeType: 'image/png', width: 1, height: 1, byteLength: 68,
   dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=' }
 let root: ReturnType<typeof createClientUiRoot>, node: HTMLDivElement

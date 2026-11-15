@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { commitShape, createScreenshotDocument, replaceShape, screenshotOutputShapes, undoShape, type ScreenshotShape } from '../src/renderer/src/components/image-annotation/drawing-model'
-import { hitSelectionHandle, resizeShapeFromHandle, selectionHandles } from '../src/renderer/src/components/image-annotation/selection-geometry'
+import { commitShape, createScreenshotDocument, replaceShape, screenshotOutputShapes, undoShape, type ScreenshotShape } from '@agentmux/client-ui/image-annotation'
+import { hitSelectionHandle, resizeShapeFromHandle, selectionHandles } from '@agentmux/client-ui/image-annotation'
 
 const rectangle: ScreenshotShape = { id: 'original-rectangle', kind: 'rect', color: '#ef4444', width: 4, from: { x: 80, y: 60 }, to: { x: 20, y: 10 } }
 

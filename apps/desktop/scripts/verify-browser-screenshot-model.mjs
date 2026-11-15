@@ -9,16 +9,17 @@ import { spawn } from 'node:child_process'
 const require = createRequire(resolve('apps/desktop/package.json'))
 const { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
 const sourcePaths = {
-  'drawing-model.ts': 'apps/desktop/src/renderer/src/components/image-annotation/drawing-model.ts',
-  'geometry.ts': 'apps/desktop/src/renderer/src/components/image-annotation/geometry.ts',
-  'view.ts': 'apps/desktop/src/renderer/src/components/image-annotation/view.ts',
-  'selection-geometry.ts': 'apps/desktop/src/renderer/src/components/image-annotation/selection-geometry.ts',
-  'canvas-render.ts': 'apps/desktop/src/renderer/src/components/image-annotation/canvas-render.ts',
-  'drawing-renderer.ts': 'apps/desktop/src/renderer/src/components/image-annotation/drawing-renderer.ts',
+  'drawing-model.ts': 'packages/client-ui/src/image-annotation/drawing-model.ts',
+  'geometry.ts': 'packages/client-ui/src/image-annotation/geometry.ts',
+  'view.ts': 'packages/client-ui/src/image-annotation/view.ts',
+  'selection-geometry.ts': 'packages/client-ui/src/image-annotation/selection-geometry.ts',
+  'canvas-render.ts': 'packages/client-ui/src/image-annotation/canvas-render.ts',
+  'drawing-renderer.ts': 'packages/client-ui/src/image-annotation/drawing-renderer.ts',
   'compose.ts': 'apps/desktop/src/renderer/src/components/image-annotation/compose.ts',
-  'magic-wand.ts': 'apps/desktop/src/renderer/src/components/image-annotation/magic-wand.ts'
+  'magic-wand.ts': 'packages/client-ui/src/image-annotation/magic-wand.ts'
 }
-const output = resolve('.local/browser-screenshot-workface/model-proof'), work = await mkdtemp(join(tmpdir(), 'amx-screenshot-model-'))
+const output = resolve(process.env.AGENTMUX_SCREENSHOT_PROOF_OUT ?? '.local/browser-screenshot-workface/model-proof')
+const work = await mkdtemp(join(tmpdir(), 'amx-screenshot-model-'))
 await mkdir(output, { recursive: true })
 await rm(join(output, 'receipt.json'), { force: true })
 const sources = Object.fromEntries(await Promise.all(Object.entries(sourcePaths).map(async ([file, path]) => [file, await readFile(path, 'utf8')])))

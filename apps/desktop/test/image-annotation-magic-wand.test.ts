@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { magicWandOutline, magicWandRegion, outlineContains, unionMagicWandRegions } from '../src/renderer/src/components/image-annotation/magic-wand'
+import { magicWandOutline, magicWandRegion, outlineContains, unionMagicWandRegions } from '@agentmux/client-ui/image-annotation'
 
 /** An RGBA image from rows of single-letter colors. */
 function pixels(rows: string[], palette: Record<string, [number, number, number]>) {

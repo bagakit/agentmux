@@ -7,11 +7,11 @@ import { ImageAnnotationEditor } from '../src/renderer/src/components/image-anno
 import { CaptureSurfaceView } from '../src/renderer/screenshot-editor/CaptureSurfaceView'
 import type { CaptureSurfaceApi, CaptureSurfaceInput, CaptureSurfaceRect } from '../src/shared/capture-surface'
 import { captureLoupePlacement, captureSizeChipPlacement, captureToolbarPlacement } from '../src/renderer/src/components/image-annotation/capture-geometry'
-import type { ImageViewport } from '../src/renderer/src/components/image-annotation/view'
+import type { ImageViewport } from '@agentmux/client-ui/image-annotation'
 
 const raster = vi.hoisted(() => ({ committed: vi.fn(), scene: vi.fn() }))
 // Component state, view, gestures and callbacks are production code; only raster drawing is replaced.
-vi.mock('../src/renderer/src/components/image-annotation/canvas-render', () => ({ renderCommittedLayer: raster.committed, renderScreenshotScene: raster.scene }))
+vi.mock('@agentmux/client-ui/image-annotation', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/client-ui/image-annotation')>(), renderCommittedLayer: raster.committed, renderScreenshotScene: raster.scene }))
 
 // One 800 × 500 point display frozen at 2x: 1600 × 1000 image pixels.
 const image = { dataUrl: 'data:image/png;base64,AA==', width: 1600, height: 1000 }

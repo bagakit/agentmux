@@ -3,13 +3,13 @@ import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { ImageAnnotationEditor } from '../src/renderer/src/components/image-annotation/ImageAnnotationEditor'
-import { shapeBounds, type NoteShape, type RectShape, type ScreenshotShape } from '../src/renderer/src/components/image-annotation/drawing-model'
+import { shapeBounds, type NoteShape, type RectShape, type ScreenshotShape } from '@agentmux/client-ui/image-annotation'
 import { createEditableAnnotationDocument, encodeEditableAnnotationDocument, parseEditableAnnotationDocument } from '../src/renderer/src/components/image-annotation/document'
 import { ANNOTATION_DOCUMENT_LIMITS } from '../src/renderer/src/components/browser-screenshot/document-files'
 
 const raster = vi.hoisted(() => ({ committed: vi.fn(), scene: vi.fn() }))
 // Component state, gestures, commands and outputs are production code; only raster drawing is replaced.
-vi.mock('../src/renderer/src/components/image-annotation/canvas-render', () => ({ renderCommittedLayer: raster.committed, renderScreenshotScene: raster.scene }))
+vi.mock('@agentmux/client-ui/image-annotation', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/client-ui/image-annotation')>(), renderCommittedLayer: raster.committed, renderScreenshotScene: raster.scene }))
 let root: ReturnType<typeof createClientUiRoot>, node: HTMLDivElement
 let frames: Map<number, FrameRequestCallback>, nextFrame: number
 // A 400 × 300 image fitted into a 400 × 300 canvas: one image pixel per screen pixel.

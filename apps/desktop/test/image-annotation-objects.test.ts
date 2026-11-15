@@ -5,8 +5,8 @@ import {
   alignShapes, createScreenshotDocument, distributeShapes, duplicateShapes, groupBounds, hitTestShape, moveShapes, pasteShapes,
   reorderShapes, screenshotOutputShapes, setShapes, shapeBounds, setShapesLocked, undoShape,
   type NoteShape, type RectShape, type ScreenshotShape
-} from '../src/renderer/src/components/image-annotation/drawing-model'
-import { marqueeSelection } from '../src/renderer/src/components/image-annotation/selection-geometry'
+} from '@agentmux/client-ui/image-annotation'
+import { marqueeSelection } from '@agentmux/client-ui/image-annotation'
 
 const rect = (id: string, x: number, y: number, width: number, height: number, extra: Partial<RectShape> = {}): RectShape =>
   ({ id, kind: 'rect', color: '#ef4444', width: 2, from: { x, y }, to: { x: x + width, y: y + height }, ...extra })

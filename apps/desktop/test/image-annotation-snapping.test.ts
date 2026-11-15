@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { pointFeatures, rectFeatures, snap, snapLines, SNAP_DISTANCE } from '../src/renderer/src/components/image-annotation/snapping'
+import { pointFeatures, rectFeatures, snap, snapLines, SNAP_DISTANCE } from '@agentmux/client-ui/image-annotation'
 
 // A 2x display: 6 screen points are 12 image pixels.
 const THRESHOLD = SNAP_DISTANCE * 2

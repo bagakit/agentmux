@@ -29,14 +29,15 @@ const work = await mkdtemp(_reshape_fixturePath("tmp/agentmux-screenshot-workfac
 await mkdir(out, { recursive: true })
 await rm(join(out, 'receipt.json'), { force: true })
 const pane = resolve('apps/desktop/src/renderer/src/components/BrowserPane.tsx')
+const captureTools = resolve('apps/desktop/src/renderer/src/components/BrowserCaptureTools.tsx')
 const editor = resolve('apps/desktop/src/renderer/src/components/image-annotation/ImageAnnotationEditor.tsx')
-const paneSource = await readFile(pane, 'utf8'), editorSource = await readFile(editor, 'utf8')
-const screenshotDirectories = ['apps/desktop/src/renderer/src/components/browser-screenshot', 'apps/desktop/src/renderer/src/components/image-annotation']
+const paneSource = await readFile(pane, 'utf8'), captureSource = await readFile(captureTools, 'utf8'), editorSource = await readFile(editor, 'utf8')
+const screenshotDirectories = ['apps/desktop/src/renderer/src/components/browser-screenshot', 'apps/desktop/src/renderer/src/components/image-annotation', 'packages/client-ui/src/image-annotation']
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const sourceInputs = [
-  'apps/desktop/src/renderer/src/components/BrowserPane.tsx', 'apps/desktop/src/renderer/src/components/browser-screenshot/ScreenshotEditor.tsx',
-  'apps/desktop/src/renderer/src/components/image-annotation/canvas-render.ts', 'apps/desktop/src/renderer/src/components/image-annotation/compose.ts',
-  'apps/desktop/src/renderer/src/components/image-annotation/drawing-model.ts', 'apps/desktop/src/renderer/src/components/image-annotation/drawing-renderer.ts',
+  'apps/desktop/src/renderer/src/components/BrowserPane.tsx', 'apps/desktop/src/renderer/src/components/BrowserCaptureTools.tsx', 'apps/desktop/src/renderer/src/components/browser-screenshot/ScreenshotEditor.tsx',
+  'packages/client-ui/src/image-annotation/canvas-render.ts', 'apps/desktop/src/renderer/src/components/image-annotation/compose.ts',
+  'packages/client-ui/src/image-annotation/drawing-model.ts', 'packages/client-ui/src/image-annotation/drawing-renderer.ts',
   'apps/desktop/src/renderer/src/hooks/useNativeOverlayChrome.ts', 'apps/desktop/src/renderer/src/lib/native-overlay-regions.ts',
   'apps/desktop/src/main/native-overlay-surfaces.ts', 'apps/desktop/src/main/browser-view-manager.ts', 'apps/desktop/src/renderer/src/styles/browser.css',
   'packages/browser/src/browser-screenshot-source.ts',
@@ -91,7 +92,7 @@ const pointer=(window as any).__annotationLastTrustedPointer;if(pointer&&pointer
     })
     if (mutant === 'omit-screenshot-hide') build.onLoad({ filter: /BrowserPane\.tsx$/ }, value => {
       assert.equal(value.path, pane)
-      const target = '          screenshot !== null ||\n'
+      const target = 'capture.screenshotOpen || '
       assert.equal(paneSource.split(target).length - 1, 1, 'The actual legacy screenshot visibility consumer exists exactly once')
       return { contents: paneSource.replace(target, ''), loader: 'tsx', resolveDir: dirname(pane) }
     })
@@ -115,12 +116,12 @@ const pointer=(window as any).__annotationLastTrustedPointer;if(pointer&&pointer
       assert.equal(editorSource.split(target).length - 1, 1, 'The actual processed image/context crop consumer exists exactly once')
       return { contents: editorSource.replace(target, target.replace('crop: documentState.crop', 'crop: null')), loader: 'tsx', resolveDir: dirname(editor) }
     })
-    if (mutant === 'save-original-pixels' || mutant === 'pin-original-pixels') build.onLoad({ filter: /BrowserPane\.tsx$/ }, value => {
-      assert.equal(value.path, pane)
-      const target = mutant === 'save-original-pixels' ? 'await api.ui.exportScreenshot({ operationId: mintObjectId(), image })' : 'await screenshotPin.pin(image)'
-      const replacement = mutant === 'save-original-pixels' ? 'await api.ui.exportScreenshot({ operationId: mintObjectId(), image: input.capture!.image })' : 'await screenshotPin.pin(input.capture!.image)'
-      assert.equal(paneSource.split(target).length - 1, 1, 'The real processed output route exists exactly once: ' + mutant)
-      return { contents: paneSource.replace(target, replacement), loader: 'tsx', resolveDir: dirname(pane) }
+    if (mutant === 'save-original-pixels' || mutant === 'pin-original-pixels') build.onLoad({ filter: /BrowserCaptureTools\.tsx$/ }, value => {
+      assert.equal(value.path, captureTools)
+      const target = mutant === 'save-original-pixels' ? 'api.ui.exportScreenshot({ image, capturedAt:' : 'screenshotPin.pin(image)'
+      const replacement = mutant === 'save-original-pixels' ? 'api.ui.exportScreenshot({ image: input.capture!.image, capturedAt:' : 'screenshotPin.pin(input.capture!.image)'
+      assert.equal(captureSource.split(target).length - 1, 1, 'The real processed output route exists exactly once: ' + mutant)
+      return { contents: captureSource.replace(target, replacement), loader: 'tsx', resolveDir: dirname(captureTools) }
     })
   } }]
   await build({ ...base, platform: 'node', format: 'esm', packages: 'external',

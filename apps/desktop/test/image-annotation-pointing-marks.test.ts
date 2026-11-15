@@ -3,9 +3,9 @@ import {
   calloutBubble, calloutLeader, commitShape, createBlurShape, createCalloutShape, createScreenshotDocument, createSpotlightShape,
   hitTestShape, isScreenshotMask, moveShape, nextNoteNumber, removeShapes, renumberNotes, scaleShape, screenshotOutputShapes, shapeBounds, undoShape,
   type CalloutShape, type NoteShape, type ScreenshotShape
-} from '../src/renderer/src/components/image-annotation/drawing-model'
-import { drawScreenshotShapes } from '../src/renderer/src/components/image-annotation/drawing-renderer'
-import { hitSelectionHandle, resizeShapeFromHandle, selectionHandles } from '../src/renderer/src/components/image-annotation/selection-geometry'
+} from '@agentmux/client-ui/image-annotation'
+import { drawScreenshotShapes } from '@agentmux/client-ui/image-annotation'
+import { hitSelectionHandle, resizeShapeFromHandle, selectionHandles } from '@agentmux/client-ui/image-annotation'
 import { AnnotationDocumentError, createEditableAnnotationDocument, encodeEditableAnnotationDocument, parseEditableAnnotationDocument } from '../src/renderer/src/components/image-annotation/document'
 import { formatScreenshotContext } from '../src/renderer/src/components/browser-screenshot/context'
 

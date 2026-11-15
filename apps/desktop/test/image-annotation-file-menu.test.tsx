@@ -6,7 +6,7 @@ import { ScreenshotEditor } from '../src/renderer/src/components/browser-screens
 import { api } from '../src/renderer/src/lib/api'
 import type { BrowserScreenshotCapture } from '../src/shared/contracts'
 
-vi.mock('../src/renderer/src/components/image-annotation/canvas-render', () => ({ renderCommittedLayer() {}, renderScreenshotScene() {} }))
+vi.mock('@agentmux/client-ui/image-annotation', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/client-ui/image-annotation')>(), renderCommittedLayer() {}, renderScreenshotScene() {} }))
 const capture: BrowserScreenshotCapture = { browserId: 'original-browser', navigationId: 'original-navigation',
   image: { mimeType: 'image/png', width: 1, height: 1, byteLength: 68,
     dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=' },

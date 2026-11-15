@@ -14,7 +14,7 @@ vi.mock('../src/renderer/src/store', () => ({ useAppStore: Object.assign((select
   { getState: () => fixture.state, setState: vi.fn(), subscribe: () => () => {} }),
   // The client UI provider wires capsule reply editors through these store exports.
   compareAndSwapCapsuleQuestionEditor: vi.fn(() => true), flushCapsuleQuestionEditors: vi.fn(async () => {}) }))
-vi.mock('../src/renderer/src/components/image-annotation/canvas-render', () => ({ renderCommittedLayer: fixture.committed, renderScreenshotScene: fixture.scene }))
+vi.mock('@agentmux/client-ui/image-annotation', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/client-ui/image-annotation')>(), renderCommittedLayer: fixture.committed, renderScreenshotScene: fixture.scene }))
 vi.mock('../src/renderer/src/components/image-annotation/compose', async importOriginal => ({
   ...await importOriginal<typeof import('../src/renderer/src/components/image-annotation/compose')>(), composeScreenshot: fixture.compose
 }))

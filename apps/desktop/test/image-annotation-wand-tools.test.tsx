@@ -3,11 +3,11 @@ import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { ImageAnnotationEditor } from '../src/renderer/src/components/image-annotation/ImageAnnotationEditor'
-import type { AdjustShape, ScreenshotShape } from '../src/renderer/src/components/image-annotation/drawing-model'
+import type { AdjustShape, ScreenshotShape } from '@agentmux/client-ui/image-annotation'
 
 const raster = vi.hoisted(() => ({ committed: vi.fn(), scene: vi.fn() }))
 // Component state, tools, sampling and outputs are production code; only raster drawing is replaced.
-vi.mock('../src/renderer/src/components/image-annotation/canvas-render', () => ({ renderCommittedLayer: raster.committed, renderScreenshotScene: raster.scene }))
+vi.mock('@agentmux/client-ui/image-annotation', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/client-ui/image-annotation')>(), renderCommittedLayer: raster.committed, renderScreenshotScene: raster.scene }))
 
 const image = { dataUrl: 'data:image/png;base64,AA==', width: 400, height: 300 }
 // The original pixels: red block A, a bluer block B touching its right edge (RGB distance 90, 20.4 on the 0–100 scale),

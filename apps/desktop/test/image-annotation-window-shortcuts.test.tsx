@@ -3,14 +3,14 @@ import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { ImageAnnotationEditor } from '../src/renderer/src/components/image-annotation/ImageAnnotationEditor'
-import type { RectShape, ScreenshotShape } from '../src/renderer/src/components/image-annotation/drawing-model'
+import type { RectShape, ScreenshotShape } from '@agentmux/client-ui/image-annotation'
 import { routeWindowShortcut, SHORTCUT_BINDINGS } from '../src/renderer/src/lib/shortcut-registry'
 import { isEditableChordTarget } from '../src/renderer/src/lib/workbench-shortcuts'
 import { surfaceOwnsChord } from '../src/renderer/src/lib/surface-chord-owners'
 
 const raster = vi.hoisted(() => ({ committed: vi.fn(), scene: vi.fn() }))
 // Component state, keys and outputs are production code; only raster drawing is replaced.
-vi.mock('../src/renderer/src/components/image-annotation/canvas-render', () => ({ renderCommittedLayer: raster.committed, renderScreenshotScene: raster.scene }))
+vi.mock('@agentmux/client-ui/image-annotation', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/client-ui/image-annotation')>(), renderCommittedLayer: raster.committed, renderScreenshotScene: raster.scene }))
 let root: ReturnType<typeof createClientUiRoot>, node: HTMLDivElement, outside: HTMLButtonElement
 let frames: Map<number, FrameRequestCallback>, nextFrame: number
 // Every window binding records its id and consumes the key, as the workbench handlers do when they act.

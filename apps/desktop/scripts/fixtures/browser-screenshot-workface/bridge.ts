@@ -70,3 +70,7 @@ export function flushCapsuleQuestionEditors() { throw new Error('Capsule questio
 export function retainBrowserAgentIntent() { throw new Error('Browser Agent creation is outside this private screenshot fixture') }
 export function retainMailboxNotificationIntent() { throw new Error('Mailbox notification writes are outside this private screenshot fixture') }
 export function currentCoreSpatialGraph() { throw new Error('Core graph projection is outside this private screenshot fixture') }
+export function staleManualSteerDraftKey() { throw new Error('Agent steering drafts are outside this private screenshot fixture') }
+export function checkpointAgentOperations() { throw new Error('Agent checkpoints are outside this private screenshot fixture') }
+export function checkpointSpatialWorkbench() { throw new Error('Workbench checkpoints are outside this private screenshot fixture') }
+export function currentDisplayNameRevision() { throw new Error('Display-name revisions are outside this private screenshot fixture') }

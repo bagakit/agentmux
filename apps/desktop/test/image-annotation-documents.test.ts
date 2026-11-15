@@ -8,7 +8,7 @@ import type { AgentMuxDesktopApi, WorkspaceRecord } from '../src/shared/contract
 import { ANNOTATION_DOCUMENT_LIMITS, readEditableAnnotationFile, saveEditableAnnotationFile } from '../src/renderer/src/components/browser-screenshot/document-files'
 import { AnnotationDocumentError, createEditableAnnotationDocument, encodeEditableAnnotationDocument, parseEditableAnnotationDocument,
   type AnnotationDocumentLimits, type EditableAnnotationDocument } from '../src/renderer/src/components/image-annotation/document'
-import type { ScreenshotShape } from '../src/renderer/src/components/image-annotation/drawing-model'
+import type { ScreenshotShape } from '@agentmux/client-ui/image-annotation'
 
 // A complete PNG keeps the codec test honest; full image decoding belongs to the native UI proof.
 const image = { width: 1, height: 1, dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=' }

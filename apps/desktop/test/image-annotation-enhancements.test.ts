@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { constrainedEndpoint, hitTestShape, maskIntersectsRect, moveShape, scaleShape, screenshotOutputShapes, shapeBounds,
-  type NoteShape, type PixelateBrushShape, type ScreenshotShape } from '../src/renderer/src/components/image-annotation/drawing-model'
-import { drawScreenshotShapes } from '../src/renderer/src/components/image-annotation/drawing-renderer'
+  type NoteShape, type PixelateBrushShape, type ScreenshotShape } from '@agentmux/client-ui/image-annotation'
+import { drawScreenshotShapes } from '@agentmux/client-ui/image-annotation'
 import { createEditableAnnotationDocument, encodeEditableAnnotationDocument, parseEditableAnnotationDocument } from '../src/renderer/src/components/image-annotation/document'
 import { formatScreenshotContext } from '../src/renderer/src/components/browser-screenshot/context'
 

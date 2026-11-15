@@ -16,7 +16,7 @@ vi.mock('../src/renderer/src/components/image-annotation/ImageAnnotationEditor',
   return { ...actual, ImageAnnotationEditor: (props: any) => { editorHarness.props = props; return createElement(actual.ImageAnnotationEditor, props) } }
 })
 // The overlay host and the shared editor are production code; raster drawing and pixel composition are replaced.
-vi.mock('../src/renderer/src/components/image-annotation/canvas-render', () => raster)
+vi.mock('@agentmux/client-ui/image-annotation', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/client-ui/image-annotation')>(), ...raster }))
 vi.mock('../src/renderer/src/components/image-annotation/compose', async importOriginal => ({
   ...await importOriginal<typeof import('../src/renderer/src/components/image-annotation/compose')>(), composeScreenshot: compose
 }))

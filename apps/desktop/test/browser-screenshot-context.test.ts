@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { BrowserPng, BrowserScreenshotCapture } from '../src/shared/contracts.js'
 import { formatScreenshotContext } from '../src/renderer/src/components/browser-screenshot/context.js'
 import type { ImageAnnotationInput } from '../src/renderer/src/components/image-annotation/types.js'
-import type { ScreenshotShape } from '../src/renderer/src/components/image-annotation/drawing-model.js'
+import type { ScreenshotShape } from '@agentmux/client-ui/image-annotation'
 
 const capture: BrowserScreenshotCapture = {
   browserId: 'original-browser', navigationId: 'original-navigation',

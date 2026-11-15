@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
-import { renderCommittedLayer } from '../src/renderer/src/components/image-annotation/canvas-render'
-import { outlineContains } from '../src/renderer/src/components/image-annotation/magic-wand'
+import { renderCommittedLayer } from '@agentmux/client-ui/image-annotation'
+import { outlineContains } from '@agentmux/client-ui/image-annotation'
 import { AnnotationDocumentError, createEditableAnnotationDocument, encodeEditableAnnotationDocument, parseEditableAnnotationDocument } from '../src/renderer/src/components/image-annotation/document'
 import { ANNOTATION_DOCUMENT_LIMITS } from '../src/renderer/src/components/browser-screenshot/document-files'
 import { createAdjustShape, isScreenshotMask, moveShape, outlineExtent, outlineRects, scaleShape, screenshotOutputLayer, screenshotOutputShapes, withOutline,
-  type CoverShape, type NoteShape, type RegionHighlightShape, type ScreenshotOutline, type ScreenshotShape } from '../src/renderer/src/components/image-annotation/drawing-model'
+  type CoverShape, type NoteShape, type RegionHighlightShape, type ScreenshotOutline, type ScreenshotShape } from '@agentmux/client-ui/image-annotation'
 
 // A complete PNG keeps the codec honest; shape geometry is not bounded by the image size.
 const image = { width: 1, height: 1, dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=' }

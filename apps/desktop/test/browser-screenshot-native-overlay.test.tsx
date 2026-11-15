@@ -18,7 +18,7 @@ vi.mock('../src/renderer/src/lib/browser-stage-geometry', () => ({
 }))
 // Canvas rasterization has its own native proof. These tests exercise the actual editor handlers,
 // original stage DOM, source CSS, and the one overlay collector, without starting Electron.
-vi.mock('../src/renderer/src/components/image-annotation/canvas-render', () => ({ renderCommittedLayer() {}, renderScreenshotScene() {} }))
+vi.mock('@agentmux/client-ui/image-annotation', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/client-ui/image-annotation')>(), renderCommittedLayer() {}, renderScreenshotScene() {} }))
 const imageAnnotationCss = readFileSync(join(import.meta.dirname, '../src/renderer/src/components/image-annotation/image-annotation.css'), 'utf8')
 const agentCss = readFileSync(join(import.meta.dirname, '../src/renderer/src/styles/agent.css'), 'utf8')
 let root: Root | undefined

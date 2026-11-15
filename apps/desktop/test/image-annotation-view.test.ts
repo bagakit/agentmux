@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fitImageView, imagePoint, zoomImageView } from '../src/renderer/src/components/image-annotation/view'
+import { fitImageView, imagePoint, zoomImageView } from '@agentmux/client-ui/image-annotation'
 
 describe('image annotation viewport coordinates', () => {
   it('fits both landscape and portrait source pixels inside the available canvas with centered margins', () => {

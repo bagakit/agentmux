@@ -5,12 +5,12 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, expect, it, vi } from 'vitest'
 import { ImageAnnotationEditor } from '../src/renderer/src/components/image-annotation/ImageAnnotationEditor'
-import { SCREENSHOT_COLORS, SCREENSHOT_WIDTHS, SCREENSHOT_FONT_SIZES } from '../src/renderer/src/components/image-annotation/drawing-model'
+import { SCREENSHOT_COLORS, SCREENSHOT_WIDTHS, SCREENSHOT_FONT_SIZES } from '@agentmux/client-ui/image-annotation'
 
 // No browser process or rasterization: exercise real controls, sizing and source CSS.
 // Actual pointer hits, wrapping geometry and native painting remain in the product probe.
 const raster = vi.hoisted(() => ({ committed: vi.fn(), scene: vi.fn() }))
-vi.mock('../src/renderer/src/components/image-annotation/canvas-render', () => ({
+vi.mock('@agentmux/client-ui/image-annotation', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/client-ui/image-annotation')>(),
   renderCommittedLayer: raster.committed, renderScreenshotScene: raster.scene
 }))
 let root: Root | undefined

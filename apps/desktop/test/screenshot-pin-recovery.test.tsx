@@ -11,7 +11,7 @@ import { createEditableAnnotationDocument, encodeEditableAnnotationDocument } fr
 import { ANNOTATION_DOCUMENT_LIMITS } from '../src/renderer/src/components/browser-screenshot/document-files'
 
 const compose = vi.hoisted(() => vi.fn())
-vi.mock('../src/renderer/src/components/image-annotation/canvas-render', () => ({ renderCommittedLayer() {}, renderScreenshotScene() {} }))
+vi.mock('@agentmux/client-ui/image-annotation', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/client-ui/image-annotation')>(), renderCommittedLayer() {}, renderScreenshotScene() {} }))
 vi.mock('../src/renderer/src/components/image-annotation/compose', async importOriginal => ({
   ...await importOriginal<typeof import('../src/renderer/src/components/image-annotation/compose')>(), composeScreenshot: compose
 }))

@@ -13,7 +13,7 @@ import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 
 const compose = vi.hoisted(() => vi.fn())
 // Raster drawing and PNG encoding need a real canvas; the editor state, Escape layers and host delivery stay production code.
-vi.mock('../src/renderer/src/components/image-annotation/canvas-render', () => ({ renderCommittedLayer() {}, renderScreenshotScene() {} }))
+vi.mock('@agentmux/client-ui/image-annotation', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/client-ui/image-annotation')>(), renderCommittedLayer() {}, renderScreenshotScene() {} }))
 vi.mock('../src/renderer/src/components/image-annotation/compose', async importOriginal => ({
   ...await importOriginal<typeof import('../src/renderer/src/components/image-annotation/compose')>(), composeScreenshot: compose
 }))

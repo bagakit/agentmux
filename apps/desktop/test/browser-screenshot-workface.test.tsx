@@ -26,7 +26,7 @@ vi.mock('../src/renderer/src/store', () => ({
 }))
 // Raster output and PNG encoding have native proof. Keep the real Pane, Editor, input handlers,
 // history and copy/cancel token here; only the Canvas implementation and async encoder are replaced.
-vi.mock('../src/renderer/src/components/image-annotation/canvas-render', () => ({
+vi.mock('@agentmux/client-ui/image-annotation', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/client-ui/image-annotation')>(),
   renderCommittedLayer: fixture.committed, renderScreenshotScene: fixture.paint
 }))
 vi.mock('../src/renderer/src/components/image-annotation/compose', async importOriginal => ({

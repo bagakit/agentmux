@@ -1,10 +1,10 @@
 import { composeScreenshot } from '../../../src/renderer/src/components/image-annotation/compose'
-import { drawScreenshotShapes } from '../../../src/renderer/src/components/image-annotation/drawing-renderer'
-import { calloutBubble, commitShape, createAdjustShape, createBlurShape, createCalloutShape, createScreenshotDocument, createSpotlightShape, hitTestShape, withOutline, moveShape, removeShapes, replaceShape, screenshotOutputShapes, setCrop, undoShape, type CoverShape, type PixelateShape, type RegionHighlightShape, type ScreenshotShape } from '../../../src/renderer/src/components/image-annotation/drawing-model'
-import { renderCommittedLayer, renderScreenshotScene } from '../../../src/renderer/src/components/image-annotation/canvas-render'
-import { resizeShapeFromHandle } from '../../../src/renderer/src/components/image-annotation/selection-geometry'
-import { outlineContains } from '../../../src/renderer/src/components/image-annotation/magic-wand'
-import type { ImageViewport } from '../../../src/renderer/src/components/image-annotation/view'
+import { drawScreenshotShapes } from '@agentmux/client-ui/image-annotation'
+import { calloutBubble, commitShape, createAdjustShape, createBlurShape, createCalloutShape, createScreenshotDocument, createSpotlightShape, hitTestShape, withOutline, moveShape, removeShapes, replaceShape, screenshotOutputShapes, setCrop, undoShape, type CoverShape, type PixelateShape, type RegionHighlightShape, type ScreenshotShape } from '@agentmux/client-ui/image-annotation'
+import { renderCommittedLayer, renderScreenshotScene } from '@agentmux/client-ui/image-annotation'
+import { resizeShapeFromHandle } from '@agentmux/client-ui/image-annotation'
+import { outlineContains } from '@agentmux/client-ui/image-annotation'
+import type { ImageViewport } from '@agentmux/client-ui/image-annotation'
 
 function check(value: unknown, message: string): asserts value { if (!value) throw new Error(message) }
 function canvas(width: number, height: number) {

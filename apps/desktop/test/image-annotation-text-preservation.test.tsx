@@ -6,14 +6,14 @@ import { ImageAnnotationEditor } from '../src/renderer/src/components/image-anno
 import { ScreenshotEditor } from '../src/renderer/src/components/browser-screenshot/ScreenshotEditor'
 import { createEditableAnnotationDocument, encodeEditableAnnotationDocument, parseEditableAnnotationDocument } from '../src/renderer/src/components/image-annotation/document'
 import type { ImageAnnotationInput } from '../src/renderer/src/components/image-annotation/types'
-import type { NoteShape, ScreenshotShape, TextShape } from '../src/renderer/src/components/image-annotation/drawing-model'
+import type { NoteShape, ScreenshotShape, TextShape } from '@agentmux/client-ui/image-annotation'
 import { ANNOTATION_DOCUMENT_LIMITS } from '../src/renderer/src/components/browser-screenshot/document-files'
 import { formatScreenshotContext } from '../src/renderer/src/components/browser-screenshot/context'
 import { api } from '../src/renderer/src/lib/api'
 
 // These tests exercise actual string/document/host consumers. Image decode and raster pixels
 // are separate native proof boundaries; neither substitute decides the text assertions.
-vi.mock('../src/renderer/src/components/image-annotation/canvas-render', () => ({ renderCommittedLayer: vi.fn(), renderScreenshotScene: vi.fn() }))
+vi.mock('@agentmux/client-ui/image-annotation', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/client-ui/image-annotation')>(), renderCommittedLayer: vi.fn(), renderScreenshotScene: vi.fn() }))
 const image = { dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', width: 1, height: 1 }
 const text: TextShape = { id: 'original-text', kind: 'text', color: '#ef4444', fontSize: .05, at: { x: .1, y: .1 }, text: '  ' + '字'.repeat(501) + '\t ' }
 const note: NoteShape = { id: 'original-note', kind: 'note', color: '#3b82f6', radius: .03, width: .01,

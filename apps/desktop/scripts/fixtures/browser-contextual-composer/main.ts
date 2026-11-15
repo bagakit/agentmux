@@ -19,7 +19,7 @@ import { WorkbenchWindowStore } from '../../../src/main/workbench-window-store'
 import { createDesktopApplicationAccessOwner } from '../../../src/main/application-access-owner'
 import { desktopBusinessSocketPath } from '../../../src/main/desktop-host'
 import { BrowserNativeInputShield } from '../../../src/main/browser-native-input-shield'
-import { fitImageView } from '../../../src/renderer/src/components/image-annotation/view'
+import { fitImageView } from '@agentmux/client-ui/image-annotation'
 
 const directory = process.env.AGENTMUX_CONTEXTUAL_ROOT!, source = process.env.AGENTMUX_CONTEXTUAL_SOURCE!
 const captureOnly = process.env.AGENTMUX_CONTEXTUAL_CAPTURE_ONLY === '1'

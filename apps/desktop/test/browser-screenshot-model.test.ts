@@ -19,8 +19,8 @@ import {
   screenshotOutputShapes,
   undoShape,
   type ScreenshotShape
-} from '../src/renderer/src/components/image-annotation/drawing-model.js'
-import { drawScreenshotShapes } from '../src/renderer/src/components/image-annotation/drawing-renderer.js'
+} from '@agentmux/client-ui/image-annotation'
+import { drawScreenshotShapes } from '@agentmux/client-ui/image-annotation'
 
 function shape(id: string): ScreenshotShape {
   return {

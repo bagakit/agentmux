@@ -3,13 +3,13 @@ import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { ImageAnnotationEditor } from '../src/renderer/src/components/image-annotation/ImageAnnotationEditor'
-import type { ScreenshotShape } from '../src/renderer/src/components/image-annotation/drawing-model'
-import type { ImageViewport } from '../src/renderer/src/components/image-annotation/view'
+import type { ScreenshotShape } from '@agentmux/client-ui/image-annotation'
+import type { ImageViewport } from '@agentmux/client-ui/image-annotation'
 
 const raster = vi.hoisted(() => ({ committed: vi.fn(), scene: vi.fn() }))
 // Component state, gesture sampling and completion callbacks remain production code. Actual
 // raster pixels, allocation bounds and cover opacity are checked by the private Electron proof.
-vi.mock('../src/renderer/src/components/image-annotation/canvas-render', () => ({ renderCommittedLayer: raster.committed, renderScreenshotScene: raster.scene }))
+vi.mock('@agentmux/client-ui/image-annotation', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/client-ui/image-annotation')>(), renderCommittedLayer: raster.committed, renderScreenshotScene: raster.scene }))
 let root: ReturnType<typeof createClientUiRoot>, node: HTMLDivElement
 let frames: Map<number, FrameRequestCallback>, nextFrame: number
 const image = { dataUrl: 'data:image/png;base64,AA==', width: 400, height: 300 }
