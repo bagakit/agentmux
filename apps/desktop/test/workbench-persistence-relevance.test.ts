@@ -6,9 +6,10 @@ import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { AppConfig, BrowserSnapshot, SessionSnapshot } from '../src/shared/contracts.js'
+import type { AppConfig, BrowserSnapshot, RuntimeEvent, SessionSnapshot } from '../src/shared/contracts.js'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
 import { providerCatalogReader } from './helpers/startup-observation-api-fixture'
+import { promptCarrierWaiting } from './helpers/prompt-carrier-receipt'
 
 const storageName = 'agentmux-workbench-v1'
 const workspaceId = 'persistence-workspace'
@@ -33,6 +34,7 @@ const session: SessionSnapshot = {
 
 let store: typeof import('../src/renderer/src/store.js').useAppStore
 let api: typeof import('../src/renderer/src/lib/api.js').api
+let receiveRuntimeEvent: (event: RuntimeEvent) => void
 let projection: MockInstance<typeof import('../src/renderer/src/lib/workbench-persistence.js').projectPersistedWorkbench>
 let backing: Map<string, string>
 let writes: Array<{ name: string; value: string; at: number }>
@@ -61,6 +63,10 @@ beforeEach(async () => {
   store = (await import('../src/renderer/src/store.js')).useAppStore
   store.setState({ sessions: [session] })
   api = (await import('../src/renderer/src/lib/api.js')).api
+  vi.spyOn(api.sessions, 'onEvent').mockImplementation(listener => {
+    receiveRuntimeEvent = listener
+    return () => {}
+  })
   vi.spyOn(api.config, 'get').mockResolvedValue(config)
   vi.spyOn(api.providers, 'list').mockImplementation(providerCatalogReader())
   vi.spyOn(api.demands, 'list').mockResolvedValue([])
@@ -100,7 +106,7 @@ function agentTab(id = 'agent-tab') {
 }
 
 function status(observedAt: number): void {
-  store.getState().applyEvent({ type: 'core', hostId: 'local', event: {
+  receiveRuntimeEvent({ type: 'core', hostId: 'local', event: {
     type: 'agent-status', agentSessionId: sessionId, state: 'working',
     evidence: { source: 'native-hook', observedAt, run: { runId } }
   } })
@@ -206,6 +212,33 @@ describe('actual Store persistence relevance', () => {
     expect(partialize(sameState)).not.toHaveProperty('restoredWorkbench')
   })
 
+  it('admits a Core authority change during synchronous Runtime publication to the original writer', async () => {
+    await initialize()
+    const tab = agentTab()
+    store.setState({ tabs: { [tab.id]: tab }, layouts: { [workspaceId]: createWorkspaceLayout('handoff-group', [tab.id]) } })
+    await savedWorkbench()
+    vi.advanceTimersByTime(400)
+    expect(saved().state).not.toHaveProperty('restoredWorkbench')
+    const { DesktopSpatialPersistence } = await import('../src/renderer/src/lib/desktop-spatial-state.js')
+    let ready = true
+    const readyGetter = vi.spyOn(DesktopSpatialPersistence.prototype, 'ready', 'get').mockImplementation(() => ready)
+    const off = store.subscribe((state, previous) => {
+      if (state.sessions !== previous.sessions) ready = state.sessions[0]?.status.observedAt !== 2
+    })
+    try {
+      status(2)
+      vi.advanceTimersByTime(400)
+      expect(saved().state.restoredWorkbench?.tabs[tab.id]).toBeDefined()
+      status(3)
+      vi.advanceTimersByTime(400)
+      expect(saved().state).not.toHaveProperty('restoredWorkbench')
+      expect((await spatial.readForLayout())?.graph.resources[`tab:${tab.id}`]).toBeDefined()
+    } finally {
+      off()
+      readyGetter.mockRestore()
+    }
+  })
+
   it('keeps acknowledged names and unrelated name handoffs on their original durable owners', async () => {
     await initialize()
     const tab = agentTab('name-tab')
@@ -247,16 +280,20 @@ describe('actual Store persistence relevance', () => {
     expect(store.getState().retainedDocumentDrafts[key]).toEqual([document])
   })
 
-  it('consumes semantic events and external transient updates without projecting or encoding unrelated Tabs', async () => {
+  it.each([1, 32, 100])('skips save preparation for real Agent events beside %i unrelated Tabs and Sessions', async count => {
     await initialize()
-    const tabs = Object.fromEntries(Array.from({ length: 64 }, (_, index) => {
-      const tab = agentTab(`agent-tab-${index}`)
-      return [tab.id, tab]
-    }))
-    store.setState({ tabs, layouts: { [workspaceId]: createWorkspaceLayout('fixture-group', Object.keys(tabs)) } })
+    const unrelated = Array.from({ length: count }, (_, index): SessionSnapshot => {
+      const id = `unrelated-session-${index}`
+      return { ...session, id, control: { ...session.control, agentSessionId: id, run: { runId: `unrelated-run-${index}` } } }
+    })
+    const original = agentTab()
+    const tabs = Object.fromEntries([original, ...unrelated.map(({ id }) => createWorkbenchTab(`tab-${id}`, {
+      regionId: `region-${id}`, kind: 'agent', phase: 'attached', workspaceId, sessionId: id
+    }))].map(tab => [tab.id, tab]))
+    store.setState({ tabs, sessions: [session, ...unrelated], layouts: { [workspaceId]: createWorkspaceLayout('fixture-group', Object.keys(tabs)) } })
     store.getState().setViewMode(sessionId, 'activity')
     vi.advanceTimersByTime(400)
-    expect(Object.keys((await savedWorkbench()).tabs)).toHaveLength(64)
+    expect(Object.keys((await savedWorkbench()).tabs)).toHaveLength(count + 1)
     expect(saved().state).not.toHaveProperty('restoredWorkbench')
     expect(saved().state.viewModes).toEqual({ [sessionId]: 'activity' })
     const before = backing.get(storageName)
@@ -264,20 +301,23 @@ describe('actual Store persistence relevance', () => {
     spatialCommit.mockClear()
     spatialRead.mockClear()
     const stringify = vi.spyOn(JSON, 'stringify')
+    const options = store.persist.getOptions()
+    const prepare = vi.spyOn(options, 'partialize')
+    const enqueue = vi.spyOn(options.storage!, 'setItem')
     const read = vi.mocked(localStorage.getItem)
     read.mockClear()
+    writes.length = 0
     for (let index = 0; index < 200; index += 1) status(index + 2)
-    for (let index = 0; index < 200; index += 1) store.setState({ startupProgress: { step: 'runtime' } })
     expect(store.getState().sessions[0]?.status.observedAt).toBe(201)
+    expect(store.getState().sessions.slice(1)).toEqual(unrelated)
+    expect({ prepare: prepare.mock.calls.length, enqueue: enqueue.mock.calls.length }).toEqual({ prepare: 0, enqueue: 0 })
+    // Other callers keep their ordinary persistence path and still reuse the projection.
+    for (let index = 0; index < 200; index += 1) store.setState({ startupProgress: { step: 'runtime' } })
     expect(projection).not.toHaveBeenCalled()
     expect(spatialCommit).not.toHaveBeenCalled()
     expect(spatialRead).not.toHaveBeenCalled()
-    // The Run service owner keys the exact changed Session once per event.
-    // No Tab, layout or persisted state is encoded, and unrelated transient
-    // updates add no work. Keep this bounded independently of the 64 Tabs.
-    expect(stringify.mock.calls).toEqual(Array.from({ length: 200 }, () => [[
-      session.hostId, session.control.hostId, sessionId, runId
-    ]]))
+    expect(stringify.mock.calls.filter(([value]) => value && typeof value === 'object' && 'version' in value && 'state' in value)).toEqual([])
+    expect(writes).toEqual([])
     expect(read).not.toHaveBeenCalled()
     expect(backing.get(storageName)).toBe(before)
   })
@@ -311,19 +351,42 @@ describe('actual Store persistence relevance', () => {
     expect(saved().state.viewModes).toEqual(modes)
   })
 
-  it('saves a real composer draft by its deadline while accepted Agent events continue', async () => {
+  it('saves a real draft and a matching input receipt by the first deadline while Agent events continue', async () => {
     await initialize()
+    const operationId = 'pending-prompt'
+    const queued = { operationId, text: 'Earlier prompt', status: 'queued' as const, runId, directInputControl: session.control,
+      directInputBinding: { expectedRun: { runId }, admissionIntent: { kind: 'manual-actor' as const } } }
+    store.setState({ agentSteerQueues: { [sessionId]: [queued] } })
     vi.advanceTimersByTime(400)
     writes.length = 0
     const start = Date.now()
-    store.getState().setAgentComposerDraft(sessionId, 'New unsent draft')
+    const options = store.persist.getOptions()
+    const prepare = vi.spyOn(options, 'partialize')
+    const enqueue = vi.spyOn(options.storage!, 'setItem')
+    // The synchronous Store listener uses the same authored action as the composer.
+    const off = store.subscribe((state, previous) => {
+      if (state.sessions !== previous.sessions && state.sessions[0]?.status.observedAt === 2)
+        state.setAgentComposerDraft(sessionId, 'New unsent draft')
+    })
+    try { status(2) } finally { off() }
+    expect(prepare).toHaveBeenCalledTimes(1)
+    const receipt = promptCarrierWaiting(sessionId, runId, operationId)
+    const event: RuntimeEvent = { type: 'core', hostId: session.hostId, event: { type: 'agent-input', receipt } }
     for (let index = 0; index < 20; index += 1) {
+      if (index === 1 || index === 5) receiveRuntimeEvent(event)
       vi.advanceTimersByTime(100)
-      status(index + 2)
+      status(index + 3)
     }
-    expect(store.getState().sessions[0]?.status.observedAt).toBe(21)
+    expect(store.getState().sessions[0]?.status.observedAt).toBe(22)
     expect(writes.map(({ at }) => at - start)).toEqual([400])
     expect(saved().state.agentComposerDrafts).toEqual({ [sessionId]: 'New unsent draft' })
+    expect(saved().state.agentSteerQueues?.[sessionId]?.[0]?.inputReceipt).toEqual(receipt)
+    expect(prepare).toHaveBeenCalledTimes(2)
+    expect(enqueue).toHaveBeenCalledTimes(2)
+    store.setState({ agentSteerQueues: {}, agentComposerDrafts: {} })
+    await store.persist.rehydrate()
+    expect(store.getState().agentComposerDrafts[sessionId]).toBe('New unsent draft')
+    expect(store.getState().agentSteerQueues[sessionId]?.[0]?.inputReceipt).toEqual(receipt)
   })
 
   it('persists actual dirty document edits and stops saving the buffer when it becomes clean', async () => {
