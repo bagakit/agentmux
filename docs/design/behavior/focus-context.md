@@ -287,7 +287,7 @@ Collection／Project 分组标题的上下文动作沿其准确对象已有的�
 
 Focus 表达用户正在关注的工作以及实际任务状态，不以当前 Run 是否连接或已 resume 判断关注关系。断电、机器重启、Run 中断、停止或退出，以及尚未 resume，都不证明用户已取消关注；原 Session 仍保留时，任务留在原项目与当前关注中。关闭 Tab／Region 并保留 Session 也不移除关注；Session 的明确退休或成员移除只沿原 Core owner，不由界面猜测。
 
-任务只沿 Attention、Working、Results、Idle／Recovery 四组呈现。明确待处理请求或错误优先 Attention；其余已确认中断及尚未观察到原 Run 的任务留在 Recovery，不能因旧 starting／working／done、旧回复或曾经活跃而冒称当前执行、结果或空闲。真实中断显示 Interrupted 与直接可读的原服务说明；原因未确认就明确未知，不从 daemon restart 等记录猜断电或用户停止。Run 未观察到显示 Run not observed；当前 Run 健康但活动未知则显示 Activity unknown。恢复与未知混合时组头保留 Recovery，准确数量与各项状态按原事实可读。
+任务只沿 Attention、Working、Results、Idle／Recovery 四组呈现。明确待处理请求或错误优先 Attention；其余已确认中断及尚未观察到原 Run 的任务留在 Recovery，不能因旧 starting／working／done、旧回复或曾经活跃而冒称当前执行、结果或空闲。真实中断显示 Interrupted，并保留原工作面和恢复动作。紧凑列表的已确认本地中断可从原条目和速览读取具体原因。其他视图保留直接可读的原服务说明。原因未确认就明确未知，不从 daemon restart 等记录猜断电或用户停止。Run 未观察到显示 Run not observed，说明继续直接可读。当前 Run 健康但活动未知则显示 Activity unknown。恢复与未知混合时组头保留 Recovery，准确数量与各项状态按原事实可读。
 
 主泳道、Focus 入口预览、Space Agents 与 Mobile 公共派生呈现共用同一任务分类，不再按 Run 状态另收进 Disconnected 目录或隐藏当前关注项。保原身份、工作面、草稿、焦点与历史；阅读或打开 Focus 不自动 resume、启动、停止或向 Run 输入，不增加关注实体、状态账本或轮询。
 
