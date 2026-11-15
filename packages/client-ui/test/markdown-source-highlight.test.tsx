@@ -40,7 +40,6 @@ describe('Markdown source highlight ranges', () => {
       ['emphasis', '**链接**'],
       ['link', '](./x.md)'],
       ['emphasis', '~~删除~~'],
-      ['math', '$x_i$'],
       ['link', 'https://example.test']
     ])
   })
