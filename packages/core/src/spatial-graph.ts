@@ -228,47 +228,64 @@ export function parseAgentMuxSpatialGraph(value: unknown): AgentMuxSpatialGraph 
 }
 export function spatialCatalog(graph: AgentMuxSpatialGraph, target: AgentMuxSpaceSelector = {}): AgentMuxSpaceCatalog {
   const labels = displayLabelDocument(graph).labels;
-  const namedTabs = graph.tabs.map(tab => ({ ...tab, nameRevision: labels[nameTargetKey({ kind: 'tab', id: tab.tabId })]?.nameRevision ?? 0 }));
+  const nameTab = (tab: AgentMuxSpatialGraph['tabs'][number]) => ({ ...tab, nameRevision: labels[nameTargetKey({ kind: 'tab', id: tab.tabId })]?.nameRevision ?? 0 });
+  const spacesByZone = new Map<string, string[]>();
+  for (const binding of graph.bindings) {
+    if (target.spaceId && binding.spaceId !== target.spaceId) continue;
+    const spaces = spacesByZone.get(binding.zoneId);
+    if (spaces) spaces.push(binding.spaceId);
+    else spacesByZone.set(binding.zoneId, [binding.spaceId]);
+  }
+  const scoped = Object.keys(target).length > 0;
+  const candidates = scoped ? graph.tabs.filter(tab =>
+    (!target.tabId || tab.tabId === target.tabId) &&
+    (!target.zoneId || tab.zoneId === target.zoneId) &&
+    (!target.spaceId || tab.zoneId !== null && spacesByZone.has(tab.zoneId)) &&
+    (!target.regionId || tab.regionIds.includes(target.regionId))) : graph.tabs;
+  const tabs = new Map(candidates.map(tab => [tab.tabId, tab]));
   const locations: AgentMuxSpaceCatalog['locations'] = [];
-  const tabs = new Map(graph.tabs.map(t => [t.tabId, t]));
-  for (const [displayWorkspaceId, layout] of Object.entries(graph.layouts))
-    for (const group of layout.groups)
+  for (const [displayWorkspaceId, layout] of Object.entries(graph.layouts)) {
+    if (target.displayWorkspaceId && displayWorkspaceId !== target.displayWorkspaceId) continue;
+    for (const group of layout.groups) {
+      if (target.groupId && group.id !== target.groupId) continue;
       for (const tabId of group.tabOrder) {
-        const t = tabs.get(tabId);
-        if (!t)
-          continue;
-        const spaces = graph.bindings.filter(b => b.zoneId === t.zoneId).map(b => b.spaceId);
-        for (const regionId of t.regionIds)
-          for (const spaceId of spaces.length ? spaces : [null])
-            locations.push({
-              spaceId, zoneId: t.zoneId, workspaceId: t.workspaceId, displayWorkspaceId, groupId: group.id, tabId, regionId
-            });
+        const tab = tabs.get(tabId);
+        if (!tab) continue;
+        const spaces = tab.zoneId === null ? undefined : spacesByZone.get(tab.zoneId);
+        for (const regionId of target.regionId ? [target.regionId] : tab.regionIds)
+          for (const spaceId of spaces ?? [null])
+            locations.push({ spaceId, zoneId: tab.zoneId, workspaceId: tab.workspaceId,
+              displayWorkspaceId, groupId: group.id, tabId, regionId });
       }
-  const selected = locations.filter(location => Object.entries(target).every(([key, value]) => location[key as keyof typeof location] === value));
-  if (!Object.keys(target).length)
-    return { ...(graph.projectGroups ? { projectGroups: graph.projectGroups } : {}), spaces: graph.spaces, zones: graph.zones, tabs: namedTabs, regions: graph.regions, bindings: graph.bindings, locations };
-  const selectedTabs = namedTabs.filter(t => (!target.tabId || t.tabId === target.tabId) &&
-    (!target.regionId || t.regionIds.includes(target.regionId)) &&
-    (!target.zoneId || t.zoneId === target.zoneId) &&
-    (!target.spaceId || graph.bindings.some(b => b.zoneId === t.zoneId && b.spaceId === target.spaceId)) &&
-    (!(target.displayWorkspaceId || target.groupId) || selected.some(l => l.tabId === t.tabId)));
+    }
+  }
+  const projectGroups = graph.projectGroups ? { projectGroups: graph.projectGroups } : {};
+  if (!scoped)
+    return { ...projectGroups, spaces: graph.spaces, zones: graph.zones, tabs: candidates.map(nameTab), regions: graph.regions, bindings: graph.bindings, locations };
+  const placed = target.displayWorkspaceId || target.groupId ? new Set(locations.map(location => location.tabId)) : null;
+  const selectedTabs = placed ? candidates.filter(tab => placed.has(tab.tabId)) : candidates;
+  const selectedTabIds = new Set(selectedTabs.map(tab => tab.tabId));
   const zoneIds = new Set(selectedTabs.map(t => t.zoneId));
   if (target.zoneId && !target.tabId && !target.regionId)
     zoneIds.add(target.zoneId);
   if (target.spaceId && !target.tabId && !target.regionId && !target.zoneId)
-    graph.bindings.filter(b => b.spaceId === target.spaceId).forEach(b => zoneIds.add(b.zoneId));
-  const selectedRegions = graph.regions.filter(r => (!target.regionId || r.regionId === target.regionId) && selectedTabs.some(t => t.tabId === r.tabId));
-  return { ...(graph.projectGroups ? { projectGroups: graph.projectGroups } : {}), spaces: graph.spaces.filter(s => (!target.spaceId || s.spaceId === target.spaceId) && (s.spaceId === target.spaceId || graph.bindings.some(b => b.spaceId === s.spaceId && zoneIds.has(b.zoneId)))),
-    zones: graph.zones.filter(z => zoneIds.has(z.zoneId)), tabs: selectedTabs, regions: selectedRegions,
-    bindings: graph.bindings.filter(b => zoneIds.has(b.zoneId) && (!target.spaceId || b.spaceId === target.spaceId)), locations: selected };
+    for (const zoneId of spacesByZone.keys()) zoneIds.add(zoneId);
+  const bindings = graph.bindings.filter(b => zoneIds.has(b.zoneId) && (!target.spaceId || b.spaceId === target.spaceId));
+  const spaceIds = new Set(bindings.map(binding => binding.spaceId));
+  if (target.spaceId) spaceIds.add(target.spaceId);
+  return { ...projectGroups, spaces: graph.spaces.filter(space => spaceIds.has(space.spaceId)),
+    zones: graph.zones.filter(zone => zoneIds.has(zone.zoneId)), tabs: selectedTabs.map(nameTab),
+    regions: graph.regions.filter(region => (!target.regionId || region.regionId === target.regionId) && selectedTabIds.has(region.tabId)),
+    bindings, locations };
 }
 export function resolveSpatialRegion(graph: AgentMuxSpatialGraph, target: AgentMuxSpatialResolve) {
   const layout = graph.tabLayouts[target.tabId];
   if (!layout || !regionIds(layout.root).includes(target.regionId))
     return { region: null, locations: [] };
   const next = regionInDirection(workbenchRegionBounds(layout.root), target.regionId, target.direction);
+  if (next === null) return { region: null, locations: [] };
   return { region: graph.regions.find(r => r.tabId === target.tabId && r.regionId === next) ?? null,
-    locations: spatialCatalog(graph).locations.filter(l => l.tabId === target.tabId && l.regionId === next) };
+    locations: spatialCatalog(graph, { tabId: target.tabId, regionId: next }).locations };
 }
 
 export { AgentMuxSpatialTargetError, exactSpatialDisplayLayout, selectSpatialCatalog, spatialDestination, type AgentMuxSpatialDestination } from './spatial-destination.js';
