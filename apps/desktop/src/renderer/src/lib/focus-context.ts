@@ -210,7 +210,7 @@ function agentContextWithConversation(session: SessionSnapshot, timeline: AgentT
   const lastActivityAt = focusLastTaskActivityAt(items, focusActivityEntryTime(session), now)
   const stateEnteredAt = session.kind === 'agent' && session.currentActivity ? undefined : agentStateEnteredAt(session, now)
   let detail = 'No activity details observed', detailIsMessage = false
-  let detailKind: FocusContext['detailKind'] = pending || bucket === 'attention' || state === 'disconnected' || state === 'exited' ? 'service' : 'activity'
+  let detailKind: FocusContext['detailKind'] = pending || bucket === 'attention' || state === 'disconnected' || state === 'exited' ? 'service' : undefined
   if (bucket === 'idle' && (session.runUnobserved || session.processState === 'interrupted')) {
     detail = `${session.runUnobserved ? 'Run not observed' : 'Run interrupted'} · ${session.status.detail?.trim() || (session.runUnobserved ? 'Original Run state is unknown' : 'Cause unknown')}`
     detailKind = 'service'
@@ -233,7 +233,10 @@ function agentContextWithConversation(session: SessionSnapshot, timeline: AgentT
   }
   else {
     const activity = sessionRecentActivity(session, items, session.workspacePath)
-    if (activity !== state) detail = activity
+    if (activity !== state) {
+      detail = activity
+      detailKind ??= 'activity'
+    }
     else if (session.kind === 'agent' && latest) {
       detail = latest.detail
       detailIsMessage = true
@@ -250,7 +253,7 @@ function agentContextWithConversation(session: SessionSnapshot, timeline: AgentT
     ...(session.kind === 'agent' ? { executorId: session.executorId, control: session.control, ...(session.workPlacement ? { workPlacement: session.workPlacement } : {}), ...(session.toolExecution ? { toolExecution: session.toolExecution } : {}) } : {}),
     hostId: session.hostId, topicId, workspace, workspaceId: workspace?.id ?? `${session.hostId}:${session.workspacePath}`, workspaceName: workspace?.name ?? session.workspacePath.split('/').filter(Boolean).at(-1) ?? 'Unassigned', workspacePath: session.workspacePath,
     liveAgent: session.kind === 'agent' && session.processState === 'running', actionable: pending || isNeedsYouState(state) || session.kind === 'agent' && state === 'error', lastActivityAt,
-    runId: session.control.run.runId, ...(stateEnteredAt === undefined ? {} : { stateEnteredAt }), workingEnteredAt: activitySemantic === 'active' && !(session.kind === 'agent' && session.currentActivity) ? workingEntryTime(session) : null, recap, detailIsRecap, detailKind,
+    runId: session.control.run.runId, ...(stateEnteredAt === undefined ? {} : { stateEnteredAt }), workingEnteredAt: activitySemantic === 'active' && !(session.kind === 'agent' && session.currentActivity) ? workingEntryTime(session) : null, recap, detailIsRecap, ...(detailKind ? { detailKind } : {}),
     ...(activitySemantic === undefined ? {} : { activitySemantic }), ...(nativeSubagents ? { nativeSubagents } : {}) }
 }
 function sameSessionPresentation(a: SessionSnapshot, b: SessionSnapshot, now: number): boolean {

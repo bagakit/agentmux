@@ -6,8 +6,25 @@ import { AgentContextAvatar, mandatoryAgentContextDetails } from './AgentContext
 import { FocusContextStateMark } from './FocusContextState'
 import { AgentWorkModeBadge } from './AgentWorkModeBadge'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { MarkdownExcerpt } from '@agentmux/client-ui/components/MarkdownExcerpt'
+import { launcherRecapExcerpt } from '@agentmux/client-ui/conversation-recap'
 
 const TeamIcon = semanticIconComponent('object.team')
+
+function listWorkDetail(context: FocusContext) {
+  return context.bucket === 'working' && context.detailKind === 'activity' ? context.detail : undefined
+}
+
+function listResultRecap(context: FocusContext) {
+  return context.bucket === 'results' && context.detailKind === 'message' ? context.recap : undefined
+}
+
+export function focusTaskListDescription(context: FocusContext): string | undefined {
+  const recap = listResultRecap(context)
+  const detail = recap ? recap.displayText ?? recap.text : listWorkDetail(context) ??
+    (mandatoryAgentContextDetails(context, 'card') && !context.detailIsRecap && context.detail !== context.stateLabel ? context.detail : undefined)
+  return [context.originAddress, detail, context.nativeSubagents && `Subagents · ${context.nativeSubagents.summary}`].filter(Boolean).join(' · ') || undefined
+}
 
 function LastActivity({ at }: { at: number }) {
   const zone = useAppStore(state => state.focusTimelineRuler.timeZone)
@@ -25,17 +42,25 @@ export function FocusTaskListContent({ context, identity, placeholder = false }:
   identity?: ReactNode
   placeholder?: boolean
 }) {
-  const showStatus = context.bucket !== 'results' && mandatoryAgentContextDetails(context, 'card')
-  const showExplanation = showStatus || context.detailKind === 'service' || context.detailKind === 'observation'
+  const inlineObservation = context.detailKind === 'observation' && !context.access && !context.runUnobserved
+  const showStatus = context.bucket !== 'results' && !inlineObservation && mandatoryAgentContextDetails(context, 'card')
+  const showExplanation = showStatus || context.detailKind === 'service' || context.detailKind === 'observation' && !inlineObservation
   const detail = showExplanation && !context.detailIsRecap && context.detail !== context.stateLabel ? context.detail : null
+  const work = listWorkDetail(context)
+  const recap = placeholder ? undefined : listResultRecap(context)
   const activity = context.lastActivityAt
   const subagents = context.nativeSubagents
   const hasTime = !placeholder && activity !== null && Number.isSafeInteger(activity) && activity > 0 && activity <= Date.now()
   return <>
     <span className="focus-task-list__line">
       {identity ?? <AgentContextAvatar context={context} placeholder={placeholder} />}
-      <span className="focus-task-list__mark" title={context.stateLabel}><FocusContextStateMark context={context} /></span>
-      <strong className="focus-task-list__title">{context.name}</strong>
+      <span className="focus-task-list__mark" title={inlineObservation ? context.detail : context.stateLabel}><FocusContextStateMark context={context} /></span>
+      <span className="focus-task-list__copy">
+        <strong className="focus-task-list__title">{context.name}</strong>
+        {inlineObservation ? <span className="focus-task-list__summary" title={context.detail}>{context.stateLabel}</span>
+          : recap ? <span className="focus-task-list__summary focus-task-list__summary--excerpt"><MarkdownExcerpt content={launcherRecapExcerpt(recap)} /></span>
+          : work ? <span className="focus-task-list__summary focus-task-list__summary--excerpt">{work}</span> : null}
+      </span>
       <span className="focus-task-list__trailing">
         {subagents ? <span className="focus-task-list__subagents" title={`Subagents · ${subagents.summary}`} aria-hidden="true">
           <TeamIcon size={13} /><span className="focus-task-list__subagent-count">{subagents.rows.length || '?'}{subagents.rows.length && subagents.coverageUnknown ? '+' : ''}</span>

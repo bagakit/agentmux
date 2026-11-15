@@ -14,7 +14,7 @@ import { focusContextHeat, focusContextVisit } from '../lib/focus-attention'
 import { focusTopicContextKey, type FocusTopicHeading } from '../lib/focus-collection-lanes'
 import { FocusTopicLabel } from './FocusTopicLabel'
 import { FocusZoneFooter } from './FocusZoneFooter'
-import { FocusTaskListContent } from './FocusTaskListContent'
+import { FocusTaskListContent, focusTaskListDescription } from './FocusTaskListContent'
 
 const contextKey = (context: FocusContext) => JSON.stringify([context.hostId, context.id])
 
@@ -136,7 +136,7 @@ export function FocusContextCards({ contexts, columns, scrollRef, visible, list 
         identity={identities.get(focusContextIdentityKey(context.hostId, context.id))} selected={selected} activity={activity?.get(focusListActivityKey(context))} onSelect={onSelect} />
         : <button type="button" className={`focus-context focus-context--card${list ? ' focus-context--list' : ''}${selected ? ' is-selected' : ''}`}
           data-session-id={context.id} data-state={context.state} data-bucket={context.bucket} data-activity={context.activitySemantic}
-          data-focus-list-goal={list && Boolean(goals) || undefined} aria-pressed={selected} aria-label={`${context.name} · ${context.stateLabel}${context.detailKind === 'service' ? ` · ${context.detail}` : ''}${topic ? ` · ${topic.kind === 'worktree' ? 'Zone' : 'Topic'} · ${topic.name}` : ''}`} aria-description={list && context.nativeSubagents ? [context.originAddress, `Subagents · ${context.nativeSubagents.summary}`].filter(Boolean).join(' · ') : context.originAddress}
+          data-focus-list-goal={list && Boolean(goals) || undefined} aria-pressed={selected} aria-label={`${context.name} · ${context.stateLabel}${!list && context.detailKind === 'service' ? ` · ${context.detail}` : ''}${topic ? ` · ${topic.kind === 'worktree' ? 'Zone' : 'Topic'} · ${topic.name}` : ''}`} aria-description={list ? focusTaskListDescription(context) : context.originAddress}
           onMouseDown={event => { if (event.button === 0) event.preventDefault() }}
           onClick={() => onSelect(context.id)}
           onFocus={event => { reveal(context, event.currentTarget.parentElement as HTMLDivElement) }}

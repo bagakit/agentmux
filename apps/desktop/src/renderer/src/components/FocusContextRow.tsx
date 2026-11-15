@@ -4,7 +4,7 @@ import type { FocusListActivity } from '../lib/focus-list-activity'
 import { memo, useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import type { FocusContext } from '../lib/focus-context'
 import { FocusContextMenu } from './FocusContextMenu'
-import { FocusTaskListContent } from './FocusTaskListContent'
+import { FocusTaskListContent, focusTaskListDescription } from './FocusTaskListContent'
 import { useAgentInformationPreview } from './AgentInformationPreview'
 import { currentDisplayNameRevision, focusAgentNameEditor, useAppStore } from '../store'
 import type { FocusNameEditor } from '../lib/focus-name-edit'
@@ -60,9 +60,6 @@ export const FocusContextRow = memo(function FocusContextRow({ context, identity
     setRename({ name: context.name, revision, owner })
   }
   const description = [context.detailIsRecap && context.recap ? null : context.detail, context.recap ? `${context.recap.source} (${context.recap.origin}) · ${context.recap.text}` : null].filter(Boolean).join('\n')
-  const rowDescription = list && mandatoryAgentContextDetails(context, 'card') && !context.detailIsRecap && context.detail !== context.stateLabel
-    ? [context.originAddress, context.detail].filter(Boolean).join(' · ')
-    : context.originAddress
   const className = `focus-context focus-context--card${list ? ' focus-context--list' : ''}${compact ? ' focus-context--compact' : ''}${selected ? ' is-selected' : ''}${menuOpen || goalOpen ? ' is-menu-open' : ''}`
   if (rename) return <FocusAgentNameEdit {...rename} sessionId={context.id} className={className} onClose={restoreFocus => {
     restoreRenameFocus.current = restoreFocus
@@ -83,7 +80,7 @@ export const FocusContextRow = memo(function FocusContextRow({ context, identity
       if (!event.repeat) hover.read()
     }
   }
-  const card = <button ref={hover.anchor} type="button" className={className} data-session-id={context.id} data-state={context.state} data-bucket={context.bucket} data-activity={context.activitySemantic} data-focus-list-goal={list && Boolean(goalLinks) || undefined} aria-pressed={selected} aria-label={`${context.name} · ${context.stateLabel}${topic ? ` · ${topic.kind === 'worktree' ? 'Zone' : 'Topic'} · ${topic.name}` : ''}${list ? '' : ` · ${description}`}`} aria-description={list && context.nativeSubagents ? [rowDescription, `Subagents · ${context.nativeSubagents.summary}`].filter(Boolean).join(' · ') : rowDescription} aria-describedby={hover.describedBy} {...hover.triggerEvents}
+  const card = <button ref={hover.anchor} type="button" className={className} data-session-id={context.id} data-state={context.state} data-bucket={context.bucket} data-activity={context.activitySemantic} data-focus-list-goal={list && Boolean(goalLinks) || undefined} aria-pressed={selected} aria-label={`${context.name} · ${context.stateLabel}${topic ? ` · ${topic.kind === 'worktree' ? 'Zone' : 'Topic'} · ${topic.name}` : ''}${list ? '' : ` · ${description}`}`} aria-description={list ? focusTaskListDescription(context) : context.originAddress} aria-describedby={hover.describedBy} {...hover.triggerEvents}
     onFocus={list ? undefined : hover.triggerEvents.onFocus}
     onKeyDown={list ? listKey : hover.triggerEvents.onKeyDown}
     aria-keyshortcuts={list ? 'ArrowUp ArrowDown Space Enter' : hover.triggerEvents['aria-keyshortcuts']} onClick={() => { hover.close(); onSelect(context.id) }} onContextMenu={hover.close}>

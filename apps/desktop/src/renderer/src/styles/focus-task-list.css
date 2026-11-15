@@ -61,15 +61,25 @@
 .focus-task-list__line .agent-avatar__status { display: none; }
 .focus-task-list__mark { display: inline-flex; justify-content: center; }
 .focus-task-list__mark .focus-state-mark { width: 14px; height: 14px; background: transparent; }
-.focus-task-list__title {
+.focus-task-list__copy { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.focus-task-list__title, .focus-task-list__summary {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.focus-task-list__title {
   color: var(--text);
   font-size: var(--fs-meta);
   font-weight: 500;
 }
+.focus-task-list__summary {
+  flex: 1 0 0;
+  color: var(--text-2);
+  font-size: var(--fs-micro);
+}
+.focus-task-list__summary .markdown-excerpt strong { color: inherit; font-weight: 600; }
+.focus-task-list__summary .markdown-excerpt code { color: inherit; font-size: .95em; }
 .focus-task-list__detail {
   display: flex;
   flex-wrap: wrap;
@@ -118,6 +128,7 @@
   .focus-task-list__clock, .focus-task-list__time { display: none; }
 }
 @container focus-task-rows (max-width: 559px) {
+  .focus-task-list__summary--excerpt { display: none; }
   .focus-task-list__subagent-states { display: none; }
   .focus-task-list__subagent-count { display: inline; }
 }
