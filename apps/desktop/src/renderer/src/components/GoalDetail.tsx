@@ -272,7 +272,7 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
           onNavigate={id => revealWork(readingTargets[id].current)} />
       </nav>
       <div className="goal-outline__tools">
-        {reviewFromPlan ? <Button type="button" onClick={() => revealGoalReview(true)}>Review criteria</Button> : null}
+        {reviewFromPlan ? <Button type="button" aria-label="Review goal criteria before confirming" onClick={() => revealGoalReview(true)}>Review to confirm</Button> : null}
         <button type="button" ref={supervisorToggle} className="goals-detail__team-link" data-goal-supervisor-toggle
           aria-label="Supervisor" aria-controls={teamRegionId} title={showSupervisor ? 'Return to goal' : 'Open Supervisor'} aria-pressed={showSupervisor}
           onClick={() => showSupervisor ? setShowSupervisor(false) : revealSupervisor()}>
