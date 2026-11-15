@@ -22,15 +22,17 @@ const highlights: Partial<Record<MarkdownNode['type'], HighlightKind>> = {
 }
 
 const MAX_SOURCE_LENGTH = 4096
-const MAX_BLOCK_MARKS_PER_LINE = 128
+const MAX_BLOCK_MARKS_PER_LINE = 64
+const MAX_BLOCK_MARKS_PER_DRAFT = 512
 
-/** Large input and very deep containers can stall the synchronous grammar. Budget coloring alone. */
+/** Bound both deep containers and the cumulative work of parsing and painting many dense lines. */
 function canHighlightSynchronously(source: string): boolean {
   if (source.length > MAX_SOURCE_LENGTH) return false
-  let marks = 0
+  let lineMarks = 0
+  let remainingMarks = MAX_BLOCK_MARKS_PER_DRAFT
   for (const character of source) {
-    if (character === '\n' || character === '\r') marks = 0
-    if ('>-+*.)'.includes(character) && ++marks > MAX_BLOCK_MARKS_PER_LINE) return false
+    if (character === '\n' || character === '\r') lineMarks = 0
+    if ('>-+*.)'.includes(character) && (++lineMarks > MAX_BLOCK_MARKS_PER_LINE || --remainingMarks < 0)) return false
   }
   return true
 }
