@@ -5,6 +5,7 @@ import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, type 
 import StarterKit from '@tiptap/starter-kit'
 import { EditorState, TextSelection } from '@tiptap/pm/state'
 import { closeHistory } from '@tiptap/pm/history'
+import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 import { ConversationImage, type ReadPastedImage } from './ConversationImage.js'
 import { splitPastedImageReferences } from '../lib/pasted-image-reference.js'
 import { composerKeywordMatches } from '../lib/composer-keywords.js'
@@ -16,6 +17,7 @@ import { uniqueImageReferences, type ConversationImageReference } from '../lib/c
 import { SemanticIcon } from '../theme/icons.js'
 import { composerWordBefore, hasExplicitComposerTrigger, type ComposerCaret } from '../lib/composer-completion.js'
 import { resolveComposerInputConfig, type ComposerInputConfig } from '../lib/composer-input-config.js'
+import { getMarkdownSourceHighlights } from '../lib/markdown-source-highlight.js'
 
 const ComposerImageReader = createContext<ReadPastedImage | undefined>(undefined)
 const ComposerDraftEditable = createContext<boolean | undefined>(undefined)
@@ -97,6 +99,41 @@ export function documentDraft(doc: JSONContent): string {
   if (doc.type === 'hardBreak') return '\n'
   return (doc.content ?? []).map(documentDraft).join(doc.type === 'doc' ? '\n' : '')
 }
+
+function markdownDecorations(doc: ProseMirrorNode): Decoration[] {
+  let source = ''
+  const textRuns: { start: number; end: number; position: number }[] = []
+  doc.forEach((paragraph, paragraphOffset, index) => {
+    if (index > 0) source += '\n'
+    paragraph.forEach((node, offset) => {
+      const start = source.length
+      source += node.isText ? node.text! : documentDraft(node.toJSON())
+      if (node.isText) textRuns.push({ start, end: source.length, position: paragraphOffset + 1 + offset })
+    })
+  })
+
+  // The source codec counts the full text of each atom. Only decorate actual editable text.
+  const decorations: Decoration[] = []
+  let firstRun = 0
+  for (const { start, end, kind } of getMarkdownSourceHighlights(source)) {
+    while (firstRun < textRuns.length && textRuns[firstRun]!.end <= start) firstRun++
+    for (let index = firstRun; index < textRuns.length; index++) {
+      const run = textRuns[index]!
+      if (run.start >= end) break
+      const from = run.position + Math.max(0, start - run.start)
+      const to = run.position + Math.min(run.end, end) - run.start
+      decorations.push(Decoration.Inline(from, to, { 'data-markdown-token': kind }))
+    }
+  }
+  return decorations
+}
+
+const composerMarkdownExtension = Extension.create({
+  name: 'composerMarkdownHighlight',
+  addDecorations() {
+    return { create: ({ state }) => markdownDecorations(state.doc) }
+  }
+})
 
 /**
  * 识别词的下划线。命中 keyword 的裸词在正文**原位**获得装饰，不改文档内容。
@@ -191,7 +228,7 @@ export function composerExtensions(
         <ComposerImage node={node} editor={editor} getPos={getPos} readImage={readPastedImage} />
       </NodeViewWrapper>)
     }
-  }), keywordUnderlineExtension(keywords, config)]
+  }), keywordUnderlineExtension(keywords, config), composerMarkdownExtension]
 }
 
 export type InlineComposerProps = {
@@ -426,7 +463,7 @@ function PresentedInlineComposer(props: InlineComposerProps) {
   const keywordKey = (props.keywords ?? []).join('\n')
   useEffect(() => {
     if (!editor || editor.isDestroyed) return
-    editor.commands.updateDecorations()
+    editor.commands.updateDecorations('promptKeywordUnderline')
   }, [editor, keywordKey, props.completionConfig])
   return <div className="composer__editor" data-placeholder={props.placeholder} data-disabled={props.disabled} data-empty={props.value.length === 0 ? 'true' : 'false'}>
     <ComposerReferenceActivation.Provider value={props.onActivateReference}><ComposerDraftEditable.Provider value={!props.disabled}><ComposerImageReader.Provider value={props.readPastedImage}><ConversationImageCollection references={imageReferences} readImage={props.readPastedImage}>
