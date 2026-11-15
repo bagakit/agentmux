@@ -22,13 +22,18 @@ const mutations = [
   ['counter-revision-rereads-intent', 'agent-execution-coordinator', 'agent-execution-coordinator', 'if (!isDeepStrictEqual(before, this.connectionDiagnostic(id))) this.observe(record.input)', 'this.observe(record.input)'],
   ['complete-before-journal', 'agent-execution-executor', 'agent-execution-executor', 'await options.journal.complete(pending.key, pending.digest, pending.response)', 'await completed(pending.key); await options.journal.complete(pending.key, pending.digest, pending.response)'],
 ]
-const candidatePaths = ['agent-execution-bridge', 'agent-execution-coordinator', 'agent-execution-executor'].flatMap(name => [`packages/core/src/${name}.ts`, `packages/core/test/${name}.test.ts`])
+const sourceFiles = {
+  'agent-execution-bridge': 'agent-execution/bridge.ts',
+  'agent-execution-coordinator': 'agent-execution-coordinator.ts',
+  'agent-execution-executor': 'agent-execution/executor.ts',
+}
+const candidatePaths = Object.entries(sourceFiles).flatMap(([name, path]) => [`packages/core/src/${path}`, `packages/core/test/${name}.test.ts`])
 const fingerprint = async () => Object.fromEntries(await Promise.all(candidatePaths.map(async path => [path, createHash('sha256').update(await readFile(join(repository, path))).digest('hex')])))
 const candidate = await fingerprint()
 const receipts = []
 for (const [name, product, test, from, to] of mutations) {
   const report = join(root, name + '.json'), config = join(root, name + '.config.mjs'), log = join(root, name + '.log')
-  await writeFile(config, `let applied=0;export default {root:${JSON.stringify(repository)},plugins:[{name:'exact-execution-observation-mutation',enforce:'pre',transform(source,id){if(!id.endsWith(${JSON.stringify('/' + product + '.ts')}))return;const from=${JSON.stringify(from)};if(source.split(from).length!==2)throw new Error('Mutation source must match exactly once');applied++;return source.replace(from,${JSON.stringify(to)})},buildEnd(){if(applied!==1)throw new Error('Mutation did not reach the exact product module')}}],test:{include:[${JSON.stringify('packages/core/test/' + test + '.test.ts')}],testTimeout:30000,hookTimeout:30000,passWithNoTests:false,pool:'forks',maxWorkers:1,reporters:['json'],outputFile:${JSON.stringify(report)}}}`, { mode: 0o600 })
+  await writeFile(config, `let applied=0;export default {root:${JSON.stringify(repository)},plugins:[{name:'exact-execution-observation-mutation',enforce:'pre',transform(source,id){if(!id.endsWith(${JSON.stringify('/src/' + sourceFiles[product])}))return;const from=${JSON.stringify(from)};if(source.split(from).length!==2)throw new Error('Mutation source must match exactly once');applied++;return source.replace(from,${JSON.stringify(to)})},buildEnd(){if(applied!==1)throw new Error('Mutation did not reach the exact product module')}}],test:{include:[${JSON.stringify('packages/core/test/' + test + '.test.ts')}],testTimeout:30000,hookTimeout:30000,passWithNoTests:false,pool:'forks',maxWorkers:1,reporters:['json'],outputFile:${JSON.stringify(report)}}}`, { mode: 0o600 })
   const child = spawn(resolve(repository, 'packages/core/node_modules/.bin/vitest'), ['run', '--config', config], { cwd: repository, stdio: ['ignore', 'pipe', 'pipe'] })
   const chunks = []
   child.stdout.on('data', bytes => chunks.push(bytes)); child.stderr.on('data', bytes => chunks.push(bytes))

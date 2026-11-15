@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { MAX_FRAME_BYTES } from '@ctxmux/sdk'
 import { createHash } from 'node:crypto'
-import { AgentExecutionBridge, type AgentExecutionBridgePort, type AgentExecutionBridgeState } from '../src/agent-execution-bridge.js'
+import { AgentExecutionBridge, type AgentExecutionBridgePort, type AgentExecutionBridgeState } from '../src/agent-execution/bridge.js'
 import type { AgentMuxClientEvent, AgentMuxRunInputOperation } from '../src/types.js'
 
 function port(runId: string, output: string, options: { replayChunkBytes?: number; replayEndByte?: number; liveDuringAttach?: { startByte: number; data: string }[] } = {}) {

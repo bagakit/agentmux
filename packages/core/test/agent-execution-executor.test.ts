@@ -7,17 +7,17 @@ import { PassThrough } from 'node:stream'
 import { EventEmitter, once } from 'node:events'
 import { createInterface } from 'node:readline'
 import { WebSocket } from 'ws'
-import { AgentExecutionJournal } from '../src/agent-execution-journal.js'
-import { createAgentExecutionExecutor } from '../src/agent-execution-executor.js'
-import { runAgentExecutionFrontend } from '../src/agent-execution-frontend.js'
-import type { AgentExecutionIntent, AgentExecutionProtocol } from '../src/agent-execution-protocol.js'
+import { AgentExecutionJournal } from '../src/agent-execution/journal.js'
+import { createAgentExecutionExecutor } from '../src/agent-execution/executor.js'
+import { runAgentExecutionFrontend } from '../src/agent-execution/frontend.js'
+import type { AgentExecutionIntent, AgentExecutionProtocol } from '../src/agent-execution/protocol.js'
 
 vi.mock('node:child_process', async importOriginal => {
   const actual = await importOriginal<typeof import('node:child_process')>()
   return { ...actual, spawn: vi.fn(actual.spawn) }
 })
 
-type Frame = { type: string; state?: string; generation: string; scope?: string; operation?: import('../src/agent-execution-journal.js').AgentExecutionOperationKey; code?: string; payload?: { id?: number; method?: string; result?: Record<string, unknown>; error?: { code: number } } }
+type Frame = { type: string; state?: string; generation: string; scope?: string; operation?: import('../src/agent-execution/journal.js').AgentExecutionOperationKey; code?: string; payload?: { id?: number; method?: string; result?: Record<string, unknown>; error?: { code: number } } }
 const cleanup: (() => Promise<void>)[] = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })
 

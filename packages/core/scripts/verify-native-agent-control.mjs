@@ -11,7 +11,7 @@ import WebSocket from 'ws'
 import xterm from '@xterm/headless'
 import { connectAgentMuxRpc } from '../dist/public-rpc-client.js'
 import { connectHostedAgentMux } from '../dist/hosted-client.js'
-import { AgentExecutionBridge } from '../dist/agent-execution-bridge.js'
+import { AgentExecutionBridge } from '../dist/agent-execution/bridge.js'
 import { durableWriteFile } from '../dist/durable-write.js'
 import { createExecutionProofCleanup } from './fixtures/execution-proof-cleanup.mjs'
 

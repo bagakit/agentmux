@@ -3,7 +3,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { AgentExecutionBridge, type AgentExecutionBridgePort, type AgentExecutionBridgeState } from '../src/agent-execution-bridge.js'
+import { AgentExecutionBridge, type AgentExecutionBridgePort, type AgentExecutionBridgeState } from '../src/agent-execution/bridge.js'
 import { AgentExecutionCoordinator, type AgentExecutionHostPort, type AgentExecutionInspection } from '../src/agent-execution-coordinator.js'
 import { AgentMuxError } from '../src/errors.js'
 

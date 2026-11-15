@@ -24,7 +24,7 @@ const root = await realpath(await mkdtemp(join(process.platform === 'darwin' ? '
 const owners = [], diagnostics = []
 const observationEvidence = {}
 const confirmedEndedHelpers = new Set()
-const sourcePaths = ['src/agent-execution-bridge.ts', 'src/agent-execution-coordinator.ts', 'src/agent-execution-executor.ts', 'src/public-rpc-agent-execution.ts', 'src/providers/codex-execution-run.ts']
+const sourcePaths = ['src/agent-execution/bridge.ts', 'src/agent-execution-coordinator.ts', 'src/agent-execution/executor.ts', 'src/public-rpc-agent-execution.ts', 'src/providers/codex-execution-run.ts']
 const fingerprint = async paths => Object.fromEntries(await Promise.all(paths.map(async path => [path, createHash('sha256').update(await readFile(join(packageRoot, path))).digest('hex')])))
 const driver = { path: fileURLToPath(import.meta.url), sha256: createHash('sha256').update(await readFile(fileURLToPath(import.meta.url))).digest('hex') }
 const sourceHashes = await fingerprint(sourcePaths), compiledHashes = await fingerprint(sourcePaths.map(path => path.replace(/^src\//u, 'dist/').replace(/\.ts$/u, '.js')))

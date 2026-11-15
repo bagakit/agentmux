@@ -10,7 +10,7 @@ import { objectCliEnvironment, runCompiledObjectCli as compiledCli } from './hel
 
 const core = process.env.AGENTMUX_TEST_LINK_CORE_ROOT ?? resolve(import.meta.dirname, '..')
 const { connectAgentMuxRpc } = await import(pathToFileURL(join(core, 'dist/public-rpc-client.js')).href) as typeof import('../src/public-rpc-client.js')
-const { AgentExecutionRpcFrontend, AgentExecutionRpcResource } = await import(pathToFileURL(join(core, 'dist/agent-execution-rpc-relay.js')).href) as typeof import('../src/agent-execution-rpc-relay.js')
+const { AgentExecutionRpcFrontend, AgentExecutionRpcResource } = await import(pathToFileURL(join(core, 'dist/agent-execution/rpc-relay.js')).href) as typeof import('../src/agent-execution/rpc-relay.js')
 const { forwardAgentMuxRpcStdio } = await import(pathToFileURL(join(core, 'dist/agentmux-rpc-stdio.js')).href) as typeof import('../src/agentmux-rpc-stdio.js')
 const closes: Array<() => unknown | Promise<unknown>> = []
 afterEach(async () => { for (const close of closes.splice(0).reverse()) await close() })

@@ -2,7 +2,7 @@ import { once } from 'node:events'
 import { PassThrough, Writable } from 'node:stream'
 import { WebSocket } from 'ws'
 import { afterEach, expect, it, vi } from 'vitest'
-import { runAgentExecutionFrontend } from '../src/agent-execution-frontend.js'
+import { runAgentExecutionFrontend } from '../src/agent-execution/frontend.js'
 
 const cleanups: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close() })

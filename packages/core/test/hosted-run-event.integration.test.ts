@@ -3,7 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { AgentMuxClientEventPublisher } from '../src/client-event-publisher.js'
-import { AgentExecutionBridge, type AgentExecutionBridgeState } from '../src/agent-execution-bridge.js'
+import { AgentExecutionBridge, type AgentExecutionBridgeState } from '../src/agent-execution/bridge.js'
 import type { AgentMuxClientEvent } from '../src/types.js'
 import { headlessFixture, until } from './helpers/headless-runtime-fixture.js'
 

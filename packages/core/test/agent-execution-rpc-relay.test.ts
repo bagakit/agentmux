@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { createAgentMuxRpcFrameStream } from '../src/agentmux-rpc-stdio.js'
-import { AgentExecutionRpcFrontend, AgentExecutionRpcResource, gateExecutionAgentRpc } from '../src/agent-execution-rpc-relay.js'
+import { AgentExecutionRpcFrontend, AgentExecutionRpcResource, gateExecutionAgentRpc } from '../src/agent-execution/rpc-relay.js'
 
 const cleanup: (() => Promise<void>)[] = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })

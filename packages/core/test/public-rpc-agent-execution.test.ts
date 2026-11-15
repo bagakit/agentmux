@@ -5,7 +5,7 @@ import { parseAgentMuxCliInvocation, AGENTMUX_CLI_COMMANDS } from '../src/agentm
 import { agentMuxCommandHelp } from '../src/agentmux-cli-help.js'
 import { agentMuxModuleSkill } from '../src/agentmux-cli-module-skills.js'
 import { AGENTMUX_RPC_NATIVE_METHODS } from '../src/public-rpc.js'
-import type { AgentExecutionOperation } from '../src/agent-execution-journal.js'
+import type { AgentExecutionOperation } from '../src/agent-execution/journal.js'
 
 const method = 'agent.execution.inspect' as const
 const key = { bindingId: 'original-binding', streamGeneration: 'original-generation', nativeRequestId: 0 }

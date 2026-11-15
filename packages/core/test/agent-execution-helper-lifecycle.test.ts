@@ -1,10 +1,10 @@
 import { fileURLToPath } from 'node:url'
 import { PassThrough } from 'node:stream'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { runAgentExecutionHelperCli } from '../src/agent-execution-helper-run.js'
+import { runAgentExecutionHelperCli } from '../src/agent-execution/helper-run.js'
 
 const originalArgv = process.argv
-afterEach(() => { process.argv = originalArgv; vi.doUnmock('../src/agent-execution-helper-run.js'); vi.restoreAllMocks(); vi.resetModules() })
+afterEach(() => { process.argv = originalArgv; vi.doUnmock('../src/agent-execution/helper-run.js'); vi.restoreAllMocks(); vi.resetModules() })
 
 function signals() {
   const handlers = new Map<string, () => void>()
@@ -71,7 +71,7 @@ describe('explicit execution helper CLI ownership', () => {
         diagnostics.push(String(data)); (typeof encoding === 'function' ? encoding as () => void : callback)?.(); return true
       }) as typeof process.stdout.write)
       const run = vi.fn(async () => ({ close }))
-      vi.doMock('../src/agent-execution-helper-run.js', async () => ({ ...await vi.importActual<typeof import('../src/agent-execution-helper-run.js')>('../src/agent-execution-helper-run.js'), runAgentExecutionHelper: run }))
+      vi.doMock('../src/agent-execution/helper-run.js', async () => ({ ...await vi.importActual<typeof import('../src/agent-execution/helper-run.js')>('../src/agent-execution/helper-run.js'), runAgentExecutionHelper: run }))
       process.argv = [process.execPath, fileURLToPath(new URL(`../src/providers/${provider}-execution-run.ts`, import.meta.url)), '--agentmux-execution-helper', JSON.stringify({
         providerId: provider, role: 'frontend', bindingId: 'original-binding', createOperationId: 'original-creation', agentSessionId: 'original-session',
         workspacePath: '/original/workspace', journalDirectory: '/original/journal', executable: '/original/cli',

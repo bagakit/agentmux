@@ -1,6 +1,6 @@
 import { PassThrough } from 'node:stream'
 import { expect, it } from 'vitest'
-import { createExecutionFrameChannel } from '../src/agent-execution-channel.js'
+import { createExecutionFrameChannel } from '../src/agent-execution/channel.js'
 
 it('closing a reader never destroys its original helper input', async () => {
   const input = new PassThrough(), output = new PassThrough()

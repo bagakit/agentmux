@@ -26,7 +26,7 @@ vi.mock('node:fs/promises', async importOriginal => {
   }) as T
   return { ...actual, mkdir: guard(actual.mkdir), open: guard(actual.open), chmod: guard(actual.chmod) }
 })
-import { AgentExecutionJournal, type AgentExecutionOperationKey } from '../src/agent-execution-journal.js'
+import { AgentExecutionJournal, type AgentExecutionOperationKey } from '../src/agent-execution/journal.js'
 
 const roots: string[] = []
 const target = (nativeRequestId: string | number = 0): AgentExecutionOperationKey => ({ bindingId: 'original-binding', streamGeneration: 'original-generation', nativeRequestId })

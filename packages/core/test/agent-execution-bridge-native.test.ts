@@ -2,7 +2,7 @@ import { expect, it } from 'vitest'
 import { createHash, randomUUID } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { AgentExecutionBridge, type AgentExecutionBridgePort, type AgentExecutionBridgeState, type AgentExecutionBridgeConnection } from '../src/agent-execution-bridge.js'
+import { AgentExecutionBridge, type AgentExecutionBridgePort, type AgentExecutionBridgeState, type AgentExecutionBridgeConnection } from '../src/agent-execution/bridge.js'
 import type { AgentMuxRunInputOperation } from '../src/types.js'
 import { headlessFixture, until } from './helpers/headless-runtime-fixture.js'
 

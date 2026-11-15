@@ -22,7 +22,7 @@ vi.mock('node:fs/promises', async importOriginal => {
     return handle
   } }
 })
-import { AgentExecutionJournal, type AgentExecutionOperationKey } from '../src/agent-execution-journal.js'
+import { AgentExecutionJournal, type AgentExecutionOperationKey } from '../src/agent-execution/journal.js'
 
 let io: Awaited<ReturnType<typeof messageJournalIo>>
 beforeAll(async () => { io = await messageJournalIo() }, 30_000)
@@ -92,7 +92,7 @@ describe('original native tool operation journal', () => {
     await journal.close()
 
     const modulePath = join(root, 'journal.mjs')
-    await build({ entryPoints: [fileURLToPath(new URL('../src/agent-execution-journal.ts', import.meta.url))], outfile: modulePath, bundle: true, platform: 'node', format: 'esm' })
+    await build({ entryPoints: [fileURLToPath(new URL('../src/agent-execution/journal.ts', import.meta.url))], outfile: modulePath, bundle: true, platform: 'node', format: 'esm' })
     const source = `const {AgentExecutionJournal}=await import(process.argv[1]);
       const journal=await AgentExecutionJournal.open(process.argv[2],process.argv[3]);
       const key=JSON.parse(process.argv[4]), digest=process.argv[5];

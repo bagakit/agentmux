@@ -14,7 +14,7 @@ import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { createHash } from "node:crypto";
 import * as core from "@agentmux/core";
-import { AgentExecutionJournal } from "../../../../../packages/core/src/agent-execution-journal.js";
+import { AgentExecutionJournal } from "../../../../../packages/core/src/agent-execution/journal.js";
 import { AgentExecutionHelperStore } from "../../../../../packages/core/src/agent-execution-helper-store.js";
 const repository = resolve(import.meta.dirname, "../../../../.."),
   output = resolve(process.argv[2]),
