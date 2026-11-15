@@ -83,6 +83,43 @@ async function fixture() {
 }
 
 describe('execution coordinator retained original pair', () => {
+  it('retains both independently pending Inputs across coordinator reopen', async () => {
+    const f = await fixture(), first = await f.open(), ack = gate()
+    await first.coordinator.create(f.input)
+    for (const helper of [f.frontend, f.executor]) {
+      const write = helper.api.writeTerminal.getMockImplementation()!
+      helper.api.writeTerminal.mockImplementationOnce(async (...args) => {
+        const receipt = await write(...args)
+        await ack.promise
+        return receipt
+      })
+    }
+    f.frontend.addOutput({ type: 'request', generation: 'original', payload: { id: 1, method: 'tools/call' } })
+    f.executor.addOutput({ type: 'response', generation: 'original', payload: { id: 0, result: 'original reply' } })
+    try {
+      await vi.waitFor(() => {
+        expect(f.frontend.api.writeTerminal).toHaveBeenCalledOnce()
+        expect(f.executor.api.writeTerminal).toHaveBeenCalledOnce()
+      })
+      const saved = f.read().bridge
+      expect([saved.pending.source, saved.concurrentPending.source].sort()).toEqual(['executor', 'frontend'])
+      const db = new DatabaseSync(join(f.root, 'bindings.sqlite'), { readOnly: true })
+      try { expect(db.prepare('PRAGMA user_version').get()?.user_version).toBe(2) } finally { db.close() }
+      await first.close()
+      const second = await f.open()
+      await second.coordinator.restoreReaders()
+      expect(second.coordinator.inspect(f.input.bindingId)?.state).toBe('connected')
+      for (const helper of [f.frontend, f.executor]) {
+        expect(helper.api.writeTerminal).toHaveBeenCalledTimes(2)
+        expect(helper.api.writeTerminal.mock.calls[1]).toEqual(helper.api.writeTerminal.mock.calls[0])
+        expect(helper.claimed.size).toBe(1)
+        expect(helper.api.createPreparedTerminal).toHaveBeenCalledOnce()
+      }
+      expect(f.read().bridge).not.toHaveProperty('pending')
+      expect(f.read().bridge).not.toHaveProperty('concurrentPending')
+    } finally { ack.release() }
+  })
+
   it('reopens the exact SQLite pair and restores readers without creating a helper or Agent', async () => {
     const f = await fixture(), first = await f.open()
     const created = await first.coordinator.create(f.input)

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { MAX_FRAME_BYTES } from '@ctxmux/sdk'
 import { createHash } from 'node:crypto'
 import { AgentExecutionBridge, type AgentExecutionBridgePort, type AgentExecutionBridgeState } from '../src/agent-execution/bridge.js'
@@ -70,6 +70,54 @@ const inputText = (data: AgentMuxRunInputOperation['data']): string => typeof da
 const request = '  ' + JSON.stringify({ type: 'request', generation: 'original', payload: { id: 1, method: 'write', params: { text: '中文' } } }) + ' \n'
 
 describe('execution bridge original Runtime continuation', () => {
+  it.each(['frontend', 'executor'] as const)('forwards the other direction while an original Input ACK is blocked on %s', async slow => {
+    const fast = slow === 'frontend' ? 'executor' : 'frontend'
+    const frames = { frontend: request, executor: JSON.stringify({ type: 'response', generation: 'original', payload: { id: 1, result: {} } }) + '\n' }
+    const ports = { frontend: port('front', frames.frontend, { replayEndByte: 0 }), executor: port('exec', frames.executor, { replayEndByte: 0 }) }
+    const release = { frontend: () => {}, executor: () => {} }
+    let holding = true, saved = state()
+    for (const side of ['frontend', 'executor'] as const) {
+      const write = ports[side].api.writeTerminal
+      const hold = new Promise<void>(resolve => { release[side] = resolve })
+      ports[side].api.writeTerminal = async (...args) => {
+        const ack = await write(...args)
+        if (holding) await hold
+        return ack
+      }
+    }
+    const errors: Error[] = []
+    const make = () => new AgentExecutionBridge({ state: saved, ports: { frontend: ports.frontend.api, executor: ports.executor.api },
+      persist: async next => { saved = structuredClone(next) }, onFrame: async () => {}, onError: error => errors.push(error) })
+    let bridge = make()
+    try {
+      await bridge.start()
+      ports[slow].emit(0, frames[slow])
+      await vi.waitFor(() => expect(ports[fast].writes).toHaveLength(1))
+      ports[fast].emit(0, frames[fast])
+      await vi.waitFor(() => expect(ports[slow].writes).toHaveLength(1))
+      expect([saved.pending?.source, saved.concurrentPending?.source].sort()).toEqual(['executor', 'frontend'])
+      const original = ports[fast].writes[0]
+      release[slow]()
+      await vi.waitFor(() => expect(saved[fast].outputByte).toBe(Buffer.byteLength(frames[fast])))
+      expect(saved[slow].outputByte).toBe(0)
+      expect(saved.pending?.source).toBe(slow)
+      await bridge.close()
+      holding = false
+      bridge = make()
+      await bridge.start()
+      expect(ports[fast].writes).toEqual([original, original])
+      expect(ports[fast].claimed.size).toBe(1)
+      expect(ports[slow].writes).toHaveLength(1)
+      expect(saved.pending).toBeUndefined()
+      expect(saved.concurrentPending).toBeUndefined()
+      expect(saved[slow].outputByte).toBe(Buffer.byteLength(frames[slow]))
+      expect(errors).toEqual([])
+    } finally {
+      release.frontend(); release.executor()
+      await bridge.close()
+    }
+  })
+
   it('forwards responses despite a failed completion projection', async () => {
     const response = (id: number) => JSON.stringify({ type: 'response', generation: 'original', payload: { id, result: {} } }) + '\n'
     const completion = JSON.stringify({ type: 'operation-completed' }) + '\n'

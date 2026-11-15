@@ -11,8 +11,8 @@ const root = process.argv[2] ? resolve(process.argv[2]) : await mkdtemp(join(tmp
 if (process.argv[2]) await mkdir(root, { recursive: false, mode: 0o700 })
 const mutations = [
   ['wire-numeric-budget', 'inputEnvelopeBytes(runId, operation, Number.MAX_SAFE_INTEGER)) / 4)', 'inputEnvelopeBytes(runId, operation, Number.MAX_SAFE_INTEGER)) / 1)'],
-  ['source-cursor-midframe', 'pending: { ...current, operation, chunk: { offset: through, bytes: limit } }', '[current.source]: { ...this.state[current.source], outputByte: current.sourceStartByte + through }, pending: { ...current, operation, chunk: { offset: through, bytes: limit } }'],
-  ['unknown-chunk-new-id', '{ ...current.operation, data: part }', "{ ...current.operation, operationId: current.operation.operationId + '-retry-' + Math.random(), data: part }"],
+  ['source-cursor-midframe', 'inputByte: end } }, side, next)', 'inputByte: end }, [side]: { ...state[side], outputByte: current.sourceStartByte + through } }, side, next)'],
+  ['unknown-chunk-new-id', '{ ...operation, data: part }', "{ ...operation, operationId: operation.operationId + '-retry-' + Math.random(), data: part }"],
   ['ignore-confirmed-offset', 'const offset = current.chunk?.offset ?? 0', 'const offset = 0'],
   ['repartition-old-claim', 'const limit = current.chunk?.bytes ?? data.byteLength', 'const limit = current.chunk?.bytes ?? inputChunkBytes(position.runId, current.operation)'],
   ['skip-durable-claim', 'await this.options.persist(structuredClone(next))', 'await Promise.resolve()'],
