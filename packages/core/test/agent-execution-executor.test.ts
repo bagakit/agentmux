@@ -1,13 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { appendFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { PassThrough } from 'node:stream'
-import { EventEmitter } from 'node:events'
+import { EventEmitter, once } from 'node:events'
 import { createInterface } from 'node:readline'
+import { WebSocket } from 'ws'
 import { AgentExecutionJournal } from '../src/agent-execution-journal.js'
 import { createAgentExecutionExecutor } from '../src/agent-execution-executor.js'
+import { runAgentExecutionFrontend } from '../src/agent-execution-frontend.js'
 import type { AgentExecutionIntent, AgentExecutionProtocol } from '../src/agent-execution-protocol.js'
 
 vi.mock('node:child_process', async importOriginal => {
@@ -33,7 +35,7 @@ const native = String.raw`
     process.stdout.write('  '+JSON.stringify({jsonrpc:'2.0',id:request.id,result:{pid:process.pid,count}})+' \n');
   }})();`
 
-async function fixture(executable = process.execPath, contribution: Pick<AgentExecutionProtocol, 'concurrentConnections' | 'projectResponse'> = {}) {
+async function fixture(executable = process.execPath, contribution: Pick<AgentExecutionProtocol, 'concurrentConnections' | 'projectResponse' | 'execute'> = {}) {
   const root = await mkdtemp(join(tmpdir(), 'amux-executor-test-'))
   cleanup.push(() => rm(root, { recursive: true, force: true }))
   const journal = await AgentExecutionJournal.open(join(root, 'journal'))
@@ -93,6 +95,56 @@ async function fixture(executable = process.execPath, contribution: Pick<AgentEx
 }
 
 describe('resource executor original native stream', () => {
+  it.each(['native stdio', 'Provider operation'] as const)('returns an unconfirmed write to its original WebSocket request through %s', async (execution) => {
+    let effectFile: string
+    const h = await fixture(process.execPath, execution === 'Provider operation' ? {
+      async execute(request) {
+        if (request.method !== 'save') return undefined
+        await appendFile(effectFile, 'effect\n')
+        return { jsonrpc: '2.0', id: request.requestId, result: { count: 1 } }
+      },
+    } : {})
+    effectFile = h.effects
+    const input = new PassThrough(), output = new PassThrough()
+    const outbound = createInterface({ input: output }), inbound = createInterface({ input: h.output })
+    outbound.on('line', line => {
+      if (JSON.parse(line).type !== 'ready') h.input.write(line + '\n')
+    })
+    inbound.on('line', line => {
+      if (JSON.parse(line).type === 'response') input.write(line + '\n')
+    })
+    const frontend = await runAgentExecutionFrontend({ input, output, onError: error => h.errors.push(error) })
+    cleanup.push(async () => { outbound.close(); inbound.close(); await frontend.close(); input.destroy(); output.destroy() })
+    const socket = new WebSocket(frontend.url)
+    const responses: NonNullable<Frame['payload']>[] = []
+    socket.on('message', bytes => responses.push(JSON.parse(String(bytes))))
+    await once(socket, 'open')
+    const send = (id: number, method: string) => socket.send(JSON.stringify({ jsonrpc: '2.0', id, method }))
+    send(0, 'hello')
+    await vi.waitFor(() => expect(responses).toContainEqual(expect.objectContaining({ id: 0, result: expect.any(Object) })))
+
+    const complete = vi.spyOn(h.journal, 'complete').mockRejectedValueOnce(new Error('private storage error'))
+    send(1, 'save')
+    const issue = await h.wait(frame => frame.code === 'RESPONSE_STORAGE_UNCONFIRMED')
+    expect(await h.journal.inspect(issue.operation!)).toMatchObject({ outcome: 'unknown' })
+    send(2, 'echo')
+    await vi.waitFor(() => expect(responses).toContainEqual(expect.objectContaining({ id: 2, result: expect.any(Object) })))
+    await vi.waitFor(() => expect(responses.filter(response => response.id === 1)).toEqual([
+      expect.objectContaining({ id: 1, error: expect.objectContaining({ code: -32603, message: expect.stringContaining('RESPONSE_STORAGE_UNCONFIRMED') }) }),
+    ]))
+    expect(complete).toHaveBeenCalledTimes(2)
+    expect(await readFile(h.effects, 'utf8')).toBe('effect\n')
+    expect(JSON.stringify(responses)).not.toContain('private storage error')
+    send(1, 'save')
+    await vi.waitFor(() => expect(responses.filter(response => response.id === 1)).toEqual([
+      expect.objectContaining({ id: 1, error: expect.any(Object) }),
+      expect.objectContaining({ id: 1, result: expect.objectContaining({ count: 1 }) }),
+    ]))
+    expect(await h.journal.inspect(issue.operation!)).toMatchObject({ phase: 'completed' })
+    expect(await readFile(h.effects, 'utf8')).toBe('effect\n')
+    expect(h.errors).toEqual([])
+  })
+
   it('keeps independent concurrent Provider connections and identical request IDs on their original generations', async () => {
     const h = await fixture(process.execPath, { concurrentConnections: true })
     const first = Number((await h.initialize('main')).payload!.result!.pid)
@@ -196,8 +248,10 @@ describe('resource executor original native stream', () => {
     vi.spyOn(h.journal, 'dispatch').mockRejectedValueOnce(new Error('writer unavailable before dispatch'))
     h.send(0, 'hello')
     await h.wait(frame => frame.code === 'ORIGINAL_DISPATCH_STORAGE_UNCONFIRMED')
+    expect((await h.reply(0)).payload?.error?.code).toBe(-32603)
+    const cursor = h.frames.length
     h.send(0, 'hello')
-    const initialized = await h.reply(0)
+    const initialized = await h.reply(0, cursor)
     expect(initialized.payload!.result!.pid).toBeTypeOf('number')
     h.send(1, 'echo'); expect((await h.reply(1)).payload!.result!.pid).toBe(initialized.payload!.result!.pid)
     expect((await readFile(h.log, 'utf8')).match(/hello/gu)).toHaveLength(1)
@@ -209,8 +263,9 @@ describe('resource executor original native stream', () => {
     h.send(1, 'save')
     expect(await h.wait(frame => frame.code === 'RESPONSE_STORAGE_UNCONFIRMED')).toMatchObject({ scope: 'operation', operation: { bindingId: 'fixed-binding', streamGeneration: 'original', nativeRequestId: 1 } })
     expect(h.frames.some(frame => frame.type === 'operation-completed' && frame.operation?.nativeRequestId === 1)).toBe(false)
-    expect(h.frames.some(frame => frame.type === 'response' && frame.payload?.id === 1)).toBe(false)
-    h.send(1, 'save'); expect((await h.reply(1)).payload!.result!.count).toBe(1)
+    expect((await h.reply(1)).payload?.error?.code).toBe(-32603)
+    const cursor = h.frames.length
+    h.send(1, 'save'); expect((await h.reply(1, cursor)).payload!.result!.count).toBe(1)
     expect(complete).toHaveBeenCalledTimes(2)
     expect(h.frames.filter(frame => frame.type === 'operation-completed' && frame.operation?.nativeRequestId === 1)).toEqual([{ type: 'operation-completed', generation: 'original', operation: { bindingId: 'fixed-binding', streamGeneration: 'original', nativeRequestId: 1 } }])
     expect(await readFile(h.effects, 'utf8')).toBe('effect\n')

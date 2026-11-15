@@ -74,8 +74,11 @@ describe('Claude shell effects through the original generic execution journal', 
     vi.spyOn(f.journal, 'complete').mockRejectedValueOnce(new Error('Original storage acknowledgement lost'))
     f.call(1, 'Bash', { command: 'printf once >> effects' })
     await f.wait(frame => frame.code === 'RESPONSE_STORAGE_UNCONFIRMED')
+    expect((await f.reply(1)).payload?.error).toBeDefined()
+    const beforeRetry = f.frames.length
     f.call(1, 'Bash', { command: 'printf once >> effects' })
-    const original = await f.reply(1)
+    const original = await f.reply(1, 'main', beforeRetry)
+    expect(original.payload?.result).toBeDefined()
     const cursor = f.frames.length
     f.call(1, 'Bash', { command: 'printf once >> effects' })
     expect((await f.reply(1, 'main', cursor)).payload).toEqual(original.payload)
