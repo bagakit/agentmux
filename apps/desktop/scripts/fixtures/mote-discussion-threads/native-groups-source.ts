@@ -72,6 +72,9 @@ export function connectGroupFixture(target: MotePreferencesTarget) {
       const original = created.find(item => item.id === request.groupId)!
       if (revisionConflict) {
         revisionConflict = false
+        const removed = original.members[1]!.moteId
+        original.members = original.members.map(member => member.moteId === removed ? { ...member, state: 'removed' } : member)
+        original.avatarMoteIds = (original.avatarMoteIds ?? []).filter(id => id !== removed)
         ++original.revision
         throw Object.assign(new Error('群资料已因另一个操作更新。'), { code: 'MOTE_GROUP_REVISION_CONFLICT' })
       }
@@ -97,6 +100,7 @@ export function connectGroupFixture(target: MotePreferencesTarget) {
       const original = created.find(item => item.id === request.groupId)!
       if (request.expectedRevision !== original.revision) throw Error('Wrong original revision')
       original.members = original.members.map(member => request.memberIds.includes(member.moteId) ? { ...member, state: 'removed' } : member)
+      original.avatarMoteIds = (original.avatarMoteIds ?? []).filter(id => !request.memberIds.includes(id))
       ++original.revision
       return { group: structuredClone(original) }
     }

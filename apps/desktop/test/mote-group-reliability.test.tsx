@@ -85,3 +85,46 @@ it('keeps the original management request on unknown outcomes', async () => {
   expect(rpc.mock.calls[1]).toEqual(rpc.mock.calls[0])
   expect(reload).not.toHaveBeenCalled()
 })
+
+it('invites only selected Motes still available in the current group', async () => {
+  const { root, container, button } = mount()
+  const original = group.members[0]!
+  const newMember = { ...original, moteId: 'new-member', name: 'New member', target: { ...original.target, spaceId: 'new-member' } }
+  const other = { ...newMember.target, spaceId: 'other-member' }
+  const candidates = [{ name: newMember.name, target: newMember.target }, { name: 'Other member', target: other }]
+  const rpc = vi.fn(async () => ({ group }))
+  const render = (summary: MoteGroupSummary) => root.render(<MoteGroupDetails group={summary} candidates={candidates} topicCandidates={[]}
+    call={rpc as MoteGroupCall} onReload={() => {}} onUpdated={() => {}} onPerspective={() => {}} />)
+  await act(async () => render(group))
+  await act(async () => { container.querySelector('input')!.click() })
+  expect(button('邀请成员')!.disabled).toBe(false)
+  await act(async () => render({ ...group, revision: 2, members: [...group.members, newMember] }))
+  expect(button('邀请成员')!.disabled).toBe(true)
+  await act(async () => { container.querySelector('input')!.click() })
+  await act(async () => { button('邀请成员')!.click() })
+  expect(rpc).toHaveBeenCalledExactlyOnceWith('space.mote.group.members.add', expect.objectContaining({ expectedRevision: 2, members: [other] }))
+})
+
+it('keeps the current avatar when a stale draft selects only an inactive Mote', async () => {
+  const { root, container, button } = mount()
+  const original = group.members[0]!
+  const current = { ...original, moteId: 'current', name: 'Current member', target: { ...original.target, spaceId: 'current' } }
+  const rpc = vi.fn(async () => ({ group }))
+  const render = (summary: MoteGroupSummary) => root.render(<MoteGroupDetails group={summary} candidates={[]} topicCandidates={[]}
+    call={rpc as MoteGroupCall} onReload={() => {}} onUpdated={() => {}} onPerspective={() => {}} />)
+  await act(async () => render({ ...group, members: [original, current] }))
+  await act(async () => { button('公告与设置')!.click() })
+  await act(async () => { button(original.name)!.click() })
+  expect(button(original.name)?.getAttribute('aria-pressed')).toBe('true')
+  await act(async () => {
+    const announcement = container.querySelector('textarea')!
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(announcement, 'Keep this announcement')
+    announcement.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await act(async () => render({ ...group, revision: 2, avatarMoteIds: [current.moteId], members: [{ ...original, state: 'removed' }, current] }))
+  await act(async () => { button('按新版本继续编辑')!.click() })
+  expect(button(current.name)?.getAttribute('aria-pressed')).toBe('true')
+  await act(async () => { button('保存群资料')!.click() })
+  expect(rpc).toHaveBeenCalledExactlyOnceWith('space.mote.group.update', { groupId: group.id, expectedRevision: 2,
+    operationId: expect.any(String), announcement: 'Keep this announcement' })
+})
