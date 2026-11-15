@@ -192,18 +192,22 @@ export function readDesktopPresentation(selection: AgentMuxDesktopSelection, tab
       const main = independent ? currentWindow && workbenchDocumentVisible(independent.doc)
         ? originalWorkbenchHost({ kind: 'surface', surface: independent.surface })?.host.querySelector<HTMLElement>(`[data-knowledge-surface="${independent.surface}"]`) ?? null : null
         : document.querySelector<HTMLElement>(`[data-desktop-surface="${surface}"]`)
+      const surfaceSelector = surface === 'goals' ? '[data-desktop-goals-view]'
+        : surface === 'survey' || surface === 'recall' ? `[data-knowledge-surface="${surface}"]` : null
+      const mountedSurface = surfaceSelector && main && !main.matches(surfaceSelector)
+        ? main.querySelector<HTMLElement>(surfaceSelector) : main
       const views = surface === 'focus' && main ? [...(main.matches(`[data-desktop-focus-view="${selection.focusView}"]`) ? [main] : []), ...main.querySelectorAll<HTMLElement>(`[data-desktop-focus-view="${selection.focusView}"]`)]
         .filter(element => desktopElementVisible(element) && !element.closest('[data-pmo-teams-topic-floating]')) : []
-      const surveyRegions = survey && regionId && tabId ? Array.from(main?.querySelectorAll<HTMLElement>('[data-workbench-region-id]') ?? []).filter(region =>
+      const surveyRegions = survey && regionId && tabId ? Array.from(mountedSurface?.querySelectorAll<HTMLElement>('[data-workbench-region-id]') ?? []).filter(region =>
         region.dataset.workbenchRegionId === regionId && desktopElementVisible(region) &&
         (region.closest<HTMLElement>('[data-workbench-primary-tab-id]')?.dataset.workbenchPrimaryTabId ??
           region.closest<HTMLElement>('[data-workbench-tab-id]')?.dataset.workbenchTabId) === tabId) : []
       const target = surface === 'focus' ? views.length === 1 ? views[0]! : null
-        : survey && regionId ? surveyRegions.length === 1 ? surveyRegions[0]! : null : surface !== 'space' ? main : regionId ? primaryRegion(selection.space, tabs)
+        : survey && regionId ? surveyRegions.length === 1 ? surveyRegions[0]! : null : surface !== 'space' ? mountedSurface : regionId ? primaryRegion(selection.space, tabs)
         : selection.space?.zoneId ? queryIdentity('data-desktop-zone-id', selection.space.zoneId) : selection.space ? null : main
       const borrowed = surface === 'space' && target?.closest('[data-pmo-teams-topic-floating]')
       const exactGoal = surface !== 'goals' || !selection.goalId ||
-        Boolean(main?.querySelector(`[data-goal-detail-id=${CSS.escape(selection.goalId)}]`))
+        Boolean(mountedSurface?.querySelector(`[data-goal-detail-id=${CSS.escape(selection.goalId)}]`))
       presentation = { ...base, provenance: 'observed', state: borrowed && desktopElementVisible(target) ? 'floating'
         : desktopElementVisible(main) && desktopElementVisible(target) && Boolean(target && main?.contains(target)) && exactGoal ? independent ? 'window' : 'main-visible' : 'pending' }
     }

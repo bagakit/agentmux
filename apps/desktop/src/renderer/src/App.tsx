@@ -10,6 +10,8 @@ import { ExecutorIdentityContext } from './components/AgentAvatar'
 import { SettingsNavigation, normalizeSettingsNavigationRequest, type SettingsNavigationRequest, type MoteConnectionSettingsOrigin, type ChannelSettingsOrigin } from './components/SettingsNavigation'
 import { settingsCatalog, settingsModules } from './components/settings/settings-modules'
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
+import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useShallow } from 'zustand/react/shallow'
 import { BrandIcon } from './components/BrandIcon'
 import { useAgentAttentionNotifications } from './hooks/useAgentAttentionNotifications'
@@ -34,12 +36,8 @@ import { isEditableChordTarget, windowShortcutHandlers } from './lib/workbench-s
 import { surfaceOwnsChord } from './lib/surface-chord-owners'
 import { routeWindowShortcut } from './lib/shortcut-registry'
 import { SurfaceSwitch, TopRowLeadingChrome, WindowSidebarLayoutContext, useWindowSidebarLayout } from './components/TopRowChrome'
-import { GlobalBoardSurface } from './components/GlobalBoardSurface'
-import { GlobalFocusSurface } from './components/GlobalFocusSurface'
 import { WorkbenchSurfaceHost } from './components/StableWorkbenchView'
 import { SurfaceWindowButton } from './components/KnowledgeSurfaceWindow'
-import { GlobalRecallSurface } from './components/GlobalRecallSurface'
-import { GlobalSurveySurface } from './components/GlobalSurveySurface'
 import { isSurveyPage, surveyPageOwner, surveyPageProjection, surveySelectionPresentation, type SurveySelection } from './lib/survey-page-references'
 import { surveySelectionProfileMatch } from './lib/survey-profile-view'
 import { browserProfiles } from './lib/browser-profiles'
@@ -79,6 +77,7 @@ import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import type { WorkbenchViewTarget, WorkbenchViewTargets } from './lib/workbench-presentation'
 import { ordinaryWorkbenchViewTargets, workbenchResourceTabs, workbenchDisplayReferenceMatches } from './lib/workbench-resource-display'
 import { useWorkbenchObjectLayout } from './hooks/useWorkbenchObjectLayout'
+import { useDeferredSurface } from './hooks/useDeferredSurface'
 import { workbenchNavigationTabs } from './lib/workbench-navigation-catalog'
 import { mainRegionReference, workbenchZoneProjection } from './lib/desktop-focus-navigation'
 import { layoutForLogicalRegionFocus } from './lib/region-focus'
@@ -88,7 +87,18 @@ import { SpaceContentPresentationContext, useSpaceContentPresentationOwner } fro
 import { MoteSpaceFrame } from './components/MoteSpaceFrame'
 
 const WorkflowComponentGallery = lazy(() => import('./components/WorkflowComponentGallery').then(module => ({ default: module.WorkflowComponentGallery })))
+const loadFocus = () => import('./components/GlobalFocusSurface').then(module => module.GlobalFocusSurface)
+const loadRecall = () => import('./components/GlobalRecallSurface').then(module => module.GlobalRecallSurface)
+const loadSurvey = () => import('./components/GlobalSurveySurface').then(module => module.GlobalSurveySurface)
+const loadGoals = () => import('./components/GlobalBoardSurface').then(module => module.GlobalBoardSurface)
 const WorkspaceWorkbench = memo(WorkspaceWorkbenchView)
+
+function SurfaceLoadNotice({ name, failure, detached }: { name: string; failure: { error: unknown } | undefined; detached?: boolean }) {
+  return <FullPageLoadingSurface scope="region" phase={failure ? 'failed' : 'loading'}
+    title={failure ? `Could not open ${name}` : `Opening ${name}`}
+    detail={failure ? presentError(failure.error) : 'Preparing this view.'}
+    actions={failure && !detached ? <Button type="button" onClick={() => useAppStore.getState().setMainSurface('workbench')}>Return to Space</Button> : undefined} />
+}
 
 /** Retain equal presentation addresses; the original callbacks and projection stay authoritative. */
 function useStableWorkbenchViewTargets(current: WorkbenchViewTargets): WorkbenchViewTargets {
@@ -218,7 +228,7 @@ function DesktopApp() {
         tabId: pmoTeamsTopicFloatingTargetTabId(floating, tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId) ?? null,
         regionId: floating.reference?.regionId ?? null } : null }
     desktopPresentationCommitted()
-    surfaceSwitchObservation.committed(desktopSurface[mainSurface], !loading && !settingsOpen && !quickSwitchVisible)
+    surfaceSwitchObservation.committed(desktopSurface[mainSurface], surfaceModuleReady && !loading && !settingsOpen && !quickSwitchVisible)
   })
   const recallSelection = useAppStore(state => state.recallZoneSelection)
   const surveySelection = useAppStore((state) => state.surveyZoneSelection)
@@ -269,8 +279,18 @@ function DesktopApp() {
     else if (!previous[mainSurface] && previousDetached.current[mainSurface]) useAppStore.getState().setMainSurface(previousWorkSurface.current)
   }, [mainSurface, surveyDetached, recallDetached])
   const focusVisible = mainSurface === 'agents' && focusMode === 'list' && !settingsOpen
-  const [focusVisited, setFocusVisited] = useState(false)
-  useEffect(() => { if (mainSurface === 'agents') setFocusVisited(true) }, [mainSurface])
+  const goalsVisible = mainSurface === 'board' && !settingsOpen
+  const focusEntry = useDeferredSurface(!loading && focusVisible, loadFocus)
+  const recallEntry = useDeferredSurface(!loading && recallVisible, loadRecall)
+  const surveyEntry = useDeferredSurface(!loading && surveyVisible, loadSurvey)
+  const goalsEntry = useDeferredSurface(!loading && goalsVisible, loadGoals)
+  const FocusSurface = focusEntry?.status === 'loaded' ? focusEntry.Component : null
+  const RecallSurface = recallEntry?.status === 'loaded' ? recallEntry.Component : null
+  const SurveySurface = surveyEntry?.status === 'loaded' ? surveyEntry.Component : null
+  const GoalsSurface = goalsEntry?.status === 'loaded' ? goalsEntry.Component : null
+  const surfaceModuleReady = mainSurface === 'agents' && focusMode === 'list' ? Boolean(FocusSurface)
+    : mainSurface === 'recall' ? Boolean(RecallSurface) : mainSurface === 'survey' ? Boolean(SurveySurface)
+      : mainSurface === 'board' ? Boolean(GoalsSurface) : true
   const surveyBindings = useAppStore(state => state.spaceZoneBindings)
   const surveyTopicSnapshots = useAppStore(state => state.scratchTopicSnapshots)
   const spatialDirectoryVisible = observeSurvey || observeRecall || focusVisible || moteFloating.open || Boolean(moteFloating.preview)
@@ -626,10 +646,6 @@ function DesktopApp() {
     return targets
   }, [config?.browser.startPage, moteViewTargets, surveyVisible, surveyProjection, surveySelection, surveyCurrentSelection, layouts, tabs, surveyToolsOpen, narrowControls, selectSurveyReference,
     focusVisible, focusProjection, focusTab, selectFocusReference, ordinaryTargets, recallVisible, recallProjection, recallCurrentSelection, selectRecallReference])
-  const [recallVisited, setRecallVisited] = useState(mainSurface === 'recall')
-  useEffect(() => { if (recallVisible) setRecallVisited(true) }, [recallVisible])
-  const [surveyVisited, setSurveyVisited] = useState(mainSurface === 'survey')
-  useEffect(() => { if (surveyVisible) setSurveyVisited(true) }, [surveyVisible])
   const compactSidebars = windowWidth <= 760 && mainSurface === 'workbench' && Boolean(config?.workspaces.some(item => item.id === activeWorkspaceId))
   const windowSidebars = useWindowSidebarLayout(compactSidebars)
   const { projectRailOpen, toolsOpen } = windowSidebars
@@ -948,24 +964,28 @@ function DesktopApp() {
               ) : null}
               <div id="survey-surface-home" className="knowledge-surface-home" hidden={mainSurface !== 'survey'}>
                 <WorkbenchSurfaceHost surface="survey" homeId="survey-surface-home" visible={surveyVisible}>
-                  {surveyVisited || surveyVisible ? <GlobalSurveySurface
+                  {SurveySurface ? <SurveySurface
                     windowAction={surveyDetached ? null : <SurfaceWindowButton surface="survey" />}
                     visible={surveyVisible} observeWork={observeSurvey} controlsCoverPage={surveyToolsOpen && narrowControls}
                     onSelectReference={selectSurveyReference} unconfirmedBrowserRegionIds={unconfirmedBrowserRegionIds}
                     catalog={surveyCatalog} projection={surveyProjection} selection={surveyCurrentSelection}
-                    pageSelection={isSurveyPage(surveySelection) ? surveySelection : null} viewTargets={viewTargets} /> : null}
+                    pageSelection={isSurveyPage(surveySelection) ? surveySelection : null} viewTargets={viewTargets} />
+                    : surveyVisible ? <SurfaceLoadNotice name="Survey" detached={surveyDetached} failure={surveyEntry?.status === 'failed' ? surveyEntry : undefined} /> : null}
                 </WorkbenchSurfaceHost>
               </div>
               <div id="recall-surface-home" className="knowledge-surface-home" hidden={mainSurface !== 'recall'}>
                 <WorkbenchSurfaceHost surface="recall" homeId="recall-surface-home" visible={recallVisible}>
-                  {recallVisited || recallVisible ? <GlobalRecallSurface
+                  {RecallSurface ? <RecallSurface
                     windowAction={recallDetached ? null : <SurfaceWindowButton surface="recall" />}
                     visible={recallVisible} observeWork={observeRecall} onSelectReference={selectRecallReference} catalog={surveyCatalog}
-                    projection={recallProjection} selection={recallCurrentSelection} viewTargets={viewTargets} /> : null}
+                    projection={recallProjection} selection={recallCurrentSelection} viewTargets={viewTargets} />
+                    : recallVisible ? <SurfaceLoadNotice name="Recall" detached={recallDetached} failure={recallEntry?.status === 'failed' ? recallEntry : undefined} /> : null}
                 </WorkbenchSurfaceHost>
               </div>
-              {mainSurface === 'agents' || focusVisited ? <GlobalFocusSurface visible={focusVisible} workspaceOpen={focusWorkfaceView !== 'closed' && Boolean(workbenchSpaceSelection || focusWorkfaceView === 'unconfirmed')} onCloseWorkspace={() => setFocusWorkfaceView('closed')} onSelectContext={selectFocusContext} onSelectLocation={focusWorkfaceView === 'unconfirmed' ? undefined : selectFocusReference} regionOnly={focusRegionOnly} onToggleRegion={() => setFocusWorkfaceView(value => value === 'region' ? 'tab' : 'region')} presentation={focusPresentation} currentReference={timelineCurrentReference} directoryIssue={spatialDirectory.issue} viewTargets={viewTargets} /> : null}
-              {mainSurface === 'board' ? <GlobalBoardSurface /> : null}
+              {FocusSurface ? <FocusSurface visible={focusVisible} workspaceOpen={focusWorkfaceView !== 'closed' && Boolean(workbenchSpaceSelection || focusWorkfaceView === 'unconfirmed')} onCloseWorkspace={() => setFocusWorkfaceView('closed')} onSelectContext={selectFocusContext} onSelectLocation={focusWorkfaceView === 'unconfirmed' ? undefined : selectFocusReference} regionOnly={focusRegionOnly} onToggleRegion={() => setFocusWorkfaceView(value => value === 'region' ? 'tab' : 'region')} presentation={focusPresentation} currentReference={timelineCurrentReference} directoryIssue={spatialDirectory.issue} viewTargets={viewTargets} />
+                : focusVisible ? <SurfaceLoadNotice name="Focus" failure={focusEntry?.status === 'failed' ? focusEntry : undefined} /> : null}
+              {mainSurface === 'board' ? GoalsSurface ? <GoalsSurface />
+                : goalsVisible ? <SurfaceLoadNotice name="Goals" failure={goalsEntry?.status === 'failed' ? goalsEntry : undefined} /> : null : null}
               {mapVisited || mapVisible ? <AgentCollaborationMap request={mapTarget} active={mapVisible} onViewInFocus={(subject, presentationSessionId) => useAppStore.getState().revealFocusAgent(subject, presentationSessionId)} onOpen={(context, reference) => { if (useAppStore.getState().focusExecutionSession(context.id, reference)) useAppStore.getState().setMainSurface('workbench') }} /> : null}
               {config && mountedWorkspaceIds.length > 0 ? (
                 <div

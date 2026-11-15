@@ -1,29 +1,24 @@
-import { useEffect, useLayoutEffect, useState, type ComponentProps } from 'react'
+import { useLayoutEffect, type ComponentProps } from 'react'
 import { Button } from '@agentmux/client-ui/components/Button'
 import type { AgentCollaborationMap as LoadedAgentCollaborationMap } from './AgentCollaborationMap'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { desktopPresentationCommitted } from '../lib/desktop-presentation'
 import { useAppStore } from '../store'
+import { useDeferredSurface } from '../hooks/useDeferredSurface'
+
+const loadMap = () => import('./AgentCollaborationMap').then(module => module.AgentCollaborationMap)
 
 /** First-use module loading only. The original Map owns its state after opening. */
 export function AgentCollaborationMap(props: ComponentProps<typeof LoadedAgentCollaborationMap>) {
-  const [entry, setEntry] = useState<{ Component: typeof LoadedAgentCollaborationMap } | { error: unknown }>()
   const enabled = props.active !== false && props.request !== null
-  useEffect(() => {
-    if (!enabled || entry) return
-    let current = true
-    void import('./AgentCollaborationMap').then(({ AgentCollaborationMap }) => {
-      if (current) setEntry({ Component: AgentCollaborationMap })
-    }, error => { if (current) setEntry({ error }) })
-    return () => { current = false }
-  }, [enabled, entry])
+  const entry = useDeferredSurface(enabled, loadMap)
   useLayoutEffect(() => {
-    if (entry && 'Component' in entry) desktopPresentationCommitted()
+    if (entry?.status === 'loaded') desktopPresentationCommitted()
   }, [entry])
 
-  if (entry && 'Component' in entry) return <entry.Component {...props} />
+  if (entry?.status === 'loaded') return <entry.Component {...props} />
   if (!enabled) return null
-  const failed = entry && 'error' in entry
+  const failed = entry?.status === 'failed'
   // Only the loaded Map exposes the ready marker consumed by public navigation.
   return <section className="collaboration-map" aria-label="Focus map loading">
     <FullPageLoadingSurface scope="region" phase={failed ? 'failed' : 'loading'} eyebrow="Focus map"

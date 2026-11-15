@@ -149,7 +149,7 @@ export function GlobalBoardSurface() {
   }
   function renderRow(demand: DemandProjection) { return <GoalRow key={demand.id} board={view === 'board' && !selectedDemandId} demand={demand} selected={demand.id === selectedDemandId} acknowledgementFailed={acknowledgementFailed(demand.id)} stageChanged={changedStages.has(demand.id)} selectedSessionId={selectedSessionId} compact={Boolean(selectedDemandId)} onSelect={() => { selectedRowRef.current = document.activeElement as HTMLElement; setSelectedDemand(demand.id) }} /> }
 
-  return <section ref={surfaceRef} className={`global-board-surface goals-surface${selectedDemandId ? ' goals-surface--detail-open' : ''}`} onKeyDown={(event) => {
+  return <section ref={surfaceRef} data-desktop-goals-view className={`global-board-surface goals-surface${selectedDemandId ? ' goals-surface--detail-open' : ''}`} onKeyDown={(event) => {
     const row = (event.target as HTMLElement).closest<HTMLElement>('.goals-collection [data-demand-id]')
     if (row && event.target === row && !event.nativeEvent.isComposing && !event.metaKey && !event.ctrlKey && !event.altKey) {
       const step = event.key === 'j' || event.key === 'ArrowDown' ? 1 : event.key === 'k' || event.key === 'ArrowUp' ? -1 : 0
