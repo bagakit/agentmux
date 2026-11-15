@@ -16,12 +16,17 @@ const runtimeEdits = {
     file: 'MeshPeerPairing.tsx',
     before: 'aria-invalid={Boolean(error && !candidate) || undefined}',
     after: 'aria-invalid={undefined}'
+  },
+  'hook-selected-scope': {
+    file: 'ProviderHooksPane.tsx',
+    before: 'scopeId: scope.scopeId, scopeRevision: scope.scopeRevision',
+    after: 'scopeId: scopes[0]!.scopeId, scopeRevision: scopes[0]!.scopeRevision!'
   }
 }
 const edit = mutant ? runtimeEdits[mutant as keyof typeof runtimeEdits] : undefined
 if (mutant && !edit) throw Error('Unknown Runtime Settings input mutation')
 const owners = new Set([
-  'AgentSettingsPane.tsx', 'HostExecutorSettings.tsx', 'ProviderComparisonPane.tsx', 'HostSettingsPane.tsx',
+  'AgentSettingsPane.tsx', 'HostExecutorSettings.tsx', 'ProviderComparisonPane.tsx', 'ProviderHooksPane.tsx', 'HostSettingsPane.tsx',
   'HostProjectsPane.tsx', 'HostTailcatListenerFields.tsx', 'MeshNetworkSettings.tsx', 'MeshPeerPairing.tsx',
   'NetworkNodeSettingsPane.tsx', 'RemoteRoutesPane.tsx'
 ])
@@ -53,7 +58,7 @@ export default defineConfig({
   test: {
     setupFiles: [resolve(root, 'vitest.setup.ts')],
     include: [
-      'settings-product-polish', 'settings-executor-creation', 'settings-host-registration-drafts', 'provider-comparison-pane',
+      'settings-product-polish', 'settings-executor-creation', 'settings-host-registration-drafts', 'provider-comparison-pane', 'executor-hook-maintenance',
       'host-tailcat-settings', 'tailcat-connection-draft', 'mesh-settings', 'network-node-settings', 'remote-routes'
     ].map(test => 'apps/desktop/test/' + test + '.test.tsx'),
     maxWorkers: 1,

@@ -41,7 +41,7 @@ it('compares the selected Host and hands off the exact Provider even when anothe
   const read = vi.spyOn(api.providers, 'forHost').mockImplementation(hostId => hostId === 'local' ? local : Promise.resolve(remote))
   vi.spyOn(api.executors, 'discover').mockRejectedValue(new Error('Executor inventory unavailable'))
   const open = vi.fn()
-  await dom.render(<ProviderComparisonPane active hosts={hosts} onExecutors={open} />)
+  await dom.render(<ProviderComparisonPane active hosts={hosts} onExecutors={open} onHooks={vi.fn()} />)
   const host = dom.container.querySelector<HTMLSelectElement>('[aria-label="Provider Host"]')!
   await act(async () => {
     host.value = 'remote'
@@ -67,7 +67,7 @@ it('filters names, identifiers and executable commands and preserves an arbitrar
   const local = catalog('local', entry('codex', 'Codex', 'streaming', 'respond'), entry('grok', 'Grok', 'complete-events', 'observe'),
     { ...entry('antigravity', 'Antigravity', 'complete-events', 'observe'), executable: 'agy' })
   const read = vi.spyOn(api.providers, 'forHost').mockResolvedValue(local)
-  await dom.render(<ProviderComparisonPane active hosts={hosts} onExecutors={vi.fn()} />)
+  await dom.render(<ProviderComparisonPane active hosts={hosts} onExecutors={vi.fn()} onHooks={vi.fn()} />)
   expect(rows()).toEqual(['codex', 'grok', 'antigravity'])
   await dom.click('[aria-label="Select Codex for comparison"]')
   await filter('  AGY ')
@@ -93,7 +93,7 @@ it('retains declarations and the original Executor route after a failed same-Hos
   vi.spyOn(api.providers, 'forHost').mockResolvedValueOnce(local).mockRejectedValueOnce(new Error('Connection unavailable'))
   vi.spyOn(api.executors, 'discover').mockResolvedValue({ routeHostId: 'local', runtimeId: 'fixture', executors: [] })
   const open = vi.fn()
-  await dom.render(<ProviderComparisonPane active hosts={hosts} onExecutors={open} />)
+  await dom.render(<ProviderComparisonPane active hosts={hosts} onExecutors={open} onHooks={vi.fn()} />)
   await dom.click('[aria-label="Refresh Provider capabilities"]')
   expect(dom.container.querySelector('.provider-comparison__matrix [role="status"]')?.textContent).toContain('Showing the last catalog from this Host.')
   expect(rows()).toEqual(['codex'])
