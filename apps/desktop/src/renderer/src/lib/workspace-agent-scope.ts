@@ -1,7 +1,7 @@
 import type { AgentMuxSpaceCatalog, AgentSessionHistoryDescriptor } from '@agentmux/core'
 import type { SessionSnapshot, WorkspaceRecord, ScratchTopicSnapshot } from '../../../shared/contracts'
 import { SCRATCH_WORKSPACE_ID, scratchTopicIdFromWorkspacePath, scratchTopicPhysicalPath, workspaceOwnsSessionPath } from '@agentmux/host/mote-model'
-import { originalTopicAddress, topicSpatialAddress } from '../../../shared/space-addresses'
+import { originalTopicAddress, topicSpatialAddress, type SpaceZoneBinding } from '../../../shared/space-addresses'
 import { workspaceProjectId } from './workspace-projects'
 import type { NavigationState } from './desktop-focus-navigation'
 import { workbenchNavigationCatalog } from './workbench-navigation-catalog'
@@ -23,10 +23,14 @@ export type WorkspaceAgentMember = {
 export type WorkspaceAgentList = { key: string; title: string; sessions: readonly AgentSessionSnapshot[]; members: readonly WorkspaceAgentMember[]; issue: string | null }
 export type WorkspaceAgentSources = ReadonlyMap<string, AgentSessionHistoryDescriptor>
 type Reference = Parameters<WorkspaceAgentExecutionResolver>[0]
+type CollectionTopicEvidence = {
+  topicId: string; spaceId: string; paths: readonly string[]; collaborators: ScratchTopicSnapshot['collaborators']
+}
 type ObjectScope = {
-  key: string; title: string; topicId: string; hostId: string; paths: readonly string[]
-  collaborators: ScratchTopicSnapshot['collaborators']; kind: 'topic' | 'mote' | 'unknown'
+  key: string; title: string; topicId: string | null; hostId: string; paths: readonly string[]
+  collaborators: ScratchTopicSnapshot['collaborators']; kind: 'topic' | 'mote' | 'unknown' | 'collection'
   spaceId: string | null; zoneId: string | null; issue: string | null
+  collectionTopics?: ReadonlyMap<string, CollectionTopicEvidence>
 }
 const noExecution: WorkspaceAgentExecutionResolver = () => null
 const same = (a: readonly unknown[], b: readonly unknown[]) => a.length === b.length && a.every((value, i) => value === b[i])
@@ -113,7 +117,50 @@ function addCollaborators(target: Map<string, AgentSessionSnapshot>, sessions: r
 function catalogFor(state: WorkspaceAgentScopeState) {
   return workbenchNavigationCatalog(state, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots))
 }
-function objectScope(state: WorkspaceAgentScopeState, workspace: WorkspaceRecord, catalog: AgentMuxSpaceCatalog): ObjectScope | null {
+function topicPaths(workspace: WorkspaceRecord, topicId: string, topic: ScratchTopicSnapshot | undefined,
+  binding: SpaceZoneBinding | undefined, topics: readonly ScratchTopicSnapshot[] | null, retained: readonly string[] = []): string[] {
+  const paths = new Set(retained)
+  for (const path of [...topic?.confirmedDirectoryPaths ?? [], topic?.identityDirectoryPath, topic?.physicalDirectoryPath, binding?.directoryPath]) {
+    if (path) paths.add(path)
+  }
+  if (topic && !topic.readError) paths.add(scratchTopicPhysicalPath(workspace, topic))
+  for (const path of paths) {
+    const owner = scratchTopicIdFromWorkspacePath(workspace.path, path, topics)
+    if ((owner || topic) && owner !== topicId) paths.delete(path)
+  }
+  return [...paths]
+}
+function collectionAgentScope(state: WorkspaceAgentScopeState, resource: WorkspaceRecord,
+  topics: readonly ScratchTopicSnapshot[] | null, spaceId: string | null, held: ObjectScope | null): ObjectScope | null {
+  const collection = state.topicCategories?.find(category => category.spaceId === spaceId && category.hostId === resource.hostId)
+  const key = JSON.stringify(['collection-agent-list', resource.id, resource.hostId, resource.path, spaceId])
+  const previous = held?.key === key ? held : null
+  if (!spaceId || !collection && !previous) return null
+  const byId = new Map(topics?.map(topic => [topic.id, topic]))
+  const collectionTopics = new Map<string, CollectionTopicEvidence>()
+  let issue = collection ? collection.readError ?? null : 'The original Collection directory is unconfirmed. Confirmed members remain available.'
+  for (const [zoneId, binding] of Object.entries(state.spaceZoneBindings)) {
+    if (!binding.topicId || binding.workspaceId !== resource.id || binding.relations?.[spaceId] !== true) continue
+    const topicId = binding.topicId, topic = byId.get(topicId)
+    const observedKind = scratchTopicKind(topicId, topic ? [topic] : null)
+    const kind = observedKind === 'mote' ? observedKind : binding.contentKind ?? observedKind
+    if (kind !== 'topic') {
+      if (kind === 'unknown') issue ??= 'Some original Collection Topic identities are unconfirmed. Refresh the original directory.'
+      continue
+    }
+    const old = previous?.collectionTopics?.get(zoneId)
+    const missing = !topic || Boolean(topic.readError)
+    const retained = missing && old?.topicId === topicId && old.spaceId === binding.spaceId ? old : undefined
+    if (missing) issue ??= topic?.readError ?? 'Some original Collection Topic metadata is unconfirmed. Confirmed members remain available.'
+    const paths = topicPaths(resource, topicId, topic, binding, topics, retained?.paths)
+    collectionTopics.set(zoneId, { topicId, spaceId: binding.spaceId,
+      paths, collaborators: [...retained?.collaborators ?? [], ...topic?.collaborators ?? []] })
+  }
+  const members = [...collectionTopics.values()]
+  return { key, title: collection?.title ?? previous!.title, topicId: null, hostId: resource.hostId, kind: 'collection', spaceId, zoneId: null,
+    paths: [...new Set(members.flatMap(member => member.paths))], collaborators: members.flatMap(member => member.collaborators), collectionTopics, issue }
+}
+function objectScope(state: WorkspaceAgentScopeState, workspace: WorkspaceRecord, catalog: AgentMuxSpaceCatalog, held: ObjectScope | null): ObjectScope | null {
   const choice = state.workbenchSpaceSelection
   if (choice?.workspaceId !== workspace.id) return null
   const resource = state.config?.workspaces.find(value => value.id === SCRATCH_WORKSPACE_ID)
@@ -121,20 +168,15 @@ function objectScope(state: WorkspaceAgentScopeState, workspace: WorkspaceRecord
   const space = catalog.spaces.find(space => space.spaceId === choice.spaceId)
   const topicId = choice.topicId ?? (space?.kind === 'mote' ? space.topicId : undefined) ??
     (space?.kind !== 'folder' && choice.zoneId ? state.spaceZoneBindings[choice.zoneId]?.topicId : undefined)
-  if (!topicId) return null
   const topics = scratchTopicsForConfig(state.config, state.scratchTopicSnapshots)
+  if (!topicId) return collectionAgentScope(state, resource, topics, choice.spaceId, held)
   const topic = topics?.find(value => value.id === topicId)
   const originals = Object.entries(state.spaceZoneBindings).filter(([, value]) => value.topicId === topicId && value.workspaceId === resource.id)
   const record = originals.length === 1 ? originals[0] : undefined
   const address = topic ? originalTopicAddress(resource, topic, state.spaceZoneBindings) : record ? { zoneId: record[0], spaceId: record[1].spaceId } : null
   const origin = address ? state.spaceZoneBindings[address.zoneId] : undefined
   const kind = origin?.contentKind ?? scratchTopicKind(topicId, topics)
-  const paths = new Set<string>()
-  for (const path of [...topic?.confirmedDirectoryPaths ?? [], topic?.identityDirectoryPath, topic?.physicalDirectoryPath, origin?.directoryPath]) {
-    if (path) paths.add(path)
-  }
-  if (topic && !topic.readError) paths.add(scratchTopicPhysicalPath(resource, topic))
-  if (topic) for (const path of paths) if (scratchTopicIdFromWorkspacePath(resource.path, path, topics) !== topicId) paths.delete(path)
+  const paths = topicPaths(resource, topicId, topic, origin, topics)
   const hasZone = address && catalog.zones.some(zone => zone.zoneId === address.zoneId)
   const display = topic ? topicSpatialAddress(state.config, topic, state.spaceZoneBindings, state.topicCategories) : address
   const selectionMatches = kind === 'mote' ? choice.spaceId === address?.spaceId && (!choice.zoneId || catalog.bindings.some(binding => binding.spaceId === choice.spaceId && binding.zoneId === choice.zoneId)) : choice.zoneId === address?.zoneId && choice.spaceId === display?.spaceId
@@ -142,10 +184,11 @@ function objectScope(state: WorkspaceAgentScopeState, workspace: WorkspaceRecord
     ? 'The selected object membership is unconfirmed. Its exact reference and existing Agents are kept; refresh the original directory or spatial facts.'
     : !topic ? 'Original directory discovery is unavailable. Confirmed spatial membership remains available; retry the same directory.' : null)
   return { key: JSON.stringify(['object-agent-list', resource.id, resource.hostId, resource.path, topicId, address?.spaceId, address?.zoneId]), title: topic?.title ?? catalog.spaces.find(space => space.spaceId === address?.spaceId)?.name ?? 'Agents',
-    topicId, hostId: resource.hostId, paths: [...paths], collaborators: topic?.collaborators ?? [], kind,
+    topicId, hostId: resource.hostId, paths, collaborators: topic?.collaborators ?? [], kind,
     spaceId: address?.spaceId ?? null, zoneId: address?.zoneId ?? null, issue }
 }
 function objectZones(scope: ObjectScope, catalog: AgentMuxSpaceCatalog): Set<string> {
+  if (scope.collectionTopics) return new Set(scope.collectionTopics.keys())
   if (scope.kind === 'mote' && scope.spaceId) return new Set(catalog.bindings.filter(binding => binding.spaceId === scope.spaceId).map(binding => binding.zoneId))
   return new Set(scope.zoneId ? [scope.zoneId] : [])
 }
@@ -183,14 +226,14 @@ export function createWorkspaceAgentListSelector(resolveExecution: WorkspaceAgen
     const topics = scratchTopicsForConfig(state.config, state.scratchTopicSnapshots), catalog = catalogFor(state)
     const nextInputs = [workspace, state.workbenchSpaceSelection, topics, state.spaceZoneBindings, catalog]
     if (!same(inputs, nextInputs)) {
-      scope = objectScope(state, workspace, catalog)
+      scope = objectScope(state, workspace, catalog, held)
       const metadata = topics?.find(topic => topic.id === scope?.topicId)
-      if (scope?.issue && held?.key === scope.key && (!metadata || metadata.readError)) scope = {
+      if (scope?.topicId && scope.issue && held?.key === scope.key && (!metadata || metadata.readError)) scope = {
         ...held, ...scope, paths: [...new Set([...held.paths, ...scope.paths])].filter(path => !topics?.some(topic =>
           topic.id !== scope!.topicId && scratchTopicIdFromWorkspacePath(workspace.path, path, [topic]) === topic.id)),
         collaborators: [...held.collaborators, ...scope.collaborators]
       }
-      if (scope && !scope.issue) held = scope
+      if (scope && (!scope.issue || scope.kind === 'collection')) held = scope
       if (!scope || held?.key !== scope.key) held = scope
       inputs = nextInputs
     }
