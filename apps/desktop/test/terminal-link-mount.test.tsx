@@ -220,6 +220,24 @@ describe('mounted Terminal object-link activation', () => {
     expect(terminal.options.linkHandler?.allowNonHttpProtocols).toBe(true)
   })
 
+  it('opens the exact Ticket from parenthesized prose across a soft wrap', async () => {
+    const uri = `amux://goal/original-goal#T-${'A'.repeat(43)}`
+    const prefix = 'Ticket ('
+    const cols = 36
+    const endIndex = prefix.length + uri.length - 1
+    const lastRow = Math.floor(endIndex / cols) + 1
+    await installCells(`${prefix}${uri})。继续`, cols)
+    const receive = vi.fn<(links: ILink[] | undefined) => void>()
+    terminal.provider!.provideLinks(lastRow, receive)
+    const link = receive.mock.lastCall?.[0]?.[0]
+    expect(link).toMatchObject({ text: uri, range: {
+      start: { x: prefix.length + 1, y: 1 }, end: { x: endIndex % cols + 1, y: lastRow }
+    } })
+    await act(async () => link!.activate(pointer(), link!.text, link!.range))
+    expect(api.ui.openObjectLink).toHaveBeenCalledExactlyOnceWith(uri)
+    expect(api.sessions.write).not.toHaveBeenCalled()
+  })
+
   for (const provider of ['bare URI', 'OSC 8'] as const) {
     it(`${provider}: opens original object URIs without HTTP destinations or input`, async () => {
       const activate = provider === 'bare URI' ? web.activate : terminal.options.linkHandler!.activate

@@ -46,6 +46,14 @@ describe('bare object links in published xterm cells', () => {
     }
   })
 
+  it('excludes prose delimiters while retaining literal parentheses in the object identity', async () => {
+    const target = { kind: 'capsule', capsuleId: 'sheet(a)' } as const
+    const uri = formatAmuxObjectLink(target)
+    const { result } = await links(`See (${uri}).`)
+    expect(result.map(link => link.text)).toEqual([uri])
+    expect(parseAmuxObjectLink(result[0]!.text)).toEqual(target)
+  })
+
   it('retains invalid object candidates for an explicit original-owner error instead of guessing another ID', async () => {
     for (const uri of ['amux://agent/original?command=stop', 'amux://agent/original#part', 'amux://unknown/original', 'amux://agent/%2f']) {
       const { result } = await links(uri)
