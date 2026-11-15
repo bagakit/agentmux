@@ -54,7 +54,7 @@ export function createAgentExecutionExecutor(options: {
     if (requestId === undefined) { await report(generation, 'INVALID_NATIVE_MESSAGE', undefined, 'request'); return }
     await channel.send({ type: 'response', generation, payload: { jsonrpc: '2.0', id: requestId, error: { code, message } } })
   }
-  const storageUnconfirmed = async (key: AgentExecutionOperationKey, code: string): Promise<void> => {
+  const outcomeUnconfirmed = async (key: AgentExecutionOperationKey, code: string): Promise<void> => {
     try {
       await reject(key.streamGeneration, key.nativeRequestId, -32603,
         `The resource host could not confirm the original tool operation (${code}). Inspect its outcome before repeating it.`)
@@ -68,7 +68,9 @@ export function createAgentExecutionExecutor(options: {
     await channel.send({ type: 'response', generation, payload: options.protocol.projectResponse?.(request, response) ?? response })
     await completed(key)
   }
-  const completed = (key: AgentExecutionOperationKey) => channel.send({ type: 'operation-completed', generation: key.streamGeneration, operation: key })
+  const completed = (key: AgentExecutionOperationKey) => channel.send({ type: 'operation-completed', generation: key.streamGeneration, operation: key }).catch(() => {
+    options.onError(new Error('The durable operation completed and its diagnostic delivery is unconfirmed'))
+  })
   const settle = async (pending: Pending, state?: Generation): Promise<void> => {
     if (!pending.response) return
     try {
@@ -76,7 +78,7 @@ export function createAgentExecutionExecutor(options: {
     } catch {
       // The reply ends the current wait. The native response stays associated
       // with the original operation for an exact persistence retry.
-      await storageUnconfirmed(pending.key, 'RESPONSE_STORAGE_UNCONFIRMED')
+      await outcomeUnconfirmed(pending.key, 'RESPONSE_STORAGE_UNCONFIRMED')
       return
     }
     if (state) {
@@ -126,10 +128,17 @@ export function createAgentExecutionExecutor(options: {
       const wasConnected = !closed.has(generation)
       state.alive = false; closed.add(generation); state.handles.clear(); state.creating.clear(); children.delete(generation)
       void (async () => {
+        // Exit can precede the last stdout frames. Let the original reader
+        // settle those replies before identifying the operations still missing one.
+        await state.channel.drained
+        if (disposed) return
         for (const pending of state.pending.values()) {
+          if (!pending.nativeDispatch || pending.response) continue
+          state.pending.delete(requestKey(pending.key.nativeRequestId))
           try { await options.journal.markUnknown(pending.key, pending.digest) } catch { /* The original journal receipt remains authoritative. */ }
-          await report(generation, 'NATIVE_CONNECTION_ENDED_OUTCOME_UNKNOWN', pending.key)
+          await outcomeUnconfirmed(pending.key, 'NATIVE_CONNECTION_ENDED_OUTCOME_UNKNOWN')
         }
+        if (!state.pending.size) retained.delete(generation)
         if (wasConnected) await report(generation, 'NATIVE_CONNECTION_ENDED')
         else await channel.send({ type: 'generation', generation, state: 'exited' })
       })().catch(() => options.onError(new Error('Native connection-end observation is unconfirmed')))
@@ -185,23 +194,23 @@ export function createAgentExecutionExecutor(options: {
       const bytes = Buffer.from(JSON.stringify(message.payload))
       let previous
       try { previous = await options.journal.inspect(key) }
-      catch { await storageUnconfirmed(key, 'ORIGINAL_REQUEST_INSPECTION_UNCONFIRMED'); return }
+      catch { await outcomeUnconfirmed(key, 'ORIGINAL_REQUEST_INSPECTION_UNCONFIRMED'); return }
       if (previous) {
         let operation
         try { operation = await options.journal.prepare(key, bytes) }
-        catch { await storageUnconfirmed(key, 'ORIGINAL_REQUEST_CONFLICT_OR_STORAGE_UNCONFIRMED'); return }
+        catch { await outcomeUnconfirmed(key, 'ORIGINAL_REQUEST_CONFLICT_OR_STORAGE_UNCONFIRMED'); return }
         if (operation.phase === 'completed') {
           let result
           try { result = await options.journal.readResult(key, operation.payloadDigest) }
-          catch { await storageUnconfirmed(key, 'RESPONSE_READ_UNCONFIRMED'); return }
-          if (!result) { await storageUnconfirmed(key, 'RESPONSE_READ_UNCONFIRMED'); return }
+          catch { await outcomeUnconfirmed(key, 'RESPONSE_READ_UNCONFIRMED'); return }
+          if (!result) { await outcomeUnconfirmed(key, 'RESPONSE_READ_UNCONFIRMED'); return }
           await replyCommitted(key, result, message)
           return
         }
         if (operation.phase !== 'prepared') {
           const pending = retained.get(generation)?.get(requestKey(message.requestId))
           if (pending?.response) await settle(pending, children.get(generation))
-          else if (!pending || closed.has(generation)) await report(generation, 'ORIGINAL_OPERATION_OUTCOME_UNKNOWN', key)
+          else if (!pending) await outcomeUnconfirmed(key, 'ORIGINAL_OPERATION_OUTCOME_UNKNOWN')
           // A live pending request waits for its original native response.
           return
         }
@@ -221,12 +230,12 @@ export function createAgentExecutionExecutor(options: {
       }
       let prepared
       try { prepared = await options.journal.prepare(key, bytes) }
-      catch { await storageUnconfirmed(key, 'ORIGINAL_REQUEST_STORAGE_UNCONFIRMED'); return }
+      catch { await outcomeUnconfirmed(key, 'ORIGINAL_REQUEST_STORAGE_UNCONFIRMED'); return }
       const state = current ?? start(generation)
       let dispatch
       try { dispatch = await options.journal.dispatch(key, prepared.payloadDigest) }
-      catch { await storageUnconfirmed(key, 'ORIGINAL_DISPATCH_STORAGE_UNCONFIRMED'); return }
-      if (!dispatch.dispatch) { await report(generation, 'ORIGINAL_OPERATION_OUTCOME_UNKNOWN', key); return }
+      catch { await outcomeUnconfirmed(key, 'ORIGINAL_DISPATCH_STORAGE_UNCONFIRMED'); return }
+      if (!dispatch.dispatch) { await outcomeUnconfirmed(key, 'ORIGINAL_OPERATION_OUTCOME_UNKNOWN'); return }
       const pending: Pending = { key, digest: prepared.payloadDigest, request: message }
       state.pending.set(requestKey(message.requestId), pending); retained.set(generation, state.pending)
       if (message.intent.initialize) state.initializing = true

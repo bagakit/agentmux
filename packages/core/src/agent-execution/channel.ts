@@ -9,7 +9,7 @@ export function createExecutionFrameChannel(options: {
   maxFrameBytes?: number
   onFrame(frame: unknown, rawLine: Uint8Array): Promise<void>
   onError(error: Error): void
-}): { send(frame: unknown): Promise<void>; close(): void } {
+}): { send(frame: unknown): Promise<void>; close(): void; drained: Promise<void> } {
   const limit = options.maxFrameBytes ?? EXECUTION_FRAME_LIMIT
   let stopped = false
   let writing = Promise.resolve()
@@ -18,7 +18,7 @@ export function createExecutionFrameChannel(options: {
     if (!stopped) options.onError(error instanceof Error ? error : new Error(String(error)))
   }
   // Async iteration applies Readable backpressure while the exact frame settles.
-  void (async () => {
+  const drained = (async () => {
     let parts: Buffer[] = [], bytes = 0
     for await (const value of options.input.iterator({ destroyOnReturn: false })) {
       if (stopped) break
@@ -42,6 +42,7 @@ export function createExecutionFrameChannel(options: {
     if (!stopped && bytes) throw new Error('Execution protocol ended with an incomplete frame')
   })().catch(fail)
   return {
+    drained,
     send(frame) {
       if (stopped) return Promise.reject(new Error('Execution protocol observation is closed'))
       const data = Buffer.from(JSON.stringify(frame) + '\n')
