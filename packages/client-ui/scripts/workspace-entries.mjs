@@ -59,6 +59,7 @@ export const workspaceSources = {
     'MoteConversationThreads',
     'MoteFace',
     'MoteFirstMessage',
+    'MoteGroupConversation',
     'MoteIcon',
     'MotePeriodConversation',
     'NativeProcessObservation',
