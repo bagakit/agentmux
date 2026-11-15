@@ -1,4 +1,4 @@
-import { intersectRect, normalizeRect, type NormalizedRect, type ScreenshotPoint } from './drawing-model'
+import { intersectRect, normalizeRect, type NormalizedRect, type ScreenshotPoint } from '@agentmux/client-ui/image-annotation'
 
 /** The capture frame's CSS pixel size; its origin is the frame's top-left. `top` is the band the display covers with a camera
  * housing: chrome stays below it, the selection does not. */

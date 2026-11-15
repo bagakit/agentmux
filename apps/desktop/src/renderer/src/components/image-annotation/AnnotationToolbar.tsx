@@ -4,7 +4,7 @@ import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { RovingToolbar, RovingToolbarButton, RovingToolbarItem } from '@agentmux/client-ui/components/RovingToolbar'
 import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import type { ScreenshotTool } from './drawing-model'
+import type { ScreenshotTool } from '@agentmux/client-ui/image-annotation'
 
 export type AnnotationTool = ScreenshotTool | 'select' | 'pan' | 'erase' | 'crop' | 'pixelate' | 'cover' | 'blur' | 'note' | 'spotlight' | 'callout' | 'wand'
 const icon = semanticIconComponent

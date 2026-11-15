@@ -1,4 +1,4 @@
-import type { NormalizedRect, ScreenshotPoint } from './drawing-model'
+import type { NormalizedRect, ScreenshotPoint } from './drawing-model.js'
 
 /** How close, in screen points, a moving edge or point must come to a line before it snaps. */
 export const SNAP_DISTANCE = 6

@@ -7,13 +7,10 @@ import {
   BROWSER_PNG_MAX_PIXELS,
   type BrowserPng
 } from '../../../../shared/contracts'
-import { intersectRect, scaleShape, screenshotOutputShapes, type NormalizedRect, type ScreenshotShape } from './drawing-model'
-import { drawScreenshotShapes } from './drawing-renderer'
+import { clampScreenshotScale, drawScreenshotShapes, intersectRect, scaleShape, screenshotOutputShapes,
+  type NormalizedRect, type ScreenshotShape } from '@agentmux/client-ui/image-annotation'
 
 export const SCREENSHOT_DOWNSCALE_STEPS = [1, 0.85, 0.7, 0.55, 0.4, 0.3] as const
-
-export { clampScreenshotScale } from './geometry'
-import { clampScreenshotScale } from './geometry'
 
 export function screenshotCanvasSize(
   displayWidth: number,

@@ -28,7 +28,7 @@ import {
   type ScreenshotOutline,
   type ScreenshotShape,
   type TextShape
-} from './drawing-model'
+} from './drawing-model.js'
 
 export const SCREENSHOT_TEXT_FONT = 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif'
 

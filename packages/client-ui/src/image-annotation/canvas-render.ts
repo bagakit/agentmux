@@ -1,10 +1,10 @@
 // Portions adapted from a third-party MIT-licensed implementation (commit 4fd93ead1999dc34e13ac5915693ad8467a39a6e).
 // Copyright (c) 2026 Lovecast Inc., MIT License. See THIRD_PARTY_NOTICES.md.
 
-import { clampScreenshotScale } from './geometry'
-import { clipMarkArea, drawScreenshotShapes } from './drawing-renderer'
-import { isScreenshotMask, screenshotOutputLayer, shapeBounds, type ScreenshotShape } from './drawing-model'
-import type { ImageViewport } from './view'
+import { clampScreenshotScale } from './geometry.js'
+import { clipMarkArea, drawScreenshotShapes } from './drawing-renderer.js'
+import { isScreenshotMask, screenshotOutputLayer, shapeBounds, type ScreenshotShape } from './drawing-model.js'
+import type { ImageViewport } from './view.js'
 
 function prepare(canvas: HTMLCanvasElement, viewport: ImageViewport): CanvasRenderingContext2D | null {
   const dpr = clampScreenshotScale(viewport.dpr)

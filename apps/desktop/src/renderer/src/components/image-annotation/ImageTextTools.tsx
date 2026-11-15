@@ -3,7 +3,7 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import type { BrowserPng } from '../../../../shared/contracts'
 import type { NativeRecognizedText } from '@agentmux/native-desktop'
-import type { NormalizedRect } from './drawing-model'
+import type { NormalizedRect } from '@agentmux/client-ui/image-annotation'
 
 export type ImageTextPort = {
   unavailableReason?: string | undefined

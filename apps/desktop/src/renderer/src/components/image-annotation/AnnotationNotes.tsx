@@ -1,5 +1,5 @@
 import { ComposerTextarea } from '@agentmux/client-ui/input'
-import type { NoteShape, NoteTemplate } from './drawing-model'
+import type { NoteShape, NoteTemplate } from '@agentmux/client-ui/image-annotation'
 
 const templates = [
   { id: '', label: 'Free note', hint: 'What should the Agent notice?' },

@@ -1,4 +1,4 @@
-import { CALLOUT_ZOOM_RANGE, calloutBubble, constrainedEndpoint, normalizeRect, shapeBounds, type CalloutShape, type NormalizedRect, type ScreenshotPoint, type ScreenshotShape, type TextShape } from './drawing-model'
+import { CALLOUT_ZOOM_RANGE, calloutBubble, constrainedEndpoint, normalizeRect, shapeBounds, type CalloutShape, type NormalizedRect, type ScreenshotPoint, type ScreenshotShape, type TextShape } from './drawing-model.js'
 
 type Corner = 'nw' | 'ne' | 'se' | 'sw'
 /** `zoom-*` are the corners of a callout bubble; they change its zoom, not its source. */

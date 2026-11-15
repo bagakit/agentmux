@@ -1,6 +1,6 @@
 import type { BrowserPng, BrowserScreenshotCapture } from '../../../../shared/contracts'
 import { screenshotCropGeometry } from '../image-annotation/compose'
-import { intersectRect, shapeBounds, screenshotOutputShapes } from '../image-annotation/drawing-model'
+import { intersectRect, shapeBounds, screenshotOutputShapes } from '@agentmux/client-ui/image-annotation'
 import type { ImageAnnotationInput } from '../image-annotation/types'
 import type { AnnotationHistoricalSource } from '../image-annotation/document'
 

@@ -8,6 +8,7 @@ function entries(prefix, directory, extension, names) {
 
 export const workspaceSources = {
   './platform': 'platform.tsx',
+  './image-annotation': 'image-annotation/index.ts',
   './styles.css': 'styles/index.css',
   ...entries('components', 'components', '.tsx', [
     'AgentAsyncQuestionCard',

@@ -1,5 +1,5 @@
 import { ADJUST_FACTOR_RANGE, ADJUST_SHARPEN_RANGE, BLUR_RADIUS_RANGE, CALLOUT_ZOOM_RANGE, OUTLINE_LIMITS, SPOTLIGHT_DIM_RANGE, isAxisAlignedOutline, normalizeRect, outlineExtent, shapeBounds,
-  type NormalizedRect, type ScreenshotOutline, type ScreenshotPoint, type ScreenshotShape } from './drawing-model'
+  type NormalizedRect, type ScreenshotOutline, type ScreenshotPoint, type ScreenshotShape } from '@agentmux/client-ui/image-annotation'
 import type { AnnotationImage } from './types'
 
 export type AnnotationHistoricalSource = {

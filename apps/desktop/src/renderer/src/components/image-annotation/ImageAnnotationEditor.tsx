@@ -8,30 +8,32 @@ import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useWorkbenchDocument } from '../../lib/workbench-document'
 import { claimSurfaceChords } from '../../lib/surface-chord-owners'
-import type { ShortcutEvent } from '../../lib/shortcut-registry'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { AnnotationToolbar, ANNOTATION_TOOLS, type AnnotationTool } from './AnnotationToolbar'
 import { CaptureHint, CaptureToolbar, CaptureTooltip, CAPTURE_TOOLS } from './CaptureToolbar'
 import { captureLoupePlacement, captureSizeChipPlacement, captureToolbarPlacement, cropGestureRect, CROP_CURSORS, hitCropHandle, rectContains, shownSelection, type CropGesture } from './capture-geometry'
 import { AnnotationOriginalMenu } from './AnnotationOriginalMenu'
 import { AnnotationNotes } from './AnnotationNotes'
-import { renderCommittedLayer, renderScreenshotScene } from './canvas-render'
-import { canRedo, canUndo, clearShapes, commitShape, createScreenshotDocument, DEFAULT_SCREENSHOT_COLOR,
+import {
+  canRedo, canUndo, clearShapes, commitShape, createScreenshotDocument, DEFAULT_SCREENSHOT_COLOR,
   DEFAULT_SCREENSHOT_FONT_SIZE, DEFAULT_SCREENSHOT_WIDTH, redoShape, SCREENSHOT_COLORS, SCREENSHOT_FONT_SIZES,
   SCREENSHOT_WIDTHS, undoShape, hitTestShape, moveShape, replaceShape, removeShapes, setCrop, normalizeRect,
   shapeBounds, intersectRect, screenshotOutputShapes, type NormalizedRect, type ScreenshotDocument, type ScreenshotPoint,
   alignShapes, distributeShapes, duplicateShapes, groupBounds, moveShapes, pasteShapes, reorderShapes, restyleShapes,
-  setShapesLocked, type ShapeAlignment, type ShapeOrder,
+  setShapesLocked, type ShapeAlignment,
   isScreenshotMask, screenshotTextLines, constrainedEndpoint, setShapes, renumberNotes, nextNoteNumber,
   createBlurShape, createSpotlightShape, createCalloutShape, calloutBubble, CALLOUT_GAP, BLUR_RADIUS_RANGE, SPOTLIGHT_DIM_RANGE, CALLOUT_ZOOM_RANGE,
-  DEFAULT_BLUR_RADIUS, DEFAULT_SPOTLIGHT_DIM, DEFAULT_CALLOUT_ZOOM, ADJUST_FACTOR_RANGE, ADJUST_SHARPEN_RANGE, createAdjustShape, exceedsOutlineLimits, withOutline, NEUTRAL_ADJUSTMENT,
+  DEFAULT_BLUR_RADIUS, DEFAULT_SPOTLIGHT_DIM, DEFAULT_CALLOUT_ZOOM, ADJUST_FACTOR_RANGE, ADJUST_SHARPEN_RANGE,
+  createAdjustShape, exceedsOutlineLimits, withOutline, NEUTRAL_ADJUSTMENT,
   type AdjustParameters, type AdjustShape, type BlurShape, type CoverShape, type RegionHighlightShape, type PixelateShape, type ScreenshotOutline, type SpotlightShape,
-  type ScreenshotShape, type TextShape, type NoteTemplate } from './drawing-model'
-import { drawMarchingAnts, SCREENSHOT_TEXT_FONT } from './drawing-renderer'
-import { DEFAULT_MAGIC_WAND_TOLERANCE, MAGIC_WAND_TOLERANCE_RANGE, magicWandOutline, magicWandRegion, unionMagicWandRegions, type MagicWandRegion } from './magic-wand'
-import { selectionHandles, hitSelectionHandle, lockedMarkAt, marqueeSelection, resizeShapeFromHandle, type SelectionHandleId } from './selection-geometry'
-import { pointFeatures, rectFeatures, snap, snapLines, SNAP_DISTANCE, type SnapFeatures, type SnapLines } from './snapping'
-import { fitImageView, imagePoint, zoomImageView, type AnnotationView, type ImageViewport } from './view'
+  type ScreenshotShape, type TextShape, type NoteTemplate,
+  drawMarchingAnts, SCREENSHOT_TEXT_FONT, renderCommittedLayer, renderScreenshotScene,
+  DEFAULT_MAGIC_WAND_TOLERANCE, MAGIC_WAND_TOLERANCE_RANGE, magicWandOutline, magicWandRegion, unionMagicWandRegions, type MagicWandRegion,
+  selectionHandles, hitSelectionHandle, lockedMarkAt, marqueeSelection, resizeShapeFromHandle, type SelectionHandleId,
+  pointFeatures, rectFeatures, snap, snapLines, SNAP_DISTANCE, type SnapFeatures, type SnapLines,
+  fitImageView, imagePoint, zoomImageView, type AnnotationView, type ImageViewport,
+  imageAnnotationHistoryCommand, imageAnnotationObjectCommand, type ImageAnnotationObjectCommand
+} from '@agentmux/client-ui/image-annotation'
 import type { AnnotationImage, ImageAnnotationInput, ImageAnnotationOutputResult } from './types'
 import './image-annotation.css'
 
@@ -48,18 +50,6 @@ const ALIGNMENTS: readonly { id: ShapeAlignment; label: string; Icon: ReturnType
 const DISTRIBUTIONS: readonly { id: 'horizontal' | 'vertical'; label: string; Icon: ReturnType<typeof icon> }[] = [
   { id: 'horizontal', label: 'Distribute horizontally', Icon: icon('drawing.distribute-horizontal') },
   { id: 'vertical', label: 'Distribute vertically', Icon: icon('drawing.distribute-vertical') }]
-// Stacking shortcuts by bracket; Shift turns forward and backward into front and back, whichever character it types.
-const BRACKETS: Readonly<Record<string, 'forward' | 'backward'>> = { ']': 'forward', '}': 'forward', '[': 'backward', '{': 'backward' }
-type ObjectCommand = 'select-all' | 'duplicate' | 'copy' | 'paste' | 'lock' | ShapeOrder
-/** The object command a Command or Control chord names. Command-C stays the screenshot copy, so marks copy and paste with
- * Shift. The window shortcut router reads the same answer, so a focused editor keeps every chord it names. */
-function objectCommandFor(event: ShortcutEvent): ObjectCommand | null {
-  if (!event.metaKey && !event.ctrlKey) return null
-  const key = event.key.toLowerCase(), bracket = BRACKETS[event.key]
-  if (bracket) return event.shiftKey ? bracket === 'forward' ? 'front' : 'back' : bracket
-  if (event.shiftKey) return key === 'c' ? 'copy' : key === 'v' ? 'paste' : null
-  return key === 'a' ? 'select-all' : key === 'd' ? 'duplicate' : key === 'l' ? 'lock' : null
-}
 type Size = { width: number; height: number; dpr: number }
 const NO_SELECTION: ReadonlySet<string> = new Set()
 type TextDraft = { shape: TextShape; existing: boolean; edited: boolean }
@@ -588,7 +578,7 @@ export function ImageAnnotationEditor({ image, textTools, captureControls, busy,
     setSelectedIds(current => [...current].some(id => ids.has(id)) ? new Set([...current].filter(id => !ids.has(id))) : current)
   }
   /** Marks copied with Shift stay inside this editor and never reach the system clipboard. */
-  function runObjectCommand(command: ObjectCommand) {
+  function runObjectCommand(command: ImageAnnotationObjectCommand) {
     const shapes = documentState.shapes, distance = 10 / viewRef.current.scale
     const offset = capture ? { x: Math.round(distance), y: Math.round(distance) } : { x: distance, y: distance }
     // Like the marquee, Select All takes what the canvas shows: unlocked marks, never a note hidden under a mask.
@@ -608,7 +598,7 @@ export function ImageAnnotationEditor({ image, textTools, captureControls, busy,
   useEffect(() => {
     const root = editorRef.current
     if (!active || !root) return
-    return claimSurfaceChords(root, event => objectCommandFor(event) !== null)
+    return claimSurfaceChords(root, event => imageAnnotationObjectCommand(event) !== null)
   }, [active, capture])
   useEffect(() => {
     if (!active) return
@@ -643,7 +633,7 @@ export function ImageAnnotationEditor({ image, textTools, captureControls, busy,
       const command = event.metaKey || event.ctrlKey, key = event.key.toLowerCase()
       if (!textDraftRef.current && !noteEditorRef.current) {
         if (event.key === 'Enter' && !command && !('tagName' in target && target.tagName === 'BUTTON')) { event.preventDefault(); complete(); return }
-        const object = objectCommandFor(event)
+        const object = imageAnnotationObjectCommand(event)
         if (object) { event.preventDefault(); runObjectCommand(object); return }
         if (command && key === 'c') { event.preventDefault(); complete(); return }
         if (command && key === 's' && onSavePng) { event.preventDefault(); complete('save-png'); return }
@@ -651,7 +641,8 @@ export function ImageAnnotationEditor({ image, textTools, captureControls, busy,
         if (capture && command && key === 'e') { event.preventDefault(); expand(); return }
         if (onRetake && command && event.shiftKey && key === 'r') { event.preventDefault(); requestRetake(); return }
       }
-      if (command && key === 'z') { event.preventDefault(); if (event.shiftKey) redo(); else undo(); return }
+      const history = imageAnnotationHistoryCommand(event)
+      if (history) { event.preventDefault(); if (history === 'redo') redo(); else undo(); return }
       if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); removeSelected(); return }
       if (groupIds.size && target === canvasRef.current && event.key.startsWith('Arrow')) {
         const delta = event.shiftKey ? 10 : 1

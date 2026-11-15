@@ -1,4 +1,4 @@
-import type { ScreenshotPoint } from './drawing-model'
+import type { ScreenshotPoint } from './drawing-model.js'
 
 export type AnnotationView = { scale: number; x: number; y: number }
 export type ImageViewport = {

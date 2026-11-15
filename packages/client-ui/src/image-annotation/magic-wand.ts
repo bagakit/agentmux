@@ -1,4 +1,4 @@
-import type { NormalizedRect, ScreenshotPoint } from './drawing-model'
+import type { NormalizedRect, ScreenshotPoint } from './drawing-model.js'
 
 /** The wand's tolerance scale: 0 selects only the exact seed color, 100 the whole connected image. */
 export const MAGIC_WAND_TOLERANCE_RANGE = { min: 0, max: 100 } as const

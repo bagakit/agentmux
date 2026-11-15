@@ -112,6 +112,11 @@
       "browser": "./src/platform.tsx",
       "import": "./dist/platform.js"
     },
+    "./image-annotation": {
+      "types": "./src/image-annotation/index.ts",
+      "browser": "./src/image-annotation/index.ts",
+      "import": "./dist/image-annotation/index.js"
+    },
     "./styles.css": "./src/styles/index.css",
     "./components/AgentAsyncQuestionCard": {
       "types": "./src/components/AgentAsyncQuestionCard.tsx",

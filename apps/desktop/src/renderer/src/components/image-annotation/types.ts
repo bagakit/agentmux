@@ -1,4 +1,4 @@
-import type { NormalizedRect, ScreenshotShape } from './drawing-model'
+import type { NormalizedRect, ScreenshotShape } from '@agentmux/client-ui/image-annotation'
 
 /** One host-provided image. Geometry always uses its original pixels. */
 export type AnnotationImage = { dataUrl: string; width: number; height: number }
