@@ -32,6 +32,7 @@ const fixture = vi.hoisted(() => ({
   terminals: [] as BrowserTerminal[],
   beforeCallback: null as (() => void) | null, holdCallbacks: false, callbacks: [] as Array<() => void>,
   focus: vi.fn(), writes: [] as Uint8Array[], grids: [] as Array<{cols:number;rows:number}>,
+  keyHandler: null as ((event: KeyboardEvent) => boolean) | null,
   writeFacts: [] as Array<{ cols: number; rows: number; scrollback: number | undefined }>
 }))
 vi.mock('@xterm/xterm', async () => {
@@ -58,7 +59,10 @@ vi.mock('@xterm/xterm', async () => {
     getSelection() { return '' }
     hasSelection() { return false }
     registerLinkProvider() { return { dispose() {} } }
-    attachCustomKeyEventHandler() {}
+    attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean) {
+      super.attachCustomKeyEventHandler(handler)
+      fixture.keyHandler = handler
+    }
   } }
 })
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: class { activate() {} dispose() {} fit() {} proposeDimensions() { return { cols: 80, rows: 24 } } } }))
@@ -108,6 +112,7 @@ async function ready(result: SessionAttachResult) {
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   fixture.beforeCallback = null; fixture.holdCallbacks = false; fixture.callbacks.length = 0
+  fixture.keyHandler = null
   fixture.terminals.length = 0; fixture.writes.length = 0; fixture.grids.length = 0; fixture.writeFacts.length = 0; fixture.focus.mockClear()
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
   attach = vi.spyOn(api.sessions, 'attach').mockResolvedValue(replay(repaint))
@@ -184,6 +189,111 @@ it('imports prefix and suffix at their distinct owner grids with temporary scrol
 async function delivered(event: RuntimeEvent) {
   await act(async () => { receive(event); await new Promise(resolve => setTimeout(resolve,25)) })
 }
+
+function sendLiveOutput(startByte = fence) {
+  let cursor = startByte
+  return async (data: string) => {
+    const parsed = vi.fn()
+    fixture.beforeCallback = parsed
+    try {
+      await act(async () => {
+        receive(output(cursor, data))
+        await vi.waitFor(() => expect(parsed).toHaveBeenCalledTimes(1))
+      })
+    } finally {
+      fixture.beforeCallback = null
+    }
+    cursor += encoder.encode(data).byteLength
+  }
+}
+
+async function expectShiftEnter(bytes: string) {
+  expect(write).not.toHaveBeenCalled()
+  await act(async () => {
+    const event = new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, cancelable: true })
+    expect(fixture.keyHandler?.(event)).toBe(false)
+  })
+  expect(write).toHaveBeenCalledExactlyOnceWith(session.control, bytes, 'user', expect.objectContaining({ source: 'user' }))
+  write.mockClear()
+}
+
+it('updates kitty input mode from split live commands and ignores ordinary text, string payloads, and queries', async () => {
+  const terminal = await ready(continuation('seed\r\n'))
+  const send = sendLiveOutput()
+  await expectShiftEnter('\x1b\r')
+  await send('中 [>7u\x1b]0;title [>7u')
+  await send('\x1b\\\x1bPqpayload [>7u\x1b\\\x1b[?')
+  await send('u\x1b[?7u\x1b[>7:1u')
+  expect(contents(terminal)).toContain('中 [>7u')
+  expect(contents(terminal)).not.toContain('payload')
+  await expectShiftEnter('\x1b\r')
+  await send('\x1b[>7')
+  await expectShiftEnter('\x1b\r')
+  await send('u\x1b[?')
+  await send('u\x1b[?0u')
+  await expectShiftEnter('\x1b[13;2u')
+  await send('\x1b[<u')
+  await expectShiftEnter('\x1b\r')
+})
+
+it('applies kitty input mode before the original parser write completion reaches TerminalView', async () => {
+  await ready(continuation('seed'))
+  fixture.holdCallbacks = true
+  try {
+    await act(async () => {
+      receive(output(fence, '\x1b[>7u'))
+      await vi.waitFor(() => expect(fixture.callbacks).toHaveLength(1))
+    })
+    await expectShiftEnter('\x1b[13;2u')
+  } finally {
+    await act(async () => {
+      fixture.holdCallbacks = false
+      for (const callback of fixture.callbacks.splice(0)) callback()
+    })
+  }
+})
+
+it('restores kitty input mode from checkpoint and tail, isolating the active buffer in a single parser batch', async () => {
+  const result = continuation('\x1b[>1u', '\x1b[=4;2u')
+  const terminal = await ready(result)
+  const send = sendLiveOutput(result.session.latestOutputBytes)
+  await expectShiftEnter('\x1b[13;2u')
+  await send('\x1b[=1;3u')
+  await expectShiftEnter('\x1b[13;2u') // Replay tail enabled bit 4 over the checkpoint's bit 1.
+  await send('\x1b[?1049h\x1b[>2u\x1b[=2;3u\x1b[?1049l')
+  expect(terminal.buffer.active.type).toBe('normal')
+  await expectShiftEnter('\x1b[13;2u')
+  await send('\x1b[?104')
+  await send('9h')
+  expect(terminal.buffer.active.type).toBe('alternate')
+  await expectShiftEnter('\x1b\r')
+  await send('\x1b[=2;2u\x1b')
+  await expectShiftEnter('\x1b[13;2u')
+  await send('cafter reset')
+  expect(terminal.buffer.active.type).toBe('normal')
+  expect(contents(terminal)).toContain('after reset')
+  await expectShiftEnter('\x1b\r')
+  await send('\x1b[?1049h')
+  expect(terminal.buffer.active.type).toBe('alternate')
+  await expectShiftEnter('\x1b\r')
+})
+
+it('bounds the kitty input mode stack and restores the previous flags for nested applications', async () => {
+  await ready(continuation('seed'))
+  const send = sendLiveOutput()
+  await send('\x1b[=4u\x1b[>u')
+  await expectShiftEnter('\x1b\r')
+  await send('\x1b[<0u') // The xterm parser exposes both an omitted count and an explicit 0 as zero.
+  await expectShiftEnter('\x1b[13;2u')
+  await send('\x1b[>0u' + '\x1b[>1u'.repeat(15))
+  await expectShiftEnter('\x1b[13;2u')
+  await send('\x1b[<15u')
+  await expectShiftEnter('\x1b\r')
+  await send('\x1b[<u')
+  await expectShiftEnter('\x1b\r')
+  await send('\x1b[>4u\x1b[<1000u')
+  await expectShiftEnter('\x1b\r')
+})
 
 it('reports ordinary writes by exact terminal instance, cause and real parser completion without retaining mutable counters', async () => {
   const seed = 'checkpoint seed\r\n', tail = 'history tail'

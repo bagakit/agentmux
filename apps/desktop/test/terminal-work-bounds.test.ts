@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import ts from 'typescript'
-import { terminalContinuationSteps, type AgentMuxRunAttachment } from '@agentmux/core'
-import { initialKittyKeyboardState, readKittyKeyboardOutput, KITTY_KEYBOARD_STACK_LIMIT } from '../src/renderer/src/lib/terminal-kitty-keyboard'
+import type { AgentMuxRunAttachment } from '@agentmux/core'
+import { terminalCheckpointHistoryPolicy, terminalContinuationSteps } from '@agentmux/core/terminal-continuation'
 import { TerminalLiveOutputQueue, composeTerminalLiveOutputWrite } from '../../../packages/client-ui/src/terminal/live-output'
 import { hydrateTerminalReplay, restoreTerminalCheckpoint, yieldTerminalWork, TERMINAL_REPLAY_BATCH_BYTES } from '../../../packages/client-ui/src/terminal/replay'
 
@@ -26,21 +26,21 @@ function owner(onYield?: (count: number) => void) {
   const yieldWork = async () => { yields.push(sizes.length); onYield?.(sizes.length); await yieldTerminalWork() }
   const bindings = {
     incidents: null, // Diagnostics are outside this parser/work-order fixture.
-    terminalContinuationSteps, TERMINAL_REPLAY_BATCH_BYTES, composeTerminalLiveOutputWrite,
+    terminalCheckpointHistoryPolicy, terminalContinuationSteps, TERMINAL_REPLAY_BATCH_BYTES, composeTerminalLiveOutputWrite,
     hydrateTerminalReplay: (chunks: Parameters<typeof hydrateTerminalReplay>[0], write: Parameters<typeof hydrateTerminalReplay>[1]) => hydrateTerminalReplay(chunks, write, yieldWork),
     restoreTerminalCheckpoint: (bytes: Uint8Array, write: Parameters<typeof hydrateTerminalReplay>[1]) => restoreTerminalCheckpoint(bytes, write, yieldWork),
     yieldTerminalWork: yieldWork,
     viewport: { acceptOwnerSize: (size: { cols: number }) => sizes.push(size.cols) },
-    terminal: { options: { scrollback: 5000 } },
+    terminal: { options: { scrollback: 5000 }, rows: 24, buffer: { normal: { length: 24 } } },
     writeTerminal: async (bytes: Uint8Array) => { writes.push(bytes.slice()) },
     writeOutput: async (bytes: Uint8Array) => { writes.push(bytes.slice()) },
     liveOutputQueue: queue,
     backfillRetainedOutput: async () => { throw new Error('unexpected backfill') },
-    setContinuationAbsence: () => {}, canControlRunRef: { current: false }
+    setContinuationAbsence: () => {}, setHistoryPolicyFailure: () => {}, canControlRunRef: { current: false }
   }
   const create = new Function(...Object.keys(bindings), `
     let cursor = 0, resizeRevision = 0, geometrySteps = 0;
-    let disposed = false, continuationKnown = true, replayingContinuation = false;
+    let disposed = false, continuationKnown = true, replayingContinuation = false, historyPolicyPending = false;
     const readyForLiveOutput = true;
     let droppedPendingThrough = 0, liveGapRedrawPending = false;
     const acceptUncontinuedSnapshot = () => { throw new Error('unexpected discontinuity') };
@@ -58,32 +58,6 @@ function attachment(data: Uint8Array, resizes: Array<{ throughByte: number; resi
 }
 
 describe('Terminal protocol and production work bounds', () => {
-  it('bounds the Kitty stack by evicting oldest and ordinary chunks retain stack identity', () => {
-    let state = initialKittyKeyboardState()
-    for (let i = 1; i <= 10000; i++) state = readKittyKeyboardOutput(state, `\x1b[>${i}u`)
-    expect(state.stack).toEqual(Array.from({ length: KITTY_KEYBOARD_STACK_LIMIT }, (_, i) => 10001 - KITTY_KEYBOARD_STACK_LIMIT + i))
-    const ordinary = readKittyKeyboardOutput(state, 'ordinary output'.repeat(100))
-    expect(ordinary).toBe(state)
-    expect(ordinary.stack).toBe(state.stack)
-    state = readKittyKeyboardOutput(state, '\x1b[<15u')
-    expect(state.stack).toEqual([10001 - KITTY_KEYBOARD_STACK_LIMIT])
-    expect(readKittyKeyboardOutput(state, '\x1b[<1000u').stack).toEqual([])
-  })
-
-  it('keeps independent screen stacks across same-chunk and split DEC switches and reset', () => {
-    let state = readKittyKeyboardOutput(initialKittyKeyboardState(), '\x1b[>1u\x1b[?1049h\x1b[>4u\x1b[=2;2u\x1b[?1049l')
-    expect(state.stack).toEqual([1])
-    expect(state.inactiveStack).toEqual([6])
-    state = readKittyKeyboardOutput(state, '\x1b[?104')
-    expect(readKittyKeyboardOutput(state, '9h\x1b[=2;3u').stack).toEqual([4])
-    const split = readKittyKeyboardOutput(readKittyKeyboardOutput(state, '9h\x1b'), 'c')
-    expect(split.stack).toEqual([])
-    expect(split.inactiveStack).toEqual([])
-    expect(split.screen).toBe('normal')
-    const query = readKittyKeyboardOutput(readKittyKeyboardOutput(initialKittyKeyboardState(), '\x1b[>7'), 'u\x1b[?u\x1b[?0u')
-    expect(query.stack).toEqual([7])
-  })
-
   it('splits an oversized first live event within the byte bound and keeps exact cursor through snapshot admission', () => {
     const data = enc.encode('A'.repeat(65534) + '中\x1b[31m' + 'B'.repeat(131072))
     const queue = new TerminalLiveOutputQueue()

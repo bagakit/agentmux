@@ -38,7 +38,7 @@ const renderer = vi.hoisted(() => {
     onData(callback: (data: string) => void) { this.data = callback; return disposable() }
     onUserInput(callback: () => void) { this.userInput = callback; return disposable() }
     onBinary() { return disposable() }
-    parser = { registerOscHandler: disposable, registerCsiHandler: disposable }
+    parser = { registerOscHandler: disposable, registerCsiHandler: disposable, registerEscHandler: disposable }
     attachCustomKeyEventHandler() {}
     getSelection() { return this.selection }
     hasSelection() { return this.selection.length > 0 }
