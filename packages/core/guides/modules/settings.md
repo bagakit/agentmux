@@ -17,16 +17,23 @@ by unregister; it removes only the exact registered override. After unknown, dis
 current facts; an absent/changed registration does not prove a lost historical ACK and must
 not trigger automatic replay. No private args/environment are returned.
 
-For managed Hooks, read runtimeId and configRevision from settings executors discover
---host HOST --executor EXECUTOR --refresh false. Then use settings executors hooks-inspect
---host HOST --runtime RUNTIME --executor EXECUTOR --config-revision REV.
-Supply --workspace PATH when the native configuration depends on the working directory
-or to check loading in that directory. PATH is absolute on the target Host. The check is read-only. A legacy direct
-runner can still be declared alongside the current Hook. Use hooks-update with the same
-flags as a transport-approved user to write the managed configuration and inspect it again.
+For shared managed Hooks, use settings providers hooks-list --host HOST [--provider PROVIDER]
+to read the actual configuration scopes and their Executors. Use settings providers hooks-inspect
+--host HOST --provider PROVIDER --runtime RUNTIME --scope ID --scope-revision REV
+to recheck one exact scope. Take the Runtime, scope ID and revision from the list. Supply
+--workspace PATH for working-directory-relative configurations and keep that same absolute
+target Host path on follow-up commands. These reads check disk configuration. Use
+settings providers hooks-update with the same scope flags as a transport-approved user to
+write managed configuration and inspect it again. A legacy direct runner can still be
+declared alongside the current Hook.
 The update result and remaining issues are separate. Old callbacks whose original dependency
 is unknown stay in place. A write does not establish loading by an existing Run.
 If the update reply is unknown, inspect before deciding whether to retry.
+
+For native loading in one execution environment, read runtimeId and configRevision from
+settings executors discover --host HOST --executor EXECUTOR --refresh false, then use
+settings executors hooks-inspect --host HOST --runtime RUNTIME --executor EXECUTOR
+--config-revision REV [--workspace PATH].
 
 settings hosts tailcat inspect reads the answering App's local incoming configuration and
 the original Host listener separately. settings hosts tailcat configure --input FILE|-
