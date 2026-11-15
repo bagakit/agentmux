@@ -2,7 +2,7 @@ import type { Root, RootContent } from 'mdast'
 import { parseMarkdownSource } from './markdown-source.js'
 
 type MarkdownNode = Root | RootContent
-type HighlightKind = 'heading' | 'list-marker' | 'quote-marker' | 'emphasis' | 'link' | 'code' | 'math'
+type HighlightKind = 'heading' | 'list-marker' | 'quote-marker' | 'emphasis' | 'link' | 'code'
 
 export type MarkdownSourceHighlight = { start: number; end: number; kind: HighlightKind }
 
@@ -18,9 +18,7 @@ const highlights: Partial<Record<MarkdownNode['type'], HighlightKind>> = {
   image: 'link',
   imageReference: 'link',
   code: 'code',
-  inlineCode: 'code',
-  math: 'math',
-  inlineMath: 'math'
+  inlineCode: 'code'
 }
 
 const MAX_SOURCE_LENGTH = 4096

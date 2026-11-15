@@ -213,5 +213,5 @@ input.ui-switch[type="checkbox"]:disabled { cursor: default; opacity: .6; }
   [data-markdown-token="list-marker"], [data-markdown-token="quote-marker"] { color: var(--text-2); }
   [data-markdown-token="emphasis"] { color: var(--purple); }
   [data-markdown-token="link"] { color: var(--blue); }
-  [data-markdown-token="code"], [data-markdown-token="math"] { color: var(--amber-text); }
+  [data-markdown-token="code"] { color: var(--amber-text); }
 }

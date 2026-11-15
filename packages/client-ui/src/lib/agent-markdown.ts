@@ -1,6 +1,7 @@
 import type { Blockquote, Definition, FootnoteDefinition, Link, Root, RootContent, PhrasingContent } from 'mdast'
 import { htmlBlocks, htmlInlines, type HtmlProjection } from './markdown-html.js'
-import { parseMarkdownSource } from './markdown-source.js'
+import remarkMath from 'remark-math'
+import { markdownSourceGrammar } from './markdown-source.js'
 
 /** remark owns the grammar. This projection retains semantics as data, never executable HTML. */
 export type InlineNode =
@@ -46,6 +47,8 @@ export type BlockNode =
 
 export type MarkdownHeading = Extract<BlockNode, { kind: 'heading' }>
 export type MarkdownDocument = { blocks: BlockNode[]; headings: MarkdownHeading[] }
+
+const readingGrammar = markdownSourceGrammar().use(remarkMath)
 
 type ParseContext = {
   source: string
@@ -257,7 +260,7 @@ function blocksFrom(nodes: readonly RootContent[], context: ParseContext, projec
 function parseMarkdown(source: string, collectHeadings: boolean): MarkdownDocument {
   const headings: MarkdownHeading[] = []
   try {
-    const tree = parseMarkdownSource(source)
+    const tree = readingGrammar.parse(source)
     const context: ParseContext = {
       source, definitions: new Map(), footnotes: new Map(), references: new Map(),
       anchors: new Set(), nextAnchorSuffix: new Map(), headings: collectHeadings ? headings : null, alertsAllowed: true, outline: true
