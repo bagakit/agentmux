@@ -216,6 +216,19 @@ export class AgentMuxHostExecutorOwner {
       descriptor: { ...this.descriptor(executorId, config, source, state.registrationRevisions[executorId]), ...observation } }
   }
 
+  /** Borrow private launch configurations from one inventory cut without probing commands. */
+  async withExecutionConfigurations<T>(providerId: string | undefined, use: (snapshot: {
+    runtimeId: string; executors: { executorId: string; config: AgentExecutorConfig; configRevision: string }[]
+  }) => Promise<T>, write = false): Promise<T> {
+    const read = async () => {
+      const entries = await this.entries((await this.read()).executors)
+      const executors = [...entries].filter(([, { config }]) => providerId === undefined || config.providerId === providerId)
+        .map(([executorId, { config }]) => ({ executorId, config, configRevision: revision(config) }))
+      return await use({ runtimeId: this.options.runtimeId, executors })
+    }
+    return write ? await this.serialized(read) : await read()
+  }
+
   /** Keep a registered configuration current until its scoped maintenance write completes. */
   async withCurrentConfiguration<T>(executorId: string, configRevision: string, write: () => Promise<T>): Promise<T> {
     return await this.serialized(async () => {

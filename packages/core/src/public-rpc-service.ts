@@ -197,7 +197,7 @@ import { observeHostRuntime, parseTailcatListenerObservation } from './host-runt
 import { observeHostAgentResources } from './host-agent-resources.js'
 import { observeRead } from './observation-read.js'
 import { observeHostNetwork } from './host-network-observation.js'
-import { isExecutorHookMethod, isHostSettingsMethod, parseHostSettingsParams, parseHostSettingsResult, type HostSettingsMethod } from './public-rpc-host-settings.js'
+import { isExecutorHookMethod, isHostSettingsMethod, isProviderHookMethod, parseHostSettingsParams, parseHostSettingsResult, type HostSettingsMethod } from './public-rpc-host-settings.js'
 import { AGENTMUX_TAILCAT_DEFAULT_KEYS, isTailcatKeyMethod, parseTailcatKeyParams, parseTailcatKeyResult } from './public-rpc-tailcat-key.js'
 import { isHostMaintenanceMethod, parseHostMaintenanceParams, parseHostMaintenanceResult, type HostMaintenanceActor, type HostMaintenanceParamsMap } from './public-rpc-host-maintenance.js'
 import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMuxRpcMethod,
@@ -219,6 +219,8 @@ export type AgentMuxRpcCorePort = import('./agent-execution-coordinator.js').Age
   'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' | 'listHostNativeAgentSessions' | 'readHostNativeAgentHistory' | 'readHostNativeAgentHistoryResource' |
   'readDeliveryAttempt' | 'readReadingDiagnostic' | 'findReadingDiagnostics' | 'readAgentStartupDiagnostic' | 'findAgentStartupDiagnostics' | 'observeRunStorage' | 'runtimeDiagnostics' | 'runtimeResourceSnapshot' | 'runtimeIdentity' | 'agentCreationAuthority' | 'listTrustedCreationSources' | 'trustCreationSource' | 'agentMessageAuthority' | 'listTrustedMessageSources' | 'trustMessageSource' | 'prepareFederatedMessage' | 'intakeFederatedMessage' | 'prepareFederatedRead' | 'exportFederatedThread' | 'readFederatedOutbox' | 'recordFederatedDispatchEvent' | 'intakeFederatedDispatchEvent' | 'recordFederatedInboxReceipt' | 'listHostExecutors' | 'configureHostExecutor' | 'removeHostExecutor' | 'hostEnvironment'> & {
     maintainHostExecutorHooks?: AgentMuxClient['maintainHostExecutorHooks']
+    listHostProviderHooks?: AgentMuxClient['listHostProviderHooks']
+    maintainHostProviderHooks?: AgentMuxClient['maintainHostProviderHooks']
     probeHostExecutorAcp?: AgentMuxClient['probeHostExecutorAcp']
     stopAgent?: AgentMuxClient['stopAgent']
     signalAgent?: AgentMuxClient['signalAgent']
@@ -2137,7 +2139,8 @@ export class AgentMuxRpcService {
     }
     if (isHostSettingsMethod(method)) {
       const input = parseHostSettingsParams(method, params)
-      if (method === 'settings.executors.hooks-update' && (context.caller !== undefined || context.principal?.kind !== 'user')) {
+      if ((method === 'settings.executors.hooks-update' || method === 'settings.providers.hooks-update') &&
+          (context.caller !== undefined || context.principal?.kind !== 'user')) {
         throw new AgentMuxError('Updating a managed Hook requires a transport-approved user.', 'CONTROL_PERMISSION_DENIED')
       }
       if ((method === 'settings.hosts.inspect' || method === 'settings.hosts.network' || method === 'settings.hosts.home' || method === 'settings.hosts.agent-resources') && !this.ports.coreClients && !this.local) throw new AgentMuxError(
@@ -2162,6 +2165,29 @@ export class AgentMuxRpcService {
         if (method === 'settings.executors.hooks-update') await context.assertCurrent?.()
         context.signal?.throwIfAborted()
         const result = await client.maintainHostExecutorHooks(query, method === 'settings.executors.hooks-update')
+        return parseHostSettingsResult(method, { routeHostId: hostId, ...result }, input) as AgentMuxRpcResult<M>
+      }
+      if (isProviderHookMethod(method)) {
+        const assertHost = async () => {
+          const current = await source()
+          context.signal?.throwIfAborted()
+          if (current.length !== 1 || current[0]!.client !== client) throw new AgentMuxError(
+            'The original Host route changed. Refresh its Provider Hooks.', 'HOST_CONFIGURATION_CHANGED')
+        }
+        if (method === 'settings.providers.hooks-list') {
+          if (!client.listHostProviderHooks) throw new AgentMuxError('This Host does not expose Provider Hook scopes.', 'CONTROL_UNAVAILABLE')
+          const { hostId, ...query } = parseHostSettingsParams('settings.providers.hooks-list', params)
+          const result = await observeRead(client.listHostProviderHooks(query), context.signal)
+          await assertHost()
+          return parseHostSettingsResult(method, { routeHostId: hostId, ...result }, input) as AgentMuxRpcResult<M>
+        }
+        if (!client.maintainHostProviderHooks) throw new AgentMuxError('This Host does not expose Provider Hook scopes.', 'CONTROL_UNAVAILABLE')
+        const { hostId, ...query } = parseHostSettingsParams('settings.providers.hooks-inspect', params)
+        const update = method === 'settings.providers.hooks-update'
+        if (update) { await context.assertCurrent?.(); await assertHost() }
+        const pending = client.maintainHostProviderHooks(query, update)
+        const result = update ? await pending : await observeRead(pending, context.signal)
+        if (!update) await assertHost()
         return parseHostSettingsResult(method, { routeHostId: hostId, ...result }, input) as AgentMuxRpcResult<M>
       }
       if (method === 'settings.hosts.inspect' || method === 'settings.hosts.network' || method === 'settings.hosts.home' || method === 'settings.hosts.agent-resources') {

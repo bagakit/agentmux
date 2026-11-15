@@ -582,6 +582,16 @@ function validatePlan(plan: AgentManagedHookPlan): void {
   }
 }
 
+/** Same native destinations and merge boundaries own one scope, independent of the launch invocation. */
+export function managedHookConfigurationIdentity(plan: AgentManagedHookPlan): { scopeId: string; scopeRevision: string; paths: string[] } {
+  validatePlan(plan)
+  const mutations = [...plan.mutations].sort((left, right) => left.path.localeCompare(right.path))
+  const targets = mutations.map(({ path, merge }) => [path, merge?.kind, merge && 'key' in merge ? merge.key : undefined])
+  const scopeId = hash(JSON.stringify([plan.providerId, targets]))
+  return { scopeId, paths: mutations.map(({ path }) => path),
+    scopeRevision: hash(JSON.stringify([scopeId, plan.retainPreviousDeclarations, mutations.map(({ content, mode }) => [content, mode])])) }
+}
+
 function inspectionErrorCode(error: unknown): string {
   return error instanceof AgentMuxError ? error.code : 'HOOK_TARGET_READ_FAILED'
 }

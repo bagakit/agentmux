@@ -108,6 +108,8 @@ export * from './agent-status-freshness.js'
 export * from './agent-context.js'
 export * from './hook-config-merge.js'
 export * from './managed-hook-installer.js'
+export type { AgentHostProviderHookList, AgentHostProviderHookListInput, AgentHostProviderHookResult,
+  AgentHostProviderHookScope, AgentHostProviderHookTarget } from './host-provider-hooks.js'
 export * from './login-shell-environment.js'
 export { runProcess, type CommandInput, type RunCommandOptions, type CommandResult, type ProcessRunner } from './process-runner.js'
 export * from './runtime.js'

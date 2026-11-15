@@ -281,17 +281,25 @@ export class AgentMuxHostedRuntimeService {
         { kind: 'user', id: rpcString(context.principal.id, 'Transport principal') })) }
     }
     const invocation = input as unknown as AgentMuxHostedInvocation
-    if (invocation.method === 'maintainHostExecutorHooks') {
+    if (invocation.method === 'maintainHostExecutorHooks' || invocation.method === 'maintainHostProviderHooks') {
       const [target, update] = invocation.args
       if (invocation.args.length < 1 || invocation.args.length > 2 || (update !== undefined && typeof update !== 'boolean')) {
-        throw new AgentMuxError('Hook maintenance requires one exact Executor target and an optional update flag.', 'INVALID_CONTROL_REQUEST')
+        throw new AgentMuxError('Hook maintenance requires one exact target and an optional update flag.', 'INVALID_CONTROL_REQUEST')
       }
       if (update && (context.caller !== undefined || context.principal?.kind !== 'user')) {
         throw new AgentMuxError('Updating a managed Hook requires a transport-approved user.', 'CONTROL_PERMISSION_DENIED')
       }
-      const { parseExecutorHookTarget } = await import('./public-rpc-host-settings.js')
-      invocation.args[0] = parseExecutorHookTarget(record(target, ['runtimeId', 'executorId', 'configRevision', 'workspacePath']))
+      const { parseExecutorHookTarget, parseProviderHookTarget } = await import('./public-rpc-host-settings.js')
+      if (invocation.method === 'maintainHostExecutorHooks') {
+        invocation.args[0] = parseExecutorHookTarget(record(target, ['runtimeId', 'executorId', 'configRevision', 'workspacePath']))
+      } else invocation.args[0] = parseProviderHookTarget(target)
       if (update) { await context.assertCurrent?.(); this.assertFence(p.fence) }
+      context.signal?.throwIfAborted()
+    }
+    if (invocation.method === 'listHostProviderHooks') {
+      if (invocation.args.length !== 1) throw new AgentMuxError('Provider Hook discovery accepts one scope selector.', 'INVALID_CONTROL_REQUEST')
+      const { parseProviderHookListInput } = await import('./public-rpc-host-settings.js')
+      invocation.args[0] = parseProviderHookListInput(invocation.args[0])
       context.signal?.throwIfAborted()
     }
     if ((invocation.method === 'prepareFederatedRead' || invocation.method === 'readFederatedOutbox') && !invocation.args[0]?.caller && (context.caller || !context.principal || !['user', 'device'].includes(context.principal.kind))) throw new AgentMuxError('Host thread reading requires its trusted original Host reader. Managed Agents retain their own participant authority.', 'CONTROL_PERMISSION_DENIED')
