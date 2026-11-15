@@ -249,6 +249,10 @@ Attach continuation 是状态恢复，不是历史动画。`TerminalView.applyCo
 
 ctxmux 的 Replay 有界。Gap 表示请求 cursor 与 `firstAvailableByte` 之间的字节已被淘汰，保留下来的后缀不能宣称为完整的终端屏幕。Core 与 Renderer 经 `terminalContinuationSteps` 消费公开 continuation：`basic-vt` 的 checkpoint、restore bytes 及之后的有序 output／Resize，或者没有 checkpoint 时的原始字节恢复。restore bytes 是恢复材料，不计为新的 PTY output；checkpoint 能恢复当前画面，不代表缺失的 scrollback 已经补全。
 
+转冷的设计边界按已有三层归属执行。实时终端查询的协议状态、答复和应用字节区间，最终由确认持有该 PTY 的 ctxmux Run 负责。AgentMux Core 消费原 Run 的协议输入来源与回执，继续处理 Provider 握手、消息和恢复。Desktop 管理真实读位、选区和按需呈现。终端查询移交以实际 Run 和已声明的查询范围为单位，实时只答一次，历史与合成恢复不触发写入。多个 Desktop 视图与交互 CLI 同时打开也应成立。显示端对已接管查询的处理不得改写原始输出或按长相吞掉真实用户输入。
+
+先用原终端实例和已消费的有序字节位置验证停止后台投递后，可以按原入口补上遗漏输出，读位与输入不变。释放实例需额外证明按需恢复检查点、顺序尾段及原读位和选区。通过以前，切换行为执行[已有呈现约定](../design/behavior/terminal-reading.md#terminal-连续向上阅读历史)。与包边界无关的输入模式和视口逻辑留在现有终端模块，公共接口仍沿同一 Runtime、Core 与 client 边界传播。
+
 缺失提示放在 xterm 字节流之外。仍在运行的 Run 确需重绘时，`TerminalViewportSynchronizer.requestContentRedraw()` 经唯一的 Resize owner 临时减少一行再恢复最终网格，促使该 Run 重新输出当前画面；历史 Run 不发送 Resize 或 Input。这只是恢复当前画面的动作，不能作为恢复原始历史或活跃终端连续向上阅读的通过证据，后者按[设计 SSOT](../design/behavior/terminal-reading.md#terminal-连续向上阅读历史) 验收。
 
 ### 5.3 Resize 只提交稳定、最新的网格
