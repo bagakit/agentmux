@@ -64,11 +64,7 @@ import {
   terminalSelectionForCopy
 } from '../lib/terminal-shortcuts'
 import { matchShortcut } from '../lib/shortcut-registry'
-import {
-  initialKittyKeyboardState,
-  isKittyKeyboardActive,
-  readKittyKeyboardOutput
-} from '../lib/terminal-kitty-keyboard'
+import { installTerminalKittyInputMode } from '../lib/terminal-kitty-keyboard'
 import {
   DEFAULT_TERMINAL_SEARCH_TOGGLES,
   searchTerminalFromSurface,
@@ -733,6 +729,7 @@ function TerminalViewOwner({
       ...terminalOptions(themeId, fontSizeRef.current),
       scrollback: 5_000
     })
+    const kittyInputMode = installTerminalKittyInputMode(terminal)
     const fit = new FitAddon()
     function activateFileLink(match: TerminalPathLink, context: SessionProjectFileContext): void {
       const displayOrigin = displayOriginRef.current
@@ -1194,11 +1191,6 @@ function TerminalViewOwner({
     }))
     let droppedPendingThrough = 0
     let droppedPendingResize: AgentMuxTerminalResize | null = null
-    // 下游程序自己声明的 kitty keyboard 状态，决定 Shift+Enter 送 CSI-u 还是退回 ESC+CR。
-    let kittyKeyboard = initialKittyKeyboardState()
-    // Semantic inspection only. xterm receives the original bytes and owns UTF-8/ANSI parsing;
-    // this decoder never participates in the byte cursor, overlap, or terminal writes.
-    const kittyOutputDecoder = new TextDecoder()
     let renderReady: { dispose(): void } | null = null
     const preserveResizeReading = (resize: () => void): void => {
       clearLinkPreview()
@@ -1407,7 +1399,6 @@ function TerminalViewOwner({
     const writeOutput = async (data: Uint8Array, cause: 'live' | 'history'): Promise<void> => {
       if (disposed) return
       await writeTerminal(data, cause)
-      kittyKeyboard = readKittyKeyboardOutput(kittyKeyboard, kittyOutputDecoder.decode(data, { stream: true }))
       if (!disposed) refreshHistoryBoundary(terminal)
     }
     const writeHistoricalOutput = async (data: Uint8Array): Promise<void> => {
@@ -1874,7 +1865,7 @@ function TerminalViewOwner({
         matchTerminalShortcut: (event) => matchShortcut(event, isMac, { scope: 'terminal' }),
         hasSelection: () => terminal.hasSelection(),
         sendInput,
-        kittyKeyboardActive: () => isKittyKeyboardActive(kittyKeyboard),
+        kittyKeyboardActive: kittyInputMode.isActive,
         setSearchOpen,
         readSelection: () => terminal.getSelection(),
         rememberSelection: (text) => {
@@ -2152,6 +2143,7 @@ function TerminalViewOwner({
       // Each retired owner releases independently; preserve the first original failure.
       cleanup(releaseWebgl)
       cleanup(() => oscHandlers.dispose())
+      cleanup(() => kittyInputMode.dispose())
       cleanup(searchOwner.release)
       cleanup(() => selection.dispose())
       cleanup(() => linkPreviewScroll.dispose())

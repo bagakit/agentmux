@@ -1,123 +1,49 @@
-/**
- * kitty keyboard 协议的启用状态，从下游 TUI 自己的输出里探测。
- *
- * 为什么要探测而不是假定：Shift+Enter 想送 CSI-u 编码（`ESC [13;2u`），前提是跑在终端里的
- * 那个程序确实在按这个协议读键。它没协商过就送，等于往它嘴里塞一串它不认识的字节——那会把
- * 「少了个换行」的缺陷换成「输入全乱」的缺陷，后者严重得多。所以启用与否由**它自己说了算**：
- * 程序通过 `CSI > flags u` 声明自己要用这个协议，我们只是读到并记住。
- *
- * 为什么不主动开启：我们是宿主，不是那个程序的作者。替它决定用什么键盘协议，就是在替它改写
- * 输入语义——而它并不知道，也没法反驳。
- *
- * 这一层是纯函数：喂字节序列进去，拿状态出来，不需要真实 PTY 就能验证 push/pop/set 的效果。
- */
+import type { Terminal } from '@xterm/xterm'
 
-/** 协议状态。`stack` 是协议自身的标志位栈，`pending` 存跨 chunk 截断的半条转义序列。 */
-export type KittyKeyboardState = {
-  readonly stack: readonly number[]
-  readonly pending: string
-  readonly inactiveStack: readonly number[]
-  readonly screen: 'normal' | 'alternate'
-}
+// The Kitty protocol gives the terminal a bounded stack per screen and evicts its oldest entry.
+const KITTY_KEYBOARD_STACK_LIMIT = 16
 
-export function initialKittyKeyboardState(): KittyKeyboardState {
-  return { stack: [], inactiveStack: [], screen: 'normal', pending: '' }
-}
+export function installTerminalKittyInputMode(terminal: Pick<Terminal, 'buffer' | 'parser'>) {
+  const stacks = { normal: [] as number[], alternate: [] as number[] }
+  const activeStack = () => stacks[terminal.buffer.active.type]
 
-/**
- * 半条序列最多留这么长。
- *
- * 转义序列本身只有几个字节，留一小段就够拼回被 chunk 边界切断的那条。设上限是因为一段永远
- * 等不到结尾的 `ESC [` 否则会让 pending 无限长——输出流是别人写的，不能假定它总是良构。
- */
-const MAX_PENDING = 32
-
-// The original protocol permits a terminal-chosen bound, evicts the oldest entry on overflow,
-// and requires independent main/alternate stacks: https://sw.kovidgoyal.net/kitty/keyboard-protocol/#progressive-enhancement
-export const KITTY_KEYBOARD_STACK_LIMIT = 16
-
-// `CSI > flags u` 推入、`CSI < number u` 弹出、`CSI = flags ; mode u` 修改栈顶。
-const KITTY_SEQUENCE = /\u001b(?:\[(?:([>=<])([0-9;]*)u|\?([0-9;]*)([hl]))|c)/g
-
-function numbers(params: string): number[] {
-  if (params === '') return []
-  return params.split(';').map((part) => (part === '' ? 0 : Number(part)))
-}
-
-function applySet(current: number, flags: number, mode: number): number {
-  // mode 2 置位、mode 3 清位，其余（含缺省的 1）整体替换。
-  if (mode === 2) return current | flags
-  if (mode === 3) return current & ~flags
-  return flags
-}
-
-/**
- * 把一段 PTY 输出折进协议状态。
- *
- * 只读不写：我们从不代替程序发起协商，只记录它自己发过什么。
- */
-export function readKittyKeyboardOutput(
-  state: KittyKeyboardState,
-  chunk: string
-): KittyKeyboardState {
-  const combined = state.pending + chunk
-  let stack = state.stack
-  let inactiveStack = state.inactiveStack
-  let screen = state.screen
-  let lastEnd = 0
-  KITTY_SEQUENCE.lastIndex = 0
-  for (let match = KITTY_SEQUENCE.exec(combined); match; match = KITTY_SEQUENCE.exec(combined)) {
-    lastEnd = match.index + match[0].length
-    if (match[0] === '\u001bc') {
-      stack = []
-      inactiveStack = []
-      screen = 'normal'
-      continue
-    }
-    if (match[3] !== undefined) {
-      if (!numbers(match[3]).some(mode => mode === 47 || mode === 1047 || mode === 1049)) continue
-      const nextScreen = match[4] === 'h' ? 'alternate' : 'normal'
-      if (nextScreen !== screen) {
-        ;[stack, inactiveStack] = [inactiveStack, stack]
-        screen = nextScreen
-      }
-      continue
-    }
-    const [kind, params] = [match[1]!, numbers(match[2]!)]
-    // Ordinary output never clones the existing stack. A protocol operation alone owns a copy.
-    const next = [...stack]
-    if (kind === '>') {
-      if (next.length === KITTY_KEYBOARD_STACK_LIMIT) next.shift()
-      next.push(params[0] ?? 0)
-    } else if (kind === '<') {
-      // 缺省弹一层。弹空栈不是错误——程序可能比我们更早开始运行，我们只见到了后半段。
-      for (let remaining = params[0] ?? 1; remaining > 0 && next.length > 0; remaining -= 1) {
-        next.pop()
-      }
-    } else {
-      const flags = applySet(next[next.length - 1] ?? 0, params[0] ?? 0, params[1] ?? 1)
-      if (next.length === 0) next.push(flags)
-      else next[next.length - 1] = flags
-    }
-    stack = next
+  function register(prefix: '>' | '=' | '<', apply: (stack: number[], params: number[]) => void) {
+    return terminal.parser.registerCsiHandler({ prefix, final: 'u' }, (params) => {
+      if (params.every((param) => typeof param === 'number')) apply(activeStack(), params)
+      return true
+    })
   }
 
-  // 末尾可能有半条被 chunk 边界切断的序列，留到下一段拼上。
-  const tail = combined.slice(lastEnd)
-  const escape = tail.lastIndexOf('\u001b')
-  const pending = escape === -1 ? '' : tail.slice(escape)
-  const nextPending = pending.length > MAX_PENDING ? '' : pending
-  if (stack === state.stack && inactiveStack === state.inactiveStack && screen === state.screen && nextPending === state.pending) return state
-  return { stack, inactiveStack, screen, pending: nextPending }
-}
+  // Observe the application's declarations for Shift+Enter. The Core still owns query replies.
+  const handlers = [
+    register('>', (stack, [flags = 0]) => {
+      if (stack.length === KITTY_KEYBOARD_STACK_LIMIT) stack.shift()
+      stack.push(flags)
+    }),
+    register('=', (stack, [flags = 0, mode = 1]) => {
+      const index = Math.max(0, stack.length - 1)
+      const current = stack[index] ?? 0
+      switch (mode || 1) {
+        case 1: stack[index] = flags; break
+        case 2: stack[index] = current | flags; break
+        case 3: stack[index] = current & ~flags; break
+      }
+    }),
+    register('<', (stack, [count]) => {
+      // xterm normalizes omitted parameters to zero. Match its native Kitty pop default.
+      stack.length = Math.max(0, stack.length - (count || 1))
+    }),
+    terminal.parser.registerEscHandler({ final: 'c' }, () => {
+      stacks.normal.length = 0
+      stacks.alternate.length = 0
+      return false // Keep xterm's native reset in the handler chain.
+    })
+  ]
 
-/**
- * 下游程序是否正在按 kitty 协议读键。栈顶标志位非 0 即为启用。
- *
- * 这里只回答"启不启用"这一个问题，不导出标志位本身：具体是哪几位（disambiguate、事件类型、
- * 关联文本……）描述的是该程序想收到多细的按键上报，与我们"Shift+Enter 送哪种编码"无关。
- * 导出一个没人用得上的数字，只会让后来者以为那里有个需要分情况处理的维度。
- */
-export function isKittyKeyboardActive(state: KittyKeyboardState): boolean {
-  return (state.stack[state.stack.length - 1] ?? 0) > 0
+  return {
+    isActive: () => (activeStack().at(-1) ?? 0) > 0,
+    dispose: () => {
+      for (const handler of handlers) handler.dispose()
+    }
+  }
 }
