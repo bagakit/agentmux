@@ -77,6 +77,7 @@ import { parseCapsuleInputRequest, parseCapsuleInputResult, type CapsuleInputPor
 import { isCapsuleRuntimeMethod, parseCapsuleRuntimeParams, parseCapsuleRuntimeResult, type CapsuleRuntimeMethod, type CapsuleRuntimePort } from './capsule-runtime.js'
 import { isCapsuleMethod, parseCapsuleRpcParams, parseCapsuleRpcResult, type CapsuleCallContext, type CapsuleMethod, type CapsuleParamsMap, type CapsuleResultMap } from './capsule.js'
 import { parseExternalConversationReference, parseExternalConversationReceipt } from './external-conversation.js'
+import { isMoteGroupMethod, parseMoteGroupParams, parseMoteGroupResult, type MoteGroupCallContext, type MoteGroupPort, type MoteGroupMethod } from './mote/group.js'
 import { isMoteChatMethod, parseMoteChatParams, parseMoteChatResult } from './mote/chat-codec.js'
 import { isAgentLearningMethod, parseAgentLearningParams, parseAgentLearningResult,
   type AgentLearningPort, type AgentLearningMethod } from './agent-learning.js'
@@ -272,6 +273,7 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
   captures?: AppCapturePort
   moteDialogue?: MoteDialoguePort
   moteChat?: MoteChatPort
+  moteGroups?: MoteGroupPort
   /** Host-owned learning workflow; Core neither stores nor interprets its knowledge. */
   agentLearning?: AgentLearningPort
   moteConnections?: MoteConnectionPort
@@ -591,7 +593,7 @@ const NATIVE_FIELDS = {
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit'],
   'system.storage': ['hostId', 'runId'], 'system.doctor': ['workspacePath'], 'system.endpoint': [], 'system.relay.inspect': [],
   'system.subscription.cancel': ['subscriptionId']
-} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, StorageRecoveryMethod | FocusMethod | MoteDialogueMethod | CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | AgentPromotionMethod | TopicMethod | ConnectionMethod | ObjectAvatarMethod | TailcatConfigurationMethod | NotesStorageMethod | ProviderCatalogMethod | HostSettingsMethod | MeshNetworkMethod | NodePublishingMethod | NodeLocatorMethod | import('./public-rpc-tailcat-key.js').TailcatKeyMethod | import('./public-rpc-host-maintenance.js').HostMaintenanceMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | ImageMethod | NativeDesktopMethod | keyof typeof HOST_ROUTE_METHODS>, readonly string[]>
+} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, StorageRecoveryMethod | FocusMethod | MoteDialogueMethod | CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteGroupMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | AgentPromotionMethod | TopicMethod | ConnectionMethod | ObjectAvatarMethod | TailcatConfigurationMethod | NotesStorageMethod | ProviderCatalogMethod | HostSettingsMethod | MeshNetworkMethod | NodePublishingMethod | NodeLocatorMethod | import('./public-rpc-tailcat-key.js').TailcatKeyMethod | import('./public-rpc-host-maintenance.js').HostMaintenanceMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | ImageMethod | NativeDesktopMethod | keyof typeof HOST_ROUTE_METHODS>, readonly string[]>
 
 /** Home follows an exact execution route; its display name does not identify that route. */
 function homeHostRoute(configuration: import('./control.js').AgentMuxControlSettingsResourceFields | null) {
@@ -1461,6 +1463,30 @@ export class AgentMuxRpcService {
         ? await this.ports.moteDialogue.read(parseMoteDialogueParams(method, params), original)
         : await this.ports.moteDialogue.link(parseMoteDialogueParams(method, params), original)
       return parseMoteDialogueResult(method, result, input) as AgentMuxRpcResult<M>
+    }
+    if (isMoteGroupMethod(method)) {
+      const input = parseMoteGroupParams(method, params)
+      const caller = context.caller ? await this.authenticated(context, true) : undefined
+      if (method === 'space.mote.group.reply' ? !caller : caller || !context.principal || !['user', 'device'].includes(context.principal.kind))
+        throw new AgentMuxError('This Group operation requires its original authenticated workspace participant.', 'CONTROL_PERMISSION_DENIED')
+      const owner = this.ports.moteGroups
+      if (!owner) throw new AgentMuxError('The original built-in Group owner is unavailable. Saved Group messages and Agents are retained.', 'CONTROL_UNAVAILABLE')
+      const actor: MoteGroupCallContext['actor'] = caller
+        ? { kind: 'agent', agentSessionId: caller.agentSessionId, hostId: caller.hostId, sourceRuns: sessionSemanticResumeSourceRuns(caller.session) }
+        : { kind: 'human', id: `local-user:${process.getuid?.() ?? 'current'}` }
+      const assertCurrent = async () => {
+        context.signal?.throwIfAborted()
+        await context.assertCurrent?.()
+        await this.assertRuntimeFence(context)
+        if (caller) {
+          const current = await this.authenticated(context, true)
+          if (current?.client !== caller.client || current.session.run.runId !== caller.session.run.runId)
+            throw new AgentMuxError('The original Group Agent caller changed during the operation.', 'CONTROL_PERMISSION_DENIED')
+        }
+      }
+      await assertCurrent()
+      const result = await owner.call(method, input, { actor, assertCurrent })
+      return parseMoteGroupResult(method, result, input) as unknown as AgentMuxRpcResult<M>
     }
     if (isMoteChatMethod(method)) {
       const caller = await this.authenticated(context)

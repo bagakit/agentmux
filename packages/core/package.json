@@ -74,6 +74,10 @@
       "types": "./dist/capsule.d.ts",
       "import": "./dist/capsule.js"
     },
+    "./mote/group": {
+      "types": "./dist/mote/group.d.ts",
+      "import": "./dist/mote/group.js"
+    },
     "./mote-chat": {
       "types": "./dist/mote/chat.d.ts",
       "import": "./dist/mote/chat.js"

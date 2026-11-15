@@ -1,3 +1,6 @@
+import { createHostMoteChat } from './mote-chat.js'
+import { createHostMoteGroups } from './mote-group.js'
+import { MoteGroupStore } from './mote-group-store.js'
 import { createHostWorkspaceResources } from './workspace-resources.js'
 import { createDesktopStorageRecoverySource } from './desktop-storage-recovery.js'
 import { createHostFolderDirectoryOwner } from './folder-directory-owner.js'
@@ -199,8 +202,17 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     catalog: async () => { const state = await spatialState.read(); return state ? spatialCatalog(state.graph) : null },
     executors: () => readConfiguredExecutorChoices(configurationPath!),
     ...(motePresence ? { maintenance: motePresence.read, changed: motePresence.invalidate, adoptGuidance: motePresence.adoptGuidance } : {}) }) : undefined
+  const moteGroups = configurationPath && options.store instanceof AgentMuxFileAgentSessionStore ? createHostMoteGroups({
+    store: new MoteGroupStore(join(dirname(options.store.path), 'mote-groups.sqlite')),
+    agents: createHostMoteChat({ configurationPath, spatial: spatialState, runtime: originalRuntime }).agents,
+    client: hostId => {
+      if (hostId !== 'local') throw new AgentMuxError('The original built-in Group member Host is unavailable.', 'MOTE_GROUP_MEMBER_UNCONFIRMED')
+      return originalRuntime().client
+    }
+  }) : undefined
   const service = {
     spatialState,
+    ...(moteGroups ? { moteGroups } : {}),
     ...(workspaceResources ? { spatialFolderDirectory: createHostFolderDirectoryOwner(workspaceResources,spatialState) } : {}),
     ...(configurationPath ? { spatialFolderResource: createHostFolderSpaceResource(configurationPath,workspaceResources) } : {}),
     hostTailcat: (hostId: string) => hostId === 'local' ? tailcat!.inspect() : undefined,

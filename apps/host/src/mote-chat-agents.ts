@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { AgentMuxError, agentDiscoveryActivity, type AgentMuxAgentCreationInspection, type AgentMuxAgentSession, type AgentMuxClient } from '@agentmux/core'
-import type { MoteChatTarget } from '@agentmux/core/mote-chat'
+import type { MoteChatGeneration, MoteChatTarget } from '@agentmux/core/mote-chat'
 import type { MoteChatAgentPort, MoteChatCreatedAgent, MoteChatPreparedLaunch } from '@agentmux/connectors'
 import type { MoteChatResourcePort } from './mote-resources.js'
 import type { AgentMuxAgentCreateInput, AgentMuxHostExecutorInventory, AgentMuxHostAgentCreateInput } from '@agentmux/core'
@@ -34,7 +34,10 @@ function hostExecutors(clients: MoteChatAgentOptions['clients']): MoteChatExecut
     }
   }
 }
-export type HostMoteChatAgents = MoteChatAgentPort & {
+type DedicatedMoteGeneration = Pick<MoteChatGeneration, 'target' | 'executionHostId' | 'agentSessionId' | 'createOperationId'>
+export type HostMoteChatAgents = Omit<MoteChatAgentPort, 'prepare'> & {
+  prepare(input: { generation: DedicatedMoteGeneration; systemContext: string }): Promise<MoteChatPreparedLaunch>
+  readTarget(target: MoteChatTarget): Promise<{ name: string }>
   assertTarget(target: MoteChatTarget): Promise<void>
   /** Validate the saved new-chat Executor without preparing an identity or starting a Run. */
   assertReady(target: MoteChatTarget): Promise<void>
@@ -119,6 +122,7 @@ export function createMoteChatAgents(options: MoteChatAgentOptions): HostMoteCha
       'The original Mote chat is not ready after recovery. Its original recovery and incoming message are retained; no input was dispatched.')
   }
   return {
+    readTarget: async target => ({ name: (await options.resources.read(target)).topic.title }),
     assertTarget: async input => { await options.resources.read(input) },
     assertReady: async input => { await ready(input) },
     prepare: async ({ generation, systemContext }) => {
