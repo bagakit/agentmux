@@ -11,10 +11,11 @@
   padding: 0 var(--sp-2); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2);
   font: inherit; cursor: pointer; transition: color 120ms ease, background-color 120ms ease;
 }
-.goal-outline__trigger { color: var(--text); font-weight: 600; }
+.goal-outline__trigger { color: var(--text); font-weight: 600; flex: 0 1 auto; min-width: 0; }
+.goal-outline__trigger > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .goal-outline__back:hover, .goal-outline__trigger:hover, .goal-outline__trigger[data-state="open"], .goals-detail__toolbar .goals-detail__team-link:is(:hover,[aria-pressed="true"]) { background-color: var(--wash-2); color: var(--text); }
 .goal-outline__trail button:focus-visible, .goals-detail__toolbar .goals-detail__team-link:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
-.goal-outline__chevron { color: var(--text-3); transition: transform var(--dur-enter) var(--ease-enter); }
+.goal-outline__chevron { flex: none; color: var(--text-3); transition: transform var(--dur-enter) var(--ease-enter); }
 .goal-outline__trigger[data-state="open"] .goal-outline__chevron { transform: rotate(180deg); }
 .tab-context-menu.goal-outline__menu { min-width: min(188px,var(--radix-dropdown-menu-content-available-width,100vw)); }
 .tab-context-menu.goal-outline__menu[data-state="open"] { --outline-offset: -4px; animation: goal-outline-enter var(--dur-enter) var(--ease-enter) both; }

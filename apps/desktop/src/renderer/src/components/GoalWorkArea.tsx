@@ -16,13 +16,17 @@ export function GoalWorkArea({ demand, sectionRef, onRevealResults, active = tru
   const fact = goalNextStepFact(current, rawIntent)
   const pending = (intent?.phase === 'selecting-access' ? undefined : intent) ?? current.dispatches?.find(item => item.execution === 'finite' && item.stage !== 'confirmed')
   const hasWork = goalHasOriginalWork(current, rawIntent)
-  const finitePrimary = primary && (fact.source.kind === 'goal' || Boolean(pending && fact.source.kind === 'start' && fact.source.operationId === pending.operationId))
+  const hasPlan = Boolean(current.plan?.nodes.length)
+  const originalInput = rawIntent !== undefined || Boolean(pending)
+  const finitePrimary = primary && (fact.source.kind === 'goal' && (!hasPlan || originalInput) || Boolean(pending && fact.source.kind === 'start' && fact.source.operationId === pending.operationId))
   const finite = <GoalFiniteStartControl demand={current} active={active} embedded primary={finitePrimary} conclusion={pending && fact.source.kind === 'start' && fact.source.operationId === pending.operationId ? fact.text : undefined} />
-  const another = !current.dispatches?.some(item => item.execution === 'finite' && item.stage === 'confirmed')
+  const showOriginalInput = hasWork && originalInput
+  const discloseNewTask = !originalInput && (hasWork || hasPlan) && !current.dispatches?.some(item => item.execution === 'finite' && item.stage === 'confirmed')
+  const next = discloseNewTask
     ? <details><summary>Start a one-time task</summary>{finite}</details> : finite
   return <section ref={sectionRef} tabIndex={-1} data-goal-reading-section="execution" className="goal-work-area" data-goal-work-area={current.id} data-goal-work-context={hasWork ? 'recorded' : 'fresh'} aria-label="Execution records">
     <div className="goals-section-heading"><h2>Execution records</h2></div>
     <GoalDelegationWork demand={current} active={active} embedded focus={fact.source} primary={primary && !finitePrimary}
-      beforeRecords={hasWork && (rawIntent !== undefined || pending) ? finite : undefined} afterRecords={!hasWork ? finite : rawIntent === undefined && !pending ? another : undefined} onRevealResults={onRevealResults} />
+      beforeRecords={showOriginalInput ? finite : undefined} afterRecords={showOriginalInput ? undefined : next} onRevealResults={onRevealResults} />
   </section>
 }

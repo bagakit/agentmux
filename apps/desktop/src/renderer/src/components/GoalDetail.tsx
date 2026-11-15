@@ -253,6 +253,7 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
   const missingDoneReport = demand.status === 'done' && !demand.grounding
   const readReport = Boolean(demand.grounding) && (fact.source.kind === 'results' || fact.source.kind === 'definition' && !demand.alignment)
   const readDefinition = Boolean(demand.alignment) && (fact.source.kind === 'definition' || missingDoneReport && !demand.alignment?.confirmedAt)
+  const reviewFromPlan = readDefinition && fact.stage === 'you' && projection.revision !== null && visibleSection === 'plan' && !showSupervisor && !acknowledgementFeedback.failure
   const requestFeedback = moteError ? <div className="goals-service" role="status">
     {moteError.mode === 'open' ? 'Goal saved. The discussion could not be opened.' : `${moteError.mode === 'plan' ? 'Planning' : moteError.mode === 'grill' ? 'Goal' : 'Check'} request delivery is unconfirmed. Your goal and current work are kept.`}
     <span>{moteError.message}</span>
@@ -271,6 +272,7 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
           onNavigate={id => revealWork(readingTargets[id].current)} />
       </nav>
       <div className="goal-outline__tools">
+        {reviewFromPlan ? <Button type="button" onClick={() => revealGoalReview(true)}>Review criteria</Button> : null}
         <button type="button" ref={supervisorToggle} className="goals-detail__team-link" data-goal-supervisor-toggle
           aria-label="Supervisor" aria-controls={teamRegionId} title={showSupervisor ? 'Return to goal' : 'Open Supervisor'} aria-pressed={showSupervisor}
           onClick={() => showSupervisor ? setShowSupervisor(false) : revealSupervisor()}>
@@ -304,7 +306,7 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
               {projection.progress ? <span className="goals-detail__progress" data-goal-meta-plan={`${projection.progress.done}/${projection.progress.total}`}>
                 Plan {projection.progress.done} of {projection.progress.total} done</span> : null}
               {currentDelivery ? <Button variant="primary" onClick={event => revealAttempt(currentDelivery.node.id, currentDelivery.delegation.operationId, event.currentTarget)}>View delivery<ThemeNavigationForwardIcon size={13} aria-hidden="true" /></Button> : null}
-              {(readReport || readDefinition) && !acknowledgementFeedback.failure
+              {(readReport || readDefinition && !reviewFromPlan) && !acknowledgementFeedback.failure
                 ? <Button type="button" onClick={() => revealGoalReview(readDefinition)}>{readReport ? 'Read results' : demand.alignment?.criteria.length ? 'Read success criteria' : 'Read proposal'}</Button> : null}
               {queue && queue.total > 1 ? <span className="goals-detail__queue" data-goal-queue><span>{GOAL_GROUP_LABELS[queue.stage]} · {queue.index} of {queue.total}</span>{queue.nextId ? <Button type="button" data-goal-queue-next aria-label={`Next goal that ${QUEUE_NAMES[queue.stage]}`} onClick={() => onOpenGoal?.(queue.nextId!)}>Next<ThemeNavigationForwardIcon size={13} /></Button> : null}</span> : null}
             </div>
