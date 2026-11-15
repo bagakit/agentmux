@@ -29,6 +29,7 @@ export const codexNativeSourceId = (sessionId: string, source: { dev: bigint; in
 
 type CodexTurnRecord = { timestamp?: unknown; type?: unknown; ordinal?: unknown; payload?: {
   type?: unknown; turn_id?: unknown; thread_id?: unknown; completed_at_ms?: unknown
+  event_id?: unknown; kind?: unknown; agent_thread_id?: unknown
   item?: { type?: unknown; id?: unknown; kind?: unknown; agent_thread_id?: unknown }
 } }
 
@@ -46,6 +47,17 @@ export function codexSubagentActivity(value: unknown, nativeSessionId: string): 
   if (typeof nativeAgentId !== 'string' || !nativeAgentId.trim() || nativeAgentId === nativeSessionId ||
     typeof observedAt !== 'number' || !Number.isSafeInteger(observedAt) || observedAt <= 0) return
   return { nativeSessionId, nativeAgentId, observedAt, kind: item.kind }
+}
+
+/** Legacy rollouts keep newer child activity in this record shape, without a completion receipt. */
+export function codexLegacySubagentActivityId(value: unknown, nativeSessionId: string): string | undefined {
+  const record = value as CodexTurnRecord, event = record?.payload
+  if (record?.type !== 'event_msg' || event?.type !== 'sub_agent_activity' ||
+      event.thread_id !== undefined && event.thread_id !== nativeSessionId ||
+      typeof event.kind !== 'string' || !['started', 'interacted', 'interrupted'].includes(event.kind) ||
+      typeof event.event_id !== 'string' || !event.event_id.trim()) return
+  const id = event.agent_thread_id
+  return typeof id === 'string' && id.trim() && id !== nativeSessionId ? id : undefined
 }
 
 /** Codex emits this kind only for a confirmed successful child turn. */
@@ -83,11 +95,9 @@ export function codexTurnRecordEvidence(value: unknown, sourceId: string, native
     ...(outcome ? { endReason: outcome.status, ...(outcome.status === 'failed' ? { failure: outcome.failure } : {}) } : {}) }
 }
 
-/** Decode only the Provider's native turn records, with bounded work per operation.
- * Native pending steers are not written here; the complete visible pane guards them.
- * A truncated suffix without an actual turn boundary remains unknown.
- */
-export async function readCodexPromptExecutionEvidence(context: CodexEvidenceContext, observeRecord?: (record: unknown) => void): Promise<CodexPromptEvidence | null> {
+/** Missing recent evidence is distinct from an invalid or unverified observation. */
+export async function readCodexTurnSnapshot(context: CodexEvidenceContext, observeRecord?: (record: unknown) => void):
+  Promise<CodexPromptEvidence | { state: 'no-recent-turn'; sourceId: string } | null> {
   const handle = context.nativeHandle
   if (handle?.kind !== 'provider' || handle.providerId !== 'codex' || !handle.transcriptPath || !isAbsolute(handle.transcriptPath)) return null
   const file = await open(handle.transcriptPath, constants.O_RDONLY | constants.O_NOFOLLOW)
@@ -103,6 +113,7 @@ export async function readCodexPromptExecutionEvidence(context: CodexEvidenceCon
     const meta = JSON.parse(header.subarray(0, headerEnd).toString('utf8')) as { type?: unknown; payload?: { id?: unknown; session_id?: unknown } }
     if (meta.type !== 'session_meta' || (meta.payload?.session_id ?? meta.payload?.id) !== handle.sessionId) return null
     const sourceId = codexNativeSourceId(handle.sessionId, stat)
+    const noRecentTurn = { state: 'no-recent-turn' as const, sourceId }
     const predecessor = context.nativePromptPredecessor
     // The retained source must be exactly the one Core observed before this Run
     // started. A replacement cannot inherit an initial-idle authorization.
@@ -117,9 +128,9 @@ export async function readCodexPromptExecutionEvidence(context: CodexEvidenceCon
     const tail = Buffer.alloc(size - start)
     await file.read(tail, 0, tail.length, start)
     const completeEnd = tail.lastIndexOf(10)
-    if (completeEnd < 0) return null
+    if (completeEnd < 0) return start ? noRecentTurn : null
     const first = start ? tail.indexOf(10) + 1 : 0
-    if (first <= 0 && start) return null
+    if (start && first >= completeEnd) return noRecentTurn
     const lines = tail.subarray(first, completeEnd).toString('utf8').split('\n')
     let latest: CodexPromptEvidence | null = null
     let recordOffset = start + first
@@ -135,9 +146,15 @@ export async function readCodexPromptExecutionEvidence(context: CodexEvidenceCon
     if (latest) return currentEvidence(latest)
     // A complete, small new transcript with no turn can prove initial idle. A
     // retained suffix cannot make the same assertion.
-    return start === 0 ? currentEvidence({ sourceId, id: sourceId, state: 'idle' }) : null
+    return start === 0 ? currentEvidence({ sourceId, id: sourceId, state: 'idle' }) : noRecentTurn
   } catch (error) {
     if (error instanceof SyntaxError) return null
     throw error
   } finally { await file.close() }
+}
+
+/** Native pending steers are not written here; the complete visible pane guards them. */
+export async function readCodexPromptExecutionEvidence(context: CodexEvidenceContext, observeRecord?: (record: unknown) => void): Promise<CodexPromptEvidence | null> {
+  const snapshot = await readCodexTurnSnapshot(context, observeRecord)
+  return snapshot?.state === 'no-recent-turn' ? null : snapshot
 }

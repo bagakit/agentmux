@@ -2,7 +2,7 @@ import { constants } from 'node:fs'
 import { lstat, open } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
 import { codexTurnRecordId } from './turn-outcome.js'
-import { codexNativeSourceId, codexSubagentActivity, codexSubagentCompletion, codexTurnRecordEvidence, readCodexPromptExecutionEvidence, type CodexEvidenceContext, type CodexPromptEvidence } from './turn-evidence.js'
+import { codexLegacySubagentActivityId, codexNativeSourceId, codexSubagentActivity, codexSubagentCompletion, codexTurnRecordEvidence, readCodexTurnSnapshot, type CodexEvidenceContext, type CodexPromptEvidence } from './turn-evidence.js'
 import type { NativeJsonlHistoryReader } from '../jsonl-history-services.js'
 import type { NativeProviderError } from '../provider-error.js'
 
@@ -73,7 +73,11 @@ export function createCodexSessionStatus({ AgentMuxError, observeNativeJsonlHist
         if (!entry) break
         if (entry.end > retainedBoundary) continue
         const activity = codexSubagentActivity(entry.value, historyContext.nativeSessionId)
-        if (!activity) continue
+        if (!activity) {
+          const legacyActivity = codexLegacySubagentActivityId(entry.value, historyContext.nativeSessionId)
+          if (legacyActivity) remaining.delete(legacyActivity)
+          continue
+        }
         const child = remaining.get(activity.nativeAgentId)
         if (!child) continue
         // The newest original activity fences older successes, including later interactions
@@ -135,18 +139,21 @@ export function createCodexSessionStatus({ AgentMuxError, observeNativeJsonlHist
       const { nativePromptPredecessor: _predecessor, ...sourceContext } = context
       const recoveringIds = context.unsettledSubagents && new Set(context.unsettledSubagents.map(child => child.nativeAgentId))
       const initialChildren = new Map<string, NonNullable<ReturnType<typeof codexSubagentCompletion>>>()
-      const initial = await readCodexPromptExecutionEvidence(sourceContext, context.onSubagentCompletion && (value => {
+      const snapshot = await readCodexTurnSnapshot(sourceContext, context.onSubagentCompletion && (value => {
         const completion = codexSubagentCompletion(value, handle.sessionId)
         if (completion && !recoveringIds?.has(completion.nativeAgentId) &&
           completion.observedAt > (initialChildren.get(completion.nativeAgentId)?.observedAt ?? 0)) {
           initialChildren.set(completion.nativeAgentId, completion)
         }
       }))
-      if (!initial) throw new AgentMuxError('The current native turn status is unknown. No completion was inferred.', 'AGENT_NATIVE_STATUS_UNCONFIRMED')
-      if (initial && initial.sourceId !== sourceId) throw new AgentMuxError('Native status source changed during the read.', 'AGENT_NATIVE_STATUS_SOURCE_CHANGED')
+      if (!snapshot) throw new AgentMuxError('The current native turn status is unknown. No completion was inferred.', 'AGENT_NATIVE_STATUS_UNCONFIRMED')
+      if (snapshot.sourceId !== sourceId) throw new AgentMuxError('Native status source changed during the read.', 'AGENT_NATIVE_STATUS_SOURCE_CHANGED')
+      const initial = snapshot.state === 'no-recent-turn' ? null : snapshot
       latest = initial
-      emit(initial, true)
-      for (const completion of initialChildren.values()) context.onSubagentCompletion?.(completion)
+      if (initial) {
+        emit(initial, true)
+        for (const completion of initialChildren.values()) context.onSubagentCompletion?.(completion)
+      }
       offset = Number(stat.size)
       // Do not join an incomplete pre-watch suffix to an unrelated subsequent line.
       const lastByte = Buffer.alloc(1)
@@ -213,6 +220,7 @@ export function createCodexSessionStatus({ AgentMuxError, observeNativeJsonlHist
       }
       context.signal.addEventListener('abort', dispose, { once: true })
       context.signal.throwIfAborted()
+      if (!initial) context.onUnavailable('AGENT_NATIVE_STATUS_GAP', 'The recent native history does not confirm the current main turn.')
       check() // Close the initial read -> watch setup gap.
       const { unsettledSubagents, onSubagentCompletion, onSubagentRecoveryUnavailable } = context
       if (unsettledSubagents?.length && onSubagentCompletion) {
