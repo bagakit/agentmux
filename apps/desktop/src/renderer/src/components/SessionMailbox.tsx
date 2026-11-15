@@ -23,8 +23,7 @@ import type { AgentInputMailboxItem } from '@agentmux/core/agent-input-mailbox'
 import { describeConversationInputSource } from '@agentmux/client-ui/conversation-input-source'
 import type { useComposerInputHistory } from '../lib/use-composer-input-history'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import type { SessionSnapshot } from '../../../shared/contracts'
-import { ContinuousProgressControl, type ContinuousProgressStatus } from './ContinuousProgressControl'
+import { ContinuousProgressControl, type ContinuousProgressSession, type ContinuousProgressStatus } from './ContinuousProgressControl'
 import { ComposerPendingDelivery } from './ComposerPendingDelivery'
 import { OriginalInputWaitingControl } from './OriginalInputWaitingControl'
 import { useMailboxMotion } from './use-mailbox-motion'
@@ -187,7 +186,7 @@ export function SessionMailbox({ pendingLayout, system, queued: workbenchQueue, 
   queued: readonly ComposerQueuedMessage[]
   archiveOwner?: { ownerKey: string; target?: { hostId: string; agentSessionId: string }; present(entry: AgentSteerQueueEntry): ComposerQueuedMessage } | undefined
   timeline?: AgentTimelineSnapshot | undefined
-  progressSession?: Extract<SessionSnapshot, { kind: 'agent' }> | undefined
+  progressSession?: ContinuousProgressSession | undefined
   originalProgress?: import('../../../shared/continuous-progress').OriginalContinuousProgressControl | undefined
   originalMail?: SessionMailReading | undefined
   progressUnavailable?: { message: string; onRefresh?: (() => void) | undefined } | undefined

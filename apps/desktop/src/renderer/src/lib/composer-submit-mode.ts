@@ -23,6 +23,10 @@ export type ComposerSubmitMode = {
   placeholder: string
 }
 
+type ComposerSubmitTarget = { kind: 'terminal' } | Pick<Extract<SessionSnapshot, { kind: 'agent' }>, 'kind' | 'processState' | 'pendingInteraction'> & {
+  status: Pick<SessionSnapshot['status'], 'state' | 'continuity' | 'continuityReason'>
+}
+
 /** Send's name while a request is pending: the message waits in the queue until Core ends that request. */
 export const SEND_AFTER_REQUEST_ENDS = 'Send after the Agent request ends'
 
@@ -34,7 +38,7 @@ export const SEND_AFTER_REQUEST_ENDS = 'Send after the Agent request ends'
  * that availability was never meant to answer.
  */
 export function composerSubmitMode(
-  session: SessionSnapshot | undefined,
+  session: ComposerSubmitTarget | undefined,
   forceDisabled = false
 ): ComposerSubmitMode {
   // No Agent yet, or a caller forcing the surface shut: nothing to type into, nothing to send or stop.

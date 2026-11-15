@@ -1,5 +1,5 @@
 import { spatialDestination } from '@agentmux/core/spatial-graph'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import type { LinkClickModifiers } from '@agentmux/client-ui/components/AgentMarkdown'
 import { resolveFocusLinkDestination } from '../../../shared/focus-preferences'
@@ -131,32 +131,32 @@ export function useSessionLinkOpening(origin: OpenHttpLinkOrigin, onService?: (m
   presentationRef.current = presentation
   // Selecting a sibling Region can refresh App's callback before the File read
   // finishes. Keep the original parent occurrence and consume its current callback.
-  const filePresentation: FilePresentation = { ...presentation, ...(presentation.onSelectRegion ? { onSelectRegion: (regionId: string) => {
+  const filePresentation: FilePresentation = useMemo(() => ({ ...presentation, ...(presentation.onSelectRegion ? { onSelectRegion: (regionId: string) => {
     const current = presentationRef.current
     const parent = (value: FilePresentation) => value.reference ? { ...value.reference, regionId: origin.regionId! } : null
     const heldParent = parent(presentation), currentParent = parent(current)
     if (current.surface !== surface || (heldParent ? !sameWorkbenchProjectionSelection(currentParent, heldParent) : currentParent !== null)) return
     current.onSelectRegion?.(regionId)
-  } } : {}) }
+  } } : {}) }), [presentation, origin.regionId, surface])
   const selector = useMemo(() => createSessionProjectFileContextSelector(origin.sessionId ?? '', origin, currentCoreSpatialGraph),
     [origin.workspaceId, origin.tabGroupId, origin.tabId, origin.regionId, origin.sessionId])
   const context = useAppStore(selector)
   const [request, setRequest] = useState<LinkRequest | null>(null)
   const next = useRef(0)
   useEffect(() => { setRequest(null) }, [context, surface])
-  const failure = (error: unknown) => {
+  const failure = useCallback((error: unknown) => {
     const message = error instanceof Error ? error.message : String(error)
     if (onService) onService(message); else useAppStore.getState().reportError(error)
-  }
-  const activateHttp = (url: string, event: LinkClickModifiers) => {
+  }, [onService])
+  const activateHttp = useCallback((url: string, event: LinkClickModifiers) => {
     flushSync(() => selectRegion?.())
     const state = useAppStore.getState()
     if (terminalLinkModifierOpensSystemBrowser(event, isMacPlatform())) void state.openHttpLink(origin, url, 'system', filePresentation).catch(failure)
     else if ((surface === 'focus' || !surface && state.mainSurface === 'agents') && !event.altKey) void state.openHttpLink(origin, url,
       resolveFocusLinkDestination(state.config?.focus?.linkDestination) === 'region' ? 'right' : 'tab', filePresentation).catch(failure)
     else setRequest({ id: ++next.current, origin, presentation: filePresentation, url, x: event.clientX, y: event.clientY })
-  }
-  const activateFile = (path: string, location?: FileLocation, event?: LinkClickModifiers) => {
+  }, [selectRegion, origin, surface, filePresentation, failure])
+  const activateFile = useCallback((path: string, location?: FileLocation, event?: LinkClickModifiers) => {
     flushSync(() => selectRegion?.())
     if (selector(useAppStore.getState()) !== context) { failure(new Error('The rendered file resource or occurrence changed. The Agent is kept.')); return }
     path = sessionFileResourcePath(context, path)
@@ -177,7 +177,7 @@ export function useSessionLinkOpening(origin: OpenHttpLinkOrigin, onService?: (m
       if (!workspaceId) { failure(new Error(context.issue ?? 'The original project file Workspace is unconfirmed. The Agent keeps running.')); return }
       void state.openFile(path, origin.tabGroupId, location, workspaceId, undefined, context.placement).catch(failure)
     }
-  }
+  }, [selectRegion, selector, context, origin, surface, filePresentation, failure, onService])
   return { activateHttp, activateFile, request,
     canSplit: request?.file ? sessionFileRegionAvailable(origin, request.file.context) : Boolean(origin.tabId && origin.regionId),
     dismiss: (id: number) => setRequest(current => current?.id === id ? null : current),

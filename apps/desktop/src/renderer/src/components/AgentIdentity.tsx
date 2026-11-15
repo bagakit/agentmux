@@ -1,5 +1,5 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { agentEvidenceStale } from '@agentmux/core/agent-status'
 import { Button } from '@agentmux/client-ui/components/Button'
 import type { AgentAvatarAppearance, ComposerShortcut, SessionSnapshot } from '../../../shared/contracts'
@@ -7,15 +7,23 @@ import { describeAgentDisplayState } from '../../../shared/agent-state-presentat
 import { AgentAvatar } from './AgentAvatar'
 import { AgentStatusPromptActions } from './AgentStatusPromptActions'
 import { agentProviderLabel } from '@agentmux/client-ui/components/AgentProviderIcon'
+import { useObservedAppStore } from '../lib/use-observed-app-store'
+import { sessionPresentationById } from '../lib/session-presentation'
+import { useShallow } from 'zustand/react/shallow'
 
 const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
 
 
 type AgentSession = Extract<SessionSnapshot, { kind: 'agent' }>
+type AgentIdentitySession = Pick<AgentSession, 'id' | 'control' | 'processState' | 'providerId' | 'executorId' | 'capabilities'> & {
+  status: Pick<AgentSession['status'], 'state' | 'detail'>
+}
+type AgentStatusDetails = Pick<AgentSession, 'status' | 'semanticStatus' | 'terminalPromptDelivery'>
 
-function AgentStateFace({ session, executorLabel, prompts, disabled, inputAction, onSelect, resultReview, close }: {
-  session: AgentSession
+function AgentStateFace({ session, originalStatus, executorLabel, prompts, disabled, inputAction, onSelect, resultReview, close }: {
+  session: AgentIdentitySession
+  originalStatus?: AgentStatusDetails | undefined
   executorLabel: string
   prompts: readonly ComposerShortcut[]
   disabled: boolean
@@ -35,7 +43,17 @@ function AgentStateFace({ session, executorLabel, prompts, disabled, inputAction
   const meaning = describeAgentDisplayState(session.status.state)
   const reviewReady = session.status.state === 'done' && Boolean(resultReview)
   useEffect(() => { if (!reviewReady) setReview(false) }, [reviewReady])
-  const statement = session.semanticStatus
+  // This disclosure is mounted while open. Read timestamps from this exact original Run.
+  const scope = useMemo(() => ({ sessionIds: originalStatus ? [] : [session.id], navigation: false, timeline: false }), [Boolean(originalStatus), session.id])
+  const observedStatus = useObservedAppStore('avatar', true, scope, useShallow(state => {
+    if (originalStatus) return undefined
+    const observed = sessionPresentationById(state.sessions).get(session.id)
+    if (observed?.kind !== 'agent' || observed.control.hostId !== session.control.hostId ||
+      observed.control.agentSessionId !== session.control.agentSessionId || observed.control.run.runId !== session.control.run.runId) return undefined
+    return { status: observed.status, semanticStatus: observed.semanticStatus, terminalPromptDelivery: observed.terminalPromptDelivery }
+  }))
+  const details = originalStatus ?? observedStatus
+  const statement = details?.semanticStatus
   return <div ref={face} className="agent-state-face">
     <div className="agent-state-face__summary">
       <strong>{meaning.label}</strong>
@@ -52,8 +70,8 @@ function AgentStateFace({ session, executorLabel, prompts, disabled, inputAction
         <details className="agent-state-face__facts"><summary>State details</summary>
           <p>{meaning.description}</p>
           <dl><dt>Process</dt><dd>{session.processState}</dd>
-            <dt>Shown status</dt><dd>{session.status.state} · {session.status.source}</dd>
-            <dt>Observed</dt><dd>{new Date(session.status.observedAt).toLocaleString()}</dd>
+            <dt>Shown status</dt><dd>{session.status.state}{details ? ` · ${details.status.source}` : ''}</dd>
+            <dt>Observed</dt><dd>{details ? new Date(details.status.observedAt).toLocaleString() : 'Unconfirmed'}</dd>
             <dt>Agent statement</dt><dd>{statement
               ? <>{describeAgentDisplayState(statement.state).label} · {statement.source}<small>{new Date(statement.observedAt).toLocaleString()}{agentEvidenceStale(statement, Date.now()) ? ' · Observation is old' : ''}</small></>
               : session.capabilities.timeline === 'unavailable' ? 'Not supported by this Provider' : 'Not reported'}</dd>
@@ -62,7 +80,7 @@ function AgentStateFace({ session, executorLabel, prompts, disabled, inputAction
             <dt>Provider</dt><dd>{agentProviderLabel(session.providerId)}</dd>
             <dt>Executor</dt><dd>{executorLabel} · {session.executorId}</dd></dl>
           {session.status.detail ? <p>{session.status.detail}</p> : null}
-          {session.terminalPromptDelivery ? <p>Prompt delivery is unverified: {session.terminalPromptDelivery.reason}. This is separate from input readiness.</p> : null}
+          {details?.terminalPromptDelivery ? <p>Prompt delivery is unverified: {details.terminalPromptDelivery.reason}. This is separate from input readiness.</p> : null}
         </details>
       </>}
     </div>
@@ -70,8 +88,9 @@ function AgentStateFace({ session, executorLabel, prompts, disabled, inputAction
 }
 
 /** The existing receiver avatar is the single state, Prompt and result entrance. */
-export function AgentIdentity({ session, name, executorLabel, appearance, prompts = [], disabled = false, inputAction = 'Send a message to this Session.', onSelect = () => false, resultReview, visible = true }: {
-  session: AgentSession
+export function AgentIdentity({ session, originalStatus, name, executorLabel, appearance, prompts = [], disabled = false, inputAction = 'Send a message to this Session.', onSelect = () => false, resultReview, visible = true }: {
+  session: AgentIdentitySession
+  originalStatus?: AgentStatusDetails | undefined
   name: string
   executorLabel: string
   appearance?: AgentAvatarAppearance | undefined
@@ -84,6 +103,6 @@ export function AgentIdentity({ session, name, executorLabel, appearance, prompt
 }) {
   return <span className="composer-agent-identity"><AgentAvatar sessionId={session.id} executorId={session.executorId}
     providerId={session.providerId} state={session.status.state} detail={session.status.detail} label={name} appearance={appearance} visible={visible}
-    actionDisclosure={({ close }) => <AgentStateFace key={session.id} session={session} executorLabel={executorLabel} prompts={prompts}
+    actionDisclosure={({ close }) => <AgentStateFace key={session.id} session={session} originalStatus={originalStatus} executorLabel={executorLabel} prompts={prompts}
       disabled={disabled} inputAction={inputAction} onSelect={onSelect} resultReview={resultReview} close={close} />} /></span>
 }

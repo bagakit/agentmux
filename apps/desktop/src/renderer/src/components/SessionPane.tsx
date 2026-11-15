@@ -16,7 +16,7 @@ import { useConversationReactions } from '../lib/conversation-reactions'
 import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
 import { ConversationMessageAvatar } from './ConversationMessageAvatar'
 import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
-import { cloneElement, useContext, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type ReactElement, type ComponentProps, type RefObject } from 'react'
+import { cloneElement, memo, useContext, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type ReactElement, type ComponentProps, type RefObject } from 'react'
 import { agentRegionExecution, useAppStore, currentCoreSpatialGraph } from '../store'
 import type { AgentDerivedAction } from '@agentmux/core/agent-derived-actions'
 import { sessionNameMetadataFor } from '../lib/session-name-metadata'
@@ -96,9 +96,36 @@ const ThemeActionStopIcon = semanticIconComponent('action.stop')
 
 
 const NO_PRESENTATIONS: readonly WorkbenchViewTarget[] = []
+const COMPOSER_PROCESS_DOCK = <ConversationProcessDockSlot />
+const PaneAgentComposer = memo(AgentSessionComposer)
 
 // Stable callbacks must not share the render context that owns a full Session.
 const readPastedImage = (path: string) => api.ui.readPastedImage(path)
+
+function createOpenTerminal(sessionId: string, regionId: OpenHttpLinkOrigin['regionId'], hideHistory: (open: boolean) => void, selectRegion: () => void) {
+  return () => {
+    hideHistory(false)
+    // Navigation belongs to this presentation. The Store owns terminal view and caret handoff.
+    selectRegion()
+    useAppStore.getState().openSessionTerminal(sessionId, regionId)
+  }
+}
+
+function createComposerResultReview(sessionId: string, origin: OpenHttpLinkOrigin) {
+  return (onNavigate: () => void) => <SessionResultReviewContent showStatus={false} sessionId={sessionId} origin={origin} onNavigate={onNavigate} />
+}
+
+function ProjectedAgentComposer({ target, origin, reveal, ...props }: ComponentProps<typeof AgentSessionComposer> & {
+  target: WorkbenchViewTarget
+  origin: OpenHttpLinkOrigin
+  reveal: (message: AgentSessionUserMessage, reference: ConversationItemRef | null, target: WorkbenchViewTarget) => Promise<MailboxMessageNavigationResult>
+}) {
+  const { displayWorkspaceId, groupId, tabId } = target.reference!
+  const mailboxOrigin = useMemo(() => ({ ...origin, workspaceId: displayWorkspaceId, tabGroupId: groupId, tabId }),
+    [origin.regionId, origin.sessionId, displayWorkspaceId, groupId, tabId])
+  const onRevealMessage = useCallback((message: AgentSessionUserMessage, reference: ConversationItemRef | null) => reveal(message, reference, target), [reveal, target])
+  return <PaneAgentComposer {...props} mailboxOrigin={mailboxOrigin} onRevealMessage={onRevealMessage} />
+}
 
 function createPaneSelection(regionId: OpenHttpLinkOrigin['regionId'], onSelectRegion: WorkbenchPresentation['onSelectRegion'],
   survey: WorkbenchPresentation['survey'], surface: WorkbenchPresentation['surface'],
@@ -253,8 +280,10 @@ export function SessionPane({
   const [learningSelection, setLearningSelection] = useState<{ key: string; displayId: string | null; origin: OpenHttpLinkOrigin; trigger: HTMLButtonElement | null; open: boolean } | null>(null)
   const primaryPresentation = useWorkbenchBrowserPresentation()
   const primaryReference = primaryPresentation.reference
-  const mailboxOrigin = primaryReference ? { ...linkOrigin, workspaceId: primaryReference.displayWorkspaceId,
-    tabGroupId: primaryReference.groupId, tabId: primaryReference.tabId } : linkOrigin
+  const mailboxOrigin = useMemo(() => primaryReference ? { ...linkOrigin, workspaceId: primaryReference.displayWorkspaceId,
+    tabGroupId: primaryReference.groupId, tabId: primaryReference.tabId } : linkOrigin,
+  [linkOrigin.workspaceId, linkOrigin.tabGroupId, linkOrigin.tabId, linkOrigin.regionId, linkOrigin.sessionId,
+    primaryReference?.displayWorkspaceId, primaryReference?.groupId, primaryReference?.tabId])
   const selectOwnRegion = useMemo(() => createPaneSelection(linkOrigin.regionId, primaryPresentation.onSelectRegion,
     primaryPresentation.survey, primaryPresentation.surface, mailboxOrigin.workspaceId, mailboxOrigin.tabId, mailboxOrigin.tabGroupId),
   [linkOrigin.regionId, primaryPresentation.onSelectRegion, primaryPresentation.survey, primaryPresentation.surface,
@@ -269,10 +298,14 @@ export function SessionPane({
   // One exact Core terminal fact outranks a stale presentation. The original
   // global Session projection and all other consumers retain their own owners.
   const session = surfaceKind === 'agent' && retainedHistory?.state === 'deleted' ? undefined : observedSession
+  const agentControl = session?.kind === 'agent' ? session.control : undefined
+  const agentProviderId = session?.kind === 'agent' ? session.providerId : undefined
   const composerProviderCatalogEntry = useObservedAppStore('sessionPane', observationVisible, consumerScope, state =>
-    session?.kind === 'agent' ? state.providerCatalog.find(entry => entry.id === session.providerId) : undefined)
-  // The same resolved execution facts feed every local Composer projection; Region remains presentation only.
-  const composerExecutionProps = { session, ownerKey: session?.id ?? sessionId, providerCatalogEntry: composerProviderCatalogEntry ?? null }
+    agentProviderId === undefined ? undefined : state.providerCatalog.find(entry => entry.id === agentProviderId))
+  // All local Composer presentations use this same confirmed original owner.
+  const paneSession = useMemo(() => agentControl ? { hostId: agentControl.hostId, agentSessionId: agentControl.agentSessionId } : null,
+    [agentControl?.hostId, agentControl?.agentSessionId])
+  const composerExecutionProps = { paneSession, ownerKey: session?.id ?? sessionId, providerCatalogEntry: composerProviderCatalogEntry ?? null }
   const currentConversationActions = useAgentCurrentForkControls({ session: session?.kind === 'agent' ? session : null, linkOrigin: mailboxOrigin, readOnly })
   const legacyExecution = useLegacyExecutionRecovery(mailboxOrigin.tabId && mailboxOrigin.regionId
     ? { tabId: mailboxOrigin.tabId, regionId: mailboxOrigin.regionId, agentSessionId: sessionId } : undefined,
@@ -368,12 +401,8 @@ export function SessionPane({
   const [historyOpen, setHistoryOpen] = useState(false)
   const [presentationHistory, setPresentationHistory] = useState<{ displayId: string; trigger: HTMLButtonElement | null } | null>(null)
   useEffect(() => { setPresentationHistory(null) }, [activitySourceKey, viewMode])
-  const openTerminal = (): void => {
-    setHistoryOpen(false)
-    // Navigation belongs to this presentation; the store owns the terminal view and its caret handoff.
-    selectOwnRegion()
-    useAppStore.getState().openSessionTerminal(sessionId, linkOrigin.regionId)
-  }
+  const openTerminal = useMemo(() => createOpenTerminal(sessionId, linkOrigin.regionId, setHistoryOpen, selectOwnRegion),
+    [sessionId, linkOrigin.regionId, selectOwnRegion])
   useEffect(() => {
     if (navigation.current.isCurrent && !navigation.current.isCurrent()) navigation.current.cancel?.()
   })
@@ -456,12 +485,12 @@ export function SessionPane({
   const revealConversationItem = useCallback((itemRef: ConversationItemRef, presentation?: WorkbenchViewTarget, mailboxInputId?: string, isIntentCurrent?: () => boolean, routeHostId = itemRef.hostId): Promise<MailboxMessageNavigationResult> => {
     navigation.current.cancel?.()
     const generation = ++navigation.current.generation
-    const control = session?.kind === 'agent' ? session.control : undefined
+    const control = agentControl
     const sourceKey = conversationMessageSourceKey(control?.agentSessionId, itemRef.source)
     const unavailable = (detail: string): MailboxMessageNavigationResult => ({ kind: 'unavailable', message: `${detail} 原文仍可阅读和复制。` })
     if (!control || routeHostId !== control.hostId || itemRef.agentSessionId !== control.agentSessionId || !sourceKey) return Promise.resolve(unavailable('记录关系未确认，无法定位。'))
     if (pendingAgentRestore) return Promise.resolve(unavailable('当前对话位置尚不可用，Session 已保留。'))
-    if (itemRef.source.kind === 'native' && session?.providerId !== itemRef.source.providerId) {
+    if (itemRef.source.kind === 'native' && agentProviderId !== itemRef.source.providerId) {
       return Promise.resolve(unavailable('原生来源已变化，当前阅读窗口保留；请刷新来源后再定位。'))
     }
     const displayId = presentation && linkOrigin.regionId ? workbenchSessionStageHostId(presentation, linkOrigin.regionId) : null
@@ -531,12 +560,12 @@ export function SessionPane({
         finish(located ? { kind: 'located' } : unavailable(error ?? '准确记录尚未呈现在对话中，无法确认位置。'))
       } })
     return result
-  }, [activitySourceKey, sessionId, session, pendingAgentRestore, linkOrigin.regionId])
+  }, [activitySourceKey, sessionId, agentControl, agentProviderId, pendingAgentRestore, linkOrigin.regionId])
   // Mailbox keeps its original user-input identity contract; Focus may reveal genuine replies.
   const revealMailboxMessage = useCallback((message: AgentSessionUserMessage, reference: ConversationItemRef | null, presentation?: WorkbenchViewTarget) => {
-    if (session?.kind !== 'agent' || !reference) return Promise.resolve<MailboxMessageNavigationResult>({ kind: 'unavailable', message: 'Original record reference is unconfirmed. Recorded text remains readable.' })
-    return revealConversationItem(reference, presentation, message.id, undefined, session.control.hostId)
-  }, [session, revealConversationItem])
+    if (!agentControl || !reference) return Promise.resolve<MailboxMessageNavigationResult>({ kind: 'unavailable', message: 'Original record reference is unconfirmed. Recorded text remains readable.' })
+    return revealConversationItem(reference, presentation, message.id, undefined, agentControl.hostId)
+  }, [agentControl, revealConversationItem])
   useEffect(() => {
     if (!incomingReveal || incomingReveal.claimed || !incomingReveal.isCurrent() || readOnly) return
     const reference = incomingReveal.reference
@@ -598,14 +627,15 @@ export function SessionPane({
   useEffect(() => { setFileLinkIssue(null) }, [fileContext])
   const fileOrigin = useMemo(() => ({ ...mailboxOrigin, sessionId }), [mailboxOrigin.workspaceId, mailboxOrigin.tabGroupId, mailboxOrigin.tabId, mailboxOrigin.regionId, sessionId])
   const linkOpening = useSessionLinkOpening(fileOrigin, setFileLinkIssue, selectOwnRegion)
+  const activateFile = linkOpening.activateFile
   const openProjectFile = useCallback((path: string, location?: { line: number; column?: number }, event?: LinkClickModifiers) => {
     // Freeze the rendered scope and exact display occurrence. Never resolve again from focus.
     if (selectFileContext(useAppStore.getState()) !== fileContext || fileContext.kind === 'unconfirmed') {
       setFileLinkIssue('The rendered file context changed before this click could be confirmed.')
       return
     }
-    linkOpening.activateFile(path, location, event)
-  }, [fileContext, selectFileContext, linkOpening])
+    activateFile(path, location, event)
+  }, [fileContext, selectFileContext, activateFile])
   const fileReferenceNotice = fileContext.kind !== 'session' || fileLinkIssue ? <>
     {fileContext.kind === 'goal' ? <div className="activity-feed__read-notice" data-file-reference-scope="current-goal">
       <span>File links use current Goal project: {fileContext.project!.name}.{!fileContext.homeDir ? ' Home paths are unconfirmed for this Host; ~/ references stay as written.' : ''} Earlier messages may have another origin.</span>
@@ -911,11 +941,13 @@ export function SessionPane({
 
   const renderMessageActions = useConversationReactions(sessionId, observationVisible && !readOnly && surfaceKind === 'agent')
 
-  const mailboxReading = {
+  const mailboxReading = useMemo(() => ({
     workspaceRoot: fileContext.workspaceRoot, homeDir: fileContext.homeDir,
     ...(fileContext.kind !== 'unconfirmed' && fileContext.kind !== 'unassigned' ? { openWorkspaceFile: openProjectFile } : {}),
     readPastedImage, openHttpLink: onProseLinkClick, describeSpeaker
-  }
+  }), [fileContext, openProjectFile, onProseLinkClick, describeSpeaker])
+  const composerReview = useMemo(() => createComposerResultReview(sessionId, linkOrigin),
+    [sessionId, linkOrigin.workspaceId, linkOrigin.tabGroupId, linkOrigin.tabId, linkOrigin.regionId, linkOrigin.sessionId])
 
   const acceptedLaunch = pendingLaunch?.created && (!session || session.control.run.runId === pendingLaunch.created.run.runId)
     ? pendingLaunch.created : undefined
@@ -986,9 +1018,8 @@ export function SessionPane({
       executionHost={preSnapshotHost} eligible={false} recovery={content(target)}
       readOnly={readOnly} resourceOrigin={linkOrigin} renderFrame={renderPresentationFrame}
       selectRegion={() => onPresentationSelected?.(target)}
-      {...(projectionPolicy.allowsRecovery && session?.kind === 'agent' ? { renderComposer: (pendingLayout: PendingDeliveryLayout) => <AgentSessionComposer {...composerExecutionProps} resourceWorkspaceId={fileContext.workspaceId} pendingLayout={pendingLayout} reading={mailboxReading}
-        mailboxOrigin={{ ...linkOrigin, workspaceId: target.reference!.displayWorkspaceId, tabGroupId: target.reference!.groupId, tabId: target.reference!.tabId }}
-        onRevealMessage={(message, reference) => revealMailboxMessage(message, reference, target)} sessionId={session.id}
+      {...(projectionPolicy.allowsRecovery && session?.kind === 'agent' ? { renderComposer: (pendingLayout: PendingDeliveryLayout) => <ProjectedAgentComposer {...composerExecutionProps} resourceWorkspaceId={fileContext.workspaceId} pendingLayout={pendingLayout} reading={mailboxReading}
+        target={target} origin={linkOrigin} reveal={revealMailboxMessage} sessionId={session.id}
         visible={false} {...(tabName ? { tabName } : {})} /> } : {})} />) : null}
     {primary}
   </>
@@ -1002,7 +1033,7 @@ export function SessionPane({
       {sessionHeader()}
       {takeoverSurface}
       <div className="agent-body">{acceptedSurface}</div>
-      {!readOnly ? <AgentSessionComposer {...composerExecutionProps} resourceWorkspaceId={fileContext.workspaceId} pendingLayout={pendingLayout} reading={mailboxReading} key={sessionId} sessionId={sessionId} visible={visible} disabled {...(tabName ? { tabName } : {})} /> : null}
+      {!readOnly ? <PaneAgentComposer {...composerExecutionProps} resourceWorkspaceId={fileContext.workspaceId} pendingLayout={pendingLayout} reading={mailboxReading} key={sessionId} sessionId={sessionId} visible={visible} disabled {...(tabName ? { tabName } : {})} /> : null}
     </section>)
   }
 
@@ -1104,7 +1135,7 @@ export function SessionPane({
             restore: 'Check again to read the same Session identity; no Agent will be started.' }
         }} actions={<Button type="button" disabled={historyCatalogue.loading}
           onClick={historyCatalogue.refresh}><ThemeActionRefreshIcon size={12} /> Check again</Button>} /> : null}
-        {!readOnly && surfaceKind === 'agent' ? <AgentSessionComposer {...composerExecutionProps} resourceWorkspaceId={fileContext.workspaceId} pendingLayout={pendingLayout} reading={mailboxReading} key={sessionId} sessionId={sessionId} visible={visible} disabled {...(tabName ? { tabName } : {})} /> : null}
+        {!readOnly && surfaceKind === 'agent' ? <PaneAgentComposer {...composerExecutionProps} resourceWorkspaceId={fileContext.workspaceId} pendingLayout={pendingLayout} reading={mailboxReading} key={sessionId} sessionId={sessionId} visible={visible} disabled {...(tabName ? { tabName } : {})} /> : null}
       </section>
     )
   }
@@ -1329,7 +1360,7 @@ export function SessionPane({
       readOnly={readOnly} resourceOrigin={linkOrigin}
       {...(hasAgentComposer ? { onAnnotate: annotateMessage } : {})}
       renderFrame={renderPresentationFrame} selectRegion={() => onPresentationSelected?.(target)}
-      {...(hasAgentComposer ? { renderComposer: (pendingLayout: PendingDeliveryLayout) => <AgentSessionComposer {...composerExecutionProps} aboveInput={<ConversationProcessDockSlot />} resourceWorkspaceId={fileContext.workspaceId} pendingLayout={pendingLayout} reading={mailboxReading} mailboxOrigin={{ ...linkOrigin, workspaceId: target.reference!.displayWorkspaceId, tabGroupId: target.reference!.groupId, tabId: target.reference!.tabId }} onRevealMessage={(message, reference) => revealMailboxMessage(message, reference, target)} sessionId={session.id}
+      {...(hasAgentComposer ? { renderComposer: (pendingLayout: PendingDeliveryLayout) => <ProjectedAgentComposer {...composerExecutionProps} aboveInput={COMPOSER_PROCESS_DOCK} resourceWorkspaceId={fileContext.workspaceId} pendingLayout={pendingLayout} reading={mailboxReading} target={target} origin={linkOrigin} reveal={revealMailboxMessage} sessionId={session.id}
         visible={target.visible !== false && viewMode !== 'terminal' && canReadConversation} {...(tabName ? { tabName } : {})} /> } : {})}
     />) : null}
     <ConversationProcessSurface><section
@@ -1447,7 +1478,7 @@ export function SessionPane({
           data-input-surface={session.kind === 'agent' && viewMode === 'terminal' ? 'terminal' : 'activity'}
           aria-label={viewMode === 'terminal' ? 'Agent input channel' : undefined}
         >
-          <AgentSessionComposer {...composerExecutionProps} aboveInput={<ConversationProcessDockSlot />} resourceWorkspaceId={fileContext.workspaceId} pendingLayout={pendingLayout} reading={mailboxReading} mailboxOrigin={mailboxOrigin} onRevealMessage={revealMailboxMessage} onOpenTerminal={openTerminal} key={sessionId} sessionId={session.id} resultReview={(onNavigate) => <SessionResultReviewContent showStatus={false} sessionId={sessionId} origin={linkOrigin} onNavigate={onNavigate} />} visible={visible} {...(tabName ? { tabName } : {})} />
+          <PaneAgentComposer {...composerExecutionProps} aboveInput={COMPOSER_PROCESS_DOCK} resourceWorkspaceId={fileContext.workspaceId} pendingLayout={pendingLayout} reading={mailboxReading} mailboxOrigin={mailboxOrigin} onRevealMessage={revealMailboxMessage} onOpenTerminal={openTerminal} key={sessionId} sessionId={session.id} resultReview={composerReview} visible={visible} {...(tabName ? { tabName } : {})} />
         </div>
       ) : null}
     </section></ConversationProcessSurface>

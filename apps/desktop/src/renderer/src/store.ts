@@ -823,12 +823,16 @@ const manualSteerAttempts = new Map<string, SteerDeliveryAttempt>()
 
 export type AgentSteerReaction = { code: string; replySource: ConversationReplySource }
 export type MoteMainInputSelection = Pick<import('@agentmux/core/mote-dialogue').MoteDialogueInputSubmit, 'target' | 'expectedRoleRevision'>
+type AgentSteerSession = Pick<Extract<SessionSnapshot, { kind: 'agent' }>, 'kind' | 'control' | 'hostId' | 'providerId' | 'processState' |
+  'capabilities' | 'inputEpoch' | 'pendingInteraction' | 'structuredPromptInput' | 'nativeHandle' | 'terminalFrontend'> & {
+  status: Pick<SessionSnapshot['status'], 'state'>
+}
 export type AgentSteerOptions = {
   focusTask?: AgentMuxFocusTaskReference | undefined
   /** Exact foreign execution transport; the canonical queue owner remains execution Runtime + raw SID. */
   originalMember?: SpaceMountMemberTarget
   /** Read-only transport facts for this admission; never inserted into the local Session map. */
-  originalSession?: SessionSnapshot
+  originalSession?: AgentSteerSession
   moteMain?: MoteMainInputSelection | undefined
   moteSource?: import('@agentmux/core').AgentInputMoteSource | undefined
   inputImages?: readonly import('@agentmux/core').AgentInputImageReference[]
@@ -921,7 +925,9 @@ export function agentSteerCanEdit(entry: AgentSteerQueueEntry, inFlightId?: stri
 }
 
 /** A retired terminal target may release the user's text to a draft, never its input authority. */
-export function staleManualSteerDraftKey(entry: AgentSteerQueueEntry, session: SessionSnapshot | undefined): Extract<import('@agentmux/core/prompt-condition').AgentPromptInputKey, { kind: 'prompt' }> | undefined {
+export function staleManualSteerDraftKey(entry: AgentSteerQueueEntry,
+  session: { kind: 'terminal' } | Pick<Extract<SessionSnapshot, { kind: 'agent' }>, 'kind' | 'id' | 'hostId' | 'control'> | undefined
+): Extract<import('@agentmux/core/prompt-condition').AgentPromptInputKey, { kind: 'prompt' }> | undefined {
   const control = entry.directInputControl
   const binding = entry.directInputBinding
   if (entry.errorCode !== 'STALE_AGENT_SESSION' || entry.origin !== 'manual' || entry.inputReceipt ||

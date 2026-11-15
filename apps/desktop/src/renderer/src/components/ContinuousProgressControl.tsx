@@ -16,6 +16,9 @@ import { useLauncherState, checkpointLauncherState, initializeLauncherState } fr
 import { presentError } from '@agentmux/client-ui/error-presentation'
 
 export type ContinuousProgressStatus = CalendarScheduleStatus
+export type ContinuousProgressSession = Pick<Extract<SessionSnapshot, { kind: 'agent' }>, 'hostId' | 'id' | 'control' | 'providerId' | 'workspacePath' | 'label'> & {
+  status: Pick<SessionSnapshot['status'], 'state'>
+}
 function recordedProgressRequest(request: ProgressRequest, loop: ContinuousProgressLoop | undefined): boolean {
   if (!loop || ['hostId', 'agentSessionId', 'providerId', 'workspacePath'].some(key =>
     loop[key as keyof typeof request.input.target] !== request.input.target[key as keyof typeof request.input.target])) return false
@@ -33,7 +36,7 @@ type ContinuousProgressControlProps = {
   presented?: boolean
   /** Visibility controls presentation work without discarding retained forms. */
   visible?: boolean
-} & ({ session: Extract<SessionSnapshot, { kind: 'agent' }>; original?: never } | { original: OriginalContinuousProgressControl; session?: never })
+} & ({ session: ContinuousProgressSession; original?: never } | { original: OriginalContinuousProgressControl; session?: never })
 export function ContinuousProgressControl({ session, original, targetName, onStatusChange, presented = true, visible = presented }: ContinuousProgressControlProps) {
   const displayPath = usePathDisplay()
   const target = useMemo(() => original?.target ?? { hostId: session!.control.hostId, agentSessionId: session!.control.agentSessionId,

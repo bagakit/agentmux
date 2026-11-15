@@ -8,8 +8,9 @@ import { useObservedAppStore, useObservedConsumerCommit } from '../lib/use-obser
 import { reportMessageDeliveryDiagnostics } from '../lib/message-delivery-diagnostics'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { NativeConfigurationPicker, PosturePicker } from './PosturePicker'
-import { createFirstPromptSelector, createSessionViewModeSelector, createSessionWorkfaceSelector } from '../lib/session-presentation'
+import { createFirstPromptSelector, createSessionViewModeSelector, sessionPresentationById } from '../lib/session-presentation'
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import type { ComposerInsertionHandle } from '@agentmux/client-ui/composer-insertion'
 import { AgentContextUsage } from './AgentContextUsage'
 import { AgentComposerTools } from './AgentComposerTools'
@@ -42,7 +43,7 @@ import { AgentIdentity } from './AgentIdentity'
 import { agentProviderLabel } from '@agentmux/client-ui/components/AgentProviderIcon'
 import { agentDisplayName } from '../lib/workbench-tabs'
 import { ComposerFeedback, useComposerFeedback } from './ComposerFeedback'
-import { sessionServiceNotices } from '../lib/session-service-notices'
+import { createSessionServiceNoticeSelector } from '../lib/session-service-notices'
 import { useRunService } from '../lib/run-service-projection'
 import { SessionMailbox } from './SessionMailbox'
 import { useComposerInputHistory, type ComposerInputReading } from '../lib/use-composer-input-history'
@@ -67,6 +68,52 @@ const EMPTY_QUEUE: readonly AgentSteerQueueEntry[] = Object.freeze([])
 // The resubmit guard survives a Composer remount within the same application run.
 // Drafts remain owned by the store; transient operation feedback stays with the mounted Composer.
 const lastSubmitBySession = new ComposerResubmitGuard()
+
+type AgentSession = Extract<SessionSnapshot, { kind: 'agent' }>
+type ComposerSessionOwner = Pick<AgentSession['control'], 'hostId' | 'agentSessionId'>
+
+function createComposerSessionReader(sessionId: string, owner: ComposerSessionOwner | null | undefined) {
+  return (state: { sessions: readonly SessionSnapshot[] }) => {
+    if (owner === null) return undefined
+    const session = sessionPresentationById(state.sessions).get(sessionId)
+    return !owner || session?.kind === 'agent' && session.control.hostId === owner.hostId &&
+      session.control.agentSessionId === owner.agentSessionId ? session : undefined
+  }
+}
+
+function composerSessionFields(session: SessionSnapshot | undefined) {
+  if (!session) return undefined
+  const { id, hostId, workspacePath, nativeService, processState, status } = session
+  const common = { id, hostId, workspacePath, processState, state: status.state,
+    ...(nativeService === undefined ? {} : { nativeService }) }
+  if (session.kind === 'terminal') return { ...common, kind: session.kind, control: session.control }
+  const { control, providerId, executorId, label, capabilities, inputEpoch, structuredPromptInput, nativeHandle, terminalFrontend,
+    toolExecution, workPlacement, pendingInteraction, nativeConfiguration, turnUsage, contextWindowUsage } = session
+  return { ...common, kind: session.kind, control, providerId, executorId, label, capabilities,
+    detail: status.detail, continuity: status.continuity, continuityReason: status.continuityReason,
+    ...(inputEpoch === undefined ? {} : { inputEpoch }), ...(structuredPromptInput ? { structuredPromptInput } : {}),
+    ...(nativeHandle ? { nativeHandle } : {}), ...(terminalFrontend ? { terminalFrontend } : {}),
+    ...(toolExecution ? { toolExecution } : {}), ...(workPlacement ? { workPlacement } : {}),
+    ...(pendingInteraction ? { pendingInteraction } : {}), ...(nativeConfiguration ? { nativeConfiguration } : {}),
+    turnUsage, contextWindowUsage }
+}
+
+/** Keep the original service outcome live, including diagnostic times carried by an actual notice. */
+function createComposerNoticeSelector() {
+  const project = createSessionServiceNoticeSelector()
+  let observed: ServiceNoticeItem[] | undefined
+  let presented: ServiceNoticeItem[] = []
+  let signature = '[]'
+  return (...args: Parameters<typeof project>) => {
+    const notices = project(...args)
+    if (notices !== observed) {
+      observed = notices
+      const next = JSON.stringify(notices)
+      if (next !== signature) { presented = notices; signature = next }
+    }
+    return presented
+  }
+}
 
 // The mailbox retains this layout across Composer renders. Its methods need only
 // the supplied layout and the original rollover node, not the Composer's Session.
@@ -107,7 +154,7 @@ function SessionComposerSurface({ source, ...props }: AgentComposerProps & {
 export function AgentSessionComposer({
   pendingLayout,
   sessionId,
-  session: explicitSession,
+  paneSession,
   ownerKey = sessionId,
   providerCatalogEntry,
   resourceWorkspaceId,
@@ -125,8 +172,8 @@ export function AgentSessionComposer({
 }: {
   pendingLayout?: PendingDeliveryLayout | undefined
   sessionId: string
-  /** Confirmed execution facts; an explicit Session is never replaced by an observer lookalike. */
-  session?: SessionSnapshot | undefined
+  /** A Pane binds its exact local original. Null is unconfirmed. Standalone surfaces discover by ID. */
+  paneSession?: ComposerSessionOwner | null | undefined
   /** execution.runtimeId + raw SID owns drafts/history/outbox; local Sessions retain session.id. */
   ownerKey?: string
   /** Original Provider capabilities consumed by this Composer; null means no original entry was found. */
@@ -152,7 +199,7 @@ export function AgentSessionComposer({
   const main = moteDialogue?.page?.main
   useObservedConsumerCommit('composer', visible)
   // Without an explicit Agent from the Pane, keep observing the original source or Session discovery.
-  const observeTimeline = visible || Boolean(source) || explicitSession?.kind !== 'agent'
+  const observeTimeline = visible || Boolean(source) || !paneSession
   const consumerScope = useMemo(() => ({ sessionIds: [...new Set([sessionId, ownerKey])], navigation: false,
     timeline: observeTimeline, sessionActivityTime: visible }), [sessionId, ownerKey, observeTimeline, visible])
   const insertionRef = useRef<ComposerInsertionHandle>(null)
@@ -181,7 +228,7 @@ export function AgentSessionComposer({
   }
   const enqueueDirect = useAppStore.getState().enqueueAgentSteer
   const enqueueAgentSteer: typeof enqueueDirect = (id, value, rejected, operationId, origin, note, options) => enqueueDirect(id, value, rejected, operationId, origin, note,
-    { ...options, ...(session ? { originalSession: session } : {}), ...(source ? { originalMember: source.target } : {}) })
+    { ...options, ...(session?.kind === 'agent' ? { originalSession: session } : {}), ...(source ? { originalMember: source.target } : {}) })
   const archiveAgentSteer = useAppStore.getState().archiveAgentSteer
   const moveAgentSteer = useAppStore.getState().moveAgentSteer
   const sendQueuedAgentSteer = useAppStore.getState().resendRefusedAgentSteer
@@ -213,10 +260,14 @@ export function AgentSessionComposer({
     if (visible && !memberInput && !rolloverChoiceRequired.current && rollovers.length === 1 && rolloverHandled.current !== rollovers[0]!.operationId) openRollover(rollovers[0]!)
   }, [visible, queuedEntries, memberInput, moteWorkface?.startRollover])
   const executors = useObservedAppStore('composer', visible, consumerScope, (state) => state.config?.executors)
-  const selectSession = useMemo(() => createSessionWorkfaceSelector(sessionId, visible), [sessionId, visible])
-  const observedSession = useObservedAppStore('composer', visible, consumerScope, (state) =>
-    !source && explicitSession === undefined ? selectSession(state) : undefined)
-  const session = explicitSession ?? source?.session ?? observedSession
+  const readSession = useMemo(() => createComposerSessionReader(sessionId, paneSession), [sessionId, paneSession])
+  const fields = useObservedAppStore('composer', visible, consumerScope, useShallow(state =>
+    source ? undefined : composerSessionFields(readSession(state))))
+  const observedSession = useMemo(() => fields && (fields.kind === 'terminal' ? { ...fields, status: { state: fields.state } }
+    : { ...fields, status: { state: fields.state, ...(fields.detail === undefined ? {} : { detail: fields.detail }),
+      ...(fields.continuity === undefined ? {} : { continuity: fields.continuity }),
+      ...(fields.continuityReason === undefined ? {} : { continuityReason: fields.continuityReason }) } }), [fields])
+  const session = source ? source.session : observedSession
   const moteMain = motePresentation.moteInputIntent !== 'member' && !moteWorkface?.memberIntent && moteDialogue?.target && main?.roleRevision && main.current && session?.kind === 'agent' &&
     main.current.sessionId === session.control.agentSessionId && main.current.hostId === session.control.hostId
     ? { target: moteDialogue.target, expectedRoleRevision: main.roleRevision } : undefined
@@ -260,9 +311,9 @@ export function AgentSessionComposer({
   const activeFile = useObservedAppStore('composer', visible, consumerScope, (state) =>
     workspace ? state.lastActiveFileByWorkspace[workspace.id] : undefined
   )
-  // Explicit Session consumers receive the same original catalog entry; an observer lookalike cannot supply controls.
+  // Mounted foreign sources use their original metadata, independently of the local catalogue.
   const observedProviderCatalogEntry = useObservedAppStore('composer', visible, consumerScope, (state) =>
-    !source && explicitSession === undefined && providerCatalogEntry === undefined && session?.kind === 'agent'
+    !source && providerCatalogEntry === undefined && session?.kind === 'agent'
       ? state.providerCatalog.find((entry) => entry.id === session.providerId)
       : undefined
   )
@@ -271,7 +322,7 @@ export function AgentSessionComposer({
   const composerOptions = session?.kind === 'agent' ? originalProviderCatalogEntry?.composer : undefined
   const sendDirect = useAppStore.getState().send
   const send: typeof sendDirect = (id, value, rejected, origin, note, options) => sendDirect(id, value, rejected, origin, note,
-    { ...options, ...(session ? { originalSession: session } : {}), ...(source ? { originalMember: source.target } : {}) })
+    { ...options, ...(session?.kind === 'agent' ? { originalSession: session } : {}), ...(source ? { originalMember: source.target } : {}) })
   const interrupt = useAppStore.getState().interrupt
   const setPosture = useAppStore.getState().setPosture
   const setConfiguration = useAppStore.getState().setConfiguration
@@ -387,8 +438,10 @@ export function AgentSessionComposer({
     disabled: !submitMode.canType, insertion: insertionRef, feedback,
     document: dialogDocument, shortcutActive: visible && !readOnly, ...(workspace ? { onRemoteFiles } : {}) })
 
-  const notices: ServiceNoticeItem[] = sessionServiceNotices(session, queuedEntries, sendingId,
-    nativeService).map(notice => notice.id === 'timeline-observation'
+  const selectNotices = useMemo(createComposerNoticeSelector, [readSession, source?.target])
+  const serviceNotices = useObservedAppStore('composer', visible, consumerScope, state =>
+    selectNotices(source ? source.session : readSession(state), queuedEntries, sendingId, nativeService))
+  const notices: ServiceNoticeItem[] = serviceNotices.map(notice => notice.id === 'timeline-observation'
       ? source ? notice : { ...notice, action: { label: 'Retry work history', run: () => { void useAppStore.getState().resyncTimeline(sessionId, { observationOnly: true }) } } }
       : notice.id === 'interaction-receipt' && onOpenTerminal
         ? { ...notice, action: { label: 'Open terminal', run: onOpenTerminal } }
@@ -417,6 +470,8 @@ export function AgentSessionComposer({
   const capabilities = session?.kind === 'agent' ? session.capabilities : undefined
   const runId = control?.run.runId
   const canDrain = session?.kind === 'agent' && steerQueueCanEverDrain(session.processState)
+  const queueTarget = useMemo(() => control && session ? { kind: 'agent' as const, id: session.id, hostId: session.hostId, control } : undefined,
+    [control, session?.id, session?.hostId])
   const presentQueueEntry = useCallback((entry: AgentSteerQueueEntry) => ({
     id: entry.operationId,
     ...(entry.directInputControl && entry.directInputBinding ? { inputOrigin: {
@@ -449,8 +504,8 @@ export function AgentSessionComposer({
     ...(entry.logId ? { logId: entry.logId } : {}),
     ...(entry.error ? { error: entry.error } : {}),
     ...(entry.preparationWait ? { preparationWait: entry.preparationWait } : {}),
-    ...(staleManualSteerDraftKey(entry, session) ? { staleRunDraft: true } : {}),
-  }), [control, capabilities, session, runId, canDrain, sendingId, sendingPhase, timeline, timelineRevision])
+    ...(staleManualSteerDraftKey(entry, queueTarget) ? { staleRunDraft: true } : {}),
+  }), [control, capabilities, queueTarget, runId, canDrain, sendingId, sendingPhase, timeline, timelineRevision])
   const queued = useMemo(() => queuedEntries.map(presentQueueEntry), [queuedEntries, presentQueueEntry])
   const sendImmediately = useMemo(() => queued.some(entry => entry.immediateSend), [queued])
 
@@ -493,6 +548,7 @@ export function AgentSessionComposer({
       readPastedImage={api.ui.readPastedImage}
       insertionRef={insertionRef}
       identity={session?.kind === 'agent' && displayName ? <AgentIdentity session={session} name={displayName}
+        originalStatus={source?.session?.kind === 'agent' ? source.session : undefined}
         executorLabel={executors?.[session.executorId]?.label ?? session.executorId}
         appearance={executors?.[session.executorId]?.avatar} prompts={completion.prompts} visible={visible}
         disabled={!submitMode.canSubmit}
