@@ -3,6 +3,7 @@
 <!-- amux:content -->
 1. **Read.** Use `goal plan --goal ID`. Read the owner's `planState`, then match
    the node's current `delegationOperationId` to its original report, worker and thread.
+   To find active Tickets across Goals, use `goal plan active --view manage`.
    If `planStateIssue` is present, read the Goal again or update its serving Host.
    Node states stay unknown while the derivation is unavailable. Keep the saved plan,
    delegations and any write receipt. For all state fields use `goal plan --help`.
