@@ -14,8 +14,22 @@ export async function standaloneScenario({ repo, bundle, work, executablePath, r
   const puppeteer = createRequire(join(repo, 'packages/browser/package.json'))('puppeteer-core').default
   const socketPath = join(work, 'host.sock'), directory = join(work, 'state')
   let posts = 0, child, client, engineEndpoint
+  const waitedRequests = []
   const http = createServer((req, res) => {
     if (req.method === 'POST') { posts++; res.end('accepted'); return }
+    if (req.url?.startsWith('/network-wait/')) {
+      waitedRequests.push(req.url)
+      if (req.url === '/network-wait/start' || req.url === '/network-wait/redirect') {
+        res.writeHead(302, { Location: req.url === '/network-wait/start' ? '/network-wait/redirect' : '/network-wait/final' })
+        res.end()
+      } else if (req.url === '/network-wait/final') {
+        setTimeout(() => res.end('original final response'), 650)
+      } else {
+        const response = setTimeout(() => res.end('slow response'), 3_000)
+        res.once('close', () => clearTimeout(response))
+      }
+      return
+    }
     const push = req.url === '/push'
     res.setHeader('content-type', 'text/html')
     res.end(`<title>${push ? 'Push fixture' : 'Form fixture'}</title><label>Draft<input aria-label="Draft"></label><button aria-label="Submit">Submit</button><div id="count">0</div><div id="push">pending</div><script>
@@ -148,6 +162,21 @@ export async function standaloneScenario({ repo, bundle, work, executablePath, r
       const result = await run(two.id, `const tree=await snapshot();await fillInput(tree.nodes.find(n=>n.ref&&n.name==='Draft').ref,'second-page draft');return await js("document.querySelector('#push').textContent")`)
       assert.equal(result.outcome.kind,'completed',result.outcome.message); assert.equal(result.result,'native-websocket-message')
       assert.equal((await state(one.id)).result.draft, 'unsaved original', 'Accurate Browser routing must retain the first input')
+    })
+    await observe('network-idle-after-redirect-and-overlapping-cancel', async () => {
+      const startFetches = `void setTimeout(() => {
+        const slow = new AbortController();
+        fetch('/network-wait/slow', { signal: slow.signal }).catch(error => { window.slowOutcome = error.name });
+        setTimeout(() => slow.abort(), 170);
+        fetch('/network-wait/start').then(response => response.text()).then(text => { window.waitOutcome = text });
+      }, 100)`
+      const result = await run(one.id, `await js(${JSON.stringify(startFetches)}); await waitForNetworkIdle(2500);
+        return await js('({final: window.waitOutcome, slow: window.slowOutcome})')`)
+      assert.equal(result.outcome.kind, 'completed', 'Network idle must accept the original finished redirect chain: ' + result.outcome.message)
+      assert.deepEqual(result.result, { final: 'original final response', slow: 'AbortError' })
+      assert.deepEqual(waitedRequests.filter(url => url !== '/network-wait/slow'),
+        ['/network-wait/start', '/network-wait/redirect', '/network-wait/final'])
+      assert.equal(waitedRequests.filter(url => url === '/network-wait/slow').length, 1)
     })
     await observe('explicit-stop-fences-pending-native-action', async () => {
       const pending = run(one.id, `const tree=await snapshot();await wait(2000);await click(tree.nodes.find(n=>n.ref&&n.name==='Submit').ref);return true`, 'standalone-held-operation')
