@@ -4,7 +4,15 @@ import { join, resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '../../..')
 const spec = 'apps/host/test/goal-node-claims.test.ts'
-const runs = [
+const independentTitle = 'claims independent successors'
+const deliveryProof = process.argv[2] === '--delivery'
+const runs = deliveryProof ? [
+  { label: 'baseline', title: independentTitle },
+  { label: 'skip-delivery-review-match', title: independentTitle, failure: 'an independent review must bind the exact delivery hash', source: 'packages/demand/src/demand-store.ts' },
+  { label: 'omit-delivery-author', title: independentTitle, failure: 'the delivery hash binds the original author and report contents', source: 'packages/demand/src/demand-store.ts' },
+  { label: 'omit-delivery-report', title: independentTitle, failure: 'the delivery hash binds the original author and report contents', source: 'packages/demand/src/demand-store.ts' },
+  { label: 'restored', title: independentTitle },
+] : [
   { label: 'baseline' },
   { label: 'allow-related', title: 'saves one authorized claimant', failure: 'a related reader cannot claim an open node', source: 'apps/host/src/goal-plan-assignment.ts' },
   { label: 'lose-executor', title: 'saves one authorized claimant', failure: 'exactly one claim must be confirmed', source: 'packages/demand/src/demand-store.ts' },
@@ -16,7 +24,7 @@ const runs = [
   { label: 'restored' }
 ]
 for (const { label, failure, source, title } of runs) {
-  const args = ['run', '--config', 'apps/host/test/vitest.goal-node-claims.config.mts',
+  const args = ['run', '--configLoader', 'runner', '--config', 'apps/host/test/vitest.goal-node-claims.config.mts',
     '--reporter=json', '--no-cache', spec, ...(title ? ['-t', title] : [])]
   const result = await new Promise((accept, reject) => {
     const child = spawn(join(root, 'node_modules/.bin/vitest'), args, { cwd: root, env: { ...process.env, NODE_CLAIM_MUTATION: failure ? label : '' },
@@ -40,7 +48,7 @@ for (const { label, failure, source, title } of runs) {
     assert.ok(test.flatMap(assertion => assertion.failureMessages).some(message => message.includes(failure)), test.flatMap(assertion => assertion.failureMessages).join('\n'))
   } else {
     assert.equal(result.code, 0, test.flatMap(assertion => assertion.failureMessages).join('\n'))
-    assert.equal(report.numPassedTests, 2, diagnostic)
+    assert.equal(report.numPassedTests, title ? 1 : 2, diagnostic)
   }
   console.log(JSON.stringify({ label, source, result: failure ? 'mutation killed' : 'passed' }))
 }

@@ -1,5 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { createHash } from 'node:crypto'
 import { afterEach, expect, it, vi } from 'vitest'
 import { crossHostOwner, type CrossHostCleanup } from './helpers/goal-cross-host-fixture.js'
 
@@ -114,13 +115,24 @@ it('claims independent successors from one read and delivers the exact prerequis
   await delegate('original', 'worker-a')
   const path = join(owner.original.root, 'artifact.txt')
   await writeFile(path, 'file deliverable\n')
-  await report('original', 'worker-a', 'artifact.txt:1')
+  const originalReport = await report('original', 'worker-a', 'artifact.txt:1')
+  const delivery = originalReport.delegations[0].report.delivery
+  expect(delivery).toMatchObject({ schema: 'agentmux.ticket-delivery.v1', hash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+    authorRuntimeId: owner.identity.runtimeId })
+  const planSource = await owner.call(null, ['goal', 'plan', '--goal', goalId])
+  const originalHash = createHash('sha256').update(JSON.stringify([delivery.schema, owner.identity.runtimeId, planSource.address.namespace,
+    goalId, 'original', 'dispatch-original', owner.identity.runtimeId, 'worker-a', [], 'report-original', 'reply-original',
+    originalReport.delegations[0].report.grounding])).digest('hex')
+  expect(delivery.hash, 'the delivery hash binds the original author and report contents').toBe(originalHash)
   const original = await readFile(path, 'utf8')
   expect(original).toBe('file deliverable\n')
-  await owner.call(null, ['goal', 'plan', 'review', '--input', '-'], { goalId, review: {
-    operationId: 'review-original', nodeId: 'original', delegationOperationId: 'dispatch-original', verdict: 'pass', note: '',
-    check: { command: 'read artifact.txt', result: original, evidence: ['artifact.txt:1'] },
-  } })
+  const review = { operationId: 'review-original', nodeId: 'original', delegationOperationId: 'dispatch-original',
+    deliveryHash: delivery.hash, verdict: 'pass', note: '', check: { command: 'read artifact.txt', result: original, evidence: ['artifact.txt:1'] } }
+  const forged = await owner.cli(null, ['goal', 'plan', 'review', '--input', '-'], {
+    goalId, review: { ...review, deliveryHash: delivery.hash.replace(/^./u, (value: string) => value === 'a' ? 'b' : 'a') },
+  })
+  expect(forged.stderr, 'an independent review must bind the exact delivery hash').toContain('must name the exact original Ticket delivery hash')
+  await owner.call(null, ['goal', 'plan', 'review', '--input', '-'], { goalId, review })
   for (const [index, nodeId] of ['notes-a', 'notes-b'].entries()) {
     await owner.call(null, ['goal', 'plan', 'assignment', '--input', '-'], {
       goalId, nodeId, operationId: 'open-' + nodeId, expectedRevision: 1 + index, assignment: { kind: 'open' },
@@ -135,9 +147,11 @@ it('claims independent successors from one read and delivers the exact prerequis
   })
   const results = await Promise.all(assignments.map(({ nodeId, worker, token }) => owner.cli(worker, claim(nodeId, token))))
   expect(results.map(result => result.code), 'independent claims must succeed from the same read').toEqual([0, 0])
-  const predecessor = { nodeId: 'original', delegationOperationId: 'dispatch-original', reportOperationId: 'report-original', reviewOperationId: 'review-original' }
+  const predecessor = { nodeId: 'original', delegationOperationId: 'dispatch-original', reportOperationId: 'report-original', reviewOperationId: 'review-original', deliveryHash: delivery.hash }
   await owner.stop(); await owner.start()
   const replay = await owner.call('worker-b', claim('notes-b', assignments[1]!.token))
+  expect(replay.delegations[0].report.delivery).toEqual(delivery)
+  expect((await report('original', 'worker-a', 'artifact.txt:1')).delegations[0].report.delivery).toEqual(delivery)
   expect(replay.plan.history.find((entry: { operationId: string }) => entry.operationId === 'claim-notes-b')?.claim.predecessors).toEqual([predecessor])
   await delegate('notes-b', 'worker-b')
   const received = await owner.call('worker-b', ['message', 'read', '--host', 'local', '--message-id', 'source-notes-b'])
@@ -146,6 +160,14 @@ it('claims independent successors from one read and delivers the exact prerequis
   const delivered = await report('notes-b', 'worker-b', 'notes.txt:1')
   expect(delivered.delegations.find((attempt: { operationId: string }) => attempt.operationId === 'dispatch-notes-b'))
     .toMatchObject({ claimOperationId: 'claim-notes-b', predecessors: [predecessor], report: { operationId: 'report-notes-b' } })
+  const appended = await owner.call('supervisor', ['goal', 'plan', 'revise', '--input', '-'], { goalId, revision: {
+    operationId: 'adopt-worker-proposal', expectedRevision: replay.plan.revision, alignmentRevision: 1,
+    nodes: [...replay.plan.nodes, { ...nodes[0], id: 'follow-up', executor: null }],
+    proposals: [{ nodeId: 'follow-up', delegationOperationId: 'dispatch-original', replyMessageId: 'reply-original' }],
+  } })
+  expect(appended.plan.history.at(-1)).toMatchObject({ operationId: 'adopt-worker-proposal', author: { id: 'supervisor', runtimeId: owner.identity.runtimeId },
+    createdNodes: ['follow-up'], proposals: [{ nodeId: 'follow-up', author: { agentSessionId: 'worker-a', runtimeId: owner.identity.runtimeId },
+      sourceMessageId: 'source-original', proposalOperationId: 'report-original' }] })
   const prepared = delegation('notes-a', 'worker-a')
   await owner.call('supervisor', ['goal', 'delegation', 'prepare', '--input', '-'], prepared)
   await owner.call(null, ['goal', 'update', '--goal', goalId, '--alignment', JSON.stringify({

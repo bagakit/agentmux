@@ -168,7 +168,7 @@ test('the received original report retains its worker signature and exact Goal c
   const checked = await promisify(execFile)(process.execPath, ['--test', 'checks/first.test.mjs'], { cwd: a.original.root })
   await writeFile(join(checks, 'review-first.log'), checked.stdout + checked.stderr)
   expect(checked.stdout).toContain('pass 1')
-  const review = { operationId: 'review-first', nodeId: 'first', delegationOperationId: 'delegate-first', verdict: 'pass',
+  const review = { operationId: 'review-first', nodeId: 'first', delegationOperationId: 'delegate-first', deliveryHash: collected.delegations[0].report.delivery.hash, verdict: 'pass',
     check: { command: nodes[0]!.check, result: checked.stdout, evidence: ['checks/review-first.log:1'] }, note: '' }
   const foreignWorker = await a.cli('same-session', ['goal', 'plan', 'review', '--input', '-'], { goalId, review: { ...review, operationId: 'foreign-worker-review' } }, b.original.capability)
   expect(foreignWorker.code).toBe(1); expect(foreignWorker.stderr).toContain('AGENT_CAPABILITY_INVALID')
