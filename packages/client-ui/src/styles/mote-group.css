@@ -44,12 +44,12 @@
   outline: 2px solid var(--accent, var(--blue)); outline-offset: -2px;
 }
 .mote-group__members { flex: none; max-height: 36%; overflow-y: auto; margin: 0 var(--group-inset) 8px; padding: 5px; border-radius: 13px; background: var(--surface-1); }
-.mote-group__members button {
+.mote-group-settings__member > button {
   display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px; min-height: 38px;
   border: 0; border-radius: 9px; background: transparent; color: var(--text); text-align: start; cursor: pointer;
 }
-.mote-group__members button:hover { background: var(--surface-2); }
-.mote-group__members button > :last-child { margin-inline-start: auto; font-size: var(--fs-meta, 12px); color: var(--text-2); }
+.mote-group-settings__member > button:hover { background: var(--surface-2); }
+.mote-group-settings__member > button > :last-child { margin-inline-start: auto; font-size: var(--fs-meta, 12px); color: var(--text-2); }
 .mote-group > .ui-notice { margin: 0 var(--group-inset) 8px; }
 .mote-group__timeline { flex: 1; min-height: 0; overflow: auto; padding: 12px var(--group-inset) 16px; overscroll-behavior: contain; }
 .mote-group__timeline > .agent-button { display: block; margin: 0 auto 14px; }
@@ -102,4 +102,63 @@
 @media (pointer: coarse) {
   .mote-group__views button, .mote-group__recipients button, .mote-group__header-actions button { min-height: 40px; }
   .mote-group__quote-action { min-height: 28px; }
+}
+
+.mote-group-avatar {
+  display: inline-grid; place-items: center; flex: none; box-sizing: border-box; inline-size: 38px; block-size: 38px;
+  overflow: hidden; border-radius: 13px; color: var(--text); background: var(--group-wash, var(--surface-3));
+  font-size: 11px; font-weight: 650; gap: 1px;
+}
+.mote-group-avatar[data-faces="2"], .mote-group-avatar[data-faces="3"], .mote-group-avatar[data-faces="4"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.mote-group-avatar[data-faces="3"], .mote-group-avatar[data-faces="4"] { grid-template-rows: repeat(2, minmax(0, 1fr)); }
+.mote-group-avatar[data-faces="3"] > span:first-child { grid-row: span 2; }
+.mote-group-avatar[data-faces] > span {
+  display: grid; place-content: center; overflow: hidden; inline-size: 100%; block-size: 100%;
+  background: color-mix(in srgb, var(--surface-3) 86%, var(--text)); line-height: 1;
+}
+.mote-group-avatar > span > :is(span, div, img, svg), .mote-group__avatar > :is(span, div, img, svg) {
+  inline-size: 100%; block-size: 100%; max-inline-size: 100%; max-block-size: 100%; border-radius: inherit; object-fit: cover;
+}
+.mote-group-avatar[data-faces]:not([data-faces="0"]) .space-object-icon { inline-size: 17px; block-size: 17px; }
+.mote-group-avatar[data-faces="1"] .space-object-icon { inline-size: 30px; block-size: 30px; }
+.mote-group__timeline[hidden] { display: none; }
+.mote-group-settings {
+  display: flex; flex: 1; flex-direction: column; min-block-size: 0; gap: 8px; max-block-size: none; overflow: hidden;
+  padding: 8px 10px 10px;
+}
+.mote-group-settings > .mote-group__views { padding: 0; }
+.mote-group-settings__body { display: grid; align-content: start; min-block-size: 0; overflow: auto; gap: 8px; padding: 2px; }
+.mote-group-settings__body > .agent-button { justify-self: start; }
+.mote-group-settings__member > button > strong { overflow-wrap: anywhere; }
+.mote-group-settings > .mote-group__views button { inline-size: auto; min-block-size: 30px; padding: 4px 8px; }
+.mote-group-settings__create, .mote-group-settings__invite {
+  padding: 8px 10px; border-radius: 10px; background: var(--surface-1); color: var(--text);
+}
+.mote-group-settings__create > summary, .mote-group-settings__invite > summary { cursor: pointer; font-weight: 600; }
+.mote-group-settings__create[open] > summary, .mote-group-settings__invite[open] > summary { margin-block-end: 9px; }
+.mote-group-settings__fields { display: grid; gap: 10px; padding-block: 2px; }
+.mote-group-settings__fields > fieldset { margin: 0; padding: 0; border: 0; min-inline-size: 0; }
+.mote-group-settings__fields legend { padding: 0; margin-block-end: 6px; font-weight: 600; }
+.mote-group-settings__faces { display: flex; align-items: flex-start; gap: 8px; }
+.mote-group-settings__picks { display: flex; flex-wrap: wrap; min-inline-size: 0; gap: 4px; }
+.mote-group-settings__face-pick {
+  display: inline-flex; align-items: center; gap: 4px; inline-size: auto; min-block-size: 28px; padding: 3px 7px; border: 0;
+  background: var(--surface-2); color: var(--text); border-radius: 8px; cursor: pointer;
+}
+.mote-group-settings__face-pick[aria-pressed="true"] { background: var(--group-wash); box-shadow: inset 0 0 0 1px var(--focus-line, var(--blue)); }
+.mote-group-settings__face-pick > :first-child:not(:last-child) { inline-size: 18px; block-size: 18px; }
+.mote-group__field > :is(textarea, select) {
+  box-sizing: border-box; inline-size: 100%; min-inline-size: 0; padding: 7px; border: 1px solid var(--line-soft); border-radius: 8px;
+  background: var(--surface-2); color: var(--text); font: inherit;
+}
+.mote-group__field > textarea { resize: vertical; }
+.mote-group-settings__member { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px; align-items: center; }
+.mote-group-settings__member-actions { display: flex; flex-wrap: wrap; justify-content: end; gap: 3px; }
+.mote-group-settings__member-actions .agent-button { inline-size: auto; min-block-size: 28px; white-space: nowrap; }
+.mote-group-settings__invite-options { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-block-end: 8px; }
+.mote-group-settings__invite-options label { display: flex; gap: 4px; align-items: center; }
+.mote-group__announcement { max-inline-size: 420px; margin: 0 auto 14px; white-space: pre-wrap; }
+@container (max-width: 360px) {
+  .mote-group-settings__member { grid-template-columns: minmax(0, 1fr); }
+  .mote-group-settings__member-actions { justify-content: start; padding-inline-start: 40px; }
 }

@@ -9,10 +9,10 @@ import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, 
 import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
 import type { ScratchTopicSnapshot } from '../../../shared/contracts'
 import { MOTE_SOUL_PATH, PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicLogicalPath } from '@agentmux/host/mote-model'
-import { homeZoneId, spatialSources } from '../../../shared/space-addresses'
+import { homeZoneId, originalTopicAddress, spatialSources } from '../../../shared/space-addresses'
 import { api } from '../lib/api'
 import { useScratchTopics } from '../hooks/useScratchTopics'
-import { scratchMoteTopics } from '../lib/scratch-topic-snapshots'
+import { scratchMoteTopics, scratchTopicKind } from '../lib/scratch-topic-snapshots'
 import { keepPmoTeamsTopicFloatingPreview, leavePmoTeamsTopicFloatingPreview, pinPmoTeamsTopicFloating,
   createPmoTeamsTopicTargetSelector, requestPmoTeamsTopicFloatingClose, requestPmoTeamsTopicFloatingOpen, PMO_FLOATING_TAB_SLOT_PREFIX,
   readPmoTeamsTopicFloatingState, subscribePmoTeamsTopicFloatingState, pmoTeamsTopicFloatingTargetTopicId,
@@ -26,7 +26,7 @@ import { agentSessionPresentationIndex, sessionPresentationById } from '../lib/s
 import { useAppStore } from '../store'
 import { WorkspaceWorkbench } from './WorkspaceWorkbench'
 import { MoteWorkface } from './MoteWorkface'
-import { DesktopMoteGroup, DesktopMoteGroupRail } from './DesktopMoteGroup'
+import { DesktopMoteGroup, DesktopMoteGroupRail, DesktopGroupMoteAvatar } from './DesktopMoteGroup'
 import { moteConnectionTarget } from '../lib/mote-connection-default'
 import { useMoteGroups, type MoteGroupReadingPositions } from '@agentmux/client-ui/components/MoteGroupConversation'
 import { MoteProfilePopover } from './MoteProfilePopover'
@@ -359,14 +359,24 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
   const visible = floating.open || floating.preview
   const [creatingGroup, setCreatingGroup] = useState(false)
   const spaceZoneBindings = useAppStore(state => state.spaceZoneBindings)
-  const groupCandidates = useMemo(() => creatingGroup && scratch ? motes.flatMap(topic => {
+  const groupSelection = floating.groupSelection
+  const showingGroup = visible && (creatingGroup || Boolean(groupSelection))
+  const groupCandidates = useMemo(() => visible && scratch ? motes.flatMap(topic => {
     const rootPath = scratchTopicLogicalPath(scratch, topic)
     if (rootPath === null || topic.moteArchive?.state === 'archived') return []
     const original = moteConnectionTarget({ workspace: scratch, topic, rootPath }, spaceZoneBindings)
-    return original ? [{ target: original, name: topic.title }] : []
-  }) : [], [creatingGroup, scratch, motes, spaceZoneBindings])
-  const groupSelection = floating.groupSelection
-  const showingGroup = visible && (creatingGroup || Boolean(groupSelection))
+    return original ? [{ target: original, name: topic.title, topic }] : []
+  }) : [], [visible, scratch, motes, spaceZoneBindings])
+  const groupTopicCandidates = useMemo(() => showingGroup && scratch ? (topics ?? []).flatMap(topic => {
+    if (scratchTopicKind(topic.id, topics) !== 'topic') return []
+    const address = originalTopicAddress(scratch, topic, spaceZoneBindings)
+    return address ? [{ name: topic.title, topicId: topic.id, target: { ...address,
+      expectedResource: { hostId: scratch.hostId, workspaceId: scratch.id, workspacePath: scratch.path } } }] : []
+  }) : [], [showingGroup, scratch, topics, spaceZoneBindings])
+  const renderGroupMoteAvatar = useCallback((moteId: string) => {
+    const candidate = groupCandidates.find(item => item.target.spaceId === moteId)
+    return candidate && scratch ? <DesktopGroupMoteAvatar workspace={scratch} topic={candidate.topic} /> : null
+  }, [groupCandidates, scratch])
   const readingMote = visible && !showingGroup
   const groupReadingPositions = useRef<MoteGroupReadingPositions>(new Map())
   const groupDirectory = useMoteGroups(api.moteGroup.call, { enabled: visible })
@@ -838,7 +848,7 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
     {visible ? <MoteChooser onReferenceSelect={selectFileReference} catalog={projectionState?.catalog} reference={floating.reference} targetAgent={floating.targetAgent} topics={motes} topicId={target.topicId} tabId={floating.targetTabId === null ? null : target.tabId} railMode={railMode}
       onToggleMode={() => { pinPmoTeamsTopicFloating(); setFloating({ railMode: railMode === 'cards' ? 'avatars' : 'cards' }) }}
       groupActive={showingGroup}
-      groupRows={<><DesktopMoteGroupRail groups={groupDirectory.groups} selectedId={creatingGroup ? undefined : groupSelection?.groupId} avatars={railMode === 'avatars'} open={openGroup} />
+      groupRows={<><DesktopMoteGroupRail groups={groupDirectory.groups} selectedId={creatingGroup ? undefined : groupSelection?.groupId} avatars={railMode === 'avatars'} renderMoteAvatar={renderGroupMoteAvatar} open={openGroup} />
         {groupDirectory.error ? <Button className="mote-chooser__group-more" onClick={groupDirectory.refresh} title={groupDirectory.error}>重读群聊</Button> : null}
         {groupDirectory.hasMore ? <Button className="mote-chooser__group-more" disabled={groupDirectory.loading} onClick={groupDirectory.loadMore}>更多群聊</Button> : null}</>}
       groupActions={<button type="button" aria-label="创建群聊" title="创建群聊" onClick={() => {
@@ -863,7 +873,7 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
     </div> : null}
     <div className="pmo-teams-topic-floating__body">
       {showingGroup ? <DesktopMoteGroup groupId={groupSelection?.groupId ?? null} moteId={groupSelection?.moteId} members={groupSelection?.members}
-        candidates={groupCandidates} creating={creatingGroup} onOpen={openGroup} onClose={creatingGroup ? () => setCreatingGroup(false) : exitGroup} onChanged={groupDirectory.refresh} positions={groupReadingPositions.current}
+        candidates={groupCandidates} topicCandidates={groupTopicCandidates} renderMoteAvatar={renderGroupMoteAvatar} creating={creatingGroup} onOpen={openGroup} onClose={creatingGroup ? () => setCreatingGroup(false) : exitGroup} onChanged={groupDirectory.refresh} positions={groupReadingPositions.current}
         onPerspectiveChange={moteId => { if (groupSelection) setFloating({ groupSelection: { groupId: groupSelection.groupId, moteId } }) }} /> : null}
       <div className="pmo-teams-topic-floating__mote" hidden={showingGroup}>
       {floating.agentTarget ? <OriginalAgentConversation floating={floating} target={target} projectionState={projectionState} visible={readingMote}

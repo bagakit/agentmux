@@ -5,6 +5,8 @@ import type { MotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { Button } from './Button.js'
 import { Notice } from './Notice.js'
+import { MoteGroupAvatar, MoteGroupDetails, MoteGroupSettingsFields, type MoteGroupSettingsValue } from './MoteGroupSettings.js'
+export { MoteGroupAvatar } from './MoteGroupSettings.js'
 import { SemanticIcon } from '../theme/semantic-icon.js'
 import '../styles/mote-group.css'
 
@@ -13,7 +15,7 @@ export type MoteGroupCall = <M extends ClientMethod>(method: M, input: AgentMuxR
 export type MoteGroupCandidate = { target: MotePreferencesTarget; name: string }
 export type MoteGroupDraft = { body: string; recipientIds: string[]; operationId?: string; replyToMessageId?: string }
 export type MoteGroupReadingPositions = Map<string, { top: number; atTail: boolean }>
-export type MoteGroupCreation = { operationId: string; name: string; members: MotePreferencesTarget[] }
+export type MoteGroupCreation = AgentMuxRpcParams<'space.mote.group.create'>
 type DraftOwner = {
   read(groupId: string): MoteGroupDraft | null
   write(groupId: string, draft: MoteGroupDraft): void | Promise<void>
@@ -27,6 +29,9 @@ type CreationOwner = {
 type Props = {
   call: MoteGroupCall
   candidates: readonly MoteGroupCandidate[]
+  topicCandidates?: readonly MoteGroupCandidate[]
+  renderMoteAvatar?(moteId: string, name: string): ReactNode
+  onOpenTopicFiles?(target: MotePreferencesTarget): void
   groupId: string | null
   creating?: boolean
   initialMoteId?: string
@@ -97,10 +102,13 @@ export function MoteGroupConversation(props: Props) {
   </section>
 }
 
-function GroupCreate({ call, candidates, onOpen, onChanged, onClose, creation }: Props) {
+function GroupCreate({ call, candidates, topicCandidates = [], renderMoteAvatar, onOpen, onChanged, onClose, creation }: Props) {
   const [saved] = useState(() => creation?.read() ?? null)
   const [name, setName] = useState(saved?.name ?? '')
   const [selected, setSelected] = useState<string[]>(saved?.members.map(member => member.spaceId) ?? [])
+  const [setup, setSetup] = useState<MoteGroupSettingsValue>(() => ({
+    avatarMoteIds: saved?.avatarMoteIds ?? [], announcement: saved?.announcement ?? '', topic: saved?.topic ?? null
+  }))
   const [issue, setIssue] = useState<string | null>(null)
   const attempted = useRef(saved)
   const mounted = useRef(false)
@@ -110,7 +118,14 @@ function GroupCreate({ call, candidates, onOpen, onChanged, onClose, creation }:
   async function create(event: FormEvent) {
     event.preventDefault()
     if (submitting.current) return
-    const input = attempted.current ?? { operationId: mintObjectId(), name: name.trim(), members: candidates.filter(candidate => selected.includes(candidate.target.spaceId)).map(member => member.target) }
+    const selectedAvatars = setup.avatarMoteIds.filter(id => selected.includes(id))
+    const input = attempted.current ?? {
+      operationId: mintObjectId(), name: name.trim(),
+      members: candidates.filter(candidate => selected.includes(candidate.target.spaceId)).map(member => member.target),
+      ...(selectedAvatars.length ? { avatarMoteIds: selectedAvatars } : {}),
+      ...(setup.announcement.trim() ? { announcement: setup.announcement.trim() } : {}),
+      ...(setup.topic ? { topic: setup.topic } : {})
+    }
     if (!input.name || input.members.length === 0) return
     attempted.current = input
     submitting.current = true
@@ -131,10 +146,22 @@ function GroupCreate({ call, candidates, onOpen, onChanged, onClose, creation }:
       <fieldset><legend>成员</legend>
         {candidates.length ? <div className="mote-group__candidate-list">{candidates.map(candidate => {
           const id = candidate.target.spaceId
-          return <label key={id} className="mote-group__candidate"><span className="mote-group__avatar" aria-hidden="true">{initial(candidate.name)}</span><strong>{candidate.name}</strong>
-            <input type="checkbox" checked={selected.includes(id)} disabled={attempted.current !== null} onChange={event => setSelected(event.target.checked ? [...selected, id] : selected.filter(member => member !== id))} /></label>
+          return <label key={id} className="mote-group__candidate"><span className="mote-group__avatar" aria-hidden="true">{renderMoteAvatar?.(id, candidate.name) ?? initial(candidate.name)}</span><strong>{candidate.name}</strong>
+            <input type="checkbox" checked={selected.includes(id)} disabled={attempted.current !== null} onChange={event => {
+              if (event.target.checked) setSelected([...selected, id])
+              else {
+                setSelected(selected.filter(member => member !== id))
+                setSetup(current => ({ ...current, avatarMoteIds: current.avatarMoteIds.filter(member => member !== id) }))
+              }
+            }} /></label>
         })}</div> : <p className="mote-group__muted">正在等待可用的 Mote 目录。</p>}
       </fieldset>
+      <details className="mote-group-settings__create">
+        <summary>头像、公告与群文件</summary>
+        <MoteGroupSettingsFields value={setup} disabled={attempted.current !== null}
+          members={candidates.filter(candidate => selected.includes(candidate.target.spaceId)).map(candidate => ({ moteId: candidate.target.spaceId, name: candidate.name }))}
+          topicCandidates={topicCandidates} renderMoteAvatar={renderMoteAvatar} onChange={setSetup} />
+      </details>
       {issue ? <Notice tone="warning" density="compact" heading="等候原建群请求确认" messageRole="status">{issue}</Notice> : null}
       <div className="mote-group__create-actions"><span className="mote-group__muted">已选 {selected.length} 位成员</span>
         <Button type="submit" variant="primary" disabled={pending || !name.trim() || selected.length === 0}>{pending ? '正在创建…' : attempted.current ? '确认建群' : '创建群聊'}</Button>
@@ -151,7 +178,7 @@ function bySequence(messages: MoteGroupMessage[]) {
   return [...new Map(messages.map(message => [message.id, message])).values()].sort((left, right) => left.sequence - right.sequence)
 }
 
-function GroupView({ call, groupId, initialMoteId, initialMembers, onChanged, onClose, onPerspectiveChange, draft, renderThread, positions }: Props & { groupId: string }) {
+function GroupView({ call, groupId, initialMoteId, initialMembers, onChanged, onClose, onPerspectiveChange, draft, renderThread, positions, candidates, topicCandidates = [], renderMoteAvatar, onOpenTopicFiles }: Props & { groupId: string }) {
   const [group, setGroup] = useState<MoteGroupSummary | null>(null)
   const [messages, setMessages] = useState<MoteGroupMessage[]>([])
   const [viewerId, setViewerId] = useState<string>()
@@ -178,6 +205,7 @@ function GroupView({ call, groupId, initialMoteId, initialMembers, onChanged, on
   const readingView = useRef<string | undefined>(undefined)
   const focusMessage = useRef<string | null>(null)
   const member = group?.members.find(item => item.moteId === moteId)
+  const activeMembers = group?.members.filter(item => (item.state ?? 'active') === 'active') ?? []
   const visibleMessages = moteId ? messages.filter(message => message.deliveries.some(delivery => delivery.moteId === moteId) || (message.author.kind === 'mote' && message.author.moteId === moteId)) : messages
 
   const read = useCallback(async (beforeSequence?: number, quiet = false, replace = false) => {
@@ -225,7 +253,7 @@ function GroupView({ call, groupId, initialMoteId, initialMembers, onChanged, on
   }, [read])
   useEffect(() => {
     const viewport = list.current
-    if (!viewport || !loaded.current) return
+    if (!viewport || !loaded.current || membersOpen) return
     if (readingView.current !== positionKey) {
       readingView.current = positionKey
       const saved = readingPositions.get(positionKey)
@@ -237,7 +265,7 @@ function GroupView({ call, groupId, initialMoteId, initialMembers, onChanged, on
       focusMessage.current = null
       if (article) { keepTail.current = false; article.scrollIntoView({ block: 'nearest' }); article.focus({ preventScroll: true }) }
     }
-  }, [messages, moteId, positionKey, readingPositions])
+  }, [messages, moteId, membersOpen, positionKey, readingPositions])
 
   async function change(next: MoteGroupDraft) {
     setValue(next)
@@ -249,10 +277,11 @@ function GroupView({ call, groupId, initialMoteId, initialMembers, onChanged, on
   async function send(event: FormEvent) {
     event.preventDefault()
     if (sendingRef.current || !value.body.trim()) return
+    const receiverIds = value.operationId ? value.recipientIds : value.recipientIds.filter(id => activeMembers.some(member => member.moteId === id))
     sendingRef.current = true
     setSending(true)
     setSendIssue(null)
-    const exact = { ...value, operationId: value.operationId ?? mintObjectId() }
+    const exact = { ...value, recipientIds: receiverIds, operationId: value.operationId ?? mintObjectId() }
     try {
       await change(exact)
       const receipt = await call('space.mote.group.send', { groupId, ...exact })
@@ -281,34 +310,36 @@ function GroupView({ call, groupId, initialMoteId, initialMembers, onChanged, on
   }
 
   function selectView(next: string | undefined) {
-    if (list.current) readingPositions.set(positionKey, { top: list.current.scrollTop, atTail: keepTail.current })
+    if (list.current && !membersOpen) readingPositions.set(positionKey, { top: list.current.scrollTop, atTail: keepTail.current })
     setMembersOpen(false)
     setMoteId(next)
     onPerspectiveChange?.(next)
   }
   const locked = Boolean(value.operationId)
-  const author = (message: MoteGroupMessage) => message.author.kind === 'mote' ? message.author.name : message.author.id === viewerId ? '我' : '用户'
+  const author = (message: MoteGroupMessage) => message.author.kind === 'system' ? '群公告' : message.author.kind === 'mote' ? message.author.name : message.author.id === viewerId ? '我' : '用户'
   return <section className="mote-group" aria-label={group?.name ?? '群聊'}>
     <header className="mote-group__header">
-      <div className="mote-group__identity"><span className="mote-group__hero-icon" aria-hidden="true"><SemanticIcon name="object.team" size={22} /></span><div><h2>{group?.name ?? '群聊'}</h2>
-        {group ? <p>{member ? `正在查看 ${member.name} 的群内视角` : `${group.members.length} 位 Mote`}</p> : null}</div></div>
-      <div className="mote-group__header-actions">{group ? <Button aria-expanded={membersOpen} onClick={() => setMembersOpen(open => !open)}>成员</Button> : null}<Button onClick={onClose}>返回</Button></div>
+      <div className="mote-group__identity"><MoteGroupAvatar memberIds={group?.avatarMoteIds ?? []} members={group?.members ?? []} renderMoteAvatar={renderMoteAvatar} /><div><h2>{group?.name ?? '群聊'}</h2>
+        {group ? <p>{member ? `正在查看 ${member.name} 的群内视角` : `${activeMembers.length} 位 Mote`}</p> : null}</div></div>
+      <div className="mote-group__header-actions">
+        {group?.topic && onOpenTopicFiles ? <Button onClick={() => onOpenTopicFiles(group.topic!)}>群文件</Button> : null}
+        {group ? <Button aria-expanded={membersOpen} onClick={() => setMembersOpen(open => !open)}>群资料</Button> : null}
+        <Button onClick={membersOpen ? () => setMembersOpen(false) : onClose}>返回</Button>
+      </div>
     </header>
     {group ? <nav className="mote-group__views" aria-label="会话视角">
       <button type="button" aria-pressed={!moteId} onClick={() => selectView(undefined)}>群聊</button>
       {group.members.map(item => <button type="button" key={item.moteId} aria-pressed={item.moteId === moteId} onClick={() => selectView(item.moteId)}>{item.name}</button>)}
     </nav> : null}
-    {membersOpen && group ? <section className="mote-group__members" aria-label="群成员">
-      {group.members.map(item => <button type="button" key={item.moteId} onClick={() => selectView(item.moteId)}>
-        <span className="mote-group__avatar" aria-hidden="true">{initial(item.name)}</span><strong>{item.name}</strong><span>{item.thread ? '查看群内会话' : '尚未参与发言'}</span>
-      </button>)}
-    </section> : null}
+    {membersOpen && group ? <MoteGroupDetails group={group} candidates={candidates} topicCandidates={topicCandidates} call={call}
+      onUpdated={summary => { ++observing.current; setGroup(summary); onChanged?.(); void read() }}
+      onPerspective={selectView} renderMoteAvatar={renderMoteAvatar} /> : null}
     {newerAvailable ? <Notice tone="info" density="compact" messageRole="status" actions={<Button onClick={() => {
       keepTail.current = true
       void read(undefined, false, true)
     }}>读取最新</Button>}>有新消息可读。</Notice> : null}
     {issue ? <Notice tone="warning" density="compact" messageRole="status" actions={<Button onClick={() => void read()}>重读</Button>}>{issue}</Notice> : null}
-    <div className="mote-group__timeline" ref={list} onScroll={event => {
+    <div className="mote-group__timeline" hidden={membersOpen} ref={list} onScroll={event => {
       const viewport = event.currentTarget
       keepTail.current = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop < 48
       readingPositions.set(positionKey, { top: viewport.scrollTop, atTail: keepTail.current })
@@ -319,11 +350,14 @@ function GroupView({ call, groupId, initialMoteId, initialMembers, onChanged, on
         {group ? <p>{member ? `发给 ${member.name} 的消息和它在群里的回复会显示在这里。` : '你可以直接发言，也可以选择希望回答的 Mote。'}</p> : null}
       </div> : null}
       {visibleMessages.map(message => {
+        if (message.author.kind === 'system') return <Notice key={message.id} className="mote-group__announcement" density="compact" heading="群公告已更新">
+          {message.body}
+        </Notice>
         const own = message.author.kind === 'human' && message.author.id === viewerId
         const reply = messages.find(earlier => earlier.id === message.replyToMessageId)
         const deliveries = moteId ? message.deliveries.filter(delivery => delivery.moteId === moteId) : message.deliveries
         return <article className="mote-group__message" data-own={own || undefined} data-group-message-id={message.id} tabIndex={-1} key={message.id}>
-          <span className="mote-group__avatar" aria-hidden="true">{initial(author(message))}</span>
+          <span className="mote-group__avatar" aria-hidden="true">{(message.author.kind === 'mote' ? renderMoteAvatar?.(message.author.moteId, message.author.name) : null) ?? initial(author(message))}</span>
           <div className="mote-group__message-content"><div className="mote-group__byline"><strong>{author(message)}</strong><time dateTime={new Date(message.createdAt).toISOString()}>{time(message.createdAt)}</time>
             {moteId && message.author.kind === 'mote' ? <button className="mote-group__quote-action" type="button" onClick={() => {
               focusMessage.current = message.id
@@ -343,13 +377,13 @@ function GroupView({ call, groupId, initialMoteId, initialMembers, onChanged, on
       })}
       {member?.thread && renderThread ? <ThreadDetails key={member.moteId} thread={member.thread} renderThread={renderThread} /> : null}
     </div>
-    {group && !moteId ? <form className="mote-group__composer" onSubmit={send}>
+    {group && !moteId && !membersOpen ? <form className="mote-group__composer" onSubmit={send}>
       {sendIssue || (locked && !sending) ? <Notice tone="warning" density="compact" heading="原发送结果待确认" messageRole="status">{sendIssue ?? '继续确认同一个发送请求。'}</Notice> : null}
       {value.replyToMessageId ? <div className="mote-group__quote-preview"><span>{messages.find(message => message.id === value.replyToMessageId)?.body ?? '回复原消息'}</span>
         <Button type="button" aria-label="取消引用" disabled={locked} onClick={() => edit({ body: value.body, recipientIds: value.recipientIds })}>取消</Button></div> : null}
       <div className="mote-group__recipients" role="group" aria-label="选择参与成员">
         <span>请谁参与</span>
-        {group.members.map(item => {
+        {activeMembers.map(item => {
           const selected = value.recipientIds.includes(item.moteId)
           return <button type="button" key={item.moteId} aria-pressed={selected} disabled={locked} onClick={() => edit({ ...value,
             recipientIds: selected ? value.recipientIds.filter(id => id !== item.moteId) : [...value.recipientIds, item.moteId] })}>{item.name}</button>
