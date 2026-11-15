@@ -20,11 +20,12 @@ const contextKey = (context: FocusContext) => JSON.stringify([context.hostId, co
 
 /** Slots stay in the natural CSS grid. Actual intersection controls only a
  * body's first creation; visited bodies retain their original React parent. */
-export function FocusContextCards({ contexts, columns, scrollRef, visible, list = false, layoutReady = true, replyLines = 2, selectedId, selectedKey, revealRequest, onRevealed, goalLinks, identities, onSelect, topics, sections, visits, activity }: {
+export function FocusContextCards({ contexts, columns, scrollRef, visible, list = false, allowPin, layoutReady = true, replyLines = 2, selectedId, selectedKey, revealRequest, onRevealed, goalLinks, identities, onSelect, topics, sections, visits, activity }: {
   activity?: ReadonlyMap<string, FocusListActivity> | undefined
   visits?: ReadonlyMap<string, number>
   contexts: readonly FocusContext[]; columns: number; scrollRef: RefObject<HTMLDivElement | null>; visible: boolean
   list?: boolean
+  allowPin?: boolean
   layoutReady?: boolean
   replyLines?: FocusReplyLines
   selectedKey?: string | undefined
@@ -131,7 +132,7 @@ export function FocusContextCards({ contexts, columns, scrollRef, visible, list 
       data-focus-card-key={contextKey(context)} data-focus-card-body={full ? 'mounted' : 'pending'} data-focus-heat={focusContextHeat(context, visits ? focusContextVisit(context, visits) : undefined, Date.now())}
       data-focus-agent-host={context.control?.hostId ?? context.hostId} data-focus-agent-session={context.control?.agentSessionId ?? context.id}
       data-focus-presentation-session={context.id} data-focus-agent-selected={selected ? 'true' : undefined}>
-      {full ? <FocusContextCardBody context={context} list={list} topic={list ? topic : undefined} summaryActive={visible} goalLinks={goals}
+      {full ? <FocusContextCardBody context={context} list={list} allowPin={allowPin} topic={list ? topic : undefined} summaryActive={visible} goalLinks={goals}
         identity={identities.get(focusContextIdentityKey(context.hostId, context.id))} selected={selected} activity={activity?.get(focusListActivityKey(context))} onSelect={onSelect} />
         : <button type="button" className={`focus-context focus-context--card${list ? ' focus-context--list' : ''}${selected ? ' is-selected' : ''}`}
           data-session-id={context.id} data-state={context.state} data-bucket={context.bucket} data-activity={context.activitySemantic}

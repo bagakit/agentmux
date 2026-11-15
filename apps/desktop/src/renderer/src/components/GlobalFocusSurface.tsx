@@ -39,6 +39,8 @@ import { focusCardTrackHeight, type FocusLaneMetrics } from '../lib/focus-lane-l
 import { resolveFocusReplyLines, resolveFocusTopicPresentation } from '../../../shared/focus-preferences'
 import { focusSelectionStyle } from '../lib/focus-selection-style'
 import { FocusToolbar } from './FocusToolbar'
+import { FocusPinnedAgents } from './FocusPinnedAgents'
+import { EMPTY_FOCUS_AGENT_PINS, FOCUS_AGENT_PIN_SCOPE } from '../lib/focus-agent-pins'
 import { FocusHistorySearch } from './FocusHistorySearch'
 import { useFocusHistorySearch } from '../lib/use-focus-history-search'
 import { createFocusGoalLinksSelector } from '../lib/focus-goal-links'
@@ -110,6 +112,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
 } = {}) {
   const surfaceVisible = useAppStore(state => state.mainSurface === 'agents' && state.focusView === 'list')
   const visible = hostVisible && surfaceVisible
+  const pinnedAgents = useAppStore(state => state.pinnedItems[FOCUS_AGENT_PIN_SCOPE] ?? EMPTY_FOCUS_AGENT_PINS)
   const [query, setQuery] = useState('')
   const [filters, setFilters] = useState<FocusFilterSelection>(EMPTY_FOCUS_FILTERS)
   const [inspectingFilters, setInspectingFilters] = useState(false)
@@ -237,6 +240,17 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     if (context.access) { clearReveal(); context.access.select(); return }
     focusExecutionSession(context.id)
   }, [clearReveal, focusExecutionSession])
+  const openPinnedAgent = useCallback((context: import('../lib/focus-context').FocusContext) => {
+    if (!context.access) {
+      const state = useAppStore.getState(), original = sessionPresentationById(state.sessions).get(context.id)
+      if (!context.control || original?.kind !== 'agent' || original.control.hostId !== context.control.hostId ||
+          original.control.agentSessionId !== context.control.agentSessionId) {
+        state.reportError(new Error('This pinned Agent is unavailable. Its shortcut and your current work are kept.'), { kind: 'indeterminate' })
+        return
+      }
+    }
+    selectTimelineContext(context)
+  }, [selectTimelineContext])
   const openPlaceless = useCallback((id: string) => {
     // The original placement owner selects the new occurrence and reports its own refusal;
     // the notice and this action stay available when it declines.
@@ -573,7 +587,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   }
   const laneRows = (lane: typeof boardLanes[number], heading: ReactNode, compact = false) => <FocusScanLaneContent list={list} lane={lane} compact={compact}
     contexts={lane.zones ? [...new Map(lane.zones.flatMap(zone => rowsByLane.get(zone.id) ?? []).map(context => [focusTopicContextKey(context.hostId, context.id), context])).values()] : rowsByLane.get(lane.id) ?? []} heading={heading} metrics={laneMetrics} replyLines={replyLines} topicPresentation={topicPresentation}
-    renderCards={(grouped, columns, topics, sections) => <FocusContextCards list={list} contexts={grouped} columns={columns} layoutReady={list || laneMetrics.measured}
+    renderCards={(grouped, columns, topics, sections) => <FocusContextCards list={list} allowPin contexts={grouped} columns={columns} layoutReady={list || laneMetrics.measured}
       replyLines={replyLines} topics={topics} sections={sections} visits={focusVisits} scrollRef={boardRowsRef} visible={!compact && visible && documentActive}
       selectedId={shownSessionId} selectedKey={selectedContextKey} revealRequest={agentReveal} onRevealed={finishReveal}
       goalLinks={goalLinks} identities={contextIdentities} activity={listActivity} onSelect={focusExecutionSession} />} />
@@ -644,12 +658,13 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
         nameUnplaced={object => object.kind === 'zone' ? searchNames.unplaced.get(object.id) : undefined} describeLocation={location => searchNames.descriptions.get(location.address) ?? 'Original location'} onSelect={location => onSelectLocation ? onSelectLocation(location.reference) : location.sessionId ? focusExecutionSession(location.sessionId, location.reference) : useAppStore.getState().reportError(new Error('The original location is kept. Its navigation is not confirmed in this view.'))} />
       <FocusHistorySearch search={historySearch} active={visible} />
       {pmoAttention.length ? <button type="button" className="focus-pmo-attention" onClick={() => openMoteContext(pmoAttention[0]!)}><span className="focus-pmo-attention__identity"><SpaceObjectIcon kind="mote" name={moteIdentity.name} manualIcon={moteIdentity.icon} avatarWorkspaceId={moteIdentity.avatarWorkspaceId} avatarTopicId={moteIdentity.avatarTopicId} avatarObjectKey={moteIdentity.avatarObjectKey} /><span>Mote</span><strong>{moteIdentity.name}</strong><span>· {pmoAttention.length} to review</span></span><span>Open context</span></button> : null}
-      {executionRows.length === 0 && retainedProjects.length === 0 && coordinationContexts.length === 0 && !moteChoices ? <div className="global-agents-empty" role="status"><ThemeObjectTeamIcon size={20} /><strong>No execution contexts yet</strong><span>Open an Agent from a Workspace to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Filtered Focus contexts">
+      {executionRows.length === 0 && retainedProjects.length === 0 && coordinationContexts.length === 0 && !moteChoices && (filtering || !pinnedAgents.length) ? <div className="global-agents-empty" role="status"><ThemeObjectTeamIcon size={20} /><strong>No execution contexts yet</strong><span>Open an Agent from a Workspace to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Filtered Focus contexts">
         <FocusSavedHistory catalogue={catalogue} visible={visible && documentActive}><div className="focus-project-board">
           <div className="focus-task-toolbar">
             <span>Tasks</span>
             <IconButton type="button" aria-label="Arrange projects by recent activity" title="Arrange unpinned projects by recent activity. Otherwise project positions stay fixed." onClick={() => setArrangeProjects(value => value + 1)}><ArrangeProjectsIcon size={13} /></IconButton>
           </div>
+          <FocusPinnedAgents pins={pinnedAgents} contexts={filtering ? matchedExecution : executionRows} filtering={filtering} onOpen={openPinnedAgent} searchRef={searchRef} />
           <WorkbenchPresentationContext.Provider value={cardPresentation}><div className="focus-project-board__live" data-empty={!hasBoardLanes && !leadingResults || undefined}>
             {hasBoardLanes || leadingResults ? <FocusProjectLanes resourceMenus renderDiscussion={(lane, slot) => <FocusGroupDiscussion lane={lane} contexts={filterContexts} active={slot.active && visible && documentActive} container={slot.container} />} quietLanes={quietLanes} protectedLanes={protectedLanes} forceExpanded={filtering} revealedLaneIds={revealedLaneIds} leading={leadingResults} visible={visible && documentActive} origins={laneOrigins} lanes={boardLanes} boardHistory={boardHistory} revealHistory={Boolean(trimmedQuery)} onRead={readProjectHistory} selectedProjectKey={filters.projects.length === 1 ? filters.projects[0]!.id : 'all'} currentLaneId={displayedCurrentLaneId} revealRequestId={agentReveal?.pending ? agentReveal.requestId : undefined} onSelect={key => setFilters(value => ({ ...value, projects: [{ id: key, name: projectOptions.find(option => option.id === key)?.name ?? key }] }))} renderLane={laneRows} rowsRef={boardRowsRef} /> : null}
             {filtered.length === 0 && filteredRetainedProjects.length === 0 && coordinationResults.length === 0 ? <p className="focus-project-lanes__empty">

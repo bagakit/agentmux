@@ -511,4 +511,62 @@ button.recent-focus__scope:focus-visible { color: var(--text); background: var(-
   font-size: var(--fs-meta);
 }
 .focus-task-toolbar > span { margin-inline-end: auto; font-weight: 600; }
+.focus-agent-pins { flex: none; padding: 4px var(--sp-2) var(--sp-2); border-block-end: 1px solid var(--line); }
+.focus-agent-pins h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin: 2px 0 5px;
+  color: var(--text-2);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+}
+.focus-agent-pins ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: var(--sp-1);
+  max-block-size: 112px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+.focus-agent-pins li {
+  container: focus-agent-pin / inline-size;
+  display: flex;
+  min-width: 0;
+  min-height: 30px;
+  align-items: center;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+}
+.focus-agent-pin__open {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) minmax(0, auto);
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 28px;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  text-align: start;
+  font-size: var(--fs-meta);
+}
+button.focus-agent-pin__open { cursor: pointer; }
+button.focus-agent-pin__open:hover { background: var(--surface-2); }
+.focus-agent-pin__open:focus-visible, .focus-agent-pins .focus-agent-pin__remove:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
+.focus-agent-pin__open .focus-state-mark { width: 14px; height: 14px; background: transparent; }
+.focus-agent-pin__open strong, .focus-agent-pin__open > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.focus-agent-pin__open strong { color: var(--text); font-weight: 550; }
+.focus-agent-pin__open > span:last-child { max-inline-size: 16ch; font-size: var(--fs-micro); }
+.focus-agent-pins .focus-agent-pin__remove { flex: none; width: 26px; min-height: 28px; margin-inline-end: 2px; color: var(--text-3); }
+.focus-agent-pins .focus-agent-pin__remove:is(:hover, :focus-visible) { color: var(--text); }
+@container focus-agent-pin (max-width: 299px) {
+  .focus-agent-pin__workspace { display: none; }
+}
 [data-task-layout='list'] .focus-project-lanes__groups > .focus-context-group { width: 100%; min-width: 0; }
