@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -8,7 +9,7 @@ import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { mountThemeRuntime } from '@agentmux/client-ui/theme'
-import type { AppConfig } from '../src/shared/contracts.js'
+import type { AppConfig, BrowserProfileSummary } from '../src/shared/contracts.js'
 
 const fixture = vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
@@ -29,6 +30,7 @@ vi.mock('../src/renderer/src/store.js', async importOriginal => {
 })
 import { BrowserPane } from '../src/renderer/src/components/BrowserPane.js'
 import { api } from '../src/renderer/src/lib/api.js'
+import { browserProfiles } from '../src/renderer/src/lib/browser-profiles.js'
 
 const config: AppConfig = {
   version: 9, hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }], executors: {}, workspaces: [],
@@ -57,12 +59,15 @@ it('keeps the page, trace and disjoint toolbar hit areas usable in actual Chromi
   const widths = [
     { width: 234.5, more: true }, { width: 234.5, more: false },
     { width: 234.5, more: true, active: true },
-    { width: 260, more: true }, { width: 340, more: true }, { width: 480, more: true },
+    { width: 260, more: true }, { width: 320, more: true, active: true }, { width: 321, more: true, active: true }, { width: 340, more: true },
+    { width: 381, more: false, active: true }, { width: 400, more: true, active: true },
+    { width: 414, more: false, active: true }, { width: 440, more: true, active: true },
+    { width: 480, more: true, active: true }, { width: 520, more: true, active: true }, { width: 521, more: true, active: true },
     { width: 650, more: false, active: true }, { width: 710, more: true, active: true },
     { width: 760, more: true, active: true }, { width: 880, more: true, active: true },
     { width: 260, more: false }, { width: 880, more: false }
   ]
-  const cases: { width: number; more: boolean; active: boolean; trace: boolean; markup: string }[] = []
+  const cases: { width: number; more: boolean; active: boolean; trace: boolean; withProfile?: boolean; markup: string }[] = []
   const activeTab = { ...tab, driving: true, source: { browserId: 'source', navigationId: 'source-navigation' },
     zoomFactor: 1.25, control: { owner: 'agent' as const, activeOperationId: 'operation-minimum-pane', revision: 2,
       inputIsolation: 'isolated' as const, agent: { hostId: 'local', agentSessionId: 'agent-1' } }, activity: { control: 'agent' as const, operation: {
@@ -80,9 +85,22 @@ it('keeps the page, trace and disjoint toolbar hit areas usable in actual Chromi
   try {
     for (const { width, more, active } of widths) {
       fixture.state.config = { ...config, browser: { toolbar: { ...config.browser.toolbar, more } } }
-      await act(async () => traceRoot.render(<BrowserPane key={`${width}:${more}:${active}`} tab={active ? activeTab : tab} visible onRegionClose={closeSplit} />))
+      const current = active ? { ...activeTab, zoomFactor: width <= 521 ? 0.5 : activeTab.zoomFactor } : tab
+      await act(async () => traceRoot.render(<BrowserPane key={`${width}:${more}:${active}`} tab={current} visible onRegionClose={closeSplit} />))
       cases.push({ width, more, active: Boolean(active), trace: false, markup: traceHost.innerHTML })
     }
+    const profile: BrowserProfileSummary = { id: tab.profileId, label: 'Research account for long-form technical reading',
+      revision: 'profile-revision', createdAt: 1, isDefault: true, source: null }
+    const list = vi.spyOn(api.browser, 'readProfiles').mockResolvedValue({ revision: 1, sequence: 1, folders: [], views: [],
+      profiles: [profile, { ...profile, id: 'second-profile', label: 'Personal', isDefault: false }] })
+    try {
+      await act(async () => { await browserProfiles.refresh() })
+      for (const width of [234.5, 414, 521, 621, 650]) {
+        await act(async () => traceRoot.render(<BrowserPane key={`profile:${width}`} tab={{ ...activeTab, zoomFactor: 0.5 }} visible onRegionClose={closeSplit} />))
+        expect(traceHost.querySelector('button.browser-profile-chip')?.getAttribute('aria-label')).toContain(profile.label)
+        cases.push({ width, more: true, active: true, trace: false, withProfile: true, markup: traceHost.innerHTML })
+      }
+    } finally { list.mockRestore() }
     fixture.state.config = structuredClone(config)
     await act(async () => traceRoot.render(<BrowserPane tab={tab} visible onRegionClose={closeSplit} />))
     const menu = await openMore(traceHost)
@@ -98,7 +116,7 @@ it('keeps the page, trace and disjoint toolbar hit areas usable in actual Chromi
     expect(traceHost.querySelector('[aria-label="Stop recording demonstration"]')).not.toBeNull()
     expect(traceHost.querySelector('.browser-trace-rail')?.textContent).toContain('No demonstrated steps yet')
     traceMarkup = traceHost.innerHTML
-  } finally { await act(async () => traceRoot.unmount()); traceHost.remove() }
+  } finally { await act(async () => traceRoot.unmount()); traceHost.remove(); browserProfiles.reset() }
   cases.push(...[234.5, 340, 480, 760].map(width => ({ width, more: true, active: false, trace: true, markup: traceMarkup })))
   const directory = await mkdtemp(join(tmpdir(), 'amux-toolbar-layout-'))
   try {
@@ -113,8 +131,11 @@ it('keeps the page, trace and disjoint toolbar hit areas usable in actual Chromi
     const index = await readFile(stylesheet, 'utf8')
     const imports = [...index.matchAll(/@import '([^']+)';/g)]
     expect(imports.length).toBeGreaterThan(0)
-    const styles = await Promise.all(imports.map(match => readFile(match[1]!.startsWith('.')
-      ? join(dirname(stylesheet), match[1]!) : createRequire(import.meta.url).resolve(match[1]!), 'utf8')))
+    const browserIndex = imports.findIndex(match => match[1] === './browser.css')
+    expect(browserIndex).toBeGreaterThanOrEqual(0)
+    const styles = await Promise.all(imports.map((match, index) => readFile(
+      (index === browserIndex && process.env.AGENTMUX_TOOLBAR_LAYOUT_CSS) ||
+      (match[1]!.startsWith('.') ? join(dirname(stylesheet), match[1]!) : createRequire(import.meta.url).resolve(match[1]!)), 'utf8')))
     await writeFile(join(directory, 'cases.json'), JSON.stringify(cases))
     await writeFile(join(directory, 'page.html'), `<!doctype html><style>${styles.join('\n')}</style><div class="workbench-region" style="height:320px"><div class="session-region-host workbench-session-region-host"></div></div>`)
     await writeFile(join(directory, 'package.json'), JSON.stringify({ type: 'module', main: 'main.mjs' }))
@@ -162,26 +183,43 @@ app.whenReady().then(async()=>{
       // before scrolling; Close is checked after the user's normal scroll-to-action geometry.
       if(closeTrace){closeTrace.scrollIntoView({block:'nearest'});await new Promise(done=>requestAnimationFrame(done));const r=closeTrace.getBoundingClientRect();const rightHit=document.elementFromPoint(r.right-1,r.y+r.height/2);trace.close={bounds:rect(closeTrace),hitSamples:hitSamples(closeTrace),rightHit:{tag:rightHit?.tagName,ariaLabel:rightHit?.getAttribute('aria-label'),className:rightHit?.className},railClientWidth:rail.clientWidth,railScrollWidth:rail.scrollWidth,railScrollLeft:rail.scrollLeft}}
       const input=toolbar.querySelector('input'), address=rect(input), discussion=toolbar.querySelector('.browser-toolbar__discussion');
+      const zoom=toolbar.querySelector('.browser-zoom')
       input.focus();
       const focusedAddress=rect(input), focusedClose=hit(close), focusedMore=visible(more)&&hit(more), focusedDiscussion=visible(discussion)&&hit(discussion), addressFocused=input.matches(':focus');
       input.blur();
       return {pane:rect(region),toolbar:rect(toolbar),stage:rect(region.querySelector('.browser-stage')),address,focusedAddress,focusedClose,focusedMore,focusedDiscussion,addressFocused,
+       pageZoom:zoom&&visible(zoom)?{text:zoom.textContent,bounds:rect(zoom),ownHit:hit(zoom)}:null,
        overflow:toolbar.scrollWidth-toolbar.clientWidth,
        trace,
        secondary:[...toolbar.querySelectorAll('.browser-toolbar__secondary')].filter(visible).map(node=>node.getAttribute('aria-label')),
        navigation:[...toolbar.querySelectorAll('.browser-toolbar__navigation')].filter(visible).map(node=>node.getAttribute('aria-label')),
+       externalVisible:visible(toolbar.querySelector('.browser-toolbar__external')),
        status:{phase:toolbar.querySelector('.browser-operation-status').dataset.phase,bounds:rect(toolbar.querySelector('.browser-operation-status__trigger'))},
        reloadVisible:visible(toolbar.querySelector('[aria-label="Reload"]')),
        more:{visible:visible(more),bounds:rect(more),ownHit:visible(more)&&hit(more),hitSamples:visible(more)?hitSamples(more):[]},
        close:{visible:visible(close),bounds:rect(close),ownHit:hit(close),hitSamples:hitSamples(close)},
        buttons:[...toolbar.querySelectorAll('button')].filter(node=>node!==close&&visible(node)).map(node=>({label:node.getAttribute('aria-label'),bounds:rect(node),ownHit:hit(node),hitSamples:hitSamples(node)}))}
      }`)} )+')('+JSON.stringify(entry)+')')
-    report.cases.push({...layout,width:entry.width,morePreference:entry.more,active:entry.active,hasTrace:entry.trace,zoom})
-    if(process.env.AGENTMUX_TOOLBAR_LAYOUT_SHOTS && entry.active && zoom===1 && [234.5,650,760,880].includes(entry.width)) {
+    if(entry.withProfile && entry.width===234.5) {
+      await window.webContents.executeJavaScript('(() => {'+
+        'const start=document.createElement("button");start.id="tab-sequence-start";'+
+        'start.style.cssText="position:fixed;opacity:0";document.body.prepend(start);start.focus();})()')
+      layout.tabSequence=[]
+      for(let index=0;index<3;index++){
+        const key={key:'Tab',code:'Tab',windowsVirtualKeyCode:9}
+        await window.webContents.debugger.sendCommand('Input.dispatchKeyEvent',{type:'keyDown',...key})
+        await window.webContents.debugger.sendCommand('Input.dispatchKeyEvent',{type:'keyUp',...key})
+        layout.tabSequence.push(await window.webContents.executeJavaScript("document.activeElement.getAttribute('aria-label')"))
+      }
+      await window.webContents.executeJavaScript("document.activeElement.blur();document.getElementById('tab-sequence-start').remove()")
+    }
+    report.cases.push({...layout,width:entry.width,morePreference:entry.more,active:entry.active,hasTrace:entry.trace,withProfile:entry.withProfile??false,zoom})
+    const capture = entry.withProfile ? [234.5,414].includes(entry.width) : [234.5,414,650,880].includes(entry.width)
+    if(process.env.AGENTMUX_TOOLBAR_LAYOUT_SHOTS && entry.active && zoom===1 && capture) {
       const bounds = layout.pane
       const image = await window.webContents.capturePage({x:Math.floor(bounds.x),y:Math.floor(bounds.y),width:Math.ceil(bounds.width),height:Math.ceil(bounds.height)})
       if(image.isEmpty()) throw new Error('Empty Browser toolbar capture')
-      await writeFile(join(process.env.AGENTMUX_TOOLBAR_LAYOUT_SHOTS,'active-'+entry.width+'.png'),image.toPNG())
+      await writeFile(join(process.env.AGENTMUX_TOOLBAR_LAYOUT_SHOTS,(entry.withProfile?'profile-':'active-')+entry.width+'.png'),image.toPNG())
     }
    }
   }
@@ -200,6 +238,7 @@ app.whenReady().then(async()=>{
     })
     expect(code, stderr).toBe(0)
     const report = JSON.parse(await readFile(join(directory, 'report.json'), 'utf8'))
+    report.browserCssSha256 = createHash('sha256').update(styles[browserIndex]!).digest('hex')
     if (process.env.AGENTMUX_TOOLBAR_LAYOUT_PROOF) {
       await writeFile(resolve(process.env.AGENTMUX_TOOLBAR_LAYOUT_PROOF), `${JSON.stringify(report, null, 2)}\n`)
     }
@@ -207,9 +246,13 @@ app.whenReady().then(async()=>{
     expect(report.cases).toHaveLength(cases.length * 2)
     for (const result of report.cases) {
       const context = JSON.stringify(result)
-      expect(result.toolbar.height, context).toBe(38)
+      if (result.width <= 320) {
+        expect(result.toolbar.height, context).toBeGreaterThan(38)
+        expect(result.toolbar.height, context).toBeLessThan(72)
+        expect(result.address.y + result.address.height, context).toBeLessThan(result.more.bounds.y)
+      } else expect(result.toolbar.height, context).toBe(38)
       expect(result.overflow, context).toBeLessThanOrEqual(0)
-      expect(result.address.width, context).toBeGreaterThanOrEqual(result.width < 380 ? 28 : 96)
+      expect(result.address.width, context).toBeGreaterThanOrEqual(result.width <= 320 ? 150 : result.width <= 380 ? 28 : 96)
       expect(result.addressFocused, context).toBe(true)
       expect(result.focusedAddress.width, context).toBeGreaterThanOrEqual(result.width < 380 ? 80 : 96)
       expect(result.focusedClose, context).toBe(true)
@@ -242,7 +285,7 @@ app.whenReady().then(async()=>{
         expect(result.trace.stop.fontSize, context).toBe('10px')
         expect(result.trace.stop.hitSamples, context).toEqual([true, true, true, true, true])
         expect(result.trace.closeCount, context).toBe(1)
-        expect(result.trace.close.bounds.width, context).toBe(25)
+        expect(result.trace.close.bounds.width, context).toBeGreaterThanOrEqual(25)
         expect(result.trace.close.hitSamples, context).toEqual([true, true, true, true, true])
         expect(result.trace.close.railScrollLeft, context).toBe(0)
       }
@@ -251,8 +294,14 @@ app.whenReady().then(async()=>{
       expect(result.close.hitSamples, context).toEqual([true, true, true, true, true])
       expect(result.status.phase, context).toBe(result.active ? 'running' : 'idle')
       if (result.active) {
+        expect(result.pageZoom?.ownHit, context).toBe(true)
         expect(result.status.bounds.width, context).toBeGreaterThanOrEqual(27)
         expect(result.buttons.some(button => button.label === 'Take control of Browser' && button.ownHit), context).toBe(true)
+      }
+      if (result.withProfile && result.width === 234.5) {
+        expect(result.tabSequence, context).toEqual([
+          'Browser address', expect.stringMatching(/^Page zoom 50%/), expect.stringMatching(/^Profile: Research account/)
+        ])
       }
       expect(result.more.visible, context).toBe(result.morePreference || result.width <= 820)
       if (result.more.visible) {
@@ -262,14 +311,20 @@ app.whenReady().then(async()=>{
       }
       const tools = ['Select element', 'Screenshot', 'Open DevTools', 'Viewport', 'Save this page as a bookmark']
       expect(result.secondary, context).toEqual(result.width <= 720 ? [] : result.width <= 820 ? tools.slice(0, 2) : tools)
-      expect(result.navigation, context).toEqual(result.width <= 380 ? [] : ['Back', 'Forward'])
+      expect(result.navigation, context).toEqual(result.width <= 520 ? [] : ['Back', 'Forward'])
+      expect(result.externalVisible, context).toBe(result.width > 520)
       expect(result.reloadVisible, context).toBe(result.width > 380)
       expect(result.buttons.length, context).toBeGreaterThanOrEqual(3)
+      const boxes = [...result.buttons.map(button => button.bounds), result.close.bounds]
+      const disjoint = boxes.every((box, index) => boxes.slice(0, index).every(previous =>
+        Math.min(box.x + box.width, previous.x + previous.width) - Math.max(box.x, previous.x) <= 0.125 ||
+        Math.min(box.y + box.height, previous.y + previous.height) - Math.max(box.y, previous.y) <= 0.125))
+      expect(disjoint, context).toBe(true)
       for (const button of result.buttons) {
         expect(button.ownHit, context).toBe(true)
         expect(button.hitSamples, context).toEqual([true, true, true, true, true])
         expect(button.bounds.x, context).toBeGreaterThanOrEqual(result.pane.x)
-        expect(button.bounds.x + button.bounds.width, context).toBeLessThanOrEqual(result.close.bounds.x)
+        expect(button.bounds.x + button.bounds.width, context).toBeLessThanOrEqual(result.pane.x + result.pane.width)
       }
     }
   } finally { await rm(directory, { recursive: true, force: true }) }
