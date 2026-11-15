@@ -72,8 +72,10 @@ export function terminalTextLinks(text: string, scope: TerminalLinkScope): Termi
   for (const { index, text: token } of tokens) {
     let reference: string | null = null
     if (/^https?:\/\//i.test(token)) reference = terminalHttpLinkText(token)
-    else if (token.startsWith('amux://')) reference = token.split(/[<>"\x60\[\]{}\p{Script=Han}\u3000-\u303f\uff00-\uffef]/u, 1)[0] ?? null
-    else if (/^file:\/\//i.test(token)) reference = trimTerminalUriPunctuation(token.split(/[\u3000-\u303f\uff00-\uffef]/u, 1)[0] ?? '')
+    else if (token.startsWith('amux://')) {
+      reference = token.split(/[<>"\x60\[\]{}\p{Script=Han}\u3000-\u303f\uff00-\uffef]/u, 1)[0] ?? null
+      if (reference && text[index - 1] === '(') reference = reference.replace(/\)[.,;:!?]*$/u, '')
+    } else if (/^file:\/\//i.test(token)) reference = trimTerminalUriPunctuation(token.split(/[\u3000-\u303f\uff00-\uffef]/u, 1)[0] ?? '')
     if (!reference) continue
 
     const target = resolveTerminalDeclaredLink(reference, scope)
