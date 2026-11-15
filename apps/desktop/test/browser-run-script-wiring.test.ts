@@ -686,6 +686,32 @@ describe('runScript waiting follows the Core capability effects', () => {
       await expect(manager.runScript('b1', 'return 8')).resolves.toMatchObject({ result: 8, outcome: { kind: 'completed' } })
     } finally { contents.debugger.off = originalOff; manager.dispose() }
   }, 30_000)
+
+  it('records a completed action and releases the original Browser when page cleanup rejects', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'amux-browser-cleanup-'))
+    const journal = new BrowserOperationJournal(new BrowserOperationFileStore(join(root, 'journal.json')))
+    const { manager, contents, sentEvents } = await managerWithBrowser(journal)
+    const releaseLaterResource = vi.fn(async () => {})
+    createDispatch.mockImplementationOnce(context => {
+      context.registerCleanup?.(async () => { throw new Error('Page release failed') })
+      context.registerCleanup?.(releaseLaterResource)
+      return async () => 17
+    })
+    try {
+      const first = await manager.runScript('b1', 'return await pageInfo()')
+      expect(first).toMatchObject({ result: 17, outcome: { kind: 'completed' } })
+      const warning = 'page resource release could not be confirmed'
+      expect(first.runOperation.warning).toContain(warning)
+      expect((await journal.get(first.runOperation.id))?.warning).toContain(warning)
+      expect(sentEvents().at(-1)?.browser.activity.warning).toContain(warning)
+      expect(releaseLaterResource).toHaveBeenCalledOnce()
+      expect(contents.debugger.isAttached()).toBe(false)
+      await expect(manager.runScript('b1', 'return 18')).resolves.toMatchObject({ result: 18, outcome: { kind: 'completed' } })
+    } finally {
+      manager.dispose()
+      await rm(root, { recursive: true, force: true })
+    }
+  }, 30_000)
 })
 
 describe('runScript 把页面调用交给派发层', () => {
