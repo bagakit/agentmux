@@ -28,7 +28,7 @@ import { DESKTOP_SESSION_ATTRIBUTE, desktopActionSelector } from '../src/shared/
  * dropped from either cleanup stop so a rejecting teardown aborts the rest. Where a property is
  * deliberately left unguarded, the test that would own it says so at its site.
  *
- * MECHANISM. Six of the seven tests drive the real exported `runDesktopResourceProbe` end to end
+ * MECHANISM. The probe scenarios drive the real exported `runDesktopResourceProbe` end to end
  * against fakes (Electron, the renderer's `executeJavaScript` surface, and a `RuntimeController`
  * state machine), then assert on the artefact the probe actually produced — the report it wrote and
  * the `stopSession` calls the runtime actually received. The one exception is the
@@ -147,7 +147,9 @@ const METRICS_CALLS_PER_SAMPLE = 5
 const EXPECTED_SAMPLE_COUNT = 15
 
 type FailurePoint = 'none' | 'terminal-write' | 'cold-observation-failed' | 'loaded-observation-failed' |
-  'editor-owner-missing-next-cycle' | 'release-observation-failed' | 'model-retained-after-close' | 'stop-receipt-missing'
+  'editor-owner-missing-next-cycle' | 'release-observation-failed' | 'model-retained-after-close' |
+  'stop-receipt-missing' | 'stop-receipt-wrong-run' | 'stop-projection-retained' | 'new-tab-unavailable' |
+  'browser-replacement-run'
 
 function createWorld(options: { plan: readonly number[]; failAt: FailurePoint; rejectStopIds?: readonly string[]; webgl?: boolean }) {
   const owners: Record<string, number> = { ...READY_LAUNCHER_OWNERS }
@@ -155,11 +157,13 @@ function createWorld(options: { plan: readonly number[]; failAt: FailurePoint; r
   owners.terminalAddons += visibleWebgl
   const launcher: Record<WorkspaceKey, string | null> = { a: null, b: null, c: null }
   const running = new Map<string, Record<string, unknown>>()
-  const xterm: Record<WorkspaceKey, boolean> = { a: false, b: false, c: false }
+  const terminalTabs = new Map<string, { workspace: WorkspaceKey; tabId: string }>()
   const monaco: Record<WorkspaceKey, boolean> = { a: false, b: false, c: false }
   const stoppedRunIds: string[] = []
+  const newTabWorkspaces: WorkspaceKey[] = []
   let openFile: { tabId: string; regionId: string } | null = null
   let fileOpenCount = 0
+  let browserWarmSession: string | null = null
   let visible: WorkspaceKey = 'a'
   let metricsCalls = 0
   let sessionCounter = 0
@@ -194,6 +198,8 @@ function createWorld(options: { plan: readonly number[]; failAt: FailurePoint; r
   // Selectors reach the fake JSON-escaped (`data-workspace-id=\"…\"`), so every textual probe below
   // matches against an unescaped copy.
   const plain = (source: string) => source.replace(/\\"/g, '"')
+  const sessionIdFromSource = (source: string) => plain(source).match(new RegExp(`${DESKTOP_SESSION_ATTRIBUTE}="([^"]+)"`))?.[1]
+  const newTabAvailable = (key: WorkspaceKey) => visible === key && !(options.failAt === 'new-tab-unavailable' && stopCount >= 2)
 
   const workspaceOf = (source: string): WorkspaceKey => {
     const match = plain(source).match(/data-workspace-id="([^"]+)"/)
@@ -209,16 +215,33 @@ function createWorld(options: { plan: readonly number[]; failAt: FailurePoint; r
     // Claiming promotes the ready launcher into the measured Terminal. Owner-neutral by design:
     // `claimLauncherTerminal` waits for the counts to equal its `expectedOwners`.
     if (source.includes(`getAttribute("${DESKTOP_SESSION_ATTRIBUTE}") ===`)) {
-      xterm[key] = true
+      const id = launcher[key]
+      if (!id) throw new Error('No ready Launcher to claim')
+      terminalTabs.set(id, { workspace: key, tabId: `opaque-terminal-tab-${id}` })
       launcher[key] = null
       return
     }
     if (source.includes(openBrowserSelector)) {
+      browserWarmSession = launcher[key]
+      launcher[key] = null
       adjust({ ...TERMINAL_VIEW_BUNDLE, terminalAddons: TERMINAL_VIEW_BUNDLE.terminalAddons + visibleWebgl }, -1)
       owners.browserWebContents += 1
       return
     }
-    if (source.includes('button[title="New tab"]')) {
+    if (source.includes('button[aria-label="New Tab"]')) {
+      if (!newTabAvailable(key)) throw new Error('No visible New Tab control')
+      newTabWorkspaces.push(key)
+      if (browserWarmSession && !owners.browserWebContents) {
+        launcher[key] = browserWarmSession
+        if (options.failAt === 'browser-replacement-run') {
+          const original = running.get(browserWarmSession)!
+          running.set(browserWarmSession, { ...original,
+            control: { kind: 'terminal', hostId: WORKSPACES[key].hostId, runId: 'different-run', run: { runId: 'different-run' } } })
+        }
+        browserWarmSession = null
+        adjust({ ...TERMINAL_VIEW_BUNDLE, terminalAddons: TERMINAL_VIEW_BUNDLE.terminalAddons + visibleWebgl }, 1)
+        return
+      }
       spawnLauncher(key)
       adjust(TERMINAL_VIEW_BUNDLE, 1)
       return
@@ -231,7 +254,6 @@ function createWorld(options: { plan: readonly number[]; failAt: FailurePoint; r
       return
     }
     if (source.includes('aria-label="Close New Tab"')) {
-      adjust({ ...TERMINAL_VIEW_BUNDLE, terminalAddons: TERMINAL_VIEW_BUNDLE.terminalAddons + visibleWebgl }, 1)
       owners.browserWebContents -= 1
       return
     }
@@ -297,6 +319,11 @@ function createWorld(options: { plan: readonly number[]; failAt: FailurePoint; r
       }
     }
     if (source.includes('activeWorkspaceRows')) return {}
+    if (source.includes("getAttribute('data-workbench-tab-id')")) {
+      const id = sessionIdFromSource(source)
+      const tab = id && running.has(id) ? terminalTabs.get(id) : undefined
+      return tab?.workspace === workspaceOf(source) ? tab.tabId : undefined
+    }
     if (source.includes('?? null')) return launcher[workspaceOf(source)]
     if (source.includes('target?.click()')) {
       handleClick(source)
@@ -305,13 +332,14 @@ function createWorld(options: { plan: readonly number[]; failAt: FailurePoint; r
     if (source.startsWith('Boolean(')) {
       const key = workspaceOf(source)
       const plainSource = plain(source)
-      if (plainSource.includes('.xterm')) return xterm[key]
+      if (plainSource.includes('.xterm')) return [...terminalTabs.values()].some(tab => tab.workspace === key)
       if (plainSource.includes('.monaco-editor')) return monaco[key] && !!openFile && plainSource.includes(openFile.regionId)
+      if (plainSource.includes('button[aria-label="New Tab"]')) return newTabAvailable(key)
       if (plainSource.includes('data-visible=')) return visible === key
       if (plainSource.includes('data-tree-path')) return true
-      if (plainSource.includes(DESKTOP_SESSION_ATTRIBUTE)) {
-        const match = plainSource.match(new RegExp(`${DESKTOP_SESSION_ATTRIBUTE}="([^"]+)"`))
-        return match ? running.has(match[1]!) : false
+      const match = plainSource.match(/data-workbench-tab-id="([^"]+)"/)
+      if (match) {
+        return [...terminalTabs.values()].some(tab => tab.workspace === key && tab.tabId === match[1])
       }
       return false
     }
@@ -331,6 +359,7 @@ function createWorld(options: { plan: readonly number[]; failAt: FailurePoint; r
     fileWatchers: () => owners.fileWatchers,
     sampleCount: () => Math.floor(metricsCalls / METRICS_CALLS_PER_SAMPLE),
     stoppedRunIds,
+    newTabWorkspaces,
     window: { webContents: { executeJavaScript } },
     runtime: {
       resourceOwnerCounts: () => ({
@@ -353,17 +382,16 @@ function createWorld(options: { plan: readonly number[]; failAt: FailurePoint; r
           throw new Error(`fixture forced stopSession to reject for ${control.runId}`)
         }
         stoppedRunIds.push(control.runId)
-        running.delete(control.runId)
+        const existed = running.delete(control.runId)
         stopCount += 1
-        // The probe's first stop retires the hidden Workspace-C Tab, leaving one fewer mounted
-        // view. Later stops release the measured Terminal, which the surface immediately replaces
-        // with a fresh ready launcher, so those are owner-neutral.
-        if (stopCount === 1) adjust(TERMINAL_VIEW_BUNDLE, -1)
-        else spawnLauncher('c')
+        const tab = terminalTabs.get(control.runId)
+        if (tab && !(options.failAt === 'stop-projection-retained' && stopCount === 2)) terminalTabs.delete(control.runId)
+        for (const key of ['a', 'b', 'c'] as const) if (launcher[key] === control.runId) launcher[key] = null
+        if (existed) adjust(TERMINAL_VIEW_BUNDLE, -1)
         if (options.failAt === 'stop-receipt-missing') return undefined
         return { action: 'terminal-stop', phase: 'settled', outcome: 'applied',
           target: { hostId: 'local', run: { runId: control.runId } },
-          acknowledgement: { kind: 'stop', runId: control.runId, state: 'exited' } }
+          acknowledgement: { kind: 'stop', runId: options.failAt === 'stop-receipt-wrong-run' ? 'different-run' : control.runId, state: 'exited' } }
       }
     },
     seed: () => spawnLauncher('a')
@@ -388,6 +416,7 @@ type Drive = {
   error: unknown
   report: Record<string, any> | null
   stoppedRunIds: readonly string[]
+  newTabWorkspaces: readonly WorkspaceKey[]
   sampleCount: number
 }
 
@@ -465,6 +494,7 @@ async function driveProbe(options: {
     error,
     report,
     stoppedRunIds: world.stoppedRunIds,
+    newTabWorkspaces: world.newTabWorkspaces,
     sampleCount: world.sampleCount()
   }
 }
@@ -479,6 +509,7 @@ describe('desktop resource probe behaviour', () => {
     expect(drive.report?.phases.idle.owners).toMatchObject({ monacoState: 'cold', monacoEditors: null, monacoModels: null })
     expect(drive.report?.phases.monaco.owners).toMatchObject({ monacoState: 'observed', monacoEditors: 1, monacoModels: 1 })
     expect(drive.report?.releaseCycles).toHaveLength(7)
+    expect(drive.newTabWorkspaces).toEqual(Array(9).fill('c'))
     for (const phase of [...drive.report?.releaseCycles ?? [], drive.report?.phases.browserReleased]) {
       expect(phase.owners).toMatchObject({ monacoState: 'observed', monacoEditors: 0, monacoModels: 0, documents: 0, fileWatchers: 0 })
     }
@@ -490,11 +521,16 @@ describe('desktop resource probe behaviour', () => {
     ['editor-owner-missing-next-cycle', 'cycle 1 Monaco owner coverage is unconfirmed'],
     ['release-observation-failed', 'initial File owner release did not converge'],
     ['model-retained-after-close', 'initial File owner release did not converge'],
-    ['stop-receipt-missing', 'hidden Workspace C Terminal did not confirm the original Native Terminal Stop']
+    ['stop-receipt-missing', 'hidden Workspace C Terminal did not confirm the original Native Terminal Stop'],
+    ['stop-receipt-wrong-run', 'hidden Workspace C Terminal did not confirm the original Native Terminal Stop'],
+    ['stop-projection-retained', 'first claimed Terminal original Terminal Tab removal'],
+    ['new-tab-unavailable', 'visible Workspace New Tab control'],
+    ['browser-replacement-run', 'same reusable Terminal after Browser release']
   ] as const)('fails at the original boundary for %s', async (failAt, expected) => {
     const drive = await driveProbe({ plan: ASCENDING_PLAN, failAt })
     expect(drive.resolved).toBe(false)
     expect(drive.report?.error).toContain(expected)
+    if (failAt === 'stop-projection-retained' || failAt === 'new-tab-unavailable') expect(drive.newTabWorkspaces).toEqual(['c'])
   })
 
   it('reports phaseOrder in the order the phases were actually sampled', async () => {
