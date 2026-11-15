@@ -41,7 +41,7 @@ export type MobileSpatialNavigationProps = { home: MobileHome; client: AgentMuxH
   focusTarget?: HTMLElement | null; moteDirectoryTarget?: HTMLElement | null; focusVisible?: boolean;
   focusSelected?: { hostId: string; agentSessionId: string } | null;
   openFocusSession?(id: string, identity: MobileObjectIdentity): void;
-  recentMoteSpaceId?: string | null; onSelectMote?(spaceId: string): void;
+  recentMoteSpaceId?: string | null; onSelectMote?(spaceId: string): void; onOpenGroups?(trigger: HTMLButtonElement): void;
   openMainAgent?(id: string, identity: MobileObjectIdentity, hostId: string): void;
   visible?: boolean; sessions?: AgentMuxAgentSession[]; openSession(id: string, identity: MobileObjectIdentity): void; openProfile?(identity: MobileObjectIdentity): void;
   openHttpLink?: OpenHttpLink; initialContext?: MobileSpatialContext; onContextChange?(context: MobileSpatialContext): void;
@@ -54,7 +54,7 @@ type SessionReference = Pick<AgentMuxAgentSession, 'agentSessionId'> & Partial<P
 type ContentTarget = { key: string; spaceId: string; spaceName: string; tabName: string; tabId: string; zoneId: string | null; region: Region; zone?: Catalog['zones'][number] }
 const EMPTY_CONTEXT: MobileSpatialContext = { spaceId: null, tabId: null, regionId: null }
 const contentKey = (spaceId: string, zoneId: string | null, region: Region) => JSON.stringify([spaceId, zoneId, region.tabId, region.regionId, region.kind, region.browserId ?? null, region.file ?? null])
-export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ home, wide = false, client, connected, sessions, openSession, openMainAgent, openProfile, openHttpLink, initialContext, onContextChange, onBackChange, onCreateAgent, recentMoteSpaceId, onSelectMote, needsYou = [], onPresentation, visible = true, focusTarget, moteDirectoryTarget, focusVisible, focusSelected, openFocusSession }: MobileSpatialNavigationProps) {
+export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ home, wide = false, client, connected, sessions, openSession, openMainAgent, openProfile, openHttpLink, initialContext, onContextChange, onBackChange, onCreateAgent, recentMoteSpaceId, onSelectMote, onOpenGroups, needsYou = [], onPresentation, visible = true, focusTarget, moteDirectoryTarget, focusVisible, focusSelected, openFocusSession }: MobileSpatialNavigationProps) {
   const observeCatalog = useMobileWebCatalogObservation()
   const [catalogObservation, setCatalogObservation] = useState<CatalogObservation | null>(null)
   const observation = catalogObservation?.client === client ? catalogObservation : null
@@ -455,6 +455,7 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
       <p>{home === 'mote' ? '与你的协调 Agent 继续讨论' : home === 'focus' ? '需要你处理的事项与最近执行' : '按 Mac 上的工作空间继续'}</p></div>
       <div className="mobile-section-actions">{contentVisible && <MobileAvatarNoticeOutlet header />}<MobileDirectoryNotice issues={[...(issue ? [{ source: '空间目录', message: issue }] : []), ...(metadata.issue ? [{ source: '会话目录', message: metadata.issue }] : []), ...presentationIssues]} retry={retryDirectory} />{onCreateAgent && <IconButton className="mobile-icon-button" aria-label="新建 Agent" onClick={() => onCreateAgent(spaceId ? { spaceId } : {})}><SemanticIcon name="action.create-agent" size={18} /></IconButton>}<IconButton className="mobile-icon-button" aria-label="刷新空间目录" onClick={retryDirectory}><SemanticIcon name="action.refresh" size={18} animation={pending ? 'spin' : 'none'} /></IconButton></div></div>
     {!connected && <MobileNotice owner={client} identity={[connected]} className="mobile-spatial-notice" role="status">连接暂不可用，显示的是最近一次读取的目录。</MobileNotice>}
+    {home === 'mote' && onOpenGroups && <button type="button" className="mobile-text-button" onClick={event => onOpenGroups(event.currentTarget)}><SemanticIcon name="object.conversations" size={18} />群聊</button>}
     <label className="mobile-spatial-search"><SemanticIcon name="action.search" size={16} /><TextInput value={query} onChange={event => setQuery(event.target.value)} placeholder={home === 'mote' ? '查找 Mote' : '查找工作空间'} aria-label={home === 'mote' ? '查找 Mote' : '查找'} /></label>
       {spaceId && !space && <MobileNotice identity={[spaceId]} className="mobile-spatial-notice" role="status">空间绑定还没重新确认，可以刷新目录。</MobileNotice>}
       {catalog ? <MobileSpaceDirectory key={home} catalog={catalog} home={home === 'mote' ? 'mote' : 'space'} query={query} selectedSpaceId={spaceId}

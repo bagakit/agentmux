@@ -1,0 +1,18 @@
+.mobile-mote-groups { display: flex; flex-direction: column; align-items: stretch; gap: var(--sp-3); min-width: 0; min-height: 0; }
+.mobile-mote-groups > .agent-button { align-self: start; }
+.mobile-mote-groups__list { display: grid; margin: 0; padding: 0; list-style: none; }
+.mobile-mote-groups__list li { display: grid; grid-template-columns: 44px minmax(0, 1fr); align-items: center; gap: var(--sp-2); padding-block: var(--sp-1); border-bottom: 1px solid var(--line-soft); }
+.mobile-mote-groups__list .mobile-mote-groups__avatar { width: 44px; height: 44px; color: var(--text-2); background: var(--surface-2); border-radius: var(--mobile-radius-group); }
+.mobile-mote-groups__row { min-height: 52px; min-width: 0; padding: 0; display: grid; align-content: center; gap: var(--sp-1); text-align: start; color: var(--text); background: transparent; }
+.mobile-mote-groups__row :is(strong, small) { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mobile-mote-groups__row small { color: var(--text-3); font-size: var(--fs-meta); }
+.mobile-mote-groups__thread { min-width: 0; }
+.mobile-mote-groups :is(.agent-button, .mote-group__views button, .mote-group__recipients button, .mote-group__members button) { min-height: 44px; }
+.mobile-sheet--mote-groups { display: flex; flex-direction: column; }
+.mobile-sheet--mote-groups > .mobile-mote-groups { overflow: auto; }
+.mobile-mote-groups-entry { margin-inline: 12px; }
+.mobile-mote-groups-description { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.mobile-sheet--mote-groups .mote-group__header { padding-block: var(--sp-2); }
+.mobile-sheet--mote-groups .mote-group__header p { margin: var(--sp-1) 0 0; }
+.mobile-sheet--mote-groups .mote-group__quote { margin: 0 0 var(--sp-1); }
+.mobile-sheet--mote-groups .mote-group__send textarea { resize: none; }

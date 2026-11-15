@@ -26,6 +26,7 @@ import { MobileMoteConversationStart, MobileMoteStartRecovery } from './navigati
 import type { MobileMoteRolloverQuery } from './conversation/mote-main-input'
 import type { MoteDialogueLink } from '@agentmux/core/mote-dialogue'
 import { MobileMoteThreads } from './navigation/MobileMoteThreads'
+import { MobileMoteGroups, type MoteGroupReadingPositions } from './navigation/MobileMoteGroups'
 import { MobileMoteContext, MobileMoteTeamPanel, mobileMoteRecipient } from './navigation/MobileMoteTeam'
 import { useMobileMoteTeam } from './navigation/use-mobile-mote-team'
 import { mobileMoteMainIdentity, mobileMoteMemberName, type MobileMoteMember } from './navigation/mobile-mote-team'
@@ -281,13 +282,22 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
     }).catch(error => setNotice(error instanceof Error ? error.message : String(error)))
   }
   const sessionTitle = objectIdentity?.name ?? null
-  const [sheet, updateSheet] = useState<'connection' | 'settings' | 'identity' | 'actions' | 'agent' | 'create' | 'notices' | 'team' | null>(restoreWorkface && initial.current.presentation?.profile ? 'identity' : null)
+  const [sheet, updateSheet] = useState<'connection' | 'settings' | 'identity' | 'actions' | 'agent' | 'create' | 'notices' | 'team' | 'groups' | null>(restoreWorkface && initial.current.presentation?.profile ? 'identity' : null)
+  const [groupMoteId, setGroupMoteId] = useState<string | null>(null)
+  const groupTrigger = useRef<HTMLButtonElement | null>(null)
+  const [groupReadingPositions] = useState<MoteGroupReadingPositions>(() => new Map())
   const [positionOverlay, setPositionOverlay] = useState(false)
   const setSheet = useCallback((value: typeof sheet) => {
     if (value !== 'agent') setPositionOverlay(false)
     if (value !== null) navigationRevision.current += 1
     updateSheet(value)
   }, [])
+  const openGroups = useCallback((moteId: string | null, trigger: HTMLButtonElement) => {
+    groupTrigger.current = trigger
+    setGroupMoteId(moteId)
+    setSheet('groups')
+  }, [setSheet])
+  const openGroupDirectory = useCallback((trigger: HTMLButtonElement) => openGroups(null, trigger), [openGroups])
   const menuSource = () => {
     const runtime = client?.runtimeOwnerIdentity?.(), { recordId, host } = getDeviceWorkface().snapshotIdentity()
     return JSON.stringify([runtime?.runtimeId, runtime?.ownerInstanceId, recordId, host?.hostId, host?.origin])
@@ -709,7 +719,7 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
       {!workspaceVisible && <MobileConnectPage {...(gatewayEndpoint ? { gatewayEndpoint } : {})} connection={connection} appIcon={hostAppearance.appIcon} panel={connectionPanel} onDetails={() => setSheet('connection')} />}
       {workspaceVisible && <>
         <div className="mobile-spatial-host" hidden={!spatialPresented}><MobileSpatialNavigation wide={wideShell} loadingLabel={focusShown ? 'Focus' : home === 'mote' ? 'Mote' : 'Space'} loadWhen={spatialPresented || moteDirectoryShown || focusVisible} focusTarget={focusTarget} moteDirectoryTarget={moteDirectoryTarget} fallbackTarget={focusShown ? focusTarget : moteDirectoryShown ? moteDirectoryTarget : null} focusVisible={focusVisible} focusSelected={focusSelected} openFocusSession={openFocusSession} onLoadReturn={returnToConversation} onCreateAgent={createAgent} visible={directoryVisible} home={home} client={client} connected={connected} openSession={openSession} onPresentation={attention.publish} needsYou={needsYou} openMainAgent={openMainAgent} openProfile={openProfile} onBackChange={registerSpatialBack}
-          recentMoteSpaceId={recentMoteSpaceId} onSelectMote={selectMote}
+          recentMoteSpaceId={recentMoteSpaceId} onSelectMote={selectMote} onOpenGroups={openGroupDirectory}
           initialContext={spatialContext} onContextChange={updateSpatialContext} openHttpLink={openBrowserHttpLink} /></div>
         <MobileWorkfaceFrame className="mobile-topics-host" presentation={sourcePanes} data-source-active={topicSourceActive || undefined} hidden={!topicsPresented}><MobileWorkfacePane className="mobile-topics-directory-host" pane="navigation" presentation={sourcePanes.navigation}><MobileTopicsSurface wide={wideShell} navigation={topicsNavigation} loadWhen={topicsPresented && sourcePanes.navigation.presented} onLoadReturn={returnToConversation} rpc={rpc} visible={sourcePanes.navigation.observed}
           client={client} connected={connected} openSource={openSource} openHttpLink={openBrowserHttpLink} onBackChange={registerTopicsBack}
@@ -725,6 +735,9 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
       </section>
       <section className="mobile-mote-threads-panel" hidden={!threadsVisible}
         {...(moteContext === 'main' ? { id: `${moteTabsId}-threads`, role: 'tabpanel', 'aria-labelledby': `${moteTabsId}-threads-tab` } : {})}>
+        {teamSpaceId && <button type="button" className="mobile-text-button mobile-mote-groups-entry" onClick={event => openGroups(teamSpaceId, event.currentTarget)}>
+          <ThemeObjectConversationIcon size={18} />群聊
+        </button>}
         <MobileMoteThreads client={client} dialogue={moteDialogue} team={team} issue={teamReading.issue} visible={exposed && threadsVisible}
           currentSessionId={workface.selectedSessionId} currentHostId={selected?.hostId} onOpen={openTeamMember} onWork={openMoteWork}
           onMain={() => returnToMoteMain()} onConfigure={() => { if (objectIdentity) openProfile(objectIdentity) }}
@@ -790,7 +803,16 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
     </div>
     <MobileAgentCreate client={client} connected={connected} visible={sheet === 'create'} target={createTarget} platform={platform} onClose={() => setSheet(null)} openSession={id => openSession(id, { name: 'Agent', project: '项目未确认' })} />
     <Dialog.Root open={sheet !== null && sheet !== 'create'} onOpenChange={open => { if (!open) setSheet(null) }}>
-      <Dialog.Portal container={platform.overlayContainer()}><Dialog.Overlay className={sheet === 'settings' ? 'mobile-drawer-backdrop' : `mobile-sheet-backdrop${positionOverlay ? ' mobile-sheet-backdrop--underlay' : ''}`} /><Dialog.Content className={sheet === 'settings' ? 'mobile-drawer' : `mobile-sheet${sheet === 'agent' || sheet === 'actions' ? ' mobile-sheet--agent' : ''}${positionOverlay ? ' mobile-sheet--underlay' : ''}`} aria-describedby="mobile-sheet-description" onCloseAutoFocus={event => {
+      <Dialog.Portal container={platform.overlayContainer()}><Dialog.Overlay className={sheet === 'settings' ? 'mobile-drawer-backdrop' : `mobile-sheet-backdrop${positionOverlay ? ' mobile-sheet-backdrop--underlay' : ''}`} /><Dialog.Content className={sheet === 'settings' ? 'mobile-drawer' : `mobile-sheet${sheet === 'agent' || sheet === 'actions' ? ' mobile-sheet--agent' : sheet === 'groups' ? ' mobile-sheet--mote-groups' : ''}${positionOverlay ? ' mobile-sheet--underlay' : ''}`} aria-describedby="mobile-sheet-description" onCloseAutoFocus={event => {
+        const trigger = groupTrigger.current
+        if (trigger) {
+          groupTrigger.current = null
+          if (trigger.isConnected && !trigger.closest('[hidden], [inert]')) {
+            event.preventDefault()
+            trigger.focus({ preventScroll: true })
+          }
+          return
+        }
         const original = composeAfterClose.current
         if (!original) return
         composeAfterClose.current = null
@@ -802,8 +824,11 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
         }
         if (!current.focusComposer()) setNotice('输入区暂时未准备好，请稍后再试。')
       }}>
-        <MobileSheetHeader onClose={() => setSheet(null)} title={sheet === 'team' ? `${team?.name ?? moteTitle} · 团队` : sheet === 'agent' ? menuTarget?.identity.name ?? 'Agent' : sheet === 'notices' ? '提醒与诊断' : sheet === 'identity' ? profileIdentity?.mote ? profileIdentity.mote.name ?? 'Mote 名称未确认' : profileIdentity?.name ?? 'Mote' : sheet === 'actions' ? '当前对话' : sheet === 'settings' ? 'AgentMux' : workspaceVisible ? '连接与设备' : '连接你的 Mac'} closeLabel="关闭面板" />
-        {sheet === 'team' ? <>
+        <MobileSheetHeader onClose={() => setSheet(null)} title={sheet === 'groups' ? '群聊' : sheet === 'team' ? `${team?.name ?? moteTitle} · 团队` : sheet === 'agent' ? menuTarget?.identity.name ?? 'Agent' : sheet === 'notices' ? '提醒与诊断' : sheet === 'identity' ? profileIdentity?.mote ? profileIdentity.mote.name ?? 'Mote 名称未确认' : profileIdentity?.name ?? 'Mote' : sheet === 'actions' ? '当前对话' : sheet === 'settings' ? 'AgentMux' : workspaceVisible ? '连接与设备' : '连接你的 Mac'} closeLabel="关闭面板" />
+        {sheet === 'groups' ? <>
+          <Dialog.Description id="mobile-sheet-description" className="mobile-mote-groups-description">{groupMoteId ? '查看这个 Mote 参与的群聊' : '打开或创建群聊'}</Dialog.Description>
+          <ClientUiProvider platform={platform}><MobileMoteGroups client={client} connected={connected} positions={groupReadingPositions} {...(groupMoteId ? { moteId: groupMoteId } : {})} /></ClientUiProvider>
+        </> : sheet === 'team' ? <>
           <Dialog.Description id="mobile-sheet-description">团队的当前工作与请求</Dialog.Description>
           <MobileMoteTeamPanel team={team} issue={teamReading.issue} currentSessionId={workface.selectedSessionId} currentHostId={selected?.hostId}
             onRefresh={() => { teamReading.refresh(); moteDialogue.refresh() }} onOpen={openTeamMember} onMain={() => returnToMoteMain()}
