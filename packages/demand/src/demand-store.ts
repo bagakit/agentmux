@@ -41,7 +41,7 @@ import {
 } from './demand-types.js'
 import { DemandStoreError } from './errors.js'
 import { GoalActiveIndex, type GoalActivePlan } from './goal-active-index.js'
-import { assertGoalPlanKeepsRecordedNodes, goalPlanChangedNodes, goalPlanDelegationIssue, goalTicketTask, parseGoalPlan, parseGoalPlanReviewInput, parseGoalPlanRevisionInput, projectGoalPlan,
+import { assertGoalPlanKeepsRecordedNodes, goalPlanChangedNodes, goalPlanDelegationIssue, goalTicketTask, matchesGoalPlanReviewInput, parseGoalPlan, parseGoalPlanReviewInput, parseGoalPlanRevisionInput, projectGoalPlan,
   type GoalPlanAssignmentChange, type GoalPlanRevisionRecord, type GoalPlanOwner, type GoalPlanReviewer, type GoalPlanReviewInput, type GoalPlanRevisionInput, type GoalPlanProposalReceipt } from './goal-plan.js'
 import { assertIssuedGoalTicket, freezeGoalTicketDependencies, issueGoalTickets } from './goal-ticket-issuance.js'
 import type { GoalTicketProof, GoalTicketSigner } from './goal-ticket-proof.js'
@@ -1066,9 +1066,9 @@ export class DemandStore {
       if (!plan) this.rejectDelegation('This Goal has no plan to review.')
       const original = plan.reviews.find(item => item.operationId === review.operationId)
       if (original) {
-        const { reviewer: before, reviewedAt: _time, completion: _proof, ...saved } = original
+        const before = original.reviewer
         const ownerHost = demand.delegations?.find(entry => entry.operationId === review.delegationOperationId)?.hostId
-        if (JSON.stringify(saved) !== JSON.stringify(review) || before.kind !== reviewer.kind || before.id !== reviewer.id ||
+        if (!matchesGoalPlanReviewInput(original, review) || before.kind !== reviewer.kind || before.id !== reviewer.id ||
             (before.runtimeId ? before.runtimeId !== reviewer.runtimeId : (before.hostId ?? ownerHost) !== (reviewer.hostId ?? ownerHost)))
           this.rejectDelegation('This review operation was already recorded with a different verdict or reviewer.')
         return { unchanged: demand }

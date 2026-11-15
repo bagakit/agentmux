@@ -164,6 +164,13 @@ export function parseGoalPlanReviewInput(value: unknown): GoalPlanReviewInput {
   return review
 }
 
+/** Compare the normalized request returned in the original durable review. */
+export function matchesGoalPlanReviewInput(original: GoalPlanReview, input: GoalPlanReviewInput): boolean {
+  if (original.operationId !== input.operationId) return false
+  const { reviewer: _reviewer, reviewedAt: _reviewedAt, completion: _completion, ...saved } = original
+  return JSON.stringify(saved) === JSON.stringify(input)
+}
+
 /** Structural rules: unique ids, dependencies inside the plan, no cycle. */
 export function validateGoalPlanNodes(nodes: readonly GoalPlanNodeInput[]): void {
   const ids = new Set<string>()

@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, type ReactNode } from 'react'
 import { compactReferenceId } from '@agentmux/client-ui/display-name'
 import { mintObjectId } from '@agentmux/core/object-id'
-import { parseGoalPlanReviewInput, type GoalPlanReview, type GoalPlanReviewInput } from '@agentmux/demand/goal-plan'
+import { matchesGoalPlanReviewInput, parseGoalPlanReviewInput, type GoalPlanReview, type GoalPlanReviewInput } from '@agentmux/demand/goal-plan'
 import { delegationWorkerHostId, type DemandDelegation } from '@agentmux/demand/delegations'
 import { Button } from '@agentmux/client-ui/components/Button'
 import type { DemandProjection } from '../lib/global-demand-board'
@@ -18,7 +18,7 @@ export type GoalPlanReviewDraft = RetainedGoalPlanReviewDraft & { pending?: bool
 
 function originalReview(reviews: readonly GoalPlanReview[] | undefined, request: GoalPlanReviewDraft['request']) {
   if (!request) return undefined
-  return reviews?.find(({ reviewer: _reviewer, reviewedAt: _time, ...review }) => JSON.stringify(review) === JSON.stringify(request.review))
+  return reviews?.find(review => matchesGoalPlanReviewInput(review, request.review))
 }
 
 function DeliveryReport({ delegation }: { delegation: DemandDelegation }) {
