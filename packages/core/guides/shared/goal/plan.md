@@ -20,10 +20,10 @@
 
 ### Claim an open node
 
-Read `goal plan --goal ID` and locate the ready node with `claimOpen: true`.
+Read `goal plan --goal ID` for the open ready node and copy its `planState` node’s `claimToken`.
 The Supervisor or a person manages the opening or assigns a worker directly using
 `goal plan assignment --input FILE`. As an authorized Goal Agent, claim for yourself
-with `goal plan claim --goal ID --node NODE --revision REV --operation-id OP`.
+with `goal plan claim --goal ID --node NODE --claim-token TOKEN --operation-id OP`.
 Use `--runtime RUNTIME --namespace NS` from the Goal address to pin both the read and claim.
 A confirmed claim records the executor. The Supervisor delegates work separately.
 On a conflict or unknown reply read the plan again, match your original node and operation

@@ -7,7 +7,7 @@ Keep responsibility until verified handoff. A discussion or patrol does not star
 
 To pick up open work, read `goal plan --goal ID`. When a ready node has `claimOpen: true`
 and your Session has work authorization on that Goal, use `goal plan claim --goal ID
---node NODE --revision N --operation-id OP`. Check the saved executor and operation.
+--node NODE --claim-token TOKEN --operation-id OP`. Use the node’s `planState.claimToken`. Check the saved executor, original operation and predecessor receipts.
 Read the original delegation for the task input and frozen criteria when work is dispatched.
 
 For a remote delegation, keep the Goal at its original owner. Read the received MID
