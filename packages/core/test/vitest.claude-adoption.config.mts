@@ -9,7 +9,7 @@ const mutants: Record<string, [string, string, string]> = {
   'wrong-queue-field': ['packages/providers/dist/claude/native-history.js', 'attachment?.source_uuid', 'attachment?.delivery_id'],
   'queue-as-turn': ['packages/providers/dist/claude/native-history.js', 'queuedSubmissionId: correlation, clientCorrelation: correlation', 'turnId: correlation, clientCorrelation: correlation'],
   'edited-body-adopted': ['packages/core/dist/native-input-adoption.js', '|| !frozenContent', '|| false'],
-  'native-peer-becomes-primary-speech': ['packages/core/dist/conversation-stream.js', 'if (key)\n            return records.find', 'if (false)\n            return records.find'],
+  'native-peer-becomes-primary-speech': ['packages/conversation/dist/conversation-stream.js', 'if (key)\n            return records.find', 'if (false)\n            return records.find'],
   'adapter-loses-original-input': ['packages/core/dist/conversation.js', 'const record = conversationEventPrimary(event.recordIds.map(id => records.get(id)), event.anchorId)',
     "const record = records.get(event.anchorId) ?? records.get(event.content[0]?.recordId ?? '') ?? records.get(event.recordIds[0])"]
 }

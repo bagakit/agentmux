@@ -3,7 +3,7 @@ import { resolve, relative } from 'node:path'
 import { readFileSync, existsSync, appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 const root = resolve(import.meta.dirname, '../../../../..')
-const aliases = ['core', 'relay', 'demand', 'identity', 'git', 'layout', 'host'].flatMap(pkg => {
+const aliases = ['core', 'conversation', 'relay', 'demand', 'identity', 'git', 'layout', 'host'].flatMap(pkg => {
  const directory = resolve(root, pkg === 'host' ? 'apps' : 'packages', pkg)
  const manifest = JSON.parse(readFileSync(resolve(directory, 'package.json'), 'utf8'))
  return Object.entries(manifest.exports).flatMap(([key, value]) => {

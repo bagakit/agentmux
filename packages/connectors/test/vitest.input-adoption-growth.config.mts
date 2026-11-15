@@ -1,13 +1,14 @@
+import { conversationSourceAliases } from '../../../vitest.config.ts'
 import { defineConfig } from 'vitest/config'
 import { appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { relative, resolve } from 'node:path'
 import base from './vitest.publication-isolation.config.mts'
 const root = resolve(import.meta.dirname, '../../..')
-export default defineConfig({ ...base, cacheDir: resolve(root, '.cache/input-adoption-growth'), plugins: [...base.plugins ?? [], {
+export default defineConfig({ ...base, resolve: { alias: conversationSourceAliases }, cacheDir: resolve(root, '.cache/input-adoption-growth'), plugins: [...base.plugins ?? [], {
   name: 'input-adoption-growth-evidence', enforce: 'pre', transform(source, id) {
     const path = relative(root, id.split('?')[0]!)
-    if (!['packages/core/src/conversation-reader.ts', 'packages/core/src/conversation-input-witness-index.ts', 'packages/core/src/conversation-stream.ts', 'packages/core/src/conversation-changes.ts', 'packages/connectors/src/publication-query-feedback.ts'].includes(path)) return
+    if (!['packages/core/src/conversation-reader.ts', 'packages/core/src/conversation-input-witness-index.ts', 'packages/conversation/src/conversation-stream.ts', 'packages/core/src/conversation-changes.ts', 'packages/connectors/src/publication-query-feedback.ts'].includes(path)) return
     let code = source
     const mutation = process.env.AGENTMUX_INPUT_GROWTH_MUTATION
     if (mutation && path === 'packages/core/src/conversation-input-witness-index.ts') {

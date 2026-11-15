@@ -16,7 +16,7 @@ const sources = [
   'apps/desktop/test/a2a-message-data-bridge.test.tsx', 'apps/desktop/test/vitest.a2a-message-data.config.mts',
   'packages/core/src/agent-message-render.ts', 'packages/core/src/types.ts', 'packages/core/src/conversation-provenance.ts',
   'packages/core/src/conversation.ts', 'packages/core/src/session-inputs.ts', 'packages/core/src/session-history-content.ts',
-  'packages/core/src/session-user-messages.ts', 'packages/core/src/conversation-stream.ts', 'packages/core/src/conversation-author.ts',
+  'packages/core/src/session-user-messages.ts', 'packages/conversation/src/conversation-stream.ts', 'packages/conversation/src/records.ts',
   'packages/core/src/amux-protocol-definition.ts',
   'packages/core/test/agent-message-reference-reading.test.ts', 'packages/core/test/agent-message-render.test.ts', 'packages/core/test/agent-message-leading-context.test.ts',
   ...['ConversationMessage', 'ConversationInputText', 'ConversationResourceText', 'CapturedConversationMessage', 'ConversationView', 'ConversationA2AReferences', 'ConversationA2AMetadata', 'ConversationNotificationDetails', 'ConversationMessageCard', 'ConversationToolPayload', 'ContentCopyButton', 'ConversationAmuxProtocol', 'ConversationProgressiveBody'].map(name => `packages/client-ui/src/components/${name}.tsx`),

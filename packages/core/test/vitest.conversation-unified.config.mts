@@ -2,37 +2,37 @@ import { createHash } from 'node:crypto'
 import { appendFileSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
 import { defineConfig } from 'vitest/config'
-import original from '../../../vitest.config.ts'
+import original, { conversationSourceAliases } from '../../../vitest.config.ts'
 const root = resolve(import.meta.dirname, '../../..')
 const changes: Record<string, [string, string, string]> = {
-  'invert-tail-clock': ['conversation-stream.ts', 'at > bt', 'at < bt'],
-  'accept-future-captured-cut': ['conversation-reader.ts', ' || cut.sequence > current.stream.sequence', ''],
-  'advance-before-complete-unit': ['conversation-reader.ts', 'frontier: complete ? snapshot.checkpoint : state.checkpoint!', 'frontier: snapshot.checkpoint'],
-  'drop-accepted-window-contributions': ['conversation-reader.ts', 'const accepted = loaded.rows, records = new Map(view.rows.map(record => [record.id, record]))', 'view.rows = []; const accepted = loaded.rows, records = new Map(view.rows.map(record => [record.id, record]))'],
-  'trust-foreign-window-checkpoint': ['conversation-changes.ts', 'checkpoint.sourceHostId !== source.hostId || !same(checkpoint.frontier.scope, accepted)', '!same(checkpoint.frontier.scope, accepted)'],
-  'repeat-window-original': ['conversation-changes.ts', 'eventIds.has(unit.event.id) || unit.records.some(record => recordIds.has(record.id))', 'false'],
-  'evict-watched-window': ['conversation-reader.ts', 'this.views.set(view.id, view); return view', 'this.views.set(view.id, view); if (this.views.size > 16) this.views.delete(this.views.keys().next().value!); return view'],
-  'retain-pre-history-cut': ['conversation-reader.ts', 'cursor: page.changesCursor', "cursor: cut?.kind === 'native' ? cut.checkpoint.cursor : page.changesCursor"],
-  'trust-route-cursor-fields': ['conversation-reader.ts', 'if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) throw Error()', 'if (actual.length !== expected.length) throw Error()'],
-  'trust-unrelated-relation': ['conversation-changes.ts', 'if (!local && !byId.has(conversationRecordId(to)) || local &&', 'if (local &&'],
-  'trust-coalesce-claim': ['conversation-changes.ts', '!same(e.coalesces, expectedCoalesces.length ? expectedCoalesces : undefined)', 'false'],
-  'trust-event-anchor': ['conversation-changes.ts', "if (records.some(record => record.id !== id && anchors.get(record.id) !== id))", 'if (false)'],
-  'omit-local-answer-relations': ['conversation-stream.ts', 'relations.push(...conversationRecordRelations(record))', "if (!record.original.item.questionAnswers) relations.push(...conversationRecordRelations(record))"],
-  'trust-local-relation-set': ['conversation-changes.ts', "if (!same(relations.filter(relation => relation.kind === 'answers' || relation.kind === 'observes'), records.flatMap(record => conversationRecordRelations(record))))", 'if (false)'],
-  'import-foreign-host-answer': ['conversation-questions.ts', 'context?.sourceHostId === page.sourceHostId && context.agentSessionId', 'context?.agentSessionId'],
-  'trust-invocation-claim': ['conversation-changes.ts', "if (!same(relations.filter(relation => relation.kind === 'invocation-member'), records.flatMap(record => conversationInvocationMembers(record))))", 'if (false)'],
-  'trust-event-role': ['conversation-changes.ts', 'e.role !== conversationRecordRole(primary) || ', ''],
-  'cross-session-watch': ['client-event-publisher.ts', 'this.timelineListeners.get(event.agentSessionId) ?? []', 'new Map([...this.timelineListeners.values()].flatMap(listeners => [...listeners]))'],
-  'forge-source-host-receipt': ['client.ts', 'return { ...await this.store.loadTimeline(agentSessionId), sourceHostId: descriptor.hostId }', "return { ...await this.store.loadTimeline(agentSessionId), sourceHostId: 'local' }"],
-  'drop-source-retry-position': ['conversation-reader.ts', "coverage[coverage.findIndex(c => c.source.kind === 'native')] = failure;", "failure.gaps = failure.gaps.map(({ continuation: _missing, ...gap }) => gap); coverage[coverage.findIndex(c => c.source.kind === 'native')] = failure;"]
+  'invert-tail-clock': ['packages/conversation/src/conversation-stream.ts', 'at > bt', 'at < bt'],
+  'accept-future-captured-cut': ['packages/core/src/conversation-reader.ts', ' || cut.sequence > current.stream.sequence', ''],
+  'advance-before-complete-unit': ['packages/core/src/conversation-reader.ts', 'frontier: complete ? snapshot.checkpoint : state.checkpoint!', 'frontier: snapshot.checkpoint'],
+  'drop-accepted-window-contributions': ['packages/core/src/conversation-reader.ts', 'const accepted = loaded.rows, records = new Map(view.rows.map(record => [record.id, record]))', 'view.rows = []; const accepted = loaded.rows, records = new Map(view.rows.map(record => [record.id, record]))'],
+  'trust-foreign-window-checkpoint': ['packages/core/src/conversation-changes.ts', 'checkpoint.sourceHostId !== source.hostId || !same(checkpoint.frontier.scope, accepted)', '!same(checkpoint.frontier.scope, accepted)'],
+  'repeat-window-original': ['packages/core/src/conversation-changes.ts', 'eventIds.has(unit.event.id) || unit.records.some(record => recordIds.has(record.id))', 'false'],
+  'evict-watched-window': ['packages/core/src/conversation-reader.ts', 'this.views.set(view.id, view); return view', 'this.views.set(view.id, view); if (this.views.size > 16) this.views.delete(this.views.keys().next().value!); return view'],
+  'retain-pre-history-cut': ['packages/core/src/conversation-reader.ts', 'cursor: page.changesCursor', "cursor: cut?.kind === 'native' ? cut.checkpoint.cursor : page.changesCursor"],
+  'trust-route-cursor-fields': ['packages/core/src/conversation-reader.ts', 'if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) throw Error()', 'if (actual.length !== expected.length) throw Error()'],
+  'trust-unrelated-relation': ['packages/core/src/conversation-changes.ts', 'if (!local && !byId.has(conversationRecordId(to)) || local &&', 'if (local &&'],
+  'trust-coalesce-claim': ['packages/core/src/conversation-changes.ts', '!same(e.coalesces, expectedCoalesces.length ? expectedCoalesces : undefined)', 'false'],
+  'trust-event-anchor': ['packages/core/src/conversation-changes.ts', "if (records.some(record => record.id !== id && anchors.get(record.id) !== id))", 'if (false)'],
+  'omit-local-answer-relations': ['packages/conversation/src/conversation-stream.ts', 'relations.push(...conversationRecordRelations(record))', "if (!record.original.item.questionAnswers) relations.push(...conversationRecordRelations(record))"],
+  'trust-local-relation-set': ['packages/core/src/conversation-changes.ts', "if (!same(relations.filter(relation => relation.kind === 'answers' || relation.kind === 'observes'), records.flatMap(record => conversationRecordRelations(record))))", 'if (false)'],
+  'import-foreign-host-answer': ['packages/core/src/conversation-questions.ts', 'context?.sourceHostId === page.sourceHostId && context.agentSessionId', 'context?.agentSessionId'],
+  'trust-invocation-claim': ['packages/core/src/conversation-changes.ts', "if (!same(relations.filter(relation => relation.kind === 'invocation-member'), records.flatMap(record => conversationInvocationMembers(record))))", 'if (false)'],
+  'trust-event-role': ['packages/core/src/conversation-changes.ts', 'e.role !== conversationRecordRole(primary) || ', ''],
+  'cross-session-watch': ['packages/core/src/client-event-publisher.ts', 'this.timelineListeners.get(event.agentSessionId) ?? []', 'new Map([...this.timelineListeners.values()].flatMap(listeners => [...listeners]))'],
+  'forge-source-host-receipt': ['packages/core/src/client.ts', 'return { ...await this.store.loadTimeline(agentSessionId), sourceHostId: descriptor.hostId }', "return { ...await this.store.loadTimeline(agentSessionId), sourceHostId: 'local' }"],
+  'drop-source-retry-position': ['packages/core/src/conversation-reader.ts', "coverage[coverage.findIndex(c => c.source.kind === 'native')] = failure;", "failure.gaps = failure.gaps.map(({ continuation: _missing, ...gap }) => gap); coverage[coverage.findIndex(c => c.source.kind === 'native')] = failure;"]
 }
-export default defineConfig({ ...original, root, cacheDir: resolve(root, '.cache/conversation-unified', process.env.AGENTMUX_UNIFIED_MUTATION ?? 'baseline'),
+export default defineConfig({ ...original, root, resolve: { alias: { ...original.resolve.alias, ...conversationSourceAliases } }, cacheDir: resolve(root, '.cache/conversation-unified', process.env.AGENTMUX_UNIFIED_MUTATION ?? 'baseline'),
   plugins: [{ name: 'unified-conversation-actual-loaded', enforce: 'pre', transform(code, id) {
-    const path = relative(root, id.split('?')[0]!); if (!path.startsWith('packages/core/src/') || !/\.ts$/u.test(path)) return
+    const path = relative(root, id.split('?')[0]!); if (!/^packages\/(core|conversation)\/src\//u.test(path) || !/\.ts$/u.test(path)) return
     const before = code, mutation = process.env.AGENTMUX_UNIFIED_MUTATION
     if (mutation) {
       const change = changes[mutation]; if (!change) throw new Error('Unknown unified conversation mutation: ' + mutation)
-      if (path === 'packages/core/src/' + change[0]) {
+      if (path === change[0]) {
         if (code.split(change[1]).length !== 2) throw new Error('Missing unique unified mutation anchor: ' + mutation)
         code = code.replace(change[1], change[2])
       }

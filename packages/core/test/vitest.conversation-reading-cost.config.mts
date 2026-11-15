@@ -4,10 +4,10 @@ import { appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { relative, resolve } from 'node:path'
 const root = resolve(import.meta.dirname, '../../..')
-export default defineConfig({ ...original, cacheDir: '.cache/conversation-reading-cost', resolve: { alias: { '@agentmux/core/conversation': resolve(root, 'packages/core/src/conversation.ts') } }, plugins: [...original.plugins ?? [], {
+export default defineConfig({ ...original, cacheDir: '.cache/conversation-reading-cost', resolve: { alias: { ...conversationSourceAliases, '@agentmux/core/conversation': resolve(root, 'packages/core/src/conversation.ts') } }, plugins: [...original.plugins ?? [], {
   name: 'actual-conversation-work-counters', enforce: 'pre', transform(source, id) {
     const path = relative(root, id.split('?')[0]!)
-    if (!['packages/core/src/conversation-reader.ts','packages/core/src/conversation-stream.ts'].includes(path)) return
+    if (!['packages/core/src/conversation-reader.ts','packages/conversation/src/conversation-stream.ts'].includes(path)) return
     let code = source
     const counter = (field: string) => `const probe = Reflect.get(globalThis, '__amuxConversationCost'); if (probe) probe.${field}++;`
     if (path.endsWith('conversation-reader.ts')) {

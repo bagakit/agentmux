@@ -1,6 +1,6 @@
 import { mkdtemp, writeFile, utimes, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { assertWorkspaceDistBuiltFromCurrentSource, distIsStale, extremeModification, rebuild, staleDistComplaint } from '../vitest.dist-freshness.js'
 
@@ -128,16 +128,20 @@ describe('staleDistComplaint：两个纯函数之间的接线', () => {
   })
 })
 
-it('checks the nested Demand artifacts consumed by Core even when Core itself is fresh', async () => {
+it('checks dependency artifacts consumed by Core even when Core itself is fresh', async () => {
   const root = await scratch()
   try {
-    for (const directory of ['core', 'demand', 'git']) {
+    for (const directory of ['core', 'conversation', 'demand', 'git', 'providers']) {
       await mkdir(join(root, 'packages', directory, 'src'), { recursive: true })
-      await mkdir(join(root, 'packages', directory, 'dist', directory === 'demand' ? 'src' : ''), { recursive: true })
+      const entry = directory === 'demand' ? 'src/index.js' : directory === 'providers' ? 'antigravity/hook-response.js' : 'index.js'
+      await mkdir(dirname(join(root, 'packages', directory, 'dist', entry)), { recursive: true })
       await fileAt(join(root, 'packages', directory, 'src'), 'index.ts', 1000)
-      await fileAt(join(root, 'packages', directory, 'dist', directory === 'demand' ? 'src' : ''), 'index.js', 2000)
+      await fileAt(join(root, 'packages', directory, 'dist'), entry, 2000)
     }
     await expect(assertWorkspaceDistBuiltFromCurrentSource(root)).resolves.toBeUndefined()
+    await fileAt(join(root, 'packages/conversation/src'), 'conversation-stream.ts', 3000)
+    await expect(assertWorkspaceDistBuiltFromCurrentSource(root)).rejects.toThrow('packages/conversation/dist 比 src 旧')
+    await rm(join(root, 'packages/conversation/src/conversation-stream.ts'))
     await fileAt(join(root, 'packages/demand/src'), 'goals.ts', 3000)
     await expect(assertWorkspaceDistBuiltFromCurrentSource(root)).rejects.toThrow('packages/demand/dist 比 src 旧')
     await rm(join(root, 'packages/demand/dist/src/index.js'))

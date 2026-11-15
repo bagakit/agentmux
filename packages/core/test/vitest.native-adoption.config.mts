@@ -1,3 +1,4 @@
+import { conversationSourceAliases } from '../../../vitest.config.ts'
 import { defineConfig } from 'vitest/config'
 import { createHash } from 'node:crypto'
 import { appendFileSync, readFileSync } from 'node:fs'
@@ -16,7 +17,7 @@ const mutants: Record<string, [string, string, string]> = {
     "const original = item"
   ],
   "first-native-wins": [
-    "packages/core/src/conversation-stream.ts",
+    "packages/conversation/src/conversation-stream.ts",
     "candidates?.length === 1 && candidates[0]!.key && !unconfirmed && !unconfirmedKeys.has(key) && !ambiguous.has(key)",
     "!!candidates?.length && !unconfirmed"
   ],
@@ -31,7 +32,7 @@ const mutants: Record<string, [string, string, string]> = {
     "return { witnesses, unconfirmedKeys, ...(this.records.size + (this.parent?.records.size ?? 0) > 1200 ? { unconfirmed: true as const } : {}) }"
   ],
   "changed-original-witness": [
-    "packages/core/src/conversation-stream.ts",
+    "packages/conversation/src/conversation-stream.ts",
     "if (!next || next.semanticItemId !== fact.semanticItemId || conversationInputWitnessGroup(next) !== conversationInputWitnessGroup(fact) ||\n        !!fact.key && conversationInputWitnessKey(next) !== conversationInputWitnessKey(fact))",
     "if (false)"
   ],
@@ -46,7 +47,7 @@ const mutants: Record<string, [string, string, string]> = {
     "native.threadId, native.expectedTurnId, input?.kind, input?.operation, input?.protocolId, input?.sourceId,\n      input?.actorId, input?.threadId, input?.expectedTurnId]"
   ],
   "discard-unconfirmed-candidate": [
-    "packages/core/src/conversation-stream.ts",
+    "packages/conversation/src/conversation-stream.ts",
     "(!adopted || conversationInputKey(record))",
     "!!adopted && !!conversationInputKey(record)"
   ],
@@ -61,7 +62,7 @@ const mutants: Record<string, [string, string, string]> = {
     "try { return { conversation: parseConversationProvenance(value.conversation) } }"
   ]
 }
-export default defineConfig({ root, cacheDir: resolve(root, '.local/state/conversation-unified-timeline/T-020-vitest-cache', process.env.AGENTMUX_NATIVE_ADOPTION_MUTATION ?? 'positive'),
+export default defineConfig({ root, resolve: { alias: conversationSourceAliases }, cacheDir: resolve(root, '.local/state/conversation-unified-timeline/T-020-vitest-cache', process.env.AGENTMUX_NATIVE_ADOPTION_MUTATION ?? 'positive'),
   plugins: [{ name: 'actual-native-adoption-source', enforce: 'pre',
     resolveId(source, importer) {
       if (process.env.AGENTMUX_NATIVE_ADOPTION_COMPILED === '1') return
@@ -78,7 +79,7 @@ export default defineConfig({ root, cacheDir: resolve(root, '.local/state/conver
     },
     transform(code, id) {
       const path = relative(root, id.split('?')[0]!)
-      if ((!path.startsWith('packages/core/src/') && path !== 'packages/client-ui/src/lib/input-receipt-projection.ts') || !path.endsWith('.ts')) return
+      if ((!/^packages\/(core|conversation)\/src\//u.test(path) && path !== 'packages/client-ui/src/lib/input-receipt-projection.ts') || !path.endsWith('.ts')) return
       const original = code, mutation = process.env.AGENTMUX_NATIVE_ADOPTION_MUTATION
       const change = mutation ? mutants[mutation] : undefined
       if (mutation && !change) throw new Error('Unknown native input source mutation')

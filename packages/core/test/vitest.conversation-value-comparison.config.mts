@@ -2,23 +2,23 @@ import { createHash } from 'node:crypto'
 import { appendFileSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
 import { defineConfig } from 'vitest/config'
-import original from '../../../vitest.config.ts'
+import original, { conversationSourceAliases } from '../../../vitest.config.ts'
 
 const root = resolve(import.meta.dirname, '../../..')
 const changes: Record<string, [string, string, string]> = {
-  'reader-double-hash': ['conversation-reader.ts', 'conversationValuesEqual as same,', ''],
-  'double-hash': ['conversation-changes.ts', 'return conversationValuesEqual(a, b)', 'return conversationRevision(a) === conversationRevision(b)'],
-  'trust-equality': ['conversation-stream.ts', 'return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b))', 'return true']
+  'reader-double-hash': ['packages/core/src/conversation-reader.ts', 'conversationValuesEqual as same,', ''],
+  'double-hash': ['packages/core/src/conversation-changes.ts', 'return conversationValuesEqual(a, b)', 'return conversationRevision(a) === conversationRevision(b)'],
+  'trust-equality': ['packages/conversation/src/conversation-stream.ts', 'return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b))', 'return true']
 }
-export default defineConfig({ ...original, root, cacheDir: resolve(root, '.cache/conversation-value-comparison', process.env.AGENTMUX_COMPARISON_MUTATION ?? 'candidate'),
+export default defineConfig({ ...original, root, resolve: { alias: { ...original.resolve.alias, ...conversationSourceAliases } }, cacheDir: resolve(root, '.cache/conversation-value-comparison', process.env.AGENTMUX_COMPARISON_MUTATION ?? 'candidate'),
   plugins: [{ name: 'conversation-comparison-loaded-source', enforce: 'pre', transform(code, id) {
     const path = relative(root, id.split('?')[0]!)
-    if (!path.startsWith('packages/core/src/') || !/\.ts$/u.test(path)) return
+    if (!/^packages\/(core|conversation)\/src\//u.test(path) || !/\.ts$/u.test(path)) return
     const before = code, mutation = process.env.AGENTMUX_COMPARISON_MUTATION
     if (mutation) {
       const change = changes[mutation]
       if (!change) throw Error('Unknown conversation comparison mutation')
-      if (path === 'packages/core/src/' + change[0]) {
+      if (path === change[0]) {
         if (code.split(change[1]).length !== 2) throw Error('Missing unique conversation comparison mutation anchor')
         code = code.replace(change[1], change[2])
         if (mutation === 'reader-double-hash') code += '\nconst same = (a: unknown, b: unknown) => conversationRevision(a) === conversationRevision(b)\n'

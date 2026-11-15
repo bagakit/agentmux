@@ -2,14 +2,14 @@ import { createHash } from 'node:crypto'
 import { appendFileSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
 import { defineConfig } from 'vitest/config'
-import original from '../../../vitest.config.ts'
+import original, { conversationSourceAliases } from '../../../vitest.config.ts'
 
 const root = resolve(import.meta.dirname, '../../..')
 const mutations: Record<string, [string, string, string]> = {
-  'rehash-original': ['conversation-stream.ts', 'const records = mergeSources(native, captured), byId',
+  'rehash-original': ['packages/conversation/src/conversation-stream.ts', 'const records = mergeSources(native, captured), byId',
     'const records = mergeSources(native, captured).map(record => ({ ...record, revision: conversationRevision(record.original.item) })), byId'],
-  'forget-relation': ['conversation-stream.ts', 'const target = provenance?.sameEvent ?? adopted.targets.get(record.id)', 'const target = undefined'],
-  'reader-source-detour': ['conversation-reader.ts',
+  'forget-relation': ['packages/conversation/src/conversation-stream.ts', 'const target = provenance?.sameEvent ?? adopted.targets.get(record.id)', 'const target = undefined'],
+  'reader-source-detour': ['packages/core/src/conversation-reader.ts',
     'const timeline = projectConversationStream({ agentSessionId: ref.agentSessionId, reference: ref, records: rows,\n    scope: accepted, coverage, inputAdoption, ...(source ? { nativeSource: source } : {}) })',
     `const timeline = sourceAdapterProbe({ agentSessionId: ref.agentSessionId, executionHostId: ref.hostId,
       ...(source ? { historyPage: { agentSessionId: ref.agentSessionId, source, nextCursor: null,
@@ -19,14 +19,14 @@ const mutations: Record<string, [string, string, string]> = {
       sourceOrders: new Map(rows.map(record => [record.id, record.order])), coverage, inputAdoption })`]
 
 }
-export default defineConfig({ ...original, root, cacheDir: '.cache/conversation-stream', plugins: [{
+export default defineConfig({ ...original, root, resolve: { alias: { ...original.resolve.alias, ...conversationSourceAliases } }, cacheDir: '.cache/conversation-stream', plugins: [{
   name: 'conversation-stream-loaded-source', enforce: 'pre', transform(source, id) {
     const path = relative(root, id.split('?')[0]!)
-    if (!path.startsWith('packages/core/src/') || !path.endsWith('.ts')) return
+    if (!/^packages\/(core|conversation)\/src\//u.test(path) || !path.endsWith('.ts')) return
     const mutation = process.env.AGENTMUX_STREAM_MUTATION, change = mutation ? mutations[mutation] : undefined
     if (mutation && !change) throw Error('Unknown stream mutation')
     let code = source
-    if (change && path === 'packages/core/src/' + change[0]) {
+    if (change && path === change[0]) {
       if (code.split(change[1]).length !== 2) throw Error('Missing unique stream mutation anchor')
       code = code.replace(change[1], change[2])
       if (mutation === 'reader-source-detour') code = "import { projectConversationTimeline as sourceAdapterProbe } from './conversation-timeline.js'\n" + code
