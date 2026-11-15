@@ -2,6 +2,10 @@
 
 从任务选择入口，按文档职责找事实。长期约束、当前实现、验证结果和历史证据各有来源；写法及维护规则见 [文档事实与维护规范](guides/document-truth-and-maintenance.md)。
 
+- 查产品约束，从[行为专题](design/agentmux-desktop-interaction.md)或[呈现专题](design/agentmux-surface-density.md)进入。
+- 查当前实现、唯一 owner 或源码，从[架构与调用链](#架构与调用链)进入。
+- 接入 SDK／RPC 从[公共能力源码入口](specs/public-capabilities.md)开始。按任务使用 CLI，从 [Core 使用指南](../packages/core/guides/README.md)开始。
+
 ## 先理解项目
 
 | 要了解什么 | 入口 |
@@ -11,22 +15,16 @@
 | Mote／Work／Know 产品分组、空间模型、Space 入口与实体 | [空间模型与概念](design/behavior/spaces-and-layout.md#空间模型) |
 | 伙伴的两条来源、Topic 晋升与内部 Agent 的成长 | [伙伴从哪里来：从 Topic 到 Mote](design/behavior/companions-from-work.md) · [用户故事板](design/presentation/motes-and-coordination.md#伙伴从哪里来用户故事板与教程-banner) |
 | 浏览研究与知识积累、创建和继续工作 | [Survey／Recall 工作流](design/behavior/knowledge-workflows.md)（[呈现](design/presentation/knowledge-workflows.md)）、[Launcher 工作起点](design/behavior/workface-launcher.md) |
-| 空间持久化、准确位置与跨视图导航怎样实现 | [空间状态与导航机制](architecture/spatial-state.md) |
 | 用户数据怎样保存、确认并跨进程恢复 | [用户数据与本地持久化](design/behavior/persistence.md) |
-| 项目分层、身份与唯一事实 owner | [系统职责地图](architecture/system-ownership.md) |
-| CPU、内存与卡顿的证据 owner、分析链路和缺测 | [性能技术剖面](architecture/performance-diagnostics.md) |
-| 公开 API / CLI 的实际合同与接线来源 | [公共能力源码入口](specs/public-capabilities.md) |
 | Capsule 持久页面、隔离／注入模式、HITL 及 Browser／Toolkit 联动 | [Capsule PRD](design/behavior/local-page-hosting.md) · [呈现合同](design/presentation/local-page-hosting.md) |
 | Note Markdown、稳定块／引用与独立元数据 | [Note 文件格式与存储](specs/note-markdown.md) |
 | Note 中 Agent 与人的协同编辑、并发与历史回滚 | [协同编辑产品要求](design/behavior/knowledge-workflows.md#note-中-agent-与人的协同编辑) |
 | Agent 的目标、边界和交付责任 | [AGENTS.md](../AGENTS.md) |
 | Core 公共 API、Provider 与 Session | [Core 接入说明](../packages/core/README.md) |
 | Agent Hook 为什么保留、怎样隔离配置与更新、各 Provider 的取舍 | [Agent Hook 设计](design/behavior/agent-hooks.md) |
-| 人与 Agent 共用的系统使用指南 | [Core guides](../packages/core/guides/README.md)：Markdown 正文与 CLI 读取入口 |
 | 分屏树代数 / 目标存储 | [Layout](../packages/layout/README.md)、[Demand](../packages/demand/README.md) |
 | 对话视图的目标、场景、交互与产品验收 | [对话视图 PRD](design/behavior/conversation-mode.md) · [呈现 SSOT](design/presentation/conversation-mode.md) |
-| 对话模式怎样接到 Core、Desktop、Mobile 与公共协议 | [机制与接线](architecture/conversation.md) · [公共协议](specs/conversation-protocol.md) |
-| 对话组件如何分层、收敛阅读保护并支持渐进加载 | [对话机制《Desktop 阅读链》](architecture/conversation.md#desktop-阅读链) |
+| 对话记录的字段、关系、分页与覆盖 | [对话公共协议](specs/conversation-protocol.md) |
 | amux 信封、业务标记、内容分享与对象链接的格式 | [amux 可读协议 SSOT](specs/amux-protocol.md) |
 | Agent 发现、A2A 广播、双向事件、spawn、协作图与通信责任 | [A2A 协作业务 SSOT](design/behavior/a2a-collaboration.md) |
 | Composer、邮箱、草稿、队列与持续推进 | [输入与邮箱](design/behavior/conversation-input.md) |
@@ -35,30 +33,34 @@
 | 改手机界面：尺度、控件、文案、状态、动效与采图验收 | [手机客户端的呈现](design/presentation/mobile-client.md) |
 | 手机 Web 与既有行为／呈现要求的共用范围、差异和未核实项 | [Mobile 对齐索引](design/agentmux-mobile-alignment.md) |
 
+## 架构与调用链
+
+| 查什么 | 源码机制入口 |
+| --- | --- |
+| 系统分层、对象身份、空间绑定与导航 | [系统职责总图](architecture/system-ownership.md) · [空间状态与导航机制](architecture/spatial-state.md) |
+| Session 恢复与终端 | [Session 恢复模块](architecture/agent-session-recovery.md) · [字节、Attachment 与 viewport](architecture/terminal-runtime.md) · [复制、粘贴、键盘与 IME](architecture/terminal-interaction-layers.md) · [ANSI palette 与 OSC 颜色](architecture/terminal-appearance.md) |
+| 对话来源、阅读、输入与外部渠道 | [对话机制总览](architecture/conversation.md) · [Desktop 阅读链](architecture/conversation.md#desktop-阅读链) · [输入与 Mailbox](architecture/conversation.md#输入与-mailbox) · [Connector publication](architecture/conversation.md#connector-publication) |
+| 客户端、宿主与更新 | [UI 弹层与原生 Browser](architecture/ui-layering.md) · [原生 Desktop](architecture/native-desktop.md) · [Desktop 更新](architecture/desktop-updates.md) |
+| 文件、Git 与 Note | [文件操作、格式扩展、Git 与 worktree](architecture/files-and-git.md) · [Note 编辑与保存对账](architecture/note-editing.md) |
+| CPU、内存与卡顿的证据和观测边界 | [性能技术剖面](architecture/performance-diagnostics.md) |
+
 ## 按改动定位规则
 
 | 任务 | 唯一规则或机制入口 |
 | --- | --- |
-| 产品对象、行为、身份、恢复、终端连续阅读 | [交互专题索引](design/agentmux-desktop-interaction.md) |
 | 网络域、节点发布、网关、接入与多跳路径 | [Mesh 网络与接入](design/behavior/mesh.md) · [Mesh 呈现](design/presentation/settings-and-observation.md#mesh-网络工作面) |
 | 远程工作的产品需求、运行观察、来源核验与维护流程 | [Remote 管理 PRD](design/behavior/remote-management.md) · [应用账户同步](design/behavior/remote-application-access.md) |
 | 从项目开始远程执行、选择两端和继续原工作 | [Core 使用指南](../packages/core/guides/actions/remote-execution.md) · [行为合同](design/behavior/remote-management.md#独立-remote-execution-工作台) · [当前适配范围](../packages/core/README.md#agent-与工具分端执行) |
 | 读取所选环境的网络配置、请求耗时与接口地址 | [Host 网络观察](guides/remote-network-observation.md) |
-| 视觉、密度、主题 token、控件语言 | [呈现专题索引](design/agentmux-surface-density.md) |
-| Dialog、菜单、tooltip 与原生 Browser 的层级接线 | [UI 弹层实现归属](architecture/ui-layering.md) · [共享层级呈现](design/presentation/shared-rules.md#弹层作用域与层级) |
+| Dialog、菜单、tooltip 与原生 Browser 的层级 | [共享层级呈现](design/presentation/shared-rules.md#弹层作用域与层级) |
 | 开发复用或扩展图标、打开当前目录工作台 | [语义图标开发指南](guides/semantic-icons.md) |
 | 品牌结构，或增改 App 图标、大图、插画与 IP 素材 | [品牌架构](design/presentation/brand-identity.md) · [品牌素材指南](guides/brand-assets.md) |
-| 终端复制、粘贴、键盘、IME、链接的机制判别 | [终端交互分层](architecture/terminal-interaction-layers.md) |
-| 终端 palette、OSC 颜色回复与主题边界 | [Terminal 外观](architecture/terminal-appearance.md) |
-| Note 编辑时远端新稿的合入、富文本映射与保存对账 | [Note 编辑与文件会话](architecture/note-editing.md) |
-| 文件读写的修订与原子发布、Git 操作、worktree 与扇出怎样实现 | [文件、编辑与 Git](design/behavior/files-and-git.md) · [当前机制](architecture/files-and-git.md) |
+| 文件读写、修订与原子发布、Git 和 worktree 的行为 | [文件、编辑与 Git](design/behavior/files-and-git.md) |
 | 接入外部聊天平台：绑定身份、群入口、成员访问、双向交付与凭据 | [外部对话渠道](design/behavior/conversation-channels.md) · [Connection 公共协议](specs/connection-protocol.md) · [连接器包](../packages/connectors/README.md) |
-| Agent Session 启动、恢复阶段与唯一恢复 owner | [Session 恢复行为](design/behavior/session-recovery.md) · [恢复模块](architecture/agent-session-recovery.md) |
-| 字节到画面、Attachment 与 viewport 链路 | [Terminal Runtime 架构](architecture/terminal-runtime.md) |
-| Renderer 更新、应用安装与 Native 保全 | [Desktop 更新架构](architecture/desktop-updates.md) |
+| Agent Session 的启动与恢复阶段 | [Session 恢复行为](design/behavior/session-recovery.md) |
 | 并行开发中快速打包、安装、续做和清理 | [macOS 打包指南](guides/macos-packaging.md) |
 | 防止流程失败阻断健康能力 | [红线判定](../RED-LINES.md) |
-| 原生系统能力的需求与模块边界 | [AgentMux 原生层](design/behavior/native-desktop.md) · [当前机制](architecture/native-desktop.md) |
+| 原生系统能力的需求与边界 | [AgentMux 原生层](design/behavior/native-desktop.md) |
 | 原生层源码、Swift、系统操作与正式安装的验证范围 | [原生层验证](testing/native-desktop.md) |
 | 系统／Browser 截图、共享编辑、PNG／贴图及 GIF／长截图评估 | [截图与录制](design/behavior/capture-and-recording.md) · [选区呈现](design/presentation/capture-and-recording.md#系统截图选区) · [标记呈现](design/presentation/browser-workface.md#browser-任务工具与证据的紧凑呈现) |
 | 新功能需要哪些 JSON-RPC／CLI、如何接线交付 | [公共能力贡献约定](guides/public-capability-contributions.md) |
