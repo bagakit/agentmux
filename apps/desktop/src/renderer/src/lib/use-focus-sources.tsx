@@ -3,6 +3,7 @@ import { shallow } from 'zustand/shallow'
 import type { SpaceSnapshot } from '@agentmux/core'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { msUntilSemanticStatusStale } from '@agentmux/core/agent-status'
+import { nativeSubagentRefreshDelay } from './agent-observation'
 import type { AgentNameTarget, NameObservation } from '@agentmux/core/name-control'
 import type { ConversationObservation, projectConversationWindow } from '@agentmux/core/conversation'
 import type { ConversationReadApi } from '../../../shared/conversation-read'
@@ -336,9 +337,10 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
   useEffect(() => {
     if (!visible) return
     const now = Date.now(), delays = [...facts.values()].flatMap(fact => {
-      const status = fact.session?.kind === 'agent' ? fact.session.semanticStatus : undefined
-      const delay = status && msUntilSemanticStatusStale(status, now)
-      return delay ? [delay] : []
+      const session = fact.session
+      if (session?.kind !== 'agent') return []
+      const status = session.semanticStatus ? msUntilSemanticStatusStale(session.semanticStatus, now) : 0
+      return [status, nativeSubagentRefreshDelay(session, now)].filter(delay => delay > 0)
     })
     if (delays.length) { const timer = setTimeout(() => setClock(Date.now()), Math.min(...delays)); return () => clearTimeout(timer) }
   }, [facts, visible, clock])

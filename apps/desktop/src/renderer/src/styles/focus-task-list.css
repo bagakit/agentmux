@@ -84,6 +84,17 @@
 .focus-context--list[data-bucket='attention'] .focus-task-list__state { color: var(--amber); }
 .focus-context--list[data-state='error'] .focus-task-list__state { color: var(--red); }
 .focus-task-list__trailing { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.focus-task-list__subagents {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-2);
+  font-size: var(--fs-micro);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.focus-task-list__subagent-states { max-inline-size: clamp(21ch, 30cqi, 52ch); overflow: hidden; text-overflow: ellipsis; }
+.focus-task-list__subagent-count { display: none; }
 .focus-task-list__clock { inline-size: var(--focus-time-width); text-align: end; }
 .focus-task-list__time {
   color: var(--text-3);
@@ -105,6 +116,10 @@
 }
 @container focus-task-rows (max-width: 399px) {
   .focus-task-list__clock, .focus-task-list__time { display: none; }
+}
+@container focus-task-rows (max-width: 559px) {
+  .focus-task-list__subagent-states { display: none; }
+  .focus-task-list__subagent-count { display: inline; }
 }
 @media (prefers-reduced-motion: reduce) {
   [data-task-layout='list'] .focus-context-group__cards > [data-focus-card-key],

@@ -12,7 +12,7 @@ import {
 } from '@agentmux/core/agent-status'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { useAppStore } from '../store'
-import { observeAgentSession } from './agent-observation'
+import { nativeSubagentRefreshDelay, observeAgentSession } from './agent-observation'
 
 // 让「永远转的圈」停下。
 //
@@ -76,7 +76,7 @@ export function nextAgentStatusDecayDelayMs(
     if (session.kind !== 'agent') return []
     const status = msUntilSemanticStatusStale(session.status, now)
     const activity = agentActivityRemainingMs(observeAgentSession(session, now), now)
-    return [status, activity].filter(ms => ms > 0)
+    return [status, activity, nativeSubagentRefreshDelay(session, now)].filter(ms => ms > 0)
   })
   if (delays.length === 0) return null
   return Math.max(1, Math.min(...delays))
@@ -101,7 +101,8 @@ export function useAgentStatusDecay(): void {
     const expiring = new Set(sampled.filter(session => {
       if (session.kind !== 'agent') return false
       const remaining = agentActivityRemainingMs(observeAgentSession(session, now), now)
-      return remaining > 0 && remaining <= delay
+      const children = nativeSubagentRefreshDelay(session, now)
+      return remaining > 0 && remaining <= delay || children > 0 && children <= delay
     }))
     const timer = window.setTimeout(() => useAppStore.setState(state => {
       const decayed = decayStaleAgentStatuses(state.sessions, Date.now())

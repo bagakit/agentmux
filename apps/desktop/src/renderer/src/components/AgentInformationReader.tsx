@@ -16,6 +16,7 @@ import { createPortal } from 'react-dom'
 import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { AgentInputRecap } from './AgentInputRecap'
+import { AgentSubagentDetails } from './AgentSubagentDetails'
 import { AgentReadingBody as ReadingBody } from './AgentReadingBody'
 import { currentAgentSemanticStatus, msUntilSemanticStatusStale } from '@agentmux/core/agent-status'
 import { nativeBindingKey } from '../../../shared/agent-native-source'
@@ -26,7 +27,7 @@ import { captureReadingAnchor, restoreReadingAnchor } from '../lib/reading-ancho
 import { useAppStore } from '../store'
 import { agentStateEnteredAt } from '../lib/agent-state-time'
 import { elapsedShort } from '../lib/project-activity-row'
-import { observeAgentSession } from '../lib/agent-observation'
+import { nativeSubagentRefreshDelay, observeAgentSession } from '../lib/agent-observation'
 import { currentConversationSpeakerMetadata } from '../lib/conversation-sender-details'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { AgentInformationDetails, AgentInformationSummary, type AgentInformationTab } from './AgentInformationDetails'
@@ -195,7 +196,7 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
   useEffect(() => {
     if (!visible || session?.kind !== 'agent') return
     const now = Date.now(), current = currentAgentSemanticStatus(session.semanticStatus) ?? session.status
-    const delays = [session.status, current].map(status => msUntilSemanticStatusStale(status, now)).filter(delay => delay > 0)
+    const delays = [msUntilSemanticStatusStale(session.status, now), msUntilSemanticStatusStale(current, now), nativeSubagentRefreshDelay(session, now)].filter(delay => delay > 0)
     if (!delays.length) return
     const timer = setTimeout(() => setObservationNow(Date.now()), Math.min(...delays))
     return () => clearTimeout(timer)
@@ -456,6 +457,7 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
     <div className="agent-information-reader__body">
       <div ref={reading} className="agent-information-reader__reading" tabIndex={0} aria-label="Original Agent content" onScroll={() => setReadingProtected(protectedReading())}
         style={tab ? { visibility: 'hidden' } : undefined} inert={tab !== null}>
+        {sameSource && currentContext.nativeSubagents ? <AgentSubagentDetails key={currentContext.runId} subagents={currentContext.nativeSubagents} /> : null}
         <HeldReading key={JSON.stringify([currentReading.context.runId, currentReading.sourceKey])} request={displayedReading} enabled={visible && readingSameSource && tab === null} available={visible && (Boolean(request.bookmark) || readingSameSource)} follow={Boolean(request.bookmark) && !readingProtected && !changedReading} />
       </div>
       {tab ? <div className="agent-information-reader__metadata">

@@ -1,5 +1,30 @@
-import { observeAgent, type AgentObservation } from '@agentmux/core/agent-status'
+import { msUntilSemanticStatusStale, observeAgent, type AgentObservation } from '@agentmux/core/agent-status'
 import type { SessionSnapshot } from '../../../shared/contracts'
+
+type AgentSnapshot = Extract<SessionSnapshot, { kind: 'agent' }>
+
+/** Child evidence belongs only to the original provider session in this exact Run. */
+export function observedNativeSubagents(session: AgentSnapshot): AgentSnapshot['nativeSubagents'] {
+  const roster = session.nativeSubagents, handle = session.nativeHandle
+  const nativeId = handle ? handle.kind === 'provider' && handle.providerId === session.providerId ? handle.sessionId : undefined : session.nativeSessionId
+  return roster && roster.providerId === session.providerId && roster.run.runId === session.control.run.runId && roster.nativeSessionId === nativeId ? roster : undefined
+}
+
+export function canObserveCurrentSubagents(session: AgentSnapshot): boolean {
+  return session.processState === 'running' && !session.runUnobserved && session.status.state !== 'disconnected'
+}
+
+/** Wake the existing presentation clocks at the first individual working expiry. */
+export function nativeSubagentRefreshDelay(session: AgentSnapshot, now: number): number {
+  let next = 0
+  if (!canObserveCurrentSubagents(session)) return next
+  for (const child of observedNativeSubagents(session)?.sessions ?? []) {
+    if (child.phase !== 'running' || child.state !== 'working') continue
+    const delay = msUntilSemanticStatusStale({ state: child.state, observedAt: child.observedAt }, now)
+    if (delay > 0 && (!next || delay < next)) next = delay
+  }
+  return next
+}
 
 /**
  * 桌面侧读同一份 Provider 观察合同——**不新建第二套判定**。
@@ -12,9 +37,10 @@ import type { SessionSnapshot } from '../../../shared/contracts'
  * 输入形状刻意收成一个 agent Session：终端 Session 没有语义活性这层概念，调用方在传入前已按 kind 收窄。
  */
 export function observeAgentSession(
-  session: Extract<SessionSnapshot, { kind: 'agent' }>,
+  session: AgentSnapshot,
   now: number
 ): AgentObservation {
+  const subagents = observedNativeSubagents(session)
   return observeAgent(
     {
       process: session.processState,
@@ -22,8 +48,7 @@ export function observeAgentSession(
       retainedStatus: session.semanticStatus,
       currentActivity: session.currentActivity,
       mainSessionActivity: session.mainSessionActivity,
-      ...(session.nativeSubagents?.providerId === session.providerId && session.nativeSubagents.run.runId === session.control.run.runId && session.nativeSubagents.nativeSessionId === session.nativeSessionId
-        ? { subagentSessions: session.nativeSubagents } : {}),
+      ...(subagents ? { subagentSessions: subagents } : {}),
       timelineCapability: session.capabilities.timeline,
       // 卡在一个待答的 typed 请求上：普通输入此刻送不进去（会被拒或被当成对请求的回答）。
       awaitingRequest: session.pendingInteraction !== undefined,

@@ -116,6 +116,16 @@ export const agentInformationPreview = {
     if (!request?.pinned || request.bookmark || request.contentChanged) return
     if (request.context.recap?.reading?.text !== context.recap?.reading?.text) publish(current.map(item => item === request ? { ...item, contentChanged: true } : item))
   },
+  noteSourceSubagents(token: object, context: FocusContext) {
+    const request = current.find(item => item.token === token || sourceBookmarkMatches(item.bookmark, context))
+    const original = request?.context
+    if (!request || !original?.access || !context.access || original.id !== context.id || original.hostId !== context.hostId ||
+        original.runId !== context.runId || original.nativeSessionId !== context.nativeSessionId || original.nativeSubagents === context.nativeSubagents) return
+    const refreshed = { ...original }
+    if (context.nativeSubagents) refreshed.nativeSubagents = context.nativeSubagents
+    else delete refreshed.nativeSubagents
+    publish(current.map(item => item === request ? { ...item, context: refreshed } : item))
+  },
   dismiss(token: object, explicit = false) {
     cancelIntent(token)
     const request = current.find(item => item.token === token)

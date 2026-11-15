@@ -14,7 +14,8 @@ import { clampStep } from '@agentmux/client-ui/activity-step-summary'
 import { sessionRecentActivity } from './session-recency'
 import { agentStateEnteredAt } from './agent-state-time'
 import { launcherTimelineRecap, type LauncherRecap } from '@agentmux/client-ui/conversation-recap'
-import { observeAgentSession } from './agent-observation'
+import { observedNativeSubagents, observeAgentSession } from './agent-observation'
+import { focusNativeSubagents, type FocusNativeSubagents } from './focus-native-subagents'
 import { focusActivityEntryAt, focusLastTaskActivityAt } from '@agentmux/client-ui/focus-order'
 export { focusLastTaskActivityAt } from '@agentmux/client-ui/focus-order'
 import { agentPresentationBucket, agentPresentationState, activityObservationPresentation } from '@agentmux/client-ui/agent-presentation'
@@ -41,6 +42,7 @@ export type FocusContext = {
   workspace: WorkspaceRecord | undefined
   retainedRunIds?: readonly string[]
   nativeSessionId?: string
+  nativeSubagents?: FocusNativeSubagents
   originAddress?: string
   /** undefined is a deferred retained-card read, never evidence of no history. */
   recap: LauncherRecap | null | undefined
@@ -198,12 +200,12 @@ function agentContextWithConversation(session: SessionSnapshot, timeline: AgentT
   const result = latest?.currentResult
   const pending = session.kind === 'agent' && Boolean(session.pendingInteraction)
   const now = Date.now()
-  const bucket = focusBucketForSession(session, Boolean(result), now)
   const observation = session.kind === 'agent' ? observeAgentSession(session, now) : undefined
   const activitySemantic = observation?.semantic
   const activityExplanation = observation ? activityObservationPresentation(observation, state !== 'disconnected') : null
   const presentation = agentPresentationState(session, observation, Boolean(result))
-  const stateLabel = presentation.stateLabel
+  const { bucket, stateLabel } = presentation
+  const nativeSubagents = session.kind === 'agent' ? focusNativeSubagents(session, now) : undefined
   const name = session.kind === 'agent' ? agentDisplayName({ userName, firstPrompt: conversation?.firstPrompt ?? firstPromptFromTimeline(timeline), fallbackLabel: session.label, providerLabel: session.providerId }) : userName ?? session.label
   const lastActivityAt = focusLastTaskActivityAt(items, focusActivityEntryTime(session), now)
   const stateEnteredAt = session.kind === 'agent' && session.currentActivity ? undefined : agentStateEnteredAt(session, now)
@@ -249,7 +251,7 @@ function agentContextWithConversation(session: SessionSnapshot, timeline: AgentT
     hostId: session.hostId, topicId, workspace, workspaceId: workspace?.id ?? `${session.hostId}:${session.workspacePath}`, workspaceName: workspace?.name ?? session.workspacePath.split('/').filter(Boolean).at(-1) ?? 'Unassigned', workspacePath: session.workspacePath,
     liveAgent: session.kind === 'agent' && session.processState === 'running', actionable: pending || isNeedsYouState(state) || session.kind === 'agent' && state === 'error', lastActivityAt,
     runId: session.control.run.runId, ...(stateEnteredAt === undefined ? {} : { stateEnteredAt }), workingEnteredAt: activitySemantic === 'active' && !(session.kind === 'agent' && session.currentActivity) ? workingEntryTime(session) : null, recap, detailIsRecap, detailKind,
-    ...(activitySemantic === undefined ? {} : { activitySemantic }) }
+    ...(activitySemantic === undefined ? {} : { activitySemantic }), ...(nativeSubagents ? { nativeSubagents } : {}) }
 }
 function sameSessionPresentation(a: SessionSnapshot, b: SessionSnapshot, now: number): boolean {
   return (a.kind === 'agent' ? a.nativeHandle?.sessionId ?? a.nativeSessionId : null) === (b.kind === 'agent' ? b.nativeHandle?.sessionId ?? b.nativeSessionId : null)
@@ -266,6 +268,7 @@ function sameSessionPresentation(a: SessionSnapshot, b: SessionSnapshot, now: nu
     && a.status.source === b.status.source
     && (a.kind === 'agent' ? a.semanticStatus : undefined) === (b.kind === 'agent' ? b.semanticStatus : undefined)
     && (a.kind === 'agent' ? a.currentActivity : undefined) === (b.kind === 'agent' ? b.currentActivity : undefined)
+    && (a.kind === 'agent' ? observedNativeSubagents(a) : undefined) === (b.kind === 'agent' ? observedNativeSubagents(b) : undefined)
     && (a.kind !== 'terminal' || a.status.exitCode === b.status.exitCode && a.status.exitReason === b.status.exitReason)
     && focusActivityEntryTime(a) === focusActivityEntryTime(b)
     && a.control.run.runId === b.control.run.runId && a.control.hostId === b.control.hostId
@@ -286,7 +289,7 @@ export function createWorkspaceAgentContextsSelector() {
       const timeline = timelines[session.id], name = names[session.id]
       const semantic = session.kind === 'agent' ? observeAgentSession(session, now).semantic : undefined
       const topicId = scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath, topics)
-      if (old && old.semantic === semantic && sameSessionPresentation(old.session, session, now) && old.timeline === timeline && sameConversationFacts(old.conversation, timeline) && old.name === name && old.model.workspace === workspace && old.model.topicId === topicId) {
+      if (old && now < (old.model.nativeSubagents?.refreshAt ?? Infinity) && old.semantic === semantic && sameSessionPresentation(old.session, session, now) && old.timeline === timeline && sameConversationFacts(old.conversation, timeline) && old.name === name && old.model.workspace === workspace && old.model.topicId === topicId) {
         old.session = session
         return old.model
       }
@@ -364,7 +367,7 @@ function createFocusProjectionCache() {
       // their result classification and detail never consume conversation text.
       const deferred = mode === 'metadata' && (session.processState === 'interrupted' || session.runUnobserved === true)
         && !session.pendingInteraction && !isNeedsYouState(session.status.state) && session.status.state !== 'error'
-      if (old?.session && (!coordination || old.lane !== 'pmo' || old.coordinationModel) && old.deferred === deferred && old.activitySemantic === activitySemantic && sameSessionPresentation(old.session, session, now) && old.timeline === timeline && (mode !== undefined ? sameTimelineStamp(old.stamp, timeline) : !old.conversation || sameConversationFacts(old.conversation, timeline)) && old.name === name && old.config === input.config && previous?.scratchTopicSnapshots === input.scratchTopicSnapshots) {
+      if (old?.session && now < (old.model?.nativeSubagents?.refreshAt ?? old.coordinationModel?.nativeSubagents?.refreshAt ?? Infinity) && (!coordination || old.lane !== 'pmo' || old.coordinationModel) && old.deferred === deferred && old.activitySemantic === activitySemantic && sameSessionPresentation(old.session, session, now) && old.timeline === timeline && (mode !== undefined ? sameTimelineStamp(old.stamp, timeline) : !old.conversation || sameConversationFacts(old.conversation, timeline)) && old.name === name && old.config === input.config && previous?.scratchTopicSnapshots === input.scratchTopicSnapshots) {
         old.session = session
         if (old.model) { rows.push(old.model); laneRows.push(old.laneModel!) }
         else if (old.lane === 'pmo') {

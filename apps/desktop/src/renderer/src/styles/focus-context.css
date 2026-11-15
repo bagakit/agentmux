@@ -223,6 +223,41 @@
 .agent-information-reader__body { display: grid; grid-template-rows: minmax(0, 1fr); min-height: 0; flex: 1 1 auto; position: relative; }
 .agent-information-reader__reading, .agent-information-reader__metadata { grid-area: 1 / 1; min-width: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 12px 10px; scrollbar-gutter: stable; }
 .agent-information-reader__reading { overflow-anchor: none; }
+.agent-subagent-details { margin-block: 4px 10px; font-size: var(--fs-meta); }
+.agent-subagent-details > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-block-size: 30px;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  list-style: none;
+  cursor: pointer;
+}
+.agent-subagent-details > summary::-webkit-details-marker { display: none; }
+.agent-subagent-details > summary:hover { background: var(--surface-2); }
+.agent-subagent-details > summary:focus-visible { outline: 1px solid var(--focus-line); }
+.agent-subagent-details > summary::after {
+  content: '';
+  flex: none;
+  inline-size: 5px;
+  block-size: 5px;
+  margin-inline-start: auto;
+  border: solid currentColor;
+  border-width: 0 1px 1px 0;
+  rotate: 45deg;
+}
+.agent-subagent-details[open] > summary::after { rotate: -135deg; }
+.agent-subagent-details > summary strong { flex: none; color: var(--text); }
+.agent-subagent-details > summary span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-subagent-details > ul { margin: 2px 6px 0; padding: 0; list-style: none; }
+.agent-subagent-details li { display: flex; justify-content: space-between; gap: 10px; padding: 4px 0; color: var(--text-2); }
+.agent-subagent-details li > code { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-subagent-details li > span { flex: none; }
+.agent-subagent-details [data-subagent-state='waiting'] > span { color: var(--amber); }
+.agent-subagent-details [data-subagent-state='failed'] > span { color: var(--red); }
+.agent-subagent-details > p { margin: 2px 6px; color: var(--text-2); }
 .agent-information-reader__metadata { position: relative; background: var(--surface-2); }
 .agent-information-reader__metadata-heading { display: flex; align-items: center; gap: 9px; padding-top: 4px; }
 .agent-information-reader__metadata-heading > h3 { margin: 0; color: var(--text); font-size: var(--fs-body); font-weight: 600; }

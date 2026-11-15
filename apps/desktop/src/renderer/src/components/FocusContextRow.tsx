@@ -83,7 +83,7 @@ export const FocusContextRow = memo(function FocusContextRow({ context, identity
       if (!event.repeat) hover.read()
     }
   }
-  const card = <button ref={hover.anchor} type="button" className={className} data-session-id={context.id} data-state={context.state} data-bucket={context.bucket} data-activity={context.activitySemantic} data-focus-list-goal={list && Boolean(goalLinks) || undefined} aria-pressed={selected} aria-label={`${context.name} · ${context.stateLabel}${topic ? ` · ${topic.kind === 'worktree' ? 'Zone' : 'Topic'} · ${topic.name}` : ''}${list ? '' : ` · ${description}`}`} aria-description={rowDescription} aria-describedby={hover.describedBy} {...hover.triggerEvents}
+  const card = <button ref={hover.anchor} type="button" className={className} data-session-id={context.id} data-state={context.state} data-bucket={context.bucket} data-activity={context.activitySemantic} data-focus-list-goal={list && Boolean(goalLinks) || undefined} aria-pressed={selected} aria-label={`${context.name} · ${context.stateLabel}${topic ? ` · ${topic.kind === 'worktree' ? 'Zone' : 'Topic'} · ${topic.name}` : ''}${list ? '' : ` · ${description}`}`} aria-description={list && context.nativeSubagents ? [rowDescription, `Subagents · ${context.nativeSubagents.summary}`].filter(Boolean).join(' · ') : rowDescription} aria-describedby={hover.describedBy} {...hover.triggerEvents}
     onFocus={list ? undefined : hover.triggerEvents.onFocus}
     onKeyDown={list ? listKey : hover.triggerEvents.onKeyDown}
     aria-keyshortcuts={list ? 'ArrowUp ArrowDown Space Enter' : hover.triggerEvents['aria-keyshortcuts']} onClick={() => { hover.close(); onSelect(context.id) }} onContextMenu={hover.close}>

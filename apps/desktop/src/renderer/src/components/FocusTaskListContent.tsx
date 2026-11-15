@@ -5,6 +5,9 @@ import { useAppStore } from '../store'
 import { AgentContextAvatar, mandatoryAgentContextDetails } from './AgentContextContent'
 import { FocusContextStateMark } from './FocusContextState'
 import { AgentWorkModeBadge } from './AgentWorkModeBadge'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
+
+const TeamIcon = semanticIconComponent('object.team')
 
 function LastActivity({ at }: { at: number }) {
   const zone = useAppStore(state => state.focusTimelineRuler.timeZone)
@@ -26,6 +29,7 @@ export function FocusTaskListContent({ context, identity, placeholder = false }:
   const showExplanation = showStatus || context.detailKind === 'service' || context.detailKind === 'observation'
   const detail = showExplanation && !context.detailIsRecap && context.detail !== context.stateLabel ? context.detail : null
   const activity = context.lastActivityAt
+  const subagents = context.nativeSubagents
   const hasTime = !placeholder && activity !== null && Number.isSafeInteger(activity) && activity > 0 && activity <= Date.now()
   return <>
     <span className="focus-task-list__line">
@@ -33,6 +37,10 @@ export function FocusTaskListContent({ context, identity, placeholder = false }:
       <span className="focus-task-list__mark" title={context.stateLabel}><FocusContextStateMark context={context} /></span>
       <strong className="focus-task-list__title">{context.name}</strong>
       <span className="focus-task-list__trailing">
+        {subagents ? <span className="focus-task-list__subagents" title={`Subagents · ${subagents.summary}`} aria-hidden="true">
+          <TeamIcon size={13} /><span className="focus-task-list__subagent-count">{subagents.rows.length || '?'}{subagents.rows.length && subagents.coverageUnknown ? '+' : ''}</span>
+          <span className="focus-task-list__subagent-states">{subagents.summary}</span>
+        </span> : null}
         {context.kind === 'agent' && !context.access ? <AgentWorkModeBadge source={context} embedded /> : null}
         <span className="focus-task-list__clock">{hasTime ? <LastActivity at={activity} /> : null}</span>
       </span>

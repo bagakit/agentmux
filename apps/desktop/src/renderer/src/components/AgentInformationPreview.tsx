@@ -98,6 +98,7 @@ export function useAgentInformationPreview(context: FocusContext | undefined, re
   useLayoutEffect(() => { if (context) agentInformationPreview.noteContent(token, context); close() }, [context?.id, context?.hostId, context?.runId, context?.name, context?.state, context?.detail,
     context?.recap?.text, context?.recap?.source, context?.recap?.origin, context?.recap?.reading?.text,
     context?.recap?.reading?.truncated, context?.workspacePath, context?.originAddress, enabled, previewTrigger, close, document])
+  useLayoutEffect(() => { if (context?.access) agentInformationPreview.noteSourceSubagents(token, context) }, [context?.nativeSubagents, context?.runId, token])
   // Metadata becoming readable must follow the actual held input on this invoker.
   // A cached relationship highlight cannot create a new reading intent.
   useLayoutEffect(() => {
