@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { isAgentSchedule, type ContinuousProgressLoop } from '@agentmux/core/continuous-progress-scheduler'
 import type { ScheduleParamsMap } from '@agentmux/core'
-import { validateScheduleRpcResult } from '@agentmux/core/schedule-rpc'
+import { scheduleMatchesCreation, validateScheduleRpcResult } from '@agentmux/core/schedule-rpc'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { api } from './api'
 import { useLauncherState, checkpointLauncherState, initializeLauncherState } from './launcher-state'
@@ -80,10 +80,11 @@ function sameRequest(a: ScheduleRequest | undefined, b: ScheduleRequest) {
   return a?.action === b.action && a.params.operationId === b.params.operationId
 }
 function requestMatches(request: ScheduleRequest, record: ContinuousProgressLoop): boolean {
-  if (request.action === 'create') return record.creationOperationId === request.params.operationId &&
-    record.prompt === request.params.prompt && matchesScheduleQuery(record, { target: request.params.target })
+  if (request.action === 'create') return scheduleMatchesCreation(record, request.params) &&
+    (record.pause?.reason !== 'preparation' || record.lastMutation !== undefined || record.lastTickId !== undefined)
   return record.loopId === request.params.scheduleId && record.lastMutation?.operationId === request.params.operationId &&
     record.lastMutation.action === request.action && record.lastMutation.expectedRevision === request.params.expectedRevision &&
+    (!('phase' in record.lastMutation) || record.lastMutation.phase !== 'prepared') &&
     record.revision === request.params.expectedRevision + 1 &&
     record.status === (request.action === 'resume' ? 'active' : request.action === 'pause' ? 'paused' : 'stopped')
 }

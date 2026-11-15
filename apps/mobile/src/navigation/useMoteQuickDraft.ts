@@ -44,6 +44,7 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
   useMobileWebUpdateSafetyOwner(() => reloadCopies.current ? '本页保留了 Mote 配置冲突副本；请先复制保全并关闭编辑器，再更新网页。'
     : reloadDirty.current || flight.current || adopting.current ? 'Mote 配置草稿或保存操作尚未确认；请保存或复制保全后再更新网页。' : null)
   const [busy, setBusy] = useState(false), [adoptionBusy, setAdoptionBusy] = useState(false), [notice, setNotice] = useState('')
+  const [preparedResume, setPreparedResume] = useState<{ operationId: string; ownerInstanceId: string } | null>(null)
   const [storageIssue, setStorageIssue] = useState(''), [memoryOnly, setMemoryOnly] = useState(false)
   const [read, setRead] = useState<MoteQuickPreferencesReadResult | null>(null), [copies, setCopies] = useState<Editable[]>([])
   const [destination, setDestination] = useState<MotePreferencesDestination | null>(null)
@@ -146,29 +147,38 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
     }
     const input = pending?.input ?? parseScheduleRpcParams('schedule.resume', { scheduleId: schedule!.loopId, expectedRevision: schedule!.revision, operationId: randomClientRequestId() })
     let operation: MoteMaintenanceAttempt = pending ?? { input, ownerInstanceId: source.ownerInstanceId, phase: 'sending', result: null, issue: null }
+    const retryPrepared = pending !== undefined && preparedResume?.operationId === input.operationId && preparedResume.ownerInstanceId === source.ownerInstanceId
     let requested = false
     const sameSource = () => {
       const now = connection(original, owner, target)
       return mounted.current && latest.current.visible && latest.current.client === original && owner.recordIdentity() === recordId && now?.ownerInstanceId === source.ownerInstanceId && moteQuickDraftKey(now.scope) === moteQuickDraftKey(source.scope)
     }
-    flight.current = true; setBusy(true)
+    flight.current = true; setBusy(true); setPreparedResume(null)
     try {
-      if (!pending) {
-        const ack = await retain({ ...current.current, maintenanceAttempts: [...current.current.maintenanceAttempts ?? [], operation] })
-        if (!ack.canForward || !sameSource()) { operation = { ...operation, phase: 'not-sent', issue: '请求尚未发送。' }; return }
+      if (!pending || retryPrepared) {
+        operation = { ...operation, phase: 'sending', result: null, issue: null }
+        const attempts = current.current.maintenanceAttempts ?? []
+        const ack = await retain({ ...current.current, maintenanceAttempts: pending
+          ? attempts.map(value => value.input.operationId === input.operationId ? operation : value) : [...attempts, operation] })
+        if (!ack.canForward || !sameSource()) { operation = pending ?? { ...operation, phase: 'not-sent', issue: '请求尚未发送。' }; return }
       }
       requested = true
       const fence = { runtimeId: source.scope.runtimeId, ownerInstanceId: source.ownerInstanceId }
-      const result = pending
+      const result = pending && !retryPrepared
         ? validateScheduleRpcResult('schedule.inspect', await original.forwardRpc('schedule.inspect', { operationId: input.operationId }, {}, fence), { operationId: input.operationId })
         : validateScheduleRpcResult('schedule.resume', await original.forwardRpc('schedule.resume', input, {}, fence), input)
       if (!sameSource()) return
       if (!result.schedule || result.schedule.loopId !== input.scheduleId || result.schedule.lastMutation?.operationId !== input.operationId || result.schedule.lastMutation.action !== 'resume' || result.schedule.lastMutation.expectedRevision !== input.expectedRevision) {
         operation = { ...operation, phase: 'unknown', issue: '这次恢复还没确认，不会重复恢复。' }; return
       }
-      operation = { ...operation, phase: pending ? 'observed' : 'confirmed', result, issue: null }
-      setNotice(pending ? '已读到恢复记录，心跳投递另行核对。' : '心跳已恢复，主 Agent 接回和心跳投递另行核对。')
-    } catch (error) { operation = { ...operation, phase: requested ? 'unknown' : 'not-sent', issue: message(error) }; if (mounted.current) setNotice('恢复还没确认，可以核对。') }
+      if (result.schedule.lastMutation.phase === 'prepared') {
+        setPreparedResume({ operationId: input.operationId, ownerInstanceId: source.ownerInstanceId })
+        operation = { ...operation, phase: 'unknown', issue: '原恢复尚未完成，可以继续同一次恢复。' }
+        return
+      }
+      operation = { ...operation, phase: pending && !retryPrepared ? 'observed' : 'confirmed', result, issue: null }
+      setNotice(operation.phase === 'observed' ? '已读到恢复记录，心跳投递另行核对。' : '心跳已恢复，主 Agent 接回和心跳投递另行核对。')
+    } catch (error) { operation = { ...operation, phase: requested || pending ? 'unknown' : 'not-sent', issue: message(error) }; if (mounted.current) setNotice('恢复还没确认，可以核对。') }
     finally {
       if (operation.phase === 'sending') operation = { ...operation, phase: requested ? 'unknown' : 'not-sent', issue: '连接或页面已变化，请求没有发往别处。' }
       const retained = { ...current.current, maintenanceAttempts: (current.current.maintenanceAttempts ?? []).map(value => value.input.operationId === input.operationId ? operation : value) }
@@ -260,5 +270,5 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
     durable.current = canonical; conflicted.current = false; display(restore(canonical)); setNotice('已采用设备上的配置，本页的另一份选择仍可复制。')
   }
   return { draft, read, destination, setDestination, edit, editHeartbeatMinutes, inspect, adopt, save, chooseStored, busy, adoptionBusy, notice, storageIssue, memoryOnly,
-    conflict: conflicted.current, copies, resumeMaintenance }
+    conflict: conflicted.current, copies, resumeMaintenance, preparedResumeOperationId: preparedResume?.operationId }
 }

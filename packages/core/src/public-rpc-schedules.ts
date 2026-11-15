@@ -6,12 +6,26 @@ import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { parseAgentScheduleCheckIn, parseAgentScheduleTiming, type AgentScheduleTiming } from './agent-schedule.js'
 import { optionalInputEpoch, agentPromptInputId, validateAgentPromptCondition } from './agent-prompt-condition.js'
-import { isAgentSchedule, validateContinuousProgressPause, type ContinuousProgressLoop, type ContinuousProgressTarget } from './continuous-progress-scheduler.js'
+import { continuousProgressRequestDigest, isAgentSchedule, validateContinuousProgressPause, type ContinuousProgressLoop, type ContinuousProgressTarget } from './continuous-progress-scheduler.js'
 import type { AgentMuxRpcCallContext } from './public-rpc-service.js'
 
 export type ScheduleMutation = { scheduleId: string; expectedRevision: number; operationId: string }
 export type ScheduleScope = Pick<ContinuousProgressTarget, 'hostId' | 'workspacePath'>
 export type ScheduleHistoryQuery = { scheduleId: string; from: number; to: number; limit?: number; cursor?: string; bucketStarts?: number[] }
+
+export function scheduleMatchesCreation(schedule: ContinuousProgressLoop, request: ScheduleParamsMap['schedule.create']): boolean {
+  const { target } = request
+  if (schedule.creationOperationId !== request.operationId || schedule.inputEpoch !== request.inputEpoch ||
+      schedule.hostId !== target.hostId || schedule.agentSessionId !== target.agentSessionId ||
+      schedule.providerId !== target.providerId || schedule.workspacePath !== target.workspacePath ||
+      !sameAutomaticInputSource(schedule.managedSource, request.managedSource) ||
+      schedule.prompt !== request.prompt || schedule.afterMs !== request.afterMs ||
+      continuousProgressRequestDigest([schedule.calendar, schedule.checkIn]) !== continuousProgressRequestDigest([request.calendar, request.checkIn])) return false
+  const originalRequest = schedule.creationRequestDigest
+  if ((schedule.everyMs === undefined) !== (request.everyMs === undefined)) return false
+  if (originalRequest === undefined) return schedule.everyMs === undefined || schedule.revision === 1 && schedule.everyMs === request.everyMs
+  return originalRequest === continuousProgressRequestDigest(request) && (schedule.revision !== 1 || schedule.everyMs === request.everyMs)
+}
 export const scheduleEventRecapLimit = 800
 export const scheduleEventLabelLimit = 80
 export type ScheduleHistoryEntry = Pick<ContinuousProgressInputFacts, 'delivery' | 'nativeResult'> & {
@@ -146,7 +160,7 @@ export function parseScheduleRpcParams<M extends ScheduleMethod>(method: M, valu
 }
 export function parseScheduleRecord(value: unknown): ContinuousProgressLoop {
   const code = 'CONTROL_PROTOCOL_ERROR'
-  const p = rpcRecord(value, ['inputEpoch','loopId','hostId','agentSessionId','providerId','workspacePath','calendar','afterMs','everyMs','checkIn','checkInState','revision','creationOperationId','lastMutation','futureIntentId','lastOccurrenceAt','intervalMs','prompt','nextCheckAt','status','pause','pendingCompletion','lastCompletionId','lastTickId','lastOutcome','lastTickAt','lastDecision','taskSource','managedSource','managedScheduleNote','currentDefinition','guidanceAdoptions','lastInputRef'], code)
+  const p = rpcRecord(value, ['inputEpoch','loopId','hostId','agentSessionId','providerId','workspacePath','calendar','afterMs','everyMs','checkIn','checkInState','revision','creationOperationId','creationRequestDigest','lastMutation','futureIntentId','lastOccurrenceAt','intervalMs','prompt','nextCheckAt','status','pause','pendingCompletion','lastCompletionId','lastTickId','lastOutcome','lastTickAt','lastDecision','taskSource','managedSource','managedScheduleNote','currentDefinition','guidanceAdoptions','lastInputRef'], code)
   optionalInputEpoch(p.inputEpoch)
   if (p.managedSource !== undefined) parseAutomaticInputSource(p.managedSource)
   if (p.managedScheduleNote !== undefined) string(p.managedScheduleNote, code, 64 * 1024)
@@ -181,6 +195,7 @@ export function parseScheduleRecord(value: unknown): ContinuousProgressLoop {
     }
   }
   if (p.revision !== undefined) integer(p.revision, code, 1)
+  if (p.creationRequestDigest !== undefined && (typeof p.creationRequestDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(p.creationRequestDigest))) invalid('Schedule creation receipt is invalid.', code)
   for (const key of ['creationOperationId','futureIntentId','lastCompletionId','lastTickId','lastDecision']) if (p[key] !== undefined) string(p[key], code, 64 * 1024)
   for (const key of ['lastOccurrenceAt','lastTickAt']) if (p[key] !== undefined) integer(p[key], code)
   if (p.lastOutcome !== undefined && !['sent','skipped','unknown'].includes(p.lastOutcome as string)) invalid('Schedule outcome is invalid.', code)
@@ -192,7 +207,7 @@ export function parseScheduleRecord(value: unknown): ContinuousProgressLoop {
       if (p.calendar !== undefined || p.afterMs !== undefined || p.taskSource && (p.taskSource as {kind?: string}).kind === 'goal' || m.phase !== undefined || typeof m.requestDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(m.requestDigest)) invalid('Progress update receipt is invalid.', code)
     } else if (progress) {
       if (!['pause','resume','stop','check'].includes(m.action as string) || typeof m.requestDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(m.requestDigest) || !['prepared','settled'].includes(m.phase as string)) invalid('Progress action receipt is invalid.', code)
-    } else if (!['pause','resume','cancel'].includes(m.action as string) || m.requestDigest !== undefined || m.phase !== undefined) invalid('Schedule action is invalid.', code)
+    } else if (!['pause','resume','cancel'].includes(m.action as string) || m.requestDigest !== undefined || m.phase !== undefined && !['prepared','settled'].includes(m.phase as string)) invalid('Schedule action is invalid.', code)
   }
   if (p.pendingCompletion !== undefined) {
     const claim = rpcRecord(p.pendingCompletion, ['id','operationId','condition','inputByte','prompt','agentMuxNote','futureIntent'], code)
@@ -242,8 +257,7 @@ export function validateScheduleRpcResult<M extends ScheduleMethod>(method: M, v
         if (scope && (schedule.hostId !== scope.hostId || schedule.workspacePath !== scope.workspacePath)) invalid('Schedule list returned another execution-directory scope.', code)
       } else if (method === 'schedule.create') {
         const request = params as ScheduleParamsMap['schedule.create']
-        if (schedule.inputEpoch !== request.inputEpoch || schedule.creationOperationId !== request.operationId || schedule.prompt !== request.prompt || JSON.stringify(schedule.calendar) !== JSON.stringify(request.calendar) || schedule.afterMs !== request.afterMs || schedule.everyMs !== request.everyMs || JSON.stringify(schedule.checkIn) !== JSON.stringify(request.checkIn) || !sameAutomaticInputSource(schedule.managedSource, request.managedSource) ||
-            ['hostId','agentSessionId','providerId','workspacePath'].some(key => schedule[key as keyof ContinuousProgressTarget] !== request.target[key as keyof ContinuousProgressTarget])) invalid('Schedule receipt belongs to different intent or target.', code)
+        if (!scheduleMatchesCreation(schedule, request)) invalid('Schedule receipt belongs to different intent or target.', code)
       } else if (method === 'schedule.inspect') {
         const request = params as ScheduleParamsMap['schedule.inspect']
         if (request.scheduleId ? schedule.loopId !== request.scheduleId : ![schedule.creationOperationId, schedule.lastMutation?.operationId, schedule.pendingCompletion?.operationId, schedule.lastTickId, ...(schedule.lastInputRef ? [agentPromptInputId(schedule.lastInputRef.inputKey)] : [])].includes(request.operationId) && !schedule.guidanceAdoptions?.some(receipt => receipt.operationId === request.operationId)) invalid('Schedule inspection returned another identity.', code)
@@ -251,6 +265,7 @@ export function validateScheduleRpcResult<M extends ScheduleMethod>(method: M, v
         const request = params as ScheduleMutation
         if (schedule.loopId !== request.scheduleId || schedule.revision !== request.expectedRevision + 1 || schedule.lastMutation?.operationId !== request.operationId || schedule.lastMutation.action !== method.slice('schedule.'.length)) invalid('Schedule mutation receipt does not match its original request.', code)
         if (method === 'schedule.update') { if (schedule.everyMs !== (request as ScheduleParamsMap['schedule.update']).everyMs) invalid('Schedule interval receipt differs from its original update.', code); continue }
+        if ('phase' in schedule.lastMutation && schedule.lastMutation.phase === 'prepared') invalid('Schedule mutation is still preparing.', code)
         const expectedStatus = method === 'schedule.resume' ? 'active' : method === 'schedule.pause' ? 'paused' : 'stopped'
         if (schedule.status !== expectedStatus) invalid('Schedule mutation did not establish its requested state.', code)
       }

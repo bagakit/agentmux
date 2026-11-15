@@ -100,7 +100,7 @@ export function MobileMoteQuickEditor({ target, client, visible, copyText, onClo
         {maintenance?.schedule?.status === 'paused' && <button type="button" className="mobile-text-button" disabled={model.busy || model.adoptionBusy} onClick={() => { void model.resumeMaintenance() }}>恢复心跳安排</button>}
         {!!draft.maintenanceAttempts?.length && <details><summary>心跳恢复请求 · {draft.maintenanceAttempts.length}</summary>{draft.maintenanceAttempts.map(operation => <article key={operation.input.operationId}>
           <p>{operation.phase === 'confirmed' ? '恢复已确认' : operation.phase === 'observed' ? '已读到恢复记录' : operation.phase === 'not-sent' ? '恢复尚未发送' : '恢复待核对'}</p>{operation.issue && <p>{operation.issue}</p>}
-          {operation.phase === 'unknown' && <button type="button" className="mobile-text-button" onClick={() => { void model.resumeMaintenance(operation) }}>核对这次恢复</button>}
+          {operation.phase === 'unknown' && <button type="button" className="mobile-text-button" disabled={model.busy} onClick={() => { void model.resumeMaintenance(operation) }}>{model.preparedResumeOperationId === operation.input.operationId ? '继续这次恢复' : '核对这次恢复'}</button>}
           <pre>{JSON.stringify(operation, null, 2)}</pre>
         </article>)}</details>}
       </fieldset>
