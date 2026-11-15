@@ -33,7 +33,8 @@ export function sessionFileRegionAvailable(origin: OpenHttpLinkOrigin, context: 
 
 /** Human link navigation consumes the original File owner and its exact display occurrence. */
 export async function openSessionFileLink(origin: OpenHttpLinkOrigin, context: SessionProjectFileContext,
-  path: string, location: FileLocation | undefined, destination: OpenDestination, surface?: WorkbenchPresentation['surface'], presentation?: FilePresentation): Promise<void> {
+  path: string, location: FileLocation | undefined, destination: OpenDestination, surface?: WorkbenchPresentation['surface'],
+  presentation?: FilePresentation, tabGroup?: { displayWorkspaceId: string; groupId: string }): Promise<void> {
   surface ??= presentation?.surface
   const state = useAppStore.getState()
   const placement = context.placement
@@ -54,7 +55,8 @@ export async function openSessionFileLink(origin: OpenHttpLinkOrigin, context: S
   })()
   if (destination === 'tab') {
     const { tabId, regionId } = fileWorkbenchIdentity(state, workspace.id, path, placement)
-    const target = spatialDestination(catalog, { zoneId: placement.space.zoneId, spaceId: placement.space.spaceId, newTab: true }, { tabId, regionId }, state.layouts).address
+    const target = spatialDestination(catalog, { zoneId: placement.space.zoneId, spaceId: placement.space.spaceId, newTab: true,
+      ...tabGroup }, { tabId, regionId }, state.layouts).address
     const controller = surface === 'survey' || surface === 'mote' ? new AbortController() : undefined
     if (controller) {
       const expectedLocal = localChoice()

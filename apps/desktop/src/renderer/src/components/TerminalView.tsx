@@ -55,7 +55,9 @@ import {
   terminalScrollbackText,
   terminalViewportText
 } from '../lib/terminal-buffer-copy'
-import { resolveTerminalDeclaredLink, type TerminalLinkTarget } from '../lib/terminal-link-target'
+import { resolveTerminalDeclaredLink, resolveTerminalLinkPath, terminalLocalWorkspaceIndex,
+  type TerminalLinkScope, type TerminalLinkTarget } from '../lib/terminal-link-target'
+import { directoryIdentity, workspaceZoneId } from '../../../shared/space-addresses'
 import { terminalOptions, terminalTheme, activateTerminalUnicodeWidth, UNICODE_WIDTH_VERSION } from '../lib/terminal-theme'
 import {
   terminalKeyEventHandler,
@@ -160,8 +162,7 @@ function terminalPathAtPointer(
   element: HTMLElement,
   clientX: number,
   clientY: number,
-  workspaceRoot: string,
-  homeDir: string
+  scope: TerminalLinkScope
 ): TerminalPathLink | null {
   if (!terminal || terminal.cols <= 0 || terminal.rows <= 0) return null
   const screen = element.querySelector('.xterm-screen')
@@ -172,7 +173,11 @@ function terminalPathAtPointer(
   const row = Math.floor(((clientY - rect.top) / rect.height) * terminal.rows)
   if (row < 0 || row >= terminal.rows || column < 1 || column > terminal.cols) return null
   const lineNumber = terminal.buffer.active.viewportY + row
-  return terminalContextPathAtBufferCell(terminal, column, lineNumber + 1, workspaceRoot, homeDir)
+  return terminalContextPathAtBufferCell(terminal, column, lineNumber + 1, scope.workspaceRoot, scope.homeDir, scope.registeredWorkspaces)
+}
+
+function terminalFileLabel(file: TerminalPathLink): string {
+  return file.workspace ? file.workspace.path.replace(/\/+$/, '') + '/' + file.path : file.path
 }
 
 // 终端与对话正文都要判「哪些 scheme 点了能打开」，那必须是同一个判据，而不是各抄一份。判据本体
@@ -452,7 +457,28 @@ function TerminalViewOwner({
   [sessionSource, fileContext.workspaceRoot, terminalConfig, session.kind, session.hostId, session.workspacePath])
   const activeWorkspaceRootRef = useRef(activeWorkspaceRoot)
   activeWorkspaceRootRef.current = activeWorkspaceRoot
-  const linkScope = () => ({ workspaceRoot: activeWorkspaceRootRef.current, homeDir: fileContextRef.current.homeDir })
+  const localFileSource = useRef(false)
+  localFileSource.current = !sessionSource && session.hostId === 'local' && session.control.hostId === 'local'
+  const linkScope = (): TerminalLinkScope => {
+    const context = fileContextRef.current
+    const workspaces = localFileSource.current && linkOriginRef.current && context.placement?.resource.hostId === 'local'
+      ? useAppStore.getState().config?.workspaces : undefined
+    return { workspaceRoot: activeWorkspaceRootRef.current, homeDir: context.homeDir,
+      ...(workspaces ? { registeredWorkspaces: terminalLocalWorkspaceIndex(workspaces) } : {}) }
+  }
+  function registeredFileContext(file: TerminalPathLink, origin: OpenHttpLinkOrigin): SessionProjectFileContext {
+    const owner = file.workspace!
+    const current = resolveTerminalLinkPath(terminalFileLabel(file), linkScope())
+    const workspace = useAppStore.getState().config?.workspaces.find(item =>
+      item.id === owner.id && item.path === owner.path && item.hostId === 'local')
+    if (!workspace || current?.workspace?.id !== owner.id || current.workspace.path !== owner.path || current.path !== file.path) {
+      throw new Error('The registered file Workspace changed. Choose the original path again.')
+    }
+    const spaceId = directoryIdentity(workspace.hostId, workspace.repoPath ?? workspace.path)
+    return { kind: 'session', workspaceRoot: workspace.path, homeDir: '', workspaceId: workspace.id,
+      placement: { displayWorkspaceId: origin.workspaceId, resource: { hostId: workspace.hostId, path: workspace.path },
+        space: { spaceId, zoneId: workspaceZoneId(spaceId, workspace.id) } } }
+  }
   const isMac = isMacPlatform()
 
   function releaseViewportMemoryMarker(terminal?: Terminal): void {
@@ -716,8 +742,17 @@ function TerminalViewOwner({
         return
       }
       const workspaceId = context.workspaceId ?? context.project?.workspaceId
-      const path = sessionFileResourcePath(context, match.path)
       const location = match.line === undefined ? undefined : { line: match.line, ...(match.column === undefined ? {} : { column: match.column }) }
+      if (match.workspace) {
+        try {
+          const target = registeredFileContext(match, displayOrigin)
+          const group = displayOrigin.tabGroupId ? { displayWorkspaceId: displayOrigin.workspaceId, groupId: displayOrigin.tabGroupId } : undefined
+          void openSessionFileLink(displayOrigin, target, match.path, location, 'tab', presentationRef.current.surface,
+            presentationRef.current, group).catch(reportError)
+        } catch (error) { reportError(error) }
+        return
+      }
+      const path = sessionFileResourcePath(context, match.path)
       void openTerminalFileLink({
         link: { ...match, path },
         local: !sessionSource && workspaceId !== undefined && context.placement?.resource.hostId === 'local',
@@ -808,7 +843,7 @@ function TerminalViewOwner({
       if (target.kind === 'unsupported') return
       if (target.kind === 'file') {
         const { file } = target
-        const label = file.line === undefined ? file.path : file.path + ':' + file.line + (file.column === undefined ? '' : ':' + file.column)
+        const label = terminalFileLabel(file) + (file.line === undefined ? '' : ':' + file.line + (file.column === undefined ? '' : ':' + file.column))
         showLinkPreview(event, { kind: 'file', label, system: isSystemArtifactPath(file.path) })
       } else {
         showLinkPreview(event, target)
@@ -905,7 +940,7 @@ function TerminalViewOwner({
         const matches = terminalLinksAtRow(terminal, row, linkScope()).filter(({ target }) => target.kind !== 'file' || linkOriginRef.current)
         callback(matches.length ? matches.map(({ target, range }) => ({
           range,
-          text: target.kind === 'file' ? target.file.path : target.kind === 'unsupported' ? target.uri : target.url,
+          text: target.kind === 'file' ? terminalFileLabel(target.file) : target.kind === 'unsupported' ? target.uri : target.url,
           activate: event => activateLink(event, target, context),
           hover: event => hoverLink(event, target),
           leave: clearLinkPreview
@@ -2236,22 +2271,25 @@ function TerminalViewOwner({
 
   function pathMenuActions(link: TerminalPathLink | null) {
     const context = fileContextRef.current
-    const workspaceId = context.workspaceId ?? context.project?.workspaceId
+    const workspaceId = link?.workspace?.id ?? context.workspaceId ?? context.project?.workspaceId
     if (!workspaceId || !linkOriginRef.current) return []
     const runAction = (action: () => Promise<void>) => {
       if (context !== fileContextRef.current) {
         reportError(new Error('The original file resource changed. Choose the link again to confirm its target.'))
         return
       }
+      if (link?.workspace) {
+        const origin = displayOriginRef.current
+        if (!origin) return
+        try { registeredFileContext(link, origin) }
+        catch (error) { reportError(error); return }
+      }
       void action().catch(reportError)
     }
-    return terminalFileMenuActions({ link, local: !sessionSource && context.placement?.resource.hostId === 'local',
+    return terminalFileMenuActions({ link: link && !link.workspace ? { ...link, path: sessionFileResourcePath(context, link.path) } : link,
+      local: !sessionSource && context.placement?.resource.hostId === 'local',
       onReveal: path => runAction(() => api.files.reveal({ kind: 'workspace', workspaceId, path })),
       onOpenSystem: path => runAction(() => api.files.openSystem({ kind: 'workspace', workspaceId, path })) })
-  }
-
-  function resourcePathLink(link: TerminalPathLink | null): TerminalPathLink | null {
-    return link ? { ...link, path: sessionFileResourcePath(fileContextRef.current, link.path) } : null
   }
 
   function captureMenuSelection(): boolean {
@@ -2373,9 +2411,9 @@ function TerminalViewOwner({
           read: point => ({
             hasSelection: captureMenuSelection(),
             mouseTrackingMode: terminalRef.current?.modes.mouseTrackingMode ?? mouseTrackingMode,
-            pathActions: pathMenuActions(resourcePathLink(point && rootRef.current ? terminalPathAtPointer(
-              terminalRef.current, rootRef.current, point.clientX, point.clientY, activeWorkspaceRootRef.current, fileContextRef.current.homeDir
-            ) : null))
+            pathActions: pathMenuActions(point && rootRef.current ? terminalPathAtPointer(
+              terminalRef.current, rootRef.current, point.clientX, point.clientY, linkScope()
+            ) : null)
           })
         }}
         identityActions={terminalIdentityMenuActions({
@@ -2420,14 +2458,13 @@ function TerminalViewOwner({
                 // 需要解释「为什么 Copy 是灰的」的情形，若只在有选区时采样，提示永远不会出现。
                 const mode = terminalRef.current?.modes.mouseTrackingMode
                 if (mode) setMouseTrackingMode(mode)
-                setPathActions(pathMenuActions(resourcePathLink(terminalPathAtPointer(
+                setPathActions(pathMenuActions(terminalPathAtPointer(
                   terminalRef.current,
                   event.currentTarget,
                   event.clientX,
                   event.clientY,
-                  activeWorkspaceRootRef.current,
-                  fileContextRef.current.homeDir
-                ))))
+                  linkScope()
+                )))
               } else {
                 setPathActions(null)
               }

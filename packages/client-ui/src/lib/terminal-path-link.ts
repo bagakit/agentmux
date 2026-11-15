@@ -17,11 +17,15 @@ export type TerminalPathLink = {
   length: number
   /** Canonical workspace-relative path ready for `openFile` (no leading `./` or `/`). */
   path: string
+  /** Registered alternate owner supplied by the Terminal host. */
+  workspace?: { id: string; path: string }
   /** 1-based line from a `:line` suffix, if present. */
   line?: number
   /** 1-based column from a `:line:col` suffix, if present. */
   column?: number
 }
+
+export type TerminalPathResolver = (path: string) => Pick<TerminalPathLink, 'path' | 'workspace'> | null
 
 /**
  * Files that are meant to be handed to the host OS instead of opened as editor text. Keep this
@@ -76,7 +80,8 @@ export function detectTerminalPathLinks(
   text: string,
   workspaceRoot: string,
   homeDir = '',
-  reserved = terminalUriTokens(text)
+  reserved = terminalUriTokens(text),
+  resolvePath?: TerminalPathResolver
 ): TerminalPathLink[] {
   const links: TerminalPathLink[] = []
   let reservation = 0
@@ -105,9 +110,9 @@ export function detectTerminalPathLinks(
     const tail = text.slice(match.index + match[0].length)
     if (location && /^[:\p{L}\p{M}\p{N}]/u.test(tail)) continue
     if (!quoted && /^[\/\\[\](]/u.test(tail) && !/^[)\]](?:$|\s|[.,;:)\]])/u.test(tail)) continue
-    const path = resolveWorkspaceRelativePath(name, workspaceRoot, homeDir)
+    const path = resolvePath ? resolvePath(name) : resolveWorkspaceRelativePath(name, workspaceRoot, homeDir)
     if (path === null) continue
-    links.push({ index, length, path, ...coordinates })
+    links.push({ index, length, ...(typeof path === 'string' ? { path } : path), ...coordinates })
   }
   return links
 }
@@ -120,11 +125,15 @@ export function decodeFileReferencePath(value: string): string | null {
   return /[\p{Cc}\\]/u.test(decoded) ? null : decoded
 }
 
-export function resolveTerminalFileUri(raw: string, workspaceRoot: string): string | null {
+export function decodeTerminalFileUriPath(raw: string): string | null {
   if (!/^file:\/\/(?:localhost)?\//i.test(raw) || /[?#\\\p{Cc}]/u.test(raw)) return null
   const pathname = raw.replace(/^file:\/\/(?:localhost)?/i, '')
   if (pathname.startsWith('//')) return null
-  const decoded = decodeFileReferencePath(pathname)
+  return decodeFileReferencePath(pathname)
+}
+
+export function resolveTerminalFileUri(raw: string, workspaceRoot: string): string | null {
+  const decoded = decodeTerminalFileUriPath(raw)
   return decoded === null ? null : resolveWorkspaceRelativePath(decoded, workspaceRoot)
 }
 

@@ -1,4 +1,4 @@
-import { decodeFileReferencePath, detectTerminalPathLinks, resolveWorkspaceRelativePath, terminalFileLocation, type TerminalPathLink } from './terminal-path-link.js'
+import { decodeFileReferencePath, detectTerminalPathLinks, resolveWorkspaceRelativePath, terminalFileLocation, type TerminalPathLink, type TerminalPathResolver } from './terminal-path-link.js'
 
 /**
  * Which references in an agent's markdown answer point at a file in this Workspace — and where each
@@ -65,7 +65,8 @@ export function classifyMarkdownLinkHref(
   href: string,
   workspaceRoot: string,
   homeDir = '',
-  sourcePath?: string
+  sourcePath?: string,
+  resolvePath?: TerminalPathResolver
 ): MarkdownFileReference | null {
   const trimmed = href.trim()
   const scheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/
@@ -82,8 +83,8 @@ export function classifyMarkdownLinkHref(
   const slash = sourcePath?.lastIndexOf('/') ?? -1
   const candidate = core.startsWith('/') || core.startsWith('~/') || slash < 0
     ? core : sourcePath!.slice(0, slash + 1) + core
-  const path = resolveWorkspaceRelativePath(candidate, workspaceRoot, homeDir)
-  return path === null ? null : { index: 0, length: trimmed.length, path, ...coordinates }
+  const path = resolvePath ? resolvePath(candidate) : resolveWorkspaceRelativePath(candidate, workspaceRoot, homeDir)
+  return path === null ? null : { index: 0, length: trimmed.length, ...(typeof path === 'string' ? { path } : path), ...coordinates }
 }
 
 /**
