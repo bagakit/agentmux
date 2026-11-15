@@ -3,7 +3,7 @@ import { spatialAgentOpenRecord, type AgentMuxSpatialGraph } from '@agentmux/cor
 import type { SpaceMountMemberTarget, SpaceMountRecord } from '../../../shared/space-mount'
 import { desktopAgentPresentationFromSpatial } from './desktop-agent-presentation'
 import { spaceSessionMemberKey, type SpaceSessionMember } from '@agentmux/core/space-sessions'
-import { mountedSessionFacts, type MountedSessionObservation } from './space-mount-sessions'
+import { mountedSessionFact, type MountedSessionObservation } from './space-mount-sessions'
 import { mountedRegionKey, type MountedSpaceRegion } from './space-mount-view'
 
 export type OrdinaryMemberReference = { tabId: string; regionId: string; sessionId: string | null }
@@ -64,7 +64,7 @@ export function ordinarySpaceMember(graph: AgentMuxSpatialGraph | null | undefin
 }
 
 /** A current Session owner supplies the Run address; membership and access remain Core decisions. */
-export function ordinaryMemberObservedRun(occurrence: Extract<OrdinarySpaceMember, { kind: 'foreign' }>, observation: MountedSessionObservation | undefined): string | undefined {
+function ordinaryMemberObservedRun(occurrence: Extract<OrdinarySpaceMember, { kind: 'foreign' }>, observation: MountedSessionObservation | undefined): string | undefined {
   const reference = occurrence.source.reference, opening = observation?.opening
   if (!observation || !opening || opening.reference.runtimeId !== reference.runtimeId || opening.reference.spaceId !== reference.spaceId || opening.source.runtimeId !== reference.runtimeId) return
   const key = spaceSessionMemberKey(occurrence.metadataMember), current = observation.members[key]
@@ -73,15 +73,16 @@ export function ordinaryMemberObservedRun(occurrence: Extract<OrdinarySpaceMembe
     return state.session.run?.runId
 }
 
-// Pure presentation memo per original Source cut. Neither permission nor Session
-// facts are owned here; the original projection remains the only data source.
-const relationCuts = new WeakMap<SpaceSnapshot, WeakMap<MountedSessionObservation, ReturnType<typeof mountedSessionFacts>>>()
-export function ordinaryMemberRouteOccurrence(occurrence: Extract<OrdinarySpaceMember, { kind: 'foreign' }>, snapshot: SpaceSnapshot | undefined, observation: MountedSessionObservation | undefined) {
-  if (!snapshot || !observation || snapshot.reference.runtimeId !== occurrence.source.reference.runtimeId || snapshot.reference.spaceId !== occurrence.source.reference.spaceId) return
-  let cuts = relationCuts.get(snapshot)
-  if (!cuts) { cuts = new WeakMap(); relationCuts.set(snapshot, cuts) }
-  let facts = cuts.get(observation)
-  if (!facts) { facts = mountedSessionFacts(snapshot, observation); cuts.set(observation, facts) }
-  const fact = facts.get(occurrence.presentation.key), member = fact?.current?.member, relation = fact?.occurrence
-  return member && spaceSessionMemberKey(member) === spaceSessionMemberKey(occurrence.metadataMember) && relation?.regionId === occurrence.member.target.regionId && relation.creationOperationId === occurrence.creationOperationId ? relation : undefined
+/** Renderer values for one occurrence. The roster and its revisions stay with the source reader. */
+export function ordinaryMemberObservation(occurrence: Extract<OrdinarySpaceMember, { kind: 'foreign' }>, snapshot: SpaceSnapshot | undefined, observation: MountedSessionObservation | undefined) {
+  const reference = occurrence.source.reference
+  const fact = snapshot?.reference.runtimeId === reference.runtimeId && snapshot.reference.spaceId === reference.spaceId
+    ? mountedSessionFact(snapshot, observation, occurrence.presentation.key) : undefined
+  const member = fact?.current?.member, relation = fact?.occurrence
+  return {
+    current: fact?.current, last: fact?.last, stale: fact?.stale,
+    reading: observation?.reading, observedRun: ordinaryMemberObservedRun(occurrence, observation),
+    relation: member && spaceSessionMemberKey(member) === spaceSessionMemberKey(occurrence.metadataMember) &&
+      relation?.regionId === occurrence.member.target.regionId && relation.creationOperationId === occurrence.creationOperationId ? relation : undefined
+  }
 }

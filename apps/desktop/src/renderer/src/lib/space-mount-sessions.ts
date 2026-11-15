@@ -45,41 +45,74 @@ export function observeMountedSessions(target: SpaceMountRecord, previous: Mount
   }
   return next
 }
-/** Filter metadata through the business scope. Neither missing metadata nor its
- * roster deletion removes a business Region. Separate stream revisions may differ. */
+type SourceRegion = SpaceSnapshot['scope']['regions'][number]
+// Derived indexes follow the lifetime of their original immutable inputs.
+const sourceRegions = new WeakMap<SpaceSnapshot, ReadonlyMap<string, SourceRegion>>()
+const unpinnedMembers = new WeakMap<MountedSessionObservation['members'], ReadonlyMap<string, MountedSessionFact | null>>()
+const memberOccurrences = new WeakMap<SpaceSessionOccurrence[], ReadonlyMap<string, SpaceSessionOccurrence | null>>()
+
+function readMember(values: MountedSessionObservation['members'], hostId: string | null, runtimeId: string | undefined, agentSessionId: string) {
+  if (runtimeId !== undefined) return values[spaceSessionMemberKey({ hostId, runtimeId, agentSessionId })]
+  let index = unpinnedMembers.get(values)
+  if (!index) {
+    const next = new Map<string, MountedSessionFact | null>()
+    for (const fact of Object.values(values)) {
+      const key = JSON.stringify([fact.member.hostId, fact.member.agentSessionId])
+      next.set(key, next.has(key) ? null : fact)
+    }
+    unpinnedMembers.set(values, index = next)
+  }
+  // Only an unambiguous original member can qualify an unpinned Region.
+  return index.get(JSON.stringify([hostId, agentSessionId])) ?? undefined
+}
+
+function readOccurrence(snapshot: SpaceSnapshot, fact: MountedSessionFact, region: SourceRegion) {
+  const cut = fact.cut, occurrences = fact.occurrences
+  // A later topology cut can retain the last member fact without confirming its route.
+  if (!occurrences || !cut || cut.revision !== snapshot.revision || cut.reference.runtimeId !== snapshot.reference.runtimeId ||
+      cut.reference.spaceId !== snapshot.reference.spaceId || cut.source.runtimeId !== snapshot.source.runtimeId ||
+      cut.source.ownerInstanceId !== snapshot.source.ownerInstanceId) return undefined
+  let index = memberOccurrences.get(occurrences)
+  if (!index) {
+    const next = new Map<string, SpaceSessionOccurrence | null>()
+    for (const occurrence of occurrences) {
+      const key = JSON.stringify([occurrence.regionId, occurrence.creationOperationId ?? null])
+      next.set(key, next.has(key) ? null : occurrence)
+    }
+    memberOccurrences.set(occurrences, index = next)
+  }
+  return index.get(JSON.stringify([region.regionId, region.creationOperationId ?? null])) ?? undefined
+}
+
+function regionFact(snapshot: SpaceSnapshot, observation: MountedSessionObservation, region: SourceRegion): MountedRegionSessionFact | undefined {
+  const id = region.agentSessionId
+  if (!id) return undefined
+  const host = region.execution?.hostId ?? null, runtime = region.execution?.runtimeId
+  const current = readMember(observation.members, host, runtime, id)
+  const last = readMember(observation.lastConfirmed, host, runtime, id)
+  const stale = Boolean(observation.error || observation.reading)
+  const occurrence = !stale && current && readOccurrence(snapshot, current, region)
+  return { current, last, stale, ...(occurrence ? { occurrence } : {}) }
+}
+
+/** One Region needs an exact position and only its own current and retained member. */
+export function mountedSessionFact(snapshot: SpaceSnapshot | undefined, observation: MountedSessionObservation | undefined, key: string) {
+  if (!snapshot || !observation) return undefined
+  let regions = sourceRegions.get(snapshot)
+  if (!regions) {
+    regions = new Map(snapshot.scope.regions.map(region => [mountedRegionKey(snapshot.reference, region.tabId, region.regionId), region]))
+    sourceRegions.set(snapshot, regions)
+  }
+  const region = regions.get(key)
+  return region && regionFact(snapshot, observation, region)
+}
+
+/** Enumerate the same query for consumers that present the whole business scope. */
 export function mountedSessionFacts(snapshot: SpaceSnapshot | undefined, observation: MountedSessionObservation | undefined): Map<string, MountedRegionSessionFact> {
   const result = new Map<string, MountedRegionSessionFact>()
-  if (!snapshot || !observation) return result
-  const index = (values: Record<string, MountedSessionFact>) => {
-    const exact = new Map<string, MountedSessionFact>(), aliases = new Map<string, MountedSessionFact[]>()
-    for (const fact of Object.values(values)) { exact.set(spaceSessionMemberKey(fact.member), fact); const key = JSON.stringify([fact.member.hostId, fact.member.agentSessionId]), list = aliases.get(key) ?? []; list.push(fact); aliases.set(key, list) }
-    return (hostId: string | null, runtimeId: string | undefined, agentSessionId: string) => {
-      if (runtimeId !== undefined) return exact.get(spaceSessionMemberKey({ hostId, runtimeId, agentSessionId }))
-      const matches = aliases.get(JSON.stringify([hostId, agentSessionId]))
-      return matches?.length === 1 ? matches[0] : undefined // Only the Core owner qualifies an unpinned legacy member.
-    }
-  }
-  const current = index(observation.members), last = index(observation.lastConfirmed)
-  // Each original member's occurrences are indexed once. A later Space snapshot
-  // must not relabel an older relation while its healthy Session reader continues.
-  const occurrences = new Map<MountedSessionFact, Map<string, SpaceSessionOccurrence | null>>()
-  for (const fact of Object.values(observation.members)) {
-    const cut = fact.cut
-    if (observation.error || observation.reading || !cut || cut.revision !== snapshot.revision ||
-        cut.reference.runtimeId !== snapshot.reference.runtimeId || cut.reference.spaceId !== snapshot.reference.spaceId ||
-        cut.source.runtimeId !== snapshot.source.runtimeId || cut.source.ownerInstanceId !== snapshot.source.ownerInstanceId) continue
-    const exact = new Map<string, SpaceSessionOccurrence | null>()
-    for (const occurrence of fact.occurrences ?? []) {
-      const key = JSON.stringify([occurrence.regionId, occurrence.creationOperationId ?? null])
-      exact.set(key, exact.has(key) ? null : occurrence)
-    }
-    occurrences.set(fact, exact)
-  }
-  for (const region of snapshot.scope.regions) if (region.agentSessionId) {
-    const host = region.execution?.hostId ?? null, runtime = region.execution?.runtimeId, id = region.agentSessionId
-    const fact = current(host, runtime, id), occurrence = fact && occurrences.get(fact)?.get(JSON.stringify([region.regionId, region.creationOperationId ?? null]))
-    result.set(mountedRegionKey(snapshot.reference, region.tabId, region.regionId), { current: fact, last: last(host, runtime, id), stale: Boolean(observation.error || observation.reading),
-      ...(occurrence ? { occurrence } : {}) })
+  if (snapshot && observation) for (const region of snapshot.scope.regions) {
+    const fact = regionFact(snapshot, observation, region)
+    if (fact) result.set(mountedRegionKey(snapshot.reference, region.tabId, region.regionId), fact)
   }
   return result
 }

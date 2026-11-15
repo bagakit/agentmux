@@ -1,19 +1,22 @@
-import { useMemo, useRef, type ReactNode } from 'react'
+import { useRef, type ReactNode } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { Button } from '@agentmux/client-ui/components/Button'
 import { ordinaryAgentSpaceMember, useAppStore } from '../store'
 import { spaceMountKey } from '../../../shared/space-mount'
 import { SpaceMemberWorkface } from './MountedSpaceAgent'
 import { SurfaceState } from './SurfaceState'
-import { ordinaryMemberObservedRun, ordinaryMemberRouteOccurrence } from '../lib/ordinary-space-member'
+import { ordinaryMemberObservation } from '../lib/ordinary-space-member'
 import { MountedExecutionRelation } from './MountedExecutionRelation'
 import { SpaceSourceReaders, useSpaceSourceReader } from './SpaceSourceReaders'
 import { MountedCreationRecovery } from './MountedCreationRecovery'
 import { OriginalSourceMemberMetadata } from './OriginalSourceMemberMetadata'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
-import { mountedSessionFacts, confirmedMountedSessionState } from '../lib/space-mount-sessions'
+import { confirmedMountedSessionState } from '../lib/space-mount-sessions'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import './mounted-space.css'
 import './ordinary-space-member.css'
+
+type MemberViewObservation = ReturnType<typeof ordinaryMemberObservation> & { sourceError: string | undefined }
 
 /** An ordinary private Region keeps its layout; only its exact foreign IO source differs. */
 export function OrdinarySpaceMemberViewport(props: {
@@ -28,27 +31,25 @@ function Viewport({ tabId, regionId, sessionId, visible, active, interactiveResi
   const refreshSource = useSpaceSourceReader(occurrence.kind === 'foreign' ? occurrence.source : undefined, visible)
   const activeRegion = useAppStore(state => state.tabs[tabId]?.layout.activeRegionId === regionId)
   const mountKey = occurrence.kind === 'foreign' ? spaceMountKey(occurrence.source.reference) : ''
-  const metadata = useAppStore(state => occurrence.kind === 'foreign' ? state.mountedSpaceSessions[mountKey] : undefined)
-  const snapshot = useAppStore(state => occurrence.kind === 'foreign' ? state.mountedSpaceObservations[mountKey]?.snapshot : undefined)
-  const observedRun = occurrence.kind === 'foreign' ? ordinaryMemberObservedRun(occurrence, metadata) : undefined
+  const { current, last, stale, reading, observedRun, relation, sourceError } = useAppStore(useShallow((state): Partial<MemberViewObservation> => {
+    if (occurrence.kind !== 'foreign') return {}
+    const observation = state.mountedSpaceSessions[mountKey], source = state.mountedSpaceObservations[mountKey]
+    return { ...ordinaryMemberObservation(occurrence, source?.snapshot, observation), sourceError: observation?.error ?? source?.error }
+  }))
   const retainedRun = useRef<{ witness: string; runId: string } | undefined>(undefined)
   const retainedCreationRecovery = useRef<{ witness: string; active: boolean } | undefined>(undefined)
   const retainedSessionRecovery = useRef<{ witness: string; active: boolean } | undefined>(undefined)
   const sourceProjection = sessionId?.startsWith('original-source-member:') ?? false
-  const relationFact = useMemo(() => occurrence.kind === 'foreign' && snapshot ? mountedSessionFacts(snapshot, metadata).get(occurrence.presentation.key) : undefined,
-    [occurrence, snapshot, metadata])
-  const confirmedSession = confirmedMountedSessionState(relationFact?.current, relationFact?.last, relationFact?.stale)
-  const sourceError = useAppStore(state => occurrence.kind === 'foreign' ? state.mountedSpaceSessions[mountKey]?.error ?? state.mountedSpaceObservations[mountKey]?.error : undefined)
+  const confirmedSession = confirmedMountedSessionState(current, last, stale)
   if (occurrence.kind === 'existing') return children
   if (occurrence.kind === 'unconfirmed') return <SurfaceState title="Original Agent reference unconfirmed" description={occurrence.issue}
     details={{ summary: 'Original reference', content: <dl><dt>Region</dt><dd><code>{regionId}</code></dd><dt>Session</dt><dd><code>{sessionId}</code></dd></dl> }} />
-  const relation = ordinaryMemberRouteOccurrence(occurrence, snapshot, metadata)
   const reference = <dl><div><dt>Source Runtime</dt><dd><code>{occurrence.source.reference.runtimeId}</code></dd></div>
     <div><dt>Agent reference</dt><dd><code>{occurrence.member.target.agentSessionId}</code></dd></div>
     <div><dt>Execution Runtime</dt><dd><code>{occurrence.member.target.runtimeId}</code></dd></div>
     <div><dt>Creation</dt><dd><code>{occurrence.creationOperationId}</code></dd></div></dl>
   const recoveryWitness = JSON.stringify([occurrence.source, occurrence.presentation.key, occurrence.creationOperationId])
-  const sessionState = relationFact?.current?.state
+  const sessionState = current?.state
   const priorSessionRecovery = retainedSessionRecovery.current
   const recoverSession = sourceProjection && !observedRun && (sessionState?.status === 'missing' ||
     Boolean(priorSessionRecovery && priorSessionRecovery.witness === recoveryWitness && priorSessionRecovery.active))
@@ -58,7 +59,7 @@ function Viewport({ tabId, regionId, sessionId, visible, active, interactiveResi
     Boolean(priorRecovery && priorRecovery.witness === recoveryWitness && priorRecovery.active))
   retainedCreationRecovery.current = { witness: recoveryWitness, active: recoverCreation }
   const issue = sourceError ?? (sessionState?.status === 'unknown' || sessionState?.status === 'unavailable' ? sessionState.issue.message : undefined)
-  const checking = !issue && (metadata?.reading === true || sessionState?.status === 'pending')
+  const checking = !issue && (reading === true || sessionState?.status === 'pending')
   const runtimeRecovery = recoverSession ? (layout: 'inline' | 'surface') => layout === 'surface'
     ? <FullPageLoadingSurface scope="region" visible={visible} phase={checking ? 'loading' : 'parked'} eyebrow="Session connection"
       title={checking ? 'Checking the original session' : sessionState?.status === 'missing' ? 'Original session unavailable' : 'Session connection unconfirmed'}
@@ -83,7 +84,7 @@ function Viewport({ tabId, regionId, sessionId, visible, active, interactiveResi
   return <section className="agent-surface ordinary-space-member" aria-label="Original Space member">
     <header className="ordinary-space-member__header"><MountedExecutionRelation member={occurrence.presentation} target={occurrence.source} occurrence={relation} />
     <details className="ordinary-space-member__reference"><summary>Original Agent</summary>{reference}
-      {sourceProjection ? <OriginalSourceMemberMetadata current={relationFact?.current} last={relationFact?.last} stale={relationFact?.stale} error={sourceError} /> : null}</details></header>
+      {sourceProjection ? <OriginalSourceMemberMetadata current={current} last={last} stale={stale} error={sourceError} /> : null}</details></header>
     <SpaceMemberWorkface key={witness} target={currentTarget} privateInput={occurrence.source} sourceTabId={occurrence.presentation.tab.tabId} onRefreshSource={refreshSource} runtimeRecovery={runtimeRecovery}
       sessionMetadata={confirmedSession ? { providerId: confirmedSession.session.providerId, workspacePath: confirmedSession.session.workspacePath, run: confirmedSession.session.run } : undefined}
       visible={visible} active={active && activeRegion} interactiveResize={interactiveResize} />
