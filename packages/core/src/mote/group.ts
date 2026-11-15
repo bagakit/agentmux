@@ -3,6 +3,9 @@ import { AgentMuxError } from '../errors.js'
 import { rpcRecord } from '../rpc-data.js'
 import { parseMotePreferencesReadInput, type MotePreferencesTarget } from './preferences.js'
 
+/** Maximum message length in UTF-16 code units, shared with Group composers. */
+export const MOTE_GROUP_MAX_BODY_LENGTH = 64 * 1024
+
 export type MoteGroupDelivery = {
   moteId: string
   operationId: string
@@ -114,7 +117,7 @@ export function parseMoteGroupParams<M extends MoteGroupMethod>(method: M, value
     else if (method === 'space.mote.group.retry') {
       string(p.messageId, code); string(p.memberId, code)
     } else {
-      string(p.operationId, code); string(p.body, code, 64 * 1024, true)
+      string(p.operationId, code); string(p.body, code, MOTE_GROUP_MAX_BODY_LENGTH, true)
       if (method === 'space.mote.group.reply') string(p.inputOperationId, code)
       else {
         unique(list(p.recipientIds, code, 32, entry => string(entry, code)), code)
@@ -133,7 +136,7 @@ export function parseMoteGroupDelivery(value: unknown): MoteGroupDelivery {
 }
 export function parseMoteGroupMessage(value: unknown): MoteGroupMessage {
   const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['id', 'sequence', 'groupId', 'createdAt', 'body', 'author', 'replyToMessageId', 'deliveries'], code)
-  string(p.id, code); string(p.groupId, code); string(p.body, code, 64 * 1024, true)
+  string(p.id, code); string(p.groupId, code); string(p.body, code, MOTE_GROUP_MAX_BODY_LENGTH, true)
   number(p.sequence, code, 1); number(p.createdAt, code, 0)
   if (p.replyToMessageId !== undefined) string(p.replyToMessageId, code)
   const author = rpcRecord(p.author, undefined, code), deliveries = list(p.deliveries, code, 32, parseMoteGroupDelivery)
