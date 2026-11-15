@@ -1,15 +1,20 @@
 // @vitest-environment happy-dom
-import { expect, it, vi } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core'
 import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { openSystemUrlInSurvey } from '../src/renderer/src/lib/survey-system-url'
 import { createSurveyBrowser } from '../src/renderer/src/lib/survey-browser-creation'
+import { browserProfiles } from '../src/renderer/src/lib/browser-profiles'
+
+afterEach(() => { browserProfiles.reset(); vi.restoreAllMocks() })
 
 function fixture() {
   const original = { kind: 'browser', browserId: 'original-browser', profileId: 'ordinary-profile', url: 'https://original.example.test/', draft: 'Keep original draft' }
   const listeners = new Set<() => void>(), state: Record<string, any> = {
-    config: { workspaces: [{ id: SCRATCH_WORKSPACE_ID }] }, layouts: { [SCRATCH_WORKSPACE_ID]: { activeGroupId: 'scratch-group' } },
-    tabs: { original: { regions: { original } } }, mainSurface: 'workbench', surveyZoneSelection: null,
+    config: { workspaces: [{ id: SCRATCH_WORKSPACE_ID }], browser: {} },
+    layouts: { [SCRATCH_WORKSPACE_ID]: { activeGroupId: 'scratch-group', groups: [{ id: 'scratch-group', tabOrder: ['original'] }] } },
+    tabs: { original: { id: 'original', workspaceId: SCRATCH_WORKSPACE_ID, regions: { original } } },
+    mainSurface: 'workbench', surveyZoneSelection: null, surveyProfileView: { kind: 'default' },
     surveyPageReferences: [],
     setSurveyZoneCollected: vi.fn(() => true),
     openLauncher: vi.fn(() => { state.tabs['new-tab'] = { id: 'new-tab', space: { zoneId: 'new-survey-zone' }, layout: { activeRegionId: 'new-region' }, regions: { 'new-region': { kind: 'launcher', workspaceId: SCRATCH_WORKSPACE_ID, regionId: 'new-region' } } }; return 'new-tab' }),
@@ -34,6 +39,59 @@ function fixture() {
   return { state, ports, original, host, listeners, move() { navigation = 'later-user-position'; state.mainSurface = 'workbench'; for (const listener of listeners) listener() } }
 }
 const request = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'original-system-event', operation: 'browser.openFromSystem', url: 'https://external.example.test/?query=original%20value#source' } as const
+
+function existingPage() {
+  const f = fixture(), page = { regionId: 'original', browserId: 'original-browser' }
+  Object.assign(f.original, { url: request.url, mode: 'normal' })
+  f.state.surveyPageReferences = [page]
+  const known = { ...browserProfiles.get(), profiles: [{ id: 'ordinary-profile', isDefault: true, label: 'Default', createdAt: 1, source: null }] }
+  vi.spyOn(browserProfiles, 'get').mockReturnValue(known)
+  const read = vi.spyOn(browserProfiles, 'refresh').mockResolvedValue()
+  return { ...f, page, known, read }
+}
+
+it('a cold system open confirms the default environment and selects the exact existing Browser without creating or reloading it', async () => {
+  const f = existingPage(), get = vi.mocked(browserProfiles.get)
+  get.mockReturnValue({ ...f.known, profiles: null })
+  f.read.mockImplementation(async () => { get.mockReturnValue(f.known) })
+  f.state.surveyProfileView = { kind: 'profile', profileId: 'other-profile' }
+  f.state.setSurveyProfileView = vi.fn(async (view: unknown) => { f.state.surveyProfileView = view; return { reason: null } })
+  const result = await openSystemUrlInSurvey(f.host, request, new AbortController().signal)
+  expect(f.read).toHaveBeenCalledOnce()
+  expect(result).toMatchObject({ state: 'opened', browserId: f.page.browserId, reference: { displayWorkspaceId: SCRATCH_WORKSPACE_ID, groupId: 'scratch-group', tabId: 'original', regionId: 'original' } })
+  expect(f.state.openLauncher).not.toHaveBeenCalled()
+  expect(f.state.createBrowser).not.toHaveBeenCalled()
+  expect(f.state.surveyZoneSelection).toEqual({ kind: 'page', ...f.page })
+  expect(f.state.surveyProfileView).toEqual({ kind: 'default' })
+  expect(f.state.tabs.original.regions.original).toBe(f.original)
+})
+
+it('does not expose the old default environment after a different Profile becomes default', async () => {
+  const f = existingPage()
+  f.read.mockImplementation(async () => {
+    vi.mocked(browserProfiles.get).mockReturnValue({ ...f.known, profiles: [{ ...f.known.profiles[0]!, id: 'new-default' }] })
+  })
+  expect(await openSystemUrlInSurvey(f.host, request, new AbortController().signal)).toMatchObject({ state: 'opened', browserId: 'new-region' })
+  expect(f.state.createBrowser).toHaveBeenCalledOnce()
+  expect(f.state.setSurveyZoneSelection).not.toHaveBeenCalledWith({ kind: 'page', ...f.page })
+})
+
+it.each(['query', 'fragment', 'profile', 'private', 'location', 'disabled'] as const)(
+  'keeps ordinary system creation for a saved candidate with a different %s', async difference => {
+    const f = existingPage()
+    const original = f.state.tabs.original.regions.original
+    switch (difference) {
+      case 'query': original.url = request.url.replace('original%20value', 'changed'); break
+      case 'fragment': original.url = request.url.replace('#source', '#new-source'); break
+      case 'profile': original.profileId = 'other-profile'; break
+      case 'private': original.mode = 'private'; break
+      case 'location': f.state.layouts[SCRATCH_WORKSPACE_ID].groups[0].tabOrder = []; break
+      case 'disabled': f.state.config.browser.surveyBrowsing = { reuseOpenPages: false }; break
+    }
+    expect(await openSystemUrlInSurvey(f.host, request, new AbortController().signal)).toMatchObject({ state: 'opened', browserId: 'new-region' })
+    expect(f.state.createBrowser).toHaveBeenCalledOnce()
+    expect(f.state.tabs.original.regions.original).toBe(original)
+  })
 
 it('the system URL consumer uses the real Survey preparation and exact Scratch Browser creation without changing the original page', async () => {
   const f = fixture(), result = await openSystemUrlInSurvey(f.host, request, new AbortController().signal)

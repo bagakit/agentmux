@@ -13,6 +13,8 @@ Object.assign(window, { profileSurveyNative: {
  selectPage(reference: { regionId: string; browserId: string }) { const s = useAppStore.getState(); s.setSurveyZoneSelection({kind:'page', ...reference} as never); s.setMainSurface('survey') },
  appearance(mode: 'dark' | 'light') { updateThemeSelection({...useAppStore.getState().config!.appearance,appAppearance:mode}) },
  refreshProfiles() { return browserProfiles.refresh() },
+ surveyBrowsingState() { const state = useAppStore.getState(); return { times: state.surveyPageAddedAt, selection: state.surveyZoneSelection } },
+ openSurveyUrl(url: string) { return useAppStore.getState().openUrlInSurvey(url) },
  checkpoint() { return prepareRendererUpdate('quit') },
  api,
 } })
