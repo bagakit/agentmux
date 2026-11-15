@@ -48,6 +48,7 @@ export function connectGroupFixture(target: MotePreferencesTarget) {
   const group = (): MoteGroupSummary => ({ id: groupId, name: '协作体验研究', members, revision: 1, avatarMoteIds: [], announcement: null, topic: null, lastMessage: messages.at(-1) ?? null })
   const created: MoteGroupSummary[] = []
   const notifications = new Map<string, MoteGroupMessage[]>()
+  let revisionConflict = false
   const sendOperations = new Map<string, MoteGroupMessage>()
   api.moteGroup.call = (async (method: keyof MoteGroupResultMap, input: MoteGroupParamsMap[keyof MoteGroupParamsMap]) => {
     calls.push({ method, input })
@@ -69,6 +70,11 @@ export function connectGroupFixture(target: MotePreferencesTarget) {
     if (method === 'space.mote.group.update') {
       const request = input as MoteGroupParamsMap['space.mote.group.update']
       const original = created.find(item => item.id === request.groupId)!
+      if (revisionConflict) {
+        revisionConflict = false
+        ++original.revision
+        throw Object.assign(new Error('群资料已因另一个操作更新。'), { code: 'MOTE_GROUP_REVISION_CONFLICT' })
+      }
       if (request.expectedRevision !== original.revision) throw Error('Wrong original revision')
       if (request.avatarMoteIds !== undefined) original.avatarMoteIds = request.avatarMoteIds
       if (request.topic !== undefined) original.topic = request.topic
@@ -117,5 +123,5 @@ export function connectGroupFixture(target: MotePreferencesTarget) {
     }
     throw new Error('Unexpected group method: ' + method)
   }) as typeof api.moteGroup.call
-  Object.assign(window, { moteNativeGroupsCapture: { calls, groupId } })
+  Object.assign(window, { moteNativeGroupsCapture: { calls, groupId, conflictNextUpdate() { revisionConflict = true } } })
 }
