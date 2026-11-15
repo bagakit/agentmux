@@ -70,6 +70,7 @@ export async function measureRepresentativeWorkface(window: BrowserWindow, runti
   let originalRunCountAtRestore = 0
   let lastTarget: Terminal | undefined
   let failedPresentation: unknown = null
+  let lastRestoreObservation: unknown = null
   try {
     const fixture: Fixture = JSON.parse(await readFile(fixturePath, 'utf8'))
     const [visible, , alternate] = fixture.runs
@@ -77,7 +78,11 @@ export async function measureRepresentativeWorkface(window: BrowserWindow, runti
     const snapshot = await waitFor('the restored Renderer workbench and Core topology revision', async () => {
       const signal = AbortSignal.timeout(4_000)
       const receipt = await rpc.call('app.inspect', {}, { signal }).catch(error => {
-        if (signal.aborted || (error as { code?: string }).code === 'CONTROL_TIMEOUT') return undefined
+        const code = (error as { code?: string }).code
+        if (signal.aborted || code === 'CONTROL_TIMEOUT') {
+          lastRestoreObservation = { code: code ?? 'READ_DEADLINE' }
+          return undefined
+        }
         throw error
       })
       if (!receipt) return undefined
@@ -85,10 +90,11 @@ export async function measureRepresentativeWorkface(window: BrowserWindow, runti
       const inspected = parseDesktopClientObservation(observation)
       if (inspected.main.pid !== process.pid) throw new Error('Workbench observation belongs to a different Desktop Main process.')
       const state = inspected.workbench
+      lastRestoreObservation = { loading: state.loading, revision: state.persistence?.spatial.revision ?? null, tabCount: state.tabs.length }
       if (state.loading || (state.persistence?.spatial.revision ?? 0) < fixture.revision) return undefined
       loadedIdentity = inspected.main
       return state
-    }, 25_000)
+    }, 40_000)
     evidence.fixtureRevision = snapshot.persistence?.spatial.revision ?? 0
     const tabs = new Map(snapshot.tabs.map(tab => [tab.id, tab]))
     const projected = fixture.tabs.filter(expected => {
@@ -141,6 +147,7 @@ export async function measureRepresentativeWorkface(window: BrowserWindow, runti
     }
 
     if (!window.isVisible()) throw new Error('The representative Desktop window is not visible.')
+    if (process.platform === 'darwin' && !window.isFocused()) app.focus({ steal: true })
     window.focus()
     window.webContents.focus()
     await selectTerminal(visible)
@@ -184,5 +191,5 @@ export async function measureRepresentativeWorkface(window: BrowserWindow, runti
     await rpc.dispose()
   }
   return { ...evaluateRepresentativeResourceBudget(evidence), loadedIdentity, originalRunCountAtRestore,
-    lastTerminalObservation, failedPresentation, evidence, issue }
+    lastRestoreObservation, lastTerminalObservation, failedPresentation, evidence, issue }
 }

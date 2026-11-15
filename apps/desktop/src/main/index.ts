@@ -510,6 +510,12 @@ function startPrimaryInstance(): void {
         return
       }
     }
+    // The light probe starts with an already usable launcher. The representative probe activates after restoration.
+    if (process.env.AGENTMUX_DESKTOP_RESOURCE_REPORT && !process.env.AGENTMUX_DESKTOP_RESOURCE_WORKFACE && !window.isFocused()) {
+      if (process.platform === 'darwin') app.focus({ steal: true })
+      window.focus()
+      window.webContents.focus()
+    }
     try {
       if (await runDesktopResourceProbe({
         window,
