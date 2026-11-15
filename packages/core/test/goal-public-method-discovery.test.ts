@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const methods = ['goal.delegation.prepare', 'goal.delegation.bind', 'goal.delegate', 'goal.report', 'goal.collect', 'goal.delegations',
-  'goal.progress', 'goal.patrol', 'goal.patrol.continue', 'goal.patrol.report', 'goal.plan', 'goal.plan.revise', 'goal.plan.assignment', 'goal.plan.claim', 'goal.plan.review'] as const
+  'goal.progress', 'goal.patrol', 'goal.patrol.continue', 'goal.patrol.report', 'goal.plan', 'goal.plan.active', 'goal.plan.revise', 'goal.plan.assignment', 'goal.plan.claim', 'goal.plan.review'] as const
 const entries = [
   ['Goal codec', () => import('../src/goal-delegation.js')],
   ['native codec', () => import('../src/rpc-native-codec.js')],
