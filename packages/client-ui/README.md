@@ -58,6 +58,10 @@ Mount `mountThemeRuntime(window)` from `theme` once per browser document to inst
 
 Node consumers can import the theme model to resolve light and dark tokens without a DOM. Interactive entries render in a React host. Import CSS through a CSS-aware browser bundler.
 
+### Markdown source
+
+Use `syntax="markdown"` on `Textarea` or `ComposerTextarea` to color CommonMark and GFM directly in the field. Import `input/styles.css`. Syntax colors keep delimiters, whitespace, form values and clipboard text intact. The field retains native selection, undo, IME and forced colors. Drafts larger than 4,096 UTF-16 units and input that exceeds the parser budget remain fully editable as plain text.
+
 ## Workspace modules
 
 Imports in the table use the prefix `@agentmux/client-ui/`. The package manifest records the complete workspace export map.
@@ -190,9 +194,7 @@ Use `SegmentedControl` to edit a single value across a few visible choices. Its 
 
 ## Inputs
 
-### Markdown source in multiline inputs
-
-`Textarea` and `ComposerTextarea` accept `syntax="markdown"` for body fields that accept Markdown. Both keep the native textarea and its original string. Source color uses the same grammar as Markdown reading. It decorates syntax without changing delimiters, whitespace, form values or clipboard text. The field keeps native selection, undo, composition, and forced-color behavior. The Message Tool composer uses the same syntax colors for its text alongside inline attachments and references. Import `input/styles.css` when using individual style entries.
+Message Tool uses the [native inputs' Markdown syntax colors](#markdown-source) alongside inline attachments and references.
 
 ### Compact editors
 
