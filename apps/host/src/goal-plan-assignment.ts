@@ -1,11 +1,9 @@
 import { AgentMuxError, type AgentMuxRpcCallContext } from '@agentmux/core'
 import type { GoalDelegationAuthority, GoalDelegationParamsMap } from '@agentmux/core/goal-delegation'
-import type { Demand, DemandStore } from '@agentmux/demand'
-import { delegationWorkerHostId } from '@agentmux/demand/delegations'
+import type { DemandStore } from '@agentmux/demand'
 import type { GoalPlanAssignmentChange, GoalPlanOwner } from '@agentmux/demand/goal-plan'
-import { goalSupervisorHostWitnesses, type DemandAgentReference } from '@agentmux/demand/relations'
+import { goalPlanWorkRoles, type GoalPlanWorkRole } from '@agentmux/demand/relations'
 import type { GoalRuntimePort } from './goal-runtime.js'
-import { goalSupervisorRuntimeWitnesses } from './goal-supervisor-identity.js'
 
 type Runtime = Partial<Pick<GoalRuntimePort, 'locateGoalAgentHost'>>
 type Request = GoalDelegationParamsMap['goal.plan.assignment' | 'goal.plan.claim']
@@ -17,32 +15,23 @@ function originalHost(runtime: Runtime, sessionId: string, expectedHost?: string
   return runtime.locateGoalAgentHost(sessionId, expectedHost)
 }
 
-function assertWorkRole(goal: Demand, claiming: boolean, authority: GoalDelegationAuthority, runtime: Runtime): void {
+export function assertPlanWorkRole(role: GoalPlanWorkRole | undefined, claiming: boolean, authority: GoalDelegationAuthority, runtime: Runtime): void {
   const { actor, hostId, runtimeId } = authority
   if (actor.kind !== 'agent') {
     if (claiming) denied('Only an authenticated Agent can claim a node for itself.')
     return
   }
   if (!hostId || !runtimeId) throw new AgentMuxError('The authenticated Agent Host or Runtime is unconfirmed. Read its original Session.', 'CONTROL_UNAVAILABLE')
-  const matchesQualified = (ref: DemandAgentReference | null) => ref && typeof ref !== 'string' &&
-    ref.execution.agentSessionId === actor.id && ref.execution.runtimeId === runtimeId
-  // These execution references were admitted to the current Goal at their original Source.
-  if (matchesQualified(goal.supervisorSessionId) || claiming && goal.assigneeSessionIds.some(matchesQualified)) return
-
-  if (goal.supervisorSessionId === actor.id) {
-    const hosts = goalSupervisorHostWitnesses(goal), runtimes = goalSupervisorRuntimeWitnesses(goal, actor.id)
+  if (role?.supervisorRuntimes.includes(runtimeId) || claiming && role?.assigneeRuntimes.includes(runtimeId)) return
+  if (role?.supervisor) {
+    const { hosts, runtimes } = role.supervisor
     if ((hosts.length ? hosts.length === 1 && hosts[0] === hostId : originalHost(runtime, actor.id) === hostId) &&
-        (!runtimes.size || runtimes.size === 1 && runtimes.has(runtimeId))) return
+        (!runtimes.length || runtimes.length === 1 && runtimes[0] === runtimeId)) return
     denied('This action belongs to the original Supervisor Host and Runtime.')
   }
   if (!claiming) denied('Only a person or this Goal’s current Supervisor can manage node assignments.')
-  if (!goal.assigneeSessionIds.includes(actor.id)) denied('A related Session has no work role. Claiming requires this Goal’s current Supervisor or assignee.')
-  // A bare assignee must resolve uniquely. Earlier claims and delegation receipts
-  // keep a Host alias reused by a different Runtime from stealing its original work.
-  const matchesOriginal = (goal.plan?.history ?? []).every(entry => entry.change?.assignment.kind !== 'claim' ||
-    entry.author.id !== actor.id || entry.author.hostId === hostId && entry.author.runtimeId === runtimeId) &&
-    (goal.delegations ?? []).every(entry => entry.workerAgentSessionId !== actor.id ||
-      delegationWorkerHostId(entry) === hostId && (!entry.runtimeIdentity || entry.runtimeIdentity.workerRuntimeId === runtimeId))
+  if (!role?.assignee) denied('A related Session has no work role. Claiming requires this Goal’s current Supervisor or assignee.')
+  const matchesOriginal = role.assignee.bindings.every(binding => binding.hostId === hostId && (binding.runtimeId === null || binding.runtimeId === runtimeId))
   if (!matchesOriginal || originalHost(runtime, actor.id) !== hostId) denied('This claim belongs to the original assignee Host and Runtime.')
 }
 
@@ -55,7 +44,7 @@ export async function changeGoalPlanAssignment(demands: DemandStore, runtime: Ru
   await demands.changePlanAssignment(request.goalId, 'claimToken' in request ? request.claimToken : request.expectedRevision, request.operationId, change,
     { ...authority.actor, ...(authority.hostId ? { hostId: authority.hostId } : {}), ...(authority.runtimeId ? { runtimeId: authority.runtimeId } : {}) }, current => {
       context.signal?.throwIfAborted()
-      assertWorkRole(current, change.assignment.kind === 'claim', authority, runtime)
+      assertPlanWorkRole(authority.actor.kind === 'agent' ? goalPlanWorkRoles(current).get(authority.actor.id) : undefined, change.assignment.kind === 'claim', authority, runtime)
       if (change.assignment.kind === 'assign') {
         const target = change.assignment.executor
         if (originalHost(runtime, target.agentSessionId, target.hostId) !== target.hostId)

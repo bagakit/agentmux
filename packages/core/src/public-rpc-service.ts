@@ -467,6 +467,7 @@ const NATIVE_FIELDS = {
   'goal.patrol.continue': ['goalId', 'patrolOperationId', 'operationId', 'expectedRunId'],
   'goal.patrol.report': ['goalId', 'patrolOperationId', 'report'],
   'goal.plan': ['goalId', 'expectedOwner'],
+  'goal.plan.active': ['goalId', 'view', 'expectedOwner'],
   'goal.plan.assignment': ['goalId', 'nodeId', 'expectedRevision', 'operationId', 'expectedOwner', 'assignment'],
   'goal.plan.claim': ['goalId', 'nodeId', 'claimToken', 'operationId', 'expectedOwner'],
   'goal.plan.revise': ['goalId', 'revision'], 'goal.plan.review': ['goalId', 'review'],

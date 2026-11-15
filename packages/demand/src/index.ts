@@ -16,3 +16,5 @@ export * from './goal-plan.js'
 export * from './relations.js'
 
 export * from './discussion.js'
+
+export type { GoalActivePlan, GoalActiveNode } from './goal-active-index.js'

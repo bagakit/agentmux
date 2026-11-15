@@ -6,15 +6,16 @@ import { AgentMuxError, sessionSemanticResumeSourceRuns } from '@agentmux/core'
 import { assertGoalDelegationSource, assertGoalDelegationReply, readGoalDelegationWireReport, readGoalDelegationSource, goalDelegationReportBody, goalDelegationApplication, goalReportApplication } from '@agentmux/core/goal-delegation'
 export { goalDelegationReportBody } from '@agentmux/core/goal-delegation'
 import type { GoalDelegationAuthority, GoalDelegationMethod, GoalDelegationParamsMap,
-  GoalDelegationResult, GoalDelegationResultMap, GoalDelegationObservation, GoalDelegationsOwner } from '@agentmux/core/goal-delegation'
+  GoalDelegationResult, GoalDelegationResultMap, GoalActivePlanQuery, GoalActivePlanResult, GoalDelegationObservation, GoalDelegationsOwner } from '@agentmux/core/goal-delegation'
 import type { AgentMuxRpcMethod, AgentMuxRpcParams, AgentMuxRpcResult, AgentMuxRun, AgentMuxRpcCallContext } from '@agentmux/core'
 import { delegationWorkerHostId, validateDemandDelegationReport, type DemandDelegation, type DemandDelegationReportInput } from '@agentmux/demand/delegations'
 import { hostGoalAddress, hostGoalPlan } from './goal-projection.js'
 import { submitGoalSourceReport } from './goal-source-report.js'
-import { changeGoalPlanAssignment } from './goal-plan-assignment.js'
+import { assertPlanWorkRole, changeGoalPlanAssignment } from './goal-plan-assignment.js'
 import { isGoalSupervisor } from './goal-supervisor-identity.js'
 import type { DurableAgentMuxMessage } from '@agentmux/core'
 import type { DemandStore, Demand, DemandDispatch, GoalStartObservation } from '@agentmux/demand'
+import { goalPlanClaimToken } from '@agentmux/demand/goal-plan'
 import { formatGoalTicketLink, hasOriginalGoalBinding, parseAmuxObjectLink } from '@agentmux/core/sharing'
 import type { GoalRuntimePort } from './goal-runtime.js'
 import type { GoalPatrolOwner } from './goal-patrol-owner.js'
@@ -40,9 +41,11 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
     private readonly patrol?: Pick<GoalPatrolOwner, 'request' | 'continue' | 'report' | 'observe'>,
     private readonly planOwner?: () => Promise<{ runtimeId: string; namespace: string }>) {}
 
-  async call<M extends GoalDelegationMethod>(method: M, input: GoalDelegationParamsMap[M],
+  async call<M extends GoalDelegationMethod>(method: M, request: GoalDelegationParamsMap[M],
     context: AgentMuxRpcCallContext, authority: GoalDelegationAuthority): Promise<GoalDelegationResultMap[M]> {
     context.signal?.throwIfAborted()
+    if (method === 'goal.plan.active') return await this.readActivePlan(request as GoalActivePlanQuery, authority) as GoalDelegationResultMap[M]
+    const input = request as GoalDelegationParamsMap[Exclude<GoalDelegationMethod, 'goal.plan.active'>]
     const planRequest = method === 'goal.plan' || method === 'goal.plan.assignment' || method === 'goal.plan.claim'
     const owner = planRequest || method === 'goal.plan.revise' || method === 'goal.plan.review' ? await this.planOwner?.().catch(() => undefined) : undefined
     if (planRequest) {
@@ -292,6 +295,33 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
     if (!this.core) throw new AgentMuxError('The original Core communication owner is unavailable. Frozen input and original Agents are retained.', 'CONTROL_UNAVAILABLE')
     return this.core
   }
+  private async readActivePlan(query: GoalActivePlanQuery, authority: GoalDelegationAuthority): Promise<GoalActivePlanResult> {
+    const owner = await this.planOwner?.().catch(() => undefined)
+    if (!owner) throw new AgentMuxError('The original Goal owner is unconfirmed. Existing work and its history are retained.', 'CONTROL_UNAVAILABLE')
+    if (query.expectedOwner && (query.expectedOwner.runtimeId !== owner.runtimeId || query.expectedOwner.namespace !== owner.namespace))
+      throw new AgentMuxError('This request names another original Goal owner.', 'CONTROL_REQUEST_CONFLICT')
+    const claiming = query.view === 'claimable'
+    if (claiming && (authority.actor.kind !== 'agent' || !authority.hostId || !authority.runtimeId))
+      throw new AgentMuxError('Claimable work requires the original authenticated Agent, Host and Runtime.', 'CONTROL_PERMISSION_DENIED')
+    const read = await this.demands.readActivePlans({
+      ...(query.goalId === undefined ? {} : { goalId: query.goalId }),
+      ...(authority.actor.kind === 'agent' ? { agentSessionId: authority.actor.id } : {}),
+    })
+    const goals: GoalActivePlanResult['goals'] = []
+    for (const { role, goalId, goalUpdatedAt, nodes } of read) {
+      try { assertPlanWorkRole(role, claiming, authority, this.runtime) }
+      catch (error) {
+        if (query.goalId !== undefined || !(error instanceof AgentMuxError) || error.code !== 'CONTROL_PERMISSION_DENIED') throw error
+        continue
+      }
+      const active = nodes.flatMap(({ claim, ...node }) => claiming
+        ? claim ? [{ ...node, claimToken: goalPlanClaimToken({ ...owner, goalId }, claim.openingOperationId, claim.basis) }] : []
+        : [node])
+      if (active.length) goals.push({ goalId, goalUpdatedAt, nodes: active })
+    }
+    return { owner, view: query.view, goals }
+  }
+
   private async assertTicketLink(goalId: string, saved: DemandDelegation, message: DurableAgentMuxMessage): Promise<void> {
     if (!message.envelope.application) return
     const { ticketLink } = readGoalDelegationSource(message)

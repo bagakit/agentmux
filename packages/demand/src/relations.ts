@@ -16,6 +16,53 @@ export function goalSupervisorHostWitnesses(goal: Partial<Pick<Demand, 'supervis
   ])]
 }
 
+export function goalSupervisorRuntimeWitnesses(goal: Demand, id: string): Set<string> {
+  return new Set([
+    ...(goal.plan?.history ?? []).filter(item => item.change?.assignment.kind !== 'claim' && item.author.kind === 'agent' && item.author.id === id && item.author.runtimeId).map(item => item.author.runtimeId!),
+    ...(goal.delegations ?? []).filter(item => item.ownerAgentSessionId === id && item.runtimeIdentity).map(item => item.runtimeIdentity!.ownerRuntimeId)
+  ])
+}
+
+export type GoalPlanWorkRole = {
+  supervisorRuntimes: string[]
+  assigneeRuntimes: string[]
+  supervisor?: { hosts: readonly string[]; runtimes: string[] }
+  assignee?: { bindings: { hostId: string | null; runtimeId: string | null }[] }
+}
+
+/** One projection of current work roles and their retained identity witnesses. */
+export function goalPlanWorkRoles(goal: Demand): Map<string, GoalPlanWorkRole> {
+  const roles = new Map<string, GoalPlanWorkRole>()
+  const forSession = (id: string) => {
+    let role = roles.get(id)
+    if (!role) { role = { supervisorRuntimes: [], assigneeRuntimes: [] }; roles.set(id, role) }
+    return role
+  }
+  const supervisor = goal.supervisorSessionId
+  if (typeof supervisor === 'string') forSession(supervisor).supervisor = {
+    hosts: goalSupervisorHostWitnesses(goal), runtimes: [...goalSupervisorRuntimeWitnesses(goal, supervisor)]
+  }
+  else if (supervisor) forSession(supervisor.execution.agentSessionId).supervisorRuntimes.push(supervisor.execution.runtimeId)
+  for (const assignee of goal.assigneeSessionIds) {
+    if (typeof assignee === 'string') forSession(assignee).assignee = { bindings: [] }
+    else forSession(assignee.execution.agentSessionId).assigneeRuntimes.push(assignee.execution.runtimeId)
+  }
+  for (const entry of goal.plan?.history ?? []) {
+    const assignee = roles.get(entry.author.id)?.assignee
+    if (assignee && entry.change?.assignment.kind === 'claim') assignee.bindings.push({
+      hostId: entry.author.runtimeId ? entry.author.hostId ?? null : null, runtimeId: entry.author.runtimeId ?? null,
+    })
+  }
+  for (const entry of goal.delegations ?? []) roles.get(entry.workerAgentSessionId)?.assignee?.bindings.push({
+    hostId: delegationWorkerHostId(entry), runtimeId: entry.runtimeIdentity?.workerRuntimeId ?? null,
+  })
+  for (const role of roles.values()) if (role.assignee) {
+    const bindings = role.assignee.bindings
+    role.assignee.bindings = [...new Map(bindings.map(binding => [JSON.stringify(binding), binding])).values()]
+  }
+  return roles
+}
+
 export type GoalRelationRoleKind = 'assignee' | 'supervisor' | 'related' | 'create' | 'discussion' | 'requirements'
   | 'execution' | 'continuation' | 'delegation-owner' | 'delegation-worker' | 'execution-progress' | 'execution-handoff'
 export type GoalRelationRole = {

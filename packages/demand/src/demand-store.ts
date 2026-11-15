@@ -39,6 +39,7 @@ import {
   isDemandStatus,
 } from './demand-types.js'
 import { DemandStoreError } from './errors.js'
+import { GoalActiveIndex, type GoalActivePlan } from './goal-active-index.js'
 import { assertGoalPlanKeepsRecordedNodes, goalPlanChangedNodes, goalPlanDelegationIssue, parseGoalPlan, parseGoalPlanReviewInput, parseGoalPlanRevisionInput, projectGoalPlan,
   type GoalPlanAssignmentChange, type GoalPlanRevisionRecord, type GoalPlanOwner, type GoalPlanReviewer, type GoalPlanReviewInput, type GoalPlanRevisionInput } from './goal-plan.js'
 import { demandNameContext, parseDemandNameChange } from './demand-name-change.js'
@@ -328,6 +329,9 @@ export class DemandStore {
   private readonly lockTimeoutMs: number
   private readonly lockRetryMs: number
   private readonly listeners = new Set<DemandStoreListener>()
+  private readonly activeIndex: GoalActiveIndex
+  private readonly activeIndexPath: string
+  private activeIndexRepair: Promise<void> | undefined
   private snapshotReadCache: DemandSnapshotRead | undefined
   private snapshotReadFlight: { identity: string; promise: Promise<DemandSnapshotRead> } | undefined
 
@@ -338,6 +342,13 @@ export class DemandStore {
     this.root = path.resolve(options.root)
     this.storePath = path.join(this.root, 'store.json')
     this.lockPath = path.join(this.root, 'store.lock')
+    this.lockTimeoutMs = options.lockTimeoutMs ?? 5_000
+    this.lockRetryMs = options.lockRetryMs ?? 25
+    if (!Number.isSafeInteger(this.lockTimeoutMs) || this.lockTimeoutMs < 0) {
+      throw new DemandStoreError('INVALID_INPUT', 'validate', this.root, 'lockTimeoutMs must be a non-negative integer')
+    }
+    this.activeIndexPath = path.join(this.root, 'active-goals.sqlite')
+    this.activeIndex = new GoalActiveIndex(this.activeIndexPath)
     this.lockTimeoutMs = options.lockTimeoutMs ?? 5_000
     this.lockRetryMs = options.lockRetryMs ?? 25
     if (!Number.isSafeInteger(this.lockTimeoutMs) || this.lockTimeoutMs < 0) {
@@ -416,6 +427,50 @@ export class DemandStore {
     if (!demand) return null
     const { activities, ...content } = demand
     return { ...clone(content), activities: projectActivities(activities, read.namesById) }
+  }
+
+  async readActivePlans(target: { goalId?: string; agentSessionId?: string }): Promise<GoalActivePlan[]> {
+    try {
+      const generation = await this.currentSnapshotIdentity()
+      if (generation === null) return []
+      const rows = this.activeIndex.read(generation, target)
+      if (rows && generation === await this.currentSnapshotIdentity()) return rows
+    } catch (error) {
+      if (!(error instanceof Error)) throw error
+    }
+    this.scheduleActiveIndexRepair()
+    throw new DemandStoreError('READ_FAILED', 'read', this.storePath,
+      'The original active Goal index is unconfirmed and is being rebuilt. The original plans and retained history can still be read.')
+  }
+
+  private async currentSnapshotIdentity(): Promise<string | null> {
+    try { return snapshotFileIdentity(await fs.stat(this.storePath, { bigint: true })) }
+    catch (error) { if (isNodeError(error, 'ENOENT')) return null; throw error }
+  }
+
+  private scheduleActiveIndexRepair(): void {
+    if (this.activeIndexRepair) return
+    const repair = enqueue(this.root, () => this.withWriterLock(async () => {
+      const { identity, snapshot } = await this.readConfirmedSnapshot()
+      if (!identity) return
+      const rebuilding = path.join(this.root, 'active-goals.rebuilding-' + mintObjectId() + '.sqlite')
+      try {
+        new GoalActiveIndex(rebuilding).publish(identity, null, null, () => snapshot.demands)
+        if (identity === await this.currentSnapshotIdentity()) {
+          // An interrupted projection transaction can leave its own journal. Both files
+          // belong to this derived index. The original writer lock excludes index producers.
+          await fs.rm(this.activeIndexPath + '-journal', { force: true })
+          await fs.rename(rebuilding, this.activeIndexPath)
+        }
+      } finally {
+        await fs.rm(rebuilding, { force: true }).catch(() => undefined)
+      }
+    })).catch(error => {
+      console.warn('The active Goal index could not be repaired. Original Goals and history are retained.', error)
+    }).finally(() => {
+      if (this.activeIndexRepair === repair) this.activeIndexRepair = undefined
+    })
+    this.activeIndexRepair = repair
   }
 
   async originalGoalCreationId(operationId: string): Promise<string | undefined> {
@@ -1488,7 +1543,8 @@ export class DemandStore {
       await fs.mkdir(this.root, { recursive: true })
       let confirmedTitle: DemandNameChangeRecord | undefined
       try { return await this.withWriterLock(async () => {
-        let snapshot = await this.readSnapshot()
+        const prior = await this.readConfirmedSnapshot()
+        let snapshot = clone(prior.snapshot)
         const operationId = titleAttempt?.operationId ?? requestedOperationId ?? mintObjectId()
         if (activityAttempt) {
           const originalDemand = snapshot.demands.find(demand => demand.activities.some(activity => activity.operationId === operationId))
@@ -1558,6 +1614,19 @@ export class DemandStore {
           if (!nameChange || !(error instanceof SnapshotWriteError)) throw error
           const applied = error.replacementApplied
           throw new DemandNameChangeError(error, { ...nameChange, ownerRevision: null, status: applied ? 'unknown' : 'failed', actual: applied ? demand.title : original!.title, reason: error.message }, applied ? 'unknown' : 'not_applied')
+        }
+        try {
+          const generation = await this.currentSnapshotIdentity()
+          const indexed = demand.plan || await fs.stat(this.activeIndexPath).then(() => true, error => {
+            if (isNodeError(error, 'ENOENT')) return false
+            throw error
+          })
+          if (generation && indexed) this.activeIndex.publish(generation, prior.identity,
+            { id: demand.id, goal: operation === 'remove' ? null : demand }, () => snapshot.demands)
+        } catch (error) {
+          // The original write is already durable. A projection fault only affects its bounded reader.
+          console.warn('The active Goal index could not be updated. Original Goal writes are retained.', error)
+          this.scheduleActiveIndexRepair()
         }
         confirmedTitle = nameChange ? clone(nameChange) : undefined
         const published = projectNameHistory(snapshot)

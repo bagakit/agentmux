@@ -1,7 +1,7 @@
 import { AgentMuxError } from '@agentmux/core'
 import type { Demand } from '@agentmux/demand'
 import type { GoalDelegationAuthority } from '@agentmux/core/goal-delegation'
-import { goalSupervisorHostWitnesses } from '@agentmux/demand/relations'
+import { goalSupervisorHostWitnesses, goalSupervisorRuntimeWitnesses } from '@agentmux/demand/relations'
 
 type Runtime = { resolveGoalAgent?(agentSessionId: string): Promise<{ hostId: string }> }
 
@@ -15,13 +15,6 @@ export async function goalSupervisorHost(goal: Demand, runtime: Runtime): Promis
   if (hosts.length > 1) throw new AgentMuxError('The current Supervisor has conflicting retained Host bindings. Keep its original identities and resolve that exact relationship.', 'AMBIGUOUS_AGENT_SESSION')
   if (!runtime.resolveGoalAgent) throw new AgentMuxError('The current Supervisor Host is not yet confirmed. Its original work and native input remain available.', 'CONTROL_UNAVAILABLE')
   return (await runtime.resolveGoalAgent(sessionId)).hostId
-}
-
-export function goalSupervisorRuntimeWitnesses(goal: Demand, id: string): Set<string> {
-  return new Set([
-    ...(goal.plan?.history ?? []).filter(item => item.change?.assignment.kind !== 'claim' && item.author.kind === 'agent' && item.author.id === id && item.author.runtimeId).map(item => item.author.runtimeId!),
-    ...(goal.delegations ?? []).filter(item => item.ownerAgentSessionId === id && item.runtimeIdentity).map(item => item.runtimeIdentity!.ownerRuntimeId)
-  ])
 }
 
 export async function isGoalSupervisor(goal: Demand, authority: GoalDelegationAuthority, runtime: Runtime): Promise<boolean> {

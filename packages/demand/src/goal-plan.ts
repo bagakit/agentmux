@@ -261,12 +261,17 @@ export type GoalPlanNodeProjection = {
   predecessors: GoalPlanPredecessor[] | null
   claimToken?: string
   claimBasis?: string
+  claimOpeningOperationId?: string
   review: GoalPlanReview | null
   staleCriteria: string[]
   /** Every reason the node needs reconciliation; nonempty exactly when its state is unknown. */
   unknown: GoalPlanUnknownReason[]
 }
 export type GoalPlanProjection = { revision: number; nodes: GoalPlanNodeProjection[]; done: number; total: number; next: string[] }
+
+export function goalPlanClaimToken(scope: GoalPlanClaimScope, openingOperationId: string, basis: string): string {
+  return deriveObjectId('agentmux.goal-plan-claim.v1', JSON.stringify([scope.runtimeId, scope.namespace, scope.goalId, openingOperationId, basis]))
+}
 
 /**
  * The only place node state is decided. It reads the plan, this Goal's delegations and the
@@ -289,12 +294,19 @@ export function projectGoalPlan(plan: GoalPlan, delegations: readonly DemandDele
     if (entry.change) assignment.set(entry.change.nodeId, entry)
     for (const nodeId of entry.changedNodes ?? []) changedAt.set(nodeId, entry.revision)
   }
+  const latestByNode = new Map<string, { count: number; attempt: DemandDelegation }>()
+  for (const attempt of delegations) if (attempt.planNodeId) {
+    const count = (latestByNode.get(attempt.planNodeId)?.count ?? 0) + 1
+    latestByNode.set(attempt.planNodeId, { count, attempt })
+  }
+  const reviews = new Map(plan.reviews.map(review => [review.delegationOperationId, review]))
   const derived = new Map<string, Omit<GoalPlanNodeProjection, 'column'>>()
   const derive = (node: GoalPlanNodeInput): Omit<GoalPlanNodeProjection, 'column'> => {
     const known = derived.get(node.id)
     if (known) return known
-    const attempts = delegations.filter(delegation => delegation.planNodeId === node.id), latest = attempts.at(-1) ?? null
-    const latestReview = latest ? plan.reviews.filter(item => item.nodeId === node.id && item.delegationOperationId === latest.operationId).at(-1) ?? null : null
+    const attempts = latestByNode.get(node.id), latest = attempts?.attempt ?? null
+    const recordedReview = latest ? reviews.get(latest.operationId) : undefined
+    const latestReview = recordedReview?.nodeId === node.id ? recordedReview : null
     const reassigned = Boolean(latest && !latestReview && node.executor &&
       (node.executor.hostId !== delegationWorkerHostId(latest) || node.executor.agentSessionId !== latest.workerAgentSessionId))
     const current = reassigned ? null : latest
@@ -323,12 +335,12 @@ export function projectGoalPlan(plan: GoalPlan, delegations: readonly DemandDele
         node.id, node.outcome, node.check, changedAt.get(node.id), alignmentRevision, predecessors,
         [...node.criterionIds].sort().map(id => criteria.find(criterion => criterion.id === id)),
       ])) : undefined
-    const claimToken = claimScope && claimBasis && node.claimOpen && lastAssignment?.change?.assignment.kind === 'open'
-      ? deriveObjectId('agentmux.goal-plan-claim.v1', JSON.stringify([
-        claimScope.runtimeId, claimScope.namespace, claimScope.goalId, lastAssignment.operationId, claimBasis,
-      ])) : undefined
-    const value = { node, state, delegation: current, attempts: attempts.length, review, staleCriteria, unknown, predecessors,
-      ...(claimBasis ? { claimBasis } : {}), ...(claimToken ? { claimToken } : {}) }
+    const claimOpeningOperationId = claimBasis && node.claimOpen && lastAssignment?.change?.assignment.kind === 'open'
+      ? lastAssignment.operationId : undefined
+    const claimToken = claimScope && claimBasis && claimOpeningOperationId
+      ? goalPlanClaimToken(claimScope, claimOpeningOperationId, claimBasis) : undefined
+    const value = { node, state, delegation: current, attempts: attempts?.count ?? 0, review, staleCriteria, unknown, predecessors,
+      ...(claimBasis ? { claimBasis } : {}), ...(claimOpeningOperationId ? { claimOpeningOperationId } : {}), ...(claimToken ? { claimToken } : {}) }
     derived.set(node.id, value)
     return value
   }
