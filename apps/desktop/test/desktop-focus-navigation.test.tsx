@@ -1642,6 +1642,24 @@ it('copied Goal plan links and the real CLI reveal the original graph without cr
     expect(await ingress.receive(shortPlan.ticketLinks![0]!)).toBeNull()
     expect(container.querySelector('[data-goal-plan-node="read"] [aria-expanded="true"]')).toBeTruthy()
     expect(await ingress.receive(ticketUrl!)).toBeNull()
+    const readOwner = vi.mocked(api.goals.execute).getMockImplementation()!
+    let releaseTicket!: () => void, reachedTicket!: () => void
+    const heldTicket = new Promise<void>(resolve => { releaseTicket = resolve })
+    const ticketStarted = new Promise<void>(resolve => { reachedTicket = resolve })
+    vi.mocked(api.goals.execute).mockImplementationOnce(async request => {
+      const response = await readOwner(request)
+      reachedTicket()
+      await heldTicket
+      return response
+    })
+    const delayedTicket = ingress.receive(ticketUrl!)
+    await ticketStarted
+    try {
+      await act(async () => container.querySelector<HTMLButtonElement>('[data-goal-plan-node="another"] .goal-plan-node__head')!.click())
+      releaseTicket()
+      expect(await delayedTicket, 'a late Ticket link must preserve the later node choice').toContain('NAVIGATION_CHANGED')
+      expect(container.querySelector('[data-goal-plan-node="another"] [aria-expanded="true"]')).toBeTruthy()
+    } finally { releaseTicket() }
     expect(result.code, result.stderr).toBe(0)
     expect(JSON.parse(result.stdout).result.presentation.goal).toEqual(receipt.presentation.goal)
     expect(container.querySelector('[data-goal-plan-node="read"]')).not.toBeNull()
@@ -1685,6 +1703,11 @@ it('copied Goal plan links and the real CLI reveal the original graph without cr
     expect(requests.every(request => request.operation === 'focus')).toBe(true)
     expect((await owner.client.call('goal.inspect', { goalId: 'exact' })).goal!.plan).toEqual(revised.plan)
     for (const action of lifecycle) expect(action).not.toHaveBeenCalled()
+    await owner.client.call('goal.delete', { goalId: 'exact' })
+    await expect(owner.client.call('goal.create', {
+      goalId: 'exact', title: 'Namesake after removal', risk: 'low', confirmation: 'user', operationId: 'namesake-create',
+    })).rejects.toThrow('retired')
+    expect(await ingress.receive(ticketUrl!)).toContain('GOAL_SOURCE_UNCONFIRMED')
   } finally { await client?.dispose(); await server?.stop(); await fixture.close() }
 }, 60_000)
 
