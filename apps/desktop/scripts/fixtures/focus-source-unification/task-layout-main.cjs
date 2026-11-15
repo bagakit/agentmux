@@ -1,15 +1,13 @@
 const assert = require('node:assert/strict')
+const { focus: root, trigger, menu, taskLayoutControls } = require('./task-layout-controls.cjs')
 
 module.exports = async function exerciseTaskLayout({win, read, until, settle, click, capture, result, restoreOnly}) {
-  const root = '.global-focus-surface:not([hidden])'
-  const control = root + ' [role="radiogroup"][aria-label="Task layout"]'
-  const radio = value => control + ' [data-option="' + value + '"]'
+  const layouts = taskLayoutControls({read, until, click})
+  const map = '[data-desktop-focus-view="map"]:not([hidden])'
+  const viewButton = (surface, value) => surface + ' .focus-view-switch [data-surface-mode="' + value + '"]'
   const layout = () => read('document.querySelector(' + JSON.stringify(root) + ')?.dataset.taskLayout')
   const task = id => root + ' button.focus-context[data-session-id="' + id + '"]'
-  const expectLayout = async value => {
-    await until('task layout ' + value, async () => await layout() === value)
-    assert.equal(await read('document.querySelector(' + JSON.stringify(radio(value)) + ')?.getAttribute("aria-checked")'), 'true')
-  }
+  const expectLayout = value => until('task layout ' + value, async () => await layout() === value)
   const key = async (value, code, virtualKeyCode) => {
     for (const type of ['keyDown', 'keyUp']) await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {
       type, key: value, code, ...(type==='keyDown' && value==='Enter' ? {text:'\r'} : {}), windowsVirtualKeyCode: virtualKeyCode, nativeVirtualKeyCode: virtualKeyCode,
@@ -37,6 +35,9 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
     const title = button.querySelector('.focus-task-list__title')
     const status = button.querySelector('.focus-task-list__state')
     const time = button.querySelector('.focus-task-list__time')
+    const subagents = button.querySelector('.focus-task-list__subagents')
+    const subagentStates = subagents?.querySelector('.focus-task-list__subagent-states')
+    const subagentCount = subagents?.querySelector('.focus-task-list__subagent-count')
     const tag = row.querySelector('[data-focus-zone-footer]')
     const visible = node => Boolean(node?.getClientRects().length && getComputedStyle(node).visibility === 'visible')
     const tagBounds = tag?.getBoundingClientRect()
@@ -44,15 +45,21 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
     return {
       name: title?.textContent,
       width: button.getBoundingClientRect().width,
+      height: button.getBoundingClientRect().height,
       titleWidth: title?.getBoundingClientRect().width,
       mark: button.querySelector('[data-focus-state-icon]')?.dataset.focusStateIcon,
       bucket: button.dataset.bucket,
       activity: button.dataset.activity,
       status: visible(status) ? status.textContent : null,
       time: visible(time),
+      subagents: subagents ? {states: visible(subagentStates) ? subagentStates.textContent.trim() : null,
+        statesWidth: visible(subagentStates) ? subagentStates.clientWidth : null,
+        statesContentWidth: visible(subagentStates) ? subagentStates.scrollWidth : null,
+        count: visible(subagentCount) ? subagentCount.textContent.trim() : null, title: subagents.title} : null,
       tag: visible(tag) ? tag.textContent.trim() : null,
       tagInViewport: visible(tag) && tagBounds.top >= listBounds.top && tagBounds.bottom <= listBounds.bottom,
       accessibleName: button.getAttribute('aria-label'),
+      accessibleDescription: button.getAttribute('aria-description'),
     }
   })()`)
   async function checkList() {
@@ -78,10 +85,14 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
     }
     throw Error('Could not size real split List to ' + target + ' px')
   }
-  await until('Focus task layout controls and original tasks', () => read('!!window.taskLayoutProof && document.querySelectorAll(".focus-context[data-session-id]").length >= 4 && !!document.querySelector(' + JSON.stringify(radio('list')) + ')'))
+  await until('Focus task layout control and original tasks', () => read('!!window.taskLayoutProof && document.querySelectorAll(".focus-context[data-session-id]").length >= 4 && !!document.querySelector(' + JSON.stringify(trigger) + ')'))
   if (restoreOnly) {
     await expectLayout('list')
     assert.equal(await read('window.taskLayoutProof.restored'), true)
+    await layouts.open()
+    await layouts.checked('list')
+    await key('Escape', 'Escape', 27)
+    await layouts.close()
     result.topology=await read('window.taskLayoutProof.topology()')
     result.layout = 'list'
     await frame('restored-list', 'The original private user document restores List in a second Electron process')
@@ -97,23 +108,32 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
   const cardsHeight = await rowHeight()
   await read('window.unifiedFocusProof.theme("dark")')
   await frame('cards-dark', 'Default Cards in the original Focus project')
-  // Freeze one actual Chromium transition frame for independent visual review.
+  assert.equal(await read(`Boolean(document.querySelector('.focus-task-toolbar button[aria-label="Task layout"]'))`), false)
   await motion('no-preference')
-  const indicator = control + ' .segmented-control__indicator'
-  await read(`document.querySelector(${JSON.stringify(indicator)}).addEventListener('transitionrun', event => {
-    const animation=event.target.getAnimations().find(item=>item.transitionProperty==='transform')
-    if (!animation) return
-    animation.pause()
-    animation.currentTime=animation.effect.getTiming().duration*0.35
-  }, {once:true})`)
-  await click(radio('list'))
+  await layouts.open()
+  await layouts.checked('cards')
+  await frame('layout-menu-dark', 'List owns the separate layout menu, with Cards selected')
+  await key('Escape', 'Escape', 27)
+  await layouts.close()
+  await until('Escape returns to the layout trigger', () => read(`document.activeElement === document.querySelector(${JSON.stringify(trigger)})`))
+  assert.equal(await layout(), 'cards', 'Dismissing the menu leaves the current layout')
+  await layouts.choose('list')
   await expectLayout('list')
-  await until('original segmented indicator in flight', () => read('document.querySelector(' + JSON.stringify(indicator) + ').getAnimations().some(a=>a.playState==="paused")'))
-  await frame('layout-transition', 'Midpoint of the actual segmented indicator transition, sampled at 35% of its duration')
-  await read('Promise.all(document.querySelector(' + JSON.stringify(indicator) + ').getAnimations().map(a=>{a.play();return a.finished}))')
   const listHeight = await rowHeight()
   assert.ok(listHeight < cardsHeight, 'The actual Agent layout becomes denser: ' + listHeight + ' vs ' + cardsHeight)
   result.refinement = { wide: await checkList(), narrow: [] }
+  assert.equal((await rowFacts('rollout'))?.subagents, null, 'A different Run cannot supply child observations to the current task')
+  assert.equal((await rowFacts('retention'))?.subagents, null, 'A different native Session cannot supply child observations to the current task')
+  const observedParent = await rowFacts('working')
+  const summary = observedParent?.subagents
+  assert.ok(summary, 'The exact original task displays its observed subagents')
+  assert.ok(summary.states, 'The wide parent row shows its observed state mix')
+  assert.ok(summary.statesWidth >= summary.statesContentWidth, 'All four states fit in the actual wide parent row')
+  for (const expected of ['1 waiting', '1 running', '1 completed', '1 unknown']) {
+    assert.ok(summary.title.includes(expected), `Original parent summary includes ${expected}`)
+    assert.ok(observedParent.accessibleDescription?.includes(expected), `Original parent accessible description includes ${expected}`)
+  }
+  result.subagents = { initial: summary, differentRun: 'excluded', differentNativeSession: 'excluded' }
   await frame('list-dark', 'Compact project rows at desktop width')
   await read(`document.querySelector(${JSON.stringify(first)}).addEventListener('transitionrun', event => {
     if (event.propertyName !== 'background-color') return
@@ -128,7 +148,7 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
   await until('row color transition in flight', () => read(`document.querySelector(${JSON.stringify(first)}).getAnimations().some(item => item.playState === 'paused' && item.transitionProperty === 'background-color')`))
   assert.equal(await read(`document.querySelector(${JSON.stringify(first)}).getBoundingClientRect().top`), originalY, 'Pointer feedback leaves the original task position stable')
   await frame('row-hover-transition', 'Actual List row hover halfway through its background-color transition')
-  await movePointer(radio('list'))
+  await movePointer(trigger)
   await read(`Promise.allSettled(document.querySelector(${JSON.stringify(first)}).getAnimations().map(animation => {animation.play(); return animation.finished}))`)
   result.refinement.hoverStable = true
 
@@ -137,6 +157,7 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
   assert.equal(resultRow.activity, 'unknown', 'The completed Result has separate unconfirmed child activity')
   assert.equal(resultRow.status, null, 'A completed Result cannot grow a second line for Idle')
   assert.match(resultRow.accessibleName, /Idle/)
+  assert.match(resultRow.subagents.title, /coverage unknown/i, 'An incomplete roster does not claim zero observed children as complete coverage')
   assert.match(recoveryRow.status, /Interrupted/)
   result.refinement.resultRow = resultRow
   result.refinement.recoveryRow = recoveryRow
@@ -150,9 +171,13 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
   await read('window.unifiedFocusProof.theme("light")')
   await motion('reduce')
   await settle()
-  assert.equal(await read('getComputedStyle(document.querySelector(' + JSON.stringify(indicator) + ')).transitionDuration'), '0s')
   assert.equal(await read(`getComputedStyle(document.querySelector(${JSON.stringify(first)})).transitionDuration`), '0s')
   await frame('list-narrow-light', 'Light 420px scan in reduced motion')
+  await layouts.open()
+  await layouts.checked('list')
+  await frame('layout-menu-420', 'At 420 px the layout menu lists two choices and checks Compact list')
+  await key('Escape', 'Escape', 27)
+  await layouts.close()
   win.setContentSize(1440, 900)
   await settle()
   await read('document.querySelector(' + JSON.stringify(first) + ').focus()')
@@ -164,7 +189,36 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
   assert.equal(await read('document.activeElement===document.querySelector(' + JSON.stringify(first) + ')'), true)
   await key(' ', 'Space', 32)
   await until('Space opens the original reader', () => read('!!document.querySelector(".agent-information-reader")'))
-  await frame('quick-look', 'Explicit keyboard preview of the original Agent')
+  const details = '.agent-information-reader details.agent-subagent-details'
+  await until('Quick Look contains the parent’s subagent disclosure', () => read(`Boolean(document.querySelector(${JSON.stringify(details + ' > summary')}))`))
+  await click(details + ' > summary')
+  const childRows = () => read(`Array.from(document.querySelectorAll(${JSON.stringify(details + '[open] [data-subagent-id]')})).map(item => ({id: item.dataset.subagentId, state: item.dataset.subagentState, label: item.textContent.trim()}))`)
+  const expectedChildren = new Map([
+    ['compare-release-data', ['running', /Running/]],
+    ['check-payment-access', ['waiting', /Waiting for permission/]],
+    ['review-release-notes', ['completed', /Completed/]],
+    ['verify-rollback-plan', ['unknown', /Status unknown/]],
+  ])
+  const children = await childRows()
+  assert.equal(children.length, expectedChildren.size)
+  for (const child of children) {
+    assert.ok(expectedChildren.has(child.id), `Quick Look retained exact child ${child.id}`)
+    const [state, label] = expectedChildren.get(child.id)
+    assert.equal(child.state, state)
+    assert.match(child.label, label)
+  }
+  assert.equal(await read(`Boolean(document.querySelector(${JSON.stringify(details + ' [data-subagent-id] button, ' + details + ' [data-subagent-id] a')}))`), false)
+  result.subagents.details = children
+  await frame('quick-look-subagents', 'Original Agent Quick Look expands the read-only subagent states')
+  await read('window.taskLayoutProof.settleChild()')
+  await until('open Quick Look reflects the original child completion', async () =>
+    (await childRows()).some(child => child.id === 'compare-release-data' && child.state === 'completed'))
+  const changedParent = await rowFacts('working')
+  assert.equal(changedParent.mark, result.refinement.wide.ordinary.mark, 'A child-only completion keeps the otherwise working parent')
+  assert.equal(changedParent.height, result.refinement.wide.ordinary.height, 'A child-only update preserves the parent row height')
+  assert.match(changedParent.subagents.title, /2 completed/, 'The same parent row reflects the child-only change')
+  assert.doesNotMatch(changedParent.subagents.title, /running/)
+  result.subagents.completed = {summary: changedParent.subagents, details: await childRows(), unchangedParent: changedParent.mark}
   await key('Escape', 'Escape', 27)
   await until('Escape returns to the original row', () => read('!document.querySelector(".agent-information-reader") && document.activeElement===document.querySelector(' + JSON.stringify(first) + ')'))
   await key('Enter', 'Enter', 13)
@@ -174,6 +228,16 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
   assert.equal(await draft(), before.drafts.working)
   const originalKey = await read('document.querySelector(' + JSON.stringify(first) + ').closest("[data-focus-card-key]").dataset.focusCardKey')
   await frame('selected-workface', 'Original selection and draft with the list and workface open')
+  await click(viewButton(root, 'map'))
+  await until('one Map action activates the original Map view', () => read(`Boolean(document.querySelector(${JSON.stringify(map)}))`))
+  assert.equal(await read(`Boolean(document.querySelector(${JSON.stringify(map + ' button[aria-label="Task layout"]')}))`), false, 'Map does not offer a task layout control')
+  await layouts.close()
+  await frame('map-without-layout', 'Map is one click away and carries no task layout arrow')
+  await click(viewButton(map, 'list'))
+  await expectLayout('list')
+  await until('returning from Map restores the original selected workface', async () => await draft() === before.drafts.working)
+  assert.equal(await read('document.querySelector("[data-focus-agent-selected=true]")?.dataset.focusCardKey'), originalKey)
+  result.menu = { escapeRestoredFocus: true, mapDirect: true, mapHasNoLayout: true, returnedLayout: 'list', restoredSelectedDraft: true }
 
   for (const width of [420, 360]) {
     const actual = await setSplitWidth(width)
@@ -181,6 +245,8 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
     await settle()
     const rows = await checkList()
     assert.ok(rows.ordinary.titleWidth > rows.ordinary.width / 2, 'The title takes most of the main row even in a narrow split')
+    assert.equal(rows.ordinary.subagents.count, '4', 'The narrow split keeps the exact observed subagent count visible')
+    assert.equal(rows.ordinary.subagents.states, null, 'The narrow split reserves detailed state text for Quick Look')
     assert.ok(rows.web.tagInViewport && rows.api.tagInViewport, 'The actual split screenshot includes both worktree Tags')
     if (width === 360) assert.equal(rows.ordinary.time, false, 'Time yields at the most constrained List width')
     assert.equal(await draft(), before.drafts.working)
@@ -198,11 +264,17 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
   await read('document.querySelector(' + JSON.stringify(first) + ').scrollIntoView({block:"center"})')
   const beforeSwitch = await selectedVisible()
   assert.ok(beforeSwitch.scrollable && beforeSwitch.visible, 'Selected task starts within a truly scrollable project list')
-  await click(radio('cards'))
+  await layouts.choose('cards')
   await expectLayout('cards')
   const afterCards = await selectedVisible()
   assert.ok(afterCards.visible && afterCards.key === beforeSwitch.key, 'Card reflow preserves the visible original task')
-  await key('ArrowRight', 'ArrowRight', 39)
+  await read(`document.querySelector(${JSON.stringify(trigger)}).focus()`)
+  await key('ArrowDown', 'ArrowDown', 40)
+  await until('keyboard opens layout choices', () => read(`Boolean(document.querySelector(${JSON.stringify(menu)}))`))
+  await layouts.checked('cards')
+  await key('End', 'End', 35)
+  await key('Enter', 'Enter', 13)
+  await layouts.close()
   await expectLayout('list')
   assert.equal(await draft(), before.drafts.working)
   assert.equal(await read('document.querySelector("[data-focus-agent-selected=true]")?.dataset.focusCardKey'), originalKey)

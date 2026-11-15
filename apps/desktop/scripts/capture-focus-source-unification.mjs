@@ -14,7 +14,7 @@ const root=resolve(import.meta.dirname,'../../..'),desktop=join(root,'apps/deskt
 assert.ok(process.argv[2]==='--evidence'&&process.argv[3]&&(process.argv.length===4||process.argv.length===5&&['--primary-only','--member-state','--unconfirmed','--source-recovery','--source-connection','--takeover-feedback','--task-layout','--inline-rename'].includes(process.argv[4])),'Use --evidence <private evidence directory> [--primary-only|--member-state|--unconfirmed|--source-recovery|--source-connection|--takeover-feedback|--task-layout|--inline-rename]')
 const taskLayout=process.argv[4]==='--task-layout',inlineRename=process.argv[4]==='--inline-rename'
 const layoutMutation=process.env.AGENTMUX_FOCUS_LAYOUT_MUTATION
-assert.ok(!taskLayout || !layoutMutation || ['omit-layout','hide-mandatory','repeat-result-idle'].includes(layoutMutation),'Known Focus task layout mutation')
+assert.ok(!taskLayout || !layoutMutation || ['omit-layout','hide-mandatory','repeat-result-idle','unqualified-subagents'].includes(layoutMutation),'Known Focus task layout mutation')
 const sourceConnection=process.argv[4]==='--source-connection'
 const takeoverFeedback=process.argv[4]==='--takeover-feedback',sourceRecovery=process.argv[4]==='--source-recovery',primaryOnly=process.argv[4]==='--primary-only',memberState=process.argv[4]==='--member-state',unconfirmed=process.argv[4]==='--unconfirmed'||sourceRecovery
 const sourceOnly=taskLayout||inlineRename||sourceRecovery||takeoverFeedback||sourceConnection
@@ -79,6 +79,13 @@ try{
       transformations.push({path:relative(root,path),mutation:layoutMutation,sourceSHA256:hash(source),loadedSHA256:hash(code)})
       return {contents:code,loader:'tsx'}
     }
+    if(taskLayout && layoutMutation==='unqualified-subagents' && component==='agent-observation.ts'){
+      const exactRun=' && roster.run.runId === session.control.run.runId'
+      assert.equal(source.split(exactRun).length,2,'One original Run match in subagent observation')
+      const code=source.replace(exactRun,'')
+      transformations.push({path:relative(root,path),mutation:layoutMutation,sourceSHA256:hash(source),loadedSHA256:hash(code)})
+      return {contents:code,loader:'ts'}
+    }
     if((taskLayout || inlineRename) && component==='store.ts'){
       let code=source
       if(taskLayout && layoutMutation==='omit-layout'){
@@ -118,7 +125,7 @@ try{
     }
     return{contents:source,loader:path.endsWith('tsx')?'tsx':path.endsWith('ts')?'ts':'js'}
   });builder.onLoad({filter:/\.css$/},async({path})=>{if(!path.startsWith(root+'/')||path.includes('/node_modules/'))return;const source=await readFile(path,'utf8');inputs.set(path,hash(source));return{contents:source,loader:'css'}})}}
-  for(const file of ['main.cjs','entry.mjs',...(taskLayout?['task-layout-main.cjs']:[]),...(inlineRename?['inline-rename.mjs','inline-rename-main.cjs']:[]),...(takeoverFeedback?['feedback.mjs','feedback-main.cjs']:[]),...(sourceConnection?['connection.mjs','connection-main.cjs']:[])])inputs.set(join(fixture,file),hash(await readFile(join(fixture,file))))
+  for(const file of ['main.cjs','entry.mjs',...(taskLayout||inlineRename?['task-layout-controls.cjs']:[]),...(taskLayout?['task-layout-main.cjs']:[]),...(inlineRename?['inline-rename.mjs','inline-rename-main.cjs']:[]),...(takeoverFeedback?['feedback.mjs','feedback-main.cjs']:[]),...(sourceConnection?['connection.mjs','connection-main.cjs']:[])])inputs.set(join(fixture,file),hash(await readFile(join(fixture,file))))
   inputs.set(mainFixture,hash(await readFile(mainFixture)))
   inputs.set(new URL(import.meta.url).pathname,hash(await readFile(new URL(import.meta.url))))
   const out=join(privateRoot,'out');await mkdir(out)
@@ -158,7 +165,7 @@ try{
   assert.ok(taskLayout?receipt.frames.length>=6:inlineRename?receipt.frames.length>=5:sourceConnection?receipt.frames.length>=6:takeoverFeedback?receipt.frames.length>=12:sourceRecovery?receipt.frames.length>=9:unconfirmed?receipt.frames.length===4:memberState?receipt.frames.length>=6:primaryOnly?receipt.frames.length===1&&receipt.frames[0].file==='unified-focus-source-primary.png':receipt.frames.length>=6,'Requested actual ordinary Focus scenes')
   receipt.sourceAfter=Object.fromEntries(await Promise.all([...inputs.keys()].map(async path=>[relative(root,path),hash(await readFile(path))])))
   receipt.unrelatedSourceDrift=Object.keys(receipt.inputs).filter(path=>receipt.sourceAfter[path]!==receipt.inputs[path])
-  const relevant=taskLayout||inlineRename?Object.keys(receipt.inputs).filter(path=>/Focus|focus-|store.ts|SegmentedControl|segmented-control|task-layout|inline-rename|display-label/.test(path)):takeoverFeedback?Object.keys(receipt.inputs).filter(path=>/AgentOperationFeedback|AgentRegionHeader|session-takeover|agent-operation|focus-source-unification/.test(path)):Object.keys(receipt.inputs)
+  const relevant=taskLayout||inlineRename?Object.keys(receipt.inputs).filter(path=>/Focus|focus-|store.ts|task-layout|inline-rename|display-label|[Ss]ubagent|[Aa]gent-[Oo]bservation|agent-status-decay|AgentInformation|SurfaceModeSwitch|surface-mode-switch|collaboration.css/.test(path)):takeoverFeedback?Object.keys(receipt.inputs).filter(path=>/AgentOperationFeedback|AgentRegionHeader|session-takeover|agent-operation|focus-source-unification/.test(path)):Object.keys(receipt.inputs)
   for(const path of relevant)assert.equal(receipt.sourceAfter[path],receipt.inputs[path],'Current relevant visual candidate remains stable '+path)
   receipt.capturedPass=true
 }catch(error){receipt.failure={name:error.name,message:error.message,stack:error.stack};process.exitCode=1}

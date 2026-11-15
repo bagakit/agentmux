@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict')
+const { focus, taskLayoutControls } = require('./task-layout-controls.cjs')
 
 module.exports = async function exerciseInlineRename({ win, read, until, settle, click, capture, result }) {
-  const focus = '.global-focus-surface:not([hidden])'
   const card = focus + ' button.focus-context[data-session-id="working"]'
   const editor = focus + ' .focus-context__rename'
   const search = focus + ' input[aria-label="Search contexts"]'
@@ -131,7 +131,7 @@ module.exports = async function exerciseInlineRename({ win, read, until, settle,
   await frame('rename-confirmed-360', 'Original Agent row restored with its confirmed name and focus')
 
   await setSize(420, 'light', 'reduce')
-  await click(focus + ' [role="radiogroup"][aria-label="Task layout"] [data-option="list"]')
+  await taskLayoutControls({ read, until, click }).choose('list')
   await until('actual list row enabled', () => read(`document.querySelector(${JSON.stringify(card)})?.classList.contains('focus-context--list')`))
   await open()
   await writeDraft(finalListName)

@@ -59,9 +59,29 @@ if(localTaskScene){
   sessions.push({...sessions[0],id,label,status:{state,source:'native-hook',observedAt},
    semanticStatus:{state,source:'native-hook',observedAt,stateEnteredAt:observedAt},
    control:{...sessions[0].control,agentSessionId:id,run:{runId:'original-run-'+id}},
-   ...(state==='waiting_permission'?{pendingInteraction:{id:'payment-read-request',kind:'permission',title:'允许读取付款回执？',operation:'read'}}:{}),
-   ...(id==='audit'&&window.__taskLayoutScene?{nativeSessionId:'original-audit-native',nativeSubagents:{run:{runId:'original-run-audit'},providerId:sessions[0].providerId,nativeSessionId:'original-audit-native',unconfirmed:true,sessions:[]}}:{})})
+   ...(state==='waiting_permission'?{pendingInteraction:{id:'payment-read-request',kind:'permission',title:'允许读取付款回执？',operation:'read'}}:{})})
  }
+}
+if (window.__taskLayoutScene) {
+ const child = (nativeAgentId, state, phase, observedAt, extra = {}) => ({
+  nativeAgentId, hookReceiptId: `receipt-${nativeAgentId}`, state, phase, observedAt, ...extra,
+ })
+ function addRoster(id, runId, children, { rosterSessionId = `native-${id}`, unconfirmed = false } = {}) {
+  const session = sessions.find(item => item.id === id)
+  const nativeSessionId = `native-${id}`
+  session.nativeSessionId = nativeSessionId
+  session.nativeHandle = {kind: 'provider', providerId: session.providerId, sessionId: nativeSessionId}
+  session.nativeSubagents = {run: {runId}, providerId: session.providerId, nativeSessionId: rosterSessionId, unconfirmed, sessions: children}
+ }
+ addRoster('working', 'original-run-working', [
+  child('compare-release-data', 'working', 'running', now - 1000),
+  child('check-payment-access', 'waiting', 'running', now - 2000, {waitingFor: 'permission'}),
+  child('review-release-notes', 'done', 'ended', now - 25 * 60000, {outcome: 'completed'}),
+  child('verify-rollback-plan', 'working', 'running', now - 25 * 60000),
+ ])
+ addRoster('rollout', 'previous-run-rollout', [child('historical-run-only', 'working', 'running', now - 1000)])
+ addRoster('retention', 'original-run-retention', [child('other-native-session-only', 'working', 'running', now - 1000)], {rosterSessionId: 'native-replaced-retention'})
+ addRoster('audit', 'original-run-audit', [], {unconfirmed: true})
 }
 const localReply='已核对原始数据与发布记录，接下来定位异常项并给出可验证的结论。'
 const timelines=Object.fromEntries(sessions.map(s=>[s.id,{agentSessionId:s.id,revision:1,items:[{id:'original-answer-'+s.id,agentSessionId:s.id,kind:'assistant_message',title:'Original answer',source:'native-hook',status:'complete',content:s.id==='working'?localReply:'原始分析内容与恢复位置仍然保留。',createdAt:now-30000,updatedAt:now-30000}]}]))
@@ -137,7 +157,13 @@ if(localTaskScene){
  dispose()
  useAppStore.setState(arranged,true)
  globalThis.__taskLayoutAdmitWriter()
- window.taskLayoutProof={restored:restoreLayout,topology:()=>{const state=useAppStore.getState();return {tabs:state.tabs,layouts:state.layouts,drafts:state.agentComposerDrafts}},checkpoint:async()=>{await checkpointAgentOperations();return JSON.parse(localStorage.getItem('agentmux-workbench-v1')).state.focusTaskLayout}}
+ window.taskLayoutProof={restored:restoreLayout,topology:()=>{const state=useAppStore.getState();return {tabs:state.tabs,layouts:state.layouts,drafts:state.agentComposerDrafts}},checkpoint:async()=>{await checkpointAgentOperations();return JSON.parse(localStorage.getItem('agentmux-workbench-v1')).state.focusTaskLayout},settleChild(){
+  useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id !== 'working' ? session : {
+   ...session, nativeSubagents: { ...session.nativeSubagents, sessions: session.nativeSubagents.sessions.map(child => child.nativeAgentId !== 'compare-release-data' ? child : {
+    ...child, hookReceiptId: 'receipt-release-data-completed', state: 'done', phase: 'ended', outcome: 'completed', observedAt: Date.now(),
+   }) },
+  }) }))
+ }}
 }
 if(window.__inlineRenameScene)prepareInlineRename({api,useAppStore})
 if(window.__sourceConnectionScene)prepareSourceConnection({api,snapshot,opening})
