@@ -26,7 +26,7 @@
 
 ### 语义流的模块边界
 
-统一对话语义流由 [`@agentmux/conversation`](../../packages/conversation/package.json) 持有。进程外消费者可用包入口投影已经从来源读取并核对过的记录。实时产品的公共入口仍是 [`@agentmux/core/conversation`](../../packages/core/package.json)，由 Core 管理原 Session 和读取范围。Provider 原生协议由 [`@agentmux/providers`](../../packages/providers/package.json) 按厂商实现，经 Core 的 [`AgentProvider`](../../packages/core/src/agent-provider.ts) 接入。共享界面由 `@agentmux/client-ui` 消费公共结果。
+统一对话语义流由 [`@agentmux/conversation`](../../packages/conversation/package.json) 持有。Core 依赖该包，也通过 [`AgentProvider`](../../packages/core/src/agent-provider.ts) 装配 [`@agentmux/providers`](../../packages/providers/package.json) 的原生协议适配。运行时读取经过 [`@agentmux/core/conversation`](../../packages/core/package.json) 的公共合同，原 Session 和读窗归 Core 管理。离线消费者可以直接从 [`@agentmux/conversation`](../../packages/conversation/src/index.ts) 导入 `projectConversationStream`。调用方提供已从来源核对的记录、读取范围和覆盖情况，纯投影仅依赖这些输入，无需宿主、Core 或 Provider。
 
 | 边界 | 实现与责任 |
 | --- | --- |
@@ -164,9 +164,10 @@ Core 的 [`agent-outbound-message`](../../packages/core/src/agent-outbound-messa
 
 ```mermaid
 flowchart LR
-  Provider[Provider 原生记录] --> Core[Core 来源适配与纯语义流]
+  Provider[Provider 原生记录] --> Core[Core 来源读取与适配]
   Captured[Session Store captured 流] --> Core
-  Core --> Public[统一公共 Reader]
+  Core --> Semantics[Conversation 纯语义投影]
+  Semantics --> Public[Core 公共读取窗口]
   Public --> Window[Desktop IPC 与 Focus 阅读状态]
   Public --> Mobile[Mobile Hosted 阅读状态]
   Window --> Shared[client-ui 共同消息与过程]
