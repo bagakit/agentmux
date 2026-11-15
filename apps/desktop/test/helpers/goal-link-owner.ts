@@ -1,10 +1,11 @@
 import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, relative, resolve } from 'node:path'
-import { createRequire } from 'node:module'
+import { createRequire, isBuiltin } from 'node:module'
 import { createHash } from 'node:crypto'
 import { vi } from 'vitest'
 import { connectAgentMuxRpc } from '@agentmux/core'
+import { candidateResolve } from '../../scripts/candidate-package-resolve.mjs'
 import { headlessFixture } from '../../../../packages/core/test/helpers/headless-runtime-fixture'
 
 export function goalLinkBuildPlugin(consumer: 'original-private-Host' | 'actual-public-CLI' = 'original-private-Host') {
@@ -36,9 +37,21 @@ export async function goalLinkOwnerFixture() {
   try {
     const require = createRequire(import.meta.url), root = resolve(import.meta.dirname, '../../../..')
     await symlink(join(root, 'apps/host/node_modules'), join(directory, 'node_modules'), 'dir')
+    const source = { name: 'goal-link-current-owners', setup(build: import('esbuild').PluginBuild) {
+      build.onResolve({ filter: /^[^./]/ }, async args => {
+        if (args.pluginData?.goalOwnerDependency) return
+        if (isBuiltin(args.path)) return { path: args.path, external: true }
+        if (/^@agentmux\/(?:core|demand)(?:\/|$)/u.test(args.path))
+          return { path: candidateResolve(root, args.path, { source: true }) }
+        const dependency = await build.resolve(args.path, { importer: args.importer, resolveDir: args.resolveDir,
+          kind: args.kind, namespace: args.namespace, pluginData: { goalOwnerDependency: true } })
+        return dependency.errors.length ? { errors: dependency.errors } : { path: dependency.path, external: true }
+      })
+    } }
     await require('esbuild').build({ entryPoints: [join(root, 'apps/desktop/test/fixtures/goal-links/owner.mjs')], outfile: worker,
-      bundle: true, platform: 'node', format: 'esm', packages: 'external', logLevel: 'silent',
-      plugins: [goalLinkBuildPlugin()] })
+      bundle: true, platform: 'node', format: 'esm', logLevel: 'silent',
+      banner: { js: "import{createRequire as __createRequire}from'node:module';const require=__createRequire(import.meta.url);" },
+      plugins: [source, goalLinkBuildPlugin()] })
     vi.stubEnv('AGENTMUX_TEST_OWNER_ENTRY', worker)
     const native = await headlessFixture()
     cleanupNative = () => native.cleanup()

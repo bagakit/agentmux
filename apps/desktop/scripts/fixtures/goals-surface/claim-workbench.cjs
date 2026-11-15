@@ -107,4 +107,21 @@ module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result
     await waitFor(`[...document.querySelectorAll('[role="tooltip"]')].some(element => element.textContent.includes('Supervisor') && element.textContent.includes('Mira') && element.textContent.includes('Idle'))`)
     await capture(`${width}-${theme}-confirm-agent-hover`, width)
   }
+  for (const [width, theme] of [[1260, 'dark'], [620, 'light']]) {
+    await size(width)
+    await evaluate('goalsPlan.activeTickets()')
+    await evaluate(`goalsVisual.appearance(${JSON.stringify(theme)})`)
+    await click(query('[data-surface-mode="tickets"]'))
+    await waitFor('document.querySelectorAll("[data-active-ticket]").length === 5')
+    assert.equal(await evaluate(`${query('[data-surface-mode="tickets"]')}.scrollWidth <= ${query('[data-surface-mode="tickets"]')}.clientWidth`), true)
+    assert.equal(await evaluate(`${query('[aria-label="Active tickets"]')}.scrollWidth <= ${query('[aria-label="Active tickets"]')}.clientWidth`), true)
+    await capture(`${width}-${theme}-active-tickets`, width)
+  }
+  await evaluate('goalsVisual.seed("one")')
+  await evaluate('goalsPlan.activeTickets(true);goalsVisual.appearance("light")')
+  await waitFor(`Boolean(${query('[data-surface-mode="tickets"]')})`)
+  await click(query('[data-surface-mode="tickets"]'))
+  await waitFor(`document.body.innerText.includes('Active tickets are unavailable')`)
+  await capture('620-light-active-tickets-unavailable', 620)
+
 }

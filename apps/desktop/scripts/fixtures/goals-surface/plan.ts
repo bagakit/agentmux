@@ -119,6 +119,35 @@ export function goalPlanPreview(seed: (mode: string) => void, render: () => void
         render()
       })
     },
+    activeTickets(unavailable = false) {
+      seed('many')
+      const { demands } = useAppStore.getState()
+      const [first, second] = Object.values(demands)
+      const owner = { runtimeId: 'preview-ticket-runtime', namespace: 'preview-ticket-store' }
+      const node = (id: string, title: string, state: import('@agentmux/demand').GoalActiveNode['state']): import('@agentmux/demand').GoalActiveNode =>
+        ({ nodeId: id.repeat(43), title, state, unknown: state === 'unknown' ? ['dispatch-link'] : [], predecessors: [] })
+      const goals = [
+        { goalId: first!.id, goalUpdatedAt: first!.updatedAt, nodes: [
+          node('A', 'Verify workspace recovery after restart', 'review'),
+          node('B', 'Publish the recovery guide', 'ready'),
+          node('C', 'Check the original Agent connection', 'unknown'),
+        ] },
+        { goalId: second!.id, goalUpdatedAt: second!.updatedAt, nodes: [
+          node('D', 'Keep the terminal reading position while the original Agent continues to produce output after reconnecting', 'changes'),
+          node('E', 'Record reproducible performance measurements', 'working'),
+        ] },
+      ]
+      api.demands.delegation = (async (operation, input) => {
+        if (operation !== 'goal.plan.active') return originalDelegation(operation, input)
+        if (unavailable) throw Error('The original active Goal index is unconfirmed.')
+        return { owner, view: 'manage', goals }
+      }) as typeof originalDelegation
+      flushSync(() => {
+        useAppStore.setState({ demands: Object.fromEntries([first!, second!].map(goal => [goal.id,
+          { ...goal, address: formatGoalAddress(goal.id, owner.runtimeId, owner.namespace) }])) })
+        render()
+      })
+    },
     inspection() {
       seed('confirmed')
       const store = useAppStore.getState(), original = store.demands[store.selectedDemandId!]!

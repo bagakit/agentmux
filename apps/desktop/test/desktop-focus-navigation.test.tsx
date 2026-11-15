@@ -1530,7 +1530,7 @@ it('source-qualified Goal links distinguish stores on one real semantic Runtime 
   } finally { await fixture.close() }
 }, 60_000)
 
-it('copied Goal plan links and the real CLI reveal the original graph without creating work or stealing the retained draft', async () => {
+it('copied Goal plan links, active Ticket links and the real CLI reveal the original graph without creating work or stealing the retained draft', async () => {
   const fixture = await goalLinkOwnerFixture(), owner = await fixture.open('original')
   let server: AgentMuxControlServer | undefined, client: Awaited<ReturnType<typeof connectAgentMuxRpc>> | undefined
   const lifecycle = [vi.spyOn(api.sessions, 'launchAgent'), vi.spyOn(api.sessions, 'submitPrompt'), vi.spyOn(api.sessions, 'resume'), vi.spyOn(api.sessions, 'stop')]
@@ -1624,6 +1624,44 @@ it('copied Goal plan links and the real CLI reveal the original graph without cr
     expect(document.activeElement).toBe(outside)
     expect({ value: outside.value, start: outside.selectionStart, end: outside.selectionEnd }).toEqual(preserved)
     expect(await ingress.receive(ticketUrl!)).toBeNull()
+    const ticketSelector = `[data-active-ticket="${readId}"]`
+    const openObject = vi.spyOn(api.ui, 'openObjectLink').mockImplementation(async url => {
+      const issue = await ingress.receive(url)
+      if (issue) throw Error(issue)
+    })
+    const readTickets = vi.spyOn(api.demands, 'delegation').mockImplementation(async (method, input) => owner.client.call(method, input))
+    let invalidateTickets: (() => void) | undefined
+    vi.spyOn(api.demands, 'onChanged').mockImplementation(listener => {
+      invalidateTickets = () => listener(['exact'], false)
+      return () => { invalidateTickets = undefined }
+    })
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Back to goals"]')!.click())
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-surface-mode="tickets"]')!.click())
+    const queue = await owner.client.call('goal.plan.active', { view: 'manage' })
+    expect(queue.goals[0]?.nodes.map(node => node.nodeId)).toContain(readId)
+    await vi.waitFor(() => expect(container.querySelector(ticketSelector)?.textContent ?? '',
+      container.querySelector('[aria-label="Active tickets"]')?.textContent).toContain('Read original graph'))
+    expect(readTickets).toHaveBeenCalledWith('goal.plan.active', { view: 'manage' })
+    expect(container.querySelector(ticketSelector)?.textContent).toContain(created.goal.title)
+    const search = container.querySelector<HTMLInputElement>('[aria-label="Search tickets"]')!
+    const changeSearch = (value: string) => act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, value)
+      search.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await changeSearch('No matching item')
+    expect(container.querySelector(ticketSelector)).toBeNull()
+    await changeSearch('Read original graph')
+    expect(container.querySelector(ticketSelector)).toBeTruthy()
+    readTickets.mockRejectedValueOnce(Error('Active index unavailable'))
+    await act(async () => { invalidateTickets!() })
+    await vi.waitFor(() => expect(container.textContent).toContain('Active index unavailable'))
+    expect(container.querySelector(ticketSelector)).toBeTruthy()
+    const refresh = [...container.querySelectorAll('button')].find(button => button.textContent === 'Refresh tickets')!
+    await act(async () => refresh.click())
+    await vi.waitFor(() => expect(container.textContent).not.toContain('Active index unavailable'))
+    await act(async () => container.querySelector<HTMLButtonElement>(ticketSelector)!.click())
+    expect(openObject).toHaveBeenCalledWith(ticketUrl)
+    await vi.waitFor(() => expect(container.querySelector(`[data-goal-plan-detail="${readId}"]`)).toBeTruthy())
     const originalNode = plan.plan!.nodes[0]!
     const revised = await owner.client.call('goal.plan.revise', { goalId: 'exact',
       revision: { operationId: 'add-second-ticket', expectedRevision: 1, alignmentRevision: 1, nodes: [
