@@ -136,7 +136,10 @@
 /* A state, not an action: the row and its chevron are what a person clicks, and green stays the primary action's. */
 .browser-profile-editor__uses small[data-state='open'] { color: var(--text-2); }
 .browser-profile-editor__error { margin: 0; color: var(--red-text); font-size: var(--fs-meta); line-height: 1.5; }
-.browser-profile-editor__error button { border: 0; padding: 0; background: transparent; color: var(--text); text-decoration: underline; cursor: pointer; font: inherit; }
+.browser-profile-editor__error[data-profile-text-draft] { margin: calc(-1 * var(--sp-3)) 0 0 calc(36px + var(--sp-4)); }
+.browser-profile-editor__error[data-profile-text-draft][role="status"] { color: var(--text-2); }
+.browser-profile-editor__error:not([data-profile-text-draft]) button { border: 0; padding: 0; background: transparent; color: var(--text); text-decoration: underline; cursor: pointer; font: inherit; }
+.browser-profile-text-draft__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-1); }
 
 .browser-profile-editor__confirm { display: grid; gap: var(--sp-4); padding: var(--sp-4) var(--sp-5); border-radius: var(--radius); background: var(--red-bg); }
 .browser-profile-editor__confirm p { margin: 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.55; }

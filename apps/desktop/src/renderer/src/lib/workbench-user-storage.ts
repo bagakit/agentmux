@@ -223,7 +223,7 @@ export function createWorkbenchUserDocument(port: UserStatePort, original: () =>
         const native = fragments()
         let source: Storage | undefined
         for (const name of names) {
-          if (ready.has(name) || Object.hasOwn(native, name)) continue
+          if (name === 'browserProfileTextDrafts' || ready.has(name) || Object.hasOwn(native, name)) continue
           source ??= original()
           if (name === 'moteAvatarSaveDrafts') {
             const count = source.length
@@ -250,7 +250,10 @@ export function createWorkbenchUserDocument(port: UserStatePort, original: () =>
       const work = (async () => {
         await hydrate()
         let value = fragments()[name] as DesktopFragmentValues[N]
-        if (!Object.hasOwn(fragments(), name)) {
+        if (!Object.hasOwn(fragments(), name) && name === 'browserProfileTextDrafts') {
+          // The structured Profile text member has no Desktop localStorage predecessor.
+          value = null as DesktopFragmentValues[N]
+        } else if (!Object.hasOwn(fragments(), name)) {
           const source = original(), held: [string, string][] = []
           if (name === 'moteAvatarSaveDrafts') {
             const entries: Record<string, string> = {}

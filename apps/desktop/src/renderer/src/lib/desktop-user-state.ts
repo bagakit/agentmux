@@ -10,6 +10,10 @@ export const desktopUserDocument = createWorkbenchUserDocument(api.ui, () => win
 })
 const browserValue = <N extends DesktopFragmentName>(name: N): DesktopFragmentValues[N] => {
   if (typeof window === 'undefined') return (name === 'moteAvatarSaveDrafts' ? {} : null) as DesktopFragmentValues[N]
+  if (name === 'browserProfileTextDrafts') {
+    const raw = localStorage.getItem(DESKTOP_FRAGMENT_KEYS[name])
+    return (raw === null ? null : JSON.parse(raw)) as DesktopFragmentValues[N]
+  }
   if (name !== 'moteAvatarSaveDrafts') return localStorage.getItem(DESKTOP_FRAGMENT_KEYS[name]) as DesktopFragmentValues[N]
   const entries: Record<string, string> = {}
   for (let index = 0; index < localStorage.length; index++) {
@@ -33,7 +37,7 @@ export const desktopUserFragments = {
       for (const key of Object.keys(previous)) if (!(key in next)) localStorage.removeItem(key)
       for (const [key, raw] of Object.entries(next)) localStorage.setItem(key, raw)
     } else if (value === null) localStorage.removeItem(DESKTOP_FRAGMENT_KEYS[name])
-    else localStorage.setItem(DESKTOP_FRAGMENT_KEYS[name], value as string)
+    else localStorage.setItem(DESKTOP_FRAGMENT_KEYS[name], name === 'browserProfileTextDrafts' ? JSON.stringify(value) : value as string)
   },
   async checkpoint(name: DesktopFragmentName) { if (preview) await api.ui.requestStorageFlush(); else await desktopUserDocument.checkpoint(name) },
   subscribe: desktopUserDocument.subscribe

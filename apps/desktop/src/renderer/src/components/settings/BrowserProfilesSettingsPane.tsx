@@ -4,16 +4,16 @@ import { BrowserProfileCookieFiles } from './BrowserProfileCookieFiles'
 import { BrowserProfileBookmarks } from './BrowserProfileBookmarks'
 import { BrowserProfileExtensions } from './BrowserProfileExtensions'
 import { Switch, TextInput, Textarea } from '@agentmux/client-ui/input'
-import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import * as RovingFocus from '@radix-ui/react-roving-focus'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { describeError, presentError } from '@agentmux/client-ui/error-presentation'
-import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
+import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react'
 import { SettingsNavigation } from '../SettingsNavigation'
 import type { BrowserProfileSite, BrowserProfileSummary, BrowserProfileFolder } from '../../../../shared/contracts'
 import { BROWSER_PROFILE_COOKIE_SKIP_REASONS, type BrowserProfileCookieSkipCounts, type BrowserProfileCookieSkipReason } from '../../../../shared/browser-profile-import-skip'
 import { api } from '../../lib/api'
 import { browserProfiles, useBrowserProfiles } from '../../lib/browser-profiles'
+import { browserProfileTextDrafts, createBrowserProfileTextDrafts, profileTextValue, type ProfileTextField } from '../../lib/browser-profile-text-drafts'
 import { browserProfileEnvironmentDescription } from '../../lib/browser-profile-presentation'
 import { useAppStore } from '../../store'
 import { awaitDesktopPresentation, desktopElementVisible, readDesktopOverlays } from '../../lib/desktop-presentation'
@@ -28,6 +28,7 @@ import { BrowserProfileOrganization } from './BrowserProfileOrganization'
 import { SettingsConceptSummary } from './SettingsConceptSummary'
 import * as Menu from '../HoverDropdownMenu'
 import { DocumentOverlayPortal } from '../WindowOverlayHost'
+import { useBrowserProfileTextEditor } from './useBrowserProfileTextEditor'
 import './settings-browser-profiles.css'
 
 const ThemeActionCreateIcon = semanticIconComponent('action.create')
@@ -136,10 +137,14 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
   // A confirmed recycle/restore notice outlives the editor without discarding its draft.
   const [notice, setNotice] = useState<string | null>(null)
   const [copyTarget, setCopyTarget] = useState<{ id: string; label: string } | null>(null)
+  const [textDrafts] = useState(() => __AGENTMUX_WEB_PREVIEW__ ? createBrowserProfileTextDrafts() : browserProfileTextDrafts)
+  const draftStorageError = useSyncExternalStore(textDrafts.subscribe, textDrafts.storageError)
   const selected = profiles.find(profile => profile.id === selectedId) ?? (retainedEditor.current?.id === selectedId ? retainedEditor.current : null) ?? profiles.find(profile => profile.isDefault) ?? profiles[0] ?? null
   if (selected) retainedEditor.current = selected
   const selectedIsActive = selected !== null && profiles.some(profile => profile.id === selected.id)
-  useEffect(() => { if (active) void browserProfiles.refresh() }, [active])
+  useEffect(() => {
+    if (active) { void browserProfiles.refresh(); void textDrafts.load() }
+  }, [active, textDrafts])
 
   const run = (async (key: string, action: () => Promise<unknown>, report = false) => {
     if (busy) return report ? { code: null, message: '' } : false
@@ -199,6 +204,10 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
         Couldn’t refresh Profiles{list.profiles ? '; showing the last list' : ''}. {list.error}{' '}
         <button type="button" disabled={list.reading} onClick={() => void browserProfiles.refresh()}>{list.reading ? 'Retrying…' : 'Retry'}</button>
       </p> : null}
+      {draftStorageError ? <p className="browser-profiles-settings__service" role="status">
+        Profile name and notes draft storage is unconfirmed. {draftStorageError}{' '}
+        <button type="button" onClick={() => void textDrafts.checkpoint()}>Retry draft storage</button>
+      </p> : null}
       <BrowserProfileTrash active={active && showTrash} folders={folders} onBack={() => setShowTrash(false)} onRestored={(id, label) => { setRestoredTarget({ id, label }); setNotice(`Restored \"${label}\" with its original sign-ins and site data.`) }} />
       <div className="settings-resource-split" hidden={showTrash}>
         <BrowserProfileLibrary list={list} active={active && !showTrash} selectedId={selected?.id ?? null} focusRequest={returnFocus} assignment={hueAssignment} openCounts={usage.openCounts} detailLine={detailLine}
@@ -209,7 +218,7 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
           <button className="small-button settings-resource-back" type="button" onClick={() => { setView('library'); setReturnFocus({ id: selected?.id ?? null }) }}>
             <ThemeNavigationBackIcon size={13} />All Profiles
           </button>
-          {selected && list.revision !== null ? <ProfileEditor active={active && !showTrash} assignment={hueAssignment} key={selected.id} profile={selected} revision={list.revision} folders={folders} proxies={list.proxies ?? []}
+          {selected && list.revision !== null ? <ProfileEditor active={active && !showTrash} assignment={hueAssignment} key={selected.id} profile={selected} textDrafts={textDrafts} revision={list.revision} folders={folders} proxies={list.proxies ?? []}
             uses={usage.byProfile.get(selected.id) ?? []} busy={busy} run={run} error={error} errorCode={errorCode} automation={automation} exitCheckUrl={exitCheckUrl}
             onShow={use => void showBrowser(use, onClose)} onOpen={() => void openInProfile(selected.id, onClose)}
             onCopy={() => void copy(selected, selected.revision)}
@@ -223,9 +232,10 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
   )
 }
 
-function ProfileEditor({ active, assignment, profile, revision, uses, busy, run, error, errorCode, automation, exitCheckUrl, editName, onNameEdited, onDeleted, onShow, onOpen, onCopy, folders, proxies }: {
+function ProfileEditor({ active, assignment, profile, textDrafts, revision, uses, busy, run, error, errorCode, automation, exitCheckUrl, editName, onNameEdited, onDeleted, onShow, onOpen, onCopy, folders, proxies }: {
   active: boolean
   profile: BrowserProfileSummary
+  textDrafts: ReturnType<typeof createBrowserProfileTextDrafts>
   folders: BrowserProfileFolder[]
   proxies: import('@agentmux/core/control').BrowserProxyAsset[]
   assignment: ReadonlyMap<string, number>
@@ -247,20 +257,15 @@ function ProfileEditor({ active, assignment, profile, revision, uses, busy, run,
   onOpen(): void
   onCopy(): void
 }) {
-  const [naming, setNaming] = useState(editName)
-  const [name, setName] = useState(profile.label)
-  const [notes, setNotes] = useState(profile.notes ?? '')
-  const [noting, setNoting] = useState(false)
   const [hues, setHues] = useState(false)
   const [saved, setSaved] = useState(false)
+  const name = useBrowserProfileTextEditor<HTMLInputElement>(profile, 'label', textDrafts, editName, () => setSaved(true))
+  const notes = useBrowserProfileTextEditor<HTMLTextAreaElement>(profile, 'notes', textDrafts, false, () => setSaved(true))
+  const nameFeedback = useId(), notesFeedback = useId()
+  useEffect(() => { if (editName) onNameEdited() }, [editName, onNameEdited])
   const [confirm, setConfirm] = useState<'delete' | null>(null)
   const recycleRevision = useRef(profile.revision)
-  const nameRevision = useRef(profile.revision)
-  const notesDraft = useRef<{ revision: string; baseline: string; focused: boolean; composing: boolean; deferredBlur: boolean; saving: boolean; saveOnReceipt: boolean } | null>(null)
-  const notesButton = useRef<HTMLButtonElement>(null)
-  const restoreNotesFocus = useRef(false)
   const [baselineRefresh, setBaselineRefresh] = useState(0)
-  const nameInput = useRef<HTMLInputElement>(null)
   const markButton = useRef<HTMLButtonElement>(null)
   const moreButton = useRef<HTMLButtonElement>(null)
   const huesGroup = useRef<HTMLDivElement>(null)
@@ -279,61 +284,12 @@ function ProfileEditor({ active, assignment, profile, revision, uses, busy, run,
   useEffect(() => { if (confirm) cancelDelete.current?.focus() }, [confirm])
   const closeHues = () => { setHues(false); markButton.current?.focus() }
   const closeConfirm = () => { setConfirm(null); moreButton.current?.focus() }
-  useEffect(() => { if (naming) { nameInput.current?.focus(); nameInput.current?.select() } }, [naming])
-  useEffect(() => { if (!naming) setName(profile.label) }, [profile.label])
-  useLayoutEffect(() => {
-    if (!noting && restoreNotesFocus.current) {
-      restoreNotesFocus.current = false
-      notesButton.current?.focus({ preventScroll: true })
-    }
-  }, [noting])
   useEffect(() => { if (!saved) return; const timer = setTimeout(() => setSaved(false), 1200); return () => clearTimeout(timer) }, [saved])
 
-  const commit = async (edit: Parameters<typeof api.browser.updateProfile>[1], expectedRevision = profile.revision, onConfirmed?: (profile: BrowserProfileSummary) => void): Promise<boolean> => {
-    const ok = await run('edit', async () => {
-      const confirmed = await api.browser.updateProfile(profile.id, edit, expectedRevision)
-      onConfirmed?.(confirmed)
-    })
+  const commit = async (edit: Parameters<typeof api.browser.updateProfile>[1], expectedRevision = profile.revision): Promise<boolean> => {
+    const ok = await run('edit', () => api.browser.updateProfile(profile.id, edit, expectedRevision))
     if (ok) setSaved(true)
     return ok
-  }
-  // A refused edit reopens the field with the person's own text; nothing they typed is dropped.
-  const finishName = async (keep: boolean) => {
-    onNameEdited()
-    const next = name.trim()
-    if (!keep || !next || next === profile.label) { setNaming(false); setName(profile.label); return }
-    setNaming(false)
-    if (!await commit({ label: next }, nameRevision.current)) { setName(next); setNaming(true) }
-  }
-  const nameKeys = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (isImeOwnedKeyboardEvent(event)) { event.stopPropagation(); return }
-    if (event.key === 'Enter') { event.preventDefault(); void finishName(true) }
-    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); void finishName(false) }
-  }
-  const closeNotes = (returnFocus = false) => {
-    notesDraft.current = null
-    restoreNotesFocus.current = returnFocus
-    setNoting(false)
-  }
-  const finishNotes = async (input: HTMLTextAreaElement) => {
-    const draft = notesDraft.current
-    if (!draft) return
-    if (draft.saving) { draft.saveOnReceipt = true; return }
-    const submitted = input.value
-    const next = submitted.trim()
-    if (next === draft.baseline) { closeNotes(); return }
-    draft.saving = true
-    const ok = await commit({ notes: next }, draft.revision, confirmed => {
-      draft.revision = confirmed.revision
-      draft.baseline = confirmed.notes ?? ''
-    })
-    draft.saving = false
-    const saveOnReceipt = draft.saveOnReceipt
-    draft.saveOnReceipt = false
-    if (!ok || notesDraft.current !== draft || !input.isConnected) return
-    if (draft.focused || draft.composing) return
-    if (input.value === submitted) closeNotes()
-    else if (saveOnReceipt) void finishNotes(input)
   }
   const blockedDelete = profile.isDefault ? 'The default Profile can’t be recycled' : uses.length ? `Used by ${uses.length} Browser${uses.length > 1 ? 's' : ''}` : null
   const open = uses.filter(use => use.state === 'open')
@@ -344,10 +300,13 @@ function ProfileEditor({ active, assignment, profile, revision, uses, busy, run,
         <button ref={markButton} type="button" className="browser-profile-editor__mark" aria-label={`Color for ${profile.label}`} aria-expanded={hues}
           onClick={() => setHues(value => !value)}><ProfileMark assignment={assignment} profile={profile} size="large" /></button>
         <div className="browser-profile-editor__who">
-          {naming ? <TextInput ref={nameInput} aria-label="Profile name" value={name} maxLength={128}
-            onChange={event => setName(event.target.value)} onKeyDown={nameKeys} onBlur={event => { if (!(event.relatedTarget instanceof Element && event.relatedTarget.closest('.browser-profile-editor__error'))) void finishName(true) }} />
-            : <h3><button type="button" className="browser-profile-editor__name" onClick={() => { nameRevision.current = profile.revision; setNaming(true) }} title="Rename">{profile.label}</button>
-              {saved && !noting ? <span className="browser-profile-editor__saved" role="status"><ThemeStatusSavedIcon size={12} /> Saved</span> : null}</h3>}
+          {name.editing ? <TextInput ref={name.control} aria-label="Profile name" value={name.value} maxLength={128}
+            aria-describedby={name.draft ? nameFeedback : undefined}
+            aria-invalid={name.draft && !name.value.trim() ? true : undefined}
+            onChange={event => { setSaved(false); name.change(event.currentTarget.value) }} onKeyDown={name.onKeyDown} onBlur={name.onBlur}
+            onFocus={name.onFocus} onCompositionStart={name.onCompositionStart} onCompositionEnd={name.onCompositionEnd} />
+            : <h3><button ref={name.opener} type="button" className="browser-profile-editor__name" onClick={name.start} title="Rename">{profile.label}</button>
+              {saved && !notes.editing ? <span className="browser-profile-editor__saved" role="status"><ThemeStatusSavedIcon size={12} /> Saved</span> : null}</h3>}
           <small>{profile.isDefault ? 'Default for new Browsers · ' : ''}{open.length ? `Open in ${open.length} Browser${open.length > 1 ? 's' : ''}` : 'Not open'}</small>
         </div>
         <button type="button" className="primary-button browser-profile-editor__open" onClick={onOpen}>Open Browser</button>
@@ -358,7 +317,7 @@ function ProfileEditor({ active, assignment, profile, revision, uses, busy, run,
               <Menu.Item className="tab-context-menu__item" disabled={profile.isDefault} onSelect={() => void run('default', () => api.browser.setDefaultProfile(profile.id))}>
                 {profile.isDefault ? 'Default for new Browsers' : 'Make default'}
               </Menu.Item>
-              <Menu.Item className="tab-context-menu__item" onSelect={() => { nameRevision.current = profile.revision; setNaming(true) }}>Rename</Menu.Item>
+              <Menu.Item className="tab-context-menu__item" onSelect={name.start}>Rename</Menu.Item>
               <Menu.Item className="tab-context-menu__item" disabled={busy !== null} onSelect={onCopy}>Copy settings</Menu.Item>
               <Menu.Separator className="tab-context-menu__separator" />
               <Menu.Item className="tab-context-menu__item browser-profile-menu__delete" disabled={blockedDelete !== null} onSelect={() => { recycleRevision.current = profile.revision; setConfirm('delete') }}>
@@ -387,53 +346,20 @@ function ProfileEditor({ active, assignment, profile, revision, uses, busy, run,
         </div>
       </RovingFocus.Root> : null}
 
-      {noting ? <Textarea className="browser-profile-editor__notes" aria-label="Notes" autoFocus maxLength={2000} value={notes}
-          onChange={event => setNotes(event.currentTarget.value)}
-          onFocus={() => { if (notesDraft.current) notesDraft.current.focused = true }}
-          onCompositionStart={() => { if (notesDraft.current) notesDraft.current.composing = true }}
-          onCompositionEnd={event => {
-            const draft = notesDraft.current
-            if (!draft) return
-            draft.composing = false
-            if (!draft.deferredBlur) return
-            draft.deferredBlur = false
-            const input = event.currentTarget
-            // The native final input may follow compositionend before this blur can commit it.
-            queueMicrotask(() => {
-              if (notesDraft.current === draft && input.isConnected && !draft.focused) void finishNotes(input)
-            })
-          }}
-          onBlur={event => {
-            const draft = notesDraft.current
-            if (!draft) return
-            draft.focused = false
-            if (event.relatedTarget instanceof Element && event.relatedTarget.closest('.browser-profile-editor__error')) return
-            if (draft.composing) { draft.deferredBlur = true; return }
-            void finishNotes(event.currentTarget)
-          }}
-          onKeyDown={event => {
-            if (notesDraft.current?.composing || isImeOwnedKeyboardEvent(event)) { event.stopPropagation(); return }
-            if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeNotes(true) }
-          }} />
-        : <button ref={notesButton} type="button" className="browser-profile-editor__note" data-empty={profile.notes ? undefined : ''} onClick={() => {
-          const baseline = profile.notes ?? ''
-          notesDraft.current = { revision: profile.revision, baseline, focused: false, composing: false, deferredBlur: false, saving: false, saveOnReceipt: false }
-          setNotes(baseline); setNoting(true)
-        }}>
+      {name.draft ? <ProfileTextFeedback id={nameFeedback} field="label" editor={name} /> : null}
+      {notes.editing ? <Textarea ref={notes.control} className="browser-profile-editor__notes" aria-label="Notes" maxLength={2000} value={notes.value}
+          aria-describedby={notes.draft ? notesFeedback : undefined}
+          onChange={event => { setSaved(false); notes.change(event.currentTarget.value) }} onKeyDown={notes.onKeyDown} onBlur={notes.onBlur}
+          onFocus={notes.onFocus} onCompositionStart={notes.onCompositionStart} onCompositionEnd={notes.onCompositionEnd} />
+        : <button ref={notes.opener} type="button" className="browser-profile-editor__note" data-empty={profile.notes ? undefined : ''} onClick={notes.start}>
           {profile.notes || 'What is this environment for?'}
         </button>}
+      {notes.draft ? <ProfileTextFeedback id={notesFeedback} field="notes" editor={notes} /> : null}
 
       {error ? <p className="browser-profile-editor__error" role="alert">{error}{errorCode === 'BROWSER_PROFILE_REVISION_CONFLICT' ? <> <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => void (async () => {
         await browserProfiles.refresh()
         const current = browserProfiles.get().profiles?.find(value => value.id === profile.id)
-        if (current) {
-          nameRevision.current = current.revision
-          if (notesDraft.current) {
-            notesDraft.current.revision = current.revision
-            notesDraft.current.baseline = current.notes ?? ''
-          }
-          setBaselineRefresh(value => value + 1)
-        }
+        if (current) setBaselineRefresh(value => value + 1)
       })()}>Reload</button></> : null}</p> : null}
 
       <BrowserProfileOrganization profile={profile} folders={folders} revision={revision} busy={busy !== null} run={run} onEdit={commit} />
@@ -521,6 +447,34 @@ function ProfileEditor({ active, assignment, profile, revision, uses, busy, run,
       </div> : null}
     </article>
   )
+}
+
+function ProfileTextFeedback({ id, field, editor }: {
+  id: string
+  field: ProfileTextField
+  editor: Pick<ReturnType<typeof useBrowserProfileTextEditor>, 'draft' | 'isSaving' | 'message' | 'checked' | 'retry' | 'reload' | 'discard' | 'hasEarlier' | 'showEarlier'>
+}) {
+  const draft = editor.draft
+  if (!draft) return null
+  const label = field === 'label' ? 'Name' : 'Notes'
+  const pending = editor.isSaving
+  const conflict = draft.state === 'conflict'
+  const unconfirmed = !pending && (draft.state === 'saving' || draft.state === 'unconfirmed')
+  const invalid = field === 'label' && !draft.value.trim()
+  const checkedValue = editor.checked && profileTextValue(editor.checked, field)
+  const canSave = !pending && !conflict && !invalid && (!unconfirmed || checkedValue !== undefined && checkedValue !== draft.value.trim())
+  const message = pending ? `Saving ${label.toLowerCase()}…` : invalid ? 'Enter a Profile name.' : conflict ? editor.message ?? `${label} draft kept. Reload the current Profile before saving again.` :
+    unconfirmed ? `${label} save unconfirmed. Your draft is kept.` : draft.state === 'failed' ? `${label} could not be saved. Your draft is kept.` : `${label} draft`
+  return <p id={id} className="browser-profile-editor__error" role={conflict || unconfirmed || invalid || draft.state === 'failed' ? 'alert' : 'status'} data-profile-text-draft={field}>
+    {message}{' '}{editor.message && !conflict ? `${editor.message} ` : null}
+    {checkedValue !== undefined ? <>{checkedValue === draft.attempt?.value ? 'The current Profile shows the submitted value.' : 'The current Profile shows a different value.'}{' '}</> : null}
+    <span className="browser-profile-text-draft__actions">
+      {conflict || unconfirmed ? <button className="small-button" type="button" onMouseDown={event => event.preventDefault()} onClick={() => void editor.reload()}>{conflict ? 'Reload' : 'Check saved Profile'}</button> : null}
+      {canSave ? <button className="small-button" type="button" onMouseDown={event => event.preventDefault()} onClick={editor.retry}>Save draft</button> : null}
+      <button className="small-button" type="button" onMouseDown={event => event.preventDefault()} onClick={editor.discard}>Discard draft</button>
+      {editor.hasEarlier && !pending ? <button className="small-button" type="button" onMouseDown={event => event.preventDefault()} onClick={editor.showEarlier}>Show earlier draft</button> : null}
+    </span>
+  </p>
 }
 
 /**

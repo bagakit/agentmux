@@ -157,6 +157,7 @@ import { initializeAgentBookmarks, agentBookmarks } from './lib/agent-bookmarks'
 import { initializeMoteAvatarDrafts } from './lib/mote-avatar-save-draft'
 import { initializeGlobalGoalPatrol } from './lib/global-goal-patrol-state'
 import { desktopUserDocument } from './lib/desktop-user-state'
+import { browserProfileTextDrafts } from './lib/browser-profile-text-drafts'
 import { noteBlockSelectionKey, restoreNoteBlockSelections, type NoteBlockPresentation } from './lib/note-block-selection'
 import { noteKnowledge, parseNoteFile } from './lib/note-knowledge'
 import { warmLauncherId, warmTerminalForLauncher, type WarmTerminalCreation } from './lib/warm-terminal-preview'
@@ -5684,6 +5685,7 @@ async function checkpointWorkbenchUserState(): Promise<void> {
   if (moteFloatingUnreadEditsPending()) await initializeMoteFloatingPreferences()
   await agentBookmarks.flush()
   if (agentBookmarks.pending()) throw new Error('Current Agent bookmarks are not yet saved. Original reading and current input are retained.')
+  await browserProfileTextDrafts.checkpointBeforeExit()
   await checkpointWorkbenchUserDocument()
 }
 /** The original shared document writer; unrelated fragment owners retain their own pending edits. */
@@ -5709,7 +5711,7 @@ async function saveSurveyPreferences(): Promise<AgentMuxSpatialSave> {
 }
 /** Pending edits outside a hydrated fragment are still user data, never an empty save queue. */
 export function auxiliaryUserDataPending(): boolean {
-  return launcherUnreadEditsPending() || moteFloatingUnreadEditsPending() || agentBookmarks.pending()
+  return launcherUnreadEditsPending() || moteFloatingUnreadEditsPending() || agentBookmarks.pending() || browserProfileTextDrafts.pending()
 }
 /** Admission ACK for this exact original registration input; no other settings save is required. */
 export async function checkpointMountedSpaceInputs(): Promise<void> {
