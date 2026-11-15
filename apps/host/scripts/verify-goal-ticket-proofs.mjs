@@ -8,6 +8,7 @@ const claims = [
   { name: 'baseline' },
   { name: 'trust-altered-ticket', path: 'packages/demand/src/goal-ticket-crypto.ts', failure: 'recomputing the Ticket hash cannot authorize an altered author' },
   { name: 'omit-claim-completion', path: 'packages/demand/src/demand-store.ts', failure: 'claim proof must bind the actual upstream completion' },
+  { name: 'ignore-absent-completion', path: 'packages/demand/src/goal-plan.ts', failure: 'an absent completion must keep the original pass visible and its successor waiting' },
   { name: 'restored' },
 ]
 for (const { name, path, failure } of claims) {

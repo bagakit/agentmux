@@ -4,6 +4,7 @@ import crossHost from './vitest.goal-cross-host.config.mts'
 const changes = {
   'trust-altered-ticket': { path: 'packages/demand/src/goal-ticket-crypto.ts', from: '!verify(null, original, key, signature)', to: 'false' },
   'omit-claim-completion': { path: 'packages/demand/src/demand-store.ts', from: 'predecessors: freezeGoalTicketDependencies(signer, id, plan, basis.predecessors)', to: 'predecessors: []' },
+  'ignore-absent-completion': { path: 'packages/demand/src/goal-plan.ts', from: "review?.verdict === 'pass' && !review.completion", to: 'false' },
   'skip-delivery-review-match': { path: 'packages/demand/src/demand-store.ts', from: 'if (projection.delegation.report?.delivery?.hash !== review.deliveryHash)', to: 'if (false)' },
   'omit-delivery-author': { path: 'packages/demand/src/demand-store.ts', from: 'scope.authorRuntimeId, report.authorAgentSessionId,', to: '' },
   'omit-delivery-report': { path: 'packages/demand/src/demand-store.ts', from: 'report.replyMessageId, report.grounding])).digest', to: 'report.replyMessageId])).digest' },

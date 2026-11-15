@@ -115,6 +115,19 @@ it('signs original Tickets, claims and completions through the public CLI', asyn
   changedResult.record.deliveryHash = '0'.repeat(64)
   expect((await verify(changedResult)).code).toBe(1)
   expect((await owner.call('reviewer', reviewArgs, reviewRequest)).plan.reviews[0].completion).toEqual(completion)
+  const completedSnapshot = await readFile(snapshotPath, 'utf8')
+  const missingCompletion = JSON.parse(completedSnapshot)
+  delete missingCompletion.demands.find((goal: { id: string }) => goal.id === goalId).plan.reviews[0].completion
+  try {
+    await writeFile(snapshotPath, JSON.stringify(missingCompletion))
+    const observed = await owner.call('reviewer', ['goal', 'plan', '--goal', goalId])
+    expect(observed.plan.reviews[0]).toMatchObject({ verdict: 'pass', deliveryHash })
+    expect(observed.planState.nodes, 'an absent completion must keep the original pass visible and its successor waiting').toMatchObject([
+      { id: childId, state: 'waiting' },
+      { id: nodeId, state: 'unknown', unknown: ['completion-proof'] },
+    ])
+  } finally { await writeFile(snapshotPath, completedSnapshot) }
+
   await owner.call(null, assign, { goalId, nodeId: childId, expectedRevision: reviewed.plan.revision,
     operationId: 'open-successor', assignment: { kind: 'open' } })
   const ready = await owner.call('worker', ['goal', 'plan', 'active'])

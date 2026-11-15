@@ -29,7 +29,11 @@ it('retains a shared-Host record and freezes a distinct worker Host through pers
   const task = intent(), { workerHostId: _remote, ...legacy } = task
   expect(delegationWorkerHostId(parseDemandDelegationIntent(legacy))).toBe('owner-host')
   await store.prepareDelegation('goal', task, 'owner')
-  const reopened = openDemandStore({ root }), saved = (await reopened.inspectDelegation('goal', task.operationId))!
+  let signingReads = 0
+  const reopened = openDemandStore({ root, goalTicketSigner: async () => { signingReads++; throw new Error('The Ticket signer is offline') } })
+  const saved = (await reopened.inspectDelegation('goal', task.operationId))!
+  await expect(reopened.confirmDelegationSubmission('goal', saved)).resolves.toEqual({})
+  expect(signingReads).toBe(0)
   expect(saved.workerHostId).toBe('worker-host')
   expect(delegationWorkerHostId(saved)).toBe('worker-host')
   expect((await reopened.prepareDelegation('goal', task, 'owner')).replayed).toBe(true)
