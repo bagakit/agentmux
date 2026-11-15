@@ -61,8 +61,28 @@ and original body if you need to confirm the same publication.
 
 The workspace owner can use `space mote group list`, `create`, `inspect`, `send` and `retry`.
 Group inspection reads the public stream and original member references without starting Agents.
-Send preserves the selected Motes with the original message. Retry addresses one member and
-retains the original input identity.
+An active Group member can inspect its own Group from its original Thread. Send preserves the
+selected Motes with the original message. Retry addresses one member and retains the original
+input identity.
+
+`space mote group create --input FILE|-` accepts optional `avatarMoteIds` (up to four selected Motes,
+with an empty list for the default Group icon), `announcement`, `topic` and `adminMoteIds` in the same original operation. The Topic is
+an existing topicId, its exact home zoneId and its expected Workspace resource. Read current
+Group settings and revision with `space mote group inspect`. From its original authenticated
+Thread, an active administrator can use `space mote group update`, `members add` and
+`members remove`. Each takes `--input FILE|-` with `groupId`, `expectedRevision`, and a
+stable `operationId`. Read the leaf help for the exact change. Only the authenticated workspace
+owner assigns administrators. Any current Mote can use `members leave` in its own Group
+Thread. Leave and removal retain old messages and the exact work Thread. Use the same input
+to confirm an unknown operation. A public announcement change is a Group system entry.
+An invitation keeps that admission's announcement and has a separate member receipt. Pending
+invitations remain tied to the Group's Thread. Reading their status starts no Agent.
+
+Use `space mote group file list` or `file read` with `--input FILE|-` to read within a bound
+Topic. Include the exact `groupId`, the accepted `inputOperationId` passed to this Thread, and the
+relative `path` (`.` or omitted for a root list). This access comes from current membership,
+the exact input, and the confirmed Topic. It cannot follow an outside link, grants no ordinary
+workspace operations, and ends with the authorized membership generation.
 
 Online status and heartbeat arrangements require actual Core facts and original receipts.
 If a heartbeat is arranged, inspect the same current role and authorized commitments before
