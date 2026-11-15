@@ -2807,10 +2807,10 @@ export async function registerIpc(args: {
   registerMoteChatIpc({ handleWithEvent, runtime: args.runtime })
   registerMoteConnectionIpc({ handleWithEvent, runtime: args.runtime })
   registerMoteDialogueIpc({ handleWithEvent, runtime: args.runtime })
-  handle('moteGroup:call', (method: unknown, params: unknown) => {
+  handle('moteGroup:call', (method: unknown, params: unknown) => ipcResult(() => {
     if (!isMoteGroupMethod(method) || method === 'space.mote.group.reply') throw new Error('This is not a Mote Group client action.')
     return args.runtime.callOriginalCore('local', method, parseMoteGroupParams(method, params), { transport: 'unix' })
-  })
+  }))
   registerMotePreferencesIpc({ handleWithEvent, socketPath: desktopBusinessSocketPath(), runtime: args.runtime })
   const executionBindingTransport = createDesktopExecutionBindings(args.runtime)
   const { bindings: executionBindings, readers: executionBindingReaders } = executionBindingTransport

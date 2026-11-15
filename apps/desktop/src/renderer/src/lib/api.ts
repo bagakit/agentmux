@@ -1722,6 +1722,7 @@ function requireDesktopApi(): AgentMuxDesktopApi {
   const preload: AgentMuxPreloadApi = window.agentmux
   return {
     ...preload,
+    moteGroup: { call: (method, input) => preload.moteGroup.call(method, input).then(unwrapIpcResult) },
     toolkit: createToolkitConfigurationApi(preload.toolkit),
     applications: { call: async (method, params) => unwrapSessionInputOperationResult(await preload.applications.call(method, params)) },
     conversation: createConversationReadApi(preload.conversation),

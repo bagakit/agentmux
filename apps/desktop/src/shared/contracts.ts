@@ -2439,7 +2439,8 @@ export type AgentMuxDesktopApi = {
   }
 }
 
-export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions' | 'scratch' | 'notebooks' | 'search' | 'browser' | 'hosts' | 'nodePublishing' | 'mesh' | 'hostRoutes' | 'spaceMounts' | 'applications' | 'conversation' | 'landmarks' | 'toolkit' | 'workbenchClose' | 'sourceFiles'> & {
+export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions' | 'scratch' | 'notebooks' | 'search' | 'browser' | 'hosts' | 'nodePublishing' | 'mesh' | 'hostRoutes' | 'spaceMounts' | 'applications' | 'conversation' | 'landmarks' | 'toolkit' | 'workbenchClose' | 'sourceFiles' | 'moteGroup'> & {
+  moteGroup: { call<M extends MoteGroupClientMethod>(method: M, input: AgentMuxRpcParams<M>): Promise<import('./ipc-result').IpcResult<AgentMuxRpcResult<M>>> }
   workbenchClose: { call<M extends import('@agentmux/core').SpaceCloseMethod>(method: M, input: import('@agentmux/core').SpaceCloseParams[M]): Promise<import('./ipc-result').IpcResult<import('@agentmux/core').SpaceCloseResults[M]>> }
   hostRoutes: import('./host-routes.js').PreloadHostRoutes
   sourceFiles: import('./source-files-client.js').SourceFilesPreloadApi

@@ -2,7 +2,7 @@ import { useRef, useState, type ReactNode } from 'react'
 import type { AgentMuxRpcParams, AgentMuxRpcResult } from '@agentmux/core'
 import { mintObjectId } from '@agentmux/core/object-id'
 import type { MoteGroupMember, MoteGroupSummary } from '@agentmux/core/mote/group'
-import type { MotePreferencesTarget } from '@agentmux/core/mote-preferences'
+import { sameMotePreferencesTarget, type MotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import { Button } from './Button.js'
 import { Notice } from './Notice.js'
 import { SemanticIcon } from '../theme/semantic-icon.js'
@@ -69,6 +69,17 @@ export function MoteGroupSettingsFields({ value, members, topicCandidates, rende
 
 type SettingsMethod = 'space.mote.group.update' | 'space.mote.group.members.add' | 'space.mote.group.members.remove'
 type Pending = { [M in SettingsMethod]: { method: M; input: AgentMuxRpcParams<M> } }[SettingsMethod]
+type SettingsEdit = { revision: number; baseline: MoteGroupSettingsValue; value: MoteGroupSettingsValue }
+
+function changedSettings({ baseline, value }: SettingsEdit): Partial<MoteGroupSettingsValue> {
+  const { topic } = value
+  const sameTopic = topic && baseline.topic ? sameMotePreferencesTarget(topic, baseline.topic) : topic === baseline.topic
+  return {
+    ...(JSON.stringify(value.avatarMoteIds) === JSON.stringify(baseline.avatarMoteIds) ? {} : { avatarMoteIds: value.avatarMoteIds }),
+    ...(value.announcement.trim() === baseline.announcement ? {} : { announcement: value.announcement }),
+    ...(sameTopic ? {} : { topic }),
+  }
+}
 const activeMember = (member: MoteGroupMember) => member.state === 'active'
 const invitationLabel = { pending: '入群通知待送', accepted: '已收到入群通知', failed: '入群通知未送达', unknown: '入群通知待核对' } as const
 function memberSummary(member: MoteGroupMember) {
@@ -79,18 +90,20 @@ function memberSummary(member: MoteGroupMember) {
   return member.thread ? '查看群内会话' : '尚未参与发言'
 }
 
-export function MoteGroupDetails({ group, candidates, topicCandidates, call, onUpdated, onPerspective, renderMoteAvatar }: {
+export function MoteGroupDetails({ group, candidates, topicCandidates, call, onReload, onUpdated, onPerspective, renderMoteAvatar }: {
   group: MoteGroupSummary
   candidates: readonly MoteGroupCandidate[]
   topicCandidates: readonly MoteGroupCandidate[]
   call: MoteGroupCall
+  onReload(): void
   onUpdated(group: MoteGroupSummary): void
   onPerspective(moteId: string): void
   renderMoteAvatar?: RenderAvatar | undefined
 }) {
   const [page, setPage] = useState<'members' | 'settings'>('members')
   const [invite, setInvite] = useState<string[]>([])
-  const [edit, setEdit] = useState<{ revision: number; baseline: MoteGroupSettingsValue; value: MoteGroupSettingsValue } | null>(null)
+  const [edit, setEdit] = useState<SettingsEdit | null>(null)
+  const [conflictRevision, setConflictRevision] = useState<number | null>(null)
   const [pending, setPending] = useState<Pending | null>(null)
   const [error, setError] = useState<string | null>(null)
   const inFlight = useRef(false)
@@ -100,21 +113,28 @@ export function MoteGroupDetails({ group, candidates, topicCandidates, call, onU
   const ready = Boolean(group.revision)
   const current = { avatarMoteIds: group.avatarMoteIds ?? [], announcement: group.announcement?.body ?? '', topic: group.topic ?? null }
   const staleEdit = edit !== null && edit.revision !== group.revision
+  const awaitingRevision = conflictRevision !== null && group.revision <= conflictRevision
+  const changing = pending !== null || awaitingRevision
 
   async function submit(action: Pending) {
     if (inFlight.current) return
     setPending(action)
     setError(null)
+    setConflictRevision(null)
     inFlight.current = true
     setBusy(true)
     try {
       const result = await call(action.method, action.input) as AgentMuxRpcResult<'space.mote.group.update'>
       onUpdated(result.group)
       setPending(null)
-      setEdit(null)
-      setInvite([])
+      if (action.method === 'space.mote.group.members.add') setInvite([])
+      if (action.method === 'space.mote.group.update' && action.input.adminMoteIds === undefined) setEdit(null)
     } catch (issue) {
-      setError(issue instanceof Error ? issue.message : String(issue))
+      if (issue instanceof Error && 'code' in issue && issue.code === 'MOTE_GROUP_REVISION_CONFLICT') {
+        setPending(null)
+        setConflictRevision(action.input.expectedRevision)
+        onReload()
+      } else setError(issue instanceof Error ? issue.message : String(issue))
     } finally {
       inFlight.current = false
       setBusy(false)
@@ -130,6 +150,10 @@ export function MoteGroupDetails({ group, candidates, topicCandidates, call, onU
     <div className="mote-group-settings__body">
     {error && pending ? <Notice tone="warning" heading="原群操作待核对" messageRole="status" density="compact"
       actions={<Button onClick={() => void submit(pending)} disabled={busy}>核对原操作</Button>}>{error}</Notice> : null}
+    {conflictRevision !== null && (page === 'members' || !staleEdit || awaitingRevision) ? <Notice tone="warning" density="compact" messageRole="status"
+      actions={awaitingRevision ? <Button onClick={onReload}>重读群资料</Button> : null}>
+      {awaitingRevision ? '群资料已更新，正在读取新版本。' : '已读取新版本，请按最新成员和群资料确认本次操作。'}
+    </Notice> : null}
     {page === 'members' ? <>
       <div className="mote-group-settings__members">{group.members.map(member => <div className="mote-group-settings__member" key={member.moteId}>
         <button type="button" onClick={() => onPerspective(member.moteId)}>
@@ -138,40 +162,38 @@ export function MoteGroupDetails({ group, candidates, topicCandidates, call, onU
           <span title={member.invitation?.issue} aria-description={member.invitation ? invitationLabel[member.invitation.status] : undefined}>{memberSummary(member)}</span>
         </button>
         {ready && activeMember(member) ? <div className="mote-group-settings__member-actions">
-          <Button disabled={Boolean(pending)} onClick={() => {
+          <Button disabled={changing} onClick={() => {
             const adminMoteIds = active.filter(item => item.role === 'admin' && item.moteId !== member.moteId).map(item => item.moteId)
             if (member.role !== 'admin') adminMoteIds.push(member.moteId)
             void submit({ method: 'space.mote.group.update', input: { ...base(), adminMoteIds } })
           }}>{member.role === 'admin' ? '撤下管理员' : '设为管理员'}</Button>
-          <Button disabled={Boolean(pending)} onClick={() => void submit({ method: 'space.mote.group.members.remove',
+          <Button disabled={changing} onClick={() => void submit({ method: 'space.mote.group.members.remove',
             input: { ...base(), memberIds: [member.moteId] } })}>移出</Button>
         </div> : null}
       </div>)}</div>
       {ready && available.length > 0 ? <details className="mote-group-settings__invite">
         <summary>邀请 Mote</summary>
         <div className="mote-group-settings__invite-options">{available.map(candidate => <label key={candidate.target.spaceId}>
-          <input type="checkbox" disabled={Boolean(pending)} checked={invite.includes(candidate.target.spaceId)} onChange={event => setInvite(
+          <input type="checkbox" disabled={changing} checked={invite.includes(candidate.target.spaceId)} onChange={event => setInvite(
             event.target.checked ? [...invite, candidate.target.spaceId] : invite.filter(id => id !== candidate.target.spaceId))} />
           {candidate.name}</label>)}</div>
-        <Button variant="primary" disabled={Boolean(pending) || !invite.length} onClick={() => void submit({ method: 'space.mote.group.members.add',
+        <Button variant="primary" disabled={changing || !invite.length} onClick={() => void submit({ method: 'space.mote.group.members.add',
           input: { ...base(), members: available.filter(candidate => invite.includes(candidate.target.spaceId)).map(candidate => candidate.target) } })}>邀请成员</Button>
       </details> : null}
     </> : <>
-      {staleEdit && !pending ? <Notice tone="warning" density="compact" messageRole="status"
-        actions={<Button onClick={() => setEdit(null)}>读取最新群资料</Button>}>群资料已更新。当前修改仍保留。</Notice> : null}
+      {staleEdit && !changing ? <Notice tone="warning" density="compact" messageRole="status"
+        actions={<Button onClick={() => setEdit({ revision: group.revision, baseline: current, value: { ...current, ...changedSettings(edit) } })}>按新版本继续编辑</Button>}>
+        群资料已更新。可以把当前修改带到新版本再确认。
+      </Notice> : null}
       <MoteGroupSettingsFields value={edit?.value ?? current} members={active} topicCandidates={topicCandidates} renderMoteAvatar={renderMoteAvatar}
-        disabled={Boolean(pending)} onChange={value => setEdit(previous => previous
+        disabled={changing} onChange={value => setEdit(previous => previous
           ? { ...previous, value } : { revision: group.revision, baseline: current, value })} />
-      <Button variant="primary" disabled={!edit || Boolean(pending) || staleEdit} onClick={() => {
+      <Button variant="primary" disabled={!edit || changing || staleEdit} onClick={() => {
         if (!edit) return
-        const { value, baseline } = edit
-        const changes = {
-          ...(JSON.stringify(value.avatarMoteIds) === JSON.stringify(baseline.avatarMoteIds) ? {} : { avatarMoteIds: value.avatarMoteIds }),
-          ...(value.announcement.trim() === baseline.announcement ? {} : { announcement: value.announcement.trim() || null }),
-          ...(value.topic?.spaceId === baseline.topic?.spaceId ? {} : { topic: value.topic }),
-        }
-        if (!Object.keys(changes).length) { setEdit(null); return }
-        void submit({ method: 'space.mote.group.update', input: { ...base(), expectedRevision: edit.revision, ...changes } })
+        const { announcement, ...changes } = changedSettings(edit)
+        if (announcement === undefined && !Object.keys(changes).length) { setEdit(null); return }
+        void submit({ method: 'space.mote.group.update', input: { ...base(), expectedRevision: edit.revision, ...changes,
+          ...(announcement === undefined ? {} : { announcement: announcement.trim() || null }) } })
       }}>保存群资料</Button>
     </>}
     </div>

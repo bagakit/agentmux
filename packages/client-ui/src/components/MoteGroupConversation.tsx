@@ -194,7 +194,7 @@ function GroupView({ call, groupId, initialMoteId, initialMembers, onChanged, on
   const [retrying, setRetrying] = useState<string | null>(null)
   const sendingRef = useRef(false)
   const observing = useRef(0)
-  const paging = useRef(false)
+  const reading = useRef<number | null>(null)
   const loaded = useRef(false)
   const latestSequence = useRef<number | null>(null)
   const list = useRef<HTMLDivElement>(null)
@@ -209,10 +209,10 @@ function GroupView({ call, groupId, initialMoteId, initialMembers, onChanged, on
   const visibleMessages = moteId ? messages.filter(message => message.deliveries.some(delivery => delivery.moteId === moteId) || (message.author.kind === 'mote' && message.author.moteId === moteId)) : messages
 
   const read = useCallback(async (beforeSequence?: number, quiet = false, replace = false) => {
-    if (quiet && paging.current) return
+    if (quiet && reading.current !== null) return
     const request = ++observing.current
+    reading.current = request
     if (!quiet) setLoading(true)
-    if (beforeSequence !== undefined) paging.current = true
     const height = list.current?.scrollHeight ?? 0
     try {
       const result = await call('space.mote.group.inspect', { groupId, limit: 60, ...(beforeSequence === undefined ? {} : { beforeSequence }) })
@@ -237,8 +237,8 @@ function GroupView({ call, groupId, initialMoteId, initialMembers, onChanged, on
       }
     } catch (error) { if (request === observing.current) setIssue(errorText(error)) }
     finally {
+      if (reading.current === request) reading.current = null
       if (request === observing.current) setLoading(false)
-      if (beforeSequence !== undefined) paging.current = false
     }
   }, [call, groupId])
 
@@ -249,7 +249,7 @@ function GroupView({ call, groupId, initialMoteId, initialMembers, onChanged, on
   useEffect(() => {
     void read()
     const timer = setInterval(() => void read(undefined, true), 2500)
-    return () => { ++observing.current; clearInterval(timer) }
+    return () => { ++observing.current; reading.current = null; clearInterval(timer) }
   }, [read])
   useEffect(() => {
     const viewport = list.current
@@ -332,7 +332,7 @@ function GroupView({ call, groupId, initialMoteId, initialMembers, onChanged, on
       {group.members.map(item => <button type="button" key={item.moteId} aria-pressed={item.moteId === moteId} onClick={() => selectView(item.moteId)}>{item.name}</button>)}
     </nav> : null}
     {membersOpen && group ? <MoteGroupDetails group={group} candidates={candidates} topicCandidates={topicCandidates} call={call}
-      onUpdated={summary => { ++observing.current; setGroup(summary); onChanged?.(); void read() }}
+      onReload={() => void read()} onUpdated={summary => { ++observing.current; setGroup(summary); onChanged?.(); void read() }}
       onPerspective={selectView} renderMoteAvatar={renderMoteAvatar} /> : null}
     {newerAvailable ? <Notice tone="info" density="compact" messageRole="status" actions={<Button onClick={() => {
       keepTail.current = true
