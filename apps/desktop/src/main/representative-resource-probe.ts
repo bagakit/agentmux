@@ -147,7 +147,8 @@ export async function measureRepresentativeWorkface(window: BrowserWindow, runti
     }
 
     if (!window.isVisible()) throw new Error('The representative Desktop window is not visible.')
-    if (process.platform === 'darwin' && !window.isFocused()) app.focus({ steal: true })
+    if (process.platform === 'darwin') app.focus({ steal: true })
+    window.moveTop()
     window.focus()
     window.webContents.focus()
     await selectTerminal(visible)
