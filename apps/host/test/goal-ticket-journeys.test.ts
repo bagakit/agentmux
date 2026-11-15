@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
@@ -96,6 +96,16 @@ it('signs original Tickets, claims and completions through the public CLI', asyn
     check: { command: check, result: 'Confirmed the commit content and its original Ticket trailer', evidence: [commitEvidence.href] },
   } }
   const reviewArgs = ['goal', 'plan', 'review', '--input', '-']
+  const snapshotPath = join(owner.original.root, 'demands', 'store.json')
+  const originalSnapshot = await readFile(snapshotPath, 'utf8')
+  const damagedSnapshot = JSON.parse(originalSnapshot)
+  damagedSnapshot.demands.find((goal: { id: string }) => goal.id === goalId).delegations[0].report.grounding.summary = 'Changed after delivery'
+  try {
+    await writeFile(snapshotPath, JSON.stringify(damagedSnapshot))
+    const refused = await owner.cli('reviewer', reviewArgs, reviewRequest)
+    expect(refused.code).toBe(1)
+    expect(refused.stderr).toContain('original delivery contents fail the Ticket digest check')
+  } finally { await writeFile(snapshotPath, originalSnapshot) }
   const reviewed = await owner.call('reviewer', reviewArgs, reviewRequest)
   const completion = reviewed.plan.reviews[0].completion
   expect(completion.record).toMatchObject({ kind: 'completed', ticketId: nodeId, attemptId: 'dispatch-git-ticket',
