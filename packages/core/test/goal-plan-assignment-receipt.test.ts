@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { parseGoalDelegationParams, parseGoalDelegationRpcResult } from '../src/goal-delegation.js'
 
-const target = { goalId: 'release', nodeId: 'verify', expectedRevision: 1, operationId: 'pick-up' }
+const target = { goalId: 'release', nodeId: 'verify', claimToken: '123456789ABC', operationId: 'pick-up' }
 const author = { kind: 'agent', id: 'worker', hostId: 'source', runtimeId: 'runtime' }
 const executor = { hostId: 'source', agentSessionId: 'worker' }
 const node = { id: 'verify', title: 'Verify', outcome: 'Verify build', criterionIds: ['build'], check: 'pnpm test', dependsOn: [], executor }
 const first = { operationId: 'plan', revision: 1, revisedAt: 1, author }
-const claim = { operationId: 'pick-up', revision: 2, revisedAt: 2, author, change: { nodeId: 'verify', assignment: { kind: 'claim' } } }
+const claim = { operationId: 'pick-up', revision: 2, revisedAt: 2, author, claim: { token: target.claimToken, predecessors: [] }, change: { nodeId: 'verify', assignment: { kind: 'claim' } } }
 const result = { goalId: 'release', goalUpdatedAt: 2, delegations: [], diskDurability: 'confirmed',
   plan: { alignmentRevision: 1, revision: 2, nodes: [node], history: [first, claim], reviews: [] } }
 
@@ -26,7 +26,7 @@ describe('Goal node assignment receipts', () => {
     }
     const plan = { ...result.plan, nodes: [{ ...node, executor: { ...executor, hostId: 'other' } }] }
     expect(() => parseGoalDelegationRpcResult('goal.plan.claim', { ...result, plan }, target)).toThrow()
-    expect(() => parseGoalDelegationRpcResult('goal.plan.assignment', result, { ...target, assignment: { kind: 'open' } })).toThrow()
+    expect(() => parseGoalDelegationRpcResult('goal.plan.assignment', result, { goalId: target.goalId, nodeId: target.nodeId, operationId: target.operationId, expectedRevision: 1, assignment: { kind: 'open' } })).toThrow()
   })
 
   it('scope pins comprise a Runtime and namespace, and only the connection supplies the claimant', () => {

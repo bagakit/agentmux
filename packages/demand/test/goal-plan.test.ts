@@ -219,7 +219,7 @@ describe('node delegation and review', () => {
     const goal = (await store.get('goal'))!
     expect(projectGoalPlan(goal.plan!, goal.delegations!, goal.alignment!.criteria).nodes[0])
       .toMatchObject({ state: 'unknown', unknown: ['criteria', 'dispatch-link'], staleCriteria: ['api'] })
-    expect(goalPlanDelegationIssue(goal.plan!, goal.delegations!, goal.alignment!.criteria, 'a', { hostId: 'local', agentSessionId: 'worker-a' }))
+    expect(goalPlanDelegationIssue(projectGoalPlan(goal.plan!, goal.delegations!, goal.alignment!.criteria).nodes[0], 'a', { hostId: 'local', agentSessionId: 'worker-a' }))
       .toBe('Plan node a is unknown (criteria, dispatch-link); only a ready node or one whose review requested changes can be delegated.')
   })
 

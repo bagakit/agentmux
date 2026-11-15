@@ -251,8 +251,11 @@ it('bounds a stale selection to its displayed revision and another owner with th
 it('reads the authenticated claimant on its exact Host while the node still awaits dispatch', async () => {
   const f = await workbench()
   await f.store.changePlanAssignment(goalId, 1, 'open-node', { nodeId: 'build', assignment: { kind: 'open' } }, author, () => {})
-  await f.store.changePlanAssignment(goalId, 2, 'agent-claimed', { nodeId: 'build', assignment: { kind: 'claim' } },
-    { kind: 'agent', id: 'worker', hostId: 'remote', runtimeId: 'worker-runtime' }, () => {})
+  const opened = await bridge.api!.demands.delegation('goal.plan', { goalId, expectedOwner })
+  const token = opened.planState?.nodes.find(node => node.id === 'build')?.claimToken
+  expect(token).toBeTruthy()
+  await f.store.changePlanAssignment(goalId, token!, 'agent-claimed', { nodeId: 'build', assignment: { kind: 'claim' } },
+    { kind: 'agent', id: 'worker', hostId: 'remote', runtimeId: 'worker-runtime' }, () => {}, expectedOwner)
   const result = await bridge.api!.demands.delegation('goal.plan', { goalId, expectedOwner })
   await act(async () => applyGoalDelegationResult(result))
   expect(entry('build').parentElement!.querySelector('.goal-plan-node__name')?.textContent).toBe('Remote engineer')

@@ -117,18 +117,22 @@ it('a reviewed changes verdict follows the existing explicit reassignment rule',
 
 it('keeps claims explicit across full revisions, closures, delegation and ended Goals', async () => {
   const vacant = node({ executor: null }), claimant = { kind: 'agent' as const, id: 'worker-a', hostId: 'local', runtimeId: 'runtime-a' }
-  const assign = (expectedRevision: number, operationId: string, kind: 'open' | 'close' | 'claim') =>
-    store.changePlanAssignment('goal', expectedRevision, operationId, { nodeId: 'node', assignment: { kind } }, claimant, () => {})
+  const owner = { runtimeId: 'goal-runtime', namespace: 'goal-namespace' }
+  const assign = (expectedRevision: number | string, operationId: string, kind: 'open' | 'close' | 'claim') =>
+    store.changePlanAssignment('goal', expectedRevision, operationId, { nodeId: 'node', assignment: { kind } }, claimant, () => {}, owner)
   await expect(revise('implicit-open', [{ ...vacant, claimOpen: true }])).rejects.toThrow('explicit plan assignment')
   await revise('vacant', [vacant])
   await assign(2, 'open', 'open')
   await expect(delegate()).rejects.toThrow('open for claim')
   await expect(revise('implicit-assign')).rejects.toThrow('explicit plan assignment')
   await assign(3, 'close', 'close')
-  await expect(assign(4, 'closed-claim', 'claim')).rejects.toThrow('not open for claim')
+  await expect(assign('expired', 'closed-claim', 'claim')).rejects.toThrow('node or its prerequisites changed')
   await assign(4, 'reopen', 'open')
+  const current = (await store.get('goal'))!
+  const token = projectGoalPlan(current.plan!, [], current.alignment!.criteria, { ...owner, goalId: current.id }).nodes[0]!.claimToken!
+  expect(token).toBeTruthy()
   await store.update('goal', { status: 'cancelled' })
-  await expect(assign(5, 'late-claim', 'claim')).rejects.toThrow('unfinished Goal')
+  await expect(assign(token, 'late-claim', 'claim')).rejects.toThrow('unfinished Goal')
   expect((await store.get('goal'))!.plan?.nodes[0]).toMatchObject({ executor: null, claimOpen: true })
   await store.update('goal', { status: 'in_progress' })
   await assign(5, 'close-for-delegation', 'close')
