@@ -87,7 +87,7 @@ describe('GitService (contract, fake executor)', () => {
     })
     expect(host.run).toHaveBeenCalledWith(
       'git',
-      ['-C', _hygiene_fixturePath("srv/repo"), 'status', '--porcelain=v1', '-z', '--branch', '--untracked-files=all'],
+      ['-C', _hygiene_fixturePath("srv/repo"), 'status', '--porcelain=v1', '-z', '--branch', '--no-ahead-behind', '--untracked-files=all'],
       RUN_OPTIONS
     )
   })
@@ -326,6 +326,47 @@ describe('GitService (real git, temporary repository)', { timeout: 20_000 }, () 
     await run(['commit', '-q', '--allow-empty', '-m', 'init'])
     return root
   }
+
+  it('keeps Changes identical without exact tracking divergence and reads sync counts separately', async () => {
+    const root = await makeRepo()
+    const host = new LocalExecutionHost()
+    let statusOutput = ''
+    const service = new GitService(() => new LocalExecutionHost({ runner: async (command, args, options) => {
+      const result = await host.run(command, args, options)
+      if (command === 'git' && args[2] === 'status') statusOutput = result.stdout
+      return result
+    } }))
+    const cfg: AppConfig = {
+      ...config,
+      workspaces: [{ id: 'repo', name: 'repo', hostId: 'local', path: root, kind: 'folder' }]
+    }
+    async function git(...args: string[]) {
+      const result = await host.run('git', ['-C', root, ...args], RUN_OPTIONS)
+      expect(result.exitCode, result.stderr).toBe(0)
+      return result.stdout
+    }
+
+    const branch = (await git('branch', '--show-current')).trim()
+    await git('config', 'status.aheadBehind', 'true')
+    await git('branch', 'fixture-upstream')
+    await git('commit', '--allow-empty', '-qm', 'local change')
+    await git('switch', '-q', 'fixture-upstream')
+    await git('commit', '--allow-empty', '-qm', 'upstream change')
+    await git('switch', '-q', branch)
+    await writeFile(join(root, 'pending.txt'), 'pending\n')
+
+    const noUpstream = await service.status('repo', cfg)
+    expect(noUpstream).toMatchObject({ kind: 'git-repository', branch, changes: [{ path: 'pending.txt', untracked: true }] })
+    expect(statusOutput.split('\0')[0]).toBe(`## ${branch}`)
+    expect(await service.aheadBehind('repo', cfg)).toEqual({ upstream: null, ahead: 0, behind: 0 })
+
+    await git('branch', '--set-upstream-to=fixture-upstream')
+    const fullStatus = await git('status', '--porcelain=v1', '-z', '--branch', '--ahead-behind', '--untracked-files=all')
+    expect(fullStatus.split('\0')[0]).toBe(`## ${branch}...fixture-upstream [ahead 1, behind 1]`)
+    expect(await service.status('repo', cfg)).toEqual(noUpstream)
+    expect(statusOutput.split('\0')[0]).toBe(`## ${branch}...fixture-upstream [different]`)
+    expect(await service.aheadBehind('repo', cfg)).toEqual({ upstream: 'refs/heads/fixture-upstream', ahead: 1, behind: 1 })
+  })
 
   it('sees a change, stages exactly it, and commits it — the full slice against real git', async () => {
     const root = await makeRepo()
