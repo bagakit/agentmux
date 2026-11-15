@@ -2,7 +2,7 @@ import { isAbsolute, join, resolve } from 'node:path'
 import { createClaudeExecutionOperations } from './claude-execution-operations.js'
 import { pathToFileURL } from 'node:url'
 import type { AgentExecutionHelperContext } from '../agent-execution-helper.js'
-import { runAgentExecutionHelper, runAgentExecutionHelperCli, type AgentExecutionHelperIo } from '../agent-execution-helper-run.js'
+import { runAgentExecutionHelper, runAgentExecutionHelperCli, type AgentExecutionHelperIo } from '../agent-execution/helper-run.js'
 import { parseClaudeExecutionMessage, parseClaudeExecutionServerMessage, projectClaudeExecutionResponse, buildClaudeNativeExecutorLaunchSpec } from '@agentmux/providers/claude/execution-protocol'
 
 export function parseClaudeExecutionRunArguments(args: readonly string[]): AgentExecutionHelperContext {

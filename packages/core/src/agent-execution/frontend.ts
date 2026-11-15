@@ -2,8 +2,8 @@ import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { createServer } from 'node:http'
 import type { Readable, Writable } from 'node:stream'
 import { WebSocket, WebSocketServer, createWebSocketStream } from 'ws'
-import { agentControlFailureCode, AgentExecutionRpcFrontend, type AgentExecutionRelayContext } from './agent-execution-rpc-relay.js'
-import { createExecutionFrameChannel } from './agent-execution-channel.js'
+import { agentControlFailureCode, AgentExecutionRpcFrontend, type AgentExecutionRelayContext } from './rpc-relay.js'
+import { createExecutionFrameChannel } from './channel.js'
 
 const DEFAULT_FRAME_BYTES = 32 * 1024 * 1024
 type NativeId = string | number

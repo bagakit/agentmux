@@ -4,9 +4,9 @@ import type { AgentMuxSpatialStateStore } from './spatial-state.js'
 import { spatialAgentOpenRecord } from './spatial-agent-open-contract.js'
 import type { AgentExecutionInspection } from './agent-execution-coordinator.js'
 import type { AgentExecutionReference, AgentExecutionHelperStart } from './agent-execution-contract.js'
+import type { ExecutionFrameFact } from './agent-execution/bridge.js'
 import { AgentMuxError } from './errors.js'
 
-export type ExecutionFrameFact = { startByte: number; endByte: number; bytes: number; sha256: string; syntax: 'invalid-json' }
 /** No original bytes, exception text, launch input, environment or grant. */
 export type ExecutionHelperDiagnostic = { start: AgentExecutionHelperStart; cursor: number | null; ownerInstanceId: string | null }
 export type AgentExecutionSourceDiagnostics = { sourceRuntimeId: string; reference: AgentExecutionReference;

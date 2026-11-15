@@ -5,7 +5,7 @@ import { createRequire } from 'node:module'
 import { join, isAbsolute, dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { isDeepStrictEqual } from 'node:util'
-import { AgentExecutionBridge, ExecutionProtocolFrameError, type AgentExecutionBridgeState, type AgentExecutionBridgePort, type AgentExecutionBridgeSide, type AgentExecutionBridgeConnection } from './agent-execution-bridge.js'
+import { AgentExecutionBridge, ExecutionProtocolFrameError, type AgentExecutionBridgeState, type AgentExecutionBridgePort, type AgentExecutionBridgeSide, type AgentExecutionBridgeConnection } from './agent-execution/bridge.js'
 import { inspectSourceExecutionDiagnostics, type ExecutionSourceDiagnosticsOwner, type ExecutionJournalDiagnostics, type AgentExecutionSourceDiagnostics } from './agent-execution-source-diagnostics.js'
 import type { AgentMuxClient } from './client.js';
 import type { AgentMuxHostAgentCreateInput } from "./client-contract.js";
@@ -33,7 +33,7 @@ export interface AgentExecutionOpenInput {
   resourceGrant: import('./agent-execution-helper.js').AgentExecutionResourceGrant
   agent: Omit<AgentMuxHostAgentCreateInput, 'toolExecution'> & { agentSessionId: string; createOperationId: string }
 }
-type OperationKey = import('./agent-execution-journal.js').AgentExecutionOperationKey
+type OperationKey = import('./agent-execution/journal.js').AgentExecutionOperationKey
 type Diagnostic = { code: string; message: string; generation?: string; operation?: OperationKey }
 export type AgentExecutionDiagnostic = Diagnostic & (
   | { scope: 'unclassified'; side?: AgentExecutionBridgeSide; runId?: string }

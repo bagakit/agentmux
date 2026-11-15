@@ -40,7 +40,7 @@ import { parseAutomaticInputSource, sameAutomaticInputSource } from './automatic
 import { decodePreparedRun } from './prepared-run.js'
 import { isTerminalMouseReportPayload } from './terminal-input-protocol.js'
 import { executionHelperTerminalLaunch, parseAgentExecutionNotices } from './agent-execution-helper.js'
-import { AgentExecutionJournal } from './agent-execution-journal.js'
+import { AgentExecutionJournal } from './agent-execution/journal.js'
 import { AgentExecutionHelperStore } from './agent-execution-helper-store.js'
 import { parseAgentToolExecutionBinding } from './agent-tool-execution.js'
 import { parsePreparedAuthorProfile, publicAuthorProfile } from './author-profile.js'
@@ -5160,7 +5160,7 @@ export class AgentMuxClient {
   }
 
   /** Inspect the exact resource owner's retained operation; no native action or replay. */
-  async inspectAgentExecutionOperation(key: import('./agent-execution-journal.js').AgentExecutionOperationKey): Promise<import('./agent-execution-journal.js').AgentExecutionOperation | null> {
+  async inspectAgentExecutionOperation(key: import('./agent-execution/journal.js').AgentExecutionOperationKey): Promise<import('./agent-execution/journal.js').AgentExecutionOperation | null> {
     key = structuredClone(key)
     safeId(key.bindingId, 'Execution binding id')
     safeId(key.streamGeneration, 'Execution stream generation')

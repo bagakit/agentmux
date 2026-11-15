@@ -1,10 +1,9 @@
 import { createHash } from 'node:crypto'
-import { inputChunkBytes, retainedInputFits } from './recoverable-input-frame.js'
-import type { AgentMuxClient } from './client.js'
-import type { AgentMuxClientEvent, AgentMuxRunDataEvent, AgentMuxRunInputOperation, AgentMuxNativeService, AgentMuxRunState } from './types.js'
-import { AgentMuxError } from './errors.js'
-import type { ExecutionFrameFact } from './agent-execution-source-diagnostics.js'
-import { EXECUTION_FRAME_LIMIT } from './agent-execution-channel.js'
+import { inputChunkBytes, retainedInputFits } from '../recoverable-input-frame.js'
+import type { AgentMuxClient } from '../client.js'
+import type { AgentMuxClientEvent, AgentMuxRunDataEvent, AgentMuxRunInputOperation, AgentMuxNativeService, AgentMuxRunState } from '../types.js'
+import { AgentMuxError } from '../errors.js'
+import { EXECUTION_FRAME_LIMIT } from './channel.js'
 
 export type AgentExecutionBridgeSide = 'frontend' | 'executor'
 type Side = AgentExecutionBridgeSide
@@ -32,6 +31,8 @@ export interface AgentExecutionBridgeState {
 
 const chunkOperationId = (binding: string, side: Side, endByte: number, offset: number): string =>
   createHash('sha256').update(JSON.stringify([binding, side, endByte, offset])).digest('hex')
+
+export type ExecutionFrameFact = { startByte: number; endByte: number; bytes: number; sha256: string; syntax: 'invalid-json' }
 
 /** The machine channel retains safe frame provenance, never raw exception text. */
 export class ExecutionProtocolFrameError extends AgentMuxError {

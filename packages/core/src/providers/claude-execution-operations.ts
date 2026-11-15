@@ -1,4 +1,4 @@
-import type { AgentExecutionProtocol } from '../agent-execution-protocol.js'
+import type { AgentExecutionProtocol } from '../agent-execution/protocol.js'
 import { createClaudeExecutionShell, type ClaudeExecutionBashInput } from './claude-execution-shell.js'
 
 /** One original resource helper's shell owner, shared across its MCP connections. */

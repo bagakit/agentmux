@@ -6,7 +6,7 @@ import { durableWriteFile } from '../durable-write.js'
 import type { AgentLaunchPlan } from '../types.js'
 import type { AgentToolExecutionLaunchContext } from '../agent-tool-execution.js'
 import { classifyExecutable } from '../executable-probe.js'
-import { agentControlFailureCode, registerAgentExecutionInvocation } from '../agent-execution-rpc-relay.js'
+import { agentControlFailureCode, registerAgentExecutionInvocation } from '../agent-execution/rpc-relay.js'
 
 import { inspectClaudeHookSettings } from './claude-native-settings.js'
 import { prepareClaudeExecutionPolicy, proveClaudeExecutionPolicyDirectory } from './claude-execution-policy.js'

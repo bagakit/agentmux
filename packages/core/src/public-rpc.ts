@@ -304,7 +304,7 @@ type NativeParams = StorageRecoveryParamsMap & FocusParams & SpaceLinkParams & M
   'agent.creation.resolve': import('./agent-creation-resolution.js').AgentMuxCreationResolveParams
   'agent.creation.continue': import('./agent-creation-continue.js').AgentMuxCreationContinueParams
   'agent.inspect': { target: AgentMuxRpcSessionTarget }
-  'agent.execution.inspect': import('./agent-execution-journal.js').AgentExecutionOperationKey & { hostId: string }
+  'agent.execution.inspect': import('./agent-execution/journal.js').AgentExecutionOperationKey & { hostId: string }
   'agent.execution.admit': import('./agent-execution-coordinator.js').AgentExecutionOpenInput
   'agent.execution.create': import('./agent-execution-coordinator.js').AgentExecutionOpenInput
   'agent.execution.continue': import('./agent-execution-contract.js').AgentExecutionReference
@@ -443,7 +443,7 @@ type NativeResult = StorageRecoveryResultMap & FocusResults & SpaceLinkResult & 
   'agent.creation.resolve': import('./agent-creation-inspection.js').AgentMuxCreationInspectionResult
   'agent.creation.continue': import('./agent-creation-continue.js').AgentMuxCreationContinueResult
   'agent.inspect': AgentMuxRpcAgentInspection
-  'agent.execution.inspect': import('./agent-execution-journal.js').AgentExecutionOperation | null
+  'agent.execution.inspect': import('./agent-execution/journal.js').AgentExecutionOperation | null
   'agent.execution.admit': import('./agent-execution-contract.js').AgentExecutionReference
   'agent.execution.create': { session: import('./types.js').AgentMuxAgentSession; execution: import('./agent-execution-coordinator.js').AgentExecutionInspection }
   'agent.execution.continue': AgentMuxRpcResult<'agent.execution.create'>

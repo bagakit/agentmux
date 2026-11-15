@@ -5,13 +5,13 @@ import { mkdtemp, chmod, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, dirname, delimiter, isAbsolute } from 'node:path'
 import type { Transform } from 'node:stream'
-import { EXECUTION_FRAME_LIMIT } from './agent-execution-channel.js'
-import { AgentMuxError } from './errors.js'
-import { createAgentMuxRpcFrameStream } from './agentmux-rpc-stdio.js'
-import { parseRpcRequest, rpcFailure, rpcEncode, type JSONRPCRequest } from './public-rpc-frame.js'
-import { isAgentMuxRpcDeviceMethod } from './public-rpc-device.js'
-import type { AgentMuxRuntimeFence, AgentMuxRuntimeOwnerIdentity } from './hosted-client-contract.js'
-import { resolveCoreBinPath } from './runtime-paths.js'
+import { EXECUTION_FRAME_LIMIT } from './channel.js'
+import { AgentMuxError } from '../errors.js'
+import { createAgentMuxRpcFrameStream } from '../agentmux-rpc-stdio.js'
+import { parseRpcRequest, rpcFailure, rpcEncode, type JSONRPCRequest } from '../public-rpc-frame.js'
+import { isAgentMuxRpcDeviceMethod } from '../public-rpc-device.js'
+import type { AgentMuxRuntimeFence, AgentMuxRuntimeOwnerIdentity } from '../hosted-client-contract.js'
+import { resolveCoreBinPath } from '../runtime-paths.js'
 
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const secret = () => randomBytes(32).toString('hex')
@@ -112,7 +112,7 @@ export class AgentExecutionRpcFrontend {
       if (!sameInvocation(original.value, value)) throw denied()
       return original.token
     }
-    const { connectAgentMuxRpc } = await import('./public-rpc-client.js')
+    const { connectAgentMuxRpc } = await import('../public-rpc-client.js')
     const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: value.endpointPath } })
     let owner: AgentMuxRuntimeOwnerIdentity
     try { owner = (await rpc.call('runtime.owner.identity', { expectedRuntimeId: value.runtimeId })).owner }

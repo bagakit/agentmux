@@ -1,9 +1,9 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import type { Readable, Writable } from 'node:stream'
-import { createExecutionFrameChannel } from './agent-execution-channel.js'
-import { AgentExecutionJournal, type AgentExecutionOperationKey } from './agent-execution-journal.js'
-import type { AgentExecutionIntent, AgentExecutionMessage, AgentExecutionProtocol } from './agent-execution-protocol.js'
+import { createExecutionFrameChannel } from './channel.js'
+import { AgentExecutionJournal, type AgentExecutionOperationKey } from './journal.js'
+import type { AgentExecutionIntent, AgentExecutionMessage, AgentExecutionProtocol } from './protocol.js'
 
 type Request = Extract<AgentExecutionMessage, { kind: 'request' }>
 type Channel = ReturnType<typeof createExecutionFrameChannel>

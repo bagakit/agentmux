@@ -2,11 +2,11 @@ import { createWriteStream } from 'node:fs'
 import { once } from 'node:events'
 import { join } from 'node:path'
 import type { Readable, Writable } from 'node:stream'
-import type { AgentExecutionHelperContext } from './agent-execution-helper.js'
-import { AgentExecutionRpcResource } from './agent-execution-rpc-relay.js'
-import { createAgentExecutionExecutor } from './agent-execution-executor.js'
-import { AgentExecutionJournal } from './agent-execution-journal.js'
-import { runAgentExecutionFrontend } from './agent-execution-frontend.js'
+import type { AgentExecutionHelperContext } from '../agent-execution-helper.js'
+import { AgentExecutionRpcResource } from './rpc-relay.js'
+import { createAgentExecutionExecutor } from './executor.js'
+import { AgentExecutionJournal } from './journal.js'
+import { runAgentExecutionFrontend } from './frontend.js'
 export type AgentExecutionHelperIo = { input: Readable & { isTTY?: boolean; setRawMode?: (raw: boolean) => unknown }; output: Writable }
 
 /** The packaged CLI owns explicit shutdown; EOF and reader detach do not. */
@@ -28,7 +28,7 @@ export async function runAgentExecutionHelperCli(start: () => Promise<{ close():
 export async function runAgentExecutionHelper(
   context: AgentExecutionHelperContext,
   io: AgentExecutionHelperIo,
-  protocol: (context: AgentExecutionHelperContext) => import('./agent-execution-protocol.js').AgentExecutionProtocol,
+  protocol: (context: AgentExecutionHelperContext) => import('./protocol.js').AgentExecutionProtocol,
 ): Promise<{ close(): Promise<void> }> {
   // Dedicated ctxmux helper PTY only. The ordinary Agent's terminal is never
   // parsed as a machine channel, and ready cannot precede disabling echo.

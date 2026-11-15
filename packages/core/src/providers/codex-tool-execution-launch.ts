@@ -2,7 +2,7 @@ import { readFile, realpath, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve, win32 } from 'node:path'
 import type { AgentLaunchPlan } from '../types.js'
-import { agentControlFailureCode, registerAgentExecutionInvocation, type AgentExecutionInvocation } from '../agent-execution-rpc-relay.js'
+import { agentControlFailureCode, registerAgentExecutionInvocation, type AgentExecutionInvocation } from '../agent-execution/rpc-relay.js'
 import { qualifyCodexExecutionExecutable } from './codex-execution-helper.js'
 
 const noiseOverrides = ['CODEX_EXEC_SERVER_NOISE_REGISTRY_URL', 'CODEX_EXEC_SERVER_NOISE_ENVIRONMENT_ID', 'CODEX_EXEC_SERVER_NOISE_AUTH_TOKEN'] as const

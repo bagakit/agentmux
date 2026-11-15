@@ -2,8 +2,8 @@ import { createHash, randomUUID } from 'node:crypto'
 import { chmod, mkdir, open, readFile, stat } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { DatabaseSync, type StatementSync } from 'node:sqlite'
-import { AgentMuxError } from './errors.js'
-import { durableWriteFile } from './durable-write.js'
+import { AgentMuxError } from '../errors.js'
+import { durableWriteFile } from '../durable-write.js'
 
 export type AgentExecutionOperationKey = {
   bindingId: string

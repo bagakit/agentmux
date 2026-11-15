@@ -243,14 +243,14 @@ export { parseAgentInputResourceRead, parseAgentInputResourceResult, inputImageM
 export * from './v8-profile.js'
 export * from './runtime-v8-profile.js'
 
-export { AgentExecutionBridge } from './agent-execution-bridge.js'
-export type { AgentExecutionBridgePort, AgentExecutionBridgeState, AgentExecutionBridgePosition } from './agent-execution-bridge.js'
+export { AgentExecutionBridge } from './agent-execution/bridge.js'
+export type { AgentExecutionBridgePort, AgentExecutionBridgeState, AgentExecutionBridgePosition, ExecutionFrameFact } from './agent-execution/bridge.js'
 export type { AgentExecutionHelperInput, AgentExecutionHelperPreparation, AgentExecutionResourceGrant, AgentExecutionNotice, AgentExecutionHelperLaunchPlan } from './agent-execution-helper.js'
 
 export type { AgentToolExecutionBinding } from './agent-tool-execution.js'
-export type { AgentExecutionOperationKey, AgentExecutionOperation } from './agent-execution-journal.js'
+export type { AgentExecutionOperationKey, AgentExecutionOperation } from './agent-execution/journal.js'
 
-export type { AgentExecutionSourceDiagnostics, ExecutionFrameFact, ExecutionHelperDiagnostic } from './agent-execution-source-diagnostics.js'
+export type { AgentExecutionSourceDiagnostics, ExecutionHelperDiagnostic } from './agent-execution-source-diagnostics.js'
 export { AgentExecutionCoordinator, AgentExecutionBindingService } from './agent-execution-coordinator.js'
 export type { AgentExecutionBindingObservation, AgentExecutionBindingWatch, AgentExecutionBindingWatchContext, AgentExecutionOpenInput, AgentExecutionInspection, AgentExecutionHostPort, AgentExecutionCoordinatorOptions } from './agent-execution-coordinator.js'
 export type { AgentExecutionReference, AgentExecutionFailure, AgentExecutionHelperStart } from './agent-execution-contract.js'
