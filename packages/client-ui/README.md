@@ -190,6 +190,10 @@ Use `SegmentedControl` to edit a single value across a few visible choices. Its 
 
 ## Inputs
 
+### Markdown source in multiline inputs
+
+`Textarea` and `ComposerTextarea` accept `syntax="markdown"` for body fields that accept Markdown. Both keep the native textarea and its original string. Source color uses the same grammar as Markdown reading. It decorates syntax without changing delimiters, whitespace, form values or clipboard text. The field keeps native selection, undo, composition, and forced-color behavior. The Message Tool composer uses the same syntax colors for its text alongside inline attachments and references. Import `input/styles.css` when using individual style entries.
+
 ### Compact editors
 
 Use `ComposerTextarea variant="compact"` with `ComposerEditFooter` for a short multiline edit inside an existing surface. The field handles IME, grows with content, and scrolls when it reaches its height limit. For drafts that need more editing room, the caller can set `expanded` on the compact field and link its size toggle to the field ID with `aria-controls`. Both sizes use the same native textarea and selection. Put existing utilities or metadata in `leading` and the action buttons in reading order. Use the shared primary `Button` for the action at the right edge. Hosts importing styles individually need `input/styles.css`, `styles/buttons.css` and `styles/composer.css`.
