@@ -13,6 +13,7 @@ import { publicGoalRecord } from '../../host/src/goal-projection'
 import type { DemandDelegationIntent } from '@agentmux/demand/delegations'
 import type { GoalPlanNodeInput } from '@agentmux/demand/goal-plan'
 import { GoalPlanGraph, type GoalPlanReveal } from '../src/renderer/src/components/GoalPlanGraph'
+import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface'
 import { prepareRendererUpdate, useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { applyGoalDelegationResult } from '../src/renderer/src/lib/goal-delegation-work'
@@ -136,6 +137,24 @@ it('a person requests changes then passes the new exact delivery through the ori
   expect(f.runtime.agentCreation).not.toHaveBeenCalled()
   expect(dom.container.querySelector('.goal-delivery__history')?.textContent).toContain('Changes requested')
   expect(document.activeElement).toBe(dom.container.querySelector('.goal-delivery__receipt'))
+
+  const confirmed = await f.store.confirmAlignment(goalId, 1)
+  await act(async () => {
+    useAppStore.setState({ demands: { [goalId]: publicGoalRecord(confirmed.demand) }, mainSurface: 'board', selectedDemandId: goalId })
+    applyGoalDelegationResult(await f.read())
+  })
+  await dom.render(<GlobalBoardSurface />)
+  expect(dom.container.querySelector('[data-goal-detail-stage]')?.textContent).toBe('Waiting for Supervisor to dispatch a Ticket')
+  expect(dom.container.querySelector('.goals-detail__current-work')).toBeNull()
+  const previous = dom.container.querySelector('[data-goal-work-operation="delegation-1"]')!
+  const passed = dom.container.querySelector('[data-goal-work-operation="delegation-2"]')!
+  const history = previous.closest<HTMLDetailsElement>('details')!
+  expect(passed.closest('details')).toBe(history)
+  expect(history.open).toBe(false)
+  expect(history.querySelector('[data-goal-other-work]')?.hasAttribute('data-needs-attention')).toBe(false)
+  await act(async () => history.querySelector('summary')!.click())
+  expect(previous.textContent).toContain('Previous attempt')
+  expect(passed.textContent).toContain('Ticket passed')
 })
 
 it('keeps the same focused review input when its live Ticket is revealed again', async () => {

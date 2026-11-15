@@ -4,6 +4,7 @@ import type { DemandDelegation, DemandDispatch, GoalStartObservation } from '@ag
 import type { GoalDelegationObservation } from '@agentmux/core/goal-delegation'
 import type { DemandRecord } from '../src/renderer/src/lib/global-demand-board'
 import { goalNextStep, goalNextStepFact, goalHasOriginalWork, GOAL_STAGES, type GoalStage } from '../src/renderer/src/lib/goal-presentation'
+import { goalDelegationRows } from '../src/renderer/src/lib/goal-delegation-presentation'
 
 /**
  * The Goals list groups and marks each Goal by whose turn it is. That stage must come from the same
@@ -94,5 +95,22 @@ describe('the same typed current source and original work reading budget', () =>
     expect(goalHasOriginalWork(base, retained)).toBe(true)
     expect(goalHasOriginalWork({ ...base, id: 'another-goal' }, retained)).toBe(false)
     expect(goalNextStepFact({ ...base, id: 'another-goal' }, retained).source.kind).toBe('definition')
+  })
+
+  it('only the original current Ticket attempt can take priority over Goal result review', () => {
+    const planNodeId = 'original-ticket', report = { operationId: 'r', replyMessageId: 'reply', authorAgentSessionId: 'worker',
+      submittedAt: 3, grounding: grounding(['met']) }
+    const original = { ...base, alignment: alignment(), grounding: grounding(['met', 'met']),
+      delegations: [{ ...delegation, planNodeId, operationId: 'previous-attempt', report }, { ...delegation, planNodeId, report }] }
+    const node = { id: planNodeId, state: 'review' as const, column: 0, attempts: 2, staleCriteria: [], unknown: [],
+      attempt: { delegationOperationId: delegation.operationId, reported: true } }
+    const planState = { revision: 1, done: 0, total: 1, next: [], nodes: [node] }
+    expect(goalNextStepFact({ ...original, planState }).source).toMatchObject({ kind: 'delegation', operationId: delegation.operationId })
+    const passed = { ...original, planState: { ...planState, done: 1, nodes: [{ ...node, state: 'done' as const }] } }
+    expect(goalNextStepFact(passed)).toEqual({ stage: 'you', text: 'Results ready for review', source: { kind: 'results', submissionId: 'report', revision: 1 } })
+    const { grounding: _report, ...unreported } = passed
+    expect(goalNextStepFact(unreported)).toEqual({ stage: 'agents', text: 'Plan complete · Awaiting result report', source: { kind: 'goal' } })
+    expect(goalDelegationRows(passed).map(row => row.delegation.operationId)).toEqual(['previous-attempt', delegation.operationId])
+    expect(goalNextStepFact(original).source).toMatchObject({ kind: 'delegation', operationId: 'previous-attempt' })
   })
 })
