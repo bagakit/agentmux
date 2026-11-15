@@ -3,6 +3,7 @@ import '../styles/mote-primary-agent.css'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import { useConversationView } from '@agentmux/client-ui/use-conversation-view'
+import { isNeedsYouState } from '@agentmux/client-ui/attention-vocabulary'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
@@ -50,7 +51,9 @@ import type { PmoTeamsTopicTarget } from '../lib/pmo-teams-topic-target'
 
 const ThemeStatusNeutralIcon = semanticIconComponent('status.neutral')
 const ThemeStatusUnknownIcon = semanticIconComponent('status.unknown')
+const ThemeNeedsInputIcon = semanticIconComponent('status.needs-input')
 const ThemeConversationIcon = semanticIconComponent('object.conversation')
+const ThemeProfileIcon = semanticIconComponent('object.contact')
 const ThemeActionArchiveIcon = semanticIconComponent('action.archive')
 const ThemeLayoutCloseLeftIcon = semanticIconComponent('layout.close-left')
 const ThemeLayoutOpenLeftIcon = semanticIconComponent('layout.open-left')
@@ -112,17 +115,20 @@ function settleContextOperation(operation: MoteContextOperation, state: MoteCont
   }))
 }
 
-function MoteConversationPreview({ id, hostId, sessionId }: { id: string; hostId: string; sessionId: string }) {
+function MoteConversationPreview({ id, name, primary, emptyLabel, needsInput }: {
+  id: string; name: string; primary: { hostId: string; sessionId: string } | undefined; emptyLabel: string; needsInput: boolean
+}) {
   const node = useRef<HTMLSpanElement>(null)
   const [visible, setVisible] = useState(false)
+  const hostId = primary?.hostId, agentSessionId = primary?.sessionId
+  const reference = useMemo(() => hostId && agentSessionId ? { hostId, agentSessionId } : undefined, [hostId, agentSessionId])
   useEffect(() => {
-    if (!node.current) return
+    if (!reference || !node.current) return
     const observer = new IntersectionObserver(([entry]) => setVisible(entry?.isIntersecting === true),
       { root: node.current.closest('.mote-chooser__choices') })
     observer.observe(node.current)
     return () => observer.disconnect()
-  }, [])
-  const reference = useMemo(() => ({ hostId, agentSessionId: sessionId }), [hostId, sessionId])
+  }, [reference])
   const view = useConversationView(api.conversation, reference, visible, { limit: 24 })
   const message = useMemo(() => {
     const records = view.reading?.records ?? []
@@ -132,16 +138,33 @@ function MoteConversationPreview({ id, hostId, sessionId }: { id: string; hostId
       if ((!recordedReply && record.role !== 'message') || record.author?.kind === 'system') continue
       const body = parseAgentMuxMessagePrefix(record.content)?.body ?? record.content
       const text = body.trim().slice(0, 240).replace(/\s+/gu, ' ')
-      if (text) return text
+      if (text) return { text, recordedAt: record.recordedAt }
     }
     return null
   }, [view.reading])
   const unknown = !!(view.error || view.observationError)
   const complete = !view.hasMore && view.snapshot?.coverage.length && view.snapshot.coverage.every(source =>
     source.current === 'complete-through-cut' && source.earlier === 'complete')
-  const label = unknown ? 'Preview unknown' : complete ? 'No messages yet' : view.snapshot ? 'No recent message' : 'Reading…'
-  return <span id={id} ref={node} className="mote-chooser__preview" data-mote-message-preview={message ? 'message' : undefined}
-    title={message && unknown ? 'Last confirmed message · ' + message : message ?? label}>{message ?? label}</span>
+  const label = !primary ? emptyLabel : unknown ? 'Unconfirmed' : complete ? 'No messages' : view.snapshot ? 'No recent text' : 'Reading…'
+  const date = message?.recordedAt === undefined ? null : new Date(message.recordedAt)
+  const time = date && Number.isFinite(date.getTime()) ? date : null
+  const detailedTime = time?.toLocaleString()
+  return <>
+    <span className="mote-chooser__headline">
+      <span className="mote-chooser__name"><strong>{name}</strong></span>
+      {needsInput && <span className="mote-chooser__attention" title="Needs your input" aria-hidden="true"><ThemeNeedsInputIcon size={13} /></span>}
+      {time ? <time id={id + '-time'} className="mote-chooser__time" dateTime={time.toISOString()} title={detailedTime} aria-label={'Latest message · ' + detailedTime}>
+        {time.toDateString() === new Date().toDateString()
+          ? time.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+          : time.toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' })}
+      </time> : <span id={id + '-time'} hidden />}
+    </span>
+    <span className="mote-chooser__summary">
+      <span id={id} ref={node} className="mote-chooser__preview" data-mote-message-preview={message ? 'message' : undefined}
+        title={message && unknown ? 'Last confirmed message · ' + message.text : message?.text ?? label}>{message?.text ?? label}</span>
+      <span className="mote-chooser__profile-hint" aria-hidden="true"><ThemeProfileIcon size={12} />Profile</span>
+    </span>
+  </>
 }
 
 const MoteChoice = memo(function MoteChoice({ topic, selected, savedTabId, onSelect, onIdentity, onArchive, pending, container, currentTopicId, onRename, onAvatar, onOpenSpace, catalog, reference, targetAgent, onReferenceSelect, railMode }: {
@@ -158,6 +181,12 @@ const MoteChoice = memo(function MoteChoice({ topic, selected, savedTabId, onSel
   const recent = useAppStore(state => state.recentMoteAgents[topic.id])
   const previewId = useId()
   const primary = topic.quickMode?.status === 'saved' ? topic.quickMode.defaults.conversation : undefined
+  const needsInput = useAppStore(state => {
+    const matches = primary && agentSessionPresentationIndex(state.sessions).get(primary.sessionId)?.filter(item =>
+      item.control.hostId === primary.hostId && item.control.agentSessionId === primary.sessionId)
+    const main = matches?.length === 1 ? matches[0] : undefined
+    return !!main && main.processState === 'running' && !main.runUnobserved && isNeedsYouState(main.status.state)
+  })
   const entry = primary ?? recent
   const selectTab = useMemo(() => createPmoTeamsTopicTargetSelector({ open: false, preview: false,
     targetTopicId: topic.id, targetTabId: selected ? savedTabId : entry?.tabId }), [topic.id, selected, savedTabId, entry])
@@ -209,14 +238,15 @@ const MoteChoice = memo(function MoteChoice({ topic, selected, savedTabId, onSel
         </span>
       </> }} />
     <button type="button" className="mote-chooser__choice" data-mote-topic-id={topic.id} data-space-icon-target={iconTarget?.key}
-    data-mote-target-tab={tabId} data-mote-status={status} aria-pressed={selected}
-    aria-label={topic.title + ' · ' + identityStatus} aria-describedby={railMode === 'cards' ? previewId : undefined} onClick={() => onSelect(topic.id, undefined)}
+    data-mote-target-tab={tabId} data-mote-status={status} data-mote-attention={needsInput ? 'needs-input' : undefined} aria-pressed={selected}
+    aria-label={topic.title + ' · ' + identityStatus + (needsInput ? ' · Needs your input' : '')}
+    aria-describedby={railMode === 'cards' ? previewId + ' ' + previewId + '-time' : undefined} onClick={() => onSelect(topic.id, undefined)}
     onPointerEnter={event => { if (event.pointerType === 'mouse') onIdentity(event.currentTarget) }}
     onPointerLeave={() => onIdentity(null)} onFocus={event => onIdentity(event.currentTarget)} onBlur={() => onIdentity(null)}>
-      <span className="mote-chooser__name"><strong>{topic.title}</strong></span>
-      {railMode === 'avatars' ? <ThemeConversationIcon size={13} aria-hidden /> : primary
-        ? <MoteConversationPreview key={JSON.stringify([primary.hostId, primary.sessionId])} id={previewId} hostId={primary.hostId} sessionId={primary.sessionId} />
-        : <span id={previewId} className="mote-chooser__preview">{!pendingPrimary && (target?.kind === 'no-target' || region?.kind === 'launcher') ? 'No messages yet' : 'Preview unknown'}</span>}
+      {railMode === 'avatars' ? needsInput ? <ThemeNeedsInputIcon className="mote-chooser__attention" size={15} aria-hidden />
+        : <ThemeConversationIcon size={13} aria-hidden />
+        : <MoteConversationPreview key={primary ? JSON.stringify([primary.hostId, primary.sessionId]) : undefined} id={previewId} name={topic.title}
+          primary={primary} emptyLabel={!pendingPrimary && (target?.kind === 'no-target' || region?.kind === 'launcher') ? 'No messages' : 'Unconfirmed'} needsInput={needsInput} />}
     </button>
   </div>
   return iconTarget ? <SpaceObjectContextMenu target={iconTarget} container={container} onChangeIcon={onAvatar} moteActions={{

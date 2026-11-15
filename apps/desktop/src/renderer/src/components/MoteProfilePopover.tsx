@@ -38,8 +38,8 @@ export function MoteProfilePopover({ workspaceId, topicId, reference, active, on
   const label = avatar ? 'Open profile for ' + avatar.label : 'Show Mote profile'
   const trigger = <Dialog.Trigger asChild><button type="button"
     className={avatar ? 'mote-chooser__profile' : 'pane-action mote-profile-trigger'}
-    aria-label={label} aria-pressed={open && active} title={avatar ? label : 'Mote profile'}>
-    {avatar?.content ?? <ThemeObjectContactIcon size={14} />}
+    aria-label={label} aria-pressed={open && active} title={avatar ? undefined : 'Mote profile'}>
+    {avatar ? <>{avatar.content}<ThemeObjectContactIcon className="mote-chooser__profile-glyph" size={11} aria-hidden /></> : <ThemeObjectContactIcon size={14} />}
   </button></Dialog.Trigger>
   return <Dialog.Root modal={false} open={open && active} onOpenChange={next => {
     if (next) { retained.current = null; setOwner({ workspaceId, topicId, reference }) }
