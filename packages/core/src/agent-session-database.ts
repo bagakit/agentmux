@@ -1,6 +1,6 @@
 import { mintObjectId } from './object-id.js'
 import { createHash } from 'node:crypto'
-import { readlinkSync } from 'node:fs'
+import { lstatSync, readlinkSync } from 'node:fs'
 import { chmod, link, lstat, mkdir, open, readFile, readdir, readlink, rename, symlink, unlink } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
@@ -19,8 +19,14 @@ export function canonicalSessionFile(path: string): string | undefined {
 export function logicalSessionDatabasePath(path: string): string {
   if (basename(path) !== sqliteFileName) return path
   const legacy = join(dirname(path), legacyFileName)
-  try { return readlinkSync(legacy) === sqliteFileName ? legacy : path }
-  catch (error) {
+  try {
+    const original = lstatSync(legacy, { bigint: true })
+    if (original.isSymbolicLink()) return readlinkSync(legacy) === sqliteFileName ? legacy : path
+    if (!original.isFile()) return path
+    // Both regular entries can refer to the original inode after an interrupted migration.
+    const canonical = lstatSync(path, { bigint: true })
+    return canonical.isFile() && canonical.dev === original.dev && canonical.ino === original.ino ? legacy : path
+  } catch (error) {
     if (['ENOENT', 'EINVAL'].includes((error as NodeJS.ErrnoException).code ?? '')) return path
     throw error
   }
