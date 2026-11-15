@@ -71,7 +71,7 @@ Desktop 二级内容由 [`WorkspaceFilesTool`](../../apps/desktop/src/renderer/s
 
 - **路径与引用参数。** 路径经 `toLiteralPathspec` 加 `:(literal)` 前缀，并放在 `--` 之后。引用类输入（remote、分支、refspec）经 `assertSafeRef` 拒绝以 `-` 开头的值，以及 Git 本身禁止的控制、空白和 `~^:?*[` 字符。
 - **未跟踪文件的丢弃。** 只有 `discard` 对未跟踪文件执行 `clean --force`，执行前先经 `assertInWorktree` 确认路径在 worktree 内。
-- **状态。** `status` 读取 `git status --porcelain=v1 -z --branch --untracked-files=all`，由 `parseGitStatusPorcelain` 按 NUL 分隔解析，路径不经 Git 的转义与再解码。
+- **状态。** `status` 读取 `git status --porcelain=v1 -z --branch --no-ahead-behind --untracked-files=all`，由 `parseGitStatusPorcelain` 按 NUL 分隔解析，路径不经 Git 的转义与再解码。Changes 只使用分支名和改动；精确分歧计数由同步状态的 `aheadBehind` 按有效上游独立读取。
 - **diff。** diff 读取两侧原始字节：旧侧取 `HEAD:<path>`，新侧读工作区文件。二进制由字节中的 NUL 判定，超过 `MAX_DIFF_BYTES`（2 MiB）的内容也按二进制报告；读不到时报告失败，不回落到 HEAD。
 - **远程操作。**
   - `push` 默认推送 `origin HEAD` 并带 `--set-upstream`，只在显式选项下加 `--force-with-lease`；
