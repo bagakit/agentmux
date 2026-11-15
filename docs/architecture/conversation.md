@@ -26,7 +26,7 @@
 
 ### 语义流的模块边界
 
-公开入口是 `@agentmux/core/conversation`。来源适配、语义归一、读取协调与客户端呈现分别持有自己的事实：
+统一对话是 Core 的模块，公开入口是 [`@agentmux/core/conversation`](../../packages/core/package.json)。Provider 原生协议由 [`@agentmux/providers`](../../packages/providers/package.json) 按厂商实现，经 Core 的 [`AgentProvider`](../../packages/core/src/agent-provider.ts) 接入。共享界面由 `@agentmux/client-ui` 消费公共结果。
 
 | 边界 | 实现与责任 |
 | --- | --- |
@@ -279,7 +279,7 @@ Desktop 与 Mobile 共用 [`CapturedProcessRecord`](../../packages/client-ui/src
 
 共同观察组件中的 `WorkflowStatusGlyph`（`WorkflowObservation.tsx`）接受 running、completed、failed、interrupted、killed、paused、queued 七种状态，running 按已记录与在途使用不同图形，只有在途状态带动效；卡片、步骤与 Agent 元信息的展开按钮使用 `aria-expanded`／`aria-controls`。Desktop 的 [`components/workflow/`](../../apps/desktop/src/renderer/src/components/workflow/) 组件集（`WorkflowCard`、`WorkflowDock`、`WorkflowToolRow` 等）目前只由组件 Gallery（`?agentmux-component-gallery=1` 或独立的 Gallery 入口）消费：其中 `workflowPresentation` 把带 `legacyNotice` 的 workflow 退化为普通工具行，旧 daemon 的固定文案只出现在 Gallery fixture 中，生产链路没有设置 `legacyNotice` 的 producer。
 
-纯 SDK 组合函数 [`capturedToolEdit`](../../packages/core/src/conversation-tool-edit.ts) 只接受 toolInput invocation 的 Provider 来源；Claude 的参数由 [Provider 解释器](../../packages/providers/src/claude/tool-edit.ts) 规范化为请求的编辑，未知或歧义时保留完整载荷。它复用既有 wire 与来源合同，不新增 RPC、CLI 或输入权限。共享的 [`conversation-tool-diff`](../../packages/client-ui/src/lib/conversation-tool-diff.ts) 负责通用 diff 排版与有界预览，[`ConversationToolDiff`](../../packages/client-ui/src/components/ConversationToolDiff.tsx) 使用共同样式与显式增删符号；预览截断不裁剪原文，也不证明编辑已执行。
+SDK 函数 [`capturedToolEdit`](../../packages/core/src/conversation-tool-edit.ts) 只接受唯一、准确的 toolInput invocation。它把来源 Provider ID 和原始字段交给 [Providers 的工具编辑解释入口](../../packages/providers/src/recorded-tool-edit.ts)，取得统一的请求编辑结构。来源未知或有歧义时，原始载荷仍可阅读与复制。共享的 [`conversation-tool-diff`](../../packages/client-ui/src/lib/conversation-tool-diff.ts) 负责排版和有界预览，[结果回顾](../../apps/desktop/src/renderer/src/components/SessionResultReviewContent.tsx) 复用同一结构定位文件。预览截断只影响显示，执行结果由原工具事实确认。
 
 ### 原生结果的共同消费
 
