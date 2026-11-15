@@ -1,5 +1,5 @@
 import { fixturePath } from './helpers/fixture-values.js'
-import { afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, readFile, rm, writeFile, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -7,7 +7,8 @@ import { spawn } from 'node:child_process'
 import { build } from 'esbuild'
 import { AgentMuxSpatialStateStore, spatialCatalog, resolveSpatialRegion, parseAgentMuxSpatialGraph,
   type AgentMuxSpatialGraph } from '../src/spatial-state.js'
-import { createWorkspaceLayout } from '../src/spatial-layout.js'
+import { createWorkbenchViewLayout, createWorkspaceLayout } from '../src/spatial-layout.js'
+import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 
 function graph(): AgentMuxSpatialGraph {
@@ -53,6 +54,47 @@ describe('Core durable spatial owner without an App',() => {
     expect(spatialCatalog(saved.graph).locations).toHaveLength(8)
     expect(resolveSpatialRegion(saved.graph,{tabId:'tab',regionId:'agent',direction:'right'})).toMatchObject({region:{regionId:'browser'}})
   })
+  it.each([0, 430])('reads original topology through Core and RPC without copying JSON for %i unrelated Tabs', async (unrelated) => {
+    const { dir, store } = await fixture()
+    const original = graph()
+    original.resources['cost-probe'] = 'original topology'
+    const unrelatedTabs = Array.from({ length: unrelated }, (_, index) => {
+      const tabId = `cold-tab-${index}`, regionId = `cold-region-${index}`
+      original.tabs.push({ tabId, zoneId: 'zone', workspaceId: 'resource', name: null, regionIds: [regionId] })
+      original.regions.push({ regionId, tabId, kind: 'launcher', agentSessionId: null, runId: null, execution: null })
+      original.tabLayouts[tabId] = createWorkbenchViewLayout(regionId)
+      return tabId
+    })
+    original.layouts.resource = createWorkspaceLayout('g', ['tab', ...unrelatedTabs])
+    const saved = await store.commit({ expectedRevision: 0, graph: original })
+    const server = new AgentMuxControlServer({ socketPath: join(dir, 'control.sock'), spatialState: store, coreClients: () => [] })
+    servers.push(server)
+    await server.start()
+    const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
+    const counts = { graphEncodes: 0, graphDecodes: 0 }
+    const isObservedGraph = (value: unknown) => value !== null && typeof value === 'object' &&
+      Reflect.get(value, 'resources')?.['cost-probe'] === 'original topology'
+    const encode = JSON.stringify, decode = JSON.parse
+    const encoded = vi.spyOn(JSON, 'stringify').mockImplementation((...args: Parameters<typeof encode>) => {
+      if (isObservedGraph(args[0])) counts.graphEncodes++
+      return encode(...args)
+    })
+    const decoded = vi.spyOn(JSON, 'parse').mockImplementation((...args: Parameters<typeof decode>) => {
+      const value = decode(...args)
+      if (isObservedGraph(value)) counts.graphDecodes++
+      return value
+    })
+    try {
+      const local = await store.read()
+      expect(local).toEqual(saved)
+      local!.graph.resources['cost-probe'] = 'caller can edit its copy'
+      expect((await rpc.call('space.state', {})).state).toEqual(saved)
+    } finally {
+      encoded.mockRestore(); decoded.mockRestore()
+      await rpc.dispose()
+    }
+    expect(counts).toEqual({ graphEncodes: 0, graphDecodes: 0 })
+  })
   it('admits only one of two concurrent writers at the exact original revision',async () => {
     const {store}=await fixture();await store.commit({expectedRevision:0,graph:graph()})
     const a=graph(),b=graph();a.resources.tab={draft:'A'};b.resources.tab={draft:'B'}
@@ -63,6 +105,12 @@ describe('Core durable spatial owner without an App',() => {
   it('keeps corrupted bytes, the previous valid document and all original entities',async () => {
     const {store}=await fixture();const first=await store.commit({expectedRevision:0,graph:graph()});await store.commit({expectedRevision:1,graph:graph()})
     expect(JSON.parse(await readFile(store.path+'.previous','utf8'))).toEqual(first)
+    const invalidTopology = graph()
+    invalidTopology.tabLayouts.tab!.activeRegionId = 'not-a-tab-member'
+    const malformedGraph = JSON.stringify({ schemaVersion: 1, revision: 2, graph: invalidTopology })
+    await writeFile(store.path, malformedGraph)
+    await expect(store.read()).rejects.toMatchObject({ code: 'SPATIAL_STATE_READ_UNCONFIRMED' })
+    expect(await readFile(store.path, 'utf8')).toBe(malformedGraph)
     await writeFile(store.path,'{broken original bytes')
     await expect(store.read()).rejects.toMatchObject({code:'SPATIAL_STATE_READ_UNCONFIRMED'})
     await expect(store.commit({expectedRevision:0,graph:graph()})).rejects.toMatchObject({code:'SPATIAL_STATE_READ_UNCONFIRMED'})
@@ -83,7 +131,7 @@ describe('Core durable spatial owner without an App',() => {
   it('finds original Zone members even when there is no display location',() => {
     const g=graph();g.layouts={}
     const catalog=spatialCatalog(g,{zoneId:'zone'})
-    expect(catalog.tabs).toEqual(g.tabs);expect(catalog.regions).toEqual(g.regions);expect(catalog.locations).toEqual([])
+    expect(catalog.tabs).toEqual(g.tabs.map(tab => ({ ...tab, nameRevision: 0 })));expect(catalog.regions).toEqual(g.regions);expect(catalog.locations).toEqual([])
   })
   it('preserves the same Tab in two Groups and returns every occurrence without arbitration',async () => {
     const {store}=await fixture();const g=graph();g.layouts.resource={root:{type:'split',direction:'horizontal',ratio:0.5,first:{type:'leaf',groupId:'g'},second:{type:'leaf',groupId:'second'}},groups:[...g.layouts.resource!.groups,{id:'second',tabOrder:['tab'],recentTabIds:[],activeTabId:'tab'}],activeGroupId:'g'}
@@ -117,7 +165,7 @@ describe('Core durable spatial owner without an App',() => {
     const unbound=await run(cli,['space','unbind','--zone','zone','--space','a'],env)
     expect(unbound.code,unbound.stderr).toBe(0);expect((await store.read())!.graph.bindings).toEqual([{zoneId:'zone',spaceId:'b'}])
     const listed=await run(cli,['space','ls','--zone','zone'],env)
-    expect(listed.code,listed.stderr).toBe(0);expect(listed.result.result.catalog.tabs).toEqual(graph().tabs)
+    expect(listed.code,listed.stderr).toBe(0);expect(listed.result.result.catalog.tabs).toEqual(graph().tabs.map(tab => ({ ...tab, nameRevision: 0 })))
     expect((await store.read())!.graph.regions[0]).toEqual(graph().regions[0])
   })
 })
