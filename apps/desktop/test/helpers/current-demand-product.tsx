@@ -17,7 +17,7 @@ import { act, Profiler } from 'react'
 import { type Root } from 'react-dom/client'
 import { createClientUiRoot as createRoot } from './client-ui-render'
 import { afterEach, beforeEach, beforeAll, afterAll, expect, it, vi } from 'vitest'
-import { AGENTMUX_AGENT_MESSAGING_GUIDANCE, AgentMuxClient, AgentMuxMemoryAgentSessionStore, AgentMuxSpatialStateStore, normalizeAgentSession, type AgentMuxStoredAgentSession } from '@agentmux/core'
+import { AGENTMUX_AGENT_MESSAGING_GUIDANCE, AgentMuxClient, AgentMuxCreationAuthority, AgentMuxMemoryAgentSessionStore, AgentMuxSpatialStateStore, normalizeAgentSession, type AgentMuxStoredAgentSession } from '@agentmux/core'
 import { composeAgentPrompt } from '@agentmux/core/agent-outbound-message'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { AgentMuxPreloadApi, AppConfig, SessionSnapshot } from '../../src/shared/contracts'
@@ -114,7 +114,12 @@ beforeAll(async () => {
   process.env.AGENTMUX_PRIVATE_LISTENER_ASSET = join(listenerPackage, 'dist/control-endpoint-listener-worker.js')
   await build({ entryPoints: [worker], outfile: join(listenerPackage, 'dist/control-endpoint-listener-worker.js'), bundle: true, platform: 'node', format: 'esm', logLevel: 'error' })
   if (proof) appendFileSync(proof, JSON.stringify({ file: relative(repository, worker), sha256: createHash('sha256').update(readFileSync(worker)).digest('hex'), consumer: 'actual-source-listener-worker' }) + '\n')
-  await build({ entryPoints: [resolve(repository, 'packages/core/src/agentmux.ts')], outfile: sourceCli, alias: { '@agentmux/demand/delegations': resolve(repository, 'packages/demand/src/delegations.ts'), '@agentmux/demand/goals': resolve(repository, 'packages/demand/src/goals.ts'), '@agentmux/demand/goal-plan': resolve(repository, 'packages/demand/src/goal-plan.ts'), '@agentmux/demand/relations': resolve(repository, 'packages/demand/src/relations.ts'), '@agentmux/demand': resolve(repository, 'packages/demand/src/index.ts'), '@scure/base': resolve(repository, 'node_modules/.pnpm/@scure+base@2.2.0/node_modules/@scure/base/index.js') }, bundle: true, platform: 'node', format: 'esm', logLevel: 'error', banner: { js: "import { createRequire as bundleRequire } from 'node:module'; const require=bundleRequire(import.meta.url);" },
+  const demandAliases = Object.fromEntries(['delegations', 'goals', 'goal-plan', 'goal-patrol', 'goal-ticket-crypto', 'relations'].map(name =>
+    [`@agentmux/demand/${name}`, resolve(repository, `packages/demand/src/${name}.ts`)]))
+  await build({ entryPoints: [resolve(repository, 'packages/core/src/agentmux.ts')], outfile: sourceCli,
+    alias: { ...demandAliases, '@agentmux/demand': resolve(repository, 'packages/demand/src/index.ts'),
+      '@scure/base': resolve(repository, 'node_modules/.pnpm/@scure+base@2.2.0/node_modules/@scure/base/index.js') },
+    bundle: true, platform: 'node', format: 'esm', logLevel: 'error', banner: { js: "import { createRequire as bundleRequire } from 'node:module'; const require=bundleRequire(import.meta.url);" },
     plugins: [{ name: 'actual-daily-goal-cli-imports', setup(builder: { onLoad(filter: { filter: RegExp }, handler: (args: { path: string }) => { contents: string; loader: 'ts' } | null): void }) { builder.onLoad({ filter: /\.(ts|json)$/ }, args => {
       if (proof && (args.path.startsWith(resolve(repository, 'packages/core/src') + '/') || args.path.startsWith(resolve(repository, 'packages/demand/src') + '/'))) appendFileSync(proof, JSON.stringify({ file: relative(repository, args.path), sha256: createHash('sha256').update(readFileSync(args.path)).digest('hex'), consumer: 'actual-source-cli' }) + '\n')
       const mutant = process.env.AGENTMUX_DAILY_GOAL_MUTANT ? JSON.parse(process.env.AGENTMUX_DAILY_GOAL_MUTANT) : null
@@ -159,7 +164,9 @@ beforeEach(async () => {
     hookBindingId: 'owned-binding', hookToken: 'owned-token', capabilityHash: hashAgentCapability(activityCapability), semanticStatus: { state: 'done', source: 'native-hook',
       observedAt: timestamp, stateEnteredAt: timestamp } }
   await store.compareAndSwap(null, session)
-  client = new AgentMuxClient({ store }); const inner = client as any
+  const runtimeId = 'private-goal-runtime'
+  client = new AgentMuxClient({ store, creationAuthority: new AgentMuxCreationAuthority({ stateDirectory: join(directory, 'creation-authority'), runtimeId }) })
+  const inner = client as any
   inner.connected = true; await inner.registry.load('local')
   vi.spyOn(client, 'connect').mockResolvedValue()
   vi.spyOn(client, 'connectRuntime').mockResolvedValue()
@@ -182,14 +189,14 @@ beforeEach(async () => {
   vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   config = { ...structuredClone(DEFAULT_CONFIG), toolkit: { tools: [] }, workspaces: [{ id: '__scratch__', name: 'Owned topics', hostId: 'local', path: scratchRoot, kind: 'folder' }] }
   hostGoals = createHostGoals({ configurationPath: join(directory, 'original-config.json'), projects: async () => [], spatial: new AgentMuxSpatialStateStore(),
-    runtime: () => ({ client: runtime.rpcClients().find(value => value.hostId === 'local')!.client, ownerIdentity: () => ({ ownerInstanceId: 'original-goal-owner' }) }) as never,
+    runtime: () => ({ client: runtime.rpcClients().find(value => value.hostId === 'local')!.client, ownerIdentity: () => ({ ownerInstanceId: 'original-goal-owner', runtimeId }) }) as never,
     coreCall: (hostId, method, params, context) => { expect(hostId).toBe('local'); return hostService.call(method, params, context) } })
   demands = hostGoals.demands; manager = hostGoals.schedules
   hostService = new AgentMuxRpcService({ spatialState: new AgentMuxSpatialStateStore(), coreClients: () => runtime.rpcClients(), goalControl: hostGoals.execute, goalChanges: hostGoals.goalChanges,
     goalDelegations: hostGoals.goalDelegations, goalParticipation: hostGoals.participation, progress: hostGoals.progress, schedules: hostGoals.schedules, automaticInput: hostGoals.automaticInput })
   const originalCore = runtime.callOriginalCore.bind(runtime)
   vi.spyOn(runtime, 'callOriginalCore').mockImplementation((hostId, method, params, context) => {
-    if (method === 'runtime.owner.identity') return Promise.resolve({ owner: { ownerInstanceId: 'original-goal-owner' } }) as never
+    if (method === 'runtime.owner.identity') return Promise.resolve({ owner: { ownerInstanceId: 'original-goal-owner', runtimeId } }) as never
     if (method.startsWith('goal.') || method.startsWith('schedule.') || method.startsWith('agent.progress.') || method.startsWith('agent.automation.')) return hostService.call(method, params, context)
     return originalCore(hostId, method, params, context)
   })

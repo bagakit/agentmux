@@ -105,6 +105,47 @@ it('a fresh Goal keeps the actual origin plan before its finite entry and never 
   expect((await demands.get('fresh-origin'))!.alignment).toBeUndefined()
 })
 
+it('a direct Ticket brings the current criteria within reach and keeps optional one-time work secondary', async () => {
+  const goalId = 'ticket-confirmation-entry'
+  const originalAgent = session.agentSessionId
+  await demands.create({ id: goalId, title: 'Review the original plan', description: 'Verify the planned result.',
+    sessionIds: [originalAgent], assigneeSessionIds: [originalAgent], supervisorSessionId: originalAgent })
+  await demands.proposeAlignment(goalId, { summary: 'Verify the result', criteria: [{ id: 'verified', text: 'The planned result is independently verified' }], openQuestions: [] })
+  const planned = await demands.revisePlan(goalId, { operationId: 'plan-before-confirming', expectedRevision: 0, alignmentRevision: 1,
+    nodes: [{ id: 'verify', title: 'Verify the exact result', outcome: 'Keep the original evidence', dependsOn: [],
+      criterionIds: ['verified'], check: 'Read the check result', executor: null }] }, { kind: 'user', id: 'original-planner' })
+  await mount(goalId)
+  const { address } = useAppStore.getState().demands[goalId]!
+  expect(address).toBeDefined()
+  const nodeId = planned.demand.plan!.nodes[0]!.id
+  const before = [...writes]
+  await act(async () => useAppStore.setState({ goalReadingEntry: { goalId, runtimeId: address!.runtimeId, namespace: address!.namespace,
+    section: 'plan', phase: 'ready', token: 'open-original-ticket', ticketNodeId: nodeId } }))
+  expect(container.querySelector(`[data-goal-plan-detail="${nodeId}"]`)).not.toBeNull()
+
+  const review = action('Review criteria')
+  expect(review.closest('.goals-detail__toolbar')).not.toBeNull()
+  const confirmation = container.querySelector('[data-goal-confirm]')!
+  await act(async () => review.click())
+  const criteria = container.querySelector('[aria-label="Criteria and results"]')!
+  expect(document.activeElement).toBe(criteria)
+  expect(criteria.querySelector('[data-goal-confirm]')).toBe(confirmation)
+  expect(criteria.textContent).toContain('The planned result is independently verified')
+  expect(container.querySelectorAll('[data-goal-confirm]')).toHaveLength(1)
+
+  const finite = container.querySelector('[data-goal-finite-start]')!.closest('details')!
+  expect(finite).not.toBeNull()
+  expect(finite.open).toBe(false)
+  const summary = finite.querySelector('summary')!
+  expect(summary.textContent).toBe('Start a one-time task')
+  await act(async () => summary.click())
+  expect(finite.open).toBe(true)
+  expect([...finite.querySelectorAll('button')].some(button => button.textContent?.startsWith('Start with'))).toBe(true)
+  expect((await demands.get(goalId))!.alignment!.confirmedAt).toBeNull()
+  expect((await demands.get(goalId))!.dispatches ?? []).toEqual([])
+  expect(writes).toEqual(before)
+})
+
 it('responsibility navigation keeps its authoritative remote Host in the actual Main request and never selects the local namesake', async () => {
   const state = useAppStore.getState(), original = state.demands.goal!, before = [...writes]
   const reference = { kind: 'start' as const, operationId: 'retained-remote-execution', hostId: 'original-remote-host', agentSessionId: session.agentSessionId, runId: 'original-remote-run' }
