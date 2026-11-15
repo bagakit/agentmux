@@ -164,7 +164,10 @@ export function FocusContextCards({ contexts, viewport, scrollRef, visible, list
     const observable = rows && rows.clientWidth > 0 && rows.clientHeight > 0 && typeof window?.IntersectionObserver !== 'undefined'
     // The lane owner measures real columns in this same phase. Without a
     // physical observation, the original full bodies remain usable.
-    if (!layoutReady && observable && typeof window?.ResizeObserver !== 'undefined') return
+    if (!layoutReady && observable && typeof window?.ResizeObserver !== 'undefined') {
+      observation.current = null
+      return
+    }
     observation.current = { viewport, rows, margin: viewportMargin, ready: layoutReady }
     added.current.clear()
     const view = layoutReady && observable ? rows.getBoundingClientRect() : null
@@ -174,6 +177,8 @@ export function FocusContextCards({ contexts, viewport, scrollRef, visible, list
       && bounds.right >= view.left && bounds.left <= view.right)) {
       // First presentation and newly attached slots are complete before paint.
       // Existing slots that merely move are already watched by the browser.
+      if (view && !changedViewport) candidates.sort((left, right) =>
+        left.node.compareDocumentPosition(right.node) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1)
       for (const slot of candidates) {
         const rect = view ? slot.node.getBoundingClientRect() : null
         if (view && rect && rect.top > view.bottom + viewportMargin) break
