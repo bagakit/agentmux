@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createBrowserProfileExitCheck, validBrowserProfileExitCheckUrl } from '../src/main/browser-profile-exit-check.js'
+import { createBrowserProfileExitCheck } from '../src/main/browser-profile-exit-check.js'
+import { BROWSER_PROFILE_EXIT_CHECK_URL_LIMIT, validBrowserProfileExitCheckUrl } from '../src/shared/browser-profile-exit-check-url.js'
 
 /**
  * One explicit request through a Profile's own session. It goes out only after the Profile's route is
@@ -37,7 +38,9 @@ describe('Profile exit check', () => {
 
   it('refuses a missing, plain-http or credentialed address before touching the session', async () => {
     const { check, session, order } = setup(async () => new Response('', { status: 200 }))
-    for (const address of ['', 'http://ip.example.test/', 'https://me:pw@ip.example.test/', 'not a url']) {
+    const longAddress = 'https://ip.example.test/'.padEnd(BROWSER_PROFILE_EXIT_CHECK_URL_LIMIT, 'a')
+    expect(validBrowserProfileExitCheckUrl(longAddress)).toBe(true)
+    for (const address of ['', 'http://ip.example.test/', 'https://me:pw@ip.example.test/', 'not a url', longAddress + 'a']) {
       await expect(check('p-work', address), address).rejects.toMatchObject({ code: 'BROWSER_PROFILE_EXIT_CHECK_INVALID' })
     }
     expect(session.fetch).not.toHaveBeenCalled()

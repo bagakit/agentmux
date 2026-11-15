@@ -16,6 +16,7 @@ import { BROWSER_NEW_PAGE_SCENES, BROWSER_NEW_PAGE_DESTINATIONS, BROWSER_NEW_PAG
 import { configOwnerFixture, deferred } from './helpers/config-owner-fixture'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { chooseField } from './helpers/selection-field'
+import { BROWSER_PROFILE_EXIT_CHECK_URL_LIMIT } from '../src/shared/browser-profile-exit-check-url'
 import { prepareSourceCoreCli } from './helpers/source-core-cli.mjs'
 import { objectCliEnvironment } from '../../../packages/core/test/helpers/object-cli-rpc'
 import { privateRpcCorePort } from '../../../packages/core/test/helpers/private-rpc-core'
@@ -187,4 +188,28 @@ it('[new-page-settings] original Settings search and Overview reach the exact th
     expect(document.activeElement).toBe(target); expect(field(scene)).not.toBeNull()
   }
   expect(await f.bytes()).toBe(bytes); expect(api.config.save).not.toHaveBeenCalled()
+})
+
+it('Browser Settings and public config accept the same boundary for an exit-check address', async () => {
+  await render()
+  await dom.click('.settings-browser__preferences > details > summary')
+  const input = dom.container.querySelector<HTMLInputElement>('[aria-label="Exit check address"]')!
+  const submit = dom.container.querySelector<HTMLButtonElement>('[data-settings-pane="browser"] [data-settings-save-bar] button')!
+  const lengthLimit = 'https://exit.example.test/'.padEnd(BROWSER_PROFILE_EXIT_CHECK_URL_LIMIT, 'a')
+  const fill = async (address: string) => {
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, address)
+      input.dispatchEvent(new InputEvent('input', { bubbles: true }))
+    })
+  }
+  await fill(lengthLimit + 'a')
+  expect(input.getAttribute('aria-invalid')).toBe('true')
+  expect(submit.disabled).toBe(true)
+  expect(api.config.save).not.toHaveBeenCalled()
+  await expect(executeSettingsControl({ ...envelope, operation: 'settings.set', key: 'browser.exitCheckUrl', value: lengthLimit + 'a' }, f.owner))
+    .rejects.toMatchObject({ code: 'INVALID_SETTING_VALUE' })
+  await fill(lengthLimit)
+  expect(submit.disabled).toBe(false)
+  await save()
+  expect((await f.disk()).browser.exitCheckUrl).toBe(lengthLimit)
 })
