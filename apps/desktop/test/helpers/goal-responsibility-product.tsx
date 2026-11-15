@@ -90,7 +90,7 @@ async function evidence(scenario: string, proof: unknown, slice: 'responsibility
   return { receiptPath, receiptSha256: createHash('sha256').update(bytes).digest('hex'), boundary, cliSha256 }
 }
 
-async function fixture(options: { patrol?: boolean; alignment?: boolean | 'empty' } = {}) {
+async function fixture(options: { patrol?: boolean; alignment?: boolean | 'empty'; addressable?: boolean } = {}) {
   const directory = await fs.mkdtemp(join(await fs.realpath(tmpdir()), 'gr-'))
   cleanup.push(() => fs.rm(directory, { recursive: true, force: true }))
   for (const key of Object.keys(process.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key) && !['AGENTMUX_GOAL_RESPONSIBILITY_RECEIPT_DIR', 'AGENTMUX_GOAL_PATROL_RECEIPT_DIR'].includes(key)) vi.stubEnv(key, undefined)
@@ -125,7 +125,8 @@ async function fixture(options: { patrol?: boolean; alignment?: boolean | 'empty
   // The exact CRUD owner shares its original Store with the controlled original
   // responsibility owners below. It is not started as another scheduler.
   const hostGoals = createHostGoals({ configurationPath, projects: async () => [],
-    runtime: () => ({ client, ownerIdentity: () => ({ ownerInstanceId: 'original-responsibility-owner' }) }) as never,
+    runtime: () => ({ client, ownerIdentity: () => ({ ownerInstanceId: 'original-responsibility-owner',
+      ...(options.addressable ? { runtimeId: 'original-responsibility-runtime' } : {}) }) }) as never,
     coreCall: (hostId, method, params, context) => { expect(hostId).toBe('local'); return core.call(method, params, context) } })
   cleanup.push(() => hostGoals.dispose())
   const demands = hostGoals.demands
@@ -349,17 +350,17 @@ async function fixture(options: { patrol?: boolean; alignment?: boolean | 'empty
   }
   function emitInput() { for (const listener of nativeEvents) listener('local', { type: 'agent-input', receipt: { ref: { key: {
     kind: 'prompt', agentSessionId: 'owner', expectedRun: metadata.get('owner')!.run, submissionId: 'original-prior-human-input' } } } } as AgentMuxClientEvent) }
-  async function capture(id: string) {
-    const inspect = await cli('owner', ['goal', 'inspect', '--goal', 'goal'])
-    const delegations = await cli('owner', ['goal', 'delegations', '--goal', 'goal'])
-    // Client projection for the recorded visual bridge; Native semantics remain
-    // the same explicitly isolated source already used by the actual owners.
-    const projected: SessionSnapshot[] = [...metadata.values()].map(original => ({ id: original.agentSessionId, kind: 'agent', providerId: original.providerId,
+  function projectSessions(): SessionSnapshot[] {
+    return [...metadata.values()].map(original => ({ id: original.agentSessionId, kind: 'agent', providerId: original.providerId,
       executorId: original.executorId, hostId: 'local', workspacePath: original.workspacePath, label: original.agentSessionId,
       createdAt: original.createdAt, updatedAt: original.updatedAt, agentSessionUpdatedAt: original.updatedAt, processState: runStates.get(original.run.runId) ?? 'running',
       latestOutputBytes: 0, status: statuses.get(original.agentSessionId)!.session.semanticStatus!, capabilities: statuses.get(original.agentSessionId)!.capabilities,
       control: { kind: 'agent', hostId: 'local', agentSessionId: original.agentSessionId, run: original.run } }))
-    const value = { id, inspect, delegations, sessions: structuredClone(projected) }; snapshots.push(value); return value
+  }
+  async function capture(id: string) {
+    const inspect = await cli('owner', ['goal', 'inspect', '--goal', 'goal'])
+    const delegations = await cli('owner', ['goal', 'delegations', '--goal', 'goal'])
+    const value = { id, inspect, delegations, sessions: structuredClone(projectSessions()) }; snapshots.push(value); return value
   }
   async function exportJourney(source: NonNullable<Awaited<ReturnType<typeof evidence>>>, phases: { initialSnapshotId: string; deliveredSnapshotId: string; reportedSnapshotId: string }) {
     const patrol = exchanges.find(item => item.method === 'goal.patrol')
@@ -372,7 +373,7 @@ async function fixture(options: { patrol?: boolean; alignment?: boolean | 'empty
   async function proof() { return { goal: await demands.get('goal'), trace, cliReceipts, commandInputs, exchanges, snapshots, nativeInputs, attempts, nativeWrites,
     originalPmMetadata: await sessions.readMetadata('owner'), stopCalls: stop.mock.calls.length, dom: container.innerHTML } }
   return { directory, demands, sessions, client, metadata, statuses, runStates, nativeInputs, stop, cli, action, delegate, finite, publish, emit,
-    read, proof, rpc, flushMain, patrolState, attempts, nativeWrites, setNativeState, advanceSession, restartPatrol, emitInput, flushPatrol, capture, exportJourney }
+    read, proof, rpc, socketPath: server.path, flushMain, patrolState, attempts, nativeWrites, setNativeState, advanceSession, restartPatrol, emitInput, flushPatrol, capture, exportJourney, projectSessions }
 }
 
 export { root, container, cleanup, fixture, semantic, record, mount, settle, evidence }
