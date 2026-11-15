@@ -20,6 +20,12 @@ The same original `working` Agent has controlled Core observations of a fresh wo
 
 The two Electron processes share one private user-data directory. They compare the actual persisted layout choice, original Tabs, split layouts and the unsent draft. Session observations and PTY paint come from the fixture.
 
+## Pinned Agents
+
+Pass `--agent-pins` to pin a local Agent from its Cards menu and a Source Agent from its Compact list keyboard menu. They share the same raw Session ID on different owners. Focus search narrows the visible pins and keeps both preferences. Each shortcut opens its original workface, including both Regions in the Source Tab. A third pin remains removable during a temporary gap in local observations and offers no other Agent as a substitute. Both processes use one private user-data directory to verify exact pins, order, layout, original Tabs and the unsent draft. Native Session observations and PTY painting are controlled.
+
+Set `AGENTMUX_FOCUS_PIN_MUTATION=unqualified-sid` to remove the Host and Runtime qualifiers from the actual preference key. Selecting the second original Agent's menu must then fail the independent pin assertion.
+
 ## Inline Agent name editing
 
 Pass `--inline-rename` to exercise the real Focus row menu and editor in private Electron. The name transport holds a renderer request, exposes a controlled storage failure and simulates another editor updating the original name. Check reads the original revision while preserving the draft. The next explicit save receives an applied receipt with unconfirmed disk durability, then confirms that exact operation. A keyboard save in List returns to the original row. A later save leaves the user's subsequent Search focus intact. Closing the editor during a pending write allows the original request to settle without reopening the editor. The scene checks the original Session and Run identities, Tab and Region layout, and unsent workface draft.

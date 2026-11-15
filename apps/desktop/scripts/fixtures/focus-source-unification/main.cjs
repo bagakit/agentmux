@@ -19,6 +19,9 @@ app.whenReady().then(async()=>{try{
  if(mode==='--task-layout'||mode==='--task-layout-restore'){
   await require('./task-layout-main.cjs')({win,read,until,settle,click,capture:captureMember,result,restoreOnly:mode==='--task-layout-restore'});return
  }
+ if(mode==='--agent-pins'||mode==='--agent-pins-restore'){
+  await require('./agent-pins.cjs')({win,read,until,settle,click,capture:captureMember,result,restoreOnly:mode==='--agent-pins-restore'});return
+ }
  if(takeoverFeedback){await require('./feedback-main.cjs')({win,read,until,pause,settle,click,capture:captureMember,captureIntermediate:async(file,label)=>{await fs.writeFile(path.join(evidence,file),(await win.webContents.capturePage()).toPNG());result.frames.push({file,label,viewport:await read('innerWidth'),intermediate:true})},result,privateRoot,restoreOnly:mode==='--takeover-feedback-restore'});return}
  if(mode==='--source-connection'){await require('./connection-main.cjs')({win,read,until,settle,click,capture:captureMember,result});return}
  if(sourceRecovery){

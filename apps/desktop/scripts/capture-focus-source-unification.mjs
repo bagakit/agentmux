@@ -11,21 +11,24 @@ import {pathToFileURL} from 'node:url'
 import {runProbeProcess,listProbeProcesses} from './probe-process.mjs'
 
 const root=resolve(import.meta.dirname,'../../..'),desktop=join(root,'apps/desktop')
-assert.ok(process.argv[2]==='--evidence'&&process.argv[3]&&(process.argv.length===4||process.argv.length===5&&['--primary-only','--member-state','--unconfirmed','--source-recovery','--source-connection','--takeover-feedback','--task-layout','--inline-rename'].includes(process.argv[4])),'Use --evidence <private evidence directory> [--primary-only|--member-state|--unconfirmed|--source-recovery|--source-connection|--takeover-feedback|--task-layout|--inline-rename]')
+assert.ok(process.argv[2]==='--evidence'&&process.argv[3]&&(process.argv.length===4||process.argv.length===5&&['--primary-only','--member-state','--unconfirmed','--source-recovery','--source-connection','--takeover-feedback','--task-layout','--inline-rename','--agent-pins'].includes(process.argv[4])),'Use --evidence <private evidence directory> [--primary-only|--member-state|--unconfirmed|--source-recovery|--source-connection|--takeover-feedback|--task-layout|--inline-rename|--agent-pins]')
 const taskLayout=process.argv[4]==='--task-layout',inlineRename=process.argv[4]==='--inline-rename'
+const agentPins=process.argv[4]==='--agent-pins', pinMutation=process.env.AGENTMUX_FOCUS_PIN_MUTATION
+assert.ok(!agentPins || !pinMutation || pinMutation==='unqualified-sid','Known Focus Agent pin mutation')
 const layoutMutation=process.env.AGENTMUX_FOCUS_LAYOUT_MUTATION
 assert.ok(!taskLayout || !layoutMutation || ['omit-layout','hide-mandatory','repeat-result-idle','unqualified-subagents'].includes(layoutMutation),'Known Focus task layout mutation')
 const sourceConnection=process.argv[4]==='--source-connection'
 const takeoverFeedback=process.argv[4]==='--takeover-feedback',sourceRecovery=process.argv[4]==='--source-recovery',primaryOnly=process.argv[4]==='--primary-only',memberState=process.argv[4]==='--member-state',unconfirmed=process.argv[4]==='--unconfirmed'||sourceRecovery
-const sourceOnly=taskLayout||inlineRename||sourceRecovery||takeoverFeedback||sourceConnection
+const sourceOnly=taskLayout||inlineRename||agentPins||sourceRecovery||takeoverFeedback||sourceConnection
 const evidence=resolve(process.argv[3]);await mkdir(evidence,{recursive:true})
 const privateRoot=await mkdtemp(join(tmpdir(),'amux-focus-source-unification-')),fixture=join(desktop,'scripts/fixtures/focus-source-unification'),mainFixture=join(fixture,'main.cjs')
 const require=createRequire(join(desktop,'package.json')), {build}=browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex'),inputs=new Map(),transformations=[],logs=[]
-const receipt={schema:'agentmux.focus-source-unification-scene.v1',framePolicy:taskLayout?'task-layout':inlineRename?'inline-rename':sourceConnection?'source-connection':takeoverFeedback?'takeover-feedback':sourceRecovery?'source-recovery':unconfirmed?'unconfirmed-source':memberState?'source-member-state':primaryOnly?'source-primary-only':'all-scenes',capturedPass:false,captureOnly:true,aestheticReview:'not-performed',userAppRunRuntimeControlled:false,
+const receipt={schema:'agentmux.focus-source-unification-scene.v1',framePolicy:agentPins?'agent-pins':taskLayout?'task-layout':inlineRename?'inline-rename':sourceConnection?'source-connection':takeoverFeedback?'takeover-feedback':sourceRecovery?'source-recovery':unconfirmed?'unconfirmed-source':memberState?'source-member-state':primaryOnly?'source-primary-only':'all-scenes',capturedPass:false,captureOnly:true,aestheticReview:'not-performed',userAppRunRuntimeControlled:false,
   boundary:'Light Renderer-only actual App/Focus/Workbench/Stable/Store and installed Panel browser primary. Maintained typed preview API; only SessionPane PTY/Agent paint and unused Monaco painting leaves isolated. No Runtime/native simultaneous presentation, Writer, ordinary restart or user installation.'}
 try{
   if(inlineRename)receipt.boundary='Actual App, Focus task card and list, ContextMenu, inline rename, original Store naming and revision projection. Only the name/storage transport and unrelated PTY paint are isolated. No user App, Session or storage is changed.'
+  if(agentPins)receipt.boundary='Actual Focus Agent menus, pinned projection, filtering, original local and Source navigation plus the original UI preference writer and two private Electron processes. Native Session observations and PTY painting are controlled. No user App, Session or storage is changed.'
   if(taskLayout)receipt.boundary='Production Focus rows, layout preference and source reader in an isolated Electron app. Typed session observations and adjacent PTY paint are fixture inputs. Original UI preference projection, private workbench storage and hydration across two Electron processes.'
   if(takeoverFeedback)receipt.boundary='Actual App, ordinary Focus card, Region header, operation feedback, cancellation parser, existing Stop confirmation and Store persist/checkpoint/rehydration. Typed preview original-owner IO and Core graph observation, recorded writer admission after hydration, and PTY painting only. No user App/Run, Native writer durability, Core fencing or Provider recovery claim.'
   let reader=join(root,'packages/core/dist/conversation-reader.js')
@@ -86,7 +89,17 @@ try{
       transformations.push({path:relative(root,path),mutation:layoutMutation,sourceSHA256:hash(source),loadedSHA256:hash(code)})
       return {contents:code,loader:'ts'}
     }
-    if((taskLayout || inlineRename) && component==='store.ts'){
+    if(agentPins && pinMutation==='unqualified-sid' && component==='focus-agent-pins.ts'){
+      const originalSource="JSON.stringify(['runtime', identity.runtimeId, identity.agentSessionId])"
+      const originalHost="JSON.stringify(['host', control.hostId, control.agentSessionId])"
+      assert.equal(source.split(originalSource).length,2,'One qualified Source pin key')
+      assert.equal(source.split(originalHost).length,2,'One qualified local pin key')
+      const code=source.replace(originalSource,"JSON.stringify(['agent', identity.agentSessionId])")
+        .replace(originalHost,"JSON.stringify(['agent', control.agentSessionId])")
+      transformations.push({path:relative(root,path),mutation:pinMutation,sourceSHA256:hash(source),loadedSHA256:hash(code)})
+      return {contents:code,loader:'ts'}
+    }
+    if((taskLayout || inlineRename || agentPins) && component==='store.ts'){
       let code=source
       if(taskLayout && layoutMutation==='omit-layout'){
         const target='focusTaskLayout: state.focusTaskLayout'
@@ -125,7 +138,7 @@ try{
     }
     return{contents:source,loader:path.endsWith('tsx')?'tsx':path.endsWith('ts')?'ts':'js'}
   });builder.onLoad({filter:/\.css$/},async({path})=>{if(!path.startsWith(root+'/')||path.includes('/node_modules/'))return;const source=await readFile(path,'utf8');inputs.set(path,hash(source));return{contents:source,loader:'css'}})}}
-  for(const file of ['main.cjs','entry.mjs',...(taskLayout||inlineRename?['task-layout-controls.cjs']:[]),...(taskLayout?['task-layout-main.cjs']:[]),...(inlineRename?['inline-rename.mjs','inline-rename-main.cjs']:[]),...(takeoverFeedback?['feedback.mjs','feedback-main.cjs']:[]),...(sourceConnection?['connection.mjs','connection-main.cjs']:[])])inputs.set(join(fixture,file),hash(await readFile(join(fixture,file))))
+  for(const file of ['main.cjs','entry.mjs',...(taskLayout||inlineRename||agentPins?['task-layout-controls.cjs']:[]),...(agentPins?['agent-pins.cjs']:[]),...(taskLayout?['task-layout-main.cjs']:[]),...(inlineRename?['inline-rename.mjs','inline-rename-main.cjs']:[]),...(takeoverFeedback?['feedback.mjs','feedback-main.cjs']:[]),...(sourceConnection?['connection.mjs','connection-main.cjs']:[])])inputs.set(join(fixture,file),hash(await readFile(join(fixture,file))))
   inputs.set(mainFixture,hash(await readFile(mainFixture)))
   inputs.set(new URL(import.meta.url).pathname,hash(await readFile(new URL(import.meta.url))))
   const out=join(privateRoot,'out');await mkdir(out)
@@ -134,22 +147,27 @@ try{
     define:{__AGENTMUX_WEB_PREVIEW__:'true','process.env.NODE_ENV':'"production"'},loader:{'.avif':'file','.gif':'file','.png':'file','.svg':'file','.woff2':'file','.woff':'file','.ttf':'file'}})
   receipt.metafile={inputCount:Object.keys(buildResult.metafile.inputs).length,outputs:Object.fromEntries(Object.entries(buildResult.metafile.outputs).map(([name,value])=>[relative(privateRoot,resolve(root,name)),{bytes:value.bytes}])),sha256:hash(JSON.stringify(buildResult.metafile))};receipt.inputs=Object.fromEntries([...inputs].map(([path,sha])=>[relative(root,path),sha]));receipt.transformations=transformations
   for(const suffix of ['App.tsx','GlobalFocusSurface.tsx','WorkspaceWorkbench.tsx','StableWorkbenchView.tsx','store.ts','focus-tab-projection.ts','agent-focus.ts'])assert.ok([...inputs.keys()].some(path=>path.endsWith('/'+suffix)),'Actual loaded '+suffix)
+  if(agentPins)for(const suffix of ['FocusContextMenu.tsx','FocusPinnedAgents.tsx','focus-agent-pins.ts'])assert.ok([...inputs.keys()].some(path=>path.endsWith('/'+suffix)),'Actual pin consumer loaded '+suffix)
   if(takeoverFeedback)for(const suffix of ['AgentOperationFeedback.tsx','AgentRegionHeader.tsx','session-takeover-cancellation.ts','agent-operation.ts'])assert.ok([...inputs.keys()].some(path=>path.endsWith('/'+suffix)),'Actual cancellation consumer loaded '+suffix)
   if(sourceRecovery)for(const suffix of ['FocusContextMenu.tsx','AgentMenuContent.tsx','AgentInformationReader.tsx','use-focus-sources.tsx'])assert.ok([...inputs.keys()].some(path=>path.endsWith('/'+suffix)),'Actual recovery consumer loaded '+suffix)
-  const html=join(out,'index.html');await writeFile(html,'<!doctype html><html><meta charset="utf-8"><link rel="stylesheet" href="./app.css"><div id="root"></div><script>window.__taskLayoutScene='+JSON.stringify(taskLayout)+';window.__inlineRenameScene='+JSON.stringify(inlineRename)+';window.__sourceConnectionScene='+JSON.stringify(sourceConnection)+';window.__takeoverFeedbackScene='+JSON.stringify(takeoverFeedback)+';window.__unconfirmedScene='+JSON.stringify(unconfirmed)+';window.__memberStateScene='+JSON.stringify(memberState)+';window.__originalForeignConversation='+JSON.stringify(originalConversationPage)+';window.__originalForeignBody='+JSON.stringify(foreignBody)+';window.__originalForeignInput='+JSON.stringify(foreignInput)+'</script><script type="module" src="./app.js"></script></html>')
+  const html=join(out,'index.html');await writeFile(html,'<!doctype html><html><meta charset="utf-8"><link rel="stylesheet" href="./app.css"><div id="root"></div><script>window.__taskLayoutScene='+JSON.stringify(taskLayout)+';window.__inlineRenameScene='+JSON.stringify(inlineRename)+';window.__agentPinsScene='+JSON.stringify(agentPins)+';window.__sourceConnectionScene='+JSON.stringify(sourceConnection)+';window.__takeoverFeedbackScene='+JSON.stringify(takeoverFeedback)+';window.__unconfirmedScene='+JSON.stringify(unconfirmed)+';window.__memberStateScene='+JSON.stringify(memberState)+';window.__originalForeignConversation='+JSON.stringify(originalConversationPage)+';window.__originalForeignBody='+JSON.stringify(foreignBody)+';window.__originalForeignInput='+JSON.stringify(foreignInput)+'</script><script type="module" src="./app.js"></script></html>')
   receipt.compiled={renderer:hash(await readFile(renderer)),css:hash(await readFile(join(out,'app.css')))}
   const env={...process.env,AGENTMUX_DESKTOP_USER_DATA:join(privateRoot,'user-data'),AGENTMUX_RUNTIME_DIRECTORY:join(privateRoot,'runtime'),AGENTMUX_STATE_DIRECTORY:join(privateRoot,'state')};delete env.ELECTRON_RUN_AS_NODE
-  receipt.process=await runProbeProcess(require('electron'),[mainFixture,html,privateRoot,evidence,...(taskLayout?['--task-layout']:inlineRename?['--inline-rename']:sourceConnection?['--source-connection']:takeoverFeedback?['--takeover-feedback']:sourceRecovery?['--source-recovery']:unconfirmed?['--unconfirmed']:memberState?['--member-state']:primaryOnly?['--primary-only']:[])],{temporaryRoot:privateRoot,cwd:root,env,timeoutMs:60000,onLine:line=>logs.push(line)})
+  receipt.process=await runProbeProcess(require('electron'),[mainFixture,html,privateRoot,evidence,...(agentPins?['--agent-pins']:taskLayout?['--task-layout']:inlineRename?['--inline-rename']:sourceConnection?['--source-connection']:takeoverFeedback?['--takeover-feedback']:sourceRecovery?['--source-recovery']:unconfirmed?['--unconfirmed']:memberState?['--member-state']:primaryOnly?['--primary-only']:[])],{temporaryRoot:privateRoot,cwd:root,env,timeoutMs:60000,onLine:line=>logs.push(line)})
   receipt.actual=JSON.parse(await readFile(join(evidence,'actual.json'),'utf8'))
   assert.equal(receipt.process.exitCode,0,receipt.actual.failure?.message);assert.equal(receipt.actual.passed,true)
-  if(taskLayout){
+  if(taskLayout||agentPins){
     const restoredEvidence=join(evidence,'restored');await mkdir(restoredEvidence,{recursive:true})
-    receipt.restoreProcess=await runProbeProcess(require('electron'),[mainFixture,html,privateRoot,restoredEvidence,'--task-layout-restore'],{temporaryRoot:privateRoot,cwd:root,env,timeoutMs:60000,onLine:line=>logs.push(line)})
+    receipt.restoreProcess=await runProbeProcess(require('electron'),[mainFixture,html,privateRoot,restoredEvidence,agentPins?'--agent-pins-restore':'--task-layout-restore'],{temporaryRoot:privateRoot,cwd:root,env,timeoutMs:60000,onLine:line=>logs.push(line)})
     const restored=JSON.parse(await readFile(join(restoredEvidence,'actual.json'),'utf8'))
     assert.equal(receipt.restoreProcess.exitCode,0,restored.failure?.message);assert.ok(restored.passed);assert.notEqual(restored.pid,receipt.actual.pid)
     assert.ok(restored.topology.tabs['ordinary-tab'] && restored.topology.drafts.working)
     assert.deepEqual(restored.topology,receipt.actual.topology,'Second process restores the same original Tabs, layouts and draft')
     receipt.restoration={firstPid:receipt.actual.pid,secondPid:restored.pid,layout:restored.layout,sameTopologyAndDrafts:true}
+    if(agentPins){
+      assert.deepEqual(restored.pins,receipt.actual.pins,'Second process restores both exact Agent pins and their order')
+      receipt.restoration.pins=restored.pins
+    }
     receipt.actual.frames.push(...restored.frames.map(frame=>({...frame,file:'restored/'+frame.file})))
   }
   if(takeoverFeedback){
@@ -162,10 +180,10 @@ try{
     receipt.restoration=restored.restoration;receipt.actual.frames.push(...restored.frames.map(frame=>({...frame,file:'restored/'+frame.file})))
   }
   receipt.frames=await Promise.all(receipt.actual.frames.map(async frame=>({...frame,sha256:hash(await readFile(join(evidence,frame.file)))})))
-  assert.ok(taskLayout?receipt.frames.length>=6:inlineRename?receipt.frames.length>=5:sourceConnection?receipt.frames.length>=6:takeoverFeedback?receipt.frames.length>=12:sourceRecovery?receipt.frames.length>=9:unconfirmed?receipt.frames.length===4:memberState?receipt.frames.length>=6:primaryOnly?receipt.frames.length===1&&receipt.frames[0].file==='unified-focus-source-primary.png':receipt.frames.length>=6,'Requested actual ordinary Focus scenes')
+  assert.ok(agentPins?receipt.frames.length>=6:taskLayout?receipt.frames.length>=6:inlineRename?receipt.frames.length>=5:sourceConnection?receipt.frames.length>=6:takeoverFeedback?receipt.frames.length>=12:sourceRecovery?receipt.frames.length>=9:unconfirmed?receipt.frames.length===4:memberState?receipt.frames.length>=6:primaryOnly?receipt.frames.length===1&&receipt.frames[0].file==='unified-focus-source-primary.png':receipt.frames.length>=6,'Requested actual ordinary Focus scenes')
   receipt.sourceAfter=Object.fromEntries(await Promise.all([...inputs.keys()].map(async path=>[relative(root,path),hash(await readFile(path))])))
   receipt.unrelatedSourceDrift=Object.keys(receipt.inputs).filter(path=>receipt.sourceAfter[path]!==receipt.inputs[path])
-  const relevant=taskLayout||inlineRename?Object.keys(receipt.inputs).filter(path=>/Focus|focus-|store.ts|task-layout|inline-rename|display-label|[Ss]ubagent|[Aa]gent-[Oo]bservation|agent-status-decay|AgentInformation|SurfaceModeSwitch|surface-mode-switch|collaboration.css/.test(path)):takeoverFeedback?Object.keys(receipt.inputs).filter(path=>/AgentOperationFeedback|AgentRegionHeader|session-takeover|agent-operation|focus-source-unification/.test(path)):Object.keys(receipt.inputs)
+  const relevant=taskLayout||inlineRename||agentPins?Object.keys(receipt.inputs).filter(path=>/Focus|focus-|agent-pins|store.ts|task-layout|inline-rename|display-label|[Ss]ubagent|[Aa]gent-[Oo]bservation|agent-status-decay|AgentInformation|SurfaceModeSwitch|surface-mode-switch|collaboration.css/.test(path)):takeoverFeedback?Object.keys(receipt.inputs).filter(path=>/AgentOperationFeedback|AgentRegionHeader|session-takeover|agent-operation|focus-source-unification/.test(path)):Object.keys(receipt.inputs)
   for(const path of relevant)assert.equal(receipt.sourceAfter[path],receipt.inputs[path],'Current relevant visual candidate remains stable '+path)
   receipt.capturedPass=true
 }catch(error){receipt.failure={name:error.name,message:error.message,stack:error.stack};process.exitCode=1}

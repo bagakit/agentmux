@@ -18,6 +18,7 @@ import { prepareInlineRename } from './inline-rename.mjs'
 // source adapter, normal Context/lane/card/Reader/filter/menu remain production.
 const memberStateMode=window.__memberStateScene===true,unconfirmedMode=window.__unconfirmedScene===true
 const localTaskScene=window.__taskLayoutScene||window.__inlineRenameScene
+const agentPinsScene=window.__agentPinsScene===true
 const config=await api.config.get(),initial=await api.sessions.snapshot(),base=initial.sessions.find(s=>s.kind==='agent')
 if(!base?.control?.run?.runId)throw Error('Existing typed preview Agent required')
 const {pendingInteraction:_pending,...agent}=base,now=Date.now(),path='/original/analysis-project'
@@ -129,15 +130,15 @@ api.spaceMounts.member=async(input,_listener)=>{
  const session={...sessions[0],id,hostId,label:'Original foreign fallback',creation:{createOperationId:'source-create-3',initialPrompt:'unknown'},control:{kind:'agent',hostId,agentSessionId:input.target.agentSessionId,run:input.target.expectedRun}}
  return{initial:{id,hostId},dispose(){},async call(method,request){memberCalls.push({method,runtimeId:input.target.runtimeId,agentSessionId:input.target.agentSessionId});if(method==='read')return session;if(method==='conversationRead')return structuredClone(window.__originalForeignConversation);if(method==='conversationWatch')return {hostId:'local',agentSessionId:input.target.agentSessionId,sourceHostId:'local',scope:window.__originalForeignConversation.scope,coverage:window.__originalForeignConversation.coverage,readerId:'original-preview-reader'};if(method==='conversationUnwatch')return;if(method==='conversationRelease')return {hostId:'local',agentSessionId:input.target.agentSessionId,sourceHostId:'local',viewId:window.__originalForeignConversation.window.id,released:true};throw Error('Original bounded conversation preview is not configured: '+method)}}
 }
-const restoreLayout = window.__taskLayoutScene && localStorage.getItem('agentmux-workbench-v1') !== null
+const restoreLayout = (window.__taskLayoutScene || agentPinsScene) && localStorage.getItem('agentmux-workbench-v1') !== null
 const restoreWorkbench = window.__feedbackRestoreSerialized || restoreLayout
 useAppStore.setState({loading:false,initialize:async()=>()=>{},config:{...config,workspaces,hosts:[{id:'local',kind:'local',label:'Original local device'}],
- ...(localTaskScene ? {focus:{...config.focus,previewTrigger:'keyboard'}} : {})},
+ ...(localTaskScene || agentPinsScene ? {focus:{...config.focus,previewTrigger:'keyboard'}} : {})},
  sessions,agentNames:Object.fromEntries(sessions.map(s=>[s.id,s.label])),timelines,
  tabs:restoreWorkbench?{}:Object.fromEntries(originalTabs.map(item => [item.id,item])),
  layouts:restoreWorkbench?{}:Object.fromEntries(workspaces.map((item,index) => [item.id,createWorkspaceLayout(index ? item.id+'-group' : 'ordinary-group',originalTabs.filter(tab => tab.workspaceId === item.id).map(tab => tab.id))])),
  activeWorkspaceId:workspace.id,mainSurface:'agents',focusView:'list',toolsOpen:false,projectRailOpen:false,agentFocus:{execution:{sessionId:null,history:[]},pmo:{sessionId:null}},agentComposerDrafts:restoreWorkbench?{}:{working:'原未发送草稿'},mountedSpaceInputs:{[key]:{target,drafts:{}}},mountedSpaceObservations:{},mountedSpaceSessions:{},selectedSpaceMount:null})
-if(localTaskScene){
+if(localTaskScene || agentPinsScene){
 
  api.ui.requestStorageFlush=async()=>{}
  await useAppStore.persist.rehydrate()
@@ -164,6 +165,32 @@ if(localTaskScene){
    }) },
   }) }))
  }}
+}
+if (agentPinsScene) {
+ const readingIndex = sessions.findIndex(session => session.id === 'reading')
+ const savedReading = sessions[readingIndex]
+ window.agentPinsProof = {
+  restored: restoreLayout,
+  readGraph() {
+   const state = useAppStore.getState()
+   return {tabs: state.tabs, layouts: state.layouts, drafts: state.agentComposerDrafts}
+  },
+  selection() {
+   const state = useAppStore.getState()
+   return {local: state.agentFocus.execution.sessionId, source: state.selectedSpaceMount}
+  },
+  observeReading(observed) {
+   useAppStore.setState(state => {
+    const next = state.sessions.filter(session => session.id !== 'reading')
+    if (observed) next.splice(readingIndex, 0, savedReading)
+    return {sessions: next}
+   })
+  },
+  async checkpoint() {
+   await checkpointAgentOperations()
+   return JSON.parse(localStorage.getItem('agentmux-workbench-v1')).state.pinnedItems?.['focus:agents'] ?? []
+  },
+ }
 }
 if(window.__inlineRenameScene)prepareInlineRename({api,useAppStore})
 if(window.__sourceConnectionScene)prepareSourceConnection({api,snapshot,opening})
