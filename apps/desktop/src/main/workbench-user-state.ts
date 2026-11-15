@@ -10,7 +10,8 @@ import { captureWorkbenchRecoveryFiles, inspectWorkbenchRecoveryFiles } from './
 import { confirmExistingWorkbenchRecoveryMember, holdRecoveredWorkbenchDocument, prepareWorkbenchRecoveryMembers, readWorkbenchRecoveryBytes, readWorkbenchRecoveryMember, recoveryUnavailable } from './workbench-recovery-restore.js'
 import { decodeWorkbenchUserState, holdRecoveredWorkbenchDatabase, isWorkbenchUserDatabase, WorkbenchUserDatabase } from './workbench-user-database.js'
 
-import type { WorkbenchInputArchivePage, WorkbenchInputArchiveQuery, WorkbenchUserStateFailure, WorkbenchUserStateReceipt, WorkbenchUserStateObservation } from '../shared/workbench-user-state.js'
+import type { WorkbenchInputArchivePage, WorkbenchInputArchiveQuery, WorkbenchUserStateConfirmation, WorkbenchUserStateFailure,
+  WorkbenchUserStateReceipt, WorkbenchUserStateObservation } from '../shared/workbench-user-state.js'
 import type { WorkbenchUserStateWrite, WorkbenchUserStateWriteReceipt } from '../shared/workbench-user-state.js'
 export type { WorkbenchUserStateFailure, WorkbenchUserStateReceipt, WorkbenchUserStateObservation } from '../shared/workbench-user-state.js'
 import { captureFileViewReadingOwner, encodeFileViewReading, fileViewReadingOwnerKey, isFileViewReadingPosition, parseWorkbenchInputArchiveQuery,
@@ -406,11 +407,12 @@ export class WorkbenchUserStateStore {
   private async confirmReceipt(metadata: Awaited<ReturnType<WorkbenchUserDatabase['write']>>): Promise<WorkbenchUserStateReceipt> {
     this.confirmedDatabaseFile = await this.database.fileStamp()
     const { contentDigest, sizeBytes, inputQueueArchiveOwners, inputQueueArchived } = metadata
-    const receipt: WorkbenchUserStateReceipt = { path: this.path, contentDigest, sizeBytes, diskDurability: 'confirmed', confirmedAt: Date.now(),
+    const confirmation: WorkbenchUserStateConfirmation = { path: this.path, contentDigest, sizeBytes, diskDurability: 'confirmed', confirmedAt: Date.now() }
+    const receipt: WorkbenchUserStateReceipt = { ...confirmation,
       ...(inputQueueArchiveOwners === undefined ? {} : { inputQueueArchiveOwners }),
       ...(inputQueueArchived === undefined ? {} : { inputQueueArchived }) }
-    const { inputQueueArchiveOwners: _archive, inputQueueArchived: _archived, ...observation } = receipt
-    Object.assign(this.observation, { availability: 'present', ...observation, lastConfirmedWrite: receipt })
+    Object.assign(this.observation, { availability: 'present', ...confirmation })
+    this.observation.lastConfirmedWrite = confirmation
     return structuredClone(receipt)
   }
 

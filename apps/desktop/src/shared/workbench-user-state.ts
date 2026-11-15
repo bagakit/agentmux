@@ -5,17 +5,22 @@ export type WorkbenchUserStateFailure = {
   observedAt: number
 }
 
-export type WorkbenchUserStateReceipt = {
+export type WorkbenchUserStateConfirmation = {
   path: string
   contentDigest: string
   sizeBytes: number
   diskDurability: 'confirmed'
   confirmedAt: number
+}
+
+type WorkbenchInputArchiveReceipt = {
   /** Owners whose cold records changed in this commit. Null means an explicit full clear. */
   inputQueueArchiveOwners?: string[] | null
   /** Exact submitted entries the owner has durably removed from the hot projection. */
   inputQueueArchived?: { ownerKey: string; operationId: string }[]
 }
+
+export type WorkbenchUserStateReceipt = WorkbenchUserStateConfirmation & WorkbenchInputArchiveReceipt
 
 /** Private Desktop IPC admission, scoped by Main to the original native document. */
 export type WorkbenchUserStateWrite = { value: string; writeRevision: number }
@@ -113,8 +118,8 @@ export type WorkbenchUserStateObservation = {
   sizeBytes: number | null
   diskDurability: 'confirmed' | 'unconfirmed'
   confirmedAt: number | null
-  /** Original producer receipt in this Main lifetime; a read never extends it to another file. */
-  lastConfirmedWrite: WorkbenchUserStateReceipt | null
+  /** Metadata from the original write in this Main lifetime. A read never extends it to another file. */
+  lastConfirmedWrite: (WorkbenchUserStateConfirmation & { [Key in keyof WorkbenchInputArchiveReceipt]?: never }) | null
   /** Historical metadata only; a later successful write retains the latest diagnosis. */
   lastFailure: WorkbenchUserStateFailure | null
 }
