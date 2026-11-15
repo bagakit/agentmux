@@ -52,7 +52,7 @@ async function webpage(extension = '.html') {
 function fixture() {
   const listeners = new Set<() => void>(), original = { kind: 'file', path: '/original/draft.txt', draft: 'Keep original draft' }
   const state: any = {
-    config: { workspaces: [{ id: SCRATCH_WORKSPACE_ID }] }, layouts: { [SCRATCH_WORKSPACE_ID]: { activeGroupId: 'scratch-group' } }, tabs: { original: { regions: { original } } },
+    config: { workspaces: [{ id: SCRATCH_WORKSPACE_ID }], browser: {} }, layouts: { [SCRATCH_WORKSPACE_ID]: { activeGroupId: 'scratch-group' } }, tabs: { original: { regions: { original } } },
     mainSurface: 'recall', recallNotebookId: 'original-book', recallNoteId: 'original-note', recallZoneSelection: null, surveyZoneSelection: null,
     surveyPageReferences: [], setSurveyZoneCollected: vi.fn(() => true),
     openLauncher: vi.fn(() => { state.tabs['new-tab'] = { id: 'new-tab', space: { zoneId: 'exact-zone' }, layout: { activeRegionId: 'new-region' }, regions: { 'new-region': { kind: 'launcher', workspaceId: SCRATCH_WORKSPACE_ID, regionId: 'new-region' } } }; return 'new-tab' }),
@@ -81,9 +81,12 @@ function fixture() {
   const app = Object.assign(new EventEmitter(), { whenReady: () => new Promise(() => {}), isPackaged: false })
   const main = source('apps/desktop/src/main/index.ts')
   const start = main.statements.filter(ts.isFunctionDeclaration).find(node => node.name?.text === 'startPrimaryInstance')!
+  const declarations = start.body!.statements.filter(ts.isVariableStatement).flatMap(statement => [...statement.declarationList.declarations])
+  const owner = declarations.find(declaration => declaration.name.getText(main) === 'webFiles')
   const registration = start.body!.statements.find(node => ts.isExpressionStatement(node) && ts.isCallExpression(node.expression) && node.expression.expression.getText(main) === 'registerSystemWebFileEvents')
-  const files = evaluate(`${start.body!.statements[0]!.getText(main)}; ${registration?.getText(main) ?? ''}; return webFiles`, {
-    SpatialLinkIngress, WebUrlIngress, WebFileIngress, registerSystemWebFileEvents, app, workbenchWindow: undefined, createWindow: vi.fn()
+  if (!owner || !registration) throw new Error('Original Main file ingress owner or registration missing')
+  const files = evaluate(`const ${owner.getText(main)}; ${registration.getText(main)}; return webFiles`, {
+    WebFileIngress, registerSystemWebFileEvents, app, workbenchWindow: undefined, createWindow: vi.fn()
   }) as WebFileIngress
   const issues: string[] = [], replies: unknown[] = []
   const bridge = new DesktopControlIpcBridge({ isAvailable: () => true, sendCancellation: vi.fn(), sendRequest: request => {
