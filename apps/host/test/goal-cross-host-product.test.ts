@@ -138,9 +138,10 @@ it('takes a remote worker source report through the public Goal owner, signed pu
   expect(ambiguous.code).toBe(1); expect(ambiguous.stderr, ambiguous.stderr + ambiguous.stdout).toContain('AMBIGUOUS_AGENT_SESSION')
   const nodes = ['first', 'dependent'].map(id => ({ id, title: 'Deliver ' + id, outcome: 'Original ' + id + ' outcome', dependsOn: id === 'dependent' ? ['first'] : [],
     criterionIds: ['original-criterion'], check: 'node --test checks/' + id + '.test.mjs', executor: { hostId: 'worker-b', agentSessionId: 'same-session' } }))
-  await a.call('same-session', ['goal', 'plan', 'revise', '--input', '-'], { goalId, revision: { operationId: 'original-plan-revision', expectedRevision: 0, alignmentRevision, nodes } })
+  const published = await a.call('same-session', ['goal', 'plan', 'revise', '--input', '-'], { goalId, revision: { operationId: 'original-plan-revision', expectedRevision: 0, alignmentRevision, nodes } })
+  const ids = new Map(nodes.map((node, index) => [node.id, published.plan.nodes[index].id as string]))
   const intent = (nodeId: string) => ({ operationId: 'delegate-' + nodeId, sourceMessageId: 'source-' + nodeId, hostId: 'local', workerHostId: 'worker-b', ownerAgentSessionId: 'same-session', workerAgentSessionId: 'same-session',
-    ownerRunId: 'run-same-session', workerRunId: 'run-same-session', threadId: 'thread-' + nodeId, text: 'Deliver the original ' + nodeId + ' task.', alignmentRevision, criterionIds: ['original-criterion'], planNodeId: nodeId })
+    ownerRunId: 'run-same-session', workerRunId: 'run-same-session', threadId: 'thread-' + nodeId, text: 'Deliver the original ' + nodeId + ' task.', alignmentRevision, criterionIds: ['original-criterion'], planNodeId: ids.get(nodeId)! })
   const blocked = await a.cli('same-session', ['goal', 'delegate', '--input', '-'], { goalId, intent: intent('dependent') })
   expect(blocked.code).toBe(1); expect(blocked.stderr).toContain('only a ready node')
   const delegated = await a.call('same-session', ['goal', 'delegate', '--input', '-'], { goalId, intent: intent('first') })
@@ -168,13 +169,17 @@ test('the received original report retains its worker signature and exact Goal c
   const checked = await promisify(execFile)(process.execPath, ['--test', 'checks/first.test.mjs'], { cwd: a.original.root })
   await writeFile(join(checks, 'review-first.log'), checked.stdout + checked.stderr)
   expect(checked.stdout).toContain('pass 1')
-  const review = { operationId: 'review-first', nodeId: 'first', delegationOperationId: 'delegate-first', deliveryHash: collected.delegations[0].report.delivery.hash, verdict: 'pass',
+  const review = { operationId: 'review-first', nodeId: ids.get('first')!, delegationOperationId: 'delegate-first', deliveryHash: collected.delegations[0].report.delivery.hash, verdict: 'pass',
     check: { command: nodes[0]!.check, result: checked.stdout, evidence: ['checks/review-first.log:1'] }, note: '' }
   const foreignWorker = await a.cli('same-session', ['goal', 'plan', 'review', '--input', '-'], { goalId, review: { ...review, operationId: 'foreign-worker-review' } }, b.original.capability)
   expect(foreignWorker.code).toBe(1); expect(foreignWorker.stderr).toContain('AGENT_CAPABILITY_INVALID')
   await a.call('independent-reviewer', ['goal', 'plan', 'review', '--input', '-'], { goalId, review })
   const unlocked = await a.call('same-session', ['goal', 'delegate', '--input', '-'], { goalId, intent: intent('dependent') })
   expect(unlocked.plan.reviews[0]).toMatchObject({ ...review, reviewer: { kind: 'agent', id: 'independent-reviewer', hostId: 'local', runtimeId: a.identity.runtimeId } })
+  const completion = unlocked.plan.reviews[0].completion
+  const fingerprint = (await a.client().agentCreationAuthority()).fingerprint
+  expect((await b.cli(null, ['goal', 'plan', 'verify', '--input', '-', '--goal', goalId, '--hash', completion.hash, '--fingerprint', fingerprint], completion)).code).toBe(0)
+  expect(unlocked.delegations[1].dispatchProof.record).toMatchObject({ executor: { runtimeId: b.identity.runtimeId }, predecessors: [{ ticketId: ids.get('first'), completionHash: completion.hash }] })
   expect(unlocked.delegations.map((item: { operationId: string }) => item.operationId)).toEqual(['delegate-first', 'delegate-dependent'])
   const final = await a.call(null, ['goal', 'inspect', '--goal', goalId])
   expect(final.goal).toMatchObject({ status: 'in_progress', description: 'Preserve the original human intent.', alignment: { confirmedAt: null }, grounding: { acceptedAt: null } })

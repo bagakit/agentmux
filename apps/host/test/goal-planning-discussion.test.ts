@@ -62,7 +62,7 @@ it('the public CLI submits and reconciles an original managed planning input, th
   expect((await f.call(null, ['goal', 'plan', '--goal', goalId])).plan).toBeUndefined()
   const saved = await f.call('supervisor', ['goal', 'plan', 'revise', '--input', '-'], revision)
   expect(saved.plan.history[0].author).toMatchObject({ kind: 'agent', id: 'supervisor' })
-  expect(saved.plan.nodes[1].dependsOn).toEqual(['prepare'])
+  expect(saved.plan.nodes[1].dependsOn).toEqual([saved.plan.nodes[0].id])
   const read = await f.call(null, ['goal', 'inspect', '--goal', goalId])
   expect(read.goal).toMatchObject({ supervisorSessionId: 'supervisor', alignment: { confirmedAt: null }, plan: { revision: 1 } })
   expect(read.goal.delegations ?? []).toEqual([])

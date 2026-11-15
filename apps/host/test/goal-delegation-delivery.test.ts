@@ -23,12 +23,12 @@ async function fixture() {
   const criteria = [{ id: 'delivery-criterion', text: 'Retain original work and verify target receipt.' }]
   const aligned = await a.call(null, ['goal', 'update', '--goal', goalId, '--alignment', JSON.stringify({ summary: 'Original delivery target', criteria, openQuestions: [] })])
   a.routes([{ hostId: 'worker-host', client: b.reader }]); b.routes([])
-  await a.call('same-session', ['goal', 'plan', 'revise', '--input', '-'], { goalId, revision: { operationId: 'delivery-plan', expectedRevision: 0,
+  const published = await a.call('same-session', ['goal', 'plan', 'revise', '--input', '-'], { goalId, revision: { operationId: 'delivery-plan', expectedRevision: 0,
     alignmentRevision: aligned.goal.alignment.revision, nodes: [{ id: 'first', title: 'Original work', outcome: 'One received source', dependsOn: [],
       criterionIds: ['delivery-criterion'], check: 'node --test checks/delivery.test.mjs', executor: { hostId: 'worker-host', agentSessionId: 'same-session' } }] } })
   const intent = { operationId: 'delivery-operation', sourceMessageId: 'delivery-source', hostId: 'local', workerHostId: 'worker-host',
     ownerAgentSessionId: 'same-session', workerAgentSessionId: 'same-session', ownerRunId: 'run-same-session', workerRunId: 'run-same-session',
-    threadId: 'delivery-thread', text: 'Deliver this original task once.', alignmentRevision: aligned.goal.alignment.revision, criterionIds: ['delivery-criterion'], planNodeId: 'first' }
+    threadId: 'delivery-thread', text: 'Deliver this original task once.', alignmentRevision: aligned.goal.alignment.revision, criterionIds: ['delivery-criterion'], planNodeId: published.plan.nodes[0].id as string }
   const input = { goalId, intent }
   const read = () => a.call('same-session', ['goal', 'delegations', '--goal', goalId])
   const incoming = () => b.call('same-session', ['message', 'read', '--host', 'local', '--message-id', intent.sourceMessageId])
@@ -86,26 +86,26 @@ it('retries only an explicit original delegation after missing trust and lost ta
 it('the public plan reader names why a node needs reconciliation: an unconfirmed link, then criteria changed after the attempt was sent', async () => {
   const f = await fixture(), read = () => f.a.call('same-session', ['goal', 'plan', '--goal', f.goalId]), plan = async () => (await read()).planState
   const saved = (await read()).plan
-  await f.a.call('same-session', ['goal', 'plan', 'revise', '--input', '-'], { goalId: f.goalId, revision: { operationId: 'delivery-plan-dependent',
+  const revised = await f.a.call('same-session', ['goal', 'plan', 'revise', '--input', '-'], { goalId: f.goalId, revision: { operationId: 'delivery-plan-dependent',
     expectedRevision: saved.revision, alignmentRevision: saved.alignmentRevision, nodes: [...saved.nodes, { id: 'second', title: 'Dependent work',
-      outcome: 'Builds on the received source', dependsOn: ['first'], criterionIds: ['delivery-criterion'], check: 'node --test checks/second.test.mjs', executor: null }] } })
+      outcome: 'Builds on the received source', dependsOn: [f.intent.planNodeId], criterionIds: ['delivery-criterion'], check: 'node --test checks/second.test.mjs', executor: null }] } })
   const attempt = { delegationOperationId: f.intent.operationId, sourceMessageId: f.intent.sourceMessageId, threadId: f.intent.threadId,
     workerHostId: 'worker-host', workerAgentSessionId: 'same-session', reported: false }
-  const second = { id: 'second', state: 'waiting', column: 1, unknown: [], attempt: null }
-  expect(await plan()).toMatchObject({ revision: 2, done: 0, total: 2, next: ['first'], nodes: [{ id: 'first', state: 'ready', column: 0, unknown: [], attempt: null }, second] })
+  const second = { id: revised.plan.nodes[1].id, state: 'waiting', column: 1, unknown: [], attempt: null }
+  expect(await plan()).toMatchObject({ revision: 2, done: 0, total: 2, next: [f.intent.planNodeId], nodes: [{ id: f.intent.planNodeId, state: 'ready', column: 0, unknown: [], attempt: null }, second] })
   expect((await f.a.cli('same-session', ['goal', 'delegate', '--input', '-'], f.input)).code).toBe(1)
-  expect(await plan()).toMatchObject({ next: [], nodes: [{ id: 'first', state: 'unknown', unknown: ['dispatch-link'], attempts: 1, attempt }, second] })
+  expect(await plan()).toMatchObject({ next: [], nodes: [{ id: f.intent.planNodeId, state: 'unknown', unknown: ['dispatch-link'], attempts: 1, attempt }, second] })
   await pin(f.a, f.b)
   await f.a.call('same-session', ['goal', 'delegate', '--input', '-'], f.input)
-  expect((await plan()).nodes).toMatchObject([{ id: 'first', state: 'working', unknown: [], attempts: 1, attempt }, second])
+  expect((await plan()).nodes).toMatchObject([{ id: f.intent.planNodeId, state: 'working', unknown: [], attempts: 1, attempt }, second])
   const criteria = [{ ...f.criteria[0]!, text: 'Retain original work and verify the signed target receipt.' }]
   await f.a.call(null, ['goal', 'update', '--goal', f.goalId, '--alignment', JSON.stringify({ summary: 'Original delivery target', criteria, openQuestions: [] })])
-  expect((await plan()).nodes).toMatchObject([{ id: 'first', state: 'unknown', unknown: ['criteria'], staleCriteria: ['delivery-criterion'], attempt }, second])
+  expect((await plan()).nodes).toMatchObject([{ id: f.intent.planNodeId, state: 'unknown', unknown: ['criteria'], staleCriteria: ['delivery-criterion'], attempt }, second])
 })
 
 it('binds an existing cross-Host source only after the worker exact read proves receipt and never sends from bind', async () => {
   const f = await fixture(), application = { schema: 'agentmux.goal-delegation.v1', data: { goalId: f.goalId,
-    delegationOperationId: f.intent.operationId, alignmentRevision: f.intent.alignmentRevision, criteria: f.criteria, planNodeId: 'first' } }
+    delegationOperationId: f.intent.operationId, alignmentRevision: f.intent.alignmentRevision, criteria: f.criteria, planNodeId: f.intent.planNodeId } }
   const send = { target: { kind: 'agent-session', hostId: 'worker-host', agentSessionId: 'same-session' }, operationId: f.intent.operationId,
     messageId: f.intent.sourceMessageId, threadId: f.intent.threadId, correlationId: f.intent.sourceMessageId, text: f.intent.text,
     application, expectedRun: { runId: f.intent.workerRunId } }
