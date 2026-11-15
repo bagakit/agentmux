@@ -15,6 +15,8 @@ const mutation = process.env.AMX_SESSION_STATE_MUTATION
 const edits: Record<string, [string, string, string]> = {
   'omit-codex-child-completion': ['packages/providers/src/codex/turn-evidence.ts',
     'return { nativeSessionId, nativeAgentId, observedAt }', 'return undefined'],
+  'omit-codex-child-backfill': ['packages/providers/src/codex/session-status.ts',
+    'if (unsettledSubagents?.length && onSubagentCompletion) {', 'if (false && unsettledSubagents?.length && onSubagentCompletion) {'],
   'child-not-active': ['packages/core/src/agent-status-freshness.ts', ": childWorking ? 'active'", ": childWorking ? 'unknown'"],
   'child-not-saved': ['packages/core/src/client.ts', '...(childState ? { nativeSubagents: childState } : {}),', '/* omit the durable child contribution */'],
   'old-child-end': ['packages/core/src/hook-normalizer.ts', 'before.sourceId !== identity.sourceId || before.nativeTurnId !== identity.nativeTurnId', 'before.sourceId !== identity.sourceId'],
