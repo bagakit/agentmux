@@ -45,10 +45,6 @@ export function BrowserSettingsPane({ browser, active, onSave, onForget }: {
     newPageSurvey: resolveBrowserNewPagePlacement(browser.newPagePlacement, 'survey') }
   const draft = useSettingDraftRecord(saved)
   const saveState = useSettingsSave()
-  const [managementOpen, setManagementOpen] = useState(false)
-  const observing = active && managementOpen
-  const directory = useBrowserDirectory(observing)
-  const observation = usePerformanceObservation(api.toolkit, observing)
 
   async function save(): Promise<void> {
     const submitted = draft.beginSave()
@@ -99,14 +95,22 @@ export function BrowserSettingsPane({ browser, active, onSave, onForget }: {
       <SettingsSaveBar save={saveState} dirty={draft.dirty} resolution={draft} scopeLabel="Browser preferences" blocked={validExitCheckUrl(draft.value.exitCheckUrl.trim()) ? undefined : 'the exit check address must be https:// without a user name or password.'} label="Save browser" onSave={() => void save()} />
       </section>
       <AppLinkSchemes browser={browser} onForget={onForget} />
-      <SettingsDisclosure title="Browser management" description="Inspect open pages, shared tabs and selected files." onOpenChange={setManagementOpen}>
-        <BrowserResources active={observing} directory={directory} app={observation.snapshot?.observation?.app} observationError={observation.error} />
-        <ExternalBrowserConnections targets={directory.rows.map(row => row.target).filter(target => target.source === 'external')}
-          observedIds={directory.observedIds} />
-        <RetainedBrowserUploads active={observing} />
-      </SettingsDisclosure>
+      <BrowserManagementSettings active={active} />
     </div>
   )
+}
+
+function BrowserManagementSettings({ active }: { active: boolean }) {
+  const [managementOpen, setManagementOpen] = useState(false)
+  const observing = active && managementOpen
+  const directory = useBrowserDirectory(observing)
+  const observation = usePerformanceObservation(api.toolkit, observing)
+  return <SettingsDisclosure title="Browser management" description="Inspect open pages, shared tabs and selected files." onOpenChange={setManagementOpen}>
+    <BrowserResources active={observing} directory={directory} app={observation.snapshot?.observation?.app} observationError={observation.error} />
+    <ExternalBrowserConnections targets={directory.rows.map(row => row.target).filter(target => target.source === 'external')}
+      observedIds={directory.observedIds} />
+    <RetainedBrowserUploads active={observing} />
+  </SettingsDisclosure>
 }
 
 /**
