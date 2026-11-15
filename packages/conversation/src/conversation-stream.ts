@@ -555,6 +555,11 @@ function projectConversationGraph<Record extends ConversationSourceRecord, Event
     order: { basis: 'source-and-relations', crossSource: sources.length > 1 ? 'partial' : 'confirmed' } }
 }
 
+/**
+ * Project one Session scope with at most one selected native history and one captured stream.
+ * Pass accepted records in original oldest-first order within each source. Provide scope and
+ * coverage for sources without accepted records, and project a different source scope separately.
+ */
 export function projectConversationStream<Record extends ConversationSourceRecord>(input: ConversationStreamInput<Record>): ConversationTimeline<Record> {
   return projectConversationGraph(input, (event, group) => ({ ...event,
     revision: conversationRevision({ policy: 1, versions: group.map(record => [record.id, record.revision]), event }) }))
