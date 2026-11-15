@@ -488,6 +488,8 @@ ACP 的原连接绑定、原 Run 与每次实际接收的归一请求身份共�
 
 ## 共同对话协议与外部交流入口
 
+AgentMux 内置群聊的独立会话、作者与 Mote 视角见[内置群聊与 Mote 群内视角](motes-and-coordination.md#内置群聊与-mote-群内视角)。
+
 对话模式与飞书、Discord 等外部聊天连接器是同一 Agent Conversation 统一 timeline 的接入方，共同消费 Core 给出的事件身份、顺序、内容与来源，各自只持有自己的呈现、草稿与阅读状态。外部渠道的绑定身份、群入口与成员访问、共享与触发、双向交付、托管 Host、凭据与群诊断唯一见[外部对话渠道与群聊连接](conversation-channels.md)。
 
 ## 产品验收导航
