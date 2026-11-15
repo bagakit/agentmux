@@ -1,15 +1,16 @@
 .goal-agent-picker { width: min(620px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); overflow: auto; }
-.goal-agent-picker__modes { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin: var(--sp-5) 0; }
-.goal-agent-picker__search { display: flex; align-items: center; gap: var(--sp-3); color: var(--text-3); margin-bottom: var(--sp-3); }
-.goal-agent-picker__search input { width: 100%; }
-.goal-agent-picker__rows { display: grid; max-height: min(380px, 42dvh); overflow: auto; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); }
-.goal-agent-picker__row { display: flex; align-items: flex-start; gap: var(--sp-4); padding: var(--sp-4); color: var(--text-2); cursor: pointer; border-bottom: 1px solid var(--line-soft); font-size: var(--fs-body); }
-.goal-agent-picker__row:last-child { border-bottom: 0; }
-.goal-agent-picker__row:has(input:checked) { background: var(--surface-1); }
+.goal-agent-picker__modes { --segmented-min-height: 32px; margin-block: var(--sp-5); }
+.goal-agent-picker__search { margin-block-end: var(--sp-3); }
+.goal-agent-picker__rows { display: grid; gap: var(--sp-1); max-height: min(380px, 42dvh); overflow: auto; }
+.goal-agent-picker__row { display: flex; align-items: flex-start; gap: var(--sp-4); padding: var(--sp-4); border-radius: var(--radius-sm);
+  color: var(--text-2); cursor: pointer; font-size: var(--fs-body); }
+.goal-agent-picker__row:hover:has(input:not(:disabled)) { background: var(--surface-1); }
+.goal-agent-picker__row:has(input:checked) { background: var(--surface-2); }
+.goal-agent-picker__row:has(input:focus-visible) { outline: 2px solid var(--focus-line); outline-offset: -2px; }
 .goal-agent-picker__row:has(input:disabled):not(:has(input:checked)) { color: var(--text-3); cursor: default; }
 .goal-agent-picker__row input { flex: none; margin: 4px 0 0; accent-color: var(--green); }
 .goal-agent-picker__row > span:last-child { display: grid; gap: var(--sp-1); min-width: 0; }
-.goal-agent-picker__row strong { overflow-wrap: anywhere; font-weight: 500; }
+.goal-agent-picker__row strong { overflow-wrap: anywhere; color: var(--text); font-weight: 600; }
 .goal-agent-picker__row small { color: var(--text-3); font-size: var(--fs-meta); overflow-wrap: anywhere; }
 .goal-agent-picker__identity { opacity: .8; }
 .goal-agent-picker__creation { display: grid; gap: var(--sp-4); padding: var(--sp-3) 0; }

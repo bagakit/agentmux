@@ -384,7 +384,9 @@ export function GoalPlanGraph({ demand, projection: provided, planLink, planning
           className={edge.live ? 'goal-plan__edge goal-plan__edge--live' : 'goal-plan__edge'} />)}
       </svg>
       <ol className="goal-plan__columns" style={{ '--goal-plan-columns': columns.length } as CSSProperties} data-single-column={columns.length === 1 || undefined}>
-        <li className="goal-plan__boundary" data-goal-plan-boundary="start"><StartIcon size={13} aria-hidden="true" /><strong>Start</strong></li>
+        <li className="goal-plan__boundary" data-goal-plan-boundary="start">
+          <span className="goal-plan__boundary-mark"><StartIcon size={13} aria-hidden="true" /></span><strong>Start</strong>
+        </li>
         {columns.map((column, index) => <li key={index} className="goal-plan__column" data-goal-plan-column={index}>
           {progress && !wholeGoal && (columns.length > 1 || column.length > 1) ? <div className="goal-plan__depth">
             <span>Level {index + 1}</span>{column.length > 1 ? <span>{column.length} tasks</span> : null}
@@ -403,7 +405,8 @@ export function GoalPlanGraph({ demand, projection: provided, planLink, planning
           </ol>
         </li>)}
         <li className="goal-plan__boundary" data-goal-plan-boundary="finish" data-goal-finish-state={finishState}>
-          <FinishIcon size={14} aria-hidden="true" /><strong>Finish</strong><small>{finishState}</small>
+          <span className="goal-plan__boundary-mark"><FinishIcon size={14} aria-hidden="true" /></span>
+          <span className="goal-plan__boundary-label"><strong>Finish</strong><small>{finishState}</small></span>
         </li>
       </ol>
     </div>

@@ -80,7 +80,8 @@
 .goals-detail__overview > .goals-detail__overview-heading { align-items: center; justify-content: flex-start; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); margin-block: 0 var(--sp-3); }
 .goals-detail__overview > .goals-detail__overview-heading > h2 { margin: 0; }
 .goals-detail__overview-heading button { max-width: 100%; text-align: start; white-space: normal; }
-.goals-detail__overview-heading .goals-detail__discussion { gap: var(--sp-2); min-height: 32px; padding-inline-start: var(--sp-1); }
+.goals-detail__overview-heading .goals-detail__discussion { gap: var(--sp-3); min-height: 36px; padding: var(--sp-1) var(--sp-5) var(--sp-1) var(--sp-2);
+  border-radius: var(--radius); }
 .goals-detail__discussion img { flex: none; object-fit: contain; }
 .goals-detail__brief .goals-intent__reading { line-height: 1.65; }
 .goal-work-area__records { min-width: 0; }

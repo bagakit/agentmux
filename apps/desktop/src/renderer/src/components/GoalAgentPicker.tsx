@@ -4,7 +4,9 @@ import { GoalRelationAccessFields } from './GoalRelationAccessFields'
 import { demandAgentReferenceKey, mergeDemandAgentReferences, type DemandSpaceMemberReference } from '@agentmux/demand/relations'
 import { mintObjectId } from '@agentmux/core/object-id'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
-import { TextInput } from '@agentmux/client-ui/input'
+import { SearchInput } from '@agentmux/client-ui/input'
+import { MoteIcon } from '@agentmux/client-ui/components/MoteIcon'
+import { SegmentedControl } from '@agentmux/client-ui/components/SegmentedControl'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, type AgentMuxSpaceMutationReport } from '@agentmux/core/control'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -26,12 +28,16 @@ import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
-const ThemeActionSearchIcon = semanticIconComponent('action.search')
 const ThemeActionCreateAgentIcon = semanticIconComponent('action.create-agent')
 
 
 export type GoalRelationSave = (patch: Parameters<ReturnType<typeof useAppStore.getState>['updateDemand']>[1], expectedUpdatedAt: number, relationAccess?: GoalRelationAccess[]) => Promise<boolean>
 const labels = { assignees: 'Assignees', related: 'Related sessions', supervisor: 'Supervisor' }
+const agentSources = [
+  { value: 'existing', label: 'Existing Agents' },
+  { value: 'mote', label: 'Mote · new Session' },
+  { value: 'agent', label: 'New Agent' }
+] as const
 export function GoalAgentFace({ row }: { row: GoalAgentRow }) {
   const avatar = useAppStore(state => row.session?.executorId ? state.config?.executors[row.session.executorId]?.avatar ?? state.config?.appearance.agentAvatars?.[row.session.executorId] : undefined)
   return <span inert aria-hidden="true" className="goal-agent-face"><AgentAvatar size={22} label={row.name} providerId={row.session?.providerId} state={row.session?.status.state} executorId={row.session?.executorId} appearance={avatar} visible={false} /></span>
@@ -161,10 +167,16 @@ function GoalAgentPickerEditor({ demand, role, saved, onSave, onClose }: { deman
       <Dialog.Content className="confirmation-dialog dialog-surface goal-agent-picker" aria-busy={busy} onOpenAutoFocus={event => { event.preventDefault(); previousFocus.current = document.activeElement?.nodeType === 1 ? document.activeElement as HTMLElement : null; openedContent.current = (event.target as Node | null)?.nodeType === 1 ? event.target as Element : null; search.current?.focus() }} onCloseAutoFocus={event => { event.preventDefault(); const original = previousFocus.current, active = document.activeElement; if (original?.isConnected && (active === document.body || active === original || !active?.isConnected || openedContent.current?.contains(active))) original.focus({ preventScroll: true }) }} onEscapeKeyDown={event => { if (busy) event.preventDefault() }} onInteractOutside={event => { if (busy) event.preventDefault() }}>
         <header className="confirmation-dialog__heading"><Dialog.Title className="confirmation-dialog__title">{labels[role]}</Dialog.Title><Dialog.Close className="icon-button" aria-label="Close Agent picker" disabled={busy}><ThemeActionCloseIcon size={15} /></Dialog.Close></header>
         <Dialog.Description className="confirmation-dialog__description">{demand.title}<br />{role === 'assignees' ? 'Choose who advances this Goal. Their related history is retained.' : role === 'related' ? 'Keep the conversations involved in this Goal. Responsibilities are edited separately.' : '从负责人中选择此 Goal 的 Supervisor；需要其他 Agent 时，先在负责人中添加。保存不会启动执行或发送巡查。'}</Dialog.Description>
-        {role !== 'supervisor' ? <div className="goal-agent-picker__modes">{(['existing', 'mote', 'agent'] as const).map(value => <button key={value} type="button" className={`small-button${mode === value ? ' small-button--active' : ''}`} aria-pressed={mode === value} disabled={busy} onClick={() => { setMode(value); setIssue(null); if (value === 'mote' && scratch) void useAppStore.getState().refreshScratchTopics(scratch.id) }}>{value === 'existing' ? 'Existing Agents' : value === 'mote' ? 'Mote · new Session' : 'New Agent'}</button>)}</div> : null}
+        {role !== 'supervisor' ? <SegmentedControl className="goal-agent-picker__modes" aria-label="Agent source" value={mode}
+          options={agentSources.map(source => ({ ...source, disabled: busy }))} onValueChange={value => {
+            setMode(value)
+            setIssue(null)
+            if (value === 'mote' && scratch) void useAppStore.getState().refreshScratchTopics(scratch.id)
+          }} /> : null}
         <form onSubmit={event => { event.preventDefault(); void save() }}>
           {mode === 'existing' ? <>
-            <label className="goal-agent-picker__search"><ThemeActionSearchIcon size={14} /><TextInput ref={search} aria-label="Search Agents" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search name, Project or Session…" /></label>
+            <SearchInput className="goal-agent-picker__search" ref={search} aria-label="Search Agents" clearLabel="Clear Agent search"
+              value={query} onValueChange={setQuery} placeholder="Search name, Project or Session…" />
             <div className="goal-agent-picker__rows" aria-label={`Choose ${labels[role].toLowerCase()}`}>
               {role === 'supervisor' ? <label className="goal-agent-picker__row"><input type="radio" name="goal-supervisor" checked={!selected.length} disabled={busy} onChange={() => changeSelection({ selected: [] })} /><span><strong>No Supervisor</strong><small>Explicitly clear the selection</small></span></label> : null}
               {filtered.map(row => {
@@ -179,7 +191,10 @@ function GoalAgentPickerEditor({ demand, role, saved, onSave, onClose }: { deman
             </div>
           </> : <div className="goal-agent-picker__creation">
             {mode === 'mote' ? <>
-              <label>Mote<SelectionField key={JSON.stringify([demand.id, role, mode])} label="Mote for new Session" value={moteId} options={[{ value: '', label: 'Choose a Mote…' }, ...motes.map(topic => ({ value: topic.id, label: topic.title, description: scratchTopicIdentityPath(scratch!, topic) }))]}
+              <label>Mote<SelectionField key={JSON.stringify([demand.id, role, mode])} label="Mote for new Session" value={moteId} options={[
+                { value: '', label: 'Choose a Mote…' },
+                ...motes.map(topic => ({ value: topic.id, label: topic.title, description: scratchTopicIdentityPath(scratch!, topic), icon: <MoteIcon /> }))
+              ]}
                 onValueChange={id => { setMoteId(id); setExecutorId(scratch ? moteDefaultExecutor(useAppStore.getState(), scratch.id, id) ?? '' : '') }} disabled={busy || creationRaw !== undefined} /></label>
               {!observed ? <p className="goals-service">The original Mote directory is not yet observed. <Button type="button" onClick={() => { if (scratch) void useAppStore.getState().refreshScratchTopics(scratch.id, true) }}>Refresh Motes</Button></p> : null}
               <p className="goals-muted">A new Session uses this Mote’s original directory, Soul and Wiki.</p>

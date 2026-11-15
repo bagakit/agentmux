@@ -317,7 +317,7 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
               <h2>Goal overview</h2>
               <Button type="button" className="goals-detail__discussion" disabled={Boolean(motePending)} onClick={onOpenMote}
                 aria-label={`Open discussion for ${demand.title}`} title={recipient.openLabel}>
-                <img src={dialogueArtworkUrl} width={34} height={24} alt="" decoding="async" loading="lazy"
+                <img src={dialogueArtworkUrl} width={40} height={29} alt="" decoding="async" loading="lazy"
                   onError={event => { event.currentTarget.hidden = true }} />
                 {motePending === 'open' ? 'Opening discussion…' : recipient.openLabel}
               </Button>
