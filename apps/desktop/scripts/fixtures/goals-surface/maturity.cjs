@@ -182,7 +182,7 @@ app.whenReady().then(async()=>{
    await require('./reading-outline.cjs')({evaluate,size,click,pointer,capture,waitFor,paint,result,debuggerSession:win.webContents.debugger})
   }else if(scope==='goal-claim-workbench-only'){
    result.mode='goal-claim-workbench'
-   await require('./claim-workbench.cjs')({evaluate,size,click,capture,waitFor,paint,result,keyEscape})
+   await require('./claim-workbench.cjs')({evaluate,size,click,capture,waitFor,paint,result,keyEscape,debuggerSession:win.webContents.debugger})
   }else if(hierarchy){
    result.mode='goal-hierarchy'
    await require('./hierarchy.cjs')({evaluate,size,click,pointer,capture,waitFor,paint,result,scope,insert})

@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict')
 
 // Host-shaped preview inputs enter the normal App. All navigation below uses its rendered controls.
-module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result, keyEscape }) => {
+module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result, keyEscape, debuggerSession }) => {
   const query = selector => `document.querySelector(${JSON.stringify(selector)})`
   async function hitControl(selector) {
     const target = query(selector)
@@ -85,5 +85,26 @@ module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result
     }
     assert.deepEqual(await evaluate('goalsSpace.facts()'), before, 'Reading preserves the same goal, plan, draft and Runs')
     result.observations.push({ scene, width, theme, first })
+  }
+  for (const [width, theme] of [[1600, 'dark'], [620, 'light']]) {
+    await size(width)
+    await evaluate('goalsPlan.seed(false, true, true)')
+    await evaluate(`goalsVisual.appearance(${JSON.stringify(theme)})`)
+    const avatar = query('[data-goal-confirm-agent]')
+    const criteria = query('[aria-label="Review goal criteria before confirming"]')
+    await waitFor(`Boolean(${avatar})`)
+    await hitControl('[data-goal-plan-node="guide"] .goal-plan-node__head')
+    await waitFor(`Boolean(${criteria})`)
+    assert.equal(await evaluate(`${query('[data-goal-finite-start]')}.closest('details').open`), false)
+    await capture(`${width}-${theme}-criteria-from-ticket`, width)
+    await click(criteria)
+    await waitFor(`document.activeElement === ${query('[aria-label="Criteria and results"]')}`)
+    await evaluate(`${avatar}.closest('button').scrollIntoView({block:'center'})`)
+    await paint()
+    await capture(`${width}-${theme}-confirm-and-continue`, width)
+    const point = await evaluate(`(() => {const r = ${avatar}.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}})()`)
+    await debuggerSession.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point })
+    await waitFor(`[...document.querySelectorAll('[role="tooltip"]')].some(element => element.textContent.includes('Supervisor') && element.textContent.includes('Mira') && element.textContent.includes('Idle'))`)
+    await capture(`${width}-${theme}-confirm-agent-hover`, width)
   }
 }

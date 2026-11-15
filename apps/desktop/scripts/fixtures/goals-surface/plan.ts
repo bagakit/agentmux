@@ -16,11 +16,17 @@ export function goalPlanPreview(seed: (mode: string) => void, render: () => void
   const originalDelegation = api.demands.delegation
   return {
     /** `withoutDerivation` previews a Host that returns the plan without node states, as an older version does. */
-    seed(withoutDerivation = false, openGuide = false) {
+    seed(withoutDerivation = false, openGuide = false, awaitingConfirmation = false) {
       seed('confirmed')
       const state = useAppStore.getState(), goal = state.demands[state.selectedDemandId!]!
       const agents = state.sessions.filter(session => session.kind === 'agent')
-      const originalWorker = agents[0]!, owner = agents[1] ?? originalWorker
+      const originalWorker = agents[0]!, originalSupervisor = agents[1] ?? originalWorker
+      const owner: typeof originalSupervisor = awaitingConfirmation ? { ...originalSupervisor, processState: 'running',
+        status: { state: 'running', source: 'run-process', observedAt: goal.updatedAt }, currentActivity: {
+          state: 'idle', source: 'native-hook', providerId: originalSupervisor.providerId, run: originalSupervisor.control.run,
+          nativeSessionId: 'preview-supervisor-session', nativeTurnId: 'preview-supervisor-turn', sourceId: 'preview-supervisor-source',
+          sequence: 1, hookReceiptId: 'preview-supervisor-idle', observedAt: goal.updatedAt
+        } } : originalSupervisor
       const worker = { ...originalWorker, id: 'plan-worker-session', hostId: 'plan-worker', control: {
         ...originalWorker.control, hostId: 'plan-worker', agentSessionId: 'plan-worker-session', run: { runId: 'plan-worker-run' }
       } }
@@ -73,14 +79,15 @@ export function goalPlanPreview(seed: (mode: string) => void, render: () => void
       previousGuide.workerRunId = previousWorker.control.run.runId
       previousGuide.report = { ...previousGuide.report!, authorAgentSessionId: previousWorker.control.agentSessionId,
         grounding: { ...previousGuide.report!.grounding, summary: 'The earlier guide result is retained after reassignment.' } }
-      const next = { ...goal, ...(openGuide ? { address: formatGoalAddress(goal.id, 'workbench-preview-runtime', 'workspace-recovery') } : {}), title: 'Return to the same work, without rebuilding it', plan,
+      const next = { ...goal, ...(openGuide ? { address: formatGoalAddress(goal.id, 'workbench-preview-runtime', 'workspace-recovery') } : {}), title: 'Return to the same work, without rebuilding it',
+        ...(awaitingConfirmation ? { alignment: { ...goal.alignment!, confirmedAt: null }, plan: { ...plan, reviews: [] } } : { plan }),
         activities: Array.from({ length: 8 }, (_, index) => ({ id: `original-note:${index}`, kind: 'Progress',
           message: index === 7 ? 'The original checks are ready for independent review.' : 'Kept the original workspace and recorded the recovery evidence.',
           createdAt: goal.createdAt + index * 60000, actorId: worker.control.agentSessionId })),
         decisions: [{ id: 'original-decision', question: 'Which work should the next check use?', decision: 'Continue from the same original workspace.',
           rationale: 'The existing Sessions, reading anchors and unsent drafts belong to this work.', actorId: owner.control.agentSessionId, createdAt: goal.createdAt + 9 * 60000 }],
         supervisorSessionId: owner.control.agentSessionId, sessionIds: [...new Set([...goal.sessionIds, executor.agentSessionId, previousWorker.control.agentSessionId])], assigneeSessionIds: [owner.control.agentSessionId, executor.agentSessionId],
-        delegations: parseDemandDelegations([attempt('outline', true), attempt('workspace', false), attempt('drafts', true), attempt('history', true), attempt('reconnect', false, false), ...(openGuide ? [] : [previousGuide])]) }
+        delegations: awaitingConfirmation ? [] : parseDemandDelegations([attempt('outline', true), attempt('workspace', false), attempt('drafts', true), attempt('history', true), attempt('reconnect', false, false), ...(openGuide ? [] : [previousGuide])]) }
       const references = demandExecutionReferences(next)
       // The private Electron probe validates these DTOs with the production parser outside the browser.
       const responsibility: GoalResponsibilityObservation = { scope: demandResponsibilityScope(next), observedAt: next.updatedAt,
@@ -104,7 +111,8 @@ export function goalPlanPreview(seed: (mode: string) => void, render: () => void
         : originalDelegation(operation, input)
       flushSync(() => {
         useAppStore.setState({ demands: { [next.id]: observed },
-          sessions: [...state.sessions.filter(session => session.id !== worker.id && session.id !== previousWorker.id), worker, previousWorker],
+          sessions: [...state.sessions.filter(session => session.id !== worker.id && session.id !== previousWorker.id)
+            .map(session => session.id === owner.id ? owner : session), worker, previousWorker],
           config: { ...state.config!, hosts: [...state.config!.hosts.filter(host => host.id !== 'plan-worker'),
             { id: 'plan-worker', kind: 'ssh', label: 'Recovery worker', hostname: 'plan-worker.invalid' }] },
           agentNames: { ...state.agentNames, [worker.id]: 'Atlas · Recovery engineer', [owner.id]: 'Mira · Independent review', [previousWorker.id]: 'Earlier guide author' } })
