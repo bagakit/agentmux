@@ -1,3 +1,5 @@
+import { agentPromptLogicalInputId, type AgentPromptInputKey } from '@agentmux/conversation/records'
+export { agentPromptInputId, agentPromptLogicalInputId, type AgentPromptInputKey } from '@agentmux/conversation/records'
 import { AgentMuxError } from './errors.js'
 import type { AgentLaunchPromptInputPlan, AgentMuxAgentSession, AgentMuxRunRef } from './types.js'
 import { normalizeNativeSessionId, normalizeNativeTranscriptPath } from './agent-native-locator.js'
@@ -33,18 +35,6 @@ export function validateAgentPromptInputBinding(value: unknown): AgentPromptInpu
 export type AgentPromptAdmissionIntent =
   | { kind: 'exact-condition'; condition: AgentPromptCondition }
   | (AgentDirectedPromptTarget & { expectedRun: AgentMuxRunRef; inputEpoch?: string })
-
-export type AgentPromptInputKey = (
-  | { kind: 'prompt'; agentSessionId: string; expectedRun: AgentMuxRunRef; submissionId: string }
-  | { kind: 'message'; agentSessionId: string; expectedRun: AgentMuxRunRef; messageId: string }
-) & { /** A Core-owned delivery attempt; the original logical producer identity is unchanged. */ attemptId?: string }
-
-export function agentPromptInputId(key: AgentPromptInputKey): string {
-  return key.attemptId ?? agentPromptLogicalInputId(key)
-}
-export function agentPromptLogicalInputId(key: AgentPromptInputKey): string {
-  return key.kind === 'prompt' ? key.submissionId : key.messageId
-}
 
 function inputIdentity(value: unknown): value is string {
   return typeof value === 'string' && Boolean(value.trim()) && value.length <= 512 &&

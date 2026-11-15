@@ -1,3 +1,5 @@
+import type { AgentConversationRecordSource, ConversationItemRef } from '@agentmux/conversation/records'
+export type { AgentConversationRecordSource, ConversationItemRef, ConversationRef } from '@agentmux/conversation/records'
 import { isCompleteConversationRecord, type ConversationProcessHeader, type ConversationDeferredRecord } from './conversation-process-detail.js'
 import type { AgentSessionHistoryContentPart, AgentSessionHistoryItem, AgentSessionHistoryPage, AgentSessionHistorySource, AgentSessionUserMessage, AgentTimelineItem, AgentTimelineSnapshot } from './types.js'
 import { projectSessionUserMessages } from './session-user-messages.js'
@@ -5,10 +7,6 @@ import { projectConversationTimeline, projectConversationEventFacts, type Conver
 import { conversationRecordRole, conversationRecordAuthor, conversationEventPrimary, type ConversationAuthor, type ConversationEvent, type ConversationSourceRecord, type ConversationTimeline } from './conversation-stream.js'
 export { projectSessionInputs, sessionInputMailboxAuthor, type SessionInputGroup } from './session-inputs.js'
 export { capturedToolEdit, type ConversationToolEdit } from './conversation-tool-edit.js'
-
-export type AgentConversationRecordSource =
-  | (AgentSessionHistorySource & { kind: 'native'; recordId: string })
-  | { kind: 'captured'; recordId: string }
 
 /** A view of already read facts. The original record owns its body and metadata. */
 export type AgentConversationRecord = {
@@ -191,12 +189,6 @@ export function projectConversationSummary(input: ConversationProjectionInput & 
   return timeline.events.map(adapter.adaptEvent)
     .map(({ event: _event, records: _records, input: _input, ...summary }) => summary)
 }
-
-/** A reference to the original Session, never a new conversation lifecycle. */
-export type ConversationRef = import('./session-history-read-codec.js').AgentSessionContextReference
-
-/** Exact original record within its Session and source; never a body or display position. */
-export type ConversationItemRef = ConversationRef & { source: AgentConversationRecordSource }
 
 /** Unknown Host does not acquire a navigation identity or hide the recorded content. */
 export function conversationItemRef(record: Pick<AgentConversationRecord, 'agentSessionId' | 'executionHostId' | 'sourceHostId' | 'source'>): ConversationItemRef | null {

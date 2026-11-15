@@ -1,0 +1,35 @@
+{
+  "name": "@agentmux/conversation",
+  "version": "0.1.0",
+  "description": "Portable semantic projection of accepted AgentMux conversation records",
+  "license": "UNLICENSED",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./records": {
+      "types": "./dist/records.d.ts",
+      "import": "./dist/records.js"
+    },
+    "./semantics": {
+      "types": "./dist/conversation-stream.d.ts",
+      "import": "./dist/conversation-stream.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "pnpm build",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@noble/hashes": "2.4.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}

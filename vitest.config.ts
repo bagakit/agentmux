@@ -60,6 +60,12 @@ function nestedWorktreeGlobs(): string[] {
   return [...new Set([...conventional, ...nested])]
 }
 
+// Opt in for source mutations. Ordinary tests consume the built package exports.
+export const conversationSourceAliases = {
+  '@agentmux/conversation/records': join(import.meta.dirname, 'packages/conversation/src/records.ts'),
+  '@agentmux/conversation/semantics': join(import.meta.dirname, 'packages/conversation/src/conversation-stream.ts')
+}
+
 export default defineConfig({
   resolve: { alias: { '@agentmux/browser': join(import.meta.dirname, 'packages/browser/src'), ...radixOverlayAliases } },
   /**

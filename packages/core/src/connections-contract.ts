@@ -1,5 +1,6 @@
+import type { ConnectionActor, ConnectionApplication } from '@agentmux/conversation/records'
+export type { ConnectionActor, ConnectionApplication } from '@agentmux/conversation/records'
 /** External application identity. Domain belongs to the issuer, never a local account alias. */
-export type ConnectionApplication = { domain: string; appId: string; /** Original authenticated service instance, when the protocol scopes an account to one. */ issuer?: string }
 /** Internal scoped lookup key; old unscoped identities retain their exact durable keys. */
 export function connectionApplicationScope(application: ConnectionApplication): string {
   return application.issuer === undefined ? application.domain : JSON.stringify([application.domain, application.issuer])
@@ -88,7 +89,6 @@ export interface ConnectionPort {
   configure(input: ConnectionConfigureInput): Promise<ConnectionOperation>
   test(input: ConnectionParamsMap['connection.test']): Promise<ConnectionRecord>
 }
-export type ConnectionActor = { application: ConnectionApplication; idType: string; userId: string }
 /** Attribution is not authorization. Grants remain scoped to the original external conversation. */
 export type ConnectionGrant = {
   grantId: string; revision: number; bindingId: string; bindingRevision: number; connectionId: string; actor: ConnectionActor

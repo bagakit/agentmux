@@ -1,3 +1,5 @@
+import type { AgentExternalConversationAuthor } from '@agentmux/conversation/records'
+export type { AgentExternalConversationAuthor } from '@agentmux/conversation/records'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { parseConnectionActor } from './room-binding-codec.js'
@@ -6,8 +8,6 @@ import { parseAgentExternalAuthoritySource, type AgentExternalAuthoritySource } 
 import type { ConversationItemRef } from './conversation.js'
 import { connectionDiagnosisIntakeCodes } from './connection-diagnosis-contract.js'
 
-/** Original platform attribution. Recording a message grants no execution permission. */
-export type AgentExternalConversationAuthor = Omit<AgentExternalMessageAuthor, 'grantId' | 'grantRevision' | 'grantSource'>
 /** Read-only projection of the original ingress, not a Core input receipt or authorization. */
 export type AgentExternalConversationInputObservation = { ingressId: string; state: 'received' | 'claimed' | 'refused'; code?: typeof connectionDiagnosisIntakeCodes[number] }
 export type AgentExternalConversationReference = { agentSessionId: string; ingressId: string; authoritySource?: AgentExternalAuthoritySource }

@@ -580,6 +580,7 @@
   ],
   "dependencies": {
     "@agentmux/capsule": "workspace:*",
+    "@agentmux/conversation": "workspace:*",
     "@agentmux/demand": "workspace:*",
     "@agentmux/diagnostic-evidence": "workspace:*",
     "@agentmux/git": "workspace:*",

@@ -689,11 +689,24 @@ importers:
         specifier: 8.21.3
         version: 8.21.3
 
+  packages/conversation:
+    dependencies:
+      '@noble/hashes':
+        specifier: 2.4.0
+        version: 2.4.0
+    devDependencies:
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+
   packages/core:
     dependencies:
       '@agentmux/capsule':
         specifier: workspace:*
         version: link:../capsule
+      '@agentmux/conversation':
+        specifier: workspace:*
+        version: link:../conversation
       '@agentmux/demand':
         specifier: workspace:*
         version: link:../demand

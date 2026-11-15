@@ -1,3 +1,26 @@
+import type {
+  AgentFailure, AgentMuxEvidenceSource, AgentSessionHistoryContentEligibility, AgentSessionHistoryContentPart,
+  AgentSessionHistoryItem, AgentSessionHistoryQuestionAnswer, AgentSessionHistorySource, AgentSessionUserMessageAuthor,
+  AgentTimelineItemKind, AgentTurnOutcome, ConversationCapturedItem
+} from '@agentmux/conversation/records'
+export type {
+  AgentFailure,
+  AgentMuxEvidenceSource,
+  AgentSessionHistoryCollaboration,
+  AgentSessionHistoryContentEligibility,
+  AgentSessionHistoryContentPart,
+  AgentSessionHistoryItem,
+  AgentSessionHistoryMessagePhase,
+  AgentSessionHistoryMetrics,
+  AgentSessionHistoryQuestion,
+  AgentSessionHistoryQuestionAnswer,
+  AgentSessionHistoryQuestionRequest,
+  AgentSessionHistorySource,
+  AgentSessionHistoryTokenUsage,
+  AgentSessionUserMessageAuthor,
+  AgentTimelineItemKind,
+  AgentTurnOutcome
+} from '@agentmux/conversation/records'
 import type { LaunchOption, LaunchOptionSelection } from './agent-launch-option.js'
 import type { AgentMuxRunExitReason } from './agent-run-exit.js'
 import type { AgentMuxCreationOrigin } from './agent-creation-admission.js'
@@ -128,15 +151,6 @@ export type AgentDisplayState =
  * The final AgentMux runtime never infers semantic activity from terminal bytes.
  * Each public event names the owner that actually observed the fact.
  */
-export type AgentMuxEvidenceSource =
-  | 'terminal-output'
-  | 'run-process'
-  | 'native-hook'
-  | 'native-transcript'
-  | 'acp'
-  | 'user'
-  | 'agentmux'
-
 export type AgentMuxRunState = 'running' | 'exited' | 'interrupted'
 
 export type AgentMuxRunRef = {
@@ -831,60 +845,6 @@ export type AgentTerminalPromptReadinessState = {
     }
 )
 
-/** Provider-owned content purpose, never audience or sending authority. Missing means unconfirmed. */
-export type AgentSessionHistoryContentEligibility = 'public' | 'private' | 'unconfirmed'
-export type AgentSessionHistoryContentPart = (
-  | { kind: 'text'; text: string;
-      /** Provider-owned reading span in the original text, using UTF-16 indices. Copy keeps text complete. */
-      readingRange?: { start: number; end: number } }
-  | { kind: 'resource'; resourceType: 'image' | 'audio' | 'file' | 'other' | 'text'; reference: string; label?: string;
-      /** Exact serialized semantic part, retained at the original source and read in bounded fragments. */
-      content?: { encoding: 'json-utf8'; kind: 'text' | 'reasoning' | 'tool-call' | 'tool-result' | 'resource'; byteLength: number; sha256: string } }
-  | { kind: 'reasoning'; text: string; signature?: string; redacted?: boolean }
-  | { kind: 'tool-call'; name: string; input: string; callId?: string }
-  | { kind: 'tool-result'; output: string; name?: string; callId?: string; failed?: boolean }
-) & {
-  contentEligibility?: AgentSessionHistoryContentEligibility
-  /** Original tool/reasoning purpose when projection has a text or resource shape. Not sharing authority. */
-  contentRole?: 'tool' | 'reasoning'
-}
-
-export type AgentSessionHistorySource = { providerId: AgentProviderId; nativeSessionId: string }
-
-/** A Provider-recorded assistant phase, not reasoning or task-completion authority. */
-export type AgentSessionHistoryMessagePhase = 'progress' | 'final'
-
-/** Native collaboration references are read-only locators, never AgentMux Session or Run IDs. */
-export type AgentSessionHistoryCollaboration =
-  | {
-      kind: 'message'
-      /** The native conversation scopes these actor names; they are not AgentMux Session IDs. */
-      source: AgentSessionHistorySource
-      sender?: string
-      recipient?: string
-    }
-  | {
-      kind: 'operation'
-      operation?: 'spawn' | 'send-input' | 'send-message' | 'followup' | 'wait' | 'resume' | 'interrupt' | 'close' | 'list'
-      status?: 'running' | 'completed' | 'failed' | 'interrupted'
-      sender?: AgentSessionHistorySource
-      receivers: AgentSessionHistorySource[]
-      prompt?: string
-      /** Last recorded target states; independent of this operation and current Runtime state. */
-      agentStates: {
-        source: AgentSessionHistorySource
-        state?: 'pending' | 'running' | 'completed' | 'failed' | 'interrupted' | 'stopped' | 'not-found'
-        message?: string
-      }[]
-    }
-  | {
-      kind: 'agent-activity'
-      event: 'started' | 'interacted' | 'interrupted' | 'completed'
-      agent: AgentSessionHistorySource
-      /** Native logical path, not an execution directory or filesystem authority. */
-      path?: string
-    }
-
 /** Durable reading and provenance only; no authority to control a current Run or send input. */
 export type AgentSessionHistoryMetadata = Pick<AgentMuxStoredAgentSession,
   'providerId' | 'executorId' | 'workspacePath' | 'toolExecution' | 'nativeHandle' | 'observedNativeHandle' | 'createdAt' | 'creation' | 'forkedFrom'> & {
@@ -908,80 +868,6 @@ export type AgentSessionHistoryDescriptor = {
 
 /** Exact original source observation; omission reads the full retained catalog. */
 export type AgentSessionHistorySourcesOptions = { agentSessionId?: string; signal?: AbortSignal }
-
-/** Structured native asynchronous questions; absence of an answer is not pending authority. */
-export type AgentSessionHistoryQuestion = {
-  /** Provider-owned opaque identity; clients must never construct or parse it. */
-  id: string
-  prompt: string
-  options: Array<{ id: string; label: string }>
-  acceptsText: boolean
-}
-
-export type AgentSessionHistoryQuestionRequest = {
-  delivery: 'async'
-  questions: AgentSessionHistoryQuestion[]
-}
-
-/** A native user record's exact reply reference; its original contentParts remain untouched. */
-export type AgentSessionHistoryQuestionAnswer = {
-  questionId: string
-  answer: string
-  /** Question text carried by this native reply, not current pending or authenticated question authority. */
-  prompt?: string
-}
-
-/** Provider-reported token counts; missing counts stay absent and are never estimated or summed. */
-export type AgentSessionHistoryTokenUsage = {
-  inputTokens?: number
-  outputTokens?: number
-  totalTokens?: number
-  cachedInputTokens?: number
-  reasoningOutputTokens?: number
-}
-
-/** Read-only facts on the original native record, never Runtime or input authority. */
-export type AgentSessionHistoryMetrics = {
-  /** turn requires the original item's exact turnId; response is scoped to the original record. */
-  scope: 'turn' | 'response'
-  /** Native wall-clock elapsed milliseconds, not inference time or a locally started timer. */
-  durationMs?: number
-  usage?: AgentSessionHistoryTokenUsage
-}
-
-/** A result of the original native turn, never current activity or task acceptance. */
-export type AgentTurnOutcome =
-  | { status: 'completed' | 'interrupted' }
-  | { status: 'failed'; failure: AgentFailure }
-
-export type AgentSessionHistoryItem = {
-  id: string
-  /** Read-only typed source relationships, interpreted at the original Provider boundary. */
-  conversation?: import('./conversation-stream.js').ConversationRecordProvenance
-  conversationDiagnostic?: { code: string; message: string; original?: unknown }
-  turnId?: string
-  /** System messages describe read-only native history; they grant no input, identity or permission authority. */
-  kind: 'user-message' | 'assistant-message' | 'system-message' | 'activity'
-  /** Provider-confirmed machine-event purpose for reading only; not current state or input authority. */
-  recordPurpose?: 'system-event'
-  messagePhase?: AgentSessionHistoryMessagePhase
-  questionRequest?: AgentSessionHistoryQuestionRequest
-  questionAnswers?: AgentSessionHistoryQuestionAnswer[]
-  /** A local native question/answer reading projection diagnostic; original speech and adjacent history stay readable. */
-  questionDiagnostic?: { code: string; message: string }
-  /** Qualified by this original item, native source and turnId. */
-  turnOutcome?: AgentTurnOutcome
-  turnOutcomeDiagnostic?: { code: string; message: string }
-  metrics?: AgentSessionHistoryMetrics
-  /** Optional metrics unavailable; original content, identity and reading remain available. */
-  metricsDiagnostic?: { code: string; message: string }
-  /** Original contentParts remain complete and copyable alongside this optional summary. */
-  collaboration?: AgentSessionHistoryCollaboration
-  title?: string
-  contentParts: AgentSessionHistoryContentPart[]
-  startedAt?: number
-  completedAt?: number
-}
 
 /** Native conversation pages are separate from captured AgentMux Timeline and Run byte Replay. */
 export type AgentSessionHistoryPage = {
@@ -1210,13 +1096,6 @@ export type AgentMessageChannel = (typeof AGENT_MESSAGE_CHANNELS)[number]
 export type AgentSessionUserMessageSource =
   | { kind: 'native'; providerId: AgentProviderId; nativeSessionId: string; recordId: string }
   | { kind: 'captured'; submissionId: string; channel?: AgentMessageChannel; device?: AgentOperationDevice }
-
-export type AgentSessionUserMessageAuthor =
-  | import('./external-author.js').AgentExternalMessageAuthor
-  | import('./external-conversation.js').AgentExternalConversationAuthor
-  | { kind: 'human' }
-  | { kind: 'agent'; agentSessionId: string }
-  | { kind: 'unknown' }
 
 export type AgentSessionUserMessage = {
   authorProfile?: import('./author-profile.js').AgentAuthorProfile
@@ -2165,17 +2044,6 @@ export type AgentMuxClientEvent = (
 
 ) & { observationOrigin?: AgentMuxObservationOrigin }
 
-export type AgentFailure = {
-  /** Provider-normalized safe summary; raw message has no external sharing qualification. */
-  publicMessage?: string
-  code: string
-  message: string
-  nativeCode?: string
-  httpStatusCode?: number
-  recovery: string
-  nativeTurnId: string
-}
-
 export type AgentStatus = {
   /** Acceptance position of this main semantic fact in the original Run; reads/children never advance it. */
   evidenceRevision?: number
@@ -2193,14 +2061,6 @@ export type AgentStatus = {
   failure?: AgentFailure
   exitCode?: number
 }
-
-export type AgentTimelineItemKind =
-  | 'system_message'
-  | 'user_message'
-  | 'assistant_message'
-  | 'tool_call'
-  | 'permission'
-  | 'lifecycle'
 
 export type AgentTimelineItemStatus = 'streaming' | 'complete' | 'failed' | 'recorded'
 
@@ -2246,7 +2106,7 @@ export type AgentWorkHistoryProjection = {
   coverage: { recorded: boolean; truncated: boolean; gaps: boolean }
 }
 
-export type AgentTimelineItem = {
+export type AgentTimelineItem = ConversationCapturedItem & {
   /** Result of the original native turn; independent of this capture's current Run. */
   turnOutcome?: AgentTurnOutcome
   authorProfile?: import('./author-profile.js').AgentAuthorProfile
@@ -2255,34 +2115,18 @@ export type AgentTimelineItem = {
   inputContextSource?: import('./browser-input-context.js').BrowserInputContextSource
   inputContextCaptureProof?: import('./agent-input-context-capture.js').AgentInputContextCaptureProof
   id: string
-  /** Original Core notification identity, distinct from the referenced A2A messages. */
-  a2aNotificationId?: string
-  /** Original typed provenance, never reconstructed from display text or opaque item IDs. */
-  conversation?: import('./conversation-stream.js').ConversationRecordProvenance
-  conversationDiagnostic?: { code: string; message: string; original?: unknown }
   agentSessionId: string
-  kind: AgentTimelineItemKind
   status: AgentTimelineItemStatus
-  source: AgentMuxEvidenceSource
-  createdAt: number
   updatedAt: number
   title: string
-  /** Input supplied by another Agent, attributed by the trusted host (not a credential). */
-  authorAgentSessionId?: string
-  /** Explicit manual origin attributed by trusted host. */
-  authorHuman?: boolean
-  authorExternal?: import('./external-author.js').AgentExternalMessageAuthor | import('./external-conversation.js').AgentExternalConversationAuthor
   sourceDevice?: AgentOperationDevice
   sourceChannel?: AgentMessageChannel
-  content?: string
   /** Original purpose of content only; never author identity or sharing authority. */
   contentEligibility?: AgentSessionHistoryContentEligibility
   /** Set by the original userContent writer, never inferred from legacy content or author. Not sharing authority. */
   publicContent?: 'confirmed'
   /** Reading declaration from the separately frozen system context of this automatic input. */
   declaredTrigger?: import('./amux-protocol-definition.js').AmuxTriggerKind
-  /** Original saved or submitted Input identity; attribution or opaque IDs never reconstruct it. */
-  inputRef?: import('./agent-prompt-condition.js').AgentPromptInputKey
   /** Immutable membership in the original saved-input journal. */
   inputOrigin?: import('./agent-input-conversation.js').AgentInputJournalCut
   /** Read-only original ingress observation; never input authority or an Agent receipt. */
@@ -2290,12 +2134,6 @@ export type AgentTimelineItem = {
   /** Safe projection of the original Input receipt, not Agent completion. */
   inputSubmission?: import('./agent-input-conversation.js').AgentInputSubmissionObservation
   toolName?: string
-  toolInput?: string
-  /**
-   * 这一步跑出来的东西。缺席就是缺席——没观察到结果时不写空串，那会把「还没结果」伪装成
-   * 「结果是空的」。体量由采集侧封顶并在文本里明说截断，时间轴不吞整份 stdout。
-   */
-  toolOutput?: string
   eventName?: string
   activityState?: AgentActivityState
 }

@@ -1,3 +1,5 @@
+import type { AgentExternalAuthoritySource, AgentExternalMessageAuthor } from '@agentmux/conversation/records'
+export type { AgentExternalAuthoritySource, AgentExternalMessageAuthor } from '@agentmux/conversation/records'
 import type { AgentExternalConversationAuthorityPort } from './external-conversation.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
@@ -7,8 +9,6 @@ import type { AgentMuxAgentInteractionInput, AgentMuxSessionQuestionReplyInput }
 import { sha256 } from '@noble/hashes/sha2.js'
 import { agentInteractionRequestTarget } from './agent-interaction-state.js'
 
-/** Original semantic owners, never an endpoint, credential or reusable input grant. */
-export type AgentExternalAuthoritySource = { hostingRuntimeId: string; executionRuntimeId: string }
 export function parseAgentExternalAuthoritySource(value: unknown): AgentExternalAuthoritySource {
   const source = rpcRecord(value, ['hostingRuntimeId', 'executionRuntimeId'], 'INVALID_EXTERNAL_AUTHOR')
   for (const id of [source.hostingRuntimeId, source.executionRuntimeId]) {
@@ -17,21 +17,6 @@ export function parseAgentExternalAuthoritySource(value: unknown): AgentExternal
   return { hostingRuntimeId: source.hostingRuntimeId as string, executionRuntimeId: source.executionRuntimeId as string }
 }
 
-/** Recorded external attribution, never a serialized authorization or a local human identity. */
-export type AgentExternalMessageAuthor = {
-  kind: 'external'
-  connectionId: string
-  actor: ConnectionActor
-  externalConversationId: string
-  externalMessageId: string
-  bindingId: string
-  bindingRevision: number
-  grantId: string
-  grantRevision: number
-  /** Absence is the original room reference; application grants have an explicit source. */
-  grantSource?: 'application'
-  authoritySource?: AgentExternalAuthoritySource
-}
 export type AgentExternalInputIntent = {
   agentSessionId: string; expectedRun: { runId: string }; operationId: string; messageId: string; body: string
   admissionIntent?: import('./agent-prompt-condition.js').AgentPromptAdmissionIntent

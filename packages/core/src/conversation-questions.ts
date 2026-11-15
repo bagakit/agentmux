@@ -1,3 +1,5 @@
+import { conversationQuestionIdentity, type ConversationQuestionIdentity } from '@agentmux/conversation/records'
+export { conversationQuestionIdentity, type ConversationQuestionIdentity } from '@agentmux/conversation/records'
 import type { AgentMuxSessionQuestionReplyInput } from "./client-contract.js";
 import type { AgentSessionHistoryItem, AgentSessionHistoryPage, AgentSessionHistoryQuestion, AgentSessionHistoryQuestionAnswer, AgentSessionHistoryQuestionRequest, AgentSessionHistorySource, AgentSessionQuestionReplyReceipt } from './types.js'
 
@@ -13,16 +15,6 @@ export type ConversationQuestionReference = {
   recordId: string
   turnId?: string
   questionId: string
-}
-/** Source-qualified reading identity; no physical request record or pending authority is implied. */
-export type ConversationQuestionIdentity = {
-  hostId: string
-  agentSessionId: string
-  source: AgentSessionHistorySource
-  questionId: string
-}
-export function conversationQuestionIdentity(scope: { hostId?: string | undefined; agentSessionId: string; source: AgentSessionHistorySource }, questionId: string): ConversationQuestionIdentity | null {
-  return scope.hostId ? { hostId: scope.hostId, agentSessionId: scope.agentSessionId, source: scope.source, questionId } : null
 }
 export type ConversationQuestionAnswerFact = AgentSessionHistoryQuestionAnswer & ConversationQuestionIdentity & {
   recordId: string
