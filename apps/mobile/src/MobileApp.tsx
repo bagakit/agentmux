@@ -284,6 +284,8 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
   const sessionTitle = objectIdentity?.name ?? null
   const [sheet, updateSheet] = useState<'connection' | 'settings' | 'identity' | 'actions' | 'agent' | 'create' | 'notices' | 'team' | 'groups' | null>(restoreWorkface && initial.current.presentation?.profile ? 'identity' : null)
   const [groupMoteId, setGroupMoteId] = useState<string | null>(null)
+  const [groupBack, setGroupBack] = useState<(() => void) | null>(null)
+  const registerGroupBack = useCallback((back: (() => void) | null) => setGroupBack(() => back), [])
   const groupTrigger = useRef<HTMLButtonElement | null>(null)
   const [groupReadingPositions] = useState<MoteGroupReadingPositions>(() => new Map())
   const [positionOverlay, setPositionOverlay] = useState(false)
@@ -389,6 +391,7 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
     if (sheet === 'agent' && positionOverlay) setPositionOverlay(false)
     else if (sheet !== null) {
       if (sheet === 'identity' && profileBack) profileBack()
+      else if (sheet === 'groups' && groupBack) groupBack()
       else setSheet(null)
     } else if (current.session) {
       if (current.goal) setShowGoalWork(false)
@@ -827,7 +830,7 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
         <MobileSheetHeader onClose={() => setSheet(null)} title={sheet === 'groups' ? '群聊' : sheet === 'team' ? `${team?.name ?? moteTitle} · 团队` : sheet === 'agent' ? menuTarget?.identity.name ?? 'Agent' : sheet === 'notices' ? '提醒与诊断' : sheet === 'identity' ? profileIdentity?.mote ? profileIdentity.mote.name ?? 'Mote 名称未确认' : profileIdentity?.name ?? 'Mote' : sheet === 'actions' ? '当前对话' : sheet === 'settings' ? 'AgentMux' : workspaceVisible ? '连接与设备' : '连接你的 Mac'} closeLabel="关闭面板" />
         {sheet === 'groups' ? <>
           <Dialog.Description id="mobile-sheet-description" className="mobile-mote-groups-description">{groupMoteId ? '查看这个 Mote 参与的群聊' : '打开或创建群聊'}</Dialog.Description>
-          <ClientUiProvider platform={platform}><MobileMoteGroups client={client} connected={connected} positions={groupReadingPositions} {...(groupMoteId ? { moteId: groupMoteId } : {})} /></ClientUiProvider>
+          <ClientUiProvider platform={platform}><MobileMoteGroups client={client} connected={connected} positions={groupReadingPositions} openHttpLink={openBrowserHttpLink} onBackChange={registerGroupBack} {...(groupMoteId ? { moteId: groupMoteId } : {})} /></ClientUiProvider>
         </> : sheet === 'team' ? <>
           <Dialog.Description id="mobile-sheet-description">团队的当前工作与请求</Dialog.Description>
           <MobileMoteTeamPanel team={team} issue={teamReading.issue} currentSessionId={workface.selectedSessionId} currentHostId={selected?.hostId}
