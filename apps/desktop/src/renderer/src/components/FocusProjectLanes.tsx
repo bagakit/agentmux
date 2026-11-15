@@ -339,7 +339,7 @@ const FocusProjectObservation = memo(function FocusProjectObservation({ project,
   showCards?: boolean
 }) {
   const withinProject = projectName !== undefined
-  const [expanded, setExpanded] = useState(!withinProject)
+  const [expanded, setExpanded] = useState(false)
   const showHistory = withinProject ? expanded || revealHistory : showCards
   const historyId = useId()
   const hosts = useAppStore(state => state.config?.hosts)
