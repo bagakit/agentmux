@@ -6,7 +6,7 @@ import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { AppConfig, BrowserSnapshot, RuntimeEvent, SessionSnapshot } from '../src/shared/contracts.js'
+import type { AppConfig, BrowserSnapshot, RuntimeEvent, RuntimeSnapshot, SessionSnapshot } from '../src/shared/contracts.js'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
 import { providerCatalogReader } from './helpers/startup-observation-api-fixture'
 import { promptCarrierWaiting } from './helpers/prompt-carrier-receipt'
@@ -320,6 +320,55 @@ describe('actual Store persistence relevance', () => {
     expect(writes).toEqual([])
     expect(read).not.toHaveBeenCalled()
     expect(backing.get(storageName)).toBe(before)
+  })
+
+  it('keeps ordered observations across a membership read and saves the effect of a canonical Timeline read', async () => {
+    await initialize()
+    const beforeTimeline = { agentSessionId: sessionId, revision: 1, items: [] }
+    store.setState({ timelines: { [sessionId]: beforeTimeline } })
+    vi.advanceTimersByTime(400)
+    const options = store.persist.getOptions()
+    const prepare = vi.spyOn(options, 'partialize')
+    const enqueue = vi.spyOn(options.storage!, 'setItem')
+    let resolveSnapshot!: (value: RuntimeSnapshot) => void
+    const snapshot = vi.mocked(api.sessions.snapshot)
+    snapshot.mockClear()
+    snapshot.mockReturnValueOnce(new Promise<RuntimeSnapshot>(resolve => { resolveSnapshot = resolve }))
+    receiveRuntimeEvent({ type: 'core', hostId: 'local', event: {
+      type: 'agent-status', agentSessionId: 'awaiting-membership', state: 'working',
+      evidence: { source: 'native-hook', observedAt: 2, run: { runId: 'awaiting-membership-run' } }
+    } })
+    expect(snapshot).toHaveBeenCalledOnce()
+    status(3)
+    status(2)
+    expect(store.getState().sessions[0]?.status.observedAt).toBe(1)
+    resolveSnapshot({ sessions: [session], timelines: { [sessionId]: beforeTimeline }, recoveryCandidates: [] })
+    await vi.waitFor(() => expect(store.getState().sessions[0]?.status.observedAt).toBe(3))
+    expect(prepare).not.toHaveBeenCalled()
+    expect(enqueue).not.toHaveBeenCalled()
+
+    const operationId = 'delivered-before-timeline-gap'
+    const queued = { operationId, text: 'Original prompt', status: 'queued' as const, runId }
+    store.setState({ agentSteerQueues: { [sessionId]: [queued] } })
+    vi.advanceTimersByTime(400)
+    expect(saved().state.agentSteerQueues?.[sessionId]).toEqual([queued])
+    writes.length = 0
+    const item = { id: `prompt:${operationId}`, agentSessionId: sessionId, kind: 'user_message' as const,
+      status: 'complete' as const, source: 'user' as const, title: 'Prompt', content: queued.text, createdAt: 2, updatedAt: 2 }
+    const canonical = { agentSessionId: sessionId, revision: 3, items: [item] }
+    const read = vi.spyOn(api.sessions, 'timeline').mockResolvedValue(canonical)
+    const submit = vi.spyOn(api.sessions, 'submitPrompt')
+    receiveRuntimeEvent({ type: 'core', hostId: 'local', event: {
+      type: 'agent-timeline', agentSessionId: sessionId, revision: 3,
+      mutation: { type: 'append', agentSessionId: sessionId, item },
+      evidence: { source: 'user', observedAt: 4, run: { runId } }
+    } })
+    await vi.waitFor(() => expect(store.getState().timelines[sessionId]?.revision).toBe(3))
+    expect(read).toHaveBeenCalledWith(session.control)
+    expect(submit).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(400)
+    expect(saved().state.agentSteerQueues?.[sessionId]).toBeUndefined()
+    expect(writes).toHaveLength(1)
   })
 
   it('persists explicit Session modes through the existing writer and real rehydrate without changing Runtime or diff ownership', async () => {
