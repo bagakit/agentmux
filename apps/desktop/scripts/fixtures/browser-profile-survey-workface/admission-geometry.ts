@@ -12,6 +12,10 @@ export async function admissionGeometry(window: BrowserWindow, evaluate: (expres
     if(!region||!slot||!stage)return null;
     const native=region.querySelector('[data-native-browser-stage="'+ids.browserId+'"]'),toolbar=region.querySelector('.browser-toolbar'),surface=region.querySelector('.browser-surface');
     if(!native||!toolbar||!surface)return null;
+    const stageBounds=rect(stage),pageHeader=stage.querySelector('.survey-page-tab-header');
+    const headerBounds=pageHeader&&visible(pageHeader)?rect(pageHeader):null;
+    const top=headerBounds?headerBounds.y+headerBounds.height:stageBounds.y;
+    const availableStage={...stageBounds,y:top,height:stageBounds.y+stageBounds.height-top};
     const preceding=(parent,child)=>[...parent.children].slice(0,[...parent.children].indexOf(child));
     const body=surface.querySelector('.browser-body'),presentation=native.closest('.browser-presentation');
     if(!body)return null;
@@ -19,7 +23,7 @@ export async function admissionGeometry(window: BrowserWindow, evaluate: (expres
       .filter(e=>visible(e)&&e.getBoundingClientRect().height>0&&!['absolute','fixed'].includes(getComputedStyle(e).position))
       .map(e=>({className:e.className,role:e.getAttribute('role'),rect:rect(e),marginTop:parseFloat(getComputedStyle(e).marginTop)||0,marginBottom:parseFloat(getComputedStyle(e).marginBottom)||0,
         hasContent:Boolean(e.textContent?.trim()||e.querySelector('button,input,svg,[role="status"],[role="alert"]'))})).sort((a,b)=>a.rect.y-b.rect.y);
-    return{visibleRegionCount:regions.length,stage:rect(stage),slot:rect(slot),region:rect(region),toolbar:rect(toolbar),nativeStage:rect(native),
+    return{visibleRegionCount:regions.length,stage:availableStage,pageHeader:headerBounds,slot:rect(slot),region:rect(region),toolbar:rect(toolbar),nativeStage:rect(native),
       serviceRows,
       hosts:[...slot.children].map(e=>({className:e.className,visible:visible(e),rect:rect(e)}))};
   })()`)

@@ -340,10 +340,14 @@ export async function profileSwitchCase(ctx: Context) {
     const pendingBinding = await nativeUntil(() => ports.held(), 'original B binding reply held before membership withdrawal')
     assert.equal(pendingBinding.returned.profileId, b.id)
     await showSurvey(); await choose('profile:' + b.id)
-    await input.click(pageRow(withdrawnReference.browserId) + ' [aria-label="Remove page from Survey"]')
+    const withdrawPage = async () => {
+      await input.click(pageRow(withdrawnReference.browserId) + ' .survey-item', undefined, 'right')
+      await input.click('.survey-item-menu [role="menuitem"]', 'Remove page from Survey')
+    }
+    await withdrawPage()
     await nativeUntil(async () => !(await memberList()).pageReferences.some((page: any) => page.browserId === withdrawnReference.browserId), 'first explicit membership withdrawal')
     await addReference(withdrawnReference)
-    await input.click(pageRow(withdrawnReference.browserId) + ' [aria-label="Remove page from Survey"]')
+    await withdrawPage()
     await nativeUntil(async () => !(await memberList()).pageReferences.some((page: any) => page.browserId === withdrawnReference.browserId), 'later add/remove with an equal final membership set')
     ports.release()
     await nativeUntil(() => !evaluatePending(ports, pendingBinding.index), 'the same binding reply released')
@@ -361,14 +365,22 @@ export async function profileSwitchCase(ctx: Context) {
     const closingNative = await native(withdrawnReference.browserId, a.id, pageUrl + '?membership-binding')
     const closingContents=closingNative.webContents,closingContentsId=closingContents.id
     await input.click(region(withdrawnReference.regionId) + ' [aria-label="Close split"]')
-    await nativeUntil(() => receipt.closeCalls.some((call: any) => call.browserId === withdrawnReference.browserId && call.ack === 'confirmed'), 'exact original Main Close acknowledgment during pending binding')
+    const closeReceipt = await nativeUntil(() => receipt.workbenchCloseCalls?.find((call: any) => {
+      const operation = call.result.value?.operation
+      return call.method === 'space.close.apply' && call.result.ok && operation?.outcome === 'applied' &&
+        operation.diskDurability === 'confirmed' && operation.plan.target.regionId === withdrawnReference.regionId &&
+        operation.resources.some((resource: any) => resource.outcome === 'acknowledged' && resource.receipt?.kind === 'browser-closed' &&
+          resource.receipt.browserId === withdrawnReference.browserId)
+    }), 'exact original workbench Close receipt during pending binding')
+    proof.closeOperationId = closeReceipt.result.value.operation.operationId
     proof.closedNative={browserId:withdrawnReference.browserId,contentsId:closingContentsId,destroyed:closingContents.isDestroyed()}
     assert.equal(closingContents.isDestroyed(), true,'The exact original native WebContents is physically destroyed by the acknowledged Close')
     ports.release(); await nativeUntil(() => !evaluatePending(ports, closingBinding.index), 'original closed binding reply released')
     await nativeUntil(async () => !Object.values((await facts()).tabs).some((tab: any) => tab.regions[withdrawnReference.regionId]), 'Close keeps the exact Region absent')
     await evaluate('profileSurveyNative.checkpoint()')
     await nativeUntil(async () => !(await result(['browser', 'targets'])).targets.some((target: any) => target.id === withdrawnReference.browserId), 'no live/cold recreation after original Core deletion acknowledgment')
-    assert.ok((await memberList()).pageReferences.some((page: any) => page.browserId === withdrawnReference.browserId), 'An old unknown reference is kept without recreating its page')
+    assert.equal((await memberList()).pageReferences.some((page: any) => page.browserId === withdrawnReference.browserId), false,
+      'The acknowledged original Close removes its Survey reference without letting a late binding recreate it')
     mark('pending-binding-close-never-recreates-original', { reference: withdrawnReference })
 
     await showSurvey(); await choose('profile:' + a.id)
@@ -439,7 +451,13 @@ export async function profileSwitchCase(ctx: Context) {
     'successful-Main-lost-ACK-metadata-retry-zero-second-switch',
     'pending-binding-close-never-recreates-original', 'private-entry-stays-private-and-single'] : ['second-PID-original-view-references-partitions-and-real-sign-in']
   assert.ok(required.every(kind => proof.cases.some((entry: any) => entry.kind === kind && entry.passed)), 'Every dedicated T002 stage must actually complete')
-  if(phase==='first')assert.equal(proof.frames.length,14,'The dedicated normal, narrow, short, directory and recovery views must actually be captured')
+  if (phase === 'first') {
+    const scenes = ['directory-unconfirmed', 'picker-open', 'creation-metadata-unconfirmed', 'binding-metadata-unconfirmed',
+      'switch-reply-unconfirmed', 'normal', 'narrow', 'short']
+    const expected = ['dark', 'light'].flatMap(theme => scenes.map(scene => `first-profile-switch-${theme}-${scene}.png`))
+    assert.deepEqual(proof.frames.map((frame: { file: string }) => frame.file).sort(), expected.sort(),
+      'Each original profile workface and its recovery scenarios must be captured in both themes')
+  }
   proof.completed = true
   receipt.cases.push({ kind: 'profile-switch-dedicated-oracle', phase, passed: true })
 }

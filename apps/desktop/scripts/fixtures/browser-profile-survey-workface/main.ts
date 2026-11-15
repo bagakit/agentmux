@@ -140,6 +140,7 @@ async function run() {
   if(close)receipt.closeCalls.push(close)
   let observed
   try{observed=await(switchPorts?switchPorts.observe(channel,args,async()=>handler(event,...args)):handler(event,...args));if(close)close.ack='confirmed'}catch(error){if(close)close.ack='failed';throw error}
+  if (channel === 'workbenchClose:call') (receipt.workbenchCloseCalls ??= []).push({ method: args[0], result: observed })
   if(channel==='browser:create'&&rejectSurveyWrites)rejectedSurveyBrowserId=observed.id
   if(channel==='browser:choosePageMenu')(receipt.pageMenuChoices??=[]).push({choice:args[1],accepted:observed})
   if(['browser:listProfiles','browser:readProfiles'].includes(channel)&&loseProfileDirectoryAck)throw new Error('Private fixture lost the original Profile directory read ACK')
