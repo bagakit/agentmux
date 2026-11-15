@@ -54,31 +54,45 @@ export function createAgentExecutionExecutor(options: {
     if (requestId === undefined) { await report(generation, 'INVALID_NATIVE_MESSAGE', undefined, 'request'); return }
     await channel.send({ type: 'response', generation, payload: { jsonrpc: '2.0', id: requestId, error: { code, message } } })
   }
+  const storageUnconfirmed = async (key: AgentExecutionOperationKey, code: string): Promise<void> => {
+    try {
+      await reject(key.streamGeneration, key.nativeRequestId, -32603,
+        `The resource host could not confirm the original tool operation (${code}). Inspect its outcome before repeating it.`)
+    } finally {
+      await report(key.streamGeneration, code, key)
+    }
+  }
   const respond = (generation: string, bytes: Uint8Array, request: Request) => {
     const response = JSON.parse(Buffer.from(bytes).toString('utf8')) as Record<string, unknown>
     return channel.send({ type: 'response', generation, payload: options.protocol.projectResponse?.(request, response) ?? response })
   }
   const completed = (key: AgentExecutionOperationKey) => channel.send({ type: 'operation-completed', generation: key.streamGeneration, operation: key })
-  const settle = async (state: Generation, pending: Pending): Promise<void> => {
+  const settle = async (pending: Pending, state?: Generation): Promise<void> => {
     if (!pending.response) return
     try {
       await options.journal.complete(pending.key, pending.digest, pending.response)
     } catch {
-      await report(state.id, 'RESPONSE_STORAGE_UNCONFIRMED', pending.key)
+      // The reply ends the current wait. The native response stays associated
+      // with the original operation for an exact persistence retry.
+      await storageUnconfirmed(pending.key, 'RESPONSE_STORAGE_UNCONFIRMED')
       return
     }
-    const payload: unknown = JSON.parse(Buffer.from(pending.response).toString('utf8'))
-    const success = object(payload) && Object.hasOwn(payload, 'result')
-    const handle = pending.request.intent.handle
-    if (handle?.action === 'create') {
-      state.creating.delete(handleKey(handle))
-      if (success) state.handles.add(handleKey(handle))
-    } else if (handle?.action === 'close' && success) state.handles.delete(handleKey(handle))
-    if (pending.request.intent.initialize) { state.initializing = false; if (success) state.initialized = true }
-    state.pending.delete(requestKey(pending.key.nativeRequestId))
-    if (!state.pending.size) retained.delete(state.id)
+    if (state) {
+      const payload: unknown = JSON.parse(Buffer.from(pending.response).toString('utf8'))
+      const success = object(payload) && Object.hasOwn(payload, 'result')
+      const handle = pending.request.intent.handle
+      if (handle?.action === 'create') {
+        state.creating.delete(handleKey(handle))
+        if (success) state.handles.add(handleKey(handle))
+      } else if (handle?.action === 'close' && success) state.handles.delete(handleKey(handle))
+      if (pending.request.intent.initialize) { state.initializing = false; if (success) state.initialized = true }
+    }
+    const generation = pending.key.streamGeneration
+    const operations = retained.get(generation)
+    operations?.delete(requestKey(pending.key.nativeRequestId))
+    if (!operations?.size) retained.delete(generation)
     await completed(pending.key)
-    await respond(state.id, pending.response, pending.request)
+    await respond(generation, pending.response, pending.request)
   }
   const start = (generation: string): Generation => {
     const spec = options.protocol.executor
@@ -103,7 +117,7 @@ export function createAgentExecutionExecutor(options: {
           await report(generation, 'CONFLICTING_NATIVE_RESPONSE', pending.key); return
         }
         pending.response = Uint8Array.from(rawLine)
-        await settle(state, pending)
+        await settle(pending, state)
         } catch { await report(generation, 'NATIVE_RESPONSE_OBSERVATION_UNCONFIRMED') }
       } })
     const ended = () => {
@@ -168,29 +182,26 @@ export function createAgentExecutionExecutor(options: {
       catch { await reject(generation, message.requestId, -32001, 'The requested execution binding permission was not granted'); return }
       const key: AgentExecutionOperationKey = { bindingId, streamGeneration: generation, nativeRequestId: message.requestId }
       const bytes = Buffer.from(JSON.stringify(message.payload))
-      const previous = await options.journal.inspect(key)
+      let previous
+      try { previous = await options.journal.inspect(key) }
+      catch { await storageUnconfirmed(key, 'ORIGINAL_REQUEST_INSPECTION_UNCONFIRMED'); return }
       if (previous) {
         let operation
         try { operation = await options.journal.prepare(key, bytes) }
-        catch { await report(generation, 'ORIGINAL_REQUEST_CONFLICT_OR_STORAGE_UNCONFIRMED', key); return }
+        catch { await storageUnconfirmed(key, 'ORIGINAL_REQUEST_CONFLICT_OR_STORAGE_UNCONFIRMED'); return }
         if (operation.phase === 'completed') {
-          const result = await options.journal.readResult(key, operation.payloadDigest)
+          let result
+          try { result = await options.journal.readResult(key, operation.payloadDigest) }
+          catch { await storageUnconfirmed(key, 'RESPONSE_READ_UNCONFIRMED'); return }
+          if (!result) { await storageUnconfirmed(key, 'RESPONSE_READ_UNCONFIRMED'); return }
           await completed(key)
-          if (result) await respond(generation, result, message)
+          await respond(generation, result, message)
           return
         }
         if (operation.phase !== 'prepared') {
           const pending = retained.get(generation)?.get(requestKey(message.requestId))
-          if (pending?.response) {
-            const original = children.get(generation)
-            if (original) await settle(original, pending)
-            else {
-              await options.journal.complete(key, pending.digest, pending.response)
-              retained.get(generation)?.delete(requestKey(message.requestId))
-              await completed(key)
-              await respond(generation, pending.response, pending.request)
-            }
-          } else if (!pending || closed.has(generation)) await report(generation, 'ORIGINAL_OPERATION_OUTCOME_UNKNOWN', key)
+          if (pending?.response) await settle(pending, children.get(generation))
+          else if (!pending || closed.has(generation)) await report(generation, 'ORIGINAL_OPERATION_OUTCOME_UNKNOWN', key)
           // A live pending request waits for its original native response.
           return
         }
@@ -210,11 +221,11 @@ export function createAgentExecutionExecutor(options: {
       }
       let prepared
       try { prepared = await options.journal.prepare(key, bytes) }
-      catch { await report(generation, 'ORIGINAL_REQUEST_STORAGE_UNCONFIRMED', key); return }
+      catch { await storageUnconfirmed(key, 'ORIGINAL_REQUEST_STORAGE_UNCONFIRMED'); return }
       const state = current ?? start(generation)
       let dispatch
       try { dispatch = await options.journal.dispatch(key, prepared.payloadDigest) }
-      catch { await report(generation, 'ORIGINAL_DISPATCH_STORAGE_UNCONFIRMED', key); return }
+      catch { await storageUnconfirmed(key, 'ORIGINAL_DISPATCH_STORAGE_UNCONFIRMED'); return }
       if (!dispatch.dispatch) { await report(generation, 'ORIGINAL_OPERATION_OUTCOME_UNKNOWN', key); return }
       const pending: Pending = { key, digest: prepared.payloadDigest, request: message }
       state.pending.set(requestKey(message.requestId), pending); retained.set(generation, state.pending)
@@ -227,7 +238,7 @@ export function createAgentExecutionExecutor(options: {
             const parsed = options.protocol.parseServer(response)
             if (parsed.kind !== 'response' || parsed.requestId !== message.requestId) throw new Error('Provider response does not identify its original operation')
             pending.response = Buffer.from(JSON.stringify(parsed.payload))
-            await settle(state, pending)
+            await settle(pending, state)
           } else {
             pending.nativeDispatch = true
             await state.channel.send(message.payload)
