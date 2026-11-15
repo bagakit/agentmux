@@ -4,31 +4,38 @@
 .pmo-teams-topic-floating__resize:hover, .pmo-teams-topic-floating__resize:focus-visible { color: var(--text); background: var(--surface-3); }
 .pmo-teams-topic-floating__resize:focus-visible { outline: 1px solid var(--green-2); outline-offset: -1px; }
 .pmo-teams-topic-floating:popover-open { display: flex; flex-direction: row; }
-.mote-chooser { display: flex; flex-direction: column; flex: 0 0 172px; gap: var(--sp-2); min-width: 0; min-height: 0; padding: var(--sp-2); border-right: 1px solid var(--line); background: var(--surface-2); }
+.mote-chooser { display: flex; flex-direction: column; flex: 0 0 192px; gap: var(--sp-2); min-width: 0; min-height: 0; padding: var(--sp-2); border-right: 1px solid var(--line); background: var(--surface-2); }
 .mote-chooser__choices { display: flex; flex-direction: column; flex: 1; gap: var(--sp-1); min-width: 0; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
-.mote-chooser__choice { position: relative; display: flex; flex: none; flex-direction: column; align-items: flex-start; gap: var(--sp-1); width: 100%; min-height: 50px; padding: 6px; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); text-align: left; cursor: pointer; }
-.mote-chooser__choice:hover { background: var(--surface-3); }
-.mote-chooser__choice[aria-pressed="true"] { border-color: var(--text-3); background: var(--surface-3); color: var(--text); box-shadow: var(--hl); }
-.mote-chooser__name { display: flex; align-items: center; gap: var(--sp-1); width: 100%; min-width: 0; }
-.mote-chooser__name > strong { flex: 1; min-width: 0; overflow: hidden; font-size: var(--fs-body); font-weight: 500; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
-.mote-chooser__name > img { flex: none; width: 24px; height: 24px; object-fit: contain; }
-.mote-chooser__name .space-object-icon, .mote-chooser__name .space-object-icon > svg { flex: none; width: 24px; height: 24px; }
-.mote-chooser__selected { position: absolute; right: 6px; bottom: 6px; }
-.mote-chooser__status { display: flex; align-items: center; gap: var(--sp-1); color: var(--text-3); font-size: var(--fs-micro); line-height: 1.2; white-space: nowrap; }
+.mote-chooser__row { display: grid; grid-template-columns: auto minmax(0,1fr); align-items: center; gap: var(--sp-1); min-width: 0; flex: none; border-radius: var(--radius); }
+.mote-chooser__row:has(.mote-chooser__choice[aria-pressed="true"]) { background: var(--surface-3); }
+.mote-chooser__row:hover { background: color-mix(in srgb, var(--surface-3) 85%, var(--surface-2)); }
+.mote-chooser__choice { display: grid; align-content: center; justify-items: start; gap: var(--sp-1); width: 100%; min-width: 0; min-height: 52px; padding: 6px 6px 6px 2px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); text-align: start; cursor: pointer; }
+.mote-chooser__name, .mote-chooser__preview { display: block; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mote-chooser__name { color: var(--text); font-size: var(--fs-body); line-height: 1.3; }
+.mote-chooser__name > strong { display: block; overflow: hidden; text-overflow: ellipsis; font-weight: 520; }
+.mote-chooser__choice[aria-pressed="true"] .mote-chooser__name > strong { font-weight: 660; }
+.mote-chooser__preview { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.35; }
+.mote-chooser__preview:not([data-mote-message-preview]) { white-space: normal; }
+.mote-chooser__preview[data-mote-message-preview] { color: var(--text-2); }
+.mote-chooser__profile { position: relative; display: grid; place-items: center; width: 42px; height: 44px; border: 0; border-radius: var(--radius-sm); padding: 0; background: transparent; color: var(--text); cursor: pointer; }
+.mote-chooser__profile:is(:hover, [aria-pressed="true"]) { background: var(--surface-3); }
+.mote-chooser__profile .space-object-icon, .mote-chooser__profile .space-object-icon > svg { width: 32px; height: 32px; }
+.mote-chooser__status { position: absolute; right: 4px; bottom: 6px; display: grid; place-items: center; width: 10px; height: 10px; border-radius: 50%; color: var(--text-2); background: var(--surface-2); }
+.mote-chooser__status .status__dot { width: 6px; height: 6px; box-shadow: none; }
+.mote-chooser__status .status__dot::after { display: none; }
 .mote-chooser__availability { display: inline-flex; align-items: center; justify-content: center; width: 7px; height: 7px; font-size: 10px; font-weight: 600; }
 .mote-chooser__identity { position: fixed; z-index: var(--layer-tooltip); max-width: min(280px, calc(100vw - 80px)); padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text); background: var(--surface-3); box-shadow: 0 4px 12px var(--scrim-1); font-size: var(--fs-meta); line-height: 1.4; overflow-wrap: anywhere; pointer-events: none; }
-.mote-chooser__choice:focus-visible { outline: 2px solid var(--green-2); outline-offset: -2px; }
+.mote-chooser__row :is(.mote-chooser__choice, .mote-chooser__profile):focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; }
 .mote-chooser__actions { display: flex; flex: none; align-items: center; justify-content: center; gap: var(--sp-2); padding-top: var(--sp-1); border-top: 1px solid var(--line-soft); }
 .mote-chooser__actions > button { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); cursor: pointer; }
 .mote-chooser__actions > button:hover { background: var(--surface-3); color: var(--text); }
 .mote-chooser__actions > .mote-chooser__archive { width: auto; min-width: 30px; padding-inline: 3px; gap: 3px; }
 .mote-chooser__archive span { font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
 .pmo-teams-topic-floating[data-mote-navigation="avatars"] .mote-chooser { flex-basis: 56px; padding: var(--sp-1); }
-.pmo-teams-topic-floating[data-mote-navigation="avatars"] .mote-chooser__choice { align-items: center; justify-content: center; min-height: 44px; padding: var(--sp-1); }
-.pmo-teams-topic-floating[data-mote-navigation="avatars"] .mote-chooser__name { justify-content: center; }
-.pmo-teams-topic-floating[data-mote-navigation="avatars"] .mote-chooser__name > strong, .pmo-teams-topic-floating[data-mote-navigation="avatars"] .mote-chooser__status-text { display: none; }
-.pmo-teams-topic-floating[data-mote-navigation="avatars"] .mote-chooser__status { position: absolute; right: 4px; bottom: 4px; padding: 2px; border-radius: 4px; background: var(--surface-2); }
-.pmo-teams-topic-floating[data-mote-navigation="avatars"] .mote-chooser__selected { left: 2px; right: auto; bottom: 2px; border-radius: 3px; background: var(--surface-3); }
+.pmo-teams-topic-floating[data-mote-navigation="avatars"] .mote-chooser__row { grid-template-columns: minmax(0,1fr); justify-items: center; gap: 0; }
+.pmo-teams-topic-floating[data-mote-navigation="avatars"] .mote-chooser__choice { justify-items: center; min-height: 26px; padding: var(--sp-1); }
+.pmo-teams-topic-floating[data-mote-navigation="avatars"] .mote-chooser__choice[aria-pressed="true"] { color: var(--text); }
+.pmo-teams-topic-floating[data-mote-navigation="avatars"] .mote-chooser__name { display: none; }
 .pmo-teams-topic-floating[data-mote-navigation="avatars"] .mote-chooser__actions { flex-direction: column; }
 .pmo-teams-topic-floating__content { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; container-type: inline-size; container-name: mote-workface; }
 .pmo-teams-topic-floating__body { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
@@ -81,6 +88,10 @@
 @media (max-width: 560px) {
   .pmo-teams-topic-floating[data-mote-navigation="cards"] .mote-chooser { flex-basis: 136px; padding: var(--sp-1); }
   .mote-chooser__choice { padding: var(--sp-1); }
+}
+@media (pointer: coarse) {
+  .mote-chooser__profile { width: 44px; }
+  .pmo-teams-topic-floating[data-mote-navigation="avatars"] .mote-chooser__choice { min-height: 44px; }
 }
 @container mote-workface (max-width: 320px) {
   .pmo-teams-topic-floating .composer:has(.composer-tools[data-mode='collapsed']) { display: block; }

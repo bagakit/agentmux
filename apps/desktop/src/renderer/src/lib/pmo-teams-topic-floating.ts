@@ -21,7 +21,7 @@ export const PMO_FLOATING_TAB_SLOT_PREFIX = 'mote-floating-tab-slot'
 export type PmoTeamsTopicFloatingSize = { width: number; height: number }
 export function resolvePmoTeamsTopicFloatingSize(preferred: PmoTeamsTopicFloatingSize | undefined,
   available: PmoTeamsTopicFloatingSize, railMode: 'cards' | 'avatars', viewportWidth: number): PmoTeamsTopicFloatingSize {
-  const rail = railMode === 'avatars' ? 56 : viewportWidth <= 560 ? 136 : 172
+  const rail = railMode === 'avatars' ? 56 : viewportWidth <= 560 ? 136 : 192
   const clamp = (value: number, minimum: number, maximum: number) => Math.min(Math.max(0, maximum), Math.max(minimum, value))
   return { width: clamp(preferred?.width ?? 720, rail + 232, available.width),
     height: clamp(preferred?.height ?? 520, 250, available.height) }

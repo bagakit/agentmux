@@ -1,7 +1,6 @@
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
+import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useMoteWorkfaceScope, type MoteWorkfaceScope } from '../lib/mote-workface'
 import { useMoteMaterialsActions } from '../lib/mote-materials-actions'
 import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
@@ -13,18 +12,16 @@ const ThemeObjectContactIcon = semanticIconComponent('object.contact')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
 
 
-/** The same Profile, opened from the Tab row without moving its original input tree. */
-export function MoteProfilePopover({ workspaceId, topicId, reference, active, onReferenceSelect, children }: {
+/** The same Profile is accessible from the header and roster without moving the conversation. */
+export function MoteProfilePopover({ workspaceId, topicId, reference, active, onReferenceSelect, children, avatar }: {
   workspaceId: string; topicId: string; reference?: WorkbenchProjectionSelection | null | undefined; active: boolean
   onReferenceSelect(topicId: string, reference: WorkbenchProjectionSelection): void
-  children(trigger: ReactNode): ReactNode
+  children?(trigger: ReactNode): ReactNode
+  avatar?: { label: string; content: ReactNode }
 }) {
   const [open, setOpen] = useState(false)
   const [owner, setOwner] = useState({ workspaceId, topicId, reference })
-  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null)
-  const [content, setContent] = useState<HTMLDivElement | null>(null)
   const surface = useRef<HTMLDivElement>(null)
-  const attach = useCallback((node: HTMLDivElement | null) => { surface.current = node; setContent(node) }, [])
   const resolved = useMoteWorkfaceScope(owner.workspaceId, owner.topicId, active && open)
   const retained = useRef<MoteWorkfaceScope | null>(null)
   const scope = useMemo(() => {
@@ -38,28 +35,19 @@ export function MoteProfilePopover({ workspaceId, topicId, reference, active, on
   const materials = useMoteMaterialsActions(scope, { floating: true, reference: owner.reference,
     onReferenceSelect: reference => onReferenceSelect(owner.topicId, reference) })
   useLayoutEffect(() => { if (!active) setOpen(false) }, [active])
-  useLayoutEffect(() => {
-    if (!open || !anchor || !content) return
-    const invoker = anchor
-    let current = true
-    const position = async () => {
-      const result = await computePosition(invoker, content, { strategy: 'fixed', placement: 'bottom-end',
-        middleware: [offset(6), flip(), shift({ padding: 12 }), size({ padding: 12, apply: ({ availableHeight, availableWidth }) => {
-          if (current) Object.assign(content.style, { maxHeight: Math.max(0, availableHeight) + 'px', maxWidth: Math.max(0, availableWidth) + 'px' })
-        } })] })
-      if (current) Object.assign(content.style, { left: result.x + 'px', top: result.y + 'px', visibility: 'visible' })
-    }
-    const release = autoUpdate(invoker, content, () => { void position() })
-    return () => { current = false; release() }
-  }, [open, anchor, content])
+  const label = avatar ? 'Open profile for ' + avatar.label : 'Show Mote profile'
+  const trigger = <Dialog.Trigger asChild><button type="button"
+    className={avatar ? 'mote-chooser__profile' : 'pane-action mote-profile-trigger'}
+    aria-label={label} aria-pressed={open && active} title={avatar ? label : 'Mote profile'}>
+    {avatar?.content ?? <ThemeObjectContactIcon size={14} />}
+  </button></Dialog.Trigger>
   return <Dialog.Root modal={false} open={open && active} onOpenChange={next => {
     if (next) { retained.current = null; setOwner({ workspaceId, topicId, reference }) }
     setOpen(next)
   }}>
-    {children(<Dialog.Trigger asChild><button ref={setAnchor} type="button" className="pane-action mote-profile-trigger" aria-label="Show Mote profile"
-      aria-pressed={open && active} title="Mote profile"><ThemeObjectContactIcon size={14} /></button></Dialog.Trigger>)}
+    {children ? children(trigger) : trigger}
     <DocumentOverlayPortal component={Dialog.Portal}>
-      <Dialog.Content ref={attach} className="mote-profile-popover" style={{ visibility: 'hidden' }}
+      <Dialog.Content ref={surface} className="mote-profile-popover"
         onOpenAutoFocus={event => { event.preventDefault(); surface.current?.focus({ preventScroll: true }) }}>
         <Dialog.Title hidden>Mote profile</Dialog.Title>
         <Dialog.Description hidden>Identity, behavior, current work and ideas for the selected Mote.</Dialog.Description>

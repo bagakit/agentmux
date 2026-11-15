@@ -83,7 +83,7 @@ function createViewCustody() {
 /** Presentation lifetime for the original public Reader. The client retains only
  * complete accepted frames and transport assembly; Core owns source pages/joins. */
 export function useConversationView(client: ConversationViewClient | null, reference: ConversationRef | undefined, active: boolean,
-  options: { identity?: string; diagnostics?: ConversationViewDiagnostics; heldReason?(): ReadingDiagnosticReason;
+  options: { identity?: string; limit?: number; diagnostics?: ConversationViewDiagnostics; heldReason?(): ReadingDiagnosticReason;
     beforeCommit?(snapshot: ConversationWindowSnapshot, operation: Operation, displayed: ConversationWindowSnapshot | null, replayingHeldIntent: boolean): boolean } = {}) {
   const key = reference ? JSON.stringify([reference.hostId, reference.agentSessionId, options.identity]) : ''
   const [state, setState] = useState<ViewState>(empty)
@@ -327,12 +327,13 @@ export function useConversationView(client: ConversationViewClient | null, refer
       const originalNative = prior?.scope.sources.find(source => source.kind === 'native')
       // This consumer assembles a complete bounded frame before committing it.
       // Use the existing wire budget instead of fragmenting it into CLI-sized pages.
-      const request: ConversationTimelineReadInput = { ...ref, ...(!selection.record && !selection.anchor && !(kind === 'resume' && prior?.window.anchor) ? { processDetails: 'deferred' as const } : {}), limit: 100, maxBytes: CONVERSATION_MAX_READ_BYTES,
+      const limit = options.limit ?? 100
+      const request: ConversationTimelineReadInput = { ...ref, ...(!selection.record && !selection.anchor && !(kind === 'resume' && prior?.window.anchor) ? { processDetails: 'deferred' as const } : {}), limit, maxBytes: CONVERSATION_MAX_READ_BYTES,
         ...selection, ...(kind === 'reopen' && originalNative?.kind === 'native' ? { nativeSource: { providerId: originalNative.providerId, nativeSessionId: originalNative.nativeSessionId } } : {}),
         ...(kind === 'resume' && prior?.window.view ? { view: prior.window.view } : {}), ...(kind === 'older' && prior?.window.navigation.older ? { cursor: prior.window.navigation.older } : {}),
         ...(kind === 'newer' && prior?.window.navigation.newer ? { cursor: prior.window.navigation.newer } : {}) }
       const change: ConversationChangesInput | null = kind === 'changes' && prior ? {
-        ...ref, ...(prior.processDetails ? { processDetails: prior.processDetails } : {}), checkpoint: prior.window.checkpoint, view: prior.window.view!, limit: 100, maxBytes: CONVERSATION_MAX_READ_BYTES
+        ...ref, ...(prior.processDetails ? { processDetails: prior.processDetails } : {}), checkpoint: prior.window.checkpoint, view: prior.window.view!, limit, maxBytes: CONVERSATION_MAX_READ_BYTES
       } : null
       // Presentation follows this original request, never a retained frame's
       // source during an unqualified latest selection or a replay-only resume.
@@ -378,7 +379,7 @@ export function useConversationView(client: ConversationViewClient | null, refer
           let more = false
           do {
             const page = change ? await client.readConversationChanges({ ...change, ...(cursor ? { cursor } : {}) }, { signal: requestSignal })
-              : await client.readAgentConversation({ ...request, ...(cursor ? { cursor, limit: 100 } : {}) }, { signal: requestSignal })
+              : await client.readAgentConversation({ ...request, ...(cursor ? { cursor, limit } : {}) }, { signal: requestSignal })
             const nextLease = custody(client, ref, page.window)
             releaseResponse?.(); releaseResponse = nextLease
             if (!isCurrent()) { releaseComplete(); return }

@@ -1,8 +1,10 @@
 import { Button } from '@agentmux/client-ui/components/Button'
 import '../styles/mote-primary-agent.css'
 import { mintObjectId } from '@agentmux/core/object-id'
+import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
+import { useConversationView } from '@agentmux/client-ui/use-conversation-view'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
 import type { ScratchTopicSnapshot } from '../../../shared/contracts'
 import { MOTE_SOUL_PATH, PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicLogicalPath } from '@agentmux/host/mote-model'
@@ -48,7 +50,7 @@ import type { PmoTeamsTopicTarget } from '../lib/pmo-teams-topic-target'
 
 const ThemeStatusNeutralIcon = semanticIconComponent('status.neutral')
 const ThemeStatusUnknownIcon = semanticIconComponent('status.unknown')
-const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
+const ThemeConversationIcon = semanticIconComponent('object.conversation')
 const ThemeActionArchiveIcon = semanticIconComponent('action.archive')
 const ThemeLayoutCloseLeftIcon = semanticIconComponent('layout.close-left')
 const ThemeLayoutOpenLeftIcon = semanticIconComponent('layout.open-left')
@@ -110,17 +112,51 @@ function settleContextOperation(operation: MoteContextOperation, state: MoteCont
   }))
 }
 
-const MoteChoice = memo(function MoteChoice({ topic, selected, savedTabId, onSelect, onIdentity, onArchive, pending, container, currentTopicId, onRename, onAvatar, onOpenSpace, catalog, reference, targetAgent, onReferenceSelect }: {
+function MoteConversationPreview({ id, hostId, sessionId }: { id: string; hostId: string; sessionId: string }) {
+  const node = useRef<HTMLSpanElement>(null)
+  const [visible, setVisible] = useState(false)
+  useEffect(() => {
+    if (!node.current) return
+    const observer = new IntersectionObserver(([entry]) => setVisible(entry?.isIntersecting === true),
+      { root: node.current.closest('.mote-chooser__choices') })
+    observer.observe(node.current)
+    return () => observer.disconnect()
+  }, [])
+  const reference = useMemo(() => ({ hostId, agentSessionId: sessionId }), [hostId, sessionId])
+  const view = useConversationView(api.conversation, reference, visible, { limit: 24 })
+  const message = useMemo(() => {
+    const records = view.reading?.records ?? []
+    for (let index = records.length - 1; index >= 0; index--) {
+      const record = records[index]!
+      const recordedReply = record.role === 'observation' && record.kind === 'assistant-message'
+      if ((!recordedReply && record.role !== 'message') || record.author?.kind === 'system') continue
+      const body = parseAgentMuxMessagePrefix(record.content)?.body ?? record.content
+      const text = body.trim().slice(0, 240).replace(/\s+/gu, ' ')
+      if (text) return text
+    }
+    return null
+  }, [view.reading])
+  const unknown = !!(view.error || view.observationError)
+  const complete = !view.hasMore && view.snapshot?.coverage.length && view.snapshot.coverage.every(source =>
+    source.current === 'complete-through-cut' && source.earlier === 'complete')
+  const label = unknown ? 'Preview unknown' : complete ? 'No messages yet' : view.snapshot ? 'No recent message' : 'Reading…'
+  return <span id={id} ref={node} className="mote-chooser__preview" data-mote-message-preview={message ? 'message' : undefined}
+    title={message && unknown ? 'Last confirmed message · ' + message : message ?? label}>{message ?? label}</span>
+}
+
+const MoteChoice = memo(function MoteChoice({ topic, selected, savedTabId, onSelect, onIdentity, onArchive, pending, container, currentTopicId, onRename, onAvatar, onOpenSpace, catalog, reference, targetAgent, onReferenceSelect, railMode }: {
   catalog?: AgentMuxSpaceCatalog | null | undefined; reference?: WorkbenchProjectionSelection | null | undefined
   targetAgent?: PmoTeamsTopicFloatingState['targetAgent']
   onReferenceSelect(topicId: string, reference: WorkbenchProjectionSelection): void
   topic: ScratchTopicSnapshot; selected: boolean; savedTabId: string | null | undefined
+  railMode: 'cards' | 'avatars'
   onSelect(topicId: string, tabId: string | undefined): void
   onIdentity(anchor: HTMLButtonElement | null): void
   onArchive(topic: ScratchTopicSnapshot, archived: boolean): Promise<boolean>; pending: string | null; container(): HTMLElement | null; currentTopicId: string
   onRename(topic: ScratchTopicSnapshot): void; onAvatar(target: SpaceIconTarget): void; onOpenSpace(topicId: string, tabId: string | undefined, intent?: 'space' | 'persona'): void
 }) {
   const recent = useAppStore(state => state.recentMoteAgents[topic.id])
+  const previewId = useId()
   const primary = topic.quickMode?.status === 'saved' ? topic.quickMode.defaults.conversation : undefined
   const entry = primary ?? recent
   const selectTab = useMemo(() => createPmoTeamsTopicTargetSelector({ open: false, preview: false,
@@ -159,23 +195,30 @@ const MoteChoice = memo(function MoteChoice({ topic, selected, savedTabId, onSel
   const status = !target ? 'Original Agent retained' : pendingPrimary ? 'Status unknown' : target.label
   const identityStatus = (topic.moteArchive?.state === 'archived' ? 'Archived · ' : '') + (topic.id === PMO_TEAMS_TOPIC_ID ? 'Primary · ' : '') + status
   const restoring = Boolean(pendingPrimary || tabId && (!tab || !region || region.kind === 'agent' && !session))
-  const choice = <button type="button" className="mote-chooser__choice" data-mote-topic-id={topic.id}
+  const choice = <div className="mote-chooser__row" data-mote-row={topic.id}>
+    <MoteProfilePopover workspaceId={SCRATCH_WORKSPACE_ID} topicId={topic.id} reference={fileReference}
+      active onReferenceSelect={onReferenceSelect} avatar={{ label: topic.title, content: <>
+        <SpaceObjectIcon kind={iconTarget?.kind ?? 'mote'} name={topic.title} manualIcon={manualIcon}
+          moteSessionId={region?.kind === 'agent' ? region.sessionId : undefined} moteHostId={workspace?.hostId}
+          moteAvailability={(!tabId || region?.kind === 'launcher') && !retainedPrimaryBot ? 'no-agent' : 'restoring'}
+          avatarObjectKey={iconTarget?.key} avatarWorkspaceId={iconTarget?.avatarTarget?.workspaceId} avatarTopicId={iconTarget?.avatarTarget?.topicId} />
+        <span className="mote-chooser__status" title={identityStatus}>
+          {session ? <StatusDot status={session.status} /> : <span className="mote-chooser__availability" data-mote-availability={restoring ? 'restoring' : 'no-agent'} aria-hidden="true">
+            {restoring ? <ThemeStatusUnknownIcon size={7} /> : <ThemeStatusNeutralIcon size={7} />}
+          </span>}
+        </span>
+      </> }} />
+    <button type="button" className="mote-chooser__choice" data-mote-topic-id={topic.id} data-space-icon-target={iconTarget?.key}
     data-mote-target-tab={tabId} data-mote-status={status} aria-pressed={selected}
-    aria-label={topic.title + ' · ' + identityStatus} onClick={() => onSelect(topic.id, undefined)}
+    aria-label={topic.title + ' · ' + identityStatus} aria-describedby={railMode === 'cards' ? previewId : undefined} onClick={() => onSelect(topic.id, undefined)}
     onPointerEnter={event => { if (event.pointerType === 'mouse') onIdentity(event.currentTarget) }}
     onPointerLeave={() => onIdentity(null)} onFocus={event => onIdentity(event.currentTarget)} onBlur={() => onIdentity(null)}>
-    <span className="mote-chooser__name">
-      <SpaceObjectIcon kind={iconTarget?.kind ?? 'mote'} name={topic.title} manualIcon={manualIcon}
-        moteSessionId={region?.kind === 'agent' ? region.sessionId : undefined} moteHostId={workspace?.hostId}
-        moteAvailability={(!tabId || region?.kind === 'launcher') && !retainedPrimaryBot ? 'no-agent' : 'restoring'}
-        avatarObjectKey={iconTarget?.key} avatarWorkspaceId={iconTarget?.avatarTarget?.workspaceId} avatarTopicId={iconTarget?.avatarTarget?.topicId} />
-      <strong>{topic.title}</strong>
-    </span><span className="mote-chooser__status">
-      {session ? <StatusDot status={session.status} /> : <span className="mote-chooser__availability" data-mote-availability={restoring ? 'restoring' : 'no-agent'} aria-hidden="true">{restoring ? <ThemeStatusUnknownIcon size={7} /> : <ThemeStatusNeutralIcon size={7} />}</span>}
-      <span className="mote-chooser__status-text">{identityStatus}</span>
-    </span>
-    {selected ? <ThemeStatusSelectedIcon className="mote-chooser__selected" size={10} aria-hidden="true" /> : null}
-  </button>
+      <span className="mote-chooser__name"><strong>{topic.title}</strong></span>
+      {railMode === 'avatars' ? <ThemeConversationIcon size={13} aria-hidden /> : primary
+        ? <MoteConversationPreview key={JSON.stringify([primary.hostId, primary.sessionId])} id={previewId} hostId={primary.hostId} sessionId={primary.sessionId} />
+        : <span id={previewId} className="mote-chooser__preview">{!pendingPrimary && (target?.kind === 'no-target' || region?.kind === 'launcher') ? 'No messages yet' : 'Preview unknown'}</span>}
+    </button>
+  </div>
   return iconTarget ? <SpaceObjectContextMenu target={iconTarget} container={container} onChangeIcon={onAvatar} moteActions={{
     pinned, onTogglePin: () => useAppStore.getState().togglePinnedItem(SCRATCH_WORKSPACE_ID, topic.id),
     onRename: () => onRename(topic), onEdit: () => { if (scope && fileReference) void files.open(scope.rootPath + '/' + MOTE_SOUL_PATH); else onOpenSpace(topic.id, tabId, 'persona') },
@@ -206,8 +249,8 @@ function MoteIdentityTip({ anchor }: { anchor: HTMLButtonElement }) {
     const observer = new MutationObserver(sync)
     observer.observe(anchor, { attributes: true, attributeFilter: ['aria-label'] }); sync()
     const position = async () => {
-      const result = await computePosition(anchor, tooltip, { placement: 'right', strategy: 'fixed',
-        middleware: [offset(6), flip({ boundary, padding: 8 }), shift({ boundary, padding: 8 })] })
+      const result = await computePosition(anchor, tooltip, { placement: 'bottom-start', strategy: 'fixed',
+        middleware: [offset(12), flip({ boundary, padding: 8 }), shift({ boundary, padding: 8 })] })
       if (!disposed) Object.assign(tooltip.style, { left: result.x + 'px', top: result.y + 'px' })
     }
     const stop = autoUpdate(anchor, tooltip, () => { void position() })
@@ -234,7 +277,7 @@ const MoteChooser = memo(function MoteChooser({ topics, topicId, tabId, railMode
   }, [railMode])
   return <div className="mote-chooser">
     <div className="mote-chooser__choices" role="group" aria-label="Clubs">
-      {topics.filter(topic => topic.moteArchive?.state !== 'archived' || showArchived).map(topic => <MoteChoice key={topic.id} topic={topic} selected={topic.id === topicId} savedTabId={tabId} onSelect={onSelect} onIdentity={showIdentity} onArchive={onArchive} pending={pending} container={container} currentTopicId={topicId} onRename={onRename} onAvatar={onAvatar} onOpenSpace={onOpenMoteSpace} catalog={catalog} reference={reference} targetAgent={targetAgent} onReferenceSelect={onReferenceSelect} />)}
+      {topics.filter(topic => topic.moteArchive?.state !== 'archived' || showArchived).map(topic => <MoteChoice key={topic.id} topic={topic} selected={topic.id === topicId} savedTabId={tabId} railMode={railMode} onSelect={onSelect} onIdentity={showIdentity} onArchive={onArchive} pending={pending} container={container} currentTopicId={topicId} onRename={onRename} onAvatar={onAvatar} onOpenSpace={onOpenMoteSpace} catalog={catalog} reference={reference} targetAgent={targetAgent} onReferenceSelect={onReferenceSelect} />)}
     </div>
     <div className="mote-chooser__actions">
       <button type="button" className="mote-chooser__archive" aria-label="Show archived Clubs" aria-pressed={showArchived} title={showArchived ? 'Hide archived Clubs' : 'Show archived Clubs'} onClick={() => setShowArchived(value => !value)}><ThemeActionArchiveIcon size={13} /><span>{topics.filter(topic => topic.moteArchive?.state === 'archived').length}</span></button>
