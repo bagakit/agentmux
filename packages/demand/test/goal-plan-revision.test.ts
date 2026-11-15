@@ -1,3 +1,4 @@
+import { goalTickets } from './helpers/goal-tickets.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,14 +8,15 @@ import { projectGoalPlan, type GoalPlanNodeInput } from '../src/goal-plan.js'
 import type { DemandDelegationIntent } from '../src/delegations.js'
 
 let root: string, store: ReturnType<typeof openDemandStore>
+let tickets: ReturnType<typeof goalTickets>
 const author = { kind: 'agent' as const, id: 'supervisor' }
 const executor = (agentSessionId: string) => ({ hostId: 'local', agentSessionId })
 const node = (patch: Partial<GoalPlanNodeInput> = {}): GoalPlanNodeInput => ({ id: 'node', title: 'The original node', outcome: 'Deliver the original result',
   check: 'node --test checks/original.test.mjs', dependsOn: [], criterionIds: ['original'], executor: executor('worker-a'), ...patch })
 const intent = (worker = 'worker-a', attempt = 1): DemandDelegationIntent => ({ operationId: `attempt-${attempt}`, sourceMessageId: `source-${attempt}`, threadId: `thread-${attempt}`,
   hostId: 'local', ownerAgentSessionId: 'supervisor', ownerRunId: 'supervisor-run', workerAgentSessionId: worker, workerRunId: worker + '-run', text: 'Original task',
-  alignmentRevision: 1, criterionIds: ['original'], planNodeId: 'node' })
-const revise = async (operationId: string, nodes = [node()]) => { const goal = (await store.get('goal'))!; return store.revisePlan('goal', { operationId, nodes,
+  alignmentRevision: 1, criterionIds: ['original'], planNodeId: tickets.id('node') })
+const revise = async (operationId: string, nodes = [node()]) => { const goal = (await store.get('goal'))!; return tickets.revise('goal', { operationId, nodes,
   expectedRevision: goal.plan?.revision ?? 0, alignmentRevision: goal.alignment!.revision }, author) }
 const projected = async () => { const goal = (await store.get('goal'))!; return projectGoalPlan(goal.plan!, goal.delegations ?? [], goal.alignment!.criteria).nodes[0]! }
 const delegate = async (worker = 'worker-a', attempt = 1, linked = true) => {
@@ -22,14 +24,14 @@ const delegate = async (worker = 'worker-a', attempt = 1, linked = true) => {
   if (linked) await store.linkDelegation('goal', value.operationId, value.sourceMessageId, 'supervisor')
   return value
 }
-const report = async (value: DemandDelegationIntent) => store.submitDelegationReport('goal', value.operationId, { operationId: `report-${value.operationId}`,
+const report = async (value: DemandDelegationIntent) => tickets.submit('goal', value.operationId, { operationId: `report-${value.operationId}`,
   replyMessageId: `reply-${value.operationId}`, authorAgentSessionId: value.workerAgentSessionId, grounding: { alignmentRevision: 1, summary: 'The original result',
     checks: [{ criterionId: 'original', outcome: 'met', evidence: ['checks/original.log'], note: '' }] } }, value.workerAgentSessionId)
-const review = async (value: DemandDelegationIntent, verdict: 'pass' | 'changes' = 'pass') => store.reviewPlanNode('goal', { operationId: `review-${value.operationId}`,
+const review = async (value: DemandDelegationIntent, verdict: 'pass' | 'changes' = 'pass') => tickets.review('goal', { operationId: `review-${value.operationId}`,
   nodeId: 'node', delegationOperationId: value.operationId, verdict, check: { command: 'node --test checks/original.test.mjs', result: 'passed', evidence: ['checks/original.log'] },
   note: verdict === 'changes' ? 'Fix the reviewed result' : '' }, { kind: 'agent', id: 'reviewer' })
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'amux-revise-plan-')); store = openDemandStore({ root })
+  root = await mkdtemp(join(tmpdir(), 'amux-revise-plan-')); tickets = goalTickets(root); store = tickets.store
   await store.create({ id: 'goal', title: 'Original Goal', status: 'in_progress', sessionIds: ['supervisor', 'worker-a', 'worker-b', 'reviewer'],
     assigneeSessionIds: ['supervisor', 'worker-a', 'worker-b', 'reviewer'], supervisorSessionId: 'supervisor' })
   await store.proposeAlignment('goal', { summary: 'Original scope', criteria: [{ id: 'original', text: 'Original criterion' }, { id: 'remaining', text: 'Remaining criterion' }], openQuestions: [] })
@@ -41,14 +43,14 @@ it.each(['nodes', 'expectedRevision', 'alignmentRevision'] as const)('a revision
   const before = (await store.get('goal'))!
   const original = { operationId: 'plan-1', expectedRevision: 0, alignmentRevision: 1, nodes: [node()] }
   const changed = { ...original, ...(field === 'nodes' ? { nodes: [node({ title: 'Different content' })] } : { [field]: 7 }) }
-  await expect(store.revisePlan('goal', changed, author)).rejects.toThrow('already recorded with different content')
+  await expect(tickets.revise('goal', changed, author)).rejects.toThrow('already recorded with different content')
   expect(await store.get('goal')).toEqual(before)
-  expect((await store.revisePlan('goal', original, author)).replayed).toBe(true)
+  expect((await tickets.revise('goal', original, author)).replayed).toBe(true)
 })
 
 it('an older revision operation names where it already applied instead of pretending the current plan is its replay', async () => {
   await revise('plan-2', [node({ title: 'Newer title' })]); const before = (await store.get('goal'))!
-  await expect(store.revisePlan('goal', { operationId: 'plan-1', expectedRevision: 0, alignmentRevision: 1, nodes: [node()] }, author))
+  await expect(tickets.revise('goal', { operationId: 'plan-1', expectedRevision: 0, alignmentRevision: 1, nodes: [node()] }, author))
     .rejects.toThrow('already applied at plan revision 1; the current plan is revision 2')
   expect(await store.get('goal')).toEqual(before)
 })
@@ -117,9 +119,9 @@ it('a reviewed changes verdict follows the existing explicit reassignment rule',
 
 it('keeps claims explicit across full revisions, closures, delegation and ended Goals', async () => {
   const vacant = node({ executor: null }), claimant = { kind: 'agent' as const, id: 'worker-a', hostId: 'local', runtimeId: 'runtime-a' }
-  const owner = { runtimeId: 'goal-runtime', namespace: 'goal-namespace' }
+  const owner = tickets.owner
   const assign = (expectedRevision: number | string, operationId: string, kind: 'open' | 'close' | 'claim') =>
-    store.changePlanAssignment('goal', expectedRevision, operationId, { nodeId: 'node', assignment: { kind } }, claimant, () => {}, owner)
+    store.changePlanAssignment('goal', expectedRevision, operationId, { nodeId: tickets.id('node'), assignment: { kind } }, claimant, () => {}, owner)
   await expect(revise('implicit-open', [{ ...vacant, claimOpen: true }])).rejects.toThrow('explicit plan assignment')
   await revise('vacant', [vacant])
   await assign(2, 'open', 'open')

@@ -73,7 +73,7 @@ it('inline Goal plan links keep their exact source URI and own object kind for c
   expect(copy).toHaveBeenCalledWith(address.planUrl)
   const goalId = deriveBoundGoalId(address.runtimeId, address.namespace, 'create-original')
   const original = formatGoalAddress(goalId, address.runtimeId, address.namespace, 'create-original')
-  const nodeId = '5Bhs4C9tC8bq'
+  const nodeId = 'A'.repeat(43)
   const ticketUrl = formatGoalTicketLink(goalId, original, nodeId)
   await dom.render(createElement(InlineObjectLink, { uri: ticketUrl, target: parseAmuxObjectLink(ticketUrl) }))
   expect(ticketUrl).toBe('amux://goal/' + goalId + '#T-' + nodeId)

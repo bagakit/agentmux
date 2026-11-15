@@ -1,18 +1,19 @@
 import { execFile } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 import { afterEach, expect, it, vi } from 'vitest'
+import { verifyGoalTicketProof } from '@agentmux/demand/goal-ticket-crypto'
 import { crossHostOwner, type CrossHostCleanup } from './helpers/goal-cross-host-fixture.js'
 
 const run = promisify(execFile)
 const cleanup: CrossHostCleanup = []
 afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
 
-it('uses the original Git result as optional Ticket evidence and preserves explicit Goal acceptance', async () => {
+it('signs original Tickets, claims and completions through the public CLI', async () => {
   const owner = await crossHostOwner(cleanup, 'git-ticket', ['supervisor', 'worker', 'reviewer'])
-  const { nodeId } = await owner.call('supervisor', ['goal', 'plan', 'new-id'])
   const created = await owner.call('supervisor', ['goal', 'create', '--title', 'Deliver a checked repository result', '--status', 'in_progress',
     '--assignees', JSON.stringify(['supervisor', 'worker']), '--supervisor', 'supervisor', '--risk', 'low', '--confirm', 'user'])
   const goalId = created.goal.id
@@ -22,18 +23,45 @@ it('uses the original Git result as optional Ticket evidence and preserves expli
   })])
   await owner.call(null, ['goal', 'confirm', '--goal', goalId, '--revision', '1'])
   const check = 'Read the original landed commit and its Goal-Node trailer'
-  await owner.call('supervisor', ['goal', 'plan', 'revise', '--input', '-'], { goalId, revision: {
-    operationId: 'define-git-ticket', expectedRevision: 0, alignmentRevision: 1,
-    nodes: [{ id: nodeId, title: 'Land the change', outcome: 'A verified commit on main', executor: null, criterionIds: [criterion.id], dependsOn: [], check }],
-  } })
-  await owner.call(null, ['goal', 'plan', 'assignment', '--input', '-'], {
-    goalId, nodeId, expectedRevision: 1, operationId: 'open-git-ticket', assignment: { kind: 'open' },
-  })
+  const revision = { goalId, revision: {
+    operationId: 'define-git-tickets', expectedRevision: 0, alignmentRevision: 1,
+    nodes: [
+      { id: 'follow-up', title: 'Consume the result', outcome: 'Review the established artifact', executor: null, criterionIds: [criterion.id], dependsOn: ['code'], check },
+      { id: 'code', title: 'Land the change', outcome: 'A verified commit on main', executor: null, criterionIds: [criterion.id], dependsOn: [], check },
+    ],
+  } }
+  const revise = ['goal', 'plan', 'revise', '--input', '-']
+  const published = await owner.call('supervisor', revise, revision)
+  const [successor, initial] = published.plan.nodes
+  const nodeId = initial.id, childId = successor.id
+  const [issue, childIssue] = published.plan.history[0].createdTickets
+  expect(initial.id).toBe(issue.hash)
+  expect(successor.dependsOn).toEqual([nodeId])
+  expect(childIssue).toMatchObject({ hash: childId, record: { kind: 'issued', predecessors: [nodeId], actor: { id: 'supervisor', runtimeId: owner.identity.runtimeId } } })
+  expect(published.planState.nodes[0].state).toBe('waiting')
+  expect((await owner.call('supervisor', revise, revision)).plan.history[0].createdTickets).toEqual([issue, childIssue])
+  const { fingerprint } = await owner.client().agentCreationAuthority()
+  const verify = (proof: any, hash = proof.hash, expectedKey = fingerprint) => owner.cli(null,
+    ['goal', 'plan', 'verify', '--input', '-', '--goal', goalId, '--hash', hash, '--fingerprint', expectedKey], proof)
+  expect((await verify(childIssue)).code).toBe(0)
+  const modifiedIssue = structuredClone(childIssue)
+  modifiedIssue.record.actor.id = 'another-author'
+  const replacementHash = createHash('sha256').update(JSON.stringify([modifiedIssue.schema, modifiedIssue.record])).digest('base64url')
+  expect(() => verifyGoalTicketProof({ ...modifiedIssue, hash: replacementHash }, { fingerprint, goalId, hash: replacementHash }),
+    'recomputing the Ticket hash cannot authorize an altered author').toThrow()
+  expect((await verify(modifiedIssue)).code, 'a changed Ticket author fails the public proof verifier').toBe(1)
+  expect((await verify(childIssue, childIssue.hash, '0'.repeat(64))).code).toBe(1)
+  const assign = ['goal', 'plan', 'assignment', '--input', '-']
+  await owner.call(null, assign, { goalId, nodeId, expectedRevision: 1, operationId: 'open-git-ticket', assignment: { kind: 'open' } })
   const active = await owner.call('worker', ['goal', 'plan', 'active'])
-  expect(active.goals[0].nodes[0].nodeId).toBe(nodeId)
-  const claim = await owner.call('worker', ['goal', 'plan', 'claim', '--goal', goalId, '--node', nodeId,
-    '--claim-token', active.goals[0].nodes[0].claimToken, '--operation-id', 'claim-git-ticket'])
-  const ticketLink = claim.ticketLinks[0]
+  expect(active.goals[0].nodes.map((node: { nodeId: string }) => node.nodeId)).toEqual([nodeId])
+  const claimArgs = ['goal', 'plan', 'claim', '--goal', goalId, '--node', nodeId,
+    '--claim-token', active.goals[0].nodes[0].claimToken, '--operation-id', 'claim-git-ticket']
+  const claim = await owner.call('worker', claimArgs)
+  const claimed = claim.plan.history.at(-1).claim.proof
+  expect(claimed.record).toMatchObject({ kind: 'claim', ticketId: nodeId, executor: { id: 'worker' }, predecessors: [] })
+  expect((await owner.call('worker', claimArgs)).plan.history.at(-1).claim.proof).toEqual(claimed)
+  const ticketLink = claim.ticketLinks[1]
   expect(ticketLink).toBe('amux://goal/' + goalId + '#T-' + nodeId)
   await owner.call('supervisor', ['goal', 'delegate', '--input', '-'], { goalId, intent: {
     operationId: 'dispatch-git-ticket', sourceMessageId: 'source-git-ticket', threadId: 'thread-git-ticket',
@@ -63,10 +91,28 @@ it('uses the original Git result as optional Ticket evidence and preserves expli
     ] },
   } })
   const deliveryHash = submitted.delegations[0].report.delivery.hash
-  await owner.call('reviewer', ['goal', 'plan', 'review', '--input', '-'], { goalId, review: {
-    operationId: 'review-git-ticket', nodeId, delegationOperationId: 'dispatch-git-ticket', deliveryHash, verdict: 'pass', note: '',
+  const reviewRequest = { goalId, review: {
+    operationId: 'review-git-ticket', nodeId, delegationOperationId: 'dispatch-git-ticket', deliveryHash, verdict: 'pass' as const, note: '',
     check: { command: check, result: 'Confirmed the commit content and its original Ticket trailer', evidence: [commitEvidence.href] },
-  } })
+  } }
+  const reviewArgs = ['goal', 'plan', 'review', '--input', '-']
+  const reviewed = await owner.call('reviewer', reviewArgs, reviewRequest)
+  const completion = reviewed.plan.reviews[0].completion
+  expect(completion.record).toMatchObject({ kind: 'completed', ticketId: nodeId, attemptId: 'dispatch-git-ticket',
+    executionHash: claimed.hash, deliveryHash, actor: { id: 'reviewer' } })
+  expect((await verify(completion)).code).toBe(0)
+  const changedResult = structuredClone(completion)
+  changedResult.record.deliveryHash = '0'.repeat(64)
+  expect((await verify(changedResult)).code).toBe(1)
+  expect((await owner.call('reviewer', reviewArgs, reviewRequest)).plan.reviews[0].completion).toEqual(completion)
+  await owner.call(null, assign, { goalId, nodeId: childId, expectedRevision: reviewed.plan.revision,
+    operationId: 'open-successor', assignment: { kind: 'open' } })
+  const ready = await owner.call('worker', ['goal', 'plan', 'active'])
+  const childClaim = await owner.call('worker', ['goal', 'plan', 'claim', '--goal', goalId, '--node', childId,
+    '--claim-token', ready.goals[0].nodes[0].claimToken, '--operation-id', 'claim-successor'])
+  const childProof = childClaim.plan.history.at(-1).claim.proof
+  expect(childProof.record.predecessors, 'claim proof must bind the actual upstream completion').toEqual([{ ticketId: nodeId, completionHash: completion.hash }])
+  expect((await verify(childProof)).code).toBe(0)
   const collected = await owner.call('supervisor', ['goal', 'collect', '--input', '-'], { goalId, operationId: 'dispatch-git-ticket',
     collection: { operationId: 'collect-git-ticket', replyMessageId: 'reply-git-ticket' },
   })
@@ -74,7 +120,8 @@ it('uses the original Git result as optional Ticket evidence and preserves expli
   expect(collected.grounding.acceptedAt).toBeNull()
   await owner.stop(); await owner.start()
   const historical = await owner.call('reviewer', ['goal', 'plan', '--goal', goalId])
-  expect(historical.ticketLinks).toEqual([ticketLink])
+  expect(historical.ticketLinks[1]).toBe(ticketLink)
+  expect(historical.plan.history.at(-1).claim.proof).toEqual(childProof)
   expect(historical.plan.reviews[0]).toMatchObject({ deliveryHash, reviewer: { id: 'reviewer' } })
   const accept = ['goal', 'accept', '--goal', goalId, '--revision', '1', '--submission', collected.grounding.submissionId, '--finish']
   expect((await owner.cli('reviewer', accept)).code).toBe(1)

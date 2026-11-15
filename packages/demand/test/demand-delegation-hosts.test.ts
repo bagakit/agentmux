@@ -1,3 +1,4 @@
+import { goalTickets } from './helpers/goal-tickets.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,6 +9,7 @@ import { demandExecutionReferences } from '../src/responsibility.js'
 import { projectGoalPlan } from '../src/goal-plan.js'
 
 let root: string, store: ReturnType<typeof openDemandStore>
+let tickets: ReturnType<typeof goalTickets>
 const criteria = [{ id: 'original', text: 'Deliver the original result' }]
 const intent = (worker = 'worker'): DemandDelegationIntent => ({ operationId: 'original-delegation', sourceMessageId: 'original-source',
   hostId: 'owner-host', workerHostId: 'worker-host', ownerAgentSessionId: 'owner', workerAgentSessionId: worker,
@@ -17,7 +19,7 @@ const node = (id: string, dependsOn: string[] = [], agentSessionId = 'worker') =
 const review = { operationId: 'original-review', nodeId: 'work', delegationOperationId: 'original-delegation', verdict: 'pass' as const,
   check: { command: 'pnpm test result', result: 'passed', evidence: ['artifacts/result.log'] }, note: '' }
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'goal-delegation-hosts-')); store = openDemandStore({ root })
+  root = await mkdtemp(join(tmpdir(), 'goal-delegation-hosts-')); tickets = goalTickets(root); store = tickets.store
   await store.create({ id: 'goal', title: 'One Goal', sessionIds: ['owner', 'worker'], assigneeSessionIds: ['owner', 'worker'], supervisorSessionId: 'owner' })
   await store.proposeAlignment('goal', { summary: 'Original target', criteria, openQuestions: [] })
 })
@@ -45,44 +47,44 @@ it('keeps old persisted records usable without rewriting their shared-Host ident
 })
 
 it('matches a plan executor against the exact worker Host, while the original owner stays on its Host', async () => {
-  await store.revisePlan('goal', { operationId: 'plan', expectedRevision: 0, alignmentRevision: 1, nodes: [node('work')] }, { kind: 'agent', id: 'owner', hostId: 'owner-host' })
-  const task = { ...intent(), planNodeId: 'work' }
+  await tickets.revise('goal', { operationId: 'plan', expectedRevision: 0, alignmentRevision: 1, nodes: [node('work')] }, { kind: 'agent', id: 'owner', hostId: 'owner-host' })
+  const task = { ...intent(), planNodeId: tickets.id('work') }
   await expect(store.prepareDelegation('goal', { ...task, workerHostId: 'owner-host' }, 'owner')).rejects.toThrow('names worker on worker-host')
   await store.prepareDelegation('goal', task, 'owner')
   expect((await store.inspectDelegation('goal', task.operationId))!.hostId).toBe('owner-host')
 })
 
 it('distinguishes the same Session id on two Hosts for delegation and independent review', async () => {
-  await store.revisePlan('goal', { operationId: 'plan', expectedRevision: 0, alignmentRevision: 1,
+  await tickets.revise('goal', { operationId: 'plan', expectedRevision: 0, alignmentRevision: 1,
     nodes: [node('work', [], 'owner'), node('next', ['work'], 'worker')] }, { kind: 'agent', id: 'owner', hostId: 'owner-host' })
-  const task = { ...intent('owner'), planNodeId: 'work' }
+  const task = { ...intent('owner'), planNodeId: tickets.id('work') }
   await store.prepareDelegation('goal', task, 'owner')
   await store.linkDelegation('goal', task.operationId, task.sourceMessageId, 'owner')
-  await store.submitDelegationReport('goal', task.operationId, { operationId: 'worker-report', replyMessageId: 'worker-reply', authorAgentSessionId: 'owner',
+  await tickets.submit('goal', task.operationId, { operationId: 'worker-report', replyMessageId: 'worker-reply', authorAgentSessionId: 'owner',
     grounding: { alignmentRevision: 1, summary: 'Delivered', checks: [{ criterionId: 'original', outcome: 'met', evidence: ['artifacts/result.log'], note: '' }] } }, 'owner')
-  await expect(store.reviewPlanNode('goal', review, { kind: 'agent', id: 'owner', hostId: 'worker-host' })).rejects.toThrow('cannot review its own work')
-  await store.reviewPlanNode('goal', review, { kind: 'agent', id: 'owner', hostId: 'owner-host' })
+  await expect(tickets.review('goal', review, { kind: 'agent', id: 'owner', hostId: 'worker-host' })).rejects.toThrow('cannot review its own work')
+  await tickets.review('goal', review, { kind: 'agent', id: 'owner', hostId: 'owner-host' })
   const saved = (await openDemandStore({ root }).get('goal'))!
   expect(saved.plan!.reviews[0]!.reviewer).toEqual({ kind: 'agent', id: 'owner', hostId: 'owner-host' })
   expect(projectGoalPlan(saved.plan!, saved.delegations!, criteria).nodes.map(item => item.state)).toEqual(['done', 'ready'])
 })
 
 it('retains verified Runtime references and rejects the worker under a second Host alias', async () => {
-  await store.revisePlan('goal', { operationId: 'plan', expectedRevision: 0, alignmentRevision: 1,
+  await tickets.revise('goal', { operationId: 'plan', expectedRevision: 0, alignmentRevision: 1,
     nodes: [node('work'), node('next', ['work'])] }, { kind: 'agent', id: 'owner', hostId: 'owner-host', runtimeId: 'owner-runtime' })
-  const task = { ...intent(), planNodeId: 'work' }, runtimeIdentity = { ownerRuntimeId: 'owner-runtime', workerRuntimeId: 'worker-runtime' }
+  const task = { ...intent(), planNodeId: tickets.id('work') }, runtimeIdentity = { ownerRuntimeId: 'owner-runtime', workerRuntimeId: 'worker-runtime' }
   expect(() => parseDemandDelegationIntent({ ...task, runtimeIdentity })).toThrow('unsupported')
   await store.prepareDelegation('goal', task, 'owner')
   await store.linkDelegation('goal', task.operationId, task.sourceMessageId, 'owner', runtimeIdentity)
   await expect(store.linkDelegation('goal', task.operationId, task.sourceMessageId, 'owner', { ...runtimeIdentity, workerRuntimeId: 'other-runtime' })).rejects.toThrow('Runtime identities differ')
-  await store.submitDelegationReport('goal', task.operationId, { operationId: 'worker-report', replyMessageId: 'worker-reply', authorAgentSessionId: 'worker',
+  await tickets.submit('goal', task.operationId, { operationId: 'worker-report', replyMessageId: 'worker-reply', authorAgentSessionId: 'worker',
     grounding: { alignmentRevision: 1, summary: 'Delivered', checks: [{ criterionId: 'original', outcome: 'met', evidence: ['artifacts/result.log'], note: '' }] } }, 'worker')
-  await expect(store.reviewPlanNode('goal', review, { kind: 'agent', id: 'worker', hostId: 'second-worker-alias', runtimeId: 'worker-runtime' })).rejects.toThrow('cannot review its own work')
-  await expect(store.reviewPlanNode('goal', review, { kind: 'agent', id: 'reviewer', hostId: 'review-host' })).rejects.toThrow('Runtime is not yet confirmed')
-  await store.reviewPlanNode('goal', review, { kind: 'agent', id: 'worker', hostId: 'other-host', runtimeId: 'independent-runtime' })
+  await expect(tickets.review('goal', review, { kind: 'agent', id: 'worker', hostId: 'second-worker-alias', runtimeId: 'worker-runtime' })).rejects.toThrow('cannot review its own work')
+  await expect(tickets.review('goal', review, { kind: 'agent', id: 'reviewer', hostId: 'review-host' })).rejects.toThrow('Runtime is not yet confirmed')
+  await tickets.review('goal', review, { kind: 'agent', id: 'worker', hostId: 'other-host', runtimeId: 'independent-runtime' })
   const saved = (await openDemandStore({ root }).get('goal'))!
   expect(saved.delegations![0]!.runtimeIdentity).toEqual(runtimeIdentity)
   expect(saved.plan!.reviews[0]!.reviewer.runtimeId).toBe('independent-runtime')
-  expect((await store.reviewPlanNode('goal', review, { kind: 'agent', id: 'worker', hostId: 'second-independent-alias', runtimeId: 'independent-runtime' })).replayed).toBe(true)
+  expect((await tickets.review('goal', review, { kind: 'agent', id: 'worker', hostId: 'second-independent-alias', runtimeId: 'independent-runtime' })).replayed).toBe(true)
   expect(projectGoalPlan(saved.plan!, saved.delegations!, criteria).nodes.map(item => item.state)).toEqual(['done', 'ready'])
 })

@@ -12,9 +12,9 @@ async function fixture() {
   const node = { id: 'original-node', title: 'Original node', outcome: 'Deliver the original result', dependsOn: [], criterionIds: ['original'],
     check: 'node --test checks/original.test.mjs', executor: { hostId: 'local', agentSessionId: 'worker-a' } }
   const revision = { operationId: 'plan-1', expectedRevision: 0, alignmentRevision: 1, nodes: [node] }
-  await owner.call('supervisor', ['goal', 'plan', 'revise', '--input', '-'], { goalId, revision })
+  const published = await owner.call('supervisor', ['goal', 'plan', 'revise', '--input', '-'], { goalId, revision })
   const read = () => owner.call('supervisor', ['goal', 'plan', '--goal', goalId])
-  return { owner, goalId, node, revision, read }
+  return { owner, goalId, node: published.plan.nodes[0] as typeof node, revision, read }
 }
 
 it('public CLI revision replay compares the full original input and rejects newly written invalid criteria without losing the current plan', async () => {

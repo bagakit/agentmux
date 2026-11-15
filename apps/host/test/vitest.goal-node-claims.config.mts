@@ -2,13 +2,14 @@ import { defineConfig } from 'vitest/config'
 import crossHost from './vitest.goal-cross-host.config.mts'
 
 const changes = {
+  'trust-altered-ticket': { path: 'packages/demand/src/goal-ticket-crypto.ts', from: '!verify(null, original, key, signature)', to: 'false' },
+  'omit-claim-completion': { path: 'packages/demand/src/demand-store.ts', from: 'predecessors: freezeGoalTicketDependencies(signer, id, plan, basis.predecessors)', to: 'predecessors: []' },
   'skip-delivery-review-match': { path: 'packages/demand/src/demand-store.ts', from: 'if (projection.delegation.report?.delivery?.hash !== review.deliveryHash)', to: 'if (false)' },
   'omit-delivery-author': { path: 'packages/demand/src/demand-store.ts', from: 'scope.authorRuntimeId, report.authorAgentSessionId,', to: '' },
   'omit-delivery-report': { path: 'packages/demand/src/demand-store.ts', from: 'report.replyMessageId, report.grounding])).digest', to: 'report.replyMessageId])).digest' },
   'active-full-snapshot': { path: 'packages/demand/src/demand-store.ts', from: 'if (generation === null) return []', to: 'await this.readConfirmedSnapshot(); if (generation === null) return []' },
   'allow-related': { path: 'apps/host/src/goal-plan-assignment.ts', from: "if (!role?.assignee) denied('A related Session has no work role. Claiming requires this Goal’s current Supervisor or assignee.')",
     to: "if (!role?.assignee) return" },
-  'wrong-goal-token': { path: 'packages/demand/src/goal-plan.ts', from: 'scope.runtimeId, scope.namespace, scope.goalId, openingOperationId', to: 'scope.runtimeId, scope.namespace, openingOperationId' },
   'restore-old-token': { path: 'packages/demand/src/goal-plan.ts', from: 'node.check, changedAt.get(node.id), alignmentRevision', to: 'node.check, alignmentRevision' },
   'whole-plan-token': { path: 'packages/demand/src/goal-plan.ts', from: 'goalPlanClaimToken(claimScope, claimOpeningOperationId, claimBasis)', to: 'goalPlanClaimToken(claimScope, claimOpeningOperationId, claimBasis + plan.revision)' },
   'drop-predecessors': { path: 'packages/core/src/goal-delegation-source.ts', from: '...(saved.predecessors ? { predecessors: saved.predecessors } : {})', to: '...{}' },
@@ -25,4 +26,4 @@ export default defineConfig({ ...crossHost, plugins: [...(crossHost.plugins ?? [
     process.stderr.write('Goal claim mutation loaded: ' + change.path + '\n')
     return source.replace(change.from, change.to)
   } }], test: { ...crossHost.test, testTimeout: 120_000, include: ['apps/host/test/goal-claim-role.test.ts', 'apps/host/test/goal-node-claims.test.ts',
-      'apps/host/test/goal-active-cost.test.ts', 'apps/host/test/goal-ticket-journeys.test.ts', 'apps/host/test/goal-plan-revision-product.test.ts', 'packages/demand/test/goal-plan-revision.test.ts', 'packages/demand/test/goal-plan.test.ts'] } })
+      'apps/host/test/goal-active-cost.test.ts', 'apps/host/test/goal-ticket-journeys.test.ts', 'apps/host/test/goal-plan-revision-product.test.ts', 'packages/demand/test/goal-plan-revision.test.ts', 'packages/demand/test/goal-plan.test.ts', 'packages/demand/test/demand-delegation-hosts.test.ts'] } })

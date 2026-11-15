@@ -17,15 +17,16 @@ it('reads only current work at the original owner after a cold restart and keeps
     summary: 'Read only the relevant work', criteria: [{ id: 'work', text: 'A file exists' }], openQuestions: [],
   })])
   const node = { id: 'open', title: 'Make the file', outcome: 'A delivered file', check: 'Read the file', dependsOn: [], criterionIds: ['work'], executor: null }
-  await owner.call('supervisor', ['goal', 'plan', 'revise', '--input', '-'], { goalId, revision: { operationId: 'define-work', expectedRevision: 0, alignmentRevision: 1,
+  const published = await owner.call('supervisor', ['goal', 'plan', 'revise', '--input', '-'], { goalId, revision: { operationId: 'define-work', expectedRevision: 0, alignmentRevision: 1,
     nodes: [node, { ...node, id: 'closed', cancelled: true }, { ...node, id: 'waiting', dependsOn: [node.id] }] } })
+  const id = published.plan.nodes[0].id
   const opened = await owner.call('supervisor', ['goal', 'plan', 'assignment', '--input', '-'], {
-    goalId, nodeId: node.id, expectedRevision: 1, operationId: 'open-work', assignment: { kind: 'open' },
+    goalId, nodeId: id, expectedRevision: 1, operationId: 'open-work', assignment: { kind: 'open' },
   })
   const working = ['goal', 'plan', 'active']
   const initial = await owner.call('worker', working)
   expect(initial.goals).toHaveLength(1)
-  expect(initial.goals[0].nodes.map((item: { nodeId: string }) => item.nodeId)).toEqual([node.id])
+  expect(initial.goals[0].nodes.map((item: { nodeId: string }) => item.nodeId)).toEqual([id])
   const claimToken = opened.planState.nodes[0].claimToken
   expect(initial.goals[0].nodes[0].claimToken).toBe(claimToken)
   const original = new DemandStore({ root: join(owner.original.root, 'demands') })
@@ -43,10 +44,10 @@ it('reads only current work at the original owner after a cold restart and keeps
     expect(await owner.call('worker', working)).toEqual(initial)
     expect(await owner.call('observer', working)).toMatchObject({ goals: [] })
     const managed = await owner.call(null, [...working, '--goal', goalId])
-    expect(managed.goals[0].nodes).toEqual([{ nodeId: node.id, title: node.title, state: 'ready', unknown: [], predecessors: [] }])
+    expect(managed.goals[0].nodes).toEqual([{ nodeId: id, title: node.title, state: 'ready', unknown: [], predecessors: [] }])
     expect(fullRead, 'active reads must skip the original full snapshot').not.toHaveBeenCalled()
   } finally { fullRead.mockRestore() }
-  await owner.call('worker', ['goal', 'plan', 'claim', '--goal', goalId, '--node', node.id, '--claim-token', claimToken, '--operation-id', 'claim-work'])
+  await owner.call('worker', ['goal', 'plan', 'claim', '--goal', goalId, '--node', id, '--claim-token', claimToken, '--operation-id', 'claim-work'])
   expect(await owner.call('worker', working)).toMatchObject({ goals: [] })
   expect((await owner.call(null, ['goal', 'plan', '--goal', goalId])).plan.nodes).toHaveLength(3)
   expect((await owner.call(null, ['goal', 'inspect', '--goal', 'archive-a'])).goal.id).toBe('archive-a')

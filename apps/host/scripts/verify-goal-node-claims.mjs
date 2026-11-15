@@ -16,7 +16,6 @@ const runs = deliveryProof ? [
   { label: 'baseline' },
   { label: 'allow-related', title: 'saves one authorized claimant', failure: 'a related reader cannot claim an open node', source: 'apps/host/src/goal-plan-assignment.ts' },
   { label: 'lose-executor', title: 'saves one authorized claimant', failure: 'exactly one claim must be confirmed', source: 'packages/demand/src/demand-store.ts' },
-  { label: 'wrong-goal-token', title: 'saves one authorized claimant', failure: 'a claim cannot use another Goal’s token', source: 'packages/demand/src/goal-plan.ts' },
   { label: 'restore-old-token', title: 'saves one authorized claimant', failure: 'a reversed check revision does not revive the original claim', source: 'packages/demand/src/goal-plan.ts' },
   { label: 'whole-plan-token', title: 'claims independent successors', failure: 'independent claims must succeed from the same read', source: 'packages/demand/src/goal-plan.ts' },
   { label: 'drop-predecessors', title: 'claims independent successors', failure: 'The original Core source names different predecessor receipts', source: 'packages/core/src/goal-delegation-source.ts' },
