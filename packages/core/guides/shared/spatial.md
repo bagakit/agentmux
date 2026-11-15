@@ -70,7 +70,10 @@ Use the public @agentmux/core/sharing parseAmuxObjectLink helper to decode its U
 without trimming or changing the original ID. Supported kinds are agent, region, tab, space, zone, capsule, mote, host and goal.
 A Goal link retains its original Runtime and Goal-store namespace. Read `goal --skill`
 for the exact `goal focus --goal ID --runtime ID --namespace ID --section plan` reading path;
-opening the link never creates a plan or executes work.
+opening the link never creates a plan or executes work. For a Ticket use
+\`goal focus --link URL\` with the exact copied address. A short \`amux://goal/ID#T42\`
+requires proof of the original Goal binding. Keep the owner coordinates when they
+appear in the URI.
 For amux://agent/<SID>, use agent inspect --session SID or agent send --to-session SID --text TEXT.
 For spatial kinds, use space inspect with --region, --tab, --space or --zone and the decoded ID.
 For a copied amux://mote/LINK_ID?runtime=RUNTIME, keep the entire URI and use

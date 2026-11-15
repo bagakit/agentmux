@@ -48,6 +48,10 @@ newest unreviewed attempt. Clearing the executor does not. A passed node stays d
 The previous attempt and its thread remain readable. For input and revision rules use
 `goal plan revise --help`.
 
+Read \`goal plan\` for \`plan.ticketNodes\` and \`ticketLinks\`. The entry at position
+one is T1. Use \`goal focus --link URL\` to open the exact Ticket. If your workflow
+uses Git, the published URL is the value for a \`Goal-Node\` trailer.
+
 ### Reconcile before advancing
 
 - `dispatch-link` unknown means read the original Core delivery receipt. Keep the same
