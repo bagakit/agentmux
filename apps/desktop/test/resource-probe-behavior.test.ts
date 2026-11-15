@@ -121,8 +121,8 @@ const READY_LAUNCHER_OWNERS = {
   fileWatchers: 0,
   runtimeSubscriptions: 4,
   terminalViews: 1,
-  terminalAddons: 3,
-  terminalListeners: 7,
+  terminalAddons: 1,
+  terminalListeners: 10,
   sessionAttachmentOwners: 1,
   sessionAttachmentLeases: 1
 }
@@ -130,8 +130,8 @@ const READY_LAUNCHER_OWNERS = {
 /** One mounted Terminal view's worth of owners, added on navigation / new Tab, removed on release. */
 const TERMINAL_VIEW_BUNDLE = {
   terminalViews: 1,
-  terminalAddons: 3,
-  terminalListeners: 7,
+  terminalAddons: 1,
+  terminalListeners: 10,
   sessionAttachmentOwners: 1,
   sessionAttachmentLeases: 1
 }
@@ -146,15 +146,20 @@ const METRICS_CALLS_PER_SAMPLE = 5
  */
 const EXPECTED_SAMPLE_COUNT = 15
 
-type FailurePoint = 'none' | 'terminal-write'
+type FailurePoint = 'none' | 'terminal-write' | 'cold-observation-failed' | 'loaded-observation-failed' |
+  'editor-owner-missing-next-cycle' | 'release-observation-failed' | 'model-retained-after-close' | 'stop-receipt-missing'
 
-function createWorld(options: { plan: readonly number[]; failAt: FailurePoint; rejectStopIds?: readonly string[] }) {
+function createWorld(options: { plan: readonly number[]; failAt: FailurePoint; rejectStopIds?: readonly string[]; webgl?: boolean }) {
   const owners: Record<string, number> = { ...READY_LAUNCHER_OWNERS }
+  const visibleWebgl = options.webgl ? 1 : 0
+  owners.terminalAddons += visibleWebgl
   const launcher: Record<WorkspaceKey, string | null> = { a: null, b: null, c: null }
   const running = new Map<string, Record<string, unknown>>()
   const xterm: Record<WorkspaceKey, boolean> = { a: false, b: false, c: false }
   const monaco: Record<WorkspaceKey, boolean> = { a: false, b: false, c: false }
   const stoppedRunIds: string[] = []
+  let openFile: { tabId: string; regionId: string } | null = null
+  let fileOpenCount = 0
   let visible: WorkspaceKey = 'a'
   let metricsCalls = 0
   let sessionCounter = 0
@@ -209,7 +214,7 @@ function createWorld(options: { plan: readonly number[]; failAt: FailurePoint; r
       return
     }
     if (source.includes(openBrowserSelector)) {
-      adjust(TERMINAL_VIEW_BUNDLE, -1)
+      adjust({ ...TERMINAL_VIEW_BUNDLE, terminalAddons: TERMINAL_VIEW_BUNDLE.terminalAddons + visibleWebgl }, -1)
       owners.browserWebContents += 1
       return
     }
@@ -218,13 +223,15 @@ function createWorld(options: { plan: readonly number[]; failAt: FailurePoint; r
       adjust(TERMINAL_VIEW_BUNDLE, 1)
       return
     }
-    if (source.includes('aria-label="Close resource-probe.ts"')) {
+    if (source.includes('.workbench-tab__close') && openFile && source.includes(openFile.tabId)) {
       monaco[key] = false
-      adjust({ monacoEditors: 1, monacoModels: 1, documents: 1, fileWatchers: 1 }, -1)
+      openFile = null
+      adjust({ monacoEditors: 1, monacoModels: options.failAt === 'model-retained-after-close' ? 0 : 1, documents: 1, fileWatchers: 1 }, -1)
+      owners.terminalAddons += visibleWebgl
       return
     }
     if (source.includes('aria-label="Close New Tab"')) {
-      adjust(TERMINAL_VIEW_BUNDLE, 1)
+      adjust({ ...TERMINAL_VIEW_BUNDLE, terminalAddons: TERMINAL_VIEW_BUNDLE.terminalAddons + visibleWebgl }, 1)
       owners.browserWebContents -= 1
       return
     }
@@ -235,8 +242,12 @@ function createWorld(options: { plan: readonly number[]; failAt: FailurePoint; r
       return
     }
     if (source.includes('data-tree-path')) {
+      fileOpenCount++
+      openFile = { tabId: `opaque-placement-${fileOpenCount}`, regionId: `fixture-region-${fileOpenCount}` }
       monaco[key] = true
-      adjust({ monacoEditors: 1, monacoModels: 1, documents: 1, fileWatchers: 1 }, 1)
+      const editors = options.failAt === 'editor-owner-missing-next-cycle' && fileOpenCount > 1 ? 0 : 1
+      adjust({ monacoEditors: editors, monacoModels: 1, documents: 1, fileWatchers: 1 }, 1)
+      owners.terminalAddons -= visibleWebgl
     }
   }
 
@@ -245,9 +256,19 @@ function createWorld(options: { plan: readonly number[]; failAt: FailurePoint; r
     // the already-stripped shape. Including `observed` here makes the probe reject it as an
     // invalid owner count.
     if (source.includes('resource-owner-counts')) {
+      if (source.includes('event.detail.occurrence')) {
+        expect(source).toContain(`"workspaceId":"${WORKSPACES.c.id}"`)
+        expect(source).toContain('"path":"resource-probe.ts"')
+        return openFile
+      }
+      const registryPresent = fileOpenCount > 0 || options.failAt === 'cold-observation-failed'
+      const missingEditor = fileOpenCount === 0 || options.failAt === 'loaded-observation-failed' ||
+        options.failAt === 'release-observation-failed' && openFile === null
       return {
-        monacoEditors: owners.monacoEditors,
-        monacoModels: owners.monacoModels,
+        monacoSourceRequested: fileOpenCount > 0,
+        monacoRegistryPresent: registryPresent,
+        monacoEditors: missingEditor ? null : owners.monacoEditors,
+        monacoModels: fileOpenCount === 0 ? null : owners.monacoModels,
         documents: owners.documents,
         runtimeSubscriptions: owners.runtimeSubscriptions,
         terminalViews: owners.terminalViews,
@@ -285,9 +306,8 @@ function createWorld(options: { plan: readonly number[]; failAt: FailurePoint; r
       const key = workspaceOf(source)
       const plainSource = plain(source)
       if (plainSource.includes('.xterm')) return xterm[key]
-      if (plainSource.includes('.monaco-editor')) return monaco[key]
+      if (plainSource.includes('.monaco-editor')) return monaco[key] && !!openFile && plainSource.includes(openFile.regionId)
       if (plainSource.includes('data-visible=')) return visible === key
-      if (plainSource.includes('data-workbench-tab-id=') && plainSource.includes('file:')) return monaco[key]
       if (plainSource.includes('data-tree-path')) return true
       if (plainSource.includes(DESKTOP_SESSION_ATTRIBUTE)) {
         const match = plainSource.match(new RegExp(`${DESKTOP_SESSION_ATTRIBUTE}="([^"]+)"`))
@@ -340,6 +360,10 @@ function createWorld(options: { plan: readonly number[]; failAt: FailurePoint; r
         // with a fresh ready launcher, so those are owner-neutral.
         if (stopCount === 1) adjust(TERMINAL_VIEW_BUNDLE, -1)
         else spawnLauncher('c')
+        if (options.failAt === 'stop-receipt-missing') return undefined
+        return { action: 'terminal-stop', phase: 'settled', outcome: 'applied',
+          target: { hostId: 'local', run: { runId: control.runId } },
+          acknowledgement: { kind: 'stop', runId: control.runId, state: 'exited' } }
       }
     },
     seed: () => spawnLauncher('a')
@@ -371,6 +395,7 @@ async function driveProbe(options: {
   plan: readonly number[]
   failAt?: FailurePoint
   rejectStopIds?: readonly string[]
+  webgl?: boolean
 }): Promise<Drive> {
   const directory = await mkdtemp(join(tmpdir(), 'agentmux-resource-probe-behavior-'))
   temporaryRoots.push(directory)
@@ -383,7 +408,8 @@ async function driveProbe(options: {
   const world = createWorld({
     plan: options.plan,
     failAt: options.failAt ?? 'none',
-    rejectStopIds: options.rejectStopIds
+    rejectStopIds: options.rejectStopIds,
+    webgl: options.webgl
   })
   hoisted.holder.world = world
   world.seed()
@@ -447,6 +473,30 @@ async function driveProbe(options: {
 const ASCENDING_PLAN = Array.from({ length: EXPECTED_SAMPLE_COUNT }, (_, index) => 400_000 + index * 10_000)
 
 describe('desktop resource probe behaviour', () => {
+  it.each([false, true])('records cold Monaco and verifies each File occurrence with WebGL %s', async webgl => {
+    const drive = await driveProbe({ plan: ASCENDING_PLAN, webgl })
+    expect(drive.error).toBeNull()
+    expect(drive.report?.phases.idle.owners).toMatchObject({ monacoState: 'cold', monacoEditors: null, monacoModels: null })
+    expect(drive.report?.phases.monaco.owners).toMatchObject({ monacoState: 'observed', monacoEditors: 1, monacoModels: 1 })
+    expect(drive.report?.releaseCycles).toHaveLength(7)
+    for (const phase of [...drive.report?.releaseCycles ?? [], drive.report?.phases.browserReleased]) {
+      expect(phase.owners).toMatchObject({ monacoState: 'observed', monacoEditors: 0, monacoModels: 0, documents: 0, fileWatchers: 0 })
+    }
+  })
+
+  it.each([
+    ['cold-observation-failed', 'fresh ready reusable Terminal launcher'],
+    ['loaded-observation-failed', 'initial Monaco owner coverage is unconfirmed'],
+    ['editor-owner-missing-next-cycle', 'cycle 1 Monaco owner coverage is unconfirmed'],
+    ['release-observation-failed', 'initial File owner release did not converge'],
+    ['model-retained-after-close', 'initial File owner release did not converge'],
+    ['stop-receipt-missing', 'hidden Workspace C Terminal did not confirm the original Native Terminal Stop']
+  ] as const)('fails at the original boundary for %s', async (failAt, expected) => {
+    const drive = await driveProbe({ plan: ASCENDING_PLAN, failAt })
+    expect(drive.resolved).toBe(false)
+    expect(drive.report?.error).toContain(expected)
+  })
+
   it('reports phaseOrder in the order the phases were actually sampled', async () => {
     const drive = await driveProbe({ plan: ASCENDING_PLAN })
 
