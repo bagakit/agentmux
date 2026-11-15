@@ -1803,7 +1803,8 @@ export type AgentMuxDesktopApi = {
     chooseLocalFolder(document?: WorkbenchWindowDocument): Promise<WorkspaceRecord | null>
     /** Pick a replacement directory while preserving the existing Workspace identity. */
     rebindLocalFolder(workspaceId: string, document?: WorkbenchWindowDocument): Promise<WorkspaceRecord | null>
-    add(input: CreateWorkspaceInput, source?: import('./source-files').SourceFileReadLocation): Promise<WorkspaceRecord>
+    add(input: CreateWorkspaceInput): Promise<WorkspaceRecord>
+    addFromFile(location: import('./source-files').FileActionLocation, expected: CreateWorkspaceInput): Promise<WorkspaceRecord>
     listBranches(workspaceId: string): Promise<WorkspaceBranchesSnapshot>
     openBranch(workspaceId: string, branch: string): Promise<WorkspaceSelectionResult>
     createWorktreeForBranch(input: CreateWorktreeForBranchInput): Promise<WorkspaceSelectionResult>
@@ -1876,8 +1877,8 @@ export type AgentMuxDesktopApi = {
     unobserve(workspaceId: string, path: string): Promise<void>
     onInvalidated(listener: (event: WorkspaceFileInvalidated) => void): () => void
     /** Open a local Workspace path with the host operating system's default handler. */
-    openSystem(workspaceId: string, path: string): Promise<void>
-    reveal(workspaceId: string, path: string, source?: import('./source-files').SourceFileReadLocation): Promise<void>
+    openSystem(location: import('./source-files').FileActionLocation): Promise<void>
+    reveal(location: import('./source-files').FileActionLocation): Promise<void>
   }
   moteChat: {
     call<M extends import('@agentmux/core/mote-chat').MoteChatMethod>(method: M, params: import('@agentmux/core/mote-chat').MoteChatParamsMap[M], target?: ConnectionHostingTarget): Promise<import('@agentmux/core/mote-chat').MoteChatResultMap[M]>

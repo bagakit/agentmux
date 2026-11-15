@@ -721,7 +721,7 @@ function TerminalViewOwner({
       void openTerminalFileLink({
         link: { ...match, path },
         local: !sessionSource && workspaceId !== undefined && context.placement?.resource.hostId === 'local',
-        openSystem: file => api.files.openSystem(workspaceId!, file),
+        openSystem: file => api.files.openSystem({ kind: 'workspace', workspaceId: workspaceId!, path: file }),
         openFile: async link => {
           const origin = { ...displayOrigin, sessionId: displayOrigin.sessionId ?? session.id }
           const state = useAppStore.getState()
@@ -2246,8 +2246,8 @@ function TerminalViewOwner({
       void action().catch(reportError)
     }
     return terminalFileMenuActions({ link, local: !sessionSource && context.placement?.resource.hostId === 'local',
-      onReveal: path => runAction(() => api.files.reveal(workspaceId, path)),
-      onOpenSystem: path => runAction(() => api.files.openSystem(workspaceId, path)) })
+      onReveal: path => runAction(() => api.files.reveal({ kind: 'workspace', workspaceId, path })),
+      onOpenSystem: path => runAction(() => api.files.openSystem({ kind: 'workspace', workspaceId, path })) })
   }
 
   function resourcePathLink(link: TerminalPathLink | null): TerminalPathLink | null {

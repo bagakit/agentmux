@@ -130,6 +130,7 @@ import { canStopSessionRun, sessionTabTooltip, surfaceTabTooltip } from '../lib/
 import { addressableAgentSessionId, copyableAgentSessionIdForTab } from '../lib/tab-control-handoff'
 import { handleTopicRenameKeyDown } from '../lib/topic-rename'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
+import { fileActionLocation } from '../../../shared/source-files'
 import { fileViewAbsolutePath, fileViewHost, fileViewReadSource, revealFileInFileManager } from '../lib/file-view-path'
 import { useAppStore } from '../store'
 import type { SessionStopOutcome } from '../lib/session-stop-intent'
@@ -247,12 +248,13 @@ function SortableWorkbenchTab({
   const displayName = workbenchTabDisplayName(tab, sessions, agentNames, timelines, sessionNameMetadata, noteName)
   const copyableAgentSessionId = copyableAgentSessionIdForTab(tab)
   const source = useAppStore(state => surface.kind === 'file' ? fileViewReadSource(state, tab.id, surface) : undefined)
-  const fileHost = surface.kind === 'file' ? fileViewHost(source, config?.workspaces.find(item => item.id === surface.workspaceId)?.hostId) : undefined
-  const fileActions = surface.kind === 'file' && (source || fileHost === 'local') ? {
-    path: source?.query.path ?? surface.path,
-    absolutePath: () => fileViewAbsolutePath(useAppStore.getState(), surface, source),
+  const location = surface.kind === 'file' ? fileActionLocation(surface.workspaceId, surface.path, source) : undefined
+  const fileHost = location && surface.kind === 'file' ? fileViewHost(location, config?.workspaces.find(item => item.id === surface.workspaceId)?.hostId) : undefined
+  const fileActions = location && (location.kind === 'source' || fileHost === 'local') ? {
+    path: location.kind === 'source' ? location.source.query.path : location.path,
+    absolutePath: () => fileViewAbsolutePath(useAppStore.getState(), location),
     revealLabel: revealInFileManagerLabel(),
-    ...(fileHost === 'local' ? { onReveal: () => revealFileInFileManager(surface.workspaceId, surface.path, reportError, source) } : {}),
+    ...(fileHost === 'local' ? { onReveal: () => revealFileInFileManager(location, reportError) } : {}),
     home: fileHost === 'local' ? localHome : '',
     copyPathsAsAbsolute: config?.copyPathsAsAbsolute
   } : undefined

@@ -21,7 +21,7 @@ import {
 } from '@dnd-kit/core'
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from 'react'
 import { createPortal } from 'react-dom'
-import { originalNativeFileResource, sourceFileNativeHost, sourceTreeFileLocation } from '../../../shared/source-files'
+import { fileActionLocation, originalNativeFileResource, sourceFileNativeHost, sourceTreeFileLocation } from '../../../shared/source-files'
 import { isFolderWorkspace, isScratchWorkspaceId } from '../../../shared/contracts'
 import { scratchTopicIdFromDirectoryName, scratchWorkspaceFilePath } from '@agentmux/host/mote-model'
 import { api } from '../lib/api'
@@ -71,7 +71,6 @@ import {
 } from './file-tree/useWorkspaceFileTree'
 import { FileTreeContextMenu } from './file-tree/FileTreeContextMenu'
 import { isMacPlatform } from '../lib/host-platform'
-import { createDirectoryProjectInput } from '../lib/open-directory-as-project'
 import {
   createFileExplorerMoveIndex,
   fileExplorerDropDirectory,
@@ -825,6 +824,10 @@ export function FileExplorer({
     ].filter(Boolean).join(' ')
   }
 
+  function locationForEntry(workspaceId: string, path: string) {
+    return fileActionLocation(workspaceId, path, locator && sourceTreeFileLocation(locator, path))
+  }
+
   async function nativeDirectoryPath(path: string): Promise<string> {
     tree.assertCurrent()
     if (locator) {
@@ -876,20 +879,14 @@ export function FileExplorer({
     if (!workspace || !node.isDirectory) return
     try {
       tree.assertCurrent()
-      const projectInput = createDirectoryProjectInput({
-        workspace,
-        relativePath: node.path,
-        name: node.name,
-        isDirectory: node.isDirectory
-      })
-      if (!projectInput) return
       const path = confirmedPhysicalPath(node.path)
-      const expectedHost = useAppStore.getState().config?.hosts.find(host => host.id === fileHostId)
-      if (!fileHostId || locator && !expectedHost) throw new Error('This Source uses another Host with no configured project connection. Open the folder on its original Host.')
+      const requiresConnection = !!locator || fileHostId !== 'local'
+      const expectedHost = requiresConnection ? useAppStore.getState().config?.hosts.find(host => host.id === fileHostId) : undefined
+      if (!fileHostId || requiresConnection && !expectedHost) throw new Error('This Source uses another Host with no configured project connection. Open the folder on its original Host.')
       // Main verifies the Source and its carrier at registration, then publishes the committed Workspace.
-      const created = locator
-        ? await api.workspaces.add({ ...projectInput, hostId: fileHostId, path, ...(expectedHost && { expectedHost }) }, sourceTreeFileLocation(locator, node.path))
-        : await api.workspaces.add({ ...projectInput, hostId: fileHostId, path })
+      const created = await api.workspaces.addFromFile(locationForEntry(workspace.id, node.path), {
+        hostId: fileHostId, path, name: node.name, ...(expectedHost && { expectedHost })
+      })
       await useAppStore.getState().selectWorkspace(created.id)
     } catch (error) {
       reportError(error)
@@ -924,8 +921,7 @@ export function FileExplorer({
     if (!workspaceId || fileHostId !== 'local') return
     try {
       tree.assertCurrent()
-      if (locator) await api.files.reveal(workspaceId, node.path, sourceTreeFileLocation(locator, node.path))
-      else await api.files.reveal(workspaceId, node.path)
+      await api.files.reveal(locationForEntry(workspaceId, node.path))
     } catch (error) {
       reportError(error)
     }

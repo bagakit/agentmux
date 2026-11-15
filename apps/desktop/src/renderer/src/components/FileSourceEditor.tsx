@@ -1,3 +1,4 @@
+import { fileActionLocation } from '../../../shared/source-files'
 import { fileViewAbsolutePath, fileViewHost, fileViewReadSource } from '../lib/file-view-path'
 import '../monaco'
 import { setNoteComposition } from '../lib/note-live-merge'
@@ -215,14 +216,14 @@ export function FileSourceEditor({ tabId, surface, visible = true, viewState }: 
           const doc = state.documents[currentKey]
           if (!doc) return
           const workspace = state.config?.workspaces.find((item) => item.id === surface.workspaceId)
-          const source = fileViewReadSource(state, tabId, surface)
+          const location = fileActionLocation(surface.workspaceId, surface.path, fileViewReadSource(state, tabId, surface))
           const selection = ed.getSelection()
           const model = ed.getModel()
           const startLine = selection?.startLineNumber ?? ed.getPosition()?.lineNumber ?? 1
           const endLine = selection?.endLineNumber ?? startLine
           const input: CopyActionInput = {
-            relativePath: source?.query.path ?? surface.path,
-            absolutePath: () => fileViewAbsolutePath(state, surface, source),
+            relativePath: location.kind === 'source' ? location.source.query.path : location.path,
+            absolutePath: () => fileViewAbsolutePath(state, location),
             startLine,
             endLine,
             selectedText: selection && model ? model.getValueInRange(selection) : '',
@@ -233,7 +234,7 @@ export function FileSourceEditor({ tabId, surface, visible = true, viewState }: 
           const built = action.buildText(input)
           if (built === null) return
           const text =
-            action.id === 'agentmux.copyAbsolutePath' && fileViewHost(source, workspace?.hostId) === 'local'
+            action.id === 'agentmux.copyAbsolutePath' && fileViewHost(location, workspace?.hostId) === 'local'
               ? applyCopyPathStyle(built, { home: state.localHome, copyPathsAsAbsolute: state.config?.copyPathsAsAbsolute })
               : built
           void copyTextToClipboard(text, state.reportError)

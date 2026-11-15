@@ -155,7 +155,7 @@ export function WorkspaceRowContextMenu({
     removable: onRemove !== undefined,
     copyText: (text) => void copyTextToClipboard(text, reportError),
     reveal: () => {
-      void api.files.reveal(workspaceId, '').catch(reportError)
+      void api.files.reveal({ kind: 'workspace', workspaceId, path: '' }).catch(reportError)
     },
     openTerminal: () => {
       // 在终端打开这一行：先选中它，layout 便就绪，再走与 FileExplorer 完全一致的 launchTerminal。

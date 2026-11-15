@@ -804,7 +804,7 @@ export class WorkspaceFiles {
    * missing artifact in the OS would otherwise produce a platform-specific no-op. System opens
    * retain real-root confinement (unlike the Explorer's explicitly followed read-only links).
    */
-  async localPathForSystemOpen(workspace: WorkspaceRecord, requestedPath: string): Promise<string> {
+  async localPathForSystemOpen(workspace: Pick<WorkspaceRecord, 'hostId' | 'id' | 'path'>, requestedPath: string): Promise<string> {
     const host = this.hostFor(workspace.hostId)
     if (host.kind !== 'local') throw new Error('Open with the system is available only for local paths')
     const resolved = await localExistingPathWithin(workspace, requestedPath)

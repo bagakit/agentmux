@@ -41,7 +41,7 @@ export async function openSessionFileLink(origin: OpenHttpLinkOrigin, context: S
   const workspaceId = context.workspaceId ?? context.project?.workspaceId
   const workspace = state.config?.workspaces.find(item => item.id === workspaceId && item.hostId === placement.resource.hostId && item.path === placement.resource.path)
   if (!workspace) throw new Error('The original file Workspace is unavailable. The Agent keeps running.')
-  if (destination === 'system') { await api.files.openSystem(workspace.id, path); return }
+  if (destination === 'system') { await api.files.openSystem({ kind: 'workspace', workspaceId: workspace.id, path }); return }
   const topics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspace) ?? []
   const catalog = spatialCatalog(state, topics)
   let actual: FileOpenResult | undefined

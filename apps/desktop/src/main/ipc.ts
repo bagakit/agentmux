@@ -125,7 +125,7 @@ import {AgentMuxSpatialStateStore,spatialCatalog} from '@agentmux/core/spatial-s
 import { displayLabel } from '@agentmux/core/spatial-graph'
 import { NameChangeAudit, nameChangeRequests, desktopNameContext, unknownNameContext } from './name-change-audit.js'
 import type { AgentMuxNameContext } from '@agentmux/core/control'
-import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
+import { SCRATCH_WORKSPACE_ID, scratchWorkspaceFilePath } from '@agentmux/host/mote-model'
 import { sessionReopenResult } from '../shared/session-reopen-result.js'
 import { sessionLaunchResult } from '../shared/session-launch-result.js'
 import { sessionInputWriteResult, sessionInputOperationResult } from '../shared/session-input-result.js'
@@ -323,7 +323,7 @@ import { desktopBusinessSocketPath } from './desktop-host.js'
 import { ScratchTopics } from './scratch-topics.js'
 import type { MoteAvatarInput, MoteAvatarRef } from '../shared/mote-avatars.js'
 import { configWithRuntimeBindings, confirmRuntimeConfig, saveRuntimeConfig } from './runtime-config-transaction.js'
-import { originalNativeFileResource, sourceFileNativeHost, type SourceFileReadLocation } from '../shared/source-files.js'
+import { originalNativeFileResource, sourceFileNativeHost, type FileActionLocation } from '../shared/source-files.js'
 import { WorkspaceFiles, workspaceFileObserverCount, LOCAL_WORKER_SOURCE } from './workspace-files.js'
 import { NoteFileWriter } from '@agentmux/host/note-file-writer'
 
@@ -1165,8 +1165,18 @@ export async function registerIpc(args: {
     })
     return result.workspace
   })
-  handle('workspaces:add', async (input: CreateWorkspaceInput, source?: SourceFileReadLocation) => {
-    if (!source) return (await registerWorkspace(input, configOwner, id => args.runtime.executionHost(id))).workspace
+  handle('workspaces:add', async (input: CreateWorkspaceInput) =>
+    (await registerWorkspace(input, configOwner, id => args.runtime.executionHost(id))).workspace)
+  handle('workspaces:addFromFile', async (location: FileActionLocation, input: CreateWorkspaceInput) => {
+    if (location.kind === 'workspace') {
+      const owner = workspace(config, location.workspaceId)
+      const scope = owner.hostId === 'local' ? await localFileScope(owner, location.path) : null
+      const path = scope ? localPathWithin(scope.root, scope.requested) : scratchWorkspaceFilePath(owner, [], location.path)
+      if (owner.hostId !== input.hostId || path !== input.path)
+        throw new Error('The selected folder moved. Refresh its Files view before opening the project.')
+      return (await registerWorkspace(input, configOwner, id => args.runtime.executionHost(id))).workspace
+    }
+    const { source } = location
     if (input.hostId !== sourceFileNativeHost(source))
       throw new Error('The selected project cannot be opened through this Host connection.')
     const host = args.runtime.executionHost(input.hostId), carrier = args.runtime.executionHost(source.target.hostId)
@@ -1444,19 +1454,22 @@ export async function registerIpc(args: {
     const key = `${workspaceId}\0${path}`
     await fileObservations.unobserve(key)
   })
-  handle('files:openSystem', async (workspaceId: string, path: string) => {
-    const error = await shell.openPath(await files.localPathForSystemOpen(workspace(config, workspaceId), path))
+  async function localFileForNativeAction(location: FileActionLocation) {
+    if (location.kind === 'workspace') return { owner: workspace(config, location.workspaceId), path: location.path }
+    const { source } = location
+    if (sourceFileNativeHost(source) !== 'local')
+      throw new Error('This file is on another Host. Its original location is unavailable to local applications and the local file manager.')
+    const resource = await originalNativeFileResource(source, (target, method, query) => args.runtime.sourceFilesCall(target, method, query))
+    return { owner: { id: resource.workspaceId, path: resource.workspacePath, hostId: resource.hostId }, path: resource.path }
+  }
+  handle('files:openSystem', async (location: FileActionLocation) => {
+    const { owner, path } = await localFileForNativeAction(location)
+    const error = await shell.openPath(await files.localPathForSystemOpen(owner, path))
     if (error) throw new Error(error)
   })
-  handle('files:reveal', async (workspaceId: string, path: string, source?: SourceFileReadLocation) => {
-    if (!source) {
-      shell.showItemInFolder(await files.localPathForReveal(workspace(config, workspaceId), path))
-      return
-    }
-    if (sourceFileNativeHost(source) !== 'local')
-      throw new Error('This file is on another Host. Its directory is unavailable in the local file manager.')
-    const resource = await originalNativeFileResource(source, (target, method, query) => args.runtime.sourceFilesCall(target, method, query))
-    shell.showItemInFolder(await files.localPathForReveal({ id: resource.workspaceId, path: resource.workspacePath, hostId: resource.hostId }, resource.path))
+  handle('files:reveal', async (location: FileActionLocation) => {
+    const { owner, path } = await localFileForNativeAction(location)
+    shell.showItemInFolder(await files.localPathForReveal(owner, path))
   })
   handle('scratch:readTopic', async (workspaceId: string, topicId: string, expectedResource?: import('@agentmux/core/mote-preferences').MotePreferencesTarget['expectedResource']) =>
     await args.scratchTopics.read(workspace(config, workspaceId, expectedResource), topicId)

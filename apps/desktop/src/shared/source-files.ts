@@ -11,6 +11,14 @@ export type SourceFilesCall<M extends SourceFilesMethod> = { method: M; params: 
 /** carrierCurrent is a client observation; it never changes the original effect receipt. */
 export type SourceFilesResult<M extends SourceFilesMethod> = { result: AgentMuxRpcResult<M>; carrierCurrent: boolean }
 export type SourceFileReadLocation = { target: SpaceMountSourceTarget; resource: FileReadResource; query: Omit<FileReadParams, 'maxBytes'> }
+export type FileActionLocation =
+  | { kind: 'workspace'; workspaceId: string; path: string }
+  | { kind: 'source'; source: SourceFileReadLocation }
+
+export function fileActionLocation(workspaceId: string, path: string, source: SourceFileReadLocation | undefined): FileActionLocation {
+  return source ? { kind: 'source', source } : { kind: 'workspace', workspaceId, path }
+}
+
 export type SourceFilesLocator = { mount: SpaceMountRecord; resource: FileReadResource }
 export type SourceFilesSelection = { kind: 'mount'; mount: SpaceMountRecord }
   | { kind: 'directory'; path: string; expectedResource?: FolderDirectoryResource; registration?: SpaceMountRecord }

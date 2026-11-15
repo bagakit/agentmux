@@ -1,5 +1,7 @@
 import { lazy, Suspense, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { fileActionLocation } from '../../../shared/source-files'
+import { fileViewHost, fileViewReadSource } from '../lib/file-view-path'
 import { api } from '../lib/api'
 import { revealInFileManagerLabel } from '../lib/host-platform'
 import { documentKey, type FileWorkbenchSurface } from '../lib/workbench-tabs'
@@ -30,7 +32,9 @@ export function FilePreviewPane({ tabId, surface, visible = true, onRetryBinary,
   const [bookAttempt, setBookAttempt] = useState(0)
   const key = documentKey(surface.workspaceId, surface.path)
   const binary = useAppStore(state => state.documentIssues[key]?.kind === 'binary' ? state.documentIssues[key] : null)
-  const canOpenExternally = useWorkspaceResource(surface.workspaceId)?.hostId === 'local'
+  const source = useAppStore(state => fileViewReadSource(state, tabId, surface))
+  const location = fileActionLocation(surface.workspaceId, surface.path, source)
+  const canOpenExternally = fileViewHost(location, useWorkspaceResource(surface.workspaceId)?.hostId) === 'local'
   const reportError = useAppStore(state => state.reportError)
   const playable = workspaceFilePreviewFormat(surface.path)
   const isMedia = playable?.kind === 'audio' || playable?.kind === 'video'
@@ -45,7 +49,7 @@ export function FilePreviewPane({ tabId, surface, visible = true, onRetryBinary,
   const reload = isMedia ? stream.reload : isPdf ? pdf.reload : isBook ? () => setBookAttempt(value => value + 1) : snapshot.reload
   const url = usePreviewObjectUrl(preview)
   const external = async (action: 'openSystem' | 'reveal') => {
-    try { await api.files[action](surface.workspaceId, surface.path) } catch (error) { reportError(error) }
+    try { await api.files[action](location) } catch (error) { reportError(error) }
   }
   return <section className="file-preview-pane" data-preview-state={binary ? 'binary' : failure?.status ?? (preview ? 'loaded' : visible ? 'loading' : 'inactive')}>
     <header className="editor-header file-preview__header">

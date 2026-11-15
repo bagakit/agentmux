@@ -295,7 +295,8 @@ const api: AgentMuxPreloadApi = {
     appearance: (id: string) => ipcRenderer.invoke('workspaces:appearance', id),
     chooseLocalFolder: document => ipcRenderer.invoke('workspaces:chooseLocalFolder', document),
     rebindLocalFolder: (workspaceId, document) => ipcRenderer.invoke('workspaces:rebindLocalFolder', workspaceId, document),
-    add: (input, source) => source ? ipcRenderer.invoke('workspaces:add', input, source) : ipcRenderer.invoke('workspaces:add', input),
+    add: input => ipcRenderer.invoke('workspaces:add', input),
+    addFromFile: (location, expected) => ipcRenderer.invoke('workspaces:addFromFile', location, expected),
     listBranches: (workspaceId: string) => ipcRenderer.invoke('workspaces:listBranches', workspaceId),
     openBranch: (workspaceId: string, branch: string) =>
       ipcRenderer.invoke('workspaces:openBranch', workspaceId, branch),
@@ -395,8 +396,8 @@ const api: AgentMuxPreloadApi = {
       ipcRenderer.on(WORKSPACE_FILE_INVALIDATED_CHANNEL, wrapped)
       return () => ipcRenderer.off(WORKSPACE_FILE_INVALIDATED_CHANNEL, wrapped)
     },
-    openSystem: (workspaceId: string, path: string) => ipcRenderer.invoke('files:openSystem', workspaceId, path),
-    reveal: (workspaceId, path, source) => source ? ipcRenderer.invoke('files:reveal', workspaceId, path, source) : ipcRenderer.invoke('files:reveal', workspaceId, path)
+    openSystem: location => ipcRenderer.invoke('files:openSystem', location),
+    reveal: location => ipcRenderer.invoke('files:reveal', location)
   },
   moteChat: { call: async (method, params, target) => unwrapSessionInputOperationResult(await ipcRenderer.invoke('moteChat:call', method, params, ...(target === undefined ? [] : [target]))) },
   moteConnections: { call: (method, params, target) => ipcRenderer.invoke('moteConnections:call', method, params, ...(target === undefined ? [] : [target])) },

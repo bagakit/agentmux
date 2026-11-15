@@ -66,10 +66,12 @@ import {
   DEFAULT_TOPIC_WIKI,
   MOTE_SOUL_PATH,
   DEFAULT_MOTE_SOUL,
+  SCRATCH_WORKSPACE_ID,
   SCRATCH_TOPIC_WIKI_PATH,
   SCRATCH_TOPIC_TITLE_MAX_LENGTH,
   scratchTopicDirectoryName,
-  scratchTopicIdFromDirectoryName
+  scratchTopicIdFromDirectoryName,
+  scratchWorkspaceFilePath
 } from '@agentmux/host/mote-model'
 import { bookmarkKindForPath, isBinaryContent, parseBookmarkUrl } from '../../../shared/bookmark-file'
 import { normalizeBrowserProfileNetwork } from '../../../shared/browser-profile-network'
@@ -569,6 +571,15 @@ const mockApi: AgentMuxDesktopApi = {
     appearance: async () => ({ kind: 'directory', icon: null }),
     chooseLocalFolder: async () => null,
     rebindLocalFolder: async () => null,
+    addFromFile: async (location, expected) => {
+      if (location.kind === 'source') throw new Error('The original Source Files owner is unavailable in this preview.')
+      const owner = mockConfig.workspaces.find(item => item.id === location.workspaceId)
+      const topicId = owner?.id === SCRATCH_WORKSPACE_ID && scratchTopicIdFromDirectoryName(location.path.split('/', 1)[0]!)
+      const topic = topicId ? await mockApi.scratch.readTopic(location.workspaceId, topicId) : null
+      if (!owner || owner.hostId !== expected.hostId || scratchWorkspaceFilePath(owner, topic ? [topic] : [], location.path) !== expected.path)
+        throw new Error('The selected folder moved. Refresh its Files view before opening the project.')
+      return mockApi.workspaces.add(expected)
+    },
     add: async (input) => {
       const existing = mockConfig.workspaces.find(item => item.hostId === input.hostId && item.path === input.path)
       if (existing) return structuredClone(existing)
@@ -748,10 +759,13 @@ const mockApi: AgentMuxDesktopApi = {
       mockFileInvalidationListeners.add(listener)
       return () => mockFileInvalidationListeners.delete(listener)
     },
-    openSystem: async (_workspaceId, path) => {
-      if (!mockFiles.has(path)) throw new Error(`Could not open ${path}`)
+    openSystem: async location => {
+      if (location.kind === 'source') throw new Error('The original Source Files owner is unavailable in this preview.')
+      if (!mockFiles.has(location.path)) throw new Error(`Could not open ${location.path}`)
     },
-    reveal: async () => {}
+    reveal: async location => {
+      if (location.kind === 'source') throw new Error('The original Source Files owner is unavailable in this preview.')
+    }
   },
   objectAvatars: { call: async () => { throw new Error('Object avatar publication requires its original Desktop owner and authenticated actor. The exact request and current choice are retained.') } },
   spaceObjects: {

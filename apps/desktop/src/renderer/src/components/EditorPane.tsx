@@ -8,6 +8,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type
 import { NoteViewToolbarContext } from '../lib/note-view-toolbar'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { createWorkspaceResourceSelector } from '../hooks/useWorkspaceResource'
+import { fileActionLocation } from '../../../shared/source-files'
 import { fileViewHost, fileViewReadSource, revealFileInFileManager } from '../lib/file-view-path'
 import { effectiveFileRegionMode } from '../lib/file-region-presentation'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
@@ -136,7 +137,8 @@ export function EditorPane({
   const source = useAppStore(state => fileViewReadSource(state, tabId, surface))
   const workspaceSelector = useMemo(() => createWorkspaceResourceSelector(surface.workspaceId), [surface.workspaceId])
   const workspace = useAppStore(workspaceSelector)
-  const canReveal = fileViewHost(source, workspace?.hostId) === 'local'
+  const location = fileActionLocation(surface.workspaceId, surface.path, source)
+  const canReveal = fileViewHost(location, workspace?.hostId) === 'local'
   const reportError = useAppStore((state) => state.reportError)
   const attachPersistedDocument = useAppStore((state) => state.attachPersistedFileDocument)
   // Word wrap is one global viewing preference (like a theme), not a document property: it is read
@@ -204,7 +206,7 @@ export function EditorPane({
         {...(previewReadsSavedFile && onTogglePreview ? { onPreview: onTogglePreview } : {})}
         {...(issue.kind === 'read-error' ? { message: issue.message, onRetry: () => { void reload(tabId, surface.regionId) } } : {})}
         canReveal={canReveal}
-        onReveal={() => void revealFileInFileManager(surface.workspaceId, surface.path, reportError, source)}
+        onReveal={() => void revealFileInFileManager(location, reportError)}
       />
     )
   }
