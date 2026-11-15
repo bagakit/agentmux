@@ -15,6 +15,7 @@ import { moteNoticeCaptureFixture } from '../../../../../packages/client-ui/test
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { PMO_TEAMS_TOPIC_ID } from '@agentmux/core/mote-preferences'
 import { MobileApp } from '../../../src/MobileApp'
+import { createMoteGroupCapture } from './mote-groups-fixture'
 import { auxiliaryDensityTimeline } from './auxiliary-density-fixture'
 import { createMoteDialogueCapture } from './mote-dialogue-fixture'
 import { MobileWebUpdateSafetyProvider } from '../../../src/mobile-web/update-safety'
@@ -26,6 +27,8 @@ import { DEFAULT_THEME_ID, GRAPHITE_THEME, themeValue, updateObservedTheme, type
 import '@agentmux/client-ui/styles.css'
 
 type Call = { sequence: number; observedAt: number; method: string; params: unknown }
+const moteGroupsFixture = new URLSearchParams(location.search).get('mote-groups') === '1'
+const moteGroupsFresh = moteGroupsFixture && localStorage.getItem('mobile-product-fixture-initialized') !== 'true'
 const questionReceiptFixture = new URLSearchParams(location.search).get('question-receipts') === '1'
 let permissionReceiptStage: 'saved' | 'unknown' | 'completed' = 'saved'
 let permissionInput: Parameters<AgentMuxHostedClient['respondAgentInteraction']>[0] | undefined
@@ -202,6 +205,7 @@ const publishExactDirectory = () => publishClientEvent({ type: 'session-observat
 const requireExactDirectory = () => {
   if (exactFirstReadFixture && !exactDirectory.hasSnapshot) throw Object.assign(new Error('The complete controlled directory is unconfirmed.'), { code: 'HOSTED_SESSION_OBSERVATION_UNCONFIRMED' })
 }
+const moteGroupsCapture = moteGroupsFixture ? createMoteGroupCapture(catalog) : null
 const client = {
   sessionObservation: () => structuredClone(exactDirectory),
   sessionObservationScope: () => null,
@@ -418,6 +422,8 @@ const client = {
   },
   forwardRpc: async (method: string, params: Record<string, unknown>, options?: { signal?: AbortSignal }) => {
     record(method, params)
+    const group = moteGroupsCapture?.(method, params)
+    if (group !== undefined) return group
     if (composerFixture && (method === 'space.ls' || method === 'space.mote.dialogue.read')) await composerReads
     if (!connected) throw Error('原 Host 连接中断；原对象、历史与草稿保留。')
     if (exactFirstReadFixture && method === 'space.ls') {
@@ -536,6 +542,13 @@ if (questionReceiptFixture) await getDeviceWorkface().updatePresentation({ selec
       groupId: 'group-mote' } } })
 if (exactFirstReadFresh) await getDeviceWorkface().updatePresentation({ selectedSessionId: result.agentSessionId, hostUrl: '', panel: 'conversation' },
   { primary: 'focus', showSession: true, showGoalWork: false, identity: { name: '实验建议', project: '并行项目' }, profile: null })
+if (moteGroupsFresh) {
+  const fact = catalog.motePresentation!.find(value => value.spaceId === 'mote-original')!
+  await getDeviceWorkface().updatePresentation({ selectedSessionId: main.agentSessionId, hostUrl: '', panel: 'conversation' },
+    { primary: 'mote', showSession: true, showGoalWork: false, identity: { name: '我的 Mote', project: '我的 Mote',
+      mote: { spaceId: 'mote-original', name: '我的 Mote', contentReference: fact.content! } }, profile: null, recentMoteSpaceId: 'mote-original',
+      moteView: { spaceId: 'mote-original', section: 'discussion', detail: false, directAgent: false } })
+}
 if (composerFresh) {
   const fact = catalog.motePresentation!.find(value => value.spaceId === 'mote-original')!
   await getDeviceWorkface().updatePresentation({ selectedSessionId: main.agentSessionId, hostUrl: '', panel: 'conversation' },
@@ -887,7 +900,7 @@ function Scene() {
   } })
   if (connectScene) return <MobileApp key={'connect-' + connectScene.state + String(connectScene.paired)} client={null} connection={connectScene} platform={platform}
     connectionPanel={connectScene.paired === false ? undefined : connectScene.state === 'unavailable' ? <><p>请核对 Mac 的连接与授权，修复后重新检查。</p><button type="button">重新检查连接</button></> : <p>连接会自动恢复。Mac 和手机保持在同一局域网即可。</p>} />
-  const app = <MobileApp key={densityMount} restoreWorkface={restoreResponsiveWorkface || composerFixture || exactFirstReadFixture} client={unconfirmedClient ? null : client} connection={connected ? { state: 'connected', message: '已连接原 Host', ...(conversationStatusScene === 'parallel' ? { issue: '原连接观察暂未确认 [CONNECTION_OBSERVATION_FAILED]' } : {}) } : { state: 'disconnected', message: '连接中断；原工作面与草稿保留。' }} platform={platform} webObservation={webUpdateScene ? webUpdateObservation : null} />
+  const app = <MobileApp key={densityMount} restoreWorkface={restoreResponsiveWorkface || composerFixture || exactFirstReadFixture || moteGroupsFixture} client={unconfirmedClient ? null : client} connection={connected ? { state: 'connected', message: '已连接原 Host', ...(conversationStatusScene === 'parallel' ? { issue: '原连接观察暂未确认 [CONNECTION_OBSERVATION_FAILED]' } : {}) } : { state: 'disconnected', message: '连接中断；原工作面与草稿保留。' }} platform={platform} webObservation={webUpdateScene ? webUpdateObservation : null} />
   return webUpdateScene ? <MobileWebUpdateSafetyProvider verifyConnection={verifyWebUpdateConnection}>{app}</MobileWebUpdateSafetyProvider> : app
 }
 createRoot(document.getElementById('root')!).render(<Scene />)

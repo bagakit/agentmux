@@ -36,6 +36,9 @@ try {
   } }
   const mutationId = process.argv.find(value => value.startsWith('--mutation='))?.slice('--mutation='.length)
   const variants = {
+    'mote-groups-missing-threads-entry': { file: 'apps/mobile/src/MobileApp.tsx',
+      before: '{teamSpaceId && <button type="button" className="mobile-text-button mobile-mote-groups-entry"',
+      after: '{false && teamSpaceId && <button type="button" className="mobile-text-button mobile-mote-groups-entry"' },
     'mote-thread-tabs-disconnected': { file: 'packages/client-ui/src/components/MoteConversationThreads.tsx',
       before: 'value={view} onValueChange={setView}', after: 'value={view} onValueChange={() => {}}' },
     'mote-thread-layout-remounts': { file: 'packages/client-ui/src/components/MoteConversationThreads.tsx',
@@ -261,7 +264,7 @@ try {
   await fs.writeFile(path.join(compiled, 'index.html'), '<!doctype html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="product-entry.css"></head><body><div id="root"></div><script type="module" src="product-entry.js"></script></body></html>')
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const logs = []
-  const subset = ['topic-directory-search', 'question-receipts', 'focus-availability', 'exact-first-read', 'density-workfaces', 'mote-composer', 'responsive-primary-workfaces', 'compact-navigation', 'wide-agent-workface', 'auxiliary-density', 'agent-locations', 'conversation-status', 'brand-attention', 'brand-refinement', 'chrome-motion', 'terminal-restore', 'mature-shell', 'mote-start', 'mote-main-retention', 'quiet-run-status', 'directory-notices', 'mote-discussion-restore', 'mote-main-setup', 'mote-dialogue', 'creation-update', 'mote-notice-join', 'mote-host-boundaries', 'mote-cooperation', 'creation-recovery', 'polish-followup', 'floating-tools', 'attachment-upload-exit', 'attachment-selection', 'focus-state', 'conversation-spacing', 'web-update', 'goal-recovery', 'goal-exit', 'chat-start', 'conversation-controls', 'conversation-attachments', 'conversation-density-hit', 'conversation-density', 'agent-menu-notice', 'agent-menu', 'mote-home', 'spatial-resources', 'commands-entry', 'notice-light', 'notice-center', 'parity-final', 'baseline', 'navigation', 'source-recovery', 'input-history'].find(value => process.argv.includes('--' + value))
+  const subset = ['topic-directory-search', 'question-receipts', 'focus-availability', 'exact-first-read', 'density-workfaces', 'mote-composer', 'responsive-primary-workfaces', 'compact-navigation', 'wide-agent-workface', 'auxiliary-density', 'agent-locations', 'conversation-status', 'brand-attention', 'brand-refinement', 'chrome-motion', 'terminal-restore', 'mature-shell', 'mote-start', 'mote-main-retention', 'quiet-run-status', 'directory-notices', 'mote-discussion-restore', 'mote-main-setup', 'mote-dialogue', 'mote-groups', 'creation-update', 'mote-notice-join', 'mote-host-boundaries', 'mote-cooperation', 'creation-recovery', 'polish-followup', 'floating-tools', 'attachment-upload-exit', 'attachment-selection', 'focus-state', 'conversation-spacing', 'web-update', 'goal-recovery', 'goal-exit', 'chat-start', 'conversation-controls', 'conversation-attachments', 'conversation-density-hit', 'conversation-density', 'agent-menu-notice', 'agent-menu', 'mote-home', 'spatial-resources', 'commands-entry', 'notice-light', 'notice-center', 'parity-final', 'baseline', 'navigation', 'source-recovery', 'input-history'].find(value => process.argv.includes('--' + value))
   if (['brand-attention', 'brand-refinement'].includes(subset)) for (const name of ['brand-attention.cjs', ...(subset === 'brand-refinement' ? ['brand-goals.cjs'] : [])]) receipt.source[path.relative(root, path.join(fixture, name))] = sha(await fs.readFile(path.join(fixture, name)))
   if (subset === 'mote-composer') receipt.source[path.relative(root, path.join(fixture, 'mote-composer.cjs'))] = sha(await fs.readFile(path.join(fixture, 'mote-composer.cjs')))
   if (subset === 'agent-locations') receipt.source[path.relative(root, path.join(fixture, 'agent-locations.cjs'))] = sha(await fs.readFile(path.join(fixture, 'agent-locations.cjs')))
@@ -275,6 +278,7 @@ try {
   if (subset === 'responsive-primary-workfaces') receipt.source[path.relative(root, path.join(fixture, 'responsive-primary-workfaces.cjs'))] = sha(await fs.readFile(path.join(fixture, 'responsive-primary-workfaces.cjs')))
   if (subset === 'compact-navigation') for (const name of ['compact-navigation.cjs', 'wide-agent-workface.cjs']) receipt.source[path.relative(root, path.join(fixture, name))] = sha(await fs.readFile(path.join(fixture, name)))
   if (subset === 'wide-agent-workface') receipt.source[path.relative(root, path.join(fixture, 'wide-agent-workface.cjs'))] = sha(await fs.readFile(path.join(fixture, 'wide-agent-workface.cjs')))
+  if (subset === 'mote-groups') receipt.source[path.relative(root, path.join(fixture, 'mote-groups.cjs'))] = sha(await fs.readFile(path.join(fixture, 'mote-groups.cjs')))
   if (subset) receipt.captureSubset = subset
   if (subset === 'focus-availability') receipt.source[path.relative(root, path.join(fixture, 'focus-availability.cjs'))] = sha(await fs.readFile(path.join(fixture, 'focus-availability.cjs')))
   if (process.argv.includes('--positions-only')) receipt.captureMode = 'positions-only'
@@ -295,7 +299,7 @@ try {
   }
   receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'product-main.cjs'), productPage, directory, ...(subset ? [subset] : []), ...(process.argv.includes('--tool-action-pressed') ? ['tool-action-pressed'] : []), ...(process.argv.includes('--positions-only') ? ['positions-only'] : []), ...(process.argv.includes('--quiet-status-details-only') ? ['details-only'] : []), ...(process.argv.includes('--mote-start-visual-fixes') ? ['visual-fixes'] : [])],
     { temporaryRoot: directory, cwd: root, env, timeoutMs: 90000, onLine: line => logs.push(line) })
-  if (['exact-first-read', 'mote-composer', 'responsive-primary-workfaces', 'compact-navigation', 'wide-agent-workface', 'spatial-resources', 'chat-start', 'goal-recovery', 'terminal-restore', 'mote-discussion-restore'].includes(subset) && !process.argv.includes('--positions-only') && JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8')).passed) {
+  if (['exact-first-read', 'mote-composer', 'responsive-primary-workfaces', 'compact-navigation', 'wide-agent-workface', 'spatial-resources', 'chat-start', 'goal-recovery', 'terminal-restore', 'mote-discussion-restore', 'mote-groups'].includes(subset) && !process.argv.includes('--positions-only') && JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8')).passed) {
     receipt.restartProcess = await runProbeProcess(require('electron'), [path.join(fixture, 'product-main.cjs'), productPage, directory, subset, 'restore'],
       { temporaryRoot: directory, cwd: root, env, timeoutMs: 90000, onLine: line => logs.push(line) })
     receipt.restoredRenderer = JSON.parse(await fs.readFile(path.join(directory, 'renderer-result-restored.json'), 'utf8'))

@@ -18,7 +18,7 @@ app.whenReady().then(async () => {
   win.webContents.on('console-message', event => { if (event.level === 'error') result.errors.push(event.message) })
   if (['responsive-primary-workfaces', 'density-workfaces', 'exact-first-read', 'mote-settings-placement'].includes(mode) || phase === 'tool-action-pressed') await win.loadURL(html)
   else if (mode === 'mote-discussion-restore') await win.loadFile(html, { query: { 'mote-dialogue': '1', 'mote-thread-layout': '1' } })
-  else await win.loadFile(html, ['agent-locations', 'question-receipts', 'focus-availability', 'mote-composer', 'mote-notice-join', 'mote-dialogue', 'mote-main-setup', 'mote-main-retention', 'mote-start'].includes(mode) ? { query: { [['mote-main-setup','mote-main-retention','mote-start'].includes(mode) ? 'mote-dialogue' : mode]: '1' } } : undefined)
+  else await win.loadFile(html, ['agent-locations', 'question-receipts', 'focus-availability', 'mote-composer', 'mote-notice-join', 'mote-dialogue', 'mote-groups', 'mote-main-setup', 'mote-main-retention', 'mote-start'].includes(mode) ? { query: { [['mote-main-setup','mote-main-retention','mote-start'].includes(mode) ? 'mote-dialogue' : mode]: '1' } } : undefined)
   win.webContents.debugger.attach('1.3')
   await win.webContents.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 })
   console.log('mobile_product_stage=renderer-loaded')
@@ -153,6 +153,10 @@ app.whenReady().then(async () => {
   }
   if (mode === 'mote-composer') {
     await require('./mote-composer.cjs')({ win, read, until, resize, tap, button, capture, result, phase }); result.passed = true; return
+  }
+  if (mode === 'mote-groups') {
+    await require('./mote-groups.cjs')({ win, read, until, resize, tap, button, capture, result, phase })
+    result.passed = true; return
   }
   if (mode === 'quiet-run-status') {
     await require('./quiet-run-status.cjs')({ read, until, resize, tap, button, capture, result })

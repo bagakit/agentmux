@@ -118,3 +118,9 @@ shared `runProbeProcess` owns each exit receipt. Private compiled files are
 removed by the original capture path; this subset also removes its private
 profile only after both exits are explicitly confirmed. Original PNGs, result
 JSON, source identity and receipt remain for independent review.
+
+### 内置群聊
+
+`node apps/mobile/scripts/fixtures/mobile-product-redesign/capture-ui.mjs --mote-groups` 从实际 MobileApp 的 Mote 目录打开公开群聊，并经 Threads 进入同一群的 Mote 视角。用 390px 暗色及 332px 短浅色检查群名单、建群视图、群消息与引用、受众和写入区。原文按钮聚焦同一条公开原消息。关闭私有 Chromium 再起一个进程，从原 Threads 位置重新打开同一群，核对主对话和群草稿都从实际 Device 记录恢复。受控数据提供群、消息和成员回执。实际 MobileApp 发送通过公开 Core Unix RPC 和 Host SQLite 的消费者证据见 `test/mobile-mote-groups.test.tsx`。
+
+`--mutation=mote-groups-missing-threads-entry` 只在私有 Renderer 编译中移除 Threads 的群聊入口。公开群视图仍可读，原 Mote 入口检查须失败。
