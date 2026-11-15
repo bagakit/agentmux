@@ -42,6 +42,7 @@ const desktopRoot = resolve(import.meta.dirname, '..')
 // large workbench missed a 30-second activation window. Wrong identity, an unrestored workbench or an
 // early exit still rejects at once; only a slow healthy GUI gains time.
 const GUI_STARTUP_HANG_GUARD_MS = 300_000
+const GUI_PROGRESS_INTERVAL_MS = 5_000
 const repositoryRoot = resolve(desktopRoot, '../..')
 const manifest = JSON.parse(await readFile(join(desktopRoot, 'package.json'), 'utf8'))
 const coreRoot = join(repositoryRoot, 'packages', 'core')
@@ -61,6 +62,62 @@ const runtimeReviewArgument = process.argv.find((argument) => argument.startsWit
 
 function assert(condition, message) {
   if (!condition) throw new Error(message)
+}
+
+function writeProgress(stage, status, started, details) {
+  process.stderr.write(`package_progress=${JSON.stringify({ stage, status, elapsedMs: Math.round(performance.now() - started), ...details })}\n`)
+}
+
+async function reportPackageStage(stage, action) {
+  const started = performance.now()
+  writeProgress(stage, 'started', started)
+  try {
+    const result = await action()
+    writeProgress(stage, 'finished', started)
+    return result
+  } catch (error) {
+    writeProgress(stage, 'failed', started)
+    throw error
+  }
+}
+
+async function reportGuiQualification(stage, action) {
+  const started = performance.now()
+  let check = 'app-inspect', difference, lastFailure, queryStarted, lastQueryMs
+  const report = status => writeProgress(stage, status, started, {
+    check: status === 'failed' ? lastFailure?.check ?? check : check,
+    lastQueryMs, queryElapsedMs: queryStarted === undefined ? undefined : Math.round(performance.now() - queryStarted),
+    lastFailedCheck: lastFailure?.check, changedWorkbenchFields: lastFailure?.difference?.()
+  })
+  const progress = {
+    checking(name, describeDifference) { check = name; difference = describeDifference },
+    failedCheck() {
+      // Do not copy exception text or workbench data into progress output.
+      lastFailure = { check: check === 'app-inspect' ? 'app-inspect-unavailable' : check, difference }
+    },
+    async inspect(observe) {
+      progress.checking('app-inspect')
+      queryStarted = performance.now()
+      try { return await observe() }
+      finally {
+        lastQueryMs = Math.round(performance.now() - queryStarted)
+        queryStarted = undefined
+      }
+    }
+  }
+  report('started')
+  const timer = setInterval(() => report('waiting'), GUI_PROGRESS_INTERVAL_MS)
+  timer.unref()
+  try {
+    const result = await action(progress)
+    report('finished')
+    return result
+  } catch (error) {
+    report('failed')
+    throw error
+  } finally {
+    clearInterval(timer)
+  }
 }
 
 async function run(command, args, options = {}) {
@@ -685,14 +742,20 @@ function workbenchIdentity(workbench, { expectedAfterRestart = false, includeSur
 }
 
 /** Actual loaded identity and complete Store topology, not process appearance. */
-async function qualifyUi(appPath, before = null, { outgoing = false } = {}) {
+async function qualifyUi(appPath, before, { outgoing = false, progress }) {
   const { observeUiClient, requireOutgoingWorkbenchStorage } = await import('./package-runtime-upgrade.mjs')
-  const observation = await observeUiClient(appPath)
+  const observation = await progress.inspect(() => observeUiClient(appPath))
   try {
+    progress.checking('main-package-identity')
     assert(observation.main.package, 'The loaded Main package identity is unknown; no UI commit can be confirmed.')
     assertPackageIdentity(observation.main.package, await readPackageIdentity(appPath))
+    progress.checking('workbench-loading')
     assert(!observation.workbench.loading, 'The saved workbench is still loading; no UI commit can be confirmed.')
-    if (outgoing) requireOutgoingWorkbenchStorage(observation)
+    if (outgoing) {
+      progress.checking('outgoing-workbench-storage')
+      requireOutgoingWorkbenchStorage(observation)
+    }
+    progress.checking('renderer-identity')
     const bundled = JSON.parse(await readFile(join(appPath, 'Contents/Resources/app/out/renderer/release.json'), 'utf8'))
     assert(observation.main.renderer.identity.shell === bundled.identity.shell && observation.main.renderer.identity.ctxmux === bundled.identity.ctxmux,
       'The loaded Renderer does not belong to this application contract.')
@@ -700,8 +763,13 @@ async function qualifyUi(appPath, before = null, { outgoing = false } = {}) {
       // Missing older facts do not gain empty values or revoke the activated GUI. The final receipt stays unknown.
       const includeSurvey = before.workbench.survey !== undefined && observation.workbench.survey !== undefined
       const includeSurveyPageReferences = before.workbench.survey?.pageReferences !== undefined && observation.workbench.survey?.pageReferences !== undefined
-      assert(isDeepStrictEqual(workbenchIdentity(observation.workbench, { includeSurvey, includeSurveyPageReferences }), workbenchIdentity(before.workbench, { expectedAfterRestart: true, includeSurvey, includeSurveyPageReferences })),
+      const actual = workbenchIdentity(observation.workbench, { includeSurvey, includeSurveyPageReferences })
+      const expected = workbenchIdentity(before.workbench, { expectedAfterRestart: true, includeSurvey, includeSurveyPageReferences })
+      let changedFields
+      progress.checking('workbench-continuity', () => changedFields ??= Object.keys(expected).filter(key => !isDeepStrictEqual(actual[key], expected[key])))
+      assert(isDeepStrictEqual(actual, expected),
         'The original workbench, Region descriptors or focus have not been restored.')
+      progress.checking('original-run-binding')
       for (const tab of before.workbench.tabs) for (const region of tab.regions) {
         const restored = observation.workbench.tabs.find(candidate => candidate.id === tab.id)?.regions.find(candidate => candidate.regionId === region.regionId)
         // A Region that had no confirmed Run before the update has no identity to compare; it is
@@ -728,34 +796,46 @@ async function qualifyUi(appPath, before = null, { outgoing = false } = {}) {
 // GUI hang guard. A qualification failure on an actual observation (loading, storage, identity) still rejects.
 async function qualifyOutgoingUi(appPath) {
   const deadline = Date.now() + GUI_STARTUP_HANG_GUARD_MS
-  while (true) {
-    try { return await qualifyUi(appPath, null, { outgoing: true }) }
-    catch (error) { if (error.uiContinuity || Date.now() >= deadline) throw error }
-    await new Promise(resolve => setTimeout(resolve, 250))
-  }
+  return reportGuiQualification('outgoing-gui', async progress => {
+    while (true) {
+      try { return await qualifyUi(appPath, null, { outgoing: true, progress }) }
+      catch (error) {
+        progress.failedCheck()
+        if (error.uiContinuity || Date.now() >= deadline) throw error
+      }
+      progress.checking('retry-delay')
+      await new Promise(resolve => setTimeout(resolve, 250))
+    }
+  })
 }
 
 async function awaitUiActivation(appPath, before, runtimePlan = null) {
   const { confirmUiRuntime, assertUiRuntimeObservation, confirmUiTerminalRebindings } = await import('./package-runtime-upgrade.mjs')
   const deadline = Date.now() + GUI_STARTUP_HANG_GUARD_MS
-  let lastError, lastObservation = null
-  do {
-    try {
-      const observed = await qualifyUi(appPath, before)
-      lastObservation = observed
-      const confirmation = runtimePlan ? await confirmUiRuntime(runtimePlan) : null
-      if (confirmation) assertUiRuntimeObservation(observed, confirmation, before)
-      const terminalRebindings = await confirmUiTerminalRebindings(runtimePlan, confirmation, before, observed)
-      return { observation: observed, terminalRebindings }
-    }
-    catch (error) {
-      lastError = error
-      if (error.uiContinuity?.after) lastObservation = error.uiContinuity.after
-    }
-    await new Promise(resolve => setTimeout(resolve, 100))
-  } while (Date.now() < deadline)
-  // Preserve the last successful read even if a later RPC observation fails.
-  throw Object.assign(lastError, { uiContinuity: { before: structuredClone(before), after: structuredClone(lastObservation) } })
+  return reportGuiQualification('installed-gui', async progress => {
+    let lastError, lastObservation = null
+    do {
+      try {
+        const observed = await qualifyUi(appPath, before, { progress })
+        lastObservation = observed
+        progress.checking('runtime-continuity')
+        const confirmation = runtimePlan ? await confirmUiRuntime(runtimePlan) : null
+        if (confirmation) assertUiRuntimeObservation(observed, confirmation, before)
+        progress.checking('terminal-rebindings')
+        const terminalRebindings = await confirmUiTerminalRebindings(runtimePlan, confirmation, before, observed)
+        return { observation: observed, terminalRebindings }
+      }
+      catch (error) {
+        lastError = error
+        progress.failedCheck()
+        if (error.uiContinuity?.after) lastObservation = error.uiContinuity.after
+      }
+      progress.checking('retry-delay')
+      await new Promise(resolve => setTimeout(resolve, 100))
+    } while (Date.now() < deadline)
+    // Preserve the last successful read even if a later RPC observation fails.
+    throw Object.assign(lastError, { uiContinuity: { before: structuredClone(before), after: structuredClone(lastObservation) } })
+  })
 }
 
 // Cleanup evidence uses the same package and signed seals as stage adoption.
@@ -1055,7 +1135,7 @@ async function main({ selectAfterBuild, install = installRequested, onlyApp = ap
     if (install && !argv.includes('--install')) argv.push('--install')
     return preflightMacosSigning({ argv })
   }
-  const build = () => run('pnpm', ['--config.enable-pre-post-scripts=true', 'build'], { cwd: desktopRoot })
+  const build = () => reportPackageStage('build', () => run('pnpm', ['--config.enable-pre-post-scripts=true', 'build'], { cwd: desktopRoot }))
   let signingPlan, initialSource
   if (selectAfterBuild) {
     // Only an App consumes Git provenance; its snapshot must precede the routing build.
@@ -1080,36 +1160,43 @@ async function main({ selectAfterBuild, install = installRequested, onlyApp = ap
     const candidateRoot = join(temporaryRoot, 'candidate')
     const stagedApp = join(candidateRoot, `${PRODUCT_NAME}.app`)
     const stagedDmg = join(candidateRoot, `${PRODUCT_NAME}-${manifest.version}-${process.platform}-${process.arch}.dmg`)
-    await mkdir(candidateRoot, { recursive: true })
-    await run('cp', ['-cR', electronApp, stagedApp], { capture: true })
-    // Normalize downloaded bundle metadata on the disposable candidate before signing.
-    await run('xattr', ['-cr', stagedApp], { capture: true })
-    await brandApplication(stagedApp)
-    await copyRuntimeApplication(stagedApp, initialSource)
-    await verifyIdentity(stagedApp)
-    await verifyThirdPartyNotices(stagedApp)
-    await auditBundle(stagedApp, {
-      runtimeRoot: join(stagedApp, 'Contents', 'Resources', 'app'),
-      forbidden: [repositoryRoot, temporaryRoot]
-    })
     const stagedWorkspaceMoveHelper = join(stagedApp, 'Contents', 'Resources', 'app', 'resources', 'bin', 'agentmux-workspace-move')
-    await verifyWorkspaceMoveHelper(stagedWorkspaceMoveHelper,
-      await sha256(join(desktopRoot, 'resources', 'bin', 'agentmux-workspace-move')))
-    const locationAddOn = 'agentmux-mac-location.node'
-    assert(await sha256(join(dirname(stagedWorkspaceMoveHelper), locationAddOn)) ===
-      await sha256(join(desktopRoot, 'resources', 'bin', locationAddOn)), 'Packaged location add-on differs from the built candidate.')
-    await verifyNativeDesktopCopy(stagedApp, repositoryRoot)
+    await reportPackageStage('app-assembly', async () => {
+      await mkdir(candidateRoot, { recursive: true })
+      await run('cp', ['-cR', electronApp, stagedApp], { capture: true })
+      // Normalize downloaded bundle metadata on the disposable candidate before signing.
+      await run('xattr', ['-cr', stagedApp], { capture: true })
+      await brandApplication(stagedApp)
+      await copyRuntimeApplication(stagedApp, initialSource)
+      await verifyIdentity(stagedApp)
+      await verifyThirdPartyNotices(stagedApp)
+      await auditBundle(stagedApp, {
+        runtimeRoot: join(stagedApp, 'Contents', 'Resources', 'app'),
+        forbidden: [repositoryRoot, temporaryRoot]
+      })
+      await verifyWorkspaceMoveHelper(stagedWorkspaceMoveHelper,
+        await sha256(join(desktopRoot, 'resources', 'bin', 'agentmux-workspace-move')))
+      const locationAddOn = 'agentmux-mac-location.node'
+      assert(await sha256(join(dirname(stagedWorkspaceMoveHelper), locationAddOn)) ===
+        await sha256(join(desktopRoot, 'resources', 'bin', locationAddOn)), 'Packaged location add-on differs from the built candidate.')
+      await verifyNativeDesktopCopy(stagedApp, repositoryRoot)
+    })
     process.stdout.write('Signing and verifying macOS candidate...\n')
-    const signature = await signAndVerifyMacosApplication(stagedApp, signingPlan)
-    await verifyNativeDesktopSigning(stagedApp, signingPlan)
+    const signature = await reportPackageStage('signing', async () => {
+      const signed = await signAndVerifyMacosApplication(stagedApp, signingPlan)
+      await verifyNativeDesktopSigning(stagedApp, signingPlan)
+      return signed
+    })
     const signedWorkspaceMoveHelperSha256 = await sha256(stagedWorkspaceMoveHelper)
 
     if (onlyApp) {
-      await verifyPackagedRuntime(stagedApp, temporaryRoot, initialSource, signedWorkspaceMoveHelperSha256)
-      if (signingPlan.kind !== 'ad-hoc') await verifyLaunchServices(stagedApp, temporaryRoot)
+      await reportPackageStage('app-verification', async () => {
+        await verifyPackagedRuntime(stagedApp, temporaryRoot, initialSource, signedWorkspaceMoveHelperSha256)
+        if (signingPlan.kind !== 'ad-hoc') await verifyLaunchServices(stagedApp, temporaryRoot)
+      })
     } else {
-      await createDmg(stagedApp, stagedDmg, temporaryRoot)
-      await verifyDmg(stagedDmg, temporaryRoot, initialSource, signedWorkspaceMoveHelperSha256, signingPlan)
+      await reportPackageStage('dmg-creation', () => createDmg(stagedApp, stagedDmg, temporaryRoot))
+      await reportPackageStage('dmg-verification', () => verifyDmg(stagedDmg, temporaryRoot, initialSource, signedWorkspaceMoveHelperSha256, signingPlan))
     }
     const finalSource = await sourceIdentity()
     assert(
@@ -1124,11 +1211,12 @@ async function main({ selectAfterBuild, install = installRequested, onlyApp = ap
     if (!onlyApp) await rename(stagedDmg, outputDmg)
     const qualifiedDmgHash = onlyApp ? null : await sha256(outputDmg)
     if (!onlyApp) {
-      const artifacts = await publishPackageArtifact({ repositoryRoot, target: 'darwin-arm64', archive: outputDmg, sha256: qualifiedDmgHash })
+      const artifacts = await reportPackageStage('dmg-publication', () =>
+        publishPackageArtifact({ repositoryRoot, target: 'darwin-arm64', archive: outputDmg, sha256: qualifiedDmgHash }))
       process.stdout.write(`package_artifact_publication=${JSON.stringify(artifacts.publication)}\n`)
       process.stdout.write(`package_artifact_cleanup=${JSON.stringify(artifacts.cleanup)}\n`)
     }
-    if (install) reportInstallTransaction(await installApplication(outputApp))
+    if (install) reportInstallTransaction(await reportPackageStage('installation', () => installApplication(outputApp)))
     if (!onlyApp) await run(process.execPath, [join(desktopRoot, 'scripts', 'report-desktop-package.mjs')])
     const [appHash, dmgHash, appSizeResult, dmgInfo] = await Promise.all([
       sha256(join(outputApp, 'Contents', 'MacOS', PRODUCT_NAME)),
