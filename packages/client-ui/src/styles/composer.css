@@ -152,7 +152,7 @@
 .composer-queued-editor { display: grid; gap: var(--sp-2); min-width: 0; }
 .composer-queued-editor__heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .composer-queued-editor__heading label { font-size: var(--fs-meta); font-weight: 600; color: var(--text); }
-.composer-queued-editor > .ui-input--compact-editor {
+.composer-queued-editor > .ui-textarea-source > .ui-input--compact-editor {
   min-height: calc(1lh + 2 * var(--sp-2) + 2px);
   padding: var(--sp-2) var(--sp-3);
   resize: none;

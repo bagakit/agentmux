@@ -13,7 +13,8 @@
 .browser-contextual-composer > header strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .browser-contextual-composer > header svg { flex: none; color: var(--green-2); }
 .browser-contextual-composer > header .icon-button svg { color: var(--text-3); }
-.browser-contextual-composer > textarea { flex: 1 0 76px; min-height: 56px; max-height: 180px; resize: vertical; padding: var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-1); font: inherit; }
+.browser-contextual-composer > .ui-textarea-source { flex: 1 0 76px; }
+.browser-contextual-composer > .ui-textarea-source > textarea { min-height: 56px; max-height: 180px; resize: vertical; padding: var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-1); font: inherit; }
 .browser-contextual-composer__source { min-width: 0; padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); background: var(--surface-3); }
 .browser-contextual-composer__source > label { display: flex; align-items: center; gap: var(--sp-2); }
 .browser-contextual-composer__source > label span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

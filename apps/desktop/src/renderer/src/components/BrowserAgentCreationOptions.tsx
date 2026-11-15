@@ -61,7 +61,7 @@ export function BrowserAgentCreationOptionsDialog({ browserId, context, hostLabe
             <option value="right">Right</option><option value="left">Left</option><option value="down">Below</option><option value="up">Above</option>
           </select></label>
           <label className="confirmation-dialog__field">Task <span className="browser-agent-create-options__optional">Optional · without a task, observe the page and wait</span>
-            <ComposerTextarea aria-label="Task for new Browser Agent" value={task} onValueChange={value => write({ prompt: value, executorId, split })} rows={4} disabled={pending}
+            <ComposerTextarea syntax="markdown" aria-label="Task for new Browser Agent" value={task} onValueChange={value => write({ prompt: value, executorId, split })} rows={4} disabled={pending}
               placeholder="What should this Agent do on this page?" /></label>
           {hostChanged ? <p className="surface-inline-error" role="status">The execution Host changed since these options were saved. Choose its Executor explicitly; your task is kept.</p> : null}
           {persistenceIssue ? <p className="surface-inline-error" role="status">{persistenceIssue}</p> : null}

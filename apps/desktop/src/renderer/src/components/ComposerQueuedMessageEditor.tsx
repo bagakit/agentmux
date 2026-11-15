@@ -46,7 +46,7 @@ export function ComposerQueuedMessageEditor({ entry, onSave, onCancel, status, t
       <label htmlFor={fieldId}>{editorLabel}</label>
       {status}
     </div>
-    <ComposerTextarea variant="compact" expanded={expanded} id={fieldId} ref={textareaRef} autoFocus aria-label={editorLabel}
+    <ComposerTextarea variant="compact" expanded={expanded} syntax="markdown" id={fieldId} ref={textareaRef} autoFocus aria-label={editorLabel}
       aria-describedby={error ? `${fieldId}-save-error` : undefined} rows={3} value={text} onValueChange={setText} readOnly={saving} />
     <ActionFeedback bounded tabIndex={error ? 0 : undefined}>
       {!entry.editable ? <span role="status">原消息已锁定，编辑稿仍可复制。</span> : null}

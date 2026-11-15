@@ -129,7 +129,7 @@ export function ScheduleCreateForm({ draftKey, target, onReceipt, initialMessage
   const exact = form.target ?? target
   const targetMatches = targetFields.every(key => exact?.[key] === target?.[key])
   const discussion = targetMatches && calendarEditor?.discussion || exact?.agentSessionId
-  const messageField = <label>Message<ComposerTextarea aria-label="Arranged message" rows={calendarEditor ? 2 : 3} value={form.prompt} disabled={locked}
+  const messageField = <label>Message<ComposerTextarea syntax="markdown" aria-label="Arranged message" rows={calendarEditor ? 2 : 3} value={form.prompt} disabled={locked}
     placeholder={calendarEditor ? 'What should this discussion do?' : undefined} onValueChange={prompt => update({ prompt })} /></label>
   const moveDraft = openRequest && (form.timing !== 'calendar' || form.kind !== 'once' || form.date !== openRequest.date || form.timezone !== openRequest.timezone ||
     (openRequest.time !== undefined && form.time !== openRequest.time))

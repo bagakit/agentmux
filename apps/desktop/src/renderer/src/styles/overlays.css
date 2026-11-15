@@ -50,7 +50,8 @@
 .confirmation-dialog footer { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-3); margin-top: var(--sp-6); }
 /* One label-above text field for every small form dialog. The input keeps the shared input skin and focus. */
 .confirmation-dialog__field { display: flex; flex-direction: column; gap: var(--sp-3); margin-top: var(--sp-5); color: var(--text-2); font-size: var(--fs-meta); }
-.confirmation-dialog__field > .ui-input { width: 100%; }
+.confirmation-dialog__field > .ui-input,
+.confirmation-dialog__field > .ui-textarea-source > textarea { width: 100%; }
 .host-folder-dialog { --dialog-width: 480px; }
 .confirmation-dialog__cancel { margin-right: auto; }
 .annotation-file-dialog form { display: flex; flex-direction: column; gap: var(--sp-3); margin-top: var(--sp-5); }

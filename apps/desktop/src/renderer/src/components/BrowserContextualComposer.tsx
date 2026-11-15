@@ -179,7 +179,7 @@ export function useBrowserContextualComposer(browserId: string, agent: AgentMuxB
       {changed ? <p className="browser-contextual-composer__notice">The Browser has moved on. This draft still addresses the original Agent and captured page.</p> : null}
       {!original && !recipient ? <p className="browser-contextual-composer__notice">{agent === null ? 'Choose or create a collaborator before sending. Your message stays here.' : 'The linked Agent is not confirmed. Check the original association; your message stays here.'}
         {onInspectControl ? <Button type="button" onClick={() => { close(); onInspectControl() }}>View Agent controls</Button> : null}</p> : null}
-      <ComposerTextarea ref={editor} aria-label="Opinion for Browser operator" placeholder="What should the Agent notice?" value={text} onValueChange={setText} readOnly={pending.current !== null}
+      <ComposerTextarea syntax="markdown" ref={editor} aria-label="Opinion for Browser operator" placeholder="What should the Agent notice?" value={text} onValueChange={setText} readOnly={pending.current !== null}
         onKeyDown={event => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !isImeOwnedKeyboardEvent(event)) { event.preventDefault(); void send() } }} />
       {selection.controls}
       {!includeContext && original && original.selection !== undefined ? <p className="browser-contextual-composer__notice">The image is kept in this draft. Text-only sending excludes it.</p> : null}

@@ -125,6 +125,7 @@ export function PrLaunchSurface({
             onChange={(event) => onTitleChange(event.target.value)}
           />
           <ComposerTextarea
+            syntax="markdown"
             className="pr-form__body"
             placeholder="Description (optional)"
             value={body}

@@ -346,7 +346,7 @@ export function ContinuousProgressControl({ session, original, targetName, onSta
   const progressForm = <form ref={progressFormElement} aria-label="Continuous progress setup" onChange={() => { edited.current = true; editVersion.current++ }} onCompositionStart={() => { edited.current = true; editVersion.current++ }} onSubmit={event => { event.preventDefault(); if (!conflict) void saveConfiguration() }}>
       <section className="continuous-progress-control__group" aria-label="Continuation settings">
         <label className="continuous-progress-control__interval">Check every (minutes)<TextInput type="number" min="1" value={interval} onChange={event => editConfiguration({ interval: event.target.value })} /></label>
-        <label>Continuation prompt<ComposerTextarea value={prompt} onValueChange={value => editConfiguration({ prompt: value })} /></label>
+        <label>Continuation prompt<ComposerTextarea syntax="markdown" value={prompt} onValueChange={value => editConfiguration({ prompt: value })} /></label>
       </section>
       <details className="continuous-progress-control__group continuous-progress-control__optional" aria-label="Optional task source" onToggle={event => event.stopPropagation()} hidden={!!loop || !!pendingUpdate}>
         <summary>Task source <span>Optional</span></summary>
