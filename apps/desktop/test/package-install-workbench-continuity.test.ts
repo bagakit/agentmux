@@ -81,8 +81,7 @@ vi.mock('../scripts/package-process-scope.mjs', async original => ({
       classification: 'gui', source: 'private-observed-main', initial: { classification: 'gui', source: 'private-observed-main' } }] : [],
     processes: io.pid ? [{ pid: io.pid, ppid: 1, birth: `private-birth-${io.pid}`, command: `${io.app}/Contents/MacOS/AgentMux` }] : [] })
 }))
-vi.mock('../scripts/package-semantic-host.mjs', async original => ({
-  ...await original<typeof import('../scripts/package-semantic-host.mjs')>(),
+vi.mock('../scripts/package-semantic-host.mjs', () => ({
   prepareSemanticHostReload: async () => null, stopSemanticHostForInstall: async () => {}, confirmSemanticHostReload: async () => {}
 }))
 vi.mock('../scripts/package-runtime-upgrade.mjs', async original => ({
@@ -182,6 +181,56 @@ async function install(f: Awaited<ReturnType<typeof fixture>>, intent: 'ui-only'
     launch: async () => { io.pid = 202; io.cutovers++; expect(JSON.parse(await readFile(join(f.app, 'Contents/Resources/app/package-identity.json'), 'utf8')).sourceCommit).toBe('c'.repeat(40)); return [202] }
   })
 }
+
+function capturePackageProgress() {
+  const rows: Record<string, unknown>[] = []
+  vi.spyOn(process.stderr, 'write').mockImplementation(chunk => {
+    const line = String(chunk)
+    if (line.startsWith('package_progress=')) rows.push(JSON.parse(line.slice('package_progress='.length)))
+    return true
+  })
+  return rows
+}
+
+it('[package-progress] reports unavailable reads during the original GUI qualification and stops after installation', async () => {
+  const f = await fixture(), rows = capturePackageProgress()
+  io.outgoingMisses = 1; io.missesAfterLaunch = 1
+  const schedule = setInterval
+  const timer = vi.spyOn(globalThis, 'setInterval').mockImplementation((callback, delay) => {
+    expect(delay).toBe(5_000)
+    return schedule(callback, 25)
+  })
+  const clear = vi.spyOn(globalThis, 'clearInterval')
+  const result = await install(f)
+  expect(result.ui.status).toBe('committed')
+  for (const stage of ['outgoing-gui', 'installed-gui']) {
+    const progress = rows.filter(row => row.stage === stage)
+    expect(progress[0]).toMatchObject({ status: 'started' })
+    expect(progress).toEqual(expect.arrayContaining([expect.objectContaining({
+      status: 'waiting', lastFailedCheck: 'app-inspect-unavailable', lastQueryMs: expect.any(Number), elapsedMs: expect.any(Number)
+    })]))
+    expect(progress.at(-1)).toMatchObject({ status: 'finished' })
+  }
+  for (const interval of timer.mock.results) expect(clear).toHaveBeenCalledWith(interval.value)
+  expect(io.outgoingReads).toBe(2)
+  expect(io.reads).toBe(2)
+})
+
+it('[package-progress] reports mismatched workbench fields without disclosing compared values', async () => {
+  const f = await fixture(), rows = capturePackageProgress()
+  const changedFocus = 'PRIVATE_FOCUS_VALUE'
+  after().focus.executionSessionId = changedFocus
+  after().layouts.workspace!.groups[0]!.activeTabId = 'tab-b'
+  const error = await install(f).catch(error => error)
+  expect(error.transaction.ui.continuity.after.workbench.focus.executionSessionId).toBe(changedFocus)
+  expect(error.transaction.ui.status).toBe('unknown')
+  expect(rows.at(-1)).toMatchObject({ stage: 'installed-gui', status: 'failed', check: 'workbench-continuity',
+    lastFailedCheck: 'workbench-continuity', changedWorkbenchFields: ['focus', 'layouts'], lastQueryMs: expect.any(Number) })
+  expect(JSON.stringify(rows)).not.toContain(changedFocus)
+  expect(JSON.stringify(rows)).not.toContain(f.home)
+  expect(io.cutovers).toBe(1)
+})
+
 const after = () => io.after!.workbench
 const agent = () => after().tabs[0]!.regions[0]! as Extract<DesktopClientObservation['workbench']['tabs'][number]['regions'][number], { kind: 'agent' }>
 const browser = () => after().tabs[1]!.regions[0]! as Extract<DesktopClientObservation['workbench']['tabs'][number]['regions'][number], { kind: 'browser' }>

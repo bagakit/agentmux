@@ -34,7 +34,7 @@ async function runUpdate({ command = 'update:local', argv = [], before = install
     await symlink(join(desktop, 'node_modules'), join(app, 'node_modules'))
     const source = await readFile(join(desktop, 'scripts/package-macos.mjs'), 'utf8')
     const ast = ts.createSourceFile('package-macos.mjs', source, ts.ScriptTarget.ESNext, true, ts.ScriptKind.JS)
-    const names = ['main', 'sourceIdentity', 'reportInstallTransaction', 'assert']
+    const names = ['main', 'sourceIdentity', 'reportInstallTransaction', 'assert', 'writeProgress', 'reportPackageStage']
     const product = ast.statements.filter(s => ts.isFunctionDeclaration(s) && names.includes(s.name?.text))
     assert.equal(product.length, names.length)
     const flags = ast.statements.filter(s => ts.isVariableStatement(s) && ['installRequested','appOnly','installIntent'].includes(s.declarationList.declarations[0].name.getText(ast)))
@@ -42,7 +42,7 @@ async function runUpdate({ command = 'update:local', argv = [], before = install
     await writeFile(join(scripts, 'package-macos.mjs'), `
       import { execFileSync } from 'node:child_process'
       import { mkdir, mkdtemp, rename, rm, stat } from 'node:fs/promises'
-      import { join, resolve } from 'node:path'
+      import { dirname, join, resolve } from 'node:path'
       const desktopRoot=resolve(import.meta.dirname,'..'), repositoryRoot=resolve(desktopRoot,'../..')
       const tmpdir=()=>${JSON.stringify(root)}, releaseRoot=join(desktopRoot,'release/mac')
       const PRODUCT_NAME='AgentMux', manifest={version:'fixture'}, outputApp=join(releaseRoot,'AgentMux.app')

@@ -12,7 +12,7 @@ import { preservePackageSmokeFailure } from '../scripts/package-smoke-context.mj
 const source = await readFile(process.env.AGENTMUX_PACKAGE_SMOKE_SOURCE ?? new URL('../scripts/package-macos.mjs', import.meta.url), 'utf8')
 const ast = ts.createSourceFile('package-macos.mjs', source, ts.ScriptTarget.ESNext, true, ts.ScriptKind.JS)
 const digest = (bytes: string | Buffer) => createHash('sha256').update(bytes).digest('hex')
-const bodies = Object.fromEntries(['main', 'createDmg', 'detachCreatedImage', 'verifyDmg', 'run', 'sha256'].map(name => {
+const bodies = Object.fromEntries(['main', 'createDmg', 'detachCreatedImage', 'verifyDmg', 'run', 'sha256', 'writeProgress', 'reportPackageStage'].map(name => {
   const declarations = ast.statements.filter(ts.isFunctionDeclaration).filter(node => node.name?.text === name)
   if (declarations.length !== 1 || !declarations[0]!.body?.statements.length) throw new Error(`Expected one nonempty original ${name}`)
   return [name, declarations[0]!.getText(ast)]
@@ -72,9 +72,13 @@ async function consumeOriginalMain(scenario: Scenario) {
   await writeFile(join(sourceApp, payloadPath), payload)
   await writeFile(join(sourceApp, 'Contents/Info.plist'), '<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>dev.agentmux.private-dmg-fixture</string></dict></plist>\n')
   await writeFile(join(sourceApp, 'Contents/MacOS/AgentMux'), '#!/bin/sh\nexit 0\n', { mode: 0o755 })
-  await writeFile(join(sourceApp, 'Contents/Resources/app/resources/bin/agentmux-workspace-move'), 'private fixture; never executed\n')
-  await mkdir(join(repositoryRoot, 'apps/desktop/resources/bin'), { recursive: true })
-  await writeFile(join(repositoryRoot, 'apps/desktop/resources/bin/agentmux-workspace-move'), 'private fixture; never executed\n')
+  const builtBin = join(repositoryRoot, 'apps/desktop/resources/bin')
+  const stagedBin = join(sourceApp, 'Contents/Resources/app/resources/bin')
+  await mkdir(builtBin, { recursive: true })
+  for (const name of ['agentmux-workspace-move', 'agentmux-mac-location.node']) {
+    await writeFile(join(builtBin, name), 'private fixture; never executed\n')
+    await writeFile(join(stagedBin, name), 'private fixture; never executed\n')
+  }
   let temporaryRoot = '', verifyError: unknown, observedError: unknown, diagnostics: Awaited<ReturnType<typeof preservePackageSmokeFailure>> | undefined
   const cleanupError = Object.assign(new Error('Private completed DMG input cleanup denied'), { code: 'EACCES' })
   const run: Run = async (command, args, options = {}) => {
@@ -134,7 +138,7 @@ async function consumeOriginalMain(scenario: Scenario) {
       facts.diagnostics = diagnostics; return diagnostics
     }
   }
-  const declarations = ['sha256', 'createDmg', 'detachCreatedImage', 'verifyDmg', 'main'].map(name => bodies[name]).join('\n')
+  const declarations = ['sha256', 'createDmg', 'detachCreatedImage', 'verifyDmg', 'writeProgress', 'reportPackageStage', 'main'].map(name => bodies[name]).join('\n')
   const main = new Function(...Object.keys(ports), `${declarations}\nreturn main`)(...Object.values(ports)) as () => Promise<void>
   const error = await main().then(() => null, error => error)
   facts.sourcePayloadAfterSHA256 = digest(await readFile(join(sourceApp, payloadPath)))

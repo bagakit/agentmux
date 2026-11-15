@@ -7,8 +7,12 @@ import { preservePackageSmokeFailure } from '../scripts/package-smoke-context.mj
 
 const source = await readFile(process.env.AGENTMUX_PACKAGE_SMOKE_SOURCE ?? new URL('../scripts/package-macos.mjs', import.meta.url), 'utf8')
 const ast = ts.createSourceFile('package-macos.mjs', source, ts.ScriptTarget.ESNext, true, ts.ScriptKind.JS)
-const mains = ast.statements.filter(ts.isFunctionDeclaration).filter(node => node.name?.text === 'main')
-if (mains.length !== 1) throw new Error('Expected one original packaging entry')
+const functions = ast.statements.filter(ts.isFunctionDeclaration)
+const declarations = ['writeProgress', 'reportPackageStage', 'main'].map(name => {
+  const selected = functions.filter(node => node.name?.text === name)
+  if (selected.length !== 1 || !selected[0]!.body?.statements.length) throw new Error(`Expected one nonempty original ${name}`)
+  return selected[0]!.getText(ast)
+}).join('\n')
 const roots: string[] = []
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })
 async function fixture() {
@@ -56,7 +60,7 @@ async function executeOriginalMain(appOnly: boolean, evidenceUnavailable = false
       return receipt = await preservePackageSmokeFailure(...args)
     }
   }
-  const consume = new Function(...Object.keys(ports), `return (${mains[0]!.getText(ast)})`)(...Object.values(ports))
+  const consume = new Function(...Object.keys(ports), `${declarations}\nreturn main`)(...Object.values(ports))
   const error = await consume().then(() => { throw new Error('The failed smoke must stay failed') }, (error: unknown) => error)
   return { root, repositoryRoot, staging, receipt, failure, error, output, originalLog, stagingRemovalError }
 }

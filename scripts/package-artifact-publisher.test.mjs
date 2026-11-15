@@ -213,7 +213,7 @@ const linuxPath = process.env.AGENTMUX_ARTIFACT_LINUX_SOURCE ?? fileURLToPath(ne
 const macSource = await readFile(macPath, 'utf8'), linuxSource = await readFile(linuxPath, 'utf8')
 const astFor = text => ts.createSourceFile('package.mjs', text, ts.ScriptTarget.ESNext, true, ts.ScriptKind.JS)
 const functionBody = (text, name) => { const ast = astFor(text), found = ast.statements.filter(ts.isFunctionDeclaration).filter(node => node.name?.text === name); assert.equal(found.length, 1); assert(found[0].body.statements.length); return found[0].getText(ast) }
-const macMain = functionBody(macSource, 'main')
+const macDeclarations = ['writeProgress', 'reportPackageStage', 'main'].map(name => functionBody(macSource, name)).join('\n')
 
 async function macConsumer(root, { appOnly = false, install = false, installFailure = false, publicationFailure = false, fenceFailure = false } = {}) {
   const releaseRoot = join(root, 'release'), outputApp = join(releaseRoot, 'AgentMux.app'), outputDmg = join(releaseRoot, 'AgentMux.dmg')
@@ -222,7 +222,7 @@ async function macConsumer(root, { appOnly = false, install = false, installFail
   const ports = { assert: (condition, message) => assert(condition, message), process: { argv: [], platform: 'darwin', arch: 'arm64', execPath: process.execPath, stdout: { write: value => outputs.push(value) }, stderr: { write: () => {} } },
     preflightMacosSigning: async () => ({ kind: 'ad-hoc' }), sourceIdentity: async () => ++reads > 1 && fenceFailure ? { ...originalSource, tree: 'later' } : originalSource,
     run: async command => { events.push(command); return { stdout: '1\n', stderr: '' } }, inspectElectronApplication: async () => ({ application: join(root, 'original.app') }),
-    mkdtemp, mkdir, rename, rm, stat: lstat, join, tmpdir: () => root, repositoryRoot: root, desktopRoot: root, releaseRoot, outputApp, outputDmg, PRODUCT_NAME: 'AgentMux', manifest: { version: 'fixture' }, appOnly, installRequested: install || installFailure,
+    mkdtemp, mkdir, rename, rm, stat: lstat, dirname, join, tmpdir: () => root, repositoryRoot: root, desktopRoot: root, releaseRoot, outputApp, outputDmg, PRODUCT_NAME: 'AgentMux', manifest: { version: 'fixture' }, appOnly, installRequested: install || installFailure,
     brandApplication: noop, copyRuntimeApplication: noop, verifyIdentity: noop, verifyThirdPartyNotices: noop, auditBundle: noop, verifyWorkspaceMoveHelper: noop, verifyNativeDesktopCopy: noop,
     signAndVerifyMacosApplication: async () => ({ kind: 'ad-hoc' }), verifyNativeDesktopSigning: noop, verifyPackagedRuntime: noop, verifyLaunchServices: noop,
     sha256: async path => path === outputDmg ? hash(await readFile(path)) : 'a'.repeat(64),
@@ -232,7 +232,7 @@ async function macConsumer(root, { appOnly = false, install = false, installFail
     publishPackageArtifact: async input => { events.push('publish'); published = await publishPackageArtifact({ ...input, sha256: publicationFailure ? '0'.repeat(64) : input.sha256 }, { observeOccupancy: free }); return published } }
   // cp/branding/build/sign/OS qualification are expensive leaves; source main, filesystem publication and ordering are original.
   ports.brandApplication = async app => { await mkdir(app, { recursive: true }) }
-  const main = new Function(...Object.keys(ports), `return (${macMain})`)(...Object.values(ports))
+  const main = new Function(...Object.keys(ports), `${macDeclarations}\nreturn main`)(...Object.values(ports))
   const error = await main().then(() => null, error => error)
   return { events, outputs, published, error }
 }
