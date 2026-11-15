@@ -5,6 +5,8 @@ import { WindowReturnButton } from './SpatialWindowGrip'
 import { KnowledgeSurfaceTitlebar, useKnowledgeWindowChrome } from './KnowledgeSurfaceWindow'
 import { NOTE_FILE_EXTENSION } from '@agentmux/client-ui/note/note-format'
 import { surveyThumbnailStyle } from '../../../shared/survey-thumbnail-layout'
+import { resolveSurveyBrowsing } from '../../../shared/survey-browsing'
+import { isSystemWebUrl } from '../../../shared/system-web-url'
 import * as Menu from './DropdownMenu'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { recordNotebookChanges, retryNotebookRecoveries, useNotebookLibrary } from '../lib/notebook-library'
@@ -17,6 +19,8 @@ import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, 
 import { useStore } from 'zustand'
 import type { SurveyBrowserPreparation } from '../lib/survey-browser-creation'
 import { isSurveyPage, surveyCatalogScope, surveyPageOwner, type SurveyPageSelection } from '../lib/survey-page-references'
+import { surveyPageReuseCandidates } from '../lib/survey-page-navigation'
+import { surveyPagesBySite, surveyPagesByTime } from '../lib/survey-page-organization'
 import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { surveyBrowserControl, surveyInitialZoneSelection, surveySelectReference, surveySelectedBrowser, surveyZoneItems, type ResolvedSurveyZoneSelection } from '../lib/survey-workface'
@@ -38,7 +42,7 @@ import { surveyCompositionDestinations, type SurveyCompositionDestinationIntent 
 import type { SurveyContentReference, SurveyCompositionDropTarget, SurveyCompositionSelectionControl } from '../lib/survey-composition-drag'
 import { SurveyItemList } from './SurveyItemList'
 import { useSurveyListOrganization } from '../hooks/useSurveyListOrganization'
-import { moveSurveyListItem } from '../lib/survey-list'
+import { moveSurveyListItem, samePage } from '../lib/survey-list'
 import { BrowserStartPage } from './BrowserStartPage'
 import { resolveBrowserStartPage } from '../../../shared/browser-start-page'
 import { SurveyPanelChoices } from './SurveyPanelChoices'
@@ -77,6 +81,7 @@ const ThemeFileTextIcon = semanticIconComponent('file.text')
 const ThemeObjectLauncherIcon = semanticIconComponent('object.launcher')
 const ThemeActionCreateBrowserIcon = semanticIconComponent('action.create-browser')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const surveyGroupTime = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 const ThemeActionCollectSourcesIcon = semanticIconComponent('action.collect-sources')
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
@@ -122,6 +127,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAct
   const profileViewRecovery = useAppStore(state => state.surveyProfileViewReadRecovery)
   const profiles = useBrowserProfiles(observeWork)
   const pageReferences = useAppStore(state => state.surveyPageReferences)
+  const pageAddedAt = useAppStore(state => state.surveyPageAddedAt)
   const pageReadRecovery = useAppStore(state => state.surveyPageReadRecovery)
   const pinnedItems = useAppStore(state => state.pinnedItems)
   const pinReadRecovery = useAppStore(state => state.surveyPinReadRecovery)
@@ -424,6 +430,16 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAct
       return
     }
     const before = useAppStore.getState()
+    if (!newItem && mode !== 'private' && !failedCreation.current) {
+      const profileId = profileView.kind === 'profile' ? profileView.profileId : profiles.error ? undefined : defaultProfileId
+      const existing = profileId && surveyPageReuseCandidates(before, input).find(candidate => candidate.profileId === profileId)
+      if (existing) {
+        intent.current += 1
+        if (!isSurveyPage(before.surveyZoneSelection) || !samePage(before.surveyZoneSelection, existing.page)) setSelection({ kind: 'page', ...existing.page })
+        setError(null)
+        return
+      }
+    }
     const startedIntent = intent.current
     setOpening(true); setError(null)
     try {
@@ -710,7 +726,18 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAct
   const itemTitles = new Map([...Object.keys(collected).filter(zoneId => !membership?.zonesById.has(zoneId)).map(zoneId => [zoneId, 'Retained exploration'] as const), ...[...displayedItems.values()].map(zone => [zone.zoneId, itemTitle(zone)] as const)].filter(([zoneId]) => profileReferences.zoneIds.has(zoneId)))
   const pinnedZoneIds = pinReferences.flatMap(reference => reference.kind === 'zone' && itemTitles.has(reference.zoneId) ? [reference.zoneId] : [])
   const pinnedPages = profileReferences.pages.filter(page => pinnedKeys.has(surveyPinKey({ kind: 'page', ...page })))
-  const ordinaryPages = profileReferences.pages.filter(page => !pinnedKeys.has(surveyPinKey({ kind: 'page', ...page })))
+  const ordinaryPages = useMemo(() => profileReferences.pages.filter(page => !pinnedKeys.has(surveyPinKey({ kind: 'page', ...page }))),
+    [profileReferences.pages, pinnedKeys])
+  const { pageGrouping, groupGapMinutes } = resolveSurveyBrowsing(config?.browser.surveyBrowsing)
+  const automaticGroups = useMemo(() => {
+    if (sidebarCollapsed || pageGrouping === 'none') return null
+    if (pageGrouping === 'time') return surveyPagesByTime(ordinaryPages, pageAddedAt, groupGapMinutes)
+    return surveyPagesBySite(ordinaryPages, page => {
+      const browser = surveyPageOwner(tabs, page, catalog)?.surface
+      return browser?.kind === 'browser' && browser.mode === 'normal' && !browser.capsuleId && isSystemWebUrl(browser.url)
+        ? new URL(browser.url).hostname : undefined
+    })
+  }, [sidebarCollapsed, pageGrouping, ordinaryPages, pageAddedAt, groupGapMinutes, tabs, catalog])
   function pageOptionsFor(page: SurveyPageSelection): SurveyItemOptionsProps {
     const surface = surveyPageOwner(tabs, page, catalog)?.surface, browser = surface?.kind === 'browser' ? surface : null
     return { ...itemOptionsFor(undefined, browser ? <span>{browser.url}</span> : <span>Original Browser unconfirmed; its exact reference is retained.</span>),
@@ -731,6 +758,13 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAct
             actions={<SurveyItemOptions {...pageOptionsFor({ kind: 'page', ...page })} rowAction compact />} />
           return reorderable ? <SortableSurveyPage key={JSON.stringify(page)} page={page} order={references} title={browser?.title || 'Retained page'} enabled={observeWork && !controlsCoverPage}>{item}</SortableSurveyPage> : item()
         })}</div></SortableContext> : null
+  const ordinaryPageRows = automaticGroups === null ? pageItems(ordinaryPages, true) : automaticGroups.map(group => {
+    const title = group.site ?? (group.start !== undefined ? surveyGroupTime.format(group.start) : pageGrouping === 'time' ? 'Earlier webpages' : 'Other webpages')
+    return <section key={group.id} className="survey-automatic-page-group" aria-label={title}>
+      <h3 className="survey-pinned-heading" title={title}>{title}</h3>
+      {pageItems(group.pages, true)}
+    </section>
+  })
   const selectionControls = selectingContent ? <div className="survey-composition-toolbar" role="group" aria-label="Select content to combine">
     {selectingContent ? <><span role="status">{selectedSources.length} selected</span><Menu.Root modal={false}>
       <Menu.Trigger asChild><button type="button" disabled={!selectedSources.length} aria-label="Actions for selected content">Actions</button></Menu.Trigger>
@@ -774,7 +808,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAct
           {unresolvedCompositions.map(operation => <button key={operation.requestId} type="button" onClick={() => setReviewingComposition(operation.requestId)}>Review combination · {operation.sources.length} {operation.sources.every(source => source.kind === 'page') ? 'pages' : 'items'}</button>)}
           {pendingCompositions.length > unresolvedCompositions.length ? <details><summary>A saved combination record could not be read</summary><p>The original record is kept. Other content and combinations remain available.</p><pre>{JSON.stringify(pendingCompositions.filter(entry => !isSurveyCompositionRecovery(entry)), null, 2)}</pre></details> : null}
         </div> : null}
-        <SurveyItemList leading={selectionControls} pinnedZoneIds={pinnedZoneIds} pinnedPages={pageItems(pinnedPages)} trailing={pageItems(ordinaryPages, true)} pageOrder={{ references: pageReferences, commit(next, expected) {
+        <SurveyItemList leading={selectionControls} pinnedZoneIds={pinnedZoneIds} pinnedPages={pageItems(pinnedPages)} trailing={ordinaryPageRows} pageOrder={{ references: pageReferences, commit(next, expected) {
           const requestId = mintObjectId()
           void useAppStore.getState().executeControl({ schemaVersion: 5, requestId, operation: 'space.survey-list',
             collection: { pageReferences: [...next], expectedPageReferences: [...expected] } }).then(result => {

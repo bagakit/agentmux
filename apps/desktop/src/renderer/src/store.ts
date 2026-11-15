@@ -142,6 +142,7 @@ import { acknowledgedNameProjection, projectedNameRevision } from './lib/name-au
 import type { AgentMuxDisplayLabel, AgentMuxNameTarget, AgentMuxDisplayLabelResult } from '@agentmux/core/spatial-graph'
 import { displayLabel, nameTargetKey } from '@agentmux/core/spatial-graph'
 import { createSurveyBrowser } from './lib/survey-browser-creation'
+import { surveyPageTimes, type SurveyPageTimes } from './lib/survey-page-organization'
 import { planSurveyTabComposition, reconcileResearchCompositionSelection, type SurveyCompositionRequest, type SurveyCompositionReport } from './lib/survey-tab-composition'
 import { retainSurveyComposition, surveyCompositionTargetConfirmed, restoreSurveyCompositionRecoveries, changeSurveyCompositionRecovery, isSurveyCompositionRecovery, type SurveyCompositionRecovery, type SurveyCompositionReview } from './lib/survey-composition-recovery'
 import { readSurveyProfileView, surveySelectionProfileMatch, type SurveyProfileView, type SurveyProfileViewRecovery } from './lib/survey-profile-view'
@@ -1345,6 +1346,7 @@ export type AppState = GitReadingActions & {
   surveyPinReadRecovery: SurveyPinReadRecovery | null
   retrySurveyPagesRead(): Promise<void>
   surveyPageReferences: import('@agentmux/core/control').AgentMuxSurveyPageReference[]
+  surveyPageAddedAt: SurveyPageTimes
   setSurveyPageCollected(reference: import('@agentmux/core/control').AgentMuxSurveyPageReference, collected: boolean, onApplied?: (pages: AppState['surveyPageReferences']) => void): Promise<import('@agentmux/core/control').AgentMuxSurveyListReport>
   registerSurveyBrowserPage(reference: import('@agentmux/core/control').AgentMuxSurveyPageReference, profileId: string, onApplied?: (pages: AppState['surveyPageReferences']) => void): Promise<import('@agentmux/core/control').AgentMuxSurveyPageAdmission>
   surveyCollectedZones: Record<string, true>
@@ -4370,6 +4372,7 @@ type PersistedAppState = {
   surveyZoneSelection?: PersistedSurveySelection
   surveyProfileView?: unknown
   surveyPageReferences?: unknown
+  surveyPageAddedAt?: unknown
   surveyCompositionRecoveries?: unknown
   surveyCollectedZones?: Record<string, true>
   surveyOrganization?: import('@agentmux/core/control').AgentMuxSurveyOrganization
@@ -4425,6 +4428,7 @@ export type RestoredUiState = Pick<
   | 'surveyPageReadRecovery'
   | 'surveyPinReadRecovery'
   | 'surveyPageReferences'
+  | 'surveyPageAddedAt'
   | 'surveyCompositionRecoveries'
   | 'surveyCollectedZones'
   | 'surveyOrganization'
@@ -4529,6 +4533,7 @@ export function restorePersistedUiState(
     | 'surveyZoneSelection'
   | 'surveyProfileView'
   | 'surveyPageReferences'
+    | 'surveyPageAddedAt'
   | 'surveyCompositionRecoveries'
   | 'surveyCollectedZones'
   | 'surveyOrganization'
@@ -4593,6 +4598,7 @@ export function restorePersistedUiState(
     surveyProfileView: surveyView.view,
     surveyProfileViewReadRecovery: surveyView.recovery,
     surveyPageReferences: surveyPages.references,
+    surveyPageAddedAt: surveyPageTimes(persisted.surveyPageAddedAt, surveyPages.references),
     surveyCompositionRecoveries: restoreSurveyCompositionRecoveries(persisted.surveyCompositionRecoveries),
     surveyPageReadRecovery: surveyPages.recovery,
     surveyCollectedZones: restoredSurveyCollection(persisted.surveyCollectedZones),
@@ -4711,6 +4717,7 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     surveyZoneSelection: state.surveyZoneSelection,
     surveyProfileView: state.surveyProfileViewReadRecovery ? state.surveyProfileViewReadRecovery.source : state.surveyProfileView,
     surveyPageReferences: state.surveyPageReadRecovery ? state.surveyPageReadRecovery.source : state.surveyPageReferences,
+    surveyPageAddedAt: state.surveyPageAddedAt,
     surveyCompositionRecoveries: state.surveyCompositionRecoveries,
     surveyCollectedZones: state.surveyCollectedZones,
     surveyOrganization: state.surveyOrganization,
@@ -5977,6 +5984,7 @@ function surveyPresentationAfterClose(state: AppState, tabs: AppState['tabs']) {
     recallZoneSelection: closedPage ? null : surveySelectionAfterClose(state.tabs, tabs, state.recallZoneSelection),
     surveyCollectedZones,
     surveyPageReferences: surveyPageReferences.length === state.surveyPageReferences.length ? state.surveyPageReferences : surveyPageReferences,
+    ...(surveyPageReferences.length !== state.surveyPageReferences.length ? { surveyPageAddedAt: surveyPageTimes(state.surveyPageAddedAt, surveyPageReferences) } : {}),
     surveyZoneSelection: isSurveyPage(state.surveyZoneSelection) && pageClosed(state.surveyZoneSelection) ? null : !isSurveyPage(state.surveyZoneSelection) && state.surveyZoneSelection && state.surveyCollectedZones[state.surveyZoneSelection.zoneId] && !surveyCollectedZones[state.surveyZoneSelection.zoneId]
       ? null : isSurveyPage(state.surveyZoneSelection) ? state.surveyZoneSelection : surveySelectionAfterClose(state.tabs, tabs, state.surveyZoneSelection) }
 }
@@ -6689,13 +6697,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (!saved || typeof saved.state !== 'object' || saved.state === null) throw new Error('The original Desktop preference source is unreadable.')
       const read = readSurveyPagePreferences(saved.state.surveyPageReferences)
       if (get().surveyPageReadRecovery !== original) return
-      set({ surveyPageReferences: read.references, surveyPageReadRecovery: read.recovery })
+      set({ surveyPageReferences: read.references, surveyPageAddedAt: surveyPageTimes(saved.state.surveyPageAddedAt, read.references), surveyPageReadRecovery: read.recovery })
     } catch {
       if (get().surveyPageReadRecovery === original) set({ surveyPageReadRecovery: { ...original,
         issue: 'The original Survey page preference source is still unavailable. Its data and healthy pages are kept; restore it and read again.' } })
     }
   },
   surveyPageReferences: [],
+  surveyPageAddedAt: {},
   surveyCompositionRecoveries: [],
   surveyCollectedZones: {},
   surveyOrganization: restoreSurveyOrganization(undefined),
@@ -12868,6 +12877,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return {
         ...topology,
         ...(survey ? { ...survey, surveyPageReferences: pages,
+          ...(pages !== state.surveyPageReferences ? { surveyPageAddedAt: surveyPageTimes(state.surveyPageAddedAt, pages) } : {}),
           ...(pages !== state.surveyPageReferences && state.surveyPageReadRecovery
             ? { surveyPageReadRecovery: { ...state.surveyPageReadRecovery } } : {}) } : {}),
         ...(event.type === 'closed' ? settleNativeBrowserProjectionNotice(state, event.id) : {}),
@@ -14957,8 +14967,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     state.spaceObjectIcons = restoreSpaceIconOverrides(Object.hasOwn(current.config?.appearance ?? {}, 'spaceObjectIcons')
       ? current.config!.appearance.spaceObjectIcons : retainedSpaceIconHandoff)
     state.botTaskSelections = restoredBotTaskSelections(state.botTaskSelections)
+    const surveyPages = readSurveyPagePreferences(state.surveyPageReferences)
     return { ...state, moteMainCreationReferences: restoredMoteMainCreationReferences(state.moteMainCreationReferences), agentLearningReviewDrafts: restoredLearningReviewDrafts(state.agentLearningReviewDrafts), manualConnectionIntents: restoredManualConnectionIntents(state.manualConnectionIntents), manualConnectionSelections: restoredManualConnectionSelections(state.manualConnectionSelections), workspaceAgentOrder: restoreWorkspaceAgentOrder(state.workspaceAgentOrder), moteBotRequests: restoredMoteBotRequests(state.moteBotRequests), connectorRoomIntents: restoredConnectorRoomIntents(state.connectorRoomIntents), connectorRoomDrafts: restoredConnectorRoomDrafts(state.connectorRoomDrafts), connectorServiceIntents: restoredConnectorServiceIntents(state.connectorServiceIntents), mailboxNotificationIntents: restoredMailboxNotificationIntents(state.mailboxNotificationIntents), mailboxNotificationFeedback: current.mailboxNotificationFeedback, mailboxNotificationHistory: current.mailboxNotificationHistory, moteConnectionSaveIntents: restoredMoteConnectionSaveIntents(state.moteConnectionSaveIntents), moteChatIntents: restoredMoteChatIntents(state.moteChatIntents), noteCanvasLayouts: restoreNoteCanvasLayouts(state.noteCanvasLayouts), recentMoteAgents: restoredRecentMoteAgents(state.recentMoteAgents), questionReplies: restoredQuestionReplies(state.questionReplies), capsuleQuestionEditors: restoredCapsuleQuestionEditors(state.capsuleQuestionEditors), goalAgentSelectionDrafts: restoredGoalAgentSelectionDrafts(state.goalAgentSelectionDrafts), goalAgentCreationDrafts: restoredGoalAgentCreationDrafts(state.goalAgentCreationDrafts), goalFiniteStartIntents: restoredGoalFiniteStartIntents(state.goalFiniteStartIntents), agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
-      agentComposerHistoryNavigation: {}, ...restoreSurveyPinPreferences(restoredPinnedItems(state.pinnedItems), state.pinnedItems), surveyProfileView: readSurveyProfileView(state.surveyProfileView).view, surveyProfileViewReadRecovery: readSurveyProfileView(state.surveyProfileView).recovery, surveyPageReferences: readSurveyPagePreferences(state.surveyPageReferences).references, surveyPageReadRecovery: readSurveyPagePreferences(state.surveyPageReferences).recovery, surveyOrganization: restoreSurveyOrganization(state.surveyOrganization), surveyZoneSelection: restoredSurveySelection(state.surveyZoneSelection), recallZoneSelection: restoredSurveyZoneSelection(state.recallZoneSelection) }
+      agentComposerHistoryNavigation: {}, ...restoreSurveyPinPreferences(restoredPinnedItems(state.pinnedItems), state.pinnedItems), surveyProfileView: readSurveyProfileView(state.surveyProfileView).view, surveyProfileViewReadRecovery: readSurveyProfileView(state.surveyProfileView).recovery, surveyPageReferences: surveyPages.references, surveyPageAddedAt: surveyPageTimes(state.surveyPageAddedAt, surveyPages.references), surveyPageReadRecovery: surveyPages.recovery, surveyOrganization: restoreSurveyOrganization(state.surveyOrganization), surveyZoneSelection: restoredSurveySelection(state.surveyZoneSelection), recallZoneSelection: restoredSurveyZoneSelection(state.recallZoneSelection) }
   },
   partialize: partializeAppState
 }))

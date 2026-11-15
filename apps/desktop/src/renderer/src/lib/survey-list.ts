@@ -1,6 +1,7 @@
 import type { AgentMuxSpaceControlRequest, AgentMuxSurveyListReport, AgentMuxSurveyOrganization, AgentMuxSpatialSave } from '@agentmux/core/control'
 import { parseSurveyOrganization, parseSurveyCollectionChange, parseSurveyPinChange } from '@agentmux/core/control'
 import { changeSurveyPin, surveyPinnedReferences, surveyPinKey, type SurveyPinReadRecovery } from './survey-pins'
+import { surveyPageKey, updateSurveyPageTimes, type SurveyPageTimes } from './survey-page-organization'
 
 export const EMPTY_SURVEY_ORGANIZATION: AgentMuxSurveyOrganization = { ungrouped: [], groups: [] }
 
@@ -50,6 +51,7 @@ type State = {
   surveyOrganization: AgentMuxSurveyOrganization
   surveyCollectedZones: Record<string, true>
   surveyPageReferences: Page[]
+  surveyPageAddedAt?: SurveyPageTimes
   surveyPageReadRecovery?: { issue: string } | null
   pinnedItems: Record<string, string[]>
   surveyPinReadRecovery?: SurveyPinReadRecovery | null
@@ -66,7 +68,6 @@ type Request = Extract<AgentMuxSpaceControlRequest, { operation: 'space.survey-l
 export const surveyCollectedZoneIds = (collected: Readonly<Record<string, true>>): string[] => Object.keys(collected).filter(id => collected[id] === true)
 const sameMembers = (left: string[], right: string[]) => { const members = new Set(right); return left.length === members.size && left.every(id => members.has(id)) }
 export const samePage = (a: Page, b: Page) => a.regionId === b.regionId && a.browserId === b.browserId
-const pageKey = (page: Page) => JSON.stringify([page.regionId, page.browserId])
 const samePages = (left: readonly Page[], right: readonly Page[]) =>
   left.length === right.length && left.every((page, index) => samePage(page, right[index]!))
 
@@ -116,8 +117,8 @@ export async function executeSurveyList(ports: Ports, request: Request): Promise
     recovery: 'Read this same list before changing the original page references. Its pages remain available.' }])
   const pages = collection?.pageReferences ?? state.surveyPageReferences
   if (collection?.pageReferences !== undefined && unread.length) return report('unknown', unread)
-  const originals = new Set(state.surveyPageReferences.map(pageKey))
-  if (pages.some(page => !originals.has(pageKey(page)) && !ports.hasPage(page))) return report('refused', [{
+  const originals = new Set(state.surveyPageReferences.map(surveyPageKey))
+  if (pages.some(page => !originals.has(surveyPageKey(page)) && !ports.hasPage(page))) return report('refused', [{
     step: 'target', code: 'SURVEY_LIST_PAGE_UNCONFIRMED', message: 'A new Survey reference has no confirmed original Browser in that Region.',
     recovery: 'Inspect that exact Region and Browser ID. Existing references and healthy pages are kept.' }])
   const appliedMembers = collection?.zoneIds !== undefined ? changeSurveyCollection(state.surveyCollectedZones, collection.zoneIds, ports.hasZone) : state.surveyCollectedZones
@@ -144,7 +145,11 @@ export async function executeSurveyList(ports: Ports, request: Request): Promise
   // Omitted originals return to the ungrouped area; organization never removes membership.
   const requested = new Set(ids)
   const applied = request.organization === undefined ? before : { ...next, ungrouped: [...next.ungrouped, ...[...zoneOriginals].filter(id => !requested.has(id))] }
-  ports.set({ surveyOrganization: applied, surveyCollectedZones: appliedMembers, surveyPageReferences: pages === state.surveyPageReferences ? pages : pages.map(page => ({ ...page })), ...pinChange })
+  const originalPages = state.surveyPageReferences
+  ports.set({ surveyOrganization: applied, surveyCollectedZones: appliedMembers,
+    surveyPageReferences: pages === originalPages ? pages : pages.map(page => ({ ...page })),
+    ...(pages !== originalPages && state.surveyPageAddedAt ? { surveyPageAddedAt: updateSurveyPageTimes(originalPages, pages, state.surveyPageAddedAt, Date.now()) } : {}),
+    ...pinChange })
   let save: AgentMuxSpatialSave
   try { save = await ports.save() }
   catch (error) {

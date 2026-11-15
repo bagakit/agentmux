@@ -4,9 +4,14 @@ import type { AppState } from '../store'
 import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import type { SystemPageOutcome } from '../../../shared/system-web-url'
 import type { SurveyBrowserPreparation } from './survey-browser-creation'
+import { browserProfiles } from './browser-profiles'
+import { surveyPageReuseCandidates } from './survey-page-navigation'
+import { isSurveyPage } from './survey-page-references'
+import { samePage } from './survey-list'
 
 export type SystemPageState = Pick<AppState,
-  'tabs' | 'createSurveyBrowser' | 'surveyProfileView' | 'surveyZoneSelection' | 'setSurveyZoneSelection' | 'setMainSurface'>
+  'config' | 'tabs' | 'layouts' | 'surveyPageReferences' | 'createSurveyBrowser' | 'surveyProfileView' |
+  'setSurveyProfileView' | 'surveyZoneSelection' | 'setSurveyZoneSelection' | 'setMainSurface'>
 export type SystemPageHost = { get(): SystemPageState; navigation(): string; subscribe(listener: () => void): () => void }
 // Presentation priority only; requests, resource creation and saving keep their original owners.
 const latestPresentation = new WeakMap<SystemPageHost['get'], object>()
@@ -24,23 +29,49 @@ export async function openSystemPageInSurvey(host: SystemPageHost, request: { ur
   let focus: Promise<boolean> | undefined
   const unsubscribe = host.subscribe(() => { if (!presenting && !current()) navigationChanged = true })
   let preparation: SurveyBrowserPreparation | null = null
-  const reveal = (prepared: SurveyBrowserPreparation): void => {
-    if (signal.aborted || latestPresentation.get(get) !== presentation || !prepared.reference || navigationChanged || !current()) return
-    const browser = get().tabs[prepared.reference.tabId]?.regions[prepared.reference.regionId]
-    if (prepared.admission?.outcome === 'unknown') return
-    const page = browser?.kind === 'browser' && prepared.createdBrowser?.id === browser.browserId
-    const launcher = browser?.kind === 'launcher' && browser === prepared.surface
-    if (!page && !launcher) return
+  const present = (choose: () => void) => {
+    if (signal.aborted || latestPresentation.get(get) !== presentation || navigationChanged || !current()) return
     presenting = true
     try {
-      get().setSurveyZoneSelection(page ? { kind: 'page', regionId: prepared.reference.regionId, browserId: browser.browserId }
-        : { zoneId: prepared.zone.zoneId, selection: [{ tabId: prepared.reference.tabId, regionId: prepared.reference.regionId }],
-            active: { tabId: prepared.reference.tabId, regionId: prepared.reference.regionId } })
+      choose()
       focus ??= presentKnowledgeSurface('survey', get().setMainSurface, { inputPolicy: 'target' })
       navigation = host.navigation(); surveySelection = get().surveyZoneSelection; profile = get().surveyProfileView
     } finally { presenting = false }
   }
+  const reveal = (prepared: SurveyBrowserPreparation): void => {
+    if (!prepared.reference || prepared.admission?.outcome === 'unknown') return
+    const { tabId, regionId } = prepared.reference
+    const browser = get().tabs[tabId]?.regions[regionId]
+    const page = browser?.kind === 'browser' && prepared.createdBrowser?.id === browser.browserId
+    const launcher = browser?.kind === 'launcher' && browser === prepared.surface
+    if (!page && !launcher) return
+    present(() => get().setSurveyZoneSelection(page ? { kind: 'page', regionId, browserId: browser.browserId }
+      : { zoneId: prepared.zone.zoneId, selection: [{ tabId, regionId }], active: { tabId, regionId } }))
+  }
   try {
+    const hasMatch = surveyPageReuseCandidates(get(), request.url).length > 0
+    // The default can change while no Renderer observes Profile pushes. Only a
+    // possible reuse needs a fresh default observation before choosing its page.
+    if (hasMatch) await browserProfiles.refresh()
+    if (signal.aborted) return { state: 'unconfirmed', browserId: null, reference: null, message: 'The original system request is no longer available.' }
+    const profiles = browserProfiles.get()
+    const defaultProfileId = !profiles.error ? profiles.profiles?.find(item => item.isDefault)?.id : undefined
+    const reusable = hasMatch && defaultProfileId && surveyPageReuseCandidates(get(), request.url).find(candidate => candidate.profileId === defaultProfileId)
+    if (reusable) {
+      const { page, reference } = reusable
+      let saveView: Promise<string | null> | undefined
+      present(() => {
+        const state = get()
+        if (state.surveyProfileView.kind === 'profile' && state.surveyProfileView.profileId !== defaultProfileId)
+          saveView = state.setSurveyProfileView({ kind: 'default' }).then(save => save.reason, () => 'Saving the original environment view was unconfirmed.')
+        const selected = get().surveyZoneSelection
+        if (!isSurveyPage(selected) || !samePage(selected, page)) state.setSurveyZoneSelection({ kind: 'page', ...page })
+      })
+      if (focus && !await focus) return { state: 'unconfirmed', browserId: page.browserId, reference, message: 'The existing page is available. Bringing its Survey window forward was unconfirmed.' }
+      const issue = await saveView
+      if (issue) return { state: 'unconfirmed', browserId: page.browserId, reference, message: issue }
+      return { state: 'opened', browserId: page.browserId, reference }
+    }
     const prepared = await get().createSurveyBrowser({ workspaceId: SCRATCH_WORKSPACE_ID, url: request.url, preparation: null, onPrepared(value) { preparation = value; reveal(value) } })
     const browser = get().tabs[prepared.reference.tabId]?.regions[prepared.reference.regionId]
     if (browser?.kind !== 'browser') throw new Error('The original Survey Browser attachment is unconfirmed.')

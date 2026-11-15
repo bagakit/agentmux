@@ -16,6 +16,7 @@ import { resolveNotesPreferences, type NotesPreferences } from './notes-preferen
 import { resolveMarkdownPreferences, type MarkdownPreferences } from './markdown-preferences'
 import { resolveBrowserStartPage, type BrowserStartPageConfig } from './browser-start-page'
 import { resolveSurveyThumbnailLayout, type SurveyThumbnailLayout } from './survey-thumbnail-layout'
+import { resolveSurveyBrowsing, type SurveyBrowsingPreferences } from './survey-browsing'
 import { BROWSER_NEW_PAGE_SCENES, resolveBrowserNewPagePlacement, type BrowserNewPagePlacement } from './browser-new-page-placement'
 import { resolveBrowserAgentControl, type BrowserAgentControlPreferences } from './browser-agent-control'
 import { resolveAutomationPreferences, type AutomationPreferences } from './automation-preferences'
@@ -47,6 +48,7 @@ const preferenceDomains = new Map<string, PreferenceDomain>(Object.entries({
   'browser.agentControl': { resolve: value => resolveBrowserAgentControl(value as Partial<BrowserAgentControlPreferences> | undefined), merge: 'authored' },
   'browser.startPage': { resolve: value => resolveBrowserStartPage(value as Partial<BrowserStartPageConfig> | undefined), merge: 'authored' },
   'browser.surveyThumbnails': { resolve: value => resolveSurveyThumbnailLayout(value as Partial<SurveyThumbnailLayout> | undefined), merge: 'authored' },
+  'browser.surveyBrowsing': { resolve: value => resolveSurveyBrowsing(value as Partial<SurveyBrowsingPreferences> | undefined), merge: 'authored' },
   'browser.newPagePlacement': { resolve: value => Object.fromEntries(BROWSER_NEW_PAGE_SCENES.map(scene => [scene, resolveBrowserNewPagePlacement(value as Partial<BrowserNewPagePlacement> | undefined, scene)])), merge: 'authored' },
   continuity: { resolve: value => normalizeAgentContinuityPolicy(value as Partial<AgentMuxContinuityPolicy> | undefined), merge: 'authored' },
   profile: { resolve: value => resolveUserProfile(value as Partial<UserProfile> | undefined), merge: 'resolved' },

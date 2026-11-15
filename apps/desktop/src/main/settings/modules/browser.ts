@@ -2,6 +2,7 @@ import { BROWSER_TOOLBAR_ITEM_ORDER } from '../../../shared/browser-toolbar.js'
 import { DEFAULT_CONFIG } from '../../config-store.js'
 import { booleanSetting, enumSetting, integerSetting, textSetting, invalid } from '../scalar-setting.js'
 import { DEFAULT_SURVEY_THUMBNAIL_LAYOUT, SURVEY_THUMBNAIL_HEIGHT, SURVEY_THUMBNAIL_COLUMNS, resolveSurveyThumbnailLayout } from '../../../shared/survey-thumbnail-layout.js'
+import { DEFAULT_SURVEY_BROWSING, SURVEY_GROUP_GAP_MINUTES, SURVEY_PAGE_GROUPINGS, resolveSurveyBrowsing, type SurveyBrowsingPreferences } from '../../../shared/survey-browsing.js'
 import type { ScalarSetting } from '../scalar-setting.js'
 import { browserAgentControlSettings } from './browser-agent-control.js'
 import { BROWSER_NEW_PAGE_SCENES, BROWSER_NEW_PAGE_DESTINATIONS, BROWSER_NEW_PAGE_PLACEMENT_DEFAULTS, resolveBrowserNewPagePlacement } from '../../../shared/browser-new-page-placement.js'
@@ -10,6 +11,9 @@ import { DEFAULT_BROWSER_START_PAGE, BROWSER_START_PAGE_TITLE_LIMIT, BROWSER_STA
 
 const writeStartPage = <K extends keyof BrowserStartPageConfig>(config: Parameters<ScalarSetting['entry']>[0], key: K, value: BrowserStartPageConfig[K]) =>
   ({ ...config, browser: { ...config.browser, startPage: { ...resolveBrowserStartPage(config.browser.startPage), [key]: value } } })
+
+const writeSurveyBrowsing = <K extends keyof SurveyBrowsingPreferences>(config: Parameters<ScalarSetting['entry']>[0], key: K, value: SurveyBrowsingPreferences[K]) =>
+  ({ ...config, browser: { ...config.browser, surveyBrowsing: { ...config.browser.surveyBrowsing, [key]: value } } })
 
 export const browserSettings = [
   ...BROWSER_NEW_PAGE_SCENES.map(scene => enumSetting(`browser.newPagePlacement.${scene}`,
@@ -20,6 +24,15 @@ export const browserSettings = [
     config => config.browser.automaticMemoryRelease !== false,
     (config, automaticMemoryRelease) => ({ ...config, browser: { ...config.browser, automaticMemoryRelease } })),
   ...browserAgentControlSettings,
+  booleanSetting('browser.surveyBrowsing.reuseOpenPages', DEFAULT_SURVEY_BROWSING.reuseOpenPages,
+    config => resolveSurveyBrowsing(config.browser.surveyBrowsing).reuseOpenPages,
+    (config, value) => writeSurveyBrowsing(config, 'reuseOpenPages', value)),
+  enumSetting('browser.surveyBrowsing.pageGrouping', SURVEY_PAGE_GROUPINGS, DEFAULT_SURVEY_BROWSING.pageGrouping,
+    config => resolveSurveyBrowsing(config.browser.surveyBrowsing).pageGrouping,
+    (config, value) => writeSurveyBrowsing(config, 'pageGrouping', value)),
+  integerSetting('browser.surveyBrowsing.groupGapMinutes', SURVEY_GROUP_GAP_MINUTES, DEFAULT_SURVEY_BROWSING.groupGapMinutes,
+    config => resolveSurveyBrowsing(config.browser.surveyBrowsing).groupGapMinutes,
+    (config, value) => writeSurveyBrowsing(config, 'groupGapMinutes', value)),
   ...(['height', 'maxColumns'] as const).map(key => integerSetting(`browser.surveyThumbnails.${key}`,
     key === 'height' ? SURVEY_THUMBNAIL_HEIGHT : SURVEY_THUMBNAIL_COLUMNS, DEFAULT_SURVEY_THUMBNAIL_LAYOUT[key],
     config => resolveSurveyThumbnailLayout(config.browser.surveyThumbnails)[key],

@@ -444,6 +444,8 @@
 
 .survey-pinned-items { flex: none; display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--sp-2); }
 .survey-pinned-heading { padding: var(--sp-2) var(--sp-3) var(--sp-1); color: var(--text-3); font-size: var(--fs-meta); }
+.survey-automatic-page-group + .survey-automatic-page-group { margin-top: var(--sp-2); }
+.survey-automatic-page-group > h3 { margin: 0; padding-top: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .global-survey-surface .survey-item-row:has(> .survey-item-shortcuts > .survey-pin-mark) { --survey-pin-space: 16px; }
 .global-survey-surface .survey-item-row[data-headerless="true"] .survey-pin-mark { position: static; }

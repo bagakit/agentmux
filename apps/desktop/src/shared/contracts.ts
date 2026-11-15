@@ -392,6 +392,7 @@ export type BrowserConfig = {
   startPage?: Partial<import('./browser-start-page').BrowserStartPageConfig>
   /** Optional navigation density; absence uses shared effective defaults without a write. */
   surveyThumbnails?: Partial<import('./survey-thumbnail-layout').SurveyThumbnailLayout>
+  surveyBrowsing?: Partial<import('./survey-browsing').SurveyBrowsingPreferences>
   /**
    * Agent 驱动浏览器页面的总开关。可选是因为字段是后加的——`ConfigStore.get` 会把缺席补成具体的
    * `false` 并落盘一次（同 scratch/notifications 的补齐），所以缺席从不意味着"开"。
