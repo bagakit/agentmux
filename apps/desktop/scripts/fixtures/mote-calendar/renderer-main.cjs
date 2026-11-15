@@ -4,6 +4,7 @@ const path = require('node:path')
 const assert = require('node:assert/strict')
 const [html, evidence] = process.argv.slice(2)
 const ideasOnly = process.argv.includes('--ideas')
+const personalityOnly = process.argv.includes('--profile-personality')
 const result = { passed: false, captureOnly: true, aestheticReview: 'not-performed', engine: { electron: process.versions.electron, chromium: process.versions.chrome }, images: [], operations: [], geometry: [], mutations: [], errors: [] }
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
 assert.ok(evidence && evidence.includes('/capture-'))
@@ -45,16 +46,17 @@ app.whenReady().then(async () => {
       const close=n.closest('.mote-profile-popover')?.querySelector('[aria-label="Close Mote profile"]');
       const bounds=rect(n),tabs=n.querySelector('[role="tablist"][aria-label="Mote details"]'),fonts=[...n.querySelectorAll('.mote-details__content,.mote-details__prose')].filter(visible);
       return {panel:bounds,section:n.dataset.section,main:rect(n.querySelector('.mote-details__main')),name:n.querySelector('.mote-details__name strong')?.textContent.trim(),header:rect(n.querySelector('.mote-details__profile')),
+        activity:rect(n.querySelector('.mote-profile__activity')),
         content:rect(content),contentOffset:content?rect(content).top-bounds.top:null,calendarOffset:first?rect(first).top+calendar.scrollTop-bounds.top:null,
         calendarScroll:visible(calendar)?calendar.scrollTop:null,calendar:visible(calendar)?rect(calendar):null,
         calendarToolbar:visible(calendar)?rect(calendar.querySelector('.mote-calendar__toolbar')):null,
         calendarControls:visible(calendar)?[...calendar.querySelectorAll('.mote-calendar__toolbar button')].map(control):[],
         canvas:visible(calendar)?rect(calendar.querySelector('.mote-calendar__canvas')):null,agenda:visible(calendar)?rect(calendar.querySelector('.mote-calendar__day')):null,
         nameRect:rect(n.querySelector('.mote-details__name')),close:visible(close)?control(close):null,coarse:matchMedia('(pointer: coarse)').matches,
-        densityPolicy:matchMedia('(pointer: coarse)').matches?'coarse: 44px targets and unobstructed readable content':'fine: finite identity card beside personality, first useful content visible, original Calendar density',
+        densityPolicy:matchMedia('(pointer: coarse)').matches?'coarse: 44px targets and unobstructed readable content':'fine: one finite identity card, unobstructed activity and original Calendar density',
         tabs:[...tabs?.querySelectorAll('[role="tab"]')??[]].map(control),
         identity:[...n.querySelectorAll('[aria-label="Change Mote avatar"],[aria-label="Rename Mote"]')].filter(visible).map(control),
-        axes:[...n.querySelectorAll('[data-behavior-axis]')].filter(visible).map(e=>({axis:e.dataset.behaviorAxis,rect:rect(e)})),
+        axes:[...n.querySelectorAll('[data-behavior-axis]')].filter(visible).map(e=>({axis:e.dataset.behaviorAxis,rect:rect(e),withinIdentity:!!e.closest('[aria-label="Mote identity"]')})),
         fonts:fonts.map(e=>({prose:e.classList.contains('mote-details__prose'),size:parseFloat(getComputedStyle(e).fontSize),lineHeight:getComputedStyle(e).lineHeight})),
         overflow:[n,content,visible(calendar)?calendar.querySelector('.mote-calendar__toolbar'):null].filter(visible).map(e=>({className:e.className,clientWidth:e.clientWidth,scrollWidth:e.scrollWidth})),
         scenario:window.moteCalendarScene.facts().mode};
@@ -64,13 +66,13 @@ app.whenReady().then(async () => {
       assert.ok(facts.panel.width > 0 && facts.contentOffset > 0, 'A nonempty actual Mote content position is required')
       const card = facts.section === 'profile' && facts.panel.width >= 720
       if (card) {
-        assert.ok(facts.main.left >= facts.header.right + 12, 'The identity card must leave space beside the working content')
-        assert.ok(facts.header.width <= 241 && facts.header.width < facts.panel.width / 3, 'The identity card must keep its compact width')
+        assert.ok(facts.activity.left >= facts.header.right + 12, 'The identity card must leave space beside the working content')
+        assert.ok(facts.header.width <= 273 && facts.header.width < facts.panel.width * .36, 'The identity card must keep its compact width')
         assert.ok(facts.header.top >= facts.panel.top + 12 && facts.header.left >= facts.panel.left + 12, 'The identity card must be visibly inset')
         assert.ok(facts.header.bottom <= facts.panel.bottom - 32, 'Identity card density budget exceeded: the card must leave visible space below it')
       }
       const budget = card ? 72 : facts.panel.height * 0.55
-      if (!card) assert.ok(facts.header.height <= facts.panel.height * 0.45 + 1, 'The compact identity must leave most of the height for work')
+      if (!card && facts.section === 'profile') assert.ok(facts.activity.top >= facts.header.bottom, 'Narrow activity follows the identity card in the same reading flow')
       assert.ok(facts.contentOffset <= budget, 'Mote header density budget exceeded: ' + facts.contentOffset + ' > ' + budget)
     }
     const calendarBudget = facts => {
@@ -173,6 +175,57 @@ app.whenReady().then(async () => {
       await until(`window.moteCalendarScene.facts().calls.some(c=>c.method==='schedule.list'&&c.params.scope)`, 'Mote-wide scope read')
     }
     await until('!!window.moteCalendarScene&&!!document.querySelector("[data-mote-details]")', 'Original Mote frame')
+    if (personalityOnly) {
+      await read('document.querySelector(".calendar-fixture").dataset.wideProof=""')
+      win.setContentSize(1440, 900)
+      const summary = inPanel('.mote-behavior-summary__details')
+      const original = inPanel('.mote-details__soul')
+      const edit = inPanel('[aria-label="Edit behavior settings"]')
+      const tag = inPanel('.mote-behavior-summary__tag')
+      await until(`(${tag})?.textContent === 'MBTI style · INFJ'`, 'Confirmed original working style')
+      const checkTraits = facts => {
+        assert.equal(facts.axes.length, 4, 'Personality density budget exceeded: four original preferences must be visible')
+        assert.ok(facts.axes.every(({ rect, withinIdentity }) => withinIdentity && rect.left >= facts.header.left && rect.right <= facts.header.right + 1),
+          'Personality density budget exceeded: all four preferences belong to the identity card')
+      }
+      await capture('identity-and-work-wide-dark')
+      await densityMutation('personality-hidden', '.mote-details__profile .mote-behavior-summary__choices {display:none!important}', checkTraits)
+      await click(`${summary}.querySelector('summary')`, 'Open the saved explanations')
+      await until(`${summary}.open&&${summary}.querySelectorAll('[data-behavior-rule]').length===4`, 'All four original working-style explanations')
+      await capture('identity-explanations-wide-dark')
+      await click(`${summary}.querySelector('summary')`, 'Collapse explanations')
+      await click(edit, 'Edit from the identity card')
+      await until('!!document.querySelector(".mote-behavior-dialog")', 'Original preference editor')
+      await click('document.querySelector(\'[aria-label="Close behavior settings"]\')', 'Close original editor')
+      assert.equal(await read(`document.activeElement===${edit}`), true, 'The original editor restores the identity-card focus')
+      await read(`window.moteCalendarScene.behavior({engagement:'I',custom:'Use concrete examples.'})`)
+      await until(`(${inPanel('.mote-behavior-summary__choices')})?.textContent.includes('Not selected')`, 'Partial saved preferences')
+      await click(`${summary}.querySelector('summary')`, 'Read custom preferences')
+      await until(`${summary}.open&&${summary}.textContent.includes('Use concrete examples.')`, 'The original custom preference is readable')
+      await capture('identity-partial-wide-dark')
+      await read(`window.moteCalendarScene.behavior('unknown')`)
+      await until(`!!(${inPanel('.mote-behavior-summary .ui-notice')})&&!(${tag})`, 'Unconfirmed original preferences live in the identity card')
+      assert.equal(await read(`(${inPanel('.mote-behavior-summary')}).textContent.split('Saved behavior is unconfirmed.').length-1`), 1)
+      await capture('identity-unconfirmed-wide-dark')
+      await read(`window.moteCalendarScene.behavior('saved', false)`)
+      await click(button('Retry settings'), 'Retry original behavior read')
+      await until(`(${tag})?.textContent === 'MBTI style · INFJ'`, 'Read back the same saved preferences')
+      await click(`${original}.querySelector('summary')`, 'Open original file links')
+      await until(`${original}.open&&${original}.textContent.includes('Open original SOUL')`, 'Original SOUL stays reachable')
+      await click(`${original}.querySelector('summary')`, 'Collapse original files')
+      await read(`delete document.querySelector('.calendar-fixture').dataset.wideProof;window.moteCalendarScene.theme('light');window.moteCalendarScene.name('一起做研究与设计的长期搭档 Mote')`)
+      win.setContentSize(360, 700)
+      await firstViewport()
+      const narrow = await geometry()
+      checkTraits(narrow)
+      assert.ok(narrow.activity.top >= narrow.header.bottom)
+      const name = inPanel('.mote-details__full-name strong')
+      assert.equal(await read(`(${name}).scrollHeight <= (${name}).clientHeight + 1`), true, 'The long name wraps fully in the identity card')
+      await capture('identity-long-name-narrow-light')
+      assert.deepEqual(result.errors, [])
+      result.passed = true
+      return
+    }
     if (ideasOnly) {
       const service = inPanel('.mote-details__ideas .mote-ideas__service')
       const retry = inPanel('.mote-details__ideas .ui-notice__actions button')
@@ -259,10 +312,10 @@ app.whenReady().then(async () => {
       result.passed = true
       return
     }
-    await until(`(${panel}).textContent.includes('Personality & working style')&&(${inPanel('.mote-behavior-summary__choices')})?.children.length===4`, 'Confirmed original personality axes')
+    await until(`(${panel}).textContent.includes('Personality')&&(${inPanel('.mote-behavior-summary__choices')})?.children.length===4`, 'Confirmed original personality axes')
     await until(`!(${panel}).textContent.includes('Reading original goals')`, 'Original Goal data ready')
     await capture('profile-wide-dark')
-    await densityMutation('identity-card-full-height', '.mote-details[data-section="profile"] > .mote-details__profile { height: 100% !important; max-height: none !important; }', headerBudget)
+    await densityMutation('identity-card-full-height', '.mote-profile > .mote-details__profile { min-height: 100vh !important; }', headerBudget)
     await read(`window.moteCalendarScene.behavior({engagement:'I',custom:'Keep this partial preference.'})`)
     await until(`(${inPanel('.mote-behavior-summary__choices')})?.textContent.includes('Not selected')`, 'Partial original personality')
     await capture('profile-partial-personality-dark')
@@ -286,7 +339,7 @@ app.whenReady().then(async () => {
     win.setContentSize(1600, 900); await firstViewport(); await capture('profile-expanded-dark')
     const employee = await geometry()
     assert.equal(employee.axes.length, 4, 'All four original axes remain visible in the expanded Profile')
-    assert.ok(Math.abs(employee.axes[0].rect.top - employee.axes[1].rect.top) < 1 && employee.axes[1].rect.left >= employee.axes[0].rect.right, 'Wide Profile must present two readable personality columns')
+    assert.ok(employee.axes.every(axis => axis.withinIdentity) && Math.abs(employee.axes[0].rect.top - employee.axes[1].rect.top) < 1, 'Wide Profile puts two readable personality columns inside the identity card')
     await read(`delete document.querySelector('.calendar-fixture').dataset.wideProof`)
     win.setContentSize(332, 900); await firstViewport(); await capture('profile-narrow-dark')
     win.webContents.debugger.attach('1.3')

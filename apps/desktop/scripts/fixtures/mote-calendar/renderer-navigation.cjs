@@ -27,7 +27,7 @@ app.whenReady().then(async () => {
       const rect=e=>{if(!e)return null;const r=e.getBoundingClientRect();return {x:r.x,y:r.y,left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height}};
       const hit=e=>{const r=rect(e);if(!r)return null;const h=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return {rect:r,hit:h===e||e.contains(h)}};
       const panel=${q('[data-mote-details]')},name=panel?.querySelector('.mote-details__full-name'),cal=panel?.querySelector('.mote-calendar'),css=cal&&getComputedStyle(cal),visible=!!cal?.getBoundingClientRect().height&&getComputedStyle(cal).visibility!=='hidden';
-      return {viewport:{width:innerWidth,height:innerHeight},section:panel?.dataset.section,panel:rect(panel),name:{text:name?.textContent,label:name?.getAttribute('aria-label'),expanded:name?.getAttribute('aria-expanded'),...hit(name),textRect:rect(name?.querySelector('strong')),font:name?parseFloat(getComputedStyle(name.querySelector('strong')).fontSize):0},tabs:[...document.querySelectorAll('[aria-label="Mote pages"] [role="tab"]')].map(e=>({label:e.textContent,selected:e.getAttribute('aria-selected'),...hit(e)})),
+      return {viewport:{width:innerWidth,height:innerHeight},section:panel?.dataset.section,panel:rect(panel),name:{text:name?.textContent,label:name?.getAttribute('aria-label'),expanded:name?.getAttribute('aria-expanded'),...hit(name),textRect:rect(name?.querySelector('strong')),font:name?parseFloat(getComputedStyle(name.querySelector('strong')).fontSize):0,lineHeight:name?parseFloat(getComputedStyle(name.querySelector('strong')).lineHeight):0},tabs:[...document.querySelectorAll('[aria-label="Mote pages"] [role="tab"]')].map(e=>({label:e.textContent,selected:e.getAttribute('aria-selected'),...hit(e)})),
       calendar:visible?{crossedCells:[...cal.querySelectorAll('.mote-calendar__point')].filter(p=>{
         const end=rect(p.closest('.mote-calendar__cell')).right
         return [...p.children].some(child=>rect(child).right>end+1)
@@ -40,7 +40,7 @@ app.whenReady().then(async () => {
       if(g.section==='profile') {
         assert.ok(g.name.rect.width>=100,'Identity readability failed: no horizontal name room')
         assert.equal(g.name.label,g.name.text)
-        if(g.name.expanded==='false')assert.ok(g.name.textRect.height<30,'Identity readability failed: collapsed name stacks vertically')
+        if(g.name.expanded==='false')assert.ok(g.name.textRect.height<=g.name.lineHeight*(g.panel.width<720?2:1)+1,'Identity readability failed: collapsed name exceeds its line budget')
       }
       for(const o of g.overflow)assert.ok(o.scroll<=o.client+1,'Original surface overflowed')
     }

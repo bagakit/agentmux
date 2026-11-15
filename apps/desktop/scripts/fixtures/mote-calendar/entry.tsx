@@ -254,10 +254,10 @@ function Scene() {
       [workspace.id]: { ...state.scratchTopicSnapshots[workspace.id]!, topics: [{ ...topic }] } } })) },
     summary: (summary: string) => { topic.summary = summary; useAppStore.setState(state => ({ scratchTopicSnapshots: { ...state.scratchTopicSnapshots,
       [workspace.id]: { ...state.scratchTopicSnapshots[workspace.id]!, topics: [{ ...topic }] } } })) },
-    behavior: (preferences: MoteBehaviorDraft | 'unknown' | 'saved') => {
+    behavior: (preferences: MoteBehaviorDraft | 'unknown' | 'saved', refresh = true) => {
       behaviorUnknown = preferences === 'unknown'
       if (!behaviorUnknown) files[rootPath + '/BEHAVIOR.md'] = serializeMoteBehaviorDocument(DEFAULT_MOTE_BEHAVIOR, preferences === 'saved' ? savedPreferences : preferences as MoteBehaviorDraft)
-      useAppStore.setState(state => ({ workspaceFileRevisions: { ...state.workspaceFileRevisions, [workspace.id]: (state.workspaceFileRevisions[workspace.id] ?? 0) + 1 } }))
+      if (refresh) useAppStore.setState(state => ({ workspaceFileRevisions: { ...state.workspaceFileRevisions, [workspace.id]: (state.workspaceFileRevisions[workspace.id] ?? 0) + 1 } }))
     },
     presentation: (next: 'space' | 'card') => setCard(next === 'card'),
     facts: () => ({ explorer: (() => { const value = useAppStore.getState().fileExplorerStates[workspace.id]; return value ? { expandedPaths: [...value.expandedPaths], activePath: value.selection.activePath, selectedPaths: [...value.selection.selectedPaths] } : null })(), expanded: presentation.expanded, mode, now, workspacePath, moteDirectory: topic.directoryPath, targets, initialDrafts, drafts: useAppStore.getState().agentComposerDrafts,

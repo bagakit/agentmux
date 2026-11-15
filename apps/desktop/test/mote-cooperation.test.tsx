@@ -43,13 +43,14 @@ async function choices() { for (const value of ['I', 'N', 'F', 'J']) await moteC
 const scope = () => ({ workspace: scratchWorkspace, topic: moteTopics.find(topic => topic.id === PMO_TEAMS_TOPIC_ID)!, rootPath })
 function savedAxes(preferences: MoteBehaviorDraft) {
   const list = details().querySelector('.mote-behavior-summary__choices')!
+  expect(list.closest('[aria-label="Mote identity"]')).not.toBeNull()
   expect(list.tagName).toBe('DL')
   expect(list.children).toHaveLength(4)
   for (const [index, axis] of MOTE_BEHAVIOR_AXES.entries()) {
     const row = list.children[index]!, selected = axis.choices.find(choice => choice.value === preferences[axis.id])
     expect(row.querySelector('dt')?.textContent).toBe(axis.label)
     expect(row.querySelector('dd strong')?.textContent).toBe(selected?.title ?? 'Not selected')
-    expect(row.querySelector('dd p')?.textContent ?? null).toBe(selected?.rule ?? null)
+    expect(details().querySelector(`[data-behavior-rule="${axis.id}"] dd`)?.textContent ?? null).toBe(selected?.rule ?? null)
   }
 }
 
@@ -96,8 +97,10 @@ describe('original Mote cooperation Editor and explicit new Launcher', () => {
     const original = '# My original SOUL\nKeep all custom content exactly.\n\n## Cooperation preferences\nOld preference remains.\n\n## Idea feedback\nOriginal note and revision remain.\n'; soulDisk = original + MOTE_BEHAVIOR_LINK + '\n'
 
     const write = vi.mocked(api.files.write)
-    await app.mount(); expect(details().querySelector('.mote-behavior-summary select, .mote-behavior-summary textarea')).toBeNull(); expect(details().textContent).toContain('Choose how we work together.')
+    await app.mount(); await moteClick(button('Profile'))
+    expect(details().querySelector('.mote-behavior-summary select, .mote-behavior-summary textarea')).toBeNull(); expect(details().textContent).toContain('Choose how we work together.')
     await studio(); await choices(); await moteClick(action('Extra preferences')); await text('[aria-label="Custom cooperation preferences"]', 'Use concrete examples.'); await moteClick(button('Save'))
+    await moteClick(button('Profile'))
     const state = useAppStore.getState(), key = documentKey(SCRATCH_WORKSPACE_ID, path), doc = state.documents[key]!
     expect(soulDisk.startsWith(original)).toBe(true); expect(doc.content).toContain('Use concrete examples.'); expect(doc.revision).toBe(diskRevision)
     expect(state.dirtyDocuments[key]).not.toBe(true); expect(write).toHaveBeenCalledTimes(1); expect(details().textContent).toContain('MBTI style · INFJ'); expect(parseMoteBehaviorDocument(doc.content)).toMatchObject({ status: 'valid', code: 'INFJ' })
@@ -174,13 +177,15 @@ describe('original Mote cooperation Editor and explicit new Launcher', () => {
     expect(useAppStore.getState().documents[documentKey(SCRATCH_WORKSPACE_ID, path)]).toBeUndefined(); expect(api.files.write).not.toHaveBeenCalled()
   })
   it('keeps unknown Save unconfirmed until the original Check saved file verifies the same attempt', async () => {
-    await app.mount(); await studio(); await choices(); /* Save follows the controlled receipt loss below. */
+    await app.mount(); await moteClick(button('Profile')); await studio(); await choices(); /* Save follows the controlled receipt loss below. */
     const state = useAppStore.getState(), key = documentKey(SCRATCH_WORKSPACE_ID, path)
     vi.mocked(api.files.write).mockImplementation(async (_workspace, input) => { if (input.path === path) disk = input.content; else soulDisk = input.content; diskRevision = 'sha256:' + 'e'.repeat(64); return { status: 'unknown', code: 'RECEIPT_LOST', message: 'The write receipt is unconfirmed.' } })
     await moteClick(button('Save'))
     const tab = Object.values(useAppStore.getState().tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'file' && region.path === path))!
     expect(dialog()).not.toBeNull(); expect(dialog().textContent).toContain('Saving is unconfirmed')
     expect(useAppStore.getState().documentIssues[key]?.kind).toBe('write-unknown')
+    await moteClick(action('Close behavior settings'))
+    await moteClick(button('Profile'))
     expect(details().querySelector('.mote-behavior-summary__tag')).toBeNull(); expect(details().textContent).toContain('Saved behavior is unconfirmed')
     expect(details().textContent).not.toContain('Save there to apply it')
     await act(async () => state.saveDocument(tab.id, tab.layout.activeRegionId)); expect(api.files.write).toHaveBeenCalledTimes(1)
@@ -188,7 +193,7 @@ describe('original Mote cooperation Editor and explicit new Launcher', () => {
     expect(useAppStore.getState().documentIssues[key]).toBeUndefined(); expect(useAppStore.getState().dirtyDocuments[key]).toBe(false)
     expect(api.files.write).toHaveBeenCalledTimes(1); expect(details().textContent).toContain('MBTI style · INFJ')
     expect(details().textContent).not.toContain('Save there to apply it')
-    await moteClick(action('Close behavior settings')); await studio(); expect(dialog().querySelector<HTMLInputElement>('input[value="I"]')!.checked).toBe(true)
+    await moteClick(button('Profile')); await studio(); expect(dialog().querySelector<HTMLInputElement>('input[value="I"]')!.checked).toBe(true)
     expect(useAppStore.getState().agentComposerDrafts[defaultAgent.id]).toBe('Default unsent'); expect(app.stop).not.toHaveBeenCalled()
   })
   it('preserves an existing unsaved original Editor paragraph when reviewing a behavior block', async () => {
@@ -363,7 +368,7 @@ it('review counter: the original behavior system file is not a recent idea', asy
 
 it('review counter: confirmed custom-only Markdown remains visible in Profile without inventing an MBTI code', async () => {
   disk = '---\nversion: 1\npreferences: {}\n---\nKeep my manual collaboration notes visible.'
-  await app.mount(); await settleMoteApp()
+  await app.mount(); await moteClick(button('Profile')); await settleMoteApp()
   expect(parseMoteBehaviorDocument(disk)).toMatchObject({ status: 'valid', code: null })
   expect(details().textContent).toContain('Keep my manual collaboration notes visible.')
   expect(details().querySelector('.mote-behavior-summary__tag')).toBeNull()
@@ -384,7 +389,7 @@ it('keeps ordinary user notes in both Profile and Ideas while excluding the beha
 })
 it('shows a saved partial preference without inventing its missing axes or MBTI code', async () => {
   disk = '---\nversion: 1\npreferences:\n  engagement: I\n---\nKeep these partial notes.'
-  await app.mount(); await settleMoteApp()
+  await app.mount(); await moteClick(button('Profile')); await settleMoteApp()
   savedAxes({ engagement: 'I', custom: 'Keep these partial notes.' })
   expect(details().textContent).toContain('Keep these partial notes.')
   expect(details().querySelector('.mote-behavior-summary__tag')).toBeNull()
@@ -393,10 +398,10 @@ it('shows a saved partial preference without inventing its missing axes or MBTI 
 it('presents every saved personality axis with its own title and working rule before current work', async () => {
   const preferences = { engagement: 'E', information: 'S', decisions: 'T', approach: 'P', custom: 'Keep my original additional preference.' } as const
   disk = serializeMoteBehaviorDocument(DEFAULT_MOTE_BEHAVIOR, preferences)
-  await app.mount(); await settleMoteApp()
+  await app.mount(); await moteClick(button('Profile')); await settleMoteApp()
   savedAxes(preferences)
   const personality = details().querySelector('.mote-behavior-summary')!, work = details().querySelector('[aria-label="This Mote’s work"]')!
-  expect(personality.textContent).toContain('Personality & working style')
+  expect(personality.getAttribute('aria-label')).toBe('Personality')
   expect(personality.textContent).toContain('MBTI style · ESTP')
   expect(personality.textContent).toContain(preferences.custom)
   expect(personality.compareDocumentPosition(work) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
@@ -404,7 +409,7 @@ it('presents every saved personality axis with its own title and working rule be
 })
 
 it('distinguishes confirmed unselected axes from an unconfirmed original behavior read', async () => {
-  await app.mount(); await settleMoteApp()
+  await app.mount(); await moteClick(button('Profile')); await settleMoteApp()
   savedAxes({ custom: '' })
   const before = useAppStore.getState()
   vi.mocked(api.files.readPublic).mockImplementation(async params => params.path === 'BEHAVIOR.md'
