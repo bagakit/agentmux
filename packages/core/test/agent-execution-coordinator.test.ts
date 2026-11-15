@@ -11,6 +11,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { afterAll, beforeAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentExecutionCoordinator, AgentExecutionBindingService, type AgentExecutionHostPort, type AgentExecutionOpenInput, type AgentExecutionInspection } from '../src/agent-execution-coordinator.js'
 import type { AgentMuxClientEvent, AgentMuxRunInputOperation, AgentMuxAgentSession } from '../src/types.js'
+import { AgentMuxError } from '../src/errors.js'
 
 let io: Awaited<ReturnType<typeof messageJournalIo>>
 beforeAll(async () => { io = await messageJournalIo() }, 30_000)
@@ -83,6 +84,52 @@ async function fixture() {
 }
 
 describe('execution coordinator retained original pair', () => {
+  it('automatically rejoins the original bridge after carrier loss and reconciles the lost Input acknowledgement', async () => {
+    const f = await fixture(), owner = await f.open()
+    const original = (await owner.coordinator.create(f.input)).execution
+    const disconnected = () => new AgentMuxError('Original carrier disconnected', 'CONTROL_CONNECTION_FAILED')
+    const resolveHost = f.resolveHost.getMockImplementation()!
+    let failedRejoins = 0
+    f.resolveHost.mockImplementation(async id => {
+      if (id === f.input.resourceHostId && failedRejoins < 2) { failedRejoins++; throw disconnected() }
+      return await resolveHost(id)
+    })
+    const write = f.executor.api.writeTerminal.getMockImplementation()!
+    f.executor.api.writeTerminal.mockImplementationOnce(async (...args) => {
+      await write(...args)
+      throw disconnected()
+    })
+    const end = f.frontend.addOutput({ type: 'request', generation: 'original', payload: { id: 1, method: 'tools/call' } })
+    const inspect = () => owner.coordinator.inspect(f.input.bindingId)
+    await vi.waitFor(() => expect(inspect()).toMatchObject({ state: 'unavailable', diagnostic: { code: 'CONTROL_CONNECTION_FAILED' } }))
+    expect(f.read().bridge.pending.operation.operationId).toBe(f.executor.api.writeTerminal.mock.calls[0]![1].operationId)
+    await vi.waitFor(() => expect(inspect()).toMatchObject({ state: 'connected', helperStarts: original.helperStarts,
+      continuation: original.continuation }), { timeout: 3000 })
+    expect(failedRejoins).toBe(2)
+    expect(f.executor.api.writeTerminal.mock.calls).toHaveLength(2)
+    expect(f.executor.api.writeTerminal.mock.calls[1]).toEqual(f.executor.api.writeTerminal.mock.calls[0])
+    expect(f.executor.claimed.size).toBe(1)
+    expect(f.read().bridge.frontend.outputByte).toBe(end)
+    expect(f.read().bridge.pending).toBeUndefined()
+    expect(f.frontend.api.createHostAgentWithDelivery).toHaveBeenCalledOnce()
+    for (const helper of [f.frontend, f.executor]) expect(helper.api.createPreparedTerminal).toHaveBeenCalledOnce()
+  })
+
+  it('keeps the original claim and stops background rejoin when the carrier answers for another Runtime', async () => {
+    const f = await fixture(), owner = await f.open()
+    const original = (await owner.coordinator.create(f.input)).execution
+    f.resolveHost.mockImplementationOnce(async () => ({ runtimeId: 'wrong-runtime', client: f.frontend.port }))
+    f.executor.api.writeTerminal.mockRejectedValueOnce(new AgentMuxError('Original carrier disconnected', 'CONTROL_CONNECTION_FAILED'))
+    f.frontend.addOutput({ type: 'request', generation: 'original', payload: { id: 1, method: 'tools/call' } })
+    await vi.waitFor(() => expect(owner.coordinator.inspect(f.input.bindingId)).toMatchObject({ state: 'unavailable',
+      diagnostic: { code: 'EXECUTION_HOST_CHANGED' }, helperStarts: original.helperStarts, continuation: original.continuation }))
+    await new Promise(resolve => setTimeout(resolve, 550))
+    expect(f.resolveHost).toHaveBeenCalledTimes(4)
+    expect(f.executor.api.writeTerminal).toHaveBeenCalledOnce()
+    expect(f.read().bridge.pending.operation.operationId).toBe(f.executor.api.writeTerminal.mock.calls[0]![1].operationId)
+    expect(f.frontend.api.createHostAgentWithDelivery).toHaveBeenCalledOnce()
+  })
+
   it('retains both independently pending Inputs across coordinator reopen', async () => {
     const f = await fixture(), first = await f.open(), ack = gate()
     await first.coordinator.create(f.input)
@@ -445,6 +492,45 @@ describe('exact helper connection and local diagnostic truth', () => {
     emit(f.executor, { type: 'attachment-state', state: 'restored', afterByte: 0 })
     expect(first.coordinator.inspect(f.input.bindingId)?.state).toBe('connected')
     expect(f.executor.api.attachTerminal).toHaveBeenCalledTimes(1)
+  })
+  it.each([false, true])('recovers an idle reader after carrier loss and keeps an already restored attachment (%s)', async restoredFirst => {
+    const f = await fixture(), owner = await f.open()
+    await owner.coordinator.create(f.input)
+    emit(f.executor, { type: 'attachment-state', state: 'unavailable', afterByte: 0,
+      diagnostic: { code: 'CONTROL_CONNECTION_FAILED', message: 'Original attachment carrier disconnected' } })
+    expect(owner.coordinator.inspect(f.input.bindingId)?.state).toBe('unavailable')
+    if (restoredFirst) {
+      emit(f.executor, { type: 'attachment-state', state: 'restored', afterByte: 0 })
+      // The first binding retry window ends within this interval.
+      await new Promise(resolve => setTimeout(resolve, 300))
+    } else await vi.waitFor(() => expect(f.executor.api.attachTerminal).toHaveBeenCalledTimes(2))
+    expect(f.executor.api.attachTerminal).toHaveBeenCalledTimes(restoredFirst ? 1 : 2)
+    expect(owner.coordinator.inspect(f.input.bindingId)?.state).toBe('connected')
+    expect(f.frontend.api.writeTerminal).not.toHaveBeenCalled()
+    expect(f.executor.api.writeTerminal).not.toHaveBeenCalled()
+    expect(f.frontend.api.createHostAgentWithDelivery).toHaveBeenCalledOnce()
+  })
+  it('coalesces a manual rejoin queued behind automatic recovery on the same binding', async () => {
+    const f = await fixture(), owner = await f.open(), attaching = gate()
+    const original = (await owner.coordinator.create(f.input)).execution
+    const attach = f.executor.api.attachTerminal.getMockImplementation()!
+    f.executor.api.attachTerminal.mockImplementationOnce(async (...args) => {
+      await attaching.promise
+      return await attach(...args)
+    })
+    try {
+      emit(f.executor, { type: 'attachment-state', state: 'unavailable', afterByte: 0,
+        diagnostic: { code: 'CONTROL_CONNECTION_FAILED', message: 'Original attachment carrier disconnected' } })
+      await vi.waitFor(() => expect(f.executor.api.attachTerminal).toHaveBeenCalledTimes(2))
+      const manual = owner.coordinator.rejoin(f.input.bindingId)
+      attaching.release()
+      await expect(manual).resolves.toMatchObject({ state: 'connected', continuation: original.continuation,
+        helperStarts: original.helperStarts })
+      expect(f.executor.api.attachTerminal).toHaveBeenCalledTimes(2)
+      expect(f.executor.api.releaseRunAttachment).toHaveBeenCalledOnce()
+      expect(f.resolveHost).toHaveBeenCalledTimes(4)
+      expect(f.frontend.api.createHostAgentWithDelivery).toHaveBeenCalledOnce()
+    } finally { attaching.release() }
   })
   it('uses native service revisions independently from running process and reader availability', async () => {
     const f = await fixture(), first = await f.open(); await first.coordinator.create(f.input)
