@@ -62,7 +62,13 @@ it('observes the actual footer→Store→App commit→snapshot/strict codec for 
     expect(useAppStore.getState().mainSurface).toBe(internal)
     const selected = records().at(-1)!
     expect(selected).toMatchObject({ source: 'footer-click', to: publicId, eventAtMonoMs: null, inputDelayMs: null,
-      selectedSource: 'layout-effect', selectedMs: expect.any(Number), actionResult: 'returned', frameMs: null, state: 'pending', pendingStage: 'frame' })
+      selectedSource: 'layout-effect', selectedMs: expect.any(Number), actionResult: 'returned', frameMs: null, state: 'pending' })
+    if (container.querySelector('[data-loading-phase="loading"]')) {
+      expect(selected.pendingStage).toBe('presentation')
+      expect(clock.frames.size).toBe(0)
+    }
+    await act(async () => vi.dynamicImportSettled())
+    expect(records().at(-1)!.pendingStage).toBe('frame')
     await frame(); expect(records().at(-1)!.frameMs).toBeNull(); await frame()
     expect(records().at(-1)).toMatchObject({ state: 'observed', frameMs: 32, pendingStage: null })
   }
@@ -96,6 +102,7 @@ it('waits through actual Settings/quick switch/loading/document coverage and fre
   expect(records()[0]).toMatchObject({ state: 'pending', pendingStage: 'presentation', frameMs: null })
   expect(clock.frames.size).toBe(0)
   await act(async () => button('Settings').click())
+  await act(async () => vi.dynamicImportSettled())
   expect(clock.frames.size).toBe(1)
   const chord = isMacPlatform() ? { metaKey: true } : { ctrlKey: true, shiftKey: true }
   await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', ...chord, bubbles: true })))

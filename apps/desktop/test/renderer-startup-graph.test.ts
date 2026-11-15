@@ -38,6 +38,10 @@ it('keeps on-demand libraries out of the static Renderer startup graph', async (
     'apps/desktop/src/renderer/src/components/AgentCollaborationGraph.tsx']
   expect(map.every(path => path in inputs)).toBe(true)
   expect(map.filter(path => startup.has(path))).toEqual([])
+  const surfaces = ['GlobalFocusSurface', 'GlobalRecallSurface', 'GlobalSurveySurface', 'GlobalBoardSurface']
+    .map(module => `apps/desktop/src/renderer/src/components/${module}.tsx`)
+  expect(surfaces.filter(path => path in inputs)).toEqual(surfaces)
+  expect(surfaces.filter(path => startup.has(path))).toEqual([])
   const mesh = 'apps/desktop/src/renderer/src/components/settings/MeshSettingsPane.tsx'
   expect(mesh in inputs).toBe(true)
   expect(startup.has(mesh)).toBe(false)

@@ -90,7 +90,9 @@ beforeEach(async () => {
   vi.spyOn(api.spatial, 'renameLabel').mockRejectedValue(new Error('Private name write failed; original Agent stays healthy'))
   host = document.createElement('div'); document.body.append(host); root = createClientUiRoot(host)
   await act(async () => root.render(<App />)); await settle()
-  await act(async () => host.querySelector<HTMLButtonElement>('footer [aria-label^="Focus: show execution contexts."]')!.click()); await settle()
+  await act(async () => host.querySelector<HTMLButtonElement>('footer [aria-label^="Focus: show execution contexts."]')!.click())
+  await act(async () => vi.dynamicImportSettled())
+  await until(() => Boolean(host.querySelector('[data-desktop-focus-view="list"]')))
 })
 afterEach(async () => {
   await act(async () => root.unmount()); dispose?.(); dispose = undefined; restorePopover()

@@ -3,6 +3,8 @@ import { createRequire } from 'node:module'
 import { act } from 'react'
 import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
+import { parseAgentMuxCliInvocation } from '../../../packages/core/src/agentmux-cli-commands'
+import { rpcControlRequest } from '../../../packages/core/src/rpc-business-codec'
 import { App } from '../src/renderer/src/App'
 import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
 import { MoteWorkfaceContext } from '../src/renderer/src/lib/mote-workface'
@@ -12,7 +14,22 @@ import type { SessionSnapshot } from '../src/shared/contracts'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import { installNativePopover, moteTopic } from './fixtures/mote-workface'
 
-vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
+const surfaceLoad = vi.hoisted(() => {
+  vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
+  const fixture = {
+    evaluated: [] as string[], requests: [] as string[], held: '', failed: '', release: undefined as (() => void) | undefined,
+    load<T>(surface: string, load: () => Promise<T>): Promise<T> {
+      fixture.requests.push(surface)
+      if (surface === fixture.failed) return Promise.reject(new Error('Private surface module unavailable'))
+      if (surface === fixture.held) return new Promise((resolve, reject) => {
+        fixture.release = () => { void load().then(resolve, reject) }
+      })
+      return load()
+    }
+  }
+  vi.stubGlobal('__agentmuxSurfaceLoad', fixture)
+  return fixture
+})
 vi.mock('react-resizable-panels', () => createRequire(import.meta.url)('../node_modules/react-resizable-panels/dist/react-resizable-panels.browser.development.cjs.js'))
 // Only the native drawing leaf is isolated. App, Pane/Tab ownership, SessionPane
 // and the global chrome's Store subscription are the actual product code.
@@ -31,6 +48,9 @@ let restorePopover: () => void
 
 beforeEach(() => {
   window.localStorage.clear()
+  surfaceLoad.requests.length = 0
+  surfaceLoad.held = surfaceLoad.failed = ''
+  surfaceLoad.release = undefined
   restorePopover = installNativePopover()
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} })
@@ -73,7 +93,7 @@ function scene(count: number) {
   const drafts = { [active.id]: 'Original unsent draft' }
   useAppStore.setState({
     config: { ...composerConfig, workspaces }, loading: false, initialize: async () => () => {},
-    mainSurface: 'workbench', activeWorkspaceId: active.id, workbenchSpaceSelection: null,
+    mainSurface: 'workbench', focusView: 'list', activeWorkspaceId: active.id, workbenchSpaceSelection: null,
     projectRailOpen: false, toolsOpen: false, sessions, tabs, layouts, timelines: {},
     viewModes: Object.fromEntries(sessions.map(session => [session.id, 'terminal' as const])),
     agentComposerDrafts: drafts, prewarmTerminal: async () => {},
@@ -81,6 +101,93 @@ function scene(count: number) {
   })
   return { active, next, sessions, tabs, layouts, drafts }
 }
+
+it('loads only the actual requested surface and confirms it through its original public reader', async () => {
+  const original = scene(4)
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+    x: 0, y: 0, top: 0, left: 0, right: 600, bottom: 400, width: 600, height: 400, toJSON: () => ({})
+  })
+  await dom.render(<App />)
+  const originalRegion = region('region-' + original.active.id)
+  const originalTerminal = terminal(original.active.id)
+  expect(originalTerminal).not.toBeNull()
+  expect(surfaceLoad.evaluated).toEqual([])
+  expect(surfaceLoad.requests).toEqual([])
+
+  const inspect = await parseAgentMuxCliInvocation(['app', 'inspect'])
+  const focus = await parseAgentMuxCliInvocation(['app', 'focus', '--surface', 'goals'])
+  expect(inspect.command.method).toBe('app.inspect')
+  expect(focus.command.method).toBe('app.focus')
+  const control = () => useAppStore.getState()
+  const inspectPresentation = () => control().executeControl(rpcControlRequest('app.inspect', inspect.params))
+  surfaceLoad.held = 'Goals'
+  const navigate = rpcControlRequest('app.focus', focus.params)
+  let opening!: ReturnType<ReturnType<typeof control>['executeControl']>
+  await act(async () => { opening = control().executeControl(navigate) })
+  expect(surfaceLoad.requests).toEqual(['Goals'])
+  expect(surfaceLoad.evaluated).toEqual([])
+  expect(dom.container.querySelector('[data-loading-phase="loading"]')).not.toBeNull()
+  expect(await inspectPresentation()).toMatchObject({ observation: { desktop: { presentation: { state: 'pending' } } } })
+  await act(async () => { surfaceLoad.release!(); await vi.dynamicImportSettled() })
+  expect(dom.container.querySelector('[data-desktop-goals-view]')).not.toBeNull()
+  let firstReceipt!: Awaited<typeof opening>
+  await act(async () => { firstReceipt = await opening })
+  expect(firstReceipt.operation).toBe('focus')
+  if (firstReceipt.operation === 'focus' && firstReceipt.presentation.state !== 'main-visible') {
+    expect(firstReceipt).toMatchObject({ partial: true, presentation: { state: 'pending' } })
+  }
+  expect(await inspectPresentation()).toMatchObject({ observation: { desktop: { presentation: { state: 'main-visible' } } } })
+  await act(async () => {
+    expect(await control().executeControl(rpcControlRequest('app.focus', focus.params)))
+      .toMatchObject({ presentation: { state: 'main-visible' } })
+  })
+
+  const retained: Array<{ selector: string; node: Element }> = []
+  for (const [surface, name, selector] of [
+    ['agents', 'Focus', '[data-desktop-focus-view="list"]'],
+    ['recall', 'Recall', '[data-knowledge-surface="recall"]'],
+    ['survey', 'Survey', '[data-knowledge-surface="survey"]']
+  ] as const) {
+    await act(async () => control().setMainSurface(surface))
+    await act(async () => vi.dynamicImportSettled())
+    const node = dom.container.querySelector(selector)
+    expect(node).not.toBeNull()
+    retained.push({ selector, node: node! })
+    expect(surfaceLoad.evaluated.at(-1)).toBe(name)
+    expect(await inspectPresentation()).toMatchObject({ observation: { desktop: { presentation: { state: 'main-visible' } } } })
+  }
+  await act(async () => control().setMainSurface('workbench'))
+  expect(surfaceLoad.evaluated).toEqual(['Goals', 'Focus', 'Recall', 'Survey'])
+  expect(surfaceLoad.requests).toEqual(surfaceLoad.evaluated)
+  for (const { selector, node } of retained) expect(dom.container.querySelector(selector)).toBe(node)
+  expect(region('region-' + original.active.id)).toBe(originalRegion)
+  expect(terminal(original.active.id)).toBe(originalTerminal)
+  expect(control().sessions).toBe(original.sessions)
+  expect(control().agentComposerDrafts).toBe(original.drafts)
+})
+
+it('isolates late and failed module loads and returns to the original workface', async () => {
+  const original = scene(4)
+  await dom.render(<App />)
+  const originalTerminal = terminal(original.active.id)
+  expect(originalTerminal).not.toBeNull()
+  surfaceLoad.held = 'Survey'
+  await act(async () => useAppStore.getState().setMainSurface('survey'))
+  expect(dom.container.querySelector('[data-loading-phase="loading"]')).not.toBeNull()
+  await act(async () => useAppStore.getState().setMainSurface('workbench'))
+  await act(async () => { surfaceLoad.release!(); await vi.dynamicImportSettled() })
+  expect(dom.container.querySelector('[data-knowledge-surface="survey"]')).toBeNull()
+  surfaceLoad.failed = 'Goals'
+  await act(async () => useAppStore.getState().setMainSurface('board'))
+  expect(dom.container.querySelector('[data-loading-phase="failed"]')?.textContent).toContain('Could not open Goals')
+  const back = [...dom.container.querySelectorAll('button')].find(button => button.textContent === 'Return to Space')
+  expect(back).toBeDefined()
+  await act(async () => back!.click())
+  expect(useAppStore.getState().mainSurface).toBe('workbench')
+  expect(terminal(original.active.id)).toBe(originalTerminal)
+  expect(useAppStore.getState().agentComposerDrafts).toBe(original.drafts)
+  expect(surfaceLoad.requests).toEqual(['Survey', 'Goals'])
+})
 
 it.each([4, 88])('only observes global window controls in the current owner among %i mounted Workspaces', async count => {
   const original = scene(count)
