@@ -1,6 +1,6 @@
 # Auth
 
-This editable local Toolkit package reads the selected account's reported usage. Its default arguments are `codexL` and `@active`. Only an explicit Run invokes the query; installing, saving, enabling or watching it does not query an account.
+This editable local Toolkit package reads the selected account's reported usage. The preinstalled package starts disabled. Its example arguments are `codexL` and `@active`. Configure an available query executable and an account selector before enabling it. Startup execution then follows the tool's saved automatic-start setting.
 
 `query.mjs` receives the query executable, then either `@active` or an exact `account_key`, followed by optional query arguments. Without extra arguments it runs `as-inspect auth status --scope global --skip-api --json`. To use another CLI or output format, edit `queryArguments`, `decodeQueryOutput` and `readAccounts` in this directory. Editing `manifest.json`, the entry or helper files takes effect on the next explicit run.
 
