@@ -65,8 +65,11 @@ export const ScreenshotEditor = forwardRef<ScreenshotEditorHandle, {
     // Clear previous copy feedback without creating an edit or changing its revision.
     props.onEdited?.()
     try {
+      const historical = source ? {
+        url: source.url, title: source.title, viewport: source.viewport, viewportWarning: source.viewportWarning
+      } : null
       const document = createEditableAnnotationDocument({ image: { dataUrl: image.dataUrl, width: image.width, height: image.height },
-        shapes: input.shapes, crop: input.crop, source }, ANNOTATION_DOCUMENT_LIMITS)
+        shapes: input.shapes, crop: input.crop, source: historical }, ANNOTATION_DOCUMENT_LIMITS)
       saveDraft.current = { path: file?.path ?? 'screenshot.agentmux-annotation.json', expectedRevision: file?.revision ?? null, document, edit: edits.current }
       operation.current += 1; setDialog('save')
     } catch (error) { setStatus(presentError(error)); props.onError?.(error) }
