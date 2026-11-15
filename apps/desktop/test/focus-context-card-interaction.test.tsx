@@ -14,6 +14,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { createFocusProjectionSelector } from '../src/renderer/src/lib/focus-context'
 import { formatSessionAddress } from '../src/renderer/src/lib/agent-address'
+import { agentInformationPreview } from '../src/renderer/src/lib/agent-information-preview'
 vi.mock('../src/renderer/src/components/AgentAvatar', async importOriginal => ({
   ...await importOriginal<typeof import('../src/renderer/src/components/AgentAvatar')>(),
   AgentAvatar: () => createElement('span')
@@ -44,9 +45,12 @@ async function menu(id = second, keyboard: boolean | 'shift-f10' = false) {
   expect(document.querySelector('.focus-context-menu')?.getAttribute('data-agent-session-id')).toBe(id)
 }
 async function choose(label: string) {
-  const item = [...document.querySelectorAll<HTMLElement>('.focus-context-menu [role="menuitem"]')].find(node => node.textContent === label)
+  const item = menuEntry(label)
   expect(item).toBeTruthy(); await act(async () => item!.click())
   await advance(1)
+}
+function menuEntry(label: string) {
+  return [...document.querySelectorAll<HTMLElement>('.focus-context-menu [role="menuitem"]')].find(node => (node.getAttribute('aria-label') ?? node.textContent) === label)
 }
 async function value(text: string) {
   const input = container.querySelector<HTMLInputElement>('.focus-context__rename')!
@@ -96,10 +100,17 @@ afterEach(async () => {
 })
 
 it('reveals held facts and scoped inputs after intent, allows reading transfer and inner scrolling without moving input', async () => {
-  const reads = [vi.spyOn(api.sessions, 'historyPage'), vi.spyOn(api.sessions, 'timeline'), vi.spyOn(api.workspaces, 'appearance')]
+  const read = vi.spyOn(api.conversation, 'readAgentConversation')
+  const historyPage = vi.spyOn(api.sessions, 'historyPage')
+  const timeline = vi.spyOn(api.sessions, 'timeline')
+  const projectAppearance = vi.spyOn(api.workspaces, 'appearance')
+  const workspaceId = useAppStore.getState().config!.workspaces[0]!.id
   destination.focus(); await pointer(card(), 'pointerover'); await advance(179); expect(preview()).toBeNull()
-  expect(reads.every(read => read.mock.calls.length === 0)).toBe(true)
-  await advance(1); expect(preview()?.textContent).toContain(response); expect(preview()?.querySelector('.focus-context-hover__recap small')?.getAttribute('title')).toContain('Last assistant message')
+  expect(read).not.toHaveBeenCalled()
+  expect(historyPage).not.toHaveBeenCalled()
+  expect(timeline).not.toHaveBeenCalled()
+  expect(projectAppearance).not.toHaveBeenCalled()
+  await advance(1); expect(preview()?.textContent).toContain(response); expect(preview()?.querySelector('.focus-context-hover__recap small')?.getAttribute('title')).toContain('Last reply observation')
   expect(preview()?.querySelector('.agent-information-reader__heading > small')?.getAttribute('title')).toContain(_hygiene_fixturePath("private/card-interaction")); expect(preview()?.querySelector('.agent-information-reader__facts')?.getAttribute('aria-label')).toContain('source')
   expect(document.activeElement).toBe(destination)
   const panel = preview()!; await pointer(card(), 'pointerout', panel); await pointer(panel, 'pointerover', card()); await advance(170)
@@ -107,8 +118,11 @@ it('reveals held facts and scoped inputs after intent, allows reading transfer a
   const text = panel.querySelector('.focus-context-hover__recap p')!.firstChild!, range = document.createRange(); range.selectNodeContents(text)
   window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(range); expect(window.getSelection()!.toString()).toContain(response)
   await pointer(panel, 'pointerout', destination); await advance(160); expect(preview()).toBeNull()
-  expect(reads[0]).toHaveBeenCalledTimes(1); expect(reads[0]!.mock.calls[0]![0]).toBe(useAppStore.getState().sessions.find(session => session.id === second)!.control)
-  expect(reads.slice(1).every(read => read.mock.calls.length === 0)).toBe(true); expect(select).not.toHaveBeenCalled()
+  expect(read).toHaveBeenCalledTimes(1)
+  expect(read.mock.calls[0]![0]).toMatchObject({ hostId: 'local', agentSessionId: second })
+  expect(timeline).not.toHaveBeenCalled()
+  expect(projectAppearance).toHaveBeenCalledExactlyOnceWith(workspaceId)
+  expect(select).not.toHaveBeenCalled()
 })
 it('Escape, external scroll, source changes and unmount cancel stale intents without claiming focus', async () => {
   destination.focus(); await pointer(card(), 'pointerover')
@@ -121,15 +135,15 @@ it('Escape, external scroll, source changes and unmount cancel stale intents wit
   await pointer(card(), 'pointerover'); await act(async () => root.render(null)); await advance(200); expect(preview()).toBeNull()
 })
 it('uses one keyboard-readable preview and the same exact-SID menu without selecting a same-name neighbor', async () => {
-  await act(async () => card(first).focus()); expect(preview()?.textContent).toContain(first)
+  await act(async () => card(first).focus()); expect(agentInformationPreview.get()?.control?.agentSessionId).toBe(first)
   await act(async () => card(second).focus()); expect(document.querySelectorAll('.focus-context-hover')).toHaveLength(1)
+  expect(agentInformationPreview.get()?.control?.agentSessionId).toBe(second)
   const before = useAppStore.getState(), copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   await menu(second, 'shift-f10'); expect(preview()).toBeNull()
-  expect([...document.querySelectorAll('.focus-context-menu [role="menuitem"]')].map(node => node.textContent)).toEqual(['Rename Agent', 'Copy Agent Link', 'Stop Agent'])
-  const identity = document.querySelector('.focus-context-menu__identity')!
+  for (const action of ['Rename Agent', 'Copy Agent Link', 'Stop Agent']) expect(menuEntry(action), action).toBeTruthy()
+  const identity = document.querySelector('.focus-context-menu .agent-region-menu__summary strong')!
   expect(identity.textContent).toBe(useAppStore.getState().agentNames[second])
-  expect(identity.querySelector('strong')?.getAttribute('title')).toBe(identity.textContent)
-  expect(identity.querySelector('span, code')).toBeNull()
+  expect(identity.getAttribute('title')).toBe(identity.textContent)
   expect(card(second).getAttribute('aria-pressed')).toBe('false'); expect(select).not.toHaveBeenCalled()
   await choose('Copy Agent Link'); expect(copy).toHaveBeenCalledExactlyOnceWith(formatSessionAddress(second))
   expect(useAppStore.getState().agentFocus).toBe(before.agentFocus); expect(useAppStore.getState().sessions).toBe(before.sessions)
@@ -146,8 +160,9 @@ it('keeps exact card navigation after dismissing its action menu', async () => {
 it('keeps a newly opened keyboard menu when an older menu finishes restoring focus', async () => {
   vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   await menu(second, true)
-  const copy = [...document.querySelectorAll<HTMLElement>('.focus-context-menu [role="menuitem"]')].find(node => node.textContent === 'Copy Agent Link')!
-  await act(async () => copy.click())
+  const copy = menuEntry('Copy Agent Link')
+  expect(copy).toBeTruthy()
+  await act(async () => copy!.click())
   await menu(second, 'shift-f10')
   await advance(1)
   const current = document.querySelector<HTMLElement>('.focus-context-menu')!
