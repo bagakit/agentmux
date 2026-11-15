@@ -333,6 +333,7 @@ function assertRepresentativeResult(report) {
 }
 
 async function main() {
+  const representativeOnly = process.argv.includes('--representative-only')
   const diagnostic = { report: null, cleanup: true, daemonCount: 0 }
   const representative = { report: null, cleanup: true, daemonCount: 0 }
   const failures = []
@@ -354,20 +355,22 @@ async function main() {
       platform: `${process.platform}-${process.arch}`
     }
     await Promise.all([chmod(runtimeDirectory, 0o700),
-      mkdir(representativeRuntime, { recursive: true, mode: 0o700 }),
-      ...measuredWorkspaces.map(({ path }) => mkdir(path, { recursive: true, mode: 0o700 }))])
+      mkdir(representativeRuntime, { recursive: true, mode: 0o700 })])
     await exerciseReceiptlessDaemonCleanup()
     receiptlessDaemonCleanup = true
     await materializeRuntimePayload(await inspectRuntimeApplicationPayload(repositoryRoot), desktopRoot)
     await access(entry)
     const { initializeResourceWorkbench } = await loadResourceWorkbenchFixture()
-    await Promise.all(measuredWorkspaces.map(({ path }) => (
-      writeFile(join(path, 'resource-probe.ts'), 'export const value = 1\n'.repeat(20_000))
-    )))
     const workspaces = measuredWorkspaces.map(workspace => ({ ...workspace, hostId: 'local', kind: 'folder' }))
-    try {
-      await runStage({ root: directory, runtimeRoot: runtimeDirectory, userData, reportPath, workspaces, initializeResourceWorkbench }, identity, diagnostic)
-    } catch (error) { failures.push(error) }
+    if (!representativeOnly) {
+      try {
+        await Promise.all(workspaces.map(async ({ path }) => {
+          await mkdir(path, { recursive: true, mode: 0o700 })
+          await writeFile(join(path, 'resource-probe.ts'), 'export const value = 1\n'.repeat(20_000))
+        }))
+        await runStage({ root: directory, runtimeRoot: runtimeDirectory, userData, reportPath, workspaces, initializeResourceWorkbench }, identity, diagnostic)
+      } catch (error) { failures.push(error) }
+    }
 
     if (diagnostic.cleanup) {
       try {
@@ -408,6 +411,7 @@ async function main() {
         daemonSha256: manifest.binaries.find(binary => binary.name === 'ctxmuxd')?.sha256 ?? null } : null
     },
     harness: {
+      requestedScenarios: representativeOnly ? ['representative'] : ['diagnostic', 'representative'],
       isolatedRuntime: true, receiptlessDaemonCleanup, ownedDaemonCount: diagnostic.daemonCount + representative.daemonCount,
       daemonCleanup: diagnostic.cleanup && representative.cleanup, pathsRemoved: diagnosticCleanup,
       diagnostic: diagnostic.isolation ?? null, representative: representative.isolation ?? null,
