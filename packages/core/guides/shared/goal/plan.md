@@ -10,7 +10,7 @@
    criteria. A ready node or a node with changes requested can go to its named executor.
    Independent ready nodes can run in parallel. For rework, preserve the node and original
    thread. Use `intent.workerHostId` for the exact worker route on another Host.
-3. **Review.** In Desktop choose **Plan → Ready for review → Record review**, or use
+3. **Review.** In Desktop choose **View delivery → Record review**, or use
    `goal plan review --input FILE`. Judge the current reported attempt. The reviewer
    runs the declared check independently. A pass records the actual check, result and
    evidence. A dependent task becomes ready once all its dependencies pass.
@@ -20,14 +20,11 @@
 
 ### Claim an open node
 
-Read `goal plan --goal ID` for the open ready node and copy its `planState` node’s `claimToken`.
-The Supervisor or a person manages the opening or assigns a worker directly using
-`goal plan assignment --input FILE`. As an authorized Goal Agent, claim for yourself
-with `goal plan claim --goal ID --node NODE --claim-token TOKEN --operation-id OP`.
-Use `--runtime RUNTIME --namespace NS` from the Goal address to pin both the read and claim.
-A confirmed claim records the executor. The Supervisor delegates work separately.
-On a conflict or unknown reply read the plan again, match your original node and operation
-in revision history, and check the current executor before acting.
+The Supervisor or a person opens a ready node with `goal plan assignment --input FILE`.
+An authorized Agent can find it with `goal plan active`. For one Goal use
+`--goal ID --view claimable`. Pin reads and claims to the original address with
+`--runtime RUNTIME --namespace NS`. If the active index is rebuilding, read the original
+plan for history and retry the active query.
 
 ### Create or revise a plan
 
@@ -57,12 +54,6 @@ Read `goal plan` for `plan.nodes` and `ticketLinks`. Each link carries the origi
 node ID in its `#T-<nodeId>` fragment. Use `goal focus --link URL` to open the exact
 Ticket. If your workflow uses Git, use the published URL as the `Goal-Node` trailer.
 
-Use \`goal plan active\` for the Agent’s own claimable Tickets. Use
-\`goal plan active --goal ID\` for one Goal’s in-flight work and uncertain states
-as its Supervisor or as a person. For a bounded claim query on one Goal use
-\`--goal ID --view claimable\`. The read uses the original owner’s current index.
-If it is rebuilding, read the original plan for history and retry the active query.
-
 The owner signs a stable proof during claim or direct dispatch, then signs the
 completion when independent review passes. Its referenced hashes identify exact
 upstream completions and the original execution. If a receiver needs offline
@@ -71,10 +62,8 @@ Use the expected hash from the original link or related proof and a signing key
 fingerprint independently approved for this Goal and purpose.
 
 For a reviewed Ticket, use the exact delivery hash from its original report receipt.
-The core records the authenticated author and verified source references. The review
-must supply that hash if the original report has one. An appended Ticket can point to
-its proposal reply by including a revision proposal with \`nodeId\`,
-\`delegationOperationId\` and \`replyMessageId\`.
+An appended Ticket can cite its original proposal reply with a revision proposal
+containing `nodeId`, `delegationOperationId` and `replyMessageId`.
 
 ### Reconcile before advancing
 

@@ -5,15 +5,12 @@ Read the original finite Start or delegation and its frozen criteria before acti
 Report progress, questions, waiting conditions or blockers against that execution.
 Keep responsibility until verified handoff. A discussion or patrol does not start work.
 
-To pick up open work, use `goal plan active` and read a Ticket returned for your Session.
-Call `goal plan claim --goal ID --node NODE --claim-token TOKEN --operation-id OP`
-with its original Goal, node and claim token. Check the saved executor, operation
-and predecessor receipts. Read the exact Goal plan to reconcile an uncertain claim.
+Use `goal plan active` to find your claimable Tickets. With the returned Goal, node and
+claim token, call `goal plan claim --goal ID --node NODE --claim-token TOKEN --operation-id OP`.
+Confirm the saved operation and executor in `goal plan --goal ID` when uncertain. A claim
+records responsibility. Wait for the original dispatch before executing the task.
 
-Use the original `ticketLink` from the delegation to refer to your work.
-When you use Git, put that URL in the `Goal-Node` trailer on the Ticket's commits.
-
-Read the original delegation for the task input and frozen criteria when work is dispatched.
+Use the delegation’s `ticketLink` to refer to the Ticket and as the Git `Goal-Node` trailer.
 
 For a remote delegation, keep the Goal at its original owner. Read the received MID
 with `message read --message-id SOURCE`.
