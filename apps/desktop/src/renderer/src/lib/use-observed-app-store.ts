@@ -2,7 +2,7 @@ import { goalDiscussionSessionBindings } from '@agentmux/host/goal-discussion-bi
 import { useCallback, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import { useAppStore, currentCoreSpatialGraph } from '../store'
 import { rendererPerformance } from './renderer-performance'
-import { sessionPresentationById } from './session-presentation'
+import { onlyAgentActivityTimeChanged, sessionPresentationById } from './session-presentation'
 import { workbenchNavigationTabs } from './workbench-navigation-catalog'
 
 type MeasuredConsumerKind = 'composer' | 'sessionPane'
@@ -30,7 +30,12 @@ const sessionFactsByKind = {
   workbenchTab: ['agentNames', 'pendingAgentLaunches', 'timelines', 'viewModes']
 } as const satisfies Record<ConsumerKind, readonly (typeof sessionFacts[number])[]>
 type ConsumerFacts<K extends ConsumerKind> = Pick<State, typeof sharedFacts[K][number] | typeof sessionFactsByKind[K][number] | 'sessions' | 'recoveryCandidates' | (K extends 'sessionPane' ? 'tabs' | 'sessionNameMetadata' | typeof navigationFacts[number] : K extends 'workbenchTab' ? 'sessionNameMetadata' : never)>
-export type RetainedConsumerScope = { readonly sessionIds: readonly string[]; readonly navigation: boolean }
+export type RetainedConsumerScope = {
+  readonly sessionIds: readonly string[]
+  readonly navigation: boolean
+  readonly timeline?: boolean
+  readonly sessionActivityTime?: boolean
+}
 type Listener = () => void
 const listenersByScope = new Map<RetainedConsumerScope, { kind: ConsumerKind; listeners: Set<Listener> }>()
 const scopesBySession = new Map<string, Set<RetainedConsumerScope>>()
@@ -45,6 +50,7 @@ function notify(current: State, previous: State): void {
   const addSession = (id: string, fact?: typeof sessionFacts[number]): void => {
     for (const scope of scopesBySession.get(id) ?? []) {
       const kind = listenersByScope.get(scope)!.kind
+      if (fact === 'timelines' && scope.timeline === false) continue
       if (!fact || (sessionFactsByKind[kind] as readonly string[]).includes(fact)) changed.add(scope)
     }
   }
@@ -74,7 +80,15 @@ function notify(current: State, previous: State): void {
   }
   if (current.sessions !== previous.sessions) {
     const before = sessionPresentationById(previous.sessions), after = sessionPresentationById(current.sessions)
-    for (const id of scopesBySession.keys()) if (before.get(id) !== after.get(id)) addSession(id)
+    for (const [id, scopes] of scopesBySession) {
+      const previousSession = before.get(id), nextSession = after.get(id)
+      if (previousSession === nextSession) continue
+      let onlyClockChanged: boolean | undefined
+      for (const scope of scopes) {
+        // Compare the row once, only if a hidden presentation can skip its recency update.
+        if (scope.sessionActivityTime !== false || !(onlyClockChanged ??= onlyAgentActivityTimeChanged(previousSession, nextSession))) changed.add(scope)
+      }
+    }
   }
   for (const key of sessionFacts) {
     if (current[key] === previous[key]) continue
@@ -139,7 +153,7 @@ function createScopedSubscription(kind: ConsumerKind, scope: RetainedConsumerSco
   return (listener: Listener) => subscribe(kind, scope, listener)
 }
 
-/** One shared admission, then only related consumers. Visibility never freezes live facts. */
+/** One shared admission, then only related consumers. Visibility limits presentation reads. */
 export function useObservedAppStore<K extends ConsumerKind, T>(kind: K, visible: boolean, scope: RetainedConsumerScope, selector: (state: ConsumerFacts<K>) => T): T {
   const visibility = useRef(visible)
   visibility.current = visible

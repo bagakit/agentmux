@@ -42,6 +42,29 @@ export function sessionPresentationById(sessions: readonly SessionSnapshot[]): R
   return sessionPresentations(sessions).byId
 }
 
+/** A captured item can advance the recency clock independently of every control fact. */
+export function onlyAgentActivityTimeChanged(previous: SessionSnapshot | undefined, next: SessionSnapshot | undefined): boolean {
+  if (previous?.kind !== 'agent' || next?.kind !== 'agent' || previous.updatedAt === next.updatedAt ||
+    previous.status !== next.status || previous.control !== next.control) return false
+  const keys = Object.keys(previous) as (keyof AgentSessionSnapshot)[]
+  return keys.length === Object.keys(next).length && keys.every(key =>
+    key === 'updatedAt' || Object.hasOwn(next, key) && Object.is(previous[key], next[key]))
+}
+
+/** Hidden workfaces hold a stable display result across clock-only changes. Reveal reads the current row. */
+export function createSessionWorkfaceSelector(sessionId: string, visible: boolean) {
+  let observed: SessionSnapshot | undefined
+  let presented: SessionSnapshot | undefined
+  return (state: { sessions: readonly SessionSnapshot[] }): SessionSnapshot | undefined => {
+    const next = sessionPresentationById(state.sessions).get(sessionId)
+    if (next !== observed) {
+      observed = next
+      if (visible || !onlyAgentActivityTimeChanged(presented, next)) presented = next
+    }
+    return presented
+  }
+}
+
 export function sessionTakeoverPresentations(sessions: readonly SessionSnapshot[]): readonly AgentSessionSnapshot[] {
   return sessionPresentations(sessions).takeovers
 }

@@ -8,7 +8,7 @@ import { useObservedAppStore, useObservedConsumerCommit } from '../lib/use-obser
 import { reportMessageDeliveryDiagnostics } from '../lib/message-delivery-diagnostics'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { NativeConfigurationPicker, PosturePicker } from './PosturePicker'
-import { createFirstPromptSelector, createSessionViewModeSelector, sessionPresentationById } from '../lib/session-presentation'
+import { createFirstPromptSelector, createSessionViewModeSelector, createSessionWorkfaceSelector } from '../lib/session-presentation'
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import type { ComposerInsertionHandle } from '@agentmux/client-ui/composer-insertion'
 import { AgentContextUsage } from './AgentContextUsage'
@@ -151,7 +151,10 @@ export function AgentSessionComposer({
   const moteDialogue = useMoteDialogueView()
   const main = moteDialogue?.page?.main
   useObservedConsumerCommit('composer', visible)
-  const consumerScope = useMemo(() => ({ sessionIds: [...new Set([sessionId, ownerKey])], navigation: false }), [sessionId, ownerKey])
+  // Without an explicit Agent from the Pane, keep observing the original source or Session discovery.
+  const observeTimeline = visible || Boolean(source) || explicitSession?.kind !== 'agent'
+  const consumerScope = useMemo(() => ({ sessionIds: [...new Set([sessionId, ownerKey])], navigation: false,
+    timeline: observeTimeline, sessionActivityTime: visible }), [sessionId, ownerKey, observeTimeline, visible])
   const insertionRef = useRef<ComposerInsertionHandle>(null)
   useEffect(() => { void reportMessageDeliveryDiagnostics() }, [])
   const feedback = useComposerFeedback(ownerKey)
@@ -210,8 +213,9 @@ export function AgentSessionComposer({
     if (visible && !memberInput && !rolloverChoiceRequired.current && rollovers.length === 1 && rolloverHandled.current !== rollovers[0]!.operationId) openRollover(rollovers[0]!)
   }, [visible, queuedEntries, memberInput, moteWorkface?.startRollover])
   const executors = useObservedAppStore('composer', visible, consumerScope, (state) => state.config?.executors)
+  const selectSession = useMemo(() => createSessionWorkfaceSelector(sessionId, visible), [sessionId, visible])
   const observedSession = useObservedAppStore('composer', visible, consumerScope, (state) =>
-    !source && explicitSession === undefined ? sessionPresentationById(state.sessions).get(sessionId) : undefined)
+    !source && explicitSession === undefined ? selectSession(state) : undefined)
   const session = explicitSession ?? source?.session ?? observedSession
   const moteMain = motePresentation.moteInputIntent !== 'member' && !moteWorkface?.memberIntent && moteDialogue?.target && main?.roleRevision && main.current && session?.kind === 'agent' &&
     main.current.sessionId === session.control.agentSessionId && main.current.hostId === session.control.hostId
@@ -232,7 +236,7 @@ export function AgentSessionComposer({
     control: source ? undefined : session?.kind === 'agent' ? session.control : undefined, visible, readOnly: readOnly || disabled,
     insertion: insertionRef, ...(timeline ? { timeline } : {}), ...(source?.inputReading ? { originalReading: source.inputReading } : {}) })
   const firstPromptSelector = useMemo(() => createFirstPromptSelector(sessionId), [sessionId])
-  const firstPrompt = useObservedAppStore('composer', visible, consumerScope, firstPromptSelector)
+  const firstPrompt = useObservedAppStore('composer', visible, consumerScope, state => readTimeline ? firstPromptSelector(state) : null)
   const displayName = session?.kind === 'agent' ? agentDisplayName({
     userName, firstPrompt, fallbackLabel: tabName || session.label, providerLabel: agentProviderLabel(session.providerId)
   }) : undefined

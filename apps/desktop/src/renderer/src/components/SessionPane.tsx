@@ -22,7 +22,7 @@ import type { AgentDerivedAction } from '@agentmux/core/agent-derived-actions'
 import { sessionNameMetadataFor } from '../lib/session-name-metadata'
 import { useShallow } from 'zustand/react/shallow'
 import { retainActivityControls } from '../lib/retained-activity'
-import { createFirstPromptSelector, createSessionViewModeSelector, effectiveSessionViewMode, sessionPresentationById } from '../lib/session-presentation'
+import { createFirstPromptSelector, createSessionViewModeSelector, createSessionWorkfaceSelector, effectiveSessionViewMode, sessionPresentationById } from '../lib/session-presentation'
 import type { AgentMuxRunExitReason, AgentSessionUserMessage } from '@agentmux/core'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import type { OpenHttpLinkOrigin } from '../lib/open-destination'
@@ -246,7 +246,8 @@ export function SessionPane({
 }) {
   const observationVisible = visible || presentations.some(target => target.visible !== false)
   useObservedConsumerCommit('sessionPane', observationVisible)
-  const consumerScope = useMemo(() => ({ sessionIds: [sessionId], navigation: visible && !readOnly }), [sessionId, visible, readOnly])
+  const consumerScope = useMemo(() => ({ sessionIds: [sessionId], navigation: visible && !readOnly,
+    timeline: observationVisible, sessionActivityTime: observationVisible }), [sessionId, visible, readOnly, observationVisible])
   const projectionPolicy = sessionRegionProjectionPolicy(readOnly)
   const [takeoverSelection, setTakeoverSelection] = useState<{ key: string; displayId: string | null; origin: OpenHttpLinkOrigin; trigger: HTMLButtonElement | null; derived?: AgentDerivedAction; destinationKind?: 'club' } | null>(null)
   const [learningSelection, setLearningSelection] = useState<{ key: string; displayId: string | null; origin: OpenHttpLinkOrigin; trigger: HTMLButtonElement | null; open: boolean } | null>(null)
@@ -258,7 +259,8 @@ export function SessionPane({
     primaryPresentation.survey, primaryPresentation.surface, mailboxOrigin.workspaceId, mailboxOrigin.tabId, mailboxOrigin.tabGroupId),
   [linkOrigin.regionId, primaryPresentation.onSelectRegion, primaryPresentation.survey, primaryPresentation.surface,
     mailboxOrigin.workspaceId, mailboxOrigin.tabId, mailboxOrigin.tabGroupId])
-  const observedSession = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => sessionPresentationById(state.sessions).get(sessionId))
+  const selectSession = useMemo(() => createSessionWorkfaceSelector(sessionId, observationVisible), [sessionId, observationVisible])
+  const observedSession = useObservedAppStore('sessionPane', observationVisible, consumerScope, selectSession)
   const pendingLaunch = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => state.pendingAgentLaunches[sessionId])
   const historyHostId = useObservedAppStore('sessionPane', observationVisible, consumerScope, state => state.config?.workspaces.find(workspace => workspace.id === linkOrigin.workspaceId)?.hostId)
   const historyCatalogue = useFocusHistorySources(!observedSession && !pendingLaunch && surfaceKind === 'agent' && visible)
@@ -317,7 +319,7 @@ export function SessionPane({
       ...(page?.links.flatMap(link => link.kind === 'main' ? [JSON.stringify([link.reference.hostId, link.reference.sessionId])] : []) ?? [])])
   }, [moteDialogue?.page])
   const firstPromptSelector = useMemo(() => createFirstPromptSelector(sessionId), [sessionId])
-  const firstPrompt = useObservedAppStore('sessionPane', observationVisible, consumerScope, firstPromptSelector)
+  const firstPrompt = useObservedAppStore('sessionPane', observationVisible, consumerScope, state => observationVisible ? firstPromptSelector(state) : null)
   const userName = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => state.agentNames?.[sessionId])
   const questionReplies = useObservedAppStore('sessionPane', observationVisible, consumerScope, state => state.questionReplies?.[sessionId])
   const questionSaveWarning = useObservedAppStore('sessionPane', observationVisible, consumerScope, state => state.workbenchSaveWarning)
@@ -560,9 +562,11 @@ export function SessionPane({
   // Observe only identity facts for the Agents actually represented in this reading surface.
   // Output/status from unrelated Sessions cannot refresh these descriptors or read sender goals.
   const speakerIds = useMemo(() => [...new Set([sessionId, ...(readingSpeakers.source === activitySourceKey ? [...readingSpeakers.readers.values()].flat() : [])])], [sessionId, activitySourceKey, readingSpeakers])
-  const speakerScope = useMemo(() => ({ sessionIds: speakerIds, navigation: false }), [speakerIds])
+  const speakerScope = useMemo(() => ({ sessionIds: speakerIds, navigation: false,
+    timeline: observationVisible, sessionActivityTime: observationVisible }), [speakerIds, observationVisible])
   const speakerFactsSelector = useMemo(() => createConversationSpeakerFactsSelector(speakerIds), [speakerIds])
-  const speakerFacts = useObservedAppStore('sessionPane', observationVisible, speakerScope, useShallow(speakerFactsSelector))
+  const selectSpeakerFacts = useShallow(speakerFactsSelector)
+  const speakerFacts = useObservedAppStore('sessionPane', observationVisible, speakerScope, state => observationVisible ? selectSpeakerFacts(state) : null)
   const describeSpeaker = useMemo(() => createPaneSpeakerResolver(session?.kind === 'agent'
     ? { id: session.id, ...(session.label === undefined ? {} : { label: session.label }), providerId: session.providerId } : undefined,
   moteOwner, Boolean(moteDialogue?.target), mainSources, speakerIds),
