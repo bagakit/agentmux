@@ -2,7 +2,7 @@ const { app, BrowserWindow, ipcMain } = require('electron')
 const assert = require('node:assert/strict'), fs = require('node:fs'), path = require('node:path')
 const { createHash } = require('node:crypto')
 const { spawn } = require('node:child_process'), { pathToFileURL } = require('node:url')
-const [html, privateRoot, preload, evidence, coreFile, binary] = process.argv.slice(2)
+const [html, privateRoot, preload, evidence, coreFile, binary, fileOwner] = process.argv.slice(2)
 app.setPath('userData', path.join(privateRoot, 'user-data')); app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 const control = { kind: 'terminal', hostId: 'local', runId: '', run: { runId: '' } }
 const session = { id: '', kind: 'terminal', hostId: 'local', workspacePath: privateRoot,
@@ -13,7 +13,7 @@ const result = { schema: 'agentmux.terminal-link-hover-native.v1', passed: false
   captureOnly: true, aestheticReview: 'not-performed', userRunTouched: false,
   boundary: 'Private actual Electron/production TerminalView/preload/published xterm, public Core Client and manifest native CtxMux daemon/PTY. Main attachment/resize/write handlers are fixture adapters to public Core APIs; generic live Python producer, no model or user App interaction. Native Linkifier/compositor and trusted CDP pointer/click/wheel/key events; not full product Main bootstrap or a physical pointer test.',
   versions: process.versions, frames: [], scenes: [] }
-let win, client, daemon, run, unsubscribe
+let win, client, daemon, run, unsubscribe, files
 const outputQueue = []
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
 const evaluate = source => win.webContents.executeJavaScript(source)
@@ -80,19 +80,46 @@ app.whenReady().then(async () => {
     daemon.stderr.on('data', data => { result.daemonDiagnostics = ((result.daemonDiagnostics ?? '') + data).slice(-3000) })
     await wait(() => Promise.resolve(fs.existsSync(path.join(privateRoot, 'runtime/ctxmux.sock'))), Boolean, 'Private native daemon did not create its socket')
     const core = await import(pathToFileURL(coreFile).href)
+    let reportWorkspace, report
+    if (fileOwner) {
+      session.workspacePath = path.join(privateRoot, 'original')
+      reportWorkspace = { id: 'registered-report', hostId: 'local', kind: 'folder', name: 'Registered report', path: path.join(privateRoot, 'registered') }
+      fs.mkdirSync(session.workspacePath); fs.mkdirSync(reportWorkspace.path)
+      report = path.join(reportWorkspace.path, 'result.md')
+      fs.writeFileSync(report, '# Result from its registered owner\n')
+      const { WorkspaceFiles } = await import(pathToFileURL(fileOwner).href), host = new core.LocalExecutionHost()
+      files = new WorkspaceFiles(() => host)
+      ipcMain.handle('config:get', () => ({ version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private' }], executors: {},
+        workspaces: [{ id: 'hover-private-workspace', hostId: 'local', path: session.workspacePath, name: 'Original Terminal', kind: 'folder' }, reportWorkspace] }))
+      result.fileReads = []
+      ipcMain.handle('files:observe', () => undefined)
+      ipcMain.handle('files:unobserve', () => undefined)
+      ipcMain.handle('files:read', async (_event, workspaceId, requestedPath) => {
+        assert.equal(workspaceId, reportWorkspace.id); assert.equal(requestedPath, 'result.md')
+        const observed = await files.read(reportWorkspace, requestedPath)
+        result.fileReads.push({ workspaceId, path: requestedPath, status: observed.status })
+        return observed
+      })
+    }
     client = new core.AgentMuxClient({ store: new core.AgentMuxMemoryAgentSessionStore(), providers: [] }); await client.connect()
     result.runtime = client.runtimeIdentity()
-    run = await client.createTerminal({ workspacePath: privateRoot, command: '/usr/bin/python3', args: [path.join(__dirname, 'program.py'), privateRoot], cols: 80, rows: 24 })
+    run = await client.createTerminal({ workspacePath: session.workspacePath, command: '/usr/bin/python3', args: [path.join(__dirname, 'program.py'), privateRoot], cols: 80, rows: 24 })
     control.runId = run.runId; control.run.runId = run.runId; session.id = run.runId
     await wait(() => client.listRuns(), runs => runs.some(item => item.runId === run.runId && item.latestOutputBytes > 50), 'Private actual PTY did not emit initial bytes')
     result.runBefore = (await client.listRuns()).find(item => item.runId === run.runId)
+    ipcMain.on('ui:themeBootstrap', event => { event.returnValue = null })
+    ipcMain.handle('clientIncidents:open', () => null)
     ipcMain.handle('sessions:snapshot', () => ({ sessions: [session], timelines: {}, recoveryCandidates: [], runtimeOwnershipWarnings: [] }))
-    ipcMain.handle('sessions:attach', async (_event, value) => {
-      assert.deepEqual(value, control); counts.attach++
-      const attached = await client.attachTerminal(run.runId, 0, 'terminal')
-      return { attachmentId: 'hover-private-attachment', session: { ...session, latestOutputBytes: attached.run.latestOutputBytes },
+    const attach = async (value, after) => {
+      assert.deepEqual(value, control)
+      const attached = await client.attachTerminal(run.runId, after, 'terminal')
+      return { ok: true, result: { attachmentId: 'hover-private-attachment', session: { ...session, latestOutputBytes: attached.run.latestOutputBytes },
         terminal: attached.terminal, replay: attached.replay, resizeRevision: attached.resizeRevision,
-        currentSize: { cols: attached.run.cols, rows: attached.run.rows }, gap: attached.gap }
+        currentSize: { cols: attached.run.cols, rows: attached.run.rows }, gap: attached.gap } }
+    }
+    ipcMain.handle('sessions:attach', (_event, value, after) => { counts.attach++; return attach(value, after) })
+    ipcMain.handle('sessions:refreshAttachment', (_event, value, id, after) => {
+      assert.ok(id === null || id === 'hover-private-attachment'); return attach(value, after)
     })
     ipcMain.handle('sessions:resize', async (_event, id, cols, rows) => { assert.equal(id, 'hover-private-attachment'); counts.resize++; return await client.resizeTerminal(control.run, cols, rows) })
     ipcMain.handle('sessions:detach', async (_event, id) => { assert.equal(id, 'hover-private-attachment'); counts.detach++; await client.releaseRunAttachment(control.run); return true })
@@ -106,10 +133,31 @@ app.whenReady().then(async () => {
     result.console = []
     win.webContents.on('console-message', event => { if (event.level === 'error') result.console.push(event.message) })
     unsubscribe = client.onEvent(event => { if (!win.isDestroyed()) win.webContents.send('agentmux:session-event', { type: 'core', hostId: 'local', event }) })
-    await win.loadFile(html); win.showInactive(); win.webContents.debugger.attach('1.3')
+    await win.loadFile(html, fileOwner ? { query: { registeredFiles: 'true' } } : {}); win.showInactive(); win.webContents.debugger.attach('1.3')
     await wait(() => evaluate('window.ready === true'), value => value, 'Native fixture module did not mount')
     const boot = await wait(facts, x => x.terminalCount === 1 && !x.hydrating && x.lines?.[1]?.startsWith('ASCII '), 'Actual production terminal failed to replay')
     await delay(400); result.boot = await facts(); assert.deepEqual(result.boot.errors, [])
+    if (fileOwner) {
+      output('\r\nReport (' + report + ')')
+      const painted = await wait(facts, value => value.lines.join('').includes(report), 'The private PTY did not paint the exact report path')
+      const row = painted.lines.findLastIndex(line => line.startsWith('Report ('))
+      const point = await evaluate(`cellPoint(${row},'/')`)
+      await pointer(point)
+      const hovered = await wait(facts, value => value.pathHovers.at(-1)?.text === report, 'Registered report did not become a native xterm link')
+      assert.equal(hovered.pathHovers.at(-1).trusted, true)
+      assert.deepEqual(result.fileReads, [], 'Hover must not read the file')
+      await click(point)
+      const opened = await wait(() => evaluate('fileFacts()'), value => value.file?.content && value.opened, 'The real File store did not read and place the registered report')
+      assert.equal(opened.file.content, '# Result from its registered owner\n')
+      assert.equal(opened.opened.workspaceId, reportWorkspace.id)
+      assert.equal(opened.original.sessionId, session.id)
+      assert.equal(opened.group[0], 'hover-private-tab'); assert.equal(opened.group.length, 2)
+      assert.deepEqual(result.fileReads, [{ workspaceId: reportWorkspace.id, path: 'result.md', status: 'read' }])
+      result.runAfter = (await client.listRuns()).find(item => item.runId === run.runId)
+      assert.equal(result.runAfter.pid, result.runBefore.pid); assert.equal(result.runAfter.state, 'running'); assert.equal(counts.write, 0)
+      result.registeredFile = { shownIn: opened.group, original: opened.original, target: opened.opened, control, point }
+      await frame('registered-report'); result.passed = true; return
+    }
     for (const [name, row, start] of [['ascii', 1, 7], ['cjk', 2, 6], ['combining', 3, 3], ['emoji', 4, 4]])
       await hoverFile(name, row, 'src/', 'src/example.ts', start, ':3:2'.length)
     // This control proves the existing live OSC 8 owner. Initial checkpoint restoration
@@ -191,6 +239,7 @@ app.whenReady().then(async () => {
     result.cleanup = { errors: [] }; unsubscribe?.()
     if (client && run) try { await client.stopTerminal({ runId: run.runId }) } catch (error) { result.cleanup.errors.push(String(error)) }
     if (client) try { await client.dispose() } catch (error) { result.cleanup.errors.push(String(error)) }
+    if (files) try { await files.dispose() } catch (error) { result.cleanup.errors.push(String(error)) }
     if (daemon && daemon.exitCode === null && daemon.signalCode === null) { daemon.kill('SIGTERM'); await Promise.race([new Promise(resolve => daemon.once('exit', resolve)), delay(1500)]); if (daemon.exitCode === null && daemon.signalCode === null) daemon.kill('SIGKILL') }
     fs.writeFileSync(path.join(evidence, 'native.json'), JSON.stringify(result, null, 2)); app.exit(result.passed && result.cleanup.errors.length === 0 ? 0 : 1)
   }

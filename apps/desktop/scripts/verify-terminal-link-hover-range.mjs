@@ -11,6 +11,7 @@ import { listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
 const desktop = path.join(root, 'apps/desktop'), fixture = path.join(desktop, 'scripts/fixtures/terminal-link-hover')
 const require = createRequire(path.join(desktop, 'package.json'))
+const registeredFiles = process.argv.includes('--registered-files')
 const argument = (name, fallback) => process.argv.find(item => item.startsWith(name + '='))?.slice(name.length + 1) ?? fallback
 const receiptFile = path.resolve(root, argument('--receipt', "docs/reviews/evidence/terminal-link-hover/integrated-receipt.json"))
 const evidence = path.dirname(receiptFile), sha = bytes => createHash('sha256').update(bytes).digest('hex')
@@ -28,7 +29,7 @@ if (process.argv.includes('--verify-existing')) {
   process.exit(0)
 }
 await fs.mkdir(evidence, { recursive: true })
-const privateRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'agentmux-link-hover-'))
+const privateRoot = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'agentmux-link-hover-')))
 const sourceInputs = new Map(), compiledModules = new Set()
 const { build } = await import(pathToFileURL(require.resolve('vite')).href)
 const esbuild = createRequire(require.resolve('vite/package.json'))('esbuild'), electron = require('electron')
@@ -48,7 +49,7 @@ const receipt = { schema: 'agentmux.terminal-link-hover-integrated.v1', passed: 
   aestheticReview: 'not-performed', userRunTouched: false, sourceInputs: null, compiledInputs: null, native: null }
 let child, deadline
 try {
-  await build({ configFile: false, root: fixture, base: './', logLevel: 'error',
+  await build({ configFile: false, root: fixture, base: './', logLevel: 'error', worker: { format: 'es' },
     define: { __AGENTMUX_WEB_PREVIEW__: 'false', 'process.env.NODE_ENV': '"production"' },
     resolve: { alias: [{ find: /^@xterm\/xterm$/, replacement: path.join(fixture, 'xterm-observed.ts') }] },
     esbuild: { jsx: 'automatic' }, build: { target: 'esnext', outDir: path.join(privateRoot, 'renderer'), minify: false, emptyOutDir: true },
@@ -60,6 +61,19 @@ try {
   const preloadBuild = await esbuild.build({ entryPoints: [path.join(desktop, 'src/preload/index.ts')], outfile: preload,
     platform: 'node', bundle: true, format: 'cjs', external: ['electron'], metafile: true, logLevel: 'error' })
   for (const file of Object.keys(preloadBuild.metafile.inputs).map(file => path.resolve(root, file))) sourceInputs.set(file, sha(await fs.readFile(file)))
+  const fileOwner = registeredFiles && path.join(privateRoot, 'application/out/main/file-owner.mjs')
+  const privateHelper = registeredFiles && path.join(privateRoot, 'application/resources/bin/agentmux-workspace-move')
+  if (fileOwner && privateHelper) {
+    const originalHelper = path.join(desktop, 'resources/bin/agentmux-workspace-move')
+    const helper = await fs.readFile(originalHelper)
+    sourceInputs.set(originalHelper, sha(helper))
+    await fs.mkdir(path.dirname(privateHelper), { recursive: true })
+    await fs.writeFile(privateHelper, helper, { mode: 0o755 })
+    const mainBuild = await esbuild.build({ entryPoints: [path.join(desktop, 'src/main/workspace-files.ts')], outfile: fileOwner,
+      platform: 'node', bundle: true, format: 'esm', external: ['electron'], metafile: true, logLevel: 'error',
+      banner: { js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);" } })
+    for (const file of Object.keys(mainBuild.metafile.inputs).map(file => path.resolve(root, file))) sourceInputs.set(file, sha(await fs.readFile(file)))
+  }
   receipt.sourceInputs = Object.fromEntries([...sourceInputs].sort(([a], [b]) => a.localeCompare(b)))
   assert.ok(compiledModules.size > 100, 'Actual production component bundle has populated dependencies')
   assert.deepEqual(await hashes(Object.keys(receipt.sourceInputs)), receipt.sourceInputs, 'Source inputs changed while compiling')
@@ -68,10 +82,11 @@ try {
     const file = path.join(directory, entry.name); if (entry.isDirectory()) await collect(file); else artifacts.push(file)
   } }
   await collect(path.join(privateRoot, 'renderer')); artifacts.push(preload)
+  if (fileOwner && privateHelper) artifacts.push(fileOwner, privateHelper)
   receipt.compiledInputs = await hashes(artifacts)
   const env = { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: path.join(privateRoot, 'runtime'), AGENTMUX_STATE_DIRECTORY: path.join(privateRoot, 'runtime/state'), AGENTMUX_MESSAGE_QUEUE_PATH: path.join(privateRoot, 'messages.ndjson') }; delete env.ELECTRON_RUN_AS_NODE
   await fs.mkdir(path.join(privateRoot, 'runtime/state'), { recursive: true })
-  child = spawn(electron, [path.join(fixture, 'main.cjs'), path.join(privateRoot, 'renderer/index.html'), privateRoot, preload, evidence, coreFile, binary],
+  child = spawn(electron, [path.join(fixture, 'main.cjs'), path.join(privateRoot, 'renderer/index.html'), privateRoot, preload, evidence, coreFile, binary, ...(fileOwner ? [fileOwner] : [])],
     { env, stdio: ['ignore', 'ignore', 'pipe'] })
   let stderr = ''; child.stderr.on('data', data => { stderr = (stderr + data).slice(-5000) })
   const exit = await Promise.race([new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', (code, signal) => resolve({ code, signal })) }),
@@ -79,14 +94,16 @@ try {
   clearTimeout(deadline); receipt.exit = exit
   receipt.native = JSON.parse(await fs.readFile(path.join(evidence, 'native.json'), 'utf8'))
   assert.equal(exit.code, 0, receipt.native.failure + '\n' + stderr); assert.equal(receipt.native.passed, true)
-  assert.ok(receipt.native.frames.length >= 8, 'Native new screenshots are nonempty')
+  assert.ok(receipt.native.frames.length >= (registeredFiles ? 1 : 8), 'Native new screenshots are nonempty')
   assert.deepEqual(await hashes(Object.keys(receipt.sourceInputs)), receipt.sourceInputs, 'Source inputs changed during native capture')
   assert.deepEqual(await hashes(artifacts), receipt.compiledInputs)
-  await fs.rm(path.join(evidence, 'compiled'), { recursive: true, force: true })
-  await fs.mkdir(path.join(evidence, 'compiled'), { recursive: true })
   // Keep exact generated input bytes for the independent review; private profile is disposable.
   receipt.preservedCompiled = {}
-  for (const file of artifacts) {
+  if (!registeredFiles) {
+    await fs.rm(path.join(evidence, 'compiled'), { recursive: true, force: true })
+    await fs.mkdir(path.join(evidence, 'compiled'), { recursive: true })
+  }
+  for (const file of registeredFiles ? [] : artifacts) {
     const relative = path.relative(privateRoot, file), saved = path.join(evidence, 'compiled', relative)
     await fs.mkdir(path.dirname(saved), { recursive: true }); await fs.copyFile(file, saved)
     assert.equal(sha(await fs.readFile(saved)), receipt.compiledInputs[file]); receipt.preservedCompiled[saved] = receipt.compiledInputs[file]

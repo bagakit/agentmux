@@ -724,6 +724,25 @@ describe('mounted Terminal link exits', () => {
     expect(openHttp).not.toHaveBeenCalled()
   })
 
+  it.each(['path', 'osc8'] as const)('opens a registered local report from another Workspace via %s', async representation => {
+    const path = '.local/state/report.md'
+    const workspace = { id: 'registered-report', hostId: 'local', kind: 'folder' as const, name: 'Report owner', path: session.workspacePath + '-other' }
+    const config = useAppStore.getState().config!
+    await act(async () => useAppStore.setState({ config: { ...config, workspaces: [...config.workspaces, workspace] } }))
+    const absolute = workspace.path + '/' + path
+    const text = representation === 'path' ? '(' + absolute + ')' : '\x1b]8;;file://' + absolute + '\x07report\x1b]8;;\x07'
+    const file = await fileLink(text)
+    await act(async () => file.activate(pointer(), file.text))
+    expect(openFile.mock.calls.map(call => call.slice(0, 4))).toEqual([[path, origin.tabGroupId, undefined, workspace.id]])
+    expect(openFile.mock.calls[0]?.[5]).toMatchObject({ resource: { hostId: 'local', path: workspace.path }, fileOnly: true })
+    expect(useAppStore.getState().tabs[origin.tabId]?.regions[origin.regionId]).toMatchObject({ sessionId: session.id })
+    expect(reportError).not.toHaveBeenCalled()
+    await act(async () => useAppStore.setState({ config }))
+    await act(async () => file.activate(pointer(), file.text))
+    expect(openFile).toHaveBeenCalledOnce()
+    expect(reportError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('registered file Workspace changed') }))
+  })
+
   it('file primary retains editor/system seam, while right-button and drag do not open', async () => {
     const file = await fileLink()
     await act(async () => { file.activate(pointer(2), file.text) })

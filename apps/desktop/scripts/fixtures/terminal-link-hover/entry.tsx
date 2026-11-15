@@ -1,6 +1,8 @@
 import React from 'react'
 import { createRoot } from 'react-dom/client'
 import type { Terminal } from '@xterm/xterm'
+import { createWorkspaceLayout } from '@agentmux/layout'
+import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import '../../../src/renderer/src/styles/index.css'
 
 const w = window as unknown as Window & {
@@ -19,10 +21,24 @@ const snapshot = await window.agentmux!.sessions.snapshot()
 const session = snapshot.sessions[0]!
 if (session.kind !== 'terminal' || snapshot.sessions.length !== 1) throw Error('Expected one private actual Core terminal Run')
 const origin = { workspaceId: 'hover-private-workspace', tabGroupId: 'hover-private-group', tabId: 'hover-private-tab', regionId: 'hover-private-region' }
-useAppStore.setState({ config: { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private' }], executors: {},
-  workspaces: [{ id: origin.workspaceId, hostId: 'local', path: session.workspacePath, kind: 'folder' }] } as NonNullable<ReturnType<typeof useAppStore.getState>['config']>,
-  sessions: [session], openFile: async (...args) => { w.opens.push({ kind: 'file', args }); return true },
+const registered = new URLSearchParams(location.search).has('registeredFiles')
+const config = registered ? await window.agentmux!.config.get() : { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private' }], executors: {},
+  workspaces: [{ id: origin.workspaceId, hostId: 'local', path: session.workspacePath, kind: 'folder' }] } as NonNullable<ReturnType<typeof useAppStore.getState>['config']>
+const originalTab = createWorkbenchTab(origin.tabId, { regionId: origin.regionId, workspaceId: origin.workspaceId, kind: 'terminal', phase: 'attached', sessionId: session.id })
+useAppStore.setState({ config, sessions: [session], tabs: { [origin.tabId]: originalTab }, activeWorkspaceId: origin.workspaceId,
+  layouts: { [origin.workspaceId]: createWorkspaceLayout(origin.tabGroupId, [origin.tabId]) },
+  ...(registered ? {} : { openFile: async (...args: Parameters<ReturnType<typeof useAppStore.getState>['openFile']>) => {
+    w.opens.push({ kind: 'file', args: args.slice(0, 4) }); args[5]?.onResult?.({ placement: { status: 'created', tabId: 'file-result', regionId: 'file-result-region' },
+      data: { kind: 'text', reason: null }, navigation: 'applied' }); return true
+  } }),
   openHttpLink: async (...args) => { w.opens.push({ kind: 'http', args }) }, reportError: error => w.errors.push(String(error)) })
+Object.assign(w, { fileFacts: () => {
+  const state = useAppStore.getState()
+  return { file: Object.values(state.documents).find(document => document.path === 'result.md'),
+    group: state.layouts[origin.workspaceId]?.groups.find(group => group.id === origin.tabGroupId)?.tabOrder,
+    original: state.tabs[origin.tabId]?.regions[origin.regionId],
+    opened: Object.values(state.tabs).flatMap(tab => Object.values(tab.regions)).find(region => region.kind === 'file' && region.path === 'result.md') }
+} })
 createRoot(document.getElementById('container')!).render(<TerminalView session={session} themeId="graphite" fontSize={17}
   interactiveResize={false} visible autoFocus={false} linkOrigin={origin} />)
 let original: Terminal | undefined

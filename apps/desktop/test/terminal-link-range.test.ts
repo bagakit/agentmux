@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { Terminal } from '@xterm/xterm'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { terminalLinkAtCell, terminalLinksAtRow, terminalLinksInBuffer } from '../src/renderer/src/lib/terminal-link-range'
+import { resolveTerminalLinkPath, terminalLocalWorkspaceIndex } from '../src/renderer/src/lib/terminal-link-target'
 
 const terminals: Terminal[] = []
 async function parsed(text: string, cols = 80, rows = 8) {
@@ -24,6 +25,19 @@ function terminalPathLinkAtBufferCell(buffer: Buffer, x: number, y: number, work
 }
 
 describe('published xterm buffer to file-link cell ranges', () => {
+  it('requires one local owner for a foreign absolute path and keeps relative paths in the source Workspace', () => {
+    const workspaceRoot = _hygiene_fixturePath('terminal-source')
+    const owner = { id: 'report', hostId: 'local', path: _hygiene_fixturePath('registered-report') }
+    const candidate = owner.path + '/reports/result.md'
+    const scope = (workspaces: typeof owner[]) => ({ workspaceRoot, registeredWorkspaces: terminalLocalWorkspaceIndex(workspaces) })
+    expect(resolveTerminalLinkPath(candidate, scope([owner]))).toEqual({ path: 'reports/result.md', workspace: { id: owner.id, path: owner.path } })
+    expect(resolveTerminalLinkPath('reports/result.md', scope([owner]))).toEqual({ path: 'reports/result.md' })
+    expect(resolveTerminalLinkPath(candidate, scope([{ ...owner, hostId: 'remote' }]))).toBeNull()
+    expect(resolveTerminalLinkPath(candidate, scope([owner, { ...owner, id: 'same-root' }]))).toBeNull()
+    expect(resolveTerminalLinkPath(candidate, scope([owner, { ...owner, id: 'nested', path: owner.path + '/reports' }]))).toBeNull()
+    expect(resolveTerminalLinkPath(owner.path + '/reports/../result.md', scope([owner]))).toBeNull()
+  })
+
   for (const [prefix, start] of [['See ', 5], ['说明 ', 6], ['😀 ', 4], ['e\u0301 ', 3], ['a😀说明e\u0301 ', 10]] as const) {
     it(`maps the actual Unicode 11 cells after ${JSON.stringify(prefix)}, not UTF-16 offsets`, async () => {
       const terminal = await parsed(prefix + '@src/example.ts:3:2, next')
