@@ -8,7 +8,8 @@ import { listProbeProcesses, runProbeProcess, stopProbeProcesses } from '../../p
 import { radixOverlayAliases } from '../../../../../packages/client-ui/scripts/radix-overlay-aliases.ts'
 const root = path.resolve(import.meta.dirname, '../../../../..')
 const navigation = process.argv.includes('--top-navigation')
-const groups = process.argv.includes('--native-groups')
+const advanced = process.argv.includes('--group-management')
+const groups = advanced || process.argv.includes('--native-groups')
 const fixture = navigation ? path.join(import.meta.dirname, '../mote-thread-navigation') : import.meta.dirname
 const require = createRequire(path.join(root, 'apps/desktop/package.json'))
 const { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
@@ -18,6 +19,17 @@ await fs.mkdir(compiled, { recursive: true }); await fs.mkdir(path.join(director
 const receipt = { passed: false, captureOnly: true, aestheticReview: 'not-performed', captureSubset: groups ? 'mote-native-groups-full-app' : 'mote-discussion-threads-full-app', source: {}, images: {},
   boundary: 'Original App/PmoTeamsTopicFloatingPanel/MoteSpaceFrame/WorkspaceWorkbench/SessionPane/Composer/Store and CSS in private Electron. Original Core conversation projector/codec consumes controlled typed source pages. Exact private Sessions/Run/Space bindings and finite API/native ports only; no real user App/Run, Provider, model, package, install or native recovery claim.' }
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
+const mutant = process.env.AMUX_MOTE_GROUP_UI_MUTANT
+assert.ok(!mutant || advanced && mutant === 'drop-topic-binding', 'Only the exact group management probe supports this mutant')
+const groupMutation = { name: 'mote-group-product-mutation', setup(plugin) {
+  plugin.onLoad({ filter: /MoteGroupConversation\.tsx$/ }, async args => {
+    const original = await fs.readFile(args.path, 'utf8')
+    const changed = original.replace('...(setup.topic ? { topic: setup.topic } : {})', '...{}')
+    assert.notEqual(original, changed, 'The current group creation branch must be mutated')
+    receipt.mutant = { name: mutant, source: path.relative(root, args.path), original: sha(original), loaded: sha(changed) }
+    return { contents: changed, loader: 'tsx' }
+  })
+} }
 try {
   const alias = { ...radixOverlayAliases }
   const clientFolder = path.join(root, 'packages/client-ui')
@@ -66,21 +78,21 @@ try {
     alias['@agentmux/host' + (subpath === '.' ? '' : subpath.slice(1))] = path.join(root, 'apps/host', target.import.replace('./dist/', './src/').replace(/\.js$/u, '.ts'))
   }
   const built = await build({ absWorkingDir: root, entryPoints: [path.join(fixture, 'entry.tsx')], outdir: compiled, bundle: true,
-    format: 'esm', platform: 'browser', conditions: ['browser', 'production'], target: 'esnext', jsx: 'automatic', logLevel: 'error', metafile: true, alias, plugins: [clientSources, workers],
+    format: 'esm', platform: 'browser', conditions: ['browser', 'production'], target: 'esnext', jsx: 'automatic', logLevel: 'error', metafile: true, alias, plugins: [...(mutant ? [groupMutation] : []), clientSources, workers],
     loader: { '.png': 'file', '.gif': 'file', '.svg': 'file', '.avif': 'file', '.woff': 'file', '.woff2': 'file', '.ttf': 'file' }, define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' } })
   for (const file of Object.keys({ ...built.metafile.inputs, ...workerInputs }).filter(file => !file.startsWith('original-worker:') && !file.startsWith('original-url:') && !file.startsWith('original-raw:'))) receipt.source[file] = sha(await fs.readFile(path.resolve(root, file)))
-  for (const file of [import.meta.filename, path.join(fixture, 'renderer-main.cjs'), ...navigation ? [] : [path.join(fixture, 'thread-discovery.cjs'), ...(groups ? [path.join(fixture, 'native-groups.cjs')] : [])]]) receipt.source[path.relative(root, file)] = sha(await fs.readFile(file))
+  for (const file of [import.meta.filename, path.join(fixture, 'renderer-main.cjs'), ...navigation ? [] : [path.join(fixture, 'thread-discovery.cjs'), ...(groups ? [path.join(fixture, 'native-groups.cjs')] : []), ...(advanced ? [path.join(fixture, 'group-management.cjs')] : [])]]) receipt.source[path.relative(root, file)] = sha(await fs.readFile(file))
   for (const file of ['apps/desktop/src/renderer/src/App.tsx', 'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/components/PmoTeamsTopicFloatingPanel.tsx', 'apps/desktop/src/renderer/src/components/MoteSpaceFrame.tsx', 'apps/desktop/src/renderer/src/components/WorkspaceWorkbench.tsx', 'apps/desktop/src/renderer/src/components/SessionPane.tsx', 'apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx', 'apps/desktop/src/renderer/src/components/MoteCooperation.tsx'])
     assert.ok(receipt.source[file], 'Nonempty original product consumer is required: ' + file)
   await fs.writeFile(path.join(compiled, 'index.html'), '<!doctype html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="entry.css"></head><body><div id="root"></div><script>window.closedTabSetup={phase:"module-loading",errors:[]};window.addEventListener("error",e=>window.closedTabSetup.errors.push(String(e.error?.stack||e.message)));window.addEventListener("unhandledrejection",e=>window.closedTabSetup.errors.push(String(e.reason?.stack||e.reason)));</script><script type="module" src="entry.js"></script></body></html>')
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const logs = []
-  receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'renderer-main.cjs'), path.join(compiled, 'index.html'), directory, directory, ...(process.argv.includes('--notice-only') ? ['--notice-only'] : []), ...(groups ? ['--native-groups'] : [])],
+  receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'renderer-main.cjs'), path.join(compiled, 'index.html'), directory, directory, ...(process.argv.includes('--notice-only') ? ['--notice-only'] : []), ...(groups ? ['--native-groups'] : []), ...(advanced ? ['--group-management'] : [])],
     { cwd: root, env, timeoutMs: 90000, onLine: line => logs.push(line) })
   await fs.writeFile(path.join(directory, 'renderer.log'), logs.join('\n'))
   receipt.renderer = JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8'))
   assert.equal(receipt.process.exitCode, 0); assert.equal(receipt.renderer.passed, true)
-  assert.equal(receipt.renderer.images.length, navigation ? 15 : groups ? 7 : process.argv.includes('--notice-only') ? 2 : 15, 'Every named real product scene must be captured')
+  assert.equal(receipt.renderer.images.length, navigation ? 15 : advanced ? 6 : groups ? 7 : process.argv.includes('--notice-only') ? 2 : 15, 'Every named real product scene must be captured')
   if (navigation) {
     receipt.restartProcess = await runProbeProcess(require('electron'), [path.join(fixture, 'renderer-main.cjs'), path.join(compiled, 'index.html'), directory, directory, '--restore'], { cwd: root, env, timeoutMs: 45000, onLine: line => logs.push(line) })
     receipt.restart = JSON.parse(await fs.readFile(path.join(directory, 'renderer-restart-result.json'), 'utf8'))

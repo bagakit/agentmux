@@ -31,7 +31,7 @@ app.whenReady().then(async () => {
   const before = await facts(); result.initial = before
   if (process.argv.includes('--native-groups')) {
    await until('window.moteNativeGroupsCapture', 'Native group source connected to original panel')
-   await require('./native-groups.cjs')({ win, panel, findButton, read, until, click, type, capture, theme: light => read('window.moteDiscussionCapture.theme(' + light + ')') })
+   await require(process.argv.includes('--group-management') ? './group-management.cjs' : './native-groups.cjs')({ win, panel, findButton, read, until, click, type, capture, theme: light => read('window.moteDiscussionCapture.theme(' + light + ')') })
    result.final = await facts(); assert.deepEqual(result.final.identities, before.identities)
    result.groupCalls = await read('window.moteNativeGroupsCapture.calls')
    result.passed = true
