@@ -68,8 +68,9 @@ it('signs original Tickets, claims and completions through the public CLI', asyn
     hostId: 'local', ownerAgentSessionId: 'supervisor', ownerRunId: 'run-supervisor', workerAgentSessionId: 'worker', workerRunId: 'run-worker',
     text: 'Deliver and report the original repository result.', alignmentRevision: 1, criterionIds: [criterion.id], planNodeId: nodeId,
   } })
-  const received = await owner.call('worker', ['message', 'read', '--host', 'local', '--message-id', 'source-git-ticket'])
+  const received = await owner.call('worker', ['message', 'read', '--message-id', 'source-git-ticket'])
   expect(received.message.envelope.application.data.ticketLink).toBe(ticketLink)
+  expect(received.message.envelope.body).toContain('Use the verified `envelope.application.data`')
   const repo = join(owner.original.root, 'repository')
   await mkdir(repo)
   const git = async (...args: string[]) => (await run('git', ['-C', repo, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
