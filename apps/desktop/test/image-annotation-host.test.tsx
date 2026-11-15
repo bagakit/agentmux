@@ -2,6 +2,7 @@
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createClientUiRoot } from './helpers/client-ui-render'
+import { observeScreenshotPresentation } from './helpers/browser-screenshot-presentation'
 import type { AppConfig, BrowserPng, BrowserScreenshotCapture } from '../src/shared/contracts'
 import { createEditableAnnotationDocument, encodeEditableAnnotationDocument, type AnnotationHistoricalSource } from '../src/renderer/src/components/image-annotation/document'
 import { ANNOTATION_DOCUMENT_LIMITS } from '../src/renderer/src/components/browser-screenshot/document-files'
@@ -47,7 +48,7 @@ class Decoder {
 let root: ReturnType<typeof createClientUiRoot>, node: HTMLDivElement, frames: Map<number, FrameRequestCallback>, nextFrame: number
 let read: ReturnType<typeof vi.spyOn<typeof api.files, 'read'>>, write: ReturnType<typeof vi.spyOn<typeof api.files, 'write'>>
 let captured: ReturnType<typeof vi.spyOn<typeof api.browser, 'captureScreenshot'>>, clipboard: ReturnType<typeof vi.spyOn<typeof api.ui, 'writeClipboardText'>>
-let bounds: ReturnType<typeof vi.spyOn<typeof api.browser, 'setBounds'>>
+let presentation: ReturnType<typeof observeScreenshotPresentation>
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', false)
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} }); vi.stubGlobal('Image', Decoder); Decoder.pending = []
@@ -59,7 +60,7 @@ beforeEach(() => {
   fixture.state.config = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Local fixture' }], executors: {}, workspaces: [], appearance: { terminalTheme: 'graphite' },
     browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
   vi.clearAllMocks()
-  bounds = vi.spyOn(api.browser, 'setBounds').mockResolvedValue(undefined)
+  presentation = observeScreenshotPresentation(page)
   captured = vi.spyOn(api.browser, 'captureScreenshot').mockResolvedValue(capture)
   vi.spyOn(api.browser, 'setAnnotationMarkers').mockResolvedValue(undefined); vi.spyOn(api.browser, 'cancelElementSelection').mockResolvedValue(undefined)
   read = vi.spyOn(api.files, 'read').mockResolvedValue(readResult()); write = vi.spyOn(api.files, 'write').mockResolvedValue({ status: 'written', revision: 'saved-revision' })
@@ -84,7 +85,7 @@ async function click(scope: ParentNode, name: string) {
   } else await act(async () => button(scope, name).click())
   await frame()
 }
-async function mount(snapshot = page, visible = true) { await act(async () => root.render(<BrowserPane tab={snapshot} visible={visible} />)); await frame() }
+async function mount(snapshot = page, visible = true) { await act(async () => root.render(<BrowserPane tab={snapshot} primaryStage={presentation.stage(visible)} visible={visible} />)); await frame() }
 async function beginCapture() { await click(node, 'Screenshot'); const opened = editor(); await act(async () => opened.querySelector('img')!.dispatchEvent(new Event('load'))); await frame(); return opened }
 async function enterMoreOpen() {
   await act(async () => { const trigger = button(node, 'More browser tools'); trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })) })
@@ -112,9 +113,9 @@ describe('Browser annotation host save and reopen consumers', () => {
     expect(context).toMatchObject({ browserId: null, navigationId: null, sourceKind: 'saved-document', source,
       annotations: [expect.objectContaining({ id: 'saved-note', note: 'Saved historical note', template: 'request' })] })
     expect(captured).not.toHaveBeenCalled(); expect(write).not.toHaveBeenCalled()
-    expect(bounds).toHaveBeenLastCalledWith(page.browserId, null)
+    presentation.expectBounds(null)
     await click(opened, 'Cancel'); expect(node.querySelector('[aria-label="Screenshot editor"]')).toBeNull()
-    expect(bounds).toHaveBeenLastCalledWith(page.browserId, { x: 0, y: 0, width: 400, height: 300 })
+    presentation.expectBounds({ x: 0, y: 0, width: 400, height: 300 })
   })
 
   it('saves the exact captured document once, then uses only the revision explicitly reopened for the same path', async () => {

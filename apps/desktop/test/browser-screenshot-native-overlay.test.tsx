@@ -72,6 +72,8 @@ it('the screenshot editor uses its original stage DOM without native bitmap proj
   expect(publish.mock.calls[0]).toEqual([[], undefined])
   const image = editor!.querySelector<HTMLImageElement>('img')!
   await act(async () => image.dispatchEvent(new Event('load')))
+  const pen = editor!.querySelector<HTMLButtonElement>('button[aria-label="Pen"]')!
+  await act(async () => pen.click())
   const canvas = editor!.querySelector('canvas')!
   canvas.setPointerCapture = vi.fn()
   await act(async () => canvas.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerId: 1, clientX: 25, clientY: 30 })))
@@ -83,7 +85,10 @@ it('the screenshot editor uses its original stage DOM without native bitmap proj
   await act(async () => copy.click())
   expect(complete).toHaveBeenCalledTimes(1)
   expect(complete.mock.calls[0]![0].shapes).toEqual([expect.objectContaining({ kind: 'pen', points: [{ x: 25, y: 30 }, { x: 35, y: 40 }] })])
-  await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })))
+  await act(async () => buttons.find(button => button.textContent?.trim() === 'Cancel')!.click())
+  const discard = [...editor!.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === 'Discard')
+  expect(discard).toBeDefined()
+  await act(async () => discard!.click())
   expect(cancel).toHaveBeenCalledTimes(1)
   await act(async () => root!.unmount()); root = undefined
   expect(geometry.stop).not.toHaveBeenCalled()
@@ -174,7 +179,8 @@ it('discards a cancelled pointer gesture without committing it or changing exist
 })
 
 it('retains a gesture whose down, moves and up all precede the next render', async () => {
-  const { complete, copy, pointer } = await mountGestureEditor()
+  const { complete, copy, pointer, button } = await mountGestureEditor()
+  await act(async () => button('Pen').click())
   await act(async () => {
     pointer('pointerdown', 25, 30)
     pointer('pointermove', 100, 40)

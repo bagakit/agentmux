@@ -2,6 +2,7 @@
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createClientUiRoot } from './helpers/client-ui-render'
+import { observeScreenshotPresentation } from './helpers/browser-screenshot-presentation'
 import type { AppConfig, BrowserPng, BrowserScreenshotCapture } from '../src/shared/contracts'
 
 const fixture = vi.hoisted(() => ({
@@ -69,7 +70,7 @@ function rect(x: number, y: number, width: number, height: number): DOMRect {
 }
 let container: HTMLDivElement, root: ReturnType<typeof createClientUiRoot>
 let frames: Map<number, FrameRequestCallback>, nextFrame: number
-let bounds: ReturnType<typeof vi.spyOn<typeof api.browser, 'setBounds'>>
+let presentation: ReturnType<typeof observeScreenshotPresentation>
 let clipboard: ReturnType<typeof vi.spyOn<typeof api.ui, 'writeClipboardImage'>>
 let clipboardText: ReturnType<typeof vi.spyOn<typeof api.ui, 'writeClipboardText'>>
 let captureScreenshot: ReturnType<typeof vi.spyOn<typeof api.browser, 'captureScreenshot'>>
@@ -80,8 +81,6 @@ let nativeImageWrite: ReturnType<typeof vi.fn>
 
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  // api was imported under the normal preview test adapter. The mounted Pane must exercise its
-  // native bounds branch, where screenshot mode temporarily hides the original Browser owner.
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', false)
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   frames = new Map(); nextFrame = 0
@@ -103,7 +102,7 @@ beforeEach(() => {
     browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
   }
   vi.clearAllMocks()
-  bounds = vi.spyOn(api.browser, 'setBounds').mockResolvedValue(undefined)
+  presentation = observeScreenshotPresentation(page)
   nativeImageWrite = vi.fn(async () => {})
   const handlers = new Map<string, (...args: any[]) => any>()
   registerNativeDesktopIpc({ capture: vi.fn(async () => null), native: () => ({ writeClipboardImage: nativeImageWrite,
@@ -136,7 +135,7 @@ async function flushFrames() {
   })
 }
 async function mount(snapshot = page, visible = true) {
-  await act(async () => root.render(<BrowserPane tab={snapshot} visible={visible} />))
+  await act(async () => root.render(<BrowserPane tab={snapshot} primaryStage={presentation.stage(visible)} visible={visible} />))
   await flushFrames()
   expect(container.querySelector('[data-native-browser-stage]')).not.toBeNull()
 }
@@ -181,7 +180,7 @@ async function cancel(method: 'Cancel' | 'Escape') {
 }
 function originalPageKept() {
   expect(container.querySelector<HTMLInputElement>('[aria-label="Browser address"]')!.value).toBe(page.url)
-  expect(bounds.mock.calls.every(([id]) => id === page.browserId)).toBe(true)
+  presentation.expectOriginalLease()
   expect(release).not.toHaveBeenCalled(); expect(restore).not.toHaveBeenCalled(); expect(navigate).not.toHaveBeenCalled()
   expect(fixture.state.reportError).not.toHaveBeenCalled()
 }
@@ -239,7 +238,7 @@ describe('original Browser screenshot workface', () => {
       editorClosed: !container.querySelector('[aria-label="Screenshot editor"]') },
     `Text completion left focus on ${focused?.tagName} ${focused?.getAttribute('aria-label') ?? ''}`)
       .toEqual({ canvasFocused: true, exitConsumed: true, editorClosed: true })
-    expect(bounds).toHaveBeenLastCalledWith(page.browserId, pageBounds)
+    presentation.expectBounds(pageBounds)
     expect(clipboard).not.toHaveBeenCalled(); expect(clipboardText).not.toHaveBeenCalled()
     originalPageKept()
   })
@@ -331,7 +330,7 @@ describe('original Browser screenshot workface', () => {
     expect(editor()).toBe(opened); expect(captureScreenshot).toHaveBeenCalledTimes(1)
     await cancel('Cancel')
     expect(container.querySelector('[aria-label="Screenshot editor"]')).toBeNull()
-    expect(bounds).toHaveBeenLastCalledWith(page.browserId, pageBounds)
+    presentation.expectBounds(pageBounds)
     originalPageKept()
   })
 
@@ -350,7 +349,7 @@ describe('original Browser screenshot workface', () => {
         expect(field.value).toBe(draft)
         expect(field.selectionStart).toBe(1); expect(field.selectionEnd).toBe(5)
         expect(editor()).toBe(opened)
-        expect(bounds).toHaveBeenLastCalledWith(page.browserId, null)
+        presentation.expectBounds(null)
       }
       const canvas = opened.querySelector('canvas')!
       const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
@@ -358,7 +357,7 @@ describe('original Browser screenshot workface', () => {
       await flushFrames()
       expect(event.defaultPrevented).toBe(true)
       expect(container.querySelector('[aria-label="Screenshot editor"]')).toBeNull()
-      expect(bounds).toHaveBeenLastCalledWith(page.browserId, pageBounds)
+      presentation.expectBounds(pageBounds)
       expect(captureScreenshot).toHaveBeenCalledTimes(1)
       expect(clipboard).not.toHaveBeenCalled(); expect(clipboardText).not.toHaveBeenCalled()
       originalPageKept()
@@ -371,9 +370,9 @@ describe('original Browser screenshot workface', () => {
     expect(clipboard.mock.calls).toEqual([[image], [image]])
     expect(nativeImageWrite.mock.calls).toEqual([[image], [image]])
     expect(captureScreenshot).toHaveBeenCalledTimes(1)
-    expect(bounds).toHaveBeenLastCalledWith(page.browserId, null)
+    presentation.expectBounds(null)
     await cancel('Cancel')
-    expect(bounds).toHaveBeenLastCalledWith(page.browserId, pageBounds)
+    presentation.expectBounds(pageBounds)
     originalPageKept()
   })
 
@@ -512,19 +511,18 @@ describe('original Browser screenshot workface', () => {
 
   it.each(['Cancel', 'Escape'] as const)('%s exits the real editor and restores the same Browser bounds', async method => {
     await mount()
-    expect(bounds).toHaveBeenLastCalledWith(page.browserId, pageBounds)
-    bounds.mockClear()
+    presentation.expectBounds(pageBounds)
     const stage = container.querySelector('[data-native-browser-stage]')!
     const opened = await openScreenshot(method === 'Escape' ? 'more' : 'toolbar')
     expect(captureScreenshot).toHaveBeenCalledExactlyOnceWith(page.browserId)
     expect(opened.closest('[data-native-browser-stage]')).toBe(stage)
     expect(document.querySelector('[data-overlay-host] .image-annotation-editor')).toBeNull()
-    expect(bounds).toHaveBeenLastCalledWith(page.browserId, null)
+    presentation.expectBounds(null)
     expect(button(opened, 'Cancel').disabled).toBe(false)
     await cancel(method)
     expect(container.querySelector('[aria-label="Screenshot editor"]')).toBeNull()
     expect(container.querySelector('[data-native-browser-stage]')).toBe(stage)
-    expect(bounds).toHaveBeenLastCalledWith(page.browserId, pageBounds)
+    presentation.expectBounds(pageBounds)
     expect(button(container, 'Screenshot').disabled).toBe(false)
     expect(clipboard).not.toHaveBeenCalled()
     originalPageKept()
@@ -545,7 +543,7 @@ describe('original Browser screenshot workface', () => {
     expect(button(opened, 'Cancel').disabled).toBe(false)
     await cancel(method)
     expect(container.querySelector('[aria-label="Screenshot editor"]')).toBeNull()
-    expect(bounds).toHaveBeenLastCalledWith(page.browserId, pageBounds)
+    presentation.expectBounds(pageBounds)
     const next = await openScreenshot()
     expect(next).not.toBe(opened)
     await act(async () => waiting.resolve(image))
@@ -553,7 +551,7 @@ describe('original Browser screenshot workface', () => {
     expect(clipboardText).not.toHaveBeenCalled()
     expect(editor()).toBe(next)
     expect(button(next, 'Copy PNG').disabled).toBe(false)
-    expect(bounds).toHaveBeenLastCalledWith(page.browserId, null)
+    presentation.expectBounds(null)
     await cancel('Cancel'); originalPageKept()
   })
 

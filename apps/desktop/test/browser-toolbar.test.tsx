@@ -3,7 +3,7 @@ import { GRAPHITE_THEME, mountThemeRuntime, previewTheme } from '@agentmux/clien
 import { semanticIconHref } from '@agentmux/client-ui/icons'
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
-import { act } from 'react'
+import { act, type ReactNode } from 'react'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { renderClientUiMarkup as renderToStaticMarkup } from './helpers/client-ui-render'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -162,6 +162,19 @@ async function openActivityMenu(container: HTMLElement): Promise<HTMLElement> {
   return menu
 }
 
+async function mountedBrowserMarkup(content: ReactNode): Promise<string> {
+  const container = document.createElement('div')
+  document.body.append(container)
+  const root = createRoot(container)
+  try {
+    await act(async () => root.render(content))
+    return container.innerHTML
+  } finally {
+    await act(async () => root.unmount())
+    container.remove()
+  }
+}
+
 describe('Browser bar contract', () => {
   it('rejects a capture returned for a Browser identity that is no longer current', () => {
     expect(browserCaptureMatchesIdentity(
@@ -178,8 +191,8 @@ describe('Browser bar contract', () => {
     )).toBe(true)
   })
 
-  it('keeps external open fixed first and projects the stable tool order', () => {
-    const markup = renderToStaticMarkup(<BrowserPane tab={tab} visible />)
+  it('keeps external open fixed first and projects the stable tool order', async () => {
+    const markup = await mountedBrowserMarkup(<BrowserPane tab={tab} visible />)
     const labels = [
       'Open in external browser',
       'Back',
@@ -210,12 +223,12 @@ describe('Browser bar contract', () => {
     ])
   })
 
-  it('hides configured tools without allowing external open to be configured away', () => {
+  it('hides configured tools without allowing external open to be configured away', async () => {
     fixture.state.config = BROWSER_TOOLBAR_ITEM_ORDER.reduce(
       (current, item) => withBrowserToolbarItem(current, item, false),
       config
     )
-    const markup = renderToStaticMarkup(<BrowserPane tab={tab} visible />)
+    const markup = await mountedBrowserMarkup(<BrowserPane tab={tab} visible />)
 
     expect(markup).toContain('aria-label="Open in external browser"')
     expect(markup).not.toContain('aria-label="Select element"')
@@ -228,13 +241,13 @@ describe('Browser bar contract', () => {
     expect('openExternal' in fixture.state.config.browser.toolbar).toBe(false)
   })
 
-  it('shows one accessible operation rail while an Agent operates the page', () => {
-    const markup = renderToStaticMarkup(<BrowserPane tab={{ ...tab, driving: true }} visible />)
+  it('shows one accessible operation rail while an Agent operates the page', async () => {
+    const markup = await mountedBrowserMarkup(<BrowserPane tab={{ ...tab, driving: true, control: { owner: 'agent', activeOperationId: 'operation-1', revision: 1, inputIsolation: 'isolated', agent: null } }} visible />)
     expect(markup).toContain('Agent control active')
     expect(markup).toContain('Activity details are loading')
     expect(markup).toContain('aria-label="Browser activity: Agent control active · Activity details are loading"')
     expect(markup).not.toContain('browser-control-status')
-    expect(renderToStaticMarkup(<BrowserPane tab={tab} visible />)).not.toContain('Agent control active')
+    expect(await mountedBrowserMarkup(<BrowserPane tab={tab} visible />)).not.toContain('Agent control active')
   })
 
   it.each(['back', 'forward', 'reload', 'openDevTools'] as const)('More executes %s on the original Browser', async method => {
@@ -284,20 +297,13 @@ describe('Browser bar contract', () => {
     } finally { await act(async () => root.unmount()); container.remove(); action.mockRestore() }
   })
 
-  /**
-   * 停止走**协议**，不走 `api.browser.stopOperation`（T-008 收口）。
-   *
-   * 这里断言两件事，缺一件这条就放过一半缺陷：**经协议**（不是又一份 IPC 语义），且**按 operationId
-   * 寻址**（不是 browserId）——后者是协议比旧 IPC 强的地方，一条操作的寿命长于这张 Tab。
-   */
-  it('rail 的接管与停止都经协议按 operationId 取消，不各自维护一份 IPC 语义', async () => {
+  it('接管以 Browser 为目标，停止以原 operationId 为目标', async () => {
     fixture.state.executeControl.mockClear()
-    // 旧那条第二套语义**整个入口已被删掉**（contracts/preload/ipc/manager 四处），所以这里不 spy——
-    // spyOn 一个不存在的方法会抛。判它不在场比判它没被调用更强：不在场的入口无法被将来悄悄接回去。
-    expect('stopOperation' in api.browser, 'api.browser.stopOperation 又回来了——第二套语义复活').toBe(false)
+    const takeControl = vi.spyOn(api.browser, 'takeControl').mockResolvedValue(tab)
     const activeTab = {
       ...tab,
       driving: true,
+      control: { owner: 'agent' as const, activeOperationId: 'operation-1', revision: 1, inputIsolation: 'isolated' as const, agent: null },
       activity: {
         control: 'agent' as const,
         operation: {
@@ -325,16 +331,13 @@ describe('Browser bar contract', () => {
     const stop = menu.querySelector('[aria-label="Stop browser operation"]')
     expect(stop).not.toBeNull()
     await act(async () => stop!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
-    // 两次点击（Take control 与 Stop）各发一条协议请求，且都按 operationId。钉死整份参数而不是
-    // 只判"被调过"：只判次数会放过"发的是别的 operation"或"寻址回到了 browserId"。
-    const sent = fixture.state.executeControl.mock.calls.map(([request]) => request as Record<string, unknown>)
-    expect(sent.map((request) => request.operation), '停止没经协议，或发的不是 browser.stop')
-      .toEqual(['browser.stop', 'browser.stop'])
-    expect(sent.map((request) => request.operationId), '协议请求没按 operationId 寻址')
-      .toEqual(['operation-1', 'operation-1'])
-    // 另一半：**旧那条 IPC 语义一次都没被走**。只断言协议被调过会放过"两条都走了"。
+    expect(takeControl).toHaveBeenCalledExactlyOnceWith(tab.browserId)
+    expect(fixture.state.executeControl).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      operation: 'browser.stop', operationId: 'operation-1'
+    }))
     await act(async () => root.unmount())
     container.remove()
+    takeControl.mockRestore()
   })
 
   it('rail 打开历史时经协议按 browserId 取，不各自维护一份 IPC 语义', async () => {
@@ -353,19 +356,22 @@ describe('Browser bar contract', () => {
     expect((fixture.state.executeControl.mock.calls[0]![0] as Record<string, unknown>).browserId,
       '过滤没交给协议——在客户端再滤一遍就是把同一条规则写两处').toBe(tab.browserId)
     expect(listOperationHistory, '还在走 api.browser.listOperationHistory（第二套语义仍在）').not.toHaveBeenCalled()
-    expect(container.textContent).toContain('Recent operations')
-    expect(container.textContent).toContain('No recorded Browser operations yet.')
+    const trace = document.querySelector('[aria-label="Browser activity trace"]')
+    expect(trace).not.toBeNull()
+    expect(trace!.textContent).toContain('Recent operations')
+    expect(trace!.textContent).toContain('No recorded Browser operations yet.')
     await act(async () => root.unmount())
     container.remove()
     listOperationHistory.mockRestore()
   })
 
-  it('renders an explicit release state without pretending a hidden Browser still owns WebContents', () => {
-    const markup = renderToStaticMarkup(<BrowserPane tab={tab} visible={false} released />)
+  it('keeps the original address and recovery UI for a confirmed parked Browser', async () => {
+    const markup = await mountedBrowserMarkup(<BrowserPane tab={{ ...tab, nativeOwnerReleased: true }} visible released />)
     expect(markup).toContain('Browser parked')
-    expect(markup).toContain('restore the original page')
-    expect(markup).toContain('Browser address')
-    expect(markup).toContain('You can edit the address or open it in your external browser')
+    expect(markup).toContain('aria-label="Browser address"')
+    expect(markup).toContain(tab.url)
+    expect(markup).toContain('Edit address')
+    expect(markup).not.toContain('class="browser-preview"')
   })
 
   it('keeps Browser Tools as the recovery surface when More is hidden', () => {
@@ -412,26 +418,23 @@ describe('Browser bar contract', () => {
 
   // T-004「查看源码」按钮。它是**上下文按钮**（只在从书签开的 Browser 上出现），不进 toolbar 配置——
   // 普通网页没有源可看。二进制 plist 那一档按用户原话「按钮灰掉，hover 告知」（§2.7）。
-  it('普通网页（非书签来历）不显示查看源码按钮', () => {
-    const markup = renderToStaticMarkup(<BrowserPane tab={tab} visible />)
+  it('普通网页（非书签来历）不显示查看源码按钮', async () => {
+    const markup = await mountedBrowserMarkup(<BrowserPane tab={tab} visible />)
     expect(markup).not.toContain('aria-label="View bookmark source"')
   })
 
-  it('文本书签：查看源码按钮在场且可用，hover 说明看的是这份书签的源码', () => {
+  it('文本书签：查看源码按钮在场且可用，hover 说明看的是这份书签的源码', async () => {
     const fromText = { ...tab, bookmarkOrigin: { path: 'links/Example.webloc', binary: false } }
-    const markup = renderToStaticMarkup(<BrowserPane tab={fromText} visible />)
+    const markup = await mountedBrowserMarkup(<BrowserPane tab={fromText} visible />)
     expect(markup).toContain('aria-label="View bookmark source"')
-    // `renderToStaticMarkup` 会把 `'` 转义成 `&#x27;`，所以断言要写成属性在产物里的真实样子。
-    // 照着源码里的原文写（`View this bookmark's source`）会红，而红的是断言不是按钮。
-    expect(markup).toContain('title="View this bookmark&#x27;s source"')
-    // 可用：这个按钮没有 disabled 属性。renderToStaticMarkup 只在 disabled=true 时才输出该属性。
+    expect(markup).toContain("title=\"View this bookmark's source\"")
     const button = markup.slice(markup.indexOf('aria-label="View bookmark source"'))
     expect(button.slice(0, button.indexOf('>'))).not.toContain('disabled')
   })
 
-  it('二进制书签：查看源码按钮在场但灰掉，hover 只说清为什么这一个不行（不弹框不 toast 不警告条）', () => {
+  it('二进制书签：查看源码按钮在场但灰掉，hover 只说清为什么这一个不行（不弹框不 toast 不警告条）', async () => {
     const fromBinary = { ...tab, bookmarkOrigin: { path: 'links/Binary.webloc', binary: true } }
-    const markup = renderToStaticMarkup(<BrowserPane tab={fromBinary} visible />)
+    const markup = await mountedBrowserMarkup(<BrowserPane tab={fromBinary} visible />)
     expect(markup).toContain('aria-label="View bookmark source"')
     const button = markup.slice(markup.indexOf('aria-label="View bookmark source"'))
     expect(button.slice(0, button.indexOf('>'))).toContain('disabled')
