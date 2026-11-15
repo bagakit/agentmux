@@ -27,7 +27,7 @@ export type GoalNextStepSource =
   | { kind: 'patrol'; operationId: string }
   | { kind: 'goal' }
 export type GoalNextStepFact = { stage: GoalStage; text: string; source: GoalNextStepSource }
-type GoalNextStepInput = Pick<DemandRecord, 'id' | 'alignment' | 'grounding' | 'status' | 'delegations' | 'delegationObservations' | 'delegationObservationIssue' | 'dispatches' | 'startObservations' | 'patrols' | 'patrolObservations'>
+type GoalNextStepInput = Pick<DemandRecord, 'id' | 'alignment' | 'grounding' | 'status' | 'delegations' | 'delegationObservations' | 'delegationObservationIssue' | 'dispatches' | 'startObservations' | 'patrols' | 'patrolObservations' | 'plan' | 'planState'>
 
 const DELEGATION_STAGE: Record<GoalDelegationRow['state'], GoalStage> = {
   // A worker report is collected and verified by the Supervisor Agent before a person reviews it.
@@ -46,7 +46,7 @@ function retainedGoalInputHere(value: unknown, goalId: string): boolean {
 export function goalHasOriginalWork(demand: Pick<DemandRecord, 'id' | 'dispatches' | 'delegations' | 'patrols' | 'responsibility'>, retainedStart?: unknown): boolean {
   return Boolean(demand.dispatches?.some(item => item.execution === 'finite') || demand.delegations?.length ||
     readGoalFiniteStartIntent(retainedStart, demand.id)?.phase !== 'selecting-access' && retainedGoalInputHere(retainedStart, demand.id) ||
-    demand.patrols?.some(item => item.purpose !== 'plan') || demand.responsibility?.executions.length)
+    demand.patrols?.some(item => item.purpose === undefined) || demand.responsibility?.executions.length)
 }
 
 /** Display the owner facts. Business status is not an acknowledgement. */
@@ -83,7 +83,7 @@ export function goalNextStepFact(demand: GoalNextStepInput, retainedInput?: unkn
       return { stage: retainedStart.phase === 'not-attempted' ? 'attention' : 'unknown',
         text: retainedStart.phase === 'not-attempted' ? 'Original task retained · Not submitted' : 'Original task input unconfirmed',
         source: { kind: 'start', operationId: retainedStart.operationId, ...(retainedStart.agentReference ? { agentReference: retainedStart.agentReference } : { agentSessionId: retainedStart.sessionId }) } }
-    const patrol = demand.patrols?.filter(item => item.purpose !== 'plan').at(-1)
+    const patrol = demand.patrols?.findLast(item => item.purpose === undefined)
     const observed = patrol && demand.patrolObservations?.find(item => item.operationId === patrol.operationId)
     if (patrol && !patrol.report && observed && observed.state !== 'stale' && observed.state !== 'reported' && observed.state !== 'planned') {
       const text = { unknown: 'Original inspection input unconfirmed', missing: 'Inspection saved · Not delivered',
@@ -99,7 +99,20 @@ export function goalNextStepFact(demand: GoalNextStepInput, retainedInput?: unkn
   if (!alignment) return { stage: 'define', text: 'Goal needs an outline', source: definitionSource }
   if (alignmentConfirmationIssue(alignment)) return { stage: 'define', text: alignment.openQuestions.length ? 'Decision needed' : 'Success criteria needed', source: definitionSource }
   if (alignment.confirmedAt === null) return { stage: 'you', text: 'Goal ready for confirmation', source: definitionSource }
-  if (!grounding) return { stage: 'agents', text: 'Goal agreed · No result report', source: { kind: 'goal' } }
+  if (!grounding) {
+    const { planState } = demand
+    let text = 'Goal agreed · No result report'
+    if (planState && demand.status !== 'cancelled') {
+      if (planState.total > 0 && planState.done === planState.total) text = 'Plan complete · Awaiting result report'
+      else {
+        const ready = planState.nodes.find(node => node.state === 'ready')
+        const nextTicket = ready && demand.plan?.nodes.find(node => node.id === ready.id)
+        if (nextTicket) text = nextTicket.claimOpen ? 'Waiting for an Agent to claim a Ticket'
+          : nextTicket.executor ? 'Waiting for Supervisor to dispatch a Ticket' : 'Waiting for Ticket assignment'
+      }
+    }
+    return { stage: 'agents', text, source: { kind: 'goal' } }
+  }
   if (grounding.alignmentRevision !== alignment.revision) return { stage: 'attention', text: 'Results need updating', source: resultSource }
   const gapsAllowed = groundingAcceptanceIssue(alignment, grounding, true) === null
   const hasGaps = grounding.checks.some(check => check.outcome === 'gap')

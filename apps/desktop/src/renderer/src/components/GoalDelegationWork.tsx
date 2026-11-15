@@ -7,7 +7,7 @@ import { demandAgentReferenceLabel, goalSupervisorHostWitnesses } from '@agentmu
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import { api } from '../lib/api'
 import type { DemandRecord } from '../lib/global-demand-board'
-import { goalDelegationRows } from '../lib/goal-delegation-presentation'
+import { goalDelegationRows, isHistoricalGoalDelegation } from '../lib/goal-delegation-presentation'
 import { goalStartRows } from '../lib/goal-start-presentation'
 import { GoalRequestReader } from './GoalRequestReader'
 import { GoalStartWork } from './GoalStartWork'
@@ -76,17 +76,18 @@ export function GoalDelegationWork({ demand, active = true, compact = false, emb
       if (result.operation === 'focus' && result.navigation.state === 'rejected') setIssue(result.issues.map(item => item.message).join(' '))
     } catch (error) { setIssue(error instanceof Error ? error.message : String(error)) }
   }
-  const startRecords = starts.map(row => ({ key: `start:${row.start.operationId}`, title: 'One-time task', summary: row.next,
+  const startRecords = starts.map(row => ({ key: `start:${row.start.operationId}`, title: 'One-time task', summary: row.next, historical: false,
     element: <GoalStartWork key={row.start.operationId} rows={[row]} supervisorSessionId={current.supervisorSessionId} active={active} openAgent={openAgent} review={review} embedded={embedded} responsibilities={embedded ? responsibilities : undefined} focus={focus} primary={primary} /> }))
   const planTitles = new Map(current.plan?.nodes.map(node => [node.id, node.title]))
-  const delegationRecords = rows.map(row => ({ key: `delegation:${row.delegation.operationId}`,
-    title: planTitles.get(row.delegation.planNodeId ?? '') ?? 'Delegated task', summary: row.next,
-    element: <article className="goal-delegation__item" key={row.delegation.operationId} tabIndex={-1} aria-label={row.next} data-goal-work-operation={row.delegation.operationId} data-goal-work-kind="delegation" data-goal-attempt={row.previousAttempt ? 'previous' : undefined}>
+  const delegationRecords = rows.map(row => {
+    const summary = row.previousAttempt ? 'Previous attempt' : row.closedTicket === 'done' ? 'Ticket passed' : row.closedTicket === 'cancelled' ? 'Ticket cancelled' : row.next
+    return { key: `delegation:${row.delegation.operationId}`, title: planTitles.get(row.delegation.planNodeId ?? '') ?? 'Delegated task',
+    summary, historical: isHistoricalGoalDelegation(row),
+    element: <article className="goal-delegation__item" key={row.delegation.operationId} tabIndex={-1} aria-label={summary} data-goal-work-operation={row.delegation.operationId} data-goal-work-kind="delegation" data-goal-attempt={row.previousAttempt ? 'previous' : undefined}>
       {embedded && row.delegation.planNodeId && planTitles.has(row.delegation.planNodeId) ? <p className="goal-work-area__plan-task" data-goal-work-node={row.delegation.planNodeId}>
         Plan task · {planTitles.get(row.delegation.planNodeId)}
       </p> : null}
-      {row.previousAttempt ? <span className="goals-caption">Previous attempt</span> : null}
-      <strong data-goal-current-conclusion={focus?.kind === 'delegation' && focus.operationId === row.delegation.operationId ? true : undefined} data-goal-current-source={focus?.kind === 'delegation' && focus.operationId === row.delegation.operationId ? 'delegation' : undefined}>{row.next}</strong>
+      <strong data-goal-current-conclusion={focus?.kind === 'delegation' && focus.operationId === row.delegation.operationId ? true : undefined} data-goal-current-source={focus?.kind === 'delegation' && focus.operationId === row.delegation.operationId ? 'delegation' : undefined}>{summary}</strong>
       <p className="goal-delegation__identity">Agent <span><GoalContinuationAgent agentSessionId={row.delegation.workerAgentSessionId} hostId={delegationWorkerHostId(row.delegation)} active={active} size={14} /></span> · Follow-up {current.supervisorSessionId
         ? supervisorHost ? <span><GoalContinuationAgent agentSessionId={current.supervisorSessionId} hostId={supervisorHost} active={active} size={14} /></span>
           : <span title={demandAgentReferenceLabel(current.supervisorSessionId)}>Supervisor reference · {typeof current.supervisorSessionId === 'string' ? 'Host unconfirmed' : demandAgentReferenceLabel(current.supervisorSessionId)}</span> : 'needs an assigned Supervisor'}</p>
@@ -121,12 +122,13 @@ export function GoalDelegationWork({ demand, active = true, compact = false, emb
             {check.note ? <p>{check.note}</p> : null}<GoalEvidence evidence={check.evidence} criterion={check.criterionId} /></div>)}
         </div> : null}
       </GoalRequestReader>
-    </article> }))
+    </article> }
+  })
   const records = [...startRecords, ...delegationRecords]
   const focusedKey = focus?.kind === 'start' || focus?.kind === 'delegation' ? `${focus.kind}:${focus.operationId}` : null
   const others = records.filter(record => record.key !== focusedKey)
   const attentionKeys = new Set([...starts.filter(row => row.state !== 'working').map(row => `start:${row.start.operationId}`), ...rows.filter(row => ['unknown', 'exited', 'question', 'report', 'collected'].includes(row.state)).map(row => `delegation:${row.delegation.operationId}`)])
-  const needsAttention = others.filter(record => attentionKeys.has(record.key) || responsibilities.get(record.key)?.alert).length
+  const needsAttention = others.filter(record => !record.historical && (attentionKeys.has(record.key) || responsibilities.get(record.key)?.alert)).length
   const single = others.length === 1 ? others[0] : undefined
   const readIssue = issue ?? current.delegationObservationIssue
   const refreshButton = <Button type="button" onClick={() => void refresh()}>Refresh reports</Button>

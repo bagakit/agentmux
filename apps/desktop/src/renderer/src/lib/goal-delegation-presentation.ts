@@ -9,6 +9,11 @@ export type GoalDelegationRow = {
   report?: import('@agentmux/demand').DemandDelegationReportInput
   attention?: NonNullable<DemandRecord['delegationObservations']>[number]['attention']
   previousAttempt?: true
+  closedTicket?: 'done' | 'cancelled'
+}
+
+export function isHistoricalGoalDelegation(row: GoalDelegationRow): boolean {
+  return Boolean(row.previousAttempt || row.closedTicket)
 }
 
 /** Reading projection only; no display label authorizes input, recovery or acceptance. */
@@ -24,6 +29,7 @@ export function goalDelegationRows(goal: Pick<DemandRecord, 'delegations' | 'del
     const planNode = delegation.planNodeId ? planNodes.get(delegation.planNodeId) : undefined
     const original = { delegation, ...(issue ? { issue } : {}), ...(report ? { report } : {}),
       ...(planNode && planNode.attempt?.delegationOperationId !== delegation.operationId ? { previousAttempt: true as const } : {}),
+      ...(planNode?.state === 'done' || planNode?.state === 'cancelled' ? { closedTicket: planNode.state } : {}),
       ...(observation?.attention ? { attention: observation.attention } : {}) }
     if (delegation.collection) {
       const accepted = goal.grounding?.acceptedAt != null && goal.grounding.submissionId === delegation.collection.groundingSubmissionId
@@ -70,7 +76,7 @@ export function goalDelegationNextStep(goal: Parameters<typeof goalDelegationRow
 
 /** The same priority as the visible next step, keeping the row state for reading projections. */
 export function goalDelegationNextRow(goal: Parameters<typeof goalDelegationRows>[0]): GoalDelegationRow | null {
-  const rows = goalDelegationRows(goal)
+  const rows = goalDelegationRows(goal).filter(row => !isHistoricalGoalDelegation(row))
   for (const state of ['report', 'question', 'exited', 'collected', 'unknown', 'working'] as const) {
     const row = rows.find(item => item.state === state)
     if (row) return row
