@@ -65,7 +65,15 @@ async function declarationDependencies(dist) {
       dependencies.add(name)
     }
   }
-  return Object.fromEntries(await Promise.all([...dependencies].sort().map(async name => [name, (await readPackage(name)).version])))
+  const options = { module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler }
+  const entries = await Promise.all([...dependencies].sort().map(async name => {
+    const { resolvedModule } = ts.resolveModuleName(name, join(pkg, 'package.json'), options, ts.sys)
+    const root = resolvedModule && installedPackageRoot(resolvedModule.resolvedFileName)
+    assert.ok(root, 'No installed package for declaration dependency ' + name)
+    const installed = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
+    return [installed.name, installed.version]
+  }))
+  return Object.fromEntries(entries)
 }
 
 async function copyDocumentation(directory) {
