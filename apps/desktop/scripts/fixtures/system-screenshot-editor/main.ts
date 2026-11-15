@@ -77,7 +77,7 @@ async function open(image: ReturnType<typeof pngFromBytes>, attach: boolean) {
   })
   await settle()
   process.stdout.write('native-editor: decoded editor ready\n')
-  assert.deepEqual(await evaluate('Object.keys(window.screenshotEditor).sort()'), ['cancel', 'copyContext', 'finish', 'inspectOriginal', 'inspectOriginalOperation', 'inspectPin', 'load', 'onNotice', 'openOriginal', 'pin', 'retake', 'saveOriginal', 'savePng'])
+  assert.deepEqual(await evaluate('Object.keys(window.screenshotEditor).sort()'), ['cancel', 'copyContext', 'finish', 'inspectOriginal', 'inspectOriginalOperation', 'inspectPin', 'load', 'onNotice', 'openOriginal', 'pin', 'recognizeText', 'retake', 'saveOriginal', 'savePng'])
   assert.equal(await evaluate('typeof window.agentmux'), 'undefined', 'the full application preload is absent')
   const glyphs = await evaluate(`(()=>{const svg=document.querySelector('[aria-label="Crop"] svg use');return !!svg&&!!document.getElementById(svg.getAttribute('href').slice(1))})()`)
   assert.equal(glyphs, true, 'the shared theme runtime installs actual semantic glyphs')
