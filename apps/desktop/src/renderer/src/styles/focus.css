@@ -499,18 +499,6 @@ button.recent-focus__scope:focus-visible { color: var(--text); background: var(-
 .recent-focus__identity { display: flex; flex-direction: column; justify-content: center; min-width: 0; padding-inline-start: 12px; }
 .recent-focus__identity > small { padding-inline-start: 22px; }
 
-.focus-task-toolbar {
-  display: flex;
-  align-items: center;
-  flex: none;
-  gap: var(--sp-1);
-  min-height: 30px;
-  padding: 2px var(--sp-2);
-  border-block-end: 1px solid var(--line);
-  color: var(--text-2);
-  font-size: var(--fs-meta);
-}
-.focus-task-toolbar > span { margin-inline-end: auto; font-weight: 600; }
 .focus-agent-pins { flex: none; padding: 4px var(--sp-2) var(--sp-2); border-block-end: 1px solid var(--line); }
 .focus-agent-pins h3 {
   display: flex;
