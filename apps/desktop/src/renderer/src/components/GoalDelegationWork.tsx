@@ -76,9 +76,12 @@ export function GoalDelegationWork({ demand, active = true, compact = false, emb
       if (result.operation === 'focus' && result.navigation.state === 'rejected') setIssue(result.issues.map(item => item.message).join(' '))
     } catch (error) { setIssue(error instanceof Error ? error.message : String(error)) }
   }
-  const startRecords = starts.map(row => ({ key: `start:${row.start.operationId}`, element: <GoalStartWork key={row.start.operationId} rows={[row]} supervisorSessionId={current.supervisorSessionId} active={active} openAgent={openAgent} review={review} embedded={embedded} responsibilities={embedded ? responsibilities : undefined} focus={focus} primary={primary} /> }))
+  const startRecords = starts.map(row => ({ key: `start:${row.start.operationId}`, title: 'One-time task', summary: row.next,
+    element: <GoalStartWork key={row.start.operationId} rows={[row]} supervisorSessionId={current.supervisorSessionId} active={active} openAgent={openAgent} review={review} embedded={embedded} responsibilities={embedded ? responsibilities : undefined} focus={focus} primary={primary} /> }))
   const planTitles = new Map(current.plan?.nodes.map(node => [node.id, node.title]))
-  const delegationRecords = rows.map(row => ({ key: `delegation:${row.delegation.operationId}`, element: <article className="goal-delegation__item" key={row.delegation.operationId} tabIndex={-1} aria-label={row.next} data-goal-work-operation={row.delegation.operationId} data-goal-work-kind="delegation" data-goal-attempt={row.previousAttempt ? 'previous' : undefined}>
+  const delegationRecords = rows.map(row => ({ key: `delegation:${row.delegation.operationId}`,
+    title: planTitles.get(row.delegation.planNodeId ?? '') ?? 'Delegated task', summary: row.next,
+    element: <article className="goal-delegation__item" key={row.delegation.operationId} tabIndex={-1} aria-label={row.next} data-goal-work-operation={row.delegation.operationId} data-goal-work-kind="delegation" data-goal-attempt={row.previousAttempt ? 'previous' : undefined}>
       {embedded && row.delegation.planNodeId && planTitles.has(row.delegation.planNodeId) ? <p className="goal-work-area__plan-task" data-goal-work-node={row.delegation.planNodeId}>
         Plan task · {planTitles.get(row.delegation.planNodeId)}
       </p> : null}
@@ -124,15 +127,27 @@ export function GoalDelegationWork({ demand, active = true, compact = false, emb
   const others = records.filter(record => record.key !== focusedKey)
   const attentionKeys = new Set([...starts.filter(row => row.state !== 'working').map(row => `start:${row.start.operationId}`), ...rows.filter(row => ['unknown', 'exited', 'question', 'report', 'collected'].includes(row.state)).map(row => `delegation:${row.delegation.operationId}`)])
   const needsAttention = others.filter(record => attentionKeys.has(record.key) || responsibilities.get(record.key)?.alert).length
+  const single = others.length === 1 ? others[0] : undefined
+  const readIssue = issue ?? current.delegationObservationIssue
+  const refreshButton = <Button type="button" onClick={() => void refresh()}>Refresh reports</Button>
   const recordNodes = embedded ? [
     ...records.filter(record => record.key === focusedKey).map(record => <Fragment key={record.key}>{record.element}</Fragment>),
-    ...(others.length ? [<div key="original-executions" className="goal-work-area__records"><details><summary data-goal-other-work>{others.length} original {others.length === 1 ? 'execution' : 'executions'}{needsAttention ? ` · ${needsAttention} to check` : ''}</summary>{others.map(record => <Fragment key={record.key}>{record.element}</Fragment>)}</details><Button type="button" onClick={() => void refresh()}>Refresh reports</Button></div>] : [])
+    ...(others.length ? [<details key="original-executions" className="goal-work-area__records">
+      <summary data-goal-other-work data-needs-attention={needsAttention > 0 || undefined}>
+        <span className="goal-work-area__history-label"><strong>{single?.title ?? `${others.length} recorded executions`}</strong>
+          {single ? <span>{single.summary}</span> : needsAttention ? <span>{needsAttention} to check</span> : null}
+        </span>
+      </summary>
+      {others.map(record => <Fragment key={record.key}>{record.element}</Fragment>)}
+      {!readIssue ? <div className="goal-work-area__refresh">{refreshButton}</div> : null}
+    </details>] : [])
   ] : records.map(record => <Fragment key={record.key}>{record.element}</Fragment>)
   const responsibility = <GoalResponsibilitySummary demand={current} active={active} embedded={embedded} represented={embedded ? represented : undefined} />
   return <>{beforeRecords}{responsibility}{rows.length || starts.length || current.delegationObservationIssue || issue ? <section id={`goal-work-${demand.id}`} tabIndex={-1} className="goal-delegation" aria-label={embedded ? 'Original work records' : 'Delegated work'}>
-    <div className="goal-delegation__heading">{!embedded ? <strong>Delegated work</strong> : null}{(!embedded || !others.length) && (rows.length || starts.length) ? <Button type="button" onClick={() => void refresh()}>Refresh reports</Button> : null}</div>
-    {current.delegationObservationIssue || issue ? <p className="goals-service" role="status">{issue ?? current.delegationObservationIssue} Original Agents, tasks and last confirmed reports are kept.</p> : null}
+    {!embedded ? <div className="goal-delegation__heading"><strong>Delegated work</strong>{records.length ? refreshButton : null}</div> : null}
+    {readIssue ? <div className="goals-service" role="status"><span>{readIssue} Original Agents, tasks and last confirmed reports are kept.</span>{embedded ? refreshButton : null}</div> : null}
     {recordNodes}
+    {embedded && !readIssue && !others.length && records.length ? <div className="goal-work-area__refresh">{refreshButton}</div> : null}
 
   </section> : null}{afterRecords}</>
 }

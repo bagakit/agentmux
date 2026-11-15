@@ -1,5 +1,6 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { Button } from '@agentmux/client-ui/components/Button'
+import dialogueArtworkUrl from '@agentmux/client-ui/brand/illustrations/goals/demand-dialogue.png'
 import { GoalReadingOutline, type GoalReadingSection } from './GoalReadingOutline'
 import * as Menu from './DropdownMenu'
 import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -314,8 +315,10 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
             data-goal-reading-id={demand.id} data-goal-reading-runtime={demand.address?.runtimeId} data-goal-reading-namespace={demand.address?.namespace}>
             <div className="goals-section-heading goals-detail__overview-heading">
               <h2>Goal overview</h2>
-              <Button type="button" disabled={Boolean(motePending)} onClick={onOpenMote}
+              <Button type="button" className="goals-detail__discussion" disabled={Boolean(motePending)} onClick={onOpenMote}
                 aria-label={`Open discussion for ${demand.title}`} title={recipient.openLabel}>
+                <img src={dialogueArtworkUrl} width={34} height={24} alt="" decoding="async" loading="lazy"
+                  onError={event => { event.currentTarget.hidden = true }} />
                 {motePending === 'open' ? 'Opening discussion…' : recipient.openLabel}
               </Button>
             </div>
