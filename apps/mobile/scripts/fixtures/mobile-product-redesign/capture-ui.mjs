@@ -36,6 +36,8 @@ try {
   } }
   const mutationId = process.argv.find(value => value.startsWith('--mutation='))?.slice('--mutation='.length)
   const variants = {
+    'mote-group-files-unpinned': { file: 'apps/mobile/src/navigation/MobileMoteGroups.tsx',
+      before: 'expectedFileRoot={target} rpc={request}', after: 'expectedFileRoot={undefined} rpc={request}' },
     'mote-groups-missing-threads-entry': { file: 'apps/mobile/src/MobileApp.tsx',
       before: '{teamSpaceId && <button type="button" className="mobile-text-button mobile-mote-groups-entry"',
       after: '{false && teamSpaceId && <button type="button" className="mobile-text-button mobile-mote-groups-entry"' },

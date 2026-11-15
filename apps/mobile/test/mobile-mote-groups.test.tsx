@@ -22,11 +22,19 @@ const spaceId = 'group-mote', secondId = 'other-mote', hostId = 'host-original',
 const content = { zoneId: 'mote-zone', workspaceId: 'mote-workspace', hostId, workspacePath: '/fixture/original-mote' }
 const target = { spaceId, zoneId: content.zoneId, expectedResource: { hostId, workspaceId: content.workspaceId, workspacePath: content.workspacePath } }
 const second = { ...target, spaceId: secondId, zoneId: 'other-mote-zone' }
+const filesWorkspace = { workspaceId: 'files-workspace', hostId, path: '/fixture/original-project', name: '原项目', kind: 'folder' as const,
+  projectId: null, repoPath: null, branch: null }
+const commonFileZone = { workspaceId: filesWorkspace.workspaceId, hostId, kind: 'directory' as const, branch: null }
+const filesZone = { ...commonFileZone, zoneId: 'group-topic-zone', directoryPath: filesWorkspace.path + '/materials' }
+const filesResource = { hostId, workspaceId: filesWorkspace.workspaceId, workspacePath: filesWorkspace.path }
+const filesTarget = { spaceId: 'bound-topic', zoneId: filesZone.zoneId, expectedResource: filesResource }
+const topic = { topicId: filesTarget.spaceId, hostId, zoneId: filesZone.zoneId, workspaceId: filesWorkspace.workspaceId,
+  directoryPath: filesZone.directoryPath, title: '实验资料', summary: '', categorySpaceIds: [], chatIds: [], spatialRevision: 1, contentKind: 'topic' as const }
 const main = { hostId, sessionId: 'session-original', displayWorkspaceId: content.workspaceId, groupId: 'main-group', tabId: 'main-tab', regionId: 'main-region' }
 const catalog: AgentMuxSpaceCatalog = {
   spaces: [spaceId, secondId].map((id, index) => ({ spaceId: id, kind: 'mote', name: index === 0 ? '研究' : '设计',
     topicId: id, hostId, directoryPath: content.workspacePath, projectId: null })),
-  zones: [], tabs: [], regions: [], locations: [], bindings: [],
+  zones: [{ ...commonFileZone, zoneId: 'parent-zone', directoryPath: filesWorkspace.path }, filesZone], tabs: [], regions: [], locations: [], bindings: [],
   motePresentation: [
     { spaceId, content, quickMode: { status: 'saved', version: 'original-version', defaults: { conversation: main } }, conversation: main },
     { spaceId: secondId, content: { ...content, zoneId: second.zoneId }, quickMode: { status: 'saved', version: 'second-version', defaults: {} }, conversation: null },
@@ -67,14 +75,27 @@ const close = () => click(button(sheet(), '关闭面板'))
 
 it('opens an independent group from the Mobile Mote directory and the exact participant view from Threads', async () => {
   const f = fixture(), platform = createBrowserPlatform(), owner = getDeviceWorkface()
-  const group: MoteGroupSummary = { id: groupId, name: '研究与设计群', lastMessage: null,
-    members: [{ moteId: spaceId, name: '研究', target, thread: { hostId, agentSessionId: 'peer' } },
-      { moteId: secondId, name: '设计', target: second, thread: null }] }
+  const group: MoteGroupSummary = { id: groupId, name: '研究与设计群', lastMessage: null, revision: 2,
+    avatarMoteIds: [spaceId, secondId], announcement: { body: '先确认资料再做比较', updatedAt: fixtureEpoch(2), operationId: 'first-announcement' },
+    topic: filesTarget, members: [{ moteId: spaceId, name: '研究', target, role: 'admin', state: 'active', thread: { hostId, agentSessionId: 'peer' } },
+      { moteId: secondId, name: '设计', target: second, role: 'member', state: 'active', thread: null }] }
   const messages: MoteGroupMessage[] = []
+  let inspectBoundTopic = false
   let created = false, loseCreateReceipt = true, loseFirstReceipt = true
-  const rpc = vi.fn(async (method: string, input: unknown) => {
+  const rpc = vi.fn(async (method: string, input: unknown, _options?: unknown, _fence?: unknown) => {
     if (method === 'space.ls' || method === 'space.inspect') return { catalog }
     if (method === 'space.mote.dialogue.read') return mainPage
+    if (method === 'app.snapshot') return { agents: [], projects: [], executors: [], workspaces: [filesWorkspace], unavailable: [] }
+    if (method === 'topic.ls') return { topics: [topic, { ...topic, topicId: 'mote-as-topic', contentKind: 'mote' }], unavailable: [] }
+    if (method === 'topic.inspect') return { topic: inspectBoundTopic ? topic : { ...topic, zoneId: 'parent-zone' }, unavailable: [] }
+    if (method === 'file.read' || method === 'file.list') {
+      const { path, ...scope } = input as { zoneId: string; path: string; expectedResource: typeof filesResource }
+      expect(scope).toEqual({ zoneId: filesTarget.zoneId, expectedResource: filesResource })
+      const resource = { ...filesResource, zoneId: filesZone.zoneId, zonePath: filesZone.directoryPath, path }
+      if (method === 'file.list') return { resource, result: { status: 'listed', files: ['决策.md'], complete: true, omitted: 'none', partialReason: null } }
+      return path === '.' ? { resource, result: { status: 'directory' } }
+        : { resource, result: { status: 'read', document: { path, revision: 'owner-revision', content: '# 原项目决策\n\n先确认实验范围。' } } }
+    }
     if (method === 'space.mote.group.list') return { groups: created ? [structuredClone(group)] : [], nextBeforeSequence: null }
     if (method === 'space.mote.group.create') {
       created = true
@@ -138,7 +159,37 @@ it('opens an independent group from the Mobile Mote directory and the exact part
   await click(button(directory, '群聊'))
   await vi.waitFor(() => expect(queryButton(sheet(), group.name + messages[0]?.body)).toBeDefined())
   await click(button(sheet(), '查看 研究与设计群 的群资料'))
-  await waitForElement(sheet(), '[aria-label="群成员"]')
+  const detailsPanel = await waitForElement(sheet(), '[aria-label="群资料"]')
+  expect(detailsPanel.textContent).toContain('管理员')
+  expect(sheet().querySelector('.mote-group__identity .mote-group-avatar')?.getAttribute('data-faces')).toBe('2')
+  await click(button(detailsPanel, '公告与设置'))
+  const topicPicker = await waitForElement<HTMLSelectElement>(detailsPanel, 'select')
+  expect([...topicPicker.options].map(option => option.value)).toEqual(['', filesTarget.spaceId])
+  expect(topicPicker.value).toBe(filesTarget.spaceId)
+  expect((await waitForElement<HTMLTextAreaElement>(detailsPanel, 'textarea')).value).toBe('先确认资料再做比较')
+  await click(button(sheet(), '群文件'))
+  await vi.waitFor(() => expect(sheet().textContent).toContain('群聊绑定的原 Topic 文件范围暂未确认'))
+  expect(rpc.mock.calls.filter(([method]) => method.startsWith('file.'))).toHaveLength(0)
+  inspectBoundTopic = true
+  await click(button(sheet(), '重读文件范围'))
+  const reader = await waitForElement(sheet(), '.mobile-topic-source-reader')
+  await vi.waitFor(() => expect(queryButton(reader, '决策.md')).toBeDefined())
+  await click(button(reader, '决策.md'))
+  await vi.waitFor(() => expect(reader.querySelector('article h1')?.textContent).toBe('原项目决策'))
+  expect(rpc.mock.calls.filter(([method]) => method === 'topic.inspect')).toEqual([
+    ['topic.inspect', { topicId: filesTarget.spaceId }, expect.anything(), undefined],
+    ['topic.inspect', { topicId: filesTarget.spaceId }, expect.anything(), undefined],
+  ])
+  expect(rpc.mock.calls.filter(([method]) => method.startsWith('file.')).map(([method, input]) => [method, input])).toEqual([
+    ['file.read', { zoneId: filesTarget.zoneId, expectedResource: filesResource, path: '.' }],
+    ['file.list', { zoneId: filesTarget.zoneId, expectedResource: filesResource, path: '.' }],
+    ['file.read', { zoneId: filesTarget.zoneId, expectedResource: filesResource, path: '决策.md' }],
+  ])
+  await click(button(reader, '返回上层来源'))
+  await vi.waitFor(() => expect(queryButton(reader, '决策.md')).toBeDefined())
+  await click(button(reader, '返回群聊'))
+  expect(detailsPanel.closest('[hidden]')).toBeNull()
+  await click(button(sheet(), '返回'))
   const restored = await waitForElement<HTMLTextAreaElement>(sheet(), '[aria-label="群消息"]')
   expect(restored.value).toBe('这条消息只请研究参与')
   await submit(await waitForElement(sheet(), '.mote-group__composer'))
@@ -169,7 +220,7 @@ it('opens an independent group from the Mobile Mote directory and the exact part
   expect(f.client.ensureAgentContinuity).not.toHaveBeenCalled()
 })
 
-it('publishes a Mobile composer message through the real public Core and original Host group store', async () => {
+it('creates, publishes, and manages a Mobile group through the public Core and original Host store', async () => {
   const transport = await rpcOwnerFixture([], core)
   const surface = fixture()
   const prepare = vi.fn(async () => { throw new Error('Original member executor temporarily unavailable') })
@@ -186,8 +237,10 @@ it('publishes a Mobile composer message through the real public Core and origina
   const agents = createMoteChatAgents({ resources, clients: () => [{ hostId, client: transport.client }],
     executors: { resolve: async () => ({ providerId: 'codex', launch: {} }) } })
   const store = new MoteGroupStore(join(transport.root, 'original-group.sqlite'))
+  const confirm = vi.fn(async (source: typeof filesTarget) => expect(source).toEqual(filesTarget))
+  const untouched = async () => { throw new Error('This operation only binds the original Topic') }
   const server = new core.AgentMuxControlServer({ socketPath: join(transport.root, 'groups.sock'), coreClients: transport.coreClients,
-    moteGroups: createHostMoteGroups({ store, agents, client: () => transport.client }) })
+    moteGroups: createHostMoteGroups({ store, agents, client: () => transport.client, files: { confirm, list: untouched, read: untouched } }) })
   await server.start()
   const rpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
   try {
@@ -195,7 +248,8 @@ it('publishes a Mobile composer message through the real public Core and origina
       if (isMoteGroupMethod(method)) return rpc.call(method, input)
       if (method === 'space.ls' || method === 'space.inspect') return { catalog } as core.AgentMuxRpcResult<typeof method>
       if (method === 'space.mote.dialogue.read') return mainPage as core.AgentMuxRpcResult<typeof method>
-      return { agents: [], goals: [], unavailable: [] } as unknown as core.AgentMuxRpcResult<typeof method>
+      if (method === 'topic.ls') return { topics: [topic], unavailable: [] } as core.AgentMuxRpcResult<typeof method>
+      return { agents: [], goals: [], workspaces: [filesWorkspace], unavailable: [] } as unknown as core.AgentMuxRpcResult<typeof method>
     }
     surface.client.forwardRpc = forward
     const view = await mount(<MobileApp client={surface.client} platform={createBrowserPlatform()} connection={connected} restoreWorkface />)
@@ -206,7 +260,18 @@ it('publishes a Mobile composer message through the real public Core and origina
     await enter(await waitForElement<HTMLInputElement>(sheet(), '.mote-group__field input'), '原 Host 项目群')
     const candidate = await waitForElement<HTMLInputElement>(sheet(), '.mote-group__candidate input')
     await act(async () => { candidate.click() })
+    const setup = await waitForElement<HTMLDetailsElement>(sheet(), '.mote-group-settings__create')
+    await act(async () => { setup.open = true })
+    await click(button(setup, '研究'))
+    await enter(await waitForElement<HTMLTextAreaElement>(setup, 'textarea'), '只在本群留原项目材料')
+    const topicPicker = await waitForElement<HTMLSelectElement>(setup, 'select')
+    await vi.waitFor(() => expect([...topicPicker.options].map(option => option.value)).toContain(filesTarget.spaceId))
+    await act(async () => {
+      topicPicker.value = filesTarget.spaceId
+      topicPicker.dispatchEvent(new Event('change', { bubbles: true }))
+    })
     await submit(await waitForElement(sheet(), '.mote-group__create'))
+    await vi.waitFor(() => expect(sheet().textContent, sheet().textContent ?? '').toContain('请谁参与'), { timeout: 1800 })
     const text = await waitForElement<HTMLTextAreaElement>(sheet(), '[aria-label="群消息"]')
     await enter(text, '从手机发给这个群')
     await click(button(await waitForElement(sheet(), '[aria-label="选择参与成员"]'), '研究'))
@@ -214,11 +279,28 @@ it('publishes a Mobile composer message through the real public Core and origina
     await vi.waitFor(() => expect(sheet().querySelector('.mote-group__message[data-own] strong')?.textContent).toBe('我'))
     const listing = await rpc.call('space.mote.group.list', { moteId: spaceId })
     expect(listing.groups).toHaveLength(1)
+    expect(listing.groups[0]).toMatchObject({ avatarMoteIds: [spaceId], topic: filesTarget, announcement: { body: '只在本群留原项目材料' } })
+    expect(confirm).toHaveBeenCalledOnce()
     const read = await rpc.call('space.mote.group.inspect', { groupId: listing.groups[0]!.id })
     expect(read.messages).toHaveLength(1)
     expect(read.messages[0]).toMatchObject({ body: '从手机发给这个群', author: { kind: 'human', id: read.viewerId },
       deliveries: [{ moteId: spaceId, status: 'failed', issue: 'Original member executor temporarily unavailable' }] })
     expect(prepare).toHaveBeenCalledOnce()
+    await click(button(sheet(), '群资料'))
+    const details = await waitForElement(sheet(), '[aria-label="群资料"]')
+    await click(button(details, '设为管理员'))
+    await vi.waitFor(() => expect(queryButton(details, '撤下管理员')).toBeDefined())
+    await click(button(details, '公告与设置'))
+    await enter(await waitForElement<HTMLTextAreaElement>(details, 'textarea'), '这周先补完整原始材料')
+    await click(button(details, '保存群资料'))
+    await vi.waitFor(async () => {
+      const observed = await rpc.call('space.mote.group.inspect', { groupId: read.group.id })
+      expect(observed.group).toMatchObject({ topic: filesTarget, announcement: { body: '这周先补完整原始材料' },
+        members: [{ moteId: spaceId, role: 'admin', state: 'active' }] })
+      expect(observed.messages.filter(message => message.event?.kind === 'announcement-updated')).toMatchObject([
+        { author: { kind: 'system' }, body: '这周先补完整原始材料', deliveries: [] },
+      ])
+    })
     expect(surface.submit).not.toHaveBeenCalled()
     expect(getDeviceWorkface().snapshot().record.selectedSessionId).toBe(main.sessionId)
   } finally {
