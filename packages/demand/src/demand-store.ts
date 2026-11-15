@@ -5,7 +5,7 @@ import { demandPatrolScope, completedGoalPlanRequest, assertPatrolExecutions, pa
 import { parseDemandDispatch, parseDemandDispatchIntent, parseDemandDispatchRequest, parseDemandDispatches, qualifiedDemandDispatch, runBoundDemandDispatch, sameDemandDispatchIntent, type DemandDispatch, type DemandDispatchIntent, type DemandDispatchRequest, type DemandDispatchRejection } from './dispatch.js'
 import { parseDemandDelegationRuntimeIdentity, type DemandDelegationRuntimeIdentity, parseDemandDelegationIntent, parseDemandDelegations, parseDemandDelegationReportInput, parseDemandDelegationCollectionInput, parseDemandDelegationCollector, sameDemandDelegationIntent, validateDemandDelegationReport,
   parseDemandDelegationAttentionInput, sameDemandDelegationAttention, delegationWorkerHostId, sameGoalPlanPredecessors,
-  type DemandDelegation, type DemandDelegationIntent, type DemandDelegationReportInput, type DemandDelegationCollectionInput, type DemandDelegationCollector, type DemandDelegationAttentionInput } from './delegations.js'
+  type GoalDeliveryScope, type DemandDelegation, type DemandDelegationIntent, type DemandDelegationReportInput, type DemandDelegationCollectionInput, type DemandDelegationCollector, type DemandDelegationAttentionInput } from './delegations.js'
 import { optionalDemandInputEpoch, parseDemandParticipations, parseDemandCreationOrigin, parseDemandParticipationSource, type DemandParticipationSource } from './collaboration.js'
 import { appendDemandContentReferences, parseDemandContentReferences } from './content-references.js'
 import { demandExecutionReferences, demandExecutionKey, demandHandoffDestinations, demandResponsibilityScope, parseDemandProgressInput, parseDemandProgressUpdates,
@@ -14,6 +14,7 @@ import { mintObjectId } from '@agentmux/identity'
 import { promises as fs, type BigIntStats } from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
+import { createHash } from 'node:crypto'
 import type { FileHandle } from 'node:fs/promises'
 import {
   DEMAND_RECEIPT_SCHEMA,
@@ -41,7 +42,7 @@ import {
 import { DemandStoreError } from './errors.js'
 import { GoalActiveIndex, type GoalActivePlan } from './goal-active-index.js'
 import { assertGoalPlanKeepsRecordedNodes, goalPlanChangedNodes, goalPlanDelegationIssue, parseGoalPlan, parseGoalPlanReviewInput, parseGoalPlanRevisionInput, projectGoalPlan,
-  type GoalPlanAssignmentChange, type GoalPlanRevisionRecord, type GoalPlanOwner, type GoalPlanReviewer, type GoalPlanReviewInput, type GoalPlanRevisionInput } from './goal-plan.js'
+  type GoalPlanAssignmentChange, type GoalPlanRevisionRecord, type GoalPlanOwner, type GoalPlanReviewer, type GoalPlanReviewInput, type GoalPlanRevisionInput, type GoalPlanProposalReceipt } from './goal-plan.js'
 import { demandNameContext, parseDemandNameChange } from './demand-name-change.js'
 import { alignmentConfirmationIssue, groundingAcceptanceIssue, parseAlignment, parseAlignmentProposal, parseGrounding, parseGroundingProposal, type DemandAlignmentProposal, type DemandGroundingProposal } from './goals.js'
 
@@ -342,11 +343,6 @@ export class DemandStore {
     this.root = path.resolve(options.root)
     this.storePath = path.join(this.root, 'store.json')
     this.lockPath = path.join(this.root, 'store.lock')
-    this.lockTimeoutMs = options.lockTimeoutMs ?? 5_000
-    this.lockRetryMs = options.lockRetryMs ?? 25
-    if (!Number.isSafeInteger(this.lockTimeoutMs) || this.lockTimeoutMs < 0) {
-      throw new DemandStoreError('INVALID_INPUT', 'validate', this.root, 'lockTimeoutMs must be a non-negative integer')
-    }
     this.activeIndexPath = path.join(this.root, 'active-goals.sqlite')
     this.activeIndex = new GoalActiveIndex(this.activeIndexPath)
     this.lockTimeoutMs = options.lockTimeoutMs ?? 5_000
@@ -894,18 +890,22 @@ export class DemandStore {
    * Revise the Goal plan as a whole. The caller names the revision it read; a later revision by
    * someone else is rejected so nobody overwrites a plan they have not seen.
    */
-  async revisePlan(id: string, input: GoalPlanRevisionInput, author: GoalPlanReviewer): Promise<DemandReceipt> {
+  async revisePlan(id: string, input: GoalPlanRevisionInput, author: GoalPlanReviewer, proposals: GoalPlanProposalReceipt[] = []): Promise<DemandReceipt> {
     let revision: GoalPlanRevisionInput
     try { revision = parseGoalPlanRevisionInput(input) } catch (error) { this.rejectDelegation(error instanceof Error ? error.message : String(error)) }
     return this.mutate('plan.revise', snapshot => {
       const demand = findDemand(snapshot, id, this.storePath), current = demand.plan
+      const proposalRefs = (receipts: GoalPlanProposalReceipt[]) => receipts.map(({ nodeId, delegationOperationId, replyMessageId }) => ({ nodeId, delegationOperationId, replyMessageId }))
+      if (!isDeepStrictEqual(revision.proposals ?? [], proposalRefs(proposals)))
+        this.rejectDelegation('A Ticket proposal requires its verified original Core reply.')
       if (current?.history.some(record => record.operationId === revision.operationId)) {
         const original = current.history.find(record => record.operationId === revision.operationId)!
         if (original.change) this.rejectDelegation('This operation already belongs to a node assignment. Read its original plan history.')
         if (original.author.kind !== author.kind || original.author.id !== author.id || (original.author.runtimeId ? original.author.runtimeId !== author.runtimeId : original.author.hostId !== undefined && original.author.hostId !== author.hostId)) this.rejectDelegation('This plan revision operation belongs to another author.')
         if (original.revision !== current.revision)
           this.rejectDelegation(`This operation already applied at plan revision ${original.revision}; the current plan is revision ${current.revision}. Read the current plan instead of repeating the revision.`)
-        if (revision.expectedRevision !== original.revision - 1 || revision.alignmentRevision !== current.alignmentRevision || JSON.stringify(revision.nodes) !== JSON.stringify(current.nodes))
+        if (revision.expectedRevision !== original.revision - 1 || revision.alignmentRevision !== current.alignmentRevision ||
+            !isDeepStrictEqual(revision.nodes, current.nodes) || !isDeepStrictEqual(revision.proposals ?? [], proposalRefs(original.proposals ?? [])))
           this.rejectDelegation('This plan revision operation was already recorded with different content. Read the original plan before another revision.')
         return { unchanged: demand }
       }
@@ -931,9 +931,19 @@ export class DemandStore {
       if (removedTicket) this.rejectDelegation('Published Ticket ' + removedTicket + ' retains its original number. Mark it cancelled to retire it.')
       const numbered = new Set(ticketNodes)
       const published = [...ticketNodes, ...revision.nodes.flatMap(node => numbered.has(node.id) ? [] : [node.id])]
+      const previousIds = new Set(current?.nodes.map(node => node.id))
+      const createdNodes = revision.nodes.filter(node => !previousIds.has(node.id)).map(node => node.id)
+      for (const proposal of proposals) {
+        const attempt = demand.delegations?.find(item => item.operationId === proposal.delegationOperationId)
+        if (!createdNodes.includes(proposal.nodeId) || attempt?.sourceMessageId !== proposal.sourceMessageId ||
+            attempt?.workerAgentSessionId !== proposal.author.agentSessionId ||
+            attempt.runtimeIdentity && attempt.runtimeIdentity.workerRuntimeId !== proposal.author.runtimeId)
+          this.rejectDelegation('Ticket proposals must tie a new node to its original worker and attempt.')
+      }
       const changedNodes = goalPlanChangedNodes(current?.nodes ?? [], revision.nodes)
       demand.plan = { revision: next, alignmentRevision: revision.alignmentRevision, nodes: clone(revision.nodes), ticketNodes: published, reviews: current?.reviews ?? [],
-        history: [...(current?.history ?? []), { operationId: revision.operationId, revision: next, author, revisedAt: now, ...(changedNodes.length ? { changedNodes } : {}) }] }
+        history: [...(current?.history ?? []), { operationId: revision.operationId, revision: next, author, revisedAt: now, ...(changedNodes.length ? { changedNodes } : {}),
+          ...(createdNodes.length ? { createdNodes } : {}), ...(proposals.length ? { proposals: clone(proposals) } : {}) }] }
       demand.updatedAt = Math.max(now, demand.updatedAt + 1)
       validateNewDemand(demand, this.storePath)
       return demand
@@ -1013,6 +1023,8 @@ export class DemandStore {
       if (!projection) this.rejectDelegation(`Plan node ${review.nodeId} is not in the current plan.`)
       if (!projection.delegation || projection.delegation.operationId !== review.delegationOperationId)
         this.rejectDelegation('A review must judge the node\'s current attempt.')
+      if (projection.delegation.report?.delivery?.hash !== review.deliveryHash)
+        this.rejectDelegation('The review must name the exact original Ticket delivery hash. Read the current reported attempt.')
       if (projection.state !== 'review') this.rejectDelegation(`Plan node ${review.nodeId} is ${projection.state}; only a reported attempt can be reviewed.`)
       if (reviewer.kind === 'agent' && projection.delegation.runtimeIdentity && !reviewer.runtimeId)
         this.rejectDelegation('The reviewer Runtime is not yet confirmed for this signed delegation. Keep the original work and review evidence.')
@@ -1086,19 +1098,19 @@ export class DemandStore {
   }
 
   /** Core verifies replyTo/thread/author; Demand verifies the frozen business scope. */
-  async submitDelegationReport(id: string, delegationOperationId: string, input: DemandDelegationReportInput, actorSessionId: string): Promise<DemandReceipt> {
+  async submitDelegationReport(id: string, delegationOperationId: string, input: DemandDelegationReportInput, actorSessionId: string, scope?: GoalDeliveryScope): Promise<DemandReceipt> {
     const report = parseDemandDelegationReportInput(input)
-    return this.recordDelegationReport(id, delegationOperationId, report, { worker: actorSessionId })
+    return this.recordDelegationReport(id, delegationOperationId, report, { worker: actorSessionId }, scope)
   }
 
   /** Main must verify the original structured Core reply before calling this owner. */
-  async recoverDelegationReport(id: string, delegationOperationId: string, input: DemandDelegationReportInput, admittedCollector: DemandDelegationCollector): Promise<DemandReceipt> {
+  async recoverDelegationReport(id: string, delegationOperationId: string, input: DemandDelegationReportInput, admittedCollector: DemandDelegationCollector, scope?: GoalDeliveryScope): Promise<DemandReceipt> {
     const report = parseDemandDelegationReportInput(input), collector = parseDemandDelegationCollector(admittedCollector)
-    return this.recordDelegationReport(id, delegationOperationId, report, { collector })
+    return this.recordDelegationReport(id, delegationOperationId, report, { collector }, scope)
   }
 
   private async recordDelegationReport(id: string, delegationOperationId: string, report: DemandDelegationReportInput,
-    author: { worker: string } | { collector: DemandDelegationCollector }): Promise<DemandReceipt> {
+    author: { worker: string } | { collector: DemandDelegationCollector }, scope?: GoalDeliveryScope): Promise<DemandReceipt> {
     return this.mutate('collector' in author ? 'delegation.report-recover' : 'delegation.report', snapshot => {
       const demand = findDemand(snapshot, id, this.storePath), entry = this.findDelegation(demand, delegationOperationId)
       if ('worker' in author) {
@@ -1111,13 +1123,24 @@ export class DemandStore {
         .find(item => item.delegation.report?.operationId === report.operationId || item.delegation.report?.replyMessageId === report.replyMessageId)
       if (previous && (previous.goalId !== id || previous.delegation.operationId !== delegationOperationId)) this.rejectDelegation('The original report identity belongs to another delegation. Inspect its original source.')
       if (entry.report) {
-        const { submittedAt: _time, recovery: _recovery, ...original } = entry.report
+        const { submittedAt: _time, recovery: _recovery, delivery: _delivery, ...original } = entry.report
         if (JSON.stringify(original) !== JSON.stringify(report)) this.rejectDelegation('The original worker report is frozen. A duplicate or late report cannot replace its evidence or collection.')
         return { unchanged: demand }
       }
       if (entry.linkedAt === undefined) this.rejectDelegation('The original Core dispatch association is not confirmed. Inspect it before recording its reply.')
       const submittedAt = Date.now()
-      entry.report = { ...report, submittedAt, ...('collector' in author ? { recovery: { collector: author.collector, recoveredAt: submittedAt } } : {}) }
+      if (scope && entry.runtimeIdentity && (scope.ownerRuntimeId !== entry.runtimeIdentity.ownerRuntimeId ||
+          scope.authorRuntimeId !== entry.runtimeIdentity.workerRuntimeId))
+        this.rejectDelegation('The delivery identity disagrees with the original signed Goal delegation.')
+      const schema = 'agentmux.ticket-delivery.v1' as const
+      const delivery = entry.planNodeId && scope && entry.predecessors ? {
+        schema, authorRuntimeId: scope.authorRuntimeId,
+        hash: createHash('sha256').update(JSON.stringify([schema, scope.ownerRuntimeId, scope.namespace, id,
+          entry.planNodeId, entry.operationId, scope.authorRuntimeId, report.authorAgentSessionId,
+          entry.predecessors.map(ref => [ref.nodeId, ref.delegationOperationId, ref.reportOperationId, ref.reviewOperationId, ref.deliveryHash ?? null]),
+          report.operationId, report.replyMessageId, report.grounding])).digest('hex'),
+      } : undefined
+      entry.report = { ...report, ...(delivery ? { delivery } : {}), submittedAt, ...('collector' in author ? { recovery: { collector: author.collector, recoveredAt: submittedAt } } : {}) }
       demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
       validateNewDemand(demand, this.storePath)
       return demand

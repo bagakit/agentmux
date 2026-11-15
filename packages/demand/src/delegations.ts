@@ -38,7 +38,18 @@ export type DemandDelegationReportInput = {
   authorAgentSessionId: string
   grounding: DemandGroundingProposal
 }
+export type GoalDeliveryScope = { ownerRuntimeId: string; namespace: string; authorRuntimeId: string }
+export type GoalDeliveryReceipt = { schema: 'agentmux.ticket-delivery.v1'; hash: string; authorRuntimeId: string }
+export function isGoalDeliveryHash(value: unknown): value is string {
+  return typeof value === 'string' && /^[a-f0-9]{64}$/u.test(value)
+}
+function parseGoalDeliveryReceipt(value: unknown): GoalDeliveryReceipt {
+  const data = record(value, 'Ticket delivery receipt', ['schema', 'hash', 'authorRuntimeId'])
+  if (data.schema !== 'agentmux.ticket-delivery.v1' || !isGoalDeliveryHash(data.hash)) throw new Error('Invalid Ticket delivery receipt')
+  return { schema: data.schema, hash: data.hash, authorRuntimeId: identity(data.authorRuntimeId, 'Delivery author Runtime') }
+}
 export type DemandDelegationReport = DemandDelegationReportInput & {
+  delivery?: GoalDeliveryReceipt
   submittedAt: number
   /** Restored from Main-verified original Core evidence, with its actual restorer. */
   recovery?: { collector: DemandDelegationCollector; recoveredAt: number }
@@ -70,22 +81,24 @@ export function parseDemandDelegationRuntimeIdentity(value: unknown): DemandDele
   return { ownerRuntimeId: identity(data.ownerRuntimeId, 'runtimeIdentity.ownerRuntimeId'), workerRuntimeId: identity(data.workerRuntimeId, 'runtimeIdentity.workerRuntimeId') }
 }
 /** Direct links to the exact passing inputs of this attempt. */
-export type GoalPlanPredecessor = { nodeId: string; delegationOperationId: string; reportOperationId: string; reviewOperationId: string }
+export type GoalPlanPredecessor = { nodeId: string; delegationOperationId: string; reportOperationId: string; reviewOperationId: string; deliveryHash?: string }
 
 export function sameGoalPlanPredecessors(expected: readonly GoalPlanPredecessor[], actual: readonly GoalPlanPredecessor[] | null | undefined): boolean {
   if (!actual || expected.length !== actual.length) return false
   return expected.every((ref, index) => {
     const other = actual[index]!
     return ref.nodeId === other.nodeId && ref.delegationOperationId === other.delegationOperationId &&
-      ref.reportOperationId === other.reportOperationId && ref.reviewOperationId === other.reviewOperationId
+      ref.reportOperationId === other.reportOperationId && ref.reviewOperationId === other.reviewOperationId && ref.deliveryHash === other.deliveryHash
   })
 }
 
 export function parseGoalPlanPredecessors(value: unknown): GoalPlanPredecessor[] {
   if (!Array.isArray(value)) throw new Error('Goal plan predecessors must be an array')
   const refs = value.map(entry => {
-    const item = record(entry, 'Goal plan predecessor', ['nodeId', 'delegationOperationId', 'reportOperationId', 'reviewOperationId'])
+    const item = record(entry, 'Goal plan predecessor', ['nodeId', 'delegationOperationId', 'reportOperationId', 'reviewOperationId', 'deliveryHash'], ['deliveryHash'])
+    if (item.deliveryHash !== undefined && !isGoalDeliveryHash(item.deliveryHash)) throw new Error('Invalid predecessor delivery hash')
     return {
+      ...(typeof item.deliveryHash === 'string' ? { deliveryHash: item.deliveryHash } : {}),
       nodeId: identity(item.nodeId, 'predecessor node'),
       delegationOperationId: identity(item.delegationOperationId, 'predecessor delegation'),
       reportOperationId: identity(item.reportOperationId, 'predecessor report'),
@@ -202,11 +215,13 @@ export function parseDemandDelegation(value: unknown): DemandDelegation {
   if (runtimeIdentity && data.linkedAt === undefined) throw new Error('delegation Runtime identities lack their verified source association')
   let report: DemandDelegationReport | undefined
   if (data.report !== undefined) {
-    const item = record(data.report, 'delegation.report', ['operationId', 'replyMessageId', 'authorAgentSessionId', 'grounding', 'submittedAt', 'recovery'], ['recovery'])
+    const item = record(data.report, 'delegation.report', ['operationId', 'replyMessageId', 'authorAgentSessionId', 'grounding', 'submittedAt', 'recovery', 'delivery'], ['recovery', 'delivery'])
     const recovery = item.recovery === undefined ? undefined : record(item.recovery, 'report.recovery', ['collector', 'recoveredAt'])
     report = { ...parseDemandDelegationReportInput({ operationId: item.operationId, replyMessageId: item.replyMessageId, authorAgentSessionId: item.authorAgentSessionId, grounding: item.grounding }),
       submittedAt: positive(item.submittedAt, 'report.submittedAt'),
+      ...(item.delivery === undefined ? {} : { delivery: parseGoalDeliveryReceipt(item.delivery) }),
       ...(recovery === undefined ? {} : { recovery: { collector: parseDemandDelegationCollector(recovery.collector), recoveredAt: positive(recovery.recoveredAt, 'report.recovery.recoveredAt') } }) }
+    if (report.delivery && (!intent.planNodeId || runtimeIdentity && report.delivery.authorRuntimeId !== runtimeIdentity.workerRuntimeId)) throw new Error('Ticket delivery belongs to another attempt or Runtime')
     validateDemandDelegationReport(intent, report)
     if (data.linkedAt === undefined) throw new Error('delegation report lacks its original dispatch association')
   }

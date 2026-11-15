@@ -58,6 +58,7 @@ export function GoalPlanDelivery({ demand, item, historical, author, context, dr
     let original = request
     if (!original) {
       try { original = { goalId: demand.id, review: parseGoalPlanReviewInput({ operationId: mintObjectId(), nodeId: item.node.id,
+        ...(item.delegation?.report?.delivery ? { deliveryHash: item.delegation.report.delivery.hash } : {}),
         delegationOperationId: delegation!.operationId, verdict, check: { command: current.command, result: current.result,
           evidence: current.evidence.split('\n').map(line => line.trim()).filter(Boolean) }, note: current.note }) } }
       catch (error) { onDraft({ ...current, issue: error instanceof Error ? error.message : String(error) }); return }

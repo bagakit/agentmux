@@ -8,14 +8,14 @@ export { goalDelegationReportBody } from '@agentmux/core/goal-delegation'
 import type { GoalDelegationAuthority, GoalDelegationMethod, GoalDelegationParamsMap,
   GoalDelegationResult, GoalDelegationResultMap, GoalActivePlanQuery, GoalActivePlanResult, GoalDelegationObservation, GoalDelegationsOwner } from '@agentmux/core/goal-delegation'
 import type { AgentMuxRpcMethod, AgentMuxRpcParams, AgentMuxRpcResult, AgentMuxRun, AgentMuxRpcCallContext } from '@agentmux/core'
-import { delegationWorkerHostId, validateDemandDelegationReport, type DemandDelegation, type DemandDelegationReportInput } from '@agentmux/demand/delegations'
+import { delegationWorkerHostId, validateDemandDelegationReport, type DemandDelegation, type DemandDelegationReportInput, type GoalDeliveryScope } from '@agentmux/demand/delegations'
 import { hostGoalAddress, hostGoalPlan } from './goal-projection.js'
 import { submitGoalSourceReport } from './goal-source-report.js'
 import { assertPlanWorkRole, changeGoalPlanAssignment } from './goal-plan-assignment.js'
 import { isGoalSupervisor } from './goal-supervisor-identity.js'
 import type { DurableAgentMuxMessage } from '@agentmux/core'
 import type { DemandStore, Demand, DemandDispatch, GoalStartObservation } from '@agentmux/demand'
-import { goalPlanClaimToken } from '@agentmux/demand/goal-plan'
+import { goalPlanClaimToken, type GoalPlanProposalReceipt } from '@agentmux/demand/goal-plan'
 import { formatGoalTicketLink, hasOriginalGoalBinding, parseAmuxObjectLink } from '@agentmux/core/sharing'
 import type { GoalRuntimePort } from './goal-runtime.js'
 import type { GoalPatrolOwner } from './goal-patrol-owner.js'
@@ -77,8 +77,26 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
       // People edit the plan freely; among Agents only the current Supervisor maintains it.
       if (!await isGoalSupervisor(goal, authority, this.runtime))
         throw new AgentMuxError('Only this Goal\'s current Supervisor or a person can revise its plan. Read goal plan and ask the Supervisor.', 'CONTROL_PERMISSION_DENIED')
-      await this.demands.revisePlan(input.goalId, (input as GoalDelegationParamsMap['goal.plan.revise']).revision,
-        { ...authority.actor, ...(authority.hostId ? { hostId: authority.hostId } : {}), ...(authority.runtimeId ? { runtimeId: authority.runtimeId } : {}) })
+      const revision = (input as GoalDelegationParamsMap['goal.plan.revise']).revision
+      const saved = goal.plan?.history.find(entry => entry.operationId === revision.operationId)
+      const proposals = saved?.proposals ?? await Promise.all((revision.proposals ?? []).map(async proposal => {
+        const attempt = goal.delegations?.find(entry => entry.operationId === proposal.delegationOperationId)
+        if (!attempt?.linkedAt) throw new AgentMuxError('The original Ticket proposal attempt is unconfirmed.', 'CONTROL_UNAVAILABLE')
+        const { communication } = await this.readDispatch(attempt, context, authority, goal)
+        this.assertSource(attempt, communication.source, goal.id)
+        const reply = communication.replies.find(message => message.envelope.messageId === proposal.replyMessageId)
+        const wire = reply?.envelope
+        const runtimeId = reply ? (await this.deliveryScope(attempt, reply))?.authorRuntimeId : undefined
+        if (!wire || !runtimeId || wire.replyTo !== attempt.sourceMessageId || wire.threadId !== attempt.threadId ||
+            wire.senderSessionId !== attempt.workerAgentSessionId || wire.recipientSessionId !== attempt.ownerAgentSessionId ||
+            wire.sender.kind !== 'agent-session' || wire.sender.agentSessionId !== attempt.workerAgentSessionId ||
+            attempt.runtimeIdentity && attempt.runtimeIdentity.workerRuntimeId !== runtimeId)
+          throw new AgentMuxError('The original Ticket proposal reply and authenticated author do not match its attempt.', 'CONTROL_REQUEST_CONFLICT')
+        return { ...proposal, sourceMessageId: attempt.sourceMessageId, proposalOperationId: wire.operationId,
+          author: { agentSessionId: attempt.workerAgentSessionId, runtimeId } } satisfies GoalPlanProposalReceipt
+      }))
+      await this.demands.revisePlan(input.goalId, revision,
+        { ...authority.actor, ...(authority.hostId ? { hostId: authority.hostId } : {}), ...(authority.runtimeId ? { runtimeId: authority.runtimeId } : {}) }, proposals)
     }
     if (method === 'goal.plan.review') {
       // The store refuses the node's own executor; any other admitted Agent or person may review.
@@ -243,7 +261,8 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
         const reply = observed.replies.find(message => message.envelope.messageId === report.replyMessageId)
         if (!reply) throw new AgentMuxError('The original report reply is unconfirmed. Keep the same report identity and evidence.', 'CONTROL_UNAVAILABLE')
         await this.assertReply(saved, report, reply, body, observed.source)
-        await this.demands.submitDelegationReport(input.goalId, saved.operationId, report, authority.actor.id)
+        await this.demands.submitDelegationReport(input.goalId, saved.operationId, report, authority.actor.id,
+          await this.deliveryScope(saved, reply, authority.runtimeId))
       } else {
         const collection = (input as GoalDelegationParamsMap['goal.collect']).collection
         const goal = await this.demands.get(input.goalId)
@@ -258,7 +277,8 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
         const report = saved.report ?? await this.readReport(input.goalId, saved, reply, observed.source)
         if (report.replyMessageId !== collection.replyMessageId) throw new AgentMuxError('Collection refers to another original report.', 'CONTROL_REQUEST_CONFLICT')
         await this.assertReply(saved, report, reply, goalDelegationReportBody(input.goalId, saved.operationId, report), observed.source)
-        if (!saved.report) await this.demands.recoverDelegationReport(input.goalId, saved.operationId, report, authority.actor)
+        if (!saved.report) await this.demands.recoverDelegationReport(input.goalId, saved.operationId, report, authority.actor,
+          await this.deliveryScope(saved, reply))
         await this.demands.collectDelegationReport(input.goalId, saved.operationId, collection, authority.actor)
       }
     }
@@ -295,6 +315,15 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
     if (!this.core) throw new AgentMuxError('The original Core communication owner is unavailable. Frozen input and original Agents are retained.', 'CONTROL_UNAVAILABLE')
     return this.core
   }
+  private async deliveryScope(saved: DemandDelegation, reply: DurableAgentMuxMessage, authorRuntimeId?: string): Promise<GoalDeliveryScope | undefined> {
+    if (!saved.planNodeId || !saved.predecessors) return undefined
+    const owner = await this.planOwner?.().catch(() => undefined)
+    if (!owner) return undefined
+    const originalAuthor = reply.provenance?.source.runtimeId ?? authorRuntimeId ??
+      (saved.hostId === delegationWorkerHostId(saved) ? owner.runtimeId : undefined)
+    return originalAuthor ? { ownerRuntimeId: owner.runtimeId, namespace: owner.namespace, authorRuntimeId: originalAuthor } : undefined
+  }
+
   private async readActivePlan(query: GoalActivePlanQuery, authority: GoalDelegationAuthority): Promise<GoalActivePlanResult> {
     const owner = await this.planOwner?.().catch(() => undefined)
     if (!owner) throw new AgentMuxError('The original Goal owner is unconfirmed. Existing work and its history are retained.', 'CONTROL_UNAVAILABLE')
