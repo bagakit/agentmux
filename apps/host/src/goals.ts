@@ -113,7 +113,7 @@ export function createHostGoals(options: {
       return checkInHumanObservation(target.agentSessionId, timeline, page, now)
     } })
   const progress = new ContinuousProgressLoopManager(ContinuousProgressLoopStore.forUserData(root),
-    (loop, operationId, isCurrent, signal) => deliverContinuousProgress(runtime, loop, operationId, isCurrent, signal), undefined,
+    (...args) => deliverContinuousProgress(runtime, ...args), undefined,
     (loop, tickId, now, signal) => runtime.observeContinuousProgress(loop, tickId, now, signal), runtime,
     { read: id => demands.get(id), subscribe: listener => demands.subscribe((snapshot, _ids, changes) => listener(changes, snapshot.revision, snapshot.demands)),
       inspectInitial: loop => runtime.inspectContinuousProgressInitial(loop) })

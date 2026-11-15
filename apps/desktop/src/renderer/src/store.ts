@@ -5940,7 +5940,6 @@ function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: u
     ...(origin === 'manual' ? { origin: 'manual' } : {}),
     ...(origin === 'manual' && !options?.goalContinuation && !options?.goalPmo && !options?.goalDispatch ? { freshComposerIntent: true as const } : {})
   }
-  if (!options?.originalMember) void api.continuousProgress.pauseForInput(session.control).catch(error => useAppStore.getState().reportError(error))
   setAuthoredWorkbench((state) => ({ agentSteerQueues: { ...state.agentSteerQueues, [sessionId]: [...(state.agentSteerQueues[sessionId] ?? []), entry] } }))
   return entry.operationId
 }
@@ -12960,7 +12959,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!owner) return
     const previous = moteDraftKey ? useLauncherState.getState().drafts[moteDraftKey]?.prompt : state.agentComposerDrafts[owner]
     if (previous === text && !state.agentComposerHistoryNavigation[owner]) return
-    if (!previous?.trim() && text.trim() && session?.kind === 'agent') {
+    // Launcher-owned Mote text is outside the Session draft watcher.
+    if (moteDraftKey && !previous?.trim() && text.trim() && session?.kind === 'agent') {
       void api.continuousProgress.pauseForInput(session.control).catch(error => get().reportError(error))
     }
     if (moteDraftKey) {
@@ -13198,7 +13198,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     return admitAgentSteer(sessionId, text, onRejected, operationId, origin, agentMuxNote, options, binding) !== false
   },
   async moveQueuedAgentSteerToDraft(sessionId, operationId, expectedText, expectedRunId, moteDraftKey) {
-    let pause: Extract<SessionSnapshot, { kind: 'agent' }> | undefined
     const readOriginal = (state: ReturnType<typeof get>) => {
       const queue = state.agentSteerQueues[sessionId], entry = queue?.find(item => item.operationId === operationId)
       const session = state.sessions.find(item => item.id === sessionId)
@@ -13234,7 +13233,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (latest.entry !== original && !latest.entry.movedToDraft) throw controlFailure(
         'CONTROL_REQUEST_CONFLICT', 'The original message changed during confirmation. Its text and delivery history are kept.')
     }
-    if (moteDraftKey && !useLauncherState.getState().drafts[moteDraftKey]?.prompt?.trim() && original.text.trim() && first.session?.kind === 'agent') pause = first.session
     const move = { operationId, sessionId, runId: expectedRunId, text: expectedText, body: restoreComposerInput(original.text, original.inputImages) }
     if (moteDraftKey && !original.archived) {
       if (!useLauncherState.getState().retainQueuedInputInDraft(moteDraftKey, move)) throw new Error('The original queued input remains available. Saving its destination draft is unconfirmed.')
@@ -13242,17 +13240,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       await checkpointLauncherState()
     }
     setAuthoredWorkbench(state => {
-      const { entry, session } = readOriginal(state)
+      const { entry } = readOriginal(state)
       if (entry.archived) return state
       const draft = moteDraftKey ? useLauncherState.getState().drafts[moteDraftKey]?.prompt ?? '' : state.agentComposerDrafts[sessionId] ?? ''
-      if (!draft.trim() && entry.text.trim() && session?.kind === 'agent') pause = session
       return {
         ...(!moteDraftKey ? { agentComposerDrafts: { ...state.agentComposerDrafts, [sessionId]: `${draft}${draft ? '\n\n' : ''}${restoreComposerInput(entry.text, entry.inputImages)}` } } : {}),
         agentSteerQueues: { ...state.agentSteerQueues, [sessionId]: state.agentSteerQueues[sessionId]!.map(item => item === entry ? { ...item, archived: true as const, movedToDraft: true as const } : item) }
       }
     })
     agentSteerDrains.get(sessionId)?.explicitSteers.delete(operationId)
-    if (pause) void api.continuousProgress.pauseForInput(pause.control).catch(error => get().reportError(error))
     try {
       await flushMessageWorkbench(false)
       if (moteDraftKey) { useLauncherState.getState().clearQueuedInputMove(moteDraftKey, move); await checkpointLauncherState() }

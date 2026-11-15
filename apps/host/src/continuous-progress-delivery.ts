@@ -6,8 +6,8 @@ import { AutomaticInputNotDispatchedError } from './automatic-input-not-dispatch
 /** Revalidate the durable claim immediately before crossing the typed input boundary. */
 export async function deliverContinuousProgress(
   runtime: Pick<GoalRuntimePort, 'observeContinuousProgress' | 'submitPrompt'>,
-  loop: ContinuousProgressLoop, operationId: string, isCurrent: () => boolean, signal: AbortSignal
-): Promise<'sent' | 'skipped'> {
+  loop: ContinuousProgressLoop, operationId: string, isCurrent: () => boolean, signal: AbortSignal, onDispatch?: () => void
+): Promise<'sent' | 'skipped' | 'not-applied'> {
   // Observation precedes any input: a read cancelled here proves this tick sent nothing.
   let observation: Awaited<ReturnType<typeof runtime.observeContinuousProgress>>
   try { observation = await awaitUntilCancelled(() => runtime.observeContinuousProgress(loop, operationId, Date.now(), signal), signal) }
@@ -29,11 +29,14 @@ export async function deliverContinuousProgress(
     await runtime.submitPrompt({ kind: 'agent', agentSessionId: observation.session.agentSessionId,
       hostId: loop.hostId, run: condition.expectedRun }, pending.prompt, operationId, condition,
     { ...(pending.futureIntent ? { futureIntent: pending.futureIntent } : { completionId: pending.id }),
-      ...(pending.inputByte !== undefined ? { inputByte: pending.inputByte } : {}), isCurrent, signal },
+      ...(pending.inputByte !== undefined ? { inputByte: pending.inputByte } : {}), isCurrent, signal,
+      ...(onDispatch ? { onDispatch } : {}) },
     undefined, undefined, pending.agentMuxNote)
     return 'sent'
   } catch (error) {
-    // Core raises these before it claims the input, so nothing was sent and the next due tick may retry.
+    // Core has reserved this exact occurrence and retained the refusal.
+    if (pending.futureIntent && error instanceof AgentMuxError && error.code === 'AGENT_PROMPT_INPUT_NOT_APPLIED') return 'not-applied'
+    // A pre-admission refusal leaves the original due occurrence available.
     if (loop.lastOutcome !== 'unknown' && error instanceof AgentMuxError && (error.code === 'AGENT_PROMPT_CANCELLED' || error.code === 'AGENT_COMPLETION_CHANGED' || error.controlFailure?.disposition === 'not_applied')) throw new AutomaticInputNotDispatchedError(error)
     throw error
   }

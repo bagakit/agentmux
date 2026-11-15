@@ -6,7 +6,7 @@ import type { GoalAgentControl, GoalExecutionClient } from './goal-runtime.js'
 /** Original cancel-only receipts live for this owner instance; no draft or eligibility state. */
 export function createGoalAutomationPause(options: {
   ownerInstanceId(): string
-  client: GoalExecutionClient
+  client: Pick<GoalExecutionClient, 'agentSession' | 'readAgentSession'>
   progress: ContinuousProgressLoopManager
   cancel(control: GoalAgentControl): void
 }): AgentAutomationOwner {
@@ -53,43 +53,23 @@ export function createGoalAutomationPause(options: {
         assertTargetSync()
         const target = { hostId: 'local', agentSessionId: input.agentSessionId }
         options.cancel({ kind: 'agent', ...target, run: input.expectedRun })
-        options.progress.cancelTarget(target)
+        const { progress, maintenance } = options.progress.cancelTarget(target)
         const originalContext = { ...context, assertCurrent: assertTarget }
-        // A Mote's standing heartbeat keeps the main role available: this input moves its current occurrence
-        // one interval later instead of pausing it, so no manual resume is needed.
-        const standing = options.progress.list(target).filter(loop => loop.status === 'active' && loop.managedSource)
-        const loops = options.progress.list(target).filter(loop => loop.status !== 'stopped' && !loop.managedSource)
-        const intents: string[] = []
-        let afterIntentId: string | undefined
-        do {
-          await authorize(context)
-          const page = await options.client.listAgentFuturePromptIntents(input.agentSessionId, { ...(afterIntentId ? { afterIntentId } : {}), limit: 16 })
-          intents.push(...page.intents.filter(value => value.intent.active && !value.intent.continuitySource).map(value => value.intentId))
-          afterIntentId = page.nextIntentId ?? undefined
-        } while (afterIntentId)
         const effects = await Promise.allSettled([
-          options.progress.deferManaged(standing.map(loop => loop.loopId), 'Your input moved this heartbeat to one interval later; it stays on.',
+          options.progress.deferManaged(maintenance, 'Your input moved this heartbeat to one interval later; it stays on.',
             { prepare: assertTarget, assertCurrent: assertTargetSync }).then(results => {
               for (const result of results) {
-                if (result.status === 'fulfilled') receipt.deferredLoopIds.push(result.value.loopId)
+                if (result.status === 'fulfilled') { if (result.value !== null) receipt.deferredLoopIds.push(result.value) }
                 else receipt.issues.push({ stage: 'defer-standing-heartbeat', message: result.reason instanceof Error ? result.reason.message : String(result.reason) })
               }
             }),
-          options.progress.pauseMany(loops.map(loop => loop.loopId), 'Paused for your explicit input intent. Resume the original arrangement explicitly.', originalContext,
+          options.progress.pauseMany(progress, 'Paused for your explicit input intent. Resume the original arrangement explicitly.', originalContext,
             { prepare: assertTarget, assertCurrent: assertTargetSync }).then(results => {
               for (const result of results) {
                 if (result.status === 'fulfilled') receipt.pausedLoopIds.push(result.value.loopId)
                 else receipt.issues.push({ stage: 'pause-original-automatic-input', message: result.reason instanceof Error ? result.reason.message : String(result.reason) })
               }
             }),
-          ...intents.map(async intentId => {
-            const original = await options.client.readAgentFuturePromptIntent(input.agentSessionId, intentId)
-            if (!original?.active) return
-            await authorize(context)
-            await options.client.saveAgentFuturePromptIntent({ agentSessionId: input.agentSessionId, intentId, operationId: original.operationId, expectedRun: input.expectedRun,
-              prompt: original.message.userContent ?? '', ...(original.message.systemContext === undefined ? {} : { agentMuxNote: original.message.systemContext }), active: false })
-            receipt.disabledIntentIds.push(intentId)
-          })
         ])
         for (const effect of effects) if (effect.status === 'rejected') receipt.issues.push({ stage: 'pause-original-automatic-input', message: effect.reason instanceof Error ? effect.reason.message : String(effect.reason) })
         receipt.status = receipt.issues.length ? 'unknown' : 'confirmed'

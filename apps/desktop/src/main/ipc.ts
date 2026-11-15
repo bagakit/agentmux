@@ -2140,7 +2140,7 @@ export async function registerIpc(args: {
     const outcome = await args.runtime.callOriginalCore(control.hostId, 'agent.automation.pause', target, context)
     if (outcome.receipt?.status !== 'confirmed') throw new AgentMuxError('The original automatic pause is unconfirmed. Keep operation ' + target.operationId + ' on owner ' + target.ownerInstanceId + '; manual input remains available.', 'CONTROL_UNAVAILABLE')
   }
-  const pauseUserProgress = (session: SessionControl, _reason: string): void => {
+  const pauseUserProgress = (session: SessionControl): void => {
     if (session.kind === 'agent') void pauseAutomaticInput(session).catch(error => console.warn('Original automatic pause is unconfirmed; manual input remains available:', error))
   }
   const pauseForTyping = (session: SessionControl): void => {
@@ -2148,11 +2148,8 @@ export async function registerIpc(args: {
     const key = JSON.stringify([session.hostId, session.agentSessionId, session.run.runId]), now = Date.now()
     const lastInputAt = typingBursts.get(key)
     typingBursts.set(key, now)
-    if (lastInputAt === undefined || now - lastInputAt >= TYPING_BURST_GAP_MS) pauseUserProgress(session, 'Paused for your terminal input.')
+    if (lastInputAt === undefined || now - lastInputAt >= TYPING_BURST_GAP_MS) pauseUserProgress(session)
   }
-  handleWithEvent('continuousProgress:pauseForInput', async (event, control: AgentSessionControl) => {
-    await pauseAutomaticInput(control)
-  })
   handleWithEvent('sessions:inputOccupation', async (event, control: AgentSessionControl) => {
     await pauseAutomaticInput(control)
   })
@@ -2162,7 +2159,7 @@ export async function registerIpc(args: {
       inputSender(event)))
   })
   handleWithEvent('sessions:paste', async (event, session: SessionControl, text: string, terminalData: string, observation?: import('@agentmux/core/control').InputObservationReference): Promise<SessionInputWriteResult> => {
-    if (text.length > 0) pauseUserProgress(session, 'Paused for your paste.')
+    if (text.length > 0) pauseUserProgress(session)
     return await sessionInputWriteResult(() => args.runtime.paste(session, text, terminalData, readInputObservation(observation) ?? undefined,
       inputSender(event)))
   })
@@ -2194,7 +2191,7 @@ export async function registerIpc(args: {
     let submission: Awaited<ReturnType<RuntimeController['submitPrompt']>> = undefined
     if ('admissionIntent' in condition) {
       if (goalContinuation || goalPmo || goalDispatch) throw new AgentMuxError('The original Goal input cannot become a new manual message.', 'CONTROL_REQUEST_CONFLICT')
-      pauseUserProgress(session, 'Paused for your message.')
+      pauseUserProgress(session)
       return await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, authorHuman, agentMuxNote, sourceChannel, inputContextCapture, inputImages, authorHuman === true ? preparePublicUserProfile(config.profile) : undefined)
     }
     if (goalPmo) {
@@ -2222,7 +2219,7 @@ export async function registerIpc(args: {
           : condition.inputEpoch === undefined ? {} : { inputEpoch: condition.inputEpoch }),
         ...(loop?.taskSource?.kind === 'goal' ? { continuation: { intervalMs: loop.intervalMs, alignmentRevision: loop.taskSource.alignmentRevision } } : {}) })
     } else {
-      pauseUserProgress(session, 'Paused for your message.')
+      pauseUserProgress(session)
       submission = await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, effectiveAuthorHuman, agentMuxNote, sourceChannel, inputContextCapture, inputImages, effectiveAuthorHuman ? preparePublicUserProfile(config.profile) : undefined)
     }
     if (goalPmo) {
@@ -2278,7 +2275,7 @@ export async function registerIpc(args: {
   handleWithEvent('sessions:resume', async (event, session: AgentSessionControl, prompt: string, operationId: string, agentMuxNote?: string, inputEpoch?: string) => {
     return await args.runtime.resumeSession(session, prompt, operationId, config, agentMuxNote, inputEpoch)
   })
-  handle('sessions:interrupt', async (session: SessionControl) => { pauseUserProgress(session, 'Paused because you interrupted the Agent.'); await args.runtime.interrupt(session) })
+  handle('sessions:interrupt', async (session: SessionControl) => { pauseUserProgress(session); await args.runtime.interrupt(session) })
   handleWithEvent('sessions:resize', async (event, attachmentId: string, cols: number, rows: number) => (
     await args.runtime.resizeSessionAttachment(event.sender.id, attachmentId, cols, rows)
   ))
@@ -2288,11 +2285,11 @@ export async function registerIpc(args: {
   handle('sessions:refresh', async (session: SessionControl) => await args.runtime.refresh(session, config))
   handleWithEvent('sessions:recover', async (event, session: SessionControl, workspacePath?: string, operationId?: string, request?: (Pick<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input' | 'inputEpoch'> & { moteMain?: Pick<import('@agentmux/core/mote-dialogue').MoteDialogueInputSubmit, 'target' | 'expectedRoleRevision'>; focusTask?: import('@agentmux/core/focus-control').AgentMuxFocusTaskReference; inputImages?: readonly import('@agentmux/core').AgentInputImageReference[] })) => { return await sessionRecoveryOperationResult(() => args.runtime.recoverSession(session, config, workspacePath, operationId, request)) })
   handleWithEvent('sessions:restart', async (event, session: AgentSessionControl, operationId: string, observeOnly?: boolean) => {
-    if (!observeOnly) pauseUserProgress(session, 'Paused because you restarted this Agent. Resume explicitly when ready.')
+    if (!observeOnly) pauseUserProgress(session)
     return await sessionObservationResult(() => args.runtime.restartSession(session, config, operationId, observeOnly))
   })
   handle('sessions:stop', async (session: SessionControl, operationId?: string) => {
-    pauseUserProgress(session, 'Paused because you stopped the Agent.')
+    pauseUserProgress(session)
     return await sessionStopReply(() => args.runtime.stopSession(session, operationId))
   })
   handle('sessions:inspectStop', async (session: AgentSessionControl, operationId: string) =>

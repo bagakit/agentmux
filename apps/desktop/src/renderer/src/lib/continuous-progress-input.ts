@@ -31,22 +31,20 @@ export function observeAgentInputOccupation(store: {
         if (state[key][id] !== previous[key][id]) changed.add(id)
       }
     }
-    if (!changed.size) return
+    if (state.loading || !changed.size) return
     const sessions = agentSessionPresentationIndex(state.sessions)
     const notified = new Set<string>()
     for (const id of changed) {
       // Launcher drafts belong to Regions. Only an original Agent presentation owns this input.
       const matches = (sessions.get(id) ?? []).filter(session => session.id === id)
-      const unknown = state.loading || matches.length !== 1 || matches.some(session => session.hostId !== session.control.hostId)
-      if (!unknown && (!agentInputOccupied(state, id) || agentInputOccupied(previous, id))) continue
-      for (const session of matches) {
-        const control = session.control
-        const ref = JSON.stringify([control.hostId, control.agentSessionId, control.run.runId])
-        if (notified.has(ref)) continue
-        notified.add(ref)
-        try { void notify(control).catch(onFailure) }
-        catch (error) { onFailure(error) }
-      }
+      const session = matches.length === 1 ? matches[0] : undefined
+      if (!session || session.hostId !== session.control.hostId || !agentInputOccupied(state, id) || agentInputOccupied(previous, id)) continue
+      const control = session.control
+      const ref = JSON.stringify([control.hostId, control.agentSessionId, control.run.runId])
+      if (notified.has(ref)) continue
+      notified.add(ref)
+      try { void notify(control).catch(onFailure) }
+      catch (error) { onFailure(error) }
     }
   })
 }

@@ -651,7 +651,7 @@ const api: AgentMuxPreloadApi = {
       return result.loop
     },
     action: (target: ContinuousProgressTarget, loopId: string, action: 'pause' | 'resume' | 'stop' | 'check', expectedLoop: import('@agentmux/core').ContinuousProgressLoop, operationId: string) => ipcRenderer.invoke('continuousProgress:action', target, loopId, action, expectedLoop, operationId),
-    pauseForInput: (control: AgentSessionControl) => ipcRenderer.invoke('continuousProgress:pauseForInput', control),
+    pauseForInput: (control: AgentSessionControl) => ipcRenderer.invoke('sessions:inputOccupation', control),
   },
   schedule: {
     list: (params: import('@agentmux/core').ScheduleParamsMap['schedule.list']) => ipcRenderer.invoke('schedule:list', params),

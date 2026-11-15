@@ -39,7 +39,7 @@ export type GoalAgentControl = { kind: 'agent'; hostId: string; agentSessionId: 
 export type GoalDispatchReference = { goalId: string; operationId: string; inputEpoch?: string }
 export type GoalExecutionClient = AgentMuxClient | AgentMuxHostedClient
 type Automation = { completionId?: string; futureIntent?: { intentId: string; occurrenceAt: number };
-  inputByte?: number; isCurrent(): boolean; signal: AbortSignal }
+  inputByte?: number; isCurrent(): boolean; onDispatch?(): void; signal: AbortSignal }
 type Attention = { inputEpoch?: string; hostId: string; supervisorAgentSessionId: string; supervisorRunId: string; operationId: string; producer?: 'message' }
 
 /** The existing Goal mechanisms borrow typed Core operations, never an editor controller. */
@@ -207,6 +207,7 @@ export function createGoalRuntime(options: {
         const submit = (input: import('@agentmux/core').AgentMuxAgentPromptInput) => {
           const dispatch = () => {
             automation?.signal.throwIfAborted()
+            automation?.onDispatch?.()
             dispatchStarted = true
             return originalAuthority ? client.submitAgentPrompt(input, originalAuthority) : client.submitAgentPrompt(input)
           }
