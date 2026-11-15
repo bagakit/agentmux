@@ -1,5 +1,4 @@
 import { useMemo } from 'react'
-import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { delegationWorkerHostId } from '@agentmux/demand/delegations'
 import type { DemandRecord } from '../lib/global-demand-board'
 import type { GoalPlanNodeView, GoalPlanReadingTarget } from './GoalPlanGraph'
@@ -10,7 +9,6 @@ type TimeSpan = { from: number; to: number }
 type Row = { id: string; title: string; number?: number; target?: GoalPlanReadingTarget; events: Event[]; active?: TimeSpan; planned?: TimeSpan }
 const format = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 const clock = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' })
-const TimelineIcon = semanticIconComponent('object.workflow')
 
 /** Receipt times are events. Only an exact, confirmed activity observation can supply a live span. */
 export function goalExecutionRows(demand: Pick<DemandRecord, 'plan' | 'delegations' | 'dispatches' | 'responsibility'>): Row[] {
@@ -72,17 +70,20 @@ export function GoalExecutionTimeline({ demand, nodes, selected, onSelect }: { d
   const onlyRow = rows.length === 1 ? rows[0] : undefined
   if (wholeGoal && onlyRow?.events.length && !onlyRow.target && !onlyRow.active && !onlyRow.planned) {
     return <section className="goal-execution-time" aria-label="Execution timeline" data-goal-execution-time>
-      <h3><TimelineIcon size={14} aria-hidden="true" />Execution timeline</h3>
-      <ul className="goal-execution-time__receipts" data-goal-time-row={onlyRow.id}>{onlyRow.events.map(event => <li key={event.id}>
-        <strong>{onlyRow.title}</strong><span>{event.label}</span><time dateTime={new Date(event.at).toISOString()}>{format.format(event.at)}</time>
-      </li>)}</ul>
+      <h3>Execution timeline</h3>
+      <div className="goal-execution-time__receipt-group" data-goal-time-row={onlyRow.id}>
+        <strong>{onlyRow.title}</strong>
+        <ul className="goal-execution-time__receipts">{onlyRow.events.map(event => <li key={event.id}>
+          <span>{event.label}</span><time dateTime={new Date(event.at).toISOString()}>{format.format(event.at)}</time>
+        </li>)}</ul>
+      </div>
     </section>
   }
   if (onlyRow?.target && !onlyRow.events.length && !onlyRow.active && !onlyRow.planned) {
     const { target } = onlyRow
     const active = selected?.nodeId === target.nodeId && selected.attemptId === target.attemptId && selected.wholeGoal === target.wholeGoal
     return <section className="goal-execution-time goal-execution-time--empty" aria-label="Execution timeline" data-goal-execution-time data-goal-time-row={onlyRow.id}>
-      <h3><TimelineIcon size={14} aria-hidden="true" />Execution timeline</h3>
+      <h3>Execution timeline</h3>
       <span>No times recorded</span>
       <button type="button" aria-label={`Read ${onlyRow.title}`} aria-pressed={active} onClick={event => onSelect(target, event.currentTarget)}>View task</button>
     </section>
@@ -100,7 +101,7 @@ export function GoalExecutionTimeline({ demand, nodes, selected, onSelect }: { d
   const tickFormat = hasTimes && new Date(start).toDateString() === new Date(end).toDateString() ? clock : format
   const offset = (at: number) => (at - start) / Math.max(1, end - start) * 100
   return <section className="goal-execution-time" aria-label="Execution timeline" data-goal-execution-time>
-    <h3><TimelineIcon size={14} aria-hidden="true" />Execution timeline</h3>
+    <h3>Execution timeline</h3>
     <div className="goal-execution-time__scroll"><div className="goal-execution-time__rows" data-timed={hasTimes || undefined}>
       <div className="goal-execution-time__row goal-execution-time__axis"><span>Task and attempt</span>
         <div>{hasTimes ? ticks.map(at => <time key={at} dateTime={new Date(at).toISOString()} title={format.format(at)}>{tickFormat.format(at)}</time>)

@@ -11,8 +11,6 @@ import { GoalPatrolControl } from './GoalPatrolControl'
 import { GoalContinuationAgent, GoalContinuationControl } from './GoalContinuationControl'
 import '../styles/goal-supervisor-rail.css'
 
-const DiscussionIcon = semanticIconComponent('object.conversation')
-const SupervisorIcon = semanticIconComponent('object.workflow')
 const ReviewIcon = semanticIconComponent('action.review-source')
 const ForwardIcon = semanticIconComponent('navigation.forward')
 const RECENT = 6
@@ -82,15 +80,13 @@ function coordinationEntries(demand: DemandProjection): CoordinationEntry[] {
 }
 
 /** A workbench over the Goal owner's records and explicit actions. */
-export function GoalSupervisorRail({ demand, onChooseSupervisor, onAddAssignee, planning, inspectionIsCurrent = false, currentDelivery, onOpenDiscussion, discussionBusy = false, onRevealAttempt }: {
+export function GoalSupervisorRail({ demand, onChooseSupervisor, onAddAssignee, planning, inspectionIsCurrent = false, currentDelivery, onRevealAttempt }: {
   demand: DemandProjection
   onChooseSupervisor?: () => void
   onAddAssignee?: () => void
   planning?: ReactNode
   inspectionIsCurrent?: boolean
   currentDelivery?: AttemptTarget | undefined
-  onOpenDiscussion?: (() => void) | undefined
-  discussionBusy?: boolean
   onRevealAttempt(nodeId: string, operationId: string, trigger: HTMLButtonElement): void
 }) {
   const active = useWorkbenchPresentationActive()
@@ -111,7 +107,7 @@ export function GoalSupervisorRail({ demand, onChooseSupervisor, onAddAssignee, 
   const editProgressSupervisor = needsAssignee ? onAddAssignee : onChooseSupervisor
   const shown = all ? entries : entries.slice(0, RECENT)
   return <section className="goal-supervisor-rail" aria-label="Goal Supervisor" data-goal-supervisor-rail={demand.id}>
-    <header className="goal-supervisor-rail__heading"><h2><SupervisorIcon size={17} aria-hidden="true" />Supervisor</h2></header>
+    <header className="goal-supervisor-rail__heading"><h2>Supervisor</h2></header>
     <div className="goal-supervisor-rail__identity">
       <div className="goal-supervisor-rail__person">{supervisor ? typeof supervisor !== 'string' || hosts.length === 1
         ? <GoalContinuationAgent agentSessionId={supervisor} {...(typeof supervisor === 'string' ? { hostId: hosts[0]! } : {})} active={active} size={32} />
@@ -138,7 +134,6 @@ export function GoalSupervisorRail({ demand, onChooseSupervisor, onAddAssignee, 
         {...(editProgressSupervisor ? { onChooseSupervisor: editProgressSupervisor } : {})} /> : null}
     </details>
     {demand.delegationObservationIssue ? <p className="goal-supervisor-rail__issue" role="status">{demand.delegationObservationIssue}</p> : null}
-    {onOpenDiscussion ? <Button type="button" className="goal-supervisor-rail__discussion" disabled={discussionBusy} onClick={onOpenDiscussion}><DiscussionIcon size={13} aria-hidden="true" />Open goal discussion</Button> : null}
     {typeof supervisor === 'string' || diagnostic ? <details className="goal-supervisor-rail__detail" data-goal-supervisor-source>
       <summary>Supervisor source</summary>
       {typeof supervisor === 'string' ? <p className="goal-supervisor-rail__source">{hosts.length === 1 ? `Host ${hosts[0]}` : hosts.length ? 'Supervisor Host is conflicting' : 'Supervisor Host is unconfirmed'} · Session {supervisor}</p> : null}

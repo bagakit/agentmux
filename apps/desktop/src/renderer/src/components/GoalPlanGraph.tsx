@@ -36,7 +36,6 @@ export type GoalPlanView = { revision: number | null; nodes: GoalPlanNodeView[];
 export function goalPlanDeliveries(plan: GoalPlanView) {
   return plan.nodes.filter((item): item is GoalPlanNodeView & { delegation: DemandDelegation } => item.state === 'review' && Boolean(item.delegation?.report))
 }
-const ThemeObjectWorkflowIcon = semanticIconComponent('object.workflow')
 const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
 const StartIcon = semanticIconComponent('action.start')
 const finishIcons = {
@@ -274,6 +273,8 @@ export function GoalPlanGraph({ demand, projection: provided, planLink, planning
   const open = Boolean(selectedTarget && 'wholeGoal' in selectedTarget && selectedTarget.wholeGoal) === wholeGoal ? selectedTarget?.nodeId : undefined
   const [issue, setIssue] = useState<string | null>(null)
   const [readingState, setReadingState] = useState(false)
+  const [showAssignments, setShowAssignments] = useState(false)
+  const assignmentsId = useId()
   const retainedReviews = useAppStore(state => state.goalEditDrafts[demand.id]?.planReviews)
   const [reviewNotices, setReviewNotices] = useState<Record<string, Pick<GoalPlanReviewDraft, 'pending' | 'issue' | 'reread'>>>({})
   const canvas = useRef<HTMLDivElement>(null)
@@ -351,16 +352,27 @@ export function GoalPlanGraph({ demand, projection: provided, planLink, planning
   return <section className={`goal-plan${wholeGoal || progress ? '' : ' goal-plan--unavailable'}`} aria-label="Goal plan" data-goal-plan-revision={projection.revision ?? undefined}>
     <div className="goals-section-heading">
       <div className="goal-plan__heading">
-        <h2><ThemeObjectWorkflowIcon size={15} aria-hidden="true" /> Execution plan</h2>
+        <h2>Execution plan</h2>
         {!wholeGoal ? <span className="goals-caption" data-goal-plan-progress>Revision {projection.revision}</span> : null}
       </div>
       <div className="goal-plan__tools">
+        {projection.nodes.length > 1 ? <Button type="button" className="goal-plan__assignment-toggle" aria-expanded={showAssignments} aria-controls={assignmentsId}
+          onClick={() => setShowAssignments(value => !value)}>Assignments</Button> : null}
         {planLink}
         {planningLink}
       </div>
     </div>
     {stateService}
     {issue ? <p className="goals-service" role="status">{issue}</p> : null}
+    {projection.nodes.length > 1 ? <div className="goal-plan__assignments" id={assignmentsId} hidden={!showAssignments}>
+      <nav aria-label="Task assignments">
+        {projection.nodes.map(item => <button key={item.node.id} type="button"
+          aria-current={open === item.node.id ? 'true' : undefined} onClick={event => toggleNode(item, event.currentTarget)}>
+          <GoalPlanMark item={item} /><strong>{item.node.title}</strong>
+          <span className="goal-plan__assignment-fact"><NodeExecutor item={item} compact /><span>{goalPlanStateLabel(item)}</span></span>
+        </button>)}
+      </nav>
+    </div> : null}
     <div className="goal-plan__workbench">
     <div className="goal-plan__stage">
     <div className="goal-plan__canvas" data-single-task={projection.nodes.length === 1 || undefined} ref={canvas} tabIndex={0} aria-label="Execution graph">
@@ -416,14 +428,6 @@ export function GoalPlanGraph({ demand, projection: provided, planLink, planning
           setReviewNotices(previous => { if (!previous[reviewNoticeKey]) return previous; const { [reviewNoticeKey]: _notice, ...retained } = previous; return retained })
         }} /> : null}
     </div></GoalPlanReadingPlacement> : null}
-      <details className="goal-plan__assignments"><summary>Assignments</summary>
-        <nav aria-label="Task assignments">
-        {projection.nodes.map(item => <button key={item.node.id} type="button"
-          aria-current={open === item.node.id ? 'true' : undefined} onClick={event => toggleNode(item, event.currentTarget)}>
-          <GoalPlanMark item={item} /><strong>{item.node.title}</strong>
-          <span className="goal-plan__assignment-fact"><NodeExecutor item={item} compact /><span>{goalPlanStateLabel(item)}</span></span>
-        </button>)}
-      </nav></details>
     <GoalExecutionTimeline demand={demand} nodes={projection.nodes} selected={open ? selectedTarget ?? null : null} onSelect={select} />
     </div>
     </div>

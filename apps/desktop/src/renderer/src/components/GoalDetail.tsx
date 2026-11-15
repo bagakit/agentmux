@@ -32,12 +32,9 @@ import '../styles/goal-reading.css'
 const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
 const ThemeActionMoreIcon = semanticIconComponent('action.more')
 const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
-const ThemeObjectGoalIcon = semanticIconComponent('object.goal')
 const ThemeNavigationForwardIcon = semanticIconComponent('navigation.forward')
-const ThemeReviewIcon = semanticIconComponent('action.review-source')
 const ThemeDoneIcon = semanticIconComponent('status.completed')
 const QUEUE_NAMES: Record<GoalStage, string> = { you: 'needs you', attention: 'needs attention', define: 'needs defining', agents: 'is with agents', unknown: 'is unknown', finished: 'is finished' }
-const DiscussionIcon = semanticIconComponent('object.conversation')
 const SupervisorPaneIcon = semanticIconComponent('layout.open-right')
 const CopyLinkIcon = semanticIconComponent('action.copy-address')
 
@@ -233,7 +230,6 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
     await saveGoalDrafts(demand.id)
     if (Object.keys(failedPatch.current).length) await update({ ...failedPatch.current })
   }
-  const continueInBody = Boolean(demand.alignment?.confirmedAt && !demand.grounding)
   const finished = demand.status === 'done' || demand.status === 'cancelled'
   const fact = useMemo(() => goalNextStepFact(demand, retainedStart), [demand, retainedStart])
   const projection = useMemo(() => goalPlanProjection(demand, fact), [demand, fact])
@@ -253,6 +249,13 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
   const missingDoneReport = demand.status === 'done' && !demand.grounding
   const readReport = Boolean(demand.grounding) && (fact.source.kind === 'results' || fact.source.kind === 'definition' && !demand.alignment)
   const readDefinition = Boolean(demand.alignment) && (fact.source.kind === 'definition' || missingDoneReport && !demand.alignment?.confirmedAt)
+  const requestFeedback = moteError ? <div className="goals-service" role="status">
+    {moteError.mode === 'open' ? 'Goal saved. The discussion could not be opened.' : `${moteError.mode === 'plan' ? 'Planning' : moteError.mode === 'grill' ? 'Goal' : 'Check'} request delivery is unconfirmed. Your goal and current work are kept.`}
+    <span>{moteError.message}</span>
+    <Button type="button" disabled={Boolean(motePending)} onClick={onRetryMote}>
+      {moteError.mode === 'open' ? 'Retry opening discussion' : moteError.mode === 'plan' ? 'Check planning request' : moteError.mode === 'grill' ? 'Retry goal request' : 'Retry check request'}
+    </Button>
+  </div> : null
   const readingTargets = { plan: planRef, overview: overviewRef, execution: executionRef, activity: activityRef }
   return <aside ref={detailRef} className="goals-detail" data-goal-detail-id={demand.id} data-goal-view={showSupervisor ? 'supervisor' : 'work'} aria-label={`Goal workspace for ${demand.title}`}>
     <header ref={toolbarRef} className="goals-detail__toolbar">
@@ -264,7 +267,6 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
           onNavigate={id => revealWork(readingTargets[id].current)} />
       </nav>
       <div className="goal-outline__tools">
-        {!demand.plan && !continueInBody ? <Button type="button" className="goal-outline__discussion" disabled={Boolean(motePending)} onClick={onOpenMote} aria-label={`Open discussion for ${demand.title}`} title={recipient.openLabel}><DiscussionIcon size={14} aria-hidden="true" /><span>{motePending === 'open' ? 'Opening discussion…' : recipient.openLabel}</span></Button> : null}
         <button type="button" ref={supervisorToggle} className="goals-detail__team-link" data-goal-supervisor-toggle
           aria-label="Supervisor" aria-controls={teamRegionId} title={showSupervisor ? 'Return to goal' : 'Open Supervisor'} aria-pressed={showSupervisor}
           onClick={() => showSupervisor ? setShowSupervisor(false) : revealSupervisor()}>
@@ -286,16 +288,16 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
     <article className="goals-document">
       <div className="goals-detail__body">
       <header className="goals-detail__head">
-        <div className="goals-detail__identity"><GoalStageMark stage={stage} />
+        <div className="goals-detail__identity">
           <div className="goals-detail__title">
             <ComposerTextarea className="goals-title" aria-label="Goal title" value={title} onValueChange={value => editGoalDraft(demand.id, 'title', value)} rows={1} onBlur={() => { if (titleDirty && title.trim()) void saveGoalDrafts(demand.id, ['title']) }} />
-            <p className="goals-detail__stage"><strong data-goal-detail-stage>{next}</strong>{currentWork ? <button type="button" className="goals-detail__current-work" onClick={() => revealOriginalWork(currentWork)}>{currentWork.kind === 'patrol' ? 'View original inspection' : 'View current work'}<ThemeNavigationForwardIcon size={12} aria-hidden="true" /></button> : null}</p>
+            <p className="goals-detail__stage"><span className="goals-detail__status"><GoalStageMark stage={stage} /><strong data-goal-detail-stage>{next}</strong></span>{currentWork ? <button type="button" className="goals-detail__current-work" onClick={() => revealOriginalWork(currentWork)}>{currentWork.kind === 'patrol' ? 'View original inspection' : 'View current work'}<ThemeNavigationForwardIcon size={12} aria-hidden="true" /></button> : null}</p>
           </div>
         </div>
         <div className="goals-detail__actions">
-          {deliveries.length ? <span className="goals-detail__pending-review"><ThemeReviewIcon size={14} aria-hidden="true" />{deliveries.length} awaiting review</span> : null}
+          {deliveries.length ? <span className="goals-detail__pending-review">{deliveries.length} awaiting review</span> : null}
           {projection.progress ? <span className="goals-detail__progress" data-goal-meta-plan={`${projection.progress.done}/${projection.progress.total}`}>
-            <ThemeDoneIcon size={14} aria-hidden="true" />Plan {projection.progress.done} of {projection.progress.total} done</span> : null}
+            Plan {projection.progress.done} of {projection.progress.total} done</span> : null}
           {currentDelivery ? <Button variant="primary" onClick={event => revealAttempt(currentDelivery.node.id, currentDelivery.delegation.operationId, event.currentTarget)}>View delivery<ThemeNavigationForwardIcon size={13} aria-hidden="true" /></Button> : null}
           {(readReport || readDefinition) && !acknowledgementFeedback.failure
             ? <Button type="button" onClick={() => revealGoalReview(readDefinition)}>{readReport ? 'Read results' : demand.alignment?.criteria.length ? 'Read success criteria' : 'Read proposal'}</Button> : null}
@@ -304,18 +306,26 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
         <p className="goals-detail__edit-status" aria-live="polite">{hasEditDraft ? draftIssue ? 'Edits kept · Save unconfirmed' : 'Unsaved edits' : null}</p>
       </header>
         {copyIssue ? <p className="goals-service" role="status">Link could not be copied. {copyIssue}</p> : null}
-        {moteError ? <div className="goals-service" role="status">{moteError.mode === 'open' ? 'Goal saved. The discussion could not be opened.' : `${moteError.mode === 'plan' ? 'Planning' : moteError.mode === 'grill' ? 'Goal' : 'Check'} request delivery is unconfirmed. Your goal and current work are kept.`} <span>{moteError.message}</span><Button type="button" disabled={Boolean(motePending)} onClick={onRetryMote}>{moteError.mode === 'open' ? 'Retry opening discussion' : moteError.mode === 'plan' ? 'Check planning request' : moteError.mode === 'grill' ? 'Retry goal request' : 'Retry check request'}</Button></div> : null}
+        {moteError?.mode !== 'open' ? requestFeedback : null}
         {acknowledgementFeedback.failure ? <GoalAcknowledgementRecovery goalId={demand.id} feedback={acknowledgementFeedback} onFeedbackChange={onAcknowledgementFeedbackChange} /> : null}
         <div className="goals-detail__main">
           {plan}
           <section ref={overviewRef} tabIndex={-1} className="goals-detail__overview" aria-label="Goal overview" data-goal-reading-section="overview"
             data-goal-reading-id={demand.id} data-goal-reading-runtime={demand.address?.runtimeId} data-goal-reading-namespace={demand.address?.namespace}>
-            <div className="goals-section-heading"><h2><ThemeObjectGoalIcon size={14} aria-hidden="true" />Goal overview</h2>{descriptionDirty ? <span className="goals-caption">Unsaved draft</span> : null}</div>
+            <div className="goals-section-heading goals-detail__overview-heading">
+              <h2>Goal overview</h2>
+              <Button type="button" disabled={Boolean(motePending)} onClick={onOpenMote}
+                aria-label={`Open discussion for ${demand.title}`} title={recipient.openLabel}>
+                {motePending === 'open' ? 'Opening discussion…' : recipient.openLabel}
+              </Button>
+            </div>
+            {moteError?.mode === 'open' ? requestFeedback : null}
+            {descriptionDirty ? <span className="goals-caption">Unsaved draft</span> : null}
             <div className="goals-intent-body goals-detail__brief" aria-label="Goal brief">{intent(demand.plan ? 3 : 6)}{saveFeedback}</div>
             <div ref={resultsRef} tabIndex={-1} className="goals-detail__definition" aria-label="Criteria and results">
               <GoalAlignment emphasis={fact.source.kind === 'definition' || fact.source.kind === 'results' ? fact.source.kind : null}
                 feedback={acknowledgementFeedback} onFeedbackChange={onAcknowledgementFeedbackChange}
-                demand={demand} onGrill={onGrill} onGrounding={onGrounding} onOpenMote={onOpenMote} motePending={motePending} />
+                demand={demand} onGrill={onGrill} onGrounding={onGrounding} motePending={motePending} />
             </div>
           </section>
           <GoalWorkArea key={demand.id} demand={demand} sectionRef={executionRef} primary={!acknowledgementFeedback.failure && !currentDelivery} onRevealResults={() => revealGoalReview(false)} />
@@ -329,7 +339,7 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
               <GoalPlanRequest demand={demand} onRequest={onPlan} pending={motePending === 'plan'} busy={Boolean(motePending)}
                 onChooseSupervisor={() => setInspectorRole(demand.assigneeSessionIds?.length ? 'supervisor' : 'assignees')} />
             </div> : null}
-            currentDelivery={currentDelivery ? { nodeId: currentDelivery.node.id, operationId: currentDelivery.delegation.operationId, title: currentDelivery.node.title } : undefined} onOpenDiscussion={demand.plan && !continueInBody ? onOpenMote : undefined} discussionBusy={Boolean(motePending)} onRevealAttempt={revealAttempt} />
+            currentDelivery={currentDelivery ? { nodeId: currentDelivery.node.id, operationId: currentDelivery.delegation.operationId, title: currentDelivery.node.title } : undefined} onRevealAttempt={revealAttempt} />
           <details className="goals-detail__relationships"><summary>Team and relationships</summary>
             <GoalExecution demand={demand} onUpdate={update} onChooseSupervisor={() => setInspectorRole('supervisor')} />
           </details>

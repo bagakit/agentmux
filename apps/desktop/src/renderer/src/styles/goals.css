@@ -402,8 +402,6 @@
 }
 
 .goals-request-action { display: flex; flex-basis: 100%; align-items: center; gap: var(--sp-3); min-width: 0; }
-.goals-request-action__art { width: 32px; height: 32px; flex: 0 0 auto; object-fit: contain; pointer-events: none; }
-.goals-request-action__art[hidden] { display: none; }
 .goals-clarification { margin-bottom: var(--sp-6); }
 .goals-no-results { padding: var(--sp-4) 0 var(--sp-5); }
 

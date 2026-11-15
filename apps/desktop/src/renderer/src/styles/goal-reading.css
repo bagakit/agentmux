@@ -5,7 +5,6 @@
 .goal-outline__trail i { flex: none; color: var(--text-3); font-style: normal; opacity: .6; }
 .goal-outline__project { display: flex; align-items: baseline; gap: var(--sp-3); min-width: 0; max-width: 22ch; color: var(--text-2); }
 .goal-outline__project > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.goal-outline__tools .goal-outline__discussion > svg { display: none; }
 .goal-outline__tools { flex: none; gap: var(--sp-3); }
 .goal-outline__back, .goal-outline__trigger, .goals-detail__toolbar .goals-detail__team-link {
   display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); flex: none; min-height: 28px;
@@ -35,9 +34,6 @@
 @container goal-detail (width < 560px) {
   .goal-outline__project, .goals-detail__toolbar .goals-detail__team-link span { display: none; }
   .goal-outline__tools { gap: var(--sp-1); }
-  .goal-outline__tools .goal-outline__discussion { width: 28px; padding: 0; }
-  .goal-outline__tools .goal-outline__discussion > svg { display: block; }
-  .goal-outline__tools .goal-outline__discussion > span { display: none; }
   .goals-detail__toolbar .goals-detail__team-link { width: 28px; }
 }
 @media (prefers-reduced-motion: no-preference) {
@@ -52,36 +48,40 @@
 }
 .goals-detail__main > [data-goal-reading-section] { min-width: 0; scroll-margin-top: var(--goal-detail-reading-offset, 90px); }
 .goals-detail__main > [data-goal-reading-section]:focus { outline: none; }
-.goals-detail__stage { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-4); }
+.goals-detail__stage { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-4); }
+.goals-detail__status { display: inline-flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.goals-detail__status > .goal-stage-mark { flex: none; width: 18px; height: 18px; }
 .goals-detail__current-work { display: inline-flex; align-items: center; gap: var(--sp-1); padding: var(--sp-1) 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font: 550 var(--fs-meta)/1.4 var(--font-sans); cursor: pointer; }
 .goals-detail__current-work:hover { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
 .goals-detail__current-work:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
 .goals-document .goals-detail__title .goals-title { font-size: clamp(var(--fs-display), 2cqw, 28px); line-height: 1.27; font-weight: 650; letter-spacing: -.025em; }
 .goals-document .goals-detail__identity { align-items: flex-start; }
-.goals-document .goals-detail__identity > .goal-stage-mark { margin-block-start: var(--sp-1); }
-.goals-document .goals-detail__head { padding-block: var(--sp-3) var(--sp-5); }
+.goals-document .goals-detail__head { padding-block: var(--sp-2) var(--sp-6); }
+@container goal-detail (width < 760px) {
+  .goals-document .goals-detail__identity { flex-basis: 100%; }
+}
 .goals-document .goals-detail__actions:empty, .goals-detail__edit-status:empty { display: none; }
 @container goal-detail (min-width: 960px) {
   .goals-detail .goals-document { padding-inline: clamp(18px, 2.4cqw, 48px); padding-top: var(--sp-6); gap: clamp(20px, 2.3cqw, 42px); }
-  .goals-document .goals-detail__side { padding-inline-start: clamp(18px, 2cqw, 30px); }
+  .goals-document .goals-detail__side { padding: var(--sp-5); border: 0; border-radius: var(--radius-lg); background: var(--surface-1); }
 }
 .goals-detail__main :is(button, summary, input, select, textarea, [tabindex='0']),
 .goals-detail :is([data-goal-work-operation], [data-goal-retained-operation]) { scroll-margin-top: var(--goal-detail-reading-offset, 90px); }
 .goals-detail :is([data-goal-work-operation], [data-goal-retained-operation]):focus { outline: 2px solid var(--focus-line); outline-offset: 3px; border-radius: var(--radius-sm); }
-.goals-detail__main > :is(.goals-detail__overview, .goal-work-area, .goals-detail__activity) {
-  margin-block: var(--sp-5) 0;
-  padding-block: var(--sp-5);
-  border-block-start: 1px solid var(--line);
-}
+.goals-detail__main { display: grid; gap: var(--sp-7); }
+.goals-detail__main > .goal-work-area, .goals-detail__main .goal-plan { margin-block-end: 0; }
+.goals-detail__activity > .goals-activity { padding-block: 0; border: 0; }
 .goals-detail__overview .goals-detail__brief { margin-block: 0; }
-.goals-detail__overview .goals-detail__definition { margin-block-start: var(--sp-4); }
+.goals-detail__overview .goals-detail__definition { margin-block-start: var(--sp-5); }
 .goals-detail__definition > .goals-alignment { border-top: 0; padding-top: 0; }
-.goals-detail__definition > .goals-clarification { display: grid; gap: var(--sp-2); margin-bottom: 0; padding: var(--sp-3) 0 0; border-top: 1px solid var(--line-soft); }
+.goals-detail__definition > .goals-clarification { display: grid; gap: var(--sp-2); margin: 0; padding: 0; border: 0; }
 .goal-agreement__prompt { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); color: var(--text-2); font-size: var(--fs-body); }
 .goal-work-area .goal-work-area__plan-task { margin: 0 0 var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); font-weight: 550; }
-.goals-detail__overview > .goals-section-heading { margin-bottom: var(--sp-3); }
+.goals-detail__overview > .goals-detail__overview-heading { align-items: center; justify-content: flex-start; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); margin-block: 0 var(--sp-3); }
+.goals-detail__overview > .goals-detail__overview-heading > h2 { margin: 0; }
+.goals-detail__overview-heading button { max-width: 100%; text-align: start; white-space: normal; }
 .goals-detail__brief .goals-intent__reading { line-height: 1.65; }
-.goal-work-area__records { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; padding-block: var(--sp-4); border-top: 1px solid var(--line-soft); }
+.goal-work-area__records { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; padding-block: var(--sp-1) var(--sp-3); }
 .goal-work-area__records > details, .goal-work-area__records > .small-button { grid-area: 1 / 1; }
 .goal-work-area__records > .small-button { justify-self: end; min-height: 24px; font-size: var(--fs-meta); }
 .goal-work-area__records > details > summary { min-height: 24px; padding-inline-end: 9em; color: var(--text-2); font-size: var(--fs-body); font-weight: 500; }
@@ -110,6 +110,7 @@
   .goals-detail[data-goal-view='supervisor'] .goals-detail__side { margin-top: 0; padding-top: 0; border-top: 0; }
 }
 .goals-detail__relationships { min-width: 0; }
+.goals-detail__side .goals-detail__properties { border: 0; padding-block-start: 0; }
 .goals-detail__relationships > summary { cursor: pointer; font-weight: 560; color: var(--text-2); }
 .goals-detail__relationships[open] > summary { margin-bottom: var(--sp-4); }
 .goals-detail__side { align-content: start; }

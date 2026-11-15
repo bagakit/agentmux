@@ -9,7 +9,6 @@ import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { goalNextStepFact, goalResultExplanation } from '../lib/goal-presentation'
 import { GoalEvidence } from './GoalEvidence'
 import { useGoalDiscussionRecipient } from '../lib/goal-discussion-recipient'
-import dialogueArtworkUrl from '@agentmux/client-ui/brand/illustrations/goals/demand-dialogue.png'
 import '../styles/goal-review.css'
 
 const ThemeObjectGoalIcon = semanticIconComponent('object.goal')
@@ -39,7 +38,7 @@ export function GoalAcknowledgementRecovery({ goalId, feedback, onFeedbackChange
   return failure ? <div className="goals-service" role="status" data-goal-acknowledgement-failure>{failure.attempt.kind === 'confirm' ? 'Goal confirmation' : 'Result acceptance'} is unconfirmed. Your goal and current work are kept. <span>{failure.message}</span><Button type="button" variant="primary" disabled={pending} onClick={() => void reload()}>Reload current proposal</Button>{reloadError ? <span>Reload failed: {reloadError}</span> : null}</div> : null
 }
 
-export function GoalAlignment({ demand, emphasis, onGrill, onGrounding, onOpenMote, motePending = null, feedback, onFeedbackChange }: { demand: DemandProjection; emphasis?: 'definition' | 'results' | null; onGrill: () => void; onGrounding: () => void; onOpenMote: () => void; motePending?: 'open' | 'grill' | 'grounding' | 'plan' | null; feedback: GoalAcknowledgementFeedback; onFeedbackChange: (patch: Partial<GoalAcknowledgementFeedback>) => void }) {
+export function GoalAlignment({ demand, emphasis, onGrill, onGrounding, motePending = null, feedback, onFeedbackChange }: { demand: DemandProjection; emphasis?: 'definition' | 'results' | null; onGrill: () => void; onGrounding: () => void; motePending?: 'open' | 'grill' | 'grounding' | 'plan' | null; feedback: GoalAcknowledgementFeedback; onFeedbackChange: (patch: Partial<GoalAcknowledgementFeedback>) => void }) {
   const confirmDemandGoal = useAppStore((state) => state.confirmDemandGoal)
   const acceptDemandResult = useAppStore((state) => state.acceptDemandResult)
   const recipient = useGoalDiscussionRecipient(demand.id)
@@ -81,7 +80,7 @@ export function GoalAlignment({ demand, emphasis, onGrill, onGrounding, onOpenMo
   const needsDefinition = focus === 'definition' || focus === 'results' && missingDoneReport && !alignment?.confirmedAt
   const useBrief = missingDoneReport && !alignment && Boolean(demand.description.trim())
   const goalRequestButton = <button type="button" className={!failure && needsDefinition && (!alignment || confirmIssue) ? 'primary-button' : 'small-button'} data-goal-grill disabled={Boolean(motePending)} onClick={onGrill}>{motePending === 'grill' ? 'Sending request…' : useBrief ? 'Draft criteria from brief' : recipient.requestLabel('grill')}</button>
-  const goalRequestNote = <span className="goals-request-action"><img className="goals-request-action__art" src={dialogueArtworkUrl} alt="" aria-hidden="true" onError={(event) => { event.currentTarget.hidden = true }} /><span className="goals-caption">{recipient.description}</span></span>
+  const goalRequestNote = <span className="goals-request-action goals-caption">{recipient.description}</span>
   const resultRequest = alignment?.confirmedAt ? <button type="button" className={!failure && focus === 'results' && demand.status === 'done' && !grounding ? 'primary-button' : 'small-button'} data-goal-grounding disabled={Boolean(motePending)} onClick={onGrounding}>{motePending === 'grounding' ? 'Sending request…' : recipient.requestLabel('grounding')}</button> : null
   const reportCaption = accepted ? hasGaps ? 'Accepted with gaps' : 'Accepted by you' : stale ? 'Report needs updating' : 'Agent report · Not accepted yet'
   const reportState = accepted ? (hasGaps ? 'accepted-with-gaps' : 'accepted') : stale ? 'stale' : 'reported'
@@ -136,7 +135,7 @@ export function GoalAlignment({ demand, emphasis, onGrill, onGrounding, onOpenMo
   const noResults = <div className={`goals-no-results${compactAgreement ? ' goal-review__no-results--compact' : ''}`} data-goal-result-state="missing">
     {!compactAgreement && !missingDoneReport ? <div className="goals-section-heading"><h2>Results review</h2><span className="goals-caption">No report yet</span></div> : null}
     {missingDoneReport ? <p className="goals-muted">Ask the agent to check the finished work against the confirmed criteria.</p> : <p className="goals-muted">Agents work on this goal next. Ask for a result check when the work is ready.</p>}
-    <div className="goals-inline-actions">{alignment?.confirmedAt ? <Button type="button" disabled={Boolean(motePending)} onClick={onOpenMote} aria-label={`Open discussion for ${demand.title}`}>{motePending === 'open' ? 'Opening discussion…' : recipient.openLabel}</Button> : null}{resultRequest}</div>
+    {resultRequest ? <div className="goals-inline-actions">{resultRequest}</div> : null}
   </div>
   return <>
     {currentReport ? report : alignment ? <section className={`goals-alignment goal-review${compactAgreement ? ' goal-review--compact' : ''}`} aria-label="Goal definition" data-goal-id={demand.id} data-goal-alignment-revision={alignment.revision} data-goal-confirmation-state={alignment.confirmedAt ? 'confirmed' : 'unconfirmed'}>
