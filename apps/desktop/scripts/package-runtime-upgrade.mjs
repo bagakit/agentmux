@@ -11,7 +11,7 @@ import { probeSocketLiveness } from '../../../packages/core/src/socket-liveness.
 
 const exec = promisify(execFile)
 const script = fileURLToPath(import.meta.url)
-const nativeObservation = fileURLToPath(new URL('./package-native-observation.mjs', import.meta.url))
+const nativeObservation = join(dirname(script), 'package-native-observation.mjs')
 const coreRelative = 'Contents/Resources/app/node_modules/@agentmux/core'
 const capability = 'services.planned_exec_upgrade_continuity'
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex')
