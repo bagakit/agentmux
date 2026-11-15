@@ -2,7 +2,7 @@
 
 本文定义 Goal 内的计划、Ticket、认领、前置成果、交付与节点评审。Goal 的目标确认和结果接受归 [Goals](goals.md#目标确认与结果接受)，派工输入、运行观测和持续推进归 [Goal 执行与监督](goal-execution-and-supervision.md)。
 
-当前源码已按前置评审推导后继就绪，提供节点认领与原尝试评审。现有认领仍比较整份计划的版本，公开链接可定位 Goal 或计划。下文的 Ticket 短链、限定范围的活跃查询、前置回执绑定、交付哈希、自动接续与可信集群的 Ticket 回执定义目标行为。 [节点状态](../../../packages/demand/src/goal-plan.ts) · [认领与评审](../../../packages/demand/src/demand-store.ts) · [Goal 链接](../../../packages/core/src/sharing.ts)
+当前认领独立核对准确节点、原 Goal owner 与前置评审。认领回执冻结前置节点的原尝试、报告和评审，派工与后续报告沿同一来源。下文同时定义 Ticket 地址、活跃查询、交付哈希与持续推进的行为。 [节点状态](../../../packages/demand/src/goal-plan.ts) · [认领与评审](../../../packages/demand/src/demand-store.ts) · [Goal 链接](../../../packages/core/src/sharing.ts)
 
 - [Ticket 的身份与地址](#ticket-的身份与地址)
 - [活跃任务与认领](#活跃任务与认领)
