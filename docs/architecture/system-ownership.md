@@ -11,16 +11,16 @@ AgentMux 的优先目标是可独立消费的本地 Agent Core；Desktop 是它�
 | 层或模块 | 持有的事实与职责 | 当前来源 |
 | --- | --- | --- |
 | ctxmux | 通用 Run、PTY、进程生命周期、ordered bytes、Replay、Gap 与 Attachment | [随包 artifact manifest](../../packages/core/vendor/ctxmux/darwin-arm64/manifest.json)、[Core 的唯一适配器](../../packages/core/src/ctxmux-run-adapter.ts) |
-| AgentMux Core | AgentSession 语义，以及与前端无关的持久空间身份、拓扑与绑定 | [Client](../../packages/core/src/client.ts)、[Session Store](../../packages/core/src/agent-session-store.ts)、[空间 owner](../../packages/core/src/spatial-state.ts) |
-| Provider | 解释原生 Agent 协议，贡献启动／恢复计划、输入协议、Hook 归一化与原生历史能力 | [`AgentProvider` / `defineAgentProvider`](../../packages/core/src/agent-provider.ts)、[内置 Provider](../../packages/core/src/providers/) |
-| 独立 Host | 组合唯一 Core 语义 owner，提供 Relay／设备、原文件／Note／Topic、Goal 领域组合与后台安排、资源配置读取与观察；不持有真实屏幕焦点 | [Host](../../apps/host/src/host.ts)、[内容 owner](../../apps/host/src/content-owner.ts)、[平台服务](../../apps/host/src/macos-service.ts) |
+| AgentMux Core | 持有 AgentSession、语义恢复、输入准入与回执，以及与前端无关的持久空间身份、拓扑与绑定。定义 Provider 契约并装配内置适配器 | [Client](../../packages/core/src/client.ts)、[Session Store](../../packages/core/src/agent-session-store.ts)、[Provider 契约](../../packages/core/src/agent-provider.ts)、[空间 owner](../../packages/core/src/spatial-state.ts) |
+| Provider | 解释各 Agent CLI 的原生协议，贡献启动与恢复计划、输入协议、Hook 归一化与原生历史能力 | [`@agentmux/providers` 实现](../../packages/providers/src/)、[Core 内置 Provider 装配](../../packages/core/src/providers/index.ts) |
+| 独立 Host | 在执行机器上准备和刷新 shell 环境，运行 Core 服务，并组合 Relay／设备、原文件／Note／Topic、Goal、后台安排及资源配置读取与观察 | [执行环境入口](../../apps/host/src/index.ts)、[Host 服务](../../apps/host/src/host.ts)、[内容 owner](../../apps/host/src/content-owner.ts)、[平台服务](../../apps/host/src/macos-service.ts) |
 | Desktop Main | 宿主配置写入、原生文件适配／Git、Browser 与 Toolkit；连接原 Host 并通过 Core 公共 API 管理 Agent | [RuntimeController](../../apps/desktop/src/main/runtime-controller.ts)、[IPC 接线](../../apps/desktop/src/main/ipc.ts)、[ConfigOwner](../../apps/desktop/src/main/config-owner.ts) |
 | Desktop Renderer | 消费 Core 的拓扑与绑定；持有屏幕投影、焦点、草稿与客户端资源元数据 | [Store](../../apps/desktop/src/renderer/src/store.ts)、[空间状态机制](spatial-state.md) |
 | `@agentmux/client-ui` | 消息、原生历史、Trace、结构化请求卡片与 Composer 的共享呈现和编辑，以及共享 Note 格式工具；宿主能力经平台适配器与 typed props 注入 | [包说明及 Node 入口职责](../../packages/client-ui/README.md#node-consumers)、[导出入口](../../packages/client-ui/src/index.ts)、[`ClientUiPlatform`](../../packages/client-ui/src/platform.tsx) |
 | Core `spatial-layout` / `@agentmux/layout` | Core 持有分屏树结构、比例、几何寻址与布局 reducer 的纯代数；`@agentmux/layout` 仅重导出该公共能力，不另持有空间状态或 Session 生命周期 | [Core 代数](../../packages/core/src/spatial-layout.ts)、[重导出入口](../../packages/layout/src/index.ts) |
 | `@agentmux/demand` | Demand／Goal 的 durable 文件事实、关联、决策、目标确认和结果接受的状态 | [包说明](../../packages/demand/README.md)、[Store](../../packages/demand/src/demand-store.ts)、[Goal 类型与规则](../../packages/demand/src/goals.ts) |
 
-Provider 是 Core 内部的原生协议边界，不是另一套 Runtime。Core 通过 `CtxmuxRunAdapter` 消费 ctxmux SDK；不向公共 API 导出其 wire 类型。包的当前版本、平台、依赖与 artifact 身份分别读取 [Core package](../../packages/core/package.json) 和 manifest，不在本页重列。
+Core 通过 Provider 契约取得原生协议事实，通过 `CtxmuxRunAdapter` 取得通用 Run 事实。公共 API 使用 Core 定义的 Run 类型。包版本、平台、依赖与 artifact 身份见 [Core manifest](../../packages/core/package.json)、[Providers manifest](../../packages/providers/package.json) 和上表的 ctxmux manifest。具体分工见 [Provider 移植](../design/behavior/agent-capabilities-and-messaging.md#provider-能力对齐与移植边界)、[Session 恢复架构](agent-session-recovery.md)和[对话输入接线](conversation.md#输入与-mailbox)。
 
 共享 UI 由 `ClientUiProvider` 接收显式平台适配器，注入剪贴板错误报告、overlay 目标、编辑器焦点登记及身份／图标呈现；文件打开、导航、图片 IO、发送／排队／中断与结构化回答沿组件 props 回到宿主。Desktop 的实际入口是 [`DesktopClientUiProvider`](../../apps/desktop/src/renderer/src/components/DesktopClientUiProvider.tsx) 和 [Renderer main](../../apps/desktop/src/renderer/src/main.tsx)。`client-ui` 不持有 Runtime client、Provider adapter、Session Store 或会话日志；Core 不依赖它、React 或 Electron，原事实 owner 与工作面焦点仍各归其层。
 
@@ -73,6 +73,7 @@ flowchart LR
   Renderer["Desktop Renderer"] --> Main
   Renderer --> SharedUI["client-ui 呈现 / 编辑"]
   Main --> Service
+  Core --> Provider["Provider 原生协议适配"]
   Core --> Adapter["CtxmuxRunAdapter"]
   Adapter --> Runtime["ctxmux Run Runtime"]
 ```
@@ -92,7 +93,8 @@ Agent 生命周期由 Host 的 Core owner 持有；Main 的 `RuntimeController` 
 | --- | --- |
 | 通用 Run 及其字节、生命周期 | ctxmux；Core 经 `CtxmuxRunAdapter` 核对身份并消费 |
 | AgentSession、原生 handle、当前 Run 关联与 Timeline | [Core Session Store](../../packages/core/src/agent-session-store.ts)；默认目录由 [runtime-paths.ts](../../packages/core/src/runtime-paths.ts) 决定，Desktop 注入 [userData Store 路径](../../apps/desktop/src/main/agent-session-store-path.ts) |
-| 宿主配置、Executor 与 Workspace 配置 | [ConfigOwner](../../apps/desktop/src/main/config-owner.ts) 串行提交，[ConfigStore](../../apps/desktop/src/main/config-store.ts) 保存；未确认保存先在同队列读原文件，经[原 Runtime 配置接缝](../../apps/desktop/src/main/runtime-config-transaction.ts)准备／验证、确认准确文件及父目录后提交并发布实际值，随后合入新 edit；读回不再 save 或重放 Toolkit 准备 |
+| Desktop 宿主配置、全局 Executor 模板与 Workspace 配置 | [ConfigOwner](../../apps/desktop/src/main/config-owner.ts) 串行提交，[ConfigStore](../../apps/desktop/src/main/config-store.ts) 保存；未确认保存先在同队列读原文件，经[原 Runtime 配置接缝](../../apps/desktop/src/main/runtime-config-transaction.ts)准备／验证、确认准确文件及父目录后提交并发布实际值，随后合入新 edit；读回不再 save 或重放 Toolkit 准备 |
+| 执行 Host 的 Executor 注册与命令可用性 | [Core Executor owner](../../packages/core/src/executor-owner.ts) 持有 Host 注册。[Host 启动入口](../../apps/host/src/index.ts)为 Core 提供环境准备，[`listHostExecutors`](../../packages/core/src/client.ts) 在需要探测时调用它。命令可用性是本次执行环境的观察结果，模板、注册、当前探测与 Run 所用命令分别表达。见[配置生效与可用性刷新](../design/behavior/settings-and-observation.md#分区资源与配置生效) |
 | Tab／Region／布局及展示偏好 | [Core Spatial owner](../../packages/core/src/spatial-state.ts) 持有身份与布局；Renderer Store 的 `initialize` / `projectPersistedWorkbench` / `restorePersistedWorkbench` 读取并投影，偏好和草稿归 client |
 | Goal／Demand 内容与确认记录 | [Demand Store](../../packages/demand/src/demand-store.ts)；宿主提供明确 root，读取失败不替换成空 Store |
 | Note 正文与稳定块／引用 | 原 Files owner 的 `.note.md`；共享 [Markdown codec](../../packages/client-ui/src/note/note-markdown.ts) 供 Desktop／Mobile 编辑和读取、Host 处理同一格式，写入与 CAS 仍归原 Files owner；Core [轻量格式入口](../../packages/core/src/note-format.ts) 只解释身份头 |
