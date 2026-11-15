@@ -10,7 +10,9 @@ app.whenReady().then(async () => {
     Menu.setApplicationMenu(null)
     window = new BrowserWindow({ width: 1000, height: 800, show: false, webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false } })
     window.webContents.on('console-message', (_event, details) => { if (details.level === 'error') result.errors.push(details.message) })
-    await window.loadFile(html, { query: { workspacePath: path.join(evidence, 'workspace', 'scratch'), contextProof: '1', calendarNavigation: process.argv.includes('--calendar-navigation') ? '1' : '' } })
+    const roster = process.argv.includes('--mote-roster')
+    await window.loadFile(html, { query: { workspacePath: path.join(evidence, 'workspace', 'scratch'), contextProof: '1',
+      calendarNavigation: process.argv.includes('--calendar-navigation') ? '1' : '', moteRoster: roster ? '1' : '' } })
     const read = async script => {
       try { return await window.webContents.executeJavaScript(script) }
       catch (error) { throw new Error('Renderer failed at ' + script.slice(0, 240), {cause:error}) }
@@ -31,6 +33,79 @@ app.whenReady().then(async () => {
       assert.equal(observed.bodyBanners.length, 0, 'Preparation/location is not a stacked body banner')
       await fs.writeFile(path.join(evidence, name + '.png'), (await window.webContents.capturePage()).toPNG())
       result.images.push(name + '.png'); result.actions.push({ action: 'capture', name, observed })
+    }
+    if (roster) {
+      window.webContents.focus()
+      window.setContentSize(1240, 900)
+      await read("moteQuick.contextScenario('normal')")
+      await read("moteQuick.floatSize(920,700,'cards')")
+      const panel = '[data-pmo-teams-topic-floating]:popover-open'
+      const preview = panel + ' [data-mote-message-preview="message"]'
+      const avatar = panel + ' [aria-label="Open profile for Analyst"]'
+      const analyst = panel + ' [data-mote-topic-id="launcher:analyst"]'
+      const profile = '.mote-profile-popover'
+      const close = profile + ' [aria-label="Close Mote profile"]'
+      await wait(`document.querySelector(${JSON.stringify(preview)})?.textContent.startsWith('Let’s compare')`)
+      const verifyPreview = async () => {
+        const displayed = await read(`(()=>{const node=document.querySelector(${JSON.stringify(preview)});return {text:node?.textContent,width:node?.getBoundingClientRect().width,height:node?.getBoundingClientRect().height}})()`)
+        assert.ok(displayed.width > 40 && displayed.height > 0 && displayed.text === 'Let’s compare the last two options tomorrow.', 'The latest original message is visible in the roster')
+      }
+      await verifyPreview()
+      const mutant = await window.webContents.insertCSS(preview + ' {display:none!important}')
+      try { await assert.rejects(verifyPreview, /latest original message/) }
+      finally { await window.webContents.removeInsertedCSS(mutant) }
+      await verifyPreview()
+      result.actions.push({ action: 'mutation', name: 'hidden-preview', restored: true })
+      const original = (await facts()).source
+      assert.ok(original.calls.some(call => call.operation === 'conversation.read' && call.path === 'original-core-session:24'))
+      await wait(`!!document.querySelector('${panel} .mote-chooser__status .status--working')`)
+      await capture('mote-roster-wide-dark')
+
+      await click(avatar)
+      await wait(`document.querySelector('${profile} [data-mote-details]')?.dataset.moteDetails==='launcher:analyst'`)
+      const bounds = await read(`document.querySelector('${profile}').getBoundingClientRect().toJSON()`)
+      assert.ok(bounds.width >= 800 && bounds.x > 0 && bounds.right < 1240)
+      const after = (await facts()).source
+      for (const field of ['drafts', 'sessions', 'tabs', 'selection']) assert.deepEqual(after[field], original[field], field + ' kept while reading Profile')
+      assert.equal(after.floating.targetTopicId, original.floating.targetTopicId)
+      await capture('mote-roster-profile-wide-dark')
+      await click(close)
+      await wait(`document.activeElement===document.querySelector(${JSON.stringify(avatar)})`)
+
+      window.setContentSize(460, 690)
+      await read("moteQuick.theme(true);moteQuick.floatSize(438,540,'cards')")
+      await wait("document.documentElement.dataset.appearance==='light'")
+      await verifyPreview()
+      assert.equal(await read(`(()=>{const row=document.querySelector(${JSON.stringify(analyst)}),label=row.querySelector('.mote-chooser__preview');return label.scrollWidth<=label.clientWidth+1})()`), true)
+      await capture('mote-roster-narrow-light')
+      await click(avatar)
+      await wait(`!!document.querySelector('${profile} [data-mote-details]')`)
+      const narrow = await read(`document.querySelector('${profile}').getBoundingClientRect().toJSON()`)
+      assert.ok(narrow.x >= 0 && narrow.right <= 460 && narrow.y >= 0 && narrow.bottom <= 690)
+      await capture('mote-roster-profile-narrow-light')
+      await click(close)
+      await click(analyst)
+      await wait(`document.querySelector(${JSON.stringify(analyst)})?.getAttribute('aria-pressed')==='true'`)
+      assert.equal(await read(`!!document.querySelector('${profile}')`), false)
+      assert.deepEqual((await facts()).source.drafts, original.drafts)
+      await click(panel + ' [aria-label="Show Mote avatars only"]')
+      await wait(`!!document.querySelector('[data-mote-navigation="avatars"]') && !document.querySelector(${JSON.stringify(preview)})`)
+      await read(`document.querySelector(${JSON.stringify(avatar)}).focus()`)
+      for (const type of ['keyDown', 'keyUp']) window.webContents.sendInputEvent({ type, keyCode: 'Tab' })
+      await wait(`document.querySelector(${JSON.stringify(analyst)})?.matches(':focus-visible') && document.querySelector('.mote-chooser__identity')?.textContent.startsWith('Analyst')`)
+      await wait("!!document.querySelector('.mote-chooser__identity')?.style.top")
+      const hintClear = await read(`(()=>{
+        const tooltip=document.querySelector('.mote-chooser__identity').getBoundingClientRect();
+        const threads=[...document.querySelectorAll('${panel} button')].find(node=>node.textContent.trim()==='查看 Threads');
+        if (!threads) return true;
+        const action=threads.getBoundingClientRect();
+        return tooltip.right<=action.left||tooltip.left>=action.right||tooltip.bottom<=action.top||tooltip.top>=action.bottom;
+      })()`)
+      assert.equal(hintClear, true, 'The compact roster hint leaves the original conversation recovery action visible')
+      await capture('mote-roster-avatar-rail-light')
+      assert.deepEqual(result.errors, [])
+      result.passed = true
+      return
     }
     if (process.argv.includes('--calendar-navigation')) {
       const panel = '[data-pmo-teams-topic-floating]'

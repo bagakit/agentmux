@@ -26,12 +26,14 @@ import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName, MO
 import { directoryIdentity, homeZoneId } from '../../../src/shared/space-addresses'
 import type { ScratchTopicSnapshot, SessionSnapshot } from '../../../src/shared/contracts'
 import type { Demand } from '@agentmux/demand'
-import type { FileReadParams, FileReadResult } from '@agentmux/core'
+import type { AgentTimelineItem, FileReadParams, FileReadResult } from '@agentmux/core'
+import { conversationRevision, parseConversationReadPage, projectConversationTimeline, type ConversationTimelineReadInput } from '@agentmux/core/conversation'
 import '../../../src/renderer/src/styles/index.css'
 import './scene.css'
 
 const terminalRestartOnly = new URLSearchParams(location.search).get('terminalRestartOnly') === '1'
 const contextProof = new URLSearchParams(location.search).get('contextProof') === '1'
+const rosterProof = new URLSearchParams(location.search).get('moteRoster') === '1'
 const workspacePath = new URLSearchParams(location.search).get('workspacePath')
 if (!workspacePath) throw Error('An isolated original workspace is required.')
 const workspace = { id: SCRATCH_WORKSPACE_ID, hostId: 'local', path: workspacePath, name: 'Motes', kind: 'folder' as const }
@@ -44,7 +46,7 @@ const secondTopic = { ...topic, id: 'launcher:analyst', title: 'Analyst', direct
 const topics = [topic, secondTopic], spaceId = directoryIdentity('local', topic.directoryPath), zoneId = homeZoneId(spaceId)
 const session: Extract<SessionSnapshot, { kind: 'agent' }> = { id: 'original-display-session', kind: 'agent', providerId: 'fixture', executorId: 'fixture', hostId: 'local',
   workspacePath: topic.directoryPath, label: 'Our ongoing discussion', createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 2), agentSessionUpdatedAt: _reshape_fixtureEpoch(0, 0, 2), processState: 'running', latestOutputBytes: 0,
-  status: { state: 'waiting', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 2) }, capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
+  status: { state: rosterProof ? 'working' : 'waiting', source: 'native-hook', observedAt: _reshape_fixtureEpoch(0, 0, 2) }, capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
   control: { kind: 'agent', hostId: 'local', agentSessionId: 'original-core-session', run: { runId: 'original-controlled-run' } } }
 const tab = { ...createWorkbenchTab('original-discussion', { kind: 'agent', phase: 'attached', regionId: 'original-region', workspaceId: workspace.id, sessionId: session.id }, 'Our ongoing discussion'), topicId: topic.id, space: { spaceId, zoneId } }
 const launcher = { ...createWorkbenchTab('original-launcher', { kind: 'launcher', regionId: 'launcher-region', workspaceId: workspace.id }, 'New discussion'), topicId: topic.id, space: { spaceId, zoneId } }
@@ -72,13 +74,13 @@ api.scratch.readTopic = async (_workspace, id) => {
   if (contextReadFailure) throw Error('Original discussion read rejected (controlled source failure).')
   return id === topic.id ? quickTopic() : secondTopic
 }
-api.scratch.ensureMote = async () => {
+api.scratch.ensureMote = async (_workspace, id) => {
   if (contextFailure) throw Error('Original Mote metadata read failed (controlled source failure).')
   if (contextPending) await new Promise<void>(resolve => { contextPending = resolve })
-  return quickTopic()
+  return rosterProof && id === secondTopic.id ? secondTopic : quickTopic()
 }
 const calendarNavigation = new URLSearchParams(location.search).get('calendarNavigation') === '1'
-if (calendarNavigation) {
+if (calendarNavigation || rosterProof) {
   mountThemeRuntime(window, { appAppearance: 'dark' })
   api.moteDialogue.read = async query => ({
     main: { target: query.target, identity: { hostId: workspace.hostId, moteId: topic.id }, status: 'ready', resource: null,
@@ -95,6 +97,41 @@ if (calendarNavigation) {
   }
   api.schedule.history = async params => validateScheduleRpcResult('schedule.history', { scheduleId: params.scheduleId, from: params.from, to: params.to, nextCursor: null,
     executionScope: 'connected-host', coverage: 'recorded-inputs', entries: [], ...(params.bucketStarts ? { buckets: [] } : {}) }, params)
+}
+if (rosterProof) {
+  const ref = { hostId: session.control.hostId, agentSessionId: session.control.agentSessionId }
+  const items: AgentTimelineItem[] = [
+    { id: 'roster-prompt', agentSessionId: ref.agentSessionId, kind: 'user_message', source: 'user', status: 'complete',
+      title: 'User message', content: 'We have the first result.', publicContent: 'confirmed', authorHuman: true, sourceChannel: 'api', createdAt: 1, updatedAt: 1 },
+    { id: 'roster-reply', agentSessionId: ref.agentSessionId, kind: 'assistant_message', source: 'native-hook', status: 'complete',
+      title: 'Assistant response', content: 'Let’s compare the last two options tomorrow.', createdAt: 2, updatedAt: 2 },
+    { id: 'roster-process', agentSessionId: ref.agentSessionId, kind: 'tool_call', source: 'native-hook', status: 'complete',
+      title: 'Private tool trace', toolName: 'Read', createdAt: 3, updatedAt: 3 }
+  ]
+  const stream = { epoch: 'roster-original-stream', sequence: items.length, revision: items.length, origin: 'beginning' as const, gaps: [],
+    positions: items.map((item, index) => ({ id: item.id, firstSequence: index + 1, sequence: index + 1, revision: conversationRevision(item) })) }
+  const projected = projectConversationTimeline({ ...ref, executionHostId: ref.hostId, timeline: { sourceHostId: ref.hostId, agentSessionId: ref.agentSessionId, stream, items, revision: items.length } })
+  const read = (input: ConversationTimelineReadInput) => {
+    if (input.agentSessionId !== ref.agentSessionId || input.hostId !== ref.hostId) throw Error('Wrong original conversation')
+    const units = [...projected.events].reverse().map(event => ({ kind: 'item', item: { event, records: projected.records.filter(record => event.recordIds.includes(record.id)) } }))
+    const checkpoint = { ...ref, sourceHostId: ref.hostId, frontier: { ...ref, scope: projected.scope, cuts: [{ kind: 'captured', epoch: stream.epoch, sequence: stream.sequence }] } }
+    return parseConversationReadPage({ ...ref, sourceHostId: ref.hostId, scope: projected.scope, coverage: projected.coverage, processDetails: input.processDetails,
+      order: { ...projected.order, direction: 'newest-first' }, items: units, nextCursor: null, budgetBytes: input.maxBytes ?? 65536,
+      window: { id: 'roster-window-' + input.limit, revision: 1, itemCount: units.length, complete: true, view: 'roster-view-' + input.limit,
+        replay: 'roster-replay', checkpoint, outside: { older: null, newer: null }, navigation: { older: null, newer: null } } }, input)
+  }
+  api.conversation.readAgentConversation = async input => {
+    calls.push({ operation: 'conversation.read', path: input.agentSessionId + ':' + input.limit }); return read(input)
+  }
+  api.conversation.readConversationChanges = async input => {
+    const page = read(input); return { ...page, checkpoint: page.window.checkpoint, more: false }
+  }
+  api.conversation.observeConversation = async input => {
+    if (input.agentSessionId !== ref.agentSessionId || input.hostId !== ref.hostId) throw Error('Wrong original conversation')
+    const closed = new AbortController()
+    return { ...ref, sourceHostId: ref.hostId, scope: projected.scope, coverage: projected.coverage, closed: closed.signal, dispose() { closed.abort() } }
+  }
+  api.conversation.releaseConversationView = async input => ({ ...ref, sourceHostId: ref.hostId, viewId: input.view, released: true })
 }
 const goals: Demand[] = ['experiment', 'research'].map((id, index) => ({ id: 'choice-' + id,
   title: index ? 'Compare the evidence before choosing our next experiment' : 'Explore a small useful experiment',
@@ -178,10 +215,10 @@ function Scene() {
     retarget: (otherMote: boolean) => setFloating(otherMote ? {targetTopicId: secondTopic.id, targetTabId: other.id, reference: {displayWorkspaceId: workspace.id, groupId: 'mote-group', tabId: other.id, regionId: 'analyst-region'}} : {targetTopicId: topic.id, targetTabId: tab.id, reference: conversation}),
     open: () => requestPmoTeamsTopicFloatingOpen({targetTopicId: topic.id, targetTabId: tab.id, reference: conversation}), close: () => requestPmoTeamsTopicFloatingClose({restoreFocus: false}),
     mode: (mode: 'activity' | 'terminal') => useAppStore.getState().setViewMode(session.id, mode, {focus: false}),
-    floatSize: (width: number,height: number) => setFloating({size: {width,height},railMode: 'avatars'}),
+    floatSize: (width: number,height: number, railMode: 'cards' | 'avatars' = 'avatars') => setFloating({size: {width,height},railMode}),
     theme: (light: boolean) => {
       const appearance = light ? 'light' : 'dark'
-      if (calendarNavigation) updateThemeSelection({ appAppearance: appearance })
+      if (calendarNavigation || rosterProof) updateThemeSelection({ appAppearance: appearance })
       else document.documentElement.dataset.appearance = appearance
     },
     missingExecutor: () => { const parsed = parseMoteQuickMode(disk[rootPath + '/MOTE.md']!); if (parsed.status !== 'valid') throw Error('Original config unavailable'); disk[rootPath + '/MOTE.md'] = serializeMoteQuickMode(disk[rootPath + '/MOTE.md']!, { ...parsed.defaults, executorId: 'saved-unavailable-executor' }); useAppStore.setState({ scratchTopicSnapshots: { [workspace.id]: { ...useAppStore.getState().scratchTopicSnapshots[workspace.id]!, topics: [quickTopic(), secondTopic], revision: 1 } } }) },

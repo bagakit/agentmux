@@ -8,10 +8,11 @@ import { runProbeProcess } from '../../probe-process.mjs'
 import { radixOverlayAliases } from '../../../../../packages/client-ui/scripts/radix-overlay-aliases.ts'
 import { bundleIdentityRuntime } from '../../../../../packages/identity/scripts/runtime-bundle.mjs'
 
-const scenarios = { workspace: 'renderer-main.cjs', ideas: 'renderer-main.cjs', 'profile-personality': 'renderer-main.cjs', 'companion-navigation': 'renderer-navigation.cjs', 'discussion-files': 'renderer-discussion-files.cjs', 'calendar-density': 'renderer-density.cjs', 'floating-navigation': '../mote-surface-repair/context-main.cjs' }
+const scenarios = { workspace: 'renderer-main.cjs', ideas: 'renderer-main.cjs', 'profile-personality': 'renderer-main.cjs', 'companion-navigation': 'renderer-navigation.cjs', 'discussion-files': 'renderer-discussion-files.cjs', 'calendar-density': 'renderer-density.cjs', 'floating-navigation': '../mote-surface-repair/context-main.cjs', 'mote-roster': '../mote-surface-repair/context-main.cjs' }
 const scenario = process.argv.length === 2 ? 'workspace' : process.argv.length === 3 && process.argv[2].startsWith('--scenario=') ? process.argv[2].slice('--scenario='.length) : null
 assert.ok(Object.hasOwn(scenarios, scenario), 'Unknown Mote capture scene: ' + scenario)
 const rendererRunner = scenarios[scenario]
+const floatingScenario = scenario === 'floating-navigation' || scenario === 'mote-roster'
 const fixture = import.meta.dirname, root = path.resolve(fixture, '../../../../..')
 const directory = path.join(root, '.local/state/mote-workspace/capture-' + randomUUID()), compiled = path.join(directory, 'compiled')
 // Clear before loading esbuild: its service is a child process too.
@@ -23,7 +24,7 @@ const { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esb
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const receipt = { scenario, passed: false, captureOnly: true, aestheticReview: 'not-performed', source: {}, images: {},
   boundary: 'Current MoteFilesTool/MoteProfilePopover/MoteDetailsPanel and AgentSessionComposer, real DesktopClientUiProvider/CSS/theme/icons. Only private outer Space shell, static conversation prose and typed in-memory API replies are synthetic. No user App, preload, journal, schedule, real Session/Run, model, native scheduler, package or install claim.' }
-if (scenario === 'floating-navigation') receipt.boundary = 'Current MoteSpaceFrame, PmoTeamsTopicFloatingPanel, MoteWorkface, WorkspaceWorkbench and MoteCalendar, product theme and icons. Controlled in-memory schedules, original discussion and workbench state. No user data, actual Session/Run, installed application or scheduler.'
+if (floatingScenario) receipt.boundary = 'Current MoteSpaceFrame, PmoTeamsTopicFloatingPanel, MoteWorkface, WorkspaceWorkbench and MoteCalendar, product theme and icons. Controlled in-memory conversation, schedules and workbench state. No user data, actual Session/Run, installed application or scheduler.'
 await fs.mkdir(compiled, { recursive: true })
 for (const name of ['userData', 'runtime', 'state', 'store', 'queue', 'workspace']) await fs.mkdir(path.join(directory, name), { recursive: true })
 try {
@@ -90,7 +91,7 @@ try {
       alias['@agentmux/' + name + (subpath === '.' ? '' : subpath.slice(1))] = path.join(folder, source)
     }
   }
-  const built = await build({ absWorkingDir: root, entryPoints: [path.join(fixture, scenario === 'floating-navigation' ? '../mote-surface-repair/entry.tsx' : 'entry.tsx')], outdir: compiled, bundle: true,
+  const built = await build({ absWorkingDir: root, entryPoints: [path.join(fixture, floatingScenario ? '../mote-surface-repair/entry.tsx' : 'entry.tsx')], outdir: compiled, bundle: true,
     format: 'esm', platform: 'browser', conditions: ['browser', 'production'], target: 'esnext', jsx: 'automatic', logLevel: 'silent', metafile: true, alias, plugins: [generatedIdentity, clientSources, workers, captureInputs],
     loader: { '.png': 'file', '.gif': 'file', '.svg': 'file', '.avif': 'file', '.woff': 'file', '.woff2': 'file', '.ttf': 'file' },
     define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' } })
@@ -98,7 +99,7 @@ try {
   for (const file of inputs) assert.ok(consumed.has(path.resolve(root, file)), 'Metafile input has no actual source-byte binding: ' + file)
   receipt.source = Object.fromEntries([...consumed].map(([file, hash]) => [path.relative(root, file), hash]))
   receipt.compiler = { esbuild: browserSourceBuild(createRequire(require.resolve('vite'))('esbuild')).version, sourceBinding: 'actual-onLoad-bytes', currentSource: true, standardCoreBuild: false }
-  for (const file of [scenario === 'floating-navigation' ? 'PmoTeamsTopicFloatingPanel' : 'MoteFilesTool', 'MoteProfilePopover', 'MoteDetailsPanel', 'MoteCalendar', 'AgentSessionComposer', 'DesktopClientUiProvider'])
+  for (const file of [floatingScenario ? 'PmoTeamsTopicFloatingPanel' : 'MoteFilesTool', 'MoteProfilePopover', 'MoteDetailsPanel', 'MoteCalendar', 'AgentSessionComposer', 'DesktopClientUiProvider'])
     assert.ok(receipt.source['apps/desktop/src/renderer/src/components/' + file + '.tsx'], 'Nonempty actual product input: ' + file)
   if (scenario === 'ideas') for (const file of ['components/Notice.tsx', 'styles/notice.css'])
     assert.ok(receipt.source['packages/client-ui/src/' + file], 'Ideas must consume the shared Client UI Notice: ' + file)
@@ -114,7 +115,7 @@ try {
   receipt.engine = { executable, sha256: sha(await fs.readFile(executable)), version: require('electron/package.json').version,
     override: process.env.ELECTRON_OVERRIDE_DIST_PATH ?? null }
   const logs = []
-  const flags = { 'floating-navigation': ['--calendar-navigation'], ideas: ['--ideas'], 'profile-personality': ['--profile-personality'] }
+  const flags = { 'floating-navigation': ['--calendar-navigation'], 'mote-roster': ['--mote-roster'], ideas: ['--ideas'], 'profile-personality': ['--profile-personality'] }
   receipt.process = await runProbeProcess(executable, [path.join(fixture, rendererRunner), path.join(compiled, 'index.html'), directory, ...(flags[scenario] ?? [])],
     { cwd: root, env, timeoutMs: 120_000, onLine: line => logs.push(line) })
   await fs.writeFile(path.join(directory, 'renderer.log'), logs.join('\n') + '\n')

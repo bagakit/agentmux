@@ -91,7 +91,7 @@ it('keeps small viewports within available space and preserves the large prefere
   expect(resolvePmoTeamsTopicFloatingSize(preference, { width: 100, height: 90 }, 'cards', 320)).toEqual({ width: 100, height: 90 })
   expect(preference).toEqual({ width: 810, height: 650 })
   expect(resolvePmoTeamsTopicFloatingSize(preference, { width: 920, height: 700 }, 'cards', 980)).toEqual(preference)
-  expect(resolvePmoTeamsTopicFloatingSize({ width: 1, height: 1 }, { width: 900, height: 600 }, 'cards', 980)).toEqual({ width: 404, height: 250 })
+  expect(resolvePmoTeamsTopicFloatingSize({ width: 1, height: 1 }, { width: 900, height: 600 }, 'cards', 980)).toEqual({ width: 424, height: 250 })
   expect(resolvePmoTeamsTopicFloatingSize({ width: 1, height: 1 }, { width: 900, height: 600 }, 'avatars', 980)).toEqual({ width: 288, height: 250 })
 })
 

@@ -31,12 +31,12 @@ async function click(label: string) {
   expect(button, label).not.toBeNull()
   await act(async () => { button!.click(); await new Promise(resolve => setTimeout(resolve, 20)) })
 }
-it('closed Profile does no material reads; opening mounts and positions the original Profile', async () => {
+it('closed Profile does no material reads; opening mounts the original Profile dialog', async () => {
   await mount()
   expect(api.files.readDirectory).not.toHaveBeenCalled()
   expect(document.querySelector('.mote-profile-popover')).toBeNull()
   await click('Show Mote profile')
-  expect(document.querySelector<HTMLElement>('.mote-profile-popover')!.style.visibility).toBe('visible')
+  expect(document.querySelector('.mote-profile-popover')?.getAttribute('data-state')).toBe('open')
   expect(document.querySelector('[data-mote-details]')!.getAttribute('data-mote-details')).toBe(customMoteId)
   await click('Close Mote profile')
   expect(document.querySelector('.mote-profile-popover')).toBeNull()

@@ -19,7 +19,7 @@ export default defineConfig({ ...base, cacheDir: '.cache/conversation-coverage-b
       'repaint-refill': ['const coverageDemand = useRef({ key, duration: coverageDuration, remaining: 2 })', 'const coverageDemand = { current: { key, duration: coverageDuration, remaining: 2 } }'],
       'ignore-source-share': ['Math.max(1, sources)', '1'],
       'ignore-shrink': ['coverageDuration < previous.duration ? 0', 'coverageDuration < previous.duration ? previous.remaining'],
-      'tiny-frozen-packets': ['...(cursor ? { cursor, limit: 100 } : {})', '...(cursor ? { cursor } : {})'],
+      'tiny-frozen-packets': ['...(cursor ? { cursor, limit } : {})', '...(cursor ? { cursor } : {})'],
       'ignore-request-limit': ["limit === undefined ? {} : { limit }", '{}'],
       'three-page-read-ahead': ['remaining: Math.ceil(CONVERSATION_MAX_WINDOW_RECORDS / 100)', 'remaining: 3'],
       'ignore-readable-reserve': ['!next.force && !value.nearEdge(next.direction)', 'false'],
