@@ -1,3 +1,4 @@
+import { bindBrowserNativePageLifetime } from './browser-native-page-lifetime.js'
 import { prepareBrowserScreenshot, type BrowserScreenshotOptions } from '@agentmux/browser/browser-screenshot-options'
 import { withCleanBrowserFeedback, confirmBrowserFeedbackPaint } from './browser-feedback-presentation.js'
 import { readWorkbenchReturnContext, type WorkbenchReturnContext } from '../shared/workbench-windows'
@@ -5035,12 +5036,19 @@ export class BrowserViewManager {
     this.entriesByContents.set(view.webContents, entry)
     this.browserIdsByView.set(view, entry.id)
     const contents = view.webContents
-    // Pair Chromium's accepted page-close fact with destruction of this exact
-    // native page. Destruction alone remains an unavailable, recoverable owner.
-    let pageRequestedClose = false
-    // Electron emits CloseContents as `close`; its WebContents typings omit it.
-    const nativeEvents: NodeJS.EventEmitter = contents
-    nativeEvents.on('close', () => { if (this.owns(entry, view)) { this.flushPageAppearance(entry); pageRequestedClose = true } })
+    const resetNativeClose = bindBrowserNativePageLifetime(contents, {
+      onCloseRequested: () => {
+        if (!this.owns(entry, view)) return false
+        this.flushPageAppearance(entry)
+        return true
+      },
+      // This event can also veto navigation or reload. Only the original Close intent may settle it.
+      onClosePrevented: () => {
+        if (entry.nativeChild?.closing && this.owns(entry, view)) void this.confirmNativeChildClose(entry, view)
+      },
+      onRendererGone: reason => this.browserRendererGone(entry, view, reason),
+      onDestroyed: pageRequestedClose => this.browserViewDestroyed(entry, view, pageRequestedClose)
+    })
     contents.on('certificate-error', (event, url, error, certificate, callback, isMainFrame) => {
       if (!isMainFrame || !this.owns(entry, view)) return
       event.preventDefault()
@@ -5063,12 +5071,6 @@ export class BrowserViewManager {
       entry.requestedUrl = decision.request.url
       entry.certificateDecision = decision
       this.emit(entry)
-    })
-    contents.on('will-prevent-unload', () => {
-      pageRequestedClose = false
-      // The same event can veto reload/navigation. Only a recorded Close intent
-      // may ask to close this page; ordinary navigation never becomes Close.
-      if (entry.nativeChild?.closing && this.owns(entry, view)) void this.confirmNativeChildClose(entry, view)
     })
     const controlFeedback: BrowserControlFeedback = new BrowserControlFeedback({ contents, browserId: entry.id, ownerId: mintObjectId(),
       navigationId: () => entry.navigationId, nextRevision: () => ++entry.feedbackRevision,
@@ -5216,7 +5218,7 @@ export class BrowserViewManager {
         entry.pendingSwitch.navigationId = mintObjectId()
       }
       if (!details.isMainFrame || !this.owns(entry, view)) return
-      pageRequestedClose = false
+      resetNativeClose()
       if (!details.isSameDocument) this.sitePermissions?.cancel(entry.id, contents)
       entry.certificateDecision?.settle(false)
       this.cancelRecoveryPreview(entry)
@@ -5351,107 +5353,111 @@ export class BrowserViewManager {
       this.emit(entry)
     })
     contents.on('dom-ready', () => this.resumeProfileActivity(view))
-    contents.on('render-process-gone', (_event, details) => {
-      this.interruptProfileActivity(view)
-      this.sitePermissions?.cancel(entry.id, contents)
-      if (!this.owns(entry, view)) return
-      entry.certificateDecision?.settle(false)
-      entry.committedNavigationId = null
-      entry.appLinkRequest = null
-      entry.appLinkPrompt = null
-      this.cancelRecoveryPreview(entry)
-      this.revokePresentationCapture(entry, 'source-replaced')
-      entry.error = `Browser renderer stopped: ${details.reason}`
-      this.emit(entry)
-    })
-    contents.once('destroyed', () => {
-      if (this.owns(entry, view)) this.publishPageAppearance(entry)
-      this.forgetZoomScope(view)
-      this.endProfileActivity(view)
-      this.sitePermissions?.cancel(entry.id, contents)
-      if (entry.view === view) entry.certificateDecision?.settle(false)
-      this.entriesByContents.delete(contents)
-      if (entry.view === view) entry.nativeChild?.closing?.settle(true)
-      if (entry.view === view) this.cancelRecoveryPreview(entry)
-      const attempt = entry.releaseAttempt
-      // An earlier vetoed release no longer owns this destruction. Capture the
-      // active request before settling it, including an unconfirmed close still in flight.
-      const releasing = attempt?.view === view && attempt.pending
-      if (releasing) attempt.settle('released', [])
-      if (this.owns(entry, view)) this.clearFavicon(entry)
-
-      if (entry.pendingSwitch?.view === view) {
-        try { this.cancelPendingSwitch(entry, new Error('Browser profile candidate was destroyed')) } catch (error) {
-          if (!this.owns(entry, entry.view) || entry.view.webContents.isDestroyed()) return
-          const warning = error instanceof Error ? error.message : String(error)
-          if (entry.pendingSwitch) entry.pendingSwitch.cleanupWarning = warning
-          entry.activity = { ...entry.activity, warning }
-          this.emit(entry)
-        }
-        return
-      }
-      if (!this.owns(entry, view)) return
-      const nativeWindow = entry.nativeChild ? this.windowForView(view) : null
-      const closedPreviewScope = entry.nativeChild || pageRequestedClose ? this.recoveryPreviewScope(entry.id) : null
-      // Native destruction is authoritative even if a separate resource's cleanup throws. Retain
-      // only the existing metadata: a dead WebContents cannot supply a fresh live snapshot.
-      const released: ReleasedBrowser = {
-        id: entry.id, workspaceId: entry.workspaceId, storage: entry.storage, requestedUrl: entry.requestedUrl, viewport: entry.viewport, agent: entry.agent, agentWarning: entry.agentWarning,
-        ...(entry.source ? { source: entry.source } : {}),
-        ...(attempt?.view === view && attempt.history ? { history: attempt.history } : {}),
-        ...(entry.nativeChild ? { nativeChild: { window: { ...entry.nativeChild.window } } } : {})
-      }
-      this.releasedEntries.set(entry.id, released)
-      const cleanupErrors: unknown[] = []
-      this.releaseInputShield(entry)
-      if (entry.inputShield) { released.inputShield = entry.inputShield; entry.inputShield = undefined }
-      try { this.revokePresentationCapture(entry, 'source-released') } catch (error) { cleanupErrors.push(error) }
-      if (entry.captureId) this.presentationCaptures.delete(entry.captureId)
-      entry.captureId = null
-      for (const leaseId of [...entry.presentationLeaseIds]) {
-        try { this.removePresentationLease(this.presentationLeases.get(leaseId)!) } catch (error) { cleanupErrors.push(error) }
-      }
-      try { void this.releaseDemonstrationCapture(entry) } catch (error) { cleanupErrors.push(error) }
-      try { this.releaseUploadFiles(entry) } catch (error) { cleanupErrors.push(error) }
-      try { this.cancelPendingSwitch(entry, new Error('Browser native owner was destroyed during profile switch')) } catch (error) {
-        cleanupErrors.push(error)
-        if (entry.pendingSwitch) released.pendingSwitch = entry.pendingSwitch
-      }
-      if (this.entries.get(entry.id) !== entry || entry.view !== view) return
-      this.entries.delete(entry.id)
-      this.notifyNativeVisibility(this.windowForView(view))
-      if (!this.window.isDestroyed()) {
-        try { this.detachView(view) } catch (error) {
-          released.detachedView = view
-          cleanupErrors.push(error)
-        }
-      }
-      if (releasing) {
-        this.send({ type: 'released', id: entry.id, navigationId: entry.navigationId })
-        return
-      }
-      if (entry.nativeChild || pageRequestedClose) {
-        // The original page ended, rather than becoming a restorable URL.
-        entry.recoveryPreviewRetired = true
-        this.cancelRecoveryPreview(entry)
-        if (closedPreviewScope) void this.recoveryPreviews?.remove(closedPreviewScope).then(result => {
-          if (result.warning) console.warn('Browser page closed; its historical preview cleanup is unconfirmed:', result.warning)
-        }).catch(error => console.warn('Browser page closed; its historical preview cleanup is unconfirmed:', error))
-        released.cleanupOnly = true
-        if (!released.inputShield && !released.pendingSwitch && !released.detachedView && !cleanupErrors.length) this.releasedEntries.delete(entry.id)
-        entry.nativeChild?.closing?.settle(true)
-        this.send({ type: 'closed', id: entry.id })
-        if (entry.nativeChild?.ownsPrivateStorage && entry.storage.mode === 'private') {
-          void this.clearPrivateStorage(entry.storage).catch(error => console.warn('The closed private Browser environment could not be fully cleared:', error))
-        }
-        if (nativeWindow && nativeWindow !== this.window && !nativeWindow.isDestroyed()) nativeWindow.close()
-        return
-      }
-      const reason = [...cleanupErrors.map(error => error instanceof Error ? error.message : String(error)),
-        ...(released.inputShield ? ['Native input surface cleanup is unconfirmed; reopening or Close retries its retained cleanup identity.'] : [])].join('; ')
-      this.send({ type: 'unavailable', id: entry.id, error: 'Browser native page was destroyed. Retry to reopen this page.' + (reason ? ` Cleanup failed: ${reason}` : '') })
-    })
     return controlFeedback
+  }
+
+  private browserRendererGone(entry: BrowserEntry, view: WebContentsView, reason: string): void {
+    const contents = view.webContents
+    this.interruptProfileActivity(view)
+    this.sitePermissions?.cancel(entry.id, contents)
+    if (!this.owns(entry, view)) return
+    entry.certificateDecision?.settle(false)
+    entry.committedNavigationId = null
+    entry.appLinkRequest = null
+    entry.appLinkPrompt = null
+    this.cancelRecoveryPreview(entry)
+    this.revokePresentationCapture(entry, 'source-replaced')
+    entry.error = `Browser renderer stopped: ${reason}`
+    this.emit(entry)
+  }
+
+  private browserViewDestroyed(entry: BrowserEntry, view: WebContentsView, pageRequestedClose: boolean): void {
+    const contents = view.webContents
+    if (this.owns(entry, view)) this.publishPageAppearance(entry)
+    this.forgetZoomScope(view)
+    this.endProfileActivity(view)
+    this.sitePermissions?.cancel(entry.id, contents)
+    if (entry.view === view) entry.certificateDecision?.settle(false)
+    this.entriesByContents.delete(contents)
+    if (entry.view === view) entry.nativeChild?.closing?.settle(true)
+    if (entry.view === view) this.cancelRecoveryPreview(entry)
+    const attempt = entry.releaseAttempt
+    // An earlier vetoed release no longer owns this destruction. Capture the
+    // active request before settling it, including an unconfirmed close still in flight.
+    const releasing = attempt?.view === view && attempt.pending
+    if (releasing) attempt.settle('released', [])
+    if (this.owns(entry, view)) this.clearFavicon(entry)
+
+    if (entry.pendingSwitch?.view === view) {
+      try { this.cancelPendingSwitch(entry, new Error('Browser profile candidate was destroyed')) } catch (error) {
+        if (!this.owns(entry, entry.view) || entry.view.webContents.isDestroyed()) return
+        const warning = error instanceof Error ? error.message : String(error)
+        if (entry.pendingSwitch) entry.pendingSwitch.cleanupWarning = warning
+        entry.activity = { ...entry.activity, warning }
+        this.emit(entry)
+      }
+      return
+    }
+    if (!this.owns(entry, view)) return
+    const nativeWindow = entry.nativeChild ? this.windowForView(view) : null
+    const closedPreviewScope = entry.nativeChild || pageRequestedClose ? this.recoveryPreviewScope(entry.id) : null
+    // Native destruction is authoritative even if a separate resource's cleanup throws. Retain
+    // only the existing metadata: a dead WebContents cannot supply a fresh live snapshot.
+    const released: ReleasedBrowser = {
+      id: entry.id, workspaceId: entry.workspaceId, storage: entry.storage, requestedUrl: entry.requestedUrl, viewport: entry.viewport, agent: entry.agent, agentWarning: entry.agentWarning,
+      ...(entry.source ? { source: entry.source } : {}),
+      ...(attempt?.view === view && attempt.history ? { history: attempt.history } : {}),
+      ...(entry.nativeChild ? { nativeChild: { window: { ...entry.nativeChild.window } } } : {})
+    }
+    this.releasedEntries.set(entry.id, released)
+    const cleanupErrors: unknown[] = []
+    this.releaseInputShield(entry)
+    if (entry.inputShield) { released.inputShield = entry.inputShield; entry.inputShield = undefined }
+    try { this.revokePresentationCapture(entry, 'source-released') } catch (error) { cleanupErrors.push(error) }
+    if (entry.captureId) this.presentationCaptures.delete(entry.captureId)
+    entry.captureId = null
+    for (const leaseId of [...entry.presentationLeaseIds]) {
+      try { this.removePresentationLease(this.presentationLeases.get(leaseId)!) } catch (error) { cleanupErrors.push(error) }
+    }
+    try { void this.releaseDemonstrationCapture(entry) } catch (error) { cleanupErrors.push(error) }
+    try { this.releaseUploadFiles(entry) } catch (error) { cleanupErrors.push(error) }
+    try { this.cancelPendingSwitch(entry, new Error('Browser native owner was destroyed during profile switch')) } catch (error) {
+      cleanupErrors.push(error)
+      if (entry.pendingSwitch) released.pendingSwitch = entry.pendingSwitch
+    }
+    if (this.entries.get(entry.id) !== entry || entry.view !== view) return
+    this.entries.delete(entry.id)
+    this.notifyNativeVisibility(this.windowForView(view))
+    if (!this.window.isDestroyed()) {
+      try { this.detachView(view) } catch (error) {
+        released.detachedView = view
+        cleanupErrors.push(error)
+      }
+    }
+    if (releasing) {
+      this.send({ type: 'released', id: entry.id, navigationId: entry.navigationId })
+      return
+    }
+    if (entry.nativeChild || pageRequestedClose) {
+      // The original page ended, rather than becoming a restorable URL.
+      entry.recoveryPreviewRetired = true
+      this.cancelRecoveryPreview(entry)
+      if (closedPreviewScope) void this.recoveryPreviews?.remove(closedPreviewScope).then(result => {
+        if (result.warning) console.warn('Browser page closed; its historical preview cleanup is unconfirmed:', result.warning)
+      }).catch(error => console.warn('Browser page closed; its historical preview cleanup is unconfirmed:', error))
+      released.cleanupOnly = true
+      if (!released.inputShield && !released.pendingSwitch && !released.detachedView && !cleanupErrors.length) this.releasedEntries.delete(entry.id)
+      entry.nativeChild?.closing?.settle(true)
+      this.send({ type: 'closed', id: entry.id })
+      if (entry.nativeChild?.ownsPrivateStorage && entry.storage.mode === 'private') {
+        void this.clearPrivateStorage(entry.storage).catch(error => console.warn('The closed private Browser environment could not be fully cleared:', error))
+      }
+      if (nativeWindow && nativeWindow !== this.window && !nativeWindow.isDestroyed()) nativeWindow.close()
+      return
+    }
+    const reason = [...cleanupErrors.map(error => error instanceof Error ? error.message : String(error)),
+      ...(released.inputShield ? ['Native input surface cleanup is unconfirmed; reopening or Close retries its retained cleanup identity.'] : [])].join('; ')
+    this.send({ type: 'unavailable', id: entry.id, error: 'Browser native page was destroyed. Retry to reopen this page.' + (reason ? ` Cleanup failed: ${reason}` : '') })
   }
 
   contextMenuReload?: (browserId: string) => Promise<BrowserSnapshot>
