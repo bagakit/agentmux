@@ -51,10 +51,13 @@ async function fixture() {
   const revise = async (nodes: GoalPlanNodeInput[]) => { const original = await goals.get('goal'); return goals.revisePlan('goal', { operationId: `plan-${(original!.plan?.revision ?? 0) + 1}`, expectedRevision: original!.plan?.revision ?? 0, alignmentRevision: 1, nodes }, supervisor) }
   const report = async (id: string, verdict?: 'pass' | 'changes') => {
     const original = task(id)
-    await goals.submitDelegationReport('goal', original.operationId, { operationId: `report-${id}`, replyMessageId: `reply-${id}`, authorAgentSessionId: 'worker',
-      grounding: { alignmentRevision: 1, summary: `Delivered ${id}`, checks: [{ criterionId: 'accepted', outcome: 'met', evidence: [`logs/${id}.log`], note: '' }] } }, 'worker')
-    if (verdict) await goals.reviewPlanNode('goal', { operationId: `review-${id}`, nodeId: id, delegationOperationId: original.operationId, verdict,
+    const submitted = await goals.submitDelegationReport('goal', original.operationId, { operationId: `report-${id}`, replyMessageId: `reply-${id}`, authorAgentSessionId: 'worker',
+      grounding: { alignmentRevision: 1, summary: `Delivered ${id}`, checks: [{ criterionId: 'accepted', outcome: 'met', evidence: [`logs/${id}.log`], note: '' }] } }, 'worker',
+      { ownerRuntimeId: 'original-runtime', namespace: 'original-goals', authorRuntimeId: 'worker-runtime' })
+    const deliveryHash = submitted.demand.delegations?.find(entry => entry.operationId === original.operationId)?.report?.delivery?.hash
+    if (verdict) await goals.reviewPlanNode('goal', { operationId: `review-${id}`, nodeId: id, delegationOperationId: original.operationId, verdict, ...(deliveryHash ? { deliveryHash } : {}),
       check: { command: `check ${id}`, result: 'Actual result', evidence: [`checks/${id}.log`] }, note: verdict === 'changes' ? 'Return this change on the original thread.' : '' }, { kind: 'agent', id: 'reviewer' })
+    return deliveryHash
   }
   const delegate = async (id: string, linked = true) => { const original = task(id); await goals.prepareDelegation('goal', original, 'supervisor'); if (linked) await goals.linkDelegation('goal', original.operationId, original.sourceMessageId, 'supervisor') }
   return { native, runtime, goals, loops, manager, read, submitted, originalSubmit, loop, revise, delegate, report, observeAfter: (action: () => Promise<void>) => { beforeObserve = action }, advance: () => { now += 60_000 } }
@@ -65,19 +68,24 @@ it('a real planned tick reaches Core as a manager with every open node and its o
   const f = await fixture(), ready = Array.from({ length: 40 }, (_, i) => node(`ready-${i}`))
   await f.revise([...ready, node('working'), node('review'), node('changes'), node('unknown'), node('done'), node('waiting', { dependsOn: ['working'] }), node('cancelled', { cancelled: true })])
   for (const id of ['working', 'review', 'changes', 'done']) await f.delegate(id)
-  await f.delegate('unknown', false); await f.report('review'); await f.report('changes', 'changes'); await f.report('done', 'pass')
+  await f.delegate('unknown', false); const deliveryHash = await f.report('review'); await f.report('changes', 'changes'); await f.report('done', 'pass')
   await f.manager.check()
   expect(f.manager.list()[0]).toMatchObject({ lastOutcome: 'sent', lastCompletionId: expect.any(String) })
   expect(f.read).toHaveBeenCalledOnce(); expect(f.submitted).toHaveBeenCalledOnce()
   const [target, prompt, operationId, , , , , guidance] = f.submitted.mock.calls[0]!
   expect(target).toMatchObject({ agentSessionId: 'supervisor', run: { runId: 'original-run' } })
   expect(guidance).toContain('Goal role: manager'); expect(guidance).toContain('"operationId":' + JSON.stringify(operationId))
-  expect(prompt).toContain('Read amux goal plan --goal "goal"'); expect(prompt).not.toContain('Read the original body of')
+  expect(prompt).toContain('Read amux goal plan active --goal "goal"'); expect(prompt).not.toContain('Read the original body of')
   const frozen = handoff(prompt)
   expect(frozen).toMatchObject({ schema: 'agentmux.goal-plan-continuation.v1', goalId: 'goal', alignmentRevision: 1, planRevision: 1 })
   expect(frozen.nodes.map((item: { id: string; state: string }) => [item.id, item.state])).toEqual([...ready.map(item => [item.id, 'ready']), ['working', 'working'], ['review', 'review'], ['changes', 'changes'], ['unknown', 'unknown']])
   expect(frozen.nodes.at(-1)).toEqual({ id: 'unknown', state: 'unknown', executor: { hostId: 'worker-host', agentSessionId: 'worker' }, unknown: ['dispatch-link'],
+    next: { kind: 'reconcile', reasons: ['dispatch-link'] },
     attempt: { delegationOperationId: 'delegate-unknown', sourceMessageId: 'source-unknown', threadId: 'thread-unknown', workerHostId: 'worker-host', workerAgentSessionId: 'worker' } })
+  expect(deliveryHash).toMatch(/^[a-f0-9]{64}$/u)
+  expect(frozen.nodes.find((node: { id: string }) => node.id === 'review')?.next,
+    'a scheduled review names the precise original delivery').toEqual({ kind: 'review', delegationOperationId: 'delegate-review', deliveryHash })
+  expect(frozen.nodes[0]?.next).toEqual({ kind: 'dispatch', executor: ready[0]!.executor, predecessors: [] })
   const original = await f.native.core.inspectAgentPromptSubmission({ kind: 'prompt', agentSessionId: 'supervisor', expectedRun: { runId: 'original-run' }, submissionId: operationId })
   expect(original?.admission).toMatchObject({ acknowledged: true, intent: { message: { userContent: prompt, systemContext: guidance } } })
   expect(f.native.writes.length).toBeGreaterThan(0); expect(f.native.start).not.toHaveBeenCalled(); expect(f.native.stop).not.toHaveBeenCalled()
@@ -85,7 +93,7 @@ it('a real planned tick reaches Core as a manager with every open node and its o
 
 it('one new tick freezes the same Goal snapshot that decided to continue', async () => {
   const f = await fixture(); await f.revise([node('original-ready')])
-  f.observeAfter(async () => { await f.revise([node('newer-ready')]) })
+  f.observeAfter(async () => { await f.revise([node('original-ready', { cancelled: true }), node('newer-ready')]) })
   await f.manager.check()
   expect(f.read).toHaveBeenCalledOnce(); expect(f.submitted).toHaveBeenCalledOnce()
   expect(handoff(f.submitted.mock.calls[0]![1])).toMatchObject({ planRevision: 1, nodes: [{ id: 'original-ready', state: 'ready' }] })
@@ -100,7 +108,7 @@ it('unknown delivery reconciles the frozen original manager input after the plan
   expect(f.manager.list()[0]).toMatchObject({ status: 'paused', lastOutcome: 'unknown', lastDecision: 'The saved Core ACK was lost' })
   expect(f.native.writes.length).toBeGreaterThan(0)
   expect(pending.prompt).toContain('original-ready'); expect(pending.agentMuxNote).toContain('Goal role: manager')
-  await f.revise([node('newer-ready')]); await f.manager.stop()
+  await f.revise([node('original-ready', { cancelled: true }), node('newer-ready')]); await f.manager.stop()
   let now = Date.now() + 120_000
   const second = new ContinuousProgressLoopManager(f.loops, (loop, operationId, isCurrent, signal) => deliverContinuousProgress(f.runtime, loop, operationId, isCurrent, signal), () => now,
     (loop, tickId, at, signal) => f.runtime.observeContinuousProgress(loop, tickId, at, signal), undefined, { read: id => f.goals.get(id), inspectInitial: async () => 'confirmed' })

@@ -9,7 +9,7 @@ const managerMutation = process.env.GOAL_MANAGER_ROLE_MUTATION ? JSON.parse(proc
 export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, plugins: [{
   name: 'original-plan-manager-owner', enforce: 'pre', transform(source, id) {
     const path = relative(root, id.split('?')[0]!)
-    if (path !== 'apps/host/src/continuous-progress-loop-manager.ts') return
+    if (path !== (managerMutation?.path ?? 'apps/host/src/continuous-progress-loop-manager.ts')) return
     const hash = (text: string) => createHash('sha256').update(text).digest('hex'), originalSHA256 = hash(source)
     if (managerMutation) {
       if (source.split(managerMutation.anchor).length !== 2) throw new Error('The manager mutation must name one exact original owner')
