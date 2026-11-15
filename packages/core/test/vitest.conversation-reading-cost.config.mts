@@ -1,4 +1,5 @@
 import original from './vitest.conversation-resilience.config.mts'
+import { conversationSourceAliases } from '../../../vitest.config.ts'
 import { defineConfig } from 'vitest/config'
 import { appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
