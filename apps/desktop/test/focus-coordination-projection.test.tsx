@@ -23,6 +23,7 @@ vi.mock('../src/renderer/src/components/FocusContextRow', () => ({ FocusContextR
   return <span data-body-session={context.id}>{context.recap?.reading?.text ?? context.detail}</span>
 } }))
 import { FocusContextCardBody } from '../src/renderer/src/components/FocusContextCardBody'
+import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface'
 
 const baseline = useAppStore.getState(), project = vi.mocked(projectConversationSummary)
 let root: Root | undefined, host: HTMLDivElement | undefined
@@ -83,6 +84,36 @@ it('requests coordination metadata explicitly without changing execution members
   expect(state.agentFocus).toBe(originalFocus); expect(state.agentFocus.execution).toBe(history)
   expect(state.agentFocus.execution.history).toEqual([{ sessionId: execution.id, focusedAt: fixtureEpoch(0, 0, 1) }])
   expect(input.sessions).toEqual([session, execution]); expect(expanded.coordinationContexts[0]!.control).toBe(session.control)
+})
+
+it('retires only the compact reminder when the original Mote is archived and restores it after unarchive', () => {
+  const { input, session, mote, scratch } = scene(), select = createFocusProjectionSelector()
+  const snapshot = input.scratchTopicSnapshots[scratch.id]!
+  const update = (state: 'archived' | 'active' | 'unknown') => ({ ...input, scratchTopicSnapshots: { [scratch.id]: { ...snapshot, topics: [{ ...mote,
+    moteArchive: state === 'unknown' ? { state, issue: 'Archive source unavailable' } : { state, version: 'archive-revision' } }] } } })
+  expect(select(input).pmoAttention).toEqual([session.id])
+  const archived = update('archived')
+  expect(select(archived).pmoAttention).toEqual([])
+  const cached = select({ ...archived, sessions: [...archived.sessions] })
+  expect(cached.pmoAttention).toEqual([])
+  expect(select(archived, true, 'metadata', true).coordinationContexts).toMatchObject([{ id: session.id, bucket: 'attention', control: session.control }])
+  expect(select(update('unknown')).pmoAttention).toEqual([session.id])
+  expect(select(update('active')).pmoAttention).toEqual([session.id])
+})
+
+it('updates the mounted Focus reminder when the retained Mote archive fact changes', async () => {
+  const { input, session, mote, scratch } = scene()
+  const snapshot = input.scratchTopicSnapshots[scratch.id]!
+  useAppStore.setState({ ...input, mainSurface: 'agents', focusView: 'list' })
+  host = document.createElement('div'); document.body.append(host); root = createRoot(host)
+  await act(async () => root!.render(<GlobalFocusSurface />))
+  const reminder = () => host!.querySelector('.focus-pmo-attention')
+  expect(reminder()?.textContent).toContain('1 to review')
+  await act(async () => useAppStore.setState({ scratchTopicSnapshots: { [scratch.id]: { ...snapshot, topics: [{ ...mote, moteArchive: { state: 'archived', version: 'archive-revision' } }] } } }))
+  expect(reminder()).toBeNull()
+  expect(useAppStore.getState().sessions.find(item => item.id === session.id)).toBe(session)
+  await act(async () => useAppStore.setState({ scratchTopicSnapshots: input.scratchTopicSnapshots }))
+  expect(reminder()?.textContent).toContain('1 to review')
 })
 
 it.each(['metadata', 'full'] as const)('does not iterate retained Mote records or read body/name text in %s mode', mode => {
