@@ -1093,7 +1093,7 @@ export class DemandStore {
         const report = attempt.report, delivery = report?.delivery
         if (!execution || !review.deliveryHash || !report || !delivery || !attempt.predecessors)
           this.rejectDelegation('Ticket completion needs the original signed execution and delivery evidence')
-        if (ticketDeliveryHash(id, attempt, report, { ownerRuntimeId: signer.owner.runtimeId, namespace: signer.owner.namespace, authorRuntimeId: delivery.authorRuntimeId }) !== review.deliveryHash)
+        if (ticketDeliveryHash(id, attempt, report, { ownerRuntimeId: signer.owner.runtimeId, namespace: signer.owner.namespace, authorRuntimeId: delivery.authorRuntimeId }) !== delivery.hash)
           this.rejectDelegation('The original delivery contents fail the Ticket digest check')
         signer.verify(execution)
         if (execution.record.scope.goalId !== id || (execution.record.kind !== 'claim' && execution.record.kind !== 'dispatch') || execution.record.ticketId !== review.nodeId ||
