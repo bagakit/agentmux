@@ -2,6 +2,7 @@ import { Switch, TextInput } from '@agentmux/client-ui/input'
 import { Button } from '@agentmux/client-ui/components/Button'
 import { SelectionField } from '../SelectionField'
 import { BROWSER_NEW_PAGE_DESTINATIONS, resolveBrowserNewPagePlacement, type BrowserNewPageDestination } from '../../../../shared/browser-new-page-placement'
+import { BROWSER_PROFILE_EXIT_CHECK_URL_LIMIT, validBrowserProfileExitCheckUrl } from '../../../../shared/browser-profile-exit-check-url'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useId, useState } from 'react'
 import type { AppLinkSchemeChoice, BrowserConfig } from '../../../../shared/contracts'
@@ -26,12 +27,6 @@ const newPageFields = [
 const newPageOptions = BROWSER_NEW_PAGE_DESTINATIONS.map(value => ({ value,
   label: { window: 'Window', tab: 'Tab', region: 'Region' }[value] }))
 
-/** Matches Main's rule: https without a user name or password. Empty turns the check off. */
-function validExitCheckUrl(value: string): boolean {
-  if (!value) return true
-  try { const url = new URL(value); return url.protocol === 'https:' && !url.username && !url.password } catch { return false }
-}
-
 export function BrowserSettingsPane({ browser, active, onSave, onForget }: {
   browser: BrowserConfig
   active: boolean
@@ -45,6 +40,8 @@ export function BrowserSettingsPane({ browser, active, onSave, onForget }: {
     newPageSurvey: resolveBrowserNewPagePlacement(browser.newPagePlacement, 'survey') }
   const draft = useSettingDraftRecord(saved)
   const saveState = useSettingsSave()
+  const exitCheckValid = validBrowserProfileExitCheckUrl(draft.value.exitCheckUrl.trim())
+  const exitCheckHint = `Use an https:// address of up to ${BROWSER_PROFILE_EXIT_CHECK_URL_LIMIT} characters without a user name or password.`
 
   async function save(): Promise<void> {
     const submitted = draft.beginSave()
@@ -86,13 +83,13 @@ export function BrowserSettingsPane({ browser, active, onSave, onForget }: {
       <SettingsDisclosure title="Network check" description="Optional address for testing a Profile’s connection.">
         <label className="browser-start-settings__field settings-browser__exit" data-settings-field="exit-check"><span>Check address</span>
           <TextInput aria-label="Exit check address" type="url" inputMode="url" placeholder="https://" value={draft.value.exitCheckUrl}
-            aria-describedby={exitCheckHintId} aria-invalid={!validExitCheckUrl(draft.value.exitCheckUrl.trim())} onChange={event => draft.setField('exitCheckUrl', event.target.value)} /></label>
-        <p id={exitCheckHintId} className="settings-browser__note">{validExitCheckUrl(draft.value.exitCheckUrl.trim())
+            aria-describedby={exitCheckHintId} aria-invalid={!exitCheckValid} onChange={event => draft.setField('exitCheckUrl', event.target.value)} /></label>
+        <p id={exitCheckHintId} className="settings-browser__note">{exitCheckValid
           ? 'Run the check from Browser Profiles. It sends one request through that Profile and can display the exit IP if the service returns it.'
-          : 'Use an https:// address without a user name or password.'}</p>
+          : exitCheckHint}</p>
         {draft.value.exitCheckUrl !== saved.exitCheckUrl ? <p className="settings-browser__note">Saved: {saved.exitCheckUrl || 'Off'}</p> : null}
       </SettingsDisclosure>
-      <SettingsSaveBar save={saveState} dirty={draft.dirty} resolution={draft} scopeLabel="Browser preferences" blocked={validExitCheckUrl(draft.value.exitCheckUrl.trim()) ? undefined : 'the exit check address must be https:// without a user name or password.'} label="Save browser" onSave={() => void save()} />
+      <SettingsSaveBar save={saveState} dirty={draft.dirty} resolution={draft} scopeLabel="Browser preferences" blocked={exitCheckValid ? undefined : exitCheckHint} label="Save browser" onSave={() => void save()} />
       </section>
       <AppLinkSchemes browser={browser} onForget={onForget} />
       <BrowserManagementSettings active={active} />

@@ -5,6 +5,7 @@ import { parseGoalsCommonActions } from '@agentmux/core'
 import { validateReservedWorkspaceConfigEdit } from './workspace-location.js'
 import { SURVEY_THUMBNAIL_HEIGHT, SURVEY_THUMBNAIL_COLUMNS } from '../shared/survey-thumbnail-layout.js'
 import { SURVEY_GROUP_GAP_MINUTES, SURVEY_PAGE_GROUPINGS } from '../shared/survey-browsing.js'
+import { BROWSER_PROFILE_EXIT_CHECK_URL_LIMIT } from '../shared/browser-profile-exit-check-url.js'
 import { BROWSER_NEW_PAGE_DESTINATIONS } from '../shared/browser-new-page-placement.js'
 import { APP_ICON_IDS } from '@agentmux/client-ui/app-icon-catalog'
 import { validateComposerInputConfig } from '@agentmux/client-ui/composer-input-config'
@@ -245,7 +246,7 @@ const browserSchema = z.object({
   agentAutomation: z.boolean().optional(),
   automaticMemoryRelease: z.boolean().optional(),
   /** An https address a person chose to check where a Profile's route reaches; absent means no check is offered. */
-  exitCheckUrl: z.string().max(2048).optional(),
+  exitCheckUrl: z.string().max(BROWSER_PROFILE_EXIT_CHECK_URL_LIMIT).optional(),
   /**
    * 用户对每个 scheme 记住的答案。`.optional()` 同 `agentAutomation`（既有磁盘 config 没有这个字段，
    * 写成必需会让 browser 整块判失败）——但这一个**不**回填：空对象与缺席语义完全一样（都是「一个

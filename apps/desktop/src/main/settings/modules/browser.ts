@@ -6,7 +6,7 @@ import { DEFAULT_SURVEY_BROWSING, SURVEY_GROUP_GAP_MINUTES, SURVEY_PAGE_GROUPING
 import type { ScalarSetting } from '../scalar-setting.js'
 import { browserAgentControlSettings } from './browser-agent-control.js'
 import { BROWSER_NEW_PAGE_SCENES, BROWSER_NEW_PAGE_DESTINATIONS, BROWSER_NEW_PAGE_PLACEMENT_DEFAULTS, resolveBrowserNewPagePlacement } from '../../../shared/browser-new-page-placement.js'
-import { validBrowserProfileExitCheckUrl } from '../../browser-profile-exit-check.js'
+import { validBrowserProfileExitCheckUrl } from '../../../shared/browser-profile-exit-check-url.js'
 import { DEFAULT_BROWSER_START_PAGE, BROWSER_START_PAGE_TITLE_LIMIT, BROWSER_START_PAGE_SUBTITLE_LIMIT, BROWSER_START_PAGE_HISTORY_LIMIT, resolveBrowserStartPage, validBrowserStartPageText, validBrowserStartPageImage, validBrowserStartPageHistoryLimit, type BrowserStartPageConfig } from '../../../shared/browser-start-page.js'
 
 const writeStartPage = <K extends keyof BrowserStartPageConfig>(config: Parameters<ScalarSetting['entry']>[0], key: K, value: BrowserStartPageConfig[K]) =>

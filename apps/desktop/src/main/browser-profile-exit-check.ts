@@ -1,6 +1,7 @@
 import type { Session } from 'electron'
 import { isIP } from 'node:net'
 import type { BrowserProfileExitCheck } from '../shared/contracts.js'
+import { BROWSER_PROFILE_EXIT_CHECK_URL_LIMIT, validBrowserProfileExitCheckUrl } from '../shared/browser-profile-exit-check-url.js'
 
 /**
  * One explicit request through a Profile's own session, to see where its route actually reaches.
@@ -17,15 +18,6 @@ const BODY_LIMIT = 256
 
 export class BrowserProfileExitCheckInvalid extends Error {
   readonly code = 'BROWSER_PROFILE_EXIT_CHECK_INVALID'
-}
-
-/** The check address must be HTTPS without credentials, so nothing secret travels in it. */
-export function validBrowserProfileExitCheckUrl(value: string): boolean {
-  if (!value) return true
-  try {
-    const url = new URL(value)
-    return url.protocol === 'https:' && !url.username && !url.password && value.length <= 2048
-  } catch { return false }
 }
 
 function plainAddress(body: string): string | undefined {
@@ -60,7 +52,8 @@ export type BrowserProfileExitCheckPorts = {
 export function createBrowserProfileExitCheck(ports: BrowserProfileExitCheckPorts) {
   return async (profileId: string, address: string): Promise<BrowserProfileExitCheck> => {
     if (!address) throw new BrowserProfileExitCheckInvalid('Set a check address in Settings › Browser first, then Check.')
-    if (!validBrowserProfileExitCheckUrl(address)) throw new BrowserProfileExitCheckInvalid('The check address must be an https:// address without a user name or password.')
+    if (!validBrowserProfileExitCheckUrl(address)) throw new BrowserProfileExitCheckInvalid(
+      `Use an https:// address of up to ${BROWSER_PROFILE_EXIT_CHECK_URL_LIMIT} characters without a user name or password.`)
     const target = ports.session(profileId)
     await ports.prepare(profileId)
     const started = ports.now()
