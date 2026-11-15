@@ -293,6 +293,18 @@ async function changesBatch(ref: ConversationRef, port: ConversationReaderPort, 
             record.sequence <= cut.sequence || record.sequence > current.stream.sequence || !Number.isSafeInteger(record.firstSequence) || record.firstSequence < 1 || record.firstSequence > record.sequence ||
             index > 0 && record.sequence <= page.records[index - 1]!.sequence))
           return fail('The captured primitive returned records outside its accepted original ordered range. Its prior cut is retained.')
+        // A retired body still witnesses the original position of its record.
+        const positions = new Map<string, number>()
+        for (const record of page.records) {
+          const recordId = record.item === null ? record.recordId : record.item.id
+          const id = conversationRecordId({ ...ref, source: { kind: 'captured', recordId } })
+          const prior = originals.get(id)?.order
+          const firstSequence = positions.get(id) ?? (prior?.kind === 'captured-stream' ? prior.firstSequence : undefined)
+          if ((prior?.kind === 'captured-stream' && prior.epoch !== cut.epoch) ||
+              (firstSequence !== undefined && record.firstSequence !== firstSequence))
+            return fail('The captured primitive changed an accepted original record position. Its prior cut is retained.')
+          positions.set(id, record.firstSequence)
+        }
         capturedBodyGap = capturedBodyGaps(page.records)[0]
         let inputGap=false
         const sourceRows=page.records.flatMap(record=>{
@@ -305,14 +317,6 @@ async function changesBatch(ref: ConversationRef, port: ConversationReaderPort, 
           }
           return [row(ref, { kind: 'captured', item: record.item }, { kind: 'captured-stream' as const, epoch: cut.epoch, firstSequence: record.firstSequence }, record.revision)]
         })
-        const positions = new Map<string, ConversationSourceRecord['order']>()
-        for (const record of sourceRows) {
-          const prior = positions.get(record.id) ?? originals.get(record.id)?.order
-          if (prior?.kind === 'captured-stream' && record.order.kind === 'captured-stream' &&
-            (prior.epoch !== record.order.epoch || prior.firstSequence !== record.order.firstSequence))
-            return fail('The captured primitive changed an accepted original record position. Its prior cut is retained.')
-          positions.set(record.id, record.order)
-        }
         const sequence = record?.sequence ?? cut.sequence
         const bodyUnavailable=page.records.some(record=>record.item===null)
         const gaps=inputGap?[...(bodyUnavailable?page.stream.gaps.slice(0,-1):page.stream.gaps),{code:'AGENT_CONVERSATION_INPUT_SOURCE_UNCONFIRMED',message:'Original input journal membership is outside or unconfirmed for this frozen range. Retain the original Session.'},...(bodyUnavailable?page.stream.gaps.slice(-1):[])]:page.stream.gaps
