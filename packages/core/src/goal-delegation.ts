@@ -82,8 +82,8 @@ export function parseGoalDelegationParams<M extends GoalDelegationMethod>(method
   if (method === 'goal.plan.active') {
     const p = record(value, ['goalId', 'view', 'expectedOwner'])
     const goalId = p.goalId === undefined ? undefined : id(p.goalId)
-    if (p.view !== 'claimable' && p.view !== 'manage' || p.view === 'manage' && !goalId)
-      throw new AgentMuxError('Choose claimable work or one exact Goal for management.', 'INVALID_CONTROL_REQUEST')
+    if (p.view !== 'claimable' && p.view !== 'manage')
+      throw new AgentMuxError('Choose claimable or managed active work.', 'INVALID_CONTROL_REQUEST')
     const owner = p.expectedOwner === undefined ? undefined : record(p.expectedOwner, ['runtimeId', 'namespace'])
     return { ...(goalId ? { goalId } : {}), view: p.view,
       ...(owner ? { expectedOwner: { runtimeId: id(owner.runtimeId), namespace: id(owner.namespace) } } : {}) } as GoalDelegationParamsMap[M]

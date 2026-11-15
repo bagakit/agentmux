@@ -48,7 +48,9 @@ export class GoalActiveIndex {
         ? target.goalId === undefined
           ? db.prepare('SELECT g.content, m.role FROM active_member m JOIN active_goal g ON g.id = m.goal_id WHERE m.agent_session_id = ? ORDER BY m.goal_id').all(target.agentSessionId)
           : db.prepare('SELECT g.content, m.role FROM active_member m JOIN active_goal g ON g.id = m.goal_id WHERE m.agent_session_id = ? AND m.goal_id = ?').all(target.agentSessionId, target.goalId)
-        : db.prepare('SELECT content FROM active_goal WHERE id = ?').all(target.goalId!)
+        : target.goalId === undefined
+          ? db.prepare('SELECT content FROM active_goal ORDER BY id').all()
+          : db.prepare('SELECT content FROM active_goal WHERE id = ?').all(target.goalId)
       return rows.map(row => ({ ...JSON.parse(String(row.content)) as GoalActivePlan,
         ...(typeof row.role === 'string' ? { role: JSON.parse(row.role) as GoalPlanWorkRole } : {}) }))
     } finally { db.close() }

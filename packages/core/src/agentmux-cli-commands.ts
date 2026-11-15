@@ -1290,7 +1290,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   }, f => {
     const goalId = f.values.has('--goal') ? id(f, '--goal') : undefined
     return { ...(goalId ? { goalId } : {}), view: value(f, '--view') ?? (goalId ? 'manage' : 'claimable'), ...goalPlanOwner(f) }
-  }, 'Without a Goal ID, the authenticated Agent sees only its own claimable work. Specify an exact Goal to manage in-flight and unknown work. Read goal plan for retained history.'),
+  }, 'Use --view manage to read active Tickets across Goals at this owner. An Agent can manage only Goals it supervises. Use --goal to read one exact Goal. Without either flag, an authenticated Agent sees only work it can claim. Read goal plan for retained history.'),
   { ...command('goal.plan.verify', '--input FILE|- --goal ID --hash HASH --fingerprint SHA256', 'Verify an original Ticket proof offline against an independently trusted signing key and exact Goal and digest.',
     { '--input': 'data', '--goal': 'data', '--hash': 'data', '--fingerprint': 'data' }, async f => ({ proof: await readControlJsonInput(value(f, '--input', true)!, 'Signed Goal Ticket proof'),
       goalId: id(f, '--goal', true), hash: id(f, '--hash', true), fingerprint: id(f, '--fingerprint', true) })), local: true },
