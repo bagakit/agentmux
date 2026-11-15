@@ -15,6 +15,7 @@ import { AGENTMUX_CONTROL_SCHEMA_VERSION, AgentMuxControlServer } from '@agentmu
 import { BROWSER_NEW_PAGE_SCENES, BROWSER_NEW_PAGE_DESTINATIONS, BROWSER_NEW_PAGE_PLACEMENT_DEFAULTS, resolveBrowserNewPagePlacement, type BrowserNewPageScene } from '../src/shared/browser-new-page-placement'
 import { configOwnerFixture, deferred } from './helpers/config-owner-fixture'
 import { composerDOM } from './helpers/composer-dom-fixture'
+import { chooseField } from './helpers/selection-field'
 import { prepareSourceCoreCli } from './helpers/source-core-cli.mjs'
 import { objectCliEnvironment } from '../../../packages/core/test/helpers/object-cli-rpc'
 import { privateRpcCorePort } from '../../../packages/core/test/helpers/private-rpc-core'
@@ -37,12 +38,7 @@ const saved = () => f.owner.current.browser.newPagePlacement
 const field = (scene: BrowserNewPageScene) => dom.container.querySelector<HTMLButtonElement>(`[aria-label="New webpage in ${names[scene]}"]`)!
 async function render() { await dom.render(<SettingsPanel initialSection="browser" onClose={() => {}} />) }
 async function choose(scene: BrowserNewPageScene, label: string) {
-  const trigger = field(scene); expect(trigger).not.toBeNull()
-  await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })) })
-  await vi.waitFor(() => expect(document.querySelector('[role="menuitemradio"]')).not.toBeNull())
-  const option = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find(item => item.textContent?.trim() === label)!
-  expect(option).not.toBeUndefined(); await act(async () => option.click())
-  await vi.waitFor(() => expect(document.querySelector('[role="menuitemradio"]')).toBeNull())
+  await chooseField(field(scene), label.toLowerCase())
 }
 async function save() {
   await dom.click('[data-settings-pane="browser"] [data-settings-save-bar] button')
@@ -119,14 +115,14 @@ it('[new-page-settings] pending save does not discard a later local change', asy
     await dom.click('[data-settings-pane="browser"] [data-settings-save-bar] button')
     await vi.waitFor(() => expect(f.runtime.prepare).toHaveBeenCalled())
     expect(dom.container.querySelector('[data-settings-save-bar] button')?.getAttribute('aria-busy')).toBe('true')
-    expect(dom.container.querySelector('[data-settings-save-bar]')?.textContent).toContain('Saving changes')
+    expect(dom.container.querySelector('[data-settings-save-bar]')?.textContent).toContain('Saving Browser preferences')
     await choose('space', 'Tab')
   } finally {
     held.resolve()
     await act(async () => { await vi.mocked(api.config.save).mock.results.at(-1)!.value })
   }
   expect(saved()).toEqual({ space: 'window' }); expect(field('space').dataset.value).toBe('tab')
-  expect(dom.container.querySelector('[data-settings-save-bar]')?.textContent).toContain('Unsaved changes')
+  expect(dom.container.querySelector('[data-settings-save-bar]')?.textContent).toContain('Browser preferences: unsaved changes')
   await save(); expect(saved()).toEqual({ space: 'tab' })
 })
 

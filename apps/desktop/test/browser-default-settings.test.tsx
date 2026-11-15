@@ -9,7 +9,11 @@ import { surveySettingsModule } from '../src/renderer/src/components/settings/mo
 
 const ui = vi.hoisted(() => ({ inspect: vi.fn(), open: vi.fn(), save: vi.fn() }))
 vi.mock('../src/renderer/src/lib/api', () => ({ api: { ui: { inspectDefaultBrowser: ui.inspect, openDefaultBrowserSettings: ui.open }, config: { save: ui.save } } }))
-vi.mock('../src/renderer/src/store', async importOriginal => ({ ...await importOriginal<typeof import('../src/renderer/src/store')>(), useAppStore: { getState: () => ({ config: null }) } }))
+vi.mock('../src/renderer/src/store', async importOriginal => {
+  const state = { config: null, surveySidebarWidth: 240 }
+  return { ...await importOriginal<typeof import('../src/renderer/src/store')>(),
+    useAppStore: Object.assign((select: (value: typeof state) => unknown) => select(state), { getState: () => state }) }
+})
 const current = (matched = false): BrowserDefaultInspection => ({ platform: 'darwin', outcome: matched ? 'default' : 'not-default', protocols: { http: { state: 'known', isCurrentApplication: matched, application: { name: matched ? 'AgentMux' : 'Another browser', path: 'application-bundle' } }, https: { state: 'known', isCurrentApplication: matched, application: { name: matched ? 'AgentMux' : 'Another browser', path: 'application-bundle' } } } })
 const config = { browser: { startPage: { title: 'Original title', subtitle: 'Original subtitle', icon: '', backgroundImage: '', showHistory: true } } } as AppConfig
 const Pane = surveySettingsModule.Pane
@@ -67,4 +71,18 @@ it('does not inspect or subscribe while its original Settings pane is hidden', a
   const result = await render(view(false)); await fireEvent.focus(); await act(async () => { await Promise.resolve() }); expect(ui.inspect).not.toHaveBeenCalled()
   await result.rerender(view()); await screen.findByText('Web links currently open in another app.'); expect(ui.inspect).toHaveBeenCalledTimes(1)
   await result.rerender(view(false)); await fireEvent.focus(); expect(ui.inspect).toHaveBeenCalledTimes(1)
+})
+
+it('distinguishes identically named browser installations using the system identity result', async () => {
+  const fact = current()
+  for (const protocol of Object.values(fact.protocols!)) {
+    if (protocol.state === 'known') protocol.application.name = 'AgentMux'
+  }
+  ui.inspect.mockResolvedValue(fact)
+  await render(view()); await screen.findByText('Web links currently open in another app.')
+  const handlers = container.querySelector<HTMLDetailsElement>('.settings-survey__handlers')!
+  expect(handlers.open).toBe(false)
+  await fireEvent.click(handlers.querySelector('summary')!)
+  expect(handlers.textContent?.match(/AgentMux \(another installation\)/gu)).toHaveLength(2)
+  expect(ui.open).not.toHaveBeenCalled()
 })

@@ -13,6 +13,7 @@ import { cliFollow } from './cli-follow'
 import { browserProfilePartition } from '../../../src/main/browser-profile-store'
 import { settingsCase } from './settings-case'
 import { surveyBrowsingCase } from './survey-browsing-case'
+import { settingsLayoutCase } from './settings-layout-case'
 import { spawn } from 'node:child_process'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -88,7 +89,7 @@ async function run() {
  const initial={...structuredClone(DEFAULT_CONFIG),hosts:[{id:'local',kind:'local',label:'Private Profile Survey proof'}],workspaces:[{id:workspaceId,name:'Private mixed task',kind:'folder',hostId:'local',path:join(directory,'workspace')},{id:legacyWorkspaceId,name:'Original whole-Zone exploration',kind:'folder',hostId:'local',path:join(directory,'legacy-workspace')}],executors:{proof:{providerId:'codex',label:'Private synthetic Provider',command:join(source,'packages/core/test/fixtures/fake-codex-cli.mjs'),args:[],injectAgentMuxGuide:false,env:{AGENTMUX_FAKE_READY_MODE:'before',AGENTMUX_FAKE_NATIVE_RECORD:'1',AGENTMUX_FAKE_NATIVE_RECORD_DIRECTORY:join(directory,'native-records')}}},browser:{...DEFAULT_CONFIG.browser,agentAutomation:true},notifications:{mode:'off'}}
  if(selectedCase==='complete')(initial.executors.proof.env as Record<string,string>).AGENTMUX_FAKE_CAPABILITY_RECEIPT=join(directory,'workface-credential.json')
  let config=phase==='first'?await configStore.save(initial as any):await configStore.get()
- if(selectedCase==='profile-switch'||selectedCase==='complete'||selectedCase==='surface-windows'||selectedCase==='survey-browsing')config=await configStore.get()
+ if(selectedCase==='profile-switch'||selectedCase==='complete'||selectedCase==='surface-windows'||selectedCase==='survey-browsing'||selectedCase==='settings-layout')config=await configStore.get()
  privateHost=await startAgentMuxHost({store,socketPath:join(directory,'semantic.sock'),desktopSocketPath:desktopBusinessSocketPath(),configurationPath:configStore.filePath,mobilePort:0,mobileBuildDirectory:join(directory,'no-mobile-assets')})
  core=privateHost.client;hosted=privateHost.hosted;hostServer=privateHost.server
  rpc=await connectAgentMuxRpc({endpoint:{transport:'unix',path:join(directory,'semantic.sock')}})
@@ -184,6 +185,11 @@ async function run() {
  if(selectedCase==='settings'){await settingsCase({phase,directory,window,evaluate,result,receipt,probeAck});receipt.businessPassed=true;receipt.passed=true;return}
  if (selectedCase === 'survey-browsing') {
   await surveyBrowsingCase({ phase, directory, window, evaluate, result, receipt, pageUrl })
+  receipt.businessPassed = true; receipt.passed = true; return
+ }
+ if (selectedCase === 'settings-layout') {
+  contents.debugger.attach('1.3')
+  await settingsLayoutCase({ phase, directory, window, evaluate, click, result, receipt, pageUrl })
   receipt.businessPassed = true; receipt.passed = true; return
  }
  if(selectedCase==='profile-switch'){
