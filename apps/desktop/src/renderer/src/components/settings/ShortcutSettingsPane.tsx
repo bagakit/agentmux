@@ -3,7 +3,7 @@ import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
 import { PROMPT_REACTION_ICONS, PROMPT_REACTION_STARTERS, type PromptReactionIcon } from '@agentmux/core/prompt-reaction'
 import { PromptReactionIconView } from '@agentmux/client-ui/components/ConversationReactionActions'
 import { resolveComposerInputConfig } from '@agentmux/client-ui/composer-input-config'
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { BUILT_IN_AGENT_PROVIDER_IDS } from '@agentmux/core/provider-id'
 import { Button } from '@agentmux/client-ui/components/Button'
 import type { AppConfig, ComposerShortcut } from '../../../../shared/contracts'
@@ -17,6 +17,7 @@ import { promptProblems, useGoalsPrompts } from './GoalsPromptDrafts'
 import { LiquidSelectionSurface } from '../LiquidSelectionSurface'
 import { describeAgentDisplayState } from '../../../../shared/agent-state-presentation'
 import { SettingsConceptSummary } from './SettingsConceptSummary'
+import { useSettingsLibraryView } from './use-settings-library-view'
 import './settings-prompts-editor.css'
 import './settings-starting-points.css'
 
@@ -56,7 +57,7 @@ export function ShortcutSettingsPane({ config, active, onOpenGoals }: {
   const [scope, setScope] = useState<PromptScope>({ kind: 'all' })
   const [usageOpen, setUsageOpen] = useState<Record<string, boolean>>({})
   const [expanded, setExpanded] = useState(false)
-  const [view, setView] = useState<'library' | 'editor'>('library')
+  const { view, narrow, host, rememberFocus, openEditor, returnToLibrary } = useSettingsLibraryView(active)
   const [recentDelete, setRecentDelete] = useState<{ prompt: ComposerShortcut } | null>(null)
   const nameInput = useRef<HTMLInputElement>(null)
   const instructionInput = useRef<HTMLTextAreaElement>(null)
@@ -64,8 +65,7 @@ export function ShortcutSettingsPane({ config, active, onOpenGoals }: {
   const searchInput = useRef<HTMLInputElement>(null)
   const library = useRef<HTMLDivElement>(null)
   const focusNewName = useRef(false)
-  const focusCommonBody = useRef(false), promptEditor = useRef<HTMLElement>(null)
-  const focusBack = useRef(false)
+  const focusCommonBody = useRef(false)
   const descriptionId = useId()
   const instructionId = `${descriptionId}-instruction`
   const prompt = selectedId !== null && Object.hasOwn(resource.value, selectedId) ? resource.value[selectedId] : undefined
@@ -99,7 +99,7 @@ export function ShortcutSettingsPane({ config, active, onOpenGoals }: {
   }, [resource.value, selectedId])
   useEffect(() => {
     if (focusCommonBody.current) {
-      promptEditor.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus()
+      instructionInput.current?.focus()
       focusCommonBody.current = false
       return
     }
@@ -107,13 +107,6 @@ export function ShortcutSettingsPane({ config, active, onOpenGoals }: {
     nameInput.current.focus()
     focusNewName.current = false
   }, [selectedId, view, scope])
-  useLayoutEffect(() => {
-    if (!focusBack.current || view !== 'library') return
-    const row = Array.from(library.current?.querySelectorAll<HTMLButtonElement>('[data-prompt-id]') ?? [])
-      .find((item) => item.dataset.promptId === selectedId)
-    ;(row ?? searchInput.current)?.focus()
-    focusBack.current = false
-  }, [view, selectedId, scope, query])
 
   function bindProvider(id: string, providerId: string): void {
     resource.setValue((current) => {
@@ -137,7 +130,7 @@ export function ShortcutSettingsPane({ config, active, onOpenGoals }: {
   }
   function open(id: string): void {
     if (!focusNewName.current) focusCommonBody.current = true
-    setSelectedId(id); setView('editor')
+    setSelectedId(id); openEditor()
   }
   function add(startingPoint?: Pick<ComposerShortcut, 'keyword' | 'label' | 'body'>): void {
     const id = mintObjectId()
@@ -155,14 +148,15 @@ export function ShortcutSettingsPane({ config, active, onOpenGoals }: {
   function remove(id: string): void {
     owner.forgetAutoLabel(id)
     if (Object.hasOwn(resource.expected, id) && Object.hasOwn(resource.value, id)) setRecentDelete({ prompt: resource.value[id]! })
-    if (selectedId === id) setSelectedId(drafts.find((candidate) => candidate.id !== id)?.id ?? null)
+    const nextId = selectedId === id ? drafts.find((candidate) => candidate.id !== id)?.id ?? null : selectedId
+    setSelectedId(nextId)
     resource.setValue((current) => {
       const next = { ...current }
       delete next[id]
       return next
     })
     if (!Object.hasOwn(resource.expected, id)) owner.changeItems(owner.common.items.filter(ref => ref.kind !== 'prompt' || ref.id !== id))
-    setView('library')
+    showLibrary(nextId)
   }
   function undoDelete(): void {
     if (!recentDelete) return
@@ -171,15 +165,14 @@ export function ShortcutSettingsPane({ config, active, onOpenGoals }: {
     setRecentDelete(null)
     open(restored.id)
   }
-  function back(): void {
-    focusBack.current = true
-    setView('library')
+  function showLibrary(id: string | null): void {
+    returnToLibrary(() => Array.from(library.current?.querySelectorAll<HTMLButtonElement>('[data-prompt-id]') ?? [])
+      .find(item => item.dataset.promptId === id) ?? searchInput.current)
   }
   function showInLibrary(): void {
     setScope({ kind: 'all' })
     setQuery('')
-    focusBack.current = true
-    setView('library')
+    showLibrary(selectedId)
   }
   async function save(): Promise<void> {
     if (saveState.saving || resource.saving) return
@@ -190,9 +183,9 @@ export function ShortcutSettingsPane({ config, active, onOpenGoals }: {
   }
 
   return (
-    <div className="settings-pane-stack prompt-workbench" data-view={view} data-creation-empty={!drafts.length}>
+    <div ref={host} className="settings-pane-stack prompt-workbench" data-view={view} data-creation-empty={!drafts.length}>
       <div className="prompt-goals-link"><span>Manage Goals shortcuts, order and visibility in Goals settings.</span><Button type="button" onClick={onOpenGoals}>Goals common actions</Button></div>
-      <div className="prompt-scope" role="group" aria-label="Prompt authoring scope">
+      <div className="prompt-scope" role="group" aria-label="Prompt authoring scope" onFocusCapture={() => rememberFocus('library')}>
         <button type="button" data-prompt-scope="all" aria-pressed={scope.kind === 'all'} onClick={() => setScope({ kind: 'all' })}>All prompts <span>{drafts.length}</span></button>
         <button type="button" data-prompt-scope="shared" aria-pressed={scope.kind === 'shared'} onClick={() => setScope({ kind: 'shared' })}>Shared <span>{drafts.filter(candidate => candidate.providerId === undefined).length}</span></button>
         {providerScopes.map(providerId => <button type="button" key={providerId} data-prompt-scope-provider={providerId}
@@ -200,18 +193,18 @@ export function ShortcutSettingsPane({ config, active, onOpenGoals }: {
           {agentProviderLabel(providerId)} <span>{drafts.filter(candidate => candidate.providerId === providerId).length}</span>
         </button>)}
       </div>
-      <div className="settings-pane-toolbar prompt-workbench__toolbar">
+      <div className="settings-pane-toolbar prompt-workbench__toolbar" onFocusCapture={() => rememberFocus('library')}>
         <span className="settings-resource-count">{visible.length === drafts.length ? drafts.length : `${visible.length} of ${drafts.length}`} {drafts.length === 1 ? 'prompt' : 'prompts'}</span>
         <Button type="button" onClick={() => add()}><ThemeActionCreatePromptIcon size={13} /> Add prompt</Button>
         {PROMPT_REACTION_STARTERS.some(starter => !drafts.some(candidate => candidate.id === starter.id || candidate.keyword === starter.keyword)) ?
           <Button type="button" onClick={addReactionStarters}><ThemeActionAddQuickRepliesIcon size={13} /> Add quick replies</Button> : null}
       </div>
       <div className="prompt-workbench__body">
-        <section className="prompt-library" aria-label="Prompt library">
+        <section className="prompt-library" aria-label="Prompt library" onFocusCapture={() => rememberFocus('library')}>
           <SearchInput className="prompt-library__search" ref={searchInput} aria-label="Search prompts" clearLabel="Clear prompt search"
             placeholder="Find an instruction…" value={query} onValueChange={setQuery} />
           <div ref={library} className="prompt-library__items">
-            <LiquidSelectionSurface selected={selectedId} active={active} targetAttribute="data-prompt-id" />
+            <LiquidSelectionSurface selected={selectedId} active={active && (!narrow || view === 'library')} targetAttribute="data-prompt-id" />
             {visible.map((candidate) => {
               const status = problemsById.has(candidate.id) ? 'invalid' :
                 !configValuesEqual(candidate, Object.hasOwn(resource.expected, candidate.id) ? resource.expected[candidate.id] : undefined) ? 'unsaved' : undefined
@@ -228,8 +221,8 @@ export function ShortcutSettingsPane({ config, active, onOpenGoals }: {
           </div>
           {!visible.length ? <p className="settings-resource-empty">{drafts.length ? 'No prompts in this view. Your edits are kept.' : 'Keep the instructions you use often here. Add a prompt to get started.'}</p> : null}
         </section>
-        {prompt ? <section ref={promptEditor} onFocus={() => setView('editor')} className="prompt-settings-card prompt-editor" data-prompt-editor={prompt.id} aria-label={`Edit ${promptName(prompt)}`}>
-          <div className="prompt-editor__heading"><Button type="button" className="prompt-editor__back" onClick={back}><ThemeNavigationBackIcon size={13} /> Back to prompts</Button><span>{providerName(prompt)}</span><span className="prompt-editor__status" data-prompt-status={promptStatus}><SemanticIcon name={`status.prompt-${promptStatus}`} size={4} />{promptStatus === 'invalid' ? 'Needs attention' : promptStatus === 'unsaved' ? 'Unsaved' : 'Saved'}</span></div>
+        {prompt ? <section onFocusCapture={() => rememberFocus('editor')} className="prompt-settings-card prompt-editor" data-prompt-editor={prompt.id} aria-label={`Edit ${promptName(prompt)}`}>
+          <div className="prompt-editor__heading"><Button type="button" className="prompt-editor__back" onClick={() => showLibrary(selectedId)}><ThemeNavigationBackIcon size={13} /> Back to prompts</Button><span>{providerName(prompt)}</span><span className="prompt-editor__status" data-prompt-status={promptStatus}><SemanticIcon name={`status.prompt-${promptStatus}`} size={4} />{promptStatus === 'invalid' ? 'Needs attention' : promptStatus === 'unsaved' ? 'Unsaved' : 'Saved'}</span></div>
           {selectedChanged && Object.hasOwn(resource.expected, prompt.id) ? <Button type="button" className="prompt-editor__revert" disabled={saveState.saving} onClick={() => resource.setValue(current => ({ ...current, [prompt.id]: resource.expected[prompt.id]! }))}>Cancel edit</Button> : null}
           {!visible.some((candidate) => candidate.id === prompt.id) ? <p className="prompt-editor__filtered" role="status">This prompt is outside your search or scope. <Button type="button" onClick={showInLibrary}>Show in library</Button></p> : null}
           <div className="prompt-editor__fields">
