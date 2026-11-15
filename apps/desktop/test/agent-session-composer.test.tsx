@@ -236,15 +236,17 @@ describe('AgentSessionComposer adapter', () => {
     expect(markup).not.toMatch(/data-disabled="true"/)
   })
 
-  it('uses the explicit Session and execution owner instead of an observer lookalike', async () => {
+  it('uses the original mounted Session and execution owner instead of a local lookalike', async () => {
     const original = agentSession({ label: 'Original Core', status: { state: 'running', source: 'run-process', observedAt: 2 },
       control: { kind: 'agent', hostId: 'origin', agentSessionId: 'agent-1', run: { runId: 'original-run' } } })
     const observer = agentSession({ label: 'Observer decoy', processState: 'interrupted',
       control: { kind: 'agent', hostId: 'observer', agentSessionId: 'agent-1', run: { runId: 'decoy-run' } } })
     fixture.state.sessions = [observer]
     fixture.state.agentComposerDrafts = { 'runtime-1:agent-1': 'Use the original control' }
+    const target = { hostId: 'origin-mount', target: { reference: { runtimeId: 'origin-runtime', spaceId: 'origin-space' },
+      regionId: 'origin-region', runtimeId: 'execution-runtime', agentSessionId: 'agent-1', expectedRun: { runId: 'original-run' } } }
     const composer = renderComponentBoundary(AgentSessionComposer, {
-      sessionId: 'agent-1', session: original, ownerKey: 'runtime-1:agent-1'
+      sessionId: 'agent-1', source: { target, session: original }, ownerKey: 'runtime-1:agent-1'
     }) as unknown as { props: { disabled?: boolean; onSubmit?: () => void } }
 
     expect(composer.props.disabled).not.toBe(true)
@@ -252,7 +254,7 @@ describe('AgentSessionComposer adapter', () => {
     composer.props.onSubmit?.()
 
     await vi.waitFor(() => expect(fixture.state.send).toHaveBeenCalledWith('runtime-1:agent-1', 'Use the original control',
-      expect.any(Function), 'manual', undefined, expect.objectContaining({ originalSession: original })))
+      expect.any(Function), 'manual', undefined, expect.objectContaining({ originalSession: original, originalMember: target })))
     expect(fixture.state.clearAgentComposerDraftIfUnchanged).toHaveBeenCalledWith('runtime-1:agent-1', 'Use the original control')
     expect(fixture.state.recordAgentComposerHistory).toHaveBeenCalledWith('runtime-1:agent-1', 'Use the original control')
   })

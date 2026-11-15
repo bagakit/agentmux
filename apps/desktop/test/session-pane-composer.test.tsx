@@ -28,7 +28,7 @@ const captured = vi.hoisted(() => ({
   menuCanSplit: null as boolean | null,
   menuRequest: null as { id: number; url: string; x: number; y: number } | null,
   workspaceRoot: null as string | null,
-  composer: null as { session?: SessionSnapshot; ownerKey?: string; providerCatalogEntry?: AgentCatalogEntry | null } | null,
+  composer: null as { paneSession?: { hostId: string; agentSessionId: string } | null; ownerKey?: string; providerCatalogEntry?: AgentCatalogEntry | null } | null,
   openHttpLink: vi.fn(async (_origin: OpenHttpLinkOrigin, _url: string, _dest: OpenDestination) => {})
 }))
 
@@ -117,7 +117,7 @@ vi.mock('../src/renderer/src/components/OpenDestinationBar.js', () => ({
   }
 }))
 vi.mock('../src/renderer/src/components/AgentSessionComposer.js', () => ({
-  AgentSessionComposer: (props: { disabled?: boolean; session?: SessionSnapshot; ownerKey?: string; providerCatalogEntry?: AgentCatalogEntry | null }) => {
+  AgentSessionComposer: (props: NonNullable<typeof captured.composer> & { disabled?: boolean }) => {
     captured.composer = props
     return <div data-test-agent-composer={props.disabled ? 'disabled' : 'enabled'} />
   }
@@ -255,7 +255,7 @@ describe('这一格按哪个仓根缩短路径', () => {
 })
 
 describe('SessionPane Agent Composer ownership', () => {
-  it('passes the resolved Session, catalog and stable execution owner to the Composer boundary', () => {
+  it('passes the resolved local Session identity, catalog and stable execution owner to the Composer boundary', () => {
     const original = session('agent')
     const catalog = { id: 'codex', composer: { commands: [] } } as AgentCatalogEntry
     fixture.state.sessions = [original]
@@ -264,7 +264,7 @@ describe('SessionPane Agent Composer ownership', () => {
 
     render('agent-1', 'agent')
 
-    expect(captured.composer?.session).toBe(original)
+    expect(captured.composer?.paneSession).toEqual({ hostId: 'local', agentSessionId: 'agent-1' })
     expect(captured.composer?.ownerKey).toBe('agent-1')
     expect(captured.composer?.providerCatalogEntry).toBe(catalog)
   })

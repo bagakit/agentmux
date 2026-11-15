@@ -517,7 +517,8 @@ it('a retained Composer ignores non-input timeline appends while hidden and keep
   expect(timeline.sourceHostId).toBe(session.hostId)
   useAppStore.setState({ sessions: [session], timelines: { [session.id]: timeline },
     agentComposerDrafts: { [session.id]: 'Keep my original editor and draft' }, agentSteerQueues: { [session.id]: [queued, retained] } })
-  const composer = (visible: boolean) => <AgentSessionComposer sessionId={session.id} session={session} visible={visible} />
+  const composerOwner = { hostId: session.control.hostId, agentSessionId: session.control.agentSessionId }
+  const composer = (visible: boolean) => <AgentSessionComposer sessionId={session.id} paneSession={composerOwner} visible={visible} />
   await dom.render(composer(true))
   const editor = dom.container.querySelector<HTMLElement>('.ProseMirror')!
   const panel = dom.container.querySelector<HTMLElement>('.composer-mailbox')!
