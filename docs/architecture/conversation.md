@@ -10,10 +10,10 @@
 
 | 事实 | owner 与源码入口 |
 | --- | --- |
-| 原生记录、parts、回合、问题与原生延续位置 | Provider；[`AgentProvider`](../../packages/core/src/agent-provider.ts)、[`AgentSessionHistoryItem`](../../packages/core/src/types.ts) |
+| 原生记录、parts、回合、问题与原生延续位置 | Provider；[`AgentProvider`](../../packages/core/src/agent-provider.ts)、[`AgentSessionHistoryItem`](../../packages/conversation/src/records.ts) |
 | Session、原生绑定、输入／交互回执与 captured 记录 | Core；[`AgentMuxClient`](../../packages/core/src/client.ts) 与 Session Store 接口 [`AgentMuxAgentSessionStore`](../../packages/core/src/agent-session-store.ts) |
 | captured 流、提交序号与旧版本 | Session Store 的 [`captured-history`](../../packages/core/src/captured-history.ts)；[`captured-history-import`](../../packages/core/src/captured-history-import.ts) 在同一 writer 与事务内接管旧 JSONL，保留原始文件（见 [captured 记录的存储与版本退休](#captured-记录的存储与版本退休)） |
-| 记录到事件、角色、作者、顺序、关系与内容归属 | Core 的纯函数 [`projectConversationStream`](../../packages/core/src/conversation-stream.ts)；浏览器与 Node 消费同一实现 |
+| 记录到事件、角色、作者、顺序、关系与内容归属 | 对话语义包的 [`projectConversationStream`](../../packages/conversation/src/conversation-stream.ts)；浏览器与 Node 消费同一实现 |
 | 通用 Run、PTY 有序字节、Replay 与 Gap | ctxmux；Core 经 [`CtxmuxRunAdapter`](../../packages/core/src/ctxmux-run-adapter.ts) 消费，见 [Terminal 运行时](terminal-runtime.md) |
 | 消息、过程、Question、来源与载荷的共同呈现 | [`client-ui`](../../packages/client-ui/src/components/ConversationView.tsx)；宿主注入 [`ClientUiPlatform`](../../packages/client-ui/src/platform.tsx) 能力 |
 | 公共读取的已接受贡献、页邻接与有界临时窗 | [`conversation-reader`](../../packages/core/src/conversation-reader.ts)；持久记录仍归各自 owner |
@@ -26,12 +26,12 @@
 
 ### 语义流的模块边界
 
-统一对话是 Core 的模块，公开入口是 [`@agentmux/core/conversation`](../../packages/core/package.json)。Provider 原生协议由 [`@agentmux/providers`](../../packages/providers/package.json) 按厂商实现，经 Core 的 [`AgentProvider`](../../packages/core/src/agent-provider.ts) 接入。共享界面由 `@agentmux/client-ui` 消费公共结果。
+统一对话语义流由 [`@agentmux/conversation`](../../packages/conversation/package.json) 持有。进程外消费者可用包入口投影已经从来源读取并核对过的记录。实时产品的公共入口仍是 [`@agentmux/core/conversation`](../../packages/core/package.json)，由 Core 管理原 Session 和读取范围。Provider 原生协议由 [`@agentmux/providers`](../../packages/providers/package.json) 按厂商实现，经 Core 的 [`AgentProvider`](../../packages/core/src/agent-provider.ts) 接入。共享界面由 `@agentmux/client-ui` 消费公共结果。
 
 | 边界 | 实现与责任 |
 | --- | --- |
 | 来源适配 | [`conversation-timeline`](../../packages/core/src/conversation-timeline.ts) 把 SDK 的 native page 与 captured timeline 转为源记录，保留 source Host、来源顺序与 writer 版本。Provider 继续解释各自的原生协议。 |
-| 纯语义流 | [`conversation-stream`](../../packages/core/src/conversation-stream.ts) 的 `projectConversationStream` 消费已接受的 `ConversationSourceRecord`，统一事件、作者、关系、版本、覆盖与部分顺序；没有 IO、订阅或持久 Store，不决定输入资格。 |
+| 纯语义流 | [`projectConversationStream`](../../packages/conversation/src/conversation-stream.ts) 消费已接受的 `ConversationSourceRecord`，统一事件、作者、关系、版本、覆盖与部分顺序，返回的记录保留原对象与版本。包可在浏览器或 Node 运行，数据来源和读取范围由调用方提供。 |
 | 读取协调 | [`conversation-reader`](../../packages/core/src/conversation-reader.ts) 持有来源读取、cut、分页及临时阅读窗，把带版本的源记录直接交给语义流，不从 page／timeline 还原后再造记录或重算版本。scope、frontier 与分页位置的相等比较复用 `conversationValuesEqual` 的 canonical value 语义，不为纯比较生成内容摘要；记录与事件的版本校验、签名续读资格仍在协议边界执行。页预算在本次读取内累计已接受条目的 JSON 字节与分隔符，候选保留游标与 envelope 大小，不逐项重编码整个已接受前缀；最终的完整页仍执行字节预算与严格解析。 |
 | 公共输送 | [`conversation-changes`](../../packages/core/src/conversation-changes.ts) 校验并组装完整的版本化窗口；尚未收齐的 wire fragment 不表示语义节点处于半开状态。 |
 | 客户端消费 | Desktop、Mobile 与 Connectors 消费同一公共 Reader；`projectConversationWindow` 只适配已接受的事件，不重判关联、作者或顺序。 |
@@ -69,7 +69,7 @@ Inputs 的有界搜索与分页由 `agent.history` 与 `agent.input.ls` 提供�
 
 声明 `changesCursor` 与 `replayCursor` 的 Provider（字段见 [`AgentSessionHistoryPage`](../../packages/core/src/types.ts)）从同一次冻结读取取得页快照的 changes 边界与页起点，通常经共享的 [`NativeJsonlHistoryReader`](../../packages/core/src/native-jsonl-history-reader.ts)；这避免了另做一次 checkpoint 时，checkpoint 与页读取之间同一 ID 的版本竞态。支持耐久变化读取的 Provider 在 `AgentProvider` 上声明 `readConversationChanges`（[agent-provider.ts](../../packages/core/src/agent-provider.ts)）。Pi 的 [`readPiConversationChanges`](../../packages/providers/src/pi/native-history.ts) 从切点之前的叶记录继续逐项校验 parent 关系；分支改变由 Reader 表达为来源 gap，之后的 Current 读取重新读取选中的分支。
 
-调用关联以每个 part 对其 scoped invocation 的 `invocation-member` 归属表达，单个成员也保留；`conversationInvocationId` 由 Core 唯一定义。归属及其所在事件的版本，不依赖同一批是否读到另一个成员，公共 Reader 也不为此反查全部历史。相同的调用身份不合并父发言，也不表示未读的对端内容已经可读。
+调用关联以每个 part 对其 scoped invocation 的 `invocation-member` 归属表达，单个成员也保留；`conversationInvocationId` 由对话语义包唯一定义。归属及其所在事件的版本，不依赖同一批是否读到另一个成员，公共 Reader 也不为此反查全部历史。相同的调用身份不合并父发言，也不表示未读的对端内容已经可读。
 
 每条原生答案的 typed `questionAnswers` 独立产生 `answers` 关系，目标只持 source Host、Session、Provider／native source 与完整的不透明 question ID，不要求同批读到问题，也不猜问题所在的记录或 turn。`conversation-questions` 限定读卡片的 Host 与来源；`conversation-stream` 的关系函数同时供投影与严格 codec 使用。`answers` 与 `observes` 只归发起记录所在的事件，读到目标不会改变目标事件的版本；未读的目标保留 gap。多条答案分别保留，卡片显示哪个选择不代替关系的保全。
 
@@ -124,7 +124,7 @@ Codex 保存的 rollout 由首条 `session_meta` 中的 `history_mode` 声明格
 - 其他格式保留各自原有的合同：`response_item` 的用户消息仍是用户发言。
 - 有界的 app-server indexed history（[app-server-native-history.ts](../../packages/providers/src/app-server/native-history.ts)）要求 `thread/read` 返回的 `historyMode` 为 `paginated`，否则页读取报告 `AGENT_SESSION_HISTORY_UNSUPPORTED`，精确记录读取报告记录不受支持；保存的 JSONL 读取不依赖这个 helper。
 
-原生协作回报由 Provider 的历史适配解释，沿 `collaboration.kind = message` 保留 source、发送者、接收者、记录与回合；[`session-history`](../../packages/core/src/session-history.ts) 核对其原生命名空间，[Core 语义流](../../packages/core/src/conversation-stream.ts) 把它当作真实的消息边界，不借用父 Session 的作者。共同的 `ConversationView` 显示原生参与者与正文，不以 actor 字符串查询 AgentMux 身份或补头像。没有消息关联的 Hook 快照仍是独立的观察；[`conversation-reply-preview`](../../packages/client-ui/src/lib/conversation-reply-preview.ts) 只生成有界的阅读摘要，不持有关联或正文事实。
+原生协作回报由 Provider 的历史适配解释，沿 `collaboration.kind = message` 保留 source、发送者、接收者、记录与回合；[`session-history`](../../packages/core/src/session-history.ts) 核对其原生命名空间，[对话语义流](../../packages/conversation/src/conversation-stream.ts) 把它当作真实的消息边界，不借用父 Session 的作者。共同的 `ConversationView` 显示原生参与者与正文，不以 actor 字符串查询 AgentMux 身份或补头像。没有消息关联的 Hook 快照仍是独立的观察；[`conversation-reply-preview`](../../packages/client-ui/src/lib/conversation-reply-preview.ts) 只生成有界的阅读摘要，不持有关联或正文事实。
 
 ### 原生结果的接线与能力边界
 
