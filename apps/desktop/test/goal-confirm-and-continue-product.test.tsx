@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { parseAgentMuxMessagePrefix, parseGoalConfirmation } from '@agentmux/core/agent-message-render'
 import { act, createElement } from 'react'
 import { expect, it, vi } from 'vitest'
 import { execFile } from 'node:child_process'
@@ -52,12 +53,15 @@ it('confirms the displayed proposal and sends one original notification after th
   await act(async () => { f.emit('owner'); await f.flushPatrol(); await settle() })
   await vi.waitFor(() => expect(notification()?.getAttribute('data-goal-confirmation-notification')).toBe('delivered'))
   const delivered = (await f.demands.get(goalId))!.patrols![0]!.attempts[0]!
-  expect(JSON.parse(delivered.agentMuxNote)).toMatchObject({ schema: 'agentmux.goal-confirmation.v1', goalId,
-    goalUrl: goal().address?.goalUrl, alignmentRevision: 1, operationId: original.operationId })
+  expect(parseGoalConfirmation(delivered.agentMuxNote)).toEqual({ goalUrl: goal().address?.goalUrl, alignmentRevision: 1, operationId: original.operationId })
   expect((await f.rpc.call('goal.delegations', { goalId })).patrolObservations).toMatchObject([{ operationId: original.operationId, state: 'delivered' }])
-  const writes = f.nativeWrites.filter(write => write.data.includes('agentmux.goal-confirmation.v1'))
+  const writes = f.nativeWrites.filter(write => write.data.includes('<amux:goal '))
   expect(writes).toHaveLength(1)
   expect(writes[0]).toMatchObject({ runId: 'owner-run' })
+  expect(writes[0]?.data).toContain(delivered.agentMuxNote)
+  expect(parseAgentMuxMessagePrefix(delivered.agentMuxNote)?.protocol).toMatchObject({
+    id: 'goal-confirmation', tag: 'amux:goal', raw: delivered.agentMuxNote
+  })
   expect(f.attempts).toHaveLength(1)
   await f.restartPatrol(); await f.flushPatrol()
   expect(f.attempts).toHaveLength(1)
@@ -72,7 +76,7 @@ it('keeps a saved confirmation and an unconfirmed notification without resending
   await vi.waitFor(() => expect(notification()?.textContent).toContain('notification unconfirmed'))
   await f.flushPatrol()
   expect((await f.demands.get(goalId))!.alignment?.confirmedAt).toBeGreaterThan(0)
-  expect(f.nativeWrites.filter(write => write.data.includes('agentmux.goal-confirmation.v1'))).toHaveLength(1)
+  expect(f.nativeWrites.filter(write => write.data.includes('<amux:goal '))).toHaveLength(1)
   await act(async () => {
     await f.restartPatrol()
     f.patrolState.receiptUnavailable = false
