@@ -4,7 +4,8 @@ import { rpcRecord } from '../rpc-data.js'
 import { parseMoteGroupParams, parseMoteGroupResult, type MoteGroupCallContext, type MoteGroupMember, type MoteGroupMessage } from './group.js'
 import { parseMotePreferencesTarget, sameMotePreferencesTarget, type MotePreferencesTarget } from './preferences.js'
 import { parseAgentScheduleTiming, type AgentScheduleTiming } from '../agent-schedule.js'
-import { scheduleMatchesCreation, validateScheduleRpcResult, type ScheduleParamsMap, type ScheduleResultMap } from '../public-rpc-schedules.js'
+import { scheduleMatchesCreation, validateScheduleRpcResult, type ScheduleResultMap } from '../public-rpc-schedules.js'
+import type { MoteScheduleContext } from './scheduled-work.js'
 
 type Page = { beforeSequence?: number; limit?: number }
 export type MoteDirectParticipant = Pick<MoteGroupMember, 'moteId' | 'target' | 'name' | 'thread'>
@@ -52,10 +53,7 @@ export const isMoteDirectMethod = (method: unknown): method is MoteDirectMethod 
 export interface MoteDirectPort {
   call<M extends MoteDirectMethod>(method: M, input: MoteDirectParamsMap[M], context: MoteDirectCallContext): Promise<MoteDirectResultMap[M]>
 }
-export type MoteDirectCallContext = MoteGroupCallContext & {
-  schedule(input: ScheduleParamsMap['schedule.create']): Promise<ScheduleResultMap['schedule.create']>
-  readSchedule(input: ScheduleParamsMap['schedule.inspect']): Promise<ScheduleResultMap['schedule.inspect']>
-}
+export type MoteDirectCallContext = MoteGroupCallContext & MoteScheduleContext
 
 function privateAssignmentSource(input: MoteDirectParamsMap['space.mote.direct.schedule']): string {
   const target = ({ spaceId, zoneId, expectedResource: { hostId, workspaceId, workspacePath } }: MotePreferencesTarget) =>
@@ -108,9 +106,11 @@ export function parseMoteDirectResult<M extends MoteDirectMethod>(method: M, val
     const request = input as MoteDirectParamsMap['space.mote.direct.schedule']
     const result = validateScheduleRpcResult('schedule.create', value), { schedule } = result
     if (schedule.hostId !== request.mote.expectedResource.hostId) return invalid(code)
+    const matches = schedule.moteWork ? schedule.moteWork.kind === 'direct' && sameMotePreferencesTarget(schedule.moteWork.mote, request.mote) &&
+      sameMotePreferencesTarget(schedule.moteWork.peer, request.peer) && schedule.prompt === request.body : moteDirectScheduleSourceMatches(schedule.prompt, request)
     const { mote: _, peer: __, body: ___, ...timing } = request
     const target = { hostId: schedule.hostId, agentSessionId: schedule.agentSessionId, providerId: schedule.providerId, workspacePath: schedule.workspacePath }
-    if (!moteDirectScheduleSourceMatches(schedule.prompt, request) || !scheduleMatchesCreation(schedule, { ...timing, target, prompt: schedule.prompt,
+    if (!matches || !scheduleMatchesCreation(schedule, { ...timing, target, prompt: schedule.prompt,
       ...(schedule.inputEpoch ? { inputEpoch: schedule.inputEpoch } : {}) })) return invalid(code)
     return result as MoteDirectResultMap[M]
   }

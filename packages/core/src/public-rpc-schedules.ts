@@ -8,6 +8,7 @@ import { parseAgentScheduleCheckIn, parseAgentScheduleTiming, type AgentSchedule
 import { optionalInputEpoch, agentPromptInputId, validateAgentPromptCondition } from './agent-prompt-condition.js'
 import { continuousProgressRequestDigest, isAgentSchedule, validateContinuousProgressPause, type ContinuousProgressLoop, type ContinuousProgressTarget } from './continuous-progress-scheduler.js'
 import type { AgentMuxRpcCallContext } from './public-rpc-service.js'
+import { parseMoteScheduledWork, type MoteScheduledWork } from './mote/scheduled-work.js'
 
 export type ScheduleMutation = { scheduleId: string; expectedRevision: number; operationId: string }
 export type ScheduleScope = Pick<ContinuousProgressTarget, 'hostId' | 'workspacePath'>
@@ -77,7 +78,7 @@ export type ScheduleResultMap = {
 }
 export type ScheduleMethod = keyof ScheduleParamsMap
 export interface AgentMuxRpcSchedulesOwner {
-  call<M extends ScheduleMethod>(method: M, params: ScheduleParamsMap[M], context?: AgentMuxRpcCallContext): Promise<ScheduleResultMap[M]>
+  call<M extends ScheduleMethod>(method: M, params: ScheduleParamsMap[M], context?: AgentMuxRpcCallContext & { moteWork?: MoteScheduledWork }): Promise<ScheduleResultMap[M]>
 }
 export const AGENTMUX_RPC_SCHEDULE_METHODS = {
   'schedule.list': 'short', 'schedule.inspect': 'short', 'schedule.history': 'short', 'schedule.create': 'long',
@@ -160,8 +161,20 @@ export function parseScheduleRpcParams<M extends ScheduleMethod>(method: M, valu
 }
 export function parseScheduleRecord(value: unknown): ContinuousProgressLoop {
   const code = 'CONTROL_PROTOCOL_ERROR'
-  const p = rpcRecord(value, ['inputEpoch','loopId','hostId','agentSessionId','providerId','workspacePath','calendar','afterMs','everyMs','checkIn','checkInState','revision','creationOperationId','creationRequestDigest','lastMutation','futureIntentId','lastOccurrenceAt','intervalMs','prompt','nextCheckAt','status','pause','pendingCompletion','lastCompletionId','lastTickId','lastOutcome','lastTickAt','lastDecision','taskSource','managedSource','managedScheduleNote','currentDefinition','guidanceAdoptions','lastInputRef'], code)
+  const p = rpcRecord(value, ['inputEpoch','loopId','hostId','agentSessionId','providerId','workspacePath','calendar','afterMs','everyMs','checkIn','checkInState','revision','creationOperationId','creationRequestDigest','lastMutation','futureIntentId','lastOccurrenceAt','intervalMs','prompt','nextCheckAt','status','pause','pendingCompletion','lastCompletionId','lastTickId','lastOutcome','lastTickAt','lastDecision','taskSource','managedSource','managedScheduleNote','currentDefinition','guidanceAdoptions','lastInputRef','moteWork','lastMotePublication'], code)
   optionalInputEpoch(p.inputEpoch)
+  if (p.moteWork !== undefined) {
+    const work = parseMoteScheduledWork(p.moteWork)
+    if (work.mote.expectedResource.hostId !== p.hostId || p.futureIntentId !== undefined || p.managedSource !== undefined || p.taskSource !== undefined || p.checkIn !== undefined)
+      invalid('A Mote assignment has one logical owner and one work delivery.', code)
+  }
+  if (p.lastMotePublication !== undefined) {
+    const publication = rpcRecord(p.lastMotePublication, ['conversationId', 'messageId', 'operationId', 'occurrenceAt'], code)
+    for (const field of ['conversationId', 'messageId', 'operationId']) string(publication[field], code)
+    integer(publication.occurrenceAt, code)
+    if (!p.moteWork || publication.occurrenceAt !== p.lastOccurrenceAt || publication.operationId !== `scheduled/${p.loopId}/${publication.occurrenceAt}`)
+      invalid('The publication belongs to another arrangement or occurrence.', code)
+  }
   if (p.managedSource !== undefined) parseAutomaticInputSource(p.managedSource)
   if (p.managedScheduleNote !== undefined) string(p.managedScheduleNote, code, 64 * 1024)
   if (p.currentDefinition !== undefined) parseContinuousProgressDefinition(p.currentDefinition)
@@ -249,7 +262,7 @@ export function validateScheduleRpcResult<M extends ScheduleMethod>(method: M, v
   if (method !== 'schedule.list' && method !== 'schedule.inspect' && p.diskDurability !== 'confirmed') invalid('Schedule persistence is unconfirmed.', code)
   const records = method === 'schedule.list' ? p.schedules as ContinuousProgressLoop[] : p.schedule === null ? [] : [p.schedule as ContinuousProgressLoop]
   for (const schedule of records) {
-    if (!isAgentSchedule(schedule) || !schedule.revision || !schedule.futureIntentId || !schedule.creationOperationId) invalid('Schedule identity or admission is unconfirmed.', code)
+    if (!isAgentSchedule(schedule) || !schedule.revision || !(schedule.futureIntentId || schedule.moteWork) || !schedule.creationOperationId) invalid('Schedule identity or admission is unconfirmed.', code)
     if (params) {
       if (method === 'schedule.list') {
         const { target, scope } = params as ScheduleParamsMap['schedule.list']

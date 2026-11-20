@@ -27,7 +27,11 @@ export type GoalProgressOwner = {
   continueInitial?(loop: ContinuousProgressLoop, context: AgentMuxRpcCallContext): Promise<void>
 }
 /** In-process producer context for the original managed schedule. Public schedule.create cannot set it. */
-type ScheduleOwnerContext = AgentMuxRpcCallContext & { managedScheduleNote?: string }
+type ScheduleOwnerContext = AgentMuxRpcCallContext & { managedScheduleNote?: string; moteWork?: NonNullable<ContinuousProgressLoop['moteWork']> }
+type MoteWorkOwner = {
+  dispatch(work: NonNullable<ContinuousProgressLoop['moteWork']>, body: string, operationId: string, assertCurrent: () => Promise<void>): Promise<{ conversationId: string; messageId: string }>
+  owns(work: NonNullable<ContinuousProgressLoop['moteWork']>, caller: NonNullable<AgentMuxRpcCallContext['caller']>): Promise<boolean>
+}
 export type GoalProgressStart = ContinuousProgressTarget & { goalId: string; alignmentRevision: number; intervalMs: number; operationId: string; prompt: string; inputEpoch?:string }
 
 export type FutureProgressInputOwner = {
@@ -78,6 +82,8 @@ export type MaintenanceSourceOwner = { maintain(now: number, signal: AbortSignal
 /** Host owner: scheduler and durable store stay together; renderer only observes results. */
 export class ContinuousProgressLoopManager {
   private maintenanceOwner: MaintenanceSourceOwner | undefined
+  private moteWorkOwner: MoteWorkOwner | undefined
+  setMoteWorkOwner(owner: MoteWorkOwner): void { this.moteWorkOwner = owner }
   private readonly maintenanceChecks = new Set<Promise<{ owner: MaintenanceSourceOwner; error: unknown } | null>>()
   private maintenanceController: AbortController | undefined
   /** In memory only: a restarted Host asks every source again. */
@@ -604,6 +610,7 @@ export class ContinuousProgressLoopManager {
     signal.throwIfAborted()
     const loop = this.scheduler.get(query.scheduleId)
     if (!loop || !isAgentSchedule(loop)) throw new AgentMuxError('The original schedule is unknown here.', 'UNKNOWN_SCHEDULE')
+    if (loop.moteWork) await this.authorizeCaller(loop, context)
     const { scheduleId, from, to } = query
     let result: Awaited<ReturnType<NonNullable<FutureProgressInputOwner['readHistory']>>> | undefined
     try {
@@ -624,12 +631,17 @@ export class ContinuousProgressLoopManager {
     const scope = { executionScope: 'connected-host' as const }
     if (method === 'schedule.list') {
       const { target, scope: directory } = params as ScheduleParamsMap['schedule.list']
-      return { ...scope, schedules: this.scheduler.list(target ?? directory).filter(isAgentSchedule) } as ScheduleResultMap[M]
+      const schedules = this.scheduler.list(target ?? directory).filter(isAgentSchedule)
+      const caller = context?.caller
+      const visible = caller ? (await Promise.all(schedules.map(async loop => !loop.moteWork || await this.moteWorkOwner?.owns(loop.moteWork, caller) ? loop : null)))
+        .filter(loop => loop !== null) : schedules
+      return { ...scope, schedules: visible } as ScheduleResultMap[M]
     }
     if (method === 'schedule.inspect') {
       const p = params as ScheduleParamsMap['schedule.inspect']
       const selected = p.scheduleId ? this.scheduler.get(p.scheduleId) : this.list().find(loop => isAgentSchedule(loop) && (loop.creationOperationId === p.operationId || loop.guidanceAdoptions?.some(value => value.operationId === p.operationId) || loop.lastMutation?.operationId === p.operationId || loop.pendingCompletion?.operationId === p.operationId || loop.lastTickId === p.operationId || loop.lastInputRef && agentPromptInputId(loop.lastInputRef.inputKey) === p.operationId))
       const schedule = selected && isAgentSchedule(selected) ? selected : null
+      if (schedule?.moteWork) await this.authorizeCaller(schedule, context)
       let input: ContinuousProgressInputReading | undefined
       if (schedule?.lastInputRef) {
         try { input = await awaitUntilCancelled(async () => await this.futureInputs?.inspectInput?.(schedule), context?.signal ?? new AbortController().signal) }
@@ -642,10 +654,10 @@ export class ContinuousProgressLoopManager {
       const p = params as ScheduleParamsMap['schedule.create']
       if (p.checkIn && (context?.caller || !context?.principal || !['user','device'].includes(context.principal.kind))) throw new AgentMuxError('Quiet follow-up requires explicit opt-in from the authenticated user or device. Existing arrangements and manual input remain available.', 'SCHEDULE_CHECK_IN_OPT_IN_REQUIRED')
       if (p.managedSource && context?.caller) throw new AgentMuxError('Standing maintenance requires the original person/device configuration owner.', 'CONTROL_PERMISSION_DENIED')
-      await this.authorizeCaller(p.target, context)
       const existing = this.list().find(loop => loop.creationOperationId === p.operationId)
+      if (!existing?.moteWork || !context?.moteWork) await this.authorizeCaller(p.target, context)
       if (existing) {
-        if (!scheduleMatchesCreation(existing, p)) throw new AgentMuxError('Schedule operation was reused with conflicting target or content. Inspect the original operation.', 'SCHEDULE_OPERATION_CONFLICT')
+        if (!scheduleMatchesCreation(existing, p) || !isDeepStrictEqual(existing.moteWork, context?.moteWork)) throw new AgentMuxError('Schedule operation was reused with conflicting target or content. Inspect the original operation.', 'SCHEDULE_OPERATION_CONFLICT')
         return { ...scope, schedule: await this.finishScheduleCreation(existing.loopId, context), diskDurability: 'confirmed' } as ScheduleResultMap[M]
       }
       if (p.managedSource && this.listManaged(p.managedSource.sourceId).some(loop => loop.status !== 'stopped' && loop.managedSource?.sourceId === p.managedSource!.sourceId)) throw new AgentMuxError('The original managed source already has an arrangement. Inspect that original schedule.', 'SCHEDULE_MANAGED_EXISTS')
@@ -654,7 +666,8 @@ export class ContinuousProgressLoopManager {
       const nextDue = p.calendar ? nextCalendarOccurrence(p.calendar, this.now()) : this.now() + (p.afterMs ?? p.everyMs!)
       if (nextDue !== null && (!Number.isSafeInteger(nextDue) || nextDue < 0 || p.everyMs !== undefined && !Number.isFinite(new Date(nextDue).getTime()))) throw new AgentMuxError('The requested delay exceeds the safe absolute schedule clock. Choose a representable delay; the Agent and manual input remain available.', 'INVALID_CONTROL_REQUEST')
       if (nextDue === null) throw new AgentMuxError('This one-time civil occurrence is past or falls in a skipped DST gap. Choose a valid future time.', 'SCHEDULE_NO_FUTURE_OCCURRENCE')
-      const loop = this.scheduler.createSchedule({ ...p.target,...optionalInputEpoch(p.inputEpoch), prompt: p.prompt, nextDue, operationId: p.operationId, creationRequestDigest: continuousProgressRequestDigest(p), ...(p.managedSource && context?.managedScheduleNote ? { managedScheduleNote: context.managedScheduleNote } : {}), ...(p.managedSource ? { managedSource: p.managedSource } : {}), ...(p.calendar ? { calendar: p.calendar, ...(p.checkIn ? { checkIn: p.checkIn } : {}) } : p.afterMs !== undefined ? { afterMs: p.afterMs } : { everyMs: p.everyMs! }) })
+      const loop = this.scheduler.createSchedule({ ...p.target,...optionalInputEpoch(p.inputEpoch), prompt: p.prompt, nextDue, operationId: p.operationId, creationRequestDigest: continuousProgressRequestDigest(p), ...(context?.moteWork ? { moteWork: context.moteWork } : {}), ...(p.managedSource && context?.managedScheduleNote ? { managedScheduleNote: context.managedScheduleNote } : {}), ...(p.managedSource ? { managedSource: p.managedSource } : {}), ...(p.calendar ? { calendar: p.calendar, ...(p.checkIn ? { checkIn: p.checkIn } : {}) } : p.afterMs !== undefined ? { afterMs: p.afterMs } : { everyMs: p.everyMs! }) })
+      if (loop.moteWork) return { ...scope, schedule: await this.confirmScheduleSnapshot(loop.loopId), diskDurability: 'confirmed' } as ScheduleResultMap[M]
       this.pauseWithReason(loop.loopId, 'preparation')
       return { ...scope, schedule: await this.finishScheduleCreation(loop.loopId, context), diskDurability: 'confirmed' } as ScheduleResultMap[M]
     }
@@ -709,8 +722,12 @@ export class ContinuousProgressLoopManager {
     this.listeners.add(listener)
     return () => { this.listeners.delete(listener) }
   }
-  private async authorizeCaller(target: ContinuousProgressTarget, context?: AgentMuxRpcCallContext): Promise<void> {
+  private async authorizeCaller(target: ContinuousProgressTarget & Pick<ContinuousProgressLoop, 'moteWork'>, context?: AgentMuxRpcCallContext): Promise<void> {
     if (!context?.caller) return
+    if (target.moteWork) {
+      if (await this.moteWorkOwner?.owns(target.moteWork, context.caller)) return
+      throw new AgentMuxError('Only the coordinating Mote Main can access this assignment arrangement.', 'CONTROL_PERMISSION_DENIED')
+    }
     if (!this.futureInputs?.authorizeFutureIntent) throw new AgentMuxError('The original target authorization owner is unavailable; the arrangement and manual Agent input are retained.', 'SCHEDULE_INPUT_OWNER_UNAVAILABLE')
     await this.futureInputs.authorizeFutureIntent(target, context)
   }
@@ -767,6 +784,7 @@ export class ContinuousProgressLoopManager {
     return confirmed
   }
   private async saveFutureIntent(loop: ContinuousProgressLoop, active: boolean, context?: AgentMuxRpcCallContext): Promise<void> {
+    if (loop.moteWork) return
     const current = this.require(loop.loopId), activating = active && current.status !== 'stopped'
     try { await this.futureInputs?.saveFutureIntent(current, activating, context) }
     finally {
@@ -1150,6 +1168,7 @@ export class ContinuousProgressLoopManager {
     }
     if (now === undefined) checkAt = Math.max(checkAt, this.now())
     refreshLatest()
+    if (loop.moteWork) return await this.runMoteWork(this.require(loopId), checkAt, deliveryState)
     // A read-only probe can avoid a durable claim only for confirmed busy input.
     // Everything else still follows the original claim and final admission fence.
     let preflightFailure: unknown, preflightFailed = false
@@ -1358,6 +1377,36 @@ export class ContinuousProgressLoopManager {
       this.deferredChecks.delete(loopId)
       for (const listener of this.listeners) listener(this.require(loopId))
     } else await this.persist(claim.loop.loopId)
+  }
+
+  private async runMoteWork(loop: ContinuousProgressLoop, checkAt: number, delivery: { controller: AbortController; inputStarted: boolean }): Promise<void> {
+    const { loopId, moteWork, nextCheckAt: occurrenceAt } = loop
+    const owner = this.moteWorkOwner
+    if (!moteWork || !owner) return
+    const operationId = `scheduled/${loopId}/${occurrenceAt}`
+    const assertCurrent = async () => {
+      if (delivery.controller.signal.aborted || this.require(loopId).status !== 'active' ||
+          this.require(loopId).pendingCompletion?.operationId !== operationId) throw new AgentMuxError(
+        'This original Mote occurrence is no longer active.', 'CONTROL_REQUEST_CONFLICT')
+    }
+    this.patch(loopId, { pendingCompletion: { id: operationId, operationId }, lastTickId: operationId, lastTickAt: checkAt })
+    await this.saveLoops()
+    try {
+      await assertCurrent()
+      delivery.inputStarted = true
+      const publication = await owner.dispatch(moteWork, loop.prompt, operationId, assertCurrent)
+      const { pendingCompletion: _, ...settled } = this.require(loopId)
+      const status = settled.status
+      this.completeScheduledOccurrence(settled, occurrenceAt, checkAt)
+      if (status !== 'active' && settled.status === 'active') settled.status = status
+      settled.lastDecision = 'The assignment was saved in its original conversation. Read that message for member delivery.'
+      this.scheduler.replace(loopId, { ...settled, lastOutcome: 'sent', lastMotePublication: { ...publication, operationId, occurrenceAt } })
+      this.deferredChecks.delete(loopId)
+    } catch (error) {
+      if (this.require(loopId).status === 'active') this.deferCheck(loopId, checkAt)
+      this.patch(loopId, { lastOutcome: 'unknown', lastDecision: error instanceof Error ? error.message : String(error) })
+    }
+    await this.persist(loopId)
   }
 
   private completeScheduledOccurrence(loop: ContinuousProgressLoop, occurrenceAt: number, now: number): void {

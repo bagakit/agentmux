@@ -53,6 +53,8 @@ export type ContinuousProgressLoop = ContinuousProgressTarget & {
   /** Original platform reading context captured by the Host before freezing this managed arrangement. */
   managedScheduleNote?: string
   managedSource?: import('./automatic-input-source.js').AutomaticInputSource
+  moteWork?: import('./mote/scheduled-work.js').MoteScheduledWork
+  lastMotePublication?: { conversationId: string; messageId: string; operationId: string; occurrenceAt: number }
   taskSource?: ContinuousProgressTaskSource
   loopId: string
   calendar?: AgentScheduleCalendar
@@ -204,12 +206,13 @@ export class ContinuousProgressScheduler {
 
   requestCheck(loopId: string): ContinuousProgressLoop { return this.update(loopId, { nextCheckAt: this.now() }) }
 
-  createSchedule(input: ContinuousProgressTarget & AgentScheduleTiming & { prompt: string; nextDue: number; operationId: string; creationRequestDigest?: string; inputEpoch?:string; managedScheduleNote?: string; managedSource?: import('./automatic-input-source.js').AutomaticInputSource }): ContinuousProgressLoop {
+  createSchedule(input: ContinuousProgressTarget & AgentScheduleTiming & { prompt: string; nextDue: number; operationId: string; creationRequestDigest?: string; inputEpoch?:string; managedScheduleNote?: string; managedSource?: import('./automatic-input-source.js').AutomaticInputSource; moteWork?: ContinuousProgressLoop['moteWork'] }): ContinuousProgressLoop {
     if (!input.hostId || !input.agentSessionId || !input.providerId || !input.workspacePath || !input.prompt.trim() || (!Number.isSafeInteger(input.nextDue) || input.nextDue < 0)) throw new Error('An exact schedule target, message and next occurrence are required.')
     const timing = parseAgentScheduleTiming({ calendar: input.calendar, afterMs: input.afterMs, everyMs: input.everyMs, checkIn: input.checkIn })
     const loopId = this.id()
     const loop: ContinuousProgressLoop = { ...optionalInputEpoch(input.inputEpoch),loopId, hostId: input.hostId, agentSessionId: input.agentSessionId, providerId: input.providerId, workspacePath: input.workspacePath,
-      ...timing, ...(input.managedScheduleNote ? { managedScheduleNote: input.managedScheduleNote } : {}), ...(input.managedSource ? { managedSource: { ...input.managedSource } } : {}), revision: 1, creationOperationId: input.operationId, ...(input.creationRequestDigest ? { creationRequestDigest: input.creationRequestDigest } : {}), futureIntentId: `${loopId}-1`, intervalMs: 1000, prompt: input.prompt, nextCheckAt: input.nextDue, status: 'active' }
+      ...timing, ...(input.managedScheduleNote ? { managedScheduleNote: input.managedScheduleNote } : {}), ...(input.managedSource ? { managedSource: { ...input.managedSource } } : {}), revision: 1, creationOperationId: input.operationId, ...(input.creationRequestDigest ? { creationRequestDigest: input.creationRequestDigest } : {}),
+      ...(input.moteWork ? { moteWork: structuredClone(input.moteWork) } : { futureIntentId: `${loopId}-1` }), intervalMs: 1000, prompt: input.prompt, nextCheckAt: input.nextDue, status: 'active' }
     this.setLoop(loop)
     return structuredClone(loop)
   }

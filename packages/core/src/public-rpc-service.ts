@@ -1519,7 +1519,7 @@ export class AgentMuxRpcService {
     if (isMoteGroupMethod(method) || isMoteDirectMethod(method)) {
       const caller = context.caller ? await this.authenticated(context, true) : undefined
       const agentOnly = method === 'space.mote.group.reply' || method === 'space.mote.group.members.leave' ||
-        method === 'space.mote.direct.send' || method === 'space.mote.direct.reply' || method === 'space.mote.direct.schedule'
+        method === 'space.mote.direct.send' || method === 'space.mote.direct.reply' || method === 'space.mote.direct.schedule' || method === 'space.mote.group.schedule'
       const ownerOnly = method === 'space.mote.group.retry'
       if (caller ? ownerOnly : agentOnly || !context.principal || !['user', 'device'].includes(context.principal.kind))
         throw new AgentMuxError('This Group operation requires its original authenticated workspace participant.', 'CONTROL_PERMISSION_DENIED')
@@ -1537,19 +1537,25 @@ export class AgentMuxRpcService {
         }
       }
       await assertCurrent()
+      const scheduleContext: import('./mote/scheduled-work.js').MoteScheduleContext = {
+        schedule: (request, moteWork) => {
+          if (!moteWork) return this.call('schedule.create', request, context)
+          if (!this.ports.schedules) throw new AgentMuxError('The original Mote arrangement owner is unavailable.', 'CONTROL_UNAVAILABLE')
+          return this.ports.schedules.call('schedule.create', request, { ...context, moteWork })
+        },
+        readSchedule: request => this.call('schedule.inspect', request, context)
+      }
       if (isMoteDirectMethod(method)) {
         const owner = this.ports.moteDirect
         if (!owner) throw new AgentMuxError('The original private Mote conversation owner is unavailable.', 'CONTROL_UNAVAILABLE')
         const input = parseMoteDirectParams(method, params)
-        const result = await owner.call(method, input, { actor, assertCurrent,
-          schedule: request => this.call('schedule.create', request, context),
-          readSchedule: request => this.call('schedule.inspect', request, context) })
+        const result = await owner.call(method, input, { actor, assertCurrent, ...scheduleContext })
         return parseMoteDirectResult(method, result, input) as unknown as AgentMuxRpcResult<M>
       }
       const owner = this.ports.moteGroups
       if (!owner) throw new AgentMuxError('The original built-in Group owner is unavailable. Saved Group messages and Agents are retained.', 'CONTROL_UNAVAILABLE')
       const input = parseMoteGroupParams(method, params)
-      const result = await owner.call(method, input, { actor, assertCurrent })
+      const result = await owner.call(method, input, { actor, assertCurrent, ...scheduleContext })
       return parseMoteGroupResult(method, result, input) as unknown as AgentMuxRpcResult<M>
     }
     if (isMoteChatMethod(method)) {

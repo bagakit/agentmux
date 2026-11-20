@@ -1,6 +1,6 @@
 import { renderAmuxProtocol } from '@agentmux/core/amux-protocol'
 import { createHash } from 'node:crypto'
-import { AgentMuxError, mintObjectId, type AgentInputSubmissionReceipt, type AgentMuxClient,
+import { AgentMuxError, mintObjectId, type AgentInputSubmissionReceipt, type AgentMuxClient, type ContinuousProgressLoop,
   type MoteGroupCallContext, type MoteGroupDelivery, type MoteGroupMember, type MoteGroupMessage,
   type MoteGroupMethod, type MoteGroupParamsMap, type MoteGroupPort, type MoteGroupResultMap,
   type MoteGroupSummary } from '@agentmux/core'
@@ -76,13 +76,24 @@ export async function authorizeMoteConversationMain(main: MoteMainReader | undef
   } }
 }
 
+export async function ownsMoteWork(main: MoteMainReader, client: Pick<AgentMuxClient, 'authorizeRetainedAgentCaller'>,
+  work: NonNullable<ContinuousProgressLoop['moteWork']>, caller: { agentSessionId: string; capability: string }): Promise<boolean> {
+  try {
+    const selected = await main.readCurrentMoteMain(work.mote)
+    if (selected.status !== 'ready' || selected.current?.sessionId !== caller.agentSessionId) return false
+    const session = await client.authorizeRetainedAgentCaller(caller.capability, caller.agentSessionId)
+    return selected.current.hostId === session.hostId && selected.identity?.moteId === work.mote.spaceId
+  } catch { return false }
+}
+
 export function createHostMoteGroups(options: {
   store: MoteGroupStore
   agents: HostMoteChatAgents
   client(hostId: string): Core
   files?: HostMoteGroupFiles
   main?: MoteMainReader
-}): MoteGroupPort {
+}): MoteGroupPort & { dispatchWork(work: Extract<NonNullable<ContinuousProgressLoop['moteWork']>, { kind: 'group' }>, body: string, operationId: string,
+  assertCurrent: () => Promise<void>): Promise<{ conversationId: string; messageId: string }> } {
   const { store, agents } = options
   const lanes = new Map<string, Promise<unknown>>()
   async function memberLane<T>(groupId: string, moteId: string, action: () => Promise<T>): Promise<T> {
@@ -426,6 +437,18 @@ export function createHostMoteGroups(options: {
   }
 
   return {
+    async dispatchWork(work, body, operationId, assertCurrent) {
+      const main = options.main
+      const selected = await main?.readCurrentMoteMain(work.mote)
+      if (!main || selected?.status !== 'ready' || !selected.current || selected.identity?.moteId !== work.mote.spaceId)
+        return groupFailure('The scheduled assignment is saved and awaiting its coordinating Main.', 'CONTROL_UNAVAILABLE')
+      const session = await groupSession({ agentSessionId: selected.current.sessionId, hostId: selected.current.hostId })
+      const { message } = await this.call('space.mote.group.send', { groupId: work.groupId, body, operationId, sourceMote: work.mote,
+        recipientIds: work.recipients.map(member => member.moteId) }, { actor: { kind: 'agent', hostId: selected.current.hostId,
+        agentSessionId: session.agentSessionId, runId: session.run.runId, sourceRuns: [] }, scheduledRecipients: work.recipients,
+        assertCurrent: async () => { await assertCurrent(); await main.assertCurrent(selected) } })
+      return { conversationId: work.groupId, messageId: message.id }
+    },
     async call<M extends MoteGroupMethod>(method: M, raw: MoteGroupParamsMap[M], context: MoteGroupCallContext): Promise<MoteGroupResultMap[M]> {
       await context.assertCurrent()
       const { actor } = context
@@ -494,6 +517,29 @@ export function createHostMoteGroups(options: {
         await context.assertCurrent()
         return { delivery: await freshDelivery(message, input.memberId, true) } as MoteGroupResultMap[M]
       }
+      if (method === 'space.mote.group.schedule') {
+        const { sourceMote: mote, groupId, recipientIds, body, operationId, ...timing } = raw as MoteGroupParamsMap['space.mote.group.schedule']
+        const { schedule, readSchedule } = context
+        if (!main || !schedule || !readSchedule || store.kind !== 'group')
+          return groupFailure('The original Group arrangement owner is unavailable.', 'CONTROL_UNAVAILABLE')
+        const coordinatingMember = await mainMembership(groupId, mote)
+        requireActive(coordinatingMember)
+        const { schedule: original } = await readSchedule({ operationId })
+        const retained = original?.creationOperationId === operationId ? original : undefined
+        const stored = retained?.moteWork
+        if (retained && (stored?.kind !== 'group' || stored.groupId !== groupId || !sameMotePreferencesTarget(stored.mote, mote) ||
+            stored.recipients.length !== recipientIds.length || !stored.recipients.every((entry, index) => entry.moteId === recipientIds[index])))
+          return groupFailure('The original Group assignment differs from this retry.', 'SCHEDULE_OPERATION_CONFLICT')
+        const recipients = stored?.kind === 'group' ? stored.recipients : await Promise.all(recipientIds.map(async moteId => {
+          const record = await store.member(groupId, moteId)
+          requireActive(record)
+          return { moteId, generation: groupMemberGeneration(record) }
+        }))
+        const target = retained ?? await groupSession({ hostId: main.reference.hostId, agentSessionId: main.reference.sessionId })
+        return await main.commit(() => schedule({ ...timing, prompt: body, operationId,
+          target: { hostId: target.hostId, agentSessionId: target.agentSessionId, providerId: target.providerId, workspacePath: target.workspacePath },
+          ...(target.inputEpoch ? { inputEpoch: target.inputEpoch } : {}) }, { kind: 'group', mote, groupId, recipients })) as MoteGroupResultMap[M]
+      }
       const input = raw as MoteGroupParamsMap['space.mote.group.send']
       let membership = main ? await mainMembership(input.groupId, main.target) : undefined
       if (input.memberMoteId !== undefined) {
@@ -509,17 +555,19 @@ export function createHostMoteGroups(options: {
         : actor.kind === 'human' ? actor : groupFailure('Supply sourceMote from your current Main or memberMoteId from your Group Thread.', 'CONTROL_PERMISSION_DENIED')
       const id = stable('message', input.groupId, input.operationId)
       const recipients = input.recipientIds.map(moteId => ({ moteId, operationId: stable('input', input.groupId, id, moteId), status: 'pending' as const }))
-      const hash = digest({ input, actor: membership ? { kind: 'mote', moteId: membership.member.moteId } : actor })
+      const generations = context.scheduledRecipients ? new Map(context.scheduledRecipients.map(({ moteId, generation }) => [moteId, generation])) : undefined
+      const hash = digest({ input, actor: membership ? { kind: 'mote', moteId: membership.member.moteId } : actor,
+        ...(context.scheduledRecipients ? { recipients: context.scheduledRecipients } : {}) })
       const append = () => store.append(input.operationId, hash, { id, groupId: input.groupId,
         createdAt: Date.now(), body: input.body, author, ...(input.replyToMessageId ? { replyToMessageId: input.replyToMessageId } : {}) },
-      recipients, membership && memberAuthority(membership))
+      recipients, membership && memberAuthority(membership), undefined, generations)
       if (!main) await context.assertCurrent()
       const { message, fresh } = await (main ? main.commit(append) : append())
       if (!fresh) return { message: await readMessage(message) } as MoteGroupResultMap[M]
       // The public message has been committed once. One failing member cannot stop other recipients.
-      const deliveries = await Promise.allSettled(recipients.map(delivery => freshDelivery(message, delivery.moteId, false)))
+      const deliveries = await Promise.allSettled(message.deliveries.map(delivery => freshDelivery(message, delivery.moteId, false)))
       return { message: { ...message, deliveries: deliveries.map((result, index) => result.status === 'fulfilled' ? result.value
-        : { ...recipients[index]!, status: 'unknown', issue: currentIssue(result.reason) }) } } as MoteGroupResultMap[M]
+        : { ...message.deliveries[index]!, status: 'unknown', issue: currentIssue(result.reason) }) } } as MoteGroupResultMap[M]
     }
   }
 }

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { AgentMuxError, moteDirectSchedulePrompt, moteDirectScheduleSourceMatches, type AgentMuxClient, type MoteDirectCallContext, type MoteDirectMainNotification, type MoteDirectMethod, type MoteDirectMessage, type MoteDirectParamsMap, type MoteDirectPort,
+import { AgentMuxError, moteDirectScheduleSourceMatches, type AgentMuxClient, type ContinuousProgressLoop, type MoteDirectCallContext, type MoteDirectMainNotification, type MoteDirectMethod, type MoteDirectMessage, type MoteDirectParamsMap, type MoteDirectPort, type MoteGroupCallContext,
   type MoteDirectResultMap, type MoteDirectThread, type MoteGroupMessage, type MoteGroupPort, type MoteGroupSummary } from '@agentmux/core'
 import { renderAmuxProtocol } from '@agentmux/core/amux-protocol'
 import { sameMotePreferencesTarget, type MotePreferencesTarget } from '@agentmux/core/mote-preferences'
@@ -29,7 +29,8 @@ export function createHostMoteDirect(ledger: MoteGroupPort, owner: {
   store: MoteGroupStore
   readPeer(target: MotePreferencesTarget): Promise<unknown>
   client: Pick<AgentMuxClient, 'readAgentSession' | 'readMessage' | 'enqueuePublishedMoteReport'>
-}): MoteDirectPort & { start(): void; dispose(): Promise<void> } {
+}): MoteDirectPort & { start(): void; dispose(): Promise<void>; dispatchWork(work: Extract<NonNullable<ContinuousProgressLoop['moteWork']>, { kind: 'direct' }>, body: string, operationId: string,
+  assertCurrent: () => Promise<void>): Promise<{ conversationId: string; messageId: string }> } {
   const activeReports = new Map<string, Promise<MoteDirectMainNotification>>()
   const retryMs = 5000
   let running = false
@@ -104,6 +105,16 @@ export function createHostMoteDirect(ledger: MoteGroupPort, owner: {
     timer.unref?.()
   }
 
+  async function sendPrivate(input: MoteDirectParamsMap['space.mote.direct.send'], context: MoteGroupCallContext) {
+    const { mote, peer, ...send } = input
+    const members = [mote, peer].sort((left, right) => left.spaceId < right.spaceId ? -1 : 1)
+    const pair = members.map(target => [target.expectedResource.hostId, target.spaceId])
+    const threadId = 'mote-direct-' + createHash('sha256').update(JSON.stringify(pair)).digest('hex')
+    await ledger.call('space.mote.group.create', { name: 'Private conversation', operationId: threadId, sourceMote: mote, members }, context)
+    const result = await ledger.call('space.mote.group.send', { ...send, groupId: threadId, sourceMote: mote, recipientIds: [peer.spaceId] }, context)
+    return { threadId, message: privateMessage(result.message) }
+  }
+
   return {
     start() { running = true; wakeReports() },
     async dispose() {
@@ -111,6 +122,19 @@ export function createHostMoteDirect(ledger: MoteGroupPort, owner: {
       clearTimeout(timer)
       await sweep
       await Promise.all(activeReports.values())
+    },
+    async dispatchWork(work, body, operationId, assertCurrent) {
+      const selected = await owner.main.readCurrentMoteMain(work.mote)
+      if (selected.status !== 'ready' || !selected.current || selected.identity?.moteId !== work.mote.spaceId)
+        throw new AgentMuxError('The scheduled assignment is saved and awaiting its coordinating Main.', 'CONTROL_UNAVAILABLE')
+      const session = await owner.client.readAgentSession(selected.current.sessionId)
+      if (!session || session.hostId !== selected.current.hostId) throw new AgentMuxError('The coordinating Main Session is unconfirmed.', 'CONTROL_UNAVAILABLE')
+      const { threadId, message } = await sendPrivate({ mote: work.mote, peer: work.peer, body, operationId }, { actor: { kind: 'agent', hostId: session.hostId,
+        agentSessionId: session.agentSessionId, runId: session.run.runId, sourceRuns: [] }, assertCurrent: async () => {
+        await assertCurrent()
+        await owner.main.assertCurrent(selected)
+      } })
+      return { conversationId: threadId, messageId: message.id }
     },
     async call<M extends MoteDirectMethod>(method: M, raw: MoteDirectParamsMap[M], context: MoteDirectCallContext): Promise<MoteDirectResultMap[M]> {
       const { actor } = context
@@ -142,29 +166,24 @@ export function createHostMoteDirect(ledger: MoteGroupPort, owner: {
       }
       if (method === 'space.mote.direct.schedule') {
         const request = raw as MoteDirectParamsMap['space.mote.direct.schedule']
-        const { mote, peer, operationId, body: _, ...timing } = request
+        const { mote, peer, operationId, body, ...timing } = request
         const main = await authorizeMoteConversationMain(owner.main, mote, context)
         await owner.readPeer(peer)
         const session = await owner.client.readAgentSession(main.reference.sessionId)
         if (!session || session.agentSessionId !== main.reference.sessionId || session.hostId !== main.reference.hostId)
           throw new AgentMuxError('The original Main schedule target is unconfirmed.', 'CONTROL_UNAVAILABLE')
-        const target = { hostId: session.hostId, agentSessionId: session.agentSessionId, providerId: session.providerId, workspacePath: session.workspacePath }
         const { schedule: observed } = await context.readSchedule({ operationId })
         const original = observed?.creationOperationId === operationId ? observed : null
-        if (original && !moteDirectScheduleSourceMatches(original.prompt, request))
+        if (original && !original.moteWork && !moteDirectScheduleSourceMatches(original.prompt, request))
           throw new AgentMuxError('The original private assignment differs from this retry.', 'SCHEDULE_OPERATION_CONFLICT')
-        const prompt = original?.prompt ?? moteDirectSchedulePrompt(request)
+        const source = original?.moteWork ? original : session
+        const target = { hostId: source.hostId, agentSessionId: source.agentSessionId, providerId: source.providerId, workspacePath: source.workspacePath }
+        const prompt = original?.moteWork ? body : original?.prompt ?? body
         const result = await main.commit(() => context.schedule({ ...timing, target, prompt, operationId,
-          ...(session.inputEpoch ? { inputEpoch: session.inputEpoch } : {}) }))
+          ...(source.inputEpoch ? { inputEpoch: source.inputEpoch } : {}) }, !original || original.moteWork ? { kind: 'direct', mote, peer } : undefined))
         return result as MoteDirectResultMap[M]
       }
-      const { mote, peer, ...send } = raw as MoteDirectParamsMap['space.mote.direct.send']
-      const members = [mote, peer].sort((left, right) => left.spaceId < right.spaceId ? -1 : 1)
-      const pair = members.map(target => [target.expectedResource.hostId, target.spaceId])
-      const threadId = 'mote-direct-' + createHash('sha256').update(JSON.stringify(pair)).digest('hex')
-      await ledger.call('space.mote.group.create', { name: 'Private conversation', operationId: threadId, sourceMote: mote, members }, context)
-      const result = await ledger.call('space.mote.group.send', { ...send, groupId: threadId, sourceMote: mote, recipientIds: [peer.spaceId] }, context)
-      return { threadId, message: privateMessage(result.message) } as MoteDirectResultMap[M]
+      return await sendPrivate(raw as MoteDirectParamsMap['space.mote.direct.send'], context) as MoteDirectResultMap[M]
     }
   }
 }

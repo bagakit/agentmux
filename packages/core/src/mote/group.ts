@@ -3,6 +3,9 @@ import { rpcRecord } from '../rpc-data.js'
 import { parseFileListParams, parseFileListResult, parseFileReadParams, parseFileReadResult,
   type FileListResult, type FileReadResult } from '../public-rpc-files.js'
 import { parseMotePreferencesTarget, sameMotePreferencesTarget, type MotePreferencesTarget } from './preferences.js'
+import { parseAgentScheduleTiming, type AgentScheduleTiming } from '../agent-schedule.js'
+import { scheduleMatchesCreation, validateScheduleRpcResult, type ScheduleResultMap } from '../public-rpc-schedules.js'
+import type { MoteScheduleContext, MoteScheduledRecipient } from './scheduled-work.js'
 
 /** Maximum message length in UTF-16 code units, shared with Group composers. */
 export const MOTE_GROUP_MAX_BODY_LENGTH = 64 * 1024
@@ -65,6 +68,7 @@ export type MoteGroupParamsMap = {
   'space.mote.group.inspect': Page & GroupMainSource & { groupId: string; messageId?: string }
   'space.mote.group.send': { groupId: string; operationId: string; body: string; recipientIds: string[]; replyToMessageId?: string;
     memberMoteId?: string } & GroupMainSource
+  'space.mote.group.schedule': { groupId: string; operationId: string; body: string; recipientIds: string[]; sourceMote: MotePreferencesTarget } & AgentScheduleTiming & { checkIn?: never }
   'space.mote.group.retry': { groupId: string; messageId: string; memberId: string }
   'space.mote.group.reply': { groupId: string; operationId: string; inputOperationId: string; body: string }
 }
@@ -79,6 +83,7 @@ export type MoteGroupResultMap = {
   'space.mote.group.file.read': FileReadResult
   'space.mote.group.inspect': { group: MoteGroupSummary; messages: MoteGroupMessage[]; nextBeforeSequence: number | null; viewerId: string }
   'space.mote.group.send': { message: MoteGroupMessage }
+  'space.mote.group.schedule': ScheduleResultMap['schedule.create']
   'space.mote.group.retry': { delivery: MoteGroupDelivery }
   'space.mote.group.reply': { message: MoteGroupMessage }
 }
@@ -86,14 +91,16 @@ export type MoteGroupMethod = keyof MoteGroupParamsMap
 export const MOTE_GROUP_METHODS = {
   'space.mote.group.list': 'short', 'space.mote.group.create': 'long', 'space.mote.group.inspect': 'short',
   'space.mote.group.send': 'long', 'space.mote.group.retry': 'long', 'space.mote.group.reply': 'short',
+  'space.mote.group.schedule': 'long',
   'space.mote.group.update': 'long', 'space.mote.group.members.add': 'long', 'space.mote.group.members.remove': 'short',
   'space.mote.group.members.leave': 'short', 'space.mote.group.file.list': 'long', 'space.mote.group.file.read': 'short'
 } as const satisfies Record<MoteGroupMethod, 'short' | 'long'>
 export const isMoteGroupMethod = (method: unknown): method is MoteGroupMethod =>
   typeof method === 'string' && Object.hasOwn(MOTE_GROUP_METHODS, method)
-export type MoteGroupCallContext = {
+export type MoteGroupCallContext = Partial<MoteScheduleContext> & {
   actor: { kind: 'human'; id: string } | { kind: 'agent'; agentSessionId: string; hostId: string; runId: string; sourceRuns: readonly string[] }
   assertCurrent(): Promise<void>
+  scheduledRecipients?: readonly MoteScheduledRecipient[]
 }
 export interface MoteGroupPort {
   call<M extends MoteGroupMethod>(method: M, input: MoteGroupParamsMap[M], context: MoteGroupCallContext): Promise<MoteGroupResultMap[M]>
@@ -145,6 +152,7 @@ const requestFields = {
   'space.mote.group.file.read': [...groupFiles, 'path', 'maxBytes'],
   'space.mote.group.inspect': ['groupId', 'beforeSequence', 'limit', 'sourceMote', 'messageId'],
   'space.mote.group.send': ['groupId', 'operationId', 'body', 'recipientIds', 'replyToMessageId', 'sourceMote', 'memberMoteId'],
+  'space.mote.group.schedule': ['groupId', 'operationId', 'body', 'recipientIds', 'sourceMote', 'calendar', 'afterMs', 'everyMs'],
   'space.mote.group.retry': ['groupId', 'messageId', 'memberId'],
   'space.mote.group.reply': ['groupId', 'operationId', 'inputOperationId', 'body']
 } as const
@@ -230,7 +238,12 @@ export function parseMoteGroupParams<M extends MoteGroupMethod>(method: M, value
       id('operationId')
       field('body', `Use nonempty reply or message text up to ${MOTE_GROUP_MAX_BODY_LENGTH} UTF-16 code units.`, () => string(p.body, code, MOTE_GROUP_MAX_BODY_LENGTH, true))
       if (method === 'space.mote.group.reply') id('inputOperationId')
-      else {
+      else if (method === 'space.mote.group.schedule') {
+        ids('recipientIds', true)
+        const source = target(p.sourceMote, code)
+        if ((p.recipientIds as string[]).includes(source.spaceId)) return invalid(code)
+        parseAgentScheduleTiming({ calendar: p.calendar, afterMs: p.afterMs, everyMs: p.everyMs }, code)
+      } else {
         ids('recipientIds', false)
         if (p.replyToMessageId !== undefined) id('replyToMessageId')
         if (p.memberMoteId !== undefined) {
@@ -303,7 +316,16 @@ export function parseMoteGroupSummary(value: unknown): MoteGroupSummary {
 }
 export function parseMoteGroupResult<M extends MoteGroupMethod>(method: M, value: unknown, input: MoteGroupParamsMap[M]): MoteGroupResultMap[M] {
   const code = 'CONTROL_PROTOCOL_ERROR'
-  if (method === 'space.mote.group.list') {
+  if (method === 'space.mote.group.schedule') {
+    const result = validateScheduleRpcResult('schedule.create', value), { schedule } = result
+    const { sourceMote, groupId, body, recipientIds, ...timing } = input as MoteGroupParamsMap['space.mote.group.schedule']
+    const { moteWork: work, hostId, agentSessionId, providerId, workspacePath } = schedule
+    if (work?.kind !== 'group' || !sameMotePreferencesTarget(work.mote, sourceMote) || work.groupId !== groupId ||
+      work.recipients.length !== recipientIds.length || !work.recipients.every((member, index) => member.moteId === recipientIds[index]) ||
+      !scheduleMatchesCreation(schedule, { ...timing, prompt: body, target: { hostId, agentSessionId, providerId, workspacePath },
+        ...(schedule.inputEpoch ? { inputEpoch: schedule.inputEpoch } : {}) })) return invalid(code)
+    return result as MoteGroupResultMap[M]
+  } else if (method === 'space.mote.group.list') {
     const p = rpcRecord(value, ['groups', 'nextBeforeSequence'], code), query = input as MoteGroupParamsMap['space.mote.group.list']
     const groups = list(p.groups, code, query.limit ?? 100, parseMoteGroupSummary)
     unique(groups.map(group => group.id), code)

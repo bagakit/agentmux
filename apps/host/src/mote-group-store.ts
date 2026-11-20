@@ -399,7 +399,8 @@ export class MoteGroupStore {
   }
 
   async append(operationId: string, digest: string, body: MessageBody, recipients: MoteGroupDelivery[], actor?: GroupMemberAuthority,
-    reportSender?: Pick<MotePrivateReportOrigin, 'senderSessionId' | 'senderRunId'>): Promise<{ message: MoteGroupMessage; fresh: boolean }> {
+    reportSender?: Pick<MotePrivateReportOrigin, 'senderSessionId' | 'senderRunId'>,
+    scheduledGenerations?: ReadonlyMap<string, string>): Promise<{ message: MoteGroupMessage; fresh: boolean }> {
     return this.write(db => {
       this.originalGroup(db, body.groupId)
       const prior = this.publishedMessage(db, body.groupId, operationId)
@@ -410,11 +411,12 @@ export class MoteGroupStore {
       if (actor) this.assertActive(this.originalMember(db, body.groupId, actor.moteId), actor.generation)
       if (body.replyToMessageId && !db.prepare('SELECT id FROM messages WHERE group_id=? AND id=?').get(body.groupId, body.replyToMessageId))
         return groupFailure('The original reply message belongs to another Group or is unavailable.', 'UNKNOWN_MOTE_GROUP_MESSAGE')
-      const selected = recipients.map(delivery => {
+      const selected = recipients.flatMap(delivery => {
         const record = this.originalMember(db, body.groupId, delivery.moteId)
         const memberGeneration = groupMemberGeneration(record)
+        if (scheduledGenerations && (record.member.state !== 'active' || scheduledGenerations.get(delivery.moteId) !== memberGeneration)) return []
         this.assertActive(record, memberGeneration)
-        return { delivery, memberGeneration } satisfies GroupDeliveryRecord
+        return [{ delivery, memberGeneration } satisfies GroupDeliveryRecord]
       })
       db.prepare('INSERT INTO messages(id,group_id,operation_id,digest,data) VALUES (?,?,?,?,?)')
         .run(body.id, body.groupId, operationId, digest, JSON.stringify(body))

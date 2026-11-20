@@ -1,5 +1,5 @@
 import { createHostMoteChat } from './mote-chat.js'
-import { createHostMoteGroups } from './mote-group.js'
+import { createHostMoteGroups, ownsMoteWork } from './mote-group.js'
 import { MoteGroupStore } from './mote-group-store.js'
 import { createHostWorkspaceResources } from './workspace-resources.js'
 import { createDesktopStorageRecoverySource } from './desktop-storage-recovery.js'
@@ -238,6 +238,14 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
       client: { readAgentSession: id => originalRuntime().client.readAgentSession(id),
         readMessage: input => originalRuntime().client.readMessage(input),
         enqueuePublishedMoteReport: (input, assertCurrent) => originalRuntime().client.enqueuePublishedMoteReport(input, assertCurrent) } }) : undefined
+  if (moteDirect && moteGroups && moteMain) {
+    const main = moteMain
+    goals?.schedules.setMoteWorkOwner({
+      dispatch: (work, body, operationId, assertCurrent) => work.kind === 'group'
+        ? moteGroups.dispatchWork(work, body, operationId, assertCurrent) : moteDirect.dispatchWork(work, body, operationId, assertCurrent),
+      owns: (work, caller) => ownsMoteWork(main, originalRuntime().client, work, caller)
+    })
+  }
   const service = {
     spatialState,
     ...(moteGroups ? { moteGroups } : {}),
