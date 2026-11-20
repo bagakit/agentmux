@@ -128,9 +128,19 @@ it('opens an independent group from the Mobile Mote directory and the exact part
   const name = await waitForElement<HTMLInputElement>(sheet(), '.mote-group__field input')
   await enter(name, group.name)
   const members = await waitForElement(sheet(), '.mote-group__candidate-list')
-  for (const control of members.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')) {
+  await act(async () => { members.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click() })
+  const search = await waitForElement<HTMLInputElement>(sheet(), 'input[aria-label="搜索 Mote"]')
+  await enter(search, 'no-matching-mote')
+  await vi.waitFor(() => expect(sheet().textContent).toContain('没有匹配的 Mote'))
+  expect(sheet().querySelectorAll('.mote-group__selected li')).toHaveLength(1)
+  await click(sheet().querySelector<HTMLButtonElement>('.mote-group__selected li button')!)
+  expect(sheet().querySelector('.mote-group__selected')).toBeNull()
+  await click(sheet().querySelector<HTMLButtonElement>('button[aria-label="清空成员搜索"]')!)
+  const restoredCandidates = await waitForElement(sheet(), '.mote-group__candidate-list')
+  for (const control of restoredCandidates.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')) {
     await act(async () => { control.click() })
   }
+  expect(sheet().querySelectorAll('.mote-group__selected li')).toHaveLength(2)
   await submit(await waitForElement(sheet(), '.mote-group__create'))
   await vi.waitFor(() => expect(sheet().textContent).toContain('建群原回执暂不可用'))
   const createCalls = () => rpc.mock.calls.filter(([method]) => method === 'space.mote.group.create')
