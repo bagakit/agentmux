@@ -61,6 +61,36 @@ it('the public Supervisor reassigns an active plan node, preserves a late origin
   expect(f.owner.native.stop).not.toHaveBeenCalled()
 })
 
+it('the current Supervisor collects the original worker report after reassignment', async () => {
+  const f = await fixture()
+  const intent = { operationId: 'original-dispatch', sourceMessageId: 'original-source', threadId: 'original-thread', hostId: 'local',
+    ownerAgentSessionId: 'supervisor', ownerRunId: 'run-supervisor', workerAgentSessionId: 'worker-a', workerRunId: 'run-worker-a',
+    text: f.node.outcome, alignmentRevision: 1, criterionIds: ['original'], planNodeId: f.node.id }
+  await f.owner.call('supervisor', ['goal', 'delegate', '--input', '-'], { goalId: f.goalId, intent })
+  await f.owner.call(null, ['goal', 'update', '--goal', f.goalId, '--supervisor', 'worker-b'])
+  const report = {
+    operationId: 'original-report', replyMessageId: 'original-reply', authorAgentSessionId: 'worker-a',
+    grounding: { alignmentRevision: 1, summary: 'Original evidence',
+      checks: [{ criterionId: 'original', outcome: 'met', evidence: ['checks/original.log'], note: '' }] }
+  }
+  const reported = await f.owner.call('worker-a', ['goal', 'report', '--input', '-'], { goalId: f.goalId, operationId: intent.operationId, report })
+  const original = reported.delegations[0]
+  expect(original.report.delivery.hash).toMatch(/^[a-f0-9]{64}$/u)
+
+  const args = ['goal', 'collect', '--input', '-']
+  const input = { goalId: f.goalId, operationId: intent.operationId,
+    collection: { operationId: 'collect-original', replyMessageId: report.replyMessageId } }
+  const refused = await f.owner.cli('reviewer', args, input)
+  expect(refused.code).toBe(1)
+  expect(refused.stderr).toContain('Only the original responsibility owner or current Supervisor')
+  const collected = await f.owner.call('worker-b', args, input)
+  expect(collected.goalState.supervisorSessionId).toBe('worker-b')
+  expect(collected.delegations).toEqual([{ ...original, collection: expect.objectContaining({ ...input.collection,
+    collector: { kind: 'agent', id: 'worker-b' } }) }])
+  expect(collected.grounding.acceptedAt).toBeNull()
+  expect(f.owner.native.stop).not.toHaveBeenCalled()
+})
+
 it('appends independent branches from a completed Ticket through the public CLI', async () => {
   const f = await fixture()
   const parent = f.node.id

@@ -2,6 +2,9 @@ import { defineConfig } from 'vitest/config'
 import crossHost from './vitest.goal-cross-host.config.mts'
 
 const changes = {
+  'omit-original-report-host': { path: 'apps/host/src/goals.ts',
+    from: "'message.dispatch.read', { hostId: 'local', sourceMessageId }, { principal: person }",
+    to: "'message.dispatch.read', { sourceMessageId }, { principal: person }" },
   'append-drop-published-nodes': { path: 'packages/demand/src/demand-store.ts',
     from: 'const savedNodes = appending ? [...(current?.nodes ?? []), ...issued.nodes] : issued.nodes', to: 'const savedNodes = issued.nodes' },
   'active-omit-managed-goals': { path: 'packages/demand/src/goal-active-index.ts', from: "SELECT content FROM active_goal ORDER BY id", to: "SELECT content FROM active_goal WHERE 0" },
