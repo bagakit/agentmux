@@ -1,4 +1,4 @@
-import { renderAmuxProtocol } from '../amux-protocol.js'
+import { getAmuxProtocolTemplate } from '../amux-protocol.js'
 import { AgentMuxError } from '../errors.js'
 import { rpcRecord } from '../rpc-data.js'
 import { parseMoteGroupParams, parseMoteGroupResult, type MoteGroupCallContext, type MoteGroupMember, type MoteGroupMessage } from './group.js'
@@ -49,14 +49,22 @@ export interface MoteDirectPort {
 }
 export type MoteDirectCallContext = MoteGroupCallContext & {
   schedule(input: ScheduleParamsMap['schedule.create']): Promise<ScheduleResultMap['schedule.create']>
+  readSchedule(input: ScheduleParamsMap['schedule.inspect']): Promise<ScheduleResultMap['schedule.inspect']>
+}
+
+function privateAssignmentSource(input: MoteDirectParamsMap['space.mote.direct.schedule']): string {
+  const target = ({ spaceId, zoneId, expectedResource: { hostId, workspaceId, workspacePath } }: MotePreferencesTarget) =>
+    ({ spaceId, zoneId, expectedResource: { hostId, workspaceId, workspacePath } })
+  return JSON.stringify({ operationId: input.operationId, mote: target(input.mote), peer: target(input.peer), body: input.body })
 }
 
 export function moteDirectSchedulePrompt(input: MoteDirectParamsMap['space.mote.direct.schedule']): string {
-  const target = ({ spaceId, zoneId, expectedResource: { hostId, workspaceId, workspacePath } }: MotePreferencesTarget) =>
-    ({ spaceId, zoneId, expectedResource: { hostId, workspaceId, workspacePath } })
-  return renderAmuxProtocol('mote-task', 'private-schedule', {
-    original: JSON.stringify({ operationId: input.operationId, mote: target(input.mote), peer: target(input.peer), body: input.body })
-  })
+  return getAmuxProtocolTemplate('mote-task', 'private-schedule') + '\n\n' + privateAssignmentSource(input)
+}
+
+/** The original structured suffix qualifies a retry independently of editable guidance. */
+export function moteDirectScheduleSourceMatches(prompt: string, input: MoteDirectParamsMap['space.mote.direct.schedule']): boolean {
+  return prompt.endsWith('\n\n' + privateAssignmentSource(input))
 }
 
 const invalid = (code: 'INVALID_CONTROL_REQUEST' | 'CONTROL_PROTOCOL_ERROR'): never => {
@@ -97,7 +105,7 @@ export function parseMoteDirectResult<M extends MoteDirectMethod>(method: M, val
     if (schedule.hostId !== request.mote.expectedResource.hostId) return invalid(code)
     const { mote: _, peer: __, body: ___, ...timing } = request
     const target = { hostId: schedule.hostId, agentSessionId: schedule.agentSessionId, providerId: schedule.providerId, workspacePath: schedule.workspacePath }
-    if (!scheduleMatchesCreation(schedule, { ...timing, target, prompt: moteDirectSchedulePrompt(request),
+    if (!moteDirectScheduleSourceMatches(schedule.prompt, request) || !scheduleMatchesCreation(schedule, { ...timing, target, prompt: schedule.prompt,
       ...(schedule.inputEpoch ? { inputEpoch: schedule.inputEpoch } : {}) })) return invalid(code)
     return result as MoteDirectResultMap[M]
   }

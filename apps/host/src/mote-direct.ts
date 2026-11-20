@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { AgentMuxError, moteDirectSchedulePrompt, type AgentMuxClient, type MoteDirectCallContext, type MoteDirectMethod, type MoteDirectMessage, type MoteDirectParamsMap, type MoteDirectPort,
+import { AgentMuxError, moteDirectSchedulePrompt, moteDirectScheduleSourceMatches, type AgentMuxClient, type MoteDirectCallContext, type MoteDirectMethod, type MoteDirectMessage, type MoteDirectParamsMap, type MoteDirectPort,
   type MoteDirectResultMap, type MoteDirectThread, type MoteGroupMessage, type MoteGroupPort, type MoteGroupSummary } from '@agentmux/core'
 import { sameMotePreferencesTarget, type MotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import type { MoteMainReader } from '@agentmux/core/mote-dialogue'
@@ -60,7 +60,12 @@ export function createHostMoteDirect(ledger: MoteGroupPort, owner: {
         if (!session || session.agentSessionId !== main.reference.sessionId || session.hostId !== main.reference.hostId)
           throw new AgentMuxError('The original Main schedule target is unconfirmed.', 'CONTROL_UNAVAILABLE')
         const target = { hostId: session.hostId, agentSessionId: session.agentSessionId, providerId: session.providerId, workspacePath: session.workspacePath }
-        const result = await main.commit(() => context.schedule({ ...timing, target, prompt: moteDirectSchedulePrompt(request), operationId,
+        const { schedule: observed } = await context.readSchedule({ operationId })
+        const original = observed?.creationOperationId === operationId ? observed : null
+        if (original && !moteDirectScheduleSourceMatches(original.prompt, request))
+          throw new AgentMuxError('The original private assignment differs from this retry.', 'SCHEDULE_OPERATION_CONFLICT')
+        const prompt = original?.prompt ?? moteDirectSchedulePrompt(request)
+        const result = await main.commit(() => context.schedule({ ...timing, target, prompt, operationId,
           ...(session.inputEpoch ? { inputEpoch: session.inputEpoch } : {}) }))
         return result as MoteDirectResultMap[M]
       }

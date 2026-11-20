@@ -1540,7 +1540,8 @@ export class AgentMuxRpcService {
         if (!owner) throw new AgentMuxError('The original private Mote conversation owner is unavailable.', 'CONTROL_UNAVAILABLE')
         const input = parseMoteDirectParams(method, params)
         const result = await owner.call(method, input, { actor, assertCurrent,
-          schedule: request => this.call('schedule.create', request, context) })
+          schedule: request => this.call('schedule.create', request, context),
+          readSchedule: request => this.call('schedule.inspect', request, context) })
         return parseMoteDirectResult(method, result, input) as unknown as AgentMuxRpcResult<M>
       }
       const owner = this.ports.moteGroups
