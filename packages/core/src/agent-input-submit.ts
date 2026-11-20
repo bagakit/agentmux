@@ -76,6 +76,6 @@ export function parseAgentInputSubmit(value: unknown): AgentInputSubmit {
 
 /** Only the original input producer selects these fixed guides; wire composition stays in its existing owner. */
 export function agentInputGuidance(input: Pick<AgentInputSubmit, 'moteGuidance' | 'focusTask'>): string {
-  const note = [input.moteGuidance ? MOTE_INPUT_GUIDANCE : undefined, input.focusTask ? focusTaskHandoffNote(input.focusTask) : undefined].filter(Boolean).join('\n\n')
-  return note
+  if (input.focusTask) return focusTaskHandoffNote(input.focusTask)
+  return input.moteGuidance ? MOTE_INPUT_GUIDANCE : ''
 }

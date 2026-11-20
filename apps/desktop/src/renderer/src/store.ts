@@ -5,7 +5,7 @@ import { detachedFileSurface, knowledgeSurfacePresented } from './lib/knowledge-
 import { isWorkbenchSurfaceDetached, type WorkbenchSurface as KnowledgeSurface } from './lib/workbench-window-registry'
 import { readBrowserOperationResult } from '@agentmux/browser/browser-operation-result'
 import { parseFocusTaskReference, type AgentMuxFocusTaskReference } from '@agentmux/core/focus-control'
-import { focusTaskHandoffNote } from '@agentmux/core/focus-task-guidance'
+import { focusTaskHandoffNote, isFocusTaskHandoffNote } from '@agentmux/core/focus-task-guidance'
 import { agentInputGuidance } from '@agentmux/core/agent-input-submit'
 import { readFocusGroups } from './lib/focus-read-projection'
 import { finishNativeBrowserOpening } from './lib/browser-native-opening'
@@ -13079,7 +13079,9 @@ export const useAppStore = create<AppState>()<[['zustand/persist', PersistedAppS
     const owner = moteDraftKey ?? sessionId
     if (!owner) return
     const previous = moteDraftKey ? useLauncherState.getState().drafts[moteDraftKey]?.prompt : state.agentComposerDrafts[owner]
-    if (previous === text && !state.agentComposerHistoryNavigation[owner]) return
+    const note = state.agentComposerNotes[owner]
+    const clearFocusReference = !moteDraftKey && !text.trim() && note !== undefined && isFocusTaskHandoffNote(note)
+    if (previous === text && !clearFocusReference && !state.agentComposerHistoryNavigation[owner]) return
     // Launcher-owned Mote text is outside the Session draft watcher.
     if (moteDraftKey && !previous?.trim() && text.trim() && session?.kind === 'agent') {
       void api.continuousProgress.pauseForInput(session.control).catch(error => get().reportError(error))
@@ -13089,8 +13091,10 @@ export const useAppStore = create<AppState>()<[['zustand/persist', PersistedAppS
       if (!state.agentComposerHistoryNavigation[owner]) return
     }
     const { [owner]: _navigation, ...navigation } = state.agentComposerHistoryNavigation
+    const notes = clearFocusReference ? { ...state.agentComposerNotes } : state.agentComposerNotes
+    if (clearFocusReference) delete notes[owner]
     setAuthoredWorkbench({ ...(!moteDraftKey ? { agentComposerDrafts: { ...state.agentComposerDrafts, [owner]: text } } : {}),
-      agentComposerHistoryNavigation: navigation })
+      agentComposerNotes: notes, agentComposerHistoryNavigation: navigation })
   },
   async prepareAgentHostWorkspace(hostId, context) {
     const signal = context?.signal, host = get().config?.hosts.find(item => item.id === hostId)

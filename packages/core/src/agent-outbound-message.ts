@@ -1,7 +1,7 @@
 import { guideSharedRuntime } from './generated/agentmux-guides.js'
 import { guideText } from './guide-text.js'
 import { AGENTMUX_GOAL_SKILL_ENTRY } from './goal-role-guidance.js'
-import { AMUX_PROTOCOL_DEFINITIONS, readAmuxTriggerNote } from './amux-protocol-definition.js'
+import { AMUX_PROTOCOL_DEFINITIONS, readAmuxFocusReference, readAmuxTriggerNote } from './amux-protocol-definition.js'
 import { DOMImplementation, XMLSerializer } from '@xmldom/xmldom'
 import { AGENTMUX_SELF_CONTEXT_VERB } from './agent-self-context.js'
 import { AGENTMUX_AGENT_MESSAGING_ENTRY, AGENTMUX_SESSION_NAMING_ENTRY } from './agent-messaging-guidance.js'
@@ -66,6 +66,14 @@ function amuxEnvelope(text: string): string {
   return new XMLSerializer().serializeToString(envelope).replace(/\r/g, '&#13;')
 }
 
+function splitFocusReference(note: string): { guidance: string; reference: string } | undefined {
+  const start = note.lastIndexOf(`<${AMUX_PROTOCOL_DEFINITIONS['focus-reference'].tag} `)
+  if (start < 0 || start > 0 && note.slice(start - 2, start) !== '\n\n') return
+  const reference = readAmuxFocusReference(note.slice(start))
+  if (reference?.tail !== '') return
+  return { guidance: start === 0 ? '' : note.slice(0, start - 2), reference: reference.raw }
+}
+
 /**
  * 组装一条出站消息，这是 AgentMux 出站文本的**唯一出口**。
  *
@@ -74,7 +82,12 @@ function amuxEnvelope(text: string): string {
  */
 export function composeOutboundMessage(input: { amux?: string; user?: string; inputContext?: BrowserInputContext }): string {
   const segments: string[] = []
-  if (input.amux) segments.push(parseGoalConfirmation(input.amux) ? input.amux : amuxEnvelope(input.amux))
+  if (input.amux) {
+    const focus = splitFocusReference(input.amux)
+    const guidance = focus ? focus.guidance : input.amux
+    if (guidance) segments.push(parseGoalConfirmation(guidance) ? guidance : amuxEnvelope(guidance))
+    if (focus) segments.push(focus.reference)
+  }
   if (input.inputContext) segments.push(`<amux>\n<context kind="browser" version="1">\n${browserInputContextJson(input.inputContext)}\n</context>\n</amux>`)
   if (input.user) segments.push(input.user)
   return segments.join('\n\n')
@@ -125,16 +138,18 @@ export function composeAgentLaunchPrompt(
   const userRequest = prompt?.trim() ? prompt : undefined
   const note = agentMuxNote?.trim() ? agentMuxNote : undefined
   const task = agentMuxTask?.trim() ? agentMuxTask : undefined
+  const focus = note ? splitFocusReference(note) : undefined
+  const guidance = focus ? focus.guidance : note
   const amuxParts: string[] = []
   if (injectAgentMuxGuide) amuxParts.push(AGENTMUX_RUNTIME_GUIDE)
   if (task) amuxParts.push(task)
-  if (note) amuxParts.push(note)
+  if (guidance) amuxParts.push(guidance)
   // All omission notes participate from the start. Prefer complete earlier sources,
   // without estimating XML/UTF-8 overhead outside the actual outbound composer.
   const selected = optionalContext.map(part => part.omittedText)
   // 只有当 AgentMux 确实要说话时，才引出用户段——否则一个空信封只会徒增噪音。
   const compose = () => {
-    const parts = [...amuxParts, ...selected].filter(part => part.trim())
+    const parts = [...amuxParts, ...selected, focus?.reference ?? ''].filter(part => part.trim())
     // Reuse an existing creation packet; an empty disabled-guide launch stays empty.
     if (!injectAgentMuxGuide && (userRequest || parts.length > 0) && !parts.includes(AGENTMUX_SESSION_NAMING_ENTRY)) parts.unshift(AGENTMUX_SESSION_NAMING_ENTRY)
     if (parts.length > 0) parts.unshift(userRequest ? USER_REQUEST_FOLLOWS : task ? PLATFORM_TASK_REQUESTED : AWAIT_USER_REQUEST)

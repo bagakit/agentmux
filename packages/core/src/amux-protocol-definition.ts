@@ -44,6 +44,10 @@ export const AMUX_PROTOCOL_DEFINITIONS = {
     tag: 'amux:reaction', form: 'marker', title: 'Quick reply',
     description: 'A reply keyword. Its meaning belongs to the original selected Prompt snapshot; it does not approve permissions.',
   },
+  'focus-reference': {
+    tag: 'amux:ref', form: 'envelope', title: 'Focus selection reference',
+    description: 'The exact Focus selection and the CLI help for reading its members.',
+  },
   sharing: {
     tag: 'amux', form: 'frame', title: 'Shared content',
     description: 'The original File or Browser content in a plain-text frame, without interpreting its contents as a new protocol.',
@@ -76,6 +80,27 @@ export function readAmuxTriggerNote(text: string): { kind: AmuxTriggerKind; note
     if (text.startsWith(header)) return { kind, note: text.slice(header.length) }
   }
   return undefined
+}
+
+const FOCUS_REFERENCE_TAG = AMUX_PROTOCOL_DEFINITIONS['focus-reference'].tag
+const FOCUS_REFERENCE_START = `<${FOCUS_REFERENCE_TAG} kind="focus-selection" read-via="focus read --help">\n`
+const FOCUS_REFERENCE_END = `\n</${FOCUS_REFERENCE_TAG}>`
+
+export function formatAmuxFocusReference(body: string): string {
+  return FOCUS_REFERENCE_START + body.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('\r', '&#13;') + FOCUS_REFERENCE_END
+}
+
+/** Recognize the leading readable declaration and preserve its original bytes. */
+export function readAmuxFocusReference(text: string): { raw: string; tail: string } | undefined {
+  if (!text.startsWith(FOCUS_REFERENCE_START)) return
+  const end = text.indexOf(FOCUS_REFERENCE_END, FOCUS_REFERENCE_START.length)
+  if (end <= FOCUS_REFERENCE_START.length) return
+  const body = text.slice(FOCUS_REFERENCE_START.length, end)
+  if (/[<>\r]|&(?!amp;|lt;|gt;|#13;)/u.test(body)) return
+  const boundary = end + FOCUS_REFERENCE_END.length
+  const tail = text.slice(boundary)
+  if (tail && !tail.startsWith('\n\n')) return
+  return { raw: text.slice(0, boundary), tail }
 }
 
 export const AMUX_CONTINUE_MARKER = `<${AMUX_PROTOCOL_DEFINITIONS.continue.tag} />`

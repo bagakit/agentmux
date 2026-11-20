@@ -1,3 +1,4 @@
+import { focusTaskHandoffNote } from './focus-task-guidance.js'
 import { sameConnectionApplication } from './connections-contract.js'
 import { DOMParser, onWarningStopParsing, type Element } from '@xmldom/xmldom'
 import type { AgentMuxMessageEnvelope } from './agent-message-envelope.js'
@@ -8,7 +9,7 @@ import type { ConnectionActor } from './connections-contract.js'
 import { composeOutboundMessage } from './agent-outbound-message.js'
 import { AGENTMUX_A2A_REMINDER } from './agent-messaging-guidance.js'
 import { browserInputContextJson, parseBrowserInputContext, type BrowserInputContext } from './browser-input-context.js'
-import { AMUX_PROTOCOL_DEFINITIONS, AMUX_CONTINUE_MARKER, AMUX_TRIGGER_KINDS, formatAmuxTriggerNote, readAmuxTriggerNote, type AmuxTriggerKind, formatAmuxReactionMarker, isAmuxReactionCode, type AmuxProtocolDeclaration, type AmuxProtocolId } from './amux-protocol-definition.js'
+import { AMUX_PROTOCOL_DEFINITIONS, AMUX_CONTINUE_MARKER, AMUX_TRIGGER_KINDS, formatAmuxTriggerNote, readAmuxFocusReference, readAmuxTriggerNote, type AmuxTriggerKind, formatAmuxReactionMarker, isAmuxReactionCode, type AmuxProtocolDeclaration, type AmuxProtocolId } from './amux-protocol-definition.js'
 import { formatAmuxSharing, formatAmuxObjectLink } from './sharing.js'
 import { formatCapsuleAnswer, parseCapsuleAnswer } from './capsule-answer.js'
 import { formatGoalConfirmation, parseGoalConfirmation } from './goal-confirmation.js'
@@ -255,14 +256,18 @@ function parseDeclaredContexts(text: string): AgentMuxMessagePrefix | null {
 
 /** Native inputs and captured deliveries share this reading grammar; copying keeps original bytes. */
 export function parseAgentMuxMessagePrefix(text: string): AgentMuxMessagePrefix | null {
-  if (!text.startsWith('<amux>')) return parseSenderPrefix(text)
-  const contexts = parseDeclaredContexts(text)
-  if (!contexts) return null
-  if (contexts.kind === 'references' || contexts.declaredMessageId !== undefined) return contexts
-  if (contexts.declaredTrigger || contexts.declaredContexts?.some(context => context.inputContext)) return contexts
+  const hasPlatformContext = text.startsWith('<amux>')
+  const contexts = hasPlatformContext ? parseDeclaredContexts(text) : null
+  if (hasPlatformContext && !contexts) return null
+  if (contexts?.kind === 'references' || contexts?.declaredMessageId !== undefined) return contexts
+  if (contexts?.declaredTrigger || contexts?.declaredContexts?.some(context => context.inputContext)) return contexts
   // Only newline separators join a following declaration; indentation remains authored text.
-  const sender = parseSenderPrefix(contexts.body.replace(/^(?:\r?\n)*/u, ''))
-  return sender ? { ...sender, ...(contexts.declaredContexts ? { declaredContexts: contexts.declaredContexts } : {}) } : contexts
+  const remainder = contexts ? contexts.body.replace(/^(?:\r?\n)*/u, '') : text
+  const reference = readAmuxFocusReference(remainder)
+  if (reference) return { kind: 'content', sourceLabel: '', declaredAgentSessionId: null,
+    declaredContexts: [...contexts?.declaredContexts ?? [], { raw: reference.raw }], body: reference.tail }
+  const sender = parseSenderPrefix(remainder)
+  return sender && contexts?.declaredContexts ? { ...sender, declaredContexts: contexts.declaredContexts } : sender ?? contexts
 }
 
 function parseA2aMetadata(sender: string, messageId: string): { sender: string; messageId: string } | null {
@@ -458,6 +463,11 @@ const protocolExamples = {
     { label: 'Standalone keyword declaration', wire: formatAmuxReactionMarker('ok') },
     { label: 'Marker remains text inside guidance', wire: composeOutboundMessage({ amux: formatAmuxReactionMarker('ok'), user: 'Original selected Prompt body.' }) }
   ],
+  'focus-reference': () => [{ label: 'Selected members and task', wire: composeOutboundMessage({
+    amux: focusTaskHandoffNote({ scope: { kind: 'project', hostId: 'local', projectSpaceId: 'PROJECT_ID' },
+      selection: { kind: 'members', references: [{ hostId: 'local', contextId: 'MEMBER_ID' }] } }),
+    user: '整理这组工作，给我一份可以逐项决定的清单。'
+  }) }],
   sharing: () => [
     { label: 'File context', wire: formatAmuxSharing('File', 'docs/example.md\nOriginal file context.') },
     { label: 'Browser context', wire: formatAmuxSharing('Browser', 'https://example.org/\nOriginal page context.') }
