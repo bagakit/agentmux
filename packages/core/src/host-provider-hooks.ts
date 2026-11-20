@@ -48,7 +48,9 @@ export function managedHookInspectionFailure(providerId: AgentProviderId, error:
 export function managedHookHealth(inspection: AgentManagedHookInspection,
   unmanaged: boolean): AgentHostExecutorHookResult['health'] {
   const issue = inspection.status === 'not_installed' || inspection.targets.some(target =>
-    target.legacyDeclarations || target.code === 'HOOK_TARGET_UNPARSEABLE' || target.code === 'UNSAFE_HOOK_TARGET') ||
+    target.missingLegacyEntrypoints || target.missingLegacyDependencies ||
+    target.legacyDeclarations && target.status !== 'current' ||
+    target.code === 'HOOK_TARGET_UNPARSEABLE' || target.code === 'UNSAFE_HOOK_TARGET') ||
     ['MANAGED_HOOK_INCOMPLETE', 'HOOK_CONFIGURATION_DISABLED', 'HOOK_NATIVE_DISABLED'].includes(inspection.code)
   return inspection.status === 'installed' ? 'current' : unmanaged ? 'not-managed' : issue ? 'issue' : 'unknown'
 }

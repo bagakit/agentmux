@@ -16,6 +16,7 @@ import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { AgentMuxError } from './errors.js'
 import { legacyHookEntrypoints, inspectManagedHookContent, prepareMergedHookContent, type AgentHookMergeStrategy } from './hook-config-merge.js'
+import { hasMissingLegacyHookDependency } from './legacy-hook-runner.js'
 import type { AgentProviderId } from './types.js'
 
 const MAX_HOOK_FILE_BYTES = 256 * 1024
@@ -49,7 +50,7 @@ export type AgentManagedHookInspection = {
   action: string | null
   targets: Array<{ path: string; status: 'current' | 'not_present' | 'partial' | 'error'; code?: string;
     expectedRevision?: string; observedRevision?: string;
-    legacyDeclarations?: number; missingLegacyEntrypoints?: number }>
+    legacyDeclarations?: number; missingLegacyEntrypoints?: number; missingLegacyDependencies?: number }>
 }
 
 export type AgentHostExecutorHookTarget = { runtimeId: string; executorId: string; configRevision: string; workspacePath?: string | undefined }
@@ -244,10 +245,11 @@ export class AgentManagedHookInstaller {
     }
   }
 
-  /** Fresh disk observation only: no preview admission, receipt, mkdir or native process. */
+  /** Fresh disk observation only: no preview admission, receipt, mkdir or Provider process. */
   async inspect(plan: AgentManagedHookPlan): Promise<AgentManagedHookInspection> {
     const targets: AgentManagedHookInspection['targets'] = []
     const missingPaths = new Map<string, boolean>()
+    const missingDependencies = new Map<string, boolean>()
     const isMissing = async (path: string) => {
       const previous = missingPaths.get(path)
       if (previous !== undefined) return previous
@@ -273,15 +275,26 @@ export class AgentManagedHookInstaller {
           const legacy = plan.retainPreviousDeclarations && mutation.merge && content !== undefined
             ? legacyHookEntrypoints(content, mutation.merge, plan.providerId) : []
           let missingLegacyEntrypoints = 0
+          let missingLegacyDependencies = 0
           for (const [executable, runner] of legacy) {
-            if (await isMissing(executable) || await isMissing(runner)) missingLegacyEntrypoints++
+            if (await isMissing(executable) || await isMissing(runner)) {
+              missingLegacyEntrypoints++
+              continue
+            }
+            let missing = missingDependencies.get(runner)
+            if (missing === undefined) {
+              missing = await hasMissingLegacyHookDependency(runner)
+              missingDependencies.set(runner, missing)
+            }
+            if (missing) missingLegacyDependencies++
           }
           const legacyDeclarations = legacy.length
           targets.push({ path: mutation.path, expectedRevision,
-            status: legacyDeclarations ? 'partial' : facts.current ? 'current' : facts.present ? 'partial' : 'not_present',
+            status: facts.current ? 'current' : facts.present ? 'partial' : 'not_present',
             ...(facts.current ? { observedRevision: expectedRevision } : {}),
             ...(legacyDeclarations ? { legacyDeclarations, code: 'MANAGED_HOOK_LEGACY_CARRIER' } : {}),
-            ...(missingLegacyEntrypoints ? { missingLegacyEntrypoints } : {}) })
+            ...(missingLegacyEntrypoints ? { missingLegacyEntrypoints } : {}),
+            ...(missingLegacyDependencies ? { missingLegacyDependencies } : {}) })
         } catch (error) {
           targets.push({ path: mutation.path, expectedRevision, status: 'error', code: inspectionErrorCode(error) })
         }
@@ -290,15 +303,23 @@ export class AgentManagedHookInstaller {
       return { providerId: plan.providerId, checkedAt: Date.now(), status: 'error', targets,
         code: inspectionErrorCode(error), action: 'Fix the scoped Hook plan or target, then inspect again.' }
     }
-    const status = targets.some(target => target.status === 'error') ? 'error'
+    const legacy = targets.some(target => target.legacyDeclarations)
+    const missingEntrypoints = targets.reduce((count, target) => count + (target.missingLegacyEntrypoints ?? 0), 0)
+    const missingRuntimeDependencies = targets.reduce((count, target) => count + (target.missingLegacyDependencies ?? 0), 0)
+    const status = targets.some(target => target.status === 'error') ? 'error' : legacy ? 'partial'
       : targets.every(target => target.status === 'current') ? 'installed'
         : targets.every(target => target.status === 'not_present') ? 'not_installed' : 'partial'
-    const legacy = status === 'partial' && targets.some(target => target.legacyDeclarations)
+    const legacyObservation = [
+      missingEntrypoints === 1 ? '1 older Hook declaration has a missing executable or runner.'
+        : missingEntrypoints > 0 ? `${missingEntrypoints} older Hook declarations have a missing executable or runner.` : null,
+      missingRuntimeDependencies === 1 ? '1 older Hook declaration has a missing runtime dependency.'
+        : missingRuntimeDependencies > 0 ? `${missingRuntimeDependencies} older Hook declarations have missing runtime dependencies.` : null
+    ].filter(Boolean).join(' ') || 'Older Hooks are present. Their runtime health is unconfirmed.'
     return { providerId: plan.providerId, checkedAt: Date.now(), status, targets,
       code: status === 'installed' ? 'MANAGED_HOOK_CURRENT' : status === 'not_installed' ? 'MANAGED_HOOK_ABSENT'
         : status === 'error' ? 'MANAGED_HOOK_CHECK_FAILED' : legacy ? 'MANAGED_HOOK_LEGACY_CARRIER' : 'MANAGED_HOOK_INCOMPLETE',
       action: status === 'installed' ? null : status === 'error' ? 'Fix the unreadable or invalid scoped Hook target, then inspect again.'
-        : legacy ? 'Older direct runtime declarations are still present. Confirm their original ownership and Run dependencies before removal.'
+        : legacy ? legacyObservation + ' Confirm original ownership and Run dependencies before removal.'
         : 'Install or repair the managed Hook configuration for this scope, then inspect again.' }
   }
 

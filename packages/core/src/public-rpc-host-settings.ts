@@ -163,14 +163,15 @@ function parseHookMaintenanceResult(p: Record<string, unknown>, updateRequested:
     !['installed', 'not_installed', 'partial', 'error', 'skipped'].includes(inspection.status as string) ||
     typeof inspection.code !== 'string' || (inspection.action !== null && typeof inspection.action !== 'string') || !Array.isArray(inspection.targets)) return fail()
   for (const target of inspection.targets) {
-    const item = rpcRecord(target, ['path', 'status', 'code', 'expectedRevision', 'observedRevision', 'legacyDeclarations', 'missingLegacyEntrypoints'], protocol)
+    const item = rpcRecord(target, ['path', 'status', 'code', 'expectedRevision', 'observedRevision', 'legacyDeclarations',
+      'missingLegacyEntrypoints', 'missingLegacyDependencies'], protocol)
+    const counts = [item.legacyDeclarations, item.missingLegacyEntrypoints, item.missingLegacyDependencies]
     if (typeof item.path !== 'string' || !['current', 'not_present', 'partial', 'error'].includes(item.status as string) ||
       (item.code !== undefined && typeof item.code !== 'string') ||
       [item.expectedRevision, item.observedRevision].some(revision => revision !== undefined && !isHookDigest(revision)) ||
       (item.observedRevision !== undefined && item.expectedRevision === undefined) ||
-      (item.legacyDeclarations !== undefined && (typeof item.legacyDeclarations !== 'number' || !Number.isSafeInteger(item.legacyDeclarations) || item.legacyDeclarations < 1)) ||
-      (item.missingLegacyEntrypoints !== undefined && (typeof item.legacyDeclarations !== 'number' || typeof item.missingLegacyEntrypoints !== 'number' ||
-        !Number.isSafeInteger(item.missingLegacyEntrypoints) || item.missingLegacyEntrypoints < 1 || item.missingLegacyEntrypoints > item.legacyDeclarations))) fail()
+      counts.some(count => count !== undefined && (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 1)) ||
+      Number(item.missingLegacyEntrypoints ?? 0) + Number(item.missingLegacyDependencies ?? 0) > Number(item.legacyDeclarations ?? 0)) fail()
   }
   const update = rpcRecord(p.update, ['status', 'receiptId', 'code'], protocol)
   if (updateRequested ? !['not-applicable', 'unchanged', 'updated', 'unconfirmed'].includes(update.status as string) : update.status !== 'not-requested') fail()
