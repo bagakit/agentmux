@@ -47,8 +47,8 @@ function fullQuote(repetitions = 2500): string {
   return wire
 }
 
-async function fixture(mode: 'ordinary' | 'queue') {
-  const native = true, queue = mode === 'queue'
+async function fixture(mode: 'ordinary' | 'queue' | 'managed-create') {
+  const native = true, queue = mode === 'queue', managedCreate = mode === 'managed-create'
   const root = await realpath(await mkdtemp(join(tmpdir(), 'amx-current-codex-')))
   cleanups.push(() => rm(root, { recursive: true }))
   for (const name of ['runtime', 'state', 'native-home', 'bin']) await mkdir(join(root, name), { mode: 0o700 })
@@ -61,7 +61,7 @@ async function fixture(mode: 'ordinary' | 'queue') {
   const entry = join(root, 'managed-entry.mjs')
   const nativeCommand = process.env.AGENTMUX_TEST_CODEX_BINARY ?? 'codex'
   if (native) {
-    expect((await runner.runProcess(nativeCommand, ['--version'], { timeoutMs: 5000 })).stdout.trim()).toBe('codex-cli 0.165.0')
+    expect((await runner.runProcess(nativeCommand, ['--version'], { timeoutMs: 5000 })).stdout.trim()).toBe(managedCreate ? 'codex-cli 0.171.0' : 'codex-cli 0.165.0')
     const helper = join(root, 'native-process-proof')
     expect(await runner.runProcess('cc', ['-Wall', '-Wextra', '-Werror', fileURLToPath(new URL('../native/native-socket-peer.c', import.meta.url)), '-lproc', '-o', helper], { timeoutMs: 10_000 }))
       .toMatchObject({ exitCode: 0, stderr: '' })
@@ -83,11 +83,11 @@ async function fixture(mode: 'ordinary' | 'queue') {
   }
   // Override only how the test opens its native process. Discovery, identity,
   // readiness, durable queue protocol and receipts remain the original Provider.
-  const providers = [{ ...provider, planManagedHooks: () => null,
+  const providers = [{ ...provider, ...(managedCreate ? {} : { planManagedHooks: () => null }),
     ...(queue ? { buildLaunch: (context: Parameters<typeof provider.buildLaunch>[0]) => ({ command: process.execPath, args: [fileURLToPath(new URL('./fixtures/codex-current-queue-worker.mjs', import.meta.url)), root, 'original', join(root, 'native-home')], env: { ...context.env } }) } : {}),
     prepareManagedLaunch: async (...args: Parameters<NonNullable<typeof provider.prepareManagedLaunch>>) => {
       const prepared = await provider.prepareManagedLaunch!(...args)
-      if (queue || args[2].kind === 'create') {
+      if (queue || args[2].kind === 'create' && !managedCreate) {
         expect(prepared.nativeActor).toBeUndefined(); expect(prepared).toEqual({ plan: args[0] })
         fact('ordinary-plan', { command: prepared.plan.command, args: prepared.plan.args, kind: args[2].kind })
         return prepared
@@ -116,7 +116,20 @@ async function fixture(mode: 'ordinary' | 'queue') {
   const initial = await vi.waitFor(async () => {
     await client.refreshAgentSession('original', session.run)
     const status = await client.statusAgent('original')
-    if (native) { expect(status.session.nativeHandle?.sessionId).toEqual(expect.any(String)); expect((await store().readMetadata('original'))?.nativeActor).toBeUndefined(); expect(status.session.semanticStatus?.state).toBe('done') }
+    if (native) {
+      expect(status.session.nativeHandle?.sessionId, JSON.stringify(status.session.terminalFrontend)).toEqual(expect.any(String))
+      const stored = await store().readMetadata('original')
+      if (managedCreate) {
+        expect(stored?.nativeActor?.initializationControl).toBe(true)
+        expect(status.session.terminalFrontend).toMatchObject({ state: 'attached', backendState: 'running',
+          initialization: { native: { state: 'confirmed', sessionId: status.session.nativeHandle!.sessionId } } })
+        expect(stored?.initialInput).toMatchObject({ delivery: 'post-launch', state: 'native-admitted' })
+        expect(inputs.filter(text => text.includes('PRIVATE_QUEUE_INITIAL_ORIGINAL'))).toHaveLength(1)
+      } else {
+        expect(stored?.nativeActor).toBeUndefined()
+        expect(status.session.semanticStatus?.state).toBe('done')
+      }
+    }
     else expect(status.run.pid).toBe(JSON.parse(await readFile(output + '.ready', 'utf8')).pid)
     return status
   }, { timeout: 20_000, interval: 100 })
@@ -182,6 +195,14 @@ function publicInput(h: Awaited<ReturnType<typeof fixture>>, id: string, prompt:
   const { authorHuman: _human, ...input } = h.input(id, prompt)
   return input
 }
+
+it.runIf(process.platform === 'darwin')('Codex 0.171 adopts the original startup prompt once and joins the same live thread', async () => {
+  const h = await fixture('managed-create')
+  try {
+    await h.reopen()
+    expect(h.inputs.filter(text => text.includes('PRIVATE_QUEUE_INITIAL_ORIGINAL'))).toHaveLength(1)
+  } finally { await h.close() }
+})
 
 it.runIf(process.platform === 'darwin')('current native actor starts and steers the exact original turn, retains adoption and refuses a foreign source', async () => {
   const h = await fixture('ordinary')

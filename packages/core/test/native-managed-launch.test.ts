@@ -52,6 +52,17 @@ it.runIf(process.platform === 'darwin')('keeps unsupported argv/version and unqu
   expect(await prepareCodexManagedLaunch(unsupported, 'original-lifecycle', { kind: 'create' })).toEqual({ plan: unsupported })
 })
 
+it.runIf(process.platform === 'darwin')('qualifies Codex 0.171 prompted creation without stranding empty terminal launches', async () => {
+  const f = await command('codex-cli 0.171.0')
+  const plan = { command: f.path, args: ['--sandbox', 'read-only'], env: {} }
+  expect(await prepareCodexManagedLaunch(plan, 'empty', { kind: 'create' })).toEqual({ plan })
+  const prompt = 'Original prompt'
+  const prompted = { ...plan, args: [...plan.args, '--', prompt] }
+  const prepared = await prepareCodexManagedLaunch(prompted, 'prompted', { kind: 'create', prompt })
+  expect(prepared).toMatchObject({ nativeActor: { lifecycleOperationId: 'prompted', initializationControl: true }, promptDelivery: 'post-launch' })
+  expect(JSON.parse(prepared.plan.args[1]!)).toEqual({ command: f.path, serverConfig: [], frontendArgs: [], create: { sandbox: 'read-only' }, historyMode: 'legacy' })
+})
+
 it.runIf(process.platform === 'darwin').each([false, true])('prepares normal Core permission selections before TUI resume, with prompt=%s and the exact original native actor invocation', async withPrompt => {
   const f = await command(), sid = '00000000-0000-4000-8000-000000000001', prompt = 'Original resume prompt'
   const choices = (id: string) => [undefined, ...CODEX_LAUNCH_OPTIONS.find(option => option.id === id)!.choices.map(choice => choice.id)]

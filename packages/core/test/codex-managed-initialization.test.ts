@@ -18,7 +18,7 @@ const cleanups: Array<() => Promise<unknown>> = []
 let root: string, worker: string
 const sid = '00000000-0000-4000-8000-000000000001'
 const mutations: Record<string, [string, string]> = {
-  'deadline-preflight': ["nativeConnection.request('account/read', { refreshToken: false }, { retainPending: true })", "nativeConnection.request('account/read', { refreshToken: false })"],
+  'deadline-preflight': ["connection.request('account/read', { refreshToken: false }, { retainPending: true })", "connection.request('account/read', { refreshToken: false })"],
   'drop-preflight-retry': ['if (nativeRequested || !live()) return Promise.resolve()', "if (initialization.phase === 'failed' || nativeRequested || !live()) return Promise.resolve()"],
   'repeat-unknown': ['if (nativeRequested || !live()) return Promise.resolve()', 'if (!live()) return Promise.resolve()'],
   'drop-settled-resume': ['if (plan.resume && error instanceof JSONRPCErrorException && [-32600, -32602].includes(error.code)) nativeRequested = false', 'if (false) nativeRequested = false'],
@@ -65,7 +65,7 @@ afterEach(async () => {
 afterAll(async () => { if (root) await rm(root, { recursive: true, force: true }) })
 async function rows(path: string): Promise<any[]> { return await readFile(path, 'utf8').then(text => text.trim().split('\n').filter(Boolean).map(line => JSON.parse(line)), () => []) }
 
-async function fixture(options: { accountFailure?: boolean; authRequired?: boolean; readGate?: 'initialize' | 'account/read'; nativeGate?: boolean; nativeError?: boolean;
+async function fixture(options: { accountFailure?: boolean; accountInternalErrors?: number; authRequired?: boolean; readGate?: 'initialize' | 'account/read'; nativeGate?: boolean; nativeError?: boolean;
   settledError?: -32600 | -32602; postLoad?: boolean; transportClose?: boolean; wrongPolicy?: boolean; wrongTarget?: boolean; malformed?: boolean; resume?: boolean } = {}) {
   const directory = await realpath(await mkdtemp(join(root, 'case-')))
   const executable = join(directory, 'native'), log = join(directory, 'rpc.jsonl'), events = join(directory, 'frontends.jsonl'), heartbeat = join(directory, 'heartbeat.json')
@@ -80,7 +80,7 @@ const {appendFileSync,existsSync,writeFileSync}=require('node:fs');const args=pr
 if(args.includes('--version')){console.log('codex-cli 0.163.0');process.exit(0)}
 if(args.includes('app-server')){
  setInterval(()=>writeFileSync(${JSON.stringify(heartbeat)},JSON.stringify({pid:process.pid,time:Date.now()})),40);
- let effective;const server=new WebSocketServer({port:0,host:'127.0.0.1'});
+ let effective, accountReads=0;const server=new WebSocketServer({port:0,host:'127.0.0.1'});
  server.on('connection',(socket,req)=>{if(req.headers.authorization!=='Bearer '+process.env.${CODEX_NATIVE_TOKEN_ENV})process.exit(9);
  socket.on('message',async bytes=>{const r=JSON.parse(String(bytes));appendFileSync(${JSON.stringify(log)},JSON.stringify(r)+String.fromCharCode(10));if(!Object.hasOwn(r,'id'))return;
  const reply=result=>socket.send(JSON.stringify({jsonrpc:'2.0',id:r.id,result}));
@@ -88,6 +88,7 @@ if(args.includes('app-server')){
  if(r.method===${JSON.stringify(options.readGate ?? '')})while(existsSync(${JSON.stringify(readGate)}))await new Promise(resolve=>setTimeout(resolve,10));
  if(r.method==='initialize')return reply({});
  if(r.method==='account/read'){
+  if(++accountReads<=${options.accountInternalErrors ?? 0})return error(-32603,'Private workspace routing discovery timed out');
   if(${Boolean(options.authRequired)})return reply({account:existsSync(${JSON.stringify(fail)})?null:{type:'apiKey'},requiresOpenaiAuth:true});
   return existsSync(${JSON.stringify(fail)})?error(-32041,'Private original account routing failure'):reply({account:null,requiresOpenaiAuth:false});
  }
@@ -144,6 +145,29 @@ if(args.includes('app-server')){
   return { child, context, plan, log, events, heartbeat, fail, gate, readGate, rejected, loaded, directory, executable, wait,
     current: () => latest!, stderr: () => stderr, methods: async () => (await rows(log)).map(row => row.method) }
 }
+
+it.runIf(process.platform === 'darwin')('retries a settled account internal error once before starting the original thread', async () => {
+  const f = await fixture({ accountInternalErrors: 1 })
+  const ready = await f.wait(value => value.initialization?.phase === 'ready')
+  expect(ready.initialization?.native).toEqual({ state: 'confirmed', sessionId: sid })
+  const methods = await f.methods()
+  expect(methods.filter(method => method === 'account/read' || method === 'thread/start')).toEqual(['account/read', 'account/read', 'thread/start'])
+  expect(methods.filter(method => method === 'initialize')).toHaveLength(1)
+  expect(f.child.exitCode).toBeNull()
+})
+
+it.runIf(process.platform === 'darwin')('keeps the exact backend and explicit retry when automatic account retries are exhausted', async () => {
+  const f = await fixture({ accountInternalErrors: 2 })
+  const failed = await f.wait(value => value.initialization?.phase === 'failed')
+  expect(failed.initialization).toMatchObject({ native: { state: 'not-created' }, failure: { step: 'preflight', code: -32603 } })
+  expect((await f.methods()).filter(method => method === 'account/read' || method === 'thread/start')).toEqual(['account/read', 'account/read'])
+  const before = JSON.parse(await readFile(f.heartbeat, 'utf8'))
+  await reconnectCodexTerminalFrontend(f.context, { operationId: 'retry-exhausted', expectedFrontendId: failed.frontendId,
+    target: { kind: 'initialization', lifecycleOperationId: 'original-lifecycle' } })
+  await f.wait(value => value.initialization?.phase === 'ready')
+  expect(JSON.parse(await readFile(f.heartbeat, 'utf8')).pid).toBe(before.pid)
+  expect((await f.methods()).filter(method => method === 'thread/start')).toHaveLength(1)
+})
 
 it.runIf(process.platform === 'darwin').each(['initialize', 'account/read'] as const)('keeps the original slow %s response beyond ten seconds and automatically continues without a second request', async method => {
   const f = await fixture({ readGate: method })
