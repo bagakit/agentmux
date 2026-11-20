@@ -28,7 +28,7 @@ Remote 管理是独立、完整的产品主题；设置提供明确入口，以�
 
 分端 helper 的机器通道由 Core 通用启动边界保全：stdin／stdout 只承载已定义协议，进程启动器及 helper 自身的 stderr 在进入原生进程前隔离并保留在原 Host 私有诊断文件。Provider 负责厂商原生协议与其子进程语义，不各自过滤通用启动器日志；客户端不解析原生展示文案推断连接或完成。隔离不改变原 Native Run、PID、PTY 与信号身份，命中原冻结准备直接复用；历史未知 Run 不因新实现而替换，非法 stdout 仍报告准确原通道失败。
 
-原任务诊断应能从准确 Source 创建操作通过公共只读 CLI 查询，并在工作面就地复制；不要求用户搬运整份原请求供 Agent 排查。诊断查询只读同一 Source admission 确认的原对象及排查元数据，保留当前真实 caller，不以诊断冒充 user/device、绕过全量 binding／控制权限，或公开冻结输入、grant、环境与原生 payload。原 failure、当前 observation、helper Start 和 Agent 创建分别报告；未知不补造，读取、复制与呈现均不派发继续或输入。
+用户可以从公共只读 CLI 按 Source Runtime 与原创建操作查询诊断，也可以在工作面就地复制。Source 依据真实调用者对准确 admission 的观察资格，核对原 binding、Session 与项目资源后提供有限诊断。结果区分历史失败、当前连接观察、helper Start 与 Agent 创建，按已确认事实提供步骤、角色、错误码、游标和能力状态。缺失的历史原因继续标为未知。工具回执查询通过原 binding 定位资源 Runtime，再以准确 generation 与原 request ID 读取该资源 Core 的操作元数据。已派发而未取得原结果时保持未知。完整 binding、raw terminal、创建及控制各沿原授权边界。有限诊断仅返回允许公开的元数据，省略冻结输入、grant、环境与原生 payload。诊断读取和复制只观察，不写入位置、不推进原创建或输入。
 
 Core 更新后，原失败请求可沿其准确 Coordinator、binding、Session 与创建操作显式继续。Coordinator 从自己保留的冻结意图推进，保留原 Runtime、Native Start 尝试及输入回执；不接受客户端以当前草稿重构输入，不换身份、不重发未知 Start 或初始 Prompt。工具 reader 重接、存储等待中的创建继续与分端原意图继续分别表达。当前环境与可执行动作随准确新观察更新，上次失败作为历史保留；辅助进程启动回执、工具连接与 Agent 创建结果分别表达，准确原 Coordinator 的当前诊断直接可见，读取失败不把旧诊断冒充当前问题。更新成功本身不证明准备、创建或输入成功，也不自动触发继续。原工作面已被另一 Session 使用时，迟到回包不得覆盖它。
 
@@ -118,7 +118,7 @@ Remote 集中配置和观察准确路线。每一跳解释自己 owner 下已配
 
 Source 已接纳原创建但尚未确认 Agent 时，原 Region 的诊断须沿同一创建操作读取原 binding，不以 Session 元数据存在作为前提。原创建诊断与当前观察者的读取失败分别表达，未保留的历史原因仍为未知；托管 Agent 不借诊断入口取得 user/device 专属能力。原请求已有有效续接引用时，工作面提供同一请求的显式继续，沿原权限、冻结输入和 Start／输入回执推进；刷新不启动、不重建、不自动重放。
 
-执行协调器及其原持久意图仅由 Core 持有；Desktop 的启动、显式创建、原请求继续和实时观察均经同一公共 owner，不另开同目录或替代目录的 writer。客户端关闭只释放自己的 reader，Core 与 Main 分别重启不改变原绑定、原输入和健康 Run。原 Launcher 首层直接说明已返回的业务失败，历史创建错误与当前读取错误分开；空间接纳不代签执行意图已持久接纳，缺少原冻结意图时不以当前配置补造。
+Core 是执行协调器及其原持久意图的唯一 writer。Desktop 的启动、显式创建、原请求继续和实时观察均经同一公共 owner。客户端关闭只释放自己的 reader，Core 与 Main 分别重启时保留原绑定、原输入和健康 Run。原 Launcher 首层直接说明已返回的业务失败，历史创建错误与当前读取错误分开。Coordinator 的执行意图接纳与 Source 的位置保存分别查询和报告。位置未保存、接纳回执丢失或执行端暂不可达时，Source 仍按原 Runtime 与创建操作读取 Coordinator 已持久确认的事实。查询保留位置未知和原操作身份，原冻结意图缺失时不能用当前配置补造。原 Region 的位置结算由原创建或恢复 owner 执行。
 
 分端 helper 按实际角色确认启动依赖：Agent 侧 frontend 只承载工具消息转发时，不要求未消费的默认原生 CLI；资源侧 executor 运行原生工具服务时，仍确认该 Host 的准确 CLI、资源授权与原 journal。主 Agent 的可执行文件沿原选定 Executor 配置准备，不由辅助通道的默认命令替换。两端准备及显式继续仍保全原 binding、Session 与创建操作；移除无关检查不代签原请求已启动或恢复。
 

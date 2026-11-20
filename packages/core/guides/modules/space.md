@@ -103,12 +103,21 @@ For a split Source creation, the same exact-operation read includes
 `report.execution.diagnostics`: a safe projection of the Source's own admission and
 original journal. An authenticated managed Agent can read this metadata without full
 binding permission. `state: matched` confirms identity, not helper health or Agent readiness.
-Helper Start receipts, Native instance and byte cursors stay separate from current frame
-failure provenance (role, stage, byte range, length and SHA-256). Missing failure is unknown;
-a restarted reader cannot manufacture a historical cause. Frozen prompt, notes, environment,
-grant and raw Native bytes are excluded. Full binding/control and raw terminal reads retain
-their original user/device boundary. Use `--source-host HOST` to select the already authorized
-original Source; do not replace it with the execution Host or an unpinned same-SID lookup.
+Helper Start receipts, Native instance and byte cursors stay separate from the current
+connection, capability qualification, the last recorded creation failure's role, stage and
+code, and current invalid frame provenance. A missing failure remains unknown.
+`execution.placement: unconfirmed`
+with a matched intent means the original Coordinator journal is readable while the original
+Source placement is unconfirmed. This read can return those journal facts while the Agent
+Host is unreachable, and it neither reserves a Region nor starts work. The frozen prompt,
+notes, environment, grant and raw Native bytes stay private.
+If `request.observationIssue` is present, the lookup was unconfirmed. Retain the original
+operation when retrying the read.
+Use `--source-host HOST` to select the already authorized original Source and verify its
+Runtime. For one tool operation, an approved user or device can use
+`agent execution inspect --host local --binding ID --generation ID --request-json JSON`
+at this same Source, the original Resource Runtime, with the exact verified operation key.
+Full binding and raw terminal reads use their original user/device boundary.
 
 A Project is a repository or directory resource, not a Space. A Zone may hold a Git worktree,
 a plain directory or a Topic/Mote workface. One Session may have several display positions;
