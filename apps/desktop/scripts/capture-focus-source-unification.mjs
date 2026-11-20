@@ -16,7 +16,7 @@ const creationRelations=process.argv[4]==='--creation-relations', creationMutati
 const taskLayout=process.argv[4]==='--task-layout'||creationRelations,inlineRename=process.argv[4]==='--inline-rename'
 const agentPins=process.argv[4]==='--agent-pins', pinMutation=process.env.AGENTMUX_FOCUS_PIN_MUTATION
 assert.ok(!agentPins || !pinMutation || pinMutation==='unqualified-sid','Known Focus Agent pin mutation')
-assert.ok(!creationRelations || !creationMutation || creationMutation==='omit-creation', 'Known Focus creation mutation')
+assert.ok(!creationRelations || !creationMutation || ['omit-creation', 'ignore-route-obstacles'].includes(creationMutation), 'Known Focus creation mutation')
 const layoutMutation=process.env.AGENTMUX_FOCUS_LAYOUT_MUTATION
 assert.ok(!taskLayout || !layoutMutation || ['omit-layout','hide-mandatory','repeat-result-idle','unqualified-subagents','omit-row-summary','expand-known-recovery','omit-detail-motion','ignore-interaction-range'].includes(layoutMutation),'Known Focus task layout mutation')
 const sourceConnection=process.argv[4]==='--source-connection'
@@ -82,6 +82,13 @@ try{
       const target='const creator = source.history?.creation?.createdBy'
       assert.equal(source.split(target).length,2,'One original creation observation')
       const code=source.replace(target,'const creator = undefined')
+      transformations.push({path:relative(root,path),mutation:creationMutation,sourceSHA256:hash(source),loadedSHA256:hash(code)})
+      return {contents:code,loader:'ts'}
+    }
+    if(creationRelations && creationMutation==='ignore-route-obstacles' && component==='focus-card-link-path.ts'){
+      const target='...obstacles.filter(box => box !== from && box !== to)'
+      assert.equal(source.split(target).length,2,'One source of third-party routing obstacles')
+      const code=source.replace(target,'...[].filter(box => box !== from && box !== to)')
       transformations.push({path:relative(root,path),mutation:creationMutation,sourceSHA256:hash(source),loadedSHA256:hash(code)})
       return {contents:code,loader:'ts'}
     }
@@ -167,7 +174,7 @@ try{
     }
     return{contents:source,loader:'css'}
   })}}
-  for(const file of ['main.cjs','entry.mjs',...(taskLayout||inlineRename||agentPins?['task-layout-controls.cjs']:[]),...(agentPins?['agent-pins.cjs']:[]),...(taskLayout?['task-layout-main.cjs']:[]),...(inlineRename?['inline-rename.mjs','inline-rename-main.cjs']:[]),...(takeoverFeedback?['feedback.mjs','feedback-main.cjs']:[]),...(sourceConnection?['connection.mjs','connection-main.cjs']:[])])inputs.set(join(fixture,file),hash(await readFile(join(fixture,file))))
+  for(const file of ['main.cjs','entry.mjs',...(taskLayout||inlineRename||agentPins?['task-layout-controls.cjs']:[]),...(agentPins?['agent-pins.cjs']:[]),...(creationRelations?['creation-relations.cjs']:taskLayout?['task-layout-main.cjs']:[]),...(inlineRename?['inline-rename.mjs','inline-rename-main.cjs']:[]),...(takeoverFeedback?['feedback.mjs','feedback-main.cjs']:[]),...(sourceConnection?['connection.mjs','connection-main.cjs']:[])])inputs.set(join(fixture,file),hash(await readFile(join(fixture,file))))
   inputs.set(mainFixture,hash(await readFile(mainFixture)))
   inputs.set(new URL(import.meta.url).pathname,hash(await readFile(new URL(import.meta.url))))
   const out=join(privateRoot,'out');await mkdir(out)

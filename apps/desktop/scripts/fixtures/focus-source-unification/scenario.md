@@ -30,6 +30,8 @@ The two Electron processes share one private user-data directory. They compare t
 
 Pass `--creation-relations` to follow a typed, Host-qualified creation record through the actual Focus Cards and Compact list. Select a creator and its child to verify the same dashed arrow direction. Compact list shows a working child and a completed grandchild, and links to a child in another project without duplicating its task row. Folding keeps a permission request visible in Attention. Search can find a child independently, and a separate observation with an unconfirmed Runtime cannot acquire a parent through a matching raw Session ID. The second private Electron process restores the original Tabs, layouts, unsent draft and chosen List layout.
 
+The same Cards scene places a Results child below and to the side of the selected Working card in a dense grid. It samples the actual SVG links against the rendered card and heading bounds, then repeats after narrowing the pane. Set `AGENTMUX_FOCUS_CREATION_MUTATION=ignore-route-obstacles` to remove neighboring obstacles from the loaded router. A link must then fail the collision check.
+
 Set `AGENTMUX_FOCUS_CREATION_MUTATION=omit-creation` to omit the original creation fact in the loaded Renderer. The same scene must fail before the relation appears. The fixture controls history and Native I/O. Core creation admission, persistence and the public lookup are covered by `a2a-spawn.test.ts` and `a2a-spawn-product.test.ts`.
 
 ## Pinned Agents

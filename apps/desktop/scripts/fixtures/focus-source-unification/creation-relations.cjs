@@ -6,10 +6,33 @@ module.exports = async function exerciseCreationRelations({ win, read, until, se
   const controls = taskLayoutControls({ read, until, click })
   const button = id => focus + ' button.focus-context[data-session-id="' + id + '"]'
   const slot = id => focus + ' [data-focus-card-key][data-focus-presentation-session="' + id + '"]'
+  const tree = [['coverage', 1], ['audit', 2], ['reviews', 1]]
   const view = '.focus-project-lanes__rows'
   const scrollTop = () => read(`document.querySelector(${JSON.stringify(view)}).scrollTop = 0`)
   const descendants = () => read(`[...document.querySelectorAll(${JSON.stringify(focus + ' [data-focus-creation-depth]')})].map(node => [node.dataset.focusPresentationSession, Number(node.dataset.focusCreationDepth)])`)
   const lines = () => read(`[...document.querySelectorAll('.focus-creation-line')].map(line => ({from: JSON.parse(line.dataset.focusCreationFrom)[1], to: JSON.parse(line.dataset.focusCreationTo)[1], marker: Boolean(line.getAttribute('marker-end')), dash: getComputedStyle(line).strokeDasharray}))`)
+  const hasLine = (from, to) => lines().then(edges => edges.some(edge => edge.from === from && edge.to === to))
+  const routeCollisions = () => read(`(() => {
+      const board = document.querySelector(${JSON.stringify(view)})
+      const boxes = [...board.querySelectorAll('[data-focus-card-key], .focus-context-group__bucket, .focus-topic-section')].map(element => ({
+        bounds: element.getBoundingClientRect(), label: element.dataset.focusPresentationSession ?? element.textContent.trim(),
+      }))
+      return [...document.querySelectorAll('.focus-creation-line')].flatMap(line => {
+        const origin = line.ownerSVGElement.getBoundingClientRect()
+        const length = line.getTotalLength()
+        for (let offset = 0; offset < length; offset += 0.5) {
+          const point = line.getPointAtLength(offset), x = point.x + origin.left, y = point.y + origin.top
+          const hit = boxes.find(({bounds}) => x > bounds.left + 0.25 && x < bounds.right - 0.25 && y > bounds.top + 0.25 && y < bounds.bottom - 0.25)
+          if (hit) return [{from: line.dataset.focusCreationFrom, to: line.dataset.focusCreationTo, card: hit.label,
+            path: line.getAttribute('d'), point: [x, y], bounds: hit.bounds.toJSON()}]
+        }
+        return []
+      })
+    })()`)
+  const expectClearRoutes = async () => {
+    await settle()
+    assert.deepEqual(await routeCollisions(), [], 'Selected creation links stay outside cards and headings')
+  }
   const key = async (value, code) => {
     for (const type of ['keyDown', 'keyUp']) await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', {
       type, key: value, code: value, ...(type === 'keyDown' && value === 'Enter' ? {text:'\r'} : {}), windowsVirtualKeyCode: code, nativeVirtualKeyCode: code,
@@ -21,7 +44,7 @@ module.exports = async function exerciseCreationRelations({ win, read, until, se
     read(`Boolean(document.querySelector(${JSON.stringify(slot('working') + ' .focus-creation-mark')})) || (document.querySelector(${JSON.stringify(focus)}).dataset.taskLayout === 'list' && Boolean(document.querySelector('.focus-creation-disclosure')))`))
   if (restoreOnly) {
     assert.equal(await layout(), 'list')
-    assert.deepEqual(await descendants(), [['coverage', 1], ['audit', 2]])
+    assert.deepEqual(await descendants(), tree)
     assert.equal(await read('window.taskLayoutProof.restored'), true)
     result.topology = await read('window.taskLayoutProof.topology()')
     result.layout = 'list'
@@ -33,7 +56,7 @@ module.exports = async function exerciseCreationRelations({ win, read, until, se
   assert.deepEqual(await lines(), [])
   await read('window.unifiedFocusProof.theme("dark")')
   await click(button('working'))
-  await until('selected card draws creator to child', async () => (await lines()).some(line => line.from === 'working' && line.to === 'coverage'))
+  await until('selected card draws both column relationships', async () => await hasLine('working', 'coverage') && await hasLine('working', 'reviews'))
   assert.ok((await lines()).every(line => line.from === 'working' && line.marker && line.dash !== 'none'))
   const attentionEndpointGap = () => read(`(() => {
     const line = [...document.querySelectorAll('.focus-creation-line')].find(line => JSON.parse(line.dataset.focusCreationTo)[1] === 'permission')
@@ -45,19 +68,46 @@ module.exports = async function exerciseCreationRelations({ win, read, until, se
     return dx <= 0 && dy <= 0 ? -Math.max(dx, dy) : Math.hypot(Math.max(0, dx), Math.max(0, dy))
   })()`)
   await until('the arrow ends at the visible Attention card outline', async () => (await attentionEndpointGap()) <= 4)
+  assert.equal(await read(`(() => {
+    const line = [...document.querySelectorAll('.focus-creation-line')].find(line => JSON.parse(line.dataset.focusCreationTo)[1] === 'permission')
+    const board = document.querySelector(${JSON.stringify(view)}), origin = line.ownerSVGElement.getBoundingClientRect()
+    const length = line.getTotalLength(), tip = line.getPointAtLength(length), before = line.getPointAtLength(length - 0.1)
+    const dx = tip.x - before.x, dy = tip.y - before.y, delta = Math.hypot(dx, dy)
+    const x = tip.x + origin.left - board.getBoundingClientRect().left, y = tip.y + origin.top - board.getBoundingClientRect().top
+    const tailX = x - 3.75 * dx / delta, tailY = y - 3.75 * dy / delta
+    const wingX = 1.875 * Math.abs(dy / delta), wingY = 1.875 * Math.abs(dx / delta)
+    return tailX - wingX >= 0 && tailX + wingX <= board.clientWidth && tailY - wingY >= 0 && tailY + wingY <= board.clientHeight
+  })()`), true, 'The entire arrowhead fits inside the scrollport')
+  await expectClearRoutes()
   assert.equal(await read(`getComputedStyle(document.querySelector('.focus-creation-connections')).pointerEvents`), 'none')
   result.cardOutgoing = await lines()
   await capture('cards-creation-outgoing.png', 'Selected creator links to the visible Agent it created using a dashed arrow')
 
   await click(button('coverage'))
-  await until('selected child keeps incoming creation direction', async () => (await lines()).some(line => line.from === 'working' && line.to === 'coverage'))
+  await until('the selected child shows the incoming and staggered outgoing relations', async () => await hasLine('working', 'coverage') && await hasLine('coverage', 'audit'))
+  await settle()
+  assert.equal(await read(`(() => {
+    const source = document.querySelector(${JSON.stringify(slot('coverage'))}).getBoundingClientRect()
+    const target = document.querySelector(${JSON.stringify(slot('audit'))}).getBoundingClientRect()
+    return Math.abs(target.x - source.x) >= 20 && target.top >= source.bottom - 4
+  })()`), true, 'The Results target is staggered across a column and row')
   assert.ok(!(await lines()).some(line => line.from === 'coverage' && line.to === 'working'))
-  await capture('cards-creation-incoming.png', 'Selecting the child preserves the creator-to-child arrow direction')
+  await expectClearRoutes()
+  await capture('cards-creation-incoming.png', 'The staggered Results link follows the available gutter')
   result.cardIncoming = await lines()
 
+  win.setContentSize(1200, 1000)
+  await settle()
+  await until('resizing keeps the selected relation visible', () => hasLine('coverage', 'audit'))
+  await expectClearRoutes()
+  await capture('cards-creation-reflow.png', 'Cards keep the same directed relationship after the pane narrows')
+  result.routing = { staggered: true, clearedCardsAndHeadings: true, reflow: true }
+  win.setContentSize(1440, 900)
+  await settle()
+
   await controls.choose('list')
-  await until('mounted compact List creation subtree', async () => await layout() === 'list' && (await descendants()).length === 2)
-  assert.deepEqual(await descendants(), [['coverage', 1], ['audit', 2]])
+  await until('mounted compact List creation subtree', async () => await layout() === 'list' && (await descendants()).length === tree.length)
+  assert.deepEqual(await descendants(), tree)
   assert.equal(await read(`document.querySelector(${JSON.stringify(button('audit'))}).dataset.bucket`), 'results', 'The child retains its own status inside the subtree')
   assert.equal(await read(`document.querySelectorAll(${JSON.stringify(button('mobile'))}).length`), 1, 'The other project keeps one original task row')
   const reference = slot('working') + ' .focus-creation-references button'
@@ -79,8 +129,8 @@ module.exports = async function exerciseCreationRelations({ win, read, until, se
   assert.equal(await read(`document.activeElement === document.querySelector(${JSON.stringify(toggle)})`), true)
   await capture('list-creation-collapsed.png', 'The keyboard disclosure folds descendants and keeps the original workface')
   await key('Enter', 13)
-  await until('keyboard expands the same subtree', async () => (await descendants()).length === 2)
-  assert.deepEqual(await descendants(), [['coverage', 1], ['audit', 2]])
+  await until('keyboard expands the same subtree', async () => (await descendants()).length === tree.length)
+  assert.deepEqual(await descendants(), tree)
   assert.deepEqual(await read('window.taskLayoutProof.topology()'), before)
 
   const search = focus + ' [aria-label="Search contexts"]'
@@ -91,7 +141,7 @@ module.exports = async function exerciseCreationRelations({ win, read, until, se
   assert.match(await read(`document.querySelector(${JSON.stringify(button('audit'))}).getAttribute('aria-description')`), /Created by/)
   await read(`document.querySelector(${JSON.stringify(search)}).select()`)
   await key('Backspace', 8)
-  await until('clearing the filter restores the same tree', async () => (await descendants()).length === 2)
+  await until('clearing the filter restores the same tree', async () => (await descendants()).length === tree.length)
 
   const sizes = [1200, 1130, 1060, 1000, 935, 870, 820]
   for (const width of sizes) {

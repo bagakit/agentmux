@@ -64,7 +64,7 @@ if(localTaskScene){
   ['notes','归档本轮业务分析记录','done'],
  ]
  for(const [index,[id,label,state]] of scenario.entries()){
-  const observedAt=now-index*40000
+  const observedAt=window.__focusCreationScene && id === 'reviews' ? now - 1000 : now - index*40000
   sessions.push({...sessions[0],id,label,...(window.__taskLayoutScene && id === 'mobile' ? {workspacePath:secondary.path} : {}),status:{state,source:'native-hook',observedAt},
    semanticStatus:{state,source:'native-hook',observedAt,stateEnteredAt:observedAt},
    control:{...sessions[0].control,agentSessionId:id,run:{runId:'original-run-'+id}},
@@ -191,7 +191,7 @@ if(localTaskScene || agentPinsScene){
  if (window.__focusCreationScene) {
   const historySources = api.sessions.historySources
   const subjects = [
-   ['coverage', 'working', {kind:'local'}], ['audit', 'coverage', {kind:'local'}],
+   ['coverage', 'working', {kind:'local'}], ['reviews', 'working', {kind:'local'}], ['audit', 'coverage', {kind:'local'}],
    ['mobile', 'working', {kind:'local'}], ['permission', 'working', {kind:'local'}],
    ['summary', 'working', {kind:'runtime',runtimeId:'unconfirmed-creator-device'}],
   ].map(([id, parent, owner]) => {
