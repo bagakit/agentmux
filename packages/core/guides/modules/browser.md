@@ -304,11 +304,10 @@ handoff choice while the original page stays unchanged.
 
 Profile native environment uses `browser profile update --profile ID --expected-revision TOKEN --environment JSON`.
 The bundle accepts userAgent, acceptLanguages, timeZone, locale, geolocation, userAgentMetadata, screen
-and hardwareConcurrency; null clears it. Read the original Profile for each Browser/field native application
+hardwareConcurrency, and fingerprint: {seed, surfaces}; null clears it. Fingerprint seeds are unsigned 32-bit integers. The surfaces are fonts, audio, canvas, clientRects, and webgl. Read the original Profile for each Browser/field native application
 and explicit scope. Saving does not reload the page or grant geolocation permission. DevTools owns its native
 connection while open; actual detach is unknown and closing DevTools reapplies without replaying page actions.
-Subdocuments, Workers and initial scripts remain unknown; Canvas/WebGL/fonts/TLS and complete fingerprint
-emulation are unsupported. Screen edits compose with the original execution Viewport.
+Fingerprint settings affect the selected document APIs. Subdocuments, Workers and initial scripts remain unknown. TLS and engine-wide emulation are unsupported. Screen edits compose with the original execution Viewport.
 
 Proxy library: `browser profile proxy ls` reads stable non-secret assets and exact proxy revision tokens.
 Use `proxy create --operation-id ID --edit JSON`, `proxy update --proxy ID --expected-revision TOKEN --edit JSON`, or
