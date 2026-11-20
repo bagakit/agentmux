@@ -12,6 +12,9 @@ import { createHostContent } from '../../../apps/host/src/content-owner.js'
 import { HostMoteQuickPreferences } from '../../../apps/host/src/mote-quick-preferences.js'
 import { spatialCatalog } from '../src/spatial-state.js'
 import { MOTE_INPUT_GUIDANCE } from '../src/mote/input-source.js'
+import { focusReadCommand } from '../src/focus-task-guidance.js'
+import { guideSharedFocusTaskHandoff } from '../src/generated/agentmux-guides.js'
+import { guideText } from '../src/guide-text.js'
 import { agentPromptSubmissionOutcome, parseMoteDialogueResult } from '../src/mote/dialogue.js'
 import type { AgentPromptSubmissionRecord } from '../src/types.js'
 import { createAgentInputContextCaptureRecord, type AgentInputContextCaptureReader, type AgentInputContextCaptureRecord } from '../src/agent-input-context-capture.js'
@@ -269,6 +272,51 @@ function mainPrompt(roleRevision: string, target: Awaited<ReturnType<typeof fixt
     expectedRun:{runId:'run-primary'},admissionIntent:{kind:'native-conversation' as const,source:{providerId:'codex',nativeSessionId:'primary-native'}},execution:'immediate' as const}}
 }
 
+const focusTask = {
+  scope: { kind: 'project' as const, projectSpaceId: 'original-focus-project', hostId: 'local' },
+  selection: { kind: 'members' as const, references: [{ hostId: 'local', contextId: 'original-focus-member' }] }
+}
+const legacyFocusNote = MOTE_INPUT_GUIDANCE + '\n\n' + guideText(guideSharedFocusTaskHandoff) +
+  '\n\nExact Focus reads (1 batch; read every batch and its remaining pages):\n' + focusReadCommand(focusTask)
+
+it.each(['terminal-confirmed', 'not-applied'] as const)('explicit Focus preparation retry preserves the original %s receipt', async outcome => {
+  const f = await fixture()
+  f.idle()
+  const provider = f.client.providers.get('codex')
+  f.client.providers.replace({ ...provider, catalog: { ...provider.catalog, capabilities: {
+    ...provider.catalog.capabilities, promptExecution: { immediate: 'terminal-submit' }
+  } }, planPromptInput: prompt => ({ kind: 'single-phase', data: prompt + '\r' }) })
+  const target = { agentSessionId: 'primary', expectedRun: { runId: 'run-primary' }, afterSubmissionId: null,
+    operationId: 'original-focus-preparation', prompt: 'Original Focus question', execution: 'immediate' as const, sourceChannel: 'cli' as const }
+  const key = { kind: 'prompt' as const, agentSessionId: target.agentSessionId, expectedRun: target.expectedRun, submissionId: target.operationId }
+  if (outcome === 'not-applied') {
+    const write = vi.mocked(f.inner.kernel.input as () => Promise<unknown>)
+    write.mockRejectedValueOnce(new AgentMuxError('Original bytes were refused.', 'CTXMUX_input_cursor_mismatch',
+      'not_applied', { disposition: 'not_applied', confirmedInputBytes: 0 }))
+  }
+  const sending = f.client.submitAgentPrompt({ ...target, authorHuman: true, agentMuxNote: legacyFocusNote })
+  if (outcome === 'not-applied') await expect(sending).rejects.toBeTruthy()
+  else await sending
+  const original = await f.client.inspectAgentPromptSubmission(key)
+  expect(agentPromptSubmissionOutcome(original)).toBe(outcome)
+  expect(original?.admission?.intent?.message).toMatchObject({
+    userContent: target.prompt, systemContext: legacyFocusNote, authorHuman: true
+  })
+  const request = { ...target, moteGuidance: true as const, focusTask,
+    preparationRetry: { inputByte: 0, nativeSourceId: 'native-primary-native' } }
+  const acceptedBytes = f.run(target.expectedRun.runId).acceptedInputBytes
+  if (outcome === 'not-applied') {
+    await expect(f.rpc.call('agent.input.submit', request)).rejects.toMatchObject({ code: 'AGENT_PROMPT_INPUT_NOT_APPLIED' })
+  } else {
+    expect((await f.rpc.call('agent.input.submit', request)).record).toEqual(original)
+  }
+  await expect(f.rpc.call('agent.input.submit', { ...request,
+    focusTask: { ...focusTask, selection: { kind: 'all' } }
+  })).rejects.toMatchObject({ code: 'AGENT_PROMPT_OPERATION_CONFLICT' })
+  expect(f.run(target.expectedRun.runId).acceptedInputBytes).toBe(acceptedBytes)
+  expect(await f.client.inspectAgentPromptSubmission(key)).toEqual(original)
+})
+
 it('logical main input rejects a stale first send after a completed role switch and retains ordinary member input', async()=>{
   const f=await fixture(),main=await f.main.readCurrentMoteMain(f.target),request=mainPrompt(main.roleRevision!,f.target,'stale-main-draft')
   await switchMain(f,'member','switch-before-first-main-input')
@@ -278,7 +326,7 @@ it('logical main input rejects a stale first send after a completed role switch 
   await expect(f.rpc.call('space.mote.dialogue.input.submit',request)).rejects.toMatchObject({code:'MOTE_MAIN_CHANGED'})
   expect(f.writes).toEqual([])
   expect((await f.submit('ordinary-member-after-main-switch')).moteObservationId).toBe(f.observation('ordinary-member-after-main-switch'))
-  expect(f.writes.some(row=>row.key?.agentSessionId==='member')).toBe(true)
+  await vi.waitFor(() => expect(f.writes.some(row=>row.key?.agentSessionId==='member')).toBe(true))
   expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 })
 
@@ -475,6 +523,35 @@ it('a captured main recovery serializes an attempted role switch and keeps the o
   expect(await f.rpc.call('space.mote.dialogue.input.inspect',{target:f.target,operationId:base.input.operationId})).toEqual(accepted)
   expect(await f.rpc.call('space.mote.dialogue.input.submit',request)).toEqual(accepted)
   expect(ensure).toHaveBeenCalledTimes(1);expect(runtime.started).toHaveLength(1);expect(f.writes).toEqual([]);expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it('explicit Focus recovery reconciles the original launch after the note format changes', async () => {
+  const f = await fixture(), main = await f.main.readCurrentMoteMain(f.target)
+  const runtime = endedMainRuntime(f, { lostStart: true })
+  const { input, ...route } = mainPrompt(main.roleRevision!, f.target, 'original-focus-launch')
+  const request = { ...route, input: { ...input, focusTask, admissionIntent: { kind: 'manual-actor' as const } },
+    recovery: { operationId: 'original-focus-recovery' } }
+  const ensure = f.client.ensureAgentContinuity.bind(f.client)
+  vi.spyOn(f.client, 'ensureAgentContinuity').mockImplementationOnce((original, context) =>
+    ensure({ ...original, input: { ...original.input!, agentMuxNote: legacyFocusNote } }, context))
+  const unknown = await f.rpc.call('space.mote.dialogue.input.submit', request)
+  expect(unknown.recovery?.launchInput).toMatchObject({ state: 'unknown', input: { agentMuxNote: legacyFocusNote } })
+  expect(await f.rpc.call('space.mote.dialogue.input.submit', request)).toEqual(unknown)
+  const reconcile = { ...request, recovery: { ...request.recovery, reconcile: true } }
+  await expect(f.rpc.call('space.mote.dialogue.input.submit', { ...reconcile, input: {
+    ...reconcile.input, focusTask: { ...focusTask, selection: { kind: 'all' } }
+  } })).rejects.toMatchObject({ code: 'AGENT_PROMPT_OPERATION_CONFLICT' })
+  const result = await f.rpc.call('space.mote.dialogue.input.submit', reconcile)
+  expect(result.route).toEqual(unknown.route)
+  expect(result.recovery).toMatchObject({ kind: 'resumed', newRun: runtime.recovered })
+  expect(result.record?.launch).toMatchObject({
+    state: 'launch-carried', key: { submissionId: input.operationId },
+    message: { userContent: input.prompt, systemContext: unknown.recovery?.launchInput?.message.systemContext },
+    input: { agentMuxNote: legacyFocusNote }
+  })
+  expect(runtime.core.kernel.inspectPreparedStart).toHaveBeenCalledOnce()
+  expect(runtime.started).toHaveLength(1)
+  expect(f.writes).toEqual([])
 })
 
 it('a stale captured recovery and an unknown original Start never become a later main input or another launch',async()=>{
