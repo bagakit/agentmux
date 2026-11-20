@@ -612,7 +612,7 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     if (['assigneeExecutorId', 'executorId', 'participations', 'creationOrigin', 'requesterAsSupervisor', 'requesterParticipationId', 'supervisorDefaultPending'].some(key => Object.hasOwn(source, key))) throw new AgentMuxError('Goal assignment requires accurate Sessions; provenance is authored by the original host.', 'INVALID_CONTROL_REQUEST')
   }
   if (source.operation === 'demand.create') {
-    if (Object.hasOwn(source, 'demandId') || Object.hasOwn(source, 'goalId'))
+    if (['id', 'demandId', 'goalId'].some(key => Object.hasOwn(source, key)))
       throw new AgentMuxError('The original owner allocates Goal IDs. Supply an operation ID to look up this creation.', 'INVALID_CONTROL_REQUEST')
     const title = text(source.title, 'Demand title')
     const sessionIds = source.sessionIds === undefined ? undefined : parseGoalAgentReferences(source.sessionIds)
