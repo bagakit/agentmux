@@ -115,8 +115,17 @@ it('original Goal continuation initial input waits while busy and autonomously a
   await vi.waitFor(async () => {
     expect(await f.input()).toMatchObject({ run: f.expectedRun, admission: { submissionId: f.operationId, acknowledged: true } })
   }, { timeout: 8_000, interval: 50 })
+  expect((await f.input())?.admission?.intent?.message?.systemContext).toContain('Goal role: manager')
   expect((await f.inspect()).goalContinuations).toMatchObject([{ loopId, status: 'active', initialDelivery: { state: 'confirmed', operationId: f.operationId } }])
   expect(f.host.native.input).toHaveBeenCalledTimes(1)
+})
+
+it('uses executor guidance for the original finite Goal Start', async () => {
+  const f = await originalContinuation('goal-finite-start-role')
+  await f.turn('done')
+  await f.host.call(null, ['goal', 'start', '--goal', f.goalId, '--session', 'supervisor', '--operation-id', f.operationId])
+  expect((await f.input())?.admission?.intent?.message?.systemContext).toContain('Goal role: executor')
+  expect((await f.inspect()).goalContinuations).toEqual([])
 })
 
 it('original Goal continuation initial input releases a prepared loop whose authoritative Goal version refused Start', async () => {
