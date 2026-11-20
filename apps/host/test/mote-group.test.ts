@@ -298,6 +298,16 @@ it('schedules recurring private assignments on the original clock and deduplicat
   now += assignment.everyMs
   await manager.check(now, schedule.loopId)
   expect(delivered).toHaveLength(2)
+  const prior = { ...assignment, operationId: 'original-archived-assignment' }
+  const expected = core.moteDirectSchedulePrompt(prior)
+  const frozen = 'Prior guidance carried by the original arrangement.' + expected.slice(expected.lastIndexOf('\n\n'))
+  const saved = await rpc.call('schedule.create', { operationId: prior.operationId, everyMs: prior.everyMs,
+    target: { hostId: schedule.hostId, agentSessionId: schedule.agentSessionId, providerId: schedule.providerId, workspacePath: schedule.workspacePath }, prompt: frozen })
+  const retry = await f.cli('schedule', prior, 'assignment-owner', 'direct')
+  expect(retry.code, retry.stderr).toBe(0)
+  expect(JSON.parse(retry.stdout).result.schedule).toMatchObject({ loopId: saved.schedule.loopId, prompt: frozen })
+  const conflict = await f.cli('schedule', { ...prior, body: 'A different private assignment' }, 'assignment-owner', 'direct')
+  expect(cliError(conflict)).toMatchObject({ code: 'SCHEDULE_OPERATION_CONFLICT' })
 })
 
 it('saves one original public message, starts only invited members and reuses exact member input through public RPC', async () => {
