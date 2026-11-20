@@ -1,6 +1,6 @@
 import { RecallOriginalRecord } from './RecallOriginalRecord'
 import { recallCardBlocks, type RecallCard } from '@agentmux/core/notebook-observation'
-import { openRecallCardRecord } from '../lib/recall-card-capture'
+import { openRecallCardRecord } from '../lib/recall-card-navigation'
 import { RecallCardLink, RecallKnowledgeCard } from './RecallKnowledgeCard'
 import { presentKnowledgeSurface } from '../lib/knowledge-surface-navigation'
 import { useWorkbenchDocument } from '../lib/workbench-document'

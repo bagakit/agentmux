@@ -51,13 +51,13 @@ export function confirmNoteHistoryTarget(params: FileReadParams, noteId: string,
     path: params.path, expectedResource: receipt.resource, noteId }, document: receipt.result.document }
 }
 
-/** Map an already confirmed embedded resource through an existing exact directory Zone. No surface is invented. */
-export function noteResourceReadParams(state: SpatialWorkbench, topics: readonly ScratchTopicSnapshot[], resource: import('@agentmux/core/notebook-catalog').NoteResource): FileReadParams {
+/** Map a known Note through an existing directory. An admitted operation keeps its exact Zone. */
+export function noteResourceReadParams(state: SpatialWorkbench, topics: readonly ScratchTopicSnapshot[], resource: import('@agentmux/core/notebook-catalog').NoteResource, position?: { zoneId: string; exact?: boolean }): FileReadParams {
   const workspace = state.config?.workspaces.find(item => item.id === resource.workspaceId)
   if (!workspace || workspace.hostId !== resource.hostId || workspace.path !== resource.workspacePath) throw Error('The original shared file Workspace changed. Its draft is kept.')
   const catalog = spatialCatalog(state, topics), candidates: FileReadParams[] = []
   for (const zone of catalog.zones) {
-    if (zone.workspaceId !== resource.workspaceId) continue
+    if (zone.workspaceId !== resource.workspaceId || position?.exact && zone.zoneId !== position.zoneId) continue
     try {
       const directory = zoneFileResource(workspace, zone, '', topics), prefix = directory.relativeDirectory ? directory.relativeDirectory + '/' : ''
       if (!resource.path.startsWith(prefix) || resource.path.length === prefix.length) continue
@@ -65,6 +65,8 @@ export function noteResourceReadParams(state: SpatialWorkbench, topics: readonly
       if (zoneFileResource(workspace, zone, path, topics).path === resource.path) candidates.push({ zoneId: zone.zoneId, path, expectedResource: { hostId: resource.hostId, workspaceId: resource.workspaceId, workspacePath: resource.workspacePath } })
     } catch { /* This Zone does not own the exact known file; it cannot authorize this request. */ }
   }
+  const original = candidates.find(candidate => candidate.zoneId === position?.zoneId)
+  if (original) return original
   const root = candidates.filter(candidate => candidate.path === resource.path)
   // A Notebook page may share the same directory through its own workface Zone.
   // Prefer the original default factory identity only after exact resource validation.

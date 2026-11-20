@@ -1,0 +1,53 @@
+import type { NotebookPage } from '@agentmux/core/notebook-catalog'
+import { recallCardHref, type RecallCard } from '@agentmux/core/notebook-observation'
+import type { ConversationRef } from '@agentmux/core/conversation'
+import type { NotebookGraphSnapshot } from '../../../shared/notebook-observation'
+import { useAppStore } from '../store'
+import { presentKnowledgeSurface } from './knowledge-surface-navigation'
+import { noteResourceReadParams } from './note-history-target'
+import { openNotebookPage } from './recall-notebooks'
+import { scratchTopicsForConfig } from './scratch-topic-snapshots'
+import { sessionPresentationById } from './session-presentation'
+
+export type RecallDestination = { page: NotebookPage; blockId: string }
+export type RecallBacklinks = {
+  complete: boolean
+  byCard: ReadonlyMap<string, readonly RecallDestination[]>
+}
+
+/** Project each graph observation once for the visible conversation. */
+export function recallBacklinks(snapshot: NotebookGraphSnapshot, conversation: ConversationRef): RecallBacklinks {
+  const byCard = new Map<string, RecallDestination[]>()
+  for (const entry of snapshot.graph.recallCards ?? []) {
+    if (entry.card.routeHostId !== conversation.hostId || entry.card.reference.agentSessionId !== conversation.agentSessionId) continue
+    const page = snapshot.catalog.pages[entry.source.noteId]
+    if (!page) continue
+    const key = recallCardHref(entry.card), links = byCard.get(key) ?? []
+    links.push({ page, blockId: entry.source.blockId })
+    byCard.set(key, links)
+  }
+  return { complete: snapshot.graph.completeness === 'complete', byCard }
+}
+
+export async function openRecallCardNote(page: NotebookPage, blockId: string, sourceDocument: Document): Promise<void> {
+  const state = useAppStore.getState()
+  const topics = scratchTopicsForConfig(state.config, state.scratchTopicSnapshots) ?? []
+  const { zoneId } = noteResourceReadParams(state, topics, page.resource, page.workface)
+  const original = { ...page, workface: { zoneId, workspaceId: page.resource.workspaceId } }
+  state.setRecallNotebook(page.notebookId, page.noteId)
+  if (!await presentKnowledgeSurface('recall', state.setMainSurface, { inputPolicy: 'target', sourceDocument }) ||
+    !await openNotebookPage(original, undefined, undefined, { noteId: page.noteId, blockId })) {
+    throw new Error('The original Note is kept. Its card position is not currently visible.')
+  }
+}
+
+export async function openRecallCardRecord(card: RecallCard): Promise<boolean> {
+  const state = useAppStore.getState(), session = sessionPresentationById(state.sessions).get(card.reference.agentSessionId)
+  if (session?.kind !== 'agent' || session.control.hostId !== card.routeHostId || !state.focusExecutionSession(card.reference.agentSessionId)) {
+    return false
+  }
+  state.setMainSurface('agents')
+  const result = await useAppStore.getState().revealConversationItem(card.reference, card.routeHostId)
+  if (result.kind === 'unavailable') state.reportError(new Error(result.message), { kind: 'indeterminate' })
+  return true
+}
