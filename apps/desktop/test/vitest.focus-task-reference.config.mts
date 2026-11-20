@@ -3,6 +3,7 @@ import { relative, resolve } from 'node:path'
 import base from './vitest.focus-read-projection.config.mts'
 const root = resolve(import.meta.dirname, '../../..')
 const mutants = {
+  'ignore-canonical-project': ['lib/focus-group-reference.ts', "if (lane.projectSpaceId) return { kind: 'project', hostId: lane.hostId, projectSpaceId: lane.projectSpaceId }", ''],
   'drop-main-reference': ['lib/mote-task-handoff.ts', '...(task.focusTask ? { focusTask: task.focusTask } : {})', ''],
   'drop-launcher-reference': ['components/FocusGroupDiscussion.tsx', 'openFocusGroupAgentLauncher(project, prompt, current, focusTask)', 'openFocusGroupAgentLauncher(project, prompt, current)'],
   'prompt-only-receipt': ['components/FocusGroupDiscussion.tsx', 'moteTaskPacketKey(prompt, focusTask)', 'prompt']

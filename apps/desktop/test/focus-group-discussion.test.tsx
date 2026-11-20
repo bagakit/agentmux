@@ -225,12 +225,16 @@ it('untrusted card names never enter the task or its original member references'
   expect(Object.keys(packet.focusTask).sort()).toEqual(['scope', 'selection'])
 })
 
-it('task generation follows the canonical public project scope while title changes keep the original intent', () => {
+it('task generation follows the canonical project Space identity across presentation and configuration changes', () => {
   const state = useAppStore.getState(), contexts = createFocusProjectionSelector()(state).laneContexts
   const lane = deriveFocusProjectLanes(contexts, state.config).find(lane => lane.projectId === project.id)!
   const original = focusGroupTaskScopeKey(lane, state.config!.workspaces)
   expect(focusGroupTaskScopeKey({ ...lane, name: 'Later title', summary: 'Later activity' }, state.config!.workspaces)).toBe(original)
-  expect(focusGroupTaskScopeKey(lane, state.config!.workspaces.map(resource => resource.id === project.id ? { ...resource, path: resource.path + '/changed' } : resource))).not.toBe(original)
+  expect(lane.projectSpaceId).toBe(folderSpaceFacts(project).space.spaceId)
+  const workspaces = state.config!.workspaces.map(resource => resource.id === project.id ? { ...resource, path: resource.path + '/changed' } : resource)
+  expect(focusGroupTaskScopeKey(lane, workspaces)).toBe(original)
+  const changed = { ...lane, projectSpaceId: folderSpaceFacts(workspaces.find(resource => resource.id === project.id)!).space.spaceId }
+  expect(focusGroupTaskScopeKey(changed, workspaces)).not.toBe(original)
 })
 
 
