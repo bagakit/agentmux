@@ -23,7 +23,9 @@ const config = mergeConfig(base, { plugins: [{
     if (path.endsWith('/test/mobile-agent-reference-reconnect.test.tsx')) {
       code = replaceOnce(code, 'bootstrap.sessions = [session(), nextPeer]', `bootstrap.sessions = [session(), nextPeer, ...Array.from({ length: ${peerCount} }, (_, i) => ({ ...session('new-peer-' + i), providerId: 'new-provider-' + i }))]; (globalThis as any).__referenceReconnectEntries = 0; (globalThis as any).__referenceReconnectPublications = 0`)
       const anchor = '    const stale: AgentMuxClientEvent ='
-      return replaceOnce(code, anchor, `    expect(client.agentSessions()).toHaveLength(${peerCount + 2}); expect((globalThis as any).__referenceReconnectPublications).toBeGreaterThan(0); console.info('REFERENCE_RECONNECT_COST ' + JSON.stringify({ peers: ${peerCount}, entries: (globalThis as any).__referenceReconnectEntries, publications: (globalThis as any).__referenceReconnectPublications })); expect((globalThis as any).__referenceReconnectEntries).toBeLessThanOrEqual(${2 * (peerCount + 3)});\n` + anchor)
+      // Losing the directory can publish the two retained entries once, before
+      // the bootstrap events and its ready snapshot are reconciled.
+      return replaceOnce(code, anchor, `    expect(client.agentSessions()).toHaveLength(${peerCount + 2}); expect((globalThis as any).__referenceReconnectPublications).toBeGreaterThan(0); console.info('REFERENCE_RECONNECT_COST ' + JSON.stringify({ peers: ${peerCount}, entries: (globalThis as any).__referenceReconnectEntries, publications: (globalThis as any).__referenceReconnectPublications })); expect((globalThis as any).__referenceReconnectEntries).toBeLessThanOrEqual(${2 + (peerCount + 3) + (peerCount + 2)});\n` + anchor)
     }
   }
 }] })

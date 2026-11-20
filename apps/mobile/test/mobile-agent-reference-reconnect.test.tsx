@@ -37,7 +37,7 @@ it('reconciles the original Hosted SDK bootstrap after its actual observation le
   const client = await connectHostedAgentMux({ rpc: port })
   // Keep the true Hosted event lease, bootstrap and metadata methods. Only unrelated
   // conversation reading ports use the controlled fixture, so no Provider is started.
-  const preserved = new Set(['onEvent', 'agentSessions', 'agentSession', 'runtimeOwnerIdentity'])
+  const preserved = new Set(['onEvent', 'agentSessions', 'agentSession', 'runtimeOwnerIdentity', 'sessionObservation'])
   for (const [key, value] of Object.entries(companion.client)) if (!preserved.has(key)) Object.assign(client, { [key]: value })
   const events: AgentMuxClientEvent[] = [], stopEvents = client.onEvent(value => events.push(value))
   try {
@@ -48,8 +48,16 @@ it('reconciles the original Hosted SDK bootstrap after its actual observation le
     await vi.waitFor(() => expect(choices().some(value => value.includes('old-provider'))).toBe(true))
     bootstrap.sessions = [session(), nextPeer]
     await act(async () => streams[0]!.onEnd(new Error('original observation lost')))
+    expect(client.sessionObservation()).toMatchObject({ state: 'unavailable', hasSnapshot: true })
     expect(choices().some(value => value.includes('old-provider'))).toBe(true)
-    await vi.waitFor(async () => { await act(async () => {}); expect(streams).toHaveLength(2); expect(events.some(value => value.type === 'connection-state' && value.state === 'restored')).toBe(true); expect(choices().some(value => value.includes('new-provider'))).toBe(true); expect(choices().some(value => value.includes('old-provider'))).toBe(false) }, { timeout: 3000 })
+    await vi.waitFor(async () => {
+      await act(async () => {})
+      expect(streams).toHaveLength(2)
+      const directoryStates = events.flatMap(event => event.type === 'session-observation-state' ? [event.observation.state] : [])
+      expect(directoryStates).toEqual(['unavailable', 'ready'])
+      expect(choices().some(value => value.includes('new-provider'))).toBe(true)
+      expect(choices().some(value => value.includes('old-provider'))).toBe(false)
+    }, { timeout: 3000 })
     const stale: AgentMuxClientEvent = { type: 'agent-session', session: { ...session('late-peer'), providerId: 'late-old-provider' } }
     await act(async () => { for (const data of hostedTransfer({ kind: 'event', event: stale }, 'late-old-event')) streams[0]!.onEvent({ type: 'snapshot', data }) })
     expect(choices().some(value => value.includes('late-old-provider'))).toBe(false)
