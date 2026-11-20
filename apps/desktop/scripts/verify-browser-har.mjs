@@ -74,6 +74,18 @@ try {
             assert.equal(result.result.entryCount, log.entries.length)
             row.exported = { sha256: hash(bytes), previousPosts: 1, finalPosts: posts(), retainedEntries: log.entries.length }
           })
+          await observe('Browser without a Workspace returns a bounded native HAR', async () => {
+            const limited = join(work, 'bounded.har')
+            const burst = `Promise.all(Array.from({length:350},(_,i)=>fetch('/bounded?ticket='+i).then(response=>response.text())))`
+            const result = await cli(['browser','run','--browser',one.id,'--operation-id','har-inline-capture','--output',limited],
+              `await startHarCapture(); await js(${JSON.stringify(burst)}); return await finishHarCapture();`)
+            const bytes = await readFile(limited, 'utf8'), { log } = JSON.parse(bytes)
+            assert.equal(result.outcome.kind, 'completed', result.outcome.message)
+            assert.ok(log.entries.length > 0 && log.entries.length < 350, 'Large native result is bounded rather than unavailable')
+            assert.ok(log._capture.dropped > 0, 'The file reports the actual output loss')
+            assert.ok(Buffer.byteLength(bytes) < 128 * 1024)
+            row.boundedExport = { entries: log.entries.length, dropped: log._capture.dropped }
+          })
         } })
       assert.equal(name === 'omit-native-redirect', false, 'Original native redirect regression must fail the mutant')
     } catch (error) {
