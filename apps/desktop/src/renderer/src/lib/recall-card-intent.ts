@@ -6,6 +6,7 @@ export type RecallCardIntent = {
   operationId: string
   location: { resource: NoteResource; noteId: string | null; zoneId: string; dailyTitle?: string }
   phase: 'ready' | 'checking'
+  writeAttempt?: string
 }
 export type RecallCardIntents = Record<string, RecallCardIntent>
 
@@ -20,7 +21,7 @@ export function restoreRecallCardIntents(value: unknown): RecallCardIntents {
     if (!intent || !intent.location || !intent.location.resource || !validId(intent.operationId) || !validId(intent.location.zoneId) ||
       intent.location.noteId !== null && !validId(intent.location.noteId) ||
       intent.location.dailyTitle !== undefined && !validId(intent.location.dailyTitle) ||
-      !['ready', 'checking'].includes(intent.phase)) continue
+      intent.writeAttempt !== undefined && !validId(intent.writeAttempt) || !['ready', 'checking'].includes(intent.phase)) continue
     const { resource } = intent.location
     if (![resource.hostId, resource.workspaceId, resource.workspacePath, resource.path].every(validId) ||
       resource.path.startsWith('/') || resource.path.split(/[\\/]/u).includes('..')) continue

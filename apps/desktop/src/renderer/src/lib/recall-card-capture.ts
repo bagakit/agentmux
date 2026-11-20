@@ -68,7 +68,16 @@ async function capture(card: RecallCard, destination: NotebookPage | null, now: 
   if (existing && (recallCardHref(existing.card) !== recallCardHref(intent.card))) {
     throw new Error('The destination already contains this card identity with different content. Its existing card is kept.')
   }
-  if (!existing && intent.phase === 'checking') throw new Error('The original file write is unconfirmed. This save and its exact destination are kept for checking.')
+  if (intent.phase === 'checking' && intent.writeAttempt && original?.status === 'valid') {
+    const { result: history } = await api.files.historyPublic({ ...scope, expectedResource: mapping, noteId: original.note.noteId, eventId: intent.writeAttempt })
+    const receipt = history.status === 'read' ? history.entries.find(entry => entry.eventId === intent!.writeAttempt) : undefined
+    if (receipt?.status === 'not-applied' && !existing) {
+      await persistRecallCardIntent({ ...intent, phase: 'ready' })
+      throw new Error('The original write did not apply. Save again to the same Note using its current contents.')
+    }
+    if (receipt?.status !== 'committed') throw new Error('The original Note write is still unconfirmed. Its exact destination and operation are kept.')
+  }
+  if (!existing && intent.phase === 'checking') throw new Error('The original card could not be confirmed in this Note. This save and its exact destination are kept for checking.')
   const targetId = original?.status === 'valid' ? original.note.noteId : dailyId!
   const blockId = existing?.blockId ?? intent.operationId
   if (!existing) {
@@ -82,11 +91,13 @@ async function capture(card: RecallCard, destination: NotebookPage | null, now: 
     if (proposed.status !== 'valid' || !recallCardBlocks(proposed.note.content).some(entry => entry.blockId === blockId && recallCardHref(entry.card) === recallCardHref(intent!.card))) {
       throw new Error('The card could not be added to the end of the original Markdown. Check its ending syntax or choose another Note.')
     }
-    intent = { ...intent, phase: 'checking' }
-    await persistRecallCardIntent(intent)
+    const ready = intent
+    intent = { ...intent, phase: 'checking', ...(result.status === 'read' ? { writeAttempt: mintObjectId() } : {}) }
+    try { await persistRecallCardIntent(intent) }
+    catch (error) { await persistRecallCardIntent(ready); throw error }
     const query = { ...scope, expectedResource: mapping }
     const saved = result.status === 'read'
-      ? await api.files.writePublic({ ...query, content, baseContent: result.document.content, expectedRevision: result.document.revision, operationId: intent.operationId })
+      ? await api.files.writePublic({ ...query, content, baseContent: result.document.content, expectedRevision: result.document.revision, operationId: intent.writeAttempt! })
       : await api.files.createPublic({ ...query, content, expectedRevision: null })
     if (saved.result.status === 'conflict' || saved.result.status === 'error') {
       await persistRecallCardIntent({ ...intent, phase: 'ready' })
