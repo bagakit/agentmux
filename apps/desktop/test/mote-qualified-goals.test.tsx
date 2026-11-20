@@ -42,6 +42,22 @@ it('matches a qualified original admission and excludes same SID in another Runt
 it('actual Mote keeps the unloaded qualified Goal without borrowing the receiving same-SID label',async()=>{await render([goal('Qualified original',[ref])]);expect(container.querySelector('[data-mote-goal="Qualified original"]')).not.toBeNull();expect(container.textContent).toContain('1 linked discussion not loaded. Original references retained.');expect(appStore.useAppStore.getState().demands['Qualified original']!.sessionIds[0]).toBe(ref)})
 it('separates raw IDs from qualified view keys while retaining original raw Goal membership',()=>{const key=demandAgentReferenceKey(ref),value=context();const records={raw:goal('raw',[defaultAgent.id]),qualified:goal('qualified',[ref]),collision:goal('collision',[key])};expect(goalsForMote(records,value.sessionIds,value.contentRef,value.agentReferences).map(r=>r.id).sort()).toEqual(['qualified','raw'])})
 
+it('shows confirmed empty work until an original Goal uses the unresolved discussion', async () => {
+  delete graph!.resources['core:agent-open']
+  await render([])
+  expect(context().unconfirmedMembers).toContainEqual({ regionId: ref.source.regionId, operationId: 'original-C' })
+  expect(container.textContent).toContain('No linked work yet')
+  expect(container.textContent).not.toContain('Some Mote discussions could not be checked.')
+
+  await act(async () => appStore.useAppStore.setState({ demands: { original: goal('Referenced work', [ref]) } }))
+  expect(container.textContent).toContain('Some Mote discussions could not be checked.')
+  expect(container.textContent).not.toContain('No linked work yet')
+
+  await act(async () => appStore.useAppStore.setState({ demands: {} }))
+  expect(container.textContent).toContain('No linked work yet')
+  expect(container.textContent).not.toContain('Some Mote discussions could not be checked.')
+})
+
 it('retains the exact unresolved C as last-known alongside a healthy raw neighbor, then stops matching a changed C', async () => {
   const original = goal('Qualified retained', [ref]), neighbor = goal('Healthy neighbor', ['neighbor-agent'])
   await render([original, neighbor])
