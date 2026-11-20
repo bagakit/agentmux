@@ -127,7 +127,7 @@ it('relationship editing and a new Loop use native disclosures while an existing
   await button('Check')
   expect(team().querySelector('.goals-continuation__configure')).toBeNull()
   expect(team().querySelector('.goals-continuation__saved')?.closest('details')).toBeNull()
-  await button('Inspect and retry original start')
+  await button('Check original start')
   expect(execute.mock.calls.filter(([request]) => request.operation === 'demand.start').map(([request]) => request)).toEqual([
     { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'original-start', operation: 'demand.start', demandId: goal().id, sessionId: 'original-loop-agent', continuation: { intervalMs: 120000, alignmentRevision: 5 } }
   ])

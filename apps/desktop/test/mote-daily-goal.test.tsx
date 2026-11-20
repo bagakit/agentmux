@@ -825,10 +825,10 @@ it('a remounted Goal control recovers the durable original start without replaci
   window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(selected)
   await demands.update('goal', { title: 'A display rename keeps the original operation' })
   await act(async () => root.render(<><div key="goal"><GoalContinuationControl demand={goal} /></div><div key="input"><AgentSessionComposer sessionId={session.agentSessionId} /></div></>))
-  await vi.waitFor(() => expect([...container.querySelectorAll<HTMLButtonElement>('.goals-continuation button')].find(button => button.textContent === 'Inspect and retry original start')).toBeDefined())
-  const retry = [...container.querySelectorAll<HTMLButtonElement>('.goals-continuation button')].find(button => button.textContent === 'Inspect and retry original start')!
+  await vi.waitFor(() => expect([...container.querySelectorAll<HTMLButtonElement>('.goals-continuation button')].find(button => button.textContent === 'Check original start')).toBeDefined())
+  const check = [...container.querySelectorAll<HTMLButtonElement>('.goals-continuation button')].find(button => button.textContent === 'Check original start')!
   lose = false; inspection.mockRestore()
-  await act(async () => retry.click())
+  await act(async () => check.click())
   await vi.waitFor(() => expect(manager.list()[0]!.initialDelivery!.state).toBe('confirmed'))
   expect(manager.list()[0]!.creationOperationId).toBe('original-start'); expect(writes).toEqual(before)
   expect(container.querySelector('[contenteditable="true"]')).toBe(input); expect(input.textContent).toBe('A later manual draft stays here.')

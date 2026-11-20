@@ -236,9 +236,9 @@ it('the Team keeps the original continuation operation and Agent when the curren
     throw new Error('Original start receipt is still unknown')
   })
   await dom.render(<GoalExecution demand={goal()} onUpdate={async () => true} />)
-  const retry = [...team().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Inspect and retry original start')!
-  expect(retry).toBeDefined()
-  await act(async () => retry.click())
+  const check = [...team().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Check original start')!
+  expect(check).toBeDefined()
+  await act(async () => check.click())
   expect(control.mock.calls.filter(([request]) => request.operation === 'demand.start').map(([request]) => request)).toEqual([
     { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'original-start', operation: 'demand.start', demandId: goal().id, sessionId: 'original-supervisor', continuation: { intervalMs: 1800000, alignmentRevision: 7 } }
   ])
