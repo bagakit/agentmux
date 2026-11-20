@@ -47,7 +47,7 @@ import { assertGoalPlanKeepsRecordedNodes, currentGoalWorkflowDelivery, goalPlan
 import { assertIssuedGoalTicket, freezeGoalTicketDependencies, issueGoalTickets } from './goal-ticket-issuance.js'
 import type { GoalTicketProof, GoalTicketSigner } from './goal-ticket-proof.js'
 import { demandNameContext, parseDemandNameChange } from './demand-name-change.js'
-import { alignmentConfirmationIssue, groundingAcceptanceIssue, parseAlignment, parseAlignmentProposal, parseGrounding, parseGroundingProposal, type DemandAlignmentProposal, type DemandGroundingProposal } from './goals.js'
+import { alignmentConfirmationIssue, groundingAcceptanceIssue, parseAlignment, parseAlignmentProposal, parseGrounding, parseGroundingProposal, type DemandAlignmentConfirmer, type DemandAlignmentProposal, type DemandGroundingProposal } from './goals.js'
 
 const requireNative = createRequire(import.meta.url)
 const WRITER_LOCK_MARKER = 'agentmux.demand-writer-lock.v1\n'
@@ -1510,9 +1510,13 @@ export class DemandStore {
     return this.update(id, { grounding: proposal })
   }
 
-  /** Human acknowledgement. Hosts expose this through an explicit user action, never Agent update. */
+  /** The Host supplies verified authorship. Ordinary Goal edits cannot write confirmation. */
   async confirmAlignment(id: string, expectedRevision: number, continuation?: {
     operationId: string; recipient: GoalConfirmationRecipient; goalUrl: string; requestedBy: { kind: 'user' | 'device'; id: string }
+  }, confirmation?: {
+    operationId: string
+    author: DemandAlignmentConfirmer
+    expectedUpdatedAt?: number
   }): Promise<DemandReceipt> {
     return this.mutate('confirm-alignment', snapshot => {
       const demand = findDemand(snapshot, id, this.storePath)
@@ -1527,10 +1531,18 @@ export class DemandStore {
         original && (original.supervisorAgentSessionId !== continuation.recipient.agentSessionId || original.recipientHostId !== continuation.recipient.hostId)))
         this.rejectDelegation('The confirmation recipient or Goal changed. Read the current Goal before requesting continuation.')
       if (demand.alignment.confirmedAt !== null && (!continuation || original)) return { unchanged: demand }
+      if (confirmation?.expectedUpdatedAt !== undefined && demand.updatedAt !== confirmation.expectedUpdatedAt) {
+        throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'The Goal changed while checking its Supervisor. Read the current Goal and retry confirmation.')
+      }
       const now = Date.now()
       if (demand.alignment.confirmedAt === null) {
         demand.alignment.confirmedAt = now
-        demand.activities.push({ id: mintObjectId(), kind: 'goal-confirmed', message: `User confirmed goal revision ${expectedRevision}.`, createdAt: demand.alignment.confirmedAt, actorId: null })
+        const author = confirmation?.author
+        if (author) demand.alignment.confirmedBy = author
+        demand.activities.push({ id: mintObjectId(), kind: 'goal-confirmed',
+          message: `${author?.kind === 'agent' ? 'Supervisor' : 'User'} confirmed goal revision ${expectedRevision}.`, createdAt: now,
+          actorId: author?.kind === 'agent' ? author.id : null,
+          ...(confirmation ? { operationId: confirmation.operationId } : {}) })
       }
       if (continuation) {
         const { operationId, recipient, requestedBy, goalUrl } = continuation

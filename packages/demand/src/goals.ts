@@ -7,9 +7,13 @@ export type DemandAlignmentProposal = {
   criteria: DemandCriterion[]
   openQuestions: string[]
 }
+export type DemandAlignmentConfirmer =
+  | { kind: 'agent'; id: string; hostId: string; runtimeId: string }
+  | { kind: 'user' | 'device'; id: string }
 export type DemandAlignment = DemandAlignmentProposal & {
   revision: number
   confirmedAt: number | null
+  confirmedBy?: DemandAlignmentConfirmer
 }
 export type DemandGroundingCheck = {
   criterionId: string
@@ -27,10 +31,10 @@ export type DemandGrounding = DemandGroundingProposal & {
   acceptedAt: number | null
 }
 
-function record(value: unknown, label: string, keys: readonly string[]): Record<string, unknown> {
+function record(value: unknown, label: string, keys: readonly string[], optional: readonly string[] = []): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be an object`)
   const source = value as Record<string, unknown>
-  for (const key of Object.keys(source)) if (!keys.includes(key)) throw new Error(`${label} has unknown field ${key}`)
+  for (const key of Object.keys(source)) if (!keys.includes(key) && !optional.includes(key)) throw new Error(`${label} has unknown field ${key}`)
   for (const key of keys) if (!(key in source)) throw new Error(`${label} is missing ${key}`)
   return source
 }
@@ -67,9 +71,20 @@ export function parseAlignmentProposal(value: unknown): DemandAlignmentProposal 
 }
 
 export function parseAlignment(value: unknown): DemandAlignment {
-  const source = record(value, 'alignment', ['summary', 'criteria', 'openQuestions', 'revision', 'confirmedAt'])
+  const source = record(value, 'alignment', ['summary', 'criteria', 'openQuestions', 'revision', 'confirmedAt'], ['confirmedBy'])
   const proposal = parseAlignmentProposal({ summary: source.summary, criteria: source.criteria, openQuestions: source.openQuestions })
-  const result = { ...proposal, revision: revision(source.revision, 'alignment.revision'), confirmedAt: acknowledgement(source.confirmedAt, 'alignment.confirmedAt') }
+  const result: DemandAlignment = { ...proposal, revision: revision(source.revision, 'alignment.revision'), confirmedAt: acknowledgement(source.confirmedAt, 'alignment.confirmedAt') }
+  if (source.confirmedBy !== undefined) {
+    const actor = record(source.confirmedBy, 'alignment confirmer', ['kind', 'id'], ['hostId', 'runtimeId'])
+    const id = text(actor.id, 'alignment confirmer id')
+    if (result.confirmedAt === null) throw new Error('An unconfirmed alignment cannot have a confirmer')
+    if (actor.kind === 'agent') {
+      result.confirmedBy = { kind: actor.kind, id, hostId: text(actor.hostId, 'confirmer Host'), runtimeId: text(actor.runtimeId, 'confirmer Runtime') }
+    } else {
+      if ((actor.kind !== 'user' && actor.kind !== 'device') || actor.hostId !== undefined || actor.runtimeId !== undefined) throw new Error('Invalid alignment confirmer')
+      result.confirmedBy = { kind: actor.kind, id }
+    }
+  }
   if (result.confirmedAt !== null && alignmentConfirmationIssue(result)) throw new Error('alignment acknowledgement does not match a confirmable proposal')
   return result
 }

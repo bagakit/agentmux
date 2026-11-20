@@ -24,6 +24,8 @@ import { GoalResponsibilityOwner } from './goal-responsibility-owner.js'
 import { GoalPatrolOwner } from './goal-patrol-owner.js'
 import { GoalDispatchInputOwner } from './goal-dispatch-input.js'
 import { goalRoleInputNote } from './goal-role-input.js'
+import { isGoalSupervisor } from './goal-supervisor-identity.js'
+import type { DemandAlignmentConfirmer } from '@agentmux/demand/goals'
 import { createGoalRuntime, type GoalExecutionClient } from './goal-runtime.js'
 import { ContinuousProgressLoopManager } from './continuous-progress-loop-manager.js'
 import { ContinuousProgressLoopStore } from './continuous-progress-loop-store.js'
@@ -275,16 +277,31 @@ export function createHostGoals(options: {
       return { operation: req.operation, demand: await projectGoal(saved), receipt: { demandId: goal.id, updatedAt: saved.updatedAt } }
     }
     if (req.operation === 'demand.confirm') {
-      let continuation
-      if (req.continueWith) {
+      let author: DemandAlignmentConfirmer
+      let expectedUpdatedAt: number | undefined
+      if (context.caller) {
+        const actor = name?.actor
+        const hostId = name?.location.hostId, runtimeId = name?.location.callerRuntimeId
+        if (!actor?.verified || actor.kind !== 'agent' || !actor.id || !hostId || !runtimeId || req.continueWith)
+          throw new AgentMuxError('Use the authenticated Supervisor to confirm a proposal without a continuation notification.', 'CONTROL_PERMISSION_DENIED')
+        author = { kind: 'agent', id: actor.id, hostId, runtimeId }
+        const supervisor = goal.supervisorSessionId
+        const matches = typeof supervisor === 'object' && supervisor !== null
+          ? supervisor.execution.runtimeId === runtimeId && supervisor.execution.agentSessionId === actor.id
+          : await isGoalSupervisor(goal, { actor: { kind: 'agent', id: actor.id }, hostId, runtimeId }, runtime)
+        if (!matches) throw new AgentMuxError('Only the current authenticated Supervisor can confirm this Goal as an Agent.', 'CONTROL_PERMISSION_DENIED')
+        expectedUpdatedAt = goal.updatedAt
+      } else {
         const actor = context.principal
-        if (context.caller !== undefined || !actor || actor.kind !== 'user' && actor.kind !== 'device')
-          throw new AgentMuxError('Goal confirmation and continuation require the original user or device.', 'CONTROL_PERMISSION_DENIED')
-        const goalUrl = hostGoalAddress(goal, await planOwner()).goalUrl
-        await current(context)
-        continuation = { operationId: req.requestId, recipient: req.continueWith, goalUrl, requestedBy: { kind: actor.kind, id: actor.id } } as const
+        if (!actor || actor.kind !== 'user' && actor.kind !== 'device')
+          throw new AgentMuxError('Goal confirmation requires an authenticated confirmer.', 'CONTROL_PERMISSION_DENIED')
+        author = { kind: actor.kind, id: actor.id }
       }
-      const saved = await demands.confirmAlignment(goal.id, req.expectedRevision, continuation)
+      const continuation = req.continueWith && author.kind !== 'agent' ? { operationId: req.requestId, recipient: req.continueWith,
+        goalUrl: hostGoalAddress(goal, await planOwner()).goalUrl, requestedBy: author } : undefined
+      await current(context)
+      const saved = await demands.confirmAlignment(goal.id, req.expectedRevision, continuation,
+        { operationId: req.requestId, author, ...(expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt }) })
       return { operation: req.operation, demand: await projectGoal(saved.demand), receipt: { demandId: goal.id, confirmedRevision: saved.demand.alignment!.revision, confirmedAt: saved.demand.alignment!.confirmedAt! } }
     }
     if (req.operation === 'demand.accept') {

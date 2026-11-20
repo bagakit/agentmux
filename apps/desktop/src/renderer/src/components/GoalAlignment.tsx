@@ -80,6 +80,7 @@ export function GoalAlignment({ demand, emphasis, onGrill, onGrounding, motePend
   const checks = new Map(grounding?.checks.map(check => [check.criterionId, check]) ?? [])
   const currentReport = Boolean(alignment && grounding && !stale)
   const compactAgreement = Boolean(alignment?.confirmedAt && !confirmIssue && !grounding && demand.status !== 'done' && !failure)
+  const agentConfirmer = alignment?.confirmedBy?.kind === 'agent' ? alignment.confirmedBy : undefined
   const criterionIds = new Set(alignment?.criteria.map(criterion => criterion.id))
   const extraChecks = grounding?.checks.filter(check => !criterionIds.has(check.criterionId)) ?? []
   const resultExplanation = goalResultExplanation(demand)
@@ -161,7 +162,7 @@ export function GoalAlignment({ demand, emphasis, onGrill, onGrounding, motePend
     </div> : null}
     {currentReport ? report : alignment ? <section className={`goals-alignment goal-review${compactAgreement ? ' goal-review--compact' : ''}`} aria-label="Goal definition" data-goal-id={demand.id} data-goal-alignment-revision={alignment.revision} data-goal-confirmation-state={alignment.confirmedAt ? 'confirmed' : 'unconfirmed'}>
       <details className="goal-review__disclosure" open={!compactAgreement}>
-      <summary className="goals-section-heading"><h2 ref={heading}><ThemeObjectGoalIcon key={cue.key} size={14} aria-hidden="true" animation={cue.animation} onAnimationEnd={cue.stop} />Goal definition</h2><span className="goals-caption">{alignment.confirmedAt ? `Confirmed by you · ${alignment.criteria.length} success criteria${compactAgreement ? ' · No report yet' : ''}` : confirmIssue ? alignment.openQuestions.length ? 'Decisions needed' : 'Define success criteria' : 'Needs your confirmation'}</span></summary>
+      <summary className="goals-section-heading"><h2 ref={heading}><ThemeObjectGoalIcon key={cue.key} size={14} aria-hidden="true" animation={cue.animation} onAnimationEnd={cue.stop} />Goal definition</h2><span className="goals-caption" title={agentConfirmer ? `Confirmed by Agent ${agentConfirmer.id} on ${agentConfirmer.hostId}` : undefined}>{alignment.confirmedAt ? `${agentConfirmer ? 'Confirmed by Agent' : 'Goal confirmed'} · ${alignment.criteria.length} success criteria${compactAgreement ? ' · No report yet' : ''}` : confirmIssue ? alignment.openQuestions.length ? 'Decisions needed' : 'Define success criteria' : demand.supervisorSessionId ? 'Ready for Supervisor confirmation' : 'Ready for confirmation'}</span></summary>
       <div className="goal-review__body">
       <p className="goals-proposal" data-goal-summary>{alignment.summary}</p>
       {alignment.criteria.length ? grounding ? <div className="goals-result-checks">{alignment.criteria.map(criterion => <GoalResultCheck key={criterion.id} criterionId={criterion.id} criterion={criterion.text} check={stale ? undefined : checks.get(criterion.id)} stale={stale} currentCriterion />)}</div>

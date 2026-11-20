@@ -510,7 +510,7 @@ const NATIVE_FIELDS = {
   'agent.execution.continue': ['bindingId', 'agentSessionId', 'createOperationId'],
   'agent.execution.binding': ['bindingId','view'],
   'agent.execution.watch': ['bindingId'],
-  'agent.execution.rejoin': ['bindingId'],
+  'agent.execution.rejoin': ['bindingId', 'recoverProject'],
   'terminal.input': ['target', 'operationId', 'ownerInstanceId', 'expectedByte', 'dataBase64'], 'terminal.interrupt': ['target', 'operationId', 'ownerInstanceId'], 'terminal.stop': ['target', 'operationId', 'ownerInstanceId'], 'terminal.operation.inspect': ['hostId', 'run', 'operationId', 'runtimeId'],
   'agent.configuration.inspect': ['hostId', 'agentSessionId', 'expectedRun', 'operationId'],
   'agent.configuration.set': ['target', 'operationId', 'configId', 'value', 'expectedRevision'],
@@ -2373,7 +2373,7 @@ export class AgentMuxRpcService {
     }
     if (method === 'agent.execution.admit' || method === 'agent.execution.create' || method === 'agent.execution.continue' || method === 'agent.execution.binding' || method === 'agent.execution.rejoin' || method === 'agent.execution.watch') {
       assertExecutionBindingAuthority(context)
-      const input = method === 'agent.execution.admit' || method === 'agent.execution.create' ? parseAgentExecutionCreate(params) : method === 'agent.execution.continue' ? parseAgentExecutionReference(params) : parseAgentExecutionBinding(params, { associationView: method === 'agent.execution.binding' })
+      const input = method === 'agent.execution.admit' || method === 'agent.execution.create' ? parseAgentExecutionCreate(params) : method === 'agent.execution.continue' ? parseAgentExecutionReference(params) : parseAgentExecutionBinding(params, { associationView: method === 'agent.execution.binding', projectRecovery: method === 'agent.execution.rejoin' })
       const owner = this.ports.executionBindings
       if (!owner) throw new AgentMuxError('The original execution binding owner is unavailable. No helper or Agent was replaced.', 'CONTROL_UNAVAILABLE')
       context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
@@ -2381,7 +2381,7 @@ export class AgentMuxRpcService {
       const result = method === 'agent.execution.admit' ? await owner.admit!(input as import('./agent-execution-coordinator.js').AgentExecutionOpenInput, context)
         : method === 'agent.execution.create' ? await owner.create(input as import('./agent-execution-coordinator.js').AgentExecutionOpenInput, context)
         : method === 'agent.execution.continue' ? await owner.continueOriginal(input as import('./agent-execution-contract.js').AgentExecutionReference, context)
-        : method === 'agent.execution.rejoin' ? await owner.rejoin(input.bindingId, context) : await owner.inspect(input.bindingId, 'view' in input && input.view === 'association' ? 'association' : undefined, context)
+        : method === 'agent.execution.rejoin' ? await owner.rejoin(input.bindingId, context, 'recoverProject' in input && input.recoverProject === true) : await owner.inspect(input.bindingId, 'view' in input && input.view === 'association' ? 'association' : undefined, context)
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
       return parseRpcNativeResult(method, method === 'agent.execution.watch' ? { bindingId: input.bindingId, inspection: result } : result, input) as AgentMuxRpcResult<M>
     }
@@ -2481,9 +2481,9 @@ export class AgentMuxRpcService {
         throw new AgentMuxError('Editing or submitting a human pending draft requires a transport-approved user or device. A managed Agent can use agent.send with its authenticated message envelope; the original draft and Agent remain available.', 'AGENT_CAPABILITY_INVALID')
       }
     }
-    if (method === 'goal.confirm' || method === 'goal.accept') {
+    if (method === 'goal.accept' || method === 'goal.confirm' && context.caller === undefined) {
       if (context.caller !== undefined || !context.principal || !['user', 'device'].includes(context.principal.kind) || typeof context.principal.id !== 'string' || !context.principal.id.trim() || context.principal.id.includes('\0')) {
-        throw new AgentMuxError('Goal confirmation and result acceptance require a transport-approved person or device.', 'CONTROL_PERMISSION_DENIED')
+        throw new AgentMuxError('Use a transport-approved person or device. An authenticated Supervisor can also confirm its original Goal.', 'CONTROL_PERMISSION_DENIED')
       }
     }
     const caller = await this.authenticated(context)
@@ -3246,6 +3246,9 @@ export class AgentMuxRpcService {
         source: 'explicit-edit', entryPoint: method, transport: context.transport ?? null,
         location: caller ? { workspacePath: caller.session.workspacePath, hostId: caller.hostId,
           callerSessionId: caller.agentSessionId, callerRunId: caller.session.run.runId, callerCwd: caller.session.workspacePath } : {}
+      }
+      if (method === 'goal.confirm' && caller) {
+        nameContext.location.callerRuntimeId = await this.agentOwnerRuntimeId(caller.client) ?? null
       }
       if (request.operation === 'demand.activity.append' && !nameContext.actor.verified) {
         throw new AgentMuxError('Activity append requires an authenticated original Agent, person or device.', 'CONTROL_PERMISSION_DENIED')

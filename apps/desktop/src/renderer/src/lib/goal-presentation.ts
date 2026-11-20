@@ -105,7 +105,9 @@ export function goalNextStepFact(demand: GoalNextStepInput, retainedInput?: unkn
   }
   if (!alignment) return { stage: 'define', text: 'Goal needs an outline', source: definitionSource }
   if (alignmentConfirmationIssue(alignment)) return { stage: 'define', text: alignment.openQuestions.length ? 'Decision needed' : 'Success criteria needed', source: definitionSource }
-  if (alignment.confirmedAt === null) return { stage: 'you', text: 'Goal ready for confirmation', source: definitionSource }
+  if (alignment.confirmedAt === null) return demand.supervisorSessionId
+    ? { stage: 'agents', text: 'Supervisor can confirm the goal', source: definitionSource }
+    : { stage: 'you', text: 'Goal ready for confirmation', source: definitionSource }
   if (!grounding) {
     const { planState } = demand
     let text = 'Goal agreed · No result report'
