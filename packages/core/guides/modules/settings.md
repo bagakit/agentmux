@@ -24,10 +24,12 @@ to recheck one exact scope. Take the Runtime, scope ID and revision from the lis
 --workspace PATH for working-directory-relative configurations and keep that same absolute
 target Host path on follow-up commands. These reads check disk configuration. Use
 settings providers hooks-update with the same scope flags as a transport-approved user to
-write managed configuration and inspect it again. A legacy direct runner can still be
-declared alongside the current Hook.
-The update result and remaining issues are separate. Old callbacks whose original dependency
-is unknown stay in place. A write does not establish loading by an existing Run.
+write managed configuration and inspect it again. A matching observed and expected revision
+confirms today's declarations. Older declarations may still be present in the same file.
+The inspection counts missing entry points and proven missing static module dependencies
+separately. Remaining older callbacks have unconfirmed runtime health. These reads never
+execute the configured commands. Updating keeps older declarations whose ownership or Run use
+is unconfirmed. Only the original owner and Run evidence can qualify retirement.
 If the update reply is unknown, inspect before deciding whether to retry.
 
 For native loading in one execution environment, read runtimeId and configRevision from
