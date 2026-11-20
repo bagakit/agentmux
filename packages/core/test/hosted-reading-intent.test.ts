@@ -18,6 +18,9 @@ function attachment(runId: string): AgentMuxRunAttachment {
     workspacePath: fixturePath("private-workspace"), pid: 421, state: 'running', cols: 80, rows: 24, observedAt: reshapeFixtureEpoch(0, 0, 1),
     latestOutputBytes: 4, acceptedInputBytes: 0 }, replay: [], gap: null, terminal: { type: 'not-requested' }, resizeRevision: 0 }
 }
+const sessionObservationStates = (events: readonly AgentMuxClientEvent[]) =>
+  events.flatMap(event => event.type === 'session-observation-state' ? [event.observation.state] : [])
+
 function fixture() {
   const identity: NonNullable<AgentMuxHostedBootstrap['owner']['ctxmux']> = { instanceId: 'original-daemon', ownership: 'owned', hostId: 'local',
     buildIdentity: 'private-fixture', protocolVersion: 1, processId: 123 }
@@ -50,7 +53,11 @@ function fixture() {
     subscribe: async (method: string, params: unknown, handlers: Parameters<AgentMuxHostedRpcPort['subscribe']>[2]) => {
       let closed = false
       const transferId = crypto.randomUUID()
-      const data = params as { target?: { runId: string }; afterByte?: number; view?: 'raw' | 'terminal'; refresh?: boolean }
+      const data = params as { target?: { runId: string }; afterByte?: number; view?: 'raw' | 'terminal'; refresh?: boolean;
+        fence: { runtimeId: string; ownerInstanceId: string } }
+      if (data.fence.runtimeId !== initial.owner.runtimeId || data.fence.ownerInstanceId !== initial.owner.ownerInstanceId) {
+        throw new AgentMuxError('The original owner changed before the observation could open.', 'RUNTIME_OWNER_CHANGED')
+      }
       let value: unknown = initial
       if (method === 'runtime.attachment-watch') {
         const runId = data.target!.runId
@@ -94,9 +101,10 @@ describe('Hosted desired reading intent', () => {
       expect.objectContaining({ state: 'unavailable', run: { runId: 'retained-run' }, afterByte: 4,
         diagnostic: expect.objectContaining({ code: 'RUNTIME_ATTACHMENT_UNAVAILABLE' }) })
     ])
-    expect(events.filter(event => event.type === 'connection-state').map(event => event.state)).toEqual(['lost'])
+    expect(sessionObservationStates(events)).toEqual(['unavailable'])
     // Replace only the semantic owner process; the durable Runtime and original Run remain.
     f.initial.owner.ownerInstanceId = 'restarted-owner'; f.initial.owner.processId = 456
+    await expect(client.connect()).rejects.toMatchObject({ code: 'RUNTIME_OWNER_CHANGED' })
     await client.connect()
     await vi.waitFor(() => expect(events.filter(event => event.type === 'attachment-state').map(event => event.state)).toEqual(['unavailable', 'restored']))
     const restored = events.filter(event => event.type === 'attachment-state')
@@ -108,13 +116,13 @@ describe('Hosted desired reading intent', () => {
     expect(events.filter(event => event.type === 'terminal-snapshot')).toEqual([
       { type: 'terminal-snapshot', ...attachment('retained-run'), afterByte: 4 }
     ])
-    await vi.waitFor(() => expect(events.filter(event => event.type === 'connection-state').map(event => event.state)).toEqual(['lost', 'restored']))
+    await vi.waitFor(() => expect(sessionObservationStates(events)).toEqual(['unavailable', 'unavailable', 'ready']))
+    expect(events.filter(event => event.type === 'connection-state')).toEqual([])
     expect(client.runtimeOwnerIdentity()).toMatchObject({ runtimeId: 'original-runtime', ownerInstanceId: 'restarted-owner', availability: 'connected' })
     expect(f.calls).toEqual([
       { method: 'runtimeProjection', args: [] }, { method: 'attachTerminal', args: ['retained-run', 2, 'terminal'] },
-      // The independent reader can first observe the prior fence. The confirmed
-      // new metadata lease restores this same desired Run, without any Input.
-      { method: 'refreshRunAttachment', args: [{ runId: 'retained-run' }, 4, 'terminal'] }, { method: 'runtimeProjection', args: [] },
+      // Only the confirmed owner opens the reader for the same desired Run and cursor.
+      { method: 'runtimeProjection', args: [] },
       { method: 'refreshRunAttachment', args: [{ runId: 'retained-run' }, 4, 'terminal'] }
     ])
     await client.dispose()
@@ -146,7 +154,8 @@ describe('Hosted desired reading intent', () => {
       return attachment(invocation.args[0].runId)
     }
     f.disconnect(); await client.connect()
-    await vi.waitFor(() => expect(events.filter(event => event.type === 'connection-state').map(event => event.state)).toEqual(['lost', 'restored']))
+    await vi.waitFor(() => expect(sessionObservationStates(events)).toEqual(['unavailable', 'ready']))
+    expect(events.filter(event => event.type === 'connection-state')).toEqual([])
     expect(events.filter(event => event.type === 'attachment-state' && event.run.runId === 'failed-run').at(-1),
       'endpoint restoration cannot settle an unconfirmed Run reader').toMatchObject({ state: 'unavailable', diagnostic: { code: 'CONTROL_PROTOCOL_ERROR' } })
     expect(events.filter(event => event.type === 'attachment-state' && event.run.runId === 'healthy-run')).toEqual([])
@@ -215,14 +224,14 @@ describe('Hosted desired reading intent', () => {
     const release = client.releaseRunAttachment({ runId: 'closed-run' })
     finish(attachment('closed-run'))
     await reconnect; await release
-    await vi.waitFor(() => expect(events.filter(event => event.type === 'connection-state').map(event => event.state)).toEqual(['lost', 'restored']))
+    await vi.waitFor(() => expect(sessionObservationStates(events)).toEqual(['unavailable', 'ready']))
+    expect(events.filter(event => event.type === 'connection-state')).toEqual([])
     expect(events.filter(event => event.type === 'terminal-snapshot')).toEqual([])
     expect(f.calls).toEqual([
       { method: 'runtimeProjection', args: [] },
       { method: 'attachTerminal', args: ['closed-run', 0, 'terminal'] },
       { method: 'refreshRunAttachment', args: [{ runId: 'closed-run' }, 4, 'terminal'] },
-      { method: 'runtimeProjection', args: [] },
-      { method: 'releaseRunAttachment', args: [{ runId: 'closed-run' }] }
+      { method: 'runtimeProjection', args: [] }
     ])
     f.disconnect(); await client.connect()
     expect(f.behavior.refresh).toHaveBeenCalledTimes(1)

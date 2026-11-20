@@ -168,13 +168,23 @@ it('re-acknowledges shared namespace parents for a different-binding EEXIST surv
   await symlink(resolve('packages/core/node_modules'), join(f.root, 'node_modules'), 'dir')
   const source = `import fs from 'node:fs/promises'; import {syncBuiltinESMExports} from 'node:module';
 const root=process.argv[2], role=process.argv[3], state=root;
-const originalOpen=fs.open.bind(fs), originalMkdir=fs.mkdir.bind(fs); let stateSyncs=0, releaseA, releaseB;
+const originalOpen=fs.open.bind(fs); let stateSyncs=0, releaseA, releaseB;
 const gateA=new Promise(r=>releaseA=r), gateB=new Promise(r=>releaseB=r);
 process.on('message',message=>{if(message.type==='release-a')releaseA(); if(message.type==='a-held')releaseB()});
-fs.open=async(path,flags,mode)=>{const handle=await originalOpen(path,flags,mode); if(String(path)===state&&flags==='r'){
-  stateSyncs++; if(role==='A'&&stateSyncs===4){process.send({type:'a-held'});await gateA;await handle.close();throw new Error('simulated crash before identity parent ACK')}
-} return handle};
-fs.mkdir=async(path,options)=>{if(role==='B'&&String(path)===root+'/agent-workspaces'){process.send({type:'b-preflight'});await gateB} return await originalMkdir(path,options)};
+fs.open=async(path,flags,mode)=>{
+  const handle=await originalOpen(path,flags,mode);
+  if(String(path)!==state||flags!=='r')return handle;
+  const sync=handle.sync.bind(handle);
+  handle.sync=async()=>{
+    stateSyncs++;
+    // The first state fsync acknowledges the helper store. The second is
+    // the workspace preflight, ahead of either descriptor-relative mkdirat.
+    if(role==='A'&&stateSyncs===4){process.send({type:'a-held'});await gateA;throw new Error('simulated crash before identity parent ACK')}
+    await sync();
+    if(role==='B'&&stateSyncs===2){process.send({type:'b-preflight'});await gateB}
+  };
+  return handle;
+};
 syncBuiltinESMExports();
 const {AgentExecutionHelperStore}=await import(${JSON.stringify(resolve('packages/core/src/agent-execution-helper-store.ts'))});
 const {AgentWorkspaceDirectory}=await import(${JSON.stringify(resolve('packages/core/src/agent-workspace-directory.ts'))});
@@ -193,30 +203,51 @@ try {
     '@agentmux/identity': resolve('packages/identity/src/index.ts'), '@noble/hashes/sha2.js': identityRequire.resolve('@noble/hashes/sha2.js'), '@scure/base': identityRequire.resolve('@scure/base'),
   }, logLevel: 'silent' })
   type Message = { type: string; syncs?: number; role?: string; message?: string }
-  const children: ReturnType<typeof fork>[] = []
   const start = (role: 'A' | 'B') => {
-    const child = fork(worker, [f.root, role], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] }); children.push(child)
+    const child = fork(worker, [f.root, role], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] })
     let diagnostics = ''; child.stderr!.on('data', bytes => { diagnostics += bytes })
     const exit = once(child, 'exit').then(([code, signal]) => ({ code, signal, diagnostics }))
-    return { child, exit }
+    return { child, exit, diagnostics: () => diagnostics }
   }
-  const message = (child: ReturnType<typeof fork>, type: string) => new Promise<Message>((resolveMessage, reject) => {
-    const listener = (value: Message) => { if (value.type === type) { child.off('message', listener); resolveMessage(value) } }
-    child.on('message', listener); child.once('error', reject); child.once('exit', () => reject(new Error(`Worker exited before ${type}`)))
+  const message = ({ child, diagnostics }: ReturnType<typeof start>, type: string) => new Promise<Message>((resolveMessage, reject) => {
+    const cleanup = () => {
+      clearTimeout(timer)
+      child.off('message', listener)
+      child.off('exit', onExit)
+      child.off('error', onError)
+    }
+    const onError = (error: Error) => { cleanup(); reject(error) }
+    const listener = (value: Message) => {
+      if (value.type === 'worker-error' && type !== 'worker-error') onError(new Error(value.message))
+      if (value.type === type) { cleanup(); resolveMessage(value) }
+    }
+    const onExit = () => onError(new Error(`Worker exited before ${type}. ${diagnostics()}`))
+    const timer = setTimeout(() => onError(new Error(`Worker timed out awaiting ${type}`)), 4_000).unref()
+    child.on('message', listener); child.once('exit', onExit); child.once('error', onError)
   })
   const b = start('B')
-  await message(b.child, 'b-preflight')
-  const a = start('A')
-  await message(a.child, 'a-held')
-  b.child.send({ type: 'a-held' })
-  const bDone = await message(b.child, 'b-done')
-  a.child.send({ type: 'release-a' })
-  const [aExit, bExit] = await Promise.all([a.exit, b.exit])
-  expect(bExit.code, bExit.diagnostics).toBe(0)
-  expect(aExit.code, aExit.diagnostics).toBe(2)
-  expect(bDone.syncs).toBeGreaterThanOrEqual(4)
-  expect((await readdir(join(f.root, 'execution-helpers'))).filter(name => name.endsWith('.json'))).toHaveLength(1)
-  for (const child of children) if (child.connected) child.disconnect()
+  let a: ReturnType<typeof start> | undefined
+  try {
+    await message(b, 'b-preflight')
+    a = start('A')
+    await message(a, 'a-held')
+    const bResult = message(b, 'b-done')
+    b.child.send({ type: 'a-held' })
+    const bDone = await bResult
+    const aFailure = message(a, 'worker-error')
+    a.child.send({ type: 'release-a' })
+    expect((await aFailure).message).toContain('simulated crash before identity parent ACK')
+    const [aExit, bExit] = await Promise.all([a.exit, b.exit])
+    expect(bExit.code, bExit.diagnostics).toBe(0)
+    expect(aExit.code, aExit.diagnostics).toBe(2)
+    expect(bDone.syncs).toBeGreaterThanOrEqual(4)
+    expect((await readdir(join(f.root, 'execution-helpers'))).filter(name => name.endsWith('.json'))).toHaveLength(1)
+  } finally {
+    for (const worker of a ? [a, b] : [b]) {
+      if (worker.child.exitCode === null && worker.child.signalCode === null) worker.child.kill()
+      await worker.exit
+    }
+  }
 })
 
 it('blocks a same-key independent prepare while retained admission is held', async () => {

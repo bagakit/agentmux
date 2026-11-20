@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { AgentMuxFileAgentSessionStore, AgentMuxMemoryAgentSessionStore,
   type AgentMuxLifecycleReservation, type AgentMuxPreparedCreation } from '../src/agent-session-store.js'
+import { agentLifecycleOperationIdentity } from '../src/agent-session-identity.js'
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
 
 const roots: string[] = []
@@ -43,8 +44,10 @@ function changedTargets(original: AgentMuxStoredAgentSession): AgentMuxStoredAge
 describe.each(['memory', 'file'] as const)('%s Store exact tool execution binding', kind => {
   it('retains the binding in original no-Run preparation and acknowledged creation across reader reopen', async () => {
     const h = await fixture(kind), { run, retiredRuns: _retired, ...seedIdentity } = h.original
-    const seed: AgentMuxPreparedCreation = { ...seedIdentity, creation: { createOperationId: 'create-original', intentDigest: 'a'.repeat(64), initialPrompt: 'not-requested' } }
-    const reservation: Extract<AgentMuxLifecycleReservation, { kind: 'create' }> = { ...h.owner('create'), kind: 'create' }
+    const createOperationId = 'create-original'
+    const seed: AgentMuxPreparedCreation = { ...seedIdentity, creation: { createOperationId, intentDigest: 'a'.repeat(64), initialPrompt: 'not-requested' } }
+    const reservation: Extract<AgentMuxLifecycleReservation, { kind: 'create' }> = { ...h.owner('create'), kind: 'create',
+      operationId: agentLifecycleOperationIdentity('create', h.original.agentSessionId, createOperationId) }
     await h.store.reserveLifecycle(reservation)
     const prepared = await h.store.prepareCreate(reservation, seed)
     expect((await h.reader().loadCreationCorrelation(h.original.agentSessionId))?.preparedCreation?.toolExecution).toEqual(h.original.toolExecution)
