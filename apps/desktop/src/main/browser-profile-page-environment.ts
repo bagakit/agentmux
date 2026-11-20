@@ -108,7 +108,7 @@ export function createBrowserProfilePageEnvironment(ports: {
           page.lease.detach()
           page.clearing = false
         }
-        page.lease = BrowserCdpSession.attach(page.contents)
+        page.lease = BrowserCdpSession.attach(page.contents, { background: true })
         delete page.fingerprintScript
       }
       const lease = page.lease

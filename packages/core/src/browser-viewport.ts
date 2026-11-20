@@ -1,6 +1,8 @@
+const PHONE_DIMENSIONS = { width: 390, height: 844 } as const
 export const BROWSER_VIEWPORT_PRESETS = {
   responsive: null,
-  mobile: { width: 390, height: 844 },
+  mobile: PHONE_DIMENSIONS,
+  phone: { ...PHONE_DIMENSIONS, device: 'phone' },
   tablet: { width: 768, height: 1024 },
   desktop: { width: 1280, height: 800 }
 } as const
@@ -10,6 +12,8 @@ export type BrowserViewportSize = {
   readonly width: number
   readonly height: number
   readonly screenPosition: 'mobile' | 'desktop'
+  /** The synthetic phone viewport includes input capability and its native pixel density. */
+  readonly device?: 'phone'
 }
 export type BrowserViewport = BrowserViewportPreset | BrowserViewportSize
 
@@ -22,6 +26,7 @@ export function isBrowserViewport(value: unknown): value is BrowserViewport {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const size = value as Partial<BrowserViewportSize>
   return (size.screenPosition === 'mobile' || size.screenPosition === 'desktop') &&
+    (size.device === undefined || size.device === 'phone' && size.screenPosition === 'mobile') &&
     [size.width, size.height].every(dimension => typeof dimension === 'number' &&
       Number.isInteger(dimension) && dimension > 0 && dimension <= BROWSER_VIEWPORT_MAX_DIMENSION)
 }
@@ -29,7 +34,8 @@ export function isBrowserViewport(value: unknown): value is BrowserViewport {
 /** Own custom dimensions without retaining a mutable caller's request object. */
 export function cloneBrowserViewport(viewport: BrowserViewport): BrowserViewport {
   return typeof viewport === 'string' ? viewport : Object.freeze({
-    width: viewport.width, height: viewport.height, screenPosition: viewport.screenPosition
+    width: viewport.width, height: viewport.height, screenPosition: viewport.screenPosition,
+    ...(viewport.device ? { device: viewport.device } : {})
   })
 }
 
@@ -42,5 +48,5 @@ export function browserViewportSize(viewport: BrowserViewport): BrowserViewportS
 
 export function browserViewportsEqual(a: BrowserViewport, b: BrowserViewport): boolean {
   return a === b || typeof a !== 'string' && typeof b !== 'string' &&
-    a.width === b.width && a.height === b.height && a.screenPosition === b.screenPosition
+    a.width === b.width && a.height === b.height && a.screenPosition === b.screenPosition && a.device === b.device
 }

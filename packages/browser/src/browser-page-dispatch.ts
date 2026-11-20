@@ -55,7 +55,8 @@ export type BrowserPageContext = {
   pageInfo(): { url: string; title: string; navigationId: string; faviconDataUrl?: string;
     navigation?: import('@agentmux/core').AgentMuxBrowserNavigationObservation; viewport?: BrowserViewport }
   /** Only a supporting host owns execution Viewport, persistence and rendering fit. */
-  setViewport?(viewport: BrowserViewport): { browserId: string; navigationId: string; viewport: BrowserViewport }
+  setViewport?(viewport: BrowserViewport, authorize?: () => void): { browserId: string; navigationId: string; viewport: BrowserViewport } |
+    Promise<{ browserId: string; navigationId: string; viewport: BrowserViewport }>
   /** 导航到一个地址，等它停下来。 */
   gotoUrl(url: string): Promise<void>
   /** The original host captures the same page; options never change its input or viewport. */
@@ -1202,10 +1203,11 @@ export function createBrowserPageDispatch(
         if (args.length > 1) throw new Error('captureScreenshot accepts one options object.')
         return await context.captureScreenshot(parseBrowserScreenshotOptions(args[0]))
       case 'setViewport': {
-        if (args.length !== 1 || !isBrowserViewport(args[0])) throw new Error('setViewport requires one known preset or {width,height,screenPosition}.')
+        if (args.length !== 1 || !isBrowserViewport(args[0])) throw new Error('setViewport requires a known preset or {width,height,screenPosition,device?}.')
         if (!context.setViewport) throw new Error('This Browser host does not support execution Viewport. The original page is unchanged.')
-        ;(scope?.beforeAction ?? context.beforeAction)?.()
-        return context.setViewport(args[0])
+        const authorize = scope?.beforeAction ?? context.beforeAction
+        authorize?.()
+        return context.setViewport(args[0], authorize)
       }
       case 'elementContext': {
         // Agent 读一个元素的完整上下文。**不经指针事件**——目标由 `callOn` 解出来的 CDP 句柄指定，

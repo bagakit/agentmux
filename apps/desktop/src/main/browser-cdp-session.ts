@@ -183,7 +183,7 @@ class BrowserCdpConnection implements BrowserPageTransport {
 }
 
 
-type SharedBrowserCdpConnection = { native: BrowserCdpConnection; leases: number; deferredDetach: Promise<string | null> | null }
+type SharedBrowserCdpConnection = { native: BrowserCdpConnection; leases: number; background: number; deferredDetach: Promise<string | null> | null }
 
 /** A lease on this WebContents' original debugger. Profile environment and a page
  * program share one native connection; releasing one consumer cannot detach the other. */
@@ -192,16 +192,23 @@ export class BrowserCdpSession implements BrowserPageTransport {
   private readonly observers = new Set<() => void>()
   private readonly frameWrappers = new Map<string, { native: BrowserCdpSender; send: BrowserCdpSender }>()
   private released = false
-  private constructor(private readonly contents: WebContents, private readonly owner: SharedBrowserCdpConnection) {}
+  private constructor(private readonly contents: WebContents, private readonly owner: SharedBrowserCdpConnection,
+    private readonly background: boolean) {}
 
-  static attach(contents: WebContents): BrowserCdpSession {
+  static attach(contents: WebContents, { background = false }: { background?: boolean } = {}): BrowserCdpSession {
     let owner = this.connections.get(contents)
     if (!owner || owner.native.endedReason !== null) {
-      owner = { native: BrowserCdpConnection.attach(contents), leases: 0, deferredDetach: null }
+      owner = { native: BrowserCdpConnection.attach(contents), leases: 0, background: 0, deferredDetach: null }
       this.connections.set(contents, owner)
     }
     owner.leases++
-    return new BrowserCdpSession(contents, owner)
+    if (background) owner.background++
+    return new BrowserCdpSession(contents, owner, background)
+  }
+
+  static hasOnlyBackgroundLeases(contents: WebContents): boolean {
+    const owner = this.connections.get(contents)
+    return !!owner && owner.leases > 0 && owner.leases === owner.background && owner.native.endedReason === null
   }
 
   private assertActive(): void {
@@ -314,6 +321,7 @@ export class BrowserCdpSession implements BrowserPageTransport {
     for (const remove of this.observers) remove()
     this.observers.clear()
     this.frameWrappers.clear()
+    if (this.background) this.owner.background--
     if (--this.owner.leases !== 0 || this.owner.deferredDetach) return null
     return this.detachConnection()
   }

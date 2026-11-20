@@ -14,7 +14,7 @@ const SelectedIcon = semanticIconComponent('status.selected')
 
 type Option = { id: string; label: string; viewport: BrowserViewport }
 // CSS screen dimensions, referenced from Playwright's maintained device descriptors.
-// These choices do not change the page's user agent, touch support or operating system.
+// The touch preset adds native emulation. The remaining presets set the layout dimensions.
 const groups: { label: string; options: Option[] }[] = [
   { label: 'Common sizes', options: [
     { id: 'mobile', label: 'Mobile', viewport: 'mobile' },
@@ -22,6 +22,7 @@ const groups: { label: string; options: Option[] }[] = [
     { id: 'desktop', label: 'Desktop', viewport: 'desktop' }
   ] },
   { label: 'Phones', options: [
+    { id: 'phone', label: 'Phone · touch', viewport: 'phone' },
     { id: 'iphone-se', label: 'iPhone SE (3rd gen)', viewport: { width: 375, height: 667, screenPosition: 'mobile' } },
     { id: 'iphone', label: 'iPhone 16', viewport: { width: 393, height: 852, screenPosition: 'mobile' } },
     { id: 'iphone-pro', label: 'iPhone 16 Pro', viewport: { width: 402, height: 874, screenPosition: 'mobile' } },
@@ -48,7 +49,7 @@ export function BrowserViewportOptions({ value, disabled, onSelect, onCustom }: 
   const selected = options.find(option => {
     if (browserViewportsEqual(option.viewport, value)) return true
     const dimensions = browserViewportSize(option.viewport)
-    return size && dimensions && size.screenPosition === dimensions.screenPosition &&
+    return size && dimensions && size.screenPosition === dimensions.screenPosition && size.device === dimensions.device &&
       (size.width === dimensions.width && size.height === dimensions.height || size.width === dimensions.height && size.height === dimensions.width)
   })?.id ?? 'custom'
   const select = (id: string) => {

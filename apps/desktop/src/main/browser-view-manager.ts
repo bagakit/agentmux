@@ -80,6 +80,7 @@ import type { BrowserMenuCommands, BrowserMenuDestination } from './browser-page
 import type { BrowserPageMenuPresentation } from './browser-page-menu-presentation.js'
 import { getDesktopNativeUiOwner } from './native-desktop-owner.js'
 import { BrowserCdpSession, DESKTOP_BROWSER_DIALOG_TYPES } from './browser-cdp-session.js'
+import { BrowserViewportTouch } from './browser-viewport-touch.js'
 import { openBrowserHarCapture } from '@agentmux/browser/browser-har-capture'
 import { BrowserCertificateDecision, type BrowserCertificateAnswer } from './browser-certificates.js'
 import { BrowserNativeInputShield } from './browser-native-input-shield.js'
@@ -339,6 +340,7 @@ const INPUT_SHIELD_CLEANUP_WARNING = 'The original Browser input surface could n
 const INPUT_ISOLATION_WARNING = 'Native Browser input isolation is unconfirmed. The original page and Agent remain available. Use Take control before editing manually, or submit a fresh Agent program to retry isolation.'
 const INPUT_ISOLATION_HISTORY = 'Native input isolation was unconfirmed during this operation.'
 const ASSOCIATION_OPERATOR_NOTICE = 'This program started with a different operator from the Browser’s associated Agent. The original association and message recipient were retained.'
+const VIEWPORT_TOUCH_WARNING = 'Touch emulation is unconfirmed on this Browser. The page remains available. Reselect Phone to retry.'
 const ADDRESS_COPY_WARNING = 'Could not confirm the address was copied. Right-click the original target to try again.'
 function removeWarning(current: string | undefined, warning: string): string | undefined {
   return current?.split('\n').filter(line => line !== warning).join('\n') || undefined
@@ -557,6 +559,7 @@ export class BrowserViewManager {
   private nativeVisibilityRevision = 0
   onNativeInput: ((owner: NativeBrowserOwner, input: NativeBrowserPageInput) => boolean) | undefined
   /** Page CSS px → `Input.*` coordinates under the emulation applyViewport actually applied; absent means 1. */
+  private readonly viewportTouch = new BrowserViewportTouch()
   private readonly viewportScales = new WeakMap<WebContents, { input: number; fit: number }>()
   private readonly pendingFinds = new WeakMap<WebContents, () => void>()
   pageMenus?: BrowserPageMenuPresentation
@@ -1914,9 +1917,10 @@ export class BrowserViewManager {
     if (contents.isLoading()) reasons.add('loading')
     if (contents.isCurrentlyAudible?.()) reasons.add('media')
     if (this.uploads?.hasRetained(entry.id)) reasons.add('upload')
-    const onlyEnvironment = entry.storage.mode === 'normal' && entry.storage.profileId && !('capsule' in entry.storage) &&
-      this.profiles.hasOnlyEnvironmentDebugger?.(entry.storage.profileId,contents) === true
-    if (contents.debugger?.isAttached?.() && !onlyEnvironment || contents.isDevToolsOpened?.()) reasons.add('debugger')
+    const backgroundDebugger = BrowserCdpSession.hasOnlyBackgroundLeases(contents) ||
+      (entry.storage.mode === 'normal' && entry.storage.profileId && !('capsule' in entry.storage) &&
+        this.profiles.hasOnlyEnvironmentDebugger?.(entry.storage.profileId, contents) === true)
+    if ((contents.debugger?.isAttached?.() && !backgroundDebugger) || contents.isDevToolsOpened?.()) reasons.add('debugger')
     if (!entry.resourceDocumentConfirmed || typeof contents.isBeingCaptured !== 'function' || typeof contents.isCurrentlyAudible !== 'function') reasons.add('document-unconfirmed')
     if (entry.releaseAttempt?.pending && entry.releaseAttempt.view === entry.view) reasons.add('close-unconfirmed')
     if (entry.inputShield && (entry.inputIsolation === 'unconfirmed' || !this.agentOwnsInput(entry))) reasons.add('close-unconfirmed')
@@ -2641,6 +2645,7 @@ export class BrowserViewManager {
       this.updateFavicon(entry, candidate)
       if (previousPreviewScope) void this.recoveryPreviews?.remove(previousPreviewScope)
       this.sampleRecoveryPreview(entry, candidate)
+      if (browserViewportSize(entry.viewport)?.device === 'phone') await this.restoreViewportTouch(entry, candidate)
       this.emit(entry)
       return this.snapshot(entry)
     } finally {
@@ -2714,17 +2719,68 @@ export class BrowserViewManager {
     return [...uses.values()]
   }
 
-  setViewport(id: string, viewport: BrowserViewport): BrowserSnapshot {
+  async setViewport(id: string, viewport: BrowserViewport): Promise<BrowserSnapshot> {
     const entry = this.require(id)
-    this.requireHumanInput(entry)
-    return this.updateViewport(entry, viewport)
+    return this.updateViewport(entry, viewport, () => this.requireHumanInput(entry))
   }
 
-  private updateViewport(entry: BrowserEntry, viewport: BrowserViewport): BrowserSnapshot {
+  private async updateViewport(entry: BrowserEntry, viewport: BrowserViewport, authorize: () => void): Promise<BrowserSnapshot> {
+    authorize()
     if (!isBrowserViewport(viewport)) throw new Error('Unknown browser viewport or invalid dimensions')
+    const view = entry.view, contents = view.webContents
     const ownedViewport = cloneBrowserViewport(viewport)
-    this.applyViewport(entry, entry.view, ownedViewport)
-    entry.viewport = ownedViewport
+    const phone = browserViewportSize(ownedViewport)?.device === 'phone'
+    if (!phone && !this.viewportTouch.hasWork(contents)) return this.applyViewportSelection(entry, view, ownedViewport)
+
+    return this.viewportTouch.run(contents, async () => {
+      const current = () => this.owns(entry, view) && !contents.isDestroyed()
+      const authorizeOriginal = () => {
+        if (!current()) throw new Error('The original Browser changed before the Viewport could be applied.')
+        authorize()
+      }
+      authorizeOriginal()
+      const previous = entry.viewport
+      const oldPhone = browserViewportSize(previous)?.device === 'phone'
+      await this.viewportTouch.set(contents, phone)
+      try {
+        authorizeOriginal()
+        return this.applyViewportSelection(entry, view, ownedViewport)
+      } catch (error) {
+        if (entry.viewport === previous && current() && phone !== oldPhone) {
+          try { await this.viewportTouch.set(contents, oldPhone) }
+          catch (rollbackError) {
+            this.reportViewportTouch(entry, true)
+            throw new AggregateError([error, rollbackError], 'The Viewport change failed and native touch could not be restored.')
+          }
+        }
+        throw error
+      }
+    })
+  }
+
+  private restoreViewportTouch(entry: BrowserEntry, view: WebContentsView): Promise<boolean> {
+    const contents = view.webContents
+    return this.viewportTouch.run(contents, async () => {
+      const selected = () => this.owns(entry, view) && !contents.isDestroyed() && browserViewportSize(entry.viewport)?.device === 'phone'
+      if (!selected()) return false
+      let failed = false
+      try { await this.viewportTouch.set(contents, true) } catch { failed = true }
+      return selected() && this.reportViewportTouch(entry, failed)
+    })
+  }
+
+  private reportViewportTouch(entry: BrowserEntry, failed: boolean): boolean {
+    const { warning: previous, ...activity } = entry.activity
+    const warning = failed ? appendWarning(previous, VIEWPORT_TOUCH_WARNING) : removeWarning(previous, VIEWPORT_TOUCH_WARNING)
+    if (warning === previous) return false
+    entry.activity = { ...activity, ...(warning ? { warning } : {}) }
+    return true
+  }
+
+  private applyViewportSelection(entry: BrowserEntry, view: WebContentsView, viewport: BrowserViewport): BrowserSnapshot {
+    this.applyViewport(entry, view, viewport)
+    entry.viewport = viewport
+    this.reportViewportTouch(entry, false)
     // Emulation is already applied. Keep its dimensions observable even if native
     // drawing synchronization fails; the original failure still reaches the caller.
     try {
@@ -4249,9 +4305,8 @@ export class BrowserViewManager {
         await runBrowserTaskNavigation(() => this.startNavigation(entry, url))
       },
       captureScreenshot: async (options) => await this.captureScreenshot(entry.id, { view: observingView, sendCommand: session.sendCommand, get frames() { return session.frames }, remainingMillis: () => Math.max(0, deadlineMillis - performance.now()) }, options),
-      setViewport: viewport => {
-        beforeAction()
-        const applied = this.updateViewport(entry, viewport)
+      setViewport: async (viewport, authorize) => {
+        const applied = await this.updateViewport(entry, viewport, authorize ?? (() => beforeAction()))
         return { browserId: applied.id, navigationId: applied.navigationId, viewport: applied.viewport }
       },
       readLedger: async () => await this.refLedgers.read(entry.id),
@@ -5217,11 +5272,22 @@ export class BrowserViewManager {
       })
     }
     contents.on('devtools-opened', () => this.emitRetentionChange(entry))
-    contents.on('devtools-closed', () => this.emitRetentionChange(entry))
+    const restoreTouch = () => {
+      if (!this.owns(entry, view) || browserViewportSize(entry.viewport)?.device !== 'phone') return
+      void this.restoreViewportTouch(entry, view).then(changed => {
+        if (changed && this.owns(entry, view)) this.emit(entry)
+      }).catch(error => console.warn('Browser touch recovery could not be published:', error))
+    }
+    contents.on('devtools-closed', () => {
+      this.emitRetentionChange(entry)
+      restoreTouch()
+    })
     contents.on('media-started-playing', () => this.markResourceRisk(entry, view, 'media'))
     contents.on('did-finish-load', () => {
       if (!this.owns(entry, view)) return
       this.applyViewport(entry, view)
+      // Native touch needs a renderer target. A cold page can navigate before it is available.
+      restoreTouch()
       void this.refreshFaviconAfterLoad(entry, view)
     })
     contents.on('dom-ready', () => {
@@ -5786,7 +5852,7 @@ export class BrowserViewManager {
       screenPosition: size.screenPosition,
       screenSize: screen ?? { width: size.width, height: size.height },
       viewPosition: { x: 0, y: 0 },
-      deviceScaleFactor: 0,
+      deviceScaleFactor: size.device === 'phone' ? 3 : 0,
       viewSize,
       scale
     })
