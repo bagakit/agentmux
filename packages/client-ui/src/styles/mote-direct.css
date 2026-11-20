@@ -114,3 +114,10 @@
 .mote-direct-message[data-own="true"] { margin: 8px 0 12px 40px; }
 .mote-direct-message > div { display: flex; gap: 10px; align-items: baseline; }
 .mote-direct-message p { margin: 5px 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
+.mote-direct-message footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.mote-direct-message footer button { min-height: 36px; }
+.mote-direct-assignment .mote-direct-message { margin-inline: 0; }
+.mote-direct-assignment h3 { margin: 0 0 6px; font-size: var(--fs-body, 14px); }
+@media (pointer: coarse), (max-width: 540px) {
+  .mote-direct-message footer button { min-height: 44px; }
+}

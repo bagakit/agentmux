@@ -25,6 +25,9 @@ export function MoteDirectThreads({ mote, active, read, renderAvatar }: {
   const [selected, setSelected] = useState<string | null>(null)
   const [detail, setDetail] = useState<Detail | null>(null)
   const [detailIssue, setDetailIssue] = useState('')
+  const [report, setReport] = useState<MoteDirectMessage | null>(null)
+  const [assignment, setAssignment] = useState<MoteDirectMessage | null>(null)
+  const [assignmentIssue, setAssignmentIssue] = useState('')
   const [older, setOlder] = useState<MoteDirectMessage[]>([])
   const [cursor, setCursor] = useState<number | null | undefined>(undefined)
   const [more, setMore] = useState<MoteDirectThread[]>([])
@@ -32,6 +35,8 @@ export function MoteDirectThreads({ mote, active, read, renderAvatar }: {
   const [pageLoading, setPageLoading] = useState(false)
   const pageGeneration = useRef(0)
   const returnFocus = useRef<HTMLButtonElement | null>(null)
+  const returnToReport = useRef<string | null>(null)
+  const reportHeading = useRef<HTMLHeadingElement | null>(null)
   const dialog = useRef<HTMLDivElement | null>(null)
   const closing = useRef<Animation | null>(null)
   useEffect(() => () => {
@@ -55,7 +60,7 @@ export function MoteDirectThreads({ mote, active, read, renderAvatar }: {
   }, [active, mote, read])
 
   useEffect(() => {
-    if (!active || !open || !selected) return
+    if (!active || !open || !selected || report) return
     const threadId = selected
     let live = true, timer: ReturnType<typeof setTimeout>
     async function refresh() {
@@ -67,12 +72,38 @@ export function MoteDirectThreads({ mote, active, read, renderAvatar }: {
     }
     void refresh()
     return () => { live = false; clearTimeout(timer) }
-  }, [active, mote, open, read, selected])
+  }, [active, mote, open, read, report, selected])
+
+  useEffect(() => {
+    if (!active || !open || !report?.replyToMessageId) return
+    let current = true
+    reportHeading.current?.focus()
+    void read('space.mote.direct.inspect', { mote, threadId: report.threadId, messageId: report.replyToMessageId })
+      .then(result => {
+        const original = result.messages[0]
+        if (original?.id !== report.replyToMessageId) throw new Error('原作业引用暂未核对。')
+        if (current) setAssignment(original ?? null)
+      })
+      .catch(error => { if (current) setAssignmentIssue(issueText(error)) })
+    return () => { current = false }
+  }, [active, mote, open, read, report])
+
+  useEffect(() => {
+    const id = returnToReport.current
+    if (!report && id) {
+      returnToReport.current = null
+      dialog.current?.querySelector<HTMLButtonElement>(`[data-direct-message-id="${CSS.escape(id)}"] button`)?.focus()
+    }
+  }, [report])
+
+  const focusReport = (message: MoteDirectMessage | null) => {
+    setReport(message); setAssignment(null); setAssignmentIssue('')
+  }
 
   const pick = (id: string | null) => {
     pageGeneration.current++
     setPageLoading(false)
-    setDetail(null); setDetailIssue(''); setOlder([]); setCursor(undefined); setSelected(id)
+    setDetail(null); setDetailIssue(''); setOlder([]); setCursor(undefined); setSelected(id); focusReport(null)
   }
   const changeOpen = (next: boolean) => {
     if (next) { setOpen(true); return }
@@ -143,20 +174,21 @@ export function MoteDirectThreads({ mote, active, read, renderAvatar }: {
       <Dialog.Content ref={dialog} className="mote-direct-panel" data-view={selected ? 'detail' : 'list'} aria-describedby={undefined}
         onCloseAutoFocus={event => { if (returnFocus.current?.isConnected) { event.preventDefault(); returnFocus.current.focus() } }}>
         <header>
-          <div>{selected && <Button onClick={() => pick(null)}>全部私聊</Button>}
-            <Dialog.Title>{currentPeer?.name ?? 'Mote 私聊'}</Dialog.Title></div>
+          <div>{report ? <Button onClick={() => { returnToReport.current = report.id; focusReport(null) }}>返回私聊</Button> : selected && <Button onClick={() => pick(null)}>全部私聊</Button>}
+            <Dialog.Title ref={reportHeading} tabIndex={-1}>{report ? '作业与回报' : currentPeer?.name ?? 'Mote 私聊'}</Dialog.Title></div>
           <Dialog.Close asChild><Button aria-label="关闭私聊">关闭</Button></Dialog.Close>
         </header>
-        {selected ? <div className="mote-direct-panel__body" aria-label="私聊消息">
+        {report ? <div className="mote-direct-panel__body mote-direct-assignment">
+          {assignmentIssue && <Notice density="compact" heading="原作业暂未读到">{assignmentIssue}</Notice>}
+          {!assignment && !assignmentIssue && <p role="status">正在读取原作业…</p>}
+          {assignment && <DirectMessage message={assignment} ownMoteId={mote.spaceId} label="原作业" />}
+          <DirectMessage message={report} ownMoteId={mote.spaceId} label="回报" />
+        </div> : selected ? <div className="mote-direct-panel__body" aria-label="私聊消息">
           {detailIssue && <Notice density="compact" heading="私聊暂未更新">{detailIssue}</Notice>}
           {!detail && !detailIssue && <p role="status">正在读取私聊…</p>}
           {moreMessages && <Button disabled={pageLoading} onClick={() => void loadOlder()}>更早的消息</Button>}
-          {mergeMessages(older, detail?.messages ?? []).map(message => <article key={message.id} data-direct-message-id={message.id}
-            className="mote-direct-message" data-own={message.author.moteId === mote.spaceId || undefined}>
-            <div><strong>{message.author.name}</strong><time dateTime={new Date(message.createdAt).toISOString()}>{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></div>
-            <p>{message.body}</p>
-            {status(message) && <small title={message.deliveries[0]?.issue}>{status(message)}</small>}
-          </article>)}
+          {mergeMessages(older, detail?.messages ?? []).map(message => <DirectMessage key={message.id} message={message} ownMoteId={mote.spaceId}
+            onOpenAssignment={message.replyToMessageId && message.deliveries.length === 0 ? () => focusReport(message) : undefined} />)}
         </div> : <div className="mote-direct-panel__body">
           {issue && <Notice density="compact" heading="私聊列表暂未更新">{issue}</Notice>}
           {threads.map(entry => {
@@ -179,4 +211,19 @@ function mergeMessages(previous: readonly MoteDirectMessage[], next: readonly Mo
   const messages = new Map(previous.map(message => [message.id, message]))
   for (const message of next) messages.set(message.id, message)
   return [...messages.values()].sort((left, right) => left.sequence - right.sequence)
+}
+
+function DirectMessage({ message, ownMoteId, label, onOpenAssignment }: {
+  message: MoteDirectMessage; ownMoteId: string; label?: string; onOpenAssignment?: (() => void) | undefined
+}) {
+  const delivered = status(message)
+  return <article data-direct-message-id={message.id} className="mote-direct-message" data-own={message.author.moteId === ownMoteId || undefined}>
+    {label && <h3>{label}</h3>}
+    <div><strong>{message.author.name}</strong><time dateTime={new Date(message.createdAt).toISOString()}>{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></div>
+    <p>{message.body}</p>
+    <footer>
+      {delivered && <small title={message.deliveries[0]?.issue}>{delivered}</small>}
+      {onOpenAssignment && <Button onClick={onOpenAssignment}>查看原作业</Button>}
+    </footer>
+  </article>
 }
