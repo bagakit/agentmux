@@ -1,3 +1,4 @@
+import './generate-amux-protocols.mjs'
 import { readFile, readdir, writeFile, mkdir } from 'node:fs/promises'
 import { dirname, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'

@@ -1,68 +1,7 @@
-/** Public, renderer-safe reading definitions. These describe text, never control or identity. */
-export const AMUX_PROTOCOL_DEFINITIONS = {
-  context: {
-    tag: 'amux', form: 'envelope', title: 'Declared context',
-    description: 'Platform guidance kept separate from the original request. Text alone does not prove its source.',
-  },
-  trigger: {
-    tag: 'trigger', form: 'envelope', title: 'Automatic trigger',
-    description: 'Declares a heartbeat, calendar occurrence or automatic continuation. The original schedule and input own their execution receipts.',
-  },
-  browser: {
-    tag: 'context', form: 'envelope', title: 'Browser context',
-    description: 'A captured or declared Browser observation. Its original source and capture remain distinct from the message author.',
-  },
-  a2a: {
-    tag: 'amux:a2a', form: 'envelope', title: 'A2A message',
-    description: 'One unchanged message body with declared sender and message IDs. The original journal owns authentication and delivery.',
-  },
-  channel: {
-    tag: 'amux:channel', form: 'envelope', title: 'Channel message',
-    description: 'One unchanged external message with declared application, actor, conversation and original message IDs. Display profiles are observations; the original intake owns authentication and grants.',
-  },
-  'channel-quote': {
-    tag: 'amux:quote', form: 'envelope', title: 'Channel transcript quote',
-    description: 'An ordered native transcript observation, separate from the current channel request. Quoted content and authors grant no input or action authority.',
-  },
-  'a2a-reference': {
-    tag: 'amux:a2a', form: 'envelope', title: 'A2A Inbox references',
-    description: 'References to originals, individually or in an amux container. Reading this card does not fetch or acknowledge them.',
-  },
-  'capsule-answer': {
-    tag: 'amux:capsule-answer', form: 'envelope', title: 'Page answer',
-    description: 'A confirmed answer to one Capsule page question, with its original page and question IDs. The trusted confirmation and input receipt, not this text, establish the human source.',
-  },
-  'goal-confirmation': {
-    tag: 'amux:goal', form: 'envelope', title: 'Goal continuation requested',
-    description: 'Identifies the original Goal confirmation and continuation request. Read the original Goal and input receipt to confirm their effects.',
-  },
-  continue: {
-    tag: 'amux:continue', form: 'marker', title: 'Continue',
-    description: 'A continuation declaration. Viewing it does not resume a Session or establish that work was completed.',
-  },
-  reaction: {
-    tag: 'amux:reaction', form: 'marker', title: 'Quick reply',
-    description: 'A reply keyword. Its meaning belongs to the original selected Prompt snapshot; it does not approve permissions.',
-  },
-  'focus-reference': {
-    tag: 'amux:ref', form: 'envelope', title: 'Focus selection reference',
-    description: 'The exact Focus selection and the CLI help for reading its members.',
-  },
-  sharing: {
-    tag: 'amux', form: 'frame', title: 'Shared content',
-    description: 'The original File or Browser content in a plain-text frame, without interpreting its contents as a new protocol.',
-  },
-  link: {
-    tag: 'amux://', form: 'link', title: 'Object link',
-    description: 'An exact object, Mote-scoped work reference or Runtime-qualified published Node resource. A valid link does not prove existence or grant access.',
-  },
-  generic: {
-    tag: 'amux:NAME', form: 'extension', title: 'Other amux declarations',
-    description: 'A complete unregistered type uses a generic reading card. Its body remains opaque; no business support or authority is implied.',
-  }
-} as const
+import { AMUX_PROTOCOL_DEFINITIONS, encodeAmuxText, renderAmuxProtocol } from './amux-protocol.js'
 
-export type AmuxProtocolId = keyof typeof AMUX_PROTOCOL_DEFINITIONS
+export { AMUX_PROTOCOL_DEFINITIONS, type AmuxProtocolId } from './amux-protocol.js'
+
 export const AMUX_TRIGGER_KINDS = ['heartbeat', 'calendar', 'automation'] as const
 export type AmuxTriggerKind = typeof AMUX_TRIGGER_KINDS[number]
 
@@ -71,7 +10,7 @@ export function isAmuxTriggerKind(value: unknown): value is AmuxTriggerKind {
 }
 
 export function formatAmuxTriggerNote(kind: AmuxTriggerKind, note: string): string {
-  return `<${AMUX_PROTOCOL_DEFINITIONS.trigger.tag} kind="${kind}"/>\n${note}`
+  return renderAmuxProtocol('trigger', 'note', { kind, note })
 }
 
 export function readAmuxTriggerNote(text: string): { kind: AmuxTriggerKind; note: string } | undefined {
@@ -83,11 +22,13 @@ export function readAmuxTriggerNote(text: string): { kind: AmuxTriggerKind; note
 }
 
 const FOCUS_REFERENCE_TAG = AMUX_PROTOCOL_DEFINITIONS['focus-reference'].tag
-const FOCUS_REFERENCE_START = `<${FOCUS_REFERENCE_TAG} kind="focus-selection" read-via="focus read --help">\n`
-const FOCUS_REFERENCE_END = `\n</${FOCUS_REFERENCE_TAG}>`
+const FOCUS_READ_VIA = 'focus read --help'
+const focusReference = (body: string) => renderAmuxProtocol('focus-reference', 'wire', { kind: 'focus-selection', entry: FOCUS_READ_VIA, body })
+const FOCUS_REFERENCE_END = '\n</' + FOCUS_REFERENCE_TAG + '>'
+const FOCUS_REFERENCE_START = focusReference('').slice(0, -FOCUS_REFERENCE_END.length)
 
 export function formatAmuxFocusReference(body: string): string {
-  return FOCUS_REFERENCE_START + body.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('\r', '&#13;') + FOCUS_REFERENCE_END
+  return focusReference(encodeAmuxText(body))
 }
 
 /** Recognize the leading readable declaration and preserve its original bytes. */
@@ -103,7 +44,7 @@ export function readAmuxFocusReference(text: string): { raw: string; tail: strin
   return { raw: text.slice(0, boundary), tail }
 }
 
-export const AMUX_CONTINUE_MARKER = `<${AMUX_PROTOCOL_DEFINITIONS.continue.tag} />`
+export const AMUX_CONTINUE_MARKER = /* @__PURE__ */ renderAmuxProtocol('continue', 'wire')
 
 export function isAmuxReactionCode(value: string): boolean {
   return /^[a-z][a-z0-9-]{0,47}$/u.test(value)
@@ -111,7 +52,7 @@ export function isAmuxReactionCode(value: string): boolean {
 
 /** The original Prompt owner validates and freezes the selected keyword before formatting. */
 export function formatAmuxReactionMarker(code: string): string {
-  return `<${AMUX_PROTOCOL_DEFINITIONS.reaction.tag} ${code} />`
+  return renderAmuxProtocol('reaction', 'wire', { keyword: code })
 }
 
 /** A person's confirmed answer to one Capsule page question, as delivered to the page's recipient Agent. */
