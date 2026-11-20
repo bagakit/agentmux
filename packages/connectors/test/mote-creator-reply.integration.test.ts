@@ -135,7 +135,9 @@ it('keeps an applied reply with lost ACK inspect-only across owner restart witho
   expect((await f.cli('reply', input, f.credentials(0))).operation).toEqual(reply.operation)
   expect(effects).toHaveBeenCalledOnce()
   readable = true; f.services.publication!.refresh()
-  await vi.waitFor(async () => expect((await f.cli('inspect', { operationId: input.operationId }, f.credentials(0))).deliveries).toMatchObject([{ state: 'confirmed' }]))
+  // A startup inspection can still own the lane. Its unchanged result waits for the next Host refresh.
+  await vi.waitFor(async () => expect((await f.cli('inspect', { operationId: input.operationId }, f.credentials(0))).deliveries)
+    .toMatchObject([{ state: 'confirmed' }]), { timeout: 8000 })
   expect(effects).toHaveBeenCalledOnce(); expect(f.wire.effects).toHaveLength(1)
   expect(observations).toHaveBeenCalled()
   expect(observations.mock.calls.every(([prepared]) => reply.operation.deliveryOperationIds.includes(prepared.requestKey))).toBe(true)
