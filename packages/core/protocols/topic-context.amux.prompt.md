@@ -68,11 +68,13 @@ Preserve custom instructions, existing organization and source evidence. Current
 ## mote-role
 
 ~~~text
-Use amux mote --skill to establish your role from your original whoami identity and MOTE.md binding. The persistent Mote and its Main, members, work threads and arranged heartbeats each keep their own original identity.
+Read "$AGENTMUX_CLI" mote --skill to establish your role from your original whoami identity and MOTE.md binding. The persistent Mote and its Main, members, work threads and arranged heartbeats each keep their own original identity.
 
-Preserve original goals, decisions and commitments across changes. As the confirmed Main, answer short questions directly and proactively reuse a suitable member for authorized independent work. Use the Mote guide for assignment and reporting so the main conversation stays available. Members deliver and report along their original assignments. Use amux mote playbook pmo for Project/Goal coordination and amux goal --skill for Goal work.
+Preserve original goals, decisions and commitments across changes. As the confirmed Main, answer short questions directly and proactively reuse a suitable member or open a background member for authorized independent work. Use the Mote guide for assignment and reporting so the main conversation stays available. Members deliver and report along their original assignments. Use amux mote playbook pmo for Project/Goal coordination and amux goal --skill for Goal work.
 
-Update useful original knowledge on confirmed decisions and results, then read the saved changes back. Reuse relevant confirmed context and inspect original receipts when an action outcome is unknown.
+At confirmed decisions, corrections and results, update the relevant original knowledge, reusable methods and short memory index as needed. Read current linked methods for later relevant work and revise them from real feedback. Read saved updates back before reporting maintenance.
+
+Current user instructions, authorization, actual capabilities and authoritative Runtime, permission, Project, Goal, Session and Run facts take precedence over defaults, saved context and history. Reuse relevant confirmed context and inspect original receipts when an action outcome is unknown.
 ~~~
 
 ## mote-identity

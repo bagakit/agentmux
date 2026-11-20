@@ -53,10 +53,10 @@ Add the facts and constraints every collaborator should know.
 Keep a short current summary of confirmed decisions, open questions and links to useful knowledge here. Put deliverables in \`outcome/\` and source material in \`refs/\`.
 `
 
-function topicPrompt(directoryPath: string, mote: boolean): string {
+function topicPrompt(directoryPath: string, kind: ScratchTopicSnapshot['kind']): string {
   return renderAmuxProtocol('topic-context', 'workspace', {
     directory: directoryPath,
-    instructions: getAmuxProtocolTemplate('topic-context', mote ? 'mote-resource' : 'topic-resource')
+    instructions: kind === undefined ? '' : getAmuxProtocolTemplate('topic-context', kind === 'mote' ? 'mote-resource' : 'topic-resource')
   })
 }
 
@@ -731,7 +731,7 @@ export class ScratchTopics {
         ...(snapshot.kind === 'mote' ? [renderAmuxProtocol('topic-context', 'mote-identity', { mote: topicId, directory: absolutePath })] : []),
         ...(snapshot.kind === 'mote' ? [MOTE_COORDINATION_ROLE] : snapshot.kind === 'topic' ? [TOPIC_KNOWLEDGE_GUIDANCE] : []),
         ...(snapshot.readError ? [renderAmuxProtocol('topic-context', 'partial', { diagnostic: snapshot.readError })] : []),
-        topicPrompt(absolutePath, snapshot.kind === 'mote'),
+        topicPrompt(absolutePath, snapshot.kind),
         ...(snapshot.wiki?.enabled ? [] : [getAmuxProtocolTemplate('topic-context', snapshot.wiki ? 'wiki-disabled' : 'wiki-unknown')])
       ].join('\n\n'),
       identityPath,
