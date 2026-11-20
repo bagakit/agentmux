@@ -1,3 +1,4 @@
+import { AgentMuxSpatialStateStore } from '../src/spatial-state.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -6,7 +7,7 @@ import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { parseAgentMuxCliInvocation } from '../src/agentmux-cli-commands.js'
 import { agentMuxCommandHelp } from '../src/agentmux-cli-help.js'
-import { agentDerivedActionPrompt } from '../src/agent-derived-actions.js'
+import { composeAgentDerivedAction } from '../src/agent-derived-actions.js'
 import { spatialAgentFact } from '../src/spatial-agent-open-contract.js'
 import type { AgentMuxControlRequest } from '../src/control.js'
 
@@ -27,7 +28,17 @@ async function harness() {
   const client = { readAgentSession: async (id: string) => id === source.agentSessionId ? structuredClone(source) : null,
     agentSession: (id: string) => { if (id !== source.agentSessionId) throw Object.assign(new Error('unknown'), { code: 'UNKNOWN_AGENT_SESSION' }); return structuredClone(source) },
     readAgentSessions: async () => [structuredClone(source)], sessionHistorySources: async () => [] }
-  const server = new AgentMuxControlServer({ socketPath: join(root, 'owner.sock'), coreClients: () => [{ hostId: 'local', client: client as never }],
+  const spatialState = new AgentMuxSpatialStateStore(join(root, 'spatial.json'))
+  await spatialState.commit({ expectedRevision: 0, graph: {
+    spaces: [{ spaceId: 'space', kind: 'folder', hostId: 'local', directoryPath: source.workspacePath, projectId: 'project', name: 'Original Project' }],
+    zones: [
+      { zoneId: 'zone', workspaceId: 'workspace', kind: 'home', hostId: 'local', directoryPath: source.workspacePath, branch: null },
+      { zoneId: 'wrong-zone', workspaceId: 'wrong-workspace', kind: 'worktree', hostId: 'local', directoryPath: '/fixture/other', branch: 'other' }
+    ],
+    bindings: [{ spaceId: 'space', zoneId: 'zone' }, { spaceId: 'space', zoneId: 'wrong-zone' }],
+    tabs: [], regions: [], layouts: {}, tabLayouts: {}, resources: {}
+  } })
+  const server = new AgentMuxControlServer({ socketPath: join(root, 'owner.sock'), coreClients: () => [{ hostId: 'local', client: client as never }], spatialState,
     execute: async request => {
       if (request.operation === 'settings.resource.get' && request.resource === 'derived-actions') {
         const value = request.id !== undefined ? actions[request.id] : undefined
@@ -45,7 +56,8 @@ async function harness() {
   await server.start()
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
   const open = async (...args: string[]) => rpc.call('agent.open', (await parseAgentMuxCliInvocation(['agent', 'open', ...args, ...destination])).params as never)
-  return { opened, open, close: async () => { await rpc.dispose(); await server.stop(); await rm(root, { recursive: true, force: true }) } }
+  return { opened, open, openWrong: async () => rpc.call('agent.open', (await parseAgentMuxCliInvocation(['agent', 'open', '--derive', 'review', '--from-session', source.agentSessionId,
+    '--space', 'space', '--zone', 'wrong-zone', '--new-tab'])).params as never), close: async () => { await rpc.dispose(); await server.stop(); await rm(root, { recursive: true, force: true }) } }
 }
 
 describe('agent open --derive', () => {
@@ -67,9 +79,11 @@ describe('agent open --derive', () => {
     try {
       await h.open('--derive', 'review', '--from-session', 'original-session', '--operation-id', 'derive-review')
       expect(h.opened[0]).toMatchObject({ requestId: 'derive-review', content: { kind: 'new-agent', executorId: 'codex' }, destination: { spaceId: 'space', zoneId: 'zone', newTab: true } })
-      const expected = agentDerivedActionPrompt({ label: 'Review this work', instruction: 'Review the changes and list concrete bugs.' }, { hostId: 'local', agentSessionId: 'original-session',
-        cwd: source.workspacePath, executorId: 'claude', label: 'original-session', diagnostic: 'Started from the public derived action command; read the complete context for the current state.' })
-      expect(h.opened[0]!.content).toEqual({ kind: 'new-agent', executorId: 'codex', prompt: expected })
+      expect(h.opened[0]!.content).toEqual({ kind: 'new-agent', executorId: 'codex',
+        prompt: composeAgentDerivedAction({ instruction: actions.review!.instruction as string },
+          { hostId: 'local', agentSessionId: source.agentSessionId, executorId: source.executorId }) })
+      await expect(h.openWrong()).rejects.toMatchObject({ code: 'SPACE_RESOURCE_CHANGED' })
+      expect(h.opened).toHaveLength(1)
       // An explicit --executor wins over the action's default Agent.
       await h.open('--derive', 'review', '--from-session', 'original-session', '--executor', 'claude')
       expect(h.opened.at(-1)!.content).toMatchObject({ kind: 'new-agent', executorId: 'claude' })

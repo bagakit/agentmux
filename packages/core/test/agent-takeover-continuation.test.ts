@@ -27,7 +27,7 @@ const originalRecord = async (f: Owner, id: string) => spatialAgentOpenRecord((a
 it('explicit continuation advances a C-only original Takeover exactly once while inspect stays read-only', async () => {
   const f = await fixture(), input = inputFor(f, 'continue-original-c'), creator = interrupt(f)
   const first = await f.rpc.call('agent.open', input), record = await originalRecord(f, input.operationId)
-  expect(first.outcome).toBe('unknown'); expect(record.takeoverSourceAgentMuxNote).toBe(''); expect(record.takeoverOptionalContext).toBeUndefined()
+  expect(first.outcome).toBe('unknown'); expect(record.takeoverSourceAgentMuxNote).toContain('read-via="agent context --help"'); expect(record.takeoverOptionalContext).toBeUndefined()
   expect(record.takeoverContent!.agentMuxNote).toBe(input.content.agentMuxNote)
   const original = await readFile(f.spatial.path, 'utf8')
   await f.rpc.call('space.inspect', { target: { operationId: input.operationId } })
@@ -97,13 +97,13 @@ it('an admitted Executor revision cannot be replaced when a C-only Takeover cont
   expect(await originalRecord(f, input.operationId)).toEqual(record); expect(await f.client.readAgentSession(f.source.agentSessionId)).toEqual(f.source)
 })
 
-it('an explicit execution target on this Runtime freezes an empty context and continues through the same original C', async () => {
+it('an explicit execution target on this Runtime freezes its original reference and continues through the same original C', async () => {
   const f = await fixture(), base = inputFor(f, 'same-runtime-target'), input = { ...base, content: { ...base.content, agentTarget: { hostId: 'local', runtimeId: f.owner.runtimeId } } }
   Object.assign(f.runtime, { executionHost: async () => ({ runtimeId: f.owner.runtimeId, client: f.client }) })
   const creator = interrupt(f)
   expect((await f.rpc.call('agent.open', input)).outcome).toBe('unknown')
   const record = await originalRecord(f, input.operationId)
-  expect(record.takeoverSourceAgentMuxNote).toBe(''); expect(record.executionBinding).toBeUndefined()
+  expect(record.takeoverSourceAgentMuxNote).toContain('read-via="agent context --help"'); expect(record.executionBinding).toBeUndefined()
   const result = await f.rpc.call('agent.open', input)
   expect(result.outcome, JSON.stringify(result)).toBe('opened'); expect(result.agent!.agentSessionId).toBe(record.agentSessionId)
   expect(creator.mock.calls[1]![0]).toEqual(creator.mock.calls[0]![0]); expect(f.started).toHaveLength(1)

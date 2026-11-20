@@ -16,5 +16,5 @@ export default defineConfig({ root, resolve: { alias: aliases }, plugins: [{ nam
   const result = takeoverSource(path, source, process.env.AGENTMUX_TEST_TAKEOVER_MUTATION === 'restore-drops-provenance' ? undefined : process.env.AGENTMUX_TEST_TAKEOVER_MUTATION)
   if (process.env.AGENTMUX_TEST_TAKEOVER_TRACE) appendFileSync(process.env.AGENTMUX_TEST_TAKEOVER_TRACE, JSON.stringify({ loader: 'vite', ...result.receipt }) + '\n')
   return result.loaded === source ? undefined : { code: result.loaded, map: null }
-} }], test: { include: ['packages/core/test/agent-takeover.test.ts', 'packages/core/test/agent-takeover-continuation.test.ts'], passWithNoTests: false,
+} }], test: { include: ['packages/core/test/agent-derived-actions.test.ts', 'packages/core/test/agent-open-derive.test.ts', 'packages/core/test/agent-takeover.test.ts', 'packages/core/test/agent-takeover-continuation.test.ts'], passWithNoTests: false,
   setupFiles: [resolve(root, 'vitest.setup.ts')], maxWorkers: 1, fileParallelism: false, testTimeout: 30000, hookTimeout: 30000 } })

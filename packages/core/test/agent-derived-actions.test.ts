@@ -1,36 +1,33 @@
+import { parseAgentMuxMessagePrefix } from '../src/agent-message-render.js'
 import { readFileSync } from 'node:fs'
 import { expect, it } from 'vitest'
-import { agentTakeoverPrompt, type AgentTakeoverContextSource } from '../src/agent-takeover-context.js'
+import { agentTakeoverInput, type AgentTakeoverContextSource } from '../src/agent-takeover-context.js'
 import {
-  agentDerivedActionPrompt, parseAgentDerivedActionFields, parseAgentDerivedActionId, parseAgentDerivedActionsConfig,
+  composeAgentDerivedAction, parseAgentDerivedActionFields, parseAgentDerivedActionId, parseAgentDerivedActionsConfig,
   resolveAgentDerivedActions, AGENT_BUILT_IN_DERIVED_ACTIONS
 } from '../src/agent-derived-actions.js'
 
-const source: AgentTakeoverContextSource = { hostId: 'remote', agentSessionId: 'original', cwd: '/repo', executorId: 'codex', label: 'Mote dialogue', diagnostic: 'running · waiting for review' }
-const native = { nativeHandle: { kind: 'provider' as const, providerId: 'claude', sessionId: 'native-1' }, workspacePath: '/repo', revision: 'r1' }
+const source: AgentTakeoverContextSource = { hostId: 'remote', agentSessionId: 'original', executorId: 'codex', diagnostic: 'Original context unavailable.' }
+const native = { nativeHandle: { kind: 'provider' as const, providerId: 'claude', sessionId: 'native-1' }, workspacePath: '/fixture/repo', revision: 'r1' }
 
-it('keeps the complete original source context and safety for a custom new-agent action', () => {
-  const prompt = agentDerivedActionPrompt({ label: 'Review this work', instruction: '  Review the changes and list concrete bugs.\n' }, source, 'Build the Threads view')
-  expect(prompt.startsWith('Start new work from the original Agent’s work')).toBe(true)
-  expect(prompt).toContain('Your task (Review this work):\nReview the changes and list concrete bugs.')
-  expect(prompt).toContain(`agent context --host 'local' --session 'original'`)
-  expect(prompt).toContain('"hostId":"remote"')
-  expect(prompt).toContain('Original initial task (complete retained text):\nBuild the Threads view')
-  expect(prompt).toContain('Current source diagnostic (complete, observed; not proof of completion):\nrunning · waiting for review')
-  expect(prompt).toContain('Do not stop, delete, overwrite or send to the original Session.')
-  expect(prompt).toContain('This is a separate derived task, not a resume of the original Session.')
-  expect(prompt).not.toContain('Take over the unfinished work')
-  expect(prompt).not.toContain('This is a handover')
+it('keeps a custom authored instruction byte for byte and attaches only the qualified source reference', () => {
+  const instruction = '  Review the changes and list concrete bugs.\n'
+  const result = parseAgentMuxMessagePrefix(composeAgentDerivedAction({ instruction }, source))
+  expect(result?.body).toBe('\n\n' + instruction)
+  expect(result?.declaredContexts?.[0]?.raw).toBe('<amux:ref kind="agent-context" read-via="agent context --help">\nRead Host: local\nOriginal Agent Session: original\n</amux:ref>')
 })
 
-it('shares the takeover context block, so a dual native source reads both independent sources', () => {
+it('keeps independent Provider material and observes a bounded page at its original owner', () => {
   const dual = { ...source, nativeSource: native }
-  const derived = agentDerivedActionPrompt({ label: 'Try another approach', instruction: 'Try a different design.' }, dual)
-  const takeover = agentTakeoverPrompt(dual)
-  for (const shared of ['agent native history --input -', 'These are independent original sources', `agent context --host 'local' --session 'original'`]) {
-    expect(derived).toContain(shared); expect(takeover).toContain(shared)
-  }
-  expect(agentDerivedActionPrompt({ label: 'x', instruction: 'y' }, source, undefined, null)).not.toContain('agent context --host')
+  const derived = composeAgentDerivedAction({ instruction: 'Try a different design.' }, dual)
+  const takeover = agentTakeoverInput(dual)
+  expect(parseAgentMuxMessagePrefix(derived)?.declaredContexts?.[0]?.raw).toBe(takeover.agentMuxNote)
+  expect(takeover.agentMuxNote).toContain('agent native history --help')
+  expect(takeover.agentMuxNote).toContain(native.revision)
+  const remote = agentTakeoverInput(source, null, { nextCursor: 'original-cursor' })
+  expect(remote.agentMuxNote).toContain('Original Host: remote. Original source: original.')
+  expect(remote.agentMuxNote).toContain('original-cursor')
+  expect(remote.agentMuxNote).not.toContain('Read Host: local')
 })
 
 it('reads one action order: visible official actions, then the user list in its saved order', () => {

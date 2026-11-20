@@ -13,7 +13,7 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore, executorDetectionKey, prepareRendererUpdate } from '../src/renderer/src/store'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
-import { takeOverSession, takeoverPrompt, takeoverRequestId, type TakeoverSource } from '../src/renderer/src/lib/session-takeover'
+import { takeOverSession, takeoverInput, takeoverRequestId, type TakeoverSource } from '../src/renderer/src/lib/session-takeover'
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
 import { SessionTakeoverSurface } from '../src/renderer/src/components/SessionTakeoverSurface'
 import { AgentOperationFeedback } from '../src/renderer/src/components/AgentOperationFeedback'
@@ -237,10 +237,10 @@ it('the shared Launcher picker retains unknown choices and has no warm-terminal 
 
 it('custom derived instructions and original diagnostic remain complete at the prompt boundary', () => {
   const instruction = 'Review each independent finding and preserve its source. '.repeat(50) + 'End of authored instruction.'
-  const prompt = takeoverPrompt({ ...source, derived: { id: 'full-review', label: 'Review all findings', instruction } })
-  expect(prompt).toContain(instruction)
-  expect(prompt).toContain(diagnostic)
-  expect(prompt).toContain("agent context --host 'local' --session 'original'")
+  const input = takeoverInput({ ...source, derived: { id: 'full-review', label: 'Review all findings', instruction } })
+  expect(input.prompt.endsWith('\n\n' + instruction)).toBe(true)
+  expect(input.prompt).toContain('read-via="agent context --help"')
+  expect(input.prompt).toContain('Original Agent Session: original')
 })
 
 async function mountTakeoverExitFocus() {

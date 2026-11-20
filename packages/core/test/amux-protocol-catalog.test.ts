@@ -18,7 +18,7 @@ describe('source-owned amux reading catalog', () => {
       for (const example of entry.examples) {
         if (entry.form === 'link') expect(parseAmuxObjectLink(example.wire)).toEqual({ kind: 'agent', agentSessionId: 'SID' })
         else if (entry.form === 'frame') expect(example.wire).toMatch(/^--- amux : (?:File|Browser) ---\n[\s\S]+\n-----$/u)
-        else expect(parseAgentMuxMessagePrefix(example.wire), entry.id).not.toBeNull()
+        else if (entry.form !== 'prompt') expect(parseAgentMuxMessagePrefix(example.wire), entry.id).not.toBeNull()
       }
     }
     const marker = AGENTMUX_PROTOCOL_CATALOG.find(entry => entry.id === 'continue')!.examples[0]!.wire

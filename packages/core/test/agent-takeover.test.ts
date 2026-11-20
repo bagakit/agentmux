@@ -205,6 +205,7 @@ it('a separate execution Core consumes the original binding through Hosted, whil
   let frozen: import('../src/agent-execution-coordinator.js').AgentExecutionOpenInput | undefined, pending = true, created = false
   const reference = () => ({ bindingId: frozen!.bindingId, agentSessionId: frozen!.agent.agentSessionId, createOperationId: frozen!.agent.createOperationId })
   const bindings = {
+    inspectSourceAdmission: vi.fn(async () => null),
     admit: vi.fn(async (input: import('../src/agent-execution-coordinator.js').AgentExecutionOpenInput) => { frozen = structuredClone(input); return reference() }),
     inspect: vi.fn(async (_id: string, view?: string) => !frozen ? null : { bindingId: frozen.bindingId, agentHostId: frozen.agentHostId, resourceHostId: frozen.resourceHostId, agentSessionId: frozen.agent.agentSessionId, resourceWorkspacePath: frozen.resourceWorkspacePath,
       continuation: reference(), state: created ? 'connected' : 'unavailable', ...(view === 'association' ? { association: { state: 'confirmed', reference: reference(), agentRuntimeId: frozen.agentRuntimeId, resourceRuntimeId: frozen.resourceRuntimeId, resourceWorkspacePath: frozen.resourceWorkspacePath, sourceRequestDigest: frozen.sourceRequestDigest,
@@ -219,8 +220,10 @@ it('a separate execution Core consumes the original binding through Hosted, whil
   const initial = await f.rpc.call('agent.open', input)
   expect(initial.outcome).toBe('unknown'); expect(d.started).toHaveLength(0)
   const originalPrompt = frozen!.agent.prompt
-  expect(originalPrompt).toContain('not been confirmed in this new Agent’s Core namespace')
-  expect(originalPrompt).not.toContain('agent context --host \'local\'')
+  const sourceNote = frozen!.agent.sourceAgentMuxNote
+  expect(originalPrompt).toContain('Take over the original Agent')
+  expect(sourceNote).toContain('The original source route is unconfirmed from this Core')
+  expect(sourceNote).not.toContain('Read Host: local')
   // Continuing an accepted C neither re-reads source identity nor today's inventory.
   const sourceRead = vi.spyOn(f.client, 'readAgentSession').mockRejectedValue(Error('Source is temporarily unavailable.'))
   const inventory = vi.spyOn(d.client, 'listHostExecutors').mockRejectedValue(Error('Current inventory cannot replace an admitted target.'))
@@ -229,7 +232,9 @@ it('a separate execution Core consumes the original binding through Hosted, whil
   expect(sourceRead).not.toHaveBeenCalled(); expect(inventory).not.toHaveBeenCalled(); expect(f.started).toHaveLength(0); expect(d.started).toHaveLength(1)
   const sid = result.agent!.agentSessionId, child = await d.client.readAgentSession(sid)
   expect(child!.creation!.takeover).toBeUndefined(); expect(child!.toolExecution!.resourceRuntimeId).toBe(f.owner.runtimeId)
-  expect(bindings.admit).toHaveBeenCalledTimes(1); expect(frozen!.agent.prompt).toBe(originalPrompt)
+  expect(bindings.admit).toHaveBeenCalledTimes(2)
+  expect(bindings.admit.mock.calls[1]![0]).toEqual(bindings.admit.mock.calls[0]![0])
+  expect(frozen!.agent.prompt).toBe(originalPrompt); expect(frozen!.agent.sourceAgentMuxNote).toBe(sourceNote)
   const incoming = await f.rpc.call('agent.takeover.ls', { expectedRuntimeId: f.owner.runtimeId, direction: 'incoming', subject: { runtimeId: executionRuntime, agentSessionId: sid } })
   expect(incoming.records).toMatchObject([{ phase: 'active', agent: { runtimeId: executionRuntime, agentSessionId: sid }, takeover: result.agent!.takeover }])
   expect(incoming.coverage.scope).toBe('selected-owner'); expect(d.started).toHaveLength(1)
