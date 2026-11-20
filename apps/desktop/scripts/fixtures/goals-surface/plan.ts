@@ -102,6 +102,11 @@ export function goalPlanPreview(seed: (mode: string) => void, render: () => void
               agentSessionId: delegation.report || !delegation.linkedAt ? owner.control.agentSessionId : executor.agentSessionId,
               action: delegation.report ? 'Review and collect the original report.' : delegation.linkedAt ? 'Complete the assigned node and report its evidence.' : 'Reconcile the original dispatch.' },
             alert: delegation.report ? 'manager-review' : delegation.linkedAt ? null : 'unknown',
+            ...(delegation.operationId === 'attempt:workspace' && delegation.linkedAt ? {
+              stateSince: delegation.linkedAt + 10_000,
+              observation: { process: 'running' as const, semantic: 'active' as const, source: 'native-hook' as const,
+                readiness: 'ready' as const, observedAt: delegation.linkedAt + 95_000, stale: false }
+            } : {}),
             basis: { stateEnteredAt: null, activityRevision: null, inputSubmissionId: null } }
         }) }
       const owned = withoutDerivation ? { plan } : hostGoalPlan(next), observed = { ...next, ...owned, responsibility }

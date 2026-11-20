@@ -103,9 +103,21 @@ describe('Goal plan graph', () => {
     await chooseGoalSection(dom.container, 'plan')
     expect(reading().querySelector('[data-goal-delivery="d-api"]')).toBe(delivery)
     expect(graph()!.querySelector('[data-goal-time-row="d-api"][data-selected]')).not.toBeNull()
-    await act(async () => graph()!.querySelector<HTMLButtonElement>('[data-goal-time-row="d-api-current"] button')!.click())
+    const currentRow = graph()!.querySelector<HTMLButtonElement>('[data-goal-time-row="d-api-current"]')!
+    expect(currentRow.tagName).toBe('BUTTON')
+    expect(currentRow.getAttribute('aria-label')).toContain('Report recorded')
+    await act(async () => currentRow.querySelector<HTMLElement>('[data-goal-time-event="Report recorded"]')!.click())
+    expect(currentRow.getAttribute('aria-pressed')).toBe('true')
     expect(reading().querySelector('[data-goal-delivery="d-api-current"]')).not.toBeNull()
     expect(reading().querySelector('[aria-label="Independent node review"]')).not.toBeNull()
+    await act(async () => reading().querySelector<HTMLButtonElement>('.goal-plan__reading-header button')!.click())
+    expect(document.activeElement).toBe(currentRow)
+    expect(currentRow.getAttribute('aria-pressed')).toBe('false')
+    const previousRow = graph()!.querySelector<HTMLButtonElement>('[data-goal-time-row="d-api"]')!
+    await act(async () => previousRow.querySelector<HTMLElement>('[data-goal-time-event="Changes requested"]')!.click())
+    expect(previousRow.getAttribute('aria-pressed')).toBe('true')
+    expect(reading().querySelector('[data-goal-delivery="d-api"]')).not.toBeNull()
+    expect(reading().querySelector('[aria-label="Independent node review"]')).toBeNull()
   })
 
   it('takes the reader to the original Supervisor rail with keyboard focus and keeps one original discussion action', async () => {

@@ -31,6 +31,7 @@ const goalBoardReading = captureArgs.includes('--goal-board-reading-only')
 const goalTaskWorkbench = captureArgs.includes('--goal-task-workbench-only')
 const goalReadingOutline = captureArgs.includes('--goal-reading-outline-only')
 const goalClaimWorkbench = captureArgs.includes('--goal-claim-workbench-only')
+const sourceCoreExports = goalBoardReading || goalReadingOutline || goalClaimWorkbench
 const goalSpaceOnly=goalBoardReading || goalTaskWorkbench || goalReadingOutline || goalClaimWorkbench || captureArgs.includes('--goal-space-only')||captureArgs.includes('--goal-space-layout-only')||captureArgs.includes('--goal-space-settings-only')||captureArgs.includes('--goal-space-wide-plan-only')
 const goalHierarchy = captureArgs.some(flag => flag.startsWith('--goal-hierarchy-'))
 const goalSourceOnly = goalSpaceOnly || goalHierarchy || goalRealWork
@@ -70,10 +71,16 @@ if(links)ownedSources.push('scripts/fixtures/goals-surface/maturity.cjs','script
 if(links)ownedSources.push('src/renderer/src/App.tsx','src/renderer/src/components/StableWorkbenchView.tsx','src/renderer/src/components/FileSurfaceView.tsx','src/renderer/src/components/EditorPane.tsx','src/renderer/src/lib/workbench-presentation.ts','src/renderer/src/lib/workbench-resource-display.ts','src/renderer/src/lib/scratch-topic-layout.ts','src/renderer/src/lib/region-focus.ts')
 if(mainMote)ownedSources.push('scripts/fixtures/goals-surface/main-mote.ts','scripts/fixtures/goals-surface/main-mote.cjs')
 if(mainMote||direct)ownedSources.push('src/renderer/src/lib/api.ts','src/renderer/src/lib/session-state.ts','src/renderer/src/lib/session-user-messages.ts','src/renderer/src/lib/session-project-file-context.ts','src/renderer/src/components/SessionPane.tsx','src/renderer/src/components/ActivityView.tsx','../../packages/client-ui/src/components/ConversationView.tsx','../../packages/client-ui/src/components/ConversationMessage.tsx','../../packages/client-ui/src/components/AgentMarkdown.tsx','src/renderer/src/styles/activity.css','../../packages/client-ui/src/styles/conversation-native-thread.css','src/renderer/src/components/WorkspaceWorkbench.tsx')
-if(planOnly||mainMote||direct||captureArgs.includes('--common-actions')||captureArgs.includes('--maturity'))ownedSources.push('src/renderer/src/lib/primary-mote-executor.ts','../host/src/mote-topic-model.ts','../../packages/core/package.json','../../packages/core/src/agent-outbound-message.ts','../../packages/core/dist/agent-outbound-message.js','../../packages/core/src/agentmux-cli-help.ts','../../packages/core/dist/agentmux-cli-help.js')
+if(planOnly||mainMote||direct||captureArgs.includes('--common-actions')||captureArgs.includes('--maturity')) {
+  ownedSources.push('src/renderer/src/lib/primary-mote-executor.ts','../host/src/mote-topic-model.ts','../../packages/core/package.json','../../packages/core/src/agent-outbound-message.ts','../../packages/core/src/agentmux-cli-help.ts')
+  if (!sourceCoreExports) ownedSources.push('../../packages/core/dist/agent-outbound-message.js','../../packages/core/dist/agentmux-cli-help.js')
+}
 if(mainMote||direct)ownedSources.push('../../packages/core/src/agent-message-render.ts','../../packages/core/dist/agent-message-render.js','src/renderer/src/lib/conversation-speaker.ts','../../packages/client-ui/src/styles/conversation-message.css','../../packages/client-ui/src/styles/conversation-input-details.css','../../packages/client-ui/src/styles/conversation-avatar.css','src/renderer/src/styles/conversation-axis.css')
 if(planRequestOnly)ownedSources.push('src/renderer/src/components/GoalPlanRequest.tsx','scripts/fixtures/goals-surface/plan-request.cjs')
-if(planOnly)ownedSources.push('src/renderer/src/components/GoalDelegationWork.tsx','src/renderer/src/lib/goal-delegation-presentation.ts','scripts/fixtures/goals-surface/plan.ts','scripts/fixtures/goals-surface/plan.cjs','scripts/fixtures/goals-surface/scenario.md','src/renderer/src/components/GoalPlanGraph.tsx','src/renderer/src/components/GoalPlanThread.tsx','src/renderer/src/styles/goal-plan.css','../../packages/demand/src/goal-plan.ts','../../packages/demand/dist/src/goal-plan.js','../../packages/demand/src/responsibility.ts','../../packages/demand/dist/src/responsibility.js','../../packages/core/src/goal-responsibility.ts','../../packages/core/dist/goal-responsibility.js','../host/src/goal-projection.ts','../host/dist/goal-projection.js')
+if(planOnly) {
+  ownedSources.push('src/renderer/src/components/GoalDelegationWork.tsx','src/renderer/src/lib/goal-delegation-presentation.ts','scripts/fixtures/goals-surface/plan.ts','scripts/fixtures/goals-surface/plan.cjs','scripts/fixtures/goals-surface/scenario.md','src/renderer/src/components/GoalPlanGraph.tsx','src/renderer/src/components/GoalPlanThread.tsx','src/renderer/src/styles/goal-plan.css','../../packages/demand/src/goal-plan.ts','../../packages/demand/dist/src/goal-plan.js','../../packages/demand/src/responsibility.ts','../../packages/demand/dist/src/responsibility.js','../../packages/core/src/goal-responsibility.ts','../host/src/goal-projection.ts','../host/dist/goal-projection.js')
+  if (!sourceCoreExports) ownedSources.push('../../packages/core/dist/goal-responsibility.js')
+}
 if(goalSourceOnly)ownedSources.push('../../packages/core/src/control.ts','../../packages/core/src/browser-profile-bookmarks.ts','scripts/fixtures/goals-surface/space.ts','scripts/fixtures/goals-surface/space.cjs','src/renderer/src/components/settings/GoalsSettingsPane.tsx','src/renderer/src/components/settings/GoalsCommonActionsSettings.tsx','src/renderer/src/components/settings/settings-goals-common-actions.css','src/renderer/src/components/settings/ShortcutSettingsPane.tsx','src/renderer/src/components/SettingsPanel.tsx')
 if(goalBoardReading) ownedSources.push('scripts/verify-goal-board-reading.mjs', 'scripts/fixtures/goals-surface/board-reading.cjs',
   'scripts/fixtures/goals-surface/real-work.ts', 'src/renderer/src/components/GoalStartWork.tsx',
@@ -112,7 +119,7 @@ try{
   if(density&&!captureArgs.includes('--density-before-only')){const bytes=await readFile(densityBaseline),baseline=JSON.parse(bytes);result.densityBaseline={path:densityBaseline,sha256:hash(bytes),sourceCommit:baseline.sourceCommit,sourceBefore:baseline.sourceBefore};assert.ok(Object.keys(baseline.sourceBefore).length>0,'Measured prior layout has nonempty Source identity')}
   const outDir=join(privateRoot,'renderer')
   const loadedCoreSources={}, loadedCandidateSources={}
-  const coreAliases = goalBoardReading || goalReadingOutline || goalClaimWorkbench
+  const coreAliases = sourceCoreExports
     ? Object.entries(JSON.parse(await readFile(join(repository, 'packages/core/package.json'), 'utf8')).exports)
       .filter(([key]) => key !== '.')
       .map(([key, entry]) => ({ find: '@agentmux/core/' + key.slice(2), replacement: join(repository, 'packages/core', entry.import.replace('./dist/', './src/').replace(/\.js$/u, '.ts')) }))

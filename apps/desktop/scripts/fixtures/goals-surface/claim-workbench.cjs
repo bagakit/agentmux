@@ -86,6 +86,65 @@ module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result
     assert.deepEqual(await evaluate('goalsSpace.facts()'), before, 'Reading preserves the same goal, plan, draft and Runs')
     result.observations.push({ scene, width, theme, first })
   }
+  for (const [width, theme] of [[1260, 'dark'], [620, 'light']]) {
+    const scene = 'execution-timeline'
+    await size(width)
+    await evaluate('goalsPlan.seed(false, true)')
+    await evaluate(`goalsVisual.appearance(${JSON.stringify(theme)})`)
+    const row = '[data-goal-time-row="attempt:drafts"]'
+    const point = row + ' [data-goal-time-event="Report recorded"]'
+    const observed = '[data-goal-time-row="attempt:workspace"]'
+    const bar = observed + ' [data-goal-observed-activity]'
+    const reading = '.goal-plan__reading'
+    const back = reading + ' .goal-plan__reading-header button'
+    await waitFor(`Boolean(${query(point)} && ${query(bar)})`)
+    const before = await evaluate('goalsSpace.facts()')
+    const enter = async () => {
+      for (const type of ['keyDown', 'keyUp']) {
+        await debuggerSession.sendCommand('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13,
+          ...(type === 'keyDown' ? { text: '\r', unmodifiedText: '\r' } : {}) })
+      }
+    }
+    await evaluate(`${query('[data-goal-execution-time]')}.scrollIntoView({block:'center'})`)
+    await paint()
+    const hover = async selector => {
+      const mouse = await evaluate(`(() => { const rect = ${query(selector)}.getBoundingClientRect();
+        return {x: rect.x + rect.width / 2, y: rect.y + rect.height / 2} })()`)
+      await debuggerSession.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', ...mouse })
+      await waitFor(`${query(selector)}.matches(':hover')`)
+    }
+    await debuggerSession.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 12, y: 54 })
+    await waitFor(`!${query(observed)}.matches(':hover')`)
+    const normal = await evaluate(`getComputedStyle(${query(observed)}).backgroundColor`)
+    await hover(bar)
+    await waitFor(`getComputedStyle(${query(observed)}).backgroundColor !== ${JSON.stringify(normal)}`)
+    await capture(`${width}-${theme}-${scene}`, width)
+    await hitControl(bar)
+    await waitFor(`${query(reading + ' h3')}?.textContent === 'Restore the whole workspace'`)
+    assert.equal(await evaluate(`${query(observed)}.getAttribute('aria-pressed')`), 'true')
+    await hitControl(back)
+    assert.equal(await evaluate(`document.activeElement === ${query(observed)}`), true)
+    await hover(point)
+    assert.match(await evaluate(`${query(point)}.title`), /^Report recorded · .+/u)
+    await hitControl(point)
+    await waitFor(`Boolean(${query(reading + ' [data-goal-delivery="attempt:drafts"]')})`)
+    assert.equal(await evaluate(`${query(row)}.getAttribute('aria-pressed')`), 'true')
+    await capture(`${width}-${theme}-${scene}-attempt`, width)
+    await hitControl(back)
+    assert.equal(await evaluate(`document.activeElement === ${query(row)}`), true)
+    await enter()
+    await waitFor(`Boolean(${query(reading + ' [data-goal-delivery="attempt:drafts"]')})`)
+    for (const type of ['keyDown', 'keyUp']) {
+      await debuggerSession.sendCommand('Input.dispatchKeyEvent', { type, key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
+    }
+    assert.equal(await evaluate(`document.activeElement === ${query(back)}`), true)
+    await enter()
+    await waitFor(`document.activeElement === ${query(row)} && ${query(row)}.matches(':focus-visible')`)
+    await paint()
+    await capture(`${width}-${theme}-${scene}-focus`, width)
+    assert.deepEqual(await evaluate('goalsSpace.facts()'), before)
+    result.observations.push({ scene, width, theme, dispatch: 'attempt:workspace', report: 'attempt:drafts', focusReturned: true, keyboardOpened: true })
+  }
   for (const [width, theme] of [[1600, 'dark'], [620, 'light']]) {
     await size(width)
     await evaluate('goalsPlan.seed(false, true, true)')
