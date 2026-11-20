@@ -317,8 +317,8 @@ carrier; it does not extend that maintenance qualification.
 
 ## Local readable protocol reference
 
-Documentation → amux Protocols shows this app version's formats and original wire
-examples using the shared message cards. The following list comes from this local CLI's
+Open amux Protocols from Settings → Prompts or the window’s Documentation button.
+The reference shows this app version's formats, prompt templates and examples. The following list comes from this local CLI's
 same Core definitions; it does not describe the connected Runtime or an older installation.
 Reading a declaration does not authenticate its author, execute hints or grant permissions.
 
