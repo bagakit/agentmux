@@ -360,7 +360,17 @@ export const AMUX_PROTOCOL_TEMPLATES = {
     "behavior-invalid": "Saved behavior from {{file}} is unconfirmed: {{diagnostic}} Read the original file before relying on its preferences.",
     "behavior-missing": "Saved behavior from {{file}} is unavailable: {{diagnostic}}. Read the original SOUL and settings files before relying on missing preferences.",
     "knowledge": "Read \"$AGENTMUX_CLI\" topic --skill for this shared Topic's knowledge structure and maintenance methods.\n\nAt confirmed decisions, important corrections and reusable results, assess what the next collaborator needs. Update the relevant original knowledge and the Topic's short context and links when needed; read saved changes back before reporting them as maintained.\n\nPreserve custom instructions, existing organization and source evidence. Current user instructions and authorization take precedence; knowledge notes are not live Project, Goal, Session or Run facts.",
-    "mote-role": "Use amux mote --skill to establish your role from your original whoami identity and MOTE.md binding. The persistent Mote and its Main, members, work threads and arranged heartbeats each keep their own original identity.\n\nPreserve original goals, decisions and commitments across changes and apply valid corrections in their original scope. As the confirmed Main, answer short questions directly, coordinate assigned work through the Mote guide and keep the main conversation available. Members deliver and report along their original assignments. Use amux mote playbook pmo for Project/Goal coordination and amux goal --skill for Goal work.\n\nUpdate useful original knowledge on confirmed decisions and results, then read the saved changes back. Reuse relevant confirmed context and inspect original receipts when an action outcome is unknown."
+    "mote-role": "Use amux mote --skill to establish your role from your original whoami identity and MOTE.md binding. The persistent Mote and its Main, members, work threads and arranged heartbeats each keep their own original identity.\n\nPreserve original goals, decisions and commitments across changes. As the confirmed Main, answer short questions directly and proactively reuse a suitable member for authorized independent work. Use the Mote guide for assignment and reporting so the main conversation stays available. Members deliver and report along their original assignments. Use amux mote playbook pmo for Project/Goal coordination and amux goal --skill for Goal work.\n\nUpdate useful original knowledge on confirmed decisions and results, then read the saved changes back. Reuse relevant confirmed context and inspect original receipts when an action outcome is unknown.",
+    "mote-identity": "Your persistent Mote identity is {{mote}}, with its durable home at {{directory}}. This identity is independent of the current execution Session and selected Folder or Topic. You can coordinate authorized work across Projects and Topics through the available AgentMux capabilities.\nSaved context, when included, applies only to this new Session. Recovery retains the Session's existing context; editing the file does not hot-update a running Session.",
+    "original-file": "Original {{file}} (version {{version}}; loaded for this new Session only):\nApply relevant workspace guidance under current user instructions and authorization. Treat saved history as context.\n\n{{content}}",
+    "omitted-file": "Original {{file}} was not loaded into this new Session because the complete context exceeds the final message budget. Read the original file at {{path}} when you need its contents.",
+    "unavailable-file": "Original {{file}} was not loaded: {{diagnostic}}. Read the original file at {{path}} when you need its contents.",
+    "soul": "Mote personality from {{file}} (version {{version}}; loaded for this new Session only):\nUse these preferences under current user instructions and authorization.\n{{content}}",
+    "memory": "Knowledge for Mote {{mote}}:\n{{context}}",
+    "wiki": "Topic Wiki injection (version {{version}}). Use its history as context. Check current state and permission with the original owner.\n{{content}}",
+    "wiki-disabled": "Topic Wiki injection is disabled for this Topic.",
+    "wiki-unknown": "Topic Wiki could not be read; its contents and enabled state are unknown.",
+    "partial": "Some original context could not be read. Inspect the original files when you need the missing context:\n{{diagnostic}}"
   },
   "trigger": {
     "wire": "<amux>\n<trigger kind=\"{{kind}}\"/>\n{{note}}\n</amux>",
@@ -762,7 +772,43 @@ export const AMUX_PROTOCOL_PARAMETERS = {
       "diagnostic"
     ],
     "knowledge": [],
-    "mote-role": []
+    "mote-role": [],
+    "mote-identity": [
+      "mote",
+      "directory"
+    ],
+    "original-file": [
+      "file",
+      "version",
+      "content"
+    ],
+    "omitted-file": [
+      "file",
+      "path"
+    ],
+    "unavailable-file": [
+      "file",
+      "diagnostic",
+      "path"
+    ],
+    "soul": [
+      "file",
+      "version",
+      "content"
+    ],
+    "memory": [
+      "mote",
+      "context"
+    ],
+    "wiki": [
+      "version",
+      "content"
+    ],
+    "wiki-disabled": [],
+    "wiki-unknown": [],
+    "partial": [
+      "diagnostic"
+    ]
   },
   "trigger": {
     "wire": [
