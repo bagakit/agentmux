@@ -10088,7 +10088,7 @@ export const useAppStore = create<AppState>()<[['zustand/persist', PersistedAppS
       if (current && current.updatedAt > demand.updatedAt) return state
       return { demands: { ...state.demands, [id]: demandRecordFromFilesystem(demand, current) } }
     })
-    if (!demand) throw Object.assign(new Error('The original Goal owner confirms this ID is not saved. Save the same ID explicitly to continue.'), { code: 'GOAL_OWNER_NOT_FOUND' })
+    if (!demand) throw Object.assign(new Error('The original Goal owner found no Goal with this ID.'), { code: 'GOAL_OWNER_NOT_FOUND' })
     refreshKnownGoalResponsibilities([id])
   },
   deleteDemand(id) {
