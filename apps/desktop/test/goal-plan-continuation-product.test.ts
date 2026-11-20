@@ -75,7 +75,7 @@ it('a real planned tick reaches Core as a manager with every open node and its o
   const [target, prompt, operationId, , , , , guidance] = f.submitted.mock.calls[0]!
   expect(target).toMatchObject({ agentSessionId: 'supervisor', run: { runId: 'original-run' } })
   expect(guidance).toContain('Goal role: manager'); expect(guidance).toContain('"operationId":' + JSON.stringify(operationId))
-  expect(prompt).toContain('Read amux goal plan active --goal "goal"'); expect(prompt).not.toContain('Read the original body of')
+  expect(prompt).toContain('amux goal plan active --help'); expect(prompt).not.toContain('Read the original body of')
   const frozen = handoff(prompt)
   expect(frozen).toMatchObject({ schema: 'agentmux.goal-plan-continuation.v1', goalId: 'goal', alignmentRevision: 1, planRevision: 1 })
   expect(frozen.nodes.map((item: { id: string; state: string }) => [item.id, item.state])).toEqual([...ready.map(item => [f.ticketId(item.id), 'ready']), ...['working', 'review', 'changes', 'unknown'].map(id => [f.ticketId(id), id])])

@@ -150,6 +150,10 @@ describe('启动提示路径经同一出口', () => {
 // 真的进了启动提示、是否署名在 amux 信封里、是否指向 whoami 与 --skill 而不把语法抄进来。把握手指令
 // 从引导里摘掉、或把它挪出信封落进用户段、或把动词抄错成一个 CLI 并不分发的名字，都会让某一条变红。
 describe('启动定向握手：启动提示携带 whoami 指令并署名进信封', () => {
+  it('keeps the actual waiting bootstrap inside the initial disclosure budget', () => {
+    expect(composeAgentLaunchPrompt(undefined, true).systemContext!.length).toBeLessThan(1800)
+  })
+
   it('启动提示指示 Agent 先运行 whoami 拿到自己的坐标与能力', () => {
     const out = composeAgentLaunchPrompt('do the work', true).text
     // 行为断言：握手动词进了启动提示，且用的是 CLI 真正分发的那个动词名（防 guide/dispatch 漂移）。
