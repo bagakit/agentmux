@@ -116,9 +116,22 @@ module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result
     await debuggerSession.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 12, y: 54 })
     await waitFor(`!${query(observed)}.matches(':hover')`)
     const normal = await evaluate(`getComputedStyle(${query(observed)}).backgroundColor`)
-    await hover(bar)
-    await waitFor(`getComputedStyle(${query(observed)}).backgroundColor !== ${JSON.stringify(normal)}`)
-    await capture(`${width}-${theme}-${scene}`, width)
+    await hover(observed + ' strong')
+    await paint()
+    const hovered = await evaluate(`getComputedStyle(${query(observed)}).backgroundColor`)
+    assert.notEqual(hovered, normal)
+    // Keep the verified hover style while capturing the private compositor.
+    await debuggerSession.sendCommand('DOM.enable')
+    await debuggerSession.sendCommand('CSS.enable')
+    const { root } = await debuggerSession.sendCommand('DOM.getDocument')
+    const { nodeId } = await debuggerSession.sendCommand('DOM.querySelector', { nodeId: root.nodeId, selector: observed })
+    await debuggerSession.sendCommand('CSS.forcePseudoState', { nodeId, forcedPseudoClasses: ['hover'] })
+    try {
+      assert.equal(await evaluate(`getComputedStyle(${query(observed)}).backgroundColor`), hovered)
+      await capture(`${width}-${theme}-${scene}`, width)
+    } finally {
+      await debuggerSession.sendCommand('CSS.forcePseudoState', { nodeId, forcedPseudoClasses: [] })
+    }
     await hitControl(bar)
     await waitFor(`${query(reading + ' h3')}?.textContent === 'Restore the whole workspace'`)
     assert.equal(await evaluate(`${query(observed)}.getAttribute('aria-pressed')`), 'true')
@@ -143,7 +156,8 @@ module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result
     await paint()
     await capture(`${width}-${theme}-${scene}-focus`, width)
     assert.deepEqual(await evaluate('goalsSpace.facts()'), before)
-    result.observations.push({ scene, width, theme, dispatch: 'attempt:workspace', report: 'attempt:drafts', focusReturned: true, keyboardOpened: true })
+    result.observations.push({ scene, width, theme, dispatch: 'attempt:workspace', report: 'attempt:drafts', normal, hovered,
+      hoverCapturedWithPseudoState: true, focusReturned: true, keyboardOpened: true })
   }
   for (const [width, theme] of [[1600, 'dark'], [620, 'light']]) {
     await size(width)
