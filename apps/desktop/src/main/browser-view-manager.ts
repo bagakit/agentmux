@@ -340,7 +340,7 @@ const INPUT_SHIELD_CLEANUP_WARNING = 'The original Browser input surface could n
 const INPUT_ISOLATION_WARNING = 'Native Browser input isolation is unconfirmed. The original page and Agent remain available. Use Take control before editing manually, or submit a fresh Agent program to retry isolation.'
 const INPUT_ISOLATION_HISTORY = 'Native input isolation was unconfirmed during this operation.'
 const ASSOCIATION_OPERATOR_NOTICE = 'This program started with a different operator from the Browser’s associated Agent. The original association and message recipient were retained.'
-const VIEWPORT_TOUCH_WARNING = 'Touch emulation is unconfirmed on this Browser. The page remains available. Reselect Phone to retry.'
+const VIEWPORT_TOUCH_WARNING = 'Touch emulation is unconfirmed. Choose a Viewport to retry.'
 const ADDRESS_COPY_WARNING = 'Could not confirm the address was copied. Right-click the original target to try again.'
 function removeWarning(current: string | undefined, warning: string): string | undefined {
   return current?.split('\n').filter(line => line !== warning).join('\n') || undefined
@@ -426,7 +426,6 @@ export interface BrowserProfileResolver {
   environmentSettings?(profileId: string): import('@agentmux/core/control').BrowserProfileEnvironment | undefined
   preparePageEnvironment?(profileId: string, browserId: string, contents: WebContents, port: import('./browser-profile-page-environment.js').BrowserProfilePageEnvironmentPorts): Promise<void>
   environmentApplication?(profileId: string): BrowserProfileEnvironmentApplication | undefined
-  hasOnlyEnvironmentDebugger?(profileId: string, contents: WebContents): boolean
   publishEnvironmentBindings?(profileIds:readonly string[]):void
   onEnvironmentApplicationChange?(listener: (profileId: string) => void): () => void
   readonly activityObserverId?: string
@@ -559,7 +558,10 @@ export class BrowserViewManager {
   private nativeVisibilityRevision = 0
   onNativeInput: ((owner: NativeBrowserOwner, input: NativeBrowserPageInput) => boolean) | undefined
   /** Page CSS px → `Input.*` coordinates under the emulation applyViewport actually applied; absent means 1. */
-  private readonly viewportTouch = new BrowserViewportTouch()
+  private readonly viewportTouch = new BrowserViewportTouch(contents => {
+    const entry = this.entriesByContents.get(contents)
+    if (entry?.view.webContents === contents && this.viewportTouchWarning(entry)) this.emit(entry)
+  })
   private readonly viewportScales = new WeakMap<WebContents, { input: number; fit: number }>()
   private readonly pendingFinds = new WeakMap<WebContents, () => void>()
   pageMenus?: BrowserPageMenuPresentation
@@ -678,7 +680,7 @@ export class BrowserViewManager {
     const proxySignInWarning = this.profileProxySignInWarning(entry.storage)
     const environmentWarning = this.profileEnvironmentWarning(entry.storage)
     const activityWarning = entry.storage.mode === 'normal' && entry.storage.profileId ? this.profileObservations.get(entry.storage.profileId)?.warning : undefined
-    const warnings = [entry.agentWarning, proxySignInWarning, environmentWarning, activityWarning, !available
+    const warnings = [entry.agentWarning, proxySignInWarning, environmentWarning, activityWarning, this.viewportTouchWarning(entry), !available
       ? 'The embedded page surface is unavailable. Its original Region remains.' : !workspaceId
         ? 'This embedded page has no verified Workspace binding. Workspace file and durable result capabilities are unavailable.' : ''].filter(Boolean).join('\n')
     return { id: entry.id, workspaceId, source: 'embedded', mode: entry.storage.mode, ...(profile ? { profile } : {}), status: available ? 'ready' : 'unavailable',
@@ -1917,10 +1919,8 @@ export class BrowserViewManager {
     if (contents.isLoading()) reasons.add('loading')
     if (contents.isCurrentlyAudible?.()) reasons.add('media')
     if (this.uploads?.hasRetained(entry.id)) reasons.add('upload')
-    const backgroundDebugger = BrowserCdpSession.hasOnlyBackgroundLeases(contents) ||
-      (entry.storage.mode === 'normal' && entry.storage.profileId && !('capsule' in entry.storage) &&
-        this.profiles.hasOnlyEnvironmentDebugger?.(entry.storage.profileId, contents) === true)
-    if ((contents.debugger?.isAttached?.() && !backgroundDebugger) || contents.isDevToolsOpened?.()) reasons.add('debugger')
+    if ((contents.debugger?.isAttached?.() && !BrowserCdpSession.hasOnlyBackgroundLeases(contents)) ||
+      contents.isDevToolsOpened?.()) reasons.add('debugger')
     if (!entry.resourceDocumentConfirmed || typeof contents.isBeingCaptured !== 'function' || typeof contents.isCurrentlyAudible !== 'function') reasons.add('document-unconfirmed')
     if (entry.releaseAttempt?.pending && entry.releaseAttempt.view === entry.view) reasons.add('close-unconfirmed')
     if (entry.inputShield && (entry.inputIsolation === 'unconfirmed' || !this.agentOwnsInput(entry))) reasons.add('close-unconfirmed')
@@ -2741,7 +2741,14 @@ export class BrowserViewManager {
       authorizeOriginal()
       const previous = entry.viewport
       const oldPhone = browserViewportSize(previous)?.device === 'phone'
-      await this.viewportTouch.set(contents, phone)
+      const previousWarning = this.viewportTouchWarning(entry)
+      try { await this.viewportTouch.set(contents, phone) }
+      catch (error) {
+        if (current() && this.viewportTouchWarning(entry) !== previousWarning) {
+          try { this.emit(entry) } catch (publicationError) { console.warn('Browser touch notice could not be published:', publicationError) }
+        }
+        throw error
+      }
       try {
         authorizeOriginal()
         return this.applyViewportSelection(entry, view, ownedViewport)
@@ -2749,7 +2756,10 @@ export class BrowserViewManager {
         if (entry.viewport === previous && current() && phone !== oldPhone) {
           try { await this.viewportTouch.set(contents, oldPhone) }
           catch (rollbackError) {
-            this.reportViewportTouch(entry, true)
+            if (!this.viewportTouchWarning(entry)) {
+              entry.activity = { ...entry.activity, warning: appendWarning(entry.activity.warning, VIEWPORT_TOUCH_WARNING) }
+            }
+            try { this.emit(entry) } catch (publicationError) { console.warn('Browser touch notice could not be published:', publicationError) }
             throw new AggregateError([error, rollbackError], 'The Viewport change failed and native touch could not be restored.')
           }
         }
@@ -2763,24 +2773,25 @@ export class BrowserViewManager {
     return this.viewportTouch.run(contents, async () => {
       const selected = () => this.owns(entry, view) && !contents.isDestroyed() && browserViewportSize(entry.viewport)?.device === 'phone'
       if (!selected()) return false
-      let failed = false
-      try { await this.viewportTouch.set(contents, true) } catch { failed = true }
-      return selected() && this.reportViewportTouch(entry, failed)
+      const previous = this.viewportTouchWarning(entry)
+      try { await this.viewportTouch.set(contents, true) } catch { /* The native owner records its unconfirmed attempt. */ }
+      return selected() && this.viewportTouchWarning(entry) !== previous
     })
   }
 
-  private reportViewportTouch(entry: BrowserEntry, failed: boolean): boolean {
-    const { warning: previous, ...activity } = entry.activity
-    const warning = failed ? appendWarning(previous, VIEWPORT_TOUCH_WARNING) : removeWarning(previous, VIEWPORT_TOUCH_WARNING)
-    if (warning === previous) return false
-    entry.activity = { ...activity, ...(warning ? { warning } : {}) }
-    return true
+  private viewportTouchWarning(entry: BrowserEntry): string | undefined {
+    return browserViewportSize(entry.viewport)?.device === 'phone' && this.viewportTouch.isUnconfirmed(entry.view.webContents)
+      ? VIEWPORT_TOUCH_WARNING : undefined
   }
 
   private applyViewportSelection(entry: BrowserEntry, view: WebContentsView, viewport: BrowserViewport): BrowserSnapshot {
     this.applyViewport(entry, view, viewport)
     entry.viewport = viewport
-    this.reportViewportTouch(entry, false)
+    const warning = removeWarning(entry.activity.warning, VIEWPORT_TOUCH_WARNING)
+    if (warning !== entry.activity.warning) {
+      const { warning: _previous, ...activity } = entry.activity
+      entry.activity = { ...activity, ...(warning ? { warning } : {}) }
+    }
     // Emulation is already applied. Keep its dimensions observable even if native
     // drawing synchronization fails; the original failure still reaches the caller.
     try {
@@ -5942,8 +5953,8 @@ export class BrowserViewManager {
     const sitePermissions = this.sitePermissionState(entry)
     const proxySignInWarning = this.profileProxySignInWarning(entry.storage)
     const activityWarning = entry.storage.mode === 'normal' && entry.storage.profileId ? this.profileObservations.get(entry.storage.profileId)?.warning : undefined
-    const profileWarnings = [proxySignInWarning, this.profileEnvironmentWarning(entry.storage), activityWarning].filter(Boolean).join('\n')
-    const warning = this.closingWarning(entry.id, profileWarnings ? appendWarning(currentWarnings, profileWarnings) : currentWarnings || undefined)
+    const nativeWarnings = [proxySignInWarning, this.profileEnvironmentWarning(entry.storage), activityWarning, this.viewportTouchWarning(entry)].filter(Boolean).join('\n')
+    const warning = this.closingWarning(entry.id, nativeWarnings ? appendWarning(currentWarnings, nativeWarnings) : currentWarnings || undefined)
     return {
       id: entry.id,
       ...(entry.source ? { source: entry.source } : {}),

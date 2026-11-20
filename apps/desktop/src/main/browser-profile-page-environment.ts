@@ -33,7 +33,6 @@ export function createBrowserProfilePageEnvironment(ports: {
     touched: Set<keyof BrowserProfileEnvironment>
     receipt: BrowserProfileEnvironmentPageApplication
     disposed: boolean
-    clearing: boolean
     releases: (() => void)[]
   }
   const profiles = new Map<string, Map<WebContents, Page>>()
@@ -75,7 +74,6 @@ export function createBrowserProfilePageEnvironment(ports: {
         /* A destroyed native wrapper has already ended this exact subscription. */
       }
     }
-    page.clearing = true
     page.lease?.detach()
     page.lease = null
     ports.changed(page.profileId)
@@ -103,12 +101,13 @@ export function createBrowserProfilePageEnvironment(ports: {
           'DevTools currently owns this page’s debugger. Close DevTools to reapply the saved environment; its page and input remain.'
         )
       if (!page.lease || page.lease.endedReason !== null) {
-        if (page.lease) {
-          page.clearing = true
-          page.lease.detach()
-          page.clearing = false
-        }
-        page.lease = BrowserCdpSession.attach(page.contents, { background: true })
+        page.lease?.detach()
+        const acquired = BrowserCdpSession.attach(page.contents, { background: true })
+        page.lease = acquired
+        acquired.observeEnd(() => {
+          if (page.disposed || page.lease !== acquired) return
+          unknown(page, 'The original native debugger detached. Its environment scope is unknown; the page and input remain. Close DevTools to reapply the saved version without reloading.')
+        })
         delete page.fingerprintScript
       }
       const lease = page.lease
@@ -272,10 +271,8 @@ export function createBrowserProfilePageEnvironment(ports: {
           'One or more native environment fields could not be confirmed. The original page remains available; inspect each field and close DevTools if it owns the connection.'
       publish(page, receipt)
       if (!settings && receipt.status === 'applied') {
-        page.clearing = true
         lease.detach()
         page.lease = null
-        page.clearing = false
       }
     } catch (cause) {
       if (current(page, key)) unknown(page, cause instanceof Error ? cause.message : String(cause))
@@ -343,19 +340,11 @@ export function createBrowserProfilePageEnvironment(ports: {
           lease: null,
           touched: new Set(),
           disposed: false,
-          clearing: false,
           releases: [],
           receipt: { browserId, status: 'pending', fields: {}, scope: scope(false) }
         }
         pages.set(contents, page)
         const original = page
-        const detached = () => {
-          if (!original.disposed && !original.clearing)
-            unknown(
-              original,
-              'The original native debugger detached. Its environment scope is unknown; the page and input remain. Close DevTools to reapply the saved version without reloading.'
-            )
-        }
         const closed = () => {
           if (!original.disposed) void schedule(original, true)
         }
@@ -371,12 +360,10 @@ export function createBrowserProfilePageEnvironment(ports: {
             void schedule(original, true)
         }
         const destroyed = () => release(original)
-        contents.debugger.on('detach', detached)
         contents.on('devtools-closed', closed)
         contents.on('dom-ready', documentReady)
         contents.once('destroyed', destroyed)
         page.releases.push(
-          () => contents.debugger.off('detach', detached),
           () => contents.off('devtools-closed', closed),
           () => contents.off('dom-ready', documentReady),
           () => contents.off('destroyed', destroyed)
@@ -420,10 +407,6 @@ export function createBrowserProfilePageEnvironment(ports: {
     /** BVM has atomically changed its original binding; this republishes projection, not native commands. */
     publishBindings(profileIds: readonly string[]): void {
       for (const profileId of new Set(profileIds)) ports.changed(profileId)
-    },
-    hasOnlyEnvironmentDebugger(profileId: string, contents: WebContents): boolean {
-      const page = profiles.get(profileId)?.get(contents)
-      return !!page && !page.disposed && page.lease?.isSoleConsumer === true
     }
   }
 }

@@ -355,9 +355,12 @@ export function BrowserOperationStatus({
  */
 export function BrowserOperationWarning({ activity }: { activity: BrowserActivityState }) {
   const message = activity.warning
-  const [dismissed, setDismissed] = useState<string | null>(null)
-  if (!message || dismissed === message) return null
-  return <BrowserOperationNotice message={message} className="browser-operation-warning" onDismiss={() => setDismissed(message)} />
+  return message ? <CurrentBrowserWarning key={message} message={message} /> : null
+}
+
+function CurrentBrowserWarning({ message }: { message: string }) {
+  const [dismissed, setDismissed] = useState(false)
+  return dismissed ? null : <BrowserOperationNotice message={message} className="browser-operation-warning" onDismiss={() => setDismissed(true)} />
 }
 
 /**

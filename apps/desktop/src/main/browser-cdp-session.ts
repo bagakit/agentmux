@@ -30,12 +30,18 @@ class BrowserCdpConnection implements BrowserPageTransport {
   private frameAttachFailure: string | null = null
   /** 订阅 CDP 事件的人。等一个事件（如 networkIdle）比轮询一个近似量诚实。 */
   private readonly listeners = new Set<(method: string, params: unknown, sessionId?: string) => void>()
+  private readonly endListeners = new Set<() => void>()
   private readonly onDetach: (_event: unknown, reason: string) => void
   private readonly onMessage: (_event: unknown, method: string, params: unknown, sessionId?: string) => void
 
   private constructor(private readonly contents: WebContents) {
     this.onDetach = (_event, reason) => {
       this.gone = reason
+      for (const listener of this.endListeners) queueMicrotask(() => {
+        if (this.endListeners.delete(listener)) {
+          try { listener() } catch (error) { console.warn('Browser debugger disconnect could not be published:', error) }
+        }
+      })
     }
     // flatten 模式下，子 target 的 attach/detach 是主会话上的普通事件。
     this.onMessage = (_event, method, params, sessionId) => {
@@ -149,11 +155,17 @@ class BrowserCdpConnection implements BrowserPageTransport {
       : await this.contents.debugger.sendCommand(method, params, sessionId)
   }
 
+  observeEnd(listener: () => void): () => void {
+    this.endListeners.add(listener)
+    return () => { this.endListeners.delete(listener) }
+  }
+
   /**
    * 释放原连接的事件与协议资源；只有最后一个消费者调用这里。
    * 清理失败返回准确原因，不能盖掉已取得的操作结果。
    */
   detach(): string | null {
+    this.endListeners.clear()
     this.frameSenders.clear()
     this.listeners.clear()
     // A destroyed WebContents also destroys its debugger wrapper: even reading `.off` can throw.
@@ -234,11 +246,6 @@ export class BrowserCdpSession implements BrowserPageTransport {
     return new Map([...this.frameWrappers].map(([id, value]) => [id, value.send]))
   }
   get endedReason(): string | null { return this.released ? 'This consumer released its debugger lease.' : this.owner.native.endedReason }
-  /** Exact native connection fact; another lease or an unknown attachment is never background-only. */
-  get isSoleConsumer(): boolean {
-    return !this.released && !this.contents.isDestroyed() && this.owner.leases === 1 && this.owner.native.endedReason === null &&
-      BrowserCdpSession.connections.get(this.contents) === this.owner && this.contents.debugger.isAttached()
-  }
   get frameDiscoveryFailure(): string | null { return this.owner.native.frameDiscoveryFailure }
   observe(listener: (method: string, params: unknown, sessionId?: string) => void): () => void {
     this.assertActive()
@@ -247,6 +254,11 @@ export class BrowserCdpSession implements BrowserPageTransport {
     this.observers.add(release)
     return release
   }
+  observeEnd(listener: () => void): void {
+    this.assertActive()
+    this.observers.add(this.owner.native.observeEnd(listener))
+  }
+
   async openNetworkSession(): Promise<BrowserNetworkSession> {
     this.assertActive()
     if (this.endedReason || BrowserCdpSession.connections.get(this.contents) !== this.owner) throw new Error('The original native connection changed. No replacement target is selected.')

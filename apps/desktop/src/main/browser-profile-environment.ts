@@ -58,7 +58,6 @@ export function createBrowserProfileEnvironment(ports: {
     preparePage(profileId: string, browserId: string, contents: WebContents, port: BrowserProfilePageEnvironmentPorts): Promise<void> { return pageEnvironment.preparePage(profileId, browserId, contents, port) },
     applyPages(profileId: string): void { pageEnvironment.apply(profileId) },
     publishBindings(profileIds:readonly string[]):void { pageEnvironment.publishBindings(profileIds) },
-    hasOnlyEnvironmentDebugger(profileId: string, contents: WebContents): boolean { return pageEnvironment.hasOnlyEnvironmentDebugger(profileId,contents) },
     inspect(profileId: string): BrowserProfileEnvironmentApplication | undefined {
       const settings = ports.settings(profileId), outcome = outcomes.get(profileId)
       const pages = pageEnvironment.inspect(profileId)

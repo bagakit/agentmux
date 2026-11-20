@@ -15,14 +15,17 @@ const SelectedIcon = semanticIconComponent('status.selected')
 type Option = { id: string; label: string; viewport: BrowserViewport }
 // CSS screen dimensions, referenced from Playwright's maintained device descriptors.
 // The touch preset adds native emulation. The remaining presets set the layout dimensions.
+const modes: Option[] = [
+  { id: 'responsive', label: 'Responsive', viewport: 'responsive' },
+  { id: 'phone', label: 'Phone · touch', viewport: 'phone' }
+]
 const groups: { label: string; options: Option[] }[] = [
   { label: 'Common sizes', options: [
     { id: 'mobile', label: 'Mobile', viewport: 'mobile' },
     { id: 'tablet', label: 'Tablet · iPad mini', viewport: 'tablet' },
     { id: 'desktop', label: 'Desktop', viewport: 'desktop' }
   ] },
-  { label: 'Phones', options: [
-    { id: 'phone', label: 'Phone · touch', viewport: 'phone' },
+  { label: 'Phone sizes', options: [
     { id: 'iphone-se', label: 'iPhone SE (3rd gen)', viewport: { width: 375, height: 667, screenPosition: 'mobile' } },
     { id: 'iphone', label: 'iPhone 16', viewport: { width: 393, height: 852, screenPosition: 'mobile' } },
     { id: 'iphone-pro', label: 'iPhone 16 Pro', viewport: { width: 402, height: 874, screenPosition: 'mobile' } },
@@ -30,10 +33,10 @@ const groups: { label: string; options: Option[] }[] = [
     { id: 'pixel', label: 'Pixel 7', viewport: { width: 412, height: 915, screenPosition: 'mobile' } },
     { id: 'galaxy', label: 'Galaxy S24', viewport: { width: 360, height: 780, screenPosition: 'mobile' } }
   ] },
-  { label: 'Tablets', options: [
+  { label: 'Tablet sizes', options: [
     { id: 'ipad-pro', label: 'iPad Pro 11', viewport: { width: 834, height: 1194, screenPosition: 'mobile' } }
   ] },
-  { label: 'Desktop screens', options: [
+  { label: 'Desktop sizes', options: [
     { id: 'laptop', label: 'Laptop', viewport: { width: 1440, height: 900, screenPosition: 'desktop' } },
     { id: 'full-hd', label: 'Full HD', viewport: { width: 1920, height: 1080, screenPosition: 'desktop' } }
   ] }
@@ -45,26 +48,23 @@ export function BrowserViewportOptions({ value, disabled, onSelect, onCustom }: 
 }) {
   const size = browserViewportSize(value)
   const orientation = size && size.width > size.height ? 'landscape' : 'portrait'
-  const options = [{ id: 'responsive', label: 'Responsive', viewport: 'responsive' as const }, ...groups.flatMap(group => group.options)]
+  const options = [...modes, ...groups.flatMap(group => group.options)]
   const selected = options.find(option => {
     if (browserViewportsEqual(option.viewport, value)) return true
     const dimensions = browserViewportSize(option.viewport)
     return size && dimensions && size.screenPosition === dimensions.screenPosition && size.device === dimensions.device &&
       (size.width === dimensions.width && size.height === dimensions.height || size.width === dimensions.height && size.height === dimensions.width)
   })?.id ?? 'custom'
-  const select = (id: string) => {
-    const option = options.find(option => option.id === id)
-    if (option) onSelect(option.viewport)
-  }
   const row = (option: Option) => {
     const dimensions = option.id === selected ? size : browserViewportSize(option.viewport)
-    return <Menu.RadioItem key={option.id} value={option.id} className="browser-menu__item" disabled={disabled}>
+    return <Menu.RadioItem key={option.id} value={option.id} className="browser-menu__item" disabled={disabled}
+      onSelect={() => onSelect(option.id === selected ? value : option.viewport)}>
       <span className="browser-menu__indicator"><Menu.ItemIndicator><SelectedIcon size={12} /></Menu.ItemIndicator></span>
       <span>{option.label}</span><small>{dimensions ? `${dimensions.width} × ${dimensions.height}` : 'Fit pane'}</small>
     </Menu.RadioItem>
   }
   return <>
-    <Menu.RadioGroup value={selected} onValueChange={select}>{row(options[0]!)}</Menu.RadioGroup>
+    <Menu.RadioGroup value={selected}>{modes.map(row)}</Menu.RadioGroup>
     <Menu.Item className="browser-menu__item" disabled={disabled} onSelect={onCustom}>
       <span className="browser-menu__indicator">{selected === 'custom' ? <SelectedIcon size={12} /> : null}</span>
       <span>Custom size…</span><small>{size ? `${size.width} × ${size.height}` : 'Width × height'}</small>
@@ -80,7 +80,7 @@ export function BrowserViewportOptions({ value, disabled, onSelect, onCustom }: 
       </Menu.RadioItem>)}
     </Menu.RadioGroup>
     <Menu.Separator className="browser-menu__separator" />
-    <Menu.RadioGroup value={selected} onValueChange={select}>
+    <Menu.RadioGroup value={selected}>
       {groups.map(group => <Menu.Group key={group.label} aria-label={group.label}>
         <Menu.Label className="browser-menu__label">{group.label}</Menu.Label>{group.options.map(row)}
       </Menu.Group>)}
