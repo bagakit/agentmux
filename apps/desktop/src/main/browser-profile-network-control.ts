@@ -65,6 +65,9 @@ export function createBrowserProfileNetworkControl(ports: {
               : exit.status === 'reachable' ? exit : { status: 'unknown', reason: 'exit-unavailable', latencyMs: exit.latencyMs }
           } catch { diagnostic.exit = { status: 'unknown', reason: current() ? 'exit-unavailable' : 'route-changed', latencyMs: performance.now() - started } }
         }
+        diagnostic.webrtc = !current()
+          ? { status: 'unknown', reason: 'route-changed', observedPages: 0 }
+          : ports.profiles.sessions?.observeWebRtc?.(profileId) ?? { status: 'unknown', reason: 'native-unavailable', observedPages: 0 }
         diagnostic.phase = 'observed'; diagnostic.finishedAt = Date.now(); await save()
         return { diagnostic: structuredClone(diagnostic), historySaved }
       }

@@ -9,6 +9,15 @@ export type BrowserProxyProbeReason = 'not-started' | 'no-proxy' | 'not-socks5' 
 export type BrowserProxyProbeRoute = { mode: 'system' | 'direct' } |
   { mode: 'proxy'; scheme: 'http' | 'https' | 'socks4' | 'socks5'; host: string; port: number }
 export type BrowserProxyProbeObservation<Status extends string> = { status: Status; latencyMs: number; reason?: BrowserProxyProbeReason }
+export const BROWSER_WEBRTC_IP_POLICIES = [
+  'default', 'default_public_interface_only', 'default_public_and_private_interfaces', 'disable_non_proxied_udp'
+] as const
+export type BrowserWebRtcIpPolicy = (typeof BROWSER_WEBRTC_IP_POLICIES)[number]
+const WEBRTC_OBSERVATION_REASONS = ['no-live-page', 'native-unavailable', 'mixed-policies', 'route-changed'] as const
+export type BrowserWebRtcObservation = { observedPages: number } & (
+  | { status: 'observed'; policy: BrowserWebRtcIpPolicy }
+  | { status: 'unknown'; reason: (typeof WEBRTC_OBSERVATION_REASONS)[number] }
+)
 export type BrowserProxyProbe = {
   id: string; profileId: string; configurationRevision: string; route: BrowserProxyProbeRoute
   /** Only the HTTPS origin is public; the configured address's path/query stay private. */
@@ -18,6 +27,8 @@ export type BrowserProxyProbe = {
   authentication: BrowserProxyProbeObservation<'authenticated' | 'not-required' | 'rejected' | 'unknown' | 'not-applicable'>
   /** Only a request through the original Profile session can populate this observation. */
   exit: BrowserProfileNetworkCheck
+  /** Native WebContents policy readback. Older diagnostics have no WebRTC observation. */
+  webrtc?: BrowserWebRtcObservation
 }
 export type BrowserProxyProbeReceipt = { diagnostic: BrowserProxyProbe; historySaved: boolean }
 export type BrowserProxyProbeHistory = { diagnostics: BrowserProxyProbe[]; nextCursor: string | null }
@@ -38,7 +49,7 @@ export function parseBrowserProxyProbe(value: unknown, code = 'INVALID_CONTROL_R
     if (!statuses.includes(row.status as T) || row.reason !== undefined && !REASONS.includes(row.reason as BrowserProxyProbeReason)) return invalid()
     return { status: row.status as T, latencyMs: number(row.latencyMs), ...(row.reason === undefined ? {} : { reason: row.reason as BrowserProxyProbeReason }) }
   }
-  const row = object(value, ['id', 'profileId', 'configurationRevision', 'route', 'exitOrigin', 'startedAt', 'finishedAt', 'phase', 'tcp', 'authentication', 'exit'])
+  const row = object(value, ['id', 'profileId', 'configurationRevision', 'route', 'exitOrigin', 'startedAt', 'finishedAt', 'phase', 'tcp', 'authentication', 'exit', 'webrtc'])
   const rawRoute = object(row.route, ['mode', 'scheme', 'host', 'port'])
   let route: BrowserProxyProbeRoute
   if (rawRoute.mode === 'proxy') {
@@ -67,8 +78,22 @@ export function parseBrowserProxyProbe(value: unknown, code = 'INVALID_CONTROL_R
     catch { return invalid() }
   }
   if (row.phase !== 'pending' && row.phase !== 'observed' || (row.phase === 'observed') !== (finishedAt !== undefined)) return invalid()
+  let webrtc: BrowserWebRtcObservation | undefined
+  if (row.webrtc !== undefined) {
+    const native = object(row.webrtc, ['status', 'policy', 'reason', 'observedPages'])
+    const observedPages = number(native.observedPages)
+    if (!Number.isSafeInteger(observedPages)) return invalid()
+    if (native.status === 'observed' && native.reason === undefined && observedPages > 0 &&
+        BROWSER_WEBRTC_IP_POLICIES.includes(native.policy as BrowserWebRtcIpPolicy)) {
+      webrtc = { status: 'observed', policy: native.policy as BrowserWebRtcIpPolicy, observedPages }
+    } else if (native.status === 'unknown' && native.policy === undefined &&
+        WEBRTC_OBSERVATION_REASONS.includes(native.reason as typeof WEBRTC_OBSERVATION_REASONS[number])) {
+      webrtc = { status: 'unknown', reason: native.reason as typeof WEBRTC_OBSERVATION_REASONS[number], observedPages }
+    } else return invalid()
+  }
   return { id: text(row.id), profileId: text(row.profileId), configurationRevision: text(row.configurationRevision), route, exitOrigin, startedAt,
     phase: row.phase, ...(finishedAt === undefined ? {} : { finishedAt }),
     tcp: observation(row.tcp, ['connected', 'unknown', 'not-applicable']),
-    authentication: observation(row.authentication, ['authenticated', 'not-required', 'rejected', 'unknown', 'not-applicable']), exit }
+    authentication: observation(row.authentication, ['authenticated', 'not-required', 'rejected', 'unknown', 'not-applicable']), exit,
+    ...(webrtc ? { webrtc } : {}) }
 }

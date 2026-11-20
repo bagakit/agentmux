@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { BrowserProxyProbe, BrowserProxyProbeHistory, BrowserProxyProbeReason } from '@agentmux/core/control'
+import type { BrowserProxyProbe, BrowserProxyProbeHistory, BrowserProxyProbeReason, BrowserWebRtcIpPolicy, BrowserWebRtcObservation } from '@agentmux/core/control'
 import { Button } from '@agentmux/client-ui/components/Button'
 import type { BrowserProfileSummary } from '../../../../shared/contracts'
 import { api } from '../../lib/api'
@@ -22,14 +22,33 @@ function resultText(row: BrowserProxyProbe, phase: 'tcp' | 'authentication' | 'e
   if (value.reason && value.reason in reasons) return reasons[value.reason as BrowserProxyProbeReason]
   return 'Unknown'
 }
+const webRtcPolicies: Record<BrowserWebRtcIpPolicy, string> = {
+  default: 'Browser default',
+  default_public_interface_only: 'Public interface only',
+  default_public_and_private_interfaces: 'Default public and private interfaces',
+  disable_non_proxied_udp: 'Non-proxied UDP disabled'
+}
+const webRtcUnknown: Record<Extract<BrowserWebRtcObservation, { status: 'unknown' }>['reason'], string> = {
+  'no-live-page': 'Open a page in this Profile to observe its policy',
+  'native-unavailable': 'Native policy could not be read',
+  'mixed-policies': 'Open pages reported different policies',
+  'route-changed': 'Profile route changed during this check'
+}
 function Observation({ diagnostic }: { diagnostic: BrowserProxyProbe }) {
+  const webrtc = diagnostic.webrtc
   return <>
     <dl className="profile-network-diagnostics__facts">
       {(['tcp', 'authentication', 'exit'] as const).map((phase, index) => <div key={phase} data-observation={diagnostic[phase].status}>
         <dt>{['TCP connection', 'SOCKS5 sign-in', 'Profile exit'][index]}</dt><dd>{resultText(diagnostic, phase)}</dd>
       </div>)}
+      <div data-observation={webrtc?.status ?? 'unknown'}>
+        <dt>WebRTC routing</dt>
+        <dd>{webrtc?.status === 'observed'
+          ? `${webRtcPolicies[webrtc.policy]} · ${webrtc.observedPages} ${webrtc.observedPages === 1 ? 'page' : 'pages'}`
+          : webrtc ? webRtcUnknown[webrtc.reason] : 'No observation in this check'}</dd>
+      </div>
     </dl>
-    <p className="browser-profile-editor__quiet">TCP and sign-in describe this proxy probe. Only the exit request uses this Profile’s Browser session.</p>
+    <p className="browser-profile-editor__quiet">The exit check uses this Profile’s Browser session. WebRTC shows the native policy read from open pages. Call connectivity is untested.</p>
   </>
 }
 

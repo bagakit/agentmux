@@ -1,5 +1,6 @@
 import { createBrowserProfileSocksTransport, type BrowserProfileSocksTransportPorts } from './browser-profile-socks-transport.js'
-import type { BrowserProfileNetworkApplication, BrowserProfileEnvironment, BrowserProfileNativeUse } from '@agentmux/core/control'
+import { BROWSER_WEBRTC_IP_POLICIES, type BrowserProfileNetworkApplication, type BrowserProfileEnvironment,
+  type BrowserProfileNativeUse, type BrowserWebRtcIpPolicy, type BrowserWebRtcObservation } from '@agentmux/core/control'
 import type { BrowserProfilePageEnvironmentPorts } from './browser-profile-page-environment.js'
 import { createBrowserProfileEnvironment } from './browser-profile-environment.js'
 import type { Session, WebContents, DownloadItem } from 'electron'
@@ -115,6 +116,28 @@ export function createBrowserProfileSessions(ports: BrowserProfileSessionPorts) 
     /** Session has no destroy API. Idle counts cannot replace this process-lifetime admission fact. */
     nativeSessionAdmitted(profileId: string): boolean { return nativeProfileSessions.has(profileId) },
     observedSession(profileId: string): Session | undefined { return nativeProfileSessions.get(profileId) },
+    observeWebRtc(profileId: string): BrowserWebRtcObservation {
+      const target = nativeProfileSessions.get(profileId)
+      if (!target) return { status: 'unknown', reason: 'no-live-page', observedPages: 0 }
+      let contentsList: readonly WebContents[]
+      try { contentsList = ports.openContents() }
+      catch { return { status: 'unknown', reason: 'native-unavailable', observedPages: 0 } }
+      const policies = new Set<BrowserWebRtcIpPolicy>()
+      let observedPages = 0, unreadable = false
+      for (const contents of contentsList) {
+        try {
+          if (contents.isDestroyed() || contents.session !== target) continue
+          const policy = contents.getWebRTCIPHandlingPolicy() as BrowserWebRtcIpPolicy
+          if (!BROWSER_WEBRTC_IP_POLICIES.includes(policy)) { unreadable = true; continue }
+          policies.add(policy)
+          observedPages++
+        } catch { unreadable = true }
+      }
+      const [policy] = policies
+      if (unreadable) return { status: 'unknown', reason: 'native-unavailable', observedPages }
+      if (policies.size > 1) return { status: 'unknown', reason: 'mixed-policies', observedPages }
+      return policy ? { status: 'observed', policy, observedPages } : { status: 'unknown', reason: 'no-live-page', observedPages }
+    },
     bindSocksTransport(ports: Omit<BrowserProfileSocksTransportPorts, 'network'>): void { if (!socks) socks = createBrowserProfileSocksTransport({ ...ports, network: id => portsNetwork(id) }) },
     async refreshTransport(profileId: string): Promise<boolean> { const network = ports.network(profileId); if (!socks || network?.mode !== 'proxy' || network.server.scheme !== 'socks5') return false; const target = ownedSession(profileId); await apply(target, network, profileId, true); return true },
     answerProxyTransport(target: Session, auth: { isProxy: boolean; host: string; port: number }, callback: (username?: string, password?: string) => void): boolean { return socks?.answer(target, auth, callback) ?? false },
