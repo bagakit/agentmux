@@ -5,10 +5,11 @@ import type { connectCodexNativeActor } from './native-rpc.js'
 export type CodexManagedThreadConfiguration = { sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access'; approvalPolicy?: 'on-request' | 'never'; model?: string; cwd?: string }
 export type CodexManagedResume = CodexManagedThreadConfiguration & { threadId: string }
 export type CodexManagedRunPlan = { command: string; serverConfig: string[]; frontendArgs: string[] } &
-  ({ create: CodexManagedThreadConfiguration; resume?: never } | { resume: CodexManagedResume; create?: never })
+  ({ create: CodexManagedThreadConfiguration; historyMode?: 'legacy'; resume?: never } |
+    { resume: CodexManagedResume; create?: never; historyMode?: never })
 
-// Persisted contract identity, not the currently installed CLI version. Both
-// qualified releases use this exact actor/input wire; old claims keep their ID.
+// Persisted contract identity, not the currently installed CLI version.
+// Qualified releases use this exact actor/input wire; old claims keep their ID.
 export const CODEX_NATIVE_INPUT_PROTOCOL = 'codex-app-server-v2-0.163'
 const BYPASS_PERMISSIONS = '--dangerously-bypass-approvals-and-sandbox'
 

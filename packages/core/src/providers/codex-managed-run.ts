@@ -187,7 +187,14 @@ export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number
             { retainPendingInitialization: true, onNotification: observeNativeProgress })
           // Read-only preflight may be retried before any native creation request exists.
           initializationStep = 'preflight'
-          const account = await nativeConnection.request('account/read', { refreshToken: false }, { retainPending: true })
+          const connection = nativeConnection
+          const readAccount = () => connection.request('account/read', { refreshToken: false }, { retainPending: true })
+          const account = await readAccount().catch(error => {
+            // Codex can retry workspace discovery after it returns a settled
+            // internal error. An outstanding request or transport failure is not that reply.
+            if (!(error instanceof JSONRPCErrorException) || error.code !== -32603 || !live() || !connection.isConnected()) throw error
+            return readAccount()
+          })
           if (account?.requiresOpenaiAuth === true && account.account === null) initializationBlocker = {
             state: 'pending', reason: 'authentication', source: 'native-protocol', scope: 'prerequisite' }
           if (typeof account?.requiresOpenaiAuth !== 'boolean' || account.requiresOpenaiAuth && !account.account) {
@@ -203,7 +210,8 @@ export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number
           // This one native request is retained even after an observer times out.
           // There is no thread/start idempotency key; retrying a reader cannot repeat it.
           const prepared = await nativeConnection.request(plan.resume ? 'thread/resume' : 'thread/start',
-            { ...expected, ...(plan.resume ? { excludeTurns: true } : { threadSource: 'user' }) }, { retainPending: true }).catch(error => {
+            { ...expected, ...(plan.resume ? { excludeTurns: true } : { threadSource: 'user',
+              ...(plan.historyMode ? { historyMode: plan.historyMode } : {}) }) }, { retainPending: true }).catch(error => {
             // A settled resume rejection may follow loading the original thread.
             // Continuing this exact resume rejoins that backend's object; it does
             // not prove not-applied. Creation and uncertain transport stay latched.
@@ -215,6 +223,7 @@ export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number
           const sandboxType = expected.sandbox === 'read-only' ? 'readOnly' : expected.sandbox === 'workspace-write' ? 'workspaceWrite' : 'dangerFullAccess'
           if (typeof id !== 'string' || !id || plan.resume && id !== plan.resume.threadId ||
             prepared.thread.canAcceptDirectInput !== true || typeof prepared.thread.sessionId !== 'string' || !prepared.thread.sessionId ||
+              plan.historyMode !== undefined && prepared.thread.historyMode !== plan.historyMode ||
             expected.approvalPolicy !== undefined && prepared.approvalPolicy !== expected.approvalPolicy ||
             expected.sandbox !== undefined && prepared.sandbox?.type !== sandboxType ||
             expected.model !== undefined && prepared.model !== expected.model || prepared.cwd !== expected.cwd) {

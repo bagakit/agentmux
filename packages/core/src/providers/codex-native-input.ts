@@ -21,18 +21,24 @@ export const prepareCodexManagedLaunch: NonNullable<AgentProvider['prepareManage
   if (process.platform !== 'darwin' || context.kind === 'fork') return { plan }
   const prepared = context.kind === 'resume' ? nativeResumePlan(plan.args, context.prompt) : undefined
   if (context.kind === 'resume' && !prepared) return { plan }
-  const creation = context.kind === 'create' ? nativeServerConfig(context.prompt && plan.args.at(-2) === '--' && plan.args.at(-1) === context.prompt ? plan.args.slice(0, -2) : plan.args) : undefined
+  const carriesPrompt = Boolean(context.prompt?.trim() && plan.args.at(-2) === '--' && plan.args.at(-1) === context.prompt)
+  const creation = context.kind === 'create' ? nativeServerConfig(carriesPrompt ? plan.args.slice(0, -2) : plan.args) : undefined
   if (!prepared && !creation) return { plan }
   const { serverConfig, frontendArgs } = (prepared ?? creation)!
   // The version is the native CLI's stable version command, not a terminal screen or readiness guess.
   const version = await runProcess(plan.command, ['--version'], { env: plan.env, timeoutMs: 2_000, maxOutputBytes: 4096 }).catch(() => null)
-  if (!version || version.exitCode !== 0 || version.stderr || !['codex-cli 0.163.0', 'codex-cli 0.165.0'].includes(version.stdout.trim())) return { plan }
-  // This release can rejoin an existing native thread, but an empty managed
-  // thread cannot attach its TUI. Keep the original ordinary creation plan.
-  if (version.stdout.trim() === 'codex-cli 0.165.0' && context.kind === 'create') return { plan }
+  if (!version || version.exitCode !== 0 || version.stderr) return { plan }
+  const release = version.stdout.trim()
+  if (!['codex-cli 0.163.0', 'codex-cli 0.165.0', 'codex-cli 0.171.0'].includes(release)) return { plan }
+  // In 0.171 the first admitted prompt materializes the rollout that the TUI
+  // joins. Empty creates in this release still need the ordinary terminal.
+  if (context.kind === 'create' && (release === 'codex-cli 0.165.0' || release === 'codex-cli 0.171.0' && !carriesPrompt)) return { plan }
   const nativeActor = { protocolId: PROTOCOL_ID, actorId: mintObjectId(), lifecycleOperationId, token: randomBytes(32).toString('hex'), frontendControl: true as const, initializationControl: true as const, launch: { command: plan.command, args: [...plan.args] } }
   const managed: CodexManagedRunPlan = { command: plan.command, serverConfig, frontendArgs,
-    ...(prepared ? { resume: prepared.resume } : { create: creation!.configuration }) }
+    ...(prepared ? { resume: prepared.resume } : { create: creation!.configuration,
+      // The CLI's remote frontend and AgentMux's original history reader both
+      // consume a materialized rollout. 0.171's paginated default cannot join it.
+      ...(release === 'codex-cli 0.171.0' ? { historyMode: 'legacy' as const } : {}) }) }
   return { nativeActor, promptDelivery: 'post-launch', plan: { ...plan, command: process.execPath,
     args: [fileURLToPath(new URL('./codex-managed-run.js', import.meta.url)), JSON.stringify(managed)],
     env: { ...plan.env, ELECTRON_RUN_AS_NODE: '1', [CODEX_NATIVE_TOKEN_ENV]: nativeActor.token, [CODEX_ACTOR_ID_ENV]: nativeActor.actorId, [CODEX_ACTOR_LIFECYCLE_ENV]: lifecycleOperationId } } }
