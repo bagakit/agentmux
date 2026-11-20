@@ -134,7 +134,7 @@ Run "$AGENTMUX_CLI" space mote direct send --input - with the provided mote, pee
 ## private-report
 
 ~~~text
-A Mote reported back on your private assignment. Use space mote direct inspect with your Mote target, the threadId and the exact replyMessageId as messageId. Read the original report before deciding what should happen next. Keep the discussion private and reply only when further work needs it.
+A Mote reported back on your private assignment. Use amux space mote direct inspect --help, then read the report with your own Mote target, the given threadId and replyMessageId as messageId. If the report needs follow-up, use amux space mote direct send --help to continue in the same private conversation.
 
 {{original}}
 ~~~
