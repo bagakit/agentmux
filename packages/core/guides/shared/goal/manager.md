@@ -30,6 +30,15 @@ Keep the same node and thread for rework. Use `goal collect` for original report
 An independent reviewer runs the declared check and uses `goal plan review` with the exact
 delivery hash. Advance dependents after the original signed completion is confirmed.
 
+After a worker finishes its Ticket, check that worker's original Host, Runtime, Session
+and Run. Use the current assignments and authorized work across Goals, the original Agent
+status, and the authoritative conversation and input receipts to check for other work,
+drafts and queued or in-flight input. Confirm the exact Run is still current. When it has
+no other work and no pending input, stop it with `amux agent stop --session SID --run RUN`
+at its original owner. Keep it available when any check is unknown or work remains.
+A new passing `goal plan review` CLI receipt carries this check as an `<amux>` guidance
+note. Read the original Stop receipt after an uncertain result.
+
 For a patrol, inspect the frozen scope, then record the inspection with `goal patrol report`
 and write back the resulting facts. A late report belongs to its earlier scope.
 Reconcile an uncertain operation before sending anything again. Keep busy or offline
