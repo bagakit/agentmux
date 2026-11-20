@@ -199,6 +199,51 @@ it.each(['lost-ack', 'partial-ack', 'wire', 'correlation', 'reject', 'unsupporte
     expect((await h.client.statusAgent('recipient')).run).toMatchObject({ state: 'running', pid: 700001 })
   })
 
+it.each(['admitted', 'unknown'] as const)('keeps external conversation input %s on the original ordinary Codex queue', async outcome => {
+  const h = await rpcOwnerFixture(['recipient']); closes.push(h.close)
+  const f = await fixture()
+  if (outcome === 'unknown') await f.update({ failure: 'lost-ack' })
+  const original = (await h.store.readMetadata('recipient'))!
+  await h.store.compareAndSwapMetadata(original, { ...original, workspacePath: f.root, nativeHandle: f.context.nativeHandle, updatedAt: Date.now() })
+  await h.inner.registry.load('local')
+  h.inner.kernel.status = vi.fn(async (id: string) => ({ ...h.run(id), pid: 700001, workspacePath: f.root }))
+  const sender = { kind: 'external' as const, connectionId: 'original-connector',
+    actor: { application: { domain: 'channel.example', appId: 'original-app' }, idType: 'open_id', userId: 'original-person' },
+    externalConversationId: 'original-direct-chat', externalMessageId: 'original-platform-message',
+    bindingId: 'original-binding', bindingRevision: 1, grantId: 'original-grant', grantRevision: 1 }
+  const key = { kind: 'message' as const, agentSessionId: 'recipient', expectedRun: original.run, messageId: 'original-external-message' }
+  const body = 'Original external creator question'
+  const intent = { kind: 'session-conversation' as const, expectedRun: original.run }
+  const envelope = { schema: 'agentmux.a2a.v1' as const, messageId: key.messageId, operationId: 'original-intake-operation',
+    createdAt: Date.now(), sender, recipient: { kind: 'agent-session' as const, agentSessionId: key.agentSessionId },
+    threadId: 'original-thread', correlationId: 'external-correlation', replyTo: null, workspaceId: null,
+    senderSessionId: null, senderRunId: null, recipientSessionId: key.agentSessionId, recipientRunId: original.run.runId, body }
+  const assertCurrent = vi.fn(async value => expect(value).toEqual({ agentSessionId: key.agentSessionId, expectedRun: original.run,
+    operationId: envelope.operationId, messageId: key.messageId, body, admissionIntent: intent }))
+  const input = { agentSessionId: key.agentSessionId, envelope, execution: 'immediate' as const, admissionIntent: intent,
+    scope: 'ensure-custody' as const, conversationKind: 'direct' as const }
+  const context = { externalAuthor: { identity: sender, assertCurrent } }
+  await h.client.submitAgentMessage(input, context)
+  const rpc = new AgentMuxRpcService({ coreClients: h.coreClients })
+  const inspect = () => rpc.call('agent.input.inspect', { key }, { principal: { kind: 'user', id: 'private-test-user' } })
+  const settled = await vi.waitFor(async () => {
+    const receipt = await inspect()
+    expect(receipt.input).toMatchObject({ key, status: outcome, admission: { admission: { native: { outcome,
+      plan: { operation: 'queue-idle', threadId: source.nativeSessionId } } } } })
+    return receipt
+  }, { timeout: 8000 })
+  await h.client.submitAgentMessage(input, context)
+  expect((await inspect()).input).toEqual(settled.input)
+  const calls = (await f.readTrace()).filter(row => row.method === 'thread/queue/add')
+  expect(calls).toHaveLength(1)
+  expect(calls[0].params.input[0].text).toContain(body)
+  expect(calls[0].params.input[0].text).toContain(sender.actor.userId)
+  expect(assertCurrent).toHaveBeenCalled()
+  expect(h.inner.kernel.input).not.toHaveBeenCalled()
+  expect(h.inner.kernel.stop).not.toHaveBeenCalled()
+  expect((await h.client.readAgentSession(key.agentSessionId))!.run).toEqual(original.run)
+})
+
 it('keeps the selected target for preparation and admission while unrelated main candidates remain open', async () => {
   const f = await fixture(); os.multi = true
   const result = await f.prepare().then(prepared => ({ prepared }), error => ({ error }))

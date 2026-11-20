@@ -6,6 +6,7 @@ import source from '../../../apps/desktop/scripts/fixtures/agent-schedules/vites
 const root = resolve(import.meta.dirname, '../../..')
 const owner = 'packages/providers/src/codex/native-queue.ts'
 export const mutations: Record<string, [string, string]> = {
+  'drop-external-queue': ["...(allowIdleQueue ? { allowIdleQueue: true } : {})", '...{}'],
   'version-gate': ['  await assertFile(executable)\n', "  await assertFile(executable)\n  if ((await import('node:child_process')).execFileSync(executable.path, ['--version'], { encoding: 'utf8', signal }).trim() !== 'codex-cli 0.167.0') throw unavailable()\n"],
   'skip-queue-contract': ["const queue = await helper.request('thread/queue/list', { threadId: original.id, limit: 1 })", 'const queue = { data: [] }'],
   'require-peer-correlation': ['(item as Record<string, unknown>).clientUserMessageId != null && typeof (item as Record<string, unknown>).clientUserMessageId', 'typeof (item as Record<string, unknown>).clientUserMessageId'],
@@ -17,6 +18,7 @@ export const mutations: Record<string, [string, string]> = {
   'ignore-birth': ['await nativeProcessBirth(processId, signal) !== rootBirth || await nativeProcessBirth(owner, signal) !== ownerBirth ||\n            await nativeProcessBirth(helper.processId, signal) !== helperBirth', 'false'],
 }
 const mutation = process.env.AGENTMUX_QUEUE_CONTRACT_MUTATION
+const report = process.env.AGENTMUX_QUEUE_CONTRACT_LOADED
 if (mutation && !Object.hasOwn(mutations, mutation)) throw new Error('Unknown original Codex queue mutation')
 export default defineConfig({ ...source,
   resolve: { ...source.resolve, alias: [
@@ -25,17 +27,17 @@ export default defineConfig({ ...source,
   ] },
   cacheDir: resolve(root, '.local/state/codex-native-queue-contract/cache', mutation ?? 'candidate'),
   plugins: [...(source.plugins ?? []), { name: 'actual-codex-queue-owner', enforce: 'pre', transform(original, id) {
-    if (relative(root, id.split('?')[0]!) !== owner) return
+    const target = mutation === 'drop-external-queue' ? 'packages/core/src/prompt-submission.ts' : owner
+    if (relative(root, id.split('?')[0]!) !== target) return
     let code = original
     if (mutation) {
       const [anchor, replacement] = mutations[mutation]!
       if (code.split(anchor).length !== 2) throw new Error('Codex mutation requires one exact owner anchor: ' + mutation)
       code = code.replace(anchor, replacement)
     }
-    const report = process.env.AGENTMUX_QUEUE_CONTRACT_LOADED
     if (report) {
       const sha = (text: string) => createHash('sha256').update(text).digest('hex')
-      const fact = { path: owner, originalSHA256: sha(original), loadedSHA256: sha(code), ...(mutation ? { mutation } : {}) }
+      const fact = { path: target, originalSHA256: sha(original), loadedSHA256: sha(code), ...(mutation ? { mutation } : {}) }
       code = "import { appendFileSync as __codexQueueLoaded } from 'node:fs'; __codexQueueLoaded(" + JSON.stringify(report) + ', ' + JSON.stringify(JSON.stringify(fact) + '\n') + ');\n' + code
     }
     return code === original ? undefined : { code, map: null }
