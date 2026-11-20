@@ -9,6 +9,7 @@ import { MobileTerminalViewer } from '../src/terminal/MobileTerminalViewer'
 const canvases = vi.hoisted(() => [] as Array<{ options: Record<string, unknown>; textarea: HTMLTextAreaElement; input(data: string): void }>)
 const selectedText = vi.hoisted(() => ({ value: 'Retained terminal selection' }))
 const unicodeRefusal = vi.hoisted(() => ({ active: false }))
+const imageRefusal = vi.hoisted(() => ({ active: false }))
 const readings = vi.hoisted(() => [] as Array<(reading: MobileTerminalReading) => void>)
 
 // This mounted check isolates initial control ownership. Output parsing and
@@ -39,11 +40,19 @@ vi.mock('../src/terminal/reader', () => ({ createMobileTerminalReader: ({ report
   readings.push(report)
   return { setVisible() {}, dispose: async () => {}, retry: async () => {} }
 } }))
+vi.mock('@agentmux/client-ui/terminal/images', () => ({ activateTerminalImages: () => {
+  if (imageRefusal.active) throw new Error('Graphics configuration unavailable')
+} }))
 const key = 'agentmux-mobile-terminal-intent-v1:initial-original-session'
 const connection = { state: 'connected' as const, message: '原连接' }
 const platform = { copyText: async () => true, overlayContainer: () => document.body } as Parameters<typeof MobileTerminalViewer>[0]['platform']
 const roots: ReturnType<typeof createRoot>[] = []
-beforeEach(() => { globalThis.IS_REACT_ACT_ENVIRONMENT = true; unicodeRefusal.active = false; selectedText.value = 'Retained terminal selection' })
+beforeEach(() => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true
+  unicodeRefusal.active = false
+  imageRefusal.active = false
+  selectedText.value = 'Retained terminal selection'
+})
 afterEach(async () => { for (const root of roots.splice(0)) await act(async () => root.unmount()); document.body.innerHTML = ''; localStorage.clear(); canvases.length = 0; readings.length = 0 })
 
 function port() {
@@ -208,12 +217,14 @@ it('applies explicit Host terminal colors to the retained canvas without recreat
   expect(canvas.options.disableStdin).toBe(true); expect(p.write).not.toHaveBeenCalled(); expect(p.resize).not.toHaveBeenCalled()
 })
 
-it('keeps the retained terminal and explicit control available when Unicode configuration fails', async () => {
+it('keeps the retained terminal and explicit control available when rendering configuration fails', async () => {
   unicodeRefusal.active = true
+  imageRefusal.active = true
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
   const p = port(), view = await mount(p.client), original = canvases[0]
   expect(view.node.querySelector('.mobile-terminal-notice')?.textContent).toContain('终端字宽设置没有生效')
   const details = await openReading(view.node)
+  expect(details.textContent).toContain('终端图片暂时无法显示')
   expect(details.textContent).toContain('输出和输入仍可使用')
   await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="关闭终端阅读"]')!.click())
   await act(async () => view.node.querySelector<HTMLButtonElement>('.mobile-terminal-mode')!.click())
