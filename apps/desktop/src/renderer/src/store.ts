@@ -8554,12 +8554,14 @@ export const useAppStore = create<AppState>()<[['zustand/persist', PersistedAppS
         }
       }
       const goalPresentationTarget = goalTarget && { ...goalTarget, ...(sourceGoal?.address ? { runtimeId: sourceGoal.address.runtimeId, namespace: sourceGoal.address.namespace } : {}) }
+      const requiresGoalPresentation = needsGoalOwner || goalSection !== undefined
       if (navigationState !== 'rejected') await awaitDesktopPresentation(() => {
         const actual = readSelection()
         if (request.target.kind === 'mote' && !request.target.address) return get().moteDiscussionEntry?.token !== moteEntryToken ||
           actual.space?.spaceId !== request.target.spaceId || Boolean('spaceId' in request.target && readMoteLinkPresentation(request.target))
         if (JSON.stringify(actual) !== JSON.stringify(expected)) return true
-        if (goalPresentationTarget && goalSection) return get().goalReadingEntry?.token !== goalReadingToken || Boolean(readGoalReadingPresentation(goalPresentationTarget))
+        if (goalPresentationTarget && requiresGoalPresentation) return (goalSection !== undefined && get().goalReadingEntry?.token !== goalReadingToken) ||
+          Boolean(readGoalReadingPresentation(goalPresentationTarget))
         const observed = readDesktopPresentation(actual, get().tabs, independent)
         if (request.target.kind === 'settings') return request.target.sectionId === null ? observed.overlays.settings === false :
           observed.overlays.settingsPage?.sectionId === request.target.sectionId && observed.overlays.settingsPage.visible === true && (request.target.hostId === undefined || observed.overlays.settingsPage.hostId === request.target.hostId)
@@ -8595,7 +8597,7 @@ export const useAppStore = create<AppState>()<[['zustand/persist', PersistedAppS
       }
       const goalPresentation = goalPresentationTarget ? readGoalReadingPresentation(goalPresentationTarget) : null
       if (goalPresentation) observed.presentation = { ...observed.presentation, goal: goalPresentation }
-      if (navigationState !== 'rejected' && (needsGoalOwner || goalSection) &&
+      if (navigationState !== 'rejected' && requiresGoalPresentation &&
         (!goalPresentation || goalSection && get().goalReadingEntry?.token !== goalReadingToken)) {
         navigationState = 'unconfirmed'
         issues.push({ step: 'presentation', code: 'GOAL_READING_UNCONFIRMED', message: 'The exact original Goal reading position has not been visibly confirmed.',
