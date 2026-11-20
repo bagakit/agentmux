@@ -56,12 +56,16 @@ export function MoteQuickMode({ scope, reference, onOpenPath, active }: {
   const executorLabel = useMemo(() => executorsForHost(executorFacts.config, scope.workspace.hostId, executorFacts.detections, executorFacts.inventory)
     .find(item => item.id === defaults.executorId)?.label ?? defaults.executorId, [executorFacts, scope.workspace.hostId, defaults.executorId])
   const conversationLabel = useAppStore(state => defaults.conversation ? moteConversationLabel(state, defaults.conversation) : undefined)
+  const currentConversation = defaults.conversation ? conversationLabel ?? 'Conversation linked'
+    : saved?.status === 'saved' || saved?.status === 'missing'
+      ? defaults.executorId ? 'Will start when you message' : 'Set an Executor to start'
+      : 'Not yet confirmed'
   const heartbeat = useMoteHeartbeatReading(scope, active)
   const edit = () => { invoker.current = ownerDocument.activeElement as HTMLElement; setEditing(true) }
   return <section className="mote-quick-mode" aria-label="Quick mode">
     <div className="mote-details__section-actions"><span><ThemeActionQuickModeIcon size={13} />Quick mode</span><MoteBehaviorAction label="Edit quick mode" onClick={edit}><ThemeActionEditIcon size={14} /></MoteBehaviorAction></div>
     <button className="mote-quick-mode__row" type="button" onClick={edit}><ThemeObjectAgentIcon size={14} /><span>Executor priority</span><strong title={defaults.executorId}>{executorLabel ?? 'Set Executors'}{moteExecutorPriority(defaults).length > 1 ? ` +${moteExecutorPriority(defaults).length - 1}` : ''}</strong></button>
-    {conversationLabel ? <div className="mote-quick-mode__row"><ThemeObjectConversationIcon size={14} /><span>Current Agent</span><strong>{conversationLabel}</strong></div> : null}
+    <div className="mote-quick-mode__row mote-quick-mode__current"><ThemeObjectConversationIcon size={14} /><span>Current conversation</span><strong title={currentConversation}>{currentConversation}</strong></div>
     <MoteHeartbeatStatus scope={scope} reading={heartbeat.saved?.maintenance} reports={heartbeat.saved?.reports} onOpenPath={onOpenPath} loading={heartbeat.loading} unavailable={heartbeat.unavailable} issue={heartbeat.issue} visible={active} onRefresh={heartbeat.refresh}
       actions={<Button type="button" onClick={edit}>Configure heartbeat</Button>} />
     {resolved.issue ? <p role="status" className="mote-details__issue">{resolved.issue}</p> : null}
@@ -279,6 +283,10 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
     return candidate?.kind === 'agent' && candidate.control.kind === 'agent' && candidate.control.hostId === originalMain.hostId &&
       candidate.control.agentSessionId === originalMain.sessionId ? candidate : undefined
   })
+  const currentConversation = originalMain ? mainSession?.label || 'Conversation linked'
+    : !confirmedSettings ? loading ? 'Checking conversation…' : 'Conversation not yet confirmed'
+      : saved.defaults.executorId ? 'Your first message will start a conversation.'
+        : 'Set an Executor to start a conversation with your first message.'
   const originalRunState = mainSession?.runUnobserved ? undefined : mainSession?.processState
   const mainStatus = originalRunState === 'running' ? 'Run active' : originalRunState === 'exited' ? 'Run ended' :
     originalRunState === 'interrupted' ? 'Run interrupted' : 'Run status unconfirmed'
@@ -375,8 +383,8 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
         {!originalHeartbeat ? <section className="mote-quick-mode__conversation" aria-label="Conversation settings">
         <h3>Conversation</h3>
         <div className="mote-quick-mode__main" data-run-state={originalMain ? originalRunState ?? 'unknown' : undefined}>
-          <div><small>Saved main Agent</small><strong title={originalMain?.sessionId}>{originalMain ? mainSession?.label || 'Main Agent' : confirmedSettings ? 'No main Agent yet' : 'Binding unconfirmed'}</strong>
-          {originalMain ? <span className="mote-quick-mode__run-state">{mainStatus}</span> : null}</div>
+          <div><small>Current conversation</small><strong title={originalMain?.sessionId}>{currentConversation}</strong>
+          {originalMain ? <span className="mote-quick-mode__run-state">{confirmedSettings ? mainStatus : 'Last confirmed conversation'}</span> : null}</div>
           {originalMain && continueToConversation ? <Button type="button" onClick={() => { onClose(); continueToConversation() }}>Open discussion</Button> : null}
         </div>
         <MoteExecutorPriority defaults={draft} choices={saved?.choices?.executors ?? []} onChange={update} />

@@ -6,16 +6,25 @@ import { MoteExecutorPriority } from '@agentmux/client-ui/components/MoteExecuto
 import { FormRow } from '@agentmux/client-ui/components/FormRow'
 import { Switch, TextInput } from '@agentmux/client-ui/input'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
-import { DEFAULT_MOTE_PRESENCE, moteMinutesToMs, type MotePreferencesTarget } from '@agentmux/core/mote-preferences'
+import { DEFAULT_MOTE_PRESENCE, moteMinutesToMs, type MoteDefaultConversation, type MotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import { useMoteQuickDraft } from './useMoteQuickDraft'
 
 const HEARTBEAT_MINUTES_ISSUE = '心跳间隔请填至少 1 分钟的整数。'
 
-type Props = { target: MotePreferencesTarget; client: AgentMuxHostedClient | null; visible: boolean;
+export function mobileMoteConversationSummary(confirmed: boolean, hasExecutor: boolean, conversation?: MoteDefaultConversation, name?: string) {
+  if (conversation) return name || '会话已关联'
+  if (!confirmed) return '当前会话待核对'
+  return hasExecutor ? '发送第一条消息时会新建会话' : '设置 Executor 后，发送第一条消息时会新建会话'
+}
+
+type Props = { lastConversation?: { reference: MoteDefaultConversation; name?: string | undefined } | undefined; target: MotePreferencesTarget; client: AgentMuxHostedClient | null; visible: boolean;
   copyText: ClientUiPlatform['copyText']; onClose(): void; onSaved(): void }
-export function MobileMoteQuickEditor({ target, client, visible, copyText, onClose, onSaved }: Props) {
+export function MobileMoteQuickEditor({ lastConversation, target, client, visible, copyText, onClose, onSaved }: Props) {
   const model = useMoteQuickDraft(target, client, visible, onSaved), { draft, read } = model
   const [copyIssue, setCopyIssue] = useState('')
+  const conversationConfirmed = read?.status === 'ready'
+  const current = conversationConfirmed ? read.defaults?.conversation : read?.defaults?.conversation ?? draft.baseline?.defaults.conversation ?? lastConversation?.reference
+  const title = current && lastConversation?.reference.hostId === current.hostId && lastConversation.reference.sessionId === current.sessionId ? lastConversation.name : undefined
   const presence = draft.values.presence ?? DEFAULT_MOTE_PRESENCE
   const minutes = draft.invalidHeartbeatInput ?? String(presence.intervalMs / 60000)
   const intervalIssue = draft.invalidHeartbeatInput === undefined ? null : HEARTBEAT_MINUTES_ISSUE
@@ -27,7 +36,10 @@ export function MobileMoteQuickEditor({ target, client, visible, copyText, onClo
   const blocked = draft.attempts.find(a => a.input.operationId === draft.blockedAttemptId)
   return <section className="mobile-mote-quick-editor" aria-label="Mote 快捷配置编辑">
     <button type="button" className="mobile-text-button" onClick={onClose}>返回 Profile</button><h3>快捷配置</h3>
-    <p>设置执行器顺序和心跳。</p>
+    <dl className="mobile-mote-profile__defaults"><dt>当前会话</dt><dd>
+      {mobileMoteConversationSummary(conversationConfirmed, Boolean(read?.defaults?.executorId), current, title)}
+      {current && !conversationConfirmed && <small>上次确认的会话</small>}
+    </dd></dl>
     {read?.status === 'ready' && (!read.choices || read.choices.executors === null) && <p role="status">正在读取其余候选；已保存的配置仍可编辑和保存。</p>}
     {read?.choices?.issues && <MobileNotice kind="warning" owner={client} identity={[JSON.stringify(target),read.choices.issues.executors,read.choices.issues.locations]} role="status">{Object.values(read.choices.issues).join(' ')}<button type="button" className="mobile-text-button" onClick={() => { void model.inspect() }}>重新核对候选</button></MobileNotice>}
     <MobileNotice dismissible={!model.busy && !model.adoptionBusy} kind={blocked && !model.busy && !model.adoptionBusy ? "warning" : "feedback"} owner={client} identity={[JSON.stringify(target),blocked?.input.operationId,blocked?.phase,model.notice]} role="status">{model.busy ? '正在保存配置…' : model.adoptionBusy ? '正在采用当前修订…' : blocked ? '保存还没确认。' : model.notice || '正在核对配置…'}</MobileNotice>

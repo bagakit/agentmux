@@ -96,7 +96,11 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
     const source = connection(latest.current.client, owner, target), epoch = ++readEpoch.current, original = latest.current.client
     readController.current?.abort()
     const controller = new AbortController(); readController.current = controller
-    if (!source || !original?.forwardRpc || !latest.current.visible) { setNotice('暂时无法核对 Mac 上的配置。'); return }
+    const unavailable = (issue: string) => {
+      setRead(previous => previous ? { ...previous, status: 'unconfirmed', issue } : previous)
+      setNotice(issue)
+    }
+    if (!source || !original?.forwardRpc || !latest.current.visible) { unavailable('暂时无法核对 Mac 上的配置。'); return }
     const sameReader = () => {
       const now = connection(original, owner, target)
       return !controller.signal.aborted && mounted.current && latest.current.visible && epoch === readEpoch.current && latest.current.client === original &&
@@ -123,7 +127,7 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
         const failure: MoteQuickChoices = { executors: [], conversations: null, destinations: null, issues: { executors: message(error) } }
         if (sameReader()) setRead(previous => previous ? { ...previous, choices: mergeMoteQuickChoices(previous.choices, failure) } : previous)
       })
-    } catch (error) { if (mounted.current && epoch === readEpoch.current) setNotice(message(error)) }
+    } catch (error) { if (mounted.current && epoch === readEpoch.current) unavailable(message(error)) }
   }
   useEffect(() => { if (visible) void inspect(); return () => { readEpoch.current++; readController.current?.abort() } }, [client, visible])
   async function resumeMaintenance(pending?: MoteMaintenanceAttempt) {
@@ -207,6 +211,7 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
     const saved = submitted.baseline.defaults
     const values = { ...draftValues, ...(saved.conversation ? { conversation: saved.conversation } : {}),
       ...(saved.conversationRollover ? { conversationRollover: saved.conversationRollover } : {}) }
+    const originalReadEpoch = readEpoch.current
     const input = parseMotePreferencesSaveParams({ kind: 'quick', target, baseline: submitted.baseline, values,
       operationId: randomClientRequestId() }), attempt: MoteQuickAttempt = { input, ownerInstanceId: source.ownerInstanceId, phase: 'sending', result: null, issue: null }
     flight.current = true; setBusy(true)
@@ -234,6 +239,12 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
       const afterSettle = connection(original, owner, target)
       const originalScope = mounted.current && latest.current.visible && latest.current.client === original && owner.recordIdentity() === recordId &&
         !!afterSettle && afterSettle.ownerInstanceId === source.ownerInstanceId && moteQuickDraftKey(afterSettle.scope) === moteQuickDraftKey(source.scope)
+      const savedSource = confirmed ? resolved.result?.source : undefined
+      if (savedSource && originalScope && originalReadEpoch === readEpoch.current) {
+        const { resource, document, defaults } = savedSource
+        setRead(previous => previous && originalReadEpoch === readEpoch.current ? { ...previous, status: 'ready', issue: null, defaults,
+          source: { resource, result: document ? { status: 'read', document } : { status: 'deleted' } } } : previous)
+      }
       if (!settled.committed && settled.canForward && confirmed && originalScope && !conflicted.current) {
         // Host's exact receipt is authoritative even when this device cannot back it up.
         // Keep its baseline for a later explicit Save; never claim a Device commit ACK.

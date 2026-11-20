@@ -4,6 +4,8 @@
 .mote-quick-mode__row:hover, .mote-quick-mode__row:focus-visible { color: var(--text); }
 .mote-quick-mode__row > span { flex: 1; min-width: 0; }
 .mote-quick-mode__row strong { font-weight: 500; color: var(--text); max-width: 48%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mote-quick-mode__current { cursor: default; }
+.mote-quick-mode__current strong { max-width: 60%; white-space: normal; overflow-wrap: anywhere; text-align: end; }
 .mote-quick-mode-dialog { position: fixed; z-index: var(--layer-dialog); top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(752px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); display: flex; flex-direction: column; overflow: hidden; padding: 0; }
 .mote-quick-mode-dialog[data-heartbeat-only="true"] { width: min(460px, calc(100vw - 24px)); }
 .mote-quick-mode-dialog > .mote-behavior-header, .mote-quick-mode-dialog__footer { flex: none; }

@@ -8,7 +8,7 @@ import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
 import type { MobileObjectIdentity } from './MobileIdentity'
 import { isMoteFilePath, moteFileSources } from '../recovery/mote-file-drafts'
 import { createBrowserPlatform } from '../platform/browser'
-import { MobileMoteQuickEditor } from './MobileMoteQuickEditor'
+import { MobileMoteQuickEditor, mobileMoteConversationSummary } from './MobileMoteQuickEditor'
 import { MobileMoteMainActions } from './MobileMoteMainActions'
 import { MobileMoteFileEditor } from './MobileMoteFileEditor'
 
@@ -104,6 +104,10 @@ function MoteProfile({ identity, client, visible = true, sourcePath, onSourceCha
   }, [visible, selected, loadSource])
   const saved = facts?.quickMode.status === 'saved' ? facts.quickMode : null
   const main = saved?.defaults.conversation
+  const conversationConfirmed = !issue && (facts?.quickMode.status === 'saved' || facts?.quickMode.status === 'missing')
+  const initialMain = identity.mote?.facts?.conversation ?? undefined
+  const current = main ?? (conversationConfirmed ? undefined : initialMain)
+  const mainName = current && initialMain?.hostId === current.hostId && initialMain.sessionId === current.sessionId ? identity.mote?.conversationName : undefined
   const read = selected ? files[selected] : undefined
   const document = read?.result.status === 'read' ? read.result.document : null
   return <MobileNoticeScope owner={client} identity={[identity.mote?.spaceId,sourcePath]}><section className="mobile-mote-profile" aria-label="Mote Profile" data-mote-space-id={spaceId}>
@@ -112,6 +116,7 @@ function MoteProfile({ identity, client, visible = true, sourcePath, onSourceCha
     {facts?.issue && <MobileNotice identity={[identity.mote?.spaceId,facts?.issue]} role="status">{facts.issue}</MobileNotice>}
     {quickEditing && spaceId && content ? <MobileMoteQuickEditor key={JSON.stringify([spaceId, content])} target={{ spaceId, zoneId: content.zoneId,
       expectedResource: { hostId: content.hostId, workspaceId: content.workspaceId, workspacePath: content.workspacePath } }}
+      lastConversation={current ? { reference: current, name: mainName } : undefined}
       client={client} visible={visible} copyText={copyText ?? createBrowserPlatform().copyText} onClose={backFromQuick}
       onSaved={() => setRefresh(value => value + 1)} /> : selected && editing && spaceId && content && isMoteFilePath(selected) ? <MobileMoteFileEditor
       key={JSON.stringify([spaceId, selected, content])} target={{ spaceId, path: selected, reference: content,
@@ -129,8 +134,9 @@ function MoteProfile({ identity, client, visible = true, sourcePath, onSourceCha
         <details><summary>文件来源与修订</summary><p>{document.path}</p><p>{document.revision}</p><p>{read?.resource?.hostId} · {read?.resource?.workspaceId}</p></details></>}
     </section> : <>
       {spaceId && content && <MobileMoteMainActions client={client} target={{ spaceId, zoneId: content.zoneId, expectedResource: { hostId: content.hostId, workspaceId: content.workspaceId, workspacePath: content.workspacePath } }} visible={visible} onConfigure={() => setQuickEditing(true)} onBound={() => setRefresh(value => value + 1)} onOpenMain={onOpenMain} />}
-      {spaceId && content && <button type="button" className="mobile-menu-row" aria-label="编辑快捷配置" onClick={() => setQuickEditing(true)}><span>编辑快捷配置<small>Agent、主对话与自动心跳</small></span></button>}
-      <dl className="mobile-mote-profile__defaults"><dt>主对话</dt><dd>{main ? <><span>{identity.mote?.conversationName ?? '已保存的主对话'}</span><small>{facts?.conversation ? '' : '主对话位置还没确认'}</small></> : facts?.quickMode.status === 'missing' ? '尚未保存 MOTE.md' : saved ? '未选择主对话' : '配置未确认'}</dd>
+      {spaceId && content && <button type="button" className="mobile-menu-row" aria-label="编辑快捷配置" onClick={() => setQuickEditing(true)}><span>编辑快捷配置<small>Executor 优先级与自动心跳</small></span></button>}
+      <dl className="mobile-mote-profile__defaults"><dt>当前会话</dt><dd>{mobileMoteConversationSummary(conversationConfirmed, Boolean(saved?.defaults.executorId), current, mainName)}
+        {current && !conversationConfirmed ? <small>上次确认的会话</small> : current && !facts?.conversation ? <small>会话位置待核对</small> : null}</dd>
         <dt>新对话 Agent</dt><dd>{saved?.defaults.executorId ?? (saved ? '未设置' : '配置未确认')}</dd>
       </dl>
       {main && <details><summary>主对话引用</summary><dl>{Object.entries(main).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}</dl></details>}
