@@ -41,7 +41,7 @@ function ProtocolRow({ entry, active, rowRef }: { entry: AgentMuxProtocolCatalog
   return <details ref={rowRef} className="amux-protocols__row" data-protocol-entry={entry.id} onToggle={event => setOpen(event.currentTarget.open)}>
     <summary><SemanticIcon name="navigation.disclosure" size={13} aria-hidden="true" /><span><strong>{entry.title}</strong><code>{entry.form}</code></span></summary>
     {open && active ? <div className="amux-protocols__body"><p className="amux-protocols__description">{entry.description}</p>{entry.form === 'prompt' ? <PromptExamples entry={entry} /> : <ProtocolExamples entry={entry} />}
-      <details className="amux-protocols__templates" onToggle={event => setShowTemplates(event.currentTarget.open)}>
+      <details className="amux-protocols__templates" open={showTemplates} onToggle={event => setShowTemplates(event.currentTarget.open)}>
         <summary>Templates</summary>
         {showTemplates ? entry.templates.map(template => <section key={template.name} className="amux-protocols__example">
           <h4>{template.name}</h4><div className="amux-protocols__source"><pre>{template.text}</pre></div>
