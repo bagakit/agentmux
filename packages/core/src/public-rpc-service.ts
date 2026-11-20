@@ -1,3 +1,4 @@
+import { originalConnectorRuntime } from './original-connector-runtime.js'
 import { parseAgentTakeoverCancellation, parseAgentTakeoverCancellationResult } from './agent-takeover-cancellation.js'
 import { takeoverCancellationRecord } from './agent-takeover-cancellation-record.js'
 import { parseGoalInputEpochInput, parseGoalInputEpoch } from './goal-input-epoch.js'
@@ -81,7 +82,7 @@ import { isMoteGroupMethod, parseMoteGroupParams, parseMoteGroupResult, type Mot
 import { isMoteChatMethod, parseMoteChatParams, parseMoteChatResult } from './mote/chat-codec.js'
 import { isAgentLearningMethod, parseAgentLearningParams, parseAgentLearningResult,
   type AgentLearningPort, type AgentLearningMethod } from './agent-learning.js'
-import type { MoteChatPort, MoteChatMethod, MoteChatParamsMap } from './mote/chat-contract.js'
+import type { MoteChatPort, MoteChatMethod, MoteChatParamsMap, MoteChatReplyInput, MoteChatInspect } from './mote/chat-contract.js'
 import { isConnectionDeletionMethod, parseConnectionDeletionParams } from './connection-deletion-codec.js'
 import { mintObjectId } from './object-id.js'
 import { parseTerminalRecoveryInput, parseTerminalRecoveryResult } from './terminal-recovery.js'
@@ -992,6 +993,39 @@ export class AgentMuxRpcService {
     const session = await owner.client.authorizeRetainedAgentCaller(capability, agentSessionId)
     return { ...owner, capability, session }
   }
+  private async routeMoteChatFromMessage(method: 'space.mote.chat.reply' | 'space.mote.chat.inspect',
+    input: MoteChatReplyInput | Extract<MoteChatInspect, { operationId: string }>,
+    context: AgentMuxRpcCallContext, authenticated: Awaited<ReturnType<AgentMuxRpcService['authenticated']>>) {
+    const unavailable = () => new AgentMuxError('The original Connector reply route is unconfirmed. Retain this message and reply operation to check the same owner.', 'MOTE_CHAT_REPLY_ROUTE_UNCONFIRMED')
+    const mismatch = () => new AgentMuxError('This reply does not refer to the authenticated recipient’s original Connector input.', 'CONTROL_PERMISSION_DENIED')
+    const { sourceMessageId, ...original } = input
+    if (!sourceMessageId || !authenticated || authenticated.hostId !== 'local' || !context.caller) throw mismatch()
+    const message = await authenticated.client.readMessage({ messageId: sourceMessageId, caller: context.caller })
+    const envelope = message?.envelope, sender = envelope?.sender
+    if (!envelope || envelope.recipientSessionId !== authenticated.agentSessionId || sender?.kind !== 'external') throw mismatch()
+    const source = sender.authoritySource, runtime = await this.ports.hostedRuntime?.()
+    if (!source || !runtime || (await runtime.call('runtime.owner.identity', { expectedRuntimeId: source.executionRuntimeId })).owner.runtimeId !== source.executionRuntimeId) throw unavailable()
+    const remote = source.hostingRuntimeId !== source.executionRuntimeId
+      ? await originalConnectorRuntime(() => this.clients(undefined, context.signal ? { signal: context.signal } : undefined), source.hostingRuntimeId, unavailable, context.signal) : undefined
+    const lookup = { operationId: envelope.operationId }
+    const observed = remote ? await remote.call('connection.ingress.authority', lookup) : await this.ports.connections?.ingress?.authority(lookup)
+    if (!observed) throw unavailable()
+    const ingress = observed.ingress
+    if (!ingress || ingress.kind === 'action' || ingress.conversationKind !== 'direct' || !ingress.input || ingress.input.operationId !== lookup.operationId ||
+        ingress.input.messageId !== envelope.messageId || ingress.input.agentSessionId !== authenticated.agentSessionId ||
+        ingress.input.expectedRun.runId !== envelope.recipientRunId || !isDeepStrictEqual(ingress.input.author, sender)) throw mismatch()
+    context.signal?.throwIfAborted(); await context.assertCurrent?.()
+    const remoteCaller = { caller: context.caller, ...(context.signal ? { signal: context.signal } : {}) }
+    if ('ingressId' in original) {
+      if (method !== 'space.mote.chat.reply' || original.ingressId !== ingress.ingressId) throw mismatch()
+      return remote ? await remote.call(method, original, remoteCaller) : await this.call(method, original, context)
+    }
+    if (method !== 'space.mote.chat.inspect') throw mismatch()
+    const result = remote ? await remote.call(method, original, remoteCaller) : await this.call(method, original, context)
+    if (result.operation && (result.operation.action !== 'reply' || result.operation.ingressId !== ingress.ingressId)) throw mismatch()
+    return result
+  }
+
   private requireCaller<T>(caller: T | undefined): T {
     if (!caller) throw new AgentMuxError('This method requires an authenticated managed Agent.', 'MANAGED_AGENT_CONTEXT_REQUIRED')
     return caller
@@ -1504,6 +1538,10 @@ export class AgentMuxRpcService {
       if (caller && !(['space.mote.chat.history', 'space.mote.chat.diagnose', 'space.mote.chat.events', 'space.mote.chat.review', 'space.mote.chat.reply', 'space.mote.chat.inspect'] as string[]).includes(method)) throw new AgentMuxError('Managed Agents may read redacted diagnosis, their own chat history, or their own Mote\'s events; chat settings and audience administration require the original person or device.', 'CONTROL_PERMISSION_DENIED')
       const input = parseMoteChatParams(method, params), owner = this.ports.moteChat
       await this.assertRuntimeFence(context)
+      if ('sourceMessageId' in input && input.sourceMessageId !== undefined && (method === 'space.mote.chat.reply' || method === 'space.mote.chat.inspect')) {
+        const result = await this.routeMoteChatFromMessage(method, input as Parameters<AgentMuxRpcService['routeMoteChatFromMessage']>[1], context, caller)
+        return parseMoteChatResult<'space.mote.chat.reply' | 'space.mote.chat.inspect'>(method, result, input as MoteChatParamsMap['space.mote.chat.reply' | 'space.mote.chat.inspect']) as AgentMuxRpcResult<M>
+      }
       if (!owner) {
         if (this.ports.forwardControl) {
           context.signal?.throwIfAborted(); await context.assertCurrent?.()

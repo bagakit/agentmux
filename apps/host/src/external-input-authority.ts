@@ -1,7 +1,7 @@
 import { isDeepStrictEqual } from 'node:util'
 import { AgentMuxError, parseAgentExternalMessageAuthor, parseAgentExternalInteractionAuthor, agentInteractionIntentDigest, agentQuestionReplyIntentDigest, type AgentExternalInputAuthorityPort } from '@agentmux/core'
 
-import type { ConnectionIngressPort } from '@agentmux/core/connections'
+import { originalConnectorRuntime, type ConnectionIngressPort } from '@agentmux/core/connections'
 import type { AgentExternalAuthoritySource } from '@agentmux/core'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 
@@ -16,24 +16,10 @@ export function createConnectionExternalInputAuthority(options: { ingress(): Pro
     const runtimeId = options.runtimeId?.()
     if (source && source.executionRuntimeId !== runtimeId) throw unavailable()
     if (!source || source.hostingRuntimeId === runtimeId) return await options.ingress()
-    // Only already confirmed client metadata is indexed here. No Host is probed
-    // to discover a match, and a wire source never supplies an endpoint.
-    const matches = options.clients?.().filter(entry => entry.client.runtimeOwnerIdentity()?.runtimeId === source.hostingRuntimeId) ?? []
-    if (matches.length !== 1 || !matches[0]!.client.forwardRpc) throw unavailable()
-    const route = matches[0]!, client = route.client, context = { ...(options.signal ? { signal: options.signal } : {}) }
-    const current = () => {
-      const exact = options.clients?.().filter(entry => entry.hostId === route.hostId) ?? []
-      if (exact.length !== 1 || exact[0]!.client !== client || client.runtimeOwnerIdentity()?.runtimeId !== source.hostingRuntimeId) throw unavailable()
-    }
-    current()
-    const { owner } = await client.forwardRpc!('runtime.owner.identity', { expectedRuntimeId: source.hostingRuntimeId }, context)
-    if (owner.runtimeId !== source.hostingRuntimeId) throw unavailable()
-    const fence = { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId }
-    if ((await client.forwardRpc!('connection.owner.inspect', {}, context, fence)).ownership !== 'local') throw unavailable()
-    current()
+    const route = await originalConnectorRuntime(options.clients ?? (() => []), source.hostingRuntimeId, unavailable, options.signal)
     return {
-      authority: async input => { current(); const result = await client.forwardRpc!('connection.ingress.authority', input, context, fence); current(); return result },
-      recordAuthority: async input => { current(); const result = await client.forwardRpc!('connection.ingress.record-authority', input, context, fence); current(); return result }
+      authority: async input => { const result = await route.call('connection.ingress.authority', input); await route.assertCurrent(); return result },
+      recordAuthority: async input => { const result = await route.call('connection.ingress.record-authority', input); await route.assertCurrent(); return result }
     }
   }
   return { async resolveConversationMessage(input) {

@@ -25,6 +25,16 @@ const CONVERSATION_NOTE: Readonly<Record<string, string>> = {
   group: 'This message came from a group chat; everyone there can read your replies, so keep unrelated private material out.'
 }
 
+function privateReplyGuidance(reply: MoteChatReplyReference, messageId: string): string {
+  const operationId = 'CHOOSE_ONE_STABLE_OPERATION_ID'
+  const source = reply.route === 'unconfirmed' ? { sourceMessageId: messageId } : {}
+  const send = JSON.stringify({ operationId, ingressId: reply.ingressId, body: 'YOUR_REPLY', ...source })
+  const inspect = JSON.stringify({ operationId, ...source })
+  return `Reply to this private message with "$AGENTMUX_CLI" space mote chat reply --input - and JSON ${send}. ` +
+    `If the reply result is unknown, read the same operation with space mote chat inspect --input - and JSON ${inspect}. ` +
+    'Only the supplied reply is sent to the original person.'
+}
+
 function reminder(envelope: AgentMuxMessageEnvelope, body: AgentMessageInputRepresentation['body'], quote: AgentMessageInputRepresentation['quote'],
   conversationKind?: ConnectionIngressMessage['conversationKind'], moteReply?: MoteChatReplyReference): string {
   const note = conversationKind === undefined ? undefined : CONVERSATION_NOTE[conversationKind]
@@ -35,7 +45,7 @@ function reminder(envelope: AgentMuxMessageEnvelope, body: AgentMessageInputRepr
     body === 'reference' ? `The original request body is retained, not included here. Read it before acting: ${read('body')}.` : undefined,
     quote === 'reference' ? `Earlier channel context is retained separately. Read it only when needed: ${read('channelQuote')}.` : undefined,
     body === 'reference' || quote === 'reference' ? 'Use message --skill and message read --help for bounded continuation. References and reads are not Inbox acknowledgements or task acceptance.' : undefined,
-    note, moteReply?.route === 'unconfirmed' ? `Original connector ingress: ${moteReply.ingressId}. The reply route from this execution endpoint to the original Connector owner is unconfirmed. Keep this original reference; do not guess another owner or recipient. Main input remains available. This reply operation publishes only the supplied body and creates no ordinary Main publication.` : moteReply ? `Reply to this exact private message with \"$AGENTMUX_CLI\" space mote chat reply --input - and JSON ${JSON.stringify({ operationId: 'CHOOSE_ONE_STABLE_OPERATION_ID', ingressId: moteReply.ingressId, body: 'YOUR_REPLY' })}. Keep the same operationId after an unknown result; read it with space mote chat inspect --input - and JSON {\"operationId\":\"YOUR_OPERATION_ID\"}. This explicit operation sends only the supplied reply to the original person. This reply operation publishes only the supplied body and creates no ordinary Main publication.` : note === undefined ? undefined : AGENTMUX_CHANNEL_INSTANT_REPLY,
+    note, moteReply ? privateReplyGuidance(moteReply, envelope.messageId) : note === undefined ? undefined : AGENTMUX_CHANNEL_INSTANT_REPLY,
     moteReply ? undefined : 'For reactions, read connection --skill and use this Session’s original bound identity and the original platform message ID. The connector manages waiting and input-delivered markers; choose any processing or result reaction yourself within the task’s authorization.'
   ].filter(Boolean).join('\n')
 }

@@ -52,14 +52,14 @@ export type MoteChatAllocate = {
   total: number
 }
 export type MoteChatReplyReference = { ingressId: string; route: 'original-owner' | 'unconfirmed' }
-export type MoteChatReplyInput = Pick<MoteChatReplyReference, 'ingressId'> & { operationId: string; body: string }
+export type MoteChatReplyInput = Pick<MoteChatReplyReference, 'ingressId'> & { operationId: string; body: string; sourceMessageId?: string }
 export type MoteChatReplyOperation = { operationId: string; action: 'reply'; target: MoteChatTarget; ingressId: string; deliveryOperationIds: string[]; binding: import('../room-binding-contract.js').RoomBinding }
 export type MoteChatReplyResult = { operation: MoteChatReplyOperation; deliveries: ConnectionDelivery[] }
 export type MoteChatOperation =
   | MoteChatReplyOperation
   | { operationId: string; action: 'configure'; configuration: MoteChatConfiguration }
   | { operationId: string; action: 'allocate'; configuration: MoteChatConfiguration; person: MoteChatPerson }
-export type MoteChatInspect = { target: MoteChatTarget; operationId?: never } | { operationId: string; target?: never }
+export type MoteChatInspect = { target: MoteChatTarget; operationId?: never } | { operationId: string; target?: never; sourceMessageId?: string }
 export type MoteChatInspection = { configuration: MoteChatConfiguration | null; operation: MoteChatOperation | null; deliveries?: ConnectionDelivery[] }
 export type MoteChatGeneration = {
   generationId: string

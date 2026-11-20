@@ -45,7 +45,7 @@ function intakeLabel(row: MoteChatDiagnosisIntake): { title: string; detail: str
 function currentNotice(row: MoteChatDiagnosisIntake): string | null {
   if (row.noticeCode === 'MOTE_CHAT_MAIN_EXTERNAL_AUDIENCE') return 'This Connector owner currently has a sharing relationship for Main. New private inputs wait until you inspect and explicitly resolve that sharing; earlier input receipts are unchanged.'
   if (row.noticeCode === 'MOTE_CHAT_MAIN_UNCONFIRMED') return 'This Connector owner’s current Main sharing relationships could not be checked. Original messages and Main remain available.'
-  if (row.noticeCode === 'MOTE_CHAT_REPLY_ROUTE_UNCONFIRMED') return 'The default execution endpoint has no confirmed return path to the original Connector owner. Main input remains available; an explicit reply through the original hosting endpoint keeps its own authorization and receipt.'
+  if (row.noticeCode === 'MOTE_CHAT_REPLY_ROUTE_UNCONFIRMED') return 'The execution Host checks the return route when replying. If the route is unavailable, keep the original message and reply operation so you can check it again.'
   return null
 }
 

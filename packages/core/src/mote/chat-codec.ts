@@ -129,9 +129,9 @@ export function parseMoteChatParams<M extends MoteChatMethod>(method: M, value: 
   const code: Code = 'INVALID_CONTROL_REQUEST'
   if (!isMoteChatMethod(method)) fail(code)
   if (method === 'space.mote.chat.reply') {
-    const p = fields(value, ['operationId', 'ingressId', 'body'], ['operationId', 'ingressId', 'body'], code)
+    const p = fields(value, ['operationId', 'ingressId', 'body', 'sourceMessageId'], ['operationId', 'ingressId', 'body'], code)
     if (typeof p.body !== 'string' || !p.body.trim()) fail(code)
-    return { operationId: text(p.operationId, code), ingressId: text(p.ingressId, code), body: p.body } as MoteChatParamsMap[M]
+    return { operationId: text(p.operationId, code), ingressId: text(p.ingressId, code), body: p.body, ...(p.sourceMessageId === undefined ? {} : { sourceMessageId: text(p.sourceMessageId, code) }) } as MoteChatParamsMap[M]
   }
   if (method === 'space.mote.chat.diagnose') {
     const p = fields(value, ['target'], ['target'], code)
@@ -146,9 +146,9 @@ export function parseMoteChatParams<M extends MoteChatMethod>(method: M, value: 
       ...(p.refreshCreator === true ? { refreshCreator: true as const } : {}) } as MoteChatParamsMap[M]
   }
   if (method === 'space.mote.chat.inspect') {
-    const p = fields(value, ['target', 'operationId'], [], code)
-    if (Object.hasOwn(p, 'target') === Object.hasOwn(p, 'operationId')) fail(code)
-    return (p.target === undefined ? { operationId: text(p.operationId, code) } : { target: target(p.target, code) }) as MoteChatParamsMap[M]
+    const p = fields(value, ['target', 'operationId', 'sourceMessageId'], [], code)
+    if (Object.hasOwn(p, 'target') === Object.hasOwn(p, 'operationId') || p.target !== undefined && p.sourceMessageId !== undefined) fail(code)
+    return (p.target === undefined ? { operationId: text(p.operationId, code), ...(p.sourceMessageId === undefined ? {} : { sourceMessageId: text(p.sourceMessageId, code) }) } : { target: target(p.target, code) }) as MoteChatParamsMap[M]
   }
   if (method === 'space.mote.chat.allocate') {
     const keys = ['operationId', 'target', 'expectedConfigurationRevision', 'actor', 'expectedPersonRevision', 'total'], p = fields(value, keys, keys, code)
