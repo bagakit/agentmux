@@ -27,7 +27,7 @@ import { goalRoleInputNote } from './goal-role-input.js'
 import { isGoalSupervisor } from './goal-supervisor-identity.js'
 import type { DemandAlignmentConfirmer } from '@agentmux/demand/goals'
 import { createGoalRuntime, type GoalExecutionClient } from './goal-runtime.js'
-import { ContinuousProgressLoopManager } from './continuous-progress-loop-manager.js'
+import { ContinuousProgressLoopManager, waitingGoalInitial } from './continuous-progress-loop-manager.js'
 import { ContinuousProgressLoopStore } from './continuous-progress-loop-store.js'
 import { deliverContinuousProgress } from './continuous-progress-delivery.js'
 import { checkInHumanObservation } from './agent-schedule-check-in.js'
@@ -124,7 +124,19 @@ export function createHostGoals(options: {
         const { maxConcurrent, maxAttempts } = await readGoalWorkflowPreferences(options.configurationPath)
         return maxConcurrent || maxAttempts ? `For each new automatic Ticket dispatch in this continuation, set intent.workflowLoopId to ${JSON.stringify(loopId)}. The original owner enforces the Workflows budget (parallel: ${maxConcurrent || 'unlimited'}, new attempts: ${maxAttempts || 'unlimited'}). If it is exhausted, report the original completed and remaining Tickets without changing the dispatch origin or resending the task.` : ''
       },
-      inspectInitial: loop => runtime.inspectContinuousProgressInitial(loop) })
+      inspectInitial: loop => runtime.inspectContinuousProgressInitial(loop),
+      continueInitial: async (loop, context) => {
+        const source = loop.taskSource, initial = loop.initialDelivery
+        if (source?.kind !== 'goal' || !initial) return
+        const original = await demands.inspectDispatch(source.goalId, initial.operationId)
+        if (!original || 'target' in original || original.execution !== 'continue' || original.loopId !== loop.loopId ||
+            original.hostId !== loop.hostId || original.agentSessionId !== loop.agentSessionId || original.runId !== initial.condition.expectedRun.runId ||
+            original.inputEpoch !== loop.inputEpoch || original.alignmentRevision !== source.alignmentRevision || original.prompt !== initial.prompt)
+          throw new AgentMuxError('The original Goal start is unconfirmed. Its retained loop will wait without dispatching input.', 'CONTROL_UNAVAILABLE')
+        await current(context)
+        await startGoal(await get(source.goalId), original.agentSessionId, initial.operationId, context,
+          { intervalMs: loop.intervalMs, alignmentRevision: source.alignmentRevision }, undefined, loop.inputEpoch)
+      } })
   const dispatch = new GoalDispatchInputOwner(demands, runtime)
   const automaticInput = createGoalAutomationPause({ ownerInstanceId: () => options.runtime().ownerIdentity().ownerInstanceId,
     get client() { return options.runtime().client }, progress,
@@ -234,7 +246,10 @@ export function createHostGoals(options: {
           const port = await runtime.openFiniteInspection({ reference: original.target, access: req.access, originalRunId: original.runId }, context)
           try { await dispatch.reconcileQualified(reference, port, () => current(context)) }
           finally { await port.dispose().catch(error => { console.warn('Closing this exact Goal input reader was unconfirmed.', error) }) }
-        } else await dispatch.reconcile(reference, () => current(context))
+        } else {
+          const loop = original.loopId ? (await progress.listGoals(req.demandId)).find(value => value.loopId === original.loopId) : undefined
+          if (loop?.creationOperationId !== original.operationId || !waitingGoalInitial(loop)) await dispatch.reconcile(reference, () => current(context))
+        }
       }
       const goal = await demands.get(req.demandId)
       return { operation: req.operation, demand: goal ? await projectGoal(goal) : null, goalContinuations: await progress.listGoals(req.demandId) }
@@ -349,7 +364,7 @@ export function createHostGoals(options: {
     return undefined
   }
   const startGoal = async (goal: Demand, sessionId: string | undefined, operationId: string, context: AgentMuxRpcCallContext,
-    continuation?: { intervalMs: number; alignmentRevision: number }, expectedUpdatedAt?: number, inputEpoch?: string): Promise<Extract<AgentMuxControlResult, { operation: 'demand.start' }>> => {
+    continuation?: { intervalMs: number; alignmentRevision: number }, expectedUpdatedAt?: number, inputEpoch?: string): Promise<Extract<AgentMuxControlResult, { operation: 'demand.start' }>> => progress.withGoalStart(operationId, async () => {
     const original = await demands.inspectDispatch(goal.id, operationId)
     if (original && 'target' in original) throw new AgentMuxError('The original qualified Start needs its frozen Source reference and current access, not a legacy Session alias.', 'CONTROL_REQUEST_CONFLICT')
     if (original && (sessionId !== undefined && original.agentSessionId !== sessionId || Boolean(continuation) !== (original.execution === 'continue'))) throw new AgentMuxError('The original Goal Start target or execution changed. Inspect that operation without replaying it.', 'CONTROL_REQUEST_CONFLICT')
@@ -357,24 +372,30 @@ export function createHostGoals(options: {
     if (selected !== undefined && typeof selected !== 'string') throw new AgentMuxError('This Source-qualified Start requires its current finite Goal execution access. The original relation and Agent remain retained.', 'CONTROL_UNAVAILABLE')
     if (!selected || !original && !goal.assigneeSessionIds.includes(selected)) throw new AgentMuxError('Choose the exact responsible Agent before starting this Goal. Creation or assignment alone does not start it.', 'INVALID_CONTROL_REQUEST')
     if (original?.stage === 'confirmed') {
-      const loop = original.loopId ? (await progress.listGoals(goal.id)).find(value => value.loopId === original.loopId) : undefined
+      let loop = original.loopId ? (await progress.listGoals(goal.id)).find(value => value.loopId === original.loopId) : undefined
+      if (loop && loop.initialDelivery?.state !== 'confirmed') loop = await progress.initialGoalInput(loop, loop.loopId, operationId, 'confirm')
       return { operation: 'demand.start', demand: await projectGoal(await get(goal.id)), ...(loop ? { continuation: loop } : {}), receipt: { demandId: goal.id, startedAt: original.preparedAt, sessionId: selected } }
     }
+    if (!original && continuation && expectedUpdatedAt !== undefined && expectedUpdatedAt !== goal.updatedAt)
+      throw new AgentMuxError('The Goal changed before this new Start was prepared. Read the current Goal and explicitly start that version.', 'CONTROL_REQUEST_CONFLICT', undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
     const resolved = original ? { hostId: original.hostId, status: await runtime.observeGoalAgent(original.hostId, selected) } : await runtime.resolveGoalAgent(selected)
     const session = resolved.status.session
     await runtime.authorizeFutureIntent({ hostId: resolved.hostId, agentSessionId: selected, providerId: session.providerId, workspacePath: session.workspacePath }, context)
     if (original && original.runId !== session.run.runId) throw new AgentMuxError('The original Goal Start belongs to another Run. Its unknown input is retained without resending.', 'CONTROL_REQUEST_CONFLICT')
     const loop = continuation ? await progress.prepareGoal({ goalId: goal.id, agentSessionId: selected, hostId: resolved.hostId, providerId: session.providerId, workspacePath: session.workspacePath,
       intervalMs: continuation.intervalMs, alignmentRevision: continuation.alignmentRevision, ...optionalInputEpoch(original ? original.inputEpoch : inputEpoch), operationId, prompt: original?.prompt ?? (goal.description.trim() || goal.title) }, context) : undefined
+    if (loop?.status === 'stopped') throw new AgentMuxError('The original Goal start was stopped. Inspect its retained operation and current Goal before a new start.', 'CONTROL_REQUEST_CONFLICT')
     const prompt = original?.prompt ?? loop?.initialDelivery?.prompt ?? (goal.description.trim() || goal.title)
     await current(context)
     const birthCut = original ?? optionalInputEpoch(inputEpoch)
     const prepared = await demands.prepareDispatch(goal.id, { operationId, ...optionalInputEpoch(birthCut.inputEpoch), agentSessionId: selected, hostId: resolved.hostId, runId: session.run.runId,
-      execution: loop ? 'continue' : 'finite', prompt, ...(loop ? { loopId: loop.loopId, alignmentRevision: continuation!.alignmentRevision } : {}) }, original ? undefined : expectedUpdatedAt ?? goal.updatedAt).catch(error => {
+      execution: loop ? 'continue' : 'finite', prompt, ...(loop ? { loopId: loop.loopId, alignmentRevision: continuation!.alignmentRevision } : {}) }, original ? undefined : expectedUpdatedAt ?? goal.updatedAt).catch(async error => {
         const cause = isDemandStoreError(error) && record(error.cause) ? error.cause : undefined
         if (!original && cause?.kind === 'goal-start-version-conflict' && cause.goalId === goal.id && cause.operationId === operationId &&
-            Number.isSafeInteger(cause.currentUpdatedAt) && Number(cause.currentUpdatedAt) >= 0)
+            Number.isSafeInteger(cause.currentUpdatedAt) && Number(cause.currentUpdatedAt) >= 0) {
+          if (loop) await progress.rejectGoalPreparation(loop.loopId, operationId, error.message)
           throw new AgentMuxError(error.message, 'CONTROL_REQUEST_CONFLICT', undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
+        }
         throw error
       })
     const savedStart = preparedStart(prepared, operationId)
@@ -383,16 +404,21 @@ export function createHostGoals(options: {
     const control = { kind: 'agent' as const, hostId: resolved.hostId, agentSessionId: selected, run: session.run }
     const note = goalRoleInputNote(undefined, { role: 'executor', goalId: goal.id, agentSessionId: selected, runId: session.run.runId,
       source: { kind: loop ? 'goal-native-continuation' : 'goal-start', operationId } }, await runtime.inspectGoalStart(savedStart))
-    await dispatch.submit({ goalId: goal.id, operationId, ...optionalInputEpoch(savedStart.inputEpoch) }, control, operationId, prompt, async () => {
+    const submitted = await dispatch.submit({ goalId: goal.id, operationId, ...optionalInputEpoch(savedStart.inputEpoch) }, control, operationId, prompt, async () => {
       await current(context)
-      if (loop) await progress.submitGoalInitial(control, goal.id, loop.loopId, operationId, prompt, condition,
+      if (loop) return await progress.submitGoalInitial(control, goal.id, loop.loopId, operationId, prompt, condition,
         async (isCurrent, signal) => { await runtime.submitPrompt(control, prompt, operationId, condition, { isCurrent, signal }, undefined, false, note, undefined, undefined, context) })
-      else await runtime.submitPrompt(control, prompt, operationId, condition, undefined, undefined, false, note, undefined, undefined, context)
+      await runtime.submitPrompt(control, prompt, operationId, condition, undefined, undefined, false, note, undefined, undefined, context)
     }, loop ? { goalId: goal.id, loopId: loop.loopId } : undefined)
-    await demands.update(goal.id, { status: 'in_progress' })
+    if (loop && submitted === 'waiting') return { operation: 'demand.start', demand: await projectGoal(await get(goal.id)),
+      continuation: progress.inspectLoop(loop.loopId) ?? loop,
+      receipt: { demandId: goal.id, startedAt: savedStart.preparedAt, sessionId: selected } }
+    const latest = await get(goal.id)
+    if (latest.status === goal.status && latest.status !== 'in_progress' && latest.status !== 'blocked' && latest.status !== 'done' && latest.status !== 'cancelled')
+      await demands.update(goal.id, { status: 'in_progress' }, { expectedUpdatedAt: latest.updatedAt })
     const confirmed = loop ? await progress.initialGoalInput(loop, loop.loopId, operationId, 'confirm') : undefined
     return { operation: 'demand.start', demand: await projectGoal(await get(goal.id)), ...(confirmed ? { continuation: confirmed } : {}), receipt: { demandId: goal.id, startedAt: savedStart.preparedAt, sessionId: selected } }
-  }
+  })
   const startQualifiedGoal = async (goal: Demand, request: Extract<Extract<AgentMuxControlRequest, { operation: 'demand.start' }>, { agentReference: DemandSpaceMemberReference }>,
     context: AgentMuxRpcCallContext, name: AgentMuxNameContext | undefined): Promise<Extract<AgentMuxControlResult, { operation: 'demand.start' }>> => {
     const reference = { goalId: goal.id, operationId: request.requestId }

@@ -53,7 +53,7 @@ export class GoalDispatchInputOwner {
     return this.demands.recordDispatchPhase(reference.goalId, reference.operationId, { stage: 'confirmed', receipt })
   }
 
-  async submit(reference: GoalDispatchReference, session: AgentSessionControl, operationId: string, prompt: string, submit: () => Promise<void>, continuation?: { goalId: string; loopId: string }): Promise<void> {
+  async submit(reference: GoalDispatchReference, session: AgentSessionControl, operationId: string, prompt: string, submit: () => Promise<'waiting' | void>, continuation?: { goalId: string; loopId: string }): Promise<'waiting' | void> {
     const original = await this.original(reference)
     if ('target' in original) throw new AgentMuxError('The qualified Goal input cannot use a legacy Session carrier.', 'CONTROL_REQUEST_CONFLICT')
     if ((original.execution === 'continue') !== Boolean(continuation) || continuation && (continuation.goalId !== reference.goalId || continuation.loopId !== original.loopId))
@@ -70,7 +70,7 @@ export class GoalDispatchInputOwner {
     if (original.runId !== session.run.runId) throw new AgentMuxError('The original Goal Start belongs to another Run. Inspect it without resending.', 'CONTROL_REQUEST_CONFLICT')
     await this.demands.recordDispatchPhase(reference.goalId, reference.operationId, { stage: 'submitted' })
     try {
-      await submit()
+      if (await submit() === 'waiting') return 'waiting'
       await this.reconcile(reference)
     } catch (error) {
       await this.demands.recordDispatchPhase(reference.goalId, reference.operationId, { stage: 'unknown', issue: error instanceof Error ? error.message : String(error) }).catch(failure => { console.warn('Original Goal dispatch stage is unconfirmed; inspect the same operation without sending again.', failure) })

@@ -23,6 +23,7 @@ export type GoalProgressOwner = {
   workflowGuidance?(loopId: string): Promise<string>
   subscribe?(listener: (changes: ReadonlyMap<string, GoalProgressRecord | null>, revision: number, goals: readonly GoalProgressRecord[]) => void): () => void
   inspectInitial(loop: ContinuousProgressLoop): Promise<'confirmed' | 'pending' | 'unconfirmed'>
+  continueInitial?(loop: ContinuousProgressLoop, context: AgentMuxRpcCallContext): Promise<void>
 }
 /** In-process producer context for the original managed schedule. Public schedule.create cannot set it. */
 type ScheduleOwnerContext = AgentMuxRpcCallContext & { managedScheduleNote?: string }
@@ -51,6 +52,11 @@ export type LoopMutationFence = { prepare(): Promise<void>; assertCurrent(): voi
 const actionBasis = (loop: ContinuousProgressLoop) => ({ loopId: loop.loopId, hostId: loop.hostId, agentSessionId: loop.agentSessionId,
   providerId: loop.providerId, workspacePath: loop.workspacePath, intervalMs: loop.intervalMs, prompt: loop.prompt,
   taskSource: loop.taskSource, creationOperationId: loop.creationOperationId, status: loop.status, pause: loop.pause, revision: loop.revision ?? 0 })
+
+export function waitingGoalInitial(loop: Readonly<ContinuousProgressLoop> | undefined): boolean {
+  return loop?.taskSource?.kind === 'goal' && loop.status === 'paused' && loop.initialDelivery?.state === 'prepared' &&
+    loop.pause?.reason === 'preparation' && loop.lastOutcome === 'skipped' && !loop.lastTickId && !loop.lastMutation
+}
 
 function hasHeldScheduledInput(loop: Readonly<ContinuousProgressLoop>): boolean {
   if (!isAgentSchedule(loop) || loop.pause?.reason !== 'input-unconfirmed' && loop.pause?.reason !== 'persistence-unconfirmed' ||
@@ -342,6 +348,19 @@ export class ContinuousProgressLoopManager {
     await this.start()
     return [...this.goalLoops.get(goalId) ?? []].map(id => this.require(id))
   }
+  withGoalStart<T>(operationId: string, action: () => Promise<T>): Promise<T> {
+    return this.serialize(`goal-start-dispatch:${operationId}`, action)
+  }
+  /** A confirmed Goal version refusal occurred before this exact loop could enter Core. */
+  async rejectGoalPreparation(loopId: string, operationId: string, reason: string): Promise<void> {
+    await this.serialize(loopId, async () => {
+      const loop = this.require(loopId)
+      if (loop.taskSource?.kind !== 'goal' || loop.creationOperationId !== operationId || loop.initialDelivery?.operationId !== operationId ||
+          loop.status !== 'paused' || loop.initialDelivery.state !== 'prepared' || waitingGoalInitial(loop)) return
+      this.patch(loopId, { status: 'stopped', lastDecision: reason })
+      await this.persist(loopId)
+    })
+  }
   /** A queue retry joins original Core admission; a lost receipt never reconstructs another message. */
   async initialGoalInput(target: ContinuousProgressTarget, loopId: string, operationId: string, phase: 'begin' | 'confirm'): Promise<ContinuousProgressLoop> {
     return this.serialize(loopId, async () => {
@@ -362,7 +381,12 @@ export class ContinuousProgressLoopManager {
       const current = this.require(loopId)
       if (phase === 'begin' && current.status === 'stopped') throw new AgentMuxError('This original Goal loop was stopped. Its operation and Agent are retained; no input was sent.', 'CONTROL_REQUEST_CONFLICT')
       if (receipt === 'confirmed') {
-        this.patch(loopId, { initialDelivery: { ...initial, state: 'confirmed' }, ...(current.status === 'stopped' || source.action === 'stop' ? { status: 'stopped' as const } : source.action === 'pause' ? { status: 'paused' as const } : !current.lastMutation ? { status: 'active' as const, nextCheckAt: this.now() + loop.intervalMs } : {}), lastDecision: source.reason })
+        const decision = await this.goalSource(current), latest = this.require(loopId)
+        const stopped = latest.status === 'stopped' || decision.action === 'stop'
+        const activate = !stopped && decision.action === 'continue' && !latest.lastMutation &&
+          (latest.pause === undefined || latest.pause.reason === 'preparation' || latest.pause.reason === 'input-unconfirmed')
+        this.patch(loopId, { initialDelivery: { ...initial, state: 'confirmed' }, status: stopped ? 'stopped' : activate ? 'active' : 'paused',
+          ...(activate ? { nextCheckAt: this.now() + loop.intervalMs } : {}), lastDecision: decision.reason })
         await this.persist(loopId)
         return this.require(loopId)
       }
@@ -379,26 +403,45 @@ export class ContinuousProgressLoopManager {
   /** The original input port keeps a Goal's live source guard through Core's native write. */
   async submitGoalInitial(target: Pick<ContinuousProgressTarget, 'hostId' | 'agentSessionId'>, goalId: string, loopId: string, operationId: string,
     prompt: string, condition: AgentPromptCondition,
-    send: (isCurrent: () => boolean, signal: AbortSignal) => Promise<void>): Promise<void> {
-    await this.start()
-    const original = this.require(loopId)
-    if (original.hostId !== target.hostId || original.agentSessionId !== target.agentSessionId) throw new AgentMuxError('The original Goal input belongs to another Agent.', 'CONTROL_REQUEST_CONFLICT')
-    const prepared = await this.initialGoalInput(original, loopId, operationId, 'begin')
-    if (prepared.taskSource?.kind !== 'goal' || prepared.taskSource.goalId !== goalId ||
-        prepared.initialDelivery?.prompt !== prompt || JSON.stringify(prepared.initialDelivery.condition) !== JSON.stringify(condition)) throw new AgentMuxError('The original Goal message body or frozen condition changed. Your input is kept.', 'CONTROL_REQUEST_CONFLICT')
-    if (prepared.initialDelivery.state === 'confirmed') return
-    const controller = new AbortController()
-    this.initialDeliveries.get(loopId)?.abort()
-    this.initialDeliveries.set(loopId, controller)
-    const isCurrent = () => this.running && !controller.signal.aborted && this.initialDeliveries.get(loopId) === controller &&
-      this.list().some(loop => loop.loopId === loopId && loop.status !== 'stopped' && loop.revision === prepared.revision && loop.initialDelivery?.operationId === operationId)
-    try {
-      const source = await this.goalSource(this.require(loopId))
-      if (source.action !== 'continue') { await this.pauseForSource(prepared, source); throw new AgentMuxError(source.reason, 'CONTROL_REQUEST_CONFLICT') }
-      if (!isCurrent()) throw new AgentMuxError('The original Goal input was cancelled. Its message and Agent remain available.', 'CONTROL_REQUEST_CONFLICT')
-      await send(isCurrent, controller.signal)
-      await this.initialGoalInput(prepared, loopId, operationId, 'confirm')
-    } finally { if (this.initialDeliveries.get(loopId) === controller) this.initialDeliveries.delete(loopId) }
+    send: (isCurrent: () => boolean, signal: AbortSignal) => Promise<void>): Promise<'waiting' | void> {
+    return this.serialize(`goal-initial:${loopId}`, async () => {
+      await this.start()
+      const original = this.require(loopId), initial = original.initialDelivery
+      if (original.hostId !== target.hostId || original.agentSessionId !== target.agentSessionId) throw new AgentMuxError('The original Goal input belongs to another Agent.', 'CONTROL_REQUEST_CONFLICT')
+      if (original.taskSource?.kind !== 'goal' || original.taskSource.goalId !== goalId ||
+          initial?.operationId !== operationId || initial.prompt !== prompt || !isDeepStrictEqual(initial.condition, condition)) throw new AgentMuxError('The original Goal message body or frozen condition changed. Your input is kept.', 'CONTROL_REQUEST_CONFLICT')
+      const prepared = await this.initialGoalInput(original, loopId, operationId, 'begin')
+      if (prepared.initialDelivery?.state === 'confirmed') return
+      const controller = new AbortController()
+      this.initialDeliveries.set(loopId, controller)
+      const isCurrent = () => {
+        const current = this.scheduler.get(loopId)
+        return this.running && !controller.signal.aborted && this.initialDeliveries.get(loopId) === controller &&
+          current?.status === 'paused' && current.revision === prepared.revision && current.initialDelivery?.operationId === operationId
+      }
+      try {
+        const source = await this.goalSource(prepared)
+        if (source.action !== 'continue') { await this.pauseForSource(prepared, source); throw new AgentMuxError(source.reason, 'CONTROL_REQUEST_CONFLICT') }
+        if (!isCurrent()) throw new AgentMuxError('The original Goal input was cancelled. Its message and Agent remain available.', 'CONTROL_REQUEST_CONFLICT')
+        try { await send(isCurrent, controller.signal) }
+        catch (error) {
+          if (initial.state !== 'prepared' || !isCurrent() || !(error instanceof AgentMuxError) || error.code !== 'AGENT_TURN_END_UNCONFIRMED' ||
+              error.controlFailure?.disposition !== 'not_applied' || error.controlFailure.confirmedInputBytes !== 0) throw error
+          await this.serialize(loopId, async () => {
+            if (!isCurrent()) throw error
+            this.patch(loopId, { initialDelivery: initial, pause: { reason: 'preparation' }, lastOutcome: 'skipped',
+              nextCheckAt: this.now(), lastDecision: 'The original Goal input was not sent. Waiting for the Supervisor’s current turn to end.' })
+            try { await this.persist(loopId) }
+            catch (failure) {
+              if (waitingGoalInitial(this.require(loopId))) this.patch(loopId, { initialDelivery: { ...initial, state: 'unknown' }, lastOutcome: 'unknown' })
+              throw failure
+            }
+          })
+          return 'waiting'
+        }
+        await this.initialGoalInput(prepared, loopId, operationId, 'confirm')
+      } finally { if (this.initialDeliveries.get(loopId) === controller) this.initialDeliveries.delete(loopId) }
+    })
   }
   async goalAction(goalId: string, loopId: string, action: 'pause' | 'resume' | 'stop' | 'check', expectedRevision: number, operationId: string, context?: AgentMuxRpcCallContext): Promise<ContinuousProgressLoop> {
     return this.serialize(loopId, () => this.activation(loopId, async assertActivation => {
@@ -485,6 +528,9 @@ export class ContinuousProgressLoopManager {
   private goalDecision(loop: ContinuousProgressLoop, goal: GoalProgressRecord | null | undefined): GoalProgressDecision {
     if (loop.taskSource?.kind !== 'goal') return { action: 'continue', reason: '' }
     const source = decideGoalProgressSource(loop.taskSource, goal)
+    if (source.action === 'continue' && loop.initialDelivery?.state !== 'confirmed' &&
+        (!goal || goal.supervisorSessionId !== loop.agentSessionId || !goal.assigneeSessionIds.includes(loop.agentSessionId)))
+      return { action: 'pause', reason: 'The original Goal start no longer names its currently assigned Supervisor. The saved request and Agent remain available.' }
     // This qualifies only a new plan-management input, never an already frozen claim.
     if (source.action === 'continue' && goal?.plan && !loop.pendingCompletion && goal.supervisorSessionId !== loop.agentSessionId)
       return { action: 'pause', reason: 'The original loop Agent is no longer this plan’s current Supervisor. New management input is paused. Explicitly stop this loop before starting the current Supervisor; the original Agent and manual input remain available.' }
@@ -1012,9 +1058,11 @@ export class ContinuousProgressLoopManager {
   }
   private async runDue(checkAt: number, now: number | undefined, onlyLoopId?: string): Promise<void> {
     const pending = this.scheduler.due(checkAt, onlyLoopId, id => !this.checks.has(id) && (this.deferredChecks.get(id)?.until ?? 0) <= checkAt,
-      this.futureInputs?.inspectInput && this.futureInputs.inspectFutureIntent ? hasHeldScheduledInput : undefined).map(selected => {
+      loop => Boolean(this.goals?.continueInitial && !this.initialDeliveries.has(loop.loopId) && waitingGoalInitial(loop) ||
+        this.futureInputs?.inspectInput && this.futureInputs.inspectFutureIntent && hasHeldScheduledInput(loop))).map(selected => {
       const controller = new AbortController()
-      const reconciling = selected.status === 'paused'
+      const initial = waitingGoalInitial(selected)
+      const reconciling = selected.status === 'paused' && !initial
       const target = reconciling ? undefined : this.targetKey(selected)
       const delivery = { controller, inputStarted: selected.pendingCompletion !== undefined }
       this.activeDeliveries.set(selected.loopId, delivery)
@@ -1028,7 +1076,9 @@ export class ContinuousProgressLoopManager {
           try { await awaitUntilCancelled(() => previous, controller.signal) }
           catch { return }
         }
-        if (!controller.signal.aborted) await this.runLoop(selected.loopId, checkAt, now, delivery)
+        if (controller.signal.aborted) return
+        if (initial) await this.checkWaitingGoalInitial(selected, checkAt, controller.signal)
+        else await this.runLoop(selected.loopId, checkAt, now, delivery)
       }
       // Publish the active check before any provider or persistence callback runs.
       const checking = Promise.resolve().then(run).finally(() => {
@@ -1049,6 +1099,35 @@ export class ContinuousProgressLoopManager {
     const results = await Promise.allSettled(pending)
     const failure = results.find(result => result.status === 'rejected')
     if (failure?.status === 'rejected') throw failure.reason
+  }
+  private async checkWaitingGoalInitial(loop: ContinuousProgressLoop, checkAt: number, signal: AbortSignal): Promise<void> {
+    const unchanged = () => this.running && !signal.aborted && isDeepStrictEqual(this.scheduler.get(loop.loopId), loop)
+    const initial = loop.initialDelivery!
+    try {
+      if (!unchanged()) return
+      const source = await this.goalSource(loop)
+      if (!unchanged() || source.action === 'defer') return
+      if (source.action !== 'continue') { await this.pauseForSource(loop, source); return }
+      const observed = await awaitUntilCancelled(() => this.observe(loop, initial.operationId, checkAt, signal), signal)
+      if (!unchanged()) return
+      if (observed.session.run.runId !== initial.condition.expectedRun.runId || observed.session.inputEpoch !== loop.inputEpoch ||
+          agentPromptCondition(observed.session).afterSubmissionId !== initial.condition.afterSubmissionId) {
+        await this.pauseForSource(loop, { action: 'pause', reason: 'The original Goal input condition changed while waiting. Its request and manual input are retained.' })
+        return
+      }
+      // An idle observation only avoids a needless attempt. Core still fences the actual write.
+      if (!observed.inputOccupied && observed.observation.process === 'running' && observed.observation.readiness === 'ready' && observed.observation.semantic === 'idle') {
+        await this.goals?.continueInitial?.(loop, { signal, assertCurrent: async () => {
+          signal.throwIfAborted()
+          const source = await this.goalSource(this.require(loop.loopId))
+          signal.throwIfAborted()
+          if (source.action !== 'continue') throw new AgentMuxError(source.reason, 'CONTROL_REQUEST_CONFLICT')
+        } })
+      }
+    } finally {
+      const current = this.scheduler.get(loop.loopId)
+      if (current && waitingGoalInitial(current) && !signal.aborted) this.deferCheck(loop.loopId, Math.max(checkAt, this.now()))
+    }
   }
   private async runLoop(loopId: string, checkAt: number, now: number | undefined, deliveryState: { controller: AbortController; inputStarted: boolean }): Promise<void> {
     const { controller } = deliveryState
@@ -1360,7 +1439,8 @@ export class ContinuousProgressLoopManager {
   /** Only a real owner transition creates an onset. An old already-paused record has no invented history. */
   private pauseFacts(loop: ContinuousProgressLoop, reason: ContinuousProgressPauseReason): ContinuousProgressPause {
     if (loop.status === 'active') return { reason, episodeId: mintObjectId(), pausedAt: this.now() }
-    if (loop.pause) return reason === 'manual' ? { ...loop.pause, reason } : loop.pause
+    if (loop.pause) return reason === 'manual' || loop.taskSource?.kind === 'goal' &&
+      loop.initialDelivery?.state !== 'confirmed' && loop.pause.reason === 'preparation' ? { ...loop.pause, reason } : loop.pause
     return { reason }
   }
   private pauseWithReason(loopId: string, reason: ContinuousProgressPauseReason): void {

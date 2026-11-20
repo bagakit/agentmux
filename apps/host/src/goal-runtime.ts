@@ -1,4 +1,5 @@
 import { optionalInputEpoch, agentPromptNotApplied } from '@agentmux/core/prompt-condition'
+import { isDeepStrictEqual } from 'node:util'
 import { awaitUntilCancelled } from './await-until-cancelled.js'
 import type { DemandSpaceMemberReference } from '@agentmux/demand/relations'
 import type { GoalQualifiedAccess, GoalInspectionAccess } from '@agentmux/core/control'
@@ -329,8 +330,10 @@ export function createGoalRuntime(options: {
       const session = exact(loop.hostId).agentSession(loop.agentSessionId)
       if (session.kind !== 'agent' || session.agentSessionId !== loop.agentSessionId || session.providerId !== loop.providerId || session.workspacePath !== loop.workspacePath) return 'unconfirmed'
       const original = await inspect({ hostId: loop.hostId, supervisorAgentSessionId: loop.agentSessionId, supervisorRunId: initial.condition.expectedRun.runId, operationId: initial.operationId })
-      const admission = original?.admission, key = admission?.inputKey
-      if (original?.agentSessionId !== loop.agentSessionId || original.run.runId !== initial.condition.expectedRun.runId || key?.kind !== 'prompt' || key.agentSessionId !== loop.agentSessionId || key.expectedRun.runId !== initial.condition.expectedRun.runId || key.submissionId !== initial.operationId || admission?.submissionId !== initial.operationId || admission.intent?.message?.userContent !== initial.prompt) return 'unconfirmed'
+      const admission = original?.admission, key = admission?.inputKey, intent = admission?.intent
+      if (original?.agentSessionId !== loop.agentSessionId || original.run.runId !== initial.condition.expectedRun.runId || key?.kind !== 'prompt' || key.agentSessionId !== loop.agentSessionId || key.expectedRun.runId !== initial.condition.expectedRun.runId || key.submissionId !== initial.operationId || key.attemptId !== undefined || admission?.submissionId !== initial.operationId || intent?.message?.userContent !== initial.prompt ||
+          intent.message.sourceChannel !== 'message-tool' || intent.message.authorHuman || intent.message.authorAgentSessionId || intent.message.authorExternal ||
+          intent.admissionIntent?.kind !== 'exact-condition' || !isDeepStrictEqual(intent.admissionIntent.condition, initial.condition)) return 'unconfirmed'
       return admission.acknowledged === true || original.terminalPromptSubmission?.submissionId === initial.operationId && original.terminalPromptSubmission.submit.acknowledged === true ? 'confirmed' : 'pending'
     }
   }
