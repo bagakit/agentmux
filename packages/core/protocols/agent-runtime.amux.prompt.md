@@ -32,9 +32,9 @@ An explicit AgentMux task follows. Begin that task within its stated scope; ther
 
 ~~~text
 AgentMux runtime guide:
-Run "$AGENTMUX_CLI" {{self}} once for your identity and capabilities.
+Run "$AGENTMUX_CLI" {{self}} once for your exact identity, capabilities and unavailable facts.
 {{space}}
-When attached, read space --skill to establish your actual Zone/Tab/Region. Execution cwd and human focus do not locate your presentation. Preserve original Sessions, Runs and healthy capabilities when observations are unknown.
+When attached, read space --skill to establish your actual Zone/Tab/Region and display bindings from that exact Region. Then inspect the whole Tab and its neighbors when the task needs them. Execution cwd and human focus do not locate your presentation. Missing or failed observations remain unknown; preserve the original Session, Run and healthy capabilities.
 Load only the relevant "$AGENTMUX_CLI" MODULE --skill. Use leaf --help for arguments and "$AGENTMUX_CLI" --skill to find a module.
 {{naming}}
 {{messaging}}
