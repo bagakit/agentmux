@@ -168,3 +168,16 @@ This operation requires the same transport-authenticated user/device authority a
 execution creation. `execution rejoin` keeps healthy original helper readers and
 reattaches them when their connection needs recovery. A failed rejoin attempt
 returns its own error. `creation continue` handles an active ordinary creation wait.
+
+If the original binding reports `diagnostic.nextAction=recover-project`, use
+`agent execution rejoin --input FILE` with `{ "bindingId": "ORIGINAL", "recoverProject": true }`
+at its original project Coordinator. The target must be the Coordinator's local
+project Runtime. Core verifies the old project helper is gone and the original
+frontend is at a complete frame boundary. The original binding, project grant
+and operation journal are retained. The replacement Start has its own durable
+identity. Keep the same binding and inspect after a lost reply.
+
+When `diagnostic.nextAction=reconnect-provider`, renew the tool connection in
+the existing Provider session. Wait for fresh native initialization before
+using project tools. The original Agent and Run remain available throughout.
+Unknown old tool effects are queried by their original operation identity.
