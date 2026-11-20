@@ -25,8 +25,33 @@ module.exports = async ({ win, read, until, resize, tap, button, capture }) => {
   await capture('mobile-private-thread-narrow')
   await button('查看原作业', '[role=dialog]')
   await until('!!document.querySelector("[data-direct-message-id=original-private-assignment]")')
+  assert.ok(await read('document.querySelector("[data-direct-message-id=original-private-assignment]").innerText.includes("优先投递")'))
   assert.equal(await read('!!document.querySelector("[data-direct-message-id=another-private-assignment]")'), false)
   await capture('mobile-private-assignment')
+  await button('发布手册截图.png', '[role=dialog]')
+  await until('document.querySelector(".mote-direct-image img")?.naturalWidth === 220')
+  await capture('mobile-private-assignment-image')
+  const gesture = await read(`(() => {
+    const body = document.querySelector('.mote-direct-assignment')
+    const rect = body.getBoundingClientRect()
+    return { x: Math.round(rect.x + rect.width / 2), from: Math.round(rect.bottom - 30), to: Math.round(rect.y + 70) }
+  })()`)
+  const touch = (type, y) => win.webContents.debugger.sendCommand('Input.dispatchTouchEvent', {
+    type, touchPoints: y === undefined ? [] : [{ id: 1, x: gesture.x, y }]
+  })
+  await touch('touchStart', gesture.from)
+  for (let frame = 1; frame <= 10; frame++) await touch('touchMove', Math.round(gesture.from + (gesture.to - gesture.from) * frame / 10))
+  await touch('touchEnd')
+  await until(`(() => {
+    const body = document.querySelector('.mote-direct-assignment')
+    const report = body?.querySelector('[data-direct-message-id=original-private-report]')
+    const bottom = body?.getBoundingClientRect().bottom
+    const copy = report?.querySelector('p'), state = report?.querySelector('small')
+    return body?.scrollTop > 0 && copy?.getBoundingClientRect().bottom <= bottom &&
+      state?.textContent === '已回复' && state.getBoundingClientRect().bottom <= bottom &&
+      document.querySelector('.mote-direct-panel > header').getBoundingClientRect().bottom <= body.getBoundingClientRect().top
+  })()`)
+  await capture('mobile-private-assignment-scrolled')
   await button('返回私聊', '[role=dialog]')
   await button('关闭私聊', '[role=dialog]')
   assert.equal(await read('document.querySelector("[contenteditable=true]")===window.originalDirectEditor'), true)
@@ -35,5 +60,6 @@ module.exports = async ({ win, read, until, resize, tap, button, capture }) => {
   assert.equal(calls.filter(call => call.method === 'space.mote.direct.inspect').every(call => call.params.threadId === 'private-work-review'), true)
   assert.ok(calls.some(call => call.method === 'space.mote.direct.inspect'))
   assert.ok(calls.some(call => call.method === 'space.mote.direct.inspect' && call.params.messageId === 'original-private-assignment'))
+  assert.ok(calls.some(call => call.method === 'space.mote.direct.image.read' && call.params.imageOperationId === 'original-assignment-image'))
   assert.equal(calls.some(call => call.method === 'agent.input.submit' || call.method === 'space.mote.direct.send'), false)
 }
