@@ -1,6 +1,7 @@
 import { expect, it, vi } from 'vitest'
 import { connectAgentMuxRpc } from '@agentmux/core'
 import { moteChatJourneyFixture as journey } from './fixtures/mote-chat-journey.js'
+import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
 
 const fixture = (protocol: 'feishu' | 'signed-room' = 'feishu') => journey(4, 60_000, 'headless', false, 'grok', undefined, 'bound', protocol)
 
@@ -46,6 +47,37 @@ it('discovers the exact reply capability in trusted input and sends through the 
   expect(f.feishu!.messageCalls()).toHaveLength(1)
   expect(f.inner.kernel.input).toHaveBeenCalledOnce()
 })
+
+it('uses the execution CLI to reply and read the same operation at the original Connector', async () => {
+  const f = await journey(4, 60_000, 'headless', false, 'grok', undefined, 'bound', 'signed-room', 'remote')
+  expect(await f.wire.post(f.message('original-remote-question'))).toBe(202)
+  const original = await f.claimed('original-remote-question')
+  await delivered(f, original.ingressId)
+  expect(await f.wire.post(f.message('another-remote-question'))).toBe(202)
+  const other = await f.claimed('another-remote-question')
+  await delivered(f, other.ingressId)
+  f.setExecutionReplyRoute(true)
+  const credentials = f.credentials(0)
+  const cli = async (action: 'reply' | 'inspect', input: object) => {
+    const result = await runCompiledObjectCli(['--endpoint', 'unix:' + f.executionEndpoint!.path, 'space', 'mote', 'chat', action, '--input', '-'],
+      objectCliEnvironment(f.root, { AGENTMUX_AGENT_SESSION_ID: credentials.agentSessionId, AGENTMUX_AGENT_CAPABILITY: credentials.capability, NODE_NO_WARNINGS: '1' }), JSON.stringify(input))
+    return JSON.parse(result.code === 0 ? result.stdout : result.stderr)
+  }
+  const input = { operationId: 'original-routed-reply', ingressId: original.ingressId, body: 'Replies use the original conversation', sourceMessageId: original.input!.messageId }
+  expect(await cli('reply', { ...input, ingressId: other.ingressId })).toMatchObject({ ok: false, error: { code: 'CONTROL_PERMISSION_DENIED' } })
+  expect(f.wire.effects).toHaveLength(0)
+  const saved = await cli('reply', input)
+  expect(saved).toMatchObject({ ok: true, result: { operation: { operationId: input.operationId, ingressId: original.ingressId } } })
+  await vi.waitFor(() => expect(f.wire.effects).toEqual([expect.objectContaining({ room: original.externalConversationId, text: input.body })]))
+  const selector = { operationId: input.operationId, sourceMessageId: input.sourceMessageId }
+  f.setExecutionReplyRoute(false)
+  expect(await cli('inspect', selector)).toMatchObject({ ok: false, error: { code: 'MOTE_CHAT_REPLY_ROUTE_UNCONFIRMED' } })
+  f.setExecutionReplyRoute(true)
+  expect(await cli('inspect', selector)).toMatchObject({ ok: true, result: { operation: saved.result.operation } })
+  expect(await cli('reply', input)).toMatchObject({ ok: true, result: { operation: saved.result.operation } })
+  expect(f.wire.effects).toHaveLength(1)
+  expect(f.start).toHaveBeenCalledOnce()
+}, 40_000)
 
 it('uses a second wire protocol and preserves every long reply fragment without sharing other Main output', async () => {
   const f = await fixture('signed-room')

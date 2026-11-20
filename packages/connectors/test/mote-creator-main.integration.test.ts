@@ -293,8 +293,8 @@ it('keeps a remote Main input healthy while retaining an explicit unconfirmed re
   }, { timeout: 4000 })
   expect(f.inner.kernel.input).toHaveBeenCalledOnce()
   const wire = vi.mocked(f.inner.kernel.input).mock.calls[0]![1].data
-  expect(wire).toContain(record.ingressId); expect(wire).toContain('reply route from this execution endpoint')
-  expect(wire).not.toContain('space mote chat reply')
+  expect(wire).toContain(record.ingressId); expect(wire).toContain('space mote chat reply')
+  expect(wire).toContain(JSON.stringify({ sourceMessageId: record.input!.messageId }).slice(1, -1))
   const source = await f.main!.readCurrentMoteMain(f.target)
   expect(source.current).toMatchObject({ hostId: 'original-execution', sessionId: main.agentSessionId })
   expect((await f.client.runtimeSubject({ kind: 'terminal-run', runId: main.run.runId })).run.state).toBe('running')
@@ -302,7 +302,7 @@ it('keeps a remote Main input healthy while retaining an explicit unconfirmed re
   expect(report.incoming!.rows[0]).toMatchObject({ state: 'claimed', code: null, codeRecorded: false, noticeCode: 'MOTE_CHAT_REPLY_ROUTE_UNCONFIRMED', input: { status: 'terminal-confirmed' } })
   const input = { operationId: 'remote-explicit-original-owner', ingressId: record.ingressId, body: 'Explicit reply through the original hosting owner' }
   const execution = await connectAgentMuxRpc({ endpoint: f.executionEndpoint!, credentials: f.credentials(0) })
-  try { await expect(execution.call('space.mote.chat.reply', input)).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE' }) } finally { await execution.dispose() }
+  try { await expect(execution.call('space.mote.chat.reply', { ...input, sourceMessageId: record.input!.messageId })).rejects.toMatchObject({ code: 'MOTE_CHAT_REPLY_ROUTE_UNCONFIRMED' }) } finally { await execution.dispose() }
   expect(f.wire.effects).toHaveLength(0)
   const reply = await f.cli('reply', input, f.credentials(0))
   expect(reply.operation.ingressId).toBe(record.ingressId)

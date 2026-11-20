@@ -182,6 +182,7 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
   }
   const mainHostId = execution === 'remote' ? 'original-execution' : 'local'
   let executionReader: Awaited<ReturnType<typeof connectHostedAgentMux>> | undefined, hostingReader: Awaited<ReturnType<typeof connectHostedAgentMux>> | undefined
+  let executionReplyRoute = false
   let executionEndpoint: { transport: 'unix'; path: string } | undefined
   let hostingOwnerInstanceId = execution === 'remote' ? 'fixture-hosting-owner' : 'fixture-instance'
   let hosting = original, hostingRuntime: AgentMuxHostedRuntimeService | undefined
@@ -242,7 +243,8 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
       ingress: async () => services.ingress!, clients: () => hostingReader ? [{ hostId: 'original-hosting', client: hostingReader }] : [] })
     const executionRuntime = new AgentMuxHostedRuntimeService(client, original.store.path, executionOwner, undefined, authority)
     cleanup.push(() => executionRuntime.dispose())
-    const executionServer = new core.AgentMuxControlServer({ socketPath: join(original.root, 'execution.sock'), coreClients: clients, hostedRuntime: () => executionRuntime })
+    const executionClients = () => [...clients(), ...(executionReplyRoute && hostingReader ? [{ hostId: 'original-hosting', client: hostingReader }] : [])]
+    const executionServer = new core.AgentMuxControlServer({ socketPath: join(original.root, 'execution.sock'), coreClients: executionClients, hostedRuntime: () => executionRuntime })
     await executionServer.start(); executionEndpoint = { transport: 'unix', path: executionServer.path }; cleanup.push(() => executionServer.stop())
     const executionRpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: executionServer.path } }); cleanup.push(() => executionRpc.dispose())
     executionReader = await connectHostedAgentMux({ rpc: executionRpc, expectedRuntimeId: executionOwner().runtimeId,
@@ -271,7 +273,8 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
     server = new core.AgentMuxControlServer({ socketPath: join(original.root, 'public.sock'), connections: services.connections, moteChat: services.moteChat!, ...(dialogue ? { moteDialogue: dialogue } : {}), ...(quick ? { moteQuickPreferences: quick, spatialAgentControl: createHostSpatialAgentControl({ configurationPath, spatial, runtime: () => headless }) } : {}), spatialState: spatial, coreClients: servingClients, ...(hostingRuntime ? { hostedRuntime: () => hostingRuntime! } : {}) })
     await server.start()
     sdk = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
-    if (executionReader) hostingReader = await connectHostedAgentMux({ rpc: sdk, expectedRuntimeId: 'fixture-hosting-runtime', forwardRpc: (method, params, context) => sdk.call(method, params, context) })
+    if (executionReader) hostingReader = await connectHostedAgentMux({ rpc: sdk, expectedRuntimeId: 'fixture-hosting-runtime', forwardRpc: (method, params, context) => sdk.call(method, params, {
+      ...(context?.signal ? { signal: context.signal } : {}), ...(context?.caller ? { credentials: context.caller } : {}), ...(context?.runtimeFence ? { runtimeFence: context.runtimeFence } : {}) }) })
   }
   async function close() { await hostingReader?.dispose(); hostingReader = undefined; await sdk?.dispose(); await server?.stop(); if (connectionOwner) await connectionOwner.close(); else await services?.close() }
   await open(); cleanup.push(close)
@@ -325,7 +328,7 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
     if (!source.transcriptPath) throw new Error('Original native path is missing')
     await appendFile(source.transcriptPath, nativeProvider === 'grok' ? [grokChunk(source.sessionId, text, id), grokDone(source.sessionId, id)].map(row => JSON.stringify(row)).join('\n') + '\n' : JSON.stringify({ sessionId: source.sessionId, uuid: id, type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } }) + '\n')
   }
-  return { ...original, shareMain, coldExecutionOwnerObservation() {
+  return { ...original, shareMain, setExecutionReplyRoute(enabled: boolean) { executionReplyRoute = enabled }, coldExecutionOwnerObservation() {
       if (!executionReader) throw Error('No original remote execution reader')
       let ready = false
       const originalOwner = executionReader.runtimeOwnerIdentity.bind(executionReader), originalRead = executionReader.readAgentSession.bind(executionReader)
