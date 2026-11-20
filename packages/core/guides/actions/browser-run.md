@@ -219,6 +219,21 @@ headers and request/response bodies are omitted. Child documents, worker request
 messages are outside this main-document HTTP scope. Observation readers do not install request rules.
 
 
+For a login redirect or a sequence that navigates this Browser, record a HAR in the same program. Start before navigation and return the exact capture to the CLI.
+
+```sh
+amux browser run --browser ID --output traffic.har < record.js
+```
+
+```js
+await startHarCapture();
+await gotoUrl("https://example.org/");
+await waitForLoad();
+return await finishHarCapture();
+```
+
+This independent capture follows native HTTP(S) events on the original page target across navigation and retains up to 512 request hops. The file reports retained, dropped, unmatched, pending, and connection-gap facts. It removes query strings, fragments, URL credentials, headers, cookies, and bodies. URL paths remain visible. Separate Browser targets, out-of-process frames, workers, and WebSocket messages are outside this capture. Program stop and completion release the original recording. File export creates a new local HAR and never reruns a navigation to recover a failed write.
+
 Install explicit request rules before the action, and withdraw the same program's rules afterward:
 
 ```js
