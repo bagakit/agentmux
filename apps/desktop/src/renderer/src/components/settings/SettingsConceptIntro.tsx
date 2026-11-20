@@ -11,8 +11,8 @@ export function RecallIntroduction() {
   const titleId = useId()
   return <section className="settings-concept-intro settings-concept-intro--workview" data-concept="recall" aria-labelledby={titleId}>
     <div className="settings-concept-intro__copy">
-      <h3 className="settings-concept-intro__title" id={titleId}>Keep useful knowledge close.</h3>
-      <p className="settings-concept-intro__description">Organize notes, pages and sources so you can return to what matters.</p>
+      <h3 className="settings-concept-intro__title" id={titleId}>Connect what you learn across AgentMux.</h3>
+      <p className="settings-concept-intro__description">Save a conversation Reading Point to a Note or today’s Daily. Find the card in Recall and follow its link back to the original message.</p>
     </div>
     <div className="settings-concept-intro__art" aria-hidden="true">
       <img src={recallArt} alt="" width="1536" height="1024" loading="lazy" decoding="async" draggable={false} />
