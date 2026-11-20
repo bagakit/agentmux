@@ -111,6 +111,13 @@ it('keeps the detached original Folder and exact execution project without openi
   expect(card().getAttribute('aria-description')).toContain('No open workface')
   expect(card().querySelector('.focus-context__position')).toBeNull()
   const store = useAppStore.getState()
+  const contexts = createFocusProjectionSelector()(store).laneContexts
+  const identities = createFocusContextIdentitySelector()(workbenchSelectionCatalog(store), store.tabs, contexts, store.config, store.layouts,
+    agentRegionExecution, true, executionOwner.currentCoreSpatialGraph())
+  const timeline = groupFocusTimeline(contexts, deriveFocusProjectLanes(contexts, store.config, undefined, identities), new Map())
+  expect(timeline.find(group => group.key === focusProjectKey('local', home.id))?.tracks.map(track => track.sessionId)).toEqual([original.id])
+  expect(timeline.find(group => group.key === focusProjectKey('local', project.id))?.tracks.map(track => track.sessionId)).toEqual([unplaced.id])
+  expect(rows().some(row => row.dataset.focusCurrent === 'true')).toBe(false)
   const source = { clientId: 'original-client', rendererId: 'original-renderer', documentGeneration: 1 }
   const focus = await store.executeControl({ schemaVersion: 5, requestId: 'read-placed-members', operation: 'focus.read', source,
     input: { scope: { kind: 'project', hostId: 'local', projectSpaceId: directoryIdentity(project.hostId, project.path) }, selection: { kind: 'all' } } })
