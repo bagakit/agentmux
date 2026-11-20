@@ -164,7 +164,7 @@ Survey and Recall, together with Topics in Space, keep what you and your agents 
 <td width="33%" valign="top">
 <img src="docs/assets/readme/art-recall-fold.webp" alt="Recall" width="100%"><br>
 <b>Recall</b><br>
-<sub>Notes are plain <code>.note.md</code> files. <code>^blockID</code> marks a stable block and <code>[[page #^block]]</code> links to it. Browse the catalog as a tree, as cards or as an infinite-canvas graph.</sub>
+<sub>Collect knowledge from across AgentMux. Save a conversation Reading Point as a card in a Note or today’s Daily, and follow links back to the original message.</sub>
 </td>
 <td width="33%" valign="top">
 <img src="docs/assets/readme/art-topic-atlas.webp" alt="Topic" width="100%"><br>

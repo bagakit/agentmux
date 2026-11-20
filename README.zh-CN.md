@@ -164,7 +164,7 @@ Desktop 把视图分成三组：Work（Space、Focus、Goals）、Know（Survey�
 <td width="33%" valign="top">
 <img src="docs/assets/readme/art-recall-fold.webp" alt="Recall" width="100%"><br>
 <b>Recall</b><br>
-<sub>Note 就是普通的 <code>.note.md</code> 文件，用 <code>^blockID</code> 标记稳定块，用 <code>[[页面 #^块]]</code> 链接。目录可以按树、卡片或无限画布图谱浏览。</sub>
+<sub>收纳 AgentMux 各处产生的知识。把对话阅读点存成知识卡，放入指定 Note 或当天 Daily，并沿双向连接回到原消息。</sub>
 </td>
 <td width="33%" valign="top">
 <img src="docs/assets/readme/art-topic-atlas.webp" alt="Topic" width="100%"><br>
