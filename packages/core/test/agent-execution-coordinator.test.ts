@@ -125,8 +125,9 @@ describe('execution coordinator retained original pair', () => {
     f.resolveHost.mockImplementationOnce(async () => ({ runtimeId: 'wrong-runtime', client: f.frontend.port }))
     f.executor.api.writeTerminal.mockRejectedValueOnce(new AgentMuxError('Original carrier disconnected', 'CONTROL_CONNECTION_FAILED'))
     f.frontend.addOutput({ type: 'request', generation: 'original', payload: { id: 1, method: 'tools/call' } })
-    await vi.waitFor(() => expect(owner.coordinator.inspect(f.input.bindingId)).toMatchObject({ state: 'unavailable',
-      diagnostic: { code: 'EXECUTION_HOST_CHANGED' }, helperStarts: original.helperStarts, continuation: original.continuation }))
+    await vi.waitFor(() => expect(f.resolveHost).toHaveBeenCalledTimes(4))
+    expect(owner.coordinator.inspect(f.input.bindingId)).toMatchObject({ state: 'unavailable',
+      diagnostic: { code: 'CONTROL_CONNECTION_FAILED' }, helperStarts: original.helperStarts, continuation: original.continuation })
     await new Promise(resolve => setTimeout(resolve, 550))
     expect(f.resolveHost).toHaveBeenCalledTimes(4)
     expect(f.executor.api.writeTerminal).toHaveBeenCalledOnce()
@@ -265,17 +266,23 @@ describe('execution coordinator retained original pair', () => {
     expect(f.frontend.api.createHostAgentWithDelivery).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps live bridge progress when a concurrent create retry is awaiting helper observations', async () => {
+  it('continues the original Agent creation on a healthy bridge without repeating helper preparation or attachment', async () => {
     const f = await fixture(), first = await f.open(); await first.coordinator.create(f.input)
-    const entered = gate(), held = gate(), original = f.frontend.api.listHostExecutors.getMockImplementation()!
-    f.frontend.api.listHostExecutors.mockImplementationOnce(async () => { entered.release(); await held.promise; return await original() })
+    const entered = gate(), held = gate(), original = f.frontend.api.createHostAgentWithDelivery.getMockImplementation()!
+    f.frontend.api.createHostAgentWithDelivery.mockImplementationOnce(async () => { entered.release(); await held.promise; return await original() })
     const retry = first.coordinator.create(f.input); await entered.promise
-    const through = f.frontend.addOutput({ type: 'request', generation: 'original-generation', payload: { id: 1, method: 'fixture/write' } })
-    await vi.waitFor(() => expect(f.read().bridge.frontend.outputByte).toBe(through))
-    held.release(); await retry
-    expect(f.frontend.api.attachTerminal.mock.calls.map(call => call[1])).toEqual([0, through])
-    expect(f.executor.api.writeTerminal).toHaveBeenCalledTimes(1)
-    expect(f.read().bridge.frontend.outputByte).toBe(through)
+    try {
+      const through = f.frontend.addOutput({ type: 'request', generation: 'original-generation', payload: { id: 1, method: 'fixture/write' } })
+      await vi.waitFor(() => expect(f.read().bridge.frontend.outputByte).toBe(through))
+      held.release(); await retry
+      for (const helper of [f.frontend, f.executor]) {
+        expect(helper.api.prepareAgentExecutionHelper).toHaveBeenCalledOnce()
+        expect(helper.api.attachTerminal).toHaveBeenCalledOnce()
+        expect(helper.api.releaseRunAttachment).not.toHaveBeenCalled()
+      }
+      expect(f.executor.api.writeTerminal).toHaveBeenCalledOnce()
+      expect(f.read().bridge.frontend.outputByte).toBe(through)
+    } finally { held.release() }
   })
 
   it.each(['[1234/PRIVATE_STDERR]\n', '{"type":"response","private":"PRIVATE_PAYLOAD"\n'])('records safe exact bad-frame provenance without returning raw bytes or changing helpers: %s', async bad => {
@@ -291,6 +298,9 @@ describe('execution coordinator retained original pair', () => {
     const diagnostic = first.coordinator.diagnostics(ref)!
     expect(diagnostic.failure!.frame!.sha256).toBe(createHash('sha256').update(bad.slice(0, -1)).digest('hex'))
     expect(JSON.stringify(diagnostic)).not.toContain('PRIVATE_')
+    f.resolveHost.mockRejectedValueOnce(new AgentMuxError('Rejoin lookup failed', 'CONTROL_TIMEOUT'))
+    await expect(first.coordinator.rejoin(f.input.bindingId)).rejects.toMatchObject({ code: 'CONTROL_TIMEOUT' })
+    expect(first.coordinator.diagnostics(ref)?.failure).toEqual(diagnostic.failure)
     expect(first.coordinator.inspect(f.input.bindingId)).toMatchObject({ state: 'unavailable', diagnostic: { code: 'EXECUTION_PROTOCOL_INVALID_FRAME' } })
     expect(first.coordinator.inspect(f.input.bindingId)!.diagnostic).not.toHaveProperty('protocolFrame')
     expect(first.coordinator.diagnostics({ ...ref, createOperationId: 'another-operation' })).toBeNull()
@@ -425,6 +435,9 @@ it('persists both helper qualification notices without taking away a connected s
   const created = await first.coordinator.create(f.input)
   expect(created.execution).toMatchObject({ state: 'connected', notices })
   expect(created.execution.diagnostic).toBeUndefined()
+  expect(first.coordinator.diagnostics(created.execution.continuation!)).toMatchObject({ connection: { state: 'connected' },
+    notices: notices.map(({ role, capability, state }) => ({ role, capability, state })) })
+  expect(JSON.stringify(first.coordinator.diagnostics(created.execution.continuation!))).not.toContain('connected unavailable healthy are display text')
   expect(f.read().notices).toEqual(notices)
   await first.close()
   const next = await f.open()
@@ -538,10 +551,10 @@ describe('exact helper connection and local diagnostic truth', () => {
     }
   })
 
-  it('does not let a continuation lookup failure rewrite an attached connection', async () => {
+  it('does not let a continuation failure rewrite an attached connection', async () => {
     const f = await fixture(), owner = await f.open()
     const original = (await owner.coordinator.create(f.input)).execution
-    f.frontend.api.readAgentSession.mockRejectedValueOnce(new AgentMuxError('Original Agent Registry read timed out', 'CONTROL_TIMEOUT'))
+    f.frontend.api.createHostAgentWithDelivery.mockRejectedValueOnce(new AgentMuxError('Original Agent receipt timed out', 'CONTROL_TIMEOUT'))
     await expect(owner.coordinator.continueOriginal(original.continuation!)).rejects.toMatchObject({ code: 'CONTROL_TIMEOUT' })
     expect(owner.coordinator.inspect(f.input.bindingId)).toEqual(original)
     expect(f.frontend.api.attachTerminal).toHaveBeenCalledOnce()
