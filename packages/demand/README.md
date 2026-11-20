@@ -48,6 +48,8 @@ The standalone `agentmux-demand` binary reads the same API. Pass `--root` (or se
 `AGENTMUX_DEMAND_ROOT`). `agentmux-demand help` prints the current verbs, options
 and safety requirements such as `delete --confirm delete`; the parser is
 [`src/cli.ts`](src/cli.ts).
+On `create`, the store assigns the ID and returns it as `demand.id` in the JSON
+response. Pass that ID to commands such as `show --id` and `update --id`.
 
 Goals use the same durable owner. Agents submit `proposeAlignment(id, proposal)`
 and `proposeGrounding(id, proposal)`, or CLI `propose-alignment` / `propose-grounding`
