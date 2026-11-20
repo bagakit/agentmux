@@ -25,7 +25,7 @@ function retainedInput(key: string): ConversationLandmarkWrite | null {
   try { const input = parseConversationLandmarkWrite(original); return conversationLandmarkIntentKey(input) === key ? input : null }
   catch { return null }
 }
-/** One explicit metadata operation; no read on mount, output subscription or body cache. */
+/** Exact metadata operations with independent mutation confirmation and list observations. */
 function useLandmarks(reference: ConversationRef, active: boolean, retainedKey?: string, onAccepted?: (page: ConversationLandmarkPage) => void) {
   const owner = useMemo(() => ({}), [reference.hostId, reference.agentSessionId])
   const current = useRef(owner); current.current = owner
@@ -34,6 +34,13 @@ function useLandmarks(reference: ConversationRef, active: boolean, retainedKey?:
   const [intent, setIntent] = useState<ConversationLandmarkWrite | null>(() => retainedKey ? retainedInput(retainedKey) : null)
   const [busy, setBusy] = useState(false), busyRef = useRef(false)
   const [issue, setIssue] = useState<string | null>(null), [confirmed, setConfirmed] = useState<string | null>(null)
+  const acceptedElsewhere = useRef<ConversationLandmarkPage | null>(null)
+  useEffect(() => {
+    if (!retainedKey || !intent) return
+    return observeLandmarkWrites(reference, next => {
+      if (next.recordedOperation?.input.operationId === intent.operationId) acceptedElsewhere.current = next
+    })
+  }, [reference.hostId, reference.agentSessionId, retainedKey, intent])
   const [observed, setObserved] = useState(false)
   const [conflict, setConflict] = useState<'revision' | 'missing' | null>(null)
   const valid = () => current.current === owner
@@ -97,7 +104,13 @@ function useLandmarks(reference: ConversationRef, active: boolean, retainedKey?:
     if (original && !busyRef.current) { setIntent(original); setConfirmed(null); return original }
     // Another open reading tool may have confirmed this same operation. The absent
     // client intent is not its receipt: reconcile only when this form reopens.
-    else if (intent && !busyRef.current) void check()
+    else if (intent && !busyRef.current) {
+      const accepted = acceptedElsewhere.current
+      if (accepted?.recordedOperation?.input.operationId === intent.operationId) {
+        acceptedElsewhere.current = null
+        accept(accepted, intent)
+      } else void check()
+    }
     return null
   }
   const beginNewConfirmedIntent = () => { if (confirmed && !intent && !busyRef.current) { setConfirmed(null); setIssue(null); return true } return false }
