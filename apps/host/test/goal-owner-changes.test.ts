@@ -11,6 +11,7 @@ import { GoalResponsibilityOwner } from '../src/goal-responsibility-owner.js'
 import { GoalPatrolOwner } from '../src/goal-patrol-owner.js'
 import { ContinuousProgressLoopManager } from '../src/continuous-progress-loop-manager.js'
 import { ContinuousProgressLoopStore } from '../src/continuous-progress-loop-store.js'
+import { deliverContinuousProgress } from '../src/continuous-progress-delivery.js'
 
 const cleanup: Array<() => Promise<unknown>> = []
 afterEach(async () => {
@@ -268,4 +269,30 @@ it.each(['cancelled', 'blocked', 'scope-changed', 'session-removed'] as const)('
   const status = change === 'cancelled' ? 'stopped' : 'paused'
   expect(manager.inspectLoop(loop.loopId)?.status).toBe(status)
   expect(await store.load()).toMatchObject([{ loopId: loop.loopId, status }])
+})
+
+it('fences the original Supervisor at the last delivery cut after another owner changes an unplanned Goal', async () => {
+  const f = await fixture(), store = ContinuousProgressLoopStore.forUserData(f.root)
+  const external = openDemandStore({ root: join(f.root, 'goals') })
+  const semanticStatus = { state: 'done' as const, source: 'native-hook' as const, observedAt: 1 }
+  const session = { agentSessionId: 'manager', hostId: 'local', providerId: 'codex', workspacePath: f.root, run: { runId: 'manager-run' }, semanticStatus }
+  let now = 0
+  const observe = async (_loop: unknown, tickId: string, at: number) => ({ session, tickId, now: at, inputByte: 0,
+    observation: observeAgent({ process: 'running', status: semanticStatus, timelineCapability: 'complete-events', awaitingRequest: false, terminalCapabilityUnverified: false }, at) })
+  const submitPrompt = vi.fn(async () => {})
+  const manager = new ContinuousProgressLoopManager(store, (...args) => deliverContinuousProgress({ submitPrompt,
+    observeContinuousProgress: async (loop, operationId, at) => {
+      const retained = (await store.load()).find(record => record.loopId === loop.loopId)!
+      expect(retained.pendingCompletion?.operationId).toBe(operationId)
+      await external.update('goal-a', { supervisorSessionId: 'worker' })
+      return await observe(loop, operationId, at)
+    }
+  }, ...args), () => now, observe, undefined, { read: id => f.demands.get(id), inspectInitial: async () => 'confirmed' })
+  cleanup.push(() => manager.stop())
+  const loop = await manager.prepareGoal({ ...session, goalId: 'goal-a', alignmentRevision: 1, intervalMs: 60_000, operationId: 'old-supervisor-start', prompt: 'goal-a' })
+  await manager.initialGoalInput(session, loop.loopId, 'old-supervisor-start', 'confirm')
+  now = 60_000; await manager.check(now)
+  expect(submitPrompt).not.toHaveBeenCalled()
+  expect(await store.load()).toMatchObject([{ loopId: loop.loopId, agentSessionId: 'manager', status: 'paused', lastOutcome: 'skipped', lastDecision: expect.stringContaining('current Supervisor') }])
+  expect(manager.inspectLoop(loop.loopId)?.pendingCompletion).toBeUndefined()
 })
