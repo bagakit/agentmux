@@ -40,6 +40,9 @@ import { isConnectionCredentialMethod } from './connection-credential-codec.js'
 import { prepareConnectionCredentialCli } from './connection-credential-cli.js'
 import { isConnectionReceiverMethod } from './connection-receiver-codec.js'
 import type { AgentMuxRpcCallOptions } from './public-rpc-client.js'
+import { composeOutboundMessage } from './agent-outbound-message.js'
+import type { GoalDelegationParamsMap, GoalDelegationResult } from './goal-delegation.js'
+import { delegationWorkerHostId } from '@agentmux/demand/delegations'
 
 let selectedSource: AgentMuxCliSource | undefined
 function write(value: unknown, stream: NodeJS.WriteStream = process.stdout, boundedReader = false): void {
@@ -60,6 +63,13 @@ const outputClosed = new AbortController()
 let outputFailed = false
 let failureReported = false
 let outputAbandoned = false
+function goalReviewGuidance(result: GoalDelegationResult, review: GoalDelegationParamsMap['goal.plan.review']['review']): string | undefined {
+  if (!result.passRecorded) return
+  const attempt = result.delegations.find(entry => entry.operationId === review.delegationOperationId && entry.planNodeId === review.nodeId)
+  if (!attempt?.workerRunId || !attempt.report?.delivery) return
+  const target = `Session ${JSON.stringify(attempt.workerAgentSessionId)}, Run ${JSON.stringify(attempt.workerRunId)}, Host ${JSON.stringify(delegationWorkerHostId(attempt))}, Runtime ${JSON.stringify(attempt.report.delivery.authorRuntimeId)}`
+  return composeOutboundMessage({ amux: `Supervisor: check remaining work and pending input for ${target}. If that exact Run is still current and has neither, use amux agent stop --session ID --run ID. See amux goal --skill.` })
+}
 function partial(method: AgentMuxRpcMethod, result: unknown): boolean {
   if (!result || typeof result !== 'object') return false
   const body = result as Record<string, unknown>
@@ -363,7 +373,10 @@ async function main(): Promise<number> {
         message: source?.message ?? String(error), ...(source?.detail === undefined ? {} : { detail: source.detail }) } })
       return 1
     }
-    write({ ok: true, operation: method, ...(output === undefined ? {} : { output }), ...(operationId === undefined ? {} : { operationId }), result: output && method === 'browser.run' ? browserCaptureCliMetadata(captureResult) : output && (method === 'app.capture' || method === 'app.record.read') ? appCaptureCliMetadata(method, result) : result })
+    const guidance = method === 'goal.plan.review' ? goalReviewGuidance(result as GoalDelegationResult, (invocation.params as GoalDelegationParamsMap['goal.plan.review']).review) : undefined
+    write({ ok: true, operation: method, ...(output === undefined ? {} : { output }), ...(operationId === undefined ? {} : { operationId }),
+      ...(guidance ? { guidance } : {}),
+      result: output && method === 'browser.run' ? browserCaptureCliMetadata(captureResult) : output && (method === 'app.capture' || method === 'app.record.read') ? appCaptureCliMetadata(method, result) : result })
     return partial(method, result) ? 1 : 0
   } finally { await client.dispose() }
 }

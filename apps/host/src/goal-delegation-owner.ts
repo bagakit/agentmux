@@ -50,6 +50,7 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
     context.signal?.throwIfAborted()
     if (method === 'goal.plan.active') return await this.readActivePlan(request as GoalActivePlanQuery, authority) as GoalDelegationResultMap[M]
     const input = request as GoalDelegationParamsMap[Exclude<GoalDelegationMethod, 'goal.plan.active'>]
+    let passRecorded = false
     const planRequest = method === 'goal.plan' || method === 'goal.plan.assignment' || method === 'goal.plan.claim' || method === 'goal.plan.revise'
     const owner = planRequest || method === 'goal.plan.review' ? await this.planOwner?.().catch(() => undefined) : undefined
     if (planRequest) {
@@ -108,8 +109,10 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
     }
     if (method === 'goal.plan.review') {
       // The store refuses the node's own executor; any other admitted Agent or person may review.
-      await this.demands.reviewPlanNode(input.goalId, (input as GoalDelegationParamsMap['goal.plan.review']).review,
+      const { review } = input as GoalDelegationParamsMap['goal.plan.review']
+      const receipt = await this.demands.reviewPlanNode(input.goalId, review,
         { ...authority.actor, ...(authority.hostId ? { hostId: authority.hostId } : {}), ...(authority.runtimeId ? { runtimeId: authority.runtimeId } : {}) })
+      passRecorded = review.verdict === 'pass' && receipt.replayed !== true
     }
     if (method === 'goal.progress') {
       if (!this.responsibility) throw new AgentMuxError('The original Goal responsibility owner is unavailable. Original work and native input remain available.', 'CONTROL_UNAVAILABLE')
@@ -320,6 +323,7 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
     const address = owner && goal.plan ? hostGoalAddress(goal, owner) : undefined
     const ticketLinks = address && goal.plan ? goal.plan.nodes.map(node => formatGoalTicketLink(goal.id, address, node.id)) : undefined
     const result: GoalDelegationResult = { ...(address && ticketLinks ? { address, ticketLinks } : {}), goalId: goal.id, goalUpdatedAt: goal.updatedAt, delegations: goal.delegations ?? [], ...plan,
+      ...(passRecorded ? { passRecorded: true } : {}),
       goalState: { status: goal.status, supervisorSessionId: goal.supervisorSessionId, ...(goal.alignment ? { alignment: goal.alignment } : {}) },
       ...(startObservations ? { dispatches: goal.dispatches ?? [], startObservations } : {}),
       ...(observations ? { observations } : {}),

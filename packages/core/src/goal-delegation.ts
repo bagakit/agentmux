@@ -9,7 +9,7 @@ import { parseDemandDispatch, parseDemandDispatches, runBoundDemandDispatch, typ
 import { parseFileReadParams, type FileReadParams } from './public-rpc-files.js'
 import { parseDemandDelegationIntent, parseDemandDelegations, parseDemandDelegationReportInput, parseDemandDelegationCollectionInput, parseGoalPlanPredecessors, sameGoalPlanPredecessors, validateDemandDelegationReport } from '@agentmux/demand/delegations'
 import { parseAlignment, parseGrounding } from '@agentmux/demand/goals'
-import { GOAL_PLAN_UNKNOWN_REASONS, parseGoalPlanAssignment, type GoalPlanAssignment, parseGoalPlan, parseGoalPlanReviewInput, parseGoalPlanRevisionInput, type GoalPlan, type GoalPlanReviewInput, type GoalPlanRevisionInput, type GoalPlanState } from '@agentmux/demand/goal-plan'
+import { GOAL_PLAN_UNKNOWN_REASONS, matchesGoalPlanReviewInput, parseGoalPlanAssignment, type GoalPlanAssignment, parseGoalPlan, parseGoalPlanReviewInput, parseGoalPlanRevisionInput, type GoalPlan, type GoalPlanReviewInput, type GoalPlanRevisionInput, type GoalPlanState } from '@agentmux/demand/goal-plan'
 import { parseOwnerGoalPlanState } from './goal-plan-state.js'
 import type { DemandDelegation, DemandDelegationIntent, DemandDelegationReportInput, DemandDelegationCollectionInput } from '@agentmux/demand/delegations'
 import type { DemandGrounding } from '@agentmux/demand/goals'
@@ -58,7 +58,7 @@ export type GoalDelegationParamsMap = {
 type GoalReviewInputObservation = { state: 'prepared' | 'confirmed' | 'unknown'; reason: string }
 export type GoalDelegationObservation = { operationId: string; communication?: DispatchObservation & { hostId: string }; workerRun?: Pick<AgentMuxRun, 'runId' | 'state'>; unknown?: string; recoverableReport?: DemandDelegationReportInput; attention?: GoalReviewInputObservation; workflowReview?: GoalReviewInputObservation }
 /** `planState` is the Goal owner's derivation of `plan`; a reader keeps the owner's rules and checks only that it describes this plan and these delegations. */
-export type GoalDelegationResult = { goalId: string; goalUpdatedAt: number; delegations: DemandDelegation[]; address?: AmuxGoalAddress; ticketLinks?: string[]; plan?: GoalPlan; planState?: GoalPlanState; planStateIssue?: string; grounding?: DemandGrounding; diskDurability: 'confirmed'; observations?: GoalDelegationObservation[]; dispatches?: DemandDispatch[]; startObservations?: GoalStartObservation[]; progressUpdates?: DemandProgress[]; responsibility?: GoalResponsibilityObservation; patrols?: DemandPatrol[]; patrolObservations?: GoalPatrolObservation[]; goalState?: { status: import('@agentmux/demand').DemandStatus; supervisorSessionId: import('@agentmux/demand/relations').DemandAgentReference | null; alignment?: import('@agentmux/demand').DemandAlignment } }
+export type GoalDelegationResult = { goalId: string; goalUpdatedAt: number; delegations: DemandDelegation[]; address?: AmuxGoalAddress; ticketLinks?: string[]; plan?: GoalPlan; planState?: GoalPlanState; planStateIssue?: string; passRecorded?: true; grounding?: DemandGrounding; diskDurability: 'confirmed'; observations?: GoalDelegationObservation[]; dispatches?: DemandDispatch[]; startObservations?: GoalStartObservation[]; progressUpdates?: DemandProgress[]; responsibility?: GoalResponsibilityObservation; patrols?: DemandPatrol[]; patrolObservations?: GoalPatrolObservation[]; goalState?: { status: import('@agentmux/demand').DemandStatus; supervisorSessionId: import('@agentmux/demand/relations').DemandAgentReference | null; alignment?: import('@agentmux/demand').DemandAlignment } }
 /** The worker submits a message at its own Core; it does not attest an update to the owner Goal. */
 export type GoalReportSubmissionResult = { kind: 'report-submission'; goalId: string; delegationOperationId: string;
   sourceMessageId: string; submission: AgentMuxRpcResult<'agent.send'> }
@@ -161,6 +161,12 @@ export function parseGoalDelegationRpcResult<M extends GoalDelegationMethod>(met
       sourceMessageId: request.sourceMessageId, submission } as GoalDelegationResultMap[M]
   }
   const result = parseGoalDelegationResult(value, input as { goalId: string })
+  if (result.passRecorded) {
+    const review = method === 'goal.plan.review' ? (input as GoalDelegationParamsMap['goal.plan.review']).review : undefined
+    const saved = review && result.plan?.reviews.find(entry => entry.operationId === review.operationId)
+    if (!review || !saved?.completion || saved.completion.record.scope.goalId !== result.goalId ||
+        !matchesGoalPlanReviewInput(saved, review)) delete result.passRecorded
+  }
   if (method === 'goal.plan.revise') {
     const { expectedOwner, revision } = input as GoalDelegationParamsMap['goal.plan.revise']
     if (expectedOwner && (result.address?.runtimeId !== expectedOwner.runtimeId || result.address?.namespace !== expectedOwner.namespace))
@@ -231,7 +237,7 @@ function parseGoalActivePlanResult(value: unknown, input: GoalActivePlanQuery): 
 }
 
 export function parseGoalDelegationResult(value: unknown, input: { goalId: string }): GoalDelegationResult {
-  const p = record(value, ['goalId', 'goalUpdatedAt', 'delegations', 'address', 'ticketLinks', 'plan', 'planState', 'planStateIssue', 'grounding', 'diskDurability', 'observations', 'dispatches', 'startObservations', 'progressUpdates', 'responsibility', 'patrols', 'patrolObservations', 'goalState'])
+  const p = record(value, ['goalId', 'goalUpdatedAt', 'delegations', 'address', 'ticketLinks', 'plan', 'planState', 'planStateIssue', 'passRecorded', 'grounding', 'diskDurability', 'observations', 'dispatches', 'startObservations', 'progressUpdates', 'responsibility', 'patrols', 'patrolObservations', 'goalState'])
   if (p.goalId !== input.goalId || p.diskDurability !== 'confirmed' || typeof p.goalUpdatedAt !== 'number' || !Number.isSafeInteger(p.goalUpdatedAt) || p.goalUpdatedAt <= 0) throw new AgentMuxError('The Goal delegation read belongs to another object or is unconfirmed.', 'CONTROL_PROTOCOL_ERROR')
   const goalState = p.goalState === undefined ? undefined : (() => {
     const state = record(p.goalState, ['status', 'supervisorSessionId', 'alignment'])
@@ -301,6 +307,7 @@ export function parseGoalDelegationResult(value: unknown, input: { goalId: strin
     })
   })()
   return { goalId: input.goalId, goalUpdatedAt: p.goalUpdatedAt as number, delegations, ...(address && ticketLinks ? { address, ticketLinks } : {}), ...(plan ? { plan } : {}), ...planStateRead, diskDurability: 'confirmed',
+    ...(p.passRecorded === true ? { passRecorded: true } : {}),
     ...(dispatches ? { dispatches } : {}), ...(startObservations ? { startObservations } : {}),
     ...(goalState ? { goalState } : {}), ...(patrols ? { patrols } : {}), ...(patrolObservations ? { patrolObservations } : {}),
     ...(progressUpdates ? { progressUpdates } : {}), ...(responsibility ? { responsibility } : {}),
