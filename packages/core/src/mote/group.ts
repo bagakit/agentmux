@@ -62,8 +62,9 @@ export type MoteGroupParamsMap = {
   'space.mote.group.members.leave': GroupEdit
   'space.mote.group.file.list': GroupFile & { path?: string; limit?: number }
   'space.mote.group.file.read': GroupFile & { path: string; maxBytes?: number }
-  'space.mote.group.inspect': Page & GroupMainSource & { groupId: string }
-  'space.mote.group.send': { groupId: string; operationId: string; body: string; recipientIds: string[]; replyToMessageId?: string } & GroupMainSource
+  'space.mote.group.inspect': Page & GroupMainSource & { groupId: string; messageId?: string }
+  'space.mote.group.send': { groupId: string; operationId: string; body: string; recipientIds: string[]; replyToMessageId?: string;
+    memberMoteId?: string } & GroupMainSource
   'space.mote.group.retry': { groupId: string; messageId: string; memberId: string }
   'space.mote.group.reply': { groupId: string; operationId: string; inputOperationId: string; body: string }
 }
@@ -142,8 +143,8 @@ const requestFields = {
   'space.mote.group.members.leave': groupEdits,
   'space.mote.group.file.list': [...groupFiles, 'path', 'limit'],
   'space.mote.group.file.read': [...groupFiles, 'path', 'maxBytes'],
-  'space.mote.group.inspect': ['groupId', 'beforeSequence', 'limit', 'sourceMote'],
-  'space.mote.group.send': ['groupId', 'operationId', 'body', 'recipientIds', 'replyToMessageId', 'sourceMote'],
+  'space.mote.group.inspect': ['groupId', 'beforeSequence', 'limit', 'sourceMote', 'messageId'],
+  'space.mote.group.send': ['groupId', 'operationId', 'body', 'recipientIds', 'replyToMessageId', 'sourceMote', 'memberMoteId'],
   'space.mote.group.retry': ['groupId', 'messageId', 'memberId'],
   'space.mote.group.reply': ['groupId', 'operationId', 'inputOperationId', 'body']
 } as const
@@ -195,7 +196,14 @@ export function parseMoteGroupParams<M extends MoteGroupMethod>(method: M, value
     editableSettings(p, false)
   } else {
     id('groupId')
-    if (method === 'space.mote.group.inspect') page(p)
+    if (method === 'space.mote.group.inspect') {
+      if (p.messageId === undefined) page(p)
+      else {
+        id('messageId')
+        if (p.limit !== undefined || p.beforeSequence !== undefined)
+          throw new AgentMuxError('Choose either one original messageId or a page of messages.', code)
+      }
+    }
     else if (method === 'space.mote.group.retry') {
       id('messageId')
       id('memberId')
@@ -225,6 +233,10 @@ export function parseMoteGroupParams<M extends MoteGroupMethod>(method: M, value
       else {
         ids('recipientIds', false)
         if (p.replyToMessageId !== undefined) id('replyToMessageId')
+        if (p.memberMoteId !== undefined) {
+          id('memberMoteId')
+          if (p.sourceMote !== undefined) throw new AgentMuxError('Use either your Main target or your original Group Thread membership.', code)
+        }
       }
     }
   }
@@ -327,6 +339,7 @@ export function parseMoteGroupResult<M extends MoteGroupMethod>(method: M, value
       (query.beforeSequence !== undefined && entry.sequence >= query.beforeSequence) ||
       (index > 0 && entry.sequence <= messages[index - 1]!.sequence))) return invalid(code)
     if (p.nextBeforeSequence !== null && (!messages.length || p.nextBeforeSequence !== messages[0]!.sequence)) return invalid(code)
+    if (query.messageId && (messages.length !== 1 || messages[0]?.id !== query.messageId || p.nextBeforeSequence !== null)) return invalid(code)
   } else if (method === 'space.mote.group.retry') {
     const p = rpcRecord(value, ['delivery'], code), request = input as MoteGroupParamsMap['space.mote.group.retry']
     if (parseMoteGroupDelivery(p.delivery).moteId !== request.memberId) return invalid(code)
@@ -335,7 +348,8 @@ export function parseMoteGroupResult<M extends MoteGroupMethod>(method: M, value
     const request = input as MoteGroupParamsMap['space.mote.group.send'] | MoteGroupParamsMap['space.mote.group.reply']
     if (message.groupId !== request.groupId || message.body !== request.body) return invalid(code)
     if ('recipientIds' in request) {
-      const authored = request.sourceMote ? message.author.kind === 'mote' && message.author.moteId === request.sourceMote.spaceId : message.author.kind === 'human'
+      const moteId = request.sourceMote?.spaceId ?? request.memberMoteId
+      const authored = moteId ? message.author.kind === 'mote' && message.author.moteId === moteId : message.author.kind === 'human'
       if (!authored || message.replyToMessageId !== request.replyToMessageId ||
           message.deliveries.length !== request.recipientIds.length ||
           message.deliveries.some((entry, index) => entry.moteId !== request.recipientIds[index])) return invalid(code)

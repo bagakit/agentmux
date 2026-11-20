@@ -203,9 +203,10 @@ export class MoteGroupStore {
     return (result ?? groupFailure('The original Group was not found.', 'UNKNOWN_MOTE_GROUP')).topic
   }
 
-  async inspect(groupId: string, before: number, limit: number): Promise<{ group: MoteGroupSummary; messages: MoteGroupMessage[]; nextBeforeSequence: number | null }> {
+  async inspect(groupId: string, before: number, limit: number, messageId?: string): Promise<{ group: MoteGroupSummary; messages: MoteGroupMessage[]; nextBeforeSequence: number | null }> {
     const result = await this.read(null, db => {
       const group = this.group(db, this.originalGroup(db, groupId))
+      if (messageId !== undefined) return { group, messages: [this.originalMessage(db, groupId, messageId)], nextBeforeSequence: null }
       const rows = db.prepare('SELECT * FROM messages WHERE group_id=? AND sequence < ? ORDER BY sequence DESC LIMIT ?').all(groupId, before, limit + 1)
       return { group, messages: rows.slice(0, limit).reverse().map(row => this.message(db, row)),
         nextBeforeSequence: rows.length > limit ? Number(rows[limit - 1]!.sequence) : null }
@@ -214,11 +215,13 @@ export class MoteGroupStore {
   }
 
   async messageById(groupId: string, messageId: string): Promise<MoteGroupMessage> {
-    const result = await this.read(null, db => {
-      const row = db.prepare('SELECT * FROM messages WHERE group_id=? AND id=?').get(groupId, messageId)
-      return row ? this.message(db, row) : null
-    })
-    return result ?? groupFailure('The original public message was not found in this Group.', 'UNKNOWN_MOTE_GROUP_MESSAGE')
+    return (await this.read(null, db => this.originalMessage(db, groupId, messageId)))
+      ?? groupFailure('The original message was not found in this conversation.', 'UNKNOWN_MOTE_GROUP_MESSAGE')
+  }
+
+  private originalMessage(db: DatabaseSync, groupId: string, messageId: string): MoteGroupMessage {
+    const row = db.prepare('SELECT * FROM messages WHERE group_id=? AND id=?').get(groupId, messageId)
+    return row ? this.message(db, row) : groupFailure('The original message was not found in this conversation.', 'UNKNOWN_MOTE_GROUP_MESSAGE')
   }
 
   private originalMember(db: DatabaseSync, groupId: string, moteId: string): GroupMemberRecord {

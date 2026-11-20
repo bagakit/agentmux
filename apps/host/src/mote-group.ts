@@ -439,8 +439,8 @@ export function createHostMoteGroups(options: {
         return await groupFile(method, raw as MoteGroupParamsMap[FileMethod], context) as MoteGroupResultMap[M]
       const sourceMote = 'sourceMote' in raw ? raw.sourceMote : undefined
       const main = sourceMote ? await authorizeMoteConversationMain(options.main, sourceMote, context) : undefined
-      if (actor.kind === 'agent' && !main && method !== 'space.mote.group.inspect')
-        return groupFailure('Use sourceMote from your current Main, or an addressed reply in your Group Thread.', 'CONTROL_PERMISSION_DENIED')
+      if (actor.kind === 'agent' && !main && method !== 'space.mote.group.inspect' && method !== 'space.mote.group.send')
+        return groupFailure('Use sourceMote from your current Main, or the commands available from your Group Thread.', 'CONTROL_PERMISSION_DENIED')
       if (method === 'space.mote.group.list') {
         const input = raw as MoteGroupParamsMap['space.mote.group.list']
         if (main && input.moteId !== undefined && input.moteId !== main.target.spaceId)
@@ -455,7 +455,7 @@ export function createHostMoteGroups(options: {
         const membership = main ? await mainMembership(input.groupId, main.target)
           : actor.kind === 'agent' ? await store.memberForThread(input.groupId, actor.hostId, actor.agentSessionId) : undefined
         if (membership) requireActive(membership)
-        const page = await store.inspect(input.groupId, input.beforeSequence ?? Number.MAX_SAFE_INTEGER, input.limit ?? 30)
+        const page = await store.inspect(input.groupId, input.beforeSequence ?? Number.MAX_SAFE_INTEGER, input.limit ?? 30, input.messageId)
         const messages = await Promise.all(page.messages.map(readMessage))
         const group = await readSummary(page.group, messages.find(message => message.id === page.group.lastMessage?.id))
         await context.assertCurrent()
@@ -494,15 +494,25 @@ export function createHostMoteGroups(options: {
         return { delivery: await freshDelivery(message, input.memberId, true) } as MoteGroupResultMap[M]
       }
       const input = raw as MoteGroupParamsMap['space.mote.group.send']
-      const membership = main ? await mainMembership(input.groupId, main.target) : undefined
+      let membership = main ? await mainMembership(input.groupId, main.target) : undefined
+      if (input.memberMoteId !== undefined) {
+        if (actor.kind !== 'agent')
+          return groupFailure('Publishing as a Group member requires its authenticated Thread.', 'CONTROL_PERMISSION_DENIED')
+        membership = await store.memberForThread(input.groupId, actor.hostId, actor.agentSessionId)
+        if (membership.member.moteId !== input.memberMoteId)
+          return groupFailure('The authenticated Thread belongs to another Group member.', 'CONTROL_PERMISSION_DENIED')
+        if (input.recipientIds.includes(input.memberMoteId))
+          return groupFailure('Select other Group members for this handoff.', 'INVALID_CONTROL_REQUEST')
+      }
       const author = membership ? { kind: 'mote' as const, moteId: membership.member.moteId, name: membership.member.name }
-        : actor.kind === 'human' ? actor : groupFailure('Publishing requires the original Mote Main or workspace owner.', 'CONTROL_PERMISSION_DENIED')
+        : actor.kind === 'human' ? actor : groupFailure('Supply sourceMote from your current Main or memberMoteId from your Group Thread.', 'CONTROL_PERMISSION_DENIED')
       const id = stable('message', input.groupId, input.operationId)
       const recipients = input.recipientIds.map(moteId => ({ moteId, operationId: stable('input', input.groupId, id, moteId), status: 'pending' as const }))
       const hash = digest({ input, actor: membership ? { kind: 'mote', moteId: membership.member.moteId } : actor })
       const append = () => store.append(input.operationId, hash, { id, groupId: input.groupId,
         createdAt: Date.now(), body: input.body, author, ...(input.replyToMessageId ? { replyToMessageId: input.replyToMessageId } : {}) },
       recipients, membership && memberAuthority(membership))
+      if (!main) await context.assertCurrent()
       const { message, fresh } = await (main ? main.commit(append) : append())
       if (!fresh) return { message: await readMessage(message) } as MoteGroupResultMap[M]
       // The public message has been committed once. One failing member cannot stop other recipients.
