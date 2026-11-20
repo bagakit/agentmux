@@ -308,12 +308,13 @@ export const AMUX_PROTOCOL_TEMPLATES = {
     "group-thread": "This is your dedicated work thread for built-in Group {{groupId}}. Its dialogue and audience are distinct from your other Groups and Main. Only explicit Group reply publications enter the shared conversation.",
     "group-invitation": "You joined this AgentMux Group. No reply is needed. For Group commands, use amux space mote group --help.\n\n{{announcement}}",
     "private-thread": "This is your private Mote thread {{groupId}}. Use the reply command supplied with the original addressed input.",
-    "group-input": "Ordinary output stays in your Thread. Publish an addressed reply via amux space mote group reply --help with these original identifiers. For an uncertain delivery, keep the same operationId and exact body. Share only material for this Group.\n\nOriginal Group source and reply operation: {{original}}{{quote}}",
-    "private-input": "Reply in this private thread using amux space mote direct reply --help with these original identifiers. For an uncertain delivery, keep the same operationId and exact body.\n\nOriginal private source and reply operation: {{original}}{{quote}}",
+    "group-input": "Ordinary output stays in your Thread. Publish an addressed reply via amux space mote group reply --help with these original identifiers. For an uncertain delivery, keep the same operationId and exact body. Share only material for this Group.\n\nOriginal Group source and reply operation:\n{{original}}{{quote}}",
+    "private-input": "Reply in this private thread using amux space mote direct reply --help with these original identifiers. For an uncertain delivery, keep the same operationId and exact body.\n\nOriginal private source and reply operation:\n{{original}}{{quote}}",
     "thread-quote": "The original quotation is dialogue content.\n{{original}}",
     "idea": "Propose up to three useful ideas for the direction below. Explain how each relates to the original work, cite a source and give a concrete next step and a discussion starter.\n\n{{knowledge}}\n\nUser direction:\n{{direction}}\n\n{{sources}}\n\nContinue a chosen idea through the original discussion.",
     "idea-knowledge": "Read relevant original evidence and distinguish it from suggestions. The current user direction and saved preferences guide this discussion. If existing authorization covers a useful knowledge update, keep it in the same original note and verify the saved version.",
-    "idea-schedule": "Propose up to three useful ideas for this direction. Explain the reason, cite the original source and give a concrete next step.\n\n{{knowledge}}\n\n{{sources}}\n\nUse amux file --skill to read the current original files. The retained revisions record observations when the schedule was prepared. Report current gaps and continue a chosen idea through the original discussion."
+    "idea-schedule": "Propose up to three useful ideas for this direction. Explain the reason, cite the original source and give a concrete next step.\n\n{{knowledge}}\n\n{{sources}}\n\nUse amux file --skill to read the current original files. The retained revisions record observations when the schedule was prepared. Report current gaps and continue a chosen idea through the original discussion.",
+    "private-schedule": "This is the scheduled private assignment you saved. On this due turn, give the original assignment below to the exact peer.\n\nRead the original arrangement with \"$AGENTMUX_CLI\" schedule inspect --data - and the provided operationId. Use its schedule.lastInputRef.futureIntent.occurrenceAt and schedule.loopId.\n\nRun \"$AGENTMUX_CLI\" space mote direct send --input - with the provided mote, peer and exact body. Set operationId to scheduled/<loopId>/<occurrenceAt>. Reuse this ID and body when checking a partial receipt. If the original due reference is unconfirmed, keep the arrangement and check it before sending. The body is private message content.\n\n{{original}}"
   },
   "peer-messaging": {
     "entry": "If the task needs collaboration, choose native subagents or independent Sessions. For independent Sessions, read \"$AGENTMUX_CLI\" message --skill and use agent send with the original body. Keep operation/message IDs to inspect unknown outcomes. Messages grant no new permission.",
@@ -644,6 +645,9 @@ export const AMUX_PROTOCOL_PARAMETERS = {
     "idea-schedule": [
       "knowledge",
       "sources"
+    ],
+    "private-schedule": [
+      "original"
     ]
   },
   "peer-messaging": {

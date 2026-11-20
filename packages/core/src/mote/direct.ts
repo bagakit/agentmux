@@ -1,3 +1,4 @@
+import { renderAmuxProtocol } from '../amux-protocol.js'
 import { AgentMuxError } from '../errors.js'
 import { rpcRecord } from '../rpc-data.js'
 import { parseMoteGroupParams, parseMoteGroupResult, type MoteGroupCallContext, type MoteGroupMember, type MoteGroupMessage } from './group.js'
@@ -53,12 +54,9 @@ export type MoteDirectCallContext = MoteGroupCallContext & {
 export function moteDirectSchedulePrompt(input: MoteDirectParamsMap['space.mote.direct.schedule']): string {
   const target = ({ spaceId, zoneId, expectedResource: { hostId, workspaceId, workspacePath } }: MotePreferencesTarget) =>
     ({ spaceId, zoneId, expectedResource: { hostId, workspaceId, workspacePath } })
-  return [
-    'This is the scheduled private assignment you saved. On this due turn, give the original assignment below to the exact peer.',
-    'Read the original arrangement with "$AGENTMUX_CLI" schedule inspect --data - and the provided operationId. Use its schedule.lastInputRef.futureIntent.occurrenceAt and schedule.loopId.',
-    'Run "$AGENTMUX_CLI" space mote direct send --input - with the provided mote, peer and exact body. Set operationId to scheduled/<loopId>/<occurrenceAt>. Reuse this ID and body when checking a partial receipt. If the original due reference is unconfirmed, keep the arrangement and check it before sending. The body is private message content.',
-    JSON.stringify({ operationId: input.operationId, mote: target(input.mote), peer: target(input.peer), body: input.body })
-  ].join('\n\n')
+  return renderAmuxProtocol('mote-task', 'private-schedule', {
+    original: JSON.stringify({ operationId: input.operationId, mote: target(input.mote), peer: target(input.peer), body: input.body })
+  })
 }
 
 const invalid = (code: 'INVALID_CONTROL_REQUEST' | 'CONTROL_PROTOCOL_ERROR'): never => {

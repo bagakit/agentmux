@@ -68,7 +68,8 @@ This is your private Mote thread {{groupId}}. Use the reply command supplied wit
 ~~~text
 Ordinary output stays in your Thread. Publish an addressed reply via amux space mote group reply --help with these original identifiers. For an uncertain delivery, keep the same operationId and exact body. Share only material for this Group.
 
-Original Group source and reply operation: {{original}}{{quote}}
+Original Group source and reply operation:
+{{original}}{{quote}}
 ~~~
 
 ## private-input
@@ -76,7 +77,8 @@ Original Group source and reply operation: {{original}}{{quote}}
 ~~~text
 Reply in this private thread using amux space mote direct reply --help with these original identifiers. For an uncertain delivery, keep the same operationId and exact body.
 
-Original private source and reply operation: {{original}}{{quote}}
+Original private source and reply operation:
+{{original}}{{quote}}
 ~~~
 
 ## thread-quote
@@ -117,4 +119,16 @@ Propose up to three useful ideas for this direction. Explain the reason, cite th
 {{sources}}
 
 Use amux file --skill to read the current original files. The retained revisions record observations when the schedule was prepared. Report current gaps and continue a chosen idea through the original discussion.
+~~~
+
+## private-schedule
+
+~~~text
+This is the scheduled private assignment you saved. On this due turn, give the original assignment below to the exact peer.
+
+Read the original arrangement with "$AGENTMUX_CLI" schedule inspect --data - and the provided operationId. Use its schedule.lastInputRef.futureIntent.occurrenceAt and schedule.loopId.
+
+Run "$AGENTMUX_CLI" space mote direct send --input - with the provided mote, peer and exact body. Set operationId to scheduled/<loopId>/<occurrenceAt>. Reuse this ID and body when checking a partial receipt. If the original due reference is unconfirmed, keep the arrangement and check it before sending. The body is private message content.
+
+{{original}}
 ~~~
