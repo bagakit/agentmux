@@ -2,7 +2,7 @@
 
 本文是 AgentMux 可读信封、业务标记、内容分享外框与对象链接的唯一格式合同，供 Core producer、共享 reader 和客户端维护者使用。它定义字节怎样组合、读取和保留；身份、权限、投递与恢复条件由各业务 owner 定义。规范和源码存在不代表每个运行实例或客户端已经验收。
 
-[文档导航](../README.md) · [A2A 业务行为](../design/behavior/a2a-collaboration.md) · [共同对话协议](conversation-protocol.md#readable-agentmux-envelopes) · [当前阅读机制](../architecture/conversation.md#可读信封与原输入)
+[文档导航](../README.md) · [产品需求](../design/behavior/amux-protocols.md) · [模板与目录架构](../architecture/amux-protocols.md) · [A2A 业务行为](../design/behavior/a2a-collaboration.md) · [共同对话协议](conversation-protocol.md#readable-agentmux-envelopes) · [当前阅读机制](../architecture/conversation.md#可读信封与原输入)
 
 ## 格式与业务归属
 
@@ -90,7 +90,7 @@
 </amux:channel>
 ```
 
-`amux:channel` 是外部原信的通用阅读声明。六个必需属性依次为原生应用 `domain`、`app-id`、发言人命名空间 `id-type`、`user-id`、原会话 `conversation-id` 与平台原消息 `message-id`；平台消息 ID 不替换 Core message／operation ID。可选资料属性依次为 `name`、`avatar-url`、`observed-at`；存在资料快照时必须有十进制非负安全整数 `observed-at`，名字和头像分别可以缺失。头像是无内嵌凭据的 HTTP(S) URL，不执行或查询该 URL 来验证作者。资料仅描述当次已观察字段，不能冒称始终最新、本人身份或权限。
+`amux:channel` 是外部原信的通用阅读声明。六个必需属性依次为原生应用 `domain`、`app-id`、发言人命名空间 `id-type`、`user-id`、原会话 `conversation-id` 与平台原消息 `message-id`；平台消息 ID 不替换 Core message／operation ID。应用存在原 issuer 时，在 `app-id` 与 `id-type` 之间携带 `issuer`。可选资料属性依次为 `name`、`avatar-url`、`observed-at`；存在资料快照时必须有十进制非负安全整数 `observed-at`，名字和头像分别可以缺失。头像是无内嵌凭据的 HTTP(S) URL，不执行或查询该 URL 来验证作者。资料仅描述当次已观察字段，不能冒称始终最新、本人身份或权限。
 
 开头是上述固定顺序、双引号和单个属性间空格的完整标签后接一个 LF，结尾是一个 LF 与完整 `</amux:channel>`；之后没有尾文。元数据的 XML 属性转义沿原 formatter，身份按原公开平台身份合同校验。正文是两边界之间的原字符串，保留空白、CR/LF、实体、代码和同形标签，不转义、不递归解释，也不交给 XML DOM。reader 只解释原消息开头的完整外层边界并保留原 wire；平台说明可以沿原独立前导声明组合，作者正文中的其他标签不取得来源资格。非法保留格式不进入通用声明分支，原文继续可读。整条 Copy 仍取原 wire，不从资料卡重组。
 
@@ -198,7 +198,7 @@ Core 可在引用列表后、关闭容器前附一个完整 `<reminder>…</remi
 
 ## Goal 确认并接续
 
-`<amux:goal version="2" action="confirm-and-continue" goal="…" revision="…" operation-id="…">` 是确认并接续的独立声明。属性引用原 Goal 地址、已确认版本和原操作，地址携原 Runtime 与命名空间，属性值按 XML 转义。标签之间是可直接阅读的平台说明，交代谁确认、Supervisor 现在该做什么和接续的结束条件。起始标签、正文与闭合标签以 LF 分隔，无尾文。
+`<amux:goal version="2" action="confirm-and-continue" goal="…" revision="…" operation-id="…">` 是确认并接续的独立声明。属性引用原 Goal 地址、已确认版本和原操作，地址携原 Runtime 与命名空间，属性值按 XML 转义。标签之间是可直接阅读的平台说明，交代谁确认、Supervisor 现在该做什么和接续的结束条件。起始标签、正文与闭合标签以 LF 分隔，无尾文。阅读器按 canonical 结构读取原地址、版本与操作，原说明以 XML 文本读取。
 
 声明用于找到同一次确认和当前计划。原 Goal 及 Core 输入回执分别证明业务确认和投递。完整 Copy 保留原 wire，已冻结的旧输入保持原格式。执行语义沿 [Goal 确认后继续](../design/behavior/goal-execution-and-supervision.md#确认后接续原-goal)。
 
@@ -243,6 +243,8 @@ Browser 使用同样定界，将首行的 `File` 换成 `Browser`。准确拼接
 Mote 的新公开 wire 为 `amux://mote/LINK_ID?runtime=RUNTIME`。LINK_ID 是原 Core 空间 owner 发行并耐久保存的不透明定位符，沿[产品 ID 分配](../design/behavior/spaces-and-layout.md#产品实体-id-分配)分配；RUNTIME 是持有该定位关系的原空间 authority 的 Runtime ID，按 `encodeURIComponent` 编码，不是执行 Host、当前路由别名或 owner instance。定位关系保存完整 `{spaceId,eventId?}` 目标：普通 Mote 地址解析到原逻辑主对话，thread 地址解析到同一原 Mote 的准确工作事件；两者均不在 URL 拼出原空间键、目录或 eventId。query 只允许一个固定顺序的 `runtime` 项，不接受 fragment、额外路径或自动执行参数。`space.link.ensure` 明确发行并确认持久写入，`space.link.resolve` 只读原定位关系；`amux space link ensure/resolve` 与 `app focus --mote URI` 消费同一 typed 合同。当前安装包的支持情况仍沿实际构建的能力发现核对。
 
 已保存的 `amux://mote/ID` 与 `amux://mote/ID/thread/EVENT` 是需要保全的原输入：无 query 时，ID 仍按原 literal `spaceId`、EVENT 按该 Mote 内原 eventId 解码，不按长度、Base58 外形、JSON 形状或路径判断改释为新定位符。旧输入和新地址解析后共用同一原目标与导航 owner，不重写历史 URI、原实体 ID 或工作面；新复制只发行上述不透明 wire。地址关系或原 Runtime 未确认时保留原引用并如实报告，不按同名对象、当前成员、裸 topicId 或其他 Runtime 猜目标。定位符及 URI 不携带访问或输入权限，不建立连接或批准信任；发行、只读解析、原身份保全与导航行为沿[对象地址、分享与方向](../design/behavior/public-control.md#对象地址分享与方向)。
+
+Goal 公开地址为 `amux://goal/GOAL?runtime=RUNTIME&namespace=NAMESPACE`。Plan 在查询之前加 `/plan`，Ticket 使用原 Goal 地址及 `#T-TICKET`，Ticket 片段与 Plan 子路径互斥。Runtime 与 namespace 同时给出并按固定顺序编码。原绑定的本地 Goal、Plan 以及历史 Ticket 地址保留其已发行的便捷形式，读取仍由原 Goal owner 定位。业务归[Goal、计划与验收](../design/behavior/goal-execution-and-supervision.md)。
 
 节点入口为 `amux://host/ALIAS`，原节点资源为 `amux://host/ALIAS/agent/SID` 或 `amux://host/ALIAS/capsule/CID`。ALIAS 使用节点发布接口确认的小写规范别名，SID／CID 仍是单个编码 segment 的原身份。三种节点链接都可在末尾带唯一的 `?runtime=RUNTIME`；RUNTIME 按 `encodeURIComponent` 编码，保留原语义 Runtime 身份。分享时带此身份；匹配的原 Runtime 可在别名改动后继续定位，不能因旧别名指向另一设备而换 owner。裸别名只是当前定位提示，在已配置且认证的 Host 范围内解析；同名、不可观察与缺失须分别说明，不猜首候选或扫描新设备。别名、Runtime pin 和合法链接都不授予访问或输入权限，不自动继承中间节点的连接。
 

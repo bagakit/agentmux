@@ -55,6 +55,10 @@ Provider 在 Core 内提供基于原生协议的可复用语义能力，Core 组
 
 Browser、Runtime 与编辑器公共机制按协议和行为泛化；在 Core、Main、设计 SSOT 与公共测试中均不预设具体站点、产品名、按钮文案或厂商协议特例。Provider 在自己的边界内解释原生协议，不能把这些差异泄漏为 client 分支。真实站点仅作黑盒输入；暴露的通用缺陷至少用两种不同协议或触发形态验证。历史背景留在复盘，不成为实现分支或验收条件。
 
+## AMUX 协议与内置 Prompt
+
+AgentMux 提供的所有 prompt 通过 Core AMUX 协议模块实现。按对话场景在独立的 `.amux.prompt.md` 中维护协议和内置文案，编译后由 producer 调用同一入口取得纯文本或有参数的文本。设置的协议参考消费同一目录。现有业务 owner 继续校验参数、权限和回执，保留用户原文及已冻结输入。产品约束见 [AMUX 协议与内置 Prompt](docs/design/behavior/amux-protocols.md)，实现边界见 [AMUX 协议管理架构](docs/architecture/amux-protocols.md)。
+
 ## 实现选择
 
 - 选满足当前需求的最简单实现，不做预防性抽象或多余配置层；组件模块化、关注点分离。
