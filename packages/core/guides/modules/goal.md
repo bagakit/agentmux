@@ -28,9 +28,9 @@ If `addressIssue` is present, recheck the original source before sharing.
 
 <!-- amux:generated command:goal.focus -->
 
-Pass both `--runtime` and `--namespace` from the address when targeting another
-source. `--section plan` opens the original plan, including its empty state.
-Check both navigation and `presentation.goal`. Opening the view only reads.
+Use `goal focus --link LINK` for a shared address. When scripting against an exact
+owner, pass its `--runtime` and `--namespace` together. `--section plan` opens the
+plan. Check both navigation and `presentation.goal`.
 
 ## Assign or start work
 
