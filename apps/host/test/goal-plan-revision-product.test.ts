@@ -220,3 +220,93 @@ it('returns a human executor change and independent review with their original T
   expect(read.planState.nodes[0].state).toBe('done')
   expect(f.owner.native.stop).not.toHaveBeenCalled()
 })
+
+it('reads current result evidence from reviewed Ticket attempts through the Goal CLI and Host', async () => {
+  const { owner, goalId, node, read } = await fixture()
+  const inspect = () => owner.call(null, ['goal', 'inspect', '--goal', goalId])
+  const evidence = (attempt: string) => ['checks/' + attempt + '.log']
+  const deliver = async (target: typeof node, attempt: string, alignmentRevision: number, outcome: 'gap' | 'met', verdict: 'pass' | 'changes') => {
+    await owner.call('supervisor', ['goal', 'delegate', '--input', '-'], { goalId, intent: {
+      operationId: attempt, sourceMessageId: attempt + '-source', threadId: attempt + '-thread', hostId: 'local',
+      ownerAgentSessionId: 'supervisor', ownerRunId: 'run-supervisor', workerAgentSessionId: 'worker-a', workerRunId: 'run-worker-a',
+      text: target.outcome, alignmentRevision, criterionIds: target.criterionIds, planNodeId: target.id,
+    } })
+    const replyMessageId = attempt + '-reply'
+    const reported = await owner.call('worker-a', ['goal', 'report', '--input', '-'], { goalId, operationId: attempt, report: {
+      operationId: attempt + '-report', replyMessageId, authorAgentSessionId: 'worker-a',
+      grounding: { alignmentRevision, summary: attempt, checks: target.criterionIds.map(criterionId =>
+        ({ criterionId, outcome, evidence: evidence(attempt), note: outcome === 'gap' ? attempt + ' found a remaining problem' : '' })) },
+    } })
+    const deliveryHash = reported.delegations.find((value: { operationId: string }) => value.operationId === attempt).report.delivery.hash
+    await owner.call('supervisor', ['goal', 'collect', '--input', '-'], { goalId, operationId: attempt,
+      collection: { operationId: attempt + '-collection', replyMessageId } })
+    return owner.call('reviewer', ['goal', 'plan', 'review', '--input', '-'], { goalId, review: {
+      operationId: attempt + '-review', nodeId: target.id, delegationOperationId: attempt, deliveryHash, verdict,
+      check: { command: target.check, result: 'Reviewed this delivery', evidence: evidence(attempt) },
+      note: verdict === 'changes' ? 'Resolve the reported gap' : '',
+    } })
+  }
+  const originalGap = await deliver(node, 'first-gap', 1, 'gap', 'changes')
+  expect(originalGap.grounding.checks[0]).toMatchObject({ outcome: 'gap', evidence: evidence('first-gap') })
+  const reworked = await deliver(node, 'current-rework', 1, 'met', 'pass')
+  expect(reworked.grounding.checks[0]).toMatchObject({ outcome: 'met', evidence: evidence('current-rework') })
+
+  const reviseAlignment = (text: string, summary: string) => owner.call(null, ['goal', 'update', '--goal', goalId, '--alignment',
+    JSON.stringify({ summary, criteria: [{ id: 'original', text }], openQuestions: [] })])
+  await reviseAlignment('The original criterion remains independently checkable.', 'Expanded explanation of the same criterion')
+  await owner.call('supervisor', ['goal', 'confirm', '--goal', goalId, '--revision', '2'])
+  const stable = await read()
+  expect(stable.grounding).toMatchObject({ alignmentRevision: 2, acceptedAt: null, checks: [{ outcome: 'met', evidence: evidence('current-rework') }] })
+  expect((await inspect()).goal.grounding).toEqual(stable.grounding)
+
+  const append = async (operationId: string, additions: (typeof node)[]) => {
+    const result = await owner.call('supervisor', ['goal', 'plan', 'append', '--goal', goalId, '--alignment-revision', '2',
+      '--operation-id', operationId, '--runtime', stable.address.runtimeId, '--namespace', stable.address.namespace, '--input', '-'], { nodes: additions })
+    return result.plan.nodes.slice(-additions.length) as (typeof node)[]
+  }
+  const accept = (submissionId: string, ...flags: string[]) => ['goal', 'accept', '--goal', goalId, '--revision', '2', '--submission', submissionId, ...flags]
+  const [audit] = await append('append-audit', [{ ...node, id: 'audit', title: 'Audit original result' }])
+  const open = await read()
+  expect(open.grounding.checks[0].outcome).toBe('unknown')
+  expect((await owner.cli(null, accept(stable.grounding.submissionId))).stderr).toContain('results changed')
+  const audited = await deliver(audit!, 'signed-audit-gap', 2, 'gap', 'pass')
+  expect(audited.grounding.checks[0].outcome).toBe('gap')
+  const [independent, repair] = await append('append-resolution', [
+    { ...node, id: 'independent', title: 'Independent branch' },
+    { ...node, id: 'repair', title: 'Repair audited gap', dependsOn: [audit!.id] },
+  ])
+  await deliver(independent!, 'independent-gap', 2, 'gap', 'pass')
+  const current = await deliver(repair!, 'audit-repair', 2, 'met', 'pass')
+  expect(current.grounding.checks[0]).toMatchObject({ outcome: 'gap',
+    evidence: [...evidence('current-rework'), ...evidence('independent-gap'), ...evidence('audit-repair')] })
+  expect(current.grounding.checks[0].note).toContain('independent-gap-reply')
+  expect(current.grounding.checks[0].note).not.toContain('signed-audit-gap-reply')
+  expect(current.delegations.filter((attempt: { report?: unknown }) => attempt.report).map(({ operationId }: { operationId: string }) => operationId))
+    .toEqual(['first-gap', 'current-rework', 'signed-audit-gap', 'independent-gap', 'audit-repair'])
+  expect(current.plan.reviews).toHaveLength(5)
+  expect((await inspect()).goal.grounding).toEqual(current.grounding)
+  expect((await owner.rpc.call('goal.ls', { goalId })).goals[0]?.grounding).toEqual(current.grounding)
+  expect((await owner.cli(null, accept(current.grounding.submissionId))).stderr).toContain('remaining gaps')
+  const accepted = await owner.call(null, accept(current.grounding.submissionId, '--accept-gaps'))
+  expect(accepted.receipt).toMatchObject({ submissionId: current.grounding.submissionId, acceptedWithGaps: true })
+  await append('append-after-acceptance', [{ ...node, id: 'after-acceptance', title: 'Follow-up' }])
+  expect((await read()).grounding).toEqual(accepted.goal.grounding)
+
+  await reviseAlignment('The current criterion changed.', 'Different success criterion')
+  expect((await read()).grounding.checks[0]).toMatchObject({ outcome: 'unknown', evidence: [] })
+})
+
+it('retains an unaccepted Done result without a Goal plan', async () => {
+  const { owner } = await fixture()
+  const { goal } = await owner.call(null, ['goal', 'create', '--title', 'Original historical Goal', '--status', 'done',
+    '--risk', 'low', '--confirm', 'user', '--operation-id', 'create-unplanned'])
+  const criterion = { id: 'original', text: 'Check the original result' }
+  await owner.call(null, ['goal', 'update', '--goal', goal.id, '--alignment', JSON.stringify({ summary: 'Historical execution', criteria: [criterion], openQuestions: [] })])
+  const proposal = { alignmentRevision: 1, summary: 'Original result report', checks: [{ criterionId: criterion.id,
+    outcome: 'met', evidence: ['checks/historical.log'], note: 'Historical artifact passed' }] }
+  const updated = await owner.call(null, ['goal', 'update', '--goal', goal.id, '--grounding', JSON.stringify(proposal)])
+  const inspected = await owner.call(null, ['goal', 'inspect', '--goal', goal.id])
+  expect(inspected.goal).toMatchObject({ status: 'done', grounding: { ...proposal, acceptedAt: null } })
+  expect(inspected.goal.plan).toBeUndefined()
+  expect((await owner.call(null, ['goal', 'plan', '--goal', goal.id])).grounding).toEqual(updated.goal.grounding)
+})
