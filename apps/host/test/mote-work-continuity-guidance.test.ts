@@ -88,6 +88,8 @@ it('the original managed FutureIntent freezes one actionable sentence and the ex
   expect(userContent).not.toContain('\n')
   expect(systemContext).toContain(MOTE_SUPERVISION_GUIDANCE)
   expect(systemContext).toContain('space mote dialogue supervision read --input -')
+  expect(systemContext).toContain('If no work can move forward, consider a useful new idea grounded in the original work.')
+  expect(systemContext).toContain('read it back only if it is worth keeping')
   expect(systemContext!.length + userContent.length).toBeLessThan(1000)
   expect(JSON.parse(systemContext!.split('\n').at(-1)!)).toEqual({ target: f.target })
   expect(parseAgentMuxMessagePrefix(composeAgentPrompt(userContent, systemContext).text)).toMatchObject({ declaredTrigger: 'heartbeat', body: '\n\n' + userContent })

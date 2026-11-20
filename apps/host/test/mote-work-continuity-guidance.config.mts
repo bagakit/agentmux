@@ -16,6 +16,11 @@ export default defineConfig({ ...source, plugins: [...(source.plugins ?? []), {
       if (!code.includes(anchor)) throw Error('Missing heartbeat composition anchor')
       loaded = code.replace(anchor, "managedScheduleNote: 'untyped calendar context'")
     }
+    if (process.env.MOTE_GUIDANCE_MUTANT === 'skip-idea-review' && file === 'apps/host/src/mote-presence.ts') {
+      const anchor = /^  'If no work can move forward,.*',\n/m
+      if (!anchor.test(code)) throw Error('Missing original heartbeat idea guidance')
+      loaded = code.replace(anchor, '')
+    }
     if (process.env.MOTE_GUIDANCE_MUTANT === 'main-input-disconnected' && file === 'packages/core/src/mote/input-source.ts') {
       const anchor = '+ "\\n\\n" + MOTE_SUPERVISION_GUIDANCE'
       if (!code.includes(anchor)) throw Error('Missing Main input composition anchor')
