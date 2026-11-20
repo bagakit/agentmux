@@ -9,6 +9,8 @@ import { AgentMuxHostExecutorOwner } from '../../src/executor-owner.js'
 import type { AgentMuxAgentCreateInput } from "../../src/client-contract.js";
 import type { AgentMuxAgentSession } from '../../src/types.js'
 import type { CtxmuxAdapterRun } from '../../src/ctxmux-run-adapter.js'
+import { hookBindingIdentity } from '../../src/agent-capability.js'
+import type { RunSpec } from '@ctxmux/sdk'
 import { rpcOwnerFixture } from './public-rpc-owner.js'
 
 export async function spawnOwnerFixture(cleanups: Array<() => Promise<void>>, remote = false) {
@@ -37,9 +39,12 @@ export async function spawnOwnerFixture(cleanups: Array<() => Promise<void>>, re
     runs.push(run); return run
   })
   Object.assign(h.inner.kernel, { start, list: vi.fn(async () => runs),
+    creationRuntimeIdentity: () => ({ runtimeId: 'fixture-runtime', instanceId: 'fixture-runtime', protocolVersion: 1, buildIdentity: 'fixture' }),
+    startPrepared: (request: RunSpec, operationKey: string) => start({ ...request, operationKey }),
+    inspectPreparedStart: async (_request: RunSpec, operationKey: string) => runs.find(run => run.lifecycleOperationId === operationKey) ?? null,
     prepareStop: vi.fn(async (runId: string, operationKey: string) => ({ daemonInstance: 'fixture-runtime', operationKey, runId })) })
   inner.hookServer.isRunning = () => true
-  inner.hookServer.createBinding = () => ({ bindingId: 'b'.repeat(43),
+  inner.hookServer.createBinding = (_sessionId: string, _provider: string, bindingId: ReturnType<typeof hookBindingIdentity>) => ({ bindingId,
     endpoint: { url: 'http://127.0.0.1:0', token: 't'.repeat(43) }, bindRun: async () => {}, close: async () => {} })
   inner.ensureManagedHooks = async () => {}
   inner.ensureTerminalHandshakeOrDegrade = async (session: AgentMuxAgentSession) => session

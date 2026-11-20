@@ -97,7 +97,8 @@ it.each([undefined, 'Original authorized task'])('Desktop spatial open preserves
   let state: SpatialWorkbench = { config, sessions: [], tabs: {}, layouts: {}, spaceZoneBindings: {}, spatialRequests: {} }
   const launch = vi.fn((input: Parameters<SpatialControlPorts['launch']>[0]) => controller.launchAgent(input, config))
   const ports: SpatialControlPorts = { get: () => state, patch: patch => { state = { ...state, ...patch } }, topics: async () => [],
-    launch, creation: (_host, sid) => h.client.inspectAgentCreation(sid), attach: async () => {},
+    launch, creationSessionId: (hostId, operationId) => controller.resolveCreationSessionId(hostId, operationId),
+    creation: (_host, sid) => h.client.inspectAgentCreation(sid), attach: async () => {},
     createResource: async () => { throw new Error('No resource creation is requested') },
     save: async layoutApplied => ({ layoutApplied, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'confirmed', reason: null }),
     focus: vi.fn(), isFocused: () => false, notice: vi.fn(), closing: () => false }
@@ -107,7 +108,8 @@ it.each([undefined, 'Original authorized task'])('Desktop spatial open preserves
     caller: { agentSessionId: 'creator', capability: h.capability } }
   const result = await executeSpatialControl(ports, request)
   if (result.operation !== 'agent.open') throw new Error('Wrong original creation operation')
-  expect(result.agent).toMatchObject({ createdBy: creator, createdRun: { runId: 'child-run-1' }, createOperationId: request.requestId })
+  expect(result.agent, JSON.stringify(result.issues)).toMatchObject({ createdBy: creator, createdRun: { runId: 'child-run-1' }, createOperationId: request.requestId })
+  expect((await h.store.readHistorySource(result.agent!.agentSessionId))?.history?.creation?.createdBy).toEqual(creator)
   expect(result.agent?.initialMessageId === undefined).toBe(prompt === undefined)
   expect(launch.mock.calls[0]![0].creationCaller).toEqual(h.credentials)
   const { operation, ...body } = result
