@@ -260,7 +260,13 @@ export const AMUX_PROTOCOL_TEMPLATES = {
     "wire": "<amux:continue />"
   },
   "focus-reference": {
-    "wire": "<amux:ref kind=\"{{kind}}\" read-via=\"{{entry}}\">\n{{body}}\n</amux:ref>"
+    "wire": "<amux:ref kind=\"{{kind}}\" read-via=\"{{entry}}\">\n{{body}}\n</amux:ref>",
+    "project": "项目 Space ID：{{project}}（Host：{{host}}）",
+    "collection": "Collection 类别 Space ID：{{categories}}（Host：{{host}}）",
+    "selection": "{{group}}\n所选 Focus 成员：{{members}}",
+    "all": "全组",
+    "empty": "无",
+    "unknown": "未确认"
   },
   "focus-task": {
     "organize": "整理这组工作，给我一份可以逐项决定的清单。建议哪些继续、哪些先收尾、哪些可以合并或接手、哪些可以关闭。每项写明对象、依据和影响。证据不足的列为待核。",
@@ -294,7 +300,8 @@ export const AMUX_PROTOCOL_TEMPLATES = {
     "project-unavailable": "Assigned Project ID: {{id}}\nThe registered Project and its workspace are unavailable.",
     "project-unassigned": "Project: unassigned",
     "delegated-work": "Read the verified envelope.application and current Ticket before acting. Use goal report --input FILE with this original delegation operation to return every delegated criterion with evidence, gap or unknown. Include sourceMessageId when reporting from another Core. For a question or blocker, reply to the original source and record message dispatch report --kind question|escalation. Keep the worker report distinct from collection by the current Supervisor. See amux goal --skill for verified handoff and exact Run closeout.",
-    "workflow-budget-unknown": "The saved Workflows budget is unconfirmed. Read the original Goal settings before any new automatic Ticket dispatch."
+    "workflow-budget-unknown": "The saved Workflows budget is unconfirmed. Read the original Goal settings before any new automatic Ticket dispatch.",
+    "continuation": "As Supervisor of original Goal {{goal}} at confirmed revision {{revision}}, use amux goal plan active --help for the current Tickets. For dispatch, verify the assigned executor and original predecessor receipts. For review, independently verify the frozen delivery and record the actual result. Reconcile unknown receipts at the original owner. When all relevant Tickets have passed, prepare the result evidence for the person’s acceptance.\n\n{{original}}"
   },
   "link": {
     "wire": "amux://{{target}}"
@@ -528,7 +535,22 @@ export const AMUX_PROTOCOL_PARAMETERS = {
       "kind",
       "entry",
       "body"
-    ]
+    ],
+    "project": [
+      "project",
+      "host"
+    ],
+    "collection": [
+      "categories",
+      "host"
+    ],
+    "selection": [
+      "group",
+      "members"
+    ],
+    "all": [],
+    "empty": [],
+    "unknown": []
   },
   "focus-task": {
     "organize": [],
@@ -597,7 +619,12 @@ export const AMUX_PROTOCOL_PARAMETERS = {
     ],
     "project-unassigned": [],
     "delegated-work": [],
-    "workflow-budget-unknown": []
+    "workflow-budget-unknown": [],
+    "continuation": [
+      "goal",
+      "revision",
+      "original"
+    ]
   },
   "link": {
     "wire": [

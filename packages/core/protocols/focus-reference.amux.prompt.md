@@ -27,3 +27,40 @@ examples:
 {{body}}
 </amux:ref>
 ~~~
+
+## project
+
+~~~text
+项目 Space ID：{{project}}（Host：{{host}}）
+~~~
+
+## collection
+
+~~~text
+Collection 类别 Space ID：{{categories}}（Host：{{host}}）
+~~~
+
+## selection
+
+~~~text
+{{group}}
+所选 Focus 成员：{{members}}
+~~~
+
+## all
+
+~~~text
+全组
+~~~
+
+## empty
+
+~~~text
+无
+~~~
+
+## unknown
+
+~~~text
+未确认
+~~~

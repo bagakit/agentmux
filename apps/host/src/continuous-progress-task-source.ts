@@ -1,3 +1,4 @@
+import { renderAmuxProtocol } from '@agentmux/core/amux-protocol'
 import type { DemandAgentReference } from '@agentmux/demand/relations'
 import { execFile } from 'node:child_process'
 import { isAbsolute } from 'node:path'
@@ -96,6 +97,10 @@ function goalPlanContinuation(source: Extract<ContinuousProgressTaskSource, { ki
       attempt: attempt ? { delegationOperationId: attempt.operationId, sourceMessageId: attempt.sourceMessageId,
         threadId: attempt.threadId, workerHostId: delegationWorkerHostId(attempt), workerAgentSessionId: attempt.workerAgentSessionId } : null }
   })
-  return `Manage the original Goal ${source.goalId} within its confirmed scope r${source.alignmentRevision} as its Supervisor. Read amux goal plan active --goal ${JSON.stringify(source.goalId)} to confirm the current actionable Tickets. For a review, verify the frozen delivery hash, run the node’s declared check independently, and record its actual result using goal plan review. If you delivered the work, arrange an independent reviewer. For dispatch, use the assigned executor and the current original predecessor receipts. Keep the original operation, delegation and thread after an uncertain response. Reconcile an unknown receipt before advancing. When all relevant Tickets have passed, collect the result evidence and wait for a person to accept the Goal.\n\n`
-    + JSON.stringify({ schema: 'agentmux.goal-plan-continuation.v1', goalId: source.goalId, alignmentRevision: source.alignmentRevision, planRevision: projection.revision, nodes })
+  return renderAmuxProtocol('goal-task', 'continuation', {
+    goal: source.goalId,
+    revision: String(source.alignmentRevision),
+    original: JSON.stringify({ schema: 'agentmux.goal-plan-continuation.v1', goalId: source.goalId,
+      alignmentRevision: source.alignmentRevision, planRevision: projection.revision, nodes })
+  })
 }

@@ -1,3 +1,4 @@
+import { getAmuxProtocolTemplate, renderAmuxProtocol } from './amux-protocol.js'
 import { formatAmuxFocusReference, readAmuxSourceReference } from './amux-protocol-definition.js'
 import { FOCUS_READ_MAX_REFERENCES, parseFocusParams, parseFocusTaskReference,
   type AgentMuxFocusReadParams, type AgentMuxFocusTaskReference } from './focus-control.js'
@@ -36,11 +37,14 @@ function displayIdentity(value: string): string {
 export function focusTaskHandoffNote(reference: AgentMuxFocusTaskReference): string {
   const { scope, selection } = parseFocusTaskReference(reference)
   const group = scope.kind === 'project'
-    ? `项目 Space ID：${displayIdentity(scope.projectSpaceId)}（Host：${displayIdentity(scope.hostId)}）`
-    : `Collection 类别 Space ID：${scope.categorySpaceIds.map(displayIdentity).join('、') || '未确认'}（Host：${displayIdentity(scope.hostId)}）`
-  const members = selection.kind === 'all' ? '全组'
-    : selection.references.map(({ hostId, contextId }) => `${displayIdentity(hostId)}/${displayIdentity(contextId)}`).join('、') || '无'
-  return formatAmuxFocusReference(`${group}\n所选 Focus 成员：${members}`)
+    ? renderAmuxProtocol('focus-reference', 'project', { project: displayIdentity(scope.projectSpaceId), host: displayIdentity(scope.hostId) })
+    : renderAmuxProtocol('focus-reference', 'collection', {
+      categories: scope.categorySpaceIds.map(displayIdentity).join('、') || getAmuxProtocolTemplate('focus-reference', 'unknown'),
+      host: displayIdentity(scope.hostId)
+    })
+  const members = selection.kind === 'all' ? getAmuxProtocolTemplate('focus-reference', 'all')
+    : selection.references.map(({ hostId, contextId }) => `${displayIdentity(hostId)}/${displayIdentity(contextId)}`).join('、') || getAmuxProtocolTemplate('focus-reference', 'empty')
+  return formatAmuxFocusReference(renderAmuxProtocol('focus-reference', 'selection', { group, members }))
 }
 
 /** A cleared draft can also own a saved note from the previous Focus handoff format. */
