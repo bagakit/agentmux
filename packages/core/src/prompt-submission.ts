@@ -1021,9 +1021,11 @@ export class AgentPromptSubmissionCoordinator {
       const uncertain = !completed && !ended &&
         (hasPreviousPrompt || current.semanticStatus?.state === 'working')
       if (uncertain && ((!allowUncertainTurn && !currentTerminal) || expectedCompletionId !== undefined)) {
+        const beforeClaim = !rejoiningFrozenPlan && !newClaim && !inputAttempted && !inputDispatch && !control?.authorizeDispatch &&
+          current.promptCompletionAdmission?.submissionId !== submissionId && current.terminalPromptSubmission?.submissionId !== submissionId
         throw new AgentMuxError(
           'The previous turn has not been confirmed complete. Your message is kept. Wait for its completion or explicitly continue; the Agent may still be working.',
-          'AGENT_TURN_END_UNCONFIRMED'
+          'AGENT_TURN_END_UNCONFIRMED', undefined, beforeClaim ? { disposition: 'not_applied', confirmedInputBytes: 0 } : undefined
         )
       }
       return uncertain
