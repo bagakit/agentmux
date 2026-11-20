@@ -8,7 +8,7 @@ import { crossHostOwner, type CrossHostCleanup } from './helpers/goal-cross-host
 const cleanup: CrossHostCleanup = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
 
-it('collects the exact Ticket, admits one independent system input and unlocks the successor only after the reviewer reports', async () => {
+it('collects the exact Ticket, admits independent review and prompts exact Run release only after a new pass', async () => {
   const host = await crossHostOwner(cleanup, 'workflow-review', ['supervisor', 'worker', 'reviewer'])
   const goalId = 'workflow-goal'
   const config = JSON.parse(await readFile(host.configurationPath, 'utf8'))
@@ -107,7 +107,29 @@ it('collects the exact Ticket, admits one independent system input and unlocks t
     check: { command: 'cat artifact.txt', result: checked.stdout, evidence: ['artifact.txt:1'] }, note: '' }
   const selfReview = await host.cli('worker', ['goal', 'plan', 'review', '--input', '-'], { goalId, review })
   expect(selfReview.stderr).toContain('cannot review its own work')
-  const reviewed = await host.call('reviewer', ['goal', 'plan', 'review', '--input', '-'], { goalId, review })
-  expect(reviewed.plan.reviews[0]).toMatchObject({ reviewer: { id: 'reviewer', runtimeId: host.identity.runtimeId }, completion: { hash: expect.any(String) } })
+  expect(selfReview.stdout).not.toContain('<amux>')
+  const reviewArgs = ['goal', 'plan', 'review', '--input', '-']
+  const accepted = await host.cli('reviewer', reviewArgs, { goalId, review })
+  expect(accepted.code, accepted.stderr).toBe(0)
+  const reviewed = JSON.parse(accepted.stdout)
+  expect(reviewed.result.plan.reviews[0]).toMatchObject({ reviewer: { id: 'reviewer', runtimeId: host.identity.runtimeId }, completion: { hash: expect.any(String) } })
+  expect(reviewed.guidance).toBe(
+    `<amux>\nSupervisor: check remaining work and pending input for Session "worker", Run "run-worker", Host "local", Runtime "${host.identity.runtimeId}". If that exact Run is still current and has neither, use amux agent stop --session ID --run ID. See amux goal --skill.\n</amux>`)
   expect((await read()).planState?.nodes[1]?.state).toBe('ready')
+  const repeated = await host.cli('reviewer', reviewArgs, { goalId, review })
+  expect(repeated.code, repeated.stderr).toBe(0)
+  expect(JSON.parse(repeated.stdout)).not.toHaveProperty('guidance')
+  const planned = await host.cli('supervisor', ['goal', 'plan', '--goal', goalId])
+  expect(planned.code, planned.stderr).toBe(0)
+  expect(JSON.parse(planned.stdout)).not.toHaveProperty('guidance')
+  const changes = await host.cli('reviewer', reviewArgs, { goalId, review: { ...review,
+    operationId: 'request-changes-on-parallel', nodeId: published.plan.nodes[2].id, delegationOperationId: parallelOperation,
+    deliveryHash: (await read()).delegations[1]!.report!.delivery!.hash, verdict: 'changes', note: 'Explain the parallel result.' } })
+  expect(changes.code, changes.stderr).toBe(0)
+  expect(JSON.parse(changes.stdout)).not.toHaveProperty('guidance')
+  const skill = await host.cli('supervisor', ['goal', '--skill'])
+  expect(skill.code, skill.stderr).toBe(0)
+  expect(skill.stdout).toContain('amux agent stop --session SID --run RUN')
+  expect(skill.stdout).toContain('Keep it available when any check is unknown or work remains.')
+  expect(host.native.stop).not.toHaveBeenCalled()
 }, 90_000)
