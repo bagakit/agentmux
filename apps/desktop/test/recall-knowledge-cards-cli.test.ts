@@ -12,18 +12,23 @@ import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/co
 it('derives saved Recall occurrences from original files through the shipping Notebook CLI', async () => {
   const root = await mkdtemp(join(tmpdir(), 'amx-recall-cli-'))
   const workspace = { id: 'notes', hostId: 'local', path: root, name: 'Notes', kind: 'folder' as const }
-  const store = new AgentMuxNotebookStore(join(root, 'catalog.json'))
-  const owner = new NotebookObservationOwner({ workspace: id => id === workspace.id ? workspace : undefined,
+  const catalogPath = join(root, 'catalog.json')
+  const store = new AgentMuxNotebookStore(catalogPath)
+  const newOwner = () => new NotebookObservationOwner({ workspace: id => id === workspace.id ? workspace : undefined,
     files: { async read(_, path) {
       const content = await readFile(join(root, path), 'utf8')
       return { status: 'read', document: { path, content, revision: fileUploadRevision(new TextEncoder().encode(content)) } }
     } } })
-  const server = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'), coreClients: () => [], notebookStore: store, notebookObservation: owner })
+  const newServer = (notebookStore: AgentMuxNotebookStore) => new AgentMuxControlServer({
+    socketPath: join(root, 'control.sock'), coreClients: () => [], notebookStore, notebookObservation: newOwner()
+  })
+  let server = newServer(store)
   try {
     const card: RecallCard = { id: 'checkpoint', title: 'Selected conversation record', routeHostId: 'connection-route',
       reference: { hostId: 'source-namespace', agentSessionId: 'original-agent', source: { kind: 'captured', recordId: 'original-record' } } }
     const note = newNoteDocument('', 'recall-entry', 'capture-block')
-    note.content.content![0]!.content = [{ type: 'text', text: card.title, marks: [{ type: 'link', attrs: { href: recallCardHref(card) } }] }]
+    const link = { type: 'link', attrs: { href: recallCardHref(card) } }
+    note.content.content![0]!.content = [{ type: 'text', text: card.title, marks: [link] }]
     const path = 'entry.note.md'
     await writeFile(join(root, path), serializeNoteDocument(note))
     await store.apply({ operationId: 'register-entry', expectedRevision: (await store.read()).revision,
@@ -37,7 +42,21 @@ it('derives saved Recall occurrences from original files through the shipping No
       return JSON.parse(result.stdout).result
     }
     expect((await graph()).recallCards).toEqual([{ source: { noteId: note.noteId, blockId: 'capture-block' }, card }])
-    await writeFile(join(root, path), serializeNoteDocument(newNoteDocument('Independent edit', note.noteId, 'capture-block')))
+
+    note.content.content![0]!.content = [
+      { type: 'text', text: 'Selected', marks: [link, { type: 'bold' }] },
+      { type: 'text', text: ' conversation record', marks: [link] }
+    ]
+    const formatted = serializeNoteDocument(note)
+    expect(formatted).toContain('**Selected**')
+    await writeFile(join(root, path), formatted)
+    await server.stop()
+    server = newServer(new AgentMuxNotebookStore(catalogPath))
+    await server.start()
+    expect((await graph()).recallCards).toEqual([{ source: { noteId: note.noteId, blockId: 'capture-block' }, card }])
+
+    note.content.content![0]!.content!.push({ type: 'text', text: ' Unrelated comment' })
+    await writeFile(join(root, path), serializeNoteDocument(note))
     expect((await graph()).recallCards).toBeUndefined()
   } finally { await server.stop(); await rm(root, { recursive: true, force: true }) }
 })
