@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { EventEmitter } from 'node:events'
+import { BrowserCdpSession } from '../src/main/browser-cdp-session.js'
 import { createBrowserProfilePageEnvironment } from '../src/main/browser-profile-page-environment.js'
 import type { CapsuleInspection } from '@agentmux/core/capsule'
 import { BrowserRecoveryPreviewStore } from '../src/main/browser-recovery-preview'
@@ -161,19 +162,31 @@ describe('Native child pages use the ordinary Browser owner', () => {
     expect(bindingPublications.some(value=>value.profileId==='other'&&value.pages.some(page=>page.browserId==='switch-environment'))).toBe(true)
     expect(bindingPublications.some(value=>value.profileId==='normal'&&value.pages.length===0)).toBe(true)
   })
-  it('excludes only a confirmed sole environment lease from debugger retention while preserving native DevTools and unknown consumers', async () => {
-    const f=await fixture(),resolver=(f.manager as any).profiles
-    let sole=true,devtools=false
-    ;(f.parent.debugger as any).isAttached=()=>true
-    ;(f.parent as any).isDevToolsOpened=()=>devtools
-    resolver.hasOnlyEnvironmentDebugger=vi.fn((id,contents)=>id==='normal'&&contents===f.parent&&sole)
-    const reasons=()=>f.manager.resourceTargets(null).find(row=>row.id==='original-parent')!.resource!.retention.reasons
+  it('retains native DevTools and foreground debugger consumers, and releases background-only ownership', async () => {
+    const f = await fixture()
+    let attached = false, devtools = false
+    const nativeDebugger = Object.assign(new EventEmitter(), {
+      attach: vi.fn(() => { attached = true }),
+      detach: vi.fn(() => { attached = false }),
+      isAttached: () => attached,
+      sendCommand: vi.fn(async () => ({}))
+    })
+    Object.assign(f.parent, { debugger: nativeDebugger, isDevToolsOpened: () => devtools })
+    const contents = f.parent as any
+    const profile = BrowserCdpSession.attach(contents, { background: true })
+    const touch = BrowserCdpSession.attach(contents, { background: true })
+    const reasons = () => f.manager.resourceTargets(null).find(row => row.id === 'original-parent')!.resource!.retention.reasons
     expect(reasons()).not.toContain('debugger')
-    devtools=true
+    const program = BrowserCdpSession.attach(contents)
     expect(reasons()).toContain('debugger')
-    devtools=false;sole=false
+    program.detach()
+    expect(reasons()).not.toContain('debugger')
+    devtools = true
     expect(reasons()).toContain('debugger')
-    delete resolver.hasOnlyEnvironmentDebugger
+    devtools = false
+    profile.detach()
+    touch.detach()
+    attached = true // The native owner is outside the shared CDP lease.
     expect(reasons()).toContain('debugger')
     expect(f.parent.isDestroyed()).toBe(false)
   })

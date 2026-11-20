@@ -187,7 +187,7 @@ describe('one original Profile environment across native target scopes', () => {
       })
     ).toThrow()
     expect(f.owner.inspect('profile')!.unsupported).toEqual(
-      expect.arrayContaining(['canvas', 'webgl', 'fonts', 'tls'])
+      expect.arrayContaining(['native-canvas', 'native-webgl', 'native-fonts', 'tls'])
     )
     expect(f.contents.debugger.sendCommand).toHaveBeenCalledWith(
       'Emulation.setGeolocationOverride',
@@ -205,9 +205,9 @@ describe('one original Profile environment across native target scopes', () => {
     const f = fixture()
     cleanup.push(f.destroy)
     await f.prepare()
-    expect(f.owner.hasOnlyEnvironmentDebugger('profile', f.contents as any)).toBe(true)
+    expect(BrowserCdpSession.hasOnlyBackgroundLeases(f.contents as any)).toBe(true)
     const program = BrowserCdpSession.attach(f.contents as any)
-    expect(f.owner.hasOnlyEnvironmentDebugger('profile', f.contents as any)).toBe(false)
+    expect(BrowserCdpSession.hasOnlyBackgroundLeases(f.contents as any)).toBe(false)
     expect(f.contents.debugger.attach).toHaveBeenCalledTimes(1)
     f.set(undefined)
     await settled(
@@ -234,7 +234,7 @@ describe('one original Profile environment across native target scopes', () => {
     cleanup.push(f.destroy)
     await f.prepare()
     f.devtools(true)
-    expect(f.owner.inspect('profile')!.pages![0]!.status).toBe('unknown')
+    await settled(() => f.owner.inspect('profile')!.pages![0]!.status === 'unknown')
     f.set({ ...configured, locale: 'ja-JP' })
     await settled(() => f.owner.inspect('profile')!.pages![0]!.status === 'unknown')
     expect(f.contents.debugger.attach).toHaveBeenCalledTimes(1)

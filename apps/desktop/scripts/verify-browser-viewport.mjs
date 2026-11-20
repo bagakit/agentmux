@@ -32,16 +32,18 @@ const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const inputs = [
   'apps/desktop/src/main/browser-view-manager.ts', 'apps/desktop/src/main/browser-viewport-touch.ts',
   'apps/desktop/src/main/browser-cdp-session.ts', 'apps/desktop/src/main/browser-cold-descriptor.ts',
+  'apps/desktop/src/main/browser-profile-page-environment.ts',
   'apps/desktop/src/main/native-overlay-surfaces.ts',
   'apps/desktop/src/main/native-overlay-focus.ts', 'apps/desktop/src/main/ipc.ts',
   'apps/desktop/src/shared/native-overlay.ts', 'apps/desktop/src/shared/browser-bounds.ts',
   'packages/browser/src/browser-page-dispatch.ts', 'packages/browser/src/browser-script-runner.ts',
   'apps/desktop/src/renderer/src/components/BrowserPane.tsx', 'apps/desktop/src/renderer/src/components/BrowserViewportControls.tsx',
-  'apps/desktop/src/renderer/src/components/HoverDropdownMenu.tsx',
+  'apps/desktop/src/renderer/src/components/HoverDropdownMenu.tsx', 'apps/desktop/src/renderer/src/components/BrowserOperationSurface.tsx',
   'apps/desktop/src/renderer/src/components/WindowOverlayHost.tsx', 'apps/desktop/src/renderer/src/lib/api.ts',
   'apps/desktop/src/renderer/src/hooks/useNativeOverlayChrome.ts', 'apps/desktop/src/renderer/src/lib/native-overlay-regions.ts',
   'apps/desktop/src/renderer/src/lib/workbench-persistence.ts',
-  'apps/desktop/src/renderer/src/styles/browser.css', 'apps/desktop/src/renderer/src/styles/base.css',
+  'apps/desktop/src/renderer/src/styles/browser.css', 'apps/desktop/src/renderer/src/styles/browser-operation-surface.css',
+  'apps/desktop/src/renderer/src/styles/base.css',
   'apps/desktop/src/renderer/src/styles/chrome.css', 'apps/desktop/src/renderer/src/styles/overlays.css',
   'packages/client-ui/scripts/radix-overlay-aliases.ts', 'apps/desktop/electron.vite.config.ts',
   'apps/desktop/src/shared/contracts.ts', 'apps/desktop/src/preload/index.ts',
@@ -61,8 +63,12 @@ function replaceUnique(source, target, replacement) {
   return source.replace(target, replacement)
 }
 function mutatedManager(kind) {
+  if (kind === 'omit-touch-loss-publication') return replaceUnique(originalManager,
+    '    if (entry?.view.webContents === contents && this.viewportTouchWarning(entry)) this.emit(entry)', '    void entry')
+  if (kind === 'omit-foreground-debugger-guard') return replaceUnique(originalManager,
+    '!BrowserCdpSession.hasOnlyBackgroundLeases(contents)', 'false')
   if (kind === 'omit-native-apply') return replaceUnique(originalManager, '    this.applyViewport(entry, view, viewport)\n    entry.viewport = viewport', '    void viewport\n    entry.viewport = viewport')
-  if (kind === 'omit-phone-touch') return replaceUnique(originalManager, '      await this.viewportTouch.set(contents, phone)', '      await this.viewportTouch.set(contents, false)')
+  if (kind === 'omit-phone-touch') return replaceUnique(originalManager, '      try { await this.viewportTouch.set(contents, phone) }', '      try { await this.viewportTouch.set(contents, false) }')
   if (kind === 'omit-fit') return replaceUnique(originalManager, '      viewSize,\n      scale\n', '      viewSize,\n      scale: 1\n')
   if (kind === 'commit-before-native-apply') return replaceUnique(originalManager, '    this.applyViewport(entry, view, viewport)\n    entry.viewport = viewport', '    entry.viewport = viewport\n    this.applyViewport(entry, view, viewport)')
   return originalManager
@@ -81,7 +87,8 @@ async function childProcess(executable, argv, env, timeoutMs, input) {
 }
 const cleanEnv = () => Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(?:AGENTMUX_|CTXMUX_)/.test(key)))
 async function native(label, mutation) {
-  const compiled = join(work, label); await mkdir(compiled); await symlink(resolve('apps/desktop/node_modules'), join(compiled, 'node_modules'))
+  // The run root also owns a Unix socket with a platform-limited path.
+  const compiled = join(work, 'case-' + evidence.cases.length); await mkdir(compiled); await symlink(resolve('apps/desktop/node_modules'), join(compiled, 'node_modules'))
   const store = await readFile(join(fixture, 'store.ts'), 'utf8')
   const coreFromCandidate = {
     name: 'resolve-public-core-from-candidate',
@@ -138,7 +145,8 @@ async function native(label, mutation) {
   if (mutation) {
     assert.equal(processResult.code, 1, processResult.stdout + processResult.stderr)
     assert.equal(result.passed, false)
-    const expected = { 'omit-phone-touch': /phone-native-touch-points-are-five/, 'omit-native-focus-guard': /native-focus-handoff-keeps-original-menu-open/, 'omit-menu-call': /menu-call-must-apply-original-viewport/, 'omit-native-apply': /native-apply-must-change-layout-width|phone-native-dpr-is-three/, 'omit-fit': /fixed-viewport-must-fit-all-four-corners/ }
+    const expected = { 'omit-touch-loss-publication': /native-touch-disconnect-must-publish-visible-warning/,
+      'omit-foreground-debugger-guard': /foreground-debugger-lease-must-protect-original-page/, 'omit-phone-touch': /phone-native-touch-points-are-five/, 'omit-native-focus-guard': /native-focus-handoff-keeps-original-menu-open/, 'omit-menu-call': /menu-call-must-apply-original-viewport/, 'omit-native-apply': /native-apply-must-change-layout-width|phone-native-dpr-is-three/, 'omit-fit': /fixed-viewport-must-fit-all-four-corners/ }
     assert.match(result.failure?.message ?? '', expected[mutation], 'Mutation fails for its actual nonempty behavioral oracle')
   } else {
     assert.equal(processResult.code, 0, (result.failure?.message ?? 'Native process failed without a consumer failure') + '\nEvidence: ' + join(out, label + '.json') + '\n' + processResult.stderr)
@@ -188,7 +196,8 @@ async function selectionMutation() {
 try {
   await native('source')
   if (args.includes('--mutations')) {
-    const mutations = deviceOnly ? ['omit-menu-call', 'omit-native-apply', 'omit-fit', 'omit-phone-touch']
+    const mutations = deviceOnly ? ['omit-menu-call', 'omit-native-apply', 'omit-fit', 'omit-phone-touch',
+      'omit-touch-loss-publication', 'omit-foreground-debugger-guard']
       : ['omit-native-focus-guard', 'omit-menu-call', 'omit-native-apply', 'omit-fit', 'omit-phone-touch']
     for (const mutation of mutations) await native(mutation, mutation)
     await selectionMutation(); await native('restored-source')

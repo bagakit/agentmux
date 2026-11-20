@@ -10,6 +10,7 @@ import { createWorkspaceLayout } from '@agentmux/core/spatial-layout'
 import { parseAgentMuxSpatialGraph, spatialCatalog } from '@agentmux/core/spatial-state'
 import { browserColdDescriptor } from '../../../src/main/browser-cold-descriptor'
 import { browserViewportSize, browserViewportsEqual } from '../../../src/shared/browser-viewport'
+import { BrowserCdpSession } from '../../../src/main/browser-cdp-session'
 import { BrowserViewManager } from '../../../src/main/browser-view-manager'
 import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
 import { NativeOverlaySurfaces } from '../../../src/main/native-overlay-surfaces'
@@ -31,14 +32,23 @@ const originalId = 'private-viewport-original', siblingId = 'private-viewport-si
 const receipt: any = { label, pid: process.pid, passed: false, cases: [], images: [], warnings: [], calls: [], events: [], public: [], transitions: [], publications: [], windowFocus: [] }
 let window: BrowserWindow, manager: BrowserViewManager, overlays: NativeOverlaySurfaces, server: Server, rpcServer: AgentMuxControlServer
 let original: WebContentsView, sibling: WebContentsView, baseline: any, siblingBaseline: any, baseUrl: string
+let chromeReady = false
 let uninstallNativeOverlayFocus: (() => void) | undefined
 const sha = (bytes: Uint8Array | string) => createHash('sha256').update(bytes).digest('hex')
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 const evaluate = (code: string) => window.webContents.executeJavaScript(code)
 async function until(name: string, read: () => Promise<any>, budget = 4000) {
-  const end = Date.now() + budget
-  while (Date.now() < end) { const value = await read(); if (value) return value; await delay(15) }
-  throw new Error('Viewport observation failed: ' + name)
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const expiration = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('Viewport observation failed: ' + name)), budget)
+  })
+  try {
+    for (;;) {
+      const value = await Promise.race([read(), expiration])
+      if (value) return value
+      await Promise.race([delay(15), expiration])
+    }
+  } finally { clearTimeout(timer) }
 }
 async function settle() { await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))') }
 const uiFacts = () => evaluate('window.viewportProbe.read()')
@@ -376,6 +386,55 @@ async function verifyPhone(spatial: ReturnType<typeof parseAgentMuxSpatialGraph>
   assert.equal(rotated.dpr, 3)
   if (deviceOnly) await verifyPhoneFit('landscape')
   else await observe('phone-landscape', landscape, true)
+  // The resource owner reads the exact shared connection, even when the
+  // visible Browser has other unrelated retention reasons.
+  const retention = () => manager.resourceTargets(null).find(row => row.id === originalId)!.resource!.retention.reasons
+  const contents = original.webContents
+  assert.equal(contents.debugger.isAttached(), true)
+  assert.ok(!retention().includes('debugger'), 'phone-background-lease-must-not-pin-native-resource')
+  const foreground = BrowserCdpSession.attach(contents)
+  try { assert.ok(retention().includes('debugger'), 'foreground-debugger-lease-must-protect-original-page') }
+  finally { foreground.detach() }
+  assert.ok(!retention().includes('debugger'))
+
+  contents.debugger.detach()
+  const lostUi = await until('native-touch-disconnect-must-publish-visible-warning', async () => {
+    const current = await uiFacts()
+    return current.warningVisible && current.warning?.includes('Touch emulation is unconfirmed') ? current : null
+  })
+  assert.ok(browserViewportsEqual(lostUi.viewport, landscape))
+  const disconnected = await cli(['browser', 'targets'])
+  const originalTarget = disconnected.result.result.targets.find((row: any) => row.id === originalId)
+  assert.equal(originalTarget.status, 'ready')
+  assert.equal(originalTarget.navigationId, baseline.navigationId)
+  assert.match(originalTarget.warning, /Touch emulation is unconfirmed/)
+  assert.doesNotMatch(disconnected.result.result.targets.find((row: any) => row.id === siblingId)?.warning ?? '', /Touch emulation/)
+  await until('original native touch ends while its geometry remains', async () => {
+    const page = await pageFacts()
+    return page.touchPoints === normal.touchPoints && page.dpr === 3 && page.screen.width === landscape.width
+  })
+  await identity('disconnected-touch-keeps-original-page')
+  await settle()
+  await saveImage('phone-touch-unconfirmed', await window.webContents.capturePage(), 'actual-renderer-touch-warning')
+  await clickUi('.browser-operation-warning button', 'Dismiss this Browser notice')
+  await until('dismissing the notice preserves the original diagnostic fact', async () => {
+    const ui = await uiFacts()
+    return !ui.warningVisible && ui.warning === lostUi.warning
+  })
+
+  const recover = async () => {
+    await select(landscape, true, 'Phone · touch')
+    await until('reselecting the checked touch preset reopens the original capability', async () => {
+      const page = await pageFacts(), ui = await uiFacts()
+      return page.touchPoints === 5 && !page.portrait && !ui.warning?.includes('Touch emulation is unconfirmed')
+    })
+    assert.doesNotMatch(manager.target(originalId)?.warning ?? '', /Touch emulation/)
+  }
+  await recover()
+  contents.debugger.detach()
+  await until('a new touch disconnect is visible after the earlier notice was dismissed', async () => (await uiFacts()).warningVisible)
+  await recover()
+  receipt.touchLoss = { warning: lostUi.warning, selected: lostUi.viewport, target: originalTarget, recovered: true, newOccurrenceVisible: true }
   const siblingEnvironment = await sibling.webContents.executeJavaScript('window.viewportFacts()')
   assert.equal(siblingEnvironment.touchPoints, normal.touchPoints)
   assert.equal(siblingEnvironment.dpr, normal.dpr)
@@ -414,6 +473,7 @@ async function verifyPhone(spatial: ReturnType<typeof parseAgentMuxSpatialGraph>
   await until('responsive restores original native DPR and touch after leaving phone', async () => {
     const actual = await pageFacts(); return actual.touchPoints === normal.touchPoints && actual.dpr === normal.dpr
   })
+  assert.ok(!(await uiFacts()).warningVisible, 'Intentional exit never emits an unexpected connection warning')
   const debuggerApi = original.webContents.debugger
   const sendCommand = debuggerApi.sendCommand
   debuggerApi.sendCommand = (method, ...params) => method === 'Emulation.setTouchEmulationEnabled'
@@ -486,6 +546,7 @@ async function run() {
     receipt.passed = true
     return
   }
+  window.showInactive()
   await manager.create(originalId, baseUrl + '/meta', workspaceId); await manager.create(siblingId, baseUrl + '/sibling', workspaceId)
   manager.setBounds(originalId, { x: 20, y: 110, width: 900, height: 590 }); manager.setBounds(siblingId, { x: 930, y: 80, width: 240, height: 600 })
   original = manager.nativeOwner(originalId)!.view; sibling = manager.nativeOwner(siblingId)!.view
@@ -526,6 +587,7 @@ async function run() {
   } }, join(root, 'control.sock')); await rpcServer.start()
   await window.loadFile(join(root, 'index.html')); window.show(); window.webContents.focus(); window.webContents.debugger.attach('1.3')
   await until('mounted original product Viewport button', async () => evaluate('!!document.querySelector("button[aria-label=Viewport]")'))
+  chromeReady = true
   await settle()
   await stage('original-renderer-ready')
   if (!preflight) {
@@ -577,12 +639,12 @@ async function run() {
 }
 void run().catch(async error => {
   receipt.failure = { message: error.message, stack: error.stack }
-  if (!restart && window && !window.isDestroyed()) {
+  if (chromeReady && window && !window.isDestroyed()) {
     try { receipt.failure.windowFocused = window.isFocused(); receipt.failure.ui = await uiFacts(); receipt.failure.menus = await evaluate(`[...document.querySelectorAll('[role=menu]')].map(e=>({state:e.getAttribute('data-state'),children:[...e.querySelectorAll('[role=menuitem],[role=menuitemradio]')].map(n=>({name:n.textContent.trim(),popup:n.getAttribute('aria-haspopup'),expanded:n.getAttribute('aria-expanded')}))}))`); receipt.failure.layers = window.contentView.children.filter(view => view.getVisible()).map(view => ({ bounds: view.getBounds(), original: view === original, sibling: view === sibling })) } catch {}
   }
 }).finally(async () => {
   await writeFile(join(out, label + '.json'), JSON.stringify(receipt, null, 2))
-  if (!restart && window && !window.isDestroyed()) { await evaluate('window.viewportProbe?.dispose()').catch(() => {}); await delay(40) }
+  if (chromeReady && window && !window.isDestroyed()) { await evaluate('window.viewportProbe?.dispose()').catch(() => {}); await delay(40) }
   await rpcServer?.stop(); uninstallNativeOverlayFocus?.(); overlays?.dispose(); manager?.dispose(); await new Promise<void>(resolve => server ? server.close(() => resolve()) : resolve())
   if (window && !window.isDestroyed() && window.webContents.debugger.isAttached()) window.webContents.debugger.detach()
   window?.destroy(); app.exit(receipt.passed ? 0 : 1)

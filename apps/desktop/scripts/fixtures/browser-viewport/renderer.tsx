@@ -9,6 +9,7 @@ import '../../../src/renderer/src/styles/base.css'
 import '../../../src/renderer/src/styles/overlays.css'
 import '../../../src/renderer/src/styles/chrome.css'
 import '../../../src/renderer/src/styles/browser.css'
+import '../../../src/renderer/src/styles/browser-operation-surface.css'
 import '../../../src/renderer/src/styles/agent.css'
 import './fixture.css'
 
@@ -36,7 +37,7 @@ function Fixture() {
 const root = createRoot(document.getElementById('root')!)
 root.render(<Fixture />)
 ;(window as any).viewportProbe = {
-  read: () => ({ viewport: state.tab.viewport, errors: errors.slice(), applied: applied.slice(), events: events.slice(),
+  read: () => ({ viewport: state.tab.viewport, warning: state.tab.activity?.warning, warningVisible: document.body.innerText.includes('Touch emulation is unconfirmed'), errors: errors.slice(), applied: applied.slice(), events: events.slice(),
     menus: document.querySelectorAll('[role=menu]').length, hasFocus: document.hasFocus(), bodyPointerEvents: document.body.style.pointerEvents,
     activeElement: document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.getAttribute('role') ?? document.activeElement?.tagName }),
   menu(triggerName: string, option: string) {
