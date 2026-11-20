@@ -108,10 +108,13 @@ Read only the matching local help:
   browser profile network check --profile ID observes the configured HTTPS address
   through that Profile's session. Unknown leaves the Profile and its pages available.
   browser profile network probe --profile ID [--operation-id ID] records a separate
-  TCP/SOCKS5 sign-in/Profile exit diagnostic for the exact current configuration.
+  TCP/SOCKS5 sign-in/Profile exit diagnostic for the exact current configuration,
+  plus WebRTC policy readback on open pages of that Profile.
   TCP and RFC1929 authentication use a direct socket to that proxy; authentication
   success does not certify Chromium's authenticated SOCKS, UDP or QUIC traffic.
-  The exit observation alone uses the original Profile session. Credentials remain
+  The exit observation makes an HTTP request using the original Profile session.
+  WebRTC reads the native page policy and reports unknown without a readable page.
+  Call connectivity needs its own observation. Credentials remain
   inside their original encrypted Main owner and never enter reports or history.
   Read network history --profile ID [--operation-id ID | --before ID] after an unknown
   reply. Pages contain at most twenty original records; nextCursor names the oldest
@@ -222,12 +225,13 @@ Read only the matching local help:
   For a wider layout during an Agent task, use
   `amux browser viewport --browser ID --preset desktop` when the original target supports it.
 - amux browser viewport --help: change the same embedded page's execution Viewport through its original owner.
-  `--preset mobile|tablet|desktop|responsive` shares the App's presets; custom `--width 844 --height 390`
-  (mobile layout by default) tests landscape without navigation. `--screen desktop` chooses desktop
-  layout behavior. These are layout dimensions, not a complete device identity. Supporting targets
-  advertise `setViewport`; page programs use `setViewport('mobile')` or
-  `setViewport({width:844,height:390,screenPosition:'mobile'})`, followed by `pageInfo()` for the
-  original applied state. Human control and Stop remain authoritative. Keep unknown operation IDs
+  `--preset phone` applies a 390 × 844 CSS viewport, native touch and simulated DPR 3.
+  `mobile`, `tablet`, `desktop` and custom width/height set layout dimensions. Use
+  `setViewport({width:844,height:390,screenPosition:'mobile',device:'phone'})` in a Page Program for
+  a landscape phone layout. `pageInfo()` reads the original applied state, and `tap(ref)` sends
+  native touch input where the original target advertises it. `responsive` follows the pane
+  and restores its original touch and pixel density. User agent, real hardware and OS identity
+  are unchanged. Human control and Stop remain authoritative. Keep unknown operation IDs
   and inspect rather than replay. Screenshot sampling is separate: `browser capture --pixel-ratio 2`.
 - amux browser task --help: source/draft discovery, draft edit/publish, original create receipts,
   version reliability, run, batch, explicit parallel targets and stop.
@@ -307,7 +311,7 @@ The bundle accepts userAgent, acceptLanguages, timeZone, locale, geolocation, us
 hardwareConcurrency, and fingerprint: {seed, surfaces}; null clears it. Fingerprint seeds are unsigned 32-bit integers. The surfaces are fonts, audio, canvas, clientRects, and webgl. Read the original Profile for each Browser/field native application
 and explicit scope. Saving does not reload the page or grant geolocation permission. DevTools owns its native
 connection while open; actual detach is unknown and closing DevTools reapplies without replaying page actions.
-Fingerprint settings affect the selected document APIs. Subdocuments, Workers and initial scripts remain unknown. TLS and engine-wide emulation are unsupported. Screen edits compose with the original execution Viewport.
+Generating a fingerprint seed preserves the selected APIs. Application reports script registration on the exact native Browser target. Read the actual document APIs when a task depends on the result. Child documents and Workers require separate observation. Screen edits compose with the original execution Viewport.
 
 Proxy library: `browser profile proxy ls` reads stable non-secret assets and exact proxy revision tokens.
 Use `proxy create --operation-id ID --edit JSON`, `proxy update --proxy ID --expected-revision TOKEN --edit JSON`, or
