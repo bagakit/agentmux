@@ -55,6 +55,20 @@ it('an older revision operation names where it already applied instead of preten
   expect(await store.get('goal')).toEqual(before)
 })
 
+it('a closed Goal keeps its plan until explicitly reopened for an append', async () => {
+  const earlier = (await store.get('goal'))!.plan!
+  const append = { operationId: 'append-after-close', alignmentRevision: 1, appendNodes: [node({ id: 'follow-up', dependsOn: [tickets.id('node')] })] }
+  await store.update('goal', { status: 'done' })
+  await expect(store.revisePlan('goal', append, author)).rejects.toThrow('Reopen the original Goal explicitly')
+  await expect(revise('replace-after-close', [node(), node({ id: 'follow-up' })])).rejects.toThrow('Reopen the original Goal explicitly')
+  expect((await store.get('goal'))!.plan).toEqual(earlier)
+  await store.update('goal', { status: 'in_progress' })
+  await store.revisePlan('goal', append, author)
+  const saved = (await store.get('goal'))!.plan!
+  expect(saved.nodes[0]).toEqual(earlier.nodes[0])
+  expect(saved.nodes[1]!.dependsOn).toEqual([earlier.nodes[0]!.id])
+})
+
 it.each([{ label: 'empty', criterionIds: [] }, { label: 'missing', criterionIds: ['removed'] }])('a newly written $label criterion set is refused while the original plan remains writable', async ({ criterionIds }) => {
   const before = (await store.get('goal'))!
   await expect(revise('bad-new-node', [node(), node({ id: 'new-node', criterionIds })])).rejects.toThrow('must write at least one success criterion, all from the current Goal proposal')

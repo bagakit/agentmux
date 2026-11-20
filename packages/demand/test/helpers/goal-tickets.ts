@@ -12,7 +12,7 @@ export function goalTickets(root: string, owner = { runtimeId: 'owner-runtime', 
   const aliases = new Map<string, string>()
   const id = (draft: string) => aliases.get(draft) ?? draft
   return { store, owner, id, draft(id: string) { return Array.from(aliases).find(([, ticket]) => id === ticket)?.[0] ?? id },
-    async revise(goalId: string, input: GoalPlanRevisionInput, author: GoalPlanReviewer) {
+    async revise(goalId: string, input: Extract<GoalPlanRevisionInput, { expectedRevision: number }>, author: GoalPlanReviewer) {
       const existing = new Map<string, string>()
       const current = await store.get(goalId)
       for (const revision of current?.plan?.history ?? []) {

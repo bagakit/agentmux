@@ -2,6 +2,8 @@ import { defineConfig } from 'vitest/config'
 import crossHost from './vitest.goal-cross-host.config.mts'
 
 const changes = {
+  'append-drop-published-nodes': { path: 'packages/demand/src/demand-store.ts',
+    from: 'const savedNodes = appending ? [...(current?.nodes ?? []), ...issued.nodes] : issued.nodes', to: 'const savedNodes = issued.nodes' },
   'active-omit-managed-goals': { path: 'packages/demand/src/goal-active-index.ts', from: "SELECT content FROM active_goal ORDER BY id", to: "SELECT content FROM active_goal WHERE 0" },
   'trust-altered-ticket': { path: 'packages/demand/src/goal-ticket-crypto.ts', from: '!verify(null, original, key, signature)', to: 'false' },
   'omit-claim-completion': { path: 'packages/demand/src/demand-store.ts', from: 'predecessors: freezeGoalTicketDependencies(signer, id, plan, basis.predecessors)', to: 'predecessors: []' },
