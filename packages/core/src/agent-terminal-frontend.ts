@@ -8,6 +8,7 @@ export type AgentTerminalInitialization = {
   phase: 'preparing' | 'creating' | 'ready' | 'failed' | 'unknown'
   native: { state: 'not-created' } | { state: 'confirmed'; sessionId: string } | { state: 'unknown' }
   blocker?: import('./agent-provider.js').AgentProviderInputInitialization
+  /** Latest original failure. In the preparing phase, the actor is continuing preflight. */
   failure?: { step: 'connection' | 'preflight' | 'native-session' | 'frontend'; code?: string | number; message: string }
 }
 export type AgentTerminalFrontendRecoveryRequest = {

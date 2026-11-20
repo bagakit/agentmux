@@ -2,6 +2,7 @@ import { mintObjectId } from '../object-id.js'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
+import { setTimeout as delay } from 'node:timers/promises'
 import { stripVTControlCharacters } from 'node:util'
 import { JSONRPCErrorException } from 'json-rpc-2.0'
 import { CODEX_NATIVE_TOKEN_ENV, CODEX_ACTOR_ID_ENV, CODEX_ACTOR_LIFECYCLE_ENV, joinCodexNativeFrontend, openCodexFrontendControl } from './codex-managed-frontend.js'
@@ -14,6 +15,8 @@ import { codexDiagnosticStream, formatCodexManagedDiagnostic } from '@agentmux/p
 
 export { CODEX_NATIVE_TOKEN_ENV } from './codex-managed-frontend.js'
 const INITIALIZATION_OBSERVATION_MS = 8_000
+const PREFLIGHT_RETRY_INITIAL_MS = 2_000
+const PREFLIGHT_RETRY_MAX_MS = 30_000
 class ManagedNativeLaunchError extends Error {}
 const diagnosticCredentials = (): string[] => [process.env[CODEX_NATIVE_TOKEN_ENV], process.env.AGENTMUX_HOOK_TOKEN,
   process.env.AGENTMUX_AGENT_CAPABILITY].filter((value): value is string => Boolean(value))
@@ -191,13 +194,24 @@ export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number
             setInitialization({ ...initialization, failure: { ...initialization.failure, step: initializationStep } })
           }
           const connection = nativeConnection
-          const readAccount = () => connection.request('account/read', { refreshToken: false }, { retainPending: true })
-          const account = await readAccount().catch(error => {
-            // Codex can retry workspace discovery after it returns a settled
-            // internal error. An outstanding request or transport failure is not that reply.
-            if (!(error instanceof JSONRPCErrorException) || error.code !== -32603 || !live() || !connection.isConnected()) throw error
-            return readAccount()
-          })
+          let account
+          for (let backoff = PREFLIGHT_RETRY_INITIAL_MS; ; backoff = Math.min(backoff * 2, PREFLIGHT_RETRY_MAX_MS)) {
+            try {
+              account = await connection.request('account/read', { refreshToken: false }, { retainPending: true })
+              break
+            } catch (error) {
+              // A settled Codex internal error allows another read on the same actor.
+              if (!(error instanceof JSONRPCErrorException) || error.code !== -32603 || !live() || !connection.isConnected()) throw error
+              const diagnostic = failure(error)
+              if (initialization.phase !== 'preparing' || initialization.failure?.code !== diagnostic.code ||
+                initialization.failure?.message !== diagnostic.message) {
+                setInitialization({ ...initialization, phase: 'preparing', failure: diagnostic })
+              }
+              // Keep a minimum delay and stagger independent actors during a shared outage.
+              await delay(backoff * (0.5 + Math.random() * 0.5), undefined, { signal: lifetime.signal })
+              if (!live()) return
+            }
+          }
           if (account?.requiresOpenaiAuth === true && account.account === null) initializationBlocker = {
             state: 'pending', reason: 'authentication', source: 'native-protocol', scope: 'prerequisite' }
           if (typeof account?.requiresOpenaiAuth !== 'boolean' || account.requiresOpenaiAuth && !account.account) {
@@ -256,7 +270,7 @@ export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number
       let timer: ReturnType<typeof setTimeout> | undefined
       try {
         await Promise.race([pending, new Promise<void>(resolve => { timer = setTimeout(() => {
-          if (live() && initialization.phase !== 'ready' && initialization.phase !== 'failed') {
+          if (live() && initialization.phase !== 'ready' && !initialization.failure) {
             setInitialization({ ...initialization, phase: 'unknown', failure: { step: initializationStep,
               code: 'AGENT_NATIVE_INITIALIZATION_OBSERVATION_UNCONFIRMED',
               message: 'The original initialization response is unconfirmed. Its result remains observed; no native request or input was repeated.' } })

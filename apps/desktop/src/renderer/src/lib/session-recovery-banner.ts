@@ -54,12 +54,14 @@ export function sessionFrontendPresentation(session: SessionSnapshot | undefined
     }
     if (noTerminal) return {
       kind: 'initialization', fullPage: true, phase: 'recovering',
-      title: initialization.phase === 'creating' ? 'Opening your conversation' : 'Preparing your session',
+      title: initialization.phase === 'creating' ? 'Opening your conversation' : diagnostic ? 'Retrying setup' : 'Preparing your session',
       description: initialization.phase === 'creating' ? 'Waiting for the original conversation request to return.'
-        : 'Connecting to the agent service and checking its startup requirements.',
+        : diagnostic ? 'The original backend will check its account again automatically.'
+          : 'Connecting to the agent service and checking its startup requirements.',
       detail: retained,
       actionLabel: 'Check progress',
-      actionDetail: 'Follows the original setup. You can keep writing your draft while it completes.'
+      actionDetail: 'Follows the original setup. You can keep writing your draft while it completes.',
+      ...(diagnostic ? { diagnostic } : {})
     }
   }
   if (frontend.state === 'detached' && typeof frontend.exitCode === 'number' && frontend.exitCode !== 0) {
