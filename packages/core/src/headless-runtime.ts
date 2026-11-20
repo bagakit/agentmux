@@ -166,7 +166,7 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
       }),
       creationAuthority })
     hostRoutes = options.service?.hostRoutes ? undefined : new HostRouteGateway({ stateDirectory, authority: creationAuthority,
-      ...(options.routeEdges ? { edges: options.routeEdges } : {}),
+      edges: options.routeEdges ?? (async () => []),
       edge: options.routeEdge ?? (() => { throw new AgentMuxError('The original Host has no configured route edge transport. Keep the exact route; other Core capabilities remain available.', 'HOST_ROUTE_EDGE_UNAVAILABLE') }),
       call: (method, params, context) => server!.callRpc(method, params, context),
       subscribe: (method, params, emit, context) => server!.subscribeRpc(method, params, emit, context),
