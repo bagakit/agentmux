@@ -66,7 +66,9 @@ it('one click admits real original PMO input once; delivery alone does not chang
       { kind: 'start', operationId: 'start', hostId: 'worker-host', agentSessionId: 'worker', runId: 'worker-run' }
     ] }, read: { method: 'goal.delegations', params: { goalId: 'goal' }, patrolOperationId: patrol.operationId } })
   expect(metadata).not.toHaveProperty('roleGuidance')
-  expect(metadata.next).toBe('Read amux goal --skill and the retained original Goal/patrol/execution/input/evidence before inspection. Actually inspect progress, evidence, gaps and unknowns; use goal patrol report --input FILE to write back this patrol, current business status and next responsible party/action. Explicit review of an original stored worker report collects its exact authenticated reply atomically; do not collect separately before frozen-scope reporting. Delivery, acknowledgement and reminders are not inspection or acceptance. Retain original Goal/Session/Run and unknown inputs; never blindly resend. Human confirmation and acceptance remain human actions.')
+  expect(metadata.next).toContain('amux goal patrol report')
+  expect(metadata.next).toContain('exact original worker report')
+  expect(metadata.next).toContain('within the same review operation')
   expect(attempt.agentMuxNote).toBe(JSON.stringify(metadata) + '\n\n' + goalRoleGuidance({ role: 'manager', goalId: 'goal',
     agentSessionId: 'manager', runId: 'manager-run', source: { kind: 'goal-patrol', operationId: patrol.operationId } }))
 })
