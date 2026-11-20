@@ -24,6 +24,8 @@ import { encodeCwdDirname } from '../../../providers/src/grok/native-history.js'
 import { grokChunk, grokDone, grokUpdate } from '../../../core/test/fixtures/grok-updates.js'
 import { createHostConnectionOwner } from '../../../../apps/host/src/connections.js'
 import { createHostMoteMainReader, createHostMoteDialogue } from '../../../../apps/host/src/mote-dialogue.js'
+import { createHostSpatialAgentControl } from '../../../../apps/host/src/spatial-agent-control.js'
+import { HostMoteQuickPreferences } from '../../../../apps/host/src/mote-quick-preferences.js'
 import { FileReadOwner } from '../../../../apps/host/src/file-read-owner.js'
 import { OrdinaryWorkspaceFiles } from '../../../../apps/host/src/ordinary-files.js'
 import { MoteDialogueStore } from '@agentmux/core/mote-dialogue-store'
@@ -186,6 +188,10 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
     workspace: id => id === workspace.id ? workspace : undefined, files: new OrdinaryWorkspaceFiles(), topicForDirectory: (resource, path) => topics.readForDirectory(resource, path) }) : undefined
   const main = mainFiles ? createHostMoteMainReader({ configurationPath, spatial, files: mainFiles }) : undefined
   const dialogue = main ? createHostMoteDialogue({ main, spatial, store: new MoteDialogueStore(join(original.root, 'dialogue.sqlite')), clientForHost: () => executionReader ?? client }) : undefined
+  const quick = main && mainFiles && dialogue ? new HostMoteQuickPreferences({ files: mainFiles, main,
+    catalog: async () => { const state = await spatial.read(); return state ? spatialCatalog(state.graph) : null },
+    executors: async () => (await client.listHostExecutors()).executors.map(value => ({ id: value.executorId, name: value.label, providerId: value.providerId })),
+    recordMainSource: dialogue.recordMainSource, prepareMainSource: dialogue.prepareMainSource }) : undefined
   async function bindMain(id: string, existing?: core.AgentMuxAgentSession) {
     const executor = (await client.listHostExecutors()).executors.find(e => e.executorId === 'saved-chat')!
     const session = existing ?? (await client.createHostAgentWithDelivery({ agentSessionId: id, createOperationId: `create-${id}`,
@@ -251,15 +257,17 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
   }
   const servingClients = () => executionReader ? [{ hostId: 'local', client: hosting.client }, { hostId: mainHostId, client: executionReader }] : clients()
   async function open() {
+    const headless = { get server() { return server }, client: hosting.client, ownerIdentity: () => execution === 'remote'
+      ? { runtimeId: 'fixture-hosting-runtime', ownerInstanceId: hostingOwnerInstanceId } : { runtimeId: 'fixture-original-core', ownerInstanceId: hostingOwnerInstanceId } } as core.AgentMuxHeadlessRuntime
     if (mainMode) {
       connectionOwner = createHostConnectionOwner({ directory: join(original.root, 'connectors'), adapters: [adapter], spatial, moteMain: () => main, ...(executionReader ? { clients: () => [{ hostId: mainHostId, client: executionReader! }, { hostId: 'same-runtime-alias', client: executionReader! }] } : {}),
         moteChat: { agents, assertTarget: desktopAgents.assertTarget, assertReady: desktopAgents.assertReady, member: createHostMoteMembership(spatial) } })
-      await connectionOwner.start({ client: hosting.client, ownerIdentity: () => execution === 'remote' ? { runtimeId: 'fixture-hosting-runtime', ownerInstanceId: hostingOwnerInstanceId } : { runtimeId: 'fixture-original-core', ownerInstanceId: hostingOwnerInstanceId } } as core.AgentMuxHeadlessRuntime)
+      await connectionOwner.start(headless)
       services = await connectionOwner.services()
     } else services = await createConnectionServices({ directory: join(original.root, 'connectors'), adapters: [adapter],
       bindings: { spatial, checkpoint }, moteChat: { ...(main ? { main: () => main } : {}), agents, assertTarget: desktopAgents.assertTarget, assertReady: desktopAgents.assertReady, member: createHostMoteMembership(spatial) },
       publication: createPublicationConversationPort(clients), ingress: { core: host => host === 'local' ? original.client : undefined } })
-    server = new core.AgentMuxControlServer({ socketPath: join(original.root, 'public.sock'), connections: services.connections, moteChat: services.moteChat!, ...(dialogue ? { moteDialogue: dialogue } : {}), spatialState: spatial, coreClients: servingClients, ...(hostingRuntime ? { hostedRuntime: () => hostingRuntime! } : {}) })
+    server = new core.AgentMuxControlServer({ socketPath: join(original.root, 'public.sock'), connections: services.connections, moteChat: services.moteChat!, ...(dialogue ? { moteDialogue: dialogue } : {}), ...(quick ? { moteQuickPreferences: quick, spatialAgentControl: createHostSpatialAgentControl({ configurationPath, spatial, runtime: () => headless }) } : {}), spatialState: spatial, coreClients: servingClients, ...(hostingRuntime ? { hostedRuntime: () => hostingRuntime! } : {}) })
     await server.start()
     sdk = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
     if (executionReader) hostingReader = await connectHostedAgentMux({ rpc: sdk, expectedRuntimeId: 'fixture-hosting-runtime', forwardRpc: (method, params, context) => sdk.call(method, params, context) })

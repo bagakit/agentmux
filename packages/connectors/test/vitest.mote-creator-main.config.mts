@@ -4,6 +4,8 @@ import { appendFileSync, readFileSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
 const variants: Record<string, { path: string; before: string; after: string }> = {
+  'skip-priority': { path: 'packages/core/src/public-rpc-service.ts', before: "if (executor && executor.availability !== 'missing') return id", after: 'if (id === order[0]) return id' },
+  'disconnect-creator-setup': { path: 'packages/connectors/src/mote-chat.ts', before: 'await this.options.prepareCreatorMain(configuration.target, assertCreator)', after: 'await Promise.resolve()' },
   audience: { path: 'packages/connectors/src/mote-chat.ts', before: "if (shared) fail('MOTE_CHAT_MAIN_EXTERNAL_AUDIENCE'", after: "if (false) fail('MOTE_CHAT_MAIN_EXTERNAL_AUDIENCE'" },
   alias: { path: 'packages/connectors/src/mote-chat.ts', before: 'if (executionRuntimeId && runtimeId) return executionRuntimeId === runtimeId', after: 'return binding.executionHostId === hostId' },
   'old-lane': { path: 'packages/connectors/src/mote-chat.ts', before: "if (lane?.binding && lane.binding.state !== 'detached') candidates.push(lane.binding)", after: 'void lane' },

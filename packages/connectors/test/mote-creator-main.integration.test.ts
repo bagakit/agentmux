@@ -48,16 +48,26 @@ it('delivers the authenticated creator to the original logical Main once and kee
   expect((await f.records())).toHaveLength(1)
 })
 
-it('keeps a creator message received when Main is unbound, then delivers that same intake after setup', async () => {
+it('starts one Main for concurrent original creator messages and skips a missing first Executor', async () => {
   const f = await fixture(false)
-  expect(await f.wire.post(f.message('wait-main'))).toBe(202)
-  await vi.waitFor(async () => expect((await f.records())[0]).toMatchObject({ state: 'received', code: 'MOTE_CHAT_MAIN_REQUIRED' }))
-  expect(f.start).not.toHaveBeenCalled(); expect(f.prepare).not.toHaveBeenCalled(); expect(f.inner.kernel.input).not.toHaveBeenCalled()
-  const ingressId = (await f.records())[0]!.ingressId
-  await f.bindMain('later-main')
-  await f.services.ingress!.dispatch(ingressId)
-  expect((await f.services.ingress!.inspect({ ingressId })).ingress).toMatchObject({ ingressId, state: 'claimed', input: { agentSessionId: 'later-main' } })
-  expect(f.start).toHaveBeenCalledOnce(); expect(f.prepare).not.toHaveBeenCalled()
+  await writeFile(join(f.topic.physicalDirectoryPath!, 'MOTE.md'), '---\nversion: 1\ndefaults:\n  executorId: removed-executor\n  fallbackExecutorIds: [saved-chat]\n---\n')
+  expect(await Promise.all([f.wire.post(f.message('first-dm-1')), f.wire.post(f.message('first-dm-2'))])).toEqual([202, 202])
+  const first = await f.claimed('first-dm-1'), second = await f.claimed('first-dm-2')
+  const main = (await f.sdk.call('space.mote.dialogue.read', { target: f.target })).main.current!
+  expect(first.input).toMatchObject({ agentSessionId: main.sessionId, author: { kind: 'external', actor: f.creator } })
+  expect(second.input).toMatchObject({ agentSessionId: main.sessionId, author: { kind: 'external', actor: f.creator } })
+  expect(first.input!.operationId).not.toBe(second.input!.operationId)
+  expect((await f.client.readAgentSession(main.sessionId))?.executorId).toBe('saved-chat')
+  const inventory = await f.client.listHostExecutors()
+  const fallback = inventory.executors.find(executor => executor.executorId === 'saved-chat')!
+  const restored = vi.spyOn(f.client, 'listHostExecutors').mockResolvedValue({
+    ...inventory, executors: [{ ...fallback, executorId: 'removed-executor', availability: 'available' }, ...inventory.executors]
+  })
+  expect(await f.wire.post(f.message('after-first-executor-returns'))).toBe(202)
+  expect((await f.claimed('after-first-executor-returns')).input?.agentSessionId).toBe(main.sessionId)
+  expect(f.start).toHaveBeenCalledOnce()
+  expect(f.prepare).not.toHaveBeenCalled()
+  restored.mockRestore()
 })
 
 it('freezes old Main inputs through an unknown Core result, role replacement and service restart', async () => {
