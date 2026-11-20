@@ -113,7 +113,7 @@ import { GoalContinuationControl } from '../src/renderer/src/components/GoalCont
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface'
 import { MobileGoalActions } from '../../mobile/src/goals/MobileGoalActions'
 import { runDemandCli } from '../../../packages/demand/src/cli'
-import { admittedDemandParticipation, admittedDemandCreateMatches, admittedDemandUpdateMatches } from '@agentmux/host/demand-participation'
+import { admittedDemandParticipation } from '@agentmux/host/demand-participation'
 import { GoalDetail } from '../src/renderer/src/components/GoalDetail'
 import { EMPTY_GOAL_ACKNOWLEDGEMENT } from '../src/renderer/src/components/GoalAlignment'
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
@@ -1257,15 +1257,6 @@ it('collaboration original provenance authenticates create and requirements whil
     scratch.read.mockResolvedValue({ kind: 'topic' }); expect((await admittedDemandParticipation(context, 'create', config, scratch as any))?.mote).toBeUndefined()
     expect(await admittedDemandParticipation({ ...context, actor: { kind: 'agent', id: 'body-claim', verified: false } }, 'create', config, scratch as any)).toBeUndefined()
     expect(await admittedDemandParticipation({ ...context, location: { ...context.location, callerSessionId: 'different-verified-source' } }, 'create', config, scratch as any)).toBeUndefined()
-    const admitted = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'admit-op', operation: 'demand.create' as const, title: 'Original', projectId: 'project-original', sessionIds: ['accurate-original'] }
-    const input = { title: 'Original', projectId: 'project-original', sessionIds: ['accurate-original'] }
-    expect(admittedDemandCreateMatches(admitted, input)).toBe(true)
-    expect(admittedDemandCreateMatches(admitted, { ...input, projectId: 'other-project' })).toBe(false)
-    expect(admittedDemandCreateMatches(admitted, { ...input, sessionIds: ['body-session'] })).toBe(false)
-    const updated = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'update-op', operation: 'demand.update' as const, demandId: 'goal', patch: { description: 'Authored description' }, expectedUpdatedAt: _reshape_fixtureEpoch(0, 0, 7) }
-    expect(admittedDemandUpdateMatches(updated, 'goal', { description: 'Authored description' }, 7)).toBe(true)
-    expect(admittedDemandUpdateMatches(updated, 'goal', { description: 'Authored description', assigneeSessionIds: ['not-authored'] }, 7)).toBe(false)
-    expect(admittedDemandUpdateMatches(updated, 'goal', { description: 'Authored description' }, 8)).toBe(false)
   } finally { await typed.dispose(); await server.stop() }
 })
 

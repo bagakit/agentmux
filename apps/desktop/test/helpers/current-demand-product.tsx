@@ -92,7 +92,6 @@ import { GoalContinuationControl } from '../../src/renderer/src/components/GoalC
 import { GlobalBoardSurface } from '../../src/renderer/src/components/GlobalBoardSurface'
 import { MobileGoalActions } from '../../../mobile/src/goals/MobileGoalActions'
 import { runDemandCli } from '../../../../packages/demand/src/cli'
-import { admittedDemandParticipation, admittedDemandCreateMatches, admittedDemandUpdateMatches } from '@agentmux/host/demand-participation'
 import { GoalDetail } from '../../src/renderer/src/components/GoalDetail'
 import { EMPTY_GOAL_ACKNOWLEDGEMENT } from '../../src/renderer/src/components/GoalAlignment'
 import { AgentSessionComposer } from '../../src/renderer/src/components/AgentSessionComposer'
