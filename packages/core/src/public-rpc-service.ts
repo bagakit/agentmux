@@ -1524,7 +1524,7 @@ export class AgentMuxRpcService {
       if (caller ? ownerOnly : agentOnly || !context.principal || !['user', 'device'].includes(context.principal.kind))
         throw new AgentMuxError('This Group operation requires its original authenticated workspace participant.', 'CONTROL_PERMISSION_DENIED')
       const actor: MoteGroupCallContext['actor'] = caller
-        ? { kind: 'agent', agentSessionId: caller.agentSessionId, hostId: caller.hostId, sourceRuns: sessionSemanticResumeSourceRuns(caller.session) }
+        ? { kind: 'agent', agentSessionId: caller.agentSessionId, hostId: caller.hostId, runId: caller.session.run.runId, sourceRuns: sessionSemanticResumeSourceRuns(caller.session) }
         : { kind: 'human', id: `local-user:${process.getuid?.() ?? 'current'}` }
       const assertCurrent = async () => {
         context.signal?.throwIfAborted()

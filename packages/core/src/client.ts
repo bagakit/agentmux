@@ -9083,6 +9083,30 @@ export class AgentMuxClient {
     return await this.messageQueue.append(input, intent ? { admissionIntent: intent } : undefined)
   }
 
+  /** In-process continuation for an authenticated publication already committed by the private Thread owner. */
+  async enqueuePublishedMoteReport(input: { messageId: string; threadId: string; assignmentMessageId: string; replyMessageId: string;
+    senderSessionId: string; senderRunId: string; recipientSessionId: string; text: string; createdAt: number },
+    assertCurrent: () => Promise<void>): Promise<AgentMuxMessageReadView> {
+    const { messageId, threadId, assignmentMessageId, replyMessageId, senderSessionId, senderRunId, recipientSessionId } = input
+    const sender = await this.currentStoredAgentSession(senderSessionId)
+    const recipient = await this.currentStoredAgentSession(recipientSessionId)
+    if (sender.hostId !== 'local' || recipient.hostId !== 'local' || ![...sessionSemanticResumeSourceRuns(sender),
+      ...sender.retiredRuns.map(run => run.runId)].includes(senderRunId)) throw new AgentMuxError(
+      'The published private report cannot be matched to its original local Agent Run.', 'MESSAGE_SENDER_MISMATCH')
+    await assertCurrent()
+    const envelope: AgentMuxMessageEnvelope = { schema: 'agentmux.a2a.v1', messageId, operationId: `${messageId}-enqueue`, createdAt: input.createdAt,
+      sender: { kind: 'agent-session', agentSessionId: senderSessionId }, recipient: { kind: 'agent-session', agentSessionId: recipientSessionId },
+      senderSessionId, senderRunId, recipientSessionId, recipientRunId: recipient.run.runId, threadId, correlationId: assignmentMessageId,
+      workspaceId: null, replyTo: null, body: input.text,
+      application: { schema: 'amux.mote.private-report.v1', data: { assignmentMessageId, replyMessageId } } }
+    await this.messageQueue.append({ ...envelope, execution: 'default', sourceChannel: 'agent-message' }, { deliveryMode: 'reference', reauthorize: async () => {
+      if ((await this.currentStoredAgentSession(recipientSessionId)).run.runId !== recipient.run.runId) throw new AgentMuxError(
+        'The coordinating Main Run changed before the report was queued.', 'MESSAGE_RECIPIENT_MISMATCH')
+    } })
+    this.messageNotifications.saved(recipientSessionId)
+    return (await this.readMessage({ messageId }))!
+  }
+
   private async assertNewAgentInputRun(agentSessionId: string, runId: string, originalClaim?: () => Promise<boolean>): Promise<void> {
     const lifecycle = await this.store.readLifecycleReservation(agentSessionId)
     const retired = lifecycle ? null : await this.store.readRetiredAgentSession(agentSessionId)
@@ -9233,6 +9257,16 @@ export class AgentMuxClient {
       ...(original && pending?.nativeCompleted ? { nativeCompleted: pending.nativeCompleted } : {}) })
   }
 
+  /** A Goal reads only the original Core approvals for its known input recipients. */
+  async listAgentGoalApprovals(agentSessionId: string, goalId: string) {
+    const active = await this.store.readMetadata(agentSessionId)
+    const receipts = active?.interactionOperations ?? (await this.store.readRetiredAgentSession(agentSessionId))?.interactionOperations ?? {}
+    return Object.values(receipts).flatMap(receipt => {
+      const view = receipt.goalApproval?.goalId === goalId ? goalApprovalObservation(receipt) : undefined
+      return view ? [view] : []
+    })
+  }
+
   async respondAgentInteraction(input: AgentMuxAgentInteractionInput, context?: AgentInputCallContext): Promise<AgentMuxInteractionOperationReceipt> {
     const observationId = await this.moteInputs.prepare({kind:'interaction',agentSessionId:input.agentSessionId,runId:input.expectedRun.runId,operationId:input.operationId},input.moteSource,input.authorHuman === true && !input.externalAction)
     try { return await this.respondAgentInteractionOwned(input,context,observationId) }
@@ -9261,16 +9295,31 @@ export class AgentMuxClient {
     const expected = agentInteractionRequestTarget(input.expectedRequest)
     const response = normalizeAgentInteractionResponse(expected, input.response)
     if (!isDeepStrictEqual(response, input.response)) throw new AgentMuxError('The interaction response contains unknown fields.', 'INVALID_AGENT_INTERACTION_RESPONSE')
+    const authority = context?.goalApproval
+    const attribution = authority && parseGoalApprovalAttribution({ ...authority, kind: 'explicit-goal-selection', at: Date.now() })
+    const matchesApproval = (receipt: AgentMuxInteractionOperationReceipt) => !attribution ||
+      receipt.goalApproval !== undefined && isDeepStrictEqual({ ...receipt.goalApproval, at: attribution.at }, attribution)
+    if (attribution && (response.kind !== 'permission' || input.externalAction || attribution.inputKey.agentSessionId !== input.agentSessionId ||
+        !sameRun(attribution.inputKey.expectedRun, input.expectedRun) || attribution.inputKey.submissionId !== attribution.dispatchOperationId))
+      throw new AgentMuxError('The selected Goal input belongs to another original permission target.', 'AGENT_INTERACTION_RESPONSE_CONFLICT')
     const original = await this.inspectAgentInteractionOperation(input)
     if (original) {
       if (!sameRun(original.run, input.expectedRun) || !isDeepStrictEqual(agentInteractionRequestTarget(original.expectedRequest), expected) ||
-          !isDeepStrictEqual(original.response, response) || !isDeepStrictEqual(original.externalAction, input.externalAction)) throw new AgentMuxError('The original response operation has different content.', 'AGENT_INTERACTION_RESPONSE_CONFLICT')
+          !isDeepStrictEqual(original.response, response) || !isDeepStrictEqual(original.externalAction, input.externalAction) || !matchesApproval(original)) throw new AgentMuxError('The original response operation has different content or attribution.', 'AGENT_INTERACTION_RESPONSE_CONFLICT')
       // Only an explicit same-intent caller may join the original recoverable input operation.
       // Inspection and reconnection never turn unknown into a new input attempt.
-      if (!['saved', 'unknown'].includes(original.delivery) || original.nativeCompleted || expected.evidence.source === 'acp' && original.delivery === 'unknown') return original
+      if (attribution || original.goalApproval || !['saved', 'unknown'].includes(original.delivery) || original.nativeCompleted || expected.evidence.source === 'acp' && original.delivery === 'unknown') return original
+    }
+    if (attribution) {
+      const originalInput = await this.inspectAgentPromptSubmission(attribution.inputKey)
+      if (!originalInput?.admission?.acknowledged || !isDeepStrictEqual(originalInput.admission.inputKey, attribution.inputKey))
+        throw new AgentMuxError('The selected Goal Start has no exact confirmed original Core input.', 'CONTROL_UNAVAILABLE')
+      await context?.assertCurrent?.()
     }
     const requested = await this.registry.resolveMetadata(input.agentSessionId, 'local', () => context?.requestSignal?.throwIfAborted())
+    let fresh = false
     await this.updateExactAgentSession(input.agentSessionId, input.expectedRun, current => {
+      fresh = false
       const request = [current.pendingInteraction?.request, ...(current.pendingInteraction?.additionalRequests ?? [])].find(candidate => candidate?.id === response.requestId)
       if (!request || request.agentSessionId !== input.agentSessionId || !isDeepStrictEqual(agentInteractionRequestTarget(request), expected) ||
           !sameNativeHandle(current.nativeHandle, requested.nativeHandle)) throw new AgentMuxError('The exact original interaction request changed.', 'UNKNOWN_AGENT_INTERACTION')
@@ -9279,18 +9328,20 @@ export class AgentMuxClient {
       if (competing) throw new AgentMuxError('The original request already has another response operation.', 'AGENT_INTERACTION_RESPONSE_CONFLICT')
       const prior = current.interactionOperations?.[input.operationId]
       if (prior) {
-        if (!isDeepStrictEqual(prior.response, response) || !isDeepStrictEqual(agentInteractionRequestTarget(prior.expectedRequest), expected)) throw new AgentMuxError('The original response operation has different content.', 'AGENT_INTERACTION_RESPONSE_CONFLICT')
+        if (!isDeepStrictEqual(prior.response, response) || !isDeepStrictEqual(agentInteractionRequestTarget(prior.expectedRequest), expected) || !matchesApproval(prior)) throw new AgentMuxError('The original response operation has different content or attribution.', 'AGENT_INTERACTION_RESPONSE_CONFLICT')
         return current
       }
+      fresh = true
       return { ...current, interactionOperations: { ...current.interactionOperations, [input.operationId]: {
         operationId: input.operationId, agentSessionId: input.agentSessionId, run: input.expectedRun,
         ...(input.authorHuman === true && !input.externalAction ? {authorHuman:true as const} : {}),
+        ...(attribution ? { goalApproval: attribution } : {}),
         ...(observationId ? {moteObservationId:observationId} : {}),
         expectedRequest: structuredClone(expected), response: structuredClone(response),
         ...(input.externalAction ? { externalAction: structuredClone(input.externalAction) } : {}),
         ...(current.nativeHandle ? { nativeHandle: current.nativeHandle } : {}), delivery: 'saved', nativeAdoption: 'unknown' } }, updatedAt: Date.now() }
     })
-    await this.dispatchAgentInteraction(input, context)
+    if (!attribution || fresh) await this.dispatchAgentInteraction(input, context)
     return (await this.inspectAgentInteractionOperation(input))!
   }
 
@@ -13483,3 +13534,4 @@ function readingDiagnosticFailureReason(error: unknown): ReadingDiagnosticReason
 }
 
 export { terminalEnvironment } from './agent-runtime-helpers.js'
+import { goalApprovalObservation, parseGoalApprovalAttribution } from './goal-approval.js'

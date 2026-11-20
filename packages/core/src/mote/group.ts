@@ -92,7 +92,7 @@ export const MOTE_GROUP_METHODS = {
 export const isMoteGroupMethod = (method: unknown): method is MoteGroupMethod =>
   typeof method === 'string' && Object.hasOwn(MOTE_GROUP_METHODS, method)
 export type MoteGroupCallContext = {
-  actor: { kind: 'human'; id: string } | { kind: 'agent'; agentSessionId: string; hostId: string; sourceRuns: readonly string[] }
+  actor: { kind: 'human'; id: string } | { kind: 'agent'; agentSessionId: string; hostId: string; runId: string; sourceRuns: readonly string[] }
   assertCurrent(): Promise<void>
 }
 export interface MoteGroupPort {

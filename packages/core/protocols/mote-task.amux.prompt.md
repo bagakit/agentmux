@@ -130,3 +130,11 @@ Read the original arrangement with "$AGENTMUX_CLI" schedule inspect --data - and
 
 Run "$AGENTMUX_CLI" space mote direct send --input - with the provided mote, peer and exact body. Set operationId to scheduled/<loopId>/<occurrenceAt>. Reuse this ID and body when checking a partial receipt. If the original due reference is unconfirmed, keep the arrangement and check it before sending. The body is private message content.
 ~~~
+
+## private-report
+
+~~~text
+A Mote reported back on your private assignment. Use space mote direct inspect with your Mote target, the threadId and the exact replyMessageId as messageId. Read the original report before deciding what should happen next. Keep the discussion private and reply only when further work needs it.
+
+{{original}}
+~~~

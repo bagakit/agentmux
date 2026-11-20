@@ -107,7 +107,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     mobileState = { state: 'unavailable', message: '原 Host 可选连接已停止；Agent 会话保留。' }
     const errors: unknown[] = []
     for (const close of [() => outbound?.close(), () => tailcat?.close(), () => relay?.stop(), () => local?.stop(), () => deviceAccess.flush(),
-      () => mobileIncidents?.flush(), () => motePresence?.dispose(), () => goals?.dispose(), () => connectionOwner?.close(), () => runtime?.stop()]) {
+      () => mobileIncidents?.flush(), () => moteDirect?.dispose(), () => motePresence?.dispose(), () => goals?.dispose(), () => connectionOwner?.close(), () => runtime?.stop()]) {
       try { await close() } catch (error) { errors.push(error) }
     }
     if (errors.length === 1) throw errors[0]
@@ -223,16 +223,21 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
       return originalRuntime().client
     }
   }) : undefined
-  const moteDirect = conversationAgents && moteMain && options.store instanceof AgentMuxFileAgentSessionStore
+  const moteDirectStore = options.store instanceof AgentMuxFileAgentSessionStore
+    ? new MoteGroupStore(join(dirname(options.store.path), 'mote-direct.sqlite'), 'direct') : undefined
+  const moteDirect = conversationAgents && moteMain && moteDirectStore
     ? createHostMoteDirect(createHostMoteGroups({
-      store: new MoteGroupStore(join(dirname(options.store.path), 'mote-direct.sqlite'), 'direct'),
+      store: moteDirectStore,
       agents: conversationAgents,
       main: moteMain,
       client: hostId => {
         if (hostId !== 'local') throw new AgentMuxError('The original private thread Host is unavailable.', 'CONTROL_UNAVAILABLE')
         return originalRuntime().client
       }
-    }), { main: moteMain, readPeer: conversationAgents.readTarget, client: { readAgentSession: id => originalRuntime().client.readAgentSession(id) } }) : undefined
+    }), { store: moteDirectStore, main: moteMain, readPeer: conversationAgents.readTarget,
+      client: { readAgentSession: id => originalRuntime().client.readAgentSession(id),
+        readMessage: input => originalRuntime().client.readMessage(input),
+        enqueuePublishedMoteReport: (input, assertCurrent) => originalRuntime().client.enqueuePublishedMoteReport(input, assertCurrent) } }) : undefined
   const service = {
     spatialState,
     ...(moteGroups ? { moteGroups } : {}),
@@ -401,6 +406,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
       inputContextCaptureReader: options.inputContextCaptureReader ?? createDesktopInputContextCaptureReader({ desktopSocketPath: desktopPath, captureHostId: 'local', executionHostId: 'local' }),
       ...(externalInputAuthority ? { externalInputAuthority } : {}) })
     // The Core endpoint is already serving before this optional listener can accept a peer.
+    moteDirect?.start()
     void outbound.start(runtime.server)
     void tailcat.start()
     await connectionOwner?.start(runtime)

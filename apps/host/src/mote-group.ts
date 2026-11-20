@@ -339,7 +339,8 @@ export function createHostMoteGroups(options: {
     await assertCurrent()
     const author = { kind: 'mote' as const, moteId: member.moteId, name: member.name }
     return (await store.append(input.operationId, digest({ input, author }), { id: mintObjectId(), groupId: input.groupId,
-      createdAt: Date.now(), body: input.body, author, replyToMessageId: original.id }, [], memberAuthority(source.membership))).message
+      createdAt: Date.now(), body: input.body, author, replyToMessageId: original.id }, [], memberAuthority(source.membership),
+      store.kind === 'direct' ? { senderSessionId: actor.agentSessionId, senderRunId: actor.runId } : undefined)).message
   }
 
   async function memberFromTarget(target: MotePreferencesTarget): Promise<MoteGroupMember> {

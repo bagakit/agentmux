@@ -790,10 +790,10 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   ...(Object.keys(MOTE_DIRECT_METHODS) as MoteDirectMethod[]).map(method => {
     const [summary, details] = ({
       'space.mote.direct.list': ['List the private threads of one Mote.', 'JSON requires {mote}; beforeSequence and limit are optional. Use your exact Mote target.'],
-      'space.mote.direct.inspect': ['Read the original private Mote thread and its messages.', 'JSON requires {threadId}; beforeSequence and limit are optional. From your current Main include mote, your exact Mote target. A private Thread uses its own binding.'],
+      'space.mote.direct.inspect': ['Read the original private Mote thread and its messages.', 'JSON requires {threadId}. Select one original messageId or page with beforeSequence and limit. From your current Main include mote, your exact Mote target. A private Thread uses its own binding.'],
       'space.mote.direct.send': ['Send a private message to another Mote.', 'JSON requires {mote,peer,operationId,body}; replyToMessageId is optional. mote and peer each use {spaceId,zoneId,expectedResource} from Mote presentation. Run from your authenticated current Main. Keep operationId and the same request when checking an uncertain send.'],
       'space.mote.direct.schedule': ['Arrange a private assignment from the current Mote Main.', 'JSON requires {mote,peer,operationId,body} and exactly one of calendar, afterMs or everyMs using schedule create timing. The original Host schedules an input to this Main. At the due turn, this Main sends the assignment and receives its separate private delivery receipt.'],
-      'space.mote.direct.reply': ['Reply from the private Thread that received the addressed input.', 'JSON requires {threadId,operationId,inputOperationId,body}. Use the command from the original input. Keep the original request when checking an uncertain reply.']
+      'space.mote.direct.reply': ['Reply from the private Thread that received the addressed input.', 'JSON requires {threadId,operationId,inputOperationId,body}. The private reply and the original Main Inbox notification have separate receipts. Use the same request to check the notification.']
     } satisfies Record<MoteDirectMethod, [string, string]>)[method]
     return command(method, '--input FILE|-', summary, { '--input': 'data' },
       async flags => parseMoteDirectParams(method, await readControlJsonInput(value(flags, '--input', true)!, 'Mote private thread input')), details)

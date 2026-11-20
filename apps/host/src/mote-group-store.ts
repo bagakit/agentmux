@@ -28,6 +28,7 @@ type GroupSettingsChange = { avatarMoteIds?: string[]; announcement?: string | n
 type GroupChange = { kind: 'settings'; settings: GroupSettingsChange } | { kind: 'invite'; members: MoteGroupMember[] }
   | { kind: 'remove'; moteIds: string[] } | { kind: 'leave' }
 type GroupMemberAuthority = { moteId: string; generation: string }
+export type MotePrivateReportOrigin = { threadId: string; replyMessageId: string; senderSessionId: string; senderRunId: string }
 
 export const groupStableId = (kind: string, ...parts: string[]): string =>
   `mote-group-${kind}-${createHash('sha256').update(JSON.stringify(parts)).digest('hex')}`
@@ -78,6 +79,9 @@ export class MoteGroupStore {
         CREATE TABLE IF NOT EXISTS group_operations (group_id TEXT NOT NULL REFERENCES groups(id), operation_id TEXT NOT NULL, digest TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(group_id,operation_id));
         CREATE TABLE IF NOT EXISTS group_invitations (operation_id TEXT PRIMARY KEY, group_id TEXT NOT NULL, mote_id TEXT NOT NULL, data TEXT NOT NULL,
           FOREIGN KEY(group_id,mote_id) REFERENCES members(group_id,mote_id));`)
+      if (write && this.kind === 'direct') db.exec(`
+        CREATE TABLE IF NOT EXISTS private_reports (message_id TEXT PRIMARY KEY REFERENCES messages(id), data TEXT NOT NULL, next_at INTEGER);
+        CREATE INDEX IF NOT EXISTS pending_private_reports ON private_reports(next_at) WHERE next_at IS NOT NULL;`)
       return db
     } catch (error) {
       db.close()
@@ -394,7 +398,8 @@ export class MoteGroupStore {
     return this.read(null, db => this.publishedMessage(db, groupId, operationId))
   }
 
-  async append(operationId: string, digest: string, body: MessageBody, recipients: MoteGroupDelivery[], actor?: GroupMemberAuthority): Promise<{ message: MoteGroupMessage; fresh: boolean }> {
+  async append(operationId: string, digest: string, body: MessageBody, recipients: MoteGroupDelivery[], actor?: GroupMemberAuthority,
+    reportSender?: Pick<MotePrivateReportOrigin, 'senderSessionId' | 'senderRunId'>): Promise<{ message: MoteGroupMessage; fresh: boolean }> {
     return this.write(db => {
       this.originalGroup(db, body.groupId)
       const prior = this.publishedMessage(db, body.groupId, operationId)
@@ -415,8 +420,32 @@ export class MoteGroupStore {
         .run(body.id, body.groupId, operationId, digest, JSON.stringify(body))
       const insert = db.prepare('INSERT INTO deliveries(message_id,mote_id,operation_id,data) VALUES (?,?,?,?)')
       for (const record of selected) insert.run(body.id, record.delivery.moteId, record.delivery.operationId, JSON.stringify(record))
+      if (reportSender && this.kind === 'direct') db.prepare('INSERT INTO private_reports(message_id,data,next_at) VALUES (?,?,0)')
+        .run(body.id, JSON.stringify({ ...reportSender, threadId: body.groupId, replyMessageId: body.id } satisfies MotePrivateReportOrigin))
       return { message: this.publishedMessage(db, body.groupId, operationId)!.message, fresh: true }
     })
+  }
+
+  async privateReport(messageId: string): Promise<MotePrivateReportOrigin | null> {
+    return this.read(null, db => {
+      if (!db.prepare("SELECT 1 FROM sqlite_master WHERE name='private_reports'").get()) return null
+      const row = db.prepare('SELECT data FROM private_reports WHERE message_id=?').get(messageId)
+      return row ? decode<MotePrivateReportOrigin>(row.data) : null
+    })
+  }
+
+  async nextPrivateReports(now: number): Promise<{ due: MotePrivateReportOrigin[]; nextAt: number | null }> {
+    const empty = { due: [], nextAt: null }
+    return this.read(empty as { due: MotePrivateReportOrigin[]; nextAt: number | null }, db => {
+      if (!db.prepare("SELECT 1 FROM sqlite_master WHERE name='private_reports'").get()) return empty
+      const due = db.prepare('SELECT data FROM private_reports WHERE next_at<=? ORDER BY next_at,message_id LIMIT 16').all(now)
+      const nextAt = db.prepare('SELECT MIN(next_at) next_at FROM private_reports WHERE next_at IS NOT NULL').get()?.next_at
+      return { due: due.map(row => decode<MotePrivateReportOrigin>(row.data)), nextAt: typeof nextAt === 'number' ? nextAt : null }
+    })
+  }
+
+  async settlePrivateReport(messageId: string, nextAt: number | null): Promise<void> {
+    await this.write(db => { db.prepare('UPDATE private_reports SET next_at=? WHERE message_id=? AND next_at IS NOT NULL').run(nextAt, messageId) })
   }
 
   async delivery(gid: string, messageId: string, moteId: string): Promise<GroupDeliveryRecord | null> {

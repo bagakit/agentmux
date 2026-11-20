@@ -329,7 +329,8 @@ export const AMUX_PROTOCOL_TEMPLATES = {
     "idea": "Propose up to three useful ideas for the direction below. Explain how each relates to the original work, cite a source and give a concrete next step and a discussion starter.\n\n{{knowledge}}\n\nUser direction:\n{{direction}}\n\n{{sources}}\n\nContinue a chosen idea through the original discussion.",
     "idea-knowledge": "Read relevant original evidence and distinguish it from suggestions. The current user direction and saved preferences guide this discussion. If existing authorization covers a useful knowledge update, keep it in the same original note and verify the saved version.",
     "idea-schedule": "Propose up to three useful ideas for this direction. Explain the reason, cite the original source and give a concrete next step.\n\n{{knowledge}}\n\n{{sources}}\n\nUse amux file --skill to read the current original files. The retained revisions record observations when the schedule was prepared. Report current gaps and continue a chosen idea through the original discussion.",
-    "private-schedule": "This is the scheduled private assignment you saved. On this due turn, give the original assignment below to the exact peer.\n\nRead the original arrangement with \"$AGENTMUX_CLI\" schedule inspect --data - and the provided operationId. Use its schedule.lastInputRef.futureIntent.occurrenceAt and schedule.loopId.\n\nRun \"$AGENTMUX_CLI\" space mote direct send --input - with the provided mote, peer and exact body. Set operationId to scheduled/<loopId>/<occurrenceAt>. Reuse this ID and body when checking a partial receipt. If the original due reference is unconfirmed, keep the arrangement and check it before sending. The body is private message content."
+    "private-schedule": "This is the scheduled private assignment you saved. On this due turn, give the original assignment below to the exact peer.\n\nRead the original arrangement with \"$AGENTMUX_CLI\" schedule inspect --data - and the provided operationId. Use its schedule.lastInputRef.futureIntent.occurrenceAt and schedule.loopId.\n\nRun \"$AGENTMUX_CLI\" space mote direct send --input - with the provided mote, peer and exact body. Set operationId to scheduled/<loopId>/<occurrenceAt>. Reuse this ID and body when checking a partial receipt. If the original due reference is unconfirmed, keep the arrangement and check it before sending. The body is private message content.",
+    "private-report": "A Mote reported back on your private assignment. Use space mote direct inspect with your Mote target, the threadId and the exact replyMessageId as messageId. Read the original report before deciding what should happen next. Keep the discussion private and reply only when further work needs it.\n\n{{original}}"
   },
   "peer-messaging": {
     "entry": "If the task needs collaboration, choose native subagents or independent Sessions. Read message --skill before agent send. Keep the original body and operation/message IDs.",
@@ -721,7 +722,10 @@ export const AMUX_PROTOCOL_PARAMETERS = {
       "knowledge",
       "sources"
     ],
-    "private-schedule": []
+    "private-schedule": [],
+    "private-report": [
+      "original"
+    ]
   },
   "peer-messaging": {
     "entry": [],

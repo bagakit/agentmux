@@ -17,10 +17,15 @@ export type MoteDirectThread = {
   participants: MoteDirectParticipant[]
   lastMessage: MoteDirectMessage | null
 }
+export type MoteDirectMainNotification = {
+  messageId: string
+  status: 'queued' | 'accepted' | 'failed' | 'unconfirmed'
+  issue?: string
+}
 
 export type MoteDirectParamsMap = {
   'space.mote.direct.list': Page & { mote: MotePreferencesTarget }
-  'space.mote.direct.inspect': Page & { threadId: string; mote?: MotePreferencesTarget }
+  'space.mote.direct.inspect': Page & { threadId: string; mote?: MotePreferencesTarget; messageId?: string }
   'space.mote.direct.send': { mote: MotePreferencesTarget; peer: MotePreferencesTarget; operationId: string; body: string; replyToMessageId?: string }
   'space.mote.direct.schedule': Omit<MoteDirectParamsMap['space.mote.direct.send'], 'replyToMessageId'> & AgentScheduleTiming & { checkIn?: never }
   'space.mote.direct.reply': { threadId: string; operationId: string; inputOperationId: string; body: string }
@@ -30,7 +35,7 @@ export type MoteDirectResultMap = {
   'space.mote.direct.inspect': { thread: MoteDirectThread; messages: MoteDirectMessage[]; nextBeforeSequence: number | null }
   'space.mote.direct.send': { threadId: string; message: MoteDirectMessage }
   'space.mote.direct.schedule': ScheduleResultMap['schedule.create']
-  'space.mote.direct.reply': { message: MoteDirectMessage }
+  'space.mote.direct.reply': { message: MoteDirectMessage; mainNotification: MoteDirectMainNotification }
 }
 export type MoteDirectMethod = keyof MoteDirectParamsMap
 export const MOTE_DIRECT_METHODS = {
@@ -77,7 +82,7 @@ export function parseMoteDirectParams<M extends MoteDirectMethod>(method: M, val
     parseMotePreferencesTarget(mote, code)
     parseMoteGroupParams('space.mote.group.list', page)
   } else if (method === 'space.mote.direct.inspect') {
-    const { mote, threadId, ...page } = rpcRecord(value, ['mote', 'threadId', 'beforeSequence', 'limit'], code)
+    const { mote, threadId, ...page } = rpcRecord(value, ['mote', 'threadId', 'beforeSequence', 'limit', 'messageId'], code)
     if (mote !== undefined) parseMotePreferencesTarget(mote, code)
     parseMoteGroupParams('space.mote.group.inspect', { ...page, groupId: threadId })
   } else if (method === 'space.mote.direct.send' || method === 'space.mote.direct.schedule') {
@@ -142,8 +147,12 @@ export function parseMoteDirectResult<M extends MoteDirectMethod>(method: M, val
     parseMoteGroupResult('space.mote.group.send', { message: message(response.message) },
       { ...send, groupId: response.threadId, recipientIds: [peer.spaceId], sourceMote: mote })
   } else {
-    const response = rpcRecord(value, ['message'], code), { threadId, ...reply } = input as MoteDirectParamsMap['space.mote.direct.reply']
+    const response = rpcRecord(value, ['message', 'mainNotification'], code), { threadId, ...reply } = input as MoteDirectParamsMap['space.mote.direct.reply']
     parseMoteGroupResult('space.mote.group.reply', { message: message(response.message) }, { ...reply, groupId: threadId })
+    const notification = rpcRecord(response.mainNotification, ['messageId', 'status', 'issue'], code)
+    if (typeof notification.messageId !== 'string' || !notification.messageId || /[\0\r\n]/u.test(notification.messageId) ||
+      !['queued', 'accepted', 'failed', 'unconfirmed'].includes(String(notification.status)) ||
+      (notification.issue !== undefined && typeof notification.issue !== 'string')) return invalid(code)
   }
   return structuredClone(value) as MoteDirectResultMap[M]
 }
