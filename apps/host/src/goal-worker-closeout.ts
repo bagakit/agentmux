@@ -45,8 +45,7 @@ export function createGoalWorkerCloseout(options: {
     const client = options.client()
     const run = { runId: input.runId }
     const readDesktop = () => options.desktopOccupation?.(input.agentSessionId, input.runId, context)
-    const inspect = async () => {
-      const goals = await options.demands.list()
+    const inspect = (goals: readonly Demand[]) => {
       const goal = goals.find(item => item.id === input.goalId)
       const attempt = goal?.delegations?.find(item => item.operationId === input.attempt)
       const current = goal && attempt?.planNodeId
@@ -63,9 +62,9 @@ export function createGoalWorkerCloseout(options: {
       if (otherGoalWork(goals, input, authority.runtimeId)) return { reason: 'other-work' as const }
       return { attempt }
     }
-    let first
+    let core, collectionOperationId: string | undefined
     try {
-      first = await inspect()
+      const first = inspect(await options.demands.list())
       if (first.reason) return retain(first.reason)
       const stop = await client.inspectAgentStop({ agentSessionId: input.agentSessionId, expectedRun: run, operationId: input.operationId })
       if (stop.phase !== 'not-requested') return retain('unknown')
@@ -77,14 +76,12 @@ export function createGoalWorkerCloseout(options: {
       // Detached presentations can retain original Desktop drafts by Session.
       const desktop = await readDesktop()
       if (desktop !== 'clear') return retain(desktop ?? 'unknown')
-      const core = await client.readAgentCloseoutInput(input.agentSessionId, run, first.attempt.sourceMessageId)
-      if (core !== 'clear') return retain(core)
-      const last = await inspect()
-      if (last.reason) return retain(last.reason)
-      if (last.attempt.collection?.operationId !== first.attempt.collection?.operationId ||
-          (await options.spatial?.readForLayout())?.revision !== originalSpace.revision) return retain('unknown')
+      core = await client.readAgentCloseoutInput(input.agentSessionId, run, first.attempt.sourceMessageId)
+      if (core.state !== 'clear') return retain(core.state)
       const finalDesktop = await readDesktop()
       if (finalDesktop !== 'clear') return retain(finalDesktop ?? 'unknown')
+      collectionOperationId = first.attempt.collection?.operationId
+      if ((await options.spatial?.readForLayout())?.revision !== originalSpace.revision) return retain('unknown')
     } catch {
       context.signal?.throwIfAborted()
       return retain('unknown')
@@ -93,7 +90,14 @@ export function createGoalWorkerCloseout(options: {
     await context.assertCurrent?.()
     const current = await client.authorizeAgentCaller(context.caller.capability, input.agentSessionId)
     if (current.run.runId !== input.runId) return retain('unknown')
-    const receipt = await client.stopAgent(input.agentSessionId, run, { operationId: input.operationId })
-    return { ...input, state: 'stopped', receipt }
+    let refusal: Retained['reason'] | undefined
+    const result = await client.stopAgentIfInputClear(core.proof, input.operationId, admit => options.demands.withCurrentDemands(async goals => {
+      context.signal?.throwIfAborted()
+      const last = inspect(goals)
+      refusal = last.reason ?? (last.attempt.collection?.operationId !== collectionOperationId ? 'unknown' : undefined)
+      if (refusal) throw new AgentMuxError('The original Goal handoff or other responsibilities changed before admission.', 'GOAL_CLOSEOUT_HANDOFF_CHANGED')
+      return await admit()
+    }))
+    return refusal ? retain(refusal) : { ...input, ...result }
   }
 }

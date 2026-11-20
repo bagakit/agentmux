@@ -263,7 +263,8 @@ export class DurableAgentMuxMessageQueue {
     return Number(this.db.prepare('SELECT COALESCE(MAX(sequence), 0) + 1 AS next FROM records').get()!.next)
   }
 
-  constructor(readonly path = defaultAgentMuxMessageQueuePath()) {
+  constructor(readonly path = defaultAgentMuxMessageQueuePath(),
+    private readonly assertNewInputRun?: (agentSessionId: string, runId: string, originalClaim?: () => Promise<boolean>) => Promise<void>) {
     this.queueId = queueIdFor(path)
   }
 
@@ -617,14 +618,42 @@ export class DurableAgentMuxMessageQueue {
   }
 
   async hasPendingNotification(agentSessionId: string, completedSourceMessageId?: string): Promise<boolean> {
-    return this.withLock(async () => {
-      this.restoredInputFrontier()
-      return Boolean(this.db.prepare(`SELECT 1 FROM a2a_message_notifications WHERE recipient_id=? AND submitted=0
+    return this.withLock(async () => this.pendingNotification(agentSessionId, completedSourceMessageId))
+  }
+
+  private pendingNotification(agentSessionId: string, completedSourceMessageId?: string): boolean {
+    this.restoredInputFrontier()
+    return Boolean(this.db.prepare(`SELECT 1 FROM a2a_message_notifications WHERE recipient_id=? AND submitted=0
         AND (message_id IS NOT ? OR notification_id IS NOT NULL)
         AND message_sequence>(SELECT COALESCE(MAX(frontier),0) FROM restoration_holds)
         UNION ALL SELECT 1 FROM a2a_notifications WHERE recipient_id=? AND active=1
         AND original_sequence>(SELECT COALESCE(MAX(frontier),0) FROM restoration_holds) LIMIT 1`)
-        .get(agentSessionId, completedSourceMessageId ?? null, agentSessionId))
+      .get(agentSessionId, completedSourceMessageId ?? null, agentSessionId))
+  }
+
+  private closeoutInputCut(agentSessionId: string) {
+    return { incarnation: String(this.db.prepare('SELECT incarnation FROM metadata').get()!.incarnation),
+      throughSequence: Number(this.db.prepare('SELECT COALESCE(MAX(control_sequence),0) AS n FROM input_intents WHERE recipient_id=?').get(agentSessionId)!.n),
+      restorationFrontier: this.restoredInputFrontier() }
+  }
+
+  async readCloseoutInputCut(agentSessionId: string) {
+    return await this.withLock(async () => this.closeoutInputCut(agentSessionId))
+  }
+
+  /** The existing writer admission orders a saved input and this exact durable Stop reservation. */
+  async admitCloseoutStop<T>(agentSessionId: string, runId: string, sourceMessageId: string, cut: Awaited<ReturnType<DurableAgentMuxMessageQueue['readCloseoutInputCut']>>,
+    reserve: () => Promise<T>): Promise<T> {
+    return await this.withLock(async () => {
+      const directMessage = this.db.prepare(`SELECT 1 FROM messages m JOIN records r ON r.sequence=m.message_sequence
+        WHERE m.recipient_id=? AND m.delivery_sequence IS NULL AND m.message_id<>?
+        AND json_extract(r.json,'$.envelope.recipientRunId')=? AND json_extract(r.json,'$.deliveryMode') IS NULL LIMIT 1`)
+        .get(agentSessionId, sourceMessageId, runId)
+      if (directMessage || this.pendingNotification(agentSessionId, sourceMessageId)) throw new AgentMuxError(
+        'Original input is pending. The Run and its input are retained.', 'AGENT_CLOSEOUT_INPUT_PENDING')
+      if (!isDeepStrictEqual(this.closeoutInputCut(agentSessionId), cut)) throw new AgentMuxError(
+        'The original input journal changed before Stop admission. The Run is retained.', 'AGENT_CLOSEOUT_INPUT_UNCONFIRMED')
+      return await reserve()
     })
   }
 
@@ -677,6 +706,7 @@ export class DurableAgentMuxMessageQueue {
         expectedRun:condition.expectedRun, submissionId:notificationId}, condition, idle, mode:'idle', state:'pending', messageIds:[],
         moteObservation:{id,phase}, wire:moteInputNoticeWire(observation,phase) }
       if (!isDeepStrictEqual(this.inputOwnerKey(notice.key), notice.key) || this.db.prepare('SELECT 1 FROM input_intents WHERE input_id=?').get(agentInputJournalKey(notice.key))) throw new AgentMuxError('Another original input owns this notification operation.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+      await this.assertNewInputRun?.(notice.key.agentSessionId, notice.key.expectedRun.runId)
       await this.appendRecord({kind:'a2a-notification', sequence:this.nextSequence, notification:notice, at:Date.now()})
       return this.notification(notificationId)!
     }, true)
@@ -740,6 +770,7 @@ export class DurableAgentMuxMessageQueue {
           this.db.prepare('SELECT 1 FROM input_intents WHERE input_id=?').get(agentInputJournalKey(notice.key)) ||
           input.originalInputAbsent && !await input.originalInputAbsent()) throw new AgentMuxError(
         'Another original input already owns this notification operation ID.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+      await this.assertNewInputRun?.(notice.key.agentSessionId, notice.key.expectedRun.runId)
       await this.appendRecord({ kind: 'a2a-notification', sequence: this.nextSequence, notification: notice, at: Date.now() })
       return this.notification(input.notificationId)!
     }, true)
@@ -925,6 +956,7 @@ export class DurableAgentMuxMessageQueue {
       if (this.db.prepare('SELECT 1 FROM input_intents WHERE input_id=?').get(agentInputJournalKey(key))) return null
       if (intent.source.kind !== 'prompt') throw new AgentMuxError('Prompt journal requires its original prompt producer.', 'INVALID_AGENT_INPUT_CONTROL')
       if (originalClaimAbsent && !await originalClaimAbsent()) return null
+      await this.assertNewInputRun?.(key.agentSessionId, key.expectedRun.runId)
       await this.appendRecord({ kind: 'input-intent', sequence: this.nextSequence, intent: structuredClone(intent), at: Date.now() })
       return this.input(key)!
     }, true)
@@ -1071,7 +1103,10 @@ export class DurableAgentMuxMessageQueue {
           !notice || !sameNotificationKey || expectedNotificationId !== notice.notificationId || notice.state !== 'pending') throw new AgentMuxError(
         'This original notification no longer authorizes a new input claim.', 'A2A_NOTIFICATION_CONFLICT')
       if (this.input(key)) throw new AgentMuxError('The original controlled input requires its journal gate and intent.', 'AGENT_PROMPT_OPERATION_CONFLICT')
-      if (this.db.prepare('SELECT 1 FROM input_intents WHERE input_id=?').get(agentInputJournalKey(key)) && (!originalClaim || !await originalClaim())) throw new AgentMuxError('This accepted original input has no available admission to rejoin. Its recorded identity is retained.', 'AGENT_INPUT_READ_UNCONFIRMED')
+      const indexed = this.db.prepare('SELECT 1 FROM input_intents WHERE input_id=?').get(agentInputJournalKey(key))
+      if (indexed) {
+        if (!originalClaim || !await originalClaim()) throw new AgentMuxError('This accepted original input has no available admission to rejoin. Its recorded identity is retained.', 'AGENT_INPUT_READ_UNCONFIRMED')
+      } else await this.assertNewInputRun?.(key.agentSessionId, key.expectedRun.runId, originalClaim)
       return await claim()
     }, true)
   }
@@ -1162,6 +1197,7 @@ export class DurableAgentMuxMessageQueue {
       if (deliveryKey && (!isDeepStrictEqual(this.inputOwnerKey(deliveryKey), deliveryKey) ||
           this.db.prepare('SELECT 1 FROM input_intents WHERE input_id=?').get(agentInputJournalKey(deliveryKey)))) throw new AgentMuxError(
         'This resumed delivery already belongs to another original input.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+      await this.assertNewInputRun?.(physicalKey.agentSessionId, physicalKey.expectedRun.runId)
       const gateId = mintObjectId()
       await this.appendRecord({ kind: 'input-control', sequence: this.nextSequence,
         control: { ref, state: 'dispatch-authorized', gateId, ...(deliveryKey ? { deliveryKey } : {}), ...(current.control.retry ? { retry: current.control.retry } : {}),
@@ -1504,6 +1540,8 @@ export class DurableAgentMuxMessageQueue {
         if (!sameEnvelope(existing.envelope, envelope) || (existing.execution ?? 'default') !== execution || !sameOrigin(existing)) throw new AgentMuxError('Message id already names another envelope, execution or source.', 'MESSAGE_ID_CONFLICT')
         return this.receipt(existing)
       }
+      if (envelope.recipientSessionId && envelope.recipientRunId && !newMessage?.inboxOnly && newMessage?.deliveryMode !== 'outbox')
+        await this.assertNewInputRun?.(envelope.recipientSessionId, envelope.recipientRunId)
       // The direct producer may select intent for a new record only. A retry
       // returns an old record above; it never manufactures a manual tag for it.
       const frozenIntent = admissionIntent ?? (newMessage?.admissionIntent === undefined ? undefined : validateAgentPromptAdmissionIntent(newMessage.admissionIntent))

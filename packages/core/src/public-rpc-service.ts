@@ -227,6 +227,7 @@ export type AgentMuxRpcCorePort = import('./agent-execution-coordinator.js').Age
     maintainHostProviderHooks?: AgentMuxClient['maintainHostProviderHooks']
     probeHostExecutorAcp?: AgentMuxClient['probeHostExecutorAcp']
     stopAgent?: AgentMuxClient['stopAgent']
+    appendAgentMessage?: AgentMuxClient['appendAgentMessage']
     signalAgent?: AgentMuxClient['signalAgent']
     controlTerminal?: AgentMuxClient['controlTerminal']
     inspectTerminalControl?: AgentMuxClient['inspectTerminalControl']
@@ -5355,9 +5356,10 @@ export class AgentMuxRpcService {
         caller ? { agentSessionId: caller.agentSessionId, capability: caller.capability } : undefined) : undefined
       return { ...saved, ...(currentReceipt ? { inputReceipt: currentReceipt } : {}) }
     }
-    const queued = await appendGlobalMessage({ ...envelope, messageId, execution, sourceChannel, ...(sourceDevice ? { sourceDevice } : {}) }, queuePath,
-      { ...(terminalManual ? { admissionIntent: directIntent,
-        } : {}) })
+    if (!recipientOwner.client.appendAgentMessage) throw new AgentMuxError(
+      'The original Core message admission is unavailable. No new input was saved.', 'CONTROL_UNAVAILABLE')
+    const queued = await recipientOwner.client.appendAgentMessage({ ...envelope, messageId, execution, sourceChannel,
+      ...(sourceDevice ? { sourceDevice } : {}) }, terminalManual ? directIntent : undefined)
     const { input: _internalInput, ...publicQueued } = queued
     if (original && queued.input) return { ...publicQueued, inputReceipt: (await recipientOwner.client.inspectAgentInput({ key: queued.input.intent.key },
       caller ? { agentSessionId: caller.agentSessionId, capability: caller.capability } : undefined))! }

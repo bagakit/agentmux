@@ -298,6 +298,10 @@ type AgentStopAdmission = {
   admission: Exclude<AgentMuxAgentStopAdmission, 'joined'>
   stages: AgentMuxAgentStopStage[]
 }
+type AgentCloseoutInputProof = { agentSessionId: string; expectedRun: AgentMuxRunRef; sourceMessageId: string;
+  cut: Awaited<ReturnType<DurableAgentMuxMessageQueue['readCloseoutInputCut']>> }
+type AgentCloseoutInput = { state: 'clear'; proof: AgentCloseoutInputProof } | { state: 'pending' | 'other-work' | 'unknown' }
+type AgentStopAdmissionScope = <T>(reserve: () => Promise<T>) => Promise<T>
 
 type TakeoverCreationContribution = { takeover?: import('./agent-takeover.js').AgentTakeoverProvenance }
 type LocalHostAgentCreateInput = AgentMuxHostAgentCreateInput & TakeoverCreationContribution & Pick<AgentMuxAgentCreateInput, 'initialMessage'> & {
@@ -1295,6 +1299,7 @@ export class AgentMuxClient {
   private readonly agentStopFlights = new Map<string, {
     readers: number
     retired: boolean
+    conditional: boolean
     admission: Promise<AgentStopAdmission>
     retirement?: Promise<AgentMuxAgentStopReceipt>
   }>()
@@ -1389,7 +1394,8 @@ export class AgentMuxClient {
     const adoptedFileStore = this.store instanceof AgentMuxFileAgentSessionStore &&
       (options.store !== undefined || Boolean(process.env.AGENTMUX_AGENT_SESSION_STORE?.trim()))
       ? this.store.path : null
-    this.messageQueue = new DurableAgentMuxMessageQueue(defaultAgentMuxMessageQueuePath(adoptedFileStore))
+    this.messageQueue = new DurableAgentMuxMessageQueue(defaultAgentMuxMessageQueuePath(adoptedFileStore),
+      (agentSessionId, runId, originalClaim) => this.assertNewAgentInputRun(agentSessionId, runId, originalClaim))
     bindAgentInputClaimStore(this.messageQueue, this.store)
     // Own the listener before any first save; initial admission also schedules a
     // check, so restoration cannot be lost between saving and subscription.
@@ -7726,41 +7732,40 @@ export class AgentMuxClient {
     })
   }
 
-  /** Closeout consumes the exact Core input owner without exporting another Agent's input bodies. */
-  async readAgentCloseoutInput(agentSessionId: string, expectedRun: AgentMuxRunRef, completedSourceMessageId: string): Promise<'clear' | 'pending' | 'other-work' | 'unknown'> {
-    const pending = () => {
-      const lane = this.agentInputLanes.get(agentSessionId)
-      return Boolean(lane?.pending.size || lane?.renderObservations.size || this.rawInputAdmissions.has(expectedRun.runId))
-    }
+  private closeoutLanePending(agentSessionId: string, expectedRun: AgentMuxRunRef): boolean {
+    const lane = this.agentInputLanes.get(agentSessionId)
+    return Boolean(lane?.pending.size || lane?.renderObservations.size || this.rawInputAdmissions.has(expectedRun.runId))
+  }
+
+  /** Capture the original Core input cut for this exact Run's later Stop admission. */
+  async readAgentCloseoutInput(agentSessionId: string, expectedRun: AgentMuxRunRef, completedSourceMessageId: string): Promise<AgentCloseoutInput> {
+    const cut = await this.messageQueue.readCloseoutInputCut(agentSessionId)
     const { session, observation } = await this.statusAgent(agentSessionId)
-    if (!sameRun(session.run, expectedRun) || observation.process !== 'running' || observation.stale) return 'unknown'
-    if (session.pendingInteraction || pending() ||
-        await this.messageQueue.hasPendingNotification(agentSessionId, completedSourceMessageId)) return 'pending'
-    if (observation.semantic === 'unknown' || observation.readiness !== 'ready') return 'unknown'
+    if (!sameRun(session.run, expectedRun) || observation.process !== 'running' || observation.stale) return { state: 'unknown' }
+    if (session.pendingInteraction || this.closeoutLanePending(agentSessionId, expectedRun) ||
+        await this.messageQueue.hasPendingNotification(agentSessionId, completedSourceMessageId)) return { state: 'pending' }
+    if (observation.semantic === 'active' || observation.semantic === 'awaiting-input') return { state: 'pending' }
+    if (observation.semantic !== 'idle' || observation.readiness !== 'ready') return { state: 'unknown' }
     let afterSourceMessageId: string | undefined
     do {
       const page = await this.listDispatches({ participantSessionId: agentSessionId, limit: 100,
         ...(afterSourceMessageId ? { afterSourceMessageId } : {}) })
-      if (page.dispatches.some(dispatch => dispatch.sourceMessageId !== completedSourceMessageId && dispatch.originAwaits)) return 'other-work'
+      if (page.dispatches.some(dispatch => dispatch.sourceMessageId !== completedSourceMessageId && dispatch.originAwaits)) return { state: 'other-work' }
       afterSourceMessageId = page.nextSourceMessageId ?? undefined
     } while (afterSourceMessageId)
-    let cursor: string | undefined, cut: { incarnation: string; throughSequence: number } | undefined
+    let cursor: string | undefined
     do {
       const page = await this.messageQueue.readInputMailbox({ agentSessionId, limit: 100, ...(cursor ? { cursor } : {}) })
-      cut ??= page.cut
       for (const item of page.items) {
         const key = item.kind === 'controlled' ? item.intent.key : item.key
         if (!sameRun(key.expectedRun, expectedRun)) continue
         const receipt = item.kind === 'controlled' ? await this.inspectAgentInput({ key }) : undefined
-        if (item.kind === 'controlled' && (!receipt || receipt.status === 'unknown')) return 'unknown'
-        if (receipt?.status === 'waiting' || receipt?.status === 'stopped') return 'pending'
+        if (item.kind === 'controlled' && (!receipt || receipt.status === 'unknown')) return { state: 'unknown' }
+        if (receipt?.status === 'waiting' || receipt?.status === 'stopped') return { state: 'pending' }
       }
       cursor = page.continuation(page.items.length) ?? undefined
     } while (cursor)
-    if (await this.messageQueue.hasPendingNotification(agentSessionId, completedSourceMessageId)) return 'pending'
-    const tail = await this.messageQueue.readInputMailbox({ agentSessionId, limit: 1 })
-    const current = await this.currentStoredAgentSession(agentSessionId)
-    return sameRun(current.run, expectedRun) && !pending() && isDeepStrictEqual(cut, tail.cut) ? 'clear' : 'unknown'
+    return { state: 'clear', proof: { agentSessionId, expectedRun: { ...expectedRun }, sourceMessageId: completedSourceMessageId, cut } }
   }
 
   /** Read original journal membership; this never creates waiting, prepares or dispatches input. */
@@ -9070,6 +9075,21 @@ export class AgentMuxClient {
     }
   }
 
+  /** Original local message admission for the already authenticated RPC producer. */
+  async appendAgentMessage(input: Parameters<DurableAgentMuxMessageQueue['append']>[0],
+    intent?: AgentPromptAdmissionIntent): ReturnType<DurableAgentMuxMessageQueue['append']> {
+    return await this.messageQueue.append(input, intent ? { admissionIntent: intent } : undefined)
+  }
+
+  private async assertNewAgentInputRun(agentSessionId: string, runId: string, originalClaim?: () => Promise<boolean>): Promise<void> {
+    const lifecycle = await this.store.readLifecycleReservation(agentSessionId)
+    const retired = lifecycle ? null : await this.store.readRetiredAgentSession(agentSessionId)
+    if ((lifecycle?.kind === 'stop' && lifecycle.expectedRun.runId === runId || retired?.run.runId === runId && retired.stop) &&
+        !await originalClaim?.()) throw new AgentMuxError(
+      'A Stop was already admitted for this exact Run. No new input was submitted. Inspect the original Run and operation.',
+      'AGENT_INPUT_RUN_STOPPING', undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
+  }
+
   async submitAgentMessage(input: AgentMuxAgentMessageInput, context?: AgentInputCallContext): Promise<void | AgentInputSubmissionReceipt> {
     context?.requestSignal?.throwIfAborted()
     if (input.scope !== undefined && (input.scope !== 'ensure-custody' || input.execution !== 'immediate' ||
@@ -9697,13 +9717,41 @@ export class AgentMuxClient {
    * always wins. Readers that join an in-flight Stop get its receipt with admission `joined`.
    */
   async stopAgent(agentSessionId: string, expectedRun: AgentMuxRunRef, options: { operationId?: string } = {}): Promise<AgentMuxAgentStopReceipt> {
+    return await this.stopAgentWithAdmission(agentSessionId, expectedRun, options.operationId)
+  }
+
+  /** The Closeout check owns only a fresh Stop. An open operation is reconciled by its original receipt. */
+  async stopAgentIfInputClear(proof: AgentCloseoutInputProof, operationId: string, scope?: AgentStopAdmissionScope): Promise<
+    { state: 'stopped'; receipt: AgentMuxAgentStopReceipt } | { state: 'retained'; reason: 'pending' | 'unknown' }> {
+    try {
+      return { state: 'stopped', receipt: await this.stopAgentWithAdmission(proof.agentSessionId, proof.expectedRun, operationId, { proof, scope }) }
+    } catch (error) {
+      if (error instanceof AgentMuxError && error.code === 'AGENT_CLOSEOUT_INPUT_PENDING') return { state: 'retained', reason: 'pending' }
+      // A disconnected observer cannot know whether reservation or Native Stop committed. Keep the
+      // original operation for agent stop inspect; never turn this into another authorization.
+      return { state: 'retained', reason: 'unknown' }
+    }
+  }
+
+  private async stopAgentWithAdmission(agentSessionId: string, expectedRun: AgentMuxRunRef, operationId?: string,
+    closeout?: { proof: AgentCloseoutInputProof; scope: AgentStopAdmissionScope | undefined }): Promise<AgentMuxAgentStopReceipt> {
     this.requireConnected()
-    if (options.operationId !== undefined) safeId(options.operationId, 'Stop operation id')
+    if (operationId !== undefined) safeId(operationId, 'Stop operation id')
     const flightKey = JSON.stringify([agentSessionId, expectedRun.runId])
     let flight = this.agentStopFlights.get(flightKey)
+    if (flight && closeout) throw new AgentMuxError('A Stop is already open for this exact Run. Inspect that original operation.', 'AGENT_CLOSEOUT_INPUT_UNCONFIRMED')
+    // A failed conditional qualification cannot withdraw an explicit Stop. A
+    // durable reservation, including a lost admission ACK, still wins on retry.
+    while (flight?.conditional) {
+      try { await flight.admission; break } catch {
+        if (this.agentStopFlights.get(flightKey) === flight) this.agentStopFlights.delete(flightKey)
+        flight = this.agentStopFlights.get(flightKey)
+      }
+    }
     const joined = Boolean(flight)
     if (!flight) {
-      flight = { readers: 0, retired: false, admission: this.prepareAgentStop(agentSessionId, expectedRun, options.operationId) }
+      flight = { readers: 0, retired: false, conditional: Boolean(closeout),
+        admission: this.prepareAgentStop(agentSessionId, expectedRun, operationId, closeout) }
       this.agentStopFlights.set(flightKey, flight)
     }
     flight.readers++
@@ -9778,14 +9826,15 @@ export class AgentMuxClient {
     }
   }
 
-  private async prepareAgentStop(agentSessionId: string, expectedRun: AgentMuxRunRef, callerOperationId?: string): Promise<AgentStopAdmission> {
+  private async prepareAgentStop(agentSessionId: string, expectedRun: AgentMuxRunRef, callerOperationId?: string,
+    closeout?: { proof: AgentCloseoutInputProof; scope: AgentStopAdmissionScope | undefined }): Promise<AgentStopAdmission> {
     const startedAt = Date.now()
     const session = await this.resolveRawAgentSession(agentSessionId)
     if (!sameRun(session.run, expectedRun)) {
       throw new AgentMuxError('Agent Session changed before its Run was stopped.', 'STALE_AGENT_SESSION')
     }
     // The registry admits only this exact Run's original Stop for a targeted claim.
-    const retained = (await this.registry.claimStaleLifecycles(Date.now(), { agentSessionId, expectedRun }))[0] as
+    const retained = (closeout ? undefined : (await this.registry.claimStaleLifecycles(Date.now(), { agentSessionId, expectedRun }))[0]) as
       Extract<AgentMuxLifecycleReservation, { kind: 'stop' }> | undefined
     // A retained Stop keeps the identity it was admitted with, never the retry's; a Stop admitted
     // before its caller identity was recorded has only its lifecycle identity.
@@ -9796,11 +9845,27 @@ export class AgentMuxClient {
       { stage: 'admission', startedAt, endedAt: startedAt, outcome: 'ok' }
     // A prepared resume of this exact Run may hold the Session; the Runtime fence for its creation key is
     // the only witness that lets this Stop take it over. The fence refuses when no witness can exist.
-    const supersededResume = retained ? undefined : await this.fencePreparedResume(agentSessionId, expectedRun)
+    const supersededResume = retained || closeout ? undefined : await this.fencePreparedResume(agentSessionId, expectedRun)
     const stopOperation = retained ? retained.stopOperation : await this.kernel.prepareStop(expectedRun.runId, lifecycleOperationId)
     if (!retained) admitted.endedAt = Date.now()
-    const reservation = retained ?? await this.registry.reserveExisting('stop', agentSessionId, expectedRun, lifecycleOperationId, stopOperation,
+    const reserve = () => this.registry.reserveExisting('stop', agentSessionId, expectedRun, lifecycleOperationId, stopOperation,
       { progress: { operationId, stages: [admitted] }, ...(supersededResume ? { supersededResume } : {}) })
+    const reserveCloseout = ({ proof, scope }: NonNullable<typeof closeout>) => {
+      const admit = () => this.store.withPromptSubmission(agentSessionId, () =>
+        this.messageQueue.admitCloseoutStop(agentSessionId, expectedRun.runId, proof.sourceMessageId, proof.cut, async () => {
+          const current = await this.store.readMetadata(agentSessionId)
+          if (!current || !sameRun(current.run, expectedRun) || await this.store.readLifecycleReservation(agentSessionId))
+            throw new AgentMuxError('The original Run or its lifecycle changed before closeout admission.', 'AGENT_CLOSEOUT_INPUT_UNCONFIRMED')
+          if (current.pendingInteraction || current.semanticStatus?.state === 'working' || this.closeoutLanePending(agentSessionId, expectedRun))
+            throw new AgentMuxError('Original input is pending. The Run and its input are retained.', 'AGENT_CLOSEOUT_INPUT_PENDING')
+          const prompt = current.promptCompletionAdmission
+          if (prompt?.intent && sameRun(prompt.intent.run, expectedRun) && !prompt.acknowledged && !agentPromptNotApplied(current))
+            throw new AgentMuxError('The original prompt admission has no confirmed outcome. The Run is retained.', 'AGENT_CLOSEOUT_INPUT_UNCONFIRMED')
+          return await reserve()
+        }))
+      return scope ? scope(admit) : admit()
+    }
+    const reservation = retained ?? (closeout ? await reserveCloseout(closeout) : await reserve())
     // Intent is recorded only after admission succeeds. Keep this prepared
     // identity through observation/receipt/cleanup failures until retirement;
     // no individual reader can release another reader's accepted operation.

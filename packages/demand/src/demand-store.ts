@@ -433,6 +433,11 @@ export class DemandStore {
     return (await this.snapshot()).demands
   }
 
+  /** Hold the original responsibility snapshot through a short, already prepared admission. */
+  async withCurrentDemands<T>(admit: (demands: readonly Demand[]) => Promise<T>): Promise<T> {
+    return await this.withWriterLock(async () => await admit((await this.snapshot()).demands))
+  }
+
   async get(id: string): Promise<Demand | null> {
     const read = await this.readConfirmedSnapshot(), demand = read.demandsById.get(id)
     if (!demand) return null
