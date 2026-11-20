@@ -9413,23 +9413,22 @@ export class AgentMuxClient {
         throw new AgentMuxError('ACP question responses are unsupported.', 'AGENT_INTERACTION_UNSUPPORTED')
       }
       await context?.assertCurrent?.()
-      let claimed = false
+      const claim: { respond?: () => Promise<void> } = {}
       await this.updateExactAgentSession(input.agentSessionId, input.expectedRun, current => {
-        claimed = false
+        delete claim.respond
         const receipt = current.interactionOperations?.[input.operationId]
         if (!receipt) throw new AgentMuxError('The original ACP response operation is unavailable.', 'UNKNOWN_AGENT_INTERACTION')
         if (receipt.delivery !== 'saved' || receipt.nativeCompleted) return current
         const request = current.pendingInteraction?.request
-        if (!request || !isDeepStrictEqual(agentInteractionRequestTarget(request), receipt.expectedRequest) ||
-            !sameNativeHandle(current.nativeHandle, canonical.nativeHandle) || !this.acp.hasBinding(input.agentSessionId, input.expectedRun) ||
-            !this.acp.hasPendingPermission(input.agentSessionId, request.id))
+        if (request?.kind !== 'permission' || !isDeepStrictEqual(agentInteractionRequestTarget(request), receipt.expectedRequest) ||
+            !sameNativeHandle(current.nativeHandle, canonical.nativeHandle))
           throw new AgentMuxError('The exact original ACP permission callback is unavailable.', 'AGENT_INTERACTION_UNCONFIRMED')
         context?.requestSignal?.throwIfAborted()
-        claimed = true
+        claim.respond = this.acp.preparePermissionResponse(request, response.decision)
         return interactionReceiptPatch(current, input.operationId, { delivery: 'unknown' })
       })
-      if (!claimed) return
-      await this.acp.respondPermission(input.agentSessionId, pending.request.id, response.decision)
+      if (!claim.respond) return
+      await claim.respond()
       await this.updateExactAgentSession(input.agentSessionId, input.expectedRun, current => interactionReceiptPatch(current, input.operationId, { delivery: 'acp-acknowledged' }))
       return
     }
@@ -10266,7 +10265,7 @@ export class AgentMuxClient {
     const frontend = this.terminalFrontendWatches.get(session.agentSessionId)?.frontend
     if (frontend && sameRun(frontend.run, session.run)) projected.terminalFrontend = structuredClone(frontend)
     const pending = projected.pendingInteraction
-    if (pending?.request.evidence.source === 'acp' && !this.acp.hasPendingPermission(session.agentSessionId, pending.request.id)) {
+    if (pending?.request.evidence.source === 'acp' && !this.acp.hasPendingPermission(pending.request)) {
       pending.request.responseUnavailableReason = 'The original ACP binding is unavailable to this reader. The request and any unknown response were retained; inspect the original operation or use its original connection.'
     }
     if (pending) {
@@ -11838,14 +11837,15 @@ export class AgentMuxClient {
     return await this.updateExactAgentSession(request.agentSessionId, expectedRun, (current) => {
       const existing = current.pendingInteraction
       if (existing) {
-        if (existing.request.id !== request.id) {
+        if (isDeepStrictEqual(agentInteractionRequestTarget(existing.request), agentInteractionRequestTarget(request))) return current
+        if (existing.request.evidence.source !== 'acp' || request.evidence.source !== 'acp' ||
+            this.acp.hasPendingPermission(existing.request) || !this.acp.hasPendingPermission(request)) {
           throw new AgentMuxError('Another Agent interaction is already pending.', 'AGENT_INTERACTION_BUSY')
         }
-        return current
       }
       return {
         ...current,
-        pendingInteraction: { request: structuredClone(request) },
+        pendingInteraction: { request: structuredClone(request), ...(existing?.additionalRequests ? { additionalRequests: existing.additionalRequests } : {}) },
         updatedAt: Math.max(current.updatedAt, request.evidence.observedAt)
       }
     }, undefined, undefined, signal)

@@ -1,8 +1,10 @@
 import { AgentMuxError } from './errors.js'
+import { agentInteractionRequestsMatch } from './agent-interaction-state.js'
 import { mintObjectId } from './object-id.js'
 import type {
   AgentMuxAcpEvent,
   AgentMuxEvidence,
+  AgentMuxInteractionRequest,
   AgentMuxPermissionDecision,
   AgentMuxPermissionRequest,
   AgentNativeSessionHandle,
@@ -202,39 +204,47 @@ export class AgentMuxAcpBridge {
     finally { await bound.binding.close() }
   }
 
-  respondPermission(
-    agentSessionId: string,
-    requestId: string,
-    decision: AgentMuxPermissionDecision
-  ): Promise<void> {
-    const bound = this.bindings.get(agentSessionId)
+  private permissionTarget(request: AgentMuxInteractionRequest) {
+    const bound = this.bindings.get(request.agentSessionId)
     const pending = bound?.pendingPermission
-    if (!bound || !pending || pending.request.id !== requestId) {
-      throw new AgentMuxError('ACP permission request is not pending.', 'UNKNOWN_AGENT_INTERACTION')
-    }
+    if (bound && pending && !bound.lifetime.signal.aborted && bound.nativeSessionId === pending.request.evidence.acpSessionId &&
+        agentInteractionRequestsMatch(pending.request, request)) return { bound, pending }
+  }
+
+  /** Capture the original callback before Core awaits durable dispatch admission. */
+  preparePermissionResponse(request: AgentMuxPermissionRequest, decision: AgentMuxPermissionDecision): () => Promise<void> {
+    const target = this.permissionTarget(request)
+    if (!target) throw new AgentMuxError('The original ACP permission callback is unavailable.', 'AGENT_INTERACTION_UNCONFIRMED')
+    const { agentSessionId } = request
+    const { bound, pending } = target
     const explicit = explicitDecision(pending.request, decision)
     if (!explicit) {
       throw new AgentMuxError('ACP permission response is invalid.', 'INVALID_AGENT_INTERACTION_RESPONSE')
     }
-    if (pending.responded) {
-      throw new AgentMuxError('ACP permission request was already answered.', 'UNKNOWN_AGENT_INTERACTION')
+    return () => {
+      const current = this.permissionTarget(request)
+      if (current?.bound !== bound || current.pending !== pending)
+        throw new AgentMuxError('The original ACP permission callback is unavailable.', 'AGENT_INTERACTION_UNCONFIRMED')
+      if (pending.responded) {
+        throw new AgentMuxError('ACP permission request was already answered.', 'UNKNOWN_AGENT_INTERACTION')
+      }
+      pending.responded = true
+      pending.decision = explicit
+      if (pending.publicationFailed) {
+        // Only a new explicit response retries publication of this unsent request.
+        // Unknown adapter delivery remains under its original custody below.
+        return this.publishPermission(agentSessionId, bound, pending).then(() => pending.completion, async error => {
+          await this.callbacks.onError(agentSessionId, error, pending.request.evidence)
+          throw error
+        })
+      }
+      this.dispatchPermission(agentSessionId, bound, pending)
+      return pending.completion
     }
-    pending.responded = true
-    pending.decision = explicit
-    if (pending.publicationFailed) {
-      // Only a new explicit response retries publication of this unsent request.
-      // Unknown adapter delivery remains under its original custody below.
-      return this.publishPermission(agentSessionId, bound, pending).then(() => pending.completion, async error => {
-        await this.callbacks.onError(agentSessionId, error, pending.request.evidence)
-        throw error
-      })
-    }
-    this.dispatchPermission(agentSessionId, bound!, pending)
-    return pending.completion
   }
 
-  hasPendingPermission(agentSessionId: string, requestId: string): boolean {
-    return this.bindings.get(agentSessionId)?.pendingPermission?.request.id === requestId
+  hasPendingPermission(request: AgentMuxInteractionRequest): boolean {
+    return this.permissionTarget(request) !== undefined
   }
 
   /** Retry only publication of this original unanswered request on an explicit exact read. */
@@ -349,6 +359,8 @@ export class AgentMuxAcpBridge {
     try {
       await this.callbacks.onEvent(agentSessionId, { ...pending.event, requestId: pending.request.id }, pending.request.evidence, bound.lifetime.signal)
       await this.callbacks.onInteraction(pending.request, bound.lifetime.signal)
+      if (this.permissionTarget(pending.request)?.pending !== pending)
+        throw new AgentMuxError('The original ACP permission callback is unavailable.', 'AGENT_INTERACTION_UNCONFIRMED')
       pending.ready = true
       this.dispatchPermission(agentSessionId, bound, pending)
     } catch (error) {
