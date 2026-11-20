@@ -57,7 +57,7 @@ Goal 的委派沿 Core 原通信 dispatch 和实际独立 AgentSession，保存�
 
 原执行 Run 的权威退出／中断或原报告待回收可触发一次给准确 Supervisor 的 AgentMux 提示，沿现有有源输入机制并保冻结操作与原目标；不新增周期 Loop。忙、草稿或观察未知保留准备与服务窗，提交回执未知后仅对账原输入，不自动重投。原 Core 已有明确结构化报告而 Goal 尚未记到时，责任 owner 可核对真实作者、原 source／reply、版本和逐标准证据后恢复报告再显式回收，不冒充 worker 再发消息。
 
-独立评审首次通过后，同一 CLI 回执用 amux 提示当前 Supervisor 核对原执行者是否还有认领、其他 Goal、在途输入或需要接续的工作。确认没有剩余工作且原 Run 空闲时，Supervisor 关闭准确原 Run，保留 Session 和交付历史。读取、重放、观察未知或收到提示本身不停止 Agent。
+独立评审首次通过后，同一 CLI 回执用 amux 引用准确的 Goal、Ticket、尝试及原执行者 Host、Runtime、Session 和 Run。独立 Reviewer 从原 Goal 查当前 Supervisor，转交原评审回执并保有复核职责。Supervisor 核对当前尝试、原报告回收以及其他 Goal、认领和在途工作。有已就绪后继工作时继续派工，条件明确时交接给原执行者，由其对准确尝试发起受检查的 `goal closeout`。观察或回执未知时保留原 Run 和操作。只有获授权的人或设备可以读取不明 Stop 的精确回执。Goal 自治收尾经执行者的受检查入口，通用 Stop 仍沿自身的显式授权。读取、重放和收到提示本身不停止 Agent。
 
 ## 执行责任、停滞告警与 PMO 巡查
 

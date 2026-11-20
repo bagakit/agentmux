@@ -37,14 +37,20 @@ Keep the same node and thread for rework. Use `goal collect` for original report
 An independent reviewer runs the declared check and uses `goal plan review` with the exact
 delivery hash. Advance dependents after the original signed completion is confirmed.
 
-After a worker finishes its Ticket, check that worker's original Host, Runtime, Session
-and Run. Use the current assignments and authorized work across Goals, the original Agent
-status, and the authoritative conversation and input receipts to check for other work,
-drafts and queued or in-flight input. Confirm the exact Run is still current. When it has
-no other work and no pending input, stop it with `amux agent stop --session SID --run RUN`
-at its original owner. Keep it available when any check is unknown or work remains.
-A new passing `goal plan review` CLI receipt carries this check as an `<amux>` guidance
-note. Read the original Stop receipt after an uncertain result.
+A new passing `goal plan review` receipt carries an `<amux>` note with the exact
+attempt and executor. As the independent reviewer, use `goal inspect --goal ID`
+to find the current Supervisor. Pass them the original receipt and keep your review role.
+
+As the current Supervisor, read the original plan and delegations to verify the
+current attempt and the collection of its original report. Confirm the executor's
+Host, Runtime, Session and Run. Check current assignments and authorized work across
+Goals, the original Agent status, and known pending work and input. Assign the next
+ready Ticket when appropriate. When the handoff is confirmed and no work remains,
+give the original executor the exact Goal, attempt and Run for `amux goal closeout`.
+The original owners check drafts and queued or in-flight input at closeout.
+Keep the original Run and operation if any check or receipt is unknown. Only an authorized
+person or device can read the exact Stop receipt with
+`amux agent stop inspect --session SID --run RUN --operation-id OP`.
 
 For a patrol, inspect the frozen scope, then record the inspection with `goal patrol report`
 and write back the resulting facts. A late report belongs to its earlier scope.
