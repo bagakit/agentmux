@@ -18,6 +18,8 @@ export class AgentMuxRpcStreamTransport {
   private failure?: Error
   private readonly ready: Promise<void>
   private closed = false
+  private receivedChunks = 0
+  get inboundRevision(): number { return this.receivedChunks }
   constructor(private readonly carrier: { input: Writable; output: Readable; close(): void },
     private readonly onClose: () => void,
     options: { ready?: Promise<void>; probe?: { request: JSONRPCRequest; validate(value: unknown): void }; budgetMs?: number;
@@ -45,6 +47,8 @@ export class AgentMuxRpcStreamTransport {
     carrier.output.once('close', () => this.fail(new AgentMuxError('RPC transport closed; business outcomes are unconfirmed.', 'CONTROL_CONNECTION_FAILED')))
     carrier.output.on('data', (chunk: Buffer) => {
       if (this.closed) return
+      // A fragment of a large response still proves inbound carrier progress.
+      if (chunk.byteLength) this.receivedChunks++
       try { lines.accept(chunk, frame => {
         if (!established) {
           const response = parseRpcResponse(frame)

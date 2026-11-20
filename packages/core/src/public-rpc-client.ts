@@ -505,7 +505,10 @@ class RpcClient implements AgentMuxRpcClient {
               route.stdio = channel
             }
             sharedDispatch = 'queued'
-            opening = route.stdio.open(payload, receive, end, controller.signal, () => { sharedDispatch = 'dispatched'; armDeadline() }, { cancelOpening: true })
+            const hostedFence = Object.hasOwn(AGENTMUX_HOSTED_RPC_METHODS, method) ? (body as { fence?: AgentMuxRuntimeFence }).fence : undefined
+            const runtimeId = runtimeFence?.runtimeId ?? hostedFence?.runtimeId
+            opening = route.stdio.open(payload, receive, end, controller.signal, () => { sharedDispatch = 'dispatched'; armDeadline() },
+              { cancelOpening: true, ...(typeof runtimeId === 'string' && runtimeId ? { runtimeId } : {}) })
           } else if (route.endpoint.transport === 'unix' && !(options.forwarding ?? this.forwarding)) {
             if (!route.unix) {
               const socket = new Socket(), lifetime = new AbortController(), path = route.endpoint.path

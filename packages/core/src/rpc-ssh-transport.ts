@@ -2,6 +2,8 @@ import { mintObjectId } from './object-id.js'
 import { spawn } from 'node:child_process'
 import { AgentMuxError } from './errors.js'
 import { parseRpcNativeResult } from './rpc-native-codec.js'
+import { parseRpcResponse } from './public-rpc-frame.js'
+import { parseHostedRuntimeOwnerIdentity } from './hosted-value.js'
 import { AgentMuxRpcStreamTransport } from './rpc-stream-transport.js'
 export const AGENTMUX_RPC_SSH_TRANSPORT_BUDGET_MS = 30_000
 
@@ -40,6 +42,22 @@ export class AgentMuxRpcStdioProcessTransport extends AgentMuxRpcStreamTransport
     child.stderr.resume()
     child.once('error', () => this.fail(new AgentMuxError(`${command === 'ssh' ? 'SSH' : 'Tailcat'} RPC transport could not start. Install its CLI in PATH and retry the connection.`, 'CONTROL_UNAVAILABLE')))
     child.once('exit', () => this.fail(new AgentMuxError(`${command === 'ssh' ? 'SSH' : 'Tailcat'} RPC transport exited; its owner and Runs were preserved.`, 'CONTROL_UNAVAILABLE')))
+  }
+
+  async confirmsRuntime(runtimeId: string, signal: AbortSignal): Promise<boolean> {
+    const controller = new AbortController()
+    const request = { jsonrpc: '2.0' as const, id: mintObjectId(), method: 'runtime.owner.identity', params: { expectedRuntimeId: runtimeId } }
+    try {
+      return await new Promise(resolve => {
+        void this.open(request, frame => {
+          try {
+            const reply = parseRpcResponse(frame)
+            const owner = parseHostedRuntimeOwnerIdentity((reply.result as { owner?: unknown } | undefined)?.owner)
+            resolve(owner.runtimeId === runtimeId)
+          } catch { resolve(false) }
+        }, () => resolve(false), AbortSignal.any([signal, controller.signal]), () => {}).catch(() => resolve(false))
+      })
+    } finally { controller.abort() }
   }
 }
 
