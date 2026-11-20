@@ -6,6 +6,7 @@ import { DOMImplementation, XMLSerializer } from '@xmldom/xmldom'
 import { AGENTMUX_SELF_CONTEXT_VERB } from './agent-self-context.js'
 import { AGENTMUX_AGENT_MESSAGING_ENTRY, AGENTMUX_SESSION_NAMING_ENTRY } from './agent-messaging-guidance.js'
 import { browserInputContextJson, type BrowserInputContext } from './browser-input-context.js'
+import { parseGoalConfirmation } from './goal-confirmation.js'
 import { agentLaunchContextExceedsBudget } from './agent-prompt-budget.js'
 
 export { formatAmuxTriggerNote, readAmuxTriggerNote, type AmuxTriggerKind } from './amux-protocol-definition.js'
@@ -73,7 +74,7 @@ function amuxEnvelope(text: string): string {
  */
 export function composeOutboundMessage(input: { amux?: string; user?: string; inputContext?: BrowserInputContext }): string {
   const segments: string[] = []
-  if (input.amux) segments.push(amuxEnvelope(input.amux))
+  if (input.amux) segments.push(parseGoalConfirmation(input.amux) ? input.amux : amuxEnvelope(input.amux))
   if (input.inputContext) segments.push(`<amux>\n<context kind="browser" version="1">\n${browserInputContextJson(input.inputContext)}\n</context>\n</amux>`)
   if (input.user) segments.push(input.user)
   return segments.join('\n\n')

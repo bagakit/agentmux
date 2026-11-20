@@ -32,6 +32,10 @@ export const AMUX_PROTOCOL_DEFINITIONS = {
     tag: 'amux:capsule-answer', form: 'envelope', title: 'Page answer',
     description: 'A confirmed answer to one Capsule page question, with its original page and question IDs. The trusted confirmation and input receipt, not this text, establish the human source.',
   },
+  'goal-confirmation': {
+    tag: 'amux:goal', form: 'envelope', title: 'Goal continuation requested',
+    description: 'Identifies the original Goal confirmation and continuation request. Read the original Goal and input receipt to confirm their effects.',
+  },
   continue: {
     tag: 'amux:continue', form: 'marker', title: 'Continue',
     description: 'A continuation declaration. Viewing it does not resume a Session or establish that work was completed.',
@@ -90,7 +94,7 @@ export type CapsuleAnswer = { capsuleId: string; interactionId: string; question
 
 export type AmuxProtocolDeclaration = {
   /** Absent for an unknown type: a generic reading card, not a supported business action. */
-  id?: 'continue' | 'reaction' | 'capsule-answer'
+  id?: 'continue' | 'reaction' | 'capsule-answer' | 'goal-confirmation'
   tag: string
   attributes: readonly { name: string; value: string }[]
   body: string | null

@@ -1,3 +1,4 @@
+import { formatGoalConfirmation } from '@agentmux/core/agent-message-render'
 import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
 import { createHash } from 'node:crypto'
 import { AgentMuxError, agentPromptCondition, decideFutureProgress, type AgentMuxClientEvent, type AgentMuxRpcCallContext } from '@agentmux/core'
@@ -98,9 +99,11 @@ export class GoalPatrolOwner {
   }
   private attempt(goalId: string, patrolId: string, target: DemandPatrolTarget, context: string, suffix: string, purpose?: DemandPatrol['purpose']): Omit<DemandPatrolAttempt, 'preparedAt'> {
     const operationId = 'goal-patrol-' + createHash('sha256').update(JSON.stringify([goalId, patrolId, suffix])).digest('hex')
-    if (purpose === 'confirmation') return { operationId, actionOperationId: suffix, intentId: operationId, target,
-      agentMuxNote: JSON.stringify({ schema: 'agentmux.goal-confirmation.v1', ...JSON.parse(context),
-        next: 'A person confirmed this Goal and asked you to continue it as Supervisor. Read amux goal --skill, then inspect the original Goal and its current plan. Check that the confirmed version and Supervisor are still current. Advance its ready Tickets using the existing claim, delegation, evidence and independent review flow. Keep original work and reconcile in-flight operations.' }) }
+    if (purpose === 'confirmation') {
+      const { goalUrl, alignmentRevision } = JSON.parse(context)
+      return { operationId, actionOperationId: suffix, intentId: operationId, target,
+        agentMuxNote: formatGoalConfirmation({ goalUrl, alignmentRevision, operationId: patrolId }) }
+    }
     if (purpose === 'plan') {
       const guidance = goalRoleGuidance({ role: 'manager', goalId, agentSessionId: target.agentSessionId, runId: target.runId, source: { kind: 'goal-plan-request', operationId: patrolId } })
       return { operationId, actionOperationId: suffix, intentId: operationId, target, agentMuxNote: JSON.stringify({ schema: 'agentmux.goal-plan-request.v1',

@@ -11,6 +11,9 @@ import { browserInputContextJson, parseBrowserInputContext, type BrowserInputCon
 import { AMUX_PROTOCOL_DEFINITIONS, AMUX_CONTINUE_MARKER, AMUX_TRIGGER_KINDS, formatAmuxTriggerNote, readAmuxTriggerNote, type AmuxTriggerKind, formatAmuxReactionMarker, isAmuxReactionCode, type AmuxProtocolDeclaration, type AmuxProtocolId } from './amux-protocol-definition.js'
 import { formatAmuxSharing, formatAmuxObjectLink } from './sharing.js'
 import { formatCapsuleAnswer, parseCapsuleAnswer } from './capsule-answer.js'
+import { formatGoalConfirmation, parseGoalConfirmation } from './goal-confirmation.js'
+
+export { formatGoalConfirmation, parseGoalConfirmation } from './goal-confirmation.js'
 
 export { AMUX_PROTOCOL_DEFINITIONS, type AmuxTriggerKind, type AmuxProtocolDeclaration, type AmuxProtocolId } from './amux-protocol-definition.js'
 
@@ -390,6 +393,9 @@ function parseStandaloneProtocol(text: string): AmuxProtocolDeclaration | null {
   const capsuleAnswer = parseCapsuleAnswer(text)
   if (capsuleAnswer) return { id: 'capsule-answer', tag: AMUX_PROTOCOL_DEFINITIONS['capsule-answer'].tag,
     attributes: [{ name: 'version', value: '1' }], body: null, raw: text, capsuleAnswer }
+  const goalConfirmation = parseGoalConfirmation(text)
+  if (goalConfirmation) return { id: 'goal-confirmation', tag: AMUX_PROTOCOL_DEFINITIONS['goal-confirmation'].tag,
+    attributes: [], body: text.split('\n')[1]!, raw: text }
   const header = /^<amux:([a-z][a-z0-9-]*)((?: +[a-z][a-z0-9-]*="[^<>"\r\n]*")*) *(\/?)>/u.exec(text)
   if (!header) return null
   const tag = `amux:${header[1]}`
@@ -443,6 +449,10 @@ const protocolExamples = {
     { label: 'Merged references', wire: renderAgentMuxMessageReferences([sampleReference, { senderSessionId: 'SID-2', messageId: 'MID-2' }]) }
   ],
   'capsule-answer': () => [{ label: 'Confirmed page answer', wire: formatCapsuleAnswer({ capsuleId: 'Kd7mQ2xRb9Wp', interactionId: 'Q4nT8vHc2Jzs', question: 'Which icon?', answer: 'B, with a lighter shadow' }) }],
+  'goal-confirmation': () => [{ label: 'Confirm a Goal and ask its Supervisor to continue', wire: formatGoalConfirmation({
+    goalUrl: formatAmuxObjectLink({ kind: 'goal', goalId: 'GOAL', runtimeId: 'RUNTIME', namespace: 'NAMESPACE' }),
+    alignmentRevision: 1, operationId: 'OP'
+  }) }],
   continue: () => [{ label: 'Continuation declaration', wire: AMUX_CONTINUE_MARKER }],
   reaction: () => [
     { label: 'Standalone keyword declaration', wire: formatAmuxReactionMarker('ok') },
