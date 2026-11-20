@@ -45,6 +45,11 @@ unknown selector strings are rejected. Reading or cancelling either form changes
 Session, Run, input authority, saved reference or draft. Cancellation ends this reader;
 a lower-level read already running without cancellation support may finish independently.
 
+`space agent-locations --runtime RUNTIME --session SID` reads the original Core’s
+bindings and display occurrences for an already existing Session. Select its original
+Source endpoint. A bound Space may have no current display occurrence. Retain all exact
+positions and use `space inspect` with the chosen original address before opening it.
+
 ## Saved Survey pages and research
 
 Survey references are client preferences over the original Browser/Region or Zone, not
