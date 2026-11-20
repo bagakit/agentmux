@@ -53,3 +53,22 @@ This is the same conversation restored after its previous process ended. Preserv
 ~~~text
 Early in the conversation, once you understand the task and your role, read name --skill and give your own Session a concise derived task name; continue the task if naming is unavailable.
 ~~~
+
+## local-owner
+
+~~~text
+this original Core owner
+~~~
+
+## runtime-owner
+
+~~~text
+Runtime {{runtimeId}}
+~~~
+
+## spawn
+
+~~~text
+This Session was created by AgentMux Session {{sessionId}}, Run {{runId}}, at {{owner}}.
+Use amux whoami or amux agent inspect to verify the creation, and amux agent spawn --help for original creation relations.
+~~~

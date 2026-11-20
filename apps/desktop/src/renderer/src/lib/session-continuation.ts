@@ -1,3 +1,4 @@
+import { renderAmuxProtocol } from '@agentmux/core/amux-protocol'
 import type { AgentSessionHistoryPage, AgentSessionHistoryItem } from '@agentmux/core'
 import type { ConversationAxisItem } from './conversation-axis'
 import { speakerOf } from './conversation-speaker'
@@ -15,5 +16,5 @@ export function buildContinuationPrompt(messages: readonly ConversationAxisItem[
     const label = speaker?.role === 'human' ? 'User' : speaker?.role === 'agent' ? 'Agent' : speaker?.role === 'unknown' ? 'Input' : 'Activity'
     return `${label}: ${message.content ?? ''}`
   }).join('\n\n')
-  return `Continue this conversation from the selected point.\n\n${transcript}`
+  return renderAmuxProtocol('agent-recovery-task', 'continue', { transcript })
 }

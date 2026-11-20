@@ -73,7 +73,7 @@ Use the confirmed private route.
 ## reaction
 
 ~~~text
-For an external reaction, use amux connection --skill with the original bound identity and platform message ID.
+For reactions, use amux connection --skill with the original bound identity and platform message ID.
 ~~~
 
 ## reply

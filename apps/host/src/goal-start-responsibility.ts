@@ -1,3 +1,4 @@
+import { getAmuxProtocolTemplate } from '@agentmux/core/amux-protocol'
 import { optionalInputEpoch } from '@agentmux/core/prompt-condition'
 import { createHash } from 'node:crypto'
 import { agentPromptCondition, decideFutureProgress, type AgentMuxClientEvent, type AgentPromptSubmissionRecord } from '@agentmux/core'
@@ -140,7 +141,7 @@ export class GoalStartResponsibilityOwner {
         agentMuxNote: JSON.stringify({ schema: 'agentmux.goal-start-attention.v1', goalId: goal.id, startOperationId: start.operationId,
           hostId: start.hostId, workerAgentSessionId: start.agentSessionId, originalRunId: start.runId,
           originalInputReceipt: start.receipt ?? null, resultBasis: start.resultBasis ?? null,
-          next: 'The original finite Goal Start Run ended without a Start-associated result. Inspect its original Core prompt input and Goal evidence. Goal-level grounding is not an authenticated report by this worker. Retain the original Session, identify the blocker or explicit continuation, and use the existing Goal result proposal and human review. Input receipt, Run exit, ordinary completion text and human acceptance are separate facts. Never resend an unknown original input or choose another Agent by guessing.' }) })
+          next: getAmuxProtocolTemplate('goal-task', 'start-attention') }) })
       attention = (await this.demands.inspectDispatch(goal.id, start.operationId))!.attention!
     }
     scope.runId = attention.supervisorRunId

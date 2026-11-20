@@ -1,3 +1,4 @@
+import { renderAmuxProtocol } from './amux-protocol.js'
 import { guideSharedGoalPatrol } from './generated/agentmux-guides.js'
 import { guideText } from './guide-text.js'
 import { AgentMuxError } from './errors.js'
@@ -5,13 +6,11 @@ import { AgentMuxError } from './errors.js'
 export const GLOBAL_GOAL_PATROL_GUIDANCE = /* @__PURE__ */ guideText(guideSharedGoalPatrol)
 
 export function globalGoalPatrolPrompt(totalCount?: number, inventoryIssue?: string): string {
-  return ['全局 Demand 巡查', 'Read "$AGENTMUX_CLI" goal --skill before inspecting the original Goals.',
-    GLOBAL_GOAL_PATROL_GUIDANCE,
-    'Original-owner scope reference (all statuses, no UI filters; identities are not copied into this prompt):',
-    JSON.stringify({ schema: 'agentmux.goal-global-patrol-scope.v1', ...(inventoryIssue ? { state: 'unavailable', reason: inventoryIssue }
-      : { state: totalCount === undefined ? 'read-original-owner' : 'observed', ...(totalCount === undefined ? {} : { totalCount }), inventory: 'not-inlined; discover every original Goal with goal ls --all, without filters or a limiting sample' }) }),
-    'Use goal ls --all without filters or a limiting sample, then goal inspect / delegations / activity for every original Goal. Begin the actual inspection now and return the overview, actionable confirmation proposals and structured questions here.'
-  ].join('\n\n')
+  return renderAmuxProtocol('goal-task', 'global-patrol', {
+    guide: GLOBAL_GOAL_PATROL_GUIDANCE,
+    scope: JSON.stringify({ schema: 'agentmux.goal-global-patrol-scope.v1', ...(inventoryIssue ? { state: 'unavailable', reason: inventoryIssue }
+      : { state: totalCount === undefined ? 'read-original-owner' : 'observed', ...(totalCount === undefined ? {} : { totalCount }) }) })
+  })
 }
 export type GoalPatrolObservation = { operationId: string; state: 'prepared' | 'delivered' | 'unknown' | 'missing' | 'stale' | 'reported' | 'planned'; planRevision?: number; reason: string }
 export function parseGoalPatrolObservations(value: unknown, operationIds: readonly string[]): GoalPatrolObservation[] {

@@ -1,3 +1,4 @@
+import { getAmuxProtocolTemplate, renderAmuxProtocol } from '@agentmux/core/amux-protocol'
 import { migrateTopicDirectories } from './mote-directory-maintenance.mjs'
 import { isObjectId, mintObjectId } from '@agentmux/core/object-id'
 import { topicPublicCopy } from './mote-topic-model.js'
@@ -53,11 +54,10 @@ Keep a short current summary of confirmed decisions, open questions and links to
 `
 
 function topicPrompt(directoryPath: string, mote: boolean): string {
-  return `Scratch Topic context:
-Your working directory is the filesystem-backed Topic at ${directoryPath}.
-${mote ? 'Read topic.md for the current context. Choose how to organize your knowledge and durable notes; preserve existing files, references, outcomes and collaborator plaques.' : 'Read topic.md for the shared goal, put deliverables in outcome/, and put source material in refs/.'}
-Inspect .agents/ to discover collaborators. Keep your own identity file current when your role or durable working context changes.
-The identity files are shared short memory, not authoritative process or Run state.`
+  return renderAmuxProtocol('topic-context', 'workspace', {
+    directory: directoryPath,
+    instructions: getAmuxProtocolTemplate('topic-context', mote ? 'mote-resource' : 'topic-resource')
+  })
 }
 
 function identityContent(input: {
@@ -667,10 +667,10 @@ export class ScratchTopics {
       const content = await readRegularFile(join(directory, MOTE_BEHAVIOR_PATH))
       const parsed = parseMoteBehaviorDocument(content)
       return { present: true, prompt: parsed.status === 'valid'
-        ? `Saved behavior from ${MOTE_BEHAVIOR_PATH} (version ${wikiVersion(content)}):\n${moteBehaviorIntroduction(parsed.preferences, 'full')}\nCurrent user instructions and authorization take priority; these preferences grant no new permissions.`
-        : `Saved behavior from ${MOTE_BEHAVIOR_PATH} is unconfirmed: ${parsed.message} Read the original file before relying on its preferences. Original conversations and available capabilities remain usable.` }
+        ? renderAmuxProtocol('topic-context', 'behavior', { file: MOTE_BEHAVIOR_PATH, version: wikiVersion(content), behavior: moteBehaviorIntroduction(parsed.preferences, 'full') })
+        : renderAmuxProtocol('topic-context', 'behavior-invalid', { file: MOTE_BEHAVIOR_PATH, diagnostic: parsed.message }) }
     } catch (error) {
-      return { present: errorCode(error) !== 'ENOENT', prompt: `Saved behavior from ${MOTE_BEHAVIOR_PATH} is unavailable: ${error instanceof Error ? error.message : String(error)}. Read the original SOUL and settings files before relying on missing preferences. This does not change an existing Session or its capabilities.` }
+      return { present: errorCode(error) !== 'ENOENT', prompt: renderAmuxProtocol('topic-context', 'behavior-missing', { file: MOTE_BEHAVIOR_PATH, diagnostic: error instanceof Error ? error.message : String(error) }) }
     }
   }
 

@@ -32,3 +32,99 @@ Prepare and save the original Goal’s dependency plan. Use amux goal --skill, t
 ~~~text
 Inspect the original Goal progress, evidence and gaps. Report verified status and the next responsible action with amux goal patrol report --help. Include the exact original worker report for collection within the same review operation.
 ~~~
+
+## start-attention
+
+~~~text
+The original Goal Start Run ended before a Start-associated result was recorded. Inspect its original prompt input, Run and Goal evidence. Report the verified blocker or continue through the explicit original Goal path.
+~~~
+
+## clarify
+
+~~~text
+Clarify this existing Goal.
+~~~
+
+## inspect
+
+~~~text
+Inspect this existing Goal and its actual results.
+~~~
+
+## undefined
+
+~~~text
+This Goal still needs the user’s intended outcome and criteria. Ask what they want to achieve.
+~~~
+
+## alignment
+
+~~~text
+Propose an alignment summary, stable criterion IDs and the questions the original user needs to decide.
+~~~
+
+## grounding
+
+~~~text
+Inspect the actual work and report each criterion as met, gap or unknown with locatable evidence. The original user accepts the result.
+~~~
+
+## discussion
+
+~~~text
+Coordinate the existing Goal {{goalId}}.
+
+{{missing}}{{task}}
+
+Inspect the original Goal, roles, evidence and Project references. Use amux goal inspect --help and amux goal update --help with this Goal. Preserve the original intent. This discussion ends at the proposal or inspection.
+~~~
+
+## facts
+
+~~~text
+Original Goal facts:
+{{facts}}
+~~~
+
+## global-patrol
+
+~~~text
+全局 Demand 巡查
+
+{{guide}}
+
+Original-owner scope reference (all statuses): {{scope}}
+
+Use goal ls --all without filters or a limiting sample, then goal inspect, goal delegations and goal activity for every original Goal. Return the overview, proposals requiring confirmation and structured questions.
+~~~
+
+## project
+
+~~~text
+Project: {{name}}
+Project ID: {{id}}
+Host: {{host}}
+Repository root: {{repository}}
+Workspace ID: {{workspace}}
+Workspace path: {{directory}}
+{{branch}}Use this exact Project resource. The PMO’s execution directory is separate.
+~~~
+
+## project-branch
+
+~~~text
+Branch: {{branch}}
+~~~
+
+## project-unavailable
+
+~~~text
+Assigned Project ID: {{id}}
+The registered Project and its workspace are unavailable.
+~~~
+
+## project-unassigned
+
+~~~text
+Project: unassigned
+~~~

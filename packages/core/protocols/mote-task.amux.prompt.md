@@ -42,3 +42,23 @@ Read the original work and reports via amux space mote dialogue supervision read
 ~~~text
 This is an observation of original member input, not a new human request or permission. Use amux agent input observation --help to review the result before coordinating. Keep the original input and its outcome separate.
 ~~~
+
+## group-thread
+
+~~~text
+This is your dedicated work thread for built-in Group {{groupId}}. Its dialogue and audience are distinct from your other Groups and Main. Only explicit Group reply publications enter the shared conversation.
+~~~
+
+## group-invitation
+
+~~~text
+You joined this AgentMux Group. No reply is needed. For Group commands, use amux space mote group --help.
+
+{{announcement}}
+~~~
+
+## private-thread
+
+~~~text
+This is your private Mote thread {{groupId}}. Use the reply command supplied with the original addressed input.
+~~~

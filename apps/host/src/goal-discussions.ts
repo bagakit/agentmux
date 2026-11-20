@@ -1,3 +1,4 @@
+import { getAmuxProtocolTemplate, renderAmuxProtocol } from '@agentmux/core/amux-protocol'
 import { optionalInputEpoch } from '@agentmux/core/prompt-condition'
 import { confirmSpatialGoalDiscussionLauncher } from './goal-discussion-launcher.js'
 import { contributeGoalDiscussionBinding, readGoalDiscussionBinding, resolveGoalDiscussionBinding } from './goal-discussion-bindings.js'
@@ -22,19 +23,15 @@ import type { GoalRuntimePort } from './goal-runtime.js'
 type Request = Extract<AgentMuxControlRequest, { operation: 'demand.discuss' }>
 type TaskMode = 'grill' | 'grounding'
 type DiscussionRequest = Omit<Request, 'mode'> & { mode: 'open' | TaskMode }
-const discussionPrompt = (_goal: Demand, mode: TaskMode) => mode === 'grill' ? 'Clarify this existing Goal.' : 'Inspect this existing Goal and its actual results.'
+const discussionPrompt = (mode: TaskMode) => getAmuxProtocolTemplate('goal-task', mode === 'grill' ? 'clarify' : 'inspect')
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 /** Original Goal request text, shared by every client through the domain owner. */
 function discussionTask(goal: Demand, mode: TaskMode): string {
-  return [
-    `Coordinate the existing Goal ${goal.id}. Current request: ${mode === 'grill' ? 'align the goal' : 'align the results'}.`,
-    ...(!goal.alignment && !goal.description.trim() ? ['This is an existing undefined Goal draft. Its placeholder title is not the user intent. Ask what the person wants to achieve; do not invent an outcome, criteria or human approval.'] : []),
-    'Preserve the original intent. Inspect this same Goal, its Supervisor, assignees, criteria, evidence and project references. Do not create another Goal or overwrite the description with a summary. Discussion or inspection grants no execution beyond the actual authorization.',
-    mode === 'grill' ? 'Discuss decision-bearing choices. Propose a readable alignment summary, stable criterion IDs and actual unresolved questions; the person confirms the Goal.' : 'Inspect actual work and report each criterion with met/gap/unknown, locatable evidence and concrete gaps. The person accepts results; never claim their acceptance.',
-    'Read the current Goal through the public CLI and replace examples with actual observations. The original owner generates revisions and result acknowledgements.',
-    `"$AGENTMUX_CLI" goal inspect --goal ${JSON.stringify(goal.id)}`,
-    `"$AGENTMUX_CLI" goal update --goal ${JSON.stringify(goal.id)} --${mode === 'grill' ? 'alignment' : 'grounding'} '<actual proposal JSON>'`
-  ].join('\n\n')
+  return renderAmuxProtocol('goal-task', 'discussion', {
+    goalId: goal.id,
+    missing: !goal.alignment && !goal.description.trim() ? getAmuxProtocolTemplate('goal-task', 'undefined') + '\n\n' : '',
+    task: getAmuxProtocolTemplate('goal-task', mode === 'grill' ? 'alignment' : 'grounding')
+  })
 }
 export function createHostGoalDiscussions(options: {
   configurationPath: string
@@ -113,11 +110,11 @@ export function createHostGoalDiscussions(options: {
     const source = await primaryMote(request.executorId)
     const body = request.mode === 'open' ? undefined : discussionTask(goal, request.mode)
     const note = [goalRoleGuidance({ role: 'manager', goalId: goal.id, source: { kind: 'goal-pmo-launch', operationId } }),
-      body, await projectContext(goal), `Original Goal facts:\n${JSON.stringify({ id: goal.id, title: goal.title, description: goal.description, projectId: goal.projectId, assigneeSessionIds: goal.assigneeSessionIds, supervisorSessionId: goal.supervisorSessionId, alignment: goal.alignment, grounding: goal.grounding })}`].filter(Boolean).join('\n\n')
+      body, await projectContext(goal), renderAmuxProtocol('goal-task', 'facts', { facts: JSON.stringify({ id: goal.id, title: goal.title, description: goal.description, projectId: goal.projectId, assigneeSessionIds: goal.assigneeSessionIds, supervisorSessionId: goal.supervisorSessionId, alignment: goal.alignment, grounding: goal.grounding }) })].filter(Boolean).join('\n\n')
     const birth = goal.discussionOperationId ? goal.creationOrigin : { ...optionalInputEpoch(await options.runtime.readInputEpoch('local')) }
     const value: DemandDiscussionIntent = { ...optionalInputEpoch(birth?.inputEpoch), ...(birth && 'inputRuntimeId' in birth && typeof birth.inputRuntimeId === 'string' ? { inputRuntimeId: birth.inputRuntimeId } : {}), requestOperationId: request.requestId, mode: request.mode, ...source, agentMuxNote: note,
       ...(context.caller ? { callerAgentSessionId: context.caller.agentSessionId } : {}),
-      ...(request.mode === 'open' ? {} : { prompt: discussionPrompt(goal, request.mode) }) }
+      ...(request.mode === 'open' ? {} : { prompt: discussionPrompt(request.mode) }) }
     await current(context)
     try { return (await options.demands.prepareDiscussion(goal.id, operationId, value, goal.updatedAt)).demand.discussionIntent! }
     catch (error) {
@@ -274,7 +271,7 @@ export function createHostGoalDiscussions(options: {
           const prepared = await options.demands.prepareDiscussionInput(goal.id, { operationId: request.requestId, mode: request.mode,
             hostId: recipient.hostId, agentSessionId: recipient.agentSessionId, runId: condition.expectedRun.runId,
             ...optionalInputEpoch(await options.runtime.readInputEpoch(recipient.hostId)), afterSubmissionId: condition.afterSubmissionId,
-            prompt: discussionPrompt(goal, request.mode), agentMuxNote: await taskContext(goal, request.mode),
+            prompt: discussionPrompt(request.mode), agentMuxNote: await taskContext(goal, request.mode),
             ...(context.caller ? { callerAgentSessionId: context.caller.agentSessionId } : {}) })
           frozen = prepared.demand.discussionInputs!.find(item => item.operationId === request.requestId)!
         }
@@ -291,7 +288,7 @@ export function createHostGoalDiscussions(options: {
           if (prior) break
         }
         if (prior && !prior.admission?.acknowledged) return unavailable('The original discussion request input is unconfirmed; it was not automatically repeated.')
-        if (prior && !context.caller && prior.admission?.intent?.message?.userContent !== discussionPrompt(goal, request.mode))
+        if (prior && !context.caller && prior.admission?.intent?.message?.userContent !== discussionPrompt(request.mode))
           throw new AgentMuxError('This original discussion input belongs to another frozen request. Its input and recipient remain retained.', 'CONTROL_REQUEST_CONFLICT')
         if (!prior) {
           if (context.caller) {

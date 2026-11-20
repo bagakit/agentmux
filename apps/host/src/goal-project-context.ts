@@ -1,3 +1,4 @@
+import { getAmuxProtocolTemplate, renderAmuxProtocol } from '@agentmux/core/amux-protocol'
 import { SCRATCH_WORKSPACE_ID } from './mote-topic-model.js'
 import { NOTES_WORKSPACE_ID } from './notes-library.js'
 import type { ProjectWorkspace } from './workspace-projects.js'
@@ -33,18 +34,12 @@ export function goalProjectContext(config: ProjectConfiguration | null, projectI
 }
 
 export function goalProjectContextText(context: GoalProjectContext | null, assignedProjectId?: string | null): string {
-  if (!context) return [
-    assignedProjectId ? `Assigned Project ID: ${assignedProjectId}` : 'Project: unassigned',
-    'Registered project and workspace context is unavailable. Do not infer a project, path or home from the PMO working directory.'
-  ].join('\n')
-  return [
-    `Project: ${context.name}`,
-    `Project ID: ${context.id}`,
-    `Host: ${context.hostId}`,
-    `Repository root: ${context.repoPath}`,
-    `Workspace ID: ${context.workspaceId}`,
-    `Workspace path: ${context.path}`,
-    ...(context.branch ? [`Branch: ${context.branch}`] : []),
-    'These are the project paths for this request. The PMO working directory is separate; do not substitute it or assume a host home.'
-  ].join('\n')
+  if (!context) return assignedProjectId
+    ? renderAmuxProtocol('goal-task', 'project-unavailable', { id: assignedProjectId })
+    : getAmuxProtocolTemplate('goal-task', 'project-unassigned')
+  return renderAmuxProtocol('goal-task', 'project', {
+    name: context.name, id: context.id, host: context.hostId, repository: context.repoPath,
+    workspace: context.workspaceId, directory: context.path,
+    branch: context.branch ? renderAmuxProtocol('goal-task', 'project-branch', { branch: context.branch }) + '\n' : ''
+  })
 }

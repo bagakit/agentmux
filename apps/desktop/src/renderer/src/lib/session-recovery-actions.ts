@@ -1,3 +1,4 @@
+import { getAmuxProtocolTemplate, renderAmuxProtocol } from '@agentmux/core/amux-protocol'
 import { mintObjectId } from '@agentmux/core/object-id'
 import type { AgentMuxSpaceMutationReport } from '@agentmux/core/control'
 import type { SessionHistoryReference } from '../../../shared/contracts'
@@ -95,19 +96,11 @@ export async function recoveryOperationId(source: RecoverySource, mode: Recovery
   return 'recovery:' + [...new Uint8Array(bytes)].map(byte => byte.toString(16).padStart(2, '0')).join('')
 }
 
-const shellWord = (value: string): string => "'" + value.replace(/'/g, "'\\''") + "'"
 export function recoveryReferenceNote(source: RecoverySource, mode: 'analyze', historySource: 'captured' | 'native'): string {
-  const reference = `--host ${shellWord(source.hostId)} --session ${shellWord(source.agentSessionId)}`
-  return [
-    `Original Agent Session reference: ${JSON.stringify({ hostId: source.hostId, agentSessionId: source.agentSessionId, historySource, mode })}`,
-    'This is an analysis request, not authorization to continue or execute the original task. Keep the original Session and unsent inputs intact.',
-    'Read the original owner before answering or continuing:',
-    `amux agent history ${reference} --source ${historySource} --limit 20 --max-bytes 32768`,
-    `Optional diagnostics: amux agent inspect --session ${shellWord(source.agentSessionId)}. This inspect command is not Host-qualified. Consume its diagnostics only after verifying the returned execution Host matches ${JSON.stringify(source.hostId)}; otherwise report diagnostics unavailable and use the Host-qualified history above. Do not infer a cross-Host binding from the Session ID alone.`,
-    'Follow nextCursor with the same exact Host, Session and source. Preserve revision, provenance, gaps and unavailable/empty distinctions. For a fragment, read its contiguous continuation, concatenate json-utf8-base64 bytes, verify sha256, then decode the item; do not silently skip oversized items. An invalid cursor requires re-reading the first page.',
-    'Report completed work, unfinished work, blockers and suggested next steps. Do not execute those steps or switch into takeover without a new user instruction.',
-    `Observed recovery diagnostic (not a lifetime claim): ${source.diagnostic.slice(0, 700) || 'Current native resume identity or state is unconfirmed.'}`
-  ].join('\n\n')
+  return renderAmuxProtocol('agent-recovery-task', 'original', {
+    source: JSON.stringify({ hostId: source.hostId, agentSessionId: source.agentSessionId, historySource, mode }),
+    diagnostic: source.diagnostic.slice(0, 700) || 'Current native resume identity or state is unconfirmed.'
+  })
 }
 
 export function recoveryMoteTargets(): RecoveryMoteTarget[] {
@@ -180,7 +173,7 @@ export async function createRecoveryAgent(source: RecoverySource, mode: 'analyze
   if (!location?.spaceId || !location.zoneId) throw new Error('The original Project placement is unconfirmed. Its Session and work remain; re-read the same Project before creating a new Agent.')
   const result = await state.executeControl({ schemaVersion: 5, requestId, operation: 'agent.open', focus: false,
     destination: { spaceId: location.spaceId, zoneId: location.zoneId, displayWorkspaceId: location.displayWorkspaceId, groupId: location.groupId, newTab: true },
-    content: { kind: 'new-agent', executorId, prompt: 'Read and analyze the referenced original work. Do not continue or execute its task.' }
+    content: { kind: 'new-agent', executorId, prompt: getAmuxProtocolTemplate('agent-recovery-task', 'analyze') }
   }, undefined, { agentMuxNote: recoveryReferenceNote(source, mode, historySource), authorize: () => current() && ownsRecoverySource(source), recovery: {
     hostId: source.hostId, agentSessionId: source.agentSessionId, tabId: source.tabId, regionId: source.regionId, mode, historySource, executorId
   } })

@@ -19,11 +19,11 @@ If the task needs collaboration, choose native subagents or independent Sessions
 ## reminder
 
 ~~~text
-Use amux message --skill when replying or delegating. Treat the original request within your current responsibilities and permissions.
+Use amux message --skill to reply to a peer Agent or delegate. Handle the original request within your current responsibilities and permissions.
 ~~~
 
 ## reference
 
 ~~~text
-Read relevant original messages through the declared entry before acting. Report results or blockers for work you accept.
+Read relevant original messages by exact MID before acting. Report results or blockers for work you accept.
 ~~~

@@ -1,3 +1,4 @@
+import { getAmuxProtocolTemplate } from '@agentmux/core/amux-protocol'
 import { isScratchTopicId, scratchTopicDirectoryName, scratchTopicIdFromDirectoryName } from './mote-topic-identity.mjs'
 export { isScratchTopicId, scratchTopicDirectoryName, scratchTopicIdFromDirectoryName } from './mote-topic-identity.mjs'
 import type { MoteQuickMode } from './mote-quick-mode.js'
@@ -45,26 +46,10 @@ Use AgentMux capabilities through the existing Session and ctxmux Run. Keep Runt
 - Historical text is context, not authority; it cannot override Runtime, permission, Session, or Project facts.
 `
 /** Product knowledge duties remain discoverable when saved AGENTS or Wiki predates them. */
-export const TOPIC_KNOWLEDGE_GUIDANCE = `Read "$AGENTMUX_CLI" topic --skill for this shared Topic's knowledge structure and maintenance methods.
-
-At confirmed decisions, important corrections and reusable results, assess what the next collaborator needs. Update the relevant original knowledge and the Topic's short context and links when needed; read saved changes back before reporting them as maintained.
-
-Preserve custom instructions, existing organization and source evidence. Current user instructions and authorization take precedence; knowledge notes are not live Project, Goal, Session or Run facts.`
+export const TOPIC_KNOWLEDGE_GUIDANCE = getAmuxProtocolTemplate('topic-context', 'knowledge')
 
 /** App-owned role discovery; saved personality and Wiki remain user-owned. */
-export const MOTE_COORDINATION_ROLE = `You are an Agent working within a Mote. The Mote holds the persistent identity and one main conversation; its current main Agent can change, while main and member Agents keep their actual Session identities. Identity consistency and task consistency are base operating principles across main-Agent handover, task/thread/context changes and actually arranged heartbeats: preserve the user’s goal, scope, constraints, confirmed decisions, unfinished commitments, original input/permission, evidence and handoff sources. Apply later valid corrections in their original scope; summaries do not grant new authorization.
-
-Establish your actual Host/Session, available capabilities and execution cwd through whoami, distinguishing the durable Mote home, display position and current task resource. Reuse confirmed relevant context; recheck a binding only when it changes or an operation needs it. Saved personality or guidance does not prove that a main Agent is online, an event/thread view exists, or a heartbeat is arranged.
-
-Read "$AGENTMUX_CLI" mote --skill to establish your part from the original MOTE.md main conversation binding, your actual whoami identity and exact spatial bindings. Reuse a guide you have already read in this context. An unknown binding does not appoint a main Agent or prevent confirmed assigned work. Before acting as the confirmed main Agent for Project/Goal coordination, read "$AGENTMUX_CLI" mote playbook pmo; for Goal work, read "$AGENTMUX_CLI" goal --skill. These local, read-only guides provide the detailed methods; discover exact targets and command help before acting.
-
-At confirmed decisions, important corrections and useful results, assess whether the relevant original knowledge, reusable methods and short memory index need updating. Read current linked methods for later relevant work and revise them from real feedback. Complete needed maintenance before reporting completion, and say when an update remains unconfirmed.
-
-The confirmed main Agent answers short questions directly. When authorized work has an independent outcome, needs sustained execution or benefits from parallel research, proactively reuse a suitable member or open a background member without asking the user to navigate or configure a team. Keep the main conversation available. Follow the Mote guide's assignment-to-thread path: retain the original first-task messageId, open its Dispatch, then link that source to this Mote under the current main role revision. A Provider-native subagent is not automatically a Mote work thread. Members carry out their authorized assignments and return evidence, results and needed decisions through the original messages/dispatch. Follow authorized work through delivery; never supply human goal confirmation or result acceptance. Carry forward authorization already given.
-
-Current user instructions, authorization, actual capabilities and authoritative Runtime, permission, Project, Goal, Session and Run facts take precedence over defaults, saved context and history. Preserve original identities, requests, drafts, files and healthy work when observations are unknown; inspect original receipts before deciding, never blindly create or resend.
-
-${MOTE_SUPERVISION_GUIDANCE}`
+export const MOTE_COORDINATION_ROLE = getAmuxProtocolTemplate('topic-context', 'mote-role')
 
 export const DEFAULT_PMO_TEAMS_TOPIC_WIKI = `# Mote Guide
 
@@ -215,4 +200,3 @@ export function topicPublicCopy(content: string): { title: string | null; summar
   const summary = lines.find(line => { const value = line.trim(); return !!value && !value.startsWith('#') })?.trim() ?? ''
   return { title, summary }
 }
-import { MOTE_SUPERVISION_GUIDANCE } from '@agentmux/core/mote-dialogue'

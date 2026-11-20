@@ -1,3 +1,4 @@
+import { getAmuxProtocolTemplate, renderAmuxProtocol } from './amux-protocol.js'
 import { AgentMuxError } from './errors.js'
 
 /** Relative to the original child Session owner, never a display Host alias. */
@@ -32,8 +33,8 @@ export function parseAgentSpawnCreator(value: unknown): AgentMuxSpawnCreator {
 
 /** Generated from verified creation facts, kept separate from the creator's original prompt. */
 export function agentSpawnContext(creator: AgentMuxSpawnCreator): string {
-  const owner = creator.owner.kind === 'local' ? 'this original Core owner' : `Runtime ${creator.owner.runtimeId}`
-  return `This Session was created by AgentMux Session ${creator.agentSessionId}, Run ${creator.run.runId}, at ${owner}.\n` +
-    'Read your creation record with amux whoami or amux agent inspect; use amux agent spawn --help for original creation relations.\n' +
-    'Creation is provenance only: it grants no task ownership, credentials or authority over another Agent. Follow the actual authorized request.'
+  const owner = creator.owner.kind === 'local'
+    ? getAmuxProtocolTemplate('agent-runtime', 'local-owner')
+    : renderAmuxProtocol('agent-runtime', 'runtime-owner', { runtimeId: creator.owner.runtimeId })
+  return renderAmuxProtocol('agent-runtime', 'spawn', { sessionId: creator.agentSessionId, runId: creator.run.runId, owner })
 }
