@@ -97,6 +97,14 @@ describe('original Ideas request and feedback owners', () => {
     expect(useAppStore.getState().tabs).toBe(before.tabs); expect(app.launch).not.toHaveBeenCalled()
   })
   it('latches same-Mote Region A to B to A navigation and retains a separate Mote direction across a late read', async () => {
+    async function showIdeas() {
+      if (panel().dataset.section === 'ideas') return
+      const selected = [...app.container.querySelectorAll<HTMLButtonElement>('button[data-surface-mode="ideas"]')]
+        .find(tab => !tab.closest('[hidden]'))
+      expect(selected).toBeDefined()
+      await moteClick(selected!)
+      expect(panel().dataset.section).toBe('ideas')
+    }
     let finish!: (value: FileReadResult) => void, captured!: FileReadParams
     const read = vi.fn<(params: FileReadParams) => Promise<FileReadResult>>(params => { captured = params; return new Promise(resolve => { finish = resolve }) })
     vi.spyOn(api.files, 'readPublic').mockImplementation(params => panel()?.querySelector('[aria-label="Mote ideas"] [aria-label="Idea direction"]') ? read(params) : Promise.resolve(publicRead(params)))
@@ -104,12 +112,13 @@ describe('original Ideas request and feedback owners', () => {
     await moteClick(button('Prepare idea request'))
     await act(async () => { useAppStore.getState().activateTab(SCRATCH_WORKSPACE_ID, 'mote-group', neighborTab.id); useAppStore.getState().activateTab(SCRATCH_WORKSPACE_ID, 'mote-group', defaultTab.id) }); await settleMoteApp()
     await act(async () => finish(publicRead(captured))); await settleMoteApp(); expect(useAppStore.getState().tabs).toBe(before.tabs)
+    await showIdeas()
     await moteClick(button('Prepare idea request')); const second = { captured, finish }
     await act(async () => useAppStore.getState().openScratchTopic(customMoteId, SCRATCH_WORKSPACE_ID, { tabId: customTab.id })); await settleMoteApp()
-    if (!panel().querySelector('[aria-label="Idea direction"]')) await ideas()
+    await showIdeas()
     await type('[aria-label="Idea direction"]', 'Other Mote direction')
     await act(async () => useAppStore.getState().openScratchTopic(PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, { tabId: defaultTab.id })); await settleMoteApp()
-    if (!panel().querySelector('[aria-label="Idea direction"]')) await ideas()
+    await showIdeas()
     await act(async () => second.finish(publicRead(second.captured))); await settleMoteApp()
     expect(panel().querySelector<HTMLTextAreaElement>('[aria-label="Idea direction"]')!.value).toBe('Retained original Mote direction'); expect(useAppStore.getState().tabs).toBe(before.tabs); expect(read).toHaveBeenCalledTimes(2)
     expect(useAppStore.getState().agentComposerDrafts[defaultAgent.id]).toBe('Default unsent')
