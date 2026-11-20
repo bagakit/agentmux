@@ -7988,7 +7988,7 @@ export const useAppStore = create<AppState>()<[['zustand/persist', PersistedAppS
       try { return await executeSpatialControl({
         get: () => ({ ...get(), originalSpatialGraph: coreSpatialPersistence?.current?.graph ?? null }),
         agentPresentation: catalog => readAgentPresentation(get(), { catalog, layouts: get().layouts,
-          executionFor: agentRegionExecution, known: agentRegionLocationsKnown(), bindings: agentRegionLocationBindings() }),
+          executionFor: agentRegionExecution, known: agentRegionLocationsKnown(), originalGraph: currentCoreSpatialGraph() }),
         motePresentation: (catalog, topics) => readMotePresentation(get(), catalog, topics),
         surveyPresentation: catalog => readSurveyPresentation(get(), catalog),
         appearance: (catalog, imageSpaceId, topics) => readSpatialAppearance(get(), catalog, imageSpaceId, topics,
@@ -8223,8 +8223,8 @@ export const useAppStore = create<AppState>()<[['zustand/persist', PersistedAppS
       if (!request.source) throw controlFailure('CONTROL_UNAVAILABLE', 'The original Focus client document is unconfirmed. Keep its exact group and existing work.')
       const state = get()
       return request.operation === 'focus.ls'
-        ? { operation: request.operation, page: readFocusGroups(state, { method: request.operation, params: request.input }, request.source, { known: agentRegionLocationsKnown(), executionFor: agentRegionExecution, bindings: agentRegionLocationBindings() }) }
-        : { operation: request.operation, page: readFocusGroups(state, { method: request.operation, params: request.input }, request.source, { known: agentRegionLocationsKnown(), executionFor: agentRegionExecution, bindings: agentRegionLocationBindings() }) }
+        ? { operation: request.operation, page: readFocusGroups(state, { method: request.operation, params: request.input }, request.source, { known: agentRegionLocationsKnown(), executionFor: agentRegionExecution, originalGraph: currentCoreSpatialGraph() }) }
+        : { operation: request.operation, page: readFocusGroups(state, { method: request.operation, params: request.input }, request.source, { known: agentRegionLocationsKnown(), executionFor: agentRegionExecution, originalGraph: currentCoreSpatialGraph() }) }
     }
     if (request.operation === 'inspect.notifications') {
       return { operation: request.operation, observation: observeNotifications(request) }

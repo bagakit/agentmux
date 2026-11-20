@@ -13,7 +13,8 @@ import { workbenchSelectionCatalog } from './desktop-focus-navigation'
 import { workbenchNavigationTabs } from './workbench-navigation-catalog'
 import { memberSpaceInputTarget } from './space-mount-view'
 
-export type FocusReadLocations = { known: boolean; executionFor: Parameters<ReturnType<typeof createFocusContextIdentitySelector>>[5]; bindings?: unknown }
+export type FocusReadLocations = { known: boolean; executionFor: Parameters<ReturnType<typeof createFocusContextIdentitySelector>>[5];
+  originalGraph?: Parameters<ReturnType<typeof createFocusContextIdentitySelector>>[7] }
 const unknownLocations: FocusReadLocations = { known: false, executionFor: () => null }
 
 const hash = (value: unknown) => bytesToHex(sha256(utf8ToBytes(JSON.stringify(value))))
@@ -38,7 +39,7 @@ export function readFocusGroups<M extends FocusMethod>(state: AppState, input: {
   const projection = createFocusProjectionSelector()(state, true, 'metadata', true)
   const contexts = [...projection.contexts, ...projection.coordinationContexts]
   const identities = createFocusContextIdentitySelector()(catalog, workbenchNavigationTabs(state.tabs), contexts,
-    state.config, state.layouts, locations.executionFor, locations.known, locations.bindings)
+    state.config, state.layouts, locations.executionFor, locations.known, locations.originalGraph)
   const raw = deriveFocusProjectLanes([...projection.laneContexts, ...projection.coordinationContexts], state.config, undefined, identities, now, state.scratchTopicSnapshots)
   const lanes = deriveFocusCollectionLanes(raw, catalog, { bindings: state.spaceZoneBindings, categories: state.topicCategories })
   const resources = [...state.config?.workspaces ?? [], ...contexts.flatMap(context => context.workspace ? [context.workspace] : [])]

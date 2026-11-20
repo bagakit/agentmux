@@ -7,6 +7,7 @@ import type { FocusScanLane } from './focus-collection-lanes'
 export function focusGroupReadScope(lane: FocusScanLane, resources: readonly WorkspaceRecord[]): AgentMuxFocusScope | null {
   if (lane.collection) return { kind: 'collection', hostId: lane.hostId,
     categorySpaceIds: lane.collection.confirmed ? [...new Set(lane.collection.categories.map(category => category.spaceId))].sort() : [] }
+  if (lane.projectSpaceId) return { kind: 'project', hostId: lane.hostId, projectSpaceId: lane.projectSpaceId }
   const candidates = resources.filter(resource => resource.hostId === lane.hostId &&
     (resource.id === lane.projectWorkspaceId || resource.id === lane.workspaceId ||
       (resource.repoPath ?? resource.path) === lane.path))

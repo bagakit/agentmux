@@ -18,6 +18,7 @@ import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { FocusGoalLinks, FocusGoalMark } from './FocusGoalLinks'
 import type { FocusGoalLinks as GoalLinks } from '../lib/focus-goal-links'
 import type { FocusTopicHeading } from '../lib/focus-collection-lanes'
+import { agentWorkfaceLocationLabel } from '../lib/desktop-focus-navigation'
 
 /** Move between task buttons in actual project and section order, including lazy slots. */
 function moveTaskFocus(button: HTMLButtonElement, forward: boolean) {
@@ -83,7 +84,9 @@ export const FocusContextRow = memo(function FocusContextRow({ context, identity
       if (!event.repeat) hover.read()
     }
   }
-  const card = <button ref={hover.anchor} type="button" className={className} data-session-id={context.id} data-state={context.state} data-bucket={context.bucket} data-activity={context.activitySemantic} data-focus-list-goal={list && Boolean(goalLinks) || undefined} aria-pressed={selected} aria-label={`${context.name} · ${context.stateLabel}${topic ? ` · ${topic.kind === 'worktree' ? 'Zone' : 'Topic'} · ${topic.name}` : ''}${list ? '' : ` · ${description}`}`} aria-description={[list ? focusTaskListDescription(context) : context.originAddress, creationLabel].filter(Boolean).join(' · ') || undefined} aria-describedby={hover.describedBy} {...hover.triggerEvents}
+  const workfaceStatus = context.kind === 'agent' && identity && identity.locations.occurrences.length === 0
+    ? agentWorkfaceLocationLabel(identity.locations.status === 'confirmed' ? { state: 'confirmed', count: 0 } : { state: 'unconfirmed' }) : undefined
+  const card = <button ref={hover.anchor} type="button" className={className} data-session-id={context.id} data-state={context.state} data-bucket={context.bucket} data-activity={context.activitySemantic} data-focus-list-goal={list && Boolean(goalLinks) || undefined} aria-pressed={selected} aria-label={`${context.name} · ${context.stateLabel}${topic ? ` · ${topic.kind === 'worktree' ? 'Zone' : 'Topic'} · ${topic.name}` : ''}${list ? '' : ` · ${description}`}`} aria-description={[list ? focusTaskListDescription(context) : context.originAddress, creationLabel, workfaceStatus].filter(Boolean).join(' · ') || undefined} aria-describedby={hover.describedBy} {...hover.triggerEvents}
     onFocus={list ? undefined : hover.triggerEvents.onFocus}
     onKeyDown={list ? listKey : hover.triggerEvents.onKeyDown}
     aria-keyshortcuts={list ? 'ArrowUp ArrowDown Space Enter' : hover.triggerEvents['aria-keyshortcuts']} onClick={() => { hover.close(); onSelect(context.id) }} onContextMenu={hover.close}>

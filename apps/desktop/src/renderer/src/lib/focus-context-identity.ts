@@ -1,4 +1,5 @@
 import type { AgentMuxSpaceCatalog } from '@agentmux/core'
+import type { AgentMuxSpatialGraph } from '@agentmux/core/spatial-graph'
 import type { AppConfig } from '../../../shared/contracts'
 import { groupIds, type WorkspaceLayout } from '@agentmux/layout'
 import type { WorkbenchTabDetail } from '../components/WorkbenchTopology'
@@ -20,7 +21,7 @@ export type FocusContextOccurrence = {
 }
 export type FocusContextIdentity = {
   /** Original business resources, independently of private display occurrences. */
-  resources?: readonly AppConfig['workspaces'][number][]
+  resources?: readonly FocusProjectResource[]
   objects?: readonly FocusSourceObject[]
   sourceIssue?: string
   tabs: readonly WorkbenchTabDetail[]; occurrenceCount: number
@@ -29,6 +30,42 @@ export type FocusContextIdentity = {
 export type FocusSourceObject = { id: string; kind: 'topic' | 'mote'; name: string; hostId: string; workspaceId: string; path: string; topicId: string }
 const NO_OCCURRENCES: readonly FocusContextOccurrence[] = []
 const same = (left: readonly unknown[], right: readonly unknown[]) => left.length === right.length && left.every((value, index) => value === right[index])
+
+export type FocusProjectResource = AppConfig['workspaces'][number] & { originalSpaceId?: string }
+const NO_RESOURCES = new Map<string, FocusProjectResource[]>()
+const boundResources = new WeakMap<AgentMuxSpatialGraph, Map<string, FocusProjectResource[]>>()
+
+/** Folder membership in the original Core survives an empty window layout. */
+function boundFolderResources(graph: AgentMuxSpatialGraph | null | undefined): Map<string, FocusProjectResource[]> {
+  if (!graph) return NO_RESOURCES
+  const cached = boundResources.get(graph)
+  if (cached) return cached
+  const resources = new Map<string, FocusProjectResource[]>()
+  const tabs = new Map(graph.tabs.map(tab => [tab.tabId, tab]))
+  const zones = new Map(graph.zones.map(zone => [zone.zoneId, zone]))
+  const spaces = new Map(graph.spaces.map(space => [space.spaceId, space]))
+  const byZone = new Map<string, FocusProjectResource[]>()
+  for (const binding of graph.bindings) {
+    const space = spaces.get(binding.spaceId), zone = zones.get(binding.zoneId)
+    if (space?.kind !== 'folder' || !zone?.directoryPath || !zone.hostId || space.hostId !== zone.hostId || zone.issue || space.issue) continue
+    const resource: FocusProjectResource = { originalSpaceId: space.spaceId, id: zone.workspaceId, hostId: zone.hostId, path: zone.directoryPath, name: space.name,
+      kind: zone.kind === 'worktree' ? 'worktree' : 'folder',
+      ...(space.directoryPath !== zone.directoryPath ? { repoPath: space.directoryPath } : {}), ...(zone.branch ? { branch: zone.branch } : {}) }
+    const items = byZone.get(zone.zoneId) ?? []
+    items.push(resource); byZone.set(zone.zoneId, items)
+  }
+  for (const region of graph.regions) {
+    if (region.kind !== 'agent' || !region.agentSessionId || !region.execution) continue
+    const tab = tabs.get(region.tabId)
+    if (!tab?.zoneId) continue
+    const original = byZone.get(tab.zoneId)
+    if (!original?.length || original[0]!.id !== tab.workspaceId) continue
+    const key = focusContextIdentityKey(region.execution.hostId, region.agentSessionId), items = resources.get(key) ?? []
+    items.push(...original); resources.set(key, items)
+  }
+  boundResources.set(graph, resources)
+  return resources
+}
 
 /** Presentation IDs locate candidates; only the original execution owner qualifies one. */
 export function focusContextAtRegion(candidates: readonly FocusContext[], reference: Pick<RegionReference, 'tabId' | 'regionId'>,
@@ -50,14 +87,14 @@ export function createFocusContextIdentitySelector() {
   let previousResult: ReadonlyMap<string, FocusContextIdentity> = new Map()
   let locationCache: { inputs: readonly unknown[]; positions: Map<string, Map<string, Position>>;
     occurrences: Map<string, Set<string>>; relations: Map<string, FocusContextOccurrence[]>;
-    subjectsByRegion: Map<string, string>; unconfirmed: Set<string> } | undefined
+    subjectsByRegion: Map<string, string>; unconfirmed: Set<string>; resources: ReturnType<typeof boundFolderResources> } | undefined
   return (catalog: AgentMuxSpaceCatalog, tabs: Readonly<Record<string, WorkbenchTab>>,
     contexts: readonly FocusContext[], config: AppConfig | null, layouts: Readonly<Record<string, WorkspaceLayout>>,
-    executionFor: ExecutionFor, locationsKnown = false, executionBindings?: unknown): ReadonlyMap<string, FocusContextIdentity> => {
+    executionFor: ExecutionFor, locationsKnown = false, originalGraph?: AgentMuxSpatialGraph | null): ReadonlyMap<string, FocusContextIdentity> => {
     const executors = config?.executors, retainedAvatars = config?.appearance.agentAvatars
     const contextsByKey = new Map(contexts.map(context => [focusContextIdentityKey(context.hostId, context.id), context]))
     const signature = contexts.map(context => JSON.stringify([context.hostId, context.id, context.control?.agentSessionId, context.control?.run.runId])).sort().join('\n')
-    const inputs = [catalog, tabs, layouts, config?.workspaces, signature, executionFor, locationsKnown, executionBindings]
+    const inputs = [catalog, tabs, layouts, config?.workspaces, signature, executionFor, locationsKnown, originalGraph]
     if (!locationCache || !same(locationCache.inputs, inputs)) {
       const regions = new Map(catalog.regions.map(region => [JSON.stringify([region.tabId, region.regionId]), region]))
       const subjectsByRegion = new Map<string, string>(), unconfirmed = new Set<string>()
@@ -106,7 +143,7 @@ export function createFocusContextIdentitySelector() {
         const position = subjectPositions.get(occurrenceKey) ?? { tabId: location.tabId, regionIds: new Set<string>(), ...(locationLabel ? { locationLabel } : {}) }
         position.regionIds.add(location.regionId); subjectPositions.set(occurrenceKey, position); positions.set(subject, subjectPositions)
       }
-      locationCache = { inputs, positions, occurrences, relations, subjectsByRegion, unconfirmed }
+      locationCache = { inputs, positions, occurrences, relations, subjectsByRegion, unconfirmed, resources: boundFolderResources(originalGraph) }
     }
     const { positions, occurrences, relations, subjectsByRegion, unconfirmed } = locationCache
     const contextForRegion = new Map([...subjectsByRegion].map(([key, subject]) => [key, contextsByKey.get(subject)!]))
@@ -151,13 +188,16 @@ export function createFocusContextIdentitySelector() {
             ? previous.value.locations : { status: 'confirmed' as const, occurrences: subjectRelations } }
       nextSubjects.set(subject, { dependencies, value }); result.set(subject, value)
     }
-    for (const subject of contextsByKey.keys()) {
+    for (const [subject, context] of contextsByKey) {
       if (result.has(subject)) continue
       const previous = subjectCache.get(subject)
       const status: FocusContextIdentity['locations']['status'] = locationsKnown && !unconfirmed.has(subject) ? 'confirmed' : 'unconfirmed'
       const held = status === 'unconfirmed' ? previous?.value.locations.occurrences ?? NO_OCCURRENCES : NO_OCCURRENCES
-      const value = previous?.value.occurrenceCount === 0 && previous.value.locations.status === status && previous.value.locations.occurrences === held
-        ? previous.value : { tabs: [], occurrenceCount: 0, locations: { status, occurrences: held } }
+      const resources = held.length || context.kind !== 'agent' ? undefined : locationCache.resources.get(
+        focusContextIdentityKey(context.control?.hostId ?? context.hostId, context.control?.agentSessionId ?? context.id))
+      const value = previous?.value.occurrenceCount === 0 && previous.value.locations.status === status && previous.value.locations.occurrences === held &&
+        previous.value.resources === resources
+        ? previous.value : { tabs: [], occurrenceCount: 0, locations: { status, occurrences: held }, ...(resources ? { resources } : {}) }
       nextSubjects.set(subject, { dependencies: [], value }); result.set(subject, value)
     }
     tabCache = nextTabs; subjectCache = nextSubjects

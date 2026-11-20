@@ -2,14 +2,9 @@ import { AgentWorkLocationTrigger, type AgentWorkLocationSummary } from '@agentm
 import '@agentmux/client-ui/patterns/agent-work-location.css'
 import { useMemo, useState } from 'react'
 import { agentRegionExecution, agentRegionLocationBindings, useAppStore } from '../store'
-import { sessionWorkbenchLocationSummary, workbenchSelectionCatalog } from '../lib/desktop-focus-navigation'
+import { agentWorkfaceLocationLabel, sessionWorkbenchLocationSummary, workbenchSelectionCatalog } from '../lib/desktop-focus-navigation'
 import { workbenchNavigationTabs } from '../lib/workbench-navigation-catalog'
 import type { FocusContext } from '../lib/focus-context'
-
-function locationLabel(summary: AgentWorkLocationSummary): string {
-  if (summary.state === 'confirmed') return `${summary.count} ${summary.count === 1 ? 'location' : 'locations'}`
-  return 'Locations unconfirmed'
-}
 
 /** Mounted by Source details only. The existing Store owns the exact selection. */
 export function AgentLocationsButton({ context, subject = context.control, runtimeId, beforeOpen }: {
@@ -29,7 +24,7 @@ export function AgentLocationsButton({ context, subject = context.control, runti
       { hostId, agentSessionId, ...(runtimeId === undefined ? {} : { runtimeId }) }, agentRegionExecution)
   }, [tabs, catalog, bindings, context.id, hostId, agentSessionId, runtimeId])
   return <>
-    <AgentWorkLocationTrigger agentName={context.name} actionLabel="Choose location" aria-haspopup="dialog" summary={summary} describeSummary={locationLabel} onClick={() => {
+    <AgentWorkLocationTrigger agentName={context.name} actionLabel="Choose location" aria-haspopup="dialog" summary={summary} describeSummary={agentWorkfaceLocationLabel} onClick={() => {
       const original = subject ? { hostId: subject.hostId, agentSessionId: subject.agentSessionId,
         ...(runtimeId === undefined ? {} : { runtimeId }) } : null
       if (useAppStore.getState().requestSessionLocations(context.id, { subject: original })) {

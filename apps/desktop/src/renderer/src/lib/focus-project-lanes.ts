@@ -7,7 +7,7 @@ import { topicSpaceIconTarget } from './space-object-appearance'
 import { FOCUS_RECENT_PROJECT_HOURS, resolveFocusRecentActivityHours } from '../../../shared/focus-preferences'
 import { directoryIdentity } from '../../../shared/space-addresses'
 import { compareFocusWork, focusWorkPriority } from '@agentmux/client-ui/focus-order'
-import { focusContextIdentityKey, type FocusContextIdentity, type FocusSourceObject } from './focus-context-identity'
+import { focusContextIdentityKey, type FocusContextIdentity, type FocusProjectResource, type FocusSourceObject } from './focus-context-identity'
 
 export type FocusWorktreeFact = { hostId: string; path: string; repoPath: string; branch: string; removed: boolean }
 export type FocusHierarchyFacts = {
@@ -46,6 +46,7 @@ export type FocusProjectLane = {
   locationUnconfirmed?: boolean
   labels: string[]; topicId: string | null; recovery: 'removed' | 'unknown' | null
   projectWorkspaceId: string | null; summary: string | null
+  projectSpaceId?: string
   objectKind?: 'topic' | 'mote' | 'unknown'; objectIconKey?: string
   activeAgentRefs: FocusContextReference[]; contextRefs: FocusContextReference[]
   lastActivityAt?: number | null
@@ -82,19 +83,22 @@ export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: P
     const closeout = configured?.closeout ?? resource?.closeout
     const identity = identities?.get(focusContextIdentityKey(row.hostId, row.id))
     const sourceResources = identity?.resources ?? []
-    const displayed = new Map<string, AppConfig['workspaces'][number]>()
+    const displayed = new Map<string, FocusProjectResource>()
     if (identities && !row.topicId && !closeout) for (const occurrence of identity?.locations.occurrences ?? []) {
       const candidate = workspacesById.get(occurrence.display.workspaceId)
         ?? (occurrence.display.workspaceId === occurrence.source.workspaceId ? occurrence.source.resource : undefined)
       if (candidate && candidate.hostId === occurrence.display.hostId && !candidate.closeout) displayed.set(candidate.id, candidate)
     }
     const closeoutDisplay = closeout ? workspacesById.get(closeout.targetWorkspaceId) : undefined
-    const knownPlacements = [...new Map([...displayed.values(), ...sourceResources].map(value => [JSON.stringify([value.hostId, value.id, value.path]), value])).values()]
+    const knownPlacements = [...new Map([...displayed.values(), ...sourceResources].map(value => [JSON.stringify([value.hostId, value.id, value.path, value.originalSpaceId]), value])).values()]
     const objects = identity?.objects ?? []
+    // The saved execution Workspace can name work without claiming a Space or Region binding.
+    const executionProject = row.kind === 'agent' && resource && configured?.hostId === row.hostId &&
+      configured.path === row.workspacePath && !configured.closeout ? configured : undefined
     const projects = closeoutDisplay && closeoutDisplay.hostId === row.hostId ? [closeoutDisplay]
       : objects.length ? knownPlacements
-        : identities && !row.topicId ? knownPlacements.length ? knownPlacements : [row.access ? resource : undefined] : [resource]
-    const placements: Array<{ display?: AppConfig['workspaces'][number] | undefined; object?: FocusSourceObject }> = [
+        : identities && !row.topicId ? knownPlacements.length ? knownPlacements : [row.access ? resource : executionProject] : [resource]
+    const placements: Array<{ display?: FocusProjectResource | undefined; object?: FocusSourceObject }> = [
       ...projects.map(display => ({ display })),
       ...objects.map(object => ({ object }))
     ]
@@ -122,9 +126,10 @@ export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: P
       const id = object ? object.id : JSON.stringify([projectHostId, workspaceId, displayPath, topicId])
       const iconTarget = workspace && topic ? topicSpaceIconTarget(workspace, topic) : null
       const lane = lanes.get(id) ?? { id, workspaceId, projectId, projectWorkspaceId: project?.id ?? workspace?.id ?? null,
+        ...(!topicId && workspace ? { projectSpaceId: display?.originalSpaceId ?? directoryIdentity(projectHostId, repoPath ?? workspace.path) } : {}),
         name: labels.join(' / '), labels, summary: topic?.readError ? null : topic?.summary.trim() || null,
         path: displayPath, hostId: projectHostId, topicId,
-        ...(identity?.sourceIssue || located && (!workspace || identity?.locations.status !== 'confirmed') ? { locationUnconfirmed: true } : {}),
+        ...(identity?.sourceIssue || located && (!workspace || knownPlacements.length > 0 && identity?.locations.status !== 'confirmed') ? { locationUnconfirmed: true } : {}),
         ...(topicId ? { objectKind: object?.kind ?? scratchTopicKind(topicId, topics),
           ...(iconTarget ? { objectIconKey: iconTarget.key } : {}) } : {}),
         recovery: checkout?.removed ? 'removed' : !object && !workspace && config && !located ? 'unknown' : null, activeAgentRefs: [], contextRefs: [] }

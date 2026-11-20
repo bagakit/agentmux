@@ -12,7 +12,7 @@ import { TextInput } from '@agentmux/client-ui/input'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { agentRegionExecution, agentRegionLocationsKnown, agentRegionLocationBindings, useAppStore } from '../store'
+import { agentRegionExecution, agentRegionLocationsKnown, currentCoreSpatialGraph, useAppStore } from '../store'
 import { useShallow } from 'zustand/react/shallow'
 import { createFocusProjectionSelector, agentContextForSession, retainedFocusContext } from '../lib/focus-context'
 import { focusAgentCreations } from '../lib/focus-agent-creations'
@@ -347,10 +347,10 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const identityTabs = workbenchNavigationTabs(tabs)
   const identitySelector = useMemo(createFocusContextIdentitySelector, [])
   const locationsKnown = useAppStore(agentRegionLocationsKnown)
-  const executionBindings = useAppStore(agentRegionLocationBindings)
+  const originalGraph = useAppStore(currentCoreSpatialGraph)
   const lastIdentities = useRef<ReturnType<typeof identitySelector>>(new Map())
   const contextIdentities = useMemo(() => {
-    if (visible) lastIdentities.current = identitySelector(navigationCatalog, identityTabs, filterContexts, config, layouts, agentRegionExecution, locationsKnown, executionBindings)
+    if (visible) lastIdentities.current = identitySelector(navigationCatalog, identityTabs, filterContexts, config, layouts, agentRegionExecution, locationsKnown, originalGraph)
     if (!sourceFacts.identities.size) return lastIdentities.current
     const merged = new Map(lastIdentities.current)
     for (const [key, identity] of sourceFacts.identities) {
@@ -361,7 +361,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
         locations: { status: unique.length ? 'confirmed' : identity.locations.status, occurrences: unique } })
     }
     return merged
-  }, [sourceFacts.identities, visible, identitySelector, navigationCatalog, identityTabs, filterContexts, config?.executors, config?.appearance.agentAvatars, config?.workspaces, layouts, locationsKnown, executionBindings])
+  }, [sourceFacts.identities, visible, identitySelector, navigationCatalog, identityTabs, filterContexts, config?.executors, config?.appearance.agentAvatars, config?.workspaces, layouts, locationsKnown, originalGraph])
   const allLanes = useMemo(() => deriveFocusProjectLanes(laneContexts, config, facts, contextIdentities, Date.now(), topicSnapshots), [laneContexts, config, facts, topicSnapshots, contextIdentities])
   observedProjectLanes.current = allLanes
   const coordinationLanes = useMemo(() => deriveFocusProjectLanes(coordinationContexts, config, undefined, contextIdentities, Date.now(), topicSnapshots), [coordinationContexts, config, topicSnapshots, contextIdentities])

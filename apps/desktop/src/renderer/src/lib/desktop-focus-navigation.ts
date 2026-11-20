@@ -21,6 +21,12 @@ export const desktopMainSurface = { space: 'workbench', focus: 'agents', goals: 
 export const desktopSurface: Record<AgentMuxDesktopMainSurface, AgentMuxDesktopSurface> = {
   workbench: 'space', agents: 'focus', board: 'goals', survey: 'survey', recall: 'recall'
 }
+
+export function agentWorkfaceLocationLabel(summary: AgentWorkLocationSummary): string {
+  if (summary.state !== 'confirmed') return 'Locations unconfirmed'
+  if (!summary.count) return 'No open workface'
+  return `${summary.count} ${summary.count === 1 ? 'location' : 'locations'}`
+}
 export type DesktopSelectionState = {
   activeWorkspaceId: string | null
   mainSurface: AgentMuxDesktopMainSurface
