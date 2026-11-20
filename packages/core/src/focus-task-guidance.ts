@@ -50,9 +50,10 @@ export function isFocusTaskHandoffNote(note: string): boolean {
 }
 
 /** Check the exact selection encoded by the former producer before reusing its saved note. */
-export function matchesLegacyFocusTaskNote(task: AgentMuxFocusTaskReference, note: string): boolean {
-  if (!note.startsWith(LEGACY_HANDOFF_PREFIX)) return false
+export function matchesLegacyFocusTaskNote(task: AgentMuxFocusTaskReference, note: string, withMoteGuidance = false): boolean {
+  const start = note.lastIndexOf(LEGACY_HANDOFF_PREFIX)
+  if (start !== 0 && (!withMoteGuidance || start < 2 || note.slice(start - 2, start) !== '\n\n')) return false
   const inputs = focusTaskReadInputs(task)
   const batches = inputs.length === 1 ? 'batch' : 'batches'
-  return note === `${LEGACY_HANDOFF_PREFIX}${inputs.length} ${batches}; read every batch and its remaining pages):\n${inputs.map(focusReadCommand).join('\n')}`
+  return note.slice(start) === `${LEGACY_HANDOFF_PREFIX}${inputs.length} ${batches}; read every batch and its remaining pages):\n${inputs.map(focusReadCommand).join('\n')}`
 }

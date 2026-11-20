@@ -4639,7 +4639,7 @@ export class AgentMuxRpcService {
     const device = this.ports.operationSource?.(context)
     const {moteGuidance,focusTask,capturedContext,...prompt} = input
     const key = {kind:'prompt' as const,agentSessionId:input.agentSessionId,expectedRun:input.expectedRun,submissionId:input.operationId}
-    const retainedNote = input.preparationRetry && focusTask
+    const retainedNote = input.preparationRetry && (moteGuidance || focusTask)
       ? (await scope.client.inspectAgentPromptSubmission(key))?.admission?.intent?.message?.systemContext
       : undefined
     const receipt = await scope.client.submitAgentPrompt({ ...prompt,
