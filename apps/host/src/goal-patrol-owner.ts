@@ -109,7 +109,7 @@ export class GoalPatrolOwner {
       const guidance = goalRoleGuidance({ role: 'manager', goalId, agentSessionId: target.agentSessionId, runId: target.runId, source: { kind: 'goal-plan-request', operationId: patrolId } })
       return { operationId, actionOperationId: suffix, intentId: operationId, target, agentMuxNote: JSON.stringify({ schema: 'agentmux.goal-plan-request.v1',
         goalId, requestOperationId: patrolId, inputOperationId: operationId, target, context: JSON.parse(context),
-        next: 'Make and save a dependency plan inside this existing Goal. Read the current Goal and goal plan. Use any saved workflow in this frozen request as a template for the actual scope and criteria. As its current Supervisor use goal plan revise with the current proposal revision, real nodes, dependencies, covered criteria and repeatable checks. If the proposal is missing, clarify the same original intent and propose meaningful criteria first. Read back the saved plan revision; delivery is not plan completion. This request does not authorize execution, delegation, continuous progress or human confirmation/acceptance.' }) + '\n\n' + guidance }
+        next: 'Make and save a dependency plan inside this existing Goal. Read the current Goal and goal plan. Use any saved workflow in this frozen request as a template for the actual scope and criteria. As its current Supervisor use goal plan append for new Tickets and goal plan revise for changes to existing nodes. Use the current proposal revision, dependencies, covered criteria and repeatable checks. If the proposal is missing, clarify the same original intent and propose meaningful criteria first. Read back the saved plan revision; delivery is not plan completion. This request does not authorize execution, delegation, continuous progress or human confirmation/acceptance.' }) + '\n\n' + guidance }
     }
     const frozen = JSON.parse(context) as { alignmentRevision: number | null; executions: unknown[]; alerts: unknown[]; reports: unknown[]; evidence: DemandEvidence[] }
     // The original Goal holds full tasks/results. Carry exact references and an explicit bounded excerpt.
@@ -139,7 +139,7 @@ export class GoalPatrolOwner {
     if (purpose === 'plan' && !goal.supervisorSessionId) throw new AgentMuxError('This Goal has no Supervisor. Keep this planning request and choose a Supervisor in the original Goal relationships, then explicitly send it.', 'GOAL_PLAN_SUPERVISOR_REQUIRED')
     let planningHost: string | undefined
     if (purpose === 'plan') { try { planningHost = await goalSupervisorHost(goal, this.runtime) } catch (error) { this.issues.set(key(goalId, operationId), describe(error)) } }
-    if (purpose === 'plan' && authority.actor.kind === 'agent' && authority.actor.id === goal.supervisorSessionId && planningHost !== undefined && authority.hostId === planningHost) throw new AgentMuxError('You are this Goal’s Supervisor. Read goal plan and save through goal plan revise instead of requesting a plan from yourself.', 'GOAL_PLAN_REQUEST_SELF')
+    if (purpose === 'plan' && authority.actor.kind === 'agent' && authority.actor.id === goal.supervisorSessionId && planningHost !== undefined && authority.hostId === planningHost) throw new AgentMuxError('You are this Goal’s Supervisor. Read goal plan and save at the original Goal instead of requesting a plan from yourself.', 'GOAL_PLAN_REQUEST_SELF')
     const expectedScope = demandPatrolScope(goal, purpose)
     const retained = [...goal.patrols ?? []].reverse().find(item => !item.report && item.purpose === purpose && !completedGoalPlanRequest(goal, item) && item.expectedScope === expectedScope)
     if (retained && purpose !== 'plan') { await this.check(goalId, retained.operationId); return retained }
@@ -251,7 +251,7 @@ export class GoalPatrolOwner {
   }
   async report(goalId: string, patrolId: string, report: DemandPatrolReportInput, authority: GoalDelegationAuthority): Promise<void> {
     const { patrol } = await this.exact(goalId, patrolId)
-    if (patrol.purpose === 'plan') throw new AgentMuxError('A planning request is completed by saving the plan, not an inspection report. Read goal plan and goal plan revise.', 'CONTROL_REQUEST_CONFLICT')
+    if (patrol.purpose === 'plan') throw new AgentMuxError('A planning request is completed by saving the plan, not an inspection report. Read goal plan, then use goal plan append or goal plan revise.', 'CONTROL_REQUEST_CONFLICT')
     if (patrol.purpose === 'confirmation') throw new AgentMuxError('Continue the original Goal and report through its normal work path.', 'CONTROL_REQUEST_CONFLICT')
     if (authority.actor.kind !== 'agent' || !authority.runId || authority.actor.id !== patrol.supervisorAgentSessionId)
       throw new AgentMuxError('Only the authenticated original PMO can report an actual inspection, including from its recovered Run.', 'CONTROL_PERMISSION_DENIED')
