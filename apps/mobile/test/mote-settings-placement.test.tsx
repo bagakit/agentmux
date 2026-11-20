@@ -37,6 +37,13 @@ async function change(element: HTMLElement, label: string, value: string) {
     input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true }))
   })
 }
+async function addExecutor(element: HTMLElement, id: string) {
+  await wait(() => expect(element.querySelector('[aria-label="添加 Executor"]')).not.toBeNull())
+  await click(element.querySelector<HTMLButtonElement>('[aria-label="添加 Executor"]')!)
+  const option = () => document.querySelector<HTMLButtonElement>('[role="option"][data-value="' + id + '"]')
+  await wait(() => expect(option()).not.toBeNull())
+  await click(option()!)
+}
 async function submit(element: HTMLElement) {
   await act(async () => { element.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) })
 }
@@ -93,9 +100,7 @@ async function original(options: { absent?: boolean; loseReceipt?: boolean; hold
 it('actual Mobile Profile creates only original preferences for an unbound Mote with no file or display', async () => {
   const x = await original({ absent: true })
   expect(x.initial.source?.result.status).toBe('deleted'); expect(x.initial.choices.destinations).toEqual([])
-  expect(x.view.element.textContent).toContain('保存偏好无需选择展示位置')
-  expect(x.view.element.textContent).not.toContain('保存位置还没确认')
-  await change(x.view.element, '新对话使用的 Agent', 'next')
+  await addExecutor(x.view.element, 'next')
   await change(x.view.element, '心跳间隔（分钟）', '7'); await submit(x.view.element)
   await wait(() => expect(x.view.element.textContent).toContain('快捷配置已保存'))
   expect(x.writes).toHaveLength(1); expect(x.writes[0]).not.toHaveProperty('destination')
@@ -122,34 +127,21 @@ it('actual Mobile Profile saves same-Main settings through public Host CAS witho
   expect(x.host.transitions).toEqual([]); expect(x.host.writes).toEqual([])
 })
 
-it('clearing the original Main still requires its actual display and retains the draft without dispatch', async () => {
-  const x = await original(), bytes = await readFile(x.host.motePath, 'utf8')
-  await change(x.view.element, '主对话', '')
-  expect(x.view.element.textContent).toContain('更换主对话需要确认展示位置')
-  await submit(x.view.element)
-  await wait(() => expect(x.view.element.textContent).toContain('你的选择已保留，可以重新核对'))
-  expect(x.writes).toEqual([]); expect(await readFile(x.host.motePath, 'utf8')).toBe(bytes)
-  expect(getDeviceWorkface().snapshot().record.moteQuickDrafts?.[0]?.values.conversation).toBeUndefined()
-  expect(x.host.transitions).toEqual([]); expect(x.host.writes).toEqual([])
-})
-
-it('a deliberate Main change still reaches the original Host when its exact candidate and display are selected', async () => {
-  const x = await original(); await x.host.confirmDisplay()
-  await click(button(x.view.element, '核对当前配置'))
-  await wait(() => expect(x.view.element.querySelector<HTMLSelectElement>('[aria-label="主对话"]')?.options.length).toBeGreaterThan(2))
-  const current = await x.read(), member = current.choices.conversations.find(value => value.reference.sessionId === 'member')
-  expect(member).toBeDefined()
-  const destination = current.choices.destinations.find(value => value.reference.kind === 'occurrence' && value.reference.regionId === member!.reference.regionId)
-  expect(destination).toBeDefined()
-  await change(x.view.element, '主对话', JSON.stringify(member!.reference))
-  await change(x.view.element, '主对话展示位置', JSON.stringify(destination!.reference))
+it('saves a fallback from Mobile Profile and leaves its original Main in place even with multiple displayed Agents', async () => {
+  const x = await original()
+  await x.host.confirmDisplay()
+  expect(x.view.element.querySelector('select[aria-label="主对话"]')).toBeNull()
+  expect(x.view.element.querySelector('[aria-label="主对话展示位置"]')).toBeNull()
+  await addExecutor(x.view.element, 'next')
   await submit(x.view.element)
   await wait(() => expect(x.view.element.textContent).toContain('快捷配置已保存'))
-  expect(x.writes).toHaveLength(1); expect(x.writes[0]!.destination).toEqual(destination!.reference)
+  expect(x.writes).toHaveLength(1)
+  expect(x.writes[0]).not.toHaveProperty('destination')
   const saved = await x.read()
-  expect(saved.defaults!.conversation).toEqual(member!.reference)
-  expect(saved.defaults!.conversationRevision).not.toBe(x.host.defaults.conversationRevision)
-  expect(x.host.transitions).toHaveLength(2); expect(x.host.writes).toEqual([])
+  expect(saved.defaults).toMatchObject({ executorId: x.host.defaults.executorId, fallbackExecutorIds: ['next'],
+    conversation: x.host.defaults.conversation, conversationRevision: x.host.defaults.conversationRevision })
+  expect(x.host.transitions).toEqual([])
+  expect(x.rpc.mock.calls.filter(([method]) => method === 'agent.open')).toEqual([])
 })
 
 it('a lost original Host save response preserves its exact operation and later edits through durable reload without replay', async () => {
