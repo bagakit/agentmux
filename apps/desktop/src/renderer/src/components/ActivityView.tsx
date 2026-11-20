@@ -132,6 +132,7 @@ export function ActivityView({
   onReadingSpeakers,
   conversationReading,
   readingNotice,
+  compactUnavailable,
   readingAction,
   revealRequest,
   capability,
@@ -158,6 +159,7 @@ export function ActivityView({
   onReadingSpeakers?: (owner: string, ids: readonly string[] | null) => void
   conversationReading?: ConversationReading
   readingNotice?: ReactNode
+  compactUnavailable?: boolean
   readingAction?: ReactNode
   revealRequest?: ConversationRevealRequest | null
   /** Native timeline support may be unobserved while the original Conversation reader is available. */
@@ -1023,6 +1025,10 @@ export function ActivityView({
       )}
     </div>
   )
+  }
+
+  if (compactUnavailable && fullReadFailure) {
+    return <div className="activity-feed--compact-unavailable">{emptyReadStatus}</div>
   }
 
   return renderSurface(findTrigger => (

@@ -13,9 +13,13 @@ const Close = semanticIconComponent('action.close')
 export function RecallOriginalRecord({ card, onClose }: { card: RecallCard; onClose: () => void }) {
   const [issue, setIssue] = useState<string | null>(null)
   const [located, setLocated] = useState(false)
-  const controller = useMemo(() => new AbortController(), [card])
-  useEffect(() => () => controller.abort(), [controller])
-  const request = useMemo<ConversationRevealRequest>(() => ({
+  const [controller, setController] = useState<AbortController | null>(null)
+  useEffect(() => {
+    const current = new AbortController()
+    setController(current)
+    return () => current.abort()
+  }, [card])
+  const request = useMemo<ConversationRevealRequest | null>(() => controller && ({
     generation: 1, record: card.reference, signal: controller.signal,
     sourceKey: conversationMessageSourceKey(card.reference.agentSessionId, card.reference.source) ?? '',
     isCurrent: () => !controller.signal.aborted,
@@ -39,6 +43,7 @@ export function RecallOriginalRecord({ card, onClose }: { card: RecallCard; onCl
           sessionId={card.reference.agentSessionId}
           executionHostId={card.routeHostId}
           capability="complete-events"
+          compactUnavailable
           revealRequest={located ? null : request}
           conversationReading={{ reference: { hostId: card.routeHostId, agentSessionId: card.reference.agentSessionId },
             identity: JSON.stringify(['recall-card', card.id, card.reference]), enabled: true, opened: true, readCaptured: true }}

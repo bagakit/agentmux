@@ -51,3 +51,6 @@
 .recall-original-record > header { display: flex; align-items: start; justify-content: space-between; gap: 8px; }
 .recall-original-record h2 { margin: 0; min-width: 0; overflow-wrap: anywhere; font-size: var(--fs-body); }
 .recall-original-record .activity-feed-frame { flex: 1; min-height: 0; }
+
+.recall-original-record:has(.activity-feed--compact-unavailable) { height: auto; }
+.recall-original-record > p[role="status"] { font-size: var(--fs-meta); }
