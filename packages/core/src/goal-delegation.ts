@@ -52,7 +52,7 @@ export type GoalDelegationParamsMap = {
   'goal.plan.active': GoalActivePlanQuery
   'goal.plan.assignment': GoalPlanNodeWrite & { expectedRevision: number; assignment: GoalPlanAssignment }
   'goal.plan.claim': GoalPlanNodeWrite & { claimToken: string }
-  'goal.plan.revise': { goalId: string; revision: GoalPlanRevisionInput }
+  'goal.plan.revise': GoalPlanTarget & { revision: GoalPlanRevisionInput }
   'goal.plan.review': { goalId: string; review: GoalPlanReviewInput }
 }
 type GoalReviewInputObservation = { state: 'prepared' | 'confirmed' | 'unknown'; reason: string }
@@ -94,9 +94,10 @@ export function parseGoalDelegationParams<M extends GoalDelegationMethod>(method
     return { goalId: id(p.goalId), ...(method === 'goal.patrol.report' ? { patrolOperationId: id(p.patrolOperationId), report: parseDemandPatrolReportInput(p.report) }
       : { operationId: id(p.operationId), ...(method === 'goal.patrol.continue' ? { patrolOperationId: id(p.patrolOperationId), expectedRunId: id(p.expectedRunId) } : {}) }) } as GoalDelegationParamsMap[M]
   }
-  if (method === 'goal.plan' || method === 'goal.plan.assignment' || method === 'goal.plan.claim') {
+  if (method === 'goal.plan' || method === 'goal.plan.assignment' || method === 'goal.plan.claim' || method === 'goal.plan.revise') {
     const keys = ['goalId', 'expectedOwner']
-    if (method !== 'goal.plan') keys.push('nodeId', 'operationId')
+    if (method === 'goal.plan.assignment' || method === 'goal.plan.claim') keys.push('nodeId', 'operationId')
+    if (method === 'goal.plan.revise') keys.push('revision')
     if (method === 'goal.plan.assignment') keys.push('expectedRevision', 'assignment')
     if (method === 'goal.plan.claim') keys.push('claimToken')
     const p = record(value, keys)
@@ -106,6 +107,13 @@ export function parseGoalDelegationParams<M extends GoalDelegationMethod>(method
       target.expectedOwner = { runtimeId: id(owner.runtimeId), namespace: id(owner.namespace) }
     }
     if (method === 'goal.plan') return target as GoalDelegationParamsMap[M]
+    if (method === 'goal.plan.revise') {
+      try {
+        return { ...target, revision: parseGoalPlanRevisionInput(p.revision) } as GoalDelegationParamsMap[M]
+      } catch (error) {
+        throw new AgentMuxError(error instanceof Error ? error.message : String(error), 'INVALID_CONTROL_REQUEST')
+      }
+    }
     const node = { ...target, nodeId: id(p.nodeId), operationId: id(p.operationId) }
     if (method === 'goal.plan.claim') return { ...node, claimToken: id(p.claimToken) } as GoalDelegationParamsMap[M]
     if (typeof p.expectedRevision !== 'number' || !Number.isSafeInteger(p.expectedRevision) || p.expectedRevision < 1)
@@ -116,10 +124,10 @@ export function parseGoalDelegationParams<M extends GoalDelegationMethod>(method
       throw new AgentMuxError(error instanceof Error ? error.message : String(error), 'INVALID_CONTROL_REQUEST')
     }
   }
-  if (method === 'goal.plan.revise' || method === 'goal.plan.review') {
-    const p = record(value, method === 'goal.plan.revise' ? ['goalId', 'revision'] : ['goalId', 'review'])
+  if (method === 'goal.plan.review') {
+    const p = record(value, ['goalId', 'review'])
     try {
-      return { goalId: id(p.goalId), ...(method === 'goal.plan.revise' ? { revision: parseGoalPlanRevisionInput(p.revision) } : method === 'goal.plan.review' ? { review: parseGoalPlanReviewInput(p.review) } : {}) } as GoalDelegationParamsMap[M]
+      return { goalId: id(p.goalId), review: parseGoalPlanReviewInput(p.review) } as GoalDelegationParamsMap[M]
     } catch (error) {
       if (error instanceof AgentMuxError) throw error
       throw new AgentMuxError(error instanceof Error ? error.message : String(error), 'INVALID_CONTROL_REQUEST')
@@ -153,6 +161,17 @@ export function parseGoalDelegationRpcResult<M extends GoalDelegationMethod>(met
       sourceMessageId: request.sourceMessageId, submission } as GoalDelegationResultMap[M]
   }
   const result = parseGoalDelegationResult(value, input as { goalId: string })
+  if (method === 'goal.plan.revise') {
+    const { expectedOwner, revision } = input as GoalDelegationParamsMap['goal.plan.revise']
+    if (expectedOwner && (result.address?.runtimeId !== expectedOwner.runtimeId || result.address?.namespace !== expectedOwner.namespace))
+      throw new AgentMuxError('The saved plan belongs to another Goal owner. Read it at the original Runtime and store.', 'CONTROL_PROTOCOL_ERROR')
+    if (revision.appendNodes) {
+      const saved = result.plan?.history.find(entry => entry.operationId === revision.operationId)
+      const issuedDrafts = new Set(saved?.createdTickets?.flatMap(proof => proof.record.kind === 'issued' ? [proof.record.draftId] : []))
+      if (issuedDrafts.size !== revision.appendNodes.length || revision.appendNodes.some(node => !issuedDrafts.has(node.id)))
+        throw new AgentMuxError('The saved plan did not confirm the original Ticket append. Read its plan history.', 'CONTROL_PROTOCOL_ERROR')
+    }
+  }
   if (method === 'goal.plan.assignment' || method === 'goal.plan.claim') {
     const { plan } = result
     const write = input as GoalDelegationParamsMap['goal.plan.assignment' | 'goal.plan.claim']

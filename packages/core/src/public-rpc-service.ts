@@ -261,6 +261,7 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
   executionBindings?: Pick<import('./agent-execution-coordinator.js').AgentExecutionCoordinator, 'create' | 'rejoin' | 'continueOriginal'> & {
     cancelOriginal?: import('./agent-execution-coordinator.js').AgentExecutionBindingService['cancelOriginal']
     inspect(bindingId: string, view?: 'association', context?: AgentMuxRpcCallContext): import('./agent-execution-coordinator.js').AgentExecutionInspection | null | Promise<import('./agent-execution-coordinator.js').AgentExecutionInspection | null>
+    inspectSourceAdmission?: import('./agent-execution-coordinator.js').AgentExecutionBindingService['inspectSourceAdmission']
     sourceDiagnostics?: import('./agent-execution-coordinator.js').AgentExecutionBindingService['sourceDiagnostics']
     admit?: import('./agent-execution-coordinator.js').AgentExecutionBindingService['admit']
     watch?: import('./agent-execution-coordinator.js').AgentExecutionBindingService['watch']
@@ -475,7 +476,7 @@ const NATIVE_FIELDS = {
   'goal.plan.active': ['goalId', 'view', 'expectedOwner'],
   'goal.plan.assignment': ['goalId', 'nodeId', 'expectedRevision', 'operationId', 'expectedOwner', 'assignment'],
   'goal.plan.claim': ['goalId', 'nodeId', 'claimToken', 'operationId', 'expectedOwner'],
-  'goal.plan.revise': ['goalId', 'revision'], 'goal.plan.review': ['goalId', 'review'],
+  'goal.plan.revise': ['goalId', 'revision', 'expectedOwner'], 'goal.plan.review': ['goalId', 'review'],
   'goal.participation.confirm': ['goalId','creationOperationId','hostId','agentSessionId','expectedRun','evidence','operationId'],
   'goal.watch': [],
   'settings.appearance.watch': [],

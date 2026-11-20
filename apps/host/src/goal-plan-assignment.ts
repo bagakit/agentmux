@@ -29,7 +29,7 @@ export function assertPlanWorkRole(role: GoalPlanWorkRole | undefined, claiming:
         (!runtimes.length || runtimes.length === 1 && runtimes[0] === runtimeId)) return
     denied('This action belongs to the original Supervisor Host and Runtime.')
   }
-  if (!claiming) denied('Only a person or this Goal’s current Supervisor can manage node assignments.')
+  if (!claiming) denied('Only this Goal’s current Supervisor or a person can manage its plan.')
   if (!role?.assignee) denied('A related Session has no work role. Claiming requires this Goal’s current Supervisor or assignee.')
   const matchesOriginal = role.assignee.bindings.every(binding => binding.hostId === hostId && (binding.runtimeId === null || binding.runtimeId === runtimeId))
   if (!matchesOriginal || originalHost(runtime, actor.id) !== hostId) denied('This claim belongs to the original assignee Host and Runtime.')

@@ -42,7 +42,7 @@ import {
 } from './demand-types.js'
 import { DemandStoreError } from './errors.js'
 import { GoalActiveIndex, type GoalActivePlan } from './goal-active-index.js'
-import { assertGoalPlanKeepsRecordedNodes, currentGoalWorkflowDelivery, goalPlanChangedNodes, goalPlanDelegationIssue, goalTicketTask, matchesGoalPlanReviewInput, parseGoalPlan, parseGoalPlanReviewInput, parseGoalPlanRevisionInput, projectGoalPlan,
+import { assertGoalPlanKeepsRecordedNodes, currentGoalWorkflowDelivery, goalPlanChangedNodes, goalPlanDelegationIssue, goalTicketTask, matchesGoalPlanReviewInput, parseGoalPlan, parseGoalPlanReviewInput, parseGoalPlanRevisionInput, projectGoalPlan, validateGoalPlanNodes,
   type GoalPlanAssignmentChange, type GoalPlanRevisionRecord, type GoalPlanOwner, type GoalPlanReviewer, type GoalPlanReviewInput, type GoalPlanRevisionInput, type GoalPlanProposalReceipt } from './goal-plan.js'
 import { assertIssuedGoalTicket, freezeGoalTicketDependencies, issueGoalTickets } from './goal-ticket-issuance.js'
 import type { GoalTicketProof, GoalTicketSigner } from './goal-ticket-proof.js'
@@ -952,17 +952,16 @@ export class DemandStore {
     }, undefined, intent.operationId)
   }
 
-  /**
-   * Revise the Goal plan as a whole. The caller names the revision it read; a later revision by
-   * someone else is rejected so nobody overwrites a plan they have not seen.
-   */
-  async revisePlan(id: string, input: GoalPlanRevisionInput, author: GoalPlanReviewer, proposals: GoalPlanProposalReceipt[] = []): Promise<DemandReceipt> {
+  /** Append at the current plan under the writer lock. Revisions to existing nodes compare the observed version. */
+  async revisePlan(id: string, input: GoalPlanRevisionInput, author: GoalPlanReviewer, proposals: GoalPlanProposalReceipt[] = [],
+    assertAuthorized?: (current: Demand) => void): Promise<DemandReceipt> {
     let revision: GoalPlanRevisionInput
     try { revision = parseGoalPlanRevisionInput(input) } catch (error) { this.rejectDelegation(error instanceof Error ? error.message : String(error)) }
     const signing = await this.readTicketSigner()
     const requestHash = createHash('sha256').update(JSON.stringify(revision)).digest('hex')
     return this.mutate('plan.revise', snapshot => {
       const demand = findDemand(snapshot, id, this.storePath), current = demand.plan
+      assertAuthorized?.(demand)
       const proposalRefs = (receipts: GoalPlanProposalReceipt[]) => receipts.map(({ nodeId, delegationOperationId, replyMessageId }) => ({ nodeId, delegationOperationId, replyMessageId }))
       if (current?.history.some(record => record.operationId === revision.operationId)) {
         const original = current.history.find(record => record.operationId === revision.operationId)!
@@ -974,14 +973,21 @@ export class DemandStore {
           this.rejectDelegation('This plan revision operation was already recorded with different content. Read the original plan before another revision.')
         return { unchanged: demand }
       }
-      if ((current?.revision ?? 0) !== revision.expectedRevision)
+      const appending = revision.appendNodes !== undefined
+      if (!appending && (current?.revision ?? 0) !== revision.expectedRevision)
         this.rejectDelegation(`The plan changed to revision ${current?.revision ?? 0} after you read revision ${revision.expectedRevision}. Read the current plan before revising it.`)
       if (!demand.alignment || demand.alignment.revision !== revision.alignmentRevision)
         this.rejectDelegation('A plan must be written against the current Goal proposal version.')
       if (!isDeepStrictEqual(revision.proposals ?? [], proposalRefs(proposals)))
         this.rejectDelegation('A Ticket proposal requires its verified original Core reply.')
       const previousNodes = new Map(current?.nodes.map(node => [node.id, node]))
-      for (const node of revision.nodes) {
+      const nodes = revision.appendNodes ?? revision.nodes
+      if ((demand.status === 'done' || demand.status === 'cancelled') && nodes.some(node => !previousNodes.has(node.id)))
+        this.rejectDelegation('This Goal is closed. Reopen the original Goal explicitly before appending work.')
+      if (appending) {
+        try { validateGoalPlanNodes(nodes, previousNodes) } catch (error) { this.rejectDelegation(error instanceof Error ? error.message : String(error)) }
+      }
+      for (const node of nodes) {
         const previous = previousNodes.get(node.id)
         if (node.claimOpen && !previous?.claimOpen)
           this.rejectDelegation('Open a ready node using the explicit plan assignment operation.')
@@ -1000,10 +1006,13 @@ export class DemandStore {
           this.rejectDelegation('Ticket proposals must tie a new node to its original worker and attempt.')
       }
       const signer = this.requireTicketSigner(signing)
-      const issued = issueGoalTickets(signer, id, revision.operationId, author, revision.nodes, current, demand.alignment.criteria, proposals)
-      try { assertGoalPlanKeepsRecordedNodes(current, issued.nodes, demand.delegations ?? []) } catch (error) { this.rejectDelegation(error instanceof Error ? error.message : String(error)) }
-      const changedNodes = goalPlanChangedNodes(current?.nodes ?? [], issued.nodes)
-      demand.plan = { revision: next, alignmentRevision: revision.alignmentRevision, nodes: clone(issued.nodes), reviews: current?.reviews ?? [],
+      const issued = issueGoalTickets(signer, id, revision.operationId, author, nodes, current, demand.alignment.criteria, proposals)
+      if (!appending) {
+        try { assertGoalPlanKeepsRecordedNodes(current, issued.nodes, demand.delegations ?? []) } catch (error) { this.rejectDelegation(error instanceof Error ? error.message : String(error)) }
+      }
+      const changedNodes = appending ? issued.nodes.map(node => node.id) : goalPlanChangedNodes(current?.nodes ?? [], issued.nodes)
+      const savedNodes = appending ? [...(current?.nodes ?? []), ...issued.nodes] : issued.nodes
+      demand.plan = { revision: next, alignmentRevision: revision.alignmentRevision, nodes: clone(savedNodes), reviews: current?.reviews ?? [],
         history: [...(current?.history ?? []), { operationId: revision.operationId, revision: next, author, revisedAt: now, requestHash, ...(changedNodes.length ? { changedNodes } : {}),
           ...(issued.createdTickets.length ? { createdTickets: issued.createdTickets } : {}), ...(issued.proposals.length ? { proposals: issued.proposals } : {}) }] }
       demand.updatedAt = Math.max(now, demand.updatedAt + 1)

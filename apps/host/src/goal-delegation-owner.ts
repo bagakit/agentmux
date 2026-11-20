@@ -15,6 +15,7 @@ import { assertPlanWorkRole, changeGoalPlanAssignment } from './goal-plan-assign
 import { isGoalSupervisor } from './goal-supervisor-identity.js'
 import type { DurableAgentMuxMessage } from '@agentmux/core'
 import type { DemandStore, Demand, DemandDispatch, GoalStartObservation } from '@agentmux/demand'
+import { goalPlanWorkRoles } from '@agentmux/demand/relations'
 import { goalPlanClaimToken, type GoalPlanProposalReceipt } from '@agentmux/demand/goal-plan'
 import { formatGoalTicketLink, hasOriginalGoalBinding, parseAmuxObjectLink } from '@agentmux/core/sharing'
 import type { GoalRuntimePort } from './goal-runtime.js'
@@ -49,8 +50,8 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
     context.signal?.throwIfAborted()
     if (method === 'goal.plan.active') return await this.readActivePlan(request as GoalActivePlanQuery, authority) as GoalDelegationResultMap[M]
     const input = request as GoalDelegationParamsMap[Exclude<GoalDelegationMethod, 'goal.plan.active'>]
-    const planRequest = method === 'goal.plan' || method === 'goal.plan.assignment' || method === 'goal.plan.claim'
-    const owner = planRequest || method === 'goal.plan.revise' || method === 'goal.plan.review' ? await this.planOwner?.().catch(() => undefined) : undefined
+    const planRequest = method === 'goal.plan' || method === 'goal.plan.assignment' || method === 'goal.plan.claim' || method === 'goal.plan.revise'
+    const owner = planRequest || method === 'goal.plan.review' ? await this.planOwner?.().catch(() => undefined) : undefined
     if (planRequest) {
       const expected = (input as GoalDelegationParamsMap['goal.plan']).expectedOwner
       if (expected) {
@@ -59,7 +60,7 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
       }
       if (method === 'goal.plan.claim' && !owner)
         throw new AgentMuxError('The original Goal claim owner is unconfirmed. Keep the task and read the original plan.', 'CONTROL_UNAVAILABLE')
-      if (method !== 'goal.plan') await changeGoalPlanAssignment(this.demands, this.runtime,
+      if (method === 'goal.plan.assignment' || method === 'goal.plan.claim') await changeGoalPlanAssignment(this.demands, this.runtime,
         input as GoalDelegationParamsMap['goal.plan.assignment' | 'goal.plan.claim'], context, authority, owner)
     }
     if (method === 'goal.report' && (input as GoalDelegationParamsMap['goal.report']).sourceMessageId !== undefined)
@@ -77,9 +78,12 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
     if (method === 'goal.plan.revise') {
       const goal = await this.demands.get(input.goalId)
       if (!goal) throw new AgentMuxError('The original Goal is unavailable. Original Sessions and input remain available.', 'CONTROL_UNAVAILABLE')
-      // People edit the plan freely; among Agents only the current Supervisor maintains it.
-      if (!await isGoalSupervisor(goal, authority, this.runtime))
-        throw new AgentMuxError('Only this Goal\'s current Supervisor or a person can revise its plan. Read goal plan and ask the Supervisor.', 'CONTROL_PERMISSION_DENIED')
+      const assertAuthorized = (current: Demand): void => {
+        context.signal?.throwIfAborted()
+        const role = authority.actor.kind === 'agent' ? goalPlanWorkRoles(current).get(authority.actor.id) : undefined
+        assertPlanWorkRole(role, false, authority, this.runtime)
+      }
+      assertAuthorized(goal)
       const revision = (input as GoalDelegationParamsMap['goal.plan.revise']).revision
       const saved = goal.plan?.history.find(entry => entry.operationId === revision.operationId)
       const proposals = saved?.proposals ?? await Promise.all((revision.proposals ?? []).map(async proposal => {
@@ -98,8 +102,9 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
         return { ...proposal, sourceMessageId: attempt.sourceMessageId, proposalOperationId: wire.operationId,
           author: { agentSessionId: attempt.workerAgentSessionId, runtimeId } } satisfies GoalPlanProposalReceipt
       }))
+      await context.assertCurrent?.()
       await this.demands.revisePlan(input.goalId, revision,
-        { ...authority.actor, ...(authority.hostId ? { hostId: authority.hostId } : {}), ...(authority.runtimeId ? { runtimeId: authority.runtimeId } : {}) }, proposals)
+        { ...authority.actor, ...(authority.hostId ? { hostId: authority.hostId } : {}), ...(authority.runtimeId ? { runtimeId: authority.runtimeId } : {}) }, proposals, assertAuthorized)
     }
     if (method === 'goal.plan.review') {
       // The store refuses the node's own executor; any other admitted Agent or person may review.

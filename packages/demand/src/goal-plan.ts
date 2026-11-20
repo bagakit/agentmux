@@ -61,7 +61,9 @@ export type GoalPlan = {
   /** Append-only provenance of each accepted revision. */
   history: GoalPlanRevisionRecord[]
 }
-export type GoalPlanRevisionInput = { operationId: string; expectedRevision: number; alignmentRevision: number; nodes: GoalPlanNodeInput[]; proposals?: GoalPlanProposal[] }
+export type GoalPlanRevisionInput = { operationId: string; alignmentRevision: number; proposals?: GoalPlanProposal[] } & (
+  { expectedRevision: number; nodes: GoalPlanNodeInput[]; appendNodes?: never } |
+  { appendNodes: GoalPlanNodeInput[]; expectedRevision?: never; nodes?: never })
 
 function object(value: unknown, label: string, keys: readonly string[], optional: readonly string[] = []): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label} must be an object`)
@@ -172,22 +174,22 @@ export function matchesGoalPlanReviewInput(original: GoalPlanReview, input: Goal
 }
 
 /** Structural rules: unique ids, dependencies inside the plan, no cycle. */
-export function validateGoalPlanNodes(nodes: readonly GoalPlanNodeInput[]): void {
+export function validateGoalPlanNodes(nodes: readonly GoalPlanNodeInput[], existing?: ReadonlyMap<string, GoalPlanNodeInput>): void {
   const ids = new Set<string>()
   for (const node of nodes) {
-    if (ids.has(node.id)) throw new Error(`Plan node ${node.id} appears twice`)
+    if (ids.has(node.id) || existing?.has(node.id)) throw new Error(`Plan node ${node.id} appears twice`)
     ids.add(node.id)
   }
   for (const node of nodes) {
     for (const dependency of node.dependsOn) {
       if (dependency === node.id) throw new Error(`Plan node ${node.id} cannot depend on itself`)
-      if (!ids.has(dependency)) throw new Error(`Plan node ${node.id} depends on ${dependency}, which is not in this plan`)
+      if (!ids.has(dependency) && !existing?.has(dependency)) throw new Error(`Plan node ${node.id} depends on ${dependency}, which is not in this plan`)
     }
   }
   const byId = new Map(nodes.map(node => [node.id, node]))
   const settled = new Set<string>(), visiting = new Set<string>()
   const visit = (id: string, path: string[]): void => {
-    if (settled.has(id)) return
+    if (settled.has(id) || existing?.has(id)) return
     if (visiting.has(id)) throw new Error(`Plan dependencies form a cycle: ${[...path, id].join(' → ')}`)
     visiting.add(id)
     for (const dependency of byId.get(id)!.dependsOn) visit(dependency, [...path, id])
@@ -251,17 +253,26 @@ export function parseGoalPlan(value: unknown): GoalPlan {
 }
 
 export function parseGoalPlanRevisionInput(value: unknown): GoalPlanRevisionInput {
-  const data = object(value, 'plan revision', ['operationId', 'expectedRevision', 'alignmentRevision', 'nodes', 'proposals'], ['proposals'])
-  if (typeof data.expectedRevision !== 'number' || !Number.isSafeInteger(data.expectedRevision) || data.expectedRevision < 0) throw new Error('plan expectedRevision must be a non-negative integer')
-  if (!Array.isArray(data.nodes) || data.nodes.length === 0) throw new Error('A plan needs at least one node')
-  const nodes = data.nodes.map(parseGoalPlanNode)
-  validateGoalPlanNodes(nodes)
+  const data = object(value, 'plan revision', ['operationId', 'expectedRevision', 'alignmentRevision', 'nodes', 'appendNodes', 'proposals'],
+    ['expectedRevision', 'nodes', 'appendNodes', 'proposals'])
+  const appending = Object.hasOwn(data, 'appendNodes')
+  if (appending && (Object.hasOwn(data, 'nodes') || Object.hasOwn(data, 'expectedRevision')))
+    throw new Error('An append supplies only appendNodes and the Goal proposal version')
+  const input = appending ? data.appendNodes : data.nodes
+  if (!Array.isArray(input) || input.length === 0) throw new Error('A plan revision needs at least one node')
+  const nodes = input.map(parseGoalPlanNode)
+  if (!appending) validateGoalPlanNodes(nodes)
   if (data.proposals !== undefined && !Array.isArray(data.proposals)) throw new Error('Ticket proposals must be an array')
   const proposals = (data.proposals as unknown[] | undefined)?.map(proposal)
   if (proposals && (new Set(proposals.map(p => p.nodeId)).size !== proposals.length || proposals.some(p => !nodes.some(node => node.id === p.nodeId))))
     throw new Error('Each proposed Ticket must appear once in this revision')
-  return { operationId: identity(data.operationId, 'plan revision operationId'), ...(proposals?.length ? { proposals } : {}), expectedRevision: data.expectedRevision,
-    alignmentRevision: positive(data.alignmentRevision, 'plan alignmentRevision'), nodes }
+  const original = { operationId: identity(data.operationId, 'plan revision operationId'), ...(proposals?.length ? { proposals } : {}) }
+  const alignmentRevision = positive(data.alignmentRevision, 'plan alignmentRevision')
+  if (appending) return { ...original, alignmentRevision, appendNodes: nodes }
+  const expectedRevision = data.expectedRevision
+  if (typeof expectedRevision !== 'number' || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0)
+    throw new Error('plan expectedRevision must be a non-negative integer')
+  return { ...original, expectedRevision, alignmentRevision, nodes }
 }
 
 export function goalTicketTask(node: GoalPlanNodeInput, criterionById: (id: string) => DemandCriterion | undefined): GoalTicketTask {
