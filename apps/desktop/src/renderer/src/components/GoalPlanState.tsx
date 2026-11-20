@@ -1,5 +1,5 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import type { GoalPlanNodeState, GoalPlanUnknownReason } from '@agentmux/demand/goal-plan'
+import type { GoalPlanNodeState, GoalPlanRevisionRecord, GoalPlanUnknownReason } from '@agentmux/demand/goal-plan'
 
 export type GoalPlanNodePresentation = {
   state: GoalPlanNodeState | null
@@ -31,4 +31,12 @@ export function goalPlanStateLabel(item: GoalPlanNodePresentation): string {
 export function GoalPlanMark({ item }: { item: Pick<GoalPlanNodePresentation, 'state' | 'wholeGoal'> }) {
   const Icon = item.wholeGoal ? ThemeObjectGoalIcon : STATE_ICONS[item.state ?? 'unknown']
   return <span className="goal-plan-node__mark" data-goal-plan-state={item.wholeGoal ? 'goal' : item.state ?? 'unavailable'} aria-hidden="true"><Icon size={12} strokeWidth={1.8} animation="none" /></span>
+}
+
+export function goalPlanRevisionPresentation({ change }: Pick<GoalPlanRevisionRecord, 'change'>): { label: string; note?: string } {
+  const assignment = change?.assignment
+  if (!assignment) return { label: 'Plan revised' }
+  if (assignment.kind === 'assign') return { label: 'Executor assigned', note: `${assignment.executor.agentSessionId} · ${assignment.executor.hostId}` }
+  if (assignment.kind === 'claim') return { label: 'Ticket claimed' }
+  return { label: assignment.kind === 'open' ? 'Claims opened' : 'Claims closed' }
 }

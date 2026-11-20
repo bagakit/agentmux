@@ -25,6 +25,7 @@
 .goal-supervisor-rail__event-head time { color: var(--text-3); font-size: var(--fs-micro); }
 .goal-supervisor-rail__author, .goal-supervisor-rail__operation { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; overflow-wrap: anywhere; }
 .goal-supervisor-rail__operation code { font-size: inherit; }
+.goal-supervisor-rail__return { margin-block-start: var(--sp-2); }
 .goal-supervisor-rail__attempt { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-2); min-width: 0; padding: var(--sp-1) 0; border: 0; border-radius: var(--radius); background: transparent; color: var(--text-2); text-align: start; font-size: var(--fs-meta); cursor: pointer; overflow-wrap: anywhere; }
 .goal-supervisor-rail__attempt:hover { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
 .goal-supervisor-rail__attempt:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; }

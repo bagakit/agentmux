@@ -3,25 +3,66 @@ import { Button } from '@agentmux/client-ui/components/Button'
 import { formatDuration } from '@agentmux/client-ui/conversation-time'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { delegationWorkerHostId } from '@agentmux/demand/delegations'
+import type { GoalPlanReviewer } from '@agentmux/demand/goal-plan'
 import type { DemandRecord } from '../lib/global-demand-board'
 import type { GoalPlanNodeView, GoalPlanReadingTarget, GoalPlanReveal } from './GoalPlanGraph'
 import { useWorkbenchNameTooltip } from './WorkbenchNameTooltip'
 import { markWindowOverlayDismissal, wasWindowOverlayDismissed } from './WindowOverlayHost'
-import { GoalPlanMark, goalPlanStateLabel } from './GoalPlanState'
+import { GoalPlanMark, goalPlanRevisionPresentation, goalPlanStateLabel } from './GoalPlanState'
 
-type TimelineEvent = { id: string; at: number; label: string; result: string; actor?: string; reference?: string; note?: string; reviewOperationId?: string }
+export type GoalTimelineOriginal = { kind: 'start' | 'delegation'; operationId: string }
+  | { kind: 'confirmation'; revision: number; at: number }
+  | { kind: 'coordination'; key: string }
+type TimelineEvent = {
+  id: string; at: number; label: string; result: string; actor?: string; participant?: 'user' | 'device'
+  reference?: string; note?: string; original?: GoalTimelineOriginal; reviewOperationId?: string
+}
 type TimeSpan = { from: number; to: number }
-type OriginalWork = { kind: 'start' | 'delegation'; operationId: string }
-type Row = { id: string; title: string; number?: number; target?: GoalPlanReadingTarget; original?: OriginalWork; events: TimelineEvent[]; active?: TimeSpan; planned?: TimeSpan }
+type Row = { id: string; title: string; number?: number; ticket?: true; target?: GoalPlanReadingTarget; original?: GoalTimelineOriginal; events: TimelineEvent[]; active?: TimeSpan; planned?: TimeSpan }
+type TimelineSource = Pick<DemandRecord, 'alignment' | 'plan' | 'delegations' | 'dispatches' | 'patrols' | 'responsibility'>
 type OpenEvent = { row: Row; event: TimelineEvent; trigger: HTMLButtonElement }
+function timelineRowKey(row: Row): string {
+  return row.original?.kind === 'delegation' ? `delegation:${row.id}` : row.id
+}
 const eventTime = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'long' })
 const unknownActor = 'Unknown author'
 const format = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 const clock = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' })
 const Disclosure = semanticIconComponent('navigation.disclosure')
 
+function participantIdentity(author: Pick<GoalPlanReviewer, 'kind' | 'id'> | undefined) {
+  if (!author || author.kind === 'agent') return undefined
+  return { participant: author.kind, actor: `${author.kind === 'user' ? 'User' : 'Device'} ${author.id}` }
+}
+
+/** The current proposal and its retained confirmation notices hold the original confirmation, independent of the requester. */
+function goalParticipationEvents(demand: TimelineSource): TimelineEvent[] {
+  const confirmations = new Map<number, TimelineEvent>()
+  function addConfirmation(alignment: TimelineSource['alignment'], source?: { key: string; operationId: string }) {
+    if (!alignment || alignment.confirmedAt === null || alignment.confirmedBy?.kind === 'agent') return
+    const { revision, confirmedAt, confirmedBy } = alignment
+    const id = `confirmation:${revision}`
+    confirmations.set(revision, { id, at: confirmedAt, label: 'Goal confirmed', result: `Proposal revision ${revision} confirmed`,
+      ...participantIdentity(confirmedBy), ...(source ? { original: { kind: 'coordination', key: source.key }, reference: source.operationId }
+        : { original: { kind: 'confirmation', revision, at: confirmedAt } }) })
+  }
+  const requests: TimelineEvent[] = []
+  for (const request of demand.patrols ?? []) {
+    const key = `patrol:${request.operationId}`, original = { kind: 'coordination' as const, key }
+    if (request.purpose === 'confirmation' && request.alignment && request.alignment.revision !== demand.alignment?.revision && !confirmations.has(request.alignment.revision))
+      addConfirmation(request.alignment, { key, operationId: request.operationId })
+    const author = participantIdentity(request.requestedBy)
+    if (!author) continue
+    requests.push({ id: key, at: request.requestedAt, label: request.purpose === 'confirmation' ? 'Continuation requested'
+      : request.purpose === 'plan' ? 'Plan requested' : 'Inspection requested',
+      result: 'Original request recorded', ...author, reference: request.operationId, original })
+  }
+  addConfirmation(demand.alignment)
+  return [...confirmations.values(), ...requests]
+}
+
 /** Receipt times are events. Only an exact, confirmed activity observation can supply a live span. */
-export function goalExecutionRows(demand: Pick<DemandRecord, 'plan' | 'delegations' | 'dispatches' | 'responsibility'>): Row[] {
+export function goalExecutionRows(demand: TimelineSource): Row[] {
   const nodes = new Map((demand.plan?.nodes ?? []).map(node => [node.id, node.title]))
   const live = new Map((demand.responsibility?.executions ?? []).filter(row => row.execution.kind === 'delegation').map(row => [row.execution.operationId, row]))
   const counts = new Map<string, number>()
@@ -49,16 +90,37 @@ export function goalExecutionRows(demand: Pick<DemandRecord, 'plan' | 'delegatio
       execution.runId === attempt.workerRunId && execution.agentSessionId === attempt.workerAgentSessionId) {
       row.active = { from, to: observation.observedAt }
     }
-    rows.set(row.id, row)
+    rows.set(timelineRowKey(row), row)
   }
   for (const review of demand.plan?.reviews ?? []) {
-    const row = rows.get(review.delegationOperationId)
+    const row = rows.get(`delegation:${review.delegationOperationId}`)
+    const author = participantIdentity(review.reviewer) ?? { actor: [review.reviewer.id, review.reviewer.hostId].filter(Boolean).join(' · ') }
     if (row?.target?.nodeId === review.nodeId) row.events.push({ id: `review:${review.operationId}`, at: review.reviewedAt,
       label: review.verdict === 'pass' ? 'Review passed' : 'Changes requested', result: review.check.result || (review.verdict === 'pass' ? 'Passed' : 'Changes requested'),
-      actor: [review.reviewer.id, review.reviewer.hostId].filter(Boolean).join(' · '), reference: review.operationId,
+      ...author, reference: review.operationId,
       note: review.note, reviewOperationId: review.operationId })
   }
-  for (const [nodeId, title] of nodes) if (!counts.has(nodeId)) rows.set(`node:${nodeId}`, { id: `node:${nodeId}`, title, target: { nodeId }, events: [] })
+  const goalEvents = goalParticipationEvents(demand)
+  for (const revision of demand.plan?.history ?? []) {
+    const author = participantIdentity(revision.author)
+    if (!author) continue
+    const key = `plan:${revision.operationId}`, change = revision.change
+    const event: TimelineEvent = { id: key, at: revision.revisedAt, result: `Plan revision ${revision.revision} saved`,
+      ...goalPlanRevisionPresentation(revision), ...author, reference: revision.operationId, original: { kind: 'coordination', key } }
+    const title = change && nodes.get(change.nodeId)
+    if (!change || !title) {
+      goalEvents.push(event)
+      continue
+    }
+    const id = `node:${change.nodeId}`
+    const row = rows.get(id) ?? { id, title, ticket: true as const, target: { nodeId: change.nodeId }, events: [] }
+    row.events.push(event)
+    rows.set(id, row)
+  }
+  for (const [nodeId, title] of nodes) {
+    const id = `node:${nodeId}`
+    if (!counts.has(nodeId) && !rows.has(id)) rows.set(id, { id, title, target: { nodeId }, events: [] })
+  }
   for (const start of demand.dispatches ?? []) {
     if (start.execution !== 'finite') continue
     const rejected = start.stage === 'rejected'
@@ -74,7 +136,10 @@ export function goalExecutionRows(demand: Pick<DemandRecord, 'plan' | 'delegatio
       original: { kind: 'start', operationId: start.operationId }, events })
   }
   const order = new Map([...nodes.keys()].map((id, index) => [id, index]))
-  return [...rows.values()].sort((a, b) => (order.get(a.target?.nodeId ?? '') ?? order.size) - (order.get(b.target?.nodeId ?? '') ?? order.size))
+  const sorted = [...rows.values()].sort((a, b) =>
+    (order.get(a.target?.nodeId ?? '') ?? order.size) - (order.get(b.target?.nodeId ?? '') ?? order.size) ||
+    (a.target?.attemptId ? 1 : 0) - (b.target?.attemptId ? 1 : 0))
+  return goalEvents.length ? [{ id: 'goal-participation', title: 'Goal participation', events: goalEvents }, ...sorted] : sorted
 }
 
 function TimelineEventButton({ event, open, detailsId, style, onOpen }: {
@@ -83,7 +148,8 @@ function TimelineEventButton({ event, open, detailsId, style, onOpen }: {
   const preview = useWorkbenchNameTooltip(event.label, `${eventTime.format(event.at)} · ${event.actor || unknownActor} · ${event.result}`, open,
     { placement: 'top', pointerPassThrough: true })
   return <><button type="button" className={style ? 'goal-execution-time__point' : 'goal-execution-time__receipt'}
-    {...preview.props} data-goal-time-event={event.label} data-goal-time-event-id={event.id} style={style}
+    {...preview.props} data-goal-time-event={event.label} data-goal-time-event-id={event.id}
+    data-goal-time-participant={event.participant} style={style}
     aria-label={style ? event.label : undefined} aria-expanded={open} aria-controls={open ? detailsId : undefined}
     onKeyDown={e => { if (e.key === 'Escape' && wasWindowOverlayDismissed(e.nativeEvent)) e.stopPropagation() }}
     onClick={e => { preview.cancelHover(); onOpen(e.currentTarget) }}>
@@ -96,7 +162,7 @@ function timelinePoints(events: TimelineEvent[], offset: (at: number) => number)
   const lastPosition: number[] = []
   const points = [...events].sort((left, right) => left.at - right.at).map(event => {
     const position = offset(event.at)
-    // The narrowest plot is over 285px. Nine percent leaves room for a 24px hit target.
+    // Nine percent of the minimum plot width leaves room for a 24px hit target.
     const free = lastPosition.findIndex(last => position - last >= 9)
     const lane = free === -1 ? lastPosition.length : free
     lastPosition[lane] = position
@@ -108,7 +174,7 @@ function timelinePoints(events: TimelineEvent[], offset: (at: number) => number)
 export function GoalExecutionTimeline({ demand, nodes, selected, onSelect, onOpenRecord }: {
   demand: DemandRecord; nodes: readonly GoalPlanNodeView[]; selected: GoalPlanReadingTarget | null
   onSelect: (selection: GoalPlanReveal) => void
-  onOpenRecord: (target: OriginalWork) => boolean
+  onOpenRecord: (target: GoalTimelineOriginal, restoreFocus: () => void) => boolean
 }) {
   const timeline = useRef<HTMLElement>(null), detail = useRef<HTMLHeadingElement>(null)
   const detailsId = useId()
@@ -120,11 +186,13 @@ export function GoalExecutionTimeline({ demand, nodes, selected, onSelect, onOpe
 
   function eventButton(row: Row, event: TimelineEvent, style?: CSSProperties) {
     return <TimelineEventButton key={event.id} event={event} style={style} detailsId={detailsId}
-      open={openEvent?.row.id === row.id && openEvent.event.id === event.id}
+      open={openEvent !== null && timelineRowKey(openEvent.row) === timelineRowKey(row) && openEvent.event.id === event.id}
       onOpen={trigger => { setSourceUnavailable(false); setOpenEvent({ row, event, trigger }) }} />
   }
   function restoreEvent({ row, event, trigger }: OpenEvent) {
-    const originalRow = timeline.current?.querySelector<HTMLElement>(`[data-goal-time-row="${CSS.escape(row.id)}"]`)
+    const key = timelineRowKey(row)
+    const originalRow = timeline.current?.dataset.goalTimeRowKey === key ? timeline.current
+      : timeline.current?.querySelector<HTMLElement>(`[data-goal-time-row-key="${CSS.escape(key)}"]`)
     const point = originalRow?.querySelector<HTMLElement>(`[data-goal-time-event-id="${CSS.escape(event.id)}"]`)
     const focus = trigger.isConnected ? trigger : point ?? originalRow?.querySelector<HTMLElement>('[data-goal-time-open]') ?? originalRow ?? timeline.current
     focus?.focus()
@@ -133,7 +201,7 @@ export function GoalExecutionTimeline({ demand, nodes, selected, onSelect, onOpe
     if (openEvent) restoreEvent(openEvent)
     setOpenEvent(null)
   }
-  const recorded = useMemo(() => goalExecutionRows(demand), [demand.plan, demand.delegations, demand.dispatches, demand.responsibility])
+  const recorded = useMemo(() => goalExecutionRows(demand), [demand.alignment, demand.plan, demand.delegations, demand.dispatches, demand.patrols, demand.responsibility])
   const wholeGoal = nodes.find(item => item.wholeGoal)
   const rows: Row[] = wholeGoal && !recorded.length ? [{ id: `node:${wholeGoal.node.id}`, title: wholeGoal.node.title,
     target: { nodeId: wholeGoal.node.id, wholeGoal: true }, events: [] }] : [...recorded]
@@ -147,18 +215,18 @@ export function GoalExecutionTimeline({ demand, nodes, selected, onSelect, onOpe
     }
     rows.unshift(schedule)
   }
-  const currentRow = rows.find(row => row.id === openEvent?.row.id)
+  const currentRow = openEvent ? rows.find(row => timelineRowKey(row) === timelineRowKey(openEvent.row)) : undefined
   const currentEvent = currentRow?.events.find(event => event.id === openEvent?.event.id)
   const eventDetail = openEvent && (() => {
     const { row, event, trigger } = openEvent
     const reading = currentEvent ?? event
     const target = currentRow?.target
-    const original = currentRow?.original
+    const original = reading.original ?? currentRow?.original
     const restoreFocus = () => restoreEvent(openEvent)
     function openOriginal() {
-      if (target) {
+      if (target && !reading.original) {
         onSelect({ target: { ...target, ...(event.reviewOperationId ? { reviewOperationId: event.reviewOperationId } : {}) }, trigger, restoreFocus })
-      } else if (!original || !onOpenRecord(original)) {
+      } else if (!original || !onOpenRecord(original, restoreFocus)) {
         setSourceUnavailable(true)
         return
       }
@@ -181,15 +249,16 @@ export function GoalExecutionTimeline({ demand, nodes, selected, onSelect, onOpe
       {reading.note ? <p>{reading.note}</p> : null}
       {!currentEvent || sourceUnavailable ? <p className="goals-service" role="status">The original event source is unavailable.</p> : null}
       {currentEvent && (target || original) ? <Button type="button" onClick={openOriginal}>
-        {event.reviewOperationId ? 'Open original review' : target?.attemptId ? 'Open original attempt' : target ? 'Open Ticket' : 'Open original record'}
+        {reading.original?.kind === 'confirmation' ? 'Open original proposal' : reading.original ? 'Open original record'
+          : event.reviewOperationId ? 'Open original review' : target?.attemptId ? 'Open original attempt' : target ? 'Open Ticket' : 'Open original record'}
       </Button> : null}
     </section>
   })()
   const onlyRow = rows.length === 1 ? rows[0] : undefined
-  if (wholeGoal && onlyRow?.events.length && !onlyRow.target && !onlyRow.active && !onlyRow.planned) {
+  if (wholeGoal && onlyRow?.id !== 'goal-participation' && onlyRow?.events.length && !onlyRow.target && !onlyRow.active && !onlyRow.planned) {
     return <section ref={timeline} tabIndex={-1} className="goal-execution-time" aria-label="Execution timeline" data-goal-execution-time>
       <h3>Execution timeline</h3>
-      <div className="goal-execution-time__receipt-group" data-goal-time-row={onlyRow.id} tabIndex={-1}>
+      <div className="goal-execution-time__receipt-group" data-goal-time-row={onlyRow.id} data-goal-time-row-key={timelineRowKey(onlyRow)} tabIndex={-1}>
         <strong>{onlyRow.title}</strong>
         <ul className="goal-execution-time__receipts">{onlyRow.events.map(event => <li key={event.id}>{eventButton(onlyRow, event)}</li>)}</ul>
       </div>
@@ -199,7 +268,7 @@ export function GoalExecutionTimeline({ demand, nodes, selected, onSelect, onOpe
   if (onlyRow?.target && !onlyRow.events.length && !onlyRow.active && !onlyRow.planned) {
     const { target } = onlyRow
     const active = selected?.nodeId === target.nodeId && selected.attemptId === target.attemptId && selected.wholeGoal === target.wholeGoal
-    return <section ref={timeline} tabIndex={-1} className="goal-execution-time goal-execution-time--empty" aria-label="Execution timeline" data-goal-execution-time data-goal-time-row={onlyRow.id}>
+    return <section ref={timeline} tabIndex={-1} className="goal-execution-time goal-execution-time--empty" aria-label="Execution timeline" data-goal-execution-time data-goal-time-row={onlyRow.id} data-goal-time-row-key={timelineRowKey(onlyRow)}>
       <h3>Execution timeline</h3>
       <span>No times recorded</span>
       <button type="button" data-goal-time-open aria-label={`Read ${onlyRow.title}`} aria-pressed={active} onClick={event => onSelect({ target, trigger: event.currentTarget })}>View task</button>
@@ -219,7 +288,8 @@ export function GoalExecutionTimeline({ demand, nodes, selected, onSelect, onOpe
   const tickFormat = hasTimes && new Date(start).toDateString() === new Date(end).toDateString() ? clock : format
   const offset = (at: number) => (at - start) / Math.max(1, end - start) * 100
   return <section ref={timeline} tabIndex={-1} className="goal-execution-time" aria-label="Execution timeline" data-goal-execution-time>
-    <h3>Execution timeline</h3>
+    <h3>Execution timeline{rows.some(row => row.events.some(event => event.participant)) ?
+      <span className="goal-execution-time__participation-key">User or device</span> : null}</h3>
     <div className="goal-execution-time__scroll"><div className="goal-execution-time__rows" data-timed={hasTimes || undefined}>
       <div className="goal-execution-time__row goal-execution-time__axis"><span>Task and attempt</span>
         <div>{hasTimes ? ticks.map(at => <time key={at} dateTime={new Date(at).toISOString()} title={format.format(at)}>{tickFormat.format(at)}</time>)
@@ -229,7 +299,7 @@ export function GoalExecutionTimeline({ demand, nodes, selected, onSelect, onOpe
         const active = target && selected?.nodeId === target.nodeId && selected.attemptId === target.attemptId && selected.wholeGoal === target.wholeGoal
         const item = target && byId.get(target.nodeId)
         const previous = Boolean(target?.attemptId && item?.delegation?.operationId !== target.attemptId)
-        const state = previous ? 'Previous attempt' : item ? goalPlanStateLabel(item) : undefined
+        const state = row.ticket ? 'Ticket' : previous ? 'Previous attempt' : item ? goalPlanStateLabel(item) : undefined
         const attempt = row.number && row.number > 1 ? `Attempt ${row.number}` : undefined
         const duration = activity && formatDuration(activity.to - activity.from)
         const activityDetails = activity && `Observed activity · ${duration} · ${format.format(activity.from)} – ${format.format(activity.to)}`
@@ -242,8 +312,8 @@ export function GoalExecutionTimeline({ demand, nodes, selected, onSelect, onOpe
         const { points, lanes } = timelinePoints(row.events, offset)
         const title = [`Read ${row.title}`, state, attempt, activityDetails].filter(Boolean).join(' · ')
         function selectRow(trigger: HTMLButtonElement) { if (target) onSelect({ target, trigger }) }
-        return <div className={`goal-execution-time__row${target ? ' goal-execution-time__row--action' : ''}`} key={row.id}
-          data-goal-time-row={row.id} data-selected={active || undefined} tabIndex={-1}>
+        return <div className={`goal-execution-time__row${target ? ' goal-execution-time__row--action' : ''}`} key={timelineRowKey(row)}
+          data-goal-time-row={row.id} data-goal-time-row-key={timelineRowKey(row)} data-selected={active || undefined} tabIndex={-1}>
           {target ? <button className="goal-execution-time__task" type="button" data-goal-time-open aria-pressed={Boolean(active)}
             aria-label={title} title={activityDetails} onClick={e => selectRow(e.currentTarget)}>{marker}</button>
             : <div className="goal-execution-time__task">{marker}</div>}

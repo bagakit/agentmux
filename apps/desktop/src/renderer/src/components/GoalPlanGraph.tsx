@@ -20,7 +20,7 @@ import { useGoalAgentPresentation } from '../lib/goal-discussion-recipient'
 import { GoalPlanReadingPlacement } from './GoalPlanReadingPlacement'
 import { GoalPlanThread } from './GoalPlanThread'
 import { delegationWorkerHostId, type DemandDelegation } from '@agentmux/demand/delegations'
-import { GoalExecutionTimeline } from './GoalExecutionTimeline'
+import { GoalExecutionTimeline, type GoalTimelineOriginal } from './GoalExecutionTimeline'
 import { GoalPlanDelivery, type GoalPlanReviewDraft } from './GoalPlanDelivery'
 import { clearGoalPlanReviewDraft, editGoalPlanReviewDraft, goalPlanReviewDraftKey } from '../lib/goal-edit-drafts'
 import { goalNextStepFact, type GoalNextStepFact } from '../lib/goal-presentation'
@@ -266,7 +266,7 @@ function NodeDetail({ demand, item, historical, dependencyNames, onIssue, draft,
 export function GoalPlanGraph({ demand, projection: provided, planLink, planningLink, onOpenGoalWork, onOpenTimelineRecord, currentDelegation, reveal }: {
   demand: DemandProjection
   projection?: GoalPlanView; planLink?: ReactNode; onOpenGoalWork?: (() => void) | undefined
-  onOpenTimelineRecord: (target: { kind: 'start' | 'delegation'; operationId: string }) => boolean
+  onOpenTimelineRecord: (target: GoalTimelineOriginal, restoreFocus: () => void) => boolean
   currentDelegation?: DemandDelegation | undefined
   planningLink?: ReactNode; reveal?: GoalPlanReveal | null
 }) {

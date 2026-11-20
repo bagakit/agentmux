@@ -17,7 +17,8 @@ import { GoalAgentPicker } from './GoalAgentPicker'
 import { GoalExecution } from './GoalExecution'
 import { GoalPlanGraph, goalPlanDeliveries, goalPlanProjection, type GoalPlanReveal } from './GoalPlanGraph'
 import { GoalPlanRequest } from './GoalPlanRequest'
-import { GoalSupervisorRail } from './GoalSupervisorRail'
+import { GoalSupervisorRail, type GoalCoordinationReveal } from './GoalSupervisorRail'
+import type { GoalTimelineOriginal } from './GoalExecutionTimeline'
 import { useGoalDiscussionRecipient } from '../lib/goal-discussion-recipient'
 import { editGoalDraft, saveGoalDrafts } from '../lib/goal-edit-drafts'
 import { GoalActivity } from './GoalActivity'
@@ -62,6 +63,9 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
   const activityRef = useRef<HTMLDivElement>(null)
   const [showSupervisor, setShowSupervisor] = useState(false)
   const [planReveal, setPlanReveal] = useState<GoalPlanReveal | null>(null)
+  const [timelineReading, setTimelineReading] = useState<{
+    kind: 'confirmation'; restoreFocus: () => void
+  } | { kind: 'coordination'; reveal: GoalCoordinationReveal; restoreFocus: () => void } | null>(null)
   const jumpedToScrollTop = useRef<number | null>(null)
   const [readingSection, setReadingSection] = useState<GoalReadingSection>('plan')
   const hasActivity = Boolean(demand.activities?.length || demand.decisions?.length)
@@ -156,6 +160,27 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
     if (narrow && !showSupervisor) requestAnimationFrame(reveal)
     else reveal()
   }
+  function revealTimelineRecord(source: GoalTimelineOriginal, restoreFocus: () => void) {
+    if (source.kind === 'confirmation') {
+      if (demand.alignment?.revision !== source.revision || demand.alignment.confirmedAt !== source.at || !resultsRef.current) return false
+      setTimelineReading({ kind: 'confirmation', restoreFocus })
+      revealGoalReview(true)
+      return true
+    }
+    if (source.kind === 'coordination') {
+      if (!teamRef.current) return false
+      setTimelineReading({ kind: 'coordination', reveal: { key: source.key, focus: target => revealSupervisor(true, target) }, restoreFocus })
+      return true
+    }
+    return revealOriginalWork(source)
+  }
+  function returnToTimeline() {
+    previousReadingTop.current = null
+    setShowSupervisor(false)
+    setReadingSection('plan')
+    setTimelineReading(null)
+    if (timelineReading) requestAnimationFrame(timelineReading.restoreFocus)
+  }
   function revealPlanningControls() {
     const target = planningControls.current
     const actions = target?.querySelector('details')
@@ -242,7 +267,7 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
   const currentDelegation = currentWork?.kind === 'delegation'
     ? demand.delegations?.find(attempt => attempt.operationId === currentWork.operationId) : undefined
   const plan = <div ref={planRef} tabIndex={-1} className="goals-detail__plan" data-goal-reading-section="plan" data-goal-reading-id={demand.id} data-goal-reading-runtime={demand.address?.runtimeId} data-goal-reading-namespace={demand.address?.namespace}>
-    <GoalPlanGraph demand={demand} projection={projection} reveal={planReveal} currentDelegation={currentDelegation} onOpenGoalWork={currentWork ? () => revealOriginalWork(currentWork) : undefined} onOpenTimelineRecord={revealOriginalWork}
+    <GoalPlanGraph demand={demand} projection={projection} reveal={planReveal} currentDelegation={currentDelegation} onOpenGoalWork={currentWork ? () => revealOriginalWork(currentWork) : undefined} onOpenTimelineRecord={revealTimelineRecord}
       planningLink={!finished ? <Button type="button" onClick={revealPlanningControls}>{demand.plan?.nodes.length ? 'Plan actions' : 'Plan with Supervisor'}<SupervisorPaneIcon size={14} aria-hidden="true" /></Button> : null}
       planLink={demand.address ? <button type="button" className="icon-button goal-plan__copy" title={copied === 'plan' ? 'Plan link copied' : 'Copy plan link'} onClick={() => void copyLink('plan')}>
         {copied === 'plan' ? <ThemeDoneIcon size={15} aria-hidden="true" /> : <CopyLinkIcon size={15} aria-hidden="true" />}
@@ -334,6 +359,7 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
             {descriptionDirty ? <span className="goals-caption">Unsaved draft</span> : null}
             <div className="goals-intent-body goals-detail__brief" aria-label="Goal brief">{intent(demand.plan ? 3 : 6)}{saveFeedback}</div>
             <div ref={resultsRef} tabIndex={-1} className="goals-detail__definition" aria-label="Criteria and results">
+              {timelineReading?.kind === 'confirmation' ? <Button type="button" onClick={returnToTimeline}>Back to event</Button> : null}
               <GoalAlignment emphasis={fact.source.kind === 'definition' || fact.source.kind === 'results' ? fact.source.kind : null}
                 feedback={acknowledgementFeedback} onFeedbackChange={onAcknowledgementFeedbackChange}
                 demand={demand} onGrill={onGrill} onGrounding={onGrounding} motePending={motePending} />
@@ -344,7 +370,7 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
         </div>
       </div>
         <aside ref={teamRef} id={teamRegionId} tabIndex={-1} className="goals-detail__side" aria-label="Goal team and properties">
-          <GoalSupervisorRail demand={demand} inspectionIsCurrent={currentWork?.kind === 'patrol' && !currentDelivery}
+          <GoalSupervisorRail demand={demand} coordinationReveal={timelineReading?.kind === 'coordination' ? timelineReading.reveal : undefined} onReturnToTimeline={returnToTimeline} inspectionIsCurrent={currentWork?.kind === 'patrol' && !currentDelivery}
             onChooseSupervisor={() => setInspectorRole('supervisor')} onAddAssignee={() => setInspectorRole('assignees')}
             planning={!finished ? <div ref={planningControls} className="goal-supervisor-rail__planning" tabIndex={-1} aria-label="Planning with Supervisor">
               <GoalPlanRequest demand={demand} onRequest={onPlan} pending={motePending === 'plan'} busy={Boolean(motePending)}

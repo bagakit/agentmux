@@ -264,7 +264,7 @@
 .goal-execution-time__row.goal-execution-time__axis { position: sticky; top: 0; z-index: 1; background: var(--surface-1); }
 .goal-execution-time__rows { display: grid; }
 .goal-execution-time__rows[data-timed] { min-width: 436px; }
-.goal-execution-time__row { display: grid; grid-template-columns: minmax(98px, 26%) minmax(0, 1fr); gap: var(--sp-4); align-items: center; min-height: 35px; padding: var(--sp-2) var(--sp-3); border-top: 1px solid var(--line-soft); color: var(--text-2); font-size: var(--fs-meta); }
+.goal-execution-time__row { display: grid; grid-template-columns: minmax(98px, 26%) minmax(0, 1fr); gap: var(--sp-4); align-items: center; min-height: 35px; padding: var(--sp-2) var(--sp-3); padding-inline-end: 26px; border-top: 1px solid var(--line-soft); color: var(--text-2); font-size: var(--fs-meta); }
 .goal-execution-time__row[data-selected] { background: color-mix(in srgb, var(--green) 9%, var(--surface-1)); }
 .goal-execution-time__task { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; overflow-wrap: anywhere; }
 .goal-execution-time__row--action:hover:not([data-selected]) { background: color-mix(in srgb, var(--text) 7%, transparent); }
@@ -405,3 +405,13 @@ button.goal-execution-time__task { border-radius: var(--radius-sm); min-height: 
 .goal-execution-time__detail dt { color: var(--text-3); }
 .goal-execution-time__detail dd, .goal-execution-time__detail p { margin: 0; }
 .goal-execution-time__detail time { font-variant-numeric: tabular-nums; }
+
+.goal-execution-time__participation-key {
+  display: inline-flex; align-items: center; gap: var(--sp-1); margin-inline-start: auto;
+  color: var(--text-2); font-size: var(--fs-meta); font-weight: 450;
+}
+.goal-execution-time__participation-key::before,
+.goal-execution-time__point[data-goal-time-participant]::after {
+  content: ''; width: 7px; height: 7px; border-radius: 1px; transform: rotate(45deg);
+}
+.goal-execution-time__participation-key::before { background: var(--text-2); }

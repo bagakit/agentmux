@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { demandAgentReferenceLabel } from '@agentmux/demand/relations'
 import { delegationWorkerHostId, type DemandDelegation } from '@agentmux/demand/delegations'
@@ -10,6 +10,7 @@ import { useGoalAgentName } from '../lib/goal-discussion-recipient'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { GoalPatrolControl } from './GoalPatrolControl'
 import { GoalContinuationAgent, GoalContinuationControl } from './GoalContinuationControl'
+import { goalPlanRevisionPresentation } from './GoalPlanState'
 import '../styles/goal-supervisor-rail.css'
 
 const ReviewIcon = semanticIconComponent('action.review-source')
@@ -17,6 +18,7 @@ const ForwardIcon = semanticIconComponent('navigation.forward')
 const RECENT = 6
 const coordinationTime = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 type RecordedAuthor = GoalPlanReviewer | { kind: 'recorded'; id: string }
+export type GoalCoordinationReveal = { key: string; focus(element: HTMLElement): void }
 type AttemptTarget = { nodeId: string; operationId: string; title: string }
 type CoordinationEntry = {
   key: string; at: number; label: string; author: RecordedAuthor | null; sourceId: string
@@ -45,8 +47,12 @@ function coordinationEntries(demand: DemandProjection): CoordinationEntry[] {
     return node && delegation?.planNodeId === node.id ? { nodeId: node.id, operationId, title: node.title } : undefined
   }
   const entries: CoordinationEntry[] = []
-  for (const revision of demand.plan?.history ?? []) entries.push({ key: `plan:${revision.operationId}`, at: revision.revisedAt,
-    label: `Plan revised · revision ${revision.revision}`, author: revision.author, sourceKind: 'Operation', sourceId: revision.operationId })
+  for (const revision of demand.plan?.history ?? []) {
+    const { label, note } = goalPlanRevisionPresentation(revision)
+    entries.push({ key: `plan:${revision.operationId}`, at: revision.revisedAt,
+      label: `${label} · revision ${revision.revision}`, author: revision.author, sourceKind: 'Operation', sourceId: revision.operationId,
+      detail: note })
+  }
   for (const review of demand.plan?.reviews ?? []) entries.push({ key: `review:${review.operationId}`, at: review.reviewedAt,
     label: review.verdict === 'pass' ? 'Review passed' : 'Changes requested', author: review.reviewer, sourceKind: 'Operation', sourceId: review.operationId,
     attempt: target(review.nodeId, review.delegationOperationId) })
@@ -67,7 +73,7 @@ function coordinationEntries(demand: DemandProjection): CoordinationEntry[] {
       label: 'Report collected', author: delegation.collection.collector, sourceKind: 'Operation', sourceId: delegation.collection.operationId, attempt })
   }
   for (const patrol of demand.patrols ?? []) {
-    entries.push({ key: `patrol:${patrol.operationId}`, at: patrol.requestedAt, label: patrol.purpose === 'plan' ? 'Plan requested' : patrol.purpose === 'confirmation' ? 'Confirmed · Continuation requested' : 'Inspection requested',
+    entries.push({ key: `patrol:${patrol.operationId}`, at: patrol.requestedAt, label: patrol.purpose === 'plan' ? 'Plan requested' : patrol.purpose === 'confirmation' ? 'Continuation requested' : 'Inspection requested',
       author: patrol.requestedBy, sourceKind: 'Operation', sourceId: patrol.operationId })
     if (patrol.report) entries.push({ key: `patrol-report:${patrol.operationId}`, at: patrol.report.reportedAt,
       label: patrol.report.applied ? 'Inspection recorded' : 'Inspection reported · not applied',
@@ -81,7 +87,7 @@ function coordinationEntries(demand: DemandProjection): CoordinationEntry[] {
 }
 
 /** A workbench over the Goal owner's records and explicit actions. */
-export function GoalSupervisorRail({ demand, onChooseSupervisor, onAddAssignee, planning, inspectionIsCurrent = false, currentDelivery, onRevealAttempt }: {
+export function GoalSupervisorRail({ demand, onChooseSupervisor, onAddAssignee, planning, inspectionIsCurrent = false, currentDelivery, onRevealAttempt, coordinationReveal, onReturnToTimeline }: {
   demand: DemandProjection
   onChooseSupervisor?: () => void
   onAddAssignee?: () => void
@@ -89,6 +95,8 @@ export function GoalSupervisorRail({ demand, onChooseSupervisor, onAddAssignee, 
   inspectionIsCurrent?: boolean
   currentDelivery?: AttemptTarget | undefined
   onRevealAttempt(nodeId: string, operationId: string, trigger: HTMLButtonElement): void
+  coordinationReveal?: GoalCoordinationReveal | undefined
+  onReturnToTimeline?: (() => void) | undefined
 }) {
   const active = useWorkbenchPresentationActive()
   const [progressOpened, setProgressOpened] = useState(false)
@@ -106,7 +114,19 @@ export function GoalSupervisorRail({ demand, onChooseSupervisor, onAddAssignee, 
   const nextOwner = next ? { manager: 'Supervisor', worker: 'Executor', human: 'Human', external: 'External' }[next.nextOwner.kind] : undefined
   const needsAssignee = !supervisor && !demand.assigneeSessionIds?.length
   const editProgressSupervisor = needsAssignee ? onAddAssignee : onChooseSupervisor
-  const shown = all ? entries : entries.slice(0, RECENT)
+  const selectedRecord = useRef<HTMLDetailsElement>(null)
+  useLayoutEffect(() => {
+    const record = selectedRecord.current
+    const heading = record?.querySelector<HTMLElement>('summary')
+    if (coordinationReveal && record && heading) {
+      record.open = true
+      coordinationReveal.focus(heading)
+    }
+  }, [coordinationReveal])
+  const recent = entries.slice(0, RECENT)
+  const extra = coordinationReveal && !recent.some(entry => entry.key === coordinationReveal.key) ?
+    entries.find(entry => entry.key === coordinationReveal.key) : undefined
+  const shown = all ? entries : extra ? [...recent, extra] : recent
   return <section className="goal-supervisor-rail" aria-label="Goal Supervisor" data-goal-supervisor-rail={demand.id}>
     <header className="goal-supervisor-rail__heading"><h2>Supervisor</h2></header>
     <div className="goal-supervisor-rail__identity">
@@ -143,10 +163,13 @@ export function GoalSupervisorRail({ demand, onChooseSupervisor, onAddAssignee, 
     {entries.length ? <section className="goal-supervisor-rail__coordination" aria-label="Coordination history">
       <h3>Coordination timeline</h3>
       <ol className="goal-supervisor-rail__timeline">{shown.map(entry => <li key={entry.key} data-goal-coordination={entry.key}>
-        <details className="goal-supervisor-rail__detail goal-supervisor-rail__record">
+        <details ref={coordinationReveal?.key === entry.key ? selectedRecord : undefined} className="goal-supervisor-rail__detail goal-supervisor-rail__record">
           <summary><strong className="goal-supervisor-rail__event-title">{entry.label}</strong></summary>
           {entry.detail ? <p>{entry.detail}</p> : null}
           <span className="goal-supervisor-rail__operation">{entry.sourceKind} · <code>{entry.sourceId}</code></span>
+          {coordinationReveal?.key === entry.key && onReturnToTimeline ? <div className="goal-supervisor-rail__return">
+            <Button type="button" onClick={onReturnToTimeline}>Back to event</Button>
+          </div> : null}
         </details>
         <div className="goal-supervisor-rail__event-head"><time dateTime={new Date(entry.at).toISOString()} title={new Date(entry.at).toLocaleString()}>{coordinationTime.format(entry.at)}</time><span aria-hidden="true">·</span>
           {entry.author?.kind === 'agent' && entry.author.hostId ? <CoordinationAgentAuthor author={entry.author} />
