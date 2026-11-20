@@ -7,6 +7,7 @@ export const tests = [
   'codex-tool-execution-launch', 'public-rpc-agent-execution', 'public-rpc-execution-bindings',
   'client-event-publisher', 'hosted-run-event.integration', 'agent-open-tool-workspace', 'remote-execution-workspace',
   'agent-execution-rpc-relay', 'agent-native-process-linux', 'hosted-attachment-progress', 'hosted-reading-intent',
+  'source-execution-diagnostics', 'host-route-gateway', 'agent-message-authority',
 ].map(name => `packages/core/test/${name}.test.ts`)
 
 export const mutations = [
@@ -23,8 +24,8 @@ export const mutations = [
   { id: 'bridge-manual-rejoin-only', file: 'packages/core/src/agent-execution-coordinator.ts', test: 'agent-execution-coordinator',
     before: 'this.scheduleReaderRecovery(id, code, stable ? 0 : attempt)', after: 'void 0' },
   { id: 'bridge-replace-recovered-reader', file: 'packages/core/src/agent-execution-coordinator.ts', test: 'agent-execution-coordinator',
-    before: 'if (before && current && (before.unavailable || current !== before.bridge) && !this.connectionDiagnostic(bindingId))',
-    after: 'if (false)' },
+    before: 'if (!this.hasConnectedBridge(bindingId)) await this.attach(record, hosts, attempt)',
+    after: 'await this.attach(record, hosts, attempt)' },
   { id: 'unrelated-run-scan', file: 'packages/core/src/client-event-publisher.ts', test: 'client-event-publisher',
     before: 'if (runId) this.deliver(event, [...(this.runListeners.get(runId) ?? [])])',
     after: 'if (runId) this.deliver(event, [...([...this.runListeners].find(([key]) => key === runId)?.[1] ?? [])])' },
@@ -33,8 +34,8 @@ export const mutations = [
   { id: 'original-tool-binding-lost', file: 'packages/core/src/agent-execution-helper-store.ts', test: 'agent-execution-helper-store',
     before: '...(toolExecution === undefined ? {} : { toolExecution }),', after: '' },
   { id: 'public-create-replayed', file: 'packages/core/src/public-rpc-service.ts', test: 'public-rpc-execution-bindings',
-    before: "await owner.create(input as import('./agent-execution-coordinator.js').AgentExecutionOpenInput)",
-    after: "await owner.create(input as import('./agent-execution-coordinator.js').AgentExecutionOpenInput).catch(() => owner.create(input as import('./agent-execution-coordinator.js').AgentExecutionOpenInput))" },
+    before: "await owner.create(input as import('./agent-execution-coordinator.js').AgentExecutionOpenInput, context)",
+    after: "await owner.create(input as import('./agent-execution-coordinator.js').AgentExecutionOpenInput, context).catch(() => owner.create(input as import('./agent-execution-coordinator.js').AgentExecutionOpenInput, context))" },
   { id: 'tool-open-permission', file: 'packages/core/src/public-rpc-service.ts', test: 'agent-open-tool-workspace',
     before: "throw new AgentMuxError('Opening an Agent with a tool Workspace requires a transport-approved user or device without a managed Agent caller.', 'CONTROL_PERMISSION_DENIED')", after: ';' },
 ]
