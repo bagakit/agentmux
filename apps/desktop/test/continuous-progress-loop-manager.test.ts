@@ -1,11 +1,13 @@
 import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { formatAmuxTriggerNote } from '@agentmux/core/agent-outbound-message'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
-import { AGENTMUX_AGENT_MESSAGING_ENTRY, observeAgent } from '@agentmux/core'
+import { observeAgent } from '@agentmux/core'
+import { renderAmuxProtocol } from '@agentmux/core/amux-protocol'
 import { parseAgentProgressParams } from '../../../packages/core/src/agent-progress.js'
 import { describe, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { ContinuousProgressLoopStore } from '../../host/src/continuous-progress-loop-store.js'
 import { ContinuousProgressLoopManager } from '../../host/src/continuous-progress-loop-manager.js'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
@@ -13,7 +15,7 @@ import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-valu
 
 describe('ContinuousProgressLoopManager', () => {
   it.each([1, 100, 1000])('checks its real scheduler without copying %i unrelated saved prompts', async (count) => {
-    const dir = await mkdtemp(join(_hygiene_fixturePath('tmp'), 'agentmux-idle-clock-'))
+    const dir = await mkdtemp(join(tmpdir(), 'agentmux-idle-clock-'))
     const store = new ContinuousProgressLoopStore(join(dir, 'loops.json'))
     const onTick = vi.fn(async () => 'sent' as const)
     const observe = vi.fn(observedDone)
@@ -41,7 +43,7 @@ describe('ContinuousProgressLoopManager', () => {
   })
 
   it('claims a completed turn once without screen readiness, including after restart', async () => {
-    const dir = await mkdtemp(join(_hygiene_fixturePath("tmp"), 'agentmux-completion-'))
+    const dir = await mkdtemp(join(tmpdir(), 'agentmux-completion-'))
     const store = new ContinuousProgressLoopStore(join(dir, 'loops.json'))
     let now = _historyFixtureEpoch(0, 0, 0), completedAt = _historyFixtureEpoch(0, 0, 1), calls = 0
     const observe = async (_loop: unknown, tickId: string) => ({
@@ -52,7 +54,8 @@ describe('ContinuousProgressLoopManager', () => {
     })
     const send = async () => {
       expect((await store.load())[0]?.pendingCompletion).toMatchObject({
-        id: JSON.stringify(['r', completedAt]), prompt: 'next', agentMuxNote: formatAmuxTriggerNote('automation', AGENTMUX_AGENT_MESSAGING_ENTRY)
+        id: JSON.stringify(['r', completedAt]), prompt: 'next',
+        agentMuxNote: formatAmuxTriggerNote('automation', renderAmuxProtocol('schedule-input', 'automation', { automation: 'l' }))
       })
       calls++
       return 'sent' as const
@@ -72,7 +75,7 @@ describe('ContinuousProgressLoopManager', () => {
     }
   })
   it('loads durable loops and never retries an unknown tick', async () => {
-    const dir = await mkdtemp(join(_hygiene_fixturePath("tmp"), 'agentmux-manager-')); const store = new ContinuousProgressLoopStore(join(dir, 'loops.json'))
+    const dir = await mkdtemp(join(tmpdir(), 'agentmux-manager-')); const store = new ContinuousProgressLoopStore(join(dir, 'loops.json'))
     let now = _historyFixtureEpoch(0, 0, 0); let calls = 0
     const seed = new ContinuousProgressLoopManager(store, async () => 'unknown', () => now, observedDone)
     // seed through the public scheduler-independent store contract
@@ -84,7 +87,7 @@ describe('ContinuousProgressLoopManager', () => {
 })
 
   it('persists the claim before a slow handler and pauses unknown outcomes', async () => {
-    const dir = await mkdtemp(join(_hygiene_fixturePath("tmp"), 'agentmux-manager-')); const store = new ContinuousProgressLoopStore(join(dir, 'loops.json'))
+    const dir = await mkdtemp(join(tmpdir(), 'agentmux-manager-')); const store = new ContinuousProgressLoopStore(join(dir, 'loops.json'))
     let now = _historyFixtureEpoch(0, 0, 0); let release!: () => void; const gate = new Promise<void>((resolve) => { release = resolve })
     let didEnter!: () => void; const entered = new Promise<void>((resolve) => { didEnter = resolve })
     const manager = new ContinuousProgressLoopManager(store, async () => { didEnter(); await gate; return 'unknown' }, () => now, observedDone)
@@ -104,7 +107,7 @@ const observedDone = async (_loop: unknown, tickId: string) => ({
   tickId, now: _historyFixtureEpoch(0, 0, 0)
 })
 it('skips and retries a tick whose observation fails before anything is sent, but pauses an unknown send', async () => {
-  const dir = await mkdtemp(join(_hygiene_fixturePath("tmp"), 'agentmux-predispatch-')); const store = new ContinuousProgressLoopStore(join(dir, 'loops.json'))
+  const dir = await mkdtemp(join(tmpdir(), 'agentmux-predispatch-')); const store = new ContinuousProgressLoopStore(join(dir, 'loops.json'))
   let now = _historyFixtureEpoch(0, 0, 0), fail = true, sends = 0
   const observe = async (loop: unknown, tickId: string) => {
     if (fail) throw new Error('AgentMux client is not connected.')
@@ -126,7 +129,7 @@ it('skips and retries a tick whose observation fails before anything is sent, bu
   } finally { await manager.stop(); await rm(dir, { recursive: true, force: true }) }
 })
 it('restores an interrupted claim as unknown and resumes using the original operation identity', async () => {
-  const dir = await mkdtemp(join(_hygiene_fixturePath("tmp"), 'agentmux-interrupted-loop-'))
+  const dir = await mkdtemp(join(tmpdir(), 'agentmux-interrupted-loop-'))
   const store = new ContinuousProgressLoopStore(join(dir, 'loops.json'))
   const operations: string[] = []
   let now = _historyFixtureEpoch(0, 0, 0)
@@ -151,7 +154,7 @@ it('restores an interrupted claim as unknown and resumes using the original oper
   } finally { await manager.stop(); await rm(dir, { recursive: true, force: true }) }
 })
 it.each(['pause', 'stopLoop'] as const)('does not send after %s while observation is pending', async (action) => {
-  const dir = await mkdtemp(join(_hygiene_fixturePath("tmp"), 'agentmux-pause-loop-'))
+  const dir = await mkdtemp(join(tmpdir(), 'agentmux-pause-loop-'))
   const store = new ContinuousProgressLoopStore(join(dir, 'loops.json'))
   let release!: () => void, enter!: () => void
   const gate = new Promise<void>((resolve) => { release = resolve })
@@ -169,7 +172,7 @@ it.each(['pause', 'stopLoop'] as const)('does not send after %s while observatio
 })
 
 it('propagates pause cancellation to an already queued Core submission', async () => {
-  const dir = await mkdtemp(join(_hygiene_fixturePath("tmp"), 'agentmux-abort-loop-')); const store = new ContinuousProgressLoopStore(join(dir, 'loops.json'))
+  const dir = await mkdtemp(join(tmpdir(), 'agentmux-abort-loop-')); const store = new ContinuousProgressLoopStore(join(dir, 'loops.json'))
   let enter!: () => void, release!: () => void
   const entered = new Promise<void>((r) => { enter = r }); const gate = new Promise<void>((r) => { release = r })
   let bytes = 0
@@ -188,7 +191,7 @@ it('propagates pause cancellation to an already queued Core submission', async (
 
 it('retains one original Goal start through durable Manager reload and reconciles only its saved initial operation', async () => {
   const { openDemandStore } = await import('@agentmux/demand')
-  const dir = await mkdtemp(join(_hygiene_fixturePath("tmp"), 'agentmux-goal-loop-'))
+  const dir = await mkdtemp(join(tmpdir(), 'agentmux-goal-loop-'))
   const store = new ContinuousProgressLoopStore(join(dir, 'loops.json')), goals = openDemandStore({ root: join(dir, 'goals') })
   await seedStoredDemand(goals, { id: 'original-goal', title: 'Original work', sessionIds: ['a'], assigneeSessionIds: ['a'], supervisorSessionId: 'a' })
   await goals.proposeAlignment('original-goal', { summary: 'Original scope', criteria: [{ id: 'criterion', text: 'Observable result' }], openQuestions: [] })
@@ -216,7 +219,7 @@ it('retains one original Goal start through durable Manager reload and reconcile
 
 it('cancels original Goal initial admission when its real source owner becomes blocked, keeping the saved loop and execution identity', async () => {
   const { openDemandStore } = await import('@agentmux/demand')
-  const dir = await mkdtemp(join(_hygiene_fixturePath("tmp"), 'agentmux-goal-source-'))
+  const dir = await mkdtemp(join(tmpdir(), 'agentmux-goal-source-'))
   const store = new ContinuousProgressLoopStore(join(dir, 'loops.json')), goals = openDemandStore({ root: join(dir, 'goals') })
   await seedStoredDemand(goals, { id: 'original-goal', title: 'Original work', sessionIds: ['a'], assigneeSessionIds: ['a'], supervisorSessionId: 'a' })
   await goals.proposeAlignment('original-goal', { summary: 'Original scope', criteria: [{ id: 'criterion', text: 'Observable result' }], openQuestions: [] })
@@ -243,7 +246,7 @@ it('cancels original Goal initial admission when its real source owner becomes b
 })
 
 it('updates the original loop, protects an unknown save and rejects stale or conflicting operations', async () => {
-  const dir = await mkdtemp(join(_hygiene_fixturePath('tmp'), 'progress-update-'))
+  const dir = await mkdtemp(join(tmpdir(), 'progress-update-'))
   const store = new ContinuousProgressLoopStore(join(dir, 'loops.json'))
   const send = vi.fn(async () => 'sent' as const)
   const manager = new ContinuousProgressLoopManager(store, send, () => 100, observedDone)
@@ -272,7 +275,7 @@ it('updates the original loop, protects an unknown save and rejects stale or con
 })
 
 it('keeps an already claimed tick and pending input while saving the next configuration', async () => {
-  const dir = await mkdtemp(join(_hygiene_fixturePath('tmp'), 'progress-claim-update-'))
+  const dir = await mkdtemp(join(tmpdir(), 'progress-claim-update-'))
   const store = new ContinuousProgressLoopStore(join(dir, 'loops.json'))
   let now = 0, release!: () => void, entered!: () => void
   const gate = new Promise<void>(resolve => { release = resolve }), claimed = new Promise<void>(resolve => { entered = resolve })
@@ -302,7 +305,7 @@ it('keeps an already claimed tick and pending input while saving the next config
 })
 
 it('retains the paused original pending operation and its frozen prompt across update and restart', async () => {
-  const dir = await mkdtemp(join(_hygiene_fixturePath('tmp'), 'progress-pending-update-'))
+  const dir = await mkdtemp(join(tmpdir(), 'progress-pending-update-'))
   const store = new ContinuousProgressLoopStore(join(dir, 'loops.json'))
   const send = vi.fn(async () => 'sent' as const)
   const target = { hostId: 'local', agentSessionId: 'a', providerId: 'codex', workspacePath: _hygiene_fixturePath('w') }
