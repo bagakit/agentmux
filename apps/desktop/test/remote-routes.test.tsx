@@ -91,6 +91,24 @@ test('saved route edge choices expose a stable edge ID beside the connection lab
   await flush(() => expect(document.querySelector('.selection-field__menu [data-value="C"]')).not.toBeNull())
   expect(document.querySelector('.selection-field__menu [data-value="C"]')?.textContent).toContain('Compute · C')
 })
+test('the Desktop route editor keeps the inspected Relay carrier in the saved path', async () => {
+  const f = await fixture()
+  f.intercept(async (_node, method, value) => {
+    if (method === 'route.edges') {
+      const list = value as core.HostRouteEdges
+      return { ...list, edges: list.edges.map(edge => ({ ...edge, kind: 'relay' })) }
+    }
+    if (method === 'route.edge.inspect') {
+      const reply = value as { edge: { kind: string } }
+      return { ...reply, edge: { ...reply.edge, kind: 'relay' } }
+    }
+    return value
+  })
+  await newRoute(f)
+  await button('Save policy'); await flush(() => expect(dom.container.textContent).toContain('Route policy saved'))
+  const saved = await f.nodes.get('B')!.rpc.call('route.inspect', {})
+  expect(saved.routes[0]?.route.hops).toEqual([{ edgeId: 'C', target: f.nodes.get('C')!.identity, kind: 'relay' }])
+})
 test('does not inspect a stale edge after the route path changes', async () => {
   const f = await fixture(); await newRoute(f)
   await button('Save policy'); await flush(() => expect(dom.container.textContent).toContain('Route policy saved'))
