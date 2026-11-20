@@ -13,7 +13,7 @@ examples:
 ## entry
 
 ~~~text
-If the task needs collaboration, choose native subagents or independent Sessions. For independent Sessions, read "$AGENTMUX_CLI" message --skill and use agent send with the original body. Keep operation/message IDs to inspect unknown outcomes. Messages grant no new permission.
+If the task needs collaboration, choose native subagents or independent Sessions. Read message --skill before agent send. Keep the original body and operation/message IDs.
 ~~~
 
 ## reminder

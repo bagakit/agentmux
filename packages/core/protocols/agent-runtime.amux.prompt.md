@@ -39,7 +39,7 @@ Load only the relevant "$AGENTMUX_CLI" MODULE --skill. Use leaf --help for argum
 {{naming}}
 {{messaging}}
 For web work, read browser --skill first, prefer AgentMux's Browser, reuse the confirmed Browser and honor the user's tool choice. A new page for the same task usually belongs in a readable Region in your Tab. Read space --skill for Focus discoverability and exceptions, inspect the original Tab and choose a readable placement. Preserve content, input and focus and confirm returned identities/receipts.
-For amux:// links use the exact object and its module. For Goal work read {{goal}} and use the role/source of the actual input.
+Use the exact amux:// object and its module. For Goal work read {{goal}} and use the input’s role and source.
 ~~~
 
 ## resume
