@@ -67,8 +67,16 @@ function goalReviewGuidance(result: GoalDelegationResult, review: GoalDelegation
   if (!result.passRecorded) return
   const attempt = result.delegations.find(entry => entry.operationId === review.delegationOperationId && entry.planNodeId === review.nodeId)
   if (!attempt?.workerRunId || !attempt.report?.delivery) return
+  const original = `Goal ${JSON.stringify(result.goalId)}, Ticket ${JSON.stringify(review.nodeId)}, attempt ${JSON.stringify(attempt.operationId)}`
   const target = `Session ${JSON.stringify(attempt.workerAgentSessionId)}, Run ${JSON.stringify(attempt.workerRunId)}, Host ${JSON.stringify(delegationWorkerHostId(attempt))}, Runtime ${JSON.stringify(attempt.report.delivery.authorRuntimeId)}`
-  return composeOutboundMessage({ amux: `Supervisor: check remaining work and pending input for ${target}. If that exact Run is still current and has neither, use amux agent stop --session ID --run ID. See amux goal --skill.` })
+  return composeOutboundMessage({ amux: [
+    `Review passed for ${original}. The original executor is ${target}.`,
+    'As the independent reviewer, read the original Goal for its current Supervisor and pass them this receipt. Keep your review role.',
+    'As the current Supervisor, verify the exact attempt, report collection and remaining work. Assign the next ready Ticket when appropriate.',
+    'When the handoff is confirmed and no work remains, ask the original executor to use amux goal closeout for this exact attempt and Run.',
+    'Keep the original Run and operation if any check or receipt is unknown. Only an authorized person or device can read the exact Stop receipt with amux agent stop inspect.',
+    'See amux goal --skill.'
+  ].join('\n') })
 }
 
 function goalReportGuidance(result: GoalReportResult, input: GoalDelegationParamsMap['goal.report']): string | undefined {
