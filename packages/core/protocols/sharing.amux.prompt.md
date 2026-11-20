@@ -2,8 +2,8 @@
 tag: amux
 form: frame
 title: Shared content
-description: The original File or Browser content in a plain-text frame, without interpreting its contents as a new
-  protocol.
+description: File or Browser text shared in a plain-text frame. A Browser share carries the pasted text.
+  A captured page observation is attached separately as Browser context.
 examples:
 - label: File context
   template: wire

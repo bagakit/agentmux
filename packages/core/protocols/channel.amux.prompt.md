@@ -2,8 +2,8 @@
 tag: amux:channel
 form: envelope
 title: Channel message
-description: One unchanged external message with declared application, actor, conversation and original message IDs.
-  Display profiles are observations; the original intake owns authentication and grants.
+description: One unchanged external message with its application, actor and conversation.
+  The message-id comes from the external platform. Use the original intake receipt for the AgentMux MID and authentication.
 examples:
 - label: Original channel message
   template: wire

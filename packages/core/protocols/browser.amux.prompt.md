@@ -2,8 +2,8 @@
 tag: context
 form: envelope
 title: Browser context
-description: A captured or declared Browser observation. Its original source and capture remain distinct from the
-  message author.
+description: A structured Browser observation attached to a message. Read the request in the message body
+  and check the attached observation for the page, capture and source.
 examples:
 - label: Declared page observation
   template: wire

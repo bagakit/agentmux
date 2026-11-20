@@ -46,7 +46,7 @@ export const AMUX_PROTOCOL_DEFINITIONS = {
     "tag": "context",
     "form": "envelope",
     "title": "Browser context",
-    "description": "A captured or declared Browser observation. Its original source and capture remain distinct from the message author."
+    "description": "A structured Browser observation attached to a message. Read the request in the message body and check the attached observation for the page, capture and source."
   },
   "capsule-answer": {
     "tag": "amux:capsule-answer",
@@ -70,7 +70,7 @@ export const AMUX_PROTOCOL_DEFINITIONS = {
     "tag": "amux:channel",
     "form": "envelope",
     "title": "Channel message",
-    "description": "One unchanged external message with declared application, actor, conversation and original message IDs. Display profiles are observations; the original intake owns authentication and grants."
+    "description": "One unchanged external message with its application, actor and conversation. The message-id comes from the external platform. Use the original intake receipt for the AgentMux MID and authentication."
   },
   "composer-task": {
     "tag": "composer-task",
@@ -88,13 +88,13 @@ export const AMUX_PROTOCOL_DEFINITIONS = {
     "tag": "amux:continue",
     "form": "marker",
     "title": "Continue",
-    "description": "A continuation declaration. Viewing it does not resume a Session or establish that work was completed."
+    "description": "A continuation declaration for the same original Session. Read its current status and continue the work identified in the original conversation."
   },
   "focus-reference": {
     "tag": "amux:ref",
     "form": "envelope",
     "title": "Focus selection reference",
-    "description": "The exact Focus selection and the CLI help for reading its members."
+    "description": "The exact Focus scope and selection. Read the selected members with the CLI entry. An explicit all selection means every member in that scope. An unconfirmed selection needs the original scope or members."
   },
   "focus-task": {
     "tag": "focus-task",
@@ -154,7 +154,7 @@ export const AMUX_PROTOCOL_DEFINITIONS = {
     "tag": "amux",
     "form": "frame",
     "title": "Shared content",
-    "description": "The original File or Browser content in a plain-text frame, without interpreting its contents as a new protocol."
+    "description": "File or Browser text shared in a plain-text frame. A Browser share carries the pasted text. A captured page observation is attached separately as Browser context."
   },
   "tailcat-setup": {
     "tag": "tailcat-setup",

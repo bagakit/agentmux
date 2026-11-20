@@ -2,7 +2,8 @@
 tag: amux:ref
 form: envelope
 title: Focus selection reference
-description: The exact Focus selection and the CLI help for reading its members.
+description: The exact Focus scope and selection. Read the selected members with the CLI entry.
+  An explicit all selection means every member in that scope. An unconfirmed selection needs the original scope or members.
 examples:
 - label: Selected members and task
   template: wire
