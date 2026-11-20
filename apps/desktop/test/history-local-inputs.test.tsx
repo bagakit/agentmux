@@ -70,15 +70,15 @@ check('original client owner projection preserves orphan keys, text, frozen Host
 })
 
 check('mounted global local-input entry copies original unassociated draft and retained queue without Session/send/retry', async () => {
-  const { LocalRetainedInputsPanel } = await import('../src/renderer/src/components/LocalRetainedInputs')
+  const { FocusScanActions } = await import('../src/renderer/src/components/FocusScanActions')
   const { useAppStore: store } = await import('../src/renderer/src/store')
   const { api } = await import('../src/renderer/src/lib/api')
   store.setState({ sessions: [], tabs: {}, agentComposerDrafts: { 'old-orphan-region': originalDraft }, agentSteerQueues: { 'retired-original': [structuredClone(originalQueue)] } })
   const before = structuredClone({ drafts: store.getState().agentComposerDrafts, queues: store.getState().agentSteerQueues })
   const copied = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   const send = vi.spyOn(api.sessions, 'submitPrompt'), stop = vi.spyOn(api.sessions, 'stop'), reopen = vi.spyOn(api.sessions, 'reopen')
-  const element = await mount(<LocalRetainedInputsPanel />)
-  await click(button(element, 'Drafts & queue'))
+  const element = await mount(<FocusScanActions order="priority" onOrderChange={() => {}} />)
+  await click(button(element, 'Drafts'))
   const records = [...element.querySelectorAll<HTMLDetailsElement>('.local-input-record')]
   expect(records.length, 'local-unassociated-route-present').toBe(2)
   await toggle(records[0]!); expect(records[0]!.querySelector('textarea')!.value).toBe(originalDraft)
@@ -148,9 +148,9 @@ async function desktop(seed: boolean) {
 }
 check('original Main user-document hydrate and actual save keep unassociated input reachable without an active Session', async () => {
   const f = await desktop(true)
-  const { LocalRetainedInputsPanel } = await import('../src/renderer/src/components/LocalRetainedInputs')
+  const { FocusScanActions } = await import('../src/renderer/src/components/FocusScanActions')
   expect(f.api.ui.readWorkbenchInputArchive).not.toHaveBeenCalled()
-  const element = await mount(<LocalRetainedInputsPanel />); await click(button(element, 'Drafts & queue'))
+  const element = await mount(<FocusScanActions order="priority" onOrderChange={() => {}} />); await click(button(element, 'Drafts'))
   await vi.waitFor(() => expect(element.querySelectorAll('.local-input-record')).toHaveLength(3))
   expect(f.store.getState().agentComposerDrafts['old-orphan-region']).toBe(originalDraft)
   expect(f.store.getState().agentSteerQueues['retired-original']![0]).toMatchObject(originalQueue)
@@ -169,10 +169,10 @@ check('original Main user-document hydrate and actual save keep unassociated inp
   const before = JSON.parse((await f.owner.read())!)
   expect(before.state.agentComposerDrafts['old-orphan-region']).toBe(originalDraft)
   expect(before.state.agentSteerQueues['retired-original']).toMatchObject([originalQueue])
-  const { LocalRetainedInputsPanel } = await import('../src/renderer/src/components/LocalRetainedInputs')
+  const { FocusScanActions } = await import('../src/renderer/src/components/FocusScanActions')
   const copied = vi.spyOn(f.api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   expect(f.api.ui.readWorkbenchInputArchive).not.toHaveBeenCalled()
-  const element = await mount(<LocalRetainedInputsPanel />); await click(button(element, 'Drafts & queue'))
+  const element = await mount(<FocusScanActions order="priority" onOrderChange={() => {}} />); await click(button(element, 'Drafts'))
   await vi.waitFor(() => expect(element.querySelectorAll('.local-input-record')).toHaveLength(3))
   const records = [...element.querySelectorAll<HTMLDetailsElement>('.local-input-record')]
   await toggle(records[0]!); await click(button(records[0]!, 'Copy saved input')); expect(copied).toHaveBeenLastCalledWith(originalDraft)

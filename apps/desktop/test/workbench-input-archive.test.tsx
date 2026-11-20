@@ -9,7 +9,8 @@ import { connectAgentMuxRpc } from '../../../packages/core/src/public-rpc-client
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc'
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
 import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystemNotices'
-import { LocalRetainedInputsPanel } from '../src/renderer/src/components/LocalRetainedInputs'
+import { FocusScanActions } from '../src/renderer/src/components/FocusScanActions'
+import { focusScanAction } from './fixtures/focus-scan-actions'
 import { SessionRecordDetails } from '../src/renderer/src/components/SessionRecordDetails'
 import { api } from '../src/renderer/src/lib/api'
 import { desktopUserDocument } from '../src/renderer/src/lib/desktop-user-state'
@@ -147,9 +148,9 @@ it('Focus opens the global cold archive for copying without an active Session', 
   const read = vi.spyOn(api.ui, 'readWorkbenchInputArchive').mockResolvedValue({ entries: [saved()], nextCursor: null })
   const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   const send = vi.spyOn(api.sessions, 'submitPrompt'), reopen = vi.spyOn(api.sessions, 'reopen')
-  await dom.render(<LocalRetainedInputsPanel />)
+  await dom.render(<FocusScanActions order="priority" onOrderChange={() => {}} />)
   expect(read).not.toHaveBeenCalled()
-  await dom.click('[aria-label="Drafts & queue"]')
+  await focusScanAction(dom.container, 'Saved inputs')
   expect(read).toHaveBeenCalledExactlyOnceWith({ limit: 30 })
   const row = localRecords().find(item => item.textContent?.includes('Exact original archived message'))!
   expect(row).toBeDefined()

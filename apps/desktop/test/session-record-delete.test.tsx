@@ -98,13 +98,13 @@ if (reading) it('a fresh process hydrates the same original deletion request and
 
 check('the actual Store terminal event keeps independent draft and queue objects reachable and copyable through the original local-input consumer', async () => {
   const f = await desktop(), before = { drafts: f.store.getState().agentComposerDrafts, queues: f.store.getState().agentSteerQueues }
-  const { LocalRetainedInputsPanel } = await import('../src/renderer/src/components/LocalRetainedInputs')
+  const { FocusScanActions } = await import('../src/renderer/src/components/FocusScanActions')
   const copy = vi.spyOn(f.api.ui, 'writeClipboardText').mockResolvedValue(undefined), send = vi.spyOn(f.api.sessions, 'submitPrompt')
   f.store.getState().applyEvent({ type: 'core', hostId: target.hostId, event: { type: 'agent-session-record-deleted', agentSessionId: target.agentSessionId, retiredAt: 1,
     recordDeletion: { operationId: request.operationId, retirementRevision: request.expectedRetirementRevision, deletedAt: 2, phase: 'complete' } } })
   expect(f.store.getState().agentComposerDrafts, 'delete-terminal-event-keeps-independent-original-drafts').toBe(before.drafts)
   expect(f.store.getState().agentSteerQueues, 'delete-terminal-event-keeps-independent-original-queue').toBe(before.queues)
-  const view = await mount(<LocalRetainedInputsPanel />); await click(document.body, 'Local inputs')
+  const view = await mount(<FocusScanActions order="priority" onOrderChange={() => {}} />); await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Drafts"]')!.click())
   const inputs = [...document.querySelectorAll<HTMLDetailsElement>('.local-input-record')]
   expect(inputs.length, 'delete-local-unsent-remains-reachable').toBe(2)
   await act(async () => { inputs[0]!.open = true; inputs[0]!.dispatchEvent(new Event('toggle')) })

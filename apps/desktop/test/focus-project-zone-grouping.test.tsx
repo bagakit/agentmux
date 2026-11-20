@@ -208,7 +208,7 @@ it('keeps in-project History folded when live data arrives before anyone reads i
   expect(disclosure.textContent).toContain('1')
   expect(container.querySelector(savedRow)).toBeNull()
   expect(container.querySelector('.focus-task-toolbar')).toBeNull()
-  expect(container.querySelectorAll('.focus-toolbar [aria-label="Arrange projects by recent activity"]')).toHaveLength(1)
+  expect(container.querySelectorAll('.focus-toolbar [aria-label="Focus actions"]')).toHaveLength(1)
 
   await act(async () => disclosure.click())
   expect(disclosure.getAttribute('aria-expanded')).toBe('true')

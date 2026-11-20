@@ -9,7 +9,7 @@ const targets = ['FocusSearchLocations.tsx', 'LocalRetainedInputs.tsx', 'GlobalF
 const mutants = {
  'first-location': [targets[0]!, 'onSelect(location)', 'onSelect(result.locations[0]!)'],
  'missing-native-fact': [targets[0]!, '{source.history?.previousNativeHandle ?', '{false ?'],
- 'drop-orphan': [targets[1]!, 'inputs.slice(0, limit).map', 'inputs.filter(input => input.target).slice(0, limit).map'],
+ 'drop-orphan': [targets[1]!, 'const preview = inputs.slice(0, limit)', 'const preview = inputs.filter(input => input.target).slice(0, limit)'],
  'copy-preview': [targets[1]!, 'copyTextToClipboard(body,', 'copyTextToClipboard(input.text.trim(),'],
  'drop-images': [targets[1]!, 'restoreComposerInput(input.text, input.entry?.inputImages)', 'restoreComposerInput(input.text, undefined)'],
  'wrong-source-host': [targets[2]!, 'JSON.stringify([entry.identity.hostId, entry.sessionId])', "JSON.stringify(['local', entry.sessionId])"]

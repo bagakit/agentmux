@@ -5,7 +5,8 @@ import type { AgentSessionHistoryDescriptor } from '@agentmux/core'
 import { fileUploadRevision } from '@agentmux/core/files'
 import { expandComposerInput } from '@agentmux/client-ui/composer-semantic-reference'
 import { FocusSearchLocations } from '../src/renderer/src/components/FocusSearchLocations'
-import { LocalRetainedInputs, LocalRetainedInputsPanel } from '../src/renderer/src/components/LocalRetainedInputs'
+import { FocusScanActions } from '../src/renderer/src/components/FocusScanActions'
+import { LocalRetainedInputs } from '../src/renderer/src/components/LocalRetainedInputs'
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore, type AgentSteerQueueEntry } from '../src/renderer/src/store'
@@ -103,15 +104,15 @@ it('drafts and queue remain readable and copy-only with unknown keys and origina
  const before = { drafts: useAppStore.getState().agentComposerDrafts, queues: useAppStore.getState().agentSteerQueues }
  const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
  const submit = vi.spyOn(api.sessions, 'submitPrompt'), reopen = vi.spyOn(api.sessions, 'reopen'), stop = vi.spyOn(api.sessions, 'stop')
- await dom.render(<LocalRetainedInputsPanel />)
- const trigger = dom.container.querySelector<HTMLButtonElement>('[aria-label="Drafts & queue"]')!; expect(trigger).not.toBeNull(); expect(trigger.querySelector('svg')).not.toBeNull()
+ await dom.render(<FocusScanActions order="priority" onOrderChange={() => {}} />)
+ const trigger = dom.container.querySelector<HTMLButtonElement>('[aria-label="Drafts"]')!; expect(trigger).not.toBeNull(); expect(trigger.querySelector('svg')).not.toBeNull()
  await click(trigger)
- expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Saved drafts & queue')
+ expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Saved inputs')
  const rows = [...document.querySelectorAll<HTMLDetailsElement>('.local-input-record')]; expect(rows).toHaveLength(2)
- expect(rows[0]!.textContent).toContain('Association unknown'); expect(document.querySelector('textarea')).toBeNull()
+ expect(document.querySelector('textarea')).toBeNull()
  for (const row of rows) await act(async () => { row.open = true; row.dispatchEvent(new Event('toggle')) })
  expect(rows[0]!.querySelector('textarea')!.value).toBe(draft)
- expect(rows[0]!.textContent).toContain('orphan-original-region'); expect(rows[1]!.textContent).toContain('original-input')
+ expect(rows[0]!.textContent).toContain('orphan-original-region'); expect(rows[0]!.textContent).toContain('Unknown · original key kept'); expect(rows[1]!.textContent).toContain('original-input')
  expect(rows[1]!.textContent).toContain('original-host / original-agent'); expect(rows[1]!.textContent).toContain('explicit send required')
  await click(rows[0]!.querySelector('button')!); expect(copy).toHaveBeenLastCalledWith(draft)
  await click(rows[1]!.querySelector('button')!)
@@ -125,5 +126,5 @@ it('an exactly scoped empty shelf keeps the all-inputs route and unknown associa
  await dom.render(<LocalRetainedInputs target={{ hostId: 'missing-host', agentSessionId: 'missing-agent' }} />)
  expect(dom.container.querySelector('.local-input-record')).toBeNull()
  expect(dom.container.textContent).toContain('No exactly associated local inputs')
- expect(dom.container.textContent).toContain('Focus → Drafts & queue')
+ expect(dom.container.textContent).toContain('Focus actions')
 })

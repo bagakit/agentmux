@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { focusScanAction } from './fixtures/focus-scan-actions'
 import { act, useRef } from 'react'
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -426,11 +427,8 @@ function containerOrder() {
     return row.dataset.focusSource === 'collection' ? row.querySelector('.focus-project-lanes__collection strong')!.textContent : row.dataset.projectId
   })
 }
-async function arrange() {
-  const control = host.querySelector<HTMLButtonElement>('[aria-label="Arrange projects by recent activity"]')!
-  expect(control).not.toBeNull()
-  await act(async () => control.click())
-}
+async function arrange() { await focusScanAction(host, 'Task priority') }
+
 function OriginalFocusRoute({ lanes, visible }: { lanes: readonly FocusScanLane[]; visible: boolean }) {
   const rows = useRef<HTMLOListElement>(null), ordered = useFocusProjectOrder(lanes, visible, rows)
   return <ol ref={rows}>{ordered.map(lane => <li key={lane.id} data-original-route-key={focusScanOrderKey(lane)}>{lane.name}</li>)}</ol>

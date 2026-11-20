@@ -1,6 +1,7 @@
 import { fixturePath as _liveTailFixturePath } from "../../../test/fixture-values.mjs"
 import { fixtureYear as _hygiene_fixtureYear } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
+import { focusScanAction } from './fixtures/focus-scan-actions'
 import { act } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { focusSettings } from '../src/main/settings/modules/focus'
@@ -123,12 +124,12 @@ it('updates the actual GlobalFocusSurface for 12 and 72 hours while retaining pr
   await act(async () => useAppStore.setState({ config: { ...config, focus: { recentActivityHours: 12 } } }))
   await act(async () => vi.advanceTimersByTime(3000))
   expect(order()).toEqual(['attention', 'working', 'recent2', 'exact12', 'mid18', 'old30', 'unknown'])
-  await dom.click('[aria-label="Arrange projects by recent activity"]')
+  await focusScanAction(dom.container, 'Task priority')
   expect(order()).toEqual(['attention', 'working', 'recent2', 'exact12', 'old30', 'mid18', 'unknown'])
   await act(async () => useAppStore.setState({ config: { ...config, focus: { recentActivityHours: 72 } } }))
   await act(async () => vi.advanceTimersByTime(3000))
   expect(order()).toEqual(['attention', 'working', 'recent2', 'exact12', 'old30', 'mid18', 'unknown'])
-  await dom.click('[aria-label="Arrange projects by recent activity"]')
+  await focusScanAction(dom.container, 'Task priority')
   expect(order()).toEqual(['attention', 'working', 'recent2', 'exact12', 'mid18', 'old30', 'unknown'])
   expect(useAppStore.getState().sessions).toBe(sessions)
   expect(useAppStore.getState().sessions.map(session => session.control.run)).toEqual(sessions.map(session => session.control.run))

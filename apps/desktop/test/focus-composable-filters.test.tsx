@@ -57,10 +57,7 @@ it('provides keyboard option search, reflects current names and returns chip rem
     await act(async()=>trigger.dispatchEvent(new PointerEvent('pointerover',{bubbles:true,pointerType:'mouse',buttons:0})))
     const hovered=document.querySelector<HTMLElement>('.focus-filter-menu')!
     expect(hovered).not.toBeNull();await act(async()=>hovered.dispatchEvent(new KeyboardEvent('keydown',{bubbles:true,key:'Escape'})))
-    const chip=host.querySelector<HTMLButtonElement>('.focus-filter-chip__value')!
-    expect(chip).not.toBeNull();await act(async()=>chip.click())
-    expect(document.querySelector('.focus-filter-menu')?.contains(document.activeElement)).toBe(true)
-    await act(async()=>document.querySelector('.focus-filter-menu')!.dispatchEvent(new KeyboardEvent('keydown',{bubbles:true,key:'Escape'})))
+    expect(host.querySelector('.focus-filter-chip__value')).toBeNull()
     await act(async()=>trigger.dispatchEvent(new KeyboardEvent('keydown',{bubbles:true,key:'ArrowDown'})))
     const menu=document.querySelector<HTMLElement>('.focus-filter-menu')!
     expect(menu).not.toBeNull();await act(async()=>menu.dispatchEvent(new KeyboardEvent('keydown',{bubbles:true,key:'Tab'})))
@@ -70,9 +67,10 @@ it('provides keyboard option search, reflects current names and returns chip rem
     expect(document.activeElement?.getAttribute('role')).toBe('menuitemcheckbox')
     const done=[...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node=>node.textContent==='Done')!
     expect(done).not.toBeNull();await act(async()=>done.click())
-    const remove=host.querySelector<HTMLButtonElement>('[aria-label="Remove Project filter"]')!
+    await act(async()=>trigger.dispatchEvent(new KeyboardEvent('keydown',{bubbles:true,key:'ArrowDown'})))
+    const remove=document.querySelector<HTMLButtonElement>('[aria-label="Remove Project filter"]')!
     expect(remove).not.toBeNull();remove.focus();await act(async()=>remove.click())
-    expect(document.activeElement).toBe(trigger)
-    expect(host.querySelector('[aria-label="Remove Project filter"]')).toBeNull()
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('Interacted within')
+    expect(document.querySelector('[aria-label="Remove Project filter"]')).toBeNull()
   } finally {await act(async()=>root.unmount());host.remove();vi.unstubAllGlobals()}
 })
