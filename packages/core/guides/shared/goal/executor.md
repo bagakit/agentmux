@@ -35,7 +35,9 @@ and read the current Supervisor and Project with `goal inspect --goal ID` at the
 Verify that your original report and its evidence are saved, then give the current
 Supervisor the original Goal, attempt, source MID and reply MID for `goal collect`.
 If the Supervisor changed, keep the original report and its recipient and ask the
-current Supervisor to collect that same reply. If it was already collected by someone
+current Supervisor to collect that same reply. A retired local original recipient
+can receive the signed reply in its retained Inbox without starting a Run.
+If it was already collected by someone
 else, ask the current Supervisor to confirm that exact collection and take over.
 Use an authorized route for the current Supervisor. If the original owner or that
 Supervisor cannot be verified, keep the report and Run available.
