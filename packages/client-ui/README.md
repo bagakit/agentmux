@@ -73,7 +73,7 @@ Imports in the table use the prefix `@agentmux/client-ui/`. The package manifest
 | Agent work location | `patterns/agent-work-location` | Location summary trigger, confirmed position count and distinct descriptions for exact routes. [Pattern and example](docs/patterns/agent-work-location.md#react-entry). |
 | Conversation | `components/ConversationView`, `components/ConversationMessage`, `components/ConversationRecordSequence` | Messages, native-history reading, reasoning and tool traces, permission and question cards, recorded images and files |
 | Composer | `components/AgentComposer`, `components/InlineComposer`, `components/ComposerEditFooter` | Rich message editing and the action row for a compact multiline edit |
-| Terminal | `terminal/replay`, `terminal/live-output`, `terminal/input`, `terminal/unicode` | xterm replay, live output, input encoding and the Unicode width table |
+| Terminal | `terminal/replay`, `terminal/live-output`, `terminal/input`, `terminal/unicode`, `terminal/images` | xterm replay, live output, input encoding, Unicode width and inline graphics |
 | Notes | `note/note-document`, `note/note-wikilinks`, `note/note-live-merge`, `components/NoteReader` | The `.note.md` Markdown codec, wiki links, live three-way merge and a read-only Note reader |
 | Theme and icons | `theme`, `icons` | Theme catalog and built-in themes, semantic icons and their animations |
 | Native controls | `components/Button`, `components/IconButton`, `components/FormRow`, `input`, `components/Modal` | Buttons, form rows, text inputs and dialogs with one shared style owner |
