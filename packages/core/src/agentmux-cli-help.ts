@@ -43,8 +43,8 @@ export function agentMuxCommandHelp(path: string): string | null {
   const selected = entries(path)
   if (!selected.length) return null
   const exact = selected.find(entry => entry.method === path)
-  const group = path === 'space.mote.group' || path.startsWith('space.mote.group.')
-  const moduleEntry = agentMuxModuleSkillEntry(group ? 'mote' : path.split('.')[0]!)
+  const conversation = /^space\.mote\.(group|direct)(\.|$)/u.test(path)
+  const moduleEntry = agentMuxModuleSkillEntry(conversation ? 'mote' : path.split('.')[0]!)
   const moduleGuide = moduleEntry ? `Module guide (local, read-only): ${moduleEntry}\nParameters and legal values below come from this version's command registration.` : ''
   const guide = path === 'system.endpoint' ? ENDPOINT_GUIDE
     : path === 'capsule.open' ? CAPSULE_OPEN_GUIDE

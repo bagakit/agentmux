@@ -78,6 +78,7 @@ import { parseCapsuleInputRequest, parseCapsuleInputResult, type CapsuleInputPor
 import { isCapsuleRuntimeMethod, parseCapsuleRuntimeParams, parseCapsuleRuntimeResult, type CapsuleRuntimeMethod, type CapsuleRuntimePort } from './capsule-runtime.js'
 import { isCapsuleMethod, parseCapsuleRpcParams, parseCapsuleRpcResult, type CapsuleCallContext, type CapsuleMethod, type CapsuleParamsMap, type CapsuleResultMap } from './capsule.js'
 import { parseExternalConversationReference, parseExternalConversationReceipt } from './external-conversation.js'
+import { isMoteDirectMethod, parseMoteDirectParams, parseMoteDirectResult, type MoteDirectPort, type MoteDirectMethod } from './mote/direct.js'
 import { isMoteGroupMethod, parseMoteGroupParams, parseMoteGroupResult, type MoteGroupCallContext, type MoteGroupPort, type MoteGroupMethod } from './mote/group.js'
 import { isMoteChatMethod, parseMoteChatParams, parseMoteChatResult } from './mote/chat-codec.js'
 import { isAgentLearningMethod, parseAgentLearningParams, parseAgentLearningResult,
@@ -277,6 +278,7 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
   moteDialogue?: MoteDialoguePort
   moteChat?: MoteChatPort
   moteGroups?: MoteGroupPort
+  moteDirect?: MoteDirectPort
   /** Host-owned learning workflow; Core neither stores nor interprets its knowledge. */
   agentLearning?: AgentLearningPort
   moteConnections?: MoteConnectionPort
@@ -601,7 +603,7 @@ const NATIVE_FIELDS = {
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit'],
   'system.storage': ['hostId', 'runId'], 'system.doctor': ['workspacePath'], 'system.endpoint': [], 'system.relay.inspect': [],
   'system.subscription.cancel': ['subscriptionId']
-} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, StorageRecoveryMethod | FocusMethod | MoteDialogueMethod | CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteGroupMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | AgentPromotionMethod | TopicMethod | ConnectionMethod | ObjectAvatarMethod | TailcatConfigurationMethod | NotesStorageMethod | ProviderCatalogMethod | HostSettingsMethod | MeshNetworkMethod | NodePublishingMethod | NodeLocatorMethod | import('./public-rpc-tailcat-key.js').TailcatKeyMethod | import('./public-rpc-host-maintenance.js').HostMaintenanceMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | ImageMethod | NativeDesktopMethod | keyof typeof HOST_ROUTE_METHODS>, readonly string[]>
+} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, StorageRecoveryMethod | FocusMethod | MoteDialogueMethod | CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteGroupMethod | MoteDirectMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | AgentPromotionMethod | TopicMethod | ConnectionMethod | ObjectAvatarMethod | TailcatConfigurationMethod | NotesStorageMethod | ProviderCatalogMethod | HostSettingsMethod | MeshNetworkMethod | NodePublishingMethod | NodeLocatorMethod | import('./public-rpc-tailcat-key.js').TailcatKeyMethod | import('./public-rpc-host-maintenance.js').HostMaintenanceMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | ImageMethod | NativeDesktopMethod | keyof typeof HOST_ROUTE_METHODS>, readonly string[]>
 
 /** Home follows an exact execution route; its display name does not identify that route. */
 function homeHostRoute(configuration: import('./control.js').AgentMuxControlSettingsResourceFields | null) {
@@ -1505,15 +1507,13 @@ export class AgentMuxRpcService {
         : await this.ports.moteDialogue.link(parseMoteDialogueParams(method, params), original)
       return parseMoteDialogueResult(method, result, input) as AgentMuxRpcResult<M>
     }
-    if (isMoteGroupMethod(method)) {
-      const input = parseMoteGroupParams(method, params)
+    if (isMoteGroupMethod(method) || isMoteDirectMethod(method)) {
       const caller = context.caller ? await this.authenticated(context, true) : undefined
-      const agentOnly = method === 'space.mote.group.reply' || method === 'space.mote.group.members.leave'
+      const agentOnly = method === 'space.mote.group.reply' || method === 'space.mote.group.members.leave' ||
+        method === 'space.mote.direct.send' || method === 'space.mote.direct.reply'
       const ownerOnly = method === 'space.mote.group.retry'
       if (caller ? ownerOnly : agentOnly || !context.principal || !['user', 'device'].includes(context.principal.kind))
         throw new AgentMuxError('This Group operation requires its original authenticated workspace participant.', 'CONTROL_PERMISSION_DENIED')
-      const owner = this.ports.moteGroups
-      if (!owner) throw new AgentMuxError('The original built-in Group owner is unavailable. Saved Group messages and Agents are retained.', 'CONTROL_UNAVAILABLE')
       const actor: MoteGroupCallContext['actor'] = caller
         ? { kind: 'agent', agentSessionId: caller.agentSessionId, hostId: caller.hostId, sourceRuns: sessionSemanticResumeSourceRuns(caller.session) }
         : { kind: 'human', id: `local-user:${process.getuid?.() ?? 'current'}` }
@@ -1528,6 +1528,16 @@ export class AgentMuxRpcService {
         }
       }
       await assertCurrent()
+      if (isMoteDirectMethod(method)) {
+        const owner = this.ports.moteDirect
+        if (!owner) throw new AgentMuxError('The original private Mote conversation owner is unavailable.', 'CONTROL_UNAVAILABLE')
+        const input = parseMoteDirectParams(method, params)
+        const result = await owner.call(method, input, { actor, assertCurrent })
+        return parseMoteDirectResult(method, result, input) as unknown as AgentMuxRpcResult<M>
+      }
+      const owner = this.ports.moteGroups
+      if (!owner) throw new AgentMuxError('The original built-in Group owner is unavailable. Saved Group messages and Agents are retained.', 'CONTROL_UNAVAILABLE')
+      const input = parseMoteGroupParams(method, params)
       const result = await owner.call(method, input, { actor, assertCurrent })
       return parseMoteGroupResult(method, result, input) as unknown as AgentMuxRpcResult<M>
     }

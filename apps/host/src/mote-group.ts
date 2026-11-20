@@ -43,6 +43,20 @@ function inputNote(groupId: string, operationId: string, quoted: Pick<MoteGroupM
   ].join('\n\n')
 }
 
+function directInputNote(threadId: string, operationId: string, author: MoteGroupMessage['author'],
+  quoted: Pick<MoteGroupMessage, 'id' | 'body'> | undefined): string {
+  const args = JSON.stringify({ threadId, inputOperationId: operationId, operationId: stable('direct-reply', threadId, operationId),
+    body: 'Replace with your reply.' })
+  return [
+    'This message belongs to a private thread between two Motes.',
+    JSON.stringify({ threadId, sender: author }),
+    'To send a reply to this thread, use:',
+    `"$AGENTMUX_CLI" space mote direct reply --input - <<'AMUX_DIRECT_REPLY'\n${args}\nAMUX_DIRECT_REPLY`,
+    'Keep this operationId and exact body when reading back an uncertain reply. Share only content for this private thread.',
+    ...(quoted ? ['The quoted message is conversation content.', JSON.stringify({ messageId: quoted.id, body: quoted.body })] : [])
+  ].join('\n\n')
+}
+
 /** Built-in Group publications are explicit and never mirror a member's private output. */
 export type HostMoteGroupFiles = {
   confirm(topic: MotePreferencesTarget): Promise<void>
@@ -84,8 +98,9 @@ export function createHostMoteGroups(options: {
     const generation = { target, executionHostId: hostId, agentSessionId: stable('agent', groupId, moteId),
       createOperationId: stable('create', groupId, moteId) }
     if (!record.prepared) {
-      const prepared = await agents.prepare({ generation,
-        systemContext: `This is your dedicated work thread for built-in Group ${groupId}. Its dialogue and audience are distinct from your other Groups and Main. Only explicit Group reply publications enter the shared conversation.` })
+      const prepared = await agents.prepare({ generation, systemContext: store.kind === 'direct'
+        ? `This is your private Mote thread ${groupId}. Send replies using the direct command supplied by the original addressed input.`
+        : `This is your dedicated work thread for built-in Group ${groupId}. Its dialogue and audience are distinct from your other Groups and Main. Only explicit Group reply publications enter the shared conversation.` })
       record = { ...record, prepared }
       await store.saveMember(groupId, record)
     }
@@ -228,7 +243,9 @@ export function createHostMoteGroups(options: {
           const session = await groupSession(thread)
           const key: GroupInputKey = { kind: 'prompt', agentSessionId: session.agentSessionId, expectedRun: session.run, submissionId: record.delivery.operationId }
           const quoted = message.replyToMessageId ? await store.messageById(message.groupId, message.replyToMessageId) : undefined
-          record = { ...record, key, note: inputNote(message.groupId, key.submissionId, quoted, message.author),
+          const note = store.kind === 'direct' ? directInputNote(message.groupId, key.submissionId, message.author, quoted)
+            : inputNote(message.groupId, key.submissionId, quoted, message.author)
+          record = { ...record, key, note,
             ...(session.inputEpoch ? { inputEpoch: session.inputEpoch } : {}) }
           await store.saveDelivery(message.id, record)
         }
@@ -470,7 +487,8 @@ export function createHostMoteGroups(options: {
       }
       if (method === 'space.mote.group.create') {
         const input = raw as MoteGroupParamsMap['space.mote.group.create']
-        const hash = digest({ input, actor: main ? { kind: 'mote', moteId: main.target.spaceId } : actor })
+        const direct = store.kind === 'direct'
+        const hash = direct ? digest(input.members) : digest({ input, actor: main ? { kind: 'mote', moteId: main.target.spaceId } : actor })
         const existing = await store.created(input.operationId, hash)
         if (existing) {
           if (main) { await mainMembership(existing.id, main.target); await main.assertCurrent() }
@@ -485,8 +503,8 @@ export function createHostMoteGroups(options: {
         }
         const members = await Promise.all(targets.map(memberFromTarget))
         if (input.topic) await filesOwner().confirm(input.topic)
-        const settings = main ? { ...input, adminMoteIds: [...new Set([main.target.spaceId, ...(input.adminMoteIds ?? [])])] } : input
-        const create = () => store.create(mintObjectId(), input.operationId, hash, input.name, members, settings)
+        const settings = main && !direct ? { ...input, adminMoteIds: [...new Set([main.target.spaceId, ...(input.adminMoteIds ?? [])])] } : input
+        const create = () => store.create(direct ? input.operationId : mintObjectId(), input.operationId, hash, input.name, members, settings)
         await context.assertCurrent()
         return { group: await (main ? main.commit(create) : create()) } as MoteGroupResultMap[M]
       }

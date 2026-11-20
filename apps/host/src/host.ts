@@ -6,6 +6,7 @@ import { createDesktopStorageRecoverySource } from './desktop-storage-recovery.j
 import { createHostFolderDirectoryOwner } from './folder-directory-owner.js'
 import { createHostFolderSpaceResource } from './folder-space-resource.js'
 import { createHostMoteMainReader, createHostMoteDialogue } from './mote-dialogue.js'
+import { createHostMoteDirect } from './mote-direct.js'
 import { MoteDialogueStore } from '@agentmux/core/mote-dialogue-store'
 import { HostMoteQuickPreferences } from './mote-quick-preferences.js'
 import { createHostMotePresence } from './mote-presence.js'
@@ -202,9 +203,11 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     catalog: async () => { const state = await spatialState.read(); return state ? spatialCatalog(state.graph) : null },
     executors: () => readConfiguredExecutorChoices(configurationPath!),
     ...(motePresence ? { maintenance: motePresence.read, changed: motePresence.invalidate, adoptGuidance: motePresence.adoptGuidance } : {}) }) : undefined
-  const moteGroups = configurationPath && options.store instanceof AgentMuxFileAgentSessionStore ? createHostMoteGroups({
+  const conversationAgents = configurationPath && options.store instanceof AgentMuxFileAgentSessionStore
+    ? createHostMoteChat({ configurationPath, spatial: spatialState, runtime: originalRuntime }).agents : undefined
+  const moteGroups = conversationAgents && options.store instanceof AgentMuxFileAgentSessionStore ? createHostMoteGroups({
     store: new MoteGroupStore(join(dirname(options.store.path), 'mote-groups.sqlite')),
-    agents: createHostMoteChat({ configurationPath, spatial: spatialState, runtime: originalRuntime }).agents,
+    agents: conversationAgents,
     ...(moteMain ? { main: moteMain } : {}),
     ...(content ? { files: content.moteGroupFiles } : {}),
     client: hostId => {
@@ -212,9 +215,20 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
       return originalRuntime().client
     }
   }) : undefined
+  const moteDirect = conversationAgents && moteMain && options.store instanceof AgentMuxFileAgentSessionStore
+    ? createHostMoteDirect(createHostMoteGroups({
+      store: new MoteGroupStore(join(dirname(options.store.path), 'mote-direct.sqlite'), 'direct'),
+      agents: conversationAgents,
+      main: moteMain,
+      client: hostId => {
+        if (hostId !== 'local') throw new AgentMuxError('The original private thread Host is unavailable.', 'CONTROL_UNAVAILABLE')
+        return originalRuntime().client
+      }
+    })) : undefined
   const service = {
     spatialState,
     ...(moteGroups ? { moteGroups } : {}),
+    ...(moteDirect ? { moteDirect } : {}),
     ...(workspaceResources ? { spatialFolderDirectory: createHostFolderDirectoryOwner(workspaceResources,spatialState) } : {}),
     ...(configurationPath ? { spatialFolderResource: createHostFolderSpaceResource(configurationPath,workspaceResources) } : {}),
     hostTailcat: (hostId: string) => hostId === 'local' ? tailcat!.inspect() : undefined,

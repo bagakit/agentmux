@@ -7,7 +7,7 @@ import { AgentMuxError, parseMoteGroupMessage, parseMoteGroupSummary, type MoteG
 import { sameMotePreferencesTarget, type MotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import type { MoteChatPreparedLaunch } from '@agentmux/connectors'
 
-const applicationId = 0x414d4752
+const applicationIds = { group: 0x414d4752, direct: 0x414d444d }
 export type GroupInputKey = { kind: 'prompt'; agentSessionId: string; expectedRun: { runId: string }; submissionId: string }
 export type GroupDeliveryRecord = {
   delivery: MoteGroupDelivery
@@ -40,11 +40,12 @@ type Row = Record<string, SQLInputValue>
 const decode = <T>(value: SQLInputValue | undefined): T => JSON.parse(String(value)) as T
 export const groupFailure = (message: string, code: string): never => { throw new AgentMuxError(message, code) }
 
-/** One public stream, distinct member bindings and private delivery references. No provider output goes here. */
+/** Durable conversation streams, member bindings and addressed delivery references. */
 export class MoteGroupStore {
-  constructor(readonly path: string) {}
+  constructor(readonly path: string, readonly kind: 'group' | 'direct' = 'group') {}
 
   private async open(write: boolean): Promise<DatabaseSync | null> {
+    const applicationId = applicationIds[this.kind]
     let exists = true
     try { await stat(this.path) }
     catch (error) {
@@ -171,7 +172,8 @@ export class MoteGroupStore {
       const now = Date.now()
       const settings = this.applySettings(defaults(), desired, records, operationId, now)
       db.prepare('INSERT INTO group_settings(group_id,data) VALUES (?,?)').run(id, JSON.stringify(settings))
-      for (const record of records) this.writeMember(db, id, this.invited(id, record, operationId, settings.announcement, now))
+      for (const record of records)
+        this.writeMember(db, id, this.kind === 'group' ? this.invited(id, record, operationId, settings.announcement, now) : record)
       return this.group(db, this.originalGroup(db, id))
     })
   }

@@ -1,3 +1,4 @@
+import { isMoteDirectMethod, parseMoteDirectParams, parseMoteDirectResult } from './mote/direct.js'
 import { isMoteGroupMethod, parseMoteGroupParams, parseMoteGroupResult } from './mote/group.js'
 import { parseAgentExecutionBindingObservation } from './public-rpc-agent-execution.js'
 import { parseFileMutationWatchParams, parseFileMutationWatchOpening, parseFileMutationEffect, type FileMutationWatchOpening } from './public-rpc-file-mutations.js'
@@ -191,6 +192,7 @@ async function openRequest(endpoint: AgentMuxRpcEndpoint, request: JSONRPCReques
     closed = true; socket.destroy() } }
 }
 function resultBody(method: AgentMuxRpcMethod, value: unknown, params: unknown, credentials?: AgentMuxRpcCredentials): unknown {
+  if (isMoteDirectMethod(method)) return parseMoteDirectResult(method, value, parseMoteDirectParams(method, params))
   if (isMoteGroupMethod(method)) return parseMoteGroupResult(method, value, parseMoteGroupParams(method, params))
   if (Object.hasOwn(AGENTMUX_RPC_CONTROL_METHODS, method)) {
     return parseRpcControlResult(method as keyof typeof AGENTMUX_RPC_CONTROL_METHODS, value, params)
