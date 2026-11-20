@@ -355,8 +355,12 @@ it('default authenticated A2A saves the original Inbox body by reference without
   const repeated: any = await rpc.call('agent.send', packet, { caller: h.credentials })
   expect(repeated.messageId).toBe(receipt.messageId); expect(repeated.notification.state).toBe('pending')
   expect(h.prepare).not.toHaveBeenCalled(); expect(h.send).not.toHaveBeenCalled(); expect(h.inner.kernel.input).not.toHaveBeenCalled()
-  await expect(rpc.call('agent.send', { ...packet, operationId: 'peer-cannot-authorize-steer', execution: 'immediate' }, { caller: h.credentials })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
-  expect(await queue.readByOperationId('peer-cannot-authorize-steer')).toBeNull()
+  await expect(rpc.call('agent.send', { ...packet, execution: 'immediate' }, { caller: h.credentials }))
+    .rejects.toMatchObject({ code: 'AGENT_PROMPT_OPERATION_CONFLICT' })
+  expect(await queue.readByOperationId(packet.operationId)).toMatchObject({
+    deliveryMode: 'reference', envelope: { messageId: receipt.messageId, body: packet.text }
+  })
+  expect(h.inner.kernel.input).not.toHaveBeenCalled()
 })
 
 it.each(['no-source', 'source-unknown', 'source-ambiguous', 'changed-source', 'observed-other-source'] as const)('keeps default user terminal capability when its native target is unqualified: %s', async missing => {
@@ -438,7 +442,10 @@ it.each(['completion', 'future'] as const)('directs an automatic %s prompt to th
   if (kind === 'future') expect(await h.client.readAgentFuturePromptIntent('recipient', future.intentId)).toMatchObject({
     lastOccurrenceAt: future.occurrenceAt, lastOperationId: request.operationId })
   const repeated = { ...request, ...agentPromptCondition(h.client.agentSession('recipient')), operationId: request.operationId + '-duplicate' }
-  await expect(h.client.submitAgentPrompt(repeated)).rejects.toMatchObject({ code: kind === 'future' ? 'AGENT_FUTURE_INTENT_CHANGED' : 'AGENT_COMPLETION_CHANGED' })
+  await expect(h.client.submitAgentPrompt(repeated)).rejects.toMatchObject(kind === 'future'
+    ? { code: 'AGENT_PROMPT_PREPARATION_FAILED', detail: expect.stringContaining('"code":"AGENT_FUTURE_INTENT_CHANGED"'),
+      controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } }
+    : { code: 'AGENT_COMPLETION_CHANGED' })
   expect(h.send).toHaveBeenCalledTimes(1); expect(h.inner.kernel.input).not.toHaveBeenCalled()
 })
 
@@ -596,7 +603,9 @@ it('compiled default agent send uses the same original native claim and retries 
   expect(claim?.admission).toMatchObject({ transport: 'native', native: { outcome: 'admitted' }, intent: { admissionIntent: { kind: 'exact-condition', condition: { afterSubmissionId: null } } } })
   expect(h.send).toHaveBeenCalledTimes(1); expect(h.inner.kernel.input).not.toHaveBeenCalled()
   const help = await runCompiledObjectCli(['agent', 'send', '--help'], env)
-  expect(help.code).toBe(0); expect(help.stdout).toContain('Core notifies by reference at idle'); expect(help.stdout).toContain('Trusted user current-terminal immediate input')
+  expect(help.code).toBe(0)
+  expect(help.stdout).toContain('--execution default|immediate')
+  expect(help.stdout).toContain('notification.automatic')
 })
 
 
