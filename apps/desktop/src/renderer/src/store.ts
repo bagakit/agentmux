@@ -1,3 +1,4 @@
+import { recallIntentKey, restoreRecallCardIntents, type RecallCardIntent, type RecallCardIntents } from './lib/recall-card-intent'
 import { sourceFilesQuery, sourceFilesMappingMatches } from '../../shared/source-files'
 import { topicFileDirectory, topicFilesTarget } from './lib/topic-files-address'
 import { dequal } from 'dequal'
@@ -1308,6 +1309,7 @@ export type AppState = GitReadingActions & {
   connectorRoomIntents: Record<string, ConnectorRoomIntent>
   connectorRoomDrafts: Record<string, ConnectorRoomDraft>
   continuityControlIntents: ContinuityControlIntents
+  recallCardIntents: RecallCardIntents
   conversationLandmarkIntents: ConversationLandmarkIntents
   connectorServiceIntents: Record<string, ConnectorServiceIntent>
   mailboxNotificationIntents: MailboxNotificationIntents
@@ -4372,6 +4374,7 @@ type PersistedAppState = {
   connectorRoomIntents?: Record<string, ConnectorRoomIntent>
   connectorRoomDrafts?: Record<string, ConnectorRoomDraft>
   continuityControlIntents?: ContinuityControlIntents
+  recallCardIntents?: RecallCardIntents
   conversationLandmarkIntents?: ConversationLandmarkIntents
   connectorServiceIntents?: Record<string, ConnectorServiceIntent>
   mailboxNotificationIntents?: MailboxNotificationIntents
@@ -4707,6 +4710,7 @@ function workbenchSaveSources(state: AppState) {
     connectorRoomIntents: state.connectorRoomIntents,
     connectorRoomDrafts: state.connectorRoomDrafts,
     continuityControlIntents: state.continuityControlIntents,
+    recallCardIntents: state.recallCardIntents,
     conversationLandmarkIntents: state.conversationLandmarkIntents,
     connectorServiceIntents: state.connectorServiceIntents,
     mailboxNotificationIntents: state.mailboxNotificationIntents,
@@ -5479,6 +5483,23 @@ export async function retainBrowserAgentIntent(requestId: string, expected: NonN
   const saved = await saveWorkbenchSelection(false)
   if (!saved.clientStateWritten) throw new Error('The Browser Agent intent could not be saved. No further handoff or input was dispatched.')
 }
+/** Pending capture metadata shares the workbench writer with other durable user intents. */
+export async function persistRecallCardIntent(input: RecallCardIntent, settled = false): Promise<void> {
+  const key = recallIntentKey(input.card)
+  useAppStore.setState(state => {
+    const old = state.recallCardIntents[key]
+    if (old && old.operationId !== input.operationId) return state
+    const next = { ...state.recallCardIntents }
+    if (settled) delete next[key]
+    else next[key] = input
+    return { recallCardIntents: next }
+  })
+  const saved = await saveWorkbenchSelection(false)
+  if (!settled && (useAppStore.getState().recallCardIntents[key]?.operationId !== input.operationId || saved.diskDurability !== 'confirmed')) {
+    throw new Error('Recall could not durably retain this save request. Your original Note and reading point are kept.')
+  }
+}
+
 /** Retain one unresolved exact reading-point input in the existing workbench draft writer. */
 export async function retainConversationLandmarkIntent(input: ConversationLandmarkWrite): Promise<AgentMuxSpatialSave> {
   const parsed = parseConversationLandmarkWrite(input), key = conversationLandmarkIntentKey(parsed)
@@ -6648,6 +6669,7 @@ export const useAppStore = create<AppState>()<[['zustand/persist', PersistedAppS
   connectorRoomIntents: {},
   connectorRoomDrafts: {},
   continuityControlIntents: {},
+  recallCardIntents: {},
   conversationLandmarkIntents: {},
   connectorServiceIntents: {},
   mailboxNotificationIntents: {},
@@ -15030,7 +15052,7 @@ export const useAppStore = create<AppState>()<[['zustand/persist', PersistedAppS
       ? current.config!.appearance.spaceObjectIcons : retainedSpaceIconHandoff)
     state.botTaskSelections = restoredBotTaskSelections(state.botTaskSelections)
     const surveyPages = readSurveyPagePreferences(state.surveyPageReferences)
-    return { ...state, moteMainCreationReferences: restoredMoteMainCreationReferences(state.moteMainCreationReferences), agentLearningReviewDrafts: restoredLearningReviewDrafts(state.agentLearningReviewDrafts), manualConnectionIntents: restoredManualConnectionIntents(state.manualConnectionIntents), manualConnectionSelections: restoredManualConnectionSelections(state.manualConnectionSelections), workspaceAgentOrder: restoreWorkspaceAgentOrder(state.workspaceAgentOrder), moteBotRequests: restoredMoteBotRequests(state.moteBotRequests), connectorRoomIntents: restoredConnectorRoomIntents(state.connectorRoomIntents), connectorRoomDrafts: restoredConnectorRoomDrafts(state.connectorRoomDrafts), connectorServiceIntents: restoredConnectorServiceIntents(state.connectorServiceIntents), mailboxNotificationIntents: restoredMailboxNotificationIntents(state.mailboxNotificationIntents), mailboxNotificationFeedback: current.mailboxNotificationFeedback, mailboxNotificationHistory: current.mailboxNotificationHistory, moteConnectionSaveIntents: restoredMoteConnectionSaveIntents(state.moteConnectionSaveIntents), moteChatIntents: restoredMoteChatIntents(state.moteChatIntents), noteCanvasLayouts: restoreNoteCanvasLayouts(state.noteCanvasLayouts), recentMoteAgents: restoredRecentMoteAgents(state.recentMoteAgents), questionReplies: restoredQuestionReplies(state.questionReplies), capsuleQuestionEditors: restoredCapsuleQuestionEditors(state.capsuleQuestionEditors), goalAgentSelectionDrafts: restoredGoalAgentSelectionDrafts(state.goalAgentSelectionDrafts), goalAgentCreationDrafts: restoredGoalAgentCreationDrafts(state.goalAgentCreationDrafts), goalFiniteStartIntents: restoredGoalFiniteStartIntents(state.goalFiniteStartIntents), agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
+    return { ...state, recallCardIntents: restoreRecallCardIntents(state.recallCardIntents), moteMainCreationReferences: restoredMoteMainCreationReferences(state.moteMainCreationReferences), agentLearningReviewDrafts: restoredLearningReviewDrafts(state.agentLearningReviewDrafts), manualConnectionIntents: restoredManualConnectionIntents(state.manualConnectionIntents), manualConnectionSelections: restoredManualConnectionSelections(state.manualConnectionSelections), workspaceAgentOrder: restoreWorkspaceAgentOrder(state.workspaceAgentOrder), moteBotRequests: restoredMoteBotRequests(state.moteBotRequests), connectorRoomIntents: restoredConnectorRoomIntents(state.connectorRoomIntents), connectorRoomDrafts: restoredConnectorRoomDrafts(state.connectorRoomDrafts), connectorServiceIntents: restoredConnectorServiceIntents(state.connectorServiceIntents), mailboxNotificationIntents: restoredMailboxNotificationIntents(state.mailboxNotificationIntents), mailboxNotificationFeedback: current.mailboxNotificationFeedback, mailboxNotificationHistory: current.mailboxNotificationHistory, moteConnectionSaveIntents: restoredMoteConnectionSaveIntents(state.moteConnectionSaveIntents), moteChatIntents: restoredMoteChatIntents(state.moteChatIntents), noteCanvasLayouts: restoreNoteCanvasLayouts(state.noteCanvasLayouts), recentMoteAgents: restoredRecentMoteAgents(state.recentMoteAgents), questionReplies: restoredQuestionReplies(state.questionReplies), capsuleQuestionEditors: restoredCapsuleQuestionEditors(state.capsuleQuestionEditors), goalAgentSelectionDrafts: restoredGoalAgentSelectionDrafts(state.goalAgentSelectionDrafts), goalAgentCreationDrafts: restoredGoalAgentCreationDrafts(state.goalAgentCreationDrafts), goalFiniteStartIntents: restoredGoalFiniteStartIntents(state.goalFiniteStartIntents), agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
       agentComposerHistoryNavigation: {}, ...restoreSurveyPinPreferences(restoredPinnedItems(state.pinnedItems), state.pinnedItems), surveyProfileView: readSurveyProfileView(state.surveyProfileView).view, surveyProfileViewReadRecovery: readSurveyProfileView(state.surveyProfileView).recovery, surveyPageReferences: surveyPages.references, surveyPageAddedAt: surveyPageTimes(state.surveyPageAddedAt, surveyPages.references), surveyPageReadRecovery: surveyPages.recovery, surveyOrganization: restoreSurveyOrganization(state.surveyOrganization), surveyZoneSelection: restoredSurveySelection(state.surveyZoneSelection), recallZoneSelection: restoredSurveyZoneSelection(state.recallZoneSelection) }
   },
   partialize: partializeAppState

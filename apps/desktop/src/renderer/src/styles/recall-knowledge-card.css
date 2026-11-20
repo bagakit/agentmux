@@ -1,0 +1,24 @@
+.recall-knowledge-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  font-size: 12px;
+}
+.recall-knowledge-card > svg { margin-top: 3px; }
+.recall-knowledge-card__body { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
+.recall-knowledge-card__kind { color: var(--text-3); font-size: 11px; }
+.recall-knowledge-card__actions { display: flex; flex-wrap: wrap; gap: 4px; }
+.recall-knowledge-card__actions button { max-width: 100%; height: auto; white-space: normal; text-align: start; }
+.recall-knowledge-cards { display: grid; gap: 6px; }
+.recall-knowledge-cards > h2 { margin: 0; font-size: 12px; }
+.recall-card-capture { grid-column: 1 / -1; }
+.recall-card-capture summary { cursor: pointer; width: fit-content; color: var(--text-3); }
+.conversation-landmark .recall-card-capture form { display: grid; gap: 7px; padding-block: 5px; }
+.recall-card-capture select { max-width: 100%; min-width: 0; }
+
+.conversation-landmark__row:has(> .recall-card-capture) { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; }
+.conversation-landmark__row > form { grid-column: 1 / -1; }

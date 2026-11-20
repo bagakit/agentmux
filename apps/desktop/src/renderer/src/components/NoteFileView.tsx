@@ -1,3 +1,6 @@
+import { recallCardBlocks } from '@agentmux/core/notebook-observation'
+import { openRecallCardRecord } from '../lib/recall-card-capture'
+import { RecallCardLink, RecallKnowledgeCard } from './RecallKnowledgeCard'
 import { presentKnowledgeSurface } from '../lib/knowledge-surface-navigation'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { NoteFileContext, NoteFileLinkContext, useNoteFileResource } from '@agentmux/client-ui/components/NoteFileContext'
@@ -151,8 +154,15 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
     (link, target) => link.referenceId ? handle?.bindLink(link, target) ?? false : true,
     sourceIdentity, onOpenOriginal)
   const hasLinkedReferences = registered || read.status === 'valid' && read.note.kind === 'shared-block' && Boolean(resource)
-  const footer = hasLinkedReferences || sourceCoverage ? <footer className="note-reading-footer" aria-label="Note references and sources">
+  const cards = useMemo(() => read.status === 'valid' ? recallCardBlocks(read.note.content) : [], [read])
+  const footer = hasLinkedReferences || sourceCoverage || cards.length ? <footer className="note-reading-footer" aria-label="Note references and sources">
     {read.status === 'valid' && hasLinkedReferences ? <NoteLinksPanel noteId={read.note.noteId} active={presentation.active} onOpen={openLinkedPage} onOpenFile={onOpenOriginal} selectedBlockId={restoredBlock?.blockId} /> : null}
+    {cards.length ? <section className="recall-knowledge-cards" aria-label="Knowledge cards">
+      <h2>Knowledge cards</h2>
+      {cards.map(({ blockId, card }) => <RecallKnowledgeCard key={blockId} title={card.title} actions={
+        <RecallCardLink onOpen={() => { void openRecallCardRecord(card).catch(error => setIssue(presentError(error))) }}>Open original message</RecallCardLink>
+      } />)}
+    </section> : null}
     {sourceCoverage}
   </footer> : null
   if (read.status === 'invalid') return <div className="note-file-view"><div className="note-invalid" role="status"><strong>Note source needs attention</strong>

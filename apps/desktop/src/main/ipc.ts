@@ -1365,6 +1365,7 @@ export async function registerIpc(args: {
     return parseFileShareInspectResult(await publicFiles.inspectShare(params, { actor: { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'local') } }), params)
   })
   handleWithEvent('files:importPublic', async (event, input: import('@agentmux/core/files').FileImportParams) => { return publicFiles.import(input) })
+  handleWithEvent('files:writePublic', async (_event, input: import('@agentmux/core/files').FileWriteParams) => publicFiles.write(input, { actor: { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'local') } }))
   handleWithEvent('files:createPublic', async (event, input: import('@agentmux/core').FileCreateParams) => { return publicFiles.create(input, { actor: { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'local') } }) })
   handleWithEvent('files:readPublic', async (event, input: import('@agentmux/core').FileReadParams) => {
     return await publicFiles.read(input)

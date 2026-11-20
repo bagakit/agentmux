@@ -1,3 +1,5 @@
+import { ConversationRecallCard } from './ConversationRecallCard'
+import type { NotebookGraphSnapshot } from '../../../shared/notebook-observation'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -88,8 +90,8 @@ function useLandmarks(reference: ConversationRef, active: boolean, retainedKey?:
   return { page, intent, busy, issue, confirmed, conflict, beginNewConfirmedIntent, restoreRetained, adopt: setPage, refresh: () => run(async () => { await load(intent?.operationId) }), apply, check, refreshAfterConflict }
 }
 
-function LandmarkPopover({ title, trigger, active, onOpen, children }: {
-  title: string; trigger: ReactNode; active: boolean; onOpen?: () => void; children: ReactNode
+function LandmarkPopover({ title, trigger, active, onOpen, onClose, children }: {
+  title: string; trigger: ReactNode; active: boolean; onOpen?: () => void; onClose?: () => void; children: ReactNode
 }) {
   const [open, setOpen] = useState(false), [anchor, setAnchor] = useState<HTMLButtonElement | null>(null), [content, setContent] = useState<HTMLDivElement | null>(null)
   const focusPending = useRef(false)
@@ -104,7 +106,7 @@ function LandmarkPopover({ title, trigger, active, onOpen, children }: {
     const release = autoUpdate(anchor, content, () => { void update() })
     return () => { current = false; release() }
   }, [open, active, anchor, content])
-  return <Dialog.Root modal={false} open={open && active} onOpenChange={next => { focusPending.current = next; setOpen(next); if (next) onOpen?.() }}>
+  return <Dialog.Root modal={false} open={open && active} onOpenChange={next => { focusPending.current = next; setOpen(next); if (next) onOpen?.(); else onClose?.() }}>
     <Dialog.Trigger asChild><button ref={setAnchor} type="button" className="conversation-landmark__trigger" aria-label={title} title={title}>{trigger}</button></Dialog.Trigger>
     <DocumentOverlayPortal component={Dialog.Portal}><Dialog.Content ref={setContent} className="conversation-landmark" style={{ visibility: 'hidden' }} aria-describedby={undefined} onOpenAutoFocus={event => event.preventDefault()}>
       <header><Dialog.Title>{title}</Dialog.Title><Dialog.Close type="button" className="icon-button" aria-label={`Close ${title}`}><CloseIcon size={13}/></Dialog.Close></header>
@@ -125,6 +127,7 @@ function SaveConversationLandmarkInner({ reference, routeHostId, active = true }
   const newKey = conversationLandmarkRecordKey(reference, routeHostId), oldKey = conversationLandmarkRecordKey(reference), old = retainedInput(oldKey)
   const key = retainedInput(newKey) ? newKey : old?.hostId === catalog.hostId && old.agentSessionId === catalog.agentSessionId ? oldKey : newKey
   const state = useLandmarks(catalog, active, key), field = useId(), [name, setName] = useState(() => { const input = retainedInput(key); return input?.change.kind === 'create' ? input.change.point.name : '' }), pointId = useRef<string | null>(null)
+  const savedPoint = state.confirmed ? state.page?.points.find(point => point.id === pointId.current) : undefined
   return <LandmarkPopover title="Name reading point" trigger={<BookmarkIcon size={12}/>} active={active} onOpen={() => { const retained = state.restoreRetained(); if (retained?.change.kind === 'create') { setName(retained.change.point.name); pointId.current = retained.change.point.id } else if (state.beginNewConfirmedIntent()) { setName(''); pointId.current = null } }}>
     <form onSubmit={event => { event.preventDefault(); if (!name.trim() || state.intent || state.confirmed) return; pointId.current ??= mintObjectId(); void state.apply({ kind: 'create', point: { id: pointId.current, name, reference, ...(routeHostId ? { routeHostId } : {}) } }) }}
       onKeyDown={event => { if (event.key === 'Enter' && isImeOwnedKeyboardEvent(event)) event.preventDefault() }}>
@@ -133,12 +136,34 @@ function SaveConversationLandmarkInner({ reference, routeHostId, active = true }
       <Pending state={state}/>
       {state.confirmed ? <p role="status">Saved. Return from Reading points.</p> : <Button type="submit" disabled={state.busy || !!state.intent || !name.trim()}>{state.busy ? 'Saving…' : 'Save reading point'}</Button>}
     </form>
+    {savedPoint ? <ConversationRecallCard card={{ id: savedPoint.id, title: savedPoint.name, reference: savedPoint.reference, routeHostId: savedPoint.routeHostId ?? catalog.hostId }} observed={null} /> : null}
   </LandmarkPopover>
 }
 export const renderConversationLandmarkAction = (reference: ConversationItemRef, active: boolean, routeHostId?: string) => <SaveConversationLandmark key={JSON.stringify([routeHostId,reference])} reference={reference} routeHostId={routeHostId} active={active}/>
 
 function ConversationLandmarkListInner({ reference, reveal, active }: { reference: ConversationRef; reveal: RevealConversationItem; active: boolean }) {
   const state = useLandmarks(reference, active), [edit, setEdit] = useState<{ id: string; name: string } | null>(null), [navigation, setNavigation] = useState<string | null>(null)
+  const [graph, setGraph] = useState<NotebookGraphSnapshot | null>(null), [graphIssue, setGraphIssue] = useState<string | null>(null)
+  const [open, setOpen] = useState(false)
+  useEffect(() => { if (!active) setOpen(false) }, [active])
+  const graphRead = useRef<AbortController | null>(null)
+  const hasPoints = Boolean(state.page?.points.length)
+  useEffect(() => {
+    if (open && active && hasPoints) refreshCardLinks()
+    return () => graphRead.current?.abort()
+  }, [open, active, hasPoints])
+  function refreshCardLinks() {
+    graphRead.current?.abort()
+    const read = new AbortController()
+    graphRead.current = read
+    setGraphIssue(null)
+    void api.notebooks.graph({}, { signal: read.signal }).then(next => {
+      if (!read.signal.aborted) {
+        setGraph(next)
+        if (next.graph.completeness !== 'complete') setGraphIssue('Some Note connections could not be checked.')
+      }
+    }).catch(() => { if (!read.signal.aborted) setGraphIssue('Recall connections are unavailable. Reading points remain available.') })
+  }
   const request = useRef(0), source = JSON.stringify([reference.hostId, reference.agentSessionId, active]), currentSource = useRef(source); currentSource.current = source
   useEffect(() => () => { request.current++ }, [source])
   useEffect(() => { if (state.confirmed) setEdit(null) }, [state.confirmed])
@@ -151,7 +176,7 @@ function ConversationLandmarkListInner({ reference, reveal, active }: { referenc
     else if (result.kind === 'unavailable') setNavigation(result.message)
     else setNavigation('Navigation cancelled by your later reading intent. The point is kept.')
   }
-  return <LandmarkPopover title="Reading points" trigger={<><BookmarkIcon size={11}/><span>Reading points</span></>} active={active} onOpen={() => { void state.refresh() }}>
+  return <LandmarkPopover title="Reading points" trigger={<><BookmarkIcon size={11}/><span>Reading points</span></>} active={active} onOpen={() => { setOpen(true); void state.refresh() }} onClose={() => setOpen(false)}>
     <div className="conversation-landmark__list">
       {!state.page && !state.issue ? <p role="status">{state.busy ? 'Reading saved points…' : 'Open the list to read saved points.'}</p> : null}
       {state.page?.points.length === 0 ? <p>No named points in this conversation.</p> : null}
@@ -163,7 +188,9 @@ function ConversationLandmarkListInner({ reference, reveal, active }: { referenc
         </form> : <><button type="button" className="conversation-landmark__destination" title={point.name} onClick={() => { void openPoint(point) }}><span>{point.name}</span><small>{point.reference.source.kind === 'native' ? `${point.reference.source.providerId} · Native` : 'Captured'}</small></button>
           <button type="button" className="icon-button" aria-label={`Rename ${point.name}`} disabled={state.busy || !!state.intent} onClick={() => setEdit({ id: point.id, name: point.name })}><EditIcon size={12}/></button>
           <button type="button" className="icon-button" aria-label={`Remove ${point.name}`} disabled={state.busy || !!state.intent} onClick={() => { void state.apply({ kind: 'remove', id: point.id }) }}><RemoveIcon size={12}/></button></>}
+      <ConversationRecallCard card={{ id: point.id, title: point.name, reference: point.reference, routeHostId: point.routeHostId ?? reference.hostId }} observed={graph} onSaved={refreshCardLinks}/>
       </div>)}
+      {graphIssue && state.page?.points.length ? <p role="status">{graphIssue}</p> : null}
     </div>
     <Pending state={state}/><RetainedLandmarkIntents reference={reference} active={active} onAccepted={state.adopt} excludeOperationId={state.intent?.operationId}/>{navigation ? <p role="status">{navigation}</p> : null}
     <footer><Button type="button" disabled={state.busy} onClick={() => { void state.refresh() }}>Refresh points</Button><span>Original record references</span></footer>
