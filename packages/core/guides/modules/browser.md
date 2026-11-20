@@ -229,7 +229,8 @@ Read only the matching local help:
   `mobile`, `tablet`, `desktop` and custom width/height set layout dimensions. Use
   `setViewport({width:844,height:390,screenPosition:'mobile',device:'phone'})` in a Page Program for
   a landscape phone layout. `pageInfo()` reads the original applied state, and `tap(ref)` sends
-  native touch input where the original target advertises it. `responsive` follows the pane
+  native touch input where the original target advertises it. If `browser targets` reports
+  unconfirmed touch, reapply the viewport from `pageInfo()` to the same page. `responsive` follows the pane
   and restores its original touch and pixel density. User agent, real hardware and OS identity
   are unchanged. Human control and Stop remain authoritative. Keep unknown operation IDs
   and inspect rather than replay. Screenshot sampling is separate: `browser capture --pixel-ratio 2`.
