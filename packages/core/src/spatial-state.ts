@@ -731,24 +731,26 @@ export class AgentMuxSpatialStateStore {
     });
   }
   /** Host-owned metadata and an exact producer-confirmed Agent attachment share one transaction.
-   * The caller verifies its original creation receipt; this transaction never creates one. */
-  async commitOwnedResource(input: { key: string; expectedRevision: number; value: SpatialJson;
-    agentRegion?: AgentRegionAttachment;
-  }): Promise<{
+   * An in-process owner can assert its exact dependencies under the write lock. */
+  async commitOwnedResource(input: { key: string; value: SpatialJson; agentRegion?: AgentRegionAttachment } & (
+    { expectedRevision: number; assertCurrent?: never } |
+    { expectedRevision?: never; assertCurrent: (graph: Readonly<AgentMuxSpatialGraph>) => void | Promise<void> }
+  )): Promise<{
     state: AgentMuxSpatialState; key: string; diskDurability: 'confirmed';
   }> {
-    const { key, expectedRevision } = input;
+    const { key, expectedRevision, assertCurrent } = input;
     if (typeof key !== 'string' || !key.startsWith('owned:') || key.length === 'owned:'.length || key.includes('\0'))
       invalid('An exact owned resource key with a nonempty stable suffix is required.');
-    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0)
+    if (assertCurrent === undefined && (typeof expectedRevision !== 'number' || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0))
       invalid('An exact nonnegative expected revision is required.');
     const value = structuredClone(input.value), agentRegion = input.agentRegion === undefined ? undefined : structuredClone(input.agentRegion);
     if (agentRegion !== undefined && (!agentRegion || typeof agentRegion.agentSessionId !== 'string' || typeof agentRegion.runId !== 'string' || !agentRegion.execution))
       invalid('An exact Agent Session, Run and execution location are required.');
     return this.locked(async () => {
       const current = await this.requiredState();
-      if (current.revision !== expectedRevision)
+      if (expectedRevision !== undefined && current.revision !== expectedRevision)
         throw new AgentMuxError('Spatial state changed. Read the current revision and preserve both edits before retrying.', 'SPATIAL_STATE_CONFLICT');
+      if (assertCurrent) await assertCurrent(current.graph);
       const graph = structuredClone(current.graph);
       const placement = agentRegion && placeAgentRegion(graph, agentRegion);
       if (placement === 'absent' || placement === 'conflict') throw new AgentMuxError(REGION_CHANGED, 'SPATIAL_RESOURCE_TARGET_CONFLICT');

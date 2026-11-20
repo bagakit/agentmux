@@ -85,12 +85,16 @@ export async function contributeGoalDiscussionBinding(input: {
   goalId: string
   binding: GoalDiscussionBinding
 }): Promise<GoalDiscussionBindingReceipt> {
-  const binding = parseGoalDiscussionBinding(input.binding), state = await input.spatial.read()
-  if (!state) return unconfirmed('The original Core spatial document is unavailable.')
-  resolveGoalDiscussionBinding(state.graph, binding)
-  const original = readGoalDiscussionBinding(state.graph, input.goalId)
-  if (original && JSON.stringify(original) !== JSON.stringify(binding)) return unconfirmed('This Goal already retains a different original discussion binding.')
-  return input.spatial.commitOwnedResource({ key: goalDiscussionBindingKey(input.goalId), expectedRevision: state.revision, value: binding as unknown as SpatialJson })
+  const binding = parseGoalDiscussionBinding(input.binding)
+  return input.spatial.commitOwnedResource({
+    key: goalDiscussionBindingKey(input.goalId),
+    value: binding as unknown as SpatialJson,
+    assertCurrent: graph => {
+      resolveGoalDiscussionBinding(graph, binding)
+      const original = readGoalDiscussionBinding(graph, input.goalId)
+      if (original && JSON.stringify(original) !== JSON.stringify(binding)) unconfirmed('This Goal already retains a different original discussion binding.')
+    }
+  })
 }
 
 /** A derived lookup for the trusted original Launcher producer, not a new binding owner. */
