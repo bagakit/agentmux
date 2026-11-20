@@ -756,16 +756,19 @@ export class DurableIngressHost implements ConnectionIngressPort {
   private async prepareInputOnlyRecipient(record: ConnectionIngressMessage, client: DurableIngressCore,
     session: NonNullable<Awaited<ReturnType<DurableIngressCore['readAgentSession']>>>) {
     const operationId = 'mote-input-recovery-' + createHash('sha256').update(record.ingressId).digest('hex')
-    const prior = session.continuityOperations?.[operationId]
-    if (!prior && client.runtimeSubject) {
+    const prior = session.continuityOperations?.[operationId], previousRun = prior?.previousRun.runId
+    // Before the input claim, a confirmed semantic resume can satisfy this receipt’s original target.
+    const resumedByAnother = previousRun !== undefined && previousRun !== session.run.runId &&
+      sessionSemanticResumeSourceRuns(session).includes(previousRun)
+    if ((!prior || resumedByAnother) && client.runtimeSubject) {
       try {
         const subject = await client.runtimeSubject({ kind: 'terminal-run', runId: session.run.runId })
         if (subject.run.runId !== session.run.runId || subject.run.workspacePath !== session.workspacePath) fail('INGRESS_TARGET_UNCONFIRMED')
         if (subject.run.state === 'running') return session
       } catch (error) {
         if (error instanceof AgentMuxError && ['INGRESS_TARGET_UNCONFIRMED', 'RUNTIME_OWNER_MISMATCH', 'CONTROL_PERMISSION_DENIED'].includes(error.code)) throw error
-        // An observation gap is no evidence of a dead Run. The original Core input remains usable.
-        if (!(error instanceof AgentMuxError && error.code === 'CTXMUX_run_not_found')) return session
+        // Without an earlier recovery to settle, an observation gap does not imply a dead Run.
+        if (!prior && !(error instanceof AgentMuxError && error.code === 'CTXMUX_run_not_found')) return session
       }
     } else if (!prior && !client.runtimeSubject) return session
     this.authorize(record)
