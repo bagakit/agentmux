@@ -65,7 +65,7 @@ test.each(['writer', 'prepare'] as const)('the real Source %s failure has compac
   expect(creation()?.closest('details')?.open).toBe(false)
   expect(dom.container.querySelector('.source-launch-feedback__status')?.textContent).toContain('Launch not confirmed')
   expect(f.calls).toHaveLength(0)
-  await act(async () => button('Check original task').click())
+  await act(async () => button('Check original status').click())
   await vi.waitFor(() => expect(dom.container.querySelector('[aria-label="Source observation issues"]')?.textContent).toContain('Latest Source observation'))
   expect(creation()?.textContent).toContain(code)
   expect(f.calls.filter(call => call.method === 'space.inspect')).toEqual([expect.objectContaining({ params: { target: { operationId: f.input.request.operationId } },
@@ -82,12 +82,12 @@ test.each(['writer', 'prepare'] as const)('the real Source %s failure has compac
 test('a newer observer failure leaves the original creation cause and request intact', async () => {
   const f = await fixture()
   f.source.client.inspectAgentCreation.mockRejectedValueOnce(new AgentMuxError('The current observer cannot read this target.', 'HOST_ROUTE_AUTHORIZATION_REQUIRED'))
-  await act(async () => button('Check original task').click())
+  await act(async () => button('Check original status').click())
   await vi.waitFor(() => expect(dom.container.querySelector('[aria-label="Source observation issues"]')?.textContent).toContain('HOST_ROUTE_AUTHORIZATION_REQUIRED'))
   expect(creation()?.textContent).toContain('EXECUTION_OWNER_UNAVAILABLE')
   expect(creation()?.textContent).not.toContain('HOST_ROUTE_AUTHORIZATION_REQUIRED')
   f.delivery.failure = Error('Transport observation failed')
-  await act(async () => button('Check original task').click())
+  await act(async () => button('Check original status').click())
   await vi.waitFor(() => expect(dom.container.textContent).toContain('Transport observation failed'))
   expect(creation()?.textContent).toContain('already has a writer')
   expect(f.source.create).not.toHaveBeenCalled(); expect(f.source.bindings.continueOriginal).toHaveBeenCalledTimes(1); expect(f.onContinue).not.toHaveBeenCalled()
@@ -97,7 +97,7 @@ test('the Source keeps a prior preparation cause readable after the Launcher los
   const f = await fixture('prepare', true, true), clipboard = await clipboardConsumer()
   const { receipt: _receipt, ...input } = f.input
   await f.render(input)
-  await act(async () => button('Check original task').click())
+  await act(async () => button('Check original status').click())
   const details = () => dom.container.querySelector('[aria-label="Last recorded creation failure"]')
   await vi.waitFor(() => expect(details()?.textContent).toContain('EXECUTION_HELPER_UNAVAILABLE'))
   expect(details()?.closest('details')?.open).toBe(false)
@@ -121,7 +121,7 @@ test.each(['operation', 'session', 'runtime'] as const)('a foreign %s report can
   if (kind === 'session') report.execution!.reference.agentSessionId = 'other-session'
   if (kind === 'runtime') report.execution!.coordinatorRuntimeId = 'other-runtime'
   f.delivery.override = { request: { known: true, operationId: f.input.request.operationId, report } }
-  await act(async () => button('Check original task').click())
+  await act(async () => button('Check original status').click())
   await vi.waitFor(() => expect(dom.container.textContent).toContain(kind === 'operation' ? 'The Source has not confirmed this original request.' : 'The observation belongs to another original request.'))
   expect(dom.container.textContent).not.toContain('FOREIGN_CREATION')
   expect(creation()?.textContent).toContain('EXECUTION_OWNER_UNAVAILABLE')
@@ -133,7 +133,7 @@ test.each(['operation', 'session', 'runtime'] as const)('a foreign %s report can
 test('a reply from an earlier request cannot populate a changed Source or erase later private input', async () => {
   const f = await fixture(); let release!: () => void
   f.delivery.wait = new Promise<void>(resolve => { release = resolve })
-  await act(async () => button('Check original task').click())
+  await act(async () => button('Check original status').click())
   await vi.waitFor(() => expect(f.calls.filter(call => call.method === 'space.inspect')).toHaveLength(1))
   const { receipt: _receipt, ...original } = f.input
   const next: MountedAgentOpenInput = { ...original, target: { ...f.input.target, hostId: 'different-original-source' },
@@ -154,7 +154,7 @@ test.each(['confirmed', 'retired'] as const)('an original %s Agent is not presen
   const f = await fixture('prepare')
   await f.source.create(f.source.frozen()!.agent)
   if (kind === 'retired') f.source.retire()
-  await act(async () => button('Check original task').click())
+  await act(async () => button('Check original status').click())
   await vi.waitFor(() => expect(dom.container.textContent).toContain(kind === 'retired' ? 'Agent retired' : 'Agent created'))
   expect(creation()?.textContent).toContain('Earlier creation')
   expect(creation()?.textContent).toContain('EXECUTION_HELPER_UNAVAILABLE')

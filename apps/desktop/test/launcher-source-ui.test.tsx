@@ -246,7 +246,11 @@ it('real ordinary Launcher uses selected D declarations and the complete Source 
   expect(f.checkpoint).toHaveBeenCalledOnce(); expect(f.localLaunch).not.toHaveBeenCalled()
   expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts)
   expect(useAppStore.getState().agentComposerDrafts['original-slot']).toBe('  original task\n')
-  await act(async () => button('Check original task').click())
+  const status = dom.container.querySelector('[aria-label="Original launch status"]')!
+  expect(status.querySelector('.source-launch-feedback__actions button')?.textContent).toBe('Check original status')
+  expect(status.textContent).toContain('Continuing can send the saved original input.')
+  expect(button('Launch new task').disabled).toBe(true)
+  await act(async () => button('Check original status').click())
   await vi.waitFor(() => expect(f.methods.some(call => call.method === 'space.inspect')).toBe(true)); expect(f.opens).toHaveLength(1)
   f.unsupported()
   await act(async () => dom.container.querySelector<HTMLButtonElement>('[aria-label="Refresh agents on this device"]')!.click())
@@ -352,7 +356,7 @@ it('a failed original private checkpoint retains the complete unsent Source requ
   const original = mountedAgentOpenInput(useAppStore.getState().mountedSpaceInputs, key)!
   expect(original.issue).toContain('not sent')
   expect(original.submitted).toBe(false); expect(f.opens).toHaveLength(0)
-  await act(async () => button('Check original task').click())
+  await act(async () => button('Check original status').click())
   expect(mountedAgentOpenInput(useAppStore.getState().mountedSpaceInputs, key)?.request).toBe(original.request)
   expect(f.opens).toHaveLength(0); expect(useAppStore.getState().agentComposerDrafts['original-slot']).toBe('  original task\n')
 })
@@ -393,7 +397,7 @@ it('checking the same original Source operation updates the visible outcome whil
   await vi.waitFor(() => expect(mountedAgentOpenInput(useAppStore.getState().mountedSpaceInputs, key)?.receipt).toBeDefined())
   const original = mountedAgentOpenInput(useAppStore.getState().mountedSpaceInputs, key)!
   f.inspect({ ...original.receipt!, outcome: 'opened' })
-  await act(async () => button('Check original task').click())
+  await act(async () => button('Check original status').click())
   await vi.waitFor(() => expect(dom.container.querySelector('[aria-label="Original launch status"] .source-launch-feedback__status strong')?.textContent).toBe('Agent created'))
   expect(button('Continue original task')).toBeUndefined(); expect(f.opens).toHaveLength(1)
   expect(mountedAgentOpenInput(useAppStore.getState().mountedSpaceInputs, key)?.receipt?.outcome).toBe('unknown')

@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from 'vitest'
 import { act, createElement } from 'react'
 import { tmpdir } from 'node:os'
@@ -61,8 +62,8 @@ it('after a lost Source C reply, readonly Check provides the exact locator for e
   await expect(sendSourceLauncherRequest(original)).rejects.toThrow('reply lost')
   const get = () => mountedAgentOpenInput(useAppStore.getState().mountedSpaceInputs, mountedAgentOpenKey(original.target, original.slot))!, pending = get(), draft = useAppStore.getState().launcherNameDrafts
   const continuation = vi.fn(), container = await mount(createElement(SourceLauncherRequest, { input: pending, busy: false, active: true, onContinue: continuation }))
-  await act(async () => button(container, 'Check original task')!.click())
-  await vi.waitFor(() => expect(container.textContent).toContain('The project device confirmed this Agent'))
+  await act(async () => button(container, 'Check original status')!.click())
+  await vi.waitFor(() => expect(container.querySelector('.source-launch-feedback__status strong')?.textContent).toBe('Agent created'))
   expect(calls.mock.calls.filter(([method]) => method.endsWith('Change'))).toHaveLength(0)
   expect(get().receipt).toBeUndefined(); expect(get().nameInputs).toBeUndefined()
   expect(button(container, 'Apply original agent name')).toBeDefined()

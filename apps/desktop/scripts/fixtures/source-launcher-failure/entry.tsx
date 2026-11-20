@@ -30,6 +30,8 @@ api.spaceMounts.call = (async (method: string) => {
   if (method !== 'inspect') { effects++; throw Error('The visual fixture never advances work: ' + method) }
   reads++
   if (failed) throw Error('The latest Source read is unavailable. The original creation receipt remains retained.')
+  if (scenario === 'recorded' || scenario === 'unplaced')
+    return { request: { known: true, operationId: request.operationId, report: receipt } }
   return { request: { known: true, operationId: request.operationId, report: { ...receipt, issues: [{ step: 'observation', code: 'HOST_ROUTE_AUTHORIZATION_REQUIRED', message: 'The current viewer has not confirmed its original observation route.', recovery: 'Read the same original request.' }] } } }
 }) as typeof api.spaceMounts.call
 flushSync(() => {
@@ -40,7 +42,19 @@ Object.assign(window, { sourceFailure: {
   scenario: (next: string) => {
     scenario = next; failed = false
     receipt = { ...receipt, execution: next === 'writer' ? { ...execution, inspection: null } : next === 'confirmed' ? { ...execution, inspection: { ...connectedInspection, state: 'connected' } } : execution, outcome: next === 'confirmed' ? 'opened' : next === 'retired' ? 'retired' : 'unknown', agent: next === 'confirmed' || next === 'retired' ? { hostId: 'original-agent-host', agentSessionId: 'original-agent-session', createOperationId: request.operationId, runId: 'original-agent-run', providerId: 'codex', executorId: 'original-executor', cwd: '/original/agent', initialPrompt: 'confirmed', ...(next === 'retired' ? { retirement: { source: 'user', observedAt: 2 } } : {}) } : null, issues: [next === 'writer' ? writer : attach] }
-    const updated = { ...input, request: { ...request }, receipt }
+    const withoutReply = next === 'recorded' || next === 'unplaced'
+    if (withoutReply) {
+      const helper = { start: { outcome: 'not-submitted' as const, runId: null }, cursor: null, ownerInstanceId: null }
+      receipt = { ...receipt, issues: [], execution: { coordinatorRuntimeId: target.reference.runtimeId, reference, inspection: null,
+        placement: next === 'unplaced' ? 'unconfirmed' : 'retained',
+        diagnostics: { sourceRuntimeId: target.reference.runtimeId, reference, state: 'matched', helpers: { frontend: helper, executor: helper },
+          connection: { state: 'unconfirmed', code: 'EXECUTION_OBSERVATION_UNCONFIRMED' },
+          ...(next === 'recorded' ? { lastCreationFailure: { hostId: 'local', role: 'executor' as const, stage: 'prepare' as const,
+            code: 'EXECUTION_HELPER_UNAVAILABLE' } } : {}) } },
+        save: { layoutApplied: false, clientStateWritten: false, storageFlushRequested: false, diskDurability: 'unconfirmed',
+          reason: 'The original Source write acknowledgement was lost.' } }
+    }
+    const updated = { ...input, request: { ...request }, receipt: withoutReply ? undefined : receipt }
     flushSync(() => useAppStore.setState({ mountedSpaceInputs: { [mountedAgentOpenKey(target, input.slot)]: updated } }))
   },
   theme: (appAppearance: 'dark' | 'light') => updateThemeSelection({ appAppearance }),

@@ -36,9 +36,22 @@ app.whenReady().then(async()=>{
   }
   await window.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride',{width:1180,height:850,deviceScaleFactor:1,mobile:false});await evaluate("sourceFailure.theme('dark');document.querySelector('.launch-surface').scrollTop=0")
   await click('Copy diagnostics');await wait("document.body.textContent.includes('Diagnostics copied')");assert.equal(clipboardWrites,1);const diagnosis=JSON.parse(clipboardText);assert.equal(diagnosis.operationId,'original-creation-operation');assert(!clipboardText.includes('Expected'));assert(!clipboardText.includes('original submitted task'));assert(!clipboardText.includes('newer private draft'));receipt.clipboard={writes:clipboardWrites,diagnosis};await frame('copy-confirmed')
-  await click('Check original task');await wait("document.querySelector('[aria-label=\"Source observation issues\"]')?.textContent.includes('HOST_ROUTE_AUTHORIZATION_REQUIRED')");await frame('observer-denied')
-  await evaluate('sourceFailure.fail()');await click('Check original task');await wait("document.body.textContent.includes('Latest check could not be completed')");await frame('observation-failed')
+  await click('Check original status');await wait("document.querySelector('[aria-label=\"Source observation issues\"]')?.textContent.includes('HOST_ROUTE_AUTHORIZATION_REQUIRED')");await frame('observer-denied')
+  await evaluate('sourceFailure.fail()');await click('Check original status');await wait("document.body.textContent.includes('Latest check could not be completed')");await frame('observation-failed')
   for(const scenario of ['writer','confirmed','retired']){await evaluate(`sourceFailure.scenario(${JSON.stringify(scenario)});document.querySelector('.launch-surface').scrollTop=0`);await paint();await frame(scenario+'-wide-dark')}
+  for(const [scenario,width,height,theme,details]of[['recorded',1180,850,'dark',false],
+      ['recorded',460,760,'light',true],['unplaced',460,760,'dark',false],['unplaced',840,430,'light',false]]){
+   await window.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false})
+   await evaluate(`sourceFailure.theme(${JSON.stringify(theme)});sourceFailure.scenario(${JSON.stringify(scenario)});document.querySelector('.launch-surface').scrollTop=0`)
+   await click('Check original status')
+   const label=scenario==='recorded'?'Tool helper preparation is unconfirmed.':'Its place in the project is unconfirmed.'
+   await wait(`document.querySelector('.source-launch-feedback__status')?.textContent.includes(${JSON.stringify(label)})`)
+   if(details){
+    await evaluate("document.querySelector('.source-launch-feedback summary').click();document.querySelector('.source-launch-feedback details').scrollIntoView({block:'start'})")
+    await wait("document.querySelector('[aria-label=\"Last recorded creation failure\"]')?.textContent.includes('EXECUTION_HELPER_UNAVAILABLE')")
+   }
+   await frame(`${scenario}-${width}-${theme}${details?'-details':''}`)
+  }
   const facts=await evaluate('sourceFailure.facts()');assert.equal(facts.effects,0);assert(facts.prompt.includes('newer private draft'));assert.equal(facts.calls.launches.length,0);assert.equal(facts.calls.submissions.length,0);receipt.facts=facts;receipt.passed=true
  }catch(error){receipt.failure={message:error.message,stack:error.stack};process.exitCode=1}
  finally{await fs.writeFile(path.join(output,'ui-receipt.json'),JSON.stringify(receipt,null,2));window?.destroy();app.exit(process.exitCode||0)}

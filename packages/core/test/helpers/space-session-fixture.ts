@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { hashAgentCapability } from '../../src/agent-capability.js'
 import { AgentMuxClient } from '../../src/client.js'
+import { BUILT_IN_AGENT_PROVIDERS } from '../../src/agent-provider.js'
 import { AgentMuxMemoryAgentSessionStore } from '../../src/agent-session-store.js'
 import { AgentMuxHostedRuntimeService } from '../../src/hosted-runtime-service.js'
 import { AgentMuxControlServer } from '../../src/public-rpc-server.js'
@@ -28,7 +29,7 @@ function isolatedCore(root: string) {
   try {
     for (const key of keys) delete process.env[key]
     Object.assign(process.env, privateEnvironment)
-    return new AgentMuxClient({ store: new AgentMuxMemoryAgentSessionStore(), providers: [], controlSocketPath: join(root, 'rpc.sock') })
+    return new AgentMuxClient({ store: new AgentMuxMemoryAgentSessionStore(), providers: BUILT_IN_AGENT_PROVIDERS.filter(provider => provider.catalog.id === 'codex'), controlSocketPath: join(root, 'rpc.sock') })
   } finally {
     for (const key of Object.keys(privateEnvironment)) delete process.env[key]
     for (const [key, value] of previous) process.env[key] = value
