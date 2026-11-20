@@ -46,6 +46,8 @@
 .provider-hook-scope__status[data-health='current'] { color: var(--green-text); }
 .provider-hook-scope__status[data-health='issue'] { color: var(--red-text); }
 .provider-hook-scope__status .settings-hook-problem-dot { margin: 0; }
+.provider-hook-scope > p > .provider-hook-scope__status { align-items: flex-start; }
+.provider-hook-scope > p > .provider-hook-scope__status .settings-hook-problem-dot { margin-block-start: calc((1lh - 6px) / 2); }
 .provider-hook-scope__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .provider-hook-scope__executors { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); }
 .provider-hook-scope__executors > span { color: var(--text-3); }
@@ -70,6 +72,7 @@
 .provider-hook-scope__details > :not(summary) { margin-block-start: var(--sp-2); }
 .provider-hook-scope p { margin: 0; line-height: 1.55; }
 .provider-hook-scope__details .settings-executor-identity { margin-block: var(--sp-1); }
+.provider-hook-scope__details ul { margin: var(--sp-1) 0 0; padding-inline-start: var(--sp-5); }
 .provider-hooks__workspace > * { flex-wrap: wrap; }
 .provider-hooks__workspace .ui-input { max-width: 100%; }
 .provider-hooks__workspace-anchor { padding-block: var(--sp-2) 0; }

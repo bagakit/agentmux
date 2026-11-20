@@ -142,8 +142,11 @@ function HookScopeCard({ scope, target, runtimeId, hostId, workspacePath, worksp
 
   const title = scope.kind === 'configuration' ? 'Configuration' : scope.kind === 'launch-carried' ? 'Hooks supplied at launch'
     : scope.kind === 'unmanaged' ? 'No managed Hook' : 'Configuration scope unconfirmed'
+  const currentConfiguration = !observation?.error && inspection.targets.length > 0 &&
+    inspection.targets.every(item => item.status === 'current' && item.observedRevision && item.observedRevision === item.expectedRevision)
+  const currentWithOlderHooks = currentConfiguration && inspection.targets.some(item => item.legacyDeclarations)
   const status = pending === 'update' ? 'Updating…' : pending ? 'Checking…' : observation?.error ? 'Check unconfirmed'
-    : scope.kind === 'configuration' ? healthLabels[health] : undefined
+    : scope.kind === 'configuration' ? currentWithOlderHooks ? 'Current declarations match' : healthLabels[health] : undefined
   // The readback describes the native file. A successful write and a later Run's load are separate facts.
   const updateMessage = update.status === 'updated' ? 'Managed configuration updated.'
     : update.status === 'unchanged' ? 'The managed configuration required no write.'
@@ -155,13 +158,14 @@ function HookScopeCard({ scope, target, runtimeId, hostId, workspacePath, worksp
     <div className="provider-hook-scope__main">
       <div className="provider-hook-scope__identity">
         <h4 id={titleId}>{scope.paths.length ? scope.paths.map(path => <code key={path}>{path}</code>) : title}</h4>
-        {status ? <span className="provider-hook-scope__status" data-health={observation?.error || pending ? 'unknown' : health} role="status">
-          {health === 'issue' ? <span className="settings-hook-problem-dot" role="img" aria-label="Hook needs attention" /> : null}{status}
+        {status ? <span className="provider-hook-scope__status"
+          data-health={observation?.error || pending ? 'unknown' : currentWithOlderHooks ? 'current' : health} role="status">
+          {health === 'issue' && !currentWithOlderHooks ? <span className="settings-hook-problem-dot" role="img" aria-label="Hook needs attention" /> : null}{status}
         </span> : null}
       </div>
       {target ? <div className="provider-hook-scope__actions">
         <button type="button" className="small-button" disabled={Boolean(pending)} onClick={() => void maintain('check')}>Check</button>
-        {canUpdate ? <button type="button" className="small-button" disabled={Boolean(pending || observation?.error || update.status === 'unconfirmed' || stale && !exact)}
+        {canUpdate && !currentConfiguration ? <button type="button" className="small-button" disabled={Boolean(pending || observation?.error || update.status === 'unconfirmed' || stale && !exact)}
           onClick={() => void maintain('update')}>Update configuration</button> : null}
       </div> : null}
     </div>
@@ -174,7 +178,12 @@ function HookScopeCard({ scope, target, runtimeId, hostId, workspacePath, worksp
         </li>)}
       </ul>
     </div> : null}
-    {scope.kind === 'launch-carried' ? <p>Check loading on the original Run.</p> : inspection.action ? <p>{inspection.action}</p> : null}
+    {scope.kind === 'launch-carried' ? <p>Check loading on the original Run.</p> : inspection.action ?
+      currentWithOlderHooks && health === 'issue' ? <p>
+        <span className="provider-hook-scope__status" data-health="issue">
+          <span className="settings-hook-problem-dot" role="img" aria-label="Hook needs attention" />{inspection.action}
+        </span>
+      </p> : <p>{inspection.action}</p> : null}
     {updateMessage ? <p role="status">{updateMessage}</p> : null}
     {observation?.error ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
       step: 'Hook operation unconfirmed', mode: observation.error, restore: 'Check this scope again. Existing Runs retain their execution state.'
@@ -189,7 +198,13 @@ function HookScopeCard({ scope, target, runtimeId, hostId, workspacePath, worksp
             : item.status === 'not_present' ? 'Not present' : 'Unconfirmed'}</dd></div>
           <div><dt>Expected config revision</dt><dd><code title={item.expectedRevision}>{item.expectedRevision.slice(0, 12)}</code></dd></div>
         </dl> : null}
-        {item.legacyDeclarations ? <p>{item.legacyDeclarations} older {item.legacyDeclarations === 1 ? 'declaration' : 'declarations'}{item.missingLegacyEntrypoints ? ` · ${item.missingLegacyEntrypoints} with a missing executable or runner` : ''}</p> : null}
+        {item.legacyDeclarations ? <ul aria-label="Older Hook declarations">
+          <li>{item.legacyDeclarations} in configuration</li>
+          {item.missingLegacyEntrypoints ? <li>{item.missingLegacyEntrypoints} with a missing executable or runner</li> : null}
+          {item.missingLegacyDependencies ? <li>{item.missingLegacyDependencies} with a missing runtime dependency</li> : null}
+          {item.legacyDeclarations > (item.missingLegacyEntrypoints ?? 0) + (item.missingLegacyDependencies ?? 0)
+            ? <li>{item.legacyDeclarations - (item.missingLegacyEntrypoints ?? 0) - (item.missingLegacyDependencies ?? 0)} with runtime health unconfirmed</li> : null}
+        </ul> : null}
       </div>)}
     </details> : null}
     {runtimeId && canInspectLoading ? <HookActivationCheck scope={scope} hostId={hostId} runtimeId={runtimeId}
