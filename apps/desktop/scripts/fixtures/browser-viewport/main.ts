@@ -196,7 +196,7 @@ async function returnChoices(page: string) {
     for (const [index, mode] of (['mobile', 'tablet', 'mobile', 'desktop', 'mobile', 'responsive'] as BrowserViewport[]).entries()) {
       const name = 'return-' + page + '-' + (narrow ? 'narrow-' : 'wide-') + index + '-' + mode
       await choose(mode, narrow)
-      const metrics = await pageFacts(), expected = BROWSER_VIEWPORT_PRESETS[mode]
+      const metrics = await pageFacts(), expected = browserViewportSize(mode)
       if (expected) { assert.equal(metrics.screen.width, expected.width, 'native-apply-must-change-layout-width: ' + name); assert.equal(metrics.screen.height, expected.height) }
       else assert.ok(Math.abs(metrics.innerWidth * baseline.zoom - fixedBounds.width) <= 1)
       assert.deepEqual(manager.nativeOwner(originalId)!.bounds, fixedBounds, 'Viewport return choices never resize the original Pane')
