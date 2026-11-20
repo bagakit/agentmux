@@ -31,6 +31,7 @@ it('confirms the displayed proposal and sends one original notification after th
   expect((await f.demands.get(goalId))!.alignment?.confirmedAt).toBeNull()
   await act(async () => { approve().click(); approve().click() })
   await vi.waitFor(() => expect(notification()?.textContent).toContain('Waiting to notify Supervisor'))
+  expect(approve()).toBeNull()
   await f.flushPatrol()
   const saved = (await f.demands.get(goalId))!
   expect(saved.alignment?.confirmedAt).toBeGreaterThan(0)
@@ -60,7 +61,8 @@ it('confirms the displayed proposal and sends one original notification after th
   expect(writes[0]).toMatchObject({ runId: 'owner-run' })
   expect(writes[0]?.data).toContain(delivered.agentMuxNote)
   expect(parseAgentMuxMessagePrefix(delivered.agentMuxNote)?.protocol).toMatchObject({
-    id: 'goal-confirmation', tag: 'amux:goal', raw: delivered.agentMuxNote
+    id: 'goal-confirmation', tag: 'amux:goal', raw: delivered.agentMuxNote,
+    body: expect.stringContaining('Advance the ready Tickets in the original Goal.')
   })
   expect(f.attempts).toHaveLength(1)
   await f.restartPatrol(); await f.flushPatrol()
