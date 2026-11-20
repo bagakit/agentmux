@@ -155,7 +155,7 @@ it('keeps pending original frontend join visible without covering the terminal o
   expect(sessionFrontendPresentation(stale)).toBeNull()
 })
 
-it('captures an exact native target only for a new draft while its original terminal has not started', async () => {
+it('captures the same managed native target for new prose before and after terminal attachment', async () => {
   vi.spyOn(api.continuousProgress, 'pauseForInput').mockResolvedValue(undefined)
   const session = startup('ready')
   session.terminalFrontend.initialization.native = { state: 'confirmed', sessionId: 'original-native' } as never
@@ -169,16 +169,19 @@ it('captures an exact native target only for a new draft while its original term
     admissionIntent: { kind: 'native-conversation', source: { providerId: session.providerId, nativeSessionId: 'original-native' } } })
   await act(async () => useAppStore.setState({ sessions: [{ ...session, terminalFrontend: { ...session.terminalFrontend, state: 'attached' } }] }))
   expect(useAppStore.getState().agentSteerQueues[session.id]![0]!.directInputBinding).toEqual(captured.directInputBinding)
-  await act(async () => { expect(useAppStore.getState().enqueueAgentSteer(session.id, 'Later terminal draft', undefined, 'later-draft', 'manual', undefined,
+  await act(async () => { expect(useAppStore.getState().enqueueAgentSteer(session.id, 'Later native draft', undefined, 'later-draft', 'manual', undefined,
     { execution: 'immediate' })).toBe(true) })
-  expect(useAppStore.getState().agentSteerQueues[session.id]![1]!.directInputBinding?.admissionIntent).toEqual({ kind: 'manual-actor' })
+  expect(useAppStore.getState().agentSteerQueues[session.id]![1]!.directInputBinding).toEqual(captured.directInputBinding)
+  await act(async () => { expect(useAppStore.getState().enqueueAgentSteer(session.id, '/compact', undefined, 'native-command', 'manual', undefined,
+    { execution: 'immediate' })).toBe(true) })
+  expect(useAppStore.getState().agentSteerQueues[session.id]![2]!.directInputBinding?.admissionIntent).toEqual({ kind: 'manual-actor' })
   for (const changed of [
     { ...session, terminalFrontend: { ...session.terminalFrontend, run: { runId: 'old-run' } } },
     { ...session, nativeHandle: { ...session.nativeHandle, sessionId: 'different-native' } },
     { ...session, capabilities: { ...session.capabilities, nativeConversationInput: undefined } }
   ]) expect(initialNativeComposerBinding(changed)).toBeUndefined()
   await act(async () => { expect(useAppStore.getState().enqueueAgentSteer(session.id, 'Not a fresh manual producer', undefined, 'background-message')).toBe(true) })
-  expect(useAppStore.getState().agentSteerQueues[session.id]![2]!.directInputBinding).toBeUndefined()
+  expect(useAppStore.getState().agentSteerQueues[session.id]![3]!.directInputBinding).toBeUndefined()
   noSideEffects()
 })
 

@@ -139,9 +139,13 @@ async function fixture(mode: 'ordinary' | 'queue' | 'managed-create') {
     execution: 'immediate' as const, authorHuman: true, admissionIntent: native ? { kind: 'session-conversation' as const } : { kind: 'manual-actor' as const } })
   let releaseResponse: (() => void) | undefined
   let responseGate: Promise<void> | undefined
+  let responseHeld = false
   const originalHandler = endpoint!.endpoint.listeners('request')[0]!
   endpoint!.endpoint.removeAllListeners('request')
-  endpoint!.endpoint.on('request', async (request, response) => { if (request.method !== 'GET') await responseGate; Reflect.apply(originalHandler, endpoint!.endpoint, [request, response]) })
+  endpoint!.endpoint.on('request', async (request, response) => {
+    if (request.method !== 'GET' && responseGate) { responseHeld = true; await responseGate }
+    Reflect.apply(originalHandler, endpoint!.endpoint, [request, response])
+  })
   cleanups.push(async () => { releaseResponse?.() })
   const server = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'), coreClients: () => [{ hostId: 'local', client }] }); await server.start(); cleanups.push(() => server.stop())
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); cleanups.push(() => rpc.dispose())
@@ -166,6 +170,7 @@ async function fixture(mode: 'ordinary' | 'queue' | 'managed-create') {
     },
     get currentStatus() { return currentStatus },
     finishOriginalRun: async () => { await activation.client.stop(await activation.client.prepareStop(session.run.runId)) },
+    waitForHeldTurn: async () => { await vi.waitFor(() => expect(responseHeld).toBe(true)) },
     hold: () => { responseGate = new Promise<void>(resolve => { releaseResponse = resolve }); return () => { releaseResponse?.(); responseGate = undefined } }, get client() { return client },
     receipt: async (id: string, status: string, explicit = false) => vi.waitFor(async () => {
       const value = await client.inspectAgentInput({ key: key(id) })
@@ -202,6 +207,34 @@ it.runIf(process.platform === 'darwin')('Codex 0.171 adopts the original startup
     await h.reopen()
     expect(h.inputs.filter(text => text.includes('PRIVATE_QUEUE_INITIAL_ORIGINAL'))).toHaveLength(1)
   } finally { await h.close() }
+})
+
+it.runIf(process.platform === 'darwin')('Codex 0.171 dispatches new Message Tool text to one original active turn', async () => {
+  const h = await fixture('managed-create')
+  const release = h.hold()
+  try {
+    const source = { providerId: 'codex', nativeSessionId: h.initial.session.nativeHandle!.sessionId }
+    const input = (id: string, body: string) => ({ ...publicInput(h, id, body), admissionIntent: { kind: 'native-conversation' as const, source } })
+    const first = input('manual-active-start', 'PRIVATE_QUEUE_START 原正文')
+    const followup = input('manual-active-followup', 'PRIVATE_QUEUE_FOLLOWUP 原正文')
+    await h.rpc.call('agent.input.submit', first)
+    const start = await h.receipt(first.operationId, 'admitted')
+    const turnId = start.admission?.admission?.native?.turnId
+    expect(turnId).toEqual(expect.any(String))
+    await h.waitForHeldTurn()
+    await h.rpc.call('agent.input.submit', followup)
+    const receipt = await vi.waitFor(async () => {
+      const current = await h.client.inspectAgentInput({ key: h.key(followup.operationId) })
+      expect(current?.status).toBe('admitted')
+      return current!
+    }, { timeout: 5000, interval: 100 })
+    expect(receipt.admission?.admission).toMatchObject({ transport: 'native', acknowledged: true, native: { outcome: 'admitted', turnId } })
+    expect((await h.client.statusAgent('original')).run.acceptedInputBytes).toBe(h.initial.run.acceptedInputBytes)
+    await h.rpc.call('agent.input.submit', followup)
+    expect(await h.client.inspectAgentPromptSubmission(receipt.key)).toEqual(receipt.admission)
+    release()
+    await vi.waitFor(() => expect(h.inputs.filter(body => body.includes(followup.prompt))).toHaveLength(1), { timeout: 15_000, interval: 100 })
+  } finally { release(); await h.close() }
 })
 
 it.runIf(process.platform === 'darwin')('current native actor starts and steers the exact original turn, retains adoption and refuses a foreign source', async () => {
