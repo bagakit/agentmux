@@ -24,6 +24,8 @@ export type AgentInputCallContext = Readonly<{
   retainAcceptedInputAuthority?(key: AgentPromptInputKey): Promise<{ assertCurrent(): Promise<void>; release(): void }>
   /** Automatic producers may forbid steering; this restriction grants no input authority. */
   nativeIdleOnly?: true
+  /** An explicitly prioritized background message, ordered before unclaimed background inputs only. */
+  backgroundPriority?: true
 }>
 
 /** Original Host restriction for raw bytes, valid only before native dispatch.
@@ -58,7 +60,7 @@ export type AgentInputJournalIntent = {
   execution: 'immediate'
   environment: AgentInputSavedEnvironment
   source:
-    | { kind: 'prompt'; authorProfile?: import('./author-profile.js').AgentPreparedAuthorProfile; inputImages?: import('./agent-input-resource.js').AgentInputImage[]; prompt: string; agentMuxNote?: string; authorHuman?: boolean; sourceChannel?: AgentMessageChannel; sourceDevice?: AgentOperationDevice;
+    | { kind: 'prompt'; authorProfile?: import('./author-profile.js').AgentPreparedAuthorProfile; inputImages?: import('./agent-input-resource.js').AgentInputImage[]; prompt: string; agentMuxNote?: string; authorHuman?: boolean; backgroundPriority?: true; sourceChannel?: AgentMessageChannel; sourceDevice?: AgentOperationDevice;
         /** Original Core intake confirmed local human authority without an invocation-local restrictor. */
         recoveryAuthorization?: 'local-human';
         inputContext?: import('./browser-input-context.js').BrowserInputContext; inputContextSource?: import('./browser-input-context.js').BrowserInputContextSource;

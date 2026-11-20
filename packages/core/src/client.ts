@@ -504,6 +504,7 @@ type InputWaitingContext = {
   requested: boolean
   active: boolean
   sequence: number
+  backgroundOrder: 'ordinary' | 'priority' | 'protected'
   storageRetries?: number
   storageRetry?: ReturnType<typeof setTimeout> | undefined
 }
@@ -7553,6 +7554,8 @@ export class AgentMuxClient {
       // Controlled waiting does not retain this private idle-only restriction.
       // Refuse this invocation before saving rather than silently sending ordinary input.
       if (context?.nativeIdleOnly) throw new AgentMuxError('Controlled input cannot drop its original idle-only restriction.', 'INVALID_AGENT_PROMPT')
+      if (context?.backgroundPriority && (input.authorHuman !== false || input.admissionIntent.kind !== 'session-conversation')) throw new AgentMuxError(
+        'Priority is available only for explicit background conversation input.', 'INVALID_AGENT_PROMPT')
       this.validateControlledPrompt(input)
       const key = { kind: 'prompt' as const, agentSessionId: input.agentSessionId, expectedRun: input.expectedRun, submissionId: input.operationId }
       const session = await this.currentStoredAgentSession(input.agentSessionId)
@@ -7566,6 +7569,7 @@ export class AgentMuxClient {
       if (saved || !await this.inspectAgentPromptSubmission(key)) {
         const intent: AgentInputJournalIntent = { key, admissionIntent: validateAgentPromptAdmissionIntent({ ...input.admissionIntent, expectedRun: input.expectedRun, ...optionalInputEpoch(input.inputEpoch) }) as AgentInputJournalIntent['admissionIntent'], execution: 'immediate',
           environment: this.inputSavedEnvironment(session), source: { kind: 'prompt', prompt: input.prompt,
+            ...(context?.backgroundPriority ? { backgroundPriority: true as const } : {}),
             ...(authorProfile === undefined ? {} : { authorProfile }),
             ...(inputImages === undefined ? {} : { inputImages }),
             ...(input.inputContext === undefined ? {} : { inputContext: input.inputContext,
@@ -8333,6 +8337,7 @@ export class AgentMuxClient {
             if (ownedAuthority) delete ownedAuthority.retainForAcceptedInput
             const controller = new AbortController(), context: InputWaitingContext = { ref, input, producer, recipientContinuation, ...(continueGate ? { continueGate: true as const } : {}),
               controller, runtimeWake: true, sessionWake: this.isRetainedHumanInput(saved.intent) || recipientContinuation, requested: true, active: false, sequence: saved.sequence,
+              backgroundOrder: saved.intent.source.kind !== 'prompt' || saved.intent.source.authorHuman !== false ? 'protected' : saved.intent.source.backgroundPriority ? 'priority' : 'ordinary',
               ...(authorAgentSessionId ? { authorAgentSessionId } : {}), ...(ownedAuthority ? { authority: ownedAuthority } : {}) }
             this.inputWaitingContexts.set(id, context)
             const ids = this.inputWaitingByRecipient.get(ref.key.agentSessionId) ?? new Set<string>()
@@ -8384,7 +8389,15 @@ export class AgentMuxClient {
           return value && (value.requested || value.storageRetry) ? [value] : []
         })
           .sort((a, b) => a.sequence - b.sequence)
+        const ordered: InputWaitingContext[] = [], ordinary: InputWaitingContext[] = []
         for (const context of relevant) {
+          if (context.continueGate || context.storageRetry || context.backgroundOrder === 'protected') {
+            ordered.push(...ordinary.splice(0), context)
+          } else if (context.backgroundOrder === 'priority') ordered.push(context)
+          else ordinary.push(context)
+        }
+        ordered.push(...ordinary)
+        for (const context of ordered) {
           if (context.controller.signal.aborted) continue
           if (context.storageRetry) break
           context.requested = false
@@ -8415,6 +8428,7 @@ export class AgentMuxClient {
           } finally {
             context.active = false
           }
+          if (state.again) break
         }
       } while (state.again && !this.inputWaitingDisposed)
     }).catch(error => {
@@ -8508,7 +8522,8 @@ export class AgentMuxClient {
         const frozen = saved.control.retry ? (await this.inspectAgentPromptSubmission(saved.control.retry.previousKey))?.admission?.intent : undefined
         if (saved.control.retry && !frozen) throw new AgentMuxError('The exact previous input recipe is unavailable. Its successor remains waiting.', 'AGENT_INPUT_READ_UNCONFIRMED')
         await this.submitPromptInternal({ ...context.input, operationId: agentPromptInputId(deliveryKey), expectedRun: deliveryKey.expectedRun, signal: context.controller.signal }, context.authorAgentSessionId, assertTarget, undefined, authority, context.producer,
-          { sourceKey: key, deliveryKey, ...(frozen ? { frozen } : {}), ...(context.continueGate ? { handoff: saved.control.handoff! } : {}), authorizeDispatch: async (lease, carrier) => {
+          { sourceKey: key, deliveryKey, ...(frozen ? { frozen } : {}), ...(context.continueGate ? { handoff: saved.control.handoff! } : {}),
+            ...(saved.intent.source.kind === 'prompt' && saved.intent.source.backgroundPriority ? { nativeIdleOnly: true } : {}), authorizeDispatch: async (lease, carrier) => {
             const link = await this.messageQueue.authorizeInputDispatch(context.ref, context.controller.signal, { key: deliveryKey,
               claimsAbsent: async () => {
                 if (await this.inspectAgentPromptSubmission(deliveryKey)) return false

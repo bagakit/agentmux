@@ -862,7 +862,7 @@ export class AgentPromptSubmissionCoordinator {
       : carrier?.kind === 'pty' ? undefined : nativeOriginal && defaultNativeSource(nativeOriginal)
     // Selecting a target does not prove transport availability or the TUI's current
     // conversation. Its semantic message must keep that target even when unavailable.
-    if ((control?.requiredNativeSource || control?.idleOnly || defaultSemanticInput && nativeOriginal &&
+    if ((control?.requiredNativeSource || control?.idleOnly || control?.nativeIdleOnly || defaultSemanticInput && nativeOriginal &&
         (hasSelectedNativeTarget(nativeOriginal) && (!sessionConversation || provider.prepareNativeInput !== undefined) ||
           sessionConversation && provider.prepareNativeInput !== undefined && nativeOriginal.nativeHandle?.kind === 'provider')) && !source) throw nativePreparationFailure(new AgentMuxError(
       'The original native input source is unconfirmed. No input was sent; the Agent and terminal remain available.', 'AGENT_NATIVE_INPUT_UNAVAILABLE'))

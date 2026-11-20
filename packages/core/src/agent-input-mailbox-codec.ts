@@ -43,7 +43,7 @@ export function parseAgentInputMailboxItem(value: unknown, agentSessionId: strin
       const deliveryKey = receipt ? agentInputDeliveryKey(receipt.control) : key
       if (receipt?.admission?.admission && !dequal(receipt.admission.admission.intent?.admissionIntent,
         { ...admission, expectedRun: deliveryKey.expectedRun })) fail()
-      const source = object(intent.source, ['kind', 'prompt', 'agentMuxNote', 'authorHuman', 'recoveryAuthorization', 'sourceChannel', 'sourceDevice', 'messageId', 'originalControlOperationId', 'inputContext', 'inputContextSource', 'inputContextCaptureProof', 'inputImages', 'authorProfile', 'promptWire', 'representation'])
+      const source = object(intent.source, ['kind', 'prompt', 'agentMuxNote', 'authorHuman', 'recoveryAuthorization', 'sourceChannel', 'sourceDevice', 'messageId', 'originalControlOperationId', 'inputContext', 'inputContextSource', 'inputContextCaptureProof', 'inputImages', 'authorProfile', 'promptWire', 'representation', 'backgroundPriority'])
       // The receipt codec already binds each same-Run retry to its original
       // logical key and typed predecessor. Only Run rebinding has manual-author
       // eligibility; a fresh transport identity alone does not change the target.
@@ -61,6 +61,7 @@ export function parseAgentInputMailboxItem(value: unknown, agentSessionId: strin
         if (source.promptWire !== undefined && (typeof source.promptWire !== 'string' || !source.promptWire.trim())) fail()
         if (key.kind !== 'prompt' || typeof source.prompt !== 'string' || source.agentMuxNote !== undefined && typeof source.agentMuxNote !== 'string' ||
           source.authorHuman !== undefined && typeof source.authorHuman !== 'boolean' ||
+          source.backgroundPriority !== undefined && (source.backgroundPriority !== true || source.authorHuman === true || admission.kind !== 'session-conversation') ||
           source.recoveryAuthorization !== undefined && (source.recoveryAuthorization !== 'local-human' || source.authorHuman !== true ||
             source.inputContext !== undefined || admission.kind !== 'manual-actor' && admission.kind !== 'session-conversation') ||
           source.messageId !== undefined || source.originalControlOperationId !== undefined || entry.message !== undefined || entry.sourceChannel !== undefined || entry.sourceDevice !== undefined) fail()
@@ -68,7 +69,7 @@ export function parseAgentInputMailboxItem(value: unknown, agentSessionId: strin
         if (source.sourceDevice !== undefined) normalizeOperationDevice(source.sourceDevice)
       } else {
         if (source.kind !== 'message' || key.kind !== 'message' || source.messageId !== key.messageId ||
-          source.prompt !== undefined || source.agentMuxNote !== undefined || source.authorHuman !== undefined || source.recoveryAuthorization !== undefined || source.sourceChannel !== undefined || source.sourceDevice !== undefined || source.inputContext !== undefined || source.inputContextSource !== undefined || source.inputContextCaptureProof !== undefined || source.inputImages !== undefined || source.authorProfile !== undefined) fail()
+          source.prompt !== undefined || source.agentMuxNote !== undefined || source.authorHuman !== undefined || source.backgroundPriority !== undefined || source.recoveryAuthorization !== undefined || source.sourceChannel !== undefined || source.sourceDevice !== undefined || source.inputContext !== undefined || source.inputContextSource !== undefined || source.inputContextCaptureProof !== undefined || source.inputImages !== undefined || source.authorProfile !== undefined) fail()
         string(source.originalControlOperationId)
         const message = object(entry.message, ['schema', 'messageId', 'operationId', 'createdAt', 'sender', 'recipient', 'threadId', 'correlationId', 'replyTo', 'workspaceId', 'senderSessionId', 'senderRunId', 'recipientSessionId', 'recipientRunId', 'body', 'channelProfile', 'channelQuote'])
         const envelope = validateAgentMuxMessageEnvelope(message as unknown as Parameters<typeof validateAgentMuxMessageEnvelope>[0])

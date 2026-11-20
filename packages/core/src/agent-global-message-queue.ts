@@ -874,6 +874,7 @@ export class DurableAgentMuxMessageQueue {
         if (key.kind !== 'prompt' || typeof intent.source.prompt !== 'string' ||
             intent.source.agentMuxNote !== undefined && typeof intent.source.agentMuxNote !== 'string' ||
             intent.source.authorHuman !== undefined && typeof intent.source.authorHuman !== 'boolean' ||
+            intent.source.backgroundPriority !== undefined && (intent.source.backgroundPriority !== true || intent.source.authorHuman === true || admissionIntent.kind !== 'session-conversation') ||
             intent.source.recoveryAuthorization !== undefined && !isRestorableLocalPromptInput(intent)) {
           throw new AgentMuxError('Original prompt intent is invalid.', 'INVALID_AGENT_INPUT_CONTROL')
         }
