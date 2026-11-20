@@ -57,7 +57,12 @@ export async function openSpatialAgentTarget(options: {
     if (previous && !sameRuntime && !binding) throw new AgentMuxError('The original split creation has no confirmed coordinator reference. Keep its request; no replacement binding was constructed.', 'SPATIAL_CREATION_UNCONFIRMED')
     // A lost Core admission reply leaves no Source record. Consult the original
     // journal before current inventory, home or generated launch context.
-    const retained = binding && (!previous || previous.takeover) ? await runtime.executionBindings.inspect(binding.bindingId, 'association', context) : null
+    let retained: Awaited<ReturnType<typeof runtime.executionBindings.inspect>> = null
+    if (binding && !previous) {
+      if (!runtime.executionBindings.inspectSourceAdmission) throw new AgentMuxError(
+        'The original Source admission cannot be observed. Keep the original request and binding.', 'CONTROL_UNAVAILABLE')
+      retained = await runtime.executionBindings.inspectSourceAdmission(binding.bindingId)
+    }
     const witness = retained?.association
     if (retained && (!binding || retained.bindingId !== binding.bindingId || retained.agentSessionId !== agentSessionId ||
         !isDeepStrictEqual(retained.agentRoute, adoptedRoute) || retained.resourceRoute !== undefined ||
@@ -102,10 +107,13 @@ export async function openSpatialAgentTarget(options: {
     const admit = () => options.spatial.admitAgentOpen({ request, agentSessionId, placement, execution,
       ...(context.agentTakeover ? { takeover: { preparation: context.agentTakeover.preparation, requestDigest: context.agentTakeover.requestDigest, ...(note === undefined ? {} : { sourceAgentMuxNote: note }) } } : {}),
       ...(binding ? { executionBinding: binding } : {}), regionResource: options.descriptor({ agentSessionId, execution, placement }, 'launching') }, options.assertTakeover)
-    if (binding && !retained && (!previous || previous.takeover) && !runtime.executionBindings.admit) throw new AgentMuxError(
+    // Takeover can persist its spatial intent before the Coordinator acknowledges
+    // the binding. Recheck the complete saved launch through the same Admit.
+    const needsBindingAdmission = !retained && (!previous || Boolean(previous.takeover))
+    if (binding && needsBindingAdmission && !runtime.executionBindings.admit) throw new AgentMuxError(
       'The original Core cannot acknowledge this frozen execution intent. Keep the original Source request; no helper was started.', 'CONTROL_UNAVAILABLE')
     const frozenAdmission = context.agentTakeover && !previous ? await admit() : undefined
-    if (binding && !retained && (!previous || previous.takeover)) {
+    if (binding && needsBindingAdmission) {
       const agent = { agentSessionId, createOperationId: request.requestId, executorId: request.content.executorId,
         executorRevision: execution.executorRevision, workspacePath: execution.workspacePath, ...launch,
         ...(request.content.prompt === undefined ? {} : { prompt: request.content.prompt }), ...(note ? { sourceAgentMuxNote: note } : {}) }

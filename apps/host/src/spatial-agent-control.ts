@@ -73,7 +73,8 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
         report.execution = { coordinatorRuntimeId: record.placement.runtimeId, reference: record.executionBinding, inspection: null, placement: 'retained' }
         const bindings = options.runtime().executionBindings
         if (bindings.sourceDiagnostics && canReadSourceExecution(context)) try {
-          report.execution.diagnostics = await bindings.sourceDiagnostics(record.requestId, context)
+          report.execution.diagnostics = await bindings.sourceDiagnostics(record.requestId, context,
+            observedGraph ? { spatial: options.spatial, graph: observedGraph } : undefined)
         } catch {
           context.signal?.throwIfAborted(); await context.assertCurrent?.()
           report.issues.push(issue(new AgentMuxError('The original Source diagnostic metadata is unconfirmed. Its request and helpers remain retained.', 'EXECUTION_DIAGNOSTIC_UNAVAILABLE'), 'observation'))
@@ -169,7 +170,7 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
       let admission: Awaited<ReturnType<NonNullable<typeof runtime.executionBindings.sourceDiagnostics>>> | undefined
       let observationIssue: { code: string; message: string } | undefined
       if (!record && canReadSourceExecution(context)) try {
-        admission = await runtime.executionBindings.sourceDiagnostics?.(requestId, context)
+        admission = await runtime.executionBindings.sourceDiagnostics?.(requestId, context, { spatial: options.spatial, graph: state?.graph ?? null })
       } catch (error) {
         context.signal?.throwIfAborted(); await context.assertCurrent?.()
         observationIssue = error instanceof AgentMuxError && error.code === 'EXECUTION_DIAGNOSTIC_SCOPE_UNCONFIRMED'

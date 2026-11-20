@@ -3,10 +3,10 @@ import { createHash } from 'node:crypto'
 import { mkdir, chmod, open, stat, type FileHandle } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { join, isAbsolute, dirname } from 'node:path'
-import { DatabaseSync } from 'node:sqlite'
+import { DatabaseSync, type StatementSync } from 'node:sqlite'
 import { isDeepStrictEqual } from 'node:util'
 import { AgentExecutionBridge, ExecutionProtocolFrameError, type AgentExecutionBridgeState, type AgentExecutionBridgePort, type AgentExecutionBridgeSide, type AgentExecutionBridgeConnection } from './agent-execution/bridge.js'
-import { inspectSourceExecutionDiagnostics, isExecutionDiagnosticCode, sourceExecutionBindingId, type ExecutionSourceDiagnosticsOwner, type ExecutionJournalDiagnostics, type AgentExecutionSourceDiagnostics, type ExecutionSourceCreationFailure } from './agent-execution-source-diagnostics.js'
+import { inspectSourceExecutionDiagnostics, isExecutionDiagnosticCode, sourceExecutionBindingId, type ExecutionSourceDiagnosticsOwner, type ExecutionSourceSpatialObservation, type ExecutionJournalDiagnostics, type AgentExecutionSourceDiagnostics, type ExecutionSourceCreationFailure } from './agent-execution-source-diagnostics.js'
 import type { AgentMuxClient } from './client.js';
 import type { AgentMuxHostAgentCreateInput } from "./client-contract.js";
 import type { AgentMuxAgentSession } from './types.js'
@@ -94,6 +94,9 @@ function isSourceExecutionIntent(input: AgentExecutionOpenInput, sourceRuntimeId
     input.agentRuntimeId !== sourceRuntimeId && /^[a-f0-9]{64}$/u.test(input.sourceRequestDigest ?? '') &&
     input.bindingId === sourceExecutionBindingId(sourceRuntimeId, input.agentHostId, input.agent.agentSessionId, input.agent.createOperationId)
 }
+function isSourceAdmission(record: RecordValue, runtimeId: string): boolean {
+  return record.sourceAdmissionRuntimeId === runtimeId && isSourceExecutionIntent(record.input, runtimeId)
+}
 function executionFailure(error: unknown, input: AgentExecutionOpenInput, step: Omit<AgentExecutionFailure, 'reference'>): AgentMuxError {
   if (error instanceof AgentMuxError && error.executionFailure) return error
   const original = error instanceof AgentMuxError ? error : undefined
@@ -123,6 +126,7 @@ export class AgentExecutionCoordinator {
   private readonly projectionFailures = new Map<string, AgentExecutionDiagnostic>()
   private readonly connectionFailures = new Map<string, Diagnostic & { protocolFrame?: Pick<ExecutionProtocolFrameError, 'side' | 'frame'> }>()
   private readonly helperConnections = new Map<string, Map<AgentExecutionBridgeSide, AgentExecutionBridgeConnection>>()
+  private sourceCreationLookup?: StatementSync
   private disposed = false
   private constructor(private readonly db: DatabaseSync, private readonly lease: FileHandle,
     private readonly options: AgentExecutionCoordinatorOptions, private journalVersion: number) {}
@@ -151,7 +155,6 @@ export class AgentExecutionCoordinator {
       const version = Number(db.prepare('PRAGMA user_version').get()!.user_version)
       if (Number(db.prepare('PRAGMA application_id').get()!.application_id) !== 1095587906 || (version !== 1 && version !== 2))
         throw fail('The original execution binding store is unconfirmed; it was not replaced.', 'EXECUTION_STORAGE_UNCONFIRMED')
-      db.exec(`CREATE INDEX IF NOT EXISTS binding_intents_source_creation ON binding_intents(${sourceCreationRuntime}, ${sourceCreationOperation}) WHERE ${sourceCreationIndexed}`)
       const fd = await open(directory, 'r'); try { await fd.sync() } finally { await fd.close() }
       return new AgentExecutionCoordinator(db, lease, options, version)
     } catch (error) { db.close(); await lease.close(); throw error }
@@ -172,7 +175,8 @@ export class AgentExecutionCoordinator {
     // SQLite's acknowledged EXTRA transaction is the durability fence. No full
     // native payload is stored here; pending Input references existing Replay.
     // This synchronous read/update is inside the existing exclusive coordinator writer lease.
-    const cancellation = this.read(record.input.bindingId)?.cancellation
+    const retained = this.db.prepare('SELECT record FROM bindings WHERE id=?').get(record.input.bindingId)
+    const cancellation = retained ? (JSON.parse(String(retained.record)) as Pick<RecordValue, 'cancellation'>).cancellation : undefined
     if (cancellation && record.cancellation && !isDeepStrictEqual(cancellation, record.cancellation)) throw fail('The original binding has another cancellation control.', 'AGENT_CREATION_CANCELLATION_CONFLICT')
     if (cancellation) record.cancellation = cancellation
     // Fence older readers before a row can contain a second Input claim.
@@ -265,7 +269,17 @@ export class AgentExecutionCoordinator {
   }
   inspect(bindingId: string, view?: 'association'): AgentExecutionInspection | null {
     const record = this.read(bindingId)
+    return record ? this.bindingInspection(record, view) : null
+  }
+  inspectSourceAdmission(bindingId: string, runtimeId: string): AgentExecutionInspection | null {
+    const record = this.read(bindingId)
     if (!record) return null
+    if (!isSourceAdmission(record, runtimeId)) throw fail(
+      'The original binding has no confirmed Source admission. Keep the original request and binding.', 'EXECUTION_INTENT_UNCONFIRMED')
+    return this.bindingInspection(record, 'association')
+  }
+  private bindingInspection(record: RecordValue, view?: 'association'): AgentExecutionInspection {
+    const bindingId = record.input.bindingId
     const association: AgentExecutionAssociationWitness | undefined = view === 'association' ? ((): AgentExecutionAssociationWitness => {
       const input = record.input, original = reference(input)
       if (typeof input.agentRuntimeId !== 'string' || !input.agentRuntimeId || typeof input.resourceRuntimeId !== 'string' || !input.resourceRuntimeId ||
@@ -291,13 +305,17 @@ export class AgentExecutionCoordinator {
   }
   /** No live Host or workspace lookup is needed to read this Source's frozen intent. */
   unplacedSourceDiagnostics(sourceRuntimeId: string, operationId: string): ExecutionJournalDiagnostics | null {
-    const rows = this.db.prepare(`SELECT id FROM binding_intents WHERE ${sourceCreationIndexed} AND ${sourceCreationRuntime}=? AND ${sourceCreationOperation}=?`)
-      .iterate(sourceRuntimeId, operationId)
+    // Preparing the optional lookup can require writes on an older journal.
+    // Keep it off the owner startup and exact binding recovery path.
+    if (!this.sourceCreationLookup) {
+      this.db.exec(`CREATE INDEX IF NOT EXISTS binding_intents_source_creation ON binding_intents(${sourceCreationRuntime}, ${sourceCreationOperation}) WHERE ${sourceCreationIndexed}`)
+      this.sourceCreationLookup = this.db.prepare(`SELECT id FROM binding_intents WHERE ${sourceCreationIndexed} AND ${sourceCreationRuntime}=? AND ${sourceCreationOperation}=?`)
+    }
+    const rows = this.sourceCreationLookup.iterate(sourceRuntimeId, operationId)
     let matched: RecordValue | undefined
     for (const row of rows) {
-      const record = this.read(String(row.id)), input = record?.input
-      if (!record || !input || record.sourceAdmissionRuntimeId !== sourceRuntimeId ||
-          input.agent.createOperationId !== operationId || !isSourceExecutionIntent(input, sourceRuntimeId)) continue
+      const record = this.read(String(row.id))
+      if (!record || record.input.agent.createOperationId !== operationId || !isSourceAdmission(record, sourceRuntimeId)) continue
       if (matched) throw fail('More than one frozen intent matches this Source creation. Keep the original operation without selecting a replacement.', 'EXECUTION_DIAGNOSTIC_SCOPE_UNCONFIRMED')
       matched = record
     }
@@ -552,8 +570,10 @@ export class AgentExecutionCoordinator {
     if (!record || !isDeepStrictEqual(reference(record.input), original) || input.agentSessionId !== original.agentSessionId || input.createOperationId !== original.createOperationId) throw fail('The cancellation names another original execution intent.', 'EXECUTION_INTENT_UNCONFIRMED')
     await this.options.authorize?.(record.input, context, record.routeAuthorization, true)
     if (!inspectOnly) {
-      if (record.cancellation && !isDeepStrictEqual(record.cancellation, input)) throw fail('The original binding has another cancellation.', 'AGENT_CREATION_CANCELLATION_CONFLICT')
-      record.cancellation = input; this.save(record)
+      // A live reader may have persisted bytes while authorization was pending.
+      const latest = this.read(original.bindingId)
+      if (!latest) throw fail('The original execution intent is unavailable.', 'EXECUTION_INTENT_UNCONFIRMED')
+      this.save({ ...latest, cancellation: input })
     }
     const host = await this.options.resolveHost(record.input.agentHostId, record.input.agentRoute, record.routeAuthorization ? { authorization: record.routeAuthorization } : undefined)
     try {
@@ -595,75 +615,75 @@ export class AgentExecutionCoordinator {
         }
         return { session: created.session, execution: this.inspect(input.bindingId)! }
       }
-      step = { hostId: input.agentHostId, role: 'agent', stage: 'inventory' }
-      // The same target owns the selected Provider and the actual creation handler.
-      // The target checks the frozen revision again at its Agent Start boundary.
-      const receipt = record.creationContract
-      if (receipt && (receipt.ordinaryLaunch !== 1 || receipt.runtimeId !== input.agentRuntimeId || receipt.executorRevision !== input.agent.executorRevision)) throw fail(
-        'The original target creation contract receipt is unconfirmed. Its intent and helpers were retained.', 'EXECUTION_STORAGE_UNCONFIRMED')
-      let providerId = receipt?.providerId
-      if (providerId === undefined) {
-        const inventory = await hosts.agent.listHostExecutors({ executorId: input.agent.executorId })
-        const selected = inventory.executors.find(executor => executor.executorId === input.agent.executorId)
-        if (!selected || selected.configRevision !== input.agent.executorRevision) throw fail('The selected Agent Host Executor configuration changed.', 'EXECUTOR_REVISION_CONFLICT')
-        const confirms = inventory.runtimeId === input.agentRuntimeId && selected.creationContract?.ordinaryLaunch === 1
-        if (!receipt && !confirms && input.agent.sourceAgentMuxNote !== undefined) throw fail(
-          'The selected Agent Core has not confirmed this complete Source launch input. Keep the original binding and confirm or update that Core; no new helper was started.', 'EXECUTION_CREATION_CONTRACT_UNCONFIRMED')
-        providerId = selected.providerId
-        if (receipt || confirms) {
-          record.creationContract = { ordinaryLaunch: 1, runtimeId: input.agentRuntimeId, executorRevision: selected.configRevision, providerId }
-          this.save(record)
-        }
-      }
-      const preparations = {} as Record<'executor' | 'frontend', import('./agent-execution-helper.js').AgentExecutionHelperPreparation>
-      // Both endpoint owners acknowledge required preparation before either Start.
-      for (const role of ['executor', 'frontend'] as const) {
-        step = { hostId: role === 'executor' ? input.resourceHostId : input.agentHostId, role, stage: 'prepare' }
-        const client = role === 'executor' ? hosts.resource : hosts.agent
-        this.assertNotCancelled(input.bindingId)
-        const original = await client.prepareAgentExecutionHelper({ bindingId: input.bindingId, agentSessionId: input.agent.agentSessionId,
-          providerId, role, workspacePath: role === 'executor' ? input.resourceWorkspacePath : input.agent.workspacePath,
-          createOperationId: creationId(input.bindingId, role), ...(role === 'executor' ? { grant: input.resourceGrant } : { toolExecution }) })
-        if (original.notices !== undefined) {
-          const notices = parseAgentExecutionNotices(original.notices, { providerId, role })
-          record.notices = [...(record.notices ?? []).filter(notice => notice.role !== role), ...notices]
-          this.save(record)
-        }
-        preparations[role] = original
-      }
-      for (const role of ['executor', 'frontend'] as const) {
-        step = { hostId: role === 'executor' ? input.resourceHostId : input.agentHostId, role, stage: 'start' }
-        const client = role === 'executor' ? hosts.resource : hosts.agent, original = preparations[role]
-        const retained = record[role]
-        if (retained) {
-          const observed = await client.inspectPreparedTerminal(original.prepared, { runId: retained.runId })
-          if (!observed || observed.state !== 'running' || client.runtimeIdentity().instanceId !== retained.ownerInstanceId)
-            throw fail('The original execution helper is unavailable; no replacement was started.', 'EXECUTION_HELPER_UNAVAILABLE')
-        } else {
-          const ownerInstanceId = client.runtimeIdentity().instanceId
-          const attempt = record.attempts?.[role]
-          if (attempt && attempt.ownerInstanceId !== ownerInstanceId) throw fail('The original helper Start owner changed; its outcome remains unknown.', 'EXECUTION_HELPER_UNAVAILABLE')
-          let run = await client.inspectPreparedTerminal(original.prepared)
-          if (!run) {
-            if (attempt) throw fail('The original helper Start has no confirmed receipt; it was not submitted again.', 'EXECUTION_HELPER_UNAVAILABLE')
-            record.attempts = { ...record.attempts, [role]: { ownerInstanceId } }; this.save(record)
-            this.assertNotCancelled(input.bindingId)
-            run = await client.createPreparedTerminal(original.prepared)
+      if (!record.bridge) {
+        step = { hostId: input.agentHostId, role: 'agent', stage: 'inventory' }
+        // The same target owns the selected Provider and the actual creation handler.
+        // The target checks the frozen revision again at its Agent Start boundary.
+        const receipt = record.creationContract
+        if (receipt && (receipt.ordinaryLaunch !== 1 || receipt.runtimeId !== input.agentRuntimeId || receipt.executorRevision !== input.agent.executorRevision)) throw fail(
+          'The original target creation contract receipt is unconfirmed. Its intent and helpers were retained.', 'EXECUTION_STORAGE_UNCONFIRMED')
+        let providerId = receipt?.providerId
+        if (providerId === undefined) {
+          const inventory = await hosts.agent.listHostExecutors({ executorId: input.agent.executorId })
+          const selected = inventory.executors.find(executor => executor.executorId === input.agent.executorId)
+          if (!selected || selected.configRevision !== input.agent.executorRevision) throw fail('The selected Agent Host Executor configuration changed.', 'EXECUTOR_REVISION_CONFLICT')
+          const confirms = inventory.runtimeId === input.agentRuntimeId && selected.creationContract?.ordinaryLaunch === 1
+          if (!receipt && !confirms && input.agent.sourceAgentMuxNote !== undefined) throw fail(
+            'The selected Agent Core has not confirmed this complete Source launch input. Keep the original binding and confirm or update that Core; no new helper was started.', 'EXECUTION_CREATION_CONTRACT_UNCONFIRMED')
+          providerId = selected.providerId
+          if (receipt || confirms) {
+            record.creationContract = { ordinaryLaunch: 1, runtimeId: input.agentRuntimeId, executorRevision: selected.configRevision, providerId }
+            this.save(record)
           }
-          if (run.state !== 'running' || client.runtimeIdentity().instanceId !== ownerInstanceId)
-            throw fail('The original helper is not confirmed serving on its original Runtime.', 'EXECUTION_HELPER_UNAVAILABLE')
-          record[role] = { runId: run.runId, ownerInstanceId, inputByte: 0, outputByte: 0 }
-          this.save(record)
         }
+        const preparations = {} as Record<'executor' | 'frontend', import('./agent-execution-helper.js').AgentExecutionHelperPreparation>
+        // Both endpoint owners acknowledge required preparation before either Start.
+        for (const role of ['executor', 'frontend'] as const) {
+          step = { hostId: role === 'executor' ? input.resourceHostId : input.agentHostId, role, stage: 'prepare' }
+          const client = role === 'executor' ? hosts.resource : hosts.agent
+          this.assertNotCancelled(input.bindingId)
+          const original = await client.prepareAgentExecutionHelper({ bindingId: input.bindingId, agentSessionId: input.agent.agentSessionId,
+            providerId, role, workspacePath: role === 'executor' ? input.resourceWorkspacePath : input.agent.workspacePath,
+            createOperationId: creationId(input.bindingId, role), ...(role === 'executor' ? { grant: input.resourceGrant } : { toolExecution }) })
+          if (original.notices !== undefined) {
+            const notices = parseAgentExecutionNotices(original.notices, { providerId, role })
+            record.notices = [...(record.notices ?? []).filter(notice => notice.role !== role), ...notices]
+            this.save(record)
+          }
+          preparations[role] = original
+        }
+        for (const role of ['executor', 'frontend'] as const) {
+          step = { hostId: role === 'executor' ? input.resourceHostId : input.agentHostId, role, stage: 'start' }
+          const client = role === 'executor' ? hosts.resource : hosts.agent, original = preparations[role]
+          const retained = record[role]
+          if (retained) {
+            const observed = await client.inspectPreparedTerminal(original.prepared, { runId: retained.runId })
+            if (!observed || observed.state !== 'running' || client.runtimeIdentity().instanceId !== retained.ownerInstanceId)
+              throw fail('The original execution helper is unavailable; no replacement was started.', 'EXECUTION_HELPER_UNAVAILABLE')
+          } else {
+            const ownerInstanceId = client.runtimeIdentity().instanceId
+            const attempt = record.attempts?.[role]
+            if (attempt && attempt.ownerInstanceId !== ownerInstanceId) throw fail('The original helper Start owner changed; its outcome remains unknown.', 'EXECUTION_HELPER_UNAVAILABLE')
+            let run = await client.inspectPreparedTerminal(original.prepared)
+            if (!run) {
+              if (attempt) throw fail('The original helper Start has no confirmed receipt; it was not submitted again.', 'EXECUTION_HELPER_UNAVAILABLE')
+              record.attempts = { ...record.attempts, [role]: { ownerInstanceId } }; this.save(record)
+              this.assertNotCancelled(input.bindingId)
+              run = await client.createPreparedTerminal(original.prepared)
+            }
+            if (run.state !== 'running' || client.runtimeIdentity().instanceId !== ownerInstanceId)
+              throw fail('The original helper is not confirmed serving on its original Runtime.', 'EXECUTION_HELPER_UNAVAILABLE')
+            record[role] = { runId: run.runId, ownerInstanceId, inputByte: 0, outputByte: 0 }
+            this.save(record)
+          }
+        }
+        record.bridge = { bindingId: input.bindingId, frontend: record.frontend!, executor: record.executor! }
+        this.save(record)
       }
-      if (this.bridges.has(input.bindingId)) {
-        await this.closeBridge(input.bindingId)
-        Object.assign(record, this.read(input.bindingId)!)
-      }
-      record.bridge ??= { bindingId: input.bindingId, frontend: record.frontend!, executor: record.executor! }
-      this.save(record)
+      // A retained pair already crossed both Start fences. Attach checks its
+      // exact Runs and owners; fresh qualification is for unstarted helpers.
       step = { hostId: input.agentHostId, role: 'frontend', stage: 'attach' }
-      await this.attach(record, hosts)
+      if (!this.hasConnectedBridge(input.bindingId)) await this.attach(record, hosts)
       // Endpoint pinning reads the exact original frontend receipt. A not-yet
       // ready helper is returned as unavailable, never silently recreated.
       step = { hostId: input.agentHostId, role: 'agent', stage: 'create' }
@@ -736,9 +756,9 @@ export class AgentExecutionBindingService {
     }
     return this.owner
   }
-  async sourceDiagnostics(operationId: string, context: AgentMuxRpcCallContext = {}): Promise<AgentExecutionSourceDiagnostics | null> {
+  async sourceDiagnostics(operationId: string, context: AgentMuxRpcCallContext = {}, observation?: ExecutionSourceSpatialObservation): Promise<AgentExecutionSourceDiagnostics | null> {
     if (!this.source) throw fail('The original Source diagnostic owner is unavailable.', 'CONTROL_UNAVAILABLE')
-    return await inspectSourceExecutionDiagnostics({ source: this.source, operationId, context,
+    return await inspectSourceExecutionDiagnostics({ source: this.source, operationId, context, ...(observation ? { observation } : {}),
       inspect: bindingId => this.inspect(bindingId, 'association'),
       journal: async original => !this.owner && !await this.retained() ? null : (await this.coordinator()).diagnostics(original),
       unplaced: async (runtimeId, creationId) => !this.owner && !await this.retained() ? null : (await this.coordinator()).unplacedSourceDiagnostics(runtimeId, creationId) })
@@ -762,6 +782,16 @@ export class AgentExecutionBindingService {
   async inspect(bindingId: string, view?: 'association'): Promise<AgentExecutionInspection | null> {
     if (!this.owner && !await this.retained()) return null
     return (await this.coordinator()).inspect(bindingId, view)
+  }
+  /** Private Source owner lookup before an unplaced operation is continued. */
+  async inspectSourceAdmission(bindingId: string): Promise<AgentExecutionInspection | null> {
+    const source = this.source
+    if (!source) throw fail('The original Source admission owner is unavailable.', 'CONTROL_UNAVAILABLE')
+    const runtimeId = source.runtimeId()
+    if (!this.owner && !await this.retained()) return null
+    const coordinator = await this.coordinator()
+    if (source.runtimeId() !== runtimeId) throw fail('The original Source Runtime changed during this read.', 'RUNTIME_OWNER_MISMATCH')
+    return coordinator.inspectSourceAdmission(bindingId, runtimeId)
   }
   /** One related live snapshot reader, with at most one in-flight and one latest
    * value. Reading or cancelling never advances or closes the Coordinator. */

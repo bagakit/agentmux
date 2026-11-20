@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import type { AgentMuxRpcCallContext } from './public-rpc-service.js'
 import type { AgentMuxSpatialStateStore } from './spatial-state.js'
+import type { AgentMuxSpatialGraph } from './spatial-graph.js'
 import { spatialAgentOpenRecord } from './spatial-agent-open-contract.js'
 import type { AgentExecutionInspection } from './agent-execution-coordinator.js'
 import type { AgentExecutionReference, AgentExecutionHelperStart, AgentExecutionFailure } from './agent-execution-contract.js'
@@ -22,6 +23,8 @@ export type AgentExecutionSourceDiagnostics = { sourceRuntimeId: string; referen
     code: 'EXECUTION_PROTOCOL_INVALID_FRAME'; frame: ExecutionFrameFact } }
 export type ExecutionJournalDiagnostics = Omit<AgentExecutionSourceDiagnostics, 'sourceRuntimeId' | 'state'>
 export type ExecutionSourceDiagnosticsOwner = { spatial: Pick<AgentMuxSpatialStateStore, 'read'>; runtimeId(): string }
+/** An in-process observation from the same Source store used by the Coordinator. */
+export type ExecutionSourceSpatialObservation = { spatial: ExecutionSourceDiagnosticsOwner['spatial']; graph: AgentMuxSpatialGraph | null }
 
 /** A Source-owned split creation treats the project Core as the Coordinator. */
 export function sourceExecutionBindingId(sourceRuntimeId: string, agentHostId: string, agentSessionId: string, operationId: string): string {
@@ -36,6 +39,7 @@ export const isExecutionDiagnosticCode = (value: unknown): value is string =>
  * admission from its own Store; no client-supplied tuple supplies authority. */
 export async function inspectSourceExecutionDiagnostics(options: {
   source: ExecutionSourceDiagnosticsOwner; operationId: string; context: AgentMuxRpcCallContext;
+  observation?: ExecutionSourceSpatialObservation;
   inspect(bindingId: string): Promise<AgentExecutionInspection | null>;
   journal(reference: AgentExecutionReference): Promise<ExecutionJournalDiagnostics | null>
   unplaced?(sourceRuntimeId: string, operationId: string): Promise<ExecutionJournalDiagnostics | null>
@@ -48,7 +52,8 @@ export async function inspectSourceExecutionDiagnostics(options: {
     return result
   }
   await finish(null)
-  const state = await source.spatial.read(), record = state ? spatialAgentOpenRecord(state.graph, options.operationId) : null
+  const graph = options.observation?.spatial === source.spatial ? options.observation.graph : (await source.spatial.read())?.graph
+  const record = graph ? spatialAgentOpenRecord(graph, options.operationId) : null
   if (!record) {
     const retained = await options.unplaced?.(sourceRuntimeId, options.operationId)
     return await finish(retained ? { ...retained, sourceRuntimeId, state: 'matched' } : null)
