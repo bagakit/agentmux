@@ -1,3 +1,4 @@
+import { recallCardBlocks } from '@agentmux/core/notebook-observation'
 import { AgentMuxError, type NotebookObservationPort, type NoteContentObservation, type NoteContentMetadata, type NotebookGraph, type NotebookGraphParams } from '@agentmux/core'
 import { notebookFingerprint, type NotebookPage, type NotebookState } from '@agentmux/core/notebook-catalog'
 import { noteKnowledge, parseNoteFile, resolveNoteBlock, type NoteFileDocument } from '@agentmux/client-ui/note/note-knowledge'
@@ -248,10 +249,15 @@ export class NotebookObservationOwner implements NotebookObservationPort {
     const completeness = observations.every(o => o.status === 'read' && (o.unanchoredBlockCount ?? 0) === 0) && duplicateNoteIds.length === 0 && !hasExternalTargets && !hasUnbound && !references.some(item => item.resolution === 'ambiguous' || item.resolution === 'unknown') && incompleteSharedScopes.size === 0 ? 'complete' : knowledge.sources.length === 0 && observations.length > 0 ? 'unknown' : 'partial'
     const sharedResources = new Map<string, NoteContentMetadata[]>(), sharedIds = new Set(observations.filter(item => item.kind === 'shared-block').map(item => item.noteId))
     for (const item of observations) if (sharedIds.has(item.noteId)) { const list = sharedResources.get(item.noteId) ?? []; list.push(item); sharedResources.set(item.noteId, list) }
+    const recallCards = knowledge.sources.flatMap(source =>
+      selected.has(source.note.noteId) && !duplicateNoteIds.includes(source.note.noteId)
+        ? recallCardBlocks(source.note.content).map(({ blockId, card }) => ({ source: { noteId: source.note.noteId, blockId }, card }))
+        : [])
     this.sharedResources = sharedResources
     this.incompleteSharedScopes = incompleteSharedScopes
     return {
       catalogRevision: state.revision, scope: params.noteId ? { kind: 'note', noteId: params.noteId } : params.notebookId ? { kind: 'notebook', notebookId: params.notebookId } : { kind: 'catalog' }, scannedScope: 'catalog', completeness, observations, duplicateNoteIds,
+      ...(recallCards.length ? { recallCards } : {}),
       hierarchy: Object.values(state.pages).filter(p => p.parentNoteId && (selected.has(p.noteId) || selected.has(p.parentNoteId))).map(p => ({ parentNoteId: p.parentNoteId!, noteId: p.noteId })),
       references: references.filter(reference => reference.target.kind === 'unbound' || selected.has(reference.source.noteId) || selected.has(reference.target.noteId))
     }

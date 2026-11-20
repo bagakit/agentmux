@@ -1,3 +1,5 @@
+import { readRecallCard, recallCardHref, type RecallCard } from './recall-card.js'
+export { readRecallCard, recallCardHref, recallCardBlocks, recallDailyDate, type RecallCard } from './recall-card.js'
 import { AgentMuxError } from './errors.js'
 export { AgentMuxError } from './errors.js'
 import type { NotebookState, NoteResource } from './notebook-catalog.js'
@@ -21,6 +23,7 @@ export type NoteGraphReference = { source: NoteGraphEndpoint; sourceResource: No
   /** A query observed from the saved source; its file binding and occurrence are unchanged. */
   query?: string;
   mode: 'reference' | 'embed' | 'link'; resolution: 'resolved' | 'missing' | 'unknown' | 'ambiguous' | 'unbound' }
+export type RecallCardOccurrence = { source: NoteGraphEndpoint; card: RecallCard }
 export type NotebookGraph = {
   catalogRevision: number
   scope: NotebookGraphScope
@@ -31,6 +34,7 @@ export type NotebookGraph = {
   duplicateNoteIds: string[]
   hierarchy: { parentNoteId: string; noteId: string }[]
   references: NoteGraphReference[]
+  recallCards?: RecallCardOccurrence[]
 }
 export type NotebookObservationPort = {
   scan?(params: import('./note-corpus.js').NoteCorpusParams, options?: { signal?: AbortSignal }): Promise<import('./note-corpus.js').NoteCorpusResult>
@@ -132,7 +136,7 @@ export function parseNotebookGraph(value: unknown, params: NotebookGraphParams):
   return protocolResult(() => validateNotebookGraph(value, params))
 }
 function validateNotebookGraph(value: unknown, params: NotebookGraphParams): NotebookGraph {
-  const p = object(value, ['catalogRevision', 'scope', 'scannedScope', 'completeness', 'observations', 'duplicateNoteIds', 'hierarchy', 'references'])
+  const p = object(value, ['catalogRevision', 'scope', 'scannedScope', 'completeness', 'observations', 'duplicateNoteIds', 'hierarchy', 'references', 'recallCards'])
   count(p.catalogRevision)
   const expected: NotebookGraphScope = params.noteId ? { kind: 'note', noteId: params.noteId } : params.notebookId ? { kind: 'notebook', notebookId: params.notebookId } : { kind: 'catalog' }
   const s = object(p.scope, ['kind', 'notebookId', 'noteId'])
@@ -162,6 +166,17 @@ function validateNotebookGraph(value: unknown, params: NotebookGraphParams): Not
   if (p.completeness === 'complete' && (observations.some(o => o.status !== 'read' || (o.unanchoredBlockCount ?? 0) > 0) || (p.duplicateNoteIds as unknown[]).length > 0)) bad('Incomplete file observations cannot confirm the whole graph.')
   list(p.hierarchy).forEach(v => { const e = object(v, ['parentNoteId', 'noteId']); id(e.parentNoteId); id(e.noteId); if (![e.parentNoteId, e.noteId].every(noteId => grouped.has(noteId as string))) bad('An original hierarchy endpoint is outside the observed catalog.') })
   const endpoint = (v: unknown) => { const e = object(v, ['noteId', 'blockId']); id(e.noteId); id(e.blockId) }
+  if (p.recallCards !== undefined) list(p.recallCards).forEach(value => {
+    const entry = object(value, ['source', 'card'])
+    endpoint(entry.source)
+    const source = entry.source as NoteGraphEndpoint
+    const original = byNoteId.get(source.noteId)
+    const card = object(entry.card, ['id', 'title', 'reference', 'routeHostId']) as RecallCard
+    if (!original || original.status !== 'read' || !original.blockIds.includes(source.blockId) ||
+      duplicates.includes(source.noteId) || params.noteId && source.noteId !== params.noteId) bad('The card must come from an observed original Note block.')
+    try { if (!readRecallCard(recallCardHref(card), card.title)) bad('The original card reference is invalid.') }
+    catch { bad('The original card reference is invalid.') }
+  })
   list(p.references).forEach(v => {
     const e = object(v, ['source', 'sourceResource', 'target', 'occurrence', 'mode', 'resolution', 'query']); endpoint(e.source); resource(e.sourceResource); member(e.mode, ['reference', 'embed', 'link']); member(e.resolution, ['resolved', 'missing', 'unknown', 'ambiguous', 'unbound'])
     const source = e.source as NoteGraphEndpoint, target = object(e.target, ['kind', 'noteId', 'blockId', 'text'])
