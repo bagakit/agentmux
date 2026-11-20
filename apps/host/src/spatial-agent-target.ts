@@ -73,10 +73,11 @@ export async function openSpatialAgentTarget(options: {
     if (inventory && inventory.runtimeId !== host.runtimeId) throw new AgentMuxError('The executor inventory belongs to another original Agent Core.', 'RUNTIME_OWNER_MISMATCH')
     const matches = inventory?.executors.filter(executor => executor.executorId === request.content.executorId)
     if (matches && matches.length !== 1) throw new AgentMuxError('Choose an executor registered on the original Agent Core.', 'UNKNOWN_EXECUTOR')
+    const selected = matches?.[0]
     const launch = parseAgentOpenLaunchFields(request.content)
     const preparedNote = previous?.takeover ? previous.takeoverSourceAgentMuxNote : !previous && !retained ? await options.agentMuxContext?.(request) : undefined
     const note = context.agentTakeover && sameRuntime ? preparedNote ?? '' : preparedNote
-    if (!previous && !retained && (Object.keys(launch).length || Boolean(note)) && matches![0]!.creationContract?.ordinaryLaunch !== 1) throw new AgentMuxError(
+    if (selected && (Object.keys(launch).length || Boolean(note)) && selected.creationContract?.ordinaryLaunch !== 1) throw new AgentMuxError(
       'The selected execution Core has no confirmed handler for this complete launch input. Keep this request and update or confirm that Core; no Agent or helper was started.', 'AGENT_OPEN_CONTRACT_UNCONFIRMED')
     const executionHostId = previous?.execution.hostId ?? (sameRuntime ? 'local' : target.hostId)
     if (!previous && !retained) try {
@@ -92,7 +93,7 @@ export async function openSpatialAgentTarget(options: {
     } catch (error) { if (!(error instanceof AgentMuxError) || error.code !== 'AGENT_CREATION_UNKNOWN') throw error }
     const execution = previous?.execution ?? { hostId: executionHostId, ...optionalInputEpoch(launch.inputEpoch), runtimeId: host.runtimeId,
       workspacePath: originalAgent ? originalAgent.workspacePath : sameRuntime ? placement.workspacePath : (await host.client.hostEnvironment({ agentSessionId })).agentWorkspace.workspacePath,
-      workspaceId: sameRuntime ? placement.workspaceId : null, executorRevision: originalAgent?.executorRevision ?? matches![0]!.configRevision,
+      workspaceId: sameRuntime ? placement.workspaceId : null, executorRevision: originalAgent?.executorRevision ?? selected!.configRevision,
       ...(adoptedRoute ? { adoptedRoute } : {}) }
     if (!previous && !retained) {
       if (launch.inputRuntimeId !== undefined && launch.inputRuntimeId !== host.runtimeId) throw new AgentMuxError('The original input belongs to another execution Runtime.', 'RUNTIME_OWNER_MISMATCH')
@@ -113,7 +114,8 @@ export async function openSpatialAgentTarget(options: {
       const acknowledged = await runtime.executionBindings.admit!({ bindingId: binding.bindingId, agentHostId: execution.hostId, agentRuntimeId: execution.runtimeId,
         ...(execution.adoptedRoute ? { agentRoute: execution.adoptedRoute } : {}), sourceRequestDigest: spatialAgentOpenDigest(request),
         resourceHostId: placement.hostId, resourceRuntimeId: placement.runtimeId, resourceWorkspacePath: placement.workspacePath,
-        resourceGrant: { scope: 'host-user', bindingId: binding.bindingId }, agent }, context)
+        resourceGrant: { scope: 'host-user', bindingId: binding.bindingId }, agent }, context,
+      inventory && selected?.creationContract?.ordinaryLaunch === 1 ? { runtimeId: inventory.runtimeId, executor: selected } : undefined)
       if (acknowledged.bindingId !== binding.bindingId || acknowledged.agentSessionId !== agentSessionId || acknowledged.createOperationId !== request.requestId)
         throw new AgentMuxError('The Core did not acknowledge this original frozen intent. Keep the Source operation and inspect its original binding.', 'EXECUTION_INTENT_UNCONFIRMED')
     }

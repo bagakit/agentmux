@@ -310,9 +310,9 @@ export class HostRouteGateway {
     const operation = call ? hostRouteOperation(call) : undefined
     if (!operation || operation.kind !== 'spatial' && operation.kind !== 'execution') denied('Preparation needs the same original typed creation and target.', 'HOST_ROUTE_DERIVATION_MISMATCH')
     const target = operation.kind === 'spatial' ? operation.targetRuntimeId : operation.agentRuntimeId
-    if (target !== targetRuntimeId) denied('Preparation names another original Agent target.', 'HOST_ROUTE_TARGET_MISMATCH')
+    if (target !== targetRuntimeId || !operation.agentRoute) denied('Preparation needs the adopted route to the original Agent target.', 'HOST_ROUTE_TARGET_MISMATCH')
     return await this.options.authority.attestHostRouteExecution({ schema: 'agentmux.host-route-execution.v1', purpose: 'host-route-execution', ...origin,
-      scope: { kind: 'preparation', targetRuntimeId, createOperationId: operation.createOperationId, executorId: operation.executorId } })
+      scope: { kind: 'preparation', targetRuntimeId, createOperationId: operation.createOperationId, executorId: operation.executorId, agentRoute: operation.agentRoute } })
   }
   /** Original Space/admission read owner supplies only its confirmed members.
    * This uses the current viewer's read parent, never a creator's frozen input grant. */

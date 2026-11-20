@@ -99,7 +99,8 @@ export function assertExecutionParent(authorization: HostRouteExecutionAuthoriza
   if (operation.kind !== 'spatial' && operation.kind !== 'execution') deny()
   if (scope.kind === 'preparation') {
     const target = operation.kind === 'spatial' ? operation.targetRuntimeId : operation.agentRuntimeId
-    if (scope.targetRuntimeId !== target || scope.createOperationId !== operation.createOperationId || scope.executorId !== operation.executorId) deny()
+    if (scope.targetRuntimeId !== target || scope.createOperationId !== operation.createOperationId || scope.executorId !== operation.executorId ||
+        !isDeepStrictEqual(scope.agentRoute, operation.agentRoute)) deny()
   } else if (operation.kind === 'execution') {
     if (!isDeepStrictEqual(scope, operation)) deny()
   } else if (scope.agentRuntimeId !== operation.targetRuntimeId || scope.resourceRuntimeId !== coordinator.runtimeId ||
@@ -158,6 +159,7 @@ export function assertExecutionChild(statement: HostRouteStatement, call: HostRo
     if (destination === scope.resourceRuntimeId && isDeepStrictEqual(statement.route, scope.resourceRoute)) roles.push('executor')
     if (!roles.length) deny()
   } else if (destination !== scope.targetRuntimeId) deny()
+  if (scope.kind === 'preparation' && !isDeepStrictEqual(statement.route, scope.agentRoute)) deny()
   if (scope.kind === 'observation' && scope.source.kind === 'input-epoch-reader') {
     if (stream || !isDeepStrictEqual(statement.route, scope.source.agentRoute)) deny()
     if (call.method === 'runtime.owner.identity') return
@@ -211,6 +213,7 @@ export function assertExecutionChild(statement: HostRouteStatement, call: HostRo
     if (scope.kind === 'preparation' ? value !== statement.preparationSessionId || !statement.preparationSessionId : (typeof value !== 'string' || !observed.includes(value))) deny()
     return
   }
+  if (scope.kind === 'preparation' && method === 'readAgentInputEpoch' && invocation.args.length === 0) return
   if (scope.kind !== 'execution') deny()
   if (method === 'runtimeSubject') {
     const target = rpcRecord(value)

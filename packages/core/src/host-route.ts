@@ -81,6 +81,7 @@ export type HostRouteExecutionScope = {
 }
 export type HostRoutePreparationScope = {
   kind: 'preparation'; targetRuntimeId: string; createOperationId: string; executorId: string
+  agentRoute: AdoptedHostRoute
 }
 export type HostRouteSpatialOperation = {
   kind: 'spatial'; targetRuntimeId: string; createOperationId: string; executorId: string; promptDigest: string
@@ -292,8 +293,9 @@ export function parseHostRouteExecutionAuthorization(value: unknown): HostRouteE
     if ((source.kind === 'input-epoch-reader' ? agentSessionIds.length !== 0 || s.targetRuntimeId !== source.targetRuntimeId : !agentSessionIds.length) || new Set(agentSessionIds).size !== agentSessionIds.length) invalid('An observation needs distinct original members.')
     scope = { kind: 'observation', targetRuntimeId: rpcString(s.targetRuntimeId, 'Original Session Runtime'), agentSessionIds, source: source as HostRouteReadOperation }
   } else if (rpcRecord(p.scope).kind === 'preparation') {
-    const s = rpcRecord(p.scope, ['kind','targetRuntimeId','createOperationId','executorId'])
-    scope = { kind: 'preparation', targetRuntimeId: rpcString(s.targetRuntimeId, 'Original target Runtime'), createOperationId: originalString(s.createOperationId, 'Original CID'), executorId: originalString(s.executorId, 'Original Executor') }
+    const s = rpcRecord(p.scope, ['kind','targetRuntimeId','createOperationId','executorId','agentRoute'])
+    scope = { kind: 'preparation', targetRuntimeId: rpcString(s.targetRuntimeId, 'Original target Runtime'), createOperationId: originalString(s.createOperationId, 'Original CID'),
+      executorId: originalString(s.executorId, 'Original Executor'), agentRoute: parseAdoptedHostRoute(s.agentRoute) }
   } else scope = parseHostRouteOperation(p.scope) as HostRouteExecutionScope
   if (scope.kind !== 'execution' && scope.kind !== 'preparation' && scope.kind !== 'observation' && scope.kind !== 'member-control' && scope.kind !== 'member-name' && scope.kind !== 'executor-inventory') invalid('This execution authorization has another scope.')
   return { schema: 'agentmux.host-route-execution.v1', purpose: 'host-route-execution', coordinator: parseHostRouteIdentity(p.coordinator), actor: parseHostRouteActor(p.actor), scope,

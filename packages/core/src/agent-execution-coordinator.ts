@@ -33,6 +33,10 @@ export interface AgentExecutionOpenInput {
   resourceGrant: import('./agent-execution-helper.js').AgentExecutionResourceGrant
   agent: Omit<AgentMuxHostAgentCreateInput, 'toolExecution'> & { agentSessionId: string; createOperationId: string }
 }
+type AgentExecutionExecutorObservation = {
+  runtimeId: string
+  executor: Pick<import('./executor-contract.js').AgentMuxHostExecutorDescriptor, 'executorId' | 'configRevision' | 'providerId' | 'creationContract'>
+}
 type OperationKey = import('./agent-execution/journal.js').AgentExecutionOperationKey
 type Diagnostic = { code: string; message: string; generation?: string; operation?: OperationKey }
 export type AgentExecutionDiagnostic = Diagnostic & (
@@ -48,7 +52,7 @@ const originalOperation = (value: unknown, bindingId: string, generation: unknow
 }
 type RecordValue = { cancellation?: AgentCreationCancellationInput; input: AgentExecutionOpenInput; routeAuthorization?: HostRouteExecutionAuthorization;
   /** Actual target handler observation in this original journal; not caller input or Provider qualification. */
-  creationContract?: { ordinaryLaunch: 1; runtimeId: string; executorRevision: string };
+  creationContract?: { ordinaryLaunch: 1; runtimeId: string; executorRevision: string; providerId?: string };
   agentControl?: { generation: string; state: 'unconfigured' | 'unverified' | 'available' | 'unavailable'; stage?: 'invocation-registration'; code?: string }; notices?: AgentExecutionNotice[]; diagnostic?: AgentExecutionInspection['diagnostic']; diagnostics?: AgentExecutionDiagnostic[]; attempts?: Partial<Record<'frontend' | 'executor', { ownerInstanceId: string }>>; bridge?: AgentExecutionBridgeState; frontend?: AgentExecutionBridgeState['frontend']; executor?: AgentExecutionBridgeState['executor'] }
 export interface AgentExecutionInspection {
   bindingId: string
@@ -465,18 +469,29 @@ export class AgentExecutionCoordinator {
   }
   /** Called only inside this binding's lane. The durable write is independent
    * of later network preparation and advancement; its ACK is never rolled back. */
-  private async freeze(input: AgentExecutionOpenInput, context?: AgentMuxRpcCallContext): Promise<RecordValue> {
+  private async freeze(input: AgentExecutionOpenInput, context?: AgentMuxRpcCallContext, observed?: AgentExecutionExecutorObservation): Promise<RecordValue> {
     let record = this.read(input.bindingId)
     if (record && !isDeepStrictEqual(record.input, input)) throw fail('This execution binding already names another original creation.')
     const routeAuthorization = await this.options.authorize?.(input, context, record?.routeAuthorization, !!record)
-    if (!record) { record = { input, ...(routeAuthorization ? { routeAuthorization } : {}) }; this.save(record) }
+    if (!record) {
+      record = { input, ...(routeAuthorization ? { routeAuthorization } : {}) }
+      if (observed) {
+        const { runtimeId, executor } = observed
+        if (runtimeId !== input.agentRuntimeId || executor.executorId !== input.agent.executorId || executor.configRevision !== input.agent.executorRevision ||
+            executor.creationContract?.ordinaryLaunch !== 1 || !executor.providerId) throw fail(
+          'The observed Executor contract belongs to another original launch.', 'EXECUTION_CREATION_CONTRACT_UNCONFIRMED')
+        record.creationContract = { ordinaryLaunch: 1, runtimeId, executorRevision: executor.configRevision, providerId: executor.providerId }
+      }
+      this.save(record)
+    }
     return record
   }
-  /** Acknowledge the complete frozen intent only. No endpoint preparation,
-   * helper Start, Agent creation or first input belongs to this operation. */
-  async admit(value: AgentExecutionOpenInput, context?: AgentMuxRpcCallContext): Promise<AgentExecutionReference> {
+  /** Acknowledge the complete frozen intent only. The optional Executor
+   * observation comes from the Source owner, outside the public create input. */
+  async admit(value: AgentExecutionOpenInput, context?: AgentMuxRpcCallContext, observed?: AgentExecutionExecutorObservation): Promise<AgentExecutionReference> {
     const input = this.creationInput(value)
-    return await this.serialize(input.bindingId, async () => reference((await this.freeze(input, context)).input))
+    const selection = observed && structuredClone(observed)
+    return await this.serialize(input.bindingId, async () => reference((await this.freeze(input, context, selection)).input))
   }
   /** Convenience intake and advancement share one lane, without nesting a
    * serialized public call or holding a DB transaction over remote work. */
@@ -533,19 +548,22 @@ export class AgentExecutionCoordinator {
         return { session: created.session, execution: this.inspect(input.bindingId)! }
       }
       step = { hostId: input.agentHostId, role: 'agent', stage: 'inventory' }
-      const inventory = await hosts.agent.listHostExecutors({ executorId: input.agent.executorId })
-      const selected = inventory.executors.find(executor => executor.executorId === input.agent.executorId)
-      if (!selected || selected.configRevision !== input.agent.executorRevision) throw fail('The selected Agent Host Executor configuration changed.', 'EXECUTOR_REVISION_CONFLICT')
-      if (input.agent.sourceAgentMuxNote !== undefined) {
-        // Provider preparation does not attest this Core's creation wire handler.
-        // Once observed for this frozen intent, metadata disappearance is not revocation.
-        const receipt = record.creationContract
-        if (receipt && (receipt.ordinaryLaunch !== 1 || receipt.runtimeId !== input.agentRuntimeId || receipt.executorRevision !== input.agent.executorRevision)) throw fail(
-          'The original target creation contract receipt is unconfirmed. Its intent and helpers were retained.', 'EXECUTION_STORAGE_UNCONFIRMED')
-        if (!receipt) {
-          if (inventory.runtimeId !== input.agentRuntimeId || selected.creationContract?.ordinaryLaunch !== 1) throw fail(
-            'The selected Agent Core has not confirmed this complete Source launch input. Keep the original binding and confirm or update that Core; no new helper was started.', 'EXECUTION_CREATION_CONTRACT_UNCONFIRMED')
-          record.creationContract = { ordinaryLaunch: 1, runtimeId: inventory.runtimeId, executorRevision: selected.configRevision }
+      // The same target owns the selected Provider and the actual creation handler.
+      // The target checks the frozen revision again at its Agent Start boundary.
+      const receipt = record.creationContract
+      if (receipt && (receipt.ordinaryLaunch !== 1 || receipt.runtimeId !== input.agentRuntimeId || receipt.executorRevision !== input.agent.executorRevision)) throw fail(
+        'The original target creation contract receipt is unconfirmed. Its intent and helpers were retained.', 'EXECUTION_STORAGE_UNCONFIRMED')
+      let providerId = receipt?.providerId
+      if (providerId === undefined) {
+        const inventory = await hosts.agent.listHostExecutors({ executorId: input.agent.executorId })
+        const selected = inventory.executors.find(executor => executor.executorId === input.agent.executorId)
+        if (!selected || selected.configRevision !== input.agent.executorRevision) throw fail('The selected Agent Host Executor configuration changed.', 'EXECUTOR_REVISION_CONFLICT')
+        const confirms = inventory.runtimeId === input.agentRuntimeId && selected.creationContract?.ordinaryLaunch === 1
+        if (!receipt && !confirms && input.agent.sourceAgentMuxNote !== undefined) throw fail(
+          'The selected Agent Core has not confirmed this complete Source launch input. Keep the original binding and confirm or update that Core; no new helper was started.', 'EXECUTION_CREATION_CONTRACT_UNCONFIRMED')
+        providerId = selected.providerId
+        if (receipt || confirms) {
+          record.creationContract = { ordinaryLaunch: 1, runtimeId: input.agentRuntimeId, executorRevision: selected.configRevision, providerId }
           this.save(record)
         }
       }
@@ -556,10 +574,10 @@ export class AgentExecutionCoordinator {
         const client = role === 'executor' ? hosts.resource : hosts.agent
         this.assertNotCancelled(input.bindingId)
         const original = await client.prepareAgentExecutionHelper({ bindingId: input.bindingId, agentSessionId: input.agent.agentSessionId,
-          providerId: selected.providerId, role, workspacePath: role === 'executor' ? input.resourceWorkspacePath : input.agent.workspacePath,
+          providerId, role, workspacePath: role === 'executor' ? input.resourceWorkspacePath : input.agent.workspacePath,
           createOperationId: creationId(input.bindingId, role), ...(role === 'executor' ? { grant: input.resourceGrant } : { toolExecution }) })
         if (original.notices !== undefined) {
-          const notices = parseAgentExecutionNotices(original.notices, { providerId: selected.providerId, role })
+          const notices = parseAgentExecutionNotices(original.notices, { providerId, role })
           record.notices = [...(record.notices ?? []).filter(notice => notice.role !== role), ...notices]
           this.save(record)
         }
@@ -667,8 +685,8 @@ export class AgentExecutionBindingService {
       inspect: bindingId => this.inspect(bindingId, 'association'),
       journal: async original => !this.owner && !await this.retained() ? null : (await this.coordinator()).diagnostics(original) })
   }
-  async admit(input: AgentExecutionOpenInput, context?: AgentMuxRpcCallContext): ReturnType<AgentExecutionCoordinator['admit']> {
-    return await (await this.coordinator()).admit(input, context)
+  async admit(input: AgentExecutionOpenInput, context?: AgentMuxRpcCallContext, observed?: AgentExecutionExecutorObservation): ReturnType<AgentExecutionCoordinator['admit']> {
+    return await (await this.coordinator()).admit(input, context, observed)
   }
   async create(input: AgentExecutionOpenInput, context?: AgentMuxRpcCallContext): ReturnType<AgentExecutionCoordinator['create']> {
     return await (await this.coordinator()).create(input, context)
