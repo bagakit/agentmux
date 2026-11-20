@@ -12,6 +12,10 @@ import { afterAll, beforeAll, afterEach, describe, expect, it, vi } from 'vitest
 import { AgentExecutionCoordinator, AgentExecutionBindingService, type AgentExecutionHostPort, type AgentExecutionOpenInput, type AgentExecutionInspection } from '../src/agent-execution-coordinator.js'
 import type { AgentMuxClientEvent, AgentMuxRunInputOperation, AgentMuxAgentSession } from '../src/types.js'
 import { AgentMuxError } from '../src/errors.js'
+import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
+import { AgentMuxControlServer } from '../src/public-rpc-server.js'
+import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
+import { runSourceObjectCli } from './helpers/source-object-cli.js'
 
 let io: Awaited<ReturnType<typeof messageJournalIo>>
 beforeAll(async () => { io = await messageJournalIo() }, 30_000)
@@ -364,9 +368,11 @@ describe('execution coordinator retained original pair', () => {
   it('rejects changed binding intent and Core identity without replacing the pair', async () => {
     const f = await fixture(), first = await f.open(); await first.coordinator.create(f.input)
     await expect(first.coordinator.create({ ...f.input, agent: { ...f.input.agent, agentSessionId: 'another-agent' } })).rejects.toMatchObject({ code: 'EXECUTION_BINDING_CONFLICT' })
+    await first.close()
+    const reopened = await f.open()
     f.resolveHost.mockResolvedValueOnce({ runtimeId: 'replacement-core', client: f.frontend.port })
-    await expect(first.coordinator.rejoin(f.input.bindingId)).rejects.toMatchObject({ code: 'EXECUTION_HOST_CHANGED' })
-    expect(first.coordinator.inspect(f.input.bindingId)).toMatchObject({ state: 'unavailable', diagnostic: { code: 'EXECUTION_HOST_CHANGED' } })
+    await expect(reopened.coordinator.rejoin(f.input.bindingId)).rejects.toMatchObject({ code: 'EXECUTION_HOST_CHANGED' })
+    expect(reopened.coordinator.inspect(f.input.bindingId)).toMatchObject({ state: 'unavailable', diagnostic: { code: 'EXECUTION_HOST_CHANGED' } })
     expect(f.read().input).toEqual(f.input)
     expect(f.executor.api.createPreparedTerminal).toHaveBeenCalledTimes(1)
   })
@@ -468,6 +474,79 @@ describe('exact helper connection and local diagnostic truth', () => {
   const emit = (h: ReturnType<typeof host>, event: Record<string, unknown>) => {
     for (const listener of h.listeners) listener({ run: { runId: h.runId }, evidence: { source: 'run-process', observedAt: 0 }, ...event } as AgentMuxClientEvent)
   }
+  it('the original Unix RPC rejoin preserves healthy readers and isolates a per-attempt authorization failure', async () => {
+    const f = await fixture(), key = { bindingId: f.input.bindingId }
+    const authorize = vi.fn(async () => undefined)
+    const bindings = new AgentExecutionBindingService(f.root, { resolveHost: f.resolveHost, authorize })
+    f.input.agent.executorRevision = 'a'.repeat(64)
+    f.frontend.api.listHostExecutors.mockResolvedValueOnce({ executors: [
+      { executorId: f.input.agent.executorId, providerId: 'fixture-provider', configRevision: f.input.agent.executorRevision },
+    ] })
+    f.frontend.api.createHostAgentWithDelivery.mockImplementationOnce(async () => ({ session: {
+      kind: 'agent', agentSessionId: f.input.agent.agentSessionId, run: { runId: 'original-agent-run' }, retiredRuns: [],
+      providerId: 'fixture-provider', executorId: f.input.agent.executorId, hostId: 'local', workspacePath: f.input.agent.workspacePath,
+      createdAt: 1, updatedAt: 1,
+      creation: { createOperationId: f.input.agent.createOperationId, initialPrompt: 'not-requested', executorRevision: f.input.agent.executorRevision },
+      toolExecution: { bindingId: key.bindingId, resourceHostId: f.input.resourceHostId, resourceRuntimeId: f.input.resourceRuntimeId, workspacePath: f.input.resourceWorkspacePath },
+    } }))
+    cleanups.push(() => bindings.dispose())
+    const server = new AgentMuxControlServer({ socketPath: join(f.root, 'rpc.sock'), executionBindings: bindings })
+    await server.start(); cleanups.push(() => server.stop())
+    const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); cleanups.push(() => rpc.dispose())
+    const original = (await rpc.call('agent.execution.create', f.input)).execution
+    f.resolveHost.mockRejectedValueOnce(new AgentMuxError('Replacement route is unavailable', 'CONTROL_TIMEOUT'))
+    const cli = await runSourceObjectCli(['--endpoint', 'unix:' + server.path, 'agent', 'execution', 'rejoin', '--input', '-'],
+      objectCliEnvironment(f.root), JSON.stringify(key))
+    expect(cli.code, cli.stdout + cli.stderr).toBe(0)
+    expect(JSON.parse(cli.stdout)).toMatchObject({ ok: true, result: original })
+    authorize.mockRejectedValueOnce(new AgentMuxError('The original viewer grant changed', 'CONTROL_PERMISSION_DENIED'))
+    await expect(rpc.call('agent.execution.rejoin', key)).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+    const through = f.frontend.addOutput({ type: 'request', generation: 'original', payload: { id: 1, method: 'tools/call' } })
+    await vi.waitFor(() => expect(f.read().bridge.frontend.outputByte).toBe(through))
+    expect(f.executor.claimed.size).toBe(1)
+    await expect(rpc.call('agent.execution.binding', key)).resolves.toEqual(original)
+    expect(f.resolveHost).toHaveBeenCalledTimes(2)
+    for (const helper of [f.frontend, f.executor]) {
+      expect(helper.api.attachTerminal).toHaveBeenCalledOnce()
+      expect(helper.api.releaseRunAttachment).not.toHaveBeenCalled()
+      expect(helper.api.createPreparedTerminal).toHaveBeenCalledOnce()
+    }
+  })
+
+  it.each([false, true])('keeps a Hosted reader recovered during the rejoin route lookup (alternate route fails: %s)', async failLookup => {
+    const f = await fixture(), owner = await f.open(), resolving = gate(), resolved = gate()
+    const original = (await owner.coordinator.create(f.input)).execution
+    const resolve = f.resolveHost.getMockImplementation()!
+    f.resolveHost.mockImplementationOnce(async id => {
+      resolving.release()
+      await resolved.promise
+      if (failLookup) throw new AgentMuxError('Alternate reader lookup timed out', 'CONTROL_TIMEOUT')
+      return await resolve(id)
+    })
+    emit(f.executor, { type: 'attachment-state', state: 'unavailable', afterByte: 0,
+      diagnostic: { code: 'EXECUTION_READER_UNAVAILABLE', message: 'Original attachment is being restored by its Host' } })
+    const retry = owner.coordinator.rejoin(f.input.bindingId)
+    const outcome = retry.then(value => ({ value }), error => ({ error }))
+    await resolving.promise
+    emit(f.executor, { type: 'attachment-state', state: 'restored', afterByte: 0 })
+    resolved.release()
+    expect(await outcome).toMatchObject(failLookup ? { error: { code: 'CONTROL_TIMEOUT' } } : { value: original })
+    expect(owner.coordinator.inspect(f.input.bindingId)).toEqual(original)
+    for (const helper of [f.frontend, f.executor]) {
+      expect(helper.api.attachTerminal).toHaveBeenCalledOnce()
+      expect(helper.api.releaseRunAttachment).not.toHaveBeenCalled()
+    }
+  })
+
+  it('does not let a continuation lookup failure rewrite an attached connection', async () => {
+    const f = await fixture(), owner = await f.open()
+    const original = (await owner.coordinator.create(f.input)).execution
+    f.frontend.api.readAgentSession.mockRejectedValueOnce(new AgentMuxError('Original Agent Registry read timed out', 'CONTROL_TIMEOUT'))
+    await expect(owner.coordinator.continueOriginal(original.continuation!)).rejects.toMatchObject({ code: 'CONTROL_TIMEOUT' })
+    expect(owner.coordinator.inspect(f.input.bindingId)).toEqual(original)
+    expect(f.frontend.api.attachTerminal).toHaveBeenCalledOnce()
+  })
+
   it.each(['exited', 'interrupted', 'removed'] as const)('observes original helper %s without new output and never revives it from reader restoration', async state => {
     const f = await fixture(), first = await f.open(); await first.coordinator.create(f.input)
     emit(f.executor, state === 'removed' ? { type: 'run-removed' } : { type: 'process-state', state, pid: null })
