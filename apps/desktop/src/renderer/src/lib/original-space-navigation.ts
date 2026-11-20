@@ -179,10 +179,13 @@ export function reconcileOriginalSourceProjection<T extends OriginalSpaceSelecti
   const activeGroup = composition.groups.find(group => group.id === composition.activeGroupId)
   const activeTabId = selection?.tabId == null ? activeGroup?.activeTabId ?? activeGroup?.tabOrder.find(id => tabs[id]) : undefined
   const selectedTab = selectedHere && selection ? selection.tabId ? tabs[selection.tabId] : activeTabId ? tabs[activeTabId] : undefined : undefined
-  const selectedGroup = selectedTab ? composition.groups.find(group => group.tabOrder.includes(selectedTab.id)) : undefined
+  const selectedGroup = selectedTab ? composition.groups.find(group => group.id === selection?.groupId && group.tabOrder.includes(selectedTab.id))
+    ?? composition.groups.find(group => group.tabOrder.includes(selectedTab.id)) : undefined
   const selectedRegion = selectedTab && selection ? selection.regionId && selectedTab.regions[selection.regionId] ? selection.regionId : selectedTab.layout.activeRegionId : null
   if (selectedTab && selectedGroup && (composition.activeGroupId !== selectedGroup.id || selectedGroup.activeTabId !== selectedTab.id)) composition = activateLayoutTab(composition, selectedGroup.id, selectedTab.id)
-  const nextSelection = selectedHere && selection ? { ...selection, workspaceId, tabId: selectedTab?.id ?? null, groupId: selectedGroup?.id ?? null, regionId: selectedRegion } : selection
+  const tabId = selectedTab?.id ?? null, groupId = selectedGroup?.id ?? null
+  const nextSelection = selectedHere && selection && (selection.workspaceId !== workspaceId || selection.tabId !== tabId ||
+    selection.groupId !== groupId || selection.regionId !== selectedRegion) ? { ...selection, workspaceId, tabId, groupId, regionId: selectedRegion } : selection
   const mountedSpaceInputs = savedView ? editMountedSpaceInput(state.mountedSpaceInputs, key, current => {
     const { view: _migrated, ...retained } = current as MountedSpaceInput & { view?: SpaceMountView }
     return retained
