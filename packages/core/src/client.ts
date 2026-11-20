@@ -9321,6 +9321,8 @@ export class AgentMuxClient {
     const attribution = authority && parseGoalApprovalAttribution({ ...authority, kind: 'explicit-goal-selection', at: Date.now() })
     const matchesApproval = (receipt: AgentMuxInteractionOperationReceipt) => !attribution ||
       receipt.goalApproval !== undefined && isDeepStrictEqual({ ...receipt.goalApproval, at: attribution.at }, attribution)
+    const canResumeSavedApproval = (receipt: AgentMuxInteractionOperationReceipt) =>
+      Boolean(attribution && receipt.goalApproval && receipt.delivery === 'saved' && !receipt.nativeCompleted)
     if (attribution && (response.kind !== 'permission' || input.externalAction || attribution.inputKey.agentSessionId !== input.agentSessionId ||
         !sameRun(attribution.inputKey.expectedRun, input.expectedRun) || attribution.inputKey.submissionId !== attribution.dispatchOperationId))
       throw new AgentMuxError('The selected Goal input belongs to another original permission target.', 'AGENT_INTERACTION_RESPONSE_CONFLICT')
@@ -9330,7 +9332,9 @@ export class AgentMuxClient {
           !isDeepStrictEqual(original.response, response) || !isDeepStrictEqual(original.externalAction, input.externalAction) || !matchesApproval(original)) throw new AgentMuxError('The original response operation has different content or attribution.', 'AGENT_INTERACTION_RESPONSE_CONFLICT')
       // Only an explicit same-intent caller may join the original recoverable input operation.
       // Inspection and reconnection never turn unknown into a new input attempt.
-      if (attribution || original.goalApproval || !['saved', 'unknown'].includes(original.delivery) || original.nativeCompleted || expected.evidence.source === 'acp' && original.delivery === 'unknown') return original
+      const recoverable = original.goalApproval ? canResumeSavedApproval(original)
+        : !original.nativeCompleted && (original.delivery === 'saved' || original.delivery === 'unknown' && expected.evidence.source !== 'acp')
+      if (!recoverable) return original
     }
     if (attribution) {
       const originalInput = await this.inspectAgentInput({ key: attribution.inputKey })
@@ -9343,24 +9347,19 @@ export class AgentMuxClient {
     await this.updateExactAgentSession(input.agentSessionId, input.expectedRun, current => {
       send = false
       const prior = current.interactionOperations?.[input.operationId]
-      if (prior?.goalApproval) {
-        if (!isDeepStrictEqual(prior.response, response) || !isDeepStrictEqual(agentInteractionRequestTarget(prior.expectedRequest), expected) ||
-            !isDeepStrictEqual(prior.externalAction, input.externalAction) || !matchesApproval(prior))
-          throw new AgentMuxError('The original response operation has different content or attribution.', 'AGENT_INTERACTION_RESPONSE_CONFLICT')
-        return current
-      }
+      if (prior && (!sameRun(prior.run, input.expectedRun) || !isDeepStrictEqual(prior.response, response) ||
+          !isDeepStrictEqual(agentInteractionRequestTarget(prior.expectedRequest), expected) ||
+          !isDeepStrictEqual(prior.externalAction, input.externalAction) || !matchesApproval(prior)))
+        throw new AgentMuxError('The original response operation has different content or attribution.', 'AGENT_INTERACTION_RESPONSE_CONFLICT')
+      if (prior?.goalApproval && !canResumeSavedApproval(prior)) return current
       const request = [current.pendingInteraction?.request, ...(current.pendingInteraction?.additionalRequests ?? [])].find(candidate => candidate?.id === response.requestId)
       if (!request || request.agentSessionId !== input.agentSessionId || !isDeepStrictEqual(agentInteractionRequestTarget(request), expected) ||
           !sameNativeHandle(current.nativeHandle, requested.nativeHandle)) throw new AgentMuxError('The exact original interaction request changed.', 'UNKNOWN_AGENT_INTERACTION')
       const competing = Object.values(current.interactionOperations ?? {}).find(receipt => sameRun(receipt.run, input.expectedRun) &&
         isDeepStrictEqual(agentInteractionRequestTarget(receipt.expectedRequest), expected) && receipt.operationId !== input.operationId)
       if (competing) throw new AgentMuxError('The original request already has another response operation.', 'AGENT_INTERACTION_RESPONSE_CONFLICT')
-      if (prior) {
-        if (!isDeepStrictEqual(prior.response, response) || !isDeepStrictEqual(agentInteractionRequestTarget(prior.expectedRequest), expected) || !matchesApproval(prior)) throw new AgentMuxError('The original response operation has different content or attribution.', 'AGENT_INTERACTION_RESPONSE_CONFLICT')
-        send = true
-        return current
-      }
       send = true
+      if (prior) return current
       return { ...current, interactionOperations: { ...current.interactionOperations, [input.operationId]: {
         operationId: input.operationId, agentSessionId: input.agentSessionId, run: input.expectedRun,
         ...(input.authorHuman === true && !input.externalAction ? {authorHuman:true as const} : {}),
@@ -9387,6 +9386,8 @@ export class AgentMuxClient {
     const hookRequest = [pending?.request, ...(pending?.additionalRequests ?? [])].find(request =>
       request?.id === input.response.requestId && request.kind === 'permission' && request.permissionHook)
     if (hookRequest?.kind === 'permission' && hookRequest.permissionHook) {
+      if (!isDeepStrictEqual(agentInteractionRequestTarget(hookRequest), agentInteractionRequestTarget(input.expectedRequest)))
+        throw new AgentMuxError('The exact original interaction request changed.', 'UNKNOWN_AGENT_INTERACTION')
       await this.respondPermissionHook(canonical, hookRequest, input.response, input.operationId, context)
       return
     }
@@ -9412,8 +9413,22 @@ export class AgentMuxClient {
         throw new AgentMuxError('ACP question responses are unsupported.', 'AGENT_INTERACTION_UNSUPPORTED')
       }
       await context?.assertCurrent?.()
-      assertOriginalResponseTarget()
-      await this.updateExactAgentSession(input.agentSessionId, input.expectedRun, current => interactionReceiptPatch(current, input.operationId, { delivery: 'unknown' }))
+      let claimed = false
+      await this.updateExactAgentSession(input.agentSessionId, input.expectedRun, current => {
+        claimed = false
+        const receipt = current.interactionOperations?.[input.operationId]
+        if (!receipt) throw new AgentMuxError('The original ACP response operation is unavailable.', 'UNKNOWN_AGENT_INTERACTION')
+        if (receipt.delivery !== 'saved' || receipt.nativeCompleted) return current
+        const request = current.pendingInteraction?.request
+        if (!request || !isDeepStrictEqual(agentInteractionRequestTarget(request), receipt.expectedRequest) ||
+            !sameNativeHandle(current.nativeHandle, canonical.nativeHandle) || !this.acp.hasBinding(input.agentSessionId, input.expectedRun) ||
+            !this.acp.hasPendingPermission(input.agentSessionId, request.id))
+          throw new AgentMuxError('The exact original ACP permission callback is unavailable.', 'AGENT_INTERACTION_UNCONFIRMED')
+        context?.requestSignal?.throwIfAborted()
+        claimed = true
+        return interactionReceiptPatch(current, input.operationId, { delivery: 'unknown' })
+      })
+      if (!claimed) return
       await this.acp.respondPermission(input.agentSessionId, pending.request.id, response.decision)
       await this.updateExactAgentSession(input.agentSessionId, input.expectedRun, current => interactionReceiptPatch(current, input.operationId, { delivery: 'acp-acknowledged' }))
       return
@@ -9538,6 +9553,7 @@ export class AgentMuxClient {
       context?.requestSignal?.throwIfAborted()
       const target = [pending?.request, ...(pending?.additionalRequests ?? [])].find(candidate => candidate?.id === request.id)
       if (!sameRun(current.run, session.run) || target?.kind !== 'permission' || !target.permissionHook || target.permissionHook.nativeTurnEnded || permissionNativeTurnEnd(current, target) ||
+          !isDeepStrictEqual(agentInteractionRequestTarget(target), agentInteractionRequestTarget(request)) ||
           current.nativeHandle?.kind === 'provider' && target.permissionHook.nativeSessionId !== undefined && target.permissionHook.nativeSessionId !== current.nativeHandle.sessionId) {
         throw new AgentMuxError('The original permission target changed before dispatch.', 'AGENT_INTERACTION_UNCONFIRMED')
       }
