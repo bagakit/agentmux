@@ -41,7 +41,7 @@ import { prepareConnectionCredentialCli } from './connection-credential-cli.js'
 import { isConnectionReceiverMethod } from './connection-receiver-codec.js'
 import type { AgentMuxRpcCallOptions } from './public-rpc-client.js'
 import { composeOutboundMessage } from './agent-outbound-message.js'
-import type { GoalDelegationParamsMap, GoalDelegationResult } from './goal-delegation.js'
+import type { GoalDelegationParamsMap, GoalDelegationResult, GoalReportResult } from './goal-delegation.js'
 import { delegationWorkerHostId } from '@agentmux/demand/delegations'
 
 let selectedSource: AgentMuxCliSource | undefined
@@ -69,6 +69,24 @@ function goalReviewGuidance(result: GoalDelegationResult, review: GoalDelegation
   if (!attempt?.workerRunId || !attempt.report?.delivery) return
   const target = `Session ${JSON.stringify(attempt.workerAgentSessionId)}, Run ${JSON.stringify(attempt.workerRunId)}, Host ${JSON.stringify(delegationWorkerHostId(attempt))}, Runtime ${JSON.stringify(attempt.report.delivery.authorRuntimeId)}`
   return composeOutboundMessage({ amux: `Supervisor: check remaining work and pending input for ${target}. If that exact Run is still current and has neither, use amux agent stop --session ID --run ID. See amux goal --skill.` })
+}
+
+function goalReportGuidance(result: GoalReportResult, input: GoalDelegationParamsMap['goal.report']): string | undefined {
+  const attempt = 'kind' in result ? undefined : result.delegations.find(entry => entry.operationId === input.operationId)
+  const source = 'kind' in result ? result.sourceMessageId : attempt?.sourceMessageId
+  if (!source || !('kind' in result) && (!attempt?.planNodeId || attempt.report?.operationId !== input.report.operationId)) return
+  const handoff = { goalId: input.goalId, operationId: input.operationId, sourceMessageId: source, replyMessageId: input.report.replyMessageId }
+  return composeOutboundMessage({ amux: `Executor: read the original Goal and its current Supervisor. Give that Supervisor the original report references ${JSON.stringify(handoff)} to verify collection of this reply. Read back the handoff before checking whether you can stop your exact Run. See amux goal --skill.` })
+}
+
+function goalCollectionGuidance(result: GoalDelegationResult, input: GoalDelegationParamsMap['goal.collect']): string | undefined {
+  const attempt = result.delegations.find(entry => entry.operationId === input.operationId)
+  const collection = attempt?.collection
+  if (!attempt?.planNodeId || !attempt.report?.delivery || collection?.operationId !== input.collection.operationId) return
+  const handoff = { goalId: result.goalId, operationId: attempt.operationId, sourceMessageId: attempt.sourceMessageId,
+    replyMessageId: collection.replyMessageId, collectionOperationId: collection.operationId, deliveryHash: attempt.report.delivery.hash,
+    worker: { hostId: delegationWorkerHostId(attempt), runtimeId: attempt.report.delivery.authorRuntimeId, agentSessionId: attempt.workerAgentSessionId } }
+  return composeOutboundMessage({ amux: `Supervisor: acknowledge handoff to the original executor if you still hold responsibility for this Goal. Refer to the saved collection ${JSON.stringify(handoff)}. See amux goal --skill.` })
 }
 function partial(method: AgentMuxRpcMethod, result: unknown): boolean {
   if (!result || typeof result !== 'object') return false
@@ -373,7 +391,9 @@ async function main(): Promise<number> {
         message: source?.message ?? String(error), ...(source?.detail === undefined ? {} : { detail: source.detail }) } })
       return 1
     }
-    const guidance = method === 'goal.plan.review' ? goalReviewGuidance(result as GoalDelegationResult, (invocation.params as GoalDelegationParamsMap['goal.plan.review']).review) : undefined
+    const guidance = method === 'goal.plan.review' ? goalReviewGuidance(result as GoalDelegationResult, (invocation.params as GoalDelegationParamsMap['goal.plan.review']).review)
+      : method === 'goal.report' ? goalReportGuidance(result as GoalReportResult, invocation.params as GoalDelegationParamsMap['goal.report'])
+        : method === 'goal.collect' ? goalCollectionGuidance(result as GoalDelegationResult, invocation.params as GoalDelegationParamsMap['goal.collect']) : undefined
     write({ ok: true, operation: method, ...(output === undefined ? {} : { output }), ...(operationId === undefined ? {} : { operationId }),
       ...(guidance ? { guidance } : {}),
       result: output && method === 'browser.run' ? browserCaptureCliMetadata(captureResult) : output && (method === 'app.capture' || method === 'app.record.read') ? appCaptureCliMetadata(method, result) : result })

@@ -171,7 +171,7 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
             operationId: intent.operationId, sourceMessageId: intent.sourceMessageId, threadId: intent.threadId,
             ownerAgentSessionId: intent.ownerAgentSessionId, workerAgentSessionId: intent.workerAgentSessionId,
             hostId: intent.hostId, alignmentRevision: intent.alignmentRevision, criterionIds: intent.criterionIds, ...(intent.planNodeId ? { planNodeId: intent.planNodeId } : {}),
-            next: 'Read the verified envelope.application for frozen criteria. Use goal report --input FILE with this sourceMessageId to return every delegated criterion with evidence, gap or unknown at your own Core; keep kind:report-submission distinct from owner collection. For a question/block, reply to the original source and record message dispatch report --kind question|escalation. A report is pending collection and human acceptance; exiting or worker_done does not complete the Goal.' })
+            next: 'Read the verified envelope.application and current Ticket before acting. Use goal report --input FILE with this original delegation operation to return every delegated criterion with evidence, gap or unknown. Include sourceMessageId when reporting from another Core. For a question or blocker, reply to the original source and record message dispatch report --kind question|escalation. Keep the worker report distinct from collection by the current Supervisor. See amux goal --skill for verified handoff and exact Run closeout.' })
           intent = { ...intent, requestText: request.intent.text, text: intent.text + '\n\n[AgentMux delegation]\n' + coordination + '\n\n' + guidance }
         }
       }
