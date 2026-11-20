@@ -37,6 +37,7 @@ export type MoteChatHostOptions = {
   agents: MoteChatAgentPort
   /** The exact role writer/reader used by this Host's dialogue and preferences. */
   main?: () => MoteMainReader | undefined
+  prepareCreatorMain?(target: MoteChatTarget, assertCurrent: () => void): Promise<void>
   /** Current sharing facts in this original Connector owner; never a global export inventory. */
   sharedAudience?(reference: { agentSessionId: string }): readonly RoomBinding[]
   executionRuntimeId?(hostId: string): string | undefined
@@ -435,6 +436,21 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
   private async prepareMain(incoming: MoteChatIncoming, configuration: MoteChatConfiguration): Promise<RoomBinding> {
     const main = this.options.main?.()
     if (!main?.withRole || !this.options.session) return fail('MOTE_CHAT_MAIN_UNCONFIRMED', 'The original Main role owner is unavailable. This message is retained; no private-chat Agent was created.')
+    const assertCreator = () => {
+      const current = this.store.route(incoming.application)
+      const retained = this.options.ingress?.()?.readMessage(incoming.ingressId)
+      if (!current || current.revision !== configuration.revision || !sameMotePreferencesTarget(current.target, configuration.target) ||
+        !same(current.creator, incoming.actor) || current.values.connection?.connectionId !== incoming.connectionId ||
+        retained?.state !== 'received' || retained.conversationKind !== 'direct' || !same(retained.actor, incoming.actor) ||
+        !same(retained.application, incoming.application) || retained.externalMessageId !== incoming.externalMessageId ||
+        retained.externalConversationId !== incoming.externalConversationId || retained.connectionId !== incoming.connectionId)
+        return fail('MOTE_CHAT_ROUTE_CHANGED', 'The original creator intake or chat policy changed. Its original message is retained.')
+      this.assertService(incoming.connectionId)
+    }
+    if (this.options.prepareCreatorMain && !this.store.admissionByIngress(incoming.ingressId)) {
+      assertCreator()
+      await this.options.prepareCreatorMain(configuration.target, assertCreator)
+    }
     return await main.withRole(configuration.target, async () => {
       const saved = this.store.admissionByIngress(incoming.ingressId)
       if (saved) return saved.kind === 'main' ? this.mainBinding(saved) : await this.ready(saved.generationId)

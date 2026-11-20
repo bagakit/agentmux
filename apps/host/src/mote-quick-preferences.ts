@@ -1,5 +1,5 @@
 import { parseFileWriteResult, parseFileCreateResult, type AgentMuxRpcFilesOwner } from '@agentmux/core/files'
-import { DEFAULT_MOTE_PRESENCE, effectiveMoteQuickSave, sameMoteQuickDefaults, parseMotePreferencesReadResult, parseMotePreferencesSaveParams, parseMotePreferencesSaveResult, type MoteQuickChoices, type MoteQuickPreferencesPort, type MoteQuickPreferencesReadInput, type MoteQuickPreferencesReadResult, type MoteQuickPreferencesSaveParams, type MoteQuickPreferencesSaveResult, type MotePresenceReading } from '@agentmux/core/mote-preferences'
+import { DEFAULT_MOTE_PRESENCE, moteExecutorPriority, effectiveMoteQuickSave, sameMoteQuickDefaults, parseMotePreferencesReadResult, parseMotePreferencesSaveParams, parseMotePreferencesSaveResult, type MoteQuickChoices, type MoteQuickPreferencesPort, type MoteQuickPreferencesWriteContext, type MoteQuickPreferencesReadInput, type MoteQuickPreferencesReadResult, type MoteQuickPreferencesSaveParams, type MoteQuickPreferencesSaveResult, type MotePresenceReading } from '@agentmux/core/mote-preferences'
 import type { MoteMainReader, MoteMainSnapshot } from '@agentmux/core/mote-dialogue'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import type { ConnectionEnrollmentCallContext } from '@agentmux/core/connections'
@@ -72,10 +72,10 @@ export class HostMoteQuickPreferences implements MoteQuickPreferencesPort {
     }
     return parseMotePreferencesReadResult({ ...original, choices, ...(maintenance ? { maintenance } : {}) }, input)
   }
-  async save(raw: MoteQuickPreferencesSaveParams, context?: ConnectionEnrollmentCallContext): Promise<MoteQuickPreferencesSaveResult> {
+  async save(raw: MoteQuickPreferencesSaveParams, context?: MoteQuickPreferencesWriteContext): Promise<MoteQuickPreferencesSaveResult> {
     return this.ports.main.withRole?await this.ports.main.withRole(raw.target,()=>this.saveInRole(raw,context)):await this.saveInRole(raw,context)
   }
-  private async saveInRole(raw: MoteQuickPreferencesSaveParams, context?: ConnectionEnrollmentCallContext): Promise<MoteQuickPreferencesSaveResult> {
+  private async saveInRole(raw: MoteQuickPreferencesSaveParams, context?: MoteQuickPreferencesWriteContext): Promise<MoteQuickPreferencesSaveResult> {
     const input = parseMotePreferencesSaveParams(raw), values = effectiveMoteQuickSave(input)
     let dispatched = false
     const result = (status: MoteQuickPreferencesSaveResult['status'], source: MoteQuickPreferencesSaveResult['source'], message: string | null) => parseMotePreferencesSaveResult({ kind: 'quick', target: input.target, operationId: input.operationId, status, source, message }, input)
@@ -90,7 +90,7 @@ export class HostMoteQuickPreferences implements MoteQuickPreferencesPort {
       // request, actor, role, definition and controlling preferences stay exact.
       if (!sameBaseline && !(input.action && sameResource && sameControls)) throw new Error('The original MOTE.md changed. Reread its exact revision; your request is retained.')
       if (input.action) {
-        if (!context || !['user', 'device'].includes(context.actor.kind) || !context.actor.id.trim()) throw new Error('Adopting guidance requires the original authenticated person or device. The Agent and its inputs remain available.')
+        if (!context?.actor || !['user', 'device'].includes(context.actor.kind) || !context.actor.id.trim()) throw new Error('Adopting guidance requires the original authenticated person or device. The Agent and its inputs remain available.')
         if (input.destination || !isDeepStrictEqual(input.values, baseline.defaults)) throw new Error('Guidance adoption must preserve the complete original settings and Main binding. Save preference changes separately.')
         if (!this.ports.adoptGuidance) throw new Error('The original guidance adoption owner is unavailable.')
         const before = await this.ports.main.readCurrentMoteMain(input.target, context.signal)
@@ -103,10 +103,12 @@ export class HostMoteQuickPreferences implements MoteQuickPreferencesPort {
       const roleChanged = !sameMoteDefaultConversation(values.conversation, read.defaults.conversation)
       if (roleChanged && !input.destination) throw new Error('Changing the original Main requires its exact legitimate destination.')
       const presenceChanged = JSON.stringify(values.presence ?? DEFAULT_MOTE_PRESENCE) !== JSON.stringify(read.defaults.presence ?? DEFAULT_MOTE_PRESENCE)
-      if (context?.actor.kind === 'agent' && (roleChanged || presenceChanged)) throw new Error('Standing maintenance and its current role require the original person or device configuration. Existing Agents remain available.')
-      if (values.executorId !== read.defaults.executorId && values.executorId) {
+      if (context?.actor?.kind === 'agent' && (roleChanged || presenceChanged)) throw new Error('Standing maintenance and its current role require the original person or device configuration. Existing Agents remain available.')
+      const previousPriority = moteExecutorPriority(read.defaults)
+      const addedExecutors = moteExecutorPriority(values).filter(id => !previousPriority.includes(id))
+      if (addedExecutors.length) {
         const executors = await this.ports.executors()
-        if (!executors.some(value => value.id === values.executorId)) throw new Error('The selected original Executor is unconfirmed.')
+        if (addedExecutors.some(id => !executors.some(value => value.id === id))) throw new Error('A selected original Executor is unconfirmed.')
       }
       if (roleChanged && values.conversation) {
         const locations = await this.readLocations(input.target)
@@ -120,7 +122,7 @@ export class HostMoteQuickPreferences implements MoteQuickPreferencesPort {
       context?.signal?.throwIfAborted(); await context?.assertCurrent?.()
       const base = { ...input.target, expectedResource: read.source.resource, path: 'MOTE.md', content }
       dispatched = true
-      const saved = document ? parseFileWriteResult(await this.ports.files.write({ ...base, expectedRevision: document.revision }, context ? { actor: context.actor } : undefined), { ...base, expectedRevision: document.revision }) : parseFileCreateResult(await this.ports.files.create({ ...base, expectedRevision: null }, context ? { actor: context.actor } : undefined), { ...base, expectedRevision: null })
+      const saved = document ? parseFileWriteResult(await this.ports.files.write({ ...base, expectedRevision: document.revision }, context?.actor ? { actor: context.actor } : undefined), { ...base, expectedRevision: document.revision }) : parseFileCreateResult(await this.ports.files.create({ ...base, expectedRevision: null }, context?.actor ? { actor: context.actor } : undefined), { ...base, expectedRevision: null })
       if (saved.result.status !== 'written') return result(saved.result.status === 'unknown' ? 'unconfirmed' : 'refused-before-write', null, saved.result.status === 'conflict' ? 'The original file changed before this save. Keep this request and reread.' : saved.result.message)
       const actual = saved.result.content ?? content, parsed = parseMoteQuickMode(actual)
       if (!saved.resource || parsed.status !== 'valid' || !sameMoteQuickDefaults(parsed.defaults, values)) throw new Error('The original writer result is unconfirmed. Inspect this same save; do not overwrite or replay it.')

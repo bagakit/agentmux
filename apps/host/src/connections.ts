@@ -91,7 +91,10 @@ export function createHostConnectionOwner(options: HostConnectionOptions) {
   const services = async () => {
     if (closed || !runtime) throw new AgentMuxError('The original Host connection owner is not available. Original records and healthy Agents are retained.', 'CONTROL_UNAVAILABLE')
     const target = runtime.ownerIdentity()
-    return await (opened ??= createConnectionServices({ ...options, ...(moteChat ? { moteChat: { ...moteChat, replyAtOriginalOwner: hostId => { const exact = clients().filter(entry => entry.hostId === hostId); return !!runtime && !closed && exact.length === 1 && exact[0]!.client === runtime.client }, ...(options.moteMain ? { main: options.moteMain } : {}) } } : {}),
+    return await (opened ??= createConnectionServices({ ...options, ...(moteChat ? { moteChat: { ...moteChat, replyAtOriginalOwner: hostId => { const exact = clients().filter(entry => entry.hostId === hostId); return !!runtime && !closed && exact.length === 1 && exact[0]!.client === runtime.client }, ...(options.moteMain ? { main: options.moteMain, prepareCreatorMain: async (target, assertCurrent) => {
+        if (!runtime || closed) throw new AgentMuxError('The original Mote Host is unavailable.', 'MOTE_CHAT_HOST_UNAVAILABLE')
+        await runtime.server.prepareMoteMainForCreator(target, assertCurrent)
+      } } : {}) } } : {}),
       bindings: {
         spatial,
         executionRuntimeId: hostId => authoritySource(hostId)?.executionRuntimeId,

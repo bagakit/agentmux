@@ -47,14 +47,20 @@ export function moteMinutesToMs(value: string, options: { wholeMinutes?: boolean
   const ms = Math.round(Number(text) * 60_000)
   return Number.isSafeInteger(ms) && ms > 0 && (!options.wholeMinutes || ms >= 60_000) ? ms : null
 }
-export type MoteQuickDefaults = { executorId?: string; conversation?: MoteDefaultConversation; conversationRevision?: string; /** Retained legacy file value; no lifecycle execution effect. */ recovery?: 'startup' | 'on-open'; presence?: MotePresencePreferences; conversationRollover?: MoteMainRolloverPolicy; conversationTransition?: MoteMainTransitionMarker }
+export type MoteQuickDefaults = { executorId?: string; fallbackExecutorIds?: string[]; conversation?: MoteDefaultConversation; conversationRevision?: string; /** Retained legacy file value; no lifecycle execution effect. */ recovery?: 'startup' | 'on-open'; presence?: MotePresencePreferences; conversationRollover?: MoteMainRolloverPolicy; conversationTransition?: MoteMainTransitionMarker }
+/** The original primary choice also represents a saved one-item list. */
+export function moteExecutorPriority(defaults: Pick<MoteQuickDefaults, 'executorId' | 'fallbackExecutorIds'>): readonly string[] {
+  return defaults.executorId ? [defaults.executorId, ...(defaults.fallbackExecutorIds ?? [])] : []
+}
 export type MoteGuidanceReading = { availableRevision: string; currentDefinition: ContinuousProgressDefinitionReference | ContinuousProgressDefinition | null; adoptedRevision: string | null; adoptions: ContinuousProgressGuidanceAdoption[] }
 export type MoteMaintenanceAdoption = ContinuousProgressGuidanceAdoption & { loopId: string }
 export type MoteGuidanceAdoptionAction = { kind: 'adopt-current-guidance'; expectedSchedule: { loopId: string; revision: number }; expectedMain: { roleRevision: string; reference: MoteDefaultConversation }; expectedDefinition: ContinuousProgressDefinitionReference; guidanceRevision: string }
 export type MotePresenceReading = { status: 'active' | 'paused' | 'disabled' | 'unbound' | 'unconfirmed'; schedule: import('../continuous-progress-scheduler.js').ContinuousProgressLoop | null; issue: string | null; guidance?: MoteGuidanceReading; input?: ContinuousProgressInputReading }
+export type MoteQuickPreferencesWriteContext = import('../connection-enrollment-contract.js').ConnectionEnrollmentCallContext |
+  { actor?: never; signal?: AbortSignal; assertCurrent(): void | Promise<void> }
 export interface MoteQuickPreferencesPort {
   read(input: MoteQuickPreferencesReadInput): Promise<MoteQuickPreferencesReadResult>
-  save(input: MoteQuickPreferencesSaveParams, context?: import('../connection-enrollment-contract.js').ConnectionEnrollmentCallContext): Promise<MoteQuickPreferencesSaveResult>
+  save(input: MoteQuickPreferencesSaveParams, context?: MoteQuickPreferencesWriteContext): Promise<MoteQuickPreferencesSaveResult>
 }
 /** Generation of one changed Main, shared by the writer and its exact original-operation reader. */
 export function moteChangedMainRoleRevision(spaceId: string, operationId: string, documentRevision: string | null): string {
@@ -145,7 +151,7 @@ export function sameMoteDefaultConversation(a: MoteDefaultConversation | undefin
   return a === b || !!a && !!b && tupleFields.every(key => a[key] === b[key])
 }
 export function sameMoteQuickDefaults(a: MoteQuickDefaults, b: MoteQuickDefaults): boolean {
-  return a.executorId === b.executorId && a.recovery === b.recovery && a.conversationRevision === b.conversationRevision &&
+  return dequal(moteExecutorPriority(a), moteExecutorPriority(b)) && a.recovery === b.recovery && a.conversationRevision === b.conversationRevision &&
     JSON.stringify(a.conversationRollover ?? {kind:'keep-current'}) === JSON.stringify(b.conversationRollover ?? {kind:'keep-current'}) && a.presence?.enabled === b.presence?.enabled && a.presence?.intervalMs === b.presence?.intervalMs && sameMoteDefaultConversation(a.conversation, b.conversation)
 }
 export function sameMotePreferencesTarget(a: MotePreferencesTarget, b: MotePreferencesTarget): boolean {
@@ -188,7 +194,7 @@ export function sameMoteConnectionValues(a: MoteConnectionValues, b: MoteConnect
     sameConnectionApplication(a.connection.application, b.connection.application)
 }
 export function parseMoteQuickDefaults(value: unknown, code: Code = 'INVALID_CONTROL_REQUEST'): MoteQuickDefaults {
-  const p = fields(value, ['executorId', 'conversation', 'conversationRevision', 'recovery', 'presence', 'conversationRollover', 'conversationTransition'], [], code), result: MoteQuickDefaults = {}
+  const p = fields(value, ['executorId', 'fallbackExecutorIds', 'conversation', 'conversationRevision', 'recovery', 'presence', 'conversationRollover', 'conversationTransition'], [], code), result: MoteQuickDefaults = {}
   if (Object.hasOwn(p, 'conversationRollover')) {
     const r = fields(p.conversationRollover, ['kind','idleMs'], ['kind'], code)
     if (r.kind === 'keep-current' && r.idleMs === undefined) result.conversationRollover = {kind:'keep-current'}
@@ -207,6 +213,11 @@ export function parseMoteQuickDefaults(value: unknown, code: Code = 'INVALID_CON
     result.presence = { enabled: value.enabled as boolean, intervalMs: value.intervalMs as number }
   }
   if (Object.hasOwn(p, 'executorId')) result.executorId = id(p.executorId, code)
+  if (Object.hasOwn(p, 'fallbackExecutorIds')) {
+    const fallbacks = list(p.fallbackExecutorIds, value => id(value, code), value => value, code)
+    if (!result.executorId || fallbacks.includes(result.executorId)) fail('Mote Executor priority requires a first choice and distinct alternatives.', code)
+    if (fallbacks.length) result.fallbackExecutorIds = fallbacks
+  }
   if (Object.hasOwn(p, 'conversation')) {
     result.conversation = parseMoteDefaultConversation(p.conversation, code)
   }

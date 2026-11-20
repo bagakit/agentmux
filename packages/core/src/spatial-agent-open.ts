@@ -2,6 +2,7 @@ import { takeoverCancellationRecord } from './agent-takeover-cancellation-record
 import { parseAgentTakeoverProvenance, takeoverDestinationOrganization, qualifyTakeoverOrganization, sameTakeoverOrganization, type AgentTakeoverPreparation } from './agent-takeover.js'
 import { mintObjectId } from './object-id.js'
 import { AgentMuxError } from './errors.js'
+import { moteExecutorPriority } from './mote/preferences.js'
 import { agentCreationIntentDigest } from './agent-creation-authority.js'
 import { spatialCatalog, type AgentMuxSpatialGraph, type SpatialJson } from './spatial-graph.js'
 import { spatialDestination } from './spatial-destination.js'
@@ -64,7 +65,7 @@ export function admitSpatialAgentOpen(graph: AgentMuxSpatialGraph, input: { requ
     const intent = parseMoteMainCreationIntent(input.request.moteMain)
     if (intent.target.expectedResource.hostId !== input.execution.hostId || intent.target.expectedResource.workspaceId !== input.execution.workspaceId ||
       intent.target.spaceId !== input.request.destination.spaceId || intent.target.zoneId !== input.request.destination.zoneId ||
-      input.request.content.kind !== 'new-agent' || intent.baseline.defaults.executorId !== input.request.content.executorId)
+      input.request.content.kind !== 'new-agent' || !moteExecutorPriority(intent.baseline.defaults).includes(input.request.content.executorId))
       throw new AgentMuxError('The Main intent belongs to another original execution resource.', 'SPACE_RESOURCE_CHANGED')
   }
   const digest = spatialAgentOpenDigest(input.request), previous = spatialAgentOpenRecord(graph, input.request.requestId)

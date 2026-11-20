@@ -16,7 +16,7 @@ import { settingsResourceEnvelope } from './settings-resource-json.js'
 import { SPLIT_DIRECTIONS, isSplitDirection } from './split-direction-ssot.js'
 import { parseAgentMuxCreationOrigin } from './agent-creation-admission.js'
 import { parseMoteQuickDefaults, parseMoteDefaultConversation, parseMotePreferencesReadInput, parseMotePreferencesSaveInput,
-  parseMotePreferencesReadResult, parseMotePreferencesSaveResult } from './mote/preferences.js'
+  parseMotePreferencesReadResult, parseMotePreferencesSaveResult, moteExecutorPriority } from './mote/preferences.js'
 import type {
   AgentMuxSpaceAddress, AgentMuxSpaceCatalog, AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult,
   AgentMuxSpaceDestination, AgentMuxSpaceMutationReport, AgentMuxSpaceSelector, AgentMuxSpatialSave, AgentMuxSpaceBindingTarget, AgentMuxSpaceBindingReport, AgentMuxSpaceRegionFact, AgentMuxMotePresentation, AgentMuxMoteConversationReference, AgentMuxSurveyOrganization
@@ -333,7 +333,7 @@ export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_C
         ...(Object.hasOwn(owner, 'capability') ? { capability: spaceControlId(owner.capability, 'Caller capability', code) } : {}) }
     })() : undefined
     const moteMain = Object.hasOwn(source, 'moteMain') ? parseMoteMainCreationIntent(source.moteMain, code) : undefined
-    if (moteMain && (content.kind !== 'new-agent' || content.executorId !== moteMain.baseline.defaults.executorId ||
+    if (moteMain && (content.kind !== 'new-agent' || !moteExecutorPriority(moteMain.baseline.defaults).includes(content.executorId) ||
       source.focus !== false || !target.newTab || target.spaceId !== moteMain.target.spaceId || target.zoneId !== moteMain.target.zoneId ||
       content.prompt !== undefined || content.agentTarget !== undefined || content.executionWorkspaceId !== undefined || content.toolWorkspaceId !== undefined || content.nativeResumeSource !== undefined ||
       target.displayWorkspaceId !== undefined || target.groupId !== undefined)) fail('Main creation retains its configured default, original home and no-input background admission.', code)

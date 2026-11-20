@@ -146,6 +146,10 @@ export class AgentMuxControlServer {
     params: import('./public-rpc.js').AgentMuxRpcParams<M>, context: import('./public-rpc-service.js').AgentMuxRpcCallContext): Promise<import('./public-rpc.js').AgentMuxRpcResult<M>> {
     return await this.service.call(method, params, context)
   }
+  /** Original Host Connector only, never a wire RPC method. */
+  async prepareMoteMainForCreator(target: import('./mote/preferences.js').MotePreferencesTarget, assertCurrent: () => void | Promise<void>): Promise<void> {
+    await this.service.prepareMoteMainForCreator(target, assertCurrent)
+  }
   /** Borrow this original dispatcher reader; the caller owns only its subscription. */
   async subscribeRpc<M extends import('./public-rpc.js').AgentMuxRpcStreamMethod>(method: M, params: Record<string, unknown>,
     emit: (event: import('./public-rpc.js').AgentMuxRpcStreamEvent<M>) => void | Promise<void>, context: import('./public-rpc-service.js').AgentMuxRpcCallContext) {

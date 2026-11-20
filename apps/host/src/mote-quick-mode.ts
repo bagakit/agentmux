@@ -1,8 +1,8 @@
 import { parseMoteDefaultConversation, parseMoteConnectionValues, sameMoteConnectionValues,
-  parseMoteQuickDefaults, sameMoteDefaultConversation, type MoteConnectionValues, type MoteDefaultConversation, type MoteQuickDefaults } from '@agentmux/core/mote-preferences'
+  parseMoteQuickDefaults, sameMoteQuickDefaults, sameMoteDefaultConversation, type MoteConnectionValues, type MoteDefaultConversation, type MoteQuickDefaults } from '@agentmux/core/mote-preferences'
 export { sameMoteDefaultConversation } from '@agentmux/core/mote-preferences'
 export type { MoteDefaultConversation, MoteQuickDefaults } from '@agentmux/core/mote-preferences'
-import { Document, isMap, isScalar, parseDocument } from 'yaml'
+import { Document, isMap, isScalar, isSeq, parseDocument } from 'yaml'
 
 /** Launch/navigation preferences are original files, not personality or Runtime state. */
 export const MOTE_QUICK_MODE_PATH = 'MOTE.md'
@@ -82,6 +82,12 @@ export function parseMoteQuickMode(content: string): { status: 'valid'; defaults
       if (!isScalar(executor) || !validId(executor.value)) return { status: 'unconfirmed', message: ISSUE }
       defaults.executorId = executor.value
     }
+    if (node.has('fallbackExecutorIds')) {
+      const fallback = node.get('fallbackExecutorIds', true)
+      if (!isSeq(fallback) || !defaults.executorId || !fallback.items.every(item => isScalar(item) && validId(item.value))) return { status: 'unconfirmed', message: ISSUE }
+      const parsed = fallback.toJSON() as string[]
+      if (parsed.length) defaults.fallbackExecutorIds = parsed
+    }
     if (node.has('conversation')) {
       const conversation = node.get('conversation', true)
       if (!isMap(conversation)) return { status: 'unconfirmed', message: ISSUE }
@@ -121,10 +127,10 @@ export function serializeMoteQuickMode(content: string, defaults: MoteQuickDefau
   const original = content ? frontmatter(content) : null
   const parsed = content ? parseMoteQuickMode(content) : null
   if (parsed?.status === 'unconfirmed') throw new Error(ISSUE)
-  if (parsed?.status === 'valid' && parsed.defaults.conversationRevision === defaults.conversationRevision && JSON.stringify(parsed.defaults.conversationRollover) === JSON.stringify(defaults.conversationRollover) && JSON.stringify(parsed.defaults.conversationTransition) === JSON.stringify(defaults.conversationTransition) && JSON.stringify(parsed.defaults.presence) === JSON.stringify(defaults.presence) && parsed.defaults.recovery === defaults.recovery && parsed.defaults.executorId === defaults.executorId && sameMoteDefaultConversation(parsed.defaults.conversation, defaults.conversation)) return content
+  if (parsed?.status === 'valid' && sameMoteQuickDefaults(parsed.defaults, defaults) && JSON.stringify(parsed.defaults.conversationTransition) === JSON.stringify(defaults.conversationTransition)) return content
   const document = original?.document ?? new Document({ version: 1, defaults: {} })
   if (!document.has('defaults')) document.set('defaults', {})
-  for (const field of ['conversationRevision','presence','conversationRollover','conversationTransition'] as const) {
+  for (const field of ['conversationRevision','presence','conversationRollover','conversationTransition','fallbackExecutorIds'] as const) {
     if (defaults[field] === undefined) document.deleteIn(['defaults', field])
     else document.setIn(['defaults', field], defaults[field])
   }
