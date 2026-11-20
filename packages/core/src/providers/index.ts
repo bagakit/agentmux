@@ -21,6 +21,7 @@ import { executionEnvironmentValue, executionHomeDirectory, executionPath, execu
 import { catalog, hookCommandTimeout, hookToolFields, inspectHookDisableSetting, runScopedHookCommand } from './shared.js'
 import { createClaudeProvider } from './claude.js'
 import { createCodexProvider } from './codex.js'
+import { withGrokFailureNotice } from './grok.js'
 import { copilotProvider } from '@agentmux/providers/copilot/provider'
 import { normalizeNativeSessionId } from '../agent-native-locator.js'
 import { createCursorProvider } from './cursor-adapter.js'
@@ -225,7 +226,7 @@ export function createBuiltInAgentProviders(defineAgentProvider: ProviderFactory
       readSessionHistoryPage: readAppServerSessionHistoryPage, observeSessionHistory: observeNativeJsonlHistory }),
     createHermesProvider(defineAgentProvider),
     createPiProvider(defineAgentProvider),
-    defineAgentProvider({ ...grok, catalog: catalog(grok.catalog),
+    withGrokFailureNotice(defineAgentProvider({ ...grok, catalog: catalog(grok.catalog),
       readSessionHistoryPage: readGrokSessionHistoryPage,
       recoveryFiles: grokRecoveryFiles,
       readSessionHistoryRecord: readGrokSessionHistoryRecord,
@@ -233,7 +234,7 @@ export function createBuiltInAgentProviders(defineAgentProvider: ProviderFactory
       readConversationChanges: readGrokConversationChanges,
       readInputInitialization: readGrokInputInitialization,
       observeSessionStatus: observeGrokSessionStatus,
-      readPromptExecutionEvidence: readGrokPromptExecutionEvidence }),
+      readPromptExecutionEvidence: readGrokPromptExecutionEvidence })),
     defineAgentProvider({ ...gemini, catalog: catalog(gemini.catalog) }),
     createAntigravityProvider(defineAgentProvider),
     createCursorProvider(defineAgentProvider),

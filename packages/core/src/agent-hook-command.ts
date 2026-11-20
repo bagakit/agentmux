@@ -151,27 +151,32 @@ export async function runAgentHookCommand(): Promise<void> {
     if (isLeftoverHookInvocation(process.argv.slice(2), process.env)) return
 
     const chunks: Buffer[] = []
+    const input = process.stdin[Symbol.asyncIterator]()
     let bytes = 0
-    for await (const value of process.stdin) {
-      const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value)
+    let payload: Record<string, unknown> | undefined
+    while (true) {
+      const part = await input.next()
+      if (part.done) break
+      const chunk = Buffer.isBuffer(part.value) ? part.value : Buffer.from(part.value)
       bytes += chunk.byteLength
-      if (bytes > MAX_HOOK_INPUT_BYTES) throw new Error('Agent hook input exceeds the AgentMux limit.')
-      chunks.push(chunk)
-    }
-
-    const rawInput = Buffer.concat(chunks).toString('utf8').trim()
-    let payload: Record<string, unknown> = {}
-    if (rawInput.length > 0) {
-      try {
-        const parsed = JSON.parse(rawInput) as unknown
-        if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-          payload = parsed as Record<string, unknown>
-        } else {
-          payload = { raw: parsed }
-        }
-      } catch {
-        payload = { raw: rawInput }
+      if (bytes <= MAX_HOOK_INPUT_BYTES) { chunks.push(chunk); continue }
+      if (resolveHookProvider() !== 'grok') throw new Error('Agent hook input exceeds the AgentMux limit.')
+      const { readGrokStopFailure } = await import('./grok-failure-hook-input.js')
+      async function* originalBytes() {
+        yield* chunks
+        yield chunk
+        for (let rest = await input.next(); !rest.done; rest = await input.next())
+          yield Buffer.isBuffer(rest.value) ? rest.value : Buffer.from(rest.value)
       }
+      payload = await readGrokStopFailure(originalBytes())
+      break
+    }
+    if (!payload) {
+      const rawInput = Buffer.concat(chunks).toString('utf8').trim()
+      try {
+        const parsed: unknown = rawInput ? JSON.parse(rawInput) : {}
+        payload = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : { raw: parsed }
+      } catch { payload = { raw: rawInput } }
     }
 
     // 显式旗标优先；payload 消费当前 Provider 交付的声明来源，缺席/空白/非字符串保持 unknown，不从其他合法字段猜名。
