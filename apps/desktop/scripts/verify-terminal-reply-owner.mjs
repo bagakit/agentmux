@@ -60,6 +60,7 @@ const client = new CtxmuxClient({ socketPath: socket })
 let daemon, daemonExit, diagnostics = '', original
 let expectedRaw = ready
 let inputCursor = 0
+let nativeReplies = false
 
 async function waitFor(label, read, accepts) {
   const deadline = performance.now() + 5_000
@@ -71,8 +72,9 @@ async function waitFor(label, read, accepts) {
   throw new Error(`Private terminal reply probe timed out: ${label}`)
 }
 
-function start(program, args, initial_size = grid) {
-  return client.start({ program, args, cwd: root, env: { TERM: 'xterm-256color' }, initial_size, declared_inputs: [] })
+function start(program, args, initial_size = grid, terminal_replies) {
+  return client.start({ program, args, cwd: root, env: { TERM: 'xterm-256color' }, initial_size, declared_inputs: [],
+    ...(terminal_replies === undefined ? {} : { terminal_replies }) })
 }
 
 async function assertOriginalOutput() {
@@ -80,6 +82,7 @@ async function assertOriginalOutput() {
     run => run.latest_output_bytes >= Buffer.byteLength(expectedRaw))
   assert.equal(current.pid, original.pid)
   assert.equal(current.state.type, 'running')
+  return current
 }
 
 async function openView(size, initialMarker) {
@@ -133,15 +136,36 @@ async function observe(label, expected, operation, presenting) {
   if (!passed) receipt.failures.push(`${label}: original child input differs from the expected reply bytes`)
 }
 
-function live(command, presenting, label) {
-  return observe(label, reply, async () => {
+async function live(command, presenting, label) {
+  const fromOutput = Buffer.byteLength(expectedRaw)
+  const fromInput = inputCursor
+  await observe(label, reply, async () => {
     await client.input(original.id, command)
     expectedRaw += phases[command]
-    await assertOriginalOutput()
+    const current = await assertOriginalOutput()
+    if (presenting.length === 0) assert.equal(current.attachments, 0)
     await Promise.all(presenting.map(view => waitFor('interactive CLI painted live output', () => view.text,
       text => text.includes(`REPLY_FIXTURE_${command}`))))
     return command
   }, presenting)
+  if (nativeReplies) {
+    const { observation } = await client.observeTerminalReplies(original.id, fromOutput)
+    const phase = phases[command]
+    const dsrEnd = fromInput + 1 + Buffer.byteLength(dsr)
+    const daEnd = dsrEnd + Buffer.byteLength(da)
+    assert.equal(observation.run_id, original.id)
+    assert.equal(observation.process_id, original.pid)
+    assert.ok(observation.covers_after_output_byte <= fromOutput)
+    assert.equal(observation.through_output_byte, Buffer.byteLength(expectedRaw))
+    assert.equal(observation.applied_input_bytes, inputCursor)
+    assert.deepEqual(observation.replies, [
+      { query_end_byte: fromOutput + phase.indexOf(`${ESC}[6n`) + 4,
+        outcome: { state: 'applied', applied_range: { start_byte: fromInput + 1, end_byte: dsrEnd } } },
+      { query_end_byte: fromOutput + phase.indexOf(`${ESC}[c`) + 3,
+        outcome: { state: 'applied', applied_range: { start_byte: dsrEnd, end_byte: daEnd } } }
+    ])
+    receipt.cases.at(-1).nativeReplyRangesVerified = true
+  }
 }
 
 try {
@@ -157,10 +181,13 @@ try {
   const runtime = await waitFor('private daemon ready', () => client.runtimeInfo().catch(() => null), Boolean)
   assert.equal(runtime.protocolGeneration, PROTOCOL_VERSION)
   receipt.protocol = runtime.protocolGeneration
+  nativeReplies = (runtime.capabilities['native.terminal_replies'] ?? 0) >= 1
 
   const child = fileURLToPath(new URL('./fixtures/terminal-reply-owner/child.cjs', import.meta.url))
-  original = await start(process.execPath, [child, transcriptPath, ready, JSON.stringify(phases)])
+  original = await start(process.execPath, [child, transcriptPath, ready, JSON.stringify(phases)], grid,
+    nativeReplies ? 'native_dsr_da' : undefined)
   assert.ok(original.pid > 0)
+  assert.equal(original.spec.terminal_replies, nativeReplies ? 'native_dsr_da' : undefined)
   receipt.original = { runId: original.id, pid: original.pid }
   await assertOriginalOutput()
   await live('A', [], 'live with no attachment')
