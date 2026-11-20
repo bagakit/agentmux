@@ -70,12 +70,8 @@
 .focus-source-status .service-disclosure__content section + section { margin-top: 14px; }
 .focus-source-status .service-disclosure__content p { margin: 4px 0 8px; overflow-wrap: anywhere; }
 .focus-source-status__entry { padding: 6px 0 8px; border-top: 1px solid var(--line-soft); }
+.focus-source-status__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .focus-source-status__cause { margin: 0 0 var(--sp-3); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
-.focus-source-issue { flex: none; padding: 0 var(--sp-3) var(--sp-2); font-size: var(--fs-meta); line-height: 1.5; }
-.focus-source-issue > .service-window { margin-inline: 0; }
-.focus-source-issue > details { margin-top: var(--sp-2); }
-.focus-source-issue > details > summary { cursor: pointer; }
-.focus-source-issue > details > p { margin: var(--sp-2) 0 0; padding-inline-start: var(--sp-3); }
 .focus-agent-reveal { display: flex; flex: none; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--line-soft); background: var(--surface-2); color: var(--text-2); font-size: var(--fs-meta); }
 .focus-agent-reveal > span { min-width: 0; overflow-wrap: anywhere; }
 .focus-agent-reveal > button { flex: none; margin-left: auto; }

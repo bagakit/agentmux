@@ -40,6 +40,7 @@ function matchesLocation(location: Location, requested: FocusContextAccess['loca
 const sourceFactKey = (target: NonNullable<Candidate['readingTarget']>) => JSON.stringify([target.target.runtimeId, target.target.agentSessionId, target.target.reference.runtimeId, target.target.expectedAdmission])
 const candidateFactKey = (candidate: Candidate) => candidate.readingTarget ? sourceFactKey(candidate.readingTarget) : candidate.directName ? JSON.stringify([candidate.runtimeId, candidate.sid, candidate.directName.target.runtimeId]) : candidate.target ? JSON.stringify([candidate.runtimeId, candidate.sid, candidate.target.target.reference, candidate.target.target.regionId]) : undefined
 type SourceChoice = { locations: FocusContextAccess['locations']; choose(location: FocusContextAccess['locations'][number]): void }
+export type FocusSourceIssue = { key: string; label: string; host: string; hostId: string; reference?: SpaceMountRecord['reference']; message: string; reading: boolean; refresh(): void }
 type ReadFact = { key: string; session?: SessionSnapshot; name?: NameObservation;
   conversationPort?: ConversationReadApi; readConversation?: () => Promise<void>; reading?: ReturnType<typeof projectConversationWindow>;
   rename?: FocusNameEditor | undefined; nameSaveIssue?: string | undefined; sessionIssue?: string | undefined; nameIssue?: string | undefined; readingIssue?: string | undefined; readingCurrent?: () => boolean }
@@ -619,7 +620,8 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
   const publishLocations = useCallback((next: FocusSourceLocationObservation) => setLocationReads(previous => {
     const before = previous.get(next.host.id)
     const value = next.value ?? (before?.host === next.host ? before.value : undefined)
-    return new Map(previous).set(next.host.id, { ...next, ...(value ? { value } : {}) })
+    const issue = next.issue ?? (next.reading && before?.host === next.host ? before.issue : undefined)
+    return new Map(previous).set(next.host.id, { ...next, ...(value ? { value } : {}), ...(issue ? { issue } : {}) })
   }), [])
   const originalLocations = useMemo(() => new Map([...locationReads].filter(([hostId, observed]) =>
     config?.hosts.find(host => host.id === hostId) === observed.host)), [locationReads, config?.hosts])
@@ -734,20 +736,21 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
   const result = useMemo(() => {
     const rows: FocusContext[] = [], identities = new Map<string, FocusContextIdentity>()
     const aliases = new Map<string, FocusContextAccess>()
-    const issues: Array<{ key: string; label: string; host: string; reference?: SpaceMountRecord['reference']; message: string; reading: boolean; refresh(): void }> = [], readers: ReactNode[] = []
+    const issues: FocusSourceIssue[] = [], readers: ReactNode[] = []
     for (const host of config?.hosts ?? []) {
       const sessions = locationDemands.get(host.id)
       if (!sessions?.length) continue
-      const key = originalLocationReaderKey(host.id), issue = originalLocations.get(host.id)?.issue
+      const key = originalLocationReaderKey(host.id), observed = originalLocations.get(host.id)
       readers.push(<OriginalLocationsReader key={key} host={host} sessions={sessions} visible={visible} revision={refreshes.get(key) ?? 0}
         observation={originalLocations.get(host.id)?.value} mountedSourceKeys={mountedSourceKeys} publish={publishLocations} />)
-      if (issue) issues.push({ key, label: 'Original Agent locations', host: host.label, message: issue, reading: false, refresh: () => refresh(key) })
+      if (observed?.issue) issues.push({ key, label: 'Agent locations', host: host.label, hostId: host.id, message: observed.issue,
+        reading: Boolean(observed.reading), refresh: () => refresh(key) })
     }
     for (const [key, source] of sources) {
       readers.push(<SourceReader key={'source:' + key} target={source} visible={visible} revision={refreshes.get(key) ?? 0} />)
       const issue = observations[key]?.error ?? metadata[key]?.error
       if (issue) issues.push({ key, label: observations[key]?.snapshot?.scope.space?.name ?? observations[key]?.lastPresentSnapshot?.scope.space?.name ?? 'Project source',
-        host: config?.hosts.find(host => host.id === source.hostId)?.label ?? source.hostId, reference: source.reference,
+        host: config?.hosts.find(host => host.id === source.hostId)?.label ?? source.hostId, hostId: source.hostId, reference: source.reference,
         message: issue, reading: Boolean(observations[key]?.reading || metadata[key]?.reading), refresh: () => refresh(key) })
     }
     const previous = presentations.current, next = new Map<string, CandidatePresentation>()

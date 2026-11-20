@@ -2889,7 +2889,11 @@ export class RuntimeController {
     const result = position ? await carrier.rpc.call('space.inspect', { target: {
       ...(position.spaceId ? { spaceId: position.spaceId } : {}), ...(position.zoneId ? { zoneId: position.zoneId } : {}),
       tabId: position.tabId, regionId: position.regionId, displayWorkspaceId: position.displayWorkspaceId, groupId: position.groupId
-    } }, fenced) : await carrier.rpc.call('space.agent-locations', { runtimeId: owner.runtimeId, agentSessionIds }, fenced)
+    } }, fenced) : await carrier.rpc.call('space.agent-locations', { runtimeId: owner.runtimeId, agentSessionIds }, fenced).catch(cause => {
+      if (cause instanceof AgentMuxError && cause.code === 'RPC_METHOD_NOT_FOUND') throw new AgentMuxError(
+        'The original Host Core does not provide Agent location lookup. Open the Host settings to check its Core version.', cause.code)
+      throw cause
+    })
     carrier.assertCurrent()
     const observation = sourceAgentLocations(result.catalog, owner.runtimeId, agentSessionIds)
     if (position) observation.locations = observation.locations.filter(entry => entry.position && sourcePositionKey(entry.position) === sourcePositionKey(position))

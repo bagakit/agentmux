@@ -287,7 +287,7 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, re
           </button></FocusLaneHeadingMenu> : null}
           {lane.summary ? <span id={descriptionId + lane.id} className="focus-project-lanes__summary">{lane.summary}</span> : null}</>}
           {!frame.project || lane.labels.length > 1 ? <FocusProjectActivity at={lane.lastActivityAt ?? null} now={now} interactionAt={interactionTimes ? interactionAt([lane]) : undefined} /> : null}
-          {lane.locationUnconfirmed ? <span className="focus-project-lanes__recovery">Location unconfirmed</span> : null}
+          {lane.locationUnconfirmed && lane.projectId !== 'unconfirmed-project' ? <span className="focus-project-lanes__recovery">Location unconfirmed</span> : null}
           {lane.recovery ? <span className="focus-project-lanes__recovery">{lane.recovery === 'removed' ? 'Worktree removed' : 'Workspace unregistered'}</span> : null}
           {lane.collection && resourceMenus ? <><FocusZoneLayoutToggle containerKey={containerKey} name={lane.name} presentation={mode} defaultPresentation={focusZonePresentation(null, 'collection', undefined, authoredTopicPresentation)}
             unavailable="Zone layout needs one confirmed Collection. Original members and their work surfaces remain available." />

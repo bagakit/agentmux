@@ -4,7 +4,7 @@ import type { HostConfig } from '../../../shared/contracts'
 import { spaceMountKey, type SourceAgentLocation, type SourceAgentLocations } from '../../../shared/space-mount'
 import { api } from './api'
 
-export type FocusSourceLocationObservation = { host: HostConfig; value?: SourceAgentLocations; issue?: string }
+export type FocusSourceLocationObservation = { host: HostConfig; value?: SourceAgentLocations; issue?: string; reading?: boolean }
 export const originalLocationReaderKey = (hostId: string) => JSON.stringify(['original-agent-locations', hostId])
 
 type MemberLocation = Pick<SourceAgentLocation, 'tab' | 'zone' | 'region'>
@@ -51,6 +51,7 @@ export function useFocusSourceLocations(host: HostConfig, sessionIds: readonly s
       if (failed) reopen()
     }, { kind: 'host-observation', hostId: host.id })
     const expectedRuntimeId = host.kind === 'ssh' ? host.runtimeId : undefined
+    publish({ host, reading: true })
     void api.spaceMounts.call('agentLocations', { hostId: host.id, agentSessionIds: key, ...(expectedRuntimeId ? { expectedRuntimeId } : {}) }, controller.signal).then(value => {
       if (!controller.signal.aborted) publish({ host, value })
     }, cause => {
