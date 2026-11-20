@@ -8777,6 +8777,7 @@ export class AgentMuxClient {
                 ...(platformNotification?.mode === 'idle' ? { idleOnly: platformNotification.idle! } : {}) }, diagnostic, protocolInput)
           }, { kind: 'semantic', bytes: null, work: 'prompt-submit' }, { renderObservation, protocolInput,
             onQueued: releasePreparationObservation, retainPreclaimYield: release => { releasePreparationObservation = release },
+            checkPreparationReceipt: admissionIntent.kind !== 'manual-actor' || transportQualification !== undefined,
             preclaimDeadline: transportQualification?.deadline, preclaimSignal: input.signal })
           break
         } catch (error) {
@@ -11774,7 +11775,10 @@ export class AgentMuxClient {
         for (const observation of protocolObservers) protocolInputs.add(observation.protocolInput!)
       }
       preempted = true
-      for (const protocol of protocolInputs) protocol.pending = (protocol.pending ?? 0) + 1
+      for (const protocol of protocolInputs) {
+        if (mousePreparation) protocol.mouseReport = true
+        protocol.pending = (protocol.pending ?? 0) + 1
+      }
       this.cancelPromptRenderObservation(requestedSession, source,
         rawInputCancellationDetail(requestedSession, data, operationId, inputKind), mousePreparation)
     }
@@ -12076,6 +12080,7 @@ export class AgentMuxClient {
       renderObservation?: AbortController | undefined; protocolInput?: AgentPromptProtocolInputBoundary | undefined
       onQueued?: ((next?: AbortController) => void) | undefined
       retainPreclaimYield?: ((release: (next?: AbortController) => void) => void) | undefined
+      checkPreparationReceipt?: boolean
       preclaimDeadline?: number | undefined; preclaimSignal?: AbortSignal | undefined
       rawInput?: RawInputCall; rawPreparation?: Promise<void> | undefined; orderedRaw?: boolean
     } = {}
@@ -12149,7 +12154,10 @@ export class AgentMuxClient {
       if (protocolInput?.preclaim && !protocolInput.preclaim.claimStarted) protocolInput.origin ??= { inputByte: run.acceptedInputBytes, processId: run.pid }
       preparationSignal.throwIfAborted()
       rawInput?.check()
+      // A current-terminal Send without a prepared transport starts at the
+      // live Run's cursor. A separate terminal query keeps its own ACK outcome.
       if (protocolInput?.preclaim && !protocolInput.preclaim.claimStarted &&
+          (options.checkPreparationReceipt !== false || protocolInput.mouseReport) &&
           (protocolInput.invalid || protocolInput.pending || protocolInput.acknowledged &&
             (protocolInput.acknowledged.processId !== run.pid || protocolInput.origin?.processId !== run.pid ||
               protocolInput.origin.inputByte === null ||

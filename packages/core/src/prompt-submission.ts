@@ -83,6 +83,7 @@ export function promptPreparationFailure(error: unknown): AgentMuxError {
 export type AgentPromptProtocolInputBoundary = {
   acknowledged?: { startByte: number; endByte: number; processId: number | null }
   invalid: boolean
+  mouseReport?: true
   pending?: number
   origin?: { inputByte: number | null; processId: number | null }
   cancelled?: Error
