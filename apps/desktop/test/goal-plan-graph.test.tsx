@@ -103,21 +103,104 @@ describe('Goal plan graph', () => {
     await chooseGoalSection(dom.container, 'plan')
     expect(reading().querySelector('[data-goal-delivery="d-api"]')).toBe(delivery)
     expect(graph()!.querySelector('[data-goal-time-row="d-api"][data-selected]')).not.toBeNull()
-    const currentRow = graph()!.querySelector<HTMLButtonElement>('[data-goal-time-row="d-api-current"]')!
-    expect(currentRow.tagName).toBe('BUTTON')
-    expect(currentRow.getAttribute('aria-label')).toContain('Report recorded')
-    await act(async () => currentRow.querySelector<HTMLElement>('[data-goal-time-event="Report recorded"]')!.click())
-    expect(currentRow.getAttribute('aria-pressed')).toBe('true')
+    const currentRow = graph()!.querySelector('[data-goal-time-row="d-api-current"]')!
+    const currentTitle = currentRow.querySelector<HTMLButtonElement>('[data-goal-time-open]')!
+    const currentPoint = currentRow.querySelector<HTMLButtonElement>('[data-goal-time-event="Report recorded"]')!
+    expect(currentPoint.closest('button')).toBe(currentPoint)
+    const eventReader = () => graph()!.querySelector('.goal-execution-time__detail')!
+    const eventAction = () => [...eventReader().querySelectorAll('button')].at(-1)!
+    await act(async () => currentPoint.click())
+    expect(currentPoint.getAttribute('aria-expanded')).toBe('true')
+    expect(eventReader().textContent).toContain('worker-api · local')
+    expect(eventReader().textContent).toContain('reply-current')
+    expect(eventReader().textContent).toContain('Delivered api')
+    expect(document.activeElement).toBe(eventReader().querySelector('h4'))
+    await act(async () => eventAction().click())
+    expect(currentTitle.getAttribute('aria-pressed')).toBe('true')
     expect(reading().querySelector('[data-goal-delivery="d-api-current"]')).not.toBeNull()
     expect(reading().querySelector('[aria-label="Independent node review"]')).not.toBeNull()
-    await act(async () => reading().querySelector<HTMLButtonElement>('.goal-plan__reading-header button')!.click())
-    expect(document.activeElement).toBe(currentRow)
-    expect(currentRow.getAttribute('aria-pressed')).toBe('false')
-    const previousRow = graph()!.querySelector<HTMLButtonElement>('[data-goal-time-row="d-api"]')!
-    await act(async () => previousRow.querySelector<HTMLElement>('[data-goal-time-event="Changes requested"]')!.click())
-    expect(previousRow.getAttribute('aria-pressed')).toBe('true')
+    const backToEvent = reading().querySelector<HTMLButtonElement>('.goal-plan__reading-header button')!
+    expect(backToEvent.textContent).toBe('Back to event')
+    await act(async () => backToEvent.click())
+    expect(document.activeElement).toBe(currentPoint)
+    expect(currentTitle.getAttribute('aria-pressed')).toBe('false')
+    const previousRow = graph()!.querySelector('[data-goal-time-row="d-api"]')!
+    const previousPoint = previousRow.querySelector<HTMLButtonElement>('[data-goal-time-event="Changes requested"]')!
+    await act(async () => previousPoint.click())
+    expect(eventReader().textContent).toContain('reviewer')
+    await act(async () => eventAction().click())
+    expect(previousRow.querySelector('[data-goal-time-open]')!.getAttribute('aria-pressed')).toBe('true')
     expect(reading().querySelector('[data-goal-delivery="d-api"]')).not.toBeNull()
     expect(reading().querySelector('[aria-label="Independent node review"]')).toBeNull()
+    expect(reading().querySelector('[data-goal-plan-verdict]')?.textContent).toContain('Correct the original work')
+  })
+
+  it('opens the precise review when two reviews overlap on one historical attempt', async () => {
+    const original = { ...pass('api'), verdict: 'changes' as const, note: 'First review on the original attempt' }
+    const newer = { ...original, operationId: 'rv-later', note: 'Later review on that attempt' }
+    const first = reported('api')
+    seed(goal({ plan: plan(nodes, [original, newer]), delegations: [first, { ...first, operationId: 'd-api-current' }] }))
+    await dom.render(<GlobalBoardSurface />)
+    const row = graph()!.querySelector('[data-goal-time-row="d-api"]')!
+    const points = [...row.querySelectorAll<HTMLButtonElement>('[data-goal-time-event="Changes requested"]')]
+    expect(points).toHaveLength(2)
+    expect(points[0]!.style.left).toBe(points[1]!.style.left)
+    expect(points[0]!.style.getPropertyValue('--goal-event-lane')).not.toBe(points[1]!.style.getPropertyValue('--goal-event-lane'))
+    const reader = () => graph()!.querySelector('.goal-execution-time__detail')!
+    await act(async () => points[1]!.click())
+    expect(reader().textContent).toContain(newer.note)
+    await act(async () => reader().querySelector('button')!.click())
+    expect(document.activeElement).toBe(points[1])
+    await act(async () => points[0]!.click())
+    expect(reader().textContent).toContain(original.note)
+    await act(async () => [...reader().querySelectorAll('button')].at(-1)!.click())
+    const verdict = graph()!.querySelector('[data-goal-delivery="d-api"] [data-goal-plan-verdict]')
+    expect(verdict?.textContent ?? '', 'The original attempt still shows the selected review').toContain(original.note)
+    expect(verdict?.textContent).not.toContain(newer.note)
+  })
+
+  it('keeps an unknown event author and restores its exact point on Escape', async () => {
+    seed(goal({ plan: plan(nodes), delegations: [attempt('api')] }))
+    await dom.render(<GlobalBoardSurface />)
+    const point = graph()!.querySelector<HTMLButtonElement>('[data-goal-time-event="Original dispatch linked"]')!
+    await act(async () => point.click())
+    const details = graph()!.querySelector('.goal-execution-time__detail')!
+    expect(details.textContent).toContain('Unknown author')
+    expect(details.textContent).toContain('Original dispatch association verified')
+    expect(details.querySelector('time')?.dateTime).toBe(new Date(2).toISOString())
+    await act(async () => details.querySelector('h4')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+    expect(graph()!.querySelector('.goal-execution-time__detail')).toBeNull()
+    expect(document.activeElement).toBe(point)
+    expect(point.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('returns to the original row if its open event disappears', async () => {
+    const record = goal({ plan: plan(nodes), delegations: [attempt('api')] })
+    seed(record)
+    await dom.render(<GlobalBoardSurface />)
+    const row = graph()!.querySelector('[data-goal-time-row="d-api"]')!
+    const point = row.querySelector<HTMLButtonElement>('[data-goal-time-event="Original dispatch linked"]')!
+    await act(async () => point.click())
+    const { linkedAt: _linked, ...preparationOnly } = record.delegations![0]!
+    await act(async () => seed(owned({ ...record, delegations: [preparationOnly] })))
+    const details = graph()!.querySelector('.goal-execution-time__detail')!
+    expect(point.isConnected).toBe(false)
+    expect(details.querySelector('[role="status"]')?.textContent).toContain('original event source is unavailable')
+    await act(async () => details.querySelector('button')!.click())
+    expect(document.activeElement).toBe(row.querySelector('[data-goal-time-open]'))
+  })
+
+  it('opens the precise one-time task from a compact event', async () => {
+    seed(goal({ dispatches: [{ operationId: 'original-start', stage: 'confirmed', execution: 'finite', prompt: 'The original task',
+      agentSessionId: 'worker-api', hostId: 'local', runId: 'old-run', preparedAt: 15,
+      receipt: { kind: 'core-prompt', itemId: 'original-input', createdAt: 25 } }] }))
+    await dom.render(<GlobalBoardSurface />)
+    const point = graph()!.querySelector<HTMLButtonElement>('.goal-execution-time__receipts [data-goal-time-event="Original input recorded"]')!
+    await act(async () => point.click())
+    const details = graph()!.querySelector('.goal-execution-time__detail')!
+    expect(details.textContent).toContain('original-input')
+    await act(async () => [...details.querySelectorAll('button')].at(-1)!.click())
+    expect(document.activeElement).toBe(dom.container.querySelector('[data-goal-work-kind="start"][data-goal-work-operation="original-start"]'))
   })
 
   it('takes the reader to the original Supervisor rail with keyboard focus and keeps one original discussion action', async () => {
@@ -432,7 +515,7 @@ describe('plan graph projection helpers', () => {
     expect(bar.textContent).toBe('3.0s observed')
     expect(original.querySelector('.goal-execution-time__activity-focus')?.textContent).toBe(bar.textContent)
     expect(original.querySelector('.goal-execution-time__task')?.getAttribute('title')).toBe(bar.title)
-    expect(original.getAttribute('aria-label')).toContain('Observed activity · 3.0s')
+    expect(original.querySelector('[data-goal-time-open]')?.getAttribute('aria-label')).toContain('Observed activity · 3.0s')
     expect(timeline.querySelector('[data-goal-planned-period]')?.textContent).toBe('Planned')
     expect(timeline.querySelector('[data-goal-time-row="d-ui"] [data-goal-time-event="Report recorded"]')).not.toBeNull()
     expect(timeline.querySelector('[data-goal-time-row="d-docs"] [data-goal-time-event="Original dispatch linked"]')).not.toBeNull()

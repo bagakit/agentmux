@@ -62,7 +62,7 @@ export function goalPlanPreview(seed: (mode: string) => void, render: () => void
         criterionIds: [criterion.id], capturedCriteria: [criterion], planNodeId: nodeId, preparedAt: at(1),
         ...(linked ? { linkedAt: at(2) } : {}),
         ...(reported ? { report: { operationId: `report:${nodeId}`, replyMessageId: `reply:${nodeId}`,
-          authorAgentSessionId: executor.agentSessionId, submittedAt: at(3),
+          authorAgentSessionId: executor.agentSessionId, submittedAt: at(nodeId === 'history' && timelineDurationMs !== undefined ? 2 : 3),
           grounding: { alignmentRevision: goal.alignment!.revision, summary: nodeId === 'history' ? 'The draft survives; the reading anchor still moves during live output.' : 'The original identities and saved content match the recovery log.',
             checks: [{ criterionId: criterion.id, outcome: 'met' as const, evidence: [`artifacts/recovery/${nodeId}.log`], note: '' }] } } } : {})
       })

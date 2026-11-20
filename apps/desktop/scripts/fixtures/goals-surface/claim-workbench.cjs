@@ -124,17 +124,22 @@ module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result
     const row = '[data-goal-time-row="attempt:drafts"]'
     const point = row + ' [data-goal-time-event="Report recorded"]'
     const observed = '[data-goal-time-row="attempt:workspace"]'
+    const observedButton = observed + ' [data-goal-time-open]'
+    const details = '.goal-execution-time__detail'
+    const openEventRecord = details + ' > button'
     const bar = observed + ' [data-goal-observed-activity]'
     const reading = '.goal-plan__reading'
     const back = reading + ' .goal-plan__reading-header button'
     await waitFor(`Boolean(${query(point)} && ${query(bar)})`)
     const before = await evaluate('goalsSpace.facts()')
-    const enter = async () => {
+    const key = async (name, code, text) => {
       for (const type of ['keyDown', 'keyUp']) {
-        await debuggerSession.sendCommand('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13,
-          ...(type === 'keyDown' ? { text: '\r', unmodifiedText: '\r' } : {}) })
+        await debuggerSession.sendCommand('Input.dispatchKeyEvent', { type, key: name, code: name, windowsVirtualKeyCode: code,
+          ...(text && type === 'keyDown' ? { text, unmodifiedText: text } : {}) })
       }
     }
+    const enter = () => key('Enter', 13, '\r')
+    const tab = () => key('Tab', 9)
     await evaluate(`${query('[data-goal-execution-time]')}.scrollIntoView({block:'center'})`)
     await paint()
     const summary = bar + ' .goal-execution-time__bar-summary'
@@ -177,41 +182,66 @@ module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result
     }
     await hitControl(bar)
     await waitFor(`${query(reading + ' h3')}?.textContent === 'Restore the whole workspace'`)
-    assert.equal(await evaluate(`${query(observed)}.getAttribute('aria-pressed')`), 'true')
+    assert.equal(await evaluate(`${query(observedButton)}.getAttribute('aria-pressed')`), 'true')
     await hitControl(back)
-    assert.equal(await evaluate(`document.activeElement === ${query(observed)}`), true)
+    assert.equal(await evaluate(`document.activeElement === ${query(observedButton)}`), true)
     await enter()
     await waitFor(`${query(reading + ' h3')}?.textContent === 'Restore the whole workspace'`)
-    for (const type of ['keyDown', 'keyUp']) {
-      await debuggerSession.sendCommand('Input.dispatchKeyEvent', { type, key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
-    }
+    await tab()
     assert.equal(await evaluate(`document.activeElement === ${query(back)}`), true)
     await enter()
-    await waitFor(`document.activeElement === ${query(observed)} && ${query(observed)}.matches(':focus-visible')`)
+    await waitFor(`document.activeElement === ${query(observedButton)} && ${query(observedButton)}.matches(':focus-visible')`)
     await paint()
     assert.equal(await evaluate(`Boolean(${query(focusSummary)}.getClientRects().length) && ${query(focusSummary)}.textContent`), barEvidence.text)
     if (width === 620) await capture(`${width}-${theme}-${scene}-short-focus`, width)
+    const preview = '[role="tooltip"]'
+    const hoverPreview = `[...document.querySelectorAll(${JSON.stringify(preview)})].find(element => element.textContent.includes('Worker report saved'))`
+    await evaluate(`${query(point)}.scrollIntoView({block: 'center'})`)
+    await paint()
     await hover(point)
-    assert.match(await evaluate(`${query(point)}.title`), /^Report recorded · .+/u)
+    await waitFor(`Boolean(${hoverPreview}?.getBoundingClientRect().width && getComputedStyle(${hoverPreview}).visibility === 'visible')`)
+    assert.match(await evaluate(`${hoverPreview}.textContent`), /Report recorded.*plan-worker-session.*Worker report saved/su)
+    await capture(`${width}-${theme}-${scene}-event-preview`, width)
     await hitControl(point)
+    await waitFor(`document.activeElement === ${query(details + ' h4')} && Boolean(${query(openEventRecord)})`)
+    assert.match(await evaluate(`${query(details)}.innerText`), /Report recorded.*reply:drafts.*The original identities/su)
+    await evaluate(`${query(details)}.scrollIntoView({block:'center'})`)
+    await paint()
+    await capture(`${width}-${theme}-${scene}-event-detail`, width)
+    await keyEscape()
+    await waitFor(`!${query(details)} && document.activeElement === ${query(point)}`)
+    await enter()
+    await waitFor(`document.activeElement === ${query(details + ' h4')}`)
+    await hitControl(openEventRecord)
     await waitFor(`Boolean(${query(reading + ' [data-goal-delivery="attempt:drafts"]')})`)
-    assert.equal(await evaluate(`${query(row)}.getAttribute('aria-pressed')`), 'true')
+    assert.equal(await evaluate(`${query(row + ' [data-goal-time-open]')}.getAttribute('aria-pressed')`), 'true')
     await capture(`${width}-${theme}-${scene}-attempt`, width)
     await hitControl(back)
-    assert.equal(await evaluate(`document.activeElement === ${query(row)}`), true)
-    await enter()
-    await waitFor(`Boolean(${query(reading + ' [data-goal-delivery="attempt:drafts"]')})`)
-    for (const type of ['keyDown', 'keyUp']) {
-      await debuggerSession.sendCommand('Input.dispatchKeyEvent', { type, key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
-    }
-    assert.equal(await evaluate(`document.activeElement === ${query(back)}`), true)
-    await enter()
-    await waitFor(`document.activeElement === ${query(row)} && ${query(row)}.matches(':focus-visible')`)
+    await waitFor(`document.activeElement === ${query(point)}`)
+    const unknown = '[data-goal-time-row="attempt:history"] [data-goal-time-event="Original dispatch linked"]'
+    const keyboardPoint = '[data-goal-time-row="attempt:history"] [data-goal-time-event="Report recorded"]'
+    const overlap = await evaluate(`(() => {
+      const first = ${query(unknown)}.getBoundingClientRect(), second = ${query(keyboardPoint)}.getBoundingClientRect()
+      return { firstX: first.x, secondX: second.x, firstBottom: first.bottom, secondTop: second.top }
+    })()`)
+    assert.equal(overlap.firstX, overlap.secondX)
+    assert.ok(overlap.firstBottom <= overlap.secondTop, 'Same-time events have independent hit areas')
+    await evaluate(`${query(unknown)}.scrollIntoView({block:'center'})`)
     await paint()
-    await capture(`${width}-${theme}-${scene}-focus`, width)
+    const target = await evaluate(`(() => { const box = ${query(unknown)}.getBoundingClientRect();
+      return { x: box.left + box.width / 2, y: box.top + box.height / 2 } })()`)
+    await debuggerSession.sendCommand('Input.dispatchTouchEvent', {type: 'touchStart', touchPoints: [target]})
+    await debuggerSession.sendCommand('Input.dispatchTouchEvent', {type: 'touchEnd', touchPoints: []})
+    await waitFor(`${query(details)}?.innerText.includes('Unknown author')`)
+    await keyEscape()
+    await waitFor(`document.activeElement === ${query(unknown)}`)
+    await tab()
+    await waitFor(`document.activeElement === ${query(keyboardPoint)} && Boolean(${hoverPreview})`)
+    await paint()
+    await capture(`${width}-${theme}-${scene}-event-focus`, width)
     assert.deepEqual(await evaluate('goalsSpace.facts()'), before)
     result.observations.push({ scene, width, theme, dispatch: 'attempt:workspace', report: 'attempt:drafts', normal, hovered, barEvidence,
-      hoverCapturedWithPseudoState: true, focusReturned: true, keyboardOpened: true })
+      hoverCapturedWithPseudoState: true, eventPreview: true, exactEventReturn: true, keyboardOpened: true, touchOpened: true, overlap })
   }
   if (timelineOnly) return
   for (const [width, theme] of [[1600, 'dark'], [620, 'light']]) {
