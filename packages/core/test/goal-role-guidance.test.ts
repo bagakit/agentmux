@@ -22,7 +22,7 @@ it('both roles retain the same original responsibility, human authority and unce
 
 it('presents the selected responsibility before shared lifecycle guidance with one module entry', () => {
   const cases = [
-    { role: 'executor' as const, duty: 'Read the original finite Start or delegation and its frozen criteria before acting.' },
+    { role: 'executor' as const, duty: 'At the start of each work turn, read the original finite Start or delegation' },
     { role: 'manager' as const, duty: 'Read the original Goal, its exact execution and Core input receipts.' }
   ]
   for (const { role, duty } of cases) {
