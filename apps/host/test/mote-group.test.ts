@@ -15,13 +15,15 @@ import { ScratchTopics } from '../src/mote-resources.js'
 import { SCRATCH_WORKSPACE_ID } from '../src/mote-topic-model.js'
 import { registerKnowledgeTopic } from '../src/topic-spatial-owner.js'
 import { topicContentZoneId } from '../src/topic-categories.js'
-import { createHostMoteGroups, type HostMoteGroupFiles } from '../src/mote-group.js'
+import { createHostMoteGroups, ownsMoteWork, type HostMoteGroupFiles } from '../src/mote-group.js'
 import { createHostMoteDirect } from '../src/mote-direct.js'
 import type { MoteChatResourcePort } from '../src/mote-resources.js'
 import type { MoteMainReader } from '@agentmux/core/mote-dialogue'
 import { ContinuousProgressLoopManager } from '../src/continuous-progress-loop-manager.js'
 import { ContinuousProgressLoopStore } from '../src/continuous-progress-loop-store.js'
 import { createGoalRuntime } from '../src/goal-runtime.js'
+import { FileUploadOwner } from '../src/file-upload-owner.js'
+import { fileUploadRevision } from '@agentmux/core/files'
 
 const closes: (() => void | Promise<void>)[] = []
 afterEach(async () => {
@@ -60,7 +62,7 @@ async function fixture(retainedRoot?: string, initialSessions: string[] = []) {
   const provider = f.client.providers.get('codex')
   vi.spyOn(provider, 'prepareNativeInput').mockImplementation(async (_context, input) => ({
     plan: { kind: 'native-rpc', protocolId: 'fixture-native', actorId: 'fixture-actor', sourceId: JSON.stringify(['codex', input.nativeSessionId]),
-      threadId: input.nativeSessionId, operation: 'start-or-steer' }, assertCurrent: async () => {}, send, dispose: async () => {}
+      threadId: input.nativeSessionId, operation: input.idleOnly ? 'queue-idle' : 'start-or-steer' }, assertCurrent: async () => {}, send, dispose: async () => {}
   }))
   f.inner.kernel.status = vi.fn(async (id: string) => ({ ...f.run(id), workspacePath, pid: 700001 }))
   const target = (spaceId: string) => ({ spaceId, zoneId: 'home-' + spaceId,
@@ -99,12 +101,18 @@ async function fixture(retainedRoot?: string, initialSessions: string[] = []) {
   const dbPath = join(workspacePath, 'groups.sqlite'), socketPath = join(f.root, 'group.sock')
   const start = async (files?: HostMoteGroupFiles, main?: MoteMainReader, schedules?: ContinuousProgressLoopManager) => {
     const directStore = new MoteGroupStore(join(workspacePath, 'direct.sqlite'), 'direct')
+    const fileUploads = new FileUploadOwner(join(workspacePath, 'attachments'))
     const port = createHostMoteGroups({ store: new MoteGroupStore(dbPath), agents, client: () => f.client,
       ...(files ? { files } : {}), ...(main ? { main } : {}) })
     const direct = main ? createHostMoteDirect(createHostMoteGroups({
       store: directStore, agents, client: () => f.client, main
-    }), { store: directStore, main, readPeer: agents.readTarget, client: f.client }) : undefined
-    const server = new core.AgentMuxControlServer({ socketPath, coreClients: f.coreClients, moteGroups: port,
+    }), { store: directStore, main, readPeer: agents.readTarget, client: f.client, files: fileUploads }) : undefined
+    if (main && direct) schedules?.setMoteWorkOwner({
+      dispatch: (work, body, operationId, assertCurrent) => work.kind === 'group'
+        ? port.dispatchWork(work, body, operationId, assertCurrent) : direct.dispatchWork(work, body, operationId, assertCurrent),
+      owns: (work, caller) => ownsMoteWork(main, f.client, work, caller)
+    })
+    const server = new core.AgentMuxControlServer({ socketPath, coreClients: f.coreClients, moteGroups: port, fileUploads,
       ...(direct ? { moteDirect: direct } : {}), ...(schedules ? { schedules } : {}) })
     await server.start()
     closes.push(() => server.stop())
@@ -340,27 +348,16 @@ it('keeps an original private report and enqueues it once for the coordinating M
     .toEqual([assignment.message.id, held.message.id])
 })
 
-it('schedules recurring private assignments on the original clock and deduplicates each due turn', async () => {
-  const f = await fixture(undefined, ['assignment-owner', 'assignment-peer'])
+it('keeps one private assignment arrangement and occurrence across Main rotation', async () => {
+  const f = await fixture(undefined, ['assignment-owner', 'assignment-peer', 'assignment-successor'])
   const a = f.target('mote-a'), b = f.target('mote-b')
-  const main = boundMains(new Map([['mote-a', 'assignment-owner'], ['mote-b', 'assignment-peer']]))
+  const bindings = new Map([['mote-a', 'assignment-owner'], ['mote-b', 'assignment-peer']])
+  const main = boundMains(bindings)
   const runtime = createGoalRuntime({ clients: f.coreClients, checkIn: async () => ({ known: false, reason: 'No check-in requested.' }) })
   let now = 100
-  const delivered: core.ContinuousProgressLoop[] = []
+  const nativeSchedule = vi.fn(async () => 'sent' as const)
   const manager = new ContinuousProgressLoopManager(new ContinuousProgressLoopStore(join(f.root, 'schedules.json')),
-    async (loop, operationId, _current, _signal, onDispatch) => {
-      expect(loop.pendingCompletion?.operationId).toBe(operationId)
-      onDispatch()
-      delivered.push(structuredClone(loop))
-      return 'sent'
-    }, () => now, async (loop, tickId) => {
-      const session = f.client.agentSession(loop.agentSessionId)
-      const status = { state: 'done' as const, source: 'native-hook' as const, observedAt: now }
-      const intent = loop.futureIntentId ? await f.client.readAgentFuturePromptIntent(loop.agentSessionId, loop.futureIntentId) : null
-      return { session: { ...session, semanticStatus: status, ...(intent ? { futurePromptIntents: { [loop.futureIntentId!]: intent } } : {}) },
-        observation: core.observeAgent({ process: 'running', status, timelineCapability: 'complete-events', awaitingRequest: false, terminalCapabilityUnverified: false }, now),
-        tickId, now, inputByte: 0, inputOccupied: false }
-    }, runtime)
+    nativeSchedule, () => now, undefined, runtime)
   closes.push(() => manager.stop())
   await manager.start()
   const { rpc } = await f.start(undefined, main, manager)
@@ -369,43 +366,43 @@ it('schedules recurring private assignments on the original clock and deduplicat
   const original = await f.cli('schedule', assignment, 'assignment-owner', 'direct')
   expect(original.code, original.stderr).toBe(0)
   const { schedule } = JSON.parse(original.stdout).result
-  expect(schedule).toMatchObject({ agentSessionId: 'assignment-owner', creationOperationId: assignment.operationId, everyMs: assignment.everyMs, nextCheckAt: now + assignment.everyMs })
-  expect((await rpc.call('space.mote.direct.list', { mote: a })).threads).toEqual([])
+  expect(schedule).toMatchObject({ moteWork: { mote: a, peer: b }, agentSessionId: 'assignment-owner',
+    creationOperationId: assignment.operationId, everyMs: assignment.everyMs, nextCheckAt: now + assignment.everyMs })
+  const list = async () => (await rpc.call('space.mote.direct.list', { mote: a })).threads
   await manager.check(schedule.nextCheckAt - 1, schedule.loopId)
-  expect(delivered).toEqual([])
+  expect(await list()).toEqual([])
 
-  // The model is the consumer at this boundary. Exercise its documented exact
-  // due-turn command against the same real CLI and conversation owner.
-  const runDue = async (at: number) => {
-    now = at
-    await manager.check(now, schedule.loopId)
-    const original = await rpc.call('schedule.inspect', { operationId: assignment.operationId })
-    const occurredAt = original.schedule.lastInputRef?.futureIntent.occurrenceAt
-    expect(occurredAt).toBe(now)
-    const prompt = delivered.at(-1)?.pendingCompletion?.prompt
-    expect(prompt).toContain('scheduled/<loopId>/<occurrenceAt>')
-    const { operationId: saved, ...source } = JSON.parse(prompt!.split('\n').at(-1)!)
-    expect(saved).toBe(assignment.operationId)
-    const request = { ...source, operationId: `scheduled/${schedule.loopId}/${occurredAt}` }
-    const send = await f.cli('send', request, 'assignment-owner', 'direct')
-    expect(send.code, send.stderr).toBe(0)
-    const again = await f.cli('send', request, 'assignment-owner', 'direct')
-    expect(again.code, again.stderr).toBe(0)
-    expect(JSON.parse(again.stdout).result.message.id).toBe(JSON.parse(send.stdout).result.message.id)
-    return JSON.parse(send.stdout).result
-  }
-  const first = await runDue(schedule.nextCheckAt)
-  const second = await runDue(schedule.nextCheckAt + assignment.everyMs)
-  expect(delivered).toHaveLength(2)
-  expect(first.threadId).toBe(second.threadId)
-  const page = await rpc.call('space.mote.direct.inspect', { threadId: first.threadId, mote: a })
-  expect(page.messages.map(message => [message.id, message.body, message.deliveries[0]?.moteId]))
-    .toEqual([[first.message.id, assignment.body, 'mote-b'], [second.message.id, assignment.body, 'mote-b']])
+  now = schedule.nextCheckAt
+  await manager.check(now, schedule.loopId)
+  const [thread] = await list()
+  expect(thread?.lastMessage).toMatchObject({ body: assignment.body, author: { moteId: a.spaceId }, deliveries: [{ moteId: b.spaceId }] })
+  const first = thread!.lastMessage!.id
+  await manager.check(now, schedule.loopId)
+  expect((await list())[0]?.lastMessage?.id).toBe(first)
+
+  bindings.set(a.spaceId, 'assignment-successor')
+  const retained = await f.cli('schedule', assignment, 'assignment-successor', 'direct')
+  expect(retained.code, retained.stderr).toBe(0)
+  expect(JSON.parse(retained.stdout).result.schedule.loopId).toBe(schedule.loopId)
+  const denied = await f.cli('schedule', assignment, 'assignment-owner', 'direct')
+  expect(cliError(denied)).toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+
+  now += assignment.everyMs
+  await manager.check(now, schedule.loopId)
+  const second = (await list())[0]!.lastMessage!.id
+  expect(second).not.toBe(first)
+  const messages = async () => (await rpc.call('space.mote.direct.inspect', { threadId: thread!.id, mote: a })).messages
+  expect((await messages()).map(message => [message.id, message.body, message.deliveries[0]?.moteId]))
+    .toEqual([[first, assignment.body, 'mote-b'], [second, assignment.body, 'mote-b']])
   const current = await rpc.call('schedule.inspect', { scheduleId: schedule.loopId })
+  expect(current.schedule).toMatchObject({ lastOccurrenceAt: now, lastOutcome: 'sent',
+    lastMotePublication: { conversationId: thread!.id, messageId: second } })
   await rpc.call('schedule.pause', { scheduleId: schedule.loopId, expectedRevision: current.schedule.revision!, operationId: 'pause-assignments' })
   now += assignment.everyMs
   await manager.check(now, schedule.loopId)
-  expect(delivered).toHaveLength(2)
+  expect((await messages()).map(message => message.id)).toEqual([first, second])
+  expect(nativeSchedule).not.toHaveBeenCalled()
+  bindings.set(a.spaceId, 'assignment-owner')
   const prior = { ...assignment, operationId: 'original-archived-assignment' }
   const expected = core.moteDirectSchedulePrompt(prior)
   const frozen = 'Prior guidance carried by the original arrangement.' + expected.slice(expected.lastIndexOf('\n\n'))
@@ -416,6 +413,146 @@ it('schedules recurring private assignments on the original clock and deduplicat
   expect(JSON.parse(retry.stdout).result.schedule).toMatchObject({ loopId: saved.schedule.loopId, prompt: frozen })
   const conflict = await f.cli('schedule', { ...prior, body: 'A different private assignment' }, 'assignment-owner', 'direct')
   expect(cliError(conflict)).toMatchObject({ code: 'SCHEDULE_OPERATION_CONFLICT' })
+})
+
+it('reads immutable private image bytes through the original addressed Thread only', async () => {
+  const f = await fixture(undefined, ['image-coordinator', 'unrelated-image-agent'])
+  const mote = f.target('mote-a'), peer = f.target('mote-b')
+  const { rpc } = await f.start(undefined, boundMains(new Map([[mote.spaceId, 'image-coordinator']])))
+  f.unblockSecond()
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7ZgC8AAAAASUVORK5CYII='
+  const bytes = Buffer.from(png, 'base64')
+  const upload = { hostId: 'local', agentSessionId: 'image-coordinator', expectedRun: { runId: 'run-image-coordinator' },
+    operationId: 'private-diagram-upload', name: 'diagram.png', mimeType: 'image/png', byteLength: bytes.length, revision: fileUploadRevision(bytes) }
+  const receipt = await rpc.call('file.upload', { ...upload, dataBase64: png })
+  expect(receipt.status).toBe('uploaded')
+  const foreign = { ...upload, agentSessionId: 'unrelated-image-agent', expectedRun: { runId: 'run-unrelated-image-agent' }, operationId: 'foreign-image' }
+  expect((await rpc.call('file.upload', { ...foreign, dataBase64: png })).status).toBe('uploaded')
+  const request = { mote, peer, operationId: 'direct-diagram', body: 'Read the assignment diagram.', images: [upload] }
+  expect(cliError(await f.cli('send', { ...request, operationId: 'foreign-selection', images: [foreign] }, 'image-coordinator', 'direct')))
+    .toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  const sent = await f.cli('send', request, 'image-coordinator', 'direct')
+  expect(sent.code, sent.stderr).toBe(0)
+  const { threadId, message } = JSON.parse(sent.stdout).result
+  expect(message.images).toEqual([{ operationId: upload.operationId, name: upload.name, mimeType: upload.mimeType,
+    byteLength: upload.byteLength, revision: upload.revision }])
+  const view = await rpc.call('space.mote.direct.inspect', { threadId, messageId: message.id })
+  expect(view.messages[0]?.images).toEqual(message.images)
+  const worker = view.thread.participants.find(participant => participant.moteId === peer.spaceId)?.thread?.agentSessionId
+  expect(worker).toBeTruthy()
+  const exact = { threadId, messageId: message.id, imageOperationId: upload.operationId }
+  const inputId = message.deliveries[0].operationId as string
+  const original = await f.client.inspectAgentInput({ key: { kind: 'prompt', agentSessionId: worker!, expectedRun: { runId: 'run-' + worker }, submissionId: inputId } })
+  expect(original?.admission?.admission?.intent?.message?.systemContext).toContain(upload.operationId)
+  expect(original?.admission?.admission?.intent?.message?.userContent).toBe(request.body)
+  const binary = await f.cli('image read', exact, worker!, 'direct')
+  expect(binary.code, binary.stderr).toBe(0)
+  expect(JSON.parse(binary.stdout).result).toMatchObject({ ...exact, dataBase64: png })
+  const rejected = await f.cli('image read', exact, 'unrelated-image-agent', 'direct')
+  expect(cliError(rejected)).toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  await expect(rpc.call('space.mote.direct.image.read', { ...exact, imageOperationId: 'unselected-upload' }))
+    .rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  await expect(rpc.call('space.mote.group.inspect', { groupId: threadId })).rejects.toMatchObject({ code: 'UNKNOWN_MOTE_GROUP' })
+})
+
+it('orders private priority ahead of waiting background work while preserving user input and the original native claim', async () => {
+  const f = await fixture(undefined, ['priority-coordinator'])
+  const mote = f.target('mote-a'), peer = f.target('mote-b')
+  const { rpc } = await f.start(undefined, boundMains(new Map([[mote.spaceId, 'priority-coordinator']])))
+  f.unblockSecond()
+  const post = async (body: string, priority?: true) => {
+    const sent = await f.cli('send', { mote, peer, operationId: body, body, ...(priority ? { priority } : {}) }, 'priority-coordinator', 'direct')
+    expect(sent.code, sent.stderr).toBe(0)
+    return JSON.parse(sent.stdout).result
+  }
+  const opened = await post('baseline-input')
+  await vi.waitFor(async () => expect((await rpc.call('space.mote.direct.inspect', { threadId: opened.threadId })).messages[0]?.deliveries[0]?.status).toBe('accepted'))
+  const { thread } = await rpc.call('space.mote.direct.inspect', { threadId: opened.threadId })
+  const worker = thread.participants.find(participant => participant.moteId === peer.spaceId)!.thread!.agentSessionId
+  let release!: () => void
+  f.holdNative(new Promise<void>(resolve => { release = resolve }))
+  try {
+    await post('original-claim')
+    await vi.waitFor(() => expect(f.send.mock.calls.some(([prompt]) => prompt.includes('original-claim'))).toBe(true))
+    await post('background-before-person')
+    await f.client.submitAgentPrompt({ agentSessionId: worker, expectedRun: { runId: 'run-' + worker }, operationId: 'original-person-input',
+      prompt: 'person-input', execution: 'immediate', admissionIntent: { kind: 'session-conversation' }, authorHuman: true })
+    await post('background-after-person')
+    const prioritized = await post('explicit-priority-input', true)
+    expect(prioritized.message.priority).toBe(true)
+    const original = await post('explicit-priority-input', true)
+    expect(original.message.id).toBe(prioritized.message.id)
+    expect(f.send.mock.calls.some(([prompt]) => prompt.includes('explicit-priority-input'))).toBe(false)
+  } finally { release() }
+  const bodies = ['original-claim', 'background-before-person', 'person-input', 'explicit-priority-input', 'background-after-person']
+  await vi.waitFor(() => expect(f.send.mock.calls.map(([prompt]) => bodies.find(body => prompt.includes(body))).filter(Boolean)).toEqual(bodies))
+  const priorityInput = (await rpc.call('space.mote.direct.inspect', { threadId: opened.threadId })).messages.find(message => message.priority)!
+  const receipt = await f.client.inspectAgentInput({ key: { kind: 'prompt', agentSessionId: worker, expectedRun: { runId: 'run-' + worker },
+    submissionId: priorityInput.deliveries[0]!.operationId } })
+  expect(receipt?.admission?.admission?.native?.plan.operation).toBe('queue-idle')
+})
+
+it('publishes a due Group assignment to the selected original membership generations only', async () => {
+  const f = await fixture(undefined, ['group-owner', 'group-successor', 'unrelated'])
+  const a = f.target('mote-a'), b = f.target('mote-b'), c = f.target('mote-c'), d = f.target('mote-d')
+  const bindings = new Map([[a.spaceId, 'group-owner']])
+  let now = 100
+  const runtime = createGoalRuntime({ clients: f.coreClients, checkIn: async () => ({ known: false, reason: 'A Group assignment.' }) })
+  const schedulePath = join(f.root, 'group-schedules.json')
+  const loadManager = () => new ContinuousProgressLoopManager(new ContinuousProgressLoopStore(schedulePath),
+    async () => { throw Error('A scheduled Group publication is not a native prompt to its coordinator') }, () => now, undefined, runtime)
+  const manager = loadManager()
+  closes.push(() => manager.stop())
+  await manager.start()
+  const { rpc, server, direct } = await f.start(undefined, boundMains(bindings), manager)
+  f.unblockSecond()
+  const created = await f.cli('create', { sourceMote: a, operationId: 'make-homework-group', name: 'Homework', members: [b, c] }, 'group-owner')
+  expect(created.code, created.stderr).toBe(0)
+  const { group } = JSON.parse(created.stdout).result
+  const request = { sourceMote: a, groupId: group.id, recipientIds: [b.spaceId, c.spaceId], body: 'Compare this release.',
+    operationId: 'original-group-homework', everyMs: 60_000 }
+  expect(cliError(await f.cli('schedule', request, 'unrelated'))).toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  const planned = await f.cli('schedule', request, 'group-owner')
+  expect(planned.code, planned.stderr).toBe(0)
+  const { schedule } = JSON.parse(planned.stdout).result
+  expect(schedule.moteWork).toMatchObject({ kind: 'group', groupId: group.id,
+    recipients: [b, c].map(target => ({ moteId: target.spaceId,
+      generation: group.members.find((member: core.MoteGroupMember) => member.moteId === target.spaceId).invitation.operationId })) })
+  const outsider = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(f.root, 'group.sock') },
+    credentials: { agentSessionId: 'unrelated', capability: f.capability } })
+  try {
+    await expect(outsider.call('schedule.inspect', { scheduleId: schedule.loopId })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+    expect((await outsider.call('schedule.list', {})).schedules.some(item => item.loopId === schedule.loopId)).toBe(false)
+  } finally { await outsider.dispose() }
+
+  const removed = await rpc.call('space.mote.group.members.remove', { groupId: group.id, expectedRevision: group.revision,
+    operationId: 'removed-recipient', memberIds: [b.spaceId] })
+  await rpc.call('space.mote.group.members.add', { groupId: group.id, expectedRevision: removed.group.revision,
+    operationId: 'readded-recipient-and-new-member', members: [b, d] })
+  bindings.delete(a.spaceId)
+  now = schedule.nextCheckAt
+  await manager.check(now, schedule.loopId)
+  expect((await rpc.call('space.mote.group.inspect', { groupId: group.id })).messages).toEqual([])
+  const pending = (await rpc.call('schedule.inspect', { scheduleId: schedule.loopId })).schedule!
+  expect(pending.pendingCompletion?.operationId).toBe(`scheduled/${schedule.loopId}/${now}`)
+  await rpc.dispose(); await direct?.dispose(); await server.stop(); await manager.stop()
+  const reopened = loadManager()
+  closes.push(() => reopened.stop())
+  await reopened.start()
+  const restored = (await f.start(undefined, boundMains(bindings), reopened)).rpc
+  const stillPending = (await restored.call('schedule.inspect', { scheduleId: schedule.loopId })).schedule!
+  expect(stillPending.pendingCompletion?.operationId).toBe(pending.pendingCompletion?.operationId)
+  bindings.set(a.spaceId, 'group-successor')
+  now += 6000
+  await reopened.check(now, schedule.loopId)
+  const receipt = (await restored.call('schedule.inspect', { scheduleId: schedule.loopId })).schedule!
+  const published = receipt.lastMotePublication!
+  expect(published).toMatchObject({ conversationId: group.id, occurrenceAt: schedule.nextCheckAt,
+    operationId: pending.pendingCompletion?.operationId })
+  const message = (await restored.call('space.mote.group.inspect', { groupId: group.id, messageId: published.messageId })).messages[0]!
+  expect(message).toMatchObject({ body: request.body, author: { moteId: a.spaceId }, deliveries: [{ moteId: c.spaceId }] })
+  await reopened.check(now, schedule.loopId)
+  expect((await restored.call('space.mote.group.inspect', { groupId: group.id })).messages.map(message => message.id)).toEqual([published.messageId])
 })
 
 it('saves one original public message, starts only invited members and reuses exact member input through public RPC', async () => {
