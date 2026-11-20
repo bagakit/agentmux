@@ -216,6 +216,14 @@ Core 可在引用列表后、关闭容器前附一个完整 `<reminder>…</remi
 
 [`promptReactionMessage`](../../packages/core/src/prompt-reaction.ts) 将标记、选定含义快照和原回复来源放进 `agentMuxNote`，把选定 `definition.body` 作为独立原 prompt。note 进入平台包装时，标记的尖括号按平台文本转义，例如 `&lt;amux:reaction ok /&gt;`；不能把这个内部说明误写成一个新 A2A 信封或独立入站控制协议。实际选择、发送与含义冻结归原[快捷回复 owner](../design/behavior/conversation-input.md#回复卡片的-reaction-快捷回复)，文字不认证用户点击、不批准权限、不确认原生 turn 关联。
 
+## 资料引用
+
+`<amux:ref>` 声明原资料及其 CLI 查阅入口。协议名表达信息用途，目录的 `form` 描述阅读形式。引用的数据由原业务对象持有，CLI 参数、分页及用法由当前版本的 help 持有。
+
+Focus 引用的起始行是 `<amux:ref kind="focus-selection" read-via="focus read --help">`。正文给出点击时固定的 Project Space 或 Collection 类别、原 Host 以及所选 Focus 成员标识。标识中的换行和分隔符在呈现时转义，引用不内联卡片事实、历史或 CLI 的 JSON 入参。收尾使用独立的 `</amux:ref>` 行。实际引用语法与示例从 Core 阅读目录获取。
+
+声明可跟在原平台说明后，之后以两个 LF 接原任务正文。阅读器保留原声明和任务正文，读取用法沿实际注册的 `focus read --help`。Focus 组范围与咨询行为沿[项目组讨论与建议](../design/behavior/focus-context.md#项目组讨论与建议)。
+
 ## 内容分享外框
 
 ```text
