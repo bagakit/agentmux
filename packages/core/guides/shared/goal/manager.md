@@ -5,6 +5,9 @@ Read the original Goal, its exact execution and Core input receipts. Distinguish
 idle or declared waiting from unreported stalled work. Record the real evidence, gaps,
 next responsible party and action against that execution.
 
+On `<amux:goal version="1" action="confirm-and-continue">`, verify the original
+confirmation operation, current revision and your Supervisor role before advancing work.
+
 Read the plan revision with `goal plan --goal ID` and current work with
 `goal plan active --goal ID`. Omit `--goal` and use `--view manage` to see current
 Tickets across the Goals you supervise at this owner. Publish with `goal plan revise` and use the issued Ticket IDs.
