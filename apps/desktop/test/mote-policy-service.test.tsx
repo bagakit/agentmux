@@ -104,15 +104,17 @@ it('unconfirmed settings offer the original settings read rather than claiming a
   expect(calls.open).not.toHaveBeenCalled();expect(calls.ensure).not.toHaveBeenCalled();expect(calls.send).not.toHaveBeenCalled()
 })
 
-it('unknown original recovery has its own read action and never claims creation is pending',async()=>{
+it('background recovery stays in the Main actions and reads only the original Run',async()=>{
   const calls=setup()
   useAppStore.setState(state=>({sessions:state.sessions.map(item=>item.id===defaultAgent.id?{...item,continuity:{...item.continuity!,kind:'pending',reason:'operation-unconfirmed',evidence:{kind:'run-unknown',observedAt:1,message:'Original recovery reply unknown'}},status:{...item.status,continuity:undefined,continuityReason:undefined}}:item)} as any))
   const refresh=vi.spyOn(api.sessions,'refresh').mockResolvedValue(useAppStore.getState().sessions.find(item=>item.id===defaultAgent.id)!)
   const container=await mounted()
-  await vi.waitFor(()=>expect(container.querySelector('[data-mote-main-service]')?.textContent).toContain('主对话恢复尚待确认'))
-  const service=container.querySelector('[data-mote-main-service]')!
-  expect(service.textContent).not.toContain('开始请求')
-  await act(async()=>button(service,'核对恢复进度')!.click())
+  await vi.waitFor(()=>expect(container.querySelector('.mote-main-actions__trigger')).not.toBeNull())
+  expect(container.querySelector('[data-mote-main-service]')).toBeNull()
+  await act(async()=>container.querySelector<HTMLButtonElement>('.mote-main-actions__trigger')!.click())
+  const actions = () => document.querySelector('.mote-main-actions__menu')
+  await vi.waitFor(()=>expect(actions() && button(actions()!,'核对恢复进度')).toBeTruthy())
+  await act(async()=>button(actions()!,'核对恢复进度')!.click())
   await vi.waitFor(()=>expect(refresh).toHaveBeenCalled())
   expect(refresh.mock.calls.every(([control])=>control.agentSessionId===defaultAgent.id&&control.run.runId===defaultAgent.control.run.runId)).toBe(true)
   expect(calls.open).not.toHaveBeenCalled();expect(calls.send).not.toHaveBeenCalled();expect(calls.ensure).not.toHaveBeenCalled()
