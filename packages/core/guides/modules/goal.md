@@ -1,5 +1,5 @@
 ---
-summary: "Goal scope, execution responsibility, reports and PMO patrol"
+summary: "Goal plans, workflows, execution responsibility, reports and PMO patrol"
 roles: "Executors, managers and people confirming or accepting work"
 when: "Discuss, execute, supervise, inspect or report on a Goal"
 ---

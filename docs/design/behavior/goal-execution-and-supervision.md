@@ -111,6 +111,8 @@ New Goal 与已有 Goal 的讨论关系只定义于[显式新建与专属讨论]
 
 确认的 Goal 可以由明确指定的单一 Loop Supervisor 持续推进；该准确 Session 必须属于负责人。持续推进是有限开始之外的单独授权，默认不开启。未指定 Supervisor 时详情引导选择，Continue 的启动操作在准确 Supervisor 明确后可用；有多个候选时由用户明确选择，不借最后关联项、背景 Space、名称或当前目录猜测。原 loop 的检查和控制不被新的选择状态遮蔽。原 `goal.start` 通过可选 continuation 授权，绑定原 Goal ID、已确认 alignment revision、Supervisor 的准确 Host／Session／Provider／cwd 与同一业务 operationId；未提供 continuation 仍是原有限开始。一次开始的业务 operationId 与后续每次 tick 各自准确留存，丢失回执按原操作核对，未确认时不重复发送，也不创建替代 Session。原 `goal.inspect` 按该 Goal 投影原续跑 Manager 的准确目标、状态与原操作回执，读不创建调度或复制 Goal 账本。原 `goal.continuation-action` 以准确 Goal/loop、预期 revision 与业务 operationId 沿同一 Manager 执行暂停、恢复、停止或检查；普通日历 `schedule.*` 不承载 interval 续跑。Goal 续跑与日历消息共用同一个持久调度时钟和 Core 输入事务，各自保留业务语义；Goal 生命周期只由 Goal owner 解释，Core 的续跑来源与调度不新增 Mote、Demand 或 UI 依赖。RPC/CLI/GUI 与连接设备对同一操作、版本和结果使用一致语义。
 
+工作流可配置一次 Goal 持续推进的最大并行派工和新增尝试数。自动派工明确引用这次已授权的持续推进，原 Goal owner 在保存新尝试的同一事务核对额度与范围。总量计入同一轮已准备的派工，并行只计仍属当前节点且尚无报告的尝试。已准备但效果未知的原操作按原身份继续对账，当前已开始的工作正常推进。额度耗尽时从原计划查看已完成结果及尚待派工的工作，并按对应原因提高额度或等待执行回报。允许的执行者、Host 和项目资源沿原派工授权。
+
 持续执行以原 Host 在线、Supervisor Agent 可用和准确输入条件为前提；关闭当前面板或换设备不改变原执行身份。设备或连接不可达时显示最后已确认的事实与未知状态，不宣称云端全天候保证。应用或连接恢复后保原目标、同一 loop、待核操作与讨论，不追补一串过期 tick。
 
 有限 Goal 开始把已确认的任务正常提交给明确的执行 Session；Provider 具备立即打断能力不等于这次目标开始获得抢占授权。提交方式与同一业务操作在首次入队时保存，重试沿原方式和原回执；已经选择立即打断或方式尚未确认的旧操作，不能被新的有限开始静默改成普通提交。忙碌、待权限、错误 Run 和投递未知仍由原 Core 判定并保留原任务、草稿与健康工作面，不在失败后换方式或换身份重发。用户的显式立即发送与原持续推进保留各自原合同。

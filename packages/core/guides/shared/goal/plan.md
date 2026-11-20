@@ -27,6 +27,33 @@ An authorized Agent can find it with `goal plan active`. For one Goal use
 `--runtime RUNTIME --namespace NS`. If the active index is rebuilding, read the original
 plan for history and retry the active query.
 
+### Use a system workflow
+
+In Desktop, open **Settings → Goals → Workflows** to view and configure
+the system workflows. **Execution and review** (`execution-review`) pairs
+work with independent review. **Evidence synthesis** (`evidence-synthesis`)
+organizes evidence gathering, independent challenges and a synthesis.
+Use the current Goal criteria to specify the work, checks and exact roles.
+Publish through the original plan revision. Its saved Ticket IDs and
+dependencies are the record of this Goal's plan.
+
+Use `settings inspect goals.workflow` to read the saved template, reviewer
+and budget on the serving owner. The `goals.workflow.reviewer` setting is one
+JSON value with `hostId`, `runtimeId` and `sessionId`. An empty value clears
+it. Read the owner before editing and use `settings set --help` for the write
+form. After an uncertain write, keep the original operation and read back
+the settings. Selecting `off` disables workflow use in settings. Start and
+delegation use the original Goal and role authorization independently of
+these settings. Goal acceptance remains a person's decision.
+
+For a new plan delegation in a budgeted workflow, read the original Goal's
+active continuation and put its ID in `intent.workflowLoopId` in the existing
+`goal delegate` input. `maxConcurrent` counts current attempts in that loop
+still awaiting a report. `maxAttempts` counts the new attempts admitted for
+that loop. Reconcile an uncertain delegation under its original operation and
+loop ID. At the budget boundary, read the original plan for completed work and
+pending nodes. A new loop requires the existing explicit stop and start actions.
+
 ### Create or revise a plan
 
 `goal discuss --goal ID --mode plan --operation-id OP` asks the current
@@ -82,3 +109,22 @@ containing `nodeId`, `delegationOperationId` and `replyMessageId`.
 - Continuous progress freezes the plan revision, actionable nodes and original attempt
   references for each input. Follow that frozen scope after an uncertain input.
   When every node passes, wait for the person's Goal acceptance.
+
+### Recheck only the affected work
+
+1. Read `goal inspect --goal ID` and `goal plan --goal ID` on the original
+   owner. For each affected Ticket, identify the current criteria text,
+   delivered artifact version, recorded check and frozen predecessor
+   completion proofs.
+2. Compare the proposed change with those facts. Keep the original node IDs,
+   attempts and reviews for unaffected work. Trace changed evidence or a
+   changed upstream completion through the dependencies that actually
+   reference it.
+3. Revise the plan through its current revision. Use a new node for changed
+   work when the published node already has an attempt. Rerun the relevant
+   checks against the exact delivery version and record the independent
+   verdict through the original review path. Preserve earlier evidence and
+   its version when a newer result needs review.
+4. If a send or review outcome is unknown, inspect the same original
+   operation before trying another write. Use a new attempt for actual
+   rework, with the source report and reasons carried forward.
