@@ -7,6 +7,7 @@ import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { build } from 'vite'
+import { browserSourceAliases } from '../../../packages/browser/scripts/source-build.mjs'
 import { listProbeProcesses, stopProbeProcesses, runProbeProcess } from './probe-process.mjs'
 const desktop=resolve(import.meta.dirname,'..'), repository=resolve(desktop,'../..'), fixture=join(desktop,'scripts/fixtures/goals-surface')
 const require=createRequire(import.meta.url),exec=promisify(execFile),hash=bytes=>createHash('sha256').update(bytes).digest('hex')
@@ -103,6 +104,7 @@ if (goalReadingOutline) ownedSources.push('../../packages/client-ui/src/input/Se
   '../../packages/client-ui/src/components/SegmentedControl.tsx', '../../packages/client-ui/src/components/SelectionField.tsx',
   '../../packages/client-ui/src/components/MoteIcon.tsx', '../../packages/client-ui/src/styles/segmented-control.css')
 if(goalClaimWorkbench)ownedSources.push('src/renderer/src/components/GoalPlanState.tsx','src/renderer/src/components/GoalActiveTickets.tsx','src/renderer/src/components/GoalWorkArea.tsx','scripts/fixtures/goals-surface/claim-workbench.cjs','scripts/fixtures/goals-surface/maturity.cjs','src/renderer/src/components/GoalSupervisorRail.tsx','src/renderer/src/components/GoalPatrolControl.tsx','src/renderer/src/components/GoalExecutionTimeline.tsx','src/renderer/src/components/GoalAgentGroup.tsx','src/renderer/src/styles/goal-reading.css','src/renderer/src/styles/goal-review.css','src/renderer/src/styles/goal-supervisor-rail.css','../../packages/core/src/mote/group.ts','../../packages/demand/src/goal-patrol.ts')
+if(goalParticipationCapture)ownedSources.push('src/renderer/src/components/GoalStartWork.tsx','scripts/fixtures/goals-surface/plan.ts','../../packages/demand/src/dispatch.ts')
 if(workflowReviewCapture)ownedSources.push('src/renderer/src/components/GoalPlanDelivery.tsx','../../packages/demand/src/delegations.ts','../../packages/core/src/goal-delegation.ts','../host/src/goals-preferences.ts')
 if(goalHierarchy)ownedSources.push('scripts/fixtures/goals-surface/hierarchy.ts','scripts/fixtures/goals-surface/hierarchy.cjs','src/renderer/src/lib/goal-team.ts','src/renderer/src/lib/goal-agent-selection.ts','src/renderer/src/components/GoalContinuationControl.tsx','src/renderer/src/styles/goal-team.css','src/renderer/src/components/FocusContextCardBody.tsx','src/renderer/src/components/settings/GoalsPromptDrafts.tsx','src/renderer/src/components/settings/SettingsSaveBar.tsx','src/renderer/src/components/settings/modules/goals.tsx','src/renderer/src/components/settings/modules/prompts.tsx','src/renderer/src/components/settings/use-resource-drafts.ts','src/renderer/src/components/settings/use-setting-draft.ts','src/renderer/src/lib/focus-context.ts','src/renderer/src/lib/focus-context-identity.ts','src/renderer/src/styles/focus-context.css','src/renderer/src/components/FocusContextRow.tsx','src/renderer/src/components/AgentContextContent.tsx','src/renderer/src/components/FocusContextMenu.tsx','src/renderer/src/components/AgentInformationPreview.tsx','src/renderer/src/styles/focus.css')
 if(goalRealWork)ownedSources.push('scripts/fixtures/goals-surface/index.html','scripts/fixtures/goals-surface/real-work.ts','scripts/fixtures/goals-surface/real-work.cjs','scripts/fixtures/goals-surface/real-work-native.cjs','src/renderer/src/components/GoalWorkArea.tsx','src/renderer/src/lib/goal-start-presentation.ts','src/renderer/src/lib/goal-delegation-work.ts','src/renderer/src/components/GoalFiniteStartControl.tsx','src/renderer/src/lib/goal-team.ts','src/renderer/src/styles/goal-team.css')
@@ -130,6 +132,7 @@ try{
     : [{ find: /^@agentmux\/core\/control$/u, replacement: join(repository, 'packages/core/src/control.ts') }]
   const goalPatrolSource = join(repository, 'packages/demand/src/goal-patrol.ts')
   if (goalClaimWorkbench) coreAliases.push({ find: /^@agentmux\/demand\/goal-patrol$/u, replacement: goalPatrolSource })
+  if (goalSourceOnly) coreAliases.push(...Object.entries(browserSourceAliases()).map(([find, replacement]) => ({ find, replacement })))
   if (workflowReviewCapture) coreAliases.push(
     { find: /^@agentmux\/demand\/delegations$/u, replacement: join(repository, 'packages/demand/src/delegations.ts') },
     { find: /^@agentmux\/host\/goals-preferences$/u, replacement: join(repository, 'apps/host/src/goals-preferences.ts') })

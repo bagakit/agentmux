@@ -103,7 +103,16 @@ export function goalPlanPreview(seed: (mode: string) => void, render: () => void
         expectedScope: JSON.stringify([goal.id, owner.control.agentSessionId, alignment.revision, alignment.confirmedAt]), executions: [], alignment,
         supervisorAgentSessionId: owner.control.agentSessionId, recipientHostId: owner.control.hostId, context: 'Continue the original recovery.',
         requestedBy: { kind: 'device', id: 'workspace-console' }, requestedAt: at(2), attempts: [] }]) : undefined
-      const next = { ...goal, alignment, ...(patrols ? { patrols } : {}), ...(openGuide ? { address: formatGoalAddress(goal.id, 'workbench-preview-runtime', 'workspace-recovery') } : {}), title: 'Return to the same work, without rebuilding it',
+      const authoredStart = participation ? parseDemandDispatch({ operationId: 'authored-recovery-start', stage: 'confirmed', execution: 'finite',
+        target: { kind: 'space-member', source: { runtimeId: 'workbench-preview-runtime', spaceId: 'workspace-recovery',
+          regionId: 'recovery-worker', admission: { kind: 'creation', operationId: 'original-recovery-agent' } },
+          execution: { runtimeId: 'plan-worker-runtime', agentSessionId: executor.agentSessionId } },
+        runId: worker.control.run.runId, prompt: 'Check that the original workspace and unsent drafts are still available.',
+        request: { requestedBy: person, requestedAt: at(2), goalUpdatedAt: goal.updatedAt }, preparedAt: at(3), submittedAt: at(3),
+        receipt: { kind: 'core-input', inputKey: { kind: 'prompt', expectedRun: worker.control.run,
+          agentSessionId: executor.agentSessionId, submissionId: 'authored-recovery-start' }, outcome: 'admitted', observedAt: at(4) }
+      }) : undefined
+      const next = { ...goal, alignment, ...(authoredStart ? { dispatches: [authoredStart] } : {}), ...(patrols ? { patrols } : {}), ...(openGuide ? { address: formatGoalAddress(goal.id, 'workbench-preview-runtime', 'workspace-recovery') } : {}), title: 'Return to the same work, without rebuilding it',
         ...(timelineDurationMs === undefined ? {} : { plannedStartAt: at(1), targetAt: at(4) }),
         ...(awaitingConfirmation ? { alignment: { ...goal.alignment!, confirmedAt: null }, plan: { ...plan, reviews: [] } } : { plan }),
         activities: Array.from({ length: 8 }, (_, index) => ({ id: `original-note:${index}`, kind: 'Progress',
@@ -118,7 +127,7 @@ export function goalPlanPreview(seed: (mode: string) => void, render: () => void
       const responsibility: GoalResponsibilityObservation = { scope: demandResponsibilityScope(next), observedAt: next.updatedAt,
         supervisor: { agentSessionId: owner.control.agentSessionId, hostId: owner.control.hostId, runId: owner.control.run.runId,
           state: 'available', reason: 'The preview Supervisor can review the original reports.' },
-        executions: references.map(execution => {
+        executions: references.filter(execution => execution.kind === 'delegation').map(execution => {
           const delegation = next.delegations.find(item => item.operationId === execution.operationId)!
           return { execution, binding: delegation.linkedAt ? 'confirmed' : 'unconfirmed',
             phase: delegation.report ? 'report-review' : delegation.linkedAt ? 'executing' : 'unknown',
@@ -137,7 +146,7 @@ export function goalPlanPreview(seed: (mode: string) => void, render: () => void
       const owned = withoutDerivation ? { plan } : hostGoalPlan(next), observed = { ...next, ...owned, responsibility, delegationObservations: observations }
       // Actual observation hooks read these original preview facts instead of clearing the fixture.
       api.demands.delegation = async (operation, input) => input.goalId === next.id && operation === 'goal.delegations'
-        ? { goalId: next.id, goalUpdatedAt: next.updatedAt, diskDurability: 'confirmed' as const, delegations: next.delegations, observations, ...owned, responsibility, ...(patrols ? { patrols } : {}) }
+        ? { goalId: next.id, goalUpdatedAt: next.updatedAt, diskDurability: 'confirmed' as const, delegations: next.delegations, observations, ...owned, responsibility, ...(patrols ? { patrols } : {}), ...(authoredStart ? { dispatches: [authoredStart] } : {}) }
         : originalDelegation(operation, input)
       flushSync(() => {
         useAppStore.setState({ demands: { [next.id]: observed },

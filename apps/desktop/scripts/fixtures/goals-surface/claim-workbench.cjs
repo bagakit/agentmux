@@ -14,18 +14,21 @@ module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result
     const detailOpen = detail + ' > button'
     const originalAssignment = '[data-goal-coordination="plan:original-assignment"] details'
     const originalRequest = '[data-goal-coordination="patrol:original-continue-request"] details'
+    const task = '[data-goal-time-row="start:authored-recovery-start"] [data-goal-time-event="Task requested"]'
+    const originalTask = '[data-goal-work-operation="authored-recovery-start"]'
     const proposal = '[aria-label="Criteria and results"]'
     const reader = '.goal-plan__reading'
     for (const [width, theme] of [[1260, 'dark'], [620, 'light']]) {
       await size(width)
       await evaluate(`goalsPlan.seed(false, true, false, undefined, 85000, true); goalsVisual.appearance(${JSON.stringify(theme)})`)
-      await waitFor(`Boolean(${query(point)} && ${query(request)} && ${query(ticket)} && ${query(review)})`)
+      await waitFor(`Boolean(${query(point)} && ${query(request)} && ${query(ticket)} && ${query(review)} && ${query(task)})`)
       const before = await evaluate('goalsSpace.facts()')
       const scoped = await evaluate(`[...document.querySelectorAll('[data-goal-time-participant]')].map(point =>
         [point.closest('[data-goal-time-row]').dataset.goalTimeRow, point.dataset.goalTimeParticipant, point.dataset.goalTimeEvent])`)
       assert.deepEqual(scoped, [
         ['goal-participation', 'user', 'Goal confirmed'], ['goal-participation', 'device', 'Continuation requested'],
         ['node:workspace', 'user', 'Executor assigned'], ['attempt:history', 'user', 'Changes requested'],
+        ['start:authored-recovery-start', 'user', 'Task requested'],
       ])
       await evaluate(`${query('[data-goal-execution-time]')}.scrollIntoView({block:'center'})`)
       await paint()
@@ -74,6 +77,25 @@ module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result
       await capture(`${width}-${theme}-participation-original-review`, width)
       await hitControl(reader + ' .goal-plan__reading-header button')
       await waitFor(`document.activeElement === ${query(review)}`)
+      await hitControl(task)
+      await waitFor(`Boolean(${query(detailOpen)})`)
+      assert.match(await evaluate(`${query(detail)}.innerText`), /Task requested.*User recovery-owner.*authored-recovery-start/su)
+      const requestedAt = await evaluate(`${query(detail + ' time')}.dateTime`)
+      await evaluate(`${query(detail)}.scrollIntoView({block:'center'})`)
+      await paint()
+      await capture(`${width}-${theme}-start-participation-event`, width)
+      await hitControl(detailOpen)
+      await waitFor(`document.activeElement === ${query(originalTask)}`)
+      await hitControl(originalTask + ' .goal-request-reader > summary')
+      await waitFor(`${query(originalTask)}.innerText.includes('unsent drafts are still available')`)
+      const executionDetails = `[...(${query(originalTask)}.querySelectorAll('button'))].find(button => button.textContent === 'Execution details')`
+      await click(executionDetails)
+      await waitFor(`Boolean(${query(originalTask + ' time')})`)
+      assert.match(await evaluate(`${query(originalTask)}.innerText`), /User recovery-owner.*authored-recovery-start/su)
+      assert.equal(await evaluate(`${query(originalTask + ' time')}.dateTime`), requestedAt)
+      await evaluate(`${query(originalTask + ' time')}.scrollIntoView({block:'center'})`)
+      await paint()
+      await capture(`${width}-${theme}-start-participation-original`, width)
       assert.deepEqual(await evaluate('goalsSpace.facts()'), before, 'Reading keeps the same Goal, plan, draft and Runs')
       result.observations.push({ scene: 'goal-participation', width, theme, scoped, exactOriginalsOpened: true, exactPointReturned: true })
     }

@@ -203,6 +203,40 @@ describe('Goal plan graph', () => {
     expect(document.activeElement).toBe(dom.container.querySelector('[data-goal-work-kind="start"][data-goal-work-operation="original-start"]'))
   })
 
+  it('reads a task requester from its original Goal Start and keeps the input and other starts separate', async () => {
+    const target = { kind: 'space-member' as const, source: { runtimeId: 'owner', spaceId: 'project',
+      regionId: 'worker-region', admission: { kind: 'creation' as const, operationId: 'original-member' } },
+      execution: { runtimeId: 'worker', agentSessionId: 'same-worker' } }
+    const operationId = 'authored-start'
+    const request = { requestedAt: 120_000, goalUpdatedAt: 1, requestedBy: { kind: 'device' as const, id: 'verified-console' } }
+    const other = { operationId: 'older-start', target, stage: 'submitted' as const, execution: 'finite' as const,
+      prompt: 'Original earlier task', runId: 'same-run', preparedAt: 125_000,
+      request: { requestedAt: 110_000, goalUpdatedAt: 1 } }
+    seed(goal({ alignment: { ...alignment, confirmedAt: null }, dispatches: [other,
+      { ...other, operationId, prompt: 'Proceed with this exact task', stage: 'confirmed', request, preparedAt: 180_000,
+        receipt: { kind: 'core-input', inputKey: { kind: 'prompt', agentSessionId: 'same-worker', expectedRun: { runId: 'same-run' },
+          submissionId: operationId }, outcome: 'admitted', observedAt: 230_000 } }] }))
+    await dom.render(<GlobalBoardSurface />)
+    const time = graph()!.querySelector('[data-goal-execution-time]')!
+    const people = [...time.querySelectorAll('[data-goal-time-participant]')]
+    expect(people.map(point => point.closest('[data-goal-time-row]')!.getAttribute('data-goal-time-row'))).toEqual(['start:authored-start'])
+    const point = people[0] as HTMLButtonElement
+    expect(point.dataset.goalTimeEvent).toBe('Task requested')
+    await act(async () => point.click())
+    const details = time.querySelector('.goal-execution-time__detail')!
+    expect(details.querySelector('time')?.getAttribute('datetime')).toBe(new Date(request.requestedAt).toISOString())
+    expect(details.textContent).toContain('Device verified-console')
+    expect(details.textContent).toContain(operationId)
+    await act(async () => [...details.querySelectorAll('button')].at(-1)!.click())
+    const original = dom.container.querySelector('[data-goal-work-kind="start"][data-goal-work-operation="authored-start"]')!
+    expect(document.activeElement).toBe(original)
+    await act(async () => (original.querySelector('summary') as HTMLElement).click())
+    expect(original.textContent).toContain('Proceed with this exact task')
+    await act(async () => ([...original.querySelectorAll('button')].find(button => button.textContent === 'Execution details'))!.click())
+    expect(original.textContent).toContain('Device verified-console')
+    expect(original.querySelector('time')?.getAttribute('datetime')).toBe(new Date(request.requestedAt).toISOString())
+  })
+
   it('opens authenticated Goal participation at its original proposal and request', async () => {
     const person = { kind: 'user' as const, id: 'person-confirming' }
     const device = { kind: 'device' as const, id: 'request-device' }

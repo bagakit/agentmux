@@ -71,6 +71,7 @@ it('a public local-member Goal input outlives its temporary reader while retaini
   provider.prepareNativeInput = async (...args) => { await held; return await prepare(...args) }
   cleanup.push(() => { release(); provider.prepareNativeInput = prepare })
   const operationId = 'original-reader-lifetime-input'
+  const beforeRequest = Date.now()
   // The original Goal owner disposes its temporary SDK in finally after this
   // waiting receipt. Native preparation deliberately finishes only afterwards.
   await f.rpc.call('goal.start', { goalId: f.goal.id, operationId, agentReference: f.reference, access: f.access,
@@ -85,8 +86,25 @@ it('a public local-member Goal input outlives its temporary reader while retaini
   }).toBe(true)
   expect((await f.d.core.inspectAgentInput({ key }))?.status).toBe('admitted')
   const observed = await f.rpc.call('goal.inspect', { goalId: f.goal.id, dispatchOperationId: operationId, access: f.access })
-  expect(observed.goal?.dispatches?.find(row => row.operationId === operationId)).toMatchObject({ operationId, target: f.reference,
-    runId: f.session.run.runId, stage: 'confirmed', receipt: { kind: 'core-input', inputKey: key, outcome: 'admitted' } })
+  const original = observed.goal?.dispatches?.find(row => row.operationId === operationId)
+  const requestedBy = { kind: 'device', id: `local-user:${process.getuid?.() ?? 'current'}` }
+  expect(original).toMatchObject({ operationId, target: f.reference, prompt: f.goal.description,
+    request: { requestedBy, goalUpdatedAt: f.goal.updatedAt }, runId: f.session.run.runId, stage: 'confirmed',
+    receipt: { kind: 'core-input', inputKey: key, outcome: 'admitted' } })
+  expect(original!.request!.requestedAt).toBeGreaterThanOrEqual(beforeRequest)
+  expect(original!.request!.requestedAt).toBeLessThanOrEqual(original!.preparedAt!)
+  expect(await f.goals.demands.inspectDispatch(f.goal.id, operationId)).toEqual(original)
+
+  const loader = process.env.T012_FINITE_CLI_LOADER ? pathToFileURL(process.env.T012_FINITE_CLI_LOADER) : new URL('./helpers/goal-relations-source-loader.mjs', import.meta.url)
+  const cli = await runSourceObjectCli(['--endpoint', 'unix:' + f.goalServer.path, 'goal', 'inspect', '--goal', f.goal.id,
+    '--dispatch-operation', operationId, '--access', JSON.stringify(f.access)], objectCliEnvironment(f.sourceRoot), '', 15000, loader)
+  expect(cli.code, cli.stderr).toBe(0)
+  expect(JSON.parse(cli.stdout).result.goal.dispatches).toEqual([original])
+
+  const other = (await seedStoredDemand(f.goals.demands, { id: 'neighbor-goal', title: 'Same member, different Goal',
+    assigneeSessionIds: [f.reference] })).demand
+  const decoy = await f.rpc.call('goal.inspect', { goalId: other.id })
+  expect(decoy.goal?.dispatches ?? []).toEqual([])
   expect(f.send).toHaveBeenCalledTimes(1); expect(f.raw).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled()
   expect(await f.d.core.readAgentSession(f.session.agentSessionId)).toMatchObject({ run: f.session.run })
 })
@@ -110,7 +128,10 @@ it('public Goal Start obtains the exact Source C/current Run, uses the original 
   const cli = await runSourceObjectCli(['--endpoint', 'unix:' + f.goalServer.path, 'goal', 'start', '--goal', f.goal.id, '--operation-id', operationId, '--agent-ref', JSON.stringify(f.reference), '--access', JSON.stringify(f.access), '--resume-original'], objectCliEnvironment(f.sourceRoot), '', 15000, process.env.T012_FINITE_CLI_LOADER ? pathToFileURL(process.env.T012_FINITE_CLI_LOADER) : new URL('./helpers/goal-relations-source-loader.mjs', import.meta.url))
   expect(cli.code, cli.stderr).toBe(0); expect(JSON.parse(cli.stdout).result.receipt).toMatchObject({ agentReference: f.reference, run: f.session.run })
   const skill = await runSourceObjectCli(['goal', '--skill'], objectCliEnvironment(f.sourceRoot), '', 15000, process.env.T012_FINITE_CLI_LOADER ? pathToFileURL(process.env.T012_FINITE_CLI_LOADER) : new URL('./helpers/goal-relations-source-loader.mjs', import.meta.url))
-  expect(skill.code, skill.stderr).toBe(0); expect(skill.stdout).toContain('--resume-original'); expect(skill.stdout).toContain('Unknown effects are not automatically resent')
+  expect(skill.code, skill.stderr).toBe(0)
+  expect(skill.stdout).toContain('--dispatch-operation OP')
+  expect(skill.stdout).toContain('--resume-original')
+  expect(skill.stdout).toContain('A missing read does not establish that input was never sent.')
   const responsibility = await f.rpc.call('goal.delegations', { goalId: f.goal.id })
   expect(responsibility.dispatches).toMatchObject([{ target: f.reference, operationId, receipt: { kind: 'core-input' } }])
   expect(responsibility.responsibility?.executions).toMatchObject([{ execution: { target: f.reference, operationId, runId: f.session.run.runId }, binding: 'unconfirmed', phase: 'unknown' }])
