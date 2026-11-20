@@ -53,7 +53,10 @@ duty or input remains. Use
 for your own original Run at the Goal and Core's shared local owner. The command
 checks the saved handoff, other Goal duties and exact input occupation, including
 the original Desktop's draft and queue even if the Session's view is detached.
-A retained result names the blocking fact. If the Stop result is uncertain, preserve that operation ID.
+A new Goal duty or Core input saved before Stop admission retains the exact Run.
+The Desktop occupancy receipt describes the drafts and queue when Desktop reads
+them. A retained result names the blocking fact. If the Stop result is uncertain,
+preserve that operation ID and inspect it before retrying.
 The original authorized person or device can read it with
 `agent stop inspect --session SID --run RUN --operation-id OP`.
 The collection and Stop receipts preserve the report's independent review and
