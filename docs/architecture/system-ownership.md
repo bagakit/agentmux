@@ -65,6 +65,14 @@ flowchart LR
 
 Agent 生命周期由 Host 的 Core owner 持有；Main 的 `RuntimeController` 沿原 Hosted client 调用公共 API。Browser 操作事实和订阅由准确 Browser 宿主消费共享的 [operation journal](../../packages/browser/src/browser-operation-journal.ts) 提供，Toolkit 能力由 [ToolkitOwner](../../apps/desktop/src/main/toolkit-owner.ts) 提供。Session lookup、角色绑定和消息编排归共享业务服务；CLI 不直接读写这些本地业务事实。独立 Host 不依赖 Main 提供内容与配置读取；真实焦点、窗口、Browser 等原生 owner 离线时明确局部不可用，服务存在不证明这些宿主能力已经就绪。
 
+## Goal 工作流
+
+独立 Host 在 `createHostGoals` 装配规划、派工和评审输入，`@agentmux/demand` 持有目标、计划与 Ticket 的事实。工作流沿 [Goal 计划与 Ticket](../design/behavior/goal-plans-and-tickets.md#工作流模板与计划修订指引) 的原身份、授权和回执推进。见 [Host 组装](../../apps/host/src/goals.ts)与 [DemandStore](../../packages/demand/src/demand-store.ts)。
+
+- **配置与规划**。Desktop 的 Workflows 子菜单和公开设置命令经 `ConfigOwner` 写入同一 `goals.workflow`。Host 从保存的配置读模板，在创建规划请求时保存对应指引。Supervisor 通过 `goal.plan.revise` 保存实际计划。见 [设置页贡献](../../apps/desktop/src/renderer/src/components/settings/modules/goals.tsx)、[公开设置注册](../../apps/desktop/src/main/settings/modules/goals.ts)、[Host 配置读取](../../apps/host/src/goal-workflow-settings.ts)与[规划请求](../../apps/host/src/goal-patrol-owner.ts)。
+- **持续推进与派工**。启用派工预算时，持续推进的输入给出该轮 `workflowLoopId`。派工请求在 `intent.workflowLoopId` 引用此轮时，Host 核对原 Goal、Host、Session、Run 和 alignment revision。DemandStore 在准备新尝试的同一写事务中根据原 Ticket 记录计入额度，并允许回读已准备的原操作。见 [Host 组装](../../apps/host/src/goals.ts)与 [派工准备](../../packages/demand/src/demand-store.ts)。
+- **独立复核与接续**。`goal.collect` 存下交付时，DemandStore 为符合条件的交付保存带交付哈希和准确评审者的 `workflowReview`。Host 以同一操作准备 Core FutureIntent，核对评审者的准确 Run 和输入条件后认领投递。`goal.delegations` 返回此操作的投递状态，`goal.plan.review` 记录评审结论。后继就绪读取节点签名完成回执，人的结果接受走 `goal.accept`。见 [评审投递](../../apps/host/src/goal-workflow-review.ts)、[委派入口](../../apps/host/src/goal-delegation-owner.ts)与[交付及接续合同](../design/behavior/goal-plans-and-tickets.md#交付核验与自动接续)。
+
 ## 持久事实与观察投影
 
 | 事实 | 持有与恢复入口 |
