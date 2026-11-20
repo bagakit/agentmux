@@ -23,13 +23,14 @@ export type MoteStartActions = { reading: MoteMainActionReading | null; result: 
   restoringInput?: boolean; restoreInput?(): Promise<boolean>;
   submit(query: MoteMainDeferredInput, rollover?: MoteMainRolloverDecision, onRetained?: (query: MoteMainDeferredInput) => void | Promise<void>): Promise<void>;
   inspect(id: string): void; advance(id: string): void; refresh(): void }
-export function MoteMainActions({ scope, active, entryToken, onConfigure, onCreated, onRefresh, onOpenWorkspace, onOpenCreated, presentation, renderStart, onQueryResult, onStartNew, onResult, onPendingCreation }: {
+export function MoteMainActions({ scope, active, entryToken, onConfigure, onCreated, onRefresh, onOpenWorkspace, onOpenCreated, presentation, renderStart, onQueryResult, onStartNew, onResult, onPendingCreation, onInspectRecovery }: {
   scope: MoteWorkfaceScope; active: boolean; presentation?: 'menu' | 'setup' | undefined; entryToken?: string | undefined
   onConfigure(invoker?: HTMLElement | null): void; onCreated?(reference: MoteDefaultConversation): void; onOpenCreated?: ((reference: MoteDefaultConversation) => void) | undefined; onRefresh?: (() => void) | undefined; onOpenWorkspace?: (() => void) | undefined
   onStartNew?: (() => void) | undefined; renderStart?: ((state: MoteStartActions) => ReactNode) | undefined
   onQueryResult?: ((result: MoteMainActionResult, query: MoteMainDeferredInput, mayNavigate: () => boolean) => void) | undefined
   onResult?: ((result: MoteMainActionResult, mayNavigate: () => boolean) => void) | undefined
   onPendingCreation?: ((operationIds: string[]) => void) | undefined
+  onInspectRecovery?: (() => void) | undefined
 }) {
   const model = useMoteDialogueView()
   const [reading, setReading] = useState<MoteMainActionReading | null>(null), [result, setResult] = useState<MoteMainActionResult | null>(null)
@@ -152,6 +153,7 @@ export function MoteMainActions({ scope, active, entryToken, onConfigure, onCrea
       onClick={() => { if (onStartNew) leave(onStartNew)(); else if (reading) void run(() => createMoteMain(scope, reading), undefined, true) }}>{busy ? '正在核对…' : current ? '开始新一轮对话' : '开始对话'}</Button>
     <Button type="button" onClick={event => { const invoker = menu ? menuTrigger : event.currentTarget; setMenuOpen(false); onConfigure(invoker) }}>设置 Executor 优先级</Button>
     {current && onOpenWorkspace ? <Button type="button" onClick={leave(onOpenWorkspace)}>在工作区打开</Button> : null}
+    {onInspectRecovery ? <Button type="button" onClick={leave(onInspectRecovery)}>核对恢复进度</Button> : null}
     <Button type="button" disabled={busy} onClick={() => setGeneration(value => value + 1)}>重新核对</Button>
   </>
   const status = <>

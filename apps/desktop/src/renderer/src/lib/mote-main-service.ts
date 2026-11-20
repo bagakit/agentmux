@@ -14,7 +14,7 @@ export function moteMainServicePolicy(scope: MoteWorkfaceScope, main: MoteMainSn
 
 export function moteMainServicePresentation(status: 'unavailable' | 'unconfirmed', policy: ReturnType<typeof moteMainServicePolicy>, pendingCreation: boolean) {
   if (pendingCreation) return { title: '开始请求尚待确认', mode: '原请求和问题都已保留，不会重复创建。', restore: '查看这次开始的进度。', action: 'start' as const, label: '查看开始进度', hint: '写下新的问题，原请求仍留在原处…' }
-  if (status === 'unconfirmed') return { title: '主对话恢复尚待确认', mode: '原对话、草稿和未确认的消息都在。', restore: '先核对原恢复；不会重发旧消息。', action: 'inspect' as const, label: '核对恢复进度', hint: '写下新的问题，未确认的消息仍留在原处…' }
+  if (status === 'unconfirmed') return null
   const mode = policy === 'automatic' ? '已开启自动接续。新问题由保存的策略决定是否切换。'
     : policy === 'keep-current' ? '已设为保留当前对话，可明确继续新对话。'
     : policy === 'unconfigured' ? '尚未配置自动接续，可明确继续新对话。' : '接续设置尚未确认，可从主对话菜单核对。'
