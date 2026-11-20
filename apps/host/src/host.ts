@@ -224,7 +224,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
         if (hostId !== 'local') throw new AgentMuxError('The original private thread Host is unavailable.', 'CONTROL_UNAVAILABLE')
         return originalRuntime().client
       }
-    })) : undefined
+    }), { main: moteMain, readPeer: conversationAgents.readTarget, client: { readAgentSession: id => originalRuntime().client.readAgentSession(id) } }) : undefined
   const service = {
     spatialState,
     ...(moteGroups ? { moteGroups } : {}),

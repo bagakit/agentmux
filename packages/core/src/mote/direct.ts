@@ -2,6 +2,8 @@ import { AgentMuxError } from '../errors.js'
 import { rpcRecord } from '../rpc-data.js'
 import { parseMoteGroupParams, parseMoteGroupResult, type MoteGroupCallContext, type MoteGroupMember, type MoteGroupMessage } from './group.js'
 import { parseMotePreferencesTarget, sameMotePreferencesTarget, type MotePreferencesTarget } from './preferences.js'
+import { parseAgentScheduleTiming, type AgentScheduleTiming } from '../agent-schedule.js'
+import { scheduleMatchesCreation, validateScheduleRpcResult, type ScheduleParamsMap, type ScheduleResultMap } from '../public-rpc-schedules.js'
 
 type Page = { beforeSequence?: number; limit?: number }
 export type MoteDirectParticipant = Pick<MoteGroupMember, 'moteId' | 'target' | 'name' | 'thread'>
@@ -19,12 +21,14 @@ export type MoteDirectParamsMap = {
   'space.mote.direct.list': Page & { mote: MotePreferencesTarget }
   'space.mote.direct.inspect': Page & { threadId: string; mote?: MotePreferencesTarget }
   'space.mote.direct.send': { mote: MotePreferencesTarget; peer: MotePreferencesTarget; operationId: string; body: string; replyToMessageId?: string }
+  'space.mote.direct.schedule': Omit<MoteDirectParamsMap['space.mote.direct.send'], 'replyToMessageId'> & AgentScheduleTiming & { checkIn?: never }
   'space.mote.direct.reply': { threadId: string; operationId: string; inputOperationId: string; body: string }
 }
 export type MoteDirectResultMap = {
   'space.mote.direct.list': { threads: MoteDirectThread[]; nextBeforeSequence: number | null }
   'space.mote.direct.inspect': { thread: MoteDirectThread; messages: MoteDirectMessage[]; nextBeforeSequence: number | null }
   'space.mote.direct.send': { threadId: string; message: MoteDirectMessage }
+  'space.mote.direct.schedule': ScheduleResultMap['schedule.create']
   'space.mote.direct.reply': { message: MoteDirectMessage }
 }
 export type MoteDirectMethod = keyof MoteDirectParamsMap
@@ -32,6 +36,7 @@ export const MOTE_DIRECT_METHODS = {
   'space.mote.direct.list': 'short',
   'space.mote.direct.inspect': 'short',
   'space.mote.direct.send': 'long',
+  'space.mote.direct.schedule': 'long',
   'space.mote.direct.reply': 'short'
 } as const satisfies Record<MoteDirectMethod, 'short' | 'long'>
 
@@ -39,7 +44,21 @@ export const isMoteDirectMethod = (method: unknown): method is MoteDirectMethod 
   typeof method === 'string' && Object.hasOwn(MOTE_DIRECT_METHODS, method)
 
 export interface MoteDirectPort {
-  call<M extends MoteDirectMethod>(method: M, input: MoteDirectParamsMap[M], context: MoteGroupCallContext): Promise<MoteDirectResultMap[M]>
+  call<M extends MoteDirectMethod>(method: M, input: MoteDirectParamsMap[M], context: MoteDirectCallContext): Promise<MoteDirectResultMap[M]>
+}
+export type MoteDirectCallContext = MoteGroupCallContext & {
+  schedule(input: ScheduleParamsMap['schedule.create']): Promise<ScheduleResultMap['schedule.create']>
+}
+
+export function moteDirectSchedulePrompt(input: MoteDirectParamsMap['space.mote.direct.schedule']): string {
+  const target = ({ spaceId, zoneId, expectedResource: { hostId, workspaceId, workspacePath } }: MotePreferencesTarget) =>
+    ({ spaceId, zoneId, expectedResource: { hostId, workspaceId, workspacePath } })
+  return [
+    'This is the scheduled private assignment you saved. On this due turn, give the original assignment below to the exact peer.',
+    'Read the original arrangement with "$AGENTMUX_CLI" schedule inspect --data - and the provided operationId. Use its schedule.lastInputRef.futureIntent.occurrenceAt and schedule.loopId.',
+    'Run "$AGENTMUX_CLI" space mote direct send --input - with the provided mote, peer and exact body. Set operationId to scheduled/<loopId>/<occurrenceAt>. Reuse this ID and body when checking a partial receipt. If the original due reference is unconfirmed, keep the arrangement and check it before sending. The body is private message content.',
+    JSON.stringify({ operationId: input.operationId, mote: target(input.mote), peer: target(input.peer), body: input.body })
+  ].join('\n\n')
 }
 
 const invalid = (code: 'INVALID_CONTROL_REQUEST' | 'CONTROL_PROTOCOL_ERROR'): never => {
@@ -55,11 +74,14 @@ export function parseMoteDirectParams<M extends MoteDirectMethod>(method: M, val
     const { mote, threadId, ...page } = rpcRecord(value, ['mote', 'threadId', 'beforeSequence', 'limit'], code)
     if (mote !== undefined) parseMotePreferencesTarget(mote, code)
     parseMoteGroupParams('space.mote.group.inspect', { ...page, groupId: threadId })
-  } else if (method === 'space.mote.direct.send') {
-    const { mote, peer, ...send } = rpcRecord(value, ['mote', 'peer', 'operationId', 'body', 'replyToMessageId'], code)
+  } else if (method === 'space.mote.direct.send' || method === 'space.mote.direct.schedule') {
+    const planned = method === 'space.mote.direct.schedule'
+    const { mote, peer, calendar, afterMs, everyMs, ...send } = rpcRecord(value,
+      ['mote', 'peer', 'operationId', 'body', ...(planned ? ['calendar', 'afterMs', 'everyMs'] : ['replyToMessageId'])], code)
     const source = parseMotePreferencesTarget(mote, code), recipient = parseMotePreferencesTarget(peer, code)
     if (source.spaceId === recipient.spaceId) return invalid(code)
     parseMoteGroupParams('space.mote.group.send', { ...send, groupId: 'private-thread', recipientIds: [recipient.spaceId] })
+    if (planned) parseAgentScheduleTiming({ calendar, afterMs, everyMs }, code)
   } else {
     const { threadId, ...reply } = rpcRecord(value, ['threadId', 'operationId', 'inputOperationId', 'body'], code)
     parseMoteGroupParams('space.mote.group.reply', { ...reply, groupId: threadId })
@@ -71,6 +93,16 @@ export function parseMoteDirectParams<M extends MoteDirectMethod>(method: M, val
 // receipts. The public private-thread boundary has its own audience and shape.
 export function parseMoteDirectResult<M extends MoteDirectMethod>(method: M, value: unknown, input: MoteDirectParamsMap[M]): MoteDirectResultMap[M] {
   const code = 'CONTROL_PROTOCOL_ERROR'
+  if (method === 'space.mote.direct.schedule') {
+    const request = input as MoteDirectParamsMap['space.mote.direct.schedule']
+    const result = validateScheduleRpcResult('schedule.create', value), { schedule } = result
+    if (schedule.hostId !== request.mote.expectedResource.hostId) return invalid(code)
+    const { mote: _, peer: __, body: ___, ...timing } = request
+    const target = { hostId: schedule.hostId, agentSessionId: schedule.agentSessionId, providerId: schedule.providerId, workspacePath: schedule.workspacePath }
+    if (!scheduleMatchesCreation(schedule, { ...timing, target, prompt: moteDirectSchedulePrompt(request),
+      ...(schedule.inputEpoch ? { inputEpoch: schedule.inputEpoch } : {}) })) return invalid(code)
+    return result as MoteDirectResultMap[M]
+  }
   const message = (raw: unknown) => {
     const { threadId, ...entry } = rpcRecord(raw, ['threadId', 'id', 'sequence', 'createdAt', 'author', 'body', 'replyToMessageId', 'deliveries'], code)
     if (rpcRecord(entry.author, ['kind', 'moteId', 'name'], code).kind !== 'mote') return invalid(code)

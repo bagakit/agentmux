@@ -73,6 +73,26 @@ function requireActive(record: GroupMemberRecord, generation = groupMemberGenera
     groupFailure('This Group membership no longer authorizes new Group actions.', 'CONTROL_PERMISSION_DENIED')
 }
 
+export async function authorizeMoteConversationMain(main: MoteMainReader | undefined, target: MotePreferencesTarget, context: MoteGroupCallContext) {
+  const { actor } = context
+  if (actor.kind !== 'agent')
+    return groupFailure('Only the authenticated Mote Main can supply sourceMote.', 'CONTROL_PERMISSION_DENIED')
+  if (!main) return groupFailure('The original Mote Main owner is unavailable.', 'CONTROL_UNAVAILABLE')
+  const original = await main.readCurrentMoteMain(target)
+  if (original.status !== 'ready')
+    return groupFailure(original.issue ?? 'The original Mote Main is unconfirmed.', 'CONTROL_UNAVAILABLE')
+  if (original.current?.hostId !== actor.hostId || original.current.sessionId !== actor.agentSessionId)
+    return groupFailure('Use the Mote bound to your authenticated current Main.', 'CONTROL_PERMISSION_DENIED')
+  const assertCurrent = async () => {
+    await context.assertCurrent()
+    await main.assertCurrent(original)
+  }
+  return { target, reference: original.current, assertCurrent, commit: <T>(work: () => Promise<T>) => {
+    const apply = async () => { await assertCurrent(); return work() }
+    return main.withRole ? main.withRole(target, apply) : apply()
+  } }
+}
+
 export function createHostMoteGroups(options: {
   store: MoteGroupStore
   agents: HostMoteChatAgents
@@ -347,27 +367,6 @@ export function createHostMoteGroups(options: {
     return { moteId: target.spaceId, name: (await agents.readTarget(target)).name, target, thread: null, role: 'member', state: 'active' }
   }
 
-  async function groupMain(target: MotePreferencesTarget | undefined, context: MoteGroupCallContext) {
-    const { actor } = context
-    if (!target) return
-    if (actor.kind !== 'agent')
-      return groupFailure('Only the authenticated Mote Main can supply sourceMote.', 'CONTROL_PERMISSION_DENIED')
-    const main = options.main ?? groupFailure('The original Mote Main owner is unavailable.', 'CONTROL_UNAVAILABLE')
-    const original = await main.readCurrentMoteMain(target)
-    if (original.status !== 'ready')
-      return groupFailure(original.issue ?? 'The original Mote Main is unconfirmed.', 'CONTROL_UNAVAILABLE')
-    if (original.current?.hostId !== actor.hostId || original.current.sessionId !== actor.agentSessionId)
-      return groupFailure('Use the Mote bound to your authenticated current Main.', 'CONTROL_PERMISSION_DENIED')
-    const assertCurrent = async () => {
-      await context.assertCurrent()
-      await main.assertCurrent(original)
-    }
-    return { target, assertCurrent, commit: <T>(work: () => Promise<T>) => {
-      const apply = async () => { await assertCurrent(); return work() }
-      return main.withRole ? main.withRole(target, apply) : apply()
-    } }
-  }
-
   async function mainMembership(groupId: string, target: MotePreferencesTarget) {
     const record = await store.member(groupId, target.spaceId)
     if (!sameMotePreferencesTarget(record.member.target, target))
@@ -459,7 +458,8 @@ export function createHostMoteGroups(options: {
         return await edit(method, raw as MoteGroupParamsMap[EditMethod], context) as MoteGroupResultMap[M]
       if (method === 'space.mote.group.file.list' || method === 'space.mote.group.file.read')
         return await groupFile(method, raw as MoteGroupParamsMap[FileMethod], context) as MoteGroupResultMap[M]
-      const main = await groupMain('sourceMote' in raw ? raw.sourceMote : undefined, context)
+      const sourceMote = 'sourceMote' in raw ? raw.sourceMote : undefined
+      const main = sourceMote ? await authorizeMoteConversationMain(options.main, sourceMote, context) : undefined
       if (actor.kind === 'agent' && !main && method !== 'space.mote.group.inspect')
         return groupFailure('Use sourceMote from your current Main, or an addressed reply in your Group Thread.', 'CONTROL_PERMISSION_DENIED')
       if (method === 'space.mote.group.list') {

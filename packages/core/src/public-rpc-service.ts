@@ -1510,7 +1510,7 @@ export class AgentMuxRpcService {
     if (isMoteGroupMethod(method) || isMoteDirectMethod(method)) {
       const caller = context.caller ? await this.authenticated(context, true) : undefined
       const agentOnly = method === 'space.mote.group.reply' || method === 'space.mote.group.members.leave' ||
-        method === 'space.mote.direct.send' || method === 'space.mote.direct.reply'
+        method === 'space.mote.direct.send' || method === 'space.mote.direct.reply' || method === 'space.mote.direct.schedule'
       const ownerOnly = method === 'space.mote.group.retry'
       if (caller ? ownerOnly : agentOnly || !context.principal || !['user', 'device'].includes(context.principal.kind))
         throw new AgentMuxError('This Group operation requires its original authenticated workspace participant.', 'CONTROL_PERMISSION_DENIED')
@@ -1532,7 +1532,8 @@ export class AgentMuxRpcService {
         const owner = this.ports.moteDirect
         if (!owner) throw new AgentMuxError('The original private Mote conversation owner is unavailable.', 'CONTROL_UNAVAILABLE')
         const input = parseMoteDirectParams(method, params)
-        const result = await owner.call(method, input, { actor, assertCurrent })
+        const result = await owner.call(method, input, { actor, assertCurrent,
+          schedule: request => this.call('schedule.create', request, context) })
         return parseMoteDirectResult(method, result, input) as unknown as AgentMuxRpcResult<M>
       }
       const owner = this.ports.moteGroups

@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto'
-import { AgentMuxError, type MoteGroupCallContext, type MoteDirectMethod, type MoteDirectMessage, type MoteDirectParamsMap, type MoteDirectPort,
+import { AgentMuxError, moteDirectSchedulePrompt, type AgentMuxClient, type MoteDirectCallContext, type MoteDirectMethod, type MoteDirectMessage, type MoteDirectParamsMap, type MoteDirectPort,
   type MoteDirectResultMap, type MoteDirectThread, type MoteGroupMessage, type MoteGroupPort, type MoteGroupSummary } from '@agentmux/core'
 import { sameMotePreferencesTarget, type MotePreferencesTarget } from '@agentmux/core/mote-preferences'
+import type { MoteMainReader } from '@agentmux/core/mote-dialogue'
+import { authorizeMoteConversationMain } from './mote-group.js'
 
 function privateMessage({ groupId, author, event, ...message }: MoteGroupMessage): MoteDirectMessage {
   if (author.kind !== 'mote' || event) throw new AgentMuxError('The original private message has no authenticated Mote author.', 'CONTROL_PROTOCOL_ERROR')
@@ -20,9 +22,13 @@ const belongsTo = (thread: MoteGroupSummary, mote: MotePreferencesTarget) =>
   thread.members.some(member => sameMotePreferencesTarget(member.target, mote))
 
 /** Only this port can address the two-participant conversation ledger. */
-export function createHostMoteDirect(ledger: MoteGroupPort): MoteDirectPort {
+export function createHostMoteDirect(ledger: MoteGroupPort, owner: {
+  main: MoteMainReader
+  readPeer(target: MotePreferencesTarget): Promise<unknown>
+  client: Pick<AgentMuxClient, 'readAgentSession'>
+}): MoteDirectPort {
   return {
-    async call<M extends MoteDirectMethod>(method: M, raw: MoteDirectParamsMap[M], context: MoteGroupCallContext): Promise<MoteDirectResultMap[M]> {
+    async call<M extends MoteDirectMethod>(method: M, raw: MoteDirectParamsMap[M], context: MoteDirectCallContext): Promise<MoteDirectResultMap[M]> {
       const { actor } = context
       if (method === 'space.mote.direct.list') {
         const { mote, ...page } = raw as MoteDirectParamsMap['space.mote.direct.list']
@@ -44,6 +50,19 @@ export function createHostMoteDirect(ledger: MoteGroupPort): MoteDirectPort {
         const { threadId, ...reply } = raw as MoteDirectParamsMap['space.mote.direct.reply']
         const { message } = await ledger.call('space.mote.group.reply', { ...reply, groupId: threadId }, context)
         return { message: privateMessage(message) } as MoteDirectResultMap[M]
+      }
+      if (method === 'space.mote.direct.schedule') {
+        const request = raw as MoteDirectParamsMap['space.mote.direct.schedule']
+        const { mote, peer, operationId, body: _, ...timing } = request
+        const main = await authorizeMoteConversationMain(owner.main, mote, context)
+        await owner.readPeer(peer)
+        const session = await owner.client.readAgentSession(main.reference.sessionId)
+        if (!session || session.agentSessionId !== main.reference.sessionId || session.hostId !== main.reference.hostId)
+          throw new AgentMuxError('The original Main schedule target is unconfirmed.', 'CONTROL_UNAVAILABLE')
+        const target = { hostId: session.hostId, agentSessionId: session.agentSessionId, providerId: session.providerId, workspacePath: session.workspacePath }
+        const result = await main.commit(() => context.schedule({ ...timing, target, prompt: moteDirectSchedulePrompt(request), operationId,
+          ...(session.inputEpoch ? { inputEpoch: session.inputEpoch } : {}) }))
+        return result as MoteDirectResultMap[M]
       }
       const { mote, peer, ...send } = raw as MoteDirectParamsMap['space.mote.direct.send']
       const members = [mote, peer].sort((left, right) => left.spaceId < right.spaceId ? -1 : 1)
