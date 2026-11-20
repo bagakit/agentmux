@@ -15,9 +15,10 @@ import { useAppStore } from '../../../src/renderer/src/store'
 /** Preview facts only: product projection and presentation remain the actual implementation. */
 export function goalPlanPreview(seed: (mode: string) => void, render: () => void) {
   const originalDelegation = api.demands.delegation
+  const originalInteraction = api.sessions.inspectInteraction
   return {
     /** `withoutDerivation` previews a Host that returns the plan without node states, as an older version does. */
-    seed(withoutDerivation = false, openGuide = false, awaitingConfirmation = false, workflowState?: 'prepared' | 'confirmed', timelineDurationMs?: number, participation = false) {
+    seed(withoutDerivation = false, openGuide = false, awaitingConfirmation = false, workflowState?: 'prepared' | 'confirmed', timelineDurationMs?: number, participation = false, approval = false) {
       seed('confirmed')
       const state = useAppStore.getState(), goal = state.demands[state.selectedDemandId!]!
       const agents = state.sessions.filter(session => session.kind === 'agent')
@@ -112,7 +113,24 @@ export function goalPlanPreview(seed: (mode: string) => void, render: () => void
         receipt: { kind: 'core-input', inputKey: { kind: 'prompt', expectedRun: worker.control.run,
           agentSessionId: executor.agentSessionId, submissionId: 'authored-recovery-start' }, outcome: 'admitted', observedAt: at(4) }
       }) : undefined
-      const next = { ...goal, alignment, ...(authoredStart ? { dispatches: [authoredStart] } : {}), ...(patrols ? { patrols } : {}), ...(openGuide ? { address: formatGoalAddress(goal.id, 'workbench-preview-runtime', 'workspace-recovery') } : {}), title: 'Return to the same work, without rebuilding it',
+      const inputKey = authoredStart?.receipt?.kind === 'core-input' ? authoredStart.receipt.inputKey : undefined
+      const attribution = approval && inputKey ? { kind: 'explicit-goal-selection' as const, goalId: goal.id,
+        dispatchOperationId: inputKey.submissionId, inputKey, actor: { kind: 'device' as const, id: 'workspace-console' }, at: at(4) + 30_000 } : undefined
+      const observation = attribution ? { operationId: 'review-original-access', requestId: 'permission-read-workspace', attribution,
+        decision: 'approved' as const, delivery: 'unknown' as const, nativeCompleted: false } : undefined
+      api.sessions.inspectInteraction = async (control, operationId) => {
+        if (!observation || operationId !== observation.operationId || control.kind !== 'agent' || control.hostId !== 'local' ||
+            control.agentSessionId !== observation.attribution.inputKey.agentSessionId || control.run.runId !== observation.attribution.inputKey.expectedRun.runId)
+          return originalInteraction(control, operationId)
+        const { requestId, attribution, delivery } = observation
+        return { operationId, agentSessionId: control.agentSessionId, run: control.run, goalApproval: attribution, delivery, nativeAdoption: 'unknown' as const,
+          response: { kind: 'permission', requestId, decision: { outcome: 'selected', optionId: 'allow-once' } },
+          expectedRequest: { kind: 'permission', id: requestId, agentSessionId: control.agentSessionId, title: 'Read the original workspace',
+            options: [{ id: 'allow-once', kind: 'allow-once', label: 'Allow once' }],
+            evidence: { source: 'acp', run: control.run, observedAt: at(4) } } }
+      }
+      const next = { ...goal, alignment, ...(authoredStart ? { dispatches: [authoredStart] } : {}),
+        ...(observation ? { approvalObservations: [observation] } : {}), ...(patrols ? { patrols } : {}), ...(openGuide ? { address: formatGoalAddress(goal.id, 'workbench-preview-runtime', 'workspace-recovery') } : {}), title: 'Return to the same work, without rebuilding it',
         ...(timelineDurationMs === undefined ? {} : { plannedStartAt: at(1), targetAt: at(4) }),
         ...(awaitingConfirmation ? { alignment: { ...goal.alignment!, confirmedAt: null }, plan: { ...plan, reviews: [] } } : { plan }),
         activities: Array.from({ length: 8 }, (_, index) => ({ id: `original-note:${index}`, kind: 'Progress',

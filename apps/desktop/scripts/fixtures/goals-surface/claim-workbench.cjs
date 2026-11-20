@@ -4,6 +4,36 @@ const assert = require('node:assert/strict')
 module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result, keyEscape, debuggerSession }) => {
   const query = selector => `document.querySelector(${JSON.stringify(selector)})`
   const timelineOnly = process.env.AGENTMUX_GOAL_EXECUTION_TIMELINE_CAPTURE === '1'
+  if (process.env.AGENTMUX_GOAL_APPROVAL_CAPTURE === '1') {
+    const point = '[data-goal-time-event="Linked permission response"]'
+    const detail = '.goal-execution-time__detail'
+    const original = '[aria-label="Original permission receipt"]'
+    for (const [width, theme] of [[1260, 'dark'], [620, 'light']]) {
+      await size(width)
+      await evaluate(`goalsPlan.seed(false, true, false, undefined, 85000, true, true); goalsVisual.appearance(${JSON.stringify(theme)})`)
+      await waitFor(`Boolean(${query(point)})`)
+      assert.equal(await evaluate(`${query(point)}.closest('[data-goal-time-row]').dataset.goalTimeRow`), 'start:authored-recovery-start')
+      const before = await evaluate('goalsSpace.facts()')
+      await hitControl(point)
+      await waitFor(`Boolean(${query(detail)} && ${query(detail)}.textContent.includes('Provider causality is unknown'))`)
+      assert.match(await evaluate(`${query(detail)}.innerText`), /Linked permission response.*Device workspace-console.*Approved.*Delivery unconfirmed.*Open original response/su)
+      await evaluate(`${query(detail)}.scrollIntoView({block:'center'})`)
+      await paint()
+      await capture(`${width}-${theme}-linked-permission-event`, width)
+      await hitControl(detail + ' > button')
+      await waitFor(`Boolean(${query(original)}) && document.activeElement === ${query(original)}`)
+      assert.match(await evaluate(`${query(original)}.innerText`), /permission-read-workspace.*authored-recovery-start.*Delivery unconfirmed/su)
+      assert.equal((await evaluate(`${query(detail)}.innerText`)).match(/Delivery unconfirmed/gu)?.length, 1)
+      await evaluate(`${query(detail)}.scrollIntoView({block:'center'})`)
+      await paint()
+      await capture(`${width}-${theme}-original-permission-read`, width)
+      await hitControl(detail + ' .goal-execution-time__detail-heading button')
+      await waitFor(`document.activeElement === ${query(point)}`)
+      assert.deepEqual(await evaluate('goalsSpace.facts()'), before)
+      result.observations.push({ scene: 'linked-permission', width, theme, exactStart: true, originalRead: true, focusedOriginal: true, returnedFocus: true })
+    }
+    return
+  }
   if (process.env.AGENTMUX_GOAL_PARTICIPATION_CAPTURE === '1') {
     const goalRow = '[data-goal-time-row="goal-participation"]'
     const point = goalRow + ' [data-goal-time-event="Goal confirmed"]'

@@ -14,6 +14,8 @@ import { rpcOwnerFixture } from '../../../packages/core/test/helpers/public-rpc-
 import { AgentMuxSpatialStateStore } from '../../../packages/core/src/spatial-state.js'
 import { AgentMuxHostedRuntimeService } from '../../../packages/core/src/hosted-runtime-service.js'
 import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-server.js'
+import { AgentHookServer } from '../../../packages/core/src/hook-server.js'
+import { AgentMuxFileAgentSessionStore } from '../../../packages/core/src/agent-session-store.js'
 import { connectAgentMuxRpc } from '../../../packages/core/src/public-rpc-client.js'
 import type { AgentProvider } from '../../../packages/core/src/agent-provider.js'
 import type { AgentMuxHeadlessRuntime } from '../../../packages/core/src/headless-runtime.js'
@@ -55,7 +57,9 @@ async function fixture(localMember = false) {
   const runtime = { client: b.client, get server() { return goalServer }, ownerIdentity: () => bOwner } as unknown as AgentMuxHeadlessRuntime
   const goals = createHostGoals({ configurationPath, runtime: () => runtime, clients: () => [{ hostId: 'D-current', client: configuredD }], projects: async () => [], coreCall: (hostId, method, params, context) => { if (hostId !== 'local') throw Error('No alternate target'); return goalServer.callRpc(method, params, context) } })
   cleanup.push(() => goals.dispose())
-  goalServer = new AgentMuxControlServer({ socketPath, spatialState: spatial, hostedRuntime: () => bHosted, coreClients: () => [{ hostId: 'local', client: b.client }, { hostId: 'D-in-B', client: configuredD }], goalControl: goals.execute, goalDelegations: goals.goalDelegations })
+  goalServer = new AgentMuxControlServer({ socketPath, spatialState: spatial, hostedRuntime: () => bHosted, coreClients: () => [
+    { hostId: 'local', client: b.client }, ...(!localMember ? [{ hostId: 'D-in-B', client: configuredD }] : [])
+  ], goalControl: goals.execute, goalDelegations: goals.goalDelegations, goalApproval: goals.approval, goalChanges: goals.goalChanges })
   await goalServer.start(); cleanup.push(() => goalServer.stop())
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: goalServer.path } }); cleanup.push(() => rpc.dispose())
   const goal = (await seedStoredDemand(goals.demands, { id: 'original-goal', title: 'Original public Goal', description: 'Original frozen public input', assigneeSessionIds: [reference] })).demand
@@ -63,6 +67,116 @@ async function fixture(localMember = false) {
   const bInventory = vi.spyOn(b.client, 'readAgentSessions'), dInventory = vi.spyOn(d.client, 'readAgentSessions'), bRuns = vi.spyOn(b.client, 'listRuns'), dRuns = vi.spyOn(d.client, 'listRuns')
   return { sourceRoot: b.root, spatial, b: { inventory: bInventory, runs: bRuns }, d: { core: d.client, store: d.store, inner: d.inner, inventory: dInventory, runs: dRuns }, goal, goals, goalServer, configuredD, rpc, reference, access, send, raw, stop, session }
 }
+
+it('links an original permission answer to the selected Start when two inputs share one Run', async () => {
+  const f = await fixture(true), sessionId = f.session.agentSessionId, run = f.session.run
+  const start = async (operationId: string) => {
+    await f.rpc.call('goal.start', { goalId: f.goal.id, operationId, agentReference: f.reference, access: f.access })
+      .catch(error => expect(error).toMatchObject({ code: 'CONTROL_UNAVAILABLE' }))
+    const key = { kind: 'prompt' as const, agentSessionId: sessionId, expectedRun: run, submissionId: operationId }
+    await expect.poll(async () => (await f.d.core.inspectAgentInput({ key }))?.status).toBe('admitted')
+    const source = await f.rpc.call('goal.inspect', { goalId: f.goal.id, dispatchOperationId: operationId, access: f.access })
+    expect(source.goal?.dispatches?.find(row => row.operationId === operationId)).toMatchObject({ stage: 'confirmed', receipt: { inputKey: key } })
+    return key
+  }
+  const first = await start('first-start')
+  const second = await start('second-start')
+  const native = { kind: 'provider' as const, providerId: 'codex', sessionId: 'original-D-native', transcriptPath: join(f.sourceRoot, 'approval-source.jsonl') }
+  await writeFile(native.transcriptPath, '')
+  vi.spyOn(f.d.core.providers.get('codex'), 'discoverNativeSession').mockResolvedValue({ handle: native, assertCurrent: async () => {} })
+  Reflect.get(f.d.core, 'hookNativeWitnesses').set(run.runId, { candidate: JSON.stringify(native.sessionId), handle: native })
+  const hooks = Reflect.get(f.d.core, 'hookServer') as AgentHookServer
+  Object.defineProperty(hooks, 'port', { value: 0 }); await hooks.start()
+  const binding = hooks.createBinding(sessionId, 'codex'); await binding.bindRun(run.runId)
+  cleanup.push(() => binding.close())
+  async function permission(id: string) {
+    const pending = fetch(binding.endpoint.url, { method: 'POST', headers: { authorization: `Bearer ${binding.endpoint.token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ receiptId: id, eventName: 'PermissionRequest', decision: true, payload: {
+        hook_event_name: 'PermissionRequest', session_id: native.sessionId, transcript_path: native.transcriptPath, cwd: f.sourceRoot,
+        turn_id: 'same-provider-turn', prompt_id: second.submissionId, tool_name: 'Bash', tool_input: { command: 'true' }
+      } }) })
+    const request = async () => {
+      const state = (await f.rpc.call('agent.inspect', { target: { kind: 'agent-session', agentSessionId: sessionId } })).session.pendingInteraction
+      return [state?.request, ...(state?.additionalRequests ?? [])].find(row => row?.evidence.hookReceiptId === id)
+    }
+    await expect.poll(async () => (await request())?.kind).toBe('permission')
+    await expect.poll(() => hooks.hasPermissionCallback(sessionId, run.runId, id)).toBe(true)
+    return { pending, input: { agentSessionId: sessionId, expectedRun: run, expectedRequest: (await request())!, operationId: 'decision-' + id,
+      response: { kind: 'permission' as const, requestId: id, decision: { outcome: 'selected' as const, optionId: 'allow-once' } } } }
+  }
+  const cli = async (args: string[], body?: unknown) => {
+    const result = await runSourceObjectCli(['--endpoint', 'unix:' + f.goalServer.path, ...args], objectCliEnvironment(f.sourceRoot), body ? JSON.stringify(body) : '', 15000,
+      new URL('./helpers/goal-relations-source-loader.mjs', import.meta.url))
+    expect(result.code, result.stderr).toBe(0)
+    return JSON.parse(result.stdout).result
+  }
+  const selection = { goalId: f.goal.id, dispatchOperationId: first.submissionId }
+  const answer = await permission('ordinary-native-permission')
+  const plain = await f.rpc.call('agent.interaction.respond', answer.input)
+  expect(await (await answer.pending).json()).toHaveProperty('hookSpecificOutput.decision.behavior', 'allow')
+  expect(plain).not.toHaveProperty('goalApproval')
+  const request = await permission('explicit-native-permission')
+  await expect(f.rpc.call('agent.interaction.respond', { ...request.input, goalApproval: { ...selection, dispatchOperationId: 'missing-start' } }))
+    .rejects.toMatchObject({ code: 'GOAL_APPROVAL_SOURCE_UNCONFIRMED' })
+  expect(hooks.hasPermissionCallback(sessionId, run.runId, 'explicit-native-permission')).toBe(true)
+  const invalidated: string[][] = []
+  const watch = await f.rpc.subscribe('goal.watch', {}, { onInitial: value => expect(value.goalIds).toContain(f.goal.id),
+    onEvent: event => { if (event.type === 'change') invalidated.push(event.data.goalIds) } })
+  cleanup.push(() => watch.dispose())
+  const beforeAnswer = Date.now()
+  const original = await cli(['agent', 'interaction', 'respond', '--input', '-'], { ...request.input, goalApproval: selection })
+  await expect.poll(() => invalidated).toEqual([[f.goal.id]])
+  expect(await (await request.pending).json()).toHaveProperty('hookSpecificOutput.decision.behavior', 'allow')
+  expect(original).toMatchObject({ delivery: 'hook-written', nativeAdoption: 'unknown', goalApproval: { ...selection,
+    kind: 'explicit-goal-selection', actor: { kind: 'user', id: `local-user:${process.getuid?.() ?? 'current'}` }, inputKey: first } })
+  expect(original.goalApproval.at).toBeGreaterThanOrEqual(beforeAnswer)
+  expect(original.goalApproval.at).toBeLessThanOrEqual(Date.now())
+  await expect(f.rpc.call('agent.interaction.respond', { ...request.input, goalApproval: { ...selection, dispatchOperationId: second.submissionId } }))
+    .rejects.toMatchObject({ code: 'AGENT_INTERACTION_RESPONSE_CONFLICT' })
+  expect(await cli(['agent', 'interaction', 'respond', '--input', '-'], { ...request.input, goalApproval: selection })).toEqual(original)
+  expect(await cli(['agent', 'interaction', 'inspect', '--session', sessionId, '--operation-id', original.operationId])).toEqual({ receipt: original })
+  expect((await new AgentMuxFileAgentSessionStore(f.d.store.path).readMetadata(sessionId))?.interactionOperations?.[original.operationId]).toEqual(original)
+  const neighbor = (await seedStoredDemand(f.goals.demands, { id: 'approval-neighbor-goal', title: 'Same Session elsewhere', assigneeSessionIds: [f.reference] })).demand
+  expect((await f.rpc.call('goal.inspect', { goalId: neighbor.id })).goal?.approvalObservations ?? []).toEqual([])
+  const goal = await cli(['goal', 'inspect', '--goal', f.goal.id])
+  expect(goal.goal.approvalObservations).toEqual([{ operationId: original.operationId, requestId: 'explicit-native-permission',
+    attribution: original.goalApproval, decision: 'approved', delivery: 'hook-written', nativeCompleted: false }])
+
+  const uncertain = await permission('unknown-native-permission'), respond = hooks.respondPermission.bind(hooks)
+  const lost = vi.spyOn(hooks, 'respondPermission').mockImplementation(async (...args) => {
+    await respond(...args)
+    throw Error('Native connection write acknowledgement was lost')
+  })
+  const uncertainInput = { ...uncertain.input, goalApproval: { ...selection, dispatchOperationId: second.submissionId } }
+  await expect(f.rpc.call('agent.interaction.respond', uncertainInput)).rejects.toThrow('acknowledgement was lost')
+  expect(await (await uncertain.pending).json()).toHaveProperty('hookSpecificOutput.decision.behavior', 'allow')
+  const unknown = await f.rpc.call('agent.interaction.respond', uncertainInput)
+  expect(unknown).toMatchObject({ delivery: 'unknown', nativeAdoption: 'unknown', goalApproval: { inputKey: second } })
+  expect(lost).toHaveBeenCalledTimes(1)
+  expect((await f.rpc.call('goal.inspect', { goalId: f.goal.id })).goal?.approvalObservations).toEqual(expect.arrayContaining([
+    { operationId: unknown.operationId, requestId: 'unknown-native-permission', attribution: unknown.goalApproval,
+      decision: 'approved', delivery: 'unknown', nativeCompleted: false }
+  ]))
+  expect(f.raw).not.toHaveBeenCalled()
+  expect(f.stop).not.toHaveBeenCalled()
+  expect((await f.d.core.readAgentSession(sessionId))?.run).toEqual(run)
+
+  // Retire the isolated test Store with the production lifecycle commit. A fresh
+  // Store and independent CLI must still read only the explicit original receipts.
+  const retirementId = 'retire-test-original-run'
+  const retirement = { kind: 'stop' as const, agentSessionId: sessionId, expectedRun: run, operationId: retirementId,
+    reservationId: retirementId, ownerId: 'test-owner', ownerPid: process.pid, expiresAt: Date.now() + 10_000,
+    stopOperation: { operationKey: retirementId, daemonInstance: 'fixture-runtime', runId: run.runId } }
+  await f.d.store.reserveLifecycle(retirement)
+  await f.d.store.commitLifecycle(retirement, null)
+  const reopenedStore = new AgentMuxFileAgentSessionStore(f.d.store.path)
+  expect(await reopenedStore.readMetadata(sessionId)).toBeNull()
+  expect((await reopenedStore.readRetiredAgentSession(sessionId))?.interactionOperations).toEqual({
+    [original.operationId]: original, [unknown.operationId]: unknown
+  })
+  expect(await cli(['agent', 'interaction', 'inspect', '--session', sessionId, '--operation-id', unknown.operationId])).toEqual({ receipt: unknown })
+  expect((await cli(['goal', 'inspect', '--goal', f.goal.id])).goal.approvalObservations).toHaveLength(2)
+}, 60_000)
 
 it('a public local-member Goal input outlives its temporary reader while retaining the original Core claim', async () => {
   const f = await fixture(true), provider = f.d.core.providers.get('codex'), prepare = provider.prepareNativeInput!
