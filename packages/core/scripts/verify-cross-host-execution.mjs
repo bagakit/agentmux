@@ -144,6 +144,7 @@ export async function main(args) {
     }
     const consumedPaths = [...sourcePaths, ...dependencyPaths, 'packages/core/dist', 'packages/core/bin',
       `packages/core/vendor/ctxmux/${process.platform}-${process.arch}`, 'packages/core/test/helpers',
+      'test/fixture-values.mjs', 'apps/host/src', 'apps/desktop/scripts/fixtures/performance-failure-evidence/source-loader.mjs',
       'packages/core/scripts/fixtures/cross-host-execution-checks.mjs', 'packages/core/scripts/fixtures/vitest.cross-host-execution.config.mts',
       'packages/core/scripts/fixtures/execution-proof-cleanup.mjs',
       'packages/core/scripts/verify-cross-host-execution.mjs', ...(options.mutations ? mutationGates.map(gate => gate.script) : []),
