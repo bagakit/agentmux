@@ -99,8 +99,8 @@ async function originalConnection() {
     return { port, runId, fault: () => { for (const error of errors) error({ message: 'Original observer disconnected' }) } }
   }
   const agent = host('agent'), tools = host('tools')
-  const readers = new ExecutionBindingReaders(id => service.inspect(id))
-  const service = new AgentExecutionBindingService(directory, { resolveHost: async id => ({ runtimeId: `${id}-runtime`, client: (id === 'local' ? agent : tools).port as unknown as AgentExecutionHostPort }), onObservation: value => readers.publish(value) })
+  const service = new AgentExecutionBindingService(directory, { resolveHost: async id => ({ runtimeId: `${id}-runtime`, client: (id === 'local' ? agent : tools).port as unknown as AgentExecutionHostPort }) })
+  const readers = new ExecutionBindingReaders(service)
   cleanup.push(async () => { readers.dispose(); await service.dispose() })
   await service.create({ bindingId: 'original-binding', agentHostId: 'local', agentRuntimeId: 'local-runtime', resourceHostId: 'tools', resourceRuntimeId: 'tools-runtime', resourceWorkspacePath: '/original/project', resourceGrant: { scope: 'host-user', bindingId: 'original-binding' }, agent: { agentSessionId: 'original-agent', createOperationId: 'original-create', executorId: 'fixture', executorRevision: 'r1', workspacePath: '/agent/project' } })
   const renderer = new EventEmitter(), sender = Object.assign(new EventEmitter(), { isDestroyed: () => false, send: (channel: string, value: unknown) => renderer.emit(channel, {}, value) })
@@ -110,7 +110,8 @@ async function originalConnection() {
   registerExecutionBindingIpc({ handle: (channel, handler) => { handlers.set(channel, (event, ...values) => {
     if (!trusted) throw new Error('Sender is not the original trusted Desktop')
     return handler(event, ...values)
-  }) }, bindings: service, readers })
+  }) }, bindings: service, readers, coordinatorTarget: async () => ({ hostId: 'local', runtimeId: 'local-runtime' }), coordinator: async () => {},
+    project: async () => { throw new Error('The reader fixture does not materialize a new Agent') } })
   const invokes: { channel: string; values: unknown[] }[] = []
   const transport = createExecutionBindingApi({ invoke: async (channel, ...values) => { invokes.push({ channel, values }); return await handlers.get(channel)!({ sender }, ...values) }, on: (channel, listener) => { renderer.on(channel, listener); return renderer as any }, off: (channel, listener) => { renderer.off(channel, listener); return renderer as any } })
   vi.spyOn(api.sessions, 'executionBinding').mockImplementation(transport.executionBinding)
@@ -152,4 +153,18 @@ it('keeps an explicit trusted-sender rejection visible without rejoining or remo
   await vi.waitFor(() => expect(dom.container.textContent).toContain('Sender is not the original trusted Desktop'))
   expect(f.tools.port.attachTerminal).toHaveBeenCalledTimes(attaches)
   expect(await f.service.inspect('original-binding')).toMatchObject({ agentSessionId: 'original-agent' })
+})
+
+it('requests the Core project recovery and waits for the original Provider instead of offering another rejoin', async () => {
+  let observe!: (value: AgentExecutionInspection) => void
+  vi.spyOn(api.sessions, 'observeExecutionBinding').mockImplementation((_bindingId, listener) => { observe = listener; return vi.fn() })
+  const rejoin = vi.spyOn(api.sessions, 'rejoinExecutionBinding').mockResolvedValue({ ...fact(), state: 'unavailable',
+    diagnostic: { code: 'EXECUTION_PROJECT_INITIALIZATION_PENDING', nextAction: 'reconnect-provider', message: 'Reconnect the original Provider tool connection.' } })
+  await render()
+  await act(async () => observe({ ...fact(), state: 'unavailable',
+    diagnostic: { code: 'EXECUTION_RUNTIME_CHANGED', nextAction: 'recover-project', message: 'The project helper instance is gone.' } }))
+  await click('Recover project tools')
+  expect(rejoin).toHaveBeenCalledExactlyOnceWith('original-binding', true)
+  expect(dom.container.textContent).toContain('Reconnect the original Provider tool connection.')
+  expect([...dom.container.querySelectorAll('button')].map(button => button.textContent)).toEqual(['Refresh observation'])
 })

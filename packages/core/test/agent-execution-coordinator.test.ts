@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterAll, beforeAll, afterEach, describe, expect, it, vi } from 'vitest'
-import { AgentExecutionCoordinator, AgentExecutionBindingService, type AgentExecutionHostPort, type AgentExecutionOpenInput, type AgentExecutionInspection } from '../src/agent-execution-coordinator.js'
+import { AgentExecutionCoordinator, AgentExecutionBindingService, type AgentExecutionCoordinatorOptions, type AgentExecutionHostPort, type AgentExecutionOpenInput, type AgentExecutionInspection } from '../src/agent-execution-coordinator.js'
 import type { AgentMuxClientEvent, AgentMuxRunInputOperation, AgentMuxAgentSession } from '../src/types.js'
 import { AgentMuxError } from '../src/errors.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
@@ -24,7 +24,8 @@ const cleanups: (() => Promise<void>)[] = []
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup() })
 function gate() { let release!: () => void; const promise = new Promise<void>(resolve => { release = resolve }); return { promise, release } }
 function host(role: 'frontend' | 'executor') {
-  const runId = role + '-original-run', listeners = new Set<(event: AgentMuxClientEvent) => void>()
+  let runId = role + '-original-run'
+  const listeners = new Set<(event: AgentMuxClientEvent) => void>()
   let runtime = role + '-original-instance', output = '', cursor = 0, lostStart = false, missing = false, state = 'running'
   const claimed = new Map<string, { startByte: number; endByte: number }>()
   const run = () => ({ runId, state })
@@ -58,6 +59,8 @@ function host(role: 'frontend' | 'executor') {
   }
   return { api, port: api as unknown as AgentExecutionHostPort, runId, claimed,
     listeners, forgetCreation: () => { missing = true }, loseStart: () => { lostStart = true }, replaceRuntime: () => { runtime += '-replacement'; missing = true },
+    installSuccessor: () => { runId = role + '-successor-run'; output = ''; cursor = 0; claimed.clear(); missing = false; return run() },
+    readInputByte: () => cursor,
     setState: (value: string) => { state = value },
     addBytes, addOutput: (frame: unknown) => addBytes(JSON.stringify(frame) + '\n'),
   }
@@ -74,8 +77,8 @@ async function fixture() {
     if (id === input.resourceHostId) return { runtimeId: input.resourceRuntimeId, client: executor.port }
     throw new Error('Unrelated host lookup')
   })
-  const open = async (onObservation?: () => void) => {
-    const coordinator = await AgentExecutionCoordinator.open(root, { resolveHost, onObservation: value => { observations.push(value); onObservation?.() } })
+  const open = async (onObservation?: () => void, options: Partial<AgentExecutionCoordinatorOptions> = {}) => {
+    const coordinator = await AgentExecutionCoordinator.open(root, { resolveHost, onObservation: value => { observations.push(value); onObservation?.() }, ...options })
     let disposed = false
     const close = async () => { if (!disposed) { disposed = true; await coordinator.dispose() } }
     cleanups.push(close)
@@ -89,6 +92,63 @@ async function fixture() {
 }
 
 describe('execution coordinator retained original pair', () => {
+  it('recovers a lost project helper on the original binding without forwarding an old Input again', async () => {
+    const f = await fixture()
+    f.input.resourceHostId = 'local'
+    const workspacePath = f.input.resourceWorkspacePath, createOperationId = 'original-executor-start'
+    const prepared = { createOperationId, workspacePath, launch: JSON.stringify({ createOperationId, request: {
+      program: '/original/helper', args: ['executor'], cwd: workspacePath, env: { AGENTMUX_LIFECYCLE_OPERATION_ID: createOperationId },
+      initial_size: { cols: 80, rows: 24 }, declared_inputs: [],
+    } }) }
+    const owner = await f.open(undefined, { localProjectExecutor: async () => ({
+      bindingId: f.input.bindingId, role: 'executor', providerId: 'fixture-provider', prepared, journalIdentity: 'original-project-journal',
+    }) })
+    await owner.coordinator.create(f.input)
+    const original = f.read().bridge
+    const write = f.executor.api.writeTerminal.getMockImplementation()!
+    f.executor.api.writeTerminal.mockImplementationOnce(async (...args) => {
+      await write(...args)
+      f.executor.replaceRuntime()
+      throw new AgentMuxError('The original write acknowledgement was lost', 'EXECUTION_RUNTIME_CHANGED')
+    })
+    const oldEndByte = f.frontend.addOutput({ type: 'request', generation: 'old-native', payload: { id: 1, method: 'tools/call' } })
+    await vi.waitFor(() => expect(f.read().bridge.pending?.sourceEndByte).toBe(oldEndByte))
+    await expect(owner.coordinator.rejoin(f.input.bindingId)).rejects.toMatchObject({ code: 'EXECUTION_RUNTIME_CHANGED' })
+    expect(f.executor.api.createPreparedTerminal).toHaveBeenCalledTimes(1)
+
+    const replay = f.frontend.api.readRunReplay.getMockImplementation()!
+    f.frontend.api.readRunReplay.mockImplementation(async (...args) => {
+      const result = await replay(...args)
+      const acceptedInputBytes = f.frontend.readInputByte()
+      return { ...result, run: { ...result.run, latestOutputBytes: result.replay.at(-1)?.endByte ?? args[1], acceptedInputBytes,
+        nativeService: { owner: { type: 'serving' }, input: { phase: { type: 'open' }, completedInputBytes: acceptedInputBytes,
+          activeConfirmedBytes: 0, unsettledCommands: 0, unsettledRequestBytes: 0 } } } }
+    })
+    f.executor.api.createPreparedTerminal.mockImplementationOnce(async () => f.executor.installSuccessor())
+    const restored = await owner.coordinator.rejoin(f.input.bindingId, undefined, true)
+    expect(restored).toMatchObject({ state: 'unavailable', diagnostic: { code: 'EXECUTION_PROJECT_INITIALIZATION_PENDING' }, helperStarts: {
+      frontend: { runId: f.frontend.runId }, executor: { runId: 'executor-successor-run' },
+    } })
+    expect(f.read().projectRecoveries[0]).toMatchObject({ original: { executor: original.executor, pending: { sourceEndByte: oldEndByte } } })
+    expect(f.executor.api.writeTerminal).toHaveBeenCalledTimes(1)
+    expect(f.frontend.api.createHostAgentWithDelivery).toHaveBeenCalledTimes(1)
+    const journalReady = { type: 'ready', bindingId: f.input.bindingId, journalIdentity: 'original-project-journal' }
+    f.executor.addOutput(journalReady)
+    f.frontend.addOutput({ type: 'request', generation: 'new-native', payload: { id: 1, method: 'initialize' } })
+    await vi.waitFor(() => expect(f.executor.api.writeTerminal).toHaveBeenCalledTimes(2))
+    f.executor.addOutput({ type: 'response', generation: 'new-native', payload: { id: 1, result: {} } })
+    f.executor.addOutput({ type: 'native-connection-ready', generation: 'new-native' })
+    await vi.waitFor(() => expect(owner.coordinator.inspect(f.input.bindingId)?.state).toBe('connected'))
+    expect(f.frontend.api.writeTerminal).toHaveBeenCalledTimes(1)
+    f.frontend.addOutput({ type: 'request', generation: 'new-native', payload: { id: 2, method: 'tools/call' } })
+    await vi.waitFor(() => expect(f.executor.api.writeTerminal).toHaveBeenCalledTimes(3))
+    f.executor.addOutput({ type: 'response', generation: 'new-native', payload: { id: 2, result: { project: 'original-resource' } } })
+    await vi.waitFor(() => expect(f.frontend.api.writeTerminal).toHaveBeenCalledTimes(2))
+    expect(JSON.parse(Buffer.from(f.frontend.api.writeTerminal.mock.calls[1]![1].data).toString()).payload.result.project).toBe('original-resource')
+    expect((await owner.coordinator.rejoin(f.input.bindingId, undefined, true)).state).toBe('connected')
+    expect(f.executor.api.createPreparedTerminal).toHaveBeenCalledTimes(2)
+  })
+
   it('automatically rejoins the original bridge after carrier loss and reconciles the lost Input acknowledgement', async () => {
     const f = await fixture(), owner = await f.open()
     const original = (await owner.coordinator.create(f.input)).execution

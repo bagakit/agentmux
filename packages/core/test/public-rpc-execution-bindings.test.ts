@@ -46,7 +46,7 @@ describe('public execution binding owner', () => {
     expect(await f.service.call('agent.execution.binding', key, context)).toEqual(inspection)
     expect(f.owner.inspect).toHaveBeenCalledExactlyOnceWith(input.bindingId, undefined, context)
     expect(await f.service.call('agent.execution.rejoin', key, context)).toEqual(inspection)
-    expect(f.owner.rejoin).toHaveBeenCalledExactlyOnceWith(input.bindingId, context)
+    expect(f.owner.rejoin).toHaveBeenCalledExactlyOnceWith(input.bindingId, context, false)
     expect(f.coreClients).not.toHaveBeenCalled()
     expect(f.owner.create.mock.calls[0]![0]).not.toBe(input)
     expect(parseAgentExecutionCreate(input)).toEqual(input)
@@ -61,6 +61,14 @@ describe('public execution binding owner', () => {
     expect(await f.service.call('agent.execution.create', reverse, { ...context, principal: { kind: 'device', id: 'paired-device' } })).toEqual({ session: reverseSession, execution: reverseInspection })
     await expect(f.service.call('agent.execution.create', { ...reverse, resourceGrant: input.resourceGrant }, context)).rejects.toThrow()
     expect(f.owner.create).toHaveBeenCalledTimes(1)
+  })
+
+  it('exposes an explicit project recovery action through the original rejoin entry only', async () => {
+    const f = fixture(), request = { ...key, recoverProject: true as const }
+    expect(await f.service.call('agent.execution.rejoin', request, context)).toEqual(inspection)
+    expect(f.owner.rejoin).toHaveBeenCalledExactlyOnceWith(input.bindingId, context, true)
+    await expect(f.service.call('agent.execution.binding', request, context)).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
+    await expect(f.service.call('agent.execution.rejoin', { ...key, recoverProject: false }, context)).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
   })
 
   it('denies Agent and anonymous callers before touching the binding owner, including user-principal Agent contexts', async () => {
