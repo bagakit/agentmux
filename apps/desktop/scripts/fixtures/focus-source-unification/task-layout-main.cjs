@@ -8,7 +8,7 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
   const layout = () => read('document.querySelector(' + JSON.stringify(root) + ')?.dataset.taskLayout')
   const task = id => root + ' button.focus-context[data-session-id="' + id + '"]'
   const historyToggle = root + ' .focus-project-history__toggle'
-  const arrange = root + ' .focus-toolbar [aria-label="Arrange projects by recent activity"]'
+  const arrange = root + ' .focus-toolbar [aria-label="Focus actions"]'
   const history = () => read(`(() => {
     const toggle = document.querySelector(${JSON.stringify(historyToggle)})
     return { expanded: toggle?.getAttribute('aria-expanded'), count: toggle?.textContent.trim(),
@@ -166,6 +166,11 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
   await key('Home', 'Home', 36)
   assert.equal(await read(`document.querySelector(${JSON.stringify(interactionSlider)}).getAttribute('aria-valuetext')`), 'Past 15 minutes')
   assert.deepEqual(await shownTasks(), ['branch-api', 'working'], 'Recent interaction includes only an exact user visit or human input')
+  const entryTimes = await read(`Object.fromEntries([...document.querySelectorAll(".focus-context[data-session-id]")].map(node => [node.dataset.sessionId, Number(node.querySelector("[data-focus-interaction-at]")?.dataset.focusInteractionAt)]))`)
+  assert.ok(entryTimes.working > entryTimes['branch-api'], 'The selected reading uses the known visit and input timestamps, rather than fresh backend activity')
+  const projectTime = await read('Number(document.querySelector(".focus-project-frame__heading [data-focus-interaction-at]")?.dataset.focusInteractionAt)')
+  assert.equal(projectTime, entryTimes.working, 'The project header uses the latest visible matching interaction')
+  assert.equal(await read("Boolean(document.querySelector('.focus-toolbar .focus-filter-chips'))"), false, 'Applied conditions cannot overflow the top bar')
   await frame('interaction-filter-wide', 'The original Focus menu filters by an observed recent interaction')
   const attentionFilter = '.focus-filter-menu [data-focus-state="attention"]'
   await click(attentionFilter)
@@ -175,6 +180,11 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
   await read(`document.querySelector('.focus-filter-menu__options').scrollTop = 0; document.querySelector(${JSON.stringify(interactionSlider)}).focus()`)
   await key('ArrowRight', 'ArrowRight', 39)
   assert.deepEqual(await shownTasks(), ['branch-api', 'reading', 'working'])
+  await read(`document.querySelector(${JSON.stringify(interactionSlider)}).focus()`)
+  for (const _ of [0, 1]) await key('ArrowRight', 'ArrowRight', 39)
+  assert.equal(await read(`document.querySelector(${JSON.stringify(interactionSlider)}).getAttribute('aria-valuetext')`), 'Past 24 hours')
+  assert.deepEqual(await shownTasks(), ['branch-api', 'reading', 'working'], 'A visit older than 24 hours is not replaced by task activity')
+  for (const _ of [0, 1]) await key('ArrowLeft', 'ArrowLeft', 37)
   win.setContentSize(420, 900)
   await motion('reduce')
   await read('window.unifiedFocusProof.theme("light")')
@@ -205,6 +215,57 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
   assert.equal(await read(`document.querySelector(${JSON.stringify(searchField)}).value`), '')
   assert.deepEqual(await read('window.taskLayoutProof.topology()'), beforeFilter)
   result.interactionFilter = { keyboard: true, pointer: true, textIntersection: true, facetIntersection: true, originalTopology: true }
+  const chooseOrder = async label => {
+    await click(arrange)
+    const menu = '.focus-scan-actions__menu'
+    await until('opened Focus actions', () => read(`!!document.querySelector(${JSON.stringify(menu)})`))
+    const item = await read(`[...document.querySelectorAll('.focus-scan-actions__menu [role="menuitemradio"]')].findIndex(button => button.textContent.trim() === ${JSON.stringify(label)})`)
+    assert.notEqual(item, -1)
+    await click(menu + ' [role="group"] [role="menuitemradio"]:nth-child(' + (item + 1) + ')')
+    await until('the project order menu closed', () => read(`!document.querySelector(${JSON.stringify(menu)})`))
+    await settle()
+  }
+  const projectOrder = () => read(`[...document.querySelectorAll('.focus-project-lanes__rows > .focus-project-frame')].map(node => node.querySelector('.focus-project-frame__heading strong')?.textContent)`)
+  const defaultOrder = await projectOrder()
+  await chooseOrder('Project name')
+  result.orderEvidence = { before: defaultOrder, after: await projectOrder(), choice: await read(`document.querySelector(${JSON.stringify(arrange)}).title`) }
+  assert.notDeepEqual(result.orderEvidence.after, defaultOrder, JSON.stringify(result.orderEvidence))
+  assert.equal((await projectOrder())[0], 'Archive')
+  await click(arrange)
+  assert.equal(await read("document.querySelector('.focus-scan-actions__menu [aria-checked=true]')?.textContent.trim()"), 'Project name')
+  await frame('focus-project-sort', 'Project orders are explicit and the current order is checked')
+  await key('Escape', 'Escape', 27)
+  await chooseOrder('Task priority')
+  assert.deepEqual(await projectOrder(), defaultOrder)
+  result.projectSort = true
+
+  const sourceNotice = '.recent-focus__controls .focus-source-status'
+  await until('an original history source warning is present', () => read(`Boolean(document.querySelector("${sourceNotice}"))`))
+  assert.equal(await read("Boolean(document.querySelector('.focus-toolbar .focus-source-status'))"), false)
+  await click(sourceNotice + ' .service-disclosure__trigger')
+  const noticeDetails = sourceNotice + ' .service-disclosure__details:popover-open'
+  await until('visible original source details', () => read(`Boolean(document.querySelector("${noticeDetails}"))`))
+  assert.equal(await read(`document.querySelector("${noticeDetails} .focus-source-status__entry button")?.textContent`), 'Connection settings')
+  await frame('focus-source-action', 'History warnings stay beside the timeline with the exact affected Host')
+  const checkAgain = noticeDetails + ' section > button'
+  const initialReads = await read('window.focusSourceProof.reads()')
+  await click(checkAgain)
+  await until('one pending history check', () => read('window.focusSourceProof.pending()'))
+  await until('pending read is visible', () => read(`document.querySelector("${checkAgain}")?.textContent === 'Checking history…'`))
+  await read('window.focusSourceProof.settle()')
+  await until('unchanged response is visible in the same disclosure', () => read(`document.querySelector("${noticeDetails} [role=status]")?.textContent === 'Some history is still unavailable.'`))
+  await click(noticeDetails + ' .focus-source-status__entry button')
+  await until('the exact original connection settings open', () => read("Boolean(document.querySelector('[data-settings-host=fixture-archive-device]'))"))
+  await click('[aria-label="Close settings"]')
+  await click(sourceNotice + ' .service-disclosure__trigger')
+  await until('original source still has an unconfirmed read', () => read(`Boolean(document.querySelector("${noticeDetails}"))`))
+  await click(checkAgain)
+  await until('another explicit history check', () => read('window.focusSourceProof.pending()'))
+  await read('window.focusSourceProof.recover()')
+  await until('only a successful source read removes the notice', () => read(`!document.querySelector("${sourceNotice}")`))
+  assert.equal(await read('window.focusSourceProof.reads()'), initialReads + 2)
+  result.sourceChecks = true
+
   result.refinement = { wide: await checkList(), narrow: [] }
   const { ordinary } = result.refinement.wide
   assert.match(ordinary.summary?.text ?? '', /release-checklist\.md/, 'Working shows the actual observed activity on its title line')
@@ -418,6 +479,10 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
     if (width === 360) assert.equal(rows.ordinary.time, false, 'Time yields at the most constrained List width')
     assert.equal(await draft(), before.drafts.working)
     result.refinement.narrow.push({width, actual, ...rows})
+    assert.deepEqual(await read(`[...document.querySelectorAll('.focus-toolbar input, .focus-toolbar button')].filter(node => node.getClientRects().length).filter(node => {
+      const r = node.getBoundingClientRect()
+      return !node.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2))
+    }).map(node => node.getAttribute('aria-label') ?? node.title)`), [], 'Visible toolbar controls keep independent pointer targets')
     await frame('split-list-'+width, 'Original workface and task List at an actual '+width+' px split, reduced motion')
   }
   win.setContentSize(1080, 480)
@@ -451,6 +516,41 @@ module.exports = async function exerciseTaskLayout({win, read, until, settle, cl
   const after = await read('window.unifiedFocusProof.facts()')
   assert.deepEqual(after.runs, before.runs)
   assert.deepEqual(after.drafts, before.drafts)
+  const applyInteractionRange = async (uncapped = false) => {
+    await click(filterButton)
+    await until('open the range in the original split workface', () => read(`Boolean(document.querySelector(${JSON.stringify(interactionSlider)}))`))
+    await read(`document.querySelector(${JSON.stringify(interactionSlider)}).focus()`)
+    if (uncapped) await key('End', 'End', 35)
+    else {
+      await key('Home', 'Home', 36)
+      for (const _ of [0, 1, 2]) await key('ArrowRight', 'ArrowRight', 39)
+      assert.equal(await read(`document.querySelector(${JSON.stringify(interactionSlider)}).getAttribute('aria-valuetext')`), 'Past 24 hours')
+    }
+    await key('Escape', 'Escape', 27)
+  }
+  win.setContentSize(1440, 900)
+  await read('window.unifiedFocusProof.theme("dark")')
+  await layouts.choose('cards')
+  await applyInteractionRange()
+  assert.deepEqual(await shownTasks(), ['branch-api', 'reading', 'working'])
+  assert.equal(await draft(), before.drafts.working)
+  await frame('focus-cards-workface-24h', 'Matching Cards show interaction age in the original split workface')
+  await layouts.choose('list')
+  await setSplitWidth(360)
+  for (const id of ['branch-api', 'reading', 'working']) assert.ok(await read(`Boolean(document.querySelector(${JSON.stringify(task(id) + ' .focus-interaction-age')})?.getClientRects().length)`), 'Matching task interaction time remains visible in the narrow split: ' + id)
+  await frame('focus-list-workface-24h-narrow', 'Matching compact rows keep their explanation at a 360px scan width')
+  await applyInteractionRange(true)
+  await click(root + ' .focus-toolbar [aria-label="Drafts"]')
+  const shelf = '.focus-local-inputs'
+  await until('draft shelf opened', () => read(`Boolean(document.querySelector('${shelf}'))`))
+  const continueDraft = shelf + ' .focus-draft-list__entry > button'
+  assert.equal(await read(`document.querySelectorAll('${continueDraft}').length`), 1, 'Only an exact original draft offers navigation')
+  await frame('focus-draft-shelf', 'Exact input can be resumed; unassociated input remains readable')
+  await click(continueDraft)
+  await until('the original draft Region is selected', () => read("!document.querySelector('.focus-local-inputs') && window.taskLayoutProof.selection()?.regionId === 'region-branch-api'"))
+  assert.deepEqual((await read('window.taskLayoutProof.topology()')).drafts, beforeFilter.drafts)
+  await click(task('working'))
+  result.draftLocation = true
   result.topology=await read('window.taskLayoutProof.topology()')
   result.layout = await read('window.taskLayoutProof.checkpoint()')
   assert.equal(result.layout, 'list', 'Persisted preference must be the current List setting')

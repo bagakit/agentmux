@@ -22,13 +22,14 @@ const agentPinsScene=window.__agentPinsScene===true
 const config=await api.config.get(),initial=await api.sessions.snapshot(),base=initial.sessions.find(s=>s.kind==='agent')
 if(!base?.control?.run?.runId)throw Error('Existing typed preview Agent required')
 const {pendingInteraction:_pending,...agent}=base,now=Date.now(),path='/original/analysis-project'
-const workspace={id:'ordinary-analysis',hostId:'local',kind:'folder',path,name:'业务分析项目'}
+const workspace={id:'ordinary-analysis',hostId:'local',kind:'folder',path,name:window.__taskLayoutScene ? 'Release analysis' : '业务分析项目'}
 const branches = localTaskScene ? [
   { name: 'web', taskId: 'branch-web' },
   { name: 'api', taskId: 'branch-api' },
 ].map(({name, taskId}) => ({ workspace: { ...workspace, id: 'analysis-' + name, name,
   path: path + '/.worktrees/' + name, repoPath: path, branch: name }, taskId })) : []
-const workspaces = [workspace, ...branches.map(branch => branch.workspace)]
+const secondary = { ...workspace, id: 'original-archive', name: 'Archive', path: '/original/archive-project' }
+const workspaces = [workspace, ...(window.__taskLayoutScene ? [secondary] : []), ...branches.map(branch => branch.workspace)]
 const definitions=[['working','核对发布版本与业务数据','working','running',now],['reading','核查跨版本分析记录','working','running',now-20*60000],['interrupted','继续上次保留的分析任务','disconnected','interrupted',now]]
 const sessions=definitions.map(([id,label,state,processState,at])=>({...agent,id,hostId:'local',workspacePath:path,label,processState,status:{state,source:'native-hook',observedAt:at},semanticStatus:{state:'working',source:'native-hook',observedAt:at,stateEnteredAt:at},control:{...agent.control,hostId:'local',agentSessionId:id,run:{runId:'original-run-'+id}}}))
 if (window.__taskLayoutScene) {
@@ -64,7 +65,7 @@ if(localTaskScene){
  ]
  for(const [index,[id,label,state]] of scenario.entries()){
   const observedAt=now-index*40000
-  sessions.push({...sessions[0],id,label,status:{state,source:'native-hook',observedAt},
+  sessions.push({...sessions[0],id,label,...(window.__taskLayoutScene && id === 'mobile' ? {workspacePath:secondary.path} : {}),status:{state,source:'native-hook',observedAt},
    semanticStatus:{state,source:'native-hook',observedAt,stateEnteredAt:observedAt},
    control:{...sessions[0].control,agentSessionId:id,run:{runId:'original-run-'+id}},
    ...(state==='waiting_permission'?{pendingInteraction:{id:'payment-read-request',kind:'permission',title:'允许读取付款回执？',operation:'read'}}:{})})
@@ -154,19 +155,19 @@ const projectVisits = window.__taskLayoutScene ? [
 ].map(([sessionId, name], index) => ({ sessionId, focusedAt: now - (index + 1) * 60000,
  identity: {kind:'agent', providerId:'codex', hostId:'local', name, workspacePath:path, project:{id:workspace.id,name:workspace.name}} })) : []
 if (window.__taskLayoutScene) {
- for (const [sessionId, minutes] of [['working', 4], ['reading', 45]]) {
+ for (const [sessionId, minutes] of [['working', 4], ['reading', 45], ['branch-web', 1500], ['coverage', 1]]) {
   projectVisits.push({sessionId, focusedAt:now - minutes * 60_000, identity:{
    kind:'agent', providerId:'codex', hostId:'local', name:sessions.find(item=>item.id===sessionId).label,
-   workspacePath:path,project:{id:workspace.id,name:workspace.name}
+   workspacePath:path,project:{id:workspace.id,name:workspace.name},...(sessionId === 'coverage' ? {source:{runtimeId:null,agentSessionId:sessionId}} : {})
   }})
  }
 }
-useAppStore.setState({loading:false,initialize:async()=>()=>{},config:{...config,workspaces,hosts:[{id:'local',kind:'local',label:'Original local device'}],
+useAppStore.setState({loading:false,initialize:async()=>()=>{},config:{...config,workspaces,hosts:[{id:'local',kind:'local',label:'Original local device'},...(window.__taskLayoutScene ? [{id:'fixture-archive-device',kind:'ssh',hostname:'archive.example.invalid',label:'Archive device'}] : [])],
  ...(localTaskScene || agentPinsScene ? {focus:{...config.focus,previewTrigger:'keyboard'}} : {})},
  sessions,agentNames:Object.fromEntries(sessions.map(s=>[s.id,s.label])),timelines,
  tabs:restoreWorkbench?{}:Object.fromEntries(originalTabs.map(item => [item.id,item])),
  layouts:restoreWorkbench?{}:Object.fromEntries(workspaces.map((item,index) => [item.id,createWorkspaceLayout(index ? item.id+'-group' : 'ordinary-group',originalTabs.filter(tab => tab.workspaceId === item.id).map(tab => tab.id))])),
- activeWorkspaceId:workspace.id,mainSurface:'agents',focusView:'list',toolsOpen:false,projectRailOpen:false,agentFocus:{execution:{sessionId:null,history:projectVisits},pmo:{sessionId:null}},agentComposerDrafts:restoreWorkbench?{}:{working:'原未发送草稿'},mountedSpaceInputs:{[key]:{target,drafts:{}}},mountedSpaceObservations:{},mountedSpaceSessions:{},selectedSpaceMount:null})
+ activeWorkspaceId:workspace.id,mainSurface:'agents',focusView:'list',toolsOpen:false,projectRailOpen:false,agentFocus:{execution:{sessionId:null,history:projectVisits},pmo:{sessionId:null}},agentComposerDrafts:restoreWorkbench?{}:{working:'原未发送草稿',...(window.__taskLayoutScene ? {'region-branch-api':'核对 API 灰度回执的草稿'} : {})},mountedSpaceInputs:{[key]:{target,drafts:{}}},mountedSpaceObservations:{},mountedSpaceSessions:{},selectedSpaceMount:null})
 if(localTaskScene || agentPinsScene){
 
  api.ui.requestStorageFlush=async()=>{}
@@ -187,7 +188,20 @@ if(localTaskScene || agentPinsScene){
  dispose()
  useAppStore.setState(arranged,true)
  globalThis.__taskLayoutAdmitWriter()
- window.taskLayoutProof={restored:restoreLayout,topology:()=>{const state=useAppStore.getState();return {tabs:state.tabs,layouts:state.layouts,drafts:state.agentComposerDrafts}},checkpoint:async()=>{await checkpointAgentOperations();return JSON.parse(localStorage.getItem('agentmux-workbench-v1')).state.focusTaskLayout},settleChild(){
+ if (window.__taskLayoutScene) {
+  const historySources = api.sessions.historySources
+  let reads = 0, resolved = false, finish
+  api.sessions.historySources = async options => {
+   const result = await historySources(options)
+   if (!options?.observation) return result
+   if (++reads > 1 && !resolved) await new Promise(resolve => { finish = resolve })
+   return resolved ? result : { ...result, warnings: [{ hostId: 'fixture-archive-device', code: 'RUNTIME_UNAVAILABLE', availability: 'unverified',
+    step: 'Reading retained History sources', message: 'The saved device has not completed its Runtime connection.', recovery: 'Open its connection settings.' }] }
+  }
+  window.focusSourceProof = { reads: () => reads, pending: () => Boolean(finish), settle() { const release = finish; finish = undefined; release?.() },
+   recover() { resolved = true; this.settle() } }
+ }
+ window.taskLayoutProof={selection:()=>useAppStore.getState().workbenchSpaceSelection,restored:restoreLayout,topology:()=>{const state=useAppStore.getState();return {tabs:state.tabs,layouts:state.layouts,drafts:state.agentComposerDrafts}},checkpoint:async()=>{await checkpointAgentOperations();return JSON.parse(localStorage.getItem('agentmux-workbench-v1')).state.focusTaskLayout},settleChild(){
   useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id !== 'working' ? session : {
    ...session, nativeSubagents: { ...session.nativeSubagents, sessions: session.nativeSubagents.sessions.map(child => child.nativeAgentId !== 'compare-release-data' ? child : {
     ...child, hookReceiptId: 'receipt-release-data-completed', state: 'done', phase: 'ended', outcome: 'completed', observedAt: Date.now(),

@@ -32,7 +32,7 @@ module.exports = async function captureReading({ win, read, click, frame, until,
     await frame(`${theme}-source-${width}.png`, `${theme} retained source and reachable read action in its original scrollport`, 'search')
     await input('')
     await until('search results released', () => read('!document.querySelector(".focus-search-results")'))
-    await click('[aria-label="Drafts & queue"]')
+    await click('[aria-label="Drafts"]')
     await until('original saved-input reader', () => read('Boolean(document.querySelector(".focus-local-inputs"))'))
     await click('.focus-local-inputs .local-input-record > summary')
     await frame(`${theme}-saved-inputs-${width}.png`, `${theme} saved drafts and retained queue reader`, 'local')
