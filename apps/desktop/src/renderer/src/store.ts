@@ -509,6 +509,7 @@ import {
 import { moveSessionViewToWorkspace as reduceMoveSessionView } from './lib/move-session-view'
 import { rehomeClosedWorkspaces } from './lib/worktree-closeout-state'
 import { promoteRegionToTab as reducePromoteRegionToTab } from './lib/promote-region-to-tab'
+import { desktopRunInputOccupation } from './lib/agent-closeout-input'
 import {
   evaluateCreatePrIntent,
   type CreatePrToken,
@@ -8173,6 +8174,21 @@ export const useAppStore = create<AppState>()<[['zustand/persist', PersistedAppS
             !entry.directInputBinding && Boolean(confirmedSteerDelivery(state.timelines[session.id], session.control, entry.operationId))))
       }
       if (request.operation === 'message.pending.ls') {
+        if (request.closeoutRunId !== undefined) {
+          const runId = request.closeoutRunId, state = get()
+          const views = Object.values(state.tabs).flatMap(tab => workbenchSurfaces(tab).filter(surface =>
+            isSessionSurface(surface) && surface.sessionId === session.id).map(surface => ({ tab, surface })))
+          const owners = [session.id, ...views.map(({ surface }) => surface.regionId)]
+          const pending = Boolean(state.agentSteerInFlight[session.id] || records().some(message => !message.archived && message.delivery !== 'confirmed'))
+          const known = useAppStore.persist.hasHydrated() && !persistHydrationError &&
+            session.control.hostId === 'local' && session.control.run.runId === runId && !session.runUnobserved &&
+            !views.some(({ tab }) => tab.source) &&
+            !Object.values(state.moteMainCreationReferences).some(reference => reference.operationId === session.creation?.createOperationId)
+          return { operation: request.operation, agentSessionId: session.id, messages: [],
+            occupation: { runId, state: desktopRunInputOccupation({
+              known, owners, drafts: state.agentComposerDrafts, notes: state.agentComposerNotes, pending,
+            }) } }
+        }
         const archived: AgentMuxPendingMessage[] = []
         let after: string | undefined
         do {

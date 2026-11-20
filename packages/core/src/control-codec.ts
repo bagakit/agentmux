@@ -302,13 +302,14 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
   if (isPendingMessageOperation(source.operation)) {
     const code = 'INVALID_CONTROL_REQUEST'
     const fields = ['schemaVersion', 'requestId', 'operation', 'agentSessionId',
-      ...(source.operation === 'message.pending.ls' ? [] : ['pendingId']),
+      ...(source.operation === 'message.pending.ls' ? ['closeoutRunId'] : ['pendingId']),
       ...(source.operation === 'message.pending.edit' ? ['expectedText', 'text'] :
         source.operation === 'message.pending.archive' || source.operation === 'message.pending.restore' ? ['expectedText'] : [])]
     settingsFields(source, fields, code)
     const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId,
       agentSessionId: identity(source.agentSessionId, 'Pending message Session ID is invalid.', code) }
-    if (source.operation === 'message.pending.ls') return { ...base, operation: source.operation }
+    if (source.operation === 'message.pending.ls') return { ...base, operation: source.operation,
+      ...(source.closeoutRunId === undefined ? {} : { closeoutRunId: identity(source.closeoutRunId, 'Original pending input Run ID is invalid.', code) }) }
     const pendingId = identity(source.pendingId, 'Pending message ID is invalid.', code)
     if (source.operation === 'message.pending.send' || source.operation === 'message.pending.stop') return { ...base, operation: source.operation, pendingId }
     if (source.operation === 'message.pending.archive' || source.operation === 'message.pending.restore') {
@@ -1372,7 +1373,7 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
   }
   if (isPendingMessageOperation(operation)) {
     const code = 'CONTROL_PROTOCOL_ERROR'
-    settingsFields(result, operation === 'message.pending.ls' ? ['agentSessionId', 'messages']
+    settingsFields(result, operation === 'message.pending.ls' ? ['agentSessionId', 'messages', 'occupation']
       : operation !== 'message.pending.send' ? ['agentSessionId', 'message', 'changed']
       : ['agentSessionId', 'pendingId', 'disposition', 'message'], code)
     const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true as const }
@@ -1382,7 +1383,12 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
       const messages = result.messages.map(parsePendingMessage)
       if (messages.filter(item => !item.archived).length > 100) throw new AgentMuxError('Active pending message list is invalid.', code)
       if (new Set(messages.map(item => item.pendingId)).size !== messages.length) throw new AgentMuxError('Pending message identities repeat.', code)
-      return { ...base, operation, result: { agentSessionId, messages } }
+      const occupation = result.occupation === undefined ? undefined : rpcRecord(result.occupation, ['runId', 'state'], code)
+      if (occupation && (!['clear', 'draft', 'pending', 'unknown'].includes(String(occupation.state)) || messages.length))
+        throw new AgentMuxError('Desktop input occupation is unconfirmed.', code)
+      return { ...base, operation, result: { agentSessionId, messages, ...(occupation ? { occupation: {
+        runId: identity(occupation.runId, 'Original pending input Run ID is invalid.', code), state: occupation.state as import('./pending-message-control.js').AgentMuxDesktopInputOccupation['state'],
+      } } : {}) } }
     }
     if (operation !== 'message.pending.send') {
       if (typeof result.changed !== 'boolean') throw new AgentMuxError('Pending message edit result is invalid.', code)

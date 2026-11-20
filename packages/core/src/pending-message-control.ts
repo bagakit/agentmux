@@ -30,14 +30,15 @@ export type AgentMuxPendingMessage = {
 }
 type Base = { schemaVersion: 5; requestId: string; agentSessionId: string }
 export type PendingMessageControlRequest =
-  | Base & { operation: 'message.pending.ls' }
+  | Base & { operation: 'message.pending.ls'; closeoutRunId?: string }
   | Base & { operation: 'message.pending.edit'; pendingId: string; expectedText: string; text: string }
   | Base & { operation: 'message.pending.send'; pendingId: string }
   | Base & { operation: 'message.pending.stop'; pendingId: string }
   | Base & { operation: 'message.pending.archive'; pendingId: string; expectedText: string }
   | Base & { operation: 'message.pending.restore'; pendingId: string; expectedText: string }
+export type AgentMuxDesktopInputOccupation = { runId: string; state: 'clear' | 'draft' | 'pending' | 'unknown' }
 export type PendingMessageControlResult =
-  | { operation: 'message.pending.ls'; agentSessionId: string; messages: AgentMuxPendingMessage[] }
+  | { operation: 'message.pending.ls'; agentSessionId: string; messages: AgentMuxPendingMessage[]; occupation?: AgentMuxDesktopInputOccupation }
   | { operation: 'message.pending.edit'; agentSessionId: string; message: AgentMuxPendingMessage; changed: boolean }
   | { operation: 'message.pending.stop'; agentSessionId: string; message: AgentMuxPendingMessage; changed: boolean }
   | { operation: 'message.pending.send'; agentSessionId: string; pendingId: string; disposition: 'submitted' | 'unconfirmed'; message: AgentMuxPendingMessage | null }

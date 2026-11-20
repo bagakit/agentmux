@@ -616,8 +616,16 @@ export class DurableAgentMuxMessageQueue {
       .map(row => String(row.recipient_id))})
   }
 
-  async hasPendingNotification(agentSessionId: string): Promise<boolean> {
-    return this.withLock(async () => {this.restoredInputFrontier();return Boolean(this.db.prepare('SELECT 1 FROM a2a_message_notifications WHERE recipient_id=? AND submitted=0 AND message_sequence>(SELECT COALESCE(MAX(frontier),0) FROM restoration_holds) UNION ALL SELECT 1 FROM a2a_notifications WHERE recipient_id=? AND active=1 AND original_sequence>(SELECT COALESCE(MAX(frontier),0) FROM restoration_holds) LIMIT 1').get(agentSessionId,agentSessionId))})
+  async hasPendingNotification(agentSessionId: string, completedSourceMessageId?: string): Promise<boolean> {
+    return this.withLock(async () => {
+      this.restoredInputFrontier()
+      return Boolean(this.db.prepare(`SELECT 1 FROM a2a_message_notifications WHERE recipient_id=? AND submitted=0
+        AND (message_id IS NOT ? OR notification_id IS NOT NULL)
+        AND message_sequence>(SELECT COALESCE(MAX(frontier),0) FROM restoration_holds)
+        UNION ALL SELECT 1 FROM a2a_notifications WHERE recipient_id=? AND active=1
+        AND original_sequence>(SELECT COALESCE(MAX(frontier),0) FROM restoration_holds) LIMIT 1`)
+        .get(agentSessionId, completedSourceMessageId ?? null, agentSessionId))
+    })
   }
 
   /** New original references distinguish work at the same idle boundary from outcome observations. */

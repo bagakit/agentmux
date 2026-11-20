@@ -36,6 +36,7 @@ export interface GoalDelegationCorePort {
 /** Original Demand owner and original Host clients; no private journal or second queue. */
 export class GoalDelegationOwner implements GoalDelegationsOwner {
   workflowBudget?: (goalId: string, intent: DemandDelegationIntent) => Promise<{ maxConcurrent: number; maxAttempts: number }>
+  closeout?: ReturnType<typeof import('./goal-worker-closeout.js').createGoalWorkerCloseout>
   constructor(private readonly demands: DemandStore,
     private readonly runtime: Pick<GoalRuntimePort, 'agentCreation'> & Partial<Pick<GoalRuntimePort, 'resolveGoalAgent' | 'locateGoalAgentHost' | 'goalHostRuntimeId'>>,
     private readonly readMaterials?: (input: FileReadParams) => Promise<FileReadResult>,
@@ -50,6 +51,10 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
   async call<M extends GoalDelegationMethod>(method: M, request: GoalDelegationParamsMap[M],
     context: AgentMuxRpcCallContext, authority: GoalDelegationAuthority): Promise<GoalDelegationResultMap[M]> {
     context.signal?.throwIfAborted()
+    if (method === 'goal.closeout') {
+      const input = request as GoalDelegationParamsMap['goal.closeout']
+      return (this.closeout ? await this.closeout(input, context, authority) : { ...input, state: 'retained', reason: 'unknown' }) as GoalDelegationResultMap[M]
+    }
     if (method === 'goal.plan.active') return await this.readActivePlan(request as GoalActivePlanQuery, authority) as GoalDelegationResultMap[M]
     const input = request as GoalDelegationParamsMap[Exclude<GoalDelegationMethod, 'goal.plan.active'>]
     let passRecorded = false

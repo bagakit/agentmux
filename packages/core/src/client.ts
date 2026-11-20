@@ -7726,6 +7726,43 @@ export class AgentMuxClient {
     })
   }
 
+  /** Closeout consumes the exact Core input owner without exporting another Agent's input bodies. */
+  async readAgentCloseoutInput(agentSessionId: string, expectedRun: AgentMuxRunRef, completedSourceMessageId: string): Promise<'clear' | 'pending' | 'other-work' | 'unknown'> {
+    const pending = () => {
+      const lane = this.agentInputLanes.get(agentSessionId)
+      return Boolean(lane?.pending.size || lane?.renderObservations.size || this.rawInputAdmissions.has(expectedRun.runId))
+    }
+    const { session, observation } = await this.statusAgent(agentSessionId)
+    if (!sameRun(session.run, expectedRun) || observation.process !== 'running' || observation.stale) return 'unknown'
+    if (session.pendingInteraction || pending() ||
+        await this.messageQueue.hasPendingNotification(agentSessionId, completedSourceMessageId)) return 'pending'
+    if (observation.semantic === 'unknown' || observation.readiness !== 'ready') return 'unknown'
+    let afterSourceMessageId: string | undefined
+    do {
+      const page = await this.listDispatches({ participantSessionId: agentSessionId, limit: 100,
+        ...(afterSourceMessageId ? { afterSourceMessageId } : {}) })
+      if (page.dispatches.some(dispatch => dispatch.sourceMessageId !== completedSourceMessageId && dispatch.originAwaits)) return 'other-work'
+      afterSourceMessageId = page.nextSourceMessageId ?? undefined
+    } while (afterSourceMessageId)
+    let cursor: string | undefined, cut: { incarnation: string; throughSequence: number } | undefined
+    do {
+      const page = await this.messageQueue.readInputMailbox({ agentSessionId, limit: 100, ...(cursor ? { cursor } : {}) })
+      cut ??= page.cut
+      for (const item of page.items) {
+        const key = item.kind === 'controlled' ? item.intent.key : item.key
+        if (!sameRun(key.expectedRun, expectedRun)) continue
+        const receipt = item.kind === 'controlled' ? await this.inspectAgentInput({ key }) : undefined
+        if (item.kind === 'controlled' && (!receipt || receipt.status === 'unknown')) return 'unknown'
+        if (receipt?.status === 'waiting' || receipt?.status === 'stopped') return 'pending'
+      }
+      cursor = page.continuation(page.items.length) ?? undefined
+    } while (cursor)
+    if (await this.messageQueue.hasPendingNotification(agentSessionId, completedSourceMessageId)) return 'pending'
+    const tail = await this.messageQueue.readInputMailbox({ agentSessionId, limit: 1 })
+    const current = await this.currentStoredAgentSession(agentSessionId)
+    return sameRun(current.run, expectedRun) && !pending() && isDeepStrictEqual(cut, tail.cut) ? 'clear' : 'unknown'
+  }
+
   /** Read original journal membership; this never creates waiting, prepares or dispatches input. */
   async readAgentInputMailbox(value: AgentInputMailboxRead, caller?: { agentSessionId: string; capability: string }): Promise<AgentInputMailboxPage> {
     return await this.withSessionRecordRead(parseAgentInputMailboxRead(value).agentSessionId, async () => {

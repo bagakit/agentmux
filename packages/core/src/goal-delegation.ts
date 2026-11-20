@@ -18,6 +18,7 @@ import type { AgentMuxRun } from './types.js'
 import type { DurableAgentMuxMessage } from './agent-global-message-queue.js'
 import type { DispatchObservation } from './agent-handoff.js'
 import { AgentMuxError } from './errors.js'
+import { parseAgentStopReceipt } from './agent-stop-receipt.js'
 import { parseGoalAddress, formatGoalTicketLink, type AmuxGoalAddress } from './sharing.js'
 import { demandExecutionReferences, parseDemandProgressInput, parseDemandProgressUpdates, type DemandProgress, type DemandProgressInput } from '@agentmux/demand'
 import { parseGoalResponsibility, type GoalResponsibilityObservation } from './goal-responsibility.js'
@@ -35,6 +36,11 @@ export type GoalActivePlanResult = {
   goals: { goalId: string; goalUpdatedAt: number; nodes: (Omit<import('@agentmux/demand').GoalActiveNode, 'claim'> & { claimToken?: string })[] }[]
 }
 type GoalPlanNodeWrite = GoalPlanTarget & { nodeId: string; operationId: string }
+export type GoalCloseout = { goalId: string; attempt: string; agentSessionId: string; runId: string; operationId: string }
+export type GoalCloseoutResult = GoalCloseout & (
+  | { state: 'retained'; reason: 'handoff' | 'other-work' | 'draft' | 'pending' | 'unknown' }
+  | { state: 'stopped'; receipt: import('./agent-stop-receipt.js').AgentMuxAgentStopReceipt }
+)
 
 /** Goal owns business intent and reports; this port never owns a message queue. */
 export type GoalDelegationParamsMap = {
@@ -43,6 +49,7 @@ export type GoalDelegationParamsMap = {
   'goal.delegate': { goalId: string; intent: DemandDelegationIntent; materials?: FileReadParams[] }
   'goal.report': { goalId: string; operationId: string; sourceMessageId?: string; report: DemandDelegationReportInput }
   'goal.collect': { goalId: string; operationId: string; collection: DemandDelegationCollectionInput }
+  'goal.closeout': GoalCloseout
   'goal.delegations': { goalId: string }
   'goal.progress': { goalId: string; progress: DemandProgressInput }
   'goal.patrol': { goalId: string; operationId: string }
@@ -63,7 +70,7 @@ export type GoalDelegationResult = { goalId: string; goalUpdatedAt: number; dele
 export type GoalReportSubmissionResult = { kind: 'report-submission'; goalId: string; delegationOperationId: string;
   sourceMessageId: string; submission: AgentMuxRpcResult<'agent.send'> }
 export type GoalReportResult = GoalDelegationResult | GoalReportSubmissionResult
-export type GoalDelegationResultMap = { [M in GoalDelegationMethod]: M extends 'goal.plan.active' ? GoalActivePlanResult : M extends 'goal.report' ? GoalReportResult : GoalDelegationResult }
+export type GoalDelegationResultMap = { [M in GoalDelegationMethod]: M extends 'goal.plan.active' ? GoalActivePlanResult : M extends 'goal.report' ? GoalReportResult : M extends 'goal.closeout' ? GoalCloseoutResult : GoalDelegationResult }
 /** Supplied after transport/Core caller admission, never from an editable business payload. */
 export type GoalDelegationAuthority = { actor: { kind: 'agent' | 'user' | 'device'; id: string }; hostId?: string; runId?: string; runtimeId?: string }
 export interface GoalDelegationsOwner {
@@ -80,6 +87,10 @@ function id(value: unknown): string {
   return value
 }
 export function parseGoalDelegationParams<M extends GoalDelegationMethod>(method: M, value: unknown): GoalDelegationParamsMap[M] {
+  if (method === 'goal.closeout') {
+    const p = record(value, ['goalId', 'attempt', 'agentSessionId', 'runId', 'operationId'])
+    return { goalId: id(p.goalId), attempt: id(p.attempt), agentSessionId: id(p.agentSessionId), runId: id(p.runId), operationId: id(p.operationId) } as GoalDelegationParamsMap[M]
+  }
   if (method === 'goal.plan.active') {
     const p = record(value, ['goalId', 'view', 'expectedOwner'])
     const goalId = p.goalId === undefined ? undefined : id(p.goalId)
@@ -142,6 +153,18 @@ export function parseGoalDelegationParams<M extends GoalDelegationMethod>(method
     : method === 'goal.collect' ? { operationId: id(p.operationId), collection: parseDemandDelegationCollectionInput(p.collection) } : {}) } as GoalDelegationParamsMap[M]
 }
 export function parseGoalDelegationRpcResult<M extends GoalDelegationMethod>(method: M, value: unknown, input: GoalDelegationParamsMap[M]): GoalDelegationResultMap[M] {
+  if (method === 'goal.closeout') {
+    const request = input as GoalCloseout
+    const p = record(value, [...Object.keys(request), 'state', 'reason', 'receipt'])
+    const invalid = () => { throw new AgentMuxError('The original worker closeout result is unconfirmed.', 'CONTROL_PROTOCOL_ERROR') }
+    if (Object.entries(request).some(([key, expected]) => p[key] !== expected)) return invalid()
+    if (p.state === 'retained' && p.receipt === undefined && ['handoff', 'other-work', 'draft', 'pending', 'unknown'].includes(String(p.reason)))
+      return { ...request, state: p.state, reason: p.reason } as GoalDelegationResultMap[M]
+    if (p.state !== 'stopped' || p.reason !== undefined) return invalid()
+    const receipt = parseAgentStopReceipt(p.receipt, request)
+    if (receipt.expectedRun.runId !== request.runId || receipt.operationId !== request.operationId) return invalid()
+    return { ...request, state: p.state, receipt } as GoalDelegationResultMap[M]
+  }
   if (method === 'goal.plan.active') return parseGoalActivePlanResult(value, input as GoalActivePlanQuery) as GoalDelegationResultMap[M]
   const request = input as GoalDelegationParamsMap['goal.report']
   if (method === 'goal.report' && request.sourceMessageId !== undefined) {

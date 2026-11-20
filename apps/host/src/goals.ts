@@ -38,6 +38,7 @@ import { hostNameHistory } from './name-history.js'
 import { ScratchTopics } from './mote-resources.js'
 import { hostGoalAddress, projectHostGoal } from './goal-projection.js'
 import { createGoalAutomationPause } from './goal-automation-pause.js'
+import { createGoalWorkerCloseout } from './goal-worker-closeout.js'
 import { readOriginalMoteConfiguration } from './mote-resources.js'
 import type { FileReadParams, FileReadResult } from '@agentmux/core/files'
 
@@ -64,6 +65,7 @@ export function createHostGoals(options: {
   /** Injection only qualifies an explicit client veto, never a Host-owned draft projection. */
   inputOccupied?: Parameters<typeof createGoalRuntime>[0]['inputOccupied']
   subscribeInputOccupation?: Parameters<typeof createGoalRuntime>[0]['subscribeInputOccupation']
+  desktopCloseoutOccupation?: Parameters<typeof createGoalWorkerCloseout>[0]['desktopOccupation']
 }) {
   const root = dirname(options.configurationPath)
   const demands = openDemandStore({ root: join(root, 'demands'),
@@ -159,6 +161,10 @@ export function createHostGoals(options: {
     { request: (id, op, context, authority) => patrol.request(id, op, context, authority),
       continue: (id, patrolId, op, run, context, authority) => patrol.continue(id, patrolId, op, run, context, authority),
       report: (id, patrolId, report, authority) => patrol.report(id, patrolId, report, authority), observe: goal => patrol.observe(goal) }, planOwner, workflowReview)
+  delegations.closeout = createGoalWorkerCloseout({
+    demands, client: () => options.runtime().client, ...(options.spatial ? { spatial: options.spatial } : {}),
+    ...(options.desktopCloseoutOccupation ? { desktopOccupation: options.desktopCloseoutOccupation } : {}),
+  })
   delegations.workflowBudget = async (goalId, intent) => {
     const loop = (await progress.listGoals(goalId)).find(item => item.loopId === intent.workflowLoopId)
     if (loop?.status !== 'active' || loop.hostId !== intent.hostId || loop.agentSessionId !== intent.ownerAgentSessionId ||

@@ -473,6 +473,7 @@ const NATIVE_FIELDS = {
   'system.metrics.host-profile.capture': ['hostId', 'fence', 'processId', 'durationMs'],
   'goal.delegation.prepare': ['goalId', 'intent', 'materials'], 'goal.delegation.bind': ['goalId', 'intent'], 'goal.delegate': ['goalId', 'intent', 'materials'],
   'goal.report': ['goalId', 'operationId', 'sourceMessageId', 'report'], 'goal.collect': ['goalId', 'operationId', 'collection'], 'goal.delegations': ['goalId'],
+  'goal.closeout': ['goalId', 'attempt', 'agentSessionId', 'runId', 'operationId'],
   'goal.progress': ['goalId', 'progress'],
   'goal.patrol': ['goalId', 'operationId'],
   'goal.patrol.continue': ['goalId', 'patrolOperationId', 'operationId', 'expectedRunId'],
@@ -2543,6 +2544,13 @@ export class AgentMuxRpcService {
       }
     }
     const caller = await this.authenticated(context)
+    if (method === 'message.pending.ls') {
+      const input = rpcRecord(params)
+      if (input.closeoutRunId !== undefined &&
+          (caller ? caller.agentSessionId !== input.agentSessionId || caller.session.run.runId !== input.closeoutRunId
+            : !context.principal || !['user', 'device'].includes(context.principal.kind)))
+        throw new AgentMuxError('Desktop input occupation requires the exact current worker or an authorized person or device.', 'CONTROL_PERMISSION_DENIED')
+    }
     if (isCapsuleRuntimeMethod(method)) {
       const input = parseCapsuleRuntimeParams(method, params)
       if (!caller && !(context.principal && ['user', 'device'].includes(context.principal.kind) && context.principal.id.trim()))

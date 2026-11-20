@@ -170,6 +170,13 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     return runtime
   }
   if (configurationPath) goals = createHostGoals({ configurationPath, spatial: spatialState, runtime: originalRuntime,
+    desktopCloseoutOccupation: async (agentSessionId, closeoutRunId, context) => {
+      const desktop = await desktopClient(context)
+      try {
+        const result = await desktop.call('message.pending.ls', { agentSessionId, closeoutRunId }, context.signal ? { signal: context.signal } : {})
+        return result.agentSessionId === agentSessionId && result.occupation?.runId === closeoutRunId ? result.occupation.state : 'unknown'
+      } finally { await desktop.dispose() }
+    },
     ...(options.connections?.clients ? { clients: options.connections.clients } : {}),
     ...(options.connections?.subscribeClients ? { subscribeClients: options.connections.subscribeClients } : {}),
     ...(content?.files ? { files: input => content.files!.read(input) } : {}),
