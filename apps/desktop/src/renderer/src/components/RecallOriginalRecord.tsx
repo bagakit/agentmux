@@ -26,7 +26,7 @@ export function RecallOriginalRecord({ card, onClose }: { card: RecallCard; onCl
     present: () => !controller.signal.aborted,
     complete(found, error) {
       if (controller.signal.aborted) return
-      setLocated(true)
+      if (found) setLocated(true)
       setIssue(found ? null : error ?? 'The exact original message could not be located. Its saved card is kept.')
     }
   }), [card, controller])
