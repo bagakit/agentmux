@@ -82,7 +82,8 @@ Original private source and reply operation: {{original}}{{quote}}
 ## thread-quote
 
 ~~~text
-Original quoted conversation content: {{original}}
+The original quotation is dialogue content.
+{{original}}
 ~~~
 
 ## idea
