@@ -1,7 +1,8 @@
-import { parseBrowserProfileEnvironment, type BrowserProfileEnvironment } from '@agentmux/core/control'
+import { BROWSER_PROFILE_FINGERPRINT_SURFACES, parseBrowserProfileEnvironment, type BrowserProfileEnvironment, type BrowserProfileFingerprintSurface } from '@agentmux/core/control'
 
 export type EnvironmentBrand = { brand: string; version: string }
 export type ProfileEnvironmentFields = {
+  fingerprint?: { seed: string; surfaces: BrowserProfileFingerprintSurface[] } | undefined
   languages: string
   timeZone: string
   locale: string
@@ -30,6 +31,7 @@ export type ProfileEnvironmentDraft = { baseRevision: string; fields: ProfileEnv
 export function environmentFields(value?: BrowserProfileEnvironment): ProfileEnvironmentFields {
   const hints = value?.userAgentMetadata
   return {
+    ...(value?.fingerprint ? { fingerprint: { seed: String(value.fingerprint.seed), surfaces: [...value.fingerprint.surfaces] } } : {}),
     languages: value?.acceptLanguages?.join(', ') ?? '',
     timeZone: value?.timeZone ?? '',
     locale: value?.locale ?? '',
@@ -61,7 +63,9 @@ export function environmentFromFields(fields: ProfileEnvironmentFields): Browser
     if (!value.trim()) throw new Error(`${label} is required.`)
     return Number(value)
   }
+  if (fields.fingerprint && !/^\d+$/u.test(fields.fingerprint.seed)) throw new Error('Enter a whole-number fingerprint seed.')
   const value: BrowserProfileEnvironment = {
+    ...(fields.fingerprint ? { fingerprint: { seed: Number(fields.fingerprint.seed), surfaces: fields.fingerprint.surfaces } } : {}),
     ...(fields.languages.trim()
       ? { acceptLanguages: fields.languages.split(',').map((value) => value.trim()) }
       : {}),
@@ -129,10 +133,14 @@ export function parseEnvironmentDraft(value: unknown): ProfileEnvironmentDraft {
   )
     throw invalid()
   if (
-    Object.keys(fields).length !== Object.keys(shape).length ||
-    Object.keys(fields).some((key) => !(key in shape))
+    Object.keys(fields).some(key => key !== 'fingerprint' && !Object.hasOwn(shape, key)) ||
+    Object.keys(shape).some(key => !Object.hasOwn(fields, key))
   )
     throw invalid()
+  const fingerprint = fields.fingerprint as { seed?: unknown; surfaces?: unknown } | undefined
+  if (fingerprint !== undefined && (!fingerprint || Object.keys(fingerprint).length !== 2 ||
+      typeof fingerprint.seed !== 'string' || !Array.isArray(fingerprint.surfaces) ||
+      fingerprint.surfaces.some(surface => !BROWSER_PROFILE_FINGERPRINT_SURFACES.includes(surface)))) throw invalid()
   for (const [key, defaultValue] of Object.entries(shape)) {
     const item = fields[key]
     if (key === 'brands' || key === 'fullVersionList') {

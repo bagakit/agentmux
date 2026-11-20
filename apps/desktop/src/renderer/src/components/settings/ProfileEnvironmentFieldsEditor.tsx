@@ -1,9 +1,43 @@
+import { BROWSER_PROFILE_FINGERPRINT_SURFACES, type BrowserProfileFingerprintSurface } from '@agentmux/core/control'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { NativeSelect, Switch, TextInput } from '@agentmux/client-ui/input'
 import type { EnvironmentBrand, ProfileEnvironmentFields } from '../../lib/browser-profile-environment-form'
 
 type TextField = {
-  [K in keyof ProfileEnvironmentFields]: ProfileEnvironmentFields[K] extends string ? K : never
+  [K in keyof ProfileEnvironmentFields]-?: ProfileEnvironmentFields[K] extends string ? K : never
 }[keyof ProfileEnvironmentFields]
+
+const fingerprintLabels: Record<BrowserProfileFingerprintSurface, string> = {
+  fonts: 'Font metrics', audio: 'Offline audio', canvas: 'Canvas readback',
+  clientRects: 'Element coordinates', webgl: 'WebGL vendor and renderer'
+}
+
+export function ProfileFingerprintFields({ value, onChange }: {
+  value: ProfileEnvironmentFields['fingerprint']
+  onChange(value: ProfileEnvironmentFields['fingerprint']): void
+}) {
+  return <details className="profile-environment__group profile-environment__fingerprint">
+    <summary>Fingerprint{value?.surfaces.length ? <small>{value.surfaces.length} overrides</small> : null}</summary>
+    <div className="profile-environment__grid profile-environment__fingerprint-seed">
+      <label className="profile-environment__field"><span>Seed</span>
+        <TextInput aria-label="Fingerprint seed" inputMode="numeric" value={value?.seed ?? ''} placeholder="Engine default"
+          onChange={event => onChange(event.target.value ? { seed: event.target.value, surfaces: value?.surfaces ?? [] } : undefined)} />
+      </label>
+      <Button type="button" onClick={() => {
+        const [seed] = crypto.getRandomValues(new Uint32Array(1))
+        onChange({ seed: String(seed), surfaces: value?.surfaces ?? [...BROWSER_PROFILE_FINGERPRINT_SURFACES] })
+      }}>Generate seed</Button>
+    </div>
+    {value ? <div className="profile-environment__grid">
+      {BROWSER_PROFILE_FINGERPRINT_SURFACES.map(surface => <label key={surface} className="profile-environment__choice">
+        <Switch checked={value.surfaces.includes(surface)} onChange={event => onChange({ seed: value.seed,
+          surfaces: event.target.checked ? [...value.surfaces, surface] : value.surfaces.filter(item => item !== surface) })} />
+        {fingerprintLabels[surface]}
+      </label>)}
+    </div> : null}
+    <small>Selected document APIs use the same seed after navigation. Worker and engine-level coverage is unconfirmed.</small>
+  </details>
+}
 
 function BrandRows({
   label,

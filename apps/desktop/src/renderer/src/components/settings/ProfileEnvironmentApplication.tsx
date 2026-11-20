@@ -10,7 +10,8 @@ const LABELS: Record<keyof BrowserProfileEnvironment, string> = {
   geolocation: 'Location',
   userAgentMetadata: 'Client hints',
   screen: 'Screen',
-  hardwareConcurrency: 'CPU threads'
+  hardwareConcurrency: 'CPU threads',
+  fingerprint: 'Fingerprint'
 }
 
 function EnvironmentValue({
@@ -22,6 +23,10 @@ function EnvironmentValue({
 }) {
   const value = environment?.[field]
   if (value === undefined) return <span>Engine default</span>
+  if (field === 'fingerprint') {
+    const fingerprint = environment!.fingerprint!
+    return <span>Seed {fingerprint.seed} · {fingerprint.surfaces.length} selected surfaces</span>
+  }
   if (field === 'screen')
     return (
       <span>

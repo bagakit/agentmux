@@ -87,6 +87,10 @@ export type BrowserProfileUserAgentMetadata = {
   bitness?: string
   wow64?: boolean
 }
+export const BROWSER_PROFILE_FINGERPRINT_SURFACES = ['fonts', 'audio', 'canvas', 'clientRects', 'webgl'] as const
+export type BrowserProfileFingerprintSurface = (typeof BROWSER_PROFILE_FINGERPRINT_SURFACES)[number]
+export type BrowserProfileFingerprint = { seed: number; surfaces: BrowserProfileFingerprintSurface[] }
+
 export type BrowserProfileEnvironment = {
   userAgent?: string
   acceptLanguages?: string[]
@@ -96,6 +100,7 @@ export type BrowserProfileEnvironment = {
   userAgentMetadata?: BrowserProfileUserAgentMetadata
   screen?: { width: number; height: number }
   hardwareConcurrency?: number
+  fingerprint?: BrowserProfileFingerprint
 }
 export const BROWSER_PROFILE_ENVIRONMENT_FIELDS = [
   'userAgent',
@@ -105,7 +110,8 @@ export const BROWSER_PROFILE_ENVIRONMENT_FIELDS = [
   'geolocation',
   'userAgentMetadata',
   'screen',
-  'hardwareConcurrency'
+  'hardwareConcurrency',
+  'fingerprint'
 ] as const satisfies readonly (keyof BrowserProfileEnvironment)[]
 export type BrowserProfileEnvironmentField = (typeof BROWSER_PROFILE_ENVIRONMENT_FIELDS)[number]
 export type BrowserProfileEnvironmentPageApplication = {
@@ -239,6 +245,15 @@ export function parseBrowserProfileEnvironment(value: unknown): BrowserProfileEn
       ...(meta.wow64 === undefined ? {} : { wow64: meta.wow64 as boolean })
     }
   }
+  let fingerprint: BrowserProfileFingerprint | undefined
+  if (row.fingerprint !== undefined) {
+    const value = record(row.fingerprint, ['seed', 'surfaces'], code, 'Profile fingerprint')
+    const seed = environmentNumber(value.seed, 0, 2 ** 32 - 1, code, 'Fingerprint seed')
+    if (!Number.isInteger(seed) || !Array.isArray(value.surfaces) ||
+        value.surfaces.some(surface => !BROWSER_PROFILE_FINGERPRINT_SURFACES.includes(surface)))
+      fail(code, 'Fingerprint needs an unsigned 32-bit seed and recognized surfaces.')
+    fingerprint = { seed, surfaces: BROWSER_PROFILE_FINGERPRINT_SURFACES.filter(surface => (value.surfaces as unknown[]).includes(surface)) }
+  }
   return {
     ...(userAgent === undefined ? {} : { userAgent }),
     ...(acceptLanguages === undefined ? {} : { acceptLanguages }),
@@ -247,7 +262,8 @@ export function parseBrowserProfileEnvironment(value: unknown): BrowserProfileEn
     ...(geolocation ? { geolocation } : {}),
     ...(userAgentMetadata ? { userAgentMetadata } : {}),
     ...(screen ? { screen } : {}),
-    ...(hardwareConcurrency === undefined ? {} : { hardwareConcurrency })
+    ...(hardwareConcurrency === undefined ? {} : { hardwareConcurrency }),
+    ...(fingerprint ? { fingerprint } : {})
   }
 }
 function environmentNumber(value: unknown, min: number, max: number, code: string, label: string): number {

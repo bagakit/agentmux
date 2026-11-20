@@ -34,3 +34,11 @@
   .profile-environment__brand { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .profile-environment__brand > button { grid-column: 2; justify-self: end; }
 }
+
+.profile-environment__fingerprint-seed {
+  align-items: end;
+}
+
+.profile-environment__fingerprint > .profile-environment__grid {
+  margin-bottom: 8px;
+}

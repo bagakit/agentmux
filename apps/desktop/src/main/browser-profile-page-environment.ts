@@ -4,6 +4,7 @@ import {
   type BrowserProfileEnvironmentPageApplication
 } from '@agentmux/core/control'
 import { BrowserCdpSession } from './browser-cdp-session.js'
+import { browserProfileFingerprintScript } from './browser-profile-fingerprint.js'
 
 export type BrowserProfilePageEnvironmentPorts = {
   applyScreen(): void
@@ -28,6 +29,7 @@ export function createBrowserProfilePageEnvironment(ports: {
     tail: Promise<void>
     lease: BrowserCdpSession | null
     baselineHardware?: number
+    fingerprintScript?: string
     touched: Set<keyof BrowserProfileEnvironment>
     receipt: BrowserProfileEnvironmentPageApplication
     disposed: boolean
@@ -107,6 +109,7 @@ export function createBrowserProfilePageEnvironment(ports: {
           page.clearing = false
         }
         page.lease = BrowserCdpSession.attach(page.contents)
+        delete page.fingerprintScript
       }
       const lease = page.lease
       const ensure = () => {
@@ -211,6 +214,34 @@ export function createBrowserProfilePageEnvironment(ports: {
         }
         receipt.status = 'unknown'
         receipt.scope = scope(false)
+      }
+      if (fields.has('fingerprint')) {
+        try {
+          const previous = page.fingerprintScript
+          if (previous) {
+            ensure()
+            await lease.sendCommand('Page.removeScriptToEvaluateOnNewDocument', { identifier: previous })
+            delete page.fingerprintScript
+          }
+          const source = browserProfileFingerprintScript(settings?.fingerprint)
+          ensure()
+          const { identifier } = await lease.sendCommand('Page.addScriptToEvaluateOnNewDocument', {
+            source, runImmediately: true
+          }) as { identifier: string }
+          page.fingerprintScript = identifier
+          ensure()
+          if (!settings?.fingerprint?.surfaces.length) {
+            await lease.sendCommand('Page.removeScriptToEvaluateOnNewDocument', { identifier })
+            delete page.fingerprintScript
+            ensure()
+          }
+          receipt.fields.fingerprint = { status: 'applied', scope: 'page-target', reason: 'Document script acknowledged on this page target. Worker and engine-wide coverage are unconfirmed.' }
+        } catch (cause) {
+          const reason = cause instanceof Error ? cause.message : String(cause)
+          receipt.fields.fingerprint = { status: 'unknown', scope: 'page-target', reason }
+          receipt.status = 'unknown'
+          receipt.scope = scope(false)
+        }
       }
       if (fields.has('screen')) {
         try {

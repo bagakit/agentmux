@@ -14,7 +14,7 @@ import {
 } from '../../lib/browser-profile-environment-form'
 import { profileEnvironmentDrafts } from '../../lib/browser-profile-environment-drafts'
 import { ProfileEnvironmentApplication } from './ProfileEnvironmentApplication'
-import { ProfileEnvironmentFieldsEditor } from './ProfileEnvironmentFieldsEditor'
+import { ProfileEnvironmentFieldsEditor, ProfileFingerprintFields } from './ProfileEnvironmentFieldsEditor'
 import './settings-browser-profile-environment.css'
 
 type Model = ProfileEnvironmentDraft & { profileId: string; dirty: boolean }
@@ -249,6 +249,7 @@ export function ProfileEnvironmentEditor({ profile }: { profile: BrowserProfileS
       </div>
       <p className="profile-environment__intro">Region and browser identity for this Profile.</p>
       <ProfileEnvironmentFieldsEditor fields={model.fields} change={change} />
+      <ProfileFingerprintFields value={model.fields.fingerprint} onChange={fingerprint => change({ fingerprint })} />
       {model.dirty ? (
         <div className="profile-environment__actions">
           <span>Unsaved changes</span>
@@ -348,8 +349,7 @@ export function ProfileEnvironmentEditor({ profile }: { profile: BrowserProfileS
       ) : null}
       <ProfileEnvironmentApplication profile={profile} busy={busy} onReapply={() => void apply(true)} />
       <p className="profile-environment__limits">
-        Canvas, WebGL, fonts, TLS and device memory overrides are not supported. These settings do not certify
-        a complete fingerprint or anti-detection behavior.
+        TLS, device memory and engine-wide fingerprint overrides are unsupported.
       </p>
     </section>
   )
