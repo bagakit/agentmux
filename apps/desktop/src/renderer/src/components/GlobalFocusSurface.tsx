@@ -660,13 +660,13 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
       {sourceFacts.readers}
       {sourceFacts.issues.map(issue => <section key={issue.key} className="focus-source-issue" aria-label={'Source status · ' + issue.label + ' · ' + issue.host}>
         <ServiceWindowNotice notice={{ kind: 'process-degraded', notice: {
-          step: 'Project updates unavailable · ' + issue.label + ' · ' + issue.host,
-          mode: 'Some updates from this project are unavailable. Original tasks and workfaces are retained.',
-          restore: issue.reading ? 'Checking the original source…' : 'Refresh this source to check its current status.'
+          step: issue.label + ' · ' + issue.host,
+          mode: 'Source updates unavailable. Original tasks and workfaces are retained.',
+          restore: issue.reading ? 'Checking the original source…' : ''
         } }} />
         <button type="button" className="small-button" aria-busy={issue.reading} onClick={issue.refresh}>Refresh source</button>
         <details className="focus-source-status__cause"><summary>Connection details</summary>
-          <p>{issue.message}</p><p>Runtime: {issue.reference.runtimeId}<br />Space: {issue.reference.spaceId}</p>
+          <p>{issue.message}</p>{issue.reference ? <p>Runtime: {issue.reference.runtimeId}<br />Space: {issue.reference.spaceId}</p> : null}
         </details>
       </section>)}
       {agentReveal ? <div className="focus-agent-reveal" role="status" aria-label="Focus Agent reveal">
@@ -728,7 +728,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
       }}
     /><aside className="global-session-workspace" aria-label="Focus workspace">
       {sourceChoices ? <div className="focus-location-choices" role="group" aria-label="Choose original workface">
-        <p>Choose the exact workface for this Agent.</p>{sourceChoices.locations.map(location => <Button type="button" className="focus-location-choice" key={JSON.stringify(location)} onClick={() => { sourceChoices.choose(location); setSourceChoices(null) }}><strong>Tab {location.tabId}</strong><small>Region {location.regionId}</small></Button>)}
+        <p>Choose the exact workface for this Agent.</p>{sourceChoices.locations.map(location => <Button type="button" className="focus-location-choice" key={JSON.stringify(location)} onClick={() => { sourceChoices.choose(location); setSourceChoices(null) }}><strong>Tab {location.tabId}</strong><small>Region {location.regionId}</small>{location.originalPosition ? <small>Group {location.originalPosition.groupId} · {location.originalPosition.displayWorkspaceId}</small> : null}</Button>)}
         <Button type="button" onClick={() => setSourceChoices(null)}>Dismiss location choices</Button>
       </div> : projection
         ? <div className="focused-tab-workspace" data-focus-tab-id={selectedTab?.id}

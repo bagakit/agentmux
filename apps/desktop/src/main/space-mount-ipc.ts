@@ -31,7 +31,7 @@ export function sourceTarget(p: Record<string, unknown>): import('../shared/spac
 export function registerSpaceMountIpc(ports: {
   handle<T extends unknown[], R>(channel: string, listener: (event: IpcMainInvokeEvent, ...values: T) => R | Promise<R>): void
   config?(): AppConfig
-  runtime: Pick<RuntimeController, 'callOriginalCore' | 'subscribeOriginalCore' | 'openMountedSpaceMember' | 'spaceMountResources' | 'describeMountedSpace' | 'mountedSpaceHostChoices' | 'mountedSpaceRouteChoices' | 'mountedSpaceRouteExecutors' | 'registerFolderSpace' | 'inspectFolderSpace' | 'readMountedSpace' | 'applyMountedSpace' | 'watchMountedSpace' | 'mountedSpaceExecutors' | 'openMountedSpace' | 'inspectMountedSpaceRequest' | 'continueMountedSpaceExecution' | 'watchMountedSpaceSessions' | 'inspectMountedMemberName' | 'changeMountedMemberName' | 'inspectOriginalAgentName' | 'changeOriginalAgentName'>
+  runtime: Pick<RuntimeController, 'callOriginalCore' | 'subscribeOriginalCore' | 'openMountedSpaceMember' | 'spaceMountResources' | 'spaceMountAgentLocations' | 'describeMountedSpace' | 'mountedSpaceHostChoices' | 'mountedSpaceRouteChoices' | 'mountedSpaceRouteExecutors' | 'registerFolderSpace' | 'inspectFolderSpace' | 'readMountedSpace' | 'applyMountedSpace' | 'watchMountedSpace' | 'mountedSpaceExecutors' | 'openMountedSpace' | 'inspectMountedSpaceRequest' | 'continueMountedSpaceExecution' | 'watchMountedSpaceSessions' | 'inspectMountedMemberName' | 'changeMountedMemberName' | 'inspectOriginalAgentName' | 'changeOriginalAgentName'>
 }) {
   const reads = new SessionHistoryReadOwners()
   const close = sourceWorkbenchClosePort(ports.runtime)
@@ -58,6 +58,15 @@ export function registerSpaceMountIpc(ports: {
     }
     return await reads.read(event.sender, token, async signal => {
     if (method === 'resources') { const p = fields(value, ['hostId']); return await ports.runtime.spaceMountResources(host(p.hostId), signal) }
+    if (method === 'agentLocations') {
+      const p = fields(value, ['hostId', 'agentSessionIds', 'expectedRuntimeId', 'position'])
+      if (!Array.isArray(p.agentSessionIds) || !p.agentSessionIds.length) throw Error('Choose original Agent Sessions for this Source.')
+      const exact = p.position === undefined ? undefined : fields(p.position, ['spaceId', 'zoneId', 'workspaceId', 'displayWorkspaceId', 'groupId', 'tabId', 'regionId'])
+      const position = exact && { spaceId: host(exact.spaceId), zoneId: host(exact.zoneId), workspaceId: host(exact.workspaceId),
+        displayWorkspaceId: host(exact.displayWorkspaceId), groupId: host(exact.groupId), tabId: host(exact.tabId), regionId: host(exact.regionId) }
+      return await ports.runtime.spaceMountAgentLocations({ hostId: host(p.hostId), agentSessionIds: p.agentSessionIds.map(host),
+        ...(p.expectedRuntimeId === undefined ? {} : { expectedRuntimeId: host(p.expectedRuntimeId) }), ...(position ? { position } : {}) }, signal)
+    }
     if (method === 'memberNameInspect' || method === 'memberNameChange') {
       const p = fields(value, ['hostId', 'reference', 'name']), target = { hostId: host(p.hostId), reference: parseSpaceAuthorityRef(p.reference) }
       return method === 'memberNameInspect' ? await ports.runtime.inspectMountedMemberName(target, parseNameControlParams('space.member.name.inspect', p.name), signal)

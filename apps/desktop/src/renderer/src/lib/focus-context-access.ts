@@ -3,13 +3,13 @@ import type { SessionHistoryReference } from '../../../shared/contracts'
 import type { api } from './api'
 import type { FocusNameEditor } from './focus-name-edit'
 import type { SessionSnapshot } from '../../../shared/contracts'
-import type { SpaceMountRecord } from '../../../shared/space-mount'
+import type { SourceAgentLocation, SpaceMountRecord } from '../../../shared/space-mount'
 import type { WorkbenchProjectionSelection } from './workbench-projection'
 
 /** Original-source adapter for the common card. Absence never selects local access. */
 export type FocusContextAccess = {
   identity: { runtimeId: string | null; agentSessionId: string }
-  locations: readonly { source: SpaceMountRecord; tabId: string; regionId: string; reference?: WorkbenchProjectionSelection }[]
+  locations: readonly { source: SpaceMountRecord; tabId: string; regionId: string; reference?: WorkbenchProjectionSelection; originalPosition?: SourceAgentLocation['position'] }[]
   session?: SessionSnapshot
   /** Last exact member metadata for reading identity, never live control. */
   retainedSession?: SessionSnapshot

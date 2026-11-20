@@ -3,10 +3,10 @@ import type { SpaceSnapshot } from '@agentmux/core'
 import type { AgentMuxDesktopSpaceSelection } from '@agentmux/core/control'
 import { folderDirectoryFacts } from '@agentmux/core/space-folder-resources'
 import type { FolderSpaceResource } from '@agentmux/core/space-folder'
-import { createWorkbenchViewLayout, closeWorkbenchRegion, regionIds, splitWorkbenchRegion, removeTab as removeTabOccurrence, addTabOccurrence, createWorkspaceLayout, activateTab as activateLayoutTab,
+import { createWorkbenchViewLayout, closeWorkbenchRegion, regionIds, splitWorkbenchRegion, removeTab as removeTabOccurrence, addTabOccurrence, createWorkspaceLayout, activateTab as activateLayoutTab, EVEN_SPLIT_RATIO,
   type WorkspaceLayout, type WorkbenchViewLayout } from '@agentmux/layout'
 import type { AppConfig, WorkspaceRecord, FileDocument } from '../../../shared/contracts'
-import type { SpaceMountRecord, SpaceMountView } from '../../../shared/space-mount'
+import type { SourceAgentLocation, SpaceMountRecord, SpaceMountView } from '../../../shared/space-mount'
 import { spaceMountKey } from '../../../shared/space-mount'
 import { mountedSpaceInput, mountedSpaceInputs, mountedSpaceRegions, mountedSpaceTarget, editMountedSpaceInput, type MountedSpaceInput } from './space-mount-view'
 import { documentKey, sourceRegionProjectionReference, type WorkbenchTab, type FileWorkbenchSurface } from './workbench-tabs'
@@ -45,6 +45,7 @@ export const originalSourceWorkspaceId = (target: SpaceMountRecord) => qualified
 export const originalSourceTabProjectionId = (target: SpaceMountRecord, tabId: string) => qualified(sourceTabPrefix, target, tabId)
 export const originalSourceRegionProjectionId = (target: SpaceMountRecord, regionId: string) => qualified(sourceRegionPrefix, target, regionId)
 export const originalSourceGroupProjectionId = (target: SpaceMountRecord, groupId: string) => qualified(sourceGroupPrefix, target, groupId)
+export const originalSourceDisplayGroup = (position: NonNullable<SourceAgentLocation['position']>) => JSON.stringify([position.displayWorkspaceId, position.groupId])
 export const isOriginalSourceWorkspaceProjection = (workspaceId: string) => workspaceId.startsWith(sourceWorkspacePrefix)
 type SourceProjectionState = { tabs: Record<string, Pick<WorkbenchTab, 'workspaceId' | 'source'>>; layouts: Record<string, WorkspaceLayout> }
 export function preserveOriginalSourceProjection<C extends SourceProjectionState, R extends { tabs: C['tabs']; layouts: Record<string, WorkspaceLayout> }>(current: C, restored: R): R {
@@ -115,7 +116,7 @@ function legacyLauncherId(target: SpaceMountRecord) { return 'original-source-la
 /** Reconcile only view state. Original Core snapshots never enter the observer Core graph or Session map. */
 export function reconcileOriginalSourceProjection<T extends OriginalSpaceSelectionState & {
   tabs: Record<string, WorkbenchTab>; layouts: Record<string, WorkspaceLayout>; activeWorkspaceId?: string | null | undefined
-}>(state: T, target: SpaceMountRecord, snapshot: Pick<SpaceSnapshot, 'scope'>): Partial<T> {
+}>(state: T, target: SpaceMountRecord, snapshot: Pick<SpaceSnapshot, 'scope'>, originalPosition?: SourceAgentLocation['position']): Partial<T> {
   const key = spaceMountKey(target.reference), workspaceId = originalSourceWorkspaceId(target), currentLayout = state.layouts[workspaceId]
   let savedView: SpaceMountView | undefined
   try { savedView = (mountedSpaceInput(state.mountedSpaceInputs, key) as (MountedSpaceInput & { view?: SpaceMountView }) | undefined)?.view } catch { savedView = undefined }
@@ -135,7 +136,9 @@ export function reconcileOriginalSourceProjection<T extends OriginalSpaceSelecti
       regions: { [originalSourceRegionProjectionId(target, regionId)]: { regionId: originalSourceRegionProjectionId(target, regionId), kind: 'launcher', workspaceId,
         source: { ...source, regionId } } }, source, space: { spaceId: target.reference.spaceId, zoneId: target.zoneId }, name: 'New work' })
   }
-  const initialLayout = currentLayout ?? (savedView ? projectWorkspaceLayout(savedView.composition, target) : createWorkspaceLayout(originalSourceGroupProjectionId(target, 'original-group'), sourceTabs.map(tab => originalSourceTabProjectionId(target, tab.tabId))))
+  const requestedGroup = originalPosition?.spaceId === target.reference.spaceId && originalPosition.zoneId === target.zoneId
+    ? originalSourceGroupProjectionId(target, originalSourceDisplayGroup(originalPosition)) : undefined
+  const initialLayout = currentLayout ?? (savedView ? projectWorkspaceLayout(savedView.composition, target) : createWorkspaceLayout(requestedGroup ?? originalSourceGroupProjectionId(target, 'original-group'), sourceTabs.map(tab => originalSourceTabProjectionId(target, tab.tabId))))
   let composition = initialLayout
   const privateIds = new Set([...retainedLaunchers, ...retained].map(tab => tab.id))
   for (const group of initialLayout.groups) for (const tabId of group.tabOrder) if (!wanted.has(tabId) && !privateIds.has(tabId)) composition = removeTabOccurrence(composition, group.id, tabId)
@@ -144,6 +147,18 @@ export function reconcileOriginalSourceProjection<T extends OriginalSpaceSelecti
     if (!composition.groups.some(group => group.tabOrder.includes(id))) composition = addTabOccurrence(composition, composition.activeGroupId, id) ?? composition
   }
   for (const id of privateIds) if (!composition.groups.some(group => group.tabOrder.includes(id))) composition = addTabOccurrence(composition, composition.activeGroupId, id) ?? composition
+  if (requestedGroup && originalPosition) {
+    const tabId = originalSourceTabProjectionId(target, originalPosition.tabId)
+    if (wanted.has(tabId)) {
+      const placed = addTabOccurrence(composition, requestedGroup, tabId)
+      if (placed) composition = placed
+      else {
+        const added = createWorkspaceLayout(requestedGroup, [tabId])
+        composition = { ...composition, root: { type: 'split', direction: 'horizontal', ratio: EVEN_SPLIT_RATIO, first: composition.root, second: added.root },
+          groups: [...composition.groups, ...added.groups] }
+      }
+    }
+  }
   const tabs = Object.fromEntries(Object.entries(state.tabs).filter(([, tab]) => !(tab.source && tab.source.reference.runtimeId === target.reference.runtimeId &&
     tab.source.reference.spaceId === target.reference.spaceId && tab.source.zoneId === target.zoneId && tab.source.workspaceId === target.workspaceId && !privateIds.has(tab.id))))
   for (const tab of sourceTabs) {

@@ -9,7 +9,7 @@ import type { ConversationObservation, projectConversationWindow } from '@agentm
 import type { ConversationReadApi } from '../../../shared/conversation-read'
 import type { AppConfig, HostConfig, SessionSnapshot } from '../../../shared/contracts'
 import type { SourceWorkbenchCloseDestination, SourceWorkbenchCloseMember } from '../../../shared/source-workbench-close'
-import { spaceMountKey, type SpaceMountMemberSurface, type SpaceMountMemberTarget, type SpaceMountRecord } from '../../../shared/space-mount'
+import { sourcePositionKey, spaceMountKey, type SourceAgentLocation, type SourceAgentLocations, type SpaceMountMemberSurface, type SpaceMountMemberTarget, type SpaceMountRecord } from '../../../shared/space-mount'
 import { api } from './api'
 import { agentDisplayName, sourceRegionProjectionReference } from './workbench-tabs'
 import { requestWorkbenchReferenceClose } from './workbench-close-request'
@@ -17,20 +17,26 @@ import { requestDesktopFocusWorkfaceReveal } from './desktop-presentation'
 import { agentRegionLocationBindings, confirmedOriginalRawLocations, ordinaryAgentSpaceMember, useAppStore, type AppState } from '../store'
 import { workbenchSelectionCatalog } from './desktop-focus-navigation'
 import { workbenchNavigationTabs } from './workbench-navigation-catalog'
-import { mountedSpaceInputs, mountedSpaceRegions, mountedSpaceTarget, type MountedSpaceObservation, type MountedSpaceRegion } from './space-mount-view'
+import { acceptsMountedSnapshot, mountedRegionKey, mountedSpaceInputs, mountedSpaceRegions, mountedSpaceTarget, type MountedSpaceObservation, type MountedSpaceRegion } from './space-mount-view'
 import { mountedSessionFacts, type MountedSessionObservation } from './space-mount-sessions'
 import { useSpaceSourceReader } from '../components/SpaceSourceReaders'
 import { agentContextForSession, agentContextForConversation, focusRecordFacts, type FocusContext } from './focus-context'
 import type { FocusContextAccess } from './focus-context-access'
 import type { FocusNameEditor } from './focus-name-edit'
-import { focusContextIdentityKey, type FocusContextIdentity, type FocusContextOccurrence } from './focus-context-identity'
+import { focusContextIdentityKey, type FocusContextIdentity, type FocusContextOccurrence, type FocusSourceObject } from './focus-context-identity'
 import type { WorkbenchProjectionSelection } from './workbench-projection'
 import { focusSourceContextId, focusSourceHistoryNames, focusSourceHostId, focusSourceKey, focusSourceWorkspace, matchingFocusContext, unobservedFocusContext } from './focus-source-model'
 import { readSourceConversationRecap, sourceConversationPort } from './focus-source-conversation'
-import { originalSpaceResource, originalSourceRegionProjectionId, originalSourceTabProjectionId, originalSourceWorkspaceId } from './original-space-navigation'
+import { originalSpaceResource, originalSourceDisplayGroup, originalSourceGroupProjectionId, originalSourceRegionProjectionId, originalSourceTabProjectionId, originalSourceWorkspaceId } from './original-space-navigation'
+import { originalLocationReaderKey, useFocusSourceLocations, type FocusSourceLocationObservation } from './focus-source-locations'
 
-type Location = FocusContextAccess['locations'][number] & { member: MountedSpaceRegion; snapshot?: SpaceSnapshot }
+type Location = FocusContextAccess['locations'][number] & { member: MountedSpaceRegion; snapshot?: SpaceSnapshot; original?: SourceAgentLocation; sourceIssue?: string }
 type Candidate = { key: string; runtimeId?: string; sid: string; locations: Location[]; target?: SpaceMountMemberTarget; authorityKey?: string; readingTarget?: import('../../../shared/space-mount').SpaceMountReadingTarget; directName?: { hostId: string; target: Pick<AgentNameTarget, 'runtimeId' | 'agentSessionId'>; changeTarget?: AgentNameTarget }; issue?: string }
+function matchesLocation(location: Location, requested: FocusContextAccess['locations'][number]) {
+  return JSON.stringify([location.source, location.tabId, location.regionId]) === JSON.stringify([requested.source, requested.tabId, requested.regionId]) &&
+    (!requested.reference || JSON.stringify(location.reference) === JSON.stringify(requested.reference)) &&
+    (!requested.originalPosition || Boolean(location.originalPosition && sourcePositionKey(location.originalPosition) === sourcePositionKey(requested.originalPosition)))
+}
 const sourceFactKey = (target: NonNullable<Candidate['readingTarget']>) => JSON.stringify([target.target.runtimeId, target.target.agentSessionId, target.target.reference.runtimeId, target.target.expectedAdmission])
 const candidateFactKey = (candidate: Candidate) => candidate.readingTarget ? sourceFactKey(candidate.readingTarget) : candidate.directName ? JSON.stringify([candidate.runtimeId, candidate.sid, candidate.directName.target.runtimeId]) : candidate.target ? JSON.stringify([candidate.runtimeId, candidate.sid, candidate.target.target.reference, candidate.target.target.regionId]) : undefined
 type SourceChoice = { locations: FocusContextAccess['locations']; choose(location: FocusContextAccess['locations'][number]): void }
@@ -40,6 +46,14 @@ type ReadFact = { key: string; session?: SessionSnapshot; name?: NameObservation
 
 const NO_SOURCE_CONTEXTS: FocusContext[] = []
 const NO_SOURCE_IDENTITIES = new Map<string, FocusContextIdentity>()
+
+const OriginalLocationsReader = memo(function OriginalLocationsReader({ host, sessions, visible, revision, observation, mountedSourceKeys, publish }: {
+  host: HostConfig; sessions: string[]; visible: boolean; revision: number; observation: SourceAgentLocations | undefined;
+  mountedSourceKeys: ReadonlySet<string>; publish(observation: FocusSourceLocationObservation): void
+}) {
+  useFocusSourceLocations(host, sessions, visible, revision, observation, mountedSourceKeys, publish)
+  return null
+})
 
 const SourceReader = memo(function SourceReader({ target, visible, revision }: { target: SpaceMountRecord; visible: boolean; revision: number }) {
   const refresh = useSpaceSourceReader(target, visible), previous = useRef(revision)
@@ -167,14 +181,39 @@ function openSourceLocation(location: Location, surface: 'agents' | 'workbench',
       state.reportError(Error('This original task position changed. Its task and other workfaces are retained; choose a current position.')); return false
     }
   }
+  const displayWorkspaceId = location.originalPosition ? originalSourceWorkspaceId(location.source) : location.source.workspaceId
+  const groupId = location.originalPosition ? originalSourceDisplayGroup(location.originalPosition) : undefined
+  if (groupId && !state.layouts[displayWorkspaceId]?.groups.some(group => group.id === originalSourceGroupProjectionId(location.source, groupId))) {
+    state.reportError(Error('The confirmed Source Group cannot yet be displayed. Its original workface is retained.'))
+    return false
+  }
   state.openOriginalSpaceLocation({ target: location.source, resource: originalSpaceResource(state, location.source),
-    occurrence: { tabId: location.tabId, regionId: location.regionId, displayWorkspaceId: location.source.workspaceId } }, surface === 'workbench')
+    occurrence: { tabId: location.tabId, regionId: location.regionId, displayWorkspaceId, ...(groupId ? { groupId } : {}) } }, surface === 'workbench')
   useAppStore.setState({ mainSurface: surface })
   if (surface === 'agents') {
     const choice = useAppStore.getState().workbenchSpaceSelection
     if (choice) requestDesktopFocusWorkfaceReveal(choice)
   }
   return true
+}
+
+async function readDiscoveredWorkface(location: Location, runtimeId: string | undefined, sid: string): Promise<SpaceSnapshot> {
+  const { source } = location
+  const position = location.originalPosition
+  if (!position || !runtimeId) throw Error('The original Agent display position is unconfirmed. Its Session is retained.')
+  const witness = await api.spaceMounts.call('agentLocations', { hostId: source.hostId, agentSessionIds: [sid], expectedRuntimeId: runtimeId, position })
+  if (witness.runtimeId !== runtimeId || !witness.locations.some(entry => entry.position && sourcePositionKey(entry.position) === sourcePositionKey(position)))
+    throw Error('The original Agent display position changed. Its Session and current workface are retained.')
+  const snapshot = await api.spaceMounts.call('snapshot', { hostId: source.hostId, reference: source.reference })
+  const member = snapshot.scope.regions.find(region => region.tabId === location.tabId && region.regionId === location.regionId)
+  const tab = snapshot.scope.tabs.find(tab => tab.tabId === location.tabId)
+  if (!acceptsMountedSnapshot(source, snapshot) || !snapshot.scope.space || member?.kind !== 'agent' || member.agentSessionId !== sid ||
+      member.execution?.hostId !== 'local' || member.execution.runtimeId !== undefined && member.execution.runtimeId !== runtimeId ||
+      tab?.zoneId !== source.zoneId || tab.workspaceId !== source.workspaceId || !tab.regionIds.includes(location.regionId) ||
+      !snapshot.scope.bindings.some(binding => binding.spaceId === source.reference.spaceId && binding.zoneId === source.zoneId)) {
+    throw Error('The original Agent position changed. Its Session and current workface are retained.')
+  }
+  return snapshot
 }
 
 type OrdinaryLocation = { source: SpaceMountRecord; presentation: MountedSpaceRegion; reference: WorkbenchProjectionSelection }
@@ -249,6 +288,33 @@ function ordinaryCandidate(location: OrdinaryLocation, observation: MountedSpace
     ...(runtimeId === location.source.reference.runtimeId ? { directName: { hostId: location.source.hostId, target: { runtimeId, agentSessionId: sid } } } : {}),
     ...(observation?.error ? { issue: observation.error } : {})
   }
+}
+
+function discoveredLocations(base: ReadonlyMap<string, Candidate>, sources: ReadonlyMap<string, FocusSourceLocationObservation>, demands: ReadonlyMap<string, string[]>) {
+  const result = new Map(base)
+  for (const [hostId, observed] of sources) {
+    if (!observed.value) continue
+    const { runtimeId, locations } = observed.value, wanted = new Set(demands.get(hostId))
+    for (const original of locations) {
+      const { space, zone, tab, region } = original, sid = region.agentSessionId
+      if (!sid || !wanted.has(sid)) continue
+      const key = focusSourceKey(runtimeId, sid), before = result.get(key)
+      const reference = { runtimeId, spaceId: space.spaceId }
+      const source = { hostId, reference, zoneId: zone.zoneId, workspaceId: zone.workspaceId }
+      const sameMember = (location: Location) => location.source.reference.spaceId === space.spaceId && location.source.reference.runtimeId === runtimeId &&
+        location.tabId === tab.tabId && location.regionId === region.regionId
+      const position = original.position
+      if (before?.locations.some(location => sameMember(location) && location.original &&
+        (position && location.originalPosition ? sourcePositionKey(location.originalPosition) === sourcePositionKey(position) : !position && !location.originalPosition))) continue
+      const mounted = before?.locations.find(sameMember)
+      const kept = before?.locations.filter(location => !sameMember(location) || location.reference || location.original) ?? []
+      const location: Location = { source, tabId: tab.tabId, regionId: region.regionId, original,
+        ...(position ? { originalPosition: position } : {}), ...(mounted?.snapshot ? { snapshot: mounted.snapshot } : {}),
+        ...(observed.issue ? { sourceIssue: observed.issue } : {}), member: { key: mountedRegionKey(reference, tab.tabId, region.regionId), reference, tab, zone, region } }
+      result.set(key, { ...(before ?? { key, runtimeId, sid }), locations: [...kept, location] })
+    }
+  }
+  return result
 }
 
 type SourceCandidates = {
@@ -326,6 +392,7 @@ type SourceActions = {
   onFocusContext?: ((context: FocusContext) => void) | undefined
   onCloseOriginal(input: { destination: SourceWorkbenchCloseDestination; member: SourceWorkbenchCloseMember; onlyMember: true }, subject: string): void
 }
+type CandidateActions = SourceActions & { navigation: { current: number } }
 type CandidateRow = { key: string; identity: FocusContextIdentity; context?: FocusContext; alias?: FocusContextAccess }
 type CandidatePresentation = {
   candidate: Candidate; fact: ReadFact | undefined; current: ReadFact | undefined; readingCurrent: boolean | undefined; historyName: string | undefined
@@ -334,7 +401,7 @@ type CandidatePresentation = {
 }
 type SourcePresentations = {
   rows: Map<string, CandidatePresentation>; config: AppConfig | null; runtimes: ReadonlyMap<string, string>
-  layouts: AppState['layouts']; actions: SourceActions
+  layouts: AppState['layouts']; actions: CandidateActions
 }
 
 function sameCandidateLayouts(candidate: Candidate, previous: AppState['layouts'], current: AppState['layouts']) {
@@ -353,10 +420,11 @@ function sourceSessionRefreshDelay(session: SessionSnapshot | undefined, now: nu
 
 function projectSourceCandidate(candidate: Candidate, ordinary: FocusContext | undefined, current: ReadFact | undefined,
   readingCurrent: boolean | undefined, historyName: string | undefined, config: AppConfig | null, runtimes: ReadonlyMap<string, string>, layouts: AppState['layouts'],
-  { onSelectLocation, onChooseLocation, onFocusContext, onCloseOriginal }: SourceActions, refresh: (key: string) => void): CandidateRow {
+  { onSelectLocation, onChooseLocation, onFocusContext, onCloseOriginal, navigation }: CandidateActions, refresh: (key: string) => void): CandidateRow {
   const first = candidate.locations[0]!
   let focusedContext: FocusContext | undefined
   const navigate = (surface: 'agents' | 'workbench' | 'close', requested?: FocusContextAccess['locations'][number]) => {
+    const attempt = ++navigation.current
     const rawLocations = (location: Location) => {
       const state = useAppStore.getState(), target = mountedSpaceTarget(state.mountedSpaceInputs, spaceMountKey(location.source.reference))
       if (!target || target.hostId !== location.source.hostId || target.zoneId !== location.source.zoneId || target.workspaceId !== location.source.workspaceId) return []
@@ -366,7 +434,8 @@ function projectSourceCandidate(candidate: Candidate, ordinary: FocusContext | u
       })
     }
     // Resolve a local display occurrence when available, otherwise ask the original owner.
-    const locations = surface !== 'close' ? candidate.locations : candidate.locations.flatMap(location => {
+    const availableLocations = candidate.locations.filter(location => !location.original || location.originalPosition)
+    const locations = surface !== 'close' ? availableLocations : availableLocations.flatMap(location => {
       if (location.reference) return [location]
       const state = useAppStore.getState()
       const positions = [...rawLocations(location), ...workbenchSelectionCatalog(state).locations.filter(reference => {
@@ -378,8 +447,8 @@ function projectSourceCandidate(candidate: Candidate, ordinary: FocusContext | u
         groupId: reference.groupId, tabId: reference.tabId, regionId: reference.regionId } })) : [location]
     })
     const choose = (request: FocusContextAccess['locations'][number]) => {
-      const location = locations.find(location => JSON.stringify([location.source.reference, location.tabId, location.regionId, location.reference]) ===
-        JSON.stringify([request.source.reference, request.tabId, request.regionId, request.reference]))
+      const matches = locations.filter(location => matchesLocation(location, request))
+      const location = matches.length === 1 ? matches[0] : undefined
       if (location) {
         if (surface === 'close') {
           const state = useAppStore.getState(), reference = location.reference
@@ -407,23 +476,41 @@ function projectSourceCandidate(candidate: Candidate, ordinary: FocusContext | u
           requestWorkbenchReferenceClose(reference, { keepAgentSessions: true })
           return
         }
-        const selected = openSourceLocation(location, surface, onSelectLocation)
-        if (selected && surface === 'agents' && !location.reference && focusedContext) onFocusContext?.(focusedContext)
+        const open = () => {
+          const selected = openSourceLocation(location, surface, onSelectLocation)
+          if (selected && surface === 'agents' && !location.reference && focusedContext) onFocusContext?.(focusedContext)
+        }
+        if (!location.original) { open(); return }
+        const before = useAppStore.getState()
+        const isCurrent = () => {
+          const state = useAppStore.getState()
+          return navigation.current === attempt && state.mainSurface === before.mainSurface && state.focusView === before.focusView && state.agentFocus === before.agentFocus &&
+            state.activeWorkspaceId === before.activeWorkspaceId && state.workbenchSpaceSelection === before.workbenchSpaceSelection &&
+            state.config?.hosts.find(host => host.id === location.source.hostId) === before.config?.hosts.find(host => host.id === location.source.hostId)
+        }
+        void readDiscoveredWorkface(location, candidate.runtimeId, candidate.sid).then(snapshot => {
+          if (!isCurrent()) return
+          useAppStore.getState().observeSpaceMount(location.source, { snapshot, reading: false, error: undefined }, location.originalPosition)
+          open()
+        }).catch(cause => { if (isCurrent()) {
+          useAppStore.getState().reportError(cause instanceof Error ? cause : Error(String(cause)))
+          refresh(originalLocationReaderKey(location.source.hostId))
+        } })
       }
       else useAppStore.getState().reportError(Error('This position belongs to another original task. The current task and workface are retained.'))
     }
-    const choices = requested ? locations.filter(location => JSON.stringify([location.source.reference, location.tabId, location.regionId]) ===
-      JSON.stringify([requested.source.reference, requested.tabId, requested.regionId]) && (!requested.reference || JSON.stringify(location.reference) === JSON.stringify(requested.reference))) : locations
+    const choices = requested ? locations.filter(location => matchesLocation(location, requested)) : locations
     if (choices.length === 1) choose(choices[0]!)
     else if (choices.length && onChooseLocation) onChooseLocation({ locations: choices, choose })
-    else useAppStore.getState().reportError(Error('This task has several original positions. Choose an exact position before opening it.'))
+    else useAppStore.getState().reportError(Error(choices.length ? 'This task has several original positions. Choose an exact position before opening it.' : 'The requested original position is unconfirmed. Its Agent and workface are retained.'))
   }
   const refreshCandidate = () => {
     refresh(candidate.key)
     for (const sourceKey of new Set(candidate.locations.map(location => spaceMountKey(location.source.reference)))) refresh(sourceKey)
+    for (const hostId of new Set(candidate.locations.filter(location => location.original).map(location => location.source.hostId))) refresh(originalLocationReaderKey(hostId))
   }
   const locations = candidate.locations.map(location => ({
-    location, resource: focusSourceWorkspace(location.source, location.member, location.snapshot, config, runtimes)
+    location, resource: focusSourceWorkspace(location.source, location.member, location.snapshot, config, runtimes, location.original?.space)
   }))
   const workspace = locations[0]?.resource
   const resources = [...new Map(locations.flatMap(({ resource }) =>
@@ -440,16 +527,28 @@ function projectSourceCandidate(candidate: Candidate, ordinary: FocusContext | u
       display: { workspaceId: displayWorkspaceId, hostId: resource?.hostId ?? null,
         groupId: group, tabId: displayTabId, regionId: displayRegionId } }]
   })
+  const objects = new Map<string, FocusSourceObject>()
+  for (const { location } of locations) {
+    const source = location.source, space = location.snapshot?.scope.space ?? location.original?.space
+    if (!space || (space.kind !== 'mote' && space.kind !== 'topic')) continue
+    const id = JSON.stringify([source.reference.runtimeId, space.spaceId])
+    objects.set(id, { id, kind: space.kind, name: space.name, hostId: source.hostId, workspaceId: source.workspaceId,
+      path: space.directoryPath, topicId: space.topicId ?? space.spaceId })
+  }
+  const sourceIssue = candidate.locations.find(location => location.sourceIssue)?.sourceIssue
   const identity: FocusContextIdentity = { tabs: [], occurrenceCount: candidate.locations.length,
     ...(resources.length ? { resources } : {}),
+    ...(objects.size ? { objects: [...objects.values()] } : {}),
+    ...(sourceIssue ? { sourceIssue } : {}),
     locations: { status: occurrences.length === candidate.locations.length ? 'confirmed' : 'unconfirmed', occurrences } }
   const actions = { open: (location?: FocusContextAccess['locations'][number]) => navigate('workbench', location),
     select: (location?: FocusContextAccess['locations'][number]) => navigate('agents', location), refresh: refreshCandidate,
     close: (location?: FocusContextAccess['locations'][number]) => navigate('close', location) }
   if (ordinary) {
     focusedContext = ordinary
+    const positions = candidate.locations.filter(location => !location.original || location.originalPosition)
     return { key: focusContextIdentityKey(ordinary.hostId, ordinary.id), identity,
-      alias: { identity: { runtimeId: candidate.runtimeId ?? null, agentSessionId: candidate.sid }, locations: candidate.locations, ...actions } }
+      ...(positions.length ? { alias: { identity: { runtimeId: candidate.runtimeId ?? null, agentSessionId: candidate.sid }, locations: positions, ...actions } } : {}) }
   }
   const issue = [current?.sessionIssue, current?.nameIssue, current?.nameSaveIssue, current?.readingIssue, candidate.issue].filter(Boolean).join(' · ') || undefined
   const session = !current?.sessionIssue && candidate.target && current?.session?.kind === 'agent' && current.session.control.run.runId === candidate.target.target.expectedRun.runId ? current.session : undefined
@@ -490,7 +589,9 @@ function projectSourceCandidate(candidate: Candidate, ordinary: FocusContext | u
 
 /** Joins source-qualified facts to the common Context pipeline; it owns no task UI. */
 export function useFocusSources({ visible, contexts, onSelectLocation, onChooseLocation, onFocusContext, onCloseOriginal }: { visible: boolean; contexts: readonly FocusContext[] } & SourceActions) {
-  const actions = useMemo(() => ({ onSelectLocation, onChooseLocation, onFocusContext, onCloseOriginal }),
+  const navigation = useRef(0)
+  useEffect(() => () => { ++navigation.current }, [visible])
+  const actions = useMemo(() => ({ onSelectLocation, onChooseLocation, onFocusContext, onCloseOriginal, navigation }),
     [onSelectLocation, onChooseLocation, onFocusContext, onCloseOriginal])
   const inputs = useAppStore(state => state.mountedSpaceInputs), observations = useAppStore(state => state.mountedSpaceObservations)
   const metadata = useAppStore(state => state.mountedSpaceSessions), config = useAppStore(state => state.config)
@@ -514,8 +615,20 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
   }, [catalog, tabs])
   const [facts, setFacts] = useState(new Map<string, ReadFact>())
   const [witnesses, setWitnesses] = useState(new Map<string, { runtimeId: string; host: HostConfig | undefined }>())
-  const runtimes = useMemo(() => new Map([...witnesses].flatMap(([hostId, witness]) =>
-    config?.hosts.find(host => host.id === hostId) === witness.host ? [[hostId, witness.runtimeId] as const] : [])), [witnesses, config?.hosts])
+  const [locationReads, setLocationReads] = useState(new Map<string, FocusSourceLocationObservation>())
+  const publishLocations = useCallback((next: FocusSourceLocationObservation) => setLocationReads(previous => {
+    const before = previous.get(next.host.id)
+    const value = next.value ?? (before?.host === next.host ? before.value : undefined)
+    return new Map(previous).set(next.host.id, { ...next, ...(value ? { value } : {}) })
+  }), [])
+  const originalLocations = useMemo(() => new Map([...locationReads].filter(([hostId, observed]) =>
+    config?.hosts.find(host => host.id === hostId) === observed.host)), [locationReads, config?.hosts])
+  const runtimes = useMemo(() => {
+    const result = new Map([...witnesses].flatMap(([hostId, witness]) =>
+      config?.hosts.find(host => host.id === hostId) === witness.host ? [[hostId, witness.runtimeId] as const] : []))
+    for (const [hostId, observed] of originalLocations) if (observed.value) result.set(hostId, observed.value.runtimeId)
+    return result
+  }, [witnesses, config?.hosts, originalLocations])
   const [refreshes, setRefreshes] = useState(new Map<string, number>()), [clock, setClock] = useState(Date.now)
   const ordinaryContexts = useMemo(() => {
     const result = new Map<string, FocusContext[]>()
@@ -525,6 +638,19 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
     }
     return result
   }, [contexts])
+  const requestedLocations = useMemo(() => {
+    const ssh = new Set(config?.hosts.filter(host => host.kind === 'ssh').map(host => host.id))
+    const wanted = new Map<string, Set<string>>()
+    for (const context of contexts) {
+      const control = context.control
+      if (!control || !ssh.has(control.hostId)) continue
+      const members = wanted.get(control.hostId) ?? new Set<string>()
+      members.add(control.agentSessionId)
+      wanted.set(control.hostId, members)
+    }
+    return JSON.stringify([...wanted].map(([host, ids]) => [host, [...ids].sort()]).sort(([a], [b]) => String(a).localeCompare(String(b))))
+  }, [config?.hosts, contexts])
+  const locationDemands = useMemo(() => new Map<string, string[]>(JSON.parse(requestedLocations)), [requestedLocations])
   const resourceHosts = useMemo(() => {
     const result = new Map<string, string[]>()
     for (const resource of config?.workspaces ?? []) {
@@ -568,21 +694,24 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
     for (const location of ordinaryLocations) result.set(spaceMountKey(location.source.reference), location.source)
     return result
   }, [inputs, ordinaryLocations])
-  const candidates = useSourceCandidates(sources, observations, metadata, ordinaryLocations)
+  const mountedCandidates = useSourceCandidates(sources, observations, metadata, ordinaryLocations)
+  const mountedSourceKeys = useMemo(() => new Set(sources.keys()), [sources])
+  const candidates = useMemo(() => discoveredLocations(mountedCandidates, originalLocations, locationDemands), [mountedCandidates, originalLocations, locationDemands])
   const runtimeHosts = [...new Set([...candidates.values()].flatMap(candidate => [
     ...(ordinaryContexts.get(candidate.sid) ?? []).map(context => context.control?.hostId ?? context.hostId),
     ...candidate.locations.flatMap(location => location.member.zone?.hostId === 'local'
       ? resourceHosts.get(JSON.stringify([location.member.zone.workspaceId, location.member.zone.directoryPath])) ?? [] : [])
-  ]))].sort().join('\n')
+  ]))].filter(hostId => !originalLocations.get(hostId)?.value).sort().join('\n')
   const candidateKeys = [...candidates.keys()].sort().join('\n')
   useEffect(() => {
     const retained = new Set(candidates.keys())
     setFacts(previous => [...previous.keys()].some(key => !retained.has(key))
       ? new Map([...previous].filter(([key]) => retained.has(key))) : previous)
     const sourceKeys = new Set(sources.keys())
+    for (const hostId of locationDemands.keys()) sourceKeys.add(originalLocationReaderKey(hostId))
     setRefreshes(previous => [...previous.keys()].some(key => !retained.has(key) && !sourceKeys.has(key))
       ? new Map([...previous].filter(([key]) => retained.has(key) || sourceKeys.has(key))) : previous)
-  }, [candidateKeys, sources])
+  }, [candidateKeys, sources, locationDemands])
   useEffect(() => {
     if (!visible || !runtimeHosts) return
     const controller = new AbortController()
@@ -605,7 +734,15 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
   const result = useMemo(() => {
     const rows: FocusContext[] = [], identities = new Map<string, FocusContextIdentity>()
     const aliases = new Map<string, FocusContextAccess>()
-    const issues: Array<{ key: string; label: string; host: string; reference: SpaceMountRecord['reference']; message: string; reading: boolean; refresh(): void }> = [], readers: ReactNode[] = []
+    const issues: Array<{ key: string; label: string; host: string; reference?: SpaceMountRecord['reference']; message: string; reading: boolean; refresh(): void }> = [], readers: ReactNode[] = []
+    for (const host of config?.hosts ?? []) {
+      const sessions = locationDemands.get(host.id)
+      if (!sessions?.length) continue
+      const key = originalLocationReaderKey(host.id), issue = originalLocations.get(host.id)?.issue
+      readers.push(<OriginalLocationsReader key={key} host={host} sessions={sessions} visible={visible} revision={refreshes.get(key) ?? 0}
+        observation={originalLocations.get(host.id)?.value} mountedSourceKeys={mountedSourceKeys} publish={publishLocations} />)
+      if (issue) issues.push({ key, label: 'Original Agent locations', host: host.label, message: issue, reading: false, refresh: () => refresh(key) })
+    }
     for (const [key, source] of sources) {
       readers.push(<SourceReader key={'source:' + key} target={source} visible={visible} revision={refreshes.get(key) ?? 0} />)
       const issue = observations[key]?.error ?? metadata[key]?.error
@@ -625,6 +762,7 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
       const readingCurrent = current?.readingCurrent?.(), historyName = current?.name ? undefined : historyNames.get(candidate.key)
       const ordinary = sameCandidate && sameRoutes && shallow(prior.matchingRows, matchingRows) ? prior.ordinary
         : candidate.runtimeId ? matchingFocusContext(matchingRows ?? [], runtimes, candidate.runtimeId, candidate.sid) : undefined
+      if (!ordinary && !mountedCandidates.has(candidate.key)) continue
       let row: CandidateRow, validUntil: number
       if (sameCandidate && samePresentation && prior.current === current && prior.readingCurrent === readingCurrent &&
         prior.historyName === historyName && prior.ordinary === ordinary && now < prior.validUntil &&
@@ -646,6 +784,6 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
     }
     presentations.current = { rows: next, config, runtimes, layouts, actions }
     return { contexts: rows.length ? rows : NO_SOURCE_CONTEXTS, identities: identities.size ? identities : NO_SOURCE_IDENTITIES, aliases, issues, readers: <Fragment>{readers}</Fragment> }
-  }, [sources, observations, metadata, candidates, ordinaryContexts, runtimes, facts, historyNames, refreshes, layouts, config, visible, clock, publish, refresh, actions])
+  }, [sources, observations, metadata, candidates, mountedCandidates, mountedSourceKeys, ordinaryContexts, runtimes, facts, historyNames, refreshes, layouts, config, visible, clock, publish, refresh, actions, locationDemands, originalLocations, publishLocations])
   return result
 }

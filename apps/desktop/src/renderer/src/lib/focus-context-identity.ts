@@ -21,9 +21,12 @@ export type FocusContextOccurrence = {
 export type FocusContextIdentity = {
   /** Original business resources, independently of private display occurrences. */
   resources?: readonly AppConfig['workspaces'][number][]
+  objects?: readonly FocusSourceObject[]
+  sourceIssue?: string
   tabs: readonly WorkbenchTabDetail[]; occurrenceCount: number
   locations: { status: 'confirmed' | 'unconfirmed'; occurrences: readonly FocusContextOccurrence[] }
 }
+export type FocusSourceObject = { id: string; kind: 'topic' | 'mote'; name: string; hostId: string; workspaceId: string; path: string; topicId: string }
 const NO_OCCURRENCES: readonly FocusContextOccurrence[] = []
 const same = (left: readonly unknown[], right: readonly unknown[]) => left.length === right.length && left.every((value, index) => value === right[index])
 

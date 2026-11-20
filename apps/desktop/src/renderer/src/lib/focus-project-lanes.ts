@@ -7,7 +7,7 @@ import { topicSpaceIconTarget } from './space-object-appearance'
 import { FOCUS_RECENT_PROJECT_HOURS, resolveFocusRecentActivityHours } from '../../../shared/focus-preferences'
 import { directoryIdentity } from '../../../shared/space-addresses'
 import { compareFocusWork, focusWorkPriority } from '@agentmux/client-ui/focus-order'
-import { focusContextIdentityKey, type FocusContextIdentity } from './focus-context-identity'
+import { focusContextIdentityKey, type FocusContextIdentity, type FocusSourceObject } from './focus-context-identity'
 
 export type FocusWorktreeFact = { hostId: string; path: string; repoPath: string; branch: string; removed: boolean }
 export type FocusHierarchyFacts = {
@@ -90,38 +90,44 @@ export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: P
     }
     const closeoutDisplay = closeout ? workspacesById.get(closeout.targetWorkspaceId) : undefined
     const knownPlacements = [...new Map([...displayed.values(), ...sourceResources].map(value => [JSON.stringify([value.hostId, value.id, value.path]), value])).values()]
-    const placements = closeoutDisplay && closeoutDisplay.hostId === row.hostId ? [closeoutDisplay]
-      : identities && !row.topicId ? knownPlacements.length ? knownPlacements : [row.access ? resource : undefined] : [resource]
-    for (const display of placements) {
+    const objects = identity?.objects ?? []
+    const projects = closeoutDisplay && closeoutDisplay.hostId === row.hostId ? [closeoutDisplay]
+      : objects.length ? knownPlacements
+        : identities && !row.topicId ? knownPlacements.length ? knownPlacements : [row.access ? resource : undefined] : [resource]
+    const placements: Array<{ display?: AppConfig['workspaces'][number] | undefined; object?: FocusSourceObject }> = [
+      ...projects.map(display => ({ display })),
+      ...objects.map(object => ({ object }))
+    ]
+    for (const { display, object } of placements) {
       // Focus groups current presentation, while the Context retains its original
       // execution path. A completed closeout must not revive its former branch from
       // retained Git observations after the source resource is withdrawn.
-      const located = Boolean(identities && !row.topicId && !row.access && sourceResources.length === 0)
+      const located = Boolean(!object && identities && !row.topicId && !row.access && sourceResources.length === 0)
       const gathered = Boolean(display && (closeout || located || sourceResources.length))
       const workspace = gathered ? display : located ? undefined : resource
-      const displayPath = gathered ? workspace!.path : located ? '' : row.workspacePath
-      const projectHostId = workspace?.hostId ?? row.hostId
-      const checkout = gathered || located ? undefined : facts.worktrees.find(item => item.path === row.workspacePath && item.hostId === row.hostId)
+      const displayPath = object?.path ?? (gathered ? workspace!.path : located ? '' : row.workspacePath)
+      const projectHostId = object?.hostId ?? workspace?.hostId ?? row.hostId
+      const checkout = object || gathered || located ? undefined : facts.worktrees.find(item => item.path === row.workspacePath && item.hostId === row.hostId)
       const repoPath = workspace?.repoPath ?? checkout?.repoPath
       const project = repoPath ? projectRoots.get(JSON.stringify([projectHostId, repoPath])) : workspace
-      const projectId = project?.id ?? (repoPath ? directoryIdentity(projectHostId, repoPath) : workspace?.id ?? (located ? 'unconfirmed-project' : row.workspaceId))
-      const workspaceId = workspace?.id ?? (located ? 'unconfirmed-project' : row.workspaceId)
-      const topicId = row.topicId ?? null
+      const projectId = object?.id ?? project?.id ?? (repoPath ? directoryIdentity(projectHostId, repoPath) : workspace?.id ?? (located ? 'unconfirmed-project' : row.workspaceId))
+      const workspaceId = object?.workspaceId ?? workspace?.id ?? (located ? 'unconfirmed-project' : row.workspaceId)
+      const topicId = object?.topicId ?? row.topicId ?? null
       const topics = topicSnapshots ? scratchTopicsForWorkspace(topicSnapshots, workspace) : facts.topics[workspaceId]
       const topic = topicId ? topics?.find(item => item.id === topicId) : undefined
-      const labels = [project?.name ?? repoPath ?? (located ? 'Project location unconfirmed' : row.workspaceName)]
+      const labels = [object?.name ?? project?.name ?? repoPath ?? (located ? 'Project location unconfirmed' : row.workspaceName)]
       const branch = workspace?.branch ?? checkout?.branch
-      if (branch) labels.push(branch)
-      if (topicId) labels.push(topic?.title || topicId)
-      const id = JSON.stringify([projectHostId, workspaceId, displayPath, topicId])
+      if (!object && branch) labels.push(branch)
+      if (!object && topicId) labels.push(topic?.title || topicId)
+      const id = object ? object.id : JSON.stringify([projectHostId, workspaceId, displayPath, topicId])
       const iconTarget = workspace && topic ? topicSpaceIconTarget(workspace, topic) : null
       const lane = lanes.get(id) ?? { id, workspaceId, projectId, projectWorkspaceId: project?.id ?? workspace?.id ?? null,
         name: labels.join(' / '), labels, summary: topic?.readError ? null : topic?.summary.trim() || null,
         path: displayPath, hostId: projectHostId, topicId,
-        ...(located && (!workspace || identity?.locations.status !== 'confirmed') ? { locationUnconfirmed: true } : {}),
-        ...(topicId ? { objectKind: scratchTopicKind(topicId, topics),
+        ...(identity?.sourceIssue || located && (!workspace || identity?.locations.status !== 'confirmed') ? { locationUnconfirmed: true } : {}),
+        ...(topicId ? { objectKind: object?.kind ?? scratchTopicKind(topicId, topics),
           ...(iconTarget ? { objectIconKey: iconTarget.key } : {}) } : {}),
-        recovery: checkout?.removed ? 'removed' : !workspace && config && !located ? 'unknown' : null, activeAgentRefs: [], contextRefs: [] }
+        recovery: checkout?.removed ? 'removed' : !object && !workspace && config && !located ? 'unknown' : null, activeAgentRefs: [], contextRefs: [] }
       const reference = { hostId: row.hostId, id: row.id }, key = focusContextIdentityKey(row.hostId, row.id)
       const included = members.get(id) ?? new Set<string>()
       if (!included.has(key)) {

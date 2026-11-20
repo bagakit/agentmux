@@ -7,6 +7,7 @@ import { connectSpaceMember, type SpaceMemberClient } from '@agentmux/core/space
 import { parseSpaceMemberTarget } from '@agentmux/core/space-member-codec'
 import { readSpaceSnapshot, observeSpace, type AgentMuxRpcClient } from '@agentmux/core'
 import type { SpaceMountSourceTarget, SpaceMountTarget, SpaceMountResources, SpaceMountWatch, SpaceMountEvent } from '../shared/space-mount.js'
+import { sourceAgentLocations, sourcePositionKey, type SpaceMountMethods } from '../shared/space-mount.js'
 import { SOURCE_FILES_METHODS, type SourceFilesMethod, type SourceFilesResult, type SourceFilesSelection } from '../shared/source-files.js'
 import { resolveSourceFiles } from './source-files.js'
 import { originalExecutionBindingId } from './execution-binding-reference'
@@ -2878,6 +2879,21 @@ export class RuntimeController {
     const { owner } = await rpc.call('runtime.owner.identity', {}, signal ? { signal } : {})
     const snapshot = await rpc.call('app.snapshot', { include: ['workspaces'] }, { ...(signal ? { signal } : {}), runtimeFence: { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId } })
     return { hostId, runtimeId: owner.runtimeId, workspaces: snapshot.workspaces }
+  }
+  async spaceMountAgentLocations({ hostId, agentSessionIds, expectedRuntimeId, position }: SpaceMountMethods['agentLocations']['input'], signal?: AbortSignal) {
+    const carrier = this.spaceMountHost(hostId)
+    const context = signal ? { signal } : {}
+    const { owner } = await carrier.rpc.call('runtime.owner.identity', expectedRuntimeId ? { expectedRuntimeId } : {}, context)
+    if (expectedRuntimeId && owner.runtimeId !== expectedRuntimeId) throw new AgentMuxError('The route no longer identifies the original Source Runtime. Its Agent Sessions are retained.', 'RUNTIME_OWNER_MISMATCH')
+    const fenced = { ...context, runtimeFence: { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId } }
+    const result = position ? await carrier.rpc.call('space.inspect', { target: {
+      ...(position.spaceId ? { spaceId: position.spaceId } : {}), ...(position.zoneId ? { zoneId: position.zoneId } : {}),
+      tabId: position.tabId, regionId: position.regionId, displayWorkspaceId: position.displayWorkspaceId, groupId: position.groupId
+    } }, fenced) : await carrier.rpc.call('space.agent-locations', { runtimeId: owner.runtimeId, agentSessionIds }, fenced)
+    carrier.assertCurrent()
+    const observation = sourceAgentLocations(result.catalog, owner.runtimeId, agentSessionIds)
+    if (position) observation.locations = observation.locations.filter(entry => entry.position && sourcePositionKey(entry.position) === sourcePositionKey(position))
+    return observation
   }
   async openMountedSpaceMember(input: import('../shared/space-mount.js').SpaceMountMemberRoute, config: AppConfig,
     listener: (event: import('../shared/space-mount.js').SpaceMountMemberEvent) => void, signal: AbortSignal) {

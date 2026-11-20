@@ -1,5 +1,5 @@
 import type { SpaceSnapshot } from '@agentmux/core'
-import type { SpaceMountRecord } from '../../../shared/space-mount'
+import type { SourceAgentLocation, SpaceMountRecord } from '../../../shared/space-mount'
 import type { AppConfig, WorkspaceRecord } from '../../../shared/contracts'
 import type { FocusContext } from './focus-context'
 import type { FocusContextAccess } from './focus-context-access'
@@ -34,8 +34,8 @@ const resourceIndexes = new WeakMap<AppConfig, Map<string, WorkspaceRecord[]>>()
 
 /** These resources are the answering Source's own facts, never a path-name guess. */
 export function focusSourceWorkspace(target: SpaceMountRecord, member: MountedSpaceRegion, snapshot: SpaceSnapshot | undefined,
-  config: AppConfig | null, runtimeByHost: ReadonlyMap<string, string> = new Map()): WorkspaceRecord | undefined {
-  const zone = member.zone, space = snapshot?.scope.space
+  config: AppConfig | null, runtimeByHost: ReadonlyMap<string, string> = new Map(), originalSpace?: SourceAgentLocation['space']): WorkspaceRecord | undefined {
+  const zone = member.zone, space = snapshot?.scope.space ?? originalSpace
   if (!zone?.directoryPath || !zone.hostId || !space || space.kind !== 'folder') return
   // A local alias here belongs to the original Source; its confirmed carrier is
   // the observer's route for that same project, not another execution hop.

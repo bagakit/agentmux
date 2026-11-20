@@ -1,4 +1,4 @@
-import type { SpaceAuthorityRef, SpaceSnapshot, SpaceApply, SpaceApplyReceipt, SpaceWatch } from '@agentmux/core'
+import type { AgentMuxSpaceCatalog, SpaceAuthorityRef, SpaceSnapshot, SpaceApply, SpaceApplyReceipt, SpaceWatch } from '@agentmux/core'
 import type { FolderSpaceRegistration, FolderSpaceReceipt, FolderSpaceRegisterInput } from '@agentmux/core/space-folder'
 import type { WorkspaceLayout, WorkbenchViewLayout } from '@agentmux/layout'
 import type { SpaceSessionsOpening, SpaceSessionsObservation } from '@agentmux/core/space-sessions'
@@ -18,8 +18,53 @@ export type SpaceMountResources = {
   hostId: string; runtimeId: string; workspaces: import('@agentmux/core').AgentMuxRpcWorkspace[]
 }
 export type SpaceMountHostChoices = { runtimeId: string; hosts: Array<{ hostId: string; label: string; kind: 'local' | 'ssh'; runtimeId: string | null }> }
+export type SourceAgentLocation = {
+  space: AgentMuxSpaceCatalog['spaces'][number]
+  zone: AgentMuxSpaceCatalog['zones'][number]
+  tab: AgentMuxSpaceCatalog['tabs'][number]
+  region: AgentMuxSpaceCatalog['regions'][number]
+  position?: AgentMuxSpaceCatalog['locations'][number]
+}
+export type SourceAgentLocations = { runtimeId: string; locations: SourceAgentLocation[] }
+export const sourcePositionKey = (value: NonNullable<SourceAgentLocation['position']>) =>
+  JSON.stringify([value.spaceId, value.zoneId, value.workspaceId, value.displayWorkspaceId, value.groupId, value.tabId, value.regionId])
+
+/** Join original catalog occurrences to the Source's own execution identities. */
+export function sourceAgentLocations(catalog: AgentMuxSpaceCatalog, runtimeId: string, sessions: readonly string[]): SourceAgentLocations {
+  const requested = new Set(sessions)
+  const tabs = new Map(catalog.tabs.map(tab => [tab.tabId, tab]))
+  const zones = new Map(catalog.zones.map(zone => [zone.zoneId, zone]))
+  const spaces = new Map(catalog.spaces.map(space => [space.spaceId, space]))
+  const bindings = new Map<string, string[]>()
+  for (const { zoneId, spaceId } of catalog.bindings) {
+    const bound = bindings.get(zoneId) ?? []
+    bound.push(spaceId)
+    bindings.set(zoneId, bound)
+  }
+  const placed = new Map<string, AgentMuxSpaceCatalog['locations']>()
+  for (const position of catalog.locations) {
+    const positions = placed.get(position.regionId) ?? []
+    positions.push(position)
+    placed.set(position.regionId, positions)
+  }
+  const locations = catalog.regions.flatMap(region => {
+    if (region.kind !== 'agent' || !region.agentSessionId || !requested.has(region.agentSessionId) ||
+        region.execution?.hostId !== 'local' || region.execution.runtimeId !== undefined && region.execution.runtimeId !== runtimeId) return []
+    const tab = tabs.get(region.tabId), zone = tab?.zoneId ? zones.get(tab.zoneId) : undefined
+    if (!tab?.regionIds.includes(region.regionId) || !zone || tab.workspaceId !== zone.workspaceId) return []
+    return (bindings.get(zone.zoneId) ?? []).flatMap(spaceId => {
+      const space = spaces.get(spaceId)
+      if (!space || space.kind === 'container') return []
+      const positions = placed.get(region.regionId)?.filter(position => position.tabId === tab.tabId && position.spaceId === spaceId &&
+        position.zoneId === zone.zoneId && position.workspaceId === zone.workspaceId)
+      return positions?.length ? positions.map(position => ({ space, zone, tab, region, position })) : [{ space, zone, tab, region }]
+    })
+  })
+  return { runtimeId, locations }
+}
 export type SpaceMountMethods = {
   resources: { input: { hostId: string }; result: SpaceMountResources }
+  agentLocations: { input: { hostId: string; expectedRuntimeId?: string; agentSessionIds: string[]; position?: AgentMuxSpaceCatalog['locations'][number] }; result: SourceAgentLocations }
   hostChoices: { input: SpaceMountSourceTarget; result: SpaceMountHostChoices }
   describe: { input: SpaceMountSourceTarget & Pick<import('@agentmux/core/agent-open-contract').AgentOpenParams['agent.open.describe'], 'execution' | 'executionOnly'>; result: import('@agentmux/core/agent-open-contract').AgentOpenDescription }
   routeChoices: { input: SpaceMountSourceTarget; result: import('@agentmux/core/host-route').HostRouteChoices }

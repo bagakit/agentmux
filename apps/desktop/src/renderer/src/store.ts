@@ -29,7 +29,7 @@ import { editMountedSpaceInput, editMountedRegistration, mountedSpaceInput, moun
 import { ordinarySpaceMember, type OrdinaryMemberReference } from './lib/ordinary-space-member'
 import { originalSourceMember, originalSpaceResource, originalSpaceWorkspace, originalSourceFileSurface, ensureOriginalSourceFilesInput, originalSourceActionUnavailable, isOriginalSourceFileWorkspace, isOriginalSourceWorkspaceProjection, reconcileOriginalSourceProjection, originalSourceScopeFromGraph, preserveOriginalSourceProjection, originalSourceEntryForSelection, originalRawSourceOccurrenceConfirmed, originalSourceWorkspaceId, originalSourceLauncherTabId, originalSourceTabProjectionId, originalSourceRegionProjectionId, originalSourceGroupProjectionId, originalSourceLauncherRegionId, originalSourceInputOwnerKey, type OriginalSpaceLocation } from './lib/original-space-navigation'
 import { observeMountedSessions, type MountedSessionObservation, type MountedSessionUpdate } from './lib/space-mount-sessions'
-import { spaceMountKey, type SpaceMountRecord, type SpaceMountView, type SpaceMountMemberTarget } from '../../shared/space-mount'
+import { spaceMountKey, type SourceAgentLocation, type SpaceMountRecord, type SpaceMountView, type SpaceMountMemberTarget } from '../../shared/space-mount'
 import type { SpaceSnapshot } from '@agentmux/core'
 import { parseSpaceCloseReceipt, parseSpaceCloseResult, spaceCloseDecisions, type SpaceClosePrepare, type SpaceCloseReceipt, type SpaceCloseCommitResult } from '@agentmux/core/space-close'
 import { isWorkbenchCloseRendererRequest, type WorkbenchCloseRendererRequest, type WorkbenchCloseRendererResult } from '../../shared/workbench-close-control'
@@ -1232,7 +1232,7 @@ export type AppState = GitReadingActions & {
   retainSourceCoordinatorInput(key: string, update: (current: SourceCoordinatorInput | undefined) => SourceCoordinatorInput | undefined): void
   editSpaceMountLauncher(key: string, slot: MountedLauncherSlot, selection: MountedLauncherSelection): void
   editSpaceMountView(key: string, view: SpaceMountView): void
-  observeSpaceMount(target: SpaceMountRecord, observation: { snapshot?: SpaceSnapshot; error?: string | undefined; reading: boolean }): void
+  observeSpaceMount(target: SpaceMountRecord, observation: { snapshot?: SpaceSnapshot; error?: string | undefined; reading: boolean }, position?: SourceAgentLocation['position']): void
   /** Default CLI navigation suppresses automatic caret until explicit human/keyboard navigation. */
   /** Ephemeral explicit Mote navigation; never persisted or an execution authority. */
   moteDiscussionEntry: { workspaceId: string; topicId: string; token: string; memberReference?: WorkbenchProjectionSelection; eventId?: string } | null
@@ -6599,14 +6599,14 @@ export const useAppStore = create<AppState>()<[['zustand/persist', PersistedAppS
       return { ...current, view }
     }) }))
   },
-  observeSpaceMount(target, observation) {
+  observeSpaceMount(target, observation, position) {
     const key = spaceMountKey(target.reference)
     if (observation.snapshot && !acceptsMountedSnapshot(target, observation.snapshot)) throw new Error('The Space observation belongs to another original source. Existing work is retained.')
     set(state => {
       const before = state.mountedSpaceObservations[key], snapshot = observation.snapshot
       if (snapshot && before?.snapshot?.source.ownerInstanceId === snapshot.source.ownerInstanceId && snapshot.revision < before.snapshot.revision) return state
       const ordinaryLocalOccurrence = confirmedOriginalRawLocations(state, target).length > 0
-      const reconciled = snapshot?.scope.space ? reconcileOriginalSourceProjection(state, target, snapshot) : {}
+      const reconciled = snapshot?.scope.space ? reconcileOriginalSourceProjection(state, target, snapshot, position) : {}
       const projection = ordinaryLocalOccurrence ? { mountedSpaceInputs: reconciled.mountedSpaceInputs ?? state.mountedSpaceInputs } : reconciled
       return { ...projection, mountedSpaceObservations: { ...state.mountedSpaceObservations, [key]: { ...before, ...observation,
         ...(snapshot?.scope.space ? { lastPresentSnapshot: snapshot } : {}) } } }
