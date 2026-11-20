@@ -13,7 +13,7 @@ import {NativeProcessObservation} from '@agentmux/client-ui/components/NativePro
 import {getThemeCatalog,mountThemeRuntime,themeValue,updateThemeSelection} from '@agentmux/client-ui/theme'
 import type {ToolkitScriptSnapshot,ToolkitToolDefinition,ToolkitConfirmedResult} from '@agentmux/core/control'
 import type {AgentSessionHistoryItem} from '@agentmux/core'
-import type {BrowserOperation} from '@agentmux/browser/model/browser-operation'
+import type {BrowserOperation} from '@agentmux/browser/model'
 import '../../../src/renderer/src/styles/index.css'
 
 const config=await api.config.get();const host=config.hosts[0]!;const calls:unknown[]=[];let clipboardFailure=false;let checkOutcome:'ready'|'unsupported'|'checking'|'check-failed'='ready'

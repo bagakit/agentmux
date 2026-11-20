@@ -84,9 +84,9 @@ vi.mock('electron', async () => {
 })
 import { BrowserViewManager } from '../src/main/browser-view-manager.js'
 import { BrowserTaskAssets, BrowserTaskAssetFileStore } from '../src/main/browser-task-assets.js'
-import { BrowserOperationJournal, BrowserOperationFileStore } from '@agentmux/browser/browser-operation-journal'
-import { BrowserStepEvidenceStore } from '@agentmux/browser/browser-step-evidence'
-import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
+import { BrowserOperationJournal, BrowserOperationFileStore } from '@agentmux/browser/operations'
+import { BrowserStepEvidenceStore } from '@agentmux/browser/operations'
+import { BrowserRefLedgerStore } from '@agentmux/browser/operations'
 import { projectBrowserControlOperation } from '../src/main/browser-completion-control.js'
 import type { BrowserTaskContent } from '../src/shared/browser-task-assets.js'
 

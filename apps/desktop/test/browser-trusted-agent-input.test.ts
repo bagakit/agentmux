@@ -2,13 +2,13 @@ import { EventEmitter } from 'node:events'
 import vm from 'node:vm'
 import type { WebContents } from 'electron'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createBrowserPageDispatch } from '@agentmux/browser/browser-page-dispatch'
+import { createBrowserPageDispatch } from '@agentmux/browser/page'
 import { beginOwnDispatch, isOwnDispatch } from '../src/main/browser-own-dispatch.js'
 import { BrowserLocalRecoveryFailure } from '../src/main/browser-local-recovery.js'
 import { BrowserDemonstrationCapture } from '../src/main/browser-demonstration-capture.js'
 import { BrowserDemonstrationRecorder } from '../src/main/browser-demonstration-recorder.js'
 import type { BrowserDemonstrationDocument } from '../src/shared/browser-demonstration.js'
-import type { BrowserPageTransport } from '@agentmux/browser/browser-page-transport'
+import type { BrowserPageTransport } from '@agentmux/browser/page'
 
 /**
  * Agent page actions are trusted native input, and Main alone says who sent them.
@@ -57,7 +57,7 @@ vi.mock('electron', async () => {
 })
 
 const { BrowserViewManager } = await import('../src/main/browser-view-manager.js')
-const { BrowserRefLedgerStore } = await import('@agentmux/browser/browser-ref-ledger-store')
+const { BrowserRefLedgerStore } = await import('@agentmux/browser/operations')
 
 type Command = { method: string; params: Record<string, any> }
 
@@ -616,7 +616,7 @@ describe('Agent native input is never recorded as a human demonstration', () => 
 
 describe('pressKey chords', () => {
   it('parse modifiers in order, the plus key, and aliases; refuse a missing key or a repeated modifier', async () => {
-    const { parseKeyChord, editingCommandFor } = await import('@agentmux/browser/browser-page-input-scripts')
+    const { parseKeyChord, editingCommandFor } = await import('@agentmux/browser/page')
     expect(parseKeyChord('Control+Shift+Tab')).toMatchObject({ key: 'Tab', modifiers: [{ key: 'Control' }, { key: 'Shift' }] })
     expect(parseKeyChord('Cmd+a').modifiers.map(modifier => modifier.key)).toEqual(['Meta'])
     expect(parseKeyChord('+')).toEqual({ key: '+', modifiers: [] })

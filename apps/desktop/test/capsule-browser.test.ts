@@ -72,7 +72,7 @@ const native = await vi.hoisted(async () => {
 })
 vi.mock('electron', () => ({ BaseWindow: native.BaseWindow, WebContentsView: native.View, app: { getPath: () => tmpdir() } }))
 import { BrowserViewManager } from '../src/main/browser-view-manager'
-import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
+import { BrowserRefLedgerStore } from '@agentmux/browser/operations'
 
 const cleanups: Array<() => Promise<unknown> | void> = []
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close() })

@@ -25,8 +25,8 @@ vi.mock('@agentmux/core', async original => ({ ...await original<typeof import('
   AgentMuxControlServer: class { constructor(options: { execute: typeof ipc.execute }) { ipc.execute = options.execute } async start() {} async stop() {} } }))
 vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({}) }))
 vi.mock('../src/main/browser-profile-manager.js', async () => ({ BrowserProfileManager: (await import('./helpers/settings-ipc-fixture.js')).SettingsBrowserProfiles }))
-vi.mock('@agentmux/browser/browser-operation-journal', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'owned.json', BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
-vi.mock('@agentmux/browser/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: class {} }))
+vi.mock('../../../packages/browser/src/browser-operation-journal.ts', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'owned.json', BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
+vi.mock('../../../packages/browser/src/browser-ref-ledger-store.ts', () => ({ BrowserRefLedgerStore: class {} }))
 vi.mock('../src/main/browser-view-manager.js', async original => {
  const { BrowserViewManager } = await original<typeof import('../src/main/browser-view-manager.js')>()
  return { BrowserViewManager: class {

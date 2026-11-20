@@ -100,7 +100,7 @@ vi.mock('electron', () => ({ WebContentsView: native.View, session: { fromPartit
 import { BROWSER_PAGE_MEMORY_SETTLE_MS, BrowserViewManager, type BrowserProfileResolver } from '../src/main/browser-view-manager.js'
 import { BrowserRecoveryPreviewStore } from '../src/main/browser-recovery-preview.js'
 import { BrowserInputHistoryStore } from '../src/main/browser-input-history.js'
-import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
+import { BrowserRefLedgerStore } from '@agentmux/browser/operations'
 import type { BrowserColdDescriptor } from '../src/main/browser-cold-descriptor.js'
 
 const profiles: BrowserProfileResolver = { defaultProfileId: () => 'personal', resolvePartition: id => `persist:browser-${id}` }

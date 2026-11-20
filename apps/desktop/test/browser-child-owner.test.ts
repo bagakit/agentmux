@@ -86,7 +86,7 @@ const native = await vi.hoisted(async () => {
 
 vi.mock('electron', () => ({ WebContentsView: native.View, BrowserWindow: native.Window, session: { fromPartition: native.fromPartition } }))
 const { BrowserViewManager } = await import('../src/main/browser-view-manager')
-const { BrowserRefLedgerStore } = await import('@agentmux/browser/browser-ref-ledger-store')
+const { BrowserRefLedgerStore } = await import('@agentmux/browser/operations')
 const cleanups: Array<() => void> = []
 afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup() })
 const settled = () => new Promise(resolve => setImmediate(resolve))

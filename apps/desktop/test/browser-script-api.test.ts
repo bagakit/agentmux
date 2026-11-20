@@ -4,7 +4,7 @@ import { browserPageCapabilityNames } from '@agentmux/core'
 import {
   BROWSER_PAGE_FUNCTION_NAMES,
   runBrowserScript
-} from '@agentmux/browser/browser-script-runner'
+} from '@agentmux/browser/operations'
 import { BrowserLocalRecoveryFailure } from '../src/main/browser-local-recovery.js'
 
 /**
@@ -100,7 +100,7 @@ describe('页面函数库', () => {
     // 判据从**派发源码**反推 case 标签，与能力表比对。不真的调一遍派发，是因为那需要一个完整的
     // CDP 替身，而那条路上任何一个细节不对都会抛，与「这个名字有没有 case」混在一起不可区分。
     const dispatchSource = readFileSync(
-      new URL('@agentmux/browser/browser-page-dispatch', import.meta.url),
+      new URL('@agentmux/browser/page', import.meta.url),
       'utf8'
     )
     // 只取 switch (name) 那一段，否则文件里别处的字符串字面量会混进来充数。

@@ -6,16 +6,16 @@ import { join } from 'node:path'
 import { act, createElement, type MouseEvent } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { BrowserOperationFileStore, BrowserOperationJournal } from '@agentmux/browser/browser-operation-journal'
-import { BrowserResultArtifactStore } from '@agentmux/browser/browser-result-artifact'
-import { BrowserStepEvidenceStore } from '@agentmux/browser/browser-step-evidence'
-import { extractBrowserStructuredOutput } from '@agentmux/browser/browser-structured-output'
+import { BrowserOperationFileStore, BrowserOperationJournal } from '@agentmux/browser/operations'
+import { BrowserResultArtifactStore } from '@agentmux/browser/operations'
+import { BrowserStepEvidenceStore } from '@agentmux/browser/operations'
+import { extractBrowserStructuredOutput } from '@agentmux/browser/page'
 import { evaluateBrowserOutcomeCriteria, type BrowserOutcomeCurrent, type BrowserOutcomeHost } from '../src/main/browser-outcome-criteria'
 import { BrowserOutcomeCriteria } from '../src/renderer/src/components/BrowserOutcomeCriteria'
 import { BROWSER_OUTCOME_LIMITS, parseBrowserOutcomeCriteriaRequest, type BrowserOutcomeHumanFact,
-  type BrowserOutcomeRegistration, type BrowserOutcomeFieldRunInput } from '@agentmux/browser/model/browser-outcome-criteria'
-import type { BrowserStructuredDocument, BrowserStructuredOutputRequest } from '@agentmux/browser/model/browser-structured-output'
-import type { BrowserDownloadReceipt, BrowserDownloadReference, BrowserDownloadChunk } from '@agentmux/browser/model/browser-download'
+  type BrowserOutcomeRegistration, type BrowserOutcomeFieldRunInput } from '@agentmux/browser/model'
+import type { BrowserStructuredDocument, BrowserStructuredOutputRequest } from '@agentmux/browser/model'
+import type { BrowserDownloadReceipt, BrowserDownloadReference, BrowserDownloadChunk } from '@agentmux/browser/model'
 
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
 const owned: string[] = []

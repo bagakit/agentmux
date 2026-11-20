@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto'
 import ts from 'typescript'
 import { describe, expect, it, vi } from 'vitest'
 import { BrowserOperationFileStore, BrowserOperationJournal, browserOperationAlreadyExistsError,
-  type BrowserOperationJournalDocument, type BrowserOperationJournalStore, type BrowserOperationJournalChanges } from '@agentmux/browser/browser-operation-journal'
+  type BrowserOperationJournalDocument, type BrowserOperationJournalStore, type BrowserOperationJournalChanges } from '@agentmux/browser/operations'
 import { browserRunResult, unwrapBrowserRunResult } from '../src/shared/browser-run-result.js'
 import type { BrowserScriptRunReport } from '../src/shared/contracts.js'
 import { applyJournalChanges } from './browser-operation-memory-store.js'

@@ -4,13 +4,13 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { EventEmitter } from 'node:events'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createBrowserPageDispatch } from '@agentmux/browser/browser-page-dispatch'
+import { createBrowserPageDispatch } from '@agentmux/browser/page'
 import { DEFAULT_BROWSER_AGENT_CONTROL, type BrowserAgentControlPreferences } from '../src/shared/browser-agent-control.js'
 
 const native = vi.hoisted(() => ({ views: [] as any[], mode: 'click', key: undefined as string | undefined, priorRef: undefined as string | undefined, onFeedback: undefined as undefined | (() => void), onWaiting: undefined as undefined | (() => Promise<void>), onAfterAction: undefined as undefined | (() => Promise<void>), failResolves: 0, displayFails: false, displayThrows: false, displayAllThrows: false, controlDisplayFails: false, observe: undefined as undefined | (() => Promise<unknown>), takeover: undefined as undefined | (() => void), deferredCloseId: undefined as number | undefined,
   nextLoadURL: undefined as undefined | ((contents: any, url: string) => Promise<void>) }))
-vi.mock('@agentmux/browser/browser-page-dispatch', async importOriginal => {
-  const actual = await importOriginal<typeof import('@agentmux/browser/browser-page-dispatch')>()
+vi.mock('../../../packages/browser/src/browser-page-dispatch.ts', async importOriginal => {
+  const actual = await importOriginal<typeof import('@agentmux/browser/page')>()
   return { ...actual, createBrowserPageDispatch: (...args: Parameters<typeof actual.createBrowserPageDispatch>) => {
     const dispatch = actual.createBrowserPageDispatch(...args)
     return (name: string, args: unknown[], scope?: Parameters<typeof dispatch>[2]) => dispatch(name, args,
@@ -21,7 +21,7 @@ vi.mock('@agentmux/browser/browser-page-dispatch', async importOriginal => {
       } } : scope)
   } }
 })
-vi.mock('@agentmux/browser/browser-script-runner', () => ({ runBrowserScript: async ({ onPageCall }: any) => {
+vi.mock('../../../packages/browser/src/browser-script-runner.ts', () => ({ runBrowserScript: async ({ onPageCall }: any) => {
   try {
     if (native.mode === 'prior-ref') {
       await onPageCall('click', [native.priorRef])
@@ -155,9 +155,9 @@ vi.mock('electron', async () => {
   return { WebContentsView: View }
 })
 import { BrowserViewManager } from '../src/main/browser-view-manager.js'
-import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
-import { BrowserOperationJournal, BrowserOperationFileStore } from '@agentmux/browser/browser-operation-journal'
-import { BrowserStepEvidenceStore } from '@agentmux/browser/browser-step-evidence'
+import { BrowserRefLedgerStore } from '@agentmux/browser/operations'
+import { BrowserOperationJournal, BrowserOperationFileStore } from '@agentmux/browser/operations'
+import { BrowserStepEvidenceStore } from '@agentmux/browser/operations'
 import { BrowserTaskAssets, BrowserTaskAssetFileStore } from '../src/main/browser-task-assets.js'
 import { NativeOverlaySurfaces } from '../src/main/native-overlay-surfaces.js'
 const roots: string[] = [], managers: BrowserViewManager[] = []

@@ -10,8 +10,8 @@ import { BrowserTaskAssets, BrowserTaskAssetFileStore } from '../../../src/main/
 import { executeBrowserTaskControl } from '../../../src/main/browser-task-control.js'
 import { BrowserProfileManager } from '../../../src/main/browser-profile-manager.js'
 import { BrowserProfileStore } from '../../../src/main/browser-profile-store.js'
-import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
-import { BrowserOperationJournal, BrowserOperationFileStore } from '@agentmux/browser/browser-operation-journal'
+import { BrowserRefLedgerStore } from '@agentmux/browser/operations'
+import { BrowserOperationJournal, BrowserOperationFileStore } from '@agentmux/browser/operations'
 import type { BrowserTaskContent, BrowserTaskStep } from '../../../src/shared/browser-task-assets.js'
 
 const root = process.env.AMX_TASK_NATIVE_ROOT!, out = process.env.AMX_TASK_NATIVE_OUT!

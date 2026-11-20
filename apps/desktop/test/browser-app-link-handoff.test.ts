@@ -85,7 +85,7 @@ const fakeElectron = vi.hoisted(() => {
 vi.mock('electron', () => ({ WebContentsView: fakeElectron.FakeWebContentsView }))
 
 const { BrowserViewManager } = await import('../src/main/browser-view-manager.js')
-const { BrowserRefLedgerStore } = await import('@agentmux/browser/browser-ref-ledger-store')
+const { BrowserRefLedgerStore } = await import('@agentmux/browser/operations')
 
 const profiles = { defaultProfileId: () => 'default', resolvePartition: (id: string) => `persist:${id}` }
 

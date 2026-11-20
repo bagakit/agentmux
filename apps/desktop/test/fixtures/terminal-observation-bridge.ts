@@ -50,9 +50,9 @@ vi.mock('@agentmux/core', async importOriginal => ({ ...await importOriginal<typ
 }))
 vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({ subscribe: () => () => {} }) }))
 vi.mock('../../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} onChange() { return () => {} } } }))
-vi.mock('@agentmux/browser/browser-operation-journal', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private.json',
+vi.mock('../../../../packages/browser/src/browser-operation-journal.ts', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private.json',
   BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
-vi.mock('@agentmux/browser/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: class {} }))
+vi.mock('../../../../packages/browser/src/browser-ref-ledger-store.ts', () => ({ BrowserRefLedgerStore: class {} }))
 vi.mock('../../src/main/browser-view-manager', () => ({ BrowserViewManager: class { setPresentationWindowOwner() {} release() {} dispose() {} } }))
 vi.mock('../../src/main/agent-notifier', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
 import '../../src/preload/index'

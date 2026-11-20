@@ -7,10 +7,10 @@ import { LocalExecutionHost } from '@agentmux/core'
 import type { WebContents } from 'electron'
 import { BrowserDownloads, readBrowserDownload, waitForBrowserDownload, type BrowserDownloadContext } from '../src/main/browser-downloads.js'
 import { WorkspaceFiles } from '../src/main/workspace-files.js'
-import { BrowserOperationFileStore, BrowserOperationJournal } from '@agentmux/browser/browser-operation-journal'
+import { BrowserOperationFileStore, BrowserOperationJournal } from '@agentmux/browser/operations'
 import { evaluateBrowserOutcomeCriteria, type BrowserOutcomeHost } from '../src/main/browser-outcome-criteria.js'
-import type { BrowserOutcomeRegistration } from '@agentmux/browser/model/browser-outcome-criteria'
-import type { BrowserDownloadReceipt } from '@agentmux/browser/model/browser-download'
+import type { BrowserOutcomeRegistration } from '@agentmux/browser/model'
+import type { BrowserDownloadReceipt } from '@agentmux/browser/model'
 import type { WorkspaceRecord } from '../src/shared/contracts.js'
 
 class Download extends EventEmitter {

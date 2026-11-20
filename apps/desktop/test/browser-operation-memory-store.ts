@@ -1,4 +1,4 @@
-import type { BrowserOperationJournalChanges, BrowserOperationJournalDocument } from '@agentmux/browser/browser-operation-journal'
+import type { BrowserOperationJournalChanges, BrowserOperationJournalDocument } from '@agentmux/browser/operations'
 
 /** Test-only durable collaborator; it consumes the same immutable delta as the file owner. */
 export function applyJournalChanges(document: BrowserOperationJournalDocument | null, changes: BrowserOperationJournalChanges): BrowserOperationJournalDocument {

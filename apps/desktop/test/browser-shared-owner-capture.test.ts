@@ -2,11 +2,11 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
-import { BrowserOperationFileStore, BrowserOperationJournal } from '@agentmux/browser/browser-operation-journal'
-import { BrowserStepEvidenceStore } from '@agentmux/browser/browser-step-evidence'
-import { BrowserResultArtifactStore } from '@agentmux/browser/browser-result-artifact'
-import { BrowserProgramOwner } from '@agentmux/browser/browser-program-owner'
-import type { BrowserProgramPort, BrowserProgramTarget } from '@agentmux/browser/browser-program-port'
+import { BrowserOperationFileStore, BrowserOperationJournal } from '@agentmux/browser/operations'
+import { BrowserStepEvidenceStore } from '@agentmux/browser/operations'
+import { BrowserResultArtifactStore } from '@agentmux/browser/operations'
+import { BrowserProgramOwner } from '@agentmux/browser/operations'
+import type { BrowserProgramPort, BrowserProgramTarget } from '@agentmux/browser/operations'
 
 it('the shared program owner forwards exact screenshot options through its real runner and dispatch without claiming host decoration exclusion', async () => {
   const root = await mkdtemp(join(tmpdir(), 'amux-shared-capture-'))

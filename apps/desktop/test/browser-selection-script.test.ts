@@ -4,7 +4,7 @@ import {
   buildCancelBrowserAnnotationMarkerScript,
   buildBrowserElementSelectionScript,
   buildCancelBrowserElementSelectionScript
-} from '@agentmux/browser/browser-selection-script'
+} from '@agentmux/browser/page'
 
 describe('Browser selection isolated-world scripts', () => {
   it('emits parseable JavaScript for every isolated-world command', () => {
@@ -74,7 +74,7 @@ describe('Browser selection isolated-world scripts', () => {
 
 it('retains only the actual chosen node for the current inspection, ignores synthetic events, and clears the retained DOM owner', async () => {
   const { runInNewContext } = await import('node:vm')
-  const { buildSelectedBrowserElementExpression } = await import('@agentmux/browser/browser-selection-script')
+  const { buildSelectedBrowserElementExpression } = await import('@agentmux/browser/page')
   const listeners = new Map<string, (event: unknown) => void>()
   const document: any = {
     title: 'Fixture', documentElement: null,

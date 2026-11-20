@@ -5,7 +5,7 @@ vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 import { createAgentInputContextCaptureRecord } from '@agentmux/core/agent-input-context-capture'
 import type { AgentMuxBrowserControl } from '@agentmux/core'
 import { BrowserPane } from '../src/renderer/src/components/BrowserPane'
-import type { BrowserOperation } from '@agentmux/browser/model/browser-operation'
+import type { BrowserOperation } from '@agentmux/browser/model'
 import type { BrowserInputScene } from '../src/shared/browser-input-context-capture'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'

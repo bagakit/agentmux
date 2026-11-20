@@ -3,8 +3,8 @@ import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { describe, expect, it, vi } from 'vitest'
 import { BrowserStructuredFields } from '../src/renderer/src/components/BrowserStructuredFields'
-import type { BrowserResultArtifactChunk, BrowserResultArtifactReference } from '@agentmux/browser/model/browser-result-artifact'
-import type { BrowserStructuredFieldSummary, BrowserStructuredOutputReceipt } from '@agentmux/browser/model/browser-structured-output'
+import type { BrowserResultArtifactChunk, BrowserResultArtifactReference } from '@agentmux/browser/model'
+import type { BrowserStructuredFieldSummary, BrowserStructuredOutputReceipt } from '@agentmux/browser/model'
 import { allStyleRules } from './helpers/styles'
 
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)

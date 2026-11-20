@@ -6,9 +6,9 @@ import { AgentMuxControlServer, BROWSER_COMPLETION_UNAVAILABLE_WARNING,
   connectAgentMuxRpc, type AgentMuxRpcClient, type AgentMuxRpcStreamInitial, type AgentMuxControlBrowserEvent,
   type AgentMuxControlBrowserOperation, type AgentMuxControlHost } from '@agentmux/core'
 import { BrowserOperationFileStore, BrowserOperationJournal,
-  type BrowserOperationJournalChanges, type BrowserOperationJournalStore } from '@agentmux/browser/browser-operation-journal'
+  type BrowserOperationJournalChanges, type BrowserOperationJournalStore } from '@agentmux/browser/operations'
 import { projectBrowserControlEvent, projectBrowserControlOperation, projectBrowserControlResult } from '../src/main/browser-completion-control'
-import type { BrowserOutcomeEvaluation, BrowserOutcomeRegistration } from '@agentmux/browser/model/browser-outcome-criteria'
+import type { BrowserOutcomeEvaluation, BrowserOutcomeRegistration } from '@agentmux/browser/model'
 
 const context = { workspaceId: 'workspace-a', browserId: 'browser-a', operationId: 'operation-a', navigationId: 'navigation-a' }
 const assetRun = { runId: 'asset-run-a', assetId: 'asset-a', version: 3 }

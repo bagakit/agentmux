@@ -3,8 +3,8 @@ import { mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promi
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { BrowserOperationFileStore, BrowserOperationJournal, type BrowserOperationJournalChanges, type BrowserOperationJournalDocument } from '@agentmux/browser/browser-operation-journal'
-import type { BrowserOperation } from '@agentmux/browser/model/browser-operation'
+import { BrowserOperationFileStore, BrowserOperationJournal, type BrowserOperationJournalChanges, type BrowserOperationJournalDocument } from '@agentmux/browser/operations'
+import type { BrowserOperation } from '@agentmux/browser/model'
 
 const roots: string[] = []
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })

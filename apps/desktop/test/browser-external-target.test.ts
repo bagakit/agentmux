@@ -3,7 +3,7 @@ import { fixtureEpoch as _batchFixtureEpoch } from "../../../test/fixture-values
 import { coldBrowserTargets } from '../src/main/browser-cold-descriptor'
 import { browserResourceLocations } from '../src/main/browser-resource-directory'
 import { browserRunResult, unwrapBrowserRunResult } from '../src/shared/browser-run-result'
-import { browserOperationAlreadyExistsError } from '@agentmux/browser/browser-operation-journal'
+import { browserOperationAlreadyExistsError } from '@agentmux/browser/operations'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -13,7 +13,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { isNativeInputCheck } from './browser-native-input-double.js'
 import { ExternalBrowserBridge, ExternalBrowserRequestFailure } from '../src/main/browser-external-bridge.js'
 import { attachExternalBrowserTarget, type ExternalBrowserTargetSession } from '../src/main/browser-external-target.js'
-import { createBrowserPageDispatch } from '@agentmux/browser/browser-page-dispatch'
+import { createBrowserPageDispatch } from '@agentmux/browser/page'
 import { isShareUrl, isTabScopedCommand, BROWSER_OPERATION_FEEDBACK_WORLD_NAME, buildOwnedFeedbackClearScript } from '../browser-extension/protocol.js'
 
 // A real production extension worker talks to the real loopback bridge. Chrome APIs are
@@ -502,9 +502,9 @@ async function programOwner(f: Awaited<ReturnType<typeof fixture>>, uploads: imp
   validateScreenshot: (image: import('../src/shared/contracts').BrowserPng) => void = () => { throw new Error('This Source fixture does not certify PNG decoding.') }) {
   const { dirname } = await import('node:path')
   const { ExternalBrowserOwner } = await import('../src/main/browser-external-owner.js')
-  const { BrowserOperationJournal, BrowserOperationFileStore } = await import('@agentmux/browser/browser-operation-journal')
-  const { BrowserStepEvidenceStore } = await import('@agentmux/browser/browser-step-evidence')
-  const { BrowserResultArtifactStore } = await import('@agentmux/browser/browser-result-artifact')
+  const { BrowserOperationJournal, BrowserOperationFileStore } = await import('@agentmux/browser/operations')
+  const { BrowserStepEvidenceStore } = await import('@agentmux/browser/operations')
+  const { BrowserResultArtifactStore } = await import('@agentmux/browser/operations')
   const directory = dirname(f.path)
   const journalFile = new BrowserOperationFileStore(join(directory, 'operations.json'))
   const journalSaves = vi.spyOn(journalFile, 'save')

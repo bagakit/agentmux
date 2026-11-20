@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer, connectAgentMuxRpc } from '../../../packages/core/src/control-host'
-import { BrowserOperationFileStore, BrowserOperationJournal } from '@agentmux/browser/browser-operation-journal'
+import { BrowserOperationFileStore, BrowserOperationJournal } from '@agentmux/browser/operations'
 import { assertNativeBrowserMeasurements, collectBrowserCapabilityMeasurements, summarizeBrowserOutcomeCollection } from '../scripts/lib/browser-capability-cost-collector.mjs'
 
 // Source contract models and one actual public socket consumer; no Native extraction, GUI or user Run is claimed.

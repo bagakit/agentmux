@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { installBrowserPageInterrupts } from '@agentmux/browser/browser-page-interrupts'
-import type { BrowserPageTransport } from '@agentmux/browser/browser-page-transport'
+import { installBrowserPageInterrupts } from '@agentmux/browser/page'
+import type { BrowserPageTransport } from '@agentmux/browser/page'
 import type { BrowserLocalRecoveryFailure } from '../src/main/browser-local-recovery.js'
 
 /** A transport that records commands and lets the test emit protocol events on the root session. */

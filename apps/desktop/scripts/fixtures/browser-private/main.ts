@@ -7,7 +7,7 @@ import { app, BrowserWindow, type Session } from 'electron'
 import { BrowserViewManager } from '../../../src/main/browser-view-manager'
 import { BrowserProfileManager } from '../../../src/main/browser-profile-manager'
 import { BrowserProfileStore } from '../../../src/main/browser-profile-store'
-import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
+import { BrowserRefLedgerStore } from '@agentmux/browser/operations'
 
 const root = process.env.AGENTMUX_PRIVATE_OWNER_ROOT!, output = process.env.AGENTMUX_PRIVATE_OWNER_RECEIPT!
 assert.ok(root && output)

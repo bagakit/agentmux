@@ -1,14 +1,14 @@
 import { applyJournalChanges } from './browser-operation-memory-store.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createBrowserPageDispatch } from '@agentmux/browser/browser-page-dispatch'
+import { createBrowserPageDispatch } from '@agentmux/browser/page'
 import { BrowserLocalRecoveryFailure, BROWSER_LOCAL_RECOVERY_BUDGET, recoverBrowserTaskStep,
   runBrowserTaskNavigation, type BrowserLocalRecoveryHost, type BrowserLocalRecoveryIdentity,
   type BrowserLocalRecoveryReport } from '../src/main/browser-local-recovery.js'
 import type { BrowserCdpSession } from '../src/main/browser-cdp-session.js'
-import type { BrowserScopedSnapshot } from '@agentmux/browser/model/browser-snapshot-query'
+import type { BrowserScopedSnapshot } from '@agentmux/browser/model'
 import type { BrowserTaskStep } from '../src/shared/browser-task-assets.js'
-import type { BrowserOutcomeEvaluation } from '@agentmux/browser/model/browser-outcome-criteria'
-import { BrowserOperationJournal, type BrowserOperationJournalDocument } from '@agentmux/browser/browser-operation-journal'
+import type { BrowserOutcomeEvaluation } from '@agentmux/browser/model'
+import { BrowserOperationJournal, type BrowserOperationJournalDocument } from '@agentmux/browser/operations'
 import { isNativeScroll, nativeInputDouble } from './browser-native-input-double.js'
 
 const identity: BrowserLocalRecoveryIdentity = { browserId: 'browser-a', operationId: 'operation-a',

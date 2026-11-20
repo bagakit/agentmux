@@ -12,7 +12,7 @@ import { browserColdDescriptor } from '../../../src/main/browser-cold-descriptor
 import { browserViewportSize, browserViewportsEqual } from '../../../src/shared/browser-viewport'
 import { BrowserCdpSession } from '../../../src/main/browser-cdp-session'
 import { BrowserViewManager } from '../../../src/main/browser-view-manager'
-import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
+import { BrowserRefLedgerStore } from '@agentmux/browser/operations'
 import { NativeOverlaySurfaces } from '../../../src/main/native-overlay-surfaces'
 import { installNativeOverlayFocus } from '../../../src/main/native-overlay-focus'
 import { reducePersistedTab } from '../../../src/renderer/src/lib/workbench-persistence'

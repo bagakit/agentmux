@@ -8,7 +8,7 @@ import { promisify } from 'node:util'
 import { createServer, type Server } from 'node:http'
 import { NativeOverlaySurfaces } from '../../../src/main/native-overlay-surfaces'
 import { BrowserViewManager } from '../../../src/main/browser-view-manager'
-import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
+import { BrowserRefLedgerStore } from '@agentmux/browser/operations'
 import type { NativeOverlayRegion } from '../../../src/shared/native-overlay'
 import { createAvatarLayeringSeed } from './avatar-seed'
 

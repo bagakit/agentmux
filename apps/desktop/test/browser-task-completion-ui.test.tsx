@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client'
 import { describe, expect, it, vi } from 'vitest'
 import { BrowserTaskAssetEditor } from '../src/renderer/src/components/BrowserTaskAssetEditor'
 import type { BrowserTaskAsset, BrowserTaskContent } from '../src/shared/browser-task-assets'
-import type { BrowserOutcomeEvaluation } from '@agentmux/browser/model/browser-outcome-criteria'
+import type { BrowserOutcomeEvaluation } from '@agentmux/browser/model'
 
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
 

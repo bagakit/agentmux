@@ -4,7 +4,7 @@ import ts from 'typescript'
 import { coldBrowserTargets } from '../src/main/browser-cold-descriptor'
 import { browserResourceLocations } from '../src/main/browser-resource-directory'
 import { browserRunResult, unwrapBrowserRunResult } from '../src/shared/browser-run-result'
-import { browserOperationAlreadyExistsError } from '@agentmux/browser/browser-operation-journal'
+import { browserOperationAlreadyExistsError } from '@agentmux/browser/operations'
 
 const source = readFileSync(new URL('../src/main/ipc.ts', import.meta.url), 'utf8')
 const ast = ts.createSourceFile('ipc.ts', source, ts.ScriptTarget.Latest, true)

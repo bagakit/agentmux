@@ -12,8 +12,8 @@ import { registerBrowserTaskParallelIpc } from '../../../src/main/browser-task-p
 import { projectBrowserControlEvent, projectBrowserControlOperation } from '../../../src/main/browser-completion-control.js'
 import { BrowserProfileManager } from '../../../src/main/browser-profile-manager.js'
 import { BrowserProfileStore } from '../../../src/main/browser-profile-store.js'
-import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
-import { BrowserOperationJournal, BrowserOperationFileStore } from '@agentmux/browser/browser-operation-journal'
+import { BrowserRefLedgerStore } from '@agentmux/browser/operations'
+import { BrowserOperationJournal, BrowserOperationFileStore } from '@agentmux/browser/operations'
 import { importTaskRecording } from '../../../test/helpers/import-task-recording.js'
 import type { BrowserTaskStep } from '../../../src/shared/browser-task-assets.js'
 

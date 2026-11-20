@@ -15,7 +15,7 @@ import { FocusTimelineEventPreview } from '../src/renderer/src/components/FocusT
 import { focusWorkingFacts } from '../src/renderer/src/lib/focus-timeline-event-facts'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
-import type { BrowserActivityState } from '@agentmux/browser/model/browser-operation'
+import type { BrowserActivityState } from '@agentmux/browser/model'
 import { MobileConversationSurface } from '../../mobile/src/conversation/MobileConversationSurface'
 import { createBrowserPlatform } from '../../mobile/src/platform/browser'
 import { fixture as mobileFixture } from '../../mobile/test/conversation-fixture'

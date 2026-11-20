@@ -106,8 +106,8 @@ const native = vi.hoisted(() => {
 })
 vi.mock('electron', () => ({ BaseWindow: native.BaseWindow, WebContentsView: native.View, app: { getPath: () => _hygiene_fixturePath("unused-private-ledger") } }))
 import { BrowserViewManager } from '../src/main/browser-view-manager.js'
-import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
-import { browserOperationAlreadyExistsError } from '@agentmux/browser/browser-operation-journal'
+import { BrowserRefLedgerStore } from '@agentmux/browser/operations'
+import { browserOperationAlreadyExistsError } from '@agentmux/browser/operations'
 import { browserRunResult, unwrapBrowserRunResult } from '../src/shared/browser-run-result.js'
 
 const managers: BrowserViewManager[] = [], roots: string[] = [], originalApp = useAppStore.getState()

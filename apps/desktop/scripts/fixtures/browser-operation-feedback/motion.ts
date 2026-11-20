@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { webContents } from 'electron'
 import type { BrowserViewManager } from '../../../src/main/browser-view-manager.js'
 import { BrowserCdpSession } from '../../../src/main/browser-cdp-session.js'
-import { discoverBrowserFrameDocuments } from '@agentmux/browser/browser-frame-documents'
+import { discoverBrowserFrameDocuments } from '@agentmux/browser/page'
 import { inspectFeedbackFrame } from './frame-pixels.mjs'
 
 type Context = {

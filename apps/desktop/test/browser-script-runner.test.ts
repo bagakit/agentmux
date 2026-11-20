@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { runBrowserScript } from '@agentmux/browser/browser-script-runner'
+import { runBrowserScript } from '@agentmux/browser/operations'
 
 /**
  * 子进程执行器：Agent 写的脚本在独立进程里跑。

@@ -4,7 +4,7 @@ import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
-import type { BrowserActivityState, BrowserOperation, BrowserReplayPlan } from '@agentmux/browser/model/browser-operation'
+import type { BrowserActivityState, BrowserOperation, BrowserReplayPlan } from '@agentmux/browser/model'
 import {
   BrowserOperationStatus,
   BrowserOperationHistory,

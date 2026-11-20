@@ -5,7 +5,7 @@ import { EventEmitter } from 'node:events'
 vi.mock('electron', () => ({ WebContentsView: class {}, app: { getPath: () => tmpdir() } }))
 
 import { BrowserViewManager } from '../src/main/browser-view-manager.js'
-import { readScreenshotViewport, screenshotSource, SCREENSHOT_VIEWPORT_SCRIPT } from '@agentmux/browser/browser-screenshot-source'
+import { readScreenshotViewport, screenshotSource, SCREENSHOT_VIEWPORT_SCRIPT } from '@agentmux/browser/page'
 
 function png(width: number, height: number): Buffer {
   const bytes = Buffer.alloc(33)

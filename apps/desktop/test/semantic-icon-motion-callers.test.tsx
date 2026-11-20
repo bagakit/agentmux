@@ -16,7 +16,7 @@ import { BrowserOperationStatus, BrowserOperationHistory, BrowserOperationTimeli
 import { WorkflowStatusGlyph } from '../src/renderer/src/components/workflow/WorkflowStatusGlyph'
 import { createFocusProjectionSelector } from '../src/renderer/src/lib/focus-context'
 import { useAppStore } from '../src/renderer/src/store'
-import type { BrowserActivityState, BrowserOperation } from '@agentmux/browser/model/browser-operation'
+import type { BrowserActivityState, BrowserOperation } from '@agentmux/browser/model'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import { fixtureEpoch as _historyTailFixtureEpoch } from '../../../test/fixture-values.mjs'
 

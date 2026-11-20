@@ -6,7 +6,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { app, BrowserWindow, nativeImage } from 'electron'
 import { BrowserViewManager } from '../../../src/main/browser-view-manager.js'
-import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
+import { BrowserRefLedgerStore } from '@agentmux/browser/operations'
 import { resolveBrowserAgentControl } from '../../../src/shared/browser-agent-control.js'
 
 /** Adds exact OS window observations to an already qualified native/Renderer proof. */

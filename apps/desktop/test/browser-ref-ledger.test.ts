@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { healRef, ledgerFromSnapshot } from '@agentmux/browser/browser-ref-ledger'
-import { BrowserRefLedgerStore, MAX_TRACKED_BROWSERS } from '@agentmux/browser/browser-ref-ledger-store'
-import { createBrowserPageDispatch } from '@agentmux/browser/browser-page-dispatch'
+import { healRef, ledgerFromSnapshot } from '@agentmux/browser/page'
+import { BrowserRefLedgerStore, MAX_TRACKED_BROWSERS } from '@agentmux/browser/operations'
+import { createBrowserPageDispatch } from '@agentmux/browser/page'
 import { BrowserLocalRecoveryFailure } from '../src/main/browser-local-recovery.js'
 import { nativeInputDouble } from './browser-native-input-double.js'
 import type { BrowserCdpSession } from '../src/main/browser-cdp-session.js'
@@ -359,7 +359,7 @@ describe('自愈过的运行不许报成干净的成功', () => {
     // （contracts 的四分类），所以「做了但不确定作用在什么上」只能由结局本身承载。
     vi.resetModules()
     const contents = { debugger: { attach() {}, isAttached: () => false, detach() {}, on() { return this }, off() { return this }, async sendCommand() { return {} } } }
-    vi.doMock('@agentmux/browser/browser-page-dispatch', () => ({
+    vi.doMock('../../../packages/browser/src/browser-page-dispatch.ts', () => ({
       createBrowserPageDispatch: (context: { note(text: string): void }) => async () => {
         context.note('@e1 was recovered by matching button "Save" against the page again.')
         return null
@@ -406,7 +406,7 @@ describe('自愈过的运行不许报成干净的成功', () => {
     expect(report.outcome.kind === 'indeterminate' ? report.outcome.message : '').toMatch(/recovered/)
     // 返回值照常带回去：程序真算出来了，丢掉它只会逼 Agent 再跑一遍（而重跑正是 indeterminate 要劝阻的）。
     expect(report.result, '把程序的返回值一并丢了').toBe('done')
-    vi.doUnmock('@agentmux/browser/browser-page-dispatch')
+    vi.doUnmock('@agentmux/browser/page')
     vi.doUnmock('electron')
   }, 30_000)
 })

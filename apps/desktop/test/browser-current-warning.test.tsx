@@ -2,7 +2,7 @@
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { describe, expect, it, vi } from 'vitest'
-import type { BrowserOperation } from '@agentmux/browser/model/browser-operation'
+import type { BrowserOperation } from '@agentmux/browser/model'
 import { BrowserOperationWarning } from '../src/renderer/src/components/BrowserOperationSurface'
 
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)

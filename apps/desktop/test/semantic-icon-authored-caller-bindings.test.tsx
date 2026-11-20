@@ -19,7 +19,7 @@ import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { createFocusProjectionSelector } from '../src/renderer/src/lib/focus-context'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
-import type { BrowserOperation, BrowserReplayPlan } from '@agentmux/browser/model/browser-operation'
+import type { BrowserOperation, BrowserReplayPlan } from '@agentmux/browser/model'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 
 

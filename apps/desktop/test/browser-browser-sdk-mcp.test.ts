@@ -17,7 +17,7 @@ import { executeBrowserTaskControl } from '../src/main/browser-task-control.js'
 import { executeBrowserProfileControl, isBrowserProfileControlRequest } from '../src/main/browser-profile-control.js'
 import { BrowserProfileStore } from '../src/main/browser-profile-store.js'
 import { BrowserProfileManager } from '../src/main/browser-profile-manager.js'
-import { BrowserOperationJournal, BrowserOperationFileStore } from '@agentmux/browser/browser-operation-journal'
+import { BrowserOperationJournal, BrowserOperationFileStore } from '@agentmux/browser/operations'
 vi.mock('electron', () => ({ WebContentsView: class {}, app: { getPath: () => '' } }))
 import { BrowserViewManager } from '../src/main/browser-view-manager.js'
 

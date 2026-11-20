@@ -73,8 +73,8 @@ import { issueAgentCapability, hashAgentCapability } from '../../../../packages/
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import { readFile } from 'node:fs/promises'
 vi.mock('../../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { storage = { setConfirmationHandler() {} }; cookieFiles = { setFileOwner() {}, setConfirmationHandler() {} }; extensions = { setConfirmationHandler() {} }; listProfiles() { return [] }; async initialize() {} async dispose() {} onChange() { return () => {} }; onEnvironmentApplicationChange() { return () => {} } } }))
-vi.mock('@agentmux/browser/browser-operation-journal', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private.json', BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
-vi.mock('@agentmux/browser/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: class {} }))
+vi.mock('../../../../packages/browser/src/browser-operation-journal.ts', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private.json', BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
+vi.mock('../../../../packages/browser/src/browser-ref-ledger-store.ts', () => ({ BrowserRefLedgerStore: class {} }))
 vi.mock('../../src/main/browser-view-manager', () => ({ BrowserViewManager: class { async flushProfileActivity() {} setPresentationWindowOwner() {} async release() { throw new Error('Browser release is outside this Goal fixture') } dispose() {} } }))
 vi.mock('../../src/main/agent-notifier', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
 // Install the actual mocked Electron bridge before transitive renderer consumers load api.

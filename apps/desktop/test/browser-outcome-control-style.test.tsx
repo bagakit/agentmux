@@ -8,7 +8,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { expect, it } from 'vitest'
 import { BrowserOutcomeCriteria } from '../src/renderer/src/components/BrowserOutcomeCriteria'
 import { allStyles } from './helpers/styles'
-import type { BrowserOutcomeEvaluation } from '@agentmux/browser/model/browser-outcome-criteria'
+import type { BrowserOutcomeEvaluation } from '@agentmux/browser/model'
 
 // Actual production component + complete product stylesheet in Chromium. These local layout
 // fixtures do not claim Browser native-page composition, operation input or ordinary restart.

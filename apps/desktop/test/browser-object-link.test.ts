@@ -56,7 +56,7 @@ const native = await vi.hoisted(async () => {
 })
 vi.mock('electron', () => ({ WebContentsView: native.View, BrowserWindow: native.Window }))
 const { BrowserViewManager } = await import('../src/main/browser-view-manager')
-const { BrowserRefLedgerStore } = await import('@agentmux/browser/browser-ref-ledger-store')
+const { BrowserRefLedgerStore } = await import('@agentmux/browser/operations')
 
 /** Execute the actual BrowserViewManager host callback registered by Main. */
 function mainDestination(args: { spatialLinks?: SpatialLinkIngress }, shell: { openExternal: (target: string) => unknown }) {

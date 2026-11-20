@@ -7,7 +7,7 @@ import { BrowserProfileManager } from '../../../src/main/browser-profile-manager
 import { BrowserProfileStore } from '../../../src/main/browser-profile-store.js'
 import { DEFAULT_CONFIG } from '../../../src/main/config-store.js'
 import { BrowserViewManager } from '../../../src/main/browser-view-manager.js'
-import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
+import { BrowserRefLedgerStore } from '@agentmux/browser/operations'
 import { WorkbenchUserStateStore } from '../../../src/main/workbench-user-state.js'
 import {
   registerBrowserProfileEditorIpc,

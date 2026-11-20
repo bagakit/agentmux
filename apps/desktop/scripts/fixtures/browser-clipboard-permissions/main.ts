@@ -8,7 +8,7 @@ import assert from 'node:assert/strict'
 import { BrowserViewManager } from '../../../src/main/browser-view-manager'
 import { BrowserProfileManager } from '../../../src/main/browser-profile-manager'
 import { BrowserProfileStore } from '../../../src/main/browser-profile-store'
-import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
+import { BrowserRefLedgerStore } from '@agentmux/browser/operations'
 
 const root = process.env.CLIPBOARD_PROBE_ROOT!, interactive = process.env.CLIPBOARD_PROBE_INTERACTIVE === '1'
 app.setPath('userData', join(root, 'user-data')); app.setPath('sessionData', join(root, 'session-data'))

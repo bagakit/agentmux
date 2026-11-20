@@ -109,14 +109,14 @@ const native = vi.hoisted(() => {
 })
 vi.mock('electron', () => ({ BaseWindow: native.BaseWindow, WebContentsView: native.View, session: { fromPartition: () => new native.Session() }, app: { getPath: () => _hygiene_fixturePath("unused-private-ledger") } }))
 import { BrowserViewManager } from '../src/main/browser-view-manager.js'
-import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
+import { BrowserRefLedgerStore } from '@agentmux/browser/operations'
 import { BrowserCdpSession } from '../src/main/browser-cdp-session.js'
-import { SCREENSHOT_VIEWPORT_SCRIPT } from '@agentmux/browser/browser-screenshot-source'
-import { BrowserOperationJournal, BrowserOperationFileStore } from '@agentmux/browser/browser-operation-journal'
+import { SCREENSHOT_VIEWPORT_SCRIPT } from '@agentmux/browser/page'
+import { BrowserOperationJournal, BrowserOperationFileStore } from '@agentmux/browser/operations'
 import { BrowserDemonstrationCapture } from '../src/main/browser-demonstration-capture.js'
 import { BrowserDemonstrationRecorder } from '../src/main/browser-demonstration-recorder.js'
-import { BrowserResultArtifactStore } from '@agentmux/browser/browser-result-artifact'
-import * as scriptRunner from '@agentmux/browser/browser-script-runner'
+import { BrowserResultArtifactStore } from '@agentmux/browser/operations'
+import * as scriptRunner from '../../../packages/browser/src/browser-script-runner.ts'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 
 const managers: BrowserViewManager[] = [], roots: string[] = []

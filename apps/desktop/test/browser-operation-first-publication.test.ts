@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { BrowserOperationFileStore, BrowserOperationJournal } from '@agentmux/browser/browser-operation-journal'
+import { BrowserOperationFileStore, BrowserOperationJournal } from '@agentmux/browser/operations'
 
 const require = createRequire(new URL('../../../packages/core/package.json', import.meta.url))
 const { build } = browserSourceBuild(require('esbuild'))
@@ -15,7 +15,7 @@ let bundle: string, buildRoot: string
 beforeAll(async () => {
   buildRoot = await mkdtemp(join(tmpdir(), 'amx-browser-first-source-'))
   bundle = join(buildRoot, 'journal.mjs')
-  await build({ entryPoints: [fileURLToPath(new URL('@agentmux/browser/browser-operation-journal', import.meta.url))],
+  await build({ entryPoints: [fileURLToPath(new URL('@agentmux/browser/operations', import.meta.url))],
     outfile: bundle, bundle: true, platform: 'node', format: 'esm', target: 'node24', logLevel: 'silent',
     alias: { '@agentmux/core': fileURLToPath(new URL('../../../packages/core/src/durable-write.ts', import.meta.url)) } })
 })

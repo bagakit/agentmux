@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { BrowserViewManager } from '../../../src/main/browser-view-manager'
 import { BrowserProfileManager } from '../../../src/main/browser-profile-manager'
 import { BrowserProfileStore } from '../../../src/main/browser-profile-store'
-import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
+import { BrowserRefLedgerStore } from '@agentmux/browser/operations'
 import type { BrowserWindow } from 'electron'
 
 export async function verifyNativeHtml(window: BrowserWindow, root: string, evidence: string) {

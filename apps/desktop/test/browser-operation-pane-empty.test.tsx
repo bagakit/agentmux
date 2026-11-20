@@ -3,7 +3,7 @@ const { fixtureTime: _hygiene_fixtureTime } = await vi.hoisted(async () => await
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { beforeEach, expect, it, vi } from 'vitest'
-import type { BrowserOperation } from '@agentmux/browser/model/browser-operation'
+import type { BrowserOperation } from '@agentmux/browser/model'
 
 const fixture = vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)

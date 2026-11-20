@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { startBrowserOperationStep, isSensitiveBrowserPageCall } from '@agentmux/browser/browser-operation-step'
+import { startBrowserOperationStep, isSensitiveBrowserPageCall } from '@agentmux/browser/operations'
 import { createBrowserNetworkObservations } from '../../../packages/browser/src/browser-network-observation.js'
 
 const owners: ReturnType<typeof createBrowserNetworkObservations>[] = []

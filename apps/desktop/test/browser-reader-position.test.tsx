@@ -7,7 +7,7 @@ import { useBrowserContextualComposer } from '../src/renderer/src/components/Bro
 import { observeBrowserReader } from '../src/renderer/src/lib/browser-reader-position'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
-import type { BrowserOperation } from '@agentmux/browser/model/browser-operation'
+import type { BrowserOperation } from '@agentmux/browser/model'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 
 type SizeFacts = { availableWidth: number; availableHeight: number }

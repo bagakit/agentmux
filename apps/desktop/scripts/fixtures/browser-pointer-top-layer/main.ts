@@ -6,7 +6,7 @@ import { app, BrowserWindow, webContents } from 'electron'
 import { BrowserViewManager } from '../../../src/main/browser-view-manager.js'
 import { BrowserProfileManager } from '../../../src/main/browser-profile-manager.js'
 import { BrowserProfileStore } from '../../../src/main/browser-profile-store.js'
-import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
+import { BrowserRefLedgerStore } from '@agentmux/browser/operations'
 
 const out = process.env.AGENTMUX_POINTER_OUTPUT!, privateRoot = process.env.AGENTMUX_POINTER_PRIVATE!
 const mode = process.env.AGENTMUX_POINTER_MODE!

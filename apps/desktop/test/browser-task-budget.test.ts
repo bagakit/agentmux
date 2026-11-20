@@ -2,10 +2,10 @@ import { EventEmitter } from 'node:events'
 import { afterEach, expect, it, vi } from 'vitest'
 vi.mock('electron', () => ({ WebContentsView: class {}, app: { getPath: () => '' } }))
 vi.mock('../src/main/browser-operation-feedback', () => ({ showBrowserOperationFeedback: () => ({ end: vi.fn(async () => {}), clear: vi.fn() }) }))
-vi.mock('@agentmux/browser/browser-script-runner', async original => ({ ...await original<any>(), runBrowserScript: vi.fn(async () => ({ completed: true, value: 'original script result', logs: [] })) }))
+vi.mock('../../../packages/browser/src/browser-script-runner.ts', async original => ({ ...await original<any>(), runBrowserScript: vi.fn(async () => ({ completed: true, value: 'original script result', logs: [] })) }))
 import { BrowserViewManager } from '../src/main/browser-view-manager'
 import { BrowserCdpSession } from '../src/main/browser-cdp-session'
-import { runBrowserScript } from '@agentmux/browser/browser-script-runner'
+import { runBrowserScript } from '@agentmux/browser/operations'
 afterEach(() => vi.restoreAllMocks())
 it('actual page dispatcher refuses a call whose preparation used the remaining deadline', async () => {
   let clock = 1000; vi.spyOn(performance, 'now').mockImplementation(() => clock)

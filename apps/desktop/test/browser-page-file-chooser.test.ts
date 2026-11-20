@@ -1,7 +1,7 @@
 import { browserUploadPort } from '../src/main/browser-page-files.js'
 import { describe, expect, it } from 'vitest'
-import { installBrowserPageInterrupts } from '@agentmux/browser/browser-page-interrupts'
-import type { BrowserPageTransport } from '@agentmux/browser/browser-page-transport'
+import { installBrowserPageInterrupts } from '@agentmux/browser/page'
+import type { BrowserPageTransport } from '@agentmux/browser/page'
 
 /** A transport with one child frame session, recording each command with the session it went to. */
 function fakeTransport() {
@@ -82,7 +82,7 @@ describe('file choosers during a run', () => {
   })
 })
 
-import { createBrowserPageDispatch } from '@agentmux/browser/browser-page-dispatch'
+import { createBrowserPageDispatch } from '@agentmux/browser/page'
 import type { BrowserUploads } from '../src/main/browser-uploads.js'
 
 describe('uploadFiles(handle) fills a chooser through the existing upload owner', () => {

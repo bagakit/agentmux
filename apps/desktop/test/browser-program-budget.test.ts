@@ -2,16 +2,16 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
-import { BrowserOperationFileStore, BrowserOperationJournal } from '@agentmux/browser/browser-operation-journal'
-import { BrowserStepEvidenceStore } from '@agentmux/browser/browser-step-evidence'
-import { BrowserResultArtifactStore } from '@agentmux/browser/browser-result-artifact'
-import { BrowserProgramOwner } from '@agentmux/browser/browser-program-owner'
-import type { BrowserProgramPort, BrowserProgramTarget } from '@agentmux/browser/browser-program-port'
-import type { BrowserPageContext } from '@agentmux/browser/browser-page-dispatch'
+import { BrowserOperationFileStore, BrowserOperationJournal } from '@agentmux/browser/operations'
+import { BrowserStepEvidenceStore } from '@agentmux/browser/operations'
+import { BrowserResultArtifactStore } from '@agentmux/browser/operations'
+import { BrowserProgramOwner } from '@agentmux/browser/operations'
+import type { BrowserProgramPort, BrowserProgramTarget } from '@agentmux/browser/operations'
+import type { BrowserPageContext } from '@agentmux/browser/page'
 
 const captured=vi.hoisted(()=>({context:null as BrowserPageContext|null}))
-vi.mock('@agentmux/browser/browser-page-dispatch',async original=>{
-  const module=await original<typeof import('@agentmux/browser/browser-page-dispatch')>()
+vi.mock('../../../packages/browser/src/browser-page-dispatch.ts',async original=>{
+  const module=await original<typeof import('@agentmux/browser/page')>()
   return {...module,createBrowserPageDispatch:(context:BrowserPageContext)=>{captured.context=context;return module.createBrowserPageDispatch(context)}}
 })
 const cleanups:(()=>Promise<void>)[]=[]

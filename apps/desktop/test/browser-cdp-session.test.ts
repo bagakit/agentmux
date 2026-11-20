@@ -1,4 +1,4 @@
-import { createBrowserPageDispatch } from '@agentmux/browser/browser-page-dispatch'
+import { createBrowserPageDispatch } from '@agentmux/browser/page'
 import { nativeInputDouble } from './browser-native-input-double.js'
 import { describe, expect, it, vi } from 'vitest'
 import { BrowserCdpSession } from '../src/main/browser-cdp-session.js'
@@ -256,7 +256,7 @@ it('the actual ref dispatcher consumes one stable child sender and refuses its r
   c.debugger.emit('message','Target.attachedToTarget',{sessionId:'child',targetInfo:{type:'iframe'}})
   const original=page.frames.get('child')!
   const dispatch=createBrowserPageDispatch({session:page,pageInfo:()=>({url:'https://example.test/',title:'Parent',navigationId:'main-nav'}),gotoUrl:async()=>{},captureScreenshot:async()=>({}),readLedger:async()=>null,writeLedger:async()=>{},note:()=>{}})
-  const snapshot=await dispatch('snapshot',[]) as import('@agentmux/browser/model/page').BrowserPageSnapshot
+  const snapshot=await dispatch('snapshot',[]) as import('@agentmux/browser/model').BrowserPageSnapshot
   expect(snapshot.missingFrames).toEqual([])
   const field=snapshot.nodes.find(node=>node.name==='Child field')!
   expect(field.sessionId).toBe('child')

@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { BROWSER_PAGE_CAPABILITY_NAMES } from '@agentmux/core'
-import { BROWSER_PAGE_FUNCTION_NAMES } from '@agentmux/browser/browser-script-runner'
+import { BROWSER_PAGE_FUNCTION_NAMES } from '@agentmux/browser/operations'
 
 /**
  * 仓里原有三处白纸黑字写着「不做这件事」，与 Agent 结构化驱动页面直接打架。这条守的是改写之后

@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest'
 import { BrowserViewManager } from '../src/main/browser-view-manager'
-import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
+import { BrowserRefLedgerStore } from '@agentmux/browser/operations'
 const fixture = vi.hoisted(() => ({ views: [] as any[] }))
 vi.mock('electron', async () => {
   const { EventEmitter } = await import('node:events')

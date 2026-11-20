@@ -7,7 +7,7 @@ import { app, BrowserWindow, type WebContents, type WebContentsView } from 'elec
 import { ConfigStore, DEFAULT_CONFIG } from '../../../src/main/config-store'
 import { ConfigOwner } from '../../../src/main/config-owner'
 import { BrowserViewManager } from '../../../src/main/browser-view-manager'
-import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
+import { BrowserRefLedgerStore } from '@agentmux/browser/operations'
 import { resolveBrowserAgentControl } from '../../../src/shared/browser-agent-control'
 
 const privateRoot = process.env.AGENTMUX_CONTINUITY_PRIVATE!, output = process.env.AGENTMUX_CONTINUITY_OUTPUT!

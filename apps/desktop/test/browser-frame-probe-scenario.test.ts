@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { sanitizeBrowserElementSelection } from '@agentmux/browser/browser-selection'
+import { sanitizeBrowserElementSelection } from '@agentmux/browser/page'
 import { auditCaughtFrameAction, auditFrameObservation, auditRejectedFrameAction, auditRestoredFrameRead, auditScopedFrame,
   frameDocuments, frameFixture, issuedFrameActionsCode, navigatedFrameActionCode, run as runFrameOperation } from '../scripts/browser-frame-probe-scenario.mjs'
 

@@ -10,7 +10,7 @@ import { WorkbenchWindowStore } from '../../../src/main/workbench-window-store.j
 import { BrowserViewManager } from '../../../src/main/browser-view-manager.js'
 import { BrowserProfileManager } from '../../../src/main/browser-profile-manager.js'
 import { BrowserProfileStore } from '../../../src/main/browser-profile-store.js'
-import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
+import { BrowserRefLedgerStore } from '@agentmux/browser/operations'
 import { AppCaptureSource } from '../../../src/main/app-capture.js'
 import { AppRecordingOwner } from '../../../src/main/app-recording.js'
 import { createAppCapturePort } from '../../../src/main/app-capture-owner.js'

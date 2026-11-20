@@ -63,10 +63,10 @@ vi.mock('electron', async () => {
   return { WebContentsView: View, app: { getPath: () => tmpdir() } }
 })
 import { BrowserViewManager } from '../src/main/browser-view-manager'
-import { BrowserOperationFileStore, BrowserOperationJournal } from '@agentmux/browser/browser-operation-journal'
-import { BrowserStepEvidenceStore } from '@agentmux/browser/browser-step-evidence'
-import { BrowserResultArtifactStore } from '@agentmux/browser/browser-result-artifact'
-import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
+import { BrowserOperationFileStore, BrowserOperationJournal } from '@agentmux/browser/operations'
+import { BrowserStepEvidenceStore } from '@agentmux/browser/operations'
+import { BrowserResultArtifactStore } from '@agentmux/browser/operations'
+import { BrowserRefLedgerStore } from '@agentmux/browser/operations'
 import { BrowserTaskAssetFileStore, BrowserTaskAssets } from '../src/main/browser-task-assets'
 import type { BrowserTaskAssetDocument } from '../src/shared/browser-task-assets'
 
@@ -103,7 +103,7 @@ async function fixture(beforeTaskSave?: (value: BrowserTaskAssetDocument) => Pro
 }
 import type { BrowserTaskStep, BrowserTaskCompletion, BrowserTaskParameter } from '../src/shared/browser-task-assets'
 import { getBrowserTaskReliability } from '../src/shared/browser-task-reliability'
-import { readBrowserOperationResult } from '@agentmux/browser/browser-operation-result'
+import { readBrowserOperationResult } from '@agentmux/browser/model'
 import { projectBrowserControlResult } from '../src/main/browser-completion-control'
 import { executeBrowserTaskControl } from '../src/main/browser-task-control'
 import { AgentMuxControlServer } from '../../../packages/core/src/control-host'
@@ -431,7 +431,7 @@ it('the actual public result codec keeps the original operation when an optional
 })
 
 import { getBrowserTaskRunCompletion } from '../src/shared/browser-task-reliability'
-import type { BrowserOperation } from '@agentmux/browser/model/browser-operation'
+import type { BrowserOperation } from '@agentmux/browser/model'
 it('recorded aggregation rejects a same-value producer attributed to another version of this original run', async () => {
   const f = await fixture(); page(); const asset = await save(f)
   const run = await f.manager.runTaskAsset({ browserId: 'browser-a', assetId: asset.id, version: 1, parameters: {} })
@@ -522,7 +522,7 @@ it('the original viewer does not label withheld data as a saved JSON result', as
   } finally { await mounted.close() }
 })
 
-import { StandaloneBrowserHost } from '@agentmux/browser/browser-standalone-host'
+import { StandaloneBrowserHost } from '@agentmux/browser'
 it('the original standalone inspect dispatch keeps its operation when a retained step read is unavailable, without a page program', async () => {
   const f = await fixture(); page(); const asset = await save(f)
   const run = await f.manager.runTaskAsset({ browserId: 'browser-a', assetId: asset.id, version: 1, parameters: {} })
@@ -575,7 +575,7 @@ it('an unconfirmed checked save stays unavailable and an explicit same-document 
 })
 
 
-import { BrowserProgramOwner } from '@agentmux/browser/browser-program-owner'
+import { BrowserProgramOwner } from '@agentmux/browser/operations'
 it('reads the exact retained artifact after a real native release and cold owner rebuild without creating or attaching a page', async () => {
   const f = await fixture(); page(); const asset = await save(f)
   const run = await f.manager.runTaskAsset({ browserId: 'browser-a', assetId: asset.id, version: 1, parameters: {} })

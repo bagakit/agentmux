@@ -5,11 +5,11 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { durableWriteFile } from '@agentmux/core'
 import { durableWriteFile as realWrite, DurableWriteError } from '../../../packages/core/src/durable-write'
-import { BrowserResultArtifactStore, readBrowserResultArtifact } from '@agentmux/browser/browser-result-artifact'
-import { runBrowserScript } from '@agentmux/browser/browser-script-runner'
-import { browserRunOutcomeFromFailure } from '@agentmux/browser/browser-run-outcome'
+import { BrowserResultArtifactStore, readBrowserResultArtifact } from '@agentmux/browser/operations'
+import { runBrowserScript } from '@agentmux/browser/operations'
+import { browserRunOutcomeFromFailure } from '@agentmux/browser/operations'
 import { BROWSER_RESULT_INLINE_BYTES, BROWSER_RESULT_MAX_BYTES, BROWSER_RESULT_MAX_READ_BYTES,
-  type BrowserResultArtifactReference, type BrowserResultContext } from '@agentmux/browser/model/browser-result-artifact'
+  type BrowserResultArtifactReference, type BrowserResultContext } from '@agentmux/browser/model'
 
 const context: BrowserResultContext = { workspaceId: 'workspace-a', browserId: 'browser-a', operationId: 'operation-a', navigationId: 'navigation-a' }
 const owner = { workspaceId: context.workspaceId, browserId: context.browserId }

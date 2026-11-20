@@ -8,7 +8,7 @@ import { LocalExecutionHost } from '@agentmux/core'
 import type { WebContents } from 'electron'
 import { BrowserDownloads, readBrowserDownload, waitForBrowserDownload, type BrowserDownloadContext } from '../src/main/browser-downloads.js'
 import { WorkspaceFiles } from '../src/main/workspace-files.js'
-import type { BrowserDownloadReceipt } from '@agentmux/browser/model/browser-download'
+import type { BrowserDownloadReceipt } from '@agentmux/browser/model'
 import type { WorkspaceRecord } from '../src/shared/contracts.js'
 
 class Download extends EventEmitter {

@@ -116,14 +116,14 @@ vi.mock('../src/main/browser-profile-manager', () => ({
     async dispose() {}
   }
 }))
-vi.mock('@agentmux/browser/browser-operation-journal', () => ({
+vi.mock('../../../packages/browser/src/browser-operation-journal.ts', () => ({
   BROWSER_OPERATION_JOURNAL_FILE: 'private-journal.json',
   BrowserOperationFileStore: class {},
   BrowserOperationJournal: class {
     async ready() {}
   }
 }))
-vi.mock('@agentmux/browser/browser-ref-ledger-store', () => ({
+vi.mock('../../../packages/browser/src/browser-ref-ledger-store.ts', () => ({
   BrowserRefLedgerStore: class {}
 }))
 vi.mock('../src/main/browser-view-manager', () => ({

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { browserCdpScopeRefusal, isBrowserCdpNativeInput } from '@agentmux/browser/browser-cdp-scope'
+import { browserCdpScopeRefusal, isBrowserCdpNativeInput } from '@agentmux/browser/page'
 
 describe('raw cdp stays inside the page it drives', () => {
   it.each([

@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { createBrowserPageDispatch } from '@agentmux/browser/browser-page-dispatch'
-import { parseBrowserSnapshotQuery } from '@agentmux/browser/browser-snapshot-query'
+import { createBrowserPageDispatch } from '@agentmux/browser/page'
+import { parseBrowserSnapshotQuery } from '@agentmux/browser/page'
 import type { BrowserCdpSession } from '../src/main/browser-cdp-session.js'
-import type { BrowserCdpSender } from '@agentmux/browser/browser-page-snapshot'
-import type { BrowserScopedSnapshot } from '@agentmux/browser/model/browser-snapshot-query'
-import type { BrowserRefLedger } from '@agentmux/browser/browser-ref-ledger'
+import type { BrowserCdpSender } from '@agentmux/browser/page'
+import type { BrowserScopedSnapshot } from '@agentmux/browser/model'
+import type { BrowserRefLedger } from '@agentmux/browser/page'
 import { isNativeScroll, isNativeTextStep, nativeInputDouble } from './browser-native-input-double.js'
 
 const TREE = [

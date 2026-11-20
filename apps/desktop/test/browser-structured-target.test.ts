@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { resolveBrowserStructuredTarget } from '@agentmux/browser/browser-structured-target'
-import type { BrowserCdpSender } from '@agentmux/browser/browser-page-snapshot'
+import { resolveBrowserStructuredTarget } from '@agentmux/browser/page'
+import type { BrowserCdpSender } from '@agentmux/browser/page'
 
 function fixture() {
   const calls: { method: string; params?: Record<string, unknown> }[] = []

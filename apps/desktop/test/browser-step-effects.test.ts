@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createBrowserStepEffectRecorder, normalizeBrowserStepEffects } from '@agentmux/browser/browser-step-effects'
+import { createBrowserStepEffectRecorder, normalizeBrowserStepEffects } from '@agentmux/browser/operations'
 
 describe('what one page call caused, as Main saw it', () => {
   it('a Browser the page opens during a call is that call’s effect; the document it moved to is recorded', () => {

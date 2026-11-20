@@ -10,7 +10,7 @@ import { AgentMuxError } from '@agentmux/core'
 import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-server.js'
 import { parseRpcControlResult } from '../../../packages/core/src/rpc-business-codec.js'
 import { nameChangeRequests, unknownNameContext } from '../src/main/name-change-audit.js'
-import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
+import { BrowserRefLedgerStore } from '@agentmux/browser/operations'
 
 const native = await vi.hoisted(async () => (await import('./helpers/browser-resource-directory-ports')).directoryNativePorts())
 vi.mock('electron', () => ({ BaseWindow: native.BaseWindow, WebContentsView: native.View,

@@ -218,7 +218,7 @@ import {
   type BrowserProfileResolver,
   normalizeBrowserUrl
 } from '../src/main/browser-view-manager.js'
-import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
+import { BrowserRefLedgerStore } from '@agentmux/browser/operations'
 import { normalizeBrowserBounds } from '../src/shared/browser-bounds.js'
 import { DEFAULT_BROWSER_ZOOM_FACTOR } from '../src/shared/browser-zoom.js'
 import { BROWSER_EVENT_CHANNEL, BROWSER_PRESENTATION_EVENT_CHANNEL, type BrowserEvent, type BrowserPresentationEvent } from '../src/shared/contracts.js'

@@ -2,7 +2,7 @@ import {app,BrowserWindow} from 'electron'
 import {writeFile} from 'node:fs/promises'
 import {join} from 'node:path'
 import {BrowserCdpSession} from '../../../src/main/browser-cdp-session'
-import {createBrowserNetworkRouting} from '@agentmux/browser/browser-network-routing'
+import {createBrowserNetworkRouting} from '@agentmux/browser/operations'
 const root=process.env.PRIVATE_NETWORK_ROOT!,url=process.env.PRIVATE_NETWORK_URL!,out=process.env.PRIVATE_NETWORK_RECEIPT!
 app.setPath('userData',root);app.setPath('sessionData',join(root,'session'))
 const receipt:any={passed:false,cases:[],notes:[],stage:'starting'};let window:BrowserWindow, session:BrowserCdpSession, owner:ReturnType<typeof createBrowserNetworkRouting>

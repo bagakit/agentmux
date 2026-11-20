@@ -187,7 +187,7 @@ vi.mock('electron', () => ({ WebContentsView: fakeElectron.FakeWebContentsView, 
 import { BrowserProfileStore, type BrowserProfileActivityCheckpoint } from '../src/main/browser-profile-store.js'
 import { BrowserProfileManager } from '../src/main/browser-profile-manager.js'
 import { BrowserViewManager } from '../src/main/browser-view-manager.js'
-import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
+import { BrowserRefLedgerStore } from '@agentmux/browser/operations'
 import { executeBrowserProfileControl, isBrowserProfileControlRequest } from '../src/main/browser-profile-control.js'
 import { AgentMuxControlServer } from '../../../packages/core/src/control-host.js'
 import { privateRpcCorePort } from '../../../packages/core/test/helpers/private-rpc-core.js'

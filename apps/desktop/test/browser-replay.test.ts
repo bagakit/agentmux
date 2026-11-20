@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { buildReplayScript } from '../src/main/browser-replay-compiler'
-import { BROWSER_OPERATION_PHASES, narrowBrowserOperation } from '@agentmux/browser/model/browser-operation'
+import { BROWSER_OPERATION_PHASES, narrowBrowserOperation } from '@agentmux/browser/model'
 
 /**
  * 回放脚本的判据。

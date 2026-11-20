@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   BROWSER_SELECTION_LIMITS,
   sanitizeBrowserElementSelection
-} from '@agentmux/browser/browser-selection'
+} from '@agentmux/browser/page'
 
 function rawSelection(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {

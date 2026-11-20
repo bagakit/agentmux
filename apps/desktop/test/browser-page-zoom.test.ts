@@ -90,7 +90,7 @@ vi.mock('electron', () => ({ WebContentsView: native.View, session: { fromPartit
 
 import { BrowserViewManager, type BrowserProfileResolver } from '../src/main/browser-view-manager.js'
 import { steppedBrowserZoom } from '../src/shared/browser-zoom.js'
-import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
+import { BrowserRefLedgerStore } from '@agentmux/browser/operations'
 import type { BrowserEvent, BrowserSnapshot } from '../src/shared/contracts.js'
 
 const profiles: BrowserProfileResolver = { defaultProfileId: () => 'personal', resolvePartition: id => `persist:browser-${id}` }

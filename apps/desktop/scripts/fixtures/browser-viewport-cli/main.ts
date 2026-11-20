@@ -5,7 +5,7 @@ import { createServer } from 'node:http'
 import { join } from 'node:path'
 import { app, BrowserWindow, nativeImage } from 'electron'
 import { AgentMuxControlServer } from '@agentmux/core'
-import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
+import { BrowserRefLedgerStore } from '@agentmux/browser/operations'
 import { BrowserViewManager } from '../../../src/main/browser-view-manager'
 
 const root = process.env.AGENTMUX_VIEWPORT_CLI_ROOT!

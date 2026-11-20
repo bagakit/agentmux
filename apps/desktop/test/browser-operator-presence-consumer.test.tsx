@@ -4,7 +4,7 @@ const { fixtureEpoch: _batchFixtureEpoch } = await vi.hoisted(async () => await 
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import type { BrowserOperation } from '@agentmux/browser/model/browser-operation'
+import type { BrowserOperation } from '@agentmux/browser/model'
 import type { SessionSnapshot } from '../src/shared/contracts'
 import type { BrowserOperatorAvatar, BrowserOperatorAvatarResult } from '../src/renderer/src/lib/browser-operator-avatar'
 

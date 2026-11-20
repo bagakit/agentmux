@@ -11,7 +11,7 @@ import { windowSecurityWebPreferences } from '../../../src/main/window-security'
 import { topFrameOrigin } from '../../../src/main/top-frame-navigation'
 import { capsuleDocumentIpc } from '../../../src/main/capsule-document-ipc'
 import { BrowserViewManager } from '../../../src/main/browser-view-manager'
-import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
+import { BrowserRefLedgerStore } from '@agentmux/browser/operations'
 import { nameChangeRequests, desktopNameContext } from '../../../src/main/name-change-audit'
 import { sessionInputOperationResult } from '../../../src/shared/session-input-result'
 

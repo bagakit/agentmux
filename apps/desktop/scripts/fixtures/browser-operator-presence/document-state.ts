@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import type { WebContents } from 'electron'
 import { BrowserCdpSession } from '../../../src/main/browser-cdp-session.js'
-import { discoverBrowserFrameDocuments } from '@agentmux/browser/browser-frame-documents'
+import { discoverBrowserFrameDocuments } from '@agentmux/browser/page'
 import { BROWSER_OPERATION_FEEDBACK_WORLD_NAME } from '../../../src/main/browser-operation-feedback.js'
 
 /** Read the actual closed shadow in its owning document; never synthesize a cue. */

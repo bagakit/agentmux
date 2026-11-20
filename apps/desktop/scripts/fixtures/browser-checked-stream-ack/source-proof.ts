@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, expect, it, vi } from 'vitest'
 import { BrowserOperationFileStore, BrowserOperationJournal, type BrowserOperationSequencedEvent,
-  type BrowserOperationJournalDocument } from '@agentmux/browser/browser-operation-journal'
-import type { BrowserOutcomeEvaluation, BrowserOutcomeRegistration } from '@agentmux/browser/model/browser-outcome-criteria'
+  type BrowserOperationJournalDocument } from '@agentmux/browser/operations'
+import type { BrowserOutcomeEvaluation, BrowserOutcomeRegistration } from '@agentmux/browser/model'
 
 // Source-only regression: real Journal and FileStore; only the store acknowledgement is held.
 // No Electron, GUI, Browser input, Store seeding, or replacement Journal implementation.

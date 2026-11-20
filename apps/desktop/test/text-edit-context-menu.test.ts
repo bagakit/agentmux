@@ -27,7 +27,7 @@ import { installTextEditContextMenu } from '../src/main/text-edit-context-menu.j
 import { BrowserViewManager } from '../src/main/browser-view-manager.js'
 import { BrowserPageMenuPresentation } from '../src/main/browser-page-menu-presentation.js'
 import type { BrowserPageMenuEvent } from '../src/shared/browser-page-menu.js'
-import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
+import { BrowserRefLedgerStore } from '@agentmux/browser/operations'
 
 const doms: Array<{ window: DomWindow }> = [], disposers: Array<() => void> = [], roots: string[] = []
 let frameId = 0

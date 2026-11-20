@@ -48,7 +48,7 @@ vi.mock('electron', async () => {
 })
 
 import { BrowserViewManager } from '../src/main/browser-view-manager.js'
-import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
+import { BrowserRefLedgerStore } from '@agentmux/browser/operations'
 import { BrowserPane } from '../src/renderer/src/components/BrowserPane.js'
 import { BrowserPresentationStage, useBrowserPresentationCapture, type BrowserStagePresentation, type WorkbenchBrowserPresentation } from '../src/renderer/src/components/BrowserPresentationStage.js'
 import { claimSurfaceChords } from '../src/renderer/src/lib/surface-chord-owners.js'

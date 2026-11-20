@@ -3,8 +3,8 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { BrowserOperationFileStore, BrowserOperationJournal } from '@agentmux/browser/browser-operation-journal'
-import type { BrowserOutcomeEvaluation, BrowserOutcomeRegistration } from '@agentmux/browser/model/browser-outcome-criteria'
+import { BrowserOperationFileStore, BrowserOperationJournal } from '@agentmux/browser/operations'
+import type { BrowserOutcomeEvaluation, BrowserOutcomeRegistration } from '@agentmux/browser/model'
 
 const roots: string[] = []
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })

@@ -10,7 +10,7 @@ import {
   type BrowserOperationEvent,
   type BrowserOperationJournalDocument,
   type BrowserOperationJournalChanges, type BrowserOperationJournalStore
-} from '@agentmux/browser/browser-operation-journal'
+} from '@agentmux/browser/operations'
 
 class MemoryStore implements BrowserOperationJournalStore {
   document: BrowserOperationJournalDocument | null = null

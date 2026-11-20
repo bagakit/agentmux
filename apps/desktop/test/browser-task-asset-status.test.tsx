@@ -5,10 +5,10 @@ import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { BrowserTaskAssets, type BrowserTaskAssetHost, type BrowserTaskAssetStore } from '../src/main/browser-task-assets'
-import { BrowserOperationJournal, type BrowserOperationJournalDocument } from '@agentmux/browser/browser-operation-journal'
+import { BrowserOperationJournal, type BrowserOperationJournalDocument } from '@agentmux/browser/operations'
 import type { BrowserTaskAssetDocument, BrowserTaskAssetState, BrowserTaskAssetRun } from '../src/shared/browser-task-assets'
 import type { BrowserDemonstrationDraft } from '../src/shared/browser-demonstration'
-import type { BrowserActivityState } from '@agentmux/browser/model/browser-operation'
+import type { BrowserActivityState } from '@agentmux/browser/model'
 import type { BrowserWorkbenchSurface } from '../src/renderer/src/lib/workbench-tabs'
 
 const bridge = vi.hoisted(() => ({ executeControl: vi.fn(async () => ({ operation: 'browser.history', operations: [] })),

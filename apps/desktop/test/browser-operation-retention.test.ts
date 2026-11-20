@@ -1,6 +1,6 @@
 import { applyJournalChanges } from './browser-operation-memory-store.js'
 import { describe, expect, it } from 'vitest'
-import { BrowserOperationJournal, type BrowserOperationJournalDocument, type BrowserOperationJournalChanges, type BrowserOperationJournalStore } from '@agentmux/browser/browser-operation-journal'
+import { BrowserOperationJournal, type BrowserOperationJournalDocument, type BrowserOperationJournalChanges, type BrowserOperationJournalStore } from '@agentmux/browser/operations'
 
 class MemoryStore implements BrowserOperationJournalStore {
   document: BrowserOperationJournalDocument | null = null

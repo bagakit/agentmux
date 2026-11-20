@@ -61,10 +61,10 @@ vi.mock('electron', async () => {
   return { WebContentsView: View, app: { getPath: () => tmpdir() } }
 })
 import { BrowserViewManager } from '../src/main/browser-view-manager'
-import { BrowserOperationFileStore, BrowserOperationJournal } from '@agentmux/browser/browser-operation-journal'
-import { BrowserStepEvidenceStore } from '@agentmux/browser/browser-step-evidence'
-import { BrowserResultArtifactStore } from '@agentmux/browser/browser-result-artifact'
-import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
+import { BrowserOperationFileStore, BrowserOperationJournal } from '@agentmux/browser/operations'
+import { BrowserStepEvidenceStore } from '@agentmux/browser/operations'
+import { BrowserResultArtifactStore } from '@agentmux/browser/operations'
+import { BrowserRefLedgerStore } from '@agentmux/browser/operations'
 import { BrowserTaskAssetFileStore, BrowserTaskAssets } from '../src/main/browser-task-assets'
 import type { BrowserTaskAssetDocument } from '../src/shared/browser-task-assets'
 

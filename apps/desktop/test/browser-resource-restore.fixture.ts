@@ -22,7 +22,7 @@ const native = await vi.hoisted(async () => (await import('./helpers/browser-res
 vi.mock('electron', () => ({ BaseWindow: native.BaseWindow, WebContentsView: native.View,
   app: { getPath: () => process.env.AGENTMUX_COLD_PRIVATE_ROOT } }))
 import { BrowserViewManager } from '../src/main/browser-view-manager.js'
-import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
+import { BrowserRefLedgerStore } from '@agentmux/browser/operations'
 
 const managers: BrowserViewManager[] = [], roots: string[] = [], originalApp = useAppStore.getState()
 afterEach(() => {

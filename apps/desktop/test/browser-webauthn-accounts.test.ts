@@ -115,7 +115,7 @@ const native = vi.hoisted(() => {
 vi.mock('electron', () => ({ Menu: native.Menu, webContents: { fromFrame: native.fromFrame }, WebContentsView: native.View, app: { getPath: () => tmpdir() } }))
 import { registerBrowserWebAuthnAccounts, cancelBrowserWebAuthnAccounts } from '../src/main/browser-webauthn-accounts.js'
 import { BrowserViewManager } from '../src/main/browser-view-manager.js'
-import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
+import { BrowserRefLedgerStore } from '@agentmux/browser/operations'
 import { acquireBrowserWebAuthnWindowMenu, releaseBrowserWebAuthnWindowMenu } from '../src/main/browser-webauthn-window-menu.js'
 
 const releases: Array<() => void> = []

@@ -1,5 +1,5 @@
 import { BrowserViewManager } from '../../../src/main/browser-view-manager'
-import { BrowserOperationJournal } from '@agentmux/browser/browser-operation-journal'
+import { BrowserOperationJournal } from '@agentmux/browser/operations'
 import { session } from 'electron'
 import type { BrowserSnapshot } from '../../../src/shared/contracts'
 

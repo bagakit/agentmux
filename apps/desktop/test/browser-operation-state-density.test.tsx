@@ -7,7 +7,7 @@ import { createRoot } from 'react-dom/client'
 import ts from 'typescript'
 import { describe, expect, it, vi } from 'vitest'
 import type { AgentMuxBrowserControl } from '@agentmux/core'
-import type { BrowserActivityState, BrowserOperation, BrowserOperationPhase } from '@agentmux/browser/model/browser-operation'
+import type { BrowserActivityState, BrowserOperation, BrowserOperationPhase } from '@agentmux/browser/model'
 import { BrowserOperationStatus, BrowserOperationTimeline, BrowserOperationWarning } from '../src/renderer/src/components/BrowserOperationSurface'
 
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
