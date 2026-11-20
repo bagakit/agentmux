@@ -95,7 +95,7 @@ await runA2aProof({
     { label: 'actual-skill-browser-preference-removed',
       ...documentMutation('modules/space', "prefer AgentMux's embedded Browser and public CLI", 'choose a Browser'), tests: discovery },
     { label: 'actual-launch-browser-nearby-region-removed', file: 'generated/amux-protocols.js',
-      before: 'read space --skill', after: 'choose any available Region', tests: discovery },
+      before: 'When attached, read space --skill', after: 'When attached, choose any available Region', tests: discovery },
     { label: 'actual-skill-browser-nearby-region-removed',
       ...documentMutation('modules/space', 'prefer a directional Region in that same Tab', 'choose any available Region'), tests: discovery }
   ]
