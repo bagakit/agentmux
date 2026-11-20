@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act } from 'react'
+import { act, useLayoutEffect, useRef } from 'react'
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
@@ -11,6 +11,9 @@ import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
 import { moteTopic, scratchWorkspace } from './fixtures/mote-workface'
 import { fixturePath } from '../scripts/lib/fixture-values.mjs'
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface'
+import { FocusPlacementCard } from '../src/renderer/src/components/FocusPlacementCard'
+import { FocusPlacementScope, useFocusContextPlacements } from '../src/renderer/src/lib/use-focus-context-placements'
+import { agentContextForSession, type FocusContext } from '../src/renderer/src/lib/focus-context'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
@@ -255,6 +258,143 @@ it('held reparenting preserves the actual Agent editor, draft, selection and foc
   await act(async () => { later.focus(); document.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'Tab' })) })
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
   expect(lane('alpha')).toBe(lane('beta')); expect(useAppStore.getState().agentComposerDrafts).toBe(drafts); later.remove()
+})
+
+async function requireOriginalPermission() {
+  await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === 'alpha' ? {
+    ...session,
+    status: { state: 'waiting', source: 'native-hook', observedAt: Date.now() },
+    semanticStatus: { state: 'waiting', source: 'native-hook', observedAt: Date.now(), stateEnteredAt: Date.now() },
+    pendingInteraction: { id: 'exact-placement-permission', kind: 'permission', title: 'Original permission request', operation: 'edit' }
+  } : session) })))
+}
+
+it.each([4, 32])('bucket placement observes the one held card beside %i unrelated cards in its lane', async count => {
+  seed(0)
+  useAppStore.setState(state => {
+    const alpha = state.sessions.find(session => session.id === 'alpha')!
+    const decoys = Array.from({ length: count }, (_, index) => {
+      const id = `placement-decoy-${index}`
+      return { ...composerSession(id), workspacePath: alpha.workspacePath, status: alpha.status }
+    })
+    return { sessions: [...state.sessions, ...decoys] }
+  })
+  await render()
+  const original = card('alpha')!, slot = original.closest<HTMLElement>('[data-focus-card-key]')!
+  const board = lane('alpha'), bucket = original.closest<HTMLElement>('.global-agents-group')!
+  const decoys = [...board.querySelectorAll<HTMLElement>('[data-focus-card-key]')].filter(node => node !== slot)
+  expect(decoys).toHaveLength(count)
+  await act(async () => original.focus())
+
+  const exact = vi.spyOn(document, 'getElementById')
+  const wholeLane = vi.spyOn(Element.prototype, 'querySelectorAll')
+  const local = vi.spyOn(Element.prototype, 'querySelector')
+  const observe = vi.spyOn(MutationObserver.prototype, 'observe')
+  const interactionSelector = '.focus-context--renaming, .is-menu-open'
+  await requireOriginalPermission()
+  expect(original.closest('.global-agents-group')).toBe(bucket)
+  expect(document.activeElement).toBe(original)
+  expect(original.dataset.bucket).toBe('attention')
+  expect(board.querySelector('.focus-context-group__pending')).toBeTruthy()
+  expect(wholeLane.mock.calls.filter(([selector]) => selector === interactionSelector)).toEqual([])
+  const exactLookups = () => exact.mock.calls.filter(([id]) => id.startsWith('focus-card-')).map(([id]) => id)
+  expect(exactLookups()).toEqual([slot.id])
+  expect(observe.mock.calls.filter(([, options]) => options?.attributeFilter?.includes('class')).map(([target]) => target)).toContain(slot)
+  expect(observe.mock.calls.filter(([, options]) => options?.attributeFilter?.includes('class')).map(([target]) => target))
+    .not.toContain(bucket.closest('.focus-project-lanes__groups'))
+
+  exact.mockClear(); wholeLane.mockClear(); local.mockClear()
+  await act(async () => {
+    for (const node of decoys) node.classList.add('test-unrelated-change')
+    await new Promise(resolve => setTimeout(resolve, 20))
+  })
+  expect(exactLookups()).toEqual([])
+  expect(wholeLane.mock.calls.filter(([selector]) => selector === interactionSelector)).toEqual([])
+  expect(local.mock.calls.filter(([selector]) => selector === interactionSelector)).toEqual([])
+  const elsewhere = document.createElement('button'); document.body.append(elsewhere)
+  await act(async () => elsewhere.focus())
+  await until(() => card('alpha')?.closest<HTMLElement>('.global-agents-group')?.dataset.bucket === 'attention')
+  expect(board.querySelector('.focus-context-group__pending')).toBeNull()
+  elsewhere.remove()
+})
+
+it('bucket placement keeps a real text selection until the original document releases it', async () => {
+  seed(0); await render()
+  const original = card('alpha')!, group = original.closest('.global-agents-group')
+  const selection = document.getSelection()!, range = document.createRange()
+  range.selectNodeContents(original)
+  await act(async () => selection.addRange(range))
+  expect(selection.isCollapsed).toBe(false)
+  expect(document.activeElement).not.toBe(original)
+  await requireOriginalPermission()
+  expect(card('alpha')).toBe(original)
+  expect(original.closest('.global-agents-group')).toBe(group)
+  expect(selection.anchorNode).toBe(original)
+  await act(async () => { selection.removeAllRanges(); document.dispatchEvent(new Event('selectionchange')) })
+  await until(() => card('alpha')?.closest<HTMLElement>('.global-agents-group')?.dataset.bucket === 'attention')
+})
+
+it('bucket placement keeps an open menu on the original card until it closes', async () => {
+  seed(0); await render()
+  const original = card('alpha')!, group = original.closest('.global-agents-group')
+  await act(async () => original.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 30, clientY: 30 })))
+  await until(() => Boolean(document.querySelector('.focus-context-menu')))
+  const menu = document.querySelector('.focus-context-menu')!
+  await requireOriginalPermission()
+  expect(card('alpha')).toBe(original)
+  expect(original.closest('.global-agents-group')).toBe(group)
+  expect(document.querySelector('.focus-context-menu')).toBe(menu)
+  await act(async () => menu.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' })))
+  await until(() => !document.querySelector('.focus-context-menu'))
+  const elsewhere = document.createElement('button'); document.body.append(elsewhere)
+  await act(async () => elsewhere.focus())
+  await until(() => card('alpha')?.closest<HTMLElement>('.global-agents-group')?.dataset.bucket === 'attention')
+  elsewhere.remove()
+})
+
+function Occurrence({ label, context, onLayout }: { label: string; context: FocusContext; onLayout?: () => void }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const { groups, scope } = useFocusContextPlacements([context], ref)
+  useLayoutEffect(() => { onLayout?.() }, [onLayout])
+  const bucket = groups.working.length ? 'working' : 'attention'
+  return <FocusPlacementScope.Provider value={scope}><div ref={ref}>
+    <div key={bucket} data-test-placement={bucket}>
+      <FocusPlacementCard cardKey={JSON.stringify([context.hostId, context.id])}><button>{label}</button></FocusPlacementCard>
+    </div>
+  </div></FocusPlacementScope.Provider>
+}
+
+it('bucket placement scopes two mounted occurrences of the same original Context independently', async () => {
+  const original = useAppStore.getState().sessions.find(session => session.id === 'alpha')!
+  const base = agentContextForSession(original, undefined, undefined, undefined, null)
+  const draw = async (bucket: FocusContext['bucket']) => {
+    const context = { ...base, bucket }
+    await act(async () => root.render(<><Occurrence label="First" context={context} /><Occurrence label="Second" context={context} /></>))
+  }
+  await draw('working')
+  const [first, second] = [...host.querySelectorAll('button')]
+  expect(first!.parentElement!.id).not.toBe(second!.parentElement!.id)
+  await act(async () => first!.focus())
+  await draw('attention')
+  const [currentFirst, currentSecond] = [...host.querySelectorAll('button')]
+  expect(currentFirst).toBe(first)
+  expect(currentFirst!.closest<HTMLElement>('[data-test-placement]')?.dataset.testPlacement).toBe('working')
+  expect(currentSecond!.closest<HTMLElement>('[data-test-placement]')?.dataset.testPlacement).toBe('attention')
+  expect(document.getElementById(second!.parentElement!.id)).toBe(currentSecond!.parentElement)
+})
+
+it('bucket placement sees focus released during commit before listeners attach', async () => {
+  const session = useAppStore.getState().sessions.find(session => session.id === 'alpha')!
+  const context = agentContextForSession(session, undefined, undefined, undefined, null)
+  const outside = document.createElement('button')
+  document.body.append(outside)
+  try {
+    await act(async () => root.render(<Occurrence label="Original" context={{ ...context, bucket: 'working' }} />))
+    await act(async () => host.querySelector('button')!.focus())
+    await act(async () => root.render(<Occurrence label="Original" context={{ ...context, bucket: 'attention' }} onLayout={() => outside.focus()} />))
+    expect(document.activeElement).toBe(outside)
+    expect(host.querySelector<HTMLElement>('[data-test-placement]')?.dataset.testPlacement).toBe('attention')
+  } finally { outside.remove() }
 })
 
 it.each(['permission', 'connection'] as const)('a relevant Agent bucket transition preserves its active rename input, draft, selection and focus (%s)', async kind => {
