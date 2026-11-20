@@ -23,8 +23,13 @@ import { homeZoneId } from './mote-model.js'
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const heartbeat = 'Review outstanding commitments, take one useful authorized action, and verify the result.'
 const supervisionRead = 'Read the original work and reports with amux space mote dialogue supervision read --input - using this JSON:'
-const heartbeatNote = (target: MotePreferencesTarget) => formatAmuxTriggerNote('heartbeat', MOTE_SUPERVISION_GUIDANCE + '\n' + supervisionRead + '\n' + JSON.stringify({ target }))
-export const moteGuidanceRevision = () => 'sha256:' + digest([MOTE_SUPERVISION_GUIDANCE, supervisionRead])
+const heartbeatGuidance = [
+  MOTE_SUPERVISION_GUIDANCE,
+  'If no work can move forward, consider a useful new idea grounded in the original work. Save it through the Mote idea guide and read it back only if it is worth keeping.',
+  supervisionRead
+]
+const heartbeatNote = (target: MotePreferencesTarget) => formatAmuxTriggerNote('heartbeat', [...heartbeatGuidance, JSON.stringify({ target })].join('\n'))
+export const moteGuidanceRevision = () => 'sha256:' + digest(heartbeatGuidance)
 const key = (target: MotePreferencesTarget) => JSON.stringify(target)
 
 /** Mote policy adapts original files/roles to the one Host scheduler. No timer or input queue lives here. */
