@@ -147,6 +147,47 @@ it('shows the cached Main observation before spatial and Session reads complete 
   expect(element.querySelector('[aria-label="Runtime startup observations"]')).toBeNull()
 })
 
+it('groups live startup activity without dropping distinct messages or original diagnostics', async () => {
+  const connecting = pending('The endpoint is connecting. Existing Sessions remain unverified.')
+  const warnings = [
+    { ...connecting, hostId: 'remote-b', step: 'Reading Session directory', message: 'The complete Session directory is not confirmed.' },
+    { ...connecting, hostId: 'remote-a', step: 'Reading Session directory', message: 'The complete Session directory is not confirmed.' },
+    { ...connecting, hostId: 'remote-a', step: 'Connecting to Runtime' },
+    { ...connecting, hostId: 'remote-c', step: 'Connecting to Runtime' },
+    { ...connecting, hostId: 'remote-d', step: 'Connecting to Runtime', message: 'Authorization for this endpoint is still being checked.' }
+  ]
+  await act(async () => endpointCut.resolve(warnings))
+
+  const activity = element.querySelector('[aria-label="Runtime startup observations"]')!
+  const groups = [...activity.querySelectorAll('.startup-activity__group')]
+  expect(activity.querySelector('.startup-activity__heading')?.textContent).toBe('Current activity4 endpoints · 2 steps')
+  expect(groups).toHaveLength(2)
+  expect(groups[0]?.querySelector('h3')?.textContent).toBe('Reading Session directory')
+  expect(groups[0]?.querySelector('.startup-activity__count')?.textContent).toBe('2 endpoints')
+  expect(groups[0]?.querySelectorAll('.startup-activity__message')).toHaveLength(1)
+  expect(groups[1]?.querySelector('h3')?.textContent).toBe('Connecting to Runtime')
+  expect(groups[1]?.querySelector('.startup-activity__count')?.textContent).toBe('3 endpoints')
+  expect(groups[1]?.querySelectorAll('.startup-activity__message')).toHaveLength(2)
+  expect(activity.textContent).not.toContain('remote-a')
+  expect(element.textContent).toContain('Reading your saved workspace.')
+
+  const details = element.querySelector('details')!
+  const definitions = [...details.querySelectorAll('dt')].map(node => node.textContent)
+  expect(definitions).toEqual([
+    'remote-b: Reading Session directory',
+    'remote-a: Reading Session directory',
+    'remote-a: Connecting to Runtime',
+    'remote-c: Connecting to Runtime',
+    'remote-d: Connecting to Runtime'
+  ])
+  const diagnostics = [...details.querySelectorAll('dd')].map(node => node.textContent)
+  expect(diagnostics).toHaveLength(5)
+  for (const [index, warning] of warnings.entries()) {
+    expect(diagnostics[index]).toContain(warning.code)
+    expect(diagnostics[index]).toContain(warning.recovery)
+  }
+})
+
 it('does not resurrect an already restored boundary when its earlier Main cut arrives late', async () => {
   const cached = pending('The original Native connection is not yet confirmed.')
   await act(async () => listener(observed(null)))
