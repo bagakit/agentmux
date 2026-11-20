@@ -526,6 +526,53 @@ export class AgentMuxClient {
     return this.requireCreationAuthority().trustMessageSource(input, principal)
   }
 
+  /** Save a source-bound local reply when the original peer is retired, without scheduling input. */
+  async retainRetiredLocalReply(input: { caller: { agentSessionId: string; capability: string }; expectedRun: AgentMuxRunRef;
+    sourceMessageId: string; sourceAuthor: { agentSessionId: string; runId: string }; threadId: string;
+    operationId: string; messageId: string; text: string; application: AgentMuxMessageApplication },
+    context: { signal?: AbortSignal; assertCurrent?(): void | Promise<void> } = {}): Promise<boolean> {
+    const retired = await this.store.readRetiredAgentSession(input.sourceAuthor.agentSessionId)
+    if (!retired) return false
+    const author = await this.currentStoredAgentSession(input.caller.agentSessionId)
+    this.resolveMessageAuthor(input.caller.capability, author.agentSessionId, author)
+    const source = await this.messageQueue.readByMessageId(input.sourceMessageId)
+    const envelope = source?.envelope
+    if (source?.deliveryMode !== 'reference' || !envelope || envelope.sender.kind !== 'agent-session' ||
+        envelope.sender.agentSessionId !== input.sourceAuthor.agentSessionId || envelope.senderRunId !== input.sourceAuthor.runId ||
+        envelope.threadId !== input.threadId ||
+        envelope.recipientSessionId !== author.agentSessionId || envelope.recipient.kind !== 'agent-session' ||
+        envelope.recipient.agentSessionId !== author.agentSessionId || !sameRun(author.run, input.expectedRun) ||
+        !sessionSemanticResumeSourceRuns(author).includes(envelope.recipientRunId!) || !envelope.senderRunId)
+      throw new AgentMuxError('The original local reply source or worker Run is unconfirmed.', 'MESSAGE_PARTICIPANT_MISMATCH')
+    const identity = await this.agentMessageAuthority()
+    const runtimeId = identity.runtimeId
+    if (retired.hostId !== 'local' || retired.recordDeletion || retired.run.runId !== envelope.senderRunId ||
+        envelope.senderSessionId !== retired.agentSessionId ||
+        [envelope.senderRuntimeId, envelope.recipientRuntimeId].some(id => id !== undefined && id !== runtimeId))
+      throw new AgentMuxError('The original retired reply target is unconfirmed. Keep the original reply and its source.', 'MESSAGE_RECIPIENT_MISMATCH')
+    const target = { runtimeId, agentSessionId: retired.agentSessionId, runId: retired.run.runId }
+    const original = await this.messageQueue.readByOperationId(input.operationId)
+    const payload = { envelope: validateAgentMuxMessageEnvelope({
+      schema: 'agentmux.a2a.v1', messageId: input.messageId, operationId: input.operationId,
+      createdAt: original?.envelope.createdAt ?? Date.now(), sender: { kind: 'agent-session', agentSessionId: author.agentSessionId },
+      senderSessionId: author.agentSessionId, senderRunId: author.run.runId, senderRuntimeId: runtimeId,
+      recipient: { kind: 'agent-session', agentSessionId: target.agentSessionId }, recipientSessionId: target.agentSessionId,
+      recipientRunId: target.runId, recipientRuntimeId: runtimeId, workspaceId: null, threadId: envelope.threadId,
+      correlationId: envelope.messageId, replyTo: envelope.messageId, body: input.text, application: input.application,
+    }), execution: 'default' as const, sourceChannel: 'api' as const }
+    const provenance = original?.provenance ?? await this.requireCreationAuthority().attestMessage(
+      { agentSessionId: author.agentSessionId, runId: author.run.runId }, target, messagePacketDigest(payload), identity.fingerprint)
+    context.signal?.throwIfAborted()
+    await context.assertCurrent?.()
+    await this.messageQueue.append({ ...payload.envelope, execution: payload.execution, sourceChannel: payload.sourceChannel },
+      { deliveryMode: 'reference', inboxOnly: true, provenance, reauthorize: async () => {
+        context.signal?.throwIfAborted()
+        const current = await this.authorizeAgentCaller(input.caller.capability, author.agentSessionId)
+        if (!sameRun(current.run, author.run)) throw new AgentMuxError('The original reply author Run changed.', 'AGENT_CAPABILITY_STALE_RUN')
+      } })
+    return true
+  }
+
   /** Sign and retain one exact outbox intent. A network carrier never becomes its author. */
   async prepareFederatedMessage(input: { caller: { agentSessionId: string; capability: string }; target?: AgentMuxMessageParticipant;
     targetKeyFingerprint?: string; recipientInputEpoch?: string;

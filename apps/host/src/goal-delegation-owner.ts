@@ -30,6 +30,7 @@ export interface GoalDelegationCorePort {
   call<M extends GoalDelegationCoreMethod>(hostId: string, method: M, params: AgentMuxRpcParams<M>, context: AgentMuxRpcCallContext): Promise<AgentMuxRpcResult<M>>
   readDispatch?(hostId: string, sourceMessageId: string): Promise<AgentMuxRpcResult<'message.dispatch.read'>>
   syncDispatch?(ownerHostId: string, sourceMessageId: string, workerHostId: string): Promise<AgentMuxRpcResult<'message.dispatch.sync'>>
+  retainRetiredLocalReply?: import('@agentmux/core').AgentMuxClient['retainRetiredLocalReply']
   observeRun(hostId: string, runId: string): Promise<Pick<AgentMuxRun, 'runId' | 'state'>>
 }
 /** Original Demand owner and original Host clients; no private journal or second queue. */
@@ -269,8 +270,17 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
           throw new AgentMuxError('The original worker report is frozen. Read it before continuing.', 'CONTROL_REQUEST_CONFLICT')
         const body = goalDelegationReportBody(input.goalId, saved.operationId, report)
         const existing = await core.call(delegationWorkerHostId(saved), 'message.read', { hostId: delegationWorkerHostId(saved), operationId: report.operationId }, context)
+        let retainedOnly = Boolean(existing.message?.notification?.state === 'inbox-only' && existing.message.provenance &&
+          existing.message.provenance.source.runtimeId === existing.message.provenance.target.runtimeId)
         if (existing.message) await this.assertReply(saved, report, existing.message, body)
         else {
+          if (saved.hostId === 'local' && delegationWorkerHostId(saved) === 'local' && context.caller)
+            retainedOnly = await core.retainRetiredLocalReply?.({ caller: context.caller, expectedRun: { runId: authority.runId! },
+              sourceMessageId: saved.sourceMessageId, sourceAuthor: { agentSessionId: saved.ownerAgentSessionId, runId: saved.ownerRunId },
+              threadId: saved.threadId, operationId: report.operationId, messageId: report.replyMessageId,
+              text: body, application: goalReportApplication(input.goalId, saved.operationId, report) }, context) ?? false
+        }
+        if (!existing.message && !retainedOnly) {
           const owner = await this.runtime.agentCreation(saved.hostId, saved.ownerAgentSessionId)
           if (owner.kind === 'retired-agent') throw new AgentMuxError(
             'The original report recipient is closed. Keep the worker report and its original operation; explicitly recover the recipient before sending.', 'AGENT_SESSION_RETIRED')
@@ -281,7 +291,7 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
             operationId: report.operationId, messageId: report.replyMessageId, threadId: saved.threadId, correlationId: saved.sourceMessageId,
             replyTo: saved.sourceMessageId, text: body, application: goalReportApplication(input.goalId, saved.operationId, report), expectedRun: owner.run }, context)
         }
-        await core.call(saved.hostId, 'message.dispatch.report', { sourceMessageId: saved.sourceMessageId, replyMessageId: report.replyMessageId, kind: 'worker_done' }, context)
+        if (!retainedOnly) await core.call(saved.hostId, 'message.dispatch.report', { sourceMessageId: saved.sourceMessageId, replyMessageId: report.replyMessageId, kind: 'worker_done' }, context)
         const observed = await core.call(saved.hostId, 'message.dispatch.read', { hostId: saved.hostId, sourceMessageId: saved.sourceMessageId }, context)
         this.assertSource(saved, observed.source, input.goalId)
         const reply = observed.replies.find(message => message.envelope.messageId === report.replyMessageId)

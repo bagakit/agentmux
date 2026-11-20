@@ -346,6 +346,8 @@ export function assertGoalDelegationReply(saved: DemandDelegation, report: Deman
   // Signed peers admit successors at their signing Core. A local business owner
   // supplies its Core read here; a wire reader only checks the owner's returned structure.
   const signed = Boolean(message.provenance && (saved.runtimeIdentity || source?.provenance))
+  const retainedLocal = message.notification?.state === 'inbox-only' && message.provenance !== undefined &&
+    message.provenance.source.runtimeId === message.provenance.target.runtimeId && envelope.recipientRunId === saved.ownerRunId
   const successor = (actual: string | null, original: string, chain?: readonly string[]) => actual === original ||
     Boolean(actual && chain && chain.indexOf(actual) >= 0 && chain.indexOf(original) > chain.indexOf(actual))
   if (envelope.operationId !== report.operationId || envelope.messageId !== report.replyMessageId || envelope.sender.kind !== 'agent-session' ||
@@ -354,7 +356,8 @@ export function assertGoalDelegationReply(saved: DemandDelegation, report: Deman
     !signed && runs !== undefined && (!successor(envelope.senderRunId, saved.workerRunId, runs.workerSourceRuns) || !successor(envelope.recipientRunId, saved.ownerRunId, runs.ownerSourceRuns)) ||
     envelope.replyTo !== saved.sourceMessageId || envelope.threadId !== saved.threadId || envelope.body !== body ||
     saved.runtimeIdentity && (!message.provenance || envelope.senderRuntimeId !== saved.runtimeIdentity.workerRuntimeId || envelope.recipientRuntimeId !== saved.runtimeIdentity.ownerRuntimeId) ||
-    source && (envelope.senderRuntimeId !== source.envelope.recipientRuntimeId || envelope.recipientRuntimeId !== source.envelope.senderRuntimeId ||
+    source && ((!retainedLocal || source.envelope.recipientRuntimeId !== undefined) && envelope.senderRuntimeId !== source.envelope.recipientRuntimeId ||
+      (!retainedLocal || source.envelope.senderRuntimeId !== undefined) && envelope.recipientRuntimeId !== source.envelope.senderRuntimeId ||
       source.provenance && !message.provenance))
     throw new AgentMuxError('The actual worker reply differs from this original report. No result was collected or accepted.', 'CONTROL_REQUEST_CONFLICT')
 }
