@@ -24,7 +24,7 @@ describe('Goal plan guidance reaches its readers', () => {
     for (const command of ['goal plan active --goal ID', 'goal plan revise', 'goal plan assignment', 'goal delegate', 'goal collect', 'goal plan review'])
       expect(manager).toContain(command)
     expect(manager).toContain('Read the saved claim or assignment in `goal plan`')
-    expect(manager).toContain('using the same `intent.planNodeId` and the recorded executor')
+    expect(manager).toContain('using the same `intent.planNodeId` and recorded executor')
     expect(manager).toContain('same node and thread for rework')
     expect(manager).toContain('exact delivery hash')
     expect(executor).toContain('goal plan active')
@@ -51,6 +51,10 @@ describe('Goal plan guidance reaches its readers', () => {
     expect(review).toContain('When the original report has a delivery hash, supply it verbatim.')
     expect(review).toContain('match the saved review operationId, nodeId and delegationOperationId')
     expect(agentMuxCommandHelp('goal.report')).toContain('sourceMessageId')
+    const start = agentMuxCommandHelp('goal.start')
+    expect(start).toContain('Repeat the same continuation Start to read its saved state or receipt and preserve pauses.')
+    expect(start).toContain('--resume-original advances the saved qualified request')
+    expect(prose(agentMuxModuleSkill('goal')!)).toContain('Repeating the same continuation Start only reads the saved state or receipt and preserves pauses.')
   })
 
   it('discovers an explicit planning request without treating discussion or confirmation as plan authority', () => {
