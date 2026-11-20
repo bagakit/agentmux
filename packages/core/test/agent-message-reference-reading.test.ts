@@ -64,7 +64,7 @@ describe('A2A reference and full-content reading boundaries', () => {
     expect(reading.references?.map(item => [item.declaredAgentSessionId, item.declaredMessageId, item.readVia]))
       .toEqual(selected.map(item => [item.senderSessionId, item.messageId, 'message --skill']))
     expect(reading.reminder?.text).toBe(AGENTMUX_A2A_REFERENCE_REMINDER)
-    expect(reading.reminder?.text).toContain('Read relevant original messages by exact MID before acting')
+    expect(reading.reminder?.text).toContain('Read relevant original messages by exact MID with amux message read before acting')
     expect(reading.reminder?.text).not.toContain('message --skill')
     expect(reading.reminder?.text).not.toContain('message read --message-id')
   })

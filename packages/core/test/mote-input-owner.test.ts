@@ -73,7 +73,7 @@ it('real Host MOTE source + Hosted human input + native result + public CLI pres
   f.idle()
   await f.settle()
   await vi.waitFor(() => expect(f.writes.filter((value) => value.key?.agentSessionId === 'primary')).toHaveLength(1))
-  expect(f.writes[1]!.wire).toContain('not a new human request or permission')
+  expect(f.writes[1]!.wire).toContain('The input phase may still be waiting for a result.')
   expect(f.writes[1]!.wire).not.toContain('Human original original')
   await f.append('unrelated', false)
   expect((await f.read('original')).inspection?.observation.result).toBeUndefined()

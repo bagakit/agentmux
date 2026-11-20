@@ -170,6 +170,7 @@ it('takes a remote worker source report through the public Goal owner, signed pu
   const submitted = JSON.parse(reported.stdout)
   expect(submitted.result).toMatchObject({ kind: 'report-submission', goalId, delegationOperationId: 'delegate-first', sourceMessageId: 'source-first', submission: { messageId: 'reply-first', transport: { state: 'outbox', targetRuntimeId: a.identity.runtimeId } } })
   expect(submitted.guidance).toContain('Read back the handoff')
+  expect(submitted.guidance).toContain('The Goal owner’s receipt and collection still need confirmation.')
   expect(submitted.guidance).toContain('"replyMessageId":"reply-first"')
   expect(b.native.stop).not.toHaveBeenCalled()
   expect((await b.call(null, ['goal', 'ls', '--all'])).goals).toEqual([])

@@ -12,7 +12,7 @@ import { createHostContent } from '../../../apps/host/src/content-owner.js'
 import { HostMoteQuickPreferences } from '../../../apps/host/src/mote-quick-preferences.js'
 import { spatialCatalog } from '../src/spatial-state.js'
 import { MOTE_INPUT_GUIDANCE } from '../src/mote/input-source.js'
-import { focusReadCommand } from '../src/focus-task-guidance.js'
+import { focusReadCommand, focusTaskHandoffNote } from '../src/focus-task-guidance.js'
 import { guideSharedFocusTaskHandoff } from '../src/generated/agentmux-guides.js'
 import { guideText } from '../src/guide-text.js'
 import { agentPromptSubmissionOutcome, parseMoteDialogueResult } from '../src/mote/dialogue.js'
@@ -279,7 +279,12 @@ const focusTask = {
 const legacyFocusNote = 'Archived Mote collaboration guidance from the original input.' + '\n\n' + guideText(guideSharedFocusTaskHandoff) +
   '\n\nExact Focus reads (1 batch; read every batch and its remaining pages):\n' + focusReadCommand(focusTask)
 
-it.each(['terminal-confirmed', 'not-applied'] as const)('explicit Focus preparation retry preserves the original %s receipt', async outcome => {
+it.each([
+  { outcome: 'terminal-confirmed', source: 'historical' },
+  { outcome: 'not-applied', source: 'historical' },
+  { outcome: 'terminal-confirmed', source: 'typed' },
+  { outcome: 'not-applied', source: 'typed' }
+] as const)('explicit Focus preparation retry preserves the original $outcome receipt with $source source', async ({ outcome, source }) => {
   const f = await fixture()
   f.idle()
   const provider = f.client.providers.get('codex')
@@ -294,13 +299,16 @@ it.each(['terminal-confirmed', 'not-applied'] as const)('explicit Focus preparat
     write.mockRejectedValueOnce(new AgentMuxError('Original bytes were refused.', 'CTXMUX_input_cursor_mismatch',
       'not_applied', { disposition: 'not_applied', confirmedInputBytes: 0 }))
   }
-  const sending = f.client.submitAgentPrompt({ ...target, authorHuman: true, agentMuxNote: legacyFocusNote })
+  const priorNote = source === 'typed' ? focusTaskHandoffNote(focusTask).replace('所选 Focus 成员', '原 Focus 成员') : legacyFocusNote
+  const sending = f.client.submitAgentPrompt({ ...target, authorHuman: true, agentMuxNote: priorNote },
+    source === 'typed' ? { focusTask } : undefined)
   if (outcome === 'not-applied') await expect(sending).rejects.toBeTruthy()
   else await sending
   const original = await f.client.inspectAgentPromptSubmission(key)
   expect(agentPromptSubmissionOutcome(original)).toBe(outcome)
   expect(original?.admission?.intent?.message).toMatchObject({
-    userContent: target.prompt, systemContext: legacyFocusNote, authorHuman: true
+    userContent: target.prompt, systemContext: priorNote, authorHuman: true,
+    ...(source === 'typed' ? { focusTask } : {})
   })
   const request = { ...target, moteGuidance: true as const, focusTask,
     preparationRetry: { inputByte: 0, nativeSourceId: 'native-primary-native' } }
