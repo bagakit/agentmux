@@ -101,7 +101,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
   const [selectedView, setView] = useState<'library' | 'editor'>(() => initialHost == null ? 'library' : 'editor')
   const view = pendingHostNavigation ? 'editor' : selectedView
   const [filter, setFilter] = useState({ query: '', snapshot: [] as string[] })
-  const [pendingEdit, setPendingEdit] = useState<{ id: string; select: boolean } | null>(null)
+  const [pendingEdit, setPendingEdit] = useState<{ id: string; select: boolean; core?: boolean } | null>(null)
   const [returnFocus, setReturnFocus] = useState<{ id: string | null } | null>(null)
   const [advancedOpen, setAdvancedOpen] = useState<Record<string, boolean>>({})
   const [sectionsOpen, setSectionsOpen] = useState<Record<string, boolean>>({})
@@ -164,13 +164,14 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
       [sectionKey(id, 'service')]: true, [sectionKey(id, 'shared')]: true }))
     setView('editor')
     setFilter({ query: '', snapshot: [] })
-    setPendingEdit(navigationRequest.field === 'incoming' ? null : { id, select: false })
+    setPendingEdit(navigationRequest.field === 'incoming' ? null : { id, select: false, core: navigationRequest.field === 'host-core' })
   }, [navigationRequest])
 
   useEffect(() => {
     if (!pendingEdit || pendingEdit.id !== selectedId) return
     const name = editor.current?.querySelector<HTMLInputElement>('[data-host-name]')
-    const target = name ?? editor.current?.querySelector<HTMLElement>('[data-resource-editor]')
+    const core = pendingEdit.core ? editor.current?.querySelector<HTMLElement>(`[data-host-core="${CSS.escape(pendingEdit.id)}"]:not([hidden])`) : null
+    const target = core ?? name ?? editor.current?.querySelector<HTMLElement>('[data-resource-editor]')
     if (!target) return
     target.focus()
     if (name && pendingEdit.select) name.select()
@@ -387,7 +388,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
             const committed = config.hosts.find(host => host.id === id)
             return draft?.kind === 'ssh' ? <div key={id}>
               <div hidden={selectedId !== id || panel !== 'connection'} inert={selectedId !== id || panel !== 'connection'}>
-                <div hidden={draft.transport === 'tailcat'} inert={draft.transport === 'tailcat'}><HostCorePanel host={draft} committed={committed?.kind === 'ssh' ? committed : undefined} active={active && draft.transport !== 'tailcat' && view === 'editor' && selectedId === id && panel === 'connection'} /></div>
+                <div data-host-core={id} tabIndex={-1} hidden={draft.transport === 'tailcat'} inert={draft.transport === 'tailcat'}><HostCorePanel host={draft} committed={committed?.kind === 'ssh' ? committed : undefined} active={active && draft.transport !== 'tailcat' && view === 'editor' && selectedId === id && panel === 'connection'} /></div>
                 {draft.transport === 'tailcat' ? <p className="field-hint">Core upgrades here require an existing Linux x64 headless service over SSH. Install and run AgentMux on the other Mac before connecting.</p> : null}
               </div>
               <div data-host-access={id} hidden={selectedId !== id || panel !== 'agents'} inert={selectedId !== id || panel !== 'agents'}>

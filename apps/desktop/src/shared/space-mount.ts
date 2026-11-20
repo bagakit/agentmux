@@ -4,6 +4,9 @@ import type { WorkspaceLayout, WorkbenchViewLayout } from '@agentmux/layout'
 import type { SpaceSessionsOpening, SpaceSessionsObservation } from '@agentmux/core/space-sessions'
 import { isSpaceMemberNativeWrite } from '@agentmux/core/space-member'
 
+/** The fenced original Runtime lacks the bulk Agent location method. Detail is its Runtime ID. */
+export const SOURCE_AGENT_LOCATIONS_UNSUPPORTED = 'SOURCE_AGENT_LOCATIONS_UNSUPPORTED'
+
 /** Host ID is only this client's carrier. Every inner entity ID belongs to reference.runtimeId. */
 export type SpaceMountSourceTarget = { hostId: string; expectedRuntimeId: string } | SpaceMountTarget
 export type SpaceMountTarget = { hostId: string; reference: SpaceAuthorityRef }

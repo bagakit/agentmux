@@ -7,7 +7,7 @@ import { connectSpaceMember, type SpaceMemberClient } from '@agentmux/core/space
 import { parseSpaceMemberTarget } from '@agentmux/core/space-member-codec'
 import { readSpaceSnapshot, observeSpace, type AgentMuxRpcClient } from '@agentmux/core'
 import type { SpaceMountSourceTarget, SpaceMountTarget, SpaceMountResources, SpaceMountWatch, SpaceMountEvent } from '../shared/space-mount.js'
-import { sourceAgentLocations, sourcePositionKey, type SpaceMountMethods } from '../shared/space-mount.js'
+import { SOURCE_AGENT_LOCATIONS_UNSUPPORTED, sourceAgentLocations, sourcePositionKey, type SpaceMountMethods } from '../shared/space-mount.js'
 import { SOURCE_FILES_METHODS, type SourceFilesMethod, type SourceFilesResult, type SourceFilesSelection } from '../shared/source-files.js'
 import { resolveSourceFiles } from './source-files.js'
 import { originalExecutionBindingId } from './execution-binding-reference'
@@ -2890,8 +2890,10 @@ export class RuntimeController {
       ...(position.spaceId ? { spaceId: position.spaceId } : {}), ...(position.zoneId ? { zoneId: position.zoneId } : {}),
       tabId: position.tabId, regionId: position.regionId, displayWorkspaceId: position.displayWorkspaceId, groupId: position.groupId
     } }, fenced) : await carrier.rpc.call('space.agent-locations', { runtimeId: owner.runtimeId, agentSessionIds }, fenced).catch(cause => {
-      if (cause instanceof AgentMuxError && cause.code === 'RPC_METHOD_NOT_FOUND') throw new AgentMuxError(
-        'The original Host Core does not provide Agent location lookup. Open the Host settings to check its Core version.', cause.code)
+      if (cause instanceof AgentMuxError && cause.code === 'RPC_METHOD_NOT_FOUND') {
+        carrier.assertCurrent()
+        throw new AgentMuxError('The original Host Core does not provide Agent location lookup.', SOURCE_AGENT_LOCATIONS_UNSUPPORTED, owner.runtimeId)
+      }
       throw cause
     })
     carrier.assertCurrent()

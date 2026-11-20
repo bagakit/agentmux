@@ -66,6 +66,12 @@
 .focus-interaction-age { display: inline-flex; align-items: center; flex: none; gap: 3px; color: var(--text-2); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .focus-task-list__clock .focus-interaction-age { justify-content: end; }
 .focus-source-status { flex: none; padding-inline: 0; }
+.focus-core-upgrade { display: inline-flex; align-items: center; gap: 1px; white-space: nowrap; }
+.focus-core-upgrade > .recent-focus__coverage-button { color: var(--text); }
+.focus-core-upgrade > .recent-focus__coverage-button:only-child { color: var(--text-2); }
+.focus-core-upgrade .icon-button { color: var(--text-3); }
+.focus-core-upgrade__menu { min-width: 128px; max-width: min(240px, calc(100vw - 16px)); }
+.focus-core-upgrade__menu .tab-context-menu__item { white-space: normal; overflow-wrap: anywhere; }
 .focus-source-status .service-disclosure__content h4 { margin: 0 0 4px; font-size: var(--fs-meta); }
 .focus-source-status .service-disclosure__content section + section { margin-top: 14px; }
 .focus-source-status .service-disclosure__content p { margin: 4px 0 8px; overflow-wrap: anywhere; }

@@ -40,7 +40,7 @@ function matchesLocation(location: Location, requested: FocusContextAccess['loca
 const sourceFactKey = (target: NonNullable<Candidate['readingTarget']>) => JSON.stringify([target.target.runtimeId, target.target.agentSessionId, target.target.reference.runtimeId, target.target.expectedAdmission])
 const candidateFactKey = (candidate: Candidate) => candidate.readingTarget ? sourceFactKey(candidate.readingTarget) : candidate.directName ? JSON.stringify([candidate.runtimeId, candidate.sid, candidate.directName.target.runtimeId]) : candidate.target ? JSON.stringify([candidate.runtimeId, candidate.sid, candidate.target.target.reference, candidate.target.target.regionId]) : undefined
 type SourceChoice = { locations: FocusContextAccess['locations']; choose(location: FocusContextAccess['locations'][number]): void }
-export type FocusSourceIssue = { key: string; label: string; host: string; hostId: string; reference?: SpaceMountRecord['reference']; message: string; reading: boolean; refresh(): void }
+export type FocusSourceIssue = { key: string; label: string; host: string; hostId: string; reference?: SpaceMountRecord['reference']; message: string; upgradeRuntimeId?: string; reading: boolean; refresh(): void }
 type ReadFact = { key: string; session?: SessionSnapshot; name?: NameObservation;
   conversationPort?: ConversationReadApi; readConversation?: () => Promise<void>; reading?: ReturnType<typeof projectConversationWindow>;
   rename?: FocusNameEditor | undefined; nameSaveIssue?: string | undefined; sessionIssue?: string | undefined; nameIssue?: string | undefined; readingIssue?: string | undefined; readingCurrent?: () => boolean }
@@ -743,7 +743,7 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
       const key = originalLocationReaderKey(host.id), observed = originalLocations.get(host.id)
       readers.push(<OriginalLocationsReader key={key} host={host} sessions={sessions} visible={visible} revision={refreshes.get(key) ?? 0}
         observation={originalLocations.get(host.id)?.value} mountedSourceKeys={mountedSourceKeys} publish={publishLocations} />)
-      if (observed?.issue) issues.push({ key, label: 'Agent locations', host: host.label, hostId: host.id, message: observed.issue,
+      if (observed?.issue) issues.push({ key, label: 'Agent locations', host: host.label, hostId: host.id, ...observed.issue,
         reading: Boolean(observed.reading), refresh: () => refresh(key) })
     }
     for (const [key, source] of sources) {

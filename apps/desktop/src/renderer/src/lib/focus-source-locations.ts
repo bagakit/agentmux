@@ -1,10 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { SpaceSnapshot } from '@agentmux/core'
 import type { HostConfig } from '../../../shared/contracts'
-import { spaceMountKey, type SourceAgentLocation, type SourceAgentLocations } from '../../../shared/space-mount'
+import { SOURCE_AGENT_LOCATIONS_UNSUPPORTED, spaceMountKey, type SourceAgentLocation, type SourceAgentLocations } from '../../../shared/space-mount'
 import { api } from './api'
 
-export type FocusSourceLocationObservation = { host: HostConfig; value?: SourceAgentLocations; issue?: string; reading?: boolean }
+export type FocusSourceLocationObservation = {
+  host: HostConfig
+  value?: SourceAgentLocations
+  issue?: { message: string; upgradeRuntimeId?: string }
+  reading?: boolean
+}
 export const originalLocationReaderKey = (hostId: string) => JSON.stringify(['original-agent-locations', hostId])
 
 type MemberLocation = Pick<SourceAgentLocation, 'tab' | 'zone' | 'region'>
@@ -42,7 +47,7 @@ export function useFocusSourceLocations(host: HostConfig, sessionIds: readonly s
       if (event.type === 'connection-state' && event.observationOrigin.boundary === 'consumer-core' && event.state !== 'restored') {
         failed = true
         recovered = false
-        publish({ host, issue: event.diagnostic?.message ?? 'The original Source connection is unconfirmed.' })
+        publish({ host, issue: { message: event.diagnostic?.message ?? 'The original Source connection is unconfirmed.' } })
         return
       }
       if (!(event.type === 'connection-state' && event.observationOrigin.boundary === 'consumer-core' && event.state === 'restored') &&
@@ -57,7 +62,9 @@ export function useFocusSourceLocations(host: HostConfig, sessionIds: readonly s
     }, cause => {
       if (controller.signal.aborted) return
       failed = true
-      publish({ host, issue: cause instanceof Error ? cause.message : String(cause) })
+      const failure = cause instanceof Error ? cause as Error & { code?: string; detail?: string } : undefined
+      const upgradeRuntimeId = failure?.code === SOURCE_AGENT_LOCATIONS_UNSUPPORTED ? failure.detail : undefined
+      publish({ host, issue: { message: failure?.message ?? String(cause), ...(upgradeRuntimeId ? { upgradeRuntimeId } : {}) } })
       if (recovered) reopen()
     })
     return () => { controller.abort(); unsubscribe() }
@@ -73,7 +80,7 @@ export function useFocusSourceLocations(host: HostConfig, sessionIds: readonly s
     for (const spaceId of spaceIds) {
       const known = observation.locations.filter(location => location.space.spaceId === spaceId && location.region.agentSessionId && wanted.has(location.region.agentSessionId))
       let signature = sourceMembership(known[0]?.space ?? null, known)
-      const reportFailure = (issue: string) => { if (!controller.signal.aborted) publish({ host, issue }) }
+      const reportFailure = (message: string) => { if (!controller.signal.aborted) publish({ host, issue: { message } }) }
       void api.spaceMounts.watch({ hostId: host.id, reference: { runtimeId, spaceId } }, event => {
         if (controller.signal.aborted) return
         if (event.type === 'error') { reportFailure(event.error.message); return }

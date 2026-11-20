@@ -1,11 +1,57 @@
-import { useContext, useState } from 'react'
+import { useContext, useEffect, useRef, useState } from 'react'
 import { Button } from '@agentmux/client-ui/components/Button'
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
+import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { useAppStore } from '../store'
 import type { FocusHistoryCatalogue } from '../lib/focus-history-sources'
 import type { FocusSourceIssue } from '../lib/use-focus-sources'
-import type { ServiceNoticeItem } from '../lib/use-service-notices'
+import { useReadReceipts, type ServiceNoticeItem } from '../lib/use-service-notices'
+import * as Menu from './DropdownMenu'
 import { ServiceNoticeDisclosure } from './ServiceNoticeDisclosure'
 import { SettingsNavigation } from './SettingsNavigation'
+
+type CoreUpdateTarget = Pick<FocusSourceIssue, 'key' | 'host' | 'hostId'> & { upgradeRuntimeId: string }
+
+function FocusCoreUpgradeHint({ issues, visible, open }: {
+  issues: readonly CoreUpdateTarget[]
+  visible: boolean
+  open(hostId: string): void
+}) {
+  const primary = useRef<HTMLButtonElement>(null)
+  // Focus only reads demanded sources, so their absence cannot prune receipts.
+  const { unread, acknowledge } = useReadReceipts('focus:core-update', Object.fromEntries(
+    issues.map(issue => [issue.key, issue.upgradeRuntimeId])
+  ), true, false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  useEffect(() => {
+    if (!visible || issues.length < 2) setMenuOpen(false)
+  }, [visible, issues.length])
+  const first = issues[0]
+  if (!first) return null
+  const expanded = unread.length > 0
+  const multiple = issues.length > 1
+  const label = multiple ? `Update Core on ${issues.length} hosts` : `Update Core on ${first.host}`
+  const action = <button ref={primary} type="button" className="recent-focus__coverage-button" title={label} aria-label={label}
+    onClick={multiple ? undefined : () => open(first.hostId)}>
+    <SemanticIcon name="action.upgrade-host" size={13} />{expanded ? <span>Update Core{multiple ? ` · ${issues.length}` : null}</span> : null}
+  </button>
+  return <span className="focus-core-upgrade">
+    {multiple ? <Menu.Root modal={false} open={visible && menuOpen} onOpenChange={setMenuOpen}>
+      <Menu.Trigger asChild>{action}</Menu.Trigger>
+      <Menu.Portal><Menu.Content className="tab-context-menu focus-core-upgrade__menu" align="start" sideOffset={4} collisionPadding={8}
+        onCloseAutoFocus={event => { if (!visible) event.preventDefault() }}>
+        {issues.map(issue => <Menu.Item key={issue.key} className="tab-context-menu__item" onSelect={() => open(issue.hostId)}>
+          {issue.host}
+        </Menu.Item>)}
+      </Menu.Content></Menu.Portal>
+    </Menu.Root> : action}
+    {expanded ? <IconButton type="button" aria-label="Dismiss Core update hint" title="Dismiss Core update hint" onClick={() => {
+      setMenuOpen(false)
+      acknowledge(unread)
+      primary.current?.focus({ preventScroll: true })
+    }}><SemanticIcon name="action.close" size={12} /></IconButton> : null}
+  </span>
+}
 
 /** Catalogue coverage can be partial while existing tasks and their controls stay usable. */
 export function FocusSourceStatus({ catalogue, laneErrors, laneReads, onRetryLanes, visible, locationIssues = [] }: {
@@ -24,21 +70,33 @@ export function FocusSourceStatus({ catalogue, laneErrors, laneReads, onRetryLan
   const canOpenConnection = (warning: typeof warnings[number]) =>
     warning.code === 'RUNTIME_UNAVAILABLE' && warning.availability !== 'connected' &&
     Boolean(settings && hosts?.some(host => host.id === warning.hostId && host.kind === 'ssh'))
+  const upgrades: CoreUpdateTarget[] = []
+  const diagnoses: FocusSourceIssue[] = []
+  for (const issue of locationIssues) {
+    const { upgradeRuntimeId } = issue
+    const host = settings && upgradeRuntimeId ? hosts?.find(host => host.id === issue.hostId) : undefined
+    if (upgradeRuntimeId && host?.kind === 'ssh' && host.transport !== 'tailcat' &&
+        (!host.runtimeId || host.runtimeId === upgradeRuntimeId)) {
+      upgrades.push({ key: issue.key, host: issue.host, hostId: issue.hostId, upgradeRuntimeId })
+    } else {
+      diagnoses.push(issue)
+    }
+  }
   const notices: ServiceNoticeItem[] = []
   const hasSourceIssue = Boolean(readError || warnings.length)
   if (hasSourceIssue) notices.push({ id: 'project-sources', cause: readError ?? JSON.stringify(warnings.map(warning => [warning.hostId, warning.code, warning.message])),
     notice: { kind: 'process-degraded', notice: { step: 'Retained conversations', mode: 'Some history sources could not be read. Previously loaded history is kept.', restore: '' } } })
   if (laneErrors.length) notices.push({ id: 'lane-details', cause: JSON.stringify(laneErrors),
     notice: { kind: 'process-degraded', notice: { step: 'Project details', mode: 'Some project details could not be read. Existing tasks are kept.', restore: '' } } })
-  if (locationIssues.length) notices.push({ id: 'original-locations', cause: JSON.stringify(locationIssues.map(issue => [issue.key, issue.message])),
+  if (diagnoses.length) notices.push({ id: 'original-locations', cause: JSON.stringify(diagnoses.map(issue => [issue.key, issue.message])),
     notice: { kind: 'process-degraded', notice: { step: 'Agent locations', mode: 'Some source locations could not be confirmed. Existing tasks are kept.', restore: '' } } })
   const cataloguePending = catalogueAttempt !== null && completedReads === catalogueAttempt
   const lanePending = laneAttempt !== null && laneReads === laneAttempt
-  return <ServiceNoticeDisclosure compact scope="focus:sources" notices={notices} available={!loading} visible={visible}
+  const details = <ServiceNoticeDisclosure compact scope="focus:sources" notices={notices} available={!loading} visible={visible}
     title="History and project sources" className="focus-source-status">
-    {locationIssues.length ? <section aria-label="Agent locations">
+    {diagnoses.length ? <section aria-label="Agent locations">
       <h4>Agent locations</h4>
-      {locationIssues.map(issue => <div className="focus-source-status__entry" key={issue.key}>
+      {diagnoses.map(issue => <div className="focus-source-status__entry" key={issue.key}>
         <strong>{issue.host}{issue.reference ? ` · ${issue.label}` : ''}</strong>
         <p>{issue.message}</p>
         {issue.reference ? <details className="focus-source-status__cause"><summary>Source identity</summary>
@@ -81,4 +139,9 @@ export function FocusSourceStatus({ catalogue, laneErrors, laneReads, onRetryLan
       {laneAttempt !== null ? <p role="status">{lanePending ? 'Reading project details.' : 'Some details are still unavailable.'}</p> : null}
     </section> : null}
   </ServiceNoticeDisclosure>
+  return <>
+    {settings && upgrades.length > 0 ? <FocusCoreUpgradeHint issues={upgrades} visible={visible}
+      open={hostId => settings.open('hosts', undefined, 'host-core', hostId)} /> : null}
+    {details}
+  </>
 }
