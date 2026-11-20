@@ -32,14 +32,15 @@ export async function sourceCreationFixture(releases: Array<() => unknown | Prom
   })
   const agentWorkspacePath = (agentSessionId: string) => '/d/agent-workspaces/' + createHash('sha256').update(agentSessionId, 'utf8').digest('hex')
   const agentInput = vi.fn(async () => { throw Error('No Agent input belongs to this Host continuation fixture.') })
-  const client = { writeAgent: agentInput, pasteAgent: agentInput, submitAgentPrompt: agentInput, resolveAgentCreationSessionId: vi.fn(async () => 'original-d-session'),
+  const client = { readAgentInputEpoch: vi.fn(async (): Promise<string | undefined> => undefined),
+    writeAgent: agentInput, pasteAgent: agentInput, submitAgentPrompt: agentInput, resolveAgentCreationSessionId: vi.fn(async () => 'original-d-session'),
     inspectAgentCreation: vi.fn(async () => { if (retired) return retired; if (!observed) throw new AgentMuxError('No original creation is observed.', 'AGENT_CREATION_UNKNOWN'); return observed }),
-    listHostExecutors: vi.fn(async () => ({ runtimeId, executors: [{ executorId: 'd-executor', configRevision: 'd'.repeat(64), creationContract: { ordinaryLaunch: 1 } }] })),
+    listHostExecutors: vi.fn(async () => ({ runtimeId, executors: [{ executorId: 'd-executor', providerId: 'codex', configRevision: 'd'.repeat(64), creationContract: { ordinaryLaunch: 1 } }] })),
     hostEnvironment: vi.fn(async (selector?: { agentSessionId: string }) => selector ? { homeDirectory: '/d/home',
       agentWorkspace: { runtimeId, agentSessionId: selector.agentSessionId, workspacePath: agentWorkspacePath(selector.agentSessionId) } } : { homeDirectory: '/d/home' }),
     createHostAgentWithDelivery: create }
   const reference = () => ({ bindingId: frozen!.bindingId, agentSessionId: frozen!.agent.agentSessionId, createOperationId: frozen!.agent.createOperationId })
-  const freeze = async (input: AgentExecutionOpenInput) => {
+  const freeze = async (input: AgentExecutionOpenInput, _context?: Parameters<AgentExecutionBindingService['admit']>[1], _observed?: Parameters<AgentExecutionBindingService['admit']>[2]) => {
     if (frozen && !isDeepStrictEqual(input, frozen)) throw new AgentMuxError('Another original frozen creation.', 'EXECUTION_INTENT_UNCONFIRMED')
     frozen = structuredClone(input); return reference()
   }
@@ -69,6 +70,7 @@ export async function sourceCreationFixture(releases: Array<() => unknown | Prom
   // inventory observer proves it is skipped, without revoking the real Core's
   // per-operation Executor qualification or Native preparation authority.
   if (options.helperOutput) starts.mockImplementation(async () => undefined as never)
+  const bindingInventory = vi.fn(async () => ({ runtimeId, executors: [{ executorId: 'd-executor', providerId: 'codex', configRevision: 'd'.repeat(64), creationContract: { ordinaryLaunch: 1 } }] }))
   const bindingHosts = { resolveHost: async (hostId: string) => {
     const role = hostId === 'local' ? 'executor' : 'frontend', runId = role + '-original-helper'
     const run = { runId, state: 'running' }
@@ -81,7 +83,7 @@ export async function sourceCreationFixture(releases: Array<() => unknown | Prom
       attachTerminal: async () => ({ run, gap: null, replay: bytes.length ? [{ startByte: 0, endByte: bytes.length, dataBytes: bytes }] : [] })
     } : { prepareAgentExecutionHelper: prepare, createPreparedTerminal: starts }
     return { runtimeId: hostId === 'local' ? 'runtime-b' : runtimeId,
-      client: { ...client, listHostExecutors: async () => ({ runtimeId, executors: [{ executorId: 'd-executor', providerId: 'codex', configRevision: 'd'.repeat(64), creationContract: { ordinaryLaunch: 1 } }] }), readAgentSession: async () => null,
+      client: { ...client, listHostExecutors: bindingInventory, readAgentSession: async () => null,
         ...io } as unknown as AgentExecutionHostPort }
   } }
 
@@ -90,7 +92,10 @@ export async function sourceCreationFixture(releases: Array<() => unknown | Prom
   if (options.realBindings) {
     service = newService(); releases.push(() => service?.dispose())
     bindings.sourceDiagnostics.mockImplementation((operationId, context) => service!.sourceDiagnostics(operationId, context))
-    bindings.admit.mockImplementation(input => { const { sourceRequestDigest, ...original } = input; return service!.admit(options.legacyBindingDigest ? original : input) })
+    bindings.admit.mockImplementation((input, context, observed) => {
+      const { sourceRequestDigest, ...original } = input
+      return service!.admit(options.legacyBindingDigest ? original : input, context, observed)
+    })
     bindings.create.mockImplementation(input => service!.create(input) as never)
     bindings.continueOriginal.mockImplementation(original => service!.continueOriginal(original) as never)
     bindings.inspect.mockImplementation((bindingId, view) => service!.inspect(bindingId, view) as never)
@@ -108,7 +113,7 @@ export async function sourceCreationFixture(releases: Array<() => unknown | Prom
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); releases.push(() => rpc.dispose())
   const input = { operationId: 'source-create-operation', content: { kind: 'new-agent' as const, executorId: 'd-executor', agentTarget: { hostId: 'D-in-B', runtimeId } },
     destination: { spaceId: folder.spaceId, zoneId: folder.zoneId, newTab: true as const }, focus: false }
-  return { root, rpc, spatial, runtime, server, client, create, bindings, input, folder, control, agentInput, sourceNote, prepare, starts,
+  return { root, rpc, spatial, runtime, server, client, create, bindings, input, folder, control, agentInput, sourceNote, prepare, starts, bindingInventory,
     locatorWorkspacePath: agentWorkspacePath('original-d-session'),
     restartBindings: async () => { if (!service) throw Error('Real binding owner required.'); await service.dispose(); service = newService() },
     retire: (history: 'matching' | 'missing' | 'other-creation' = 'matching') => {

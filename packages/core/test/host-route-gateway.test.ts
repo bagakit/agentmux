@@ -556,6 +556,40 @@ test('an actual spatial parent binds the complete caller launch contribution and
   await expect(routedAgentMuxRpc(a.rpc,'B',parentRoute).call('agent.open',{...request,content:oldContent})).rejects.toMatchObject({code:'HOST_ROUTE_DERIVATION_MISMATCH'})
 })
 
+test('a signed Source creation can read the original input epoch through its exact preparation route', async () => {
+  const f = await fixture(true), a = f.e, actor = { source: a.identity, ...principal }
+  const parentRoute: AdoptedHostRoute = { source: a.identity, hops: [{ edgeId: 'B', target: f.b.identity }] }
+  const otherRoute: AdoptedHostRoute = { source: f.b.identity, hops: [{ edgeId: 'D', target: f.d.identity }] }
+  const request = { operationId: 'epoch-create', content: { kind: 'new-agent' as const, executorId: 'selected',
+    agentTarget: { hostId: 'D', runtimeId: f.d.identity.runtimeId, adoptedRoute: f.route } },
+    destination: { spaceId: 'B-space', zoneId: 'B-zone', newTab: true as const }, focus: false }
+  await f.configure(a, [{ id: 'B', route: parentRoute }], [])
+  await f.configure(f.b, [{ id: 'D', route: f.route }, { id: 'D-direct', route: otherRoute }],
+    [{ id: 'A-open', delegator: a.identity, actor, destination: f.b.identity, scopes: ['agent.open'] }])
+  const grant = (id: string, delegator: HostRouteIdentity): HostRouteGrant =>
+    ({ ...f.grant(id, delegator, actor), scopes: ['runtime.invoke/readAgentInputEpoch'] })
+  await f.configure(f.c, [], [grant('epoch-C', f.b.identity)])
+  await f.configure(f.d, [], [grant('epoch-D', f.c.identity), grant('epoch-direct', f.b.identity)])
+  let preparation: HostRouteExecutionAuthorization | undefined
+  f.intercept.set('B', async (_method, _params, context) => {
+    preparation = await f.b.gateway.authorizePreparation(f.d.identity.runtimeId, context)
+    return { admitted: true }
+  })
+  await routedAgentMuxRpc(a.rpc, 'B', parentRoute).call('agent.open', request)
+  const invoke = { ...f.call.params, invocation: { method: 'readAgentInputEpoch' as const, args: [] } }
+  const child = executionRouteRpc(f.b.gateway, f.route, preparation!)
+  await expect(child.call('runtime.invoke', invoke)).resolves.toEqual({ value: { $agentmuxValue: 'undefined' } })
+  expect(f.arrivals).toHaveLength(2)
+  expect(f.arrivals.at(-1)!.actor).toEqual(actor)
+  await expect(child.call('runtime.invoke', { ...invoke, invocation: { ...invoke.invocation, args: ['another-target'] } }))
+    .rejects.toMatchObject({ code: 'HOST_ROUTE_DERIVATION_MISMATCH' })
+  await expect(executionRouteRpc(f.b.gateway, otherRoute, preparation!).call('runtime.invoke', invoke))
+    .rejects.toMatchObject({ code: 'HOST_ROUTE_DERIVATION_MISMATCH' })
+  await f.configure(f.d, [], [grant('epoch-direct', f.b.identity)])
+  await expect(child.call('runtime.invoke', invoke)).rejects.toMatchObject({ code: 'HOST_ROUTE_NOT_DELEGATED' })
+  expect(f.arrivals).toHaveLength(2)
+})
+
 
 test('an original signed scope remains byte-identical during continuation and its full input digest cannot be widened', async () => {
   const f = await fixture()

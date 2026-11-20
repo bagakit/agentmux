@@ -14,6 +14,7 @@ import { AgentMuxHostedRuntimeService } from '../src/hosted-runtime-service.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import { runSourceObjectCli } from './helpers/source-object-cli.js'
 import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
+import { sourceCreationFixture } from './helpers/source-creation-fixture.js'
 
 const cleanups: Array<() => unknown | Promise<unknown>> = []
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close() })
@@ -53,7 +54,8 @@ test('the actual public binding association view reads the original frozen Runti
   const settled=await pendingView.then(value=>({value}),error=>({error}))
   expect(settled).toHaveProperty('value')
   const view='value' in settled?settled.value:undefined
-  expect(view?.association).toEqual({state:'confirmed',reference:{bindingId:'original-binding',agentSessionId:'original-SID',createOperationId:'original-CID'},agentRuntimeId:'runtime-A',resourceRuntimeId:'runtime-B',resourceWorkspacePath:'/B/project'})
+  expect(view?.association).toEqual({state:'confirmed',reference:{bindingId:'original-binding',agentSessionId:'original-SID',createOperationId:'original-CID'},agentRuntimeId:'runtime-A',resourceRuntimeId:'runtime-B',resourceWorkspacePath:'/B/project',
+    agent:{executorId:'selected',executorRevision:'original-revision',workspacePath:'/A/home'}})
   expect(parseAgentExecutionInspection(view,{bindingId:f.input.bindingId,view:'association'})).toEqual(view)
   expect(()=>parseAgentExecutionInspection({...view,association:undefined},{bindingId:f.input.bindingId,view:'association'})).toThrow()
   expect(()=>parseAgentExecutionInspection({...view,association:{...view!.association,reference:{bindingId:'original-binding',agentSessionId:'same-SID-other-owner',createOperationId:'original-CID'}}},{bindingId:f.input.bindingId,view:'association'})).toThrow()
@@ -94,12 +96,30 @@ test('the public original Coordinator retains a new Source-field intent while an
   f.enableHandler()
   await expect(f.rpc.call('agent.execution.continue',ref)).rejects.toMatchObject({code:'FIXTURE_PREPARATION_WAIT'})
   expect(f.prepare).toHaveBeenCalledTimes(1);f.hideHandler();await f.restart()
+  const confirmedReads=vi.mocked(f.port.listHostExecutors).mock.calls.length
   await expect(f.rpc.call('agent.execution.continue',ref)).rejects.toMatchObject({code:'FIXTURE_PREPARATION_WAIT'})
   expect(f.prepare).toHaveBeenCalledTimes(2);expect(f.forbidden).not.toHaveBeenCalled()
+  expect(f.port.listHostExecutors).toHaveBeenCalledTimes(confirmedReads)
   const inventoryBefore=vi.mocked(f.port.listHostExecutors).mock.calls.length
   f.present()
   expect(await f.rpc.call('agent.execution.continue',ref)).toMatchObject({session:{agentSessionId:'original-SID',run:{runId:'original-run'}}})
   expect(f.create).toHaveBeenCalledTimes(1);expect(f.prepare).toHaveBeenCalledTimes(2);expect(vi.mocked(f.port.listHostExecutors).mock.calls.length).toBe(inventoryBefore)
+})
+
+test('the real Source freezes the selected Executor observation before helper preparation without an additional inventory call', async () => {
+  const f = await sourceCreationFixture(cleanups, 'Source launch contribution', { realBindings: true })
+  f.bindingInventory.mockRejectedValue(new AgentMuxError('Independent inventory is unavailable', 'CONTROL_UNAVAILABLE'))
+  const opened = await f.rpc.call('agent.open', f.input)
+  expect(opened.execution?.reference).toMatchObject({ agentSessionId: 'original-d-session', createOperationId: f.input.operationId })
+  expect(f.client.listHostExecutors).toHaveBeenCalledOnce()
+  expect(f.client.readAgentInputEpoch).toHaveBeenCalledOnce()
+  expect(f.prepare).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ role: 'executor', providerId: 'codex' }))
+  expect(f.bindingInventory).not.toHaveBeenCalled()
+  await f.restartBindings()
+  await expect(f.rpc.call('agent.execution.continue', opened.execution!.reference)).rejects.toMatchObject({ code: 'EXECUTION_HELPER_UNAVAILABLE' })
+  expect(f.bindingInventory).not.toHaveBeenCalled()
+  expect(f.prepare).toHaveBeenCalledTimes(2)
+  expect(f.starts).not.toHaveBeenCalled()
 })
 
 
