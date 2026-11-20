@@ -4,7 +4,7 @@ import { displayLabel, type AgentMuxSpatialGraph } from '@agentmux/core/spatial-
 import { createConnectionServices, createPublicationConversationPort, createHostedIngressCorePort, type ConnectionServices } from '@agentmux/connectors'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { ConnectionPort } from '@agentmux/core/connections'
-import type { MoteChatPort } from '@agentmux/core/mote-chat'
+import type { MoteChatPort, MoteChatTarget } from '@agentmux/core/mote-chat'
 import { createConnectionExternalInputAuthority } from './external-input-authority.js'
 import { createHostMoteChat } from './mote-chat.js'
 import { createCredentialAdministration } from './credential-administration.js'
@@ -88,13 +88,17 @@ export function createHostConnectionOwner(options: HostConnectionOptions) {
       return runtime
     }
   }) : undefined)
+  const creatorMain = options.moteMain ? {
+    reader: options.moteMain,
+    async prepare(target: MoteChatTarget, assertCurrent: () => void) {
+      if (!runtime || closed) throw new AgentMuxError('The original Mote Host is unavailable.', 'MOTE_CHAT_HOST_UNAVAILABLE')
+      await runtime.server.prepareMoteMainForCreator(target, assertCurrent)
+    }
+  } : undefined
   const services = async () => {
     if (closed || !runtime) throw new AgentMuxError('The original Host connection owner is not available. Original records and healthy Agents are retained.', 'CONTROL_UNAVAILABLE')
     const target = runtime.ownerIdentity()
-    return await (opened ??= createConnectionServices({ ...options, ...(moteChat ? { moteChat: { ...moteChat, replyAtOriginalOwner: hostId => { const exact = clients().filter(entry => entry.hostId === hostId); return !!runtime && !closed && exact.length === 1 && exact[0]!.client === runtime.client }, ...(options.moteMain ? { main: options.moteMain, prepareCreatorMain: async (target, assertCurrent) => {
-        if (!runtime || closed) throw new AgentMuxError('The original Mote Host is unavailable.', 'MOTE_CHAT_HOST_UNAVAILABLE')
-        await runtime.server.prepareMoteMainForCreator(target, assertCurrent)
-      } } : {}) } } : {}),
+    return await (opened ??= createConnectionServices({ ...options, ...(moteChat ? { moteChat: { ...moteChat, replyAtOriginalOwner: hostId => { const exact = clients().filter(entry => entry.hostId === hostId); return !!runtime && !closed && exact.length === 1 && exact[0]!.client === runtime.client }, ...(creatorMain ? { main: creatorMain } : {}) } } : {}),
       bindings: {
         spatial,
         executionRuntimeId: hostId => authoritySource(hostId)?.executionRuntimeId,

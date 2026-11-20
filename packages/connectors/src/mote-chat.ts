@@ -35,9 +35,11 @@ export interface MoteChatAgentPort {
 export type MoteChatHostOptions = {
   connections: ConnectionHost
   agents: MoteChatAgentPort
-  /** The exact role writer/reader used by this Host's dialogue and preferences. */
-  main?: () => MoteMainReader | undefined
-  prepareCreatorMain?(target: MoteChatTarget, assertCurrent: () => void): Promise<void>
+  /** The original Host qualifies the role and prepares the Main through the same owner. */
+  main?: {
+    reader(): MoteMainReader | undefined
+    prepare(target: MoteChatTarget, assertCurrent: () => void): Promise<void>
+  }
   /** Current sharing facts in this original Connector owner; never a global export inventory. */
   sharedAudience?(reference: { agentSessionId: string }): readonly RoomBinding[]
   executionRuntimeId?(hostId: string): string | undefined
@@ -434,8 +436,8 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
     catch (error) { return error instanceof AgentMuxError && error.code === 'MOTE_CHAT_MAIN_EXTERNAL_AUDIENCE' ? error.code : 'MOTE_CHAT_MAIN_UNCONFIRMED' }
   }
   private async prepareMain(incoming: MoteChatIncoming, configuration: MoteChatConfiguration): Promise<RoomBinding> {
-    const main = this.options.main?.()
-    if (!main?.withRole || !this.options.session) return fail('MOTE_CHAT_MAIN_UNCONFIRMED', 'The original Main role owner is unavailable. This message is retained; no private-chat Agent was created.')
+    const owner = this.options.main, main = owner?.reader()
+    if (!owner || !main?.withRole || !this.options.session) return fail('MOTE_CHAT_MAIN_UNCONFIRMED', 'The original Main owner is unavailable. Its incoming message is retained.')
     const assertCreator = () => {
       const current = this.store.route(incoming.application)
       const retained = this.options.ingress?.()?.readMessage(incoming.ingressId)
@@ -447,16 +449,16 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
         return fail('MOTE_CHAT_ROUTE_CHANGED', 'The original creator intake or chat policy changed. Its original message is retained.')
       this.assertService(incoming.connectionId)
     }
-    if (this.options.prepareCreatorMain && !this.store.admissionByIngress(incoming.ingressId)) {
+    if (!this.store.admissionByIngress(incoming.ingressId)) {
       assertCreator()
-      await this.options.prepareCreatorMain(configuration.target, assertCreator)
+      await owner.prepare(configuration.target, assertCreator)
     }
     return await main.withRole(configuration.target, async () => {
       const saved = this.store.admissionByIngress(incoming.ingressId)
       if (saved) return saved.kind === 'main' ? this.mainBinding(saved) : await this.ready(saved.generationId)
       const source = await main.readCurrentMoteMain(configuration.target)
-      if (source.status !== 'ready' || !source.identity || !source.roleRevision) return fail('MOTE_CHAT_MAIN_UNCONFIRMED', 'The original Main role is unconfirmed. Keep this incoming message and restore its original Mote settings.')
-      if (!source.current) return fail('MOTE_CHAT_MAIN_REQUIRED', 'This Mote’s Main has not started yet. Check its Executor priorities and retry the original message.')
+      if (source.status !== 'ready' || !source.identity || !source.roleRevision || !source.current)
+        return fail('MOTE_CHAT_MAIN_UNCONFIRMED', 'The original Main binding is awaiting confirmation. Its incoming message is retained.')
       // This exact Session read can discover an unheated client's original owner.
       // Freeze only after the same route has supplied its Runtime fence and re-read.
       let session = await this.options.session!(source.current.hostId, source.current.sessionId)

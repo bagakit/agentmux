@@ -12,10 +12,10 @@ import { PublicationHost, type PublicationConversationPort } from './publication
 import { PublicationStore } from './publication-store.js'
 import { DurableIngressHost, type DurableIngressOptions } from './durable-ingress.js'
 import { ConnectionReceivers } from './connection-receivers.js'
-import { MoteChatHost, composeMoteChatBindings, type MoteChatAgentPort, type MoteChatHostOptions } from './mote-chat.js'
+import { MoteChatHost, composeMoteChatBindings, type MoteChatHostOptions } from './mote-chat.js'
 import { createBuiltinConnectionAdapters } from './platform-adapters.js'
 import type { ChannelMetadataChange, ConnectionPort } from '@agentmux/core/connections'
-import type { MoteChatPort, MoteChatTarget } from '@agentmux/core/mote-chat'
+import type { MoteChatPort } from '@agentmux/core/mote-chat'
 import { moteChatDiagnosisCode } from '@agentmux/core/mote-chat'
 import { ConnectionSecrets } from './connection-secrets.js'
 import { backupConnections, type ConnectionBackupReceipt } from './connection-backup.js'
@@ -37,7 +37,7 @@ export type ConnectionServices = {
 }
 type LiveServices = { lease?: number; database: DatabaseSync; connections: ConnectionHost; secrets: ConnectionSecrets; bindings?: RoomBindingHost; rooms?: RoomProvisioningHost; publication?: PublicationHost; ingress?: DurableIngressHost; receivers?: ConnectionReceivers; moteChat?: MoteChatHost }
 /** Optional failure stays local. A later exact operation retries storage on the same Host and database. */
-export async function createConnectionServices(options: { directory: string | undefined; adapters?: readonly ConnectionAdapter[]; bindings?: Omit<RoomBindingHostOptions, 'connections'>; publication?: PublicationConversationPort; speaker?: PublicationSpeakerReader; ingress?: Pick<DurableIngressOptions, 'core' | 'authoritySource'>; moteChat?: { main?: MoteChatHostOptions['main']; prepareCreatorMain?: MoteChatHostOptions['prepareCreatorMain']; replyAtOriginalOwner?: MoteChatHostOptions['replyAtOriginalOwner']; agents: MoteChatAgentPort; assertTarget(target: MoteChatTarget): Promise<void>; assertReady?(target: MoteChatTarget): Promise<void>; member?: MoteChatHostOptions['member'] } }): Promise<ConnectionServices> {
+export async function createConnectionServices(options: { directory: string | undefined; adapters?: readonly ConnectionAdapter[]; bindings?: Omit<RoomBindingHostOptions, 'connections'>; publication?: PublicationConversationPort; speaker?: PublicationSpeakerReader; ingress?: Pick<DurableIngressOptions, 'core' | 'authoritySource'>; moteChat?: Pick<MoteChatHostOptions, 'main' | 'replyAtOriginalOwner' | 'agents' | 'assertTarget' | 'assertReady' | 'member'> }): Promise<ConnectionServices> {
   const adapters = options.adapters ?? createBuiltinConnectionAdapters()
   let live: LiveServices | undefined, opening: Promise<LiveServices> | undefined, closed = false
   let backingUp: Promise<ConnectionBackupReceipt> | undefined, closing: Promise<void> | undefined
@@ -69,7 +69,6 @@ export async function createConnectionServices(options: { directory: string | un
         const publicationStore: PublicationStore | undefined = options.publication ? new PublicationStore(database, { readExact: (id, revision) => bindings?.readExact(id, revision) ?? null }) : undefined
         const bindings: RoomBindingHost | undefined = options.bindings ? new RoomBindingHost({ ...options.bindings, connections, ...(publicationStore ? { lifecycle: publicationStore } : {}) }) : undefined
         const moteChat = options.moteChat ? new MoteChatHost({ connections, sharedAudience: reference => { if (!bindings) throw new Error('Original publication owner unavailable'); return bindings.listCurrent(reference) }, ...(options.bindings?.executionRuntimeId ? { executionRuntimeId: options.bindings.executionRuntimeId } : {}), publication: () => publication, ...(options.moteChat.replyAtOriginalOwner ? { replyAtOriginalOwner: options.moteChat.replyAtOriginalOwner } : {}), ...(options.moteChat.main ? { main: options.moteChat.main } : {}),
-          ...(options.moteChat.prepareCreatorMain ? { prepareCreatorMain: options.moteChat.prepareCreatorMain } : {}),
           session: async (hostId, sessionId, executionRuntimeId) => options.ingress?.core(hostId, executionRuntimeId)?.readAgentSession(sessionId, executionRuntimeId) ?? null, agents: options.moteChat.agents, assertTarget: options.moteChat.assertTarget,
           ...(options.moteChat.assertReady ? { assertReady: options.moteChat.assertReady } : {}), ...(options.moteChat.member ? { member: options.moteChat.member } : {}), ingress: () => ingress }) : undefined
         const routing = bindings && moteChat ? composeMoteChatBindings(bindings, moteChat) : bindings
