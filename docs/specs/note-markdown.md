@@ -33,6 +33,13 @@ title: "研究记录"
 已有 ID 必须保留；普通新增段落可省略锚点。读取、挂载或观察不分配持久身份，显式保存经原 writer 为缺失块分配 ID。
 未锚定块仍可读，`unanchoredBlockCount` 使图观察保持 partial；不能借父块身份伪造 source endpoint 或把未确认标题当成唯一目标。
 重复身份不自动改写或选首；同文件重复块／引用 ID 按原 schema 报解析问题，跨资源重复 Note ID 在图中保持歧义。
+
+### Recall 知识卡
+
+知识卡保存为有稳定块锚点的单独 Markdown 链接段落。可读链接文字是收纳时的标题，`amux://recall-card/<card-id>` 使用 `record` 和 `route` 查询参数分别保存原 `ConversationItemRef` 与准确访问路由。链接没有授权，查看原消息仍走原阅读器。代码、普通文本和已删除 occurrence 都不产生卡片。
+
+`notebook.graph` 的可选 `recallCards` 从本次读取的原 Note 和块派生。回链消费同一 occurrence，缺少返回值时同时按图的覆盖范围解释。Daily 选择以默认 Notebook 的受管文件与稳定身份为准，文件保存与目录登记各有自己的回执。
+
 普通段落仍留在原文件；文内块地址与独立共享文件身份是不同层次。首次保留的共享复用由原 Files 提取 owner 创建独立 Markdown，并将原位置替为整文件嵌入；宿主不保存展开后的正文副本。
 
 ## 共享 Markdown 文件
