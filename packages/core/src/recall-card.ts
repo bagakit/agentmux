@@ -26,7 +26,13 @@ export function readRecallCard(href: string, title: string): RecallCard | null {
   } catch { return null }
 }
 
-type CardBlock = { type?: string; attrs?: Record<string, unknown>; text?: string; marks?: readonly { type?: string; attrs?: Record<string, unknown> }[]; content?: readonly CardBlock[] }
+type CardBlock = {
+  type?: string | undefined
+  attrs?: Record<string, unknown> | undefined
+  text?: string | undefined
+  marks?: readonly { type?: string | undefined; attrs?: Record<string, unknown> | undefined }[] | undefined
+  content?: readonly CardBlock[] | undefined
+}
 
 /** Project only explicitly marked paragraphs, keeping code and pasted lookalikes as ordinary text. */
 export function recallCardBlocks(node: CardBlock): { blockId: string; card: RecallCard }[] {

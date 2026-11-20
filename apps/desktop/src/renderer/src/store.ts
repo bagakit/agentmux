@@ -5486,7 +5486,7 @@ export async function retainBrowserAgentIntent(requestId: string, expected: NonN
 /** Pending capture metadata shares the workbench writer with other durable user intents. */
 export async function persistRecallCardIntent(input: RecallCardIntent, settled = false): Promise<void> {
   const key = recallIntentKey(input.card)
-  useAppStore.setState(state => {
+  setAuthoredWorkbench(state => {
     const old = state.recallCardIntents[key]
     if (old && old.operationId !== input.operationId) return state
     const next = { ...state.recallCardIntents }
@@ -5494,10 +5494,10 @@ export async function persistRecallCardIntent(input: RecallCardIntent, settled =
     else next[key] = input
     return { recallCardIntents: next }
   })
-  const saved = await saveWorkbenchSelection(false)
-  if (!settled && (useAppStore.getState().recallCardIntents[key]?.operationId !== input.operationId || saved.diskDurability !== 'confirmed')) {
-    throw new Error('Recall could not durably retain this save request. Your original Note and reading point are kept.')
+  if (!workbenchWriteFence.isOpen() || !settled && useAppStore.getState().recallCardIntents[key]?.operationId !== input.operationId) {
+    throw new Error('Recall could not retain this save request. Your original Note and reading point are kept.')
   }
+  await checkpointWorkbenchUserDocument()
 }
 
 /** Retain one unresolved exact reading-point input in the existing workbench draft writer. */
