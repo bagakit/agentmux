@@ -1,3 +1,4 @@
+import { renderAmuxProtocol } from './amux-protocol.js'
 import { AMUX_PROTOCOL_DEFINITIONS, type CapsuleAnswer } from './amux-protocol-definition.js'
 import { isObjectId } from './object-id.js'
 
@@ -19,7 +20,7 @@ function json(value: CapsuleAnswer): string {
 /** Readable wire only. The trusted confirmation and Core input receipt own human source and delivery. */
 export function formatCapsuleAnswer(value: CapsuleAnswer): string {
   if (!valid(value)) throw new TypeError('A Capsule answer needs its exact page and question IDs, question text and answer.')
-  return opening + json(value) + closing
+  return renderAmuxProtocol('capsule-answer', 'wire', { json: json(value) })
 }
 
 /** Recognizes only the exact formatter output; anything else stays ordinary text. */

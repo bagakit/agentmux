@@ -1,3 +1,4 @@
+import { renderAmuxProtocol } from './amux-protocol.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { isObjectId } from './object-id.js'
@@ -29,7 +30,7 @@ export function parseSpaceLinkTarget(value: unknown, code = 'INVALID_CONTROL_REQ
 }
 export function formatSpaceLink(address: SpaceLinkAddress): string {
   const p = parseSpaceLinkAddress(address)
-  return `amux://mote/${p.linkId}?runtime=${encodeURIComponent(p.runtimeId)}`
+  return renderAmuxProtocol('link', 'wire', { target: 'mote/' + p.linkId + '?runtime=' + encodeURIComponent(p.runtimeId) })
 }
 export function parseSpaceLinkParams<M extends SpaceLinkMethod>(method: M, value: unknown): SpaceLinkParams[M] {
   const p = rpcRecord(value, method === 'space.link.ensure' ? ['target', 'operationId'] : ['address'])

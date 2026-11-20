@@ -2,7 +2,7 @@ import { guideSharedRuntime } from './generated/agentmux-guides.js'
 import { guideText } from './guide-text.js'
 import { AGENTMUX_GOAL_SKILL_ENTRY } from './goal-role-guidance.js'
 import { AMUX_PROTOCOL_DEFINITIONS, readAmuxFocusReference, readAmuxTriggerNote } from './amux-protocol-definition.js'
-import { DOMImplementation, XMLSerializer } from '@xmldom/xmldom'
+import { encodeAmuxText, renderAmuxProtocol } from './amux-protocol.js'
 import { AGENTMUX_SELF_CONTEXT_VERB } from './agent-self-context.js'
 import { AGENTMUX_AGENT_MESSAGING_ENTRY, AGENTMUX_SESSION_NAMING_ENTRY } from './agent-messaging-guidance.js'
 import { browserInputContextJson, type BrowserInputContext } from './browser-input-context.js'
@@ -53,17 +53,10 @@ const PLATFORM_TASK_REQUESTED = 'An explicit AgentMux task follows. Begin that t
  * 出站文本的唯一组装出口是那一个函数，署名不该被第二处直接拼。
  */
 function amuxEnvelope(text: string): string {
-  const document = new DOMImplementation().createDocument(null, AMUX_PROTOCOL_DEFINITIONS.context.tag, null)
-  const envelope = document.documentElement!
   const trigger = readAmuxTriggerNote(text)
-  if (trigger) {
-    const declaration = document.createElement(AMUX_PROTOCOL_DEFINITIONS.trigger.tag)
-    declaration.setAttribute('kind', trigger.kind)
-    envelope.appendChild(document.createTextNode('\n'))
-    envelope.appendChild(declaration)
-  }
-  envelope.appendChild(document.createTextNode(`\n${trigger ? trigger.note : text}\n`))
-  return new XMLSerializer().serializeToString(envelope).replace(/\r/g, '&#13;')
+  return trigger
+    ? renderAmuxProtocol('trigger', 'wire', { kind: trigger.kind, note: encodeAmuxText(trigger.note) })
+    : renderAmuxProtocol('context', 'wire', { content: encodeAmuxText(text) })
 }
 
 function splitFocusReference(note: string): { guidance: string; reference: string } | undefined {
@@ -88,7 +81,7 @@ export function composeOutboundMessage(input: { amux?: string; user?: string; in
     if (guidance) segments.push(parseGoalConfirmation(guidance) ? guidance : amuxEnvelope(guidance))
     if (focus) segments.push(focus.reference)
   }
-  if (input.inputContext) segments.push(`<amux>\n<context kind="browser" version="1">\n${browserInputContextJson(input.inputContext)}\n</context>\n</amux>`)
+  if (input.inputContext) segments.push(renderAmuxProtocol('browser', 'wire', { json: browserInputContextJson(input.inputContext) }))
   if (input.user) segments.push(input.user)
   return segments.join('\n\n')
 }

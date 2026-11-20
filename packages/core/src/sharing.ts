@@ -1,6 +1,6 @@
 import { formatSpaceLink, parseSpaceLinkAddress, type SpaceLinkAddress } from './space-link.js'
 export { parseSpaceLinkResult } from './space-link.js'
-import { AMUX_PROTOCOL_DEFINITIONS } from './amux-protocol-definition.js'
+import { renderAmuxProtocol } from './amux-protocol.js'
 import { nodeAlias } from './node-publishing.js'
 import { isObjectId } from '@agentmux/identity'
 import { deriveBoundGoalId } from '@agentmux/demand/goals'
@@ -12,7 +12,7 @@ export type AmuxSharingKind = 'File' | 'Browser'
 
 /** Owners supply the original content; framing does not reinterpret or trim it. */
 export function formatAmuxSharing(kind: AmuxSharingKind, content: string): string {
-  return `--- ${AMUX_PROTOCOL_DEFINITIONS.sharing.tag} : ${kind} ---\n${content}\n-----`
+  return renderAmuxProtocol('sharing', 'wire', { kind, body: content })
 }
 
 function shellArgument(value: string): string {
@@ -86,13 +86,17 @@ export function parseGoalAddress(value: unknown, goalId: string): AmuxGoalAddres
   return expected
 }
 
+function protocolLink(target: string): string {
+  return renderAmuxProtocol('link', 'wire', { target })
+}
+
 export function formatAmuxObjectLink(target: AmuxObjectLinkTarget): string {
   if (target.kind === 'mote' && target.address) return formatSpaceLink(target.address)
   if (target.kind === 'goal') {
     if (typeof target.goalId !== 'string' || !target.goalId || target.nodeId !== undefined && !isGoalTicketHash(target.nodeId) ||
         target.section !== undefined && (target.section !== 'plan' || target.nodeId !== undefined))
       throw new TypeError('An exact Goal and a valid reading target are required.')
-    const root = `${AMUX_PROTOCOL_DEFINITIONS.link.tag}goal/${encodeURIComponent(target.goalId)}`
+    const root = protocolLink(`goal/${encodeURIComponent(target.goalId)}`)
     const fragment = target.nodeId === undefined ? '' : `#T-${encodeURIComponent(target.nodeId)}`
     if (target.runtimeId === undefined && target.namespace === undefined) {
       if (fragment) return root + fragment
@@ -109,7 +113,7 @@ export function formatAmuxObjectLink(target: AmuxObjectLinkTarget): string {
     const id = resource?.kind === 'agent' ? resource.agentSessionId : resource?.capsuleId
     if (resource && (typeof id !== 'string' || !id)) throw new TypeError('An exact original resource identity is required.')
     if (target.runtimeId !== undefined && (typeof target.runtimeId !== 'string' || !target.runtimeId)) throw new TypeError('An exact original Runtime identity is required.')
-    return `${AMUX_PROTOCOL_DEFINITIONS.link.tag}host/${alias}${resource ? `/${resource.kind}/${encodeURIComponent(id!)}` : ''}${target.runtimeId === undefined ? '' : `?runtime=${encodeURIComponent(target.runtimeId)}`}`
+    return protocolLink(`host/${alias}${resource ? `/${resource.kind}/${encodeURIComponent(id!)}` : ''}${target.runtimeId === undefined ? '' : `?runtime=${encodeURIComponent(target.runtimeId)}`}`)
   }
   const id = target.kind === 'agent' ? target.agentSessionId
     : target.kind === 'region' ? target.regionId
@@ -120,7 +124,7 @@ export function formatAmuxObjectLink(target: AmuxObjectLinkTarget): string {
   if (typeof id !== 'string' || !id) throw new TypeError('An exact original object identity is required.')
   const eventId = target.kind === 'mote' ? target.eventId : undefined
   if (eventId !== undefined && (typeof eventId !== 'string' || !eventId)) throw new TypeError('An exact original Mote work event identity is required.')
-  return `${AMUX_PROTOCOL_DEFINITIONS.link.tag}${target.kind}/${encodeURIComponent(id)}${eventId === undefined ? '' : `/thread/${encodeURIComponent(eventId)}`}`
+  return protocolLink(`${target.kind}/${encodeURIComponent(id)}${eventId === undefined ? '' : `/thread/${encodeURIComponent(eventId)}`}`)
 }
 
 /** A Mote thread carries its original event within that exact Mote's stable Space. */

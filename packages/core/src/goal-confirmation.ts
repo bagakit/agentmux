@@ -1,3 +1,4 @@
+import { encodeAmuxText, getAmuxProtocolTemplate, renderAmuxProtocol } from './amux-protocol.js'
 import { DOMImplementation, DOMParser, onWarningStopParsing, XMLSerializer } from '@xmldom/xmldom'
 import { AMUX_PROTOCOL_DEFINITIONS } from './amux-protocol-definition.js'
 import { parseAmuxObjectLink } from './sharing.js'
@@ -8,12 +9,7 @@ const tag = AMUX_PROTOCOL_DEFINITIONS['goal-confirmation'].tag
 const action = 'confirm-and-continue'
 const frozenOpening = `<${tag} version="1" action="${action}">\n`
 const closing = `\n</${tag}>`
-const instruction = [
-  'The user confirmed this Goal proposal and asked you, its Supervisor, to continue.',
-  'Read amux goal --skill. Verify the original confirmation, current proposal revision and your Supervisor role.',
-  'Advance the ready Tickets in the original Goal. Follow up on dispatches, collect reports, arrange independent review and advance newly ready work.',
-  'Write progress back to the Goal. Continue until results are ready for the user to accept or a concrete blocker needs action. Keep unaffected Tickets moving.'
-].join('\n')
+const instruction = /* @__PURE__ */ getAmuxProtocolTemplate('goal-confirmation', 'instruction')
 
 function assertGoalConfirmation({ goalUrl, alignmentRevision, operationId }: GoalConfirmation) {
   const target = parseAmuxObjectLink(goalUrl)
@@ -32,13 +28,11 @@ function formatGoalConfirmationBody(value: GoalConfirmation, body: string): stri
   assertGoalConfirmation(value)
   const document = new DOMImplementation().createDocument(null, '', null)
   const element = document.createElement(tag)
-  element.setAttribute('version', '2')
-  element.setAttribute('action', action)
   element.setAttribute('goal', value.goalUrl)
   element.setAttribute('revision', String(value.alignmentRevision))
   element.setAttribute('operation-id', value.operationId)
-  element.appendChild(document.createTextNode(`\n${body}\n`))
-  return new XMLSerializer().serializeToString(element)
+  const attributes = new XMLSerializer().serializeToString(element).slice(tag.length + 2, -2)
+  return renderAmuxProtocol('goal-confirmation', 'wire', { attributes, body: encodeAmuxText(body) })
 }
 
 export function parseGoalConfirmation(text: string): GoalConfirmation | null {

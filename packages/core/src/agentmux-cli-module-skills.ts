@@ -1,7 +1,7 @@
 import { guideIndex, guideSharedModuleCommandContract } from './generated/agentmux-guides.js'
 import { AGENTMUX_CLI_COMMANDS } from './agentmux-cli-commands.js'
 import { AGENTMUX_GOAL_SKILL_ENTRY } from './goal-role-guidance.js'
-import { AGENTMUX_PROTOCOL_CATALOG } from './agent-message-render.js'
+import { AGENTMUX_PROTOCOL_CATALOG } from './amux-protocol.js'
 import { guideText } from './guide-text.js'
 import { MODULE_GUIDES } from './generated/agentmux-guides-index.js'
 

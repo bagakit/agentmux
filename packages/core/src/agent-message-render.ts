@@ -1,4 +1,4 @@
-import { focusTaskHandoffNote } from './focus-task-guidance.js'
+import { encodeAmuxText, renderAmuxProtocol } from './amux-protocol.js'
 import { sameConnectionApplication } from './connections-contract.js'
 import { DOMParser, onWarningStopParsing, type Element } from '@xmldom/xmldom'
 import type { AgentMuxMessageEnvelope } from './agent-message-envelope.js'
@@ -9,12 +9,13 @@ import type { ConnectionActor } from './connections-contract.js'
 import { composeOutboundMessage } from './agent-outbound-message.js'
 import { AGENTMUX_A2A_REMINDER } from './agent-messaging-guidance.js'
 import { browserInputContextJson, parseBrowserInputContext, type BrowserInputContext } from './browser-input-context.js'
-import { AMUX_PROTOCOL_DEFINITIONS, AMUX_CONTINUE_MARKER, AMUX_TRIGGER_KINDS, formatAmuxTriggerNote, readAmuxFocusReference, readAmuxTriggerNote, type AmuxTriggerKind, formatAmuxReactionMarker, isAmuxReactionCode, type AmuxProtocolDeclaration, type AmuxProtocolId } from './amux-protocol-definition.js'
-import { formatAmuxSharing, formatAmuxObjectLink } from './sharing.js'
-import { formatCapsuleAnswer, parseCapsuleAnswer } from './capsule-answer.js'
-import { formatGoalConfirmation, parseGoalConfirmation } from './goal-confirmation.js'
+import { AMUX_PROTOCOL_DEFINITIONS, AMUX_CONTINUE_MARKER, formatAmuxTriggerNote, readAmuxFocusReference, readAmuxTriggerNote, type AmuxTriggerKind, formatAmuxReactionMarker, isAmuxReactionCode, type AmuxProtocolDeclaration } from './amux-protocol-definition.js'
+import { parseCapsuleAnswer } from './capsule-answer.js'
+import { parseGoalConfirmation } from './goal-confirmation.js'
 
 export { formatGoalConfirmation, parseGoalConfirmation } from './goal-confirmation.js'
+
+export { AGENTMUX_PROTOCOL_CATALOG, type AgentMuxProtocolCatalogEntry } from './amux-protocol.js'
 
 export { AMUX_PROTOCOL_DEFINITIONS, type AmuxTriggerKind, type AmuxProtocolDeclaration, type AmuxProtocolId } from './amux-protocol-definition.js'
 
@@ -36,21 +37,22 @@ function attributeText(value: string): string {
 }
 
 function reminderText(text: string): string {
-  return `<reminder>${text.replace(/&/gu, '&amp;').replace(/</gu, '&lt;').replace(/>/gu, '&gt;').replace(/\r/gu, '&#13;')}</reminder>`
+  return renderAmuxProtocol('a2a', 'reminder', { text: encodeAmuxText(text) })
 }
 
 export function renderAgentMuxMessageEnvelope(envelope: Pick<AgentMuxMessageEnvelope, 'messageId' | 'sender' | 'senderSessionId' | 'body' | 'channelProfile' | 'channelQuote'>): string {
   if (envelope.sender.kind === 'agent-session' && envelope.senderSessionId !== null) {
     // The authored body is opaque. Only the fixed final reminder is escaped, so
     // tags, code and even complete example envelopes inside the body stay exact.
-    const tag = AMUX_PROTOCOL_DEFINITIONS.a2a.tag
-    return `<${tag} from="${attributeText(envelope.senderSessionId)}" msg-id="${attributeText(envelope.messageId)}">\n${envelope.body}\n${reminderText(AGENTMUX_A2A_REMINDER)}\n</${tag}>`
+    return renderAmuxProtocol('a2a', 'wire', { sender: attributeText(envelope.senderSessionId),
+      mid: attributeText(envelope.messageId), body: envelope.body, reminder: reminderText(AGENTMUX_A2A_REMINDER) })
   }
   if (envelope.sender.kind === 'external') {
     const sender = envelope.sender
-    const header = channelHeader({ actor: sender.actor, externalConversationId: sender.externalConversationId,
+    const attributes = channelAttributes({ actor: sender.actor, externalConversationId: sender.externalConversationId,
       externalMessageId: sender.externalMessageId, ...(envelope.channelProfile?.profile ? { profile: envelope.channelProfile.profile } : {}) })
-    return `${envelope.channelQuote ? renderChannelTranscriptQuote(envelope.channelQuote) + '\n' : ''}${header}\n${envelope.body}\n</${AMUX_PROTOCOL_DEFINITIONS.channel.tag}>`
+    const body = renderAmuxProtocol('channel', 'wire', { attributes, body: envelope.body })
+    return envelope.channelQuote ? renderChannelTranscriptQuote(envelope.channelQuote) + '\n' + body : body
   }
   // Human input and unverified text cannot acquire an Agent sender by formatting.
   return envelope.body
@@ -76,13 +78,13 @@ export type AgentMuxChannelDeclaration = {
   raw: string
 }
 
-function channelHeader(channel: Omit<AgentMuxChannelDeclaration, 'raw'>): string {
+function channelAttributes(channel: Omit<AgentMuxChannelDeclaration, 'raw'>): string {
   const fields = [ ['domain', channel.actor.application.domain], ['app-id', channel.actor.application.appId], ...(channel.actor.application.issuer === undefined ? [] : [['issuer', channel.actor.application.issuer]]),
     ['id-type', channel.actor.idType], ['user-id', channel.actor.userId], ['conversation-id', channel.externalConversationId], ['message-id', channel.externalMessageId],
     ...(channel.profile?.name === undefined ? [] : [['name', channel.profile.name]]),
     ...(channel.profile?.avatarUrl === undefined ? [] : [['avatar-url', channel.profile.avatarUrl]]),
     ...(channel.profile === undefined ? [] : [['observed-at', String(channel.profile.observedAt)]]) ]
-  return `<${AMUX_PROTOCOL_DEFINITIONS.channel.tag} ${fields.map(([key, value]) => `${key}="${attributeText(value!)}"`).join(' ')}>`
+  return fields.map(([key, value]) => key + '="' + attributeText(value!) + '"').join(' ')
 }
 
 /** Parse the producer header only. The complete body, including nested closing tags, stays opaque. */
@@ -103,7 +105,7 @@ function parseChannel(text: string): AgentMuxMessagePrefix | null {
         profile: { observedAt: Number(observedAt), ...(name === null ? {} : { name }), ...(avatarUrl === null ? {} : { avatarUrl }) } }).profile!
     } else if (name !== null || avatarUrl !== null) return null
     const declaration = { actor, externalConversationId, externalMessageId, ...(profile ? { profile } : {}) }
-    if (channelHeader(declaration) + '\n' !== header[0]) return null
+    if (renderAmuxProtocol('channel', 'header', { attributes: channelAttributes(declaration) }) + '\n' !== header[0]) return null
     return { kind: 'content', sourceLabel: profile?.name ?? `${actor.userId} · ${actor.application.domain}`, declaredAgentSessionId: null,
       body: text.slice(header[0].length, -closing.length), declaredChannel: { ...declaration, raw: text } }
   } catch { return null }
@@ -151,11 +153,12 @@ export type AgentMuxMessagePacket = {
 /** Only a reading wire; the caller owns the original records and notice input identity. */
 export function renderAgentMuxMessageReferences(references: readonly { senderSessionId: string; messageId: string }[], reminder?: string): string {
   if (references.length === 0) return ''
-  const tag = references.length === 1 && reminder === undefined ? AMUX_PROTOCOL_DEFINITIONS['a2a-reference'].tag : 'a2a'
-  const items = references.map(reference => `<${tag} from="${attributeText(reference.senderSessionId)}" msg-id="${attributeText(reference.messageId)}" read-via="message --skill" />`)
-  if (tag === 'amux:a2a') return items[0]!
+  const single = references.length === 1 && reminder === undefined
+  const items = references.map(reference => renderAmuxProtocol('a2a-reference', single ? 'wire' : 'row',
+    { sender: attributeText(reference.senderSessionId), mid: attributeText(reference.messageId) }))
+  if (single) return items[0]!
   if (reminder !== undefined) items.push(reminderText(reminder))
-  return `<amux>\n${items.join('\n')}\n</amux>`
+  return renderAmuxProtocol('a2a-reference', 'batch', { items: items.join('\n') })
 }
 
 function attributes(element: Element, required: readonly string[], optional: readonly string[] = []): boolean {
@@ -342,7 +345,7 @@ function parseA2aContainer(text: string): AgentMuxMessagePrefix | null {
 }
 
 export function renderChannelTranscriptQuote(quote: ChannelTranscriptQuote): string {
-  return `<${AMUX_PROTOCOL_DEFINITIONS['channel-quote'].tag} version="1">\n${channelTranscriptQuoteJson(quote)}\n</${AMUX_PROTOCOL_DEFINITIONS['channel-quote'].tag}>`
+  return renderAmuxProtocol('channel-quote', 'wire', { json: channelTranscriptQuoteJson(quote) })
 }
 
 /** Validate retained wire with the original reader, never today's formatter. */
@@ -422,64 +425,3 @@ function parseStandaloneProtocol(text: string): AmuxProtocolDeclaration | null {
     return { tag, attributes: attrs, body, raw: text }
   } catch { return null }
 }
-
-export type AgentMuxProtocolCatalogEntry = {
-  id: AmuxProtocolId
-  title: string
-  description: string
-  form: 'envelope' | 'marker' | 'frame' | 'link' | 'extension'
-  examples: readonly { label: string; wire: string }[]
-}
-
-const sampleReference = { senderSessionId: 'SID', messageId: 'MID' }
-const protocolExamples = {
-  context: () => [{ label: 'Guidance and original request', wire: composeOutboundMessage({ amux: 'Platform guidance.', user: 'Original request.' }) }],
-  trigger: () => AMUX_TRIGGER_KINDS.map(kind => ({ label: kind, wire: composeOutboundMessage({ amux: formatAmuxTriggerNote(kind, 'Original platform guidance.'), user: 'Original instruction.' }) })),
-  browser: () => [{ label: 'Declared page observation', wire: composeOutboundMessage({ inputContext: {
-    kind: 'browser', version: 1, capturedAt: 0, browser: { hostId: 'local', browserId: 'BID', navigationId: null },
-    page: { url: 'https://example.org/', title: 'Example page' }
-  }, user: 'Original request.' }) }],
-  a2a: () => [{ label: 'Original message', wire: renderAgentMuxMessageEnvelope({ messageId: 'MID', sender: { kind: 'agent-session', agentSessionId: 'SID' }, senderSessionId: 'SID', body: 'Original message body.' }) }],
-  channel: () => [{ label: 'Original channel message', wire: renderAgentMuxMessageEnvelope({ messageId: 'MID', senderSessionId: null, body: 'Original channel body.', sender: {
-    kind: 'external', connectionId: 'CONNECTION', actor: { application: { domain: 'chat.example', appId: 'APP' }, idType: 'user-id', userId: 'USER' },
-    externalConversationId: 'ROOM', externalMessageId: 'MESSAGE', bindingId: 'BINDING', bindingRevision: 1, grantId: 'GRANT', grantRevision: 1
-  } }) }],
-  'channel-quote': () => [{ label: 'Quoted history before the current request', wire: renderAgentMuxMessageEnvelope({ messageId: 'MID', senderSessionId: null, body: 'Current request.', sender: {
-    kind: 'external', connectionId: 'CONNECTION', actor: { application: { domain: 'chat.example', appId: 'APP' }, idType: 'user-id', userId: 'USER' },
-    externalConversationId: 'ROOM', externalMessageId: 'MESSAGE', bindingId: 'BINDING', bindingRevision: 1, grantId: 'GRANT', grantRevision: 1
-  }, channelQuote: { version: 1, application: { domain: 'chat.example', appId: 'APP' }, externalConversationId: 'ROOM', observedAt: 0,
-    range: { from: { messageId: 'FIRST', inclusive: true }, throughMessageId: 'MESSAGE', origin: 'first-observed' }, coverage: 'complete', gaps: [],
-    records: [{ messageId: 'FIRST', contentType: 'text', content: 'Original earlier message.', author: { kind: 'unknown' } }] } }) }],
-  'a2a-reference': () => [
-    { label: 'Single reference', wire: renderAgentMuxMessageReferences([sampleReference]) },
-    { label: 'Merged references', wire: renderAgentMuxMessageReferences([sampleReference, { senderSessionId: 'SID-2', messageId: 'MID-2' }]) }
-  ],
-  'capsule-answer': () => [{ label: 'Confirmed page answer', wire: formatCapsuleAnswer({ capsuleId: 'Kd7mQ2xRb9Wp', interactionId: 'Q4nT8vHc2Jzs', question: 'Which icon?', answer: 'B, with a lighter shadow' }) }],
-  'goal-confirmation': () => [{ label: 'Confirm a Goal and ask its Supervisor to continue', wire: formatGoalConfirmation({
-    goalUrl: formatAmuxObjectLink({ kind: 'goal', goalId: 'GOAL', runtimeId: 'RUNTIME', namespace: 'NAMESPACE' }),
-    alignmentRevision: 1, operationId: 'OP'
-  }) }],
-  continue: () => [{ label: 'Continuation declaration', wire: AMUX_CONTINUE_MARKER }],
-  reaction: () => [
-    { label: 'Standalone keyword declaration', wire: formatAmuxReactionMarker('ok') },
-    { label: 'Marker remains text inside guidance', wire: composeOutboundMessage({ amux: formatAmuxReactionMarker('ok'), user: 'Original selected Prompt body.' }) }
-  ],
-  'focus-reference': () => [{ label: 'Selected members and task', wire: composeOutboundMessage({
-    amux: focusTaskHandoffNote({ scope: { kind: 'project', hostId: 'local', projectSpaceId: 'PROJECT_ID' },
-      selection: { kind: 'members', references: [{ hostId: 'local', contextId: 'MEMBER_ID' }] } }),
-    user: '整理这组工作，给我一份可以逐项决定的清单。'
-  }) }],
-  sharing: () => [
-    { label: 'File context', wire: formatAmuxSharing('File', 'docs/example.md\nOriginal file context.') },
-    { label: 'Browser context', wire: formatAmuxSharing('Browser', 'https://example.org/\nOriginal page context.') }
-  ],
-  link: () => [{ label: 'Exact object identity', wire: formatAmuxObjectLink({ kind: 'agent', agentSessionId: 'SID' }) }],
-  generic: () => {
-    const tag = AMUX_PROTOCOL_DEFINITIONS.generic.tag.replace('NAME', 'example')
-    return [{ label: 'Illustrative unregistered declaration', wire: `<${tag} topic="Example">Original opaque content.</${tag}>` }]
-  }
-} satisfies Record<AmuxProtocolId, () => readonly { label: string; wire: string }[]>
-
-/** Local compiled reading capabilities, not the connected Runtime's version or permissions. */
-export const AGENTMUX_PROTOCOL_CATALOG: readonly AgentMuxProtocolCatalogEntry[] = Object.entries(AMUX_PROTOCOL_DEFINITIONS)
-  .map(([id, definition]) => ({ id: id as AmuxProtocolId, ...definition, examples: protocolExamples[id as AmuxProtocolId]() }))
