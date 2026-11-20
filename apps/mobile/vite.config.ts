@@ -10,7 +10,7 @@ export default defineConfig(({ command }) => ({
     name: 'mobile-product-csp',
     transformIndexHtml: (_html, context) => command === 'build' && !context.filename.endsWith('/device.html') ? [{ tag: 'meta', attrs: {
       'http-equiv': 'Content-Security-Policy',
-      content: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self'; connect-src 'self' https:; object-src 'none'; base-uri 'self'; frame-src 'none'"
+      content: "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self'; connect-src 'self' https:; object-src 'none'; base-uri 'self'; frame-src 'none'"
     }, injectTo: 'head-prepend' as const }] : []
   }, {
     name: 'mobile-immutable-release',

@@ -10,6 +10,7 @@ import type { TerminalSessionSource } from '../lib/terminal-session-source'
 import { tabSwitchObservation } from '../lib/tab-switch-observation'
 import { useWorkbenchBrowserPresentation, type WorkbenchPresentation } from '../lib/workbench-presentation'
 import { subscribeTerminalInput } from '@agentmux/client-ui/terminal/input'
+import { activateTerminalImages } from '@agentmux/client-ui/terminal/images'
 import type { AgentMuxTerminalViewObservation, RendererTabSwitchTerminal, RendererTerminalCleanupContext, RendererTerminalWriteContext } from '@agentmux/core/control'
 import type { AgentMuxRunAttachment, AgentMuxTerminalResize } from '@agentmux/core'
 import { observeRead } from '@agentmux/core/observation-read'
@@ -915,6 +916,13 @@ function TerminalViewOwner({
     }
     terminal.loadAddon(fit)
     terminal.open(root)
+    let imagesActive = false
+    try {
+      activateTerminalImages(terminal)
+      imagesActive = true
+    } catch (error) {
+      reportError(new Error('Terminal inline graphics unavailable. Text and input remain available.', { cause: error }))
+    }
     terminalDocumentRef.current = root.ownerDocument
     terminalRef.current = terminal
     consumeCaretFocus()
@@ -946,7 +954,7 @@ function TerminalViewOwner({
     })
 
     const resourceOwners = acquireTerminalResourceOwners({
-      addons: 1,
+      addons: imagesActive ? 2 : 1,
       listeners: 10
     })
     let search: {

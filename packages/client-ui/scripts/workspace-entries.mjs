@@ -182,6 +182,7 @@ export const workspaceSources = {
     'note-wikilinks'
   ]),
   ...entries('terminal', 'terminal', '.ts', [
+    'images',
     'input',
     'live-output',
     'replay',

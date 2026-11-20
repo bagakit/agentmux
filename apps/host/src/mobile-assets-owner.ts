@@ -175,7 +175,7 @@ export class MobileAssetsOwner implements MobileAssetsPort {
     response.writeHead(200, { 'Content-Type': file.type, 'Cache-Control': entry ? 'no-store' : 'private, max-age=31536000, immutable',
       Vary: 'Accept-Encoding', ...(compress ? { 'Content-Encoding': 'gzip' } : {}), 'X-Content-Type-Options': 'nosniff',
       'X-AgentMux-Mobile-Build': encodeURIComponent(snapshot.release.buildId), 'Referrer-Policy': 'no-referrer',
-      'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' ws: wss:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" })
+      'Content-Security-Policy': "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' ws: wss:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" })
     if (request.method === 'HEAD') { response.end(); return }
     this.responseCount++; this.sending.set(snapshot, (this.sending.get(snapshot) ?? 0) + 1)
     let released = false

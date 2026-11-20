@@ -5,6 +5,7 @@ import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { activateTerminalUnicodeWidth, UNICODE_WIDTH_VERSION } from '@agentmux/client-ui/terminal/unicode'
+import { activateTerminalImages } from '@agentmux/client-ui/terminal/images'
 import type { MobileTerminalClient } from '../conversation/mobile-conversation-client'
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
 import type { MobileConnection } from '../conversation/MobileConversationSurface'
@@ -65,7 +66,13 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
       windowOptions: {}, theme: paletteRef.current ?? { background: '#151b1b', foreground: '#dce4e0', selectionBackground: '#bedbba40' } })
     canvas.open(container.current)
     const unicode = activateTerminalUnicodeWidth(canvas)
-    setRenderIssue(unicode === UNICODE_WIDTH_VERSION ? null : '终端字宽设置没有生效，部分符号可能错位。输出和输入仍可使用。')
+    let renderWarning = unicode === UNICODE_WIDTH_VERSION ? null : '终端字宽设置没有生效，部分符号可能错位。'
+    try { activateTerminalImages(canvas) }
+    catch (error) {
+      console.warn('[terminal] Inline graphics unavailable', error)
+      renderWarning = [renderWarning, '终端图片暂时无法显示。'].filter(Boolean).join('')
+    }
+    setRenderIssue(renderWarning ? `${renderWarning}输出和输入仍可使用。` : null)
     if (canvas.textarea) { canvas.textarea.readOnly = true; canvas.textarea.tabIndex = -1; canvas.textarea.inputMode = 'none' }
     // Terminal output cannot read/write the OS clipboard. Copy requires the explicit button below.
     canvas.parser.registerOscHandler(52, () => true)
