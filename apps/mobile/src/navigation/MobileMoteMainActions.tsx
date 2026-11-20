@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
-import { moteQuickBaseline, parseMotePreferencesReadResult, sameMotePreferencesTarget, sameMoteQuickDefaults, type MotePreferencesTarget, type MoteQuickPreferencesReadResult } from '@agentmux/core/mote-preferences'
+import { moteExecutorPriority, moteQuickBaseline, parseMotePreferencesReadResult, sameMotePreferencesTarget, sameMoteQuickDefaults, type MotePreferencesTarget, type MoteQuickPreferencesReadResult } from '@agentmux/core/mote-preferences'
 import { moteMainBaseline, pendingMoteMainCreation, pendingMoteMainStarts, spatialAgentOpenRecord } from '@agentmux/core/spatial-graph'
 import { agentPromptSubmissionOutcome, parseMoteDialogueResult, type MoteDialoguePage, type MoteMainSetupResult, type MoteMainRolloverDecision } from '@agentmux/core/mote-dialogue'
 import { getDeviceWorkface } from '../recovery/device-workface'
@@ -110,7 +110,7 @@ export function MobileMoteMainActions({ client, target, visible, onConfigure, on
     return () => { unlisten(); if (queuedInspection.current === id) queuedInspection.current = null }
   }, [client, visible, result?.operationId, inputSelection])
   const baseline = reading && moteQuickBaseline(reading.preferences)
-  const executor = reading?.preferences.choices?.executors?.find(item => item.id === reading.preferences.defaults?.executorId)
+  const executor = reading?.preferences.defaults ? moteExecutorPriority(reading.preferences.defaults).map(id => reading.preferences.choices?.executors?.find(item => item.id === id)).find(Boolean) : undefined
   const readIssue = !reading ? null : reading.preferences.status !== 'ready' || !baseline || reading.preferences.issue
     ? reading.preferences.issue ?? 'MOTE 配置还没确认，请刷新。'
     : reading.dialogue.main.status !== 'ready' || reading.dialogue.main.documentRevision !== (baseline.document?.revision ?? null) || !sameMoteQuickDefaults(reading.dialogue.main.current ? { conversation: reading.dialogue.main.current } : {}, baseline.defaults.conversation ? { conversation: baseline.defaults.conversation } : {})
@@ -196,9 +196,8 @@ export function MobileMoteMainActions({ client, target, visible, onConfigure, on
   inspectCurrent.current = inspectOriginal
   if (renderStart) return renderStart({ reading, result, issue: issue || readIssue, busy, checking, ready: Boolean(reading && !readIssue && !reading.creationPending.length), pending: pendingIds,
     submit: (query, retained) => run('create', query, undefined, retained), inspect: id => { void inspectOriginal(id) }, advance: id => { void run('advance', undefined, id) }, refresh: () => refresh(value => value + 1) })
-  return <section className="mobile-mote-setup" aria-label="Main Agent">
-    <h3>{reading?.dialogue.main.current ? '轮转 Main Agent' : '开始主对话'}</h3>
-    <p>{reading?.dialogue.main.current ? '由新的主 Agent 承接同一个 Mote，已有 Agent 与对话不受影响。' : '为同一个 Mote 创建承接主对话的 Main Agent。'}</p>
+  return <section className="mobile-mote-setup" aria-label="主对话">
+    <h3>主对话</h3>
     {(!reading && !issue) && <p role="status">正在核对主对话与配置…</p>}
     {readIssue && <p role="status">{readIssue}</p>}
     {issue && <p role="status">{issue}</p>}
@@ -207,12 +206,12 @@ export function MobileMoteMainActions({ client, target, visible, onConfigure, on
     {result && <p role="status">{result.binding === 'confirmed' ? 'Main 已绑定，可回到主对话。' : '主 Agent 已创建，绑定还没确认。'}</p>}
     {result?.issue && <p role="status">{result.issue}</p>}
     {operationId && (!result || result.binding === 'unconfirmed') ? <div><button type="button" disabled={checking} onClick={() => void inspectOriginal(operationId)}>核对主 Agent 创建</button><button type="button" disabled={busy} onClick={() => void run('advance')}>继续设置主 Agent</button></div>
-      : reading && !readIssue && <button type="button" disabled={busy} onClick={() => void run('create')}>{busy ? '正在处理…' : reading.dialogue.main.current ? '新建并轮转 Main Agent' : '新建 Main Agent'}</button>}
+      : reading && !readIssue && <button type="button" disabled={busy} onClick={() => void run('create')}>{busy ? '正在处理…' : reading.dialogue.main.current ? '开始新一轮对话' : '开始对话'}</button>}
     {result?.binding === 'confirmed' && <details><summary>本次设置请求</summary><code>{result.operationId}</code><div>
       <button type="button" disabled={checking} onClick={() => void inspectOriginal(result.operationId)}>核对主 Agent 创建</button>
       <button type="button" disabled={busy} onClick={() => void run('advance', undefined, result.operationId)}>继续设置主 Agent</button>
     </div></details>}
     {result?.binding === 'confirmed' && onOpenMain && <button type="button" onClick={onOpenMain}>打开主对话</button>}
-    <button type="button" onClick={onConfigure}>配置默认 Executor</button><button type="button" disabled={busy} onClick={() => refresh(value => value + 1)}>刷新主对话配置</button>
+    <button type="button" onClick={onConfigure}>设置 Executor 优先级</button><button type="button" disabled={busy} onClick={() => refresh(value => value + 1)}>刷新主对话配置</button>
   </section>
 }

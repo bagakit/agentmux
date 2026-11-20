@@ -150,7 +150,7 @@ export function MoteMainActions({ scope, active, entryToken, onConfigure, onCrea
   const actions = <>
     <Button type="button" disabled={busy || !onStartNew && (!reading || Boolean(reading.issue))}
       onClick={() => { if (onStartNew) leave(onStartNew)(); else if (reading) void run(() => createMoteMain(scope, reading), undefined, true) }}>{busy ? '正在核对…' : current ? '开始新一轮对话' : '开始对话'}</Button>
-    <Button type="button" onClick={event => { const invoker = menu ? menuTrigger : event.currentTarget; setMenuOpen(false); onConfigure(invoker) }}>{current ? '选择已有主 Agent／设置' : '设置默认执行器'}</Button>
+    <Button type="button" onClick={event => { const invoker = menu ? menuTrigger : event.currentTarget; setMenuOpen(false); onConfigure(invoker) }}>设置 Executor 优先级</Button>
     {current && onOpenWorkspace ? <Button type="button" onClick={leave(onOpenWorkspace)}>在工作区打开</Button> : null}
     <Button type="button" disabled={busy} onClick={() => setGeneration(value => value + 1)}>重新核对</Button>
   </>

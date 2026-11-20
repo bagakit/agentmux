@@ -7,7 +7,7 @@ import { AnchoredChoice } from './AnchoredChoice.js'
 
 export type SelectionOption = { value: string; label: string; disabled?: boolean; icon?: ReactNode; description?: string }
 export type SelectionFieldProps = {
-  id?: string | undefined; label: string; value: string; options: readonly SelectionOption[]
+  id?: string | undefined; label: string; value: string | null; options: readonly SelectionOption[]
   onValueChange(value: string): void; disabled?: boolean; className?: string; menuClassName?: string
   menuBoundary?: HTMLElement | null; menuContainer?: HTMLElement | null; triggerLabel?: string | undefined; searchable?: boolean
   open?: boolean; onOpenChange?(open: boolean): void; footer?: ReactNode
@@ -33,7 +33,7 @@ export function SelectionField({ id, label, value, options, onValueChange, disab
   const visible = canSearch && needle ? options.filter(option => [option.label, option.description].join(' ').toLocaleLowerCase().includes(needle)) : options
   const labelForValue = selected?.label ?? missingOptionLabel
   const description = selected?.description ? selected.label + ' · ' + selected.description : selected?.label ?? missingOptionDescription ?? labelForValue
-  const title = selected ? description : labelForValue + (missingOptionDescription && missingOptionDescription !== labelForValue
+  const title = selected || value === null ? description : labelForValue + (missingOptionDescription && missingOptionDescription !== labelForValue
     ? ' · ' + missingOptionDescription : '') + ': ' + value
   useEffect(() => {
     if (!open) { setQuery(''); setSearchSession(false); typing.current = { text: '', at: 0 }; pendingFocus.current = false }
@@ -64,7 +64,7 @@ export function SelectionField({ id, label, value, options, onValueChange, disab
     data-value={option.value} data-missing={missing || undefined} data-disabled={disabled || option.disabled ? '' : undefined}
     className="selection-field__option" tabIndex={-1} onClick={() => pick(option)}>
     <span className="selection-field__mark">{option.value === value && <SemanticIcon name="status.selected" size={13} />}</span>
-    <span className="selection-field__choice" title={missing ? value : [option.label, option.description].filter(Boolean).join(' · ')}>
+    <span className="selection-field__choice" title={missing ? option.value : [option.label, option.description].filter(Boolean).join(' · ')}>
       {option.icon ? <span className="selection-field__icon" inert aria-hidden="true">{option.icon}</span> : null}
       <span>{option.label}{option.description ? <small className="selection-field__description">{option.description}</small> : null}</span>
     </span>
@@ -73,7 +73,7 @@ export function SelectionField({ id, label, value, options, onValueChange, disab
   return <AnchoredChoice open={open} onOpenChange={change} label={label} placement="bottom-start" boundary={menuBoundary} container={menuContainer}
     onPlaced={() => { if (pendingFocus.current) focusInitial() }} trigger={<button ref={trigger} id={id} type="button"
       className={'selection-field ' + className} aria-label={label} aria-haspopup={hasDialog ? 'dialog' : 'listbox'}
-      aria-describedby={[describedBy, descriptionId].filter(Boolean).join(' ')} aria-labelledby={labelledBy} data-value={value} title={title} disabled={disabled}
+      aria-describedby={[describedBy, descriptionId].filter(Boolean).join(' ')} aria-labelledby={labelledBy} data-value={value ?? undefined} title={title} disabled={disabled}
       onKeyDown={event => {
         if (isImeOwnedKeyboardEvent(event) || disabled) return
         if (['ArrowDown', 'ArrowUp', ' ', 'Enter'].includes(event.key)) {
@@ -127,7 +127,7 @@ export function SelectionField({ id, label, value, options, onValueChange, disab
       tabIndex={hasDialog ? 0 : undefined} onFocus={event => {
         if (event.target === event.currentTarget) available()[0]?.focus({ preventScroll: true })
       }}>
-      {open && !selected && !needle ? row({ value, label: labelForValue }, true) : null}
+      {open && value !== null && !selected && !needle ? row({ value, label: labelForValue }, true) : null}
       {open && visible.map(option => row(option))}
     </div>
     {canSearch && !visible.length ? <p className="selection-field__empty" role="status">No matching options.</p> : null}

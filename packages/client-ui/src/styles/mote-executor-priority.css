@@ -1,0 +1,63 @@
+.mote-executor-priority {
+  border: 0;
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+}
+.mote-executor-priority > legend {
+  font-weight: 600;
+  padding: 0;
+}
+.mote-executor-priority > p {
+  color: var(--text-3);
+  font-size: var(--fs-body, 13px);
+  line-height: 1.45;
+  margin-block: 5px 12px;
+}
+.mote-executor-priority > ol {
+  padding: 0;
+  margin: 0 0 10px;
+  list-style: none;
+  counter-reset: executor;
+  display: grid;
+  gap: 4px;
+}
+.mote-executor-priority li {
+  counter-increment: executor;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm, 8px);
+  background: var(--surface-2);
+}
+.mote-executor-priority li::before {
+  content: counter(executor);
+  text-align: center;
+  color: var(--text-3);
+  font-size: var(--fs-body, 13px);
+  font-variant-numeric: tabular-nums;
+}
+.mote-executor-priority li > span {
+  overflow-wrap: anywhere;
+  font-size: var(--fs-body, 13px);
+}
+.mote-executor-priority__actions {
+  display: flex;
+  gap: 2px;
+}
+.mote-executor-priority__actions .icon-button {
+  inline-size: 30px;
+  block-size: 30px;
+  padding: 0;
+}
+.mote-executor-priority__actions .icon-button:disabled {
+  opacity: .3;
+}
+@media (pointer: coarse) {
+  .mote-executor-priority__actions .icon-button {
+    inline-size: 44px;
+    block-size: 44px;
+  }
+}

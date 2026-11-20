@@ -1,4 +1,4 @@
-import { moteQuickBaseline, parseMotePreferencesReadResult,
+import { moteExecutorPriority, moteQuickBaseline, parseMotePreferencesReadResult,
   type MoteDefaultConversation, type MoteQuickPreferencesReadResult } from '@agentmux/core/mote-preferences'
 import { moteMainBaseline, moteMainCreatedReference, pendingMoteMainCreation, spatialAgentOpenRecord } from '@agentmux/core/spatial-graph'
 import { pendingMoteMainStarts, type MoteDialoguePage, type MoteMainSetupResult, type MoteMainDeferredInput, type MoteMainRolloverDecision } from '@agentmux/core/mote-dialogue'
@@ -53,7 +53,7 @@ export async function readMoteMainAction(scope: MoteWorkfaceScope): Promise<Mote
   const [raw, dialogue, spatial] = await Promise.all([api.motePreferences.read(input), api.moteDialogue.read({ target, kind: 'main' }), api.spatial.read()])
   const preferences = parseMotePreferencesReadResult(raw, input), baseline = moteQuickBaseline(preferences)
   const configured = preferences.defaults?.executorId
-  const executor = preferences.choices?.executors?.find(item => item.id === configured) ?? null
+  const executor = preferences.defaults ? moteExecutorPriority(preferences.defaults).map(id => preferences.choices?.executors?.find(item => item.id === id)).find(Boolean) ?? null : null
   const issue = preferences.status !== 'ready' || !baseline || preferences.issue ? preferences.issue ?? 'Mote 的设置暂未确认，写下的想法会保留。可以重新核对。'
     : dialogue.main.status !== 'ready' || dialogue.main.documentRevision !== (baseline.document?.revision ?? null) || !same(dialogue.main.current, baseline.defaults.conversation ?? null)
       ? '主对话的来源尚未核对一致，原对话和草稿仍保留。可以重新核对。'

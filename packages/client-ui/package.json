@@ -343,6 +343,11 @@
       "browser": "./src/components/MoteConversationStart.tsx",
       "import": "./dist/components/MoteConversationStart.js"
     },
+    "./components/MoteExecutorPriority": {
+      "types": "./src/components/MoteExecutorPriority.tsx",
+      "browser": "./src/components/MoteExecutorPriority.tsx",
+      "import": "./dist/components/MoteExecutorPriority.js"
+    },
     "./components/MoteGroupConversation": {
       "types": "./src/components/MoteGroupConversation.tsx",
       "browser": "./src/components/MoteGroupConversation.tsx",

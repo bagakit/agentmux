@@ -2,14 +2,14 @@ import { MobileNotice } from '../notices/MobileNotice'
 import { useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
+import { MoteExecutorPriority } from '@agentmux/client-ui/components/MoteExecutorPriority'
 import { FormRow } from '@agentmux/client-ui/components/FormRow'
 import { Switch, TextInput } from '@agentmux/client-ui/input'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
-import { DEFAULT_MOTE_PRESENCE, moteMinutesToMs, sameMoteDefaultConversation, type MotePreferencesTarget } from '@agentmux/core/mote-preferences'
+import { DEFAULT_MOTE_PRESENCE, moteMinutesToMs, type MotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import { useMoteQuickDraft } from './useMoteQuickDraft'
 
 const HEARTBEAT_MINUTES_ISSUE = '心跳间隔请填至少 1 分钟的整数。'
-const ROLLOVER_MINUTES_ISSUE = '请填写大于 0 的空闲分钟数，例如 20 或 1.5。'
 
 type Props = { target: MotePreferencesTarget; client: AgentMuxHostedClient | null; visible: boolean;
   copyText: ClientUiPlatform['copyText']; onClose(): void; onSaved(): void }
@@ -19,30 +19,16 @@ export function MobileMoteQuickEditor({ target, client, visible, copyText, onClo
   const presence = draft.values.presence ?? DEFAULT_MOTE_PRESENCE
   const minutes = draft.invalidHeartbeatInput ?? String(presence.intervalMs / 60000)
   const intervalIssue = draft.invalidHeartbeatInput === undefined ? null : HEARTBEAT_MINUTES_ISSUE
-  const rollover = draft.values.conversationRollover
-  const rolloverKind = draft.conversationRolloverEditor?.kind ?? rollover?.kind ?? 'keep-current'
-  const rolloverMinutes = draft.conversationRolloverEditor?.minutes ?? (rollover?.kind === 'idle' ? String(rollover.idleMs / 60000) : '')
-  const [rolloverIssue, setRolloverIssue] = useState('')
-  function editRollover(kind: 'keep-current' | 'idle', value: string) {
-    setRolloverIssue('')
-    const values = kind === 'keep-current' ? { ...draft.values, conversationRollover: { kind } }
-      : moteMinutesToMs(value) !== null ? { ...draft.values, conversationRollover: { kind, idleMs: moteMinutesToMs(value)! } } : draft.values
-    model.edit(values, { kind, minutes: value })
-  }
   const maintenance = read?.maintenance
   const maintenanceLabel = maintenance?.schedule?.status === 'stopped' ? '心跳安排已停止' : maintenance ? {
     active: '已安排自动心跳', paused: '心跳安排已暂停', disabled: '自动维持未启用', unbound: '主对话尚未绑定', unconfirmed: '实际安排尚未确认'
   }[maintenance.status] : '实际安排尚未读取'
   const copy = (value: unknown) => { setCopyIssue(''); void copyText(JSON.stringify(value, null, 2), error => setCopyIssue(error instanceof Error ? error.message : String(error))) }
-  const executor = draft.values.executorId ?? '', conversations = read?.choices?.conversations ?? [], executors = read?.choices?.executors ?? []
-  const conversation = draft.values.conversation ? JSON.stringify(draft.values.conversation) : ''
-  const destinations = read?.choices?.destinations ?? [], destination = model.destination ? JSON.stringify(model.destination) : ''
-  const changesMain = draft.baseline !== null && !sameMoteDefaultConversation(draft.baseline.defaults.conversation, draft.values.conversation)
   const blocked = draft.attempts.find(a => a.input.operationId === draft.blockedAttemptId)
   return <section className="mobile-mote-quick-editor" aria-label="Mote 快捷配置编辑">
     <button type="button" className="mobile-text-button" onClick={onClose}>返回 Profile</button><h3>快捷配置</h3>
-    <p>设置主对话、自动流转策略与心跳。</p>
-    {read?.status === 'ready' && (!read.choices || read.choices.executors === null || read.choices.destinations === null) && <p role="status">正在读取其余候选；已保存的配置仍可编辑和保存。</p>}
+    <p>设置执行器顺序和心跳。</p>
+    {read?.status === 'ready' && (!read.choices || read.choices.executors === null) && <p role="status">正在读取其余候选；已保存的配置仍可编辑和保存。</p>}
     {read?.choices?.issues && <MobileNotice kind="warning" owner={client} identity={[JSON.stringify(target),read.choices.issues.executors,read.choices.issues.locations]} role="status">{Object.values(read.choices.issues).join(' ')}<button type="button" className="mobile-text-button" onClick={() => { void model.inspect() }}>重新核对候选</button></MobileNotice>}
     <MobileNotice dismissible={!model.busy && !model.adoptionBusy} kind={blocked && !model.busy && !model.adoptionBusy ? "warning" : "feedback"} owner={client} identity={[JSON.stringify(target),blocked?.input.operationId,blocked?.phase,model.notice]} role="status">{model.busy ? '正在保存配置…' : model.adoptionBusy ? '正在采用当前修订…' : blocked ? '保存还没确认。' : model.notice || '正在核对配置…'}</MobileNotice>
     <form noValidate onKeyDown={event => {
@@ -53,34 +39,9 @@ export function MobileMoteQuickEditor({ target, client, visible, copyText, onClo
         event.currentTarget.querySelector<HTMLInputElement>('input[name="heartbeatMinutes"]')?.focus()
         return
       }
-      if (rolloverKind === 'idle' && moteMinutesToMs(rolloverMinutes) === null) {
-        setRolloverIssue(ROLLOVER_MINUTES_ISSUE)
-        event.currentTarget.querySelector<HTMLInputElement>('input[name="rolloverMinutes"]')?.focus()
-        return
-      }
       void model.save()
     }}>
-      <label>新对话使用的 Agent<select aria-label="新对话使用的 Agent" value={executor} onChange={event => {
-        const { executorId: _old, ...values } = draft.values; model.edit(event.target.value ? { ...values, executorId: event.target.value } : values)
-      }}><option value="">未设置</option>{executor && !executors.some(e => e.id === executor) && <option value={executor}>保留已保存的 Agent（尚未确认）</option>}
-        {executors.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}</select></label>
-      <label>主对话<select aria-label="主对话" value={conversation} onChange={event => {
-        const { conversation: _old, ...values } = draft.values, choice = conversations.find(c => JSON.stringify(c.reference) === event.target.value)
-        model.edit(choice ? { ...values, conversation: choice.reference } : values)
-      }}><option value="">未选择</option>{conversation && !conversations.some(c => JSON.stringify(c.reference) === conversation) && <option value={conversation}>保留已保存的主对话（尚未确认）</option>}
-        {conversations.map(c => <option key={JSON.stringify(c.reference)} value={JSON.stringify(c.reference)}>{c.label}</option>)}</select></label>
-      <fieldset className="mobile-mote-presence"><legend>主对话自动流转</legend>
-        <label>自动流转策略<select aria-label="自动流转策略" value={rolloverKind} onChange={event => editRollover(event.target.value as 'keep-current' | 'idle', rolloverMinutes)}>
-          <option value="keep-current">保持当前对话</option><option value="idle">空闲后新一轮</option>
-        </select></label>
-        {rolloverKind === 'idle' && <FormRow layout="stacked" label="对话空闲时长（分钟）"
-          description="填写大于 0 的分钟数，可用小数。" error={rolloverIssue} invalid={Boolean(rolloverIssue)}>
-          {field => <TextInput {...field} name="rolloverMinutes" type="number" inputMode="decimal" min="0" step="any" value={rolloverMinutes}
-            onChange={event => editRollover('idle', event.target.value)} />}
-        </FormRow>}
-        <p>保存后才生效。达到空闲时长后，下次新问题再开启新一轮；旧对话保留。保存不会立即切换主对话，也不会发送消息。</p>
-        {!read || read.status !== 'ready' ? <p>已保存的流转策略尚未确认；当前选择保留。</p> : !read.defaults?.conversationRollover && <p>配置中还没有流转策略，不修改时保持当前对话。</p>}
-      </fieldset>
+      <MoteExecutorPriority language="zh" defaults={draft.values} choices={read?.choices?.executors ?? []} onChange={model.edit} />
       <fieldset className="mobile-mote-presence"><legend>主 Agent 驻留与心跳</legend>
         <label><Switch aria-label="启用 Mote 自动维持" checked={presence.enabled} onChange={event => model.edit({ ...draft.values, presence: { ...presence, enabled: event.target.checked } })} />启用自动维持</label>
         <FormRow layout="stacked" label="心跳间隔（分钟）"
@@ -104,10 +65,6 @@ export function MobileMoteQuickEditor({ target, client, visible, copyText, onClo
           <pre>{JSON.stringify(operation, null, 2)}</pre>
         </article>)}</details>}
       </fieldset>
-      {changesMain ? destinations.length > 1 ? <label>主对话展示位置<select aria-label="主对话展示位置" value={destination} onChange={event => model.setDestination(destinations.find(d => JSON.stringify(d.reference) === event.target.value)?.reference ?? null)}>
-        <option value="">选择展示位置</option>{destinations.map(d => <option key={JSON.stringify(d.reference)} value={JSON.stringify(d.reference)}>{d.label}</option>)}</select></label>
-        : <p>{destinations.length === 1 ? `主对话展示位置：${destinations[0]!.label}` : '更换主对话需要确认展示位置，可以重新核对。'}</p>
-        : draft.baseline ? <p>保存偏好无需选择展示位置，也不会切换主对话。</p> : null}
       <div className="mobile-mote-file-editor__actions"><button type="submit" className="mobile-text-button" disabled={model.busy || model.adoptionBusy}>保存快捷配置</button>
         <button type="button" className="mobile-text-button" onClick={() => { void model.inspect() }}>核对当前配置</button>
         <button type="button" className="mobile-text-button" onClick={() => copy(draft)}>复制配置与请求</button></div>

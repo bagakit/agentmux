@@ -7,7 +7,7 @@ import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useShallow } from 'zustand/react/shallow'
-import { DEFAULT_MOTE_PRESENCE, mergeMoteQuickChoices, moteMinutesToMs, parseMotePreferencesSaveParams, sameMotePreferencesTarget, type MoteQuickChoices, type MotePresenceReading } from '@agentmux/core/mote-preferences'
+import { DEFAULT_MOTE_PRESENCE, moteExecutorPriority, mergeMoteQuickChoices, moteMinutesToMs, parseMotePreferencesSaveParams, sameMotePreferencesTarget, type MoteQuickChoices, type MotePresenceReading } from '@agentmux/core/mote-preferences'
 import { MOTE_QUICK_MODE_PATH, type MoteQuickDefaults } from '@agentmux/host/mote-model'
 import type { MoteWorkfaceScope } from '../lib/mote-workface'
 import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
@@ -15,13 +15,11 @@ import { readMoteQuickDefaults, saveMoteQuickDefaults, adoptMoteHeartbeatGuidanc
 import { checkpointLauncherState, useLauncherState } from '../lib/launcher-state'
 import { restoredMoteQuickDraft } from '../lib/mote-quick-draft'
 import type { MoteQuickPreferencesSaveParams } from '@agentmux/core/mote-preferences'
-import { moteConversationChoices, moteConversationLabel, useMoteDefaultConversation } from '../lib/mote-quick-preferences'
-import { spatialCatalog } from '../lib/space-agent-control'
+import { moteConversationLabel, useMoteDefaultConversation } from '../lib/mote-quick-preferences'
 import { executorsForHost } from '../lib/executors'
 import { fileNavigationSelection, useAppStore } from '../store'
 import { MoteBehaviorAction } from './MoteBehaviorDialog'
-import { SelectionField } from './SelectionField'
-import { AgentExecutorPicker } from './AgentExecutorPicker'
+import { MoteExecutorPriority } from '@agentmux/client-ui/components/MoteExecutorPriority'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { api } from '../lib/api'
 import { moteConnectionTarget } from '../lib/mote-connection-default'
@@ -40,7 +38,6 @@ const ThemeActionQuickModeIcon = semanticIconComponent('action.quick-mode')
 const ThemeActionEditIcon = semanticIconComponent('action.edit')
 const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
 const ThemeObjectConversationIcon = semanticIconComponent('object.conversation')
-const ThemeActionPinIcon = semanticIconComponent('action.pin')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
 const ThemeFileTextIcon = semanticIconComponent('file.text')
 
@@ -63,11 +60,10 @@ export function MoteQuickMode({ scope, reference, onOpenPath, active }: {
   const edit = () => { invoker.current = ownerDocument.activeElement as HTMLElement; setEditing(true) }
   return <section className="mote-quick-mode" aria-label="Quick mode">
     <div className="mote-details__section-actions"><span><ThemeActionQuickModeIcon size={13} />Quick mode</span><MoteBehaviorAction label="Edit quick mode" onClick={edit}><ThemeActionEditIcon size={14} /></MoteBehaviorAction></div>
-    <button className="mote-quick-mode__row" type="button" onClick={edit}><ThemeObjectAgentIcon size={14} /><span>Executor for new chat</span><strong title={defaults.executorId}>{executorLabel ?? 'Choose Executor'}</strong></button>
-    <button className="mote-quick-mode__row" type="button" onClick={edit}><ThemeObjectConversationIcon size={14} /><span>Main Agent</span><strong title={defaults.conversation?.sessionId}>{conversationLabel ?? (defaults.conversation ? 'Saved main Agent' : 'Choose main Agent')}</strong>{defaults.conversation ? <ThemeActionPinIcon size={12} aria-label="Kept open" /> : null}</button>
+    <button className="mote-quick-mode__row" type="button" onClick={edit}><ThemeObjectAgentIcon size={14} /><span>Executor priority</span><strong title={defaults.executorId}>{executorLabel ?? 'Set Executors'}{moteExecutorPriority(defaults).length > 1 ? ` +${moteExecutorPriority(defaults).length - 1}` : ''}</strong></button>
+    {conversationLabel ? <div className="mote-quick-mode__row"><ThemeObjectConversationIcon size={14} /><span>Current Agent</span><strong>{conversationLabel}</strong></div> : null}
     <MoteHeartbeatStatus scope={scope} reading={heartbeat.saved?.maintenance} reports={heartbeat.saved?.reports} onOpenPath={onOpenPath} loading={heartbeat.loading} unavailable={heartbeat.unavailable} issue={heartbeat.issue} visible={active} onRefresh={heartbeat.refresh}
       actions={<Button type="button" onClick={edit}>Configure heartbeat</Button>} />
-    <button className="mote-quick-mode__row" type="button" onClick={edit}><ThemeObjectConversationIcon size={14} /><span>Conversation rollover</span><strong>{saved?.status !== 'saved' ? 'Unconfirmed' : defaults.conversationRollover?.kind === 'idle' ? `After ${defaults.conversationRollover.idleMs / 60000} min idle` : defaults.conversationRollover ? 'Keep current conversation' : 'Not configured'}</strong></button>
     {resolved.issue ? <p role="status" className="mote-details__issue">{resolved.issue}</p> : null}
     {editing ? <MoteQuickModeDialog key={scope.workspace.hostId + scope.topic.id + scope.rootPath} scope={scope} reference={reference} onOpenPath={onOpenPath}
       onClose={() => { setEditing(false); heartbeat.refresh() }} returnFocus={() => invoker.current?.isConnected ? invoker.current : null} /> : null}
@@ -155,19 +151,6 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
       try { retainDraft() } catch (error) { setIssue(presentError(error)) }
     }
   }, [draftKey, draft, minutes, rolloverKind, rolloverMinutes, saved, busy])
-  const facts = useAppStore(useShallow(state => ({ tabs: state.tabs, layouts: state.layouts, config: state.config, snapshots: state.scratchTopicSnapshots,
-    bindings: state.spaceZoneBindings, categories: state.topicCategories })))
-  const ownAgentIds = useMemo(() => [...new Set(Object.values(facts.tabs).filter(tab => tab.workspaceId === scope.workspace.id)
-    .flatMap(tab => Object.values(tab.regions).flatMap(region => region.kind === 'agent' ? [region.sessionId] : [])))], [facts.tabs, scope.workspace.id])
-  const execution = useAppStore(useShallow(state => Object.fromEntries(ownAgentIds.map(id => {
-    const session = sessionPresentationById(state.sessions).get(id)
-    return [id, session ? JSON.stringify([session.hostId, session.control.hostId, session.control.kind === 'agent' ? session.control.agentSessionId : null]) : null]
-  }))))
-  const choices = useMemo(() => moteConversationChoices(useAppStore.getState(), scope.topic, scope.workspace.id,
-    spatialCatalog(useAppStore.getState(), [scope.topic])), [facts.tabs, facts.layouts, facts.config, facts.snapshots, facts.bindings, facts.categories, execution, scope.topic, scope.workspace.id])
-  const executors = (saved?.choices?.executors ?? []).map(executor => ({ id: executor.id, label: executor.name, providerId: executor.providerId }))
-  const conversationLabels = useAppStore(useShallow(state => Object.fromEntries(choices.map(choice => [choice.sessionId,
-    moteConversationLabel(state, choice) ?? choice.sessionId]))))
   useLayoutEffect(() => {
     const epoch = {}; lifetime.current = epoch
     const navigation = fileNavigationSelection(useAppStore.getState()); let moved = false
@@ -193,15 +176,14 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
         setRolloverKind(source.defaults.conversationRollover?.kind ?? 'keep-current')
         setRolloverMinutes(source.defaults.conversationRollover?.kind === 'idle' ? String(source.defaults.conversationRollover.idleMs / 60000) : '')
       }
-      if (!source.issue) for (const selected of ['executors', 'locations'] as const) void readMoteQuickDefaults(scope, selected).then(discovery => {
+      if (!source.issue) void readMoteQuickDefaults(scope, 'executors').then(discovery => {
         if (lifetime.current !== epoch) return
         if (discovery.issue || !discovery.choices) throw new Error(discovery.issue ?? 'The original choices are unconfirmed. Reread this Mote’s settings.')
         setSaved(previous => previous && previous.source?.resource && source.source?.resource &&
           JSON.stringify(previous.source.resource) === JSON.stringify(source.source.resource)
           ? { ...previous, choices: mergeMoteQuickChoices(previous.choices, discovery.choices!) } : previous)
       }).catch(cause => {
-        const failure: MoteQuickChoices = { executors: selected === 'executors' ? [] : null, conversations: selected === 'locations' ? [] : null,
-          destinations: selected === 'locations' ? [] : null, issues: { [selected]: presentError(cause) } }
+        const failure: MoteQuickChoices = { executors: [], conversations: null, destinations: null, issues: { executors: presentError(cause) } }
         if (lifetime.current === epoch) setSaved(previous => previous ? { ...previous, choices: mergeMoteQuickChoices(previous.choices, failure) } : previous)
       })
     }).catch(cause => { if (lifetime.current === epoch) { setSaved(previous => previous?.pending ? previous : null); setIssue(presentError(cause)) } })
@@ -209,14 +191,6 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
     return () => { lifetime.current = {}; unsubscribe() }
   }, [attempt])
   const update = (next: MoteQuickDefaults) => { edited.current = true; form.current = next; setDraft(next) }
-  function editRollover(kind: 'keep-current' | 'idle', value: string) {
-    edited.current = true; setRolloverKind(kind); setRolloverMinutes(value); setIssue(null)
-    if (kind === 'keep-current') update({ ...form.current, conversationRollover: { kind } })
-    else if (moteMinutesToMs(value) !== null) update({ ...form.current, conversationRollover: { kind, idleMs: moteMinutesToMs(value)! } })
-    else update({ ...form.current }) // Raw edits also fence a late save from closing this later draft.
-  }
-  const selected = draft.conversation ? JSON.stringify(draft.conversation) : ''
-  const hasSelected = choices.some(choice => JSON.stringify(choice) === selected)
   function originalInspectionChanged(record: ContinuousProgressLoop) {
     const original = originalHeartbeat!.schedule
     if (record.loopId !== original.loopId || (['hostId', 'agentSessionId', 'providerId', 'workspacePath'] as const).some(field => record[field] !== original[field]))
@@ -308,18 +282,18 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
   const originalRunState = mainSession?.runUnobserved ? undefined : mainSession?.processState
   const mainStatus = originalRunState === 'running' ? 'Run active' : originalRunState === 'exited' ? 'Run ended' :
     originalRunState === 'interrupted' ? 'Run interrupted' : 'Run status unconfirmed'
-  const firstConversation = confirmedSettings && !originalMain && !draft.conversation && Boolean(draft.executorId) && Boolean(continueToConversation)
+  const firstConversation = confirmedSettings && !originalMain && Boolean(draft.executorId) && Boolean(continueToConversation)
   async function save() {
     if (busy || !saved || draftRestoreIssue) return
     const checking = useLauncherState.getState().drafts[draftKey]?.moteQuick?.pending
     if (!checking && moteMinutesToMs(minutes, { wholeMinutes: true }) === null) {
       setIssue('Enter a whole number of minutes, at least 1. Your choices and original settings are kept.'); return
     }
-    if (!checking && rolloverKind === 'idle' && moteMinutesToMs(rolloverMinutes) === null) {
-      setIssue('Enter a positive number of minutes for inactivity, such as 20 or 1.5. Your draft and original settings are kept.'); return
-    }
-    const submitted = form.current, epoch = lifetime.current
-    const current = () => lifetime.current === epoch && form.current === submitted
+    const editedValues = form.current, epoch = lifetime.current
+    const { conversation: _main, conversationRollover: _policy, ...values } = editedValues
+    const submitted = { ...values, ...(saved.defaults.conversation ? { conversation: saved.defaults.conversation } : {}),
+      ...(saved.defaults.conversationRollover ? { conversationRollover: saved.defaults.conversationRollover } : {}) }
+    const current = () => lifetime.current === epoch && form.current === editedValues
     let operationId: string | undefined, preserveDraft = false
     setBusy(true); setIssue(null)
     try {
@@ -389,10 +363,10 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
   return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}><DocumentOverlayPortal component={Dialog.Portal}>
     <Dialog.Overlay className="dialog-scrim mote-behavior-overlay" />
     <Dialog.Content ref={content} className="dialog-surface mote-quick-mode-dialog" aria-busy={loading || busy} data-heartbeat-only={!!originalHeartbeat}
-      onOpenAutoFocus={event => { event.preventDefault(); content.current?.querySelector<HTMLElement>(focusHeartbeat ? '.mote-quick-mode__heartbeat' : '.selection-field')?.focus() }}
+      onOpenAutoFocus={event => { event.preventDefault(); content.current?.querySelector<HTMLElement>(focusHeartbeat ? '.mote-quick-mode__heartbeat' : '.mote-behavior-header h2')?.focus() }}
       onCloseAutoFocus={event => { event.preventDefault(); const node = returnFocus(), active = ownerDocument.activeElement
         if (node?.isConnected && (active === ownerDocument.body || active === node || !active?.isConnected || content.current?.contains(active))) node.focus({ preventScroll: true }) }}>
-      <header className="mote-behavior-header"><div><Dialog.Title>{originalHeartbeat ? 'Original heartbeat' : 'Quick mode'}</Dialog.Title>
+      <header className="mote-behavior-header"><div><Dialog.Title tabIndex={-1}>{originalHeartbeat ? 'Original heartbeat' : 'Quick mode'}</Dialog.Title>
         <Dialog.Description>{scope.topic.title} · {originalHeartbeat ? 'From this reminder' : loading ? 'Reading saved settings' : confirmedSettings ? 'Saved settings loaded' : 'Saved settings unconfirmed'}</Dialog.Description></div>
         <MoteBehaviorAction label="Close quick mode" onClick={onClose}><ThemeActionCloseIcon size={16} /></MoteBehaviorAction></header>
       <div className="mote-quick-mode-dialog__body">
@@ -405,36 +379,12 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
           {originalMain ? <span className="mote-quick-mode__run-state">{mainStatus}</span> : null}</div>
           {originalMain && continueToConversation ? <Button type="button" onClick={() => { onClose(); continueToConversation() }}>Open discussion</Button> : null}
         </div>
-        <label htmlFor={id + '-agent'}><ThemeObjectAgentIcon size={16} /><span>Executor for new chat<small>Preselected for new conversations.</small></span></label>
-        <AgentExecutorPicker presentation="field" id={id + '-agent'} label="Executor for new chat"
-          selected={draft.executorId ?? null} executors={executors} unsetLabel="Use normal Launcher choice"
-          onSelect={value => { const { executorId: _, ...rest } = form.current; update(value ? { ...rest, executorId: value } : rest) }} />
-        {!choices.length && !selected && !originalMain ? confirmedSettings ? <p className="mote-quick-mode__welcome">Your first message with a configured Executor can start a main Agent.</p> : null : <>
-        <label htmlFor={id + '-conversation'}><ThemeActionPinIcon size={16} /><span>Main Agent<small>Choose who handles this Mote’s main discussion.</small></span></label>
-        <SelectionField id={id + '-conversation'} label="Main Agent" value={selected}
-          onValueChange={value => { const { conversation: _, ...rest } = form.current; const choice = choices.find(choice => JSON.stringify(choice) === value); if (value && !choice) { setIssue('The chosen conversation is no longer confirmed. Your choices are kept.'); return } update(choice ? { ...rest, conversation: choice } : rest) }}
-          options={[{ value: '', label: originalMain ? 'No Agent selected in this draft' : 'No main Agent yet' }, ...(selected && !hasSelected ? [{ value: selected, label: 'Selected location · unconfirmed' }] : []),
-            ...choices.map(choice => ({ value: JSON.stringify(choice), label: facts.tabs[choice.tabId]?.name?.trim() || conversationLabels[choice.sessionId] || choice.sessionId, description: `${choice.hostId} · ${facts.config?.workspaces.find(item => item.id === choice.displayWorkspaceId)?.name ?? 'Workspace'}` }))]} />
-        </>}
-        {originalMain && !selected ? <p className="mote-quick-mode__welcome">Saving this draft clears the main Agent binding.</p> : null}
-        <details className="mote-quick-mode__advanced"><summary>Conversation rollover</summary>
-        <fieldset className="mote-quick-mode__presence"><legend>Conversation rollover</legend>
-          <label htmlFor={id + '-rollover'}>Automatic rollover policy</label>
-          <SelectionField id={id + '-rollover'} label="Automatic rollover policy" value={rolloverKind}
-            onValueChange={value => editRollover(value as 'keep-current' | 'idle', rolloverMinutes)}
-            options={[{ value: 'keep-current', label: 'Keep current conversation' }, { value: 'idle', label: 'After conversation inactivity' }]} />
-          {rolloverKind === 'idle' ? <><label htmlFor={id + '-rollover-duration'}>Conversation inactivity <small>Minutes</small></label>
-            <input id={id + '-rollover-duration'} aria-label="Conversation inactivity (minutes)" type="number" inputMode="decimal" min="0" step="any" value={rolloverMinutes}
-              onChange={event => editRollover('idle', event.target.value)} /></> : null}
-          <p className="mote-details__hint">After the idle period, your next new question starts a new round. Previous conversations stay available.</p>
-          {loading || !saved || saved.issue ? <p className="mote-details__hint">The saved rollover policy is unconfirmed. Your choices are kept.</p> : !saved.defaults.conversationRollover ? <p className="mote-details__hint">No rollover policy is configured. Editing other settings keeps the existing handoff behavior.</p> : null}
-        </fieldset>
-        </details>
+        <MoteExecutorPriority defaults={draft} choices={saved?.choices?.executors ?? []} onChange={update} />
         </section> : null}
         {!focusHeartbeat && !originalHeartbeat ? heartbeat : null}
         </div>
         {loading ? <p role="status" className="mote-details__hint">{originalHeartbeat ? 'Reading the original arrangement…' : 'Reading MOTE.md…'}</p> : null}
-        {!loading && saved && !saved.issue && (!saved.choices || saved.choices.executors === null || saved.choices.destinations === null) ? <p role="status" className="mote-details__hint">Reading the remaining choices. Your saved settings can still be edited.</p> : null}
+        {!loading && saved && !saved.issue && (!saved.choices || saved.choices.executors === null) ? <p role="status" className="mote-details__hint">Reading the remaining choices. Your saved settings can still be edited.</p> : null}
         {saved?.choices?.issues ? <div role="status" className="mote-details__issue">{Object.values(saved.choices.issues).join(' ')}<Button type="button" onClick={() => setAttempt(value => value + 1)}>Reread choices</Button></div> : null}
         {draftRestoreIssue ? <p role="status" className="mote-details__issue">The saved original request could not be decoded. Its stored input and your Agent are kept; no replacement request will be sent.</p> : null}
         {issue ? <div role="status" className="mote-details__issue">{issue}<Button type="button" onClick={() => setAttempt(value => value + 1)}>Reread</Button></div> : null}

@@ -3,7 +3,7 @@ import { useMobileWebUpdateSafetyOwner } from '../mobile-web/update-safety'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { DEFAULT_MOTE_PRESENCE, moteMinutesToMs, moteQuickBaseline, parseMotePreferencesReadResult, parseMotePreferencesSaveParams, parseMotePreferencesSaveResult,
-  mergeMoteQuickChoices, sameMotePreferencesTarget, sameMoteDefaultConversation, type MotePreferencesTarget, type MoteQuickChoices, type MoteQuickPreferencesReadResult, type MoteQuickDefaults, type MotePreferencesDestination } from '@agentmux/core/mote-preferences'
+  mergeMoteQuickChoices, sameMotePreferencesTarget, type MotePreferencesTarget, type MoteQuickChoices, type MoteQuickPreferencesReadResult, type MoteQuickDefaults } from '@agentmux/core/mote-preferences'
 import { getDeviceWorkface, DeviceWorkfaceRecordChangedError, type DeviceWorkfaceStore } from '../recovery/device-workface'
 import { moteQuickDraftKey, parseMoteQuickDraft, parseMoteQuickScope, MoteQuickDraftInvalidError, MoteQuickDraftCapacityError,
   type MoteQuickDraft, type MoteRolloverEditor, type MoteQuickScope, type MoteQuickAttempt, type MoteMaintenanceAttempt } from '../recovery/mote-quick-drafts'
@@ -47,7 +47,6 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
   const [preparedResume, setPreparedResume] = useState<{ operationId: string; ownerInstanceId: string } | null>(null)
   const [storageIssue, setStorageIssue] = useState(''), [memoryOnly, setMemoryOnly] = useState(false)
   const [read, setRead] = useState<MoteQuickPreferencesReadResult | null>(null), [copies, setCopies] = useState<Editable[]>([])
-  const [destination, setDestination] = useState<MotePreferencesDestination | null>(null)
   const latest = useRef({ client, visible, onSaved }); latest.current = { client, visible, onSaved }
   const readEpoch = useRef(0)
   const readController = useRef<AbortController | null>(null)
@@ -114,18 +113,14 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
         void retain({ ...current.current, scope: source.scope, baseline, values: changed.current ? current.current.values : baseline.defaults })
       }
       setNotice(result.status === 'ready' ? '已核对当前配置；读取不确认旧保存。' : result.issue ?? '配置还没确认。')
-      if (result.status === 'ready') for (const selected of ['executors', 'locations'] as const) void original.forwardRpc('space.mote.preferences.read', { kind: 'quick', target, includeChoices: selected }, { signal: controller.signal }).then(value => {
-        const discovery = parseMotePreferencesReadResult(value, { kind: 'quick', target, includeChoices: selected })
+      if (result.status === 'ready') void original.forwardRpc('space.mote.preferences.read', { kind: 'quick', target, includeChoices: 'executors' }, { signal: controller.signal }).then(value => {
+        const discovery = parseMotePreferencesReadResult(value, { kind: 'quick', target, includeChoices: 'executors' })
         if (!sameReader()) return
         if (discovery.status !== 'ready' || !discovery.choices) throw new Error(discovery.issue ?? '候选尚未确认，原设置保留。')
         const choices = discovery.choices
         setRead(previous => previous ? { ...previous, choices: mergeMoteQuickChoices(previous.choices, choices) } : previous)
-        const destinations = choices.destinations
-        if (destinations !== null) setDestination(existing => existing && destinations.some(c => JSON.stringify(c.reference) === JSON.stringify(existing)) ? existing :
-          destinations.length === 1 ? destinations[0]!.reference : null)
       }).catch(error => {
-        const failure: MoteQuickChoices = { executors: selected === 'executors' ? [] : null, conversations: selected === 'locations' ? [] : null,
-          destinations: selected === 'locations' ? [] : null, issues: { [selected]: message(error) } }
+        const failure: MoteQuickChoices = { executors: [], conversations: null, destinations: null, issues: { executors: message(error) } }
         if (sameReader()) setRead(previous => previous ? { ...previous, choices: mergeMoteQuickChoices(previous.choices, failure) } : previous)
       })
     } catch (error) { if (mounted.current && epoch === readEpoch.current) setNotice(message(error)) }
@@ -208,10 +203,11 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
       moteQuickDraftKey(source.scope) !== moteQuickDraftKey(submitted.scope) || owner.recordIdentity() !== recordId) {
       setNotice('配置或上次保存还没确认，请先核对并采用当前版本。'); return
     }
-    const changesMain = !sameMoteDefaultConversation(submitted.baseline.defaults.conversation, submitted.values.conversation)
-    if (changesMain && !destination) { setNotice('更换主对话需要确认它的展示位置；你的选择已保留，可以重新核对。'); return }
-    const input = parseMotePreferencesSaveParams({ kind: 'quick', target, baseline: submitted.baseline, values: submitted.values,
-      ...(changesMain && destination ? { destination } : {}),
+    const { conversation: _main, conversationRollover: _policy, ...draftValues } = submitted.values
+    const saved = submitted.baseline.defaults
+    const values = { ...draftValues, ...(saved.conversation ? { conversation: saved.conversation } : {}),
+      ...(saved.conversationRollover ? { conversationRollover: saved.conversationRollover } : {}) }
+    const input = parseMotePreferencesSaveParams({ kind: 'quick', target, baseline: submitted.baseline, values,
       operationId: randomClientRequestId() }), attempt: MoteQuickAttempt = { input, ownerInstanceId: source.ownerInstanceId, phase: 'sending', result: null, issue: null }
     flight.current = true; setBusy(true)
     try {
@@ -269,6 +265,6 @@ export function useMoteQuickDraft(target: MotePreferencesTarget, client: AgentMu
     if (!canonical) { setNotice('设备上的配置还没确认，本页选择仍可复制。'); return }
     durable.current = canonical; conflicted.current = false; display(restore(canonical)); setNotice('已采用设备上的配置，本页的另一份选择仍可复制。')
   }
-  return { draft, read, destination, setDestination, edit, editHeartbeatMinutes, inspect, adopt, save, chooseStored, busy, adoptionBusy, notice, storageIssue, memoryOnly,
+  return { draft, read, edit, editHeartbeatMinutes, inspect, adopt, save, chooseStored, busy, adoptionBusy, notice, storageIssue, memoryOnly,
     conflict: conflicted.current, copies, resumeMaintenance, preparedResumeOperationId: preparedResume?.operationId }
 }
