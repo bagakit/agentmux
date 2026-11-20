@@ -20,6 +20,8 @@ assert.ok(!creationRelations || !creationMutation || ['omit-creation', 'ignore-r
 const layoutMutation=process.env.AGENTMUX_FOCUS_LAYOUT_MUTATION
 assert.ok(!taskLayout || !layoutMutation || ['omit-layout','hide-mandatory','repeat-result-idle','unqualified-subagents','omit-row-summary','expand-known-recovery','omit-detail-motion','ignore-interaction-range'].includes(layoutMutation),'Known Focus task layout mutation')
 const sourceConnection=process.argv[4]==='--source-connection'
+const sourceMutation=process.env.AGENTMUX_FOCUS_SOURCE_MUTATION
+assert.ok(!sourceConnection || !sourceMutation || sourceMutation==='omit-location-issues','Known Focus source mutation')
 const takeoverFeedback=process.argv[4]==='--takeover-feedback',sourceRecovery=process.argv[4]==='--source-recovery',primaryOnly=process.argv[4]==='--primary-only',memberState=process.argv[4]==='--member-state',unconfirmed=process.argv[4]==='--unconfirmed'||sourceRecovery
 const sourceOnly=taskLayout||inlineRename||agentPins||sourceRecovery||takeoverFeedback||sourceConnection
 const evidence=resolve(process.argv[3]);await mkdir(evidence,{recursive:true})
@@ -34,12 +36,28 @@ try{
   if(taskLayout)receipt.boundary='Production Focus rows, layout preference and source reader in an isolated Electron app. Typed session observations and adjacent PTY paint are fixture inputs. Original UI preference projection, private workbench storage and hydration across two Electron processes.'
   if(creationRelations)receipt.boundary='Production Focus Cards, Compact list, history source projection and search in two private Electron processes. The fixture supplies typed creation records and Native I/O. Actual workbench storage, preference and original workface hydration are exercised.'
   if(takeoverFeedback)receipt.boundary='Actual App, ordinary Focus card, Region header, operation feedback, cancellation parser, existing Stop confirmation and Store persist/checkpoint/rehydration. Typed preview original-owner IO and Core graph observation, recorded writer admission after hydration, and PTY painting only. No user App/Run, Native writer durability, Core fencing or Provider recovery claim.'
+  const sourceExports = new Map(sourceOnly ? await Promise.all(['core', 'demand'].map(async name => [
+    `@agentmux/${name}`, JSON.parse(await readFile(join(root, 'packages', name, 'package.json'), 'utf8')).exports
+  ])) : [])
+  const packageSources = {name:'current-core-and-demand-sources',setup(builder){
+    if(sourceOnly)builder.onResolve({filter:/^@agentmux\/(?:core|demand)(?:\/|$)/},args=>{
+      const name=args.path.split('/')[1], prefix=`@agentmux/${name}`, declared=sourceExports.get(prefix)
+      const key='.'+args.path.slice(prefix.length)
+      const match=Object.keys(declared).find(entry=>entry===key||entry.includes('*')&&key.startsWith(entry.split('*')[0])&&key.endsWith(entry.split('*')[1]))
+      assert.ok(match,'Declared original package export '+args.path)
+      const declaration=declared[match],target=typeof declaration==='string'?declaration:declaration.browser??declaration.import
+      const suffix=match.includes('*')?key.slice(match.split('*')[0].length,key.length-match.split('*')[1].length):''
+      const path=join(root,'packages',name,target.replace('*',suffix).replace(/^\.\/dist\/(?:src\/)?/,'./src/').replace(/\.js$/,'.ts'))
+      assert.ok(existsSync(path),'Current original package source '+args.path)
+      return{path}
+    })
+  }}
   let reader=join(root,'packages/core/dist/conversation-reader.js')
   if(sourceOnly){
     reader=join(privateRoot,'conversation-reader.mjs')
-    const sourceReader=await build({absWorkingDir:root,entryPoints:[join(root,'packages/core/src/conversation-reader.ts')],outfile:reader,bundle:true,platform:'node',format:'esm',target:'node22',metafile:true,logLevel:'silent',banner:{js:"import{createRequire as recoveryRequire}from'node:module';const require=recoveryRequire(import.meta.url);"}})
+    const sourceReader=await build({absWorkingDir:root,entryPoints:[join(root,'packages/core/src/conversation-reader.ts')],outfile:reader,bundle:true,platform:'node',format:'esm',target:'node22',metafile:true,plugins:[packageSources],logLevel:'silent',banner:{js:"import{createRequire as recoveryRequire}from'node:module';const require=recoveryRequire(import.meta.url);"}})
     for(const file of Object.keys(sourceReader.metafile.inputs)){const path=resolve(root,file);if(!path.includes('/node_modules/'))inputs.set(path,hash(await readFile(path)))}
-    receipt.readerPolicy='Current Core bounded reader and current Desktop product sources; unchanged installed dependencies are pinned by the loaded bundle.'
+    receipt.readerPolicy='Current Core bounded reader, Demand and Desktop product sources; installed dependencies are pinned by the loaded bundle.'
   }else{
     const freshness=spawnSync(process.execPath,['--experimental-strip-types','--input-type=module','-e',`const {assertWorkspaceDistBuiltFromCurrentSource}=await import(${JSON.stringify(pathToFileURL(join(root,'vitest.dist-freshness.ts')).href)});await assertWorkspaceDistBuiltFromCurrentSource(${JSON.stringify(root)});`],{cwd:root,encoding:'utf8'})
     await writeFile(join(evidence,'freshness.log'),freshness.stdout+freshness.stderr);assert.equal(freshness.status,0,'Original public freshness guard')
@@ -55,18 +73,7 @@ try{
   }) } finally { originalConversationState.dispose() }
   assert.equal(originalConversationPage.window.complete,true);assert.ok(originalConversationPage.items.length>0)
   receipt.previewConversation={owner:'Actual Core bounded reader with controlled native leaf',sha256:hash(JSON.stringify(originalConversationPage)),complete:true,items:originalConversationPage.items.length}
-  const coreExports=sourceOnly?JSON.parse(await readFile(join(root,'packages/core/package.json'),'utf8')).exports:{}
   const observe={name:'actual-app-focus-source-and-paint-leaf',setup(builder){
-    if(sourceOnly)builder.onResolve({filter:/^@agentmux\/core(?:\/|$)/},args=>{
-      const key=args.path==='@agentmux/core'?'.':'.'+args.path.slice('@agentmux/core'.length)
-      const match=Object.keys(coreExports).find(entry=>entry===key||entry.includes('*')&&key.startsWith(entry.split('*')[0])&&key.endsWith(entry.split('*')[1]))
-      assert.ok(match,'Declared original Core export '+key)
-      const declaration=coreExports[match],target=typeof declaration==='string'?declaration:declaration.browser??declaration.import
-      const suffix=match.includes('*')?key.slice(match.split('*')[0].length,key.length-match.split('*')[1].length):''
-      const path=join(root,'packages/core',target.replace('*',suffix).replace('./dist/','./src/').replace(/\.js$/,'.ts'))
-      assert.ok(existsSync(path),'Current original Core source '+key)
-      return{path}
-    })
     builder.onResolve({filter:/\?url$/},args=>({path:createRequire(args.importer).resolve(args.path.slice(0,-4)),namespace:'actual-url'}))
     builder.onLoad({filter:/.*/,namespace:'actual-url'},async args=>{const bytes=await readFile(args.path),name='asset-'+hash(bytes).slice(0,12)+'.mjs';await writeFile(join(privateRoot,'out',name),bytes);return{contents:`export default new URL('./${name}',import.meta.url).href`,loader:'js'}})
     builder.onResolve({filter:/\?worker$/},args=>({path:createRequire(args.importer).resolve(args.path.slice(0,-7)),namespace:'actual-worker'}))
@@ -124,6 +131,13 @@ try{
       transformations.push({path:relative(root,path),mutation:pinMutation,sourceSHA256:hash(source),loadedSHA256:hash(code)})
       return {contents:code,loader:'ts'}
     }
+    if(sourceConnection && sourceMutation==='omit-location-issues' && component==='GlobalFocusSurface.tsx'){
+      const target='locationIssues={sourceFacts.issues}'
+      assert.equal(source.split(target).length,2,'One handoff to the source disclosure')
+      const code=source.replace(target,'locationIssues={[]}')
+      transformations.push({path:relative(root,path),mutation:sourceMutation,sourceSHA256:hash(source),loadedSHA256:hash(code)})
+      return {contents:code,loader:'tsx'}
+    }
     if((taskLayout || inlineRename || agentPins) && component==='store.ts'){
       let code=source
       if(taskLayout && layoutMutation==='omit-layout'){
@@ -179,7 +193,7 @@ try{
   inputs.set(new URL(import.meta.url).pathname,hash(await readFile(new URL(import.meta.url))))
   const out=join(privateRoot,'out');await mkdir(out)
   const renderer=join(out,'app.js')
-  const buildResult=await build({entryPoints:[join(fixture,'entry.mjs')],outfile:renderer,bundle:true,platform:'browser',format:'esm',conditions:['production'],target:'es2022',jsx:'automatic',metafile:true,plugins:[observe],logLevel:'silent',
+  const buildResult=await build({entryPoints:[join(fixture,'entry.mjs')],outfile:renderer,bundle:true,platform:'browser',format:'esm',conditions:['production'],target:'es2022',jsx:'automatic',metafile:true,plugins:[packageSources,observe],logLevel:'silent',
     define:{__AGENTMUX_WEB_PREVIEW__:'true','process.env.NODE_ENV':'"production"'},loader:{'.avif':'file','.gif':'file','.png':'file','.svg':'file','.woff2':'file','.woff':'file','.ttf':'file'}})
   receipt.metafile={inputCount:Object.keys(buildResult.metafile.inputs).length,outputs:Object.fromEntries(Object.entries(buildResult.metafile.outputs).map(([name,value])=>[relative(privateRoot,resolve(root,name)),{bytes:value.bytes}])),sha256:hash(JSON.stringify(buildResult.metafile))};receipt.inputs=Object.fromEntries([...inputs].map(([path,sha])=>[relative(root,path),sha]));receipt.transformations=transformations
   for(const suffix of ['App.tsx','GlobalFocusSurface.tsx','WorkspaceWorkbench.tsx','StableWorkbenchView.tsx','store.ts','focus-tab-projection.ts','agent-focus.ts'])assert.ok([...inputs.keys()].some(path=>path.endsWith('/'+suffix)),'Actual loaded '+suffix)

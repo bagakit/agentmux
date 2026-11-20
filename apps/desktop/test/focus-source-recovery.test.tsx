@@ -36,7 +36,7 @@ const menuItem = (label: string) => [...document.querySelectorAll<HTMLElement>('
 async function fixture(options: { identityUnknown?: boolean } = {}) {
   const disposers: Array<() => unknown | Promise<unknown>> = []
   const path = fixturePath('recovery-project'), f = await createSpaceSessionsFixture(disposers, path)
-  for (const owner of [f.b, f.d]) owner.core.providers.register(new AgentProviderRegistry().get('codex'))
+  for (const owner of [f.b, f.d]) owner.core.providers.replace(new AgentProviderRegistry().get('codex'))
   const privateRoots = new Set([f.b.root, f.d.root])
   cleanup.push(...disposers.map(dispose => async () => {
     try { await dispose() } catch (cause) {
@@ -252,13 +252,12 @@ it('the actual Focus source notice identifies the retained source, keeps raw con
     originalWatch[1]({ type: 'snapshot', snapshot: { ...known, scope: { ...known.scope, space: null } } })
     originalWatch[1]({ type: 'error', error: { code: 'HOST_SERVICE_UNCONFIRMED', message: 'The original endpoint is not yet confirmed. Keep its namespace.' } })
   })
-  const notice = () => [...dom.container.querySelectorAll<HTMLElement>('section[aria-label^="Source status"]')].find(node => node.textContent?.includes('Project updates unavailable'))
+  const notice = () => [...dom.container.querySelectorAll<HTMLElement>('.focus-source-status__entry')].find(node => node.textContent?.includes('The original endpoint is not yet confirmed'))
   await vi.waitFor(() => expect(notice()).toBeDefined())
-  expect(notice()!.getAttribute('aria-label')).toContain(known.scope.space!.name)
-  expect(notice()!.getAttribute('aria-label')).toContain('Original source route')
-  expect(notice()!.querySelector('.service-window-notice')?.textContent ?? notice()!.textContent).toContain('Some updates from this project are unavailable')
+  expect(notice()!.textContent).toContain(known.scope.space!.name)
+  expect(notice()!.textContent).toContain('Original source route')
+  expect(dom.container.querySelector('.global-focus-main .focus-source-issue')).toBeNull()
   expect(notice()!.querySelector('details')?.open).toBe(false)
-  expect(notice()!.querySelector('details')?.textContent).toContain('The original endpoint is not yet confirmed')
   expect(notice()!.querySelector('details')?.textContent).toContain(f.target.reference.runtimeId)
   expect(notice()!.querySelector('details')?.textContent).toContain(f.target.reference.spaceId)
   const before = sessionReads.mock.calls.length

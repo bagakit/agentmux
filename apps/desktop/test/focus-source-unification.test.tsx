@@ -11,7 +11,7 @@ vi.mock('electron', () => ({ app: { getPath: () => tmpdir() } }))
 vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: () => null }))
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: ({ session }: { session: { id: string; control: { run: { runId: string } } } }) => createElement('div', { 'data-fixture-original-terminal': session.id, 'data-native-run': session.control.run.runId }) }))
 import { createSpaceSessionsFixture } from '../../../packages/core/test/helpers/space-session-fixture'
-import { AgentMuxControlServer, connectAgentMuxRpc } from '@agentmux/core'
+import { AgentMuxControlServer, AgentMuxError, connectAgentMuxRpc } from '@agentmux/core'
 import { decodeHostedValue } from '../../../packages/core/src/hosted-value'
 import { privateEnvironment } from './helpers/workface-control-fixture'
 import type { AgentMuxAgentSessionStore } from '../../../packages/core/src/agent-session-store'
@@ -346,25 +346,28 @@ it('keeps both original Group choices and preserves the selected exact occurrenc
   expect(useAppStore.getState().layouts[workspaceId]?.activeGroupId).toBe(groupId)
 })
 
-it('retains the original result on a Source read failure and refreshes that same route', async () => {
+it('explains an unavailable Host lookup and refreshes only the original route while retaining the result', async () => {
   const f = await fixture({ unmountedKind: 'mote' })
-  const call = vi.mocked(api.spaceMounts.call), originalCall = call.getMockImplementation()!
+  const call = vi.mocked(api.spaceMounts.call)
   await vi.waitFor(() => expect(cardWith('Existing remote result').closest('.focus-project-lanes__row')?.textContent).toContain('Original Mote'))
-  call.mockImplementation((method, input, signal) => method === 'agentLocations' && !('position' in input)
-    ? Promise.reject(Error('Original Source read timed out')) : originalCall(method, input, signal))
+  const carrier = f.main.routes.get(f.target.hostId)!.client
+  const forward = carrier.forwardRpc.bind(carrier)
+  const missing = vi.spyOn(carrier, 'forwardRpc').mockImplementation((method, params, context) => method === 'space.agent-locations'
+    ? Promise.reject(new AgentMuxError('Method not found.', 'RPC_METHOD_NOT_FOUND')) : forward(method, params, context))
   // Returning to the same Focus view refreshes the original reader without mounting.
   await act(async () => useAppStore.setState({ focusView: 'map' }))
   await act(async () => useAppStore.setState({ focusView: 'list' }))
-  await vi.waitFor(() => expect(dom.container.textContent).toContain('Original Source read timed out'))
+  await vi.waitFor(() => expect(dom.container.textContent).toContain('The original Host Core does not provide Agent location lookup.'))
   expect(cardWith('Existing remote result').textContent).toContain(foreignRecap)
   expect(cardWith('Existing remote result').closest('.focus-project-lanes__row')?.textContent).toContain('Original Mote')
   expect(useAppStore.getState().mountedSpaceInputs).toEqual({})
-  call.mockImplementation(originalCall)
-  const refresh = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Refresh source')!
+  missing.mockRestore()
+  expect(dom.container.querySelector('.global-focus-main .focus-source-issue')).toBeNull()
+  const refresh = dom.container.querySelector<HTMLButtonElement>('[aria-label="Agent locations"] .focus-source-status__actions button')!
   expect(refresh).toBeDefined()
   const before = call.mock.calls.length
   await act(async () => refresh.click())
-  await vi.waitFor(() => expect(dom.container.textContent).not.toContain('Original Source read timed out'))
+  await vi.waitFor(() => expect(dom.container.textContent).not.toContain('The original Host Core does not provide Agent location lookup.'))
   expect(call.mock.calls.slice(before).filter(([method]) => method === 'agentLocations')).toEqual([
     ['agentLocations', { hostId: f.target.hostId, agentSessionIds: [SID] }, expect.any(AbortSignal)]
   ])
