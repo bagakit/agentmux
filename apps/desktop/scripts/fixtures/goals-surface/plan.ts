@@ -17,7 +17,7 @@ export function goalPlanPreview(seed: (mode: string) => void, render: () => void
   const originalDelegation = api.demands.delegation
   return {
     /** `withoutDerivation` previews a Host that returns the plan without node states, as an older version does. */
-    seed(withoutDerivation = false, openGuide = false, awaitingConfirmation = false, workflowState?: 'prepared' | 'confirmed') {
+    seed(withoutDerivation = false, openGuide = false, awaitingConfirmation = false, workflowState?: 'prepared' | 'confirmed', timelineDurationMs?: number) {
       seed('confirmed')
       const state = useAppStore.getState(), goal = state.demands[state.selectedDemandId!]!
       const agents = state.sessions.filter(session => session.kind === 'agent')
@@ -94,6 +94,7 @@ export function goalPlanPreview(seed: (mode: string) => void, render: () => void
             : 'Waiting for the original independent reviewer to accept input.' } })
       }
       const next = { ...goal, ...(openGuide ? { address: formatGoalAddress(goal.id, 'workbench-preview-runtime', 'workspace-recovery') } : {}), title: 'Return to the same work, without rebuilding it',
+        ...(timelineDurationMs === undefined ? {} : { plannedStartAt: at(1), targetAt: at(4) }),
         ...(awaitingConfirmation ? { alignment: { ...goal.alignment!, confirmedAt: null }, plan: { ...plan, reviews: [] } } : { plan }),
         activities: Array.from({ length: 8 }, (_, index) => ({ id: `original-note:${index}`, kind: 'Progress',
           message: index === 7 ? 'The original checks are ready for independent review.' : 'Kept the original workspace and recorded the recovery evidence.',
@@ -119,7 +120,7 @@ export function goalPlanPreview(seed: (mode: string) => void, render: () => void
             ...(delegation.operationId === 'attempt:workspace' && delegation.linkedAt ? {
               stateSince: delegation.linkedAt + 10_000,
               observation: { process: 'running' as const, semantic: 'active' as const, source: 'native-hook' as const,
-                readiness: 'ready' as const, observedAt: delegation.linkedAt + 95_000, stale: false }
+                readiness: 'ready' as const, observedAt: delegation.linkedAt + 10_000 + (timelineDurationMs ?? 85_000), stale: false }
             } : {}),
             basis: { stateEnteredAt: null, activityRevision: null, inputSubmissionId: null } }
         }) }

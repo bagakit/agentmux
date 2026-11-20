@@ -411,18 +411,40 @@ describe('Goal plan graph', () => {
 })
 
 describe('plan graph projection helpers', () => {
-  it('uses an exact current activity observation and leaves receipt-only attempts as events', () => {
-    const delegation = attempt('api')
+  it('uses an exact current activity observation and renders the measured duration on the original time axis', async () => {
+    const delegation = attempt('api', { preparedAt: 1_000, linkedAt: 2_000 })
     const row = { execution: { kind: 'delegation' as const, operationId: delegation.operationId, hostId: 'local',
       agentSessionId: delegation.workerAgentSessionId, runId: delegation.workerRunId }, binding: 'confirmed' as const, phase: 'executing' as const,
       reason: 'Observed original work', alert: null, nextOwner: { kind: 'worker' as const, agentSessionId: delegation.workerAgentSessionId, action: 'Continue work' },
-      basis: { stateEnteredAt: 3, activityRevision: null, inputSubmissionId: null }, stateSince: 3,
-      observation: { process: 'running' as const, semantic: 'active' as const, source: 'native-hook' as const, readiness: 'ready' as const, observedAt: 6, stale: false } }
-    const responsibility = { scope: 'goal', observedAt: 7, supervisor: { agentSessionId: null, state: 'missing' as const, reason: 'No Supervisor' }, executions: [row] }
-    const demand = { plan: plan(nodes), delegations: [delegation], responsibility }
-    expect(goalExecutionRows(demand)[0]?.active).toEqual({ from: 3, to: 6 })
-    expect(goalExecutionRows({ ...demand, delegations: [reported('api')] })[0]?.active).toBeUndefined()
-    expect(goalExecutionRows({ ...demand, responsibility: { ...responsibility, executions: [{ ...row, execution: { ...row.execution, runId: 'another-run' } }] } })[0]?.active).toBeUndefined()
+      basis: { stateEnteredAt: 3_000, activityRevision: null, inputSubmissionId: null }, stateSince: 3_000,
+      observation: { process: 'running' as const, semantic: 'active' as const, source: 'native-hook' as const, readiness: 'ready' as const, observedAt: 6_000, stale: false } }
+    const responsibility = { scope: 'goal', observedAt: 7_000, supervisor: { agentSessionId: null, state: 'missing' as const, reason: 'No Supervisor' }, executions: [row] }
+    const demand = { plan: plan(nodes), delegations: [delegation, reported('ui'), attempt('docs')], responsibility,
+      plannedStartAt: 0, targetAt: 10_000 }
+    seed(goal(demand))
+    await dom.render(<GlobalBoardSurface />)
+    const timeline = graph()!.querySelector('[aria-label="Execution timeline"]')!
+    const original = timeline.querySelector('[data-goal-time-row="d-api"]')!
+    const bar = original.querySelector<HTMLElement>('[data-goal-observed-activity]')!
+    expect(timeline.querySelectorAll('[data-goal-observed-activity]')).toHaveLength(1)
+    expect(bar.style.left).toBe('30%')
+    expect(bar.style.width).toBe('30%')
+    expect(bar.textContent).toBe('3.0s observed')
+    expect(original.querySelector('.goal-execution-time__activity-focus')?.textContent).toBe(bar.textContent)
+    expect(original.querySelector('.goal-execution-time__task')?.getAttribute('title')).toBe(bar.title)
+    expect(original.getAttribute('aria-label')).toContain('Observed activity · 3.0s')
+    expect(timeline.querySelector('[data-goal-planned-period]')?.textContent).toBe('Planned')
+    expect(timeline.querySelector('[data-goal-time-row="d-ui"] [data-goal-time-event="Report recorded"]')).not.toBeNull()
+    expect(timeline.querySelector('[data-goal-time-row="d-docs"] [data-goal-time-event="Original dispatch linked"]')).not.toBeNull()
+    expect(goalExecutionRows({ ...demand, delegations: [{ ...reported('api'), preparedAt: 1_000, linkedAt: 2_000 }] })[0]?.active).toBeUndefined()
+    for (const incorrect of [
+      { ...row, execution: { ...row.execution, runId: 'another-run' } },
+      { ...row, execution: { ...row.execution, hostId: 'another-host' } },
+      { ...row, execution: { ...row.execution, agentSessionId: 'another-session' } },
+      { ...row, observation: { ...row.observation, stale: true } }
+    ]) {
+      expect(goalExecutionRows({ ...demand, responsibility: { ...responsibility, executions: [incorrect] } })[0]?.active).toBeUndefined()
+    }
   })
 
   it('derive columns and the highlight from the owner derivation only', () => {

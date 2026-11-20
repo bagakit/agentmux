@@ -3,6 +3,7 @@ const assert = require('node:assert/strict')
 // Host-shaped preview inputs enter the normal App. All navigation below uses its rendered controls.
 module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result, keyEscape, debuggerSession }) => {
   const query = selector => `document.querySelector(${JSON.stringify(selector)})`
+  const timelineOnly = process.env.AGENTMUX_GOAL_EXECUTION_TIMELINE_CAPTURE === '1'
   if (process.env.AGENTMUX_GOAL_WORKFLOW_REVIEW_CAPTURE === '1') {
     const attempt = query('[data-goal-delivery="attempt:outline"]')
     const view = `[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'View delivery')`
@@ -41,7 +42,7 @@ module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result
     assert.equal(hittable.hit, true, selector + ' remains clickable below the sticky reading navigation ' + JSON.stringify(hittable))
     await click(target)
   }
-  for (const scene of ['inspection', 'parallel']) for (const [width, theme] of [[1600, 'dark'], [620, 'light']]) {
+  for (const scene of timelineOnly ? [] : ['inspection', 'parallel']) for (const [width, theme] of [[1600, 'dark'], [620, 'light']]) {
     await size(width)
     await evaluate(scene === 'inspection' ? 'goalsPlan.inspection()' : 'goalsPlan.seed(false, true)')
     await evaluate(`goalsVisual.appearance(${JSON.stringify(theme)})`)
@@ -117,7 +118,8 @@ module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result
   for (const [width, theme] of [[1260, 'dark'], [620, 'light']]) {
     const scene = 'execution-timeline'
     await size(width)
-    await evaluate('goalsPlan.seed(false, true)')
+    const duration = width === 1260 ? 85_000 : 12_000
+    await evaluate(`goalsPlan.seed(false, true, false, undefined, ${duration})`)
     await evaluate(`goalsVisual.appearance(${JSON.stringify(theme)})`)
     const row = '[data-goal-time-row="attempt:drafts"]'
     const point = row + ' [data-goal-time-event="Report recorded"]'
@@ -135,6 +137,18 @@ module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result
     }
     await evaluate(`${query('[data-goal-execution-time]')}.scrollIntoView({block:'center'})`)
     await paint()
+    const summary = bar + ' .goal-execution-time__bar-summary'
+    const focusSummary = observed + ' .goal-execution-time__activity-focus'
+    const barEvidence = await evaluate(`(() => { const bar = ${query(bar)}, label = ${query(summary)};
+      return { text: label.textContent, visible: Boolean(label.getClientRects().length), inkFits: label.scrollWidth <= label.clientWidth,
+        fraction: bar.getBoundingClientRect().width / bar.parentElement.getBoundingClientRect().width,
+        fill: getComputedStyle(bar).backgroundColor, planStyle: getComputedStyle(${query('[data-goal-planned-period]')}).borderTopStyle } })()`)
+    assert.equal(barEvidence.text, width === 1260 ? '1m25s observed' : '12.0s observed')
+    assert.equal(barEvidence.visible, width === 1260)
+    assert.equal(barEvidence.inkFits, true)
+    assert.ok(Math.abs(barEvidence.fraction - duration / 180_000) < 0.001, JSON.stringify(barEvidence))
+    assert.equal(barEvidence.planStyle, 'dashed')
+    assert.notEqual(barEvidence.fill, 'rgba(0, 0, 0, 0)')
     const hover = async selector => {
       const mouse = await evaluate(`(() => { const rect = ${query(selector)}.getBoundingClientRect();
         return {x: rect.x + rect.width / 2, y: rect.y + rect.height / 2} })()`)
@@ -146,6 +160,7 @@ module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result
     const normal = await evaluate(`getComputedStyle(${query(observed)}).backgroundColor`)
     await hover(observed + ' strong')
     await paint()
+    assert.equal(await evaluate(`${query(observed + ' .goal-execution-time__task')}.title`), await evaluate(`${query(bar)}.title`))
     const hovered = await evaluate(`getComputedStyle(${query(observed)}).backgroundColor`)
     assert.notEqual(hovered, normal)
     // Keep the verified hover style while capturing the private compositor.
@@ -165,6 +180,17 @@ module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result
     assert.equal(await evaluate(`${query(observed)}.getAttribute('aria-pressed')`), 'true')
     await hitControl(back)
     assert.equal(await evaluate(`document.activeElement === ${query(observed)}`), true)
+    await enter()
+    await waitFor(`${query(reading + ' h3')}?.textContent === 'Restore the whole workspace'`)
+    for (const type of ['keyDown', 'keyUp']) {
+      await debuggerSession.sendCommand('Input.dispatchKeyEvent', { type, key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
+    }
+    assert.equal(await evaluate(`document.activeElement === ${query(back)}`), true)
+    await enter()
+    await waitFor(`document.activeElement === ${query(observed)} && ${query(observed)}.matches(':focus-visible')`)
+    await paint()
+    assert.equal(await evaluate(`Boolean(${query(focusSummary)}.getClientRects().length) && ${query(focusSummary)}.textContent`), barEvidence.text)
+    if (width === 620) await capture(`${width}-${theme}-${scene}-short-focus`, width)
     await hover(point)
     assert.match(await evaluate(`${query(point)}.title`), /^Report recorded · .+/u)
     await hitControl(point)
@@ -184,9 +210,10 @@ module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result
     await paint()
     await capture(`${width}-${theme}-${scene}-focus`, width)
     assert.deepEqual(await evaluate('goalsSpace.facts()'), before)
-    result.observations.push({ scene, width, theme, dispatch: 'attempt:workspace', report: 'attempt:drafts', normal, hovered,
+    result.observations.push({ scene, width, theme, dispatch: 'attempt:workspace', report: 'attempt:drafts', normal, hovered, barEvidence,
       hoverCapturedWithPseudoState: true, focusReturned: true, keyboardOpened: true })
   }
+  if (timelineOnly) return
   for (const [width, theme] of [[1600, 'dark'], [620, 'light']]) {
     await size(width)
     await evaluate('goalsPlan.seed(false, true, true)')
