@@ -213,10 +213,10 @@ test('the received original report retains its worker signature and exact Goal c
   expect(b.native.stop).not.toHaveBeenCalled()
 })
 
-it('retains the original report through current Supervisor collection and an explicit worker Stop', async () => {
-  const host = await crossHostOwner(cleanup, 'worker-closeout', ['supervisor', 'worker', 'reviewer'])
+it.each(['active original Supervisor', 'retired original Supervisor'] as const)('retains the original report through current Supervisor collection with %s', async scenario => {
+  const host = await crossHostOwner(cleanup, 'worker-closeout', ['supervisor', 'worker', 'reviewer', 'successor'])
   const { goal } = await host.call(null, ['goal', 'create', '--title', 'Verify worker closeout',
-    '--status', 'in_progress', '--assignees', '["supervisor","worker"]', '--supervisor', 'supervisor', '--risk', 'low', '--confirm', 'user'])
+    '--status', 'in_progress', '--assignees', '["supervisor","worker","successor"]', '--supervisor', 'supervisor', '--risk', 'low', '--confirm', 'user'])
   const goalId = goal.id
   const alignment = { summary: 'Save the original delivery', criteria: [{ id: 'saved', text: 'Read the original evidence' }], openQuestions: [] }
   const proposal = await host.call(null, ['goal', 'update', '--goal', goalId, '--alignment', JSON.stringify(alignment)])
@@ -236,20 +236,40 @@ it('retains the original report through current Supervisor collection and an exp
   const report = { operationId: 'closeout-report', replyMessageId, authorAgentSessionId: 'worker', grounding: {
     alignmentRevision, summary: 'Original delivery saved', checks: [{ criterionId: 'saved', outcome: 'met', evidence: ['artifact.log'], note: '' }],
   } }
+  const retired = scenario === 'retired original Supervisor'
+  if (retired) {
+    await host.call(null, ['goal', 'update', '--goal', goalId, '--supervisor', 'successor'])
+    await host.call(null, ['agent', 'stop', '--session', 'supervisor', '--run', 'run-supervisor', '--operation-id', 'retire-original-supervisor'])
+    const impostor = await host.cli('reviewer', ['goal', 'report', '--input', '-'], { goalId, operationId, report })
+    expect(impostor.code).toBe(1)
+    expect(impostor.stderr).toContain('CONTROL_PERMISSION_DENIED')
+  }
+  const supervisor = retired ? 'successor' : 'supervisor'
   const delivered = await host.cli('worker', ['goal', 'report', '--input', '-'], { goalId, operationId, report })
   expect(delivered.code, delivered.stderr).toBe(0)
   expect(JSON.parse(delivered.stdout)).toMatchObject({ guidance: expect.stringContaining('"sourceMessageId":"closeout-source"') })
   const waiting = await host.call('worker', ['goal', 'plan', '--goal', goalId])
   expect(waiting.delegations[0].collection).toBeUndefined()
   expect(waiting.planState.nodes[0].state).toBe('review')
-  expect(host.native.stop).not.toHaveBeenCalled()
+  expect(host.native.stop).toHaveBeenCalledTimes(retired ? 1 : 0)
 
   const signed = waiting.delegations[0].report
-  const collected = await host.call('supervisor', ['goal', 'collect', '--input', '-'], { goalId, operationId, collection: {
+  const collected = await host.call(supervisor, ['goal', 'collect', '--input', '-'], { goalId, operationId, collection: {
     operationId: 'closeout-collection', replyMessageId,
   } })
-  expect(collected.delegations[0]).toMatchObject({ report: signed, collection: { collector: { kind: 'agent', id: 'supervisor' }, replyMessageId } })
-  expect(collected.goalState.supervisorSessionId).toBe('supervisor')
+  expect(collected.delegations[0]).toMatchObject({ report: signed, collection: { collector: { kind: 'agent', id: supervisor }, replyMessageId } })
+  expect(collected.goalState.supervisorSessionId).toBe(supervisor)
+  if (retired) {
+    const reply = (await host.call('worker', ['message', 'read', '--message-id', replyMessageId])).message
+    expect(reply).toMatchObject({ envelope: { messageId: replyMessageId, replyTo: sourceMessageId, operationId: report.operationId,
+      threadId: 'closeout-thread', recipientSessionId: 'supervisor', recipientRunId: 'run-supervisor',
+      senderSessionId: 'worker', senderRunId: 'run-worker' }, provenance: { signature: expect.any(String) }, notification: { state: 'inbox-only' } })
+    const original = await host.call('worker', ['goal', 'report', '--input', '-'], { goalId, operationId, report })
+    expect(original.delegations[0].report).toEqual(signed)
+    expect(host.native.stop).toHaveBeenCalledTimes(1)
+    expect(await host.original.store.readMetadata('supervisor')).toBeNull()
+    return
+  }
   const mailbox = await host.call('worker', ['agent', 'input', 'ls', '--host-id', 'local', '--session', 'worker'])
   expect(mailbox).toMatchObject({ hostId: 'local', agentSessionId: 'worker', items: [], nextCursor: null,
     coverage: { kind: 'recorded-inputs', unrecorded: 'unconfirmed' } })

@@ -28,5 +28,11 @@ export const crossHostMutations = {
     anchor: "method === 'goal.report' ? goalReportGuidance(result as GoalReportResult, invocation.params as GoalDelegationParamsMap['goal.report'])",
     replacement: "method === 'goal.report' ? undefined",
     test: 'retains the original report through current Supervisor collection'
+  },
+  'retired-local-reply': {
+    path: 'packages/core/src/client.ts',
+    anchor: 'if (!retired) return false\n    const author = await this.currentStoredAgentSession(input.caller.agentSessionId)',
+    replacement: 'if (true) return false\n    const author = await this.currentStoredAgentSession(input.caller.agentSessionId)',
+    test: 'retired original Supervisor'
   }
 }
