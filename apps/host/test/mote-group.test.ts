@@ -132,7 +132,7 @@ function boundMains(bindings: Map<string, string>): MoteMainReader {
   return {
     async readCurrentMoteMain(target) {
       const sessionId = bindings.get(target.spaceId)
-      return { status: 'ready', target, identity: { hostId: 'local', moteId: target.spaceId }, roleRevision: sessionId ?? 'unbound',
+      return { status: 'ready', target, identity: { hostId: 'local', moteId: 'topic-' + target.spaceId }, roleRevision: sessionId ?? 'unbound',
         resource: null, documentRevision: null, issue: null,
         current: sessionId ? { hostId: 'local', sessionId, displayWorkspaceId: 'scratch', groupId: 'group', tabId: 'tab', regionId: 'main' } : null }
     },

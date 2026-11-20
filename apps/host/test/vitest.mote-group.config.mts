@@ -15,6 +15,8 @@ const variants = {
     "record.member.state !== 'active'"],
   'pause-claimed-mote-work-on-reopen': ['apps/host/src/continuous-progress-loop-manager.ts',
     "loop.pendingCompletion && loop.status === 'active' && !loop.moteWork", "loop.pendingCompletion && loop.status === 'active'"],
+  'conflate-mote-space-and-topic': ['apps/host/src/mote-group.ts',
+    'sameMotePreferencesTarget(snapshot.target, target)', 'snapshot.identity.moteId === target.spaceId'],
   'ignore-private-priority': ['packages/core/src/client.ts',
     "else if (context.backgroundOrder === 'priority') ordered.push(context)", "else if (false) ordered.push(context)"],
   'steer-with-private-priority': ['packages/core/src/client.ts',
