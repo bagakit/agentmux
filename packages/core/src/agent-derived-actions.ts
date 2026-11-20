@@ -1,5 +1,6 @@
+import { composeAgentPrompt } from './agent-outbound-message.js'
 import { AgentMuxError } from './errors.js'
-import { agentSourceContextPrompt, type AgentTakeoverContextSource } from './agent-takeover-context.js'
+import { agentSourceContextNote, type AgentTakeoverContextSource } from './agent-takeover-context.js'
 
 /**
  * A derived action starts a new Session from one exact original Session and keeps the original.
@@ -89,13 +90,6 @@ export function resolveAgentDerivedActions(config: AgentDerivedActionsConfig | u
   ]
 }
 
-const DERIVED_FRAMING = 'Start new work from the original Agent’s work using its available records. The original Session keeps running unchanged.'
-
-/** The new Agent's first message for a user-authored new-agent action. Fork actions send the instruction alone. */
-export function agentDerivedActionPrompt(action: Pick<AgentDerivedAction, 'label' | 'instruction'>, source: AgentTakeoverContextSource, initial?: string, contextHostId: string | null = 'local'): string {
-  return agentSourceContextPrompt({
-    opening: `${DERIVED_FRAMING}\n\nYour task (${action.label}):\n${action.instruction.trim()}`,
-    relation: 'This is a separate derived task, not a resume of the original Session.',
-    closing: 'Verify current files and resources before acting on them.'
-  }, source, initial, contextHostId)
+export function composeAgentDerivedAction(action: Pick<AgentDerivedAction, 'instruction'>, source: AgentTakeoverContextSource): string {
+  return composeAgentPrompt(action.instruction, agentSourceContextNote(source, 'local')).text
 }

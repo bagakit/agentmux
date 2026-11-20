@@ -1,5 +1,5 @@
-import { agentTakeoverPrompt } from '@agentmux/core/mote-dialogue'
-import { agentDerivedActionPrompt, type AgentDerivedAction } from '@agentmux/core/agent-derived-actions'
+import { agentTakeoverInput } from '@agentmux/core/mote-dialogue'
+import { composeAgentDerivedAction, type AgentDerivedAction } from '@agentmux/core/agent-derived-actions'
 import { mintObjectId } from '@agentmux/core/object-id'
 import type { AgentMuxSpaceMutationReport } from '@agentmux/core/control'
 import type { AgentNativeResumeSource, AgentSessionHistoryDescriptor, AgentMuxRunRef, AgentMuxRpcParams, AgentMuxRpcResult, SpaceAuthorityRef } from '@agentmux/core'
@@ -7,7 +7,6 @@ import type { AgentTakeoverSource } from '@agentmux/core/agent-takeover'
 import type { OpenHttpLinkOrigin } from './open-destination'
 import { checkpointAgentOperations, checkpointSpatialWorkbench, currentCoreSpatialGraph, currentDisplayNameRevision, useAppStore } from '../store'
 import { spatialCatalog } from './space-agent-control'
-import { firstPromptFromTimeline } from '@agentmux/client-ui/display-name'
 import { api } from './api'
 import { requireAgentNewTabDestination, type AgentNewTabDestination } from './agent-new-tab-destination'
 import { beginAgentOperation, retainTakeoverRequest, updateAgentOperation, settleAgentCreation, type AgentOperationFeedback } from './agent-operation-feedback'
@@ -183,10 +182,9 @@ async function exactTakeoverSource(source: TakeoverSource): Promise<TakeoverSour
     diagnostic: spatialRead.status === 'rejected' ? `${source.diagnostic}\n\nOriginal spatial observation unavailable: ${spatialRead.reason instanceof Error ? spatialRead.reason.message : String(spatialRead.reason)}. The unique durable Session source is retained.` : source.diagnostic }
 }
 
-export function takeoverPrompt(source: TakeoverSource): string {
-  const state = useAppStore.getState(), sessionId = source.agentSessionId
-  const initial = sessionId ? state.pendingAgentLaunches[sessionId]?.request?.prompt ?? firstPromptFromTimeline(state.timelines[sessionId]) : undefined
-  return source.derived ? agentDerivedActionPrompt(source.derived, source, initial ?? undefined) : agentTakeoverPrompt(source, initial ?? undefined)
+export function takeoverInput(source: TakeoverSource) {
+  const origin = { ...source, agentSessionId: takeoverOperationSubject(source).agentSessionId }
+  return source.derived ? { prompt: composeAgentDerivedAction(source.derived, origin) } : agentTakeoverInput(origin)
 }
 
 /** Display naming follows the confirmed creation; inspection never overwrites a later edit. */
@@ -336,7 +334,7 @@ export async function takeOverSession(source: TakeoverSource, executorId: string
     const destination = requireAgentNewTabDestination(source.destination, catalog, currentState.layouts, { hostId: source.hostId, cwd: source.cwd })
     assertSource()
     return submit({ schemaVersion: 5, requestId, operation: 'agent.open', focus: false,
-      destination, content: { kind: 'new-agent', executorId, prompt: takeoverPrompt(source) } })
+      destination, content: { kind: 'new-agent', executorId, ...takeoverInput(source) } })
   }
   const location = catalog.locations.find(item => item.tabId === source.origin.tabId && item.regionId === source.origin.regionId &&
     item.displayWorkspaceId === source.origin.workspaceId && item.groupId === source.origin.tabGroupId)
@@ -347,7 +345,7 @@ export async function takeOverSession(source: TakeoverSource, executorId: string
   // Zone; the new Tab may still appear beside the original in this display.
   return submit({ schemaVersion: 5, requestId, operation: 'agent.open', focus: false,
     destination: { zoneId: zone.zoneId, displayWorkspaceId: location.displayWorkspaceId, groupId: location.groupId, newTab: true },
-    content: { kind: 'new-agent', executorId, prompt: takeoverPrompt(source) } })
+    content: { kind: 'new-agent', executorId, ...takeoverInput(source) } })
 }
 
 

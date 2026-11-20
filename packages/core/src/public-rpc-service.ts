@@ -52,8 +52,8 @@ import { parseConversationSnapshotInput, parseConversationSnapshotResult, type C
 import { isImageMethod, parseImageParams, parseImageResult, type AgentMuxRpcImageOwner, type ImageMethod, type ImageActor, type ImageCallContext } from './public-rpc-image.js'
 import { agentPromptSubmissionOutcome } from './agent-input-wait.js'
 import { moteMainHandoverInputId, moteMainBindingDefaults, moteMainBaseline, spatialAgentOpenRecord, isSpatialAgentAssociation, spatialAgentAssociationRecord } from './spatial-agent-open-contract.js'
-import { agentTakeoverPrompt } from './agent-takeover-context.js'
-import { agentDerivedActionPrompt, isAgentBuiltInDerivedActionId, parseAgentDerivedActionFields } from './agent-derived-actions.js'
+import { agentTakeoverInput } from './agent-takeover-context.js'
+import { composeAgentDerivedAction, isAgentBuiltInDerivedActionId, parseAgentDerivedActionFields } from './agent-derived-actions.js'
 import { reconcileMoteMainSetup } from './mote/main-setup.js'
 import { isMoteDialogueMethod, moteHeartbeatFaultPause, parseMoteDialogueParams, parseMoteDialogueResult, sameMoteMainEntrySource, unconfirmedMoteMainEntryOperation, type MoteDialoguePort, type MoteDialogueMethod } from './mote/dialogue.js'
 import { moteInputObservationId } from './mote/input.js'
@@ -394,7 +394,7 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
 }
 export type AgentMuxRpcCallContext = {
   /** Original Core-qualified Takeover preparation; never accepted in RPC parameters. */
-  agentTakeover?: { requestId: string; requestDigest: string; preparation: AgentTakeoverPreparation; prompt: string };
+  agentTakeover?: { requestId: string; requestDigest: string; preparation: AgentTakeoverPreparation; prompt: string; agentMuxNote: string };
   routeDelegation?: VerifiedHostRouteDelegation; caller?: AgentMuxRpcCredentials; signal?: AbortSignal; principal?: AgentMuxRpcPrincipal;
   /** Optional pre-admission read-opening lifetime. Never substitutes for the business operation signal. */
   openingSignal?: AbortSignal;
@@ -731,13 +731,13 @@ export class AgentMuxRpcService {
     const destination = takeoverDestinationOrganization(state.graph, located.address, current.runtimeId)
     let contextPage: unknown, diagnostic = 'Read the original complete context through its exact owner.'
     const sameCore = (request.content.agentTarget?.runtimeId ?? current.runtimeId) === identity.runtimeId
-    if (!sameCore || !origin.agentSessionId) try { contextPage = origin.agentSessionId
+    if (!sameCore) try { contextPage = origin.agentSessionId
       ? await this.call('agent.context', { hostId: origin.hostId, agentSessionId: origin.agentSessionId }, context)
       : await this.call('agent.native.history', { hostId: origin.hostId, executorId: origin.executorId!, source: origin.nativeSource!, limit: 100 }, context) }
     catch (cause) { diagnostic = 'Original context observation is unavailable: ' + String(cause) }
-    const prompt = [agentTakeoverPrompt({ hostId: origin.hostId, agentSessionId: origin.agentSessionId, nativeSource: origin.nativeSource, cwd: metadata.workspacePath, executorId: metadata.executorId, label: origin.agentSessionId ?? origin.nativeSource!.nativeHandle.sessionId, diagnostic }, undefined, sameCore ? 'local' : null),
-      ...(!sameCore && contextPage ? ['Original-owner bounded context page; continue its nextCursor only at that original owner or through a verified route. This is not complete history.', JSON.stringify(contextPage)] : [])].join('\n\n')
-    context.agentTakeover = { requestId: request.requestId, requestDigest, prompt, preparation: { source: { hostId: origin.hostId, runtimeId: identity.runtimeId, agentSessionId: origin.agentSessionId ?? null, ...(origin.nativeSource ? { nativeSource: origin.nativeSource } : {}), ...(origin.executorId ? { executorId: origin.executorId } : {}), run: session?.run ?? null, organization, ...(organizationIssue ? { organizationIssue } : {}) },
+    const input = agentTakeoverInput({ hostId: origin.hostId, agentSessionId: origin.agentSessionId, nativeSource: origin.nativeSource,
+      executorId: metadata.executorId, diagnostic }, sameCore ? 'local' : null, contextPage)
+    context.agentTakeover = { requestId: request.requestId, requestDigest, ...input, preparation: { source: { hostId: origin.hostId, runtimeId: identity.runtimeId, agentSessionId: origin.agentSessionId ?? null, ...(origin.nativeSource ? { nativeSource: origin.nativeSource } : {}), ...(origin.executorId ? { executorId: origin.executorId } : {}), run: session?.run ?? null, organization, ...(organizationIssue ? { organizationIssue } : {}) },
       destination: { owner: { runtimeId: current.runtimeId }, organization: destination }, nature: agentTakeoverNature(organization, destination) } }
   }
 
@@ -768,8 +768,15 @@ export class AgentMuxRpcService {
     }
     const chosen = executorId ?? action.executorId
     if (!chosen) throw new AgentMuxError('Choose the Agent with --executor; this action has no default Agent.', 'INVALID_CONTROL_REQUEST')
-    const prompt = agentDerivedActionPrompt(action, { hostId: owner.hostId, agentSessionId: session.agentSessionId, cwd: session.workspacePath,
-      executorId: session.executorId, label: session.agentSessionId, diagnostic: 'Started from the public derived action command; read the complete context for the current state.' })
+    const state = await this.spatial.read()
+    if (!state) throw new AgentMuxError('The original derived action destination is unavailable.', 'SPATIAL_STATE_ABSENT')
+    const location = spatialDestination(spatialCatalog(state.graph), request.destination,
+      { tabId: mintObjectId(), regionId: mintObjectId() }, state.graph.layouts)
+    const zone = state.graph.zones.find(candidate => candidate.zoneId === location.address.zoneId)
+    if (!zone || zone.hostId !== owner.hostId || zone.directoryPath !== session.workspacePath) {
+      throw new AgentMuxError('Choose a destination in the original Agent execution Host and directory.', 'SPACE_RESOURCE_CHANGED')
+    }
+    const prompt = composeAgentDerivedAction(action, { hostId: owner.hostId, agentSessionId: session.agentSessionId, executorId: session.executorId })
     return { ...rest, content: { kind: 'new-agent', executorId: chosen, ...parseAgentOpenLaunchFields(request.content), prompt } } as AgentMuxRpcParams<'agent.open'>
   }
   private async spaceMemberRuntime(input: import('./space-member.js').SpaceMemberParams[keyof import('./space-member.js').SpaceMemberParams], context: AgentMuxRpcCallContext) {
@@ -4770,9 +4777,13 @@ export class AgentMuxRpcService {
           const old=intent.baseline.defaults.conversation,scopes=await this.clients()
           const oldOwners=scopes.filter(scope=>scope.hostId===old.hostId),newOwners=scopes.filter(scope=>scope.hostId===record.execution.hostId)
           const oldOwner=oldOwners.length===1?oldOwners[0]:undefined,newOwner=newOwners.length===1?newOwners[0]:undefined
+          const oldRuntime=oldOwner?.client.runtimeOwnerIdentity?.(),newRuntime=newOwner?.client.runtimeOwnerIdentity?.()
+          const sameCore=!!oldOwner&&!!newOwner&&!this.endpointUnverified(oldOwner.client)&&!this.endpointUnverified(newOwner.client)&&(
+            oldOwner.client===newOwner.client||oldRuntime?.availability==='connected'&&newRuntime?.availability==='connected'&&
+            !!oldRuntime.runtimeId&&!!oldRuntime.ownerInstanceId&&oldRuntime.runtimeId===newRuntime.runtimeId&&oldRuntime.ownerInstanceId===newRuntime.ownerInstanceId)
           let page:import('./agent-context.js').AgentContextPage|null=null
           let sourceIssue:string|null=null
-          try {
+          if (!sameCore) try {
             if(!oldOwner||this.endpointUnverified(oldOwner.client))throw new AgentMuxError('The original context Host is unavailable or ambiguous.','CONTROL_UNAVAILABLE')
             const request={hostId:old.hostId,agentSessionId:old.sessionId}
             page=parseRpcNativeResult('agent.context',await this.call('agent.context',request,context),request) as unknown as import('./agent-context.js').AgentContextPage
@@ -4780,16 +4791,9 @@ export class AgentMuxRpcService {
             sourceIssue='The original handover context read is unconfirmed: '+String(error)
             retainIssue(sourceIssue)
           }
-          const oldRuntime=oldOwner?.client.runtimeOwnerIdentity?.(),newRuntime=newOwner?.client.runtimeOwnerIdentity?.()
-          const sameCore=!!oldOwner&&!!newOwner&&!this.endpointUnverified(oldOwner.client)&&!this.endpointUnverified(newOwner.client)&&(
-            oldOwner.client===newOwner.client||oldRuntime?.availability==='connected'&&newRuntime?.availability==='connected'&&
-            !!oldRuntime.runtimeId&&!!oldRuntime.ownerInstanceId&&oldRuntime.runtimeId===newRuntime.runtimeId&&oldRuntime.ownerInstanceId===newRuntime.ownerInstanceId)
-          const original=page?.session
-          const prompt=[agentTakeoverPrompt({hostId:old.hostId,agentSessionId:old.sessionId,cwd:original?.workspacePath,executorId:original?.executorId,label:old.sessionId,
-            diagnostic:sourceIssue??'Original owner context page retained with its exact availability and continuation.'},undefined,sameCore?'local':null),
-            ...(page?['Original admission-owner agent.context response: this is one bounded historical page, not complete history. Preserve its source Host, unavailable sources and nextCursor. A cursor must be continued at its original owner or a verified route; its route alias is not a grant in this new Agent’s namespace.',
-              '<amux-original-context-page>',JSON.stringify(page),'</amux-original-context-page>']:[])].join('\n\n')
-          result.handoverInput=await stage('handoverInputKey',{operationId,prompt})
+          const handover = agentTakeoverInput({ hostId: old.hostId, agentSessionId: old.sessionId, executorId: page?.session?.executorId,
+            diagnostic: sourceIssue ?? undefined }, sameCore ? 'local' : null, page ?? undefined)
+          result.handoverInput=await stage('handoverInputKey',{operationId,prompt:handover.agentMuxNote+'\\n\\n'+handover.prompt})
         }
         if(!['admitted','terminal-confirmed'].includes(agentPromptSubmissionOutcome(result.handoverInput.record)))result.issue=[result.issue,'The original handover input is unconfirmed; inspect its exact key. The separate Query retains its own Core input qualification.'].filter(Boolean).join('\n')
       } catch(cause) { retainIssue(cause) }

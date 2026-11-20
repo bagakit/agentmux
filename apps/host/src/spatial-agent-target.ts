@@ -79,7 +79,9 @@ export async function openSpatialAgentTarget(options: {
     if (matches && matches.length !== 1) throw new AgentMuxError('Choose an executor registered on the original Agent Core.', 'UNKNOWN_EXECUTOR')
     const selected = matches?.[0]
     const launch = parseAgentOpenLaunchFields(request.content)
-    const preparedNote = previous?.takeover ? previous.takeoverSourceAgentMuxNote : !previous && !retained ? await options.agentMuxContext?.(request) : undefined
+    const preparedNote = previous?.takeover ? previous.takeoverSourceAgentMuxNote : !previous && !retained
+      ? [await options.agentMuxContext?.(request), context.agentTakeover?.agentMuxNote].filter(Boolean).join('\\n\\n') || undefined
+      : undefined
     const note = context.agentTakeover && sameRuntime ? preparedNote ?? '' : preparedNote
     if (selected && (Object.keys(launch).length || Boolean(note)) && selected.creationContract?.ordinaryLaunch !== 1) throw new AgentMuxError(
       'The selected execution Core has no confirmed handler for this complete launch input. Keep this request and update or confirm that Core; no Agent or helper was started.', 'AGENT_OPEN_CONTRACT_UNCONFIRMED')

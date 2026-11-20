@@ -42,7 +42,7 @@ export { observeMoteWorkSource } from './supervision.js'
 export { MOTE_SUPERVISION_GUIDANCE } from './guidance.js'
 export { agentPromptSubmissionOutcome, type AgentPromptSubmissionOutcome } from '../agent-input-wait.js'
 
-export { agentTakeoverPrompt, type AgentTakeoverContextSource } from '../agent-takeover-context.js'
+export { agentTakeoverInput, type AgentTakeoverContextSource } from '../agent-takeover-context.js'
 export * from './main-period.js'
 
 export { retainedMoteMainStarts, pendingMoteMainStarts, moteMainHandoverInputId, type MoteMainDeferredInput } from '../spatial-agent-open-contract.js'
