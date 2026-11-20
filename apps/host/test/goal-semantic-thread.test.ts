@@ -67,9 +67,8 @@ async function resume(h: Owner, id = 'same-session') {
   return result
 }
 async function goal(h: Owner, worker = 'same-session', workerHostId = 'worker-host') {
-  const goalId = 'semantic-goal'
-  await h.call('same-session', ['goal', 'create', '--goal', goalId, '--title', 'Continue the original work', '--session', 'same-session',
-    '--assignees', JSON.stringify([...new Set(['same-session', worker])]), '--supervisor', 'same-session', '--risk', 'low', '--confirm', 'user', '--operation-id', 'create-semantic-goal'])
+  const goalId = (await h.call('same-session', ['goal', 'create', '--title', 'Continue the original work', '--session', 'same-session',
+    '--assignees', JSON.stringify([...new Set(['same-session', worker])]), '--supervisor', 'same-session', '--risk', 'low', '--confirm', 'user', '--operation-id', 'create-semantic-goal'])).goal.id
   const aligned = await h.call(null, ['goal', 'update', '--goal', goalId, '--alignment', JSON.stringify({ summary: 'Original scope', criteria: [{ id: 'criterion', text: 'Deliver original evidence' }], openQuestions: [] })])
   const intent = { operationId: 'delegation', sourceMessageId: 'source', hostId: 'local', workerHostId, ownerAgentSessionId: 'same-session', workerAgentSessionId: worker,
     ownerRunId: 'run-same-session', workerRunId: 'run-' + worker, threadId: 'thread', text: 'Deliver original evidence', alignmentRevision: aligned.goal.alignment.revision, criterionIds: ['criterion'] }

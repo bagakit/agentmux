@@ -213,9 +213,9 @@ try {
   const pin = async (side, source, target) => await call(side, null, ['settings', 'hosts', 'trust-message-source', '--host', 'local', '--input', '-'], {
     sourceRuntimeId: source.authority.runtimeId, publicKey: source.authority.publicKey, targetRuntimeId: target.authority.runtimeId, targetKeyFingerprint: target.authority.fingerprint })
   await pin('b', authorityA, authorityB); await pin('a', authorityB, authorityA)
-  const goalId = 'private-ssh-goal', supervisor = a.roles.supervisor.agentSessionId, reviewer = a.roles.reviewer.agentSessionId, workerId = b.roles.worker.agentSessionId
-  await call('a', null, ['goal', 'create', '--goal', goalId, '--title', 'Deliver the original SSH result', '--description', 'Original human intent remains intact.', '--status', 'in_progress', '--session', supervisor,
-    '--assignees', JSON.stringify([supervisor, reviewer, workerId]), '--supervisor', supervisor, '--risk', 'low', '--confirm', 'user', '--operation-id', 'private-ssh-create'])
+  const supervisor = a.roles.supervisor.agentSessionId, reviewer = a.roles.reviewer.agentSessionId, workerId = b.roles.worker.agentSessionId
+  const goalId = (await call('a', null, ['goal', 'create', '--title', 'Deliver the original SSH result', '--description', 'Original human intent remains intact.', '--status', 'in_progress', '--session', supervisor,
+    '--assignees', JSON.stringify([supervisor, reviewer, workerId]), '--supervisor', supervisor, '--risk', 'low', '--confirm', 'user', '--operation-id', 'private-ssh-create'])).goal.id
   const aligned = await call('a', null, ['goal', 'update', '--goal', goalId, '--alignment', JSON.stringify({ summary: 'Check the original signed remote report.', criteria: [{ id: 'signed-report', text: 'The received report retains its original signature and Goal criteria.' }], openQuestions: [] })])
   const alignmentRevision = aligned.goal.alignment.revision
   const nodes = ['first', 'dependent'].map(id => ({ id, title: 'Deliver ' + id, outcome: 'Verify the original ' + id, dependsOn: id === 'dependent' ? ['first'] : [], criterionIds: ['signed-report'],

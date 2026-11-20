@@ -1,3 +1,4 @@
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -29,9 +30,9 @@ async function fixture() {
     await vi.waitFor(() => expect((host.client as unknown as typeof original.inner).connected).toBe(true))
   } finally { connect.mockRestore() }
   const demands = openDemandStore({ root: join(original.root, 'demands') })
-  await demands.create({ id: 'goal-original', title: 'Original Goal' })
-  await demands.create({ id: 'goal-other', title: 'Other Goal' })
-  await demands.create({ id: 'goal-empty', title: 'Empty Goal' })
+  await seedStoredDemand(demands, { id: 'goal-original', title: 'Original Goal' })
+  await seedStoredDemand(demands, { id: 'goal-other', title: 'Other Goal' })
+  await seedStoredDemand(demands, { id: 'goal-empty', title: 'Empty Goal' })
   for (let index = 0; index < 17; index++) await demands.addActivity('goal-original', {
     id: 'activity-' + index, kind: 'evidence', message: 'Original ' + index, actorId: null,
     createdAt: index % 2 === 0 ? 7 : 3, operationId: 'original-evidence-' + index })

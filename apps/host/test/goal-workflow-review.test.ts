@@ -10,13 +10,12 @@ afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await c
 
 it('collects the exact Ticket, admits independent review and prompts exact Run release only after a new pass', async () => {
   const host = await crossHostOwner(cleanup, 'workflow-review', ['supervisor', 'worker', 'reviewer'])
-  const goalId = 'workflow-goal'
   const config = JSON.parse(await readFile(host.configurationPath, 'utf8'))
   await writeFile(host.configurationPath, JSON.stringify({ ...config, goals: { workflow: {
     template: 'execution-review', reviewerHostId: 'local', reviewerSessionId: 'reviewer', reviewerRuntimeId: host.identity.runtimeId
   } } }))
-  await host.call('supervisor', ['goal', 'create', '--goal', goalId, '--title', 'Verify delivered artifact', '--status', 'in_progress',
-    '--assignees', '["supervisor","worker"]', '--supervisor', 'supervisor', '--risk', 'low', '--confirm', 'user', '--operation-id', 'create-workflow-goal'])
+  const goalId = (await host.call('supervisor', ['goal', 'create', '--title', 'Verify delivered artifact', '--status', 'in_progress',
+    '--assignees', '["supervisor","worker"]', '--supervisor', 'supervisor', '--risk', 'low', '--confirm', 'user', '--operation-id', 'create-workflow-goal'])).goal.id
   await host.call(null, ['goal', 'update', '--goal', goalId, '--alignment', JSON.stringify({
     summary: 'Independently check the artifact', criteria: [{ id: 'artifact', text: 'The artifact has the required bytes' }], openQuestions: []
   })])

@@ -1,3 +1,4 @@
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { createHash, generateKeyPairSync } from 'node:crypto'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -18,7 +19,7 @@ async function fixture(assignee: DemandAgentReference) {
   const key = publicKey.export({ type: 'spki', format: 'der' })
   const signer = goalTicketSigner(owner, key.toString('base64url'), createHash('sha256').update(key).digest('hex'), privateKey)
   const store = openDemandStore({ root, goalTicketSigner: async () => signer }), person = { kind: 'user' as const, id: 'person' }
-  await store.create({ id: 'goal', title: 'Exact source', sessionIds: [assignee], assigneeSessionIds: [assignee] })
+  await seedStoredDemand(store, { id: 'goal', title: 'Exact source', sessionIds: [assignee], assigneeSessionIds: [assignee] })
   await store.proposeAlignment('goal', { summary: 'Prepare', criteria: [{ id: 'a', text: 'Checked' }], openQuestions: [] })
   const node = { id: 'a', outcome: 'Checked', title: 'Prepare', check: 'check', criterionIds: ['a'], dependsOn: [], executor: null }
   const { demand } = await store.revisePlan('goal', { operationId: 'revision', expectedRevision: 0, alignmentRevision: 1, nodes: [node, { ...node, id: 'b' }] }, person)

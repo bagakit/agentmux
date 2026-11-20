@@ -1,3 +1,4 @@
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -13,7 +14,7 @@ afterEach(async () => { vi.restoreAllMocks(); for (const close of cleanup.splice
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'goal-discussion-')); cleanup.push(() => rm(root, { recursive: true, force: true }))
   const demands = openDemandStore({ root: join(root, 'demands') }), operationId = 'goal_pmo_create_original'
-  await demands.create({ id: 'original-goal', title: 'Original Goal' }, { operationId: 'original-create', discussionOperationId: operationId, creationOrigin: { requesterAsSupervisor: true } })
+  await seedStoredDemand(demands, { id: 'original-goal', title: 'Original Goal' }, { operationId: 'original-create', discussionOperationId: operationId, creationOrigin: { requesterAsSupervisor: true } })
   const configurationPath = join(root, 'configuration.json'), path = join(root, 'mote')
   const launch = { label: 'Original Agent', command: 'original-agent', args: [], env: {}, injectAgentMuxGuide: false }
   const config = { executors: { codex: { ...launch, providerId: 'codex' }, claude: { ...launch, providerId: 'claude' } }, workspaces: [{ id: SCRATCH_WORKSPACE_ID, hostId: 'local', path: root }] }
@@ -31,7 +32,7 @@ async function fixture() {
 }
 it('keeps old Goal data absent and refuses an unconfirmed source without a native action', async () => {
   const f = await fixture()
-  await f.demands.create({ id: 'old-goal', title: 'Original old Goal' })
+  await seedStoredDemand(f.demands, { id: 'old-goal', title: 'Original old Goal' })
   await expect(f.owner.execute({ ...f.request, demandId: 'old-goal' }, {})).rejects.toMatchObject({ code: 'GOAL_DISCUSSION_UNCONFIRMED' })
   expect((await f.demands.get('old-goal'))).not.toHaveProperty('discussionOperationId'); expect(f.call).not.toHaveBeenCalled()
 })
@@ -80,7 +81,7 @@ it('a new planning request never reserves a dedicated discussion or starts a rep
 })
 it('an explicit legacy discussion uses a distinct original source and preserves pending Goal creation provenance', async () => {
   const f = await fixture()
-  await f.demands.create({ id: 'legacy', title: 'Original legacy Goal' }, { operationId: 'same-request', creationOrigin: { requesterAsSupervisor: true } })
+  await seedStoredDemand(f.demands, { id: 'legacy', title: 'Original legacy Goal' }, { operationId: 'same-request', creationOrigin: { requesterAsSupervisor: true } })
   const before = (await f.demands.get('legacy'))!
   const request = { ...f.request, demandId: 'legacy', requestId: 'same-request', mode: 'grill' as const, executorId: 'claude' }
   await expect(f.owner.execute(request, {})).rejects.toThrow('native-boundary')
@@ -96,7 +97,7 @@ it('an explicit legacy discussion uses a distinct original source and preserves 
 
 it('a canonical binding contributed during reservation prevents any replacement creation', async () => {
   const f = await fixture()
-  await f.demands.create({ id: 'legacy', title: 'Retained work' })
+  await seedStoredDemand(f.demands, { id: 'legacy', title: 'Retained work' })
   const prepare = f.demands.prepareDiscussion.bind(f.demands)
   vi.spyOn(f.demands, 'prepareDiscussion').mockImplementation(async (...args) => {
     const receipt = await prepare(...args)
@@ -114,7 +115,7 @@ it('a canonical binding contributed during reservation prevents any replacement 
 
 it('failed spatial observation never reserves a legacy discussion or reaches Native creation', async () => {
   const f = await fixture()
-  await f.demands.create({ id: 'legacy', title: 'Retained work' })
+  await seedStoredDemand(f.demands, { id: 'legacy', title: 'Retained work' })
   const before = await f.demands.get('legacy')
   const owner = createHostGoalDiscussions({ configurationPath: '', demands: f.demands, spatial: { read: async () => null } as never,
     runtime: {} as never, call: f.call as never, confirmParticipation: async () => {} })

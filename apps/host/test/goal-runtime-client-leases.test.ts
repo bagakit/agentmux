@@ -1,3 +1,4 @@
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { AgentMuxAgentSession, AgentMuxAgentRuntimeStatus, AgentMuxClientEvent, AgentMuxClientEventListener } from '@agentmux/core'
 import { createGoalRuntime, type GoalExecutionClient } from '../src/goal-runtime.js'
@@ -113,7 +114,7 @@ it('a planning requester with the same Session ID on another Host neither impers
   const read = vi.fn(async () => { throw Error('Planning must not synchronize unrelated execution history') })
   const owner = new GoalPatrolOwner(demands, f.runtime, read, () => {})
   try {
-    await demands.create({ id: 'goal', title: 'Original outcome', supervisorSessionId: 'shared-session-id', assigneeSessionIds: ['shared-session-id'] })
+    await seedStoredDemand(demands, { id: 'goal', title: 'Original outcome', supervisorSessionId: 'shared-session-id', assigneeSessionIds: ['shared-session-id'] })
     await demands.proposeAlignment('goal', { summary: 'Original outcome', criteria: [{ id: 'result', text: 'Check the original result' }], openQuestions: [] })
     await demands.revisePlan('goal', { operationId: 'original-remote-plan', expectedRevision: 0, alignmentRevision: 1,
       nodes: [{ id: 'deliver', title: 'Deliver', outcome: 'Original outcome', criterionIds: ['result'], dependsOn: [], check: 'check original', executor: null }] },

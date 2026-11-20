@@ -1,3 +1,4 @@
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { pathToFileURL } from 'node:url'
 import { runSourceObjectCli } from '../../../packages/core/test/helpers/source-object-cli.js'
 import { objectCliEnvironment } from '../../../packages/core/test/helpers/object-cli-rpc.js'
@@ -46,7 +47,7 @@ async function fixture() {
     coreClients: () => [{ hostId: 'local', client: f.d.core }], hostedRuntime: () => f.d.hosted, goalControl: goals.execute, goalDelegations: goals.goalDelegations })
   await server.start(); cleanup.push(() => server.stop())
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); cleanup.push(() => rpc.dispose())
-  await goals.demands.create({ id: 'original-goal', title: 'Original', sessionIds: ['legacy-original'] })
+  await seedStoredDemand(goals.demands, { id: 'original-goal', title: 'Original', sessionIds: ['legacy-original'] })
   const carrier = { source: { hostId: 'configured-B' } }
   return { ...f, goals, rpc, bRpc, forbidden, calls, sourceCalls, carrier, socketPath: server.path }
 }

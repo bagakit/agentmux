@@ -1,3 +1,4 @@
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS } from '../../../packages/core/src/control.js'
 import { observeSpaceSessionStates } from '../../../packages/core/src/space-session-stream.js'
 import type { SpaceSessionsObservation } from '../../../packages/core/src/space-sessions.js'
@@ -57,7 +58,7 @@ async function fixture(localMember = false) {
   goalServer = new AgentMuxControlServer({ socketPath, spatialState: spatial, hostedRuntime: () => bHosted, coreClients: () => [{ hostId: 'local', client: b.client }, { hostId: 'D-in-B', client: configuredD }], goalControl: goals.execute, goalDelegations: goals.goalDelegations })
   await goalServer.start(); cleanup.push(() => goalServer.stop())
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: goalServer.path } }); cleanup.push(() => rpc.dispose())
-  const goal = (await goals.demands.create({ id: 'original-goal', title: 'Original public Goal', description: 'Original frozen public input', assigneeSessionIds: [reference] })).demand
+  const goal = (await seedStoredDemand(goals.demands, { id: 'original-goal', title: 'Original public Goal', description: 'Original frozen public input', assigneeSessionIds: [reference] })).demand
   const access = { source: { hostId: 'local' } }
   const bInventory = vi.spyOn(b.client, 'readAgentSessions'), dInventory = vi.spyOn(d.client, 'readAgentSessions'), bRuns = vi.spyOn(b.client, 'listRuns'), dRuns = vi.spyOn(d.client, 'listRuns')
   return { sourceRoot: b.root, spatial, b: { inventory: bInventory, runs: bRuns }, d: { core: d.client, store: d.store, inner: d.inner, inventory: dInventory, runs: dRuns }, goal, goals, goalServer, configuredD, rpc, reference, access, send, raw, stop, session }

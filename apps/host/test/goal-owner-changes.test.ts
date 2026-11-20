@@ -1,3 +1,4 @@
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { afterEach, expect, it, vi } from 'vitest'
 import { appendFile, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -25,7 +26,7 @@ async function fixture() {
   cleanup.push(() => rm(root, { recursive: true, force: true }))
   const demands = openDemandStore({ root: join(root, 'goals') })
   for (const id of ['goal-a', 'goal-b']) {
-    await demands.create({ id, title: id, sessionIds: ['manager', 'worker'], assigneeSessionIds: ['manager', 'worker'], supervisorSessionId: 'manager', status: 'in_progress' })
+    await seedStoredDemand(demands, { id, title: id, sessionIds: ['manager', 'worker'], assigneeSessionIds: ['manager', 'worker'], supervisorSessionId: 'manager', status: 'in_progress' })
     await demands.proposeAlignment(id, { summary: 'Original scope', criteria: [{ id: 'criterion', text: 'Observable result' }], openQuestions: [] })
     await demands.confirmAlignment(id, 1)
   }

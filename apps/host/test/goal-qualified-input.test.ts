@@ -1,3 +1,4 @@
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { afterEach, expect, it, vi } from 'vitest'
 import { join } from 'node:path'
 import { openDemandStore, type DemandQualifiedDispatchIntent } from '@agentmux/demand'
@@ -42,7 +43,7 @@ async function fixture() {
   const client = await connectHostedAgentMux({ rpc, expectedRuntimeId: 'original-runtime', connectOnDemand: true, agentSessionIds: ['recipient'] })
   const port = goalFiniteInputPort(client, original().target, original().runId); cleanup.push(() => port.dispose())
   const demands = openDemandStore({ root: join(h.root, 'original-goals') })
-  await demands.create({ id: 'original-goal', title: 'Original Goal', assigneeSessionIds: [original().target] })
+  await seedStoredDemand(demands, { id: 'original-goal', title: 'Original Goal', assigneeSessionIds: [original().target] })
   await demands.prepareDispatch('original-goal', original())
   const owner = new GoalDispatchInputOwner(demands, { sessionTimeline: async () => { throw new Error('A qualified input must not use legacy Session timeline matching') } })
   const queue = new DurableAgentMuxMessageQueue(h.client.agentMessageQueuePath())

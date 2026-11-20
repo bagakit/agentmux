@@ -204,7 +204,7 @@ try {
   assert.ok(graphBefore.graph.regions.some(region => region.agentSessionId === sid))
   const name = (await fixture.rpc.call('space.ls', { target: {}, presentation: true })).catalog.agentPresentation.find(row => row.agentSessionId === sid)?.name
   assert.ok(name)
-  const goal = (await fixture.rpc.call('goal.create', { goalId: 'original-mobile-goal', title: 'Original Mobile Goal', description: 'Original authorized goal body.',
+  const goal = (await fixture.rpc.call('goal.create', { title: 'Original Mobile Goal', description: 'Original authorized goal body.',
     status: 'backlog', operationId: 'original-mobile-goal-create', risk: 'low', confirmation: 'user' })).goal
   phase('compiled-original-host-desktop-native', { owner, original, executorInventory: fixture.executorInventory,
     nativeRun: await fixture.readNativeRun(original.session.run),

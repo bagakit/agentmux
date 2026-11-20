@@ -4,6 +4,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { AgentMuxSpatialStateStore } from '@agentmux/core'
 import { deriveObjectId } from '@agentmux/core/object-id'
+import { deriveBoundGoalId, parseAmuxObjectLink } from '@agentmux/core/sharing'
 import { createWorkspaceLayout, createWorkbenchViewLayout } from '@agentmux/core/spatial-layout'
 import { contributeGoalDiscussionBinding } from '../src/goal-discussion-bindings.js'
 import { workspaceProjectId } from '../src/workspace-projects.js'
@@ -14,12 +15,31 @@ vi.setConfig({ testTimeout: 60_000 })
 const cleanup: CrossHostCleanup = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
 
+it('issues and reads a bound Goal through the public owner using the original creation operation', async () => {
+  vi.stubEnv('NODE_OPTIONS', [process.env.NODE_OPTIONS, '--import ' + resolve('apps/host/test/goal-planning-discussion-node-loader.mjs')].filter(Boolean).join(' '))
+  const f = await crossHostOwner(cleanup, 'goal-address', ['creator'])
+  const operation = 'original-create-operation'
+  const args = ['goal', 'create', '--title', 'Performance and stability', '--assignees', '["creator"]', '--supervisor', 'creator', '--operation-id', operation, '--risk', 'low', '--confirm', 'user']
+  const rejected = await f.cli('creator', [...args, '--goal', 'prefix-picked-by-caller'])
+  expect(rejected.code).toBe(1)
+  expect(rejected.stderr).toContain('--goal')
+  const created = await f.call('creator', args)
+  const { id, address } = created.goal
+  expect(id).toBe(deriveBoundGoalId(address.runtimeId, address.namespace, operation))
+  expect(address).toMatchObject({ creationOperationId: operation, goalUrl: 'amux://goal/' + id, planUrl: 'amux://goal/' + id + '/plan' })
+  expect(parseAmuxObjectLink(address.goalUrl)).toEqual({ kind: 'goal', goalId: id, bound: true })
+  expect(parseAmuxObjectLink(address.planUrl)).toEqual({ kind: 'goal', goalId: id, bound: true, section: 'plan' })
+  expect((await f.call('creator', args)).goal.id).toBe(id)
+  expect((await f.call('creator', ['goal', 'inspect', '--creation-operation', operation])).goal.id).toBe(id)
+  expect((await f.call('creator', ['goal', 'inspect', '--creation-operation', 'absent-operation'])).goal).toBeNull()
+})
+
 it('the current authenticated Supervisor confirms its exact Goal through CLI and the Host retains the original actor', async () => {
   vi.stubEnv('NODE_OPTIONS', [process.env.NODE_OPTIONS, '--import ' + resolve('apps/host/test/goal-planning-discussion-node-loader.mjs')].filter(Boolean).join(' '))
   const f = await crossHostOwner(cleanup, 'supervisor-confirmation', ['supervisor', 'other'])
-  const goalId = 'supervisor-confirmation-goal'
-  await f.call(null, ['goal', 'create', '--goal', goalId, '--title', 'Deliver a checked outcome',
+  const created = await f.call(null, ['goal', 'create', '--title', 'Deliver a checked outcome',
     '--assignees', '["supervisor","other"]', '--supervisor', 'supervisor', '--risk', 'low', '--confirm', 'user'])
+  const goalId = created.goal.id
   const proposal = { summary: 'Deliver a checked outcome.', criteria: [{ id: 'result', text: 'The result has an independent check.' }], openQuestions: [] }
   await f.call('supervisor', ['goal', 'update', '--goal', goalId, '--alignment', JSON.stringify(proposal)])
   const confirm = ['goal', 'confirm', '--goal', goalId, '--revision', '1', '--operation-id', 'supervisor-confirmation']
@@ -49,9 +69,10 @@ it('the public CLI submits and reconciles an original managed planning input, th
   const f = await crossHostOwner(cleanup, 'planning', ['supervisor', 'discussion'])
   const config = JSON.parse(await readFile(f.configurationPath, 'utf8'))
   await writeFile(f.configurationPath, JSON.stringify({ ...config, goals: { workflow: { template: 'evidence-synthesis' } } }))
-  const goalId = 'original-planning-goal', operationId = 'original-planning-request'
-  await f.call(null, ['goal', 'create', '--goal', goalId, '--title', 'Keep the real Goal', '--description', 'Preserve the original human intent.',
+  const operationId = 'original-planning-request'
+  const created = await f.call(null, ['goal', 'create', '--title', 'Keep the real Goal', '--description', 'Preserve the original human intent.',
     '--assignees', '["supervisor","discussion"]', '--supervisor', 'supervisor', '--risk', 'low', '--confirm', 'user'])
+  const goalId = created.goal.id
   const alignment = { summary: 'Deliver a checked outcome.', criteria: [{ id: 'result', text: 'The original result has an independent check.' }], openQuestions: [] }
   await f.call(null, ['goal', 'update', '--goal', goalId, '--alignment', JSON.stringify(alignment)])
   const spatial = new AgentMuxSpatialStateStore(), directory = f.original.root

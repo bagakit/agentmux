@@ -17,9 +17,8 @@ async function pin(source: Owner, target: Owner) {
 async function fixture() {
   const a = await crossHostOwner(cleanup, 'delivery-owner', ['same-session'])
   const b = await crossHostOwner(cleanup, 'delivery-worker', ['same-session'])
-  const goalId = 'delivery-goal'
-  await a.call('same-session', ['goal', 'create', '--goal', goalId, '--title', 'Deliver exactly once', '--session', 'same-session', '--assignees', '["same-session"]',
-    '--supervisor', 'same-session', '--risk', 'low', '--confirm', 'user', '--operation-id', 'create-delivery-goal'])
+  const goalId = (await a.call('same-session', ['goal', 'create', '--title', 'Deliver exactly once', '--session', 'same-session', '--assignees', '["same-session"]',
+    '--supervisor', 'same-session', '--risk', 'low', '--confirm', 'user', '--operation-id', 'create-delivery-goal'])).goal.id
   const criteria = [{ id: 'delivery-criterion', text: 'Retain original work and verify target receipt.' }]
   const aligned = await a.call(null, ['goal', 'update', '--goal', goalId, '--alignment', JSON.stringify({ summary: 'Original delivery target', criteria, openQuestions: [] })])
   a.routes([{ hostId: 'worker-host', client: b.reader }]); b.routes([])

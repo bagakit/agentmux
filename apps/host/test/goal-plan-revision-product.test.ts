@@ -6,9 +6,8 @@ const cleanup: CrossHostCleanup = []
 afterEach(async () => { for (const release of cleanup.splice(0).reverse()) await release(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
 async function fixture() {
   const owner = await crossHostOwner(cleanup, 'plan-revision-owner', ['supervisor', 'worker-a', 'worker-b', 'reviewer'])
-  const goalId = 'original-revision-goal'
-  await owner.call('supervisor', ['goal', 'create', '--goal', goalId, '--title', 'Keep original plan work', '--status', 'in_progress', '--session', 'supervisor',
-    '--assignees', JSON.stringify(['supervisor', 'worker-a', 'worker-b', 'reviewer']), '--supervisor', 'supervisor', '--risk', 'low', '--confirm', 'user', '--operation-id', 'create-original'])
+  const goalId = (await owner.call('supervisor', ['goal', 'create', '--title', 'Keep original plan work', '--status', 'in_progress', '--session', 'supervisor',
+    '--assignees', JSON.stringify(['supervisor', 'worker-a', 'worker-b', 'reviewer']), '--supervisor', 'supervisor', '--risk', 'low', '--confirm', 'user', '--operation-id', 'create-original'])).goal.id
   await owner.call(null, ['goal', 'update', '--goal', goalId, '--alignment', JSON.stringify({ summary: 'Original plan scope', criteria: [{ id: 'original', text: 'The original criterion remains independently checkable.' }], openQuestions: [] })])
   const node = { id: 'original-node', title: 'Original node', outcome: 'Deliver the original result', dependsOn: [], criterionIds: ['original'],
     check: 'node --test checks/original.test.mjs', executor: { hostId: 'local', agentSessionId: 'worker-a' } }

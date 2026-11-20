@@ -1,3 +1,4 @@
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -9,10 +10,9 @@ afterEach(async () => { for (const release of cleanup.splice(0).reverse()) await
 
 it('reads only current work at the original owner after a cold restart and keeps historical reads', async () => {
   const owner = await crossHostOwner(cleanup, 'active-plan', ['supervisor', 'worker', 'observer'])
-  const goalId = 'current-work'
-  await owner.call('supervisor', ['goal', 'create', '--goal', goalId, '--title', 'Active work', '--status', 'in_progress',
+  const goalId = (await owner.call('supervisor', ['goal', 'create', '--title', 'Active work', '--status', 'in_progress',
     '--assignees', JSON.stringify(['supervisor', 'worker']), '--related', JSON.stringify(['observer']),
-    '--supervisor', 'supervisor', '--risk', 'low', '--confirm', 'user'])
+    '--supervisor', 'supervisor', '--risk', 'low', '--confirm', 'user'])).goal.id
   await owner.call(null, ['goal', 'update', '--goal', goalId, '--alignment', JSON.stringify({
     summary: 'Read only the relevant work', criteria: [{ id: 'work', text: 'A file exists' }], openQuestions: [],
   })])
@@ -23,9 +23,8 @@ it('reads only current work at the original owner after a cold restart and keeps
   const opened = await owner.call('supervisor', ['goal', 'plan', 'assignment', '--input', '-'], {
     goalId, nodeId: id, expectedRevision: 1, operationId: 'open-work', assignment: { kind: 'open' },
   })
-  const secondId = 'other-current-work'
-  await owner.call('observer', ['goal', 'create', '--goal', secondId, '--title', 'Independent work', '--status', 'in_progress',
-    '--assignees', '["observer"]', '--supervisor', 'observer', '--risk', 'low', '--confirm', 'user'])
+  const secondId = (await owner.call('observer', ['goal', 'create', '--title', 'Independent work', '--status', 'in_progress',
+    '--assignees', '["observer"]', '--supervisor', 'observer', '--risk', 'low', '--confirm', 'user'])).goal.id
   await owner.call(null, ['goal', 'update', '--goal', secondId, '--alignment', JSON.stringify({
     summary: 'Independent work', criteria: [{ id: 'work', text: 'A report exists' }], openQuestions: [],
   })])

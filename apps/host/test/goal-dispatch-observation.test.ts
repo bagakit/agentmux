@@ -1,3 +1,4 @@
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -19,7 +20,7 @@ for (const execution of ['finite', 'continue'] as const) it(`Desktop inspection 
     runtime: () => ({ client: { sessionTimeline, submitPrompt }, ownerIdentity: () => ({ ownerInstanceId: 'original-owner' }) }) as never,
     coreCall: async () => { throw new Error('Inspection must not dispatch another Core operation.') }, projects: async () => [] })
   cleanup.push(() => owner.dispose())
-  await owner.demands.create({ id: 'original-goal', title: 'Original Goal', assigneeSessionIds: ['original-worker'] })
+  await seedStoredDemand(owner.demands, { id: 'original-goal', title: 'Original Goal', assigneeSessionIds: ['original-worker'] })
   await owner.demands.proposeAlignment('original-goal', { summary: 'Original work', criteria: [{ id: 'original', text: 'Original result' }], openQuestions: [] })
   const reference = { goalId: 'original-goal', operationId: 'original-start' }
   await owner.demands.prepareDispatch(reference.goalId, { operationId: reference.operationId, hostId: 'local', agentSessionId: 'original-worker', runId: 'original-run',

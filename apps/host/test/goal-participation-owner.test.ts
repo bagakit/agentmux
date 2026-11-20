@@ -1,3 +1,4 @@
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { nonSessionCreation } from './helpers/non-session-creation.js'
 import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -12,7 +13,7 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'goal-participation-')); cleanup.push(() => rm(root, { recursive: true, force: true }))
   const demands = openDemandStore({ root })
   const intent = { goalId: 'original-goal', creationOperationId: 'original-goal-creation' }, operationId = await goalPmoOperation(intent, 'create')
-  await demands.create({ id: 'original-goal', title: 'Original Goal' }, { operationId: 'original-goal-creation', discussionOperationId: operationId, creationOrigin: { requesterAsSupervisor: true } })
+  await seedStoredDemand(demands, { id: 'original-goal', title: 'Original Goal' }, { operationId: 'original-goal-creation', discussionOperationId: operationId, creationOrigin: { requesterAsSupervisor: true } })
   const input = { ...intent, hostId: 'original-host', agentSessionId: 'original-session', expectedRun: { runId: 'original-run' }, operationId, evidence: 'creation-input' as const }
   const creation = { createOperationId: operationId, createdRun: input.expectedRun, initialPrompt: 'confirmed' as const }
   let promptReceipt: unknown, originalMessage: unknown, role = true, beforeSource: (() => Promise<void>) | undefined
@@ -115,7 +116,7 @@ it('an authored message needs both its original recipient role and exact native 
 
 it('a handed-off discussion records only its real new authored input without inventing creation provenance', async () => {
   const f = await fixture(), sender = { agentSessionId: 'actual-message-author', run: { runId: 'actual-author-run' } }
-  await f.demands.create({ id: 'original-saved-goal', title: 'An existing Goal' })
+  await seedStoredDemand(f.demands, { id: 'original-saved-goal', title: 'An existing Goal' })
   const input = { goalId: 'original-saved-goal', hostId: f.input.hostId, agentSessionId: f.input.agentSessionId,
     expectedRun: f.input.expectedRun, evidence: 'message-input' as const, operationId: 'actual-new-message' }
   const caller = { caller: { agentSessionId: sender.agentSessionId, capability: 'actual-author-capability' } }

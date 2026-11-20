@@ -19,10 +19,11 @@ it('the same original Goal and real continuation survive Desktop exit and Host r
   const main = await f.startMain(), desktop = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: main.path } }); cleanup.push(() => desktop.dispose())
   const invalidations: string[][] = []
   const watch = await desktop.subscribe('goal.watch', {}, { onInitial: value => { invalidations.push(value.goalIds) }, onEvent: event => { if (event.type === 'change') invalidations.push(event.data.goalIds) } }); cleanup.push(() => watch.dispose())
-  const goalId = 'original-mobile-goal', sessionId = f.session.agentSessionId
+  const sessionId = f.session.agentSessionId
   const target = { hostId: 'local', agentSessionId: sessionId, providerId: f.session.providerId, workspacePath: f.session.workspacePath }
-  const create = await desktop.call('goal.create', { goalId, title: 'Original authorized Goal', description: 'Preserve original work and report observed results.',
+  const create = await desktop.call('goal.create', { title: 'Original authorized Goal', description: 'Preserve original work and report observed results.',
     assigneeSessionIds: [sessionId], supervisorSessionId: sessionId, operationId: 'original-goal-create', risk: 'low', confirmation: 'user' }).then(value => ({ value }), error => ({ error: { code: error.code, message: error.message } }))
+  const goalId = create.value!.goal.id
   expect(create).toMatchObject({ value: { goal: { id: goalId, assigneeSessionIds: [sessionId] } } })
   expect(await readDesktopGoals({ callOriginalCore: (_hostId, method, params) => desktop.call(method, params) })).toMatchObject([{ id: goalId, parentDemandId: null, activities: [], decisions: [{ question: 'Original authorized Goal' }] }])
   const creation = (await f.client.inspectAgentCreation(sessionId)).creation!
@@ -82,7 +83,7 @@ it('the same original Goal and real continuation survive Desktop exit and Host r
     regions: [{ tabId: 'original-mote-tab', regionId: 'original-mote-launcher', kind: 'launcher', agentSessionId: null, runId: null, execution: null }],
     layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('original-mote-group', ['original-mote-tab']) }, tabLayouts: { 'original-mote-tab': createWorkbenchViewLayout('original-mote-launcher') }, resources: {}
   } })
-  const discussionGoal = await phone.call('goal.create', { goalId: 'original-discussion-goal', title: 'A new original discussion', description: 'Keep one dedicated original context.', operationId: 'original-discussion-create', risk: 'low', confirmation: 'user' })
+  const discussionGoal = await phone.call('goal.create', { title: 'A new original discussion', description: 'Keep one dedicated original context.', operationId: 'original-discussion-create', risk: 'low', confirmation: 'user' })
   expect(discussionGoal.goal.discussionOperationId).toMatch(/^goal_pmo_create_/)
   // Freeze the original business intent before any Core spatial creation, then
   // challenge its real public creator with another valid launcher placement.
@@ -109,7 +110,7 @@ it('the same original Goal and real continuation survive Desktop exit and Host r
   const patrolSessionId = patrol.agent!.agentSessionId
   cleanup.push(async () => { const client = await f.native.client(); await client.stopAgent(patrolSessionId, (await client.readAgentSession(patrolSessionId))!.run) })
   expect((await spatial.read())!.graph.regions.find(region => region.regionId === 'original-mote-launcher')!.kind).toBe('launcher')
-  const nextGoal = await phone.call('goal.create', { goalId: 'another-original-discussion-goal', title: 'Another real Goal discussion', operationId: 'another-original-discussion-create', risk: 'low', confirmation: 'user' })
+  const nextGoal = await phone.call('goal.create', { title: 'Another real Goal discussion', operationId: 'another-original-discussion-create', risk: 'low', confirmation: 'user' })
   const nextInput = { goalId: nextGoal.goal.id, mode: 'grill' as const, operationId: 'another-original-discussion-request' }
   const nextDiscussion = await phone.call('goal.discuss', nextInput)
   expect(nextDiscussion.goal.supervisorSessionId).toBe(nextDiscussion.receipt.agentSessionId)
@@ -117,7 +118,7 @@ it('the same original Goal and real continuation survive Desktop exit and Host r
   cleanup.push(async () => { const client = await f.native.client(); await client.stopAgent(nextSessionId, (await client.readAgentSession(nextSessionId))!.run) })
   expect((await originalDemands.get(nextGoal.goal.id))!.discussionIntent).toMatchObject({ mode: 'grill', executorId: 'codex', requestOperationId: nextInput.operationId, agentMuxNote: expect.stringContaining('Original Goal facts:') })
   const managed = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: f.native.socketPath }, credentials: { agentSessionId: sessionId, capability: f.managedEnv.AGENTMUX_AGENT_CAPABILITY } }); cleanup.push(() => managed.dispose())
-  const managedGoal = await managed.call('goal.create', { goalId: 'managed-original-discussion-goal', title: 'Original creator delegated discussion', operationId: 'managed-original-goal-create', risk: 'low', confirmation: 'user' })
+  const managedGoal = await managed.call('goal.create', { title: 'Original creator delegated discussion', operationId: 'managed-original-goal-create', risk: 'low', confirmation: 'user' })
   expect(managedGoal.goal.supervisorSessionId).toBe(sessionId)
   const managedDiscussion = await managed.call('goal.discuss', { goalId: managedGoal.goal.id, mode: 'grill', operationId: 'managed-original-discussion-request' })
     .then(value => ({ value }), error => ({ error: { code: error.code, message: error.message } }))

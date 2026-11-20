@@ -126,14 +126,13 @@ it('takes a remote worker source report through the public Goal owner, signed pu
   // local Supervisor must retain its identity when the remote route is added.
   a.routes([]); b.routes([])
   await trust(a, b); await trust(b, a)
-  const goalId = 'original-cross-host-goal'
-  await a.call('same-session', ['goal', 'create', '--goal', goalId, '--title', 'Ship the original result', '--description', 'Preserve the original human intent.',
-    '--status', 'in_progress', '--session', 'same-session', '--assignees', JSON.stringify(['same-session', 'independent-reviewer']), '--supervisor', 'same-session', '--risk', 'low', '--confirm', 'user', '--operation-id', 'create-original-goal'])
+  const goalId = (await a.call('same-session', ['goal', 'create', '--title', 'Ship the original result', '--description', 'Preserve the original human intent.',
+    '--status', 'in_progress', '--session', 'same-session', '--assignees', JSON.stringify(['same-session', 'independent-reviewer']), '--supervisor', 'same-session', '--risk', 'low', '--confirm', 'user', '--operation-id', 'create-original-goal'])).goal.id
   const alignment = { summary: 'Deliver and independently verify the original result.', criteria: [{ id: 'original-criterion', text: 'The original result is independently checked.' }], openQuestions: [] }
   const aligned = await a.call(null, ['goal', 'update', '--goal', goalId, '--alignment', JSON.stringify(alignment)])
   const alignmentRevision = aligned.goal.alignment.revision
   a.routes([{ hostId: 'worker-b', client: b.reader }])
-  const ambiguous = await a.cli(null, ['goal', 'create', '--goal', 'ambiguous-goal', '--title', 'An ambiguous relation is refused', '--session', 'same-session',
+  const ambiguous = await a.cli(null, ['goal', 'create', '--title', 'An ambiguous relation is refused', '--session', 'same-session',
     '--assignees', JSON.stringify(['same-session', 'independent-reviewer']), '--supervisor', 'same-session', '--risk', 'low', '--confirm', 'user', '--operation-id', 'ambiguous-create-operation'])
   expect(ambiguous.code).toBe(1); expect(ambiguous.stderr, ambiguous.stderr + ambiguous.stdout).toContain('AMBIGUOUS_AGENT_SESSION')
   const nodes = ['first', 'dependent'].map(id => ({ id, title: 'Deliver ' + id, outcome: 'Original ' + id + ' outcome', dependsOn: id === 'dependent' ? ['first'] : [],

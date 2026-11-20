@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { afterEach, expect, it, vi } from 'vitest'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -97,7 +98,7 @@ it('the actual Host, public CLI and encrypted Relay consume one handed-off recip
       'native-launcher-tab': createWorkbenchViewLayout('native-launcher-region') }, resources: {}
   } })
   const demands = openDemandStore({ root: join(stateDirectory, 'demands') })
-  await demands.create({ id: 'retained-goal', title: 'An original Goal with a saved dedicated discussion', description: 'Keep its original context.', status: 'todo' })
+  await seedStoredDemand(demands, { id: 'retained-goal', title: 'An original Goal with a saved dedicated discussion', description: 'Keep its original context.', status: 'todo' })
   const before = await demands.get('retained-goal')
   expect(before?.discussionOperationId).toBeUndefined(); expect(before?.creationOrigin).toBeUndefined()
   const binding = { schema: 'agentmux.goal-discussion-binding.v1' as const, tabId: 'retained-tab', regionId: 'retained-region',
@@ -137,7 +138,7 @@ it('the actual Host, public CLI and encrypted Relay consume one handed-off recip
   const after = (await demands.get('retained-goal'))!
   expect(after.discussionOperationId).toBeUndefined(); expect(after.creationOrigin).toBeUndefined()
   expect(after.participations).toHaveLength(1); expect(after.supervisorSessionId).toBeNull()
-  await demands.create({ id: 'retained-launcher-goal', title: 'An original Goal retaining its unfilled Launcher' })
+  await seedStoredDemand(demands, { id: 'retained-launcher-goal', title: 'An original Goal retaining its unfilled Launcher' })
   const launcherGoal = (await demands.get('retained-launcher-goal'))!
   const launcher = { schema: 'agentmux.goal-discussion-binding.v1' as const, tabId: 'retained-launcher-tab', regionId: 'retained-launcher-region', recipient: { kind: 'launcher' as const } }
   await handoffGoalDiscussion({ goalId: launcherGoal.id, binding: launcher }, ports)
@@ -165,7 +166,7 @@ it('the actual Host, public CLI and encrypted Relay consume one handed-off recip
   expect((await core.inspectAgentPromptSubmission({ kind: 'prompt', agentSessionId: filled.agentSessionId, expectedRun: filled.run, submissionId: 'original-filled-launcher-request' }))?.admission?.acknowledged).toBe(true)
   expect((await demands.get(launcherGoal.id))?.discussionOperationId).toBeUndefined()
   expect((await demands.get(launcherGoal.id))?.creationOrigin).toBeUndefined()
-  await demands.create({ id: 'native-launcher-goal', title: 'Retain native creation before the owned placement write' })
+  await seedStoredDemand(demands, { id: 'native-launcher-goal', title: 'Retain native creation before the owned placement write' })
   const nativeGoal = (await demands.get('native-launcher-goal'))!
   const nativeLauncher = { schema: 'agentmux.goal-discussion-binding.v1' as const, tabId: 'native-launcher-tab', regionId: 'native-launcher-region', recipient: { kind: 'launcher' as const } }
   await handoffGoalDiscussion({ goalId: nativeGoal.id, binding: nativeLauncher }, ports)
@@ -204,7 +205,7 @@ it('the actual Host, public CLI and encrypted Relay consume one handed-off recip
   expect(spatialAgentOpenRecord(unplaced.graph, nativeInput.createOperationId)).toBeNull()
   fact({ phase: 'native-created-before-owned-write', original: nativeLauncher, created: nativeCreated.session,
     creation: nativeCreated.creation, refusedBeforeWrite, actualNativeRuns: nativeRuns.map(run => run.runId) })
-  const freshGoal = await phone.call('goal.create', { goalId: 'new-canonical-goal', title: 'A new discussion uses the same owner', operationId: 'new-canonical-goal-create', risk: 'low', confirmation: 'user' })
+  const freshGoal = await phone.call('goal.create', { title: 'A new discussion uses the same owner', operationId: 'new-canonical-goal-create', risk: 'low', confirmation: 'user' })
   const discussed = await phone.call('goal.discuss', { goalId: freshGoal.goal.id, mode: 'grill', operationId: 'new-canonical-discussion' })
   const newBinding = readGoalDiscussionBinding((await spatial.read())!.graph, freshGoal.goal.id)!
   expect(newBinding).toMatchObject({ tabId: discussed.receipt.tabId, regionId: discussed.receipt.regionId,

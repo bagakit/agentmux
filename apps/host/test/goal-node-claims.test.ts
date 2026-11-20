@@ -9,10 +9,9 @@ afterEach(async () => { for (const release of cleanup.splice(0).reverse()) await
 
 it('saves one authorized claimant through the public CLI, reunites its original operation after restart and sends no work', async () => {
   const owner = await crossHostOwner(cleanup, 'node-claims', ['supervisor', 'worker-a', 'worker-b', 'reader'])
-  const goalId = 'node-claim-goal'
-  await owner.call('supervisor', ['goal', 'create', '--goal', goalId, '--title', 'Claim work', '--status', 'in_progress',
+  const goalId = (await owner.call('supervisor', ['goal', 'create', '--title', 'Claim work', '--status', 'in_progress',
     '--related', JSON.stringify(['supervisor', 'worker-a', 'worker-b', 'reader']), '--assignees', JSON.stringify(['supervisor', 'worker-a', 'worker-b']), '--supervisor', 'supervisor',
-    '--risk', 'low', '--confirm', 'user', '--operation-id', 'create-goal'])
+    '--risk', 'low', '--confirm', 'user', '--operation-id', 'create-goal'])).goal.id
   await owner.call(null, ['goal', 'update', '--goal', goalId, '--alignment', JSON.stringify({
     summary: 'Prove a claim', criteria: [{ id: 'working', text: 'One executor owns the result' }], openQuestions: []
   })])
@@ -42,10 +41,9 @@ it('saves one authorized claimant through the public CLI, reunites its original 
   const token = (await owner.call(null, ['goal', 'plan', '--goal', goalId])).planState.nodes[0].claimToken
   expect(token, 'a reversed check revision does not revive the original claim').not.toBe(initialToken)
   expect((await owner.cli('worker-a', claim('old-token', initialToken))).stderr).toContain('current claim token')
-  const otherGoalId = 'different-claim-goal'
-  await owner.call('supervisor', ['goal', 'create', '--goal', otherGoalId, '--title', 'Separate goal', '--status', 'in_progress',
+  const otherGoalId = (await owner.call('supervisor', ['goal', 'create', '--title', 'Separate goal', '--status', 'in_progress',
     '--assignees', JSON.stringify(['supervisor', 'worker-a']), '--supervisor', 'supervisor',
-    '--risk', 'low', '--confirm', 'user', '--operation-id', 'create-other-goal'])
+    '--risk', 'low', '--confirm', 'user', '--operation-id', 'create-other-goal'])).goal.id
   await owner.call(null, ['goal', 'update', '--goal', otherGoalId, '--alignment', JSON.stringify({
     summary: 'Prove a claim', criteria: [{ id: 'working', text: 'One executor owns the result' }], openQuestions: []
   })])
@@ -91,10 +89,9 @@ it('saves one authorized claimant through the public CLI, reunites its original 
 
 it('claims independent successors from one read and delivers the exact prerequisite through the public CLI', async () => {
   const owner = await crossHostOwner(cleanup, 'node-lineage', ['supervisor', 'worker-a', 'worker-b'])
-  const goalId = 'file-work'
-  await owner.call('supervisor', ['goal', 'create', '--goal', goalId, '--title', 'Verify a file deliverable', '--status', 'in_progress',
+  const goalId = (await owner.call('supervisor', ['goal', 'create', '--title', 'Verify a file deliverable', '--status', 'in_progress',
     '--assignees', JSON.stringify(['supervisor', 'worker-a', 'worker-b']), '--supervisor', 'supervisor',
-    '--risk', 'low', '--confirm', 'user', '--operation-id', 'create-file-work'])
+    '--risk', 'low', '--confirm', 'user', '--operation-id', 'create-file-work'])).goal.id
   const criterion = { id: 'file', text: 'The original file is independently checked' }
   await owner.call(null, ['goal', 'update', '--goal', goalId, '--alignment', JSON.stringify({
     summary: 'Deliver the file and follow-on notes', criteria: [criterion], openQuestions: [],
