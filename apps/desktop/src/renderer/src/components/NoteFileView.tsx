@@ -155,14 +155,8 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
     sourceIdentity, onOpenOriginal)
   const hasLinkedReferences = registered || read.status === 'valid' && read.note.kind === 'shared-block' && Boolean(resource)
   const cards = useMemo(() => read.status === 'valid' ? recallCardBlocks(read.note.content) : [], [read])
-  const footer = hasLinkedReferences || sourceCoverage || cards.length ? <footer className="note-reading-footer" aria-label="Note references and sources">
+  const footer = hasLinkedReferences || sourceCoverage ? <footer className="note-reading-footer" aria-label="Note references and sources">
     {read.status === 'valid' && hasLinkedReferences ? <NoteLinksPanel noteId={read.note.noteId} active={presentation.active} onOpen={openLinkedPage} onOpenFile={onOpenOriginal} selectedBlockId={restoredBlock?.blockId} /> : null}
-    {cards.length ? <section className="recall-knowledge-cards" aria-label="Knowledge cards">
-      <h2>Knowledge cards</h2>
-      {cards.map(({ blockId, card }) => <RecallKnowledgeCard kind="Reading point" key={blockId} title={card.title} actions={
-        <RecallCardLink onOpen={() => { void openRecallCardRecord(card).catch(error => setIssue(presentError(error))) }}>Open original message</RecallCardLink>
-      } />)}
-    </section> : null}
     {sourceCoverage}
   </footer> : null
   if (read.status === 'invalid') return <div className="note-file-view"><div className="note-invalid" role="status"><strong>Note source needs attention</strong>
@@ -188,6 +182,12 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
       } } : {})} />
     </div>
     {links.dialog}
+    {cards.length ? <section className="recall-knowledge-cards" aria-label="Knowledge cards">
+      <h2>Knowledge cards</h2>
+      {cards.map(({ blockId, card }) => <RecallKnowledgeCard kind="Reading point" key={blockId} title={card.title} actions={
+        <RecallCardLink onOpen={() => { void openRecallCardRecord(card).catch(error => setIssue(presentError(error))) }}>Open original message</RecallCardLink>
+      } />)}
+    </section> : null}
     {footer}
   </div></NoteFileContext.Provider></NoteFileLinkContext.Provider>
 }

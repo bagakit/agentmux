@@ -163,7 +163,7 @@ function SaveConversationLandmarkInner({ reference, routeHostId, active = true }
       <Pending state={state}/>
       {state.confirmed ? <p role="status">Saved. Return from Reading points.</p> : <Button type="submit" disabled={state.busy || !!state.intent || !name.trim()}>{state.busy ? 'Saving…' : 'Save reading point'}</Button>}
     </form>
-    {savedPoint ? <ConversationRecallCard card={{ id: savedPoint.id, title: savedPoint.name, reference: savedPoint.reference, routeHostId: savedPoint.routeHostId ?? catalog.hostId }} observed={null} /> : null}
+    {savedPoint ? <ConversationRecallCard card={{ id: savedPoint.id, title: savedPoint.name, reference: savedPoint.reference, routeHostId: savedPoint.routeHostId ?? catalog.hostId }} observed={null} inNamedRow /> : null}
   </LandmarkPopover>
 }
 export const renderConversationLandmarkAction = (reference: ConversationItemRef, active: boolean, routeHostId?: string) => <SaveConversationLandmark key={JSON.stringify([routeHostId,reference])} reference={reference} routeHostId={routeHostId} active={active}/>
@@ -222,7 +222,7 @@ function ConversationLandmarkListInner({ reference, reveal, active }: { referenc
         </form> : <><button type="button" className="conversation-landmark__destination" title={point.name} onClick={() => { void openPoint(point) }}><span>{point.name}</span><small>{point.reference.source.kind === 'native' ? `${point.reference.source.providerId} · Native` : 'Captured'}</small></button>
           <button type="button" className="icon-button" aria-label={`Rename ${point.name}`} disabled={state.busy || !!state.intent} onClick={() => setEdit({ id: point.id, name: point.name })}><EditIcon size={12}/></button>
           <button type="button" className="icon-button" aria-label={`Remove ${point.name}`} disabled={state.busy || !!state.intent} onClick={() => { void state.apply({ kind: 'remove', id: point.id }) }}><RemoveIcon size={12}/></button></>}
-      <ConversationRecallCard card={{ id: point.id, title: point.name, reference: point.reference, routeHostId: point.routeHostId ?? reference.hostId }} observed={graph} onSaved={refreshCardLinks}/>
+      <ConversationRecallCard card={{ id: point.id, title: point.name, reference: point.reference, routeHostId: point.routeHostId ?? reference.hostId }} observed={graph} onSaved={refreshCardLinks} inNamedRow/>
       </div>)}
       {graphIssue && state.page?.points.length ? <p role="status">{graphIssue}</p> : null}
     </div>
