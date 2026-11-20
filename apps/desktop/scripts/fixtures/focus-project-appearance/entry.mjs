@@ -94,7 +94,9 @@ useAppStore.setState({ config: { ...before.config, workspaces: [root, beta, ...b
 // component tests do. Missing directory observations are not confirmed projects.
 const arrangedBefore = useAppStore.getState()
 const topics = Object.values(arrangedBefore.scratchTopicSnapshots).flatMap(snapshot => snapshot.topics)
-const takeoverRecipients = new URL(window.location.href).searchParams.get('fixtureMode') === '--takeover-recipients' ? prepareTakeoverRecipients(arrangedBefore, topics) : null
+const fixtureMode = new URL(window.location.href).searchParams.get('fixtureMode')
+const savedInputs = fixtureMode === '--saved-inputs'
+const takeoverRecipients = fixtureMode === '--takeover-recipients' ? prepareTakeoverRecipients(arrangedBefore, topics) : null
 const arranged = takeoverRecipients?.arranged ?? arrangedBefore
 await save(arranged.config, await api.config.get())
 api.sessions.snapshot = async () => ({ sessions: arranged.sessions, timelines: arranged.timelines, recoveryCandidates: [] })
@@ -112,8 +114,36 @@ if (takeoverRecipients && !takeoverRecipients.accepted(agentRegionLocationBindin
 dispose()
 api.sessions.snapshot = snapshot
 useAppStore.setState(arranged, true)
+const savedInputArchiveCalls = []
+if (savedInputs) {
+  const archivedInput = (operationId, text) => {
+    const key = { kind: 'prompt', agentSessionId: 'retained-design', expectedRun: { runId: 'retained-original-run' }, submissionId: operationId }
+    const ref = { key, waitGeneration: 1 }
+    return { operationId, text, status: 'deferred', archived: true, awaitingExplicitSend: true,
+      directInputControl: { kind: 'agent', hostId: 'local', agentSessionId: 'retained-design', run: { runId: 'retained-original-run' } },
+      directInputBinding: { expectedRun: { runId: 'retained-original-run' } },
+      inputReceipt: { key, ref, status: 'terminal-confirmed', persistence: 'confirmed', observation: 'closed', admission: null,
+        control: { ref, state: 'dispatch-authorized', gateId: 'saved-input-gate', at: 2 } } }
+  }
+  const firstArchive = { ownerKey: 'retained-design', entry: archivedInput('archive-brush', 'Compare the brush texture with the approved direction, then keep this archived for the next design pass.') }
+  const earlierArchive = { ownerKey: 'retained-design', entry: archivedInput('archive-earlier-brush', 'Earlier brush studies are ready. Keep the original wording available without reopening or sending anything.') }
+  api.ui.readWorkbenchInputArchive = async query => {
+    savedInputArchiveCalls.push({ after: query.after ?? null })
+    return query.after ? { entries: [earlierArchive], nextCursor: null } : { entries: [firstArchive], nextCursor: 'earlier-saved-inputs' }
+  }
+  useAppStore.setState(state => ({
+    agentComposerDrafts: {
+      'original-region': 'Refine the launch composition with a quieter brush and a clearer reading rhythm.\n\nKeep the final copy calm, spacious and precise.',
+      'survey-region': '@/workspace/.agentmux/pasted/brush-reference.png\nCompare this reference with the latest saved direction and preserve the attachment.',
+      'orphan-saved-input': 'An unassociated draft remains available to copy. Its original location is unknown, so it must not offer navigation.'
+    },
+    agentSteerQueues: { ...state.agentSteerQueues, 'retained-design': [{ operationId: 'queued-brush-review', text: 'Queue the brush review for an explicit later send; reading it here must not deliver anything.', status: 'deferred', archived: true, awaitingExplicitSend: true,
+      directInputControl: { kind: 'agent', hostId: 'local', agentSessionId: 'retained-design', run: { runId: 'retained-original-run' } } }] }
+  }))
+}
 let preserved
 window.appearanceProof = {
+  savedInputArchiveCalls: () => savedInputArchiveCalls.slice(),
   settings: requestDesktopSettingsNavigation,
   selectionPreferences() { return useAppStore.getState().config.focus },
   remember() { preserved = useAppStore.getState() },

@@ -1,0 +1,90 @@
+const assert = require('node:assert/strict')
+
+module.exports = async function captureSavedInputs({ win, read, click, frame, until, settle, result }) {
+  const motion = value => win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value }] })
+  const stable = () => read(`(async()=>{const dialog=document.querySelector('.focus-local-inputs');if(dialog)await Promise.all(dialog.getAnimations({subtree:true}).map(animation=>animation.finished.catch(()=>{})));await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)))})()`)
+  const search = async value => {
+    await click('[aria-label="Search saved inputs"]')
+    await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', key: 'a', code: 'KeyA', modifiers: 4, commands: ['selectAll'] })
+    await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', key: 'a', code: 'KeyA' })
+    if (value) await win.webContents.debugger.sendCommand('Input.insertText', { text: value })
+    else for (const type of ['keyDown', 'keyUp']) await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type, key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8 })
+    await until('saved input query changed', () => read(`document.querySelector('[aria-label="Search saved inputs"]').value === ${JSON.stringify(value)}`))
+    await stable()
+  }
+  const reachable = async selector => {
+    await read(`document.querySelector(${JSON.stringify(selector)})?.scrollIntoView({block:'nearest'})`); await settle()
+    const visible = await read(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)return false;const r=e.getBoundingClientRect(),p=e.closest('.focus-local-inputs').getBoundingClientRect();return r.top>=p.top&&r.bottom<=p.bottom&&r.left>=p.left&&r.right<=p.right&&e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))})()`)
+    assert.equal(visible, true, 'Saved input control remains reachable ' + selector)
+  }
+  const queueOpen = open => read(`(()=>{const queue=document.querySelector('.focus-draft-queues');if(queue)queue.open=${open};return queue?.open})()`)
+
+  win.setContentSize(1440, 900); await read("window.appearanceProof.theme('dark')")
+  await click('[aria-label="Drafts"]')
+  await until('representative saved inputs loaded', () => read("document.querySelectorAll('.focus-draft-list__entry').length===3&&document.querySelector('.local-retained-inputs__coverage')?.textContent.includes('earlier inputs available')"))
+  await stable()
+  assert.equal(await read("document.querySelectorAll('.focus-draft-list__continue').length"), 2, 'Only exact draft locations offer Continue')
+  assert.equal(await read("document.querySelector('.focus-local-inputs').textContent.includes('@/workspace')"), false, 'Raw attachment paths stay out of the reading view')
+  await frame('dark-default-1440.png', 'Content-first drafts with quiet grouping, search and exact continuation', 'local')
+
+  await read("document.querySelectorAll('.focus-draft-list__entry')[1].querySelector('.local-input-record > summary').click()")
+  await until('saved input disclosure animation', () => read("document.querySelectorAll('.focus-draft-list__entry')[1].querySelector('.local-input-record').getAnimations({subtree:true}).some(animation=>animation.animationName==='local-input-expanded-enter')"))
+  const intermediate = await read(`(()=>{const row=document.querySelectorAll('.focus-draft-list__entry')[1].querySelector('.local-input-record'),animation=row.getAnimations({subtree:true}).find(item=>item.animationName==='local-input-expanded-enter');animation.pause();animation.currentTime=70;const expanded=row.querySelector('.local-input-record__expanded');return{opacity:Number(getComputedStyle(expanded).opacity),time:animation.currentTime,playState:animation.playState}})()`)
+  assert.equal(intermediate.playState, 'paused'); assert.ok(intermediate.opacity > 0 && intermediate.opacity < 1, 'Actual disclosure is captured between its endpoints')
+  result.savedInputMotion = intermediate
+  await frame('dark-motion-mid-1440.png', 'The actual saved-input disclosure at a paused intermediate frame', 'local')
+  await read("document.querySelectorAll('.focus-draft-list__entry')[1].querySelector('.local-input-record').getAnimations({subtree:true}).forEach(animation=>{if(animation.animationName==='local-input-expanded-enter')animation.finish()})")
+  await stable(); await click('.focus-draft-list__entry:nth-child(2) .local-input-record > summary')
+
+  await click('.focus-draft-list__entry:nth-child(1) .local-input-record > summary')
+  await click('.focus-draft-list__entry:nth-child(1) .local-input-record__diagnostics > summary')
+  await stable()
+  assert.ok(await read("document.querySelector('.local-input-record[open] textarea').value.includes('Keep the final copy calm, spacious and precise.')"), 'Expanded reading preserves the full original draft')
+  assert.ok(await read("document.querySelector('.local-input-record[open]').textContent.includes('Original key')"), 'Storage diagnostics retain the original key')
+  await frame('dark-expanded-1440.png', 'Full original prose with secondary storage and delivery diagnostics', 'local')
+  await click('.focus-draft-list__entry:nth-child(1) .local-input-record__diagnostics > summary')
+  await click('.focus-draft-list__entry:nth-child(1) .local-input-record > summary')
+
+  const callsBeforeSearch = await read('window.appearanceProof.savedInputArchiveCalls().length')
+  await search('brush')
+  assert.equal(await read('window.appearanceProof.savedInputArchiveCalls().length'), callsBeforeSearch, 'Filtering never reads another archive page')
+  assert.equal(await read("document.querySelector('.focus-draft-queues').open"), true, 'Search reveals matching queued and archived inputs')
+  assert.ok(await read("document.querySelector('.local-retained-inputs__coverage').textContent.includes('earlier inputs available')"), 'Partial loaded-range coverage stays explicit')
+  await frame('dark-search-1440.png', 'Loaded-range search with matching archived prose and explicit earlier-input coverage', 'local')
+
+  await search(''); await queueOpen(false)
+  win.setContentSize(420, 780); await read("window.appearanceProof.theme('light')"); await stable()
+  await reachable('[aria-label="Close saved inputs"]'); await reachable('.focus-draft-list__continue')
+  await frame('light-narrow-default-420.png', 'Narrow Saved Inputs with visible close, compact attachment labels and exact Continue actions', 'local')
+
+  await search('brush'); await reachable('.local-retained-inputs__pagination button')
+  await frame('light-narrow-pagination-420.png', 'Narrow loaded-range search keeps the explicit earlier-input action reachable', 'local')
+  const callsBeforeEarlier = await read('window.appearanceProof.savedInputArchiveCalls().length')
+  await click('.local-retained-inputs__pagination button')
+  await until('explicit earlier archive page', () => read(`window.appearanceProof.savedInputArchiveCalls().length===${callsBeforeEarlier + 1}&&document.querySelector('.focus-local-inputs').textContent.includes('Earlier brush studies')`))
+  assert.equal(await read("document.querySelector('.local-retained-inputs__pagination')"), null, 'No further pagination is offered after the final archive page')
+
+  win.setContentSize(1440, 900); await read("window.appearanceProof.theme('dark')"); await search(''); await queueOpen(true); await stable()
+  await frame('dark-queue-1440.png', 'Queued and archived inputs share one lightweight reading group', 'local')
+
+  await queueOpen(false); win.setContentSize(420, 780); await read("window.appearanceProof.theme('light')"); await motion('reduce')
+  await click('.focus-draft-list__entry:nth-child(1) .local-input-record > summary'); await stable()
+  assert.equal(await read("matchMedia('(prefers-reduced-motion: reduce)').matches"), true)
+  assert.equal(await read("document.querySelectorAll('.focus-draft-list__entry')[0].querySelector('.local-input-record').getAnimations({subtree:true}).length"), 0, 'Reduced motion removes the disclosure animation')
+  assert.equal(await read("(()=>{const body=document.querySelector('.local-input-record[open] textarea');return body.scrollHeight<=body.clientHeight+1})()"), true, 'Wrapped narrow prose fits the original-body reader without clipping')
+  await reachable('.local-input-record[open] .local-input-record__actions button')
+  await frame('light-narrow-reduced-expanded-420.png', 'Reduced-motion narrow reading keeps the original body and Copy action available', 'local')
+  const originalBody = await read("document.querySelector('.local-input-record[open] textarea').value")
+  const copiesBefore = await read('window.appearanceProof.copiedInputs.length')
+  await click('.local-input-record[open] .local-input-record__actions button')
+  await until('exact saved body copied', () => read(`window.appearanceProof.copiedInputs.length===${copiesBefore + 1}`))
+  assert.equal(await read('window.appearanceProof.copiedInputs.at(-1)'), originalBody)
+  await reachable('.focus-draft-list__continue')
+  await reachable('[aria-label="Close saved inputs"]'); await click('[aria-label="Close saved inputs"]')
+  await until('saved inputs closed', () => read("!document.querySelector('.focus-local-inputs')")); await motion('no-preference')
+
+  result.savedInputArchiveCalls = await read('window.appearanceProof.savedInputArchiveCalls()')
+  result.preservation = await read('window.appearanceProof.preservation()')
+  for (const name of ['sameTabs', 'sameLayouts', 'sameDrafts', 'sameQueues', 'sameRuns']) assert.equal(result.preservation[name], true, 'Reading preserves the original workface: ' + name)
+  assert.ok(Object.values(result.preservation.controls).every(value => value === 0), 'Reading and copying never control a Session or Run')
+}

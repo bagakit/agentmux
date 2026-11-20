@@ -9,6 +9,7 @@ const groupDiscussion = mode === '--group-discussion' || compactDiscussion || gr
 const neutralSurfaces = mode === '--neutral-surfaces'
 const savedInProject = mode === '--saved-in-project'
 const takeoverRecipients = mode === '--takeover-recipients'
+const savedInputs = mode === '--saved-inputs'
 app.setPath('userData', path.join(privateRoot, 'user-data')); app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 const result = { schema: 'agentmux.focus-project-appearance-actual.v1', passed: false, frames: [], scenarios: [], rendererConsole: [],
   boundary: 'Actual App/GlobalFocusSurface/project preference consumer. Private image transport uses original Main projectAppearance on controlled fixture files; PTY/Monaco painting and Runtime are isolated. No user navigation, Session control, restart or installation proof.' }
@@ -71,7 +72,7 @@ app.whenReady().then(async () => { try {
     await settle()
   }
   const key = async value => { for (const type of ['keyDown', 'keyUp']) await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type, key: value, code: value, windowsVirtualKeyCode: value === 'Escape' ? 27 : 9 }); await settle() }
-  await win.loadFile(html, takeoverRecipients ? { query: { fixtureMode: mode } } : undefined); win.webContents.debugger.attach('1.3')
+  await win.loadFile(html, takeoverRecipients || savedInputs ? { query: { fixtureMode: mode } } : undefined); win.webContents.debugger.attach('1.3')
   await until('actual App ready', () => read('Boolean(window.appearanceProof)'))
   await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true})
   await until('original workface',()=>read('!!document.querySelector("[data-owner-tab=original] textarea")'))
@@ -98,7 +99,7 @@ app.whenReady().then(async () => { try {
     result.passed = true
     return
   }
-  if (!containerOrder && !groupDiscussion && !neutralSurfaces && !selectionSettings) {
+  if (!savedInputs && !containerOrder && !groupDiscussion && !neutralSurfaces && !selectionSettings) {
   for (const theme of ['dark', 'light']) {
     await read(`window.appearanceProof.theme(${JSON.stringify(theme)})`)
     for (const width of [1440, 640, 360]) { win.setContentSize(width, 900); await ensureFocus();await read("document.querySelector('.focus-project-lanes__rows').scrollTop=0"); await frame(`${theme}-groups-${width}.png`, `${theme} full project grouping at ${width}`) }
@@ -135,7 +136,8 @@ app.whenReady().then(async () => { try {
     await read('window.appearanceProof.failSave(false)')
   }
   }
-  if(combinedPreferences) {
+  if(savedInputs) await require('./saved-inputs-scene.cjs')({win,read,click,frame,until,settle,result,key})
+  else if(combinedPreferences) {
     await require('./group-organization-scene.cjs')({win,read,click,frame,until,settle,result,key})
     win.setContentSize(1440,900); await read("window.appearanceProof.theme('dark')"); await settle()
     await require('./selection-settings-scene.cjs')({win,read,click,frame,until,settle,result,key})
@@ -145,7 +147,7 @@ app.whenReady().then(async () => { try {
   else if(compactDiscussion) await require('./compact-discussion-scene.cjs')({win,read,click,frame,until,settle,result,key})
   else if(groupDiscussion) await require('./discussion-scene.cjs')({win,read,click,frame,until,settle,result,key})
   else await require('./organization-scene.cjs')({ win, read, click, frame, until, settle, result, containerOrder })
-  if (!containerOrder && !groupDiscussion && !neutralSurfaces && !selectionSettings) await require('./reading-scene.cjs')({ win, read, click, frame, until, settle, result })
+  if (!savedInputs && !containerOrder && !groupDiscussion && !neutralSurfaces && !selectionSettings) await require('./reading-scene.cjs')({ win, read, click, frame, until, settle, result })
   result.final = await read('window.appearanceProof.facts()'); result.imageCalls = imageCalls
   assert.ok(imageCalls.some(call => call.workspaceId === 'alpha' && call.realImage), 'Original Main recognizer actually loaded a project image')
   result.passed = true

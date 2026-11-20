@@ -22,12 +22,13 @@ const containerOrder = requestedMode === '--container-order', compactDiscussion 
 const groupDiscussion = requestedMode === '--group-discussion' || compactDiscussion
 const savedInProject = requestedMode === '--saved-in-project'
 const takeoverRecipients = requestedMode === '--takeover-recipients'
-assert.ok(evidenceIndex >= 0 && evidencePath && (modes.length === 0 || modes.length === 1 && (containerOrder || groupDiscussion || neutralSurfaces || groupOrganization || selectionSettings || savedInProject || takeoverRecipients)), 'Use --evidence <private evidence directory> [--container-order|--group-discussion|--group-compact|--neutral-surfaces|--group-organization|--selection-settings|--focus-preferences|--saved-in-project|--takeover-recipients]')
+const savedInputs = requestedMode === '--saved-inputs'
+assert.ok(evidenceIndex >= 0 && evidencePath && (modes.length === 0 || modes.length === 1 && (containerOrder || groupDiscussion || neutralSurfaces || groupOrganization || selectionSettings || savedInProject || takeoverRecipients || savedInputs)), 'Use --evidence <private evidence directory> [--container-order|--group-discussion|--group-compact|--neutral-surfaces|--group-organization|--selection-settings|--focus-preferences|--saved-in-project|--takeover-recipients|--saved-inputs]')
 const evidence = resolve(evidencePath); await mkdir(evidence, { recursive: true })
 const privateRoot = await mkdtemp(join(tmpdir(), 'amux-project-appearance-')), fixture = join(desktop, 'scripts/fixtures/focus-project-appearance')
 const require = createRequire(join(desktop, 'package.json')), { build } = browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
 const hash = bytes => createHash('sha256').update(bytes).digest('hex'), inputs = new Map(), transformations = [], aliases = [], logs = []
-const receipt = { schema: 'agentmux.focus-project-appearance-capture.v1', capturedPass: false, captureOnly: true, aestheticReview: 'not-performed', mode: takeoverRecipients ? 'takeover-recipients' : savedInProject ? 'saved-in-project' : combinedPreferences ? 'focus-preferences' : selectionSettings ? 'selection-settings' : groupOrganization ? 'group-organization' : neutralSurfaces ? 'neutral-surfaces' : compactDiscussion ? 'group-compact' : groupDiscussion ? 'group-discussion' : containerOrder ? 'container-order' : 'appearance', userAppRunRuntimeControlled: false,
+const receipt = { schema: 'agentmux.focus-project-appearance-capture.v1', capturedPass: false, captureOnly: true, aestheticReview: 'not-performed', mode: savedInputs ? 'saved-inputs' : takeoverRecipients ? 'takeover-recipients' : savedInProject ? 'saved-in-project' : combinedPreferences ? 'focus-preferences' : selectionSettings ? 'selection-settings' : groupOrganization ? 'group-organization' : neutralSurfaces ? 'neutral-surfaces' : compactDiscussion ? 'group-compact' : groupDiscussion ? 'group-discussion' : containerOrder ? 'container-order' : 'appearance', userAppRunRuntimeControlled: false,
   boundary: 'Private Electron Renderer with actual App, GlobalFocusSurface, FocusFilters, Store and Workbench; maintained typed preview API. Only PTY/Agent and unused Monaco painting leaves isolated. No live Runtime, native Run proof, installation, user navigation or restart.' }
 try {
   assert.ok(!process.env.AGENTMUX_FOCUS_APPEARANCE_STYLE_MUTANT || ['oversized-menu', 'unbounded-menu', 'search-overflow', 'wrapped-footer', 'starved-search', 'preferences-scale', 'selected-frame'].includes(process.env.AGENTMUX_FOCUS_APPEARANCE_STYLE_MUTANT), 'Known actual style inverse')
@@ -149,7 +150,7 @@ try {
   receipt.process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), html, privateRoot, evidence, ...modes], { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 60000, onLine: line => logs.push(line) })
   receipt.actual = JSON.parse(await readFile(join(evidence, 'actual.json'), 'utf8')); assert.equal(receipt.process.exitCode, 0, receipt.actual.failure?.message); assert.equal(receipt.actual.passed, true)
   receipt.frames = await Promise.all(receipt.actual.frames.map(async frame => ({ ...frame, sha256: hash(await readFile(join(evidence, frame.file))) })))
-  assert.ok(receipt.frames.length >= (takeoverRecipients ? 14 : savedInProject ? 11 : combinedPreferences ? 14 : selectionSettings || groupOrganization ? 7 : neutralSurfaces ? process.env.AGENTMUX_FOCUS_APPEARANCE_STYLE_MUTANT === 'selected-frame' ? 1 : 4 : compactDiscussion ? 6 : groupDiscussion ? 8 : containerOrder ? 8 : 10), 'Actual complete App frames cover the selected bounded scenario')
+  assert.ok(receipt.frames.length >= (savedInputs ? 8 : takeoverRecipients ? 14 : savedInProject ? 11 : combinedPreferences ? 14 : selectionSettings || groupOrganization ? 7 : neutralSurfaces ? process.env.AGENTMUX_FOCUS_APPEARANCE_STYLE_MUTANT === 'selected-frame' ? 1 : 4 : compactDiscussion ? 6 : groupDiscussion ? 8 : containerOrder ? 8 : 10), 'Actual complete App frames cover the selected bounded scenario')
   receipt.sourceAfter = Object.fromEntries(await Promise.all([...inputs.keys()].map(async path => {
     try { return [relative(root, path), hash(await readFile(path))] }
     catch (error) { if (error.code === 'ENOENT') return [relative(root, path), null]; throw error }
@@ -175,7 +176,7 @@ try {
   }
   receipt.peripheralCaptureDrift = Object.entries(receipt.inputs).filter(([path, sha]) => !receipt.affectedInputs.includes(path) && receipt.sourceAfter[path] !== sha)
     .map(([path, before]) => ({ path, before, after: receipt.sourceAfter[path], gate: 'Peripheral provenance; outside shared affected input scope.' }))
-  if (takeoverRecipients) await writeFile(join(evidence, 'review.md'), '# Focus takeover destinations\n\n' +
+  if (takeoverRecipients || savedInputs) await writeFile(join(evidence, 'review.md'), '# ' + (savedInputs ? 'Saved inputs' : 'Focus takeover destinations') + '\n\n' +
     'Open each complete Electron screenshot in [the capture receipt](receipt.json).\n\n' +
     receipt.frames.map(frame => `- [${frame.file}](${frame.file}) · ${frame.label}`).join('\n') + '\n')
   receipt.capturedPass = true
