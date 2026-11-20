@@ -34,7 +34,8 @@ function host(role: 'frontend' | 'executor') {
   const api = {
     runtimeIdentity: vi.fn(() => ({ instanceId: runtime })),
     prepareAgentExecutionHelper: vi.fn(async (input: { createOperationId: string; workspacePath: string }) => ({ prepared: { ...input, launch: 'fixture' } })),
-    inspectPreparedTerminal: vi.fn(async () => started && !missing ? run() : null),
+    inspectPreparedTerminal: vi.fn(async (_prepared?: unknown, exact?: { runId: string }) =>
+      started && !missing && (!exact || exact.runId === runId) ? run() : null),
     createPreparedTerminal: vi.fn(async () => { started = true; if (lostStart) { lostStart = false; throw new Error('Start acknowledgement lost') }; return run() }),
     listHostExecutors: vi.fn(async () => ({ executors: [{ executorId: 'configured-executor', providerId: 'fixture-provider', configRevision: 'original-revision' }] })),
     readAgentSession: vi.fn(async (): Promise<AgentMuxAgentSession | null> => null),
@@ -115,6 +116,9 @@ describe('execution coordinator retained original pair', () => {
     await vi.waitFor(() => expect(f.read().bridge.pending?.sourceEndByte).toBe(oldEndByte))
     await expect(owner.coordinator.rejoin(f.input.bindingId)).rejects.toMatchObject({ code: 'EXECUTION_RUNTIME_CHANGED' })
     expect(f.executor.api.createPreparedTerminal).toHaveBeenCalledTimes(1)
+    const inspect = f.executor.api.inspectPreparedTerminal.getMockImplementation()!
+    f.executor.api.inspectPreparedTerminal.mockImplementation((launch, exact) => exact?.runId === original.executor.runId
+      ? Promise.resolve({ runId: exact.runId, state: 'interrupted' }) : inspect(launch, exact))
 
     const replay = f.frontend.api.readRunReplay.getMockImplementation()!
     f.frontend.api.readRunReplay.mockImplementation(async (...args) => {
@@ -124,12 +128,29 @@ describe('execution coordinator retained original pair', () => {
         nativeService: { owner: { type: 'serving' }, input: { phase: { type: 'open' }, completedInputBytes: acceptedInputBytes,
           activeConfirmedBytes: 0, unsettledCommands: 0, unsettledRequestBytes: 0 } } } }
     })
-    f.executor.api.createPreparedTerminal.mockImplementationOnce(async () => f.executor.installSuccessor())
+    const healthyCut = f.frontend.api.readRunReplay.getMockImplementation()!
+    f.frontend.api.readRunReplay.mockImplementationOnce(async (...args) => {
+      const result = await healthyCut(...args)
+      const run = result.run as typeof result.run & { nativeService: { input: { unsettledCommands: number } } }
+      run.nativeService.input.unsettledCommands = 1
+      return { ...result, run }
+    })
+    await expect(owner.coordinator.rejoin(f.input.bindingId, undefined, true)).rejects.toMatchObject({ code: 'EXECUTION_PROJECT_RECOVERY_UNCONFIRMED' })
+    expect(f.executor.api.createPreparedTerminal).toHaveBeenCalledTimes(1)
+    expect(f.read().projectRecoveries).toBeUndefined()
+
+    f.executor.api.createPreparedTerminal.mockImplementationOnce(async () => {
+      f.executor.installSuccessor()
+      throw new AgentMuxError('The successor Start acknowledgement was lost', 'CONTROL_CONNECTION_FAILED')
+    })
+    await expect(owner.coordinator.rejoin(f.input.bindingId, undefined, true)).rejects.toMatchObject({ code: 'CONTROL_CONNECTION_FAILED' })
+    const recoveryId = f.read().projectRecoveries[0].operationId
     const restored = await owner.coordinator.rejoin(f.input.bindingId, undefined, true)
     expect(restored).toMatchObject({ state: 'unavailable', diagnostic: { code: 'EXECUTION_PROJECT_INITIALIZATION_PENDING' }, helperStarts: {
       frontend: { runId: f.frontend.runId }, executor: { runId: 'executor-successor-run' },
     } })
     expect(f.read().projectRecoveries[0]).toMatchObject({ original: { executor: original.executor, pending: { sourceEndByte: oldEndByte } } })
+    expect(f.read().bridge.projectRecoveryId).toBe(recoveryId)
     expect(f.executor.api.writeTerminal).toHaveBeenCalledTimes(1)
     expect(f.frontend.api.createHostAgentWithDelivery).toHaveBeenCalledTimes(1)
     const journalReady = { type: 'ready', bindingId: f.input.bindingId, journalIdentity: 'original-project-journal' }
