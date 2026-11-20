@@ -62,3 +62,58 @@ You joined this AgentMux Group. No reply is needed. For Group commands, use amux
 ~~~text
 This is your private Mote thread {{groupId}}. Use the reply command supplied with the original addressed input.
 ~~~
+
+## group-input
+
+~~~text
+Ordinary output stays in your Thread. Publish an addressed reply via amux space mote group reply --help with these original identifiers. For an uncertain delivery, keep the same operationId and exact body. Share only material for this Group.
+
+Original Group source and reply operation: {{original}}{{quote}}
+~~~
+
+## private-input
+
+~~~text
+Reply in this private thread using amux space mote direct reply --help with these original identifiers. For an uncertain delivery, keep the same operationId and exact body.
+
+Original private source and reply operation: {{original}}{{quote}}
+~~~
+
+## thread-quote
+
+~~~text
+Original quoted conversation content: {{original}}
+~~~
+
+## idea
+
+~~~text
+Propose up to three useful ideas for the direction below. Explain how each relates to the original work, cite a source and give a concrete next step and a discussion starter.
+
+{{knowledge}}
+
+User direction:
+{{direction}}
+
+{{sources}}
+
+Continue a chosen idea through the original discussion.
+~~~
+
+## idea-knowledge
+
+~~~text
+Read relevant original evidence and distinguish it from suggestions. The current user direction and saved preferences guide this discussion. If existing authorization covers a useful knowledge update, keep it in the same original note and verify the saved version.
+~~~
+
+## idea-schedule
+
+~~~text
+Propose up to three useful ideas for this direction. Explain the reason, cite the original source and give a concrete next step.
+
+{{knowledge}}
+
+{{sources}}
+
+Use amux file --skill to read the current original files. The retained revisions record observations when the schedule was prepared. Report current gaps and continue a chosen idea through the original discussion.
+~~~

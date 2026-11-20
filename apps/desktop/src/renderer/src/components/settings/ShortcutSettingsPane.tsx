@@ -1,3 +1,4 @@
+import { getAmuxProtocolTemplate } from '@agentmux/core/amux-protocol'
 import { DocumentationNavigation } from '../documentation/DocumentationNavigation'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -33,9 +34,9 @@ const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
 type PromptScope = { kind: 'all' } | { kind: 'shared' } | { kind: 'provider'; providerId: string }
 
 const promptStartingPoints = [
-  { keyword: 'review', label: 'Review changes', body: 'Review the current changes. Find concrete bugs and regressions, cite the affected files and explain why each finding matters. State any gaps in verification.' },
-  { keyword: 'recap', label: 'Summarize findings', body: 'Summarize the findings so far: the conclusion, supporting evidence, open questions and the next useful step. Link the relevant files or sources.' },
-  { keyword: 'plan', label: 'Plan next steps', body: 'Read the current task and relevant project context. Propose a short sequence of concrete steps, with a clear way to verify the outcome of each step.' }
+  { keyword: 'review', label: 'Review changes', body: getAmuxProtocolTemplate('composer-task', 'review') },
+  { keyword: 'recap', label: 'Summarize findings', body: getAmuxProtocolTemplate('composer-task', 'summarize') },
+  { keyword: 'plan', label: 'Plan next steps', body: getAmuxProtocolTemplate('composer-task', 'plan') }
 ] as const
 
 const promptName = (prompt: ComposerShortcut) => prompt.label.trim() || prompt.keyword.trim() || 'Untitled prompt'

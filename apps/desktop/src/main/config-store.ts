@@ -1,3 +1,4 @@
+import { getAmuxProtocolTemplate } from '@agentmux/core/amux-protocol'
 import { parseFocusProjects } from '../shared/focus-project-preferences.js'
 import { readMeshLocation } from '../shared/mesh-map-locations.js'
 import { parseFocusZonePresentations } from '../shared/focus-zone-presentation.js'
@@ -312,13 +313,13 @@ const DEFAULT_COMPOSER_SHORTCUTS: ComposerShortcut[] = [
     id: 'review-changes',
     keyword: 'review-changes',
     label: 'Review changes',
-    body: 'Review the current changes. Identify concrete bugs and missing tests, cite the relevant files, and explain any remaining risks.'
+    body: getAmuxProtocolTemplate('composer-task', 'review')
   },
   {
     id: 'summarize-progress',
     keyword: 'summarize-progress',
     label: 'Summarize progress',
-    body: 'Summarize the goal, completed work, verification results, remaining work, and the next useful action. Distinguish confirmed facts from uncertainty.'
+    body: getAmuxProtocolTemplate('composer-task', 'summarize')
   }
 ]
 

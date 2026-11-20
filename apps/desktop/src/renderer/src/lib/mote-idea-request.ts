@@ -1,3 +1,4 @@
+import { getAmuxProtocolTemplate, renderAmuxProtocol } from '@agentmux/core/amux-protocol'
 import type { AgentSessionHistoryPage, ContinuousProgressTarget, FileDocument } from '@agentmux/core'
 import type { Demand } from '@agentmux/demand'
 import { MOTE_SOUL_PATH } from '@agentmux/host/mote-model'
@@ -21,16 +22,12 @@ export type MoteIdeaSources = {
 }
 const excerpt = (text: string, limit = 6000) => text.length <= limit ? text : text.slice(0, limit) + '\n[Excerpt; the rest remains in the original source.]'
 const sourceDocument = (document: FileDocument) => JSON.stringify({ path: document.path, revision: document.revision, excerpt: excerpt(document.content) })
-const ideaKnowledgeGuidance = 'This request permits discussion and read-only research. Carry forward earlier authorization to maintain this Mote’s original knowledge without another request for each useful update within that scope. Sending messages, purchasing, scheduling or external writes need separate authorization; this guidance grants no new authorization. Keep an idea a proposal until the user decides, not a confirmed preference, accepted Goal or completed result. Maintain relevant original notes and short index links with source, date and scope through current Files revision-checked save and readback; preserve unrelated notes, user edits and explicit feedback. Do not rewrite SOUL or BEHAVIOR from a suggestion or start an extra Agent, model round or background reflection for this request.'
+const ideaKnowledgeGuidance = getAmuxProtocolTemplate('mote-task', 'idea-knowledge')
 
 /** A request to a real Agent, never an authored suggestion or completed result. */
 export function moteIdeaRequestText(sources: MoteIdeaSources): string {
   const { scope, discussion } = sources
-  return [
-    'Help me find up to three worthwhile ideas for the direction below. Explain why each relates to my current work, cite the actual source and its scope, and give one concrete next step and a discussion starter. Distinguish evidence from suggestions and say what remains unknown.',
-    ideaKnowledgeGuidance,
-    'Read relevant original sources when needed. Keep my current directions and explicit preferences first. Do not claim an idea was generated, saved or completed before that actually happens.',
-    'User direction:\n' + sources.direction.trim(),
+  const context = [
     'Original Mote resource: ' + JSON.stringify({ hostId: scope.workspace.hostId, workspaceId: scope.workspace.id, workspacePath: scope.workspace.path, moteId: scope.topic.id, directory: scope.rootPath }),
     'Saved SOUL: ' + (sources.soul ? sourceDocument(sources.soul) : 'unconfirmed; do not invent saved preferences.'),
     'Explicitly selected saved material: ' + (sources.material ? sourceDocument(sources.material) : 'none confirmed for this request.'),
@@ -40,8 +37,8 @@ export function moteIdeaRequestText(sources: MoteIdeaSources): string {
       'Original linked Goals (Renderer Session association, up to 3): ' + JSON.stringify(discussion.goals.map(goal => ({ id: goal.id, title: goal.title, description: excerpt(goal.description, 1000), status: goal.status, updatedAt: goal.updatedAt })))
     ] : ['Discussion history and linked Goals: not included.']),
     'Unknown or omitted context: ' + (sources.unknown.length ? sources.unknown.join(' ') : 'No additional observation failure in these reads. Source statements still require judgment.'),
-    'If I choose an idea, help continue it in the original discussion. Preserve the original conversation.'
   ].join('\n\n')
+  return renderAmuxProtocol('mote-task', 'idea', { knowledge: ideaKnowledgeGuidance, direction: sources.direction.trim(), sources: context })
 }
 
 /** One read-only source preparation for both manual questions and explicit calendar opt-in. */
@@ -121,8 +118,6 @@ export async function prepareMoteIdeaSchedule(scope: MoteWorkfaceScope, referenc
   const prepared = await readMoteIdeaSources(scope, reference, input, material, stillCurrent, true)
   if (!prepared.target) throw new Error('The original arrangement target is unconfirmed. Your direction is kept.')
   const context = [
-    'For this direction, propose up to three useful ideas. Explain the reason, cite the original source and give one concrete next step. Facts and suggestions must be distinct; a proposal is not accepted work or a completed result.',
-    ideaKnowledgeGuidance,
     'Original Mote: ' + scope.topic.id + '\nSource Host: ' + scope.workspace.hostId + '\nSource Workspace: ' + scope.workspace.id + '\nSource Workspace path: ' + scope.workspace.path + '\nOriginal Mote folder: ' + scope.rootPath,
     'Source observations made while preparing this arrangement (not a claim that an Agent used them):',
     ...prepared.observations.map(({ path, observation }) => {
@@ -139,11 +134,9 @@ export async function prepareMoteIdeaSchedule(scope: MoteWorkfaceScope, referenc
         .map(item => item.id + ' (' + item.kind + '): ' + excerpt(item.contentParts.filter(part => part.kind === 'text').map(part => part.text).join('\n'), 1000)).join('\n'),
       'Original linked Goals observed at preparation:\n' + prepared.sources.discussion.goals.map(goal => goal.id + ': ' + goal.title + ' — ' + goal.status + '\n' + excerpt(goal.description, 1000)).join('\n')
     ] : ['Discussion history and linked Goals are not included.']),
-    'For each delivered request, read the current relevant original files using the original file.read / file.ls capability. These revisions and conversation/Goal observations are last-confirmed preparation facts, not current truth or a required future revision. Report failed or unknown reads; do not substitute a neighboring Mote, unseen conversation or invented source.',
     ...(prepared.sources.unknown.length ? ['Unconfirmed observations: ' + prepared.sources.unknown.join(' ')] : []),
-    'Current human instructions take priority. Saved SOUL changes apply to a new Session; do not claim an existing Session was hot-updated. Continue a chosen idea through the original discussion/Goal.'
   ].join('\n\n')
-  return { target: prepared.target, message: input.direction, frozenContext: context, sources: prepared.observations }
+  return { target: prepared.target, message: input.direction, frozenContext: renderAmuxProtocol('mote-task', 'idea-schedule', { knowledge: ideaKnowledgeGuidance, sources: context }), sources: prepared.observations }
 }
 
 export function moteIdeaFeedbackText(material: FileDocument, feedback: MoteIdeaFeedback): string {
