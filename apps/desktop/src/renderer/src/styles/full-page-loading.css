@@ -33,11 +33,11 @@
 .full-page-loading__detail { max-width: 60ch; margin: 0; color: var(--text-2); font-size: var(--fs-prose); line-height: 1.65; overflow-wrap: anywhere; }
 .full-page-loading .surface-state__description { font-size: var(--fs-prose); }
 .startup-activity { width: min(390px, 100%); margin-top: var(--sp-5); }
-.startup-activity__heading { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); margin-bottom: var(--sp-5); color: var(--text-2); font: var(--fs-micro)/1.4 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+.startup-activity__heading { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); margin-bottom: var(--sp-5); color: var(--text-2); font: var(--fs-micro)/1.4 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; animation: full-page-loading-item-arrive var(--dur-exit) var(--ease-enter) both; animation-delay: calc(var(--dur-fast) * .65); }
 .startup-activity__heading > span:last-child { letter-spacing: normal; text-align: right; text-transform: none; }
-.startup-activity__group { margin-top: var(--sp-5); }
+.startup-activity__group { margin-top: var(--sp-5); animation: full-page-loading-item-arrive var(--dur-exit) var(--ease-enter) both; animation-delay: calc(var(--dur-fast) * (.85 + var(--startup-order, 0) * .5)); }
 .startup-activity__line { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; align-items: center; gap: var(--sp-3); }
-.startup-activity__marker { width: 6px; height: 6px; margin-inline: 4px; border-radius: 50%; background: var(--green-text); box-shadow: 0 0 0 4px color-mix(in srgb, var(--green) 9%, transparent); }
+.startup-activity__marker { width: 6px; height: 6px; margin-inline: 4px; border-radius: 50%; background: var(--green-text); box-shadow: 0 0 0 4px color-mix(in srgb, var(--green) 9%, transparent); animation: startup-activity-breathe var(--dur-breath) ease-in-out infinite; }
 .startup-activity__line > h3 { margin: 0; color: var(--text); font-size: var(--fs-body); font-weight: 500; line-height: 1.5; overflow-wrap: anywhere; }
 .startup-activity__count { color: var(--text-2); font: var(--fs-meta)/1.4 var(--font-mono); text-align: right; white-space: nowrap; }
 .startup-activity__message { margin: var(--sp-2) 0 0 26px; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.6; overflow-wrap: anywhere; }
@@ -45,6 +45,7 @@
 .full-page-loading--app .surface-state__details > summary { color: var(--text-2); font-size: var(--fs-body); }
 .startup-endpoints { width: min(390px, 100%); margin-top: var(--sp-3); }
 .startup-endpoint > summary { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; align-items: center; gap: var(--sp-3); padding: var(--sp-3) 0; color: var(--text-2); cursor: pointer; list-style: none; }
+.full-page-loading--app .surface-state__details[open] .startup-endpoint > summary { animation: full-page-loading-detail-arrive var(--dur-exit) var(--ease-enter) both; animation-delay: calc(var(--dur-fast) * var(--startup-order, 0) * .25); }
 .startup-endpoint > summary::-webkit-details-marker { display: none; }
 .startup-endpoint > summary:focus-visible { border-radius: var(--radius-sm); outline: 2px solid var(--focus-line); outline-offset: 2px; }
 .startup-endpoint__chevron { color: var(--text-3); transition: transform var(--dur-fast) var(--ease-enter); }
@@ -52,7 +53,8 @@
 .startup-endpoint__host { color: var(--text); font-size: var(--fs-body); font-weight: 500; overflow-wrap: anywhere; }
 .startup-endpoint__count { color: var(--text-3); font-size: var(--fs-meta); text-align: right; white-space: nowrap; }
 .startup-endpoint__activities { margin: 0 0 var(--sp-5) 26px; }
-.startup-endpoint__activity + .startup-endpoint__activity { margin-top: var(--sp-5); }
+.startup-endpoint[open] .startup-endpoint__activity { animation: full-page-loading-detail-arrive var(--dur-exit) var(--ease-enter) both; }
+.startup-endpoint__activity + .startup-endpoint__activity { margin-top: var(--sp-5); animation-delay: calc(var(--dur-fast) * .35); }
 .startup-endpoint__activity > h4 { margin: 0; color: var(--text); font-size: var(--fs-body); font-weight: 500; line-height: 1.5; }
 .startup-endpoint__message, .startup-endpoint__recovery { margin: var(--sp-2) 0 0; font-size: var(--fs-meta); line-height: 1.6; overflow-wrap: anywhere; }
 .startup-endpoint__message { color: var(--text-2); }
@@ -63,6 +65,12 @@
 .full-page-loading--failed .full-page-loading__art { opacity: .48; }
 .full-page-loading--parked .full-page-loading__art { opacity: .58; }
 .full-page-loading--app .full-page-loading__stage { animation: full-page-loading-arrive var(--dur-enter) var(--ease-enter) both; }
+.full-page-loading--app .full-page-loading__brand { animation: full-page-loading-brand-arrive var(--dur-indicator) var(--ease-enter) both; }
+.full-page-loading--loading .full-page-loading__art { animation: full-page-loading-art-arrive var(--dur-indicator) var(--ease-enter) both; }
+.full-page-loading--loading .full-page-loading__light { animation: full-page-loading-light-arrive var(--dur-sweep) var(--ease-enter) both; }
+.full-page-loading--app .surface-state__activity { animation: full-page-loading-item-arrive var(--dur-exit) var(--ease-enter) both; }
+.full-page-loading--app .surface-state__heading { animation: full-page-loading-item-arrive var(--dur-exit) var(--ease-enter) both; animation-delay: calc(var(--dur-fast) * .25); }
+.full-page-loading--app .full-page-loading__detail { animation: full-page-loading-item-arrive var(--dur-exit) var(--ease-enter) both; animation-delay: calc(var(--dur-fast) * .5); }
 .full-page-loading--region { --recovery-accent: var(--green); background: var(--surface-0);  }
 /* A load that finishes during the hold never shows; recovery, parked and failed surfaces carry facts and appear at once. */
 .full-page-loading--region[data-loading-entry='loading'] { animation: full-page-loading-enter var(--dur-indicator) ease-out calc(var(--dur-fast) * 2) backwards; }
@@ -89,6 +97,12 @@
 .session-frontend-diagnostic pre { max-height: 12em; overflow: auto; margin: var(--sp-3) 0 0; padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-2); font: var(--fs-meta)/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 @keyframes full-page-loading-arrive { from { opacity: 0; translate: 0 4px; } to { opacity: 1; translate: 0 0; } }
 @keyframes full-page-loading-enter { from { opacity: 0; } }
+@keyframes full-page-loading-brand-arrive { from { opacity: 0; transform: translateY(-6px); filter: blur(5px); } to { opacity: 1; transform: translateY(0); filter: blur(0); } }
+@keyframes full-page-loading-art-arrive { from { opacity: 0; transform: translate(var(--startup-offset-x), calc(var(--startup-offset-y) + 10px)) scale(1.055); } to { opacity: .92; transform: translate(var(--startup-offset-x), var(--startup-offset-y)) scale(1.02); } }
+@keyframes full-page-loading-light-arrive { from { opacity: 0; } to { opacity: 1; } }
+@keyframes full-page-loading-item-arrive { from { opacity: 0; transform: translateY(10px); filter: blur(4px); } to { opacity: 1; transform: translateY(0); filter: blur(0); } }
+@keyframes full-page-loading-detail-arrive { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes startup-activity-breathe { 0%, 100% { opacity: .65; box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 6%, transparent); } 50% { opacity: 1; box-shadow: 0 0 0 6px color-mix(in srgb, var(--green) 14%, transparent); } }
 @container (max-width: 440px) {
   .full-page-loading--app > .surface-state > .surface-state__content { width: 100%; margin: auto 0 0; }
   .full-page-loading--app .surface-state__title { font-size: 36px; }
@@ -102,6 +116,10 @@
   .full-page-loading--region[data-loading-entry='loading'] { animation-duration: 0s; }
   .full-page-loading__art { transform: none; transition: none; }
   .full-page-loading__light { background: none; }
+  .full-page-loading--app .full-page-loading__brand, .full-page-loading--loading .full-page-loading__art, .full-page-loading--loading .full-page-loading__light,
+  .full-page-loading--app .surface-state__activity, .full-page-loading--app .surface-state__heading, .full-page-loading--app .full-page-loading__detail,
+  .full-page-loading--app .startup-activity__heading, .full-page-loading--app .startup-activity__group, .full-page-loading--app .startup-activity__marker,
+  .full-page-loading--app .surface-state__details[open] .startup-endpoint > summary, .full-page-loading--app .startup-endpoint[open] .startup-endpoint__activity { animation: none; }
   .startup-endpoint__chevron { transition: none; }
 }
 /* A colophon names the realm of the art shown, like the signature line under a print. It's static

@@ -2,6 +2,7 @@ import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { startupProgressDetail, type StartupProgress } from '../lib/startup-progress'
 import type { RuntimeEndpointWarning } from '../../../shared/contracts'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import type { CSSProperties } from 'react'
 
 const DisclosureIcon = semanticIconComponent('navigation.disclosure')
 
@@ -27,7 +28,7 @@ function StartupActivity({ warnings }: { warnings: readonly RuntimeEndpointWarni
   const endpointCount = new Set(warnings.map(warning => warning.hostId)).size
   return <div className="startup-activity" aria-label="Runtime startup observations">
     <div className="startup-activity__heading"><span>Current activity</span><span>{endpointCount} {endpointCount === 1 ? 'endpoint' : 'endpoints'} · {activities.length} {activities.length === 1 ? 'step' : 'steps'}</span></div>
-    {activities.map(group => <section className="startup-activity__group" key={group.step}>
+    {activities.map((group, index) => <section className="startup-activity__group" key={group.step} style={{ '--startup-order': index } as CSSProperties}>
       <div className="startup-activity__line">
         <span className="startup-activity__marker" aria-hidden="true" />
         <h3>{group.step}</h3>
@@ -49,7 +50,7 @@ function StartupEndpointDetails({ warnings }: { warnings: readonly RuntimeEndpoi
     endpoint.push(warning)
   }
   return <div className="startup-endpoints" aria-label="Endpoint connection details">
-    {[...endpoints].map(([hostId, endpointWarnings]) => <details className="startup-endpoint" key={hostId}>
+    {[...endpoints].map(([hostId, endpointWarnings], index) => <details className="startup-endpoint" key={hostId} style={{ '--startup-order': index } as CSSProperties}>
       <summary>
         <DisclosureIcon className="startup-endpoint__chevron" size={12} aria-hidden="true" />
         <span className="startup-endpoint__host">{hostId}</span>
