@@ -1,7 +1,6 @@
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { startupProgressDetail, type StartupProgress } from '../lib/startup-progress'
 import type { RuntimeEndpointWarning } from '../../../shared/contracts'
-import { Fragment } from 'react'
 
 type StartupActivityGroup = {
   step: string
@@ -27,12 +26,41 @@ function StartupActivity({ warnings }: { warnings: readonly RuntimeEndpointWarni
     <div className="startup-activity__heading"><span>Current activity</span><span>{endpointCount} {endpointCount === 1 ? 'endpoint' : 'endpoints'} · {activities.length} {activities.length === 1 ? 'step' : 'steps'}</span></div>
     {activities.map(group => <section className="startup-activity__group" key={group.step}>
       <div className="startup-activity__line">
-        <span className="startup-activity__marker" aria-hidden="true">›</span>
+        <span className="startup-activity__marker" aria-hidden="true" />
         <h3>{group.step}</h3>
         <span className="startup-activity__count">{group.hostIds.size} {group.hostIds.size === 1 ? 'endpoint' : 'endpoints'}</span>
       </div>
       {group.messages.map(message => <p className="startup-activity__message" key={message}>{message}</p>)}
     </section>)}
+  </div>
+}
+
+function StartupEndpointDetails({ warnings }: { warnings: readonly RuntimeEndpointWarning[] }) {
+  const endpoints = new Map<string, RuntimeEndpointWarning[]>()
+  for (const warning of warnings) {
+    let endpoint = endpoints.get(warning.hostId)
+    if (!endpoint) {
+      endpoint = []
+      endpoints.set(warning.hostId, endpoint)
+    }
+    endpoint.push(warning)
+  }
+  return <div className="startup-endpoints" aria-label="Endpoint connection details">
+    {[...endpoints].map(([hostId, endpointWarnings]) => <details className="startup-endpoint" key={hostId}>
+      <summary>
+        <span className="startup-endpoint__chevron" aria-hidden="true">›</span>
+        <span className="startup-endpoint__host">{hostId}</span>
+        <span className="startup-endpoint__count">{endpointWarnings.length} {endpointWarnings.length === 1 ? 'activity' : 'activities'}</span>
+      </summary>
+      <div className="startup-endpoint__activities">
+        {endpointWarnings.map(warning => <section className="startup-endpoint__activity" key={JSON.stringify([warning.hostId, warning.step])}>
+          <h4>{warning.step}</h4>
+          <p className="startup-endpoint__message">{warning.message}</p>
+          <p className="startup-endpoint__recovery">{warning.recovery}</p>
+          <span className="startup-endpoint__code">{warning.code}</span>
+        </section>)}
+      </div>
+    </details>)}
   </div>
 }
 
@@ -45,9 +73,5 @@ export function StartupLoadingSurface({ progress, runtimeEndpointWarnings = [], 
   return <FullPageLoadingSurface scope="app" phase="loading" eyebrow="AgentMux startup"
     title="Restoring your workspace" detail={startupProgressDetail(progress) + detailSuffix}
     supplement={runtimeEndpointWarnings.length ? <StartupActivity warnings={runtimeEndpointWarnings} /> : null}
-    {...(runtimeEndpointWarnings.length ? { details: { summary: 'Connection details', content: <dl>
-      {runtimeEndpointWarnings.map(warning => <Fragment key={JSON.stringify([warning.hostId, warning.step])}>
-        <dt>{warning.hostId}: {warning.step}</dt><dd>{warning.code}<br />{warning.recovery}</dd>
-      </Fragment>)}
-    </dl> } } : {})} />
+    {...(runtimeEndpointWarnings.length ? { details: { summary: 'Connection details', content: <StartupEndpointDetails warnings={runtimeEndpointWarnings} /> } } : {})} />
 }
