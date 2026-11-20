@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest'
 import { AGENTMUX_SESSION_NAMING_ENTRY } from '../src/agent-messaging-guidance.js'
 import { AGENTMUX_SESSION_NAMING_ENTRY as publicEntry } from '../src/index.js'
-import { guideSharedRuntime, guideSharedSessionNaming } from '../src/generated/agentmux-guides.js'
+import { guideSharedSessionNaming } from '../src/generated/agentmux-guides.js'
 import { composeAgentLaunchPrompt, composeAgentResumePrompt } from '../src/agent-outbound-message.js'
 import { agentMuxModuleSkill } from '../src/agentmux-cli-module-skills.js'
 
@@ -11,7 +11,6 @@ it('exports the original short discovery rule from one generated shared owner', 
   expect(AGENTMUX_SESSION_NAMING_ENTRY).toBe(originalRule)
   expect(publicEntry).toBe(AGENTMUX_SESSION_NAMING_ENTRY)
   expect(guideSharedSessionNaming.text).toBe(originalRule)
-  expect(guideSharedRuntime.text.split(originalRule)).toHaveLength(2)
   expect(AGENTMUX_SESSION_NAMING_ENTRY).not.toContain('--name-revision')
   expect(AGENTMUX_SESSION_NAMING_ENTRY).not.toContain(agentMuxModuleSkill('name')!)
 })

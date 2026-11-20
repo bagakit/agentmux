@@ -4,14 +4,15 @@ import { beforeEach, expect, it, vi } from 'vitest'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 vi.mock('../src/renderer/src/components/settings/ToolkitScriptEditor', () => ({ default: () => <textarea /> }))
 // Extend only the public Core contribution; the catalog consumer and reader remain real.
-vi.mock('@agentmux/core/agent-message-render', async importOriginal => {
-  const original = await importOriginal<typeof import('@agentmux/core/agent-message-render')>()
-  const entry = { id: 'catalog-extension-probe', title: 'New Core contribution', description: 'A catalog-extension-probe declaration.', form: 'marker', examples: [{ label: 'Added format', wire: '<amux:catalog-probe state="sample" />' }] } as unknown as import('@agentmux/core/agent-message-render').AgentMuxProtocolCatalogEntry
+vi.mock('@agentmux/core/amux-protocol', async importOriginal => {
+  const original = await importOriginal<typeof import('@agentmux/core/amux-protocol')>()
+  const entry = { id: 'catalog-extension-probe', title: 'New Core contribution', description: 'A catalog-extension-probe declaration.', form: 'marker', templates: [{ name: 'wire', text: '<amux:catalog-probe state="{{state}}" />' }], examples: [{ label: 'Added format', wire: '<amux:catalog-probe state="sample" />' }] } as unknown as import('@agentmux/core/amux-protocol').AgentMuxProtocolCatalogEntry
   return { ...original, AGENTMUX_PROTOCOL_CATALOG: [...original.AGENTMUX_PROTOCOL_CATALOG, entry] }
 })
-import { AGENTMUX_PROTOCOL_CATALOG } from '@agentmux/core/agent-message-render'
-import { AGENTMUX_PROTOCOL_CATALOG as generatedGuideCatalog } from '../../../packages/core/src/agent-message-render.js'
+import { AGENTMUX_PROTOCOL_CATALOG } from '@agentmux/core/amux-protocol'
+import { AGENTMUX_PROTOCOL_CATALOG as generatedGuideCatalog } from '../../../packages/core/src/amux-protocol.js'
 import { agentMuxModuleSkill } from '../../../packages/core/src/agentmux-cli-module-skills'
+import { focusGroupTaskPrompt } from '../src/renderer/src/lib/focus-group-task'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { settingsCatalog, settingsModules, settingsNavGroups } from '../src/renderer/src/components/settings/settings-modules'
 import { WindowUtilityBar } from '../src/renderer/src/components/WindowUtilityBar'
@@ -28,13 +29,31 @@ async function toggle(id: string, open: boolean) { const row = connected<HTMLDet
 async function mount() { await dom.render(<DocumentationTestOwner><WindowUtilityBar /></DocumentationTestOwner>); await dom.click('[data-documentation-open]'); connected('.documentation-dialog') }
 async function search(value: string) { const input = connected<HTMLInputElement>('[aria-label="Search amux Protocols"]'); await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })) }) }
 
-it('removes the protocol preference from every actual Settings catalog consumer', async () => {
-  expect(AGENTMUX_PROTOCOL_CATALOG.length).toBeGreaterThan(1)
+it('opens the App-owned protocol directory from Settings Prompts without changing the active settings pane', async () => {
+  await dom.render(<DocumentationTestOwner><SettingsPanel initialSection="prompts" onClose={() => {}} /></DocumentationTestOwner>)
+  const entry = [...connected('[data-settings-pane="prompts"]').querySelectorAll<HTMLButtonElement>('button')]
+    .find(button => button.textContent === 'amux Protocols')
+  expect(entry).toBeDefined()
+  await act(async () => { entry?.focus(); entry?.click() })
+  expect(connected('.documentation-dialog h2').textContent).toBe('amux Protocols')
+  await act(async () => connected<HTMLButtonElement>('[aria-label="Close documentation"]').click())
+  expect(document.activeElement).toBe(entry)
+  expect(connected('[data-settings-pane="prompts"]').hidden).toBe(false)
   expect(settingsModules.map(module => module.id as string)).not.toContain('amux-protocols')
   expect(settingsNavGroups('').flatMap(group => group.items.map(module => module.id as string))).not.toContain('amux-protocols')
   expect(settingsCatalog.searchResults('catalog-extension-probe')).toEqual([])
-  await dom.render(<SettingsPanel onClose={() => {}} />)
-  expect(dom.container.querySelector('[data-settings-section="amux-protocols"], [data-settings-target="amux-protocols"]')).toBeNull()
+})
+
+it('shows the exact Focus prompt used by the real task producer and opens its editable template on demand', async () => {
+  await mount()
+  await search('Focus group tasks')
+  const row = await toggle('focus-task', true)
+  expect(row.querySelector('[data-protocol-example] pre')?.textContent)
+    .toBe(focusGroupTaskPrompt('organize', { kind: 'new-agent', targetKey: 'original-project' }))
+  expect(row.querySelector('.amux-protocols__templates pre')).toBeNull()
+  const templates = row.querySelector<HTMLDetailsElement>('.amux-protocols__templates')!
+  await act(async () => { templates.open = true; templates.dispatchEvent(new Event('toggle')) })
+  expect([...templates.querySelectorAll('pre')].some(node => node.textContent?.includes('{{perspective}}'))).toBe(true)
 })
 
 it('document-local search discovers a new Core contribution and opens its real original-wire/card comparison', async () => {
@@ -55,7 +74,7 @@ it('document-local search discovers a new Core contribution and opens its real o
   expect(copy).toHaveBeenCalledWith('<amux:catalog-probe state="sample" />')
   await search('nothing matches this original catalog')
   expect(document.querySelectorAll('[data-protocol-entry], [data-protocol-example]')).toHaveLength(0)
-  expect(connected('.amux-protocols__empty').textContent).toContain('No formats match')
+  expect(connected('.amux-protocols__empty').textContent).toContain('No entries match')
   await act(async () => connected<HTMLButtonElement>('[aria-label="Clear documentation search"]').click())
   expect(document.querySelectorAll('[data-protocol-entry]')).toHaveLength(AGENTMUX_PROTOCOL_CATALOG.length)
   expect(document.activeElement).toBe(connected('[aria-label="Search amux Protocols"]'))
@@ -68,8 +87,8 @@ it('all catalog examples demand-mount the original reader, and closing the docum
   for (const entry of AGENTMUX_PROTOCOL_CATALOG) {
     const row = await toggle(entry.id, true)
     expect(row.querySelectorAll('[data-protocol-example]')).toHaveLength(entry.examples.length)
-    expect(row.querySelectorAll('.log-turn')).toHaveLength(entry.examples.length)
-    expect([...row.querySelectorAll('.amux-protocols__wire pre')].map(node => node.textContent)).toEqual(entry.examples.map(example => example.wire))
+    expect(row.querySelectorAll('.log-turn')).toHaveLength(entry.form === 'prompt' ? 0 : entry.examples.length)
+    expect([...row.querySelectorAll('.amux-protocols__wire pre, .amux-protocols__source pre')].map(node => node.textContent)).toEqual(entry.examples.map(example => example.wire))
   }
   expect(connected('[data-protocol-example="link"]').querySelector('[data-object-link-open], .inline-agent-link')).toBeNull()
   await act(async () => connected<HTMLButtonElement>('[aria-label="Close documentation"]').click())

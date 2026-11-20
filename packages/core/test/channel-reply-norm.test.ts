@@ -49,9 +49,9 @@ it('places the note in the delivered wire', () => {
 it('the connection skill carries the same reply norm, so the input note and the skill never drift', () => {
   const skill = agentMuxModuleSkill('connection')!
   expect(skill).toContain('## Reply in a connected conversation')
-  expect(skill).toContain(AGENTMUX_CHANNEL_INSTANT_REPLY)
+  expect(AGENTMUX_CHANNEL_INSTANT_REPLY).toContain("amux connection --skill")
   for (const rule of ['at most 100 words', 'Do not repost them through the platform API', 'inspect its delivery', 'do not promise follow-up'])
-    expect(AGENTMUX_CHANNEL_INSTANT_REPLY).toContain(rule)
+    expect(skill).toContain(rule)
 })
 
 it('the queue freezes the note only into a new external input, from the kind its caller passed', async () => {

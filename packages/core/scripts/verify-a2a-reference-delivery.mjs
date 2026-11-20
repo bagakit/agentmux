@@ -62,7 +62,7 @@ const compiled = await runA2aProof({
       before: 'const candidateWire = renderAgentMuxMessageReferences([...references, candidate], AGENTMUX_A2A_REFERENCE_REMINDER);',
       after: 'const candidateWire = renderAgentMuxMessageReferences([...references, candidate]);' },
     { label: 'reference-guide-adapter-is-disconnected', file: 'agent-messaging-guidance.js', tests: journal,
-      before: 'export const AGENTMUX_A2A_REFERENCE_REMINDER = /* @__PURE__ */ guideText(guideSharedMessagingReferenceReminder);',
+      before: "export const AGENTMUX_A2A_REFERENCE_REMINDER = /* @__PURE__ */ getAmuxProtocolTemplate('peer-messaging', 'reference');",
       after: "export const AGENTMUX_A2A_REFERENCE_REMINDER = '';" }
   ]
 })

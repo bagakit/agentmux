@@ -21,9 +21,10 @@ const mutations = {
   'skip-resource-reader': ['packages/client-ui/src/components/ConversationResourceText.tsx', 'const parsed = parseAgentMuxMessagePrefix(text)', 'const parsed = null'],
   'skip-special-card': ['packages/client-ui/src/components/ConversationInputText.tsx', "const a2a = prefix?.kind === 'references' || prefix?.declaredMessageId !== undefined", 'const a2a = false'],
   'lose-question-resource-boundary': ['packages/client-ui/src/components/ConversationMessage.tsx', "contentBoundary={hasQuestionAnswers ? 'body' : contentBoundary}", 'contentBoundary={contentBoundary}'],
-  'unregister-settings': ['apps/desktop/src/renderer/src/components/settings/settings-modules.ts', '  amuxProtocolsSettingsModule,', ''],
-  'omit-search-target': ['apps/desktop/src/renderer/src/components/settings/modules/amux-protocols.tsx', 'searchTargets: AGENTMUX_PROTOCOL_CATALOG.map(entry => (', 'searchTargets: AGENTMUX_PROTOCOL_CATALOG.slice(0, -1).map(entry => ('],
-  'eager-preview': ['apps/desktop/src/renderer/src/components/settings/modules/amux-protocols.tsx', '{open && active ? <div', '{active ? <div']
+  'unregister-settings': ['apps/desktop/src/renderer/src/components/settings/ShortcutSettingsPane.tsx', "documentation.open('protocols')", 'undefined'],
+  'detach-focus-template': ['apps/desktop/src/renderer/src/lib/focus-group-task.ts', "if (kind !== 'learn') return getAmuxProtocolTemplate('focus-task', kind)", "if (kind !== 'learn') return 'Detached task'"],
+  'omit-search-target': ['apps/desktop/src/renderer/src/components/documentation/AmuxProtocolReference.tsx', 'AGENTMUX_PROTOCOL_CATALOG.filter(entry =>', "AGENTMUX_PROTOCOL_CATALOG.filter(entry => entry.id !== ('catalog-extension-probe' as string)).filter(entry =>"],
+  'eager-preview': ['apps/desktop/src/renderer/src/components/documentation/AmuxProtocolReference.tsx', '{open && active ? <div', '{active ? <div']
 } as Record<string, readonly [string, string, string]>
 
 const clientPackage = resolve(overview.root!, 'packages/client-ui')

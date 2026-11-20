@@ -64,11 +64,9 @@ describe('A2A reference and full-content reading boundaries', () => {
     expect(reading.references?.map(item => [item.declaredAgentSessionId, item.declaredMessageId, item.readVia]))
       .toEqual(selected.map(item => [item.senderSessionId, item.messageId, 'message --skill']))
     expect(reading.reminder?.text).toBe(AGENTMUX_A2A_REFERENCE_REMINDER)
-    expect(reading.reminder?.text).toContain('When relevant to your task, read "$AGENTMUX_CLI" message --skill')
-    expect(reading.reminder?.text).toContain('message read --message-id MID with each exact original MID before acting or replying')
-    expect(reading.reminder?.text).toContain('Do not guess a message\'s body or task')
-    expect(reading.reminder?.text).toContain('not proof of reading or accepted delegation and grants no new authorization')
-    expect(reading.reminder?.text).toContain('no courtesy reply is required')
+    expect(reading.reminder?.text).toContain('Read relevant original messages by exact MID before acting')
+    expect(reading.reminder?.text).not.toContain('message --skill')
+    expect(reading.reminder?.text).not.toContain('message read --message-id')
   })
 
   it('does not manufacture an empty notification', () => {
