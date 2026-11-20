@@ -9,23 +9,23 @@ export function browserCaptureProgram(options: { within?: string; clip?: unknown
   return `return await captureScreenshot(${JSON.stringify(options)})`
 }
 
-function captureOf(report: unknown): Record<string, unknown> {
+function captureOf(report: unknown, kind = 'screenshot'): Record<string, unknown> {
   const r = report as { outcome?: { kind?: string }; result?: unknown }
   if (r?.outcome?.kind !== 'completed' || !r.result || typeof r.result !== 'object') {
-    throw new AgentMuxError('The original screenshot program did not complete. Inspect its operation; capture was not repeated.', 'BROWSER_CAPTURE_UNAVAILABLE')
+    throw new AgentMuxError(`The original ${kind} program did not complete. Inspect its operation; capture was not repeated.`, 'BROWSER_CAPTURE_UNAVAILABLE')
   }
   return r.result as Record<string, unknown>
 }
 
 /** Continue the original bounded result through readResult; never recapture its page. */
 export async function resolveBrowserCaptureReport(report: unknown, browserId: string,
-  read: (code: string) => Promise<unknown>): Promise<unknown> {
-  const reference = captureOf(report)
+  read: (code: string) => Promise<unknown>, kind = 'screenshot'): Promise<unknown> {
+  const reference = captureOf(report, kind)
   if (reference.kind !== 'browser-result-artifact') return report
   const total = reference.byteLength
   if (reference.browserId !== browserId || reference.format !== 'json' || !Number.isSafeInteger(total) ||
       Number(total) < 1 || Number(total) > 8 * 1024 * 1024 || reference.maxReadBytes !== 65536) {
-    throw new AgentMuxError('The retained screenshot result is not bound to this Browser or exceeds its result contract.', 'CONTROL_PROTOCOL_ERROR')
+    throw new AgentMuxError(`The retained ${kind} result is not bound to this Browser or exceeds its result contract.`, 'CONTROL_PROTOCOL_ERROR')
   }
   const chunks: Buffer[] = []
   for (let offset = 0; offset < Number(total);) {
@@ -33,16 +33,16 @@ export async function resolveBrowserCaptureReport(report: unknown, browserId: st
       outcome?: { kind?: string }; runOperation?: { id?: string }; result?: unknown
     }
     if (continued?.outcome?.kind !== 'completed') {
-      throw new AgentMuxError(`Retained screenshot result read ${continued?.runOperation?.id ?? '(unconfirmed)'} did not complete. The original screenshot remains captured and was not repeated.`,
+      throw new AgentMuxError(`Retained ${kind} result read ${continued?.runOperation?.id ?? '(unconfirmed)'} did not complete. The original capture was not repeated.`,
         'BROWSER_CAPTURE_RESULT_READ_FAILED', JSON.stringify({ readOperationId: continued?.runOperation?.id, outcome: continued?.outcome }))
     }
-    const chunk = captureOf(continued)
+    const chunk = captureOf(continued, kind)
     const bytes = typeof chunk.data === 'string' ? Buffer.from(chunk.data, 'base64') : Buffer.alloc(0)
     const next = offset + bytes.length
     if (!isDeepStrictEqual(chunk.reference, reference) || chunk.encoding !== 'base64' || chunk.offset !== offset ||
         chunk.totalBytes !== total || !bytes.length || bytes.length > 65536 || bytes.toString('base64') !== chunk.data ||
         chunk.returnedBytes !== bytes.length || next > Number(total) || chunk.nextOffset !== (next === total ? null : next)) {
-      throw new AgentMuxError('The retained screenshot continuation changed or made no progress. The original capture was not repeated.', 'CONTROL_PROTOCOL_ERROR')
+      throw new AgentMuxError(`The retained ${kind} continuation changed or made no progress. The original capture was not repeated.`, 'CONTROL_PROTOCOL_ERROR')
     }
     chunks.push(bytes); offset = next
   }
@@ -58,11 +58,22 @@ export async function writeBrowserCaptureFile(path: string, report: unknown) {
   return { ...await writeNewCliFile(path, async write => { await write(bytes) }), sha256: createHash('sha256').update(bytes).digest('hex') }
 }
 
-/** The original report and operation remain available; only bulky image bytes leave stdout. */
+export async function writeBrowserHarFile(path: string, report: unknown) {
+  const capture = captureOf(report, 'HAR')
+  const log = capture.log as { version?: unknown; entries?: unknown; _capture?: { content?: unknown } } | undefined
+  if (log?.version !== '1.2' || !Array.isArray(log.entries) || log._capture?.content !== 'metadata-only')
+    throw new AgentMuxError('Return finishHarCapture() from the original Browser program to export its HAR.', 'BROWSER_CAPTURE_UNAVAILABLE')
+  const bytes = JSON.stringify(capture) + '\n'
+  return { ...await writeNewCliFile(path, bytes), sha256: createHash('sha256').update(bytes).digest('hex') }
+}
+
+/** Keep capture metadata in stdout after the original bytes have a file destination. */
 export function browserCaptureCliMetadata(report: unknown): unknown {
   const r = report as { result?: unknown }
   if (!r?.result || typeof r.result !== 'object') return report
   const capture = r.result as Record<string, unknown>, image = capture.image
+  const log = capture.log as { entries?: unknown; _capture?: unknown } | undefined
+  if (log && Array.isArray(log.entries)) return { ...r, result: { entryCount: log.entries.length, coverage: log._capture } }
   if (!image || typeof image !== 'object') return report
   const { dataUrl: _pixels, ...metadata } = image as Record<string, unknown>
   return { ...r, result: { ...capture, image: metadata } }

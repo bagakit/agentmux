@@ -25,6 +25,7 @@ import { browserCdpScopeRefusal, isBrowserCdpNativeInput } from './browser-cdp-s
 import type { BrowserPageInterrupts } from './browser-page-interrupts.js'
 import { createBrowserNetworkObservations } from './browser-network-observation.js'
 import { createBrowserNetworkRouting } from './browser-network-routing.js'
+import { openBrowserHarCapture } from './browser-har-capture.js'
 import { parseBrowserScreenshotOptions, type BrowserScreenshotOptions } from './browser-screenshot-options.js'
 import { isBrowserViewport, type BrowserViewport } from '@agentmux/core/browser-viewport'
 
@@ -230,6 +231,7 @@ export function createBrowserPageDispatch(
   context: BrowserPageContext
 ): (name: string, args: unknown[], scope?: BrowserPageActionScope) => Promise<unknown> {
   const { session } = context
+  let harCapture: ReturnType<typeof openBrowserHarCapture> | undefined
   let network: ReturnType<typeof createBrowserNetworkObservations> | undefined
   const networkObservations = () => network ??= createBrowserNetworkObservations(context)
   let routes: ReturnType<typeof createBrowserNetworkRouting> | undefined
@@ -1068,6 +1070,31 @@ export function createBrowserPageDispatch(
 
   return async (name, args, scope) => {
     switch (name) {
+      case 'startHarCapture': {
+        if (args.length) throw new TypeError('startHarCapture takes no arguments.')
+        if (harCapture) throw new Error('This program already started a HAR capture. Finish its original capture.')
+        if (!session.openNetworkSession || !context.registerCleanup)
+          throw new Error('The original Browser host does not provide an independent HAR recording lease.')
+        let capture: Awaited<ReturnType<typeof openBrowserHarCapture>> | undefined
+        const lifecycle = new AbortController()
+        const signal = context.signal ? AbortSignal.any([context.signal, lifecycle.signal]) : lifecycle.signal
+        const opening = openBrowserHarCapture(() => session.openNetworkSession!(), signal).then(opened => {
+          capture = opened
+          if (signal.aborted) void opened.finish()
+          return opened
+        })
+        harCapture = opening
+        context.registerCleanup(async () => {
+          lifecycle.abort()
+          if (capture) await capture.finish()
+        })
+        return { startedAt: (await opening).startedAt, scope: 'page-target-http' }
+      }
+      case 'finishHarCapture': {
+        if (args.length) throw new TypeError('finishHarCapture takes no arguments.')
+        if (!harCapture) throw new Error('This program has no original HAR capture.')
+        return await (await harCapture).finish()
+      }
       case 'routeRequests':
       case 'unrouteRequests':
       case 'setNetworkConditions':

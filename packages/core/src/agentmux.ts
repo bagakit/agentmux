@@ -11,7 +11,7 @@ import { writeRendererDiagnosticFile } from './renderer-scene-cli.js'
 import { writeRuntimeV8Profile } from './runtime-v8-profile-cli.js'
 import { writeRendererV8Profile } from './renderer-v8-profile-cli.js'
 import { writeAppCaptureFile, appCaptureCliMetadata } from './app-capture-cli.js'
-import { writeBrowserCaptureFile, browserCaptureCliMetadata, resolveBrowserCaptureReport } from './browser-capture-cli.js'
+import { writeBrowserCaptureFile, writeBrowserHarFile, browserCaptureCliMetadata, resolveBrowserCaptureReport } from './browser-capture-cli.js'
 import { writeRendererTrace } from './renderer-trace-cli.js'
 import { writeCliResourceDocument } from './cli-resource-document.js'
 import process from 'node:process'
@@ -336,6 +336,7 @@ async function main(): Promise<number> {
       const settings = result as MeshNetworkSettings
       write({ ok: true, operation: 'mesh.code', result: { owner: settings.owner, code: meshPeerCode(settings) } }); return 0
     }
+    const harOutput = match?.command.method === 'browser.run' && invocation.output !== undefined
     let captureResult: unknown = result
     let output: { path: string } | undefined
     try {
@@ -346,11 +347,11 @@ async function main(): Promise<number> {
             const continued = await client.call('browser.run', { browserId: invocation.params.browserId as string, code, operationId: readOperationId }, callOptions)
             return continued
           }
-          catch (error) { throw new AgentMuxError(`Screenshot result read ${readOperationId} is unconfirmed: ${error instanceof Error ? error.message : String(error)}. Keep the original capture; it was not repeated.`, 'BROWSER_CAPTURE_RESULT_READ_FAILED') }
-        })
+          catch (error) { throw new AgentMuxError(`${harOutput ? 'HAR' : 'Screenshot'} result read ${readOperationId} is unconfirmed: ${error instanceof Error ? error.message : String(error)}. Keep the original capture; it was not repeated.`, 'BROWSER_CAPTURE_RESULT_READ_FAILED') }
+        }, harOutput ? 'HAR' : 'screenshot')
       }
       output = invocation.output === undefined ? undefined : method === 'browser.run'
-        ? await writeBrowserCaptureFile(invocation.output, captureResult) : method === 'app.capture' || method === 'app.record.read'
+        ? await (harOutput ? writeBrowserHarFile : writeBrowserCaptureFile)(invocation.output, captureResult) : method === 'app.capture' || method === 'app.record.read'
         ? await writeAppCaptureFile(invocation.output, method, result) : method === 'system.metrics.host-profile.capture'
         ? await writeRuntimeV8Profile(invocation.output, result, invocation.params) : method === 'system.metrics.profile.capture'
         ? await writeRendererV8Profile(invocation.output, result) : method === 'system.metrics.allocations.capture' ? await writeRendererDiagnosticFile(invocation.output,result,'allocations') : method === 'system.metrics.scene.capture' ? await writeRendererDiagnosticFile(invocation.output,result,'scene-capture') : method === 'system.metrics.scene.inspect' ? await writeRendererDiagnosticFile(invocation.output,result,'scene-inspect') : method === 'system.metrics.trace.capture'

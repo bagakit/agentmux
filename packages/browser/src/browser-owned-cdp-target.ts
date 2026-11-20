@@ -5,7 +5,7 @@ import type { BrowserNetworkSession } from './browser-page-transport.js'
 import { BrowserRequestFailure } from './browser-program-port.js'
 
 const EVENTS = ['Page.frameNavigated','Page.navigatedWithinDocument','Page.loadEventFired','Page.javascriptDialogOpening',
-  'Page.javascriptDialogClosed','Page.fileChooserOpened','Network.requestWillBeSent','Network.responseReceived','Network.loadingFinished','Network.loadingFailed','Input.dragIntercepted','Fetch.requestPaused'] as const
+  'Page.javascriptDialogClosed','Page.fileChooserOpened','Network.requestWillBeSent','Network.responseReceived','Network.loadingFinished','Network.loadingFailed','Network.dataReceived','Input.dragIntercepted','Fetch.requestPaused'] as const
 /** Puppeteer's original flattened CDP sessions supply page and OOPIF senders. No target is reselected. */
 export class OwnedBrowserTargetSession implements BrowserProgramSession {
   readonly frames = new Map<string, BrowserCdpSender>()

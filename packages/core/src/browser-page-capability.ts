@@ -101,6 +101,8 @@ export const BROWSER_PAGE_CAPABILITIES: readonly BrowserPageCapability[] = [
   { name: 'waitForUrl', effect: 'wait', summary: 'wait until this page is at a URL: a full URL or {contains}; returns {url, navigationId}' },
   { name: 'waitForLoad', effect: 'wait', summary: 'wait for navigation to settle' },
   { name: 'waitForNetworkIdle', effect: 'wait', summary: 'wait until requests stop' },
+  { name: 'startHarCapture', effect: 'observe', summary: 'arm an independent bounded HTTP HAR capture on this Browser across its navigations' },
+  { name: 'finishHarCapture', effect: 'observe', summary: 'stop this program’s original capture and return sanitized HAR 1.2, with coverage and losses' },
   { name: 'watchRequests', effect: 'observe', summary: 'watchRequests({maxEntries?}): arm bounded HTTP observations on this main document before triggering an action; returns a reader' },
   { name: 'readRequests', effect: 'observe', summary: 'readRequests(reader, {afterSequence?, maxEntries?}): read bounded request/response metadata, without headers or bodies' },
   { name: 'waitForResponse', effect: 'wait', summary: 'waitForResponse(reader, {url?, method?, status?}, {timeoutMs?}): match a response already buffered or arriving on an armed reader' },

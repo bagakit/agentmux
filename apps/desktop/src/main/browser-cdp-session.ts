@@ -248,8 +248,14 @@ export class BrowserCdpSession implements BrowserPageTransport {
     try { ({ targetInfo } = await retained.sendCommand('Target.getTargetInfo') as { targetInfo: { targetId: string } }) }
     catch (error) { releaseHold(); throw error }
     if (this.endedReason) { releaseHold(); throw new Error(this.endedReason) }
-    const { sessionId } = await retained.sendCommand('Target.attachToTarget', { targetId: targetInfo.targetId, flatten: true }) as { sessionId: string }
-    if (!sessionId) throw new Error('The original native network session acknowledgement is unavailable.')
+    let sessionId: string
+    try {
+      ({ sessionId } = await retained.sendCommand('Target.attachToTarget', { targetId: targetInfo.targetId, flatten: true }) as { sessionId: string })
+      if (!sessionId) throw new Error('The original native network session acknowledgement is unavailable.')
+    } catch (error) {
+      releaseHold()
+      throw error
+    }
     const contents = this.contents, listeners = new Set<(method: string, params: unknown) => void>()
     let ended: string | null = null
     const release = () => { if (!contents.isDestroyed()) { contents.debugger.off('message', message); contents.debugger.off('detach', detached) }; listeners.clear(); releaseHold() }
