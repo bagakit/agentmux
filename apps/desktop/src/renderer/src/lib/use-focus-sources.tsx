@@ -311,7 +311,7 @@ function discoveredLocations(base: ReadonlyMap<string, Candidate>, sources: Read
       const kept = before?.locations.filter(location => !sameMember(location) || location.reference || location.original) ?? []
       const location: Location = { source, tabId: tab.tabId, regionId: region.regionId, original,
         ...(position ? { originalPosition: position } : {}), ...(mounted?.snapshot ? { snapshot: mounted.snapshot } : {}),
-        ...(observed.issue ? { sourceIssue: observed.issue } : {}), member: { key: mountedRegionKey(reference, tab.tabId, region.regionId), reference, tab, zone, region } }
+        ...(observed.issue ? { sourceIssue: observed.issue.message } : {}), member: { key: mountedRegionKey(reference, tab.tabId, region.regionId), reference, tab, zone, region } }
       result.set(key, { ...(before ?? { key, runtimeId, sid }), locations: [...kept, location] })
     }
   }
