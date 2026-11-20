@@ -4,7 +4,8 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { RunUsage, ToolkitAgentCard as AgentCard, ToolkitAgentCardField } from '@agentmux/core/control'
 import type { ToolkitMetricsSnapshot } from '../../../../shared/toolkit'
 import { PerformanceAttribution, cpuCoreLabel } from './PerformanceAttribution'
-import { PerformanceTrend } from './PerformanceTrend'
+import { PerformanceMetric as Metric } from './PerformanceMetric'
+import { usePerformanceAppTrend } from './use-performance-app-trend'
 import { LiquidSelectionSurface } from '../LiquidSelectionSurface'
 import { ToolkitAgentCard, toolkitAgentCardKey, useToolkitAgentCards, type ToolkitAgentCardFacts } from '../toolkit/ToolkitAgentCards'
 import { useAppStore } from '../../store'
@@ -17,10 +18,6 @@ const RUN_FIELDS: ToolkitAgentCardField[] = ['avatar', 'name', 'status', 'provid
 const runKey = (run: Pick<RunUsage, 'hostId' | 'runId'>) => JSON.stringify([run.hostId, run.runId])
 
 
-function Metric({ label, value, hint, points, color, sourceKey, unit = '%' }: { label: string; value: string; hint: string; points?: { id: string; at: number; value: number | null }[]; color: string; sourceKey?: string; unit?: '%' | 'KiB' }) {
-  return <section className="performance-metric"><span className="performance-metric__label">{label}</span><strong>{value}</strong><small>{hint}</small>
-    {points ? <PerformanceTrend key={sourceKey} points={points} color={color} label={label} unit={unit} /> : null}</section>
-}
 function Facts({ children }: { children: React.ReactNode }) { return <dl className="performance-facts">{children}</dl> }
 function RunRow({ run, facts, onToggle, onNavigate, navigationError, basis }: { run: RunUsage; facts: ToolkitAgentCardFacts | undefined; onToggle(key: string, open: boolean): void; onNavigate(run: RunUsage, facts: ToolkitAgentCardFacts): void; navigationError?: string | undefined; basis: string | undefined }) {
   const card: AgentCard = { reference: { kind: 'run', hostId: run.hostId, runId: run.runId }, metrics: [] }
@@ -49,7 +46,6 @@ export const PerformanceResourceDetails = memo(function PerformanceResourceDetai
   const openRuns = useRef(new Set<string>())
   const list = useRef<HTMLDivElement>(null)
   const [runTrend, setRunTrend] = useState<{ key: string; lastSourceAt: number | null; points: { at: number; cpu: number | null; rss: number | null }[] }>({ key: '', lastSourceAt: null, points: [] })
-  const [appTrend, setAppTrend] = useState<{ key: string; lastSourceAt: number | null; resumePending: boolean; points: ToolkitMetricsSnapshot['trend'] }>({ key: '', lastSourceAt: null, resumePending: false, points: [] })
   const observation = snapshot?.observation
   const observationKey = JSON.stringify([snapshot?.executionId, snapshot?.run?.hostId, snapshot?.run?.runId, observation?.scope.hostId])
   const app = observation?.app.data
@@ -83,49 +79,7 @@ export const PerformanceResourceDetails = memo(function PerformanceResourceDetai
   }
   const totals = observation?.runTotals
   const source = scope === 'app' ? observation?.app : scope === 'runs' ? observation?.process : observation?.runtime
-  // 只投影真实 owner 的有界点；自己的暂停断点不能被其他 watcher 的连续观察填上。
-  useEffect(() => {
-    if (!snapshot) return
-    setAppTrend(previous => {
-      const incoming = snapshot.trend.slice(-60)
-      const numeric = (point: ToolkitMetricsSnapshot['trend'][number]) => point.appCpuPercent !== null || point.appRssKib !== null
-      if (previous.key !== observationKey) {
-        let lastSourceAt: number | null = null
-        for (let index = incoming.length - 1; index >= 0; index--) {
-          const point = incoming[index]!
-          if (numeric(point)) { lastSourceAt = point.observedAt; break }
-        }
-        return { key: observationKey, lastSourceAt, resumePending: paused, points: incoming }
-      }
-      if (paused) {
-        if (previous.resumePending) return previous
-        return { ...previous, resumePending: true, points: previous.points.length ? [...previous.points,
-          { observedAt: snapshot.observedAt ?? previous.lastSourceAt ?? 0, appCpuPercent: null, appRssKib: null }].slice(-60) : previous.points }
-      }
-      const fresh = incoming.filter(point => numeric(point) && (previous.lastSourceAt === null || point.observedAt > previous.lastSourceAt))
-      if (previous.resumePending) {
-        const latest = fresh.at(-1)
-        return latest ? { key: observationKey, lastSourceAt: latest.observedAt, resumePending: false,
-          points: [...previous.points, latest].slice(-60) } : previous
-      }
-      let anchor = -1
-      for (let index = incoming.length - 1; index >= 0; index--) {
-        const point = incoming[index]!
-        if (numeric(point) && point.observedAt === previous.lastSourceAt) { anchor = index; break }
-      }
-      const start = anchor >= 0 ? anchor + 1 : fresh.length ? incoming.indexOf(fresh[0]!) : incoming.length - 1
-      const points = previous.points.slice()
-      let lastSourceAt = previous.lastSourceAt
-      for (const point of incoming.slice(start)) {
-        if (numeric(point)) {
-          if (lastSourceAt !== null && point.observedAt <= lastSourceAt) continue
-          lastSourceAt = point.observedAt; points.push(point)
-        } else if (points.length && numeric(points.at(-1)!)) points.push(point)
-      }
-      return points.length === previous.points.length ? previous : { key: observationKey, lastSourceAt, resumePending: false, points: points.slice(-60) }
-    })
-  }, [observationKey, snapshot?.trend, paused])
-  const trend = appTrend.key === observationKey ? appTrend.points : []
+  const trend = usePerformanceAppTrend(snapshot, paused, observationKey)
   const selectScope = (next: typeof scope) => { setScope(next); setAll(false) }
   const lock = () => setLockedOrder(previous => previous ?? ranked.map(runKey))
   const toggleRun = (key: string, open: boolean) => {

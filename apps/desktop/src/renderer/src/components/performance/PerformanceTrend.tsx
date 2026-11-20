@@ -6,7 +6,9 @@ const available = (value: number | null): value is number => value !== null && N
 const sampleTime = (at: number) => new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 })
 
 /** A local reader of the original owner's bounded samples; it never collects history. */
-export function PerformanceTrend({ points, color, label, unit }: { points: Point[]; color: string; label: string; unit: '%' | 'KiB' }) {
+export function PerformanceTrend({ points, color, label, unit, compact = false, live = false, emptyLabel = 'Collecting history' }: {
+  points: Point[]; color: string; label: string; unit: '%' | 'KiB'; compact?: boolean; live?: boolean; emptyLabel?: string
+}) {
   const detailId = useId()
   const chart = useRef<SVGSVGElement>(null)
   const [selected, setSelected] = useState<Selection | null>(null)
@@ -17,6 +19,8 @@ export function PerformanceTrend({ points, color, label, unit }: { points: Point
   const point = points[index]
   const expired = selected !== null && !point
   const valid = points.filter(point => available(point.value))
+  let latestIndex = -1
+  for (let index = points.length - 1; index >= 0; index--) if (available(points[index]!.value)) { latestIndex = index; break }
   const max = valid.length ? Math.max(1, ...valid.map(point => point.value!)) * 1.12 : 1
   const x = (index: number) => points.length > 1 ? index / (points.length - 1) * 180 : 180
   const y = (value: number) => 42 - value / max * 34
@@ -34,7 +38,7 @@ export function PerformanceTrend({ points, color, label, unit }: { points: Point
   }
   const clear = () => { setSelected(null); setHover(null) }
   const value = point ? available(point.value) ? `${String(point.value)}${unit === '%' ? '%' : ' KiB'}` : 'Unavailable' : expired ? 'Sample expired' : 'Explore samples'
-  return <div className="performance-trend-reader" style={{ color }}>
+  return <div className="performance-trend-reader" style={{ color }} data-compact={compact || undefined} data-live={live || undefined}>
     <svg ref={chart} className="performance-trend" viewBox="0 0 180 48" role="group" aria-roledescription="sample chart" tabIndex={points.length ? 0 : undefined}
       aria-label={`${label} history`} aria-describedby={detailId} data-toolkit-local-escape={selected !== null || hover !== null ? '' : undefined}
       onPointerMove={event => { if (selected === null && event.pointerType !== 'touch') setHover(nearest(event)) }}
@@ -51,7 +55,11 @@ export function PerformanceTrend({ points, color, label, unit }: { points: Point
         setSelected({ id: points[next]!.id, at: points[next]!.at }); setHover(null)
       }}>
       <path className="performance-trend__baseline" d="M0 43H180" />
-      {valid.length > 1 ? <path d={d} /> : <text x="0" y="32">Collecting history</text>}
+      {live && latestIndex >= 0 ? <g key={points[latestIndex]!.id} className="performance-trend__latest" aria-hidden="true">
+        <circle className="performance-trend__latest-halo" cx={x(latestIndex)} cy={y(points[latestIndex]!.value!)} r="5" />
+        <circle cx={x(latestIndex)} cy={y(points[latestIndex]!.value!)} r="2" />
+      </g> : null}
+      {valid.length > 1 ? <path className="performance-trend__line" d={d} /> : <text x="0" y="32">{emptyLabel}</text>}
       {point ? <g className="performance-trend__cursor" aria-hidden="true"><line x1={x(index)} x2={x(index)} y1="4" y2="43" />
         {available(point.value) ? <circle cx={x(index)} cy={y(point.value)} r="2.5" /> : null}</g> : null}
     </svg>
