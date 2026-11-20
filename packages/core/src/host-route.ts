@@ -1,4 +1,5 @@
 import { AgentMuxError } from './errors.js'
+import { parseConnectionOffer, type ConnectionOffer } from '@agentmux/relay/offer'
 import { rpcRecord, rpcString } from './rpc-data.js'
 import { SPACE_MEMBER_INVOCATIONS, SPACE_MEMBER_NATIVE_CALLS, parseSpaceMemberAdmission, type SpaceMemberAdmission } from './space-member.js'
 import { parseHostExecutorInventory, type AgentMuxHostExecutorInventory } from './executor-contract.js'
@@ -9,11 +10,11 @@ export type HostRouteIdentity = { runtimeId: string; publicKey: string; fingerpr
 export type AdoptedHostRoute = {
   source: HostRouteIdentity
   /** Each edge belongs to the preceding Core's configured Host namespace. */
-  hops: { edgeId: string; target: HostRouteIdentity }[]
+  hops: { edgeId: string; target: HostRouteIdentity; kind?: 'relay' }[]
 }
 export type HostRouteActor = { source: HostRouteIdentity; kind: 'user' | 'device'; id: string }
 /** A saved outgoing edge, without transport endpoints or credentials. */
-export type HostRouteEdge = { edgeId: string; label: string; kind: 'ssh'; runtimeId?: string }
+export type HostRouteEdge = { edgeId: string; label: string; kind: 'ssh' | 'relay'; runtimeId?: string }
 export type HostRouteEdges = { identity: HostRouteIdentity; actor: HostRouteActor; edges: HostRouteEdge[]; observedAt: number }
 export type HostRouteEdgeInspection = { identity: HostRouteIdentity; actor: HostRouteActor; edge: HostRouteEdge; target: HostRouteIdentity; observedAt: number }
 export type HostRouteAgentTarget = AgentMuxSpaceAgentTarget & { adoptedRoute: AdoptedHostRoute }
@@ -54,7 +55,8 @@ export type HostRouteGrant = {
   scopes: string[]
 }
 export type HostRouteDefinition = { id: string; route: AdoptedHostRoute }
-export type HostRouteConfiguration = { routes: HostRouteDefinition[]; grants: HostRouteGrant[] }
+export type HostRelayEdge = { edgeId: string; label: string; target: HostRouteIdentity; offer: ConnectionOffer }
+export type HostRouteConfiguration = { routes: HostRouteDefinition[]; grants: HostRouteGrant[]; relayEdges?: HostRelayEdge[] }
 export type HostRouteSettings = HostRouteConfiguration & {
   identity: HostRouteIdentity
   revision: string
@@ -163,8 +165,10 @@ export function parseHostRouteIdentity(value: unknown): HostRouteIdentity {
 export function parseAdoptedHostRoute(value: unknown): AdoptedHostRoute {
   const p = rpcRecord(value, ['source', 'hops']), source = parseHostRouteIdentity(p.source)
   const hops = list(p.hops, 'Route hops').map(value => {
-    const hop = rpcRecord(value, ['edgeId', 'target'])
-    return { edgeId: rpcString(hop.edgeId, 'Configured route edge'), target: parseHostRouteIdentity(hop.target) }
+    const hop = rpcRecord(value, ['edgeId', 'target', 'kind'])
+    if (hop.kind !== undefined && hop.kind !== 'relay') invalid('The configured hop kind is not supported.')
+    return { edgeId: rpcString(hop.edgeId, 'Configured route edge'), target: parseHostRouteIdentity(hop.target),
+      ...(hop.kind === 'relay' ? { kind: 'relay' as const } : {}) }
   })
   if (!hops.length) invalid('A route must name at least one configured edge; local calls retain their original owner.')
   const nodes = [source.runtimeId, ...hops.map(hop => hop.target.runtimeId)]
@@ -192,7 +196,7 @@ export function parseHostRouteCall(value: unknown, stream: boolean): HostRouteCa
   return call
 }
 export function parseHostRouteConfiguration(value: unknown): HostRouteConfiguration {
-  const p = rpcRecord(value, ['routes', 'grants'])
+  const p = rpcRecord(value, ['routes', 'grants', 'relayEdges'])
   const routes = list(p.routes, 'Configured routes').map(value => {
     const item = rpcRecord(value, ['id', 'route'])
     return { id: rpcString(item.id, 'Original route ID'), route: parseAdoptedHostRoute(item.route) }
@@ -205,7 +209,14 @@ export function parseHostRouteConfiguration(value: unknown): HostRouteConfigurat
     return { id: rpcString(item.id, 'Original receiver grant ID'), delegator: parseHostRouteIdentity(item.delegator), actor: parseHostRouteActor(item.actor), destination: parseHostRouteIdentity(item.destination), scopes }
   })
   if (new Set(routes.map(r => r.id)).size !== routes.length || new Set(grants.map(g => g.id)).size !== grants.length) invalid('Route and receiver grant IDs must be unique on their original owner.')
-  return { routes, grants }
+  if (p.relayEdges === undefined) return { routes, grants }
+  const relayEdges = list(p.relayEdges, 'Configured Relay edges').map(value => {
+    const edge = rpcRecord(value, ['edgeId', 'label', 'target', 'offer'])
+    return { edgeId: rpcString(edge.edgeId, 'Exact configured Relay edge'), label: rpcString(edge.label, 'Relay edge label'),
+      target: parseHostRouteIdentity(edge.target), offer: parseConnectionOffer(edge.offer) }
+  })
+  if (new Set(relayEdges.map(edge => edge.edgeId)).size !== relayEdges.length) invalid('Relay edge IDs must be unique on their original owner.')
+  return { routes, grants, relayEdges }
 }
 export function parseHostRouteOperation(value: unknown): HostRouteOperation {
   const kind = rpcRecord(value).kind
@@ -384,11 +395,11 @@ export function parseHostRouteResult(method: keyof HostRouteParams, value: unkno
     return { settings: parseHostRouteResult('route.inspect', p.settings), diskDurability: 'confirmed' }
   }
   if (method === 'route.inspect') {
-    const p = rpcRecord(value, ['identity', 'revision', 'operation', 'routes', 'grants'])
+    const p = rpcRecord(value, ['identity', 'revision', 'operation', 'routes', 'grants', 'relayEdges'])
     const operation = p.operation === null ? null : rpcRecord(p.operation, ['operationId', 'inputDigest'])
     return { identity: parseHostRouteIdentity(p.identity), revision: rpcString(p.revision, 'Original route revision'),
       operation: operation ? { operationId: rpcString(operation.operationId, 'Original save operation'), inputDigest: rpcString(operation.inputDigest, 'Original save digest') } : null,
-      ...parseHostRouteConfiguration({ routes: p.routes, grants: p.grants }) }
+      ...parseHostRouteConfiguration({ routes: p.routes, grants: p.grants, ...(p.relayEdges === undefined ? {} : { relayEdges: p.relayEdges }) }) }
   }
   const p = rpcRecord(value, ['value', 'observation'])
   return { value: p.value, observation: parseHostRouteObservation(p.observation) }
@@ -410,7 +421,7 @@ export function parseHostRouteAgentTarget(value: unknown, expectedRouteId?: stri
 
 export function parseHostRouteEdge(value: unknown): HostRouteEdge {
   const p = rpcRecord(value, ['edgeId', 'label', 'kind', 'runtimeId'])
-  if (p.kind !== 'ssh') invalid('An outgoing edge must be an original saved remote Host.')
-  return { edgeId: rpcString(p.edgeId, 'Exact saved edge'), label: rpcString(p.label, 'Saved Host label'), kind: 'ssh',
+  if (p.kind !== 'ssh' && p.kind !== 'relay') invalid('An outgoing edge must be an original saved remote Host.')
+  return { edgeId: rpcString(p.edgeId, 'Exact saved edge'), label: rpcString(p.label, 'Saved Host label'), kind: p.kind as HostRouteEdge['kind'],
     ...(p.runtimeId === undefined ? {} : { runtimeId: rpcString(p.runtimeId, 'Known saved Runtime') }) }
 }

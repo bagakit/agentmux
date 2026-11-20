@@ -8,7 +8,9 @@ import { agentCreationIntentDigest as digest, verifyHostRouteEnvelope, verifyHos
 import { parseHostRouteConfiguration, parseHostRouteCall, parseHostRouteEnvelope, parseHostRouteEdge, hostRouteScope, hostRouteExecutorOperation,
   type AdoptedHostRoute, type HostRouteActor, type HostRouteCall, type HostRouteEnvelope, type HostRouteSettings,
   type HostRouteObservationScope, type HostRouteExecutionAuthorization, type HostRouteStatement, type HostRouteParams, type HostRouteObservation, type HostRouteIdentity, type HostRouteStreamInitial, type HostRouteConfiguration, type HostRouteEdge, type HostRouteEdges, type HostRouteEdgeInspection,
-  type HostRouteChoices, type HostRouteExecutors, type HostRouteAgentTarget, type HostRouteDefinition } from './host-route.js'
+  type HostRouteChoices, type HostRouteExecutors, type HostRouteAgentTarget, type HostRouteDefinition, type HostRelayEdge } from './host-route.js'
+import { hostRouteTransport } from './host-route-rpc.js'
+import { connectAgentMuxRpc, type AgentMuxRpcClient } from './public-rpc-client.js'
 import { hostRouteOperation, executionRouteScope, memberRouteOperation, memberNameRouteOperation, assertExecutionChild } from './host-route-execution.js'
 import { parseSpaceMemberParams } from './space-member-codec.js'
 import type { SpaceMemberParams } from './space-member.js'
@@ -71,10 +73,11 @@ export type HostRouteTransport = {
 }
 type State = HostRouteConfiguration & { schema: 'agentmux.host-route-settings.v1'; runtimeId: string; revision: string;
   operation: { operationId: string; inputDigest: string } | null }
-type PolicyIndex = { routes: Map<string, AdoptedHostRoute>; chains: Set<string>; grants: Set<string> }
+type PolicyIndex = { routes: Map<string, AdoptedHostRoute>; chains: Set<string>; grants: Set<string>; relayEdges: Map<string, HostRelayEdge> }
 const grantKey = (delegator: HostRouteIdentity, actor: HostRouteActor, destination: HostRouteIdentity, scope: string) => digest([delegator, actor, destination, scope])
 const policyIndex = (state: HostRouteConfiguration): PolicyIndex => ({ routes: new Map(state.routes.map(item => [item.id, item.route])), chains: new Set(state.routes.map(item => digest(item.route))),
-  grants: new Set(state.grants.flatMap(item => item.scopes.map(scope => grantKey(item.delegator, item.actor, item.destination, scope)))) })
+  grants: new Set(state.grants.flatMap(item => item.scopes.map(scope => grantKey(item.delegator, item.actor, item.destination, scope)))),
+  relayEdges: new Map((state.relayEdges ?? []).map(edge => [edge.edgeId, edge])) })
 type Active = { controller: AbortController; check(policy?: PolicyIndex): void }
 export type HostRouteGatewayOptions = {
   stateDirectory: string
@@ -93,7 +96,8 @@ export class HostRouteGateway {
   private statePromise: Promise<State> | undefined
   private tail: Promise<unknown> = Promise.resolve()
   private readonly active = new Set<Active>()
-  private policy: PolicyIndex = { routes: new Map(), chains: new Set(), grants: new Set() }
+  private policy = policyIndex({ routes: [], grants: [] })
+  private readonly relayClients = new Map<string, { binding: HostRelayEdge; client: Promise<AgentMuxRpcClient> }>()
   private disposed = false
   constructor(private readonly options: HostRouteGatewayOptions) {}
   private state(): Promise<State> {
@@ -101,12 +105,12 @@ export class HostRouteGateway {
       let state: State
       try {
         const p = rpcRecord(JSON.parse(await readFile(join(this.options.stateDirectory, 'host-route-settings.json'), 'utf8')),
-          ['schema', 'runtimeId', 'revision', 'operation', 'routes', 'grants'])
+          ['schema', 'runtimeId', 'revision', 'operation', 'routes', 'grants', 'relayEdges'])
         if (p.schema !== 'agentmux.host-route-settings.v1' || p.runtimeId !== this.options.authority.runtimeId) denied('The original route policy belongs to another Core.', 'HOST_ROUTE_POLICY_UNCONFIRMED')
         const operation = p.operation === null ? null : rpcRecord(p.operation, ['operationId', 'inputDigest'])
         state = { schema: p.schema as State['schema'], runtimeId: p.runtimeId as string, revision: rpcString(p.revision, 'Original route revision'),
           operation: operation ? { operationId: rpcString(operation.operationId, 'Original save operation'), inputDigest: rpcString(operation.inputDigest, 'Original save digest') } : null,
-          ...parseHostRouteConfiguration({ routes: p.routes, grants: p.grants }) }
+          ...parseHostRouteConfiguration({ routes: p.routes, grants: p.grants, ...(p.relayEdges === undefined ? {} : { relayEdges: p.relayEdges }) }) }
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
         state = { schema: 'agentmux.host-route-settings.v1', runtimeId: this.options.authority.runtimeId,
@@ -117,6 +121,33 @@ export class HostRouteGateway {
   }
   private index(state: State) {
     this.policy = policyIndex(state)
+    for (const [id, lease] of this.relayClients) if (!isDeepStrictEqual(this.policy.relayEdges.get(id), lease.binding)) this.releaseRelay(id)
+  }
+  private releaseRelay(edgeId: string) {
+    const lease = this.relayClients.get(edgeId)
+    this.relayClients.delete(edgeId)
+    void lease?.client.then(client => client.dispose()).catch(error => {
+      process.emitWarning(`Releasing Relay edge ${edgeId} is unconfirmed: ${error instanceof Error ? error.message : String(error)}`)
+    })
+  }
+  private async transport(edgeId: string, relay: boolean, expectedTarget?: HostRouteIdentity): Promise<HostRouteTransport> {
+    if (!relay) return await this.options.edge(edgeId)
+    const binding = this.policy.relayEdges.get(edgeId)
+    if (!binding || this.disposed) denied('This exact saved Relay edge is unavailable. Keep its original route and operation.', 'HOST_ROUTE_EDGE_UNAVAILABLE')
+    if (expectedTarget && !isDeepStrictEqual(binding.target, expectedTarget)) denied('The saved Relay edge pins another original target.', 'HOST_ROUTE_TARGET_MISMATCH')
+    let lease = this.relayClients.get(edgeId)
+    if (!lease) {
+      lease = { binding, client: connectAgentMuxRpc({ endpoint: { transport: 'relay', offer: binding.offer } }) }
+      this.relayClients.set(edgeId, lease)
+    }
+    const client = await lease.client.catch(error => { if (this.relayClients.get(edgeId) === lease) this.relayClients.delete(edgeId); throw error })
+    if (this.relayClients.get(edgeId) !== lease) denied('This Relay edge changed while opening. Keep its original operation.', 'HOST_ROUTE_EDGE_UNAVAILABLE')
+    const port = hostRouteTransport(client)
+    return { ...port, identity: async signal => {
+      const target = await port.identity(signal)
+      if (!isDeepStrictEqual(binding.target, target)) denied('The Relay endpoint answers for another original Core.', 'HOST_ROUTE_TARGET_MISMATCH')
+      return target
+    } }
   }
   async identity(): Promise<HostRouteIdentity> { return await this.options.authority.identity() }
   private async discovery(context: AgentMuxRpcCallContext) {
@@ -128,8 +159,10 @@ export class HostRouteGateway {
     return { identity, actor }
   }
   private async savedEdges(): Promise<HostRouteEdge[]> {
-    if (!this.options.edges) denied('The original Host saved-edge source is unavailable. Existing routes and Agents are retained.', 'HOST_ROUTE_EDGE_UNAVAILABLE')
-    return (await this.options.edges()).map(parseHostRouteEdge)
+    const state = await this.state()
+    if (!this.options.edges && state.relayEdges === undefined) denied('The original Host saved-edge source is unavailable. Existing routes and Agents are retained.', 'HOST_ROUTE_EDGE_UNAVAILABLE')
+    return [...(await this.options.edges?.() ?? []).map(parseHostRouteEdge), ...(state.relayEdges ?? []).map(edge =>
+      ({ edgeId: edge.edgeId, label: edge.label, kind: 'relay' as const, runtimeId: edge.target.runtimeId }))]
   }
   async edges(context: AgentMuxRpcCallContext): Promise<HostRouteEdges> {
     const source = await this.discovery(context), edges = await this.savedEdges()
@@ -172,7 +205,7 @@ export class HostRouteGateway {
     const source = await this.discovery(context)
     const matching = (await this.savedEdges()).filter(edge => edge.edgeId === input.edgeId)
     if (matching.length !== 1) denied('This exact saved outgoing edge is absent or ambiguous. Retain the route draft; no alternate Host was selected.', 'HOST_ROUTE_EDGE_UNAVAILABLE')
-    const edge = matching[0]!, target = await (await this.options.edge(input.edgeId)).identity(context.signal)
+    const edge = matching[0]!, target = await (await this.transport(input.edgeId, edge.kind === 'relay')).identity(context.signal)
     await context.assertCurrent?.(); context.signal?.throwIfAborted()
     if (edge.runtimeId !== undefined && target.runtimeId !== edge.runtimeId)
       denied('The selected edge no longer matches its saved Runtime pin. Retain that pin and inspect the original Host configuration.', 'HOST_ROUTE_TARGET_MISMATCH')
@@ -180,7 +213,8 @@ export class HostRouteGateway {
   }
   async inspect(): Promise<HostRouteSettings> {
     const state = await this.state()
-    return structuredClone({ identity: await this.identity(), revision: state.revision, operation: state.operation, routes: state.routes, grants: state.grants })
+    const { schema: _schema, runtimeId: _runtimeId, ...settings } = state
+    return structuredClone({ identity: await this.identity(), ...settings })
   }
   async configuredRoute(routeId: string): Promise<AdoptedHostRoute | undefined> {
     await this.state(); const route = this.policy.routes.get(routeId); return route ? structuredClone(route) : undefined
@@ -189,7 +223,7 @@ export class HostRouteGateway {
     this.originalUser(context)
     const work = this.tail.then(async () => {
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
-      const current = await this.state(), configuration = parseHostRouteConfiguration(input.configuration)
+      const current = await this.state(), proposed = parseHostRouteConfiguration(input.configuration)
       const identity = await this.identity(), inputDigest = digest(input)
       if (current.operation?.operationId === input.operationId) {
         if (current.operation.inputDigest !== inputDigest) denied('This original policy operation has another input.', 'HOST_ROUTE_OPERATION_CHANGED')
@@ -197,6 +231,14 @@ export class HostRouteGateway {
         denied('This save is already observed. Inspect its original revision; do not replay it.', 'HOST_ROUTE_SAVE_ALREADY_OBSERVED')
       }
       if (current.revision !== input.expectedRevision) denied('Route policy changed. Read the same original owner and preserve both edits.', 'HOST_ROUTE_POLICY_CHANGED')
+      const relayEdges = proposed.relayEdges ?? current.relayEdges
+      if (!isDeepStrictEqual(relayEdges, current.relayEdges)) {
+        if (context.transport !== 'unix' || context.principal?.kind !== 'user') denied('Changing a Relay destination requires its original user configuration transport.', 'HOST_ROUTE_ACTOR_REQUIRED')
+        const originalIds = new Set((await this.options.edges?.() ?? []).map(edge => edge.edgeId))
+        if (relayEdges?.some(edge => originalIds.has(edge.edgeId) || edge.target.runtimeId === identity.runtimeId))
+          denied('A Relay edge must identify one distinct remote target and a unique saved edge.', 'HOST_ROUTE_INVALID')
+      }
+      const configuration = { ...proposed, ...(relayEdges === undefined ? {} : { relayEdges }) }
       if (configuration.routes.some(item => !isDeepStrictEqual(item.route.source, identity))) denied('An outgoing route must originate at this actual Core.', 'HOST_ROUTE_SOURCE_MISMATCH')
       const state: State = { schema: current.schema, runtimeId: current.runtimeId, revision: digest({ previous: current.revision, operationId: input.operationId, configuration }),
         operation: { operationId: input.operationId, inputDigest }, ...configuration }
@@ -376,7 +418,7 @@ export class HostRouteGateway {
   }
   private async next(envelope: HostRouteEnvelope, authority: { signal: AbortSignal; current(): Promise<void> }) {
     await authority.current()
-    const hop = envelope.statement.route.hops[envelope.endorsements.length]!, edge = await this.options.edge(hop.edgeId)
+    const hop = envelope.statement.route.hops[envelope.endorsements.length]!, edge = await this.transport(hop.edgeId, hop.kind === 'relay', hop.target)
     await authority.current()
     // The original receiver verifies its exact adopted identity before dispatch.
     // An independent metadata probe cannot gate this authenticated business call.
@@ -439,5 +481,5 @@ export class HostRouteGateway {
       } }
     } catch (error) { value.authority.dispose(); throw error }
   }
-  dispose(): void { this.disposed = true; for (const item of this.active) item.controller.abort(new AgentMuxError('The original route reader is closed; durable operations remain retained.', 'HOST_ROUTE_READER_CLOSED')); this.active.clear() }
+  dispose(): void { this.disposed = true; for (const item of this.active) item.controller.abort(new AgentMuxError('The original route reader is closed; durable operations remain retained.', 'HOST_ROUTE_READER_CLOSED')); this.active.clear(); for (const id of this.relayClients.keys()) this.releaseRelay(id) }
 }
