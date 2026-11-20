@@ -226,7 +226,7 @@ export function parseAgentMuxSpatialGraph(value: unknown): AgentMuxSpatialGraph 
   assertAgentMuxSpatialGraph(value);
   return JSON.parse(JSON.stringify(value)) as AgentMuxSpatialGraph;
 }
-export function spatialCatalog(graph: AgentMuxSpatialGraph, target: AgentMuxSpaceSelector = {}): AgentMuxSpaceCatalog {
+export function spatialCatalog(graph: AgentMuxSpatialGraph, target: AgentMuxSpaceSelector = {}, agentRegions?: ReadonlyMap<string, ReadonlySet<string>>): AgentMuxSpaceCatalog {
   const labels = displayLabelDocument(graph).labels;
   const nameTab = (tab: AgentMuxSpatialGraph['tabs'][number]) => ({ ...tab, nameRevision: labels[nameTargetKey({ kind: 'tab', id: tab.tabId })]?.nameRevision ?? 0 });
   const spacesByZone = new Map<string, string[]>();
@@ -236,8 +236,9 @@ export function spatialCatalog(graph: AgentMuxSpatialGraph, target: AgentMuxSpac
     if (spaces) spaces.push(binding.spaceId);
     else spacesByZone.set(binding.zoneId, [binding.spaceId]);
   }
-  const scoped = Object.keys(target).length > 0;
+  const scoped = agentRegions !== undefined || Object.keys(target).length > 0;
   const candidates = scoped ? graph.tabs.filter(tab =>
+    (!agentRegions || tab.regionIds.some(regionId => agentRegions.get(tab.tabId)?.has(regionId))) &&
     (!target.tabId || tab.tabId === target.tabId) &&
     (!target.zoneId || tab.zoneId === target.zoneId) &&
     (!target.spaceId || tab.zoneId !== null && spacesByZone.has(tab.zoneId)) &&
@@ -252,14 +253,14 @@ export function spatialCatalog(graph: AgentMuxSpatialGraph, target: AgentMuxSpac
         const tab = tabs.get(tabId);
         if (!tab) continue;
         const spaces = tab.zoneId === null ? undefined : spacesByZone.get(tab.zoneId);
-        for (const regionId of target.regionId ? [target.regionId] : tab.regionIds)
+        for (const regionId of agentRegions ? tab.regionIds.filter(id => agentRegions.get(tabId)?.has(id)) : (target.regionId ? [target.regionId] : tab.regionIds))
           for (const spaceId of spaces ?? [null])
             locations.push({ spaceId, zoneId: tab.zoneId, workspaceId: tab.workspaceId,
               displayWorkspaceId, groupId: group.id, tabId, regionId });
       }
     }
   }
-  const projectGroups = graph.projectGroups ? { projectGroups: graph.projectGroups } : {};
+  const projectGroups = !agentRegions && graph.projectGroups ? { projectGroups: graph.projectGroups } : {};
   if (!scoped)
     return { ...projectGroups, spaces: graph.spaces, zones: graph.zones, tabs: candidates.map(nameTab), regions: graph.regions, bindings: graph.bindings, locations };
   const placed = target.displayWorkspaceId || target.groupId ? new Set(locations.map(location => location.tabId)) : null;
@@ -275,8 +276,21 @@ export function spatialCatalog(graph: AgentMuxSpatialGraph, target: AgentMuxSpac
   if (target.spaceId) spaceIds.add(target.spaceId);
   return { ...projectGroups, spaces: graph.spaces.filter(space => spaceIds.has(space.spaceId)),
     zones: graph.zones.filter(zone => zoneIds.has(zone.zoneId)), tabs: selectedTabs.map(nameTab),
-    regions: graph.regions.filter(region => (!target.regionId || region.regionId === target.regionId) && selectedTabIds.has(region.tabId)),
+    regions: graph.regions.filter(region => (!target.regionId || region.regionId === target.regionId) && selectedTabIds.has(region.tabId) &&
+      (!agentRegions || agentRegions.get(region.tabId)?.has(region.regionId) && tabs.get(region.tabId)?.regionIds.includes(region.regionId))),
     bindings, locations };
+}
+
+/** Read one original Runtime's saved local members. A missing display occurrence does not erase their business binding. */
+export function spatialAgentLocationCatalog(graph: AgentMuxSpatialGraph, runtimeId: string, agentSessionIds: readonly string[]): AgentMuxSpaceCatalog {
+  const requested = new Set(agentSessionIds), regions = new Map<string, Set<string>>();
+  for (const region of graph.regions) {
+    if (!region.agentSessionId || !requested.has(region.agentSessionId) || region.kind !== 'agent' || region.execution?.hostId !== 'local' ||
+        region.execution.runtimeId !== undefined && region.execution.runtimeId !== runtimeId) continue;
+    const ids = regions.get(region.tabId) ?? new Set<string>();
+    ids.add(region.regionId); regions.set(region.tabId, ids);
+  }
+  return spatialCatalog(graph, {}, regions);
 }
 export function resolveSpatialRegion(graph: AgentMuxSpatialGraph, target: AgentMuxSpatialResolve) {
   const layout = graph.tabLayouts[target.tabId];

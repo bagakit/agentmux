@@ -292,6 +292,7 @@ type NativeParams = StorageRecoveryParamsMap & FocusParams & SpaceLinkParams & M
   'notebook.resolve': import('./note-links.js').NotebookResolveParams
   'notebook.apply': import('./notebook-catalog.js').NotebookWrite
   'space.state': Record<string, never>
+  'space.agent-locations': { runtimeId: string; agentSessionIds: string[] }
   'space.commit': import('./spatial-state.js').AgentMuxSpatialCommit
   'space.resolve': import('./spatial-state.js').AgentMuxSpatialResolve
   'name.history': import('./display-label.js').AgentMuxNameHistoryQuery
@@ -432,6 +433,7 @@ type NativeResult = StorageRecoveryResultMap & FocusResults & SpaceLinkResult & 
   'notebook.resolve': import('./note-links.js').NotebookResolveResult
   'notebook.apply': { state: import('./notebook-catalog.js').NotebookState }
   'space.state': { state: import('./spatial-state.js').AgentMuxSpatialState | null }
+  'space.agent-locations': { runtimeId: string; catalog: import('./space-control.js').AgentMuxSpaceCatalog }
   'space.commit': { state: import('./spatial-state.js').AgentMuxSpatialState }
   'space.resolve': ReturnType<typeof import('./spatial-state.js').resolveSpatialRegion>
   'name.history': import('./display-label.js').AgentMuxNameHistoryPage
@@ -620,7 +622,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   'settings.appearance.watch': 'long',
   'notebook.scan': 'long', 'notebook.ls': 'short', 'notebook.inspect': 'long', 'notebook.graph': 'long', 'notebook.resolve': 'long', 'notebook.apply': 'long',
   ...SPACE_LINK_METHODS, ...NAME_CONTROL_METHODS, ...SPACE_MEMBER_METHODS, ...SPACE_SESSION_METHODS, ...SPACE_FOLDER_METHODS, ...SPACE_AUTHORITY_METHODS, ...AGENT_OPEN_METHODS, ...AGENT_TAKEOVER_METHODS,
-  'space.state': 'short', 'space.commit': 'long', 'space.resolve': 'short', 'name.history': 'short', 'name.confirm': 'long',
+  'space.state': 'short', 'space.agent-locations': 'short', 'space.commit': 'long', 'space.resolve': 'short', 'name.history': 'short', 'name.confirm': 'long',
   'agent.conversation.landmark.ls': 'short', 'agent.conversation.landmark.apply': 'long',
   'agent.conversation.snapshot.ls': 'long', 'agent.conversation.snapshot.release': 'short', whoami: 'short', 'skill.ls': 'long', 'agent.ls': 'short', 'agent.inspect': 'short', 'agent.creation.inspect': 'short', 'agent.creation.resolve': 'long', 'agent.takeover.cancel': 'long', 'agent.takeover.cancel.inspect': 'short', 'agent.creation.continue': 'short', 'agent.execution.inspect': 'short', 'agent.execution.admit': 'long', 'agent.execution.create': 'long', 'agent.execution.continue': 'long', 'agent.execution.binding': 'short', 'agent.execution.watch': 'short', 'agent.execution.rejoin': 'long', 'agent.restart': 'long', 'agent.restart.inspect': 'short', 'agent.stop.inspect': 'short', 'agent.refresh': 'short', 'agent.continuity.control': 'short', 'agent.native.confirm': 'long', 'agent.native.ls': 'long', 'agent.native.history': 'long', 'agent.native.history.resource': 'long', 'agent.context': 'long', 'agent.history': 'long', 'agent.conversation.record': 'long', 'agent.conversation.release': 'short', 'agent.conversation.inspect': 'long', 'agent.conversation.checkpoint': 'long', 'agent.conversation.changes': 'long', 'agent.conversation.watch': 'long', 'agent.history.usage': 'long', 'agent.history.record.inspect': 'long', 'agent.history.record.delete': 'long', 'agent.history.resource': 'long', 'agent.interaction.respond': 'long', 'agent.interaction.inspect': 'short', 'agent.question.reply': 'long', 'agent.reopen': 'long', 'agent.reopen.check': 'long',
   'agent.role.ls': 'short', 'agent.role.register': 'long', 'agent.role.resolve': 'short', 'agent.spawn.ls': 'short',

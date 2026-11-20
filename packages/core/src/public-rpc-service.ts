@@ -155,7 +155,7 @@ import { isAppCaptureMethod, parseAppCaptureParams, parseAppCaptureResult, type 
 import { isAppWindowMethod, parseAppWindowPage, parseAppWindowParams, type AgentMuxRpcWindowsOwner, type AppWindowActor, type AppWindowMethod } from './public-rpc-windows.js'
 import { isScheduleMethod, parseScheduleRpcParams, validateScheduleRpcResult, type AgentMuxRpcSchedulesOwner, type ScheduleMethod } from './public-rpc-schedules.js'
 import { isNativeDesktopMethod, parseNativeDesktopParams, parseNativeDesktopResult, type AgentMuxRpcNativeDesktopOwner, type NativeDesktopMethod } from './public-rpc-native-desktop.js'
-import { AgentMuxSpatialStateStore, spatialCatalog, resolveSpatialRegion } from './spatial-state.js'
+import { AgentMuxSpatialStateStore, spatialCatalog, spatialAgentLocationCatalog, resolveSpatialRegion } from './spatial-state.js'
 import { displayLabel, type AgentMuxNameContext } from './display-label.js'
 import { createHash } from 'node:crypto'
 import { isAbsolute } from 'node:path'
@@ -493,6 +493,7 @@ const NATIVE_FIELDS = {
   'space.link.ensure': ['target','operationId'], 'space.link.resolve': ['address'],
   'space.snapshot': ['reference'], 'space.apply': ['reference','expectedRevision','changes'], 'space.watch': ['reference','after'],
   'space.state': [], 'space.commit': ['expectedRevision','graph','allowEntityRemoval','removedProjectGroupIds'],
+  'space.agent-locations': ['runtimeId','agentSessionIds'],
   'space.resolve': ['tabId','regionId','direction'],
   'name.history': ['target','afterId','limit'],
   'name.confirm': ['operationId'],
@@ -3411,6 +3412,23 @@ export class AgentMuxRpcService {
         result={state:await this.notebooks.apply(p as unknown as import('./notebook-catalog.js').NotebookWrite,actor)};break
       }
       case 'space.state': result = {state:await this.spatial.readForLayout()}; break
+      case 'space.agent-locations': {
+        const runtimeId = rpcString(p.runtimeId, 'Original execution Runtime')
+        if (!Array.isArray(p.agentSessionIds) || !p.agentSessionIds.length) throw new AgentMuxError('Choose exact Agent Sessions on the original Runtime.', 'INVALID_CONTROL_REQUEST')
+        const agentSessionIds = p.agentSessionIds.map(id => rpcString(id, 'Original Agent Session'))
+        if (this.ports.callOriginalCore) {
+          result = await this.ports.callOriginalCore('local', 'space.agent-locations', { runtimeId, agentSessionIds }, context)
+          break
+        }
+        const hosted = await this.ports.hostedRuntime?.()
+        if (!hosted) throw new AgentMuxError('The original spatial Runtime is unavailable. Agent identities are retained.', 'CONTROL_UNAVAILABLE')
+        const { owner } = await hosted.call('runtime.owner.identity', { expectedRuntimeId: runtimeId })
+        if (owner.runtimeId !== runtimeId) throw new AgentMuxError('This is another original Runtime.', 'RUNTIME_OWNER_MISMATCH')
+        const state = await this.spatial.readForLayout()
+        if (!state) throw new AgentMuxError('The original spatial document is unavailable. Agent identities are retained.', 'SPATIAL_STATE_ABSENT')
+        context.signal?.throwIfAborted()
+        result = { runtimeId, catalog: spatialAgentLocationCatalog(state.graph, runtimeId, agentSessionIds) }; break
+      }
       case 'name.confirm': result = { state: await this.spatial.confirmNameCommit(rpcString(p.operationId, 'Exact name operation ID')) }; break
       case 'name.history': {
         const target = p.target === undefined ? undefined : rpcRecord(p.target, ['kind', 'id'])
