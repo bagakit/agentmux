@@ -3,7 +3,8 @@ tag: amux:ref
 form: envelope
 title: Focus selection reference
 description: The exact Focus scope and selection. Read the selected members with the CLI entry.
-  An explicit all selection means every member in that scope. An unconfirmed selection needs the original scope or members.
+  All means every member in scope. None means an explicit empty selection.
+  An unconfirmed Collection category needs the original category identity.
 examples:
 - label: Selected members and task
   template: wire

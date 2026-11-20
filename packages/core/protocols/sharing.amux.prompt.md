@@ -3,7 +3,7 @@ tag: amux
 form: frame
 title: Shared content
 description: File or Browser text shared in a plain-text frame. A Browser share carries the pasted text.
-  A captured page observation is attached separately as Browser context.
+  A structured Browser observation can be attached separately as Browser context.
 examples:
 - label: File context
   template: wire

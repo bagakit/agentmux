@@ -2,8 +2,8 @@
 tag: amux:continue
 form: marker
 title: Continue
-description: A continuation declaration for the same original Session. Read its current status and continue
-  the work identified in the original conversation.
+description: The recovery workflow's continuation declaration for interrupted work in the same original Session.
+  Reading the declaration leaves execution to that workflow.
 examples:
 - label: Continuation declaration
   template: wire

@@ -46,7 +46,7 @@ export const AMUX_PROTOCOL_DEFINITIONS = {
     "tag": "context",
     "form": "envelope",
     "title": "Browser context",
-    "description": "A structured Browser observation attached to a message. Read the request in the message body and check the attached observation for the page, capture and source."
+    "description": "A structured Browser observation attached to a message. Read the request in the message body. The observation gives the page and capture details. The original input record gives the observed source."
   },
   "capsule-answer": {
     "tag": "amux:capsule-answer",
@@ -70,7 +70,7 @@ export const AMUX_PROTOCOL_DEFINITIONS = {
     "tag": "amux:channel",
     "form": "envelope",
     "title": "Channel message",
-    "description": "One unchanged external message with its application, actor and conversation. The message-id comes from the external platform. Use the original intake receipt for the AgentMux MID and authentication."
+    "description": "One unchanged external message with its application, actor and conversation. The message-id comes from the external platform. Use the original intake record for the AgentMux MID and authenticated binding."
   },
   "composer-task": {
     "tag": "composer-task",
@@ -88,13 +88,13 @@ export const AMUX_PROTOCOL_DEFINITIONS = {
     "tag": "amux:continue",
     "form": "marker",
     "title": "Continue",
-    "description": "A continuation declaration for the same original Session. Read its current status and continue the work identified in the original conversation."
+    "description": "The recovery workflow's continuation declaration for interrupted work in the same original Session. Reading the declaration leaves execution to that workflow."
   },
   "focus-reference": {
     "tag": "amux:ref",
     "form": "envelope",
     "title": "Focus selection reference",
-    "description": "The exact Focus scope and selection. Read the selected members with the CLI entry. An explicit all selection means every member in that scope. An unconfirmed selection needs the original scope or members."
+    "description": "The exact Focus scope and selection. Read the selected members with the CLI entry. All means every member in scope. None means an explicit empty selection. An unconfirmed Collection category needs the original category identity."
   },
   "focus-task": {
     "tag": "focus-task",
@@ -154,7 +154,7 @@ export const AMUX_PROTOCOL_DEFINITIONS = {
     "tag": "amux",
     "form": "frame",
     "title": "Shared content",
-    "description": "File or Browser text shared in a plain-text frame. A Browser share carries the pasted text. A captured page observation is attached separately as Browser context."
+    "description": "File or Browser text shared in a plain-text frame. A Browser share carries the pasted text. A structured Browser observation can be attached separately as Browser context."
   },
   "tailcat-setup": {
     "tag": "tailcat-setup",

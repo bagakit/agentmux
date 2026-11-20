@@ -3,7 +3,7 @@ tag: amux:channel
 form: envelope
 title: Channel message
 description: One unchanged external message with its application, actor and conversation.
-  The message-id comes from the external platform. Use the original intake receipt for the AgentMux MID and authentication.
+  The message-id comes from the external platform. Use the original intake record for the AgentMux MID and authenticated binding.
 examples:
 - label: Original channel message
   template: wire

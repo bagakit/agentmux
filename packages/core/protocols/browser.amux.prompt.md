@@ -2,8 +2,8 @@
 tag: context
 form: envelope
 title: Browser context
-description: A structured Browser observation attached to a message. Read the request in the message body
-  and check the attached observation for the page, capture and source.
+description: A structured Browser observation attached to a message. Read the request in the message body.
+  The observation gives the page and capture details. The original input record gives the observed source.
 examples:
 - label: Declared page observation
   template: wire
