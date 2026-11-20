@@ -34,5 +34,11 @@ export const crossHostMutations = {
     anchor: 'if (!retired) return false\n    const author = await this.currentStoredAgentSession(input.caller.agentSessionId)',
     replacement: 'if (true) return false\n    const author = await this.currentStoredAgentSession(input.caller.agentSessionId)',
     test: 'retired original Supervisor'
+  },
+  'desktop-closeout-proof': {
+    path: 'apps/host/src/goal-worker-closeout.ts',
+    anchor: 'const readDesktop = () => options.desktopOccupation?.(input.agentSessionId, input.runId, context)',
+    replacement: "const readDesktop = () => 'clear'",
+    test: 'collection with active original Supervisor unmounted'
   }
 }

@@ -11,6 +11,7 @@ import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/co
 import { useAppStore, agentSteerCanEdit, type AgentSteerQueueEntry } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import type { SessionSnapshot } from '../src/shared/contracts'
+import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 
 const initial = useAppStore.getState()
 const agent: Extract<SessionSnapshot, {kind:'agent'}> = {
@@ -32,6 +33,25 @@ beforeEach(async () => {
 afterEach(() => {useAppStore.setState(initial,true);vi.restoreAllMocks()})
 
 describe('pending text is edited by its original queue owner',()=>{
+ it('returns only original Run occupation from the Desktop draft and pending owner', async () => {
+  const before = seed()
+  const service = new AgentMuxRpcService({ execute: request => useAppStore.getState().executeControl(request) })
+  const principal = { principal: { kind: 'user' as const, id: 'private-owner' } }
+  const runId = agent.control.run.runId
+  const inspect = (closeoutRunId = runId) => service.call('message.pending.ls', { agentSessionId: agent.id, closeoutRunId }, principal)
+  const view = createWorkbenchTab('original-view', { kind: 'agent', phase: 'attached', sessionId: agent.id, workspaceId: 'original-project', regionId: 'original-region' })
+  try {
+   await expect(inspect()).resolves.toEqual({ agentSessionId: agent.id, messages: [], occupation: { runId, state: 'draft' } })
+   useAppStore.setState({ tabs: { [view.id]: view }, agentComposerDrafts: { 'original-region': 'region draft' } })
+   await expect(inspect()).resolves.toMatchObject({ messages: [], occupation: { runId, state: 'draft' } })
+   useAppStore.setState({ agentComposerDrafts: {} })
+   await expect(inspect()).resolves.toMatchObject({ occupation: { runId, state: 'pending' } })
+   expect(useAppStore.getState().agentSteerQueues[agent.id]).toEqual(before)
+   useAppStore.setState({ tabs: {}, agentSteerQueues: {}, agentComposerDrafts: { unrelated: 'leave this draft' } })
+   await expect(inspect()).resolves.toMatchObject({ occupation: { runId, state: 'clear' } })
+   await expect(inspect('another-run')).resolves.toMatchObject({ occupation: { runId: 'another-run', state: 'unknown' } })
+  } finally { await service.dispose() }
+ })
  it('changes one body, preserving identity, target, order, facts and draft; saving never submits',async()=>{
   const before=seed();const target=before[1]!;const submit=vi.spyOn(api.sessions,'submitPrompt').mockResolvedValue()
   const next='edited second\nwith full contents'

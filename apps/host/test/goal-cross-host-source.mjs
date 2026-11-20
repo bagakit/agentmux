@@ -8,7 +8,7 @@ const coreOwners = new Set(['packages/core/src/agentmux.ts', 'packages/core/src/
   'packages/core/src/public-rpc-service.ts', 'packages/core/src/public-rpc-client.ts', 'packages/core/src/client.ts',
   'packages/core/src/agent-creation-authority.ts', 'packages/core/src/agent-message-federation.ts', 'packages/core/src/agent-message-envelope.ts',
   'packages/core/src/agent-global-message-queue.ts', 'packages/core/src/agent-handoff.ts', 'apps/host/src/host.ts'])
-const goalOwners = new Set(['apps/host/src/goals.ts', 'apps/host/src/goal-delegation-owner.ts', 'apps/host/src/goal-source-report.ts',
+const goalOwners = new Set(['apps/host/src/goals.ts', 'apps/host/src/goal-delegation-owner.ts', 'apps/host/src/goal-source-report.ts', 'apps/host/src/goal-worker-closeout.ts',
   'apps/host/src/goal-supervisor-identity.ts', 'packages/core/src/goal-delegation.ts', 'packages/core/src/goal-delegation-source.ts',
   'packages/demand/src/demand-store.ts', 'packages/demand/src/delegations.ts', 'packages/demand/src/goal-plan.ts'])
 const packages = readdirSync(resolve(repositoryRoot, 'packages')).map(name => 'packages/' + name).concat(['apps/host'])

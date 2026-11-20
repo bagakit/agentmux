@@ -5,6 +5,9 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { join } from 'node:path'
+import { AgentMuxControlServer, AgentMuxSpatialStateStore } from '@agentmux/core'
+import { createWorkbenchViewLayout, createWorkspaceLayout } from '@agentmux/core/spatial-layout'
+import { desktopRunInputOccupation } from '../../desktop/src/renderer/src/lib/agent-closeout-input.js'
 
 // Each case drives real Hosts through separate public CLI processes.
 vi.setConfig({ testTimeout: 60_000 })
@@ -213,7 +216,7 @@ test('the received original report retains its worker signature and exact Goal c
   expect(b.native.stop).not.toHaveBeenCalled()
 })
 
-it.each(['active original Supervisor', 'retired original Supervisor'] as const)('retains the original report through current Supervisor collection with %s', async scenario => {
+it.each(['active original Supervisor', 'retired original Supervisor', 'active original Supervisor unmounted', 'active original Supervisor with queued Core input'] as const)('retains the original report through current Supervisor collection with %s', async scenario => {
   const host = await crossHostOwner(cleanup, 'worker-closeout', ['supervisor', 'worker', 'reviewer', 'successor'])
   const { goal } = await host.call(null, ['goal', 'create', '--title', 'Verify worker closeout',
     '--status', 'in_progress', '--assignees', '["supervisor","worker","successor"]', '--supervisor', 'supervisor', '--risk', 'low', '--confirm', 'user'])
@@ -277,11 +280,61 @@ it.each(['active original Supervisor', 'retired original Supervisor'] as const)(
   expect(originalRun.session).toMatchObject({ agentSessionId: 'worker', run: { runId: 'run-worker' } })
   expect(host.native.stop).not.toHaveBeenCalled()
 
-  const incorrect = await host.cli('worker', ['agent', 'stop', '--session', 'worker', '--run', 'different-run', '--operation-id', 'closeout-wrong-run'])
+  const closeout = (runId: string, stopOperationId: string) => ['goal', 'closeout', '--goal', goalId, '--attempt', operationId,
+    '--session', 'worker', '--run', runId, '--operation-id', stopOperationId]
+  const args = closeout('run-worker', 'closeout-stop')
+  expect(await host.call('worker', args)).toMatchObject({ state: 'retained', reason: 'unknown' })
+  const spatial = new AgentMuxSpatialStateStore(), directory = host.original.root
+  const mounted = scenario === 'active original Supervisor'
+  await spatial.commit({ expectedRevision: 0, graph: {
+    spaces: [], bindings: [],
+    zones: mounted ? [{ zoneId: 'zone', workspaceId: 'original-project', kind: 'home', hostId: 'local', directoryPath: directory, branch: null }] : [],
+    tabs: mounted ? [{ tabId: 'work-tab', zoneId: 'zone', workspaceId: 'original-project', name: 'Original Agent', regionIds: ['work-region'] }] : [],
+    regions: mounted ? [{ tabId: 'work-tab', regionId: 'work-region', kind: 'agent', agentSessionId: 'worker', runId: 'run-worker', execution: { hostId: 'local', cwd: directory } }] : [],
+    layouts: mounted ? { 'original-project': createWorkspaceLayout('group', ['work-tab']) } : {},
+    tabLayouts: mounted ? { 'work-tab': createWorkbenchViewLayout('work-region') } : {}, resources: {},
+  } })
+  const metadata = (await host.original.store.readMetadata('worker'))!, now = Date.now()
+  await host.original.store.compareAndSwapMetadata(metadata, { ...metadata, semanticStatus: { state: 'done', source: 'native-hook',
+    observedAt: now, stateEnteredAt: now, nativeTurnId: 'original-completed-turn' }, updatedAt: now })
+  await (host.client() as unknown as { registry: { load(hostId: string): Promise<void> } }).registry.load('local')
+  let known = false, pending = false
+  const drafts: Record<string, string> = {}
+  const owners = mounted ? ['worker', 'work-region'] : ['worker']
+  const desktop = new AgentMuxControlServer({ socketPath: join(directory, 'absent-desktop.sock'),
+    coreClients: () => [{ hostId: 'local', client: host.client() }], execute: async request => {
+      if (request.operation !== 'message.pending.ls' || request.closeoutRunId !== 'run-worker' || request.agentSessionId !== 'worker') throw new Error('Unexpected private Desktop request')
+      return { operation: request.operation, agentSessionId: 'worker', messages: [],
+        occupation: { runId: request.closeoutRunId, state: desktopRunInputOccupation({ known, owners, drafts, notes: {}, pending }) } }
+    } })
+  await desktop.start()
+  cleanup.push(() => desktop.stop())
+  expect(await host.call('worker', args)).toMatchObject({ state: 'retained', reason: 'unknown' })
+  known = true
+  drafts[owners.at(-1)!] = 'original unsent draft'
+  expect(await host.call('worker', args)).toMatchObject({ state: 'retained', reason: 'draft' })
+  delete drafts[owners.at(-1)!]
+  pending = true
+  expect(await host.call('worker', args)).toMatchObject({ state: 'retained', reason: 'pending' })
+  pending = false
+  if (mounted) {
+    const another = await host.call(null, ['goal', 'create', '--title', 'Other worker responsibility', '--status', 'in_progress',
+      '--assignees', '["worker"]', '--risk', 'low', '--confirm', 'user'])
+    expect(await host.call('worker', args)).toMatchObject({ state: 'retained', reason: 'other-work' })
+    await host.call(null, ['goal', 'update', '--goal', another.goal.id, '--status', 'cancelled'])
+  }
+  if (scenario === 'active original Supervisor with queued Core input') {
+    await host.call('successor', ['agent', 'send', '--to-session', 'worker', '--expect-run', 'run-worker', '--message-id', 'another-original-input',
+      '--operation-id', 'queue-another-input', '--text', 'An unrelated original input'])
+    expect(await host.call('worker', args)).toMatchObject({ state: 'retained', reason: 'pending' })
+    expect(host.native.stop).not.toHaveBeenCalled()
+    return
+  }
+  const incorrect = await host.cli('worker', closeout('different-run', 'closeout-wrong-run'))
   expect(incorrect.code).toBe(1)
   expect(host.native.stop).not.toHaveBeenCalled()
-  const stopped = await host.call('worker', ['agent', 'stop', '--session', 'worker', '--run', 'run-worker', '--operation-id', 'closeout-stop'])
-  expect(stopped.receipt).toMatchObject({ operationId: 'closeout-stop', agentSessionId: 'worker', expectedRun: { runId: 'run-worker' } })
+  const stopped = await host.call('worker', args)
+  expect(stopped).toMatchObject({ state: 'stopped', receipt: { operationId: 'closeout-stop', agentSessionId: 'worker', expectedRun: { runId: 'run-worker' } } })
   expect(host.native.stop).toHaveBeenCalledTimes(1)
   expect(host.native.stop).toHaveBeenCalledWith(expect.objectContaining({ runId: 'run-worker' }))
   const retained = await host.call(null, ['agent', 'stop', 'inspect', '--session', 'worker', '--run', 'run-worker', '--operation-id', 'closeout-stop'])
