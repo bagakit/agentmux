@@ -3,6 +3,34 @@ const assert = require('node:assert/strict')
 // Host-shaped preview inputs enter the normal App. All navigation below uses its rendered controls.
 module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result, keyEscape, debuggerSession }) => {
   const query = selector => `document.querySelector(${JSON.stringify(selector)})`
+  if (process.env.AGENTMUX_GOAL_WORKFLOW_REVIEW_CAPTURE === '1') {
+    const attempt = query('[data-goal-delivery="attempt:outline"]')
+    const view = `[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'View delivery')`
+    for (const [width, theme] of [[1260, 'dark'], [620, 'light']]) for (const state of ['prepared', 'confirmed']) {
+      await size(width)
+      await evaluate(`goalsPlan.seed(false,true,false,${JSON.stringify(state)}); goalsVisual.appearance(${JSON.stringify(theme)})`)
+      await waitFor(`Boolean(${view})`)
+      await click(view)
+      await waitFor(`Boolean(${attempt}?.querySelector('[data-goal-workflow-review]'))`)
+      await evaluate(`${attempt}.querySelector('[data-goal-workflow-review]').scrollIntoView({block: 'center', behavior: 'instant'})`)
+      await paint()
+      const read = await evaluate(`(() => {
+        const attempt = ${attempt}, notice = attempt.querySelector('[data-goal-workflow-review]'), manualReview = attempt.querySelector('.goal-delivery__form > summary')
+        const visible = element => {
+          const rect = element.getBoundingClientRect()
+          const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)
+          return rect.top >= 80 && rect.bottom <= innerHeight - 24 && element.contains(hit)
+        }
+        return { status: notice.textContent, width: attempt.clientWidth, overflow: attempt.scrollWidth - attempt.clientWidth,
+          visible: visible(notice), manualReview: manualReview.textContent === 'Record review' && visible(manualReview) }
+      })()`)
+      assert.ok(read.visible && read.manualReview && read.width > 0 && read.overflow <= 1, JSON.stringify(read))
+      assert.match(read.status, state === 'confirmed' ? /reviewer received the original delivery/ : /Waiting for the original independent reviewer/)
+      await capture(`${width}-${theme}-workflow-review-${state}`, width)
+      result.observations.push({ width, theme, state, ...read })
+    }
+    return
+  }
   async function hitControl(selector) {
     const target = query(selector)
     await evaluate(`${target}.scrollIntoView({block: 'nearest'})`)

@@ -249,6 +249,20 @@ function button(label: string) {
 async function click(label: string) { await act(async () => button(label).click()); await settle() }
 
 describe('mounted original Goal delegation consumer', () => {
+  it('shows independent reviewer input separately from the original manual review action', async () => {
+    const deliveryHash = 'a'.repeat(64)
+    const record = goal({ ...delegation(), planNodeId: 'original-ticket', report: { ...report(),
+      delivery: { schema: 'agentmux.ticket-delivery.v2', hash: deliveryHash, authorRuntimeId: 'worker-runtime' } },
+      collection: { operationId: 'original-collection', replyMessageId: 'original-reply', collector: { kind: 'user', id: 'original-user' },
+        collectedAt: _reshape_fixtureEpoch(0, 0, 21), workflowReview: { operationId: 'independent-review', deliveryHash,
+          reviewer: { hostId: 'original-host', runtimeId: 'reviewer-runtime', agentSessionId: 'original-reviewer' } } } })
+    const reason = 'The original reviewer input is unconfirmed.'
+    record.delegationObservations = [{ ...observation(), workflowReview: { state: 'unknown', reason } }]
+    vi.spyOn(api.demands, 'delegation').mockResolvedValue(result(record))
+    await mount(record)
+    expect(container.textContent).toContain('Collected · Reviewer input unconfirmed')
+    expect(button('Review results')).toBeTruthy()
+  })
   it('keeps actual report responsibility before repeated relationship configuration with visible summary and a primary collection action', async () => {
     const record = goal({ ...delegation(), report: report(), attention: { operationId: 'notice', intentId: 'notice-intent', hostId: 'original-host',
       supervisorAgentSessionId: 'original-owner', supervisorRunId: 'owner-run', occurrenceAt: _reshape_fixtureEpoch(0, 0, 20), agentMuxNote: 'Original reminder', preparedAt: _reshape_fixtureEpoch(0, 0, 21) } })

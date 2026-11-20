@@ -4,6 +4,7 @@ import { parseDemandDelegations, type DemandDelegation } from '@agentmux/demand/
 import { parseGoalPlan, type GoalPlan, type GoalPlanNodeInput } from '@agentmux/demand/goal-plan'
 import { demandExecutionReferences, demandResponsibilityScope } from '../../../../../packages/demand/src/responsibility'
 import type { GoalResponsibilityObservation } from '@agentmux/core/goal-responsibility'
+import type { GoalDelegationObservation } from '@agentmux/core/goal-delegation'
 import { parseDemandPatrols, demandPatrolScope } from '../../../../../packages/demand/src/goal-patrol'
 import { formatGoalAddress } from '@agentmux/core/sharing'
 import { parseGoalPatrolObservations } from '@agentmux/core/goal-patrol'
@@ -16,7 +17,7 @@ export function goalPlanPreview(seed: (mode: string) => void, render: () => void
   const originalDelegation = api.demands.delegation
   return {
     /** `withoutDerivation` previews a Host that returns the plan without node states, as an older version does. */
-    seed(withoutDerivation = false, openGuide = false, awaitingConfirmation = false) {
+    seed(withoutDerivation = false, openGuide = false, awaitingConfirmation = false, workflowState?: 'prepared' | 'confirmed') {
       seed('confirmed')
       const state = useAppStore.getState(), goal = state.demands[state.selectedDemandId!]!
       const agents = state.sessions.filter(session => session.kind === 'agent')
@@ -72,13 +73,26 @@ export function goalPlanPreview(seed: (mode: string) => void, render: () => void
         reviewer: { kind: 'agent', id: owner.control.agentSessionId }, reviewedAt: at(4)
       })
       const plan = parseGoalPlan({ revision: 2, alignmentRevision: goal.alignment!.revision, nodes,
-        reviews: [review('outline', 'pass'), review('history', 'changes')],
+        reviews: workflowState ? [] : [review('outline', 'pass'), review('history', 'changes')],
         history: [1, 2].map(revision => ({ operationId: `plan:revision-${revision}`, revision, author: { kind: 'agent', id: owner.control.agentSessionId }, revisedAt: at(revision) })) })
       const previousGuide = attempt('guide', true)
       previousGuide.workerAgentSessionId = previousWorker.control.agentSessionId
       previousGuide.workerRunId = previousWorker.control.run.runId
       previousGuide.report = { ...previousGuide.report!, authorAgentSessionId: previousWorker.control.agentSessionId,
         grounding: { ...previousGuide.report!.grounding, summary: 'The earlier guide result is retained after reassignment.' } }
+      const outline = attempt('outline', true)
+      const observations: GoalDelegationObservation[] = []
+      if (workflowState) {
+        const hash = 'a'.repeat(64), collectedAt = at(4), operationId = 'preview-independent-review'
+        outline.report!.delivery = { schema: 'agentmux.ticket-delivery.v2', hash, authorRuntimeId: 'plan-worker-runtime' }
+        outline.collection = { operationId: 'preview-collected-delivery', replyMessageId: outline.report!.replyMessageId, collectedAt,
+          collector: { kind: 'agent', id: owner.control.agentSessionId },
+          workflowReview: { operationId, deliveryHash: hash, reviewer: { hostId: owner.control.hostId, runtimeId: 'workbench-preview-runtime', agentSessionId: owner.control.agentSessionId },
+            ...(workflowState === 'confirmed' ? { input: { runId: owner.control.run.runId, agentMuxNote: 'Verify the original delivery.', attemptedAt: collectedAt + 1 } } : {}) } }
+        observations.push({ operationId: outline.operationId, workflowReview: { state: workflowState,
+          reason: workflowState === 'confirmed' ? 'The independent reviewer received the original delivery. Its verdict remains separate.'
+            : 'Waiting for the original independent reviewer to accept input.' } })
+      }
       const next = { ...goal, ...(openGuide ? { address: formatGoalAddress(goal.id, 'workbench-preview-runtime', 'workspace-recovery') } : {}), title: 'Return to the same work, without rebuilding it',
         ...(awaitingConfirmation ? { alignment: { ...goal.alignment!, confirmedAt: null }, plan: { ...plan, reviews: [] } } : { plan }),
         activities: Array.from({ length: 8 }, (_, index) => ({ id: `original-note:${index}`, kind: 'Progress',
@@ -87,7 +101,7 @@ export function goalPlanPreview(seed: (mode: string) => void, render: () => void
         decisions: [{ id: 'original-decision', question: 'Which work should the next check use?', decision: 'Continue from the same original workspace.',
           rationale: 'The existing Sessions, reading anchors and unsent drafts belong to this work.', actorId: owner.control.agentSessionId, createdAt: goal.createdAt + 9 * 60000 }],
         supervisorSessionId: owner.control.agentSessionId, sessionIds: [...new Set([...goal.sessionIds, executor.agentSessionId, previousWorker.control.agentSessionId])], assigneeSessionIds: [owner.control.agentSessionId, executor.agentSessionId],
-        delegations: awaitingConfirmation ? [] : parseDemandDelegations([attempt('outline', true), attempt('workspace', false), attempt('drafts', true), attempt('history', true), attempt('reconnect', false, false), ...(openGuide ? [] : [previousGuide])]) }
+        delegations: awaitingConfirmation ? [] : parseDemandDelegations([outline, attempt('workspace', false), attempt('drafts', true), attempt('history', true), attempt('reconnect', false, false), ...(openGuide ? [] : [previousGuide])]) }
       const references = demandExecutionReferences(next)
       // The private Electron probe validates these DTOs with the production parser outside the browser.
       const responsibility: GoalResponsibilityObservation = { scope: demandResponsibilityScope(next), observedAt: next.updatedAt,
@@ -109,10 +123,10 @@ export function goalPlanPreview(seed: (mode: string) => void, render: () => void
             } : {}),
             basis: { stateEnteredAt: null, activityRevision: null, inputSubmissionId: null } }
         }) }
-      const owned = withoutDerivation ? { plan } : hostGoalPlan(next), observed = { ...next, ...owned, responsibility }
+      const owned = withoutDerivation ? { plan } : hostGoalPlan(next), observed = { ...next, ...owned, responsibility, delegationObservations: observations }
       // Actual observation hooks read these original preview facts instead of clearing the fixture.
       api.demands.delegation = async (operation, input) => input.goalId === next.id && operation === 'goal.delegations'
-        ? { goalId: next.id, goalUpdatedAt: next.updatedAt, diskDurability: 'confirmed' as const, delegations: next.delegations, observations: [], ...owned, responsibility }
+        ? { goalId: next.id, goalUpdatedAt: next.updatedAt, diskDurability: 'confirmed' as const, delegations: next.delegations, observations, ...owned, responsibility }
         : originalDelegation(operation, input)
       flushSync(() => {
         useAppStore.setState({ demands: { [next.id]: observed },

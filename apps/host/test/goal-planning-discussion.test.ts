@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { appendFileSync } from 'node:fs'
+import { readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { AgentMuxSpatialStateStore } from '@agentmux/core'
 import { deriveObjectId } from '@agentmux/core/object-id'
@@ -16,6 +17,8 @@ afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await c
 it('the public CLI submits and reconciles an original managed planning input, then only the legal author can save the unconfirmed Goal plan', async () => {
   vi.stubEnv('NODE_OPTIONS', [process.env.NODE_OPTIONS, '--import ' + resolve('apps/host/test/goal-planning-discussion-node-loader.mjs')].filter(Boolean).join(' '))
   const f = await crossHostOwner(cleanup, 'planning', ['supervisor', 'discussion'])
+  const config = JSON.parse(await readFile(f.configurationPath, 'utf8'))
+  await writeFile(f.configurationPath, JSON.stringify({ ...config, goals: { workflow: { template: 'evidence-synthesis' } } }))
   const goalId = 'original-planning-goal', operationId = 'original-planning-request'
   await f.call(null, ['goal', 'create', '--goal', goalId, '--title', 'Keep the real Goal', '--description', 'Preserve the original human intent.',
     '--assignees', '["supervisor","discussion"]', '--supervisor', 'supervisor', '--risk', 'low', '--confirm', 'user'])
@@ -44,12 +47,16 @@ it('the public CLI submits and reconciles an original managed planning input, th
   expect(request).toMatchObject({ requestedBy: { kind: 'agent', id: 'discussion' }, supervisorAgentSessionId: 'supervisor' })
   expect(attempt.agentMuxNote).toContain('goal plan revise')
   expect(attempt.agentMuxNote).toContain('agentmux.goal-plan-request.v1')
+  const frozenPlan = JSON.parse(attempt.agentMuxNote.split('\n\n')[0])
+  expect(frozenPlan.context.workflow).toMatchObject({ id: 'evidence-synthesis', title: 'Evidence and synthesis' })
+  expect(frozenPlan.context.workflow.instructions).toContain('depends on those verified deliveries')
   const input = await f.client().inspectAgentPromptSubmission({ kind: 'prompt', agentSessionId: 'supervisor', expectedRun: { runId: 'run-supervisor' }, submissionId: attempt.operationId })
   expect(input?.admission).toMatchObject({ acknowledged: true, inputKey: { kind: 'prompt', agentSessionId: 'supervisor', expectedRun: { runId: 'run-supervisor' }, submissionId: attempt.operationId } })
   expect(input?.admission?.intent?.message?.authorHuman).toBeUndefined()
   expect((await f.call(null, ['goal', 'plan', '--goal', goalId])).plan).toBeUndefined()
   const nativeWrites = () => f.original.rawInput.mock.calls.length + (f.native.input as { mock: { calls: unknown[] } }).mock.calls.length
   const beforeRetry = nativeWrites(); expect(beforeRetry).toBeGreaterThan(0)
+  await writeFile(f.configurationPath, JSON.stringify({ ...config, goals: { workflow: { template: 'execution-review' } } }))
   await f.call(null, ['goal', 'update', '--goal', goalId, '--project', workspaceProjectId({ id: 'original-project', name: 'Original project', hostId: 'local', path: directory })])
   const retry = await f.call('discussion', args)
   expect(retry.receipt).toEqual(first.receipt); expect(nativeWrites()).toBe(beforeRetry)
