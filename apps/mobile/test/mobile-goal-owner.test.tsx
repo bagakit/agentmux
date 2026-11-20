@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fixturePath } from '../../../test/fixture-values.mjs'
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import './mobile-lan-crypto.setup'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { act } from 'react'
@@ -10,7 +11,7 @@ vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 import { openDemandStore } from '@agentmux/demand'
 import { createHostGoals } from '../../host/src/goals'
 import { projectHostGoal } from '../../host/src/goal-projection'
-import { AgentMuxRpcService } from '../../../packages/core/src/public-rpc-service'
+import { AgentMuxRpcService, type AgentMuxRpcServiceOptions } from '../../../packages/core/src/public-rpc-service'
 import { api } from '../../desktop/src/renderer/src/lib/api'
 import { useAppStore } from '../../desktop/src/renderer/src/store'
 import { SCRATCH_WORKSPACE_ID } from '../../host/src/mote-model'
@@ -32,6 +33,8 @@ const inFlight = new Set<Promise<unknown>>()
 let discussionUnavailable = false
 let directoryProjects: import('@agentmux/core/control').AgentMuxControlProject[] = []
 const discussionName = 'Original discussion Agent'
+const creationRuntime = 'private-goal-runtime'
+const creationInputEpoch = 'original-mobile-input-epoch'
 const mounts: { root: Root; element: HTMLDivElement }[] = []
 const scratch = { id: SCRATCH_WORKSPACE_ID, name: 'Main Mote', hostId: 'local', path: fixturePath("private-topic-fixture"), kind: 'scratch' as const }
 const config = { ...baseline.config, version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private' }], workspaces: [scratch], executors: {} } as any
@@ -48,7 +51,8 @@ beforeEach(async () => {
   const configurationPath = join(directory, 'configuration.json')
   await writeFile(configurationPath, JSON.stringify(config))
   hostGoals = createHostGoals({ configurationPath, projects: async () => directoryProjects,
-    runtime: () => { throw new Error('This mounted CRUD fixture must not start or observe a native Agent.') },
+    runtime: () => ({ ownerIdentity: () => ({ runtimeId: creationRuntime }),
+      client: { readAgentInputEpoch: async () => creationInputEpoch } }) as ReturnType<Parameters<typeof createHostGoals>[0]['runtime']>,
     coreCall: async () => { throw new Error('Native discussion execution is qualified by the Host integration suite, not this mounted client fixture.') } })
   owner = openDemandStore({ root: join(directory, 'demands') })
   useAppStore.setState({ ...baseline, config, sessions: [], tabs: {}, layouts: {}, demandPmoTabIds: {}, demands: {} }, true)
@@ -58,24 +62,23 @@ beforeEach(async () => {
   vi.spyOn(hostGoals.demands, 'update').mockImplementation((...args) => owner.update(...args))
   vi.spyOn(hostGoals.demands, 'confirmAlignment').mockImplementation((...args) => owner.confirmAlignment(...args))
   vi.spyOn(api.demands, 'list').mockImplementation(() => owner.list())
-  vi.spyOn(api.goals, 'execute').mockImplementation(async request => {
-    if (request.operation === 'demand.discuss') {
-      // Exact controlled Host receipt: this suite owns its phone consumption.
-      // Real discussion creation/input is covered by mobile-desktop-goals.test.ts.
-      if (discussionUnavailable) throw new Error('Original discussion owner is unavailable')
-      const goal = await owner.get(request.demandId)
-      expect(goal, 'The discussion consumes the original saved Goal').not.toBeNull()
-      const binding = discussions.get(goal!.id) ?? { tabId: 'discussion-tab:' + goal!.id, regionId: 'discussion-region:' + goal!.id, sessionId: 'discussion-agent:' + goal!.id }
-      discussions.set(goal!.id, binding)
-      return { operation: request.operation, demand: projectHostGoal(goal!), receipt: { demandId: goal!.id, requestId: request.requestId,
-        route: 'discussion', mode: request.mode, tabId: binding.tabId, regionId: binding.regionId, hostId: 'local', agentSessionId: binding.sessionId } }
-    }
-    const result = await hostGoals.execute(request, undefined)
-    if (!result || !result.operation.startsWith('demand.')) throw new Error('The original Host did not handle this Goal operation: ' + request.operation)
-    return result as Awaited<ReturnType<typeof api.goals.execute>>
-  })
   vi.spyOn(api.continuousProgress, 'goals').mockResolvedValue([])
 })
+const executeGoal: NonNullable<AgentMuxRpcServiceOptions['goalControl']> = async (request, names, context) => {
+  if (request.operation === 'demand.discuss') {
+    // The mounted client consumes a controlled receipt. Its native production is covered by mobile-desktop-goals.test.ts.
+    if (discussionUnavailable) throw new Error('Original discussion owner is unavailable')
+    const goal = await owner.get(request.demandId)
+    expect(goal, 'The discussion consumes the original saved Goal').not.toBeNull()
+    const binding = discussions.get(goal!.id) ?? { tabId: 'discussion-tab:' + goal!.id, regionId: 'discussion-region:' + goal!.id, sessionId: 'discussion-agent:' + goal!.id }
+    discussions.set(goal!.id, binding)
+    return { operation: request.operation, demand: projectHostGoal(goal!), receipt: { demandId: goal!.id, requestId: request.requestId,
+      route: 'discussion', mode: request.mode, tabId: binding.tabId, regionId: binding.regionId, hostId: 'local', agentSessionId: binding.sessionId } }
+  }
+  const result = await hostGoals.execute(request, names, context)
+  if (!result || !result.operation.startsWith('demand.')) throw new Error('The original Host did not handle this Goal operation: ' + request.operation)
+  return result
+}
 afterEach(async () => {
   for (const view of mounts.splice(0)) { await act(async () => view.root.unmount()); view.element.remove() }
   if (originalGoalWidth) Object.defineProperty(window, 'innerWidth', originalGoalWidth); else Reflect.deleteProperty(window, 'innerWidth')
@@ -83,7 +86,7 @@ afterEach(async () => {
 })
 async function mount(initialContext?: import('../src/recovery/presentation-route').MobileGoalsContext, mobileApp = false) {
   const sdk = mobileApp ? fixture() : null
-  const service = new AgentMuxRpcService({ execute: request => {
+  const service = new AgentMuxRpcService({ goalControl: executeGoal, execute: request => {
     if (request.operation === 'space.inspect') {
       const binding = [...discussions.values()].find(value => value.tabId === ('tabId' in request.target ? request.target.tabId : undefined))
       expect(binding, 'The public read keeps the exact discussion Tab').toBeDefined()
@@ -102,7 +105,7 @@ async function mount(initialContext?: import('../src/recovery/presentation-route
     }, () => inFlight.delete(pending))
     return pending
   })
-  const client = Object.assign(sdk?.client ?? {}, { forwardRpc, runtimeOwnerIdentity: () => ({ runtimeId: 'private-goal-runtime', ownerInstanceId: 'original-goal-process', availability: 'connected' }) }) as any, element = document.createElement('div'); document.body.append(element)
+  const client = Object.assign(sdk?.client ?? {}, { forwardRpc, runtimeOwnerIdentity: () => ({ runtimeId: creationRuntime, ownerInstanceId: 'original-goal-process', availability: 'connected' }) }) as any, element = document.createElement('div'); document.body.append(element)
   const root = createRoot(element); mounts.push({ root, element })
   const openSession = vi.fn()
   if (mobileApp) await getDeviceWorkface().updatePresentation({ selectedSessionId: null, hostUrl: '', panel: 'conversation' },
@@ -117,7 +120,7 @@ async function mount(initialContext?: import('../src/recovery/presentation-route
   return { element, forwardRpc, render, click, wait, buttons, openSession, root, client, sdk }
 }
 async function existingGoal() {
-  await owner.create({ id: 'original-goal', title: 'Actual goal' }); await owner.update('original-goal', { alignment: proposal })
+  await seedStoredDemand(owner, { id: 'original-goal', title: 'Actual goal' }); await owner.update('original-goal', { alignment: proposal })
   const view = await mount(); await view.wait('Actual goal')
   await view.click('Actual goal未分配项目 · 待整理'); await view.wait(proposal.summary)
   return view
@@ -184,7 +187,7 @@ it('workface Goal preserves the original create form outside the shared panes wh
 })
 
 it('responsive Goals actual App keeps its selected owner, original editor and unsaved draft through wide and phone panes', async () => {
-  await owner.create({ id: 'responsive-original', title: 'Original responsive goal', description: 'Original owner body' })
+  await seedStoredDemand(owner, { id: 'responsive-original', title: 'Original responsive goal', description: 'Original owner body' })
   await owner.update('responsive-original', { alignment: proposal })
   await goalWidth(844)
   const view = await mount(undefined, true)
@@ -246,7 +249,7 @@ it('responsive Goals keeps the original unknown writer ACK and its editor throug
 })
 
 it('responsive Goals uses only its visible original list and selected detail readers, retaining filters when the phone list hides', async () => {
-  await owner.create({ id: 'reader-a', title: 'Reader A' }); await owner.create({ id: 'reader-b', title: 'Reader B' })
+  await seedStoredDemand(owner, { id: 'reader-a', title: 'Reader A' }); await seedStoredDemand(owner, { id: 'reader-b', title: 'Reader B' })
   const view = await mount({ goalId: 'reader-a', mode: 'detail', discussion: null })
   await view.wait('Reader A')
   const count = (method: string) => view.forwardRpc.mock.calls.filter(([name]) => name === method).length
@@ -310,7 +313,7 @@ it('retains a lost delete receipt after the real public Goal service removes the
 })
 
 it('published Demand dispatch persistence and strict Core Goal codec feed the mounted roles/stages consumer without Start or activity inference', async () => {
-  await owner.create({ id: 'original-goal', title: 'Actual dispatch goal', assigneeSessionIds: ['original-assignee'], supervisorSessionId: 'original-assignee' })
+  await seedStoredDemand(owner, { id: 'original-goal', title: 'Actual dispatch goal', assigneeSessionIds: ['original-assignee'], supervisorSessionId: 'original-assignee' })
   for (const stage of ['prepared', 'submitted', 'unknown', 'confirmed'] as const) {
     const operationId = `original-${stage}`
     await owner.prepareDispatch('original-goal', { operationId, agentSessionId: 'original-assignee', hostId: 'original-execution-host', runId: 'original-run-reference', execution: 'finite', prompt: `原${stage}正文` })
@@ -527,19 +530,19 @@ it('unrelated same-record conversation/navigation edits preserve the normal orig
   expect(record.selectedSessionId).toBe('another-session'); expect(record.goalDrafts?.[0]?.operations).toEqual([])
 })
 
-it('cold remount restores unknown creation from durable device bytes and reads its original ID without creating', async () => {
-  vi.mocked(hostGoals.demands.create).mockImplementationOnce(async input => { await owner.create(input); throw new Error('Durable creation ACK unknown') })
+it('cold remount restores unknown creation from durable device bytes and reads its original operation without creating', async () => {
+  vi.mocked(hostGoals.demands.create).mockImplementationOnce(async (...args) => { await owner.create(...args); throw new Error('Durable creation ACK unknown') })
   const first = await mount(); await first.click('新建目标'); await first.click('创建目标'); await first.wait('Durable creation ACK unknown')
   const input = first.forwardRpc.mock.calls.find(([method]) => method === 'goal.create')![1]
   const bytes = localStorage.getItem(DEVICE_WORKFACE_KEY)!
-  expect(new DeviceWorkfaceStore(() => localStorage).snapshot().record.goalIntents).toMatchObject([{ goalId: input.goalId, operationId: input.operationId, kind: 'create', phase: 'unknown' }])
+  expect(new DeviceWorkfaceStore(() => localStorage).snapshot().record.goalIntents).toMatchObject([{ operationId: input.operationId, kind: 'create', phase: 'unknown' }])
   await unmount(first)
   const restored = await mount(); await restored.wait('还不确定目标是否已创建')
-  expect(restored.element.textContent).toContain(input.goalId); await restored.click('新建目标'); expect(restored.buttons('创建目标')[0]!.disabled).toBe(true)
+  expect(restored.element.textContent).toContain(input.operationId); await restored.click('新建目标'); expect(restored.buttons('创建目标')[0]!.disabled).toBe(true)
   expect(restored.forwardRpc.mock.calls.some(([method]) => method === 'goal.create')).toBe(false)
   expect(localStorage.getItem(DEVICE_WORKFACE_KEY)).toBe(bytes)
   await restored.click('读取同一目标核对'); await restored.wait(discussionName)
-  expect(restored.forwardRpc).toHaveBeenCalledWith('goal.inspect', { goalId: input.goalId })
+  expect(restored.forwardRpc).toHaveBeenCalledWith('goal.inspect', { creationOperationId: input.operationId })
   expect(restored.forwardRpc.mock.calls.some(([method]) => method === 'goal.create')).toBe(false)
   expect(await owner.list()).toHaveLength(1)
 })
@@ -572,8 +575,8 @@ it('late original discussion receipt after leaving Goals preserves its Tab witho
 
 it('late creation completion after leaving Goals never selects or presents the original new goal', async () => {
   let settle!: () => void
-  vi.mocked(hostGoals.demands.create).mockImplementationOnce(async input => {
-    const receipt = await owner.create(input); return await new Promise(resolve => { settle = () => resolve(receipt) })
+  vi.mocked(hostGoals.demands.create).mockImplementationOnce(async (...args) => {
+    const receipt = await owner.create(...args); return await new Promise(resolve => { settle = () => resolve(receipt) })
   })
   const view = await mount(); await view.click('新建目标'); await view.click('创建目标'); await vi.waitFor(() => expect(settle).toBeTypeOf('function'), { timeout: 5000 })
   await view.render(false); await view.render(true); await act(async () => settle())
@@ -582,6 +585,32 @@ it('late creation completion after leaving Goals never selects or presents the o
   expect(view.buttons('返回目标列表')).toHaveLength(0); expect(view.buttons('返回目标')).toHaveLength(0); expect(view.openSession).not.toHaveBeenCalled()
   expect(view.forwardRpc.mock.calls.some(([method]) => method === 'space.inspect')).toBe(false)
   expect(await owner.list()).toHaveLength(1)
+})
+
+it('a creation reply from the previous Runtime waits for that owner to be connected again', async () => {
+  let settle!: () => void
+  vi.mocked(hostGoals.demands.create).mockImplementationOnce(async (...args) => {
+    const receipt = await owner.create(...args)
+    return await new Promise(resolve => { settle = () => resolve(receipt) })
+  })
+  const view = await mount()
+  const identity = view.client.runtimeOwnerIdentity
+  await view.click('新建目标'); await view.click('创建目标')
+  await vi.waitFor(() => expect(settle).toBeTypeOf('function'))
+  const input = view.forwardRpc.mock.calls.find(([method]) => method === 'goal.create')![1]
+  view.client.runtimeOwnerIdentity = () => ({ ...identity(), runtimeId: 'other-runtime' })
+  await act(async () => settle())
+  await view.wait('这个请求来自另一台 Mac')
+  expect(getDeviceWorkface().snapshot().record.goalIntents).toEqual([expect.objectContaining({
+    runtimeId: creationRuntime, operationId: input.operationId, phase: 'unknown'
+  })])
+  expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.discuss')).toEqual([])
+  expect(view.openSession).not.toHaveBeenCalled()
+
+  view.client.runtimeOwnerIdentity = identity
+  await view.click('读取同一目标核对'); await view.wait(discussionName)
+  expect(view.forwardRpc).toHaveBeenCalledWith('goal.inspect', { creationOperationId: input.operationId })
+  expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.create')).toHaveLength(1)
 })
 
 it('late old acknowledgement-recovery read never replaces a newer displayed proposal or clears its guard', async () => {
@@ -626,36 +655,48 @@ it('device intent I/O failure keeps human acknowledgement and its unknown recove
   expect(localStorage.getItem(DEVICE_WORKFACE_KEY)).toBe(before); set.mockRestore(); await getDeviceWorkface().replaceUnreadableWithCurrent()
 })
 
-it('explicit creation uses the current Host domain and strict public service to save one pending ID and present its exact discussion receipt', async () => {
-  const view = await mount(); await view.click('新建目标'); await view.click('创建目标'); await view.wait(discussionName)
-  const input = view.forwardRpc.mock.calls.find(([method]) => method === 'goal.create')![1]
-  expect(input).toMatchObject({ goalId: expect.stringMatching(/^[1-9A-HJ-NP-Za-km-z]{12}$/), title: 'Untitled goal', description: '', status: 'backlog' })
+it('explicit creation uses the current Host domain and strict public service to present the owner-issued ID and its exact discussion receipt', async () => {
+  const view = await mount(); await view.click('新建目标'); await view.click('创建目标')
+  const creation = view.forwardRpc.mock.calls.findIndex(([method]) => method === 'goal.create')
+  expect(creation, view.element.textContent ?? '').toBeGreaterThanOrEqual(0)
+  const input = view.forwardRpc.mock.calls[creation]![1]
+  await act(async () => { await view.forwardRpc.mock.results[creation]!.value })
+  const created = await view.forwardRpc.mock.results[creation]!.value
+  await vi.waitFor(() => expect(view.element.textContent).toContain(discussionName), { timeout: 2000 })
+  const goalId = (await owner.originalGoalCreationId(input.operationId))!
+  expect(input).not.toHaveProperty('goalId')
+  expect(input).toMatchObject({ title: 'Untitled goal', description: '', status: 'backlog' })
   expect(input).not.toHaveProperty('projectId')
-  const saved = (await openDemandStore({ root: join(directory, 'demands') }).get(input.goalId))!
-  expect(saved).toMatchObject({ id: input.goalId, projectId: null, description: '', sessionIds: [] }); expect(saved.alignment).toBeUndefined(); expect(saved.grounding).toBeUndefined()
-  expect(view.forwardRpc).toHaveBeenCalledWith('goal.discuss', { goalId: input.goalId, mode: 'grill', operationId: expect.any(String) })
-  const tabId = discussions.get(input.goalId)!.tabId
-  expect(view.forwardRpc).toHaveBeenCalledWith('space.inspect', { target: { tabId }, presentation: true })
+  const saved = (await openDemandStore({ root: join(directory, 'demands') }).get(goalId))!
+  expect(saved).toMatchObject({ id: goalId, projectId: null, description: '', sessionIds: [], creationOrigin: {
+    operationId: input.operationId, inputRuntimeId: creationRuntime, inputEpoch: creationInputEpoch
+  } }); expect(saved.alignment).toBeUndefined(); expect(saved.grounding).toBeUndefined()
+  expect(created).toMatchObject({ goal: { id: goalId, address: { runtimeId: creationRuntime, creationOperationId: input.operationId, goalUrl: `amux://goal/${goalId}` } }, receipt: { goalId } })
+  expect(view.forwardRpc).toHaveBeenCalledWith('goal.discuss', { goalId, mode: 'grill', operationId: expect.any(String) })
+  const tabId = discussions.get(goalId)!.tabId
+  expect(view.forwardRpc).toHaveBeenCalledWith('space.inspect', { target: { tabId }, presentation: 'status' },
+    expect.objectContaining({ signal: expect.any(AbortSignal) }))
   expect([...discussions.values()].map(value => value.tabId)).toEqual([tabId]); expect(await owner.list()).toHaveLength(1)
   expect(view.forwardRpc.mock.calls.some(([method]) => method === 'goal.start')).toBe(false)
-  expect(view.openSession).toHaveBeenCalledExactlyOnceWith(discussions.get(input.goalId)!.sessionId, expect.objectContaining({ project: '未分配项目' }))
+  expect(view.openSession).toHaveBeenCalledExactlyOnceWith(discussions.get(goalId)!.sessionId, expect.objectContaining({ project: '未分配项目' }))
   await view.click('返回目标'); expect(view.element.querySelector('article h2')?.textContent).toBe('Untitled goal')
 })
 
-it('unknown save reads the held ID against the real owner before discussion and never creates again across hide/show', async () => {
-  vi.mocked(hostGoals.demands.create).mockImplementationOnce(async input => { await owner.create(input); throw new Error('Creation ACK lost') })
+it('unknown save reads the creation operation against the real owner before discussion and never creates again across hide/show', async () => {
+  vi.mocked(hostGoals.demands.create).mockImplementationOnce(async (...args) => { await owner.create(...args); throw new Error('Creation ACK lost') })
   const view = await mount(); await view.click('新建目标'); await view.click('创建目标'); await view.wait('Creation ACK lost')
   const input = view.forwardRpc.mock.calls.find(([method]) => method === 'goal.create')![1]
+  const goalId = (await owner.originalGoalCreationId(input.operationId))!
   await view.render(false); await view.render(true); expect(view.buttons('创建目标')[0]!.disabled).toBe(true); await view.click('创建目标')
   expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.create')).toHaveLength(1)
   expect(view.forwardRpc.mock.calls.some(([method]) => method === 'goal.discuss')).toBe(false)
   await view.click('读取同一目标核对'); await view.wait(discussionName)
-  expect(view.forwardRpc).toHaveBeenCalledWith('goal.inspect', { goalId: input.goalId })
+  expect(view.forwardRpc).toHaveBeenCalledWith('goal.inspect', { creationOperationId: input.operationId })
   expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.create')).toHaveLength(1)
-  expect((await owner.list()).map(goal => goal.id)).toEqual([input.goalId])
+  expect((await owner.list()).map(goal => goal.id)).toEqual([goalId])
 })
 
-it('owner-confirmed absence only allows explicit saving of the same original ID', async () => {
+it('owner-confirmed absence only allows explicit saving of the same original operation', async () => {
   vi.mocked(hostGoals.demands.create).mockRejectedValueOnce(new Error('No save acknowledgement'))
   const view = await mount(); await view.click('新建目标'); await view.click('创建目标'); await view.wait('No save acknowledgement')
   const input = view.forwardRpc.mock.calls.find(([method]) => method === 'goal.create')![1]
@@ -663,19 +704,57 @@ it('owner-confirmed absence only allows explicit saving of the same original ID'
   expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.create')).toHaveLength(1)
   await view.click('明确保存同一目标'); await view.wait(discussionName)
   const creations = view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.create')
-  expect(creations.map(([, params]) => params.goalId)).toEqual([input.goalId, input.goalId])
+  expect(creations.map(([, params]) => params.operationId)).toEqual([input.operationId, input.operationId])
   expect(await owner.list()).toHaveLength(1)
+})
+
+it.each([false, true])('reads an older device creation by its retained operation and never sends its caller ID (saved=%s)', async saved => {
+  const goalId = 'old-phone-issued-goal', operationId = 'original-phone-create'
+  const input = { goalId, operationId, title: 'Original phone draft', description: 'Keep this original intent.',
+    status: 'backlog', risk: 'low', confirmation: 'user' } as const
+  if (saved) await seedStoredDemand(owner, { id: goalId, title: input.title, description: input.description }, { operationId,
+    discussionOperationId: 'original-goal-discussion', creationOrigin: { inputRuntimeId: creationRuntime, requesterAsSupervisor: false } })
+  const device = getDeviceWorkface(), unrelatedSession = 'unchanged-original-conversation'
+  const record = emptyDeviceWorkface()
+  const conversation: typeof record.conversation = { ...record.conversation, drafts: [[unrelatedSession, 'Keep this unrelated draft']] }
+  await device.replaceBackup({ ...record, selectedSessionId: unrelatedSession, conversation, goalIntents: [{
+    kind: 'create', phase: 'unknown', runtimeId: creationRuntime, deviceHostId: null, operationId, goalId, input
+  }] })
+  const originalBytes = localStorage.getItem(DEVICE_WORKFACE_KEY)
+  const view = await mount(); await view.wait('还不确定目标是否已创建')
+  expect(localStorage.getItem(DEVICE_WORKFACE_KEY)).toBe(originalBytes)
+  await view.click('读取同一目标核对')
+  expect(view.forwardRpc).toHaveBeenCalledWith('goal.inspect', { creationOperationId: operationId })
+  expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.create')).toEqual([])
+  if (!saved) {
+    await view.wait('Mac 上还没有这个目标')
+    await view.click('明确保存同一目标')
+    await vi.waitFor(() => {
+      const creates = view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.create')
+      expect(creates).toHaveLength(1)
+      expect(creates[0]![1]).not.toHaveProperty('goalId')
+    })
+  }
+  await view.wait(discussionName)
+  const actual = (await owner.originalGoalCreationId(operationId))!
+  if (saved) expect(actual).toBe(goalId)
+  else expect(actual).not.toBe(goalId)
+  expect(view.forwardRpc).toHaveBeenCalledWith('goal.discuss', { goalId: actual, mode: 'grill', operationId: expect.any(String) })
+  expect(await owner.list()).toHaveLength(1)
+  expect(device.snapshot().record.selectedSessionId).toBe(unrelatedSession)
+  expect(device.snapshot().record.conversation).toEqual(conversation)
 })
 
 it('an unavailable discussion owner retains the saved goal and explicit reopening uses its original ID without recreating', async () => {
   discussionUnavailable = true
   const view = await mount(); await view.click('新建目标'); await view.click('创建目标'); await view.wait('Original discussion owner is unavailable')
   const input = view.forwardRpc.mock.calls.find(([method]) => method === 'goal.create')![1]
-  expect(await owner.get(input.goalId)).not.toBeNull(); expect(view.element.textContent).toContain('目标已保存，讨论还没确认')
+  const goalId = (await owner.originalGoalCreationId(input.operationId))!
+  expect(await owner.get(goalId)).not.toBeNull(); expect(view.element.textContent).toContain('目标已保存，讨论还没确认')
   discussionUnavailable = false
   await view.click('打开这个目标的讨论'); await view.wait(discussionName)
   expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.create')).toHaveLength(1)
-  expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.discuss').map(([, params]) => params.goalId)).toEqual([input.goalId, input.goalId])
+  expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.discuss').map(([, params]) => params.goalId)).toEqual([goalId, goalId])
 })
 
 it('human confirmation unknown keeps normal acknowledgement unavailable until explicit current-owner reading', async () => {
@@ -688,6 +767,19 @@ it('human confirmation unknown keeps normal acknowledgement unavailable until ex
   await view.click('读取当前提案与报告'); await view.wait('已读取当前目标')
   expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.confirm')).toHaveLength(1)
   expect(view.element.textContent).toContain('Human ACK lost'); expect((await owner.get('original-goal'))!.alignment!.confirmedAt).toBeGreaterThan(0)
+})
+
+it('the mounted Goal summary attributes its current confirmation to the exact Agent', async () => {
+  const view = await existingGoal()
+  const agent = { kind: 'agent', id: 'original-supervisor-agent', hostId: 'original-signing-host', runtimeId: 'original-signing-runtime' } as const
+  expect(view.buttons('确认当前目标')).toHaveLength(1)
+  await owner.confirmAlignment('original-goal', 1, undefined, { operationId: 'original-agent-confirmation', author: agent })
+  await view.click('刷新目标'); await view.wait(`由 Agent ${agent.id} 确认`)
+  const summary = view.element.querySelector('section[aria-label="目标与成功标准"]')!
+  const identity = summary.querySelector('details')!
+  expect(identity.querySelector('summary')?.textContent).toBe('确认者信息')
+  expect([...identity.querySelectorAll('dd')].map(value => value.textContent)).toEqual([agent.hostId, agent.runtimeId])
+  expect(view.buttons('确认当前目标')).toHaveLength(0)
 })
 
 it('late confirmation acknowledgement never replaces a newer owner proposal already displayed', async () => {
@@ -705,7 +797,7 @@ it('late confirmation acknowledgement never replaces a newer owner proposal alre
 })
 
 it('actual gap acceptance keeps the exact submission and reported difference', async () => {
-  await owner.create({ id: 'original-goal', title: 'Actual goal' }); await owner.update('original-goal', { alignment: proposal }); await owner.confirmAlignment('original-goal', 1)
+  await seedStoredDemand(owner, { id: 'original-goal', title: 'Actual goal' }); await owner.update('original-goal', { alignment: proposal }); await owner.confirmAlignment('original-goal', 1)
   await owner.update('original-goal', { grounding: { alignmentRevision: 1, summary: 'Checked result with gap', checks: [{ criterionId: 'c', outcome: 'gap', evidence: ['actual.log'], note: 'A real difference remains' }] } })
   const submission = (await owner.get('original-goal'))!.grounding!.submissionId
   const view = await mount(); await view.wait('Actual goal'); await view.click('Actual goal未分配项目 · 待整理'); await view.wait('Checked result with gap')
@@ -742,23 +834,24 @@ it('current human stage action follows evidence before secondary discussion and 
 
 
 it('late original creation recovery read cannot replace another Goal selected while reading', async () => {
-  await owner.create({ id: 'goal-b', title: 'Selected later Goal B' })
-  vi.mocked(hostGoals.demands.create).mockImplementationOnce(async input => { await owner.create(input); throw new Error('Create A unknown') })
+  await seedStoredDemand(owner, { id: 'goal-b', title: 'Selected later Goal B' })
+  vi.mocked(hostGoals.demands.create).mockImplementationOnce(async (...args) => { await owner.create(...args); throw new Error('Create A unknown') })
   const view = await mount(); await view.wait('Selected later Goal B'); await view.click('新建目标'); await view.click('创建目标'); await view.wait('Create A unknown')
   const input = view.forwardRpc.mock.calls.find(([method]) => method === 'goal.create')![1], forward = view.forwardRpc.getMockImplementation()!
+  const goalId = (await owner.originalGoalCreationId(input.operationId))!
   let settle!: () => void
-  view.forwardRpc.mockImplementation((method, params) => method === 'goal.inspect' && params.goalId === input.goalId ? forward(method, params).then(result => new Promise(resolve => { settle = () => resolve(result) })) : forward(method, params))
+  view.forwardRpc.mockImplementation((method, params) => method === 'goal.inspect' && params.creationOperationId === input.operationId ? forward(method, params).then(result => new Promise(resolve => { settle = () => resolve(result) })) : forward(method, params))
   await view.click('读取同一目标核对'); await vi.waitFor(() => expect(settle).toBeTypeOf('function'), { timeout: 5000 })
   await view.click('Selected later Goal B未分配项目 · 待整理')
-  await act(async () => settle()); await vi.waitFor(() => expect(discussions.get(input.goalId)).toBeDefined())
+  await act(async () => settle()); await vi.waitFor(() => expect(discussions.get(goalId)).toBeDefined())
   expect([...view.element.querySelectorAll('article h2')].filter(node => !node.closest('[hidden]')).map(node => node.textContent)).toEqual(['Selected later Goal B'])
   expect(view.buttons('返回目标')).toHaveLength(0); expect(view.openSession).not.toHaveBeenCalled()
-  expect((await owner.list()).map(goal => goal.id).sort()).toEqual([input.goalId, 'goal-b'].sort())
+  expect((await owner.list()).map(goal => goal.id).sort()).toEqual([goalId, 'goal-b'].sort())
 })
 
 
 it.each([false, true])('mobile exact acceptance keeps the goal open or explicitly finishes it (finish=%s)', async finish => {
-  await owner.create({ id: 'original-goal', title: 'Actual goal', status: 'in_review' })
+  await seedStoredDemand(owner, { id: 'original-goal', title: 'Actual goal', status: 'in_review' })
   await owner.update('original-goal', { alignment: proposal }); await owner.confirmAlignment('original-goal', 1)
   await owner.update('original-goal', { grounding: { alignmentRevision: 1, summary: 'Verified original result', checks: [{ criterionId: 'c', outcome: 'met', evidence: ['proof.log'], note: '' }] } })
   const before = (await owner.get('original-goal'))!
@@ -797,10 +890,11 @@ it('mobile brand CTA opens the original form without writes and explicitly creat
   await view.click('创建目标')
   await vi.waitFor(async () => expect(await owner.list()).toHaveLength(1))
   const input = view.forwardRpc.mock.calls.find(([method]) => method === 'goal.create')![1]
-  const saved = await openDemandStore({ root: join(directory, 'demands') }).get(input.goalId)
-  expect(saved).toMatchObject({ id: input.goalId, projectId: 'brand-project', projectName: 'Original workshop project', description: '', sessionIds: [] })
-  await vi.waitFor(() => expect(discussions.has(input.goalId)).toBe(true))
-  expect(view.forwardRpc).toHaveBeenCalledWith('goal.discuss', { goalId: input.goalId, mode: 'grill', operationId: expect.any(String) })
+  const goalId = (await owner.originalGoalCreationId(input.operationId))!
+  const saved = await openDemandStore({ root: join(directory, 'demands') }).get(goalId)
+  expect(saved).toMatchObject({ id: goalId, projectId: 'brand-project', projectName: 'Original workshop project', description: '', sessionIds: [] })
+  await vi.waitFor(() => expect(discussions.has(goalId)).toBe(true))
+  expect(view.forwardRpc).toHaveBeenCalledWith('goal.discuss', { goalId, mode: 'grill', operationId: expect.any(String) })
   expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.create')).toHaveLength(1)
   expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.discuss')).toHaveLength(1)
   expect(view.sdk!.submit).not.toHaveBeenCalled(); expect(view.sdk!.respond).not.toHaveBeenCalled(); expect(view.sdk!.rejoinInput).not.toHaveBeenCalled()
@@ -825,7 +919,7 @@ it('mobile brand art appears only on the visible Goal directory and current prop
   await view.wait('从一个想法开始')
   expect(view.element.querySelector<HTMLImageElement>('.mobile-goals-start--empty img')?.src).toContain('/concepts/goals-companions.png')
   const filter = view.element.querySelector<HTMLSelectElement>('[aria-label="筛选工作状态"]')!
-  await owner.create({ id: 'unfiltered-original-goal', title: 'Original unfiltered Goal', status: 'backlog' })
+  await seedStoredDemand(owner, { id: 'unfiltered-original-goal', title: 'Original unfiltered Goal', status: 'backlog' })
   const currentGoals = await owner.list()
   let releaseFiltered: ((value: typeof currentGoals) => void) | undefined
   list.mockImplementationOnce(() => new Promise(resolve => { releaseFiltered = resolve }))
@@ -868,7 +962,7 @@ it('mobile brand art appears only on the visible Goal directory and current prop
 }, 30000)
 
 it('mobile brand proposal actions retain the exact Goal owner, draft, confirmation and acceptance with explicit discussion only', async () => {
-  await owner.create({ id: 'brand-original-goal', title: 'Original brand proposal', status: 'in_review' })
+  await seedStoredDemand(owner, { id: 'brand-original-goal', title: 'Original brand proposal', status: 'in_review' })
   await owner.update('brand-original-goal', { alignment: proposal })
   const view = await mount(undefined, true)
   await view.wait('Original brand proposal')

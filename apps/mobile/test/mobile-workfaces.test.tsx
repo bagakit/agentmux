@@ -4,7 +4,6 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, expect, it, vi } from 'vitest'
 import { dirname, join } from 'node:path'
 import { AgentMuxRpcService } from '@agentmux/core'
-import { mintObjectId } from '@agentmux/core/object-id'
 import { createHostGoals } from '../../host/src/goals'
 import { MobileApp } from '../src/MobileApp'
 import { createBrowserPlatform } from '../src/platform/browser'
@@ -41,7 +40,7 @@ async function mountedApp(showSession: boolean) {
   const goals = createHostGoals({ configurationPath: join(dirname(f.source.path), 'goals.json'), projects,
     runtime: () => { throw new Error('Native Goal execution is not supplied by this original read fixture.') }, coreCall: nativeCalls })
   resources.push({ dispose: async () => { await goals.dispose(); await f.dispose() } })
-  const { demand: goal } = await goals.demands.create({ id: mintObjectId(), title: 'Original exact Goal', description: 'Original Goal owner detail.' })
+  const { demand: goal } = await goals.demands.create({ title: 'Original exact Goal', description: 'Original Goal owner detail.' })
   const goalService = new AgentMuxRpcService({ coreClients: () => [], execute: async request => {
     const result = await goals.execute(request, undefined)
     if (!result) throw new Error('No unrelated control fixture: ' + request.operation)
