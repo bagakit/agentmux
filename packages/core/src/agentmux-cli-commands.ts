@@ -476,7 +476,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     method === 'agent.execution.admit' ? 'Durably acknowledge one complete original intent without preparing or starting work.'
       : method === 'agent.execution.create' ? 'Create one fixed Agent/resource Host binding through the original Core owner.'
       : method === 'agent.execution.continue' ? 'Explicitly continue the original frozen execution intent, without supplying new launch input.'
-      : method === 'agent.execution.rejoin' ? 'Reattach readers to the retained helper pair without starting an Agent.' : 'Read one original execution binding and its service diagnostic.',
+      : method === 'agent.execution.rejoin' ? 'Reattach the original tool readers or explicitly recover its lost project helper.' : 'Read one original execution binding and its service diagnostic.',
     { '--input': 'data' }, async f => {
       const input = await readControlJsonInput(value(f, '--input', true)!, 'Execution binding')
       return method === 'agent.execution.admit' || method === 'agent.execution.create' ? { ...parseAgentExecutionCreate(input) } : method === 'agent.execution.continue' ? { ...parseAgentExecutionReference(input) } : parseAgentExecutionBinding(input, { associationView: method === 'agent.execution.binding', projectRecovery: method === 'agent.execution.rejoin' })

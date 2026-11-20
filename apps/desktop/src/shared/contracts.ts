@@ -2133,7 +2133,7 @@ export type AgentMuxDesktopApi = {
     executionCoordinatorTarget(): Promise<AgentExecutionRecoveryReference['coordinator']>
     resolveExecutionBinding(input: AgentExecutionLegacyLocator): Promise<AgentExecutionLegacyObservation | null>
     executionBinding(bindingId: string | AgentExecutionRecoveryReference, view?: 'association'): Promise<import('@agentmux/core').AgentExecutionInspection | null>
-    rejoinExecutionBinding(bindingId: string): Promise<import('@agentmux/core').AgentExecutionInspection>
+    rejoinExecutionBinding(bindingId: string, recoverProject?: true): Promise<import('@agentmux/core').AgentExecutionInspection>
     observeExecutionBinding(bindingId: string | AgentExecutionRecoveryReference, listener: (value: import('@agentmux/core').AgentExecutionInspection | null) => void, onError: (message: string) => void): () => void
     continueExecution(input: AgentExecutionRecoveryReference): Promise<AgentLaunchResult>
     notifyInputOccupation(control: AgentSessionControl): Promise<void>

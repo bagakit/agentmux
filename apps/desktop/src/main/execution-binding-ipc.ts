@@ -5,7 +5,7 @@ import type { ExecutionBindingReaders } from './execution-binding-readers'
 import type { AgentExecutionRecoveryReference, AgentLaunchResult } from '../shared/contracts'
 import { sessionAgentLaunchResult } from '../shared/session-agent-launch-result'
 export type ExecutionBindingChannel = 'sessions:executionCoordinatorTarget' | 'sessions:resolveExecutionBinding' | 'sessions:executionBinding' | 'sessions:rejoinExecutionBinding' | 'sessions:observeExecutionBinding' | 'sessions:releaseExecutionBinding' | 'sessions:continueExecution'
-/** Observe or explicitly rejoin the original binding. Agent/helper creation is not exposed. */
+/** Observe and recover through the original Core binding owner. */
 export function registerExecutionBindingIpc(args: {
   handle(channel: ExecutionBindingChannel, listener: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown): void
   bindings: Pick<AgentExecutionBindingService, 'inspect' | 'rejoin' | 'continueOriginal'>
@@ -38,7 +38,9 @@ export function registerExecutionBindingIpc(args: {
     if (view !== undefined && view !== 'association') throw new AgentMuxError('Choose the original binding or its association witness view.', 'INVALID_CONTROL_REQUEST')
     return args.bindings.inspect(await binding(target), view)
   })
-  args.handle('sessions:rejoinExecutionBinding', (event, bindingId) => {
+  args.handle('sessions:rejoinExecutionBinding', (event, bindingId, recoverProject) => {
+    if (recoverProject !== undefined && recoverProject !== true) throw new AgentMuxError('Choose the original project recovery action.', 'INVALID_CONTROL_REQUEST')
+    if (recoverProject) return args.bindings.rejoin(id(bindingId), undefined, true)
     return args.bindings.rejoin(id(bindingId))
   })
   args.handle('sessions:observeExecutionBinding', async (event, target, watchId) => {

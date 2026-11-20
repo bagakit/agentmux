@@ -26,6 +26,7 @@ export interface AgentExecutionBridgePosition {
 type PendingInput = { source: Side; sourceStartByte: number; sourceEndByte: number; digest: string; operation: Omit<AgentMuxRunInputOperation, 'data'>; chunk?: { offset: number; bytes: number } }
 export interface AgentExecutionBridgeState {
   bindingId: string
+  projectRecoveryId?: string
   frontend: AgentExecutionBridgePosition
   executor: AgentExecutionBridgePosition
   pending?: PendingInput
@@ -45,8 +46,8 @@ function setPending(state: AgentExecutionBridgeState, side: Side, value?: Pendin
   return { ...positions, ...(primary ? { pending: primary } : {}), ...(other && value ? { concurrentPending: value } : {}) }
 }
 
-const chunkOperationId = (binding: string, side: Side, endByte: number, offset: number): string =>
-  createHash('sha256').update(JSON.stringify([binding, side, endByte, offset])).digest('hex')
+const chunkOperationId = (state: AgentExecutionBridgeState, side: Side, endByte: number, offset: number): string =>
+  createHash('sha256').update(JSON.stringify([state.bindingId, side, endByte, offset, ...(state.projectRecoveryId ? [state.projectRecoveryId] : [])])).digest('hex')
 
 export type ExecutionFrameFact = { startByte: number; endByte: number; bytes: number; sha256: string; syntax: 'invalid-json' }
 
@@ -253,7 +254,7 @@ export class AgentExecutionBridge {
       const forward = side === 'frontend' ? ['request', 'closed', 'agent-rpc-context', 'agent-rpc-response', 'agent-rpc-closed'].includes(String(frame.type)) : ['response', 'agent-rpc-request', 'agent-rpc-close'].includes(String(frame.type))
       if (forward) {
         const target = opposite(side)
-        const operationId = chunkOperationId(this.state.bindingId, side, sourceEndByte, 0)
+        const operationId = chunkOperationId(this.state, side, sourceEndByte, 0)
         const operation = { ownerInstanceId: this.state[target].ownerInstanceId, operationId,
           expectedByte: this.state[target].inputByte }
         const original = Buffer.concat([line, Buffer.from('\n')])
@@ -323,7 +324,7 @@ export class AgentExecutionBridge {
       const through = offset + part.byteLength
       if (through < data.byteLength) {
         const nextOperation = { ...operation, expectedByte: end,
-          operationId: chunkOperationId(this.state.bindingId, current.source, current.sourceEndByte, through) }
+          operationId: chunkOperationId(this.state, current.source, current.sourceEndByte, through) }
         // Keep the source cursor at the start of the entire JSON frame. A new
         // reader must reassemble and verify that frame before resuming this chunk.
         const next = { ...current, operation: nextOperation, chunk: { offset: through, bytes: limit } }

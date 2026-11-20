@@ -71,10 +71,11 @@ export function parseAgentExecutionCreate(value: unknown): AgentExecutionOpenInp
   return structuredClone(input) as unknown as AgentExecutionOpenInput
 }
 
-export function parseAgentExecutionBinding(value: unknown, options: { associationView?: boolean } = {}): { bindingId: string; view?: 'association' } {
-  const input = rpcRecord(value, options.associationView ? ['bindingId','view'] : ['bindingId'])
+export function parseAgentExecutionBinding(value: unknown, options: { associationView?: boolean; projectRecovery?: boolean } = {}): { bindingId: string; view?: 'association'; recoverProject?: true } {
+  const input = rpcRecord(value, ['bindingId', ...(options.associationView ? ['view'] : []), ...(options.projectRecovery ? ['recoverProject'] : [])])
   if (input.view !== undefined && input.view !== 'association') invalid('Choose the original association witness view.', 'INVALID_CONTROL_REQUEST')
-  return { bindingId: identity(input.bindingId, 'INVALID_CONTROL_REQUEST'), ...(input.view === undefined ? {} : { view: 'association' }) }
+  if (input.recoverProject !== undefined && input.recoverProject !== true) invalid('Project recovery must explicitly request the original project helper successor.', 'INVALID_CONTROL_REQUEST')
+  return { bindingId: identity(input.bindingId, 'INVALID_CONTROL_REQUEST'), ...(input.view === undefined ? {} : { view: 'association' }), ...(input.recoverProject === true ? { recoverProject: true } : {}) }
 }
 
 /** Metadata only. A diagnostic's original operation key is usable without native payload bytes. */
@@ -118,7 +119,10 @@ export function parseAgentExecutionInspection(value: unknown, expected: { bindin
     }
   }
   const validateDiagnostic = (value: unknown, local: boolean): void => {
-    const diagnostic = rpcRecord(value, local ? ['code', 'message', 'generation', 'operation', 'scope', 'side', 'runId'] : ['code', 'message', 'generation', 'operation'], code)
+    const diagnostic = rpcRecord(value, local ? ['code', 'message', 'generation', 'operation', 'scope', 'side', 'runId'] : ['code', 'message', 'generation', 'operation', 'nextAction'], code)
+    if (diagnostic.nextAction !== undefined &&
+      !(diagnostic.nextAction === 'recover-project' && diagnostic.code === 'EXECUTION_RUNTIME_CHANGED' ||
+        diagnostic.nextAction === 'reconnect-provider' && diagnostic.code === 'EXECUTION_PROJECT_INITIALIZATION_PENDING')) invalid('The original connection diagnostic does not support this recovery action.', code)
     if (local) {
       if (!['unclassified', 'helper', 'request', 'generation', 'operation'].includes(String(diagnostic.scope))) invalid('A local diagnostic must declare its original scope.', code)
       if (diagnostic.scope !== 'unclassified' || diagnostic.side !== undefined || diagnostic.runId !== undefined) {

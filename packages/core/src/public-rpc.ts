@@ -311,7 +311,7 @@ type NativeParams = StorageRecoveryParamsMap & FocusParams & SpaceLinkParams & M
   'agent.execution.continue': import('./agent-execution-contract.js').AgentExecutionReference
   'agent.execution.binding': { bindingId: string; view?: 'association' }
   'agent.execution.watch': { bindingId: string }
-  'agent.execution.rejoin': { bindingId: string }
+  'agent.execution.rejoin': { bindingId: string; recoverProject?: true }
   'agent.configuration.inspect': import('./agent-configuration.js').AgentConfigurationInspect
   'agent.configuration.set': import('./agent-configuration.js').AgentConfigurationSet
   'agent.posture.inspect': import('./agent-posture.js').PostureInspect

@@ -47,6 +47,8 @@ export function AgentToolExecutionNotice({ session, visible, presentation = 'dis
   if (!binding) return null
   const current = read.identity === identity ? read : { identity }
   const inspection = current.inspection
+  const connectionFailure = inspection?.diagnostic
+  const nextAction = connectionFailure?.nextAction
   const items: ServiceNoticeItem[] = []
   if (current.error || !inspection || inspection.state === 'unavailable') items.push({ id: 'observation', cause: current.error ?? inspection?.diagnostic?.code ?? 'unobserved', notice: {
     kind: 'indeterminate', notice: { step: 'Tool execution observation is unconfirmed',
@@ -79,7 +81,9 @@ export function AgentToolExecutionNotice({ session, visible, presentation = 'dis
     setRejoinState({ identity, pending: true })
     const original = latest.current, revision = original.revision, request = ++original.readRequest
     try {
-      const value = await api.sessions.rejoinExecutionBinding(binding!.bindingId)
+      const value = nextAction === 'recover-project'
+        ? await api.sessions.rejoinExecutionBinding(binding!.bindingId, true)
+        : await api.sessions.rejoinExecutionBinding(binding!.bindingId)
       if (latest.current === original) {
         if (original.readRequest === request && original.revision === revision) accept(value)
         setRejoinState({ identity, pending: false })
@@ -95,13 +99,15 @@ export function AgentToolExecutionNotice({ session, visible, presentation = 'dis
     restore: 'The original binding and pending operations are retained. Check the named cause before reconnecting again.'
   } } })
   const actions = <><Button type="button" onClick={() => void refresh()}>Refresh observation</Button>
-    {connectionUnconfirmed || recovery.pending || recovery.error ? <Button type="button" disabled={recovery.pending} onClick={() => void rejoin()}>{recovery.pending ? 'Reconnecting…' : 'Reconnect original tools'}</Button> : null}</>
-  const recoveryDetails = connectionUnconfirmed ? <p className="tool-execution-recovery-scope">Reconnect to the same Agent and tools. Pending tool work may continue, without sending your prompt again.</p> : null
+    {nextAction !== 'reconnect-provider' && (connectionUnconfirmed || recovery.pending || recovery.error)
+      ? <Button type="button" disabled={recovery.pending} onClick={() => void rejoin()}>{recovery.pending ? 'Reconnecting…' : nextAction === 'recover-project' ? 'Recover project tools' : 'Reconnect original tools'}</Button> : null}</>
+  const recoveryDetails = connectionUnconfirmed && !nextAction ? <p className="tool-execution-recovery-scope">Reconnect to the same Agent and tools. Pending tool work may continue, without sending your prompt again.</p> : null
   const connectionTitle = current.error || !inspection ? 'Unconfirmed' : inspection.state === 'connected' ? 'Connected' : 'Unavailable'
   const unresolved = inspection?.diagnostics?.some(item => item.scope === 'operation')
   const capabilityNeedsReview = inspection?.notices?.some(item => item.state === 'unsupported' || item.state === 'unqualified')
   const summary = current.error || !inspection
     ? 'Current project-tool status is unknown. Refresh to check the original connection.'
+    : connectionFailure?.nextAction ? connectionFailure.message
     : inspection.state === 'unavailable'
       ? 'The connection to this project’s tools is unavailable. Refresh its status or reconnect the original tools.'
       : unresolved ? 'Project tools are connected. An earlier tool operation still needs review.'

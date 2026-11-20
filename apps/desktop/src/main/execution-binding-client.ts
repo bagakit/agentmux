@@ -10,7 +10,7 @@ export function createCoreExecutionBindingClient(runtime: Pick<RuntimeController
     admit: (input, original) => runtime.callOriginalCore('local', 'agent.execution.admit', input, context(original)),
     create: (input, original) => runtime.callOriginalCore('local', 'agent.execution.create', input, context(original)),
     inspect: (bindingId, view, original?: AgentMuxRpcCallContext) => runtime.callOriginalCore('local', 'agent.execution.binding', { bindingId, ...(view ? { view } : {}) }, context(original)),
-    rejoin: (bindingId, original) => runtime.callOriginalCore('local', 'agent.execution.rejoin', { bindingId }, context(original)),
+    rejoin: (bindingId, original, recoverProject) => runtime.callOriginalCore('local', 'agent.execution.rejoin', { bindingId, ...(recoverProject ? { recoverProject: true } : {}) }, context(original)),
     continueOriginal: (input, original) => runtime.callOriginalCore('local', 'agent.execution.continue', input, context(original)),
     watch: async (bindingId, onSnapshot, original = {}) => {
       let initial: AgentExecutionBindingObservation | undefined, pending: AgentExecutionBindingObservation | undefined

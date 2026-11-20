@@ -96,6 +96,8 @@ export function createAgentExecutionExecutor(options: {
     operations?.delete(requestKey(pending.key.nativeRequestId))
     if (!operations?.size) retained.delete(generation)
     await replyCommitted(pending.key, pending.response, pending.request)
+    if (state?.initialized && pending.request.intent.initialize)
+      await channel.send({ type: 'native-connection-ready', generation: state.id })
   }
   const start = (generation: string): Generation => {
     const spec = options.protocol.executor

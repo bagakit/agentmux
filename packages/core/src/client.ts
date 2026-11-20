@@ -5198,6 +5198,15 @@ export class AgentMuxClient {
   }
 
   /** Prepare a Provider helper on this exact Host; no child is started here. */
+  /** In-process project Coordinator access to the existing private executor launch. */
+  async readProjectExecutionHelperPreparation(bindingId: string, workspacePath: string, agentSessionId: string): Promise<import('./agent-execution-helper.js').AgentExecutionHelperPreparation> {
+    const record = await this.executionHelperStore().read(bindingId, 'executor')
+    if (!record || record.input.workspacePath !== workspacePath || record.input.agentSessionId !== agentSessionId ||
+      record.input.grant?.bindingId !== bindingId || !record.preparation.journalIdentity)
+      throw new AgentMuxError('The original project executor preparation and journal are unconfirmed.', 'EXECUTION_PROJECT_RECOVERY_UNCONFIRMED')
+    return record.preparation
+  }
+
   async prepareAgentExecutionHelper(input: import('./agent-execution-helper.js').AgentExecutionHelperInput): Promise<import('./agent-execution-helper.js').AgentExecutionHelperPreparation> {
     input = structuredClone(input)
     safeId(input.bindingId, 'Execution binding id')

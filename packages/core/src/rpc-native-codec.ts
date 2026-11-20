@@ -420,7 +420,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     if (method === 'agent.creation.continue') return parseCreationContinueResult(value, parseCreationContinueParams(params)) as unknown as Record<string, unknown>
     if (method === 'agent.execution.watch') return parseAgentExecutionBindingObservation(value, parseAgentExecutionBinding(params).bindingId) as unknown as Record<string, unknown>
     if (method === 'agent.execution.binding' || method === 'agent.execution.rejoin') {
-      const input = parseAgentExecutionBinding(params, { associationView: method === 'agent.execution.binding' })
+      const { recoverProject: _action, ...input } = parseAgentExecutionBinding(params, { associationView: method === 'agent.execution.binding', projectRecovery: method === 'agent.execution.rejoin' })
       if (method === 'agent.execution.binding' && value === null) return value as unknown as Record<string, unknown>
       return parseAgentExecutionInspection(value, input) as unknown as Record<string, unknown>
     }

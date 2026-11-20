@@ -9,7 +9,8 @@ export function createExecutionBindingApi(ipc: Pick<IpcRenderer, 'invoke' | 'on'
     resolveExecutionBinding: (input: AgentExecutionLegacyLocator): Promise<AgentExecutionLegacyObservation | null> => ipc.invoke('sessions:resolveExecutionBinding', input),
     executionBinding: (bindingId: string | AgentExecutionRecoveryReference, view?: 'association'): Promise<AgentExecutionInspection | null> => view === undefined
       ? ipc.invoke('sessions:executionBinding', bindingId) : ipc.invoke('sessions:executionBinding', bindingId, view),
-    rejoinExecutionBinding: (bindingId: string): Promise<AgentExecutionInspection> => ipc.invoke('sessions:rejoinExecutionBinding', bindingId),
+    rejoinExecutionBinding: (bindingId: string, recoverProject?: true): Promise<AgentExecutionInspection> => recoverProject
+      ? ipc.invoke('sessions:rejoinExecutionBinding', bindingId, recoverProject) : ipc.invoke('sessions:rejoinExecutionBinding', bindingId),
     async continueExecution(input: AgentExecutionRecoveryReference) {
       let result: SessionAgentLaunchResult
       try { result = await ipc.invoke('sessions:continueExecution', input) }
