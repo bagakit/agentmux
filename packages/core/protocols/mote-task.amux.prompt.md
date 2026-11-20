@@ -76,6 +76,7 @@ Original Group source and reply operation:
 
 ~~~text
 Reply in this private thread using amux space mote direct reply --help with the original threadId, inputOperationId and operationId and your reply as body. Keep the same operationId and body after an uncertain delivery.
+If the source lists images, use amux space mote direct image read --help with the original threadId, messageId and the image's operationId as imageOperationId. Keep the image in this private conversation.
 
 Original private source and reply operation:
 {{original}}{{quote}}
