@@ -199,10 +199,11 @@ Viewport Resize 是保留的 Attachment 的能力，不是仅凭 `SessionControl
 
 Core 的 `localProcessEnvironment()` 在 daemon 启动及每次本地 Run 创建时读取当前进程环境，Run 显式传入的 env 覆盖这份基线。SDK 的 `RunSpec.env` 是 additive 的：client 删除某个 key，不会清掉常驻 daemon 已持有的同名变量。`terminalEnvironment()` 与 `agentEnvironment()` 负责终端能力、CLI 路径与 Agent 身份的注入，Desktop 不复制这些语义。
 
-基线声明 `TERM=xterm-256color`、`COLORTERM=truecolor`、`TERM_PROGRAM=AgentMux`、`TERM_PROGRAM_VERSION`（取自经 manifest 校验的 `CTXMUX_VERSION`）与 `FORCE_HYPERLINK=1`。[terminal-environment-policy.ts](../../packages/core/src/terminal-environment-policy.ts) 再移除描述宿主 shell 而非新 CLI 的信号：
+基线声明 `TERM=xterm-256color`、`COLORTERM=truecolor`、`TERM_PROGRAM=AgentMux-Kitty`、`TERM_PROGRAM_VERSION`（取自经 manifest 校验的 `CTXMUX_VERSION`）与 `FORCE_HYPERLINK=1`。图形名称及原终端行为见[内联图形](../design/behavior/terminal-reading.md#terminal-内联图形)。[terminal-environment-policy.ts](../../packages/core/src/terminal-environment-policy.ts) 再移除描述宿主 shell 而非新 CLI 的信号：
 
 - 颜色：`NO_COLOR`，以及值为 `0` 的 `FORCE_COLOR`／`CLICOLOR`；非零的颜色设置保留。
 - 宿主会话：`CI`、`CODEX_CI`、`CLAUDECODE`、`CLAUDE_CODE_CHILD_SESSION`。AgentMux 自身可能从某个 Agent 或 CI shell 启动，这些标记描述的是那个宿主；Claude 会把它们当作子会话或 CI 会话，从而关闭 transcript 与 UI 行为。
+- 宿主终端：清除继承的外层终端和 multiplexer 身份，具体变量由同一环境策略持有。新建 PTY 有自己的终端能力，外层会话的标记不能替它选择协议。
 
 Run 显式传入的值在基线之后合并，调用方仍可以有意设置这些变量。由于 `RunSpec.env` 是 additive 的，`CtxmuxRunAdapter` 的 launch 用 `/usr/bin/env -u … -- program args…` 在 exec 边界显式 unset 合并后仍缺省的策略 key（`missingHostEnvironmentKeys`），再 exec 原程序；PID、PTY、cwd、literal argv 与退出／信号语义不变。新建与 semantic resume 都经过这个边界；已启动进程的环境不能在线改写。这一机制的来由见事故案例[恢复后终端颜色丢失](../casestudy/terminal-colors-lost-after-resume.md)。
 
