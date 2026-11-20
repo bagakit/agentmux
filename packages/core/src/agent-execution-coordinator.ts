@@ -278,22 +278,28 @@ export class AgentExecutionCoordinator {
   }
   /** Resume only retained bridge readers. This never creates or restores an Agent Run. */
   async rejoin(bindingId: string, context?: AgentMuxRpcCallContext): Promise<AgentExecutionInspection> {
-    const before = { bridge: this.bridges.get(bindingId)?.bridge, unavailable: !!this.connectionDiagnostic(bindingId) }
-    return await this.serialize(bindingId, () => this.rejoinOriginal(bindingId, context, 0, before))
+    return await this.serialize(bindingId, () => this.rejoinOriginal(bindingId, context, 0))
   }
-  private async rejoinOriginal(bindingId: string, context: AgentMuxRpcCallContext | undefined, attempt: number,
-    before?: { bridge: AgentExecutionBridge | undefined; unavailable: boolean }): Promise<AgentExecutionInspection> {
+  private hasConnectedBridge(bindingId: string): boolean {
+    return this.bridges.has(bindingId) && !this.connectionDiagnostic(bindingId)
+  }
+  private async rejoinOriginal(bindingId: string, context: AgentMuxRpcCallContext | undefined, attempt: number): Promise<AgentExecutionInspection> {
     const record = this.read(bindingId)
     if (!record?.bridge) throw fail('The original execution bridge has no confirmed helper pair.', 'EXECUTION_HELPER_UNAVAILABLE')
+    await this.options.authorize?.(record.input, context, record.routeAuthorization, true)
+    if (this.hasConnectedBridge(bindingId)) return this.inspect(bindingId)!
     try {
-      await this.options.authorize?.(record.input, context, record.routeAuthorization, true)
-      const current = this.bridges.get(bindingId)?.bridge
-      // A queued rejoin can share a reader recovered since its original observation.
-      if (before && current && (before.unavailable || current !== before.bridge) && !this.connectionDiagnostic(bindingId))
-        return this.inspect(bindingId)!
       const hosts = await this.hosts(record)
-      try { await this.attach(record, hosts, attempt); return this.inspect(bindingId)! } finally { if (!hosts.adopted) await hosts.dispose() }
-    } catch (error) { this.observeFailure(record.input, error); throw error }
+      try {
+        // Hosted can independently restore its attachment while the route is opening.
+        if (!this.hasConnectedBridge(bindingId)) await this.attach(record, hosts, attempt)
+        return this.inspect(bindingId)!
+      } finally { if (!hosts.adopted) await hosts.dispose() }
+    } catch (error) {
+      // A failed recovery attempt cannot override a live bridge's own observations.
+      if (!this.bridges.has(bindingId) || this.connectionFailures.has(bindingId)) this.observeFailure(record.input, error)
+      throw error
+    }
   }
   private clearReaderRecovery(bindingId: string): void {
     clearTimeout(this.readerRecovery.get(bindingId))
@@ -600,7 +606,7 @@ export class AgentExecutionCoordinator {
       return { session: created.session, execution: this.inspect(input.bindingId)! }
       } finally { if (!hosts.adopted) await hosts.dispose() }
     } catch (error) {
-      this.observeFailure(input, error)
+      if (!this.bridges.has(input.bindingId) || this.connectionFailures.has(input.bindingId)) this.observeFailure(input, error)
       // Bridge endpoint failures already carry their exact step. A local
       // persistence/observation failure cannot be assigned to an invented Host.
       if (step.stage === 'attach') throw error
