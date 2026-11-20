@@ -38,7 +38,8 @@ async function hashes(includeBuilt = true) {
   const inputs = [
     ...await files(join(core, 'src')),
     ...await files(join(core, 'guides')),
-    ...['generate-guides.mjs', 'check-guides.mjs', 'build.mjs', 'clean-build.mjs', 'verify-system-guides.mjs']
+    ...await files(join(core, 'protocols')),
+    ...['generate-amux-protocols.mjs', 'generate-guides.mjs', 'check-guides.mjs', 'build.mjs', 'clean-build.mjs', 'verify-system-guides.mjs']
       .map(path => join(core, 'scripts', path)),
     ...(includeBuilt ? await files(join(core, 'bin')) : []),
     ...built,
@@ -236,9 +237,10 @@ async function packageProof(root, expected) {
   }
   assert(packedCore, 'Actual Core package is absent')
   const packedPaths = packedCore.files.map(x => x.path)
-  const guideSources = (await files(join(core, 'guides'))).filter(path => path.endsWith('.md'))
+  const guideSources = [...await files(join(core, 'guides')), ...await files(join(core, 'protocols'))].filter(path => path.endsWith('.md'))
   assert(guideSources.length > expected.catalog.length, 'Markdown package surface cannot be empty')
   for (const path of guideSources) assert(packedPaths.includes(relative(core, path)), `Missing packaged guide ${relative(core, path)}`)
+  assert(packedPaths.includes('dist/generated/amux-protocols.js'), 'Generated AMUX templates are absent from npm package')
   assert(packedPaths.includes('dist/generated/agentmux-guides.js'), 'Generated offline code is absent from npm package')
   const dependencyArchives = [], packedDependencies = new Set()
   async function packDependencies(owner, dependencies) {
@@ -364,7 +366,7 @@ async function mutationProof(root, original) {
   const cases = []
   let previousFixture
   async function sourceDigest(destination) {
-    const paths = [...await files(join(destination, 'src')), ...await files(join(destination, 'guides'))]
+    const paths = [...await files(join(destination, 'src')), ...await files(join(destination, 'guides')), ...await files(join(destination, 'protocols'))]
     return sha(JSON.stringify(await Promise.all(paths.map(async path =>
       [relative(destination, path), sha(await readFile(path))]))))
   }
@@ -373,7 +375,7 @@ async function mutationProof(root, original) {
     if (previousFixture) await rm(previousFixture, { recursive: true, force: true })
     previousFixture = destination
     await mkdir(destination, { recursive: true })
-    for (const entry of ['guides', 'src', 'scripts', 'package.json'])
+    for (const entry of ['guides', 'protocols', 'src', 'scripts', 'package.json'])
       await cp(join(core, entry), join(destination, entry), { recursive: true })
     for (const entry of (await readdir(core)).filter(name => /^tsconfig.*\.json$/u.test(name)))
       await cp(join(core, entry), join(destination, entry))
@@ -439,10 +441,9 @@ async function mutationProof(root, original) {
   cases.push({ label: 'unregistered-module', killed: true, kind: 'actual-command-registration-oracle',
     officialCheck: true, sourceSha256: await sourceDigest(unregistered) })
   const checkedCases = [
-    { label: 'code-only-document-missing', change: destination => rm(join(destination, 'guides/shared/messaging/reminder.md')) },
-    { label: 'required-code-fact-missing', change: async destination => {
-      const path = join(destination, 'guides/shared/messaging/reminder.md')
-      await writeFile(path, (await readFile(path, 'utf8')) + '\n[Module directory](../../README.md "amux:generated module-directory")\n')
+    { label: 'required-prompt-variant-missing', change: async destination => {
+      const path = join(destination, 'protocols/agent-runtime.amux.prompt.md')
+      await writeFile(path, replaceOnce(await readFile(path, 'utf8'), '## await', '## omitted'))
     } },
     { label: 'unregistered-playbook-command', registryDiagnostic: /Unknown playbook command:? (?:command:)?does\.not\.exist/u,
       change: async destination => {
@@ -457,7 +458,7 @@ async function mutationProof(root, original) {
     const generated = await generate(destination)
     assert.equal(generated.code, 0, `${item.label} must first generate valid source: ${generated.diagnostics}`)
     await rejectOfficialCheck(destination, item.label,
-      item.registryDiagnostic ?? /agent-messaging-guidance\.ts[^\n]*error TS2\d+/u)
+      item.registryDiagnostic ?? /agent-outbound-message\.ts[^\n]*error TS2\d+/u)
     cases.push({ label: item.label, killed: true, kind: item.registryDiagnostic
       ? 'official-check-guides-command-oracle' : 'official-check-guides-type-oracle', sourceSha256: await sourceDigest(destination) })
   }
@@ -473,9 +474,6 @@ async function mutationProof(root, original) {
     { label: 'browser-registry-directory-disconnected', file: 'guides/actions/browser-run.md',
       directiveTitle: 'amux:generated browser-capability-directory',
       read: output => output.commandHelp['browser.run'], cli: ['--help', 'browser', 'run'] },
-    { label: 'runtime-entry-disconnected', file: 'guides/shared/runtime.md',
-      directive: '../shared/messaging/entry.md "amux:include"',
-      read: output => output.launch.withRequest.systemContext, expected: original.messaging.AGENTMUX_AGENT_MESSAGING_ENTRY }
   ]
   for (const item of consumerCases) {
     const destination = await fixture(item.label), path = join(destination, item.file)
@@ -508,24 +506,28 @@ async function mutationProof(root, original) {
       cliExecuted: !!item.cli, sourceSha256: await sourceDigest(destination), originalSha256: sha(before), mutatedSha256: sha(actual) })
   }
   const startupCases = [
+    { label: 'runtime-entry-disconnected', file: 'src/agent-outbound-message.ts',
+      before: 'messaging: AGENTMUX_AGENT_MESSAGING_ENTRY', after: "messaging: 'No messaging discovery.'",
+      read: output => output.launch.withRequest.systemContext,
+      verify: text => assert(text.includes(original.messaging.AGENTMUX_AGENT_MESSAGING_ENTRY), 'The bootstrap must provide the messaging discovery entry') },
     { label: 'startup-phase-after-rules', file: 'src/agent-outbound-message.ts',
-      before: 'parts.unshift(userRequest ? USER_REQUEST_FOLLOWS : AWAIT_USER_REQUEST)',
-      after: 'parts.push(userRequest ? USER_REQUEST_FOLLOWS : AWAIT_USER_REQUEST)',
+      before: "parts.unshift(getAmuxProtocolTemplate('agent-runtime', userRequest ? 'request' : task ? 'task' : 'await'))",
+      after: "parts.push(getAmuxProtocolTemplate('agent-runtime', userRequest ? 'request' : task ? 'task' : 'await'))",
       read: output => output.launch.withRequest.systemContext,
       verify: text => assert(text.startsWith('The user request follows.\n\nAgentMux runtime guide:'),
         'The current request phase must precede the runtime rules') },
-    { label: 'startup-wait-before-initialization', file: 'src/agent-outbound-message.ts',
+    { label: 'startup-wait-before-initialization', file: 'protocols/agent-runtime.amux.prompt.md',
       before: 'No request yet. Complete any read-only initialization below, then wait for the user.',
       after: 'No request yet. Wait for the user.',
       read: output => output.launch.awaitRequest.systemContext,
       verify: text => assert(text.startsWith('No request yet. Complete any read-only initialization below, then wait for the user.'),
         'Business waiting must not postpone read-only initialization') },
-    { label: 'startup-spatial-route-removed', file: 'guides/shared/runtime.md',
+    { label: 'startup-spatial-route-removed', file: 'protocols/agent-runtime.amux.prompt.md',
       before: 'When attached, read space --skill', after: 'When attached, read file --skill',
       read: output => output.launch.withRequest.systemContext,
       verify: text => assert(text.includes('When attached, read space --skill to establish your actual Zone/Tab/Region'),
         'Startup must route attached spatial discovery to its original module') },
-    { label: 'startup-zone-confused-with-cwd', file: 'guides/shared/runtime.md',
+    { label: 'startup-zone-confused-with-cwd', file: 'guides/shared/spatial-terms.md',
       before: 'A Zone is a work partition containing Tabs;', after: 'A Zone is the execution cwd;',
       read: output => output.launch.withRequest.systemContext,
       verify: text => assert(text.includes('A Zone is a work partition containing Tabs;') &&
@@ -537,7 +539,7 @@ async function mutationProof(root, original) {
       read: output => output.modules.whoami, cli: ['whoami', '--skill'],
       verify: text => assert(text.includes('whoami does not supply a Zone or all display bindings.'),
         'whoami must preserve its actual scope and route Zone discovery to space') },
-    { label: 'startup-unconditional-collaboration', file: 'guides/shared/messaging/entry.md',
+    { label: 'startup-unconditional-collaboration', file: 'protocols/peer-messaging.amux.prompt.md',
       before: 'If the task needs collaboration, choose', after: 'Choose',
       read: output => output.launch.withRequest.systemContext,
       verify: text => assert(text.includes('If the task needs collaboration, choose'),
@@ -561,11 +563,11 @@ async function mutationProof(root, original) {
       read: output => output.modules.space, cli: ['space', '--skill'],
       verify: text => assert(text.replace(/\s+/gu, ' ').includes('a new Tab may be outside the current reading view and be harder to find'),
         'A new Tab does not guarantee visibility in the current Focus reading view') },
-    { label: 'browser-vague-target-guessed', file: 'guides/actions/browser-targets.md',
+    { label: 'browser-vague-target-guessed', file: 'guides/shared/browser-target-choice.md',
       before: "this task's same-Tab neighbor Regions", after: 'the globally most recent page',
       read: output => output.commandHelp['browser.targets'], cli: ['browser', 'targets', '--help'],
       verify: text => assert(text.includes("this task's same-Tab neighbor Regions") &&
-        text.includes('verify the exact typed Browser binding'),
+        text.includes('typed Browser binding'),
         'An unspecified Browser request must be resolved from task context and structured identity') }
   ]
   for (const item of [...startupCases, ...browserCases]) {
