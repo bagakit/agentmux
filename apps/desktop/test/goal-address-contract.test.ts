@@ -21,6 +21,8 @@ it('Goal addresses retain the original Runtime namespace and opaque Goal while r
   expect(invocation.params).toMatchObject({ goalId: 'original/Goal ?#中文', runtimeId: address.runtimeId, namespace: address.namespace, section: 'plan', input: 'preserve' })
   expect(() => parseAgentMuxControlRequest({ schemaVersion: 5, requestId: 'original', operation: 'focus', target: { kind: 'goal', goalId: 'same', runtimeId: 'one' }, inputPolicy: 'preserve' })).toThrow()
   expect(() => rpcControlRequest('goal.create', { goalId: 'custom-goal', title: 'Current task' })).toThrow('original owner allocates Goal IDs')
+  for (const key of ['id', 'demandId', 'goalId'])
+    expect(() => parseAgentMuxControlRequest({ schemaVersion: 5, requestId: 'original', operation: 'demand.create', title: 'Current task', [key]: 'custom-goal' })).toThrow('original owner allocates Goal IDs')
   const id = deriveBoundGoalId(address.runtimeId, address.namespace, 'original-create')
   const bound = formatGoalAddress(id, address.runtimeId, address.namespace, 'original-create')
   const short = await parseAgentMuxCliInvocation(['goal', 'focus', '--link', bound.planUrl])
