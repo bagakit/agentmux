@@ -10,6 +10,7 @@ export function focusVisitTimes(history: readonly AgentFocusHistoryEntry[], now 
   const visits = new Map<string, number>()
   for (const entry of history) if (entry.identity?.hostId && recorded(entry.focusedAt, now)) {
     const source = entry.identity.source
+    if (source && !source.runtimeId) continue
     const key = source?.runtimeId ? JSON.stringify(['source', source.runtimeId, source.agentSessionId])
       : JSON.stringify([entry.identity.hostId, entry.sessionId])
     visits.set(key, Math.max(visits.get(key) ?? 0, entry.focusedAt))

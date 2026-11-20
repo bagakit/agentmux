@@ -222,7 +222,9 @@ function agentContextWithConversation(session: SessionSnapshot, timeline: AgentT
   const nativeSubagents = session.kind === 'agent' ? focusNativeSubagents(session, now) : undefined
   const name = session.kind === 'agent' ? agentDisplayName({ userName, firstPrompt: conversation?.firstPrompt ?? firstPromptFromTimeline(timeline), fallbackLabel: session.label, providerLabel: session.providerId }) : userName ?? session.label
   const lastActivityAt = focusLastTaskActivityAt(items, focusActivityEntryTime(session), now)
-  const lastHumanInputAt = timeline ? focusLatestHumanInput(items, timeline.revision) : undefined
+  const lastHumanInputAt = session.kind === 'agent' && timeline?.agentSessionId === session.control.agentSessionId &&
+    (timeline.sourceHostId === undefined || timeline.sourceHostId === session.control.hostId)
+    ? focusLatestHumanInput(items, timeline.revision) : undefined
   const stateEnteredAt = session.kind === 'agent' && session.currentActivity ? undefined : agentStateEnteredAt(session, now)
   let detail = 'No activity details observed', detailIsMessage = false
   let detailKind: FocusContext['detailKind'] = pending || bucket === 'attention' || state === 'disconnected' || state === 'exited' ? 'service' : undefined

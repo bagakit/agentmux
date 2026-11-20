@@ -26,7 +26,7 @@ export const FOCUS_INTERACTION_RANGES: readonly { minutes?: number; label: strin
 
 export function focusInteractionTime(row: FocusContext, visits: ReadonlyMap<string, number>, localHosts: ReadonlySet<string>, now: number): number {
   const visit = row.access && !row.access.identity.runtimeId ? undefined : focusContextVisit(row, visits)
-  const input = !row.access && localHosts.has(row.hostId) ? row.lastHumanInputAt : undefined
+  const input = !row.access && row.control && localHosts.has(row.control.hostId) ? row.lastHumanInputAt : undefined
   return Math.max(visit && visit <= now ? visit : 0, input && input <= now ? input : 0)
 }
 
