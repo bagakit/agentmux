@@ -128,3 +128,15 @@ The registered Project and its workspace are unavailable.
 ~~~text
 Project: unassigned
 ~~~
+
+## delegated-work
+
+~~~text
+Read the verified envelope.application and current Ticket before acting. Use goal report --input FILE with this original delegation operation to return every delegated criterion with evidence, gap or unknown. Include sourceMessageId when reporting from another Core. For a question or blocker, reply to the original source and record message dispatch report --kind question|escalation. Keep the worker report distinct from collection by the current Supervisor. See amux goal --skill for verified handoff and exact Run closeout.
+~~~
+
+## workflow-budget-unknown
+
+~~~text
+The saved Workflows budget is unconfirmed. Read the original Goal settings before any new automatic Ticket dispatch.
+~~~

@@ -292,7 +292,9 @@ export const AMUX_PROTOCOL_TEMPLATES = {
     "project": "Project: {{name}}\nProject ID: {{id}}\nHost: {{host}}\nRepository root: {{repository}}\nWorkspace ID: {{workspace}}\nWorkspace path: {{directory}}\n{{branch}}Use this exact Project resource. The PMO’s execution directory is separate.",
     "project-branch": "Branch: {{branch}}",
     "project-unavailable": "Assigned Project ID: {{id}}\nThe registered Project and its workspace are unavailable.",
-    "project-unassigned": "Project: unassigned"
+    "project-unassigned": "Project: unassigned",
+    "delegated-work": "Read the verified envelope.application and current Ticket before acting. Use goal report --input FILE with this original delegation operation to return every delegated criterion with evidence, gap or unknown. Include sourceMessageId when reporting from another Core. For a question or blocker, reply to the original source and record message dispatch report --kind question|escalation. Keep the worker report distinct from collection by the current Supervisor. See amux goal --skill for verified handoff and exact Run closeout.",
+    "workflow-budget-unknown": "The saved Workflows budget is unconfirmed. Read the original Goal settings before any new automatic Ticket dispatch."
   },
   "link": {
     "wire": "amux://{{target}}"
@@ -326,8 +328,9 @@ export const AMUX_PROTOCOL_TEMPLATES = {
     "starter-clarify": "先解释这条回复的依据和不清楚之处，再等我的决定。"
   },
   "schedule-input": {
-    "note": "This input comes from the original schedule.",
-    "check-in": "Ask at most one short, concrete question about the user’s confirmed goal or unfinished commitment in this conversation. Say when relevant context is missing. Finish quietly when there is nothing useful to ask."
+    "note": "Original schedule: {{schedule}}. Use amux schedule inspect --help to read it.",
+    "check-in": "Ask at most one short, concrete question about the user’s confirmed goal or unfinished commitment in this conversation. Say when relevant context is missing. Finish quietly when there is nothing useful to ask.",
+    "automation": "Original continuation: {{automation}}. Use amux agent automation inspect --help to read it."
   },
   "sharing": {
     "wire": "--- amux : {{kind}} ---\n{{body}}\n-----"
@@ -591,7 +594,9 @@ export const AMUX_PROTOCOL_PARAMETERS = {
     "project-unavailable": [
       "id"
     ],
-    "project-unassigned": []
+    "project-unassigned": [],
+    "delegated-work": [],
+    "workflow-budget-unknown": []
   },
   "link": {
     "wire": [
@@ -660,8 +665,13 @@ export const AMUX_PROTOCOL_PARAMETERS = {
     "starter-clarify": []
   },
   "schedule-input": {
-    "note": [],
-    "check-in": []
+    "note": [
+      "schedule"
+    ],
+    "check-in": [],
+    "automation": [
+      "automation"
+    ]
   },
   "sharing": {
     "wire": [
@@ -945,7 +955,9 @@ export const AMUX_PROTOCOL_EXAMPLES = {
     {
       "label": "Scheduled input",
       "template": "note",
-      "parameters": {}
+      "parameters": {
+        "schedule": "SCHEDULE_ID"
+      }
     }
   ],
   "sharing": [

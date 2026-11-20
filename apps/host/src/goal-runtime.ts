@@ -1,4 +1,4 @@
-import { getAmuxProtocolTemplate } from '@agentmux/core/amux-protocol'
+import { renderAmuxProtocol } from '@agentmux/core/amux-protocol'
 import { optionalInputEpoch, agentPromptNotApplied } from '@agentmux/core/prompt-condition'
 import { isDeepStrictEqual } from 'node:util'
 import { awaitUntilCancelled } from './await-until-cancelled.js'
@@ -282,7 +282,7 @@ export function createGoalRuntime(options: {
       const operationId = loop.currentDefinition?.operationId ?? loop.creationOperationId
       if (loop.currentDefinition && loop.currentDefinition.intentId !== loop.futureIntentId || original && (original.operationId !== operationId || original.message.userContent !== loop.prompt)) throw new AgentMuxError('The original future-message content changed. Inspect that saved arrangement.', 'AGENT_FUTURE_INTENT_CHANGED')
       await context?.assertCurrent?.()
-      let agentMuxNote = original ? original.message.systemContext : loop.managedScheduleNote ?? formatAmuxTriggerNote('calendar', getAmuxProtocolTemplate('schedule-input', 'note') + (loop.checkIn ? '\n\n' + AGENT_SCHEDULE_CHECK_IN_GUIDANCE : ''))
+      let agentMuxNote = original ? original.message.systemContext : loop.managedScheduleNote ?? formatAmuxTriggerNote('calendar', renderAmuxProtocol('schedule-input', 'note', { schedule: loop.loopId }) + (loop.checkIn ? '\n\n' + AGENT_SCHEDULE_CHECK_IN_GUIDANCE : ''))
       if (loop.currentDefinition) {
         const definition = loop.currentDefinition, adoption = loop.guidanceAdoptions?.find(value => value.newDefinition.intentId === definition.intentId && value.newDefinition.operationId === definition.operationId)
         const base = await client.readAgentFuturePromptIntent(loop.agentSessionId, definition.baseIntentId)

@@ -1,4 +1,4 @@
-import { getAmuxProtocolTemplate } from '@agentmux/core/amux-protocol'
+import { getAmuxProtocolTemplate, renderAmuxProtocol } from '@agentmux/core/amux-protocol'
 import { formatAmuxTriggerNote } from '@agentmux/core/agent-outbound-message'
 import { optionalInputEpoch } from '@agentmux/core/prompt-condition'
 import { awaitUntilCancelled } from './await-until-cancelled.js'
@@ -1257,12 +1257,12 @@ export class ContinuousProgressLoopManager {
             let prompt = goalContinuation ?? claim.loop.prompt
             if (goalContinuation && this.goals?.workflowGuidance) {
               const guidance = await this.goals.workflowGuidance(claim.loop.loopId).catch(() =>
-                'The saved Workflows budget is unconfirmed. Read the original Goal settings before any new automatic Ticket dispatch.')
+                getAmuxProtocolTemplate('goal-task', 'workflow-budget-unknown'))
               if (!isCurrent()) break delivery
               if (guidance) prompt += '\n\n' + guidance
             }
             let agentMuxNote: string | undefined
-            if (!futureIntent) agentMuxNote = formatAmuxTriggerNote('automation', getAmuxProtocolTemplate('schedule-input', 'note') + (claim.loop.checkIn ? '\n\n' + AGENT_SCHEDULE_CHECK_IN_GUIDANCE : '') + (claim.loop.taskSource?.kind === 'goal' ? '\n\n' + goalRoleGuidance({ role: 'manager', goalId: claim.loop.taskSource.goalId, agentSessionId: claim.loop.agentSessionId, runId: observation.session.run.runId, source: { kind: 'goal-native-continuation', operationId: claim.tickId } }) : ''))
+            if (!futureIntent) agentMuxNote = formatAmuxTriggerNote('automation', renderAmuxProtocol('schedule-input', 'automation', { automation: claim.loop.loopId }) + (claim.loop.checkIn ? '\n\n' + AGENT_SCHEDULE_CHECK_IN_GUIDANCE : '') + (claim.loop.taskSource?.kind === 'goal' ? '\n\n' + goalRoleGuidance({ role: 'manager', goalId: claim.loop.taskSource.goalId, agentSessionId: claim.loop.agentSessionId, runId: observation.session.run.runId, source: { kind: 'goal-native-continuation', operationId: claim.tickId } }) : ''))
             else {
               const original = observation.session.futurePromptIntents?.[futureIntent.intentId]
               if (!original || original.operationId !== (claim.loop.currentDefinition?.operationId ?? claim.loop.creationOperationId) || original.message?.userContent !== prompt) {
