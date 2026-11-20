@@ -19,6 +19,8 @@ const variants: Record<string, { path: string; before: string; after: string }> 
   role: { path: 'packages/connectors/src/mote-chat.ts', before: 'await main.assertCurrent(source)', after: 'await Promise.resolve()' },
   'api-authority': { path: 'packages/connectors/src/mote-chat.ts', before: 'apiBinding(bindingId: string): RoomBinding | null {\n    const row', after: "apiBinding(bindingId: string): RoomBinding | null {\n    const main = this.store.mainAdmission(bindingId, 'binding'); if (main) return main.binding;\n    const row" },
   'host-main-consumer': { path: 'apps/host/src/connections.ts', before: 'main: creatorMain', after: 'main: undefined' },
+  'skip-independent-resume': { path: 'packages/connectors/src/durable-ingress.ts', before: '(!prior || resumedByAnother) && client.runtimeSubject', after: '!prior && client.runtimeSubject' },
+  'assume-independent-resume': { path: 'packages/connectors/src/durable-ingress.ts', before: 'sessionSemanticResumeSourceRuns(session).includes(previousRun)', after: 'true' },
   'restored-run': { path: 'packages/connectors/src/durable-ingress.ts', before: 'return result.session\n  }\n  private async continueInput', after: 'return session\n  }\n  private async continueInput' },
   'frozen-route': { path: 'packages/connectors/src/durable-ingress.ts', before: 'return this.options.inputRoute?.(record)?.binding ?? this.options.bindings.findActiveAudience', after: 'return this.options.bindings.findActiveAudience' }
 }

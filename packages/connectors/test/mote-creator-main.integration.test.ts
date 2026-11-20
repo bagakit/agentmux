@@ -208,6 +208,50 @@ it('recovers an ended Main in the same native conversation before freezing the n
 })
 
 
+it('claims the original message once after another owner resumes the same native Main', async () => {
+  const f = await fixture()
+  const original = (await f.client.readAgentSession('original-main'))!
+  f.endRun(original.run.runId)
+  const ensure = f.client.ensureAgentContinuity.bind(f.client)
+  vi.spyOn(f.client, 'ensureAgentContinuity').mockImplementationOnce(async (...args) => {
+    const missing = vi.spyOn(f.inner.kernel, 'status').mockRejectedValue(new Error('Original Runtime observation is temporarily unavailable'))
+    try { return await ensure(...args) } finally { missing.mockRestore() }
+  })
+  expect(await f.wire.post(f.message('independent-resume'))).toBe(202)
+  await vi.waitFor(async () => expect((await f.records())[0]).toMatchObject({ state: 'received', code: 'INGRESS_RECOVERY_PENDING' }))
+  const intake = (await f.records())[0]!
+  const pending = (await f.client.readAgentSession('original-main'))!.continuity!
+  expect(pending).toMatchObject({ kind: 'pending', previousRun: original.run })
+  expect(intake.input).toBeUndefined()
+
+  const resumed = await f.client.ensureAgentContinuity({ agentSessionId: original.agentSessionId, expectedRun: original.run,
+    operationId: 'independent-session-recovery', trigger: 'manual', policy: { continuationEnabled: false, reminderMode: 'off' } })
+  expect(resumed).toMatchObject({ kind: 'resumed', session: { agentSessionId: original.agentSessionId }, previousRun: original.run })
+  const current = (await f.client.readAgentSession('original-main'))!
+  expect(current.nativeHandle?.sessionId).toBe(original.nativeHandle?.sessionId)
+  expect(current.run).toEqual(resumed.continuity?.newRun)
+  expect(current.continuityOperations?.[pending.operationId]).toEqual(pending)
+
+  const read = f.client.readAgentSession.bind(f.client)
+  const hideLineage = vi.spyOn(f.client, 'readAgentSession').mockImplementation(async (...args) => {
+    const session = await read(...args)
+    return session?.agentSessionId === original.agentSessionId ? { ...session, continuity: pending,
+      continuityOperations: { [pending.operationId]: pending } } : session
+  })
+  await expect(f.services.ingress!.dispatch(intake.ingressId)).rejects.toMatchObject({ code: 'INGRESS_RECOVERY_PENDING' })
+  expect((await f.records())[0]?.input).toBeUndefined()
+  expect(f.inner.kernel.input).not.toHaveBeenCalled()
+  hideLineage.mockRestore()
+
+  await f.services.ingress!.dispatch(intake.ingressId)
+  const claimed = await f.claimed('independent-resume')
+  expect(claimed).toMatchObject({ ingressId: intake.ingressId, externalMessageId: intake.externalMessageId,
+    input: { agentSessionId: original.agentSessionId, expectedRun: current.run } })
+  await vi.waitFor(async () => expect((await f.services.ingress!.inspect({ ingressId: intake.ingressId })).inputReceipt?.status).toBe('terminal-confirmed'))
+  expect(f.start).toHaveBeenCalledTimes(2)
+  expect(f.inner.kernel.input).toHaveBeenCalledOnce()
+})
+
 it('reports the native input wait for the original creator message through the public CLI', async () => {
   const f = await fixture()
   const plan = vi.mocked(f.client.providers.get('grok').planPromptInput)
