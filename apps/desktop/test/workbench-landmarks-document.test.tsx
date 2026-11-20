@@ -44,7 +44,7 @@ it('routes saved reading points to the original workface document and reconciles
   const edit = async (owner: Document, value: string) => { await act(async () => { const field = input(owner); Object.getOwnPropertyDescriptor(field.ownerDocument.defaultView!.HTMLInputElement.prototype, 'value')!.set!.call(field, value); field.dispatchEvent(new Event('input', { bubbles: true })) }) }
   const submit = async (owner: Document) => { await act(async () => owner.querySelector('.conversation-landmark form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))) }
   try {
-    await render(document); expect(list).not.toHaveBeenCalled()
+    await render(document); await until(() => expect(list).toHaveBeenCalledWith(scope))
     await click(host.querySelector('[aria-label="Name reading point"]')); await edit(document, 'Original named point'); await submit(document)
     await until(() => expect(document.body.textContent).toContain('Original reply observation unavailable'))
     const original = apply.mock.calls[0]![0]
@@ -57,8 +57,12 @@ it('routes saved reading points to the original workface document and reconciles
     expect(child.querySelector('.conversation-landmark__operation')?.textContent).toBe(original.operationId)
     expect(apply).toHaveBeenCalledTimes(1)
     await click(button(child, 'Check original save'))
+    await until(() => expect(button(child, 'Confirm original save')?.disabled).toBe(false))
+    expect(Object.keys(useAppStore.getState().conversationLandmarkIntents)).toHaveLength(1)
+    await click(button(child, 'Confirm original save'))
     await until(() => expect(child.body.textContent).toContain('Saved. Return from Reading points.'))
-    expect(apply).toHaveBeenCalledTimes(1)
+    expect(apply).toHaveBeenCalledTimes(2)
+    expect(apply.mock.calls[1]![0]).toEqual(original)
     expect(list.mock.calls.some(([input]) => input.operationId === original.operationId)).toBe(true)
     await click(child.querySelector('[aria-label="Close Name reading point"]'))
     await click(host.querySelector('[aria-label="Reading points"]'))
@@ -67,7 +71,7 @@ it('routes saved reading points to the original workface document and reconciles
     await until(() => expect(child.querySelector('[aria-label="Remove Renamed original point"]')).not.toBeNull())
     await click(child.querySelector('[aria-label="Remove Renamed original point"]'))
     await until(async () => expect((await store.list(scope)).points).toHaveLength(0))
-    expect(apply).toHaveBeenCalledTimes(3)
+    expect(apply).toHaveBeenCalledTimes(4)
     expect(apply.mock.calls.every(([input]) => input.hostId === scope.hostId && input.agentSessionId === scope.agentSessionId)).toBe(true)
     expect(document.querySelector('.conversation-landmark')).toBeNull()
   } finally {

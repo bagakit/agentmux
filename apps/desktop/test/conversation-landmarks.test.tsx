@@ -34,6 +34,12 @@ const input = () => document.querySelector<HTMLInputElement>('.conversation-land
 const edit = async (value: string) => { await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input(), value); input().dispatchEvent(new Event('input', { bubbles: true })) }); await tick() }
 async function until(assertion: () => void) { let failure: unknown; for (let attempt = 0; attempt < 150; attempt++) { await tick(); try { assertion(); return } catch (error) { failure = error }; await new Promise(resolve => setTimeout(resolve, 5)) } throw failure }
 const savedStatus = () => expect(document.body.textContent).toContain('Saved. Return from Reading points.')
+async function confirmObservedSave() {
+  await click(button('Check original save'))
+  await until(() => expect(button('Confirm original save')?.disabled).toBe(false))
+  expect(Object.keys(useAppStore.getState().conversationLandmarkIntents)).toHaveLength(1)
+  await click(button('Confirm original save'))
+}
 const submit = async () => { await act(async () => document.querySelector('.conversation-landmark form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))); await tick() }
 async function saved(reference = ref(), name = 'Original point', id = 'original-point') { return store.apply({ ...scope, operationId: id + '-create', expectedRevision: (await store.list(scope)).revision, change: { kind: 'create', point: { id, name, reference } } }, actor) }
 beforeEach(async () => {
@@ -62,10 +68,10 @@ it('contributes the same exact action to actual captured Activity records withou
 })
 it('lazily lists original points and renames/removes through the actual durable owner', async () => {
   await saved(); const reveal = vi.fn(async () => ({ kind: 'located' as const }))
-  await render(<ConversationLandmarkList reference={scope} reveal={reveal} active/>); expect(api.landmarks.list).not.toHaveBeenCalled()
+  await render(<ConversationLandmarkList reference={scope} reveal={reveal} active/>); await until(() => expect(named('Reading points').textContent).toBe('1'))
   await click(named('Reading points')); await until(() => expect(named('Rename Original point')).not.toBeNull())
   await click(named('Rename Original point')); await edit('Renamed point'); await submit(); await until(() => expect(named('Remove Renamed point')).not.toBeNull()); expect((await store.list(scope)).points[0]?.name).toBe('Renamed point')
-  await click(named('Rename Renamed point')); await edit('Second name'); await submit(); await until(() => expect(named('Remove Second name')).not.toBeNull()); await click(named('Remove Second name')); await until(() => expect(document.body.textContent).toContain('No named points in this conversation.')); expect((await store.list(scope)).points).toEqual([]); expect(document.body.textContent).toContain('No named points in this conversation.'); expect(reveal).not.toHaveBeenCalled()
+  await click(named('Rename Renamed point')); await edit('Second name'); await submit(); await until(() => expect(named('Remove Second name')).not.toBeNull()); await click(named('Remove Second name')); await until(() => expect(document.body.textContent).toContain('No named points in this conversation.')); expect(named('Reading points').textContent).toBe(''); expect((await store.list(scope)).points).toEqual([]); expect(document.body.textContent).toContain('No named points in this conversation.'); expect(reveal).not.toHaveBeenCalled()
 })
 it('keeps the original save after a lost reply and retries exactly the same immutable operation', async () => {
   const write = vi.spyOn(api.landmarks, 'apply'), attempts: any[] = []; write.mockImplementation(async value => { attempts.push(structuredClone(value)); const result = await store.apply(value, actor); if (attempts.length === 1) throw Object.assign(new Error('Original write reply unavailable'), { code: 'ACK_UNKNOWN' }); return result })
@@ -92,33 +98,33 @@ it('keeps the rejected name and requires an explicit new save after a real globa
   await submit(); await until(savedStatus); expect((await store.list(scope)).points[0]!.name).toBe('Keep this name'); expect(api.landmarks.apply).toHaveBeenCalledTimes(2)
 })
 it('checks the original durable receipt without resending after an unknown save', async () => {
-  vi.spyOn(api.landmarks, 'apply').mockImplementation(async value => { await store.apply(value, actor); throw new Error('Original reply missing') })
-  await render(<SaveConversationLandmark reference={ref()}/>); await click(named('Name reading point')); await edit('Receipt point'); await submit(); await until(() => expect(button('Check original save')?.disabled).toBe(false)); await click(button('Check original save')); await until(savedStatus)
-  expect(api.landmarks.apply).toHaveBeenCalledTimes(1); expect(document.body.textContent).toContain('Saved. Return from Reading points.'); expect((await store.list(scope)).points).toHaveLength(1)
+  vi.spyOn(api.landmarks, 'apply').mockImplementationOnce(async value => { await store.apply(value, actor); throw new Error('Original reply missing') })
+  await render(<SaveConversationLandmark reference={ref()}/>); await click(named('Name reading point')); await edit('Receipt point'); await submit(); await until(() => expect(button('Check original save')?.disabled).toBe(false)); await confirmObservedSave(); await until(savedStatus)
+  expect(api.landmarks.apply).toHaveBeenCalledTimes(2); expect(document.body.textContent).toContain('Saved. Return from Reading points.'); expect((await store.list(scope)).points).toHaveLength(1)
 })
 it('does not carry source A naming intent or its late completion through A-B-A', async () => {
   let finish!: (page: ConversationLandmarkPage) => void, original!: ConversationLandmarkPage
-  vi.spyOn(api.landmarks, 'apply').mockImplementation(async value => { original = await store.apply(value, actor); return new Promise(resolve => { finish = resolve }) })
+  vi.spyOn(api.landmarks, 'apply').mockImplementationOnce(async value => { original = await store.apply(value, actor); return new Promise(resolve => { finish = resolve }) })
   await render(<SaveConversationLandmark reference={ref()}/>); await click(named('Name reading point')); await edit('Only first A'); await submit(); await until(() => expect(finish).toBeTypeOf('function'))
   await render(<SaveConversationLandmark reference={ref('source-b')}/>); expect(document.querySelector('.conversation-landmark')).toBeNull(); await click(named('Name reading point')); expect(input().value).toBe('')
   await render(<SaveConversationLandmark reference={ref()}/>); await click(named('Name reading point')); expect(input().value).toBe('Only first A'); expect(input().readOnly).toBe(true); await act(async () => finish(original)); await tick()
-  expect(document.body.textContent).not.toContain('Saved. Return from Reading points.'); await click(button('Check original save')); await until(savedStatus); expect(api.landmarks.apply).toHaveBeenCalledTimes(1); expect((await store.list(scope)).points[0]?.reference).toEqual(ref()); expect(Object.keys(useAppStore.getState().conversationLandmarkIntents)).toHaveLength(0)
+  expect(document.body.textContent).not.toContain('Saved. Return from Reading points.'); await confirmObservedSave(); await until(savedStatus); expect(api.landmarks.apply).toHaveBeenCalledTimes(2); expect((await store.list(scope)).points[0]?.reference).toEqual(ref()); expect(Object.keys(useAppStore.getState().conversationLandmarkIntents)).toHaveLength(0)
 })
 it('recovers an unknown original operation in the reading tool while its message is outside the loaded window', async () => {
-  vi.spyOn(api.landmarks, 'apply').mockImplementation(async value => { await store.apply(value, actor); throw new Error('Original reply unavailable') })
+  vi.spyOn(api.landmarks, 'apply').mockImplementationOnce(async value => { await store.apply(value, actor); throw new Error('Original reply unavailable') })
   await render(<SaveConversationLandmark reference={ref()}/>); await click(named('Name reading point')); await edit('Off-window pending point'); await submit(); await until(() => expect(button('Check original save')?.disabled).toBe(false))
   const original = Object.values(useAppStore.getState().conversationLandmarkIntents)[0]!
   expect(document.body.textContent).toContain(original.operationId)
   await render(<ConversationLandmarkList reference={scope} reveal={async () => ({ kind: 'unavailable', message: 'Read the original record window.' })} active/>); await click(named('Reading points')); await until(() => expect(button('Check original save')?.disabled).toBe(false)); expect(document.body.textContent).toContain(original.operationId)
-  await click(button('Check original save')); await until(() => expect(Object.keys(useAppStore.getState().conversationLandmarkIntents)).toHaveLength(0)); expect(api.landmarks.apply).toHaveBeenCalledTimes(1); expect((await store.list(scope)).points).toHaveLength(1)
+  await confirmObservedSave(); await until(() => expect(Object.keys(useAppStore.getState().conversationLandmarkIntents)).toHaveLength(0)); expect(api.landmarks.apply).toHaveBeenCalledTimes(2); expect((await store.list(scope)).points).toHaveLength(1)
 })
 it('shows one original receipt recovery after a list rename loses its reply', async () => {
-  await saved(); vi.spyOn(api.landmarks, 'apply').mockImplementation(async value => { await store.apply(value, actor); throw new Error('Original rename reply unavailable') })
+  await saved(); vi.spyOn(api.landmarks, 'apply').mockImplementationOnce(async value => { await store.apply(value, actor); throw new Error('Original rename reply unavailable') })
   await render(<ConversationLandmarkList reference={scope} reveal={async () => ({ kind: 'located' })} active/>); await click(named('Reading points')); await until(() => expect(named('Rename Original point')).not.toBeNull())
   await click(named('Rename Original point')); await edit('One pending rename'); await submit(); await until(() => expect(document.body.textContent).toContain('Original rename reply unavailable'))
   expect(Array.from(document.querySelectorAll('button')).filter(node => node.textContent === 'Check original save')).toHaveLength(1)
-  await click(button('Check original save')); await until(() => expect(named('Remove One pending rename')).not.toBeNull()); expect(Object.keys(useAppStore.getState().conversationLandmarkIntents)).toHaveLength(0)
-  expect(named('Rename One pending rename').disabled).toBe(false); expect(api.landmarks.apply).toHaveBeenCalledTimes(1)
+  await confirmObservedSave(); await until(() => expect(named('Remove One pending rename')).not.toBeNull()); expect(Object.keys(useAppStore.getState().conversationLandmarkIntents)).toHaveLength(0)
+  expect(named('Rename One pending rename').disabled).toBe(false); expect(api.landmarks.apply).toHaveBeenCalledTimes(2)
 })
 it('explicitly reviews the original missing-point rejection and unlocks the other saved points', async () => {
   await saved(); await saved(ref('source-b'), 'Other point', 'other-point')
@@ -130,11 +136,11 @@ it('explicitly reviews the original missing-point rejection and unlocks the othe
   expect((await store.list({ ...scope, operationId: original.operationId })).recordedOperation).toBeNull(); expect(api.landmarks.apply).toHaveBeenCalledTimes(1); expect(document.body.textContent).toContain('because its point no longer exists')
 })
 it('reconciles its original operation on explicit reopen after another reading tool confirms it', async () => {
-  vi.spyOn(api.landmarks, 'apply').mockImplementation(async value => { await store.apply(value, actor); throw new Error('Original receipt unavailable') })
+  vi.spyOn(api.landmarks, 'apply').mockImplementationOnce(async value => { await store.apply(value, actor); throw new Error('Original receipt unavailable') })
   await render(<><SaveConversationLandmark reference={ref()}/><ConversationLandmarkList reference={scope} reveal={async () => ({ kind: 'located' })} active/></>)
   await click(named('Name reading point')); await edit('Same original intent'); await submit(); await until(() => expect(button('Check original save')?.disabled).toBe(false)); await click(named('Close Name reading point'))
-  await click(named('Reading points')); await until(() => expect(button('Check original save')?.disabled).toBe(false)); await click(button('Check original save')); await until(() => expect(Object.keys(useAppStore.getState().conversationLandmarkIntents)).toHaveLength(0)); await click(named('Close Reading points'))
-  await click(named('Name reading point')); await until(savedStatus); await click(named('Close Name reading point')); await click(named('Name reading point')); expect(input().readOnly).toBe(false); expect(input().value).toBe(''); expect(api.landmarks.apply).toHaveBeenCalledTimes(1)
+  await click(named('Reading points')); await until(() => expect(button('Check original save')?.disabled).toBe(false)); await confirmObservedSave(); await until(() => expect(Object.keys(useAppStore.getState().conversationLandmarkIntents)).toHaveLength(0)); await click(named('Close Reading points'))
+  await click(named('Name reading point')); await until(savedStatus); await click(named('Close Name reading point')); await click(named('Name reading point')); expect(input().readOnly).toBe(false); expect(input().value).toBe(''); expect(api.landmarks.apply).toHaveBeenCalledTimes(2)
 })
 it('hands initial focus to the original popup only after its floating position becomes visible', async () => {
   await render(<><SaveConversationLandmark reference={ref()}/><ConversationLandmarkList reference={scope} reveal={async () => ({ kind: 'located' })} active/></>)
