@@ -178,6 +178,7 @@ it('groups live startup activity without dropping distinct messages or original 
   expect(endpoints.map(endpoint => endpoint.querySelector('.startup-endpoint__host')?.textContent)).toEqual([
     'remote-b', 'remote-a', 'remote-c', 'remote-d'
   ])
+  for (const endpoint of endpoints) expect(endpoint.querySelector('summary [data-semantic-icon]')).not.toBeNull()
   details.open = true
   expect(endpoints.every(endpoint => !endpoint.open)).toBe(true)
   const diagnostics = [...details.querySelectorAll('.startup-endpoint__activity')]
