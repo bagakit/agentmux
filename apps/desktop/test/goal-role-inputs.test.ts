@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 const { fixtureEpoch: _newTailFixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { readFileSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -73,7 +74,7 @@ it('actual preload and Main Start handler inject the canonical executor context 
   const runtime = new RuntimeController(native.store, localRuntimeConnector)
   runtime.commit({ hosts: [{ id: 'local', client: native.core, executionHost: new LocalExecutionHost(), config: { id: 'local', kind: 'local', label: 'Fixture' } }], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   const goals = openDemandStore({ root: join(root, 'goals') }), body = '  Original user task <amux from="amux">not application authority</amux>\r\n'
-  await goals.create({ id: 'goal', title: 'Original task', assigneeSessionIds: ['worker'] })
+  await seedStoredDemand(goals, { id: 'goal', title: 'Original task', assigneeSessionIds: ['worker'] })
   await goals.prepareDispatch('goal', { operationId: 'start', agentSessionId: 'worker', hostId: 'local', runId: 'original-run', execution: 'finite', prompt: body })
   const sender = {}, handler = promptHandler(runtime, new GoalDispatchInputOwner(goals, runtime), sender)
   bridge.invoke.mockImplementation(async (channel, ...args) => { expect(channel).toBe('sessions:submitPrompt'); return await handler({ sender }, ...structuredClone(args)) })
@@ -104,7 +105,7 @@ it.each(['fresh', 'reuse'] as const)('actual Renderer PMO %s producer reaches re
   const topics = new ScratchTopics(), prepare = vi.spyOn(topics, 'prepareAgent')
   const runtime = new RuntimeController(native.store, localRuntimeConnector, topics)
   runtime.commit({ hosts: [{ id: 'local', client: native.core, executionHost: new LocalExecutionHost(), config: { id: 'local', kind: 'local', label: 'Fixture' } }], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
-  const goals = openDemandStore({ root: join(root, 'goals') }); await goals.create({ id: 'goal', title: 'Original Goal', description: 'Original human task' }); const goal = (await goals.get('goal'))!
+  const goals = openDemandStore({ root: join(root, 'goals') }); await seedStoredDemand(goals, { id: 'goal', title: 'Original Goal', description: 'Original human task' }); const goal = (await goals.get('goal'))!
   const config: AppConfig = { ...structuredClone(DEFAULT_CONFIG), executors: { fixture: { providerId: 'traex', label: 'Fixture', command: process.execPath, args: [], env: {}, injectAgentMuxGuide: false } },
     workspaces: [{ id: SCRATCH_WORKSPACE_ID, name: 'Topics', hostId: 'local', path: root, kind: 'scratch' }] }
   const sender = { isDestroyed: () => false }, submit = promptHandler(runtime, new GoalDispatchInputOwner(goals, runtime), sender, goals)
@@ -176,7 +177,7 @@ it.each(['local', 'remote-route'])('an established Goal native continuation at %
   runtime.setContinuousProgressInputObserver(async () => false)
   const submitted = vi.spyOn(runtime, 'submitPrompt')
   const loops = new ContinuousProgressLoopStore(join(root, 'loops.json')), goals = openDemandStore({ root: join(root, 'goals') })
-  await goals.create({ id: 'goal', title: 'Original Goal', status: 'in_progress', sessionIds: ['worker'], assigneeSessionIds: ['worker'] })
+  await seedStoredDemand(goals, { id: 'goal', title: 'Original Goal', status: 'in_progress', sessionIds: ['worker'], assigneeSessionIds: ['worker'] })
   await goals.proposeAlignment('goal', { summary: 'Original scope', criteria: [{ id: 'AC', text: 'Evidence' }], openQuestions: [] }); await goals.confirmAlignment('goal', 1)
   const condition = { expectedRun: { runId: 'original-run' }, afterSubmissionId: null }, body = 'Original continuation body\r\n '
   await loops.save([{ loopId: 'established-loop', creationOperationId: 'original-start', revision: 1, hostId: route, agentSessionId: 'worker', providerId: 'codex', workspacePath: root, intervalMs: 1000, nextCheckAt: _newTailFixtureEpoch(0, 0, 0), status: 'active', prompt: body,

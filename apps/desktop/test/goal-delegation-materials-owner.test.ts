@@ -1,3 +1,4 @@
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { createHash } from 'node:crypto'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -26,7 +27,7 @@ async function fixture(readAvailable = true) {
   const originalFiles = new FileReadOwner({ catalog: async () => catalog, workspace: id => id === workspace.id ? workspace : undefined, files })
   const read = vi.fn((input: FileReadParams) => originalFiles.read(input))
   const demandsRoot = join(root, 'goals'), demands = openDemandStore({ root: demandsRoot })
-  await demands.create({ id: 'original-goal', title: 'Original Goal', description: 'Preserved original user request', status: 'in_progress',
+  await seedStoredDemand(demands, { id: 'original-goal', title: 'Original Goal', description: 'Preserved original user request', status: 'in_progress',
     assigneeSessionIds: ['original-owner', 'original-worker'], supervisorSessionId: 'original-owner' })
   await demands.proposeAlignment('original-goal', { summary: 'Original task scope', criteria: [{ id: 'AC-source', text: 'Retain original source input' }], openQuestions: [] })
   const runtime = { resolveGoalAgent: async () => ({ hostId: 'local', status: {} as never }), agentCreation: vi.fn(async (_hostId: string, agentSessionId: string) => ({ agentSessionId,

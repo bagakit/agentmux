@@ -1,6 +1,7 @@
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { act, createElement, Profiler } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { writeFile } from 'node:fs/promises'
@@ -42,7 +43,8 @@ beforeEach(async () => {
 afterEach(async () => { try { await act(async () => root.unmount()); await discussion.dispose() } finally { disposeTheme(); container.remove(); vi.restoreAllMocks(); useAppStore.setState(initial, true) } })
 async function mount() { await act(async () => root.render(createElement(GlobalBoardSurface))) }
 async function save(alignment?: DemandAlignmentProposal, confirmed = false, grounding?: DemandGroundingProposal) {
-  await useAppStore.getState().createDemand({ id: 'goal', title: 'Restore my work', description: intent, status: 'in_progress', projectId: workspaceProjectId(config.workspaces[0]!), projectName: 'Repo', sessionIds: ['healthy-run'], source: 'session' })
+  await seedStoredDemand(owner, { id: 'goal', title: 'Restore my work', description: intent, status: 'in_progress', projectId: workspaceProjectId(config.workspaces[0]!), projectName: 'Repo', sessionIds: ['healthy-run'] })
+  await useAppStore.getState().refreshDemand('goal')
   // Source is a retained Renderer presentation field; the Host Demand domain has no source field.
   useAppStore.setState(state => ({ demands: { ...state.demands, goal: { ...state.demands.goal!, source: 'session' } } }))
   if (alignment) await useAppStore.getState().updateDemand('goal', { alignment })
@@ -406,7 +408,7 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
   })
 
   it('keeps a failed acknowledgement attached across navigation, then reloads before a new explicit acceptance', async () => {
-    await save(proposal, true, report()); await owner.create({ id: 'other', title: 'Another real goal' }); await useAppStore.getState().refreshDemand('other'); await mount()
+    await save(proposal, true, report()); await seedStoredDemand(owner, { id: 'other', title: 'Another real goal' }); await useAppStore.getState().refreshDemand('other'); await mount()
     const submission = (await owner.get('goal'))!.grounding!.submissionId
     host.once('demand.accept', { kind: 'reject', error: new Error('Receipt unavailable') })
     await click('Accept results'); await eventually(() => expect(container.textContent).toContain('Result acceptance is unconfirmed'))
@@ -427,7 +429,7 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
   })
 
   it('keeps pending acknowledgement attached to its Goal and prevents duplicate requests when returning to it', async () => {
-    await save(proposal); await owner.create({ id: 'other', title: 'Another real goal' }); await useAppStore.getState().refreshDemand('other'); await mount()
+    await save(proposal); await seedStoredDemand(owner, { id: 'other', title: 'Another real goal' }); await useAppStore.getState().refreshDemand('other'); await mount()
     let finish!: () => void
     finish = host.once('demand.confirm', { kind: 'hold-request' }).release
     await click('Confirm goal', false)

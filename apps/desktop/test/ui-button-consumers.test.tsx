@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -39,8 +40,8 @@ async function fillName(value: string) {
 
 it('uses the real GoalDetail menu: Cancel and Escape preserve the Goal, explicit danger deletes only its original ID once', async () => {
   const owner = openDemandStore({ root: await directory() })
-  await owner.create({ id: 'original-goal', title: 'Keep the original work recoverable', description: 'Keep linked Sessions running.' })
-  await owner.create({ id: 'other-goal', title: 'Other original goal' })
+  await seedStoredDemand(owner, { id: 'original-goal', title: 'Keep the original work recoverable', description: 'Keep linked Sessions running.' })
+  await seedStoredDemand(owner, { id: 'other-goal', title: 'Other original goal' })
   const original = (await owner.get('original-goal'))!, other = (await owner.get('other-goal'))!
   const demand: DemandProjection = { ...original, source: 'default-topic', sessions: [], workspacePath: null }
   useAppStore.setState({ demands: { [original.id]: demand, [other.id]: { ...other, source: 'default-topic' } }, selectedDemandId: original.id })

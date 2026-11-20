@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { act } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -40,7 +41,7 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'amx-goal-delivery-')); cleanup.push(() => rm(root, { recursive: true, force: true }))
   isolateCoreFixtureEnvironment(root)
   const tickets = goalTickets(join(root, 'goals')), { store } = tickets
-  await store.create({ id: goalId, title: 'Review the original delivery', description: 'Keep the same Goal', status: 'in_progress',
+  await seedStoredDemand(store, { id: goalId, title: 'Review the original delivery', description: 'Keep the same Goal', status: 'in_progress',
     sessionIds: ['supervisor', 'worker'], assigneeSessionIds: ['supervisor', 'worker'], supervisorSessionId: 'supervisor' })
   await store.proposeAlignment(goalId, { summary: 'Deliver and verify', criteria: [{ id: 'result', text: 'The consumer uses a verified API' }], openQuestions: [] })
   await tickets.revise(goalId, { operationId: 'original-plan', expectedRevision: 0, alignmentRevision: 1, nodes: [node('api'), node('consumer', ['api'])] }, { kind: 'user', id: 'original-planner' })

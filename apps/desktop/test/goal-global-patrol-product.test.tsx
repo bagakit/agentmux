@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import './helpers/goal-responsibility-product'
 import { fixture, mount, container, settle, evidence, record, cleanup } from './helpers/goal-responsibility-product'
 import { execFile } from 'node:child_process'
@@ -99,7 +100,7 @@ async function prepared() {
   useAppStore.setState({ config: seeded.config, tabs: seeded.tabs, layouts: seeded.layouts,
     sessions: seeded.sessions, scratchTopicSnapshots: seeded.scratchTopicSnapshots, activeWorkspaceId: seeded.activeWorkspaceId,
     mainSurface: seeded.mainSurface, spatialRequests: {}, spaceZoneBindings: {} })
-  for (const status of ['backlog', 'done', 'cancelled', 'blocked'] as const) await f.demands.create({ id: 'global-' + status, title: 'Other project ' + status, status, projectId: 'other-project', projectName: 'Other actual project' })
+  for (const status of ['backlog', 'done', 'cancelled', 'blocked'] as const) await seedStoredDemand(f.demands, { id: 'global-' + status, title: 'Other project ' + status, status, projectId: 'other-project', projectName: 'Other actual project' })
   const all = (await f.demands.snapshot()).demands
   useAppStore.setState({ demands: Object.fromEntries(all.map(goal => [goal.id, { ...record(goal), projectId: goal.projectId, projectName: goal.projectName }])) })
   return { f, start, nativeRuns, launches, launch, all }
@@ -260,7 +261,7 @@ describe('global PMO inspection uses one public creation/input owner and the ori
 
   it('a complete inventory larger than the original Core first-prompt budget still starts one inspection and directs complete discovery to the original owner', async () => {
     const p = await prepared()
-    for (let index = 0; index < 240; index++) await p.f.demands.create({ id: 'large-scope-' + index, title: '原目标完整范围'.repeat(40), status: index % 2 ? 'done' : 'todo' })
+    for (let index = 0; index < 240; index++) await seedStoredDemand(p.f.demands, { id: 'large-scope-' + index, title: '原目标完整范围'.repeat(40), status: index % 2 ? 'done' : 'todo' })
     const originals = (await p.f.demands.snapshot()).demands
     expect(Buffer.byteLength(JSON.stringify(originals.map(({ id, title, status, updatedAt }) => ({ id, title, status, updatedAt }))))).toBeGreaterThan(AGENT_LAUNCH_CONTEXT_BUDGET_BYTES)
     const result = await p.f.cli('owner', ['goal', 'patrol', 'all', '--operation-id', 'global-large-inventory'])

@@ -1,3 +1,4 @@
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -13,7 +14,7 @@ const person: GoalDelegationAuthority = { actor: { kind: 'user', id: 'person' } 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'amux-patrol-owner-')); cleanup.push(() => rm(root, { recursive: true, force: true }))
   const demands = openDemandStore({ root })
-  await demands.create({ id: 'goal', title: 'Original work', status: 'in_progress', supervisorSessionId: 'manager', assigneeSessionIds: ['manager', 'worker'] })
+  await seedStoredDemand(demands, { id: 'goal', title: 'Original work', status: 'in_progress', supervisorSessionId: 'manager', assigneeSessionIds: ['manager', 'worker'] })
   await demands.proposeAlignment('goal', { summary: 'Original target', criteria: [{ id: 'AC', text: 'Original evidence' }], openQuestions: [] })
   await demands.prepareDispatch('goal', { operationId: 'start', agentSessionId: 'worker', hostId: 'worker-host', runId: 'worker-run', prompt: 'Original task', execution: 'finite' })
   await demands.recordDispatchPhase('goal', 'start', { stage: 'confirmed', receipt: { kind: 'core-prompt', itemId: 'prompt:start', createdAt: Date.now() } })

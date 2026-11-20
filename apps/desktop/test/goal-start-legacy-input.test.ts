@@ -1,3 +1,4 @@
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-values.mjs"
 import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -29,7 +30,7 @@ it('keeps the actual legacy Session-owner admission without a source key unknown
   inner.kernel.input = async (_runId: string, input: any) => { expect(input.expectedByte).toBe(cursor); writes.push(input.data); cursor += Buffer.byteLength(input.data); return { run: projection(), appliedByteRange: { startByte: input.expectedByte, endByte: cursor } } }
   vi.spyOn(inner.screenEvidence, 'wait').mockResolvedValue(0)
   try {
-    await demands.create({ id: 'goal', title: 'Original Goal', status: 'in_progress', assigneeSessionIds: ['worker'], supervisorSessionId: 'worker' })
+    await seedStoredDemand(demands, { id: 'goal', title: 'Original Goal', status: 'in_progress', assigneeSessionIds: ['worker'], supervisorSessionId: 'worker' })
     await demands.prepareDispatch('goal', { operationId: 'original-start', agentSessionId: 'worker', hostId: 'local', runId: 'original-run', execution: 'finite', prompt: 'Original body' })
     await demands.recordDispatchPhase('goal', 'original-start', { stage: 'confirmed', receipt: { kind: 'core-prompt', itemId: 'prompt:original-start', createdAt: _reshape_fixtureEpoch(0, 0, 100) } })
     const start = (await demands.inspectDispatch('goal', 'original-start'))!, goal = (await demands.get('goal'))!

@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { act, useState } from 'react'
 import { beforeEach, afterEach, expect, it, vi } from 'vitest'
 import { GoalAlignment, EMPTY_GOAL_ACKNOWLEDGEMENT } from '../src/renderer/src/components/GoalAlignment'
@@ -22,7 +23,8 @@ const icon = () => dom.container.querySelector('[data-semantic-icon="object.goal
 const cue = () => dom.container.querySelector('[data-icon-animation="feedback"]')
 async function confirm() { await act(async () => dom.container.querySelector<HTMLButtonElement>('[data-goal-confirm]')!.click()) }
 async function create(id = goalId) {
-  await useAppStore.getState().createDemand({ id, title: 'Shared direction', source: 'session', status: 'in_progress', sessionIds: [] })
+  await seedStoredDemand(owner, { id, title: 'Shared direction', status: 'in_progress', sessionIds: [] })
+  await useAppStore.getState().refreshDemand(id)
   await useAppStore.getState().updateDemand(id, { alignment: proposal })
 }
 beforeEach(async () => {

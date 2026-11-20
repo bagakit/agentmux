@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -35,7 +36,7 @@ afterEach(async () => { release?.(); release = undefined; vi.restoreAllMocks(); 
 
 it('ordinary durable Goal creation, edits and deletion reach the live Board by exact ID without unrelated reads', async () => {
   release = initializeGoalResponsibilityObservation()
-  await owner.create({ id: 'ordinary-goal', title: 'Original title', description: 'Original description' })
+  await seedStoredDemand(owner, { id: 'ordinary-goal', title: 'Original title', description: 'Original description' })
   await vi.waitFor(() => expect(useAppStore.getState().demands['ordinary-goal']?.title).toBe('Original title'))
   await owner.update('ordinary-goal', { title: 'Changed remotely', description: 'Actual new description' })
   await vi.waitFor(() => expect(useAppStore.getState().demands['ordinary-goal']).toMatchObject({ title: 'Changed remotely', description: 'Actual new description' }))
@@ -49,8 +50,8 @@ it('ordinary durable Goal creation, edits and deletion reach the live Board by e
 
 it('a complete reconnect membership removes a Goal deleted while offline and retains a failed exact observation', async () => {
   release = initializeGoalResponsibilityObservation()
-  await owner.create({ id: 'deleted-offline', title: 'Original retained Goal' })
-  await owner.create({ id: 'healthy-goal', title: 'Healthy retained Goal' })
+  await seedStoredDemand(owner, { id: 'deleted-offline', title: 'Original retained Goal' })
+  await seedStoredDemand(owner, { id: 'healthy-goal', title: 'Healthy retained Goal' })
   await vi.waitFor(() => expect(Object.keys(useAppStore.getState().demands).sort()).toEqual(['deleted-offline', 'healthy-goal']))
   online = false; await owner.remove('deleted-offline')
   const healthy = useAppStore.getState().demands['healthy-goal']
@@ -70,7 +71,7 @@ it('a complete reconnect membership removes a Goal deleted while offline and ret
 
 it('a change during an exact Goal read requests a new cut and never turns a stale missing result into deletion of a later saved view', async () => {
   release = initializeGoalResponsibilityObservation()
-  await owner.create({ id: 'changing-goal', title: 'Original title' })
+  await seedStoredDemand(owner, { id: 'changing-goal', title: 'Original title' })
   await vi.waitFor(() => expect(useAppStore.getState().demands['changing-goal']).toBeTruthy())
   const priorReads = vi.mocked(api.goals.execute).mock.calls.length
   let complete!: (value: any) => void
@@ -86,7 +87,7 @@ it('a change during an exact Goal read requests a new cut and never turns a stal
 })
 
 it('an exact deletion while the startup catalog is in flight cannot be resurrected by that older catalog', async () => {
-  await owner.create({ id: 'deleted-during-startup', title: 'Old startup entry' })
+  await seedStoredDemand(owner, { id: 'deleted-during-startup', title: 'Old startup entry' })
   const stale = await owner.list()
   let finish!: (value: typeof stale) => void
   vi.spyOn(api.demands, 'list').mockImplementation(() => new Promise(resolve => { finish = resolve }))

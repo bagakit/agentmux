@@ -15,7 +15,7 @@ import { readGoalDiscussionBinding } from '../../host/src/goal-discussion-bindin
 import { spatialAgentOpenRecord } from '@agentmux/core/spatial-state'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { api } from '../src/renderer/src/lib/api'
-import { directGoalRequest, retryDirectGoal } from '../src/renderer/src/lib/goals-direct-pmo'
+import { directGoalRequest, retryDirectGoal, saveDirectGoal } from '../src/renderer/src/lib/goals-direct-pmo'
 import { readPmoTeamsTopicFloatingState, requestPmoTeamsTopicFloatingOpen } from '../src/renderer/src/lib/pmo-teams-topic-floating'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
@@ -67,10 +67,10 @@ afterEach(async () => {
     const retained = directGoalRequest()
     if (retained) {
       expect(retained.pending, 'the test settles its finite operation').toBe(false)
-      if (!await owner.get(retained.id)) await owner.create({ id: retained.id, title: 'Cleanup existing caller identity' })
       releaseShowFailures?.()
       useAppStore.setState({ requestDemandPmoTask: vi.fn().mockResolvedValue('cleanup-tab') })
       await act(async () => retryDirectGoal())
+      if (directGoalRequest()?.notSaved) await act(async () => saveDirectGoal())
     }
     expect(directGoalRequest()).toBeNull()
   } finally {
@@ -106,7 +106,7 @@ describe('Goals direct PMO creation and reading surface', () => {
     const saved = goals[0]!
     expect(saved).toMatchObject({ title: 'Untitled goal', description: '', status: 'backlog', projectId: null, projectName: null, sessionIds: [] })
     expect(saved.id.length).toBeGreaterThan(0); expect(saved.alignment).toBeUndefined(); expect(saved.grounding).toBeUndefined()
-    expect(creates()).toHaveLength(1); expect(creates()[0]).toMatchObject({ demandId: saved.id, title: 'Untitled goal', description: '', status: 'backlog' })
+    expect(creates()).toHaveLength(1); expect(creates()[0]).toMatchObject({ requestId: saved.creationOrigin?.operationId, title: 'Untitled goal', description: '', status: 'backlog' })
     expect(container.querySelector('.goals-intake, [aria-label="Goal intent"]')).toBeNull()
     expect(container.querySelector(`[data-demand-id="${saved.id}"]`)?.classList.contains('goals-row--undefined')).toBe(true)
     const state = useAppStore.getState(), tabId = binding(saved.id).tabId, tab = state.tabs[tabId]!
@@ -134,7 +134,8 @@ describe('Goals direct PMO creation and reading surface', () => {
     const saved = await held.committed
     if (saved.operation !== 'demand.create') throw new Error('The held receipt belongs to another operation.')
     expect(creates()).toHaveLength(1); expect(api.sessions.launchAgent).not.toHaveBeenCalled(); expect(starts()).toBe(0)
-    expect(directGoalRequest()).toMatchObject({ id: saved.demand.id, phase: 'save', pending: true })
+    expect(directGoalRequest()).toMatchObject({ creationOperationId: saved.demand.creationOrigin?.operationId, phase: 'save', pending: true })
+    expect(directGoalRequest()?.id).toBeUndefined()
     const projected = useAppStore.getState().demands
     // The actual goal.watch publication may independently read the owner's commit before the held ACK.
     expect(Object.keys(projected)).toEqual(projected[saved.demand.id] ? [saved.demand.id] : [])
@@ -158,10 +159,10 @@ describe('Goals direct PMO creation and reading surface', () => {
     expect(api.sessions.stop).not.toHaveBeenCalled()
   })
 
-  it('recovers an actually saved but lost creation receipt only by reading the exact frozen ID', async () => {
+  it('recovers an actually saved but lost creation receipt only by reading the original creation operation', async () => {
     const lost = host.once('demand.create', { kind: 'lose-receipt', error: new Error('Saved IPC receipt missing') })
-    // The exact frozen-ID read (demand.show) fails once before reaching the original owner.
-    host.once('demand.show', { kind: 'reject', error: new Error('Owner read unavailable') })
+    // The original creation-operation read (demand.show) fails once before reaching the original owner.
+    host.once('demand.show', { kind: 'reject', error: new Error('Owner read unavailable') }, request => request.creationOperationId !== undefined)
     await mount(); await click('New Goal'); await eventually(() => expect(directGoalRequest()?.pending ?? false).toBe(false))
     const committed = await lost.committed
     if (committed.operation !== 'demand.create') throw new Error('Expected the original creation receipt')
@@ -169,22 +170,22 @@ describe('Goals direct PMO creation and reading surface', () => {
     expect((await owner.list()).map(value => value.id)).toEqual([id])
     // An original owner publication may already have supplied the saved record.
     // Otherwise the unknown receipt still exposes only its exact readback action.
-    if (directGoalRequest()) {
-      expect(directGoalRequest()!.id).toBe(id)
+    if (directGoalRequest()?.phase === 'save') {
+      expect(directGoalRequest()!.creationOperationId).toBe(committed.demand.creationOrigin?.operationId)
       expect(container.querySelector('.goals-creation')?.textContent).toContain('Goal save is unconfirmed')
       expect(api.sessions.launchAgent).not.toHaveBeenCalled()
       await act(async () => root.render(null)); await mount(); await click('Read goal again')
     } else expect(useAppStore.getState().demands[id]).toMatchObject({ id, title: committed.demand.title })
     await eventually(() => expect(directGoalRequest()).toBeNull())
-    expect(creates()).toHaveLength(1); expect(host.bodies('demand.show').filter(read => read.demandId === id).length).toBeGreaterThanOrEqual(2)
+    expect(creates()).toHaveLength(1); expect(host.bodies('demand.show').filter(read => read.creationOperationId === committed.demand.creationOrigin?.operationId).length).toBeGreaterThanOrEqual(2)
     expect(useAppStore.getState().selectedDemandId).toBe(id); expect(starts()).toBe(1)
     expect((await discussionInput(id))?.systemContext).toContain(`existing Goal ${id}`)
   })
 
-  it('saves again only after a complete owner read proves absence, using the same caller ID', async () => {
+  it('saves again only after a complete owner read proves absence, using the same creation operation', async () => {
     host.once('demand.create', { kind: 'reject', error: new Error('Disk unavailable') })
     await mount(); await click('New Goal'); await eventually(() => expect(directGoalRequest()?.pending).toBe(false))
-    const id = directGoalRequest()!.id
+    const operationId = directGoalRequest()!.creationOperationId
     expect(await owner.list()).toEqual([]); expect(useAppStore.getState().demands).toEqual({}); expect(api.sessions.launchAgent).not.toHaveBeenCalled()
     expect(directGoalRequest()?.notSaved).toBe(true)
     expect(container.querySelector('.goals-creation')?.textContent).toContain('The goal is not saved')
@@ -192,8 +193,9 @@ describe('Goals direct PMO creation and reading surface', () => {
     expect(button('Save this goal').querySelector('[data-semantic-icon]')).toBeNull()
     await act(async () => root.render(null)); await mount(); await click('Save this goal')
     await eventually(() => expect(directGoalRequest()).toBeNull())
-    expect(creates().map(request => request.demandId)).toEqual([id, id])
-    expect((await owner.list()).map(value => value.id)).toEqual([id]); expect(starts()).toBe(1)
+    expect(creates().map(request => request.requestId)).toEqual([operationId, operationId])
+    const goals = await owner.list(); expect(goals).toHaveLength(1); expect(starts()).toBe(1)
+    const id = goals[0]!.id; expect(goals[0]!.creationOrigin?.operationId).toBe(operationId)
     expect((await discussionInput(id))?.systemContext).toContain(`existing Goal ${id}`)
   })
 
@@ -201,11 +203,11 @@ describe('Goals direct PMO creation and reading surface', () => {
     host.once('demand.create', { kind: 'reject', error: new Error('Receipt missing') })
     releaseShowFailures = host.failAll('demand.show', new Error('Complete owner read unavailable'))
     await mount(); await click('New Goal'); await eventually(() => expect(directGoalRequest()?.pending).toBe(false))
-    const id = directGoalRequest()!.id
+    const operationId = directGoalRequest()!.creationOperationId
     expect(directGoalRequest()?.notSaved).toBe(false)
     await click('Read goal again'); await eventually(() => expect(directGoalRequest()?.pending).toBe(false))
-    expect(directGoalRequest()?.id).toBe(id); expect(creates()).toHaveLength(1)
-    expect(host.bodies('demand.show').map(read => read.demandId)).toEqual([id, id]); expect(await owner.list()).toEqual([])
+    expect(directGoalRequest()?.creationOperationId).toBe(operationId); expect(creates()).toHaveLength(1)
+    expect(host.bodies('demand.show').map(read => read.creationOperationId)).toEqual([operationId, operationId]); expect(await owner.list()).toEqual([])
     expect(useAppStore.getState().demands).toEqual({}); expect(api.sessions.launchAgent).not.toHaveBeenCalled()
     expect(container.querySelector('.goals-creation')?.textContent).toContain('Read this same goal before continuing')
     expect([...container.querySelectorAll('button')].filter(node => node.textContent === 'Save this goal')).toEqual([])
@@ -215,7 +217,7 @@ describe('Goals direct PMO creation and reading surface', () => {
     const lost = host.once('demand.discuss', { kind: 'lose-receipt', error: new Error('Original discussion receipt missing') })
     await mount(); await click('New Goal'); await eventually(() => expect(directGoalRequest()?.pending).toBe(false))
     const committed = await lost.committed; expect(committed.operation).toBe('demand.discuss')
-    const id = directGoalRequest()!.id, original = binding(id), tab = useAppStore.getState().tabs[original.tabId]!
+    const id = directGoalRequest()!.id!, original = binding(id), tab = useAppStore.getState().tabs[original.tabId]!
     expect((await owner.list()).map(value => value.id)).toEqual([id]); expect(starts()).toBe(1)
     expect(directGoalRequest()?.error).toBe('Original discussion receipt missing')
     expect(tab.regions[original.regionId]?.kind).toBe('agent')
@@ -259,7 +261,7 @@ describe('Goals direct PMO creation and reading surface', () => {
     expect(container.querySelector('[aria-label="Filter work status"]')?.getAttribute('data-value')).toBe('backlog')
     expect(container.querySelector('[aria-label="Filter routing"]')?.getAttribute('data-value')).toBe('unassigned')
     expect([...container.querySelectorAll('[data-demand-id]')].map(node => node.getAttribute('data-demand-id'))).toEqual([saved.id])
-    expect(creates()).toHaveLength(1); expect(creates()[0]?.demandId).toBe(saved.id); expect(host.executed('demand.discuss')).toHaveLength(1)
+    expect(creates()).toHaveLength(1); expect(creates()[0]?.requestId).toBe(saved.creationOrigin?.operationId); expect(host.executed('demand.discuss')).toHaveLength(1)
     expect(starts()).toBe(1); expect(api.sessions.launchAgent).not.toHaveBeenCalled(); expect(api.sessions.stop).not.toHaveBeenCalled()
   })
 

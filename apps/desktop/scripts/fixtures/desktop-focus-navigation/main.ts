@@ -1,3 +1,4 @@
+import { seedStoredDemand } from '../../../../../test/fixtures/stored-demand.mjs'
 import assert from 'node:assert/strict'
 import { localRuntimeConnector } from '../../../test/helpers/local-runtime-connector'
 import fs from 'node:fs/promises'
@@ -298,8 +299,8 @@ app.whenReady().then(async () => {
       await topics.ensure(scratch(), 'view:focus-proof-topic', 'Private Topic')
       await topics.ensure(scratch(), 'view:focus-proof-empty', 'Private empty Topic')
       await topics.ensureMote(scratch(), PMO_TEAMS_TOPIC_ID)
-      await demands.create({ id: 'private-goal-linked', title: 'First linked Goal', status: 'in_progress' })
-      await demands.create({ id: 'private-goal-exact', title: 'Exact requested Goal', status: 'in_progress', description: 'This exact Goal must stay selected.' })
+      await seedStoredDemand(demands, { id: 'private-goal-linked', title: 'First linked Goal', status: 'in_progress' })
+      await seedStoredDemand(demands, { id: 'private-goal-exact', title: 'Exact requested Goal', status: 'in_progress', description: 'This exact Goal must stay selected.' })
     }
     runtime.commit(await runtime.prepare(config))
     win = new BrowserWindow({ width: 1250, height: 880, show: false,

@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import {afterEach,expect,it,vi} from 'vitest'
 import {readFile,appendFile} from 'node:fs/promises'
 import {dirname,join} from 'node:path'
@@ -90,7 +91,7 @@ it('zero retained ideas performs no write or extra work; an unknown saved write 
 })
 it('a failed or foreign same-ID work source stays item unknown rather than an empty or borrowed Goal; link watermarks do not freeze Dispatch replies',async()=>{
  const f=await fixture(),work=await openMoteWorkThread(f),first=await f.cli(['space','mote','dialogue','supervision','read','--input','-'],{target:f.target,limit:1})
- await f.demands.create({id:'same-id-on-neighbor',title:'A local Goal is not the foreign original owner',status:'in_progress'})
+ await seedStoredDemand(f.demands, {id:'same-id-on-neighbor',title:'A local Goal is not the foreign original owner',status:'in_progress'})
  const goalReads=vi.spyOn(f.demands,'get')
  const original=f.client.readDispatch.bind(f.client)
  const fail=vi.spyOn(f.client,'readDispatch').mockRejectedValueOnce(Error('Exact original source unavailable'))

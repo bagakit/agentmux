@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { seedStoredDemand } from '../../../../test/fixtures/stored-demand.mjs'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { promises as fs } from 'node:fs'
@@ -130,7 +131,7 @@ async function fixture(options: { patrol?: boolean; alignment?: boolean | 'empty
     coreCall: (hostId, method, params, context) => { expect(hostId).toBe('local'); return core.call(method, params, context) } })
   cleanup.push(() => hostGoals.dispose())
   const demands = hostGoals.demands
-  await demands.create({ id: 'goal', title: 'Original responsibility', description: 'Original human task\nkept verbatim', status: 'in_progress',
+  await seedStoredDemand(demands, { id: 'goal', title: 'Original responsibility', description: 'Original human task\nkept verbatim', status: 'in_progress',
     assigneeSessionIds: ['owner', 'worker-a', 'worker-b', 'worker-c', 'finite-worker'], supervisorSessionId: 'owner' })
   if (options.alignment !== false) await demands.proposeAlignment('goal', { summary: 'Original useful result',
     criteria: options.alignment === 'empty' ? [] : [{ id: 'AC', text: 'Original evidence' }], openQuestions: [] })

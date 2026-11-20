@@ -2,6 +2,8 @@ import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { vi } from 'vitest'
 import { AgentProviderRegistry, type AgentMuxAgentSession, type AgentMuxHeadlessRuntime } from '@agentmux/core'
+import { AgentMuxHostExecutorOwner } from '../../../../packages/core/src/executor-owner'
+import { AgentMuxCreationAuthority } from '../../../../packages/core/src/agent-creation-authority'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { ScratchTopics } from '../../../host/src/mote-resources'
 import { api } from '../../src/renderer/src/lib/api'
@@ -26,14 +28,21 @@ export async function openHostGoalDiscussionFixture(config: AppConfig) {
   const coreRoot = join(host.directory, 'core'), scratchRoot = join(host.directory, 'scratch')
   await mkdir(coreRoot); await mkdir(scratchRoot)
   const listenerAsset = process.env.AGENTMUX_PRIVATE_LISTENER_ASSET
-  core = await injectedContextCore(coreRoot)
+  const runtimeId = owner.runtimeId!
+  const executors = new AgentMuxHostExecutorOwner({ path: join(coreRoot, 'executors.json'), runtimeId, catalog: () => core.core.catalog() })
+  core = await injectedContextCore(coreRoot, undefined, () => ({ hostExecutorOwner: executors,
+    creationAuthority: new AgentMuxCreationAuthority({ stateDirectory: join(coreRoot, 'creation-authority'), runtimeId }) }))
   if (listenerAsset) vi.stubEnv('AGENTMUX_PRIVATE_LISTENER_ASSET', listenerAsset)
   // Rendering readiness is controlled Native evidence; all input admission and receipts remain Core-owned.
   vi.spyOn((core.core as unknown as { screenEvidence: { wait(): Promise<number> } }).screenEvidence, 'wait').mockResolvedValue(0)
   const scratch = { ...config.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)!, path: scratchRoot }
-  const actualConfig = { ...config, workspaces: config.workspaces.map(workspace => workspace.id === SCRATCH_WORKSPACE_ID ? scratch : workspace) }
+  const executorId = Object.keys(config.executors)[0]!
+  // The fixture owns Native I/O. Avoid probing the developer's installed Codex or selecting its live actor carrier.
+  const executor = { ...config.executors[executorId]!, command: process.execPath }
+  const actualConfig = { ...config, executors: { ...config.executors, [executorId]: executor },
+    workspaces: config.workspaces.map(workspace => workspace.id === SCRATCH_WORKSPACE_ID ? scratch : workspace) }
   const topic = await new ScratchTopics().ensure(scratch, PMO_TEAMS_TOPIC_ID)
-  const executorId = Object.keys(config.executors)[0]!, executor = config.executors[executorId]!
+  await executors.configure({ executorId, config: executor })
   const primary = await core.core.createAgent({ agentSessionId: 'primary', providerId: executor.providerId, executorId,
     workspacePath: topic.physicalDirectoryPath!, createOperationId: 'fixture-primary', injectAgentMuxGuide: false })
   function snapshot(session: AgentMuxAgentSession): Extract<SessionSnapshot, { kind: 'agent' }> {

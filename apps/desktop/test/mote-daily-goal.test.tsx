@@ -1,3 +1,4 @@
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
@@ -205,7 +206,7 @@ beforeEach(async () => {
   })
   demands = hostGoals.demands
   config = { ...structuredClone(DEFAULT_CONFIG), workspaces: [{ id: '__scratch__', name: 'Owned topics', hostId: 'local', path: scratchRoot, kind: 'folder' }] }
-  await demands.create({ id: 'goal', title: 'Original useful work', description: 'Complete the original useful result.', sessionIds: [session.agentSessionId], assigneeSessionIds: [session.agentSessionId], supervisorSessionId: session.agentSessionId, status: 'todo' })
+  await seedStoredDemand(demands, { id: 'goal', title: 'Original useful work', description: 'Complete the original useful result.', sessionIds: [session.agentSessionId], assigneeSessionIds: [session.agentSessionId], supervisorSessionId: session.agentSessionId, status: 'todo' })
   await demands.update('goal', { alignment: { summary: 'Useful result', criteria: [{ id: 'real', text: 'Original output exists' }], openQuestions: [] } })
   await demands.confirmAlignment('goal', 1)
   manager = new ContinuousProgressLoopManager(new ContinuousProgressLoopStore(join(directory, 'loops.json')),
@@ -742,7 +743,7 @@ it('Goal revision, exact association, conflicting operation and foreign loop do 
   await expect(useAppStore.getState().executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'bad-action', operation: 'demand.continuation-action', demandId: 'other-goal', loopId: original.loopId, action: 'stop', expectedRevision: 1 })).rejects.toThrow('exact Goal')
   await demands.update('goal', { title: 'A harmless display rename' })
   expect(manager.list()[0]!.status).toBe('active')
-  await demands.create({ id: 'other-goal', title: 'Unrelated Goal' })
+  await seedStoredDemand(demands, { id: 'other-goal', title: 'Unrelated Goal' })
   expect(manager.list()[0]!.status).toBe('active')
   await demands.update('goal', { alignment: { summary: 'Changed scope', criteria: [{ id: 'real', text: 'Different real work' }], openQuestions: [] } })
   expect(manager.list()[0]!).toMatchObject({ status: 'paused', taskSource: { alignmentRevision: 1 } })
@@ -882,19 +883,19 @@ it('original SDK and CLI create/update/list/inspect persist exact content refs t
   const server = new PublicServer({ socketPath: join(directory, 'content.sock'), coreClients: () => [], execute: (...args) => bridge.controlOptions.execute(...args) })
   await server.start(); const typed = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
   try {
-    const created = await typed.call('goal.create', { goalId: 'content-original', title: 'Original content work', contentRefs: [ref!], risk: 'low', confirmation: 'user', operationId: 'content-create' })
-    expect(created.goal.contentRefs).toEqual([ref]); expect((await demands.get('content-original'))?.contentRefs).toEqual([ref])
+    const created = await typed.call('goal.create', { title: 'Original content work', contentRefs: [ref!], risk: 'low', confirmation: 'user', operationId: 'content-create' })
+    expect(created.goal.contentRefs).toEqual([ref]); expect((await demands.get(created.goal.id))?.contentRefs).toEqual([ref])
     const execute = promisify(execFile), environment = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('AGENTMUX_') && !key.startsWith('CTXMUX_')))
     const run = async (args: string[]) => JSON.parse((await execute(process.execPath, [sourceCli, '--endpoint', 'unix:' + server.path, ...args], { env: environment, timeout: 15000 })).stdout)
     const help = (await execute(process.execPath, [sourceCli, 'goal', 'update', '--help'], { env: environment, timeout: 15000 })).stdout
     expect(help).toContain('--content-refs'); expect(help).toContain('--expected-updated-at')
     expect((await execute(process.execPath, [sourceCli, 'goal', '--skill'], { env: environment, timeout: 15000 })).stdout).toContain('content provenance')
-    const updated = await run(['goal', 'update', '--goal', 'content-original', '--content-refs', JSON.stringify([ref]), '--expected-updated-at', String(created.goal.updatedAt), '--operation-id', 'content-append'])
+    const updated = await run(['goal', 'update', '--goal', created.goal.id, '--content-refs', JSON.stringify([ref]), '--expected-updated-at', String(created.goal.updatedAt), '--operation-id', 'content-append'])
     expect(updated.result.goal.contentRefs).toEqual([ref])
-    const byCli = await run(['goal', 'create', '--goal', 'content-cli', '--title', 'CLI content', '--content-refs', JSON.stringify([ref]), '--risk', 'low', '--confirm', 'user'])
+    const byCli = await run(['goal', 'create', '--title', 'CLI content', '--content-refs', JSON.stringify([ref]), '--risk', 'low', '--confirm', 'user'])
     expect(byCli.result.goal.contentRefs).toEqual([ref])
-    expect((await run(['goal', 'ls'])).result.goals.find((item: any) => item.id === 'content-original').contentRefs).toEqual([ref])
-    expect((await typed.call('goal.inspect', { goalId: 'content-original' })).goal?.contentRefs).toEqual([ref])
+    expect((await run(['goal', 'ls'])).result.goals.find((item: any) => item.id === created.goal.id).contentRefs).toEqual([ref])
+    expect((await typed.call('goal.inspect', { goalId: created.goal.id })).goal?.contentRefs).toEqual([ref])
     const catalog = await typed.call('space.ls', { target: {} }), listed = await typed.call('goal.ls', {})
     const catalogFile = join(directory, 'catalog.json'), goalsFile = join(directory, 'goals.json')
     await writeFile(catalogFile, JSON.stringify({ result: catalog })); await writeFile(goalsFile, JSON.stringify({ result: listed }))
@@ -902,10 +903,10 @@ it('original SDK and CLI create/update/list/inspect persist exact content refs t
     expect(preview.readOnly).toBe(true); expect(preview.rows.find((row: any) => row.goalId === 'goal')).toMatchObject({ state: 'confirmed', contentRefs: [ref] })
     await writeFile(resolve(process.env.AGENTMUX_DAILY_GOAL_REPOSITORY!, '.tmp/goal-content/maintenance-preview.json'), JSON.stringify(preview, null, 2))
 
-    await expect(typed.call('goal.update', { goalId: 'content-original', expectedUpdatedAt: created.goal.updatedAt, patch: { contentRefs: [ref!], description: 'Stale' } })).rejects.toThrow('Goal changed')
-    await expect(typed.call('goal.update', { goalId: 'content-original', patch: { contentRefs: [{ ...ref!, hostId: 'another-host' }] } })).rejects.toThrow('resource is unconfirmed')
-    expect((await demands.get('content-original'))?.description).toBe('')
-    const held = await typed.call('goal.create', { goalId: 'content-held-before-save', title: 'Held original', risk: 'low', confirmation: 'user' })
+    await expect(typed.call('goal.update', { goalId: created.goal.id, expectedUpdatedAt: created.goal.updatedAt, patch: { contentRefs: [ref!], description: 'Stale' } })).rejects.toThrow('Goal changed')
+    await expect(typed.call('goal.update', { goalId: created.goal.id, patch: { contentRefs: [{ ...ref!, hostId: 'another-host' }] } })).rejects.toThrow('resource is unconfirmed')
+    expect((await demands.get(created.goal.id))?.description).toBe('')
+    const held = await typed.call('goal.create', { title: 'Held original', risk: 'low', confirmation: 'user' })
     const originalUpdate = api.demands.update
     const lost = vi.spyOn(api.demands, 'update').mockImplementationOnce(async (...args) => { const saved = await originalUpdate(...args); expect(saved.operationId).toBe(args[2]); expect(saved.operationId).toBe('held-content-append'); expect(saved.nameChange).toBeUndefined(); throw new Error('Original content write receipt lost') })
     await expect(typed.call('goal.update', { goalId: held.goal.id, operationId: 'held-content-append', expectedUpdatedAt: held.goal.updatedAt, patch: { contentRefs: [ref!] } })).rejects.toThrow('receipt lost')
@@ -1004,7 +1005,7 @@ it('origin Supervisor first-default public Source CLI settings and authenticated
     try { reply = JSON.parse((await promisify(execFile)(process.execPath, [sourceCli, '--endpoint', 'unix:' + server.path, ...args], { env: environment, timeout: 15_000 })).stdout) }
     catch (error) { const output = (error as any).stdout || (error as any).stderr; if (!output) throw error; reply = JSON.parse(output) }
   }); return reply }
-  const create = async (id: string) => { const result = await run(['goal', 'create', '--goal', id, '--title', 'Original request', '--risk', 'low', '--confirm', 'user', '--operation-id', id + '-create']); expect(result.ok, JSON.stringify(result)).toBe(true); return result.result.goal }
+  const create = async (id: string) => { const result = await run(['goal', 'create', '--title', 'Original request', '--risk', 'low', '--confirm', 'user', '--operation-id', id + '-create']); expect(result.ok, JSON.stringify(result)).toBe(true); return result.result.goal }
   try {
     const on = await create('public-on')
     expect(on).toMatchObject({ supervisorSessionId: session.agentSessionId, assigneeSessionIds: [session.agentSessionId], sessionIds: [session.agentSessionId], creationOrigin: { operationId: 'public-on-create', requesterAsSupervisor: true, requesterParticipationId: on.participations[0].id, supervisorDefaultPending: false } })
@@ -1016,14 +1017,14 @@ it('origin Supervisor first-default public Source CLI settings and authenticated
     expect((await run(['settings', 'set', 'goals.requesterAsSupervisor', 'true'])).ok).toBe(true)
     const second = await create('public-second')
     expect(second.supervisorSessionId).toBe(session.agentSessionId)
-    expect((await demands.get('public-off'))!.supervisorSessionId).toBeNull()
+    expect((await demands.get(off.id))!.supervisorSessionId).toBeNull()
     expect((await demands.get('goal'))!.creationOrigin).toBeUndefined()
     await expect(typed.call('goal.create', { title: 'body claim', creationOrigin: { requesterAsSupervisor: true } } as any)).rejects.toThrow()
-    await act(async () => { await useAppStore.getState().refreshDemand('public-on'); root.render(<GoalDetail demand={{ ...useAppStore.getState().demands['public-on']!, sessions: [], workspacePath: null }} onClose={() => {}} onOpenMote={() => {}} onGrill={() => {}} onGrounding={() => {}} acknowledgementFeedback={EMPTY_GOAL_ACKNOWLEDGEMENT} onAcknowledgementFeedbackChange={() => {}} moteError={null} onRetryMote={() => {}} />) })
-    expect(useAppStore.getState().demands['public-on']!.supervisorSessionId).toBe(session.agentSessionId)
+    await act(async () => { await useAppStore.getState().refreshDemand(on.id); root.render(<GoalDetail demand={{ ...useAppStore.getState().demands[on.id]!, sessions: [], workspacePath: null }} onClose={() => {}} onOpenMote={() => {}} onGrill={() => {}} onGrounding={() => {}} acknowledgementFeedback={EMPTY_GOAL_ACKNOWLEDGEMENT} onAcknowledgementFeedbackChange={() => {}} moteError={null} onRetryMote={() => {}} />) })
+    expect(useAppStore.getState().demands[on.id]!.supervisorSessionId).toBe(session.agentSessionId)
     expect(container.textContent).toContain('Original request')
     const source = { kind: 'discussion' as const, agentSessionId: session.agentSessionId, hostId: 'local', entryPoint: 'confirmed-original-PMO' }
-    const manual = await demands.create({ id: 'manual-origin', title: 'Manual override' }, { operationId: 'manual-create', creationOrigin: { requesterAsSupervisor: true } })
+    const manual = await seedStoredDemand(demands, { id: 'manual-origin', title: 'Manual override' }, { operationId: 'manual-create', creationOrigin: { requesterAsSupervisor: true } })
     await demands.update(manual.demand.id, { supervisorSessionId: null })
     const current = (await demands.get(manual.demand.id))!
     const resolved = await demands.resolveCreationOrigin(current.id, { creationOperationId: 'manual-create', source, sourceOperationId: 'manual-original-source' }, { expectedUpdatedAt: current.updatedAt, allowSupervisorDefault: true })
@@ -1032,7 +1033,7 @@ it('origin Supervisor first-default public Source CLI settings and authenticated
     expect(replay.demand.participations).toEqual(resolved.demand.participations)
     await expect(demands.resolveCreationOrigin('goal', { creationOperationId: 'legacy-no-origin', source, sourceOperationId: 'legacy-source' }, { expectedUpdatedAt: _reshape_fixtureEpoch(0, 0, 1), allowSupervisorDefault: true })).rejects.toThrow('original Goal creation')
     await expect(demands.resolveCreationOrigin(current.id, { creationOperationId: 'manual-create', source: { ...source, kind: 'requirements' }, sourceOperationId: 'later-source' }, { expectedUpdatedAt: current.updatedAt, allowSupervisorDefault: true })).rejects.toThrow('Later requirements')
-    const stale = await demands.create({ id: 'stale-origin', title: 'Version protected' }, { operationId: 'stale-create', creationOrigin: { requesterAsSupervisor: true } })
+    const stale = await seedStoredDemand(demands, { id: 'stale-origin', title: 'Version protected' }, { operationId: 'stale-create', creationOrigin: { requesterAsSupervisor: true } })
     await demands.update(stale.demand.id, { description: 'A later edit' })
     await expect(demands.resolveCreationOrigin(stale.demand.id, { creationOperationId: 'stale-create', source, sourceOperationId: 'stale-source' }, { expectedUpdatedAt: stale.demand.updatedAt, allowSupervisorDefault: true })).rejects.toThrow('Goal changed')
     expect((await demands.get(stale.demand.id))!.participations).toEqual([])
@@ -1048,7 +1049,7 @@ it('origin Supervisor first-default mapped PMO records only confirmed original i
   const originalTarget = await api.sessions.refresh(snapshot.control)
   if (originalTarget.kind !== 'agent') throw new Error('Expected original Agent')
   useAppStore.setState({ sessions: [originalTarget] })
-  const make = async (id: string) => { await act(async () => { await useAppStore.getState().createDemand({ id, title: 'Fresh GUI request' }) }); return (await demands.get(id))! }
+  const make = async (operationId: string) => { let id!: string; await act(async () => { id = await useAppStore.getState().createDemand({ title: 'Fresh GUI request' }, operationId) }); return (await demands.get(id))! }
   const first = await make('mapped-origin')
   const tab = { ...createWorkbenchTab('origin-pmo', { kind: 'agent', phase: 'attached', regionId: 'origin-recipient', workspaceId: SCRATCH_WORKSPACE_ID, sessionId: session.agentSessionId }), topicId: PMO_TEAMS_TOPIC_ID }
   useAppStore.setState({ tabs: { [tab.id]: tab }, layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('origin-group', [tab.id]) }, demandPmoTabIds: { [first.id]: tab.id } })
@@ -1216,25 +1217,25 @@ it('collaboration original provenance authenticates create and requirements whil
   const typed = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path }, credentials: { agentSessionId: session.agentSessionId, capability: activityCapability } })
   const mutate = async (method: string, params: any) => { let result: any; await act(async () => { result = await (typed.call as any)(method, params) }); return result }
   try {
-    const created = await mutate('goal.create', { goalId: 'authored-goal', title: 'Precisely authored request', risk: 'low', confirmation: 'user', assigneeSessionIds: ['progress-agent'], supervisorSessionId: 'progress-agent', operationId: 'original-create-source' })
+    const created = await mutate('goal.create', { title: 'Precisely authored request', risk: 'low', confirmation: 'user', assigneeSessionIds: ['progress-agent'], supervisorSessionId: 'progress-agent', operationId: 'original-create-source' })
     expect(created.goal.participations).toMatchObject([{ kind: 'create', agentSessionId: 'progress-agent', hostId: 'local', entryPoint: 'goal.create', operationId: 'original-create-source' }])
     expect(created.goal.participations[0].mote).toBeUndefined(); expect(created.goal.creationOrigin).toEqual({ operationId: 'original-create-source', requesterAsSupervisor: true, requesterParticipationId: created.goal.participations[0].id, supervisorDefaultPending: false })
-    const requirements = await mutate('goal.update', { goalId: 'authored-goal', patch: { description: 'Actual clarified requirement' }, expectedUpdatedAt: created.goal.updatedAt, operationId: 'actual-requirements-source' })
+    const requirements = await mutate('goal.update', { goalId: created.goal.id, patch: { description: 'Actual clarified requirement' }, expectedUpdatedAt: created.goal.updatedAt, operationId: 'actual-requirements-source' })
     expect(requirements.goal.participations.map((source: any) => [source.kind, source.agentSessionId, source.operationId])).toEqual([['create', 'progress-agent', 'original-create-source'], ['requirements', 'progress-agent', 'actual-requirements-source']])
-    const body = { goalId: 'authored-goal', kind: 'requirements', message: 'Original append also records its actual participant', operationId: 'requirements-activity' }
+    const body = { goalId: created.goal.id, kind: 'requirements', message: 'Original append also records its actual participant', operationId: 'requirements-activity' }
     const first = await mutate('goal.activity.append', body); const replay = await mutate('goal.activity.append', body)
     expect(replay.activity.id).toBe(first.activity.id)
-    expect((await demands.get('authored-goal'))!.participations.filter(source => source.operationId === body.operationId)).toHaveLength(1)
-    await expect(mutate('goal.create', { goalId: 'spoofed-goal', title: 'Untrusted metadata', participations: created.goal.participations, operationId: 'spoofed-source' })).rejects.toThrow()
-    await expect(mutate('goal.update', { goalId: 'authored-goal', patch: { creationOrigin: { requesterAsSupervisor: true } }, operationId: 'spoofed-origin' })).rejects.toThrow()
-    await expect(mutate('goal.assign', { goalId: 'authored-goal', assigneeExecutorId: 'codex', start: false, operationId: 'legacy-assignee' })).rejects.toThrow()
+    expect((await demands.get(created.goal.id))!.participations.filter(source => source.operationId === body.operationId)).toHaveLength(1)
+    await expect(mutate('goal.create', { title: 'Untrusted metadata', participations: created.goal.participations, operationId: 'spoofed-source' })).rejects.toThrow()
+    await expect(mutate('goal.update', { goalId: created.goal.id, patch: { creationOrigin: { requesterAsSupervisor: true } }, operationId: 'spoofed-origin' })).rejects.toThrow()
+    await expect(mutate('goal.assign', { goalId: created.goal.id, assigneeExecutorId: 'codex', start: false, operationId: 'legacy-assignee' })).rejects.toThrow()
     await expect(mutate('goal.create', { title: 'Legacy Executor is not an owner', executorId: 'codex', operationId: 'legacy-create' })).rejects.toThrow()
     const oldSnapshot = JSON.parse(await readFile(demands.storePath, 'utf8'))
     const legacy = oldSnapshot.demands.find((goal: any) => goal.id === 'goal')
     delete legacy.assigneeSessionIds; delete legacy.supervisorSessionId; delete legacy.participations; legacy.executorId = 'retained-provider-config'
     await writeFile(demands.storePath, JSON.stringify(oldSnapshot))
     expect(await demands.get('goal')).toMatchObject({ executorId: 'retained-provider-config', sessionIds: ['progress-agent'], assigneeSessionIds: [], supervisorSessionId: null, participations: [] })
-    const trusted = await demands.create({ id: 'eligible-goal', title: 'Internal creation eligibility' }, { operationId: 'eligible-create', creationOrigin: { requesterAsSupervisor: true } })
+    const trusted = await seedStoredDemand(demands, { id: 'eligible-goal', title: 'Internal creation eligibility' }, { operationId: 'eligible-create', creationOrigin: { requesterAsSupervisor: true } })
     expect(trusted.demand.creationOrigin).toMatchObject({ operationId: 'eligible-create', requesterAsSupervisor: true, requesterParticipationId: null, supervisorDefaultPending: true })
     await demands.update('eligible-goal', { supervisorSessionId: null }, { expectedUpdatedAt: trusted.demand.updatedAt })
     expect((await demands.get('eligible-goal'))!.creationOrigin!.supervisorDefaultPending).toBe(false)
@@ -1328,8 +1329,9 @@ async function moteOriginCore(initial?: AgentMuxStoredAgentSession) {
   useAppStore.setState({ config, sessions: [], tabs: {}, layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('mote-origin-group') }, activeWorkspaceId: SCRATCH_WORKSPACE_ID, mainSurface: 'board', selectedDemandId: null, demandPmoTabIds: {}, pendingAgentLaunches: {}, scratchTopicSnapshots: {} })
   return f
 }
-async function moteOriginGoal(id: string, body = 'Original user demand body') {
-  await act(async () => { await useAppStore.getState().createDemand({ id, title: id, description: body }) })
+async function moteOriginGoal(title: string, body = 'Original user demand body') {
+  let id!: string
+  await act(async () => { id = await useAppStore.getState().createDemand({ title, description: body }) })
   const original = (await demands.get(id))!
   let tabId!: string
   await act(async () => { tabId = await useAppStore.getState().requestDemandPmoTask(id, 'grill', { creationOperationId: original.creationOrigin!.operationId }) })
@@ -1416,8 +1418,9 @@ it('Mote new-chat origin: exact Host validation and mapped Core Session survive 
   const original = await api.sessions.refresh(snapshot.control)
   if (original.kind !== 'agent') throw new Error('Expected original mapped Core Session')
   const tab = { ...createWorkbenchTab('mote-mapped-tab', { kind: 'agent', phase: 'attached', regionId: 'mote-mapped-region', workspaceId: SCRATCH_WORKSPACE_ID, sessionId: original.id }), topicId: PMO_TEAMS_TOPIC_ID }
-  await act(async () => { await useAppStore.getState().createDemand({ id: 'mote-mapped', title: 'Mapped original demand' }) })
-  const goal = (await demands.get('mote-mapped'))!
+  let goalId!: string
+  await act(async () => { goalId = await useAppStore.getState().createDemand({ title: 'Mapped original demand' }) })
+  const goal = (await demands.get(goalId))!
   useAppStore.setState({ sessions: [original], tabs: { [tab.id]: tab }, layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('mote-mapped-group', [tab.id]) }, demandPmoTabIds: { [goal.id]: tab.id } })
   const unknown = await source.save('---\nversion: 999\n---\nExisting Agent remains healthy\n')
   useAppStore.setState({ scratchTopicSnapshots: { [source.workspace.id]: { scope: scratchTopicsScope(source.workspace), revision: 4, topics: [unknown], error: null, reading: false } } })

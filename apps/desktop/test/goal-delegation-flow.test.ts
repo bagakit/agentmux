@@ -1,3 +1,4 @@
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-values.mjs"
 import { execFile } from 'node:child_process'
 import { promises as fs } from 'node:fs'
@@ -71,7 +72,7 @@ async function fixture(files?: NonNullable<ConstructorParameters<typeof AgentMux
     return receipt
   })
   const demands = openDemandStore({ root: join(root, 'goals') })
-  await demands.create({ id: 'goal', title: 'Original Goal', description: 'Original human intent\nkept verbatim', status: 'in_progress',
+  await seedStoredDemand(demands, { id: 'goal', title: 'Original Goal', description: 'Original human intent\nkept verbatim', status: 'in_progress',
     assigneeSessionIds: ['owner', 'worker-a', 'worker-b'], supervisorSessionId: 'owner' })
   await demands.proposeAlignment('goal', { summary: 'Original target', criteria: [{ id: 'AC-01', text: 'First result' }, { id: 'AC-02', text: 'Second result' }], openQuestions: [] })
   const core = new AgentMuxRpcService({ coreClients: () => [{ hostId: 'local', client }] })

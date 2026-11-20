@@ -35,7 +35,8 @@ app.whenReady().then(async () => {
       if (request.kind === 'create') {
         assert.equal(phase,'save','Restart cannot reseed the Domain or drafts')
         const g=request.goal
-        await goals.demands.create({id:g.id,title:g.title,description:g.description,status:g.status,assigneeSessionIds:g.assigneeSessionIds,supervisorSessionId:g.supervisorSessionId,sessionIds:g.sessionIds})
+        const { seedStoredDemand } = await import('../../../../../test/fixtures/stored-demand.mjs')
+        await seedStoredDemand(goals.demands,{id:g.id,title:g.title,description:g.description,status:g.status,assigneeSessionIds:g.assigneeSessionIds,supervisorSessionId:g.supervisorSessionId,sessionIds:g.sessionIds})
         if(g.alignment)await goals.demands.proposeAlignment(g.id,{summary:g.alignment.summary,criteria:g.alignment.criteria,openQuestions:g.alignment.openQuestions})
         return
       }

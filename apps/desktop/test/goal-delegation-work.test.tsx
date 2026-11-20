@@ -1,3 +1,4 @@
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act, createElement, type ReactNode } from 'react'
@@ -353,8 +354,8 @@ describe('mounted original Goal delegation consumer', () => {
       const owner = host.demands, older = openDemandStore({ root: await mkdtemp(join(tmpdir(), 'amux-goal-read-cut-')) })
       try {
         // The delayed snapshot is the same Goal before its newer original write. The Host owner returns that older version.
-        const old = (await older.create({ id: 'original-goal', title: 'Original Goal', status: 'backlog' })).demand
-        await owner.create({ id: old.id, title: old.title, status: 'backlog' })
+        const old = (await seedStoredDemand(older, { id: 'original-goal', title: 'Original Goal', status: 'backlog' })).demand
+        await seedStoredDemand(owner, { id: old.id, title: old.title, status: 'backlog' })
         const latest = { ...old, status: 'in_progress' as const, updatedAt: old.updatedAt + 60_000 }
         const record = { ...goal(), updatedAt: latest.updatedAt }
         useAppStore.setState({ demands: { [record.id]: record } })

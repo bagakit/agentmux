@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -34,7 +35,8 @@ beforeEach(async () => {
   Board = (await import('../src/renderer/src/components/GlobalBoardSurface')).GlobalBoardSurface
   store.useAppStore.setState({ config, demands: {}, selectedDemandId: null, sessions: [], tabs: {}, layouts: {}, mainSurface: 'board' })
   fixture = await (await import('./helpers/host-goal-discussion-fixture')).openHostGoalDiscussionFixture(config)
-  await store.useAppStore.getState().createDemand({ id: 'original', title: 'Saved title', description: 'Saved intent', status: 'backlog', sessionIds: [] })
+  await seedStoredDemand(fixture.host.demands, { id: 'original', title: 'Saved title', description: 'Saved intent', status: 'backlog', sessionIds: [] })
+  await store.useAppStore.getState().refreshDemand('original')
   store.useAppStore.setState({ selectedDemandId: 'original', mainSurface: 'board' })
   fixture.host.clear()
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
@@ -134,11 +136,13 @@ it('only a matching confirmed deletion clears its original drafts; failure and n
   await act(async () => editGoalDraft('original', 'title', 'A later original edit'))
   await act(async () => { held.release(); await fixture.host.settle() })
   expect(state().goalEditDrafts.original?.title?.value).toBe('A later original edit')
-  await state().createDemand({ id: 'original', title: 'Explicitly recreated original', description: '', status: 'backlog', sessionIds: [] })
+  await seedStoredDemand(fixture.host.demands, { id: 'original', title: 'Explicitly recreated original', description: '', status: 'backlog', sessionIds: [] })
+  await state().refreshDemand('original')
   fixture.host.once('demand.delete', { kind: 'lose-receipt' })
   await act(async () => { state().deleteDemand('original'); await fixture.host.settle() })
   expect(state().goalEditDrafts.original?.title?.value).toBe('A later original edit')
-  await state().createDemand({ id: 'original', title: 'Explicitly recreated again', description: '', status: 'backlog', sessionIds: [] })
+  await seedStoredDemand(fixture.host.demands, { id: 'original', title: 'Explicitly recreated again', description: '', status: 'backlog', sessionIds: [] })
+  await state().refreshDemand('original')
   await act(async () => { state().deleteDemand('original'); await fixture.host.settle() })
   expect(state().goalEditDrafts.original).toBeUndefined()
   expect(state().goalEditDrafts.other?.tags?.value).toBe('Other original text')

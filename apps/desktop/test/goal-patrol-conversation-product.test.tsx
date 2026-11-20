@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import './helpers/goal-responsibility-product'
 import { fixture, mount, container, settle, evidence } from './helpers/goal-responsibility-product'
 import { act, createElement } from 'react'
@@ -211,7 +212,7 @@ describe('single PMO inspection reaches its exact original conversation before b
 
   for (const late of ['clear', 'failure'] as const) it(`a late ${late} from Goal A cannot change Goal B feedback when both use the same original Supervisor`, async () => {
     const { f } = await prepared(); f.patrolState.inputOccupied = true
-    await f.demands.create({ id: 'goal-b', title: 'Second original Goal', status: 'in_progress', assigneeSessionIds: ['owner', 'finite-worker'],
+    await seedStoredDemand(f.demands, { id: 'goal-b', title: 'Second original Goal', status: 'in_progress', assigneeSessionIds: ['owner', 'finite-worker'],
       sessionIds: ['owner', 'finite-worker'], supervisorSessionId: 'owner' })
     await f.demands.prepareDispatch('goal-b', { operationId: 'second-finite-start', agentSessionId: 'finite-worker', hostId: 'local', runId: 'finite-worker-run', execution: 'finite', prompt: 'Second original finite task' })
     await f.demands.recordDispatchPhase('goal-b', 'second-finite-start', { stage: 'confirmed', receipt: { kind: 'core-prompt', itemId: 'prompt:second-finite-start', createdAt: Date.now() } })

@@ -1,3 +1,4 @@
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { importTaskRecording } from './helpers/import-task-recording.js'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { mkdtemp, mkdir, realpath, rm } from 'node:fs/promises'
@@ -211,7 +212,7 @@ describe('names owned by existing Desktop objects', () => {
       { target: { kind: 'host', id: 'saved-host' }, before: 'Old host', requested: 'New host' }
     ], async () => 'New host'))
     const demands = openDemandStore({ root: join(root, 'demands') })
-    await demands.create({ id: 'goal', title: 'Old goal' })
+    await seedStoredDemand(demands, { id: 'goal', title: 'Old goal' })
     const renamed = await demands.update('goal', { title: 'New goal' }, { context, operationId: 'goal-operation' })
     await demands.delete('goal')
     expect(await demands.get('goal')).toBeNull()

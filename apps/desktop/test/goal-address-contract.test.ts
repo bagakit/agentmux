@@ -7,6 +7,7 @@ import { expect, it, vi } from 'vitest'
 import { deriveBoundGoalId, formatGoalAddress, formatGoalTicketLink, parseAmuxObjectLink } from '../../../packages/core/src/sharing'
 import { parseAgentMuxCliInvocation } from '../../../packages/core/src/agentmux-cli-commands'
 import { parseAgentMuxControlRequest, parseAgentMuxControlReceipt } from '../../../packages/core/src/control-codec'
+import { rpcControlRequest } from '../../../packages/core/src/rpc-business-codec'
 import { searchAgentMuxMetadata } from '../../../packages/core/src/search-metadata'
 
 const dom = composerDOM()
@@ -19,6 +20,12 @@ it('Goal addresses retain the original Runtime namespace and opaque Goal while r
   const invocation = await parseAgentMuxCliInvocation(['goal', 'focus', '--goal', 'original/Goal ?#中文', '--runtime', address.runtimeId, '--namespace', address.namespace, '--section', 'plan'])
   expect(invocation.params).toMatchObject({ goalId: 'original/Goal ?#中文', runtimeId: address.runtimeId, namespace: address.namespace, section: 'plan', input: 'preserve' })
   expect(() => parseAgentMuxControlRequest({ schemaVersion: 5, requestId: 'original', operation: 'focus', target: { kind: 'goal', goalId: 'same', runtimeId: 'one' }, inputPolicy: 'preserve' })).toThrow()
+  expect(() => rpcControlRequest('goal.create', { goalId: 'custom-goal', title: 'Current task' })).toThrow('original owner allocates Goal IDs')
+  const id = deriveBoundGoalId(address.runtimeId, address.namespace, 'original-create')
+  const bound = formatGoalAddress(id, address.runtimeId, address.namespace, 'original-create')
+  const short = await parseAgentMuxCliInvocation(['goal', 'focus', '--link', bound.planUrl])
+  expect(short.params).toMatchObject({ goalId: id, bound: true, section: 'plan', input: 'preserve' })
+  expect(rpcControlRequest('goal.focus', short.params)).toMatchObject({ target: { kind: 'goal', goalId: id, bound: true, section: 'plan' } })
 })
 
 it('Goal metadata search matches the complete source instead of a namesake Goal ID', () => {

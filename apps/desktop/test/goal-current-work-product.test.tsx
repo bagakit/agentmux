@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import './helpers/current-demand-product'
 import { demands, client, hostGoals, root, container, session, writes } from './helpers/current-demand-product'
 import { act } from 'react'
@@ -19,7 +20,7 @@ async function mount(id: string) {
 
 it('original ended finite work dominates clarification in the actual Goal detail without changing its input or execution identity', async () => {
   const goalId = 'original-ended-work'
-  await demands.create({ id: goalId, title: 'A long design goal with several independent requirements', description: 'Original human authorization\n  exact bytes  ', assigneeSessionIds: [session.agentSessionId], sessionIds: [session.agentSessionId] })
+  await seedStoredDemand(demands, { id: goalId, title: 'A long design goal with several independent requirements', description: 'Original human authorization\n  exact bytes  ', assigneeSessionIds: [session.agentSessionId], sessionIds: [session.agentSessionId] })
   await mount(goalId)
   const start = actions().find(button => button.textContent?.startsWith('Start with'))!
   expect(start).toBeDefined(); expect(start.disabled, 'Finite execution has no new alignment requirement').toBe(false)
@@ -68,7 +69,7 @@ it('original ended finite work dominates clarification in the actual Goal detail
 
 it('a restored unknown Start keeps its exact operation and recipient through reassignment and actual inspection with no replay', async () => {
   const id = 'retained-original-task'
-  await demands.create({ id, title: 'Original task without an outline', description: 'The original authorization remains unchanged', assigneeSessionIds: [session.agentSessionId], sessionIds: [session.agentSessionId] })
+  await seedStoredDemand(demands, { id, title: 'Original task without an outline', description: 'The original authorization remains unchanged', assigneeSessionIds: [session.agentSessionId], sessionIds: [session.agentSessionId] })
   const original = { goalId: id, operationId: 'retained-current-work', sessionId: session.agentSessionId, expectedUpdatedAt: (await demands.get(id))!.updatedAt, phase: 'may-have-dispatched' as const }
   await act(async () => useAppStore.setState({ goalFiniteStartIntents: { [id]: original } }))
   const before = [...writes], inspect = vi.spyOn(api.demands, 'inspectDispatch')
@@ -92,7 +93,7 @@ it('a restored unknown Start keeps its exact operation and recipient through rea
 })
 
 it('a fresh Goal keeps the actual origin plan before its finite entry and never renders empty delegated reports', async () => {
-  await demands.create({ id: 'fresh-origin', title: 'A real fresh goal', description: 'Original intent', assigneeSessionIds: [session.agentSessionId] })
+  await seedStoredDemand(demands, { id: 'fresh-origin', title: 'A real fresh goal', description: 'Original intent', assigneeSessionIds: [session.agentSessionId] })
   await mount('fresh-origin')
   const work = container.querySelector('[data-goal-work-area]')!
   expect(work.getAttribute('data-goal-work-context')).toBe('fresh')
@@ -108,7 +109,7 @@ it('a fresh Goal keeps the actual origin plan before its finite entry and never 
 it('a direct Ticket brings the current criteria within reach and keeps optional one-time work secondary', async () => {
   const goalId = 'ticket-confirmation-entry'
   const originalAgent = session.agentSessionId
-  await demands.create({ id: goalId, title: 'Review the original plan', description: 'Verify the planned result.',
+  await seedStoredDemand(demands, { id: goalId, title: 'Review the original plan', description: 'Verify the planned result.',
     sessionIds: [originalAgent], assigneeSessionIds: [originalAgent], supervisorSessionId: originalAgent })
   await demands.proposeAlignment(goalId, { summary: 'Verify the result', criteria: [{ id: 'verified', text: 'The planned result is independently verified' }], openQuestions: [] })
   const planned = await demands.revisePlan(goalId, { operationId: 'plan-before-confirming', expectedRevision: 0, alignmentRevision: 1,

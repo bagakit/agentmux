@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { act } from 'react'
 import { afterEach, beforeEach, expect, it } from 'vitest'
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface'
@@ -13,7 +14,8 @@ afterEach(async () => { await host.dispose() })
 
 it('edits the original Goal batch through mounted properties, public RPC, Host and the durable owner', async () => {
   const originalSessions = useAppStore.getState().sessions
-  await useAppStore.getState().createDemand({ id: 'batched', title: 'Original batch', description: '', status: 'todo', priority: 'normal', projectId: null, projectName: null, sessionIds: [], source: 'default-topic', phaseIndex: 2 })
+  await seedStoredDemand(host.demands, { id: 'batched', title: 'Original batch', description: '', status: 'todo', priority: 'normal', projectId: null, projectName: null, sessionIds: [], phaseIndex: 2 })
+  await useAppStore.getState().refreshDemand('batched')
   useAppStore.setState({ selectedDemandId: 'batched', mainSurface: 'board' })
   await dom.render(<GlobalBoardSurface />)
   const properties = dom.container.querySelector<HTMLDetailsElement>('.goals-properties')!

@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import './helpers/current-demand-product'
 import { bridge, demands, directory, client, runtime, session, writes, sourceCli, root, container, manager, hostGoals } from './helpers/current-demand-product'
 import { act, Profiler } from 'react'
@@ -22,7 +23,7 @@ function FiniteTask({ goalId }: { goalId: string }) {
 }
 
 it('visible one-time task → actual preload/Main/Core receipt without confirmation or follow-up authorization; double click submits once', async () => {
-  const goal = (await demands.create({ id: 'finite-unconfirmed', title: 'An explicit finite task', sessionIds: [session.agentSessionId], assigneeSessionIds: [session.agentSessionId] })).demand
+  const goal = (await seedStoredDemand(demands, { id: 'finite-unconfirmed', title: 'An explicit finite task', sessionIds: [session.agentSessionId], assigneeSessionIds: [session.agentSessionId] })).demand
   await act(async () => { await useAppStore.getState().refreshDemand(goal.id); root.render(<FiniteTask goalId={goal.id} />) })
   const button = [...container.querySelectorAll('button')].find(button => button.textContent?.startsWith('Start with'))!
   expect(button).toBeDefined(); expect(button.disabled).toBe(false)

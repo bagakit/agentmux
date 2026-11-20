@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { join, resolve } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer } from '@agentmux/core'
@@ -18,7 +19,7 @@ it('takes an actual CLI Files receipt into goal update and restores the same typ
   // Only Electron IPC is substituted: the renderer's Goal writes reach the original Host Goal owner through its public codec.
   const host = await openHostGoalTransport({ config: () => useAppStore.getState().config }); cleanup.push(() => host.dispose())
   const owner = host.demands, root = owner.root
-  await owner.create({ id: 'original-goal', title: 'Original', status: 'in_progress', sessionIds: [] })
+  await seedStoredDemand(owner, { id: 'original-goal', title: 'Original', status: 'in_progress', sessionIds: [] })
   await owner.proposeAlignment('original-goal', { summary: 'Original agreement', criteria: [{ id: 'c', text: 'Actual outcome' }], openQuestions: [] })
   await owner.proposeGrounding('original-goal', { alignmentRevision: 1, summary: 'Original report', checks: [{ criterionId: 'c', outcome: 'met', evidence: ['Original citation'], note: '' }] })
   vi.spyOn(api.continuousProgress, 'goals').mockResolvedValue([])

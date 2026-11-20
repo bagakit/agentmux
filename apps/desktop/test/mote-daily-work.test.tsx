@@ -1,3 +1,4 @@
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { chooseField } from './helpers/selection-field'
@@ -133,8 +134,8 @@ describe('original Mote Goal composition and current-work caller', () => {
     const owner = openDemandStore({ root: directory })
     let finish!: () => void
     try {
-      await owner.create({ id: 'first-real', title: 'First real goal', sessionIds: [defaultAgent.id] })
-      await owner.create({ id: 'later-real', title: 'Later real goal', sessionIds: [defaultAgent.id] })
+      await seedStoredDemand(owner, { id: 'first-real', title: 'First real goal', sessionIds: [defaultAgent.id] })
+      await seedStoredDemand(owner, { id: 'later-real', title: 'Later real goal', sessionIds: [defaultAgent.id] })
       vi.mocked(api.demands.list).mockImplementation(() => owner.list())
       // Only the Goal transport is substituted: the public demand.* request reaches the same durable Demand store
       // and returns its original Host projection. The first association write is held before it reaches the store.

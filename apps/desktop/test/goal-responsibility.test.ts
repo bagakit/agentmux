@@ -1,3 +1,4 @@
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { fixturePath as _newTailFixturePath } from "../../../test/fixture-values.mjs"
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -23,7 +24,7 @@ function status(id: string, state: AgentStatus['state'] = 'done', since = Date.n
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'amux-responsibility-')); cleanup.push(() => rm(root, { recursive: true, force: true }))
   const demands = openDemandStore({ root })
-  await demands.create({ id: 'goal', title: 'Original task', status: 'in_progress', assigneeSessionIds: ['manager', 'worker'], supervisorSessionId: 'manager' })
+  await seedStoredDemand(demands, { id: 'goal', title: 'Original task', status: 'in_progress', assigneeSessionIds: ['manager', 'worker'], supervisorSessionId: 'manager' })
   await demands.proposeAlignment('goal', { summary: 'Original scope', criteria: [{ id: 'AC', text: 'Original evidence' }], openQuestions: [] })
   await demands.prepareDispatch('goal', { operationId: 'start', hostId: 'worker-host', agentSessionId: 'worker', runId: 'worker-run', execution: 'finite', prompt: 'Original task' })
   await demands.recordDispatchPhase('goal', 'start', { stage: 'confirmed', receipt: { kind: 'core-prompt', itemId: 'prompt:start', createdAt: Date.now() } })

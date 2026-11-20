@@ -1,3 +1,4 @@
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -35,7 +36,7 @@ async function fixture() {
   const runtime = createGoalRuntime({ clients: () => [{ hostId: 'local', client: native.core }], inputOccupied: async () => false,
     checkIn: async () => ({ known: false, reason: 'This original Goal is not a check-in schedule.' }) })
   const goals = openDemandStore({ root: join(root, 'goals') })
-  await goals.create({ id: 'goal', title: 'Original Goal', status: 'in_progress', sessionIds: ['supervisor', 'worker', 'reviewer'], assigneeSessionIds: ['supervisor', 'worker', 'reviewer'], supervisorSessionId: 'supervisor' })
+  await seedStoredDemand(goals, { id: 'goal', title: 'Original Goal', status: 'in_progress', sessionIds: ['supervisor', 'worker', 'reviewer'], assigneeSessionIds: ['supervisor', 'worker', 'reviewer'], supervisorSessionId: 'supervisor' })
   await goals.proposeAlignment('goal', { summary: 'Original scope', criteria, openQuestions: [] }); await goals.confirmAlignment('goal', 1)
   const loops = new ContinuousProgressLoopStore(join(root, 'loops.json'))
   const loop: ContinuousProgressLoop = { loopId: 'original-loop', creationOperationId: 'original-start', revision: 1, hostId: 'local', agentSessionId: 'supervisor', providerId: 'codex', workspacePath: root,

@@ -1,4 +1,5 @@
 const { fixturePath: _reshape_fixturePath, fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { fixturePath as _hygiene_fixturePath } from "../../../test/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act, createElement, type ReactNode } from 'react'
@@ -13,6 +14,8 @@ import { dirname, join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
+import { deriveBoundGoalId, formatGoalAddress } from '@agentmux/core/sharing'
+import { openDemandStore } from '@agentmux/demand'
 import { parseAgentMuxControlReceipt, parseAgentMuxControlRequest } from '@agentmux/core'
 import { AgentMuxControlServer, connectAgentMuxRpc } from '../../../packages/core/src/control-host'
 import { objectCliEnvironment } from '../../../packages/core/test/helpers/object-cli-rpc'
@@ -1491,13 +1494,15 @@ it('source-qualified Goal links distinguish stores on one real semantic Runtime 
     vi.spyOn(document.documentElement, 'clientHeight', 'get').mockReturnValue(800)
     const first = await fixture.open('original')
     vi.spyOn(api.goals, 'execute').mockImplementation(request => callPublicGoalControl(request, (method, input) => first.client.call(method, input as never)))
-    const a = await first.client.call('goal.create', { goalId: 'exact', title: 'Original source Goal', risk: 'low', confirmation: 'user' })
+    await seedStoredDemand(openDemandStore({ root: first.root }), { id: 'exact', title: 'Original source Goal' })
+    const a = { goal: (await first.client.call('goal.inspect', { goalId: 'exact' })).goal! }
     await act(async () => useAppStore.setState({ demands: { exact: { ...publicGoalRecord(a.goal), source: 'default-topic' } } }))
     const second = await fixture.open('other')
     const listProof = JSON.parse(await readFile(join(fixture.native.env.AGENTMUX_STATE_DIRECTORY!, 'goal-list-proof.json'), 'utf8'))
     expect(listProof).toMatchObject({ scope: 'original', items: [{ id: 'exact', title: 'Original source Goal' }] })
     expect(listProof.items[0].address).toBeDefined()
-    const b = await second.client.call('goal.create', { goalId: 'exact', title: 'Other source Goal', risk: 'low', confirmation: 'user' })
+    await seedStoredDemand(openDemandStore({ root: second.root }), { id: 'exact', title: 'Other source Goal' })
+    const b = { goal: (await second.client.call('goal.inspect', { goalId: 'exact' })).goal! }
     expect(a.goal.address).toBeDefined(); expect(b.goal.address).toBeDefined()
     const address = a.goal.address!, other = b.goal.address!
     expect(address.runtimeId).toBe(fixture.native.owner.runtimeId)
@@ -1516,6 +1521,12 @@ it('source-qualified Goal links distinguish stores on one real semantic Runtime 
     expect(useAppStore.getState().selectedDemandId).toBe(before.selectedDemandId)
     expect(useAppStore.getState().agentFocus).toBe(before.agentFocus)
     expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+    const falseBinding = deriveBoundGoalId(address.runtimeId, address.namespace, 'different-creation')
+    await seedStoredDemand(openDemandStore({ root: second.root }), { id: falseBinding, title: 'Stored ID without the original binding' })
+    const short = await control({ kind: 'goal', goalId: falseBinding, bound: true })
+    expect(short.navigation.state).toBe('rejected')
+    expect(short.issues).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'GOAL_SOURCE_UNCONFIRMED' })]))
+    expect(useAppStore.getState().selectedDemandId).toBe(before.selectedDemandId)
     const oldOwner = fixture.native.owner
     await fixture.open('original')
     const read = await first.client.call('goal.inspect', { goalId: 'exact' })
@@ -1544,10 +1555,12 @@ it('copied Goal plan links, active Ticket links and the real CLI reveal the orig
       return { x: 0, y: top, top, left: 0, right: 600, bottom: top + 400, width: 600, height: 400, toJSON: () => ({}) }
     })
     vi.spyOn(api.goals, 'execute').mockImplementation(request => callPublicGoalControl(request, (method, input) => owner.client.call(method, input as never)))
-    const created = await owner.client.call('goal.create', { goalId: 'exact', title: 'An addressable Goal', risk: 'low', confirmation: 'user' })
-    const address = created.goal.address!
+    const created = await owner.client.call('goal.create', { title: 'An addressable Goal', risk: 'low', confirmation: 'user' })
+    const goalId = created.goal.id, address = created.goal.address!
+    expect(address.goalUrl).toBe('amux://goal/' + goalId)
+    expect(address.planUrl).toBe(address.goalUrl + '/plan')
     if (process.env.GOAL_LINK_EVIDENCE) await appendFile(process.env.GOAL_LINK_EVIDENCE, JSON.stringify({ phase: 'empty-original-goal', goal: created.goal, config, owner: fixture.native.owner }) + '\n')
-    await act(async () => useAppStore.setState({ demands: { exact: { ...publicGoalRecord(created.goal), source: 'default-topic' } }, selectedDemandId: null }))
+    await act(async () => useAppStore.setState({ demands: { [goalId]: { ...publicGoalRecord(created.goal), source: 'default-topic' } }, selectedDemandId: null }))
     const writes = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
     const requests: AgentMuxControlRequest[] = []
     const execute = async (request: AgentMuxControlRequest, signal?: AbortSignal) => {
@@ -1575,13 +1588,13 @@ it('copied Goal plan links, active Ticket links and the real CLI reveal the orig
     expect([outside.selectionStart, outside.selectionEnd]).toEqual([2, 7])
     expect(useAppStore.getState().agentFocus).toBe(original.agentFocus)
     const proposal = { summary: 'Read the original plan', criteria: [{ id: 'read', text: 'The original graph is visible' }], openQuestions: [] }
-    await owner.client.call('goal.update', { goalId: 'exact', patch: { alignment: proposal } })
-    const published = await owner.client.call('goal.plan.revise', { goalId: 'exact', revision: { operationId: 'original-plan', expectedRevision: 0, alignmentRevision: 1,
+    await owner.client.call('goal.update', { goalId, patch: { alignment: proposal } })
+    const published = await owner.client.call('goal.plan.revise', { goalId, revision: { operationId: 'original-plan', expectedRevision: 0, alignmentRevision: 1,
       nodes: [{ id: 'read', title: 'Read original graph', outcome: 'The original graph is visible', criterionIds: ['read'], dependsOn: [], check: 'Inspect the original graph', executor: null }] } })
     const readId = published.plan!.nodes[0]!.id
-    const saved = await owner.client.call('goal.inspect', { goalId: 'exact' })
+    const saved = await owner.client.call('goal.inspect', { goalId })
     if (process.env.GOAL_LINK_EVIDENCE) await appendFile(process.env.GOAL_LINK_EVIDENCE, JSON.stringify({ phase: 'saved-original-goal', goal: saved.goal, config, owner: fixture.native.owner }) + '\n')
-    await act(async () => useAppStore.setState({ demands: { exact: { ...publicGoalRecord(saved.goal!), source: 'default-topic' } } }))
+    await act(async () => useAppStore.setState({ demands: { [goalId]: { ...publicGoalRecord(saved.goal!), source: 'default-topic' } } }))
     const cliDirectory = join(fixture.directory, 'cli'); await mkdir(cliDirectory)
     const cli = join(cliDirectory, 'amux.mjs'), require = createRequire(import.meta.url), core = dirname(require.resolve('../../../packages/core/package.json'))
     await symlink(join(core, 'node_modules'), join(cliDirectory, 'node_modules'), 'dir')
@@ -1589,8 +1602,8 @@ it('copied Goal plan links, active Ticket links and the real CLI reveal the orig
     server = new AgentMuxControlServer({ socketPath: join(fixture.directory, 'desktop.sock'), coreClients: () => [], execute: (request, _name, context) => execute(request, context?.signal) })
     await server.start()
     client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
-    const receipt = await client.call('goal.focus', { goalId: 'exact', runtimeId: address.runtimeId, namespace: address.namespace, section: 'plan' })
-    expect(receipt.presentation.goal).toEqual({ goalId: 'exact', runtimeId: address.runtimeId, namespace: address.namespace, section: 'plan' })
+    const receipt = await client.call('goal.focus', { goalId, runtimeId: address.runtimeId, namespace: address.namespace, section: 'plan' })
+    expect(receipt.presentation.goal).toEqual({ goalId, runtimeId: address.runtimeId, namespace: address.namespace, section: 'plan' })
     const cliCall = async (args: string[]) => {
       const child = spawn(process.execPath, [cli, '--endpoint', 'unix:' + server!.path, ...args], { env: objectCliEnvironment(fixture.directory), stdio: ['ignore', 'pipe', 'pipe'] })
       return new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
@@ -1606,17 +1619,19 @@ it('copied Goal plan links, active Ticket links and the real CLI reveal the orig
     expect(skill.stdout).toContain('goal plan verify')
     expect(spaceSkill.code, spaceSkill.stderr).toBe(0); expect(spaceSkill.stdout).toContain('capsule, mote, host and goal'); expect(spaceSkill.stdout).toContain('goal focus --goal ID --runtime ID --namespace ID --section plan')
     expect(requests).toHaveLength(requestsBeforeDiscovery)
-    const result = await cliCall(['goal', 'focus', '--goal', 'exact', '--runtime', address.runtimeId, '--namespace', address.namespace, '--section', 'plan'])
-    const plan = await owner.client.call('goal.plan', { goalId: 'exact' })
+    const result = await cliCall(['goal', 'focus', '--link', address.planUrl])
+    const plan = await owner.client.call('goal.plan', { goalId })
     const [ticketUrl] = plan.ticketLinks ?? []
     expect(ticketUrl, 'the link must preserve the original Ticket ID').toBe(address.goalUrl + '#T-' + readId)
-    const rejectedTicket = await ingress.receive('amux://goal/exact#T-' + readId)
+    const namesake = formatGoalAddress(goalId, address.runtimeId, address.namespace)
+    expect(namesake.goalUrl).toContain('?runtime=')
+    const rejectedTicket = await ingress.receive('amux://goal/' + deriveBoundGoalId(address.runtimeId, address.namespace, 'another-original') + '#T-' + readId)
     expect(rejectedTicket, 'a namesake without the original binding cannot receive a short Ticket link').toContain('GOAL_SOURCE_UNCONFIRMED')
     const preserved = { value: outside.value, start: outside.selectionStart, end: outside.selectionEnd }
     const ticketReply = await cliCall(['goal', 'focus', '--link', ticketUrl!])
     expect(ticketReply.code, 'the original Ticket must be visibly selected and revealed: ' + ticketReply.stderr).toBe(0)
     expect(JSON.parse(ticketReply.stdout).result.presentation.goal).toEqual({
-      goalId: 'exact', runtimeId: address.runtimeId, namespace: address.namespace, section: 'plan', nodeId: readId,
+      goalId, runtimeId: address.runtimeId, namespace: address.namespace, section: 'plan', nodeId: readId,
     })
     const ticket = container.querySelector(`[data-goal-plan-node="${readId}"]`)
     expect(ticket?.querySelector('[aria-expanded="true"]')).toBeTruthy()
@@ -1632,7 +1647,7 @@ it('copied Goal plan links, active Ticket links and the real CLI reveal the orig
     const readTickets = vi.spyOn(api.demands, 'delegation').mockImplementation(async (method, input) => owner.client.call(method, input))
     let invalidateTickets: (() => void) | undefined
     vi.spyOn(api.demands, 'onChanged').mockImplementation(listener => {
-      invalidateTickets = () => listener(['exact'], false)
+      invalidateTickets = () => listener([goalId], false)
       return () => { invalidateTickets = undefined }
     })
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Back to goals"]')!.click())
@@ -1660,10 +1675,10 @@ it('copied Goal plan links, active Ticket links and the real CLI reveal the orig
     await act(async () => refresh.click())
     await vi.waitFor(() => expect(container.textContent).not.toContain('Active index unavailable'))
     await act(async () => container.querySelector<HTMLButtonElement>(ticketSelector)!.click())
-    expect(openObject).toHaveBeenCalledWith(ticketUrl)
+    expect(openObject).toHaveBeenCalledWith(namesake.goalUrl + '#T-' + readId)
     await vi.waitFor(() => expect(container.querySelector(`[data-goal-plan-detail="${readId}"]`)).toBeTruthy())
     const originalNode = plan.plan!.nodes[0]!
-    const revised = await owner.client.call('goal.plan.revise', { goalId: 'exact',
+    const revised = await owner.client.call('goal.plan.revise', { goalId,
       revision: { operationId: 'add-second-ticket', expectedRevision: 1, alignmentRevision: 1, nodes: [
         { ...originalNode, id: 'another', title: 'Another Ticket' }, { ...originalNode, title: 'Renamed original Ticket', cancelled: true },
         { ...originalNode, id: 'third', title: 'A third Ticket' },
@@ -1708,7 +1723,7 @@ it('copied Goal plan links, active Ticket links and the real CLI reveal the orig
     expect(container.querySelector(`[data-goal-plan-node="${readId}"]`)).not.toBeNull()
     const editor = container.querySelector<HTMLTextAreaElement>('[aria-label="Goal title"]')!
     const { editGoalDraft } = await import('../src/renderer/src/lib/goal-edit-drafts')
-    await act(async () => editGoalDraft('exact', 'title', 'A retained local edit'))
+    await act(async () => editGoalDraft(goalId, 'title', 'A retained local edit'))
     await ingress.receive(address.planUrl)
     expect(container.querySelector('[aria-label="Goal title"]')).toBe(editor)
     expect(editor.value).toBe('A retained local edit')
@@ -1725,10 +1740,10 @@ it('copied Goal plan links, active Ticket links and the real CLI reveal the orig
       expect(detail.scrollTop, 'A pending source read cannot reveal the plan before confirmation').toBe(originalScroll)
       await chooseGoalSection(container, choice)
       expect(useAppStore.getState().goalReadingEntry).toBeNull()
-      const selectedScroll = detail.scrollTop, draft = useAppStore.getState().goalEditDrafts.exact
+      const selectedScroll = detail.scrollTop, draft = useAppStore.getState().goalEditDrafts[goalId]
       try { release(); expect(await pending).toContain('NAVIGATION_CHANGED') } finally { release() }
       expect(detail.scrollTop).toBe(selectedScroll)
-      expect(useAppStore.getState().goalEditDrafts.exact).toBe(draft)
+      expect(useAppStore.getState().goalEditDrafts[goalId]).toBe(draft)
       expect(container.querySelector('[aria-label="Goal title"]')).toBe(editor)
     }
     let release!: () => void, reached!: () => void
@@ -1741,15 +1756,18 @@ it('copied Goal plan links, active Ticket links and the real CLI reveal the orig
     try { release(); expect(await delayed).toContain('NAVIGATION_CHANGED') } finally { release() }
     expect(useAppStore.getState().mainSurface).toBe('recall')
     expect(useAppStore.getState().agentFocus).toBe(later.agentFocus)
-    expect(useAppStore.getState().goalEditDrafts.exact).toEqual(later.goalEditDrafts.exact)
+    expect(useAppStore.getState().goalEditDrafts[goalId]).toEqual(later.goalEditDrafts[goalId])
 
     expect(requests.every(request => request.operation === 'focus')).toBe(true)
-    expect((await owner.client.call('goal.inspect', { goalId: 'exact' })).goal!.plan).toEqual(revised.plan)
+    expect((await owner.client.call('goal.inspect', { goalId })).goal!.plan).toEqual(revised.plan)
     for (const action of lifecycle) expect(action).not.toHaveBeenCalled()
-    await owner.client.call('goal.delete', { goalId: 'exact', confirmation: 'delete' })
+    await owner.client.call('goal.delete', { goalId, confirmation: 'delete' })
     await expect(owner.client.call('goal.create', {
-      goalId: 'exact', title: 'Namesake after removal', risk: 'low', confirmation: 'user', operationId: 'namesake-create',
-    })).rejects.toThrow('retired')
+      goalId, title: 'Namesake after removal', risk: 'low', confirmation: 'user', operationId: 'namesake-create',
+    } as never)).rejects.toThrow('allocates Goal IDs')
+    await expect(owner.client.call('goal.create', {
+      title: 'An addressable Goal', risk: 'low', confirmation: 'user', operationId: address.creationOperationId,
+    })).rejects.toThrow('belongs to a removed Goal')
     expect(await ingress.receive(ticketUrl!)).toContain('GOAL_SOURCE_UNCONFIRMED')
   } finally { await client?.dispose(); await server?.stop(); await fixture.close() }
 }, 60_000)
@@ -1759,7 +1777,7 @@ it('malformed optional diagnostics never hide a real owner Goal or its valid ori
   const fixture = await goalLinkOwnerFixture()
   try {
     const owner = await fixture.open('original')
-    await owner.client.call('goal.create', { goalId: 'original', title: 'A real original Goal', risk: 'low', confirmation: 'user' })
+    await seedStoredDemand(openDemandStore({ root: owner.root }), { id: 'original', title: 'A real original Goal' })
     const read = await callPublicGoalControl({ schemaVersion: 5, requestId: 'metadata-original', operation: 'demand.show', demandId: 'original' },
       (method, input) => owner.client.call(method, input as never))
     if (read.operation !== 'demand.show' || !read.demand) throw Error('The real original Goal read is required')
@@ -1808,7 +1826,8 @@ it('a literal self Goal keeps its original identity through copied links and the
       return { x: 0, y: top, top, left: 0, right: 600, bottom: top + 400, width: 600, height: 400, toJSON: () => ({}) }
     })
     vi.spyOn(api.goals, 'execute').mockImplementation(request => callPublicGoalControl(request, (method, input) => owner.client.call(method, input as never)))
-    const created = await owner.client.call('goal.create', { goalId: 'self', title: 'A literal record identity', risk: 'low', confirmation: 'user' })
+    await seedStoredDemand(openDemandStore({ root: owner.root }), { id: 'self', title: 'A literal record identity' })
+    const created = { goal: (await owner.client.call('goal.inspect', { goalId: 'self' })).goal! }
     expect(created.goal.id).toBe('self')
     const address = created.goal.address!
     expect(parseAmuxObjectLink(address.planUrl)).toMatchObject({ kind: 'goal', goalId: 'self' })

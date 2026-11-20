@@ -1,3 +1,4 @@
+import { seedStoredDemand } from '../../../../test/fixtures/stored-demand.mjs'
 import { browserSourceBuild } from '../../../../packages/browser/scripts/source-build.mjs'
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../../scripts/lib/fixture-values.mjs"))
@@ -200,7 +201,7 @@ beforeEach(async () => {
     if (method.startsWith('goal.') || method.startsWith('schedule.') || method.startsWith('agent.progress.') || method.startsWith('agent.automation.')) return hostService.call(method, params, context)
     return originalCore(hostId, method, params, context)
   })
-  await demands.create({ id: 'goal', title: 'Original useful work', description: 'Complete the original useful result.', sessionIds: [session.agentSessionId], assigneeSessionIds: [session.agentSessionId], supervisorSessionId: session.agentSessionId, status: 'todo' })
+  await seedStoredDemand(demands, { id: 'goal', title: 'Original useful work', description: 'Complete the original useful result.', sessionIds: [session.agentSessionId], assigneeSessionIds: [session.agentSessionId], supervisorSessionId: session.agentSessionId, status: 'todo' })
   await demands.update('goal', { alignment: { summary: 'Useful result', criteria: [{ id: 'real', text: 'Original output exists' }], openQuestions: [] } })
   await demands.confirmAlignment('goal', 1)
   const frame = { framesInSubtree: [] } as { url?: string; framesInSubtree: never[] }

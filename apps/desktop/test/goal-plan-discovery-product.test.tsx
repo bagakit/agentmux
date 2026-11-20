@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { spawn } from 'node:child_process'
@@ -79,8 +80,9 @@ afterEach(async () => {
 })
 async function mount() { await act(async () => root.render(<GlobalBoardSurface />)) }
 async function save(alignment = true, supervisor: string | null = fixture.primary.agentSessionId) {
-  await useAppStore.getState().createDemand({ id: 'discovery', title: 'Preserve the same work', description: originalDescription,
+  await seedStoredDemand(fixture.host.demands, { id: 'discovery', title: 'Preserve the same work', description: originalDescription,
     supervisorSessionId: supervisor, assigneeSessionIds: supervisor ? [supervisor] : [], sessionIds: [], status: 'in_progress' })
+  await useAppStore.getState().refreshDemand('discovery')
   if (alignment) await useAppStore.getState().updateDemand('discovery', { alignment: proposal })
   useAppStore.setState({ selectedDemandId: 'discovery' }); fixture.host.clear(); await mount()
   expect((await fixture.host.demands.get('discovery'))?.plan).toBeUndefined()
@@ -144,8 +146,9 @@ async function expectSavedGraph() {
 
 it('the original Goal record reaches the store and mounted graph before a delegation observer can repair it', async () => {
   const supervisor = fixture.primary.agentSessionId
-  await useAppStore.getState().createDemand({ id: 'discovery', title: 'Preserve the same work', description: originalDescription,
+  await seedStoredDemand(fixture.host.demands, { id: 'discovery', title: 'Preserve the same work', description: originalDescription,
     supervisorSessionId: supervisor, assigneeSessionIds: [supervisor], sessionIds: [], status: 'in_progress' })
+  await useAppStore.getState().refreshDemand('discovery')
   await useAppStore.getState().updateDemand('discovery', { alignment: proposal })
   const saved = await cli(['goal', 'plan', 'revise', '--input', '-'], { goalId: 'discovery', revision: revision() }, supervisorCredentials())
   expect(saved.code, saved.stderr).toBe(0)
@@ -163,7 +166,7 @@ it('a node delegation read returns the Host owner derivation to the mounted grap
   const owner = fixture.primary.agentSessionId
   const worker = await fixture.core.core.createAgent({ agentSessionId: 'worker', providerId: 'codex', executorId: 'private',
     workspacePath: fixture.topic.physicalDirectoryPath!, createOperationId: 'fixture-worker', injectAgentMuxGuide: false })
-  await fixture.host.demands.create({ id: 'discovery', title: 'Preserve the same work', description: originalDescription, status: 'in_progress',
+  await seedStoredDemand(fixture.host.demands, { id: 'discovery', title: 'Preserve the same work', description: originalDescription, status: 'in_progress',
     supervisorSessionId: owner, assigneeSessionIds: [owner, worker.agentSessionId], sessionIds: [owner, worker.agentSessionId] })
   await useAppStore.getState().refreshDemand('discovery')
   await useAppStore.getState().updateDemand('discovery', { alignment: proposal })
@@ -417,8 +420,9 @@ it.each(['another-conversation', 'closed'] as const)('a late planning destinatio
 it('a late planning receipt never republishes an older Goal over a newer owner read', async () => {
   // An unopened Goal has no delegation read cut. Its real public write/refresh chain
   // must protect newer facts even without a mounted observer later healing a rollback.
-  await useAppStore.getState().createDemand({ id: 'discovery', title: 'Original Goal', description: originalDescription,
+  await seedStoredDemand(fixture.host.demands, { id: 'discovery', title: 'Original Goal', description: originalDescription,
     supervisorSessionId: fixture.primary.agentSessionId, assigneeSessionIds: [fixture.primary.agentSessionId], sessionIds: [], status: 'in_progress' })
+  await useAppStore.getState().refreshDemand('discovery')
   await useAppStore.getState().updateDemand('discovery', { alignment: proposal })
   await nativeState('working')
   expect(useAppStore.getState().demands.discovery!.delegationReadCut).toBeUndefined()

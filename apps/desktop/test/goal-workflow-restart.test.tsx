@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { root, directory, demands, container, session, writes } from './helpers/current-demand-product'
 import { act } from 'react'
 import { expect, it, vi } from 'vitest'
@@ -16,7 +17,7 @@ it.skipIf(!phase || !evidence)('retains finite intent and discussion close/unkno
   const key = 'agentmux-workbench-v1', storagePath = join(evidence!, 'original-workbench.json'), manifestPath = join(evidence!, 'first-process.json')
   if (phase === 'save') {
     await mkdir(evidence!, { recursive: true })
-    await demands.create({ id: 'unknown-goal', title: 'Retain original discussion', sessionIds: [session.agentSessionId] })
+    await seedStoredDemand(demands, { id: 'unknown-goal', title: 'Retain original discussion', sessionIds: [session.agentSessionId] })
     const tab = { ...createWorkbenchTab('explicitly-closed-discussion', { kind: 'launcher', regionId: 'original-launcher', workspaceId: SCRATCH_WORKSPACE_ID }), topicId: PMO_TEAMS_TOPIC_ID }
     useAppStore.setState({ tabs: { [tab.id]: tab }, layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('original-group', [tab.id]) }, demandPmoTabIds: { goal: tab.id, 'unknown-goal': 'unobserved-original-tab' } })
     expect(await useAppStore.getState().closeTab(SCRATCH_WORKSPACE_ID, 'original-group', tab.id)).toBe(true)

@@ -1,3 +1,4 @@
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
@@ -11,7 +12,7 @@ export async function createGoalsRestartFixture({ root, userData, workspaceId, s
   await writeFile(evidence, 'Private proof: original Run remains input-capable across UI restart.\n')
   const owner = openDemandStore({ root: join(userData, 'demands') })
   const id = 'private-goals-restart'
-  await owner.create({ id, title: 'Keep the goal and original workspace after restart',
+  await seedStoredDemand(owner, { id, title: 'Keep the goal and original workspace after restart',
     description: 'Grill aligns the goal. Grounding checks the result against this goal.',
     projectId: workspaceId, projectName: 'Crash fixture', sessionIds: [session.agentSessionId] })
   await owner.proposeAlignment(id, { summary: 'Restore this goal and the exact existing workspace.',

@@ -1,3 +1,4 @@
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
@@ -377,7 +378,7 @@ describe('Goals consume opaque Project identities through original mounted produ
 
   it('never substitutes an opaque Project preferred Workspace for unbound evidence', async () => {
     const directory = dirname(f.store.filePath), { projects } = projectFixture(directory), owner = await durableOwner()
-    await owner.create({ id: 'one', title: 'Real evidence', projectId: projects[0]!.id, projectName: projects[0]!.name, sessionIds: ['healthy'], status: 'in_progress' })
+    await seedStoredDemand(owner, { id: 'one', title: 'Real evidence', projectId: projects[0]!.id, projectName: projects[0]!.name, sessionIds: ['healthy'], status: 'in_progress' })
     await owner.update('one', { alignment: { summary: alignment.summary, criteria: alignment.criteria, openQuestions: alignment.openQuestions } }); await owner.confirmAlignment('one', 1)
     await owner.update('one', { grounding: { alignmentRevision: 1, summary: grounding.summary, checks: [{ ...grounding.checks[0]!, evidence: ['artifacts/recovery.log:18:7', '../outside.log:2'] }] } })
     const before = await owner.get('one'), read = vi.spyOn(api.files, 'read'), publicRead = vi.spyOn(api.files, 'readPublic')

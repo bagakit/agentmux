@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -53,7 +54,8 @@ beforeEach(async () => {
 afterEach(async () => { await act(async () => root.unmount()); await host.dispose(); element.remove(); vi.restoreAllMocks(); useAppStore.setState(initial, true) })
 async function seed() {
   for (const id of ['bad', 'healthy']) {
-    await useAppStore.getState().createDemand({ id, title: id === 'bad' ? 'Keep this original Goal' : 'Healthy other Goal', description: 'Original intent', status: 'in_progress' })
+    await seedStoredDemand(host.demands, { id, title: id === 'bad' ? 'Keep this original Goal' : 'Healthy other Goal', description: 'Original intent', status: 'in_progress' })
+    await useAppStore.getState().refreshDemand(id)
     await useAppStore.getState().updateDemand(id, { alignment: { summary: 'Original outcome', criteria: [{ id: 'criterion', text: 'Original criterion' }], openQuestions: [] } })
     await host.demands.revisePlan(id, { operationId: 'plan-' + id, expectedRevision: 0, alignmentRevision: 1, nodes: [
       { id: 'node', title: 'Original plan node', outcome: 'Keep the original facts', dependsOn: [], criterionIds: ['criterion'], check: 'node original-check.mjs', executor: null }

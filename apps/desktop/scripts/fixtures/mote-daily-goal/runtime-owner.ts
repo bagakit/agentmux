@@ -1,3 +1,4 @@
+import { seedStoredDemand } from '../../../../../test/fixtures/stored-demand.mjs'
 import assert from 'node:assert/strict'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -50,7 +51,7 @@ try {
   if (phase === 'seed') {
     const launch = await runtime.launchAgent({ hostId: 'local', executorId: 'proof', workspacePath: workspace, agentSessionId: target.agentSessionId, createOperationId: 'original-goal-agent' }, config)
     assert.equal(launch.created.agentSessionId, target.agentSessionId); target.runId = launch.created.run.runId; await writeFile(targetPath, JSON.stringify(target))
-    await goals.create({ id: 'goal', title: 'Original bounded work', description: 'Produce the original useful result.', sessionIds: [target.agentSessionId], assigneeSessionIds: [target.agentSessionId], supervisorSessionId: target.agentSessionId })
+    await seedStoredDemand(goals, { id: 'goal', title: 'Original bounded work', description: 'Produce the original useful result.', sessionIds: [target.agentSessionId], assigneeSessionIds: [target.agentSessionId], supervisorSessionId: target.agentSessionId })
     await goals.proposeAlignment('goal', { summary: 'Original work', criteria: [{ id: 'real', text: 'A real result exists' }], openQuestions: [] }); await goals.confirmAlignment('goal', 1)
   }
   observe = await host.client.observeAgentOutput(target.agentSessionId, 0, event => { if (event.type === 'terminal-output' && event.run.runId === target.runId) output += event.data })

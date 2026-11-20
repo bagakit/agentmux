@@ -1,3 +1,4 @@
+import { seedStoredDemand } from '../../../../../test/fixtures/stored-demand.mjs'
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import fs from 'node:fs/promises'
@@ -104,7 +105,7 @@ app.whenReady().then(async () => {
         await until(() => client().statusAgent(ids[name].agentSessionId), (value: any) => value.observation.readiness === 'ready' && value.session.semanticStatus?.state === 'done', 'Native fixture did not publish its authoritative completed turn')
       }
       await fs.writeFile(path.join(privateRoot, 'ids.json'), JSON.stringify(ids))
-      await demands.create({ id: 'original-goal', title: 'Inspect original responsibility', status: 'in_progress',
+      await seedStoredDemand(demands, { id: 'original-goal', title: 'Inspect original responsibility', status: 'in_progress',
         sessionIds: Object.values(ids).map((value: any) => value.agentSessionId),
         assigneeSessionIds: Object.values(ids).map((value: any) => value.agentSessionId), supervisorSessionId: ids.manager.agentSessionId })
       await demands.proposeAlignment('original-goal', { summary: 'Original useful result', criteria: [{ id: 'AC', text: 'Original execution evidence and next responsibility' }], openQuestions: [] })

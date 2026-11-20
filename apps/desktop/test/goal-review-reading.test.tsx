@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
@@ -59,7 +60,8 @@ afterEach(async () => {
   }
 })
 async function seed(options: { confirmed?: boolean; grounding?: DemandGroundingProposal; alignment?: DemandAlignmentProposal | null; done?: boolean } = {}) {
-  await useAppStore.getState().createDemand({ id: 'review-reading', title: 'Read one current result', description: 'Keep this original intent.  ', status: 'in_progress', projectId: null, projectName: null, sessionIds: [], source: 'session' })
+  await seedStoredDemand(host.demands, { id: 'review-reading', title: 'Read one current result', description: 'Keep this original intent.  ', status: 'in_progress', projectId: null, projectName: null, sessionIds: [] })
+  await useAppStore.getState().refreshDemand('review-reading')
   if (options.alignment !== null) await useAppStore.getState().updateDemand('review-reading', { alignment: options.alignment ?? proposal })
   if (options.confirmed) await useAppStore.getState().confirmDemandGoal('review-reading', 1)
   if (options.grounding) await useAppStore.getState().updateDemand('review-reading', { grounding: options.grounding })

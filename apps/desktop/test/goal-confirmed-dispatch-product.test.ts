@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -25,7 +26,7 @@ beforeEach(async () => {
   session = await core.core.createAgent({ agentSessionId: 'original-worker', providerId: 'codex', executorId: 'private', workspacePath: root,
     createOperationId: 'fixture-original-worker', injectAgentMuxGuide: false })
   host = await openHostGoalTransport({ config, runtime: () => ({ client: core.core }) as never })
-  await host.demands.create({ id: 'original-goal', title: 'Original task', description: 'Original exact input', assigneeSessionIds: [session.agentSessionId], supervisorSessionId: session.agentSessionId })
+  await seedStoredDemand(host.demands, { id: 'original-goal', title: 'Original task', description: 'Original exact input', assigneeSessionIds: [session.agentSessionId], supervisorSessionId: session.agentSessionId })
   await host.demands.proposeAlignment('original-goal', { summary: 'Original work', criteria: [{ id: 'original', text: 'Original result' }], openQuestions: [] })
   await host.demands.confirmAlignment('original-goal', 1)
   useAppStore.setState({ config, demands: {}, sessions: [], agentComposerDrafts: { 'original-worker': retained.draft },
@@ -76,7 +77,7 @@ for (const variant of ['missing', 'inspect-failed', 'still-unknown', 'different-
     await host.demands.recordDispatchPhase('original-goal', operationId, { stage: 'unknown', issue: 'Original transport observation unavailable' })
     if (variant === 'inspect-failed') vi.spyOn(core.core, 'sessionTimeline').mockRejectedValueOnce(new Error('Original timeline observation unavailable'))
     if (variant === 'different-operation' || variant === 'different-goal') {
-      await host.demands.create({ id: 'other-goal', title: 'Other task', description: 'Original exact input', assigneeSessionIds: [session.agentSessionId] })
+      await seedStoredDemand(host.demands, { id: 'other-goal', title: 'Other task', description: 'Original exact input', assigneeSessionIds: [session.agentSessionId] })
       await host.rpc.call('goal.start', { goalId: variant === 'different-goal' ? 'other-goal' : 'original-goal', sessionId: session.agentSessionId, operationId: 'another-start' })
     }
     const writes = [...core.writes]
@@ -108,7 +109,7 @@ it('only the exact original Core prompt receipt confirms a selected prepared Goa
 it('the public Start refuses an operation belonging to another Goal without input or relationship changes', async () => {
   const operationId = 'original-owned-start'
   await host.rpc.call('goal.start', { goalId: 'original-goal', sessionId: session.agentSessionId, operationId })
-  await host.demands.create({ id: 'other-goal', title: 'Other task', description: 'Original exact input', assigneeSessionIds: [session.agentSessionId] })
+  await seedStoredDemand(host.demands, { id: 'other-goal', title: 'Other task', description: 'Original exact input', assigneeSessionIds: [session.agentSessionId] })
   const before = await host.demands.snapshot(), writes = [...core.writes]
   await expect(host.rpc.call('goal.start', { goalId: 'other-goal', sessionId: session.agentSessionId, operationId })).rejects.toThrow()
   expect(await host.demands.snapshot()).toEqual(before)

@@ -1,3 +1,4 @@
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { chooseField } from './helpers/selection-field'
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -54,7 +55,7 @@ async function fixture() {
   vi.spyOn(api.goals, 'execute').mockImplementation(control)
   vi.spyOn(api.demands, 'onChanged').mockImplementation(() => () => {})
   vi.spyOn(api.sessions, 'onEvent').mockImplementation(() => () => {})
-  const stored = (await goals.demands.create({ id: 'original-goal', title: 'Original Goal', assigneeSessionIds: [reference], sessionIds: ['legacy-original', reference] })).demand
+  const stored = (await seedStoredDemand(goals.demands, { id: 'original-goal', title: 'Original Goal', assigneeSessionIds: [reference], sessionIds: ['legacy-original', reference] })).demand
   const goal: DemandProjection = { ...stored, source: 'default-topic', sessions: [], workspacePath: null }
   useAppStore.setState({ config: { ...composerConfig, hosts: [...composerConfig.hosts, { id: 'configured-B', kind: 'ssh', label: 'Project device B', hostname: 'private-fixture.invalid' }] },
     demands: { [goal.id]: goal }, sessions: [composerSession('namesake-SID')], timelines: {}, agentNames: {}, goalAgentSelectionDrafts: {}, goalAgentCreationDrafts: {},

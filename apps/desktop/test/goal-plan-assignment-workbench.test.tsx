@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { act } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -33,7 +34,7 @@ async function workbench() {
   cleanup.push(() => rm(root, { recursive: true, force: true }))
   isolateCoreFixtureEnvironment(root)
   const store = openDemandStore({ root: join(root, 'goals') })
-  await store.create({ id: goalId, title: 'Ship the board', status: 'in_progress', sessionIds: ['worker'], assigneeSessionIds: ['worker'] })
+  await seedStoredDemand(store, { id: goalId, title: 'Ship the board', status: 'in_progress', sessionIds: ['worker'], assigneeSessionIds: ['worker'] })
   await store.proposeAlignment(goalId, { summary: 'Deliver', criteria: [{ id: 'result', text: 'A verified release' }], openQuestions: [] })
   await store.revisePlan(goalId, { operationId: 'plan', expectedRevision: 0, alignmentRevision: 1, nodes }, author)
   const runtime = { agentCreation: vi.fn().mockRejectedValue(Error('No execution needed')),

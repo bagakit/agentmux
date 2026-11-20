@@ -1,4 +1,5 @@
 // Original public Goal fixture, kept separate from test registrations. Native Runtime/Provider leaves are explicit.
+import { seedStoredDemand } from '../../../../test/fixtures/stored-demand.mjs'
 import {expect,vi} from "vitest"
 import {join} from "node:path"
 import {writeFile} from "node:fs/promises"
@@ -52,7 +53,7 @@ export async function createGoalQualifiedPublicFixture(cleanup: Array<() => unkn
   goalServer = new AgentMuxControlServer({ socketPath, spatialState: spatial, hostedRuntime: () => bHosted, coreClients: () => [{ hostId: 'local', client: b.client }, { hostId: 'D-in-B', client: configuredD }], goalControl: goals.execute, goalInputEpoch: goals.inputEpoch, goalDelegations: goals.goalDelegations })
   await goalServer.start(); cleanup.push(() => goalServer.stop())
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: goalServer.path } }); cleanup.push(() => rpc.dispose())
-  const goal = (await goals.demands.create({ id: 'original-goal', title: 'Original public Goal', description: 'Original frozen public input', assigneeSessionIds: [reference] })).demand
+  const goal = (await seedStoredDemand(goals.demands, { id: 'original-goal', title: 'Original public Goal', description: 'Original frozen public input', assigneeSessionIds: [reference] })).demand
   const access = { source: { hostId: 'local' } }
   const bInventory = vi.spyOn(b.client, 'readAgentSessions'), dInventory = vi.spyOn(d.client, 'readAgentSessions'), bRuns = vi.spyOn(b.client, 'listRuns'), dRuns = vi.spyOn(d.client, 'listRuns')
   return { sourceRoot: b.root, runtime, spatial, b: { inventory: bInventory, runs: bRuns }, d: { core: d.client, store: d.store, inner: d.inner, inventory: dInventory, runs: dRuns }, goal, goals, goalServer, configuredD, rpc, reference, access, send, raw, stop, session }

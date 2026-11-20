@@ -1,3 +1,4 @@
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { nonSessionCreation } from '../../host/test/helpers/non-session-creation.js'
 import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-values.mjs"
 import { promises as fs } from 'node:fs'
@@ -30,7 +31,7 @@ async function fixture() {
   const root = await fs.mkdtemp(join(tmpdir(), 'goal-attention-owner-'))
   cleanup.push(() => fs.rm(root, { recursive: true, force: true }))
   const demands = openDemandStore({ root: join(root, 'goals') })
-  await demands.create({ id: 'goal', title: 'Original Goal', status: 'in_progress', assigneeSessionIds: ['owner', 'worker', 'next-owner'], supervisorSessionId: 'owner' })
+  await seedStoredDemand(demands, { id: 'goal', title: 'Original Goal', status: 'in_progress', assigneeSessionIds: ['owner', 'worker', 'next-owner'], supervisorSessionId: 'owner' })
   await demands.proposeAlignment('goal', { summary: 'Original scope', criteria: [{ id: 'AC', text: 'Original result' }], openQuestions: [] })
   await demands.prepareDelegation('goal', task, 'owner'); await demands.linkDelegation('goal', task.operationId, task.sourceMessageId, 'owner')
   const pending = new Set<Promise<unknown>>()

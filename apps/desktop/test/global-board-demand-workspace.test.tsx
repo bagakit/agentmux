@@ -1,5 +1,6 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -44,7 +45,7 @@ describe('Goal reading workspace', () => {
     const host = await openHostGoalTransport({ config })
     try {
     const seeded = useAppStore.getState().demands['demand:one']
-    const saved = (await host.demands.create({ id: seeded.id, title: seeded.title, description: seeded.description, status: seeded.status, sessionIds: seeded.sessionIds })).demand
+    const saved = (await seedStoredDemand(host.demands, { id: seeded.id, title: seeded.title, description: seeded.description, status: seeded.status, sessionIds: seeded.sessionIds })).demand
     const original = { ...seeded, updatedAt: saved.updatedAt, createdAt: saved.createdAt }
     useAppStore.setState({ demands: { [original.id]: original } })
     useAppStore.setState({ selectedDemandId: original.id }); await act(async () => root.render(createElement(GlobalBoardSurface)))

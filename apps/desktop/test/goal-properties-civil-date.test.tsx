@@ -1,3 +1,4 @@
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { fixtureCivil as _hygiene_fixtureCivil, fixtureYear as _hygiene_fixtureYear } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -17,7 +18,7 @@ beforeEach(async () => {
 afterEach(async () => { await host.dispose(); vi.unstubAllEnvs() })
 it('keeps both local civil dates through the actual Goal properties transaction and a redraw', async () => {
   const id = 'goal:civil-date'
-  const saved = (await host.demands.create({ id, title: 'Keep the original local dates', description: 'Original Goal', status: 'backlog', priority: 'normal', sessionIds: [] })).demand
+  const saved = (await seedStoredDemand(host.demands, { id, title: 'Keep the original local dates', description: 'Original Goal', status: 'backlog', priority: 'normal', sessionIds: [] })).demand
   const record = { ...saved, source: 'default-topic' as const }
   useAppStore.setState({ demands: { [id]: record }, selectedDemandId: id, mainSurface: 'board', sessions: [] })
   const updates = () => host.bodies('demand.update').map(({ demandId, patch }) => [demandId, patch])

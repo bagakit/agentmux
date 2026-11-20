@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { act } from 'react'
 import { afterEach, beforeEach, expect, it } from 'vitest'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
@@ -17,7 +18,7 @@ beforeEach(async () => { host = await openHostGoalTransport({ config: composerCo
 afterEach(async () => { await host.dispose() })
 
 it('keeps a published confirmation when an older public Goal read returns later', async () => {
-  await host.demands.create({ id: 'goal', title: 'Keep my confirmation', status: 'in_progress', sessionIds: [] })
+  await seedStoredDemand(host.demands, { id: 'goal', title: 'Keep my confirmation', status: 'in_progress', sessionIds: [] })
   await host.demands.proposeAlignment('goal', proposal)
   await act(async () => { await useAppStore.getState().refreshDemand('goal') })
   expect(useAppStore.getState().demands.goal?.alignment?.confirmedAt).toBeNull()
@@ -36,7 +37,7 @@ it('keeps a published confirmation when an older public Goal read returns later'
 })
 
 it('a late Goal write receipt never republishes an older Goal over a newer owner read', async () => {
-  await host.demands.create({ id: 'goal', title: 'Original title', status: 'in_progress', sessionIds: [] })
+  await seedStoredDemand(host.demands, { id: 'goal', title: 'Original title', status: 'in_progress', sessionIds: [] })
   await act(async () => useAppStore.getState().refreshDemand('goal'))
   const held = host.once('demand.update', { kind: 'hold-receipt' })
   const write = useAppStore.getState().updateDemand('goal', { title: 'First committed title' })
@@ -57,4 +58,3 @@ it('a late Goal write receipt never republishes an older Goal over a newer owner
     expect((await host.demands.get('goal'))!.title).toBe('Newer authoritative title')
   } finally { release() }
 })
-

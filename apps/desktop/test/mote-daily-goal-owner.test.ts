@@ -1,3 +1,4 @@
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -15,7 +16,7 @@ const target = { hostId: 'local', agentSessionId: 'original', providerId: 'gener
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'ag-daily-goal-')); now = 1; readsFail = false; confirmed = false; occupied = false; delayedObserve = false; runId = 'original-run'; sent = []
   goals = openDemandStore({ root: join(root, 'goals') }); store = new ContinuousProgressLoopStore(join(root, 'loops.json'))
-  await goals.create({ id: 'goal', title: 'Work', description: 'Original content', sessionIds: ['original'], assigneeSessionIds: ['original'], supervisorSessionId: 'original' })
+  await seedStoredDemand(goals, { id: 'goal', title: 'Work', description: 'Original content', sessionIds: ['original'], assigneeSessionIds: ['original'], supervisorSessionId: 'original' })
   await goals.proposeAlignment('goal', { summary: 'Useful work', criteria: [{ id: 'result', text: 'Real result' }], openQuestions: [] }); await goals.confirmAlignment('goal', 1)
   manager = make()
 })

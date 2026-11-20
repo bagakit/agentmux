@@ -1,3 +1,4 @@
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { nonSessionCreation } from '../../host/test/helpers/non-session-creation.js'
 import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-values.mjs"
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
@@ -34,7 +35,7 @@ it('runs the actual CLI/RPC/Main prepare owner, retains frozen intent and reject
   internals.connected = true; internals.kernel.isConnected = () => true; await internals.registry.load('local')
   cleanup.push(() => client.dispose())
   const demands = openDemandStore({ root: join(root, 'goals') })
-  await demands.create({ id: 'goal', title: 'Original Goal', description: 'Original intent', status: 'in_progress',
+  await seedStoredDemand(demands, { id: 'goal', title: 'Original Goal', description: 'Original intent', status: 'in_progress',
     assigneeSessionIds: ['owner', 'worker'], supervisorSessionId: 'owner' })
   await demands.proposeAlignment('goal', { summary: 'Original scope', criteria: [{ id: 'AC', text: 'Recover the result' }], openQuestions: [] })
   let pending: { id: string; kind: 'prepared-agent-creation' | 'closed-agent-creation' } | null = null
@@ -103,7 +104,7 @@ async function retirementFixture() {
   })
   const client = new AgentMuxClient({ store }); cleanup.push(() => client.dispose())
   const demands = openDemandStore({ root: join(root, 'goals') })
-  await demands.create({ id: 'goal', title: 'Original Goal', description: 'Original intent', status: 'in_progress',
+  await seedStoredDemand(demands, { id: 'goal', title: 'Original Goal', description: 'Original intent', status: 'in_progress',
     assigneeSessionIds: ['owner', 'worker'], supervisorSessionId: 'owner' })
   await demands.proposeAlignment('goal', { summary: 'Original scope', criteria: [{ id: 'AC', text: 'Recover the result' }], openQuestions: [] })
   const calls: string[] = []

@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import './helpers/current-demand-product'
 import { bridge, demands, directory, client, manager, root, container, config, session, writes, snapshot, sourceCli, runtime } from './helpers/current-demand-product'
 import { act, Profiler } from 'react'
@@ -138,7 +139,7 @@ it.each(['finite', 'continue'] as const)('Current Demand: actual Source CLI %s S
     expect(inspected.goal!.dispatches).toEqual([expect.objectContaining({ stage: 'confirmed', execution, agentSessionId: session.agentSessionId, hostId: 'local', runId: session.run.runId })])
     await expect(service.call('goal.update', { goalId: 'goal', patch: { dispatches: [] } } as never)).rejects.toThrow()
     await expect(demands.update('goal', { dispatches: [] } as never)).rejects.toThrow('actual Goal Start')
-    await expect(demands.create({ id: 'forged', title: 'Forged', dispatches: inspected.goal!.dispatches } as never)).rejects.toThrow('actual Goal Start')
+    await expect(demands.create({ title: 'Forged', dispatches: inspected.goal!.dispatches } as never)).rejects.toThrow('actual Goal Start')
     expect((await run(args)).receipt).toEqual(started.receipt)
     expect((await demands.snapshot()).revision).toBe(revision); expect(writes).toEqual(accepted)
   } finally { await service.dispose(); await server.stop() }
@@ -150,8 +151,8 @@ it('Current Demand: two actual confirmed Goals remain ambiguous and each Region 
     await act(async () => root.render(null))
     const sourceId = 'local:multiple-presentation'
     useAppStore.setState({ sessions: [{ ...snapshot, id: sourceId }], timelines: { [sourceId]: await client.sessionTimeline(session.agentSessionId) } })
-    await demands.create({ id: 'second', title: 'Second actual business result', description: 'Finish the second exact result.', assigneeSessionIds: [session.agentSessionId], sessionIds: [session.agentSessionId] })
-    await demands.create({ id: 'history', title: 'Historical association only', sessionIds: [session.agentSessionId], status: 'in_progress' })
+    await seedStoredDemand(demands, { id: 'second', title: 'Second actual business result', description: 'Finish the second exact result.', assigneeSessionIds: [session.agentSessionId], sessionIds: [session.agentSessionId] })
+    await seedStoredDemand(demands, { id: 'history', title: 'Historical association only', sessionIds: [session.agentSessionId], status: 'in_progress' })
     await service.call('goal.start', { goalId: 'goal', sessionId: session.agentSessionId, operationId: 'first-business-input' })
     await service.call('goal.start', { goalId: 'second', sessionId: session.agentSessionId, operationId: 'second-business-input' })
     await useAppStore.getState().refreshDemand('history')
@@ -203,7 +204,7 @@ it('Current Demand: Main freezes exact Host Session Run OP and prompt; a wrong r
   await demands.prepareDispatch('goal', intent)
   await expect(demands.recordDispatchPhase('goal', operationId, { stage: 'unknown', issue: 'A later observation cannot regress the original receipt.' })).resolves.toMatchObject({ demand: { dispatches: [original] } })
   expect((await demands.snapshot()).revision).toBe(revision); expect(await api.demands.inspectDispatch(reference)).toEqual(original)
-  await demands.create({ id: 'other', title: 'Other Goal', assigneeSessionIds: [session.agentSessionId] })
+  await seedStoredDemand(demands, { id: 'other', title: 'Other Goal', assigneeSessionIds: [session.agentSessionId] })
   await expect(demands.prepareDispatch('other', intent)).rejects.toThrow('another Goal')
   await expect(demands.prepareDispatch('goal', { ...intent, prompt: 'Changed' })).rejects.toThrow('another Goal')
   expect((await client.agentSession(session.agentSessionId)).run).toEqual(originalRun)

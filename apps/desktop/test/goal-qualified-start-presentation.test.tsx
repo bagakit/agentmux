@@ -1,3 +1,4 @@
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { goalNextStepFact } from '../src/renderer/src/lib/goal-presentation'
 import { WorkbenchPresentationContext } from '../src/renderer/src/lib/workbench-presentation'
 // @vitest-environment happy-dom
@@ -76,7 +77,7 @@ it('the real responsibility surface consumes the Core qualified row without crea
   const directory = await mkdtemp(join(tmpdir(), 'goal-qualified-view-'))
   try {
     const store = openDemandStore({ root: directory })
-    await store.create({ id: 'original-goal', title: 'Original Goal', assigneeSessionIds: [ref('D')] })
+    await seedStoredDemand(store, { id: 'original-goal', title: 'Original Goal', assigneeSessionIds: [ref('D')] })
     const original = (await store.prepareDispatch('original-goal', { operationId: 'Start-D', target: ref('D'), runId: 'Run-D', execution: 'finite', prompt: 'Original body' })).demand
     const execution = demandExecutionReferences(original)[0]!
     const row = observeGoalExecution(original, { execution, inputConfirmed: true, unknown: 'Current Source observation unavailable' }, 3)
