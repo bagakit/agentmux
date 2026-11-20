@@ -40,5 +40,11 @@ export const crossHostMutations = {
     anchor: 'const readDesktop = () => options.desktopOccupation?.(input.agentSessionId, input.runId, context)',
     replacement: "const readDesktop = () => 'clear'",
     test: 'collection with active original Supervisor unmounted'
+  },
+  'current-closeout-attempt': {
+    path: 'apps/host/src/goal-worker-closeout.ts',
+    anchor: "current?.attempt?.delegationOperationId !== attempt.operationId ||\n          (current.state !== 'review' && current.state !== 'done') ||",
+    replacement: 'goal?.delegations?.filter(item => item.planNodeId === attempt.planNodeId).at(-1) !== attempt ||',
+    test: 'reassignment after collection'
   }
 }
