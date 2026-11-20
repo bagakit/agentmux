@@ -33,6 +33,7 @@ import { useAppStore, type AgentSteerQueueEntry } from '../store'
 import { useWorkbenchInputArchive } from '../lib/use-workbench-input-archive'
 import { archivedInputMatchesSession } from '../lib/workbench-input-archive'
 import { serviceNoticeFingerprint, useReadReceipts, type useServiceNotices } from '../lib/use-service-notices'
+import { ServiceNoticeRow } from './ServiceNoticeRow'
 import { useSessionUserMessages } from '../lib/session-user-messages'
 import { useSessionMessages, type SessionMailReading } from '../lib/use-session-messages'
 import { MailboxA2A } from './MailboxA2A'
@@ -752,15 +753,11 @@ export function SessionMailbox({ pendingLayout, system, queued: workbenchQueue, 
           <div className="composer-notice__body">{noticePresentation?.id === selectedNotice.id ? noticePresentation.content : <><ServiceWindowNotice notice={selectedNotice.notice} />
             <MailboxTime value={selectedNotice.observedAt} complete />
             {selectedNotice.id === 'queue' ? <button type="button" className="composer-tool" onClick={() => chooseFolder('user')}>View Inputs</button> : null}
-            {selectedNotice.action ? <button type="button" className="composer-tool" onClick={selectedNotice.action.run}>{selectedNotice.action.label}</button> : null}</>}
+            {selectedNotice.action ? <button type="button" className="composer-notice__action" onClick={selectedNotice.action.run}><span>{selectedNotice.action.label}</span><span aria-hidden="true">→</span></button> : null}</>}
           </div>
         </article> : notices.length ? <ol className="composer-mailbox__messages" aria-label="Current service notices">
-          {notices.map(item => <li key={item.id} className="composer-notice" data-kind={item.notice.kind}><MailboxRecordRow
-            recordKey={`notice:${item.id}:${serviceNoticeFingerprint(item)}`} label={(item.summary ?? item.notice.notice).step}
-            text={(item.summary ?? item.notice.notice).mode.slice(0,240)}
-            metadata={item.observedAt === undefined ? null : <MailboxTime value={item.observedAt} />}
-            status={item.notice.kind === 'indeterminate' ? 'Status unknown' : 'Service notice'}
-            onOpen={selectRecord} /></li>)}
+          {notices.map(item => <li key={item.id} className="composer-notice" data-kind={item.notice.kind} data-unread={system.unread.includes(item.id) || undefined}>
+            <ServiceNoticeRow item={item} unread={system.unread.includes(item.id)} onOpen={selectRecord} /></li>)}
         </ol> : <MailboxEmpty title={system.available ? 'No current notices' : 'Waiting for Session status'} /> : null}
       </div>
       {hasProgress ? <div id={`${id}-progress`} role="region" aria-label="Automation settings" hidden={folder !== 'progress'}>
