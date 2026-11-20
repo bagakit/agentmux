@@ -11,6 +11,7 @@ import { createRequire } from 'node:module'
 import { build } from 'esbuild'
 import { nativeResumeSource } from './helpers/native-resume-source.js'
 import { prepareCodexManagedLaunch } from '../src/providers/codex-native-input.js'
+import { runProcess } from '../src/process-runner.js'
 import { CODEX_NATIVE_TOKEN_ENV, runCodexManaged } from '../src/providers/codex-managed-run.js'
 import { nativeProcessTcpListeners } from '../src/agent-native-process.js'
 import { resolveLaunchOptionArgv } from '../src/agent-launch-option.js'
@@ -21,7 +22,10 @@ afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await c
 async function command(version = 'codex-cli 0.163.0') {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'amux-native-plan-'))); cleanup.push(() => rm(root, { recursive: true, force: true }))
   const path = join(root, 'native-fixture')
-  await writeFile(path, '#!/usr/bin/env node\nconsole.log(' + JSON.stringify(version) + ')\n', { mode: 0o700 })
+  const literal = version.replaceAll("'", "'\\''")
+  await writeFile(path, `#!/bin/sh\n[ "$1" = --version ] || exit 2\nprintf '%s\\n' '${literal}'\n`, { mode: 0o700 })
+  // Verify the private executable before exercising the bounded product probe.
+  expect(await runProcess(path, ['--version'])).toEqual({ stdout: version + '\n', stderr: '', exitCode: 0 })
   return { root, path }
 }
 
