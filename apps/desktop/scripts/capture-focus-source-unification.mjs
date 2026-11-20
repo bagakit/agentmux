@@ -21,7 +21,7 @@ const layoutMutation=process.env.AGENTMUX_FOCUS_LAYOUT_MUTATION
 assert.ok(!taskLayout || !layoutMutation || ['omit-layout','hide-mandatory','repeat-result-idle','unqualified-subagents','omit-row-summary','expand-known-recovery','omit-detail-motion','ignore-interaction-range'].includes(layoutMutation),'Known Focus task layout mutation')
 const sourceConnection=process.argv[4]==='--source-connection'
 const sourceMutation=process.env.AGENTMUX_FOCUS_SOURCE_MUTATION
-assert.ok(!sourceConnection || !sourceMutation || sourceMutation==='omit-location-issues','Known Focus source mutation')
+assert.ok(!sourceConnection || !sourceMutation || ['omit-location-issues','ignore-core-update-dismissal'].includes(sourceMutation),'Known Focus source mutation')
 const takeoverFeedback=process.argv[4]==='--takeover-feedback',sourceRecovery=process.argv[4]==='--source-recovery',primaryOnly=process.argv[4]==='--primary-only',memberState=process.argv[4]==='--member-state',unconfirmed=process.argv[4]==='--unconfirmed'||sourceRecovery
 const sourceOnly=taskLayout||inlineRename||agentPins||sourceRecovery||takeoverFeedback||sourceConnection
 const evidence=resolve(process.argv[3]);await mkdir(evidence,{recursive:true})
@@ -142,6 +142,13 @@ try{
       const target='locationIssues={sourceFacts.issues}'
       assert.equal(source.split(target).length,2,'One handoff to the source disclosure')
       const code=source.replace(target,'locationIssues={[]}')
+      transformations.push({path:relative(root,path),mutation:sourceMutation,sourceSHA256:hash(source),loadedSHA256:hash(code)})
+      return {contents:code,loader:'tsx'}
+    }
+    if(sourceConnection && sourceMutation==='ignore-core-update-dismissal' && component==='FocusSourceStatus.tsx'){
+      const target='acknowledge(unread)'
+      assert.equal(source.split(target).length,2,'One explicit acknowledgement for the Core update hint')
+      const code=source.replace(target,'void unread')
       transformations.push({path:relative(root,path),mutation:sourceMutation,sourceSHA256:hash(source),loadedSHA256:hash(code)})
       return {contents:code,loader:'tsx'}
     }

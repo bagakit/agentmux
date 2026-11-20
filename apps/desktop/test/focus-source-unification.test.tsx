@@ -29,7 +29,7 @@ import { agentInformationPreview } from '../src/renderer/src/lib/agent-informati
 import { useAppStore } from '../src/renderer/src/store'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { createWorkspaceLayout, splitWorkbenchRegion } from '@agentmux/layout'
-import { spaceMountKey } from '../src/shared/space-mount'
+import { SOURCE_AGENT_LOCATIONS_UNSUPPORTED, spaceMountKey } from '../src/shared/space-mount'
 import { originalSourceGroupProjectionId, originalSourceInputOwnerKey, originalSourceRegionProjectionId, originalSourceTabProjectionId, originalSourceWorkspaceId } from '../src/renderer/src/lib/original-space-navigation'
 import { mountedRegionKey, mountedSpaceInput } from '../src/renderer/src/lib/space-mount-view'
 import * as mountedSessions from '../src/renderer/src/lib/space-mount-sessions'
@@ -358,6 +358,13 @@ it('explains an unavailable Host lookup and refreshes only the original route wh
   await act(async () => useAppStore.setState({ focusView: 'map' }))
   await act(async () => useAppStore.setState({ focusView: 'list' }))
   await vi.waitFor(() => expect(dom.container.textContent).toContain('The original Host Core does not provide Agent location lookup.'))
+  const input = { hostId: f.target.hostId, agentSessionIds: [SID] }
+  await expect(f.main.api.call('agentLocations', input)).rejects.toMatchObject({
+    code: SOURCE_AGENT_LOCATIONS_UNSUPPORTED, detail: f.target.reference.runtimeId
+  })
+  missing.mockImplementation((method, params, context) => method === 'runtime.owner.identity'
+    ? Promise.reject(new AgentMuxError('Method not found.', 'RPC_METHOD_NOT_FOUND')) : forward(method, params, context))
+  await expect(f.main.api.call('agentLocations', input)).rejects.toMatchObject({ code: 'RPC_METHOD_NOT_FOUND' })
   expect(cardWith('Existing remote result').textContent).toContain(foreignRecap)
   expect(cardWith('Existing remote result').closest('.focus-project-lanes__row')?.textContent).toContain('Original Mote')
   expect(useAppStore.getState().mountedSpaceInputs).toEqual({})
