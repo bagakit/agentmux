@@ -300,8 +300,8 @@ export class AgentExecutionCoordinator {
         return this.inspect(bindingId)!
       } finally { if (!hosts.adopted) await hosts.dispose() }
     } catch (error) {
-      // A failed recovery attempt cannot override a live bridge's own observations.
-      if (!this.bridges.has(bindingId) || this.connectionFailures.has(bindingId)) this.observeFailure(record.input, error)
+      // Keep the existing bridge's evidence when only this attempt failed.
+      if (!this.bridges.has(bindingId)) this.observeFailure(record.input, error)
       throw error
     }
   }
@@ -535,8 +535,8 @@ export class AgentExecutionCoordinator {
       try {
       const toolExecution = { bindingId: input.bindingId, resourceHostId: input.resourceHostId,
         resourceRuntimeId: input.resourceRuntimeId, workspacePath: input.resourceWorkspacePath }
-      const existing = await hosts.agent.readAgentSession(input.agent.agentSessionId)
-      if (existing) {
+      const existing = this.hasConnectedBridge(input.bindingId) ? null : await hosts.agent.readAgentSession(input.agent.agentSessionId)
+      if (existing || this.hasConnectedBridge(input.bindingId)) {
         // The target Core validates the complete original creation digest and
         // retained receipt before consulting a possibly changed Executor.
         step = { hostId: input.agentHostId, role: 'agent', stage: 'create' }
@@ -624,7 +624,7 @@ export class AgentExecutionCoordinator {
       return { session: created.session, execution: this.inspect(input.bindingId)! }
       } finally { if (!hosts.adopted) await hosts.dispose() }
     } catch (error) {
-      if (!this.bridges.has(input.bindingId) || this.connectionFailures.has(input.bindingId)) this.observeFailure(input, error)
+      if (!this.bridges.has(input.bindingId)) this.observeFailure(input, error)
       // Bridge endpoint failures already carry their exact step. A local
       // persistence/observation failure cannot be assigned to an invented Host.
       if (step.stage === 'attach') throw error
