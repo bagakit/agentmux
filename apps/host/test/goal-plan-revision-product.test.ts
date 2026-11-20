@@ -173,3 +173,50 @@ it('appends independent branches from a completed Ticket through the public CLI'
   expect((await f.owner.call('worker-b', ['goal', 'plan', '--goal', f.goalId])).plan).toEqual(current.plan)
   expect(f.owner.native.stop).not.toHaveBeenCalled()
 })
+
+it('returns the original human confirmation and continuation instruction under the exact Goal', async () => {
+  const f = await fixture()
+  const confirmation = await f.owner.call(null, ['goal', 'confirm', '--goal', f.goalId, '--revision', '1', '--operation-id', 'human-confirm-and-continue',
+    '--continue-with', '{"hostId":"local","agentSessionId":"supervisor"}'])
+  const alignment = confirmation.goal.alignment
+  expect(alignment).toMatchObject({ revision: 1, confirmedAt: expect.any(Number), confirmedBy: { kind: 'user', id: expect.any(String) } })
+  expect((await f.owner.call(null, ['goal', 'inspect', '--goal', f.goalId])).goal.alignment).toEqual(alignment)
+  const originalPlan = await f.read()
+  expect(originalPlan.patrols).toHaveLength(1)
+  expect(originalPlan.patrols[0]).toMatchObject({ purpose: 'confirmation', operationId: 'human-confirm-and-continue',
+    requestedBy: alignment.confirmedBy, requestedAt: alignment.confirmedAt, alignment, executions: [] })
+  const otherGoalId = (await f.owner.call(null, ['goal', 'create', '--title', 'Another Goal on the same Supervisor',
+    '--supervisor', 'supervisor', '--assignees', '["supervisor"]', '--operation-id', 'create-other-goal', '--risk', 'low', '--confirm', 'user'])).goal.id
+  expect((await f.owner.call(null, ['goal', 'plan', '--goal', otherGoalId])).patrols ?? []).toEqual([])
+})
+
+it('returns a human executor change and independent review with their original Ticket and attempt', async () => {
+  const f = await fixture(), nodeId = f.node.id
+  const assigned = await f.owner.call(null, ['goal', 'plan', 'assignment', '--input', '-'], {
+    goalId: f.goalId, nodeId, expectedRevision: 1, operationId: 'human-assignment',
+    assignment: { kind: 'assign', executor: { hostId: 'local', agentSessionId: 'worker-b' } },
+  })
+  const assignment = assigned.plan.history.at(-1)
+  expect(assignment).toMatchObject({ operationId: 'human-assignment', revisedAt: expect.any(Number),
+    author: { kind: 'user', id: expect.any(String) }, change: { nodeId, assignment: { kind: 'assign', executor: { agentSessionId: 'worker-b', hostId: 'local' } } } })
+  expect(assigned.delegations).toEqual([])
+  await f.owner.call('supervisor', ['goal', 'delegate', '--input', '-'], { goalId: f.goalId, intent: {
+    operationId: 'assigned-attempt', sourceMessageId: 'assigned-source', threadId: 'assigned-thread', hostId: 'local',
+    ownerAgentSessionId: 'supervisor', ownerRunId: 'run-supervisor', workerAgentSessionId: 'worker-b', workerRunId: 'run-worker-b',
+    text: f.node.outcome, alignmentRevision: 1, criterionIds: ['original'], planNodeId: nodeId,
+  } })
+  const report = await f.owner.call('worker-b', ['goal', 'report', '--input', '-'], { goalId: f.goalId, operationId: 'assigned-attempt', report: {
+    operationId: 'report-assigned', replyMessageId: 'reply-assigned', authorAgentSessionId: 'worker-b', grounding: { alignmentRevision: 1,
+      summary: 'The new executor reported', checks: [{ criterionId: 'original', outcome: 'met', evidence: ['proof:assigned'], note: '' }] },
+  } })
+  await f.owner.call(null, ['goal', 'plan', 'review', '--input', '-'], { goalId: f.goalId, review: {
+    operationId: 'human-review', nodeId, delegationOperationId: 'assigned-attempt', deliveryHash: report.delegations[0].report.delivery.hash,
+    verdict: 'pass', note: '', check: { command: f.node.check, result: 'Passed', evidence: ['proof:assigned'] },
+  } })
+  const read = await f.read()
+  expect(read.plan.history.find((entry: { operationId: string }) => entry.operationId === assignment.operationId)).toEqual(assignment)
+  expect(read.plan.reviews).toMatchObject([{ operationId: 'human-review', nodeId, delegationOperationId: 'assigned-attempt',
+    reviewedAt: expect.any(Number), reviewer: assignment.author, completion: { record: { kind: 'completed', ticketId: nodeId, attemptId: 'assigned-attempt' } } }])
+  expect(read.planState.nodes[0].state).toBe('done')
+  expect(f.owner.native.stop).not.toHaveBeenCalled()
+})

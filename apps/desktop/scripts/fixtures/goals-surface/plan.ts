@@ -17,7 +17,7 @@ export function goalPlanPreview(seed: (mode: string) => void, render: () => void
   const originalDelegation = api.demands.delegation
   return {
     /** `withoutDerivation` previews a Host that returns the plan without node states, as an older version does. */
-    seed(withoutDerivation = false, openGuide = false, awaitingConfirmation = false, workflowState?: 'prepared' | 'confirmed', timelineDurationMs?: number) {
+    seed(withoutDerivation = false, openGuide = false, awaitingConfirmation = false, workflowState?: 'prepared' | 'confirmed', timelineDurationMs?: number, participation = false) {
       seed('confirmed')
       const state = useAppStore.getState(), goal = state.demands[state.selectedDemandId!]!
       const agents = state.sessions.filter(session => session.kind === 'agent')
@@ -72,9 +72,13 @@ export function goalPlanPreview(seed: (mode: string) => void, render: () => void
         note: verdict === 'changes' ? 'Keep the original reading anchor while output continues, then repeat the live-session check.' : '',
         reviewer: { kind: 'agent', id: owner.control.agentSessionId }, reviewedAt: at(4)
       })
-      const plan = parseGoalPlan({ revision: 2, alignmentRevision: goal.alignment!.revision, nodes,
-        reviews: workflowState ? [] : [review('outline', 'pass'), review('history', 'changes')],
-        history: [1, 2].map(revision => ({ operationId: `plan:revision-${revision}`, revision, author: { kind: 'agent', id: owner.control.agentSessionId }, revisedAt: at(revision) })) })
+      const person = { kind: 'user' as const, id: 'recovery-owner' }
+      const historyReview = review('history', 'changes')
+      const plan = parseGoalPlan({ revision: participation ? 3 : 2, alignmentRevision: goal.alignment!.revision, nodes,
+        reviews: workflowState ? [] : [review('outline', 'pass'), participation ? { ...historyReview, reviewer: person } : historyReview],
+        history: [...[1, 2].map(revision => ({ operationId: `plan:revision-${revision}`, revision, author: { kind: 'agent', id: owner.control.agentSessionId }, revisedAt: at(revision) })),
+          ...(participation ? [{ operationId: 'original-assignment', revision: 3, author: person, revisedAt: at(2),
+            change: { nodeId: 'workspace', assignment: { kind: 'assign', executor } } }] : [])] })
       const previousGuide = attempt('guide', true)
       previousGuide.workerAgentSessionId = previousWorker.control.agentSessionId
       previousGuide.workerRunId = previousWorker.control.run.runId
@@ -93,7 +97,13 @@ export function goalPlanPreview(seed: (mode: string) => void, render: () => void
           reason: workflowState === 'confirmed' ? 'The independent reviewer received the original delivery. Its verdict remains separate.'
             : 'Waiting for the original independent reviewer to accept input.' } })
       }
-      const next = { ...goal, ...(openGuide ? { address: formatGoalAddress(goal.id, 'workbench-preview-runtime', 'workspace-recovery') } : {}), title: 'Return to the same work, without rebuilding it',
+      const alignment = timelineDurationMs === undefined ? goal.alignment! : { ...goal.alignment!, confirmedAt: at(1),
+        confirmedBy: participation ? person : { kind: 'agent' as const, id: owner.control.agentSessionId, hostId: owner.control.hostId, runtimeId: 'workbench-preview-runtime' } }
+      const patrols = participation ? parseDemandPatrols([{ purpose: 'confirmation', operationId: 'original-continue-request',
+        expectedScope: JSON.stringify([goal.id, owner.control.agentSessionId, alignment.revision, alignment.confirmedAt]), executions: [], alignment,
+        supervisorAgentSessionId: owner.control.agentSessionId, recipientHostId: owner.control.hostId, context: 'Continue the original recovery.',
+        requestedBy: { kind: 'device', id: 'workspace-console' }, requestedAt: at(2), attempts: [] }]) : undefined
+      const next = { ...goal, alignment, ...(patrols ? { patrols } : {}), ...(openGuide ? { address: formatGoalAddress(goal.id, 'workbench-preview-runtime', 'workspace-recovery') } : {}), title: 'Return to the same work, without rebuilding it',
         ...(timelineDurationMs === undefined ? {} : { plannedStartAt: at(1), targetAt: at(4) }),
         ...(awaitingConfirmation ? { alignment: { ...goal.alignment!, confirmedAt: null }, plan: { ...plan, reviews: [] } } : { plan }),
         activities: Array.from({ length: 8 }, (_, index) => ({ id: `original-note:${index}`, kind: 'Progress',
@@ -127,7 +137,7 @@ export function goalPlanPreview(seed: (mode: string) => void, render: () => void
       const owned = withoutDerivation ? { plan } : hostGoalPlan(next), observed = { ...next, ...owned, responsibility, delegationObservations: observations }
       // Actual observation hooks read these original preview facts instead of clearing the fixture.
       api.demands.delegation = async (operation, input) => input.goalId === next.id && operation === 'goal.delegations'
-        ? { goalId: next.id, goalUpdatedAt: next.updatedAt, diskDurability: 'confirmed' as const, delegations: next.delegations, observations, ...owned, responsibility }
+        ? { goalId: next.id, goalUpdatedAt: next.updatedAt, diskDurability: 'confirmed' as const, delegations: next.delegations, observations, ...owned, responsibility, ...(patrols ? { patrols } : {}) }
         : originalDelegation(operation, input)
       flushSync(() => {
         useAppStore.setState({ demands: { [next.id]: observed },

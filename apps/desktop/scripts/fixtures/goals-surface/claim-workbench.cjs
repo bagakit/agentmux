@@ -4,6 +4,81 @@ const assert = require('node:assert/strict')
 module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result, keyEscape, debuggerSession }) => {
   const query = selector => `document.querySelector(${JSON.stringify(selector)})`
   const timelineOnly = process.env.AGENTMUX_GOAL_EXECUTION_TIMELINE_CAPTURE === '1'
+  if (process.env.AGENTMUX_GOAL_PARTICIPATION_CAPTURE === '1') {
+    const goalRow = '[data-goal-time-row="goal-participation"]'
+    const point = goalRow + ' [data-goal-time-event="Goal confirmed"]'
+    const request = goalRow + ' [data-goal-time-event="Continuation requested"]'
+    const ticket = '[data-goal-time-row="node:workspace"] [data-goal-time-event="Executor assigned"]'
+    const review = '[data-goal-time-row="attempt:history"] [data-goal-time-event="Changes requested"]'
+    const detail = '.goal-execution-time__detail'
+    const detailOpen = detail + ' > button'
+    const originalAssignment = '[data-goal-coordination="plan:original-assignment"] details'
+    const originalRequest = '[data-goal-coordination="patrol:original-continue-request"] details'
+    const proposal = '[aria-label="Criteria and results"]'
+    const reader = '.goal-plan__reading'
+    for (const [width, theme] of [[1260, 'dark'], [620, 'light']]) {
+      await size(width)
+      await evaluate(`goalsPlan.seed(false, true, false, undefined, 85000, true); goalsVisual.appearance(${JSON.stringify(theme)})`)
+      await waitFor(`Boolean(${query(point)} && ${query(request)} && ${query(ticket)} && ${query(review)})`)
+      const before = await evaluate('goalsSpace.facts()')
+      const scoped = await evaluate(`[...document.querySelectorAll('[data-goal-time-participant]')].map(point =>
+        [point.closest('[data-goal-time-row]').dataset.goalTimeRow, point.dataset.goalTimeParticipant, point.dataset.goalTimeEvent])`)
+      assert.deepEqual(scoped, [
+        ['goal-participation', 'user', 'Goal confirmed'], ['goal-participation', 'device', 'Continuation requested'],
+        ['node:workspace', 'user', 'Executor assigned'], ['attempt:history', 'user', 'Changes requested'],
+      ])
+      await evaluate(`${query('[data-goal-execution-time]')}.scrollIntoView({block:'center'})`)
+      await paint()
+      await capture(`${width}-${theme}-participation-overview`, width)
+      await evaluate(`${query(request)}.scrollIntoView({block:'center'})`)
+      const mouse = await evaluate(`(() => { const rect = ${query(request)}.getBoundingClientRect();
+        return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 } })()`)
+      await debuggerSession.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', ...mouse })
+      const tooltip = `[...document.querySelectorAll('[role="tooltip"]')].find(node => node.textContent.includes('Device workspace-console'))`
+      await waitFor(`Boolean(${tooltip} && getComputedStyle(${tooltip}).visibility === 'visible')`)
+      assert.match(await evaluate(`${tooltip}.textContent`), /Continuation requested.*Original request recorded/su)
+      await capture(`${width}-${theme}-participation-preview`, width)
+      await hitControl(request)
+      await waitFor(`Boolean(${query(detailOpen)})`)
+      assert.match(await evaluate(`${query(detail)}.innerText`), /Continuation requested.*Device workspace-console.*original-continue-request/su)
+      await evaluate(`${query(detail)}.scrollIntoView({block:'center'})`)
+      await paint()
+      await capture(`${width}-${theme}-participation-request`, width)
+      await hitControl(detailOpen)
+      await waitFor(`document.activeElement === ${query(originalRequest + ' summary')}`)
+      await hitControl(originalRequest + ' button')
+      await waitFor(`document.activeElement === ${query(request)}`)
+      await hitControl(point)
+      await waitFor(`${query(detailOpen)}?.innerText === 'Open original proposal'`)
+      await hitControl(detailOpen)
+      await waitFor(`document.activeElement === ${query(proposal)} && Boolean(${query(proposal + ' [data-goal-alignment-revision]')})`)
+      await hitControl(proposal + ' > button')
+      await waitFor(`document.activeElement === ${query(point)}`)
+      await hitControl(ticket)
+      await waitFor(`Boolean(${query(detailOpen)})`)
+      assert.match(await evaluate(`${query(detail)}.innerText`), /Executor assigned.*original-assignment.*plan-worker-session/su)
+      await hitControl(detailOpen)
+      await waitFor(`document.activeElement === ${query(originalAssignment + ' summary')}`)
+      await evaluate(`${query(originalAssignment)}.scrollIntoView({block:'center'})`)
+      await paint()
+      await capture(`${width}-${theme}-participation-original-assignment`, width)
+      await hitControl(originalAssignment + ' button')
+      await waitFor(`document.activeElement === ${query(ticket)}`)
+      await hitControl(review)
+      await waitFor(`${query(detailOpen)}?.innerText === 'Open original review'`)
+      await hitControl(detailOpen)
+      const verdict = reader + ' [data-goal-delivery="attempt:history"] [data-goal-plan-verdict]'
+      await waitFor(`${query(verdict)}?.textContent.includes('recovery-owner')`)
+      await evaluate(`${query(reader + ' .goal-plan__reading-header')}.scrollIntoView({block:'nearest'})`)
+      await paint()
+      await capture(`${width}-${theme}-participation-original-review`, width)
+      await hitControl(reader + ' .goal-plan__reading-header button')
+      await waitFor(`document.activeElement === ${query(review)}`)
+      assert.deepEqual(await evaluate('goalsSpace.facts()'), before, 'Reading keeps the same Goal, plan, draft and Runs')
+      result.observations.push({ scene: 'goal-participation', width, theme, scoped, exactOriginalsOpened: true, exactPointReturned: true })
+    }
+    return
+  }
   if (process.env.AGENTMUX_GOAL_WORKFLOW_REVIEW_CAPTURE === '1') {
     const attempt = query('[data-goal-delivery="attempt:outline"]')
     const view = `[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'View delivery')`
@@ -66,7 +141,7 @@ module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result
     assert.equal(first.railVisible, width === 1600)
     await capture(`${width}-${theme}-${scene}`, width)
     if (scene === 'inspection') {
-      assert.equal(await evaluate(`${query('[data-goal-time-row="start:workspace-check"] time')}.closest('li').innerText.includes('Request saved')`), true)
+      assert.equal(await evaluate(`Boolean(${query('[data-goal-time-row="start:workspace-check"] [data-goal-time-event="Request saved"]')})`), true)
       assert.equal(await evaluate('document.querySelectorAll(".goal-execution-time__live, .goal-execution-time__planned").length'), 0)
       const target = '[data-goal-work-kind="patrol"][data-goal-work-operation="inspection:workspace/original"]'
       assert.equal(await evaluate(`${query('.goals-detail__stage .goals-detail__current-work')}.textContent`), 'View original inspection')

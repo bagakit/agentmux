@@ -191,7 +191,7 @@ describe('Goal plan graph', () => {
   })
 
   it('opens the precise one-time task from a compact event', async () => {
-    seed(goal({ dispatches: [{ operationId: 'original-start', stage: 'confirmed', execution: 'finite', prompt: 'The original task',
+    seed(goal({ alignment: { ...alignment, confirmedAt: null }, dispatches: [{ operationId: 'original-start', stage: 'confirmed', execution: 'finite', prompt: 'The original task',
       agentSessionId: 'worker-api', hostId: 'local', runId: 'old-run', preparedAt: 15,
       receipt: { kind: 'core-prompt', itemId: 'original-input', createdAt: 25 } }] }))
     await dom.render(<GlobalBoardSurface />)
@@ -201,6 +201,107 @@ describe('Goal plan graph', () => {
     expect(details.textContent).toContain('original-input')
     await act(async () => [...details.querySelectorAll('button')].at(-1)!.click())
     expect(document.activeElement).toBe(dom.container.querySelector('[data-goal-work-kind="start"][data-goal-work-operation="original-start"]'))
+  })
+
+  it('opens authenticated Goal participation at its original proposal and request', async () => {
+    const person = { kind: 'user' as const, id: 'person-confirming' }
+    const device = { kind: 'device' as const, id: 'request-device' }
+    const confirmed = { ...alignment, confirmedAt: 100_000, confirmedBy: person }
+    seed(goal({ alignment: confirmed, plan: plan(nodes), plannedStartAt: 100_000, targetAt: 400_000, patrols: [
+      { purpose: 'confirmation', operationId: 'request-continue', recipientHostId: 'local', expectedScope: 'frozen-goal',
+        executions: [], supervisorAgentSessionId: 'mote', alignment: confirmed, context: 'Read the exact proposal', requestedBy: device, requestedAt: 200_000, attempts: [] },
+      { purpose: 'plan', operationId: 'agent-plan-request', planRevision: 2, expectedScope: 'frozen-goal',
+        executions: [], supervisorAgentSessionId: 'mote', context: 'Ordinary Agent request', requestedBy: { kind: 'agent', id: 'mote' }, requestedAt: 275_000, attempts: [] },
+    ] }))
+    await dom.render(<GlobalBoardSurface />)
+    const row = graph()!.querySelector('[data-goal-time-row="goal-participation"]')!
+    const points = [...row.querySelectorAll<HTMLButtonElement>('[data-goal-time-event]')]
+    expect(points.map(point => [point.dataset.goalTimeEvent, point.dataset.goalTimeParticipant, point.style.left])).toEqual([
+      ['Goal confirmed', 'user', '0%'], ['Continuation requested', 'device', '33.33333333333333%'],
+    ])
+    const reader = () => graph()!.querySelector('.goal-execution-time__detail')!
+    await act(async () => points[0]!.click())
+    expect(reader().textContent).toContain('User person-confirming')
+    expect(reader().textContent).toContain('Proposal revision 1 confirmed')
+    await act(async () => reader().querySelector<HTMLButtonElement>(':scope > button')!.click())
+    const proposal = dom.container.querySelector<HTMLElement>('[aria-label="Criteria and results"]')!
+    expect(document.activeElement).toBe(proposal)
+    expect(proposal.querySelector('[data-goal-alignment-revision="1"]')).not.toBeNull()
+    const returnToPoint = () => new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+    await act(async () => { proposal.querySelector<HTMLButtonElement>(':scope > button')!.click(); await returnToPoint() })
+    expect(document.activeElement).toBe(points[0])
+    await act(async () => points[1]!.click())
+    expect(reader().textContent).toContain('Device request-device')
+    expect(reader().textContent).toContain('Original request recorded')
+    expect(reader().textContent).not.toContain('User person-confirming')
+    await act(async () => reader().querySelector<HTMLButtonElement>(':scope > button')!.click())
+    const original = dom.container.querySelector<HTMLDetailsElement>('[data-goal-coordination="patrol:request-continue"] details')!
+    expect(original.open).toBe(true)
+    expect(original.textContent).toContain('request-continue')
+    expect(document.activeElement).toBe(original.querySelector('summary'))
+    await act(async () => { original.querySelector('button')!.click(); await returnToPoint() })
+    expect(document.activeElement).toBe(points[1])
+  })
+
+  it('opens the original Ticket assignment and exact prior review without attributing other sources', async () => {
+    const first = reported('api'), newer = { ...first, operationId: 'd-api-new', sourceMessageId: 's-api-new' }
+    const person = { kind: 'user' as const, id: 'person-reviewing' }
+    const device = { kind: 'device' as const, id: 'assignment-device' }
+    const source = plan(nodes, [
+      { ...pass('api'), verdict: 'changes', reviewer: person, note: 'Original review on the earlier attempt' },
+      { ...pass('docs'), operationId: 'wrong-ticket-review', delegationOperationId: first.operationId, reviewer: person },
+      { ...pass('ui'), operationId: 'wrong-goal-review', delegationOperationId: 'absent-foreign-attempt', reviewer: person },
+    ])
+    source.history.unshift({ operationId: 'assign-original', revision: 1, author: device, revisedAt: 1,
+      change: { nodeId: 'api', assignment: { kind: 'assign', executor: { hostId: 'worker-host', agentSessionId: 'assigned-agent' } } } })
+    // The original action predates the recent coordination entries.
+    for (let index = 0; index < 7; index++) source.history.push({ operationId: `agent-revision-${index}`, revision: 3 + index,
+      author: { kind: 'agent', id: 'mote' }, revisedAt: 20 + index })
+    const collidingId = attempt('docs', { operationId: 'node:api' })
+    seed(goal({ plan: source, delegations: [first, newer, collidingId], activities: [
+      { id: 'ordinary-chat', kind: 'permission-approved', message: 'A plain message claims that the user approved this work.', actorId: 'person-reviewing', createdAt: 3 },
+    ] }))
+    await dom.render(<GlobalBoardSurface />)
+    const timeline = graph()!.querySelector('[data-goal-execution-time]')!
+    const participation = [...timeline.querySelectorAll<HTMLElement>('[data-goal-time-participant]')]
+    expect(participation.map(point => [point.closest<HTMLElement>('[data-goal-time-row]')?.dataset.goalTimeRow, point.dataset.goalTimeEventId])).toEqual([
+      ['node:api', 'plan:assign-original'], ['d-api', 'review:rv-api'],
+    ])
+    const [assignment, review] = participation as HTMLButtonElement[]
+    expect(assignment!.closest('[data-goal-time-row]')?.querySelector('[data-goal-time-open]')?.getAttribute('aria-label')).toContain('Read Node api')
+    const otherAttempt = timeline.querySelector('[data-goal-time-row-key="delegation:node:api"]')!
+    expect(otherAttempt.querySelector('[data-goal-time-event="Delegation prepared"]')).not.toBeNull()
+    expect(otherAttempt.querySelector('[data-goal-time-participant]')).toBeNull()
+    expect(dom.container.querySelector('[data-goal-coordination="plan:assign-original"]')).toBeNull()
+    await act(async () => assignment!.click())
+    const detail = () => timeline.querySelector('.goal-execution-time__detail')!
+    expect(detail().textContent).toContain('Device assignment-device')
+    expect(detail().textContent).toContain('assigned-agent · worker-host')
+    await act(async () => detail().querySelector<HTMLButtonElement>(':scope > button')!.click())
+    const original = dom.container.querySelector<HTMLDetailsElement>('[data-goal-coordination="plan:assign-original"] details')!
+    expect(original.open).toBe(true)
+    expect(original.textContent).toContain('assign-original')
+    expect(document.activeElement).toBe(original.querySelector('summary'))
+    await act(async () => { original.querySelector('button')!.click(); await new Promise<void>(resolve => requestAnimationFrame(() => resolve())) })
+    expect(document.activeElement).toBe(assignment)
+    await act(async () => review!.click())
+    expect(detail().textContent).toContain('User person-reviewing')
+    await act(async () => detail().querySelector<HTMLButtonElement>(':scope > button')!.click())
+    expect(graph()!.querySelector('[data-goal-delivery="d-api"] [data-goal-plan-verdict]')?.textContent).toContain('Original review on the earlier attempt')
+  })
+
+  it('keeps the unknown confirmation author separate from the authenticated later requester', async () => {
+    seed(goal({ patrols: [{ purpose: 'confirmation', operationId: 'later-continuation', recipientHostId: 'local', expectedScope: 'frozen-goal',
+      executions: [], supervisorAgentSessionId: 'mote', alignment, context: 'Read the exact proposal',
+      requestedBy: { kind: 'user', id: 'person-requesting' }, requestedAt: 200_000, attempts: [] }] }))
+    await dom.render(<GlobalBoardSurface />)
+    const confirmation = graph()!.querySelector<HTMLButtonElement>('[data-goal-time-event="Goal confirmed"]')!
+    expect(confirmation.hasAttribute('data-goal-time-participant')).toBe(false)
+    await act(async () => confirmation.click())
+    const detail = graph()!.querySelector('.goal-execution-time__detail')!
+    expect(detail.textContent).toContain('Unknown author')
+    expect(detail.textContent).not.toContain('person-requesting')
+    expect(detail.querySelector('time')?.dateTime).toBe(new Date(alignment.confirmedAt!).toISOString())
   })
 
   it('takes the reader to the original Supervisor rail with keyboard focus and keeps one original discussion action', async () => {
@@ -391,9 +492,10 @@ describe('Goal plan graph', () => {
     expect(graph()!.querySelector('[aria-label="Node assignment"]')).toBeNull()
   })
 
-  it.each([alignment, undefined])('reads the whole Goal in the ordinary graph and assignments (alignment %s)', async (alignment) => {
+  it.each([{ ...alignment, confirmedAt: null }, undefined])('reads the whole Goal in the ordinary graph and assignments (alignment %s)', async (alignment) => {
     const record = goal({ description: '# The original outcome\n\nKeep the same goal and original words.' })
-    if (!alignment) delete record.alignment
+    if (alignment) record.alignment = alignment
+    else delete record.alignment
     seed(record)
     await dom.render(<GlobalBoardSurface />)
     expect(dom.container.querySelector('.goals-detail')).not.toBeNull()
