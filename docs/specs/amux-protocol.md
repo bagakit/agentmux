@@ -222,6 +222,8 @@ Core 可在引用列表后、关闭容器前附一个完整 `<reminder>…</remi
 
 Focus 引用的起始行是 `<amux:ref kind="focus-selection" read-via="focus read --help">`。正文给出点击时固定的 Project Space 或 Collection 类别、原 Host 以及所选 Focus 成员标识。标识中的换行和分隔符在呈现时转义，引用不内联卡片事实、历史或 CLI 的 JSON 入参。收尾使用独立的 `</amux:ref>` 行。实际引用语法与示例从 Core 阅读目录获取。
 
+Agent 来源使用 \`kind="agent-context"\` 和 \`read-via="agent context --help"\`，正文携可读取原 Session 的准确 Host 与 SID。只持有已保存的 Provider 对话时使用 \`kind="native-context"\` 和 \`read-via="agent native history --help"\`，正文携读取该对话的原 locator。跨 Core 缺少可读路由时，交接可携原 owner 的有界历史页和读取缺口。本次任务与原资料分别交付。
+
 声明可跟在原平台说明后，之后以两个 LF 接原任务正文。阅读器保留原声明和任务正文，读取用法沿实际注册的 `focus read --help`。原输入冻结后的引用与重试沿[输入环境判定与复用边界](../design/behavior/agent-capabilities-and-messaging.md#输入环境判定与复用边界)。Focus 组范围与咨询行为沿[项目组讨论与建议](../design/behavior/focus-context.md#项目组讨论与建议)。
 
 ## 内容分享外框
