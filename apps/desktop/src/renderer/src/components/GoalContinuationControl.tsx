@@ -72,7 +72,7 @@ export function GoalContinuationControl({ demand, onRefresh, onChooseSupervisor,
       if (scope.current === owner && result.operation === 'demand.start' && result.continuation?.initialDelivery?.state === 'confirmed' && attempt.current === saved) attempt.current = undefined
     })
   }
-  function retrySavedStart(loop: ContinuousProgressLoop) {
+  function checkSavedStart(loop: ContinuousProgressLoop) {
     if (flight.current || mutation.current || loop.taskSource?.kind !== 'goal' || loop.taskSource.goalId !== demand.id ||
         !loop.creationOperationId || loop.initialDelivery?.operationId !== loop.creationOperationId || loop.initialDelivery.state === 'confirmed') return
     attempt.current = { goalId: demand.id, sessionId: loop.agentSessionId, intervalMs: loop.intervalMs,
@@ -112,7 +112,7 @@ export function GoalContinuationControl({ demand, onRefresh, onChooseSupervisor,
       {loop.status !== 'stopped' && loop.agentSessionId !== supervisorId ? <p className="goals-service">This loop keeps its original Agent. Stop it explicitly before starting with the new Supervisor.</p> : null}
       <p>{loop.lastDecision ?? (loop.initialDelivery?.state !== 'confirmed' ? 'The original start receipt is unconfirmed. Your Agent and input are retained.' : 'Uses the same executing Agent. Host acceptance does not mean work is complete.')}</p>
       {loop.status === 'active' ? <small>Next check {new Date(loop.nextCheckAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</small> : null}
-      {loop.status !== 'stopped' && loop.initialDelivery && loop.initialDelivery.state !== 'confirmed' ? <Button type="button" disabled={busy || Boolean(mutation.current)} onClick={() => retrySavedStart(loop)}>Inspect and retry original start</Button> : null}
+      {loop.status !== 'stopped' && loop.initialDelivery && loop.initialDelivery.state !== 'confirmed' ? <Button type="button" disabled={busy || Boolean(mutation.current)} onClick={() => checkSavedStart(loop)}>Check original start</Button> : null}
       <div className="goals-continuation__actions">{(['pause', 'resume', 'check', 'stop'] as const).filter(action => action === 'stop' ? loop.status !== 'stopped' : action === 'resume' ? loop.status === 'paused' && loop.initialDelivery?.state === 'confirmed' : loop.status === 'active').map(action => <Button type="button" key={action} disabled={busy || Boolean(mutation.current) || !Number.isSafeInteger(loop.revision) || !loop.revision} onClick={() => mutate(loop, action)}>{action === 'check' ? 'Check now' : action.charAt(0).toUpperCase() + action.slice(1)}</Button>)}</div>
     </div>)}
     {!currentLoops.some(loop => loop.status !== 'stopped') && observedGoal === demand.id ? <details className="goals-continuation__configure"><summary>Configure ongoing progress</summary>
