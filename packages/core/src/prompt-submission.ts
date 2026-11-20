@@ -877,6 +877,9 @@ export class AgentPromptSubmissionCoordinator {
         ...(original.nativeHandle ? { nativeHandle: original.nativeHandle } : {}),
         workspacePath: session.workspacePath, signal: signal ?? new AbortController().signal }
       const inputImages = managedPlan ? message.inputImages : undefined
+      const queueOnly = nativeIdleOnly || carrier?.kind === 'native' && carrier.plan.operation === 'queue-idle'
+      const operation = managedPlan ? 'submit' : queueOnly ? 'queue-idle' : target.expectedTurnId === undefined ? 'start-or-steer' : 'steer'
+      const allowIdleQueue = !carrier && operation === 'start-or-steer' && sessionConversation && inputKey.kind === 'message' && message.authorExternal !== undefined
       const prepared = await observeInput(diagnostic, 'provider-prepare', () => {
         if (managedPlan) {
           if (!context.nativeActor || context.nativeActor.protocolId !== managedPlan.protocolId ||
@@ -885,12 +888,13 @@ export class AgentPromptSubmissionCoordinator {
           return managed.prepareInput({ ...context, nativeActor: context.nativeActor }, managedPlan, { hasImages: Boolean(inputImages?.length) })
         }
         return provider.prepareNativeInput!(context, { ...target.source,
-          ...(target.expectedTurnId === undefined ? {} : { expectedTurnId: target.expectedTurnId }), ...(nativeIdleOnly ? { idleOnly: true } : {}) })
+          ...(target.expectedTurnId === undefined ? {} : { expectedTurnId: target.expectedTurnId }), ...(queueOnly ? { idleOnly: true } : {}),
+          ...(allowIdleQueue ? { allowIdleQueue: true } : {}) })
       })
       try {
         if (prepared.plan.sourceId !== nativeInputSourceId(target.source) || prepared.plan.threadId !== target.source.nativeSessionId ||
             prepared.plan.expectedTurnId !== target.expectedTurnId ||
-            prepared.plan.operation !== (managedPlan ? 'submit' : nativeIdleOnly ? 'queue-idle' : target.expectedTurnId === undefined ? 'start-or-steer' : 'steer')) throw new AgentMuxError(
+            prepared.plan.operation !== operation && !(allowIdleQueue && prepared.plan.operation === 'queue-idle')) throw new AgentMuxError(
           'The prepared native plan does not address the original source and input operation. No input was sent.', 'AGENT_NATIVE_INPUT_UNAVAILABLE')
         await observeInput(diagnostic, 'provider-verify', () => prepared.assertCurrent())
         let images: readonly AgentProviderPromptImage[] | undefined

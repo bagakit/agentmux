@@ -268,7 +268,7 @@ export type AgentProvider = {
   /** Qualify this exact operation, independently of healthy terminal input.
    * @see ../../../docs/design/behavior/agent-capabilities-and-messaging.md#输入环境判定与复用边界
    */
-  prepareNativeInput?(context: AgentProviderNativeInputPreparationContext, target: { providerId: string; nativeSessionId: string; expectedTurnId?: string; idleOnly?: true }): Promise<AgentProviderPreparedNativeInput>
+  prepareNativeInput?(context: AgentProviderNativeInputPreparationContext, target: { providerId: string; nativeSessionId: string; expectedTurnId?: string; idleOnly?: true; allowIdleQueue?: true }): Promise<AgentProviderPreparedNativeInput>
   observeTerminalFrontend?(context: AgentProviderNativeInputContext & { onFrontend(observation: AgentTerminalFrontendObservation): void; onUnavailable(message: string): void }): Promise<{ dispose(): void }>
   reconnectTerminalFrontend?(context: AgentProviderNativeInputContext & {
     nativeHandle?: Readonly<AgentNativeSessionHandle>

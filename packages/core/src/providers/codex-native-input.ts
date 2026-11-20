@@ -45,7 +45,7 @@ export const prepareCodexManagedLaunch: NonNullable<AgentProvider['prepareManage
 }
 
 export const prepareCodexNativeInput: NonNullable<AgentProvider['prepareNativeInput']> = async (context, target) => {
-  if (!context.nativeActor) return await prepareCodexDurableQueueInput(context, target)
+  if (!context.nativeActor) return await prepareCodexDurableQueueInput(context, target.allowIdleQueue ? { ...target, idleOnly: true } : target)
   if (target.providerId !== 'codex' || context.nativeActor.protocolId !== PROTOCOL_ID || target.idleOnly && target.expectedTurnId !== undefined) throw unavailable()
   const { processId, nativeActor, signal } = context
   const birth = await nativeProcessBirth(processId, signal)
