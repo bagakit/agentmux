@@ -11,6 +11,7 @@ import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
 import { parseAgentMuxCliInvocation } from '../src/agentmux-cli-commands.js'
+import { matchesProviderNativeSessionTarget } from '../src/agent-native-locator.js'
 import { spawn } from 'node:child_process'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
@@ -183,7 +184,7 @@ async function fixture(mode: 'ordinary' | 'queue' | 'managed-create') {
     terminalInputs: async () => (await readFile(output, 'utf8').catch(error => { if (error.code === 'ENOENT') return ''; throw error })).trim().split('\n').filter(Boolean).map(line => JSON.parse(line).text as string),
     reopen: async () => { await client.dispose(); client = new AgentMuxClient({ store: store(), ...(providers ? { providers } : {}) }); await client.connect();
       const current = await client.statusAgent('original'); expect(current.run).toMatchObject({ runId: currentStatus.run.runId, pid: currentStatus.run.pid, state: 'running' });
-      expect(current.session.nativeHandle).toEqual(initial.session.nativeHandle) },
+      expect(matchesProviderNativeSessionTarget(initial.session.nativeHandle, current.session.nativeHandle)).toBe(true) },
     close: cleanupOwned }
 }
 

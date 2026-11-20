@@ -2,7 +2,7 @@ import type { CodexManagedRunPlan } from '@agentmux/providers/codex/input-protoc
 import { codexFrontendSocketPath, observeCodexTerminalFrontend, reconnectCodexTerminalFrontend, CODEX_ACTOR_ID_ENV, CODEX_ACTOR_LIFECYCLE_ENV } from '../src/providers/codex-managed-frontend.js'
 import { fixturePath as _historyFixturePath } from "./helpers/fixture-values.js"
 import { afterEach, expect, it, vi } from 'vitest'
-import { access, mkdtemp, writeFile, rm, readFile, realpath } from 'node:fs/promises'
+import { mkdtemp, writeFile, rm, readFile, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { spawn } from 'node:child_process'
@@ -280,8 +280,10 @@ it.runIf(process.platform === 'darwin').each(['wrong-policy', 'wrong-thread', 'n
   const context = { processId: running.child.pid!, nativeActor: { protocolId: 'codex-app-server-v2-0.163', actorId: 'original-actor',
     lifecycleOperationId: 'original-lifecycle', token: 'a'.repeat(64), launch: { command: f.plan.command, args: [] } }, workspacePath: f.root, signal: new AbortController().signal }
   let latest: import('../src/agent-terminal-frontend.js').AgentTerminalFrontendObservation | undefined
-  await expect.poll(async () => { try { await access(codexFrontendSocketPath(context.nativeActor.token)); return true } catch { return false } }).toBe(true)
-  const observation = await observeCodexTerminalFrontend({ ...context, onFrontend: value => { latest = value }, onUnavailable() {} })
+  // The socket pathname can exist before the authenticated observer can connect.
+  const observation = await vi.waitFor(() => observeCodexTerminalFrontend({
+    ...context, onFrontend: value => { latest = value }, onUnavailable() {}
+  }), { timeout: 6000 })
   cleanup.push(async () => observation.dispose())
   await expect.poll(() => latest?.initialization?.phase, { timeout: 10_000 }).toBe('unknown')
   expect(latest?.initialization?.failure?.message).toContain('did not confirm')
