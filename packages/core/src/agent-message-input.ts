@@ -1,3 +1,4 @@
+import { getAmuxProtocolTemplate, renderAmuxProtocol } from './amux-protocol.js'
 import type { MoteChatReplyReference } from './mote/chat-contract.js'
 import { sameConnectionApplication } from './connections-contract.js'
 import type { AgentMuxMessageEnvelope } from './agent-message-envelope.js'
@@ -21,32 +22,28 @@ const INLINE_MESSAGE_BYTES = 16 * 1024
 const bytes = (text: string): number => new TextEncoder().encode(text).byteLength
 // The adapter's typed conversation kind selects the reply note; an absent or unknown kind adds none.
 const CONVERSATION_NOTE: Readonly<Record<string, string>> = {
-  direct: 'This message came from a direct chat with one person.',
-  group: 'This message came from a group chat; everyone there can read your replies, so keep unrelated private material out.'
-}
-
-function privateReplyGuidance(reply: MoteChatReplyReference, messageId: string): string {
-  const operationId = 'CHOOSE_ONE_STABLE_OPERATION_ID'
-  const source = reply.route === 'unconfirmed' ? { sourceMessageId: messageId } : {}
-  const send = JSON.stringify({ operationId, ingressId: reply.ingressId, body: 'YOUR_REPLY', ...source })
-  const inspect = JSON.stringify({ operationId, ...source })
-  return `Reply to this private message with "$AGENTMUX_CLI" space mote chat reply --input - and JSON ${send}. ` +
-    `If the reply result is unknown, read the same operation with space mote chat inspect --input - and JSON ${inspect}. ` +
-    'Only the supplied reply is sent to the original person.'
+  direct: getAmuxProtocolTemplate('channel-input', 'direct'),
+  group: getAmuxProtocolTemplate('channel-input', 'group')
 }
 
 function reminder(envelope: AgentMuxMessageEnvelope, body: AgentMessageInputRepresentation['body'], quote: AgentMessageInputRepresentation['quote'],
   conversationKind?: ConnectionIngressMessage['conversationKind'], moteReply?: MoteChatReplyReference): string {
   const note = conversationKind === undefined ? undefined : CONVERSATION_NOTE[conversationKind]
-  const quotedId = "'" + envelope.messageId.replaceAll("'", "'\"'\"'") + "'"
-  const read = (field: string) => `"$AGENTMUX_CLI" message read --message-id ${quotedId} --field ${field}`
   return [
-    `Original message MID: ${envelope.messageId}.`,
-    body === 'reference' ? `The original request body is retained, not included here. Read it before acting: ${read('body')}.` : undefined,
-    quote === 'reference' ? `Earlier channel context is retained separately. Read it only when needed: ${read('channelQuote')}.` : undefined,
-    body === 'reference' || quote === 'reference' ? 'Use message --skill and message read --help for bounded continuation. References and reads are not Inbox acknowledgements or task acceptance.' : undefined,
-    note, moteReply ? privateReplyGuidance(moteReply, envelope.messageId) : note === undefined ? undefined : AGENTMUX_CHANNEL_INSTANT_REPLY,
-    moteReply ? undefined : 'For reactions, read connection --skill and use this Session’s original bound identity and the original platform message ID. The connector manages waiting and input-delivered markers; choose any processing or result reaction yourself within the task’s authorization.'
+    renderAmuxProtocol('channel-input', 'mid', { mid: envelope.messageId }),
+    body === 'reference' ? renderAmuxProtocol('channel-input', 'reference', {
+      field: 'body', purpose: getAmuxProtocolTemplate('channel-input', 'body-needed')
+    }) : undefined,
+    quote === 'reference' ? renderAmuxProtocol('channel-input', 'reference', {
+      field: 'channelQuote', purpose: getAmuxProtocolTemplate('channel-input', 'quote-optional')
+    }) : undefined,
+    body === 'reference' || quote === 'reference' ? getAmuxProtocolTemplate('channel-input', 'read-entry') : undefined,
+    note,
+    moteReply ? renderAmuxProtocol('channel-input', 'private-reply', {
+      ingress: moteReply.ingressId, route: getAmuxProtocolTemplate('channel-input',
+        moteReply.route === 'unconfirmed' ? 'private-unconfirmed' : 'private-confirmed')
+    }) : note === undefined ? undefined : AGENTMUX_CHANNEL_INSTANT_REPLY,
+    moteReply ? undefined : getAmuxProtocolTemplate('channel-input', 'reaction')
   ].filter(Boolean).join('\n')
 }
 

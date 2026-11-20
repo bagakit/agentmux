@@ -1,10 +1,11 @@
+import { getAmuxProtocolTemplate } from '@agentmux/core/amux-protocol'
 import { formatAmuxTriggerNote } from '@agentmux/core/agent-outbound-message'
 import { optionalInputEpoch } from '@agentmux/core/prompt-condition'
 import { awaitUntilCancelled } from './await-until-cancelled.js'
 import { AutomaticInputNotDispatchedError } from './automatic-input-not-dispatched.js'
 import { isDeepStrictEqual } from 'node:util'
 import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
-import { AgentMuxError, AGENTMUX_AGENT_MESSAGING_ENTRY, continuousProgressRequestDigest, ContinuousProgressScheduler, isAgentSchedule, agentPromptCondition, decideContinuousProgress, decideFutureProgress, mintObjectId, type ContinuousProgressLoop, type ContinuousProgressPause, type ContinuousProgressPauseReason, type ContinuousProgressTarget, type ContinuousProgressObservation, type ContinuousProgressTaskSource, type AgentPromptCondition } from '@agentmux/core'
+import { AgentMuxError, continuousProgressRequestDigest, ContinuousProgressScheduler, isAgentSchedule, agentPromptCondition, decideContinuousProgress, decideFutureProgress, mintObjectId, type ContinuousProgressLoop, type ContinuousProgressPause, type ContinuousProgressPauseReason, type ContinuousProgressTarget, type ContinuousProgressObservation, type ContinuousProgressTaskSource, type AgentPromptCondition } from '@agentmux/core'
 import { parseScheduleRpcParams, scheduleMatchesCreation, unconfirmedScheduleHistory, type ScheduleHistoryReading, type ScheduleHistoryPage, type ScheduleHistoryQuery, type ScheduleMethod, type ScheduleParamsMap, type ScheduleResultMap, type AgentMuxRpcCallContext } from '@agentmux/core'
 import { nextCalendarOccurrence, latestCalendarOccurrence, nextIntervalOccurrence, latestIntervalOccurrence } from '@agentmux/core/schedule-calendar'
 import { readContinuousProgressTaskSource, validateContinuousProgressTaskSource, decideGoalProgressSource, type GoalProgressReader, type GoalProgressRecord, type GoalProgressDecision } from './continuous-progress-task-source.js'
@@ -1261,7 +1262,7 @@ export class ContinuousProgressLoopManager {
               if (guidance) prompt += '\n\n' + guidance
             }
             let agentMuxNote: string | undefined
-            if (!futureIntent) agentMuxNote = formatAmuxTriggerNote('automation', AGENTMUX_AGENT_MESSAGING_ENTRY + (claim.loop.checkIn ? '\n\n' + AGENT_SCHEDULE_CHECK_IN_GUIDANCE : '') + (claim.loop.taskSource?.kind === 'goal' ? '\n\n' + goalRoleGuidance({ role: 'manager', goalId: claim.loop.taskSource.goalId, agentSessionId: claim.loop.agentSessionId, runId: observation.session.run.runId, source: { kind: 'goal-native-continuation', operationId: claim.tickId } }) : ''))
+            if (!futureIntent) agentMuxNote = formatAmuxTriggerNote('automation', getAmuxProtocolTemplate('schedule-input', 'note') + (claim.loop.checkIn ? '\n\n' + AGENT_SCHEDULE_CHECK_IN_GUIDANCE : '') + (claim.loop.taskSource?.kind === 'goal' ? '\n\n' + goalRoleGuidance({ role: 'manager', goalId: claim.loop.taskSource.goalId, agentSessionId: claim.loop.agentSessionId, runId: observation.session.run.runId, source: { kind: 'goal-native-continuation', operationId: claim.tickId } }) : ''))
             else {
               const original = observation.session.futurePromptIntents?.[futureIntent.intentId]
               if (!original || original.operationId !== (claim.loop.currentDefinition?.operationId ?? claim.loop.creationOperationId) || original.message?.userContent !== prompt) {

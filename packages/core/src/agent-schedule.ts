@@ -1,3 +1,4 @@
+import { getAmuxProtocolTemplate } from './amux-protocol.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 
@@ -46,7 +47,7 @@ export type AgentScheduleCheckInState = {
 }
 const civilClock = (hour: number) => [hour, 0].map(value => String(value).padStart(2, '0')).join(':')
 export const DEFAULT_AGENT_SCHEDULE_CHECK_IN: AgentScheduleCheckInPolicy = { silenceMs: 18 * 3_600_000, minIntervalMs: 20 * 3_600_000, dailyBudget: 1, quiet: { start: civilClock(22), end: civilClock(8) } }
-export const AGENT_SCHEDULE_CHECK_IN_GUIDANCE = 'This is an explicitly enabled quiet follow-up in this same conversation. Ask at most one short, concrete question about the user’s confirmed goals or unfinished decisions here. Use only facts available in this conversation. If relevant context is missing or uncertain, say so; do not invent a topic, an answer, or progress. Current user instructions and authorization take priority. Never claim that you worked or completed tasks in the background.'
+export const AGENT_SCHEDULE_CHECK_IN_GUIDANCE = getAmuxProtocolTemplate('schedule-input', 'check-in')
 export function parseAgentScheduleCheckIn(value: unknown, code = 'INVALID_CONTROL_REQUEST'): AgentScheduleCheckInPolicy {
   const p = rpcRecord(value, ['silenceMs','minIntervalMs','dailyBudget','quiet'], code), quiet = rpcRecord(p.quiet, ['start','end'], code)
   const invalid = (): never => { throw new AgentMuxError('Quiet follow-up requires an explicit silence interval, minimum interval, civil-day budget and local quiet period.', code) }

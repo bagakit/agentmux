@@ -1,8 +1,8 @@
-import { guideSharedRuntime } from './generated/agentmux-guides.js'
+import { guideSharedSpatialTerms } from './generated/agentmux-guides.js'
 import { guideText } from './guide-text.js'
 import { AGENTMUX_GOAL_SKILL_ENTRY } from './goal-role-guidance.js'
 import { AMUX_REFERENCE_TAG, readAmuxSourceReference, readAmuxTriggerNote } from './amux-protocol-definition.js'
-import { encodeAmuxText, renderAmuxProtocol } from './amux-protocol.js'
+import { encodeAmuxText, getAmuxProtocolTemplate, renderAmuxProtocol } from './amux-protocol.js'
 import { AGENTMUX_SELF_CONTEXT_VERB } from './agent-self-context.js'
 import { AGENTMUX_AGENT_MESSAGING_ENTRY, AGENTMUX_SESSION_NAMING_ENTRY } from './agent-messaging-guidance.js'
 import { browserInputContextJson, type BrowserInputContext } from './browser-input-context.js'
@@ -40,13 +40,13 @@ export type AgentMuxOptionalContext = { text: string; omittedText: string }
 
 // Bootstrap teaches discovery, not every future operation. Domain owners retain the
 // detailed contracts; reading a guide grants no permission and is not an input gate.
-const AGENTMUX_RUNTIME_GUIDE = /* @__PURE__ */ guideText(guideSharedRuntime, { 'self-context-verb': AGENTMUX_SELF_CONTEXT_VERB, 'goal-skill-entry': AGENTMUX_GOAL_SKILL_ENTRY })
-
-// 先说明本次阶段；原用户请求仍只在信封外出现一次。
-const USER_REQUEST_FOLLOWS = 'The user request follows.'
-// 还没有用户请求时的等待指示——同样是 AgentMux 自己的话，进信封。
-const AWAIT_USER_REQUEST = 'No request yet. Complete any read-only initialization below, then wait for the user.'
-const PLATFORM_TASK_REQUESTED = 'An explicit AgentMux task follows. Begin that task within its stated scope; there is no separate human request body.'
+const AGENTMUX_RUNTIME_GUIDE = /* @__PURE__ */ renderAmuxProtocol('agent-runtime', 'bootstrap', {
+  self: AGENTMUX_SELF_CONTEXT_VERB,
+  space: guideText(guideSharedSpatialTerms),
+  naming: AGENTMUX_SESSION_NAMING_ENTRY,
+  messaging: AGENTMUX_AGENT_MESSAGING_ENTRY,
+  goal: AGENTMUX_GOAL_SKILL_ENTRY
+})
 
 /**
  * 把 AgentMux 自己的话裹进署名信封。只在内部用于 {@link composeOutboundMessage}——
@@ -147,7 +147,7 @@ export function composeAgentLaunchPrompt(
     const parts = [...amuxParts, ...selected, source?.reference ?? ''].filter(part => part.trim())
     // Reuse an existing creation packet; an empty disabled-guide launch stays empty.
     if (!injectAgentMuxGuide && (userRequest || parts.length > 0) && !parts.includes(AGENTMUX_SESSION_NAMING_ENTRY)) parts.unshift(AGENTMUX_SESSION_NAMING_ENTRY)
-    if (parts.length > 0) parts.unshift(userRequest ? USER_REQUEST_FOLLOWS : task ? PLATFORM_TASK_REQUESTED : AWAIT_USER_REQUEST)
+    if (parts.length > 0) parts.unshift(getAmuxProtocolTemplate('agent-runtime', userRequest ? 'request' : task ? 'task' : 'await'))
     return composeAgentPrompt(userRequest, parts.join('\n\n'))
   }
   for (const [index, part] of optionalContext.entries()) {

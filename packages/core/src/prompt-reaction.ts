@@ -1,3 +1,4 @@
+import { getAmuxProtocolTemplate, renderAmuxProtocol } from './amux-protocol.js'
 import { formatAmuxReactionMarker, isAmuxReactionCode } from './amux-protocol-definition.js'
 
 /** A presentation binding on the existing Prompt resource, never executable SVG. */
@@ -53,26 +54,20 @@ export function promptReactionMessage(definition: PromptReactionDefinition, sour
   if (!isPromptReactionCode(definition.keyword)) throw new Error('Invalid quick reply code. Review this saved Prompt before sending.')
   return {
     prompt: definition.body,
-    agentMuxNote: [
-      formatAmuxReactionMarker(definition.keyword),
-      'User quick reply snapshot:',
-      `code: ${definition.keyword}`,
-      `label: ${JSON.stringify(definition.label)}`,
-      `icon: ${definition.reactionIcon}`,
-      `meaning: ${JSON.stringify(definition.body)}`,
-      `reply source: ${JSON.stringify(source)}`,
-      'This describes a user reply, not permission approval or native turn correlation.',
-      `Current definition: amux settings prompts inspect --keyword ${definition.keyword}`
-    ].join('\n')
+    agentMuxNote: renderAmuxProtocol('reaction', 'note', {
+      marker: formatAmuxReactionMarker(definition.keyword),
+      label: JSON.stringify(definition.label),
+      source: JSON.stringify(source)
+    })
   }
 }
 
 /** Creation templates only. Live meaning always belongs to the saved Prompt resource. */
 export const PROMPT_REACTION_STARTERS: readonly PromptReactionDefinition[] = Object.freeze([
   { id: 'reaction-ok', keyword: 'ok', label: '认可', reactionIcon: 'check',
-    body: '我认可这条回复；不额外授权继续执行，也不批准权限请求。' },
+    body: getAmuxProtocolTemplate('reaction', 'starter-ok') },
   { id: 'reaction-continue', keyword: 'continue', label: '继续', reactionIcon: 'play',
-    body: '沿当前已授权的目标继续；保留原范围、权限与确认边界。' },
+    body: getAmuxProtocolTemplate('reaction', 'starter-continue') },
   { id: 'reaction-clarify', keyword: 'clarify', label: '解释', reactionIcon: 'message-circle',
-    body: '先解释这条回复的依据和不清楚之处，再等我的决定。' }
+    body: getAmuxProtocolTemplate('reaction', 'starter-clarify') }
 ])

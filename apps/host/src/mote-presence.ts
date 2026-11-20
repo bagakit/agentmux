@@ -1,3 +1,4 @@
+import { getAmuxProtocolTemplate, renderAmuxProtocol } from '@agentmux/core/amux-protocol'
 import { formatAmuxTriggerNote } from '@agentmux/core/agent-outbound-message'
 import { optionalInputEpoch } from '@agentmux/core/prompt-condition'
 import { awaitUntilCancelled } from './await-until-cancelled.js'
@@ -21,15 +22,15 @@ import { SCRATCH_WORKSPACE_ID } from './mote-topic-model.js'
 import { homeZoneId } from './mote-model.js'
 
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
-const heartbeat = 'Review outstanding commitments, take one useful authorized action, and verify the result.'
-const supervisionRead = 'Read the original work and reports with amux space mote dialogue supervision read --input - using this JSON:'
-const heartbeatGuidance = [
-  MOTE_SUPERVISION_GUIDANCE,
-  'If no work can move forward, consider a useful new idea grounded in the original work. Save it through the Mote idea guide and read it back only if it is worth keeping.',
-  supervisionRead
-]
-const heartbeatNote = (target: MotePreferencesTarget) => formatAmuxTriggerNote('heartbeat', [...heartbeatGuidance, JSON.stringify({ target })].join('\n'))
-export const moteGuidanceRevision = () => 'sha256:' + digest(heartbeatGuidance)
+const heartbeat = getAmuxProtocolTemplate('mote-task', 'heartbeat')
+const heartbeatGuidance = getAmuxProtocolTemplate('mote-task', 'heartbeat-source')
+const heartbeatNote = (target: MotePreferencesTarget) => {
+  const { hostId, workspaceId, workspacePath } = target.expectedResource
+  return formatAmuxTriggerNote('heartbeat', [MOTE_SUPERVISION_GUIDANCE, renderAmuxProtocol('mote-task', 'heartbeat-source', {
+    space: target.spaceId, zone: target.zoneId, host: hostId, workspace: workspaceId, directory: workspacePath
+  })].join('\n\n'))
+}
+export const moteGuidanceRevision = () => 'sha256:' + digest([MOTE_SUPERVISION_GUIDANCE, heartbeatGuidance])
 const key = (target: MotePreferencesTarget) => JSON.stringify(target)
 
 /** Mote policy adapts original files/roles to the one Host scheduler. No timer or input queue lives here. */

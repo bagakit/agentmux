@@ -1,3 +1,4 @@
+import { getAmuxProtocolTemplate } from '../amux-protocol.js'
 import { parseResumeResolution, type AgentMuxResumeResolution } from './resume-resolution.js'
 export { parseResumeResolution, type AgentMuxResumeResolution } from './resume-resolution.js'
 import { parseStandingIntentReference, type AgentStandingIntentReference } from '../automatic-input-source.js'
@@ -45,7 +46,7 @@ export type AgentMuxContinuityPolicy = {
   activeInterruptionFallback: boolean
 }
 
-export const DEFAULT_AGENT_CONTINUITY_REMINDER = 'This is the same conversation restored after its previous process ended. Preserve the existing task, decisions and user constraints. Previous input with an unknown outcome has not been replayed. Review the retained conversation before taking further action.'
+export const DEFAULT_AGENT_CONTINUITY_REMINDER = getAmuxProtocolTemplate('agent-runtime', 'resume')
 export const DEFAULT_AGENT_CONTINUITY_CONTINUATION = AMUX_CONTINUE_MARKER
 export const DEFAULT_AGENT_CONTINUITY_POLICY: Readonly<AgentMuxContinuityPolicy> = Object.freeze({
   activeRecovery: 'automatic', activeRecoveryDelayMs: 0,

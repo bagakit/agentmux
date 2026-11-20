@@ -1,4 +1,4 @@
-import './generate-amux-protocols.mjs'
+import { protocolSources } from './generate-amux-protocols.mjs'
 import { readFile, readdir, writeFile, mkdir } from 'node:fs/promises'
 import { dirname, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -54,6 +54,13 @@ function expand(id, stack = []) {
   return document.body.replace(directive, (original, _label, href, kind, slot) => {
     const target = resolve(dirname(document.file), href)
     if (kind === 'include') {
+      const protocol = /^protocols\/([a-z][a-z0-9-]*)\.amux\.prompt\.md#([a-z][a-z0-9-]*)$/u
+        .exec(relative(packageRoot, target).split(sep).join('/'))
+      if (protocol) {
+        const text = protocolSources[protocol[1]]?.[protocol[2]]
+        if (slot || typeof text !== 'string' || text.includes('{{')) throw new Error('Invalid prompt include in ' + id + ': ' + href)
+        return text
+      }
       const path = relative(guidesRoot, target).split(sep).join('/')
       if (slot || path.startsWith('../') || !path.endsWith('.md')) throw new Error('Invalid include in ' + id)
       return expand(path.slice(0, -3), [...stack, id])

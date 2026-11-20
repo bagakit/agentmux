@@ -1,3 +1,4 @@
+import { getAmuxProtocolTemplate } from '@agentmux/core/amux-protocol'
 import { formatGoalConfirmation } from '@agentmux/core/agent-message-render'
 import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
 import { createHash } from 'node:crypto'
@@ -109,7 +110,7 @@ export class GoalPatrolOwner {
       const guidance = goalRoleGuidance({ role: 'manager', goalId, agentSessionId: target.agentSessionId, runId: target.runId, source: { kind: 'goal-plan-request', operationId: patrolId } })
       return { operationId, actionOperationId: suffix, intentId: operationId, target, agentMuxNote: JSON.stringify({ schema: 'agentmux.goal-plan-request.v1',
         goalId, requestOperationId: patrolId, inputOperationId: operationId, target, context: JSON.parse(context),
-        next: 'Make and save a dependency plan inside this existing Goal. Read the current Goal and goal plan. Use any saved workflow in this frozen request as a template for the actual scope and criteria. As its current Supervisor use goal plan append for new Tickets and goal plan revise for changes to existing nodes. Use the current proposal revision, dependencies, covered criteria and repeatable checks. If the proposal is missing, clarify the same original intent and propose meaningful criteria first. Read back the saved plan revision; delivery is not plan completion. This request does not authorize execution, delegation, continuous progress or human confirmation/acceptance.' }) + '\n\n' + guidance }
+        next: getAmuxProtocolTemplate('goal-task', 'plan') }) + '\n\n' + guidance }
     }
     const frozen = JSON.parse(context) as { alignmentRevision: number | null; executions: unknown[]; alerts: unknown[]; reports: unknown[]; evidence: DemandEvidence[] }
     // The original Goal holds full tasks/results. Carry exact references and an explicit bounded excerpt.
@@ -122,7 +123,7 @@ export class GoalPatrolOwner {
     const guidance = goalRoleGuidance({ role: 'manager', goalId, agentSessionId: target.agentSessionId, runId: target.runId, source: { kind: 'goal-patrol', operationId: patrolId } })
     return { operationId, actionOperationId: suffix, intentId: operationId, target, agentMuxNote: JSON.stringify({ schema: 'agentmux.goal-patrol.v1', goalId, patrolOperationId: patrolId,
       inputOperationId: operationId, target, context: JSON.parse(encoded), read: { method: 'goal.delegations', params: { goalId }, patrolOperationId: patrolId },
-      next: 'Read amux goal --skill and the retained original Goal/patrol/execution/input/evidence before inspection. Actually inspect progress, evidence, gaps and unknowns; use goal patrol report --input FILE to write back this patrol, current business status and next responsible party/action. Explicit review of an original stored worker report collects its exact authenticated reply atomically; do not collect separately before frozen-scope reporting. Delivery, acknowledgement and reminders are not inspection or acceptance. Retain original Goal/Session/Run and unknown inputs; never blindly resend. Human confirmation and acceptance remain human actions.' }) + '\n\n' + guidance }
+      next: getAmuxProtocolTemplate('goal-task', 'patrol') }) + '\n\n' + guidance }
 
   }
   async request(goalId: string, operationId: string, context: AgentMuxRpcCallContext, authority: GoalDelegationAuthority, purpose?: 'plan'): Promise<DemandPatrol> {

@@ -1,3 +1,4 @@
+import { getAmuxProtocolTemplate } from '../amux-protocol.js'
 import { parseAgentInputMoteSource, type AgentInputMoteSource } from './input-source.js'
 import { validateAgentPromptInputKey } from '../agent-prompt-condition.js'
 import type { MoteInputInspection, MoteInputObservation, MoteInputOrigin, MoteInputNoticePhase } from './input.js'
@@ -29,9 +30,7 @@ export function moteInputNoticeWire(value: MoteInputObservation, phase: MoteInpu
     ...(phase === 'result' && value.result ? { result: value.result.kind === 'native-turn'
       ? { kind: value.result.kind, status: value.result.status } : value.result } : {}),
     read: { method: 'agent.input.observation', params: { agentSessionId: member, observationId: value.id } },
-    cli: ['amux', 'agent', 'input', 'observation', '--session', member, '--id', value.id],
-    guidance:
-      'This is a platform observation, not a new human request or permission. Read the original observation and exact result references before coordinating. Do not repeat the member input. Delivery, native turn outcome, task completion and human acceptance are distinct.'
+    guidance: getAmuxProtocolTemplate('mote-task', 'observation')
   })
 }
 

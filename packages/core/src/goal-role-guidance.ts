@@ -1,3 +1,4 @@
+import { renderAmuxProtocol } from './amux-protocol.js'
 import { guideSharedGoalCommon, guideSharedGoalContract, guideSharedGoalExecutor, guideSharedGoalManager } from './generated/agentmux-guides.js'
 import { guideText } from './guide-text.js'
 /** Canonical Goal responsibility contract shared by module, handbook and input producers. */
@@ -34,5 +35,10 @@ export function goalRoleGuidanceContract(): string {
 /** Application-authored context; callers retain the original user text separately. */
 export function goalRoleGuidance(context: GoalRoleGuidanceContext): string {
   const { role, ...identity } = context
-  return `Goal role: ${role}\nKnown original context: ${JSON.stringify(identity)}\n\n${role === 'manager' ? manager : executor}\n\n${shared}\n\nOperation details: ${AGENTMUX_GOAL_SKILL_ENTRY}`
+  return renderAmuxProtocol('goal-task', 'role', {
+    role,
+    identity: JSON.stringify(identity),
+    task: [role === 'manager' ? manager : executor, shared].join('\n\n'),
+    entry: AGENTMUX_GOAL_SKILL_ENTRY
+  })
 }
