@@ -13,6 +13,7 @@ import { ConfigStore, DEFAULT_CONFIG } from '../../../src/main/config-store'
 import { ScratchTopics } from '../../../src/main/scratch-topics'
 import { WorkbenchWindows } from '../../../src/main/workbench-windows'
 import { WorkbenchWindowStore } from '../../../src/main/workbench-window-store'
+import { WorkbenchUserStateStore } from '../../../src/main/workbench-user-state'
 import { createDesktopApplicationAccessOwner } from '../../../src/main/application-access-owner'
 import { ContinuousProgressLoopStore } from '../../../../host/src/continuous-progress-loop-store'
 import { ContinuousProgressLoopManager } from '../../../../host/src/continuous-progress-loop-manager'
@@ -27,6 +28,7 @@ const stage = (value: string) => console.log('Profile activity proof: ' + value)
 let win: BrowserWindow | undefined, outsider: BrowserWindow | undefined, windows: WorkbenchWindows | undefined, runtime: RuntimeController | undefined
 let progress: ContinuousProgressLoopManager | undefined, access: ReturnType<typeof createDesktopApplicationAccessOwner> | undefined
 let dispose: (() => Promise<void>) | undefined, manager: BrowserViewManager | undefined
+let rendererReady = false
 const evaluate = (code: string) => win!.webContents.executeJavaScript(code)
 const pause = () => new Promise(done => setTimeout(done, 60))
 async function until<T>(read: () => T | Promise<T>, label: string): Promise<NonNullable<T>> {
@@ -97,9 +99,10 @@ app.whenReady().then(async () => {
   assert.ok((await privateNotes.inspect()).directory.startsWith(home + '/'), 'All optional Notes storage stays inside this private fixture')
   stage('private Notes locator ready')
   dispose = await registerIpc({ appDocumentSources: () => ({ current: { mode: 'prod', filePath: html }, loading: null }), window: win, workbenchWindows: windows, runtime, configStore, initialConfig: config,
-    scratchTopics, applicationAccess: access, progressLoops: progress })
+    scratchTopics, applicationAccess: access, progressLoops: progress, workbenchUserState: new WorkbenchUserStateStore(join(home, 'workbench-user-state.json')) })
   stage('production IPC ready')
   await win.loadFile(html); await until(() => evaluate('Boolean(globalThis.activityProof)'), 'production Renderer entry')
+  rendererReady = true
   stage('actual Renderer ready')
 
   const previous = ['crash', 'restart', 'recovery-restart'].includes(phase) ? JSON.parse(await readFile(join(home, 'activity-identities.json'), 'utf8')) : null
@@ -303,9 +306,11 @@ app.whenReady().then(async () => {
 
 }).catch(async error => {
   console.error('Profile activity proof failed', error); receipt.failure = { message: error.message, stack: error.stack }; receipt.targets = manager?.targets()
-  try { receipt.renderer = await evaluate('activityProof.facts()'); receipt.recoveryEvents = await evaluate('globalThis.activityRecoveryEvents'); await capture('failure-observation') } catch { /* diagnostic only; never substitutes a business result */ }
+  if (rendererReady) {
+    try { receipt.renderer = await evaluate('activityProof.facts()'); receipt.recoveryEvents = await evaluate('globalThis.activityRecoveryEvents'); await capture('failure-observation') } catch { /* diagnostic only; never substitutes a business result */ }
+  }
 }).finally(async () => {
-  for (const [owner, cleanup] of [ ['renderer', () => win && !win.isDestroyed() ? evaluate('globalThis.activityProof?.dispose()') : undefined],
+  for (const [owner, cleanup] of [ ['renderer', () => rendererReady && win && !win.isDestroyed() ? evaluate('globalThis.activityProof?.dispose()') : undefined],
     ['foreign-window', () => { if (outsider && !outsider.isDestroyed()) outsider.destroy() }], ['ipc', () => dispose?.()], ['progress', () => progress?.stop()],
     ['access', () => access?.dispose()], ['runtime', () => runtime?.dispose()], ['windows', () => windows?.dispose()], ['window', () => { if (win && !win.isDestroyed()) win.destroy() }] ] as const) {
     stage('cleanup ' + owner)

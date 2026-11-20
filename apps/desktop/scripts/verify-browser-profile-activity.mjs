@@ -127,7 +127,7 @@ try {
   for (const file of ['apps/desktop/src/main/ipc.ts', 'apps/desktop/src/main/browser-profile-store.ts', 'apps/desktop/src/main/browser-profile-manager.ts',
     'apps/desktop/src/main/browser-profile-control.ts', 'apps/desktop/src/renderer/src/components/settings/BrowserProfilesSettingsPane.tsx',
     'apps/desktop/src/shared/ipc-result.ts', 'apps/desktop/src/preload/index.ts',
-    'apps/desktop/src/main/browser-view-manager.ts', 'apps/desktop/src/renderer/src/components/settings/BrowserProfileNetwork.tsx',
+    'apps/desktop/src/main/browser-view-manager.ts', 'apps/desktop/src/main/browser-profile-observation.ts', 'apps/desktop/src/renderer/src/components/settings/BrowserProfileNetwork.tsx',
     'apps/desktop/src/renderer/src/lib/desktop-spatial-state.ts', 'apps/desktop/src/renderer/src/lib/workbench-persistence.ts']) assert.ok(receipt.sources[file], 'Actual source consumer: ' + file)
   assert.deepEqual(receipt.runs.map(row => row.name + '/' + row.phase), receipt.requestedStages, 'Every requested native stage actually ran')
   receipt.passed = true

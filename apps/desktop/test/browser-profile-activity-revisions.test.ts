@@ -184,7 +184,7 @@ const fakeElectron = vi.hoisted(() => {
 
 vi.mock('electron', () => ({ WebContentsView: fakeElectron.FakeWebContentsView, BrowserWindow: class {},
   session: { fromPartition: fakeElectron.fromPartition }, app: { getPath: () => tmpdir(), getLocale: () => 'en-US' } }))
-import { BrowserProfileStore, type BrowserProfileActivityCheckpoint } from '../src/main/browser-profile-store.js'
+import { browserProfilePartition, BrowserProfileStore, type BrowserProfileActivityCheckpoint } from '../src/main/browser-profile-store.js'
 import { BrowserProfileManager } from '../src/main/browser-profile-manager.js'
 import { BrowserViewManager } from '../src/main/browser-view-manager.js'
 import { BrowserRefLedgerStore } from '@agentmux/browser/operations'
@@ -220,7 +220,7 @@ function native(f: Awaited<ReturnType<typeof fixture>>) {
     { rememberedSchemes: async () => ({}), rememberScheme: async () => {}, openExternal: () => {} })
   owners.push(owner)
   let monotonic = 0, wall = 100_000
-  vi.spyOn(owner as any, 'activityTime').mockImplementation(() => ({ monotonic, wall }))
+  vi.spyOn((owner as any).profileActivity, 'activityTime').mockImplementation(() => ({ monotonic, wall }))
   return { owner, children, events, tick(ms: number) { monotonic += ms; wall += ms }, view(id: string) { return (owner as any).entries.get(id).view as typeof children[number] } }
 }
 
@@ -305,14 +305,17 @@ describe('Profile native activity and exact configuration versions', () => {
     expect(applied).toEqual([{ mode: 'direct' }]); expect(f.profile(f.id).network).toEqual({ mode: 'direct' })
   })
 
-  it('changes only affected Profile tokens on folder removal and never revives an accurately deleted Profile from late activity', async () => {
+  it('changes only affected Profile tokens on folder removal and never revives a recycled Profile from late activity', async () => {
     const f = await fixture(), b = await f.manager.createProfile('B', crypto.randomUUID(), profileCreationTestActor), folder = await f.manager.createFolder('Shared', f.manager.listRevision(), crypto.randomUUID(), profileCreationTestActor)
     await f.manager.updateProfile(b.id, { folderId: folder.id }, b.revision)
     const a = f.profile(f.id).revision, tokenB = f.profile(b.id).revision
     await f.manager.deleteFolder(folder.id, f.manager.listRevision())
     expect(f.profile(f.id).revision).toBe(a); expect(f.profile(b.id).revision).not.toBe(tokenB)
-    await f.store.deleteProfile(b.id)
-    await expect(f.manager.recordActivity(b.id, checkpoint(f.manager.activityObserverId))).rejects.toThrow('Unknown Browser Profile')
+    const { archive } = await f.store.archiveProfile(b.id, f.profile(b.id).revision, {
+      partition: browserProfilePartition(b.id), relativePath: `Partitions/${b.id}`
+    })
+    await f.manager.recordActivity(b.id, checkpoint(f.manager.activityObserverId))
+    expect((await f.store.inspectArchive(archive.id)).archive.profile).toMatchObject({ id: b.id, activity: { observedRunMs: 1000 } })
     expect((await f.store.list()).profiles.map(value => value.id)).toEqual([f.id])
   })
 
@@ -375,6 +378,50 @@ describe('Profile native activity and exact configuration versions', () => {
     expect(f.profile(f.id).activity?.observedRunMs).toBe(1500)
     expect(n.owner.target('original')?.warning ?? '').not.toContain('could not be saved')
     expect(n.view('original').webContents.isDestroyed()).toBe(false)
+  })
+
+  it('stops sampling after the final checkpoint is confirmed and rearms for the next original view', async () => {
+    const f = await fixture(), n = native(f)
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    try {
+      await n.owner.create('original', 'https://original.invalid/', 'workspace', f.id)
+      await n.owner.flushProfileActivity()
+      const original = n.view('original'), save = f.store.recordActivity.bind(f.store)
+      const writes = vi.spyOn(f.store, 'recordActivity').mockImplementationOnce(async (id, checkpoint) => {
+        await save(id, checkpoint)
+        throw new Error('Final checkpoint acknowledgement is unavailable')
+      })
+      n.tick(1000)
+      n.owner.close('original')
+      expect(original.webContents.isDestroyed()).toBe(true)
+      // Let the write and its lost acknowledgement settle before the sampling timer retries it.
+      await n.owner.flushProfileActivity()
+      expect(vi.getTimerCount()).toBe(1)
+      expect(writes).toHaveBeenCalledTimes(1)
+      const final = writes.mock.calls[0]![1]
+      expect(final).toMatchObject({ active: false, unionMs: 1000, observedAt: 101_000 })
+
+      n.tick(5000)
+      vi.advanceTimersByTime(5000)
+      await n.owner.flushProfileActivity()
+      expect(writes).toHaveBeenNthCalledWith(2, f.id, final)
+      expect(f.profile(f.id).activity?.observedRunMs).toBe(1000)
+      expect(vi.getTimerCount(), 'sampling stops after final acknowledgement').toBe(0)
+
+      vi.advanceTimersByTime(10_000)
+      expect(writes).toHaveBeenCalledTimes(2)
+      await n.owner.create('next', 'https://next.invalid/', 'workspace', f.id)
+      expect(vi.getTimerCount()).toBe(1)
+      n.tick(500)
+      await n.owner.flushProfileActivity()
+      expect(f.profile(f.id).activity).toMatchObject({ observedRunMs: 1500, state: 'running' })
+      n.owner.dispose()
+      expect(vi.getTimerCount(), 'native close during teardown does not restart sampling').toBe(0)
+    } finally {
+      n.owner.dispose()
+      await n.owner.flushProfileActivity(true)
+      vi.useRealTimers()
+    }
   })
 
   it('runs strict configuration-token edits and activity reads through the actual compiled CLI and original Main owners', async () => {
