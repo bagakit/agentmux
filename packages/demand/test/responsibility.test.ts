@@ -5,6 +5,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { afterEach, expect, it } from 'vitest'
 import { openDemandStore } from '../src/demand-store.js'
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { demandExecutionReferences, demandResponsibilityScope, type DemandProgressInput } from '../src/responsibility.js'
 
 const cleanup: string[] = [], execute = promisify(execFile)
@@ -12,7 +13,7 @@ afterEach(async () => { for (const root of cleanup.splice(0)) await rm(root, { r
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'amux-responsibility-domain-')); cleanup.push(root)
   const store = openDemandStore({ root })
-  await store.create({ id: 'goal', title: 'Original work', status: 'in_progress', assigneeSessionIds: ['manager', 'worker'], supervisorSessionId: 'manager' })
+  await seedStoredDemand(store, { id: 'goal', title: 'Original work', status: 'in_progress', assigneeSessionIds: ['manager', 'worker'], supervisorSessionId: 'manager' })
   await store.proposeAlignment('goal', { summary: 'Original scope', criteria: [{ id: 'AC', text: 'Deliver original evidence' }], openQuestions: [] })
   await store.prepareDispatch('goal', { operationId: 'start', agentSessionId: 'worker', hostId: 'worker-host', runId: 'worker-run', execution: 'finite', prompt: 'Original task' })
   await store.recordDispatchPhase('goal', 'start', { stage: 'confirmed', receipt: { kind: 'core-prompt', itemId: 'prompt:start', createdAt: Date.now() } })

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { openDemandStore } from '../src/demand-store.js'
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import type { DemandDelegationIntent } from '../src/delegations.js'
 import { goalPlanDelegationIssue, goalPlanState, projectGoalPlan, type GoalPlanNodeInput } from '../src/goal-plan.js'
 
@@ -38,7 +39,7 @@ async function states() {
 beforeEach(async () => {
   root = await fs.mkdtemp(join(tmpdir(), 'goal-plan-'))
   tickets = goalTickets(root); store = tickets.store
-  await store.create({ id: 'goal', title: 'Ship the plan', description: 'A real outcome', status: 'in_progress',
+  await seedStoredDemand(store, { id: 'goal', title: 'Ship the plan', description: 'A real outcome', status: 'in_progress',
     sessionIds: ['mote', 'worker-a', 'worker-b', 'reviewer'], assigneeSessionIds: ['mote', 'worker-a', 'worker-b', 'reviewer'], supervisorSessionId: 'mote' })
   await store.proposeAlignment('goal', { summary: 'Plan inside the Goal', criteria, openQuestions: [] })
 })

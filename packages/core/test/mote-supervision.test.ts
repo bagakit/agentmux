@@ -108,23 +108,23 @@ it('current Main collects a formal Goal report and independently checks the orig
   const f = await fixture()
   const work = await openMoteWorkThread(f), worker = work.opened.agent.agentSessionId
   const workerCapability = f.launches[0]!.env.AGENTMUX_AGENT_CAPABILITY
-  await f.demands.create({ id: 'goal', title: 'Original scoped outcome', status: 'in_progress', supervisorSessionId: 'primary', assigneeSessionIds: ['primary', worker, 'member'] })
-  await f.demands.proposeAlignment('goal', { summary: 'Original scoped outcome', criteria: [{ id: 'result', text: 'The original work result is checkable.' }], openQuestions: [] })
+  const { demand: goal } = await f.demands.create({ title: 'Original scoped outcome', status: 'in_progress', supervisorSessionId: 'primary', assigneeSessionIds: ['primary', worker, 'member'] })
+  await f.demands.proposeAlignment(goal.id, { summary: 'Original scoped outcome', criteria: [{ id: 'result', text: 'The original work result is checkable.' }], openQuestions: [] })
   const checkPath = join(f.root, 'check-result.mjs')
   await writeFile(checkPath, "import assert from 'node:assert/strict'; assert.equal(process.argv[2], 'Original scoped research result'); console.log('Original result checked');\n")
   const command = 'node check-result.mjs "Original scoped research result"'
-  await f.cli(['goal','plan','revise','--input','-'], { goalId: 'goal', revision: { operationId: 'plan', expectedRevision: 0, alignmentRevision: 1,
+  await f.cli(['goal','plan','revise','--input','-'], { goalId: goal.id, revision: { operationId: 'plan', expectedRevision: 0, alignmentRevision: 1,
     nodes: [{ id: 'result-node', title: 'Original result', outcome: 'Checkable original result', dependsOn: [], criterionIds: ['result'], check: command,
       executor: { hostId: 'local', agentSessionId: worker } }] } })
   const intent = { operationId: 'formal-work', sourceMessageId: 'formal-source', hostId: 'local', ownerAgentSessionId: 'primary', workerAgentSessionId: worker,
     ownerRunId: 'run-primary', workerRunId: 'work-run-1', threadId: 'formal-thread', text: 'Check the original scoped result', alignmentRevision: 1,
     criterionIds: ['result'], planNodeId: 'result-node' }
-  await f.cli(['goal','delegate','--input','-'], { goalId: 'goal', intent })
+  await f.cli(['goal','delegate','--input','-'], { goalId: goal.id, intent })
   await f.cli(['space','mote','dialogue','link','--input','-'], { target: f.target, operationId: 'link-formal-work', expectedRoleRevision: work.before.main.roleRevision,
     source: { kind: 'work', messageHostId: 'local', messageId: intent.sourceMessageId } })
   const report = { operationId: 'report-formal', replyMessageId: 'formal-result', authorAgentSessionId: worker,
     grounding: { alignmentRevision: 1, summary: 'Original scoped research result', checks: [{ criterionId: 'result', outcome: 'met', evidence: ['Original scoped research result'], note: '' }] } }
-  await f.cli(['goal','report','--input','-'], { goalId: 'goal', operationId: intent.operationId, report }, worker, workerCapability)
+  await f.cli(['goal','report','--input','-'], { goalId: goal.id, operationId: intent.operationId, report }, worker, workerCapability)
   const originalRead = f.client.readDispatch.bind(f.client)
   const missing = vi.spyOn(f.client, 'readDispatch').mockImplementation(async input => {
     if (input.sourceMessageId === intent.sourceMessageId) throw new Error('This original source is temporarily unreadable')
@@ -136,19 +136,19 @@ it('current Main collects a formal Goal report and independently checks the orig
   missing.mockRestore()
   const page = await read(f, { limit: 1 })
   expect(page.next).not.toBeNull()
-  expect(page.observations[0].communication).toMatchObject({ goal: { goalId: 'goal', delegationOperationId: 'formal-work', alignmentRevision: 1, planNodeId: 'result-node' },
+  expect(page.observations[0].communication).toMatchObject({ goal: { goalId: goal.id, delegationOperationId: 'formal-work', alignmentRevision: 1, planNodeId: 'result-node' },
     originAwaits: false, events: [{ kind: 'worker_done', replyMessageId: 'formal-result' }] })
   const next = await read(f, { limit: 1, cursor: page.next })
   expect(next.links[0].origin.messageId).toBe(work.messageId)
-  const current = await f.cli(['goal','plan','--goal','goal'])
+  const current = await f.cli(['goal','plan','--goal',goal.id])
   expect(current.plan.alignmentRevision).toBe(1)
-  await f.cli(['goal','collect','--input','-'], { goalId: 'goal', operationId: 'formal-work', collection: { operationId: 'collect-formal', replyMessageId: 'formal-result' } })
+  await f.cli(['goal','collect','--input','-'], { goalId: goal.id, operationId: 'formal-work', collection: { operationId: 'collect-formal', replyMessageId: 'formal-result' } })
   const checked = await promisify(execFile)(process.execPath, [checkPath, report.grounding.summary], { cwd: f.root })
-  const reviewed = await f.cli(['goal','plan','review','--input','-'], { goalId: 'goal', review: { operationId: 'independent-review', nodeId: 'result-node',
+  const reviewed = await f.cli(['goal','plan','review','--input','-'], { goalId: goal.id, review: { operationId: 'independent-review', nodeId: 'result-node',
     delegationOperationId: 'formal-work', verdict: 'pass', check: { command, result: checked.stdout.trim(), evidence: ['Original scoped research result'] }, note: '' } }, 'member')
   expect(reviewed.planState.done).toBe(1)
   expect(reviewed.grounding.acceptedAt).toBeNull()
-  expect((await f.demands.get('goal'))!.status).toBe('in_progress')
+  expect((await f.demands.get(goal.id))!.status).toBe('in_progress')
   expect(f.launches).toHaveLength(1)
 })
 

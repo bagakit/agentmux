@@ -14,7 +14,7 @@ const target: DemandSpaceMemberReference = { kind: 'space-member', source: { run
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'amx-domain-request-')); cleanup.push(root)
   const one = openDemandStore({ root }), two = openDemandStore({ root })
-  const goal = (await one.create({ id: 'goal', title: 'Original title', description: '  Original body\n ', assigneeSessionIds: [target] })).demand
+  const goal = (await one.create({ title: 'Original title', description: '  Original body\n ', assigneeSessionIds: [target] })).demand
   return { root, one, two, goal }
 }
 
@@ -47,13 +47,13 @@ it('promotion freezes the real Run/note once, preserving request origin and refu
 
 it('the existing root OP owner refuses another Goal and target without overwriting the original', async () => {
   const { one, two, goal } = await fixture()
-  await one.create({ id: 'other', title: 'Other', assigneeSessionIds: [target] })
+  const { demand: other } = await one.create({ title: 'Other', assigneeSessionIds: [target] })
   await one.requestDispatch(goal.id, { operationId: 'OP', target })
   const saved = await one.inspectDispatch(goal.id, 'OP')
-  await expect(two.requestDispatch('other', { operationId: 'OP', target })).rejects.toThrow('another Goal or member')
+  await expect(two.requestDispatch(other.id, { operationId: 'OP', target })).rejects.toThrow('another Goal or member')
   await expect(two.requestDispatch(goal.id, { operationId: 'OP', target: { ...target, execution: { ...target.execution, runtimeId: 'other-D' } } })).rejects.toThrow('another Goal or member')
   expect(await two.inspectDispatch(goal.id, 'OP')).toEqual(saved)
-  expect(await two.inspectDispatch('other', 'OP')).toBeNull()
+  expect(await two.inspectDispatch(other.id, 'OP')).toBeNull()
 })
 
 it('version and assignee refusals are immutable business outcomes without invented body or input', async () => {

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { openDemandStore } from '../src/demand-store.js'
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import type { DemandStoreSnapshot, UpdateDemandInput } from '../src/demand-types.js'
 
 const roots: string[] = []
@@ -13,7 +14,7 @@ afterEach(async () => {
 async function fixture(count = 1) {
   const root = await fs.mkdtemp(join(tmpdir(), 'amux-demand-point-read-')); roots.push(root)
   const store = openDemandStore({ root })
-  await store.create({ id: 'goal-0', title: 'Before', description: 'Original description' })
+  await seedStoredDemand(store, { id: 'goal-0', title: 'Before', description: 'Original description' })
   const raw = JSON.parse(await fs.readFile(store.storePath, 'utf8')) as DemandStoreSnapshot
   raw.demands = Array.from({ length: count }, (_, index) => ({ ...structuredClone(raw.demands[0]!), id: 'goal-' + index }))
   await fs.writeFile(store.storePath, JSON.stringify(raw, null, 2) + '\n')
@@ -116,7 +117,7 @@ it('invalidates after explicit original file deletion and reads a later recreati
   await store.get('goal-0')
   await fs.unlink(store.storePath)
   expect(await store.get('goal-0')).toBeNull()
-  await openDemandStore({ root }).create({ id: 'goal-0', title: 'Explicitly recreated original path' })
+  await seedStoredDemand(openDemandStore({ root }), { id: 'goal-0', title: 'Explicitly recreated original path' })
   expect((await store.get('goal-0'))?.title).toBe('Explicitly recreated original path')
 })
 

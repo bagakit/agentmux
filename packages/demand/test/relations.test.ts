@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
 import { openDemandStore } from '../src/demand-store.js'
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { parseDemandDelegations } from '../src/delegations.js'
 import { parseDemandProgressUpdates } from '../src/responsibility.js'
 import { demandRelationKey, projectDemandRelations, type GoalRelationSource } from '../src/relations.js'
@@ -21,7 +22,7 @@ it('projects original persisted business facts without upgrading bare assignment
   const root = await mkdtemp(join(tmpdir(), 'goal-relations-'))
   try {
     const store = openDemandStore({ root })
-    await store.create({ id: 'original-goal', title: 'Original Goal', assigneeSessionIds: ['shared-session'], supervisorSessionId: 'shared-session' })
+    await seedStoredDemand(store, { id: 'original-goal', title: 'Original Goal', assigneeSessionIds: ['shared-session'], supervisorSessionId: 'shared-session' })
     const { stage: _stage, preparedAt: _preparedAt, submittedAt: _submittedAt, ...intent } = dispatch('start-a', 'host-a')
     await store.prepareDispatch('original-goal', intent)
     await store.recordParticipation('original-goal', { kind: 'discussion', agentSessionId: 'shared-session', hostId: 'host-b', entryPoint: 'original-entry' }, { operationId: 'discussion-b' })

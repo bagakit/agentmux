@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, expect, it, vi } from 'vitest'
 import { isObjectId } from '@agentmux/identity'
 import { openDemandStore } from '../src/demand-store.js'
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 
 const roots: string[] = []
 afterEach(async () => { vi.restoreAllMocks(); for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }) })
@@ -20,14 +21,19 @@ async function cli(directory: string, args: string[]) {
   })
 }
 
-it('compiled Demand CLI emits shared request and operation IDs and retains a supplied historical Goal identity', async () => {
+it('compiled Demand CLI emits owner-issued IDs and reads a retained historical Goal identity', async () => {
   const directory = await root(), legacy = '8d635382-9086-49b3-825e-f814e87dcb80'
-  const created = await cli(directory, ['create', '--id', legacy, '--title', 'Original goal'])
+  await seedStoredDemand(openDemandStore({ root: directory }), { id: legacy, title: 'Historical goal' })
+  const created = await cli(directory, ['create', '--title', 'Original goal'])
   expect(created.code).toBe(0); expect(isObjectId(created.output.requestId)).toBe(true)
-  expect(isObjectId(created.output.receipt.operationId)).toBe(true); expect(created.output.receipt.demand.id).toBe(legacy)
+  expect(isObjectId(created.output.receipt.operationId)).toBe(true)
+  expect(isObjectId(created.output.receipt.demand.id)).toBe(true)
+  expect(created.output.demand.id).toBe(created.output.receipt.demand.id)
   const listed = await cli(directory, ['list'])
   expect(listed.code).toBe(0); expect(isObjectId(listed.output.requestId)).toBe(true)
-  expect(listed.output.demands[0].id).toBe(legacy)
+  expect(listed.output.demands.map((demand: { id: string }) => demand.id)).toEqual([legacy, created.output.demand.id])
+  const original = await cli(directory, ['show', '--id', legacy])
+  expect(original.code).toBe(0); expect(original.output.demand).toMatchObject({ id: legacy, title: 'Historical goal' })
   const failed = await cli(directory, ['show', '--id', 'absent'])
   expect(failed.code).toBe(1); expect(isObjectId(failed.output.requestId)).toBe(true)
   expect(failed.output.error.code).toBe('NOT_FOUND')

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { openDemandStore } from '../src/demand-store.js'
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { parseDemandDispatch, type DemandDispatchIntent } from '../src/dispatch.js'
 import type { DemandDelegationAttentionInput } from '../src/delegations.js'
 
@@ -13,7 +14,7 @@ const notice: DemandDelegationAttentionInput = { operationId: 'start-notice', in
 const proposal = { alignmentRevision: 1, summary: 'Goal-level result', checks: [{ criterionId: 'AC', outcome: 'met' as const, evidence: ['evidence/original.log:7'], note: '' }] }
 beforeEach(async () => {
   root = await fs.mkdtemp(join(tmpdir(), 'goal-start-domain-')); store = openDemandStore({ root })
-  await store.create({ id: 'goal', title: 'Original Goal', status: 'in_progress', assigneeSessionIds: ['owner', 'worker', 'next-owner'], supervisorSessionId: 'owner' })
+  await seedStoredDemand(store, { id: 'goal', title: 'Original Goal', status: 'in_progress', assigneeSessionIds: ['owner', 'worker', 'next-owner'], supervisorSessionId: 'owner' })
   await store.proposeAlignment('goal', { summary: 'Original target', criteria: [{ id: 'AC', text: 'Original result' }], openQuestions: [] })
 })
 afterEach(async () => { vi.restoreAllMocks(); await fs.rm(root, { recursive: true, force: true }) })

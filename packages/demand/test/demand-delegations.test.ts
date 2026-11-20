@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { openDemandStore } from '../src/demand-store.js'
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import type { DemandDelegationIntent, DemandDelegationReportInput } from '../src/delegations.js'
 
 let root: string, store: ReturnType<typeof openDemandStore>
@@ -32,7 +33,7 @@ async function submitted(task: DemandDelegationIntent) {
 beforeEach(async () => {
   root = await fs.mkdtemp(join(tmpdir(), 'demand-delegation-'))
   store = openDemandStore({ root })
-  await store.create({ id: 'goal', title: 'Original Goal', description: 'Original human wording\nkept verbatim', status: 'in_progress',
+  await seedStoredDemand(store, { id: 'goal', title: 'Original Goal', description: 'Original human wording\nkept verbatim', status: 'in_progress',
     assigneeSessionIds: ['owner', 'worker-a', 'worker-b'], supervisorSessionId: 'owner' })
   await store.proposeAlignment('goal', { summary: 'Original standards', criteria, openQuestions: [] })
 })
@@ -235,7 +236,7 @@ describe('Goal delegation responsibility, source and result collection', () => {
 
   it('does not let an original source or reply identity be reassigned to another Goal or delegation', async () => {
     const a = intent(), first = await submitted(a)
-    await store.create({ id: 'other-goal', title: 'Other Goal', assigneeSessionIds: ['owner', 'worker-a', 'worker-b'], supervisorSessionId: 'owner' })
+    await seedStoredDemand(store, { id: 'other-goal', title: 'Other Goal', assigneeSessionIds: ['owner', 'worker-a', 'worker-b'], supervisorSessionId: 'owner' })
     await store.proposeAlignment('other-goal', { summary: 'Other standards', criteria, openQuestions: [] })
     const before = await store.snapshot()
     await expect(store.prepareDelegation('other-goal', a, 'owner')).rejects.toThrow(/different Goal/u)

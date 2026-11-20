@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
 import { openDemandStore } from '../src/demand-store.js'
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
@@ -13,7 +14,7 @@ async function fixture() {
 
 it('replays an explicit Decision identity from disk and rejects changed content or author without rewriting it', async () => {
   const { root, store } = await fixture()
-  await store.create({ id: 'goal', title: 'Original Goal' })
+  await seedStoredDemand(store, { id: 'goal', title: 'Original Goal' })
   const decision = { id: 'original-decision', question: 'Which source?', decision: 'Use the original owner.', rationale: 'Keep one fact.', actorId: 'original-author' }
   const first = await store.addDecision('goal', decision)
   const originalBytes = await readFile(store.storePath, 'utf8')

@@ -2,6 +2,8 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
+import { deriveBoundGoalId } from '../src/goals.js'
 import { openDemandStore } from '../src/demand-store.js'
 import type { DemandDiscussionIntent } from '../src/discussion.js'
 
@@ -20,18 +22,21 @@ const intent: DemandDiscussionIntent = {
 
 it('admits a new Goal and its original discussion operation in the same first durable publication', async () => {
   const { root, store } = await fixture()
+  const input = { title: 'Original Goal', description: 'Original request' }
+  const goalOwner = { runtimeId: 'original-runtime', namespace: 'original-store' }
+  const options = { operationId: 'original-create', discussionOperationId: 'original-discussion', creationOrigin: { requesterAsSupervisor: true }, goalOwner }
+  const id = deriveBoundGoalId(goalOwner.runtimeId, goalOwner.namespace, options.operationId)
   const publications: Array<{ revision: number; ids: readonly string[]; operationId: string | undefined }> = []
   store.subscribe((snapshot, ids) => publications.push({ revision: snapshot.revision, ids,
-    operationId: snapshot.demands.find(goal => goal.id === 'goal')?.discussionOperationId }))
-  const input = { id: 'goal', title: 'Original Goal', description: 'Original request' }
-  const options = { operationId: 'original-create', discussionOperationId: 'original-discussion', creationOrigin: { requesterAsSupervisor: true } }
+    operationId: snapshot.demands.find(goal => goal.id === id)?.discussionOperationId }))
   const first = await store.create(input, options)
-  expect(publications).toEqual([{ revision: 1, ids: ['goal'], operationId: options.discussionOperationId }])
+  expect(first.demand.id).toBe(id)
+  expect(publications).toEqual([{ revision: 1, ids: [id], operationId: options.discussionOperationId }])
   const bytes = await readFile(store.storePath, 'utf8')
   const disk = JSON.parse(bytes)
-  expect(disk).toMatchObject({ revision: 1, demands: [{ id: 'goal', discussionOperationId: options.discussionOperationId,
+  expect(disk).toMatchObject({ revision: 1, demands: [{ id, discussionOperationId: options.discussionOperationId,
     creationOrigin: { operationId: options.operationId } }] })
-  expect((await openDemandStore({ root }).get('goal'))?.discussionIntent).toBeUndefined()
+  expect((await openDemandStore({ root }).get(id))?.discussionIntent).toBeUndefined()
   const replay = await openDemandStore({ root }).create(input, options)
   expect(replay).toMatchObject({ replayed: true, revision: first.revision, demand: first.demand })
   expect(await readFile(store.storePath, 'utf8')).toBe(bytes)
@@ -39,55 +44,58 @@ it('admits a new Goal and its original discussion operation in the same first du
 
 it('freezes one discussion intent across reopen and rejects another mode, caller or destination on its original operation', async () => {
   const { root, store } = await fixture()
-  const created = await store.create({ id: 'goal', title: 'Original Goal' }, { discussionOperationId: 'original-discussion' })
+  const created = await store.create({ title: 'Original Goal' }, { discussionOperationId: 'original-discussion' })
+  const id = created.demand.id
   const beforePreparation = await readFile(store.storePath, 'utf8')
-  await expect(store.prepareDiscussion('goal', 'original-discussion', { ...intent, mode: new String('grill') } as never, created.demand.updatedAt))
+  await expect(store.prepareDiscussion(id, 'original-discussion', { ...intent, mode: new String('grill') } as never, created.demand.updatedAt))
     .rejects.toThrow('The original Goal discussion intent is invalid.')
   expect(await readFile(store.storePath, 'utf8')).toBe(beforePreparation)
-  const prepared = await store.prepareDiscussion('goal', 'original-discussion', intent, created.demand.updatedAt)
+  const prepared = await store.prepareDiscussion(id, 'original-discussion', intent, created.demand.updatedAt)
   const bytes = await readFile(store.storePath, 'utf8'), reopened = openDemandStore({ root })
-  const replay = await reopened.prepareDiscussion('goal', 'original-discussion', { ...intent }, created.demand.updatedAt)
+  const replay = await reopened.prepareDiscussion(id, 'original-discussion', { ...intent }, created.demand.updatedAt)
   expect(replay).toMatchObject({ replayed: true, revision: prepared.revision, demand: prepared.demand })
   expect(await readFile(store.storePath, 'utf8')).toBe(bytes)
   for (const patch of [
     { mode: 'grounding' as const }, { callerAgentSessionId: 'another-caller' }, { spaceId: 'another-space' }, { zoneId: 'another-zone' },
     { executorId: 'another-executor' }, { prompt: 'Another input' }, { agentMuxNote: 'Another context' }, { requestOperationId: 'another-request' }
   ]) {
-    await expect(reopened.prepareDiscussion('goal', 'original-discussion', { ...intent, ...patch }, prepared.demand.updatedAt))
+    await expect(reopened.prepareDiscussion(id, 'original-discussion', { ...intent, ...patch }, prepared.demand.updatedAt))
       .rejects.toMatchObject({ code: 'INVALID_INPUT', phase: 'validate' })
     expect(await readFile(store.storePath, 'utf8')).toBe(bytes)
   }
-  await expect(reopened.prepareDiscussion('goal', 'another-discussion', intent, prepared.demand.updatedAt))
+  await expect(reopened.prepareDiscussion(id, 'another-discussion', intent, prepared.demand.updatedAt))
     .rejects.toMatchObject({ code: 'INVALID_INPUT', phase: 'validate' })
   expect(await readFile(store.storePath, 'utf8')).toBe(bytes)
-  expect((await openDemandStore({ root }).get('goal'))?.discussionIntent).toEqual(intent)
+  expect((await openDemandStore({ root }).get(id))?.discussionIntent).toEqual(intent)
 })
 
 it('requires the original Goal revision before freezing a first discussion intent', async () => {
   const { root, store } = await fixture()
-  const created = await store.create({ id: 'goal', title: 'Original Goal' }, { discussionOperationId: 'original-discussion' })
-  const changed = await store.update('goal', { description: 'A newer original request' })
+  const created = await store.create({ title: 'Original Goal' }, { discussionOperationId: 'original-discussion' })
+  const id = created.demand.id
+  const changed = await store.update(id, { description: 'A newer original request' })
   const bytes = await readFile(store.storePath, 'utf8')
-  await expect(store.prepareDiscussion('goal', 'original-discussion', intent, created.demand.updatedAt))
+  await expect(store.prepareDiscussion(id, 'original-discussion', intent, created.demand.updatedAt))
     .rejects.toMatchObject({ code: 'INVALID_INPUT', phase: 'validate' })
   expect(await readFile(store.storePath, 'utf8')).toBe(bytes)
-  const prepared = await openDemandStore({ root }).prepareDiscussion('goal', 'original-discussion', intent, changed.demand.updatedAt)
+  const prepared = await openDemandStore({ root }).prepareDiscussion(id, 'original-discussion', intent, changed.demand.updatedAt)
   expect(prepared.demand).toMatchObject({ description: changed.demand.description, discussionIntent: intent })
 })
 
 it('keeps a legacy Goal untouched until an explicit first discussion atomically saves its operation and intent', async () => {
   const { root, store } = await fixture()
-  await store.create({ id: 'retained', title: 'Retained Goal', description: 'Original body', sessionIds: ['original-session'], tags: ['original-tag'] })
+  await seedStoredDemand(store, { id: 'retained', title: 'Retained Goal', description: 'Original body', sessionIds: ['original-session'], tags: ['original-tag'] })
   await store.addDecision('retained', { id: 'retained-decision', question: 'Keep which identity?', decision: 'The original one.', rationale: 'Preserve its evidence.', actorId: null })
   const original = await store.get('retained'), bytes = await readFile(store.storePath, 'utf8')
   const reopened = openDemandStore({ root })
   expect(await reopened.get('retained')).toEqual(original)
   expect(await readFile(store.storePath, 'utf8')).toBe(bytes)
-  await expect(reopened.create({ id: 'retained', title: 'Retained Goal' }, {
+  const forgedCreate = { id: 'retained', title: 'Retained Goal' }
+  await expect(reopened.create(forgedCreate, {
     operationId: 'another-create', discussionOperationId: 'unobserved-discussion', creationOrigin: { requesterAsSupervisor: true }
   })).rejects.toMatchObject({ code: 'INVALID_INPUT', phase: 'validate' })
   expect(await readFile(store.storePath, 'utf8')).toBe(bytes)
-  await reopened.create({ id: 'new-goal', title: 'New Goal' }, { discussionOperationId: 'new-discussion' })
+  await reopened.create({ title: 'New Goal' }, { discussionOperationId: 'new-discussion' })
   expect(await openDemandStore({ root }).get('retained')).toEqual(original)
   expect((await reopened.get('retained'))?.discussionOperationId).toBeUndefined()
   expect((await reopened.get('retained'))?.discussionIntent).toBeUndefined()
@@ -106,7 +114,7 @@ it('keeps a legacy Goal untouched until an explicit first discussion atomically 
 })
 
 it('concurrent explicit first discussions retain one winner and cannot overwrite it even after reading its new revision', async () => {
-  const { root, store } = await fixture(), original = (await store.create({ id: 'legacy', title: 'Original legacy Goal' })).demand
+  const { root, store } = await fixture(), original = (await seedStoredDemand(store, { id: 'legacy', title: 'Original legacy Goal' })).demand
   const second = { ...intent, requestOperationId: 'second-request', mode: 'plan' as const }
   const results = await Promise.allSettled([
     store.prepareDiscussion('legacy', 'first-operation', intent, original.updatedAt),
@@ -125,7 +133,7 @@ it('concurrent explicit first discussions retain one winner and cannot overwrite
 })
 
 it('a changed legacy Goal does not gain any discussion fields from a stale first reservation', async () => {
-  const { store } = await fixture(), original = (await store.create({ id: 'legacy', title: 'Original legacy Goal' })).demand
+  const { store } = await fixture(), original = (await seedStoredDemand(store, { id: 'legacy', title: 'Original legacy Goal' })).demand
   const changed = await store.update('legacy', { description: 'Keep the newer human intent.' })
   const bytes = await readFile(store.storePath, 'utf8')
   await expect(store.prepareDiscussion('legacy', 'stale-operation', intent, original.updatedAt)).rejects.toMatchObject({ code: 'INVALID_INPUT' })

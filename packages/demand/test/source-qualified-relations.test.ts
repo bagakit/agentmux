@@ -45,18 +45,18 @@ it('keeps raw bytes distinct from exact source/admission/execution identities an
 
 it('uses the original snapshot/CAS and semantic role subsets without dispatch or inferred qualification', async () => {
   const store = openDemandStore({ root: join(root, 'role-store') }), a = ref(), b = ref('executor-E')
-  const creating = store.create({ id: 'goal-original', title: 'Original Goal', sessionIds: ['legacy bytes', a],
+  const creating = store.create({ title: 'Original Goal', sessionIds: ['legacy bytes', a],
     assigneeSessionIds: [structuredClone(a), b], supervisorSessionId: structuredClone(a) })
   const outcome = await creating.then(value => ({ value, error: null }), error => ({ value: null, error }))
-  expect(outcome).toMatchObject({ value: { demand: { id: 'goal-original', supervisorSessionId: a } }, error: null })
-  const created = outcome.value!
+  expect(outcome).toMatchObject({ value: { demand: { id: expect.any(String), supervisorSessionId: a } }, error: null })
+  const created = outcome.value!, id = created.demand.id
   expect(created.demand.sessionIds).toEqual(['legacy bytes', a, b])
   expect(created.demand.dispatches).toBeUndefined(); expect(created.demand.delegations).toBeUndefined()
-  await expect(store.update('goal-original', { supervisorSessionId: ref('wrong-runtime') })).rejects.toMatchObject({ code: 'INVALID_INPUT' })
-  const before = await store.get('goal-original')
-  await store.update('goal-original', { description: 'ordinary offline edit' }, { expectedUpdatedAt: before!.updatedAt })
-  await expect(store.update('goal-original', { title: 'stale edit' }, { expectedUpdatedAt: before!.updatedAt })).rejects.toMatchObject({ code: 'INVALID_INPUT' })
-  const after = await openDemandStore({ root: store.root }).get('goal-original')
+  await expect(store.update(id, { supervisorSessionId: ref('wrong-runtime') })).rejects.toMatchObject({ code: 'INVALID_INPUT' })
+  const before = await store.get(id)
+  await store.update(id, { description: 'ordinary offline edit' }, { expectedUpdatedAt: before!.updatedAt })
+  await expect(store.update(id, { title: 'stale edit' }, { expectedUpdatedAt: before!.updatedAt })).rejects.toMatchObject({ code: 'INVALID_INPUT' })
+  const after = await openDemandStore({ root: store.root }).get(id)
   expect(after!.sessionIds).toEqual(created.demand.sessionIds)
   expect(after!.assigneeSessionIds).toEqual([a, b]); expect(after!.supervisorSessionId).toEqual(a)
   expect(after!.description).toBe('ordinary offline edit')
@@ -74,20 +74,21 @@ it('projects exact source-qualified relations without inserting them into bare o
 
 it('the real compiled filesystem CLI preserves mixed references and original file across independent processes', async () => {
   const dir = join(root, 'process-store'), a = ref(), b = ref('executor-E')
-  const first = await cli(['--root', dir, 'create', '--id', 'persistent-goal', '--title', 'Persistent',
+  const first = await cli(['--root', dir, 'create', '--title', 'Persistent',
     '--agent-ref', JSON.stringify('legacy-original'), '--agent-ref', JSON.stringify(a), '--assignees', JSON.stringify([a, b]), '--supervisor-ref', JSON.stringify(a)])
   expect(first.code).toBe(0)
+  const id = first.value.demand.id
   const file = join(dir, 'store.json'), bytes = await readFile(file), identity = await stat(file)
-  const second = await cli(['--root', dir, 'show', '--id', 'persistent-goal'])
+  const second = await cli(['--root', dir, 'show', '--id', id])
   expect(second.code).toBe(0); expect(second.pid).not.toBe(first.pid)
   expect(second.value.demand.sessionIds).toEqual(['legacy-original', a, b]); expect(second.value.demand.supervisorSessionId).toEqual(a)
   expect(second.value.demand.dispatches ?? []).toEqual([])
   expect(await readFile(file)).toEqual(bytes); const readIdentity = await stat(file)
   expect([readIdentity.dev, readIdentity.ino]).toEqual([identity.dev, identity.ino])
-  const edit = await cli(['--root', dir, 'update', '--id', 'persistent-goal', '--description', 'keep original relations'])
+  const edit = await cli(['--root', dir, 'update', '--id', id, '--description', 'keep original relations'])
   expect(edit.code).toBe(0); expect(edit.value.demand.sessionIds).toEqual(second.value.demand.sessionIds)
-  const collision = await cli(['--root', dir, 'assign', '--id', 'persistent-goal', '--assignees', JSON.stringify([a]), '--assignee-session-id', 'same-SID'])
+  const collision = await cli(['--root', dir, 'assign', '--id', id, '--assignees', JSON.stringify([a]), '--assignee-session-id', 'same-SID'])
   expect(collision.code).toBe(1)
-  const untouched = await cli(['--root', dir, 'show', '--id', 'persistent-goal'])
+  const untouched = await cli(['--root', dir, 'show', '--id', id])
   expect(untouched.value.demand.assigneeSessionIds).toEqual([a, b])
 })

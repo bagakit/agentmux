@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { openDemandStore } from '../src/demand-store.js'
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import type { DemandDelegationAttentionInput, DemandDelegationIntent } from '../src/delegations.js'
 let root: string, store: ReturnType<typeof openDemandStore>
 const execute = promisify(execFile)
@@ -15,7 +16,7 @@ const attention: DemandDelegationAttentionInput = { operationId: 'attention-oper
   supervisorRunId: 'owner-run', occurrenceAt: _reshape_fixtureEpoch(0, 0, 100), agentMuxNote: ' Original worker Run ended.\nInspect its retained Goal source and evidence. ' }
 beforeEach(async () => {
   root = await fs.mkdtemp(join(tmpdir(), 'demand-attention-')); store = openDemandStore({ root })
-  await store.create({ id: 'goal', title: 'Original Goal', status: 'in_progress', assigneeSessionIds: ['owner', 'worker', 'next-owner'], supervisorSessionId: 'owner' })
+  await seedStoredDemand(store, { id: 'goal', title: 'Original Goal', status: 'in_progress', assigneeSessionIds: ['owner', 'worker', 'next-owner'], supervisorSessionId: 'owner' })
   await store.proposeAlignment('goal', { summary: 'Original target', criteria: [{ id: 'AC', text: 'Original result' }], openQuestions: [] })
   await store.prepareDelegation('goal', task, 'owner')
 })

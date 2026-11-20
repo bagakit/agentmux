@@ -7,13 +7,14 @@ const ref = { hostId: 'host', workspaceId: 'resource-workspace', zoneId: 'origin
 it('original content provenance persists through owner restart and atomic appends without changing original results or links', async () => {
   const root = await mkdtemp(join(tmpdir(), 'goal-content-'))
   try {
-    const owner = openDemandStore({ root }); const original = await owner.create({ id: 'original', title: 'Original work', description: 'User content', sessionIds: ['first'], contentRefs: [ref] })
-    await Promise.all([owner.update('original', { contentRefs: [{ ...ref, zoneId: 'second' }] }), owner.update('original', { contentRefs: [{ ...ref, zoneId: 'third' }] })])
-    await owner.unlinkSession('original', 'first'); await owner.linkSession('original', 'new-discussion')
-    const restored = await openDemandStore({ root }).get('original')
-    expect(restored).toMatchObject({ id: original.demand.id, title: 'Original work', description: 'User content', sessionIds: ['new-discussion'] })
+    const owner = openDemandStore({ root }); const original = await owner.create({ title: 'Original work', description: 'User content', sessionIds: ['first'], contentRefs: [ref] })
+    const id = original.demand.id
+    await Promise.all([owner.update(id, { contentRefs: [{ ...ref, zoneId: 'second' }] }), owner.update(id, { contentRefs: [{ ...ref, zoneId: 'third' }] })])
+    await owner.unlinkSession(id, 'first'); await owner.linkSession(id, 'new-discussion')
+    const restored = await openDemandStore({ root }).get(id)
+    expect(restored).toMatchObject({ id, title: 'Original work', description: 'User content', sessionIds: ['new-discussion'] })
     expect(restored?.contentRefs?.map(ref => ref.zoneId).sort()).toEqual(['original-zone', 'second', 'third'])
-    const linked = await owner.update('original', { contentRefs: [ref] }); expect(linked.demand.contentRefs).toHaveLength(3)
+    const linked = await owner.update(id, { contentRefs: [ref] }); expect(linked.demand.contentRefs).toHaveLength(3)
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 it('same-millisecond owner mutations advance the record guard and refuse stale association before any change', async () => {

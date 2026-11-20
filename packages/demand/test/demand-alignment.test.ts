@@ -7,6 +7,7 @@ import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
 import { isObjectId } from '@agentmux/identity'
 import { openDemandStore } from '../src/demand-store.js'
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import type { UpdateDemandInput } from '../src/demand-types.js'
 import { isDemandEvidenceReference, type DemandAlignmentProposal, type DemandGroundingProposal } from '../src/goals.js'
 
@@ -19,7 +20,7 @@ const result: DemandGroundingProposal = { alignmentRevision: 1, summary: 'Restar
 async function owner() {
   const root = await mkdtemp(join(tmpdir(), 'amux-goal-')); roots.push(root)
   const store = openDemandStore({ root })
-  await store.create({ id: 'goal', title: 'Restart', description: 'Original user intent\nkept verbatim', status: 'in_progress', sessionIds: ['healthy-run'] })
+  await seedStoredDemand(store, { id: 'goal', title: 'Restart', description: 'Original user intent\nkept verbatim', status: 'in_progress', sessionIds: ['healthy-run'] })
   return { root, store }
 }
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })

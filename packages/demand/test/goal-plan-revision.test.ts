@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it } from 'vitest'
 import { openDemandStore } from '../src/demand-store.js'
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { projectGoalPlan, type GoalPlanNodeInput } from '../src/goal-plan.js'
 import type { DemandDelegationIntent } from '../src/delegations.js'
 
@@ -32,7 +33,7 @@ const review = async (value: DemandDelegationIntent, verdict: 'pass' | 'changes'
   note: verdict === 'changes' ? 'Fix the reviewed result' : '' }, { kind: 'agent', id: 'reviewer' })
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'amux-revise-plan-')); tickets = goalTickets(root); store = tickets.store
-  await store.create({ id: 'goal', title: 'Original Goal', status: 'in_progress', sessionIds: ['supervisor', 'worker-a', 'worker-b', 'reviewer'],
+  await seedStoredDemand(store, { id: 'goal', title: 'Original Goal', status: 'in_progress', sessionIds: ['supervisor', 'worker-a', 'worker-b', 'reviewer'],
     assigneeSessionIds: ['supervisor', 'worker-a', 'worker-b', 'reviewer'], supervisorSessionId: 'supervisor' })
   await store.proposeAlignment('goal', { summary: 'Original scope', criteria: [{ id: 'original', text: 'Original criterion' }, { id: 'remaining', text: 'Remaining criterion' }], openQuestions: [] })
   await revise('plan-1')

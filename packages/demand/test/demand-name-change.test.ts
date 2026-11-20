@@ -5,6 +5,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { openDemandStore } from '../src/demand-store.js'
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { runDemandCli } from '../src/cli.js'
 import type { DemandNameContext, UpdateDemandInput } from '../src/demand-types.js'
 
@@ -23,7 +24,7 @@ describe('Demand title owner', () => {
   it('commits a structured unknown-source rename with its title and receipt in one snapshot', async () => {
     const directory = await root()
     const store = openDemandStore({ root: directory })
-    await store.create({ id: 'goal', title: 'Before' })
+    await seedStoredDemand(store, { id: 'goal', title: 'Before' })
     const receipt = await store.update('goal', { title: 'After' })
     const reopened = openDemandStore({ root: directory })
     const demand = await reopened.get('goal')
@@ -41,27 +42,30 @@ describe('Demand title owner', () => {
 
   it('preserves deleted-target history in the same snapshot and queries it after reopening', async () => {
     const directory = await root(), store = openDemandStore({ root: directory })
-    await store.create({ id: 'goal', title: 'Before' })
-    const first = await store.update('goal', { title: 'Chosen' }, { operationId: 'original', context })
-    await expect(store.update('goal', { title: '' }, { operationId: 'refused', context })).rejects.toMatchObject({ code: 'INVALID_INPUT' })
+    const creation = { goalOwner: { runtimeId: 'original-runtime', namespace: 'original-store' },
+      operationId: 'original-create', creationOrigin: { requesterAsSupervisor: false } }
+    const { demand } = await store.create({ title: 'Before' }, creation)
+    const goalId = demand.id
+    const first = await store.update(goalId, { title: 'Chosen' }, { operationId: 'original', context })
+    await expect(store.update(goalId, { title: '' }, { operationId: 'refused', context })).rejects.toMatchObject({ code: 'INVALID_INPUT' })
     const history = (await store.snapshot()).nameHistory
-    const removed = await store.delete('goal').catch(error => error)
-    expect(removed).toMatchObject({ operation: 'remove', demand: { id: 'goal' } })
+    const removed = await store.delete(goalId).catch(error => error)
+    expect(removed).toMatchObject({ operation: 'remove', demand: { id: goalId } })
     const reopened = openDemandStore({ root: directory })
-    expect(await reopened.get('goal')).toBeNull()
+    expect(await reopened.get(goalId)).toBeNull()
     expect((await reopened.snapshot()).nameHistory).toEqual(history)
-    const page = await reopened.listNameChanges('goal', { limit: 1 })
+    const page = await reopened.listNameChanges(goalId, { limit: 1 })
     expect(page.records).toEqual([first.nameChange])
-    expect((await reopened.listNameChanges('goal', { offset: page.nextOffset!, limit: 1 })).records).toEqual([history[1]])
-    await reopened.create({ id: 'goal', title: 'New object using retained ID' })
-    const replay = await reopened.update('goal', { title: 'Chosen' }, { operationId: 'original', context })
-    expect(replay).toMatchObject({ replayed: true, demand: { title: 'New object using retained ID' }, nameChange: first.nameChange })
-    expect((await reopened.snapshot()).nameHistory).toEqual(history)
+    expect((await reopened.listNameChanges(goalId, { offset: page.nextOffset!, limit: 1 })).records).toEqual([history[1]])
+    const beforeReconciliation = await reopened.snapshot()
+    await expect(reopened.create({ title: 'Before' }, creation)).rejects.toThrow('creation operation has been retired')
+    await expect(reopened.update(goalId, { title: 'Chosen' }, { operationId: 'original', context })).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    expect(await reopened.snapshot()).toEqual(beforeReconciliation)
   })
 
   it('reads old v1 free-text activities unchanged without inventing trusted title history', async () => {
     const store = openDemandStore({ root: await root() })
-    await store.create({ id: 'goal', title: 'Original' })
+    await seedStoredDemand(store, { id: 'goal', title: 'Original' })
     await store.addActivity('goal', { kind: 'note', message: 'A previous author renamed this goal.', actorId: 'unverified-free-text' })
     const raw = JSON.parse(await fs.readFile(store.storePath, 'utf8'))
     delete raw.nameHistory
@@ -77,7 +81,7 @@ describe('Demand title owner', () => {
 
   it('records invalid and unchanged title attempts without losing the confirmed title', async () => {
     const store = openDemandStore({ root: await root() })
-    await store.create({ id: 'goal', title: 'Keep' })
+    await seedStoredDemand(store, { id: 'goal', title: 'Keep' })
     await expect(store.update('goal', { title: '' })).rejects.toMatchObject({ code: 'INVALID_INPUT' })
     const failed = await store.get('goal')
     expect(failed?.title).toBe('Keep')
@@ -88,7 +92,7 @@ describe('Demand title owner', () => {
 
   it('takes actor and where from the separate host context, never business input', async () => {
     const store = openDemandStore({ root: await root() })
-    await store.create({ id: 'goal', title: 'Before' })
+    await seedStoredDemand(store, { id: 'goal', title: 'Before' })
     const patch = { title: 'After', actor: { kind: 'user', id: 'pretend-user', verified: true }, context: { source: 'manual' } } as unknown as UpdateDemandInput
     const attribution = structuredClone(context)
     const pending = store.update('goal', patch, { context: attribution, operationId: 'authenticated-operation' })
@@ -103,7 +107,7 @@ describe('Demand title owner', () => {
     const directory = await root()
     const left = openDemandStore({ root: directory })
     const right = openDemandStore({ root: directory })
-    await left.create({ id: 'goal', title: 'Before' })
+    await seedStoredDemand(left, { id: 'goal', title: 'Before' })
     const earlier = (await left.snapshot()).revision
     await right.update('goal', { title: 'Concurrent winner' })
     const rejected = await left.update('goal', { title: 'Stale overwrite' }, { expectedRevision: earlier, operationId: 'stale' }).catch(error => error)
@@ -114,7 +118,7 @@ describe('Demand title owner', () => {
 
   it('observes the original operation on retry without reapplying it over a later title', async () => {
     const store = openDemandStore({ root: await root() })
-    await store.create({ id: 'goal', title: 'Before' })
+    await seedStoredDemand(store, { id: 'goal', title: 'Before' })
     const original = await store.update('goal', { title: 'First' }, { operationId: 'one' })
     await store.update('goal', { title: 'Later' }, { operationId: 'two' })
     const beforeRetry = await store.snapshot()
@@ -128,24 +132,24 @@ describe('Demand title owner', () => {
 
   it('does not apply a valid title when another field in that update is invalid', async () => {
     const store = openDemandStore({ root: await root() })
-    await store.create({ id: 'goal', title: 'Before' })
+    await seedStoredDemand(store, { id: 'goal', title: 'Before' })
     await expect(store.update('goal', { title: 'After', status: 'imaginary' } as unknown as UpdateDemandInput)).rejects.toMatchObject({ nameChange: { status: 'failed', before: 'Before', actual: 'Before', requested: 'After' } })
     expect((await store.get('goal'))?.title).toBe('Before')
   })
 
   it('keeps exact previous bytes when the atomic replacement fails and does not claim a committed audit', async () => {
     const store = openDemandStore({ root: await root() })
-    await store.create({ id: 'goal', title: 'Before' })
+    await seedStoredDemand(store, { id: 'goal', title: 'Before' })
     const before = await fs.readFile(store.storePath)
     vi.spyOn(fs, 'rename').mockRejectedValueOnce(Object.assign(new Error('read-only storage'), { code: 'EACCES' }))
     await expect(store.update('goal', { title: 'After' }, { operationId: 'write-failed' })).rejects.toMatchObject({ code: 'WRITE_FAILED', commitStatus: 'not_applied', nameChange: { status: 'failed', actual: 'Before', ownerRevision: null } })
     expect(await fs.readFile(store.storePath)).toEqual(before)
-    expect(await fs.readdir(store.root)).toEqual(['store.json'])
+    expect((await fs.readdir(store.root)).sort()).toEqual(['store.json', 'store.lock'])
   })
 
   it('returns the confirmed title despite a throwing observer, warns, and continues other listeners', async () => {
     const store = openDemandStore({ root: await root() })
-    await store.create({ id: 'goal', title: 'Before' })
+    await seedStoredDemand(store, { id: 'goal', title: 'Before' })
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const observed: string[] = []
     store.subscribe(() => { throw new Error('observer unavailable') })
@@ -163,7 +167,7 @@ describe('Demand title owner', () => {
 
   it('keeps the actual replaced title but reports unknown durability when directory fsync fails', async () => {
     const store = openDemandStore({ root: await root() })
-    await store.create({ id: 'goal', title: 'Before' })
+    await seedStoredDemand(store, { id: 'goal', title: 'Before' })
     const actualOpen = fs.open.bind(fs)
     vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
       const handle = await actualOpen(...args)
@@ -193,13 +197,13 @@ describe('Demand title owner', () => {
     expect(await store.update('goal', { title: '' }, { operationId: 'invalid-unknown' }).catch(error => error)).toMatchObject({ commitStatus: 'confirmed', nameChange: { status: 'failed' } })
     expect(await fs.readFile(store.storePath)).toEqual(beforeConfirmedReplay)
     expect(observer).not.toHaveBeenCalled()
-    expect(await fs.readdir(store.root)).toEqual(['store.json'])
+    expect((await fs.readdir(store.root)).sort()).toEqual(['store.json', 'store.lock'])
   })
 
   it('retains ordered before/after evidence from independent writers and bounds history pages', async () => {
     const directory = await root()
     const stores = [openDemandStore({ root: directory }), openDemandStore({ root: directory })]
-    await stores[0]!.create({ id: 'goal', title: 'Before' })
+    await seedStoredDemand(stores[0]!, { id: 'goal', title: 'Before' })
     await Promise.all(stores.map((store, index) => store.update('goal', { title: `Writer ${index}` })))
     const first = await stores[0]!.listNameChanges('goal', { limit: 1 })
     const second = await stores[1]!.listNameChanges('goal', { offset: first.nextOffset!, limit: 1 })
@@ -213,7 +217,7 @@ describe('Demand title owner', () => {
 
   it('does not let an ordinary activity counterfeit an owner rename record', async () => {
     const store = openDemandStore({ root: await root() })
-    await store.create({ id: 'goal', title: 'Keep' })
+    await seedStoredDemand(store, { id: 'goal', title: 'Keep' })
     await expect(store.addActivity('goal', { kind: 'name-change', message: 'User renamed this', actorId: 'human' })).rejects.toMatchObject({ code: 'INVALID_INPUT' })
     expect((await store.get('goal'))?.activities).toEqual([])
   })
@@ -221,7 +225,7 @@ describe('Demand title owner', () => {
   it('routes standalone CLI updates into the same structured owner without trusting actor flags', async () => {
     const directory = await root()
     const store = openDemandStore({ root: directory })
-    await store.create({ id: 'goal', title: 'Before' })
+    await seedStoredDemand(store, { id: 'goal', title: 'Before' })
     const output: string[] = []
     const code = await runDemandCli(['--root', directory, 'update', '--id', 'goal', '--title', 'CLI title', '--actor-id', 'invented-human'], { stdout: value => output.push(value), stderr: value => output.push(value) })
     expect(code).toBe(0)
@@ -235,19 +239,22 @@ describe('Demand title owner', () => {
     const directory = await root()
     const compiled = path.join(directory, 'compiled')
     await exec(process.execPath, [path.resolve('node_modules/typescript/bin/tsc'), '-p', 'packages/demand/tsconfig.build.json', '--outDir', compiled])
+    await fs.writeFile(path.join(compiled, 'package.json'), JSON.stringify({ type: 'module' }))
+    await fs.symlink(path.resolve('packages/demand/node_modules'), path.join(compiled, 'node_modules'))
     const bin = path.join(compiled, 'bin/agentmux-demand.js')
     const demandRoot = path.join(directory, 'store')
-    await exec(process.execPath, [bin, '--root', demandRoot, 'create', '--id', 'native', '--title', 'Before'])
-    const { stdout } = await exec(process.execPath, [bin, '--root', demandRoot, 'update', '--id', 'native', '--title', 'After', '--actor-id', 'self-declared-human', '--operation-id', 'native-operation'])
+    const created = await exec(process.execPath, [bin, '--root', demandRoot, 'create', '--title', 'Before'])
+    const goalId = JSON.parse(created.stdout).demand.id
+    const { stdout } = await exec(process.execPath, [bin, '--root', demandRoot, 'update', '--id', goalId, '--title', 'After', '--actor-id', 'self-declared-human', '--operation-id', 'native-operation'])
     const applied = JSON.parse(stdout)
     expect(applied.receipt.nameChange).toMatchObject({ status: 'applied', context: { actor: { kind: 'device', verified: true }, source: 'local-cli' }, operationId: 'native-operation' })
     expect(applied.receipt.nameChange.context.actor.id).not.toBe('self-declared-human')
-    const read = await exec(process.execPath, [bin, '--root', demandRoot, 'name-history', '--id', 'native', '--limit', '1'])
+    const read = await exec(process.execPath, [bin, '--root', demandRoot, 'name-history', '--id', goalId, '--limit', '1'])
     expect(JSON.parse(read.stdout)).toMatchObject({ records: [applied.receipt.nameChange], nextOffset: null })
     const reopened = openDemandStore({ root: demandRoot })
-    expect((await reopened.get('native'))?.activities.at(-1)?.nameChange).toEqual(applied.receipt.nameChange)
-    await exec(process.execPath, [bin, '--root', demandRoot, 'delete', '--id', 'native', '--confirm', 'delete'])
-    const deletedRead = await exec(process.execPath, [bin, '--root', demandRoot, 'name-history', '--id', 'native', '--limit', '1'])
+    expect((await reopened.get(goalId))?.activities.at(-1)?.nameChange).toEqual(applied.receipt.nameChange)
+    await exec(process.execPath, [bin, '--root', demandRoot, 'delete', '--id', goalId, '--confirm', 'delete'])
+    const deletedRead = await exec(process.execPath, [bin, '--root', demandRoot, 'name-history', '--id', goalId, '--limit', '1'])
     expect(JSON.parse(deletedRead.stdout)).toMatchObject({ records: [applied.receipt.nameChange], nextOffset: null })
   })
 })

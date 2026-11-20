@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { openDemandStore } from '../src/demand-store.js'
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { parseDemandDispatch, parseDemandDispatchIntent, sameDemandDispatchIntent, type DemandQualifiedDispatchIntent, type DemandQualifiedDispatchReceipt } from '../src/dispatch.js'
 import { demandExecutionReferences, demandExecutionKey } from '../src/responsibility.js'
 import { demandAgentReferenceKey, projectDemandRelations } from '../src/relations.js'
@@ -32,7 +33,7 @@ it('keeps the original legacy dispatch bytes while qualified receipts require th
 it('the original writer arbitrates concurrent producers and retains the frozen body, note, source and operation through a separate process read', async () => {
   const root = await mkdtemp(join(tmpdir(), 'amx-qualified-dispatch-')); directories.push(root)
   const store = openDemandStore({ root }), original = intent()
-  await store.create({ id: 'original-goal', title: 'Original Goal', sessionIds: [original.target], assigneeSessionIds: [original.target] })
+  await seedStoredDemand(store, { id: 'original-goal', title: 'Original Goal', sessionIds: [original.target], assigneeSessionIds: [original.target] })
   const races = await Promise.allSettled([store.prepareDispatch('original-goal', original), store.prepareDispatch('original-goal', { ...original, prompt: 'Another producer body' })])
   expect(races.map(row => row.status).sort()).toEqual(['fulfilled', 'rejected'])
   const frozen = await store.inspectDispatch('original-goal', original.operationId)
@@ -60,7 +61,7 @@ it('the original writer arbitrates concurrent producers and retains the frozen b
 it('responsibility and relationship projections keep qualified execution identity instead of creating a Host or bare Session alias', async () => {
   const root = await mkdtemp(join(tmpdir(), 'amx-qualified-role-')); directories.push(root)
   const store = openDemandStore({ root }), original = intent()
-  await store.create({ id: 'goal', title: 'Original Goal', sessionIds: [original.target] })
+  await seedStoredDemand(store, { id: 'goal', title: 'Original Goal', sessionIds: [original.target] })
   const saved = (await store.prepareDispatch('goal', original)).demand
   const references = demandExecutionReferences(saved)
   expect(references).toEqual([{ kind: 'start', operationId: original.operationId, target: original.target, runId: original.runId }])

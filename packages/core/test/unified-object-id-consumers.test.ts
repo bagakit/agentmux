@@ -9,6 +9,7 @@ import { DurableAgentMuxMessageQueue } from '../src/agent-global-message-queue.j
 import { DeliveryAttemptStore } from '../src/delivery-attempt-store.js'
 import { deliveryFailure, newDeliveryLogId, validateDeliveryLogId, type DeliveryAttempt } from '../src/delivery-attempt.js'
 import { ContinuousProgressScheduler } from '../src/continuous-progress-scheduler.js'
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { openDemandStore } from '../../demand/src/demand-store.js'
 
 const execute = promisify(execFile)
@@ -92,10 +93,10 @@ it('creates and reopens Goal, activity, decision and submission IDs through the 
   for (const activity of saved.activities) expect(activity.id).toMatch(canonical)
   expect(saved.decisions[0]!.id).toMatch(canonical)
   const legacyId = 'demand_765ae7ef-b886-4681-b9b5-0bbc561e8f1a'
-  await store.create({ id: legacyId, title: 'Original durable goal' })
+  await seedStoredDemand(store, { id: legacyId, title: 'Original durable goal' })
   await store.addActivity(legacyId, { id: 'activity_original', kind: 'note', message: 'Original', actorId: null })
   expect((await openDemandStore({ root }).get(legacyId))!.activities[0]!.id).toBe('activity_original')
-  const cli = new URL('../../demand/dist/bin/agentmux-demand.js', import.meta.url).pathname
+  const cli = process.env.AGENTMUX_TEST_DEMAND_CLI || new URL('../../demand/dist/bin/agentmux-demand.js', import.meta.url).pathname
   for (const exactId of [id, legacyId]) {
     const output = await execute(process.execPath, [cli, '--root', root, 'show', '--id', exactId])
     expect(JSON.parse(output.stdout).demand.id).toBe(exactId)

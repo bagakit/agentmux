@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it } from 'vitest'
 import { openDemandStore } from '../src/demand-store.js'
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { delegationWorkerHostId, parseDemandDelegationIntent, type DemandDelegationIntent } from '../src/delegations.js'
 import { demandExecutionReferences } from '../src/responsibility.js'
 import { projectGoalPlan } from '../src/goal-plan.js'
@@ -20,7 +21,7 @@ const review = { operationId: 'original-review', nodeId: 'work', delegationOpera
   check: { command: 'pnpm test result', result: 'passed', evidence: ['artifacts/result.log'] }, note: '' }
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'goal-delegation-hosts-')); tickets = goalTickets(root); store = tickets.store
-  await store.create({ id: 'goal', title: 'One Goal', sessionIds: ['owner', 'worker'], assigneeSessionIds: ['owner', 'worker'], supervisorSessionId: 'owner' })
+  await seedStoredDemand(store, { id: 'goal', title: 'One Goal', sessionIds: ['owner', 'worker'], assigneeSessionIds: ['owner', 'worker'], supervisorSessionId: 'owner' })
   await store.proposeAlignment('goal', { summary: 'Original target', criteria, openQuestions: [] })
 })
 afterEach(async () => { await rm(root, { recursive: true, force: true }) })

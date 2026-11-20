@@ -45,7 +45,7 @@ async function cliCall(...args) {
 }
 async function seed(directory = root) {
   await fs.mkdir(directory, { recursive: true })
-  return cliCall('create', '--root', directory, '--id', 'original', '--title', 'Original goal', '--description', 'Complete original body', '--session-id', 'original-session', '--project-id', 'original-project', '--operation-id', 'original-create')
+  return cliCall('create', '--root', directory, '--title', 'Original goal', '--description', 'Complete original body', '--session-id', 'original-session', '--project-id', 'original-project', '--operation-id', 'original-create')
 }
 async function privateLegacyDirectory() {
   // Copy the original data only, representing a store left by an older writer.
@@ -53,25 +53,27 @@ async function privateLegacyDirectory() {
   await fs.copyFile(join(root, 'store.json'), join(directory, 'store.json'))
   return directory
 }
-function create(directory, id, pause) { return child({ root: directory, method: 'create', args: [{ id, title: id }], ...(pause ? { pause } : {}) }) }
+function create(directory, title, pause) { return child({ root: directory, method: 'create', args: [{ title }], ...(pause ? { pause } : {}) }) }
 async function success(item) { const result = await item.wait('result'); assert.equal((await item.exit).code, 0); return result.result }
 
 cases['kernel-exclusion'] = async () => {
-  await seed()
+  const { demand: original } = await seed()
   const first = create(root, 'left', 'snapshot')
   await first.wait('paused')
   const second = create(root, 'right')
   await second.wait('opened-lock')
   await delay(60) // let this process and the other writer's async poll progress while owner is held
   assert.equal(second.messages.some(value => value.event === 'result'), false, 'a second writer must wait for the original kernel owner')
-  first.resume(); await success(first); await success(second)
-  const updated = await Promise.all(['left', 'right'].map(id => command({ root, method: 'update', args: [id, { description: id + ' body' }] })))
+  first.resume()
+  const [left, right] = await Promise.all([success(first), success(second)])
+  const ids = [left.demand.id, right.demand.id]
+  const updated = await Promise.all(ids.map(id => command({ root, method: 'update', args: [id, { description: id + ' body' }] })))
   assert.equal(updated.length, 2)
-  await Promise.all(['left', 'right'].map(id => command({ root, method: 'addActivity', args: [id, { kind: 'progress', message: id + ' progress', actorId: null, operationId: id + '-activity' }] })))
+  await Promise.all(ids.map(id => command({ root, method: 'addActivity', args: [id, { kind: 'progress', message: id + ' progress', actorId: null, operationId: id + '-activity' }] })))
   const snapshot = (await cliCall('list', '--root', root))
   assert.equal(snapshot.revision, 7)
-  assert.deepEqual(snapshot.demands.map(value => value.id).sort(), ['left', 'original', 'right'])
-  for (const id of ['left', 'right']) {
+  assert.deepEqual(snapshot.demands.map(value => value.id).sort(), [...ids, original.id].sort())
+  for (const id of ids) {
     const goal = snapshot.demands.find(value => value.id === id)
     assert.equal(goal.description, id + ' body')
     assert.equal(goal.activities.filter(value => value.operationId === id + '-activity').length, 1)
@@ -88,29 +90,29 @@ cases['atomic-publication'] = async () => {
     if (point === 'before-publish') await assert.rejects(fs.stat(join(directory, 'store.lock')), { code: 'ENOENT' })
     else assert.equal(await fs.readFile(join(directory, 'store.lock'), 'utf8'), marker, 'the first published bytes must be a complete marker')
     const ended = await writer.stop(); assert.equal(ended.signal, 'SIGKILL')
-    await command({ root: directory, method: 'create', args: [{ id: 'after-crash', title: 'Continue original root' }] })
+    const { demand: created } = await command({ root: directory, method: 'create', args: [{ title: 'Continue original root' }] })
     const snapshot = await cliCall('list', '--root', directory)
-    assert.equal(snapshot.revision, 1); assert.deepEqual(snapshot.demands.map(value => value.id), ['after-crash'])
+    assert.equal(snapshot.revision, 1); assert.deepEqual(snapshot.demands.map(value => value.id), [created.id])
   }
 }
 
 cases['crash-and-original-receipts'] = async () => {
-  await seed()
-  await cliCall('update', '--root', root, '--id', 'original', '--title', 'Reviewed title', '--operation-id', 'original-title')
+  const { demand: { id: goalId } } = await seed()
+  await cliCall('update', '--root', root, '--id', goalId, '--title', 'Reviewed title', '--operation-id', 'original-title')
   const input = { kind: 'review', message: 'Original evidence', actorId: null, operationId: 'original-activity' }
-  await command({ root, method: 'addActivity', args: ['original', input] })
+  await command({ root, method: 'addActivity', args: [goalId, input] })
   const before = await fs.readFile(join(root, 'store.json'))
   const writer = create(root, 'unknown', 'snapshot'); await writer.wait('paused'); assert.equal((await writer.stop()).signal, 'SIGKILL')
   assert.deepEqual(await fs.readFile(join(root, 'store.json')), before)
-  const receipt = await command({ root, method: 'addActivity', args: ['original', input] })
+  const receipt = await command({ root, method: 'addActivity', args: [goalId, input] })
   assert.equal(receipt.replayed, true); assert.equal(receipt.revision, 3)
-  const title = await cliCall('update', '--root', root, '--id', 'original', '--title', 'Reviewed title', '--operation-id', 'original-title')
+  const title = await cliCall('update', '--root', root, '--id', goalId, '--title', 'Reviewed title', '--operation-id', 'original-title')
   assert.equal(title.receipt.replayed, true); assert.equal(title.receipt.nameChange.operationId, 'original-title')
-  const goal = (await cliCall('show', '--root', root, '--id', 'original')).demand
-  assert.equal(goal.id, 'original'); assert.equal(goal.description, 'Complete original body')
+  const goal = (await cliCall('show', '--root', root, '--id', goalId)).demand
+  assert.equal(goal.id, goalId); assert.equal(goal.description, 'Complete original body')
   assert.deepEqual(goal.sessionIds, ['original-session']); assert.equal(goal.projectId, 'original-project')
   assert.equal(goal.activities.filter(value => value.operationId === 'original-activity').length, 1)
-  await command({ root, method: 'create', args: [{ id: 'new-explicit', title: 'A new explicit action' }] })
+  await command({ root, method: 'create', args: [{ title: 'A new explicit action' }] })
   assert.equal((await cliCall('list', '--root', root)).revision, 4)
   const broken = await fs.mkdtemp(join(root, 'corrupt-'))
   await fs.writeFile(join(broken, 'store.json'), '{broken')
@@ -119,18 +121,18 @@ cases['crash-and-original-receipts'] = async () => {
 }
 
 cases['legacy-unknown'] = async () => {
-  await seed()
+  const { demand: { id: goalId } } = await seed()
   const directory = await privateLegacyDirectory(), legacy = child({ root: directory, legacy: true })
   await legacy.wait('legacy-held')
   const lock = join(directory, 'store.lock'), bytes = await fs.readFile(lock), original = await fs.readFile(join(directory, 'store.json'))
   const fd = await fs.open(lock, 'r+'); try { assert.equal(native.tryLock(fd.fd), true, 'old live writers already closed their FD; advisory-free cannot establish authority') } finally { await fd.close() }
   const denied = async location => {
-    const item = child({ root: location, method: 'update', args: ['original', { description: 'must not write' }], timeout: 100 })
+    const item = child({ root: location, method: 'update', args: [goalId, { description: 'must not write' }], timeout: 100 })
     assert.equal((await item.exit).code, 1, 'unknown legacy ownership must refuse this mutation')
     const failure = item.messages.find(value => value.event === 'failure'); assert.ok(failure)
     assert.equal(failure.error.phase, 'lock'); assert.equal(failure.error.code, 'WRITE_FAILED'); assert.match(failure.error.message, /ownership is unknown/)
     assert.deepEqual(await fs.readFile(join(location, 'store.json')), original)
-    assert.equal((await cliCall('show', '--root', location, '--id', 'original')).demand.description, 'Complete original body')
+    assert.equal((await cliCall('show', '--root', location, '--id', goalId)).demand.description, 'Complete original body')
   }
   await denied(directory); assert.deepEqual(await fs.readFile(lock), bytes)
   await legacy.stop(); await denied(directory); assert.deepEqual(await fs.readFile(lock), bytes)
@@ -141,44 +143,45 @@ cases['legacy-unknown'] = async () => {
   const released = await privateLegacyDirectory(), alive = child({ root: released, legacy: true })
   await alive.wait('legacy-held'); await denied(released)
   alive.resume(); await success(alive)
-  await command({ root: released, method: 'update', args: ['original', { description: 'explicit after original release' }] })
+  await command({ root: released, method: 'update', args: [goalId, { description: 'explicit after original release' }] })
   assert.equal(await fs.readFile(join(released, 'store.lock'), 'utf8'), marker)
   observations.push({ liveLegacyAdvisoryLock: true, killedLegacyStillUnknown: true, ordinaryReads: true })
 }
 
 cases['permanent-inode'] = async () => {
-  await seed()
+  const { demand: original } = await seed()
   const first = create(root, 'first', 'snapshot'); await first.wait('paused')
   const inode = (await fs.stat(join(root, 'store.lock'))).ino
   const waiter = create(root, 'waiter', 'snapshot'); await waiter.wait('opened-lock')
-  first.resume(); await success(first); await waiter.wait('paused')
+  first.resume(); const issuedFirst = await success(first); await waiter.wait('paused')
   // The waiter already opened the original inode before the first owner closes.
   // A release-unlink implementation lets a third writer acquire another inode.
   const third = create(root, 'third'); await third.wait('started'); await delay(60)
   assert.equal(third.messages.some(value => value.event === 'result'), false, 'release must not let a new opener overtake the old inode owner')
   assert.equal((await fs.stat(join(root, 'store.lock'))).ino, inode)
-  waiter.resume(); await success(waiter); await success(third)
-  assert.deepEqual((await cliCall('list', '--root', root)).demands.map(value => value.id).sort(), ['first', 'original', 'third', 'waiter'])
+  waiter.resume()
+  const [issuedWaiter, issuedThird] = await Promise.all([success(waiter), success(third)])
+  assert.deepEqual((await cliCall('list', '--root', root)).demands.map(value => value.id).sort(), [issuedFirst.demand.id, original.id, issuedThird.demand.id, issuedWaiter.demand.id].sort())
 }
 
 cases['acquisition-cleanup-ownership'] = async () => {
   for (const code of ['EEXIST', 'EACCES']) {
     const directory = await fs.mkdtemp(join(root, 'open-failure-'))
-    const failed = child({ root: directory, method: 'create', args: [{ id: 'never', title: 'Never' }], openFailure: code })
+    const failed = child({ root: directory, method: 'create', args: [{ title: 'Never' }], openFailure: code })
     const collision = await failed.wait('open-failure'); const failure = await failed.wait('failure'); await failed.exit
     assert.equal(failure.error.phase, 'lock')
     assert.equal(await fs.readFile(collision.path, 'utf8'), 'Existing file owned by another creator', 'cleanup cannot delete a temporary path it did not create')
     await assert.rejects(fs.stat(join(directory, 'store.lock')), { code: 'ENOENT' })
     await assert.rejects(fs.stat(join(directory, 'store.json')), { code: 'ENOENT' })
-    await command({ root: directory, method: 'create', args: [{ id: 'new-explicit', title: 'Original root still usable' }] })
+    await command({ root: directory, method: 'create', args: [{ title: 'Original root still usable' }] })
   }
 }
 
 cases['typed-close-receipts'] = async () => {
   for (const scenario of ['unknown', 'not_applied', 'confirmed-failed', 'confirmed-applied']) {
-    const directory = await fs.mkdtemp(join(root, scenario + '-')); await seed(directory)
+    const directory = await fs.mkdtemp(join(root, scenario + '-')); const { demand: { id: goalId } } = await seed(directory)
     const operationId = scenario + '-title', title = 'Title ' + scenario
-    const argv = ['update', '--root', directory, '--id', 'original', '--title', title, '--operation-id', operationId,
+    const argv = ['update', '--root', directory, '--id', goalId, '--title', title, '--operation-id', operationId,
       ...(scenario === 'confirmed-failed' ? ['--expected-revision', '0'] : [])]
     const failed = child({ root: directory, cli: true, argv, closeFailure: true,
       directorySyncFailure: scenario === 'unknown', beforeReplaceFailure: scenario === 'not_applied' })
@@ -202,27 +205,27 @@ cases['typed-close-receipts'] = async () => {
       }
       assert.deepEqual(await fs.readFile(join(directory, 'store.json')), before, 'original receipt checks cannot repeat the title mutation')
     }
-    const actual = (await cliCall('show', '--root', directory, '--id', 'original')).demand.title
+    const actual = (await cliCall('show', '--root', directory, '--id', goalId)).demand.title
     assert.equal(actual, scenario === 'not_applied' || scenario === 'confirmed-failed' ? 'Original goal' : title)
     observations.push({ scenario, commitStatus: error.commitStatus, nameStatus: error.nameChange.status, phase: error.phase })
   }
-  const directory = await fs.mkdtemp(join(root, 'primary-cause-')); await seed(directory)
-  const failed = child({ root: directory, method: 'update', args: ['original', { description: 'Never applied' }], primaryFailure: true, closeFailure: true })
+  const directory = await fs.mkdtemp(join(root, 'primary-cause-')); const { demand: { id: goalId } } = await seed(directory)
+  const failed = child({ root: directory, method: 'update', args: [goalId, { description: 'Never applied' }], primaryFailure: true, closeFailure: true })
   const failure = await failed.wait('failure'); await failed.exit
   assert.equal(failure.sameError, true); assert.equal(failure.sameCause, true)
   assert.equal(failure.cause.kind, 'goal-start-version-conflict'); assert.equal(failure.cleanupCount, 1)
-  assert.equal((await cliCall('show', '--root', directory, '--id', 'original')).demand.description, 'Complete original body')
+  assert.equal((await cliCall('show', '--root', directory, '--id', goalId)).demand.description, 'Complete original body')
 
 }
 
 cases['host-public-and-async-wait'] = async () => {
   const { hostFixture } = await import(pathToFileURL(host).href)
   const f = hostFixture(root); cleanup.push(() => f.owner.dispose())
-  const directory = join(root, 'demands'); await seed(directory)
+  const directory = join(root, 'demands'); const { demand: { id: goalId } } = await seed(directory)
   const owner = create(directory, 'held', 'snapshot'); await owner.wait('paused')
   let updated = false, confirmed = false
-  const update = f.call('goal.update', { goalId: 'original', patch: { description: 'Public Host update' }, operationId: 'public-update' }).then(value => { updated = true; return value })
-  const activity = f.call('goal.activity.inspect', { goalId: 'original', operationId: 'public-activity' }).then(value => { confirmed = true; return value })
+  const update = f.call('goal.update', { goalId, patch: { description: 'Public Host update' }, operationId: 'public-update' }).then(value => { updated = true; return value })
+  const activity = f.call('goal.activity.inspect', { goalId, operationId: 'public-activity' }).then(value => { confirmed = true; return value })
   // Attach rejection handlers immediately; assertions below still consume the
   // original promises, and fixture cleanup runs even on an invalid public call.
   void update.catch(() => {}); void activity.catch(() => {})
@@ -230,19 +233,19 @@ cases['host-public-and-async-wait'] = async () => {
   // held; another root has its own independent queue and physical lock.
   await delay(50)
   assert.equal(updated, false); assert.equal(confirmed, false)
-  assert.equal((await f.call('goal.inspect', { goalId: 'original' })).goal.id, 'original')
-  await command({ root: join(root, 'other-root'), method: 'create', args: [{ id: 'other', title: 'Other root' }] })
-  const timeout = child({ root: directory, method: 'update', args: ['original', { description: 'must time out' }], timeout: 30 })
+  assert.equal((await f.call('goal.inspect', { goalId })).goal.id, goalId)
+  await command({ root: join(root, 'other-root'), method: 'create', args: [{ title: 'Other root' }] })
+  const timeout = child({ root: directory, method: 'update', args: [goalId, { description: 'must time out' }], timeout: 30 })
   const failure = await timeout.wait('failure'); await timeout.exit
   assert.equal(failure.error.code, 'LOCK_TIMEOUT')
   owner.resume(); await success(owner)
   assert.equal((await update).goal.description, 'Public Host update'); await activity
-  const added = await f.call('goal.activity.append', { goalId: 'original', operationId: 'public-activity', kind: 'progress', message: 'Same public receipt' })
-  const replay = await f.call('goal.activity.append', { goalId: 'original', operationId: 'public-activity', kind: 'progress', message: 'Same public receipt' })
+  const added = await f.call('goal.activity.append', { goalId, operationId: 'public-activity', kind: 'progress', message: 'Same public receipt' })
+  const replay = await f.call('goal.activity.append', { goalId, operationId: 'public-activity', kind: 'progress', message: 'Same public receipt' })
   assert.equal(replay.receipt.replayed, true); assert.equal(added.activity.id, replay.activity.id)
-  const inspected = await f.call('goal.activity.inspect', { goalId: 'original', operationId: 'public-activity' })
+  const inspected = await f.call('goal.activity.inspect', { goalId, operationId: 'public-activity' })
   assert.equal(inspected.activity.id, added.activity.id)
-  assert.equal((await cliCall('show', '--root', directory, '--id', 'original')).demand.activities.filter(value => value.operationId === 'public-activity').length, 1)
+  assert.equal((await cliCall('show', '--root', directory, '--id', goalId)).demand.activities.filter(value => value.operationId === 'public-activity').length, 1)
   observations.push({ ordinaryPublicReadDuringWait: true, otherRootDuringWait: true, sameOperationActivity: added.activity.id })
 }
 

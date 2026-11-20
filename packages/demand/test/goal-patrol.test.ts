@@ -2,6 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { demandExecutionKey, demandExecutionReferences, demandResponsibilityScope, openDemandStore,
   type DemandPatrolAttempt, type DemandPatrolReportInput } from '../src/index.js'
 const roots: string[] = []
@@ -9,7 +10,7 @@ afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { rec
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'amux-patrol-domain-')); roots.push(root)
   const store = openDemandStore({ root })
-  await store.create({ id: 'goal', title: 'Original responsibility', supervisorSessionId: 'manager', assigneeSessionIds: ['manager', 'worker'], status: 'in_progress' })
+  await seedStoredDemand(store, { id: 'goal', title: 'Original responsibility', supervisorSessionId: 'manager', assigneeSessionIds: ['manager', 'worker'], status: 'in_progress' })
   await store.proposeAlignment('goal', { summary: 'Original goal', criteria: [{ id: 'AC', text: 'Original result' }], openQuestions: [] })
   await store.prepareDispatch('goal', { operationId: 'start', hostId: 'worker-host', agentSessionId: 'worker', runId: 'worker-run', prompt: 'Original task', execution: 'finite' })
   await store.recordDispatchPhase('goal', 'start', { stage: 'confirmed', receipt: { kind: 'core-prompt', itemId: 'prompt:start', createdAt: Date.now() } })

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it } from 'vitest'
 import { openDemandStore } from '../src/demand-store.js'
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { parseDemandDelegationAttentionInput, type DemandDelegationIntent } from '../src/delegations.js'
 
 const task: DemandDelegationIntent = { operationId: 'original-delegation', sourceMessageId: 'original-source', hostId: 'host', ownerAgentSessionId: 'owner', workerAgentSessionId: 'worker',
@@ -11,8 +12,8 @@ const attention = { operationId: 'original-attention', intentId: 'original-input
 let root: string, store: ReturnType<typeof openDemandStore>
 beforeEach(async () => {
   root = await fs.mkdtemp(join(tmpdir(), 'goal-attention-qualification-')); store = openDemandStore({ root })
-  await store.create({ id: 'goal', title: 'Original Goal', status: 'in_progress', assigneeSessionIds: ['owner', 'worker'], supervisorSessionId: 'owner' })
-  await store.create({ id: 'another-goal', title: 'Another retained Goal' })
+  await seedStoredDemand(store, { id: 'goal', title: 'Original Goal', status: 'in_progress', assigneeSessionIds: ['owner', 'worker'], supervisorSessionId: 'owner' })
+  await seedStoredDemand(store, { id: 'another-goal', title: 'Another retained Goal' })
   await store.proposeAlignment('goal', { summary: 'Original target', criteria: [{ id: 'criterion', text: 'Original result' }], openQuestions: [] })
   await store.prepareDelegation('goal', task, 'owner'); await store.linkDelegation('goal', task.operationId, task.sourceMessageId, 'owner')
 })

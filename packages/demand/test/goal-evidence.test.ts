@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
 import { fixturePath } from '../../../test/fixture-values.mjs'
 import { openDemandStore } from '../src/demand-store.js'
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { parseDemandEvidence, parseGroundingProposal, isCurrentGroundingAccepted, type DemandFileEvidence } from '../src/goals.js'
 
 const evidence: DemandFileEvidence = { kind: 'file', resource: { hostId: 'source-host', workspaceId: 'worktree', workspacePath: fixturePath('worktree'), zoneId: 'source-zone', zonePath: fixturePath('worktree/results'), path: 'results/check.log' }, revision: 'sha256:' + 'a'.repeat(64), location: { line: 3, column: 2 } }
@@ -33,7 +34,7 @@ it('keeps an original human acceptance independent of later proposal readiness',
 it('collects original resources from multiple reports, deduplicates values and restores them intact', async () => {
   const root = await mkdtemp(join(tmpdir(), 'goal-evidence-')); roots.push(root)
   const store = openDemandStore({ root })
-  await store.create({ id: 'goal', title: 'Original', assigneeSessionIds: ['owner', 'a', 'b'], supervisorSessionId: 'owner' })
+  await seedStoredDemand(store, { id: 'goal', title: 'Original', assigneeSessionIds: ['owner', 'a', 'b'], supervisorSessionId: 'owner' })
   await store.proposeAlignment('goal', { summary: 'Original', criteria: [{ id: 'c', text: 'Outcome' }], openQuestions: [] })
   for (const worker of ['a', 'b']) {
     const task = { operationId: 'delegate-' + worker, sourceMessageId: 'source-' + worker, hostId: 'source-host', ownerAgentSessionId: 'owner', workerAgentSessionId: worker, ownerRunId: 'owner-run', workerRunId: worker + '-run', threadId: 'thread', text: 'Original task', alignmentRevision: 1, criterionIds: ['c'] }

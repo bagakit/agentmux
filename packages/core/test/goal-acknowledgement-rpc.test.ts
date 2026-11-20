@@ -1,3 +1,4 @@
+import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { fixturePath } from './helpers/fixture-values.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -17,7 +18,8 @@ afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await 
 function original(request: AgentMuxControlRequest): AgentMuxControlResult {
   if (request.operation === 'demand.create') {
     const { alignment: _alignment, grounding: _grounding, ...pending } = goal
-    const demand = { ...pending, id: request.demandId ?? 'owner-generated', title: request.title, description: request.description ?? '', status: 'backlog' as const }
+    const demand = { ...pending, id: 'owner-generated', title: request.title, description: request.description ?? '', status: 'backlog' as const,
+      creationOrigin: { operationId: request.requestId, requesterAsSupervisor: false, requesterParticipationId: null, supervisorDefaultPending: false } }
     return { operation: request.operation, demand, receipt: { demandId: demand.id, createdAt: demand.createdAt } }
   }
   if (request.operation === 'demand.discuss') return { operation: request.operation, demand: goal, receipt: { demandId: goal.id, requestId: request.requestId, route: 'discussion', mode: request.mode, tabId: 'original-tab', regionId: 'original-region', hostId: null, agentSessionId: null } }
@@ -71,10 +73,10 @@ it('actual Unix CLI discovers and calls the three typed methods with exact busin
   expect(JSON.stringify(results)).not.toContain('requestId')
   expect(results[1]).toMatchObject({ result: { receipt: { confirmedRevision: 3, confirmedAt: 5 } } })
   expect(results[2]).toMatchObject({ result: { receipt: { submissionId: 'exact-report', acceptedAt: 7, acceptedWithGaps: false } } })
-  const create = await runCompiledObjectCli(['goal', 'create', '--goal', 'held-before-save', '--title', 'Untitled goal', '--risk', 'low', '--confirm', 'user', '--operation-id', 'held-create'], env)
+  const create = await runCompiledObjectCli(['goal', 'create', '--title', 'Untitled goal', '--risk', 'low', '--confirm', 'user', '--operation-id', 'held-create'], env)
   expect(create.code, create.stderr).toBe(0)
-  expect(execute.mock.calls.at(-1)![0]).toMatchObject({ operation: 'demand.create', demandId: 'held-before-save', title: 'Untitled goal' })
-  expect(JSON.parse(create.stdout)).toMatchObject({ result: { goal: { id: 'held-before-save' }, receipt: { goalId: 'held-before-save' } } })
+  expect(execute.mock.calls.at(-1)![0]).toMatchObject({ operation: 'demand.create', requestId: 'held-create', title: 'Untitled goal' })
+  expect(JSON.parse(create.stdout)).toMatchObject({ result: { goal: { id: 'owner-generated' }, receipt: { goalId: 'owner-generated' } } })
 }, 15_000)
 
 it.each([
@@ -87,7 +89,9 @@ it.each([
   ['goal.accept', { goalId: goal.id, expectedAlignmentRevision: 3, expectedSubmissionId: 'exact-report', acceptGaps: false, finish: true }, (r: any) => { r.goal.status = 'in_progress' }],
   ['goal.accept', { goalId: goal.id, expectedAlignmentRevision: 3, expectedSubmissionId: 'exact-report', acceptGaps: false }, (r: any) => { r.receipt.submissionId = 'another-result' }],
   ['goal.accept', { goalId: goal.id, expectedAlignmentRevision: 3, expectedSubmissionId: 'exact-report', acceptGaps: false }, (r: any) => { r.goal.grounding.acceptedAt = 9 }]
-  , ['goal.create', { goalId: 'held-original', title: 'Untitled goal', risk: 'low', confirmation: 'user' }, (r: any) => { r.goal.id = 'another-original'; r.receipt.goalId = 'another-original' }]
+  , ['goal.create', { title: 'Untitled goal', risk: 'low', confirmation: 'user' }, (r: any) => { r.receipt.goalId = 'another-original' }],
+  ['goal.create', { title: 'Untitled goal', risk: 'low', confirmation: 'user', operationId: 'current-original-create' },
+    (r: any) => { r.goal.id = 'another-original'; r.receipt.goalId = 'another-original'; r.goal.creationOrigin.operationId = 'another-create-operation' }]
 ] as const)('actual SDK rejects mismatched owner receipt %s', async (method, params, corrupt) => {
   const fixture = new ObjectCliProbe(async request => {
     const service = new AgentMuxRpcService({ execute: async request => original(request), coreClients: () => [] })
@@ -114,7 +118,7 @@ it('HTTP without transport authorization cannot invoke either new acknowledgemen
 it('actual CLI and SDK distinguish accepting from finishing through the original durable owner and preserve human authority', async () => {
   const root = await mkdtemp(join(tmpdir(), 'goal-close-')), socketPath = join(root, 'owner.sock')
   const store = openDemandStore({ root: join(root, 'goals') })
-  await store.create({ id: 'finish-goal', title: 'Reviewed outcome', status: 'in_progress', sessionIds: ['original-session'] })
+  await seedStoredDemand(store, { id: 'finish-goal', title: 'Reviewed outcome', status: 'in_progress', sessionIds: ['original-session'] })
   await store.proposeAlignment('finish-goal', { summary: 'Original agreement', criteria: [{ id: 'c', text: 'Observable result' }], openQuestions: [] })
   await store.confirmAlignment('finish-goal', 1)
   const report = await store.proposeGrounding('finish-goal', { alignmentRevision: 1, summary: 'Observed with a known gap', checks: [{ criterionId: 'c', outcome: 'gap', evidence: ['result.log'], note: 'A reviewed limitation remains.' }] })
