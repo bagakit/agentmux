@@ -12,7 +12,7 @@ async function buildEnvironment(output) {
   // but resolve its two pnpm exec tools locally without invoking an installer.
   const bin = resolve(output, 'build-tools'); await mkdir(bin)
   const script = resolve(bin, 'tools.mjs')
-  await writeFile(script, `import {execFileSync} from 'node:child_process';\nconst [action,tool,...args]=process.argv.slice(2);\nconst commands=${JSON.stringify({ tsc: resolve(repository, 'packages/core/node_modules/typescript/bin/tsc'), esbuild: resolve(repository, 'packages/core/node_modules/esbuild/bin/esbuild') })};\nif(action!=='exec'||!Object.hasOwn(commands,tool))throw new Error('Unqualified build tool request');\nexecFileSync(process.execPath,[commands[tool],...args],{stdio:'inherit'});\n`)
+  await writeFile(script, `import {execFileSync} from 'node:child_process';\nconst [action,tool,...args]=process.argv.slice(2);\nconst commands=${JSON.stringify({ tsc: resolve(repository, 'packages/core/node_modules/typescript/bin/tsc'), esbuild: resolve(repository, 'packages/core/node_modules/esbuild/bin/esbuild') })};\nif(action!=='exec'||!Object.hasOwn(commands,tool))throw new Error('Unqualified build tool request');\nexecFileSync(commands[tool],args,{stdio:'inherit'});\n`)
   const quote = value => "'" + value.replaceAll("'", "'\\''") + "'"
   const shim = resolve(bin, 'pnpm')
   await writeFile(shim, '#!/bin/sh\nexec ' + quote(process.execPath) + ' ' + quote(script) + ' "$@"\n')
