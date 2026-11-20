@@ -1,4 +1,4 @@
-import { getAmuxProtocolTemplate } from '@agentmux/core/amux-protocol'
+import { getAmuxProtocolTemplate, renderAmuxProtocol } from '@agentmux/core/amux-protocol'
 import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
 import { isDeepStrictEqual } from 'node:util'
 import { prepareGoalDelegationMaterials } from './goal-delegation-materials.js'
@@ -179,7 +179,8 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
             ownerAgentSessionId: intent.ownerAgentSessionId, workerAgentSessionId: intent.workerAgentSessionId,
             hostId: intent.hostId, alignmentRevision: intent.alignmentRevision, criterionIds: intent.criterionIds, ...(intent.planNodeId ? { planNodeId: intent.planNodeId } : {}),
             next: getAmuxProtocolTemplate('goal-task', 'delegated-work') })
-          intent = { ...intent, requestText: request.intent.text, text: intent.text + '\n\n[AgentMux delegation]\n' + coordination + '\n\n' + guidance }
+          intent = { ...intent, requestText: request.intent.text,
+            text: intent.text + '\n\n' + renderAmuxProtocol('goal-task', 'delegation-record', { coordination, guidance }) }
         }
       }
       if (!original && !existingSource) {

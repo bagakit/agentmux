@@ -1,4 +1,5 @@
 import { optionalInputEpoch } from '@agentmux/core/prompt-condition'
+import { renderAmuxProtocol } from '@agentmux/core/amux-protocol'
 import { readGoalInputEpoch, openGoalFiniteInput, openGoalFiniteInspection } from './goal-finite-runtime.js'
 import { demandAgentReferenceKey, type DemandSpaceMemberReference } from '@agentmux/demand/relations'
 import { createHash } from 'node:crypto'
@@ -125,7 +126,9 @@ export function createHostGoals(options: {
     { read: id => demands.get(id), subscribe: listener => demands.subscribe((snapshot, _ids, changes) => listener(changes, snapshot.revision, snapshot.demands)),
       workflowGuidance: async loopId => {
         const { maxConcurrent, maxAttempts } = await readGoalWorkflowPreferences(options.configurationPath)
-        return maxConcurrent || maxAttempts ? `For each new automatic Ticket dispatch in this continuation, set intent.workflowLoopId to ${JSON.stringify(loopId)}. The original owner enforces the Workflows budget (parallel: ${maxConcurrent || 'unlimited'}, new attempts: ${maxAttempts || 'unlimited'}). If it is exhausted, report the original completed and remaining Tickets without changing the dispatch origin or resending the task.` : ''
+        return maxConcurrent || maxAttempts ? renderAmuxProtocol('goal-task', 'workflow-budget', {
+          loop: JSON.stringify(loopId), parallel: String(maxConcurrent || 'unlimited'), attempts: String(maxAttempts || 'unlimited')
+        }) : ''
       },
       inspectInitial: loop => runtime.inspectContinuousProgressInitial(loop),
       continueInitial: async (loop, context) => {

@@ -303,11 +303,13 @@ export const AMUX_PROTOCOL_TEMPLATES = {
     "delegated-work": "Read the verified envelope.application and, when assigned, the current Ticket before acting. Use goal report --input FILE with this original delegation operation to return every delegated criterion with evidence, gap or unknown. Include sourceMessageId when reporting from another Core. For a question or blocker, reply to the original source and record message dispatch report --kind question|escalation. Keep the worker report distinct from collection by the current Supervisor. See amux goal --skill for verified handoff and exact Run closeout.",
     "workflow-budget-unknown": "The saved Workflows budget is unconfirmed. Read the original Goal settings before any new automatic Ticket dispatch.",
     "continuation": "As Supervisor of original Goal {{goal}} at confirmed revision {{revision}}, use amux goal plan active --help for the current Tickets. For dispatch, verify the assigned executor and original predecessor receipts. For review, independently verify the frozen delivery and record the actual result. Reconcile unknown receipts at the original owner. When all relevant Tickets have passed, prepare the result evidence for the person’s acceptance.\n\n{{original}}",
-    "review-result": "Review passed for Goal {{goal}}, Ticket {{ticket}}, attempt {{attempt}}. The original executor is Session {{session}}, Run {{run}}, Host {{host}}, Runtime {{runtime}}.\nIndependent reviewer: give this receipt to the current Supervisor and finish your review.\nCurrent Supervisor: verify the exact attempt, report collection and remaining work. Assign the next ready Ticket when appropriate. When the handoff is confirmed and work is finished, ask the original executor to use amux goal closeout for this exact attempt and Run.\nKeep the original Run and operation if any check or receipt is unknown. An authorized person or device can use amux agent stop inspect for the exact Stop receipt. See amux goal --skill.",
-    "report-result": "{{status}} Give the current Supervisor these original report references: {{handoff}}. Read back the handoff before checking whether you can stop your exact Run. See amux goal --skill.",
+    "review-result": "Review passed for Goal {{goal}}, Ticket {{ticket}}, attempt {{attempt}}. The original executor is Session {{session}}, Run {{run}}, Host {{host}}, Runtime {{runtime}}.\nIndependent reviewer: use amux goal inspect on the original Goal owner to confirm its current Supervisor. Give them this receipt through the authorized route and finish your review.\nCurrent Supervisor: verify the exact attempt, report collection and remaining work. Assign the next ready Ticket when appropriate. Once the handoff is confirmed, check the executor's other work and pending input on this Run before asking them to use amux goal closeout for this exact attempt and Run.\nKeep the original Run and operation if any check or receipt is unknown. An authorized person or device can use amux agent stop inspect for the exact Stop receipt. See amux goal --skill.",
+    "report-result": "{{status}} Use amux goal inspect on the original Goal owner to confirm its current Supervisor. Coordinate the handoff using the original report references: {{handoff}}. Read back the handoff before checking amux goal closeout for your exact Run. If the owner or handoff is unconfirmed, retain the original report and Run. See amux goal --skill.",
     "report-saved": "This Core saved your original Goal report.",
-    "report-submission": "This Core saved your report submission. The Goal owner’s receipt and collection still need confirmation.",
-    "collection-result": "If you remain the Goal’s Supervisor, acknowledge this saved collection to the original executor: {{handoff}}. Use the separate review and closeout receipts to check those outcomes. See amux goal --skill."
+    "report-submission": "This Core saved your report submission. The Goal owner’s receipt and collection still need confirmation. Check the original submission for its receipt.",
+    "collection-result": "If you remain the Goal’s Supervisor, acknowledge this saved collection to the original executor: {{handoff}}. Check review and closeout through their own receipts. People accept the Goal result through the original Goal. See amux goal --skill.",
+    "workflow-budget": "For each new automatic Ticket dispatch in this continuation, set intent.workflowLoopId to {{loop}}. The original owner enforces the Workflows budget (parallel: {{parallel}}, new attempts: {{attempts}}). When the parallel slots are full, wait for the original attempts to report and read the plan again. When the attempt limit is reached, report completed and remaining Tickets and stop new automatic dispatches in this continuation.",
+    "delegation-record": "[AgentMux delegation]\n{{coordination}}\n\n{{guidance}}"
   },
   "link": {
     "wire": "amux://{{target}}"
@@ -661,6 +663,15 @@ export const AMUX_PROTOCOL_PARAMETERS = {
     "report-submission": [],
     "collection-result": [
       "handoff"
+    ],
+    "workflow-budget": [
+      "loop",
+      "parallel",
+      "attempts"
+    ],
+    "delegation-record": [
+      "coordination",
+      "guidance"
     ]
   },
   "link": {
