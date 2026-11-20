@@ -188,7 +188,25 @@ if(localTaskScene || agentPinsScene){
  dispose()
  useAppStore.setState(arranged,true)
  globalThis.__taskLayoutAdmitWriter()
- if (window.__taskLayoutScene) {
+ if (window.__focusCreationScene) {
+  const historySources = api.sessions.historySources
+  const subjects = [
+   ['coverage', 'working', {kind:'local'}], ['audit', 'coverage', {kind:'local'}],
+   ['mobile', 'working', {kind:'local'}], ['permission', 'working', {kind:'local'}],
+   ['summary', 'working', {kind:'runtime',runtimeId:'unconfirmed-creator-device'}],
+  ].map(([id, parent, owner]) => {
+   const session = sessions.find(row => row.id === id)
+   return {agentSessionId:id,hostId:'local',state:'active',history:{
+    providerId: session.providerId,executorId: session.executorId,workspacePath: session.workspacePath,createdAt:now,
+    creation:{createOperationId:'original-creation-'+id,initialPrompt:'not-requested',createdBy:{agentSessionId:parent,owner,run:{runId:'original-run-'+parent}}}
+   }}
+  })
+  api.sessions.historySources = async options => {
+   const original = await historySources(options)
+   return options?.observation ? {...original,sources:subjects} : subjects
+  }
+ }
+ if (window.__taskLayoutScene && !window.__focusCreationScene) {
   const historySources = api.sessions.historySources
   let reads = 0, resolved = false, finish
   api.sessions.historySources = async options => {

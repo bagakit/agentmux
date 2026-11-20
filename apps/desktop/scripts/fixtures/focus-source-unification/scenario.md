@@ -26,6 +26,12 @@ The same original `working` Agent has controlled Core observations of a fresh wo
 
 The two Electron processes share one private user-data directory. They compare the actual persisted layout choice, original Tabs, split layouts and the unsent draft. Session observations and PTY paint come from the fixture.
 
+## Agent creation relationships
+
+Pass `--creation-relations` to follow a typed, Host-qualified creation record through the actual Focus Cards and Compact list. Select a creator and its child to verify the same dashed arrow direction. Compact list shows a working child and a completed grandchild, and links to a child in another project without duplicating its task row. Folding keeps a permission request visible in Attention. Search can find a child independently, and a separate observation with an unconfirmed Runtime cannot acquire a parent through a matching raw Session ID. The second private Electron process restores the original Tabs, layouts, unsent draft and chosen List layout.
+
+Set `AGENTMUX_FOCUS_CREATION_MUTATION=omit-creation` to omit the original creation fact in the loaded Renderer. The same scene must fail before the relation appears. The fixture controls history and Native I/O. Core creation admission, persistence and the public lookup are covered by `a2a-spawn.test.ts` and `a2a-spawn-product.test.ts`.
+
 ## Pinned Agents
 
 Pass `--agent-pins` to pin a local Agent from its Cards menu and a Source Agent from its Compact list keyboard menu. They share the same raw Session ID on different owners. Focus search narrows the visible pins and keeps both preferences. Each shortcut opens its original workface, including both Regions in the Source Tab. A third pin remains removable during a temporary gap in local observations and offers no other Agent as a substitute. Both processes use one private user-data directory to verify exact pins, order, layout, original Tabs and the unsent draft. Native Session observations and PTY painting are controlled.
