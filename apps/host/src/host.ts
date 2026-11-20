@@ -205,6 +205,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   const moteGroups = configurationPath && options.store instanceof AgentMuxFileAgentSessionStore ? createHostMoteGroups({
     store: new MoteGroupStore(join(dirname(options.store.path), 'mote-groups.sqlite')),
     agents: createHostMoteChat({ configurationPath, spatial: spatialState, runtime: originalRuntime }).agents,
+    ...(moteMain ? { main: moteMain } : {}),
     ...(content ? { files: content.moteGroupFiles } : {}),
     client: hostId => {
       if (hostId !== 'local') throw new AgentMuxError('The original built-in Group member Host is unavailable.', 'MOTE_GROUP_MEMBER_UNCONFIRMED')

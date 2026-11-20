@@ -1509,8 +1509,7 @@ export class AgentMuxRpcService {
       const input = parseMoteGroupParams(method, params)
       const caller = context.caller ? await this.authenticated(context, true) : undefined
       const agentOnly = method === 'space.mote.group.reply' || method === 'space.mote.group.members.leave'
-      const ownerOnly = method === 'space.mote.group.create' || method === 'space.mote.group.list' ||
-        method === 'space.mote.group.send' || method === 'space.mote.group.retry'
+      const ownerOnly = method === 'space.mote.group.retry'
       if (caller ? ownerOnly : agentOnly || !context.principal || !['user', 'device'].includes(context.principal.kind))
         throw new AgentMuxError('This Group operation requires its original authenticated workspace participant.', 'CONTROL_PERMISSION_DENIED')
       const owner = this.ports.moteGroups
