@@ -65,6 +65,8 @@ flowchart LR
 
 Agent 生命周期由 Host 的 Core owner 持有；Main 的 `RuntimeController` 沿原 Hosted client 调用公共 API。Browser 操作事实和订阅由准确 Browser 宿主消费共享的 [operation journal](../../packages/browser/src/browser-operation-journal.ts) 提供，Toolkit 能力由 [ToolkitOwner](../../apps/desktop/src/main/toolkit-owner.ts) 提供。Session lookup、角色绑定和消息编排归共享业务服务；CLI 不直接读写这些本地业务事实。独立 Host 不依赖 Main 提供内容与配置读取；真实焦点、窗口、Browser 等原生 owner 离线时明确局部不可用，服务存在不证明这些宿主能力已经就绪。
 
+Browser 包按能力提供 package exports。Desktop 和无窗口宿主依赖公开的领域入口。Renderer／preload 通过 `@agentmux/browser/model` 读取 Browser 契约和结果描述，宿主通过 `page` 与 `operations` 组合原页面能力。无窗口宿主从包根入口启动。包内文件随拥有该职责的模块调整。
+
 ## Goal 工作流
 
 独立 Host 在 `createHostGoals` 装配规划、派工和评审输入，`@agentmux/demand` 持有目标、计划与 Ticket 的事实。工作流沿 [Goal 计划与 Ticket](../design/behavior/goal-plans-and-tickets.md#工作流模板与计划修订指引) 的原身份、授权和回执推进。见 [Host 组装](../../apps/host/src/goals.ts)与 [DemandStore](../../packages/demand/src/demand-store.ts)。
