@@ -115,8 +115,9 @@ export function ProfileEnvironmentApplication({
         <small>Application scope</small>
       </summary>
       <p className="browser-profile-editor__quiet">
-        Saved settings and native application are separate. First-script, subdocument and Worker coverage is
-        unconfirmed.
+        {profile.environment?.fingerprint
+          ? 'Document registration and native application are reported for each Browser below.'
+          : 'Saved settings and native application are separate. First-script, subdocument and Worker coverage is unconfirmed.'}
       </p>
       {application?.reason ? <p className="browser-profile-editor__quiet">{application.reason}</p> : null}
       {pages.map((page) => (

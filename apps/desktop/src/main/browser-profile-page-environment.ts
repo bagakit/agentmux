@@ -235,7 +235,13 @@ export function createBrowserProfilePageEnvironment(ports: {
             delete page.fingerprintScript
             ensure()
           }
-          receipt.fields.fingerprint = { status: 'applied', scope: 'page-target', reason: 'Document script acknowledged on this page target. Worker and engine-wide coverage are unconfirmed.' }
+          receipt.fields.fingerprint = {
+            status: 'applied',
+            scope: 'page-target',
+            reason: settings?.fingerprint?.surfaces.length
+              ? 'Document-start script registered on this native page target. Frame coverage is unconfirmed. Workers retain their native behavior.'
+              : 'Document overrides cleared.'
+          }
         } catch (cause) {
           const reason = cause instanceof Error ? cause.message : String(cause)
           receipt.fields.fingerprint = { status: 'unknown', scope: 'page-target', reason }
