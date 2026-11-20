@@ -276,7 +276,7 @@ const focusTask = {
   scope: { kind: 'project' as const, projectSpaceId: 'original-focus-project', hostId: 'local' },
   selection: { kind: 'members' as const, references: [{ hostId: 'local', contextId: 'original-focus-member' }] }
 }
-const legacyFocusNote = MOTE_INPUT_GUIDANCE + '\n\n' + guideText(guideSharedFocusTaskHandoff) +
+const legacyFocusNote = 'Archived Mote collaboration guidance from the original input.' + '\n\n' + guideText(guideSharedFocusTaskHandoff) +
   '\n\nExact Focus reads (1 batch; read every batch and its remaining pages):\n' + focusReadCommand(focusTask)
 
 it.each(['terminal-confirmed', 'not-applied'] as const)('explicit Focus preparation retry preserves the original %s receipt', async outcome => {

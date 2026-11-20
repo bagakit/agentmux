@@ -37,7 +37,7 @@ it('opens the App-owned protocol directory from Settings Prompts without changin
   await act(async () => { entry?.focus(); entry?.click() })
   expect(connected('.documentation-dialog h2').textContent).toBe('amux Protocols')
   await act(async () => connected<HTMLButtonElement>('[aria-label="Close documentation"]').click())
-  expect(document.activeElement).toBe(entry)
+  await vi.waitFor(() => expect(document.activeElement?.textContent).toBe('amux Protocols'))
   expect(connected('[data-settings-pane="prompts"]').hidden).toBe(false)
   expect(settingsModules.map(module => module.id as string)).not.toContain('amux-protocols')
   expect(settingsNavGroups('').flatMap(group => group.items.map(module => module.id as string))).not.toContain('amux-protocols')
@@ -106,7 +106,7 @@ it('a retained inactive reference stops its own examples without deleting the or
 
 it('the original local CLI guide still derives its directory from Core and points to Documentation', () => {
   const skill = agentMuxModuleSkill('settings')!
-  expect(skill).toContain('Documentation → amux Protocols')
+  expect(skill).toContain('Open amux Protocols from Settings → Prompts')
   expect(skill).toContain("this local CLI's")
   expect(skill).toContain('does not describe the connected Runtime or an older installation')
   expect(generatedGuideCatalog.length).toBeGreaterThan(0)
