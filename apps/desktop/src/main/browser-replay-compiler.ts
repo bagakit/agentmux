@@ -1,5 +1,5 @@
 import { BROWSER_PAGE_CAPABILITY_NAMES } from '@agentmux/core'
-import type { BrowserReplayPlan, BrowserReplayStep } from '@agentmux/browser/model/browser-operation'
+import type { BrowserReplayPlan, BrowserReplayStep } from '@agentmux/browser/model'
 
 const REPLAYABLE_METHODS: ReadonlySet<string> = new Set(BROWSER_PAGE_CAPABILITY_NAMES)
 

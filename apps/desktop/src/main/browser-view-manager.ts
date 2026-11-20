@@ -1,5 +1,29 @@
 import { bindBrowserNativePageLifetime } from './browser-native-page-lifetime.js'
-import { prepareBrowserScreenshot, type BrowserScreenshotOptions } from '@agentmux/browser/browser-screenshot-options'
+import {
+  prepareBrowserScreenshot,
+  type BrowserScreenshotOptions,
+  readScreenshotViewport,
+  screenshotSource,
+  SCREENSHOT_VIEWPORT_SCRIPT,
+  parseBrowserStructuredOutputRequest,
+  resolveBrowserStructuredTarget,
+  installBrowserPageInterrupts,
+  describeBrowserPageDialog,
+  isBrowserPageDialogAnswer,
+  BROWSER_PAGE_DIALOG_ANSWERS,
+  BROWSER_PAGE_MAIN_READS,
+  type BrowserPageInterrupts,
+  createBrowserPageDispatch,
+  captureBrowserPageSnapshot,
+  type BrowserCdpSender,
+  sanitizeBrowserElementSelection,
+  BROWSER_SELECTION_WORLD_ID,
+  buildBrowserAnnotationMarkerScript,
+  buildCancelBrowserAnnotationMarkerScript,
+  buildBrowserElementSelectionScript,
+  buildSelectedBrowserElementExpression,
+  buildCancelBrowserElementSelectionScript
+} from '@agentmux/browser/page'
 import { withCleanBrowserFeedback, confirmBrowserFeedbackPaint } from './browser-feedback-presentation.js'
 import { readWorkbenchReturnContext, type WorkbenchReturnContext } from '../shared/workbench-windows'
 import { resolveBrowserNewPagePlacement, type BrowserNewPagePlacement } from '../shared/browser-new-page-placement'
@@ -24,13 +48,26 @@ import { browserPageMemory, BROWSER_PAGE_MEMORY_MAX_TITLE_LENGTH } from '../shar
 import { installNativeBrowserWindows } from './browser-native-windows.js'
 import { BROWSER_RECOVERY_PREVIEW_JPEG_PREFIX, BROWSER_RECOVERY_PREVIEW_MAX_WIDTH, BROWSER_RECOVERY_PREVIEW_MAX_HEIGHT,
   BROWSER_RECOVERY_PREVIEW_MAX_IMAGE_BYTES, type BrowserRecoveryPreviewScope } from '../shared/browser-recovery-preview.js'
-import { readScreenshotViewport, screenshotSource, SCREENSHOT_VIEWPORT_SCRIPT } from '@agentmux/browser/browser-screenshot-source'
 import { browserTaskProducerCriteria } from '../shared/browser-task-completion.js'
 import { getBrowserTaskRunCompletion } from '../shared/browser-task-reliability.js'
 import { evaluateBrowserOutcomeCriteria } from './browser-outcome-criteria.js'
-import { parseBrowserStructuredOutputRequest } from '@agentmux/browser/browser-structured-output'
-import { resolveBrowserStructuredTarget } from '@agentmux/browser/browser-structured-target'
-import { parseBrowserOutcomeCriteriaRequest, type BrowserOutcomeEvaluation, type BrowserOutcomeFieldRunInput, type BrowserOutcomeRegistration } from '@agentmux/browser/model/browser-outcome-criteria'
+import {
+  parseBrowserOutcomeCriteriaRequest,
+  type BrowserOutcomeEvaluation,
+  type BrowserOutcomeFieldRunInput,
+  type BrowserOutcomeRegistration,
+  type BrowserOperation,
+  type BrowserOperationStep,
+  type BrowserReplayPlan,
+  type BrowserReplayStep,
+  type BrowserStepEvidenceContent,
+  type BrowserStepEvidenceRead,
+  type BrowserResultContext,
+  type BrowserResultReadOptions,
+  type BrowserResultArtifactChunk,
+  type BrowserStructuredOutputReceipt,
+  type BrowserScopedSnapshot
+} from '@agentmux/browser/model'
 
 import { BaseWindow, dialog, nativeImage, session, WebContentsView, type BrowserWindow, type BrowserWindowConstructorOptions, type ContextMenuParams, type Referrer, type WebContents, type WebFrameMain, type Session } from 'electron'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -65,7 +102,6 @@ import type {
 import { browserPageShortcut } from '../shared/browser-page-shortcuts.js'
 import { DEFAULT_BROWSER_ZOOM_FACTOR, steppedBrowserZoom } from '../shared/browser-zoom.js'
 import type { AgentMuxControlErrorCode } from '@agentmux/core/control'
-import type { BrowserOperation, BrowserOperationStep, BrowserReplayPlan, BrowserReplayStep } from '@agentmux/browser/model/browser-operation'
 import { normalizeBrowserBounds } from '../shared/browser-bounds.js'
 import { browserViewportSize, cloneBrowserViewport, isBrowserViewport } from '../shared/browser-viewport.js'
 import { browserSearchUrl, resolveBrowserAddress } from '../shared/browser-address.js'
@@ -81,12 +117,31 @@ import type { BrowserPageMenuPresentation } from './browser-page-menu-presentati
 import { getDesktopNativeUiOwner } from './native-desktop-owner.js'
 import { BrowserCdpSession, DESKTOP_BROWSER_DIALOG_TYPES } from './browser-cdp-session.js'
 import { BrowserViewportTouch } from './browser-viewport-touch.js'
-import { openBrowserHarCapture } from '@agentmux/browser/browser-har-capture'
+import {
+  openBrowserHarCapture,
+  createBrowserStepEffectRecorder,
+  type BrowserStepEffectRecorder,
+  browserOperationPhaseFromOutcome,
+  browserRunOutcomeFromFailure,
+  appendBrowserWarning as appendWarning,
+  finishBrowserProgramReceipt,
+  finishBrowserProgramStep,
+  safeBrowserUrl,
+  startBrowserOperationStep,
+  recordBrowserOperationTarget,
+  summarizeBrowserValue,
+  BrowserRefLedgerStore,
+  runBrowserScript,
+  type BrowserOperationJournal,
+  BrowserStepEvidenceStore,
+  pageStepEvidence,
+  recordBrowserStepEvidence,
+  screenshotStepEvidence,
+  BrowserResultArtifactStore
+} from '@agentmux/browser/operations'
 import { BrowserCertificateDecision, type BrowserCertificateAnswer } from './browser-certificates.js'
 import { BrowserNativeInputShield } from './browser-native-input-shield.js'
 import { beginOwnDispatch, isOwnDispatch, type BrowserOwnDispatch } from './browser-own-dispatch.js'
-import { installBrowserPageInterrupts, describeBrowserPageDialog, isBrowserPageDialogAnswer, BROWSER_PAGE_DIALOG_ANSWERS, BROWSER_PAGE_MAIN_READS, type BrowserPageInterrupts } from '@agentmux/browser/browser-page-interrupts'
-import { createBrowserStepEffectRecorder, type BrowserStepEffectRecorder } from '@agentmux/browser/browser-step-effects'
 import { cancelBrowserWebAuthnAccounts, registerBrowserWebAuthnAccounts, type BrowserWebAuthnOwner } from './browser-webauthn-accounts.js'
 import { cancelBrowserWebAuthnAccess } from './browser-webauthn-access.js'
 import { registerBrowserSessionPermissions } from './browser-session-permissions.js'
@@ -94,29 +149,15 @@ import { BrowserSitePermissions, browserPermissionOrigin, type BrowserPermission
 import type { BrowserSitePermission, BrowserSitePermissionAnswer, BrowserSitePermissionDecision, BrowserSitePermissionState } from '../shared/browser-site-permissions.js'
 import { capturePageImage } from '@agentmux/native-desktop/image'
 import { browserPagePixels, exportBrowserPageImage } from './browser-image.js'
-import { createBrowserPageDispatch } from '@agentmux/browser/browser-page-dispatch'
-import { browserOperationPhaseFromOutcome, browserRunOutcomeFromFailure } from '@agentmux/browser/browser-run-outcome'
-import { appendBrowserWarning as appendWarning, finishBrowserProgramReceipt, finishBrowserProgramStep } from '@agentmux/browser/browser-program-completion'
-import { safeBrowserUrl, startBrowserOperationStep, recordBrowserOperationTarget, summarizeBrowserValue } from '@agentmux/browser/browser-operation-step'
-import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
 import {
   appLinkOutcome,
   appLinkRefusedMessage,
   classifyBrowserTarget,
   type AppLinkSchemeChoice
 } from './browser-app-link.js'
-import { runBrowserScript } from '@agentmux/browser/browser-script-runner'
 import { buildReplayScript } from './browser-replay-compiler.js'
-import { captureBrowserPageSnapshot, type BrowserCdpSender } from '@agentmux/browser/browser-page-snapshot'
 import { verifyBrowserSemanticTarget } from './browser-semantic-target.js'
-import type { BrowserOperationJournal } from '@agentmux/browser/browser-operation-journal'
-import { BrowserStepEvidenceStore, pageStepEvidence, recordBrowserStepEvidence, screenshotStepEvidence } from '@agentmux/browser/browser-step-evidence'
-import type { BrowserStepEvidenceContent, BrowserStepEvidenceRead } from '@agentmux/browser/model/browser-step-evidence'
 import type { BrowserPageSnapshot } from '../shared/contracts.js'
-import { BrowserResultArtifactStore } from '@agentmux/browser/browser-result-artifact'
-import type { BrowserResultContext, BrowserResultReadOptions, BrowserResultArtifactChunk } from '@agentmux/browser/model/browser-result-artifact'
-import type { BrowserStructuredOutputReceipt } from '@agentmux/browser/model/browser-structured-output'
-import type { BrowserScopedSnapshot } from '@agentmux/browser/model/browser-snapshot-query'
 import { BrowserDemonstrationCapture } from './browser-demonstration-capture.js'
 import { BrowserDemonstrationInterpreter } from './browser-demonstration-interpretation.js'
 import type { BrowserDemonstrationRecorder } from './browser-demonstration-recorder.js'
@@ -127,15 +168,6 @@ import { BrowserTaskAssets, isPageStep, runBrowserTaskAsset } from './browser-ta
 import { runBrowserTaskBatch, type BrowserTaskRunBudget } from './browser-task-batch.js'
 import type { BrowserTaskAsset, BrowserTaskAssetRun, BrowserTaskAssetRunInput, BrowserTaskAssetState, BrowserTaskContent, BrowserTaskStepExecution, BrowserTaskStep, BrowserTaskBatchInput, BrowserTaskBatchRun } from '../shared/browser-task-assets.js'
 import { recoverBrowserTaskStep, runBrowserTaskNavigation } from './browser-local-recovery.js'
-import { sanitizeBrowserElementSelection } from '@agentmux/browser/browser-selection'
-import {
-  BROWSER_SELECTION_WORLD_ID,
-  buildBrowserAnnotationMarkerScript,
-  buildCancelBrowserAnnotationMarkerScript,
-  buildBrowserElementSelectionScript,
-  buildSelectedBrowserElementExpression,
-  buildCancelBrowserElementSelectionScript
-} from '@agentmux/browser/browser-selection-script'
 
 type BrowserStorage =
   | { mode: 'normal'; profileId: string; partition: string }
@@ -4289,7 +4321,7 @@ export class BrowserViewManager {
       } }) } : {}),
       structuredOutput: {
         ...(taskPage?.step?.kind === 'extract' ? { protectedValues: taskPage.privateValues ?? [], protectSensitiveInputs: true,
-          beforeRead: (request: import('@agentmux/browser/model/browser-structured-output').BrowserStructuredOutputRequest) => {
+          beforeRead: (request: import('@agentmux/browser/model').BrowserStructuredOutputRequest) => {
             if (JSON.stringify(request) !== JSON.stringify(taskPage.step!.extraction) || safeBrowserUrl(observingView.webContents.getURL()) !== taskPage.step!.url) throw new Error('The original reviewed extraction page or schema changed. No replacement was read.')
           } } : {}),
         source: () => { requireLive(); if (entry.view !== observingView) throw new Error('The Browser view changed before structured observation.'); return { workspaceId: entry.workspaceId, browserId: entry.id,

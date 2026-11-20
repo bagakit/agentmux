@@ -1,4 +1,4 @@
-import type { BrowserOutcomeCriterion } from '@agentmux/browser/model/browser-outcome-criteria'
+import type { BrowserOutcomeCriterion } from '@agentmux/browser/model'
 import type { BrowserTaskVersion } from './browser-task-assets'
 
 /** Fixed definition only. Main binds these declarations to the operation before dispatch. */

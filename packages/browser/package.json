@@ -12,9 +12,17 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
-    "./*": {
-      "types": "./dist/*.d.ts",
-      "import": "./dist/*.js"
+    "./model": {
+      "types": "./dist/model.d.ts",
+      "import": "./dist/model.js"
+    },
+    "./page": {
+      "types": "./dist/page.d.ts",
+      "import": "./dist/page.js"
+    },
+    "./operations": {
+      "types": "./dist/operations.d.ts",
+      "import": "./dist/operations.js"
     }
   },
   "files": [

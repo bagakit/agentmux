@@ -1,5 +1,5 @@
-import type { BrowserReplayTarget } from '@agentmux/browser/model/browser-operation'
-import type { BrowserCdpSender, BrowserPageCapture } from '@agentmux/browser/browser-page-snapshot'
+import type { BrowserReplayTarget } from '@agentmux/browser/model'
+import type { BrowserCdpSender, BrowserPageCapture } from '@agentmux/browser/page'
 
 /** The caller proves its actual main-document DOM handle and owns the existing CDP session. */
 export async function verifyBrowserSemanticTarget(input: {

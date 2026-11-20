@@ -6,7 +6,7 @@ import { browserAgentEffectsCss, type BrowserAgentControlPreferences } from '../
 import { AgentProviderIcon } from '@agentmux/client-ui/components/AgentProviderIcon'
 import { BrowserControlBoundary } from '../BrowserControlBoundary'
 import { BrowserOperationStatus } from '../BrowserOperationSurface'
-import type { BrowserOperation } from '@agentmux/browser/model/browser-operation'
+import type { BrowserOperation } from '@agentmux/browser/model'
 
 const targets = [{ x: .23, y: .39 }, { x: .72, y: .39 }, { x: .72, y: .72 }] as const
 type PreviewPhase = 'running' | 'observing' | 'script' | 'navigating' | 'waiting' | 'completed' | 'human'

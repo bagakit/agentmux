@@ -160,7 +160,7 @@ import { WorkbenchUserStateStore } from './workbench-user-state.js'
 import { parseWorkbenchInputArchiveQuery } from '../shared/workbench-user-state.js'
 import type { DesktopLoadedRenderer, DesktopPackageIdentity } from '../shared/client-observation.js'
 import { projectAppearance } from './project-appearance.js'
-import { readBrowserOperationResult } from '@agentmux/browser/browser-operation-result'
+import { readBrowserOperationResult, type BrowserResultReadOptions } from '@agentmux/browser/model'
 import { executeBrowserTaskControl } from './browser-task-control.js'
 import { createBrowserAutomationGate } from './browser-automation-gate.js'
 import { discoverAgentSkills, mintAgentSessionId, runProcess } from '@agentmux/core'
@@ -273,13 +273,17 @@ import { BROWSER_LAST_SEEN_FAVICON_BATCH } from '../shared/browser-page-memory.j
 import type { BrowserRecoveryPreviewReadResult, BrowserRecoveryPreviewScope } from '../shared/browser-recovery-preview.js'
 import { browserResourceLocations } from './browser-resource-directory.js'
 import type { NativeOverlayRegion } from '../shared/native-overlay.js'
-import { BrowserOperationFileStore, BrowserOperationJournal, BROWSER_OPERATION_JOURNAL_FILE, browserOperationAlreadyExistsError } from '@agentmux/browser/browser-operation-journal'
+import {
+  BrowserOperationFileStore,
+  BrowserOperationJournal,
+  BROWSER_OPERATION_JOURNAL_FILE,
+  browserOperationAlreadyExistsError,
+  BrowserRefLedgerStore,
+  BrowserStepEvidenceStore,
+  BrowserResultArtifactStore
+} from '@agentmux/browser/operations'
 import { browserRunResult } from '../shared/browser-run-result.js'
 import { ipcResult } from '../shared/ipc-result.js'
-import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
-import { BrowserStepEvidenceStore } from '@agentmux/browser/browser-step-evidence'
-import { BrowserResultArtifactStore } from '@agentmux/browser/browser-result-artifact'
-import type { BrowserResultReadOptions } from '@agentmux/browser/model/browser-result-artifact'
 import { BrowserDemonstrationFileStore, BrowserDemonstrationRecorder, BROWSER_DEMONSTRATION_FILE } from './browser-demonstration-recorder.js'
 import { BrowserUploads } from './browser-uploads.js'
 import { BrowserDownloads } from './browser-downloads.js'
@@ -2600,7 +2604,7 @@ export async function registerIpc(args: {
     event,
     id: string,
     code: string,
-    operator?: import('@agentmux/browser/model/browser-operation').BrowserOperator,
+    operator?: import('@agentmux/browser/model').BrowserOperator,
     operationId?: string,
     caller?: Pick<import('@agentmux/core').AgentMuxControlCaller, 'agentSessionId'>
   ) => {
@@ -2625,7 +2629,7 @@ export async function registerIpc(args: {
   handleWithEvent('browser:setOperatorAvatar', async (event, input: Parameters<import('../shared/contracts.js').AgentMuxDesktopApi['browser']['setOperatorAvatar']>[0]) => {
     return await browsers.setOperatorAvatar(input)
   })
-  handleWithEvent('browser:checkOutcomeFields', async (event, id: string, input: import('@agentmux/browser/model/browser-outcome-criteria').BrowserOutcomeFieldRunInput) => {
+  handleWithEvent('browser:checkOutcomeFields', async (event, id: string, input: import('@agentmux/browser/model').BrowserOutcomeFieldRunInput) => {
     await browserAutomation(id, undefined)
     await ensureBrowser(id)
     return await browsers.checkOutcomeFields(id, input, 'human')
@@ -2661,7 +2665,7 @@ export async function registerIpc(args: {
   handleWithEvent('browser:returnControl', async (event, id: string, input?: import('../shared/contracts.js').BrowserControlHandoff) => {
     return await browsers.returnControl(id, input)
   })
-  handleWithEvent('browser:runReplay', async (event, id: string, plan: import('@agentmux/browser/model/browser-operation').BrowserReplayPlan, operator?: import('@agentmux/browser/model/browser-operation').BrowserOperator, caller?: Pick<import('@agentmux/core').AgentMuxControlCaller, 'agentSessionId'>) => {
+  handleWithEvent('browser:runReplay', async (event, id: string, plan: import('@agentmux/browser/model').BrowserReplayPlan, operator?: import('@agentmux/browser/model').BrowserOperator, caller?: Pick<import('@agentmux/core').AgentMuxControlCaller, 'agentSessionId'>) => {
     await browserAutomation(id, caller)
     await ensureBrowser(id)
     return await browsers.runReplay(id, plan, operator, caller)

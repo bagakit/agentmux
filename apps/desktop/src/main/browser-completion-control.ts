@@ -1,7 +1,7 @@
 import { BROWSER_COMPLETION_UNAVAILABLE_WARNING, parseBrowserCompletionFacts,
   type AgentMuxControlBrowserOperation, type AgentMuxControlResult } from '@agentmux/core'
-import type { BrowserOutcomeEvaluation } from '@agentmux/browser/model/browser-outcome-criteria'
-import type { BrowserOperationEvent } from '@agentmux/browser/browser-operation-journal'
+import type { BrowserOutcomeEvaluation } from '@agentmux/browser/model'
+import type { BrowserOperationEvent } from '@agentmux/browser/operations'
 
 type Operation = AgentMuxControlBrowserOperation & { outcome?: { evaluation?: BrowserOutcomeEvaluation } }
 

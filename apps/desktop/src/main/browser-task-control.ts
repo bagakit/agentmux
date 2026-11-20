@@ -1,7 +1,7 @@
 import type { BrowserTaskParallelList, BrowserTaskParallelInput, BrowserTaskParallelSummary, BrowserTaskParallelInspection, BrowserTaskParallelContinuationInput, BrowserTaskParallelContinuationReceipt } from '@agentmux/core/control'
 import { assertBrowserTaskControlTarget, parseBrowserTaskControlPayload, parseBrowserTaskControlResult, type BrowserTaskControlResult } from '@agentmux/core'
 import type { AgentMuxBrowserTaskSource, BrowserTaskCreateInput, BrowserTaskCreateStatus } from '@agentmux/core/control'
-import type { BrowserOperation } from '@agentmux/browser/model/browser-operation'
+import type { BrowserOperation } from '@agentmux/browser/model'
 import type { BrowserTaskAsset, BrowserTaskAssetRun, BrowserTaskAssetRunInput, BrowserTaskAssetState, BrowserTaskBatchInput, BrowserTaskBatchRun } from '../shared/browser-task-assets.js'
 import { getBrowserTaskReliability } from '../shared/browser-task-reliability.js'
 

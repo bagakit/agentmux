@@ -1,7 +1,6 @@
 import type { AgentMuxBrowserDialogType } from '@agentmux/core'
 import type { WebContents } from 'electron'
-import type { BrowserCdpSender } from '@agentmux/browser/browser-page-snapshot'
-import type { BrowserPageTransport, BrowserNetworkSession } from '@agentmux/browser/browser-page-transport'
+import type { BrowserCdpSender, BrowserPageTransport, BrowserNetworkSession } from '@agentmux/browser/page'
 
 /** Electron's native page-dialog adapter. Prompt declarations remain portable data. */
 export const DESKTOP_BROWSER_DIALOG_TYPES = ['alert', 'confirm', 'beforeunload'] as const satisfies readonly AgentMuxBrowserDialogType[]

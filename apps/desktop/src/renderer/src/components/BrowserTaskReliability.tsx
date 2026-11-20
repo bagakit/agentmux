@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { BrowserTaskReliability as Reliability, BrowserTaskReliabilityResult } from '../../../shared/browser-task-reliability'
-import type { BrowserOutcomeEvaluation } from '@agentmux/browser/model/browser-outcome-criteria'
+import type { BrowserOutcomeEvaluation } from '@agentmux/browser/model'
 
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
 const ThemeStatusWarningIcon = semanticIconComponent('status.warning')

@@ -1,5 +1,5 @@
 import type { WebContents } from 'electron'
-import type { BrowserCdpSender } from '@agentmux/browser/browser-page-snapshot'
+import type { BrowserCdpSender } from '@agentmux/browser/page'
 import { mintCapabilityToken } from '@agentmux/core/object-id'
 import { BROWSER_OPERATION_FEEDBACK_WORLD_NAME } from '../../browser-extension/protocol.js'
 

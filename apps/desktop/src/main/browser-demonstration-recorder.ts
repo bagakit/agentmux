@@ -2,7 +2,7 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import { mkdir, readFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { durableWriteFile } from '@agentmux/core'
-import type { BrowserReplayTarget } from '@agentmux/browser/model/browser-operation'
+import type { BrowserReplayTarget } from '@agentmux/browser/model'
 import type { BrowserDemonstrationDocument, BrowserDemonstrationDraft, BrowserDemonstrationStep } from '../shared/browser-demonstration.js'
 
 export const BROWSER_DEMONSTRATION_FILE = 'browser-demonstration-drafts.json'

@@ -10,7 +10,7 @@ import type {
   BrowserOperationPhase,
   BrowserOperationStep,
   BrowserReplayPlan
-} from '@agentmux/browser/model/browser-operation'
+} from '@agentmux/browser/model'
 import type { AgentAvatarAppearance, AgentSessionControl, BrowserScriptRunReport } from '../../../shared/contracts'
 import type { BrowserTaskAssetState } from '../../../shared/browser-task-assets'
 import { SemanticIcon } from './semantic-icons'

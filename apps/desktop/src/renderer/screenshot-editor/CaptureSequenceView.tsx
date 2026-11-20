@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Notice } from '@agentmux/client-ui/components/Notice'
-import { BROWSER_PNG_MAX_BYTES, BROWSER_PNG_MAX_DIMENSION, BROWSER_PNG_MAX_PIXELS } from '@agentmux/browser/model/page'
+import { BROWSER_PNG_MAX_BYTES, BROWSER_PNG_MAX_DIMENSION, BROWSER_PNG_MAX_PIXELS } from '@agentmux/browser/model'
 import type { BrowserPng } from '../../shared/contracts'
 import type { CaptureSequenceApi, CaptureSequenceInput, GifKeyframe, SequenceFrame, SequenceSnapshot } from '../../shared/capture-sequence'
 import { inspectGif, writeGifMetadata } from '../../shared/gif-metadata'

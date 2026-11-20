@@ -1,9 +1,8 @@
 import type { BrowserTaskStep, BrowserTaskStepExecution } from '../shared/browser-task-assets.js'
-import type { BrowserScopedSnapshot } from '@agentmux/browser/model/browser-snapshot-query'
-import type { BrowserOutcomeEvaluation } from '@agentmux/browser/model/browser-outcome-criteria'
+import type { BrowserScopedSnapshot, BrowserOutcomeEvaluation } from '@agentmux/browser/model'
 
-import { BrowserLocalRecoveryFailure, type BrowserRecoveryFailureKind } from '@agentmux/browser/browser-recovery-failure'
-export { BrowserLocalRecoveryFailure, type BrowserRecoveryFailureKind } from '@agentmux/browser/browser-recovery-failure'
+import { BrowserLocalRecoveryFailure, type BrowserRecoveryFailureKind } from '@agentmux/browser/operations'
+export { BrowserLocalRecoveryFailure, type BrowserRecoveryFailureKind } from '@agentmux/browser/operations'
 
 /** A rejected navigation may already have sent requests or changed the document. Never resend it. */
 export async function runBrowserTaskNavigation(load: () => Promise<unknown>): Promise<void> {

@@ -1,4 +1,4 @@
-import type { BrowserUploadPort, BrowserDownloadPort } from '@agentmux/browser/browser-file-port'
+import type { BrowserUploadPort, BrowserDownloadPort } from '@agentmux/browser/operations'
 import { uploadBrowserFiles, type BrowserUploads, type BrowserUploadContext } from './browser-uploads.js'
 import { waitForBrowserDownload, readBrowserDownload, type BrowserDownloads, type BrowserDownloadContext } from './browser-downloads.js'
 

@@ -1,5 +1,9 @@
-import { BrowserProgramOwner } from '@agentmux/browser/browser-program-owner'
-import type { BrowserProgramTarget, BrowserProgramSession, BrowserProgramPort } from '@agentmux/browser/browser-program-port'
+import {
+  BrowserProgramOwner,
+  type BrowserProgramTarget,
+  type BrowserProgramSession,
+  type BrowserProgramPort
+} from '@agentmux/browser/operations'
 import { ExternalBrowserRequestFailure, type ExternalBrowserBridge, type ExternalBrowserBinding } from './browser-external-bridge.js'
 import { attachExternalBrowserTarget } from './browser-external-target.js'
 import { uploadBrowserFiles, type BrowserUploads } from './browser-uploads.js'

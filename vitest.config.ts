@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { relative, join } from 'node:path'
 import { defaultExclude, defineConfig } from 'vitest/config'
+import { browserSourceAliases } from './packages/browser/scripts/source-build.mjs'
 import { radixOverlayAliases } from './packages/client-ui/scripts/radix-overlay-aliases'
 
 // 下面两个辅助文件跟着**本配置文件**走，不跟着 cwd 走。写成 `./x.ts` 的话，vitest 按 cwd 解析：
@@ -67,7 +68,7 @@ export const conversationSourceAliases = {
 }
 
 export default defineConfig({
-  resolve: { alias: { '@agentmux/browser': join(import.meta.dirname, 'packages/browser/src'), ...radixOverlayAliases } },
+  resolve: { alias: { ...browserSourceAliases(), ...radixOverlayAliases } },
   /**
    * `__AGENTMUX_WEB_PREVIEW__` 是 vite 的构建期常量（`apps/desktop/electron.vite.config.ts:22`
    * 注入 `'false'`），`lib/api.ts` 在**模块作用域**读它来决定走 mock 还是 desktop 桥。plain

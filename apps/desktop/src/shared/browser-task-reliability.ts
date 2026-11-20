@@ -1,5 +1,9 @@
-import type { BrowserOperation } from '@agentmux/browser/model/browser-operation'
-import type { BrowserOutcomeAssetRun, BrowserOutcomeCriterion, BrowserRegisteredOutcomeCriterion } from '@agentmux/browser/model/browser-outcome-criteria'
+import type {
+  BrowserOperation,
+  BrowserOutcomeAssetRun,
+  BrowserOutcomeCriterion,
+  BrowserRegisteredOutcomeCriterion
+} from '@agentmux/browser/model'
 import type { BrowserTaskAssetRun, BrowserTaskAssetState, BrowserTaskVersion } from './browser-task-assets.js'
 import type { BrowserTaskRunCompletion } from '@agentmux/core/control'
 import { browserTaskProducerCriteria } from './browser-task-completion'

@@ -14,7 +14,26 @@ import type { BrowserViewport } from './browser-viewport.js'
 import type { BrowserPageShortcutAction } from './browser-page-shortcuts.js'
 import type { BrowserTaskControlPayload, BrowserTaskControlResult } from '@agentmux/core'
 export type { LaunchOptionSelection } from '@agentmux/core'
-import type { BrowserOutcomeEvaluation, BrowserOutcomeFieldRunInput } from '@agentmux/browser/model/browser-outcome-criteria'
+import type {
+  BrowserOutcomeEvaluation,
+  BrowserOutcomeFieldRunInput,
+  BrowserActivityState,
+  BrowserOperator,
+  BrowserOperation,
+  BrowserReplayPlan,
+  BrowserStepEvidenceRead,
+  BrowserResultArtifactChunk,
+  BrowserResultReadOptions,
+  BrowserPng,
+  BrowserScreenshotCapture,
+  BrowserScriptRunReport,
+  BrowserElementRect,
+  BrowserElementSelection,
+  BrowserAnnotationMarker,
+  BrowserPageNode,
+  BrowserPageSnapshot,
+  BrowserPageFrameFailure
+} from '@agentmux/browser/model'
 import type { ToolkitPreferences } from './toolkit-preferences'
 import type { WorkspaceFilePreviewReadOptions, WorkspaceFilePreviewResult } from './workspace-file-preview'
 import type { ContinuousProgressApi } from './continuous-progress'
@@ -22,17 +41,14 @@ import type { AgentCatalogEntry, AgentPromptCondition, AgentPromptExecution, Age
 import type { AgentMuxAgentContinuityResult, AgentMuxAgentContinuityConflictReason, AgentMuxAgentContinuityUnavailableReason, AgentMuxContinuityOperation, AgentMuxContinuityControlResult } from '@agentmux/core/agent-session-recovery'
 export type CrashLogRevealResult = Exclude<AgentMuxControlCrashLogFact, { outcome: 'present' }> | { path: string; outcome: 'requested' }
 
-import type { BrowserActivityState, BrowserOperator, BrowserOperation, BrowserReplayPlan } from '@agentmux/browser/model/browser-operation'
-import type { BrowserStepEvidenceRead } from '@agentmux/browser/model/browser-step-evidence'
-import type { BrowserResultArtifactChunk, BrowserResultReadOptions } from '@agentmux/browser/model/browser-result-artifact'
 import type { BrowserDemonstrationState } from './browser-demonstration'
 import type { BrowserInputHistoryTarget, BrowserInputHistoryScope, BrowserInputHistorySnapshot, BrowserInputHistoryRecord } from './browser-input-history'
 export type { BrowserInputHistoryTarget, BrowserInputHistoryScope, BrowserInputHistoryEntry, BrowserInputHistorySnapshot, BrowserInputHistoryRecord } from './browser-input-history'
 import type { BrowserTaskAsset, BrowserTaskAssetRun, BrowserTaskAssetRunInput, BrowserTaskAssetState, BrowserTaskContent, BrowserTaskBatchInput, BrowserTaskBatchRun } from './browser-task-assets'
 import type { BrowserTaskCreateInput, BrowserTaskCreateStatus } from '@agentmux/core/control'
-export type { BrowserStepEvidenceRead } from '@agentmux/browser/model/browser-step-evidence'
-export type { BrowserActivityState, BrowserOperator } from '@agentmux/browser/model/browser-operation'
-export type { BrowserOperation, BrowserReplayPlan } from '@agentmux/browser/model/browser-operation'
+export type { BrowserStepEvidenceRead } from '@agentmux/browser/model'
+export type { BrowserActivityState, BrowserOperator } from '@agentmux/browser/model'
+export type { BrowserOperation, BrowserReplayPlan } from '@agentmux/browser/model'
 import {
   SCRATCH_WORKSPACE_ID,
   SCRATCH_WORKSPACE_NAME,
@@ -1557,9 +1573,8 @@ export type BrowserProfileImportSourceSummary = {
 export { BROWSER_VIEWPORT_PRESETS } from './browser-viewport'
 export type { BrowserViewport, BrowserViewportPreset, BrowserViewportSize } from './browser-viewport'
 
-export { BROWSER_PNG_MAX_BASE64_CHARS, BROWSER_PNG_MAX_BYTES, BROWSER_PNG_MAX_PIXELS, BROWSER_PNG_MAX_DIMENSION } from '@agentmux/browser/model/page'
-export type { BrowserPng, BrowserScreenshotCapture, BrowserScriptRunReport, BrowserElementRect, BrowserElementSelection, BrowserAnnotationMarker, BrowserPageNode, BrowserPageSnapshot, BrowserPageFrameFailure } from '@agentmux/browser/model/page'
-import type { BrowserPng, BrowserScreenshotCapture, BrowserScriptRunReport, BrowserElementRect, BrowserElementSelection, BrowserAnnotationMarker, BrowserPageNode, BrowserPageSnapshot, BrowserPageFrameFailure } from '@agentmux/browser/model/page'
+export { BROWSER_PNG_MAX_BASE64_CHARS, BROWSER_PNG_MAX_BYTES, BROWSER_PNG_MAX_PIXELS, BROWSER_PNG_MAX_DIMENSION } from '@agentmux/browser/model'
+export type { BrowserPng, BrowserScreenshotCapture, BrowserScriptRunReport, BrowserElementRect, BrowserElementSelection, BrowserAnnotationMarker, BrowserPageNode, BrowserPageSnapshot, BrowserPageFrameFailure } from '@agentmux/browser/model'
 
 export type BrowserEvent =
   | { type: 'native-opened'; browser: BrowserSnapshot; workspaceId: string | null; window: { width: number; height: number }; opening?: BrowserNativeOpening }

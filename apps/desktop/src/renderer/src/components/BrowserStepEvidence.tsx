@@ -1,6 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import type { BrowserOperation, BrowserOperationStep } from '@agentmux/browser/model/browser-operation'
-import type { BrowserStepEvidenceRead } from '@agentmux/browser/model/browser-step-evidence'
+import type { BrowserOperation, BrowserOperationStep, BrowserStepEvidenceRead } from '@agentmux/browser/model'
 import { api } from '../lib/api'
 import { BrowserStructuredFields } from './BrowserStructuredFields'
 

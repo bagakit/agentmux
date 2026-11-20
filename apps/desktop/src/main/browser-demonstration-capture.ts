@@ -1,12 +1,15 @@
 import { mintCapabilityToken } from '@agentmux/core/object-id'
 import type { WebContents } from 'electron'
 import type { BrowserDemonstrationDraft } from '../shared/browser-demonstration.js'
-import type { BrowserReplayTarget } from '@agentmux/browser/model/browser-operation'
+import type { BrowserReplayTarget } from '@agentmux/browser/model'
 import { BrowserCdpSession } from './browser-cdp-session.js'
 import { verifyBrowserSemanticTarget } from './browser-semantic-target.js'
 import { BrowserDemonstrationRecorder } from './browser-demonstration-recorder.js'
-import { captureBrowserPageSnapshot, type BrowserPageCapture } from '@agentmux/browser/browser-page-snapshot'
-import { BROWSER_SELECTION_WORLD_ID } from '@agentmux/browser/browser-selection-script'
+import {
+  captureBrowserPageSnapshot,
+  type BrowserPageCapture,
+  BROWSER_SELECTION_WORLD_ID
+} from '@agentmux/browser/page'
 import { isOwnDispatch, ownDispatchMark, ownDispatchSince } from './browser-own-dispatch.js'
 
 const STATE = '__agentMuxBrowserDemonstration'

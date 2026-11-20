@@ -32,7 +32,7 @@ import {
   type BrowserScriptRunReport
 } from '../../../shared/contracts'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
-import { narrowBrowserOperation, narrowBrowserReplayPlan, type BrowserOperation } from '@agentmux/browser/model/browser-operation'
+import { narrowBrowserOperation, narrowBrowserReplayPlan, type BrowserOperation } from '@agentmux/browser/model'
 import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { useBrowserAnnotationMarkers } from '../hooks/useBrowserAnnotationMarkers'

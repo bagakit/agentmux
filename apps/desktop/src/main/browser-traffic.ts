@@ -1,5 +1,5 @@
 import { mintObjectId } from '@agentmux/core/object-id'
-import type { openBrowserHarCapture } from '@agentmux/browser/browser-har-capture'
+import type { openBrowserHarCapture } from '@agentmux/browser/operations'
 import type { BrowserTrafficReceipt, BrowserTrafficTarget } from '../shared/browser-traffic.js'
 
 type Recorder = Awaited<ReturnType<typeof openBrowserHarCapture>>

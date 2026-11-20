@@ -9,7 +9,7 @@ import type { WorkspaceRecord } from '../shared/contracts.js'
 import type {
   BrowserDownloadSource, BrowserDownloadReceipt, BrowserDownloadReference,
   BrowserDownloadCurrentOwner, BrowserDownloadReadOptions, BrowserDownloadChunk
-} from '@agentmux/browser/model/browser-download'
+} from '@agentmux/browser/model'
 import type { WorkspaceFiles } from './workspace-files.js'
 
 const SCHEMA = 'agentmux.browser-download.v1'

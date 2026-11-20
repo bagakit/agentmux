@@ -32,8 +32,8 @@ type Pending = { binding: ExternalBrowserBinding; navigationId: string; allowNav
   resolve(value: unknown): void; reject(error: ExternalBrowserRequestFailure): void; timer: ReturnType<typeof setTimeout> }
 type Pairing = { workspaceId: string; expiresAt: number; extensionId?: string; instanceId?: string }
 
-import { BrowserRequestFailure as ExternalBrowserRequestFailure } from '@agentmux/browser/browser-program-port'
-export { BrowserRequestFailure as ExternalBrowserRequestFailure } from '@agentmux/browser/browser-program-port'
+import { BrowserRequestFailure as ExternalBrowserRequestFailure } from '@agentmux/browser/operations'
+export { BrowserRequestFailure as ExternalBrowserRequestFailure } from '@agentmux/browser/operations'
 
 /** A connection is transport, never a grant. Only a matching original binding can issue requests. */
 export class ExternalBrowserConnection {

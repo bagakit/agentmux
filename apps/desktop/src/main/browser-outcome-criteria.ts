@@ -1,13 +1,25 @@
-import type { BrowserOperation } from '@agentmux/browser/model/browser-operation'
-import type { BrowserStepEvidenceRead } from '@agentmux/browser/model/browser-step-evidence'
-import { BROWSER_RESULT_MAX_READ_BYTES, type BrowserResultArtifactChunk, type BrowserResultArtifactReference,
-  type BrowserResultReadOptions } from '@agentmux/browser/model/browser-result-artifact'
-import type { BrowserDownloadChunk, BrowserDownloadReadOptions, BrowserDownloadReceipt, BrowserDownloadReference } from '@agentmux/browser/model/browser-download'
-import type { BrowserStructuredSource } from '@agentmux/browser/model/browser-structured-output'
-import { BROWSER_OUTCOME_LIMITS, parseBrowserOutcomeCriteriaRequest,
-  type BrowserOutcomeAssetRun, type BrowserOutcomeConditionResult, type BrowserOutcomeEvaluation, type BrowserOutcomeHumanFact,
-  type BrowserOutcomeRegistration, type BrowserRegisteredOutcomeCriterion } from '@agentmux/browser/model/browser-outcome-criteria'
-import { parseBrowserStructuredOutputDocument, parseBrowserStructuredOutputRequest } from '@agentmux/browser/browser-structured-output'
+import {
+  type BrowserOperation,
+  type BrowserStepEvidenceRead,
+  BROWSER_RESULT_MAX_READ_BYTES,
+  type BrowserResultArtifactChunk,
+  type BrowserResultArtifactReference,
+  type BrowserResultReadOptions,
+  type BrowserDownloadChunk,
+  type BrowserDownloadReadOptions,
+  type BrowserDownloadReceipt,
+  type BrowserDownloadReference,
+  type BrowserStructuredSource,
+  BROWSER_OUTCOME_LIMITS,
+  parseBrowserOutcomeCriteriaRequest,
+  type BrowserOutcomeAssetRun,
+  type BrowserOutcomeConditionResult,
+  type BrowserOutcomeEvaluation,
+  type BrowserOutcomeHumanFact,
+  type BrowserOutcomeRegistration,
+  type BrowserRegisteredOutcomeCriterion
+} from '@agentmux/browser/model'
+import { parseBrowserStructuredOutputDocument, parseBrowserStructuredOutputRequest } from '@agentmux/browser/page'
 
 export type BrowserOutcomeCurrent = {
   workspaceId: string | null; browserId: string; navigationId: string

@@ -1,7 +1,6 @@
 import type { BrowserTaskParallelRecord, BrowserTaskParallelSelection, BrowserTaskParallelSummary } from './browser-task-parallel.js'
 import type { BrowserTaskCreateInput } from '@agentmux/core/control'
-import type { BrowserReplayTarget } from '@agentmux/browser/model/browser-operation'
-import type { BrowserOutcomeHumanFact } from '@agentmux/browser/model/browser-outcome-criteria'
+import type { BrowserReplayTarget, BrowserOutcomeHumanFact } from '@agentmux/browser/model'
 
 export type BrowserTaskHumanCheckpoint = BrowserOutcomeHumanFact & { pendingCursor: number }
 export type BrowserTaskRunIdentity = { runId: string; browserId: string; assetId: string; version: number }
@@ -50,7 +49,7 @@ export type BrowserTaskStep = {
   dialog?: { type: 'alert' | 'confirm' | 'prompt' | 'beforeunload'; action: 'accept' | 'dismiss'; promptParameterKey?: string }
   subflow?: BrowserTaskSubflow
   /** Saved schema only; withinRef belongs to one live program and cannot be retained. */
-  extraction?: Omit<import('@agentmux/browser/model/browser-structured-output').BrowserStructuredOutputRequest, 'withinRef'>
+  extraction?: Omit<import('@agentmux/browser/model').BrowserStructuredOutputRequest, 'withinRef'>
   label?: string
   branch?: BrowserTaskBranch
   wait?: BrowserTaskWait

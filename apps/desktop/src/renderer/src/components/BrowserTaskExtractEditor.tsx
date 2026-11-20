@@ -1,6 +1,6 @@
 import { TextInput } from '@agentmux/client-ui/input'
 import type { BrowserTaskCompletion, BrowserTaskStep } from '../../../shared/browser-task-assets'
-import type { BrowserStructuredFieldRequest } from '@agentmux/browser/model/browser-structured-output'
+import type { BrowserStructuredFieldRequest } from '@agentmux/browser/model'
 
 /** Edits definitions only. Values are read later from the original operation's artifact. */
 export function BrowserTaskExtractEditor({ step, criteria, busy, onChange, onCriteria }: {

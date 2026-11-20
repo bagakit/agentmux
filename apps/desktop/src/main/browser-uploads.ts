@@ -6,7 +6,7 @@ import { basename, join } from 'node:path'
 import type { WorkspaceRecord } from '../shared/contracts.js'
 import type { BrowserUploadFile, BrowserUploadReceipt, BrowserUploadSource, BrowserRetainedUploadSelection, BrowserRetainedUploads } from '../shared/browser-upload.js'
 import { WORKSPACE_FILE_MAX_BYTES } from '@agentmux/host/workspace-file-bytes'
-import type { BrowserCdpSender } from '@agentmux/browser/browser-page-snapshot'
+import type { BrowserCdpSender } from '@agentmux/browser/page'
 import type { WorkspaceFiles } from './workspace-files.js'
 
 const MAX_FILES = 4
@@ -19,8 +19,8 @@ const text = z.string().min(1).max(2048)
 const selectionMetadata = z.object({ version: z.literal(1), workspaceId: text, browserId: text, navigationId: text, operationId: text,
   documentSurvivesClient: z.boolean(), bytes: z.number().int().min(0).max(MAX_RETAINED_BYTES),
   files: z.array(z.object({ path: text, name: text, byteLength: z.number().int().min(0).max(WORKSPACE_FILE_MAX_BYTES), revision: text }).strict()).min(1).max(MAX_FILES) }).strict()
-import { BrowserUploadUnconfirmedError } from '@agentmux/browser/browser-file-port'
-export { BrowserUploadUnconfirmedError } from '@agentmux/browser/browser-file-port'
+import { BrowserUploadUnconfirmedError } from '@agentmux/browser/operations'
+export { BrowserUploadUnconfirmedError } from '@agentmux/browser/operations'
 export type BrowserUploadContext = BrowserUploadSource & {
   currentNavigationId(): string
   /** The original document may outlive this Client process. This is an owner fact, not a browser brand. */
