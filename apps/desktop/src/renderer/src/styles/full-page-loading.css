@@ -22,6 +22,7 @@
 .full-page-loading__brand { position: absolute; top: clamp(56px, 7.2vh, 72px); left: clamp(48px, 6.6vw, 108px); z-index: 1; display: flex; align-items: baseline; gap: var(--sp-4); pointer-events: none; }
 .full-page-loading__brand > span:first-child { color: var(--text); font-size: 19px; font-weight: 640; letter-spacing: -.03em; }
 .full-page-loading__brand > span:last-child { color: var(--text-3); font: var(--fs-micro)/1 var(--font-mono); letter-spacing: .14em; text-transform: uppercase; }
+.full-page-loading--app:has(.surface-state__details[open]) .full-page-loading__stage { padding-top: clamp(128px, 14vh, 144px); }
 .full-page-loading--app > .surface-state > .surface-state__content { width: min(445px, 46%); margin-inline: clamp(0px, 2vw, 32px) auto; }
 .full-page-loading--app .surface-state__title { max-width: 430px; font-size: clamp(40px, 3.5vw, 56px); font-weight: 560; letter-spacing: -.04em; line-height: 1.08; }
 .full-page-loading--app .full-page-loading__detail { max-width: 385px; }
