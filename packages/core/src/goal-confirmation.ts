@@ -26,7 +26,7 @@ function assertGoalConfirmation({ goalUrl, alignmentRevision, operationId }: Goa
 /** Readers use the original Goal and Core receipts to establish authority and effects. */
 export function formatGoalConfirmation(value: GoalConfirmation): string {
   assertGoalConfirmation(value)
-  const document = new DOMImplementation().createDocument(null, null, null)
+  const document = new DOMImplementation().createDocument(null, '', null)
   const element = document.createElement(tag)
   element.setAttribute('version', '2')
   element.setAttribute('action', action)
