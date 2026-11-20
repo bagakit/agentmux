@@ -165,6 +165,6 @@ Start receipt stays unknown and is never permission to submit another Start or i
 The reply adopts only the matching original Session and creation receipt.
 
 This operation requires the same transport-authenticated user/device authority as
-execution creation. It does not elevate a managed Agent. `execution rejoin` only
-reattaches the original helper readers; `creation continue` remains the separate
-continuation for an active ordinary creation wait. Neither is an alias for this action.
+execution creation. `execution rejoin` keeps healthy original helper readers and
+reattaches them when their connection needs recovery. A failed rejoin attempt
+returns its own error. `creation continue` handles an active ordinary creation wait.
