@@ -36,7 +36,7 @@ export function isBrowserPageDialogAnswer(name: string, args: readonly unknown[]
  * held file chooser), never the document. They answer at once while a dialog is open, so they are
  * neither refused nor raced; pageInfo is also how a program reads a held file chooser.
  */
-export const BROWSER_PAGE_MAIN_READS: ReadonlySet<string> = new Set(['pageInfo', 'waitForUrl'])
+export const BROWSER_PAGE_MAIN_READS: ReadonlySet<string> = new Set(['pageInfo', 'waitForUrl', 'finishHarCapture'])
 
 export type BrowserPageDialogType = 'alert' | 'confirm' | 'prompt' | 'beforeunload'
 export type BrowserPageDialog = { type: BrowserPageDialogType; message: string; url: string }

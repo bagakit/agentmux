@@ -94,12 +94,23 @@ export function collectBrowserHar(now: () => number = Date.now) {
       }
     }
   }
-  function snapshot(gap: string | null) {
+  function snapshot(gap: string | null, maximumBytes?: number, previewEntries?: number) {
+    const retained = previewEntries === undefined ? transfers : transfers.slice(-previewEntries)
+    const entries: ReturnType<typeof harEntry>[] = []
+    let outputBytes = 0
+    for (const transfer of retained) {
+      const entry = harEntry(transfer)
+      if (maximumBytes !== undefined) {
+        outputBytes += Buffer.byteLength(JSON.stringify(entry)) + 1
+        if (outputBytes > maximumBytes) break
+      }
+      entries.push(entry)
+    }
     return {
       log: {
         version: '1.2', creator: { name: 'AgentMux', version: '1' },
-        entries: transfers.map(harEntry),
-        _capture: { scope: 'page-target-http', startedAt, observedAt: now(), dropped, unmatched,
+        entries,
+        _capture: { scope: 'page-target-http', startedAt, observedAt: now(), dropped: dropped + retained.length - entries.length, retained: transfers.length, unmatched,
           pending: inflight.size, gap, content: 'metadata-only' }
       }
     }
@@ -108,7 +119,7 @@ export function collectBrowserHar(now: () => number = Date.now) {
 }
 
 /** An independent lease isolates recording from the normal page program and request rules. */
-export async function openBrowserHarCapture(open: () => Promise<BrowserNetworkSession>, signal?: AbortSignal) {
+export async function openBrowserHarCapture(open: () => Promise<BrowserNetworkSession>, signal?: AbortSignal, maximumBytes?: number) {
   signal?.throwIfAborted()
   const session = await open()
   const collector = collectBrowserHar()
@@ -118,6 +129,7 @@ export async function openBrowserHarCapture(open: () => Promise<BrowserNetworkSe
   let finishing: Promise<ReturnType<typeof collector.snapshot>> | undefined
   const finish = () => finishing ??= (async () => {
     unsubscribe()
+    signal?.removeEventListener('abort', cancel)
     const originalGap = session.endedReason
     let timer: ReturnType<typeof setTimeout> | undefined
     const closeGap = await Promise.race([
@@ -126,13 +138,16 @@ export async function openBrowserHarCapture(open: () => Promise<BrowserNetworkSe
         timer = setTimeout(() => resolve('Native recording release is still unconfirmed.'), 1000)
       })
     ]).finally(() => clearTimeout(timer))
-    return collector.snapshot(originalGap ?? closeGap)
+    return collector.snapshot(originalGap ?? closeGap, maximumBytes)
   })()
+  const cancel = () => { void finish() }
+  signal?.addEventListener('abort', cancel, { once: true })
   try {
+    signal?.throwIfAborted()
     await session.sendCommand('Network.enable')
     signal?.throwIfAborted()
     if (session.endedReason) throw new Error('The original Browser recording connection ended before acknowledgement.')
-    return { startedAt: collector.startedAt, finish }
+    return { startedAt: collector.startedAt, finish, snapshot: (previewEntries?: number) => collector.snapshot(session.endedReason, maximumBytes, previewEntries) }
   } catch (error) {
     await finish()
     throw error

@@ -25,6 +25,7 @@ import { browserCdpScopeRefusal, isBrowserCdpNativeInput } from './browser-cdp-s
 import type { BrowserPageInterrupts } from './browser-page-interrupts.js'
 import { createBrowserNetworkObservations } from './browser-network-observation.js'
 import { createBrowserNetworkRouting } from './browser-network-routing.js'
+import { BROWSER_RESULT_INLINE_BYTES } from './model/browser-result-artifact.js'
 import { openBrowserHarCapture } from './browser-har-capture.js'
 import { parseBrowserScreenshotOptions, type BrowserScreenshotOptions } from './browser-screenshot-options.js'
 import { isBrowserViewport, type BrowserViewport } from '@agentmux/core/browser-viewport'
@@ -1078,7 +1079,8 @@ export function createBrowserPageDispatch(
         let capture: Awaited<ReturnType<typeof openBrowserHarCapture>> | undefined
         const lifecycle = new AbortController()
         const signal = context.signal ? AbortSignal.any([context.signal, lifecycle.signal]) : lifecycle.signal
-        const opening = openBrowserHarCapture(() => session.openNetworkSession!(), signal).then(opened => {
+        const maximumBytes = context.resultArtifacts?.owner.workspaceId ? undefined : BROWSER_RESULT_INLINE_BYTES - 2048
+        const opening = openBrowserHarCapture(() => session.openNetworkSession!(), signal, maximumBytes).then(opened => {
           capture = opened
           if (signal.aborted) void opened.finish()
           return opened

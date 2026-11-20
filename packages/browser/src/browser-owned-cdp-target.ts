@@ -5,7 +5,7 @@ import type { BrowserNetworkSession } from './browser-page-transport.js'
 import { BrowserRequestFailure } from './browser-program-port.js'
 
 const EVENTS = ['Page.frameNavigated','Page.navigatedWithinDocument','Page.loadEventFired','Page.javascriptDialogOpening',
-  'Page.javascriptDialogClosed','Page.fileChooserOpened','Network.requestWillBeSent','Network.responseReceived','Network.loadingFinished','Network.loadingFailed','Network.dataReceived','Input.dragIntercepted','Fetch.requestPaused'] as const
+  'Page.javascriptDialogClosed','Page.fileChooserOpened','Network.requestWillBeSent','Network.responseReceived','Network.loadingFinished','Network.loadingFailed','Input.dragIntercepted','Fetch.requestPaused'] as const
 /** Puppeteer's original flattened CDP sessions supply page and OOPIF senders. No target is reselected. */
 export class OwnedBrowserTargetSession implements BrowserProgramSession {
   readonly frames = new Map<string, BrowserCdpSender>()
@@ -27,7 +27,7 @@ export class OwnedBrowserTargetSession implements BrowserProgramSession {
     const native = this.root.connection()?.session(sessionId)
     if (!native) throw new Error('The original network session acknowledgement is unavailable. No replacement target is selected.')
     const listeners = new Set<(method: string, params: unknown) => void>()
-    const removals = EVENTS.map(method => {
+    const removals = [...EVENTS, 'Network.dataReceived' as const].map(method => {
       const fn = (params: unknown) => { for (const listener of listeners) listener(method, params) }
       native.on(method, fn); return () => native.off(method, fn)
     })
