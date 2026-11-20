@@ -11,7 +11,7 @@ import { DEFAULT_PERFORMANCE_PREFERENCES, DEFAULT_MOBILE_CONNECTION_PREFERENCES 
 import { resolveUserProfile, type UserProfile } from '@agentmux/host/mote-model'
 import { resolveFocusRecentActivityHours, resolveFocusTopicPresentation, resolveFocusLinkDestination, resolveFocusReplyLines, resolveFocusPreviewTrigger, resolveFocusRecentInputs, resolveFocusMapMotion, resolveFocusSelectionFillPercent, resolveFocusSelectionBorderPercent, resolveFocusSelectionAccent } from './focus-preferences'
 import { resolveFocusMapPreferences, type FocusMapPreferences } from './focus-map-preferences'
-import { resolveGoalsCommonActions, resolveGoalsPreferences, type GoalsPreferences } from '@agentmux/host/goals-preferences'
+import { resolveGoalsCommonActions, resolveGoalsPreferences, resolveGoalWorkflowPreferences, type GoalsPreferences, type GoalWorkflowPreferences } from '@agentmux/host/goals-preferences'
 import { resolveNotesPreferences, type NotesPreferences } from './notes-preferences'
 import { resolveMarkdownPreferences, type MarkdownPreferences } from './markdown-preferences'
 import { resolveBrowserStartPage, type BrowserStartPageConfig } from './browser-start-page'
@@ -61,7 +61,11 @@ const preferenceDomains = new Map<string, PreferenceDomain>(Object.entries({
   'focus.map': { resolve: value => resolveFocusMapPreferences(value as FocusMapPreferences | undefined), merge: 'resolved' },
   notes: { resolve: value => resolveNotesPreferences(value as NotesPreferences | undefined), merge: 'authored' },
   markdown: { resolve: value => resolveMarkdownPreferences(value as MarkdownPreferences | undefined), merge: 'authored' },
-  goals: { resolve: value => resolveGoalsPreferences(value as GoalsPreferences | undefined), merge: 'authored' },
+  goals: { resolve: value => {
+    const goals = value as GoalsPreferences | undefined
+    return { ...resolveGoalsPreferences(goals), workflow: resolveGoalWorkflowPreferences(goals?.workflow) }
+  }, merge: 'authored' },
+  'goals.workflow': { resolve: value => resolveGoalWorkflowPreferences(value as GoalWorkflowPreferences | undefined) },
   promotion: { resolve: value => value ?? { enabled: true }, merge: 'authored' },
   messageToolCompletion: { resolve: value => resolveComposerInputConfig(value as ComposerInputConfig | undefined), merge: 'resolved',
     // null is an authored disabled prefix, not a missing preference.
@@ -124,6 +128,12 @@ export function applyConfigEdit(current: AppConfig, before: AppConfig, after: Ap
   function merge(actual: unknown, expected: unknown, requested: unknown, path: string): unknown {
     if (configValuesEqual(effective(path, expected), effective(path, requested))) return actual
     if (configValuesEqual(effective(path, actual), effective(path, requested))) return actual
+    if (path === 'goals.workflow') {
+      // Save the form as one value so concurrent edits cannot splice a new
+      // recipient out of two individually valid reviewer bindings.
+      if (!configValuesEqual(effective(path, actual), effective(path, expected))) throw new ConfigConflict(path)
+      return requested
+    }
     const domain = preferenceDomains.get(path)
     if (domain?.merge) {
       // Compare defaults without persisting optional fields the user did not edit.

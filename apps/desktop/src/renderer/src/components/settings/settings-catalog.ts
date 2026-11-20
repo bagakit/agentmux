@@ -50,7 +50,7 @@ export type SettingsModule = {
   description: string
   keywords: string
   searchTargets?: readonly SettingsSearchTarget[]
-  subpages?: readonly { field: string; title: string }[]
+  subpages?: readonly { field: string; title: string; description?: string }[]
   icon: ComponentType<{ size?: number | undefined; animation?: IconAnimation | undefined }>
   /** Presentation of this leaf's applications. Never implementation support or native authorization. */
   channel?: { adapterId: string; domains: readonly { domain: string; title: string }[]; icon: ComponentType<{ size?: number | undefined }> }

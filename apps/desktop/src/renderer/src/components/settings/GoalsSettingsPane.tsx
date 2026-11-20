@@ -1,6 +1,6 @@
 import { Switch } from '@agentmux/client-ui/input'
 import { useId, useRef } from 'react'
-import { GOALS_VIEW_IDS, resolveGoalsPreferences, type GoalsPreferences } from '@agentmux/host/goals-preferences'
+import { GOALS_VIEW_IDS, resolveGoalsPreferences, type GoalsPreferences, type ResolvedGoalsPreferences } from '@agentmux/host/goals-preferences'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraft } from './use-setting-draft'
 import { GoalsIntroduction } from './SettingsConceptIntro'
@@ -13,7 +13,7 @@ import '../../styles/settings-workflows.css'
 export function GoalsSettingsPane({ config, preferences, onSave, onOpenPrompts }: {
   config: AppConfig
   preferences?: GoalsPreferences | undefined
-  onSave(preferences: Required<GoalsPreferences>, expectedPreferences: Required<GoalsPreferences>): Promise<void>
+  onSave(preferences: ResolvedGoalsPreferences, expectedPreferences: ResolvedGoalsPreferences): Promise<void>
   onOpenPrompts(): void
 }) {
   const owner = useGoalsPrompts(), disclosure = useRef<HTMLDetailsElement>(null)

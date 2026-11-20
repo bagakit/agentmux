@@ -55,7 +55,7 @@ import { USER_PROFILE_NAME_LIMIT, USER_PROFILE_ABOUT_LIMIT, USER_PROFILE_AVATAR_
 import { FOCUS_RECENT_ACTIVITY_HOURS, FOCUS_TOPIC_PRESENTATIONS, FOCUS_REPLY_LINES, FOCUS_PREVIEW_TRIGGERS, FOCUS_RECENT_INPUTS, FOCUS_MAP_MOTION, FOCUS_SELECTION_FILL_PERCENT, FOCUS_SELECTION_BORDER_PERCENT, FOCUS_SELECTION_ACCENTS } from '../shared/focus-preferences.js'
 import { NOTE_CONTENT_WIDTHS, validNoteFontSize } from '../shared/notes-preferences.js'
 import { MARKDOWN_READING_TYPEFACES, MARKDOWN_READING_WIDTHS, validMarkdownReadingFontSize } from '../shared/markdown-preferences.js'
-import { GOALS_VIEW_IDS } from '@agentmux/host/goals-preferences'
+import { GOALS_VIEW_IDS, GOAL_WORKFLOW_TEMPLATE_IDS, isGoalWorkflowAddressPart } from '@agentmux/host/goals-preferences'
 import { validateAutomationPreferences } from '../shared/automation-preferences.js'
 import { BROWSER_START_PAGE_TITLE_LIMIT, BROWSER_START_PAGE_SUBTITLE_LIMIT, validBrowserStartPageText, validBrowserStartPageImage, validBrowserStartPageHistoryLimit } from '../shared/browser-start-page.js'
 import { BROWSER_AGENT_CONTROL_LIMITS as EFFECT_LIMITS, BROWSER_AGENT_GLOW_BLENDS, BROWSER_AGENT_GLOW_ANIMATIONS, validBrowserAgentGlowColor } from '../shared/browser-agent-control.js'
@@ -342,7 +342,17 @@ const configSchema = z
     notes: z.object({ fontSize: z.number().refine(validNoteFontSize).optional(), contentWidth: z.enum(NOTE_CONTENT_WIDTHS).optional() }).strict().optional(),
     markdown: z.object({ readingWidth: z.enum(MARKDOWN_READING_WIDTHS).optional(), readingTypeface: z.enum(MARKDOWN_READING_TYPEFACES).optional(),
       readingFontSize: z.number().refine(validMarkdownReadingFontSize).optional() }).strict().optional(),
-    goals: z.object({ defaultView: z.enum(GOALS_VIEW_IDS).optional(), showFinished: z.boolean().optional(), requesterAsSupervisor: z.boolean().optional() }).strict().optional(),
+    goals: z.object({
+      defaultView: z.enum(GOALS_VIEW_IDS).optional(), showFinished: z.boolean().optional(), requesterAsSupervisor: z.boolean().optional(),
+      workflow: z.object({
+        template: z.enum(GOAL_WORKFLOW_TEMPLATE_IDS).optional(),
+        reviewerHostId: z.string().refine(isGoalWorkflowAddressPart).optional(),
+        reviewerRuntimeId: z.string().refine(value => value === '' || isGoalWorkflowAddressPart(value)).optional(),
+        reviewerSessionId: z.string().refine(value => value === '' || isGoalWorkflowAddressPart(value)).optional(),
+        maxConcurrent: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
+        maxAttempts: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional()
+      }).strict().refine(value => Boolean(value.reviewerRuntimeId) === Boolean(value.reviewerSessionId), 'Set both reviewer Runtime and Session, or clear both').optional()
+    }).strict().optional(),
     continuity: z.object({
       activeRecovery: z.enum(['automatic', 'manual']).optional(),
       activeRecoveryDelayMs: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),

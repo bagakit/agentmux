@@ -1,0 +1,17 @@
+.goal-workflows-settings .settings-group { display: grid; gap: var(--sp-3); }
+.goal-workflow-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(12rem, 16rem);
+  gap: var(--sp-3);
+  align-items: center;
+}
+.goal-workflow-row > span { min-width: 0; display: grid; gap: var(--sp-1); }
+.goal-workflow-row strong { color: var(--text); font-size: var(--fs-body); font-weight: 500; }
+.goal-workflow-row small { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.45; }
+.goal-workflow-row :is(input, select) { width: 100%; min-width: 0; }
+.goal-workflow-row input.goal-workflow-identity { font: var(--fs-meta)/1.4 var(--font-mono); }
+.goal-workflow-row--number :is(input, select) { max-width: 6rem; justify-self: end; }
+@media (max-width: 620px) {
+  .goal-workflow-row { grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); }
+  .goal-workflow-row--number { grid-template-columns: minmax(0, 1fr) minmax(4.5rem, 6rem); gap: var(--sp-3); }
+}

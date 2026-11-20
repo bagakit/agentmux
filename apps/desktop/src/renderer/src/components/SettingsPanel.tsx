@@ -125,7 +125,8 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
     setShowResults(false)
     setTargetIssue('')
     const field = target ?? (section === 'hosts' ? 'mesh-paths' : section === 'agents' ? 'executors' : undefined)
-    setDestination(searching || fromSidebar && target || section === 'hosts' || section === 'agents' ? { section, ...(target && !fromSidebar ? { target } : {}), route,
+    const hasSubpages = settingsModules.some(module => module.id === section && Boolean((module as SettingsModule).subpages?.length))
+    setDestination(searching || fromSidebar && (target || hasSubpages) || section === 'hosts' || section === 'agents' ? { section, ...(target && !fromSidebar ? { target } : {}), route,
       request: normalizeSettingsNavigationRequest({ section, field }, config?.hosts ?? []) } : null)
   }
 
@@ -279,6 +280,7 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
   const navigationSelection = subpage ? `${active}:${subpage.field}` : active
   const openNavigation = (id: string, field?: string) => chooseSection(id as SettingsPageId, field, true)
   const section = searching && showResults ? { title: 'Search results', description: '' } : active === 'overview' ? { title: 'Overview', description: '' } : currentSection!
+  const description = showResults ? section.description : subpage?.description ?? section.description
   const currentGroup = currentSection && SETTINGS_GROUPS.find(group => group.id === currentSection.group)
   const groupTitle = searching && showResults || !currentGroup ? 'Settings' : currentGroup.title
   const overviewGroups = settingsNavGroups('')
@@ -351,7 +353,7 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
             <div>
               <div className="settings-content__breadcrumb">{groupTitle}{subpage && !showResults ? ` / ${currentSection?.title}` : ''}</div>
               <h2>{searching && showResults ? section.title : subpage?.title ?? section.title}</h2>
-              {section.description ? <p>{section.description}</p> : null}
+              {description ? <p>{description}</p> : null}
             </div>
           </div>
           <div className="settings-content__actions">
