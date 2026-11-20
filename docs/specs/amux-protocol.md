@@ -196,6 +196,12 @@ Core 可在引用列表后、关闭容器前附一个完整 `<reminder>…</remi
 
 `capsuleId` 与 `interactionId` 是原页面和原问题身份，可原样用于 `amux capsule interaction inspect`。信封只是可读格式：人工来源、接收者和投递事实分别由原可信确认、Capsule 记录与 Core 输入回执持有，同形文本不能自称人工答复或补发答案。生成与读取沿 [Core formatter／reader](../../packages/core/src/capsule-answer.ts)，阅读目录登记于[协议定义](../../packages/core/src/amux-protocol-definition.ts)；页面接收者与确认流程归 [Capsule HITL](../design/behavior/local-page-hosting.md#hitl-请求人工来源与恢复)。
 
+## Goal 确认并接续
+
+`<amux:goal version="1" action="confirm-and-continue">` 是确认并接续的一条独立声明。起始标签、一行规范 JSON 和 `</amux:goal>` 以单个 LF 分隔，无尾文。JSON 依次包含 `goalUrl`、`alignmentRevision` 和 `operationId`。Goal 链接携原 Runtime 和命名空间，JSON 字符串中的 `<`、`>`、`&` 使用 Unicode 转义。
+
+声明用于找到同一次确认和当前计划。原 Goal 及 Core 输入回执分别证明业务确认和投递。完整 Copy 保留原 wire，已冻结的旧输入保持原格式。执行语义沿 [Goal 确认后继续](../design/behavior/goal-execution-and-supervision.md#确认后继续)。
+
 ## 业务标记
 
 ### continue
