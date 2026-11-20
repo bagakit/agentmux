@@ -5,6 +5,11 @@ import { resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '../../..')
 const variants = {
+  'handoff-without-binding': ['apps/host/src/mote-group.ts',
+    'membership = await store.memberForThread(input.groupId, actor.hostId, actor.agentSessionId)',
+    'membership = await store.member(input.groupId, input.memberMoteId)'],
+  'private-report-without-outbox': ['apps/host/src/mote-group-store.ts',
+    "if (reportSender && this.kind === 'direct') db.prepare(", 'if (false && reportSender) db.prepare('],
   'direct-schedule-wrong-peer': ['packages/core/src/mote/direct.ts',
     'peer: target(input.peer)', 'peer: target(input.mote)'],
   'direct-pair-order': ['apps/host/src/mote-direct.ts',

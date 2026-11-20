@@ -98,18 +98,21 @@ async function fixture(retainedRoot?: string, initialSessions: string[] = []) {
   } })
   const dbPath = join(workspacePath, 'groups.sqlite'), socketPath = join(f.root, 'group.sock')
   const start = async (files?: HostMoteGroupFiles, main?: MoteMainReader, schedules?: ContinuousProgressLoopManager) => {
+    const directStore = new MoteGroupStore(join(workspacePath, 'direct.sqlite'), 'direct')
     const port = createHostMoteGroups({ store: new MoteGroupStore(dbPath), agents, client: () => f.client,
       ...(files ? { files } : {}), ...(main ? { main } : {}) })
     const direct = main ? createHostMoteDirect(createHostMoteGroups({
-      store: new MoteGroupStore(join(workspacePath, 'direct.sqlite'), 'direct'), agents, client: () => f.client, main
-    }), { main, readPeer: agents.readTarget, client: f.client }) : undefined
+      store: directStore, agents, client: () => f.client, main
+    }), { store: directStore, main, readPeer: agents.readTarget, client: f.client }) : undefined
     const server = new core.AgentMuxControlServer({ socketPath, coreClients: f.coreClients, moteGroups: port,
       ...(direct ? { moteDirect: direct } : {}), ...(schedules ? { schedules } : {}) })
     await server.start()
     closes.push(() => server.stop())
+    direct?.start()
+    if (direct) closes.push(() => direct.dispose())
     const rpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })
     closes.push(() => rpc.dispose())
-    return { server, rpc }
+    return { server, rpc, direct }
   }
   const cli = (action: string, body: unknown, agentSessionId?: string, kind = 'group') =>
     runSourceObjectCli(['--endpoint', 'unix:' + socketPath, 'space', 'mote', kind, ...action.split(' '), '--input', '-'],
@@ -130,6 +133,51 @@ function boundMains(bindings: Map<string, string>): MoteMainReader {
     }
   }
 }
+
+it('hands off a public Group message from the original ordinary member Thread', async () => {
+  const f = await fixture(undefined, ['unrelated-agent'])
+  const { rpc } = await f.start()
+  const members = [f.target('mote-a'), f.target('mote-b'), f.target('mote-c')]
+  const { group } = await rpc.call('space.mote.group.create', { operationId: 'create-handoff-group', name: 'Handoffs', members })
+  const { group: other } = await rpc.call('space.mote.group.create', { operationId: 'create-other-group', name: 'Other', members })
+  const { message: source } = await rpc.call('space.mote.group.send', { groupId: group.id, operationId: 'ask-first-member',
+    body: 'Please coordinate.', recipientIds: ['mote-a'] })
+  const original = await rpc.call('space.mote.group.inspect', { groupId: group.id })
+  const thread = original.group.members.find(member => member.moteId === 'mote-a')?.thread
+  expect(thread).not.toBeNull()
+  const request = { groupId: group.id, operationId: 'original-handoff', memberMoteId: 'mote-a',
+    replyToMessageId: source.id, body: 'Can you take the next part?', recipientIds: ['mote-b'] }
+  const unrelated = await f.cli('send', request, 'unrelated-agent')
+  expect(cliError(unrelated)).toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  const foreign = await f.cli('send', { ...request, groupId: other.id }, thread!.agentSessionId)
+  expect(cliError(foreign)).toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  const forged = await f.cli('send', { ...request, memberMoteId: 'mote-c' }, thread!.agentSessionId)
+  expect(cliError(forged)).toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  f.unblockSecond()
+  const posted = await f.cli('send', request, thread!.agentSessionId)
+  expect(posted.code, posted.stderr).toBe(0)
+  const handoff = JSON.parse(posted.stdout).result.message
+  expect(handoff).toMatchObject({ replyToMessageId: source.id, author: { moteId: 'mote-a' }, deliveries: [{ moteId: 'mote-b' }] })
+  await vi.waitFor(async () => {
+    const observed = (await rpc.call('space.mote.group.inspect', { groupId: group.id })).messages
+    expect(observed.map(message => message.id)).toEqual([source.id, handoff.id])
+    expect(observed[1]?.deliveries[0]?.status).toBe('accepted')
+  })
+  expect(f.preparedTargets.mock.calls).toEqual([['mote-a'], ['mote-b']])
+  const exact = await rpc.call('space.mote.group.inspect', { groupId: group.id, messageId: source.id })
+  expect(exact.messages.map(message => message.id)).toEqual([source.id])
+  expect(exact.nextBeforeSequence).toBeNull()
+  await expect(rpc.call('space.mote.group.inspect', { groupId: other.id, messageId: source.id }))
+    .rejects.toMatchObject({ code: 'UNKNOWN_MOTE_GROUP_MESSAGE' })
+  const left = await f.cli('members leave', { groupId: group.id, expectedRevision: group.revision, operationId: 'leave-handoff-group' }, thread!.agentSessionId)
+  expect(left.code, left.stderr).toBe(0)
+  const stale = await f.cli('send', { ...request, operationId: 'handoff-after-leaving' }, thread!.agentSessionId)
+  expect(cliError(stale)).toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  const prior = await f.cli('send', request, thread!.agentSessionId)
+  expect(prior.code, prior.stderr).toBe(0)
+  expect(JSON.parse(prior.stdout).result.message.id).toBe(handoff.id)
+  expect((await rpc.call('space.mote.group.inspect', { groupId: other.id })).messages).toEqual([])
+})
 
 it('allows the authenticated Mote Main to create a Group and publish to exact recipients through CLI', async () => {
   const f = await fixture(undefined, ['main-a', 'main-b', 'rotated-a', 'standalone'])
@@ -230,6 +278,66 @@ it('reuses one private Mote thread across directions, Main rotation and Host reo
   const timeline = await reopened.call('space.mote.direct.inspect', { threadId, mote: a })
   expect(timeline.messages.map(entry => entry.id)).toEqual([sent.message.id, reply.message.id, reverse.message.id])
   expect(timeline.thread.participants.find(p => p.moteId === 'mote-b')?.thread).toEqual(peer.thread)
+})
+
+it('keeps an original private report and enqueues it once for the coordinating Mote Main', async () => {
+  const f = await fixture(undefined, ['coordinator', 'new-coordinator', 'unrelated'])
+  const coordinator = f.target('mote-a'), worker = f.target('mote-b')
+  const bindings = new Map([['mote-a', 'coordinator']])
+  const main = boundMains(bindings)
+  const { rpc, server, direct } = await f.start(undefined, main)
+  f.unblockSecond()
+  const cli = async (command: string, body: unknown, sessionId: string) => {
+    const result = await f.cli(command, body, sessionId, 'direct')
+    expect(result.code, result.stderr).toBe(0)
+    return JSON.parse(result.stdout).result
+  }
+  const assignment = await cli('send', { mote: coordinator, peer: worker, operationId: 'review-task', body: 'Read the release notes.' }, 'coordinator')
+  const threadId = assignment.threadId as string
+  await vi.waitFor(async () => {
+    const original = await rpc.call('space.mote.direct.inspect', { threadId, mote: worker })
+    expect(original.messages[0]?.deliveries[0]?.status).toBe('accepted')
+  })
+  const { thread } = await rpc.call('space.mote.direct.inspect', { threadId, mote: worker })
+  const originalWorker = thread.participants.find(participant => participant.moteId === worker.spaceId)?.thread?.agentSessionId
+  expect(originalWorker).toBeTruthy()
+  const body = { threadId, operationId: 'review-report', inputOperationId: assignment.message.deliveries[0].operationId,
+    body: 'The notes are ready for review.' }
+  bindings.delete(coordinator.spaceId)
+  const held = await cli('reply', body, originalWorker!)
+  expect(held.mainNotification.status).toBe('unconfirmed')
+  const messageId = held.mainNotification.messageId as string
+  expect((await rpc.call('message.read', { hostId: 'local', messageId })).message).toBeNull()
+  const ownReply = await rpc.call('space.mote.direct.inspect', { threadId, mote: coordinator, messageId: held.message.id })
+  expect(ownReply.messages.map(message => message.id)).toEqual([held.message.id])
+  expect(ownReply.nextBeforeSequence).toBeNull()
+  expect(ownReply.messages[0]?.replyToMessageId).toBe(assignment.message.id)
+
+  await rpc.dispose(); await direct?.dispose(); await server.stop()
+  bindings.set(coordinator.spaceId, 'new-coordinator')
+  const reopened = (await f.start(undefined, main)).rpc
+  await vi.waitFor(async () => expect((await reopened.call('message.read', { hostId: 'local', messageId })).message)
+    .toMatchObject({ deliveryMode: 'reference', envelope: { senderSessionId: originalWorker,
+      recipientSessionId: 'new-coordinator', threadId, correlationId: assignment.message.id } }), { timeout: 8000 }).catch(async error => {
+    const retry = await cli('reply', body, originalWorker!)
+    throw new Error(`${error.message}\nOriginal notification: ${JSON.stringify(retry.mainNotification)}`)
+  })
+  const confirmed = await cli('reply', body, originalWorker!)
+  expect(confirmed.message.id).toBe(held.message.id)
+  expect(confirmed.mainNotification).toMatchObject({ messageId, status: 'queued' })
+  const notice = (await reopened.call('message.read', { hostId: 'local', messageId })).message
+  expect(notice).toMatchObject({ deliveryMode: 'reference',
+    envelope: { messageId, senderSessionId: originalWorker, recipientSessionId: 'new-coordinator', threadId } })
+  expect(JSON.parse(notice!.envelope.body.split('\n').at(-1)!)).toMatchObject({
+    threadId, assignmentMessageId: assignment.message.id, replyMessageId: held.message.id
+  })
+
+  bindings.set(coordinator.spaceId, 'coordinator')
+  const prior = await cli('reply', body, originalWorker!)
+  expect(prior.mainNotification.messageId).toBe(messageId)
+  expect((await reopened.call('message.read', { hostId: 'local', messageId })).message?.envelope.recipientSessionId).toBe('new-coordinator')
+  expect((await reopened.call('space.mote.direct.inspect', { threadId, mote: coordinator })).messages.map(message => message.id))
+    .toEqual([assignment.message.id, held.message.id])
 })
 
 it('schedules recurring private assignments on the original clock and deduplicates each due turn', async () => {
