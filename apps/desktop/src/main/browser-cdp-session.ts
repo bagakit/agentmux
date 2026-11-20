@@ -183,19 +183,21 @@ class BrowserCdpConnection implements BrowserPageTransport {
 }
 
 
+type SharedBrowserCdpConnection = { native: BrowserCdpConnection; leases: number; deferredDetach: Promise<string | null> | null }
+
 /** A lease on this WebContents' original debugger. Profile environment and a page
  * program share one native connection; releasing one consumer cannot detach the other. */
 export class BrowserCdpSession implements BrowserPageTransport {
-  private static readonly connections = new WeakMap<WebContents, { native: BrowserCdpConnection; leases: number }>()
+  private static readonly connections = new WeakMap<WebContents, SharedBrowserCdpConnection>()
   private readonly observers = new Set<() => void>()
   private readonly frameWrappers = new Map<string, { native: BrowserCdpSender; send: BrowserCdpSender }>()
   private released = false
-  private constructor(private readonly contents: WebContents, private readonly owner: { native: BrowserCdpConnection; leases: number }) {}
+  private constructor(private readonly contents: WebContents, private readonly owner: SharedBrowserCdpConnection) {}
 
   static attach(contents: WebContents): BrowserCdpSession {
     let owner = this.connections.get(contents)
     if (!owner || owner.native.endedReason !== null) {
-      owner = { native: BrowserCdpConnection.attach(contents), leases: 0 }
+      owner = { native: BrowserCdpConnection.attach(contents), leases: 0, deferredDetach: null }
       this.connections.set(contents, owner)
     }
     owner.leases++
@@ -243,7 +245,12 @@ export class BrowserCdpSession implements BrowserPageTransport {
     if (this.endedReason || BrowserCdpSession.connections.get(this.contents) !== this.owner) throw new Error('The original native connection changed. No replacement target is selected.')
     const retained = BrowserCdpSession.attach(this.contents)
     let held = true
-    const releaseHold = () => { if (held) { held = false; retained.detach() } }
+    const releaseHold = (fromNetworkClose = false) => {
+      if (!held) return
+      held = false
+      if (fromNetworkClose) retained.deferConnectionDetach()
+      retained.detach()
+    }
     let targetInfo: { targetId: string }
     try { ({ targetInfo } = await retained.sendCommand('Target.getTargetInfo') as { targetInfo: { targetId: string } }) }
     catch (error) { releaseHold(); throw error }
@@ -261,9 +268,7 @@ export class BrowserCdpSession implements BrowserPageTransport {
     const release = () => {
       if (!contents.isDestroyed()) { contents.debugger.off('message', message); contents.debugger.off('detach', detached) }
       listeners.clear()
-      // A native detach event can arrive inside Chromium's response dispatch. Do not destroy
-      // the last debugger connection while that original callback is still on the stack.
-      setImmediate(releaseHold)
+      releaseHold(true)
     }
     const detached = (_event: unknown, reason: string) => { ended = reason; release() }
     const message = (_event: unknown, method: string, params: unknown, sourceId?: string) => {
@@ -272,9 +277,15 @@ export class BrowserCdpSession implements BrowserPageTransport {
     }
     contents.debugger.on('message', message); contents.debugger.on('detach', detached)
     const close = async () => {
-      if (ended || contents.isDestroyed()) { ended ??= 'The original network target ended.'; release(); return }
-      await retained.sendCommand('Target.detachFromTarget', { sessionId })
-      ended = 'The original network session detached.'; release()
+      if (ended || contents.isDestroyed()) {
+        ended ??= 'The original network target ended.'
+      } else {
+        await retained.sendCommand('Target.detachFromTarget', { sessionId })
+        ended = 'The original network session detached.'
+      }
+      release()
+      const issue = await this.owner.deferredDetach
+      if (issue) throw new Error(issue)
     }
     if (this.endedReason) { await close(); throw new Error(this.endedReason) }
     const sendCommand: BrowserCdpSender = async (method, params) => {
@@ -285,13 +296,29 @@ export class BrowserCdpSession implements BrowserPageTransport {
     return { sendCommand, get endedReason() { return ended }, observe(fn) { listeners.add(fn); return () => { listeners.delete(fn) } }, close }
   }
 
+  private deferConnectionDetach(): void {
+    const owner = this.owner
+    // Native detach events can arrive inside Chromium's response dispatch. Release the
+    // lease now, but let the callback unwind before any consumer destroys this debugger.
+    owner.deferredDetach ??= new Promise(resolve => {
+      setImmediate(() => {
+        owner.deferredDetach = null
+        resolve(owner.leases === 0 ? this.detachConnection() : null)
+      })
+    })
+  }
+
   detach(): string | null {
     if (this.released) return null
     this.released = true
     for (const remove of this.observers) remove()
     this.observers.clear()
     this.frameWrappers.clear()
-    if (--this.owner.leases !== 0) return null
+    if (--this.owner.leases !== 0 || this.owner.deferredDetach) return null
+    return this.detachConnection()
+  }
+
+  private detachConnection(): string | null {
     if (BrowserCdpSession.connections.get(this.contents) === this.owner) BrowserCdpSession.connections.delete(this.contents)
     return this.owner.native.detach()
   }
