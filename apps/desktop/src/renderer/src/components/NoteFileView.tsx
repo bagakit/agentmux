@@ -159,7 +159,7 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
     {read.status === 'valid' && hasLinkedReferences ? <NoteLinksPanel noteId={read.note.noteId} active={presentation.active} onOpen={openLinkedPage} onOpenFile={onOpenOriginal} selectedBlockId={restoredBlock?.blockId} /> : null}
     {cards.length ? <section className="recall-knowledge-cards" aria-label="Knowledge cards">
       <h2>Knowledge cards</h2>
-      {cards.map(({ blockId, card }) => <RecallKnowledgeCard key={blockId} title={card.title} actions={
+      {cards.map(({ blockId, card }) => <RecallKnowledgeCard kind="Reading point" key={blockId} title={card.title} actions={
         <RecallCardLink onOpen={() => { void openRecallCardRecord(card).catch(error => setIssue(presentError(error))) }}>Open original message</RecallCardLink>
       } />)}
     </section> : null}

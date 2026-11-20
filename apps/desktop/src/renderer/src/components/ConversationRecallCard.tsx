@@ -35,7 +35,7 @@ export function ConversationRecallCard({ card, observed, onSaved }: { card: Reca
     finally { setSaving(false) }
   }
   return <div className="recall-card-capture">
-    {links.length ? <RecallKnowledgeCard title={card.title} actions={links.map(({ page, blockId }) =>
+    {links.length ? <RecallKnowledgeCard kind="Reading point" title={card.title} actions={links.map(({ page, blockId }) =>
       <RecallCardLink key={JSON.stringify([page.noteId, blockId])} onOpen={document => { void openRecallCardNote(page, blockId, document).catch(error => setIssue(presentError(error))) }}>Open {page.title}</RecallCardLink>
     )} /> : null}
     <details onToggle={event => {
