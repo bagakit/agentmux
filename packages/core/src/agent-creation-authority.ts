@@ -351,6 +351,15 @@ export class AgentMuxCreationAuthority {
     if (bytes.toString('base64url') !== signature || !verify(null, Buffer.from(JSON.stringify(payload)), publicKey(trust.publicKey).key, bytes)) failure('The original message source signature is invalid.', 'AGENT_MESSAGE_AUTHORITY_INVALID')
     return trust
   }
+  /** Exact inbox approval uses a supplied, independently reviewed key, without registering trust. */
+  async verifySingleMessageProof(value: AgentMuxMessageProvenance, sourcePublicKey: string): Promise<void> {
+    const proof = parseMessageProvenance(value), identity = await this.identity()
+    if (proof.target.runtimeId !== identity.runtimeId || proof.targetKeyFingerprint !== identity.fingerprint) failure(
+      'This signed message belongs to another target Runtime or key. Original records are retained.', 'AGENT_MESSAGE_TARGET_MISMATCH')
+    const source = publicKey(sourcePublicKey), { signature, ...payload } = proof, bytes = Buffer.from(signature, 'base64url')
+    if (proof.sourceKeyFingerprint !== source.fingerprint || bytes.toString('base64url') !== signature || !verify(null, Buffer.from(JSON.stringify(payload)), source.key, bytes)) failure(
+      'The original message signature does not match its approved source key.', 'AGENT_MESSAGE_AUTHORITY_INVALID')
+  }
   /** The caller's Core must authenticate source Session/Run before invoking this signing primitive. */
   async attest(source: Omit<AgentMuxCreationSource, 'runtimeId'>, target: AgentMuxCreationTarget): Promise<AgentMuxCreationAdmission> {
     const { identity, privateKey } = await this.loadIdentity()

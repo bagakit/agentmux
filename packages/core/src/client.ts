@@ -243,7 +243,7 @@ import type { AgentActivityObservation, AgentSemanticState, AgentActivityState, 
 import { normalizeSessionHistoryPage, SESSION_HISTORY_TIMEOUT_MS, watchSessionHistoryProgress } from './session-history.js'
 import type { GoalTicketSigner } from '@agentmux/demand/goal-ticket-crypto'
 import { AgentMuxCreationAuthority, agentCreationIntentDigest } from './agent-creation-authority.js'
-import { messagePacketDigest, parseSignedMessage, parseMessageReadAuthority, parseFederatedThread, parseSignedDispatchEvent, dispatchEventDigest,
+import { messagePacketDigest, parseSignedMessage, parseMessageApprovalCandidate, parseMessageReadAuthority, parseFederatedThread, parseSignedDispatchEvent, dispatchEventDigest,
   type AgentMuxSignedMessage, type AgentMuxMessageParticipant, type AgentMuxMessageReadAuthority, type AgentMuxFederatedThread,
   type AgentMuxSignedDispatchEvent, type AgentMuxDispatchEventSubmission, type AgentMuxRecipientInboxReceipt } from './agent-message-federation.js'
 import type { AgentMuxMessageApplication } from './agent-message-envelope.js'
@@ -574,27 +574,53 @@ export class AgentMuxClient {
 
   /** Verify the foreign Core's purpose-scoped authority before one original inbox append. */
   async intakeFederatedMessage(value: AgentMuxSignedMessage) {
-    const packet = parseSignedMessage(value), identity = await this.agentMessageAuthority()
+    return this.intakeOriginalFederatedMessage(parseSignedMessage(value))
+  }
+
+  /** Public service supplies its current target-user authority in-process, never through Hosted invocation. */
+  async approveFederatedMessage(value: import('./agent-message-federation.js').AgentMuxMessageApprovalCandidate,
+    approval: { assertCurrent(): Promise<void>; signal?: AbortSignal }) {
+    const { packet, sourcePublicKey } = parseMessageApprovalCandidate(value)
+    await this.requireCreationAuthority().verifySingleMessageProof(packet.provenance, sourcePublicKey)
+    return this.intakeOriginalFederatedMessage(packet, approval)
+  }
+
+  private async intakeOriginalFederatedMessage(packet: AgentMuxSignedMessage, approval?: { assertCurrent(): Promise<void>; signal?: AbortSignal }) {
+    const identity = await this.agentMessageAuthority(), proof = packet.provenance
     const original = await this.messageQueue.readByMessageId(packet.envelope.messageId) ?? await this.messageQueue.readByOperationId(packet.envelope.operationId)
     // An exact original inbox receipt remains readable after its Run, pin or
     // connection changes. Reconciliation never notifies or submits it again.
     if (original?.deliveryMode === 'reference' && original.provenance && original.envelope.recipientRuntimeId === identity.runtimeId) {
-      const receipt = await this.messageQueue.append({ ...packet.envelope, execution: packet.execution, sourceChannel: packet.sourceChannel }, { deliveryMode: 'reference', provenance: packet.provenance })
+      await approval?.assertCurrent()
+      const receipt = await this.messageQueue.append({ ...packet.envelope, execution: packet.execution, sourceChannel: packet.sourceChannel }, {
+        deliveryMode: 'reference', provenance: proof, ...(approval ? { reauthorize: async () => { approval.signal?.throwIfAborted() } } : {}) })
       return { ...receipt, recipientInbox: await this.attestFederatedInboxReceipt(receipt) }
     }
-    await this.requireCreationAuthority().verifyMessageProof(packet.provenance)
-    const target = await this.currentStoredAgentSession(packet.provenance.target.agentSessionId)
+    if (!approval) await this.requireCreationAuthority().verifyMessageProof(proof)
+    const target = await this.currentStoredAgentSession(proof.target.agentSessionId)
     const recipientRuns = sessionSemanticResumeSourceRuns(target)
-    if (packet.provenance.target.runtimeId !== identity.runtimeId || target.hostId !== 'local' || !recipientRuns.includes(packet.provenance.target.runId) && !target.retiredRuns.some(run => run.runId === packet.provenance.target.runId)) throw new AgentMuxError('The signed message names another retained recipient Run. No input was retargeted.', 'MESSAGE_RECIPIENT_MISMATCH')
-    if (target.run.runId !== packet.provenance.target.runId && !packet.envelope.replyTo) throw new AgentMuxError('The original remote request Run changed. Keep the exact request; no replacement Run received input.', 'AGENT_CAPABILITY_STALE_RUN')
-    const receipt = await this.messageQueue.append({ ...packet.envelope, execution: packet.execution, sourceChannel: packet.sourceChannel }, { deliveryMode: 'reference', provenance: packet.provenance,
-      reauthorize: async () => { await this.requireCreationAuthority().verifyMessageProof(packet.provenance) } })
-    if (!recipientRuns.includes(packet.provenance.target.runId)) this.publisher.publish({ type: 'agent-error', agentSessionId: target.agentSessionId,
+    if (proof.target.runtimeId !== identity.runtimeId || target.hostId !== 'local' || !recipientRuns.includes(proof.target.runId) && !target.retiredRuns.some(run => run.runId === proof.target.runId)) throw new AgentMuxError('The signed message names another retained recipient Run. No input was retargeted.', 'MESSAGE_RECIPIENT_MISMATCH')
+    const assertExactRun = (current: AgentMuxAgentSession) => {
+      if (current.run.runId !== proof.target.runId || current.hostId !== 'local') throw new AgentMuxError(
+        'The original remote request Run changed. Keep the exact request; no replacement Run received input.', 'AGENT_CAPABILITY_STALE_RUN')
+    }
+    if (approval || !packet.envelope.replyTo) assertExactRun(target)
+    // Forwarded principal checks may cross a carrier. Finish that observation
+    // before taking the journal lock, then use its cancellation fence at append.
+    await approval?.assertCurrent()
+    const receipt = await this.messageQueue.append({ ...packet.envelope, execution: packet.execution, sourceChannel: packet.sourceChannel }, { deliveryMode: 'reference', provenance: proof,
+      ...(approval ? { inboxOnly: true } : {}),
+      reauthorize: approval ? async () => {
+        approval.signal?.throwIfAborted()
+        assertExactRun(await this.currentStoredAgentSession(proof.target.agentSessionId))
+        approval.signal?.throwIfAborted()
+      } : async () => { await this.requireCreationAuthority().verifyMessageProof(proof) } })
+    if (!recipientRuns.includes(proof.target.runId)) this.publisher.publish({ type: 'agent-error', agentSessionId: target.agentSessionId,
       code: 'A2A_NOTIFICATION_UNCONFIRMED', message: `The signed reply ${packet.envelope.messageId} is saved for its original Run. Its semantic recovery relationship to the current Run is unconfirmed; read this MID or inspect the original Session recovery. Healthy manual input remains available.`,
       evidence: { source: 'agentmux', observedAt: Date.now(), run: target.run } })
     // Saving the original reference never retargets its envelope. Only a confirmed
     // semantic successor may receive the notification; excluded history stays readable.
-    this.messageNotifications.saved(target.agentSessionId)
+    if (!approval) this.messageNotifications.saved(target.agentSessionId)
     return { ...receipt, recipientInbox: await this.attestFederatedInboxReceipt(receipt) }
   }
 

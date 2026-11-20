@@ -159,7 +159,7 @@ export type AgentMuxMessageJournalRecord =
   | { readonly kind: 'mote-main-input-route'; readonly sequence: number; readonly route: MoteDialogueInputRoute }
   | { readonly kind: 'message-route'; readonly sequence: number; readonly route: AgentMessageRoute }
   | { readonly kind: 'message-peer-inbox'; readonly sequence: number; readonly messageId: string; readonly receipt: AgentMuxRecipientInboxReceipt; readonly at: number }
-  | { readonly kind: 'message'; readonly sequence: number; readonly envelope: AgentMuxMessageEnvelope; readonly deliveryMode?: 'reference' | 'outbox'; readonly provenance?: AgentMuxMessageProvenance; readonly promptCondition?: null; readonly execution?: AgentPromptExecution; readonly admissionIntent?: AgentPromptAdmissionIntent; readonly sourceChannel?: AgentMessageChannel; readonly sourceDevice?: AgentOperationDevice }
+  | { readonly kind: 'message'; readonly sequence: number; readonly envelope: AgentMuxMessageEnvelope; readonly deliveryMode?: 'reference' | 'outbox'; readonly inboxOnly?: true; readonly provenance?: AgentMuxMessageProvenance; readonly promptCondition?: null; readonly execution?: AgentPromptExecution; readonly admissionIntent?: AgentPromptAdmissionIntent; readonly sourceChannel?: AgentMessageChannel; readonly sourceDevice?: AgentOperationDevice }
   | { readonly kind: 'a2a-notification'; readonly sequence: number; readonly notification: AgentMuxMessageNotification; readonly at?: number }
   | { readonly kind: 'a2a-notification-result'; readonly sequence: number; readonly notificationId: string; readonly state: Exclude<AgentMuxMessageNotification['state'], 'pending'>; readonly reason?: string; readonly at?: number }
   | { readonly kind: 'prompt-condition'; readonly sequence: number; readonly messageId: string; readonly condition: AgentPromptCondition }
@@ -488,7 +488,8 @@ export class DurableAgentMuxMessageQueue {
       ...(peerInbox ? { peerInbox } : {}),
       ...(original.deliveryMode === 'outbox' ? { deliveryMode: 'outbox' as const } : {}),
       ...(original.provenance ? { provenance: parseMessageProvenance(original.provenance), transport: { state: original.deliveryMode === 'outbox' ? 'outbox' as const : 'received' as const, targetRuntimeId: original.provenance.target.runtimeId } } : {}),
-      ...(original.deliveryMode === 'reference' ? { deliveryMode: original.deliveryMode, notification: this.messageNotification(envelope.messageId, envelope.recipientSessionId, notificationId) } : {}),
+      ...(original.deliveryMode === 'reference' ? { deliveryMode: original.deliveryMode,
+        notification: this.messageNotification(envelope.messageId, envelope.recipientSessionId, notificationId, original.inboxOnly) } : {}),
       ...(original.deliveryMode !== 'reference' && notificationId !== undefined
         ? { notification: { state: 'unassociated' as const, notificationId, reason: 'notification-not-associated' } } : {}),
       ...(condition ? { promptCondition: validateAgentPromptCondition(condition.condition) } : original.promptCondition === null ? { promptCondition: null } : {}),
@@ -520,7 +521,9 @@ export class DurableAgentMuxMessageQueue {
         ...(result.at === undefined ? {} : { resultRecordedAt: result.at }) } : {}) })
   }
 
-  private messageNotification(messageId: string, recipientSessionId: string | null, notificationId?: string): AgentMuxMessageNotificationStatus {
+  private messageNotification(messageId: string, recipientSessionId: string | null, notificationId?: string, inboxOnly?: true): AgentMuxMessageNotificationStatus {
+    if (inboxOnly) return notificationId === undefined ? { state: 'inbox-only' }
+      : { state: 'unassociated', notificationId, reason: 'notification-not-associated' }
     const selectedId = notificationId ?? this.db.prepare('SELECT notification_id FROM a2a_message_notifications WHERE message_id=?').get(messageId)?.notification_id
     const notice = selectedId ? this.notification(String(selectedId)) : undefined
     if (notificationId !== undefined && (!notice || !notice.messageIds.includes(messageId) || notice.key.agentSessionId !== recipientSessionId)) {
@@ -537,7 +540,7 @@ export class DurableAgentMuxMessageQueue {
       json_extract(original.json, '$.envelope.recipientSessionId') AS recipient_id,
       json_extract(original.json, '$.envelope.recipientRunId') AS run_id,
       json_extract(original.json, '$.envelope.recipientInputEpoch') AS input_epoch,
-      json_extract(original.json, '$.deliveryMode') AS delivery_mode,
+      json_extract(original.json, '$.deliveryMode') AS delivery_mode, json_extract(original.json, '$.inboxOnly') AS inbox_only,
       m.message_sequence, position.notification_id, position.submitted FROM messages m
       JOIN records original ON original.sequence=m.message_sequence
       LEFT JOIN a2a_message_notifications position ON position.message_id=m.message_id WHERE m.message_id=?`).get(messageId)
@@ -552,6 +555,8 @@ export class DurableAgentMuxMessageQueue {
       if (notice.state !== 'pending' || notice.reason !== undefined) throw new AgentMuxError('A new notification must retain an unsubmitted intent.', 'INVALID_A2A_NOTIFICATION')
       const references = notice.messageIds.map(messageId => {
         const original = this.messageReference(messageId)
+        if (original?.inbox_only === 1) throw new AgentMuxError(
+          'This original message was approved for Inbox custody only. Read the original body in Inbox.', 'A2A_MESSAGE_INBOX_ONLY')
         if (!original || original.delivery_mode !== 'reference' || original.recipient_id !== notice.key.agentSessionId ||
             typeof original.sender_id !== 'string' ||
             notice.mode === 'idle' && (original.notification_id !== null || original.submitted !== 0)) throw new AgentMuxError(
@@ -1337,6 +1342,8 @@ export class DurableAgentMuxMessageQueue {
       if (record.sourceChannel !== undefined) normalizeMessageChannel(record.sourceChannel)
       if (record.sourceDevice !== undefined) normalizeOperationDevice(record.sourceDevice)
       if (record.provenance) parseSignedMessage({ envelope, execution: record.execution, sourceChannel: record.sourceChannel, provenance: record.provenance })
+      if (record.inboxOnly !== undefined && (record.inboxOnly !== true || record.deliveryMode !== 'reference' || !record.provenance)) throw new AgentMuxError(
+        'Inbox-only admission requires its original signed reference.', 'AGENT_MESSAGE_AUTHORITY_INVALID')
       const consumerId = record.deliveryMode === 'outbox' ? null : envelope.recipient.kind === 'agent-session' && envelope.recipient.agentSessionId === envelope.recipientSessionId
         ? envelope.recipient.agentSessionId : null
       const ordinal = consumerId === null ? null : Number(this.db.prepare(
@@ -1347,7 +1354,7 @@ export class DurableAgentMuxMessageQueue {
       if (record.deliveryMode !== undefined && record.deliveryMode !== 'outbox') {
         if (record.deliveryMode !== 'reference' || envelope.sender.kind !== 'agent-session' || !consumerId || !envelope.recipientRunId ||
             record.execution !== 'default' || record.admissionIntent !== undefined) throw new AgentMuxError('Reference intake must preserve a default peer Inbox message.', 'INVALID_A2A_NOTIFICATION')
-        this.db.prepare('INSERT INTO a2a_message_notifications (message_id, recipient_id, run_id, message_sequence) VALUES (?, ?, ?, ?)')
+        if (!record.inboxOnly) this.db.prepare('INSERT INTO a2a_message_notifications (message_id, recipient_id, run_id, message_sequence) VALUES (?, ?, ?, ?)')
           .run(envelope.messageId, consumerId, envelope.recipientRunId, record.sequence)
       }
     } else if (record.kind === 'prompt-condition') {
@@ -1459,7 +1466,7 @@ export class DurableAgentMuxMessageQueue {
     }, true)
   }
 
-  async append(input: AgentMuxMessageAppendInput, newMessage?: { deliveryMode?: 'reference' | 'outbox'; provenance?: AgentMuxMessageProvenance; reauthorize?: () => Promise<void>; admissionIntent?: AgentPromptAdmissionIntent; inputEnvironment?: AgentInputJournalIntent['environment']; originalClaimAbsent?: () => Promise<boolean>;
+  async append(input: AgentMuxMessageAppendInput, newMessage?: { deliveryMode?: 'reference' | 'outbox'; inboxOnly?: true; provenance?: AgentMuxMessageProvenance; reauthorize?: () => Promise<void>; admissionIntent?: AgentPromptAdmissionIntent; inputEnvironment?: AgentInputJournalIntent['environment']; originalClaimAbsent?: () => Promise<boolean>;
     conversationKind?: import('./ingress-contract.js').ConnectionIngressMessage['conversationKind']; moteReply?: import('./mote/chat-contract.js').MoteChatReplyReference }): Promise<AgentMuxMessageReceipt> {
     return this.withLock(async () => {
       await newMessage?.reauthorize?.()
@@ -1494,6 +1501,7 @@ export class DurableAgentMuxMessageQueue {
       const frozenIntent = admissionIntent ?? (newMessage?.admissionIntent === undefined ? undefined : validateAgentPromptAdmissionIntent(newMessage.admissionIntent))
       const record: JournalMessage = { kind: 'message', sequence: this.nextSequence, envelope, promptCondition: null, execution,
         ...(newMessage?.deliveryMode === undefined ? {} : { deliveryMode: newMessage.deliveryMode }),
+        ...(newMessage?.inboxOnly === undefined ? {} : { inboxOnly: newMessage.inboxOnly }),
         ...(newMessage?.provenance === undefined ? {} : { provenance: parseMessageProvenance(newMessage.provenance) }),
         ...(frozenIntent === undefined ? {} : { admissionIntent: frozenIntent }),
         ...(sourceChannel === undefined ? {} : { sourceChannel }), ...(sourceDevice === undefined ? {} : { sourceDevice }) }
@@ -1729,7 +1737,8 @@ export class DurableAgentMuxMessageQueue {
           : { state: 'queued', at: envelope.createdAt, ...(last ? { reason: last.reason } : {}) }
         return { sequence: Number(row.sequence), envelope, delivery,
           bodyPreview: String(row.preview).slice(0, 240), bodyBytes: Number(row.body_bytes),
-          ...((original as JournalMessage).deliveryMode === 'reference' ? { deliveryMode: 'reference' as const, notification: this.messageNotification(envelope.messageId, envelope.recipientSessionId) } : {}) } satisfies AgentMuxMessageMetadata
+          ...((original as JournalMessage).deliveryMode === 'reference' ? { deliveryMode: 'reference' as const,
+            notification: this.messageNotification(envelope.messageId, envelope.recipientSessionId, undefined, (original as JournalMessage).inboxOnly) } : {}) } satisfies AgentMuxMessageMetadata
       })
       return { participantSessionId, direction: input.direction, messages,
         nextBeforeSequence: rows.length > limit ? messages.at(-1)!.sequence : null }

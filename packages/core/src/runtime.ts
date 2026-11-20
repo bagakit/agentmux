@@ -134,5 +134,5 @@ export function projectAgentMuxRuntimeSubjects(
   })
 }
 
-export type { AgentMuxMessageAuthorityIdentity, AgentMuxMessageTrustInput, AgentMuxMessageTrust, AgentMuxMessageProvenance, AgentMuxMessageParticipant, AgentMuxSignedMessage, AgentMuxMessageReadAuthority, AgentMuxFederatedThread, AgentMuxMessageTransport, AgentMuxSignedDispatchEvent, AgentMuxDispatchEventSubmission, AgentMuxRecipientInboxReceipt } from './agent-message-federation.js'
+export type { AgentMuxMessageAuthorityIdentity, AgentMuxMessageTrustInput, AgentMuxMessageTrust, AgentMuxMessageProvenance, AgentMuxMessageParticipant, AgentMuxSignedMessage, AgentMuxMessageApprovalCandidate, AgentMuxMessageReadAuthority, AgentMuxFederatedThread, AgentMuxMessageTransport, AgentMuxSignedDispatchEvent, AgentMuxDispatchEventSubmission, AgentMuxRecipientInboxReceipt } from './agent-message-federation.js'
 export type { AgentMuxMessageApplication, AgentMuxMessageJson } from './agent-message-envelope.js'

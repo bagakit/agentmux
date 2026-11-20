@@ -42,7 +42,7 @@ export type AgentMuxMessageNotification = {
 
 /** Read-only journal projection. Notification is independent of body read or task acceptance. */
 export type AgentMuxMessageNotificationStatus = {
-  state: AgentMuxMessageNotification['state'] | 'unassociated'
+  state: AgentMuxMessageNotification['state'] | 'unassociated' | 'inbox-only'
   notificationId?: string
   key?: Extract<AgentPromptInputKey, { kind: 'prompt' }>
   reason?: string

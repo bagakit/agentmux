@@ -400,6 +400,8 @@ type NativeParams = StorageRecoveryParamsMap & FocusParams & SpaceLinkParams & M
   'message.ls': Omit<import('./agent-message-query.js').AgentMuxMessageQuery, 'participantSessionId'> & { hostId?: string; participantSessionId?: string }
   'message.federation.dispatch-intake': { event: import('./agent-message-federation.js').AgentMuxSignedDispatchEvent }
   'message.federation.intake': { packet: import('./agent-message-federation.js').AgentMuxSignedMessage }
+  'message.federation.approve': import('./agent-message-federation.js').AgentMuxMessageApprovalCandidate
+  'message.federation.outbox': { messageId: string; operationId: string }
   'message.federation.export': { authority: import('./agent-message-federation.js').AgentMuxMessageReadAuthority }
   'message.dispatch.sync': { sourceMessageId: string; hostId: string }
   'message.dispatch.open': { sourceMessageId: string }
@@ -535,6 +537,8 @@ type NativeResult = StorageRecoveryResultMap & FocusResults & SpaceLinkResult & 
   'message.events': import('./agent-message-events.js').AgentMuxMessageEventsPage & { hostId: string }
   'message.federation.dispatch-intake': import('./agent-message-federation.js').AgentMuxDispatchEventSubmission
   'message.federation.intake': AgentMuxMessageReceipt
+  'message.federation.approve': AgentMuxMessageReceipt
+  'message.federation.outbox': import('./agent-message-federation.js').AgentMuxMessageApprovalCandidate
   'message.federation.export': import('./agent-message-federation.js').AgentMuxFederatedThread
   'message.dispatch.sync': import('./agent-handoff.js').DispatchObservation & { hostId: string }
   'message.dispatch.open': Awaited<ReturnType<AgentMuxClient['openDispatch']>>
@@ -631,7 +635,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   'system.diagnostics.inspect': 'short',
   'message.delivery.inspect': 'short', 'message.delivery.report': 'long',
   'agent.output': 'long', 'message.inbox.check': 'long', 'message.inbox.ack': 'long',
-  'message.federation.dispatch-intake': 'long', 'message.federation.intake': 'long', 'message.federation.export': 'long', 'message.dispatch.sync': 'long', 'message.dispatch.open': 'long', 'message.dispatch.inspect': 'short', 'message.dispatch.report': 'long',
+  'message.federation.dispatch-intake': 'long', 'message.federation.intake': 'long', 'message.federation.approve': 'long', 'message.federation.outbox': 'short', 'message.federation.export': 'long', 'message.dispatch.sync': 'long', 'message.dispatch.open': 'long', 'message.dispatch.inspect': 'short', 'message.dispatch.report': 'long',
   'message.notify': 'long', 'message.notify.inspect': 'short', 'message.read': 'short', 'message.ls': 'short', 'message.events': 'short', 'message.dispatch.read': 'short', 'message.dispatch.ls': 'short',
   'app.search': 'long', 'app.snapshot': 'long', 'goal.activity': 'short', 'goal.activity.history': 'short', 'system.doctor': 'long', 'system.storage': 'short',
   'system.endpoint': 'short', 'system.relay.inspect': 'short', 'system.subscription.cancel': 'short', 'terminal.recover': 'long', 'agent.configuration.inspect': 'short', 'agent.configuration.set': 'long', 'agent.posture.inspect': 'short', 'agent.posture.set': 'long', 'terminal.input': 'long', 'terminal.interrupt': 'long', 'terminal.stop': 'long', 'terminal.operation.inspect': 'short', 'terminal.creation.retire': 'long', 'terminal.creation.inspect': 'short', 'terminal.ls': 'short', 'terminal.inspect': 'short', 'terminal.output': 'long'

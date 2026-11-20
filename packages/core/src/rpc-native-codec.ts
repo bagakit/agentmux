@@ -38,7 +38,7 @@ import { parseNodeLocateParams, parseNodeLocateResult } from './node-locator.js'
 import { isNodePublishingMethod, parseNodePublishingParams, parseNodePublishingResult } from './node-publishing.js'
 import { parseAgentSessionRecordInspection, parseAgentSessionRecordReceipt, type AgentSessionRecordInput, type AgentSessionRecordDeleteInput } from './agent-session-record.js'
 import { parseAgentSessionUsagePage, type AgentSessionUsageInput } from './agent-session-usage.js'
-import { parseSignedMessage, parseFederatedThread, parseSignedDispatchEvent, assertSignedDispatchLineage, parseRecipientInboxReceipt } from './agent-message-federation.js'
+import { parseSignedMessage, parseFederatedThread, parseSignedDispatchEvent, assertSignedDispatchLineage, parseRecipientInboxReceipt, parseMessageApprovalCandidate } from './agent-message-federation.js'
 import { verifyAgentMessageInboxReceipt } from './agent-creation-authority.js'
 import { parseConversationSnapshotResult, type ConversationSnapshotInput, type ConversationSnapshotReleaseInput } from './conversation-snapshot.js'
 import { isImageMethod, parseImageParams, parseImageResult } from './public-rpc-image.js'
@@ -275,6 +275,10 @@ function notificationStatus(value: unknown, envelope: ReturnType<typeof validate
   if (p.deliveryMode === undefined) { if (p.notification !== undefined) fail(); return }
   if (p.deliveryMode !== 'reference' || envelope.sender.kind !== 'agent-session' || envelope.recipient.kind !== 'agent-session' || !envelope.recipientRunId) fail()
   const status = record(p.notification, ['state', 'notificationId', 'key', 'reason', 'mode', 'preparedAt', 'resultRecordedAt', 'automatic'])
+  if (status.state === 'inbox-only') {
+    record(status, ['state']); string(envelope.senderRuntimeId); string(envelope.recipientRuntimeId)
+    return
+  }
   member(status.state, ['pending', 'submitted', 'unconfirmed', 'not-applied'])
   // The automatic path describes only a reference still waiting for one, never a prepared notice.
   if (status.automatic !== undefined && (member(status.automatic, ['idle-queue', 'turn-end', 'none']), status.state !== 'pending' || status.key !== undefined)) fail()
@@ -949,10 +953,17 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         if (!isDeepStrictEqual(receipt.key, original.key) || receipt.ref.waitGeneration < original.waitGeneration) fail()
         break
       }
-      case 'message.federation.intake': {
-        const packet = parseSignedMessage(input.packet), envelope = message(p)
+      case 'message.federation.intake': case 'message.federation.approve': {
+        const packet = method === 'message.federation.approve' ? parseMessageApprovalCandidate(input).packet : parseSignedMessage(input.packet)
+        const envelope = message(p)
         if (!isDeepStrictEqual(envelope, packet.envelope) || !isDeepStrictEqual(p.provenance, packet.provenance)) fail()
+        if (method === 'message.federation.approve' && (p.recipientInbox === undefined || p.deliveryMode !== 'reference')) fail()
         for (const key of ['queueId', 'receiptId', 'messageId']) string(p[key]); break
+      }
+      case 'message.federation.outbox': {
+        const { packet } = parseMessageApprovalCandidate(p)
+        if (packet.envelope.messageId !== input.messageId || packet.envelope.operationId !== input.operationId) fail()
+        break
       }
       case 'message.federation.export': {
         const thread = parseFederatedThread(p)

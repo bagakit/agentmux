@@ -45,7 +45,7 @@ import { isNodePublishingMethod, parseNodePublishingParams, parseNodePublishingR
 import { sessionSemanticResumeSourceRuns } from './agent-session-resume-sources.js'
 import { parseAgentSessionRecordInput, deletedAgentSessionRecord, parseAgentSessionRecordInspection, parseAgentSessionRecordReceipt, type AgentSessionRecordDeleteInput } from './agent-session-record.js'
 import { parseAgentSessionUsageInput, parseAgentSessionUsagePage } from './agent-session-usage.js'
-import { parseSignedMessage, parseMessageReadAuthority, parseFederatedThread, parseSignedDispatchEvent } from './agent-message-federation.js'
+import { messageApprovalCandidate, parseMessageApprovalCandidate, parseSignedMessage, parseMessageReadAuthority, parseFederatedThread, parseSignedDispatchEvent } from './agent-message-federation.js'
 import { parseMessageApplication } from './agent-message-envelope.js'
 import { parseConversationSnapshotInput, parseConversationSnapshotResult, type ConversationSnapshotInput, type ConversationSnapshotReleaseInput } from './conversation-snapshot.js'
 import { isImageMethod, parseImageParams, parseImageResult, type AgentMuxRpcImageOwner, type ImageMethod, type ImageActor, type ImageCallContext } from './public-rpc-image.js'
@@ -220,6 +220,7 @@ export type AgentMuxRpcCorePort = import('./agent-execution-coordinator.js').Age
   'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' | 'listHostNativeAgentSessions' | 'readHostNativeAgentHistory' | 'readHostNativeAgentHistoryResource' |
   'readDeliveryAttempt' | 'readReadingDiagnostic' | 'findReadingDiagnostics' | 'readAgentStartupDiagnostic' | 'findAgentStartupDiagnostics' | 'observeRunStorage' | 'runtimeDiagnostics' | 'runtimeResourceSnapshot' | 'runtimeIdentity' | 'agentCreationAuthority' | 'listTrustedCreationSources' | 'trustCreationSource' | 'agentMessageAuthority' | 'listTrustedMessageSources' | 'trustMessageSource' | 'prepareFederatedMessage' | 'intakeFederatedMessage' | 'prepareFederatedRead' | 'exportFederatedThread' | 'readFederatedOutbox' | 'recordFederatedDispatchEvent' | 'intakeFederatedDispatchEvent' | 'recordFederatedInboxReceipt' | 'listHostExecutors' | 'configureHostExecutor' | 'removeHostExecutor' | 'hostEnvironment'> & {
     maintainHostExecutorHooks?: AgentMuxClient['maintainHostExecutorHooks']
+  approveFederatedMessage?: AgentMuxClient['approveFederatedMessage']
     listHostProviderHooks?: AgentMuxClient['listHostProviderHooks']
     maintainHostProviderHooks?: AgentMuxClient['maintainHostProviderHooks']
     probeHostExecutorAcp?: AgentMuxClient['probeHostExecutorAcp']
@@ -581,6 +582,8 @@ const NATIVE_FIELDS = {
   'message.events': ['hostId', 'participantSessionId', 'afterSequence', 'latest', 'beforeSequence', 'throughSequence', 'incarnation', 'messageId', 'broadcastOperationId', 'limit'],
   'message.federation.dispatch-intake': ['event'],
   'message.federation.intake': ['packet'],
+  'message.federation.approve': ['packet', 'sourcePublicKey', 'packetDigest'],
+  'message.federation.outbox': ['messageId', 'operationId'],
   'message.federation.export': ['authority'],
   'message.dispatch.sync': ['sourceMessageId', 'hostId'],
   'message.dispatch.open': ['sourceMessageId'], 'message.dispatch.inspect': ['sourceMessageId'],
@@ -4287,6 +4290,41 @@ export class AgentMuxRpcService {
         const packet = parseSignedMessage(p.packet), local = (await this.clients()).filter(scope => scope.hostId === 'local')
         if (local.length !== 1) throw new AgentMuxError('The exact receiving Core is unavailable. Keep the signed message.', 'CONTROL_UNAVAILABLE')
         result = await local[0]!.client.intakeFederatedMessage(packet); break
+      }
+      case 'message.federation.approve': {
+        if (context.caller !== undefined || context.routeDelegation !== undefined || !context.principal ||
+          !['user', 'device'].includes(context.principal.kind)) throw new AgentMuxError(
+          'One-time Inbox approval requires the receiving Runtime’s transport-approved person or device.', 'CONTROL_PERMISSION_DENIED')
+        rpcString(context.principal.id, 'Original target principal')
+        const input = parseMessageApprovalCandidate(p)
+        const assertCurrent = async () => {
+          context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
+          context.signal?.throwIfAborted()
+        }
+        if (this.ports.callOriginalCore) {
+          await assertCurrent()
+          return await this.ports.callOriginalCore('local', 'message.federation.approve', input, context) as AgentMuxRpcResult<M>
+        }
+        const owners = await this.clients('local'), local = owners.filter(scope => scope.hostId === 'local')
+        if (local.length !== 1 || !local[0]!.client.approveFederatedMessage) throw new AgentMuxError(
+          'The exact receiving Core is unavailable. Keep the original signed message and approval digest.', 'CONTROL_UNAVAILABLE')
+        result = await local[0]!.client.approveFederatedMessage(input, { assertCurrent, ...(context.signal ? { signal: context.signal } : {}) }); break
+      }
+      case 'message.federation.outbox': {
+        const local = (await this.clients('local')).filter(scope => scope.hostId === 'local')
+        const owner = local.length === 1 ? local[0]! : undefined
+        if (!owner) throw new AgentMuxError('The original signing Core is unavailable.', 'CONTROL_UNAVAILABLE')
+        if (caller ? caller.client !== owner.client : !context.principal || !['user', 'device'].includes(context.principal.kind)) throw new AgentMuxError(
+          'Read an exact outbox message as its original signing Agent or transport-approved Host reader.', 'CONTROL_PERMISSION_DENIED')
+        const messageId = rpcString(p.messageId, 'Original outbox message ID'), operationId = rpcString(p.operationId, 'Original outbox operation ID')
+        const identity = await owner.client.agentMessageAuthority()
+        const message = await owner.client.readMessage({ messageId, ...(caller ? { caller: { agentSessionId: caller.agentSessionId, capability: caller.capability } } : {}) })
+        if (message?.deliveryMode !== 'outbox' || message.envelope.operationId !== operationId ||
+          message.envelope.senderRuntimeId !== identity.runtimeId || message.provenance?.sourceKeyFingerprint !== identity.fingerprint ||
+          caller && message.envelope.senderSessionId !== caller.agentSessionId) throw new AgentMuxError(
+          'This exact original signed outbox message is unavailable to the current reader.', 'MESSAGE_PARTICIPANT_MISMATCH')
+        context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
+        result = messageApprovalCandidate({ envelope: message.envelope, execution: message.execution, sourceChannel: message.sourceChannel, provenance: message.provenance }, identity.publicKey); break
       }
       case 'message.federation.export': {
         const authority = parseMessageReadAuthority(p.authority), local = (await this.clients()).filter(scope => scope.hostId === 'local')

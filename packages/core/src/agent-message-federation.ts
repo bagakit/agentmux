@@ -16,6 +16,8 @@ export type AgentMuxMessageProvenance = {
   sourceKeyFingerprint: string; targetKeyFingerprint: string
 }
 export type AgentMuxSignedMessage = { envelope: AgentMuxMessageEnvelope; execution: 'default'; sourceChannel: AgentMessageChannel; provenance: AgentMuxMessageProvenance }
+export type AgentMuxMessageSingleApproval = { sourcePublicKey: string; packetDigest: string }
+export type AgentMuxMessageApprovalCandidate = AgentMuxMessageSingleApproval & { packet: AgentMuxSignedMessage }
 export type AgentMuxMessageReadAuthority = {
   schema: 'agentmux.agent-message-read.v1'; purpose: 'agent-message'; source: AgentMuxMessageParticipant;
   reader: { kind: 'host' } | { kind: 'agent'; agentSessionId: string; runId: string };
@@ -66,6 +68,20 @@ export function parseSignedMessage(value: unknown): AgentMuxSignedMessage {
       envelope.recipient.agentSessionId !== provenance.target.agentSessionId || envelope.recipientSessionId !== provenance.target.agentSessionId || envelope.recipientRunId !== provenance.target.runId || envelope.recipientRuntimeId !== provenance.target.runtimeId ||
       messagePacketDigest({ envelope, execution: 'default', sourceChannel }) !== provenance.intentDigest) invalid()
   return { envelope, execution: 'default', sourceChannel, provenance }
+}
+
+export function messageApprovalCandidate(value: unknown, sourcePublicKey: string): AgentMuxMessageApprovalCandidate {
+  const packet = parseSignedMessage(value)
+  if (typeof sourcePublicKey !== 'string' || !/^[A-Za-z0-9_-]{1,512}$/u.test(sourcePublicKey)) invalid()
+  return { packet, sourcePublicKey, packetDigest: agentCreationIntentDigest({ packet, sourcePublicKey }) }
+}
+
+export function parseMessageApprovalCandidate(value: unknown): AgentMuxMessageApprovalCandidate {
+  const input = object(value, ['packet', 'sourcePublicKey', 'packetDigest'])
+  const candidate = messageApprovalCandidate(input.packet, id(input.sourcePublicKey))
+  if (input.packetDigest !== candidate.packetDigest) throw new AgentMuxError(
+    'The approved digest does not identify this exact signed message and source key. Keep the original packet.', 'AGENT_MESSAGE_APPROVAL_MISMATCH')
+  return candidate
 }
 export function dispatchEventDigest(value: Omit<AgentMuxSignedDispatchEvent, 'provenance'>): string { return agentCreationIntentDigest(value) }
 export function parseSignedDispatchEvent(value: unknown): AgentMuxSignedDispatchEvent {
