@@ -5,6 +5,7 @@ import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
+import { agentInputComposing } from '../src/renderer/src/lib/agent-closeout-input'
 const dom=composerDOM()
 const editor=()=>dom.container.querySelector<HTMLElement>('[role="textbox"]')!
 async function key(key:string,options:KeyboardEventInit={}) {
@@ -18,6 +19,26 @@ beforeEach(()=>{
  vi.spyOn(api.continuousProgress,'list').mockResolvedValue([])
  vi.spyOn(api.continuousProgress,'pauseForInput').mockResolvedValue(undefined)
  Object.defineProperty(HTMLElement.prototype,'scrollIntoView',{configurable:true,value(){}})
+})
+it('tracks the exact composition from the actual Agent editor and retains preedit if the original view disappears', async () => {
+ await draft('')
+ await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+ const session = useAppStore.getState().sessions.find(item => item.id === 'agent-1')!
+ if (session.kind !== 'agent') throw Error('Expected an actual Agent composer')
+ const original = session.control
+ const compose = (type: string, data: string) => act(async () => {
+  const event = new CompositionEvent(type, { data, bubbles: true })
+  // The DOM fixture does not implement CompositionEvent.data yet.
+  Object.defineProperty(event, 'data', { value: data })
+  editor().dispatchEvent(event)
+ })
+ await compose('compositionstart', '')
+ expect(agentInputComposing(original)).toBe(true)
+ expect(agentInputComposing({ ...original, run: { runId: 'another-run' } })).toBe(false)
+ await compose('compositionupdate', '本地草稿')
+ await dom.render(<></>)
+ expect(agentInputComposing(original)).toBe(false)
+ expect(dom.draft()).toBe('本地草稿')
 })
 it('real DOM arrows recall accepted bodies and restore the exact draft without dispatch',async()=>{
  vi.spyOn(useAppStore.getState(),'sendQueuedAgentSteer').mockResolvedValue('submitted')

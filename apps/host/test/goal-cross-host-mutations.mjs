@@ -52,5 +52,11 @@ export const crossHostMutations = {
     anchor: 'if (directMessage || this.pendingNotification(agentSessionId, sourceMessageId)) throw new AgentMuxError(',
     replacement: 'if (false) throw new AgentMuxError(',
     test: 'input saved during final Desktop check'
+  },
+  'desktop-closeout-admission': {
+    path: 'apps/host/src/goal-worker-closeout.ts',
+    anchor: "const desktop = await options.desktopOccupation?.(input.agentSessionId, input.runId, context, { action: 'admit', operationId: input.operationId })",
+    replacement: "const desktop = 'clear'",
+    test: 'Desktop draft before admission'
   }
 }

@@ -52,6 +52,70 @@ describe('pending text is edited by its original queue owner',()=>{
    await expect(inspect('another-run')).resolves.toMatchObject({ occupation: { runId: 'another-run', state: 'unknown' } })
   } finally { await service.dispose() }
  })
+ it('orders Desktop closeout with draft and queue writes and reconciles the original retired Run', async () => {
+  const runId = agent.control.run.runId, operationId = 'same-original-stop'
+  const view = createWorkbenchTab('original-view', { kind: 'agent', phase: 'attached', sessionId: agent.id, workspaceId: 'original-project', regionId: 'original-region' })
+  useAppStore.setState({ sessions: [agent], tabs: { [view.id]: view } })
+  const service = new AgentMuxRpcService({ execute: (request, _name, context) => useAppStore.getState().executeControl(request, context?.signal) })
+  const principal = { transport: 'unix' as const, principal: { kind: 'user' as const, id: 'private-owner' } }
+  const request = { agentSessionId: agent.id, closeoutRunId: runId, closeout: { action: 'admit' as const, operationId } }
+  const ownOperation = () => Object.values(useAppStore.getState().agentOperations).find(operation => operation.operationId === operationId)
+  try {
+   await expect(service.call('message.pending.ls', request, { ...principal, transport: 'local' } as never)).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+   const afterObservation = useAppStore.subscribe(() => {
+    if (ownOperation()?.phase === 'unconfirmed' && !useAppStore.getState().agentComposerDrafts['original-region'])
+     useAppStore.getState().setAgentComposerDraft('original-region', 'typed during the original checkpoint')
+   })
+   try {
+    await expect(service.call('message.pending.ls', request, principal)).resolves.toMatchObject({ occupation: { runId, state: 'draft', operationId } })
+   } finally { afterObservation() }
+   expect(useAppStore.getState().agentComposerDrafts['original-region']).toBe('typed during the original checkpoint')
+   useAppStore.getState().setAgentComposerDraft('original-region', '')
+   expect(useAppStore.getState().enqueueAgentSteer('original-region', 'region-owned input', undefined, undefined,
+    'manual', undefined, { originalSession: agent })).toBe(true)
+   await expect(service.call('message.pending.ls', request, principal)).resolves.toMatchObject({ occupation: { runId, state: 'pending', operationId } })
+   useAppStore.setState({ agentSteerQueues: {} })
+   await expect(service.call('message.pending.ls', request, principal)).resolves.toMatchObject({ occupation: { runId, state: 'clear', operationId } })
+   expect(ownOperation()).toMatchObject({ kind: 'stop', control: agent.control, phase: 'pending', inputCloseout: true })
+   useAppStore.getState().setAgentComposerDraft('original-region', 'late, still editable')
+   const provider = vi.spyOn(api.sessions, 'submitPrompt')
+   expect(useAppStore.getState().send(agent.id, 'late submitted text', undefined, 'manual')).toBe(true)
+   expect(provider).not.toHaveBeenCalled()
+   expect(useAppStore.getState().agentSteerQueues[agent.id]?.[0]).toMatchObject({ text: 'late submitted text', runId, awaitingExplicitSend: true })
+   useAppStore.setState({ sessions: [], tabs: {} })
+   vi.spyOn(api.sessions, 'inspectStop').mockResolvedValue({ phase: 'retired', agentSessionId: agent.id, expectedRun: { runId },
+    operationIdMatched: true, observedAt: Date.now(), retiredAt: Date.now(), canRetry: false })
+   await service.call('message.pending.ls', { ...request, closeout: { action: 'reconcile', operationId } }, principal)
+   expect(ownOperation()?.phase).toBe('succeeded')
+   expect(useAppStore.getState().agentComposerDrafts['original-region']).toBe('late, still editable')
+   expect(useAppStore.getState().agentSteerQueues[agent.id]?.[0]?.text).toBe('late submitted text')
+  } finally { await service.dispose() }
+ })
+ it('preserves detached edits through cancelled Desktop closeout and unavailable original Stop readback', async () => {
+  const runId = agent.control.run.runId, operationId = 'cancelled-original-stop', abort = new AbortController()
+  useAppStore.setState({ sessions: [agent], tabs: {} })
+  const service = new AgentMuxRpcService({ execute: (request, _name, context) => useAppStore.getState().executeControl(request, context?.signal) })
+  const principal = { transport: 'unix' as const, principal: { kind: 'user' as const, id: 'private-owner' } }
+  const request = { agentSessionId: agent.id, closeoutRunId: runId, closeout: { action: 'admit' as const, operationId } }
+  const ownOperation = () => Object.values(useAppStore.getState().agentOperations).find(operation => operation.operationId === operationId)
+  const checkpointReader = useAppStore.subscribe(() => { if (ownOperation()) abort.abort(new Error('original reader cancelled')) })
+  try {
+   try { await expect(service.call('message.pending.ls', request, { ...principal, signal: abort.signal })).rejects.toThrow('original reader cancelled') }
+   finally { checkpointReader() }
+   expect(ownOperation()).toMatchObject({ phase: 'unconfirmed', control: agent.control })
+   const inspect = vi.spyOn(api.sessions, 'inspectStop').mockRejectedValueOnce(new Error('original Host disconnected'))
+    .mockResolvedValueOnce({ phase: 'not-requested', agentSessionId: agent.id, expectedRun: { runId }, operationIdMatched: false,
+     canRetry: true, observedAt: Date.now() })
+   const reconcile = { ...request, closeout: { action: 'reconcile' as const, operationId } }
+   useAppStore.getState().setAgentComposerDraft(agent.id, 'detached draft after cancellation')
+   await service.call('message.pending.ls', reconcile, principal)
+   expect(ownOperation()?.phase).toBe('unconfirmed')
+   await service.call('message.pending.ls', reconcile, principal)
+   expect(inspect.mock.calls).toEqual([[agent.control, operationId], [agent.control, operationId]])
+   expect(ownOperation()?.phase).toBe('failed')
+   expect(useAppStore.getState().agentComposerDrafts[agent.id]).toBe('detached draft after cancellation')
+  } finally { await service.dispose() }
+ })
  it('changes one body, preserving identity, target, order, facts and draft; saving never submits',async()=>{
   const before=seed();const target=before[1]!;const submit=vi.spyOn(api.sessions,'submitPrompt').mockResolvedValue()
   const next='edited second\nwith full contents'

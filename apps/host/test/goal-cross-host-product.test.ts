@@ -216,7 +216,7 @@ test('the received original report retains its worker signature and exact Goal c
   expect(b.native.stop).not.toHaveBeenCalled()
 })
 
-it.each(['active original Supervisor', 'retired original Supervisor', 'active original Supervisor unmounted', 'active original Supervisor with queued Core input', 'reassignment after collection', 'input saved during final Desktop check', 'new Goal duty before Stop admission', 'lost original Native Stop ACK'] as const)('retains the original report through current Supervisor collection with %s', async scenario => {
+it.each(['active original Supervisor', 'retired original Supervisor', 'active original Supervisor unmounted', 'active original Supervisor with queued Core input', 'reassignment after collection', 'input saved during final Desktop check', 'new Goal duty before Stop admission', 'lost original Native Stop ACK', 'Desktop draft before admission', 'Desktop draft after admission', 'lost Desktop admission ACK'] as const)('retains the original report through current Supervisor collection with %s', async scenario => {
   const host = await crossHostOwner(cleanup, 'worker-closeout', ['supervisor', 'worker', 'reviewer', 'successor'])
   const { goal } = await host.call(null, ['goal', 'create', '--title', 'Verify worker closeout',
     '--status', 'in_progress', '--assignees', '["supervisor","worker","successor"]', '--supervisor', 'supervisor', '--risk', 'low', '--confirm', 'user'])
@@ -285,7 +285,7 @@ it.each(['active original Supervisor', 'retired original Supervisor', 'active or
   const args = closeout('run-worker', 'closeout-stop')
   expect(await host.call('worker', args)).toMatchObject({ state: 'retained', reason: 'unknown' })
   const spatial = new AgentMuxSpatialStateStore(), directory = host.original.root
-  const mounted = scenario === 'active original Supervisor'
+  const mounted = scenario === 'active original Supervisor' || scenario === 'Desktop draft after admission'
   await spatial.commit({ expectedRevision: 0, graph: {
     spaces: [], bindings: [],
     zones: mounted ? [{ zoneId: 'zone', workspaceId: 'original-project', kind: 'home', hostId: 'local', directoryPath: directory, branch: null }] : [],
@@ -299,11 +299,18 @@ it.each(['active original Supervisor', 'retired original Supervisor', 'active or
     observedAt: now, stateEnteredAt: now, nativeTurnId: 'original-completed-turn' }, updatedAt: now })
   await (host.client() as unknown as { registry: { load(hostId: string): Promise<void> } }).registry.load('local')
   let known = false, pending = false, scheduleInput = false, desktopReads = 0
+  const desktopAdmitted = new Set<string>(), desktopReconciled = new Set<string>()
   const drafts: Record<string, string> = {}
   const owners = mounted ? ['worker', 'work-region'] : ['worker']
   const desktop = new AgentMuxControlServer({ socketPath: join(directory, 'absent-desktop.sock'),
     coreClients: () => [{ hostId: 'local', client: host.client() }], execute: async request => {
       if (request.operation !== 'message.pending.ls' || request.closeoutRunId !== 'run-worker' || request.agentSessionId !== 'worker') throw new Error('Unexpected private Desktop request')
+      const closeout = request.closeout
+      if (closeout?.action === 'reconcile') {
+        desktopReconciled.add(closeout.operationId)
+        return { operation: request.operation, agentSessionId: 'worker', messages: [],
+          occupation: { runId: request.closeoutRunId, operationId: closeout.operationId, state: 'unknown' } }
+      }
       if (scheduleInput && ++desktopReads === 2) {
         await host.call('successor', ['agent', 'send', '--to-session', 'worker', '--expect-run', 'run-worker', '--message-id', 'input-saved-after-core-check',
           '--operation-id', 'save-concurrent-original-input', '--text', 'Original work routed while closeout was checking Desktop'])
@@ -311,8 +318,13 @@ it.each(['active original Supervisor', 'retired original Supervisor', 'active or
         expect(saved.message).toMatchObject({ envelope: { recipientSessionId: 'worker', recipientRunId: 'run-worker' }, delivery: { state: 'queued' } })
         expect(host.native.stop).not.toHaveBeenCalled()
       }
+      const state = desktopRunInputOccupation({ known, owners, drafts, notes: {}, pending })
+      if (closeout?.action === 'admit' && state === 'clear') {
+        desktopAdmitted.add(closeout.operationId)
+        if (scenario === 'lost Desktop admission ACK') throw new Error('Private Desktop admission ACK lost')
+      }
       return { operation: request.operation, agentSessionId: 'worker', messages: [],
-        occupation: { runId: request.closeoutRunId, state: desktopRunInputOccupation({ known, owners, drafts, notes: {}, pending }) } }
+        occupation: { runId: request.closeoutRunId, state, ...(closeout ? { operationId: closeout.operationId } : {}) } }
     } })
   await desktop.start()
   cleanup.push(() => desktop.stop())
@@ -368,6 +380,36 @@ it.each(['active original Supervisor', 'retired original Supervisor', 'active or
     expect(host.native.stop).not.toHaveBeenCalled()
     return
   }
+  if (scenario === 'Desktop draft before admission') {
+    const prepare = host.native.prepareStop as ReturnType<typeof vi.fn<(runId: string, operationKey: string) => Promise<unknown>>>
+    const original = prepare.getMockImplementation()!
+    prepare.mockImplementationOnce(async (runId, operationKey) => {
+      drafts[owners.at(-1)!] = 'draft after initial observation, before Desktop admission'
+      return await original(runId, operationKey)
+    })
+    expect(await host.call('worker', args)).toMatchObject({ state: 'retained', reason: 'draft' })
+    expect(desktopAdmitted.size).toBe(0)
+    expect(host.native.stop).not.toHaveBeenCalled()
+    return
+  }
+  if (scenario === 'lost Desktop admission ACK') {
+    expect(await host.call('worker', args)).toMatchObject({ state: 'retained', reason: 'unknown', operationId: 'closeout-stop' })
+    expect(desktopAdmitted.has('closeout-stop')).toBe(true)
+    await vi.waitFor(() => expect(desktopReconciled.has('closeout-stop')).toBe(true))
+    expect(host.native.stop).not.toHaveBeenCalled()
+    expect(await host.call(null, ['agent', 'stop', 'inspect', '--session', 'worker', '--run', 'run-worker', '--operation-id', 'closeout-stop']))
+      .toMatchObject({ phase: 'not-requested', operationIdMatched: false })
+    return
+  }
+  if (scenario === 'Desktop draft after admission') {
+    const stop = host.native.stop as ReturnType<typeof vi.fn<(operation: { runId: string }) => Promise<unknown>>>
+    const original = stop.getMockImplementation()!
+    stop.mockImplementationOnce(async operation => {
+      expect(desktopAdmitted.has('closeout-stop')).toBe(true)
+      drafts[owners.at(-1)!] = 'new mounted draft after Desktop admission'
+      return await original(operation)
+    })
+  }
   if (scenario === 'lost original Native Stop ACK') {
     const stop = host.native.stop as ReturnType<typeof vi.fn<(operation: { runId: string }) => Promise<unknown>>>
     const status = host.native.status as ReturnType<typeof vi.fn<(runId: string) => Promise<ReturnType<typeof host.original.run>>>>
@@ -404,6 +446,10 @@ it.each(['active original Supervisor', 'retired original Supervisor', 'active or
   expect(host.native.stop).not.toHaveBeenCalled()
   const stopped = await host.call('worker', args)
   expect(stopped).toMatchObject({ state: 'stopped', receipt: { operationId: 'closeout-stop', agentSessionId: 'worker', expectedRun: { runId: 'run-worker' } } })
+  if (scenario === 'Desktop draft after admission') {
+    expect(drafts[owners.at(-1)!]).toBe('new mounted draft after Desktop admission')
+    await vi.waitFor(() => expect(desktopReconciled.has('closeout-stop')).toBe(true))
+  }
   expect(host.native.stop).toHaveBeenCalledTimes(1)
   expect(host.native.stop).toHaveBeenCalledWith(expect.objectContaining({ runId: 'run-worker' }))
   const retained = await host.call(null, ['agent', 'stop', 'inspect', '--session', 'worker', '--run', 'run-worker', '--operation-id', 'closeout-stop'])
