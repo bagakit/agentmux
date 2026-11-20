@@ -201,7 +201,7 @@ type ControlParams<M extends ControlMethod> = M extends 'space.inspect'
       risk?: import('./control.js').AgentMuxDemandDecision['risk'];
       confirmation?: import('./control.js').AgentMuxDemandDecision['confirmation']; wikiVersion?: string;
       decision?: Omit<import('./control.js').AgentMuxDemandDecision, 'recordedAt' | 'sourceSessionId'> }
-  : M extends 'goal.focus' ? { goalId: string; runtimeId?: string; namespace?: string; section?: 'plan'; nodeId?: string; input?: 'preserve' | 'target' }
+  : M extends 'goal.focus' ? { goalId: string; runtimeId?: string; namespace?: string; section?: 'plan'; nodeId?: string; bound?: true; input?: 'preserve' | 'target' }
   : M extends 'goal.activity.append' | 'goal.activity.inspect' ? GoalKeys<BusinessParams<M>> & { operationId: string }
   : M extends 'settings.browser-links.forget' ? { input: unknown }
   : M extends 'settings.prompts.inspect' ? { id: string; keyword?: never } | { keyword: string; id?: never }

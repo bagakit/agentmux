@@ -10,7 +10,7 @@ export type AgentMuxDesktopFocusTarget =
   | { kind: 'survey'; selection: AgentMuxSurveyPinReference; reference?: Pick<AgentMuxSpaceAddress, 'displayWorkspaceId' | 'groupId' | 'tabId' | 'regionId'> }
   | Extract<import('./sharing.js').AmuxObjectLinkTarget, {kind:'mote'}>
   | { kind: 'settings'; sectionId: string | null; hostId?: string }
-  | { kind: 'goal'; goalId: string; runtimeId?: string; namespace?: string; section?: 'plan'; nodeId?: string }
+  | { kind: 'goal'; goalId: string; runtimeId?: string; namespace?: string; section?: 'plan'; nodeId?: string; bound?: true }
   | { kind: 'focus-agent'; hostId: string; agentSessionId: string }
   | { kind: 'surface'; surface: 'focus'; view?: AgentMuxDesktopFocusView }
   | { kind: 'surface'; surface: Exclude<AgentMuxDesktopSurface, 'focus'> }

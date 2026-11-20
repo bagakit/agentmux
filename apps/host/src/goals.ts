@@ -3,7 +3,7 @@ import { readGoalInputEpoch, openGoalFiniteInput, openGoalFiniteInspection } fro
 import { demandAgentReferenceKey, type DemandSpaceMemberReference } from '@agentmux/demand/relations'
 import { createHash } from 'node:crypto'
 import { mkdir, realpath } from 'node:fs/promises'
-import { deriveBoundGoalId } from '@agentmux/core/sharing'
+import { deriveBoundGoalId, formatAmuxObjectLink } from '@agentmux/core/sharing'
 import { assertNewGoalSourceRelations, goalSourceRpc } from './goal-source-relations.js'
 import { createHostGoalDiscussions } from './goal-discussions.js'
 import { resolveGoalsPreferences, type GoalsPreferences } from './goals-preferences.js'
@@ -217,6 +217,11 @@ export function createHostGoals(options: {
     const req = request as GoalRequest
     if (req.operation === 'demand.list') return { operation: req.operation, demands: await projectGoals(await demands.list()) }
     if (req.operation === 'demand.show') {
+      if (req.creationOperationId !== undefined) {
+        const goalId = await demands.originalGoalCreationId(req.creationOperationId)
+        const goal = goalId === undefined ? null : await demands.get(goalId)
+        return { operation: req.operation, demand: goal ? await projectGoal(goal) : null, goalContinuations: goal ? await progress.listGoals(goal.id) : [] }
+      }
       if (req.dispatchOperationId) {
         const reference = { goalId: req.demandId, operationId: req.dispatchOperationId }, original = await dispatch.original(reference)
         if (!runBoundDemandDispatch(original)) {
@@ -236,22 +241,19 @@ export function createHostGoals(options: {
     if (req.operation === 'demand.create') {
       const selected = await project(req.projectId)
       if (!req.decision || req.decision.risk === 'unknown' || req.decision.confirmation === 'pending') throw new AgentMuxError('The original Goal write requires its explicit confirmation and resolved routing.', 'CONTROL_REQUEST_CONFLICT')
-      let goalId = req.demandId ?? await demands.originalGoalCreationId(req.requestId)
-      if (!goalId) {
-        await mkdir(demands.root, { recursive: true })
-        const owner = await planOwner()
-        goalId = deriveBoundGoalId(owner.runtimeId, owner.namespace, req.requestId)
-      }
+      await mkdir(demands.root, { recursive: true })
+      const goalOwner = await planOwner()
+      const goalId = await demands.originalGoalCreationId(req.requestId) ?? deriveBoundGoalId(goalOwner.runtimeId, goalOwner.namespace, req.requestId)
       const raw = await readOriginalMoteConfiguration(options.configurationPath), preferences = record(raw) && record(raw.goals) ? raw.goals : {}
       const participation = participant(name, 'create')
       await current(context)
       await assertNewGoalSourceRelations(await demands.get(goalId) ?? undefined, req, req.relationAccess, (access, runtimeId) => goalSourceRpc({ runtime: options.runtime, clients }, access, runtimeId, context), context.signal)
       const priorGoal = await demands.get(goalId)
       const birth = priorGoal?.creationOrigin ?? { ...optionalInputEpoch(await options.runtime().client.readAgentInputEpoch()), inputRuntimeId: options.runtime().ownerIdentity().runtimeId }
-      const saved = await demands.create({ id: goalId, title: req.title, description: req.description ?? '', projectId: req.projectId ?? null, projectName: selected?.name ?? null,
+      const saved = await demands.create({ title: req.title, description: req.description ?? '', projectId: req.projectId ?? null, projectName: selected?.name ?? null,
         ...(req.priority ? { priority: req.priority } : {}), ...(req.status ? { status: req.status } : {}), ...(req.assigneeSessionIds ? { assigneeSessionIds: req.assigneeSessionIds } : {}),
         ...(req.supervisorSessionId === undefined ? {} : { supervisorSessionId: req.supervisorSessionId }), ...(req.sessionIds ? { sessionIds: req.sessionIds } : {}), ...(req.tags ? { tags: req.tags } : {}), ...(req.plannedStartAt === undefined ? {} : { plannedStartAt: req.plannedStartAt }), ...(req.targetAt === undefined ? {} : { targetAt: req.targetAt }), ...(req.parentDemandId === undefined ? {} : { parentDemandId: req.parentDemandId }), ...(req.phaseIndex === undefined ? {} : { phaseIndex: req.phaseIndex }),  ...(req.contentRefs ? { contentRefs: req.contentRefs } : {}) },
-        { operationId: req.requestId, discussionOperationId: await goalPmoOperation({ goalId, creationOperationId: req.requestId }, 'create'), ...(name ? { context: name } : {}), ...(participation ? { participation } : {}), creationOrigin: { ...optionalInputEpoch(birth.inputEpoch), ...(birth.inputRuntimeId === undefined ? {} : { inputRuntimeId: birth.inputRuntimeId }), requesterAsSupervisor: resolveGoalsPreferences(preferences as GoalsPreferences).requesterAsSupervisor } })
+        { goalOwner, operationId: req.requestId, discussionOperationId: await goalPmoOperation({ goalId, creationOperationId: req.requestId }, 'create'), ...(name ? { context: name } : {}), ...(participation ? { participation } : {}), creationOrigin: { ...optionalInputEpoch(birth.inputEpoch), ...(birth.inputRuntimeId === undefined ? {} : { inputRuntimeId: birth.inputRuntimeId }), requesterAsSupervisor: resolveGoalsPreferences(preferences as GoalsPreferences).requesterAsSupervisor } })
       if (req.decision) await saveDecision(saved.demand.id, req.decision, req.requestId, context)
       return { operation: req.operation, demand: await projectGoal(await get(saved.demand.id)), receipt: { demandId: saved.demand.id, createdAt: saved.demand.createdAt } }
     }
@@ -298,7 +300,7 @@ export function createHostGoals(options: {
         author = { kind: actor.kind, id: actor.id }
       }
       const continuation = req.continueWith && author.kind !== 'agent' ? { operationId: req.requestId, recipient: req.continueWith,
-        goalUrl: hostGoalAddress(goal, await planOwner()).goalUrl, requestedBy: author } : undefined
+        goalUrl: formatAmuxObjectLink({ kind: 'goal', goalId: goal.id, ...await planOwner() }), requestedBy: author } : undefined
       await current(context)
       const saved = await demands.confirmAlignment(goal.id, req.expectedRevision, continuation,
         { operationId: req.requestId, author, ...(expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt }) })

@@ -1,7 +1,11 @@
 /** Pure Goal facts and validation. Safe to consume from a browser. */
+import { deriveObjectId } from '@agentmux/identity'
 import { parseDemandEvidence, type DemandEvidence } from './evidence.js'
 export { parseDemandEvidence, demandEvidenceText, demandEvidenceLabel, type DemandEvidence, type DemandFileEvidence } from './evidence.js'
 export type DemandCriterion = { id: string; text: string }
+export function deriveBoundGoalId(runtimeId: string, namespace: string, creationOperationId: string): string {
+  return deriveObjectId('agentmux.goal-root.v1', JSON.stringify([runtimeId, namespace, creationOperationId]))
+}
 export type DemandAlignmentProposal = {
   summary: string
   criteria: DemandCriterion[]

@@ -47,7 +47,7 @@ import { assertGoalPlanKeepsRecordedNodes, currentGoalWorkflowDelivery, goalPlan
 import { assertIssuedGoalTicket, freezeGoalTicketDependencies, issueGoalTickets } from './goal-ticket-issuance.js'
 import type { GoalTicketProof, GoalTicketSigner } from './goal-ticket-proof.js'
 import { demandNameContext, parseDemandNameChange } from './demand-name-change.js'
-import { alignmentConfirmationIssue, groundingAcceptanceIssue, parseAlignment, parseAlignmentProposal, parseGrounding, parseGroundingProposal, type DemandAlignmentConfirmer, type DemandAlignmentProposal, type DemandGroundingProposal } from './goals.js'
+import { alignmentConfirmationIssue, deriveBoundGoalId, groundingAcceptanceIssue, parseAlignment, parseAlignmentProposal, parseGrounding, parseGroundingProposal, type DemandAlignmentConfirmer, type DemandAlignmentProposal, type DemandGroundingProposal } from './goals.js'
 
 const requireNative = createRequire(import.meta.url)
 const WRITER_LOCK_MARKER = 'agentmux.demand-writer-lock.v1\n'
@@ -510,18 +510,18 @@ export class DemandStore {
 
   async create(input: CreateDemandInput, options: DemandCreateOptions = {}): Promise<DemandReceipt> {
     rejectProvenanceInput(input)
+    if (Object.hasOwn(input, 'id')) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'The Demand owner allocates the ID.')
     if (Object.hasOwn(input, 'dispatches')) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'Only the actual Goal Start input owner records dispatch facts.')
     const operationId = options.operationId ?? mintObjectId()
     return this.mutate('create', (snapshot) => {
-      const title = inputString(input.title, 'title')
-      if (!title) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'title is required')
-      const id = input.id ?? mintObjectId()
-      inputString(id, 'id')
+      const owner = options.goalOwner
+      const bound = owner ? snapshot.demands.find(goal => goal.creationOrigin?.operationId === operationId) : undefined
+      const id = owner ? bound?.id ?? deriveBoundGoalId(owner.runtimeId, owner.namespace, operationId) : mintObjectId()
       if (snapshot.retiredGoals?.some(goal => goal.id === id || goal.creationOperationId === operationId))
         throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'This original Goal identity or creation operation has been retired.')
       const original = snapshot.demands.find(goal => goal.id === id)
       if (original && options.discussionOperationId && original.discussionOperationId === options.discussionOperationId && original.creationOrigin?.operationId === operationId) {
-        const expected = { title, description: input.description ?? '', projectId: input.projectId ?? null, priority: input.priority ?? 'normal', status: input.status ?? 'backlog',
+        const expected = { title: input.title, description: input.description ?? '', projectId: input.projectId ?? null, priority: input.priority ?? 'normal', status: input.status ?? 'backlog',
           assigneeSessionIds: [...(input.assigneeSessionIds ?? [])], supervisorSessionId: input.supervisorSessionId ?? null,
           sessionIds: mergeDemandAgentReferences(input.sessionIds ?? [], input.assigneeSessionIds ?? []), tags: [...(input.tags ?? [])],
           plannedStartAt: input.plannedStartAt ?? null, targetAt: input.targetAt ?? null, parentDemandId: input.parentDemandId ?? null, phaseIndex: phaseIndex(input.phaseIndex, 'phaseIndex'), contentRefs: input.contentRefs }
@@ -532,40 +532,47 @@ export class DemandStore {
       if (snapshot.demands.some((entry) => entry.id === id)) {
         throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, `Demand ${id} already exists`)
       }
-      const now = Date.now()
-      const demand: Demand = {
-        id,
-        title,
-        description: input.description ?? '',
-        status: ensureStatus(input.status, 'status') ?? 'backlog',
-        priority: ensurePriority(input.priority, 'priority') ?? 'normal',
-        projectId: input.projectId ?? null,
-        projectName: input.projectName ?? null,
-        executorId: null,
-        tags: [...(input.tags ?? [])],
-        plannedStartAt: input.plannedStartAt ?? null,
-        targetAt: input.targetAt ?? null,
-        parentDemandId: input.parentDemandId ?? null,
-        phaseIndex: phaseIndex(input.phaseIndex, 'phaseIndex'),
-        sessionIds: mergeDemandAgentReferences(input.sessionIds ?? [], input.assigneeSessionIds ?? []),
-        assigneeSessionIds: [...(input.assigneeSessionIds ?? [])],
-        supervisorSessionId: input.supervisorSessionId ?? null,
-        participations: [],
-        ...(options.creationOrigin ? { creationOrigin: { operationId, ...optionalDemandInputEpoch(options.creationOrigin.inputEpoch), ...(options.creationOrigin.inputRuntimeId === undefined ? {} : { inputRuntimeId: options.creationOrigin.inputRuntimeId }), requesterAsSupervisor: options.creationOrigin.requesterAsSupervisor,
-          requesterParticipationId: null, supervisorDefaultPending: options.creationOrigin.requesterAsSupervisor && !Object.hasOwn(input, 'supervisorSessionId') } } : {}),
-        ...(options.discussionOperationId === undefined ? {} : { discussionOperationId: nonEmptyString(options.discussionOperationId, 'discussionOperationId') }),
-        ...(input.contentRefs === undefined ? {} : { contentRefs: [...input.contentRefs] }),
-        activities: [],
-        decisions: [],
-        createdAt: now,
-        updatedAt: now,
-      }
-      if (options.participation) appendParticipation(demand, options.participation, operationId, now)
-      if (options.participation?.kind === 'create' && demand.creationOrigin) resolveCreationRequester(demand, options.participation, operationId, true)
-      validateNewDemand(demand, this.storePath)
+      const demand = this.createRecord(input, options, id, operationId)
       snapshot.demands.push(demand)
       return demand
     }, undefined, operationId)
+  }
+
+  private createRecord(input: CreateDemandInput, options: DemandCreateOptions, id: string, operationId: string): Demand {
+    const title = inputString(input.title, 'title')
+    if (!title) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'title is required')
+    const now = Date.now()
+    const demand: Demand = {
+      id,
+      title,
+      description: input.description ?? '',
+      status: ensureStatus(input.status, 'status') ?? 'backlog',
+      priority: ensurePriority(input.priority, 'priority') ?? 'normal',
+      projectId: input.projectId ?? null,
+      projectName: input.projectName ?? null,
+      executorId: null,
+      tags: [...(input.tags ?? [])],
+      plannedStartAt: input.plannedStartAt ?? null,
+      targetAt: input.targetAt ?? null,
+      parentDemandId: input.parentDemandId ?? null,
+      phaseIndex: phaseIndex(input.phaseIndex, 'phaseIndex'),
+      sessionIds: mergeDemandAgentReferences(input.sessionIds ?? [], input.assigneeSessionIds ?? []),
+      assigneeSessionIds: [...(input.assigneeSessionIds ?? [])],
+      supervisorSessionId: input.supervisorSessionId ?? null,
+      participations: [],
+      ...(options.creationOrigin ? { creationOrigin: { operationId, ...optionalDemandInputEpoch(options.creationOrigin.inputEpoch), ...(options.creationOrigin.inputRuntimeId === undefined ? {} : { inputRuntimeId: options.creationOrigin.inputRuntimeId }), requesterAsSupervisor: options.creationOrigin.requesterAsSupervisor,
+        requesterParticipationId: null, supervisorDefaultPending: options.creationOrigin.requesterAsSupervisor && !Object.hasOwn(input, 'supervisorSessionId') } } : {}),
+      ...(options.discussionOperationId === undefined ? {} : { discussionOperationId: nonEmptyString(options.discussionOperationId, 'discussionOperationId') }),
+      ...(input.contentRefs === undefined ? {} : { contentRefs: [...input.contentRefs] }),
+      activities: [],
+      decisions: [],
+      createdAt: now,
+      updatedAt: now,
+    }
+    if (options.participation) appendParticipation(demand, options.participation, operationId, now)
+    if (options.participation?.kind === 'create' && demand.creationOrigin) resolveCreationRequester(demand, options.participation, operationId, true)
+    validateNewDemand(demand, this.storePath)
+    return demand
   }
 
   /** Authenticated Host supplies author and observed basis; an editable phase cannot release work. */

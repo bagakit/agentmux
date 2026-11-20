@@ -139,7 +139,6 @@ export type DemandStoreSnapshot = {
 }
 
 export type CreateDemandInput = {
-  id?: string
   title: string
   description?: string
   status?: DemandStatus
@@ -163,6 +162,7 @@ export type UpdateDemandInput = Partial<Pick<
 >> & { alignment?: DemandAlignmentProposal; grounding?: DemandGroundingProposal }
 
 export type DemandCreateOptions = {
+  goalOwner?: { runtimeId: string; namespace: string }
   discussionOperationId?: string
   operationId?: string
   context?: DemandNameContext

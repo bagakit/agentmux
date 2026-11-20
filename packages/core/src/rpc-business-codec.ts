@@ -79,9 +79,9 @@ export function rpcControlRequest(method: keyof typeof AGENTMUX_RPC_CONTROL_METH
     body.target = { requestId: rpcString(target.operationId, 'Operation ID') }
   }
   if (method === 'goal.focus') {
-    const p = rpcRecord(source, ['goalId', 'runtimeId', 'namespace', 'section', 'nodeId', 'input', 'operationId'])
+    const p = rpcRecord(source, ['goalId', 'runtimeId', 'namespace', 'section', 'nodeId', 'bound', 'input', 'operationId'])
     delete body.demandId; delete body.input
-    body.target = { kind: 'goal', goalId: rpcString(p.goalId, 'Goal ID'), ...(p.runtimeId === undefined ? {} : { runtimeId: p.runtimeId }), ...(p.namespace === undefined ? {} : { namespace: p.namespace }), ...(p.section === undefined ? {} : { section: p.section }), ...(p.nodeId === undefined ? {} : { nodeId: p.nodeId }) }; delete body.runtimeId; delete body.namespace; delete body.section; delete body.nodeId
+    body.target = { kind: 'goal', goalId: rpcString(p.goalId, 'Goal ID'), ...(p.runtimeId === undefined ? {} : { runtimeId: p.runtimeId }), ...(p.namespace === undefined ? {} : { namespace: p.namespace }), ...(p.section === undefined ? {} : { section: p.section }), ...(p.nodeId === undefined ? {} : { nodeId: p.nodeId }), ...(p.bound === undefined ? {} : { bound: p.bound }) }; delete body.runtimeId; delete body.namespace; delete body.section; delete body.nodeId; delete body.bound
     body.inputPolicy = p.input ?? 'preserve'
   }
   const resource = /^settings\.(executors|prompts|themes|derived-actions)\.(ls|inspect|create|update|delete)$/u.exec(method)
@@ -216,10 +216,12 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
       parseGitOpenResult(body, request)
       break
     }
-    case 'demand.create':
-      if (actual.receipt && (actual.receipt as Record<string, unknown>).demandId !== (actual.demand as Record<string, unknown>)?.id ||
-          request.demandId !== undefined && (actual.demand as Record<string, unknown>)?.id !== request.demandId) fail()
+    case 'demand.create': {
+      const goal = actual.demand as AgentMuxDemand
+      if ((actual.receipt as Record<string, unknown>).demandId !== goal.id ||
+          request.requestId && goal.creationOrigin?.operationId !== request.requestId) fail()
       break
+    }
     case 'demand.activity.append': {
       const activity = actual.activity as import('./control.js').AgentMuxDemandActivity
       const receipt = actual.receipt as Record<string, unknown>
@@ -392,8 +394,14 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
       if (groups.length !== request.demandIds.length || groups.some((group, index) => group.demandId !== request.demandIds[index])) fail()
       break
     }
+    case 'demand.show':
+      if (actual.demand) {
+        const goal = actual.demand as AgentMuxDemand
+        if (request.creationOperationId !== undefined ? goal.creationOrigin?.operationId !== request.creationOperationId : goal.id !== request.demandId) fail()
+      }
+      break
     case 'demand.discuss': case 'demand.confirm': case 'demand.accept':
-    case 'demand.activity.read': case 'demand.continuation-action': case 'demand.show': case 'demand.update': case 'demand.assign': case 'demand.start': case 'demand.handoff':
+    case 'demand.activity.read': case 'demand.continuation-action': case 'demand.update': case 'demand.assign': case 'demand.start': case 'demand.handoff':
     case 'demand.delete': case 'demand.link-session': case 'demand.link-project': case 'demand.decision-log':
       if (actual.demand && (actual.demand as Record<string, unknown>).id !== request.demandId ||
         actual.demandId !== undefined && actual.demandId !== request.demandId ||
@@ -498,7 +506,7 @@ export function parseRpcControlResult(method: keyof typeof AGENTMUX_RPC_CONTROL_
   if (params !== undefined) {
     // Read-only requests may omit an operation ID; compare write identity only when supplied.
     const p = rpcRecord(params), identity = method.startsWith('goal.') ? goalKeys(p, true) : { ...p }
-    if (method === 'goal.focus') { identity.target = { kind: 'goal', goalId: p.goalId, ...(p.runtimeId === undefined ? {} : { runtimeId: p.runtimeId }), ...(p.namespace === undefined ? {} : { namespace: p.namespace }), ...(p.section === undefined ? {} : { section: p.section }), ...(p.nodeId === undefined ? {} : { nodeId: p.nodeId }) }; delete identity.runtimeId; delete identity.namespace; delete identity.section; delete identity.nodeId; identity.inputPolicy = p.input ?? 'preserve' }
+    if (method === 'goal.focus') { identity.target = { kind: 'goal', goalId: p.goalId, ...(p.runtimeId === undefined ? {} : { runtimeId: p.runtimeId }), ...(p.namespace === undefined ? {} : { namespace: p.namespace }), ...(p.section === undefined ? {} : { section: p.section }), ...(p.nodeId === undefined ? {} : { nodeId: p.nodeId }), ...(p.bound === undefined ? {} : { bound: p.bound }) }; delete identity.runtimeId; delete identity.namespace; delete identity.section; delete identity.nodeId; delete identity.bound; identity.inputPolicy = p.input ?? 'preserve' }
     if (method === 'space.inspect' && identity.target && Object.hasOwn(identity.target as object, 'operationId')) identity.target = operationKeys(identity.target as Record<string, unknown>, true)
     const resource = /^settings\.(executors|prompts|themes)\./u.exec(method)
     if (resource) identity.resource = resource[1]

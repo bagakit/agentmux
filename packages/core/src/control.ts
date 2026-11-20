@@ -511,12 +511,13 @@ export type AgentMuxDemandDecision = {
   sourceSessionId: string | null
 }
 export type AgentMuxControlDemandListRequest = RequestBase & { operation: 'demand.list' }
-export type AgentMuxControlDemandShowRequest = RequestBase & { operation: 'demand.show'; demandId: string; dispatchOperationId?: string; access?: GoalInspectionAccess }
+export type AgentMuxControlDemandShowRequest = RequestBase & { operation: 'demand.show' } & (
+  | { demandId: string; dispatchOperationId?: string; access?: GoalInspectionAccess; creationOperationId?: never }
+  | { creationOperationId: string; demandId?: never; dispatchOperationId?: never; access?: never }
+)
 export type AgentMuxControlDemandCreateRequest = RequestBase & {
   operation: 'demand.create'
   relationAccess?: GoalRelationAccess[]
-  /** Caller-held original identity allows reading an uncertain save without creating again. */
-  demandId?: string
   title: string
   description?: string
   projectId?: string

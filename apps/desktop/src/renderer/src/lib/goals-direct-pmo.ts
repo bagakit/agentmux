@@ -1,4 +1,5 @@
 import { mintObjectId } from '@agentmux/core/object-id'
+import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import type { AgentFocusContext } from './agent-focus'
 import { readPmoTeamsTopicFloatingState, requestPmoTeamsTopicFloatingOpen } from './pmo-teams-topic-floating'
 import { useAppStore } from '../store'
@@ -12,11 +13,11 @@ type PresentationIntent = {
   floating: ReturnType<typeof readPmoTeamsTopicFloatingState>
 }
 type DirectGoalRequest = {
-  id: string
+  id?: string
   phase: 'save' | 'pmo'
   pending: boolean
   error: string | null
-  creationOperationId?: string | undefined
+  creationOperationId: string
   notSaved?: boolean
   project?: { id: string; name: string }
 }
@@ -47,38 +48,49 @@ function mayPresent(intent: PresentationIntent, id: string, tabId?: string): boo
     readPmoTeamsTopicFloatingState() === intent.floating
 }
 
-/** One finite click retains only its caller ID. Goal and PMO facts stay in their original owners. */
+async function readSavedGoal(creationOperationId: string): Promise<string> {
+  const read = await useAppStore.getState().executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+    requestId: mintObjectId(), operation: 'demand.show', creationOperationId })
+  if (read.operation !== 'demand.show') throw new Error('The original Goal creation read is unconfirmed.')
+  if (!read.demand) throw Object.assign(new Error('The original Goal owner confirms this operation has not saved a Goal.'), { code: 'GOAL_OWNER_NOT_FOUND' })
+  return read.demand.id
+}
+
+/** Retain one creation operation until the owner returns the Goal ID. */
 function runDirectGoal(current: DirectGoalRequest, intent: PresentationIntent, create?: { projectId: string | null; projectName: string | null }): Promise<void> {
   if (flight) return flight
   publish({ ...current, pending: true, error: null })
   flight = Promise.resolve().then(async () => {
+    let id = current.id
     try {
       if (current.phase === 'save') {
         if (create !== undefined) {
           try {
-            await useAppStore.getState().createDemand({ id: current.id, title: DIRECT_GOAL_TITLE, description: '', status: 'backlog',
-              projectId: create.projectId, projectName: create.projectName, source: 'default-topic' })
+            id = await useAppStore.getState().createDemand({ title: DIRECT_GOAL_TITLE, description: '', status: 'backlog',
+              projectId: create.projectId, projectName: create.projectName, source: 'default-topic' }, current.creationOperationId)
           } catch {
             // A rejected IPC receipt does not establish that the durable write failed.
-            await useAppStore.getState().refreshDemand(current.id)
+            id = await readSavedGoal(current.creationOperationId)
           }
-        } else await useAppStore.getState().refreshDemand(current.id)
-        publish({ ...current, phase: 'pmo', pending: true, error: null, notSaved: false, creationOperationId: useAppStore.getState().demands[current.id]?.creationOrigin?.operationId })
+        } else id = await readSavedGoal(current.creationOperationId)
+        publish({ ...current, id, phase: 'pmo', pending: true, error: null, notSaved: false })
       }
-      if (!mayPresent(intent, current.id)) {
+      if (!id) throw new Error('The original Goal ID has not been read from its owner.')
+      if (!mayPresent(intent, id)) {
         publish({ ...(request ?? current), phase: 'pmo', pending: false, error: '你已切换工作面。目标已保存，需要时可继续此目标的专属讨论。' })
         return
       }
-      useAppStore.getState().setSelectedDemand(current.id)
-      const tabId = await useAppStore.getState().requestDemandPmoTask(current.id, 'grill', { creationOperationId: request?.creationOperationId ?? current.creationOperationId })
-      if (tabId && mayPresent(intent, current.id, tabId)) requestPmoTeamsTopicFloatingOpen({ targetTabId: tabId })
+      useAppStore.getState().setSelectedDemand(id)
+      const tabId = await useAppStore.getState().requestDemandPmoTask(id, 'grill', { creationOperationId: current.creationOperationId })
+      if (tabId && mayPresent(intent, id, tabId)) requestPmoTeamsTopicFloatingOpen({ targetTabId: tabId })
       publish(null)
     } catch (cause) {
       publish({ ...(request ?? current), pending: false, error: cause instanceof Error ? cause.message : String(cause),
         ...((request ?? current).phase === 'save' ? { notSaved: (cause as { code?: unknown })?.code === 'GOAL_OWNER_NOT_FOUND' } : {}) })
-      const target = goalDiscussionTarget(useAppStore.getState(), current.id)
-      const tabId = target.kind === 'existing' ? target.tabId : undefined
-      if (request?.phase === 'pmo' && tabId && mayPresent(intent, current.id, tabId)) requestPmoTeamsTopicFloatingOpen({ targetTabId: tabId })
+      if (id && request?.phase === 'pmo') {
+        const target = goalDiscussionTarget(useAppStore.getState(), id)
+        if (target.kind === 'existing' && mayPresent(intent, id, target.tabId)) requestPmoTeamsTopicFloatingOpen({ targetTabId: target.tabId })
+      }
     }
   }).finally(() => { flight = null })
   return flight
@@ -86,14 +98,14 @@ function runDirectGoal(current: DirectGoalRequest, intent: PresentationIntent, c
 export function startDirectGoal(project?: { id: string; name: string }): Promise<void> {
   if (flight) return flight
   if (request) return retryDirectGoal()
-  return runDirectGoal({ id: mintObjectId(), phase: 'save', pending: false, error: null, ...(project ? { project: { id: project.id, name: project.name } } : {}) }, presentationIntent(),
+  return runDirectGoal({ creationOperationId: mintObjectId(), phase: 'save', pending: false, error: null, ...(project ? { project: { id: project.id, name: project.name } } : {}) }, presentationIntent(),
     { projectId: project?.id ?? null, projectName: project?.name ?? null })
 }
 export function retryDirectGoal(): Promise<void> {
   if (flight) return flight
   return request ? runDirectGoal(request, presentationIntent()) : Promise.resolve()
 }
-/** A complete owner read proved absence. Only this explicit action saves again, using the same ID. */
+/** A complete owner read proved absence. Save again using the same creation operation. */
 export function saveDirectGoal(): Promise<void> {
   if (flight) return flight
   return request?.phase === 'save' && request.notSaved ? runDirectGoal(request, presentationIntent(),

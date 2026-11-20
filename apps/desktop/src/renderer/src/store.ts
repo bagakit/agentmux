@@ -1452,7 +1452,6 @@ export type AppState = GitReadingActions & {
   confirmDemandGoal(demandId: string, expectedRevision: number, continueWith?: import('@agentmux/demand/goal-patrol').GoalConfirmationRecipient): Promise<void>
   acceptDemandResult(demandId: string, expectedAlignmentRevision: number, expectedSubmissionId: string, acceptGaps?: boolean, finish?: boolean): Promise<void>
   createDemand(input: {
-    id?: string
     title: string
     description?: string
     projectId?: string | null
@@ -8414,7 +8413,7 @@ export const useAppStore = create<AppState>()<[['zustand/persist', PersistedAppS
       const issues: AgentMuxSpatialIssue[] = []
       const goalTarget = request.target.kind === 'goal' ? request.target : undefined
       const nodeId = goalTarget?.nodeId, goalSection = nodeId === undefined ? goalTarget?.section : 'plan'
-      const needsGoalOwner = goalTarget && (goalTarget.runtimeId !== undefined || nodeId !== undefined)
+      const needsGoalOwner = goalTarget && (goalTarget.runtimeId !== undefined || nodeId !== undefined || goalTarget.bound)
       let sourceGoal: AgentMuxDemand | undefined, sourceFailure: unknown, goalReadingToken: string | undefined
       let ticketNodeId: string | undefined
       if (needsGoalOwner) {
@@ -10026,7 +10025,7 @@ export const useAppStore = create<AppState>()<[['zustand/persist', PersistedAppS
     if (contentRefs?.some(ref => !confirmedGoalContentReference(catalog, ref))) throw controlFailure('INVALID_CONTROL_REQUEST', 'The exact Goal content resource is unconfirmed. Existing work is retained.')
     const operationId = controlRequestId ?? mintObjectId()
     const result = await api.goals.execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, operation: 'demand.create', requestId: operationId,
-      ...(input.id ? { demandId: input.id } : {}), title: input.title.trim(), description: input.description ?? '', ...(input.projectId ? { projectId: input.projectId } : {}),
+      title: input.title.trim(), description: input.description ?? '', ...(input.projectId ? { projectId: input.projectId } : {}),
       ...(input.priority ? { priority: input.priority } : {}), ...(input.status ? { status: input.status } : {}),
       ...(input.assigneeSessionIds ? { assigneeSessionIds: [...input.assigneeSessionIds] } : {}), ...(input.supervisorSessionId === undefined ? {} : { supervisorSessionId: input.supervisorSessionId }),
       sessionIds: [...(input.sessionIds ?? [])], ...(contentRefs ? { contentRefs: [...contentRefs] } : {}),

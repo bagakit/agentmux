@@ -53,7 +53,7 @@ function budget(value: unknown, code: Code): void {
 }
 
 function parseDesktopFocusTarget(value: unknown, code: Code): AgentMuxDesktopFocusTarget {
-  const source = fields(value, ['kind', 'spaceId', 'zoneId', 'tabId', 'regionId', 'displayWorkspaceId', 'groupId', 'goalId', 'surface', 'view', 'hostId', 'agentSessionId', 'sectionId', 'eventId', 'runtimeId', 'namespace', 'section', 'nodeId', 'selection', 'reference', 'address'], code)
+  const source = fields(value, ['kind', 'spaceId', 'zoneId', 'tabId', 'regionId', 'displayWorkspaceId', 'groupId', 'goalId', 'surface', 'view', 'hostId', 'agentSessionId', 'sectionId', 'eventId', 'runtimeId', 'namespace', 'section', 'nodeId', 'bound', 'selection', 'reference', 'address'], code)
   if (source.kind === 'survey') {
     fields(source, ['kind', 'selection', 'reference'], code)
     const selection = parseSurveyPinReference(source.selection, code)
@@ -86,13 +86,15 @@ function parseDesktopFocusTarget(value: unknown, code: Code): AgentMuxDesktopFoc
       ...(source.hostId === undefined ? {} : { hostId: spaceControlId(source.hostId, 'Settings Host ID', code) }) }
   }
   if (source.kind === 'goal') {
-    fields(source, ['kind', 'goalId', 'runtimeId', 'namespace', 'section', 'nodeId'], code)
+    fields(source, ['kind', 'goalId', 'runtimeId', 'namespace', 'section', 'nodeId', 'bound'], code)
     if ((source.runtimeId === undefined) !== (source.namespace === undefined)) fail('Goal reading source requires its original Runtime and namespace together.', code)
     const nodeId = source.nodeId
+    if (source.bound !== undefined && (source.bound !== true || source.runtimeId !== undefined || nodeId !== undefined)) fail('A short Goal or plan link requires its bound Goal ID.', code)
     if (nodeId !== undefined && (!isGoalTicketHash(nodeId) || source.section !== undefined)) fail('A Goal Ticket requires its exact node ID and no separate section.', code)
     return { kind: 'goal', ...(isGoalTicketHash(nodeId) ? { nodeId } : {}), goalId: goalId(source.goalId, 'Goal ID', code),
       ...(source.runtimeId === undefined ? {} : { runtimeId: spaceControlId(source.runtimeId, 'Goal Runtime', code) }),
       ...(source.namespace === undefined ? {} : { namespace: spaceControlId(source.namespace, 'Goal namespace', code) }),
+      ...(source.bound === true ? { bound: true as const } : {}),
       ...(source.section === undefined ? {} : { section: member(source.section, ['plan'] as const, 'Goal reading section', code) }) }
   }
   if (source.kind === 'focus-agent') {

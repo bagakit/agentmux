@@ -581,9 +581,17 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     if (!demandIds.length || new Set(demandIds).size !== demandIds.length) throw new AgentMuxError('Activity collection needs unique exact Goal IDs.', 'INVALID_CONTROL_REQUEST')
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandIds }
   }
-  if (source.operation === 'demand.show') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'),
-    ...(source.dispatchOperationId === undefined ? {} : { dispatchOperationId: id(source.dispatchOperationId, 'Original Goal dispatch operation is invalid.', 'INVALID_CONTROL_REQUEST') }),
-    ...(source.access === undefined ? {} : { access: parseGoalInspectionAccess(source.access) }) }
+  if (source.operation === 'demand.show') {
+    const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation } as const
+    if (source.creationOperationId !== undefined) {
+      if (source.demandId !== undefined || source.dispatchOperationId !== undefined || source.access !== undefined)
+        throw new AgentMuxError('Choose the original creation operation or a Goal ID and optional Start receipt.', 'INVALID_CONTROL_REQUEST')
+      return { ...base, creationOperationId: id(source.creationOperationId, 'Original Goal creation operation is invalid.', 'INVALID_CONTROL_REQUEST') }
+    }
+    return { ...base, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'),
+      ...(source.dispatchOperationId === undefined ? {} : { dispatchOperationId: id(source.dispatchOperationId, 'Original Goal dispatch operation is invalid.', 'INVALID_CONTROL_REQUEST') }),
+      ...(source.access === undefined ? {} : { access: parseGoalInspectionAccess(source.access) }) }
+  }
   if (source.operation === 'demand.decision-log' || source.operation === 'demand.activity.inspect' || source.operation === 'demand.activity.read') {
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST') }
   }
@@ -604,11 +612,12 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     if (['assigneeExecutorId', 'executorId', 'participations', 'creationOrigin', 'requesterAsSupervisor', 'requesterParticipationId', 'supervisorDefaultPending'].some(key => Object.hasOwn(source, key))) throw new AgentMuxError('Goal assignment requires accurate Sessions; provenance is authored by the original host.', 'INVALID_CONTROL_REQUEST')
   }
   if (source.operation === 'demand.create') {
+    if (Object.hasOwn(source, 'demandId') || Object.hasOwn(source, 'goalId'))
+      throw new AgentMuxError('The original owner allocates Goal IDs. Supply an operation ID to look up this creation.', 'INVALID_CONTROL_REQUEST')
     const title = text(source.title, 'Demand title')
     const sessionIds = source.sessionIds === undefined ? undefined : parseGoalAgentReferences(source.sessionIds)
     return { ...(source.relationAccess === undefined ? {} : { relationAccess: parseGoalRelationAccesses(source.relationAccess) }),
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, title,
-      ...(source.demandId === undefined ? {} : { demandId: id(source.demandId, 'Goal id is invalid.', 'INVALID_CONTROL_REQUEST') }),
       ...(source.description === undefined ? {} : { description: text(source.description, 'Demand description') }),
       ...(source.projectId === undefined ? {} : { projectId: spaceControlId(source.projectId, 'Project id is invalid.', 'INVALID_CONTROL_REQUEST', true) }),
       ...(source.priority === undefined ? {} : { priority: demandPriority(source.priority) }),
