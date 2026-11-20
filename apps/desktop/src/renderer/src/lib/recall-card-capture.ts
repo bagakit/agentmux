@@ -116,12 +116,13 @@ export async function openRecallCardNote(page: NotebookPage, blockId: string, so
   }
 }
 
-export async function openRecallCardRecord(card: RecallCard): Promise<void> {
+export async function openRecallCardRecord(card: RecallCard): Promise<boolean> {
   const state = useAppStore.getState(), session = sessionPresentationById(state.sessions).get(card.reference.agentSessionId)
   if (session?.kind !== 'agent' || session.control.hostId !== card.routeHostId || !state.focusExecutionSession(card.reference.agentSessionId)) {
-    throw new Error('Choose the original Session location to return to this record. Its reference is kept.')
+    return false
   }
   state.setMainSurface('agents')
   const result = await useAppStore.getState().revealConversationItem(card.reference, card.routeHostId)
-  if (result.kind === 'unavailable') throw new Error(result.message)
+  if (result.kind === 'unavailable') state.reportError(new Error(result.message), { kind: 'indeterminate' })
+  return true
 }

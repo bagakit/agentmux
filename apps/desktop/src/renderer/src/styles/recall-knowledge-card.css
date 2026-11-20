@@ -36,3 +36,18 @@
 @container (max-width: 420px) {
   .note-file-view > .recall-knowledge-cards { width: calc(100% - var(--sp-4) - var(--sp-4)); }
 }
+
+.recall-original-record {
+  position: fixed;
+  inset: 50% auto auto 50%;
+  transform: translate(-50%, -50%);
+  width: min(760px, calc(100vw - 32px));
+  height: min(600px, calc(100vh - 32px));
+  z-index: var(--layer-dialog);
+  display: flex;
+  flex-direction: column;
+  padding: var(--sp-3);
+}
+.recall-original-record > header { display: flex; align-items: start; justify-content: space-between; gap: 8px; }
+.recall-original-record h2 { margin: 0; min-width: 0; overflow-wrap: anywhere; font-size: var(--fs-body); }
+.recall-original-record .activity-feed-frame { flex: 1; min-height: 0; }

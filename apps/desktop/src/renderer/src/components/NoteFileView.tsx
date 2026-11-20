@@ -1,4 +1,5 @@
-import { recallCardBlocks } from '@agentmux/core/notebook-observation'
+import { RecallOriginalRecord } from './RecallOriginalRecord'
+import { recallCardBlocks, type RecallCard } from '@agentmux/core/notebook-observation'
 import { openRecallCardRecord } from '../lib/recall-card-capture'
 import { RecallCardLink, RecallKnowledgeCard } from './RecallKnowledgeCard'
 import { presentKnowledgeSurface } from '../lib/knowledge-surface-navigation'
@@ -62,6 +63,7 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
   const savedEditors = useMemo(() => noteSavedEditors(document, read.status === 'valid' ? read.note.noteId : '', resource),
     [document.noteProvenance, document.path, document.revision, read.status === 'valid' ? read.note.noteId : null, resource?.hostId, resource?.workspaceId, resource?.workspacePath, resource?.path])
   const sourceIdentity = JSON.stringify([resource?.hostId, resource?.workspaceId, resource?.workspacePath, document.path, read.status === 'valid' ? read.note.noteId : null])
+  const [originalRecord, setOriginalRecord] = useState<RecallCard | null>(null)
   const [issue, setIssue] = useState<string | null>(null)
   const [restoreIssue, setRestoreIssue] = useState<string | null>(null)
   const [handle, setHandle] = useState<NoteEditorHandle | null>(null)
@@ -182,10 +184,11 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
       } } : {})} />
     </div>
     {links.dialog}
+    {originalRecord && presentation.active ? <RecallOriginalRecord key={originalRecord.id} card={originalRecord} onClose={() => setOriginalRecord(null)} /> : null}
     {cards.length ? <section className="recall-knowledge-cards" aria-label="Knowledge cards">
       <h2>Knowledge cards</h2>
       {cards.map(({ blockId, card }) => <RecallKnowledgeCard kind="Reading point" key={blockId} title={card.title} actions={
-        <RecallCardLink onOpen={() => { void openRecallCardRecord(card).catch(error => setIssue(presentError(error))) }}>Open original message</RecallCardLink>
+        <RecallCardLink onOpen={() => { void openRecallCardRecord(card).then(opened => { if (!opened) setOriginalRecord(card) }).catch(error => setIssue(presentError(error))) }}>Open original message</RecallCardLink>
       } />)}
     </section> : null}
     {footer}
