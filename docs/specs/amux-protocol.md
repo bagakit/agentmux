@@ -198,7 +198,7 @@ Core 可在引用列表后、关闭容器前附一个完整 `<reminder>…</remi
 
 ## Goal 确认并接续
 
-`<amux:goal version="1" action="confirm-and-continue">` 是确认并接续的一条独立声明。起始标签、一行规范 JSON 和 `</amux:goal>` 以单个 LF 分隔，无尾文。JSON 依次包含 `goalUrl`、`alignmentRevision` 和 `operationId`。Goal 链接携原 Runtime 和命名空间，JSON 字符串中的 `<`、`>`、`&` 使用 Unicode 转义。
+`<amux:goal version="2" action="confirm-and-continue" goal="…" revision="…" operation-id="…">` 是确认并接续的独立声明。属性引用原 Goal 地址、已确认版本和原操作，地址携原 Runtime 与命名空间，属性值按 XML 转义。标签之间是可直接阅读的平台说明，交代谁确认、Supervisor 现在该做什么和接续的结束条件。起始标签、正文与闭合标签以 LF 分隔，无尾文。
 
 声明用于找到同一次确认和当前计划。原 Goal 及 Core 输入回执分别证明业务确认和投递。完整 Copy 保留原 wire，已冻结的旧输入保持原格式。执行语义沿 [Goal 确认后继续](../design/behavior/goal-execution-and-supervision.md#确认后接续原-goal)。
 
