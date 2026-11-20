@@ -204,6 +204,10 @@ Load only the journey needed now:
   creation, and none of those can change this binding.
 - Typed Provider requests: agent interaction respond answers one exact original typed request
   with a stable operation identity, and agent interaction inspect reads its durable receipt.
+  A person can include `goalApproval: {goalId, dispatchOperationId}` to link a permission answer
+  to the confirmed local one-time Start for the exact Session and Run. The authenticated author
+  and selected Start are saved in the original response. Goal inspection reads the explicit
+  link. Provider causality remains unknown.
   agent question reply queues asynchronous question answers only where the capability
   asyncQuestionReply=native-input is present; submission is queue admission, not adoption.
   Both answers require a transport-approved user or device; a managed Agent cannot answer on a
