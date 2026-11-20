@@ -158,6 +158,7 @@ export function FullPageLoadingSurface({
       aria-busy={busy}
     >
       {scope === 'app' ? <AppLaunchArt /> : null}
+      {scope === 'app' ? <div className="full-page-loading__brand"><span>AgentMux</span><span>Workspace runtime</span></div> : null}
       <SurfaceState className="full-page-loading__stage"
         activity={busy && children == null ? <WaitingActivity key={phase} surface={surfaceRef} visible={visible} /> : undefined}
         identity={!busy && scope === 'region' && children == null ? <ThemeStatusInfoIcon size={22} aria-hidden="true" /> : undefined}

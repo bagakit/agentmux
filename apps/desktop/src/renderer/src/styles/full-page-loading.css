@@ -14,18 +14,37 @@
   --startup-offset-x: 0px; --startup-offset-y: 0px;
 }
 .full-page-loading__atmosphere { position: absolute; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
-.full-page-loading__art { width: 100%; height: 100%; object-fit: cover; object-position: 68% center; opacity: .82; transform: translate(var(--startup-offset-x), var(--startup-offset-y)) scale(1.02); transition: transform var(--dur-enter) var(--ease-enter); }
+.full-page-loading__art { width: 100%; height: 100%; object-fit: cover; object-position: 68% center; opacity: .92; transform: translate(var(--startup-offset-x), var(--startup-offset-y)) scale(1.02); transition: transform var(--dur-enter) var(--ease-enter); }
 .full-page-loading__art[hidden] { display: none; }
-.full-page-loading__atmosphere::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, var(--surface-0) 0%, color-mix(in srgb, var(--surface-0) 94%, transparent) 24%, color-mix(in srgb, var(--surface-0) 62%, transparent) 48%, transparent 86%), linear-gradient(0deg, color-mix(in srgb, var(--surface-0) 50%, transparent), transparent 45%); }
+.full-page-loading__atmosphere::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, var(--surface-0) 0%, color-mix(in srgb, var(--surface-0) 98%, transparent) 26%, color-mix(in srgb, var(--surface-0) 91%, transparent) 39%, color-mix(in srgb, var(--surface-0) 55%, transparent) 51%, transparent 68%), linear-gradient(0deg, color-mix(in srgb, var(--surface-0) 48%, transparent), transparent 38%); }
 .full-page-loading__light { position: absolute; inset: 0; background: radial-gradient(ellipse at var(--startup-focus-x) var(--startup-focus-y), color-mix(in srgb, var(--green) 14%, transparent), transparent 58%); }
 .full-page-loading__stage { position: relative; background: transparent; --surface-state-width: 720px; }
-.full-page-loading--app > .surface-state > .surface-state__content { width: min(640px, 52%); margin-inline: clamp(0px, 4vw, 64px) auto; }
+.full-page-loading__brand { position: absolute; top: clamp(56px, 7.2vh, 72px); left: clamp(48px, 6.6vw, 108px); z-index: 1; display: flex; align-items: baseline; gap: var(--sp-4); pointer-events: none; }
+.full-page-loading__brand > span:first-child { color: var(--text); font-size: 19px; font-weight: 640; letter-spacing: -.03em; }
+.full-page-loading__brand > span:last-child { color: var(--text-3); font: var(--fs-micro)/1 var(--font-mono); letter-spacing: .14em; text-transform: uppercase; }
+.full-page-loading--app > .surface-state > .surface-state__content { width: min(445px, 46%); margin-inline: clamp(0px, 2vw, 32px) auto; }
+.full-page-loading--app .surface-state__title { max-width: 430px; font-size: clamp(40px, 3.5vw, 56px); font-weight: 560; letter-spacing: -.04em; line-height: 1.08; }
+.full-page-loading--app .full-page-loading__detail { max-width: 385px; }
 .full-page-loading__waiting { display: flex; align-items: center; gap: var(--sp-4); flex-basis: 100%; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
 .full-page-loading__waiting > svg { flex: none; color: var(--green-text); }
 .full-page-loading__elapsed { padding-inline-start: var(--sp-4); border-inline-start: 1px solid var(--line-soft); font-variant-numeric: tabular-nums; }
 .full-page-loading__activity { color: var(--green-text); }
 .full-page-loading__detail { max-width: 60ch; margin: 0; color: var(--text-2); font-size: var(--fs-prose); line-height: 1.65; overflow-wrap: anywhere; }
 .full-page-loading .surface-state__description { font-size: var(--fs-prose); }
+.startup-activity { width: min(390px, 100%); margin-top: var(--sp-5); }
+.startup-activity__heading { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); margin-bottom: var(--sp-5); color: var(--text-2); font: var(--fs-micro)/1.4 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+.startup-activity__heading > span:last-child { letter-spacing: normal; text-align: right; text-transform: none; }
+.startup-activity__group { margin-top: var(--sp-5); }
+.startup-activity__line { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; align-items: center; gap: var(--sp-3); }
+.startup-activity__marker { color: var(--green-text); font: var(--fs-body)/1 var(--font-mono); }
+.startup-activity__line > h3 { margin: 0; color: var(--text); font-size: var(--fs-body); font-weight: 500; line-height: 1.5; overflow-wrap: anywhere; }
+.startup-activity__count { color: var(--text-2); font: var(--fs-meta)/1.4 var(--font-mono); text-align: right; white-space: nowrap; }
+.startup-activity__message { margin: var(--sp-2) 0 0 26px; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.6; overflow-wrap: anywhere; }
+.startup-activity__message + .startup-activity__message { margin-top: var(--sp-2); }
+.full-page-loading--app .surface-state__details > summary { color: var(--text-2); font-size: var(--fs-body); }
+.full-page-loading--app .surface-state__details dl { display: block; padding-top: 0; border-top: 0; }
+.full-page-loading--app .surface-state__details dt { margin-top: var(--sp-4); font-family: var(--font-mono); }
+.full-page-loading--app .surface-state__details dd { margin-top: var(--sp-1); line-height: 1.6; }
 .session-startup-action-detail { flex: 0 0 100%; margin: var(--sp-2) 0 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; overflow-wrap: anywhere; }
 .full-page-loading--failed > .surface-state > .surface-state__content > .surface-state__identity { color: var(--red-text); }
 .full-page-loading--failed .full-page-loading__art { opacity: .48; }
@@ -59,6 +78,9 @@
 @keyframes full-page-loading-enter { from { opacity: 0; } }
 @container (max-width: 440px) {
   .full-page-loading--app > .surface-state > .surface-state__content { width: 100%; margin: auto 0 0; }
+  .full-page-loading--app .surface-state__title { font-size: 36px; }
+  .full-page-loading__brand { left: var(--sp-6); }
+  .full-page-loading__brand > span:last-child { display: none; }
   .full-page-loading__art { object-position: 75% center; opacity: .68; }
   .full-page-loading__atmosphere::after { background: linear-gradient(0deg, var(--surface-0), color-mix(in srgb, var(--surface-0) 94%, transparent) 26%, color-mix(in srgb, var(--surface-0) 30%, transparent) 82%); }
 }
