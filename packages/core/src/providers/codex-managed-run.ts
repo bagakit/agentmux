@@ -187,6 +187,9 @@ export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number
             { retainPendingInitialization: true, onNotification: observeNativeProgress })
           // Read-only preflight may be retried before any native creation request exists.
           initializationStep = 'preflight'
+          if (initialization.phase === 'unknown' && initialization.failure?.code === 'AGENT_NATIVE_INITIALIZATION_OBSERVATION_UNCONFIRMED') {
+            setInitialization({ ...initialization, failure: { ...initialization.failure, step: initializationStep } })
+          }
           const connection = nativeConnection
           const readAccount = () => connection.request('account/read', { refreshToken: false }, { retainPending: true })
           const account = await readAccount().catch(error => {
