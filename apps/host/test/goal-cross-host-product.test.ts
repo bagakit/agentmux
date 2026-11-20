@@ -284,16 +284,6 @@ it.each(['active original Supervisor', 'retired original Supervisor', 'active or
     '--session', 'worker', '--run', runId, '--operation-id', stopOperationId]
   const args = closeout('run-worker', 'closeout-stop')
   expect(await host.call('worker', args)).toMatchObject({ state: 'retained', reason: 'unknown' })
-  if (scenario === 'reassignment after collection') {
-    const revised = await host.call('supervisor', ['goal', 'plan', 'revise', '--input', '-'], { goalId, revision: {
-      operationId: 'closeout-reassign', expectedRevision: collected.plan.revision, alignmentRevision,
-      nodes: [{ ...plan.plan.nodes[0], executor: { hostId: 'local', agentSessionId: 'successor' } }],
-    } })
-    expect(revised.planState.nodes[0]).toMatchObject({ state: 'ready', attempt: null })
-    expect(await host.call('worker', args)).toMatchObject({ state: 'retained', reason: 'handoff' })
-    expect(host.native.stop).not.toHaveBeenCalled()
-    return
-  }
   const spatial = new AgentMuxSpatialStateStore(), directory = host.original.root
   const mounted = scenario === 'active original Supervisor'
   await spatial.commit({ expectedRevision: 0, graph: {
@@ -327,6 +317,16 @@ it.each(['active original Supervisor', 'retired original Supervisor', 'active or
   pending = true
   expect(await host.call('worker', args)).toMatchObject({ state: 'retained', reason: 'pending' })
   pending = false
+  if (scenario === 'reassignment after collection') {
+    const revised = await host.call('supervisor', ['goal', 'plan', 'revise', '--input', '-'], { goalId, revision: {
+      operationId: 'closeout-reassign', expectedRevision: collected.plan.revision, alignmentRevision,
+      nodes: [{ ...plan.plan.nodes[0], executor: { hostId: 'local', agentSessionId: 'successor' } }],
+    } })
+    expect(revised.planState.nodes[0]).toMatchObject({ state: 'ready', attempt: null })
+    expect(await host.call('worker', args)).toMatchObject({ state: 'retained', reason: 'handoff' })
+    expect(host.native.stop).not.toHaveBeenCalled()
+    return
+  }
   if (mounted) {
     const another = await host.call(null, ['goal', 'create', '--title', 'Other worker responsibility', '--status', 'in_progress',
       '--assignees', '["worker"]', '--risk', 'low', '--confirm', 'user'])
