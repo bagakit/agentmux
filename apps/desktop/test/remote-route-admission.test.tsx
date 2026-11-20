@@ -53,6 +53,7 @@ test('a saved source route reaches original Host admission from the real Launche
       return session
     }),
     listHostExecutors: vi.fn(async (params: { refresh: boolean; executorId: string }) => await route.original.client.listHostExecutors(params)),
+    readAgentInputEpoch: vi.fn(async () => undefined),
     hostEnvironment: vi.fn(async (selector?: { agentSessionId: string }) => selector ? { homeDirectory: '/executor/home',
       agentWorkspace: { runtimeId: 'runtime-D', agentSessionId: selector.agentSessionId, workspacePath: agentWorkspacePath } } : { homeDirectory: '/executor/home' }),
     writeAgent: input, pasteAgent: input, submitAgentPrompt: input
@@ -129,8 +130,13 @@ test('a saved source route reaches original Host admission from the real Launche
   await dom.render(<NewTabSurface tabGroupId="original-route-group" tabId={slot.tabId} regionId={slot.regionId} visible />)
   await act(async () => dom.container.querySelector<HTMLButtonElement>('[aria-label="Agent location"]')!.click())
   const arrangement = await vi.waitFor(() => { const value = document.querySelector<HTMLElement>('[data-source-arrangement]'); expect(value).not.toBeNull(); return value! })
-  await act(async () => arrangement.querySelector<HTMLElement>('[aria-label="Agent runs on"]')!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse', ctrlKey: false })))
-  const routeOption = await vi.waitFor(() => { const option = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')).find(item => item.textContent?.includes('2 hops')); expect(option, document.body.textContent ?? '').toBeDefined(); return option! }, { timeout: 10000 })
+  await act(async () => arrangement.querySelector<HTMLButtonElement>('[aria-label="Agent runs on"]')!.click())
+  const routeOption = await vi.waitFor(() => {
+    const option = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="listbox"][aria-label="Agent runs on"] [role="option"]'))
+      .find(item => item.textContent?.includes('2 hops'))
+    expect(option, document.body.textContent ?? '').toBeDefined()
+    return option!
+  }, { timeout: 10000 })
   await act(async () => routeOption.click())
   await act(async () => Array.from(arrangement.querySelectorAll<HTMLButtonElement>('button')).find(button => button.textContent === 'Apply')!.click())
   await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.querySelector('[aria-label="Agent location"]')?.textContent, document.body.textContent ?? '').toContain('collision') })
@@ -142,7 +148,7 @@ test('a saved source route reaches original Host admission from the real Launche
   const start = dom.container.querySelector<HTMLButtonElement>('.launcher-launch-button')!
   await vi.waitFor(async () => { await act(async () => {}); expect(start.disabled, dom.container.textContent ?? '').toBe(false) })
   await act(async () => start.click())
-  await vi.waitFor(() => expect(bindings.create).toHaveBeenCalledOnce())
+  await vi.waitFor(() => expect(bindings.create, dom.container.textContent ?? '').toHaveBeenCalledOnce())
   await vi.waitFor(() => expect(mountedAgentOpenInput(useAppStore.getState().mountedSpaceInputs, key)?.receipt?.outcome).toBe('partial'))
   const original = mountedAgentOpenInput(useAppStore.getState().mountedSpaceInputs, key)!
   const state = (await spatial.read())!, admitted = spatialAgentOpenRecord(state.graph, original.request.operationId!)!
