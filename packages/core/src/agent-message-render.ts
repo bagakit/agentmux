@@ -395,7 +395,7 @@ function parseStandaloneProtocol(text: string): AmuxProtocolDeclaration | null {
     attributes: [{ name: 'version', value: '1' }], body: null, raw: text, capsuleAnswer }
   const goalConfirmation = parseGoalConfirmation(text)
   if (goalConfirmation) return { id: 'goal-confirmation', tag: AMUX_PROTOCOL_DEFINITIONS['goal-confirmation'].tag,
-    attributes: [], body: text.split('\n')[1]!, raw: text }
+    attributes: [], body: text.slice(text.indexOf('\n') + 1, text.lastIndexOf('\n')), raw: text }
   const header = /^<amux:([a-z][a-z0-9-]*)((?: +[a-z][a-z0-9-]*="[^<>"\r\n]*")*) *(\/?)>/u.exec(text)
   if (!header) return null
   const tag = `amux:${header[1]}`
