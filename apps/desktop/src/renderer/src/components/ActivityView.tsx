@@ -923,6 +923,10 @@ export function ActivityView({
     </div>
   )
 
+  if (compactUnavailable && fullReadFailure) {
+    return <div className="activity-feed--compact-unavailable">{emptyReadStatus}</div>
+  }
+
   if (capability === 'unavailable' && !hasUserMessages && !hasItems && !hasNativeRecords) {
     return renderSurface(findTrigger => (
       <div className="activity-feed" data-workbench-reading-scroll onKeyDown={handleReadingKey} data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}
@@ -1025,10 +1029,6 @@ export function ActivityView({
       )}
     </div>
   )
-  }
-
-  if (compactUnavailable && fullReadFailure) {
-    return <div className="activity-feed--compact-unavailable">{emptyReadStatus}</div>
   }
 
   return renderSurface(findTrigger => (

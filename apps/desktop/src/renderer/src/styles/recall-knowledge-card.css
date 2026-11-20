@@ -54,3 +54,4 @@
 
 .recall-original-record:has(.activity-feed--compact-unavailable) { height: auto; }
 .recall-original-record > p[role="status"] { font-size: var(--fs-meta); }
+.recall-original-record:has(.activity-feed--compact-unavailable) > p[role="status"] { display: none; }
