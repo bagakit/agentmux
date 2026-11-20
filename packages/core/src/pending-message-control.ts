@@ -30,13 +30,15 @@ export type AgentMuxPendingMessage = {
 }
 type Base = { schemaVersion: 5; requestId: string; agentSessionId: string }
 export type PendingMessageControlRequest =
-  | Base & { operation: 'message.pending.ls'; closeoutRunId?: string }
+  | Base & { operation: 'message.pending.ls'; closeoutRunId?: string; closeout?: DesktopInputCloseout }
   | Base & { operation: 'message.pending.edit'; pendingId: string; expectedText: string; text: string }
   | Base & { operation: 'message.pending.send'; pendingId: string }
   | Base & { operation: 'message.pending.stop'; pendingId: string }
   | Base & { operation: 'message.pending.archive'; pendingId: string; expectedText: string }
   | Base & { operation: 'message.pending.restore'; pendingId: string; expectedText: string }
-export type AgentMuxDesktopInputOccupation = { runId: string; state: 'clear' | 'draft' | 'pending' | 'unknown' }
+/** Private Host-to-original-Desktop admission and reconciliation, without input bytes. */
+export type DesktopInputCloseout = { action: 'admit' | 'reconcile'; operationId: string }
+export type AgentMuxDesktopInputOccupation = { runId: string; state: 'clear' | 'draft' | 'pending' | 'unknown'; operationId?: string }
 export type PendingMessageControlResult =
   | { operation: 'message.pending.ls'; agentSessionId: string; messages: AgentMuxPendingMessage[]; occupation?: AgentMuxDesktopInputOccupation }
   | { operation: 'message.pending.edit'; agentSessionId: string; message: AgentMuxPendingMessage; changed: boolean }

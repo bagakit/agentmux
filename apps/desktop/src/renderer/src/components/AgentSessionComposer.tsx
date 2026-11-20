@@ -1,4 +1,5 @@
 import { useWorkbenchBrowserPresentation } from '../lib/workbench-presentation'
+import { observeAgentInputComposition } from '../lib/agent-closeout-input'
 import { MoteWorkfaceContext } from '../lib/mote-workface'
 import { useMoteDialogueView } from '../lib/mote-dialogue-view'
 import { moteInputSource } from '../lib/mote-input-source'
@@ -467,6 +468,7 @@ export function AgentSessionComposer({
     enabled: Boolean(visible && moteComposer.active && moteMain && session?.kind === 'agent' && moteComposer.reference?.hostId === session.control.hostId) } : undefined
 
   const control = session?.kind === 'agent' ? session.control : undefined
+  const compositionOwner = useRef({})
   const capabilities = session?.kind === 'agent' ? session.capabilities : undefined
   const runId = control?.run.runId
   const canDrain = session?.kind === 'agent' && steerQueueCanEverDrain(session.processState)
@@ -543,6 +545,13 @@ export function AgentSessionComposer({
     {fileReferencesOpen && workspace && visible ? <ComposerFileReferences key={attachmentScope} workspace={workspace}
       onClose={() => setFileReferencesOpen(false)} onSelect={path => { void attachments.referencePaths([path]) }} /> : null}
     <SessionComposerSurface source={sourceProps} surfaceRef={composerRef} key={sessionId}
+      {...(!source && !moteComposer && control ? { onCompositionActivity: (active, interrupted) => {
+        observeAgentInputComposition(compositionOwner.current, active ? control : null)
+        if (interrupted) {
+          const store = useAppStore.getState(), current = store.agentComposerDrafts[draftOwner] ?? ''
+          if (current === interrupted.base) store.setAgentComposerDraft(draftOwner, interrupted.draft)
+        }
+      } } : {})}
       onFocusCapture={event => { inputHistory.setFocused(true); attachments.claimScreenshotTarget(event) }}
       onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) inputHistory.setFocused(false) }} active={visible} aboveInput={<>{!moteComposer ? aboveInput : null}{pending}{rollovers.length > 0 && moteWorkface?.startRollover ? <details ref={rolloverSurface} className="mote-conversation__muted" open={rollovers.length === 1}><summary>待承接到新对话的输入</summary>{rollovers.map(entry => <div className="mote-conversation__handoff" data-mote-rollover={entry.operationId} key={entry.operationId}><p style={{ margin: 0, flex: '1 1 12rem' }}>{entry.text.slice(0, 80)}</p><button className="small-button" style={{ flexShrink: 0 }} type="button" onClick={() => openRollover(entry)}>接到新对话</button></div>)}</details> : null}</>} mailbox={mailbox}
       readPastedImage={api.ui.readPastedImage}

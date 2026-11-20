@@ -12,6 +12,7 @@ export type AgentComposerProps = ComposerCompletionProps & {
   surfaceRef?: Ref<HTMLDivElement>
   onFocusCapture?: FocusEventHandler<HTMLDivElement>
   onBlurCapture?: FocusEventHandler<HTMLDivElement>
+  onCompositionActivity?: import('./InlineComposer.js').InlineComposerProps['onCompositionActivity']
   active?: boolean
   value: string
   /** The host may own selected content that becomes text when explicitly submitted. */
@@ -54,6 +55,7 @@ export function AgentComposer({
   surfaceRef,
   onFocusCapture,
   onBlurCapture,
+  onCompositionActivity,
   active = true,
   value,
   hasPendingContent = false,
@@ -124,6 +126,7 @@ export function AgentComposer({
         value={value}
         {...(historyNavigation ? { historyNavigation } : {})}
         onValueChange={onChange}
+        {...(onCompositionActivity ? { onCompositionActivity } : {})}
         commands={commands} skills={skills} references={references} promptKeywords={promptKeywords}
         {...(completionConfig ? { completionConfig } : {})}
         {...(onCompletionQuery ? { onCompletionQuery } : {})}

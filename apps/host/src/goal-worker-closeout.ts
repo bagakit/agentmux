@@ -35,7 +35,8 @@ export function createGoalWorkerCloseout(options: {
   demands: DemandStore
   client(): AgentMuxClient
   spatial?: AgentMuxSpatialStateStore
-  desktopOccupation?(agentSessionId: string, runId: string, context: AgentMuxRpcCallContext): Promise<DesktopOccupation>
+  desktopOccupation?(agentSessionId: string, runId: string, context: AgentMuxRpcCallContext,
+    closeout?: { action: 'admit' | 'reconcile'; operationId: string }): Promise<DesktopOccupation>
 }) {
   return async (input: GoalCloseout, context: AgentMuxRpcCallContext, authority: GoalDelegationAuthority): Promise<GoalCloseoutResult> => {
     const retain = (reason: Retained['reason']): Retained => ({ ...input, state: 'retained', reason })
@@ -78,8 +79,6 @@ export function createGoalWorkerCloseout(options: {
       if (desktop !== 'clear') return retain(desktop ?? 'unknown')
       core = await client.readAgentCloseoutInput(input.agentSessionId, run, first.attempt.sourceMessageId)
       if (core.state !== 'clear') return retain(core.state)
-      const finalDesktop = await readDesktop()
-      if (finalDesktop !== 'clear') return retain(finalDesktop ?? 'unknown')
       collectionOperationId = first.attempt.collection?.operationId
       if ((await options.spatial?.readForLayout())?.revision !== originalSpace.revision) return retain('unknown')
     } catch {
@@ -90,14 +89,34 @@ export function createGoalWorkerCloseout(options: {
     await context.assertCurrent?.()
     const current = await client.authorizeAgentCaller(context.caller.capability, input.agentSessionId)
     if (current.run.runId !== input.runId) return retain('unknown')
-    let refusal: Retained['reason'] | undefined
-    const result = await client.stopAgentIfInputClear(core.proof, input.operationId, admit => options.demands.withCurrentDemands(async goals => {
-      context.signal?.throwIfAborted()
-      const last = inspect(goals)
-      refusal = last.reason ?? (last.attempt.collection?.operationId !== collectionOperationId ? 'unknown' : undefined)
-      if (refusal) throw new AgentMuxError('The original Goal handoff or other responsibilities changed before admission.', 'GOAL_CLOSEOUT_HANDOFF_CHANGED')
-      return await admit()
-    }))
-    return refusal ? retain(refusal) : { ...input, ...result }
+    let refusal: Retained['reason'] | undefined, desktopRequested = false
+    try {
+      const result = await client.stopAgentIfInputClear(core.proof, input.operationId, async admit => {
+        context.signal?.throwIfAborted()
+        desktopRequested = true
+        // The original Desktop grants this operation in the same event order as editing.
+        // Do not hold the Goal or Core journal writer across the Desktop call.
+        const desktop = await options.desktopOccupation?.(input.agentSessionId, input.runId, context, { action: 'admit', operationId: input.operationId })
+        if (desktop !== 'clear') {
+          refusal = desktop ?? 'unknown'
+          throw new AgentMuxError('The original Desktop did not grant this Stop operation.', 'GOAL_CLOSEOUT_DESKTOP_RETAINED')
+        }
+        return await options.demands.withCurrentDemands(async goals => {
+          context.signal?.throwIfAborted()
+          const last = inspect(goals)
+          refusal = last.reason ?? (last.attempt.collection?.operationId !== collectionOperationId ? 'unknown' : undefined)
+          if (refusal) throw new AgentMuxError('The original Goal handoff or other responsibilities changed before admission.', 'GOAL_CLOSEOUT_HANDOFF_CHANGED')
+          return await admit()
+        })
+      })
+      return refusal ? retain(refusal) : { ...input, ...result }
+    } finally {
+      if (desktopRequested) {
+        // Reconcile metadata through the Desktop owner even when the reader cancelled.
+        // A lost reconciliation leaves the original operation discoverable by Core Stop inspect.
+        void options.desktopOccupation?.(input.agentSessionId, input.runId, { transport: 'unix' },
+          { action: 'reconcile', operationId: input.operationId }).catch(() => {})
+      }
+    }
   }
 }

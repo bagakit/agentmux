@@ -22,7 +22,7 @@ type OperationBase = {
   callerOperationIds?: string[]
 }
 export type AgentOperationFeedback = OperationBase & (
-  { kind: 'stop'; control: AgentSessionControl } | { kind: 'takeover'; takeoverSource: TakeoverSource; cancellation?: TakeoverCancellation } | { kind: 'fork' }
+  { kind: 'stop'; control: AgentSessionControl; inputCloseout?: true } | { kind: 'takeover'; takeoverSource: TakeoverSource; cancellation?: TakeoverCancellation } | { kind: 'fork' }
 )
 export type AgentOperationReferences = Record<string, AgentOperationFeedback>
 /** Historical records have only the original read action. Active and custom actions stay in feedback. */

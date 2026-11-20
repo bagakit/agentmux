@@ -44,7 +44,7 @@ import { encodeFileViewReading, fileViewReadingOwnerKey, isFileViewReadingPositi
 import { isStandaloneBrowserObjectRequest, unsupportedDesktopBrowserObject } from '../../shared/browser-object-host-policy.js'
 import type { AgentOperationReferences } from './lib/agent-operation'
 import { parseBrowserTaskCreateInput, type BrowserTaskCreateInput } from '@agentmux/core/control'
-import { persistedAgentOperations, restoredAgentOperations } from './lib/agent-operation'
+import { agentOperationKey, agentOperationsForSubject, persistedAgentOperations, restoredAgentOperations } from './lib/agent-operation'
 import { DeviceHomeError, type DeviceHomeStep } from './lib/device-home-feedback'
 import { restoredMoteMainCreationReferences, type MoteMainCreationReference } from '../../shared/mote-main-action'
 import { hasOriginalGoalBinding, parseAmuxObjectLink } from '@agentmux/core/sharing'
@@ -509,7 +509,7 @@ import {
 import { moveSessionViewToWorkspace as reduceMoveSessionView } from './lib/move-session-view'
 import { rehomeClosedWorkspaces } from './lib/worktree-closeout-state'
 import { promoteRegionToTab as reducePromoteRegionToTab } from './lib/promote-region-to-tab'
-import { desktopRunInputOccupation } from './lib/agent-closeout-input'
+import { agentInputComposing, desktopRunInputOccupation } from './lib/agent-closeout-input'
 import {
   evaluateCreatePrIntent,
   type CreatePrToken,
@@ -8158,6 +8158,29 @@ export const useAppStore = create<AppState>()<[['zustand/persist', PersistedAppS
     if (request.operation === 'message.pending.ls' || request.operation === 'message.pending.edit' || request.operation === 'message.pending.send' || request.operation === 'message.pending.stop' ||
         request.operation === 'message.pending.archive' || request.operation === 'message.pending.restore') {
       const target = { kind: 'agent-session' as const, agentSessionId: request.agentSessionId }
+      if (request.operation === 'message.pending.ls' && request.closeout?.action === 'reconcile' && request.closeoutRunId) {
+        const { operationId } = request.closeout, runId = request.closeoutRunId
+        const key = agentOperationKey({ kind: 'stop', operationId, subject: { hostId: 'local', agentSessionId: target.agentSessionId } })
+        const original = get().agentOperations[key]
+        if (original?.kind === 'stop' && original.inputCloseout && original.control.run.runId === runId) {
+          try {
+            const inspected = await api.sessions.inspectStop(original.control, operationId)
+            if (inspected.agentSessionId === target.agentSessionId && inspected.expectedRun.runId === runId &&
+                get().agentOperations[key] === original) {
+              if (inspected.operationIdMatched && inspected.phase === 'retired') updateAgentOperation(original, { phase: 'succeeded', canContinue: false })
+              else if (inspected.phase === 'not-requested') updateAgentOperation(original, { phase: 'failed', canContinue: false,
+                message: '原 Run 未提交停止。草稿和待发输入保持原位。' })
+              else updateAgentOperation(original, { phase: 'unconfirmed', canContinue: false,
+                message: inspected.failure?.message ?? '原停止操作待核对，输入已保留。' })
+              await checkpointAgentOperations()
+            }
+          } catch {
+            if (get().agentOperations[key] === original) updateAgentOperation(original, { phase: 'unconfirmed', canContinue: false,
+              message: '原停止回执暂不可读。草稿和待发输入已保留。' })
+          }
+        }
+        return { operation: request.operation, agentSessionId: target.agentSessionId, messages: [], occupation: { runId, operationId, state: 'unknown' } }
+      }
       const session = agentSession(target)
       function verifyArchiveTarget() {
         requireActive()
@@ -8166,28 +8189,49 @@ export const useAppStore = create<AppState>()<[['zustand/persist', PersistedAppS
           throw controlFailure('STALE_AGENT_SESSION', 'The original Session changed during the archive read. Its saved input is kept.')
         }
       }
-      const records = (): AgentMuxPendingMessage[] => {
+      const records = (owner = session.id): AgentMuxPendingMessage[] => {
         const state = get()
-        const current = reconcileDeliveredSteers(state, session.id)
-        return (current.agentSteerQueues[session.id] ?? []).map(entry =>
-          pendingSteerRecord(entry, state.agentSteerInFlight[session.id], state.agentSteerInFlightPhase[session.id],
+        const current = reconcileDeliveredSteers(state, owner)
+        return (current.agentSteerQueues[owner] ?? []).map(entry =>
+          pendingSteerRecord(entry, state.agentSteerInFlight[owner], state.agentSteerInFlightPhase[owner],
             !entry.directInputBinding && Boolean(confirmedSteerDelivery(state.timelines[session.id], session.control, entry.operationId))))
       }
       if (request.operation === 'message.pending.ls') {
         if (request.closeoutRunId !== undefined) {
-          const runId = request.closeoutRunId, state = get()
-          const views = Object.values(state.tabs).flatMap(tab => workbenchSurfaces(tab).filter(surface =>
-            isSessionSurface(surface) && surface.sessionId === session.id).map(surface => ({ tab, surface })))
-          const owners = [session.id, ...views.map(({ surface }) => surface.regionId)]
-          const pending = Boolean(state.agentSteerInFlight[session.id] || records().some(message => !message.archived && message.delivery !== 'confirmed'))
-          const known = useAppStore.persist.hasHydrated() && !persistHydrationError &&
-            session.control.hostId === 'local' && session.control.run.runId === runId && !session.runUnobserved &&
-            !views.some(({ tab }) => tab.source) &&
-            !Object.values(state.moteMainCreationReferences).some(reference => reference.operationId === session.creation?.createOperationId)
-          return { operation: request.operation, agentSessionId: session.id, messages: [],
-            occupation: { runId, state: desktopRunInputOccupation({
-              known, owners, drafts: state.agentComposerDrafts, notes: state.agentComposerNotes, pending,
-            }) } }
+          const runId = request.closeoutRunId, operationId = request.closeout?.operationId
+          const occupation = () => {
+            const state = get(), current = agentSession(target)
+            const views = Object.values(state.tabs).flatMap(tab => workbenchSurfaces(tab).filter(surface =>
+              isSessionSurface(surface) && surface.sessionId === session.id).map(surface => ({ tab, surface })))
+            const owners = [session.id, ...views.map(({ surface }) => surface.regionId)]
+            const pending = owners.some(owner => Boolean(state.agentSteerInFlight[owner]) ||
+              records(owner).some(message => !message.archived && message.delivery !== 'confirmed'))
+            const known = useAppStore.persist.hasHydrated() && !persistHydrationError && current.control.agentSessionId === target.agentSessionId &&
+              current.control.hostId === 'local' && current.control.run.runId === runId && !current.runUnobserved &&
+              !views.some(({ tab }) => tab.source) &&
+              !Object.values(state.moteMainCreationReferences).some(reference => reference.operationId === session.creation?.createOperationId)
+            return desktopRunInputOccupation({ known, owners, drafts: state.agentComposerDrafts, notes: state.agentComposerNotes, pending,
+              composing: agentInputComposing(current.control) })
+          }
+          let state = occupation()
+          if (request.closeout?.action === 'admit' && operationId && state === 'clear') {
+            const operation = { kind: 'stop' as const, inputCloseout: true as const, operationId, control: session.control,
+              subject: { hostId: 'local', agentSessionId: target.agentSessionId }, startedAt: Date.now(), phase: 'unconfirmed' as const,
+              canContinue: false, message: '收尾正在核对原 Run。草稿仍可编辑，原停止操作可读回。' }
+            const held = beginAgentOperation(operation)
+            if (held.kind !== 'stop' || !held.inputCloseout || held.control.run.runId !== runId || held.phase === 'succeeded') state = 'unknown'
+            else {
+              await checkpointAgentOperations()
+              requireActive()
+              // This is an admission, not the original observation. Synchronous with the
+              // draft and queue producers, it grants only this persisted operation.
+              state = occupation()
+              updateAgentOperation(operation, state === 'clear' ? { phase: 'pending' } : { phase: 'failed',
+                message: 'Desktop 原输入已占用，未准入停止。草稿和待发保持原位。' })
+            }
+          }
+          return { operation: request.operation, agentSessionId: session.id, messages: [], occupation: { runId, state,
+            ...(operationId === undefined ? {} : { operationId }) } }
         }
         const archived: AgentMuxPendingMessage[] = []
         let after: string | undefined
@@ -14106,6 +14150,9 @@ export const useAppStore = create<AppState>()<[['zustand/persist', PersistedAppS
   send(sessionId, text, onRejected, origin, agentMuxNote, options) {
     // Admission transfers ownership from draft to queue; transport completion is a separate fact.
     const operationId = mintObjectId(), session = options?.originalSession ?? get().sessions.find(item => item.id === sessionId)
+    const closeoutSession = session?.kind === 'agent' && agentOperationsForSubject(get().agentOperations, session.control).some(operation =>
+      operation.kind === 'stop' && operation.inputCloseout && operation.phase === 'pending' && operation.control.run.runId === session.control.run.runId)
+      ? session : undefined
     const binding = manualComposerBinding(sessionId, text, origin, options)
     const seed = startDeliveryAttempt({ agentSessionId: session?.kind === 'agent' ? session.control.agentSessionId : sessionId,
       operationId, hostId: session?.hostId ?? null, expectedRun: binding?.expectedRun, prompt: composeAgentPrompt(text, agentMuxNote).text })
@@ -14118,7 +14165,14 @@ export const useAppStore = create<AppState>()<[['zustand/persist', PersistedAppS
           ...(failure.code ? { code: failure.code } : {}), logId: diagnostic.logId }))
       })
     }
-    if (admitAgentSteer(sessionId, text, reject, operationId, origin, agentMuxNote, options, binding) === false) return false
+    if (admitAgentSteer(sessionId, text, reject, operationId, origin, agentMuxNote,
+      closeoutSession ? { ...options, originalSession: closeoutSession, awaitingExplicitSend: true } : options, binding) === false) return false
+    if (closeoutSession) {
+      // The exact original queue takes custody. This edit remains available for an
+      // explicit send after reading the original Stop, without sending itself.
+      void checkpointWorkbenchUserDocument().catch(error => get().reportWorkbenchSaveFailure(error, 'local-storage'))
+      return true
+    }
     manualSteerAttempts.set(JSON.stringify([sessionId, operationId]), { seed, stage: 'queue-admission' })
     void get().sendQueuedAgentSteer(sessionId, operationId).catch(error => (onRejected ?? get().reportError)(error))
     return true

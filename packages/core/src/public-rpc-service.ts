@@ -2547,6 +2547,8 @@ export class AgentMuxRpcService {
     const caller = await this.authenticated(context)
     if (method === 'message.pending.ls') {
       const input = rpcRecord(params)
+      if (input.closeout !== undefined && (!this.ports.execute || caller || context.transport !== 'unix' || context.principal?.kind !== 'user'))
+        throw new AgentMuxError('Desktop closeout admission belongs to the original local Desktop bridge.', 'CONTROL_PERMISSION_DENIED')
       if (input.closeoutRunId !== undefined &&
           (caller ? caller.agentSessionId !== input.agentSessionId || caller.session.run.runId !== input.closeoutRunId
             : !context.principal || !['user', 'device'].includes(context.principal.kind)))

@@ -253,6 +253,7 @@ export type InlineComposerProps = {
   completionConfig?: ComposerInputConfig
   /** Actual maintained editor coordinates, including a codec-independent text prefix. */
   onSelectionChange?: (caret: ComposerCaret) => void
+  onCompositionActivity?: (active: boolean, interrupted?: { base: string; draft: string }) => void
 }
 
 export function InlineComposer(props: InlineComposerProps) {
@@ -290,6 +291,7 @@ function PresentedInlineComposer(props: InlineComposerProps) {
     return uniqueImageReferences(references)
   }, [draftContent])
   const editorRef = useRef<Editor | null>(null)
+  const composition = useRef<{ base: string; before: string; after: string; text: string } | null>(null)
   const historyOrigin = useRef<{ editor: Editor; state: EditorState; draft: string } | null>(null)
   const latest = useRef(props)
   latest.current = props
@@ -315,8 +317,35 @@ function PresentedInlineComposer(props: InlineComposerProps) {
       return event.defaultPrevented
     },
     handleDOMEvents: {
-      compositionstart: () => { const editor = editorRef.current; if (editor) { const { from, to } = editor.state.selection; latest.current.onSelectionChange?.({ from, to, before: '', composing: true }) }; return false },
-      compositionend: () => { queueMicrotask(() => { const editor = editorRef.current; if (editor) reportSelection(editor) }); return false },
+      compositionstart: () => {
+        const editor = editorRef.current
+        if (editor) {
+          const { doc, selection: { from, to } } = editor.state
+          latest.current.onSelectionChange?.({ from, to, before: '', composing: true })
+          if (latest.current.onCompositionActivity) {
+            composition.current = { base: documentDraft(doc.toJSON()), before: documentDraft(doc.cut(0, from).toJSON()),
+              after: documentDraft(doc.cut(to).toJSON()), text: '' }
+            latest.current.onCompositionActivity(true)
+          }
+        }
+        return false
+      },
+      compositionupdate: (_view: unknown, event: CompositionEvent) => {
+        if (composition.current) composition.current.text = event.data
+        return false
+      },
+      compositionend: () => {
+        const original = composition.current
+        queueMicrotask(() => {
+          const editor = editorRef.current
+          if (editor) reportSelection(editor)
+          if (original && composition.current === original) {
+            composition.current = null
+            latest.current.onCompositionActivity?.(false)
+          }
+        })
+        return false
+      },
       dragover: (view: any, event: DragEvent) => {
         if (!latest.current.disabled && latest.current.onDropFiles && [...(event.dataTransfer?.types ?? [])].includes('Files')) {
           event.preventDefault(); view.dom.dataset.fileDropTarget = 'true'
@@ -370,7 +399,12 @@ function PresentedInlineComposer(props: InlineComposerProps) {
     },
     clipboardTextSerializer: (slice: any) => documentDraft({ type: 'doc', content: slice.content.toJSON() })
   }), [props.placeholder, props['aria-label']])
-  const onUpdate = useMemo(() => ({ editor }: { editor: any }) => { const value = documentDraft(editor.getJSON()); if (value !== latest.current.value) latest.current.onValueChange(value) }, [])
+  const onUpdate = useMemo(() => ({ editor }: { editor: any }) => {
+    const value = documentDraft(editor.getJSON())
+    if (value === latest.current.value) return
+    if (composition.current) composition.current.base = value
+    latest.current.onValueChange(value)
+  }, [])
   const editor = useEditor({
     immediatelyRender: false,
     extensions,
@@ -382,6 +416,13 @@ function PresentedInlineComposer(props: InlineComposerProps) {
     editorProps
   })
   editorRef.current = editor
+  useLayoutEffect(() => () => {
+    const interrupted = composition.current
+    if (!interrupted) return
+    composition.current = null
+    latest.current.onCompositionActivity?.(false, interrupted.text
+      ? { base: interrupted.base, draft: interrupted.before + interrupted.text + interrupted.after } : undefined)
+  }, [])
   useLayoutEffect(() => {
     if (!editor || editor.isDestroyed) return
     const updateRoot = () => { if (!editor.isDestroyed) editor.view.updateRoot() }

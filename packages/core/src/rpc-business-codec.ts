@@ -237,7 +237,10 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
     case 'message.pending.ls': case 'message.pending.edit': case 'message.pending.send': case 'message.pending.stop':
     case 'message.pending.archive': case 'message.pending.restore':
       if (actual.agentSessionId !== request.agentSessionId) fail()
-      if (request.operation === 'message.pending.ls' && request.closeoutRunId !== (actual.occupation as { runId?: string } | undefined)?.runId) fail()
+      if (request.operation === 'message.pending.ls') {
+        const occupation = actual.occupation as { runId?: string; operationId?: string } | undefined
+        if (request.closeoutRunId !== occupation?.runId || request.closeout?.operationId !== occupation?.operationId) fail()
+      }
       if ((request.operation === 'message.pending.edit' || request.operation === 'message.pending.stop' || request.operation === 'message.pending.archive' || request.operation === 'message.pending.restore') &&
           (actual.message as { pendingId?: string })?.pendingId !== request.pendingId) fail()
       if (request.operation === 'message.pending.send' && actual.pendingId !== request.pendingId) fail()
