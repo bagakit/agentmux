@@ -411,7 +411,7 @@ Profile 提供原私聊记录入口，按人查看已有对话及最后活动，
 
 新显式回复的发布记录同时保留已认证的原 Agent 作者与执行 Host／Session，每个片段沿同一作者呈现。名称、头像是可选的原资料观察，读取失败保原作者及正常回复能力，不从后来 Main 或正文填补；原保存、prepared 或未知效果保持原快照，不因资料更新补写或重发。
 
-Main 跨语义 Host 时，普通私聊仍沿原 Core 与原入站 authority 输入，不因缺少回复回程而阻断健康 Main。当前执行端点未确认到原连接器 owner 的回复路由时，可信上下文只保原引用，事件与诊断的当前 `noticeCode` 说明 `MOTE_CHAT_REPLY_ROUTE_UNCONFIRMED`，不覆盖原入站 `code` 或已确认的输入回执；这不是输入失败或 Main 停止，也不允许猜另一个 Host、会话或收件人。跨 Host 自动选择原连接器端点的回程尚未接通；显式到达原 hosting 端点的调用可复用其现有认证，核原收件 Session capability、合法恢复、原入站与原 Core 投递回执后，向原人回复。默认执行端点回程未确认不撤销这条准确显式调用的资格；双向读取入站 authority 本身仍不等于外发授权。
+Main 跨语义 Host 时，输入仍沿原入站和执行 Core。回复和回执读取可在执行端点携带原消息 MID，执行 Core 用实际收存的原作者与准确双向 Runtime 引用选择已配置的原连接器，再核对原入站。原连接器继续核验准确收件 Session 能力、原 Core 交付证据和原生续接关系，并持有唯一外发记录。未能确认回程时保留原消息、回复操作和 `MOTE_CHAT_REPLY_ROUTE_UNCONFIRMED` 原因。已确认输入继续可用，显式到达原连接器的回复入口仍沿同一原授权和回执。
 
 Main 的 App 输入、心跳、其他输入、工具过程和无关后续回复不会因这条本人路由自动发往私聊；本人路由不建立普通全会话发布关系，也不撤销 Main 的内部感知与协调能力。原连接器 owner 中若已有该准确 Main 的普通外发关系（包括可恢复的 paused 关系或旧私聊 lane），新私聊保原消息并说明 `MOTE_CHAT_MAIN_EXTERNAL_AUDIENCE`，在准入事务与 Core 原输入／重入授权处复核；不自动解除关系、停止 Run 或更换 Agent。用户沿原 Mote 主对话详情取得 Main 的原 Host／Session，再在原 hosting 端点用 `connection binding ls --session SID` 列出本 owner 各 Host 路由的同 SID 关系，inspect 准确关系及已保存的 `executionRuntimeId`；不同 Host 别名若确认同 Runtime／Session，仍属于同一发布来源。用户明确处理后重试原入站。这个资格检查只陈述本原 owner 的事实，不是全局保密隔离；其他 owner 之前或之后经原人／device 明确授权的独立导出仍归其原授权。本次新输入资格不撤销此前合法保存的原人显式 reply intent 或读取旧回执的资格。不同 Provider 消费同一边界，缺少原生采用／回复关联时不用正文、时间或相邻回合猜测归属。
 

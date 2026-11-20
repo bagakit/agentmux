@@ -286,8 +286,8 @@ original combined intent before writing and preserves existing configuration and
 A new policy revision conflicts with an older refresh; keep original operation IDs, never retarget
 or replay it with a later revision. Identity refresh and ordinary guest policy are independent
 intents; an unknown refresh is not a guest-policy draft or a reason to stop existing chat.
-Guests keep their independent private lanes. Without Main, the creator’s original message waits for setup;
-no separate creator Agent is created. Existing admitted messages keep their original recipient.
+Guests keep their independent private lanes. The original Host uses the saved Executor priorities
+to establish Main for the creator’s first message. Admitted messages keep their original recipient.
 Main's input-only relationship does not publish its ordinary output or grant a native API identity.
 This original Connector owner also checks its own ordinary sharing relationships, including paused
 ones that can resume and prior dedicated chat lanes. MOTE_CHAT_MAIN_EXTERNAL_AUDIENCE means this
@@ -309,13 +309,11 @@ The saved reply operation and each external fragment have separate receipts. Kee
 after an unknown result and read space mote chat inspect --input - with {operationId}; inspection
 does not send again. Repeating the exact reply returns that original operation, and changed content
 cannot reuse it. This reply operation publishes only the supplied body and creates no ordinary Main publication. A reply grants no settings or approval authority.
-When Main executes on another semantic Host, normal input still reaches that original Main.
-The trusted input and original ingress diagnosis show reply-route-unconfirmed when the execution
-endpoint has no confirmed route back to the Connector owner. Keep the original ingress reference;
-do not guess a recipient or owner. Cross-Host authority reads do not authorize replies. Automatic selection of the original Connector endpoint across Hosts is not implemented.
-An explicit call to that original hosting endpoint may use its existing authentication of the
-original recipient capability and semantic recovery, plus the exact original Core delivery proof.
-An unconfirmed default return route does not revoke that explicit qualified call.
+When Main executes on another semantic Host, include the original AMUX MID as sourceMessageId in
+reply and operation inspect. The execution Core verifies its saved message and uses the configured
+original Connector Runtime. The original Connector verifies the exact recipient, original ingress
+and Core delivery receipt. If the route is unconfirmed, retain the same MID and reply operation ID.
+An explicit call at the original hosting endpoint uses the same reply and receipt without sourceMessageId.
 A person or device controls chat policy and per-person total allowances. A chat Agent may read only
 its own retained lane with space mote chat history; copy the original target from its first context.
 The person, the device and the Mote's own Agents read what its chat application received, across
