@@ -265,7 +265,7 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
       await connectionOwner.start(headless)
       services = await connectionOwner.services()
     } else services = await createConnectionServices({ directory: join(original.root, 'connectors'), adapters: [adapter],
-      bindings: { spatial, checkpoint }, moteChat: { ...(main ? { main: () => main } : {}), agents, assertTarget: desktopAgents.assertTarget, assertReady: desktopAgents.assertReady, member: createHostMoteMembership(spatial) },
+      bindings: { spatial, checkpoint }, moteChat: { agents, assertTarget: desktopAgents.assertTarget, assertReady: desktopAgents.assertReady, member: createHostMoteMembership(spatial) },
       publication: createPublicationConversationPort(clients), ingress: { core: host => host === 'local' ? original.client : undefined } })
     server = new core.AgentMuxControlServer({ socketPath: join(original.root, 'public.sock'), connections: services.connections, moteChat: services.moteChat!, ...(dialogue ? { moteDialogue: dialogue } : {}), ...(quick ? { moteQuickPreferences: quick, spatialAgentControl: createHostSpatialAgentControl({ configurationPath, spatial, runtime: () => headless }) } : {}), spatialState: spatial, coreClients: servingClients, ...(hostingRuntime ? { hostedRuntime: () => hostingRuntime! } : {}) })
     await server.start()
@@ -333,5 +333,5 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
       return { owner, read }
     }, adapter, nativeInputs() { return nativeProcesses.flatMap(process => process.inputs) }, replaceHostingOwner() { hostingOwnerInstanceId += '-replacement' }, get executionEndpoint() { return executionEndpoint }, main, bindMain, endRun(runId: string) { const run = runs.get(runId)!; runs.set(runId, { ...run, state: { type: 'exited', code: 0, signal: null } }) }, feishu, agents, config, configurationPath, graph, spatial, workspace, get services() { return services }, get sdk() { return sdk }, get endpoint() { return { transport: 'unix' as const, path: server.path } }, topic, target, creator, lanePerson, guest, wire, message, records, claimed, reply, start, prepare, submission,
     cli, cliRaw, publicationRefresh, credentials(index: number) { const env = start.mock.calls[index]![0].env!; return { agentSessionId: env.AGENTMUX_AGENT_SESSION_ID!, capability: env.AGENTMUX_AGENT_CAPABILITY! } },
-    submissionErrors, async restart() { await close(); await open(); if (!native) await vi.waitFor(() => expect(wire.endpoint).toBeDefined()) } }
+    submissionErrors, async restart(whileStopped?: () => void | Promise<void>) { await close(); await whileStopped?.(); await open(); if (!native) await vi.waitFor(() => expect(wire.endpoint).toBeDefined()) } }
 }

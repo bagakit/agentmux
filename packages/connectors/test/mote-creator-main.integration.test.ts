@@ -70,6 +70,50 @@ it('starts one Main for concurrent original creator messages and skips a missing
   restored.mockRestore()
 })
 
+it('recovers retained creator intake after a Host restart without another platform delivery', async () => {
+  const f = await fixture(false), path = join(f.topic.physicalDirectoryPath!, 'MOTE.md')
+  await writeFile(path, '---\nversion: 1\n---\n')
+  const messages = ['retained-first', 'retained-second'].map(id => f.message(id))
+  for (const message of messages) expect(await f.wire.post(message)).toBe(202)
+  await vi.waitFor(async () => {
+    expect(await f.records()).toMatchObject([
+      { state: 'received', code: 'MOTE_CHAT_EXECUTOR_REQUIRED' },
+      { state: 'received', code: 'MOTE_CHAT_EXECUTOR_REQUIRED' }
+    ])
+  })
+  const original = await f.records()
+  expect(f.start).not.toHaveBeenCalled()
+  for (const record of original) {
+    expect(record.input).toBeUndefined()
+    // Model the persisted code from an older Host while retaining the verified original intake.
+    f.services.database!.prepare("UPDATE connection_ingress_message SET record_json=json_set(record_json,'$.code',?) WHERE ingress_id=?")
+      .run('MOTE_CHAT_MAIN_REQUIRED', record.ingressId)
+  }
+
+  await f.restart(() => writeFile(path, '---\nversion: 1\ndefaults:\n  executorId: saved-chat\n---\n'))
+
+  const inspections = () => Promise.all(original.map(record => f.services.ingress!.inspect({ ingressId: record.ingressId })))
+  await vi.waitFor(async () => expect((await inspections()).map(result => result.inputReceipt?.status))
+    .toEqual(['terminal-confirmed', 'terminal-confirmed']), { timeout: 8000 })
+  const main = (await f.sdk.call('space.mote.dialogue.read', { target: f.target })).main.current!
+  const queue = new DurableAgentMuxMessageQueue(f.client.agentMessageQueuePath())
+  const delivered = await inspections()
+  for (const [index, before] of original.entries()) {
+    const { ingress } = delivered[index]!
+    expect(ingress).toMatchObject({ ingressId: before.ingressId, externalMessageId: before.externalMessageId,
+      externalConversationId: before.externalConversationId, actor: before.actor, body: before.body, state: 'claimed',
+      input: { agentSessionId: main.sessionId, author: { kind: 'external', actor: f.creator } } })
+    expect(ingress!.code).toBeUndefined()
+    const receipt = await queue.readByOperationId(ingress!.input!.operationId)
+    expect(receipt?.envelope.sender).toMatchObject({ kind: 'external', actor: f.creator,
+      externalMessageId: before.externalMessageId, externalConversationId: before.externalConversationId })
+  }
+  expect(f.start).toHaveBeenCalledOnce()
+  expect(f.inner.kernel.input).toHaveBeenCalledTimes(messages.length)
+  expect(f.prepare).not.toHaveBeenCalled()
+  expect(await f.records()).toHaveLength(messages.length)
+})
+
 it('freezes old Main inputs through an unknown Core result, role replacement and service restart', async () => {
   const f = await fixture(), submit = f.client.submitAgentMessage.bind(f.client)
   let unavailable = true
