@@ -5,6 +5,7 @@ import { createRelayMeshIdentity, startRelayGateway } from '@agentmux/relay/gate
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { loadOrCreateRelayKeyPair } from '../src/rpc-relay-keypair.js'
 import { headlessFixture, until } from './helpers/headless-runtime-fixture.js'
+import type { HostRouteGrant } from '../src/host-route.js'
 
 const cleanup: Array<() => Promise<void> | void> = []
 afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose() })
@@ -20,25 +21,35 @@ async function originalCore() {
   return { scope, rpc }
 }
 
-it('persists an authenticated Relay edge and uses it for signed calls and readers on the original Core', async () => {
-  const source = await originalCore(), receiver = await originalCore()
-  const key = await loadOrCreateRelayKeyPair(join(source.scope.env.HOME!, '.agentmux', 'relay-client-keypair.json'))
-  const settings = await until(() => receiver.rpc.call('settings.mesh.inspect', {}), value => value.identity !== null, 'receiver Mesh identity')
-  const identity = { ...createRelayMeshIdentity(), epoch: 1 }, member = settings.identity!
-  const members = [{ peerId: member.peerId, publicKey: member.publicKey }, { peerId: identity.peerId, publicKey: identity.publicKey }]
+type CoreFixture = Awaited<ReturnType<typeof originalCore>>
+const relayClientKey = async ({ scope }: CoreFixture) => exportPublicKey((await loadOrCreateRelayKeyPair(join(scope.env.HOME!, '.agentmux', 'relay-client-keypair.json'))).publicKey)
+
+async function originalGateway(receivers: CoreFixture[]) {
+  const identity = { ...createRelayMeshIdentity(), epoch: 1 }
+  const settings = await Promise.all(receivers.map(({ rpc }) => until(() => rpc.call('settings.mesh.inspect', {}), value => value.identity !== null, 'receiver Mesh identity')))
+  const peers = settings.map(value => ({ peerId: value.identity!.peerId, endpoints: [] }))
+  const members = [identity, ...settings.map(value => value.identity!)].map(({ peerId, publicKey }) => ({ peerId, publicKey }))
   const networkId = 'original-route-relay-network'
-  const gateway = await startRelayGateway({ host: '127.0.0.1', port: 0, publishers: [], mesh: { networkId, identity, members,
-    peers: [{ peerId: member.peerId, endpoints: [] }] } })
+  const gateway = await startRelayGateway({ host: '127.0.0.1', port: 0, publishers: [], mesh: { networkId, identity, members, peers } })
   cleanup.push(() => gateway.stop())
   const relay = { endpoint: `127.0.0.1:${gateway.port}`, useTls: false }
-  await receiver.rpc.call('settings.mesh.configure', { expectedRevision: settings.revision, operationId: 'adopt-receiver-mesh', configuration: {
-    ...settings.configuration, role: 'participant', networkId, members, peers: [{ peerId: identity.peerId, endpoints: [relay] }],
-    endpointAccess: { allowedClientKeys: [exportPublicKey(key.publicKey)] },
-  } })
-  const published = await until(() => receiver.rpc.call('mesh.inspect', {}), value => value.endpoint.state === 'available', 'receiver business endpoint')
-  if (published.endpoint.state !== 'available') throw Error('Original receiver did not publish')
-  const offer = { ...published.endpoint.offer, relay }
-  await until(() => gateway.resolvePublisher(offer.serverId), Boolean, 'original gateway publisher')
+  return async (receiver: CoreFixture, client: CoreFixture) => {
+    const original = settings[receivers.indexOf(receiver)]!
+    await receiver.rpc.call('settings.mesh.configure', { expectedRevision: original.revision, operationId: 'adopt-receiver-mesh', configuration: {
+      ...original.configuration, role: 'participant', networkId, members, peers: [{ peerId: identity.peerId, endpoints: [relay] }],
+      endpointAccess: { allowedClientKeys: [await relayClientKey(client)] },
+    } })
+    const published = await until(() => receiver.rpc.call('mesh.inspect', {}), value => value.endpoint.state === 'available', 'receiver business endpoint')
+    if (published.endpoint.state !== 'available') throw Error('Original receiver did not publish')
+    const offer = { ...published.endpoint.offer, relay }
+    await until(() => gateway.resolvePublisher(offer.serverId), Boolean, 'original gateway publisher')
+    return offer
+  }
+}
+
+it('persists an authenticated Relay edge and uses it for signed calls and readers on the original Core', async () => {
+  const source = await originalCore(), receiver = await originalCore()
+  const publish = await originalGateway([receiver]), offer = await publish(receiver, source)
 
   const { identity: sourceIdentity, actor } = await source.rpc.call('route.choices', {})
   expect((await source.rpc.call('route.edges', {})).edges).toEqual([])
@@ -96,4 +107,30 @@ it('persists an authenticated Relay edge and uses it for signed calls and reader
   await resumed.call('route.configure', { expectedRevision: restored.settings.revision, operationId: 'remove-original-edge', configuration: { routes, grants: [], relayEdges: [] } })
   await expect(resumed.call('route.call', call)).rejects.toMatchObject({ code: 'HOST_ROUTE_EDGE_UNAVAILABLE' })
   expect((await receiver.rpc.call('runtime.owner.identity', {})).owner).toEqual(owner)
+})
+
+it('a transit Core uses its own Relay edge while preserving the exact original actor on both receiving Cores', async () => {
+  const source = await originalCore(), transit = await originalCore(), receiver = await originalCore()
+  const publish = await originalGateway([transit, receiver])
+  const transitOffer = await publish(transit, source), receiverOffer = await publish(receiver, transit)
+  const { identity, actor } = await source.rpc.call('route.choices', {})
+  const transitIdentity = await transit.rpc.call('route.identity', {}), target = await receiver.rpc.call('route.identity', {})
+  const edges = [{ edgeId: 'original-transit', label: 'Original transit', target: transitIdentity, offer: transitOffer },
+    { edgeId: 'original-receiver', label: 'Original receiver', target, offer: receiverOffer }]
+  const route = { source: identity, hops: edges.map(({ edgeId, target }) => ({ edgeId, target, kind: 'relay' as const })) }
+  const grant = (id: string, delegator: HostRouteGrant['delegator']): HostRouteGrant => ({ id, delegator, actor, destination: target, scopes: ['runtime.owner.identity'] })
+  await source.rpc.call('route.configure', { expectedRevision: (await source.rpc.call('route.inspect', {})).revision,
+    operationId: 'adopt-original-transit-route', configuration: { routes: [{ id: 'through-transit', route }], grants: [], relayEdges: [edges[0]!] } })
+  await transit.rpc.call('route.configure', { expectedRevision: (await transit.rpc.call('route.inspect', {})).revision,
+    operationId: 'adopt-original-receiver-edge', configuration: { routes: [], grants: [grant('original-transit-grant', identity)], relayEdges: [edges[1]!] } })
+  const receiverRevision = (await receiver.rpc.call('route.inspect', {})).revision
+  const call = { routeId: 'through-transit', adoptedRoute: route, requestId: 'two-real-relay-hops', call: { method: 'runtime.owner.identity', params: {} } }
+  const wrongActor = { ...grant('wrong-actor', transitIdentity), actor: { ...actor, source: transitIdentity } }
+  const refused = await receiver.rpc.call('route.configure', { expectedRevision: receiverRevision,
+    operationId: 'grant-different-actor', configuration: { routes: [], grants: [wrongActor] } })
+  await expect(source.rpc.call('route.call', call)).rejects.toMatchObject({ code: 'HOST_ROUTE_NOT_DELEGATED' })
+  await receiver.rpc.call('route.configure', { expectedRevision: refused.settings.revision,
+    operationId: 'grant-exact-source-through-transit', configuration: { routes: [], grants: [grant('original-receiver-grant', transitIdentity)] } })
+  const owner = (await receiver.rpc.call('runtime.owner.identity', {})).owner
+  expect(await source.rpc.call('route.call', call)).toMatchObject({ value: { owner }, observation: { actor, route, requestId: call.requestId, logicalHops: 2 } })
 })
