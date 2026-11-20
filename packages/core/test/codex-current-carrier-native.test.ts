@@ -10,6 +10,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
+import { parseAgentMuxCliInvocation } from '../src/agentmux-cli-commands.js'
 import { spawn } from 'node:child_process'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
@@ -205,6 +206,11 @@ it.runIf(process.platform === 'darwin')('Codex 0.171 adopts the original startup
   const h = await fixture('managed-create')
   try {
     await h.reopen()
+    const invocation = await parseAgentMuxCliInvocation(['agent', 'inspect', '--session', 'original'])
+    expect(invocation.command.method).toBe('agent.inspect')
+    const { status } = await h.rpc.call('agent.inspect', invocation.params as { target: { kind: 'agent-session'; agentSessionId: string } })
+    expect(status?.session.terminalFrontend).toMatchObject({ run: h.session.run, initialization: { phase: 'ready',
+      native: { state: 'confirmed', sessionId: h.initial.session.nativeHandle!.sessionId } } })
     expect(h.inputs.filter(text => text.includes('PRIVATE_QUEUE_INITIAL_ORIGINAL'))).toHaveLength(1)
   } finally { await h.close() }
 })
