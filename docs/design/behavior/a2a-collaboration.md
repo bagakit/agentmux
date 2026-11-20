@@ -117,9 +117,11 @@ A2A 收／发浏览与原信读取复用此 journal。公共 SDK／RPC／CLI 须
 
 ### 跨 Runtime 原消息与回报
 
-受管 Agent 跨语义 Runtime owner 发消息时，原 Core 认证自己的当前 Session/Run，目标 Core 按独立的 `agent-message` 目的信任核验原签名。身份密钥可复用 Runtime 原身份，创建来源信任不能自动授予消息权限。首次信任由真实用户核对双方 Runtime、公钥指纹与方向后明确批准；Agent 不能登记自己的信任，也不能转发原 capability 或借 carrier 的用户身份代署作者。
+受管 Agent 跨语义 Runtime owner 发消息时，原 Core 认证自己的当前 Session/Run。目标 Core 核验发送者原签名，并按该方向的 `agent-message` 来源信任或本封原信的明确授权接纳。首次来源信任由真实用户核对双方 Runtime、公钥指纹与方向后批准。创建来源信任限于其原目的。作者身份沿原 Core 签名，carrier 和真实批准者各自有独立身份，原 capability 留在原 Core。
 
 签名绑定准确双方 Runtime/Session/Run、原 operation/message/thread/replyTo、正文、结构化应用载荷与输入意图。Core 不解释应用业务，也不从可见正文补造权限。不同 Runtime 的相同 Session ID 是不同参与者，远端参与者不伪装成本机 Session。首次远端副作用前，来源 journal 冻结原意图和路由；接收 Core 独占实际输入与消费回执。来源 outbox 保存成功只证明已准备，不证明对方已收到。
+
+单次授权由目标 Core 依据目标端真实用户的明确批准确认。批准前可核对实际收件对象与原信。批准绑定双方 Runtime、公钥指纹、Session／Run、原 operation、MID 与完整签名意图摘要，覆盖原正文、结构化载荷和收件输入 epoch。目标 Core 将这项授权的使用与同一原 Inbox 持久记录一并结算。原信在 Inbox 可读，自动和显式通知均不消费这项授权，包括语义恢复后的后继 Run。已确认接纳后，原包再次提交只取得原回执。目标、作者、内容或操作身份变更需要新的明确授权。现有来源信任、反向回报、线程读取和独立的 Agent 输入各按原资格。一次准确文件读取的授权仍由原 Files owner 持有，适用范围限原文件目标与读取操作。
 
 回报沿接收端已核验的原 request 反向引用，实际执行者的当前 Core 认证并保存签名 reply。远端没有回程网络时，原请求方可沿已有 Host 连接，以当前已认证参与者和原 source 签出的有限读取请求取回该 thread 的原签名消息；本机仍须独立验证后接收。carrier 不成为作者，不得因此列举另一方消息库或读取无关正文，不另起队列或调度器。取回、消息投递、Dispatch 事件与业务成果各自成立，签名 reply 或 worker_done 都不能代签 Goal 完成。
 

@@ -51,13 +51,25 @@ frozen recipient Runtime, key, Session, Run and original message content. The ca
 invocation capability stays at its owner. Cross-Runtime sends use the ordinary Inbox
 path; immediate input is a separate local capability.
 
-The receiving user must explicitly approve this source for the `agent-message`
-purpose. Creation-source trust grants no message authority. Read `settings hosts
-message-trusted-sources --host HOST`; only the person can approve the exact source
-and target fingerprints with `settings hosts trust-message-source`. A reply is a
-separate direction and requires its source to be approved at the original sender.
-Missing approval retains the original operation and healthy Agents; it does not
-permit changing authors or silently trusting a key.
+Normal intake requires the receiving user’s explicit approval of the `agent-message`
+source. Read `settings hosts message-trusted-sources --host HOST`. The person verifies
+the exact source and target fingerprints and can configure that direction with
+`settings hosts trust-message-source`. Creation-source trust covers its original purpose.
+A reply uses the reverse approval at the original sender. Missing approval retains the
+original operation, signed outbox and healthy Agents.
+
+For one exact message, keep its original operation ID and MID. At the signing Core use
+`message federation outbox --message-id MID --operation-id OP` to read the signed packet,
+public key and `packetDigest`. The result is readable by the original signing Agent or
+an authorized reader there. Transfer its `result` object to the receiving person. After
+checking both Runtime key fingerprints, the exact Sessions and Runs, and the original body,
+that person can use `message federation approve --input FILE --approve-digest SHA256`
+at the receiving Core. Supply the reviewed `packetDigest`. The target Core verifies the
+original source signature and writes only that message to Inbox. A repeated exact packet
+returns the same signed Inbox receipt. After a lost reply inspect the original MID at the
+target. A newly approved message records `notification.state=inbox-only` in the receipt.
+Read the original body in Inbox. Approval admits no notification, source trust, reverse
+authorization, thread export, or direct input.
 
 After reading the original received message, reply with `agent send --reply-source
 MID --text TEXT` or the equivalent complete JSON input. Core derives the exact
