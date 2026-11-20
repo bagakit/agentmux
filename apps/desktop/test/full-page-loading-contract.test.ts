@@ -13,7 +13,7 @@ describe('full-page loading surface contract', () => {
     for (const token of ['data-loading-phase', 'data-loading-scope', 'aria-live', 'full-page-loading__atmosphere', 'prefers-reduced-motion']) {
       expect(`${component}\n${styles}`).toContain(token)
     }
-    const animatedNames = [...styles.matchAll(/animation:\s*(full-page-loading-[\w-]+)/g)].map(match => match[1])
+    const animatedNames = [...styles.matchAll(/animation:\s*((?:full-page-loading|startup)-[\w-]+)/g)].map(match => match[1])
     expect(animatedNames.length).toBeGreaterThan(0)
     for (const name of animatedNames) expect(styles).toContain(`@keyframes ${name}`)
     const reducedMotion = styles.match(/@media \(prefers-reduced-motion: reduce\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? ''
@@ -23,6 +23,9 @@ describe('full-page loading surface contract', () => {
       .flatMap(match => [...match[1].matchAll(/\.full-page-loading__[\w-]+(?:\s+i)?/g)].map(target => target[0]))
     expect(animatedTargets.length).toBeGreaterThan(0)
     for (const target of animatedTargets) expect(reducedMotion).toContain(target)
+    for (const target of ['.startup-activity__heading', '.startup-activity__group', '.startup-activity__marker', '.startup-endpoint > summary', '.startup-endpoint__activity']) {
+      expect(reducedMotion).toContain(target)
+    }
   })
 
   it('uses the shared motion tokens instead of a second duration scale', () => {
