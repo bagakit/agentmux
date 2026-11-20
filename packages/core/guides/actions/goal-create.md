@@ -12,7 +12,10 @@ Project is optional: omit --project to keep the Goal unassigned. An explicit unk
 Pass a stable `--operation-id` and use the Goal ID and link returned by the original
 owner. After an uncertain save, use `goal inspect --creation-operation OP`.
 If the original owner confirms absence, explicitly retry the same creation operation.
-goal create/update --content-refs JSON records exact {hostId,workspaceId,zoneId} content provenance, independently of executing Session links. Updates append sources atomically. Use goal update --expected-updated-at MS from goal inspect when adding existing associations; a conflict requires reading the same Goal again. Unknown writes are inspected with the original Goal ID before any explicit retry.
+Use `--content-refs JSON` on create or update to record exact
+`{hostId,workspaceId,zoneId}` content sources. To append sources to an existing
+Goal, use `goal update --expected-updated-at MS` from the original read. Read that
+Goal again after a conflict or uncertain update.
 goal discuss --mode open opens the dedicated main Mote Tab without another Prompt; grill, grounding and plan
 admit real requests through the original queue. Tab/Session navigation does not mean Prompt acceptance.
 plan asks the Supervisor to save a dependency plan to this same Goal. Use goal plan append for new
