@@ -7,8 +7,13 @@ import {
 import { agentTimelineMutationFromAcpEvent } from '../src/session-timeline.js'
 import type {
   AgentMuxAcpEvent,
-  AgentMuxPermissionDecision
+  AgentMuxPermissionDecision,
+  AgentMuxPermissionRequest
 } from '../src/types.js'
+
+function respondPermission(bridge: AgentMuxAcpBridge, request: AgentMuxPermissionRequest, decision: AgentMuxPermissionDecision) {
+  return bridge.preparePermissionResponse(request, decision)()
+}
 
 class FakeBinding implements AgentMuxAcpBinding {
   readonly responses: Array<{ requestId: string; decision: AgentMuxPermissionDecision }> = []
@@ -102,7 +107,7 @@ describe('AgentMux ACP adapter boundary', () => {
     replacement.emit({ type: 'permission', requestId: 'replacement-request', title: 'Replacement',
       options: [{ id: 'allow', label: 'Allow', kind: 'allow-once' }] })
     await vi.waitFor(() => expect(requests, 'old cleanup must retain the healthy replacement binding').toHaveLength(1))
-    await bridge.respondPermission('semantic-acp', requests[0]!.id, { outcome: 'selected', optionId: 'allow' })
+    await respondPermission(bridge, requests[0]!, { outcome: 'selected', optionId: 'allow' })
     expect(replacement.responses).toEqual([{ requestId: 'replacement-request', decision: { outcome: 'selected', optionId: 'allow' } }])
     await bridge.dispose()
   })
@@ -121,7 +126,7 @@ describe('AgentMux ACP adapter boundary', () => {
       },
       onInteraction(request) {
         interactions.push(request)
-        bridge.respondPermission('semantic-acp', request.id, {
+        respondPermission(bridge, request, {
           outcome: 'selected', optionId: 'reject'
         })
       },
@@ -168,7 +173,7 @@ describe('AgentMux ACP adapter boundary', () => {
     let bridge!: AgentMuxAcpBridge
     bridge = new AgentMuxAcpBridge(callbacks({
       onInteraction(request) {
-        bridge.respondPermission('semantic-acp', request.id, {
+        respondPermission(bridge, request, {
           outcome: 'selected', optionId: 'allow'
         })
       }
@@ -223,7 +228,7 @@ describe('AgentMux ACP adapter boundary', () => {
     })
     const request = await interaction
     let acknowledged = false
-    const response = bridge.respondPermission('semantic-acp', request.id, {
+    const response = respondPermission(bridge, request, {
       outcome: 'selected', optionId: 'allow'
     }).then(() => { acknowledged = true })
 
@@ -267,7 +272,7 @@ describe('AgentMux ACP adapter boundary', () => {
     })
     const request = await interaction
 
-    await expect(bridge.respondPermission('semantic-acp', request.id, {
+    await expect(respondPermission(bridge, request, {
       outcome: 'selected', optionId: 'allow'
     })).rejects.toThrow('adapter delivery failed')
     await bridge.dispose()
@@ -291,12 +296,12 @@ describe('AgentMux ACP adapter boundary', () => {
     await bridge.bind('semantic-acp', binding)
     emit({ type: 'permission', requestId: 'slow', title: 'Write', options: [{ id: 'allow', label: 'Allow', kind: 'allow-once' }] })
     await vi.waitFor(() => expect(published).toHaveBeenCalledOnce())
-    const response = bridge.respondPermission('semantic-acp', published.mock.calls[0]![0].id, { outcome: 'selected', optionId: 'allow' })
+    const response = respondPermission(bridge, published.mock.calls[0]![0], { outcome: 'selected', optionId: 'allow' })
     const assertion = expect(response).rejects.toMatchObject({ code: 'CONTROL_CANCELLED' })
     await vi.advanceTimersByTimeAsync(120_000)
     expect(aborted).toBe(false)
     expect(errors).not.toHaveBeenCalled()
-    expect(bridge.hasPendingPermission('semantic-acp', published.mock.calls[0]![0].id)).toBe(true)
+    expect(bridge.hasPendingPermission(published.mock.calls[0]![0])).toBe(true)
     await bridge.dispose()
     await assertion
     expect(aborted).toBe(true)
@@ -308,15 +313,15 @@ describe('AgentMux ACP adapter boundary', () => {
     bridge = new AgentMuxAcpBridge(callbacks({
       onInteraction(request) {
         try {
-          bridge.respondPermission('semantic-acp', request.id, {
+          respondPermission(bridge, request, {
             outcome: 'selected', optionId: 'not-offered'
           })
         } catch (error) {
           invalidErrors.push(error)
         }
-        bridge.respondPermission('semantic-acp', request.id, { outcome: 'cancelled' })
+        respondPermission(bridge, request, { outcome: 'cancelled' })
         try {
-          bridge.respondPermission('semantic-acp', request.id, { outcome: 'cancelled' })
+          respondPermission(bridge, request, { outcome: 'cancelled' })
         } catch (error) {
           invalidErrors.push(error)
         }
@@ -349,10 +354,10 @@ describe('AgentMux ACP adapter boundary', () => {
     await vi.advanceTimersByTimeAsync(120_000)
     expect(binding.responses, 'unanswered permission must not manufacture a decision').toEqual([])
     expect(settled).not.toHaveBeenCalled()
-    expect(bridge.hasPendingPermission('semantic-acp', published.mock.calls[0]![0].id)).toBe(true)
+    expect(bridge.hasPendingPermission(published.mock.calls[0]![0])).toBe(true)
     binding.emit({ type: 'status', state: 'working' })
     await vi.waitFor(() => expect(events).toHaveBeenCalledTimes(2))
-    await bridge.respondPermission('semantic-acp', published.mock.calls[0]![0].id, { outcome: 'selected', optionId: 'deny' })
+    await respondPermission(bridge, published.mock.calls[0]![0], { outcome: 'selected', optionId: 'deny' })
     expect(binding.responses).toEqual([{ requestId: 'unanswered', decision: { outcome: 'selected', optionId: 'deny' } }])
     await bridge.dispose()
   })
@@ -387,9 +392,9 @@ describe('AgentMux ACP adapter boundary', () => {
   })
 
   it('retains two permission requests in order while status observations continue', async () => {
-    const interactions: string[] = [], statuses: string[] = [], errors = vi.fn()
+    const interactions: AgentMuxPermissionRequest[] = [], statuses: string[] = [], errors = vi.fn()
     const bridge = new AgentMuxAcpBridge(callbacks({ onError: errors,
-      onInteraction(request) { interactions.push(request.id) },
+      onInteraction(request) { interactions.push(request) },
       onEvent(_sid, event) { if (event.type === 'status') statuses.push(event.state) } }))
     const binding = new FakeBinding()
     await bridge.bind('semantic-acp', binding)
@@ -399,9 +404,9 @@ describe('AgentMux ACP adapter boundary', () => {
     await vi.waitFor(() => expect(statuses).toEqual(['working']))
     expect(interactions).toHaveLength(1)
     expect(binding.responses).toEqual([])
-    await bridge.respondPermission('semantic-acp', interactions[0]!, { outcome: 'selected', optionId: 'allow' })
+    await respondPermission(bridge, interactions[0]!, { outcome: 'selected', optionId: 'allow' })
     await vi.waitFor(() => expect(interactions).toHaveLength(2))
-    await bridge.respondPermission('semantic-acp', interactions[1]!, { outcome: 'selected', optionId: 'allow' })
+    await respondPermission(bridge, interactions[1]!, { outcome: 'selected', optionId: 'allow' })
     expect(binding.responses.map(value => value.requestId)).toEqual(['first', 'second'])
     expect(errors).not.toHaveBeenCalled()
     await bridge.dispose()
@@ -421,16 +426,16 @@ describe('AgentMux ACP adapter boundary', () => {
     const original = requests[0]!
     expect(binding.responses).toEqual([])
     expect(binding.closed).toBe(false)
-    expect(bridge.hasPendingPermission('semantic-acp', original.id)).toBe(true)
+    expect(bridge.hasPendingPermission(original)).toBe(true)
     binding.emit({ type: 'status', state: 'working' })
     await vi.waitFor(() => expect(events).toHaveBeenCalledTimes(2))
     const decision = { outcome: 'selected' as const, optionId: 'allow' }
-    const failed = await Promise.allSettled([Promise.resolve().then(() => bridge.respondPermission('semantic-acp', original.id, decision))])
+    const failed = await Promise.allSettled([Promise.resolve().then(() => respondPermission(bridge, original, decision))])
     expect(failed[0]!.status, 'an unpublished request must not dispatch an explicit choice').toBe('rejected')
     if (failed[0]!.status === 'rejected') expect(failed[0]!.reason).toMatchObject({ message: 'Original publication failed' })
     expect(binding.responses, 'failed publication must not dispatch or consume the explicit response').toEqual([])
-    expect(bridge.hasPendingPermission('semantic-acp', original.id)).toBe(true)
-    const result = await Promise.allSettled([Promise.resolve().then(() => bridge.respondPermission('semantic-acp', original.id, decision))])
+    expect(bridge.hasPendingPermission(original)).toBe(true)
+    const result = await Promise.allSettled([Promise.resolve().then(() => respondPermission(bridge, original, decision))])
     expect(result[0]!.status, 'the same original request must recover after its publication callback recovers').toBe('fulfilled')
     expect(requests).toHaveLength(3)
     expect(requests.every(request => request === original)).toBe(true)
@@ -442,13 +447,14 @@ describe('AgentMux ACP adapter boundary', () => {
 
   it('recovers an unsent synchronous response when its publication callback then fails', async () => {
     const errors = vi.fn()
-    let originalRequestId = '', firstOutcome = 'pending', firstAttempt = true
+    let originalRequest!: AgentMuxPermissionRequest
+    let firstOutcome = 'pending', firstAttempt = true
     const bridge = new AgentMuxAcpBridge(callbacks({ onError: errors,
       onInteraction(request) {
-        originalRequestId = request.id
+        originalRequest = request
         if (!firstAttempt) return
         firstAttempt = false
-        void bridge.respondPermission('semantic-acp', request.id, { outcome: 'selected', optionId: 'allow' })
+        void respondPermission(bridge, request, { outcome: 'selected', optionId: 'allow' })
           .then(() => { firstOutcome = 'fulfilled' }, () => { firstOutcome = 'rejected' })
         throw new Error('Publication failed after the unsent choice')
       } }))
@@ -459,8 +465,8 @@ describe('AgentMux ACP adapter boundary', () => {
     await vi.waitFor(() => expect(errors).toHaveBeenCalledOnce())
     expect(firstOutcome, 'an unsent response must report its failed publication without stranding the original request').toBe('rejected')
     expect(binding.responses).toEqual([])
-    expect(bridge.hasPendingPermission('semantic-acp', originalRequestId)).toBe(true)
-    const recovered = await Promise.allSettled([Promise.resolve().then(() => bridge.respondPermission('semantic-acp', originalRequestId, { outcome: 'selected', optionId: 'allow' }))])
+    expect(bridge.hasPendingPermission(originalRequest)).toBe(true)
+    const recovered = await Promise.allSettled([Promise.resolve().then(() => respondPermission(bridge, originalRequest, { outcome: 'selected', optionId: 'allow' }))])
     expect(recovered[0]!.status, 'the same request must accept a new explicit response after an unsent attempt fails').toBe('fulfilled')
     expect(binding.responses).toEqual([{ requestId: 'synchronous-unsent', decision: { outcome: 'selected', optionId: 'allow' } }])
     await bridge.dispose()

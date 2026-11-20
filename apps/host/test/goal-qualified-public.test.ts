@@ -235,7 +235,7 @@ it('concurrent responses share one original ACP permission dispatch', async () =
   const expectedRequest = (await request())!
   const input = { agentSessionId, expectedRun, expectedRequest, operationId: 'original-acp-decision',
     response: { kind: 'permission' as const, requestId: expectedRequest.id, decision: { outcome: 'selected' as const, optionId: 'deny' } } }
-  const bridge = vi.spyOn(acp, 'respondPermission')
+  const bridge = vi.spyOn(acp, 'preparePermissionResponse')
   const coreDispatch = f.d.core as unknown as { dispatchAgentInteraction(...args: unknown[]): Promise<void> }
   const originalDispatch = coreDispatch.dispatchAgentInteraction.bind(coreDispatch)
   let release!: () => void
@@ -259,6 +259,62 @@ it('concurrent responses share one original ACP permission dispatch', async () =
     { status: 'fulfilled', value: expect.objectContaining({ delivery: 'unknown' }) }
   ]))
   expect((await f.rpc.call('agent.interaction.inspect', { agentSessionId, operationId: input.operationId })).receipt).toMatchObject({ delivery: 'acp-acknowledged' })
+  expect(f.raw).not.toHaveBeenCalled()
+  expect(f.stop).not.toHaveBeenCalled()
+})
+
+it('keeps an admitted ACP answer off a replacement binding with the same request ID', async () => {
+  const f = await fixture(true), agentSessionId = f.session.agentSessionId, expectedRun = f.session.run
+  const acp = Reflect.get(f.d.core, 'acp') as AgentMuxAcpBridge
+  let emit!: Parameters<AgentMuxAcpBinding['onEvent']>[0]
+  const original = vi.fn(async () => {}), replacement = vi.fn(async () => {})
+  const native: AgentMuxAcpBinding = { adapterId: 'original-acp-adapter', sessionId: 'original-D-native',
+    onEvent(listener) { emit = listener; return () => {} }, respondPermission: original, close: async () => {} }
+  const requestId = 'reused-acp-request'
+  const event = { type: 'permission' as const, requestId, title: 'Original permission',
+    options: [{ id: 'deny', kind: 'reject-once' as const, label: 'Deny' }] }
+  const readRequest = async () => (await f.rpc.call('agent.inspect', { target: { kind: 'agent-session', agentSessionId } })).session.pendingInteraction?.request
+  await acp.bind(agentSessionId, native, expectedRun, { providerId: 'codex', actorId: 'original-D-actor' })
+  emit(event)
+  await expect.poll(async () => (await readRequest())?.evidence.acpBindingId).toBe('original-D-actor')
+  const expectedRequest = (await readRequest())!
+  const input = { agentSessionId, expectedRun, operationId: 'original-acp-decision', expectedRequest,
+    response: { kind: 'permission' as const, requestId, decision: { outcome: 'selected' as const, optionId: 'deny' } } }
+  const persistence = f.d.core as unknown as { updateExactAgentSession(...args: unknown[]): Promise<{
+    interactionOperations?: Record<string, { delivery: string }>
+  }> }
+  const update = persistence.updateExactAgentSession.bind(persistence)
+  let switched = false
+  const afterClaim = vi.spyOn(persistence, 'updateExactAgentSession').mockImplementation(async (...args) => {
+    const saved = await update(...args)
+    if (!switched && saved.interactionOperations?.[input.operationId]?.delivery === 'unknown') {
+      switched = true
+      await acp.unbind(agentSessionId)
+      await acp.bind(agentSessionId, { ...native, sessionId: 'replacement-D-native', respondPermission: replacement }, expectedRun,
+        { providerId: 'codex', actorId: 'replacement-D-actor' })
+      emit(event)
+      await expect.poll(async () => (await readRequest())?.evidence.acpBindingId).toBe('replacement-D-actor')
+    }
+    return saved
+  })
+  const failure = await f.rpc.call('agent.interaction.respond', input).then(() => null, error => error.code)
+  expect(switched).toBe(true)
+  expect(replacement).not.toHaveBeenCalled()
+  expect(failure).toBe('AGENT_INTERACTION_UNCONFIRMED')
+  expect(original).not.toHaveBeenCalled()
+  afterClaim.mockRestore()
+  const readOriginal = async () => (await f.rpc.call('agent.interaction.inspect', { agentSessionId, operationId: input.operationId })).receipt
+  const held = await readOriginal()
+  expect(held).toMatchObject({ delivery: 'unknown', expectedRequest })
+  expect(await f.rpc.call('agent.interaction.respond', input)).toEqual(held)
+  const successor = (await readRequest())!
+  expect(successor).toMatchObject({ id: requestId, evidence: { run: expectedRun, acpBindingId: 'replacement-D-actor', acpSessionId: 'replacement-D-native' } })
+  expect(successor).not.toHaveProperty('responseUnavailableReason')
+  await expect(f.rpc.call('agent.interaction.respond', { ...input, expectedRequest: successor })).rejects.toMatchObject({ code: 'AGENT_INTERACTION_RESPONSE_CONFLICT' })
+  expect(await f.rpc.call('agent.interaction.respond', { ...input, operationId: 'replacement-acp-decision', expectedRequest: successor }))
+    .toMatchObject({ delivery: 'acp-acknowledged', expectedRequest: successor })
+  expect(replacement).toHaveBeenCalledExactlyOnceWith(requestId, input.response.decision, expect.any(AbortSignal))
+  expect(await readOriginal()).toEqual(held)
   expect(f.raw).not.toHaveBeenCalled()
   expect(f.stop).not.toHaveBeenCalled()
 })
