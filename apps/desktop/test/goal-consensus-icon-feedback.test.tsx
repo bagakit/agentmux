@@ -2,7 +2,7 @@
 import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { act, useState } from 'react'
 import { beforeEach, afterEach, expect, it, vi } from 'vitest'
-import { GoalAlignment, EMPTY_GOAL_ACKNOWLEDGEMENT } from '../src/renderer/src/components/GoalAlignment'
+import { GoalAcknowledgementRecovery, GoalAlignment, EMPTY_GOAL_ACKNOWLEDGEMENT, type GoalAcknowledgementFeedback } from '../src/renderer/src/components/GoalAlignment'
 import { projectDemands } from '../src/renderer/src/lib/global-demand-board'
 import { WorkbenchPresentationContext } from '../src/renderer/src/lib/workbench-presentation'
 import { useAppStore } from '../src/renderer/src/store'
@@ -16,8 +16,11 @@ function Panel({ id = goalId, active = true }: { id?: string; active?: boolean }
   const records = useAppStore(state => state.demands)
   const [feedback, setFeedback] = useState(EMPTY_GOAL_ACKNOWLEDGEMENT)
   const demand = projectDemands(composerConfig, [], records).find(row => row.id === id)!
-  return <WorkbenchPresentationContext.Provider value={{ active, retainedRegionId: null }}><GoalAlignment demand={demand} feedback={feedback}
-    onFeedbackChange={patch => setFeedback(value => ({ ...value, ...patch }))} onGrill={() => {}} onGrounding={() => {}} /></WorkbenchPresentationContext.Provider>
+  const onFeedbackChange = (patch: Partial<GoalAcknowledgementFeedback>) => setFeedback(value => ({ ...value, ...patch }))
+  return <WorkbenchPresentationContext.Provider value={{ active, retainedRegionId: null }}>
+    <GoalAcknowledgementRecovery goalId={id} feedback={feedback} onFeedbackChange={onFeedbackChange} />
+    <GoalAlignment demand={demand} feedback={feedback} onFeedbackChange={onFeedbackChange} onGrill={() => {}} onGrounding={() => {}} />
+  </WorkbenchPresentationContext.Provider>
 }
 const icon = () => dom.container.querySelector('[data-semantic-icon="object.goal"]')
 const cue = () => dom.container.querySelector('[data-icon-animation="feedback"]')
