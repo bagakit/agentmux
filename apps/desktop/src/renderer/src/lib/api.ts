@@ -1584,6 +1584,7 @@ const mockApi: AgentMuxDesktopApi = {
       return structuredClone(profile)
     },
     trafficTargets: async () => [],
+    onTrafficChanged: () => () => {},
     inspectTraffic: async () => null,
     startTraffic: async () => { throw new Error('Traffic recording requires the desktop host.') },
     stopTraffic: async () => { throw new Error('Traffic recording requires the desktop host.') },

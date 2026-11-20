@@ -27,6 +27,7 @@ export class BrowserTraffic {
   constructor(private readonly ports: {
     targets(): BrowserTrafficTarget[]
     attach(browserId: string, signal: AbortSignal): Promise<Recorder>
+    changed(): void
   }) {}
 
   targets(): BrowserTrafficTarget[] { return this.ports.targets() }
@@ -45,6 +46,7 @@ export class BrowserTraffic {
     const controller = new AbortController()
     const capture: Capture = { id: mintObjectId(), startedAt: Date.now(), endedAt: null, controller, sources, ready: false }
     this.capture = capture
+    this.ports.changed()
     void Promise.all(sources.map(async source => {
       try {
         const original = await this.ports.attach(source.target.id, controller.signal)
@@ -55,7 +57,10 @@ export class BrowserTraffic {
       }
     })).then(() => {
       capture.ready = true
-      if (capture.endedAt === null && !capture.closing && sources.every(source => !source.native)) capture.endedAt = Date.now()
+      if (capture.endedAt === null && !capture.closing && sources.every(source => !source.native)) {
+        capture.endedAt = Date.now()
+        this.ports.changed()
+      }
     })
     return this.project(capture)
   }
@@ -71,6 +76,7 @@ export class BrowserTraffic {
         if (source.native) source.stopped = (await source.native.finish()).log
       }))
       capture.endedAt = Date.now()
+      this.ports.changed()
     })()
     await capture.closing
     return this.project(capture)
@@ -112,7 +118,7 @@ export class BrowserTraffic {
       pending += log._capture.pending
       const entries = log.entries.slice(-preview)
       return entries.map((entry, index) => ({
-        key: JSON.stringify([source.target.id, log._capture.retained - entries.length + index]),
+        key: JSON.stringify([capture.id, source.target.id, log._capture.retained - entries.length + index]),
         browserId: source.target.id, startedAt: entry.startedDateTime, method: entry.request.method,
         url: entry.request.url, status: entry.response.status, duration: entry.time, state: entry._state,
         mimeType: entry.response.content.mimeType, redirectURL: entry.response.redirectURL

@@ -31,6 +31,7 @@ import {
   BROWSER_EVENT_CHANNEL,
   BROWSER_PAGE_KEY_CHANNEL,
   BROWSER_PRESENTATION_EVENT_CHANNEL,
+  BROWSER_TRAFFIC_CHANGED_CHANNEL,
   CONFIG_CHANGED_CHANNEL,
   CONNECTION_METADATA_CHANGED_CHANNEL, CONNECTION_METADATA_OBSERVATION_CHANNEL,
   CONTROL_CANCEL_CHANNEL,
@@ -942,6 +943,11 @@ const api: AgentMuxPreloadApi = {
     removeInputHistory: (target: BrowserInputHistoryTarget, scope: BrowserInputHistoryScope, text: string) => ipcRenderer.invoke('browser:removeInputHistory', target, scope, text),
     clearInputHistory: (target: BrowserInputHistoryTarget, scope: BrowserInputHistoryScope) => ipcRenderer.invoke('browser:clearInputHistory', target, scope),
     trafficTargets: () => ipcRenderer.invoke('browser:trafficTargets'),
+    onTrafficChanged: listener => {
+      const notify = () => listener()
+      ipcRenderer.on(BROWSER_TRAFFIC_CHANGED_CHANNEL, notify)
+      return () => ipcRenderer.off(BROWSER_TRAFFIC_CHANGED_CHANNEL, notify)
+    },
     inspectTraffic: () => ipcRenderer.invoke('browser:inspectTraffic'),
     startTraffic: browserIds => ipcRenderer.invoke('browser:startTraffic', browserIds),
     stopTraffic: id => ipcRenderer.invoke('browser:stopTraffic', id),

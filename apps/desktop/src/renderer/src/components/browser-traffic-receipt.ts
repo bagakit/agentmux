@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
+import type { BrowserTrafficReceipt } from '../../../shared/browser-traffic'
+import { api } from '../lib/api'
 
-export function useTrafficReceipt<T extends { endedAt: number | null }>(visible: boolean, inspect: () => Promise<T | null>) {
-  const [receipt, setReceipt] = useState<T | null>(null)
+export function useTrafficReceipt(visible: boolean) {
+  const [receipt, setReceipt] = useState<BrowserTrafficReceipt | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const version = useRef(0)
@@ -9,24 +11,28 @@ export function useTrafficReceipt<T extends { endedAt: number | null }>(visible:
 
   useEffect(() => {
     if (!visible || busy) return
-    let live = true, pending = false
+    let live = true, pending = false, latestRead = 0
     const refresh = async () => {
-      if (pending) return
       pending = true
+      const read = ++latestRead
       const expected = version.current
+      const isCurrent = () => live && latestRead === read && version.current === expected
       try {
-        const value = await inspect()
-        if (live && version.current === expected) setReceipt(value)
+        const value = await api.browser.inspectTraffic()
+        if (isCurrent()) setReceipt(value)
       } catch (failure) {
-        if (live && version.current === expected) setError(String(failure))
-      } finally { pending = false }
+        if (isCurrent()) setError(String(failure))
+      } finally {
+        if (latestRead === read) pending = false
+      }
     }
+    const unsubscribe = api.browser.onTrafficChanged(() => void refresh())
     void refresh()
-    const timer = recording ? setInterval(() => void refresh(), 750) : undefined
-    return () => { live = false; clearInterval(timer) }
-  }, [busy, inspect, recording, visible])
+    const timer = recording ? setInterval(() => { if (!pending) void refresh() }, 750) : undefined
+    return () => { live = false; unsubscribe(); clearInterval(timer) }
+  }, [busy, recording, visible])
 
-  async function act(action: () => Promise<T | null>) {
+  async function act(action: () => Promise<BrowserTrafficReceipt | null>) {
     version.current++
     setBusy(true)
     setError('')

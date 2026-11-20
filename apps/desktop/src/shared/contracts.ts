@@ -1695,6 +1695,7 @@ export const CONNECTION_METADATA_CHANGED_CHANNEL = 'connections:metadataChanged'
 export const CONNECTION_METADATA_OBSERVATION_CHANNEL = 'connections:metadataObservation'
 /** Main -> renderer: one embedded-browser lifecycle/navigation event. */
 export const BROWSER_EVENT_CHANNEL = 'agentmux:browser-event'
+export const BROWSER_TRAFFIC_CHANGED_CHANNEL = 'browser:trafficChanged'
 export const NATIVE_BROWSER_VISIBILITY_CHANNEL = 'ui:nativeBrowserVisibility'
 export const NATIVE_BROWSER_INPUT_CHANNEL = 'ui:nativeBrowserInput'
 export const NATIVE_OVERLAY_WARNING_CHANNEL = 'ui:nativeOverlayWarning'
@@ -2334,6 +2335,7 @@ export type AgentMuxDesktopApi = {
     removeInputHistory(target: BrowserInputHistoryTarget, scope: BrowserInputHistoryScope, text: string): Promise<BrowserInputHistorySnapshot>
     clearInputHistory(target: BrowserInputHistoryTarget, scope: BrowserInputHistoryScope): Promise<BrowserInputHistorySnapshot>
     trafficTargets(): Promise<import('./browser-traffic').BrowserTrafficTarget[]>
+    onTrafficChanged(listener: () => void): () => void
     inspectTraffic(): Promise<import('./browser-traffic').BrowserTrafficReceipt | null>
     startTraffic(browserIds: string[]): Promise<import('./browser-traffic').BrowserTrafficReceipt>
     stopTraffic(captureId: string): Promise<import('./browser-traffic').BrowserTrafficReceipt>

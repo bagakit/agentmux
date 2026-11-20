@@ -135,7 +135,7 @@ import { sessionInputWriteResult, sessionInputOperationResult } from '../shared/
 import { sessionObservationResult } from '../shared/session-observation-result.js'
 import { sessionStopReply } from '../shared/session-stop-result.js'
 import { sessionAgentLaunchResult } from '../shared/session-agent-launch-result.js'
-import { NATIVE_BROWSER_VISIBILITY_CHANNEL, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts.js'
+import { BROWSER_TRAFFIC_CHANGED_CHANNEL, NATIVE_BROWSER_VISIBILITY_CHANNEL, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts.js'
 import type { ContinuousProgressTarget } from '@agentmux/core'
 import { inspectDesktopClient, observeWorkbenchUserState, registerLoadedIdentityIpc } from './client-observation.js'
 import { inspectNotifications, clientNotificationsPort } from './notification-observation.js'
@@ -2711,7 +2711,8 @@ export async function registerIpc(args: {
     await ensureBrowser(id)
     return await browsers.locateTaskAssetStep(id, assetId, revision, stepId)
   })
-  registerBrowserTrafficIpc({ handle: handleWithEvent, browsers })
+  registerBrowserTrafficIpc({ handle: handleWithEvent, browsers,
+    changed: () => { if (!contents.isDestroyed()) contents.send(BROWSER_TRAFFIC_CHANGED_CHANNEL) } })
   registerBrowserTaskParallelIpc({ handle: handleWithEvent, browsers, authorize: (id, profileId) => browserAutomation(id, undefined, profileId) })
   handleWithEvent('browser:runTaskBatch', async (event, input: BrowserTaskBatchInput) => {
     await browserAutomation(input.browserId, undefined)

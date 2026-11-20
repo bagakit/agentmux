@@ -9,8 +9,8 @@ export function BrowserRequestCapture({ browserId, visible }: { browserId: strin
   const [selected, setSelected] = useState<string[]>([browserId])
   const [query, setQuery] = useState('')
   const [selectedRow, selectRow] = useState<string | null>(null)
-  const [saved, setSaved] = useState<string | null>(null)
-  const { receipt, error, busy, recording, act } = useTrafficReceipt(visible, api.browser.inspectTraffic)
+  const [saved, setSaved] = useState<{ captureId: string; path: string } | null>(null)
+  const { receipt, error, busy, recording, act } = useTrafficReceipt(visible)
 
   useEffect(() => {
     if (!visible || recording) return
@@ -23,6 +23,7 @@ export function BrowserRequestCapture({ browserId, visible }: { browserId: strin
   const rows = receipt?.rows.filter(row => `${row.method} ${row.status} ${row.url}`.toLowerCase().includes(query.toLowerCase())) ?? []
   const detail = rows.find(row => row.key === selectedRow)
   const canExport = receipt?.status === 'finished' && receipt.retained > 0
+  const savedPath = saved?.captureId === receipt?.captureId ? saved?.path : undefined
   return <div className="browser-traffic__body">
     {!recording ? <details className="browser-traffic__targets">
       <summary>Pages <small>{available.length} selected</small></summary>
@@ -35,7 +36,7 @@ export function BrowserRequestCapture({ browserId, visible }: { browserId: strin
     <div className="browser-traffic__actions">
       {canExport ? <Button type="button" variant="primary" disabled={busy} onClick={() => void act(async () => {
         const file = await api.browser.exportTraffic(receipt.captureId)
-        if (file) setSaved(file.path)
+        if (file) setSaved({ captureId: receipt.captureId, path: file.path })
         return null
       })}>Export HAR…</Button> : null}
       {recording && receipt ? <Button type="button" disabled={busy} onClick={() => void act(() => api.browser.stopTraffic(receipt.captureId))}>Stop</Button> :
@@ -50,7 +51,7 @@ export function BrowserRequestCapture({ browserId, visible }: { browserId: strin
       <span>{receipt.retained} requests{receipt.pending ? ` · ${receipt.pending} pending` : ''}
         {receipt.dropped ? ` · ${receipt.dropped} dropped` : ''}{receipt.unmatched ? ` · ${receipt.unmatched} unmatched events` : ''}</span>
       {receipt.sources.filter(source => source.detail).map(source => <span key={source.id}>{source.title || source.url}: {source.detail}</span>)}
-      {saved ? <span className="browser-traffic__destination" title={saved}>Saved {saved.split(/[\\/]/u).at(-1) || saved}</span> : null}
+      {savedPath ? <span className="browser-traffic__destination" title={savedPath}>Saved {savedPath.split(/[\\/]/u).at(-1) || savedPath}</span> : null}
     </div> : <p className="browser-traffic__hint">Record selected pages across navigations. HAR contains request metadata.</p>}
     {receipt?.rows.length ? <>
       <label>Filter requests<input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Path or status" /></label>

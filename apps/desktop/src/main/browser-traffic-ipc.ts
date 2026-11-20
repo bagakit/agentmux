@@ -6,9 +6,10 @@ import type { BrowserViewManager } from './browser-view-manager.js'
 export function registerBrowserTrafficIpc(ports: {
   handle<Args extends unknown[], Result>(channel: string, listener: (event: IpcMainInvokeEvent, ...args: Args) => Result | Promise<Result>): void
   browsers: Pick<BrowserViewManager, 'trafficTargets' | 'openTrafficCapture'>
+  changed(): void
 }): void {
   const owner = new BrowserTraffic({ targets: () => ports.browsers.trafficTargets(),
-    attach: (id, signal) => ports.browsers.openTrafficCapture(id, signal) })
+    attach: (id, signal) => ports.browsers.openTrafficCapture(id, signal), changed: ports.changed })
   ports.handle('browser:trafficTargets', () => owner.targets())
   ports.handle('browser:inspectTraffic', () => owner.inspect())
   ports.handle('browser:startTraffic', (_event, ids: unknown) => owner.start(ids))
