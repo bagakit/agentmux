@@ -72,6 +72,7 @@ test.each([false, true])('ordinary Source Start crosses the real Main, signed pu
           createdRun: { runId: 'controlled-target-run' }, initialPrompt: 'unconfirmed' } } as AgentMuxAgentSession
       return { session, creation: session.creation!, execution: {} }
     }),
+    inspectSourceAdmission: async (bindingId: string) => bindings.inspect(bindingId, 'association'),
     inspect: vi.fn(async (bindingId: string, view?: 'association') => frozen && bindingId === frozen.bindingId ? { bindingId: frozen.bindingId, agentHostId: frozen.agentHostId, resourceHostId: frozen.resourceHostId,
       agentSessionId: frozen.agent.agentSessionId, resourceWorkspacePath: frozen.resourceWorkspacePath,
       continuation: reference(), state: session?.creation?.createOperationId === frozen.agent.createOperationId ? 'connected' as const : 'unavailable' as const,

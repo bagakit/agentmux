@@ -11,6 +11,7 @@ import { topicContentSpaceId, topicContentZoneId } from '../../../apps/host/src/
 import { mintObjectId } from '../src/object-id.js'
 import type { AgentMuxHostAgentCreateInput } from '../src/client-contract.js'
 import { createHostSpatialAgentControl } from '../../../apps/host/src/spatial-agent-control.js'
+import { AgentExecutionBindingService, type AgentExecutionOpenInput } from '../src/agent-execution-coordinator.js'
 
 const cleanup: Array<() => unknown | Promise<unknown>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
@@ -107,6 +108,43 @@ it('an explicit execution target on this Runtime freezes an empty context and co
   expect(result.outcome, JSON.stringify(result)).toBe('opened'); expect(result.agent!.agentSessionId).toBe(record.agentSessionId)
   expect(creator.mock.calls[1]![0]).toEqual(creator.mock.calls[0]![0]); expect(f.started).toHaveLength(1)
   await f.rpc.call('agent.open', input); expect(f.started).toHaveLength(1)
+})
+
+it('rechecks the complete frozen split Takeover input from its retained placement before continuation', async () => {
+  const f = await fixture(), base = inputFor(f, 'split-takeover-admission'), target = { hostId: 'agent-host', runtimeId: 'agent-runtime' }
+  const input = { ...base, content: { ...base.content, agentTarget: target } }
+  const resolveHost = vi.fn(async () => { throw new AgentMuxError('Isolated helper route unavailable.', 'CONTROL_CONNECTION_FAILED') })
+  const bindings = new AgentExecutionBindingService(join(f.root, 'execution-bindings'), { resolveHost },
+    { spatial: f.spatial, runtimeId: () => f.owner.runtimeId })
+  cleanup.push(() => bindings.dispose())
+  const admit = bindings.admit.bind(bindings), received: AgentExecutionOpenInput[] = []
+  vi.spyOn(bindings, 'admit').mockImplementation(async (...args) => {
+    received.push(args[0])
+    if (received.length === 1) {
+      // Retain a foreign-shaped intent with the same address and original
+      // spatial digest, but without the actual frozen Agent input or provenance.
+      await admit({ ...args[0], agent: { ...args[0].agent, prompt: 'Different stored input' } }, args[1])
+      throw new AgentMuxError('Original admission reply interrupted.', 'CONTROL_CONNECTION_FAILED')
+    }
+    return await admit(...args)
+  })
+  const client = {
+    resolveAgentCreationSessionId: async () => 'split-original-agent',
+    listHostExecutors: async () => ({ runtimeId: target.runtimeId, executors: [{ executorId: 'codex', providerId: 'codex', configRevision: 'split-original-revision', creationContract: { ordinaryLaunch: 1 } }] }),
+    inspectAgentCreation: async () => { throw new AgentMuxError('No matching target Agent yet.', 'AGENT_CREATION_UNKNOWN') },
+    hostEnvironment: async () => ({ agentWorkspace: { workspacePath: f.directory } }),
+    readAgentInputEpoch: async () => undefined
+  }
+  Object.assign(f.runtime, { executionBindings: bindings, executionHost: async () => ({ runtimeId: target.runtimeId, client }) })
+  await expect(f.rpc.call('agent.open', input)).rejects.toMatchObject({ code: 'CONTROL_CONNECTION_FAILED' })
+  const record = await originalRecord(f, input.operationId)
+  expect(record.executionBinding).toBeDefined()
+  await expect(f.rpc.call('agent.open', input)).rejects.toMatchObject({ code: 'EXECUTION_BINDING_CONFLICT' })
+  expect(received).toHaveLength(2)
+  expect(received[1]).toEqual(received[0])
+  expect(await originalRecord(f, input.operationId)).toEqual(record)
+  expect(resolveHost).not.toHaveBeenCalled()
+  expect(f.started).toHaveLength(0)
 })
 
 it.each([false, true])('a retained C without complete frozen context preserves its existing Agent state (%s) without reconstructing input', async completed => {

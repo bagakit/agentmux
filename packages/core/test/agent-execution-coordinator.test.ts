@@ -38,6 +38,7 @@ function host(role: 'frontend' | 'executor') {
     listHostExecutors: vi.fn(async () => ({ executors: [{ executorId: 'configured-executor', providerId: 'fixture-provider', configRevision: 'original-revision' }] })),
     readAgentSession: vi.fn(async (): Promise<AgentMuxAgentSession | null> => null),
     createHostAgentWithDelivery: vi.fn(async () => ({ session: { agentSessionId: 'original-agent', run: { runId: 'original-agent-run' } } })),
+    cancelAgentCreation: vi.fn(async () => ({ outcome: 'created' })),
     onRunEvent: vi.fn((_runId: string, listener: (event: AgentMuxClientEvent) => void) => { listeners.add(listener); return () => { listeners.delete(listener) } }),
     attachTerminal: vi.fn(async (_runId: string, after: number) => ({ run: run(), gap: null, replay: slice(after) })),
     readRunReplay: vi.fn(async (_target: unknown, after: number) => ({ run: run(), gap: null, replay: slice(after) })),
@@ -339,17 +340,19 @@ describe('execution coordinator retained original pair', () => {
     expect(f.executor.api.createPreparedTerminal).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps small-frame durable write cost independent of the original large creation prompt', async () => {
+  it('keeps small-frame durable reads and writes independent of the original large creation prompt', async () => {
     const costs: { promptBytes: number; writeBytes: number; writes: number; syncs: number }[] = []
     for (const promptBytes of [32, 2 * 1024 * 1024]) {
       const f = await fixture(); f.input.agent.prompt = 'p'.repeat(promptBytes)
       io.target(join(f.root, 'bindings.sqlite'))
       const first = await f.open(); await first.coordinator.create(f.input)
+      const readIntent = vi.spyOn(first.coordinator as unknown as { read(id: string): unknown }, 'read')
       io.reset()
       const through = f.frontend.addOutput({ type: 'request', generation: 'original-generation', payload: { id: 1, method: 'fixture/write' } })
       await vi.waitFor(() => expect(f.read().bridge.frontend.outputByte).toBe(through))
       const observed = io.stats()
       expect(observed.failures).toBe(0); expect(observed.writes).toBeGreaterThan(0); expect(observed.syncs).toBeGreaterThan(0)
+      expect(readIntent).not.toHaveBeenCalled()
       costs.push({ promptBytes, writeBytes: observed.writeBytes, writes: observed.writes, syncs: observed.syncs })
       expect(f.read().input.agent.prompt.length).toBe(promptBytes)
       await first.close()
@@ -421,6 +424,37 @@ describe('optional execution service lifetime', () => {
     expect(f.frontend.api.createPreparedTerminal).toHaveBeenCalledTimes(1)
     expect(f.executor.api.createPreparedTerminal).toHaveBeenCalledTimes(1)
     await restored.dispose()
+  })
+
+  it('restores the original reader of a legacy journal without preparing the Source diagnostic index', async () => {
+    const f = await fixture(), path = join(f.root, 'bindings')
+    const original = new AgentExecutionBindingService(path, { resolveHost: f.resolveHost })
+    await original.create(f.input)
+    await original.dispose()
+    const legacy = new DatabaseSync(join(path, 'bindings.sqlite'))
+    try { legacy.exec('DROP INDEX IF EXISTS binding_intents_source_creation; VACUUM') } finally { legacy.close() }
+
+    const restored = new AgentExecutionBindingService(path, { resolveHost: f.resolveHost })
+    cleanups.push(() => restored.dispose())
+    const exec = DatabaseSync.prototype.exec
+    const index = vi.spyOn(DatabaseSync.prototype, 'exec').mockImplementation(function (this: DatabaseSync, sql) {
+      if (sql.includes('CREATE INDEX IF NOT EXISTS binding_intents_source_creation')) {
+        const pageLimit = this.prepare('PRAGMA max_page_count').get()!.max_page_count
+        const pages = this.prepare('PRAGMA page_count').get()!.page_count
+        exec.call(this, `PRAGMA max_page_count=${pages}`)
+        try { return exec.call(this, sql) } finally { exec.call(this, `PRAGMA max_page_count=${pageLimit}`) }
+      }
+      return exec.call(this, sql)
+    })
+    try {
+      await restored.restoreReaders()
+      expect(index.mock.calls.some(([sql]) => sql.includes('binding_intents_source_creation'))).toBe(false)
+      expect(await restored.inspect(f.input.bindingId)).toMatchObject({ state: 'connected', agentSessionId: f.input.agent.agentSessionId })
+      f.frontend.addOutput({ type: 'request', generation: 'original', payload: { id: 1, method: 'tools/call' } })
+      await vi.waitFor(() => expect(f.executor.api.writeTerminal).toHaveBeenCalledOnce())
+      expect(f.frontend.api.createPreparedTerminal).toHaveBeenCalledOnce()
+      expect(f.executor.api.createPreparedTerminal).toHaveBeenCalledOnce()
+    } finally { index.mockRestore() }
   })
 })
 
@@ -558,6 +592,24 @@ describe('exact helper connection and local diagnostic truth', () => {
     await expect(owner.coordinator.continueOriginal(original.continuation!)).rejects.toMatchObject({ code: 'CONTROL_TIMEOUT' })
     expect(owner.coordinator.inspect(f.input.bindingId)).toEqual(original)
     expect(f.frontend.api.attachTerminal).toHaveBeenCalledOnce()
+  })
+
+  it('continues the original creation with a retained pair while fresh helper preparation is unavailable', async () => {
+    const f = await fixture(), owner = await f.open()
+    f.frontend.api.createHostAgentWithDelivery.mockRejectedValueOnce(new AgentMuxError('Original creation reply timed out', 'CONTROL_TIMEOUT'))
+    await expect(owner.coordinator.create(f.input)).rejects.toMatchObject({ code: 'CONTROL_TIMEOUT' })
+    const original = owner.coordinator.inspect(f.input.bindingId)!.continuation!
+    emit(f.executor, { type: 'attachment-state', state: 'unavailable', afterByte: 0,
+      diagnostic: { code: 'EXECUTION_READER_UNAVAILABLE', message: 'Original reader temporarily unavailable' } })
+    f.executor.api.prepareAgentExecutionHelper.mockRejectedValueOnce(new AgentMuxError('Fresh preparation unavailable', 'CONTROL_TIMEOUT'))
+    expect((await owner.coordinator.continueOriginal(original)).execution).toMatchObject({ state: 'connected', continuation: original })
+    expect(f.frontend.api.listHostExecutors).toHaveBeenCalledOnce()
+    expect(f.frontend.api.createHostAgentWithDelivery).toHaveBeenCalledTimes(2)
+    for (const helper of [f.frontend, f.executor]) {
+      expect(helper.api.prepareAgentExecutionHelper).toHaveBeenCalledOnce()
+      expect(helper.api.createPreparedTerminal).toHaveBeenCalledOnce()
+      expect(helper.api.attachTerminal).toHaveBeenCalledTimes(2)
+    }
   })
 
   it.each(['exited', 'interrupted', 'removed'] as const)('observes original helper %s without new output and never revives it from reader restoration', async state => {
@@ -790,6 +842,28 @@ it('Core binding readers coalesce only related facts and cancellation preserves 
   expect(f.read().input).toEqual(f.input)
   expect(f.frontend.api.createHostAgentWithDelivery).toHaveBeenCalledOnce()
   expect(f.frontend.api.createPreparedTerminal).toHaveBeenCalledOnce(); expect(f.executor.api.createPreparedTerminal).toHaveBeenCalledOnce()
+})
+
+it('retains the live tool cursor when original cancellation authorization takes time', async () => {
+  const f = await fixture(), entered = gate(), ready = gate()
+  const authorize = vi.fn(async () => undefined)
+  const service = new AgentExecutionBindingService(f.root, { resolveHost: f.resolveHost, authorize })
+  cleanups.push(() => service.dispose())
+  const created = await service.create(f.input), original = created.execution.continuation!
+  const input = { agentSessionId: original.agentSessionId, createOperationId: original.createOperationId, operationId: 'cancel-original' }
+  authorize.mockImplementationOnce(async () => { entered.release(); await ready.promise; return undefined })
+  const cancellation = service.cancelOriginal(original, input)
+  try {
+    await entered.promise
+    const through = f.frontend.addOutput({ type: 'request', generation: 'original', payload: { id: 1, method: 'tools/call' } })
+    await vi.waitFor(() => expect(f.read().bridge.frontend.outputByte).toBe(through))
+    ready.release()
+    await expect(cancellation).resolves.toMatchObject({ outcome: 'created' })
+    expect(f.read()).toMatchObject({ cancellation: input, bridge: { frontend: { outputByte: through } } })
+    expect(f.executor.api.writeTerminal).toHaveBeenCalledOnce()
+    expect(f.frontend.api.cancelAgentCreation).toHaveBeenCalledOnce()
+    expect((await service.inspect(f.input.bindingId))?.state).toBe('connected')
+  } finally { ready.release(); await cancellation.catch(() => {}) }
 })
 
 it('one rejecting binding consumer cannot close Core or interrupt a different reader', async () => {

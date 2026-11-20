@@ -28,7 +28,9 @@ it('an authenticated managed Source CLI reads original safe journal metadata wit
   const f = await fixture()
   const projection = await f.runtime.executionBindings.sourceDiagnostics!(f.input.operationId)
   expect(JSON.stringify(projection)).not.toContain('PRIVATE_')
+  const readSpatial = vi.spyOn(f.spatial, 'read')
   const result = await f.rpc.call('space.inspect', { target: { operationId: f.input.operationId } }, { credentials: f.owner.credentials })
+  expect(readSpatial).toHaveBeenCalledOnce()
   const report = result.request!.report!
   expect(report.execution).toMatchObject({ reference: f.original.execution!.reference, inspection: null,
     diagnostics: { sourceRuntimeId: 'runtime-b', state: 'matched', reference: f.original.execution!.reference,
@@ -219,6 +221,9 @@ it('a matching public Admit cannot attest an unplaced Source operation', async (
   })
   await expect(f.rpc.call('agent.open', f.input)).rejects.toMatchObject({ code: 'CONTROL_CONNECTION_FAILED' })
   expect((await f.rpc.call('space.inspect', { target: { operationId: f.input.operationId } })).request).toMatchObject({ known: false, report: null })
+  await expect(f.rpc.call('agent.open', f.input)).rejects.toMatchObject({ code: 'EXECUTION_INTENT_UNCONFIRMED' })
+  expect(spatialOperation(await readFile(join(f.root, 'spatial.json'), 'utf8'), f.input.operationId)).toBeUndefined()
+  expect(f.prepare).not.toHaveBeenCalled()
   expect(f.starts).not.toHaveBeenCalled()
 })
 

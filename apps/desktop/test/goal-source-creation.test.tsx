@@ -65,6 +65,7 @@ async function fixture(sourceCarrier = 'B-in-A') {
         toolExecution: { bindingId: input.bindingId, resourceHostId: input.resourceHostId, resourceRuntimeId: input.resourceRuntimeId, workspacePath: input.resourceWorkspacePath } }
       return { session, creation: session.creation!, execution: {} }
     }),
+    inspectSourceAdmission: async (bindingId: string) => bindings.inspect(bindingId, 'association'),
     inspect: vi.fn(async (bindingId: string, view?: 'association') => frozen && bindingId === frozen.bindingId ? {
       bindingId: frozen.bindingId, agentHostId: frozen.agentHostId, resourceHostId: frozen.resourceHostId, agentSessionId: frozen.agent.agentSessionId,
       resourceWorkspacePath: frozen.resourceWorkspacePath, state: session?.creation?.createOperationId === frozen.agent.createOperationId ? 'connected' as const : 'unavailable' as const,

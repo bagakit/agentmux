@@ -54,7 +54,8 @@ export async function sourceCreationFixture(releases: Array<() => unknown | Prom
   }
   const bindings = { admit: vi.fn(freeze), create: vi.fn(async (input: AgentExecutionOpenInput) => { await freeze(input); return advance() }),
     continueOriginal: vi.fn(async original => { if (!frozen || !isDeepStrictEqual(original, reference())) throw new AgentMuxError('Original reference missing or changed.', 'EXECUTION_INTENT_UNCONFIRMED'); return advance() }),
-    sourceDiagnostics: vi.fn(async (_operationId: string, _context: import('../../src/public-rpc-service.js').AgentMuxRpcCallContext) => null as import('../../src/agent-execution-source-diagnostics.js').AgentExecutionSourceDiagnostics | null),
+    sourceDiagnostics: vi.fn(async (..._args: Parameters<AgentExecutionBindingService['sourceDiagnostics']>) => null as Awaited<ReturnType<AgentExecutionBindingService['sourceDiagnostics']>>),
+    inspectSourceAdmission: vi.fn<AgentExecutionBindingService['inspectSourceAdmission']>(bindingId => bindings.inspect(bindingId, 'association')),
     inspect: vi.fn(async (bindingId: string, view?: 'association') => frozen && bindingId === frozen.bindingId ? { bindingId: frozen.bindingId, agentHostId: frozen.agentHostId,
       resourceHostId: frozen.resourceHostId, agentSessionId: frozen.agent.agentSessionId, resourceWorkspacePath: frozen.resourceWorkspacePath,
       continuation: reference(),
@@ -90,7 +91,7 @@ export async function sourceCreationFixture(releases: Array<() => unknown | Prom
   const newService = () => new AgentExecutionBindingService(join(root, 'execution-bindings'), bindingHosts, { spatial, runtimeId: () => runtime.ownerIdentity().runtimeId })
   if (options.realBindings) {
     service = newService(); releases.push(() => service?.dispose())
-    bindings.sourceDiagnostics.mockImplementation((operationId, context) => service!.sourceDiagnostics(operationId, context))
+    bindings.sourceDiagnostics.mockImplementation((...args) => service!.sourceDiagnostics(...args))
     bindings.admit.mockImplementation((input, context, source) => {
       const { sourceRequestDigest, ...original } = input
       return options.legacyBindingDigest ? service!.admit(original, context) : service!.admit(input, context, source)
@@ -98,6 +99,7 @@ export async function sourceCreationFixture(releases: Array<() => unknown | Prom
     bindings.create.mockImplementation(input => service!.create(input) as never)
     bindings.continueOriginal.mockImplementation(original => service!.continueOriginal(original) as never)
     bindings.inspect.mockImplementation((bindingId, view) => service!.inspect(bindingId, view) as never)
+    bindings.inspectSourceAdmission.mockImplementation(bindingId => service!.inspectSourceAdmission(bindingId))
   }
   const identity = { runtimeId: 'runtime-b', ownerInstanceId: 'instance-b', protocolVersion: 2, processId: process.pid, ctxmux: null, availability: 'connected' }
   const runtime = { client: { inspectAgentCreation: vi.fn(async () => { throw Error('A B-local SID lookup cannot locate a D Session.') }) }, ownerIdentity: () => identity,
