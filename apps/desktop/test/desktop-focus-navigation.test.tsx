@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { deriveBoundGoalId, formatGoalAddress } from '@agentmux/core/sharing'
 import { openDemandStore } from '@agentmux/demand'
-import { parseAgentMuxControlReceipt, parseAgentMuxControlRequest } from '@agentmux/core'
+import { parseAgentMuxControlReceipt, parseAgentMuxControlRequest, type AgentMuxHeadlessRuntime } from '@agentmux/core'
 import { AgentMuxControlServer, connectAgentMuxRpc } from '../../../packages/core/src/control-host'
 import { objectCliEnvironment } from '../../../packages/core/test/helpers/object-cli-rpc'
 import type { AgentMuxControlRequest, AgentMuxControlResult, AgentMuxDesktopFocusResult, AgentMuxDesktopFocusTarget } from '@agentmux/core/control'
@@ -34,6 +34,7 @@ import { addWorkbenchRegion, createWorkbenchTab, focusWorkbenchTabRegion, remove
 import { directoryIdentity, workspaceZoneId } from '../src/shared/space-addresses'
 import { desktopWorkbenchObservationSchema } from '../src/shared/client-observation'
 import { restoreWorkbenchSpaceSelection } from '../src/renderer/src/lib/desktop-focus-navigation'
+import { desktopPresentationCommitted, readGoalReadingPresentation } from '../src/renderer/src/lib/desktop-presentation'
 import { readPmoTeamsTopicFloatingState, requestPmoTeamsTopicFloatingOpen, usePmoTeamsTopicFloatingState } from '../src/renderer/src/lib/pmo-teams-topic-floating'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
@@ -43,6 +44,7 @@ import { installCollaborationLayoutLoopback } from './helpers/collaboration-layo
 import { workbenchProjectionSlotId, workbenchRegionProjectionSlotId } from '../src/renderer/src/lib/workbench-projection'
 import { workbenchDisplayReferenceMatches } from '../src/renderer/src/lib/workbench-resource-display'
 import { moteWorkbenchProjection } from '../src/renderer/src/lib/mote-workbench-projection'
+import { openHostGoalTransport } from './helpers/host-goal-transport'
 import type { SettingsNavigationRequest } from '../src/renderer/src/components/SettingsNavigation'
 
 const incomingAppFixture = vi.hoisted(() => ({
@@ -1540,6 +1542,64 @@ it('source-qualified Goal links distinguish stores on one real semantic Runtime 
     expect(container.querySelector('[data-goal-detail-id="exact"]')?.textContent).toContain('Other source Goal')
   } finally { await fixture.close() }
 }, 60_000)
+
+it('confirms the private owner Goal short root only after its exact reading position is visible', async () => {
+  const owner = await openHostGoalTransport({ config, runtime: () => ({
+    ownerIdentity: () => ({ runtimeId: 'private-desktop-short-root' }),
+    client: { readAgentInputEpoch: async () => undefined }
+  }) as unknown as AgentMuxHeadlessRuntime })
+  try {
+    const { goal: original } = await owner.rpc.call('goal.create', {
+      title: 'The original short-link Goal', operationId: 'desktop-short-root', risk: 'low', confirmation: 'user'
+    })
+    const address = original.address!
+    expect(address.goalUrl).toBe(`amux://goal/${original.id}`)
+    vi.spyOn(document.documentElement, 'clientWidth', 'get').mockReturnValue(1280)
+    vi.spyOn(document.documentElement, 'clientHeight', 'get').mockReturnValue(800)
+    let readingFits = false
+    vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockImplementation(function(this: HTMLElement) {
+      const top = !readingFits && this.hasAttribute('data-goal-reading-section') ? 900 : 0
+      return { x: 0, y: top, top, left: 0, right: 600, bottom: top + 400, width: 600, height: 400, toJSON: () => ({}) }
+    })
+    const before = useAppStore.getState()
+    const ingress = new SpatialLinkIngress()
+    ingress.ready(async (request, signal) => {
+      let pending!: Promise<AgentMuxControlResult>
+      await act(async () => { pending = useAppStore.getState().executeControl(request, signal) })
+      return await pending
+    }, vi.fn())
+    const target = { goalId: original.id, runtimeId: address.runtimeId, namespace: address.namespace }
+    let finished = false
+    const opening = ingress.receive(address.goalUrl).then(result => { finished = true; return result })
+    const overview = '[data-goal-reading-section="overview"]'
+    await vi.waitFor(() => expect(container.querySelector(overview)?.getAttribute('data-goal-reading-id')).toBe(original.id))
+    const body = container.querySelector<HTMLElement>(overview)!
+    expect(body.dataset.goalReadingRuntime).toBe(address.runtimeId)
+    expect(body.dataset.goalReadingNamespace).toBe(address.namespace)
+    expect(body.closest('[hidden], [inert], [aria-hidden="true"]')).toBeNull()
+    expect(readGoalReadingPresentation(target)).toBeNull()
+    await settle()
+    const reportedBeforeVisible = finished
+    readingFits = true
+    expect(readGoalReadingPresentation(target)).toMatchObject(target)
+    desktopPresentationCommitted()
+    expect(await opening).toBeNull()
+    expect(reportedBeforeVisible, 'a successful surface layout alone cannot confirm the original Goal').toBe(false)
+
+    const originalRead = await owner.rpc.call('goal.inspect', { goalId: original.id })
+    const { creationOrigin: _origin, ...namesake } = originalRead.goal!
+    const otherAddress = formatGoalAddress(original.id, address.runtimeId, 'different-store')
+    owner.execute.mockImplementationOnce(request => callPublicGoalControl(request, async () => ({
+      ...originalRead, goal: { ...namesake, address: otherAddress, title: 'Unbound namesake' }
+    })))
+    expect(await ingress.receive(address.goalUrl)).toContain('GOAL_SOURCE_UNCONFIRMED')
+    expect(useAppStore.getState().selectedDemandId).toBe(original.id)
+    expect(container.querySelector('[data-goal-detail-id]')?.textContent).toContain(original.title)
+    expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+    expect(useAppStore.getState().tabs).toEqual(before.tabs)
+    expect(useAppStore.getState().layouts).toEqual(before.layouts)
+  } finally { await owner.dispose() }
+})
 
 it('copied Goal plan links, active Ticket links and the real CLI reveal the original graph without creating work or stealing the retained draft', async () => {
   const fixture = await goalLinkOwnerFixture(), owner = await fixture.open('original')
