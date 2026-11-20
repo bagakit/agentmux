@@ -456,7 +456,7 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
       if (saved) return saved.kind === 'main' ? this.mainBinding(saved) : await this.ready(saved.generationId)
       const source = await main.readCurrentMoteMain(configuration.target)
       if (source.status !== 'ready' || !source.identity || !source.roleRevision) return fail('MOTE_CHAT_MAIN_UNCONFIRMED', 'The original Main role is unconfirmed. Keep this incoming message and restore its original Mote settings.')
-      if (!source.current) return fail('MOTE_CHAT_MAIN_REQUIRED', 'Establish this Mote’s main conversation in the App. This original message is retained; no separate private chat was created.')
+      if (!source.current) return fail('MOTE_CHAT_MAIN_REQUIRED', 'This Mote’s Main has not started yet. Check its Executor priorities and retry the original message.')
       // This exact Session read can discover an unheated client's original owner.
       // Freeze only after the same route has supplied its Runtime fence and re-read.
       let session = await this.options.session!(source.current.hostId, source.current.sessionId)

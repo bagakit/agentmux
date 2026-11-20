@@ -4589,11 +4589,14 @@ export class AgentMuxRpcService {
   private async startMoteMainForCreator(target: MotePreferencesTarget, assertCurrent: () => void | Promise<void>): Promise<void> {
     const mainInput = this.ports.moteDialogue?.mainInput
     const main = await mainInput?.readCurrentMoteMain(target)
+    if (!main?.identity || main.status !== 'ready' || !main.roleRevision) return
     const preferences = await this.ports.moteQuickPreferences?.read({ kind: 'quick', target, includeChoices: false })
     const baseline = preferences && moteQuickBaseline(preferences)
-    if (!main?.identity || main.status !== 'ready' || !main.roleRevision || !baseline ||
-      main.documentRevision !== (baseline.document?.revision ?? null) || !isDeepStrictEqual(main.current, baseline.defaults.conversation ?? null))
+    if (!baseline || main.documentRevision !== (baseline.document?.revision ?? null) ||
+      !isDeepStrictEqual(main.current, baseline.defaults.conversation ?? null)) {
+      if (main.current) return
       throw new AgentMuxError('The original Mote Main settings are unconfirmed. Its incoming message is retained.', 'MOTE_CHAT_MAIN_UNCONFIRMED')
+    }
     const first = baseline.defaults.executorId
     if (main.current) {
       if (!first) return
