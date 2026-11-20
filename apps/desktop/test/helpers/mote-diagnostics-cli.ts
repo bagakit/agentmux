@@ -51,19 +51,17 @@ export async function sourceMoteDiagnosticsCli(directory: string, options: { mut
   const changed: Record<string, string> = mutations ? JSON.parse(readFileSync(mutations, 'utf8')) : {}
   const cli = join(directory, 'mote-diagnostics-cli.mjs')
   const dependency = (specifier: string, original: string): string => {
-    try { return createRequire(original).resolve(specifier) }
-    catch (error) {
-      // Import-only installed packages still use their actual declared ESM export.
-      const manifestPath = findPackageJSON(specifier, pathToFileURL(original).href)
-      if (!manifestPath) throw error
+    // The generated entry imports externals as ESM, so use their declared import export when present.
+    const manifestPath = findPackageJSON(specifier, pathToFileURL(original).href)
+    if (manifestPath) {
       const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
       const packageName = specifier.startsWith('@') ? specifier.split('/').slice(0, 2).join('/') : specifier.split('/')[0]
       const entry = specifier === packageName ? '.' : '.' + specifier.slice(packageName!.length)
-      let target = Object.hasOwn(manifest.exports, entry) ? manifest.exports[entry] : entry === '.' ? manifest.exports : undefined
+      let target = manifest.exports && Object.hasOwn(manifest.exports, entry) ? manifest.exports[entry] : entry === '.' ? manifest.exports : undefined
       while (target && typeof target === 'object') target = target.import ?? target.node ?? target.default
-      if (typeof target !== 'string') throw error
-      return resolve(dirname(manifestPath), target)
+      if (typeof target === 'string') return resolve(dirname(manifestPath), target)
     }
+    return createRequire(original).resolve(specifier)
   }
   const ssrInputs: string[] = []
   const built = options.ssr ? await (async () => {

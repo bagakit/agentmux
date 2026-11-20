@@ -15,7 +15,6 @@ import { AgentMuxControlServer, connectAgentMuxRpc } from '@agentmux/core'
 import { decodeHostedValue } from '../../../packages/core/src/hosted-value'
 import { privateEnvironment } from './helpers/workface-control-fixture'
 import type { AgentMuxAgentSessionStore } from '../../../packages/core/src/agent-session-store'
-import { AgentProviderRegistry } from '../../../packages/core/src/agent-provider'
 import type { AgentMuxStoredAgentSession, AgentTimelineSnapshot } from '@agentmux/core'
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface'
 import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
@@ -31,13 +30,14 @@ import { useAppStore } from '../src/renderer/src/store'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { createWorkspaceLayout, splitWorkbenchRegion } from '@agentmux/layout'
 import { spaceMountKey } from '../src/shared/space-mount'
-import { originalSourceInputOwnerKey, originalSourceRegionProjectionId, originalSourceTabProjectionId, originalSourceWorkspaceId } from '../src/renderer/src/lib/original-space-navigation'
+import { originalSourceGroupProjectionId, originalSourceInputOwnerKey, originalSourceRegionProjectionId, originalSourceTabProjectionId, originalSourceWorkspaceId } from '../src/renderer/src/lib/original-space-navigation'
 import { mountedRegionKey, mountedSpaceInput } from '../src/renderer/src/lib/space-mount-view'
 import * as mountedSessions from '../src/renderer/src/lib/space-mount-sessions'
 import * as sourceModel from '../src/renderer/src/lib/focus-source-model'
 import { DEFAULT_CONFIG } from '../src/main/config-store'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import { spaceMountTransport } from './helpers/space-mount-fixture'
+import { sourceMoteDiagnosticsCli } from './helpers/mote-diagnostics-cli'
 
 const dom = composerDOM({ agentInformation: true }), cleanup: Array<() => unknown | Promise<unknown>> = []
 const sourceProjectionObservation = vi.hoisted(() => ({ value: undefined as ReturnType<typeof import('../src/renderer/src/lib/use-focus-sources').useFocusSources> | undefined }))
@@ -76,7 +76,7 @@ function MainFocusFixture({ navigate, regionOnly = false }: { navigate: (id: str
 /** Real original Core/Space and scoped Unix→Main→IPC→Preload→Renderer.
  * Native process state is the existing source fixture leaf. No unified hook,
  * Context, lane, card, filter, menu or preview implementation is mocked. */
-async function fixture(options: { foreign?: boolean; unavailable?: boolean; nativeUnavailable?: boolean; metadataUnknown?: boolean; sourceOnly?: boolean; legacyNoAdmission?: boolean; multiple?: boolean; missing?: boolean; unconfirmed?: boolean; staleRun?: boolean; unobservedRun?: boolean; largeHistory?: boolean; historyImage?: boolean; originalSkills?: boolean } = {}) {
+async function fixture(options: { foreign?: boolean; unavailable?: boolean; nativeUnavailable?: boolean; metadataUnknown?: boolean; sourceOnly?: boolean; legacyNoAdmission?: boolean; multiple?: boolean; missing?: boolean; unconfirmed?: boolean; staleRun?: boolean; unobservedRun?: boolean; largeHistory?: boolean; historyImage?: boolean; originalSkills?: boolean; unmountedKind?: 'folder' | 'topic' | 'mote'; occurrence?: 'none' | 'two' } = {}) {
   const privateCleanup: Array<() => unknown | Promise<unknown>> = []
   const placementPath = options.originalSkills ? await mkdtemp(join(tmpdir(), 'amx-composer-skills-')) : '/b/project'
   if (options.originalSkills) privateCleanup.push(() => rm(placementPath, { recursive: true, force: true }))
@@ -91,7 +91,6 @@ async function fixture(options: { foreign?: boolean; unavailable?: boolean; nati
       await rm(error.path, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     }
   }))
-  for (const source of [original.b, original.d]) source.core.providers.register(new AgentProviderRegistry().get('codex'))
   const physicalReads: Promise<unknown>[] = []
   for (const source of [original.b, original.d]) {
     // Disposal instrumentation observes physical work below the cancellable public reader.
@@ -139,8 +138,10 @@ async function fixture(options: { foreign?: boolean; unavailable?: boolean; nati
   const config = structuredClone(DEFAULT_CONFIG)
   config.hosts = [{ id: 'local', kind: 'local', label: 'Original local owner' }, { id: 'source-route', kind: 'ssh', label: 'Original source route', hostname: 'source.invalid' }]
   config.workspaces = [{ id: 'original-b-project', kind: 'folder', hostId: 'local', path: placementPath, name: 'Ordinary analysis project' }]
+  const localOwner = options.unmountedKind ? original.d : original.b
+  if (options.unmountedKind) await localOwner.put(SID)
   const main = spaceMountTransport(cleanup, [
-    { id: 'local', carrier: { forwardRpc: original.b.rpc.call.bind(original.b.rpc), subscribeRpc: original.b.rpc.subscribe.bind(original.b.rpc) } },
+    { id: 'local', carrier: { forwardRpc: localOwner.rpc.call.bind(localOwner.rpc), subscribeRpc: localOwner.rpc.subscribe.bind(localOwner.rpc) } },
     { id: 'source-route', carrier: { forwardRpc: original.b.rpc.call.bind(original.b.rpc), subscribeRpc: original.b.rpc.subscribe.bind(original.b.rpc) } },
     { id: 'original-d-route', carrier: { forwardRpc: original.d.rpc.call.bind(original.d.rpc), subscribeRpc: original.d.rpc.subscribe.bind(original.d.rpc) } }
   ], config)
@@ -159,6 +160,11 @@ async function fixture(options: { foreign?: boolean; unavailable?: boolean; nati
   // Source business apply intentionally does not carry another client's layout.
   const originalLayout = sourceDocument.graph.tabLayouts[originalTab.tabId]!
   await original.b.spatial.commit({ expectedRevision: sourceDocument.revision, graph: { ...sourceDocument.graph,
+    ...(options.occurrence === 'none' ? { layouts: {} } : options.occurrence === 'two' ? {
+      layouts: { ...sourceDocument.graph.layouts, 'other-original-display': createWorkspaceLayout('other-original-group', [originalTab.tabId]) }
+    } : {}),
+    spaces: sourceDocument.graph.spaces.map(space => space.spaceId === original.reference.spaceId && options.unmountedKind && options.unmountedKind !== 'folder'
+      ? { ...space, kind: options.unmountedKind, name: options.unmountedKind === 'mote' ? 'Original Mote' : 'Original Topic', topicId: 'original-content' } : space),
     tabs: sourceDocument.graph.tabs.map(tab => tab.tabId === originalTab.tabId ? { ...tab, regionIds: [...tab.regionIds, secondRegion.regionId, ...(options.unconfirmed ? [unconfirmedRegion.regionId, otherUnconfirmedRegion.regionId] : [])] } : tab),
     regions: [...sourceDocument.graph.regions.map(region => region.regionId === originalRegion.regionId ? retainedMember : region), secondRegion, ...(options.unconfirmed ? [unconfirmedRegion, otherUnconfirmedRegion] : [])],
     tabLayouts: { ...sourceDocument.graph.tabLayouts, [originalTab.tabId]: options.unconfirmed
@@ -182,7 +188,8 @@ async function fixture(options: { foreign?: boolean; unavailable?: boolean; nati
     if (method === 'resources') {
       // The real original owner answers this witness; workspaces are this scene's
       // already registered resource, not a guessed Host-name/runtime mapping.
-      const witnessed = await original.b.rpc.call('runtime.owner.identity', {})
+      const witnessOwner = (input as { hostId: string }).hostId === 'local' ? localOwner : original.b
+      const witnessed = await witnessOwner.rpc.call('runtime.owner.identity', {})
       return { hostId: (input as { hostId: string }).hostId, runtimeId: witnessed.owner.runtimeId, workspaces: [] } as never
     }
     return await main.api.call(method, input as never, signal) as never
@@ -219,11 +226,16 @@ async function fixture(options: { foreign?: boolean; unavailable?: boolean; nati
   useAppStore.setState({ config, sessions: options.sourceOnly ? [] : [local], agentNames: { [SID]: localName }, timelines: { [SID]: timeline(SID, localRecap) }, tabs: { [tab.id]: tab }, layouts: { 'original-b-project': createWorkspaceLayout('ordinary-group', [tab.id]) },
     mainSurface: 'agents', focusView: 'list', loading: false, mountedSpaceInputs: {}, mountedSpaceObservations: {}, mountedSpaceSessions: {}, agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } }, scratchTopicSnapshots: {}, agentComposerDrafts: { [SID]: 'Keep this original local draft' } })
   const target = { hostId: 'source-route', reference: original.reference, zoneId: admitted.address.zoneId!, workspaceId: admitted.address.workspaceId! }
-  useAppStore.getState().mountSpace(target, false)
+  const remote = { ...local, id: 'remote-original-context', hostId: target.hostId, workspacePath: session.workspacePath,
+    control: { ...local.control, hostId: target.hostId, run: session.run } }
+  if (options.unmountedKind) {
+    useAppStore.setState(state => ({ sessions: [...state.sessions, remote], agentNames: { ...state.agentNames, [remote.id]: 'Existing remote result' },
+      timelines: { ...state.timelines, [remote.id]: timeline(SID, foreignRecap) } }))
+  } else useAppStore.getState().mountSpace(target, false)
   const navigate = vi.fn()
   await dom.render(<MainFocusFixture navigate={navigate} />)
   const settle = async (count: number) => { await vi.waitFor(async () => { await act(async () => {}); expect(useAppStore.getState().mountedSpaceObservations[spaceMountKey(target.reference)]?.snapshot).toBeDefined(); const members = Object.keys(useAppStore.getState().mountedSpaceSessions[spaceMountKey(target.reference)]?.members ?? {}); if (options.unconfirmed) expect(members.length).toBeGreaterThan(0); else expect(members).toHaveLength(1); expect(cards()).toHaveLength(count) }, { timeout: 10000 }) }
-  return { ...original, owner, session, admitted, main, config, target, key: spaceMountKey(target.reference), member, navigate, settle, local, sessionsRead, membershipComplete, missingRead, beginOriginalCheck, finishOriginalCheck,
+  return { ...original, owner, session, admitted, main, config, target, key: spaceMountKey(target.reference), member, navigate, settle, local, remote, sessionsRead, membershipComplete, missingRead, beginOriginalCheck, finishOriginalCheck,
     emitMetadataError: () => { for (const [listener, key] of sessionListeners) if (key === spaceMountKey(target.reference)) listener({ type: 'error', error: { code: 'ORIGINAL_METADATA_READER_UNAVAILABLE', message: 'The original metadata stream is unavailable; the independent member remains healthy.' } }) },
     emitUnknownMetadata: () => {
       const state = useAppStore.getState(), key = spaceMountKey(target.reference), snapshot = state.mountedSpaceObservations[key]!.snapshot!
@@ -253,6 +265,135 @@ async function chooseFilter(kind: 'project' | 'state' | 'type', text: string) {
   await vi.waitFor(async () => { await act(async () => {}); option = [...document.querySelectorAll<HTMLElement>(`.focus-filter-menu [data-focus-${kind}]`)].find(node => node.querySelector('.focus-filter-menu__name')?.textContent === text || node.getAttribute(`data-focus-${kind}`) === text); expect(option, `Actual ${kind} filter ${text}: ${document.querySelector('.focus-filter-menu')?.textContent}`).toBeDefined() })
   await act(async () => option!.click())
 }
+
+it.each(['mote', 'topic', 'folder'] as const)('reads a saved %s affiliation and opens the exact unmounted original through Focus', async kind => {
+  const f = await fixture({ unmountedKind: kind })
+  const title = kind === 'mote' ? 'Original Mote' : kind === 'topic' ? 'Original Topic' : 'B project'
+  await vi.waitFor(() => {
+    const card = cardWith('Existing remote result')
+    expect(card.closest('.focus-project-lanes__row')?.textContent).toContain(title)
+    expect(card.dataset.sessionId).toBe(f.remote.id)
+    expect(cardWith(localName).dataset.sessionId).toBe(SID)
+  })
+  const before = useAppStore.getState(), control = before.sessions.find(value => value.id === f.remote.id)!.control
+  expect(before.mountedSpaceInputs).toEqual({})
+  expect(sourceProjectionObservation.value?.aliases.get(JSON.stringify([f.target.hostId, f.remote.id]))?.identity).toEqual({
+    runtimeId: f.owner.owner.runtimeId, agentSessionId: SID
+  })
+  await act(async () => cardWith('Existing remote result').click())
+  await vi.waitFor(() => expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({
+    spaceId: f.target.reference.spaceId, zoneId: f.target.zoneId,
+    tabId: originalSourceTabProjectionId(f.target, f.admitted.address.tabId),
+    regionId: originalSourceRegionProjectionId(f.target, f.admitted.address.regionId)
+  }))
+  expect(useAppStore.getState().sessions.find(value => value.id === f.remote.id)!.control).toEqual(control)
+  expect(useAppStore.getState().agentComposerDrafts[SID]).toBe('Keep this original local draft')
+})
+
+it('keeps confirmed Mote membership with no layout and exposes the same read in the actual CLI', async () => {
+  const f = await fixture({ unmountedKind: 'mote', occurrence: 'none' })
+  await vi.waitFor(() => expect(cardWith('Existing remote result').closest('.focus-project-lanes__row')?.textContent).toContain('Original Mote'))
+  expect(sourceProjectionObservation.value?.aliases.has(JSON.stringify([f.target.hostId, f.remote.id]))).toBe(false)
+  expect(useAppStore.getState().mountedSpaceInputs).toEqual({})
+  const directory = await mkdtemp(join(tmpdir(), 'amx-focus-location-cli-'))
+  cleanup.push(() => rm(directory, { recursive: true, force: true }))
+  const cli = await sourceMoteDiagnosticsCli(directory)
+  const result = await cli.run(['--endpoint', 'unix:' + join(f.b.root, 'rpc.sock'), 'space', 'agent-locations', '--runtime', f.owner.owner.runtimeId, '--session', SID])
+  expect(result.code, result.stderr).toBe(0)
+  const receipt = JSON.parse(result.stdout)
+  expect(receipt).toMatchObject({ operation: 'space.agent-locations', result: { runtimeId: f.owner.owner.runtimeId,
+    catalog: { locations: [], spaces: [{ spaceId: f.target.reference.spaceId, kind: 'mote' }],
+      regions: [{ regionId: f.admitted.address.regionId, agentSessionId: SID }] } } })
+  const wrong = await cli.run(['--endpoint', 'unix:' + join(f.b.root, 'rpc.sock'), 'space', 'agent-locations', '--runtime', f.d.owner.runtimeId, '--session', SID])
+  expect(wrong.code).toBe(1)
+  const errors = (wrong.stdout + '\n' + wrong.stderr).split('\n').filter(line => line.startsWith('{'))
+  expect(errors).toHaveLength(1)
+  expect(JSON.parse(errors[0]!)).toMatchObject({ ok: false, error: { code: 'RUNTIME_OWNER_MISMATCH' } })
+})
+
+it('keeps both original Group choices and checks the selected exact occurrence without a replacement', async () => {
+  const f = await fixture({ unmountedKind: 'mote', occurrence: 'two' })
+  await vi.waitFor(() => expect(cardWith('Existing remote result').closest('.focus-project-lanes__row')?.textContent).toContain('Original Mote'))
+  await act(async () => cardWith('Existing remote result').click())
+  const choices = dom.container.querySelector('[aria-label="Choose original workface"]')!
+  const buttons = Array.from(choices.querySelectorAll<HTMLButtonElement>('.focus-location-choice'))
+  expect(buttons).toHaveLength(2)
+  const chosen = buttons.find(button => button.textContent?.includes('other-original-group'))!
+  expect(chosen).toBeDefined()
+  const call = vi.mocked(api.spaceMounts.call)
+  await act(async () => chosen.click())
+  const groupId = originalSourceGroupProjectionId(f.target, JSON.stringify(['other-original-display', 'other-original-group']))
+  await vi.waitFor(() => expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({
+    groupId, workspaceId: originalSourceWorkspaceId(f.target), regionId: originalSourceRegionProjectionId(f.target, f.admitted.address.regionId)
+  }))
+  expect(useAppStore.getState().layouts[originalSourceWorkspaceId(f.target)]?.activeGroupId).toBe(groupId)
+  expect(call.mock.calls).toContainEqual(expect.arrayContaining(['agentLocations', expect.objectContaining({
+    expectedRuntimeId: f.owner.owner.runtimeId, position: expect.objectContaining({ displayWorkspaceId: 'other-original-display', groupId: 'other-original-group' })
+  })]))
+})
+
+it('retains the original result on a Source read failure and refreshes that same route', async () => {
+  const f = await fixture({ unmountedKind: 'mote' })
+  const call = vi.mocked(api.spaceMounts.call), originalCall = call.getMockImplementation()!
+  await vi.waitFor(() => expect(cardWith('Existing remote result').closest('.focus-project-lanes__row')?.textContent).toContain('Original Mote'))
+  call.mockImplementation((method, input, signal) => method === 'agentLocations' && !('position' in input)
+    ? Promise.reject(Error('Original Source read timed out')) : originalCall(method, input, signal))
+  // Returning to the same Focus view refreshes the original reader without mounting.
+  await act(async () => useAppStore.setState({ focusView: 'map' }))
+  await act(async () => useAppStore.setState({ focusView: 'list' }))
+  await vi.waitFor(() => expect(dom.container.textContent).toContain('Original Source read timed out'))
+  expect(cardWith('Existing remote result').textContent).toContain(foreignRecap)
+  expect(cardWith('Existing remote result').closest('.focus-project-lanes__row')?.textContent).toContain('Original Mote')
+  expect(useAppStore.getState().mountedSpaceInputs).toEqual({})
+  call.mockImplementation(originalCall)
+  const refresh = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Refresh source')!
+  expect(refresh).toBeDefined()
+  const before = call.mock.calls.length
+  await act(async () => refresh.click())
+  await vi.waitFor(() => expect(dom.container.textContent).not.toContain('Original Source read timed out'))
+  expect(call.mock.calls.slice(before).filter(([method]) => method === 'agentLocations')).toEqual([
+    ['agentLocations', { hostId: f.target.hostId, agentSessionIds: [SID] }, expect.any(AbortSignal)]
+  ])
+  expect(useAppStore.getState().sessions.find(value => value.id === f.remote.id)!.control).toEqual(f.remote.control)
+})
+
+it('does not focus a late original location after the user changes Focus view', async () => {
+  await fixture({ unmountedKind: 'mote' })
+  await vi.waitFor(() => expect(cardWith('Existing remote result').closest('.focus-project-lanes__row')?.textContent).toContain('Original Mote'))
+  const call = vi.mocked(api.spaceMounts.call), originalCall = call.getMockImplementation()!
+  let release!: () => void
+  const completion = new Promise<void>(resolve => { release = resolve })
+  let requested = false, returned = false
+  call.mockImplementation(async (method, input, signal) => {
+    if (method === 'snapshot') { requested = true; await completion }
+    const reply = await originalCall(method, input, signal)
+    if (method === 'snapshot') returned = true
+    return reply
+  })
+  cleanup.push(() => release())
+  const selection = useAppStore.getState().workbenchSpaceSelection
+  await act(async () => cardWith('Existing remote result').click())
+  await vi.waitFor(() => expect(requested).toBe(true))
+  await act(async () => useAppStore.setState({ focusView: 'map' }))
+  await act(async () => release())
+  await vi.waitFor(() => expect(returned).toBe(true))
+  expect(useAppStore.getState().workbenchSpaceSelection).toBe(selection)
+  expect(useAppStore.getState().mountedSpaceInputs).toEqual({})
+})
+
+it('refreshes an unmounted affiliation when its original Space changes while Focus stays open', async () => {
+  const f = await fixture({ unmountedKind: 'mote' })
+  await vi.waitFor(() => expect(cardWith('Existing remote result').closest('.focus-project-lanes__row')?.textContent).toContain('Original Mote'))
+  const read = vi.mocked(api.spaceMounts.call), before = read.mock.calls.filter(([method]) => method === 'agentLocations').length
+  const state = (await f.b.spatial.read())!
+  await act(async () => { await f.b.spatial.commit({ expectedRevision: state.revision, graph: { ...state.graph,
+    spaces: state.graph.spaces.map(space => space.spaceId === f.target.reference.spaceId ? { ...space, name: 'Renamed original Mote' } : space) } }) })
+  await vi.waitFor(() => expect(cardWith('Existing remote result').closest('.focus-project-lanes__row')?.textContent).toContain('Renamed original Mote'))
+  expect(read.mock.calls.filter(([method]) => method === 'agentLocations').slice(before)).toEqual([
+    ['agentLocations', { hostId: f.target.hostId, agentSessionIds: [SID] }, expect.any(AbortSignal)]
+  ])
+  expect(useAppStore.getState().mountedSpaceInputs).toEqual({})
+})
 
 it('one real local task reached by ordinary and saved Source paths retains its Agent name, working state and original recap in one normal lane/card', async () => {
   const f = await fixture()

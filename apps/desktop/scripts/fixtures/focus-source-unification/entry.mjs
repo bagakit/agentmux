@@ -254,7 +254,7 @@ if (agentPinsScene) {
  }
 }
 if(window.__inlineRenameScene)prepareInlineRename({api,useAppStore})
-if(window.__sourceConnectionScene)prepareSourceConnection({api,snapshot,opening})
+if(window.__sourceConnectionScene)prepareSourceConnection({api,snapshot,opening,useAppStore})
 if(window.__takeoverFeedbackScene)await prepareTakeoverFeedback({api,useAppStore,workspace,sessions,tab})
 createRoot(document.getElementById('root')).render(createElement(App))
 window.unifiedFocusProof={ready:true,holdNextCheck(){memberReadMode='pending'},failCheck(){for(const emit of sessionObservers)emit({type:'error',error:{code:'ORIGINAL_METADATA_READER_UNAVAILABLE',message:'The original metadata stream became unavailable while checking. Your saved work is kept.'}})},finishCheck(){memberReadMode='observed';for(const emit of sessionObservers)for(const observation of originalEvents())emit({type:'observation',observation})},sourceChecks(){return sourceChecks},memberCalls,foreignRuntime:'original-other-runtime',localName:sessions[0].label,foreignName:name,localReply,foreignReply:window.__originalForeignBody,foreignInput:window.__originalForeignInput,theme(appAppearance){updateThemeSelection({themeId:'graphite',appAppearance})},facts(){const state=useAppStore.getState();return{selected:state.selectedSpaceMount,source:state.mountedSpaceInputs[key],runs:state.sessions.map(s=>s.control.run),drafts:state.agentComposerDrafts,sourceRegions:snapshot.scope.regions.length}}}

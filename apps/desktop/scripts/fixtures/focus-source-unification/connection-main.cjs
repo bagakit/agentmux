@@ -22,5 +22,13 @@ module.exports=async({win,read,until,settle,click,capture,result})=>{
  await capture('source-connection-recovered.png','Same tasks and workface after the original source confirms the new read')
  result.after=await read('window.unifiedFocusProof.facts()')
  assert.deepEqual(result.after.runs,result.before.runs);assert.deepEqual(result.after.drafts,result.before.drafts)
+ await read('window.sourceConnectionProof.unmounted()')
+ await until('unmounted original Agent location notice',()=>read('!!document.querySelector("section[aria-label*=\\\"Original Mac mini\\\"]")'))
+ for(const[width,height]of[[1440,900],[420,800]]){
+  win.setContentSize(width,height);await settle()
+  const notice=await read('document.querySelector("section[aria-label*=\\\"Original Mac mini\\\"]").textContent')
+  assert.ok(notice.includes('The original Mac mini connection timed out.'))
+  await capture('unmounted-agent-locations-'+width+'.png','Unmounted original Source read failure with the retained task and one refresh action')
+ }
  result.scenes.push({sourceConnection:true,readsBeforeRecovery:before,readsAfterRecovery:await read('window.sourceConnectionProof.reads()')});result.passed=true
 }
