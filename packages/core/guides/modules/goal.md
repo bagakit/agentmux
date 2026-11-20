@@ -62,6 +62,12 @@ Access is for this call. Saving an unchanged relation does not recheck it remote
 Saving a new relation verifies the original Source admission, independent of Run liveness
 or Coordinator availability.
 
+For ongoing work use `goal start --goal ID --session SID --continue-ms MS --alignment-revision REV --operation-id OP`
+with the confirmed Goal and its current Supervisor. Read `goal inspect --goal ID` for the loop.
+The original scheduler resumes a known unsubmitted input when the previous turn ends and
+the original authorization is still current. Repeating the same continuation Start only reads
+the saved state or receipt and preserves pauses. Keep the original operation when delivery is unknown.
+
 For a finite task use `goal start --agent-ref JSON --access JSON` with the original
 assigned reference and current Source carrier. An independent association also needs
 its authenticated Coordinator carrier. Start saves the original request before using
