@@ -77,7 +77,7 @@ it('lists the shared native configuration once and applies Check and Update only
   expect(card('shared').querySelector('[aria-label="Hook needs attention"]')).not.toBeNull()
   expect(card('separate').querySelector('[aria-label="Hook needs attention"]')).toBeNull()
   expect(card('shared').querySelector('details')?.hasAttribute('open')).toBe(false)
-  expect(card('shared').textContent).toContain('3 older declarations')
+  expect(card('shared').textContent).toContain('3 in configuration')
   await clickText(card('shared'), 'Check')
   expect(check).toHaveBeenCalledExactlyOnceWith(target)
   expect(update).not.toHaveBeenCalled()
@@ -85,10 +85,43 @@ it('lists the shared native configuration once and applies Check and Update only
   expect(update).toHaveBeenCalledExactlyOnceWith(target)
   expect(card('shared').querySelector('[aria-label="Hook needs attention"]')).toBeNull()
   expect(card('shared').textContent).toContain('Observed config revision' + revision.slice(0, 12))
+  expect([...card('shared').querySelectorAll('.provider-hook-scope__actions button')].map(button => button.textContent)).toEqual(['Check'])
   await dom.click('[aria-label="Refresh Hook scopes"]')
   expect(card('shared').textContent).toContain('Managed configuration updated.')
   await dom.click('[aria-label="Back to Providers"]')
   expect(document.activeElement?.getAttribute('aria-label')).toBe('View Codex from Host Hooks')
+})
+
+it('shows current declarations independently of confirmed and unconfirmed older runtime health', async () => {
+  const broken: HookScope = { ...shared, inspection: { ...shared.inspection,
+    action: '10 older Hook declarations have missing runtime dependencies. Confirm original ownership and Run dependencies before removal.',
+    targets: [{ path: declarationPath, status: 'current', observedRevision: revision, expectedRevision: revision,
+      legacyDeclarations: 30, missingLegacyDependencies: 10 }] } }
+  const missingCurrent: HookScope = { ...broken, inspection: { ...broken.inspection,
+    targets: [{ path: declarationPath, status: 'partial', expectedRevision: revision, legacyDeclarations: 30, missingLegacyDependencies: 10 }] } }
+  vi.spyOn(api.providers, 'listHookScopes').mockResolvedValue(listed([broken]))
+  const check = vi.spyOn(api.providers, 'inspectHookScope').mockResolvedValue(confirmed(missingCurrent))
+  vi.spyOn(api.providers, 'updateHookScope').mockResolvedValue(confirmed({ ...broken, update: { status: 'unchanged' } }))
+  await showSettings()
+  await dom.click('[aria-label="View Codex from Host Hooks"]')
+  const item = card(broken.scopeId)
+  expect(item.querySelector('[data-health="current"]')?.textContent).toBe('Current declarations match')
+  expect(item.querySelector('[data-health="current"] [aria-label="Hook needs attention"]')).toBeNull()
+  expect(item.querySelector('[data-health="issue"] [aria-label="Hook needs attention"]')).not.toBeNull()
+  expect(item.querySelector('[data-health="issue"]')?.textContent).toContain('10 older Hook declarations have missing runtime dependencies.')
+  const older = item.querySelector('[aria-label="Older Hook declarations"]')
+  expect([...older!.querySelectorAll('li')].map(row => row.textContent)).toEqual([
+    '30 in configuration', '10 with a missing runtime dependency', '20 with runtime health unconfirmed'
+  ])
+  const actions = () => [...item.querySelectorAll('.provider-hook-scope__actions button')].map(button => button.textContent)
+  expect(actions()).toEqual(['Check'])
+  await clickText(item, 'Check')
+  expect(check).toHaveBeenCalledExactlyOnceWith(target)
+  expect(actions()).toEqual(['Check', 'Update configuration'])
+  await clickText(item, 'Update configuration')
+  expect(item.textContent).toContain('The managed configuration required no write.')
+  expect(item.querySelector('[data-health="issue"]')).not.toBeNull()
+  expect(actions()).toEqual(['Check'])
 })
 
 it('opens the linked Executor and returns to the exact shared scope from its detail on the same Host', async () => {

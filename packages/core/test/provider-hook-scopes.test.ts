@@ -1,5 +1,7 @@
+import { execFile } from 'node:child_process'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { promisify } from 'node:util'
 import { expect, it, vi } from 'vitest'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
 import { AgentMuxHostExecutorOwner } from '../src/executor-owner.js'
@@ -11,6 +13,9 @@ import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { hostedTestOwner } from './helpers/hosted-runtime-port.js'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
+
+const execute = promisify(execFile)
+const quote = (path: string) => "'" + path.replaceAll("'", "'\\''") + "'"
 
 it('checks and repairs only the selected native Hook scope through Host RPC and the CLI', async () => {
   const fixture = await rpcOwnerFixture()
@@ -115,6 +120,85 @@ it('checks and repairs only the selected native Hook scope through Host RPC and 
       .rejects.toMatchObject({ code: 'HOOK_SCOPE_CHANGED' })
     expect(ensure).toHaveBeenCalledTimes(1)
     expect(connect).not.toHaveBeenCalled()
+    expect(fixture.inner.kernel.stop).not.toHaveBeenCalled()
+
+    // Reproduce the original split Node runner in this private scope. Its bin and interpreter
+    // exist, but a transitively imported package was removed.
+    const originalConfiguration = await readFile(sharedPath, 'utf8')
+    const originalFile = JSON.parse(originalConfiguration)
+    const previousPackage = join(fixture.root, 'previous copy')
+    const runner = join(previousPackage, 'bin', 'agentmux-hook.js')
+    const legacyCommand = "ELECTRON_RUN_AS_NODE=1 AGENTMUX_HOOK_PROVIDER='grok' " + quote(process.execPath) + ' ' + quote(runner)
+    const legacyGroup = { matcher: '.*', hooks: [{ type: 'command', command: legacyCommand }] }
+    const marker = join(previousPackage, 'evaluated')
+    await mkdir(dirname(runner), { recursive: true })
+    await mkdir(join(previousPackage, 'dist'))
+    await writeFile(join(previousPackage, 'package.json'), '{"type":"module"}')
+    await writeFile(runner, "import { runAgentHookCommand } from '../dist/agent-hook-command.js'; runAgentHookCommand()")
+    await writeFile(join(previousPackage, 'dist', 'agent-hook-command.js'), "export { runAgentHookCommand } from './observer.js'")
+    const dependency = '@private-hook-fixture/dependency'
+    const packageRoot = join(previousPackage, 'node_modules', dependency)
+    const packageFile = join(packageRoot, 'package.json')
+    const observer = join(previousPackage, 'dist', 'observer.js')
+    await mkdir(packageRoot, { recursive: true })
+    await writeFile(packageFile, '{"type":"module","exports":"./missing.js"}')
+    await writeFile(observer, `import '${dependency}';
+// import 'absent-comment';
+export const dormant = () => import('absent-dynamic');
+export function runAgentHookCommand() {}
+`)
+    await writeFile(join(packageRoot, 'found.js'), `import { writeFileSync } from 'node:fs';
+writeFileSync(${JSON.stringify(marker)}, 'loaded');`)
+    const legacyConfiguration = JSON.stringify({ ...originalFile,
+      hooks: { ...originalFile.hooks, PreToolUse: [legacyGroup, ...originalFile.hooks.PreToolUse] } })
+    await writeFile(sharedPath, legacyConfiguration)
+
+    const invokeCommand = (command: string) => execute('/bin/sh', ['-c', command], {
+      cwd: fixture.root, env: { HOME: fixture.root, GROK_HOME: shared, PATH: dirname(process.execPath) }
+    })
+    await expect(invokeCommand(legacyCommand)).rejects.toMatchObject({ code: 1, stderr: expect.stringContaining('ERR_MODULE_NOT_FOUND') })
+    const brokenReadback = await cli('inspect', flags)
+    expect(brokenReadback.code, brokenReadback.stderr).toBe(0)
+    const brokenScope = JSON.parse(brokenReadback.stdout).result.scope
+    expect(brokenScope).toMatchObject({ health: 'issue', update: { status: 'not-requested' }, inspection: {
+      status: 'partial', code: 'MANAGED_HOOK_LEGACY_CARRIER',
+      targets: [{ path: sharedPath, status: 'current', legacyDeclarations: 1, missingLegacyDependencies: 1 }]
+    } })
+    expect(brokenScope.inspection.targets[0]).not.toHaveProperty('missingLegacyEntrypoints')
+    expect(brokenScope.inspection.targets[0].observedRevision).toBe(brokenScope.inspection.targets[0].expectedRevision)
+    const brokenListing = await cli('list', [])
+    expect(brokenListing.code, brokenListing.stderr).toBe(0)
+    expect(JSON.parse(brokenListing.stdout).result.scopes.find((scope: { scopeId: string }) => scope.scopeId === target.scopeId).inspection.targets)
+      .toEqual(brokenScope.inspection.targets)
+    const repeat = await cli('update', flags)
+    expect(repeat.code, repeat.stderr).toBe(0)
+    expect(JSON.parse(repeat.stdout).result.scope).toMatchObject({ update: { status: 'unchanged' },
+      inspection: { targets: [{ missingLegacyDependencies: 1 }] } })
+    expect(await readFile(sharedPath, 'utf8')).toBe(legacyConfiguration)
+
+    // Fresh checks observe changed package exports. Comments and dormant dynamic imports
+    // stay outside the static check, and parsing the now-runnable graph must not run it.
+    await writeFile(packageFile, '{"type":"module","exports":"./found.js"}')
+    const unknown = await rpc.call('settings.providers.hooks-inspect', target)
+    expect(unknown.scope).toMatchObject({ health: 'unknown', inspection: { status: 'partial', targets: [{ legacyDeclarations: 1 }] } })
+    expect(unknown.scope.inspection.targets[0]).not.toHaveProperty('missingLegacyDependencies')
+    await expect(readFile(marker, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readFile(sharedPath, 'utf8')).toBe(legacyConfiguration)
+
+    // This fixture owns the only configuration consumer; the old direct command above exited.
+    // Restore the exact preexisting bytes through this separate owner action.
+    await writeFile(sharedPath, originalConfiguration)
+    const absent = await cli('inspect', flags)
+    expect(absent.code, absent.stderr).toBe(0)
+    const current = JSON.parse(absent.stdout).result.scope
+    expect(current).toMatchObject({ health: 'current', update: { status: 'not-requested' }, inspection: { status: 'installed' } })
+    expect(current.inspection.targets[0]).not.toHaveProperty('legacyDeclarations')
+    const callbacks = JSON.parse(await readFile(sharedPath, 'utf8')).hooks.PreToolUse
+    expect(callbacks).toEqual(originalFile.hooks.PreToolUse)
+    const replies = await Promise.all(callbacks.flatMap((group: { hooks: { command: string }[] }) =>
+      group.hooks.map(({ command }) => invokeCommand(command))))
+    expect(replies.map(reply => reply.stdout)).toEqual(['keep', '{}\n'])
+    await expect(readFile(marker, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
     expect(fixture.inner.kernel.stop).not.toHaveBeenCalled()
   } finally {
     vi.unstubAllEnvs()
