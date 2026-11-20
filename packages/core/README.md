@@ -14,7 +14,7 @@
 
 ## 内置 Provider 与能力入口
 
-13 个内置 Provider 的 id 是 `codex`、`claude`、`traex`、`hermes`、`pi`、`grok`、`gemini`、`antigravity`、`cursor`、`kimi`、`droid`、`copilot`、`opencode`；默认 Executor 的 `executorId` 与 Provider id 相同。id 清单唯一见 [`BUILT_IN_AGENT_PROVIDER_IDS`](src/agent-provider-id.ts)（也从 `@agentmux/core/provider-id` 导出），组合见 [`providers/index.ts`](src/providers/index.ts)；各 Provider 能否回答权限请求、是否支持原生恢复、fork 与历史，见[根 README 的 Provider 表](../../README.zh-CN.md#一套-api-驱动-13-种-agent-cli)。Provider 已注册不代表对应 CLI 已在本机安装和登录。自定义 Provider 通过 [`defineAgentProvider`](src/agent-provider.ts) 与 [plugins](src/agent-plugin.ts) 扩展。
+13 个内置 Provider 的 id 是 `codex`、`claude`、`traex`、`hermes`、`pi`、`grok`、`gemini`、`antigravity`、`cursor`、`kimi`、`droid`、`copilot`、`opencode`；默认 Executor 的 `executorId` 与 Provider id 相同。id 清单唯一见 [`BUILT_IN_AGENT_PROVIDER_IDS`](src/agent-provider-id.ts)（也从 `@agentmux/core/provider-id` 导出），组合见 [`providers/index.ts`](src/providers/index.ts)；各 Provider 能否回答权限请求、是否支持原生恢复、fork 与历史，见[根 README 的 Provider 表](../../README.zh-CN.md#一套-api-接入-agent-cli)。Provider 已注册不代表对应 CLI 已在本机安装和登录。自定义 Provider 通过 [`defineAgentProvider`](src/agent-provider.ts) 与 [plugins](src/agent-plugin.ts) 扩展。
 
 下表列出主要能力的 SDK 入口和 `amux` 模块。子路径的完整清单以 [package.json](package.json) 的 `exports` 为准，命令参数以所运行版本的 `amux MODULE --help` 为准。
 

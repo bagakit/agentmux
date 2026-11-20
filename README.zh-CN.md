@@ -4,7 +4,7 @@
 
 <br>
 
-**AgentMux 让 Codex、Claude Code、Gemini 等 13 种 Coding Agent CLI 在你的电脑上并排工作。<br>
+**AgentMux 让 Codex、Claude Code、Gemini、Antigravity 等 Coding Agent CLI 在你的电脑上并排工作。<br>
 Agent 进程跑在独立的 Runtime 里，关闭或更新 App 都不会让它们停下；<br>
 Agent 还能用 `amux` 命令行直接操作这个工作台。**
 
@@ -50,9 +50,9 @@ Agent 进程跑在 ctxmux daemon 里。退出、重启 App，或者只热更新�
 
 > 见 [Durable Runtime 健康](docs/design/behavior/session-recovery.md#durable-runtime-健康) · [冷启动按需恢复](docs/design/behavior/session-recovery.md#冷启动按需恢复p0-末位) · [Terminal 运行时](docs/architecture/terminal-runtime.md)
 
-### 一套 API 驱动 13 种 Agent CLI
+### 一套 API 接入 Agent CLI
 
-每家 CLI 的差异由各自的 Provider 消化，Provider 的 catalog 只声明对这家 CLI 实际核实过的能力。client 对所有 Agent 调用同一套 API，不需要为某一家的协议行为写分支。
+每个 Provider 适配对应 CLI 的原生协议，并声明支持的能力。Core 提供统一的类型化 API，覆盖 Session、输入、权限、状态、历史和恢复。
 
 | Provider | 权限 | 原生恢复 | 原生 fork | 原生历史 |
 | --- | :---: | :---: | :---: | :---: |
@@ -62,9 +62,11 @@ Agent 进程跑在 ctxmux daemon 里。退出、重启 App，或者只热更新�
 | Hermes | 可观察 | | | ● |
 | TraeX · Pi | — | ● | | ● |
 
-<sub>来源：[`providers/index.ts`](packages/core/src/providers/index.ts) 与各 Provider 的 catalog。「可回答」指 AgentMux 能结构化回答这家 CLI 的授权请求，「可观察」指只能看到请求。Provider 已注册不代表该 CLI 在本机可用，每个 CLI 都要单独安装并登录。自定义 Provider 的扩展点是 [`defineAgentProvider`](packages/core/src/agent-provider.ts) 与 [plugins](packages/core/src/agent-plugin.ts)；Desktop 目前只列出内置 Provider。</sub>
+<sub>来源：[`providers/index.ts`](packages/core/src/providers/index.ts) 与各 Provider 的 catalog。「可回答」指 AgentMux 能结构化回答这家 CLI 的授权请求，「可观察」指只能看到请求。各 CLI 在实际执行的 Host 上安装和登录。Core 通过 [`defineAgentProvider`](packages/core/src/agent-provider.ts) 和[插件 API](packages/core/src/agent-plugin.ts)接入自定义 Provider。</sub>
 
-对支持原生历史的 11 个 Provider，Core 读取 CLI 自己的会话记录，有的直接读文件，有的经 CLI 原生的 app-server 读取，比如 Codex 的 JSONL 会话文件、Cursor 的 SQLite `store.db`、Grok 的 `chat_history.jsonl`、Antigravity 的 presence lock 与 transcript。Desktop 的对话视图、手机端和 `amux agent history --source native` 都经同一个 Core 接口读取这些记录，各个 client 不另存消息缓存。Core 自己记下的提交回执和 Hook 观察是另一个来源，单独保留。同一个 Session 可以在终端和对话视图之间切换。
+在 **Settings → Agent CLIs → Providers** 可比较所选 Host 的能力声明，并进入对应的 Executors 或 Hook 配置。命令行也可用 [`amux agent provider ls --host HOST`](packages/core/guides/modules/agent.md) 读取同一目录。Antigravity 支持 Terminal 和[结构化 ACP 会话](docs/guides/provider-acp.md)。
+
+对支持原生历史的 Provider，Core 从 CLI 的文件或原生服务读取会话记录，例如 Codex 的 JSONL 文件、Cursor 的 SQLite 数据库，以及 Grok 和 Antigravity 的会话记录。Desktop 的对话视图、手机端和 `amux agent history --source native` 都经同一个 Core 接口读取这些记录，各个 client 不另存消息缓存。Core 自己记下的提交回执和 Hook 观察是另一个来源，单独保留。同一个 Session 可以在终端和对话视图之间切换。
 
 > 见 [对话视图](docs/design/behavior/conversation-mode.md) · [对话协议](docs/specs/conversation-protocol.md) · [原生对话读取](packages/core/README.md#原生对话读取)
 

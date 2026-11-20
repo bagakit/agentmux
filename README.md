@@ -4,7 +4,7 @@
 
 <br>
 
-**AgentMux runs Codex, Claude Code, Gemini and ten other coding-agent CLIs side by side on your machine.<br>
+**AgentMux runs Codex, Claude Code, Gemini, Antigravity and other coding agent CLIs side by side on your machine.<br>
 The agents live in a separate runtime, so closing or updating the app doesn't stop them,<br>
 and they can operate the workbench themselves through the `amux` CLI.**
 
@@ -50,9 +50,9 @@ If a process has really ended and its CLI supports native resume, Core resumes t
 
 > See [Durable Runtime health](docs/design/behavior/session-recovery.md#durable-runtime-健康) · [On-demand cold-start recovery](docs/design/behavior/session-recovery.md#冷启动按需恢复p0-末位) · [Terminal runtime](docs/architecture/terminal-runtime.md)
 
-### One API across 13 agent CLIs
+### One API for agent CLIs
 
-A Provider absorbs one CLI's differences, and its catalog declares only capabilities that have been verified against that CLI. Clients call the same API for every agent, with no agent-specific branches for protocol behavior.
+Each Provider adapts its CLI’s native protocol and declares which capabilities it supports. Core exposes a typed API for Sessions, input, permissions, status, history and recovery.
 
 | Provider | Permission | Native resume | Native fork | Native history |
 | --- | :---: | :---: | :---: | :---: |
@@ -62,9 +62,11 @@ A Provider absorbs one CLI's differences, and its catalog declares only capabili
 | Hermes | observes | | | ● |
 | TraeX · Pi | — | ● | | ● |
 
-<sub>Source: [`providers/index.ts`](packages/core/src/providers/index.ts) and each Provider's catalog. "Answers" means AgentMux can answer that CLI's permission requests in a structured way; "observes" means it can only see them. A registered Provider doesn't mean the CLI is available on your machine: each one is installed and signed in separately. Custom Providers extend [`defineAgentProvider`](packages/core/src/agent-provider.ts) and [plugins](packages/core/src/agent-plugin.ts); the desktop app currently lists built-in Providers only.</sub>
+<sub>Source: [`providers/index.ts`](packages/core/src/providers/index.ts) and each Provider's catalog. "Answers" means AgentMux can answer that CLI's permission requests in a structured way; "observes" means it can only see them. Install and sign in to each CLI on its execution Host. Core supports custom Providers through [`defineAgentProvider`](packages/core/src/agent-provider.ts) and the [plugin API](packages/core/src/agent-plugin.ts).</sub>
 
-For the 11 Providers with native history, Core reads the CLI's own session records, either from its files or through the CLI's native app-server: Codex's JSONL session files, Cursor's SQLite `store.db`, Grok's `chat_history.jsonl`, Antigravity's presence lock and transcripts, and so on. The desktop conversation view, the mobile client and `amux agent history --source native` read those records through the same Core interface, and no client keeps a message cache of its own. What Core records itself, such as submission receipts and hook observations, stays a separate source. One Session can switch between its terminal and this conversation view.
+In **Settings → Agent CLIs → Providers**, compare the selected Host’s Provider catalog and open its Executors or Hook configuration. Use [`amux agent provider ls --host HOST`](packages/core/guides/modules/agent.md) to read the same catalog from the CLI. Antigravity supports both Terminal and [structured ACP sessions](docs/guides/provider-acp.md).
+
+For Providers with native history, Core reads records from the CLI’s files or native service. Examples include Codex’s JSONL files, Cursor’s SQLite store, and Grok and Antigravity session records. The desktop conversation view, the mobile client and `amux agent history --source native` read those records through the same Core interface, and no client keeps a message cache of its own. What Core records itself, such as submission receipts and hook observations, stays a separate source. One Session can switch between its terminal and this conversation view.
 
 > See [Conversation view](docs/design/behavior/conversation-mode.md) · [Conversation protocol](docs/specs/conversation-protocol.md) · [Native conversation reading](packages/core/README.md#原生对话读取)
 
