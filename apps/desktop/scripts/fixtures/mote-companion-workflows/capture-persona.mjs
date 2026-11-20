@@ -24,6 +24,7 @@ const receipt = { passed: false, captureOnly: true, captureSubset: recoveryPolic
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 try {
   const alias = { ...radixOverlayAliases, ...Object.fromEntries(['delivery-diagnostics','composer-file-reference','composer-semantic-reference','error-presentation'].map(name => ['@agentmux/client-ui/'+name,path.join(root,'packages/client-ui/src/lib/'+name+'.ts')])) }
+  alias['@agentmux/host/mote-model'] = path.join(root, 'apps/host/src/mote-model.ts')
   const workerInputs = {}
   const workers = { name: 'original-monaco-workers', setup(plugin) {
     plugin.onResolve({ filter: /\?raw$/ }, args => ({ path: path.resolve(args.resolveDir, args.path.slice(0, -4)), namespace: 'original-raw' }))
@@ -52,8 +53,8 @@ try {
   const clientUiRoot = path.join(root, 'packages/client-ui'), clientUiManifest = JSON.parse(await fs.readFile(path.join(clientUiRoot, 'package.json'), 'utf8'))
   const clientUiSource = { name: 'original-client-ui-source', setup(plugin) { plugin.onResolve({ filter: /^@agentmux\/client-ui(?:\/.*)?$/ }, args => { const key = args.path === '@agentmux/client-ui' ? '.' : '.' + args.path.slice('@agentmux/client-ui'.length); const entries = Object.entries(clientUiManifest.exports).sort(([a],[b]) => Number(a.includes('*')) - Number(b.includes('*')) || b.length-a.length); for (const [sub, target] of entries) { const [before,after] = sub.split('*'); if (sub !== key && (!sub.includes('*') || !key.startsWith(before) || !key.endsWith(after))) continue; const source = typeof target === 'string' ? target : target.browser; if (!source) throw Error('Missing current Source export'); return { path: path.join(clientUiRoot, source.replace('*', sub.includes('*') ? key.slice(before.length, key.length-after.length) : '')) } } throw Error('Unknown original UI export '+key) }) } }
   const built = await build({ absWorkingDir: root, entryPoints: [path.join(sourceFixture, entry + '.tsx')], outdir: compiled, bundle: true,
-    format: 'esm', platform: 'browser', target: 'esnext', jsx: 'automatic', logLevel: 'error', metafile: true, alias, plugins: [clientUiSource, workers],
-    loader: { '.png': 'file', '.gif': 'file', '.svg': 'file', '.woff2': 'file', '.ttf': 'file' }, define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' } })
+    format: 'esm', platform: 'browser', target: 'esnext', jsx: 'automatic', logLevel: 'error', metafile: true, conditions: ['production', 'browser'], alias, plugins: [clientUiSource, workers],
+    loader: { '.avif': 'file', '.png': 'file', '.gif': 'file', '.svg': 'file', '.woff': 'file', '.woff2': 'file', '.ttf': 'file' }, define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' } })
   for (const file of Object.keys({ ...built.metafile.inputs, ...workerInputs }).filter(file => !file.startsWith('original-worker:') && !file.startsWith('original-url:') && !file.startsWith('original-raw:'))) receipt.source[file] = sha(await fs.readFile(path.resolve(root, file)))
   if (selectFields) {
     receipt.overlayModules = Object.fromEntries(['react-dismissable-layer', 'react-focus-scope'].map(name => {

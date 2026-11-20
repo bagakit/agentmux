@@ -190,7 +190,7 @@ it('the actual Profile parent retains confirmed Main and its independent setup i
   await click(f.view.element.querySelector<HTMLButtonElement>('.mobile-session-identity.mobile-mote-heading')!)
   const profile = () => document.body.querySelector<HTMLElement>('.mobile-mote-profile')!
   await wait(() => expect(profile()?.querySelector('.mobile-mote-setup')).toBeTruthy())
-  await wait(() => expect(button(profile(), '新建 Main Agent').disabled).toBe(false)); await click(button(profile(), '新建 Main Agent'))
+  await wait(() => expect(button(profile(), '开始对话').disabled).toBe(false)); await click(button(profile(), '开始对话'))
   await wait(() => expect(f.rpc.mock.calls.some(([method]) => method === 'space.mote.dialogue.setup.advance')).toBe(true))
   const index = f.rpc.mock.calls.findIndex(([method]) => method === 'space.mote.dialogue.setup.advance')
   const result = await f.rpc.mock.results[index]!.value

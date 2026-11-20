@@ -72,7 +72,7 @@ it('actual Mobile Main action enables its original create control with a ready E
   const client = { runtimeOwnerIdentity: () => ({ runtimeId: 'original-private-runtime', ownerInstanceId: 'original-private-owner', availability: 'connected' }),
     forwardRpc: x.calls, onEvent: () => () => {} } as unknown as AgentMuxHostedClient
   const configured = vi.fn(), bound = vi.fn(), view = await mount(<MobileMoteMainActions client={client} target={x.host.target} visible onConfigure={configured} onBound={bound} />)
-  const create = () => [...view.element.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '新建 Main Agent')
+  const create = () => [...view.element.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '开始对话')
   await observe(() => create() !== undefined)
   expect(create()?.disabled, 'The actual original Mobile Main control must be ready without catalog discovery').toBe(false)
   expect(view.element.textContent).not.toContain('正在核对主对话与配置')

@@ -28,7 +28,17 @@ app.whenReady().then(async () => {
       assert.equal(facts.overflow, false); assert.equal(facts.drafts['original-display-session'], 'An original unsent question stays here.'); assert.equal(facts.drafts['analyst-region'], 'Analyst draft.')
       await fs.writeFile(path.join(evidence,name+'.png'),(await win.webContents.capturePage()).toPNG()); result.images.push(name+'.png'); result.operations.push({ name, ...facts })
     }
-    const edit = async (expected = 'fixture') => { await click('[aria-label="Edit quick mode"]'); for (let i=0;i<100 && await read('!!document.querySelector(".mote-quick-mode-dialog[aria-busy=true]") || document.body.textContent.includes("Reading MOTE.md")');i++) await pause(30); assert.equal(await read(`document.querySelector('[aria-label="Executor for new chat"]').dataset.value`), expected) }
+    const priority = () => read(`[...document.querySelectorAll('.mote-executor-priority li > span')].map(row=>row.textContent)`)
+    const edit = async () => {
+      await click('[aria-label="Edit quick mode"]')
+      for (let i = 0; i < 100 && !(await read('!!document.querySelector(".mote-executor-priority .selection-field")')); i++) await pause(30)
+      assert.ok((await priority()).length > 0)
+      assert.equal(await read(`!!document.querySelector('.selection-field[aria-label="Main Agent"]')`), false)
+    }
+    const add = async value => {
+      await click('[aria-label="Add Executor"]')
+      await click('[role="option"][data-value="' + value + '"]')
+    }
     await read('moteQuick.enter()'); await pause(180)
     assert.equal(await read('moteQuick.facts().selection.tabId'), 'original-discussion')
     assert.equal(await read('document.querySelector(".pane-tabbar .workbench-tab")?.dataset.workbenchTabId'), 'original-discussion')
@@ -57,28 +67,36 @@ app.whenReady().then(async () => {
       for (const light of [false, true]) {
         await read(`moteQuick.theme(${light})`)
         const mode = light ? 'light-narrow' : 'dark-wide'
-        win.setContentSize(light ? 320 : 1080, light ? 820 : 850)
-        await capture('executor-profile-' + mode)
-        await edit(); await click('[aria-label="Executor for new chat"]')
-        const facts = await read(`({ menu:document.querySelector('[role="menu"]')?.textContent, selected:document.querySelector('[role="menuitemradio"][aria-checked="true"]')?.dataset.value, native:document.querySelectorAll('.mote-quick-mode-dialog select').length })`)
-        assert.equal(facts.native, 0); assert.equal(facts.selected, 'fixture')
-        for (const text of ['Codex · Available', 'Claude · Check failed', 'Codex · Not installed']) assert.ok(facts.menu.includes(text), facts.menu)
-        await capture('executor-menu-' + mode)
-        await key('Escape'); assert.equal(await read(`document.activeElement?.getAttribute('aria-label')`), 'Executor for new chat')
-        assert.equal(await read(`!!document.querySelector('.mote-quick-mode-dialog')`), true)
-        await key('Escape')
+        win.setContentSize(light ? 375 : 1080, light ? 820 : 850)
+        await edit()
+        if (!light) {
+          assert.deepEqual(await priority(), ['Thoughtful colleague'])
+          await add('analyst')
+          await click('[aria-label="Move Research partner up"]')
+        }
+        assert.deepEqual(await priority(), ['Research partner', 'Thoughtful colleague'])
+        await capture('executor-priority-' + mode)
+        if (light) {
+          await click('[aria-label="Add Executor"]')
+          assert.equal(await read(`document.activeElement?.dataset.value`), 'missing')
+          assert.deepEqual(await read(`[...document.querySelectorAll('[role="option"]')].map(option => option.dataset.value)`), ['missing'])
+          await capture('executor-priority-menu-light-narrow')
+          await key('Escape')
+          assert.equal(await read(`document.activeElement?.getAttribute('aria-label')`), 'Add Executor')
+        }
+        await click('[aria-label="Close quick mode"]')
       }
-      await edit(); await click('[aria-label="Executor for new chat"]'); await key('R')
-      assert.ok((await read(`document.activeElement?.textContent`)).startsWith('Research partner'))
-      await key('Return'); assert.equal(await read(`document.querySelector('[aria-label="Executor for new chat"]').dataset.value`), 'analyst')
-      assert.equal(await read('moteQuick.facts().calls.filter(c=>c.operation==="write").length'), 0)
-      await read(`(()=>{const b=[...document.querySelectorAll('.mote-quick-mode-dialog button')].find(n=>n.textContent==='Save');b.dataset.captureSave='true'})()`)
-      await click('[data-capture-save]'); await pause(150)
-      assert.equal(await read('moteQuick.facts().defaults.defaults.executorId'), 'analyst')
-      await edit('analyst'); await capture('executor-saved-reopened-light-narrow'); await key('Escape')
-      await read('moteQuick.missingExecutor()'); await edit('saved-unavailable-executor')
-      await click('[aria-label="Executor for new chat"]'); await capture('executor-missing-saved-light-narrow')
-      assert.equal(await read('moteQuick.facts().calls.filter(c=>c.operation==="write").length'), 1)
+      await edit(); assert.deepEqual(await priority(), ['Research partner', 'Thoughtful colleague'])
+      await read(`(() => { const button = [...document.querySelectorAll('.mote-quick-mode-dialog button')].find(node => node.textContent === 'Save'); button.dataset.captureSave = 'true' })()`)
+      await click('[data-capture-save]')
+      for (let i = 0; i < 100 && await read('!!document.querySelector(".mote-quick-mode-dialog")'); i++) await pause(30)
+      const defaults = await read('moteQuick.facts().defaults.defaults')
+      assert.equal(defaults.executorId, 'analyst')
+      assert.deepEqual(defaults.fallbackExecutorIds, ['fixture'])
+      assert.equal(defaults.conversation.sessionId, 'original-core-session')
+      await edit()
+      assert.deepEqual(await priority(), ['Research partner', 'Thoughtful colleague'])
+      await capture('executor-priority-saved')
       result.passed = true; return
     }
     if (selectFields) {

@@ -1,4 +1,5 @@
 import { createRoot } from 'react-dom/client'
+import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'
 import { useState } from 'react'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
@@ -18,9 +19,11 @@ import { directoryIdentity, homeZoneId } from '../../../src/shared/space-address
 import type { ScratchTopicSnapshot, SessionSnapshot } from '../../../src/shared/contracts'
 import type { Demand } from '@agentmux/demand'
 import type { FileReadParams, FileReadResult } from '@agentmux/core'
+import { effectiveMoteQuickSave, moteQuickBaseline } from '@agentmux/core/mote-preferences'
 import '../../../src/renderer/src/styles/index.css'
 import '../mote-companion-workflows/persona-scene.css'
 
+mountThemeRuntime(window, { appAppearance: 'dark' })
 const workspacePath = new URLSearchParams(location.search).get('workspacePath')
 if (!workspacePath) throw Error('An isolated original workspace is required.')
 const workspace = { id: SCRATCH_WORKSPACE_ID, hostId: 'local', path: workspacePath, name: 'Motes', kind: 'folder' as const }
@@ -54,6 +57,25 @@ api.files.readPublic = async (params: FileReadParams): Promise<FileReadResult> =
   return { resource: { ...params.expectedResource, zoneId: params.zoneId, zonePath: topic.directoryPath, path }, result: disk[path] === undefined ? { status: 'deleted' } : { status: 'read', document: { path, content: disk[path]!, revision: await revision(disk[path]!) } } }
 }
 api.files.write = async (_workspace, input) => { calls.push({ operation: 'write', path: input.path }); if (await revision(disk[input.path] ?? '') !== input.expectedRevision) return { status: 'conflict', observedRevision: await revision(disk[input.path] ?? '') }; disk[input.path] = input.content; return { status: 'written', revision: await revision(input.content) } }
+api.motePreferences.read = async params => {
+  const source = await api.files.readPublic({ ...params.target, expectedResource: params.target.expectedResource, path: 'MOTE.md' })
+  return { kind: 'quick', target: params.target, status: unknown ? 'unconfirmed' : 'ready', main: true,
+    issue: unknown ? 'The original settings file is unconfirmed.' : null, source,
+    defaults: unknown ? null : (parseMoteQuickMode(disk[rootPath + '/MOTE.md']!) as Extract<ReturnType<typeof parseMoteQuickMode>, { status: 'valid' }>).defaults,
+    choices: params.includeChoices === false ? null : {
+      executors: params.includeChoices === 'locations' ? null : Object.entries(useAppStore.getState().config!.executors).map(([id, executor]) => ({ id, name: executor.label, providerId: executor.providerId })),
+      conversations: params.includeChoices === 'executors' ? null : [],
+      destinations: params.includeChoices === 'executors' ? null : []
+    } }
+}
+api.motePreferences.save = async params => {
+  const path = rootPath + '/MOTE.md'
+  const content = serializeMoteQuickMode(disk[path]!, effectiveMoteQuickSave(params))
+  disk[path] = content
+  calls.push({ operation: 'write', path })
+  const after = await api.motePreferences.read({ kind: 'quick', target: params.target, includeChoices: false })
+  return { kind: 'quick', target: params.target, status: 'saved', operationId: params.operationId, message: null, source: moteQuickBaseline(after) }
+}
 api.files.observe = async () => {}; api.files.unobserve = async () => {}; api.files.onInvalidated = () => () => {}
 api.scratch.listTopics = async () => [quickTopic(), secondTopic]; api.scratch.readTopic = async (_workspace, id) => id === topic.id ? quickTopic() : secondTopic; api.scratch.ensureMote = async () => quickTopic()
 const goals: Demand[] = ['experiment', 'research'].map((id, index) => ({ id: 'choice-' + id,
@@ -85,7 +107,7 @@ function Scene() {
   const reference = selection?.tabId && selection.regionId && selection.groupId ? { displayWorkspaceId: selection.workspaceId, groupId: selection.groupId, tabId: selection.tabId, regionId: selection.regionId } : null
   const materials = useMoteMaterialsActions(scope, { reference })
   Object.assign(window, { moteQuick: {
-    theme: (light: boolean) => { document.documentElement.dataset.appearance = light ? 'light' : 'dark' },
+    theme: (light: boolean) => updateThemeSelection({ appAppearance: light ? 'light' : 'dark' }),
     missingExecutor: () => { const parsed = parseMoteQuickMode(disk[rootPath + '/MOTE.md']!); if (parsed.status !== 'valid') throw Error('Original config unavailable'); disk[rootPath + '/MOTE.md'] = serializeMoteQuickMode(disk[rootPath + '/MOTE.md']!, { ...parsed.defaults, executorId: 'saved-unavailable-executor' }); useAppStore.setState({ scratchTopicSnapshots: { [workspace.id]: { ...useAppStore.getState().scratchTopicSnapshots[workspace.id]!, topics: [quickTopic(), secondTopic], revision: 1 } } }) },
     reset: () => { reset(); setEpoch(value => value + 1) }, unknown: () => { unknown = true },
     enter: () => useAppStore.getState().openScratchTopic(topic.id, workspace.id),

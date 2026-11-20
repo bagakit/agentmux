@@ -1,4 +1,3 @@
-import { chooseField } from './helpers/selection-field'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { saveMoteQuickDefaults } from '../src/renderer/src/lib/mote-quick-mode'
 // @vitest-environment happy-dom
@@ -234,28 +233,32 @@ describe('quick-mode original consumer counterexamples', () => {
     expect(useAppStore.getState().workbenchSpaceSelection?.tabId).toBe(defaultTab.id)
     expect(useAppStore.getState().agentComposerDrafts[defaultTab.layout.activeRegionId]).toBe('Later real input')
   })
-  it('Profile displays saved choices and reopens them selected, while Cancel never writes', async () => {
+  it('shows ordered Executors and keeps Main managed by AgentMux, while Cancel never writes', async () => {
     preferences(); const text = serializeMoteQuickMode('', { executorId: 'fixture', conversation })
     vi.spyOn(api.files, 'readPublic').mockImplementation(async params => ({ resource: { ...params.expectedResource, zoneId: params.zoneId, zonePath: moteTopics[0]!.directoryPath, path: moteTopics[0]!.directoryPath.slice(scratchWorkspace.path.length + 1) + '/' + params.path }, result: { status: 'read', document: { path: moteTopics[0]!.directoryPath.slice(scratchWorkspace.path.length + 1) + '/' + params.path, content: text, revision: 'sha256:' + '1'.repeat(64) } } }))
     const read = vi.spyOn(api.motePreferences, 'read').mockImplementation(async params => ({ kind: 'quick', target: params.target, status: 'ready', main: true, issue: null,
       source: await api.files.readPublic({ ...params.target, expectedResource: params.target.expectedResource, path: 'MOTE.md' }),
-      defaults: { executorId: 'fixture', conversation }, choices: { executors: [{ id: 'fixture', name: 'Fixture', providerId: 'fixture' }], conversations: [], destinations: [] } }))
-    const write = vi.spyOn(api.files, 'write'), create = vi.spyOn(api.files, 'create')
+      defaults: { executorId: 'fixture', conversation }, choices: params.includeChoices === false ? null : { executors: [{ id: 'fixture', name: 'Fixture', providerId: 'fixture' }, { id: 'codex', name: 'Codex', providerId: 'codex' }], conversations: null, destinations: null } }))
+    const save = vi.spyOn(api.motePreferences, 'save')
     useAppStore.setState({ toolsOpen: true, explorerCollapsed: { [SCRATCH_WORKSPACE_ID]: false } })
     await app.mount()
-    const timing = app.container.querySelector('.mote-quick-mode [aria-label="Mote heartbeat"]'); expect(timing).not.toBeNull(); expect(timing!.textContent).toContain('keeps an eye on things')
     await moteClick(app.container.querySelector<HTMLElement>('[aria-label="Edit quick mode"]')!)
-    const agent = document.querySelector<HTMLButtonElement>('[aria-label="Executor for new chat"]')!, selected = document.querySelector<HTMLButtonElement>('.selection-field[aria-label="Main Agent"]')!
-    expect(agent.dataset.value).toBe('fixture'); expect(JSON.parse(selected.dataset.value!)).toEqual(conversation)
-    await moteClick(selected)
-    const options = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')]
-    const mainChoice = options.find(item => item.dataset.value === JSON.stringify(conversation))
-    expect(mainChoice).toBeDefined(); expect(mainChoice!.textContent).toContain(neighborTab.name!); expect(mainChoice!.textContent).toContain(conversation.sessionId)
-    expect(options.some(item => item.textContent?.includes(defaultTab.name!) && item.textContent?.includes(defaultAgent.id))).toBe(true)
-    await moteClick(mainChoice!)
-    await chooseField(agent, 'fixture'); expect(read).toHaveBeenCalled()
+    await vi.waitFor(() => expect(document.querySelector('.mote-executor-priority .selection-field')).not.toBeNull())
+    const priority = document.querySelector<HTMLFieldSetElement>('.mote-executor-priority')!
+    const add = priority.querySelector<HTMLButtonElement>('[aria-label="Add Executor"]')!
+    const order = () => [...priority.querySelectorAll('li > span')].map(row => row.textContent)
+    expect(order()).toEqual(['Fixture'])
+    expect(document.querySelector('.selection-field[aria-label="Main Agent"]')).toBeNull()
+    await moteClick(add)
+    await moteClick(document.querySelector<HTMLElement>('[role="option"][data-value="codex"]')!)
+    expect(order()).toEqual(['Fixture', 'Codex'])
+    await moteClick(priority.querySelector<HTMLElement>('[aria-label="Move Codex up"]')!)
+    expect(order()).toEqual(['Codex', 'Fixture'])
+    await moteClick(priority.querySelector<HTMLElement>('[aria-label="Remove Fixture"]')!)
+    expect(order()).toEqual(['Codex'])
+    expect(read).toHaveBeenCalled()
     await moteClick(document.querySelector<HTMLElement>('[aria-label="Close quick mode"]')!)
-    expect(write).not.toHaveBeenCalled(); expect(create).not.toHaveBeenCalled(); expect(app.launch).not.toHaveBeenCalled()
+    expect(save).not.toHaveBeenCalled(); expect(app.launch).not.toHaveBeenCalled()
   })
   it('an unconfirmed source refuses only Save and keeps user choices, input and Agent', async () => {
     const topic = preferences(), scope = { topic, workspace: scratchWorkspace, rootPath: topic.directoryPath.slice(scratchWorkspace.path.length + 1) }

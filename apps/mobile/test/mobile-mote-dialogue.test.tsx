@@ -397,17 +397,17 @@ it('keeps work reply names scoped to the original Host and message when an event
 it('actual Mobile Profile creates Main only with its configured Executor and consumes the shared setup owner', async () => {
   const f = await original({ ...dialogue(), main: { ...dialogue().main, current: null, roleRevision: null } })
   await click(f.view.element.querySelector('.mobile-mote-heading')!)
-  await wait(() => expect(document.body.textContent).toContain('新建 Main Agent'))
-  await click(button(document.body, '新建 Main Agent'))
+  await wait(() => expect(document.body.textContent).toContain('开始对话'))
+  await click(button(document.body, '开始对话'))
   await wait(() => expect(document.body.textContent).toContain('Main 已绑定'))
-  expect([...document.querySelectorAll('.mobile-mote-setup button')].some(node => node.textContent === '新建 Main Agent')).toBe(false)
+  expect([...document.querySelectorAll('.mobile-mote-setup button')].some(node => node.textContent === '开始对话')).toBe(false)
   const create = f.rpc.mock.calls.find(([method]) => method === 'agent.open')![1]
   expect(create).toMatchObject({ content: { kind: 'new-agent', executorId: 'configured-original' }, destination: { spaceId, zoneId, newTab: true }, focus: false,
     moteMain: { target, expectedRoleRevision: null, sourceOperationId: create.operationId + ':source', bindOperationId: create.operationId + ':bind' } })
   expect(f.rpc).toHaveBeenCalledWith('space.mote.dialogue.setup.advance', { target, creation: { hostId: 'local', operationId: create.operationId } })
   expect(f.owner.snapshot().record.agentCreates?.[0]?.input).toEqual(create)
   const bound = f.owner.snapshot().record.agentCreates![0]!
-  await wait(() => expect(button(document.body, '新建并轮转 Main Agent')).toBeDefined())
+  await wait(() => expect(button(document.body, '开始新一轮对话')).toBeDefined())
   expect(f.owner.snapshot().record.agentCreates![0]!.input.operationId).toBe(bound.input.operationId)
   expect(f.rpc.mock.calls.some(([method]) => ['space.mote.preferences.save', 'space.mote.dialogue.link', 'agent.create'].includes(method))).toBe(false)
 })
@@ -415,8 +415,8 @@ it('actual Mobile Profile creates Main only with its configured Executor and con
 it('actual Mobile Profile keeps a lost Main creation across remount and inspects that same owner operation without creation replay', async () => {
   const f = await original({ ...dialogue(), main: { ...dialogue().main, current: null, roleRevision: null } }); f.setup('configured-original', true)
   await click(f.view.element.querySelector('.mobile-mote-heading')!)
-  await wait(() => expect(document.body.textContent).toContain('新建 Main Agent'))
-  await click(button(document.body, '新建 Main Agent'))
+  await wait(() => expect(document.body.textContent).toContain('开始对话'))
+  await click(button(document.body, '开始对话'))
   await wait(() => expect(f.owner.snapshot().record.agentCreates?.[0]?.phase).toBe('unknown'))
   const intent = structuredClone(f.owner.snapshot().record.agentCreates![0]!)
   await wait(() => expect(f.owner.snapshot().record.presentation?.profile).not.toBeNull())
@@ -435,8 +435,8 @@ it('actual Mobile unbound Main asks for its missing default Executor without bor
   const f = await original({ ...dialogue(), main: { ...dialogue().main, current: null, roleRevision: null } }); f.setup(null)
   await click(f.view.element.querySelector('.mobile-mote-heading')!)
   await wait(() => expect(document.body.textContent).toContain('先配置此 Mote 的默认 Executor'))
-  expect([...document.querySelectorAll('button')].some(node => node.textContent === '新建 Main Agent')).toBe(false)
-  expect(button(document.body, '配置默认 Executor')).toBeDefined()
+  expect([...document.querySelectorAll('button')].some(node => node.textContent === '开始对话')).toBe(false)
+  expect(button(document.body, '设置 Executor 优先级')).toBeDefined()
   expect(f.rpc.mock.calls.filter(([method]) => method === 'agent.open')).toHaveLength(0)
   expect(f.owner.snapshot().record.selectedSessionId).toBe(sid)
 })
@@ -455,8 +455,8 @@ it('actual Threads reads its original event while Main native conversation is st
 it('actual Mobile Main setup preserves an unrelated Host draft without taking away this configured creation', async () => {
   const f = await original({ ...dialogue(), main: { ...dialogue().main, current: null, roleRevision: null } }, false, true)
   await click(f.view.element.querySelector('.mobile-mote-heading')!)
-  await wait(() => expect(document.body.textContent).toContain('新建 Main Agent'))
-  await click(button(document.body, '新建 Main Agent'))
+  await wait(() => expect(document.body.textContent).toContain('开始对话'))
+  await click(button(document.body, '开始对话'))
   await wait(() => expect(document.body.textContent).toContain('Main 已绑定'))
   expect(f.owner.snapshot().record.moteFileDrafts?.[0]?.body).toBe('# unrelated unsaved draft')
   expect(f.rpc.mock.calls.filter(([method]) => method === 'agent.open')).toHaveLength(1)
@@ -466,8 +466,8 @@ it('actual Mobile Main setup preserves an unrelated Host draft without taking aw
 it('actual Mobile Profile rotation without a Query hands over from the original bound Main', async () => {
   const f = await original()
   await click(f.view.element.querySelector('.mobile-mote-heading')!)
-  await wait(() => expect(button(document.body, '新建并轮转 Main Agent')).toBeDefined())
-  await click(button(document.body, '新建并轮转 Main Agent'))
+  await wait(() => expect(button(document.body, '开始新一轮对话')).toBeDefined())
+  await click(button(document.body, '开始新一轮对话'))
   await wait(() => expect(f.rpc.mock.calls.some(([method]) => method === 'agent.open')).toBe(true))
   const create = f.rpc.mock.calls.find(([method]) => method === 'agent.open')![1]
   expect(create.moteMain.baseline.defaults.conversation).toEqual(dialogue().main.current)
@@ -479,8 +479,8 @@ it('actual Mobile Profile rotation without a Query hands over from the original 
 it('retains a confirmed rotation creation with unknown binding across Profile remount and inspects the same Core follow-up', async () => {
   const f = await original(); f.setup('configured-original', false, true)
   await click(f.view.element.querySelector('.mobile-mote-heading')!)
-  await wait(() => expect(button(document.body, '新建并轮转 Main Agent')).toBeDefined())
-  await click(button(document.body, '新建并轮转 Main Agent'))
+  await wait(() => expect(button(document.body, '开始新一轮对话')).toBeDefined())
+  await click(button(document.body, '开始新一轮对话'))
   await wait(() => expect(f.owner.snapshot().record.agentCreates?.[0]?.phase).toBe('confirmed'))
   const originalIntent = structuredClone(f.owner.snapshot().record.agentCreates![0]!)
   await wait(() => expect(f.owner.snapshot().record.presentation?.profile).not.toBeNull())
