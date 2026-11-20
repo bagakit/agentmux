@@ -57,6 +57,7 @@ export const workspaceSources = {
     'MessageDeliveryFailure',
     'MoteConversationStart',
     'MoteConversationThreads',
+    'MoteDirectThreads',
     'MoteFace',
     'MoteFirstMessage',
     'MoteGroupConversation',
