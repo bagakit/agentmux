@@ -6,7 +6,8 @@ import { afterAll, beforeAll, expect, it } from 'vitest'
 import { parseFocusTaskReference, parseFocusParams, type AgentMuxFocusTaskReference } from '../src/focus-control.js'
 import { focusTaskReadInputs, focusReadCommand, focusTaskHandoffNote } from '../src/focus-task-guidance.js'
 import { agentMuxModuleSkill, agentMuxCliModuleCatalog } from '../src/agentmux-cli-module-skills.js'
-import { guideSharedFocusTaskHandoff } from '../src/generated/agentmux-guides.js'
+import { composeAgentLaunchPrompt, composeAgentPrompt } from '../src/agent-outbound-message.js'
+import { parseAgentMuxMessagePrefix } from '../src/agent-message-render.js'
 import { ObjectCliProbe } from './helpers/object-cli-rpc.js'
 
 const scope = { kind: 'project' as const, hostId: 'original-host', projectSpaceId: 'original-project' }
@@ -68,13 +69,27 @@ it('formats hostile reference data as exact stdin for the real CLI without shell
   expect(JSON.parse(result.stdout).result.selection).toEqual(input.selection)
 })
 
-it('hands off same-source guidance and every exact batch without a wire envelope or card snapshot', () => {
+it('delivers the complete selection once alongside the untouched task in both Core composers', () => {
   const input = { scope, selection: { kind: 'members' as const, references: Array.from({ length: 257 }, (_, i) => member('reference-' + i)) } }
   const note = focusTaskHandoffNote(input)
-  expect(note.startsWith(guideSharedFocusTaskHandoff.text)).toBe(true)
-  const commands = note.split('\n').filter(line => line.startsWith("printf '%s'"))
-  expect(commands).toEqual(focusTaskReadInputs(input).map(focusReadCommand)); expect(commands).toHaveLength(2)
-  expect(note).not.toContain('<amux>'); expect(note).not.toContain('cardFacts'); expect(note).toContain('not a Dispatch')
+  const body = '整理这组工作。\n  <amux>例子</amux>'
+  const focusPrefix = '<amux:ref kind="focus-selection" read-via="focus read --help">'
+  expect(note.startsWith(focusPrefix)).toBe(true)
+  expect(note).toContain(scope.projectSpaceId)
+  expect(note).toContain('original-host/reference-0、original-host/reference-1')
+  const members = note.split('\n')[2]!.split('：')[1]!.split('、')
+  expect(new Set(members)).toEqual(new Set(input.selection.references.map(({ hostId, contextId }) => `${hostId}/${contextId}`)))
+  expect(note).not.toMatch(/<amux>|contextId|printf|cardFacts/)
+  for (const message of [
+    composeAgentPrompt(body, note),
+    composeAgentLaunchPrompt(body, true, ['Project guidance.', note].join('\n\n'), [{ text: 'Additional context.', omittedText: 'Read more.' }])
+  ]) {
+    expect(message.text.split(focusPrefix)).toHaveLength(2)
+    expect(message.text.endsWith(note + '\n\n' + body)).toBe(true)
+    const reading = parseAgentMuxMessagePrefix(message.text)
+    expect(reading?.declaredContexts?.at(-1)?.raw).toBe(note)
+    expect(reading?.body).toBe('\n\n' + body)
+  }
   expect(() => focusTaskHandoffNote({ ...task, cards: [] } as AgentMuxFocusTaskReference)).toThrow()
 })
 
