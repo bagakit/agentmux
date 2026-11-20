@@ -41,6 +41,7 @@ it('persists an authenticated Relay edge and uses it for signed calls and reader
   await until(() => gateway.resolvePublisher(offer.serverId), Boolean, 'original gateway publisher')
 
   const { identity: sourceIdentity, actor } = await source.rpc.call('route.choices', {})
+  expect((await source.rpc.call('route.edges', {})).edges).toEqual([])
   const target = await receiver.rpc.call('route.identity', {})
   const edge = { edgeId: 'receiver-via-relay', label: 'Original receiver', target, offer }
   const route = { source: sourceIdentity, hops: [{ edgeId: edge.edgeId, kind: 'relay' as const, target }] }
