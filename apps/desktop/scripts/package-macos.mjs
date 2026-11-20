@@ -260,6 +260,8 @@ async function verifyIdentity(appPath) {
     assert(await plistValue(plist, key) === MAP_LOCATION_USAGE, 'Packaged location usage text is wrong.')
   }
   assert((await plistValue(plist, 'NSScreenCaptureUsageDescription')).length > 0, 'Packaged screen capture purpose is missing.')
+  assert(await plistValue(plist, 'NSLocalNetworkUsageDescription') === applicationBranding(manifest.version).plist.NSLocalNetworkUsageDescription,
+    'Packaged local network usage text is wrong.')
   assert(!await pathExists(join(contents, 'Resources', 'default_app.asar')), 'Electron default app entered the package.')
   for (const suffix of ['', ' (Renderer)', ' (GPU)', ' (Plugin)']) {
     assert(

@@ -11,6 +11,7 @@ const failure = (message: string, code = 'HOST_SERVICE_UNCONFIRMED') => new Agen
 // A signed cold App can take longer to load the Host entrypoint than a warm RPC
 // takes to answer. This hang guard ends this observation only; launchd keeps the job.
 const HOST_STARTUP_HANG_GUARD_MS = 60_000
+const desktopBundleId = 'dev.agentmux.desktop'
 
 export type MacosHostService = {
   label: string
@@ -84,6 +85,7 @@ export function macosHostServicePlist(service: MacosHostService): string {
 <key>EnvironmentVariables</key><dict>${Object.entries(service.environment).map(([key, value]) => `<key>${xml(key)}</key>${string(value)}`).join('')}</dict>
 <key>KeepAlive</key><true/>
 <key>ProcessType</key><string>Interactive</string>
+<key>AssociatedBundleIdentifiers</key><array>${string(desktopBundleId)}</array>
 <key>StandardOutPath</key>${string(service.logPath)}
 <key>StandardErrorPath</key>${string(service.logPath)}
 </dict></plist>\n`
@@ -104,10 +106,13 @@ async function parseServicePlist(plist: string): Promise<unknown> {
 /** Compare the original service's effective paths, without adopting another target or rewriting it. */
 export function normalizeMacosHostServiceDefinition(definition: unknown, storePath: string): unknown {
   if (!definition || typeof definition !== 'object' || Array.isArray(definition)) return definition
-  const { ProcessType: _scheduling, ...fields } = definition as Record<string, unknown>, environment = fields.EnvironmentVariables
+  const { ProcessType: _scheduling, AssociatedBundleIdentifiers: associatedBundles, ...fields } = definition as Record<string, unknown>
+  const environment = fields.EnvironmentVariables
   // Scheduling class is not namespace identity: a service written before it was declared
   // owns the same Store, socket and Runs, and takes the new class at its next installation.
   if (_scheduling !== undefined && _scheduling !== 'Interactive') return definition
+  // Attribute the LaunchAgent to Desktop for macOS privacy without changing its Runtime identity.
+  if (associatedBundles !== undefined && !isDeepStrictEqual(associatedBundles, [desktopBundleId])) return definition
   if (!environment || typeof environment !== 'object' || Array.isArray(environment) ||
     Object.values(environment).some(value => typeof value !== 'string')) return definition
   const original = environment as Record<string, string>

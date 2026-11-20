@@ -15,6 +15,7 @@ export function applicationBranding(version) {
       CFBundleShortVersionString: version, CFBundleVersion: version,
       LSApplicationCategoryType: 'public.app-category.developer-tools',
       NSScreenCaptureUsageDescription: 'AgentMux captures the screen area you select to attach it to your message.',
+      NSLocalNetworkUsageDescription: 'AgentMux connects to the devices and Mesh gateways you configure on your local network.',
       NSLocationUsageDescription: MAP_LOCATION_USAGE,
       NSLocationWhenInUseUsageDescription: MAP_LOCATION_USAGE
     },
