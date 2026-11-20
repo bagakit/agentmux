@@ -74,12 +74,22 @@ try {
       alias['@agentmux/' + name + (subpath === '.' ? '' : subpath.slice(1))] = path.join(folder, source)
     }
   }
+  const demandRoot = path.join(root, 'packages/demand/src', 'index.ts')
+  const rendererDemand = { name: 'renderer-demand-source', setup(plugin) {
+    plugin.onLoad({ filter: /\/demand\/src\/index\.ts$/ }, async args => {
+      if (args.path !== demandRoot) return
+      const source = await fs.readFile(args.path, 'utf8')
+      // Keep the actual domain and validation exports in the renderer bundle.
+      // The filesystem owner and its CLI are Node entry points.
+      return { contents: source.replace(/^export .* from '\.\/(?:demand-store|cli)\.js'\s*$/gm, ''), loader: 'ts' }
+    })
+  } }
   for (const [subpath, target] of Object.entries(JSON.parse(await fs.readFile(path.join(root, 'apps/host/package.json'), 'utf8')).exports)) {
     if (subpath.includes('*')) continue
     alias['@agentmux/host' + (subpath === '.' ? '' : subpath.slice(1))] = path.join(root, 'apps/host', target.import.replace('./dist/', './src/').replace(/\.js$/u, '.ts'))
   }
   const built = await build({ absWorkingDir: root, entryPoints: [path.join(fixture, 'entry.tsx')], outdir: compiled, bundle: true,
-    format: 'esm', platform: 'browser', conditions: ['browser', 'production'], target: 'esnext', jsx: 'automatic', logLevel: 'error', metafile: true, alias, plugins: [...(mutant ? [groupMutation] : []), clientSources, workers],
+    format: 'esm', platform: 'browser', conditions: ['browser', 'production'], target: 'esnext', jsx: 'automatic', logLevel: 'error', metafile: true, alias, plugins: [...(mutant ? [groupMutation] : []), clientSources, rendererDemand, workers],
     loader: { '.png': 'file', '.gif': 'file', '.svg': 'file', '.avif': 'file', '.woff': 'file', '.woff2': 'file', '.ttf': 'file' }, define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' } })
   for (const file of Object.keys({ ...built.metafile.inputs, ...workerInputs }).filter(file => !file.startsWith('original-worker:') && !file.startsWith('original-url:') && !file.startsWith('original-raw:'))) receipt.source[file] = sha(await fs.readFile(path.resolve(root, file)))
   for (const file of [import.meta.filename, path.join(fixture, 'renderer-main.cjs'), ...navigation ? [] : [path.join(fixture, 'thread-discovery.cjs'), ...(groups ? [path.join(fixture, 'native-groups.cjs')] : []), ...(advanced ? [path.join(fixture, 'group-management.cjs')] : [])]]) receipt.source[path.relative(root, file)] = sha(await fs.readFile(file))
@@ -93,7 +103,7 @@ try {
   await fs.writeFile(path.join(directory, 'renderer.log'), logs.join('\n'))
   receipt.renderer = JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8'))
   assert.equal(receipt.process.exitCode, 0); assert.equal(receipt.renderer.passed, true)
-  assert.equal(receipt.renderer.images.length, direct ? 6 : navigation ? 15 : advanced ? 10 : groups ? 7 : process.argv.includes('--notice-only') ? 2 : 15, 'Every named real product scene must be captured')
+  assert.equal(receipt.renderer.images.length, direct ? 7 : navigation ? 15 : advanced ? 10 : groups ? 7 : process.argv.includes('--notice-only') ? 2 : 15, 'Every named real product scene must be captured')
   if (navigation) {
     receipt.restartProcess = await runProbeProcess(require('electron'), [path.join(fixture, 'renderer-main.cjs'), path.join(compiled, 'index.html'), directory, directory, '--restore'], { cwd: root, env, timeoutMs: 45000, onLine: line => logs.push(line) })
     receipt.restart = JSON.parse(await fs.readFile(path.join(directory, 'renderer-restart-result.json'), 'utf8'))
