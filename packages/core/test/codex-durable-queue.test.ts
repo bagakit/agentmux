@@ -199,10 +199,11 @@ it.each(['lost-ack', 'partial-ack', 'wire', 'correlation', 'reject', 'unsupporte
     expect((await h.client.statusAgent('recipient')).run).toMatchObject({ state: 'running', pid: 700001 })
   })
 
-it.each(['admitted', 'unknown'] as const)('keeps external conversation input %s on the original ordinary Codex queue', async outcome => {
+it.each(['admitted', 'unknown', 'retained'] as const)('keeps external conversation input %s on the original ordinary Codex queue', async scenario => {
   const h = await rpcOwnerFixture(['recipient']); closes.push(h.close)
-  const f = await fixture()
-  if (outcome === 'unknown') await f.update({ failure: 'lost-ack' })
+  const f = await fixture(), outcome = scenario === 'unknown' ? 'unknown' : 'admitted'
+  if (scenario === 'unknown') await f.update({ failure: 'lost-ack' })
+  if (scenario === 'retained') await f.update({ queueReadResult: null })
   const original = (await h.store.readMetadata('recipient'))!
   await h.store.compareAndSwapMetadata(original, { ...original, workspacePath: f.root, nativeHandle: f.context.nativeHandle, updatedAt: Date.now() })
   await h.inner.registry.load('local')
@@ -226,6 +227,17 @@ it.each(['admitted', 'unknown'] as const)('keeps external conversation input %s 
   await h.client.submitAgentMessage(input, context)
   const rpc = new AgentMuxRpcService({ coreClients: h.coreClients })
   const inspect = () => rpc.call('agent.input.inspect', { key }, { principal: { kind: 'user', id: 'private-test-user' } })
+  if (scenario === 'retained') {
+    const ref = await vi.waitFor(async () => {
+      const { input: receipt } = await inspect()
+      expect(receipt).toMatchObject({ key, status: 'waiting',
+        control: { waiting: { phase: 'input-environment', reason: 'original-input-unconfirmed' } } })
+      return receipt!.ref
+    }, { timeout: 8000 })
+    expect(await h.client.inspectAgentPromptSubmission(key)).toBeNull()
+    await f.update({ queueReadResult: undefined })
+    await h.client.rejoinAgentInputWaiting({ ref, scope: 'wake-only' }, context)
+  }
   const settled = await vi.waitFor(async () => {
     const receipt = await inspect()
     expect(receipt.input).toMatchObject({ key, status: outcome, admission: { admission: { native: { outcome,
