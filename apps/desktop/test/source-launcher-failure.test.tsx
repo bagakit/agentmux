@@ -23,8 +23,8 @@ const creation = () => dom.container.querySelector('[aria-label="Original creati
 /** Actual Source/public service and Unix RPC → production Main/trusted IPC,
  * Preload, Renderer and component. Binding/native/create and controlled later
  * response delivery are leaves; no production writer or original task is run. */
-async function fixture(kind: 'writer' | 'prepare' | 'attach' = 'writer', privateInput = false) {
-  const source = await sourceCreationFixture(cleanup)
+async function fixture(kind: 'writer' | 'prepare' | 'attach' = 'writer', privateInput = false, realBindings = false) {
+  const source = await sourceCreationFixture(cleanup, undefined, { realBindings })
   if (privateInput) Object.assign(source.input.content, { prompt: 'PRIVATE_TASK_PAYLOAD', agentMuxNote: 'PRIVATE_NOTE_PAYLOAD' })
   if (kind === 'writer') source.bindings.continueOriginal.mockRejectedValueOnce(new AgentMuxError('The original execution coordinator already has a writer.', 'EXECUTION_OWNER_UNAVAILABLE'))
   else if (kind === 'attach') source.bindings.continueOriginal.mockImplementationOnce(async reference => { throw new AgentMuxError("Expected ',' or ']' after array element: PRIVATE_NATIVE_PAYLOAD", 'EXECUTION_CREATION_UNCONFIRMED', undefined, undefined, undefined, undefined, undefined, { reference, hostId: 'local', role: 'executor', stage: 'attach' }) })
@@ -91,6 +91,26 @@ test('a newer observer failure leaves the original creation cause and request in
   await vi.waitFor(() => expect(dom.container.textContent).toContain('Transport observation failed'))
   expect(creation()?.textContent).toContain('already has a writer')
   expect(f.source.create).not.toHaveBeenCalled(); expect(f.source.bindings.continueOriginal).toHaveBeenCalledTimes(1); expect(f.onContinue).not.toHaveBeenCalled()
+})
+
+test('the Source keeps a prior preparation cause readable after the Launcher loses its original receipt', async () => {
+  const f = await fixture('prepare', true, true), clipboard = await clipboardConsumer()
+  const { receipt: _receipt, ...input } = f.input
+  await f.render(input)
+  await act(async () => button('Check original task').click())
+  const details = () => dom.container.querySelector('[aria-label="Last recorded creation failure"]')
+  await vi.waitFor(() => expect(details()?.textContent).toContain('EXECUTION_HELPER_UNAVAILABLE'))
+  expect(details()?.closest('details')?.open).toBe(false)
+  expect(dom.container.querySelector('.source-launch-feedback__status')?.textContent).toContain('Tool helper preparation is unconfirmed')
+  await act(async () => button('Copy diagnostics').click())
+  await vi.waitFor(() => expect(clipboard.values).toHaveLength(1))
+  expect(JSON.parse(clipboard.values[0]!).execution.diagnostics).toMatchObject({
+    connection: { state: 'unconfirmed', code: 'EXECUTION_OBSERVATION_UNCONFIRMED' },
+    lastCreationFailure: { role: 'executor', stage: 'prepare', code: 'EXECUTION_HELPER_UNAVAILABLE' },
+  })
+  expect(clipboard.values[0]).not.toContain('PRIVATE_')
+  expect(f.source.prepare).toHaveBeenCalledOnce(); expect(f.source.starts).not.toHaveBeenCalled()
+  expect(f.source.create).not.toHaveBeenCalled(); expect(f.source.agentInput).not.toHaveBeenCalled()
 })
 
 test.each(['operation', 'session', 'runtime'] as const)('a foreign %s report cannot replace this original diagnosis or actions', async kind => {

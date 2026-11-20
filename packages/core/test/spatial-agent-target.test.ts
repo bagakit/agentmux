@@ -285,6 +285,7 @@ it('the background local Host creator preserves the same ordinary fields without
     return await f.create({...input,agentSessionId:input.agentSessionId,createOperationId:input.createOperationId,executorRevision:'local-config-revision'})
   })
   Object.assign(f.runtime.client,{resolveAgentCreationSessionId:f.client.resolveAgentCreationSessionId,inspectAgentCreation:f.client.inspectAgentCreation,createHostAgentWithDelivery:create,
+    readAgentInputEpoch:f.client.readAgentInputEpoch,
     listHostExecutors:async()=>({runtimeId:'runtime-b',executors:[{executorId:'d-executor',configRevision:'local-config-revision',creationContract:{ordinaryLaunch:1}}]}),
     agentCreationAuthority:async()=>({runtimeId:'runtime-b'})})
   const {agentTarget:_target,...content} = f.input.content

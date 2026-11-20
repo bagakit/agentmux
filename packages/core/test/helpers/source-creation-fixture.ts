@@ -4,14 +4,13 @@ import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { isDeepStrictEqual } from 'node:util'
-import { AgentMuxError } from '@agentmux/core'
+// The Host imports the package entry. Use that same owner and error class for
+// the Source fixture so typed faults survive its public dispatch boundary.
+import { AgentMuxError, AgentMuxControlServer, AgentMuxSpatialStateStore, AgentExecutionBindingService, connectAgentMuxRpc } from '@agentmux/core'
 import type { AgentMuxRpcServiceOptions } from '../../src/public-rpc-service.js'
-import { AgentMuxControlServer } from '../../src/public-rpc-server.js'
-import { connectAgentMuxRpc } from '../../src/public-rpc-client.js'
-import { AgentMuxSpatialStateStore } from '../../src/spatial-state.js'
 import { createHostSpatialAgentControl } from '../../../../apps/host/src/spatial-agent-control.js'
 import type { AgentMuxHeadlessRuntime } from '../../src/headless-runtime.js'
-import { AgentExecutionBindingService, type AgentExecutionHostPort, type AgentExecutionOpenInput } from '../../src/agent-execution-coordinator.js'
+import type { AgentExecutionHostPort, AgentExecutionOpenInput } from '../../src/agent-execution-coordinator.js'
 import type { AgentMuxAgentSession, AgentMuxAgentCreationInspection } from '../../src/types.js'
 
 /** This preflight isolates spatial ownership: target control/Native creation are
@@ -92,9 +91,9 @@ export async function sourceCreationFixture(releases: Array<() => unknown | Prom
   if (options.realBindings) {
     service = newService(); releases.push(() => service?.dispose())
     bindings.sourceDiagnostics.mockImplementation((operationId, context) => service!.sourceDiagnostics(operationId, context))
-    bindings.admit.mockImplementation((input, context, observed) => {
+    bindings.admit.mockImplementation((input, context, source) => {
       const { sourceRequestDigest, ...original } = input
-      return service!.admit(options.legacyBindingDigest ? original : input, context, observed)
+      return options.legacyBindingDigest ? service!.admit(original, context) : service!.admit(input, context, source)
     })
     bindings.create.mockImplementation(input => service!.create(input) as never)
     bindings.continueOriginal.mockImplementation(original => service!.continueOriginal(original) as never)
