@@ -402,7 +402,7 @@ export function createHostGoals(options: {
     const predecessor = loop?.initialDelivery?.condition ?? agentPromptCondition(session)
     const condition = { expectedRun: predecessor.expectedRun, afterSubmissionId: predecessor.afterSubmissionId, ...optionalInputEpoch(savedStart.inputEpoch) }
     const control = { kind: 'agent' as const, hostId: resolved.hostId, agentSessionId: selected, run: session.run }
-    const note = goalRoleInputNote(undefined, { role: 'executor', goalId: goal.id, agentSessionId: selected, runId: session.run.runId,
+    const note = goalRoleInputNote(undefined, { role: loop ? 'manager' : 'executor', goalId: goal.id, agentSessionId: selected, runId: session.run.runId,
       source: { kind: loop ? 'goal-native-continuation' : 'goal-start', operationId } }, await runtime.inspectGoalStart(savedStart))
     const submitted = await dispatch.submit({ goalId: goal.id, operationId, ...optionalInputEpoch(savedStart.inputEpoch) }, control, operationId, prompt, async () => {
       await current(context)
