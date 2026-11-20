@@ -1,11 +1,19 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, expect, it } from 'vitest'
 import { AgentMuxCreationAuthority } from '../src/agent-creation-authority.js'
-import { messagePacketDigest, parseSignedMessage } from '../src/agent-message-federation.js'
+import { messageApprovalCandidate, messagePacketDigest, parseSignedMessage } from '../src/agent-message-federation.js'
 import type { AgentMuxMessageEnvelope } from '../src/agent-message-envelope.js'
 import { DurableAgentMuxMessageQueue } from '../src/agent-global-message-queue.js'
+import { AgentMuxClient } from '../src/client.js'
+import { agentPromptCondition } from '../src/agent-prompt-condition.js'
+import { AgentMuxControlServer } from '../src/public-rpc-server.js'
+import { connectAgentMuxRpc, type AgentMuxRpcClient } from '../src/public-rpc-client.js'
+import type { AgentMuxRpcMethod, AgentMuxRpcParams } from '../src/public-rpc.js'
+import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
+import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
+import { runSourceObjectCli } from './helpers/source-object-cli.js'
 
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map(path => rm(path, { recursive: true, force: true }))) })
@@ -113,3 +121,120 @@ it('persists only the exact target Core signed inbox proof without changing outb
   expect((await queue.listMessageEvents({ participantSessionId: 'same-session' }, async () => {}, f.a.runtimeId)).events.map(event => event.kind)).toContain('message-peer-inbox')
   expect(await f.source.listTrustedMessageSources()).toEqual([])
 })
+
+it('uses one reviewed outbox packet through the public CLI and target Inbox without creating message-source trust', async () => {
+  const authority = (root: string, runtimeId: string) => new AgentMuxCreationAuthority({ stateDirectory: join(root, 'authority'), runtimeId })
+  const from = await rpcOwnerFixture(['sender', 'other-source'], undefined, undefined, root => ({ creationAuthority: authority(root, 'runtime-a') }))
+  const to = await rpcOwnerFixture(['recipient', 'sender'], undefined, undefined, root => ({ creationAuthority: authority(root, 'runtime-b') }))
+  const sourceIdentity = await from.client.agentMessageAuthority()
+  const targetIdentity = await to.client.agentMessageAuthority()
+  const target = { runtimeId: targetIdentity.runtimeId, agentSessionId: 'recipient', runId: 'run-recipient' }
+  const prepare = (messageId: string) => from.client.prepareFederatedMessage({ caller: from.credentials,
+    target, targetKeyFingerprint: targetIdentity.fingerprint, operationId: 'op-' + messageId, messageId,
+    text: 'Original Unicode 正文\n', sourceChannel: 'cli' })
+  let remoteRpc: AgentMuxRpcClient
+  const remoteClient = Object.assign(Object.create(to.client) as typeof to.client, {
+    runtimeOwnerIdentity: () => ({ runtimeId: target.runtimeId, ownerInstanceId: 'recipient-owner', availability: 'connected' as const,
+      protocolVersion: 2, processId: process.pid, ctxmux: null }),
+    forwardRpc: <M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>) => remoteRpc.call<M>(method, params)
+  })
+  const sourceServer = new AgentMuxControlServer({ socketPath: join(from.root, 'outbox.sock'),
+    coreClients: () => [...from.coreClients(), { hostId: 'exact-remote', client: remoteClient }] })
+  const targetServer = new AgentMuxControlServer({ socketPath: join(to.root, 'inbox.sock'), coreClients: to.coreClients })
+  const socket = (server: AgentMuxControlServer) => ({ transport: 'unix' as const, path: server.path })
+  const cli = (server: AgentMuxControlServer, root: string, args: string[], input = '', env: NodeJS.ProcessEnv = {}) =>
+    runSourceObjectCli(['--endpoint', 'unix://' + server.path, 'message', 'federation', ...args], objectCliEnvironment(root, { NODE_NO_WARNINGS: '1', ...env }), input)
+  try {
+    await sourceServer.start(); await targetServer.start()
+    const targetRpc = await connectAgentMuxRpc({ endpoint: socket(targetServer) })
+    remoteRpc = targetRpc
+    const sourceRpc = await connectAgentMuxRpc({ endpoint: socket(sourceServer) })
+    try {
+      const selector = { messageId: 'reviewed-message', operationId: 'op-reviewed-message' }
+      const text = 'Original Unicode 正文\n'
+      // The actual ingress freezes and signs before the first target refusal.
+      await expect(sourceRpc.call('agent.send', { target: { kind: 'agent-session', agentSessionId: target.agentSessionId, hostId: 'exact-remote' },
+        expectedRecipientRuntimeId: target.runtimeId, expectedRun: { runId: target.runId }, text, ...selector, sourceChannel: 'cli' }, { credentials: from.credentials })
+      ).rejects.toMatchObject({ code: 'AGENT_MESSAGE_SOURCE_UNTRUSTED' })
+      const { packet: next } = await prepare('different-message')
+      const read = await cli(sourceServer, from.root, ['outbox', '--message-id', selector.messageId, '--operation-id', selector.operationId], '', {
+        AGENTMUX_AGENT_SESSION_ID: from.credentials.agentSessionId, AGENTMUX_AGENT_CAPABILITY: from.credentials.capability })
+      expect(read.code, read.stderr).toBe(0)
+      const { packet, ...renderedApproval } = JSON.parse(read.stdout).result as import('../src/agent-message-federation.js').AgentMuxMessageApprovalCandidate
+      const candidate = messageApprovalCandidate(packet, sourceIdentity.publicKey)
+      expect({ packet, ...renderedApproval }).toEqual(candidate)
+      expect(packet).toMatchObject({ envelope: { ...selector, body: text }, provenance: { source: { runtimeId: sourceIdentity.runtimeId,
+        agentSessionId: from.credentials.agentSessionId, runId: 'run-sender' }, target } })
+      await expect(sourceRpc.call('message.federation.outbox', { ...selector, operationId: 'different-operation' })).rejects.toMatchObject({ code: 'MESSAGE_PARTICIPANT_MISMATCH' })
+      await expect(sourceRpc.call('message.federation.outbox', selector, { credentials: { ...from.credentials, agentSessionId: 'other-source' } })).rejects.toMatchObject({ code: 'MESSAGE_PARTICIPANT_MISMATCH' })
+      await expect(targetRpc.call('message.federation.approve', candidate, { credentials: to.credentials })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+      await expect(sourceRpc.call('message.federation.approve', candidate)).rejects.toMatchObject({ code: 'AGENT_MESSAGE_TARGET_MISMATCH' })
+      await expect(targetRpc.call('message.federation.approve', { ...candidate, packet: next })).rejects.toMatchObject({ code: 'AGENT_MESSAGE_APPROVAL_MISMATCH' })
+      const wrongKey = messageApprovalCandidate(packet, targetIdentity.publicKey)
+      await expect(targetRpc.call('message.federation.approve', wrongKey)).rejects.toMatchObject({ code: 'AGENT_MESSAGE_AUTHORITY_INVALID' })
+      const forgery = messageApprovalCandidate({ ...packet, provenance: { ...packet.provenance, signature: 'A'.repeat(86) } }, sourceIdentity.publicKey)
+      await expect(targetRpc.call('message.federation.approve', forgery)).rejects.toMatchObject({ code: 'AGENT_MESSAGE_AUTHORITY_INVALID' })
+
+      const help = await cli(targetServer, to.root, ['approve', '--help'])
+      expect(help.code, help.stderr).toBe(0)
+      expect(help.stdout).toContain('--approve-digest SHA256')
+      const changed = await cli(targetServer, to.root, ['approve', '--input', '-', '--approve-digest', '0'.repeat(64)], JSON.stringify(candidate))
+      expect(changed.code).toBe(1)
+      expect(JSON.parse(changed.stderr)).toMatchObject({ error: { code: 'AGENT_MESSAGE_APPROVAL_MISMATCH' } })
+      const applied = await cli(targetServer, to.root, ['approve', '--input', '-', '--approve-digest', candidate.packetDigest], JSON.stringify(candidate))
+      expect(applied.code, applied.stderr).toBe(0)
+      const receipt = JSON.parse(applied.stdout).result
+      expect(receipt).toMatchObject({ envelope: packet.envelope, provenance: packet.provenance, deliveryMode: 'reference', notification: { state: 'inbox-only' },
+        recipientInbox: { runtimeId: target.runtimeId, keyFingerprint: targetIdentity.fingerprint, ...selector, intentDigest: packet.provenance.intentDigest, diskDurability: 'confirmed' } })
+      await expect(targetRpc.call('message.federation.intake', { packet: next })).rejects.toMatchObject({ code: 'AGENT_MESSAGE_SOURCE_UNTRUSTED' })
+      expect(await to.client.listTrustedMessageSources()).toEqual([])
+      const one = new DurableAgentMuxMessageQueue(to.client.agentMessageQueuePath())
+      const custodyRecords = (await one.readJournal()).filter(record => record.kind === 'message')
+      expect(custodyRecords).toHaveLength(1)
+      const importPath = join(to.root, 'historical-input.ndjson')
+      await writeFile(importPath, JSON.stringify(custodyRecords[0]) + '\n')
+      const imported = new DurableAgentMuxMessageQueue(importPath)
+      expect((await imported.readByMessageId(selector.messageId))?.notification).toEqual({ state: 'inbox-only' })
+      expect(await imported.pendingNotificationRecipients()).toEqual([])
+      expect(await targetRpc.call('message.read', { hostId: 'local', messageId: selector.messageId })).toMatchObject({ message: { envelope: packet.envelope, notification: { state: 'inbox-only' } } })
+      await expect(targetRpc.call('message.notify', { hostId: 'local', operationId: 'notify-custody', messageIds: [selector.messageId] }))
+        .rejects.toMatchObject({ code: 'A2A_MESSAGE_INBOX_ONLY' })
+      await expect(targetRpc.call('message.notify', { hostId: 'local', operationId: 'notify-as-colliding-sender', messageIds: [selector.messageId] },
+        { credentials: { ...to.credentials, agentSessionId: 'sender' } })).rejects.toMatchObject({ code: 'A2A_MESSAGE_INBOX_ONLY' })
+      const signedRead = await from.client.prepareFederatedRead({ caller: from.credentials, sourceMessageId: selector.messageId })
+      await expect(targetRpc.call('message.federation.export', { authority: signedRead })).rejects.toMatchObject({ code: 'AGENT_MESSAGE_SOURCE_UNTRUSTED' })
+      expect(to.inner.kernel.input).not.toHaveBeenCalled()
+
+      const before = (await to.store.readMetadata(target.agentSessionId))!
+      const replacement = { ...before, run: { runId: 'replacement-run' }, retiredRuns: [before.run] }
+      await to.store.compareAndSwapMetadata(before, replacement)
+      await to.inner.registry.load('local')
+      await expect(targetRpc.call('message.federation.approve', messageApprovalCandidate(next, sourceIdentity.publicKey))).rejects.toMatchObject({ code: 'AGENT_CAPABILITY_STALE_RUN' })
+      await targetRpc.dispose(); await targetServer.stop(); await to.client.dispose()
+      const reopened = new AgentMuxClient({ store: to.store, creationAuthority: authority(to.root, 'runtime-b') })
+      const reopenedServer = new AgentMuxControlServer({ socketPath: targetServer.path, coreClients: () => [{ hostId: 'local', client: reopened }] })
+      try {
+        await reopenedServer.start(); const reread = await connectAgentMuxRpc({ endpoint: socket(reopenedServer) })
+        try {
+          expect((await reread.call('message.federation.approve', candidate)).recipientInbox).toEqual(receipt.recipientInbox)
+          const journal = new DurableAgentMuxMessageQueue(reopened.agentMessageQueuePath())
+          // The automatic producer considers a legitimate successor's original Run lineage.
+          expect(await journal.prepareNotification({ notificationId: 'successor-turn-end', agentSessionId: target.agentSessionId,
+            condition: agentPromptCondition(replacement), sourceRuns: [replacement.run.runId, target.runId],
+            turnEnd: { nativeTurnId: 'first-turn-end', hookReceiptId: 'original-hook-receipt' } })).toBeNull()
+          expect(await journal.pendingNotificationRecipients()).toEqual([])
+          expect((await journal.readJournal()).filter(record => record.kind === 'message')).toHaveLength(1)
+          await reopened.trustMessageSource({ sourceRuntimeId: sourceIdentity.runtimeId, publicKey: sourceIdentity.publicKey,
+            targetRuntimeId: targetIdentity.runtimeId, targetKeyFingerprint: targetIdentity.fingerprint }, { kind: 'user', id: 'isolated-target-user' })
+          const { packet: normal } = await from.client.prepareFederatedMessage({ caller: from.credentials,
+            target: { ...target, runId: replacement.run.runId }, targetKeyFingerprint: targetIdentity.fingerprint,
+            operationId: 'trusted-original-op', messageId: 'trusted-original-mid', text: 'Ordinary pinned message', sourceChannel: 'cli' })
+          const normallyReceived = await reread.call('message.federation.intake', { packet: normal })
+          expect(normallyReceived.notification).toMatchObject({ state: 'pending' })
+          const approvedAfterReceipt = await reread.call('message.federation.approve', messageApprovalCandidate(normal, sourceIdentity.publicKey))
+          expect(approvedAfterReceipt).toEqual(normallyReceived)
+        } finally { await reread.dispose() }
+      } finally { await reopenedServer.stop(); await reopened.dispose() }
+    } finally { await targetRpc.dispose(); await sourceRpc.dispose() }
+  } finally { await targetServer.stop(); await sourceServer.stop(); await to.close(); await from.close() }
+}, 30_000)
