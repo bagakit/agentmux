@@ -369,6 +369,8 @@ export class ContinuousProgressLoopManager {
       if (loop.taskSource?.kind !== 'goal' || !initial || initial.operationId !== operationId ||
           ['hostId', 'agentSessionId', 'providerId', 'workspacePath'].some(key => loop[key as keyof ContinuousProgressTarget] !== target[key as keyof ContinuousProgressTarget])) throw new AgentMuxError('The original Goal input target or operation is unconfirmed.', 'CONTROL_REQUEST_CONFLICT')
       if (phase === 'begin' && loop.status === 'stopped') throw new AgentMuxError('This original Goal loop was stopped. Its operation and Agent are retained; no input was sent.', 'CONTROL_REQUEST_CONFLICT')
+      if (phase === 'begin' && initial.state === 'prepared' && (loop.lastMutation || loop.pause && !waitingGoalInitial(loop)))
+        throw new AgentMuxError('The original Goal input was paused before delivery. Its request and manual input are retained.', 'CONTROL_REQUEST_CONFLICT')
       const source = await this.goalSource(loop)
       if (phase === 'begin' && this.require(loopId).status === 'stopped') throw new AgentMuxError('This original Goal loop was stopped. Its operation and Agent are retained; no input was sent.', 'CONTROL_REQUEST_CONFLICT')
       if (phase === 'begin' && source.action !== 'continue') {
@@ -379,7 +381,8 @@ export class ContinuousProgressLoopManager {
       if (!this.goals) throw new AgentMuxError('The original Goal input receipt owner is unavailable.', 'CONTROL_UNAVAILABLE')
       const receipt = await this.goals.inspectInitial(loop)
       const current = this.require(loopId)
-      if (phase === 'begin' && current.status === 'stopped') throw new AgentMuxError('This original Goal loop was stopped. Its operation and Agent are retained; no input was sent.', 'CONTROL_REQUEST_CONFLICT')
+      if (phase === 'begin' && !isDeepStrictEqual(current, loop))
+        throw new AgentMuxError('The original Goal loop changed before delivery. Its current pause and input are retained.', 'CONTROL_REQUEST_CONFLICT')
       if (receipt === 'confirmed') {
         const decision = await this.goalSource(current), latest = this.require(loopId)
         const stopped = latest.status === 'stopped' || decision.action === 'stop'
@@ -417,7 +420,7 @@ export class ContinuousProgressLoopManager {
       const isCurrent = () => {
         const current = this.scheduler.get(loopId)
         return this.running && !controller.signal.aborted && this.initialDeliveries.get(loopId) === controller &&
-          current?.status === 'paused' && current.revision === prepared.revision && current.initialDelivery?.operationId === operationId
+          isDeepStrictEqual(current, prepared)
       }
       try {
         const source = await this.goalSource(prepared)

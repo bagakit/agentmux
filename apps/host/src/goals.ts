@@ -3,6 +3,7 @@ import { readGoalInputEpoch, openGoalFiniteInput, openGoalFiniteInspection } fro
 import { demandAgentReferenceKey, type DemandSpaceMemberReference } from '@agentmux/demand/relations'
 import { createHash } from 'node:crypto'
 import { mkdir, realpath } from 'node:fs/promises'
+import { isDeepStrictEqual } from 'node:util'
 import { deriveBoundGoalId, formatAmuxObjectLink } from '@agentmux/core/sharing'
 import { assertNewGoalSourceRelations, goalSourceRpc } from './goal-source-relations.js'
 import { createHostGoalDiscussions } from './goal-discussions.js'
@@ -11,7 +12,7 @@ import { readGoalWorkflowPlan, readGoalWorkflowPreferences } from './goal-workfl
 import { goalPmoOperation } from './goal-pmo-origin.js'
 import { dirname, join } from 'node:path'
 import { AgentMuxError, agentPromptCondition, type AgentMuxHeadlessRuntime, type AgentMuxRpcCallContext,
-  type AgentMuxSpatialStateStore, type AgentMuxRpcMethod, type AgentMuxRpcParams, type AgentMuxRpcResult } from '@agentmux/core'
+  type AgentMuxSpatialStateStore, type AgentMuxRpcMethod, type AgentMuxRpcParams, type AgentMuxRpcResult, type ContinuousProgressLoop } from '@agentmux/core'
 import type { AgentMuxControlRequest, AgentMuxControlResult } from '@agentmux/core/control'
 import type { AgentMuxNameContext } from '@agentmux/core/spatial-graph'
 import { isDemandStoreError, openDemandStore, runBoundDemandDispatch, type Demand, type DemandParticipationSource, type DemandStore, type DemandReceipt } from '@agentmux/demand'
@@ -135,7 +136,7 @@ export function createHostGoals(options: {
           throw new AgentMuxError('The original Goal start is unconfirmed. Its retained loop will wait without dispatching input.', 'CONTROL_UNAVAILABLE')
         await current(context)
         await startGoal(await get(source.goalId), original.agentSessionId, initial.operationId, context,
-          { intervalMs: loop.intervalMs, alignmentRevision: source.alignmentRevision }, undefined, loop.inputEpoch)
+          { intervalMs: loop.intervalMs, alignmentRevision: source.alignmentRevision }, undefined, loop.inputEpoch, loop)
       } })
   const dispatch = new GoalDispatchInputOwner(demands, runtime)
   const automaticInput = createGoalAutomationPause({ ownerInstanceId: () => options.runtime().ownerIdentity().ownerInstanceId,
@@ -364,17 +365,43 @@ export function createHostGoals(options: {
     return undefined
   }
   const startGoal = async (goal: Demand, sessionId: string | undefined, operationId: string, context: AgentMuxRpcCallContext,
-    continuation?: { intervalMs: number; alignmentRevision: number }, expectedUpdatedAt?: number, inputEpoch?: string): Promise<Extract<AgentMuxControlResult, { operation: 'demand.start' }>> => progress.withGoalStart(operationId, async () => {
+    continuation?: { intervalMs: number; alignmentRevision: number }, expectedUpdatedAt?: number, inputEpoch?: string,
+    scheduledWait?: ContinuousProgressLoop): Promise<Extract<AgentMuxControlResult, { operation: 'demand.start' }>> => progress.withGoalStart(operationId, async () => {
     const original = await demands.inspectDispatch(goal.id, operationId)
     if (original && 'target' in original) throw new AgentMuxError('The original qualified Start needs its frozen Source reference and current access, not a legacy Session alias.', 'CONTROL_REQUEST_CONFLICT')
     if (original && (sessionId !== undefined && original.agentSessionId !== sessionId || Boolean(continuation) !== (original.execution === 'continue'))) throw new AgentMuxError('The original Goal Start target or execution changed. Inspect that operation without replaying it.', 'CONTROL_REQUEST_CONFLICT')
     const selected = original?.agentSessionId ?? sessionId ?? (goal.assigneeSessionIds.length === 1 ? goal.assigneeSessionIds[0] : undefined)
     if (selected !== undefined && typeof selected !== 'string') throw new AgentMuxError('This Source-qualified Start requires its current finite Goal execution access. The original relation and Agent remain retained.', 'CONTROL_UNAVAILABLE')
     if (!selected || !original && !goal.assigneeSessionIds.includes(selected)) throw new AgentMuxError('Choose the exact responsible Agent before starting this Goal. Creation or assignment alone does not start it.', 'INVALID_CONTROL_REQUEST')
+    if (continuation) {
+      let saved = (await progress.listGoals(goal.id)).find(loop => loop.creationOperationId === operationId)
+      const initial = saved?.initialDelivery
+      if ((saved || original && original.stage !== 'confirmed') && (!saved || !initial || initial.operationId !== operationId || saved.agentSessionId !== selected ||
+          saved.intervalMs !== continuation.intervalMs || saved.taskSource?.kind !== 'goal' || saved.taskSource.alignmentRevision !== continuation.alignmentRevision ||
+          original && (original.loopId !== saved.loopId || original.hostId !== saved.hostId || original.runId !== initial.condition.expectedRun.runId ||
+            original.alignmentRevision !== continuation.alignmentRevision || original.inputEpoch !== saved.inputEpoch || original.prompt !== initial.prompt)))
+        throw new AgentMuxError('The original Goal Start target, evidence or continuation changed. Its input is retained for inspection.', 'CONTROL_REQUEST_CONFLICT')
+      if (scheduledWait) {
+        if (!original || !waitingGoalInitial(saved) || !isDeepStrictEqual(saved, scheduledWait))
+          throw new AgentMuxError('The original Goal wait changed before scheduled delivery. Its current pause and input are retained.', 'CONTROL_REQUEST_CONFLICT')
+        await current(context)
+      } else if (saved && initial) {
+        await runtime.authorizeFutureIntent(saved, context)
+        if (initial.state === 'unknown' && original?.stage !== 'confirmed') {
+          if (!original || await runtime.inspectContinuousProgressInitial(saved) !== 'confirmed')
+            throw new AgentMuxError('The original Goal input transaction cannot be confirmed. Inspect the saved operation and original outbox.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
+          await dispatch.reconcile({ goalId: goal.id, operationId }, () => current(context))
+        }
+        if (initial.state === 'unknown' || original?.stage === 'confirmed' && initial.state !== 'confirmed')
+          saved = await progress.initialGoalInput(saved, saved.loopId, operationId, 'confirm')
+        if (saved.pause?.reason === 'source-changed' && initial.state === 'prepared')
+          throw new AgentMuxError(saved.lastDecision ?? 'The original Goal source changed. Inspect its saved request.', 'CONTROL_REQUEST_CONFLICT')
+        return { operation: 'demand.start', demand: await projectGoal(await get(goal.id)), continuation: saved,
+          receipt: { demandId: goal.id, startedAt: original?.preparedAt ?? initial.startedAt, sessionId: selected } }
+      }
+    }
     if (original?.stage === 'confirmed') {
-      let loop = original.loopId ? (await progress.listGoals(goal.id)).find(value => value.loopId === original.loopId) : undefined
-      if (loop && loop.initialDelivery?.state !== 'confirmed') loop = await progress.initialGoalInput(loop, loop.loopId, operationId, 'confirm')
-      return { operation: 'demand.start', demand: await projectGoal(await get(goal.id)), ...(loop ? { continuation: loop } : {}), receipt: { demandId: goal.id, startedAt: original.preparedAt, sessionId: selected } }
+      return { operation: 'demand.start', demand: await projectGoal(await get(goal.id)), receipt: { demandId: goal.id, startedAt: original.preparedAt, sessionId: selected } }
     }
     if (!original && continuation && expectedUpdatedAt !== undefined && expectedUpdatedAt !== goal.updatedAt)
       throw new AgentMuxError('The Goal changed before this new Start was prepared. Read the current Goal and explicitly start that version.', 'CONTROL_REQUEST_CONFLICT', undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
