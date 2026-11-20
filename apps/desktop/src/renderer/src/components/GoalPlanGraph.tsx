@@ -27,10 +27,11 @@ import { goalNextStepFact, type GoalNextStepFact } from '../lib/goal-presentatio
 import { GoalPlanMark, goalPlanStateLabel, type GoalPlanNodePresentation } from './GoalPlanState'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { GoalContinuationAgent } from './GoalContinuationControl'
+import { markWindowOverlayDismissal, wasWindowOverlayDismissed } from './WindowOverlayHost'
 
 /** A node as its Goal owner derived it; `state` is null when the owner returned no derivation. */
-export type GoalPlanReadingTarget = { nodeId: string; attemptId?: string; wholeGoal?: true }
-export type GoalPlanReveal = { target: GoalPlanReadingTarget; trigger?: HTMLButtonElement; restore?: () => void }
+export type GoalPlanReadingTarget = { nodeId: string; attemptId?: string; wholeGoal?: true; reviewOperationId?: string }
+export type GoalPlanReveal = { target: GoalPlanReadingTarget; trigger?: HTMLButtonElement; restore?: () => void; restoreFocus?: () => void }
 type GoalPlanSelection = GoalPlanReveal
 export type GoalPlanNodeView = Omit<GoalPlanNodeProjection, 'state' | 'unknown' | 'predecessors' | 'claimBasis' | 'claimToken'> & GoalPlanNodePresentation & { team?: DemandAgentReference[]; teamRole?: 'Task target' | 'Executor'; targetOnly?: true; claimed?: true; claimable?: true }
 /** A revision belongs to the saved breakdown. The whole Goal is revision-free. */
@@ -262,9 +263,10 @@ function NodeDetail({ demand, item, historical, dependencyNames, onIssue, draft,
  * dependency, joined to what it depends on by a smooth connector. State comes only from the
  * Goal owner's derivation; this view never decides it.
  */
-export function GoalPlanGraph({ demand, projection: provided, planLink, planningLink, onOpenGoalWork, currentDelegation, reveal }: {
+export function GoalPlanGraph({ demand, projection: provided, planLink, planningLink, onOpenGoalWork, onOpenTimelineRecord, currentDelegation, reveal }: {
   demand: DemandProjection
   projection?: GoalPlanView; planLink?: ReactNode; onOpenGoalWork?: (() => void) | undefined
+  onOpenTimelineRecord: (target: { kind: 'start' | 'delegation'; operationId: string }) => boolean
   currentDelegation?: DemandDelegation | undefined
   planningLink?: ReactNode; reveal?: GoalPlanReveal | null
 }) {
@@ -321,20 +323,21 @@ export function GoalPlanGraph({ demand, projection: provided, planLink, planning
     const pending = useAppStore.getState().goalReadingEntry
     if (pending?.goalId === demand.id && pending.phase === 'pending') useAppStore.setState({ goalReadingEntry: null })
   }
-  function select(target: GoalPlanReadingTarget, trigger: HTMLButtonElement) {
+  function select(next: GoalPlanSelection) {
     supersedePendingTicketRead()
-    setSelection({ target, trigger })
+    setSelection(next)
   }
   function toggleNode(item: GoalPlanNodeView, trigger: HTMLButtonElement) {
     const attemptId = item.delegation?.operationId
     if (selection?.trigger && open === item.node.id && selection.target.attemptId === attemptId) closeNode(item.node.id)
-    else select({ nodeId: item.node.id, ...(attemptId ? { attemptId } : {}), ...(item.wholeGoal ? { wholeGoal: true } : {}) }, trigger)
+    else select({ target: { nodeId: item.node.id, ...(attemptId ? { attemptId } : {}), ...(item.wholeGoal ? { wholeGoal: true } : {}) }, trigger })
   }
   function closeNode(id: string) {
     supersedePendingTicketRead()
     const target = selection?.trigger?.isConnected ? selection.trigger
       : canvas.current?.querySelector<HTMLButtonElement>(`[data-goal-plan-node="${CSS.escape(id)}"] .goal-plan-node__head`)
-    if (target) {
+    if (selection?.restoreFocus) selection.restoreFocus()
+    else if (target) {
       if (selection?.restore) { selection.restore(); requestAnimationFrame(() => target.focus()) }
       else target.focus()
     }
@@ -358,10 +361,13 @@ export function GoalPlanGraph({ demand, projection: provided, planLink, planning
   const attempts = selectedNode ? (demand.delegations ?? []).filter(attempt => attempt.planNodeId === selectedNode.node.id) : []
   const exact = attemptId ? attempts.find(attempt => attempt.operationId === attemptId) : undefined
   const historical = Boolean(attemptId && selectedNode?.delegation?.operationId !== attemptId)
-  const selected = selectedNode && historical ? { ...selectedNode, state: null, delegation: exact ?? null,
+  const selectedReviewId = open ? selectedTarget?.reviewOperationId : undefined
+  const selectedReview = selectedReviewId && exact ? demand.plan?.reviews.find(review => review.operationId === selectedReviewId && review.nodeId === open && review.delegationOperationId === exact.operationId) : undefined
+  const selectedAttempt = selectedNode && historical ? { ...selectedNode, state: null, delegation: exact ?? null,
     attempts: exact ? attempts.indexOf(exact) + 1 : 0, unknown: [], staleCriteria: [],
     review: exact ? demand.plan?.reviews.filter(entry => entry.nodeId === selectedNode.node.id && entry.delegationOperationId === exact.operationId).at(-1) ?? null : null }
     : selectedNode
+  const selected = selectedAttempt && selectedReviewId ? { ...selectedAttempt, review: selectedReview ?? null } : selectedAttempt
   const handoff = selectedNode && !wholeGoal ? selected?.delegation : currentDelegation
   const handoffTitle = handoff?.planNodeId ? byId.get(handoff.planNodeId)?.node.title : demand.title
   const reviewKey = selected?.delegation && goalPlanReviewDraftKey(selected.node.id, selected.delegation.operationId)
@@ -435,11 +441,18 @@ export function GoalPlanGraph({ demand, projection: provided, planLink, planning
     </div>
     {scrollable ? <p className="goal-plan__scroll-hint">Scroll to explore the full plan</p> : null}
     {selected ? <GoalPlanReadingPlacement canvas={canvas} inline={inlineReader} target={selected.node.id} explicit={Boolean(selection?.trigger)}>
-      <div className="goal-plan__reading" id={readingId}>
+      <div className="goal-plan__reading" id={readingId} onKeyDown={event => {
+        if (selection?.restoreFocus && event.key === 'Escape' && !event.nativeEvent.isComposing && !event.defaultPrevented && !wasWindowOverlayDismissed(event.nativeEvent)) {
+          markWindowOverlayDismissal(event.nativeEvent)
+          event.stopPropagation()
+          closeNode(selected.node.id)
+        }
+      }}>
       <div className="goal-plan__reading-header"><GoalPlanMark item={selected} /><h3 ref={readingHeading} tabIndex={-1}>{selected.node.title}</h3>
         {!historical && !selected.wholeGoal ? <span className="goal-plan__reading-status" data-goal-plan-state={selected.state ?? undefined}>{goalPlanStateLabel(selected)}</span> : null}
-        <Button type="button" onClick={() => closeNode(selected.node.id)}>Back to node</Button></div>
+        <Button type="button" onClick={() => closeNode(selected.node.id)}>{selection?.restoreFocus ? 'Back to event' : 'Back to node'}</Button></div>
       {historical ? <p className="goals-caption" role={!exact ? 'status' : undefined}>{exact ? 'Previous attempt' : 'The selected original attempt is unavailable.'}</p> : null}
+      {selectedReviewId && !selectedReview ? <p className="goals-caption" role="status">The selected original review is unavailable.</p> : null}
       {(!historical || exact) ? <NodeDetail key={JSON.stringify([demand.address?.runtimeId, demand.address?.namespace, demand.id, selected.node.id, attemptId])} demand={demand} item={selected} historical={historical} dependencyNames={selected.node.dependsOn.map(id => byId.get(id)!.node.title)} onIssue={setIssue} onOpenGoalWork={onOpenGoalWork}
         draft={reviewKey && retainedReviews?.[reviewKey] ? { ...retainedReviews[reviewKey], ...reviewNotices[reviewNoticeKey] } : undefined} onDraft={value => {
           editGoalPlanReviewDraft(demand.id, selected.node.id, selected.delegation!.operationId, value)
@@ -454,7 +467,7 @@ export function GoalPlanGraph({ demand, projection: provided, planLink, planning
           setReviewNotices(previous => { if (!previous[reviewNoticeKey]) return previous; const { [reviewNoticeKey]: _notice, ...retained } = previous; return retained })
         }} /> : null}
     </div></GoalPlanReadingPlacement> : null}
-    <GoalExecutionTimeline demand={demand} nodes={projection.nodes} selected={open ? selectedTarget ?? null : null} onSelect={select} />
+    <GoalExecutionTimeline demand={demand} nodes={projection.nodes} selected={open ? selectedTarget ?? null : null} onSelect={select} onOpenRecord={onOpenTimelineRecord} />
     </div>
     </div>
   </section>

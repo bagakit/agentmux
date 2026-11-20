@@ -22,7 +22,7 @@ import { useGoalDiscussionRecipient } from '../lib/goal-discussion-recipient'
 import { editGoalDraft, saveGoalDrafts } from '../lib/goal-edit-drafts'
 import { GoalActivity } from './GoalActivity'
 import { GoalAcknowledgementRecovery, GoalAlignment, type GoalAcknowledgementFeedback } from './GoalAlignment'
-import { goalNextStepFact, type GoalNextStepSource } from '../lib/goal-presentation'
+import { goalNextStepFact } from '../lib/goal-presentation'
 import { GOAL_GROUP_LABELS, GoalStageMark } from '../lib/goal-groups'
 import type { GoalQueuePosition } from '../lib/goal-navigation'
 import type { GoalStage } from '../lib/goal-presentation'
@@ -118,20 +118,21 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
     const report = !definition ? section?.querySelector<HTMLElement>('[data-goal-grounding-submission]') : null
     revealWork(report ?? section)
   }
-  function revealOriginalWork(source: Extract<GoalNextStepSource, { kind: 'start' | 'delegation' | 'patrol' }>) {
+  function revealOriginalWork(source: { kind: 'start' | 'delegation' | 'patrol'; operationId: string }) {
     const operation = CSS.escape(source.operationId)
     const detail = detailRef.current
     const pending = source.kind === 'start' ? detail?.querySelector<HTMLElement>(`[data-goal-retained-operation="${operation}"]`) : null
     const original = pending ?? detail?.querySelector<HTMLElement>(`[data-goal-work-kind="${source.kind}"][data-goal-work-operation="${operation}"]`)
-    if (!original) return
+    if (!original) return false
     if (source.kind === 'patrol') {
       revealSupervisor(true, original)
-      return
+      return true
     }
     for (let ancestor = original.parentElement; ancestor && ancestor !== executionRef.current; ancestor = ancestor.parentElement) {
       if (ancestor instanceof HTMLDetailsElement) ancestor.open = true
     }
     revealWork(original)
+    return true
   }
   function revealSupervisor(focus = true, target = teamRef.current) {
     const side = teamRef.current
@@ -241,7 +242,7 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
   const currentDelegation = currentWork?.kind === 'delegation'
     ? demand.delegations?.find(attempt => attempt.operationId === currentWork.operationId) : undefined
   const plan = <div ref={planRef} tabIndex={-1} className="goals-detail__plan" data-goal-reading-section="plan" data-goal-reading-id={demand.id} data-goal-reading-runtime={demand.address?.runtimeId} data-goal-reading-namespace={demand.address?.namespace}>
-    <GoalPlanGraph demand={demand} projection={projection} reveal={planReveal} currentDelegation={currentDelegation} onOpenGoalWork={currentWork ? () => revealOriginalWork(currentWork) : undefined}
+    <GoalPlanGraph demand={demand} projection={projection} reveal={planReveal} currentDelegation={currentDelegation} onOpenGoalWork={currentWork ? () => revealOriginalWork(currentWork) : undefined} onOpenTimelineRecord={revealOriginalWork}
       planningLink={!finished ? <Button type="button" onClick={revealPlanningControls}>{demand.plan?.nodes.length ? 'Plan actions' : 'Plan with Supervisor'}<SupervisorPaneIcon size={14} aria-hidden="true" /></Button> : null}
       planLink={demand.address ? <button type="button" className="icon-button goal-plan__copy" title={copied === 'plan' ? 'Plan link copied' : 'Copy plan link'} onClick={() => void copyLink('plan')}>
         {copied === 'plan' ? <ThemeDoneIcon size={15} aria-hidden="true" /> : <CopyLinkIcon size={15} aria-hidden="true" />}
