@@ -255,7 +255,7 @@ export async function analyzeWithRecoveryMote(source: RecoverySource, target: Re
   }
   const state = useAppStore.getState()
   const queued = state.agentSteerQueues[target.agentSessionId]?.some(entry => entry.operationId === requestId)
-  if (!queued && !state.enqueueAgentSteer(target.agentSessionId, 'Analyze the referenced original work; report progress, blockers and suggested next steps without executing them.',
+  if (!queued && !state.enqueueAgentSteer(target.agentSessionId, getAmuxProtocolTemplate('agent-recovery-task', 'analyze'),
     undefined, requestId, 'manual', recoveryReferenceNote(source, 'analyze', historySource) + '\n\n' + recipient)) throw new Error('The chosen Mote could not admit this request. Both original drafts are retained.')
   await useAppStore.getState().sendQueuedAgentSteer(target.agentSessionId, requestId)
   assertTarget()

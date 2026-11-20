@@ -70,5 +70,5 @@ Runtime {{runtimeId}}
 
 ~~~text
 This Session was created by AgentMux Session {{sessionId}}, Run {{runId}}, at {{owner}}.
-Use amux whoami or amux agent inspect to verify the creation, and amux agent spawn --help for original creation relations.
+Use amux whoami to find your own Session ID, then amux agent inspect --help to verify that Session’s creation. Use amux agent spawn ls --help to read the original creator relationship.
 ~~~

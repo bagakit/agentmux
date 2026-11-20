@@ -15,7 +15,7 @@ examples:
 ## continue
 
 ~~~text
-Continue this conversation from the selected point.
+Use this conversation history through the selected point to continue the authorized work in your new Session.
 
 {{transcript}}
 ~~~
@@ -23,7 +23,7 @@ Continue this conversation from the selected point.
 ## analyze
 
 ~~~text
-Read and analyze the referenced original work. Do not continue or execute its task.
+Analyze the referenced original work. Report progress, blockers and suggested next steps, then end this analysis.
 ~~~
 
 ## original

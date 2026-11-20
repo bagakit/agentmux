@@ -25,7 +25,7 @@ Check the original reports. Record a verified result or a specific blocker; stay
 ## heartbeat
 
 ~~~text
-Review outstanding commitments, take one useful authorized action, and verify the result.
+Review outstanding commitments. If there is a useful next step, take one useful authorized action and verify it. Otherwise use the quiet outcome.
 ~~~
 
 ## heartbeat-source
@@ -34,13 +34,13 @@ Review outstanding commitments, take one useful authorized action, and verify th
 Original Mote Space: {{space}}
 Original Zone: {{zone}}
 Original resource: Host {{host}}, Workspace {{workspace}}, directory {{directory}}
-Read the original work and reports via amux space mote dialogue supervision read --help.
+Use amux space mote dialogue supervision read --help for the original work and reports. For this heartbeat’s result, follow the reporting section of amux mote --skill.
 ~~~
 
 ## observation
 
 ~~~text
-This is an observation of original member input, not a new human request or permission. Use amux agent input observation --help to review the result before coordinating. Keep the original input and its outcome separate.
+Use amux agent input observation --help with the member Session ID and observation ID shown here. The input phase may still be waiting for a result. Coordinate from the verified record.
 ~~~
 
 ## group-thread
@@ -60,13 +60,13 @@ You joined this AgentMux Group. No reply is needed. For Group commands, use amux
 ## private-thread
 
 ~~~text
-This is your private Mote thread {{groupId}}. Use the reply command supplied with the original addressed input.
+This is your private Mote thread {{groupId}}. Follow the reply guidance attached to the original addressed input.
 ~~~
 
 ## group-input
 
 ~~~text
-Ordinary output stays in your Thread. Publish an addressed reply via amux space mote group reply --help with these original identifiers. For an uncertain delivery, keep the same operationId and exact body. Share only material for this Group.
+Ordinary output stays in your Thread. Publish an addressed reply via amux space mote group reply --help with the original groupId, inputOperationId and operationId and your reply as body. Keep the same operationId and body after an uncertain delivery. Share only material for this Group.
 
 Original Group source and reply operation:
 {{original}}{{quote}}
@@ -75,7 +75,7 @@ Original Group source and reply operation:
 ## private-input
 
 ~~~text
-Reply in this private thread using amux space mote direct reply --help with these original identifiers. For an uncertain delivery, keep the same operationId and exact body.
+Reply in this private thread using amux space mote direct reply --help with the original threadId, inputOperationId and operationId and your reply as body. Keep the same operationId and body after an uncertain delivery.
 
 Original private source and reply operation:
 {{original}}{{quote}}

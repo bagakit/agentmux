@@ -25,5 +25,5 @@ Use amux message --skill to reply to a peer Agent or delegate. Handle the origin
 ## reference
 
 ~~~text
-Read relevant original messages by exact MID before acting. Report results or blockers for work you accept.
+Read relevant original messages by exact MID with amux message read before acting. Report results or blockers for work you accept.
 ~~~

@@ -50,12 +50,13 @@ Independent saved Provider conversation, if relevant. Usage: {{entry}}.
 ~~~text
 The original source route is unconfirmed from this Core. Original Host: {{host}}. Original source: {{source}}.
 {{diagnostic}}
+Continue only work supported by confirmed evidence. Report gaps in scope or outcome and wait for the original route before repeating any uncertain action.
 ~~~
 
 ## history
 
 ~~~text
-One bounded history page from the original owner. Continue its cursor only at that owner or through a verified route.
+One bounded history page from the original owner. Continue its cursor at that owner or through a verified route. If unavailable, use the confirmed parts and report material gaps.
 {{page}}
 ~~~
 
