@@ -35,6 +35,7 @@ import { motePresentationContextKey, usePublishMotePresentation } from '../lib/m
 import { emptyMoteThreadCounts, type MoteThreadCount, type MoteWorkingMember } from './MoteThreadNavigation'
 import type { MoteThreadView } from '@agentmux/client-ui/components/MoteConversationThreads'
 import { MoteActiveWorkShortcut } from './MoteActiveWorkShortcut'
+import { MoteDirectThreads } from '@agentmux/client-ui/components/MoteDirectThreads'
 import { ComposerSurface, useComposerConnection } from '@agentmux/client-ui/components/ComposerHost'
 import { DesktopMoteComposerHost, moteComposerSessionKey } from './MoteComposer'
 import { requestPmoTeamsTopicFloatingClose } from '../lib/pmo-teams-topic-floating'
@@ -296,6 +297,8 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
           onSelectDiscussion={next => currentMain && landing && sameSelection(next, landing) ? openMain(currentMain) : showThread(next)} />
       </div> : null}
       {scope && visible && section === 'discussion' && presentation === 'conversation' && dialogue?.page ? <MoteActiveWorkShortcut links={dialogue.page.links} members={currentThreads.working} onOpen={eventId => showThreads('work', { eventId, token: crypto.randomUUID() })} /> : null}
+      {dialogue?.target && section === 'discussion' && presentation === 'conversation' && !calendarOpen &&
+        <MoteDirectThreads key={JSON.stringify(dialogue.target)} mote={dialogue.target} active={visible} read={api.moteGroup.call} />}
       {calendarOpen ? null : notice}
       <div className="mote-composer-stage" hidden={calendarOpen} inert={calendarOpen} data-phase={showOriginal ? 'conversation' : entry === 'welcome' ? 'welcome' : 'reading'}>
       {readingMain && selectedMain && showOriginal && section === 'discussion' && presentation === 'conversation' ? <MoteStartupStatus reference={readingMain} active={visible && (!sharedFrame || sharedFrame.section === 'discussion')} onOpenTerminal={sessionId => {

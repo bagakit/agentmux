@@ -1,0 +1,116 @@
+.mote-direct-entry {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 16px;
+}
+
+.mote-direct-entry .mote-direct-entry__summary {
+  flex: 0 1 540px;
+  min-width: 0;
+  min-height: 48px;
+  padding: 6px 10px;
+  background: var(--surface-2);
+}
+
+.mote-direct-entry small,
+.mote-direct-row small,
+.mote-direct-message small,
+.mote-direct-message time { color: var(--text-3); font-size: var(--fs-meta); }
+
+.mote-direct-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--scrim-2);
+  z-index: var(--layer-dialog);
+  pointer-events: auto;
+}
+
+.mote-direct-panel {
+  position: fixed;
+  inset: 50% auto auto 50%;
+  transform: translate(-50%, -50%);
+  z-index: var(--layer-dialog);
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  width: min(680px, calc(100vw - 32px));
+  height: min(560px, calc(100dvh - 64px));
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  color: var(--text);
+  box-shadow: var(--elev-3);
+  overflow: hidden;
+}
+.mote-direct-panel[data-view="list"] { width: min(520px, calc(100vw - 32px)); height: auto; max-height: min(480px, calc(100dvh - 64px)); }
+
+.mote-direct-panel[data-state="open"] { animation: mote-direct-enter 180ms ease-out both; }
+@keyframes mote-direct-enter {
+  from { translate: 0 8px; }
+  to { translate: 0 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mote-direct-panel[data-state] { animation: none; }
+}
+
+.mote-direct-panel > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 22px;
+}
+.mote-direct-panel > header > div { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.mote-direct-panel > header button, .mote-direct-entry > button { flex-shrink: 0; }
+.mote-direct-panel > header > div > button:not(:hover):not(:focus-visible) { border-color: transparent; }
+@media (pointer: coarse), (max-width: 540px) {
+  .mote-direct-panel > header { padding-block: 6px; }
+  .mote-direct-panel > header button { min-width: 44px; min-height: 44px; }
+}
+.mote-direct-panel h2 { font-size: var(--fs-title, 18px); margin: 0; }
+.mote-direct-panel__body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 22px 22px;
+}
+
+.mote-direct-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 12px;
+  min-height: 60px;
+  border: 0;
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.mote-direct-row:hover, .mote-direct-row:focus-visible { background: var(--surface-2); }
+.mote-direct-row__avatar {
+  display: grid;
+  place-items: center;
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+.mote-direct-row__text { display: grid; flex: 1; min-width: 0; gap: 3px; }
+.mote-direct-row__text :is(strong, span) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mote-direct-row__text span { color: var(--text-2); }
+.mote-direct-message {
+  margin: 8px 40px 12px 0;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+.mote-direct-message[data-own="true"] { margin: 8px 0 12px 40px; }
+.mote-direct-message > div { display: flex; gap: 10px; align-items: baseline; }
+.mote-direct-message p { margin: 5px 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }

@@ -8,7 +8,8 @@ import type { AgentMuxBrowserTarget, AgentMuxExternalBrowserPairing } from '@age
 import type { AgentMuxRpcParams, AgentMuxRpcResult } from '@agentmux/core'
 import type { MoteGroupMethod } from '@agentmux/core/mote/group'
 
-export type MoteGroupClientMethod = Exclude<MoteGroupMethod, 'space.mote.group.reply'>
+export type MoteGroupClientMethod = Exclude<MoteGroupMethod, 'space.mote.group.reply'> |
+  'space.mote.direct.list' | 'space.mote.direct.inspect'
 import type { ToolkitDesktopApi } from './toolkit.js'
 import type { BrowserViewport } from './browser-viewport.js'
 import type { BrowserPageShortcutAction } from './browser-page-shortcuts.js'

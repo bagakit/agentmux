@@ -1,5 +1,5 @@
 import { CaptureSequenceOwner } from './capture-sequence.js'
-import { parseAgentProgressParams, parseSpaceLinkParams, parseSpaceLinkResult } from '@agentmux/core'
+import { parseAgentProgressParams, parseMoteDirectParams, parseSpaceLinkParams, parseSpaceLinkResult } from '@agentmux/core'
 import { registerAgentTakeoverIpc } from './agent-takeover-ipc.js'
 import { registerMeshNetworkIpc } from './mesh-network-ipc.js'
 import { openMeshDeviceWindow } from './mesh-device-window.js'
@@ -2817,6 +2817,8 @@ export async function registerIpc(args: {
   registerMoteConnectionIpc({ handleWithEvent, runtime: args.runtime })
   registerMoteDialogueIpc({ handleWithEvent, runtime: args.runtime })
   handle('moteGroup:call', (method: unknown, params: unknown) => ipcResult(() => {
+    if (method === 'space.mote.direct.list' || method === 'space.mote.direct.inspect')
+      return args.runtime.callOriginalCore('local', method, parseMoteDirectParams(method, params), { transport: 'unix' })
     if (!isMoteGroupMethod(method) || method === 'space.mote.group.reply') throw new Error('This is not a Mote Group client action.')
     return args.runtime.callOriginalCore('local', method, parseMoteGroupParams(method, params), { transport: 'unix' })
   }))
