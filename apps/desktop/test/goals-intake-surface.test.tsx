@@ -160,6 +160,17 @@ describe('Goals direct PMO creation and reading surface', () => {
   })
 
   it('recovers an actually saved but lost creation receipt only by reading the original creation operation', async () => {
+    const original = useAppStore.getState()
+    const commitBinding = host.spatial.commitOwnedResource.bind(host.spatial)
+    const beforeBinding = vi.spyOn(host.spatial, 'commitOwnedResource').mockImplementationOnce(async input => {
+      const renamed = await host.spatial.mutateDisplayLabel({
+        target: { kind: 'tab', id: originalTab.id }, operationId: 'rename-during-goal-recovery',
+        value: 'User renamed the original Tab', expectedNameRevision: 0, source: 'manual'
+      }, { actor: { kind: 'user', id: 'private-user', verified: true }, source: 'explicit-edit',
+        entryPoint: 'private-desktop', transport: null, location: {} })
+      expect(renamed).toMatchObject({ applied: true, diskDurability: 'confirmed' })
+      return commitBinding(input)
+    })
     const lost = host.once('demand.create', { kind: 'lose-receipt', error: new Error('Saved IPC receipt missing') })
     // The original creation-operation read (demand.show) fails once before reaching the original owner.
     host.once('demand.show', { kind: 'reject', error: new Error('Owner read unavailable') }, request => request.creationOperationId !== undefined)
@@ -177,8 +188,25 @@ describe('Goals direct PMO creation and reading surface', () => {
       await act(async () => root.render(null)); await mount(); await click('Read goal again')
     } else expect(useAppStore.getState().demands[id]).toMatchObject({ id, title: committed.demand.title })
     await eventually(() => expect(directGoalRequest()).toBeNull())
+    expect(beforeBinding).toHaveBeenCalledTimes(1)
     expect(creates()).toHaveLength(1); expect(host.bodies('demand.show').filter(read => read.creationOperationId === committed.demand.creationOrigin?.operationId).length).toBeGreaterThanOrEqual(2)
     expect(useAppStore.getState().selectedDemandId).toBe(id); expect(starts()).toBe(1)
+    expect(host.executed('demand.discuss')).toEqual([expect.objectContaining({ demandId: id, mode: 'grill' })])
+    const state = (await host.spatial.read())!
+    const discussionBinding = readGoalDiscussionBinding(state.graph, id)!
+    const saved = (await owner.list())[0]!
+    const opened = spatialAgentOpenRecord(state.graph, saved.discussionOperationId!)!
+    expect(opened.address).toMatchObject({ tabId: discussionBinding.tabId, regionId: discussionBinding.regionId })
+    expect(discussionBinding.recipient).toEqual({ kind: 'agent', hostId: opened.execution.hostId, agentSessionId: opened.agentSessionId })
+    const agent = await discussion.core.core.inspectAgentCreation(opened.agentSessionId)
+    const createdRun = agent.creation?.createdRun?.runId
+    expect(createdRun).toBeTruthy()
+    expect(state.graph.regions.find(region => region.regionId === discussionBinding.regionId)?.runId).toBe(createdRun)
+    expect(state.graph.tabs.find(tab => tab.tabId === originalTab.id)?.name).toBe('User renamed the original Tab')
+    expect(state.graph.layouts.repo).toEqual(original.layouts.repo)
+    expect(state.graph.tabLayouts[originalTab.id]).toEqual(original.tabs[originalTab.id]!.layout)
+    expect(useAppStore.getState().agentComposerDrafts.healthy).toBe(original.agentComposerDrafts.healthy)
+    await eventually(() => expect(readGoalDiscussionBinding(currentCoreSpatialGraph()!, id)).toEqual(discussionBinding))
     expect((await discussionInput(id))?.systemContext).toContain(`existing Goal ${id}`)
   })
 
