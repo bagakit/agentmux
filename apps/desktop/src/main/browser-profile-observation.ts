@@ -30,6 +30,8 @@ type NativeMarker = {
   gap?: BrowserProfileActivityGap
 }
 
+type ObservationTime = { monotonic: number; wall: number }
+
 function isObserving(observation: ProfileObservation): boolean {
   for (const marker of observation.markers) if (marker.observing) return true
   return false
@@ -54,7 +56,7 @@ export class BrowserProfileActivity {
     private readonly onWarningChanged: (profileId: string) => void
   ) {}
 
-  private activityTime(): { monotonic: number; wall: number } {
+  private activityTime(): ObservationTime {
     return { monotonic: performance.now(), wall: Date.now() }
   }
 
@@ -81,17 +83,10 @@ export class BrowserProfileActivity {
     this.publish(observation)
   }
 
-  interrupt(view: WebContentsView, now = this.activityTime()): void {
+  interrupt(view: WebContentsView): void {
     const marker = this.markers.get(view)
     if (!marker?.observing || this.finalized) return
-    const observation = marker.observation
-    // A crash receipt cannot confirm the last unobserved suffix of this renderer.
-    marker.observing = false
-    advance(observation, now.monotonic)
-    const gap: BrowserProfileActivityGap = { id: mintObjectId(), after: observation.observedAt, reason: 'renderer-gone' }
-    marker.gap = gap
-    observation.gaps.set(gap.id, gap)
-    this.publish(observation)
+    this.sample(marker.observation, this.activityTime(), marker)
   }
 
   resume(view: WebContentsView): void {
@@ -130,14 +125,25 @@ export class BrowserProfileActivity {
         this.write(observation)
         continue
       }
-      for (const { view, observing } of observation.markers) {
-        if (observing && (view.webContents.isDestroyed() || view.webContents.isCrashed())) this.interrupt(view, now)
-      }
-      advance(observation, now.monotonic)
-      if (isObserving(observation)) observation.lastUsedAt = Math.max(observation.lastUsedAt, now.wall)
-      observation.observedAt = Math.max(observation.observedAt, now.wall)
-      this.publish(observation)
+      this.sample(observation, now)
     }
+  }
+
+  private sample(observation: ProfileObservation, now: ObservationTime, interrupted?: NativeMarker): void {
+    // Record native losses together before using any remaining view to confirm the interval.
+    for (const marker of observation.markers) {
+      if (!marker.observing) continue
+      const contents = marker.view.webContents
+      if (marker !== interrupted && !contents.isDestroyed() && !contents.isCrashed()) continue
+      marker.observing = false
+      const gap: BrowserProfileActivityGap = { id: mintObjectId(), after: observation.observedAt, reason: 'renderer-gone' }
+      marker.gap = gap
+      observation.gaps.set(gap.id, gap)
+    }
+    advance(observation, now.monotonic)
+    if (isObserving(observation)) observation.lastUsedAt = Math.max(observation.lastUsedAt, now.wall)
+    observation.observedAt = Math.max(observation.observedAt, now.wall)
+    this.publish(observation)
   }
 
   /** An open native view still has an unknown suffix after shutdown. */
