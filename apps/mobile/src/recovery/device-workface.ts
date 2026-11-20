@@ -47,11 +47,11 @@ export type MobileGoalOperation = GoalWorkSelection & { operationId: string } & 
 )
 export type GoalWorkface = { selection: GoalWorkSelection | null; pending: MobileGoalOperation[] }
 export type GoalIntentScope = Pick<GoalWorkSelection, 'runtimeId' | 'deviceHostId'>
-export type GoalCreationInput = { goalId: string; operationId: string; title: string; description: string; status: 'backlog'; risk: 'low'; confirmation: 'user'; projectId?: string }
-export type GoalIntent = GoalIntentScope & { goalId: string; operationId: string; phase: 'sending' | 'unknown' | 'saved' } & (
-  | { kind: 'create'; input: GoalCreationInput }
-  | { kind: 'confirm'; expectedRevision: number }
-  | { kind: 'accept'; expectedAlignmentRevision: number; expectedSubmissionId: string; acceptGaps: boolean; finish?: boolean }
+type GoalCreationInput = { operationId: string; title: string; description: string; status: 'backlog'; risk: 'low'; confirmation: 'user'; projectId?: string }
+export type GoalIntent = GoalIntentScope & { operationId: string; phase: 'sending' | 'unknown' | 'saved' } & (
+  | { kind: 'create'; input: GoalCreationInput & { goalId?: string }; goalId?: string }
+  | { kind: 'confirm'; goalId: string; expectedRevision: number }
+  | { kind: 'accept'; goalId: string; expectedAlignmentRevision: number; expectedSubmissionId: string; acceptGaps: boolean; finish?: boolean }
 )
 export function sameGoalIntentScope(a: GoalIntentScope, b: GoalIntentScope): boolean {
   return a.runtimeId === b.runtimeId && a.deviceHostId === b.deviceHostId
@@ -59,7 +59,7 @@ export function sameGoalIntentScope(a: GoalIntentScope, b: GoalIntentScope): boo
 function sameGoalIntent(a: GoalIntent, b: GoalIntent): boolean {
   if (!sameGoalIntentScope(a, b) || a.goalId !== b.goalId || a.operationId !== b.operationId) return false
   if (a.kind === 'create' && b.kind === 'create') {
-    const keys = Object.keys(a.input) as Array<keyof GoalCreationInput>
+    const keys = Object.keys(a.input) as Array<keyof typeof a.input>
     return keys.length === Object.keys(b.input).length && keys.every(key => a.input[key] === b.input[key])
   }
   if (a.kind === 'confirm' && b.kind === 'confirm') return a.expectedRevision === b.expectedRevision
@@ -313,10 +313,12 @@ export function parseDeviceWorkface(value: unknown): DeviceWorkface {
 
 function parseGoalIntent(value: unknown): GoalIntent {
   const kind = (value as GoalIntent)?.kind
-  const v = record(value, ['runtimeId', 'deviceHostId', 'goalId', 'operationId', 'phase', 'kind', ...(kind === 'create' ? ['input'] : kind === 'confirm' ? ['expectedRevision'] : ['expectedAlignmentRevision', 'expectedSubmissionId', 'acceptGaps', ...(Object.hasOwn(value ?? {}, 'finish') ? ['finish'] : [])])])
-  if (!id(v.runtimeId) || !(v.deviceHostId === null || id(v.deviceHostId)) || !id(v.goalId) || !id(v.operationId) || !['sending', 'unknown', 'saved'].includes(String(v.phase))) throw invalid()
+  const goalKey = kind !== 'create' || Object.hasOwn(value ?? {}, 'goalId') ? ['goalId'] : []
+  const v = record(value, ['runtimeId', 'deviceHostId', ...goalKey, 'operationId', 'phase', 'kind', ...(kind === 'create' ? ['input'] : kind === 'confirm' ? ['expectedRevision'] : ['expectedAlignmentRevision', 'expectedSubmissionId', 'acceptGaps', ...(Object.hasOwn(value ?? {}, 'finish') ? ['finish'] : [])])])
+  if (!id(v.runtimeId) || !(v.deviceHostId === null || id(v.deviceHostId)) || goalKey.length && !id(v.goalId) || !id(v.operationId) || !['sending', 'unknown', 'saved'].includes(String(v.phase))) throw invalid()
   if (kind === 'create') {
-    const input = record(v.input, ['goalId', 'operationId', 'title', 'description', 'status', 'risk', 'confirmation', ...(Object.hasOwn(v.input ?? {}, 'projectId') ? ['projectId'] : [])])
+    // Previously frozen device requests may carry the old caller ID. Read them by operation.
+    const input = record(v.input, [...goalKey, 'operationId', 'title', 'description', 'status', 'risk', 'confirmation', ...(Object.hasOwn(v.input ?? {}, 'projectId') ? ['projectId'] : [])])
     if (input.goalId !== v.goalId || input.operationId !== v.operationId || !body(input.title) || !input.title || !body(input.description) || input.status !== 'backlog' || input.risk !== 'low' || input.confirmation !== 'user' || input.projectId !== undefined && (typeof input.projectId !== 'string' || !input.projectId)) throw invalid()
   } else if (kind === 'confirm') {
     if (!Number.isSafeInteger(v.expectedRevision) || Number(v.expectedRevision) < 1 || v.phase === 'saved') throw invalid()

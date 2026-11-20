@@ -1,18 +1,18 @@
 import { MobileNotice } from '../notices/MobileNotice'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
-import { mintObjectId } from '@agentmux/core/object-id'
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '@agentmux/client-ui/components/Button'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxRpcGoal, AgentMuxRpcResult } from '@agentmux/core'
 import { assertGoalIntentScope, goalIntentScope, useGoalIntents } from './goal-intents'
 import { MobileRecoveryPanel } from '../recovery/MobileRecoveryPanel'
-import type { GoalCreationInput, GoalIntent, GoalIntentScope } from '../recovery/device-workface'
+import type { GoalIntent, GoalIntentScope } from '../recovery/device-workface'
 
-type Creation = { recordId: string | null; input: GoalCreationInput; target: GoalIntentScope; present: () => boolean; phase: 'saving' | 'unknown' | 'not-saved' | 'pmo' | 'ready'; issue: string }
+type CreationIntent = Extract<GoalIntent, { kind: 'create' }>
+type Creation = { recordId: string | null; input: CreationIntent['input']; target: GoalIntentScope; present: () => boolean; phase: 'saving' | 'unknown' | 'not-saved' | 'pmo' | 'ready'; issue: string }
 export type GoalDiscussionReceipt = AgentMuxRpcResult<'goal.discuss'>['receipt']
 
-/** One explicit click, one caller-held identity, and the original Goal owner. */
+/** One explicit click retains one operation until the owner returns the Goal ID. */
 export function MobileGoalCreate({ client, visible, presented = true, expanded, created, openDiscussion, beginPresentation }: {
   client: AgentMuxHostedClient | null; visible: boolean; presented?: boolean; expanded: boolean; created(goal: AgentMuxRpcGoal, present: () => boolean): void
   openDiscussion(receipt: GoalDiscussionReceipt): void
@@ -35,7 +35,9 @@ export function MobileGoalCreate({ client, visible, presented = true, expanded, 
       issue: retained.phase === 'saved' ? '目标已保存，请打开它的讨论。' : '还不确定目标是否已创建，请读取同一目标核对。'
     })
   }, [retained?.operationId, retained?.phase, retainedRunning])
-  const intent = (value: Creation): GoalIntent => ({ ...value.target, kind: 'create', goalId: value.input.goalId, operationId: value.input.operationId, phase: 'sending', input: value.input })
+  const intent = (value: Creation): CreationIntent => ({ ...value.target, kind: 'create',
+    ...(value.input.goalId === undefined ? {} : { goalId: value.input.goalId }),
+    operationId: value.input.operationId, phase: 'sending', input: value.input })
   useEffect(() => {
     if (!visible || !client?.forwardRpc) return
     let live = true
@@ -45,30 +47,36 @@ export function MobileGoalCreate({ client, visible, presented = true, expanded, 
     return () => { live = false }
   }, [client, visible, revision])
   async function discussion(value: Creation, goal: AgentMuxRpcGoal) {
+    const retained = intent(value)
     const original = owner.snapshot().record.goalIntents?.find(item => item.operationId === value.input.operationId)
     setRequest({ ...value, phase: 'pmo', issue: '目标已保存，正在打开主 Mote 讨论…' })
-    const input = { goalId: value.input.goalId, mode: 'grill' as const, operationId: randomClientRequestId() }
+    const input = { goalId: goal.id, mode: 'grill' as const, operationId: randomClientRequestId() }
     try {
-      assertGoalIntentScope(client, owner, intent(value))
+      assertGoalIntentScope(client, owner, retained)
       const result = await client!.forwardRpc!('goal.discuss', input)
+      assertGoalIntentScope(client, owner, retained)
       if (result.receipt.route !== 'discussion' || result.goal.id !== goal.id || result.receipt.goalId !== goal.id || result.receipt.operationId !== input.operationId || result.receipt.mode !== 'grill') throw new Error('返回的讨论与这次请求不一致')
       setRequest({ ...value, phase: 'ready', issue: result.receipt.agentSessionId ? '目标已保存，已打开主 Mote 讨论。' : '目标已保存，还没有 Agent 接上；请在 Mac 上为主 Mote 选择 Agent 并启动。' })
-      await owner.settleGoalIntent(intent(value), 'confirmed', value.recordId, original)
+      await owner.settleGoalIntent(retained, 'confirmed', value.recordId, original)
       if (value.present()) openDiscussion(result.receipt)
     } catch (error) {
       setRequest({ ...value, phase: 'pmo', issue: `目标已保存，讨论还没确认：${error instanceof Error ? error.message : String(error)}。可以再次打开这个目标的讨论。` })
     }
   }
   async function save(value: Creation) {
+    const retained = intent(value)
     const original = owner.snapshot().record.goalIntents?.find(item => item.operationId === value.input.operationId)
     try {
-      const result = await client!.forwardRpc!('goal.create', value.input)
-      if (result.goal.id !== value.input.goalId || result.receipt.goalId !== value.input.goalId) throw new Error('返回的目标与这次创建不一致')
-      owner.releaseGoalIntent(intent(value), value.recordId); await owner.settleGoalIntent(intent(value), 'saved', value.recordId, original)
+      const { goalId: _retainedId, ...input } = value.input
+      assertGoalIntentScope(client, owner, retained)
+      const result = await client!.forwardRpc!('goal.create', input)
+      assertGoalIntentScope(client, owner, retained)
+      if (result.goal.creationOrigin?.operationId !== input.operationId || result.receipt.goalId !== result.goal.id) throw new Error('返回的目标与这次创建不一致')
+      owner.releaseGoalIntent(retained, value.recordId); await owner.settleGoalIntent(retained, 'saved', value.recordId, original)
       created(result.goal, value.present); await discussion(value, result.goal)
     } catch (error) {
-      owner.releaseGoalIntent(intent(value), value.recordId)
-      try { await owner.settleGoalIntent(intent(value), 'unknown', value.recordId, original) } catch { /* Original durable intent remains the recovery guard. */ }
+      owner.releaseGoalIntent(retained, value.recordId)
+      try { await owner.settleGoalIntent(retained, 'unknown', value.recordId, original) } catch { /* Original durable intent remains the recovery guard. */ }
       setRequest({ ...value, phase: 'unknown', issue: `Mac 还没确认创建：${error instanceof Error ? error.message : String(error)}。请读取同一目标核对。` })
     }
   }
@@ -79,7 +87,7 @@ export function MobileGoalCreate({ client, visible, presented = true, expanded, 
     try {
       if (action === 'new') {
         if (request && request.phase !== 'ready') return
-        const value: Creation = { recordId: owner.recordIdentity(), input: { goalId: mintObjectId(), title: 'Untitled goal', description: '', status: 'backlog', ...(projectId ? { projectId } : {}), risk: 'low', confirmation: 'user', operationId: randomClientRequestId() }, target: goalIntentScope(client, owner), present: beginPresentation(), phase: 'saving', issue: '正在保存新目标…' }
+        const value: Creation = { recordId: owner.recordIdentity(), input: { title: 'Untitled goal', description: '', status: 'backlog', ...(projectId ? { projectId } : {}), risk: 'low', confirmation: 'user', operationId: randomClientRequestId() }, target: goalIntentScope(client, owner), present: beginPresentation(), phase: 'saving', issue: '正在保存新目标…' }
         setRequest(value); await owner.retainGoalIntent(intent(value), value.recordId); await save(value)
       } else if (request && action === 'save-same' && request.phase === 'not-saved') {
         const value = { ...request, phase: 'saving' as const, issue: '正在保存同一个目标…' }
@@ -88,14 +96,16 @@ export function MobileGoalCreate({ client, visible, presented = true, expanded, 
         const next = { ...value, present: beginPresentation() }; setRequest(next); await save(next)
       } else if (request) {
         const presentation = beginPresentation()
+        const retained = intent(request)
         try {
-          assertGoalIntentScope(client, owner, intent(request))
+          assertGoalIntentScope(client, owner, retained)
           if (owner.goalIntentRunning(request.input.operationId)) throw new Error('创建还在等待 Mac 确认')
           const original = owner.snapshot().record.goalIntents?.find(item => item.operationId === request.input.operationId)
-          const result = await client.forwardRpc('goal.inspect', { goalId: request.input.goalId })
+          const result = await client.forwardRpc('goal.inspect', { creationOperationId: request.input.operationId })
+          assertGoalIntentScope(client, owner, retained)
           if (result.goal === null) { setRequest({ ...request, phase: 'not-saved', issue: 'Mac 上还没有这个目标，可以保存同一目标。' }); return }
-          if (result.goal.id !== request.input.goalId) throw new Error('读到的不是这次创建的目标')
-          await owner.settleGoalIntent(intent(request), 'saved', request.recordId, original)
+          if (result.goal.creationOrigin?.operationId !== request.input.operationId) throw new Error('读到的不是这次创建的目标')
+          await owner.settleGoalIntent(retained, 'saved', request.recordId, original)
           const value = { ...request, present: presentation }
           created(result.goal, value.present); await discussion(value, result.goal)
         } catch (error) { setRequest({ ...request, issue: `读取同一目标没有完成：${error instanceof Error ? error.message : String(error)}。可以再试一次。` }) }
@@ -115,7 +125,7 @@ export function MobileGoalCreate({ client, visible, presented = true, expanded, 
       {request.phase === 'unknown' && <Button type="button" disabled={busy} onClick={() => void invoke('read')}>读取同一目标核对</Button>}
       {request.phase === 'not-saved' && <Button type="button" disabled={busy} onClick={() => void invoke('save-same')}>明确保存同一目标</Button>}
       {request.phase === 'pmo' && !busy && <Button type="button" onClick={() => void invoke('open')}>打开这个目标的讨论</Button>}
-      <details><summary>创建请求详情</summary><code>{request.input.goalId}</code><pre>{JSON.stringify(request.input, null, 2)}</pre></details>
+      <details><summary>创建请求详情</summary><pre>{JSON.stringify(request.input, null, 2)}</pre></details>
     </>}
   </section>
 }
