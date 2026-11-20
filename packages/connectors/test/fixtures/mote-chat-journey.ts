@@ -34,7 +34,7 @@ import { feishuConfig } from './feishu.js'
 import { feishuPublicationHttp, type FeishuHttpCall, type FeishuHttpResponse } from './feishu-publication.js'
 import { FeishuAdapter } from '../../src/adapters/feishu/index.js'
 import { signedRoomAdapter, type SignedRoomMessage } from './signed-room-adapter.js'
-import { AgentHookServer } from '../../../core/src/hook-server.js'
+import type { AgentHookServer } from '../../../core/src/hook-server.js'
 import { moteChatNativeProcess } from './mote-chat-native-process.js'
 
 const cleanup: Array<() => void | Promise<void>> = []
@@ -135,8 +135,9 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
   })
   const hookErrors: string[] = []
   if (nativeProcessEnabled || nativeProvider === 'grok') {
-    const hooks = new AgentHookServer((event, signal) => Reflect.get(client, 'acceptHookEvent').call(client, event, signal), 0)
-    await hooks.start(); Reflect.set(client, 'hookServer', hooks)
+    const hooks = Reflect.get(client, 'hookServer') as AgentHookServer
+    Object.defineProperty(hooks, 'port', { value: 0 })
+    await hooks.start()
     const observeOutput = inner.kernel.observeOutput as (id: string, after: number, listener: unknown) => Promise<Record<string, unknown>>
     inner.kernel.observeOutput = async (...args: Parameters<typeof observeOutput>) => {
       const result = await observeOutput(...args), data = client.providers.get(nativeProvider).terminalHandshake!.query

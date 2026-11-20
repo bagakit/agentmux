@@ -81,11 +81,12 @@ it('changing default Executor lazily rotates the next new Query through original
 
 it('the original input route stays on its admitted Executor after settings change while a separate CLI Query receives the new decision', async () => {
   const f = await fixture(), input = f.query('admitted-before-change'), admitted = await f.rpc.call('space.mote.dialogue.input.submit', input)
-  const writes = f.h.inner.kernel.input.mock.calls.length
+  const originalWrites = () => f.h.inner.kernel.input.mock.calls.filter(call => String(call[1]?.data).includes(input.input.prompt))
+  await vi.waitFor(() => expect(originalWrites()).toHaveLength(1))
   await f.choose('second')
   const same = await f.rpc.call('space.mote.dialogue.input.submit', input)
   expect(same.route).toEqual(admitted.route); expect(same.rollover).toEqual(admitted.rollover)
-  expect(f.h.inner.kernel.input).toHaveBeenCalledTimes(writes)
+  expect(originalWrites()).toHaveLength(1)
   const fresh = f.query('new-cli-query'), cli = await runSourceObjectCli(['--endpoint', 'unix:' + f.server.path,
     'space', 'mote', 'dialogue', 'input', 'submit', '--input', '-'], objectCliEnvironment(f.h.root), JSON.stringify(fresh), 30_000)
   expect(cli.code, cli.stderr || cli.stdout).toBe(0)
@@ -98,8 +99,8 @@ it('a Query already owned by the original input producer cannot become a new Exe
   await f.h.client.submitAgentPrompt(request.input)
   await f.choose('second')
   await expect(f.rpc.call('space.mote.dialogue.input.submit', request)).rejects.toMatchObject({ code: 'MOTE_MAIN_INPUT_PREEXISTING' })
-  const original = await f.h.client.inspectAgentPromptSubmission({ kind: 'prompt', agentSessionId: f.ref.sessionId, expectedRun: f.session.run, submissionId: request.input.operationId })
-  expect(original?.admission?.inputKey).toMatchObject({ agentSessionId: f.ref.sessionId, expectedRun: f.session.run, submissionId: request.input.operationId })
+  const key = { kind: 'prompt' as const, agentSessionId: f.ref.sessionId, expectedRun: f.session.run, submissionId: request.input.operationId }
+  expect(await f.h.client.inspectAgentInput({ key })).toMatchObject({ key, persistence: 'confirmed' })
   expect(f.h.inner.kernel.input.mock.calls.filter((call: any[]) => String(call[1]?.data).includes(request.input.prompt)).length).toBeLessThanOrEqual(1)
   expect(f.h.started).toHaveLength(1); expect(f.h.inner.kernel.stop).not.toHaveBeenCalled()
 }, 45_000)
@@ -130,7 +131,7 @@ it.each(['missing-executor', 'read-failed'] as const)('an %s original Executor c
   })
   const request = f.query('unknown-original-executor-' + failure)
   const submit = vi.spyOn(f.h.client, 'submitAgentPrompt')
-  await expect(f.rpc.call('space.mote.dialogue.input.submit', request)).rejects.toMatchObject({ code: 'MOTE_MAIN_EXECUTOR_UNCONFIRMED' })
+  await expect(f.rpc.call('space.mote.dialogue.input.submit', request)).rejects.toMatchObject({ code: 'MOTE_CHAT_EXECUTOR_UNCONFIRMED' })
   expect(submit).not.toHaveBeenCalled()
   expect((await f.rpc.call('space.mote.dialogue.input.inspect', { target: f.target, operationId: request.input.operationId })).route).toBeNull()
   expect((await f.rpc.call('space.mote.dialogue.input.inspect', { target: f.target, operationId: 'original-main_query' })).route?.reference).toEqual(f.ref)
@@ -164,7 +165,8 @@ it.each(['catalog', 'executors'] as const)('an unavailable %s observation retain
   const f = await fixture(); await f.choose('second')
   const fault = vi.spyOn(f.quickPorts, port).mockRejectedValue(Error('Original ' + port + ' observation unavailable'))
   const preference = await f.quick.read({ kind: 'quick', target: f.target })
-  expect(preference.status).toBe('unconfirmed'); expect(preference.defaults?.executorId).toBe('second')
+  expect(preference.status).toBe('ready'); expect(preference.defaults?.executorId).toBe('second')
+  expect(preference.choices?.issues?.[port === 'catalog' ? 'locations' : 'executors']).toContain('Original ' + port + ' observation unavailable')
   const request = f.query('choice-known-observation-failed-' + port), submit = vi.spyOn(f.h.client, 'submitAgentPrompt')
   const due = await f.rpc.call('space.mote.dialogue.input.submit', request)
   expect(due.disposition).toBe('rollover-required'); expect(due.rollover?.decision?.policy).toMatchObject({ kind: 'executor-change', executorId: 'second' })
@@ -180,7 +182,7 @@ it('an unavailable preference read retains the exact new Query until its origina
   const f = await fixture(); await f.choose('second')
   const fault = vi.spyOn(f.quick, 'read').mockRejectedValue(Error('Original settings observation unavailable'))
   const request = f.query('preference-unavailable'), submit = vi.spyOn(f.h.client, 'submitAgentPrompt')
-  await expect(f.rpc.call('space.mote.dialogue.input.submit', request)).rejects.toMatchObject({ code: 'MOTE_MAIN_EXECUTOR_UNCONFIRMED' })
+  await expect(f.rpc.call('space.mote.dialogue.input.submit', request)).rejects.toMatchObject({ code: 'MOTE_CHAT_EXECUTOR_UNCONFIRMED' })
   expect(submit).not.toHaveBeenCalled()
   expect((await f.rpc.call('space.mote.dialogue.input.inspect', { target: f.target, operationId: request.input.operationId })).route).toBeNull()
   expect((await f.rpc.call('space.mote.dialogue.input.inspect', { target: f.target, operationId: 'original-main_query' })).route?.reference).toEqual(f.ref)
