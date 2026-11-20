@@ -68,7 +68,7 @@ export interface GoalRuntimePort {
   inspectGoalAttention(input: Attention): Promise<AgentPromptSubmissionRecord | null>
   inspectGoalStart(input: DemandDispatch): Promise<AgentPromptSubmissionRecord | null>
   authorizeFutureIntent(target: ContinuousProgressTarget, context?: AgentMuxRpcCallContext): Promise<void>
-  saveFutureIntent(loop: ContinuousProgressTarget & Pick<ContinuousProgressLoop, 'futureIntentId' | 'creationOperationId' | 'managedSource' | 'managedScheduleNote' | 'prompt' | 'checkIn' | 'currentDefinition' | 'guidanceAdoptions' | 'inputEpoch'>, active: boolean, context?: AgentMuxRpcCallContext): Promise<void>
+  saveFutureIntent(loop: ContinuousProgressTarget & Pick<ContinuousProgressLoop, 'loopId' | 'futureIntentId' | 'creationOperationId' | 'managedSource' | 'managedScheduleNote' | 'prompt' | 'checkIn' | 'currentDefinition' | 'guidanceAdoptions' | 'inputEpoch'>, active: boolean, context?: AgentMuxRpcCallContext): Promise<void>
   inspectFutureIntent(loop: ContinuousProgressLoop): Promise<{ active: boolean }>
   inspectInput(loop: ContinuousProgressLoop): Promise<import('@agentmux/core').ContinuousProgressInputReading | undefined>
   supersededInputWasUnclaimed(loop: ContinuousProgressLoop, signal: AbortSignal): Promise<boolean>
