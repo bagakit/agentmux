@@ -7,7 +7,9 @@ import overview from '../apps/desktop/scripts/fixtures/settings-overview/vitest.
 const scope = process.env.AMUX_PROTOCOL_SCOPE ?? 'reader'
 const tests = {
   reader: ['packages/core/test/amux-protocol-catalog.test.ts', 'packages/client-ui/test/amux-protocol-cards.test.tsx',
-    'packages/core/test/agent-message-render.test.ts', 'packages/core/test/agent-message-leading-context.test.ts', 'packages/core/test/agent-message-reference-reading.test.ts'],
+    'packages/core/test/agent-message-render.test.ts', 'packages/core/test/agent-message-leading-context.test.ts',
+    'packages/core/test/agent-message-reference-reading.test.ts', 'packages/core/test/agent-outbound-message.test.ts',
+    'packages/core/test/goal-role-guidance.test.ts', 'packages/core/test/channel-reply-norm.test.ts'],
   cards: ['packages/client-ui/test/amux-protocol-reading.test.tsx', 'packages/client-ui/test/a2a-reference-reading.test.tsx',
     'packages/client-ui/test/conversation-leading-context.test.tsx', 'apps/desktop/test/amux-protocol-consumers.test.tsx',
     'apps/desktop/test/conversation-message-wrapper.integration.test.tsx'],
