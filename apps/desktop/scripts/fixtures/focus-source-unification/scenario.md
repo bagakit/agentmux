@@ -36,9 +36,9 @@ Set `AGENTMUX_FOCUS_CREATION_MUTATION=omit-creation` to omit the original creati
 
 ## Pinned Agents
 
-Pass `--agent-pins` to pin a local Agent from its Cards menu and a Source Agent from its Compact list keyboard menu. They share the same raw Session ID on different owners. Focus search narrows the visible pins and keeps both preferences. Each shortcut opens its original workface, including both Regions in the Source Tab. A third pin remains removable during a temporary gap in local observations and offers no other Agent as a substitute. Both processes use one private user-data directory to verify exact pins, order, layout, original Tabs and the unsent draft. Native Session observations and PTY painting are controlled.
+Pass `--agent-pins` to pin a local Agent from its Cards menu and a Source Agent from its Compact list keyboard menu. They share the same raw Session ID on different owners. Pin an Agent shown in two projects from the Archive group and verify the other group still offers its own pin action. Focus search narrows the visible group pins and keeps their saved scopes. Each shortcut opens its original workface, including both Regions in the Source Tab. Check that a previously saved exact pin without a group appears in its sole confirmed group, and that an unobserved scoped pin remains removable without opening another Agent. Both processes use one private user-data directory to verify exact pins, order, layout, original Tabs and the unsent draft. Native Session observations and PTY painting are controlled.
 
-Set `AGENTMUX_FOCUS_PIN_MUTATION=unqualified-sid` to remove the Host and Runtime qualifiers from the actual preference key. Selecting the second original Agent's menu must then fail the independent pin assertion.
+Set `AGENTMUX_FOCUS_PIN_MUTATION=unqualified-sid` to remove the Host and Runtime qualifiers from the actual preference key, or `unscoped-groups` to save all group pins in one scope. The same scene must fail when exact pin ownership or separation is lost.
 
 ## Inline Agent name editing
 

@@ -29,9 +29,9 @@ const branches = localTaskScene ? [
 ].map(({name, taskId}) => ({ workspace: { ...workspace, id: 'analysis-' + name, name,
   path: path + '/.worktrees/' + name, repoPath: path, branch: name }, taskId })) : []
 const secondary = { ...workspace, id: 'original-archive', name: 'Archive', path: '/original/archive-project' }
-const workspaces = [workspace, ...(window.__taskLayoutScene ? [secondary] : []), ...branches.map(branch => branch.workspace)]
+const workspaces = [workspace, ...(window.__taskLayoutScene || agentPinsScene ? [secondary] : []), ...branches.map(branch => branch.workspace)]
 const definitions=[['working','核对发布版本与业务数据','working','running',now],['reading','核查跨版本分析记录','working','running',now-20*60000],['interrupted','继续上次保留的分析任务','disconnected','interrupted',now]]
-const sessions=definitions.map(([id,label,state,processState,at])=>({...agent,id,hostId:'local',workspacePath:path,label,processState,status:{state,source:'native-hook',observedAt:at},semanticStatus:{state:'working',source:'native-hook',observedAt:at,stateEnteredAt:at},control:{...agent.control,hostId:'local',agentSessionId:id,run:{runId:'original-run-'+id}}}))
+const sessions=definitions.map(([id,label,state,processState,at])=>({...agent,id,hostId:'local',workspacePath:agentPinsScene && id === 'interrupted' ? secondary.path : path,label,processState,status:{state,source:'native-hook',observedAt:at},semanticStatus:{state:'working',source:'native-hook',observedAt:at,stateEnteredAt:at},control:{...agent.control,hostId:'local',agentSessionId:id,run:{runId:'original-run-'+id}}}))
 if (window.__taskLayoutScene) {
  const interrupted = sessions.find(item => item.id === 'interrupted')
  interrupted.status.detail = 'The Runtime restarted and interrupted this Run.'
@@ -105,10 +105,10 @@ if (window.__taskLayoutScene) {
  }
 }
 const tab=createWorkbenchTab('ordinary-tab',{regionId:'ordinary-region',workspaceId:workspace.id,kind:'agent',phase:'attached',sessionId:'working'})
-const originalTabs = [tab, ...(localTaskScene ? sessions.filter(item => item.id !== 'working').map(item => {
+const originalTabs = [tab, ...sessions.filter(item => localTaskScene ? item.id !== 'working' : agentPinsScene && item.id === 'interrupted').map(item => {
  const location = workspaces.find(candidate => candidate.path === item.workspacePath)
  return createWorkbenchTab('tab-'+item.id,{regionId:'region-'+item.id,workspaceId:location.id,kind:'agent',phase:'attached',sessionId:item.id})
-}) : [])]
+})]
 window.presentationLeaves={mounts:[],unmounts:[]}
 api.workspaces.listBranches=async()=>({kind:'not-a-git-repository',hostId:'local',workspacePath:path})
 api.scratch.listTopics=async()=>[]
@@ -249,7 +249,10 @@ if (agentPinsScene) {
   },
   async checkpoint() {
    await checkpointAgentOperations()
-   return JSON.parse(localStorage.getItem('agentmux-workbench-v1')).state.pinnedItems?.['focus:agents'] ?? []
+   return Object.fromEntries(Object.entries(JSON.parse(localStorage.getItem('agentmux-workbench-v1')).state.pinnedItems ?? {}).filter(([key]) => key.startsWith('focus:agents')))
+  },
+  rememberReadingPin() {
+   useAppStore.getState().togglePinnedItem('focus:agents', JSON.stringify(['host','local','reading']))
   },
  }
 }

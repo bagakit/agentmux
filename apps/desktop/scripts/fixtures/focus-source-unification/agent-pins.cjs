@@ -1,14 +1,16 @@
 const assert = require('node:assert/strict')
 const { focus, taskLayoutControls } = require('./task-layout-controls.cjs')
 
-const pinned = focus + ' section[aria-label="Pinned Agents"]'
+const pinned = focus + ' section[data-focus-pin-group]'
 const task = id => focus + ` button.focus-context[data-session-id=${JSON.stringify(id)}]`
+const projectTask = (project, id) => focus + ` [data-project-group-key='${JSON.stringify(['local', project])}'] button.focus-context[data-session-id=${JSON.stringify(id)}]`
 const workface = '.global-session-workspace'
 const menuItem = '.focus-context-menu [role="menuitem"]'
 const search = focus + ' input[aria-label="Search contexts"]'
 const exactPins = [
   JSON.stringify(['host', 'local', 'working']),
   JSON.stringify(['runtime', 'original-other-runtime', 'working']),
+  JSON.stringify(['host', 'local', 'interrupted']),
 ]
 
 module.exports = async function exerciseAgentPins({ win, read, until, settle, click, capture, result, restoreOnly }) {
@@ -17,7 +19,8 @@ module.exports = async function exerciseAgentPins({ win, read, until, settle, cl
   const query = selector => `document.querySelector(${JSON.stringify(selector)})`
   const pinEntries = () => read(`Array.from(document.querySelectorAll(${JSON.stringify(pinned + ' [data-focus-agent-pin]')})).map(entry => {
     const open = entry.querySelector('.focus-agent-pin__open')
-    return {name: open.querySelector('strong').textContent, detail: open.querySelector(':scope > span:last-child').textContent, actionable: open.tagName === 'BUTTON'}
+    return {name: open.querySelector('strong').textContent, detail: open.querySelector(':scope > span:last-child')?.textContent ?? '', actionable: open.tagName === 'BUTTON',
+      scope: entry.closest('[data-focus-pin-group]').dataset.focusPinGroup, inGroup: Boolean(entry.closest('.focus-project-lanes__track'))}
   })`)
   const workfaceDraft = () => read(`${query(workface + ' [data-owner-tab="ordinary-tab"][data-owner-region="ordinary-region"] textarea')}?.value`)
   const selected = () => read('window.agentPinsProof.selection()')
@@ -47,12 +50,12 @@ module.exports = async function exerciseAgentPins({ win, read, until, settle, cl
       })()`)
       for (const type of ['mousePressed', 'mouseReleased']) await renderer.sendCommand('Input.dispatchMouseEvent', {type, ...point, button:'right', clickCount:1})
     }
-    await until('the real Agent menu offers its pin action', () => read(`Array.from(document.querySelectorAll(${JSON.stringify(menuItem)})).some(item => /^(Pin in|Unpin from) Focus$/.test(item.textContent.trim()))`))
-    return read(`Array.from(document.querySelectorAll(${JSON.stringify(menuItem)})).find(item => /^(Pin in|Unpin from) Focus$/.test(item.textContent.trim())).textContent.trim()`)
+    await until('the real Agent menu offers its group pin action', () => read(`Array.from(document.querySelectorAll(${JSON.stringify(menuItem)})).some(item => /^(Pin in|Unpin from) group$/.test(item.textContent.trim()))`))
+    return read(`Array.from(document.querySelectorAll(${JSON.stringify(menuItem)})).find(item => /^(Pin in|Unpin from) group$/.test(item.textContent.trim())).textContent.trim()`)
   }
   async function choosePinAction() {
     const target = await read(`(() => {
-      const item = Array.from(document.querySelectorAll(${JSON.stringify(menuItem)})).find(item => /^(Pin in|Unpin from) Focus$/.test(item.textContent.trim()))
+      const item = Array.from(document.querySelectorAll(${JSON.stringify(menuItem)})).find(item => /^(Pin in|Unpin from) group$/.test(item.textContent.trim()))
       item.dataset.agentPinsFixtureAction = ''
       return '[data-agent-pins-fixture-action]'
     })()`)
@@ -84,19 +87,32 @@ module.exports = async function exerciseAgentPins({ win, read, until, settle, cl
 
   await until('both synthetic Agents have actual Focus rows', () => read(`window.agentPinsProof && !!${query(task('working'))} && Array.from(document.querySelectorAll(${JSON.stringify(focus + ' .focus-context')})).some(row => row.querySelector('strong')?.textContent === window.unifiedFocusProof.foreignName)`))
   const { localName, foreignName } = await read('({localName:window.unifiedFocusProof.localName, foreignName:window.unifiedFocusProof.foreignName})')
-  const bothNames = [localName, foreignName]
+  const archiveTask = projectTask('original-archive', 'interrupted')
+  const otherProjectName = await read(`${query(archiveTask)}?.querySelector('strong')?.textContent`)
+  assert.ok(otherProjectName)
+  const names = [localName, foreignName, otherProjectName]
   const foreignTask = task(await read(`Array.from(document.querySelectorAll(${JSON.stringify(focus + ' .focus-context')})).find(row => row.querySelector('strong')?.textContent === window.unifiedFocusProof.foreignName).dataset.sessionId`))
   const originalPins = async () => {
-    await until('both original pin shortcuts are usable', async () => {
+    await until('all original group pin shortcuts are usable', async () => {
       const entries = await pinEntries()
-      return entries.length === bothNames.length && entries.every((entry,index) => entry.actionable && entry.name === bothNames[index])
+      return entries.length === names.length && entries.every(entry => entry.actionable && names.includes(entry.name))
     })
+    const entries = await pinEntries()
+    assert.ok(entries.every(entry => entry.inGroup && entry.scope.startsWith('focus:agents:')), 'Every pin is inside a confirmed group')
+    assert.equal(new Set(entries.map(entry => entry.scope)).size, 2, 'Independent groups keep separate pin scopes')
+    assert.ok(entries.some(entry => entry.name === otherProjectName && entry.scope === 'focus:agents:' + JSON.stringify(['local', 'original-archive'])))
+  }
+  const checkpoint = async () => {
+    const saved = await read('window.agentPinsProof.checkpoint()')
+    assert.equal(Object.keys(saved).length, 2)
+    assert.ok(!Object.hasOwn(saved, 'focus:agents'))
+    assert.deepEqual(Object.values(saved).flat().sort(), [...exactPins].sort())
+    return saved
   }
   assert.equal(await read('window.agentPinsProof.restored'), restoreOnly)
   if (restoreOnly) {
     await originalPins()
-    result.pins = await read('window.agentPinsProof.checkpoint()')
-    assert.deepEqual(result.pins, exactPins)
+    result.pins = await checkpoint()
     result.topology = await graph()
     result.layout = await read(`${query(focus)}.dataset.taskLayout`)
     assert.equal(result.layout, 'list')
@@ -106,12 +122,19 @@ module.exports = async function exerciseAgentPins({ win, read, until, settle, cl
   }
 
   assert.deepEqual(await pinEntries(), [])
+  await read('window.agentPinsProof.rememberReadingPin()')
+  await until('the original saved pin finds its only confirmed group', async () => (await pinEntries()).length === 1)
+  assert.ok((await pinEntries())[0].inGroup)
+  assert.equal(await taskMenu(task('reading'), true), 'Unpin from group')
+  await choosePinAction()
+  await until('removing the original preference leaves no hidden global shortcut', async () => (await pinEntries()).length === 0)
+  assert.deepEqual(await read('window.agentPinsProof.checkpoint()'), {})
   const originalFacts = await read('window.unifiedFocusProof.facts()')
   await click(task('working'))
   await until('original local workface with its draft', async () => await workfaceDraft() === originalFacts.drafts.working)
   const localSelection = await selected()
   const originalRowCount = await rowCount()
-  assert.equal(await taskMenu(task('working')), 'Pin in Focus')
+  assert.equal(await taskMenu(task('working')), 'Pin in group')
   await frame('pin-menu-cards', 'The original Cards menu exposes the specific Agent pin action')
   await choosePinAction()
   await until('pin appears without replacing a task', async () => (await pinEntries()).length === 1)
@@ -119,12 +142,16 @@ module.exports = async function exerciseAgentPins({ win, read, until, settle, cl
   assert.equal(await rowCount(), originalRowCount, 'Pinning leaves the original Task rows intact')
 
   await layouts.choose('list')
-  assert.equal(await taskMenu(foreignTask, true), 'Pin in Focus', 'A same-SID Agent on another Runtime remains independently pinnable')
+  assert.equal(await taskMenu(foreignTask, true), 'Pin in group', 'A same-SID Agent on another Runtime remains independently pinnable')
+  await choosePinAction()
+  assert.equal(await taskMenu(archiveTask, true), 'Pin in group')
   await choosePinAction()
   await originalPins()
+  assert.equal(await taskMenu(projectTask('ordinary-analysis', 'interrupted'), true), 'Pin in group', 'The same Agent in another original group is not pinned there')
+  await key('Escape', 'Escape', 27)
   assert.equal(await rowCount(), originalRowCount, 'Two shortcuts preserve the same Task rows')
   assert.deepEqual(await selected(), localSelection)
-  await frame('both-pins-list', 'Two same-SID Agents have distinct shortcuts above their original task rows')
+  await frame('both-pins-list', 'Two exact identities in one group and a retained task in another group have independent shortcuts')
 
   await filter(foreignName)
   await until('the filter narrows the pin list to the original Source task', async () => {
@@ -132,7 +159,7 @@ module.exports = async function exerciseAgentPins({ win, read, until, settle, cl
     return entries.length === 1 && entries[0].name === foreignName
   })
   await frame('pins-filtered', 'The original Focus search narrows the shortcuts without deleting preferences')
-  assert.deepEqual(await read('window.agentPinsProof.checkpoint()'), exactPins)
+  await checkpoint()
   await filter('')
   await originalPins()
 
@@ -148,19 +175,19 @@ module.exports = async function exerciseAgentPins({ win, read, until, settle, cl
   assert.deepEqual(await selected(), localSelection)
   result.navigation = {sourceTab: 'source-tab-3', sourceRegions: exactSourceRegions, localTab: 'ordinary-tab', localRegion: 'ordinary-region', originalDraft: true}
 
-  assert.equal(await taskMenu(task('reading'), true), 'Pin in Focus')
+  assert.equal(await taskMenu(task('reading'), true), 'Pin in group')
   await choosePinAction()
-  await until('third pin appears before its observation goes away', async () => (await pinEntries()).length === 3)
+  await until('a new group pin appears before its observation goes away', async () => (await pinEntries()).length === names.length + 1)
   await read('window.agentPinsProof.observeReading(false)')
   await until('temporarily unobserved original pin remains removable', async () =>
     (await pinEntries()).some(entry => entry.name === 'Agent · reading' && entry.detail === 'Unavailable' && !entry.actionable))
   assert.equal(await workfaceDraft(), originalFacts.drafts.working)
   win.setContentSize(440, 810)
   await read('window.unifiedFocusProof.theme("light")')
-  const removeUnknown = 'button[aria-label="Unpin Agent · reading from Focus"]'
+  const removeUnknown = 'button[aria-label^="Unpin Agent · reading from "]'
   await settle()
-  const removeSource = pinned + ` button[aria-label=${JSON.stringify(`Unpin ${foreignName} from Focus`)}]`
-  await read(`${query(removeSource)}.focus()`)
+  const removeBeforeUnknown = pinned + ` button[aria-label^=${JSON.stringify(`Unpin ${foreignName} from `)}]`
+  await read(`${query(removeBeforeUnknown)}.focus()`)
   await key('Tab', 'Tab', 9)
   const unknownControl = query(pinned + ' ' + removeUnknown)
   assert.ok(await read(`document.activeElement === ${unknownControl} && ${unknownControl}.matches(':focus-visible')`),
@@ -168,18 +195,18 @@ module.exports = async function exerciseAgentPins({ win, read, until, settle, cl
   await frame('unavailable-pin-440', 'An unobserved pin retains a visible cancellation action and no substitute navigation')
   await pinControl('Agent · reading', removeUnknown, true)
   await originalPins()
-  await until('removing a focused shortcut preserves keyboard navigation', () => read(`Boolean(document.activeElement?.closest(${JSON.stringify(pinned)})) || document.activeElement === ${query(search)}`))
+  await until('removing a focused shortcut preserves keyboard navigation', () => read(`Boolean(document.activeElement?.closest(${JSON.stringify(pinned)})) || document.activeElement?.hasAttribute('data-focus-project-scope-control') || document.activeElement === ${query(search)}`))
   await read('window.agentPinsProof.observeReading(true)')
   await until('the original task can be observed after the pin is removed', () => read(`Boolean(${query(task('reading'))})`))
   win.setContentSize(1100, 850)
   await settle()
-  assert.equal(await taskMenu(foreignTask, true), 'Unpin from Focus')
+  assert.equal(await taskMenu(foreignTask, true), 'Unpin from group')
   await choosePinAction()
   await until('the exact Source preference is removed by its menu', async () => {
     const entries = await pinEntries()
-    return entries.length === 1 && entries[0].name === localName
+    return entries.length === 2 && entries.some(entry => entry.name === localName) && entries.some(entry => entry.name === otherProjectName)
   })
-  assert.equal(await taskMenu(foreignTask, true), 'Pin in Focus')
+  assert.equal(await taskMenu(foreignTask, true), 'Pin in group')
   await choosePinAction()
   await originalPins()
   await frame('pins-restored-filter', 'Restored shortcuts preserve their ordering and the original local workface')
@@ -189,8 +216,7 @@ module.exports = async function exerciseAgentPins({ win, read, until, settle, cl
   assert.deepEqual(after.drafts, originalFacts.drafts)
   assert.deepEqual(await selected(), localSelection)
   assert.equal(await rowCount(), originalRowCount)
-  result.pins = await read('window.agentPinsProof.checkpoint()')
-  assert.deepEqual(result.pins, exactPins)
+  result.pins = await checkpoint()
   result.topology = await graph()
   result.unavailable = { retained: true, removable: true, reobserved: true, keyboardFocusVisible: true, focusPreserved: true }
   result.filtered = { retainedOriginalPreferences: true, restoredExactShortcuts: true }

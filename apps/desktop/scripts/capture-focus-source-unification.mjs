@@ -15,7 +15,7 @@ assert.ok(process.argv[2]==='--evidence'&&process.argv[3]&&(process.argv.length=
 const creationRelations=process.argv[4]==='--creation-relations', creationMutation=process.env.AGENTMUX_FOCUS_CREATION_MUTATION
 const taskLayout=process.argv[4]==='--task-layout'||creationRelations,inlineRename=process.argv[4]==='--inline-rename'
 const agentPins=process.argv[4]==='--agent-pins', pinMutation=process.env.AGENTMUX_FOCUS_PIN_MUTATION
-assert.ok(!agentPins || !pinMutation || pinMutation==='unqualified-sid','Known Focus Agent pin mutation')
+assert.ok(!agentPins || !pinMutation || ['unqualified-sid','unscoped-groups'].includes(pinMutation),'Known Focus Agent pin mutation')
 assert.ok(!creationRelations || !creationMutation || ['omit-creation', 'ignore-route-obstacles'].includes(creationMutation), 'Known Focus creation mutation')
 const layoutMutation=process.env.AGENTMUX_FOCUS_LAYOUT_MUTATION
 assert.ok(!taskLayout || !layoutMutation || ['omit-layout','hide-mandatory','repeat-result-idle','unqualified-subagents','omit-row-summary','expand-known-recovery','omit-detail-motion','ignore-interaction-range'].includes(layoutMutation),'Known Focus task layout mutation')
@@ -128,6 +128,13 @@ try{
       assert.equal(source.split(originalHost).length,2,'One qualified local pin key')
       const code=source.replace(originalSource,"JSON.stringify(['agent', identity.agentSessionId])")
         .replace(originalHost,"JSON.stringify(['agent', control.agentSessionId])")
+      transformations.push({path:relative(root,path),mutation:pinMutation,sourceSHA256:hash(source),loadedSHA256:hash(code)})
+      return {contents:code,loader:'ts'}
+    }
+    if(agentPins && pinMutation==='unscoped-groups' && component==='focus-agent-pins.ts'){
+      const target='export const focusAgentPinScope = (group: string) => \u0060${FOCUS_AGENT_PIN_SCOPE}:${group}\u0060'
+      assert.equal(source.split(target).length,2,'One group scope owns saved Focus pins')
+      const code=source.replace(target,'export const focusAgentPinScope = (_group: string) => FOCUS_AGENT_PIN_SCOPE')
       transformations.push({path:relative(root,path),mutation:pinMutation,sourceSHA256:hash(source),loadedSHA256:hash(code)})
       return {contents:code,loader:'ts'}
     }
