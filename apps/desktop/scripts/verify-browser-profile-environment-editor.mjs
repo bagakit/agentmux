@@ -17,6 +17,7 @@ const electron = require('electron'),
   sha = (bytes) => createHash('sha256').update(bytes).digest('hex')
 const fixture = join(desktop, 'scripts/fixtures/browser-profile-environment'),
   textDrafts = process.argv.includes('--text-drafts'),
+  fingerprint = process.argv.includes('--fingerprint'),
   outRoot = join(root, textDrafts ? '.local/browser-profile-text-drafts/native' : '.local/browser-profile-editor/native')
 await mkdir(outRoot, { recursive: true })
 const out = await mkdtemp(join(outRoot, 'attempt-'))
@@ -180,7 +181,7 @@ try {
     )
     assert.ok(inputs.has(join(desktop, 'src/main/browser-profile-editor-ipc.ts')))
     if (textDrafts) assert.ok(inputs.has(join(desktop, 'src/renderer/src/lib/browser-profile-text-drafts.ts')))
-    const phases = textDrafts ? ['text-seed', 'text-restart', ...(name === 'mutation' ? [] : ['text-after-discard'])] :
+    const phases = fingerprint ? ['fingerprint'] : textDrafts ? ['text-seed', 'text-restart', ...(name === 'mutation' ? [] : ['text-after-discard'])] :
       process.argv.includes('--draft-read-proof') ? ['read-failure'] : name === 'mutation' ? ['seed'] : ['seed', 'restart']
     for (const phase of phases) {
       const resultFile = join(compiled, phase + '.json'),

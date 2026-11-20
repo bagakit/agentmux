@@ -1,4 +1,5 @@
 import { runProfileEnvironmentScope } from './scope.js'
+import { runProfileFingerprint } from './fingerprint.js'
 import assert from 'node:assert/strict'
 import { writeFileSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
@@ -93,7 +94,9 @@ try {
     { rememberedSchemes: async () => ({}), rememberScheme: async () => {}, openExternal: () => { throw new Error('No external navigation in this proof') } })
   const events: BrowserEvent[] = [], originalSend = (browsers as any).send.bind(browsers)
   ;(browsers as any).send = (event: BrowserEvent) => { events.push(structuredClone(event)); originalSend(event) }
-  if (process.env.AGENTMUX_ENV_PROOF_SCOPE === '1') {
+  if (process.env.AGENTMUX_ENV_PROOF_FINGERPRINT === '1') {
+    await runProfileFingerprint({ home, phase, url, profiles, browsers, page, cli, report, stage })
+  } else if (process.env.AGENTMUX_ENV_PROOF_SCOPE === '1') {
     for (const [owner, key] of [[profiles, 'prepareSession'], [profiles, 'preparePageEnvironment'], [browsers, 'createView'], [browsers, 'registerEntry']] as const) {
       const original = (owner as any)[key].bind(owner)
       ;(owner as any)[key] = (...args: any[]) => {

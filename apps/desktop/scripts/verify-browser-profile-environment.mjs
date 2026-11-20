@@ -13,6 +13,7 @@ const { build } = browserSourceBuild(createRequire(require.resolve('vite/package
 const electron = require('electron'), sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const scopeMode = process.argv.includes('--scope')
 const releaseProof = process.argv.includes('--screen-and-release-proof')
+const fingerprintProof = process.argv.includes('--fingerprint')
 const hardwareProof=process.argv.includes('--hardware-baseline-proof')
 const bindingProof=process.argv.includes('--binding-proof')
 assert.ok(!releaseProof || scopeMode, 'The screen/release proof uses --scope')
@@ -51,7 +52,7 @@ const pageServer = createServer((request, response) => {
 await new Promise(done => pageServer.listen(0, '127.0.0.1', done))
 const url = `http://127.0.0.1:${pageServer.address().port}/`
 try {
-  for (const name of scopeMode ? bindingProof&&process.argv.includes('--mutations') ? ['scope-binding-mutant','scope-switch-screen-mutant','restored'] : hardwareProof ? ['scope-hardware-baseline-mutant','restored'] : releaseProof ? ['scope-screen-mutant','restored'] : process.argv.includes('--mutations') ? ['candidate','scope-locale-mutant','scope-screen-mutant','restored'] : ['candidate'] : ['candidate','mutation','restored']) {
+  for (const name of fingerprintProof ? (process.argv.includes('--mutations') ? ['candidate', 'fingerprint-mutant', 'restored'] : ['candidate']) : scopeMode ? bindingProof&&process.argv.includes('--mutations') ? ['scope-binding-mutant','scope-switch-screen-mutant','restored'] : hardwareProof ? ['scope-hardware-baseline-mutant','restored'] : releaseProof ? ['scope-screen-mutant','restored'] : process.argv.includes('--mutations') ? ['candidate','scope-locale-mutant','scope-screen-mutant','restored'] : ['candidate'] : ['candidate','mutation','restored']) {
     const compiled = join(out, name); await mkdir(compiled)
     await symlink(join(root, 'apps/desktop/node_modules'), join(compiled, 'node_modules'))
     let mutation
@@ -62,6 +63,13 @@ try {
         bundler.onLoad({ filter: /\.[cm]?[jt]sx?$/ }, async args => {
           if (!args.path.startsWith(root + '/') || args.path.includes('/node_modules/')) return
           let code = await readFile(args.path, 'utf8'); receipt.sources[relative(root, args.path)] = sha(code)
+          if (name === 'fingerprint-mutant' && args.path === join(root, 'apps/desktop/src/main/browser-profile-fingerprint.ts')) {
+            const anchor = "if (enabled.has('canvas')) {"
+            assert.equal(code.split(anchor).length, 2, 'Exact original canvas override')
+            const before = sha(code)
+            code = code.replace(anchor, 'if (false) {')
+            mutation = { file: relative(root, args.path), before, after: sha(code) }
+          }
           if(scopeMode && name.startsWith('scope-') && name!=='scope-switch-screen-mutant' && args.path===join(root,'apps/desktop/src/main/browser-profile-page-environment.ts')){
             const anchor=name==='scope-binding-mutant'?'page.port.isCurrent()':name==='scope-hardware-baseline-mutant'?'contextId: realm.executionContextId,':name==='scope-locale-mutant'?"await one(['locale'], 'Emulation.setLocaleOverride', { locale: settings?.locale ?? '' })":"page.port.applyScreen()"
             assert.equal(code.split(anchor).length-1,1,'Exact original native environment mutation')
@@ -82,7 +90,7 @@ try {
           return { contents: code, loader: args.path.endsWith('.tsx') ? 'tsx' : args.path.endsWith('.ts') ? 'ts' : 'js' }
         })
       } }] })
-    const isMutation = name === 'mutation'||name.startsWith('scope-')
+    const isMutation = name === 'mutation' || name.startsWith('scope-') || name === 'fingerprint-mutant'
     const isolatedHome = isMutation ? await mkdtemp('/tmp/amux-env-mutation-') : home
     try {
       for (const phase of name === 'candidate' && !process.argv.includes('--cold-target') && !bindingProof ? ['seed', 'restart'] : ['seed']) {
@@ -96,6 +104,7 @@ try {
           AGENTMUX_AGENT_SESSION_STORE: join(runHome, 'sessions.json'), AGENTMUX_MESSAGE_QUEUE_PATH: join(runHome, 'messages.ndjson'),
           AGENTMUX_ENV_PROOF_HOME: runHome, AGENTMUX_ENV_PROOF_ROOT: root, AGENTMUX_ENV_PROOF_OUTPUT: resultFile,
           AGENTMUX_ENV_PROOF_PHASE: phase, AGENTMUX_ENV_PROOF_URL: url, AGENTMUX_ENV_PROOF_SCOPE: scopeMode?'1':'0', AGENTMUX_ENV_PROOF_NODE: process.execPath,
+          AGENTMUX_ENV_PROOF_FINGERPRINT: fingerprintProof ? '1' : '0',
           AGENTMUX_ENV_PROOF_COLD_TARGET: process.argv.includes('--cold-target')?'1':'0', AGENTMUX_ENV_PROOF_RELEASE: releaseProof?'1':'0', AGENTMUX_ENV_PROOF_HARDWARE_BASELINE: hardwareProof?'1':'0', AGENTMUX_ENV_PROOF_BINDING:bindingProof?'1':'0' })
         // Seed now also observes a native setter failure, Profile-scoped delivery and recovery.
         // Give that added work its own observation allowance; restart's original proof is unchanged.
@@ -116,7 +125,7 @@ try {
         if (isMutation) {
           assert.ok(mutation && mutation.before !== mutation.after)
           assert.equal(processResult.exitCode, 1)
-          assert.match(actual.failure?.message ?? '', scopeMode ? name==='scope-binding-mutant'?/A prepared candidate must not claim/:name==='scope-switch-screen-mutant'?/committed native view must keep/:name==='scope-hardware-baseline-mutant'?/Native hardware clear must restore/:name==='scope-locale-mutant'?/Native locale command/:/Original native screen application/ : /Public targets retain the exact affected Profile warning/)
+          assert.match(actual.failure?.message ?? '', fingerprintProof ? /Native canvas readback must change/ : scopeMode ? name==='scope-binding-mutant'?/A prepared candidate must not claim/:name==='scope-switch-screen-mutant'?/committed native view must keep/:name==='scope-hardware-baseline-mutant'?/Native hardware clear must restore/:name==='scope-locale-mutant'?/Native locale command/:/Original native screen application/ : /Public targets retain the exact affected Profile warning/)
         } else { assert.equal(processResult.exitCode, 0, JSON.stringify(actual.failure)); assert.equal(actual.passed, true) }
         if (name === 'restored') await rm(runHome, { recursive: true, force: true })
       }

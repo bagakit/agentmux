@@ -254,7 +254,25 @@ try {
   await until(
     'Boolean(window.environmentEditorProof?.preloadAvailable && document.querySelector(".profile-environment"))'
   )
-  if (phase.startsWith('text-')) {
+  if (phase === 'fingerprint') {
+    await click('.browser-profile-editor__advanced > summary')
+    await until('Boolean(document.querySelector(".browser-profile-editor__advanced[open]"))')
+    await click('.profile-environment__fingerprint summary')
+    await until('Boolean(document.querySelector(".profile-environment__fingerprint[open]"))')
+    await button('Generate seed')
+    const generated = await evaluate('document.querySelector(\'input[aria-label="Fingerprint seed"]\').value')
+    assert.match(generated, /^\d{1,10}$/u)
+    assert.equal(await evaluate('document.querySelectorAll(".profile-environment__fingerprint input:checked").length'), 5)
+    assert.equal(manager.environmentSettings(id)?.fingerprint, undefined, 'Generating edits the original draft until Apply is pressed')
+    await capture('profile-fingerprint-wide', 1080, 'dark', '.profile-environment__fingerprint')
+    await capture('profile-fingerprint-narrow', 720, 'light', '.profile-environment__fingerprint')
+    await button('Apply environment')
+    await until('document.querySelector(".profile-environment")?.textContent.includes("Settings saved.")')
+    const observed = await cli(['inspect', '--profile', id])
+    assert.equal(observed.profile.environment.fingerprint.seed, Number(generated))
+    assert.equal(observed.profile.environment.fingerprint.surfaces.length, 5)
+    report.observations.push({ kind: 'real-fingerprint-draft-and-save', id, surfaces: observed.profile.environment.fingerprint.surfaces })
+  } else if (phase.startsWith('text-')) {
     const owner = (await cli(['inspect', '--profile', id])).profile
     const secondName = 'Independent Profile'
     if (phase === 'text-seed') await cli(['create', '--operation-id', mintObjectId(), '--label', secondName])
