@@ -1,7 +1,7 @@
 import { guideSharedRuntime } from './generated/agentmux-guides.js'
 import { guideText } from './guide-text.js'
 import { AGENTMUX_GOAL_SKILL_ENTRY } from './goal-role-guidance.js'
-import { AMUX_PROTOCOL_DEFINITIONS, readAmuxFocusReference, readAmuxTriggerNote } from './amux-protocol-definition.js'
+import { AMUX_REFERENCE_TAG, readAmuxSourceReference, readAmuxTriggerNote } from './amux-protocol-definition.js'
 import { encodeAmuxText, renderAmuxProtocol } from './amux-protocol.js'
 import { AGENTMUX_SELF_CONTEXT_VERB } from './agent-self-context.js'
 import { AGENTMUX_AGENT_MESSAGING_ENTRY, AGENTMUX_SESSION_NAMING_ENTRY } from './agent-messaging-guidance.js'
@@ -59,12 +59,14 @@ function amuxEnvelope(text: string): string {
     : renderAmuxProtocol('context', 'wire', { content: encodeAmuxText(text) })
 }
 
-function splitFocusReference(note: string): { guidance: string; reference: string } | undefined {
-  const start = note.lastIndexOf(`<${AMUX_PROTOCOL_DEFINITIONS['focus-reference'].tag} `)
+function splitSourceReference(note: string): { guidance: string; reference: string } | undefined {
+  const start = note.lastIndexOf(`<${AMUX_REFERENCE_TAG} `)
   if (start < 0 || start > 0 && note.slice(start - 2, start) !== '\n\n') return
-  const reference = readAmuxFocusReference(note.slice(start))
-  if (reference?.tail !== '') return
-  return { guidance: start === 0 ? '' : note.slice(0, start - 2), reference: reference.raw }
+  const reference = readAmuxSourceReference(note.slice(start))
+  if (!reference) return
+  const before = start === 0 ? '' : note.slice(0, start - 2)
+  const after = reference.tail.slice(2)
+  return { guidance: [before, after].filter(Boolean).join('\n\n'), reference: reference.raw }
 }
 
 /**
@@ -76,10 +78,10 @@ function splitFocusReference(note: string): { guidance: string; reference: strin
 export function composeOutboundMessage(input: { amux?: string; user?: string; inputContext?: BrowserInputContext }): string {
   const segments: string[] = []
   if (input.amux) {
-    const focus = splitFocusReference(input.amux)
-    const guidance = focus ? focus.guidance : input.amux
+    const source = splitSourceReference(input.amux)
+    const guidance = source ? source.guidance : input.amux
     if (guidance) segments.push(parseGoalConfirmation(guidance) ? guidance : amuxEnvelope(guidance))
-    if (focus) segments.push(focus.reference)
+    if (source) segments.push(source.reference)
   }
   if (input.inputContext) segments.push(renderAmuxProtocol('browser', 'wire', { json: browserInputContextJson(input.inputContext) }))
   if (input.user) segments.push(input.user)
@@ -131,8 +133,8 @@ export function composeAgentLaunchPrompt(
   const userRequest = prompt?.trim() ? prompt : undefined
   const note = agentMuxNote?.trim() ? agentMuxNote : undefined
   const task = agentMuxTask?.trim() ? agentMuxTask : undefined
-  const focus = note ? splitFocusReference(note) : undefined
-  const guidance = focus ? focus.guidance : note
+  const source = note ? splitSourceReference(note) : undefined
+  const guidance = source ? source.guidance : note
   const amuxParts: string[] = []
   if (injectAgentMuxGuide) amuxParts.push(AGENTMUX_RUNTIME_GUIDE)
   if (task) amuxParts.push(task)
@@ -142,7 +144,7 @@ export function composeAgentLaunchPrompt(
   const selected = optionalContext.map(part => part.omittedText)
   // 只有当 AgentMux 确实要说话时，才引出用户段——否则一个空信封只会徒增噪音。
   const compose = () => {
-    const parts = [...amuxParts, ...selected, focus?.reference ?? ''].filter(part => part.trim())
+    const parts = [...amuxParts, ...selected, source?.reference ?? ''].filter(part => part.trim())
     // Reuse an existing creation packet; an empty disabled-guide launch stays empty.
     if (!injectAgentMuxGuide && (userRequest || parts.length > 0) && !parts.includes(AGENTMUX_SESSION_NAMING_ENTRY)) parts.unshift(AGENTMUX_SESSION_NAMING_ENTRY)
     if (parts.length > 0) parts.unshift(userRequest ? USER_REQUEST_FOLLOWS : task ? PLATFORM_TASK_REQUESTED : AWAIT_USER_REQUEST)

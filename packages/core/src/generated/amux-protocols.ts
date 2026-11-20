@@ -12,6 +12,12 @@ export const AMUX_PROTOCOL_DEFINITIONS = {
     "title": "A2A message",
     "description": "One unchanged message body with declared sender and message IDs. The original journal owns authentication and delivery."
   },
+  "agent-source": {
+    "tag": "agent-source",
+    "form": "prompt",
+    "title": "Agent source and handoff",
+    "description": "A new task or the reading context retained from an original Agent."
+  },
   "browser": {
     "tag": "context",
     "form": "envelope",
@@ -102,6 +108,15 @@ export const AMUX_PROTOCOL_TEMPLATES = {
     "wire": "<amux:a2a from=\"{{sender}}\" msg-id=\"{{mid}}\">\n{{body}}\n{{reminder}}\n</amux:a2a>",
     "reminder": "<reminder>{{text}}</reminder>"
   },
+  "agent-source": {
+    "takeover": "Take over the original Agent's unfinished work. Establish the user's goal, verified results and open items from the original records, then continue the relevant work.",
+    "session": "Read Host: {{host}}\nOriginal Agent Session: {{session}}",
+    "native": "Read Host: {{host}}\nOriginal Executor: {{executor}}\nOriginal Provider: {{provider}}\nOriginal Provider Session: {{session}}\nOriginal execution directory: {{directory}}\n{{locator}}",
+    "separate-native": "Independent saved Provider conversation, if relevant. Usage: {{entry}}.\n{{source}}",
+    "unrouted": "The original source route is unconfirmed from this Core. Original Host: {{host}}. Original source: {{source}}.\n{{diagnostic}}",
+    "history": "One bounded history page from the original owner. Continue its cursor only at that owner or through a verified route.\n{{page}}",
+    "native-locator": "Original Provider locator revision: {{revision}}\nOriginal transcript path: {{transcript}}"
+  },
   "browser": {
     "wire": "<amux>\n<context kind=\"browser\" version=\"1\">\n{{json}}\n</context>\n</amux>"
   },
@@ -169,6 +184,37 @@ export const AMUX_PROTOCOL_PARAMETERS = {
     ],
     "reminder": [
       "text"
+    ]
+  },
+  "agent-source": {
+    "takeover": [],
+    "session": [
+      "host",
+      "session"
+    ],
+    "native": [
+      "host",
+      "executor",
+      "provider",
+      "session",
+      "directory",
+      "locator"
+    ],
+    "separate-native": [
+      "entry",
+      "source"
+    ],
+    "unrouted": [
+      "host",
+      "source",
+      "diagnostic"
+    ],
+    "history": [
+      "page"
+    ],
+    "native-locator": [
+      "revision",
+      "transcript"
     ]
   },
   "browser": {
@@ -279,6 +325,21 @@ export const AMUX_PROTOCOL_EXAMPLES = {
         "mid": "MID",
         "body": "Original message body.",
         "reminder": "<reminder>Original collaboration guidance.</reminder>"
+      }
+    }
+  ],
+  "agent-source": [
+    {
+      "label": "Take over original work",
+      "template": "takeover",
+      "parameters": {}
+    },
+    {
+      "label": "Original Session route",
+      "template": "session",
+      "parameters": {
+        "host": "local",
+        "session": "SESSION"
       }
     }
   ],

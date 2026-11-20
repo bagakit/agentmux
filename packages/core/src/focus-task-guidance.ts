@@ -1,4 +1,4 @@
-import { formatAmuxFocusReference, readAmuxFocusReference } from './amux-protocol-definition.js'
+import { formatAmuxFocusReference, readAmuxSourceReference } from './amux-protocol-definition.js'
 import { FOCUS_READ_MAX_REFERENCES, parseFocusParams, parseFocusTaskReference,
   type AgentMuxFocusReadParams, type AgentMuxFocusTaskReference } from './focus-control.js'
 import { guideSharedFocusTaskHandoff } from './generated/agentmux-guides.js'
@@ -45,8 +45,8 @@ export function focusTaskHandoffNote(reference: AgentMuxFocusTaskReference): str
 
 /** A cleared draft can also own a saved note from the previous Focus handoff format. */
 export function isFocusTaskHandoffNote(note: string): boolean {
-  const reference = readAmuxFocusReference(note)
-  return reference?.tail === '' || note.startsWith(LEGACY_HANDOFF_PREFIX)
+  const reference = readAmuxSourceReference(note)
+  return (reference?.kind === 'focus-selection' && reference.tail === '') || note.startsWith(LEGACY_HANDOFF_PREFIX)
 }
 
 /** Check the exact selection encoded by the former producer before reusing its saved note. */

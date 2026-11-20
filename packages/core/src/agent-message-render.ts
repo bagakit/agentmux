@@ -9,7 +9,7 @@ import type { ConnectionActor } from './connections-contract.js'
 import { composeOutboundMessage } from './agent-outbound-message.js'
 import { AGENTMUX_A2A_REMINDER } from './agent-messaging-guidance.js'
 import { browserInputContextJson, parseBrowserInputContext, type BrowserInputContext } from './browser-input-context.js'
-import { AMUX_PROTOCOL_DEFINITIONS, AMUX_CONTINUE_MARKER, formatAmuxTriggerNote, readAmuxFocusReference, readAmuxTriggerNote, type AmuxTriggerKind, formatAmuxReactionMarker, isAmuxReactionCode, type AmuxProtocolDeclaration } from './amux-protocol-definition.js'
+import { AMUX_PROTOCOL_DEFINITIONS, AMUX_CONTINUE_MARKER, formatAmuxTriggerNote, readAmuxSourceReference, readAmuxTriggerNote, type AmuxTriggerKind, formatAmuxReactionMarker, isAmuxReactionCode, type AmuxProtocolDeclaration } from './amux-protocol-definition.js'
 import { parseCapsuleAnswer } from './capsule-answer.js'
 import { parseGoalConfirmation } from './goal-confirmation.js'
 
@@ -266,7 +266,7 @@ export function parseAgentMuxMessagePrefix(text: string): AgentMuxMessagePrefix 
   if (contexts?.declaredTrigger || contexts?.declaredContexts?.some(context => context.inputContext)) return contexts
   // Only newline separators join a following declaration; indentation remains authored text.
   const remainder = contexts ? contexts.body.replace(/^(?:\r?\n)*/u, '') : text
-  const reference = readAmuxFocusReference(remainder)
+  const reference = readAmuxSourceReference(remainder)
   if (reference) return { kind: 'content', sourceLabel: '', declaredAgentSessionId: null,
     declaredContexts: [...contexts?.declaredContexts ?? [], { raw: reference.raw }], body: reference.tail }
   const sender = parseSenderPrefix(remainder)

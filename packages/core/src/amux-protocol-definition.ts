@@ -21,27 +21,42 @@ export function readAmuxTriggerNote(text: string): { kind: AmuxTriggerKind; note
   return undefined
 }
 
-const FOCUS_REFERENCE_TAG = AMUX_PROTOCOL_DEFINITIONS['focus-reference'].tag
-const FOCUS_READ_VIA = 'focus read --help'
-const focusReference = (body: string) => renderAmuxProtocol('focus-reference', 'wire', { kind: 'focus-selection', entry: FOCUS_READ_VIA, body })
-const FOCUS_REFERENCE_END = '\n</' + FOCUS_REFERENCE_TAG + '>'
-const FOCUS_REFERENCE_START = focusReference('').slice(0, -FOCUS_REFERENCE_END.length)
+export const AMUX_REFERENCE_TAG = AMUX_PROTOCOL_DEFINITIONS['focus-reference'].tag
+const readEntries = {
+  'focus-selection': 'focus read --help',
+  'agent-context': 'agent context --help',
+  'native-context': 'agent native history --help',
+} as const
 
-export function formatAmuxFocusReference(body: string): string {
-  return focusReference(encodeAmuxText(body))
+export type AmuxReferenceKind = keyof typeof readEntries
+const referenceEnd = '\n</' + AMUX_REFERENCE_TAG + '>'
+const referenceText = (kind: AmuxReferenceKind, body: string) =>
+  renderAmuxProtocol('focus-reference', 'wire', { kind, entry: readEntries[kind], body })
+
+export function formatAmuxSourceReference(kind: AmuxReferenceKind, body: string): string {
+  return referenceText(kind, encodeAmuxText(body))
 }
 
-/** Recognize the leading readable declaration and preserve its original bytes. */
-export function readAmuxFocusReference(text: string): { raw: string; tail: string } | undefined {
-  if (!text.startsWith(FOCUS_REFERENCE_START)) return
-  const end = text.indexOf(FOCUS_REFERENCE_END, FOCUS_REFERENCE_START.length)
-  if (end <= FOCUS_REFERENCE_START.length) return
-  const body = text.slice(FOCUS_REFERENCE_START.length, end)
+export function formatAmuxFocusReference(body: string): string {
+  return formatAmuxSourceReference('focus-selection', body)
+}
+
+const referencePrefixes = (Object.keys(readEntries) as AmuxReferenceKind[]).map(kind => ({
+  kind, start: referenceText(kind, '').slice(0, -referenceEnd.length)
+}))
+
+/** Recognize the exact leading readable reference and keep its original bytes. */
+export function readAmuxSourceReference(text: string): { kind: AmuxReferenceKind; raw: string; tail: string } | undefined {
+  const match = referencePrefixes.find(({ start }) => text.startsWith(start))
+  if (!match) return
+  const end = text.indexOf(referenceEnd, match.start.length)
+  if (end <= match.start.length) return
+  const body = text.slice(match.start.length, end)
   if (/[<>\r]|&(?!amp;|lt;|gt;|#13;)/u.test(body)) return
-  const boundary = end + FOCUS_REFERENCE_END.length
+  const boundary = end + referenceEnd.length
   const tail = text.slice(boundary)
   if (tail && !tail.startsWith('\n\n')) return
-  return { raw: text.slice(0, boundary), tail }
+  return { kind: match.kind, raw: text.slice(0, boundary), tail }
 }
 
 export const AMUX_CONTINUE_MARKER = /* @__PURE__ */ renderAmuxProtocol('continue', 'wire')
