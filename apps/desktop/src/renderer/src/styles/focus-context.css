@@ -453,5 +453,5 @@
   color: color-mix(in srgb, var(--green) 72%, var(--text-2));
 }
 .focus-creation-line, .focus-creation-arrow { fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; }
-.focus-creation-line { stroke-width: 1.5px; stroke-dasharray: 4 4; }
+.focus-creation-line { stroke-width: 1.25px; stroke-dasharray: 3 3; }
 .focus-creation-arrow { stroke-width: 1.2px; }

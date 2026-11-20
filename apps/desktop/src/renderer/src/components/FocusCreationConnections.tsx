@@ -1,48 +1,17 @@
 import { useId, useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { FocusAgentCreations } from '../lib/focus-agent-creations'
+import { focusCardLinkPath } from '../lib/focus-card-link-path'
 import { focusContextIdentityKey } from '../lib/focus-context-identity'
 
 const CreationIcon = semanticIconComponent('object.agent-creation')
+const linkObstacles = '[data-focus-card-key], .focus-context-group__bucket, .focus-context-group__count, .focus-context-group__pending, .focus-project-lanes__axis, .focus-project-frame__title > :is(button, span), .focus-topic-section'
 
 export function FocusCreationMark({ label }: { label: string }) {
   return <span className="focus-creation-mark" role="img" aria-label={label} title={label}><CreationIcon size={12} /></span>
 }
 
-function pathBetween(from: DOMRect, to: DOMRect, origin: DOMRect, view: DOMRect): string {
-  const fromX = from.left + from.width / 2 - origin.left, fromY = from.top + from.height / 2 - origin.top
-  const toX = to.left + to.width / 2 - origin.left, toY = to.top + to.height / 2 - origin.top
-  const horizontalGap = Math.max(to.left - from.right, from.left - to.right)
-  const verticalGap = Math.max(to.top - from.bottom, from.top - to.bottom)
-  if (horizontalGap >= 16) {
-    const direction = fromX < toX ? 1 : -1
-    const x = fromX + direction * (from.width / 2 + 2), end = toX - direction * (to.width / 2 + 3)
-    const turn = (x + end) / 2
-    return `M ${x} ${fromY} C ${turn} ${fromY}, ${turn} ${toY}, ${end} ${toY}`
-  }
-  if (verticalGap >= 16) {
-    const direction = fromY < toY ? 1 : -1
-    const y = fromY + direction * (from.height / 2 + 2), end = toY - direction * (to.height / 2 + 3)
-    const turn = (y + end) / 2
-    return `M ${fromX} ${y} C ${fromX} ${turn}, ${toX} ${turn}, ${toX} ${end}`
-  }
-  // Adjacent cards may only have a few pixels between them. Route along
-  // their edges so the dashed segment and arrow remain visible and face inward.
-  if (Math.abs(fromY - toY) < Math.min(from.height, to.height) / 2) {
-    const above = Math.min(from.top, to.top) - view.top >= 12
-    const y = (above ? from.top : from.bottom) - origin.top
-    const end = (above ? to.top - 2 : to.bottom + 2) - origin.top
-    const turn = above ? Math.min(y, end) - 5 : Math.max(y, end) + 5
-    return `M ${fromX} ${y} C ${fromX} ${turn}, ${toX} ${turn}, ${toX} ${end}`
-  }
-  const left = Math.min(from.left, to.left) - view.left >= 12
-  const x = (left ? from.left : from.right) - origin.left
-  const end = (left ? to.left - 2 : to.right + 2) - origin.left
-  const turn = left ? Math.min(x, end) - 10 : Math.max(x, end) + 10
-  return `M ${x} ${fromY} C ${turn} ${fromY}, ${turn} ${toY}, ${end} ${toY}`
-}
-
-/** Inspect only the selected Agent's endpoints. Scrolling reuses the same nodes. */
+/** Read visible card gutters only while a selected relationship can be drawn. */
 export function FocusCreationConnections({ selected, creation, scrollRef }: {
   selected: string
   creation: FocusAgentCreations
@@ -67,12 +36,34 @@ export function FocusCreationConnections({ selected, creation, scrollRef }: {
     function measure() {
       if (!port || !layer || !window) return
       frame = 0
-      const origin = layer.getBoundingClientRect(), view = port.getBoundingClientRect()
+      const origin = layer.getBoundingClientRect(), bounds = port.getBoundingClientRect()
+      const view = new window.DOMRect(bounds.left, bounds.top, port.clientWidth, port.clientHeight)
       layer.style.setProperty('--focus-creation-clip', `inset(${view.top - origin.top}px ${origin.right - view.right}px ${origin.bottom - view.bottom}px ${view.left - origin.left}px)`)
-      const endpoint = (key: string) => (nodes.get(key) ?? []).map(node => node.getBoundingClientRect()).filter(rect => intersecting(rect, view))
-      const next = pairs.flatMap(pair => {
+      const boxes = new Map<Element, DOMRect>()
+      const box = (node: Element) => {
+        const previous = boxes.get(node)
+        if (previous) return previous
+        const bounds = node.getBoundingClientRect()
+        boxes.set(node, bounds)
+        return bounds
+      }
+      const endpoint = (key: string) => (nodes.get(key) ?? []).map(box).filter(rect => intersecting(rect, view))
+      const visible = pairs.flatMap(pair => {
         const from = endpoint(pair.from), to = endpoint(pair.to)
-        return from.length === 1 && to.length === 1 ? [{ ...pair, path: pathBetween(from[0]!, to[0]!, origin, view) }] : []
+        return from.length === 1 && to.length === 1 ? [{ pair, from: from[0]!, to: to[0]! }] : []
+      })
+      const obstacles: DOMRect[] = []
+      if (visible.length) for (const lane of port.children) {
+        if (!intersecting(box(lane), view)) continue
+        if (lane.matches(linkObstacles)) obstacles.push(box(lane))
+        for (const element of lane.querySelectorAll(linkObstacles)) {
+          const bounds = box(element)
+          if (intersecting(bounds, view)) obstacles.push(bounds)
+        }
+      }
+      const next = visible.flatMap(({ pair, from, to }) => {
+        const path = focusCardLinkPath(from, to, origin, view, obstacles)
+        return path ? [{ ...pair, path }] : []
       })
       setPaths(previous => previous.length === next.length &&
         previous.every((item, index) => item.from === next[index]?.from && item.to === next[index]?.to && item.path === next[index]?.path) ? previous : next)
@@ -87,20 +78,28 @@ export function FocusCreationConnections({ selected, creation, scrollRef }: {
         const slots = [...port.querySelectorAll<HTMLElement>(`[data-focus-card-key="${window.CSS.escape(key)}"]`)]
         const targets = slots.filter(slot => slot.querySelector('button.focus-context'))
         nodes.set(key, targets)
-        for (const target of targets) observe?.observe(target)
+        for (const target of targets) {
+          observe?.observe(target)
+          const group = target.closest('.focus-project-lanes__groups')
+          if (group) observe?.observe(group)
+        }
       }
       schedule()
     }
     const selectedKeys = new Set(pairs.flatMap(pair => [pair.from, pair.to]))
     const mutations = new window.MutationObserver(changes => {
-      if (changes.some(change => change.type === 'attributes' || [...change.addedNodes, ...change.removedNodes].some(node => {
-        if (!(node instanceof window.Element)) return false
-        const slot = node.closest<HTMLElement>('[data-focus-card-key]')
-        return slot ? selectedKeys.has(slot.dataset.focusCardKey ?? '') : Boolean(node.querySelector('[data-focus-card-key]'))
-      }))) refresh()
+      const targetsChanged = changes.some(change => {
+        if (change.type === 'attributes') return change.attributeName === 'hidden' || change.attributeName === 'data-collapsed'
+        return [...change.addedNodes, ...change.removedNodes].some(node => {
+          if (!(node instanceof window.Element)) return false
+          const slot = node.closest<HTMLElement>('[data-focus-card-key]')
+          return slot ? selectedKeys.has(slot.dataset.focusCardKey ?? '') : Boolean(node.querySelector('[data-focus-card-key]'))
+        })
+      })
+      if (targetsChanged) refresh()
       else schedule()
     })
-    mutations.observe(port, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden', 'data-collapsed'] })
+    mutations.observe(port, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden', 'data-collapsed', 'data-focus-card-slots', 'style'] })
     port.addEventListener('scroll', schedule, { passive: true })
     refresh()
     return () => {
@@ -111,7 +110,7 @@ export function FocusCreationConnections({ selected, creation, scrollRef }: {
     }
   }, [creation, selected, scrollRef])
   return <svg ref={svg} className="focus-creation-connections" aria-hidden="true">
-    <defs><marker id={arrow} viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto">
+    <defs><marker id={arrow} viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5" markerHeight="5" orient="auto" markerUnits="userSpaceOnUse">
       <path className="focus-creation-arrow" d="M 1 1 L 7 4 L 1 7" />
     </marker></defs>
     {paths.map(({ from, to, path }) => <path key={JSON.stringify([from, to])} data-focus-creation-from={from} data-focus-creation-to={to}
