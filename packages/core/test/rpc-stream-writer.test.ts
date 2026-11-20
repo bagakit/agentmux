@@ -22,8 +22,20 @@ function fixture(ready?: Promise<void>) {
     expect((frame as any).id).toBe(id); received.push(id)
   }, error => ended.push({ id, code: (error as any)?.code }), signal, () => dispatched.push(id), options)
   const respond = (id: string) => output.write(JSON.stringify({ jsonrpc: '2.0', id, result: { original: id } }) + '\n')
-  return { input, channel, dispatched, received, ended, open, respond, closed: () => closed }
+  return { input, output, channel, dispatched, received, ended, open, respond, closed: () => closed }
 }
+it('counts inbound progress before a large response frame is complete', async () => {
+  const f = fixture()
+  try {
+    await f.open('original')
+    const before = f.channel.inboundRevision
+    f.output.write(Buffer.from('{"jsonrpc":"2.0","id":"original",'))
+    expect(f.channel.inboundRevision).toBeGreaterThan(before)
+    expect(f.received).toEqual([])
+    f.output.write(Buffer.from('"result":{}}\n'))
+    expect(f.received).toEqual(['original'])
+  } finally { f.channel.dispose() }
+})
 it('slow writable preserves independent valid requests, drain order and request-ID delivery without aggregate refusal', async () => {
   const f = fixture(), states: Record<string, string> = {}
   try {
