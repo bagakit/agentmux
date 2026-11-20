@@ -18,6 +18,7 @@ const cleanups: Array<() => Promise<unknown>> = []
 let root: string, worker: string
 const sid = '00000000-0000-4000-8000-000000000001'
 const mutations: Record<string, [string, string]> = {
+  'keep-stale-preflight-step': ["setInitialization({ ...initialization, failure: { ...initialization.failure, step: initializationStep } })", 'void initializationStep'],
   'deadline-preflight': ["connection.request('account/read', { refreshToken: false }, { retainPending: true })", "connection.request('account/read', { refreshToken: false })"],
   'drop-preflight-retry': ['if (nativeRequested || !live()) return Promise.resolve()', "if (initialization.phase === 'failed' || nativeRequested || !live()) return Promise.resolve()"],
   'repeat-unknown': ['if (nativeRequested || !live()) return Promise.resolve()', 'if (!live()) return Promise.resolve()'],
@@ -72,7 +73,9 @@ async function fixture(options: { accountFailure?: boolean; accountInternalError
   const fail = join(directory, 'account-failure'), gate = join(directory, 'native-gate'), readGate = join(directory, 'read-gate'), rejected = join(directory, 'native-rejected'), loaded = join(directory, 'loaded.json')
   if (options.accountFailure || options.authRequired) await writeFile(fail, 'private preflight error')
   if (options.nativeGate) await writeFile(gate, 'hold original response')
+  const connectionGate = join(directory, 'connection-gate')
   if (options.readGate) await writeFile(readGate, 'hold original read response')
+  if (options.readGate === 'account/read') await writeFile(connectionGate, 'hold connection before the original preflight')
   if (options.settledError) await writeFile(rejected, 'settled original response error')
   await writeFile(executable, `#!/usr/bin/env node
 const {createRequire}=require('node:module');const {WebSocketServer}=createRequire(${JSON.stringify(import.meta.url)} )(${JSON.stringify(createRequire(import.meta.url).resolve('ws'))});
@@ -85,6 +88,7 @@ if(args.includes('app-server')){
  socket.on('message',async bytes=>{const r=JSON.parse(String(bytes));appendFileSync(${JSON.stringify(log)},JSON.stringify(r)+String.fromCharCode(10));if(!Object.hasOwn(r,'id'))return;
  const reply=result=>socket.send(JSON.stringify({jsonrpc:'2.0',id:r.id,result}));
  const error=(code,message)=>socket.send(JSON.stringify({jsonrpc:'2.0',id:r.id,error:{code,message}}));
+ if(r.method==='initialize')while(existsSync(${JSON.stringify(connectionGate)}))await new Promise(resolve=>setTimeout(resolve,10));
  if(r.method===${JSON.stringify(options.readGate ?? '')})while(existsSync(${JSON.stringify(readGate)}))await new Promise(resolve=>setTimeout(resolve,10));
  if(r.method==='initialize')return reply({});
  if(r.method==='account/read'){
@@ -142,7 +146,7 @@ if(args.includes('app-server')){
     catch (cause) { throw new Error(JSON.stringify({ latest, stderr, methods: (await rows(log)).map(row => row.method), exitCode: child.exitCode }), { cause }) }
     return latest!
   }
-  return { child, context, plan, log, events, heartbeat, fail, gate, readGate, rejected, loaded, directory, executable, wait,
+  return { child, context, plan, log, events, heartbeat, fail, gate, readGate, connectionGate, rejected, loaded, directory, executable, wait,
     current: () => latest!, stderr: () => stderr, methods: async () => (await rows(log)).map(row => row.method) }
 }
 
@@ -171,10 +175,12 @@ it.runIf(process.platform === 'darwin')('keeps the exact backend and explicit re
 
 it.runIf(process.platform === 'darwin').each(['initialize', 'account/read'] as const)('keeps the original slow %s response beyond ten seconds and automatically continues without a second request', async method => {
   const f = await fixture({ readGate: method })
-  await expect.poll(() => f.methods()).toContain(method)
-  const original = await f.wait(value => value.initialization?.phase === 'unknown')
+  await f.wait(value => value.initialization?.phase === 'unknown' && value.initialization.failure?.step === 'connection')
+  if (method === 'account/read') await rm(f.connectionGate)
+  await expect.poll(() => f.methods(), { timeout: 6000 }).toContain(method)
+  const step = method === 'initialize' ? 'connection' : 'preflight'
+  const original = await f.wait(value => value.initialization?.phase === 'unknown' && value.initialization.failure?.step === step)
   const before = JSON.parse(await readFile(f.heartbeat, 'utf8'))
-  expect(original.initialization?.failure?.step).toBe(method === 'initialize' ? 'connection' : 'preflight')
   expect(original.initialization?.native).toEqual({ state: 'not-created' })
   // Real wall time exceeds the former RPC deadline; only the observer clock is shortened.
   await new Promise(resolve => setTimeout(resolve, 10_600))
