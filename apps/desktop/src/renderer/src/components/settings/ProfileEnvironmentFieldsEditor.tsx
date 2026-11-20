@@ -25,7 +25,7 @@ export function ProfileFingerprintFields({ value, onChange }: {
       </label>
       <Button type="button" onClick={() => {
         const [seed] = crypto.getRandomValues(new Uint32Array(1))
-        onChange({ seed: String(seed), surfaces: value?.surfaces ?? [...BROWSER_PROFILE_FINGERPRINT_SURFACES] })
+        onChange({ seed: String(seed), surfaces: value?.surfaces ?? [] })
       }}>Generate seed</Button>
     </div>
     {value ? <div className="profile-environment__grid">
@@ -35,7 +35,7 @@ export function ProfileFingerprintFields({ value, onChange }: {
         {fingerprintLabels[surface]}
       </label>)}
     </div> : null}
-    <small>Selected document APIs use the same seed after navigation. Worker and engine-level coverage is unconfirmed.</small>
+    <small>Choose which document APIs use the seed. Saved selections carry through navigation.</small>
   </details>
 }
 
