@@ -104,6 +104,38 @@ async function fixture(providerId: 'codex' | 'claude') {
 const checkpoint = (): Promise<void> => new Promise(done => setImmediate(done))
 const payload = '\x1b[200~hello\x1b[201~'
 
+it('sends a fresh current-terminal message from the live cursor after an unrelated protocol ACK is lost', async () => {
+  const h = await fixture('codex')
+  const entered = deferred<void>(), release = deferred<void>()
+  h.status.mockImplementationOnce(async () => { entered.resolve(); await release.promise; return h.run() })
+  const reply = '\x1b[1;1R'
+  const sendRaw = h.rawInput.getMockImplementation()!
+  h.rawInput.mockImplementation(async data => {
+    const result = await sendRaw(data)
+    if (data === reply) throw new AgentMuxError('Original terminal reply acknowledgement was lost.', 'CTXMUX_INPUT_UNCONFIRMED', 'unknown')
+    return result
+  })
+  const send = h.client.submitAgentPrompt({ agentSessionId: h.stored.agentSessionId, expectedRun: h.stored.run, operationId: 'manual-after-protocol',
+    prompt: 'hello', execution: 'immediate', authorHuman: true, admissionIntent: { kind: 'manual-actor' } }).then(value => ({ value }), error => ({ error }))
+  try {
+    await entered.promise
+    const protocol = h.client.writeAgent({ agentSessionId: h.stored.agentSessionId, expectedRun: h.stored.run, data: reply, source: 'terminal-protocol' })
+    const outcome = protocol.then(() => null, error => error)
+    release.resolve()
+    expect(await outcome).toMatchObject({ code: 'CTXMUX_INPUT_UNCONFIRMED' })
+    expect(await send).not.toHaveProperty('error')
+    const key = { kind: 'prompt' as const, agentSessionId: h.stored.agentSessionId, expectedRun: h.stored.run, submissionId: 'manual-after-protocol' }
+    await expect.poll(async () => {
+      const receipt = await h.client.inspectAgentInput({ key })
+      return { status: receipt?.status, waiting: receipt?.control.waiting?.failure }
+    }).toEqual({ status: 'terminal-confirmed', waiting: undefined })
+    expect(h.writes.map(write => write.data)).toEqual([reply, payload, '\r'])
+    const record = await h.client.inspectAgentPromptSubmission(key)
+    expect(record?.admission?.acknowledged).toBe(true)
+    expect(record?.terminalPromptSubmission?.payload.inputByteRange.startByte).toBe(Buffer.byteLength(reply))
+  } finally { release.resolve(); await send }
+})
+
 async function writesBeforeRelease(h: Awaited<ReturnType<typeof fixture>>, count: number) {
   // Observe the actual byte port while the render barrier is still held. The
   // fallback below settles a broken owner; this retained snapshot is the oracle.
