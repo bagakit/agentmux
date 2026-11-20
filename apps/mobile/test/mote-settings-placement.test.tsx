@@ -62,6 +62,7 @@ async function original(options: { absent?: boolean; loseReceipt?: boolean; hold
     vi.spyOn(host.discovery, 'catalog').mockImplementation(() => discovery.promise)
     closes.push(async () => { discovery.resolve(await originalCatalog()) })
   }
+  let unavailable = false
   const rpc = vi.fn(async (method: string, input: unknown, context?: { signal?: AbortSignal }) => {
     if (method === 'space.ls') {
       // Profile metadata is a projection of the same original Host read. The
@@ -72,6 +73,7 @@ async function original(options: { absent?: boolean; loseReceipt?: boolean; hold
         quickMode: current.source?.result.status === 'deleted' ? { status: 'missing' } : { status: 'saved', defaults: current.defaults, version: current.source?.result.status === 'read' ? current.source.result.document.revision : 'unconfirmed' },
         conversation: current.defaults?.conversation ?? null }] } }
     }
+    if (method === 'space.mote.preferences.read' && unavailable) throw new Error('The original preferences reader is temporarily unavailable')
     if (method === 'space.mote.preferences.save') {
       const packet = input as MoteQuickPreferencesSaveParams
       writes.push(structuredClone(packet))
@@ -87,19 +89,20 @@ async function original(options: { absent?: boolean; loseReceipt?: boolean; hold
   })
   const client = { runtimeOwnerIdentity: () => ({ runtimeId: 'original-settings-runtime', ownerInstanceId: 'original-settings-process', availability: 'connected' }),
     forwardRpc: rpc, onEvent: () => () => {} } as unknown as AgentMuxHostedClient
-  const identity = { name: '原 Agent', project: '原项目', mote: { spaceId: host.target.spaceId, name: '同一 Mote', facts: {
+  const identity = { name: '原 Agent', project: '原项目', mote: { spaceId: host.target.spaceId, name: '同一 Mote', conversationName: '设计讨论', facts: {
     spaceId: host.target.spaceId, content: { ...host.target.expectedResource, zoneId: host.target.zoneId },
     quickMode: initial.source?.result.status === 'deleted' ? { status: 'missing' as const } : { status: 'saved' as const, defaults: initial.defaults!, version: initial.source!.result.status === 'read' ? initial.source!.result.document.revision : 'unconfirmed' },
     conversation: initial.defaults?.conversation ?? null } } }
   const render = () => <MobileMoteProfile identity={identity} client={client} visible copyText={createBrowserPlatform().copyText} />
   const view = await mount(render()); await click(button(view.element, '编辑快捷配置'))
   await wait(() => expect(view.element.textContent).toContain('已核对当前配置'))
-  return { host, read, initial, rpc, writes, view, render, receipt, async releaseDiscovery() { discovery.resolve(await originalCatalog()) } }
+  return { host, read, initial, rpc, writes, view, render, receipt, loseRead() { unavailable = true }, async releaseDiscovery() { discovery.resolve(await originalCatalog()) } }
 }
 
-it('actual Mobile Profile creates only original preferences for an unbound Mote with no file or display', async () => {
+it('shows how the first current conversation starts for an unbound Mobile Mote', async () => {
   const x = await original({ absent: true })
   expect(x.initial.source?.result.status).toBe('deleted'); expect(x.initial.choices.destinations).toEqual([])
+  expect(x.view.element.querySelector('.mobile-mote-quick-editor dl')?.textContent).toContain('设置 Executor 后，发送第一条消息时会新建会话')
   await addExecutor(x.view.element, 'next')
   await change(x.view.element, '心跳间隔（分钟）', '7'); await submit(x.view.element)
   await wait(() => expect(x.view.element.textContent).toContain('快捷配置已保存'))
@@ -107,8 +110,20 @@ it('actual Mobile Profile creates only original preferences for an unbound Mote 
   const saved = await x.read()
   expect(saved.defaults).toMatchObject({ executorId: 'next', presence: { enabled: true, intervalMs: 420000 } })
   expect(saved.defaults!.conversation).toBeUndefined(); expect(x.host.transitions).toEqual([]); expect(x.host.writes).toEqual([])
+  await wait(() => expect(x.view.element.querySelector('.mobile-mote-quick-editor dl')?.textContent).toBe('当前会话发送第一条消息时会新建会话'))
   expect(x.host.inner.kernel.stop).not.toHaveBeenCalled()
   expect(x.rpc.mock.calls.filter(([method]) => ['agent.open', 'agent.resume', 'agent.stop', 'schedule.resume', 'agent.input.submit'].includes(method))).toEqual([])
+})
+
+it('keeps the last confirmed current conversation visible when Mobile loses the original read', async () => {
+  const x = await original()
+  const summary = () => x.view.element.querySelector('.mobile-mote-quick-editor dl')?.textContent
+  expect(summary()).toBe('当前会话设计讨论')
+  x.loseRead()
+  await click(button(x.view.element, '核对当前配置'))
+  await wait(() => expect(summary()).toBe('当前会话设计讨论上次确认的会话'))
+  expect(x.writes).toHaveLength(0)
+  expect(x.rpc.mock.calls.filter(([method]) => method === 'agent.open')).toHaveLength(0)
 })
 
 it('actual Mobile Profile saves same-Main settings through public Host CAS without placement or changing role and paused input', async () => {

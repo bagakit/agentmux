@@ -233,7 +233,7 @@ describe('quick-mode original consumer counterexamples', () => {
     expect(useAppStore.getState().workbenchSpaceSelection?.tabId).toBe(defaultTab.id)
     expect(useAppStore.getState().agentComposerDrafts[defaultTab.layout.activeRegionId]).toBe('Later real input')
   })
-  it('shows ordered Executors and keeps Main managed by AgentMux, while Cancel never writes', async () => {
+  it('shows the current conversation alongside ordered Executors, while Cancel never writes', async () => {
     preferences(); const text = serializeMoteQuickMode('', { executorId: 'fixture', conversation })
     vi.spyOn(api.files, 'readPublic').mockImplementation(async params => ({ resource: { ...params.expectedResource, zoneId: params.zoneId, zonePath: moteTopics[0]!.directoryPath, path: moteTopics[0]!.directoryPath.slice(scratchWorkspace.path.length + 1) + '/' + params.path }, result: { status: 'read', document: { path: moteTopics[0]!.directoryPath.slice(scratchWorkspace.path.length + 1) + '/' + params.path, content: text, revision: 'sha256:' + '1'.repeat(64) } } }))
     const read = vi.spyOn(api.motePreferences, 'read').mockImplementation(async params => ({ kind: 'quick', target: params.target, status: 'ready', main: true, issue: null,
@@ -244,6 +244,9 @@ describe('quick-mode original consumer counterexamples', () => {
     await app.mount()
     await moteClick(app.container.querySelector<HTMLElement>('[aria-label="Edit quick mode"]')!)
     await vi.waitFor(() => expect(document.querySelector('.mote-executor-priority .selection-field')).not.toBeNull())
+    const current = document.querySelector<HTMLElement>('.mote-quick-mode__main')!
+    expect(current.textContent).toContain('Current conversation')
+    expect(current.querySelector('strong')?.textContent).toBe(neighborAgent.label)
     const priority = document.querySelector<HTMLFieldSetElement>('.mote-executor-priority')!
     const add = priority.querySelector<HTMLButtonElement>('[aria-label="Add Executor"]')!
     const order = () => [...priority.querySelectorAll('li > span')].map(row => row.textContent)
@@ -258,6 +261,32 @@ describe('quick-mode original consumer counterexamples', () => {
     expect(order()).toEqual(['Codex'])
     expect(read).toHaveBeenCalled()
     await moteClick(document.querySelector<HTMLElement>('[aria-label="Close quick mode"]')!)
+    expect(save).not.toHaveBeenCalled(); expect(app.launch).not.toHaveBeenCalled()
+  })
+  it.each([
+    { observed: 'empty', defaults: { executorId: 'fixture' }, expected: 'Your first message will start a conversation.' },
+    { observed: 'unset', defaults: {}, expected: 'Set an Executor to start a conversation with your first message.' },
+    { observed: 'unknown', defaults: null, expected: 'Last confirmed conversation' },
+  ])('describes the current conversation when the original owner reports $observed', async ({ observed, defaults, expected }) => {
+    const topic = preferences()
+    vi.spyOn(api.motePreferences, 'read').mockImplementation(async ({ target, includeChoices }) => {
+      const path = topic.directoryPath.slice(scratchWorkspace.path.length + 1) + '/MOTE.md'
+      return { kind: 'quick', target, status: defaults ? 'ready' : 'unconfirmed', main: true, defaults,
+        issue: defaults ? null : 'The original settings are temporarily unavailable.',
+        source: defaults ? { resource: { ...target.expectedResource, zoneId: target.zoneId, zonePath: topic.directoryPath, path },
+          result: { status: 'read', document: { path, content: serializeMoteQuickMode('', defaults), revision: 'sha256:' + '1'.repeat(64) } } } : null,
+        choices: includeChoices === false ? null : { executors: [], conversations: null, destinations: null } }
+    })
+    const save = vi.spyOn(api.motePreferences, 'save')
+    useAppStore.setState({ toolsOpen: true, explorerCollapsed: { [SCRATCH_WORKSPACE_ID]: false } })
+    await app.mount()
+    await moteClick(app.container.querySelector<HTMLElement>('[aria-label="Edit quick mode"]')!)
+    const current = () => document.querySelector<HTMLElement>('.mote-quick-mode__main')
+    await vi.waitFor(() => expect(current()?.textContent).toContain(expected))
+    if (observed === 'unknown') {
+      expect(current()?.textContent).toContain(neighborAgent.label)
+      expect(current()?.textContent).not.toContain('will start a conversation')
+    }
     expect(save).not.toHaveBeenCalled(); expect(app.launch).not.toHaveBeenCalled()
   })
   it('an unconfirmed source refuses only Save and keeps user choices, input and Agent', async () => {

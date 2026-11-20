@@ -97,6 +97,13 @@ app.whenReady().then(async () => {
       await edit()
       assert.deepEqual(await priority(), ['Research partner', 'Thoughtful colleague'])
       await capture('executor-priority-saved')
+      assert.ok((await read(`document.querySelector('.mote-quick-mode__main').textContent`)).includes('Current conversationOur ongoing discussion'))
+      await click('[aria-label="Close quick mode"]')
+      await read('moteQuick.firstConversation()')
+      await edit()
+      const first = await read(`document.querySelector('.mote-quick-mode__main').textContent`)
+      assert.equal(first, 'Current conversationYour first message will start a conversation.')
+      await capture('current-conversation-first-message')
       result.passed = true; return
     }
     if (selectFields) {

@@ -109,6 +109,14 @@ function Scene() {
   Object.assign(window, { moteQuick: {
     theme: (light: boolean) => updateThemeSelection({ appAppearance: light ? 'light' : 'dark' }),
     missingExecutor: () => { const parsed = parseMoteQuickMode(disk[rootPath + '/MOTE.md']!); if (parsed.status !== 'valid') throw Error('Original config unavailable'); disk[rootPath + '/MOTE.md'] = serializeMoteQuickMode(disk[rootPath + '/MOTE.md']!, { ...parsed.defaults, executorId: 'saved-unavailable-executor' }); useAppStore.setState({ scratchTopicSnapshots: { [workspace.id]: { ...useAppStore.getState().scratchTopicSnapshots[workspace.id]!, topics: [quickTopic(), secondTopic], revision: 1 } } }) },
+    firstConversation: () => {
+      const original = parseMoteQuickMode(disk[rootPath + '/MOTE.md']!)
+      if (original.status !== 'valid') throw Error('Original config unavailable')
+      const { conversation: _conversation, ...defaults } = original.defaults
+      disk[rootPath + '/MOTE.md'] = serializeMoteQuickMode(disk[rootPath + '/MOTE.md']!, defaults)
+      const state = useAppStore.getState().scratchTopicSnapshots[workspace.id]!
+      useAppStore.setState({ scratchTopicSnapshots: { [workspace.id]: { ...state, topics: [quickTopic(), secondTopic], revision: state.revision + 1 } } })
+    },
     reset: () => { reset(); setEpoch(value => value + 1) }, unknown: () => { unknown = true },
     enter: () => useAppStore.getState().openScratchTopic(topic.id, workspace.id),
     facts: () => { const state = useAppStore.getState(); return { defaults: quickTopic().quickMode, disk, drafts: state.agentComposerDrafts, tabs: state.tabs, layouts: state.layouts, selection: state.workbenchSpaceSelection, calls } },
