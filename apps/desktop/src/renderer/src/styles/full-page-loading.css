@@ -47,7 +47,7 @@
 .startup-endpoint > summary { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; align-items: center; gap: var(--sp-3); padding: var(--sp-3) 0; color: var(--text-2); cursor: pointer; list-style: none; }
 .startup-endpoint > summary::-webkit-details-marker { display: none; }
 .startup-endpoint > summary:focus-visible { border-radius: var(--radius-sm); outline: 2px solid var(--focus-line); outline-offset: 2px; }
-.startup-endpoint__chevron { color: var(--text-3); font: var(--fs-body)/1 var(--font-mono); transition: transform var(--dur-fast) var(--ease-enter); }
+.startup-endpoint__chevron { color: var(--text-3); transition: transform var(--dur-fast) var(--ease-enter); }
 .startup-endpoint[open] > summary > .startup-endpoint__chevron { transform: rotate(90deg); }
 .startup-endpoint__host { color: var(--text); font-size: var(--fs-body); font-weight: 500; overflow-wrap: anywhere; }
 .startup-endpoint__count { color: var(--text-3); font-size: var(--fs-meta); text-align: right; white-space: nowrap; }

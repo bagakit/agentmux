@@ -1,6 +1,9 @@
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { startupProgressDetail, type StartupProgress } from '../lib/startup-progress'
 import type { RuntimeEndpointWarning } from '../../../shared/contracts'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
+
+const DisclosureIcon = semanticIconComponent('navigation.disclosure')
 
 type StartupActivityGroup = {
   step: string
@@ -48,7 +51,7 @@ function StartupEndpointDetails({ warnings }: { warnings: readonly RuntimeEndpoi
   return <div className="startup-endpoints" aria-label="Endpoint connection details">
     {[...endpoints].map(([hostId, endpointWarnings]) => <details className="startup-endpoint" key={hostId}>
       <summary>
-        <span className="startup-endpoint__chevron" aria-hidden="true">›</span>
+        <DisclosureIcon className="startup-endpoint__chevron" size={12} aria-hidden="true" />
         <span className="startup-endpoint__host">{hostId}</span>
         <span className="startup-endpoint__count">{endpointWarnings.length} {endpointWarnings.length === 1 ? 'activity' : 'activities'}</span>
       </summary>
