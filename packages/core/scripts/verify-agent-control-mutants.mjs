@@ -11,7 +11,7 @@ const root = process.argv[2] ? resolve(process.argv[2]) : await mkdtemp(join(tmp
 if (process.argv[2]) await mkdir(root, { recursive: false, mode: 0o700 })
 const guard = `if (!object(params) || !object(params.caller) || Object.keys(params.caller).length !== 2 ||
         params.caller.agentSessionId !== expected.agentSessionId || !sameSecret(params.caller.capability, expected.capability) ||
-        Object.hasOwn(params, 'runtimeFence') || isAgentMuxRpcDeviceMethod(request.method) || request.method.startsWith('runtime.')) throw denied()`
+        Object.hasOwn(params, 'runtimeFence') || (isAgentMuxRpcDeviceMethod(request.method) && request.method !== 'device.link') || request.method.startsWith('runtime.')) throw denied()`
 const mutations = [
   ['caller-elevation', guard, 'if (!object(params)) throw denied()'],
   ['batch-members', 'const requests = (Array.isArray(value) ? value : [value]).map(parseRpcRequest)', 'const requests = (Array.isArray(value) ? value.slice(0, 1) : [value]).map(parseRpcRequest)'],
