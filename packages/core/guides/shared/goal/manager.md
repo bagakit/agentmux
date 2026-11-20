@@ -10,7 +10,10 @@ confirmation operation, current revision and your Supervisor role before advanci
 
 Read the plan revision with `goal plan --goal ID` and current work with
 `goal plan active --goal ID`. Omit `--goal` and use `--view manage` to see current
-Tickets across the Goals you supervise at this owner. Publish with `goal plan revise` and use the issued Ticket IDs.
+Tickets across the Goals you supervise at this owner. For a request in the
+current Goal, save the breakdown or follow-up with `goal plan append` and
+reply with the saved Ticket links. Use `goal plan revise` for changes to
+existing nodes.
 Use `goal plan assignment` to open ready unassigned nodes, close claims or name an executor.
 Read the saved claim or assignment in `goal plan`. When execution is authorized, send ready
 work or rework with `goal delegate`, using the same `intent.planNodeId` and the recorded executor.

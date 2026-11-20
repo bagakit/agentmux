@@ -14,6 +14,9 @@ For local or remote delegations, read the original message with `message read --
 Use the verified `envelope.application.data` for the Goal, attempt and frozen criteria.
 For a Ticket, use its `ticketLink` as the reference and, when using Git, as the `Goal-Node`
 trailer. Run the declared check. An independent reviewer decides the verdict.
+Propose follow-up work in the original Ticket thread with its outcome, check,
+criterion and dependencies. The Supervisor can append it to the same Goal and
+reference your original reply.
 
 Use `goal report --input FILE` at your Core with the original operation, `sourceMessageId`
 and actual author. Report each criterion as met, gap or unknown with evidence.

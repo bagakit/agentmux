@@ -56,9 +56,17 @@ pending nodes. A new loop requires the existing explicit stop and start actions.
 
 ### Create or revise a plan
 
+Keep decomposition and follow-up work within the original Goal when it serves
+that Goal's current criteria. Use `goal plan append` to save the new Tickets there,
+then share their returned links in the conversation. An appended Ticket can
+depend on an already completed Ticket and keeps its original completion.
+Use `goal plan append --help` for the input and receipt. If the work changes
+the Goal's agreed criteria, clarify the scope before publishing it.
+
 `goal discuss --goal ID --mode plan --operation-id OP` asks the current
 Supervisor to save a plan. Choose a Supervisor explicitly when none exists. As the
-Supervisor, use `goal plan revise` directly against the version you read. Planning can
+Supervisor, publish directly. Use `goal plan revise` against the version you read
+when editing existing nodes. Planning can
 use a real unconfirmed proposal. Clarify missing criteria first. Discussion and planning
 grant neither execution nor human confirmation. A delivered request or textual breakdown
 does not prove a plan was saved. Read the current plan revision and keep OP when receipt
