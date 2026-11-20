@@ -2,6 +2,7 @@ import { AgentMuxError, type AgentMuxClient, type AgentMuxRpcCallContext, type A
 import type { GoalCloseout, GoalCloseoutResult, GoalDelegationAuthority } from '@agentmux/core/goal-delegation'
 import { runBoundDemandDispatch, type Demand, type DemandStore } from '@agentmux/demand'
 import { delegationWorkerHostId } from '@agentmux/demand/delegations'
+import { hostGoalPlan } from './goal-projection.js'
 
 type Retained = Extract<GoalCloseoutResult, { state: 'retained' }>
 type DesktopOccupation = 'clear' | 'draft' | 'pending' | 'unknown'
@@ -17,11 +18,16 @@ function otherGoalWork(goals: readonly Demand[], input: GoalCloseout, runtimeId:
     if (goal.dispatches?.some(start => runBoundDemandDispatch(start) && start.runId === input.runId &&
         ('target' in start ? matches(start.target) : start.hostId === 'local' && start.agentSessionId === input.agentSessionId))) return true
     const own = goal.id === input.goalId ? goal.delegations?.find(attempt => attempt.operationId === input.attempt) : undefined
-    return Boolean(goal.plan?.nodes.some(node => node.id !== own?.planNodeId &&
-      node.executor?.hostId === 'local' && node.executor.agentSessionId === input.agentSessionId &&
-      !goal.plan?.reviews.some(review => review.nodeId === node.id && review.verdict === 'pass' && review.completion)) ||
-      goal.delegations?.some(attempt => attempt.operationId !== own?.operationId && delegationWorkerHostId(attempt) === 'local' &&
-        attempt.workerAgentSessionId === input.agentSessionId && attempt.workerRunId === input.runId && !attempt.collection))
+    if (goal.delegations?.some(attempt => attempt.operationId !== own?.operationId && delegationWorkerHostId(attempt) === 'local' &&
+        attempt.workerAgentSessionId === input.agentSessionId && attempt.workerRunId === input.runId && !attempt.collection)) return true
+    const assigned = goal.plan?.nodes.filter(node => node.id !== own?.planNodeId &&
+      node.executor?.hostId === 'local' && node.executor.agentSessionId === input.agentSessionId)
+    if (!assigned?.length) return false
+    const { planState } = hostGoalPlan(goal)
+    return assigned.some(node => {
+      const state = planState?.nodes.find(row => row.id === node.id)?.state
+      return state !== 'done' && state !== 'cancelled'
+    })
   })
 }
 
@@ -43,14 +49,16 @@ export function createGoalWorkerCloseout(options: {
       const goals = await options.demands.list()
       const goal = goals.find(item => item.id === input.goalId)
       const attempt = goal?.delegations?.find(item => item.operationId === input.attempt)
-      const latest = attempt?.planNodeId && goal?.delegations?.filter(item => item.planNodeId === attempt.planNodeId).at(-1)
-      if (!attempt?.planNodeId || latest !== attempt || attempt.workerRunId !== input.runId ||
+      const current = goal && attempt?.planNodeId
+        ? hostGoalPlan(goal).planState?.nodes.find(node => node.id === attempt.planNodeId)
+        : undefined
+      if (!attempt?.planNodeId || current?.attempt?.delegationOperationId !== attempt.operationId ||
+          (current.state !== 'review' && current.state !== 'done') || attempt.workerRunId !== input.runId ||
           attempt.workerAgentSessionId !== input.agentSessionId || delegationWorkerHostId(attempt) !== 'local' ||
           !attempt.report?.delivery || attempt.report.delivery.authorRuntimeId !== authority.runtimeId ||
           !attempt.collection || attempt.collection.replyMessageId !== attempt.report.replyMessageId ||
           attempt.collection.collector.kind !== 'agent' || attempt.collection.collector.id !== goal?.supervisorSessionId ||
-          goal?.alignment?.revision !== attempt.alignmentRevision ||
-          goal?.plan?.reviews.some(review => review.delegationOperationId === input.attempt && review.verdict === 'changes'))
+          goal?.alignment?.revision !== attempt.alignmentRevision)
         return { reason: 'handoff' as const }
       if (otherGoalWork(goals, input, authority.runtimeId)) return { reason: 'other-work' as const }
       return { attempt }
