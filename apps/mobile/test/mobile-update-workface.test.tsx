@@ -1,6 +1,7 @@
 import { act } from 'react'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest'
 import { MobileConnectionRoot } from '../src/connection/MobileConnectionRoot'
+import { prepareMobileApp } from '../src/connection/prepare-mobile-app'
 import { prepareReloadIdentity, reloadOfferIdentity } from '../src/connection/reload-identity'
 import { DEVICE_WORKFACE_KEY, emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { createBrowserPlatform } from '../src/platform/browser'
@@ -11,6 +12,9 @@ vi.mock('@agentmux/core/relay-hosted', async original => ({ ...await original<ob
 vi.mock('../src/connection/relay-identity', () => ({ deviceRelayIdentity: vi.fn(), existingDeviceRelayIdentity: ports.existing }))
 const identity = { publicKey: new Uint8Array(32).fill(2), secretKey: new Uint8Array(32).fill(7) }
 const offer = { v: 2 as const, serverId: 'original-host', daemonPublicKeyB64: 'A'.repeat(43) + '=', relay: { endpoint: '127.0.0.1:1', useTls: false } }
+// The startup suite separately controls the dynamic import. Here the real app
+// must already be available so the handoff can reach its first locked read.
+beforeAll(async () => { await prepareMobileApp() }, 20000)
 beforeEach(async () => { localStorage.clear(); sessionStorage.clear(); history.replaceState(null, '', '/'); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 afterEach(async () => { for (const item of mounted.splice(0)) { await act(async () => item.root.unmount()); item.element.remove() }; vi.restoreAllMocks(); vi.clearAllMocks() })
 
