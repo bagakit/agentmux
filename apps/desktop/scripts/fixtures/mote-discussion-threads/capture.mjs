@@ -10,10 +10,11 @@ const root = path.resolve(import.meta.dirname, '../../../../..')
 const navigation = process.argv.includes('--top-navigation')
 const advanced = process.argv.includes('--group-management')
 const groups = advanced || process.argv.includes('--native-groups')
+const direct = process.argv.includes('--direct-threads')
 const fixture = navigation ? path.join(import.meta.dirname, '../mote-thread-navigation') : import.meta.dirname
 const require = createRequire(path.join(root, 'apps/desktop/package.json'))
 const { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
-const directory = path.join(root, '.bagakit/mote-discussion-threads/desktop-ui', 'capture-' + crypto.randomUUID())
+const directory = path.join(process.env.AMUX_DESKTOP_CAPTURE_ROOT ?? path.join(root, '.bagakit/mote-discussion-threads/desktop-ui'), 'capture-' + crypto.randomUUID())
 const compiled = path.join(directory, 'compiled')
 await fs.mkdir(compiled, { recursive: true }); await fs.mkdir(path.join(directory, 'userData'))
 const receipt = { passed: false, captureOnly: true, aestheticReview: 'not-performed', captureSubset: groups ? 'mote-native-groups-full-app' : 'mote-discussion-threads-full-app', source: {}, images: {},
@@ -87,12 +88,12 @@ try {
   await fs.writeFile(path.join(compiled, 'index.html'), '<!doctype html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="entry.css"></head><body><div id="root"></div><script>window.closedTabSetup={phase:"module-loading",errors:[]};window.addEventListener("error",e=>window.closedTabSetup.errors.push(String(e.error?.stack||e.message)));window.addEventListener("unhandledrejection",e=>window.closedTabSetup.errors.push(String(e.reason?.stack||e.reason)));</script><script type="module" src="entry.js"></script></body></html>')
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const logs = []
-  receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'renderer-main.cjs'), path.join(compiled, 'index.html'), directory, directory, ...(process.argv.includes('--notice-only') ? ['--notice-only'] : []), ...(groups ? ['--native-groups'] : []), ...(advanced ? ['--group-management'] : [])],
+  receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'renderer-main.cjs'), path.join(compiled, 'index.html'), directory, directory, ...(process.argv.includes('--notice-only') ? ['--notice-only'] : []), ...(groups ? ['--native-groups'] : []), ...(advanced ? ['--group-management'] : []), ...(direct ? ['--direct-threads'] : [])],
     { cwd: root, env, timeoutMs: 90000, onLine: line => logs.push(line) })
   await fs.writeFile(path.join(directory, 'renderer.log'), logs.join('\n'))
   receipt.renderer = JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8'))
   assert.equal(receipt.process.exitCode, 0); assert.equal(receipt.renderer.passed, true)
-  assert.equal(receipt.renderer.images.length, navigation ? 15 : advanced ? 10 : groups ? 7 : process.argv.includes('--notice-only') ? 2 : 15, 'Every named real product scene must be captured')
+  assert.equal(receipt.renderer.images.length, direct ? 6 : navigation ? 15 : advanced ? 10 : groups ? 7 : process.argv.includes('--notice-only') ? 2 : 15, 'Every named real product scene must be captured')
   if (navigation) {
     receipt.restartProcess = await runProbeProcess(require('electron'), [path.join(fixture, 'renderer-main.cjs'), path.join(compiled, 'index.html'), directory, directory, '--restore'], { cwd: root, env, timeoutMs: 45000, onLine: line => logs.push(line) })
     receipt.restart = JSON.parse(await fs.readFile(path.join(directory, 'renderer-restart-result.json'), 'utf8'))

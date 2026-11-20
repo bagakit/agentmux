@@ -2,10 +2,12 @@ import { fixturePath } from '../../../../../test/fixture-values.mjs'
 import type { MoteDialoguePage, MoteMainSetupResult } from '@agentmux/core/mote-dialogue'
 import { moteMainBindingDefaults } from '@agentmux/core/spatial-graph'
 import { effectiveMoteQuickSave, type MotePresenceReading, type MoteQuickDefaults } from '@agentmux/core/mote-preferences'
+import { moteDirectCapture } from '../../../../../packages/client-ui/test/fixtures/mote-direct'
 /** Private observations only. No live Mote, schedule, model or Run is operated. */
 export function createMoteDialogueCapture(threadLayout = false) {
   const hostId = 'host-original', spaceId = 'mote-original', zoneId = 'zone-mote', workspacePath = fixturePath('mote-original')
   const resource = { hostId, workspaceId: 'workspace-original', workspacePath }, target = { spaceId, zoneId, expectedResource: resource }
+  const direct = moteDirectCapture(target)
   const file = { ...resource, zoneId, zonePath: workspacePath, path: 'MOTE.md' }, identity = { hostId, moteId: spaceId }
   const main = { hostId, sessionId: 'session-mote', displayWorkspaceId: 'display-original', groupId: 'group-mote', tabId: 'tab-mote', regionId: 'region-mote' }
   const b = { ...main, sessionId: 'session-waiting', regionId: 'region-waiting' }
@@ -57,6 +59,8 @@ export function createMoteDialogueCapture(threadLayout = false) {
     unconfirm() { unknown = true },
     facts: () => ({ target, page, maintenance, defaults }),
     rpc(method: string, input: any) {
+      if (method === 'space.mote.direct.list') return direct.list
+      if (method === 'space.mote.direct.inspect') return direct.inspect(input.threadId)
       if (method === 'space.state') return { state: { graph: { resources: setup?.record ? { 'core:agent-open': { schema: 'agentmux.spatial-agent-open.v1', requests: { [setup.operationId]: setup.record } } } : {} } } }
       if (method === 'agent.open' && retentionSnapshot?.record) {
         const original = retentionSnapshot, record = original.record!, query = input.moteMain.deferredInput

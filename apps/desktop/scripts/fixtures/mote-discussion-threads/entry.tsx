@@ -5,6 +5,9 @@ import { requestPmoTeamsTopicFloatingOpen, requestPmoTeamsTopicFloatingClose } f
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName, serializeMoteQuickMode } from '@agentmux/host/mote-model'
 import { directoryIdentity, homeZoneId } from '../../../src/shared/space-addresses'
 import type { MoteDialoguePage, MoteDialogueLink } from '@agentmux/core/mote-dialogue'
+import type { AgentMuxRpcParams, AgentMuxRpcResult } from '@agentmux/core'
+import type { MoteGroupClientMethod } from '../../../src/shared/contracts'
+import { moteDirectCapture } from '../../../../../packages/client-ui/test/fixtures/mote-direct'
 
 const initial = useAppStore.getState(), workspace = initial.config!.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID)!
 const original = (window as any).moteCooperationCapture
@@ -18,6 +21,16 @@ let unbound = new URLSearchParams(location.search).has('initialUnbound'), unavai
 const releaseNative: (() => void)[] = []
 const originalReader = api.conversation.readAgentConversation
 const query = new URLSearchParams(location.search)
+if (query.has('directThreads')) {
+  const direct = moteDirectCapture(target, captureAt)
+  const original = api.moteGroup.call
+  api.moteGroup.call = async <M extends MoteGroupClientMethod>(method: M, input: AgentMuxRpcParams<M>): Promise<AgentMuxRpcResult<M>> => {
+    calls.push({ method, input })
+    if (method === 'space.mote.direct.list') return direct.list as AgentMuxRpcResult<M>
+    if (method === 'space.mote.direct.inspect' && 'threadId' in input) return direct.inspect(input.threadId) as AgentMuxRpcResult<M>
+    return original(method, input)
+  }
+}
 if (query.has('initialDelay')) delay = true
 api.conversation.readAgentConversation = async input => {
   calls.push({ method: 'conversation.read', input })

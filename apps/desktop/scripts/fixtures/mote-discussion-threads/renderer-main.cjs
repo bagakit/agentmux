@@ -14,7 +14,7 @@ app.whenReady().then(async () => {
   const panel = 'document.querySelector("[data-pmo-teams-topic-floating]:popover-open")'
   const findButton = label => `(()=>{const p=${panel};return [...p.querySelectorAll('button')].find(n=>n.checkVisibility()&&n.textContent.trim()===${JSON.stringify(label)})})()`
   async function load(initialDelay = false, initialUnbound = false) {
-   await win.loadFile(html, { query: { phase: 'seed', retained: '1', zoneSelection: '1', ...(initialDelay ? { initialDelay: '1' } : {}), ...(initialUnbound ? { initialUnbound: '1' } : {}), ...(process.argv.includes('--native-groups') ? { nativeGroups: '1' } : {}) } })
+   await win.loadFile(html, { query: { phase: 'seed', retained: '1', zoneSelection: '1', ...(initialDelay ? { initialDelay: '1' } : {}), ...(initialUnbound ? { initialUnbound: '1' } : {}), ...(process.argv.includes('--native-groups') ? { nativeGroups: '1' } : {}), ...(process.argv.includes('--direct-threads') ? { directThreads: '1' } : {}) } })
    await until('window.moteDiscussionCapture?.ready && !!' + panel, 'Complete original App Mote entry')
    await read('window.__connectionsTrustedEvents=window.moteDiscussionCapture.facts().trustedEvents'); app.focus({ steal: true }); win.show(); win.focus(); win.webContents.focus(); if (!initialDelay) await until('document.hasFocus()'); await settle()
   }
@@ -29,6 +29,56 @@ app.whenReady().then(async () => {
   }
   await load(); await until(panel + '.innerText.includes("把协作体验补完整")', 'Original Main native messages')
   const before = await facts(); result.initial = before
+  if (process.argv.includes('--direct-threads')) {
+   win.webContents.debugger.attach('1.3')
+   await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] })
+   const holdMotion = name => read(`(() => {
+     window.directMotion = null;
+     const deadline = performance.now() + 6000;
+     const sample = () => {
+       const dialog = document.querySelector('.mote-direct-panel');
+       const motion = dialog?.getAnimations().find(animation => (animation.animationName || animation.id) === ${JSON.stringify(name)});
+       if (!motion) { if (performance.now() < deadline) requestAnimationFrame(sample); return; }
+       motion.pause();
+       motion.currentTime = 72;
+       window.directMotion = motion;
+     };
+     requestAnimationFrame(sample);
+   })()`)
+   const captureMotion = async (selector, name, filename) => {
+     await holdMotion(name)
+     const pressed = click(selector)
+     try {
+       await until('window.directMotion?.currentTime === 72', 'Actual ' + name + ' has an intermediate frame')
+       await read('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+       assert.equal(await read('getComputedStyle(document.querySelector(".mote-direct-panel")).opacity'), '1', 'Private text and surface remain opaque throughout motion')
+       await fs.writeFile(path.join(evidence, filename), (await win.webContents.capturePage()).toPNG())
+       result.images.push(filename)
+     } finally {
+       await read('window.directMotion?.play()')
+       await pressed
+     }
+   }
+   await until('document.querySelector(".mote-direct-entry")?.innerText.includes("已回复")', 'Main shows observed private progress')
+   await capture('desktop-main-private-summary')
+   await captureMotion('.mote-direct-entry button', 'mote-direct-enter', 'desktop-private-enter-motion.png')
+   await until('!!document.querySelector("[data-direct-message-id=original-private-report]")', 'Original private report visible')
+   await capture('desktop-private-detail')
+   await click('js:[...document.querySelectorAll(".mote-direct-panel button")].find(button=>button.textContent==="全部私聊")')
+   await until('document.querySelector(".mote-direct-panel .mote-direct-row")?.innerText.includes("资料整理")', 'Private counterpart visible')
+   await capture('desktop-private-list')
+   win.setContentSize(760, 720)
+   await read('window.moteDiscussionCapture.theme(true)')
+   await click('.mote-direct-panel .mote-direct-row')
+   await until('!!document.querySelector("[data-direct-message-id=original-private-report]")', 'Original private report still visible after resizing')
+   await capture('desktop-private-detail-narrow')
+   await captureMotion('button[aria-label="关闭私聊"]', 'mote-direct-exit', 'desktop-private-exit-motion.png')
+   await until('!document.querySelector(".mote-direct-panel")', 'Returns to original Main')
+   assert.equal(await read('document.activeElement?.matches(".mote-direct-entry__summary")'), true, 'Focus returns to exact Main summary')
+   result.final = await facts(); assert.deepEqual(result.final.identities, before.identities); assert.deepEqual(result.final.drafts, before.drafts)
+   result.passed = true
+   return
+  }
   if (process.argv.includes('--native-groups')) {
    await until('Boolean(window.moteNativeGroupsCapture)', 'Native group source connected to original panel')
    await require(process.argv.includes('--group-management') ? './group-management.cjs' : './native-groups.cjs')({ win, panel, findButton, read, until, click, type, capture, theme: light => read('window.moteDiscussionCapture.theme(' + light + ')') })
