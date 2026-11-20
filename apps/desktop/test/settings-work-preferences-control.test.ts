@@ -30,7 +30,11 @@ const defaults = [
   { key: 'notes.contentWidth', kind: 'string', value: 'standard', default: 'standard', enum: ['standard', 'wide'] },
   { key: 'goals.defaultView', kind: 'string', value: 'list', default: 'list', enum: ['list', 'board'] },
   { key: 'goals.showFinished', kind: 'boolean', value: false, default: false },
-  { key: 'goals.requesterAsSupervisor', kind: 'boolean', value: true, default: true }
+  { key: 'goals.requesterAsSupervisor', kind: 'boolean', value: true, default: true },
+  { key: 'goals.workflow.template', kind: 'string', value: 'off', default: 'off', enum: ['off', 'execution-review', 'evidence-synthesis'] },
+  { key: 'goals.workflow.reviewer', kind: 'string', value: '', default: '' },
+  { key: 'goals.workflow.maxConcurrent', kind: 'number', value: 0, default: 0 },
+  { key: 'goals.workflow.maxAttempts', kind: 'number', value: 0, default: 0 }
 ] as const
 
 it('CLI/RPC discover each actual Work field and its two domain prefixes without materializing defaults', async () => {
@@ -61,7 +65,7 @@ it('real Store validation accepts each bounded font integer and supported choice
       const receipt = await call(['set', key, value])
       expect(receipt.entry.key).toBe(key)
       expect(receipt.entry.value).toBe(key === 'notes.fontSize' ? Number(value) : key === 'goals.showFinished' ? value === 'true' : value)
-      const reopened = await new ConfigStore(f.store.filePath).get()
+      const reopened = await new ConfigStore(f.store.filePath).readSaved()
       expect(reopened.notes).toEqual(f.owner.current.notes); expect(reopened.goals).toEqual(f.owner.current.goals)
       expect(f.runtime.commit.mock.invocationCallOrder.at(-1)).toBeLessThan(f.publish.mock.invocationCallOrder.at(-1)!)
     }
@@ -152,6 +156,12 @@ it('ordinary CLI executable consumes Notes/Goals via an owned private public soc
     expect(found.entries).toEqual(defaults.filter(entry => entry.key.startsWith('notes.')))
     const saved = JSON.parse((await cli(process.execPath, [...args, 'set', 'goals.defaultView', 'board'], options)).stdout).result
     expect(saved.entry.value).toBe('board'); expect((await f.disk()).goals?.defaultView).toBe('board')
+    const workflows = JSON.parse((await cli(process.execPath, [...args, 'inspect', 'goals.workflow'], options)).stdout).result
+    expect(workflows.entries).toEqual(defaults.filter(entry => entry.key.startsWith('goals.workflow.')))
+    const reviewer = { hostId: 'local', runtimeId: 'review-runtime', sessionId: 'review-session' }
+    const review = JSON.parse((await cli(process.execPath, [...args, 'set', 'goals.workflow.reviewer', JSON.stringify(reviewer)], options)).stdout).result
+    expect(review.entry.value).toBe(JSON.stringify(reviewer))
+    expect((await f.disk()).goals?.workflow).toEqual({ reviewerHostId: reviewer.hostId, reviewerRuntimeId: reviewer.runtimeId, reviewerSessionId: reviewer.sessionId })
     await expect(cli(process.execPath, [...args, 'set', 'notes.fontSize', '25'], options)).rejects.toBeDefined()
     expect((await f.disk()).notes).toBeUndefined()
   } finally { await server.stop(); await rm(directory, { recursive: true, force: true }) }
