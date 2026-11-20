@@ -54,17 +54,25 @@ Agent 进程跑在 ctxmux daemon 里。退出、重启 App，或者只热更新�
 
 每个 Provider 适配对应 CLI 的原生协议，并声明支持的能力。Core 提供统一的类型化 API，覆盖 Session、输入、权限、状态、历史和恢复。
 
-| Provider | 权限 | 原生恢复 | 原生 fork | 原生历史 |
-| --- | :---: | :---: | :---: | :---: |
-| Codex · Claude | 可回答 | ● | ● | ● |
-| Grok · Antigravity · Cursor · Droid · OpenCode · Kimi | 可观察 | ● | | ● |
-| Gemini · Copilot | 可观察 | ● | | |
-| Hermes | 可观察 | | | ● |
-| TraeX · Pi | — | ● | | ● |
+| Provider（默认命令） | 对话 | 权限 | 原生恢复 | 原生 fork | 原生历史 | Hook 配置 | ACP | 启动选项 |
+| --- | --- | --- | :---: | :---: | :---: | --- | :---: | --- |
+| Codex (`codex`) | 已记录事件 | 可回答 | ✓ | ✓ | ✓ | 随启动加载 | — | 沙箱、审批策略 |
+| Claude (`claude`) | 已记录事件 | 可回答 | ✓ | ✓ | ✓ | 启动时加载受管插件 | — | 模型、推理强度、权限模式 |
+| TraeX (`traex`) | 仅终端 | CLI 内处理 | ✓ | — | ✓ | — | — | 沙箱、权限模式 |
+| Hermes (`hermes`) | 已记录事件 | 可观察 | — | — | ✓ | 受管配置 | — | 审批 |
+| Pi (`pi`) | 已记录事件 | CLI 内处理 | ✓ | — | ✓ | 受管配置 | — | — |
+| Grok (`grok`) | 已记录事件 | 可观察 | ✓ | — | ✓ | 受管配置 | — | 权限模式 |
+| Gemini (`gemini`) | 已记录事件 | 可观察 | ✓ | — | — | 受管配置 | — | 审批模式 |
+| Antigravity (`agy`) | 已记录事件 | 可观察 | ✓ | — | ✓ | 受管配置 | 适配器 | 交互方式、沙箱 |
+| Cursor (`cursor-agent`) | 已记录事件 | 可观察 | ✓ | — | ✓ | 受管配置 | — | 执行模式、沙箱、审批 |
+| Kimi (`kimi`) | 已记录事件 | 可观察 | ✓ | — | ✓ | Provider 自管 | — | — |
+| Droid (`droid`) | 已记录事件 | 可观察 | ✓ | — | ✓ | 受管配置 | — | — |
+| Copilot (`copilot`) | 已记录事件 | 可观察 | ✓ | — | — | 受管配置 | — | — |
+| OpenCode (`opencode`) | 已记录事件 | 可观察 | ✓ | — | ✓ | 受管配置 | — | — |
 
-<sub>来源：[`providers/index.ts`](packages/core/src/providers/index.ts) 与各 Provider 的 catalog。「可回答」指 AgentMux 能结构化回答这家 CLI 的授权请求，「可观察」指只能看到请求。各 CLI 在实际执行的 Host 上安装和登录。Core 通过 [`defineAgentProvider`](packages/core/src/agent-provider.ts) 和[插件 API](packages/core/src/agent-plugin.ts)接入自定义 Provider。</sub>
+表中是内置 Provider 的能力声明。「可回答」表示 AgentMux 可结构化回答授权请求，「可观察」表示可以展示请求。「—」表示该项未声明。各 CLI 在实际执行的 Host 上安装和登录。目录来自 [Core Provider 注册表](packages/core/src/providers/index.ts)。Core 通过 [`defineAgentProvider`](packages/core/src/agent-provider.ts) 和[插件 API](packages/core/src/agent-plugin.ts)接入自定义 Provider。
 
-在 **Settings → Agent CLIs → Providers** 可比较所选 Host 的能力声明，并进入对应的 Executors 或 Hook 配置。命令行也可用 [`amux agent provider ls --host HOST`](packages/core/guides/modules/agent.md) 读取同一目录。Antigravity 支持 Terminal 和[结构化 ACP 会话](docs/guides/provider-acp.md)。
+**Settings → Agent CLIs → Providers** 显示所选 Host 的目录、Executor 与 Session 数量，以及 Hook 检查。命令行可用 [`amux agent provider ls --host HOST`](packages/core/guides/modules/agent.md) 读取同一 Host 的目录。Antigravity 的 Terminal 和 ACP 设置见 [ACP 指南](docs/guides/provider-acp.md)。
 
 对支持原生历史的 Provider，Core 从 CLI 的文件或原生服务读取会话记录，例如 Codex 的 JSONL 文件、Cursor 的 SQLite 数据库，以及 Grok 和 Antigravity 的会话记录。Desktop 的对话视图、手机端和 `amux agent history --source native` 都经同一个 Core 接口读取这些记录，各个 client 不另存消息缓存。Core 自己记下的提交回执和 Hook 观察是另一个来源，单独保留。同一个 Session 可以在终端和对话视图之间切换。
 

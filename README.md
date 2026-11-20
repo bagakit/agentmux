@@ -54,17 +54,25 @@ If a process has really ended and its CLI supports native resume, Core resumes t
 
 Each Provider adapts its CLI’s native protocol and declares which capabilities it supports. Core exposes a typed API for Sessions, input, permissions, status, history and recovery.
 
-| Provider | Permission | Native resume | Native fork | Native history |
-| --- | :---: | :---: | :---: | :---: |
-| Codex · Claude | answers | ● | ● | ● |
-| Grok · Antigravity · Cursor · Droid · OpenCode · Kimi | observes | ● | | ● |
-| Gemini · Copilot | observes | ● | | |
-| Hermes | observes | | | ● |
-| TraeX · Pi | — | ● | | ● |
+| Provider (default CLI) | Conversation | Permissions | Native resume | Native fork | Native history | Hook setup | ACP | Launch options |
+| --- | --- | --- | :---: | :---: | :---: | --- | :---: | --- |
+| Codex (`codex`) | Recorded events | Respond | ✓ | ✓ | ✓ | At launch | — | Sandbox, Approval policy |
+| Claude (`claude`) | Recorded events | Respond | ✓ | ✓ | ✓ | Managed plugin at launch | — | Model, Effort, Permission mode |
+| TraeX (`traex`) | Terminal only | CLI only | ✓ | — | ✓ | — | — | Sandbox, Permission mode |
+| Hermes (`hermes`) | Recorded events | Observe | — | — | ✓ | Managed config | — | Approvals |
+| Pi (`pi`) | Recorded events | CLI only | ✓ | — | ✓ | Managed config | — | — |
+| Grok (`grok`) | Recorded events | Observe | ✓ | — | ✓ | Managed config | — | Permission mode |
+| Gemini (`gemini`) | Recorded events | Observe | ✓ | — | — | Managed config | — | Approval mode |
+| Antigravity (`agy`) | Recorded events | Observe | ✓ | — | ✓ | Managed config | Adapter | Interaction, Sandbox |
+| Cursor (`cursor-agent`) | Recorded events | Observe | ✓ | — | ✓ | Managed config | — | Execution mode, Sandbox, Approvals |
+| Kimi (`kimi`) | Recorded events | Observe | ✓ | — | ✓ | Provider managed | — | — |
+| Droid (`droid`) | Recorded events | Observe | ✓ | — | ✓ | Managed config | — | — |
+| Copilot (`copilot`) | Recorded events | Observe | ✓ | — | — | Managed config | — | — |
+| OpenCode (`opencode`) | Recorded events | Observe | ✓ | — | ✓ | Managed config | — | — |
 
-<sub>Source: [`providers/index.ts`](packages/core/src/providers/index.ts) and each Provider's catalog. "Answers" means AgentMux can answer that CLI's permission requests in a structured way; "observes" means it can only see them. Install and sign in to each CLI on its execution Host. Core supports custom Providers through [`defineAgentProvider`](packages/core/src/agent-provider.ts) and the [plugin API](packages/core/src/agent-plugin.ts).</sub>
+These are the built-in Provider declarations. In Permissions, Respond means AgentMux can answer a structured permission request. Observe means it can display the request. A dash indicates an undeclared capability or option. Install and sign in to each CLI on its execution Host. The catalog comes from the [Core Provider registry](packages/core/src/providers/index.ts). Core supports custom Providers through [`defineAgentProvider`](packages/core/src/agent-provider.ts) and the [plugin API](packages/core/src/agent-plugin.ts).
 
-In **Settings → Agent CLIs → Providers**, compare the selected Host’s Provider catalog and open its Executors or Hook configuration. Use [`amux agent provider ls --host HOST`](packages/core/guides/modules/agent.md) to read the same catalog from the CLI. Antigravity supports both Terminal and [structured ACP sessions](docs/guides/provider-acp.md).
+**Settings → Agent CLIs → Providers** shows the selected Host’s catalog, Executor and Session counts, and Hook checks. Use [`amux agent provider ls --host HOST`](packages/core/guides/modules/agent.md) to read that Host’s catalog from the CLI. See the [ACP guide](docs/guides/provider-acp.md) for Terminal and ACP setup in Antigravity.
 
 For Providers with native history, Core reads records from the CLI’s files or native service. Examples include Codex’s JSONL files, Cursor’s SQLite store, and Grok and Antigravity session records. The desktop conversation view, the mobile client and `amux agent history --source native` read those records through the same Core interface, and no client keeps a message cache of its own. What Core records itself, such as submission receipts and hook observations, stays a separate source. One Session can switch between its terminal and this conversation view.
 
