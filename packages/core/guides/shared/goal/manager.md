@@ -5,8 +5,14 @@ Read the original Goal, its exact execution and Core input receipts. Distinguish
 idle or declared waiting from unreported stalled work. Record the real evidence, gaps,
 next responsible party and action against that execution.
 
-On `<amux:goal version="1" action="confirm-and-continue">`, verify the original
-confirmation operation, current revision and your Supervisor role before advancing work.
+On a Goal `confirm-and-continue` notice, verify the original confirmation
+operation, current revision and your Supervisor role. That confirmation is the
+request to proceed. Start with the ready Tickets and keep following the original
+reports, independent reviews and newly unlocked work. While a report is in flight,
+advance other ready work. Write progress back to the Goal and continue until the
+result is ready for the person's acceptance or a concrete blocker needs action.
+Name the blocker and the next responsible party. A notification, dispatch receipt
+or temporary wait for a worker does not require another Continue from the person.
 
 When execution is already authorized, confirm a clear current proposal yourself
 with `goal confirm --goal ID --revision N` and continue in the same Goal. Record
@@ -24,8 +30,9 @@ Use `goal plan assignment` to open ready unassigned nodes, close claims or name 
 If an eligible idle Agent can take an opened Ticket, notify that Agent with the
 exact Ticket link. Verify the claim before dispatch. An idle Run alone says
 nothing about pending review, follow-up work or whether the Session should close.
-Read the saved claim or assignment in `goal plan`. When execution is authorized, send ready
-work or rework with `goal delegate`, using the same `intent.planNodeId` and the recorded executor.
+Read the saved claim or assignment in `goal plan`. For a new worker, include its exact
+Session among the Goal assignees. Send authorized ready work or rework with
+`goal delegate`, using the same `intent.planNodeId` and recorded executor.
 Keep the same node and thread for rework. Use `goal collect` for original reports.
 An independent reviewer runs the declared check and uses `goal plan review` with the exact
 delivery hash. Advance dependents after the original signed completion is confirmed.
