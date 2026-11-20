@@ -122,11 +122,12 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
     const report = !definition ? section?.querySelector<HTMLElement>('[data-goal-grounding-submission]') : null
     revealWork(report ?? section)
   }
-  function revealOriginalWork(source: { kind: 'start' | 'delegation' | 'patrol'; operationId: string }) {
+  function revealOriginalWork(source: { kind: 'start' | 'delegation' | 'patrol'; operationId: string }, readRecord = false) {
     const operation = CSS.escape(source.operationId)
     const detail = detailRef.current
     const pending = source.kind === 'start' ? detail?.querySelector<HTMLElement>(`[data-goal-retained-operation="${operation}"]`) : null
-    const original = pending ?? detail?.querySelector<HTMLElement>(`[data-goal-work-kind="${source.kind}"][data-goal-work-operation="${operation}"]`)
+    const record = detail?.querySelector<HTMLElement>(`[data-goal-work-kind="${source.kind}"][data-goal-work-operation="${operation}"]`)
+    const original = readRecord ? record ?? pending : pending ?? record
     if (!original) return false
     if (source.kind === 'patrol') {
       revealSupervisor(true, original)
@@ -172,7 +173,7 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
       setTimelineReading({ kind: 'coordination', reveal: { key: source.key, focus: target => revealSupervisor(true, target) }, restoreFocus })
       return true
     }
-    return revealOriginalWork(source)
+    return revealOriginalWork(source, source.kind === 'start')
   }
   function returnToTimeline() {
     previousReadingTop.current = null

@@ -459,7 +459,10 @@ export function createHostGoals(options: {
           (actor.kind === 'agent' ? !context.caller : actor.kind !== 'user' && actor.kind !== 'device'))
         throw new AgentMuxError('Saving a Goal Start request requires its original authenticated business author. The Agent and private request remain retained.', 'CONTROL_PERMISSION_DENIED')
       await current(context)
-      const receipt = await demands.requestDispatch(goal.id, { ...optionalInputEpoch(request.inputEpoch), operationId: request.requestId, target: request.agentReference }, request.expectedUpdatedAt)
+      const requestedBy = actor.kind === 'user' || actor.kind === 'device' ? { kind: actor.kind, id: actor.id } : undefined
+      const receipt = await demands.requestDispatch(goal.id, {
+        ...optionalInputEpoch(request.inputEpoch), operationId: request.requestId, target: request.agentReference
+      }, request.expectedUpdatedAt, requestedBy)
       original = receipt.demand.dispatches?.find(item => item.operationId === request.requestId) ?? null
       fresh = receipt.replayed !== true
     }

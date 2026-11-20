@@ -2,7 +2,7 @@ import { isDeepStrictEqual } from 'node:util'
 import { parseDemandAgentReference, parseDemandAgentReferences, demandAgentReferenceKey, mergeDemandAgentReferences, type DemandAgentReference } from './agent-reference.js'
 import { parseDemandDiscussionInput, parseDemandDiscussionInputs, parseDemandDiscussionIntent, type DemandDiscussionInput, type DemandDiscussionIntent } from './discussion.js'
 import { demandPatrolScope, completedGoalPlanRequest, currentGoalConfirmationNotice, assertPatrolExecutions, parseDemandPatrols, parseDemandPatrolAttempt, parseDemandPatrolReportInput, type DemandPatrolPreparation, type DemandPatrolAttempt, type DemandPatrolReportInput, type GoalConfirmationRecipient } from './goal-patrol.js'
-import { parseDemandDispatch, parseDemandDispatchIntent, parseDemandDispatchRequest, parseDemandDispatches, qualifiedDemandDispatch, runBoundDemandDispatch, sameDemandDispatchIntent, type DemandDispatch, type DemandDispatchIntent, type DemandDispatchRequest, type DemandDispatchRejection } from './dispatch.js'
+import { parseDemandDispatch, parseDemandDispatchIntent, parseDemandDispatchRequest, parseDemandDispatches, qualifiedDemandDispatch, runBoundDemandDispatch, sameDemandDispatchIntent, type DemandDispatch, type DemandDispatchIntent, type DemandDispatchRequest, type DemandDispatchRequestOrigin, type DemandDispatchRejection } from './dispatch.js'
 import { parseDemandDelegationRuntimeIdentity, type DemandDelegationRuntimeIdentity, parseDemandDelegationIntent, parseDemandDelegations, parseDemandDelegationReportInput, parseDemandDelegationCollectionInput, parseDemandDelegationCollector, sameDemandDelegationIntent, validateDemandDelegationReport,
   parseDemandDelegationAttentionInput, sameDemandDelegationAttention, delegationWorkerHostId, sameGoalPlanPredecessors,
   parseGoalWorkflowReviewer, parseGoalWorkflowReviewInput, type GoalWorkflowReviewer, type GoalWorkflowReviewInput,
@@ -736,7 +736,8 @@ export class DemandStore {
 
   /** Reserve the original business request before fallible execution preparation.
    * The existing kernel writer lock owns first acceptance across Host processes. */
-  async requestDispatch(id: string, input: DemandDispatchRequest, expectedUpdatedAt?: number): Promise<DemandReceipt> {
+  async requestDispatch(id: string, input: DemandDispatchRequest, expectedUpdatedAt?: number,
+    requestedBy?: DemandDispatchRequestOrigin['requestedBy']): Promise<DemandReceipt> {
     const request = parseDemandDispatchRequest(input)
     if (expectedUpdatedAt !== undefined && (!Number.isSafeInteger(expectedUpdatedAt) || expectedUpdatedAt < 0))
       throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'Expected Goal version is invalid.')
@@ -757,7 +758,7 @@ export class DemandStore {
       const saved: DemandDispatch = rejection ? { ...request, execution: 'finite', stage: 'rejected', requestedAt, observedGoalUpdatedAt: goalUpdatedAt,
         ...(expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt }), rejection }
         : { ...request, execution: 'finite', stage: 'requested', prompt: demand.description.trim() || demand.title,
-          request: { requestedAt, goalUpdatedAt }, resultBasis: { alignmentRevision: demand.alignment?.revision ?? null,
+          request: { requestedAt, goalUpdatedAt, ...(requestedBy ? { requestedBy } : {}) }, resultBasis: { alignmentRevision: demand.alignment?.revision ?? null,
             criteria: clone(demand.alignment?.criteria ?? []), groundingSubmissionId: demand.grounding?.submissionId ?? null } }
       demand.dispatches = [...(demand.dispatches ?? []), saved]
       demand.updatedAt = Math.max(requestedAt, demand.updatedAt + 1)

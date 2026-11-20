@@ -124,9 +124,10 @@ export function goalExecutionRows(demand: TimelineSource): Row[] {
   for (const start of demand.dispatches ?? []) {
     if (start.execution !== 'finite') continue
     const rejected = start.stage === 'rejected'
-    const at = start.stage === 'requested' ? start.request.requestedAt : rejected ? start.requestedAt : start.preparedAt
-    const events: TimelineEvent[] = [{ id: 'request', at, label: rejected ? 'Request refused' : 'Request saved',
-      result: rejected ? 'Original request rejected' : 'Original request retained', reference: start.operationId }]
+    const at = start.stage === 'requested' ? start.request.requestedAt : rejected ? start.requestedAt : start.request?.requestedAt ?? start.preparedAt
+    const author = participantIdentity(start.request?.requestedBy)
+    const events: TimelineEvent[] = [{ id: 'request', at, label: rejected ? 'Request refused' : author ? 'Task requested' : 'Request saved',
+      result: rejected ? 'Original request rejected' : 'Original request retained', ...author, reference: start.operationId }]
     const receipt = start.receipt
     if (receipt) events.push({ id: 'receipt', at: receipt.kind === 'core-input' ? receipt.observedAt : receipt.createdAt,
       label: 'Original input recorded', result: receipt.kind === 'core-input'

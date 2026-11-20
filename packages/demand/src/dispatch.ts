@@ -30,7 +30,11 @@ export type DemandQualifiedDispatchReceipt = { kind: 'core-input'; inputKey: {
   kind: 'prompt'; agentSessionId: string; expectedRun: { runId: string }; submissionId: string
 }; outcome: 'admitted' | 'terminal-confirmed'; observedAt: number }
 export type DemandDispatchRequest = { inputEpoch?: string; operationId: string; target: DemandSpaceMemberReference }
-export type DemandDispatchRequestOrigin = { requestedAt: number; goalUpdatedAt: number }
+export type DemandDispatchRequestOrigin = {
+  requestedAt: number
+  goalUpdatedAt: number
+  requestedBy?: { kind: 'user' | 'device'; id: string }
+}
 export type DemandDispatchResultBasis = { alignmentRevision: number | null; criteria: DemandCriterion[]; groundingSubmissionId: string | null }
 type QualifiedBusinessRequest = DemandDispatchRequest & {
   execution: 'finite'
@@ -61,7 +65,7 @@ type DispatchState<Receipt> = {
   /** Reference to an existing Core Supervisor input; not an A2A message or queue. */
   attention?: DemandDelegationAttention
 }
-export type DemandRunBoundDispatch = (DemandLegacyDispatchIntent & DispatchState<DemandLegacyDispatchReceipt>) |
+export type DemandRunBoundDispatch = (DemandLegacyDispatchIntent & DispatchState<DemandLegacyDispatchReceipt> & { request?: never }) |
   (DemandQualifiedDispatchIntent & DispatchState<DemandQualifiedDispatchReceipt> & { request?: DemandDispatchRequestOrigin })
 export type DemandDispatch = DemandRunBoundDispatch | DemandQualifiedRequested | DemandQualifiedRejected
 export function qualifiedDemandDispatch(value: DemandDispatchIntent | DemandDispatch): value is DemandQualifiedDispatchIntent | DemandQualifiedRequested | DemandQualifiedRejected { return 'target' in value }
@@ -108,8 +112,16 @@ function version(value: unknown): number {
 }
 function requestOrigin(value: unknown): DemandDispatchRequestOrigin {
   const input = record(value, 'dispatch.request')
-  if (Object.keys(input).some(key => key !== 'requestedAt' && key !== 'goalUpdatedAt')) throw new Error('dispatch.request has unknown fields')
-  return { requestedAt: time(input.requestedAt, 'dispatch.requestedAt'), goalUpdatedAt: version(input.goalUpdatedAt) }
+  if (Object.keys(input).some(key => key !== 'requestedAt' && key !== 'goalUpdatedAt' && key !== 'requestedBy')) throw new Error('dispatch.request has unknown fields')
+  const origin: DemandDispatchRequestOrigin = { requestedAt: time(input.requestedAt, 'dispatch.requestedAt'), goalUpdatedAt: version(input.goalUpdatedAt) }
+  if (input.requestedBy !== undefined) {
+    const author = record(input.requestedBy, 'dispatch.request.requestedBy')
+    if ((author.kind !== 'user' && author.kind !== 'device') || Object.keys(author).some(key => key !== 'kind' && key !== 'id')) {
+      throw new Error('dispatch.request.requestedBy must identify the original user or device')
+    }
+    origin.requestedBy = { kind: author.kind, id: text(author.id, 'dispatch.request.requestedBy.id') }
+  }
+  return origin
 }
 function parseResultBasis(value: unknown): DemandDispatchResultBasis {
   const basis = record(value, 'dispatch.resultBasis')

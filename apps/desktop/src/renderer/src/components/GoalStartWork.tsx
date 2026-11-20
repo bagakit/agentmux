@@ -46,6 +46,10 @@ export function GoalStartWork({ rows, supervisorSessionId, active, openAgent, re
           <dt>Admission</dt><dd>{start.target.source.admission.kind} · {start.target.source.admission.operationId}</dd>
           <dt>Execution Runtime</dt><dd>{start.target.execution.runtimeId}</dd><dt>Worker</dt><dd>{start.target.execution.agentSessionId}</dd>
         </> : <><dt>Host</dt><dd>{start.hostId}</dd><dt>Worker</dt><dd>{start.agentSessionId}</dd></>}<dt>Original Run</dt><dd>{start.runId ?? 'Not prepared'}</dd>
+        {start.request ? <><dt>Requested by</dt><dd>{start.request.requestedBy
+          ? `${start.request.requestedBy.kind === 'user' ? 'User' : 'Device'} ${start.request.requestedBy.id}`
+          : 'Unknown author'}</dd>
+          <dt>Requested at</dt><dd><time dateTime={new Date(start.request.requestedAt).toISOString()}>{new Date(start.request.requestedAt).toLocaleString()}</time></dd></> : null}
         <dt>Start operation</dt><dd>{start.operationId}</dd><dt>Input observation</dt><dd>{observation?.input.state ?? 'unknown'}</dd>
         {start.receipt ? <><dt>Retained Core receipt</dt><dd>{start.receipt.kind === 'core-input' ? start.receipt.inputKey.submissionId : start.receipt.itemId}</dd></> : null}
         <dt>Result basis</dt><dd>{start.resultBasis ? 'Captured at this Start' : 'Unknown for this original Start'}</dd></dl>
