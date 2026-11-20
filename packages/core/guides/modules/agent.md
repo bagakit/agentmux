@@ -99,6 +99,12 @@ complete window with its older/newer cursors and no record field. A versioned an
 frozen. Stopping a watch only parks its view: release the exact window with
 agent conversation release when finished, or let its Core owner dispose it.
 
+For a person-named original record, use `amux agent conversation landmark ls` with the exact
+Host and Session. `amux agent conversation landmark apply --input FILE|-` accepts create,
+rename or remove with the original operation ID and expected metadata revision. Reading an
+operation shows the observed record. Confirm durability through that same authorized
+operation. Reading points never send input or change the original Run.
+
 Original turnOutcome records completed, failed or interrupted independently of metrics and current
 activity; deferred headers retain it. Failed outcomes preserve the Provider diagnosis and exact
 original turn. Optional publicMessage is a safe sharing summary, not permission to publish or retry.

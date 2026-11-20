@@ -158,6 +158,10 @@ Retain that known result and later local drafts, then read the same original rev
 recover canonical content. Never substitute your submitted bytes for unavailable canonical content.
 
 Use amux notebook graph --note NOTE_ID, --notebook NOTEBOOK_ID or --all for saved relationships.
+Its optional recallCards entries identify the original Note block and portable conversation
+reference for a saved Reading Point. The card comes from the original Markdown. An unread
+or partial graph cannot conclude that no cards exist. A card reference grants no access to
+its original Session.
 The original owner scans the durable catalog for incoming sources, including closed pages.
 Results include catalogRevision, per-file status/revision, hierarchy, exact source block/resource,
 tagged page/block/unbound targets, resolution and duplicateNoteIds. They are not an atomic
