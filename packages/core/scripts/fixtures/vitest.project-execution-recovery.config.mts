@@ -19,5 +19,5 @@ export default {
   }] : [],
   test: { include: ['packages/core/test/project-execution-connection-recovery.test.ts', 'packages/core/test/agent-execution-coordinator.test.ts',
     'packages/core/test/agent-execution-bridge.test.ts'],
-    pool: 'forks', maxWorkers: 1, passWithNoTests: false },
+    pool: 'threads', maxWorkers: 1, passWithNoTests: false },
 }
