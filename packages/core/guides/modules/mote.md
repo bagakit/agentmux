@@ -64,6 +64,11 @@ creation operation and request to read back the original Group. Send as your
 Mote with the exact Group and selected recipient IDs. A Group Thread uses
 `inspect` with the original groupId; `limit:1` reads settings and one message.
 
+To ask other members to take over work from your Group Thread, use `send`
+with `memberMoteId` from `inspect.viewerId`, the selected members in
+`recipientIds`, and `replyToMessageId` when referring to a public message.
+Keep the original operationId and exact request when checking its result.
+
 Ordinary Agent output stays in your Thread. To publish in the Group, use the
 reply command attached to the addressed input. Share only material for the Group.
 If the result is unknown, repeat the same operationId, input reference and exact
@@ -94,18 +99,35 @@ exact Mote target as `mote` and the other exact Mote target as `peer`. Send the
 original assignment as `body` with an `operationId`. Keep the returned
 `threadId` and message reference. Both Motes use the same private thread.
 Use `list` with your Mote and `inspect` with its exact threadId to read messages
-and observed delivery. A private Thread replies with the command attached to its
-addressed input. The reply stays in the private thread. Keep each original
-operation and exact request when checking an uncertain result.
+and observed delivery. Add `messageId` to inspect one exact assignment or reply.
+A private Thread replies with the command attached to its addressed input.
+The original reply stays in the private thread. The returned `mainNotification`
+describes the message to the coordinating Main's ordinary Inbox. If that step is
+unconfirmed, the Host keeps the published report and continues checking its original
+target. Use the same request to read its receipt. An Inbox receipt confirms the
+saved notification. A separate native receipt confirms a new turn.
 
 For a user-authorized timed assignment, `direct schedule` takes the same
 `mote`, `peer`, `operationId` and `body`, plus one timing form from
-`amux schedule create --help`. The original Host schedules a turn in this
-Main. On that turn use the exact due reference and the included assignment
-to send privately. A schedule receipt confirms the arrangement. Read the
-private Thread to confirm the separate delivery and any reply. If the
-original Main changes, inspect or pause its existing schedule before
-arranging future work from the new Main.
+`amux schedule create --help`. For public work, `group schedule` takes your
+`sourceMote`, `groupId`, `operationId`, `body` and explicit `recipientIds`,
+plus the same timing forms. The arrangement follows the coordinating Mote.
+The original Host publishes once per due occurrence. A Group arrangement
+addresses only its selected active membership generations. Use `schedule
+inspect` to find `lastMotePublication`, then read its original message for
+delivery and progress. Pause or cancel the same arrangement through `schedule`.
+
+To include private images, use `file upload` for your own Session and Run.
+Pass each confirmed upload identity in `images` with `direct send` or
+`direct reply`. Use the identity fields from the upload request and leave out
+its returned path and bytes. A participant can read an image with `direct
+image read` using the original `threadId`, `messageId` and the metadata's
+`operationId` as `imageOperationId`. Include your exact `mote` from Main.
+
+For time-sensitive private work, explicitly set `priority: true` on `direct
+send`. It advances within the recipient's unclaimed background input and uses
+native idle delivery. Existing user input and claimed operations keep their
+original order and receipts. Read the saved message for delivery state.
 
 ## Know your part in this Mote
 
