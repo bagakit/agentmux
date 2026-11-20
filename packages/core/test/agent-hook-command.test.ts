@@ -444,6 +444,21 @@ describe('POST 失败后真的重投一次', () => {
     vi.restoreAllMocks()
   })
 
+  it('relays an oversized original Grok StopFailure without retaining unrelated content', async () => {
+    hookEnv()
+    vi.stubEnv('AGENTMUX_PROVIDER_ID', 'grok')
+    vi.stubEnv('AGENTMUX_HOOK_EVENT', '')
+    vi.stubEnv('AGENTMUX_HOOK_PAYLOAD_KEY', 'hookEventName')
+    const { bodies } = await captureHookPost([{ status: 204 }])
+    const failure = { hookEventName: 'stop_failure', sessionId: 'original-session', promptId: 'original-turn',
+      error: 'rate_limit', errorDetails: 'Original rate limit detail' }
+    feedStdin(JSON.stringify({ unrelated: 'é'.repeat(100_000), ...failure }))
+    await runAgentHookCommand()
+    expect(bodies).toHaveLength(1)
+    expect(bodies[0]).toMatchObject({ eventName: 'stop_failure', payload: failure })
+    expect(bodies[0]!.payload).not.toHaveProperty('unrelated')
+  })
+
   it('首次 503 后重投，第二次成功——事件没丢，也不报错', async () => {
     hookEnv()
     const { bodies, stderr } = await captureHookPost([{ status: 503 }])

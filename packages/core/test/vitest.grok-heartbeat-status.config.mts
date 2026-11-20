@@ -9,8 +9,11 @@ export default defineConfig({ ...source, plugins: [...(source.plugins ?? []), { 
   }, transform(code, id) {
   const loaded = instrumentGrokStatus(code, relative(root, id.split('?')[0]!))
   return loaded === code ? undefined : { code: loaded, map: null }
-} }], test: { ...source.test, include: process.env.MOTE_GROK_STATUS_MUTATION ? ['packages/core/test/grok-heartbeat-status.test.ts'] : [
+} }], test: { ...source.test, include: process.env.MOTE_GROK_STATUS_MUTATION === 'disconnect-failure-notice' ? ['packages/core/test/native-completion-authority.test.ts'] :
+  process.env.MOTE_GROK_STATUS_MUTATION ? ['packages/core/test/grok-heartbeat-status.test.ts'] : [
   'packages/core/test/grok-heartbeat-status.test.ts',
+  'packages/core/test/native-completion-authority.test.ts',
+  'packages/core/test/agent-hook-command.test.ts',
   'packages/core/test/native-turn-activity.test.ts',
   'packages/core/test/a2a-initial-idle.test.ts',
   'packages/core/test/platform-initialization-input.test.ts',

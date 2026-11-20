@@ -101,7 +101,8 @@ async function fixture(providerId: AgentProviderId, hook = native.get(providerId
       }))
     } } : {}) }
   const store = new AgentMuxMemoryAgentSessionStore(); await store.compareAndSwap(null, original)
-  const client = new AgentMuxClient({ store, providers: [provider] }), inner = client as any
+  const originalProvider = providerId === 'grok' && hook === native.get('grok').hook ? { ...provider, normalizeHook: native.get('grok').normalizeHook } : provider
+  const client = new AgentMuxClient({ store, providers: [originalProvider] }), inner = client as any
   await inner.registry.load('local'); inner.connected = true
   let accepted = 0
   const run = () => ({ nativeService: null, runId: original.run.runId, lifecycleOperationId: null, program: 'private-agent', args: [],
@@ -317,6 +318,15 @@ describe('native completion authority through actual Core consumers', () => {
     expect(ended.terminalPromptReadiness?.source).toBe('native-stop')
     expect(h.events.some(e => e.type === 'agent-status' && e.state === 'done')).toBe(false)
     expect((await h.rawInput()).appliedByteRange).not.toBeNull()
+  })
+
+  it('keeps an identified Grok stop failure in current status when no transcript update follows', async () => {
+    const h = await fixture('grok')
+    await h.feed('user_prompt_submit', { sessionId: 'original-native', promptId: 'original-request' })
+    await h.feed('stop_failure', { sessionId: 'original-native', promptId: 'original-request', error: 'rate_limit', errorDetails: 'Original provider request failed' })
+    const saved = await h.saved()
+    expect(saved.semanticStatus?.failure).toMatchObject({ code: 'AGENT_PROVIDER_ERROR', nativeTurnId: 'original-request', nativeCode: 'rate_limit', message: 'Original provider request failed' })
+    expect(saved.hookReceipt?.run).toEqual(h.original.run)
   })
 
   it('unique machine IDs retain separate child observations and the original main result', async () => {

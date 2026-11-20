@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 
 const leaf = 'packages/providers/src/grok/session-status.ts', client = 'packages/core/src/client.ts'
 export const grokStatusMutations = {
+  'disconnect-failure-notice': ['packages/core/src/providers/grok.ts', [["if (event.eventName !== 'stop_failure' || !event.mainSubject) return event", 'if (true) return event']]],
   'reject-current-resumed-turn': [client, [['if (!currentTurnEnded) { unattributedInitialSnapshot = true; return saved }', 'if (true) { unattributedInitialSnapshot = true; return saved }']]],
   'accept-foreign-resumed-turn': [client, [['mainHook?.nativeTurnId === observation.nativeTurnId && observation.nativeObservedAt !== undefined', 'observation.nativeObservedAt !== undefined']]],
   'accept-pre-resume-end': [client, [['observation.nativeObservedAt >= resume.admittedAt && !nativeTargetSourceUnconfirmed(saved)', '!nativeTargetSourceUnconfirmed(saved)']]],
@@ -34,7 +35,7 @@ export const grokStatusMutationCases = {
   'forget-predecessor': '^same source predecessor', 'old-run-overwrites-successor': '^original private environment',
   'old-end-overwrites-new-hook': '^a newer original Hook', 'older-write-clears-new-ingress': '^an older completion write'
 }
-const owners = new Set([client, leaf, 'packages/core/src/native-jsonl-history-reader.ts', 'packages/core/src/providers/index.ts', 'packages/providers/src/grok/native-history.ts',
+const owners = new Set([client, leaf, 'packages/core/src/providers/grok.ts', 'packages/core/src/native-jsonl-history-reader.ts', 'packages/core/src/providers/index.ts', 'packages/providers/src/grok/native-history.ts',
   'packages/core/src/public-rpc-service.ts', 'apps/host/src/goal-runtime.ts', 'apps/host/src/continuous-progress-loop-manager.ts', 'apps/host/src/continuous-progress-delivery.ts'])
 export function instrumentGrokStatus(source, file) {
   if (!owners.has(file)) return source
