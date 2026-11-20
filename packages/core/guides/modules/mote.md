@@ -87,6 +87,17 @@ acting; no change may warrant silence. It grants no new permission, external mes
 unrelated task. Saved persona files, guide delivery and a timer description do not prove a
 Run is online, an arrangement is active, or the model has adopted this guidance.
 
+## Message another Mote privately
+
+Use `amux space mote direct --help`. From your current Main, `send` takes your
+exact Mote target as `mote` and the other exact Mote target as `peer`. Send the
+original assignment as `body` with an `operationId`. Keep the returned
+`threadId` and message reference. Both Motes use the same private thread.
+Use `list` with your Mote and `inspect` with its exact threadId to read messages
+and observed delivery. A private Thread replies with the command attached to its
+addressed input. The reply stays in the private thread. Keep each original
+operation and exact request when checking an uncertain result.
+
 ## Know your part in this Mote
 
 [supervision](../shared/mote-supervision.md "amux:include")
