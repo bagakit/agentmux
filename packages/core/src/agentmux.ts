@@ -41,6 +41,7 @@ import { prepareConnectionCredentialCli } from './connection-credential-cli.js'
 import { isConnectionReceiverMethod } from './connection-receiver-codec.js'
 import type { AgentMuxRpcCallOptions } from './public-rpc-client.js'
 import { composeOutboundMessage } from './agent-outbound-message.js'
+import { getAmuxProtocolTemplate, renderAmuxProtocol } from './amux-protocol.js'
 import type { GoalDelegationParamsMap, GoalDelegationResult, GoalReportResult } from './goal-delegation.js'
 import { delegationWorkerHostId } from '@agentmux/demand/delegations'
 
@@ -67,16 +68,11 @@ function goalReviewGuidance(result: GoalDelegationResult, review: GoalDelegation
   if (!result.passRecorded) return
   const attempt = result.delegations.find(entry => entry.operationId === review.delegationOperationId && entry.planNodeId === review.nodeId)
   if (!attempt?.workerRunId || !attempt.report?.delivery) return
-  const original = `Goal ${JSON.stringify(result.goalId)}, Ticket ${JSON.stringify(review.nodeId)}, attempt ${JSON.stringify(attempt.operationId)}`
-  const target = `Session ${JSON.stringify(attempt.workerAgentSessionId)}, Run ${JSON.stringify(attempt.workerRunId)}, Host ${JSON.stringify(delegationWorkerHostId(attempt))}, Runtime ${JSON.stringify(attempt.report.delivery.authorRuntimeId)}`
-  return composeOutboundMessage({ amux: [
-    `Review passed for ${original}. The original executor is ${target}.`,
-    'As the independent reviewer, read the original Goal for its current Supervisor and pass them this receipt. Keep your review role.',
-    'As the current Supervisor, verify the exact attempt, report collection and remaining work. Assign the next ready Ticket when appropriate.',
-    'When the handoff is confirmed and no work remains, ask the original executor to use amux goal closeout for this exact attempt and Run.',
-    'Keep the original Run and operation if any check or receipt is unknown. Only an authorized person or device can read the exact Stop receipt with amux agent stop inspect.',
-    'See amux goal --skill.'
-  ].join('\n') })
+  return composeOutboundMessage({ amux: renderAmuxProtocol('goal-task', 'review-result', {
+    goal: JSON.stringify(result.goalId), ticket: JSON.stringify(review.nodeId), attempt: JSON.stringify(attempt.operationId),
+    session: JSON.stringify(attempt.workerAgentSessionId), run: JSON.stringify(attempt.workerRunId),
+    host: JSON.stringify(delegationWorkerHostId(attempt)), runtime: JSON.stringify(attempt.report.delivery.authorRuntimeId)
+  }) })
 }
 
 function goalReportGuidance(result: GoalReportResult, input: GoalDelegationParamsMap['goal.report']): string | undefined {
@@ -84,7 +80,10 @@ function goalReportGuidance(result: GoalReportResult, input: GoalDelegationParam
   const source = 'kind' in result ? result.sourceMessageId : attempt?.sourceMessageId
   if (!source || !('kind' in result) && (!attempt?.planNodeId || attempt.report?.operationId !== input.report.operationId)) return
   const handoff = { goalId: input.goalId, operationId: input.operationId, sourceMessageId: source, replyMessageId: input.report.replyMessageId }
-  return composeOutboundMessage({ amux: `Executor: read the original Goal and its current Supervisor. Give that Supervisor the original report references ${JSON.stringify(handoff)} to verify collection of this reply. Read back the handoff before checking whether you can stop your exact Run. See amux goal --skill.` })
+  return composeOutboundMessage({ amux: renderAmuxProtocol('goal-task', 'report-result', {
+    status: getAmuxProtocolTemplate('goal-task', 'kind' in result ? 'report-submission' : 'report-saved'),
+    handoff: JSON.stringify(handoff)
+  }) })
 }
 
 function goalCollectionGuidance(result: GoalDelegationResult, input: GoalDelegationParamsMap['goal.collect']): string | undefined {
@@ -94,7 +93,7 @@ function goalCollectionGuidance(result: GoalDelegationResult, input: GoalDelegat
   const handoff = { goalId: result.goalId, operationId: attempt.operationId, sourceMessageId: attempt.sourceMessageId,
     replyMessageId: collection.replyMessageId, collectionOperationId: collection.operationId, deliveryHash: attempt.report.delivery.hash,
     worker: { hostId: delegationWorkerHostId(attempt), runtimeId: attempt.report.delivery.authorRuntimeId, agentSessionId: attempt.workerAgentSessionId } }
-  return composeOutboundMessage({ amux: `Supervisor: acknowledge handoff to the original executor if you still hold responsibility for this Goal. Refer to the saved collection ${JSON.stringify(handoff)}. See amux goal --skill.` })
+  return composeOutboundMessage({ amux: renderAmuxProtocol('goal-task', 'collection-result', { handoff: JSON.stringify(handoff) }) })
 }
 function partial(method: AgentMuxRpcMethod, result: unknown): boolean {
   if (!result || typeof result !== 'object') return false
