@@ -96,15 +96,39 @@ it('publishes a unique confirmed project through the original Store spatial pres
   if (result.operation !== 'space.ls') throw Error('Expected the original space reader')
   expect(result.catalog.agentPresentation?.find(value => value.agentSessionId === original.control.agentSessionId)?.projectGroup).toMatchObject({ hostId: 'local', projectId: project.id, name: project.name })
 })
-it('does not turn a detached retained Tab into membership and keeps the healthy original card', async () => {
+it('keeps the detached original Folder and exact execution project without opening a workface', async () => {
+  const unplaced = { ...composerSession('unplaced-project-agent'), workspacePath: project.path }
+  useAppStore.setState({ sessions: [original, unplaced] })
   useAppStore.setState({ layouts: {} }); await refresh()
+  useAppStore.setState(state => ({ config: { ...state.config!, workspaces: state.config!.workspaces.filter(workspace => workspace.id !== home.id) } }))
+  const previous = useAppStore.getState()
   await dom.render(<GlobalFocusSurface />)
-  expect(card()).not.toBeNull()
-  expect(rows()).toHaveLength(1)
-  expect(rows()[0]!.textContent).toContain('Project location unconfirmed')
-  expect(rows()[0]!.dataset.projectKey).not.toBe(focusProjectKey('local', home.id))
+  expect(rows().map(row => row.dataset.projectKey)).toEqual(expect.arrayContaining([
+    focusProjectKey('local', home.id), focusProjectKey('local', project.id)
+  ]))
+  expect(rows()).toHaveLength(2)
+  expect(card().closest('[data-project-key]')?.getAttribute('data-project-key')).toBe(focusProjectKey('local', home.id))
+  expect(card().getAttribute('aria-description')).toContain('No open workface')
   expect(card().querySelector('.focus-context__position')).toBeNull()
-  expect(useAppStore.getState().sessions[0]!.control).toEqual(original.control)
+  const store = useAppStore.getState()
+  const source = { clientId: 'original-client', rendererId: 'original-renderer', documentGeneration: 1 }
+  const focus = await store.executeControl({ schemaVersion: 5, requestId: 'read-placed-members', operation: 'focus.read', source,
+    input: { scope: { kind: 'project', hostId: 'local', projectSpaceId: directoryIdentity(project.hostId, project.path) }, selection: { kind: 'all' } } })
+  expect(focus).toMatchObject({ operation: 'focus.read', page: { items: [{ reference: { hostId: 'local', contextId: unplaced.id },
+    availability: 'observed', locations: { status: 'confirmed', occurrences: [] } }] } })
+  const bound = await store.executeControl({ schemaVersion: 5, requestId: 'read-original-folder-members', operation: 'focus.read', source,
+    input: { scope: { kind: 'project', hostId: 'local', projectSpaceId: directoryIdentity(home.hostId, home.path) }, selection: { kind: 'all' } } })
+  expect(bound).toMatchObject({ operation: 'focus.read', page: { items: [{ reference: { hostId: 'farm', contextId: original.id },
+    availability: 'observed', locations: { status: 'confirmed', occurrences: [] } }] } })
+  const status = await store.executeControl(parseAgentMuxControlRequest({ schemaVersion: 5, requestId: 'read-project-status', operation: 'space.ls', target: {}, presentation: true }))
+  expect(status.operation).toBe('space.ls')
+  if (status.operation !== 'space.ls') throw Error('Expected the original space reader')
+  expect(status.catalog.agentPresentation?.find(subject => subject.agentSessionId === original.control.agentSessionId)?.projectGroup).toMatchObject({ projectId: home.id })
+  expect(status.catalog.agentPresentation?.find(subject => subject.agentSessionId === unplaced.id)?.projectGroup).toMatchObject({ projectId: project.id })
+  expect(store.sessions).toBe(previous.sessions)
+  expect(store.tabs).toBe(previous.tabs)
+  expect(store.layouts).toBe(previous.layouts)
+  expect(store.agentComposerDrafts).toBe(previous.agentComposerDrafts)
 })
 it('qualifies same SID by original Host, retains sets, and preserves a last confirmed relation only as unconfirmed', () => {
   const state = useAppStore.getState(), graph = desktopSpatialGraph(state, []), catalog = coreCatalog(graph)
@@ -131,12 +155,13 @@ it('qualifies same SID by original Host, retains sets, and preserves a last conf
 it('invalidates original execution qualification without new topology and never uses the first matching SID', () => {
   const state = useAppStore.getState(), contexts = createFocusProjectionSelector()(state).laneContexts
   const catalog = workbenchSelectionCatalog(state), select = createFocusContextIdentitySelector()
+  const graph = desktopSpatialGraph(state, [])
   let hostId: string | null = 'farm'
   const executionFor = vi.fn(() => hostId ? { hostId } : null)
-  const first = select(catalog, state.tabs, contexts, state.config, state.layouts, executionFor, true, 'first-accepted-binding')
+  const first = select(catalog, state.tabs, contexts, state.config, state.layouts, executionFor, true, graph)
   expect(first.get(focusContextIdentityKey('farm', original.id))!.locations.status).toBe('confirmed')
   hostId = null
-  const next = select(catalog, state.tabs, contexts, state.config, state.layouts, executionFor, true, 'changed-accepted-binding')
+  const next = select(catalog, state.tabs, contexts, state.config, state.layouts, executionFor, true, { ...graph })
   expect(next.get(focusContextIdentityKey('farm', original.id))!.locations.status).toBe('unconfirmed')
   expect(next.get(focusContextIdentityKey('farm', original.id))!.occurrenceCount).toBe(0)
 })

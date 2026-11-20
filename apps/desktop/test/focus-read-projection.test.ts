@@ -5,7 +5,7 @@ import { folderSpaceFacts } from '@agentmux/core/space-folder'
 import { parseFocusResult } from '@agentmux/core/focus-control'
 import { readFocusGroups } from '../src/renderer/src/lib/focus-read-projection'
 import { api } from '../src/renderer/src/lib/api'
-import { useAppStore, agentRegionExecution, agentRegionLocationsKnown, agentRegionLocationBindings } from '../src/renderer/src/store'
+import { useAppStore, agentRegionExecution, agentRegionLocationsKnown, currentCoreSpatialGraph } from '../src/renderer/src/store'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
 import { initializeSpatialControlFixture } from './helpers/spatial-control-owner-fixture'
@@ -19,7 +19,7 @@ const project = composerConfig.workspaces[0]!
 const scope = { kind: 'project' as const, hostId: project.hostId, projectSpaceId: folderSpaceFacts(project).space.spaceId }
 const source = { clientId: 'original-client', rendererId: 'original-renderer', documentGeneration: 1 }
 const all = { scope, selection: { kind: 'all' as const } }
-const locations = () => ({ known: agentRegionLocationsKnown(), executionFor: agentRegionExecution, bindings: agentRegionLocationBindings() })
+const locations = () => ({ known: agentRegionLocationsKnown(), executionFor: agentRegionExecution, originalGraph: currentCoreSpatialGraph() })
 const ref = (contextId: string, hostId = 'local') => ({ hostId, contextId })
 const read = (params: typeof all | Parameters<typeof readFocusGroups<'focus.read'>>[1]['params']) => readFocusGroups(useAppStore.getState(), { method: 'focus.read', params }, source, locations())
 

@@ -365,7 +365,7 @@ it('Space aliases count one physical occurrence each and preserve every exact co
 it.each([0, 1])('actively opens %i positions without creating a view or Run', async count => {
   const first = useAppStore.getState().tabs.first!
   useAppStore.setState({ tabs: count ? { first: { ...first, layout: createWorkbenchTab('x', first.regions.left!).layout, regions: { left: first.regions.left! } } } : {}, layouts: { workspace: createWorkspaceLayout('group-a', count ? ['first'] : []) } })
-  await dom.render(surface()); await details(); expect(disclose()?.getAttribute('aria-label')).toContain(`${count} location`)
+  await dom.render(surface()); await details(); expect(disclose()?.getAttribute('aria-label')).toContain(count ? '1 location' : 'No open workface')
   const before = useAppStore.getState(); await click(disclose())
   expect(choices()).toHaveLength(count)
   if (!count) {
