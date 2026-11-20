@@ -15,9 +15,9 @@ it('launch and reused input keep application role/source distinct from the exact
 it('both roles retain the same original responsibility, human authority and uncertain-input boundaries', () => {
   const shared = goalRoleGuidanceContract(), manager = goalRoleGuidance({ role: 'manager' }), executor = goalRoleGuidance({ role: 'executor' })
   expect(shared).toContain('Management responsibilities'); expect(shared).toContain('Executor responsibilities')
-  expect(manager).toContain('inspect the frozen scope'); expect(manager).toContain('next responsible party'); expect(manager).toContain('A person confirms the exact proposal')
+  expect(manager).toContain('inspect the frozen scope'); expect(manager).toContain('next responsible party'); expect(manager).toContain('The authenticated Supervisor can confirm the exact proposal')
   expect(executor).toContain('Report each criterion'); expect(executor).toContain('same original thread')
-  for (const guide of [manager, executor]) { expect(guide).toContain('Inspect those originals before another write'); expect(guide).toContain('permission grants neither choice') }
+  for (const guide of [manager, executor]) { expect(guide).toContain('Inspect those originals before another write'); expect(guide).toContain('does not grant execution permission') }
 })
 
 it('presents the selected responsibility before shared lifecycle guidance with one module entry', () => {
