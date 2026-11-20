@@ -159,3 +159,71 @@
   [data-task-layout='list'] .focus-zone-layout__modes button:not(:disabled) { transition: background-color var(--dur-fast) var(--ease-enter), scale var(--dur-fast) var(--ease-enter); }
   [data-task-layout='list'] .focus-zone-layout__modes button:active:not(:disabled) { scale: .97; }
 }
+
+[data-focus-creation-tree] {
+  --focus-creation-step: min(14px, 3cqi);
+}
+[data-focus-creation-tree] > [data-focus-card-key] {
+  position: relative;
+  margin-inline-start: calc(2px + var(--focus-creation-depth, 0) * var(--focus-creation-step));
+  padding-inline-start: 16px;
+}
+[data-focus-creation-depth]::before,
+.focus-creation-references > button::before {
+  content: "";
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 1px;
+  width: 5px;
+  height: 18px;
+  border-inline-start: 1px solid var(--text-3);
+  border-block-end: 1px solid var(--text-3);
+  border-end-start-radius: 4px;
+  opacity: .68;
+  pointer-events: none;
+}
+.focus-creation-disclosure {
+  position: absolute;
+  inset-block-start: 6px;
+  inset-inline-start: 1px;
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-3);
+  background: transparent;
+  cursor: pointer;
+}
+[data-focus-creation-depth] > .focus-creation-disclosure { inset-inline-start: 5px; width: 12px; }
+.focus-creation-disclosure:hover, .focus-creation-disclosure:focus-visible { background: var(--surface-2); color: var(--text); }
+.focus-creation-disclosure[aria-expanded='true'] svg { transform: rotate(90deg); }
+.focus-creation-references {
+  grid-column: 1 / -1;
+  margin-inline-start: calc(var(--focus-creation-step) - 16px);
+}
+.focus-creation-references > button {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+  min-height: 24px;
+  padding-inline: 20px 7px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-micro);
+  text-align: start;
+  cursor: pointer;
+}
+.focus-creation-references > button::before { height: 11px; border-style: dashed; border-inline-end: 0; border-block-start: 0; }
+.focus-creation-references > button:hover { background: var(--surface-2); }
+.focus-creation-references :is(strong, small) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.focus-creation-references strong { font-weight: 500; }
+.focus-creation-references small { color: var(--text-3); }

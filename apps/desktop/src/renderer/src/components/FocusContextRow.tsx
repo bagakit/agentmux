@@ -4,6 +4,7 @@ import type { FocusListActivity } from '../lib/focus-list-activity'
 import { memo, useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import type { FocusContext } from '../lib/focus-context'
 import { FocusContextMenu } from './FocusContextMenu'
+import { FocusCreationMark } from './FocusCreationConnections'
 import { FocusInteractionAge } from './FocusInteractionAge'
 import { FocusTaskListContent, focusTaskListDescription } from './FocusTaskListContent'
 import { useAgentInformationPreview } from './AgentInformationPreview'
@@ -34,7 +35,7 @@ function moveTaskFocus(button: HTMLButtonElement, forward: boolean) {
   next?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
 }
 
-export const FocusContextRow = memo(function FocusContextRow({ context, identity, goalLinks, selected, compact = false, list = false, allowPin, resolvePreview, disclosure, onSelect, onOpenWorkface, topic, activity, interactionAt }: { interactionAt?: number | undefined; context: FocusContext; identity?: FocusContextIdentity | undefined; goalLinks?: GoalLinks | undefined; selected: boolean; compact?: boolean; list?: boolean; allowPin?: boolean | undefined; resolvePreview?: (() => FocusContext) | undefined; disclosure?: { status: number; summary: number } | undefined; onSelect(id: string): void; onOpenWorkface?: ((id: string) => void) | undefined; topic?: FocusTopicHeading | undefined; activity?: FocusListActivity | undefined }) {
+export const FocusContextRow = memo(function FocusContextRow({ context, identity, goalLinks, selected, compact = false, list = false, allowPin, resolvePreview, disclosure, onSelect, onOpenWorkface, topic, activity, interactionAt, creationLabel, creationMark }: { creationLabel?: string | undefined; creationMark?: boolean; interactionAt?: number | undefined; context: FocusContext; identity?: FocusContextIdentity | undefined; goalLinks?: GoalLinks | undefined; selected: boolean; compact?: boolean; list?: boolean; allowPin?: boolean | undefined; resolvePreview?: (() => FocusContext) | undefined; disclosure?: { status: number; summary: number } | undefined; onSelect(id: string): void; onOpenWorkface?: ((id: string) => void) | undefined; topic?: FocusTopicHeading | undefined; activity?: FocusListActivity | undefined }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [rename, setRename] = useState<{ name: string; revision: number; owner: FocusNameEditor } | null>(null)
   const [goalOpen, setGoalOpen] = useState(false)
@@ -81,12 +82,12 @@ export const FocusContextRow = memo(function FocusContextRow({ context, identity
       if (!event.repeat) hover.read()
     }
   }
-  const card = <button ref={hover.anchor} type="button" className={className} data-session-id={context.id} data-state={context.state} data-bucket={context.bucket} data-activity={context.activitySemantic} data-focus-list-goal={list && Boolean(goalLinks) || undefined} aria-pressed={selected} aria-label={`${context.name} · ${context.stateLabel}${topic ? ` · ${topic.kind === 'worktree' ? 'Zone' : 'Topic'} · ${topic.name}` : ''}${list ? '' : ` · ${description}`}`} aria-description={list ? focusTaskListDescription(context) : context.originAddress} aria-describedby={hover.describedBy} {...hover.triggerEvents}
+  const card = <button ref={hover.anchor} type="button" className={className} data-session-id={context.id} data-state={context.state} data-bucket={context.bucket} data-activity={context.activitySemantic} data-focus-list-goal={list && Boolean(goalLinks) || undefined} aria-pressed={selected} aria-label={`${context.name} · ${context.stateLabel}${topic ? ` · ${topic.kind === 'worktree' ? 'Zone' : 'Topic'} · ${topic.name}` : ''}${list ? '' : ` · ${description}`}`} aria-description={[list ? focusTaskListDescription(context) : context.originAddress, creationLabel].filter(Boolean).join(' · ') || undefined} aria-describedby={hover.describedBy} {...hover.triggerEvents}
     onFocus={list ? undefined : hover.triggerEvents.onFocus}
     onKeyDown={list ? listKey : hover.triggerEvents.onKeyDown}
     aria-keyshortcuts={list ? 'ArrowUp ArrowDown Space Enter' : hover.triggerEvents['aria-keyshortcuts']} onClick={() => { hover.close(); onSelect(context.id) }} onContextMenu={hover.close}>
-    {list ? <FocusTaskListContent context={context} identity={hover.position} interactionAt={interactionAt} /> :
-      <AgentContextContent context={context} identity={hover.position} presentation="card" disclosure={disclosure} topic={topic} metadata={interactionAt ? <FocusInteractionAge at={interactionAt} /> : undefined}
+    {list ? <FocusTaskListContent context={context} identity={hover.position} interactionAt={interactionAt} creationLabel={creationMark ? creationLabel : undefined} /> :
+      <AgentContextContent context={context} identity={hover.position} presentation="card" disclosure={disclosure} topic={topic} metadata={<>{creationMark && creationLabel ? <FocusCreationMark label={creationLabel} /> : null}{interactionAt ? <FocusInteractionAge at={interactionAt} /> : null}</>}
         headingAccessory={goalLinks ? <span className="focus-goal__space" aria-hidden="true"><FocusGoalMark links={goalLinks} /></span> : undefined} />}
   </button>
   const main = context.kind === 'agent' ? <FocusContextMenu open={active && menuOpen} context={context} onOpenChange={setMenuOpen} onRestoreFocus={hover.suppressRestoredFocus} onRename={beginRename} allowPin={allowPin}>{card}</FocusContextMenu> : card

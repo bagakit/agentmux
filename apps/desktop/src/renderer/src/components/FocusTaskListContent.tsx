@@ -3,6 +3,7 @@ import type { FocusContext } from '../lib/focus-context'
 import { createFocusTimeFormatters } from '../lib/focus-timeline-ruler'
 import { useAppStore } from '../store'
 import { AgentContextAvatar, mandatoryAgentContextDetails } from './AgentContextContent'
+import { FocusCreationMark } from './FocusCreationConnections'
 import { FocusInteractionAge } from './FocusInteractionAge'
 import { FocusContextStateMark } from './FocusContextState'
 import { AgentWorkModeBadge } from './AgentWorkModeBadge'
@@ -38,7 +39,8 @@ function LastActivity({ at }: { at: number }) {
 }
 
 /** The same presentation in a lightweight slot and in the original task button. */
-export function FocusTaskListContent({ context, identity, placeholder = false, interactionAt }: {
+export function FocusTaskListContent({ context, identity, placeholder = false, interactionAt, creationLabel }: {
+  creationLabel?: string | undefined
   interactionAt?: number | undefined
   context: FocusContext
   identity?: ReactNode
@@ -67,6 +69,7 @@ export function FocusTaskListContent({ context, identity, placeholder = false, i
           : work ? <span className="focus-task-list__summary focus-task-list__summary--excerpt">{work}</span> : null}
       </span>
       <span className="focus-task-list__trailing">
+        {creationLabel ? <FocusCreationMark label={creationLabel} /> : null}
         {subagents ? <span className="focus-task-list__subagents" title={`Subagents · ${subagents.summary}`} aria-hidden="true">
           <TeamIcon size={13} /><span className="focus-task-list__subagent-count">{subagents.rows.length || '?'}{subagents.rows.length && subagents.coverageUnknown ? '+' : ''}</span>
           <span className="focus-task-list__subagent-states">{subagents.summary}</span>

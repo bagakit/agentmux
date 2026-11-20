@@ -1,5 +1,5 @@
 import { AgentWorkModeBadge } from './AgentWorkModeBadge'
-import { Fragment, useCallback, useLayoutEffect, useReducer, useRef, type ComponentPropsWithoutRef, type RefObject } from 'react'
+import { Fragment, useCallback, useLayoutEffect, useReducer, useRef, type ComponentPropsWithoutRef, type CSSProperties, type RefObject } from 'react'
 import { flushSync } from 'react-dom'
 import type { FocusContext } from '../lib/focus-context'
 import { focusContextIdentityKey, type FocusContextIdentity } from '../lib/focus-context-identity'
@@ -14,9 +14,14 @@ import { focusContextHeat, focusContextVisit } from '../lib/focus-attention'
 import { focusTopicContextKey, type FocusTopicHeading } from '../lib/focus-collection-lanes'
 import { FocusTopicLabel } from './FocusTopicLabel'
 import { FocusZoneFooter } from './FocusZoneFooter'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import type { FocusAgentCreations, FocusCreationRow } from '../lib/focus-agent-creations'
+import { FOCUS_BUCKET_PRESENTATION } from './FocusContextState'
+import { FocusCreationMark } from './FocusCreationConnections'
 import { FocusInteractionAge } from './FocusInteractionAge'
 import { FocusTaskListContent, focusTaskListDescription } from './FocusTaskListContent'
 
+const DisclosureIcon = semanticIconComponent('navigation.disclosure')
 const contextKey = (context: FocusContext) => JSON.stringify([context.hostId, context.id])
 
 type CardIntersection = { observedAt: number; enter: () => void }
@@ -79,7 +84,12 @@ function cardScrollport(scrollRef: RefObject<HTMLDivElement | null>, element: HT
 
 /** Slots stay in the natural CSS grid. Actual intersection controls only a
  * body's first creation; visited bodies retain their original React parent. */
-export function FocusContextCards({ contexts, viewport, scrollRef, visible, list = false, allowPin, layoutReady = true, replyLines = 2, selectedId, selectedKey, revealRequest, onRevealed, goalLinks, identities, onSelect, topics, sections, visits, activity, interactionTimes }: {
+export function FocusContextCards({ contexts, viewport, scrollRef, visible, list = false, allowPin, layoutReady = true, replyLines = 2, selectedId, selectedKey, revealRequest, onRevealed, goalLinks, identities, onSelect, topics, sections, visits, activity, interactionTimes,
+  creation, creationRows, onToggleCreation, onOpenRelated }: {
+  creation?: FocusAgentCreations | undefined
+  creationRows?: ReadonlyMap<string, FocusCreationRow> | undefined
+  onToggleCreation?: ((key: string) => void) | undefined
+  onOpenRelated?: ((context: FocusContext) => void) | undefined
   interactionTimes?: ReadonlyMap<string, number> | undefined
   activity?: ReadonlyMap<string, FocusListActivity> | undefined
   visits?: ReadonlyMap<string, number>
@@ -227,7 +237,11 @@ export function FocusContextCards({ contexts, viewport, scrollRef, visible, list
     button?.focus({ preventScroll: true })
     return button
   }
-  return <div ref={grid} className="focus-context-group__cards">{contexts.map(context => {
+  const hasTree = list && contexts.some(context => {
+    const row = creationRows?.get(contextKey(context))
+    return row && (row.depth > 0 || row.childCount > 0)
+  })
+  return <div ref={grid} className="focus-context-group__cards" data-focus-creation-tree={hasTree || undefined}>{contexts.map(context => {
     const key = contextKey(context)
     const requested = revealRequest?.pending && (context.control?.hostId ?? context.hostId) === revealRequest.hostId && (context.control?.agentSessionId ?? context.id) === revealRequest.agentSessionId &&
       (revealRequest.presentationSessionId === undefined || revealRequest.presentationSessionId === context.id)
@@ -236,16 +250,22 @@ export function FocusContextCards({ contexts, viewport, scrollRef, visible, list
     const selected = selectedKey === undefined ? selectedId === context.id : selectedKey === key
     const sourceKey = focusTopicContextKey(context.hostId, context.id), topic = topics?.get(sourceKey), section = sections?.get(sourceKey)
     const interactionAt = interactionTimes?.get(sourceKey)
+    const branch = creationRows?.get(key)
+    const parent = creation?.parents.get(key), created = creation?.children.get(key)?.length
+    const creationLabel = [parent && `Created by ${parent.creatorName}`, created && `Created ${created} ${created === 1 ? 'Agent' : 'Agents'}`].filter(Boolean).join(' · ') || undefined
+    const branchStyle = list ? { minHeight: cardHeight, '--focus-creation-depth': Math.min(branch?.depth ?? 0, 4) } as CSSProperties
+      : { display: 'flex', flexDirection: 'column', minHeight: cardHeight + (topic ? 22 : 0) } as const
     return <Fragment key={key}>{section ? <div className="focus-topic-section" data-focus-topic-section={section.kind === 'worktree' ? undefined : section.id} aria-label={`${section.kind === 'worktree' ? 'Zone' : 'Topic'} · ${section.name}`} data-focus-zone-section={section.kind === 'worktree' ? section.id : undefined}>{section.content ?? <FocusTopicLabel topic={section} />}</div> : null}
-    <FocusCardSlot cardKey={key} register={register} className="focus-context-card" style={list ? { minHeight: cardHeight } : { display: 'flex', flexDirection: 'column', minHeight: cardHeight + (topic ? 22 : 0) }}
+    <FocusCardSlot cardKey={key} register={register} className="focus-context-card" style={branchStyle}
+      data-focus-creation-depth={branch?.depth ? branch.depth : undefined} data-focus-creation-parent={branch?.childCount ? true : undefined}
       data-focus-card-body={full ? 'mounted' : 'pending'} data-focus-heat={focusContextHeat(context, visits ? focusContextVisit(context, visits) : undefined, Date.now())}
       data-focus-agent-host={context.control?.hostId ?? context.hostId} data-focus-agent-session={context.control?.agentSessionId ?? context.id}
       data-focus-presentation-session={context.id} data-focus-agent-selected={selected ? 'true' : undefined}>
       {full ? <FocusContextCardBody context={context} list={list} allowPin={allowPin} topic={list ? topic : undefined} summaryActive={visible} goalLinks={goals}
-        identity={identities.get(focusContextIdentityKey(context.hostId, context.id))} selected={selected} activity={activity?.get(focusListActivityKey(context))} interactionAt={interactionAt} onSelect={onSelect} />
+        identity={identities.get(focusContextIdentityKey(context.hostId, context.id))} selected={selected} activity={activity?.get(focusListActivityKey(context))} interactionAt={interactionAt} creationLabel={creationLabel} creationMark={Boolean(creationLabel && (!list || parent && !branch?.depth && !branch?.childCount))} onSelect={onSelect} />
         : <button type="button" className={`focus-context focus-context--card${list ? ' focus-context--list' : ''}${selected ? ' is-selected' : ''}`}
           data-session-id={context.id} data-state={context.state} data-bucket={context.bucket} data-activity={context.activitySemantic}
-          data-focus-list-goal={list && Boolean(goals) || undefined} aria-pressed={selected} aria-label={`${context.name} · ${context.stateLabel}${!list && context.detailKind === 'service' ? ` · ${context.detail}` : ''}${topic ? ` · ${topic.kind === 'worktree' ? 'Zone' : 'Topic'} · ${topic.name}` : ''}`} aria-description={list ? focusTaskListDescription(context) : context.originAddress}
+          data-focus-list-goal={list && Boolean(goals) || undefined} aria-pressed={selected} aria-label={`${context.name} · ${context.stateLabel}${!list && context.detailKind === 'service' ? ` · ${context.detail}` : ''}${topic ? ` · ${topic.kind === 'worktree' ? 'Zone' : 'Topic'} · ${topic.name}` : ''}`} aria-description={[list ? focusTaskListDescription(context) : context.originAddress, creationLabel].filter(Boolean).join(' · ') || undefined}
           onMouseDown={event => { if (event.button === 0) event.preventDefault() }}
           onClick={() => onSelect(context.id)}
           onFocus={event => { reveal(context, event.currentTarget.parentElement as HTMLDivElement) }}
@@ -254,8 +274,17 @@ export function FocusContextCards({ contexts, viewport, scrollRef, visible, list
             const button = reveal(context, event.currentTarget.parentElement as HTMLDivElement)
             button?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: event.clientX, clientY: event.clientY }))
           }}>
-            {list ? <FocusTaskListContent context={context} interactionAt={interactionAt} placeholder /> : <span className="focus-context__copy"><strong>{context.name}</strong>{interactionAt ? <FocusInteractionAge at={interactionAt} /> : null}{context.kind === 'agent' ? <AgentWorkModeBadge source={context} embedded /> : null}<span className="focus-context__detail">{context.stateLabel}</span></span>}
+            {list ? <FocusTaskListContent context={context} interactionAt={interactionAt} placeholder
+              creationLabel={parent && !branch?.depth && !branch?.childCount ? creationLabel : undefined} /> : <span className="focus-context__copy"><strong>{context.name}</strong>{creationLabel ? <FocusCreationMark label={creationLabel} /> : null}{interactionAt ? <FocusInteractionAge at={interactionAt} /> : null}{context.kind === 'agent' ? <AgentWorkModeBadge source={context} embedded /> : null}<span className="focus-context__detail">{context.stateLabel}</span></span>}
           </button>}
+      {branch?.childCount && onToggleCreation ? <button type="button" className="focus-creation-disclosure"
+        aria-expanded={branch.expanded} aria-label={`${branch.expanded ? 'Collapse' : 'Expand'} agents created by ${context.name}`}
+        title={`${branch.childCount} directly created ${branch.childCount === 1 ? 'Agent' : 'Agents'}`}
+        onClick={() => onToggleCreation(key)}><DisclosureIcon size={12} /></button> : null}
+      {branch?.references.length && onOpenRelated ? <div className="focus-creation-references">
+        {branch.references.map(({ context: child, label }) => <button key={contextKey(child)} type="button" title={`Open ${child.name} · ${child.workspaceName}`}
+          onClick={() => onOpenRelated(child)}><strong>{child.name}</strong><small>{label ?? FOCUS_BUCKET_PRESENTATION[child.bucket].label}</small></button>)}
+      </div> : null}
       {topic?.notice ? <div className="focus-zone-notices" data-focus-zone-notices="" role="status">{topic.notice}</div> : null}
       <FocusZoneFooter zone={topic} />
     </FocusCardSlot></Fragment>

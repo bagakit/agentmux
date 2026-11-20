@@ -15,6 +15,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { agentRegionExecution, agentRegionLocationsKnown, agentRegionLocationBindings, useAppStore } from '../store'
 import { useShallow } from 'zustand/react/shallow'
 import { createFocusProjectionSelector, agentContextForSession, retainedFocusContext } from '../lib/focus-context'
+import { focusAgentCreations } from '../lib/focus-agent-creations'
+import { FocusCreationConnections } from './FocusCreationConnections'
 import { createFocusCardViewport, FocusContextCards } from './FocusContextCards'
 import { useFocusHierarchy } from '../lib/use-focus-hierarchy'
 import { deriveFocusProjectLanes, deriveRetainedFocusProjects, focusWorkspaceProject, focusProjectKey, focusLaneProjectKey, focusLanesByContext, type FocusProjectLane } from '../lib/focus-project-lanes'
@@ -219,6 +221,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   }))
   const cardPresentation = useMemo(() => ({ active: visible, retainedRegionId: null }), [visible])
   const catalogue = useFocusHistorySources(visible)
+  const creation = useMemo(() => focusAgentCreations(catalogue.sources, executionRows, config?.hosts), [catalogue.sources, executionRows, config?.hosts])
   const focusPmoSession = useAppStore(state => state.focusPmoSession)
   const storedFocusExecutionSession = useAppStore((state) => state.focusExecutionSession)
   const selectOriginalContext = onSelectContext ?? storedFocusExecutionSession
@@ -456,6 +459,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const selected = sourceSelection?.context ?? (shownSessionId && projection?.selection[0]
     ? focusContextAtRegion(executionRows.filter(row => row.id === shownSessionId), projection.selection[0], agentRegionExecution) ?? undefined : undefined)
   const mapContext = revealedContext?.context ?? selected
+  const selectedCreationKey = mapContext ? focusTopicContextKey(mapContext.hostId, mapContext.id) : undefined
   const selectedContextKey = sourceSelection ? focusContextIdentityKey(sourceSelection.context.hostId, sourceSelection.context.id) : agentReveal && revealedContext ? JSON.stringify([revealedContext.context.hostId, revealedContext.context.id]) : undefined
   const filteredIds = new Set(filtered.map(row => focusTopicContextKey(row.hostId, row.id)))
   const collectedLanes = useFocusCollectionLanes(allLanes, navigationCatalog, originContent, boardRowsRef, scanInteraction, visible)
@@ -611,8 +615,9 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   }
   const laneRows = (lane: typeof boardLanes[number], heading: ReactNode, compact = false) => <FocusScanLaneContent list={list} lane={lane} compact={compact}
     contexts={lane.zones ? [...new Map(lane.zones.flatMap(zone => rowsByLane.get(zone.id) ?? []).map(context => [focusTopicContextKey(context.hostId, context.id), context])).values()] : rowsByLane.get(lane.id) ?? []} heading={heading} metrics={laneMetrics} replyLines={replyLines} topicPresentation={topicPresentation}
-    renderCards={(grouped, _columns, topics, sections) => <FocusContextCards list={list} allowPin contexts={grouped} viewport={cardViewport} layoutReady={list || laneMetrics.measured}
-      replyLines={replyLines} topics={topics} sections={sections} visits={focusVisits} interactionTimes={interactionTimes} scrollRef={boardRowsRef} visible={!compact && visible && documentActive}
+    creation={creation} visibleKeys={filteredIds} revealKey={agentReveal?.pending ? selectedCreationKey : undefined}
+    renderCards={(grouped, _columns, topics, sections, creationRows, toggleCreation) => <FocusContextCards list={list} allowPin contexts={grouped} viewport={cardViewport} layoutReady={list || laneMetrics.measured}
+      replyLines={replyLines} topics={topics} sections={sections} creation={creation} creationRows={creationRows} onToggleCreation={toggleCreation} onOpenRelated={selectTimelineContext} visits={focusVisits} interactionTimes={interactionTimes} scrollRef={boardRowsRef} visible={!compact && visible && documentActive}
       selectedId={shownSessionId} selectedKey={selectedContextKey} revealRequest={agentReveal} onRevealed={finishReveal}
       goalLinks={goalLinks} identities={contextIdentities} activity={listActivity} onSelect={focusExecutionSession} />} />
   const leadingResults = coordinationResults.length || moteChoices ? <>
@@ -687,6 +692,9 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
           <FocusPinnedAgents pins={pinnedAgents} contexts={filtering ? matchedExecution : executionRows} filtering={filtering} onOpen={openPinnedAgent} searchRef={searchRef} />
           <WorkbenchPresentationContext.Provider value={cardPresentation}><div className="focus-project-board__live" data-empty={!hasBoardLanes && !leadingResults || undefined}>
             {hasBoardLanes || leadingResults ? <FocusProjectLanes interactionTimes={interactionTimes} resourceMenus renderDiscussion={(lane, slot) => <FocusGroupDiscussion lane={lane} contexts={filterContexts} active={slot.active && visible && documentActive} container={slot.container} />} quietLanes={quietLanes} protectedLanes={protectedLanes} forceExpanded={filtering} revealedLaneIds={revealedLaneIds} leading={leadingResults} visible={visible && documentActive} origins={laneOrigins} lanes={boardLanes} boardHistory={boardHistory} revealHistory={Boolean(trimmedQuery)} onRead={readProjectHistory} selectedProjectKey={filters.projects.length === 1 ? filters.projects[0]!.id : 'all'} currentLaneId={displayedCurrentLaneId} revealRequestId={agentReveal?.pending ? agentReveal.requestId : undefined} onSelect={key => setFilters(value => ({ ...value, projects: [{ id: key, name: projectOptions.find(option => option.id === key)?.name ?? key }] }))} renderLane={laneRows} rowsRef={boardRowsRef} /> : null}
+            {!list && visible && documentActive && selectedCreationKey &&
+              (creation.parents.get(selectedCreationKey)?.creator || creation.children.has(selectedCreationKey))
+              ? <FocusCreationConnections selected={selectedCreationKey} creation={creation} scrollRef={boardRowsRef} /> : null}
             {filtered.length === 0 && filteredRetainedProjects.length === 0 && coordinationResults.length === 0 ? <p className="focus-project-lanes__empty">
               <span>No contexts match these local filters.</span>
               {filtering ? <button type="button" className="focus-project-lanes__clear" onClick={clearLocalFilters}>Clear filters</button> : null}
