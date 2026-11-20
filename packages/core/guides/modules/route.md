@@ -66,6 +66,14 @@ Preserve both edits on conflict. Inspect reads the current saved revision and or
 operation; only the save's own diskDurability acknowledgement confirms that write.
 An unknown save is not permission to repeat it or substitute another route.
 
+The original local user can save Relay edges in `configuration.relayEdges`.
+Each entry contains `edgeId`, `label`, the receiver's `target` from `route identity`,
+and its published E2EE `offer` with the confirmed gateway address. The receiver must
+approve the outgoing Core's Relay client key. On an adopted hop, use `kind: "relay"`
+with the exact edge ID and target. Until the receiver independently grants the finite
+business methods, the path can confirm its identity only. Omit `relayEdges` when
+changing other policy. An explicit empty list removes this Core's Relay edges.
+
 <!-- amux:generated command:route.call -->
 <!-- amux:generated command:route.watch -->
 
