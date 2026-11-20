@@ -44,7 +44,7 @@ beforeEach(async () => {
 afterEach(async () => { await app.dispose(); useLauncherState.setState({ drafts: {} }); vi.useRealTimers() })
 function retained() { expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled() }
 async function profile() { await app.mount(); await moteClick(button('Profile')); await vi.waitFor(() => expect(document.querySelector('.mote-quick-mode [aria-label="Mote heartbeat"]')?.textContent, document.querySelector('.mote-quick-mode .mote-heartbeat__issue')?.textContent ?? 'Original heartbeat read').toContain('Sent · acceptance unconfirmed')); return document.querySelector<HTMLElement>('.mote-quick-mode [aria-label="Mote heartbeat"]')! }
-it('keeps the saved Main and Run state visible beside a restored unbound settings draft', async () => {
+it('keeps the saved conversation and Run visible beside a restored settings draft', async () => {
   const card = await profile()
   const target = vi.mocked(api.motePreferences.read).mock.calls.find(([input]) => input.kind === 'quick')![0].target
   const draftKey = 'mote-quick:' + JSON.stringify(target)
@@ -58,7 +58,9 @@ it('keeps the saved Main and Run state visible beside a restored unbound setting
   await vi.waitFor(() => expect(dialog.querySelector('.mote-quick-mode__main')?.textContent).toContain('Run ended'))
   const main = dialog.querySelector('.mote-quick-mode__main')!
   expect(main.querySelector('strong')?.title).toBe(defaultAgent.id)
-  expect(dialog.querySelector('[aria-label="Main Agent"]')?.textContent).toContain('No Agent selected in this draft')
+  expect(main.textContent).toContain('Current conversation')
+  expect(dialog.querySelector('[aria-label="Main Agent"]')).toBeNull()
+  expect(dialog.querySelector('.mote-executor-priority li > span')?.textContent).toBe('fixture')
   await moteClick(button('Open discussion', main))
   expect(document.querySelector('[data-mote-page="discussion"]')).not.toBeNull()
   expect(save).not.toHaveBeenCalled()
