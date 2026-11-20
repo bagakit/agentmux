@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { formatDuration } from '@agentmux/client-ui/conversation-time'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { delegationWorkerHostId } from '@agentmux/demand/delegations'
 import type { DemandRecord } from '../lib/global-demand-board'
@@ -109,26 +110,29 @@ export function GoalExecutionTimeline({ demand, nodes, selected, onSelect }: { d
         <div>{hasTimes ? ticks.map(at => <time key={at} dateTime={new Date(at).toISOString()} title={format.format(at)}>{tickFormat.format(at)}</time>)
           : <span className="goal-execution-time__unrecorded">No schedule or execution times</span>}</div></div>
       {rows.map(row => {
-        const { target } = row
+        const { target, active: activity } = row
         const active = target && selected?.nodeId === target.nodeId && selected.attemptId === target.attemptId && selected.wholeGoal === target.wholeGoal
         const item = target && byId.get(target.nodeId)
         const previous = Boolean(target?.attemptId && item?.delegation?.operationId !== target.attemptId)
         const state = previous ? 'Previous attempt' : item ? goalPlanStateLabel(item) : undefined
         const attempt = row.number && row.number > 1 ? `Attempt ${row.number}` : undefined
+        const duration = activity && formatDuration(activity.to - activity.from)
+        const activityDetails = activity && `Observed activity · ${duration} · ${format.format(activity.from)} – ${format.format(activity.to)}`
         const times = [
           ...row.events.map(event => `${event.label}, ${format.format(event.at)}`),
-          ...(row.active ? [`Observed activity, ${format.format(row.active.from)} – ${format.format(row.active.to)}`] : []),
+          ...(activityDetails ? [activityDetails] : []),
           ...(row.planned ? [`Planned, ${format.format(row.planned.from)} – ${format.format(row.planned.to)}`] : [])
         ]
         const content = <>
-          <span className="goal-execution-time__task">{item && !previous ? <GoalPlanMark item={item} /> : null}
+          <span className="goal-execution-time__task" title={activityDetails}>{item && !previous ? <GoalPlanMark item={item} /> : null}
             <span><strong>{row.title}</strong>{target ? <Disclosure className="goal-execution-time__open" size={11} aria-hidden="true" /> : null}
-              {state || attempt ? <small>{[state, attempt].filter(Boolean).join(' · ')}</small> : null}</span>
+              {state || attempt ? <small>{[state, attempt].filter(Boolean).join(' · ')}</small> : null}
+              {duration ? <small className="goal-execution-time__activity-focus" aria-hidden="true">{duration} observed</small> : null}</span>
           </span>
           {times.length ? <span className="goal-execution-time__track" role={target ? undefined : 'img'} aria-label={target ? undefined : times.join(' · ')} aria-hidden={target ? true : undefined}>
             {ticks.slice(1, -1).map(at => <span className="goal-execution-time__guide" key={at} style={{ left: `${offset(at)}%` }} aria-hidden="true" />)}
-            {row.active ? <span className="goal-execution-time__live" data-goal-observed-activity style={{ left: `${offset(row.active.from)}%`, width: `${offset(row.active.to) - offset(row.active.from)}%` }}
-              title={`Observed activity · ${format.format(row.active.from)} – ${format.format(row.active.to)}`} /> : null}
+            {activity ? <span className="goal-execution-time__live" data-goal-observed-activity style={{ left: `${offset(activity.from)}%`, width: `${offset(activity.to) - offset(activity.from)}%` }}
+              title={activityDetails}><span className="goal-execution-time__bar-summary">{duration} observed</span></span> : null}
             {row.planned ? <span className="goal-execution-time__planned" data-goal-planned-period style={{ left: `${offset(row.planned.from)}%`, width: `${offset(row.planned.to) - offset(row.planned.from)}%` }}
               title={`Planned · ${format.format(row.planned.from)} – ${format.format(row.planned.to)}`}>Planned</span> : null}
             {row.events.map(event => <span className="goal-execution-time__point" key={event.id} data-goal-time-event={event.label} style={{ left: `${offset(event.at)}%` }}

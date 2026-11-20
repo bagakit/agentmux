@@ -273,13 +273,45 @@
 .goal-execution-time__row--action strong { color: var(--text); font-weight: 560; }
 .goal-execution-time__open { margin-inline-start: var(--sp-1); color: var(--text-3); vertical-align: middle; }
 .goal-execution-time__row small, .goal-execution-time__unrecorded { display: block; color: var(--text-3); }
+.goal-execution-time__row .goal-execution-time__activity-focus { display: none; }
+.goal-execution-time__row:focus-visible .goal-execution-time__activity-focus { display: block; color: var(--text-2); }
 .goal-execution-time__axis > div { display: flex; justify-content: space-between; gap: var(--sp-2); color: var(--text-2); font-variant-numeric: tabular-nums; }
 .goal-execution-time__track { position: relative; height: 18px; background: linear-gradient(var(--line-soft), var(--line-soft)) center / 100% 1px no-repeat; }
 .goal-execution-time__track--empty { display: flex; align-items: center; min-height: 24px; height: auto; gap: var(--sp-2); color: var(--text-3); background: none; }
 .goal-execution-time__track--empty::after { content: ''; flex: 1; min-width: var(--sp-3); border-top: 1px dashed var(--line); }
 .goal-execution-time__guide { position: absolute; inset-block: -4px; border-inline-start: 1px dashed var(--line-soft); }
 .goal-execution-time__point { position: absolute; top: 6px; width: 6px; height: 6px; transform: translateX(-50%); border-radius: 50%; background: var(--text-2); }
-.goal-execution-time__live { position: absolute; top: 1px; height: 16px; border: 1px solid var(--blue); border-inline-end-style: dashed; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--blue) 36%, var(--surface-2)); }
+.goal-execution-time__live {
+  position: absolute;
+  inset-block: 0;
+  container: goal-observed-activity / inline-size;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--blue) 46%, var(--surface-2));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blue) 70%, transparent);
+  color: var(--text);
+}
+.goal-execution-time__live::after {
+  position: absolute;
+  inset-block: 2px;
+  inset-inline-end: 1px;
+  border-inline-end: 1px dashed currentColor;
+  opacity: .38;
+  content: '';
+}
+.goal-execution-time__bar-summary {
+  display: none;
+  padding-inline: var(--sp-2);
+  overflow: hidden;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@container goal-observed-activity (min-width: 104px) {
+  .goal-execution-time__bar-summary { display: block; }
+}
 .goal-execution-time__planned { position: absolute; top: 0; min-width: 2px; height: 18px; overflow: hidden; padding-inline: var(--sp-2); border: 1px dashed var(--blue); border-radius: var(--radius-sm); color: var(--text-2); }
 @media (prefers-reduced-motion: reduce) { .goal-plan__assignments button { transition: none; } }
 
