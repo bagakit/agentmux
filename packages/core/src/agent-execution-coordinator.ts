@@ -401,7 +401,8 @@ export class AgentExecutionCoordinator {
     const oldPrepared = installed ? prepareProjectExecutorSuccessor(bindingId, preparation.prepared,
       installed.original.executor.runId, installed.ownerInstanceId) : preparation.prepared
     const oldRun = await hosts.resource.inspectPreparedTerminal(oldPrepared, { runId: previousBridge.executor.runId })
-    if (oldRun && oldRun.state !== 'exited') throw projectRecoveryError('The original project helper still has a nonterminal Run.')
+    if (oldRun && oldRun.state !== 'exited' && oldRun.state !== 'interrupted')
+      throw projectRecoveryError('The original project helper still has a nonterminal Run.')
     await this.closeBridge(bindingId)
     const record = this.read(bindingId)!
     const original = record.bridge!
