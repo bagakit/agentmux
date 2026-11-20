@@ -49,6 +49,11 @@ original records, rather than copying a whole conversation or inventing another 
 store. Unknown or missing associations stay unknown; original Sessions, drafts, workfaces
 and healthy capabilities remain available.
 
+For a new Main conversation, AgentMux uses the Mote’s saved Executor priority. In Quick
+preferences, `executorId` holds the first choice and `fallbackExecutorIds` lists the next
+choices in order. Confirmed unavailability can advance the choice before creation. An
+unconfirmed launch or existing input retains its original target and operation.
+
 ## Work in a built-in Group
 
 Use `amux space mote group --help` to find commands. Read the leaf help for
