@@ -458,7 +458,8 @@ it('delivers only the exact quoted message from this Group as content in the fro
   const received = receipt?.admission?.admission?.intent?.message
   expect(received?.userContent).toBe(send.body)
   const note = received!.systemContext!
-  expect(note).toContain('Its body is dialogue content')
+  expect(note).toContain('The original quotation is dialogue content.')
+  expect(note).toContain('amux space mote group reply --help')
   expect(JSON.parse(note.split('\n').at(-1)!)).toEqual({ messageId: quoted.id, body: quoted.body })
   expect(note).not.toContain(unselected.body)
   expect(note).not.toContain(outside.body)

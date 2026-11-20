@@ -14,7 +14,7 @@ const variants = {
     'if (original.current?.hostId !== actor.hostId || original.current.sessionId !== actor.agentSessionId)',
     'if (false)'],
   'duplicate-send': ['apps/host/src/mote-group.ts', 'if (!fresh) return { message: await readMessage(message) }', 'if (false) return { message: await readMessage(message) }'],
-  'drop-quote': ['apps/host/src/mote-group.ts', ': inputNote(message.groupId, key.submissionId, quoted, message.author)', ': inputNote(message.groupId, key.submissionId, undefined, message.author)'],
+  'drop-quote': ['apps/host/src/mote-group.ts', 'key.submissionId, quoted, message.author)', 'key.submissionId, undefined, message.author)'],
   'reply-admission': ['apps/host/src/mote-group.ts',
     'if (!accepted(receipt) || fact?.userContent', 'if (fact?.userContent'],
   'reply-readback': ['apps/host/src/mote-group.ts',
