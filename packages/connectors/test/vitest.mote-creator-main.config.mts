@@ -4,6 +4,7 @@ import { appendFileSync, readFileSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
 const variants: Record<string, { path: string; before: string; after: string }> = {
+  'hide-native-input-cause': { path: 'packages/core/src/mote/chat-diagnosis.ts', before: "  'AGENT_NATIVE_INPUT_UNAVAILABLE',\n", after: '' },
   'skip-retained-intake': { path: 'packages/connectors/src/connection-receivers.ts', before: 'for (const id of page.ingressIds) retry.add(id)', after: 'void page.ingressIds' },
   'skip-priority': { path: 'packages/core/src/public-rpc-service.ts', before: "if (executor && executor.availability !== 'missing') return id", after: 'if (id === order[0]) return id' },
   'disconnect-creator-setup': { path: 'packages/connectors/src/mote-chat.ts', before: 'await owner.prepare(configuration.target, assertCreator)', after: 'await Promise.resolve()' },

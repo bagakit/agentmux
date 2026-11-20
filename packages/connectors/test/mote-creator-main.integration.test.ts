@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { DurableAgentMuxMessageQueue, connectAgentMuxRpc } from '@agentmux/core'
+import { AgentMuxError, DurableAgentMuxMessageQueue, connectAgentMuxRpc } from '@agentmux/core'
 import { MoteChatStore } from '../src/mote-chat-store.js'
 import { moteChatJourneyFixture as journey } from './fixtures/mote-chat-journey.js'
 
@@ -206,6 +206,34 @@ it('recovers an ended Main in the same native conversation before freezing the n
   expect((await f.records())[0]!.input).toEqual(record.input)
   expect(f.start).toHaveBeenCalledTimes(2); expect(f.inner.kernel.input).toHaveBeenCalledOnce()
 })
+
+
+it('reports the native input wait for the original creator message through the public CLI', async () => {
+  const f = await fixture()
+  const plan = vi.mocked(f.client.providers.get('grok').planPromptInput)
+  const normal = plan.getMockImplementation()!
+  const privateError = 'Original native queue observation detail'
+  plan.mockImplementation(() => { throw new AgentMuxError(privateError, 'AGENT_NATIVE_INPUT_UNAVAILABLE') })
+  expect(await f.wire.post(f.message('native-input-wait'))).toBe(202)
+  const record = await f.claimed('native-input-wait')
+  const inspect = () => f.services.ingress!.inspect({ ingressId: record.ingressId })
+  await vi.waitFor(async () => expect((await inspect()).inputReceipt).toMatchObject({ status: 'waiting',
+    control: { waiting: { phase: 'input-environment', failure: { code: 'AGENT_NATIVE_INPUT_UNAVAILABLE' } } } }))
+  const before = (await inspect()).inputReceipt!
+  const diagnosis = await f.cli('diagnose', { target: f.target }, f.credentials(0))
+  expect(diagnosis.incoming.rows[0]).toMatchObject({ state: 'claimed', code: null, input: {
+    status: 'waiting', failureCode: 'AGENT_NATIVE_INPUT_UNAVAILABLE', runtime: { target: 'original', state: 'running' },
+    waiting: { phase: 'input-environment', reason: 'original-input-unconfirmed', wake: 'explicit-rejoin' } } })
+  for (const privateValue of [privateError, record.ingressId, record.body, f.creator.userId])
+    expect(JSON.stringify(diagnosis)).not.toContain(privateValue)
+  expect(f.inner.kernel.input).not.toHaveBeenCalled()
+
+  plan.mockImplementation(normal)
+  await vi.waitFor(async () => expect((await inspect()).inputReceipt).toMatchObject({ key: before.key, status: 'terminal-confirmed' }), { timeout: 12_000 })
+  expect((await inspect()).ingress?.input).toEqual(record.input)
+  expect(f.inner.kernel.input).toHaveBeenCalledOnce()
+  expect(f.start).toHaveBeenCalledOnce()
+}, 25_000)
 
 it('keeps a remote Main input healthy while retaining an explicit unconfirmed reply route', async () => {
   const f = await journey(4, 60_000, 'headless', false, 'grok', undefined, 'bound', 'signed-room', 'remote')
