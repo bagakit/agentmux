@@ -338,7 +338,7 @@ type NativeParams = StorageRecoveryParamsMap & FocusParams & SpaceLinkParams & M
   'agent.native.history': import('./public-rpc-native-history.js').AgentMuxRpcNativeHistoryParams
   'agent.native.history.resource': import('./public-rpc-native-history.js').AgentMuxRpcNativeHistoryResourceParams
   'agent.context': import('./agent-context.js').AgentContextParams
-  'agent.interaction.respond': Omit<import("./client-contract.js").AgentMuxAgentInteractionInput,'authorHuman'>
+  'agent.interaction.respond': Omit<import("./client-contract.js").AgentMuxAgentInteractionInput,'authorHuman'> & { goalApproval?: import('./goal-approval.js').GoalApprovalSelection }
   'agent.interaction.inspect': { agentSessionId: string; operationId: string }
   'agent.question.reply': Omit<import("./client-contract.js").AgentMuxSessionQuestionReplyInput, 'authorHuman' | 'sourceDevice' | 'signal' | 'commandOverride' | 'args' | 'env'>
   'agent.history.usage': import('./agent-session-usage.js').AgentSessionUsageInput

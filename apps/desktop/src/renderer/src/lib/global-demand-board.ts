@@ -1,7 +1,7 @@
 import type { DemandAgentReference } from '@agentmux/demand/relations'
 import type { DemandContentReference } from '@agentmux/demand'
 import type { SessionSnapshot } from '../../../shared/contracts'
-import type { AgentMuxDemandDecision } from '@agentmux/core/control'
+import type { AgentMuxDemand, AgentMuxDemandDecision } from '@agentmux/core/control'
 import type { DemandActivity, DemandDecision } from '@agentmux/demand'
 import type { DemandAlignment, DemandGrounding } from '@agentmux/demand/goals'
 
@@ -47,6 +47,8 @@ export type DemandRecord = {
   delegationObservationIssue?: string
   delegationReadCut?: { goalUpdatedAt: number; request: number }
   dispatches?: import('@agentmux/demand').DemandDispatch[]
+  approvalObservations?: AgentMuxDemand['approvalObservations']
+  approvalObservationIssue?: string
   startObservations?: import('@agentmux/demand').GoalStartObservation[]
   progressUpdates?: import('@agentmux/demand').DemandProgress[]
   patrols?: import('@agentmux/demand').DemandPatrol[]

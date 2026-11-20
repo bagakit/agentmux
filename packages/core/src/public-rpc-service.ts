@@ -1,4 +1,5 @@
 import { originalConnectorRuntime } from './original-connector-runtime.js'
+import { parseGoalApprovalSelection } from './goal-approval.js'
 import { parseAgentTakeoverCancellation, parseAgentTakeoverCancellationResult } from './agent-takeover-cancellation.js'
 import { takeoverCancellationRecord } from './agent-takeover-cancellation-record.js'
 import { parseGoalInputEpochInput, parseGoalInputEpoch } from './goal-input-epoch.js'
@@ -315,6 +316,7 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
     { operation: 'settings.resource.list' | 'settings.resource.get' }>): Promise<import('./control.js').AgentMuxControlSettingsResourceResult>
   goalInputEpoch?(input: import('./goal-input-epoch.js').GoalInputEpochInput, context: AgentMuxRpcCallContext): Promise<import('./goal-input-epoch.js').GoalInputEpoch>
   goalParticipation?: import('./goal-participation.js').GoalParticipationOwner
+  goalApproval?(input: AgentMuxRpcParams<'agent.interaction.respond'>, actor: import('./goal-approval.js').GoalApprovalAuthority['actor'], context: AgentInputCallContext): Promise<AgentMuxRpcResult<'agent.interaction.respond'>>
   goalChanges?: GoalChangePort
   progress?: AgentProgressOwner
   schedules?: AgentMuxRpcSchedulesOwner
@@ -535,7 +537,7 @@ const NATIVE_FIELDS = {
   'agent.native.history': ['hostId', 'executorId', 'source', 'cursor', 'limit'],
   'agent.native.history.resource': ['hostId', 'executorId', 'nativeSource', 'source', 'turnId', 'recordId', 'partIndex', 'expectedReference', 'maxBytes', 'offsetBytes', 'representation'],
   'agent.context': ['hostId', 'agentSessionId', 'cursor', 'limit'],
-  'agent.interaction.respond': ['agentSessionId', 'expectedRun', 'operationId', 'expectedRequest', 'response', 'externalAction', 'moteSource'],
+  'agent.interaction.respond': ['agentSessionId', 'expectedRun', 'operationId', 'expectedRequest', 'response', 'externalAction', 'moteSource', 'goalApproval'],
   'agent.interaction.inspect': ['agentSessionId', 'operationId'],
   'agent.question.reply': ['agentSessionId', 'source', 'turnId', 'recordId', 'answers', 'operationId', 'expectedRun', 'afterSubmissionId', 'inputEpoch', 'allowUncertainTurn', 'sourceChannel', 'externalAction', 'moteSource'],
   'agent.history.resource': ['hostId', 'agentSessionId', 'source', 'turnId', 'recordId', 'partIndex', 'expectedReference', 'maxBytes', 'offsetBytes', 'representation'],
@@ -2909,12 +2911,32 @@ export class AgentMuxRpcService {
     const p = rpcRecord(params)
     if (method === 'agent.interaction.respond' || method === 'agent.interaction.inspect') {
       const input = rpcRecord(params, NATIVE_FIELDS[method as 'agent.interaction.respond' | 'agent.interaction.inspect'])
-      const target = await this.owner(rpcString(input.agentSessionId, 'Interaction Session ID'))
+      const sessionId = rpcString(input.agentSessionId, 'Interaction Session ID')
       rpcString(input.operationId, 'Interaction operation ID')
       context.signal?.throwIfAborted()
+      if (method === 'agent.interaction.respond' && input.goalApproval !== undefined) {
+        const goalApproval = parseGoalApprovalSelection(input.goalApproval)
+        const response = { ...input, agentSessionId: sessionId, goalApproval } as AgentMuxRpcParams<'agent.interaction.respond'>
+        const principal = context.principal!
+        const call = this.inputCallContext(context)
+        await call.assertCurrent?.()
+        if (this.ports.goalApproval && (principal.kind === 'user' || principal.kind === 'device')) return await this.ports.goalApproval(response, { kind: principal.kind, id: principal.id }, call) as AgentMuxRpcResult<M>
+        if (this.ports.callOriginalCore) return await this.ports.callOriginalCore('local', 'agent.interaction.respond', response, await this.inputForwardContext(context)) as AgentMuxRpcResult<M>
+        throw new AgentMuxError('The original Goal approval owner is unavailable. The original permission can still be answered independently.', 'CONTROL_UNAVAILABLE')
+      }
+      // An exact Core endpoint can also read a linked response retained by a stopped Session.
+      if (method === 'agent.interaction.inspect') {
+        const target = await this.owner(sessionId).catch(error => {
+          if (!(error instanceof AgentMuxError) || error.code !== 'UNKNOWN_AGENT_SESSION' || caller ||
+              context.principal?.kind !== 'user' && context.principal?.kind !== 'device') throw error
+          return this.originalInputOwner(sessionId).then(owner => ({ ...owner, agentSessionId: sessionId }))
+        })
+        const inspect = { agentSessionId: target.agentSessionId, operationId: input.operationId as string }
+        if (target.client.forwardRpc) return await target.client.forwardRpc('agent.interaction.inspect', inspect, context) as AgentMuxRpcResult<M>
+        return { receipt: await target.client.inspectAgentInteractionOperation(inspect) } as AgentMuxRpcResult<M>
+      }
+      const target = await this.owner(sessionId)
       if (target.client.forwardRpc) return await target.client.forwardRpc(method, { ...input, agentSessionId: target.agentSessionId } as AgentMuxRpcParams<typeof method>, context) as AgentMuxRpcResult<M>
-      if (method === 'agent.interaction.inspect') return { receipt: await target.client.inspectAgentInteractionOperation({
-        agentSessionId: target.agentSessionId, operationId: input.operationId as string }) } as AgentMuxRpcResult<M>
       return await target.client.respondAgentInteraction({ ...input, agentSessionId: target.agentSessionId } as AgentMuxRpcParams<'agent.interaction.respond'>,
         this.inputCallContext(context)) as AgentMuxRpcResult<M>
     }

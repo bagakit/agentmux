@@ -1,4 +1,5 @@
 import { parseAgentCreationCancellation, type AgentCreationCancellationInput, type AgentCreationCancellationResult } from './agent-creation-cancellation.js'
+import { goalApprovalObservation, parseGoalApprovalAttribution } from './goal-approval.js'
 import { parseCreationResolveInput, type AgentMuxCreationResolveInput } from './agent-creation-resolution.js'
 import { assertPreparedAgentBinding } from './agent-prepared-resume.js'
 import { snapshotRecoveryFile, snapshotRecoverySqlite, recoveryDigest, type RecoverySource, type RecoverySourceMember, type RecoveryGap } from './storage-recovery.js'
@@ -2823,7 +2824,7 @@ export class AgentMuxClient {
       if (createOperationId !== undefined && retired.history.creation.createOperationId !== createOperationId) throw new AgentMuxError(
         'This retired Session belongs to another original creation operation. Keep both identities and inspect the original operation.',
         'AGENT_CREATION_OPERATION_CONFLICT', undefined, { disposition: 'not_applied', confirmedInputBytes: null })
-      const { nativeCreationKeys: _privateCreationKeys, executorInvocation: _invocation, ...publicRetirement } = retired
+      const { nativeCreationKeys: _privateCreationKeys, executorInvocation: _invocation, interactionOperations: _interactions, ...publicRetirement } = retired
       return { kind: 'retired-agent', ...publicRetirement }
     }
     if (durable) {
@@ -9241,7 +9242,11 @@ export class AgentMuxClient {
   async inspectAgentInteractionOperation(input: { agentSessionId: string; operationId: string }): Promise<AgentMuxInteractionOperationReceipt | null> {
     let session: AgentMuxStoredAgentSession | null = null
     await this.registry.readMetadata(input.agentSessionId, value => { session = value })
-    if (!session) throw new AgentMuxError('The original Agent Session is unavailable.', 'UNKNOWN_AGENT_SESSION')
+    if (!session) {
+      const retired = await this.store.readRetiredAgentSession(input.agentSessionId)
+      if (!retired || retired.recordDeletion) throw new AgentMuxError('The original Agent Session is unavailable.', 'UNKNOWN_AGENT_SESSION')
+      return structuredClone(retired.interactionOperations?.[input.operationId] ?? null)
+    }
     const current = session as AgentMuxStoredAgentSession
     const receipt = current.interactionOperations?.[input.operationId]
     if (!receipt) return null
@@ -9260,7 +9265,9 @@ export class AgentMuxClient {
   /** A Goal reads only the original Core approvals for its known input recipients. */
   async listAgentGoalApprovals(agentSessionId: string, goalId: string) {
     const active = await this.store.readMetadata(agentSessionId)
-    const receipts = active?.interactionOperations ?? (await this.store.readRetiredAgentSession(agentSessionId))?.interactionOperations ?? {}
+    const retired = active ? null : await this.store.readRetiredAgentSession(agentSessionId)
+    if (!active && !retired) throw new AgentMuxError('The original approval Session is unavailable.', 'UNKNOWN_AGENT_SESSION')
+    const receipts = active?.interactionOperations ?? (retired?.recordDeletion ? undefined : retired?.interactionOperations) ?? {}
     return Object.values(receipts).flatMap(receipt => {
       const view = receipt.goalApproval?.goalId === goalId ? goalApprovalObservation(receipt) : undefined
       return view ? [view] : []
@@ -9311,27 +9318,34 @@ export class AgentMuxClient {
       if (attribution || original.goalApproval || !['saved', 'unknown'].includes(original.delivery) || original.nativeCompleted || expected.evidence.source === 'acp' && original.delivery === 'unknown') return original
     }
     if (attribution) {
-      const originalInput = await this.inspectAgentPromptSubmission(attribution.inputKey)
-      if (!originalInput?.admission?.acknowledged || !isDeepStrictEqual(originalInput.admission.inputKey, attribution.inputKey))
+      const originalInput = await this.inspectAgentInput({ key: attribution.inputKey })
+      if (originalInput?.status !== 'admitted' && originalInput?.status !== 'terminal-confirmed')
         throw new AgentMuxError('The selected Goal Start has no exact confirmed original Core input.', 'CONTROL_UNAVAILABLE')
       await context?.assertCurrent?.()
     }
     const requested = await this.registry.resolveMetadata(input.agentSessionId, 'local', () => context?.requestSignal?.throwIfAborted())
-    let fresh = false
+    let send = false
     await this.updateExactAgentSession(input.agentSessionId, input.expectedRun, current => {
-      fresh = false
+      send = false
+      const prior = current.interactionOperations?.[input.operationId]
+      if (prior?.goalApproval) {
+        if (!isDeepStrictEqual(prior.response, response) || !isDeepStrictEqual(agentInteractionRequestTarget(prior.expectedRequest), expected) ||
+            !isDeepStrictEqual(prior.externalAction, input.externalAction) || !matchesApproval(prior))
+          throw new AgentMuxError('The original response operation has different content or attribution.', 'AGENT_INTERACTION_RESPONSE_CONFLICT')
+        return current
+      }
       const request = [current.pendingInteraction?.request, ...(current.pendingInteraction?.additionalRequests ?? [])].find(candidate => candidate?.id === response.requestId)
       if (!request || request.agentSessionId !== input.agentSessionId || !isDeepStrictEqual(agentInteractionRequestTarget(request), expected) ||
           !sameNativeHandle(current.nativeHandle, requested.nativeHandle)) throw new AgentMuxError('The exact original interaction request changed.', 'UNKNOWN_AGENT_INTERACTION')
       const competing = Object.values(current.interactionOperations ?? {}).find(receipt => sameRun(receipt.run, input.expectedRun) &&
         isDeepStrictEqual(agentInteractionRequestTarget(receipt.expectedRequest), expected) && receipt.operationId !== input.operationId)
       if (competing) throw new AgentMuxError('The original request already has another response operation.', 'AGENT_INTERACTION_RESPONSE_CONFLICT')
-      const prior = current.interactionOperations?.[input.operationId]
       if (prior) {
         if (!isDeepStrictEqual(prior.response, response) || !isDeepStrictEqual(agentInteractionRequestTarget(prior.expectedRequest), expected) || !matchesApproval(prior)) throw new AgentMuxError('The original response operation has different content or attribution.', 'AGENT_INTERACTION_RESPONSE_CONFLICT')
+        send = true
         return current
       }
-      fresh = true
+      send = true
       return { ...current, interactionOperations: { ...current.interactionOperations, [input.operationId]: {
         operationId: input.operationId, agentSessionId: input.agentSessionId, run: input.expectedRun,
         ...(input.authorHuman === true && !input.externalAction ? {authorHuman:true as const} : {}),
@@ -9341,7 +9355,7 @@ export class AgentMuxClient {
         ...(input.externalAction ? { externalAction: structuredClone(input.externalAction) } : {}),
         ...(current.nativeHandle ? { nativeHandle: current.nativeHandle } : {}), delivery: 'saved', nativeAdoption: 'unknown' } }, updatedAt: Date.now() }
     })
-    if (!attribution || fresh) await this.dispatchAgentInteraction(input, context)
+    if (send) await this.dispatchAgentInteraction(input, context)
     return (await this.inspectAgentInteractionOperation(input))!
   }
 
@@ -13534,4 +13548,3 @@ function readingDiagnosticFailureReason(error: unknown): ReadingDiagnosticReason
 }
 
 export { terminalEnvironment } from './agent-runtime-helpers.js'
-import { goalApprovalObservation, parseGoalApprovalAttribution } from './goal-approval.js'

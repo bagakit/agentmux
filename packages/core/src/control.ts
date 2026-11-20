@@ -480,6 +480,9 @@ export type AgentMuxDemand = {
   activityLog?: string[]
   delegations?: import('@agentmux/demand').DemandDelegation[]
   dispatches?: import('@agentmux/demand').DemandDispatch[]
+  /** Original Core receipt observations, projected by the Goal owner on inspection. */
+  approvalObservations?: import('./goal-approval.js').GoalApprovalObservation[]
+  approvalObservationIssue?: string
   progressUpdates?: import('@agentmux/demand').DemandProgress[]
   patrols?: import('@agentmux/demand').DemandPatrol[]
   plan?: import('@agentmux/demand/goal-plan').GoalPlan

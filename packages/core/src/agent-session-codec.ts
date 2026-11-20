@@ -1,4 +1,5 @@
 import { parseInputRestoration } from './agent-input-epoch.js'
+import { parseGoalApprovalAttribution } from './goal-approval.js'
 import { parseAgentMuxCreationOrigin } from './agent-creation-admission.js'
 import { parseCreationResolution } from './agent-creation-resolution.js'
 import { parseAgentForkSource } from './agent-fork.js'
@@ -1064,7 +1065,11 @@ export function normalizeInteractionOperationReceipt(value: unknown): AgentMuxIn
   const source = record(value, 'interaction operation')
   const expectedRequest = normalizeAgentInteractionRequest(source.expectedRequest)
   const run = runRef(source.run), agentSessionId = string(source.agentSessionId, 'interaction Session')
-  if (Object.keys(source).some(key => !['operationId', 'agentSessionId', 'run', 'expectedRequest', 'response', 'delivery', 'inputByteRange', 'nativeAdoption', 'nativeHandle', 'nativeCompleted', 'externalAction', 'authorHuman', 'moteObservationId'].includes(key)) || source.authorHuman !== undefined && source.authorHuman !== true || expectedRequest.agentSessionId !== agentSessionId || expectedRequest.evidence.run?.runId !== run.runId) throw new AgentMuxError('Interaction operation target mismatch.', 'INVALID_AGENT_SESSION_STORE')
+  if (Object.keys(source).some(key => !['operationId', 'agentSessionId', 'run', 'expectedRequest', 'response', 'delivery', 'inputByteRange', 'nativeAdoption', 'nativeHandle', 'nativeCompleted', 'externalAction', 'authorHuman', 'moteObservationId', 'goalApproval'].includes(key)) || source.authorHuman !== undefined && source.authorHuman !== true || expectedRequest.agentSessionId !== agentSessionId || expectedRequest.evidence.run?.runId !== run.runId) throw new AgentMuxError('Interaction operation target mismatch.', 'INVALID_AGENT_SESSION_STORE')
+  const goalApproval = source.goalApproval === undefined ? undefined : parseGoalApprovalAttribution(source.goalApproval)
+  if (goalApproval && (expectedRequest.kind !== 'permission' || source.externalAction !== undefined ||
+      goalApproval.inputKey.agentSessionId !== agentSessionId || goalApproval.inputKey.expectedRun.runId !== run.runId ||
+      goalApproval.inputKey.submissionId !== goalApproval.dispatchOperationId)) throw new AgentMuxError('Approval attribution targets another original input.', 'INVALID_AGENT_SESSION_STORE')
   const delivery = source.delivery
   if (!['saved', 'unknown', 'bytes-accepted', 'hook-written', 'acp-acknowledged'].includes(String(delivery)) ||
       source.nativeAdoption !== 'unknown') throw new AgentMuxError('Invalid interaction operation facts.', 'INVALID_AGENT_SESSION_STORE')
@@ -1075,6 +1080,7 @@ export function normalizeInteractionOperationReceipt(value: unknown): AgentMuxIn
   if (nativeCompleted && (nativeCompleted.source !== 'native-hook' || nativeCompleted.run?.runId !== run.runId) || delivery === 'bytes-accepted' && !inputByteRange || delivery === 'hook-written' && (expectedRequest.kind !== 'permission' || !expectedRequest.permissionHook) || delivery === 'acp-acknowledged' && expectedRequest.evidence.source !== 'acp') throw new AgentMuxError('Interaction operation receipt mismatch.', 'INVALID_AGENT_SESSION_STORE')
   return { operationId: string(source.operationId, 'interaction operation id'), agentSessionId, run,
     ...(source.authorHuman === true ? {authorHuman:true as const} : {}),
+    ...(goalApproval ? { goalApproval } : {}),
     ...(source.moteObservationId === undefined ? {} : {moteObservationId:string(source.moteObservationId,'Mote input observation')}),
     expectedRequest, response: interactionResponse(source.response, expectedRequest),
     ...(source.externalAction === undefined ? {} : { externalAction: parseAgentExternalInteractionAuthor(source.externalAction) }),

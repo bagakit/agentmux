@@ -4,6 +4,8 @@ import type { AgentNativeBinding, AgentNativeSessionHandle, AgentOperationDevice
 
 /** In-process Host context, never a wire argument or a persisted grant. */
 export type AgentInputCallContext = Readonly<{
+  /** Verified explicit selection by the original Goal owner for this permission response. */
+  goalApproval?: import('./goal-approval.js').GoalApprovalAuthority
   /** The validated original Focus scope of an exact-condition public input. */
   focusTask?: import('./focus-control.js').AgentMuxFocusTaskReference
   /** Trusted Host capture attribution, never accepted from public business arguments. */

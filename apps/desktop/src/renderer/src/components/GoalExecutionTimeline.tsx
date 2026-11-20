@@ -5,6 +5,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { delegationWorkerHostId } from '@agentmux/demand/delegations'
 import type { GoalPlanReviewer } from '@agentmux/demand/goal-plan'
 import type { DemandRecord } from '../lib/global-demand-board'
+import { api } from '../lib/api'
 import type { GoalPlanNodeView, GoalPlanReadingTarget, GoalPlanReveal } from './GoalPlanGraph'
 import { useWorkbenchNameTooltip } from './WorkbenchNameTooltip'
 import { markWindowOverlayDismissal, wasWindowOverlayDismissed } from './WindowOverlayHost'
@@ -16,10 +17,12 @@ export type GoalTimelineOriginal = { kind: 'start' | 'delegation'; operationId: 
 type TimelineEvent = {
   id: string; at: number; label: string; result: string; actor?: string; participant?: 'user' | 'device'
   reference?: string; note?: string; original?: GoalTimelineOriginal; reviewOperationId?: string
+  approval?: ApprovalObservation
 }
+type ApprovalObservation = NonNullable<DemandRecord['approvalObservations']>[number]
 type TimeSpan = { from: number; to: number }
 type Row = { id: string; title: string; number?: number; ticket?: true; target?: GoalPlanReadingTarget; original?: GoalTimelineOriginal; events: TimelineEvent[]; active?: TimeSpan; planned?: TimeSpan }
-type TimelineSource = Pick<DemandRecord, 'alignment' | 'plan' | 'delegations' | 'dispatches' | 'patrols' | 'responsibility'>
+type TimelineSource = Pick<DemandRecord, 'id' | 'alignment' | 'plan' | 'delegations' | 'dispatches' | 'patrols' | 'responsibility' | 'approvalObservations'>
 type OpenEvent = { row: Row; event: TimelineEvent; trigger: HTMLButtonElement }
 function timelineRowKey(row: Row): string {
   return row.original?.kind === 'delegation' ? `delegation:${row.id}` : row.id
@@ -33,6 +36,46 @@ const Disclosure = semanticIconComponent('navigation.disclosure')
 function participantIdentity(author: Pick<GoalPlanReviewer, 'kind' | 'id'> | undefined) {
   if (!author || author.kind === 'agent') return undefined
   return { participant: author.kind, actor: `${author.kind === 'user' ? 'User' : 'Device'} ${author.id}` }
+}
+
+const approvalDecision = { approved: 'Approved', denied: 'Denied', cancelled: 'Cancelled', recorded: 'Response recorded' }
+const approvalDelivery = { saved: 'Response saved', unknown: 'Delivery unconfirmed', 'bytes-accepted': 'Input accepted',
+  'hook-written': 'Response written to Provider connection', 'acp-acknowledged': 'Provider acknowledged receipt' }
+
+function OriginalApproval({ approval }: { approval: ApprovalObservation }) {
+  const [reading, setReading] = useState<'idle' | 'loading' | 'unavailable' | { delivery: ApprovalObservation['delivery']; nativeCompleted: boolean }>('idle')
+  const originalReading = useRef<HTMLDListElement>(null)
+  const { attribution, operationId, requestId } = approval, { inputKey } = attribution
+  const loaded = typeof reading === 'object' ? reading : undefined
+  useLayoutEffect(() => { if (loaded) originalReading.current?.focus() }, [loaded])
+  async function read() {
+    setReading('loading')
+    try {
+      const receipt = await api.sessions.inspectInteraction({ kind: 'agent', hostId: 'local', agentSessionId: inputKey.agentSessionId, run: inputKey.expectedRun }, operationId)
+      const original = receipt?.goalApproval
+      if (!receipt || receipt.operationId !== operationId || receipt.expectedRequest.id !== requestId || receipt.run.runId !== inputKey.expectedRun.runId ||
+          !original || original.goalId !== attribution.goalId || original.dispatchOperationId !== attribution.dispatchOperationId ||
+          original.inputKey.agentSessionId !== inputKey.agentSessionId || original.inputKey.submissionId !== inputKey.submissionId ||
+          original.inputKey.attemptId !== inputKey.attemptId || original.inputKey.expectedRun.runId !== inputKey.expectedRun.runId ||
+          original.at !== attribution.at || original.actor.kind !== attribution.actor.kind || original.actor.id !== attribution.actor.id) {
+        setReading('unavailable')
+        return
+      }
+      setReading({ delivery: receipt.delivery, nativeCompleted: Boolean(receipt.nativeCompleted) })
+    } catch { setReading('unavailable') }
+  }
+  return <>
+    <dl ref={originalReading} tabIndex={loaded ? -1 : undefined} aria-label={loaded ? 'Original permission receipt' : undefined}>
+      {loaded ? <>
+        <div><dt>Permission request</dt><dd><code>{requestId}</code></dd></div>
+        <div><dt>Goal Start</dt><dd><code>{attribution.dispatchOperationId}</code></dd></div>
+      </> : null}
+      <div><dt>Delivery</dt><dd>{approvalDelivery[loaded?.delivery ?? approval.delivery]}</dd></div>
+      {(loaded?.nativeCompleted ?? approval.nativeCompleted) ? <div><dt>Provider</dt><dd>Native completion observed</dd></div> : null}
+    </dl>
+    {reading === 'unavailable' ? <p className="goals-service" role="status">The original permission receipt is unavailable.</p> : null}
+    {loaded ? null : <Button type="button" disabled={reading === 'loading'} onClick={() => void read()}>{reading === 'loading' ? 'Reading original response…' : 'Open original response'}</Button>}
+  </>
 }
 
 /** The current proposal and its retained confirmation notices hold the original confirmation, independent of the requester. */
@@ -101,6 +144,14 @@ export function goalExecutionRows(demand: TimelineSource): Row[] {
       note: review.note, reviewOperationId: review.operationId })
   }
   const goalEvents = goalParticipationEvents(demand)
+  const approvals = new Map<string, ApprovalObservation[]>()
+  for (const approval of demand.approvalObservations ?? []) {
+    const { goalId, dispatchOperationId } = approval.attribution
+    if (goalId !== demand.id) continue
+    const group = approvals.get(dispatchOperationId) ?? []
+    group.push(approval)
+    approvals.set(dispatchOperationId, group)
+  }
   for (const revision of demand.plan?.history ?? []) {
     const author = participantIdentity(revision.author)
     if (!author) continue
@@ -133,6 +184,14 @@ export function goalExecutionRows(demand: TimelineSource): Row[] {
       label: 'Original input recorded', result: receipt.kind === 'core-input'
         ? receipt.outcome === 'terminal-confirmed' ? 'Terminal input confirmed' : 'Input admitted' : 'Core prompt saved',
       reference: receipt.kind === 'core-input' ? receipt.inputKey.submissionId : receipt.itemId })
+    if (receipt?.kind === 'core-input') for (const approval of approvals.get(start.operationId) ?? []) {
+      const { attribution } = approval, key = attribution.inputKey
+      if (key.agentSessionId !== receipt.inputKey.agentSessionId || key.expectedRun.runId !== receipt.inputKey.expectedRun.runId ||
+          key.submissionId !== receipt.inputKey.submissionId || key.attemptId !== undefined) continue
+      events.push({ id: `approval:${approval.operationId}`, at: attribution.at, label: 'Linked permission response',
+        result: approvalDecision[approval.decision], ...participantIdentity(attribution.actor),
+        note: 'Explicitly linked to this Start. Provider causality is unknown.', reference: approval.operationId, approval })
+    }
     rows.set(`start:${start.operationId}`, { id: `start:${start.operationId}`, title: 'One-time task',
       original: { kind: 'start', operationId: start.operationId }, events })
   }
@@ -146,7 +205,8 @@ export function goalExecutionRows(demand: TimelineSource): Row[] {
 function TimelineEventButton({ event, open, detailsId, style, onOpen }: {
   event: TimelineEvent; open: boolean; detailsId: string; style?: CSSProperties | undefined; onOpen: (trigger: HTMLButtonElement) => void
 }) {
-  const preview = useWorkbenchNameTooltip(event.label, `${eventTime.format(event.at)} · ${event.actor || unknownActor} · ${event.result}`, open,
+  const preview = useWorkbenchNameTooltip(event.label, [eventTime.format(event.at), event.actor || unknownActor, event.result,
+    event.approval && approvalDelivery[event.approval.delivery]].filter(Boolean).join(' · '), open,
     { placement: 'top', pointerPassThrough: true })
   return <><button type="button" className={style ? 'goal-execution-time__point' : 'goal-execution-time__receipt'}
     {...preview.props} data-goal-time-event={event.label} data-goal-time-event-id={event.id}
@@ -202,7 +262,7 @@ export function GoalExecutionTimeline({ demand, nodes, selected, onSelect, onOpe
     if (openEvent) restoreEvent(openEvent)
     setOpenEvent(null)
   }
-  const recorded = useMemo(() => goalExecutionRows(demand), [demand.alignment, demand.plan, demand.delegations, demand.dispatches, demand.patrols, demand.responsibility])
+  const recorded = useMemo(() => goalExecutionRows(demand), [demand.id, demand.alignment, demand.plan, demand.delegations, demand.dispatches, demand.patrols, demand.responsibility, demand.approvalObservations])
   const wholeGoal = nodes.find(item => item.wholeGoal)
   const rows: Row[] = wholeGoal && !recorded.length ? [{ id: `node:${wholeGoal.node.id}`, title: wholeGoal.node.title,
     target: { nodeId: wholeGoal.node.id, wholeGoal: true }, events: [] }] : [...recorded]
@@ -249,7 +309,8 @@ export function GoalExecutionTimeline({ demand, nodes, selected, onSelect, onOpe
         {reading.reference ? <div><dt>Reference</dt><dd><code>{reading.reference}</code></dd></div> : null}</dl>
       {reading.note ? <p>{reading.note}</p> : null}
       {!currentEvent || sourceUnavailable ? <p className="goals-service" role="status">The original event source is unavailable.</p> : null}
-      {currentEvent && (target || original) ? <Button type="button" onClick={openOriginal}>
+      {currentEvent?.approval ? <OriginalApproval key={currentEvent.id} approval={currentEvent.approval} />
+        : currentEvent && (target || original) ? <Button type="button" onClick={openOriginal}>
         {reading.original?.kind === 'confirmation' ? 'Open original proposal' : reading.original ? 'Open original record'
           : event.reviewOperationId ? 'Open original review' : target?.attemptId ? 'Open original attempt' : target ? 'Open Ticket' : 'Open original record'}
       </Button> : null}
@@ -259,6 +320,7 @@ export function GoalExecutionTimeline({ demand, nodes, selected, onSelect, onOpe
   if (wholeGoal && onlyRow?.id !== 'goal-participation' && onlyRow?.events.length && !onlyRow.target && !onlyRow.active && !onlyRow.planned) {
     return <section ref={timeline} tabIndex={-1} className="goal-execution-time" aria-label="Execution timeline" data-goal-execution-time>
       <h3>Execution timeline</h3>
+      {demand.approvalObservationIssue ? <p className="goals-service" role="status">{demand.approvalObservationIssue}</p> : null}
       <div className="goal-execution-time__receipt-group" data-goal-time-row={onlyRow.id} data-goal-time-row-key={timelineRowKey(onlyRow)} tabIndex={-1}>
         <strong>{onlyRow.title}</strong>
         <ul className="goal-execution-time__receipts">{onlyRow.events.map(event => <li key={event.id}>{eventButton(onlyRow, event)}</li>)}</ul>
@@ -291,6 +353,7 @@ export function GoalExecutionTimeline({ demand, nodes, selected, onSelect, onOpe
   return <section ref={timeline} tabIndex={-1} className="goal-execution-time" aria-label="Execution timeline" data-goal-execution-time>
     <h3>Execution timeline{rows.some(row => row.events.some(event => event.participant)) ?
       <span className="goal-execution-time__participation-key">User or device</span> : null}</h3>
+    {demand.approvalObservationIssue ? <p className="goals-service" role="status">{demand.approvalObservationIssue}</p> : null}
     <div className="goal-execution-time__scroll"><div className="goal-execution-time__rows" data-timed={hasTimes || undefined}>
       <div className="goal-execution-time__row goal-execution-time__axis"><span>Task and attempt</span>
         <div>{hasTimes ? ticks.map(at => <time key={at} dateTime={new Date(at).toISOString()} title={format.format(at)}>{tickFormat.format(at)}</time>)

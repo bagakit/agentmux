@@ -2061,8 +2061,11 @@ function isGoalBusinessRequest(request: AgentMuxControlRequest): request is Extr
   return request.operation.startsWith('demand.')
 }
 
-function demandRecordFromFilesystem(demand: FilesystemDemand & Pick<DemandRecord, 'planState' | 'planStateIssue' | 'address' | 'addressIssue'>, retained?: DemandRecord): DemandRecord {
-  if (retained && (!demand.address || !retained.address || demand.address.runtimeId === retained.address.runtimeId && demand.address.namespace === retained.address.namespace) && demand.updatedAt < Math.max(retained.updatedAt, retained.delegationReadCut?.goalUpdatedAt ?? 0)) return retained
+function demandRecordFromFilesystem(demand: FilesystemDemand & Pick<DemandRecord, 'planState' | 'planStateIssue' | 'address' | 'addressIssue' | 'approvalObservations' | 'approvalObservationIssue'>, retained?: DemandRecord): DemandRecord {
+  const sameOwner = !demand.address || !retained?.address || demand.address.runtimeId === retained.address.runtimeId && demand.address.namespace === retained.address.namespace
+  if (retained && sameOwner && demand.updatedAt < Math.max(retained.updatedAt, retained.delegationReadCut?.goalUpdatedAt ?? 0)) return retained
+  const approvalObservations = demand.approvalObservations ?? (sameOwner ? retained?.approvalObservations : undefined)
+  const approvalObservationIssue = demand.approvalObservationIssue ?? (demand.approvalObservations === undefined && sameOwner ? retained?.approvalObservationIssue : undefined)
   return {
     id: demand.id,
     ...(demand.address ? { address: demand.address } : {}),
@@ -2094,6 +2097,8 @@ function demandRecordFromFilesystem(demand: FilesystemDemand & Pick<DemandRecord
     ...(demand.planStateIssue ? { planStateIssue: demand.planStateIssue } : {}),
     ...(retained?.patrolObservations ? { patrolObservations: retained.patrolObservations } : {}),
     dispatches: [...(demand.dispatches ?? [])],
+    ...(approvalObservations ? { approvalObservations } : {}),
+    ...(approvalObservationIssue ? { approvalObservationIssue } : {}),
     activities: demand.activities,
     decisions: demand.decisions,
     ...(demand.alignment === undefined ? {} : { alignment: demand.alignment }),

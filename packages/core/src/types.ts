@@ -1163,7 +1163,7 @@ export type AgentLaunchPromptInputPlan = Readonly<{
 
 /** Original creation facts survive explicit retirement without becoming an active Session. */
 export type AgentMuxAgentCreationInspection = AgentMuxAgentSession |
-  ({ kind: 'retired-agent' } & Omit<import('./agent-session-store.js').AgentMuxRetiredAgentSession, 'executorInvocation' | 'nativeCreationKeys'>) |
+  ({ kind: 'retired-agent' } & Omit<import('./agent-session-store.js').AgentMuxRetiredAgentSession, 'executorInvocation' | 'nativeCreationKeys' | 'interactionOperations'>) |
   { kind: 'prepared-agent-creation' | 'closed-agent-creation'; agentSessionId: string; providerId: string; executorId: string;
     hostId: string; workspacePath: string; creation: AgentMuxAgentCreationFact; resolution?: import('./agent-creation-resolution.js').AgentMuxCreationResolution;
     /** Exact Native read only; this does not grant Session or input qualification. */
@@ -1772,6 +1772,7 @@ export type AgentMuxInteractionOperationIntent = {
 /** Original semantic response facts; transport acceptance never claims Native adoption. */
 export type AgentMuxInteractionOperationReceipt = AgentMuxInteractionOperationIntent & {
   authorHuman?: true
+  goalApproval?: import('./goal-approval.js').GoalApprovalAttribution
   moteObservationId?: string
   agentSessionId: string
   run: AgentMuxRunRef

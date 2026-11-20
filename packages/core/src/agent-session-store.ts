@@ -254,6 +254,8 @@ export type AgentMuxLifecycleClaim = {
 }
 
 export type AgentMuxRetiredAgentSession = {
+  /** Qualified Goal links retain their original Core response after Stop. */
+  interactionOperations?: NonNullable<AgentMuxStoredAgentSession['interactionOperations']>
   /** Private key-only lifecycle provenance; excluded from public history/snapshots. */
   nativeCreationKeys?: import('./types.js').AgentMuxNativeCreationKeys
   /** Explicit deletion is terminal for this identity; its original correlations remain. */
@@ -1009,6 +1011,7 @@ function retiredAgentSession(value: unknown): AgentMuxRetiredAgentSession {
     source: 'user',
     observedAt: timestamp(source.observedAt, 'retiredAgentSession.observedAt'),
     ...(source.recordDeletion === undefined ? {} : { recordDeletion: parseAgentSessionRecordDeletion(source.recordDeletion) }),
+    ...(source.interactionOperations === undefined ? {} : { interactionOperations: interactionOperations(source.interactionOperations, source.agentSessionId) }),
     ...(source.continuityControlReceipts === undefined ? {} : { continuityControlReceipts: parseAgentContinuityControlReceipts(source.continuityControlReceipts, String(source.agentSessionId)) }),
     ...(source.originalLaunchOptions === undefined ? {} : { originalLaunchOptions: launchOptionSelection(source.originalLaunchOptions) }),
     ...(source.history === undefined ? {} : { history: normalizeSessionHistoryMetadata(source.history) }),
@@ -1016,6 +1019,24 @@ function retiredAgentSession(value: unknown): AgentMuxRetiredAgentSession {
     ...(source.activityCommit === undefined ? {} : { activityCommit: activityCommit(source.activityCommit, string(source.agentSessionId, 'retiredAgentSession.agentSessionId')) }),
     ...(source.stop === undefined ? {} : { stop: parseAgentStopRecord(source.stop) })
   }
+}
+
+function interactionOperations(value: unknown, agentSessionId: unknown): NonNullable<AgentMuxStoredAgentSession['interactionOperations']> {
+  return Object.fromEntries(Object.entries(record(value, 'interaction operations')).map(([id, receipt]) => {
+    const normalized = normalizeInteractionOperationReceipt(receipt)
+    if (id !== normalized.operationId || normalized.agentSessionId !== agentSessionId) throw new AgentMuxError('Interaction operation identity mismatch.', 'INVALID_AGENT_SESSION_STORE')
+    return [id, normalized]
+  }))
+}
+
+function retainedGoalApprovals(previous: Pick<AgentMuxStoredAgentSession, 'interactionOperations'> | undefined) {
+  const entries = Object.entries(previous?.interactionOperations ?? {}).filter(([, receipt]) => receipt.goalApproval)
+  return entries.length ? { interactionOperations: Object.fromEntries(entries) } : {}
+}
+
+function preserveReopenedApprovals(previous: AgentMuxRetiredAgentSession | undefined, next: AgentMuxStoredAgentSession) {
+  const retained = retainedGoalApprovals(previous).interactionOperations
+  return retained ? { ...next, interactionOperations: { ...next.interactionOperations, ...retained } } : next
 }
 
 function deletedRetirement(current: AgentMuxRetiredAgentSession | null, expected: AgentMuxRetiredAgentSession,
@@ -1035,7 +1056,8 @@ function deletedRetirement(current: AgentMuxRetiredAgentSession | null, expected
 
 /** Only original normalized Store facts form this CAS witness; it is never authorization. */
 export function agentSessionRetirementRevision(retired: AgentMuxRetiredAgentSession): string {
-  const { recordDeletion: _deletion, ...original } = retired
+  // Response bodies are removed by explicit Session record cleanup.
+  const { recordDeletion: _deletion, interactionOperations: _responses, ...original } = retired
   return createHash('sha256').update(JSON.stringify(original)).digest('hex')
 }
 
@@ -1341,11 +1363,7 @@ export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgent
     ...(source.executorInvocation === undefined ? {} : { executorInvocation: structuredClone(source.executorInvocation) }),
     ...(source.nativeTurnEnds === undefined ? {} : { nativeTurnEnds: nativeTurnEnds(source.nativeTurnEnds) }),
     ...(source.nativeInteractionEnds === undefined ? {} : { nativeInteractionEnds: nativeInteractionEnds(source.nativeInteractionEnds) }),
-    ...(source.interactionOperations === undefined ? {} : { interactionOperations: Object.fromEntries(Object.entries(record(source.interactionOperations, 'interaction operations')).map(([id, receipt]) => {
-      const normalized = normalizeInteractionOperationReceipt(receipt)
-      if (id !== normalized.operationId || normalized.agentSessionId !== source.agentSessionId) throw new AgentMuxError('Interaction operation identity mismatch.', 'INVALID_AGENT_SESSION_STORE')
-      return [id, normalized]
-    })) }),
+    ...(source.interactionOperations === undefined ? {} : { interactionOperations: interactionOperations(source.interactionOperations, source.agentSessionId) }),
     hookBindingId: string(source.hookBindingId, 'hookBindingId'),
     hookToken: string(source.hookToken, 'hookToken'),
     ...(source.capabilityHash === undefined ? {} : { capabilityHash: string(source.capabilityHash, 'capabilityHash') }),
@@ -2369,7 +2387,8 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     signal?.throwIfAborted()
     const index = this.retiredAgentSessions.findIndex(value => value.agentSessionId === expected.agentSessionId)
     const current = confirmDeletedRetirement(this.retiredAgentSessions[index], expected)
-    const next = { ...current, recordDeletion: { ...current.recordDeletion!, phase: 'complete' as const } }
+    const { interactionOperations: _responses, ...retained } = current
+    const next = { ...retained, recordDeletion: { ...current.recordDeletion!, phase: 'complete' as const } }
     const stored = structuredClone(next), receipt = structuredClone(next)
     const history = this.timelines.get(expected.agentSessionId)
     // Preserve the original stream and future-body retirement cut; terminal
@@ -2678,7 +2697,8 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     const previous = this.sessions.get(reservation.agentSessionId)
     const history = currentReservation.kind === 'reopen' ? currentReservation.expectedRetirement.history : undefined
     const epochOwner = previous ?? (next && history ? { ...next, ...optionalInputEpoch(history.inputEpoch), ...(history.inputRestoration ? { inputRestoration: history.inputRestoration } : {}) } : undefined)
-    const normalized = next ? normalizeStoredAgentSession(ordinaryInputEpoch(epochOwner, {...preserveContinuityOperations(previous, next, currentReservation.kind === 'resume' ? currentReservation.resolution?.receipt.originalOperationId : undefined),nativeCreationKeys:committedNativeCreationKeys(currentReservation,previous)})) : null
+    const reopened = currentReservation.kind === 'reopen' ? currentReservation.expectedRetirement : undefined
+    const normalized = next ? normalizeStoredAgentSession(ordinaryInputEpoch(epochOwner, {...preserveContinuityOperations(previous, preserveReopenedApprovals(reopened, next), currentReservation.kind === 'resume' ? currentReservation.resolution?.receipt.originalOperationId : undefined),nativeCreationKeys:committedNativeCreationKeys(currentReservation,previous)})) : null
     assertLifecycleReceiptFence(currentReservation, previous ?? null, normalized, true)
     assertLifecycleCommit(currentReservation, normalized)
     const values = [...this.sessions.values()].filter(
@@ -2704,6 +2724,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
             nativeCreationKeys:committedNativeCreationKeys(currentReservation,previous),
             ...(previous.executorInvocation === undefined ? {} : { executorInvocation: structuredClone(previous.executorInvocation) }),
             continuityControlReceipts: continuityControlReceipts(previous),
+            ...retainedGoalApprovals(previous),
             ...(previous.activityCommit ? { activityCommit: previous.activityCommit } : {}),
             ...(stopRecord ? { stop: stopRecord } : {})
           }])
@@ -3608,7 +3629,8 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         const deleted = this.db.prepare(`DELETE FROM ${table} WHERE rowid IN (SELECT rowid FROM ${table} WHERE session_id=? LIMIT 128)`).run(id)
         if (deleted.changes) { this.dirty = true; return }
       }
-      result = { ...result, recordDeletion: { ...result.recordDeletion!, phase: 'complete' } }
+      const { interactionOperations: _responses, ...retained } = result
+      result = { ...retained, recordDeletion: { ...result.recordDeletion!, phase: 'complete' } }
       this.db.prepare('UPDATE retired_sessions SET json=? WHERE id=?').run(JSON.stringify(result), id)
       this.dirty = true
     }, signal, expected.agentSessionId)
@@ -4048,7 +4070,8 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     }
     const target = this.lifecycleTarget(db, id), previous = target.session ?? undefined
     assertReservationPrecondition(reservation, target.sessions, target.retired)
-    const normalized = next ? normalizeStoredAgentSession({...preserveContinuityOperations(previous, next,
+    const reopened = current.kind === 'reopen' ? current.expectedRetirement : undefined
+    const normalized = next ? normalizeStoredAgentSession({...preserveContinuityOperations(previous, preserveReopenedApprovals(reopened, next),
       current.kind === 'resume' ? current.resolution?.receipt.originalOperationId : undefined),nativeCreationKeys:committedNativeCreationKeys(current,previous)}) : null
     assertLifecycleReceiptFence(current, previous ?? null, normalized, true)
     assertLifecycleCommit(current, normalized)
@@ -4110,6 +4133,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       nativeCreationKeys:committedNativeCreationKeys(current,previous),
             ...(previous.executorInvocation === undefined ? {} : { executorInvocation: structuredClone(previous.executorInvocation) }),
       continuityControlReceipts: continuityControlReceipts(previous),
+      ...retainedGoalApprovals(previous),
       ...(previous.activityCommit ? { activityCommit: previous.activityCommit } : {}),
       ...(record ? { stop: record } : {})
     })

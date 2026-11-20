@@ -34,6 +34,7 @@ import { ContinuousProgressLoopStore } from './continuous-progress-loop-store.js
 import { deliverContinuousProgress } from './continuous-progress-delivery.js'
 import { checkInHumanObservation } from './agent-schedule-check-in.js'
 import { createGoalParticipationOwner } from './goal-participation-owner.js'
+import { createGoalApprovalOwner } from './goal-approval-owner.js'
 import { admittedDemandParticipation } from './demand-participation.js'
 import { hostNameHistory } from './name-history.js'
 import { ScratchTopics } from './mote-resources.js'
@@ -90,6 +91,9 @@ export function createHostGoals(options: {
     }
   }
   const projectGoal = async (goal: Demand) => (await projectGoals([goal]))[0]!
+  const approvals = createGoalApprovalOwner({ demands, runtimeId: () => options.runtime().ownerIdentity().runtimeId,
+    client: () => options.runtime().client, changed: id => changed([id]) })
+  const readGoal = async (goal: Demand) => ({ ...await projectGoal(goal), ...await approvals.read(goal) })
 
   const inputCancellations = new Set<(control: import('./goal-runtime.js').GoalAgentControl) => void>()
   const clients = () => [{ hostId: 'local', client: options.runtime().client }, ...(options.clients?.() ?? [])]
@@ -244,13 +248,13 @@ export function createHostGoals(options: {
       if (req.creationOperationId !== undefined) {
         const goalId = await demands.originalGoalCreationId(req.creationOperationId)
         const goal = goalId === undefined ? null : await demands.get(goalId)
-        return { operation: req.operation, demand: goal ? await projectGoal(goal) : null, goalContinuations: goal ? await progress.listGoals(goal.id) : [] }
+        return { operation: req.operation, demand: goal ? await readGoal(goal) : null, goalContinuations: goal ? await progress.listGoals(goal.id) : [] }
       }
       if (req.dispatchOperationId) {
         const reference = { goalId: req.demandId, operationId: req.dispatchOperationId }, original = await dispatch.original(reference)
         if (!runBoundDemandDispatch(original)) {
           // This cut has only a business request/refusal, not a Core input key.
-          return { operation: req.operation, demand: await projectGoal(await get(req.demandId)), goalContinuations: await progress.listGoals(req.demandId) }
+          return { operation: req.operation, demand: await readGoal(await get(req.demandId)), goalContinuations: await progress.listGoals(req.demandId) }
         }
         if ('target' in original) {
           if (!req.access) throw new AgentMuxError('Choose current access to read this exact original qualified Goal input. The Goal and request remain retained.', 'CONTROL_UNAVAILABLE')
@@ -263,7 +267,7 @@ export function createHostGoals(options: {
         }
       }
       const goal = await demands.get(req.demandId)
-      return { operation: req.operation, demand: goal ? await projectGoal(goal) : null, goalContinuations: await progress.listGoals(req.demandId) }
+      return { operation: req.operation, demand: goal ? await readGoal(goal) : null, goalContinuations: await progress.listGoals(req.demandId) }
     }
     if (req.operation === 'demand.create') {
       const selected = await project(req.projectId)
@@ -506,7 +510,7 @@ export function createHostGoals(options: {
         startedAt: savedStart.preparedAt, agentReference: original.target, run: { runId } } }
     } finally { await port.dispose().catch(error => { console.warn('Closing this exact Goal input reader was unconfirmed.', error) }) }
   }
-  return { execute, inputEpoch: (input: import('@agentmux/core').GoalInputEpochInput, context: AgentMuxRpcCallContext) => readGoalInputEpoch({ runtime: options.runtime, clients }, input, context), goalChanges: { subscribe: async (listener: (change: import('@agentmux/core').GoalChanges) => void | Promise<void>, _end: (error?: Error) => void | Promise<void>, signal: AbortSignal) => {
+  return { execute, approval: approvals.respond, inputEpoch: (input: import('@agentmux/core').GoalInputEpochInput, context: AgentMuxRpcCallContext) => readGoalInputEpoch({ runtime: options.runtime, clients }, input, context), goalChanges: { subscribe: async (listener: (change: import('@agentmux/core').GoalChanges) => void | Promise<void>, _end: (error?: Error) => void | Promise<void>, signal: AbortSignal) => {
       signal.throwIfAborted(); changeReaders.add(listener)
       try { const initial = { goalIds: (await demands.list()).map(goal => goal.id) }; signal.throwIfAborted(); return { initial, dispose: () => { changeReaders.delete(listener) } } }
       catch (error) { changeReaders.delete(listener); throw error }

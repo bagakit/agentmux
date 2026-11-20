@@ -131,6 +131,7 @@ import { parseAgentSessionHistoryReadPage, type AgentSessionHistoryReadInput } f
 import { parseSessionHistoryResourceResult, type AgentSessionHistoryResourceParams } from './session-history-resource.js'
 import { parseHostedBootstrap } from './hosted-value.js'
 import { normalizeInteractionOperationReceipt, normalizeAgentSession, normalizeSessionHistoryMetadata, parseAgentCreationFact } from "./agent-session-codec.js";
+import { parseGoalApprovalSelection } from './goal-approval.js'
 import { agentInteractionResponseUnavailableReason } from './agent-interaction-state.js'
 import { validateAgentMuxMessageEnvelope } from './agent-global-message-queue.js'
 import { agentPromptInputId, validateAgentPromptAdmissionIntent, validateAgentPromptCondition, validateAgentPromptInputKey } from './agent-prompt-condition.js'
@@ -667,6 +668,10 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         if (!isDeepStrictEqual(raw, receipt) || !rpcSessionTargetMatches(input.agentSessionId, receipt.agentSessionId) || receipt.operationId !== input.operationId) fail()
         if (method === 'agent.interaction.respond' && (!isDeepStrictEqual(receipt.run, input.expectedRun) || !isDeepStrictEqual(receipt.response, input.response) || !isDeepStrictEqual(receipt.externalAction, input.externalAction) ||
           !isDeepStrictEqual(agentInteractionRequestTarget(receipt.expectedRequest), agentInteractionRequestTarget(normalizeAgentInteractionRequest(input.expectedRequest))))) fail()
+        if (method === 'agent.interaction.respond' && input.goalApproval !== undefined) {
+          const selection = parseGoalApprovalSelection(input.goalApproval)
+          if (receipt.goalApproval?.goalId !== selection.goalId || receipt.goalApproval.dispatchOperationId !== selection.dispatchOperationId) fail()
+        }
         break
       }
       case 'agent.question.reply': {

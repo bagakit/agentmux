@@ -262,7 +262,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     ...(mobileIncidents ? { clientIncidents: mobileIncidents.clientIncidents, mobileWebReports: mobileIncidents.mobileWebReports } : {}),
     ...(configurationPath ? { settingsResources: createHostSettingsResourceRead(configurationPath), appearance: createHostAppearanceObservation(configurationPath) } : {}),
     ...content,
-    ...(goals ? { goalControl: goals.execute, goalInputEpoch: goals.inputEpoch, goalParticipation: goals.participation, nameHistory: goals.nameHistory, goalChanges: goals.goalChanges, progress: goals.progress, schedules: goals.schedules, goalDelegations: goals.goalDelegations, automaticInput: goals.automaticInput } : {}),
+    ...(goals ? { goalControl: goals.execute, goalInputEpoch: goals.inputEpoch, goalParticipation: goals.participation, goalApproval: goals.approval, nameHistory: goals.nameHistory, goalChanges: goals.goalChanges, progress: goals.progress, schedules: goals.schedules, goalDelegations: goals.goalDelegations, automaticInput: goals.automaticInput } : {}),
     snapshot: createHostSnapshotObservation(configurationPath, () => [...(runtime ? [{ hostId: 'local', client: runtime.client }] : []), ...(options.connections?.clients?.() ?? [])],workspaceResources),
     spatialPresentation: createHostSpatialPresentation({ ...(configurationPath ? { configurationPath } : {}), clients: () => [...(runtime ? [{ hostId: 'local', client: runtime.client }] : []), ...(options.connections?.clients?.() ?? [])] }),
     mobileAssets,

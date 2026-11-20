@@ -26,7 +26,8 @@ import { parseDemandPatrols } from '@agentmux/demand'
 import { parseDemandDelegations } from '@agentmux/demand/delegations'
 import { parseGoalPlan } from '@agentmux/demand/goal-plan'
 import { parseOwnerGoalPlanState } from './goal-plan-state.js'
-import { parseDemandDispatches, parseDemandProgressUpdates } from '@agentmux/demand'
+import { parseDemandDispatches, parseDemandProgressUpdates, runBoundDemandDispatch } from '@agentmux/demand'
+import { parseGoalApprovalObservation } from './goal-approval.js'
 import { parseDemandParticipations, parseDemandCreationOrigin } from '@agentmux/demand/goals'
 import { parseDemandContentReferences } from '@agentmux/demand'
 import { parseGoalContinuationLoop } from './continuous-progress-scheduler.js'
@@ -1142,9 +1143,29 @@ function parseDemand(value: unknown): AgentMuxDemand {
       addressRead = { address: expected }
     } else if (source.addressIssue !== undefined) addressRead = { addressIssue: text(source.addressIssue, 'Goal address observation', 'CONTROL_PROTOCOL_ERROR') }
   } catch (error) { addressRead = { addressIssue: `Goal link source is unconfirmed. ${error instanceof Error ? error.message : String(error)} The original Goal and work are retained.` } }
+  let approvalRead: Pick<AgentMuxDemand, 'approvalObservations' | 'approvalObservationIssue'> = {}
+  try {
+    if (source.approvalObservations !== undefined) {
+      if (!Array.isArray(source.approvalObservations)) throw new Error('Invalid permission response observations.')
+      const starts = new Map((goalFacts.dispatches ?? []).filter(runBoundDemandDispatch).map(start => [start.operationId, start]))
+      const observations = source.approvalObservations.map(parseGoalApprovalObservation)
+      for (const { attribution } of observations) {
+        const start = starts.get(attribution.dispatchOperationId), key = attribution.inputKey
+        if (attribution.goalId !== source.id || !start || !('target' in start) || start.stage !== 'confirmed' ||
+            start.receipt?.kind !== 'core-input' || key.attemptId !== undefined || key.submissionId !== start.receipt.inputKey.submissionId ||
+            key.agentSessionId !== start.receipt.inputKey.agentSessionId || key.expectedRun.runId !== start.receipt.inputKey.expectedRun.runId)
+          throw new Error('A permission response belongs to another original Goal input.')
+      }
+      approvalRead.approvalObservations = observations
+    }
+    if (source.approvalObservationIssue !== undefined) approvalRead.approvalObservationIssue = text(source.approvalObservationIssue, 'Approval source observation', 'CONTROL_PROTOCOL_ERROR')
+  } catch (error) {
+    approvalRead = { approvalObservationIssue: error instanceof Error ? error.message : 'Original permission responses could not be read.' }
+  }
   return {
     ...goalFacts, ...planStateRead,
     ...addressRead,
+    ...approvalRead,
     id: id(source.id, 'Control demand id is invalid.', 'CONTROL_PROTOCOL_ERROR'),
     title: text(source.title, 'Control demand title', 'CONTROL_PROTOCOL_ERROR'),
     description: text(source.description, 'Control demand description', 'CONTROL_PROTOCOL_ERROR'),
