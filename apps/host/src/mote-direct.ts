@@ -4,7 +4,7 @@ import { AgentMuxError, moteDirectScheduleSourceMatches, privateImageMetadata, t
 import { renderAmuxProtocol } from '@agentmux/core/amux-protocol'
 import { sameMotePreferencesTarget, type MotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import type { MoteMainReader } from '@agentmux/core/mote-dialogue'
-import { authorizeMoteConversationMain } from './mote-group.js'
+import { authorizeMoteConversationMain, matchesMoteMainTarget } from './mote-group.js'
 import type { MoteGroupStore, MotePrivateReportOrigin } from './mote-group-store.js'
 import type { AgentMuxRpcFileUploadsOwner, FileUploadIdentity } from '@agentmux/core/files'
 
@@ -65,7 +65,7 @@ export function createHostMoteDirect(ledger: MoteGroupPort, owner: {
         return existing
       }
       const main = await owner.main.readCurrentMoteMain(member.target)
-      if (main.status !== 'ready' || main.identity?.moteId !== member.moteId || main.current?.hostId !== 'local')
+      if (!matchesMoteMainTarget(main, member.target) || main.current?.hostId !== 'local')
         throw new AgentMuxError('The coordinating Mote has no confirmed local Main yet. Its report is saved.', 'CONTROL_UNAVAILABLE')
       const text = renderAmuxProtocol('mote-task', 'private-report', {
         original: JSON.stringify({ threadId, assignmentMessageId: original.id, replyMessageId, reporter: reply.author })
@@ -156,7 +156,7 @@ export function createHostMoteDirect(ledger: MoteGroupPort, owner: {
     },
     async dispatchWork(work, body, operationId, assertCurrent) {
       const selected = await owner.main.readCurrentMoteMain(work.mote)
-      if (selected.status !== 'ready' || !selected.current || selected.identity?.moteId !== work.mote.spaceId)
+      if (!matchesMoteMainTarget(selected, work.mote) || !selected.current)
         throw new AgentMuxError('The scheduled assignment is saved and awaiting its coordinating Main.', 'CONTROL_UNAVAILABLE')
       const session = await owner.client.readAgentSession(selected.current.sessionId)
       if (!session || session.hostId !== selected.current.hostId) throw new AgentMuxError('The coordinating Main Session is unconfirmed.', 'CONTROL_UNAVAILABLE')

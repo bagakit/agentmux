@@ -7,7 +7,7 @@ import { AgentMuxError, mintObjectId, type AgentInputSubmissionReceipt, type Age
 import { sameMotePreferencesTarget, type MotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import type { FileListParams, FileListResult, FileReadParams, FileReadResult } from '@agentmux/core/files'
 import { parseFileListResult, parseFileReadResult } from '@agentmux/core/files'
-import type { MoteMainReader } from '@agentmux/core/mote-dialogue'
+import type { MoteMainReader, MoteMainSnapshot } from '@agentmux/core/mote-dialogue'
 import type { HostMoteChatAgents } from './mote-chat-agents.js'
 import { groupFailure, groupMemberGeneration, groupStableId as stable, type GroupDeliveryRecord, type GroupInputKey, type GroupMemberRecord, type MoteGroupStore } from './mote-group-store.js'
 
@@ -57,6 +57,11 @@ function requireActive(record: GroupMemberRecord, generation = groupMemberGenera
     groupFailure('This Group membership no longer authorizes new Group actions.', 'CONTROL_PERMISSION_DENIED')
 }
 
+export function matchesMoteMainTarget(snapshot: MoteMainSnapshot, target: MotePreferencesTarget): boolean {
+  return snapshot.status === 'ready' && snapshot.identity?.hostId === target.expectedResource.hostId &&
+    sameMotePreferencesTarget(snapshot.target, target)
+}
+
 export async function authorizeMoteConversationMain(main: MoteMainReader | undefined, target: MotePreferencesTarget, context: MoteGroupCallContext) {
   const { actor } = context
   if (actor.kind !== 'agent')
@@ -81,9 +86,9 @@ export async function ownsMoteWork(main: MoteMainReader, client: Pick<AgentMuxCl
   work: NonNullable<ContinuousProgressLoop['moteWork']>, caller: { agentSessionId: string; capability: string }): Promise<boolean> {
   try {
     const selected = await main.readCurrentMoteMain(work.mote)
-    if (selected.status !== 'ready' || selected.current?.sessionId !== caller.agentSessionId) return false
+    if (!matchesMoteMainTarget(selected, work.mote) || selected.current?.sessionId !== caller.agentSessionId) return false
     const session = await client.authorizeRetainedAgentCaller(caller.capability, caller.agentSessionId)
-    if (selected.current.hostId !== session.hostId || selected.identity?.moteId !== work.mote.spaceId) return false
+    if (selected.current.hostId !== session.hostId) return false
     await main.assertCurrent(selected)
     return true
   } catch { return false }
@@ -447,7 +452,7 @@ export function createHostMoteGroups(options: {
     async dispatchWork(work, body, operationId, assertCurrent) {
       const main = options.main
       const selected = await main?.readCurrentMoteMain(work.mote)
-      if (!main || selected?.status !== 'ready' || !selected.current || selected.identity?.moteId !== work.mote.spaceId)
+      if (!main || !selected || !matchesMoteMainTarget(selected, work.mote) || !selected.current)
         return groupFailure('The scheduled assignment is saved and awaiting its coordinating Main.', 'CONTROL_UNAVAILABLE')
       const session = await groupSession({ agentSessionId: selected.current.sessionId, hostId: selected.current.hostId })
       const { message } = await this.call('space.mote.group.send', { groupId: work.groupId, body, operationId, sourceMote: work.mote,
