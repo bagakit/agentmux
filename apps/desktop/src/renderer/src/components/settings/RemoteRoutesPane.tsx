@@ -89,7 +89,8 @@ function RoutePolicyEditor({ host, identity, active }: { host: HostConfig; ident
     try {
       const reply = await api.hostRoutes.call(prefixTarget(), 'route.edge.inspect', { edgeId }, controller.signal)
       if (controller.signal.aborted || currentPath.current !== key || edgeEpoch.current !== token) return
-      const route = parseAdoptedHostRoute({ source: row?.route.source ?? identity, hops: [...(row?.route.hops ?? []), { edgeId: reply.edge.edgeId, target: reply.target }] })
+      const hop = { edgeId: reply.edge.edgeId, target: reply.target, ...(reply.edge.kind === 'relay' ? { kind: reply.edge.kind } : {}) }
+      const route = parseAdoptedHostRoute({ source: row?.route.source ?? identity, hops: [...(row?.route.hops ?? []), hop] })
       setActor(reply.actor)
       if (row) changeRoute(value => ({ ...value, route }))
       else {
