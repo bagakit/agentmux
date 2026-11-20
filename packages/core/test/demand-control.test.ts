@@ -30,16 +30,16 @@ describe('demand control contract', () => {
 
   it('parses stable JSON demand receipts', () => {
     const receipt = parseAgentMuxControlReceipt({
-      ...base, ok: true, operation: 'demand.list', result: { demands: [{ id: 'task-1', title: 'One', description: '', status: 'backlog', priority: 'normal', projectId: null, projectName: null, sessionIds: [], createdAt: 1, updatedAt: 2, source: 'default-topic' }] }
+      ...base, ok: true, operation: 'demand.list', result: { demands: [{ id: 'task-1', title: 'One', description: '', status: 'backlog', priority: 'normal', projectId: null, projectName: null, sessionIds: [], assigneeSessionIds: [], supervisorSessionId: null, participations: [], createdAt: 1, updatedAt: 2, source: 'default-topic' }] }
     })
     expect(receipt.ok && 'demands' in receipt.result && receipt.result.demands[0]?.id).toBe('task-1')
   })
 
   it('parses assignment and handoff as explicit Demand operations', () => {
-    const assigned = parseAgentMuxControlRequest({ ...base, operation: 'demand.assign', demandId: 'task-1', projectId: 'repo', assigneeExecutorId: 'agent-a', start: false })
+    const assigned = parseAgentMuxControlRequest({ ...base, operation: 'demand.assign', demandId: 'task-1', projectId: 'repo', assigneeSessionIds: ['session-a'], start: false })
     expect(assigned.operation).toBe('demand.assign')
     expect('start' in assigned && assigned.start).toBe(false)
-    const handoff = parseAgentMuxControlRequest({ ...base, operation: 'demand.handoff', demandId: 'task-1', assigneeExecutorId: 'agent-b', sessionId: 'session-b' })
+    const handoff = parseAgentMuxControlRequest({ ...base, operation: 'demand.handoff', demandId: 'task-1', assigneeSessionIds: ['session-b'], sessionId: 'session-b' })
     expect(handoff.operation).toBe('demand.handoff')
     expect('sessionId' in handoff && handoff.sessionId).toBe('session-b')
     const receipt = parseAgentMuxControlReceipt({
@@ -47,7 +47,7 @@ describe('demand control contract', () => {
       ok: true,
       operation: 'demand.start',
       result: {
-        demand: { id: 'task-1', title: 'One', description: '', status: 'in_progress', priority: 'normal', projectId: 'repo', projectName: 'Repo', assigneeExecutorId: 'agent-a', sessionIds: ['session-a'], createdAt: 1, updatedAt: 2, source: 'default-topic' },
+        demand: { id: 'task-1', title: 'One', description: '', status: 'in_progress', priority: 'normal', projectId: 'repo', projectName: 'Repo', assigneeSessionIds: ['session-a'], supervisorSessionId: null, sessionIds: ['session-a'], participations: [], createdAt: 1, updatedAt: 2, source: 'default-topic' },
         receipt: { demandId: 'task-1', startedAt: 2, sessionId: 'session-a' }
       }
     })
@@ -60,8 +60,8 @@ describe('Goal proposals through real Control and amux CLI', () => {
   const proposal = { summary: 'Retain the workspace', criteria: [{ id: 'restore', text: 'Tabs remain visible' }], openQuestions: [] }
   const grounding = { alignmentRevision: 1, summary: 'Restart inspected', checks: [{ criterionId: 'restore', outcome: 'met', evidence: ['verification.log:12'], note: '' }] }
   const project = (demand: Demand): AgentMuxDemand => {
-    const { executorId, activities: _activities, decisions: _decisions, ...facts } = demand
-    return { ...facts, activityLog: demand.activities.map(activity => activity.message), source: 'default-topic', assigneeExecutorId: executorId }
+    const { executorId: _executorId, activities, decisions: _decisions, ...facts } = demand
+    return { ...facts, activityLog: activities.map(activity => activity.message), source: 'default-topic' }
   }
 
   it('roundtrips nonempty owner proposals, revisions and acknowledgements through the socket and cross-process CLI', async () => {
