@@ -208,6 +208,11 @@ Load only the journey needed now:
   to the confirmed local one-time Start for the exact Session and Run. The authenticated author
   and selected Start are saved in the original response. Goal inspection reads the explicit
   link. Provider causality remains unknown.
+  If that linked answer was saved before its original channel was attempted, the same
+  authenticated author can explicitly submit the identical operation, request, decision and
+  selection. The original channel must still be pending and atomically claim the delivery.
+  Inspect the operation after an unknown reply. Unknown delivery stays with the original
+  operation and never authorizes another dispatch.
   agent question reply queues asynchronous question answers only where the capability
   asyncQuestionReply=native-input is present; submission is queue admission, not adoption.
   Both answers require a transport-approved user or device; a managed Agent cannot answer on a
