@@ -141,7 +141,8 @@ export class ContinuousProgressLoopManager {
     return starting
   }
   private async startOnce(): Promise<void> {
-    const loops = (await this.store.load()).map((loop) => (loop.pendingCompletion && loop.status === 'active' ||
+    // Scheduled work revisits its exact publication key. Native claims need their existing reconciliation path.
+    const loops = (await this.store.load()).map((loop) => (loop.pendingCompletion && loop.status === 'active' && !loop.moteWork ||
       !isAgentSchedule(loop) && loop.lastMutation?.action !== 'update' && loop.lastMutation?.phase === 'prepared')
       ? { ...loop, status: loop.status === 'stopped' ? loop.status : 'paused' as const, pause: this.pauseFacts(loop, 'input-unconfirmed'), lastOutcome: 'unknown' as const } : loop)
     this.scheduler.restore(loops)
@@ -1052,9 +1053,9 @@ export class ContinuousProgressLoopManager {
   }
   private persistenceFailed(loopId: string, error: unknown): void {
     const original = this.require(loopId)
-    const safeToWait = original.status === 'active' && !original.pendingCompletion &&
-      (original.managedSource || isAgentSchedule(original) && original.lastOutcome !== 'unknown')
-    const status = safeToWait ? 'active' : original.taskSource?.kind === 'goal' && original.status === 'stopped' ? 'stopped' : 'paused'
+    const safeToWait = original.status === 'active' && (original.moteWork || !original.pendingCompletion &&
+      (original.managedSource || isAgentSchedule(original) && original.lastOutcome !== 'unknown'))
+    const status = safeToWait ? 'active' : (original.moteWork || original.taskSource?.kind === 'goal') && original.status === 'stopped' ? 'stopped' : 'paused'
     if (status === 'paused' && original.status === 'active') this.pauseWithReason(loopId, 'persistence-unconfirmed')
     this.patch(loopId, { status, lastDecision: `Loop persistence is unconfirmed. Manual input remains available. ${error instanceof Error ? error.message : String(error)}` })
     for (const listener of this.listeners) listener(this.require(loopId))
