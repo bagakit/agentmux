@@ -49,8 +49,12 @@ it.runIf(process.platform === 'darwin')('real package verification rejects a mis
   await expect(verifyIdentity(app)).rejects.toThrow()
 })
 
-it.runIf(process.platform === 'darwin')('real package verification rejects a changed location purpose', async () => {
+it.runIf(process.platform === 'darwin')('real package verification rejects changed location and local network purposes', async () => {
   const app = await fixture(); await brandApplication(app); const plist = join(app, 'Contents/Info.plist')
+  const { stdout: location } = await execute('/usr/bin/plutil', ['-extract', 'NSLocationUsageDescription', 'raw', '-o', '-', plist])
   await execute('/usr/bin/plutil', ['-replace', 'NSLocationUsageDescription', '-string', 'Changed purpose', plist])
   await expect(verifyIdentity(app)).rejects.toThrow('Packaged location usage text is wrong.')
+  await execute('/usr/bin/plutil', ['-replace', 'NSLocationUsageDescription', '-string', location.trimEnd(), plist])
+  await execute('/usr/bin/plutil', ['-replace', 'NSLocalNetworkUsageDescription', '-string', 'Changed purpose', plist])
+  await expect(verifyIdentity(app)).rejects.toThrow('Packaged local network usage text is wrong.')
 })

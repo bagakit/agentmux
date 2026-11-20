@@ -31,7 +31,7 @@ describe('the macOS Host has one platform service per original endpoint', () => 
           .not.toEqual(normalizeMacosHostServiceDefinition(original, input.storePath))
       }
       for (const changed of [{ ...original, UnknownKey: true }, { ...original, KeepAlive: false },
-        { ...original, ProcessType: 'Background' },
+        { ...original, ProcessType: 'Background' }, { ...original, AssociatedBundleIdentifiers: ['different.bundle'] },
         { ...original, ProgramArguments: [...original.ProgramArguments].reverse() },
         { ...original, EnvironmentVariables: { ELECTRON_RUN_AS_NODE: 1 } }]) {
         expect(normalizeMacosHostServiceDefinition(changed, input.storePath))
@@ -39,6 +39,8 @@ describe('the macOS Host has one platform service per original endpoint', () => 
       }
       // A definition written before its scheduling class was declared is the same namespace.
       expect(normalizeMacosHostServiceDefinition({ ...original, ProcessType: 'Interactive' }, input.storePath))
+        .toEqual(normalizeMacosHostServiceDefinition(original, input.storePath))
+      expect(normalizeMacosHostServiceDefinition({ ...original, AssociatedBundleIdentifiers: ['dev.agentmux.desktop'] }, input.storePath))
         .toEqual(normalizeMacosHostServiceDefinition(original, input.storePath))
     } finally { vi.unstubAllEnvs() }
   })
@@ -76,6 +78,7 @@ describe('the macOS Host has one platform service per original endpoint', () => 
     expect(plist).toContain('<key>KeepAlive</key><true/>')
     // Terminal input and output relay through this job; it must not run in launchd's throttled default class.
     expect(plist).toContain('<key>ProcessType</key><string>Interactive</string>')
+    expect(plist).toContain('<key>AssociatedBundleIdentifiers</key><array><string>dev.agentmux.desktop</string></array>')
     expect(plist).toContain('<key>ProgramArguments</key><array>')
     expect(plist).toContain('<string>--store</string>')
     expect(plist).toContain(input.entrypoint)
