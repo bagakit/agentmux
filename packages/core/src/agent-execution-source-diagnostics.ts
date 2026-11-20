@@ -1,20 +1,35 @@
+import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import type { AgentMuxRpcCallContext } from './public-rpc-service.js'
 import type { AgentMuxSpatialStateStore } from './spatial-state.js'
 import { spatialAgentOpenRecord } from './spatial-agent-open-contract.js'
 import type { AgentExecutionInspection } from './agent-execution-coordinator.js'
-import type { AgentExecutionReference, AgentExecutionHelperStart } from './agent-execution-contract.js'
+import type { AgentExecutionReference, AgentExecutionHelperStart, AgentExecutionFailure } from './agent-execution-contract.js'
+import type { AgentExecutionNotice } from './agent-execution-helper.js'
 import type { ExecutionFrameFact } from './agent-execution/bridge.js'
 import { AgentMuxError } from './errors.js'
 
 /** No original bytes, exception text, launch input, environment or grant. */
 export type ExecutionHelperDiagnostic = { start: AgentExecutionHelperStart; cursor: number | null; ownerInstanceId: string | null }
+export type ExecutionSourceCreationFailure = Omit<AgentExecutionFailure, 'reference'> & { code: string }
+type ExecutionSourceNotice = Pick<AgentExecutionNotice, 'role' | 'capability' | 'state'> & { code?: string }
 export type AgentExecutionSourceDiagnostics = { sourceRuntimeId: string; reference: AgentExecutionReference;
   state: 'matched' | 'unconfirmed'; helpers: Record<'frontend' | 'executor', ExecutionHelperDiagnostic>;
+  connection?: { state: 'connected' } | { state: 'unconfirmed' | 'unavailable'; code: string };
+  notices?: ExecutionSourceNotice[];
+  lastCreationFailure?: ExecutionSourceCreationFailure;
   failure?: { hostId: string; role: 'frontend' | 'executor'; stage: 'attach';
     code: 'EXECUTION_PROTOCOL_INVALID_FRAME'; frame: ExecutionFrameFact } }
 export type ExecutionJournalDiagnostics = Omit<AgentExecutionSourceDiagnostics, 'sourceRuntimeId' | 'state'>
 export type ExecutionSourceDiagnosticsOwner = { spatial: Pick<AgentMuxSpatialStateStore, 'read'>; runtimeId(): string }
+
+/** A Source-owned split creation treats the project Core as the Coordinator. */
+export function sourceExecutionBindingId(sourceRuntimeId: string, agentHostId: string, agentSessionId: string, operationId: string): string {
+  return createHash('sha256').update(JSON.stringify([sourceRuntimeId, agentHostId, agentSessionId, operationId])).digest('hex')
+}
+
+export const isExecutionDiagnosticCode = (value: unknown): value is string =>
+  typeof value === 'string' && /^[A-Z][A-Z0-9_]{0,79}$/u.test(value)
 
 /** Trusted owner composition, not a public binding lookup. The public Source
  * reader has already authenticated its actual caller. This owner reads the
@@ -23,6 +38,7 @@ export async function inspectSourceExecutionDiagnostics(options: {
   source: ExecutionSourceDiagnosticsOwner; operationId: string; context: AgentMuxRpcCallContext;
   inspect(bindingId: string): Promise<AgentExecutionInspection | null>;
   journal(reference: AgentExecutionReference): Promise<ExecutionJournalDiagnostics | null>
+  unplaced?(sourceRuntimeId: string, operationId: string): Promise<ExecutionJournalDiagnostics | null>
 }): Promise<AgentExecutionSourceDiagnostics | null> {
   const { source, context } = options
   const sourceRuntimeId = source.runtimeId()
@@ -33,7 +49,11 @@ export async function inspectSourceExecutionDiagnostics(options: {
   }
   await finish(null)
   const state = await source.spatial.read(), record = state ? spatialAgentOpenRecord(state.graph, options.operationId) : null
-  if (!record?.executionBinding || !record.placement) return await finish(null)
+  if (!record) {
+    const retained = await options.unplaced?.(sourceRuntimeId, options.operationId)
+    return await finish(retained ? { ...retained, sourceRuntimeId, state: 'matched' } : null)
+  }
+  if (!record.executionBinding || !record.placement) return await finish(null)
   const reference = record.executionBinding
   if (record.requestId !== options.operationId || reference.createOperationId !== options.operationId || reference.agentSessionId !== record.agentSessionId || record.placement.runtimeId !== sourceRuntimeId)
     throw new AgentMuxError('The original Source admission no longer confirms this diagnostic scope.', 'EXECUTION_DIAGNOSTIC_SCOPE_UNCONFIRMED')

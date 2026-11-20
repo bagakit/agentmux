@@ -34,7 +34,8 @@ export function SourceLauncherRequest({ input, busy, onContinue, active = true }
       if (!owns()) return
       const next = reply.request?.report, operationId = input.request.operationId
       if (!reply.request?.known || reply.request.operationId !== operationId || !next || next.operationId !== operationId)
-        throw Error('The Source has not confirmed this original request. Its receipt and input are kept.')
+        throw Error(reply.request?.operationId === operationId && reply.request.observationIssue?.message ||
+          'The Source has not confirmed this original request. Its receipt and input are kept.')
       const sessionId = historical?.agent?.agentSessionId ?? historical?.execution?.reference.agentSessionId
       if (next.agent && (next.agent.createOperationId !== operationId || sessionId && next.agent.agentSessionId !== sessionId) ||
           next.execution && (next.execution.coordinatorRuntimeId !== input.target.reference.runtimeId || next.execution.reference.createOperationId !== operationId ||
@@ -69,11 +70,16 @@ export function SourceLauncherRequest({ input, busy, onContinue, active = true }
     const copied = await copyTextToClipboard(value, () => { if (owns()) setCopy({ owner, snapshot: value, status: 'failed' }) })
     if (copied && owns()) setCopy({ owner, snapshot: value, status: 'copied' })
   }
-  const cause = currentCreationIssues[0] ?? originalIssues[0], typed = cause?.executionFailure
+  const cause = currentCreationIssues[0] ?? originalIssues[0], recordedFailure = report?.execution?.diagnostics?.lastCreationFailure
+  const typed = cause?.executionFailure ?? recordedFailure
+  const separateFailure = recordedFailure && ![...originalIssues, ...currentCreationIssues].some(item =>
+    item.code === recordedFailure.code && item.executionFailure?.hostId === recordedFailure.hostId &&
+    item.executionFailure.role === recordedFailure.role && item.executionFailure.stage === recordedFailure.stage)
   const role = typed?.role === 'executor' ? 'Tool helper' : typed?.role === 'frontend' ? 'Agent helper' : 'Agent'
   const stage = typed ? ({ resolve: 'connection', inventory: 'Executor check', prepare: 'preparation', start: 'start', attach: 'attachment', create: 'creation' } as const)[typed.stage] : undefined
   const title = report?.outcome === 'retired' ? 'Agent retired' : report?.agent || report?.outcome === 'opened' ? 'Agent created' : 'Launch not confirmed'
   const reason = issue ? 'Latest check could not be completed. The last confirmed facts are kept.' : terminal || report?.agent ? 'The original work and your newer draft are retained.'
+    : report?.execution?.placement === 'unconfirmed' ? 'The original execution intent is retained. Its Source placement is unconfirmed.'
     : typed ? `${role} ${stage} is unconfirmed.` : cause?.message ?? 'The original request is kept.'
   return <section className="launcher-source-original source-launch-feedback" aria-label="Original launch status">
     <div className="source-launch-feedback__top">
@@ -94,6 +100,9 @@ export function SourceLauncherRequest({ input, busy, onContinue, active = true }
         </div> : null}
         {currentCreationIssues.length ? <div aria-label="Current creation failures"><h4>Current creation</h4>
           {currentCreationIssues.map((item, index) => <p key={index}><code>{item.code}</code><span>{item.message}</span>{item.executionFailure ? <small>{item.executionFailure.stage} · {item.executionFailure.role} · {item.executionFailure.hostId}</small> : null}</p>)}
+        </div> : null}
+        {separateFailure ? <div aria-label="Last recorded creation failure"><h4>Last recorded creation failure</h4>
+          <p><code>{recordedFailure.code}</code><small>{recordedFailure.stage} · {recordedFailure.role} · {recordedFailure.hostId}</small></p>
         </div> : null}
         {observationIssues.length ? <div aria-label="Source observation issues"><h4>{observed ? 'Latest Source observation' : 'Original Source observation'}</h4>
           {observationIssues.map((item, index) => <p key={index}><code>{item.code}</code><span>{item.message}</span></p>)}

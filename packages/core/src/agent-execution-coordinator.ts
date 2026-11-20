@@ -6,7 +6,7 @@ import { join, isAbsolute, dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { isDeepStrictEqual } from 'node:util'
 import { AgentExecutionBridge, ExecutionProtocolFrameError, type AgentExecutionBridgeState, type AgentExecutionBridgePort, type AgentExecutionBridgeSide, type AgentExecutionBridgeConnection } from './agent-execution/bridge.js'
-import { inspectSourceExecutionDiagnostics, type ExecutionSourceDiagnosticsOwner, type ExecutionJournalDiagnostics, type AgentExecutionSourceDiagnostics } from './agent-execution-source-diagnostics.js'
+import { inspectSourceExecutionDiagnostics, isExecutionDiagnosticCode, sourceExecutionBindingId, type ExecutionSourceDiagnosticsOwner, type ExecutionJournalDiagnostics, type AgentExecutionSourceDiagnostics, type ExecutionSourceCreationFailure } from './agent-execution-source-diagnostics.js'
 import type { AgentMuxClient } from './client.js';
 import type { AgentMuxHostAgentCreateInput } from "./client-contract.js";
 import type { AgentMuxAgentSession } from './types.js'
@@ -37,6 +37,7 @@ type AgentExecutionExecutorObservation = {
   runtimeId: string
   executor: Pick<import('./executor-contract.js').AgentMuxHostExecutorDescriptor, 'executorId' | 'configRevision' | 'providerId' | 'creationContract'>
 }
+type AgentExecutionSourceAdmission = { sourceRuntimeId: string; executorObservation?: AgentExecutionExecutorObservation }
 type OperationKey = import('./agent-execution/journal.js').AgentExecutionOperationKey
 type Diagnostic = { code: string; message: string; generation?: string; operation?: OperationKey }
 export type AgentExecutionDiagnostic = Diagnostic & (
@@ -53,6 +54,9 @@ const originalOperation = (value: unknown, bindingId: string, generation: unknow
 type RecordValue = { cancellation?: AgentCreationCancellationInput; input: AgentExecutionOpenInput; routeAuthorization?: HostRouteExecutionAuthorization;
   /** Actual target handler observation in this original journal; not caller input or Provider qualification. */
   creationContract?: { ordinaryLaunch: 1; runtimeId: string; executorRevision: string; providerId?: string };
+  lastCreationFailure?: ExecutionSourceCreationFailure;
+  /** Written only by the in-process Source admission, alongside the frozen input. */
+  sourceAdmissionRuntimeId?: string;
   agentControl?: { generation: string; state: 'unconfigured' | 'unverified' | 'available' | 'unavailable'; stage?: 'invocation-registration'; code?: string }; notices?: AgentExecutionNotice[]; diagnostic?: AgentExecutionInspection['diagnostic']; diagnostics?: AgentExecutionDiagnostic[]; attempts?: Partial<Record<'frontend' | 'executor', { ownerInstanceId: string }>>; bridge?: AgentExecutionBridgeState; frontend?: AgentExecutionBridgeState['frontend']; executor?: AgentExecutionBridgeState['executor'] }
 export interface AgentExecutionInspection {
   bindingId: string
@@ -77,9 +81,19 @@ export interface AgentExecutionInspection {
 const nativeLock = createRequire(import.meta.url)('fs-native-extensions') as { tryLock(fd: number): boolean }
 const fail = (message: string, code = 'EXECUTION_BINDING_CONFLICT') => new AgentMuxError(message, code)
 const routedIntentSchema = 'agentmux.routed-execution-intent.v1'
+// Both stored intent forms already own these identities. The index adds no second receipt.
+const sourceIntentField = (path: string) => `CASE WHEN json_valid(input) THEN coalesce(json_extract(input,'$.${path}'),json_extract(input,'$.input.${path}')) END`
+const sourceCreationRuntime = sourceIntentField('resourceRuntimeId')
+const sourceCreationOperation = sourceIntentField('agent.createOperationId')
+const sourceCreationIndexed = `(${sourceIntentField('sourceRequestDigest')}) IS NOT NULL`
 const readerTransportFailures = new Set(['CONTROL_CONNECTION_FAILED', 'CONTROL_TIMEOUT', 'CONTROL_UNAVAILABLE', 'CTXMUX_DISCONNECTED', 'RUNTIME_OWNER_CHANGED'])
 const creationId = (binding: string, role: string) => createHash('sha256').update(JSON.stringify([binding, role])).digest('hex')
 const reference = (input: AgentExecutionOpenInput): AgentExecutionReference => ({ bindingId: input.bindingId, agentSessionId: input.agent.agentSessionId, createOperationId: input.agent.createOperationId })
+function isSourceExecutionIntent(input: AgentExecutionOpenInput, sourceRuntimeId: string): boolean {
+  return input.resourceRuntimeId === sourceRuntimeId && input.resourceHostId === 'local' && !input.resourceRoute && isAbsolute(input.resourceWorkspacePath) &&
+    input.agentRuntimeId !== sourceRuntimeId && /^[a-f0-9]{64}$/u.test(input.sourceRequestDigest ?? '') &&
+    input.bindingId === sourceExecutionBindingId(sourceRuntimeId, input.agentHostId, input.agent.agentSessionId, input.agent.createOperationId)
+}
 function executionFailure(error: unknown, input: AgentExecutionOpenInput, step: Omit<AgentExecutionFailure, 'reference'>): AgentMuxError {
   if (error instanceof AgentMuxError && error.executionFailure) return error
   const original = error instanceof AgentMuxError ? error : undefined
@@ -137,6 +151,7 @@ export class AgentExecutionCoordinator {
       const version = Number(db.prepare('PRAGMA user_version').get()!.user_version)
       if (Number(db.prepare('PRAGMA application_id').get()!.application_id) !== 1095587906 || (version !== 1 && version !== 2))
         throw fail('The original execution binding store is unconfirmed; it was not replaced.', 'EXECUTION_STORAGE_UNCONFIRMED')
+      db.exec(`CREATE INDEX IF NOT EXISTS binding_intents_source_creation ON binding_intents(${sourceCreationRuntime}, ${sourceCreationOperation}) WHERE ${sourceCreationIndexed}`)
       const fd = await open(directory, 'r'); try { await fd.sync() } finally { await fd.close() }
       return new AgentExecutionCoordinator(db, lease, options, version)
     } catch (error) { db.close(); await lease.close(); throw error }
@@ -272,12 +287,39 @@ export class AgentExecutionCoordinator {
   diagnostics(original: AgentExecutionReference): ExecutionJournalDiagnostics | null {
     const record = this.read(original.bindingId)
     if (!record || !isDeepStrictEqual(reference(record.input), original)) return null
+    return this.diagnosticsFor(record)
+  }
+  /** No live Host or workspace lookup is needed to read this Source's frozen intent. */
+  unplacedSourceDiagnostics(sourceRuntimeId: string, operationId: string): ExecutionJournalDiagnostics | null {
+    const rows = this.db.prepare(`SELECT id FROM binding_intents WHERE ${sourceCreationIndexed} AND ${sourceCreationRuntime}=? AND ${sourceCreationOperation}=?`)
+      .iterate(sourceRuntimeId, operationId)
+    let matched: RecordValue | undefined
+    for (const row of rows) {
+      const record = this.read(String(row.id)), input = record?.input
+      if (!record || !input || record.sourceAdmissionRuntimeId !== sourceRuntimeId ||
+          input.agent.createOperationId !== operationId || !isSourceExecutionIntent(input, sourceRuntimeId)) continue
+      if (matched) throw fail('More than one frozen intent matches this Source creation. Keep the original operation without selecting a replacement.', 'EXECUTION_DIAGNOSTIC_SCOPE_UNCONFIRMED')
+      matched = record
+    }
+    return matched ? this.diagnosticsFor(matched) : null
+  }
+  private diagnosticsFor(record: RecordValue): ExecutionJournalDiagnostics {
+    const original = reference(record.input)
     const helpers = Object.fromEntries((['frontend', 'executor'] as const).map(role => [role, {
       start: this.operationFacts(record).helperStarts![role], cursor: record.bridge?.[role].outputByte ?? null,
       ownerInstanceId: record.bridge?.[role].ownerInstanceId ?? null
     }])) as ExecutionJournalDiagnostics['helpers']
     const failure = this.connectionFailures.get(original.bindingId)?.protocolFrame
-    return structuredClone({ reference: original, helpers, ...(failure ? { failure: { code: 'EXECUTION_PROTOCOL_INVALID_FRAME' as const,
+    const diagnostic = record.bridge ? this.connectionDiagnostic(original.bindingId) : { code: 'EXECUTION_OBSERVATION_UNCONFIRMED' }
+    const connection: NonNullable<ExecutionJournalDiagnostics['connection']> = !diagnostic ? { state: 'connected' }
+      : { state: ['EXECUTION_HELPER_UNAVAILABLE', 'EXECUTION_HELPER_SERVICE_UNAVAILABLE', 'EXECUTION_PROTOCOL_INVALID_FRAME', 'EXECUTION_PROTOCOL_GAP'].includes(diagnostic.code)
+        ? 'unavailable' : 'unconfirmed', code: isExecutionDiagnosticCode(diagnostic.code) ? diagnostic.code : 'EXECUTION_OBSERVATION_UNCONFIRMED' }
+    const notices = this.qualificationNotices(record)?.map(({ role, capability, state, code }) =>
+      ({ role, capability, state, ...(isExecutionDiagnosticCode(code) ? { code } : {}) }))
+    const last = record.lastCreationFailure
+    return structuredClone({ reference: original, helpers, connection, ...(notices ? { notices } : {}),
+      ...(last ? { lastCreationFailure: { hostId: last.hostId, role: last.role, stage: last.stage, code: last.code } } : {}),
+      ...(failure ? { failure: { code: 'EXECUTION_PROTOCOL_INVALID_FRAME' as const,
       hostId: failure.side === 'executor' ? record.input.resourceHostId : record.input.agentHostId, role: failure.side, stage: 'attach' as const, frame: failure.frame } } : {}) })
   }
   /** Resume only retained bridge readers. This never creates or restores an Agent Run. */
@@ -469,12 +511,18 @@ export class AgentExecutionCoordinator {
   }
   /** Called only inside this binding's lane. The durable write is independent
    * of later network preparation and advancement; its ACK is never rolled back. */
-  private async freeze(input: AgentExecutionOpenInput, context?: AgentMuxRpcCallContext, observed?: AgentExecutionExecutorObservation): Promise<RecordValue> {
+  private async freeze(input: AgentExecutionOpenInput, context?: AgentMuxRpcCallContext, source?: AgentExecutionSourceAdmission): Promise<RecordValue> {
     let record = this.read(input.bindingId)
     if (record && !isDeepStrictEqual(record.input, input)) throw fail('This execution binding already names another original creation.')
     const routeAuthorization = await this.options.authorize?.(input, context, record?.routeAuthorization, !!record)
     if (!record) {
       record = { input, ...(routeAuthorization ? { routeAuthorization } : {}) }
+      if (source) {
+        if (!isSourceExecutionIntent(input, source.sourceRuntimeId)) throw fail(
+          'The Source admission does not identify this original execution intent.', 'EXECUTION_INTENT_UNCONFIRMED')
+        record.sourceAdmissionRuntimeId = source.sourceRuntimeId
+      }
+      const observed = source?.executorObservation
       if (observed) {
         const { runtimeId, executor } = observed
         if (runtimeId !== input.agentRuntimeId || executor.executorId !== input.agent.executorId || executor.configRevision !== input.agent.executorRevision ||
@@ -486,12 +534,12 @@ export class AgentExecutionCoordinator {
     }
     return record
   }
-  /** Acknowledge the complete frozen intent only. The optional Executor
-   * observation comes from the Source owner, outside the public create input. */
-  async admit(value: AgentExecutionOpenInput, context?: AgentMuxRpcCallContext, observed?: AgentExecutionExecutorObservation): Promise<AgentExecutionReference> {
+  /** Acknowledge the complete frozen intent only. Source provenance and its
+   * optional Executor observation are in-process facts outside the public DTO. */
+  async admit(value: AgentExecutionOpenInput, context?: AgentMuxRpcCallContext, source?: AgentExecutionSourceAdmission): Promise<AgentExecutionReference> {
     const input = this.creationInput(value)
-    const selection = observed && structuredClone(observed)
-    return await this.serialize(input.bindingId, async () => reference((await this.freeze(input, context, selection)).input))
+    const admission = source && structuredClone(source)
+    return await this.serialize(input.bindingId, async () => reference((await this.freeze(input, context, admission)).input))
   }
   /** Convenience intake and advancement share one lane, without nesting a
    * serialized public call or holding a DB transaction over remote work. */
@@ -624,11 +672,20 @@ export class AgentExecutionCoordinator {
       return { session: created.session, execution: this.inspect(input.bindingId)! }
       } finally { if (!hosts.adopted) await hosts.dispose() }
     } catch (error) {
-      if (!this.bridges.has(input.bindingId)) this.observeFailure(input, error)
       // Bridge endpoint failures already carry their exact step. A local
       // persistence/observation failure cannot be assigned to an invented Host.
-      if (step.stage === 'attach') throw error
-      throw executionFailure(error, input, step)
+      const original = step.stage === 'attach' ? error : executionFailure(error, input, step)
+      if (input.sourceRequestDigest && original instanceof AgentMuxError && original.executionFailure &&
+          isDeepStrictEqual(original.executionFailure.reference, reference(input)) && isExecutionDiagnosticCode(original.code)) {
+        const { reference: _reference, ...subject } = original.executionFailure
+        const lastCreationFailure = { ...subject, code: original.code }
+        try {
+          const current = this.read(input.bindingId)
+          if (current && !isDeepStrictEqual(current.lastCreationFailure, lastCreationFailure)) this.save({ ...current, lastCreationFailure })
+        } catch { /* A missing diagnostic write cannot replace the original attempt result. */ }
+      }
+      if (!this.bridges.has(input.bindingId)) this.observeFailure(input, error)
+      throw original
     }
   }
 
@@ -683,10 +740,13 @@ export class AgentExecutionBindingService {
     if (!this.source) throw fail('The original Source diagnostic owner is unavailable.', 'CONTROL_UNAVAILABLE')
     return await inspectSourceExecutionDiagnostics({ source: this.source, operationId, context,
       inspect: bindingId => this.inspect(bindingId, 'association'),
-      journal: async original => !this.owner && !await this.retained() ? null : (await this.coordinator()).diagnostics(original) })
+      journal: async original => !this.owner && !await this.retained() ? null : (await this.coordinator()).diagnostics(original),
+      unplaced: async (runtimeId, creationId) => !this.owner && !await this.retained() ? null : (await this.coordinator()).unplacedSourceDiagnostics(runtimeId, creationId) })
   }
-  async admit(input: AgentExecutionOpenInput, context?: AgentMuxRpcCallContext, observed?: AgentExecutionExecutorObservation): ReturnType<AgentExecutionCoordinator['admit']> {
-    return await (await this.coordinator()).admit(input, context, observed)
+  async admit(input: AgentExecutionOpenInput, context?: AgentMuxRpcCallContext, source?: AgentExecutionSourceAdmission): ReturnType<AgentExecutionCoordinator['admit']> {
+    if (source && this.source?.runtimeId() !== source.sourceRuntimeId) throw fail(
+      'The Source admission belongs to another Runtime.', 'RUNTIME_OWNER_MISMATCH')
+    return await (await this.coordinator()).admit(input, context, source)
   }
   async create(input: AgentExecutionOpenInput, context?: AgentMuxRpcCallContext): ReturnType<AgentExecutionCoordinator['create']> {
     return await (await this.coordinator()).create(input, context)

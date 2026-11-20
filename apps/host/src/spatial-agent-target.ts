@@ -1,8 +1,7 @@
 import { assertAgentInputEpoch, optionalInputEpoch } from '@agentmux/core/prompt-condition'
-import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import { parseAgentOpenLaunchFields } from '@agentmux/core/agent-open-contract'
-import { AgentMuxError, selectSpatialCatalog, spatialCatalog, type AgentMuxHeadlessRuntime, type AgentMuxRpcCallContext,
+import { AgentMuxError, selectSpatialCatalog, spatialCatalog, sourceExecutionBindingId, type AgentMuxHeadlessRuntime, type AgentMuxRpcCallContext,
   type AgentMuxSpatialState, type AgentMuxSpatialStateStore } from '@agentmux/core'
 import { spatialAgentOpenDigest, spatialAgentOpenRecord, spatialAgentFact,
   type AgentMuxSpatialAgentOpenRecord, type AgentMuxSpatialAgentOpenRequest } from '@agentmux/core/spatial-state'
@@ -52,7 +51,7 @@ export async function openSpatialAgentTarget(options: {
     if (placement.runtimeId !== local.runtimeId) throw new AgentMuxError('The original project belongs to another frozen source Runtime. No resource or coordinator was substituted.', 'RUNTIME_OWNER_MISMATCH')
     const agentSessionId = previous?.agentSessionId ?? await host.client.resolveAgentCreationSessionId(request.requestId)
     const binding = previous ? previous.executionBinding : (!sameRuntime ? {
-      bindingId: createHash('sha256').update(JSON.stringify([local.runtimeId, target.hostId, agentSessionId, request.requestId])).digest('hex'),
+      bindingId: sourceExecutionBindingId(local.runtimeId, target.hostId, agentSessionId, request.requestId),
       agentSessionId, createOperationId: request.requestId
     } : undefined)
     if (previous && !sameRuntime && !binding) throw new AgentMuxError('The original split creation has no confirmed coordinator reference. Keep its request; no replacement binding was constructed.', 'SPATIAL_CREATION_UNCONFIRMED')
@@ -114,8 +113,8 @@ export async function openSpatialAgentTarget(options: {
       const acknowledged = await runtime.executionBindings.admit!({ bindingId: binding.bindingId, agentHostId: execution.hostId, agentRuntimeId: execution.runtimeId,
         ...(execution.adoptedRoute ? { agentRoute: execution.adoptedRoute } : {}), sourceRequestDigest: spatialAgentOpenDigest(request),
         resourceHostId: placement.hostId, resourceRuntimeId: placement.runtimeId, resourceWorkspacePath: placement.workspacePath,
-        resourceGrant: { scope: 'host-user', bindingId: binding.bindingId }, agent }, context,
-      inventory && selected?.creationContract?.ordinaryLaunch === 1 ? { runtimeId: inventory.runtimeId, executor: selected } : undefined)
+        resourceGrant: { scope: 'host-user', bindingId: binding.bindingId }, agent }, context, { sourceRuntimeId: placement.runtimeId,
+        ...(inventory && selected?.creationContract?.ordinaryLaunch === 1 ? { executorObservation: { runtimeId: inventory.runtimeId, executor: selected } } : {}) })
       if (acknowledged.bindingId !== binding.bindingId || acknowledged.agentSessionId !== agentSessionId || acknowledged.createOperationId !== request.requestId)
         throw new AgentMuxError('The Core did not acknowledge this original frozen intent. Keep the Source operation and inspect its original binding.', 'EXECUTION_INTENT_UNCONFIRMED')
     }

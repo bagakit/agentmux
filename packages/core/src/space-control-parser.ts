@@ -1,5 +1,5 @@
 import { parseAgentTakeoverSource, parseAgentTakeoverProvenance } from './agent-takeover.js'
-import type { AgentExecutionSourceDiagnostics } from './agent-execution-source-diagnostics.js'
+import { isExecutionDiagnosticCode, type AgentExecutionSourceDiagnostics } from './agent-execution-source-diagnostics.js'
 import { parseAgentToolExecutionBinding } from './agent-tool-execution.js'
 import { parseAdoptedHostRoute } from './host-route.js'
 import { parseSurveyOrganization, parseSurveyCollectionChange, parseSurveyZoneIds, parseSurveyPageReferences, parseSurveySelection, parseSurveyProfileView, parseSurveyPinChange, parseSurveyPinnedReferences } from './survey-organization.js'
@@ -34,7 +34,7 @@ function string(value: unknown, name: string, code: Code, max = AGENTMUX_CONTROL
 }
 /** Validate only the finite safe metadata exposed by the original Source. */
 function executionSourceDiagnostics(value: unknown, expected: { sourceRuntimeId: string; reference: ReturnType<typeof parseAgentExecutionReference> }, code: Code): AgentExecutionSourceDiagnostics {
-  const item = fields(value, ['sourceRuntimeId', 'reference', 'state', 'helpers', 'failure'], code)
+  const item = fields(value, ['sourceRuntimeId', 'reference', 'state', 'helpers', 'failure', 'connection', 'lastCreationFailure', 'notices'], code)
   const reference = parseAgentExecutionReference(item.reference)
   if (item.sourceRuntimeId !== expected.sourceRuntimeId || reference.bindingId !== expected.reference.bindingId || reference.agentSessionId !== expected.reference.agentSessionId || reference.createOperationId !== expected.reference.createOperationId)
     fail('Source diagnostics identify another original operation.', code)
@@ -58,8 +58,37 @@ function executionSourceDiagnostics(value: unknown, expected: { sourceRuntimeId:
       stage: member(f.stage, ['attach'], 'Failure stage', code),
       code: member(f.code, ['EXECUTION_PROTOCOL_INVALID_FRAME'], 'Failure code', code), frame }
   })()
-  return { sourceRuntimeId: expected.sourceRuntimeId, reference, state: member(item.state, ['matched', 'unconfirmed'], 'Source diagnostic scope', code),
-    helpers: { frontend: helper(helpers.frontend), executor: helper(helpers.executor) }, ...(failure ? { failure } : {}) }
+  const diagnosticCode = (value: unknown) => isExecutionDiagnosticCode(value) ? value : fail('Source diagnostic code is invalid.', code)
+  const connection = item.connection === undefined ? undefined : (() => {
+    const view = fields(item.connection, ['state','code'], code)
+    const state = member(view.state, ['connected', 'unconfirmed', 'unavailable'], 'Original connection state', code)
+    if (state === 'connected') {
+      if (Object.hasOwn(view, 'code')) fail('A connected observation cannot claim a connection fault.', code)
+      return { state }
+    }
+    return { state, code: diagnosticCode(view.code) }
+  })()
+  const lastCreationFailure = item.lastCreationFailure === undefined ? undefined : (() => {
+    const view = fields(item.lastCreationFailure, ['hostId', 'role', 'stage', 'code'], code)
+    return { hostId: spaceControlId(view.hostId, 'Failure Host', code),
+      role: member(view.role, ['agent', 'frontend', 'executor'], 'Failure role', code),
+      stage: member(view.stage, ['resolve', 'inventory', 'prepare', 'start', 'attach', 'create'], 'Failure stage', code),
+      code: diagnosticCode(view.code) }
+  })()
+  const notices = item.notices === undefined ? undefined : unique(list(item.notices, value => {
+    const view = fields(value, ['role', 'capability', 'state', 'code'], code)
+    return { role: member(view.role, ['frontend', 'executor'], 'Notice role', code),
+      capability: member(view.capability, ['hooks', 'skills', 'mcp', 'agent-control'], 'Notice capability', code),
+      state: member(view.state, ['unqualified', 'unverified', 'unsupported', 'unconfigured'], 'Notice state', code),
+      ...(view.code === undefined ? {} : { code: diagnosticCode(view.code) }) }
+  }, 'Source notices', code), notice => JSON.stringify([notice.role, notice.capability]), 'Source notices', code)
+  const state = member(item.state, ['matched', 'unconfirmed'], 'Source diagnostic scope', code)
+  const executionHelpers = { frontend: helper(helpers.frontend), executor: helper(helpers.executor) }
+  if (state === 'unconfirmed' && (failure || connection || lastCreationFailure || notices || Object.values(executionHelpers).some(helper =>
+    helper.start.outcome !== 'unknown' || helper.cursor !== null || helper.ownerInstanceId !== null)))
+    fail('Unconfirmed Source identity cannot claim helper or failure facts.', code)
+  return { sourceRuntimeId: expected.sourceRuntimeId, reference, state, helpers: executionHelpers, ...(failure ? { failure } : {}),
+    ...(connection ? { connection } : {}), ...(lastCreationFailure ? { lastCreationFailure } : {}), ...(notices ? { notices } : {}) }
 }
 
 /** Spatial IDs may contain a directory or canonical File path; Session/Run IDs retain their smaller bound. */
@@ -565,7 +594,7 @@ function report(value: unknown, code: Code): AgentMuxSpaceMutationReport {
     return { operationId: spaceControlId(value.operationId, 'Association operation', code), reference: parseCoordinatorAgentReference(value.reference), resource: parseAgentAssociationResource(value.resource) }
   })()
   const execution = source.execution === undefined ? undefined : (() => {
-    const item = fields(source.execution, ['coordinatorRuntimeId', 'reference', 'inspection', 'diagnostics'], code)
+    const item = fields(source.execution, ['coordinatorRuntimeId', 'reference', 'inspection', 'diagnostics', 'placement'], code)
     const reference = parseAgentExecutionReference(item.reference)
     if (reference.createOperationId !== source.requestId || agent && reference.agentSessionId !== agent.agentSessionId || association)
       fail('Execution observation identifies another original creation.', code)
@@ -573,7 +602,12 @@ function report(value: unknown, code: Code): AgentMuxSpaceMutationReport {
     if (inspection?.continuation && (inspection.continuation.createOperationId !== reference.createOperationId || inspection.continuation.bindingId !== reference.bindingId || inspection.continuation.agentSessionId !== reference.agentSessionId))
       fail('Execution continuation identifies another original creation.', code)
     const coordinatorRuntimeId = spaceControlId(item.coordinatorRuntimeId, 'Original Coordinator Runtime', code)
-    return { coordinatorRuntimeId, reference, inspection, ...(item.diagnostics === undefined ? {} : { diagnostics: item.diagnostics === null ? null : executionSourceDiagnostics(item.diagnostics, { sourceRuntimeId: coordinatorRuntimeId, reference }, code) }) }
+    const diagnostics = item.diagnostics === undefined ? undefined : item.diagnostics === null ? null
+      : executionSourceDiagnostics(item.diagnostics, { sourceRuntimeId: coordinatorRuntimeId, reference }, code)
+    const placement = item.placement === undefined ? undefined : member(item.placement, ['retained', 'unconfirmed'], 'Original Source placement', code)
+    if (placement === 'unconfirmed' && (agent || source.to !== null || inspection || diagnostics?.state !== 'matched'))
+      fail('An unconfirmed Source placement cannot claim an Agent or location.', code)
+    return { coordinatorRuntimeId, reference, inspection, ...(diagnostics === undefined ? {} : { diagnostics }), ...(placement ? { placement } : {}) }
   })()
   return { ...(association ? { association } : {}), ...(execution ? { execution } : {}), requestId: spaceControlId(source.requestId, 'Mutation Request', code), outcome: member(source.outcome, ['opened', 'moved', 'unchanged', 'partial', 'unknown', 'retired'], 'Mutation outcome', code),
     from: source.from === null ? null : address(source.from, code), to: source.to === null ? null : address(source.to, code), agent, resource,
@@ -722,12 +756,18 @@ export function parseSpaceControlSuccessReceipt(value: unknown): AgentMuxControl
   } else if (operation === 'space.inspect') {
     const body = fields(source.result, ['catalog', 'request'], code)
     const request = Object.hasOwn(body, 'request') ? (() => {
-      const item = fields(body.request, ['requestId', 'known', 'report'], code)
+      const item = fields(body.request, ['requestId', 'known', 'report', 'observationIssue'], code)
       const id = spaceControlId(item.requestId, 'Inspected Request', code)
       const actual = item.report === null ? null : report(item.report, code)
       const known = bool(item.known, 'Known request', code)
       if ((!known && actual !== null) || (actual && actual.requestId !== id)) fail('Inspected Request report is mismatched.', code)
-      return { requestId: id, known, report: actual }
+      const observationIssue = item.observationIssue === undefined ? undefined : (() => {
+        const issue = fields(item.observationIssue, ['code', 'message'], code)
+        const issueCode = member(issue.code, ['EXECUTION_DIAGNOSTIC_SCOPE_UNCONFIRMED', 'EXECUTION_DIAGNOSTIC_UNAVAILABLE'], 'Source observation code', code)
+        if (known || actual) fail('A Source lookup issue cannot claim a known operation.', code)
+        return { code: issueCode, message: string(issue.message, 'Source observation issue', code) }
+      })()
+      return { requestId: id, known, report: actual, ...(observationIssue ? { observationIssue } : {}) }
     })() : undefined
     result = { operation, catalog: catalog(body.catalog, code), ...(request ? { request } : {}) }
   } else if (operation === 'space.bind' || operation === 'space.unbind') {

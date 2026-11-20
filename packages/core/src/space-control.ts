@@ -240,6 +240,8 @@ export type AgentMuxSpaceMutationReport = {
   /** Original Source-owned execution observation, under the binding reader's existing authority. */
   execution?: { coordinatorRuntimeId: string; reference: import('./agent-execution-contract.js').AgentExecutionReference;
     inspection: import('./agent-execution-coordinator.js').AgentExecutionInspection | null;
+    /** The durable Source placement record is independent of the Coordinator intent. */
+    placement?: 'retained' | 'unconfirmed';
     diagnostics?: import('./agent-execution-source-diagnostics.js').AgentExecutionSourceDiagnostics | null }
   /** A Source membership ACK, never an execution/Start or input receipt. */
   association?: { operationId: string; reference: import('./agent-open-contract.js').CoordinatorAgentReference; resource: import('./agent-open-contract.js').AgentAssociationResource }
@@ -385,7 +387,8 @@ export type AgentMuxSpaceControlResult =
   | { operation: 'agent.inspect'; agentSessionId: string; override: string | null }
   | ({ operation: 'space.rename'; tabId: string } & AgentMuxDisplayNameReport)
   | { operation: 'space.ls'; catalog: AgentMuxSpaceCatalog }
-  | { operation: 'space.inspect'; catalog: AgentMuxSpaceCatalog; request?: { requestId: string; known: boolean; report: AgentMuxSpaceMutationReport | null } }
+  | { operation: 'space.inspect'; catalog: AgentMuxSpaceCatalog; request?: { requestId: string; known: boolean; report: AgentMuxSpaceMutationReport | null;
+    observationIssue?: { code: string; message: string } } }
   | ({ operation: 'space.bind' } & AgentMuxSpaceBindingReport)
   | ({ operation: 'space.unbind' } & AgentMuxSpaceBindingReport)
   | ({ operation: 'agent.open' } & AgentMuxSpaceMutationReport)

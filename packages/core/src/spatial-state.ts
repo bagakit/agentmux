@@ -43,6 +43,14 @@ type SpaceAgentSnapshot = { stamp: string; index: SpaceAgentIndex; takeovers: Ma
 const spatialFileStamp = (file: { dev: bigint; ino: bigint; size: bigint; mtimeNs: bigint; ctimeNs: bigint }) =>
   [file.dev, file.ino, file.size, file.mtimeNs, file.ctimeNs].join(':');
 const spatialAgentKey = (agent: { hostId: string; agentSessionId: string }) => JSON.stringify([agent.hostId, agent.agentSessionId]);
+/** Read the original location using the same ownership check as the settlement write. */
+export function originalAgentOpenRegion(graph: AgentMuxSpatialGraph, record: NonNullable<ReturnType<typeof spatialAgentOpenRecord>>) {
+  const region = graph.regions.find(region => region.regionId === record.address.regionId && region.tabId === record.address.tabId);
+  if (!region || region.kind !== 'agent' || region.agentSessionId !== record.agentSessionId) return null;
+  if (record.execution.runtimeId && (region.execution?.runtimeId !== record.execution.runtimeId ||
+      region.execution.hostId !== record.execution.hostId || region.execution.cwd !== record.execution.workspacePath)) return null;
+  return region;
+}
 /**
  * Place a producer-confirmed Agent at its exact Region in `graph`. Only an empty Launcher, or a Region of the
  * same Session whose Run and execution location are still unset or equal, may take it; a newer Run of the
@@ -533,10 +541,8 @@ export class AgentMuxSpatialStateStore {
     return this.locked(async () => {
       const current = await this.requiredState(), record = spatialAgentOpenRecord(current.graph, requestId);
       if (!record || record.agentSessionId !== session.agentSessionId) throw new AgentMuxError('The original creation receipt names another reserved Session.', 'SPATIAL_CREATION_UNCONFIRMED');
-      const graph = structuredClone(current.graph), region = graph.regions.find(region => region.regionId === record.address.regionId && region.tabId === record.address.tabId);
-      if (!region || region.agentSessionId !== session.agentSessionId || region.kind !== 'agent') return { state: projectSpatialState(current), attached: false };
-      if (record.execution.runtimeId && (region.execution?.runtimeId !== record.execution.runtimeId || region.execution.hostId !== record.execution.hostId ||
-          region.execution.cwd !== record.execution.workspacePath)) return { state: projectSpatialState(current), attached: false };
+      const graph = structuredClone(current.graph), region = originalAgentOpenRegion(graph, record);
+      if (!region) return { state: projectSpatialState(current), attached: false };
       const descriptor = graph.resources['region:' + region.regionId];
       if (region.runId === session.run.runId && JSON.stringify(descriptor) === JSON.stringify(regionResource)) return { state: projectSpatialState(current), attached: true };
       region.runId = session.run.runId; graph.resources['region:' + region.regionId] = structuredClone(regionResource);

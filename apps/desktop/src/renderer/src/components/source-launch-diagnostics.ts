@@ -15,7 +15,13 @@ export function sourceLaunchDiagnostics(input: MountedAgentOpenInput, original: 
     current: { observation: readFailed ? 'read-failed' : current ? 'observed' : 'not-read', ...(current ? { outcome: current.outcome, issues: current.issues.map(failure) } : {}) },
     ...(report?.agent ? { agent: { hostId: report.agent.hostId, agentSessionId: report.agent.agentSessionId, createOperationId: report.agent.createOperationId, runId: report.agent.runId } } : {}),
     ...(report?.execution ? { execution: { coordinatorRuntimeId: report.execution.coordinatorRuntimeId, reference: reference(report.execution.reference),
+      ...(report.execution.placement ? { placement: report.execution.placement } : {}),
       ...(metadata ? { diagnostics: { sourceRuntimeId: metadata.sourceRuntimeId, reference: reference(metadata.reference), state: metadata.state,
+        ...(metadata.connection ? { connection: metadata.connection.state === 'connected' ? { state: 'connected' } :
+          { state: metadata.connection.state, code: metadata.connection.code } } : {}),
+        ...(metadata.lastCreationFailure ? { lastCreationFailure: { hostId: metadata.lastCreationFailure.hostId, role: metadata.lastCreationFailure.role,
+          stage: metadata.lastCreationFailure.stage, code: metadata.lastCreationFailure.code } } : {}),
+        ...(metadata.notices ? { notices: metadata.notices.map(({ role, capability, state, code }) => ({ role, capability, state, code })) } : {}),
         helpers: { executor: helper('executor'), frontend: helper('frontend') }, ...(metadata.failure ? { failure: { hostId: metadata.failure.hostId, role: metadata.failure.role,
           stage: metadata.failure.stage, code: metadata.failure.code, ...(metadata.failure.frame ? { frame: { startByte: metadata.failure.frame.startByte, endByte: metadata.failure.frame.endByte,
             bytes: metadata.failure.frame.bytes, sha256: metadata.failure.frame.sha256, syntax: metadata.failure.frame.syntax } } : {}) } } : {}) } } : {}),

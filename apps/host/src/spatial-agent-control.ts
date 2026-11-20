@@ -6,7 +6,7 @@ import { assertPromotionEnabled } from './promotion-policy.js'
 import { isDeepStrictEqual } from 'node:util'
 import { AgentMuxError, spatialCatalog, selectSpatialCatalog, type AgentMuxHeadlessRuntime, type AgentMuxRpcCallContext,
   type AgentMuxRpcServiceOptions, type AgentMuxSpatialStateStore, type AgentMuxControlResult, type AgentMuxHostAgentCreateInput } from '@agentmux/core'
-import { isBackgroundLocalAgentOpen, isHeadlessSpatialAgentOpen, isSpatialAgentAssociation, spatialAgentAssociationRecord, spatialAgentOpenRecord, spatialAgentOpenDigest, spatialAgentFact, type AgentMuxSpatialAgentAssociationRecord, type AgentMuxSpatialAgentOpenRecord, type AgentMuxSpatialAgentOpenRequest } from '@agentmux/core/spatial-state'
+import { isBackgroundLocalAgentOpen, isHeadlessSpatialAgentOpen, isSpatialAgentAssociation, originalAgentOpenRegion, spatialAgentAssociationRecord, spatialAgentOpenRecord, spatialAgentOpenDigest, spatialAgentFact, type AgentMuxSpatialAgentAssociationRecord, type AgentMuxSpatialAgentOpenRecord, type AgentMuxSpatialAgentOpenRequest } from '@agentmux/core/spatial-state'
 import { openSpatialAgentTarget } from './spatial-agent-target.js'
 import { parseAgentOpenLaunchFields } from '@agentmux/core/agent-open-contract'
 import type { AgentMuxSpaceMutationReport } from '@agentmux/core/control'
@@ -15,6 +15,9 @@ import { SCRATCH_WORKSPACE_ID } from './mote-topic-model.js'
 import { configuredProfileAgentContext } from './mote-user-profile.js'
 
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
+const canReadSourceExecution = (context: AgentMuxRpcCallContext) => Boolean(context.caller ||
+  context.principal && ['user', 'device'].includes(context.principal.kind) && typeof context.principal.id === 'string' &&
+  context.principal.id.trim() && !context.principal.id.includes('\0'))
 const issue = (error: unknown, step = 'creation') => ({ step, code: error instanceof AgentMuxError ? error.code : 'AGENT_CREATION_UNCONFIRMED',
   message: error instanceof Error ? error.message : String(error), recovery: 'Inspect this original operation. Do not repeat creation or its first input.',
   ...(error instanceof AgentMuxError && error.executionFailure ? { executionFailure: error.executionFailure } : {}) })
@@ -52,10 +55,12 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
       issues: attached ? [] : [{ step: 'association', code: 'SPACE_PLACEMENT_UNKNOWN', message: 'The original association remains retained, but its original occurrence or resource is no longer attached.', recovery: 'Inspect the original L and A Coordinator independently; no creation or input was repeated.' }] }
   }
   async function reconcile(record: AgentMuxSpatialAgentOpenRecord, context: AgentMuxRpcCallContext, initialIssue?: unknown,
-    originalRequest?: AgentMuxSpatialAgentOpenRequest): Promise<AgentMuxSpaceMutationReport> {
-    const report: AgentMuxSpaceMutationReport = { requestId: record.requestId, outcome: 'unknown', from: null, to: record.address,
-      agent: null, resource: null, save: { layoutApplied: true, clientStateWritten: false, storageFlushRequested: false,
-        diskDurability: 'confirmed', reason: null }, issues: initialIssue ? [issue(initialIssue)] : [] }
+    originalRequest?: AgentMuxSpatialAgentOpenRequest, observedGraph?: NonNullable<Awaited<ReturnType<AgentMuxSpatialStateStore['read']>>>['graph']): Promise<AgentMuxSpaceMutationReport> {
+    const placement = !observedGraph || Boolean(originalAgentOpenRegion(observedGraph, record))
+    const report: AgentMuxSpaceMutationReport = { requestId: record.requestId, outcome: 'unknown', from: null, to: placement ? record.address : null,
+      agent: null, resource: null, save: { layoutApplied: placement, clientStateWritten: false, storageFlushRequested: false,
+        diskDurability: observedGraph ? 'unconfirmed' : 'confirmed', reason: observedGraph ? 'This read observes the original placement and does not acknowledge its write.' : null },
+      issues: initialIssue ? [issue(initialIssue)] : [] }
     if (record.takeover?.source.organizationIssue) report.issues.push(issue(new AgentMuxError(record.takeover.source.organizationIssue, 'AGENT_TAKEOVER_ORGANIZATION_UNCONFIRMED'), 'observation'))
     let borrowed: Awaited<ReturnType<AgentMuxHeadlessRuntime['executionHost']>> | null = null
     // Exact Source reads expose a safe original-operation projection to the
@@ -65,9 +70,9 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
       if (record.placement?.runtimeId !== options.runtime().ownerIdentity().runtimeId) {
         report.issues.push(issue(new AgentMuxError('The original execution Coordinator belongs to another Source Runtime.', 'RUNTIME_OWNER_MISMATCH'), 'observation'))
       } else {
-        report.execution = { coordinatorRuntimeId: record.placement.runtimeId, reference: record.executionBinding, inspection: null }
+        report.execution = { coordinatorRuntimeId: record.placement.runtimeId, reference: record.executionBinding, inspection: null, placement: 'retained' }
         const bindings = options.runtime().executionBindings
-        if (bindings.sourceDiagnostics) try {
+        if (bindings.sourceDiagnostics && canReadSourceExecution(context)) try {
           report.execution.diagnostics = await bindings.sourceDiagnostics(record.requestId, context)
         } catch {
           context.signal?.throwIfAborted(); await context.assertCurrent?.()
@@ -127,9 +132,10 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
             session.toolExecution.workspacePath !== record.placement?.workspacePath)) throw new AgentMuxError(
         'Core has not confirmed this original creation identity and execution target. The healthy Session is retained.', 'AGENT_CREATION_UNCONFIRMED')
       report.agent = { ...spatialAgentFact(session, record.execution.hostId), ...(record.takeover ? { takeover: record.takeover } : {}) }
-      const settled = await options.spatial.settleAgentOpen(record.requestId, session, regionDescriptor(record, 'attached'))
-      report.to = settled.attached ? record.address : null
-      if (!settled.attached) report.issues.push(issue(new AgentMuxError('The original Agent exists, but its reserved Region binding changed. Existing contents were retained.', 'SPACE_PLACEMENT_UNKNOWN')))
+      const attached = observedGraph ? placement : (await options.spatial.settleAgentOpen(record.requestId, session, regionDescriptor(record, 'attached'))).attached
+      report.to = attached ? record.address : null
+      report.save.layoutApplied = attached
+      if (!attached) report.issues.push(issue(new AgentMuxError('The original Agent exists, but its reserved Region binding changed. Existing contents were retained.', 'SPACE_PLACEMENT_UNKNOWN')))
       if (record.executionBinding && report.execution && !context.caller) {
         const binding = report.execution?.inspection
         const original = binding?.continuation
@@ -158,9 +164,29 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
       if (!('requestId' in request.target)) return undefined
       const association = state ? spatialAgentAssociationRecord(state.graph, request.target.requestId) : null
       if (association && state) return { operation: 'space.inspect', catalog: { spaces: [], zones: [], tabs: [], regions: [], bindings: [], locations: [] }, request: { requestId: request.target.requestId, known: true, report: associationReport(association, state.graph) } }
-      const record = state ? spatialAgentOpenRecord(state.graph, request.target.requestId) : null
+      const requestId = request.target.requestId, record = state ? spatialAgentOpenRecord(state.graph, requestId) : null
+      const runtime = options.runtime()
+      let admission: Awaited<ReturnType<NonNullable<typeof runtime.executionBindings.sourceDiagnostics>>> | undefined
+      let observationIssue: { code: string; message: string } | undefined
+      if (!record && canReadSourceExecution(context)) try {
+        admission = await runtime.executionBindings.sourceDiagnostics?.(requestId, context)
+      } catch (error) {
+        context.signal?.throwIfAborted(); await context.assertCurrent?.()
+        observationIssue = error instanceof AgentMuxError && error.code === 'EXECUTION_DIAGNOSTIC_SCOPE_UNCONFIRMED'
+          ? { code: error.code, message: 'The frozen Source intent could not be uniquely verified. Keep the original operation.' }
+          : { code: 'EXECUTION_DIAGNOSTIC_UNAVAILABLE', message: 'The original Coordinator admission could not be observed. Keep the original operation.' }
+      }
+      const report: AgentMuxSpaceMutationReport | null = state && record ? await reconcile(record, context, undefined, undefined, state.graph)
+        : admission?.state === 'matched' ? {
+          requestId, outcome: 'unknown', from: null, to: null, agent: null, resource: null,
+          execution: { coordinatorRuntimeId: admission.sourceRuntimeId, reference: admission.reference, inspection: null,
+            diagnostics: admission, placement: 'unconfirmed' },
+          save: { layoutApplied: false, clientStateWritten: false, storageFlushRequested: false, diskDurability: 'unconfirmed',
+            reason: 'The original execution intent is retained. Its Source placement is unconfirmed.' },
+          issues: [issue(new AgentMuxError('The frozen execution intent is retained. Its original Source placement is unconfirmed.', 'SPACE_PLACEMENT_UNKNOWN'), 'observation')]
+        } : null
       return { operation: 'space.inspect', catalog: { spaces: [], zones: [], tabs: [], regions: [], bindings: [], locations: [] },
-        request: { requestId: request.target.requestId, known: Boolean(record), report: record ? await reconcile(record, context) : null } }
+        request: { requestId, known: Boolean(report), report, ...(observationIssue ? { observationIssue } : {}) } }
     }
     if (request.operation !== 'agent.open') return undefined
     const cancelled = state && takeoverCancellationRecord(state.graph, request.requestId)
