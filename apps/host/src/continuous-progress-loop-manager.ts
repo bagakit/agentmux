@@ -16,7 +16,7 @@ import { agentPromptInputId, projectContinuousProgressInput, type ContinuousProg
 import { scheduledDefinitionOperation } from './scheduled-input-source.js'
 
 export type LoopTickOutcome = 'sent' | 'skipped' | 'unknown' | 'not-applied'
-export type LoopTickHandler = (loop: ContinuousProgressLoop, operationId: string, isCurrent: () => boolean, signal: AbortSignal, onDispatch: () => void) => Promise<LoopTickOutcome>
+export type LoopTickHandler = (loop: ContinuousProgressLoop, operationId: string, isCurrent: () => boolean, signal: AbortSignal, onDispatch: () => void, authority?: AgentMuxRpcCallContext) => Promise<LoopTickOutcome>
 export type LoopObservationProvider = (loop: ContinuousProgressLoop, tickId: string, now: number, signal: AbortSignal) => Promise<ContinuousProgressObservation>
 export type GoalProgressOwner = {
   read: GoalProgressReader
@@ -390,7 +390,7 @@ export class ContinuousProgressLoopManager {
         await this.persist(loopId)
         return this.require(loopId)
       }
-      if (phase === 'confirm' || initial.state === 'unknown' && receipt !== 'pending') {
+      if (phase === 'confirm' || initial.state === 'unknown') {
         this.patch(loopId, { status: current.status === 'stopped' ? 'stopped' : 'paused', lastOutcome: 'unknown', lastDecision: 'Original Goal input delivery is unconfirmed. Inspect this same operation and its original outbox; the Agent and manual input remain available.' })
         await this.persist(loopId)
         throw new AgentMuxError('The original Goal input transaction cannot be confirmed. No new operation was sent.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
@@ -528,12 +528,12 @@ export class ContinuousProgressLoopManager {
   private goalDecision(loop: ContinuousProgressLoop, goal: GoalProgressRecord | null | undefined): GoalProgressDecision {
     if (loop.taskSource?.kind !== 'goal') return { action: 'continue', reason: '' }
     const source = decideGoalProgressSource(loop.taskSource, goal)
-    if (source.action === 'continue' && loop.initialDelivery?.state !== 'confirmed' &&
+    const readingOriginal = loop.initialDelivery?.state === 'confirmed' && loop.pendingCompletion && loop.lastOutcome === 'unknown'
+    if (source.action === 'continue' && !readingOriginal &&
         (!goal || goal.supervisorSessionId !== loop.agentSessionId || !goal.assigneeSessionIds.includes(loop.agentSessionId)))
-      return { action: 'pause', reason: 'The original Goal start no longer names its currently assigned Supervisor. The saved request and Agent remain available.' }
-    // This qualifies only a new plan-management input, never an already frozen claim.
-    if (source.action === 'continue' && goal?.plan && !loop.pendingCompletion && goal.supervisorSessionId !== loop.agentSessionId)
-      return { action: 'pause', reason: 'The original loop Agent is no longer this plan’s current Supervisor. New management input is paused. Explicitly stop this loop before starting the current Supervisor; the original Agent and manual input remain available.' }
+      return { action: 'pause', reason: loop.initialDelivery?.state !== 'confirmed'
+        ? 'The original Goal start no longer names its currently assigned Supervisor. The saved request and Agent remain available.'
+        : 'The original loop Agent is no longer the current Supervisor. New Goal input is paused. The original input and Agent remain available.' }
     return source
   }
   /**
@@ -1185,6 +1185,15 @@ export class ContinuousProgressLoopManager {
     }
     const isCurrent = () => { const current = this.scheduler.get(claim.loop.loopId)
       return this.running && !controller.signal.aborted && current?.status === 'active' && current.lastTickId === claim.tickId }
+    const goalAuthority = claim.loop.taskSource?.kind === 'goal' ? { assertCurrent: async () => {
+      if (!isCurrent()) throw new AgentMuxError('The original Goal input no longer has a current arrangement.', 'CONTROL_REQUEST_CONFLICT')
+      const current = this.require(loopId), source = await this.goalSource(current)
+      if (!isCurrent()) throw new AgentMuxError('The original Goal input no longer has a current arrangement.', 'CONTROL_REQUEST_CONFLICT')
+      if (source.action !== 'continue') {
+        await this.pauseForSource(current, source)
+        throw new AgentMuxError(source.reason, 'CONTROL_REQUEST_CONFLICT')
+      }
+    } } : undefined
     let pending = claim.loop.pendingCompletion
     let outcome: LoopTickOutcome = pending && claim.loop.lastOutcome === 'unknown' ? 'unknown' : 'skipped'
     let goalContinuation: string | undefined
@@ -1205,6 +1214,10 @@ export class ContinuousProgressLoopManager {
       if (claim.loop.managedSource && !await this.admitMaintenance(claim.loop, checkAt, controller.signal, isCurrent)) break delivery
       if (pending && claim.loop.lastOutcome === 'unknown') {
         outcome = await this.onTick(claim.loop, pending.operationId, isCurrent, controller.signal, markDispatched)
+        if (outcome === 'sent' && isCurrent() && goalAuthority) {
+          const current = this.require(loopId), source = await this.goalSource({ ...current, lastOutcome: 'sent' })
+          if (isCurrent() && source.action !== 'continue') await this.pauseForSource(current, source)
+        }
       } else {
         // Source truth qualifies only a new continuation, never an already-frozen unknown operation.
         if (claim.loop.taskSource && claim.loop.taskSource.kind !== 'goal') {
@@ -1245,7 +1258,7 @@ export class ContinuousProgressLoopManager {
               if (guidance) prompt += '\n\n' + guidance
             }
             let agentMuxNote: string | undefined
-            if (!futureIntent) agentMuxNote = formatAmuxTriggerNote('automation', AGENTMUX_AGENT_MESSAGING_ENTRY + (claim.loop.checkIn ? '\n\n' + AGENT_SCHEDULE_CHECK_IN_GUIDANCE : '') + (claim.loop.taskSource?.kind === 'goal' ? '\n\n' + goalRoleGuidance({ role: goalContinuation ? 'manager' : 'executor', goalId: claim.loop.taskSource.goalId, agentSessionId: claim.loop.agentSessionId, runId: observation.session.run.runId, source: { kind: 'goal-native-continuation', operationId: claim.tickId } }) : ''))
+            if (!futureIntent) agentMuxNote = formatAmuxTriggerNote('automation', AGENTMUX_AGENT_MESSAGING_ENTRY + (claim.loop.checkIn ? '\n\n' + AGENT_SCHEDULE_CHECK_IN_GUIDANCE : '') + (claim.loop.taskSource?.kind === 'goal' ? '\n\n' + goalRoleGuidance({ role: 'manager', goalId: claim.loop.taskSource.goalId, agentSessionId: claim.loop.agentSessionId, runId: observation.session.run.runId, source: { kind: 'goal-native-continuation', operationId: claim.tickId } }) : ''))
             else {
               const original = observation.session.futurePromptIntents?.[futureIntent.intentId]
               if (!original || original.operationId !== (claim.loop.currentDefinition?.operationId ?? claim.loop.creationOperationId) || original.message?.userContent !== prompt) {
@@ -1298,7 +1311,7 @@ export class ContinuousProgressLoopManager {
               outcome = await this.onTick(this.require(loopId), pending.operationId, isCurrent, controller.signal, () => {
                 markDispatched()
                 if (discardPreparation) controller.signal.removeEventListener('abort', discardPreparation)
-              })
+              }, goalAuthority)
             } finally {
               if (discardPreparation) controller.signal.removeEventListener('abort', discardPreparation)
             }
