@@ -36,7 +36,7 @@ title: "研究记录"
 
 ### Recall 知识卡
 
-知识卡保存为有稳定块锚点的单独 Markdown 链接段落。可读链接文字是收纳时的标题，`amux://recall-card/<card-id>` 使用 `record` 和 `route` 查询参数分别保存原 `ConversationItemRef` 与准确访问路由。链接没有授权，查看原消息仍走原阅读器。代码、普通文本和已删除 occurrence 都不产生卡片。
+知识卡保存为有稳定块锚点的单独 Markdown 链接段落。可读链接文字是收纳时的标题，`amux://recall-card/<card-id>` 使用 `record` 和 `route` 查询参数分别保存原 `ConversationItemRef` 与准确访问路由。链接没有授权，查看原消息仍走原阅读器。代码、普通文本和已删除 occurrence 都不产生卡片。 同一链接覆盖整个锚定段落时，文字因加粗或斜体分成多个片段仍是同一次引用；不同链接或夹有未链接文字的段落继续按普通 Markdown 链接读取。
 
 `notebook.graph` 的可选 `recallCards` 从本次读取的原 Note 和块派生。回链消费同一 occurrence，缺少返回值时同时按图的覆盖范围解释。Daily 选择以默认 Notebook 的受管文件与稳定身份为准，文件保存与目录登记各有自己的回执。
 
