@@ -1,7 +1,8 @@
+import { AGENTMUX_PROTOCOL_CATALOG, AMUX_PROTOCOL_DEFINITIONS, getAmuxProtocolTemplate, renderAmuxProtocol } from '../src/amux-protocol.js'
 import { describe, expect, it } from 'vitest'
 import { readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { AGENTMUX_PROTOCOL_CATALOG, AMUX_PROTOCOL_DEFINITIONS, parseAgentMuxMessagePrefix, renderAgentMuxMessageEnvelope } from '../src/agent-message-render.js'
+import { parseAgentMuxMessagePrefix, renderAgentMuxMessageEnvelope } from '../src/agent-message-render.js'
 import { composeAgentPrompt, composeOutboundMessage, formatAmuxTriggerNote } from '../src/agent-outbound-message.js'
 import { DEFAULT_AGENT_CONTINUITY_CONTINUATION } from '../src/agent-session-recovery/continuity-contract.js'
 import { promptReactionMessage, PROMPT_REACTION_STARTERS } from '../src/prompt-reaction.js'
@@ -28,6 +29,15 @@ describe('source-owned amux reading catalog', () => {
     expect(realWire).toContain('&lt;amux:reaction ok /&gt;')
     expect(parseAgentMuxMessagePrefix(realWire)?.protocol).toBeUndefined()
     expect(parseAgentMuxMessagePrefix(realWire)?.body).toBe('\n\n' + original.prompt)
+  })
+
+  it('reads the original template and expands opaque values once in the delivered format', () => {
+    const template = getAmuxProtocolTemplate('context', 'wire')
+    const raw = '{{content}} <source>\r'
+    const delivered = composeOutboundMessage({ amux: raw, user: 'Original {{body}}' })
+    expect(template).toContain('{{content}}')
+    expect(delivered).toBe(renderAmuxProtocol('context', 'wire', { content: '{{content}} &lt;source&gt;&#13;' }) + '\n\nOriginal {{body}}')
+    expect(AGENTMUX_PROTOCOL_CATALOG.find(entry => entry.id === 'context')?.templates).toContainEqual({ name: 'wire', text: template })
   })
 
   it.each(['heartbeat', 'calendar', 'automation'] as const)('keeps a %s declaration apart from the original instruction and any sender it quotes', kind => {

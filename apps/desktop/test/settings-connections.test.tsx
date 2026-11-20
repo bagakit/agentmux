@@ -244,6 +244,12 @@ describe('Conversation Channels settings', () => {
     await act(async () => { documentation.focus(); documentation.click() })
     const protocols = document.querySelector<HTMLElement>('.documentation-dialog')!
     expect(protocols.querySelector('[aria-label="amux protocol reference"]')).not.toBeNull()
+    const template = protocols.querySelector<HTMLDetailsElement>('[data-protocol-entry="context"]')!
+    expect(template).not.toBeNull()
+    await act(async () => { template.open = true; template.dispatchEvent(new Event('toggle')) })
+    expect(template.textContent).toContain('Templates')
+    expect(template.textContent).toContain('{{content}}')
+    expect(template.querySelector('[data-protocol-example="context"]')).not.toBeNull()
     expect(protocols.querySelector('[data-settings-save-bar]')).toBeNull()
     expect(native.hidden).toBe(false)
     await act(async () => protocols.querySelector<HTMLButtonElement>('[aria-label="Close documentation"]')!.click())
