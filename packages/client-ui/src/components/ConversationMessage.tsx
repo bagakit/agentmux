@@ -1,6 +1,7 @@
 import { ConversationProgressiveBody } from './ConversationProgressiveBody.js'
 import type { AgentProviderId, AgentSessionHistoryContentPart, AgentSessionHistoryCollaboration, AgentSessionHistoryMessagePhase, AgentSessionHistoryQuestionAnswer, AgentSessionUserMessage, AgentSessionUserMessageSource, AgentTimelineItemStatus } from '@agentmux/core'
-import { AMUX_PROTOCOL_DEFINITIONS, parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
+import { AMUX_PROTOCOL_DEFINITIONS } from '@agentmux/core/amux-protocol'
+import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import type { ConversationItemRef, ConversationSourceRecord } from '@agentmux/core/conversation'
 import { sessionHistoryTextForReading } from '@agentmux/core/session-user-messages'
 import { readSessionHistoryTextResource } from '@agentmux/core/session-history-content'

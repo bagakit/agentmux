@@ -1,4 +1,4 @@
-import { AGENTMUX_PROTOCOL_CATALOG, type AgentMuxProtocolCatalogEntry } from '@agentmux/core/agent-message-render'
+import { AGENTMUX_PROTOCOL_CATALOG, type AgentMuxProtocolCatalogEntry } from '@agentmux/core/amux-protocol'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { TextInput } from '@agentmux/client-ui/input'
@@ -32,7 +32,13 @@ function ProtocolRow({ entry, active, rowRef }: { entry: AgentMuxProtocolCatalog
   const [open, setOpen] = useState(false)
   return <details ref={rowRef} className="amux-protocols__row" data-protocol-entry={entry.id} onToggle={event => setOpen(event.currentTarget.open)}>
     <summary><SemanticIcon name="navigation.disclosure" size={13} aria-hidden="true" /><span><strong>{entry.title}</strong><code>{entry.form}</code></span></summary>
-    {open && active ? <div className="amux-protocols__body"><p className="amux-protocols__description">{entry.description}</p><ProtocolExamples entry={entry} /></div> : null}
+    {open && active ? <div className="amux-protocols__body"><p className="amux-protocols__description">{entry.description}</p><ProtocolExamples entry={entry} />
+      <details>
+        <summary>Templates</summary>
+        {entry.templates.map(template => <section key={template.name} className="amux-protocols__example">
+          <h4>{template.name}</h4><div className="amux-protocols__wire"><pre>{template.text}</pre></div>
+        </section>)}
+      </details></div> : null}
   </details>
 }
 

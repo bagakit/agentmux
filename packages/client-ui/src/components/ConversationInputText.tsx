@@ -1,4 +1,5 @@
-import { AMUX_PROTOCOL_DEFINITIONS, type AgentMuxMessagePrefix, type AmuxTriggerKind } from '@agentmux/core/agent-message-render'
+import { AMUX_PROTOCOL_DEFINITIONS } from '@agentmux/core/amux-protocol'
+import type { AgentMuxMessagePrefix, AmuxTriggerKind } from '@agentmux/core/agent-message-render'
 import { browserInputContextJson, type BrowserInputContext, type BrowserInputContextSource } from '@agentmux/core/browser-input-context'
 import { memo, type ComponentProps } from 'react'
 import { SemanticIcon } from '../theme/icons.js'

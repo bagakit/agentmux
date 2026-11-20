@@ -1,4 +1,5 @@
-import { AMUX_PROTOCOL_DEFINITIONS, type AmuxProtocolDeclaration } from '@agentmux/core/agent-message-render'
+import { AMUX_PROTOCOL_DEFINITIONS } from '@agentmux/core/amux-protocol'
+import type { AmuxProtocolDeclaration } from '@agentmux/core/agent-message-render'
 import type { ReactNode, ComponentProps } from 'react'
 import { SemanticIcon } from '../theme/icons.js'
 import { formatAmuxObjectLink } from '@agentmux/core/sharing'
