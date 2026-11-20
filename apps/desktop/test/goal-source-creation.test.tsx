@@ -351,6 +351,8 @@ it('the original Mote producer keeps one legacy OP through actual Source Host pr
   const { directoryIdentity, homeZoneId } = await import('../src/shared/space-addresses')
   const { scratchTopicsScope } = await import('../src/renderer/src/lib/scratch-topic-snapshots')
   const f = await fixture('local'), scratch = { id: '__scratch__', name: 'Topics', hostId: 'local', path: join(f.root, 'topics'), kind: 'folder' as const }
+  // This legacy operation was issued before its original Runtime recorded an input cut.
+  f.local.readAgentInputEpoch.mockResolvedValue(undefined)
   const topics = new ScratchTopics(), topic = await topics.ensureMote(scratch, 'launcher:original-goal-mote')
   const { scratchTopicIdentityPath } = await import('../../host/src/mote-model')
   const topicPath = scratchTopicIdentityPath(scratch, topic)
