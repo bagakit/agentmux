@@ -311,25 +311,39 @@ it('keeps confirmed Mote membership with no layout and exposes the same read in 
   expect(JSON.parse(errors[0]!)).toMatchObject({ ok: false, error: { code: 'RUNTIME_OWNER_MISMATCH' } })
 })
 
-it('keeps both original Group choices and checks the selected exact occurrence without a replacement', async () => {
+it('keeps both original Group choices and preserves the selected exact occurrence through refresh', async () => {
   const f = await fixture({ unmountedKind: 'mote', occurrence: 'two' })
   await vi.waitFor(() => expect(cardWith('Existing remote result').closest('.focus-project-lanes__row')?.textContent).toContain('Original Mote'))
-  await act(async () => cardWith('Existing remote result').click())
-  const choices = dom.container.querySelector('[aria-label="Choose original workface"]')!
-  const buttons = Array.from(choices.querySelectorAll<HTMLButtonElement>('.focus-location-choice'))
-  expect(buttons).toHaveLength(2)
-  const chosen = buttons.find(button => button.textContent?.includes('other-original-group'))!
-  expect(chosen).toBeDefined()
-  const call = vi.mocked(api.spaceMounts.call)
-  await act(async () => chosen.click())
+  const workspaceId = originalSourceWorkspaceId(f.target)
+  const originalGroup = originalSourceGroupProjectionId(f.target, JSON.stringify([f.admitted.address.displayWorkspaceId, f.admitted.address.groupId]))
   const groupId = originalSourceGroupProjectionId(f.target, JSON.stringify(['other-original-display', 'other-original-group']))
+  const choices = () => Array.from(dom.container.querySelectorAll<HTMLButtonElement>('[aria-label="Choose original workface"] .focus-location-choice'))
+  const call = vi.mocked(api.spaceMounts.call)
+  await act(async () => cardWith('Existing remote result').click())
+  expect(choices()).toHaveLength(2)
+  await act(async () => choices().find(button => button.textContent?.includes(`Group ${f.admitted.address.groupId} ·`))!.click())
+  await vi.waitFor(() => expect(useAppStore.getState().workbenchSpaceSelection?.groupId).toBe(originalGroup))
+  await vi.waitFor(() => expect(useAppStore.getState().mountedSpaceObservations[f.key]?.reading).toBe(false))
+
+  await act(async () => cardWith('Existing remote result').click())
+  const chosen = choices().find(button => button.textContent?.includes('other-original-group'))!
+  expect(chosen).toBeDefined()
+  await act(async () => chosen.click())
   await vi.waitFor(() => expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({
-    groupId, workspaceId: originalSourceWorkspaceId(f.target), regionId: originalSourceRegionProjectionId(f.target, f.admitted.address.regionId)
+    groupId, workspaceId, regionId: originalSourceRegionProjectionId(f.target, f.admitted.address.regionId)
   }))
-  expect(useAppStore.getState().layouts[originalSourceWorkspaceId(f.target)]?.activeGroupId).toBe(groupId)
+  expect(useAppStore.getState().layouts[workspaceId]?.activeGroupId).toBe(groupId)
   expect(call.mock.calls).toContainEqual(expect.arrayContaining(['agentLocations', expect.objectContaining({
     expectedRuntimeId: f.owner.owner.runtimeId, position: expect.objectContaining({ displayWorkspaceId: 'other-original-display', groupId: 'other-original-group' })
   })]))
+  expect(useAppStore.getState().layouts[workspaceId]?.groups.map(group => group.id)).toContain(originalGroup)
+
+  const state = (await f.b.spatial.read())!
+  await act(async () => { await f.b.spatial.commit({ expectedRevision: state.revision, graph: { ...state.graph,
+    spaces: state.graph.spaces.map(space => space.spaceId === f.reference.spaceId ? { ...space, name: 'Latest original Mote name' } : space) } }) })
+  await vi.waitFor(() => expect(useAppStore.getState().mountedSpaceObservations[f.key]?.snapshot?.scope.space?.name).toBe('Latest original Mote name'))
+  expect(useAppStore.getState().workbenchSpaceSelection?.groupId).toBe(groupId)
+  expect(useAppStore.getState().layouts[workspaceId]?.activeGroupId).toBe(groupId)
 })
 
 it('retains the original result on a Source read failure and refreshes that same route', async () => {
