@@ -25,6 +25,10 @@ function assertGoalConfirmation({ goalUrl, alignmentRevision, operationId }: Goa
 
 /** Readers use the original Goal and Core receipts to establish authority and effects. */
 export function formatGoalConfirmation(value: GoalConfirmation): string {
+  return formatGoalConfirmationBody(value, instruction)
+}
+
+function formatGoalConfirmationBody(value: GoalConfirmation, body: string): string {
   assertGoalConfirmation(value)
   const document = new DOMImplementation().createDocument(null, '', null)
   const element = document.createElement(tag)
@@ -33,7 +37,7 @@ export function formatGoalConfirmation(value: GoalConfirmation): string {
   element.setAttribute('goal', value.goalUrl)
   element.setAttribute('revision', String(value.alignmentRevision))
   element.setAttribute('operation-id', value.operationId)
-  element.appendChild(document.createTextNode(`\n${instruction}\n`))
+  element.appendChild(document.createTextNode(`\n${body}\n`))
   return new XMLSerializer().serializeToString(element)
 }
 
@@ -54,6 +58,9 @@ export function parseGoalConfirmation(text: string): GoalConfirmation | null {
     if (!header) return null
     const element = new DOMParser({ onError: onWarningStopParsing }).parseFromString(`<goal${header[1]}/>`, 'text/xml').documentElement!
     const value = { goalUrl: element.getAttribute('goal')!, alignmentRevision: Number(element.getAttribute('revision')), operationId: element.getAttribute('operation-id')! }
-    return formatGoalConfirmation(value) === text ? value : null
+    const body = text.slice(header[0].length, -closing.length)
+    if (body.includes('<')) return null
+    const decoded = new DOMParser({ onError: onWarningStopParsing }).parseFromString('<body>' + body + '</body>', 'text/xml').documentElement?.textContent
+    return typeof decoded === 'string' && formatGoalConfirmationBody(value, decoded) === text ? value : null
   } catch { return null }
 }

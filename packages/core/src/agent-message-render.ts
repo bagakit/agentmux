@@ -370,7 +370,8 @@ function parseQuotedChannel(text: string): AgentMuxMessagePrefix | null {
 }
 
 function parseSenderPrefix(text: string): AgentMuxMessagePrefix | null {
-  if (text.startsWith('<amux:quote')) return parseQuotedChannel(text)
+  const quoteStart = `<${AMUX_PROTOCOL_DEFINITIONS['channel-quote'].tag}`
+  if (text.startsWith(quoteStart) && /^[\s/>]|^$/u.test(text.slice(quoteStart.length, quoteStart.length + 1))) return parseQuotedChannel(text)
   const channelStart = `<${AMUX_PROTOCOL_DEFINITIONS.channel.tag}`
   if (text.startsWith(channelStart) && /^[\s/>]|^$/u.test(text.slice(channelStart.length, channelStart.length + 1))) return parseChannel(text)
   const a2aStart = `<${AMUX_PROTOCOL_DEFINITIONS.a2a.tag}`
