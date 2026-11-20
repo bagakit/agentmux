@@ -1,0 +1,136 @@
+.browser-traffic {
+  container: browser-traffic / inline-size;
+  font-size: var(--fs-meta);
+}
+
+.browser-traffic__body {
+  display: grid;
+  gap: var(--sp-3);
+  padding-block: var(--sp-3);
+}
+
+.browser-traffic__receipt span {
+  margin: 4px 0 0;
+  color: var(--text-2);
+}
+
+.browser-traffic__body label {
+  display: grid;
+  gap: 6px;
+}
+
+.browser-traffic__body input,
+.browser-traffic__body select {
+  min-width: 0;
+  min-height: 28px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  padding: 4px 8px;
+  color: var(--text-1);
+  background: var(--surface-1);
+  font: inherit;
+}
+
+.browser-traffic__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.browser-traffic__receipt {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  border-top: 1px solid var(--line-2);
+  padding-top: 8px;
+  overflow-wrap: anywhere;
+}
+
+.browser-traffic__destination {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browser-traffic__requests button {
+  padding: 4px 6px;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  font: inherit;
+  text-align: left;
+}
+
+.browser-traffic button[aria-pressed="true"] {
+  background: var(--surface-2);
+}
+
+.browser-traffic__targets summary {
+  cursor: pointer;
+}
+
+.browser-traffic__targets summary small {
+  margin-inline-start: var(--sp-1);
+  color: var(--text-3);
+}
+
+.browser-traffic__targets label {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.browser-traffic__targets label input {
+  min-height: auto;
+}
+
+.browser-traffic__targets span,
+.browser-traffic__requests li span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browser-traffic__requests {
+  display: grid;
+  gap: 2px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.browser-traffic__requests button {
+  display: grid;
+  grid-template-columns: 5ch auto minmax(0, 1fr);
+  gap: 6px;
+  width: 100%;
+}
+
+.browser-traffic__detail {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px;
+  margin: 0;
+}
+
+.browser-traffic__detail dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.browser-traffic__hint {
+  margin: 0;
+  color: var(--text-2);
+}
+
+@container browser-traffic (max-width: 250px) {
+  .browser-traffic__detail {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--sp-1);
+  }
+
+  .browser-traffic__detail dd {
+    margin-block-end: var(--sp-2);
+  }
+}

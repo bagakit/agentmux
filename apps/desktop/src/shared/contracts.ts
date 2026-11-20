@@ -2333,6 +2333,11 @@ export type AgentMuxDesktopApi = {
     recordInputHistory(target: BrowserInputHistoryTarget, text: string): Promise<BrowserInputHistoryRecord>
     removeInputHistory(target: BrowserInputHistoryTarget, scope: BrowserInputHistoryScope, text: string): Promise<BrowserInputHistorySnapshot>
     clearInputHistory(target: BrowserInputHistoryTarget, scope: BrowserInputHistoryScope): Promise<BrowserInputHistorySnapshot>
+    trafficTargets(): Promise<import('./browser-traffic').BrowserTrafficTarget[]>
+    inspectTraffic(): Promise<import('./browser-traffic').BrowserTrafficReceipt | null>
+    startTraffic(browserIds: string[]): Promise<import('./browser-traffic').BrowserTrafficReceipt>
+    stopTraffic(captureId: string): Promise<import('./browser-traffic').BrowserTrafficReceipt>
+    exportTraffic(captureId: string): Promise<{ path: string; bytes: number } | null>
     openDevTools(id: string): Promise<void>
     setViewport(id: string, viewport: BrowserViewport): Promise<BrowserSnapshot>
     captureScreenshot(id: string): Promise<BrowserScreenshotCapture>

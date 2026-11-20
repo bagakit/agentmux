@@ -350,6 +350,10 @@
       "types": "./dist/delivery-attempt.d.ts",
       "import": "./dist/delivery-attempt.js"
     },
+    "./cli-atomic-file": {
+      "types": "./dist/cli-atomic-file.d.ts",
+      "import": "./dist/cli-atomic-file.js"
+    },
     "./object-id": {
       "types": "./dist/object-id.d.ts",
       "import": "./dist/object-id.js"

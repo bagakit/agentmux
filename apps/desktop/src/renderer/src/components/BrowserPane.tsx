@@ -72,6 +72,7 @@ import { workbenchTabDisplayName } from '../lib/workbench-tab-presentation'
 import { readPmoTeamsTopicFloatingState, subscribePmoTeamsTopicFloatingState } from '../lib/pmo-teams-topic-floating'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { BrowserToolsPanel } from './BrowserToolsPanel'
+import { BrowserTrafficPanel } from './BrowserTrafficPanel'
 import type { SurveyBrowserPreparation } from '../lib/survey-browser-creation'
 import { BrowserWorkfaceBoundary, type BrowserWorkfaceAddressDraft } from './BrowserWorkfaceBoundary'
 import { createBrowserAgent, type BrowserAgentCreationResult } from '../lib/browser-agent-creation'
@@ -519,6 +520,7 @@ function BrowserPaneContent({
   const [profileNoticeHost, setProfileNoticeHost] = useState<HTMLDivElement | null>(null)
   const [customViewport, setCustomViewport] = useState<string | null>(null)
   const [managementOpen, setManagementOpen] = useState(false)
+  const [trafficOpen, setTrafficOpen] = useState(false)
   const [managementVisited, setManagementVisited] = useState(false)
   const research = useRef<{ url: string; mode: BrowserSnapshot['mode']; preparation: SurveyBrowserPreparation | null } | null>(null)
   const privateCreation = useRef<{ source: WorkbenchProjectionSelection; reference: WorkbenchProjectionSelection; zoneId: string; launcher: WorkbenchSurface } | null>(null)
@@ -1342,7 +1344,10 @@ function BrowserPaneContent({
                   </DropdownMenu.Sub>
                 </> : null}
                 <DropdownMenu.Separator className="browser-menu__separator" />
-                <DropdownMenu.Item className="browser-menu__item" aria-label="Browser tools" onSelect={() => { setManagementVisited(true); setManagementOpen(true) }}>
+                <DropdownMenu.Item className="browser-menu__item" onSelect={() => { setManagementOpen(false); setTrafficOpen(true) }}>
+                  <ThemeObjectToolsIcon size={12} /><span>Traffic</span>
+                </DropdownMenu.Item>
+                <DropdownMenu.Item className="browser-menu__item" aria-label="Browser tools" onSelect={() => { setTrafficOpen(false); setManagementVisited(true); setManagementOpen(true) }}>
                   <ThemeActionAdjustIcon size={12} /><span>Browser tools…</span>
                 </DropdownMenu.Item>
                 <DropdownMenu.Item className="browser-menu__item" aria-label="Research in Survey" disabled={busy} onSelect={event => void startResearch((event.target as Element).ownerDocument)}>
@@ -1417,6 +1422,7 @@ function BrowserPaneContent({
         blocked={blocked} media={media} stageRef={!presentation || presentation.stageHostId === presentations[0]?.stageHostId ? stageRef : undefined}>{stageContent}</BrowserPresentationStage>
         : <div className="browser-stage" data-native-browser-stage={tab.browserId} ref={stageRef}>{stageContent}</div>}
 
+      {trafficOpen ? <BrowserTrafficPanel browserId={tab.browserId} visible={visible} onClose={() => setTrafficOpen(false)} /> : null}
       {managementVisited ? <aside className="browser-trace-rail browser-management-rail" aria-label="Browser management controls" hidden={!managementOpen} inert={!managementOpen || !visible}>
         <header><strong>Browser tools</strong><button type="button" className="icon-button" aria-label="Close browser tools" onClick={() => setManagementOpen(false)}><ThemeActionCloseIcon size={14} /></button></header>
         {resourceWorkspace ? <BrowserToolsPanel workspace={resourceWorkspace} visible={visible && managementOpen} /> : <p role="status">The browser resource is still restoring. Your page remains available.</p>}

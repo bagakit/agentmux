@@ -15,6 +15,7 @@ import { isSettingsPreferenceMethod } from '@agentmux/core'
 import { SettingsTailcatConfiguration } from './settings-tailcat-configuration.js'
 import { notesStorageInspection } from '@agentmux/core'
 import { registerSpaceMountIpc } from './space-mount-ipc.js'
+import { registerBrowserTrafficIpc } from './browser-traffic-ipc.js'
 import { registerBrowserTaskParallelIpc } from './browser-task-parallel-ipc.js'
 import { createProfileCookieFileIo } from './browser-profile-cookie-file-io.js'
 import { confirmProfileStorage } from './browser-profile-storage-confirmation.js'
@@ -2710,6 +2711,7 @@ export async function registerIpc(args: {
     await ensureBrowser(id)
     return await browsers.locateTaskAssetStep(id, assetId, revision, stepId)
   })
+  registerBrowserTrafficIpc({ handle: handleWithEvent, browsers })
   registerBrowserTaskParallelIpc({ handle: handleWithEvent, browsers, authorize: (id, profileId) => browserAutomation(id, undefined, profileId) })
   handleWithEvent('browser:runTaskBatch', async (event, input: BrowserTaskBatchInput) => {
     await browserAutomation(input.browserId, undefined)

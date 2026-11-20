@@ -1583,6 +1583,11 @@ const mockApi: AgentMuxDesktopApi = {
       publishMockBrowserProfiles()
       return structuredClone(profile)
     },
+    trafficTargets: async () => [],
+    inspectTraffic: async () => null,
+    startTraffic: async () => { throw new Error('Traffic recording requires the desktop host.') },
+    stopTraffic: async () => { throw new Error('Traffic recording requires the desktop host.') },
+    exportTraffic: async () => null,
     openDevTools: async () => {},
     setViewport: async (id, viewport: BrowserViewport) => {
       const current = requireMockBrowser(id)

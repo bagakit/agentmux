@@ -258,7 +258,13 @@ export class BrowserCdpSession implements BrowserPageTransport {
     }
     const contents = this.contents, listeners = new Set<(method: string, params: unknown) => void>()
     let ended: string | null = null
-    const release = () => { if (!contents.isDestroyed()) { contents.debugger.off('message', message); contents.debugger.off('detach', detached) }; listeners.clear(); releaseHold() }
+    const release = () => {
+      if (!contents.isDestroyed()) { contents.debugger.off('message', message); contents.debugger.off('detach', detached) }
+      listeners.clear()
+      // A native detach event can arrive inside Chromium's response dispatch. Do not destroy
+      // the last debugger connection while that original callback is still on the stack.
+      setImmediate(releaseHold)
+    }
     const detached = (_event: unknown, reason: string) => { ended = reason; release() }
     const message = (_event: unknown, method: string, params: unknown, sourceId?: string) => {
       if (sourceId === sessionId) for (const listener of listeners) listener(method, params)

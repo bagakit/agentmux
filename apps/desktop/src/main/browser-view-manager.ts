@@ -80,6 +80,7 @@ import type { BrowserMenuCommands, BrowserMenuDestination } from './browser-page
 import type { BrowserPageMenuPresentation } from './browser-page-menu-presentation.js'
 import { getDesktopNativeUiOwner } from './native-desktop-owner.js'
 import { BrowserCdpSession, DESKTOP_BROWSER_DIALOG_TYPES } from './browser-cdp-session.js'
+import { openBrowserHarCapture } from '@agentmux/browser/browser-har-capture'
 import { BrowserCertificateDecision, type BrowserCertificateAnswer } from './browser-certificates.js'
 import { BrowserNativeInputShield } from './browser-native-input-shield.js'
 import { beginOwnDispatch, isOwnDispatch, type BrowserOwnDispatch } from './browser-own-dispatch.js'
@@ -2656,6 +2657,29 @@ export class BrowserViewManager {
         }
       }
     }
+  }
+
+  trafficTargets() {
+    return this.targets().filter(target => target.status === 'ready' && target.mode === 'normal')
+      .map(target => ({ id: target.id, title: target.title, url: safeBrowserUrl(target.url) }))
+  }
+
+  async openTrafficCapture(browserId: string, signal: AbortSignal) {
+    const entry = this.require(browserId), view = entry.view
+    if (entry.storage.mode !== 'normal') throw new Error('Choose a normal Browser for a traffic recording.')
+    signal.throwIfAborted()
+    const session = BrowserCdpSession.attach(view.webContents)
+    try {
+      const capture = await openBrowserHarCapture(() => session.openNetworkSession(), signal)
+      if (!this.owns(entry, view)) {
+        await capture.finish()
+        throw new Error('The selected Browser owner changed during recording preparation.')
+      }
+      return { ...capture, finish: async () => {
+        try { return await capture.finish() }
+        finally { session.detach() }
+      } }
+    } catch (error) { session.detach(); throw error }
   }
 
   openDevTools(id: string): void {
