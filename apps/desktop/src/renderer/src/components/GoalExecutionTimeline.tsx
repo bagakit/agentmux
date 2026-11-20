@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { delegationWorkerHostId } from '@agentmux/demand/delegations'
 import type { DemandRecord } from '../lib/global-demand-board'
 import type { GoalPlanNodeView, GoalPlanReadingTarget } from './GoalPlanGraph'
@@ -9,6 +10,7 @@ type TimeSpan = { from: number; to: number }
 type Row = { id: string; title: string; number?: number; target?: GoalPlanReadingTarget; events: Event[]; active?: TimeSpan; planned?: TimeSpan }
 const format = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 const clock = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' })
+const Disclosure = semanticIconComponent('navigation.disclosure')
 
 /** Receipt times are events. Only an exact, confirmed activity observation can supply a live span. */
 export function goalExecutionRows(demand: Pick<DemandRecord, 'plan' | 'delegations' | 'dispatches' | 'responsibility'>): Row[] {
@@ -112,16 +114,18 @@ export function GoalExecutionTimeline({ demand, nodes, selected, onSelect }: { d
         const item = target && byId.get(target.nodeId)
         const previous = Boolean(target?.attemptId && item?.delegation?.operationId !== target.attemptId)
         const state = previous ? 'Previous attempt' : item ? goalPlanStateLabel(item) : undefined
-        return <div className="goal-execution-time__row" key={row.id} data-goal-time-row={row.id} data-selected={active || undefined}>
-          <div className="goal-execution-time__task">{item && !previous ? <GoalPlanMark item={item} /> : null}
-            <div>{target ? <button type="button" aria-pressed={Boolean(active)} onClick={event => onSelect(target, event.currentTarget)}>{row.title}</button> : <strong>{row.title}</strong>}
-              {state || row.number ? <small>{state}{row.number && row.number > 1 ? ` · Attempt ${row.number}` : ''}</small> : null}</div>
-          </div>
-          {row.events.length || row.active || row.planned ? <div className="goal-execution-time__track" role="img" aria-label={[
-            ...row.events.map(event => `${event.label}, ${format.format(event.at)}`),
-            ...(row.active ? [`Observed activity, ${format.format(row.active.from)} – ${format.format(row.active.to)}`] : []),
-            ...(row.planned ? [`Planned, ${format.format(row.planned.from)} – ${format.format(row.planned.to)}`] : [])
-          ].join(' · ')}>
+        const attempt = row.number && row.number > 1 ? `Attempt ${row.number}` : undefined
+        const times = [
+          ...row.events.map(event => `${event.label}, ${format.format(event.at)}`),
+          ...(row.active ? [`Observed activity, ${format.format(row.active.from)} – ${format.format(row.active.to)}`] : []),
+          ...(row.planned ? [`Planned, ${format.format(row.planned.from)} – ${format.format(row.planned.to)}`] : [])
+        ]
+        const content = <>
+          <span className="goal-execution-time__task">{item && !previous ? <GoalPlanMark item={item} /> : null}
+            <span><strong>{row.title}</strong>{target ? <Disclosure className="goal-execution-time__open" size={11} aria-hidden="true" /> : null}
+              {state || attempt ? <small>{[state, attempt].filter(Boolean).join(' · ')}</small> : null}</span>
+          </span>
+          {times.length ? <span className="goal-execution-time__track" role={target ? undefined : 'img'} aria-label={target ? undefined : times.join(' · ')} aria-hidden={target ? true : undefined}>
             {ticks.slice(1, -1).map(at => <span className="goal-execution-time__guide" key={at} style={{ left: `${offset(at)}%` }} aria-hidden="true" />)}
             {row.active ? <span className="goal-execution-time__live" data-goal-observed-activity style={{ left: `${offset(row.active.from)}%`, width: `${offset(row.active.to) - offset(row.active.from)}%` }}
               title={`Observed activity · ${format.format(row.active.from)} – ${format.format(row.active.to)}`} /> : null}
@@ -129,8 +133,13 @@ export function GoalExecutionTimeline({ demand, nodes, selected, onSelect }: { d
               title={`Planned · ${format.format(row.planned.from)} – ${format.format(row.planned.to)}`}>Planned</span> : null}
             {row.events.map(event => <span className="goal-execution-time__point" key={event.id} data-goal-time-event={event.label} style={{ left: `${offset(event.at)}%` }}
               title={`${event.label} · ${format.format(event.at)}`} />)}
-          </div> : <div className="goal-execution-time__track goal-execution-time__track--empty"><span>No attempt recorded</span></div>}
-        </div>
+          </span> : <span className="goal-execution-time__track goal-execution-time__track--empty">No attempt recorded</span>}
+        </>
+        return target ? <button type="button" className="goal-execution-time__row goal-execution-time__row--action" key={row.id}
+          data-goal-time-row={row.id} data-selected={active || undefined} aria-pressed={Boolean(active)}
+          aria-label={[`Read ${row.title}`, state, attempt, ...times].filter(Boolean).join(' · ')}
+          onClick={event => onSelect(target, event.currentTarget)}>{content}</button>
+          : <div className="goal-execution-time__row" key={row.id} data-goal-time-row={row.id}>{content}</div>
       })}
     </div></div>
   </section>
