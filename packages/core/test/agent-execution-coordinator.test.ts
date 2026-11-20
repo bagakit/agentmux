@@ -93,6 +93,64 @@ async function fixture() {
 }
 
 describe('execution coordinator retained original pair', () => {
+  it.each(['running', 'exited', 'second Native replacement'] as const)('automatically replaces only a project helper with the original Agent %s', async scenario => {
+    const f = await fixture(), originalOwner = await f.open()
+    f.input.resourceHostId = 'local'
+    const workspacePath = f.input.resourceWorkspacePath, createOperationId = 'original-executor-start'
+    const localProjectExecutor = vi.fn(async () => ({
+      bindingId: f.input.bindingId, role: 'executor' as const, providerId: 'fixture-provider', journalIdentity: 'original-project-journal',
+      prepared: { createOperationId, workspacePath, launch: JSON.stringify({ createOperationId, request: {
+        program: '/original/helper', args: [], cwd: workspacePath, env: { AGENTMUX_LIFECYCLE_OPERATION_ID: createOperationId },
+        initial_size: { cols: 80, rows: 24 }, declared_inputs: [],
+      } }) },
+    }))
+    await originalOwner.coordinator.create(f.input)
+    await originalOwner.close()
+    f.executor.replaceRuntime()
+    const previousInstance = f.executor.api.runtimeIdentity().instanceId
+    if (scenario === 'second Native replacement') f.executor.api.createPreparedTerminal.mockImplementationOnce(async () => {
+      f.executor.replaceRuntime()
+      throw new AgentMuxError('The project changed before this exact Start', 'TERMINAL_INITIAL_RUNTIME_CHANGED')
+    })
+    f.executor.api.createPreparedTerminal.mockImplementationOnce(async () => f.executor.installSuccessor())
+    const oldReplay = f.frontend.api.readRunReplay.getMockImplementation()!
+    f.frontend.api.readRunReplay.mockImplementation(async (...args) => {
+      const result = await oldReplay(...args)
+      return { ...result, run: { ...result.run, acceptedInputBytes: 0, latestOutputBytes: 0,
+        nativeService: { owner: { type: 'serving' }, input: { phase: { type: 'open' }, completedInputBytes: 0,
+          activeConfirmedBytes: 0, unsettledCommands: 0, unsettledRequestBytes: 0 } } } }
+    })
+    const observed = vi.fn(async () => ({
+      kind: 'agent', run: { runId: 'original-agent-run', state: scenario === 'exited' ? 'exited' : 'running' },
+      agentSession: { agentSessionId: f.input.agent.agentSessionId, run: { runId: 'original-agent-run' },
+        toolExecution: { bindingId: f.input.bindingId, resourceRuntimeId: f.input.resourceRuntimeId, workspacePath } },
+    }))
+    f.frontend.port.runtimeSubject = observed as unknown as AgentExecutionHostPort['runtimeSubject']
+    const startLocalProjectExecutor = vi.fn(async (_prepared, instance: string) => {
+      expect(instance).toBe(f.executor.api.runtimeIdentity().instanceId)
+      return await f.executor.api.createPreparedTerminal() as never
+    })
+    const reconcileLocalProjectExecutor = vi.fn(async () => 'not-admitted' as const)
+    const active = await f.open(undefined, { localProjectExecutor, startLocalProjectExecutor, reconcileLocalProjectExecutor })
+    await active.coordinator.restoreReaders()
+    await vi.waitFor(() => expect(observed).toHaveBeenCalledWith({ kind: 'agent-session', agentSessionId: f.input.agent.agentSessionId }))
+    if (scenario !== 'exited') {
+      await vi.waitFor(() => expect(f.read().bridge.executor.runId).toBe('executor-successor-run'))
+      expect(f.read().bridge.frontend.runId).toBe(f.frontend.runId)
+    } else {
+      expect(localProjectExecutor).not.toHaveBeenCalled()
+      expect(active.coordinator.inspect(f.input.bindingId)?.diagnostic?.nextAction).toBe('recover-project')
+    }
+    if (scenario === 'second Native replacement') {
+      const [abandoned, successor] = f.read().projectRecoveries
+      expect(abandoned).toMatchObject({ ownerInstanceId: previousInstance, previousAttemptSettled: 'not-admitted' })
+      expect(successor.operationId).not.toBe(abandoned.operationId)
+      expect(reconcileLocalProjectExecutor).toHaveBeenCalledWith(expect.objectContaining({ createOperationId: abandoned.operationId }), previousInstance)
+    } else expect(reconcileLocalProjectExecutor).not.toHaveBeenCalled()
+    expect(f.executor.api.createPreparedTerminal).toHaveBeenCalledTimes(scenario === 'exited' ? 1 : scenario === 'running' ? 2 : 3)
+    expect(f.frontend.api.createHostAgentWithDelivery).toHaveBeenCalledTimes(1)
+  })
+
   it('recovers a lost project helper on the original binding without forwarding an old Input again', async () => {
     const f = await fixture()
     f.input.resourceHostId = 'local'
@@ -101,7 +159,10 @@ describe('execution coordinator retained original pair', () => {
       program: '/original/helper', args: ['executor'], cwd: workspacePath, env: { AGENTMUX_LIFECYCLE_OPERATION_ID: createOperationId },
       initial_size: { cols: 80, rows: 24 }, declared_inputs: [],
     } }) }
-    const owner = await f.open(undefined, { localProjectExecutor: async () => ({
+    const owner = await f.open(undefined, { startLocalProjectExecutor: async (_prepared, instance) => {
+      expect(instance).toBe(f.executor.api.runtimeIdentity().instanceId)
+      return await f.executor.api.createPreparedTerminal() as never
+    }, localProjectExecutor: async () => ({
       bindingId: f.input.bindingId, role: 'executor', providerId: 'fixture-provider', prepared, journalIdentity: 'original-project-journal',
     }) })
     await owner.coordinator.create(f.input)

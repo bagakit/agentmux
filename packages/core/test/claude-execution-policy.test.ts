@@ -220,7 +220,7 @@ describe('Claude original tool execution policy', () => {
     expect(p.localEffects).toHaveBeenCalledOnce(); expect(p.resource).not.toHaveBeenCalled()
     const fresh = await policy({ remote: () => ({ isError: true, result: 'Original task unknown', text: 'Original task unknown' }) })
     const task_id = 'amux-shell-00000000-0000-4000-8000-000000000001'
-    expect(await fresh.run({ tool: 'TaskStop', tool_use_id: 'resource-stop', task_id })).toMatchObject({ isError: true })
+    expect(await fresh.run({ tool: 'TaskStop', tool_use_id: 'resource-stop', task_id })).toEqual({ deny: 'Original task unknown' })
     expect(fresh.resource.mock.calls[0]?.[0]).toEqual({ tool: 'mcp__original_resource__TaskStop', tool_use_id: 'native-alias-0', task_id })
     expect(fresh.localEffects).not.toHaveBeenCalled()
   })

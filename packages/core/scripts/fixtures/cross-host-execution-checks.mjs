@@ -22,7 +22,7 @@ export const mutations = [
   { id: 'bridge-before-durability', file: 'packages/core/src/agent-execution/bridge.ts', test: 'agent-execution-bridge',
     before: 'await this.options.persist(structuredClone(next))', after: 'await this.options.persist(structuredClone(next)).catch(() => {})' },
   { id: 'bridge-manual-rejoin-only', file: 'packages/core/src/agent-execution-coordinator.ts', test: 'agent-execution-coordinator',
-    before: 'this.scheduleReaderRecovery(id, code, stable ? 0 : attempt)', after: 'void 0' },
+    before: 'this.scheduleReaderRecovery(id, code, stable ? 0 : attempt, side)', after: 'void 0' },
   { id: 'bridge-replace-recovered-reader', file: 'packages/core/src/agent-execution-coordinator.ts', test: 'agent-execution-coordinator',
     before: 'if (!this.hasConnectedBridge(bindingId)) await this.attach(record, hosts, attempt)',
     after: 'await this.attach(record, hosts, attempt)' },

@@ -18,9 +18,13 @@ const env = { PATH: dirname(config.claudePath) + ':' + dirname(config.nodePath) 
   ...(process.env.SSH_AUTH_SOCK ? { SSH_AUTH_SOCK: process.env.SSH_AUTH_SOCK } : {}),
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', ENABLE_TOOL_SEARCH: 'false', DISABLE_AUTOUPDATER: '1', DISABLE_TELEMETRY: '1', DISABLE_ERROR_REPORTING: '1' }
 await writeFile(join(config.base, 'claude/.claude.json'), JSON.stringify({ hasCompletedOnboarding: true, projects: { [join(config.base, 'workspace')]: { hasTrustDialogAccepted: true, hasCompletedProjectOnboarding: true } } }), { mode: 0o600 })
-const native = spawn(join(config.packageRoot, 'vendor/ctxmux', process.platform + '-' + process.arch, 'bin/ctxmuxd'), ['--socket', join(config.base, 'runtime/ctxmux.sock'), '--state-dir', join(config.base, 'state/ctxmux'), '--readiness-fd', '3'], { env, stdio: ['ignore', 'ignore', 'pipe', 'pipe'] })
-native.stderr.pipe(createWriteStream(join(config.base, 'native.stderr')))
-await Promise.race([once(native.stdio[3], 'data'), once(native, 'exit').then(() => { throw new Error('Private native owner exited before readiness') })])
+let native, nativeEpoch = 0
+async function startNative() {
+  native = spawn(join(config.packageRoot, 'vendor/ctxmux', process.platform + '-' + process.arch, 'bin/ctxmuxd'), ['--socket', join(config.base, 'runtime/ctxmux.sock'), '--state-dir', join(config.base, 'state/ctxmux'), '--readiness-fd', '3'], { env, stdio: ['ignore', 'ignore', 'pipe', 'pipe'] })
+  native.stderr.pipe(createWriteStream(join(config.base, 'native-' + nativeEpoch++ + '.stderr')))
+  await Promise.race([once(native.stdio[3], 'data'), once(native, 'exit').then(() => { throw new Error('Private native owner exited before readiness') })])
+}
+await startNative()
 const runner = `import {startHeadlessAgentMux} from ${JSON.stringify(pathToFileURL(join(config.packageRoot, 'dist/headless-runtime.js')).href)};
 import {connectAgentMuxRpc} from ${JSON.stringify(pathToFileURL(join(config.packageRoot, 'dist/public-rpc-client.js')).href)};
 import {connectHostedAgentMux} from ${JSON.stringify(pathToFileURL(join(config.packageRoot, 'dist/hosted-client.js')).href)};
@@ -65,9 +69,14 @@ createInterface({ input: process.stdin }).on('line', line => {
   queue = queue.then(async () => {
     const request = JSON.parse(line)
     if (request.action === 'stop') { await stop(); return }
-    if (request.action !== 'restart-core') throw new Error('Unknown private owner command')
+    if (request.action !== 'restart-core' && request.action !== 'restart-project-native') throw new Error('Unknown private owner command')
     const previousPid = core.pid, closed = once(core, 'close'); core.kill('SIGTERM'); const [code, signal] = await closed
     assert.equal(code, 0); assert.equal(signal, null)
-    console.log(JSON.stringify({ id: request.id, result: { previousPid, code, signal, receipt: await startCore() } }))
+    const previousNativePid = native.pid
+    if (request.action === 'restart-project-native') {
+      const ended = once(native, 'close'); native.kill('SIGTERM'); await ended
+      await startNative()
+    }
+    console.log(JSON.stringify({ id: request.id, result: { previousPid, previousNativePid, code, signal, receipt: await startCore() } }))
   }).catch(error => console.log(JSON.stringify({ error: String(error) })))
 })

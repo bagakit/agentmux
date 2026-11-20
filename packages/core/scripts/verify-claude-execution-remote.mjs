@@ -11,9 +11,11 @@ import { DatabaseSync } from 'node:sqlite'
 import { connectAgentMuxRpc } from '../dist/public-rpc-client.js'
 import { connectHostedAgentMux } from '../dist/hosted-client.js'
 import { createClaudeExecutionProofModel, CLAUDE_PROOF_PNG_BASE64 } from './fixtures/claude-execution-proof-model.mjs'
+import { verifyClaudeProjectRecovery } from './fixtures/claude-project-recovery-proof.mjs'
 
 const args = process.argv.slice(2)
-assert.equal(args.length, 4, 'Use --installation exact-private-installation.json --authorized-target user@host')
+const projectRecovery = args.length === 5 && args[4] === '--project-recovery'
+assert(args.length === 4 || projectRecovery, 'Use --installation exact-private-installation.json --authorized-target user@host [--project-recovery]')
 assert.equal(args[0], '--installation')
 assert.equal(args[2], '--authorized-target')
 const authorizedTarget = /^([A-Za-z0-9_][A-Za-z0-9_.-]*)@([A-Za-z0-9][A-Za-z0-9.:-]*)$/u.exec(args[3])
@@ -31,10 +33,11 @@ const quote = value => "'" + value.replaceAll("'", "'\\''") + "'"
 const exec = promisify(execFile), sshArgs = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10'], target = installation.authorization.target
 const ssh = async argv => (await exec('ssh', [...sshArgs, target, argv.map(quote).join(' ')], { maxBuffer: 20 * 1024 * 1024 })).stdout
 const root = await realpath(await mkdtemp('/tmp/amx-claude-both-'))
-const sourcePaths = ['src/agent-execution/frontend.ts', 'src/agent-execution/helper-run.ts', 'src/agent-execution/bridge.ts', 'src/recoverable-input-frame.ts', 'src/agent-execution/executor.ts', 'src/agent-execution-coordinator.ts', 'src/agent-execution/protocol.ts', 'src/providers/claude.ts', 'src/providers/claude-tool-execution-launch.ts', 'src/providers/claude-execution-helper.ts', 'src/providers/claude-execution-run.ts', '../providers/src/claude/execution-protocol.ts', 'src/providers/claude-execution-policy.ts', 'src/providers/claude-execution-shell.ts', 'src/providers/claude-execution-operations.ts']
+const sourcePaths = ['src/agent-execution/frontend.ts', 'src/agent-execution/helper-run.ts', 'src/agent-execution/bridge.ts', 'src/recoverable-input-frame.ts', 'src/agent-execution/executor.ts', 'src/agent-execution-coordinator.ts', 'src/agent-execution/protocol.ts', 'src/providers/claude.ts', 'src/providers/claude-tool-execution-launch.ts', 'src/providers/claude-execution-helper.ts', 'src/providers/claude-execution-run.ts', '../providers/src/claude/execution-protocol.ts', 'src/providers/claude-execution-policy.ts', 'src/providers/claude-execution-shell.ts', 'src/providers/claude-execution-operations.ts',
+  'src/agent-execution/journal.ts', 'src/agent-execution/native-connection-recovery.ts', 'src/agent-execution/project-recovery.ts', 'src/headless-runtime.ts', 'src/terminal-recovery-owner.ts']
 const fingerprint = async paths => Object.fromEntries(await Promise.all(paths.map(async path => [path, sha(await readFile(join(packageRoot, path)))])))
 const sourceHashes = await fingerprint(sourcePaths), compiledHashes = await fingerprint(sourcePaths.map(path => path.replace(/(^|\/)src\//u, '$1dist/').replace(/\.ts$/u, '.js')))
-const harnessPaths = ['scripts/verify-claude-execution-remote.mjs', 'scripts/fixtures/claude-execution-proof-owner.mjs', 'scripts/fixtures/claude-execution-proof-model.mjs']
+const harnessPaths = ['scripts/verify-claude-execution-remote.mjs', 'scripts/fixtures/claude-execution-proof-owner.mjs', 'scripts/fixtures/claude-execution-proof-model.mjs', 'scripts/fixtures/claude-project-recovery-proof.mjs']
 const harnessHashes = await fingerprint(harnessPaths)
 await mkdir(join(root, 'harness'))
 for (const path of harnessPaths) await writeFile(join(root, 'harness', path.split('/').at(-1)), await readFile(join(packageRoot, path)))
@@ -63,10 +66,13 @@ async function startOwner(name, config, modelPort) {
   await wait(() => owner.lines.some(line => line.socketPath) || child.exitCode !== null, 'Private ' + name + ' owner readiness')
   const receipt = owner.lines.find(line => line.socketPath); assert(receipt, owner.stderr); Object.assign(owner, receipt)
   owner.endpoint = name === 'remote' ? { transport: 'ssh', host: authorizedTarget[2], user: authorizedTarget[1], command: remote.command, socketPath: receipt.socketPath } : { transport: 'unix', path: receipt.socketPath }
-  owner.rpc = await connectAgentMuxRpc({ endpoint: owner.endpoint }); owner.client = await connectHostedAgentMux({ rpc: owner.rpc }); await owner.client.connectRuntime()
   owner.hookEvents = []
-  owner.releaseHookObservation = owner.client.onEvent(event => { if (event.type === 'agent-status' && event.evidence?.source === 'native-hook') owner.hookEvents.push(event) }, { observeMessages: false })
+  await connectOwner(owner)
   return owner
+}
+async function connectOwner(owner) {
+  owner.rpc = await connectAgentMuxRpc({ endpoint: owner.endpoint }); owner.client = await connectHostedAgentMux({ rpc: owner.rpc }); await owner.client.connectRuntime()
+  owner.releaseHookObservation = owner.client.onEvent(event => { if (event.type === 'agent-status' && event.evidence?.source === 'native-hook') owner.hookEvents.push(event) }, { observeMessages: false })
 }
 async function command(owner, action) {
   const id = randomUUID(), promise = new Promise(resolve => owner.pending.set(id, resolve)); owner.child.stdin.write(JSON.stringify({ id, action }) + '\n'); const packet = await deadline(promise, action); assert(!packet.error, packet.error); return packet.result
@@ -93,7 +99,8 @@ async function runDirection(direction) {
   // runtime owner short; its exact identity is retained in every result/receipt.
   const localBase = join(root, direction + '-local'), remoteBase = '/tmp/amx-claude-run-' + randomUUID().slice(0, 12)
   const resourceWorkspace = join(direction === 'remote-agent' ? localBase : remoteBase, 'workspace')
-  const model = await createClaudeExecutionProofModel({ root: evidence, workspace: resourceWorkspace, nativeTools: process.env.AGENTMUX_CLAUDE_PROOF_NATIVE_TOOLS === '1' }); models.push(model)
+  const nativeTools = projectRecovery || process.env.AGENTMUX_CLAUDE_PROOF_NATIVE_TOOLS === '1'
+  const model = await createClaudeExecutionProofModel({ root: evidence, workspace: resourceWorkspace, nativeTools, projectRecovery }); models.push(model)
   const remotePort = Number((await ssh([remote.nodePath, '-e', 'const net=require("net");const s=net.createServer();s.listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})'])).trim())
   assert(Number.isInteger(remotePort) && remotePort > 1024)
   const remoteOwner = await startOwner('remote', { base: remoteBase, packageRoot: remote.packageRoot, nodePath: remote.nodePath, claudePath: remote.claudePath, modelPort: remotePort }, model.port)
@@ -102,9 +109,10 @@ async function runDirection(direction) {
   const writeResource = async (path, value, encoding = 'utf8') => resource.name === 'local' ? writeFile(path, value, encoding) : ssh([remote.nodePath, '-e', 'require("fs").writeFileSync(process.argv[1],process.argv[2],process.argv[3])', path, value, encoding])
   await writeResource(join(resourceWorkspace, 'fixture.png'), CLAUDE_PROOF_PNG_BASE64, 'base64')
   await writeResource(join(resourceWorkspace, 'input.txt'), 'PRIVATE_RESOURCE_INPUT\n')
+  if (projectRecovery) await writeResource(join(resourceWorkspace, 'note.txt'), 'before-recovery\n')
   await writeResource(join(resourceWorkspace, 'fixture.ipynb'), JSON.stringify({ cells: [{ cell_type: 'code', id: 'cell-original', metadata: {}, source: ['print("original")'], outputs: [], execution_count: null }], metadata: {}, nbformat: 4, nbformat_minor: 5 }))
   const configured = await agent.client.configureHostExecutor({ executorId: 'claude-native-proof', config: { label: 'Claude physical-host proof', providerId: 'claude', command: remote.claudePath && agent.name === 'remote' ? remote.claudePath : installation.localClaudePath,
-    args: ['--print', '--output-format=stream-json', '--verbose', '--model=claude-sonnet-4-6', '--max-turns=16', process.env.AGENTMUX_CLAUDE_PROOF_NATIVE_TOOLS === '1' ? '--allowedTools=Read,Write,Edit,NotebookEdit,Bash,TaskStop,mcp__amux_exec__*' : '--allowedTools=mcp__amux_exec__*'], env: {}, injectAgentMuxGuide: false } })
+    args: ['--print', '--output-format=stream-json', '--verbose', '--model=claude-sonnet-4-6', '--max-turns=16', nativeTools ? '--allowedTools=Read,Write,Edit,NotebookEdit,Bash,TaskStop,mcp__amux_exec__*' : '--allowedTools=mcp__amux_exec__*'], env: {}, injectAgentMuxGuide: false } })
   const bindingId = randomUUID(), agentSessionId = randomUUID(), inputPath = join(evidence, 'create.json'), bindingPath = join(evidence, 'binding.json')
   const creation = { bindingId, agentHostId: agent.name, agentRuntimeId: agent.client.runtimeOwnerIdentity().runtimeId, resourceHostId: resource.name, resourceRuntimeId: resource.client.runtimeOwnerIdentity().runtimeId, resourceWorkspacePath: resourceWorkspace,
     resourceGrant: { scope: 'host-user', bindingId }, agent: { agentSessionId, createOperationId: randomUUID(), executorId: configured.executor.executorId, executorRevision: configured.executor.configRevision, workspacePath: join(agent.base, 'workspace'), prompt: 'PRIVATE_CLAUDE_ORIGINAL_CONTEXT: perform the isolated resource tools.' } }
@@ -118,6 +126,26 @@ async function runDirection(direction) {
       created = await cli(coordinator, ['agent', 'execution', 'create', '--input', inputPath], receipts)
     }
     assert.equal(created.code, 0, JSON.stringify(created.packet)); const first = created.packet.result.session; assert.equal(first.agentSessionId, agentSessionId)
+    if (projectRecovery) {
+      const helpers = (await coordinator.rpc.call('agent.execution.binding', { bindingId })).helperStarts
+      assert(helpers.frontend.outcome === 'confirmed' && helpers.executor.outcome === 'confirmed')
+      const proof = await verifyClaudeProjectRecovery({ agent, resource, model, helpers, workspace: resourceWorkspace,
+        agentSessionId, bindingId, readResource: path => resourceRead(resource, path), wait,
+        async restartProject(oldHelper) {
+          assert.equal(resource.name, 'local')
+          process.kill(oldHelper.pid, 'SIGKILL')
+          await wait(async () => (await resource.client.runtimeSubject({ kind: 'terminal-run', runId: oldHelper.runId })).run.state === 'exited',
+            'Exact old physical project helper exited')
+          resource.releaseHookObservation?.(); await resource.client.dispose(); await resource.rpc.dispose()
+          const restart = await command(resource, 'restart-project-native')
+          Object.assign(resource, restart.receipt)
+          await connectOwner(resource)
+          return { previousNativePid: restart.previousNativePid, currentNativePid: resource.nativePid }
+        } })
+      const result = { passed: true, mode: 'project-recovery', direction, actualMachines: 2, agentSessionId, ...proof }
+      await writeFile(join(evidence, 'result.json'), JSON.stringify(result, null, 2)); results.push(result)
+      return
+    }
     await wait(async () => (await resourceRead(resource, join(resourceWorkspace, 'background.txt')).catch(() => null)) === 'background-complete', 'Physical resource effects')
     assert.equal(await resourceRead(resource, join(resourceWorkspace, 'note.txt')), 'modified\n'); assert.equal(await resourceRead(resource, join(resourceWorkspace, 'effect-count.txt')), 'once\n')
     assert(JSON.stringify(JSON.parse(await resourceRead(resource, join(resourceWorkspace, 'fixture.ipynb'))).cells).includes('modified'))
@@ -208,9 +236,9 @@ async function runDirection(direction) {
   }
 }
 try {
-  for (const direction of ['remote-agent', 'local-agent']) await runDirection(direction)
+  for (const direction of projectRecovery ? ['remote-agent'] : ['remote-agent', 'local-agent']) await runDirection(direction)
   assert.deepEqual(await fingerprint(sourcePaths), sourceHashes); assert.deepEqual(await fingerprint(Object.keys(compiledHashes)), compiledHashes); assert.deepEqual(await fingerprint(harnessPaths), harnessHashes)
-  await writeFile(join(root, 'summary.json'), JSON.stringify({ passed: true, actualMachines: 2, bothDirectionsPassed: true, sourceHashes, compiledHashes, harnessHashes, results, cleanup, controlledOfflineModel: true, explicitTestToolGrants: { native: ['Read', 'Write', 'Edit', 'NotebookEdit', 'Bash', 'TaskStop'], transport: 'mcp__amux_exec__*', productionAutoAllowClaim: false }, errors: [] }, null, 2))
+  await writeFile(join(root, 'summary.json'), JSON.stringify({ passed: true, actualMachines: 2, ...(projectRecovery ? { mode: 'project-recovery' } : { bothDirectionsPassed: true }), sourceHashes, compiledHashes, harnessHashes, results, cleanup, controlledOfflineModel: true, explicitTestToolGrants: { native: ['Read', 'Write', 'Edit', 'NotebookEdit', 'Bash', 'TaskStop'], transport: 'mcp__amux_exec__*', productionAutoAllowClaim: false }, errors: [] }, null, 2))
 } catch (error) {
   primaryFailure = error; await writeFile(join(root, 'failure.json'), JSON.stringify({ error: String(error), stack: error.stack, processes: processes.map(value => ({ name: value.name, base: value.base, lines: value.lines, stderr: value.stderr })) }, null, 2))
 } finally {
@@ -227,4 +255,4 @@ try {
 }
 await writeFile(join(root, 'cleanup-final.json'), JSON.stringify({ cleanup, remainingUnknown: processes.filter(value => !value.stopped).map(value => ({ name: value.name, base: value.base })) }, null, 2))
 if (primaryFailure) throw new Error('Physical Claude execution proof failed; retained evidence: ' + root, { cause: primaryFailure })
-console.log(JSON.stringify({ passed: true, root, bothDirectionsPassed: true, summary: join(root, 'summary.json') }))
+console.log(JSON.stringify({ passed: true, root, ...(projectRecovery ? { mode: 'project-recovery', actualMachines: 2 } : { bothDirectionsPassed: true }), summary: join(root, 'summary.json') }))

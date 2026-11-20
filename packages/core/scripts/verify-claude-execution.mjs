@@ -13,18 +13,21 @@ import { resolveClaudeExecutionExecutable } from '../dist/providers/claude-tool-
 import { runProcess } from '../dist/process-runner.js'
 import { createClaudeExecutionProofModel, CLAUDE_PROOF_PNG_BASE64 } from './fixtures/claude-execution-proof-model.mjs'
 import { createExecutionProofCleanup } from './fixtures/execution-proof-cleanup.mjs'
+import { verifyClaudeProjectRecovery } from './fixtures/claude-project-recovery-proof.mjs'
 
-assert.equal(process.argv.length, 2, 'This proof accepts no user profile or Session target')
+const projectRecovery = process.argv.length === 3 && process.argv[2] === '--project-recovery'
+assert(process.argv.length === 2 || projectRecovery, 'This proof accepts only --project-recovery and no user profile or Session target')
 const packageRoot = fileURLToPath(new URL('../', import.meta.url))
 const root = await realpath(await mkdtemp('/tmp/amx-claude-'))
 const sourcePaths = ['src/agent-execution/frontend.ts', 'src/agent-execution/helper-run.ts', 'src/agent-execution/bridge.ts', 'src/recoverable-input-frame.ts',
   'src/agent-execution/executor.ts', 'src/agent-execution-coordinator.ts', 'src/agent-execution/protocol.ts',
+  'src/agent-execution/journal.ts', 'src/agent-execution/native-connection-recovery.ts', 'src/agent-execution/project-recovery.ts',
   'src/providers/claude.ts', '../providers/src/claude/launch-options.ts', '../providers/src/claude/hook-settings.ts', 'src/providers/claude-native-settings.ts', 'src/providers/claude-tool-execution-launch.ts', 'src/providers/claude-execution-helper.ts',
   'src/providers/claude-execution-run.ts', '../providers/src/claude/execution-protocol.ts', 'src/providers/claude-execution-policy.ts', 'src/providers/claude-execution-shell.ts', 'src/providers/claude-execution-operations.ts']
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const fingerprint = async paths => Object.fromEntries(await Promise.all(paths.map(async path => [path, hash(await readFile(join(packageRoot, path)))])))
 const sourceHashes = await fingerprint(sourcePaths), compiledHashes = await fingerprint(sourcePaths.map(path => path.replace(/(^|\/)src\//u, '$1dist/').replace(/\.ts$/u, '.js')))
-const harnessPaths = ['scripts/verify-claude-execution.mjs', 'scripts/fixtures/claude-execution-proof-model.mjs', 'scripts/fixtures/execution-proof-cleanup.mjs']
+const harnessPaths = ['scripts/verify-claude-execution.mjs', 'scripts/fixtures/claude-execution-proof-model.mjs', 'scripts/fixtures/execution-proof-cleanup.mjs', 'scripts/fixtures/claude-project-recovery-proof.mjs']
 const harnessHashes = await fingerprint(harnessPaths)
 await mkdir(join(root, 'harness'))
 for (const path of harnessPaths) await writeFile(join(root, 'harness', path.split('/').at(-1)), await readFile(join(packageRoot, path)))
@@ -56,7 +59,9 @@ const nativeExecutable = { path: executable, realPath: await realpath(executable
 const workspace = join(root, 'resource/workspace')
 const permission = process.env.AGENTMUX_CLAUDE_PROOF_PERMISSION
 assert(permission === undefined || permission === 'ask' || permission === 'deny', 'Only the two isolated permission scenarios are supported')
-const { model, port, steps, finalNames, modelRequests, diagnostics, releaseFirstAnswer, stopResourceTask, close: closeModel } = await createClaudeExecutionProofModel({ root, workspace, nativeTools: process.env.AGENTMUX_CLAUDE_PROOF_NATIVE_TOOLS === '1', permission: Boolean(permission) })
+assert(!projectRecovery || !permission)
+const nativeTools = projectRecovery || process.env.AGENTMUX_CLAUDE_PROOF_NATIVE_TOOLS === '1'
+const { model, port, steps, finalNames, modelRequests, diagnostics, releaseFirstAnswer, stopResourceTask, close: closeModel } = await createClaudeExecutionProofModel({ root, workspace, nativeTools, permission: Boolean(permission), projectRecovery })
 async function startOwner(name, agentOwner) {
   const base = join(root, name)
   for (const directory of ['home', 'claude', 'runtime', 'state', 'workspace']) await mkdir(join(base, directory), { recursive: true, mode: 0o700 })
@@ -66,11 +71,15 @@ async function startOwner(name, agentOwner) {
     ANTHROPIC_BASE_URL: `http://127.0.0.1:${port}`, ANTHROPIC_API_KEY: 'isolated-offline-model-key', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
     ENABLE_TOOL_SEARCH: 'false', DISABLE_AUTOUPDATER: '1', DISABLE_TELEMETRY: '1', DISABLE_ERROR_REPORTING: '1' })
   await writeFile(join(base, 'claude', '.claude.json'), JSON.stringify({ hasCompletedOnboarding: true, projects: { [join(base, 'workspace')]: { hasTrustDialogAccepted: true, hasCompletedProjectOnboarding: true } } }), { mode: 0o600 })
-  const native = spawn(join(packageRoot, 'vendor/ctxmux', `${process.platform}-${process.arch}`, 'bin/ctxmuxd'), ['--socket', join(base, 'runtime/ctxmux.sock'), '--state-dir', join(base, 'state/ctxmux'), '--readiness-fd', '3'], { env, stdio: ['ignore', 'ignore', 'pipe', 'pipe'] })
-  const owner = { name, base, env, native, runs: [], sessions: [] }; owners.push(owner); cleanup.trackChild(owner, 'native', native)
-  native.stderr.on('data', bytes => diagnostics.push({ owner: name, source: 'native', text: bytes.toString() }))
-  await deadline(Promise.race([once(native.stdio[3], 'data'), once(native, 'exit').then(() => { throw new Error('Test-owned ctxmux exited before readiness') })]), 'Test-owned ctxmux readiness')
+  const owner = { name, base, env, runs: [], sessions: [] }; owners.push(owner)
+  await startNative(owner)
   return await startCore(owner, agentOwner)
+}
+async function startNative(owner) {
+  const native = owner.native = spawn(join(packageRoot, 'vendor/ctxmux', `${process.platform}-${process.arch}`, 'bin/ctxmuxd'), ['--socket', join(owner.base, 'runtime/ctxmux.sock'), '--state-dir', join(owner.base, 'state/ctxmux'), '--readiness-fd', '3'], { env: owner.env, stdio: ['ignore', 'ignore', 'pipe', 'pipe'] })
+  cleanup.trackChild(owner, 'native', native)
+  native.stderr.on('data', bytes => diagnostics.push({ owner: owner.name, source: 'native', text: bytes.toString() }))
+  await deadline(Promise.race([once(native.stdio[3], 'data'), once(native, 'exit').then(() => { throw new Error('Test-owned ctxmux exited before readiness') })]), 'Test-owned ctxmux readiness')
 }
 async function startCore(owner, agentOwner) {
   const runner = `
@@ -112,6 +121,7 @@ async function frames(owner, runId) {
   const text = Buffer.concat(replay.replay.map(chunk => Buffer.from(chunk.dataBytes))).toString()
   return text.slice(0, text.lastIndexOf('\n') + 1).split('\n').filter(Boolean).map(line => JSON.parse(line))
 }
+const readFileUtf8 = filename => readFile(filename, 'utf8')
 async function jsonlFiles(directory) {
   return (await Promise.all((await readdir(directory, { withFileTypes: true })).map(async entry => entry.isDirectory() ? jsonlFiles(join(directory, entry.name)) : entry.name.endsWith('.jsonl') ? [join(directory, entry.name)] : []))).flat()
 }
@@ -119,9 +129,10 @@ try {
   const agent = await startOwner('agent'), resource = await startOwner('resource', agent)
   await writeFile(join(workspace, 'fixture.png'), Buffer.from(CLAUDE_PROOF_PNG_BASE64, 'base64'))
   await writeFile(join(workspace, 'input.txt'), 'PRIVATE_RESOURCE_INPUT\n')
+  if (projectRecovery) await writeFile(join(workspace, 'note.txt'), 'before-recovery\n')
   await writeFile(join(workspace, 'fixture.ipynb'), JSON.stringify({ cells: [{ cell_type: 'code', id: 'cell-original', metadata: {}, source: ['print("original")'], outputs: [], execution_count: null }], metadata: {}, nbformat: 4, nbformat_minor: 5 }))
   const configured = await agent.client.configureHostExecutor({ executorId: 'claude-native-proof', config: { label: 'Claude native execution proof', providerId: 'claude', command: executable,
-    args: ['--print', '--output-format=stream-json', '--verbose', '--model=claude-sonnet-4-6', '--max-turns=16', (permission !== 'ask') && process.env.AGENTMUX_CLAUDE_PROOF_NATIVE_TOOLS === '1' ? '--allowedTools=Read,Write,Edit,NotebookEdit,Bash,TaskStop,mcp__amux_exec__*' : '--allowedTools=mcp__amux_exec__*', ...(permission === 'deny' ? ['--settings', JSON.stringify({ permissions: { deny: ['Write'] } })] : [])], env: {}, injectAgentMuxGuide: false } })
+    args: ['--print', '--output-format=stream-json', '--verbose', '--model=claude-sonnet-4-6', '--max-turns=16', (permission !== 'ask') && nativeTools ? '--allowedTools=Read,Write,Edit,NotebookEdit,Bash,TaskStop,mcp__amux_exec__*' : '--allowedTools=mcp__amux_exec__*', ...(permission === 'deny' ? ['--settings', JSON.stringify({ permissions: { deny: ['Write'] } })] : [])], env: {}, injectAgentMuxGuide: false } })
   bindingId = randomUUID(); const agentSessionId = randomUUID()
   const creation = { bindingId, agentHostId: 'agent', agentRuntimeId: agent.client.runtimeOwnerIdentity().runtimeId, resourceHostId: 'local', resourceRuntimeId: resource.client.runtimeOwnerIdentity().runtimeId,
     resourceWorkspacePath: workspace, resourceGrant: { scope: 'host-user', bindingId }, agent: { agentSessionId, createOperationId: randomUUID(), executorId: configured.executor.executorId,
@@ -139,7 +150,28 @@ try {
   const created = reply.packet.result.session; assert.equal(created.agentSessionId, agentSessionId); agent.sessions.push(created)
   const original = pair(resource, bindingId), helpers = original.bridge
   agent.runs.push(helpers.frontend.runId); resource.runs.push(helpers.executor.runId)
-  if (permission) {
+  if (projectRecovery) {
+    const proof = await verifyClaudeProjectRecovery({ agent, resource, model: { modelRequests, steps, releaseFirstAnswer }, helpers, workspace,
+      agentSessionId, bindingId, readResource: readFileUtf8, wait,
+      async restartProject(oldHelper) {
+        // Fault only the exact private project helper. The fixture's waiting
+        // shell exits when this parent disappears.
+        process.kill(oldHelper.pid, 'SIGKILL')
+        await wait(async () => (await resource.client.runtimeSubject({ kind: 'terminal-run', runId: oldHelper.runId })).run.state === 'exited', 'Exact old project helper exited')
+        resource.runs.splice(resource.runs.indexOf(oldHelper.runId), 1)
+        const previousNativePid = resource.native.pid
+        resource.releaseHookObservation?.(); await resource.client.dispose(); await resource.rpc.dispose()
+        for (const child of [resource.core, resource.native]) {
+          const closed = once(child, 'close')
+          child.kill('SIGTERM'); await deadline(closed, 'Original private project owner exit')
+        }
+        await startNative(resource); await startCore(resource, agent)
+        return { previousNativePid, currentNativePid: resource.native.pid }
+      } })
+    assert.deepEqual(await fingerprint(harnessPaths), harnessHashes); assert.deepEqual(await fingerprint(sourcePaths), sourceHashes); assert.deepEqual(await fingerprint(Object.keys(compiledHashes)), compiledHashes)
+    success = { passed: true, mode: 'project-recovery', evidence: root, actualMachines: 1, actualNativeCli: nativeExecutable.version, agentSessionId, ...proof }
+    await writeFile(join(root, 'summary.json'), JSON.stringify({ ...success, sourceHashes, compiledHashes, harnessHashes }, null, 2), { mode: 0o600 })
+  } else if (permission) {
     let pending, permissionAnswer
     if (permission === 'ask') {
       await wait(async () => { pending = (await agent.client.readAgentSession(agentSessionId))?.pendingInteraction?.request; return pending?.kind === 'permission' }, 'Original native permission callback')

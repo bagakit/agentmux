@@ -6,7 +6,7 @@ import { join } from 'node:path'
 /** Deterministic Anthropic protocol endpoint; executes no tools and uses no external model. */
 export const CLAUDE_PROOF_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNwaDjwHwAFBAKAPJ4DgAAAAABJRU5ErkJggg=='
 
-export async function createClaudeExecutionProofModel({ root, workspace, nativeTools = false, permission = false }) {
+export async function createClaudeExecutionProofModel({ root, workspace, nativeTools = false, permission = false, projectRecovery = false }) {
   const modelRequests = [], diagnostics = [], modelSockets = new Set()
   let releaseFirstAnswer, stopTask
   const firstAnswer = new Promise(resolve => { releaseFirstAnswer = resolve })
@@ -23,6 +23,11 @@ export async function createClaudeExecutionProofModel({ root, workspace, nativeT
   ]
   const modelToolPrefix = nativeTools ? '' : 'mcp__amux_exec__'
   const finalNames = { first: 'PRIVATE_CLAUDE_ORIGINAL_COMPLETE', resumed: 'PRIVATE_CLAUDE_RESUMED_COMPLETE' }
+  const originalEffect = steps.find(step => step.id === 'toolu_remote_effect')
+  const recoverySteps = [
+    { ...originalEffect, input: { ...originalEffect.input, command: originalEffect.input.command + '; while kill -0 "$PPID" 2>/dev/null; do sleep 0.05; done' } },
+    { id: 'toolu_project_recovered_read', name: 'Read', input: { file_path: join(workspace, 'effect-count.txt') } },
+  ]
   function responseContent(body) {
     const messages = body.messages ?? [], encoded = JSON.stringify(messages), resumed = encoded.includes('PRIVATE_CLAUDE_RESUMED_CONTEXT')
     const results = messages.flatMap(message => Array.isArray(message.content) ? message.content : []).filter(value => value.type === 'tool_result')
@@ -31,6 +36,15 @@ export async function createClaudeExecutionProofModel({ root, workspace, nativeT
       if (!called.has('toolu_permission_write')) return { content: [{ type: 'tool_use', id: 'toolu_permission_write', name: 'Write', input: { file_path: join(workspace, 'permission-forbidden.txt'), content: 'forbidden\n' } }], stop_reason: 'tool_use' }
       assert.equal(results.find(result => result.tool_use_id === 'toolu_permission_write')?.is_error, true, 'The actual native permission query refuses the original Write')
       return { content: [{ type: 'text', text: 'PRIVATE_CLAUDE_PERMISSION_REFUSED' }], stop_reason: 'end_turn' }
+    }
+    if (projectRecovery) {
+      const original = results.find(result => result.tool_use_id === recoverySteps[0].id)
+      if (original) assert(original.is_error === true && JSON.stringify(original.content).includes('previous tool outcome is unconfirmed'))
+      const next = recoverySteps.find(step => !called.has(step.id))
+      if (next) return { content: [{ type: 'tool_use', ...next, name: modelToolPrefix + next.name }], stop_reason: 'tool_use', hold: next === recoverySteps[1] }
+      const recovered = results.find(result => result.tool_use_id === recoverySteps[1].id)
+      assert(recovered?.is_error !== true && JSON.stringify(recovered?.content).includes('once'))
+      return { content: [{ type: 'text', text: finalNames.resumed }], stop_reason: 'end_turn' }
     }
     for (const result of results) assert(result.is_error !== true, `Native tool ${result.tool_use_id} failed: ${JSON.stringify(result.content)}`)
     if (resumed) {
@@ -73,5 +87,5 @@ export async function createClaudeExecutionProofModel({ root, workspace, nativeT
   await new Promise(resolve => model.listen(0, '127.0.0.1', resolve))
   const port = model.address().port
   let closed = false
-  return { model, port, steps, finalNames, stopResourceTask: id => { assert(typeof id === 'string' && id.length > 0); stopTask = id }, modelRequests, diagnostics, modelSockets, releaseFirstAnswer, close: async () => { if (closed) return; closed = true; releaseFirstAnswer(); for (const socket of modelSockets) socket.destroy(); await new Promise(resolve => model.close(resolve)) } }
+  return { model, port, steps: projectRecovery ? recoverySteps : steps, finalNames, stopResourceTask: id => { assert(typeof id === 'string' && id.length > 0); stopTask = id }, modelRequests, diagnostics, modelSockets, releaseFirstAnswer, close: async () => { if (closed) return; closed = true; releaseFirstAnswer(); for (const socket of modelSockets) socket.destroy(); await new Promise(resolve => model.close(resolve)) } }
 }

@@ -15,7 +15,8 @@ describe('Claude native MCP execution interpretation', () => {
   it('retains exact initialization and notification envelopes without a second MCP handshake', () => {
     expect(parseClaudeExecutionMessage(initialize)).toMatchObject({ kind: 'request', requestId: 0, intent: { initialize: true } })
     for (const payload of [{ jsonrpc: '2.0', method: 'notifications/initialized' }, { jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: '1', reason: 'User cancelled' } }]) {
-      expect(parseClaudeExecutionMessage(payload)).toEqual({ kind: 'notification', method: payload.method, payload })
+      expect(parseClaudeExecutionMessage(payload)).toEqual({ kind: 'notification', method: payload.method, payload,
+        ...(payload.method === 'notifications/cancelled' ? { cancels: '1' } : {}) })
     }
     for (const id of [0, '0']) {
       const payload = { jsonrpc: '2.0', id, result: { capabilities: { tools: {} } } }

@@ -70,6 +70,21 @@ const inputText = (data: AgentMuxRunInputOperation['data']): string => typeof da
 const request = '  ' + JSON.stringify({ type: 'request', generation: 'original', payload: { id: 1, method: 'write', params: { text: '中文' } } }) + ' \n'
 
 describe('execution bridge original Runtime continuation', () => {
+  it('forwards retirement only at the original confirmed project recovery cut', async () => {
+    const marker = JSON.stringify({ type: 'retire-frontend-requests', through: 5 }) + '\n'
+    for (const cut of [undefined, 4, 5]) {
+      const initial = state()
+      if (cut !== undefined) { initial.projectRecoveryId = 'exact-recovery'; initial.retireFrontendThrough = cut }
+      const frontend = port('front', ''), executor = port('exec', marker)
+      const bridge = new AgentExecutionBridge({ state: initial, ports: { frontend: frontend.api, executor: executor.api },
+        persist: async () => {}, onFrame: async () => {}, onError: error => { throw error } })
+      try {
+        await bridge.start()
+        expect(frontend.writes.map(operation => inputText(operation.data))).toEqual(cut === 5 ? [marker] : [])
+      } finally { await bridge.close() }
+    }
+  })
+
   it.each(['frontend', 'executor'] as const)('forwards the other direction while an original Input ACK is blocked on %s', async slow => {
     const fast = slow === 'frontend' ? 'executor' : 'frontend'
     const frames = { frontend: request, executor: JSON.stringify({ type: 'response', generation: 'original', payload: { id: 1, result: {} } }) + '\n' }
