@@ -18,7 +18,10 @@ const mutations = [
   { name: 'overlap', test: 'counts two native incarnations by union',
     before: 'observation.unionMs += Math.max(0, monotonic - observation.tick)', after: 'observation.unionMs += observation.markers.size * Math.max(0, monotonic - observation.tick)' },
   { name: 'crash-gap', test: 'keeps crash and save-failure suffixes unknown',
-    before: '    observation.gaps.set(gap.id, gap)\n', after: '' },
+    before: '      observation.gaps.set(gap.id, gap)\n', after: '' },
+  { name: 'loss-order', test: 'settles simultaneous renderer losses from a native event',
+    before: '      if (marker !== interrupted && !contents.isDestroyed() && !contents.isCrashed()) continue',
+    after: '      if (marker !== interrupted && (interrupted || (!contents.isDestroyed() && !contents.isCrashed()))) continue' },
   { name: 'idle-sampling', test: 'stops sampling after the final checkpoint is confirmed',
     before: '      if (!this.active.size) this.clearTimer()\n', after: '' }
 ]

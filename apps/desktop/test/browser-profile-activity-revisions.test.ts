@@ -363,6 +363,32 @@ describe('Profile native activity and exact configuration versions', () => {
     expect(n.owner.target('page')?.warning ?? '').not.toContain('could not be saved'); expect(f.profile(f.id).activity?.observedRunMs).toBe(3000)
   })
 
+  it.each(['native event', 'periodic sample'])('settles simultaneous renderer losses from a %s before counting time', async signal => {
+    const f = await fixture(), n = native(f)
+    const ids = ['first', 'second', 'third']
+    for (const id of ids) await n.owner.create(id, `https://${id}.invalid/`, 'workspace', f.id)
+    const first = n.view('first').webContents
+    const second = n.view('second').webContents
+    const third = n.view('third').webContents
+    n.tick(1000)
+    await n.owner.flushProfileActivity()
+
+    const observeLoss = async (contents: typeof first) => {
+      if (signal === 'native event') contents.emit('render-process-gone', { reason: 'crashed' })
+      await n.owner.flushProfileActivity()
+    }
+    n.tick(1000)
+    first.crashed = true
+    await observeLoss(first)
+    expect(f.profile(f.id).activity).toMatchObject({ observedRunMs: 2000, state: 'unknown', interruptions: 1 })
+
+    n.tick(1500)
+    second.crashed = true
+    third.crashed = true
+    await observeLoss(second)
+    expect(f.profile(f.id).activity).toMatchObject({ observedRunMs: 2000, state: 'unknown', interruptions: 3 })
+  })
+
   it('retries an actually committed checkpoint with an unknown acknowledgement without counting its interval twice', async () => {
     const f = await fixture(), n = native(f)
     await n.owner.create('original', 'https://original.invalid/', 'workspace', f.id); await n.owner.flushProfileActivity()

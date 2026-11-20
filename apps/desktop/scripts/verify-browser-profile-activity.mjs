@@ -81,7 +81,7 @@ try {
         const contents = await readFile(path, 'utf8'); receipt.sources[relative(root, path)] = sha(contents); return { contents, loader: 'css', resolveDir: dirname(path) } })
     } }, sourcePlugin()] })
   await writeFile(join(renderer, 'index.html'), '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="renderer.css"><div id="root"></div><script type="module" src="renderer.js"></script>')
-  const home = await mkdtemp('/tmp/amux-profile-activity-')
+  const home = await mkdtemp(join(process.env.AGENTMUX_ACTIVITY_TMPDIR ?? '/tmp', 'amux-profile-activity-'))
   const variants = [{ name: visualOnly ? 'visual' : recoveryOnly ? 'recovery' : 'candidate', phases: visualOnly ? ['visual'] : recoveryOnly ? ['recovery-seed', 'recovery-restart'] : ['seed', 'crash', 'restart'], home }]
   receipt.requestedStages = variants.flatMap(candidate => candidate.phases.map(phase => candidate.name + '/' + phase))
   assert.ok(receipt.requestedStages.length > 0)
