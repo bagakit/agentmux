@@ -135,7 +135,8 @@ export function createHostGoals(options: {
   const changed = (ids: string[]) => { options.changed?.(ids); for (const listener of changeReaders) void Promise.resolve(listener({ goalIds: ids })).catch(error => console.warn('Original Goal invalidation delivery is unconfirmed.', error)) }
   const releaseStoreChanges = demands.subscribe((_snapshot, ids) => changed([...ids]))
   const core: GoalDelegationCorePort = { call: options.coreCall, observeRun: (hostId, runId) => runtime.observeOriginalRun(hostId, runId),
-    readDispatch: (hostId, sourceMessageId) => options.coreCall(hostId, 'message.dispatch.read', { sourceMessageId }, { principal: person }),
+    // coreCall selects the original Core. Its own message journal is local to that Core.
+    readDispatch: (hostId, sourceMessageId) => options.coreCall(hostId, 'message.dispatch.read', { hostId: 'local', sourceMessageId }, { principal: person }),
     syncDispatch: (ownerHostId, sourceMessageId, workerHostId) => options.coreCall(ownerHostId, 'message.dispatch.sync', { sourceMessageId, hostId: workerHostId }, { principal: person }) }
   const workflowReview = new GoalWorkflowReviewOwner(demands, runtime, options.configurationPath, planOwner, changed)
   const delegations = new GoalDelegationOwner(demands, runtime, options.files, core,
