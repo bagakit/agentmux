@@ -94,7 +94,8 @@ it('shows current Core progress during the spatial read while retaining buffered
   expect(useAppStore.getState().sessions).toEqual([session])
   expect(useAppStore.getState().runtimeEndpointWarnings).toEqual([first])
   expect(element.querySelector('[aria-label="Runtime startup observations"]')?.textContent).toContain(first.message)
-  expect(element.textContent).toContain(`local: ${nativeStep}`)
+  expect(element.querySelector('.startup-endpoint__host')?.textContent).toBe('local')
+  expect(element.querySelector('.startup-endpoint__activity > h4')?.textContent).toBe(nativeStep)
   const next = pending('Hook restoration is not yet confirmed. Original Native input remains available.')
   await act(async () => listener(observed(next)))
   await act(async () => endpointCut.resolve([first]))
@@ -123,7 +124,8 @@ it('shows the original endpoint warning before membership is readable and clears
   await act(async () => listener({ type: 'core', hostId: warning.hostId, event: observed(null, warning.hostId).event, endpointWarning: warning }))
   expect(useAppStore.getState().runtimeEndpointWarnings).toEqual([warning])
   expect(element.querySelector('[aria-label="Runtime startup observations"]')?.textContent).toContain(warning.message)
-  expect(element.textContent).toContain('remote-host: Connecting to Runtime')
+  expect(element.querySelector('.startup-endpoint__host')?.textContent).toBe('remote-host')
+  expect(element.querySelector('.startup-endpoint__activity > h4')?.textContent).toBe('Connecting to Runtime')
   await act(async () => listener({ type: 'core', hostId: 'local', event: observed(null).event, endpointWarning: null }))
   expect(useAppStore.getState().runtimeEndpointWarnings).toEqual([warning])
   await act(async () => listener({ type: 'core', hostId: warning.hostId, event: observed(null, warning.hostId).event, endpointWarning: null }))
@@ -171,20 +173,22 @@ it('groups live startup activity without dropping distinct messages or original 
   expect(activity.textContent).not.toContain('remote-a')
   expect(element.textContent).toContain('Reading your saved workspace.')
 
-  const details = element.querySelector('details')!
-  const definitions = [...details.querySelectorAll('dt')].map(node => node.textContent)
-  expect(definitions).toEqual([
-    'remote-b: Reading Session directory',
-    'remote-a: Reading Session directory',
-    'remote-a: Connecting to Runtime',
-    'remote-c: Connecting to Runtime',
-    'remote-d: Connecting to Runtime'
+  const details = element.querySelector<HTMLDetailsElement>('.surface-state__details')!
+  const endpoints = [...details.querySelectorAll<HTMLDetailsElement>('.startup-endpoint')]
+  expect(endpoints.map(endpoint => endpoint.querySelector('.startup-endpoint__host')?.textContent)).toEqual([
+    'remote-b', 'remote-a', 'remote-c', 'remote-d'
   ])
-  const diagnostics = [...details.querySelectorAll('dd')].map(node => node.textContent)
+  details.open = true
+  expect(endpoints.every(endpoint => !endpoint.open)).toBe(true)
+  const diagnostics = [...details.querySelectorAll('.startup-endpoint__activity')]
   expect(diagnostics).toHaveLength(5)
   for (const [index, warning] of warnings.entries()) {
-    expect(diagnostics[index]).toContain(warning.code)
-    expect(diagnostics[index]).toContain(warning.recovery)
+    const diagnostic = diagnostics[index]!
+    expect(diagnostic.closest('.startup-endpoint')?.querySelector('.startup-endpoint__host')?.textContent).toBe(warning.hostId)
+    expect(diagnostic.querySelector('h4')?.textContent).toBe(warning.step)
+    expect(diagnostic.querySelector('.startup-endpoint__message')?.textContent).toBe(warning.message)
+    expect(diagnostic.querySelector('.startup-endpoint__code')?.textContent).toBe(warning.code)
+    expect(diagnostic.querySelector('.startup-endpoint__recovery')?.textContent).toBe(warning.recovery)
   }
 })
 
