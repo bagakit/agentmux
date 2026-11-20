@@ -13,7 +13,7 @@ import { restoreRecallCardIntents } from '../src/renderer/src/lib/recall-card-in
 import { ConversationRecallCard } from '../src/renderer/src/components/ConversationRecallCard'
 import { NoteFileView } from '../src/renderer/src/components/NoteFileView'
 import { useNotebookLibrary } from '../src/renderer/src/lib/notebook-library'
-import { composerConfig } from './helpers/composer-dom-fixture'
+import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import * as workbench from '../src/renderer/src/store'
 
@@ -111,6 +111,21 @@ it('writes the chosen original file and projects one exact card from the Noteboo
   await settle()
   expect(container!.querySelector('.recall-knowledge-card')?.textContent).toContain('Open original message')
   expect(container!.querySelector('.recall-knowledge-card')?.textContent).toContain(card.title)
+  const session = composerSession(card.reference.agentSessionId)
+  const focus = vi.fn(() => true), reveal = vi.fn(async () => ({ kind: 'located' as const }))
+  const navigation = workbench.useAppStore.getState()
+  try {
+    workbench.useAppStore.setState({ sessions: [{ ...session, control: { ...session.control, hostId: card.routeHostId } }],
+      focusExecutionSession: focus, revealConversationItem: reveal, setMainSurface: vi.fn() })
+    const source = [...container!.querySelectorAll('button')].find(button => button.textContent === 'Open original message')!
+    await act(async () => source.click())
+    expect(focus).toHaveBeenCalledWith(card.reference.agentSessionId)
+    expect(reveal).toHaveBeenCalledWith(card.reference, card.routeHostId)
+  } finally {
+    workbench.useAppStore.setState({ sessions: navigation.sessions, focusExecutionSession: navigation.focusExecutionSession,
+      revealConversationItem: navigation.revealConversationItem, setMainSurface: navigation.setMainSurface })
+  }
+
 })
 
 it('creates one default Daily per local day and appends different cards to its original file', async () => {
