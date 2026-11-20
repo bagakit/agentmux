@@ -4621,11 +4621,14 @@ export class AgentMuxRpcService {
     if (scope.hostId === 'local' && this.ports.callOriginalCore) return await this.ports.callOriginalCore(scope.hostId,'agent.input.submit',input,await this.inputForwardContext(context))
     const device = this.ports.operationSource?.(context)
     const {moteGuidance,focusTask,capturedContext,...prompt} = input
+    const key = {kind:'prompt' as const,agentSessionId:input.agentSessionId,expectedRun:input.expectedRun,submissionId:input.operationId}
+    const retainedNote = input.preparationRetry && focusTask
+      ? (await scope.client.inspectAgentPromptSubmission(key))?.admission?.intent?.message?.systemContext
+      : undefined
     const receipt = await scope.client.submitAgentPrompt({ ...prompt,
       ...(capturedContext ? {inputContextCapture:capturedContext.reference, ...(capturedContext.agentMuxNote === undefined ? {} : {agentMuxNote:capturedContext.agentMuxNote}),authorHuman:true} : {}),
-      ...((moteGuidance || focusTask) ? {agentMuxNote:agentInputGuidance(input),...(moteGuidance ? {authorHuman:true} : {})} : {}), sourceChannel: input.sourceChannel ?? (context.transport === 'unix' ? 'cli' : 'api'),
+      ...((moteGuidance || focusTask) ? {agentMuxNote:agentInputGuidance(input,retainedNote),...(moteGuidance ? {authorHuman:true} : {})} : {}), sourceChannel: input.sourceChannel ?? (context.transport === 'unix' ? 'cli' : 'api'),
       ...(device ? {sourceDevice:normalizeOperationDevice(device)} : {}) },{...this.inputCallContext(context), ...(this.ports.inputContextCaptures ? {captureReader:this.ports.inputContextCaptures} : {})})
-    const key = {kind:'prompt' as const,agentSessionId:input.agentSessionId,expectedRun:input.expectedRun,submissionId:input.operationId}
     const observed = await scope.client.inspectAgentInput({key}) ?? (receipt && 'key' in receipt ? receipt : undefined)
     const record = observed ? observed.admission : await scope.client.inspectAgentPromptSubmission(key)
     return {key,record,...(observed ? {input:observed} : {}),...(receipt?.moteObservationId ? {moteObservationId:receipt.moteObservationId} : {})}
@@ -4914,11 +4917,17 @@ export class AgentMuxRpcService {
     if (route.recoveryOperationId) {
       if (submit && (firstIntake || recovery?.reconcile === true)) {
         const device = this.ports.operationSource?.(context)
+        // The logical route already matched the original role, input digest and recovery operation.
+        const originalLaunch = !firstIntake && submit.focusTask
+          ? (await scope.client.readAgentSession(route.key.agentSessionId))?.continuityOperations?.[route.recoveryOperationId]?.launchInput
+          : undefined
+        const agentMuxNote = submit.capturedContext ? submit.capturedContext.agentMuxNote
+          : originalLaunch ? originalLaunch.input.agentMuxNote : agentInputGuidance(submit)
         await scope.client.ensureAgentContinuity({agentSessionId:route.key.agentSessionId,expectedRun:route.key.expectedRun,operationId:route.recoveryOperationId,trigger:'input',
           input:{submissionId:route.operationId,prompt:submit.prompt,authorHuman:true,sourceChannel:submit.sourceChannel ?? (context.transport === 'unix' ? 'cli' : 'api'),
             ...(device ? {sourceDevice:normalizeOperationDevice(device)} : {}),
-            ...(submit.capturedContext ? {inputContextCapture:submit.capturedContext.reference,
-              ...(submit.capturedContext.agentMuxNote === undefined ? {} : {agentMuxNote:submit.capturedContext.agentMuxNote})} : {agentMuxNote:agentInputGuidance(submit)}),
+            ...(submit.capturedContext ? {inputContextCapture:submit.capturedContext.reference} : {}),
+            ...(agentMuxNote === undefined ? {} : {agentMuxNote}),
             ...(submit.inputContext ? {inputContext:submit.inputContext} : {})}},
           {...this.inputCallContext(context),...(this.ports.inputContextCaptures ? {captureReader:this.ports.inputContextCaptures} : {})})
       }

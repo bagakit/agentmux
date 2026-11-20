@@ -1,5 +1,5 @@
 import { parseFocusTaskReference, type AgentMuxFocusTaskReference } from './focus-control.js'
-import { focusTaskHandoffNote } from './focus-task-guidance.js'
+import { focusTaskHandoffNote, matchesLegacyFocusTaskNote } from './focus-task-guidance.js'
 import { MOTE_INPUT_GUIDANCE } from './mote/input-source.js'
 import { parseAgentInputImageReference, type AgentInputImageReference } from './agent-input-resource.js'
 import { AgentMuxError } from './errors.js'
@@ -75,7 +75,11 @@ export function parseAgentInputSubmit(value: unknown): AgentInputSubmit {
 }
 
 /** Only the original input producer selects these fixed guides; wire composition stays in its existing owner. */
-export function agentInputGuidance(input: Pick<AgentInputSubmit, 'moteGuidance' | 'focusTask'>): string {
-  if (input.focusTask) return focusTaskHandoffNote(input.focusTask)
-  return input.moteGuidance ? MOTE_INPUT_GUIDANCE : ''
+export function agentInputGuidance(input: Pick<AgentInputSubmit, 'moteGuidance' | 'focusTask' | 'preparationRetry'>, retainedNote?: string): string {
+  if (!input.focusTask) return input.moteGuidance ? MOTE_INPUT_GUIDANCE : ''
+  if (input.preparationRetry && retainedNote !== undefined) {
+    const prefix = input.moteGuidance ? MOTE_INPUT_GUIDANCE + '\n\n' : ''
+    if (retainedNote.startsWith(prefix) && matchesLegacyFocusTaskNote(input.focusTask, retainedNote.slice(prefix.length))) return retainedNote
+  }
+  return focusTaskHandoffNote(input.focusTask)
 }

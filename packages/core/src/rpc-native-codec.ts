@@ -851,7 +851,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         if (p.record !== null) {
           const original = parsePromptSubmissionRecord(p.record), message = original.admission?.intent?.message ?? original.launch?.message
           const expectedContext = packet ? message?.inputContext : submitted.inputContext
-          const expectedNote = composeAgentPrompt(undefined, packet ? packet.agentMuxNote : agentInputGuidance(submitted)).systemContext
+          const expectedNote = composeAgentPrompt(undefined, packet ? packet.agentMuxNote : agentInputGuidance(submitted, message?.systemContext)).systemContext
           if (packet) {
             if (!expectedContext) fail()
             const {schema:_schema,inputContext:_context,...proof} = createAgentInputContextCaptureRecord({reference:packet.reference,

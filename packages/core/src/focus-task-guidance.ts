@@ -4,7 +4,7 @@ import { FOCUS_READ_MAX_REFERENCES, parseFocusParams, parseFocusTaskReference,
 import { guideSharedFocusTaskHandoff } from './generated/agentmux-guides.js'
 import { guideText } from './guide-text.js'
 
-const HANDOFF_GUIDANCE = /* @__PURE__ */ guideText(guideSharedFocusTaskHandoff)
+const LEGACY_HANDOFF_PREFIX = /* @__PURE__ */ guideText(guideSharedFocusTaskHandoff) + '\n\nExact Focus reads ('
 
 /** Keep the complete logical cohort; the public per-read budget is not a task limit. */
 export function focusTaskReadInputs(reference: AgentMuxFocusTaskReference): AgentMuxFocusReadParams[] {
@@ -46,5 +46,13 @@ export function focusTaskHandoffNote(reference: AgentMuxFocusTaskReference): str
 /** A cleared draft can also own a saved note from the previous Focus handoff format. */
 export function isFocusTaskHandoffNote(note: string): boolean {
   const reference = readAmuxFocusReference(note)
-  return reference?.tail === '' || note.startsWith(HANDOFF_GUIDANCE + '\n\nExact Focus reads (')
+  return reference?.tail === '' || note.startsWith(LEGACY_HANDOFF_PREFIX)
+}
+
+/** Check the exact selection encoded by the former producer before reusing its saved note. */
+export function matchesLegacyFocusTaskNote(task: AgentMuxFocusTaskReference, note: string): boolean {
+  if (!note.startsWith(LEGACY_HANDOFF_PREFIX)) return false
+  const inputs = focusTaskReadInputs(task)
+  const batches = inputs.length === 1 ? 'batch' : 'batches'
+  return note === `${LEGACY_HANDOFF_PREFIX}${inputs.length} ${batches}; read every batch and its remaining pages):\n${inputs.map(focusReadCommand).join('\n')}`
 }
