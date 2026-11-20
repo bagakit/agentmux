@@ -247,6 +247,7 @@ function GoalDetail({ goalId, goal, factScope, presented, decisions, client, con
   if (!goal) return <article aria-label="目标详情" hidden={!presented}><h2>目标</h2><MobileNotice identity={[goalId]} role="status">还没读到这个目标，可以重新读取。</MobileNotice><code>{goalId}</code>{editor}<button onClick={refresh}>读取当前目标</button></article>
   const { saving, save } = model
   const alignment = goal.alignment, grounding = goal.grounding
+  const agentConfirmer = alignment?.confirmedAt != null && alignment.confirmedBy?.kind === 'agent' ? alignment.confirmedBy : null
   const currentReport = !!alignment && grounding?.alignmentRevision === alignment.revision
   return <article aria-label="目标详情" hidden={!presented}>
     {!editing && <><h2>{goal.title || '待定义目标'}</h2><p className="mobile-goals-body">{goal.description || '还没有目标说明。'}</p></>}
@@ -255,7 +256,10 @@ function GoalDetail({ goalId, goal, factScope, presented, decisions, client, con
       {alignment ? <><p className="mobile-goals-body">{alignment.summary}</p><ul>{alignment.criteria.map(criterion => <li key={criterion.id}>{criterion.text}</li>)}</ul>
         {!alignment.criteria.length && <p>尚无成功标准。</p>}
         {!!alignment.openQuestions.length && <><h4>待决定事项</h4><ul>{alignment.openQuestions.map((question, index) => <li key={index}>{question}</li>)}</ul></>}
-        <p>{alignment.confirmedAt === null ? '目标尚未确认。' : withMobileTime('目标已确认', alignment.confirmedAt)}</p>
+        <p>{alignment.confirmedAt === null ? '目标尚未确认。' : withMobileTime(agentConfirmer ? `由 Agent ${agentConfirmer.id} 确认` : '目标已确认', alignment.confirmedAt)}</p>
+        {agentConfirmer && <details><summary>确认者信息</summary><dl>
+          <dt>Host</dt><dd>{agentConfirmer.hostId}</dd><dt>Runtime</dt><dd>{agentConfirmer.runtimeId}</dd>
+        </dl></details>}
       </> : <p>还没有目标提案。</p>}
     </section>
     <section aria-label="结果与证据"><h3>结果与证据</h3>
