@@ -79,7 +79,7 @@ export function SourceLauncherRequest({ input, busy, onContinue, active = true }
   const stage = typed ? ({ resolve: 'connection', inventory: 'Executor check', prepare: 'preparation', start: 'start', attach: 'attachment', create: 'creation' } as const)[typed.stage] : undefined
   const title = report?.outcome === 'retired' ? 'Agent retired' : report?.agent || report?.outcome === 'opened' ? 'Agent created' : 'Launch not confirmed'
   const reason = issue ? 'Latest check could not be completed. The last confirmed facts are kept.' : terminal || report?.agent ? 'The original work and your newer draft are retained.'
-    : report?.execution?.placement === 'unconfirmed' ? 'The original execution intent is retained. Its Source placement is unconfirmed.'
+    : report?.execution?.placement === 'unconfirmed' ? 'The original request is saved. Its place in the project is unconfirmed.'
     : typed ? `${role} ${stage} is unconfirmed.` : cause?.message ?? 'The original request is kept.'
   return <section className="launcher-source-original source-launch-feedback" aria-label="Original launch status">
     <div className="source-launch-feedback__top">
@@ -88,10 +88,12 @@ export function SourceLauncherRequest({ input, busy, onContinue, active = true }
     </div>
     {copyState ? <p className="source-launch-feedback__copy-status" role="status">{copyState === 'copied' ? 'Diagnostics copied' : copyState === 'writing' ? 'Copying diagnostics…' : 'Could not copy diagnostics. Try again.'}</p> : null}
     <div className="source-launch-feedback__actions">
-      {!terminal ? <Button type="button" className="source-launch-feedback__primary" disabled={busy} onClick={() => onContinue(input)}>{input.submitted ? 'Continue original task' : 'Send original task'}</Button> : null}
+      {!terminal ? <Button type="button" className="source-launch-feedback__primary" onClick={() => void check()}>Check original status</Button> : null}
+      {!terminal ? <Button type="button" disabled={busy} onClick={() => onContinue(input)}>{input.submitted ? 'Continue original task' : 'Send original task'}</Button> : null}
       {report?.to ? <button type="button" className={`small-button${terminal ? ' source-launch-feedback__primary' : ''}`} onClick={() => void open()}>Open original work</button> : null}
-      <Button type="button" onClick={() => void check()}>Check original task</Button>
+      {terminal ? <Button type="button" onClick={() => void check()}>Check original status</Button> : null}
     </div>
+    {!terminal ? <p className="source-launch-feedback__action-note">Checking is read-only. {input.submitted ? 'Continuing can send the saved original input.' : 'Sending starts the saved original task.'}</p> : null}
     <details className="source-launch-feedback__details">
       <summary>Diagnosis details</summary>
       <div className="source-launch-feedback__detail-body">

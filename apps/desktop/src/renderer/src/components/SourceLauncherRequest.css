@@ -11,7 +11,8 @@
 .source-launch-feedback .source-launch-feedback__actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
 .source-launch-feedback .small-button { min-height: 27px; padding: 4px 9px; font-size: 11px; line-height: 1.4; border-radius: 5px; }
 .source-launch-feedback .source-launch-feedback__primary { color: var(--text); border: 1px solid var(--focus-line); background: color-mix(in srgb, var(--green) 15%, var(--surface-2)); }
-.source-launch-feedback .source-launch-feedback__copy-status { margin: 5px 0 0; font-size: 11px; color: var(--text-3); }
+.source-launch-feedback .source-launch-feedback__copy-status,
+.source-launch-feedback .source-launch-feedback__action-note { margin: 5px 0 0; font-size: 11px; color: var(--text-3); }
 .source-launch-feedback .source-launch-feedback__details { margin-top: 10px; border-top: 1px solid var(--line-soft); padding-top: 8px; }
 .source-launch-feedback .source-launch-feedback__details > summary { width: fit-content; cursor: pointer; color: var(--text-3); font-size: 11px; line-height: 1.6; }
 .source-launch-feedback .source-launch-feedback__detail-body { max-height: min(46vh, 440px); overflow: auto; overscroll-behavior: contain; padding-right: 5px; }

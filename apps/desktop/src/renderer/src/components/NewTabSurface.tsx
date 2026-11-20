@@ -414,6 +414,7 @@ export function NewTabSurface({
     busy: busyKind !== null || executionPreparing || !!sourceOriginal,
     installedExecutorCount: sourceMode ? sourceLauncher.selected ? 1 : 0 : splitExecution ? selectedExecutor ? 1 : 0 : primaryBotUnconfirmed && !explicitExecutorChoice ? 0 : installedExecutors.length
   }
+  const launchLabel = retainedSourceRequests.inputs.length ? 'Launch new task' : 'Launch'
   // 启动这一件事也只写一次：按钮的 onClick 与键盘那条路调的是同一个函数。抄两遍时任何一处漏掉
   // launchOptionSelection 或那两个名字，就变成「用鼠标点带着精调启动、用键盘发就丢掉精调」。
   function launchFromLauncher(): void {
@@ -624,7 +625,7 @@ export function NewTabSurface({
       {sections.agents === 'expanded' ? <div className="launch-surface__footer">
         <LauncherMoteAction workspace={workspace} prompt={prompt} sourceTabId={tabId} sourceRegionId={regionId} disabled={busyKind !== null || !workspace || Boolean(sourceUnavailable)} />
         <div className="launcher-primary-actions"><LauncherResumePicker getTakeoverOrigin={getTakeoverOrigin} workspace={workspace} originalTarget={splitExecution || sourceMode} disabled={busyKind !== null} />
-          <button className="primary-button launcher-launch-button" title={`Launch · ${isMacPlatform() ? '⌘' : 'Ctrl+'}Enter`} disabled={!launcherCanLaunch(readiness)} onClick={launchFromLauncher}>{busyKind === 'agent' ? <ThemeStatusLoadingIcon size={15} animation="spin" /> : <ThemeActionStartIcon size={15} />}{busyKind === 'agent' ? 'Launching…' : executionPreparing ? 'Review arrangement…' : 'Launch'}</button>
+          <button className="primary-button launcher-launch-button" title={`${launchLabel} · ${isMacPlatform() ? '⌘' : 'Ctrl+'}Enter`} disabled={!launcherCanLaunch(readiness)} onClick={launchFromLauncher}>{busyKind === 'agent' ? <ThemeStatusLoadingIcon size={15} animation="spin" /> : <ThemeActionStartIcon size={15} />}{busyKind === 'agent' ? 'Launching…' : executionPreparing ? 'Review arrangement…' : launchLabel}</button>
         </div>
       </div> : null}
       {sourceMode && !sourceSupportIssue && sections.agents === 'expanded' ? <details className="agent-work-startup launcher-compatibility"><summary>Launch compatibility</summary><p>The project device and selected Agent accept complete launch fields. Native tool qualification is unconfirmed here and checked during Launch preparation.</p></details> : null}
