@@ -1,6 +1,7 @@
 import { AgentMuxError } from '../errors.js'
 import { FILE_UPLOAD_MAX_BYTES, fileUploadRevision, parseFileUploadIdentity, type FileUploadIdentity } from '../public-rpc-files.js'
 import { rpcRecord } from '../rpc-data.js'
+import { imageBytes } from '../session-history-resource.js'
 
 export type MotePrivateImageRead = { threadId: string; messageId: string; imageOperationId: string }
 export type MotePrivateImage = { operationId: string; name: string; mimeType: string; revision: string; byteLength: number }
@@ -8,7 +9,7 @@ export type MotePrivateImageResult = MotePrivateImageRead & { image: MotePrivate
 
 type Code = 'INVALID_CONTROL_REQUEST' | 'CONTROL_PROTOCOL_ERROR'
 function invalid(code: Code): never { throw new AgentMuxError('The original private image or its message reference is invalid.', code) }
-const imageMime = /^image\/(?:png|jpeg|jpg|gif|webp|heic|heif)$/u
+const imageMime = /^image\/(?:png|jpeg|gif|webp)$/u
 
 export function parsePrivateImageUploads(value: unknown, code: Code): FileUploadIdentity[] {
   if (!Array.isArray(value) || !value.length || value.length > 4) return invalid(code)
@@ -46,5 +47,6 @@ export function parseMotePrivateImageResult(value: unknown, expected: MotePrivat
   try { bytes = Uint8Array.from(atob(result.dataBase64), char => char.charCodeAt(0)) }
   catch { return invalid(code) }
   if (bytes.length !== image.byteLength || fileUploadRevision(bytes) !== image.revision) return invalid(code)
+  if (imageBytes(bytes, image.byteLength, image.mimeType).status !== 'read') return invalid(code)
   return result as unknown as MotePrivateImageResult
 }
