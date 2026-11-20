@@ -16,6 +16,7 @@ import { SCRATCH_WORKSPACE_ID } from '../src/mote-topic-model.js'
 import { registerKnowledgeTopic } from '../src/topic-spatial-owner.js'
 import { topicContentZoneId } from '../src/topic-categories.js'
 import { createHostMoteGroups, type HostMoteGroupFiles } from '../src/mote-group.js'
+import { createHostMoteDirect } from '../src/mote-direct.js'
 import type { MoteChatResourcePort } from '../src/mote-resources.js'
 import type { MoteMainReader } from '@agentmux/core/mote-dialogue'
 
@@ -96,24 +97,24 @@ async function fixture(retainedRoot?: string, initialSessions: string[] = []) {
   const start = async (files?: HostMoteGroupFiles, main?: MoteMainReader) => {
     const port = createHostMoteGroups({ store: new MoteGroupStore(dbPath), agents, client: () => f.client,
       ...(files ? { files } : {}), ...(main ? { main } : {}) })
-    const server = new core.AgentMuxControlServer({ socketPath, coreClients: f.coreClients, moteGroups: port })
+    const direct = main ? createHostMoteDirect(createHostMoteGroups({
+      store: new MoteGroupStore(join(workspacePath, 'direct.sqlite'), 'direct'), agents, client: () => f.client, main
+    })) : undefined
+    const server = new core.AgentMuxControlServer({ socketPath, coreClients: f.coreClients, moteGroups: port, ...(direct ? { moteDirect: direct } : {}) })
     await server.start()
     closes.push(() => server.stop())
     const rpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })
     closes.push(() => rpc.dispose())
     return { server, rpc }
   }
-  const cli = (action: string, body: unknown, agentSessionId?: string) =>
-    runSourceObjectCli(['--endpoint', 'unix:' + socketPath, 'space', 'mote', 'group', ...action.split(' '), '--input', '-'],
+  const cli = (action: string, body: unknown, agentSessionId?: string, kind = 'group') =>
+    runSourceObjectCli(['--endpoint', 'unix:' + socketPath, 'space', 'mote', kind, ...action.split(' '), '--input', '-'],
       objectCliEnvironment(f.root, agentSessionId ? { AGENTMUX_AGENT_SESSION_ID: agentSessionId, AGENTMUX_AGENT_CAPABILITY: f.capability } : {}), JSON.stringify(body))
   return { ...f, start, target, created, send, cli, preparedTargets, holdNative: (barrier: Promise<void>) => { nativeBarrier = barrier }, unblockSecond: () => { blockSecond = false } }
 }
 
-it('allows the authenticated Mote Main to create a Group and publish to exact recipients through CLI', async () => {
-  const f = await fixture(undefined, ['main-a', 'main-b', 'rotated-a', 'standalone'])
-  const sourceMote = f.target('mote-a')
-  const bindings = new Map([['mote-a', 'main-a'], ['mote-b', 'main-b']])
-  const { rpc } = await f.start(undefined, {
+function boundMains(bindings: Map<string, string>): MoteMainReader {
+  return {
     async readCurrentMoteMain(target) {
       const sessionId = bindings.get(target.spaceId)
       return { status: 'ready', target, identity: { hostId: 'local', moteId: target.spaceId }, roleRevision: sessionId ?? 'unbound',
@@ -123,7 +124,14 @@ it('allows the authenticated Mote Main to create a Group and publish to exact re
     async assertCurrent(snapshot) {
       expect(snapshot.current?.sessionId).toBe(bindings.get(snapshot.target.spaceId))
     }
-  })
+  }
+}
+
+it('allows the authenticated Mote Main to create a Group and publish to exact recipients through CLI', async () => {
+  const f = await fixture(undefined, ['main-a', 'main-b', 'rotated-a', 'standalone'])
+  const sourceMote = f.target('mote-a')
+  const bindings = new Map([['mote-a', 'main-a'], ['mote-b', 'main-b']])
+  const { rpc } = await f.start(undefined, boundMains(bindings))
   const create = { sourceMote, operationId: 'coordinator-create', name: 'Homework', members: [f.target('mote-b')], announcement: 'Compare the changes.' }
   const denied = await f.cli('create', create, 'standalone')
   expect(denied.code).not.toBe(0)
@@ -174,6 +182,50 @@ it('allows the authenticated Mote Main to create a Group and publish to exact re
   expect(JSON.parse(reopened.stdout).result.group.id).toBe(group.id)
   expect((await rpc.call('space.mote.group.inspect', { groupId: group.id })).messages.map(entry => entry.id))
     .toEqual([message.id, JSON.parse(reply.stdout).result.message.id])
+})
+
+it('reuses one private Mote thread across directions, Main rotation and Host reopen', async () => {
+  const f = await fixture(undefined, ['main-a', 'main-b', 'main-c', 'rotated-a'])
+  const a = f.target('mote-a'), b = f.target('mote-b'), c = f.target('mote-c')
+  const bindings = new Map([['mote-a', 'main-a'], ['mote-b', 'main-b'], ['mote-c', 'main-c']])
+  const main = boundMains(bindings)
+  const { rpc, server } = await f.start(undefined, main)
+  const direct = async (command: string, data: unknown, session?: string) => {
+    const result = await f.cli(command, data, session, 'direct')
+    expect(result.code, result.stderr).toBe(0)
+    return JSON.parse(result.stdout).result
+  }
+  f.unblockSecond()
+  const work = { mote: a, peer: b, operationId: 'original-assignment', body: 'Draft the release notes.' }
+  const sent = await direct('send', work, 'main-a')
+  const threadId = sent.threadId as string
+  expect(sent.message).toMatchObject({ threadId, body: work.body, author: { moteId: 'mote-a' }, deliveries: [{ moteId: 'mote-b' }] })
+  await vi.waitFor(async () => {
+    const page = await rpc.call('space.mote.direct.inspect', { threadId, mote: b })
+    expect(page.messages[0]?.deliveries[0]?.status).toBe('accepted')
+  })
+  const peer = (await rpc.call('space.mote.direct.inspect', { threadId, mote: b })).thread.participants.find(p => p.moteId === 'mote-b')!
+  expect(f.send).toHaveBeenCalledTimes(1)
+  const reply = await direct('reply', { threadId, operationId: 'original-private-reply',
+    inputOperationId: sent.message.deliveries[0].operationId, body: 'Draft ready for review.' }, peer.thread!.agentSessionId)
+  expect(reply.message).toMatchObject({ threadId, replyToMessageId: sent.message.id, author: { moteId: 'mote-b' } })
+  expect((await direct('list', { mote: a }, 'main-a')).threads[0]?.lastMessage.id).toBe(reply.message.id)
+  await expect(rpc.call('space.mote.group.inspect', { groupId: threadId })).rejects.toMatchObject({ code: 'UNKNOWN_MOTE_GROUP' })
+  expect((await rpc.call('space.mote.group.list', {})).groups).toEqual([])
+  const foreign = await f.cli('inspect', { threadId, mote: c }, 'main-c', 'direct')
+  expect(foreign.code).not.toBe(0)
+  const impersonated = await f.cli('inspect', { threadId, mote: a }, 'main-c', 'direct')
+  expect(cliError(impersonated)).toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+
+  await rpc.dispose(); await server.stop()
+  const reopened = (await f.start(undefined, main)).rpc
+  bindings.set('mote-a', 'rotated-a')
+  expect((await direct('send', work, 'rotated-a')).message.id).toBe(sent.message.id)
+  const reverse = await direct('send', { mote: b, peer: a, operationId: 'reverse-assignment', body: 'Check the test summary.' }, 'main-b')
+  expect(reverse.threadId).toBe(threadId)
+  const timeline = await reopened.call('space.mote.direct.inspect', { threadId, mote: a })
+  expect(timeline.messages.map(entry => entry.id)).toEqual([sent.message.id, reply.message.id, reverse.message.id])
+  expect(timeline.thread.participants.find(p => p.moteId === 'mote-b')?.thread).toEqual(peer.thread)
 })
 
 it('saves one original public message, starts only invited members and reuses exact member input through public RPC', async () => {
