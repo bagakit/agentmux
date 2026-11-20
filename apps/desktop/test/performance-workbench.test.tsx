@@ -48,7 +48,8 @@ it('starts with a scoped overview and exposes the original resource owners only 
   expect(overview.textContent).toContain('23.5%'); expect(overview.textContent).toContain('19.0 GiB')
   expect(overview.textContent).toContain('Home volume'); expect(overview.textContent).toContain('18.4%')
   expect(overview.textContent).toContain('not a whole-computer total')
-  await click(tab('resources')); expect(node<HTMLElement>('[data-performance-section="resources"]').hidden).toBe(false)
+  await click('.performance-live__heading .performance-inline-action'); expect(node<HTMLElement>('[data-performance-section="resources"]').hidden).toBe(false)
+  await click(tab('overview')); await click('.performance-overview-runs'); expect(node<HTMLElement>('[data-performance-section="resources"]').hidden).toBe(false)
   await click('[data-settings-target="runs"]'); expect(node('[data-run-totals]').textContent).toContain('All tracked Runs')
   await click('[data-settings-target="runtime"]'); expect(node('.performance-runtime').textContent).toContain('ctxmux')
   await click(tab('diagnostics')); expect(node<HTMLElement>('[data-performance-section="diagnostics"]').hidden).toBe(false)
@@ -56,6 +57,30 @@ it('starts with a scoped overview and exposes the original resource owners only 
   await click(tab('artifacts')); expect(node('[data-performance-profile-import]').isConnected).toBe(true)
   expect(api.performance.captureProfile).not.toHaveBeenCalled(); expect(api.performance.captureTrace).not.toHaveBeenCalled()
   expect(api.performance.captureScene).not.toHaveBeenCalled(); expect(api.performance.captureHeapSnapshot).not.toHaveBeenCalled()
+})
+
+it('leads with measured App trends and keeps unavailable samples honest', async () => {
+  const value = snapshot()
+  await render(value)
+  const live = node<HTMLElement>('[data-performance-live]')
+  expect(live.compareDocumentPosition(node('.performance-host')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(live.querySelectorAll('.performance-live-metric')).toHaveLength(2)
+  expect(live.querySelectorAll('.performance-trend-reader[data-compact=true][data-live=true]')).toHaveLength(2)
+  expect(live.querySelectorAll('.performance-trend__line')).toHaveLength(2)
+  expect(live.querySelectorAll('.performance-trend__latest')).toHaveLength(2)
+  expect(live.querySelector('.performance-run-summary')).not.toBeNull()
+
+  const missing = snapshot()
+  missing.executionId = 'missing-samples'
+  missing.observation!.app = { state: 'unavailable', data: null, observedAt: missing.observedAt!, lastSuccessAt: missing.observation!.app.lastSuccessAt, reason: 'Original App source unavailable' }
+  missing.trend = missing.trend.map(point => ({ ...point, appCpuPercent: null, appRssKib: null }))
+  await render(missing)
+  expect([...document.querySelectorAll('.performance-live-metric > strong')].map(item => item.textContent)).toEqual(['—', '—'])
+  expect(document.querySelectorAll('.performance-live .performance-trend__line')).toHaveLength(0)
+  expect(document.querySelectorAll('.performance-live .performance-trend__latest')).toHaveLength(0)
+  expect([...document.querySelectorAll('.performance-live .performance-trend > text')].map(item => item.textContent)).toEqual(['History unavailable', 'History unavailable'])
+  expect(live.textContent).toContain('Original App source unavailable')
+  expect(document.querySelector('[data-performance-live]')!.textContent).not.toContain('0.0%')
 })
 
 it('switches accessible sections by keyboard and restores each section reading position', async () => {
