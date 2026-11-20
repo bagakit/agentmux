@@ -450,7 +450,7 @@
 .focus-draft-list__entry { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: center; margin: 0 -10px; padding: 13px 10px; border: 0; border-radius: 10px; transition: background-color var(--dur-fast, 140ms) ease; }
 .focus-draft-list__entry:hover, .focus-draft-list__entry:focus-within { background: color-mix(in srgb, var(--surface-2) 64%, transparent); }
 .focus-draft-list__entry > .local-input-record { margin: 0; padding: 0; border: 0; }
-.focus-draft-list__continue.agent-button { align-self: center; gap: 5px; min-height: 28px; padding: 4px 2px 4px 8px; border: 0; background: transparent; box-shadow: none; color: var(--text-3); font-size: 11px; font-weight: 500; opacity: .82; transition: color var(--dur-fast, 140ms) ease, opacity var(--dur-fast, 140ms) ease; }
+.focus-draft-list__continue.agent-button { align-self: center; gap: 5px; min-height: 28px; padding: 4px 2px 4px 8px; border: 0; background: transparent; box-shadow: none; color: var(--text-2); font-size: 11px; font-weight: 500; transition: color var(--dur-fast, 140ms) ease, opacity var(--dur-fast, 140ms) ease; }
 .focus-draft-list__entry:hover .focus-draft-list__continue, .focus-draft-list__continue:focus-visible { color: var(--text); opacity: 1; }
 .focus-draft-list__continue svg { transition: transform var(--dur-fast, 140ms) ease; }
 .focus-draft-list__continue:hover svg { transform: translateX(2px); }
@@ -475,7 +475,7 @@
 .local-input-record__chevron { position: absolute; top: 3px; right: 1px; color: var(--text-3); transition: transform var(--dur-fast, 140ms) ease; }
 .local-input-record[open] > summary .local-input-record__chevron { transform: rotate(90deg); }
 .local-input-record__expanded { padding-top: 12px; animation: local-input-expanded-enter 180ms var(--ease-enter, ease-out); }
-.local-input-record textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 86px; max-height: 340px; margin: 0; padding: 13px 14px; border: 1px solid transparent; border-radius: 10px; outline: none; background: var(--surface-1); color: var(--text-2); font: 400 12px/1.65 var(--font-sans); }
+.local-input-record textarea { width: 100%; box-sizing: border-box; resize: vertical; field-sizing: content; min-height: 86px; max-height: 340px; margin: 0; padding: 13px 14px; border: 1px solid transparent; border-radius: 10px; outline: none; background: var(--surface-1); color: var(--text-2); font: 400 12px/1.65 var(--font-sans); }
 .local-input-record textarea:focus-visible { border-color: var(--focus-line); }
 .local-input-record__actions { display: flex; justify-content: flex-end; margin-top: 5px; }
 .local-input-record__actions .agent-button { gap: 5px; padding-inline: 7px; border: 0; background: transparent; box-shadow: none; color: var(--text-3); font-size: 10px; }
