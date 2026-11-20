@@ -12,7 +12,8 @@ const profile: BrowserProfileSummary = { id: 'exact-profile', revision: 'config-
   network: { mode: 'proxy', server: { scheme: 'socks5', host: 'proxy.example', port: 1080 } } }
 const diagnostic: BrowserProxyProbe = { id: 'exact-probe', profileId: profile.id, configurationRevision: profile.revision, route: { mode: 'proxy', scheme: 'socks5', host: 'proxy.example', port: 1080 },
   exitOrigin: 'https://exit.example', startedAt: 1, finishedAt: 2, phase: 'observed', tcp: { status: 'connected', latencyMs: 1 },
-  authentication: { status: 'rejected', reason: 'authentication-rejected', latencyMs: 2 }, exit: { status: 'unknown', reason: 'exit-unavailable', latencyMs: 3 } }
+  authentication: { status: 'rejected', reason: 'authentication-rejected', latencyMs: 2 }, exit: { status: 'unknown', reason: 'exit-unavailable', latencyMs: 3 },
+  webrtc: { status: 'observed', policy: 'disable_non_proxied_udp', observedPages: 1 } }
 async function mount(ports: NonNullable<Parameters<typeof ProfileNetworkDiagnostics>[0]['ports']>) {
   const container = document.createElement('div'); document.body.append(container); const root = createRoot(container)
   await act(async () => { root.render(createElement(ProfileNetworkDiagnostics, { profile, ports })) })
@@ -25,8 +26,8 @@ it('shows separate protocol facts and invokes the actual network port with a ret
   const f = await mount({ probeProfileNetwork, profileNetworkHistory }); await f.click('Check route')
   expect(probeProfileNetwork).toHaveBeenCalledExactlyOnceWith(profile.id, expect.any(String))
   const facts = [...f.container.querySelectorAll('dd')].map(row => row.textContent)
-  expect(facts).toEqual(['Connected', 'Proxy rejected sign-in', 'No exit response confirmed'])
-  expect(f.container.textContent).not.toContain('Authenticated'); expect(f.container.textContent).toContain('Only the exit request uses this Profile')
+  expect(facts).toEqual(['Connected', 'Proxy rejected sign-in', 'No exit response confirmed', 'Non-proxied UDP disabled · 1 page'])
+  expect(f.container.textContent).not.toContain('Authenticated'); expect(f.container.textContent).toContain('The exit check uses this Profile')
 })
 it('an unknown result inspects the exact original id without sending another probe', async () => {
   const probeProfileNetwork = vi.fn(async (_profileId: string, _operationId: string) => { throw new Error('The reply was lost') }), profileNetworkHistory = vi.fn(async (_profile: string, id?: string) => ({ diagnostics: id ? [{ ...diagnostic, id }] : [], nextCursor: null }))

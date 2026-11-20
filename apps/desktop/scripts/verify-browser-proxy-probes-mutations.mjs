@@ -7,6 +7,7 @@ await mkdir(directory, { recursive: true }); const out = await mkdtemp(join(dire
 const config = 'apps/desktop/scripts/fixtures/browser-proxy-probes/vitest.mutations.config.mts'
 const main = 'apps/desktop/test/browser-proxy-probes.test.ts', ui = 'apps/desktop/test/browser-proxy-probes-ui.test.tsx', exit = 'apps/desktop/test/browser-profile-exit-check.test.ts'
 const cases = [
+  ['omit-webrtc-readback', main, 'observes real SOCKS authentication separately'],
   ['authentication-reply', main, 'does not certify authentication'], ['credential-generation', main, 'credential owner refuses an old configuration token'],
   ['configuration-token', main, 'observes real SOCKS authentication separately'], ['gui-dispatch', ui, 'shows separate protocol facts'], ['bounded-exit-body', exit, 'bounded prefix']
 ]

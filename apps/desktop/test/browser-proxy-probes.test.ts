@@ -43,7 +43,8 @@ async function proxy(kind: 'http' | 'socks5', status = 0, greeting = async () =>
 }
 async function fixture(endpoint: Awaited<ReturnType<typeof proxy>>) {
   const root = await mkdtemp(join(tmpdir(), 'proxy-probe-')); roots.push(root)
-  const path = join(root, 'profiles.json'), store = new BrowserProfileStore(path), native = { apply: vi.fn(async () => {}), prepare: vi.fn(), observe: vi.fn() }
+  const path = join(root, 'profiles.json'), store = new BrowserProfileStore(path), native = { apply: vi.fn(async () => {}), prepare: vi.fn(), observe: vi.fn(),
+    observeWebRtc: vi.fn(() => ({ status: 'observed', policy: 'disable_non_proxied_udp', observedPages: 1 })) }
   const manager = new BrowserProfileManager(store, native as never); await manager.initialize()
   const id = manager.defaultProfileId(), revision = manager.listProfiles()[0]!.revision
   await manager.updateProfile(id, { network: { mode: 'proxy', server: `${endpoint.kind}://127.0.0.1:${endpoint.port}` } }, revision)
@@ -65,6 +66,9 @@ describe('original Profile protocol diagnostics', () => {
       phase: 'observed', tcp: { status: 'connected' }, authentication: { status: 'authenticated' }, exit: { status: 'reachable', ip: '203.0.113.8' } } })
     expect(endpoint.observed).toMatchObject({ connections: 1, authentications: 1, matched: 1 })
     expect(f.checkExit).toHaveBeenCalledWith(f.id, 'https://exit.example')
+    expect(f.native.observeWebRtc).toHaveBeenCalledTimes(1)
+    expect(f.native.observeWebRtc).toHaveBeenCalledWith(f.id)
+    expect(result.diagnostic.webrtc).toEqual({ status: 'observed', policy: 'disable_non_proxied_udp', observedPages: 1 })
     expect(f.manager.listProfiles()[0]).toEqual(before); expect(f.manager.listRevision()).toBe(1); expect(f.manager.listSequence()).toBeGreaterThan(sequence)
     expect(f.native.apply).toHaveBeenCalledTimes(1)
     expect(await f.network.probe(f.id, 'original-diagnostic')).toEqual(result); expect(endpoint.observed.connections).toBe(1)
@@ -92,6 +96,8 @@ describe('original Profile protocol diagnostics', () => {
     waiting.release()
     const result = await pending
     expect(result.diagnostic.authentication).toMatchObject({ status: 'unknown', reason: 'route-changed' }); expect(result.diagnostic.exit).toMatchObject({ status: 'unknown', reason: 'route-changed' })
+    expect(result.diagnostic.webrtc).toEqual({ status: 'unknown', reason: 'route-changed', observedPages: 0 })
+    expect(f.native.observeWebRtc).not.toHaveBeenCalled()
     expect(original.observed.authentications).toBe(0); expect(replacement.observed.connections).toBe(0); expect(f.checkExit).not.toHaveBeenCalled()
     expect(result.diagnostic.route).toMatchObject({ port: original.port }); expect(f.manager.proxyOf(f.id)).toMatchObject({ port: replacement.port })
   })

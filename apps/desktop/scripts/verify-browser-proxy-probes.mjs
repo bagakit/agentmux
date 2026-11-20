@@ -60,7 +60,7 @@ try {
     })
   })
   const socksPort = await listen(socks)
-  await renderer({ configFile: false, root: fixture, base: './', logLevel: 'warn', define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, esbuild: { jsx: 'automatic' },
+  await renderer({ configFile: false, root: fixture, base: './', logLevel: 'error', worker: { format: 'es' }, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, esbuild: { jsx: 'automatic' },
     plugins: [{ name: 'profile-diagnostic-ui-source', async transform(code, id) { const path = id.split('?')[0]; if (path.startsWith(repo + '/') && !path.includes('/node_modules/')) inputs.set(path, hash(await readFile(path))) } }],
     build: { outDir: join(out, 'renderer'), emptyOutDir: false } })
   await symlink(join(repo, 'apps/desktop/node_modules'), join(out, 'node_modules')); await copyFile(join(fixture, 'preload.cjs'), join(out, 'preload.cjs'))

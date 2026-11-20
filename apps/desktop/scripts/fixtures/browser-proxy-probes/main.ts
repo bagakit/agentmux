@@ -44,7 +44,7 @@ async function main() {
     let httpId = prior?.httpId ?? profiles.defaultProfileId(), socksId = prior?.socksId
     if (!prior) {
       await profiles.updateProfile(httpId, { network: { mode: 'proxy', server: `http://127.0.0.1:${httpPort}`, bypass: ['<-loopback>'] } }, profiles.configurationRevision(httpId)!)
-      socksId = (await profiles.createProfile('Research route')).id
+      socksId = (await profiles.createProfile('Research route', 'fixture-create-socks-profile', { kind: 'user', id: 'fixture-network-owner', verified: true })).id
       await profiles.updateProfile(socksId, { network: { mode: 'proxy', server: `socks5://127.0.0.1:${socksPort}`, bypass: ['<-loopback>'] } }, profiles.configurationRevision(socksId)!)
     }
     for (const id of [httpId, socksId]) profiles.sessions.nativeSession(id).setCertificateVerifyProc((request, done) => done(request.hostname === '127.0.0.1' ? 0 : -3))
@@ -61,6 +61,7 @@ async function main() {
     } }); await server.start()
     await profiles.prepareSession(httpId)
     page = new BrowserWindow({ show: false, width: 720, height: 520, webPreferences: { partition: profiles.resolvePartition(httpId), sandbox: true, contextIsolation: true } })
+    profiles.sessions.observe(page.webContents)
     await page.loadURL(origin + '/form')
     const facts = () => page!.webContents.executeJavaScript('profileProbePageFacts()')
     if (phase === 'first') {
@@ -69,6 +70,18 @@ async function main() {
       const observed = await cli(['probe', '--profile', httpId, '--operation-id', 'native-http'])
       assert.equal(observed.diagnostic.tcp.status, 'connected'); assert.equal(observed.diagnostic.authentication.status, 'not-applicable')
       assert.equal(observed.diagnostic.exit.status, 'reachable'); assert.equal(observed.diagnostic.exit.ip, '203.0.113.19')
+      assert.deepEqual(observed.diagnostic.webrtc, { status: 'observed', policy: 'disable_non_proxied_udp', observedPages: 1 })
+      assert.equal(page.webContents.getWebRTCIPHandlingPolicy(), observed.diagnostic.webrtc.policy)
+      const unrelated = (await profiles.createProfile('Independent direct route', 'fixture-create-direct-profile', { kind: 'user', id: 'fixture-network-owner', verified: true })).id
+      await profiles.updateProfile(unrelated, { network: { mode: 'direct' } }, profiles.configurationRevision(unrelated)!)
+      await profiles.prepareSession(unrelated)
+      const direct = new BrowserWindow({ show: false, webPreferences: { partition: profiles.resolvePartition(unrelated), sandbox: true } })
+      try {
+        profiles.sessions.observe(direct.webContents)
+        await direct.loadURL('about:blank')
+        assert.deepEqual(profiles.sessions.observeWebRtc(unrelated), { status: 'observed', policy: 'default', observedPages: 1 })
+        assert.deepEqual(profiles.sessions.observeWebRtc(httpId), observed.diagnostic.webrtc)
+      } finally { direct.destroy() }
       assert.deepEqual(await facts(), before); assert.deepEqual(profiles.listProfiles().find(row => row.id === httpId), profileBefore)
       address = origin + '/drop'
       const failed = await cli(['probe', '--profile', httpId, '--operation-id', 'native-exit-failure'])
@@ -80,6 +93,7 @@ async function main() {
       const socks = await cli(['probe', '--profile', socksId, '--operation-id', 'native-socks-auth'])
       assert.equal(socks.diagnostic.authentication.status, 'authenticated'); assert.equal(socks.diagnostic.tcp.status, 'connected')
       assert.equal(socks.diagnostic.exit.status, 'unknown', 'Probe authentication never certifies Chromium authenticated SOCKS business traffic')
+      assert.deepEqual(socks.diagnostic.webrtc, { status: 'unknown', reason: 'no-live-page', observedPages: 0 })
       report.cases.push({ kind: 'real-rfc1929-sign-in-with-independent-native-session-exit', socks })
       await signIn.set(socksId, { username: 'private-probe-user', password: 'private-probe-wrong' })
       const record = profiles.recordNetworkDiagnostic.bind(profiles); let madeReadOnly = false
@@ -94,15 +108,16 @@ async function main() {
       const pending = await cli(['history', '--profile', socksId, '--operation-id', 'native-pending'])
       assert.equal(pending.diagnostics[0].phase, 'pending')
       report.cases.push({ kind: 'real-eacces-after-original-registration-keeps-pending-history', unconfirmed, pending })
-      ipcMain.handle('profile-probe:initial', () => ({ profile: profiles!.listProfiles().find(row => row.id === socksId) }))
+      ipcMain.handle('profile-probe:initial', () => ({ profile: profiles!.listProfiles().find(row => row.id === httpId) }))
       ipcMain.handle('profile-probe:run', (_event, id, operationId) => network.probe(id, operationId))
       ipcMain.handle('profile-probe:history', (_event, id, operationId, before) => profiles!.networkHistory(id, operationId, before))
       editor = new BrowserWindow({ show: false, width: 620, height: 720, webPreferences: { sandbox: true, contextIsolation: true, preload: join(out, 'preload.cjs'), backgroundThrottling: false } })
       await editor.loadFile(join(out, 'renderer/index.html')); editor.showInactive()
       for (let index = 0; index < 400 && !await editor.webContents.executeJavaScript('!!document.querySelector(".profile-network-diagnostics")'); index++) await pause(25)
       await click('.profile-network-diagnostics__heading button')
-      for (let index = 0; index < 800 && !await editor.webContents.executeJavaScript('document.querySelectorAll(".profile-network-diagnostics dd").length===3'); index++) await pause(25)
-      assert.equal(await editor.webContents.executeJavaScript('document.querySelectorAll(".profile-network-diagnostics dd").length'), 3)
+      for (let index = 0; index < 800 && !await editor.webContents.executeJavaScript('document.querySelectorAll(".profile-network-diagnostics dd").length===4'); index++) await pause(25)
+      assert.equal(await editor.webContents.executeJavaScript('document.querySelectorAll(".profile-network-diagnostics dd").length'), 4)
+      assert.match(await editor.webContents.executeJavaScript('document.querySelector(".profile-network-diagnostics").textContent'), /Non-proxied UDP disabled · 1 page/)
       await click('.profile-network-diagnostics__history summary')
       for (const appearance of ['dark', 'light']) for (const width of [620, 390]) {
         editor.setSize(width, 720)

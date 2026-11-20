@@ -9,6 +9,7 @@ const rootUrl = new URL('../../../../../', import.meta.url), root = fileURLToPat
 const manifest = JSON.parse(readFileSync(new URL('packages/core/package.json', rootUrl), 'utf8'))
 const aliases = Object.entries(manifest.exports).map(([key, value]: [string, any]) => ({ find: '@agentmux/core' + (key === '.' ? '' : key.slice(1)), replacement: fileURLToPath(new URL('packages/core/' + value.types.replace('./dist/', 'src/').replace('.d.ts', '.ts'), rootUrl)) })).sort((a, b) => b.find.length - a.find.length)
 const mutations: Record<string, [string, string, string]> = {
+  'omit-webrtc-readback': ['apps/desktop/src/main/browser-profile-network-control.ts', 'ports.profiles.sessions?.observeWebRtc?.(profileId)', 'undefined'],
   'authentication-reply': ['apps/desktop/src/main/browser-proxy-probe.ts', "return result[1] === 0 ? { status: 'authenticated'", "return true ? { status: 'authenticated'"],
   'credential-generation': ['apps/desktop/src/main/browser-profile-proxy-auth.ts', "sameProxy(ports.proxyOf(profileId), expected) && ports.configurationRevision?.(profileId) === expected.configurationRevision", "sameProxy(ports.proxyOf(profileId), expected)"],
   'configuration-token': ['apps/desktop/src/main/browser-profile-store.ts', "networkDiagnostics: original ? records.map(item => item.id === original.id ? diagnostic : item) : [...records, diagnostic] }, false)", "networkDiagnostics: original ? records.map(item => item.id === original.id ? diagnostic : item) : [...records, diagnostic] }, true)"],
