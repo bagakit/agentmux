@@ -99,17 +99,13 @@ export async function createMoteConversationStartFixture(input:{providerId?:'cod
  }
  const setup=(operationId:string,advance=true)=>rpc.call(advance?'space.mote.dialogue.setup.advance':'space.mote.dialogue.setup.inspect',{target,creation:{hostId:'local',operationId}})
  const settledSetup=async(operationId:string,advance=true)=>{
-  let result=await setup(operationId,advance)
-  // The real controlled input returns its durable receipt before its worker
-  // settles. Await that original worker in positive protocol fixtures only;
-  // a genuine initialization wait or unknown receipt is returned unchanged.
-  if(advance&&providerId==='claude')await vi.waitFor(async()=>{
-   const inFlight=[result.deferredInput,result.handoverInput].some(value=>value?.input?.status==='waiting'&&!value.input.control.waiting)
-   if(!inFlight)return
-   result=await rpc.call('space.mote.dialogue.setup.inspect',{target,creation:{hostId:'local',operationId}})
-   expect([result.deferredInput,result.handoverInput].some(value=>value?.input?.status==='waiting'&&!value.input.control.waiting)).toBe(false)
-  },{timeout:5000})
-  return result
+  const result=await setup(operationId,advance)
+  if(!advance||providerId!=='claude'||!result.reference)return result
+  // A live worker can retain the carrier before its transport acknowledges it.
+  // Join that worker before reading the settled public receipt.
+  const pending=h.inner.inputWaitingRecipients.get(result.reference.sessionId)?.pending
+  if(pending)await pending
+  return await setup(operationId,false)
  }
  return {h,spatial,store,main,dialogue,quick,quickPorts,options,server,rpc,target,path,start,setup,settledSetup,qualifyMainIdle,close:async()=>{for(const close of closes.splice(0).reverse())await close()}}
 }
