@@ -20,6 +20,7 @@ export type LoopTickHandler = (loop: ContinuousProgressLoop, operationId: string
 export type LoopObservationProvider = (loop: ContinuousProgressLoop, tickId: string, now: number, signal: AbortSignal) => Promise<ContinuousProgressObservation>
 export type GoalProgressOwner = {
   read: GoalProgressReader
+  workflowGuidance?(loopId: string): Promise<string>
   subscribe?(listener: (changes: ReadonlyMap<string, GoalProgressRecord | null>, revision: number, goals: readonly GoalProgressRecord[]) => void): () => void
   inspectInitial(loop: ContinuousProgressLoop): Promise<'confirmed' | 'pending' | 'unconfirmed'>
 }
@@ -1158,6 +1159,12 @@ export class ContinuousProgressLoopManager {
           // If the observed completion changed, the old claim has no authority to send.
           if (!pending) {
             let prompt = goalContinuation ?? claim.loop.prompt
+            if (goalContinuation && this.goals?.workflowGuidance) {
+              const guidance = await this.goals.workflowGuidance(claim.loop.loopId).catch(() =>
+                'The saved Workflows budget is unconfirmed. Read the original Goal settings before any new automatic Ticket dispatch.')
+              if (!isCurrent()) break delivery
+              if (guidance) prompt += '\n\n' + guidance
+            }
             let agentMuxNote: string | undefined
             if (!futureIntent) agentMuxNote = formatAmuxTriggerNote('automation', AGENTMUX_AGENT_MESSAGING_ENTRY + (claim.loop.checkIn ? '\n\n' + AGENT_SCHEDULE_CHECK_IN_GUIDANCE : '') + (claim.loop.taskSource?.kind === 'goal' ? '\n\n' + goalRoleGuidance({ role: goalContinuation ? 'manager' : 'executor', goalId: claim.loop.taskSource.goalId, agentSessionId: claim.loop.agentSessionId, runId: observation.session.run.runId, source: { kind: 'goal-native-continuation', operationId: claim.tickId } }) : ''))
             else {

@@ -34,7 +34,8 @@ export class GoalPatrolOwner {
   private readonly indexed = new Map<string, { operations: string[]; remove(): void }>()
   constructor(private readonly demands: DemandStore, private readonly runtime: Runtime,
     private readonly read: (goalId: string, context: AgentMuxRpcCallContext) => Promise<GoalDelegationResult>,
-    private readonly changed: (ids: string[]) => void) {}
+    private readonly changed: (ids: string[]) => void,
+    private readonly workflowPlan?: () => Promise<unknown>) {}
   async start(): Promise<void> {
     this.releases.push(this.demands.subscribe((snapshot, _ids, changes) => this.index(snapshot, changes)))
     this.releases.push(this.runtime.observeCoreEvents(['agent-session', 'agent-status', 'process-state', 'agent-input', 'connection-state'], (host, event) => this.event(host, event)))
@@ -108,7 +109,7 @@ export class GoalPatrolOwner {
       const guidance = goalRoleGuidance({ role: 'manager', goalId, agentSessionId: target.agentSessionId, runId: target.runId, source: { kind: 'goal-plan-request', operationId: patrolId } })
       return { operationId, actionOperationId: suffix, intentId: operationId, target, agentMuxNote: JSON.stringify({ schema: 'agentmux.goal-plan-request.v1',
         goalId, requestOperationId: patrolId, inputOperationId: operationId, target, context: JSON.parse(context),
-        next: 'Make and save a dependency plan inside this existing Goal. Read the current Goal and goal plan. As its current Supervisor use goal plan revise with the current proposal revision, real nodes, dependencies, covered criteria and repeatable checks. If the proposal is missing, clarify the same original intent and propose meaningful criteria first. Read back the saved plan revision; delivery is not plan completion. This request does not authorize execution, delegation, continuous progress or human confirmation/acceptance.' }) + '\n\n' + guidance }
+        next: 'Make and save a dependency plan inside this existing Goal. Read the current Goal and goal plan. Use any saved workflow in this frozen request as a template for the actual scope and criteria. As its current Supervisor use goal plan revise with the current proposal revision, real nodes, dependencies, covered criteria and repeatable checks. If the proposal is missing, clarify the same original intent and propose meaningful criteria first. Read back the saved plan revision; delivery is not plan completion. This request does not authorize execution, delegation, continuous progress or human confirmation/acceptance.' }) + '\n\n' + guidance }
     }
     const frozen = JSON.parse(context) as { alignmentRevision: number | null; executions: unknown[]; alerts: unknown[]; reports: unknown[]; evidence: DemandEvidence[] }
     // The original Goal holds full tasks/results. Carry exact references and an explicit bounded excerpt.
@@ -156,7 +157,8 @@ export class GoalPatrolOwner {
     } catch (e) { this.issues.set(key(goalId, operationId), describe(e)) } }
     const frozen = purpose === 'plan' ? JSON.stringify({ goalId, expectedScope, title: goal.title, description: goal.description,
       requestedBy: authority.actor, requester: authority, requestOperationId: operationId, supervisorAgentSessionId: goal.supervisorSessionId,
-      alignment: goal.alignment ?? null, planRevision: goal.plan?.revision ?? 0 }) : JSON.stringify({ goalId, expectedScope, alignmentRevision: goal.alignment?.revision ?? null, executions: demandExecutionReferences(goal),
+      alignment: goal.alignment ?? null, planRevision: goal.plan?.revision ?? 0,
+      ...(this.workflowPlan ? { workflow: await this.workflowPlan().catch(error => ({ status: 'unknown', reason: describe(error) })) } : {}) }) : JSON.stringify({ goalId, expectedScope, alignmentRevision: goal.alignment?.revision ?? null, executions: demandExecutionReferences(goal),
       alerts: work?.responsibility?.executions.filter(row => row.alert).map(row => ({ execution: row.execution, phase: row.phase, alert: row.alert, basis: row.basis })) ?? [],
       reports: (goal.delegations ?? []).filter(d => d.report).map(d => ({ delegationOperationId: d.operationId, sourceMessageId: d.sourceMessageId, reportOperationId: d.report!.operationId, replyMessageId: d.report!.replyMessageId })),
       progressOperations: (goal.progressUpdates ?? []).map(update => update.operationId), groundingSubmissionId: goal.grounding?.submissionId ?? null,

@@ -52,6 +52,8 @@ export function GoalPlanDelivery({ demand, item, historical, author, context, dr
     if (recorded && request) onConfirmed(request)
   }, [recorded, request, onConfirmed])
   if (!delegation || !report) return null
+  const workflowReview = !historical && item.state === 'review' && delegation.collection?.workflowReview
+    ? demand.delegationObservations?.find(observation => observation.operationId === delegation.operationId)?.workflowReview : undefined
   const previous = historical ? [] : (demand.delegations ?? []).filter(attempt => attempt.planNodeId === item.node.id && attempt.operationId !== delegation.operationId)
   async function submit(verdict?: GoalPlanReviewInput['verdict']) {
     if (busy.current || current.pending) return
@@ -101,6 +103,8 @@ export function GoalPlanDelivery({ demand, item, historical, author, context, dr
     </div> : null}
     {acknowledged ? <p ref={receipt} tabIndex={-1} role="status" className="goal-delivery__receipt">Review saved · {recorded?.verdict === 'pass' ? 'Node passed' : 'Changes requested'}. Goal acceptance remains separate.</p> : null}
     {!historical && item.state === 'review' || request ? <div className="goal-delivery__review" aria-label="Independent node review">
+      {workflowReview ? <p className={workflowReview.state === 'confirmed' ? 'goals-caption' : 'goals-service'} role="status"
+        data-goal-workflow-review={workflowReview.state}>{workflowReview.reason}</p> : null}
       {!acknowledged && request ? <div className="goals-service" role="status">
         {current.pending ? 'Saving or reading the original review…' : current.issue ?? 'Original review request retained.'}
         <div className="goals-inline-actions"><Button type="button" disabled={current.pending} onClick={() => void readOriginal()}>Read original Goal</Button>

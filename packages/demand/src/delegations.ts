@@ -32,6 +32,8 @@ export type DemandDelegationIntent = {
   context?: DemandDelegationContextSource[]
   /** The Goal plan node this attempt works on; absent for work outside a plan. */
   planNodeId?: string
+  /** Original Goal continuation that requested this automatic attempt. */
+  workflowLoopId?: string
 }
 export type DemandDelegationReportInput = {
   operationId: string
@@ -62,6 +64,39 @@ export type DemandDelegationCollection = DemandDelegationCollectionInput & {
   collector: DemandDelegationCollector
   collectedAt: number
   groundingSubmissionId?: string
+  workflowReview?: GoalWorkflowReviewRequest
+}
+export type GoalWorkflowReviewer = { hostId: string; runtimeId: string; agentSessionId: string }
+export type GoalWorkflowReviewInput = { runId: string; inputEpoch?: string; agentMuxNote: string }
+export type GoalWorkflowReviewRequest = {
+  operationId: string
+  deliveryHash: string
+  reviewer: GoalWorkflowReviewer
+  input?: GoalWorkflowReviewInput & { attemptedAt?: number }
+}
+
+export function parseGoalWorkflowReviewer(value: unknown): GoalWorkflowReviewer {
+  const target = record(value, 'workflow reviewer', ['hostId', 'runtimeId', 'agentSessionId'])
+  return { hostId: identity(target.hostId, 'reviewer Host'), runtimeId: identity(target.runtimeId, 'reviewer Runtime'),
+    agentSessionId: identity(target.agentSessionId, 'reviewer Session') }
+}
+
+export function parseGoalWorkflowReviewInput(value: unknown): GoalWorkflowReviewInput {
+  const input = record(value, 'workflow review input', ['runId', 'inputEpoch', 'agentMuxNote'], ['inputEpoch'])
+  return { runId: identity(input.runId, 'reviewer Run'), ...optionalDemandInputEpoch(input.inputEpoch),
+    agentMuxNote: identity(input.agentMuxNote, 'workflow review system context') }
+}
+
+function parseGoalWorkflowReviewRequest(value: unknown): GoalWorkflowReviewRequest {
+  const request = record(value, 'workflow review request', ['operationId', 'deliveryHash', 'reviewer', 'input'], ['input'])
+  if (!isGoalDeliveryHash(request.deliveryHash)) throw new Error('Invalid workflow review delivery hash')
+  const saved = request.input === undefined ? undefined : record(request.input, 'saved workflow review input', ['runId', 'inputEpoch', 'agentMuxNote', 'attemptedAt'], ['inputEpoch', 'attemptedAt'])
+  const input = saved === undefined ? undefined : {
+    ...parseGoalWorkflowReviewInput({ runId: saved.runId, inputEpoch: saved.inputEpoch, agentMuxNote: saved.agentMuxNote }),
+    ...(saved.attemptedAt === undefined ? {} : { attemptedAt: positive(saved.attemptedAt, 'workflow review attemptedAt') })
+  }
+  return { operationId: identity(request.operationId, 'workflow review operation'), deliveryHash: request.deliveryHash,
+    reviewer: parseGoalWorkflowReviewer(request.reviewer), ...(input ? { input } : {}) }
 }
 /** One frozen responsibility notice reference; Core owns its original input. */
 export type DemandDelegationAttentionInput = {
@@ -150,9 +185,11 @@ function positive(value: unknown, label: string): number {
 export function delegationWorkerHostId(intent: Pick<DemandDelegationIntent, 'hostId' | 'workerHostId'>): string {
   return intent.workerHostId ?? intent.hostId
 }
-const intentKeys = ['operationId', 'sourceMessageId', 'hostId', 'workerHostId', 'ownerAgentSessionId', 'workerAgentSessionId', 'ownerRunId', 'workerRunId', 'threadId', 'text', 'requestText', 'alignmentRevision', 'criterionIds', 'planNodeId', 'context']
+const optionalIntentKeys = ['context', 'requestText', 'planNodeId', 'workerHostId', 'workflowLoopId']
+const intentKeys = ['operationId', 'sourceMessageId', 'hostId', 'ownerAgentSessionId', 'workerAgentSessionId', 'ownerRunId', 'workerRunId', 'threadId', 'text', 'alignmentRevision', 'criterionIds', ...optionalIntentKeys]
 export function parseDemandDelegationIntent(value: unknown): DemandDelegationIntent {
-  const data = record(value, 'delegation', intentKeys, ['context', 'requestText', 'planNodeId', 'workerHostId'])
+  const data = record(value, 'delegation', intentKeys, optionalIntentKeys)
+  if (data.workflowLoopId !== undefined && data.planNodeId === undefined) throw new Error('A workflow continuation needs an original plan node')
   if (typeof data.text !== 'string' || !data.text.trim() || data.text.includes('\0')) throw new Error('delegation.text must be a nonempty frozen body')
   if (data.requestText !== undefined && (typeof data.requestText !== 'string' || !data.requestText.trim() || data.requestText.includes('\0'))) throw new Error('delegation.requestText must be the nonempty original task request')
   if (!Array.isArray(data.criterionIds) || data.criterionIds.length === 0) throw new Error('delegation requires at least one success criterion')
@@ -177,7 +214,8 @@ export function parseDemandDelegationIntent(value: unknown): DemandDelegationInt
     workerRunId: identity(data.workerRunId, 'delegation.workerRunId'), threadId: identity(data.threadId, 'delegation.threadId'), text: data.text,
     ...(data.requestText === undefined ? {} : { requestText: data.requestText as string }),
     alignmentRevision: positive(data.alignmentRevision, 'delegation.alignmentRevision'), criterionIds, ...(context === undefined ? {} : { context }),
-    ...(data.planNodeId === undefined ? {} : { planNodeId: identity(data.planNodeId, 'delegation.planNodeId') }) }
+    ...(data.planNodeId === undefined ? {} : { planNodeId: identity(data.planNodeId, 'delegation.planNodeId') }),
+    ...(data.workflowLoopId === undefined ? {} : { workflowLoopId: identity(data.workflowLoopId, 'delegation.workflowLoopId') }) }
 }
 export function parseDemandDelegationReportInput(value: unknown): DemandDelegationReportInput {
   const data = record(value, 'delegation.report', ['operationId', 'replyMessageId', 'authorAgentSessionId', 'grounding'])
@@ -209,7 +247,7 @@ export function sameDemandDelegationIntent(left: DemandDelegationIntent, right: 
     .every(key => JSON.stringify(left[key as keyof DemandDelegationIntent]) === JSON.stringify(right[key as keyof DemandDelegationIntent]))
 }
 export function parseDemandDelegation(value: unknown): DemandDelegation {
-  const data = record(value, 'delegation', [...intentKeys, 'preparedAt', 'capturedCriteria', 'linkedAt', 'runtimeIdentity', 'report', 'collection', 'attention', 'predecessors', 'claimOperationId', 'dispatchProof'], ['context', 'requestText', 'planNodeId', 'workerHostId', 'linkedAt', 'runtimeIdentity', 'report', 'collection', 'attention', 'predecessors', 'claimOperationId', 'dispatchProof'])
+  const data = record(value, 'delegation', [...intentKeys, 'preparedAt', 'capturedCriteria', 'linkedAt', 'runtimeIdentity', 'report', 'collection', 'attention', 'predecessors', 'claimOperationId', 'dispatchProof'], [...optionalIntentKeys, 'linkedAt', 'runtimeIdentity', 'report', 'collection', 'attention', 'predecessors', 'claimOperationId', 'dispatchProof'])
   const intent = parseDemandDelegationIntent(Object.fromEntries(intentKeys.filter(key => data[key] !== undefined).map(key => [key, data[key]])))
   if (!Array.isArray(data.capturedCriteria)) throw new Error('delegation.capturedCriteria must be an array')
   const capturedCriteria = data.capturedCriteria.map(value => {
@@ -235,11 +273,16 @@ export function parseDemandDelegation(value: unknown): DemandDelegation {
   }
   let collection: DemandDelegationCollection | undefined
   if (data.collection !== undefined) {
-    const item = record(data.collection, 'delegation.collection', ['operationId', 'replyMessageId', 'collector', 'collectedAt', 'groundingSubmissionId'], ['groundingSubmissionId'])
+    const item = record(data.collection, 'delegation.collection', ['operationId', 'replyMessageId', 'collector', 'collectedAt', 'groundingSubmissionId', 'workflowReview'], ['groundingSubmissionId', 'workflowReview'])
+    const workflowReview = item.workflowReview === undefined ? undefined : parseGoalWorkflowReviewRequest(item.workflowReview)
     collection = { ...parseDemandDelegationCollectionInput({ operationId: item.operationId, replyMessageId: item.replyMessageId }),
       collector: parseDemandDelegationCollector(item.collector), collectedAt: positive(item.collectedAt, 'collection.collectedAt'),
-      ...(item.groundingSubmissionId === undefined ? {} : { groundingSubmissionId: identity(item.groundingSubmissionId, 'collection.groundingSubmissionId') }) }
+      ...(item.groundingSubmissionId === undefined ? {} : { groundingSubmissionId: identity(item.groundingSubmissionId, 'collection.groundingSubmissionId') }),
+      ...(workflowReview ? { workflowReview } : {}) }
     if (!report || collection.replyMessageId !== report.replyMessageId) throw new Error('delegation collection lacks its original report')
+    if (workflowReview && (workflowReview.deliveryHash !== report.delivery?.hash ||
+        workflowReview.reviewer.runtimeId === report.delivery.authorRuntimeId && workflowReview.reviewer.agentSessionId === intent.workerAgentSessionId))
+      throw new Error('Workflow review requires this exact delivery and an independent reviewer')
   }
   let attention: DemandDelegationAttention | undefined
   if (data.attention !== undefined) {

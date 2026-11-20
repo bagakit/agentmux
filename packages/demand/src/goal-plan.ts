@@ -331,6 +331,15 @@ export type GoalPlanNodeProjection = {
 }
 export type GoalPlanProjection = { revision: number; nodes: GoalPlanNodeProjection[]; done: number; total: number; next: string[] }
 
+/** Review only the current attempt and its exact content-signed delivery. */
+export function currentGoalWorkflowDelivery(goal: Pick<import('./demand-types.js').Demand, 'status' | 'plan' | 'alignment' | 'delegations'>, attempt: DemandDelegation): GoalPlanNodeInput | undefined {
+  if (!goal.plan || !goal.alignment || !attempt.planNodeId || !attempt.report?.delivery || goal.status === 'done' || goal.status === 'cancelled') return undefined
+  const current = projectGoalPlan(goal.plan, goal.delegations ?? [], goal.alignment.criteria, undefined, goal.alignment.revision)
+    .nodes.find(row => row.node.id === attempt.planNodeId)
+  return current?.state === 'review' && current.delegation?.operationId === attempt.operationId &&
+    current.delegation.report?.delivery?.hash === attempt.report.delivery.hash ? current.node : undefined
+}
+
 export function goalPlanClaimToken(scope: GoalPlanClaimScope, openingOperationId: string, basis: string): string {
   return deriveObjectId('agentmux.goal-plan-claim.v1', JSON.stringify([scope.runtimeId, scope.namespace, scope.goalId, openingOperationId, basis]))
 }

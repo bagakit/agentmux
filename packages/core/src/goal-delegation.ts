@@ -55,7 +55,8 @@ export type GoalDelegationParamsMap = {
   'goal.plan.revise': { goalId: string; revision: GoalPlanRevisionInput }
   'goal.plan.review': { goalId: string; review: GoalPlanReviewInput }
 }
-export type GoalDelegationObservation = { operationId: string; communication?: DispatchObservation & { hostId: string }; workerRun?: Pick<AgentMuxRun, 'runId' | 'state'>; unknown?: string; recoverableReport?: DemandDelegationReportInput; attention?: { state: 'prepared' | 'confirmed' | 'unknown'; reason: string } }
+type GoalReviewInputObservation = { state: 'prepared' | 'confirmed' | 'unknown'; reason: string }
+export type GoalDelegationObservation = { operationId: string; communication?: DispatchObservation & { hostId: string }; workerRun?: Pick<AgentMuxRun, 'runId' | 'state'>; unknown?: string; recoverableReport?: DemandDelegationReportInput; attention?: GoalReviewInputObservation; workflowReview?: GoalReviewInputObservation }
 /** `planState` is the Goal owner's derivation of `plan`; a reader keeps the owner's rules and checks only that it describes this plan and these delegations. */
 export type GoalDelegationResult = { goalId: string; goalUpdatedAt: number; delegations: DemandDelegation[]; address?: AmuxGoalAddress; ticketLinks?: string[]; plan?: GoalPlan; planState?: GoalPlanState; planStateIssue?: string; grounding?: DemandGrounding; diskDurability: 'confirmed'; observations?: GoalDelegationObservation[]; dispatches?: DemandDispatch[]; startObservations?: GoalStartObservation[]; progressUpdates?: DemandProgress[]; responsibility?: GoalResponsibilityObservation; patrols?: DemandPatrol[]; patrolObservations?: GoalPatrolObservation[]; goalState?: { status: import('@agentmux/demand').DemandStatus; supervisorSessionId: import('@agentmux/demand/relations').DemandAgentReference | null; alignment?: import('@agentmux/demand').DemandAlignment } }
 /** The worker submits a message at its own Core; it does not attest an update to the owner Goal. */
@@ -244,7 +245,7 @@ export function parseGoalDelegationResult(value: unknown, input: { goalId: strin
     if (!Array.isArray(p.observations)) throw new AgentMuxError('Delegation observations must refer to original intents.', 'CONTROL_PROTOCOL_ERROR')
     const seen = new Set<string>()
     return p.observations.map(value => {
-      const item = record(value, ['operationId', 'communication', 'workerRun', 'unknown', 'recoverableReport', 'attention'])
+      const item = record(value, ['operationId', 'communication', 'workerRun', 'unknown', 'recoverableReport', 'attention', 'workflowReview'])
       const operationId = id(item.operationId), delegation = delegations.find(d => d.operationId === operationId)
       if (!delegation || seen.has(operationId)) throw new AgentMuxError('An observation refers to another or duplicate delegation.', 'CONTROL_PROTOCOL_ERROR')
       seen.add(operationId)
@@ -270,7 +271,13 @@ export function parseGoalDelegationResult(value: unknown, input: { goalId: strin
           throw new AgentMuxError('Attention observation lacks its original reminder reference.', 'CONTROL_PROTOCOL_ERROR')
         return { state: a.state as 'prepared' | 'confirmed' | 'unknown', reason: id(a.reason) }
       })()
-      return { operationId, ...(attention ? { attention } : {}), ...(recoverableReport ? { recoverableReport } : {}), ...(communication ? { communication } : {}), ...(workerRun ? { workerRun } : {}),
+      const workflowReview = item.workflowReview === undefined ? undefined : (() => {
+        const review = record(item.workflowReview, ['state', 'reason'])
+        if (!delegation.collection?.workflowReview || !['prepared', 'confirmed', 'unknown'].includes(String(review.state)))
+          throw new AgentMuxError('Workflow review observation lacks its original collected delivery reference.', 'CONTROL_PROTOCOL_ERROR')
+        return { state: review.state as GoalReviewInputObservation['state'], reason: id(review.reason) }
+      })()
+      return { operationId, ...(attention ? { attention } : {}), ...(workflowReview ? { workflowReview } : {}), ...(recoverableReport ? { recoverableReport } : {}), ...(communication ? { communication } : {}), ...(workerRun ? { workerRun } : {}),
         ...(item.unknown === undefined ? {} : { unknown: id(item.unknown) }) }
     })
   })()

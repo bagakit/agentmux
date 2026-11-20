@@ -35,12 +35,12 @@ export type GoalFiniteInspectionPort = Pick<GoalFiniteInputPort, 'inspectOrigina
 export type GoalFiniteInspectionInput = { reference: DemandSpaceMemberReference; access: GoalInspectionAccess; originalRunId: string }
 export type GoalFiniteAccessInput = { reference: DemandSpaceMemberReference; access: GoalQualifiedAccess; originalRunId?: string }
 
-export type GoalAgentControl = { kind: 'agent'; hostId: string; agentSessionId: string; run: AgentMuxRunRef }
+export type GoalAgentControl = { kind: 'agent'; hostId: string; agentSessionId: string; run: AgentMuxRunRef; expectedRuntimeId?: string }
 export type GoalDispatchReference = { goalId: string; operationId: string; inputEpoch?: string }
 export type GoalExecutionClient = AgentMuxClient | AgentMuxHostedClient
 type Automation = { completionId?: string; futureIntent?: { intentId: string; occurrenceAt: number };
   inputByte?: number; isCurrent(): boolean; onDispatch?(): void; signal: AbortSignal }
-type Attention = { inputEpoch?: string; hostId: string; supervisorAgentSessionId: string; supervisorRunId: string; operationId: string; producer?: 'message' }
+type Attention = { inputEpoch?: string; hostId: string; supervisorAgentSessionId: string; supervisorRunId: string; operationId: string; producer?: 'message'; expectedRuntimeId?: string }
 
 /** The existing Goal mechanisms borrow typed Core operations, never an editor controller. */
 export interface GoalRuntimePort {
@@ -112,13 +112,24 @@ export function createGoalRuntime(options: {
       throw new AgentMuxError('The original Goal execution owner changed during observation. Retain its exact Session and operation.', 'STALE_AGENT_SESSION')
     return { ...value, session: { ...value.session, hostId } }
   }
-  const inspect = async (input: Attention) => await exact(input.hostId).inspectAgentPromptSubmission(input.producer === 'message'
-    ? { kind: 'message', agentSessionId: input.supervisorAgentSessionId, expectedRun: { runId: input.supervisorRunId }, messageId: input.operationId }
-    : { kind: 'prompt', agentSessionId: input.supervisorAgentSessionId, expectedRun: { runId: input.supervisorRunId }, submissionId: input.operationId })
+  const runtimeIdentity = async (client: GoalExecutionClient) =>
+    'runtimeOwnerIdentity' in client ? client.runtimeOwnerIdentity() : await client.agentCreationAuthority()
+  const assertRuntime = async (client: GoalExecutionClient, hostId: string, expectedRuntimeId: string) => {
+    const identity = await runtimeIdentity(client)
+    if (identity?.runtimeId !== expectedRuntimeId || exact(hostId) !== client)
+      throw new AgentMuxError('This workflow review belongs to its original reviewer Runtime. Reconnect the original Host.', 'STALE_AGENT_SESSION')
+  }
+  const inspect = async (input: Attention) => {
+    const client = exact(input.hostId)
+    if (input.expectedRuntimeId) await assertRuntime(client, input.hostId, input.expectedRuntimeId)
+    return client.inspectAgentPromptSubmission(input.producer === 'message'
+      ? { kind: 'message', agentSessionId: input.supervisorAgentSessionId, expectedRun: { runId: input.supervisorRunId }, messageId: input.operationId }
+      : { kind: 'prompt', agentSessionId: input.supervisorAgentSessionId, expectedRun: { runId: input.supervisorRunId }, submissionId: input.operationId })
+  }
   const runtime: GoalRuntimePort = {
     goalHostRuntimeId: async hostId => {
       const client = exact(hostId)
-      const identity = 'runtimeOwnerIdentity' in client ? client.runtimeOwnerIdentity() : await client.agentCreationAuthority()
+      const identity = await runtimeIdentity(client)
       if (!identity?.runtimeId || exact(hostId) !== client)
         throw new AgentMuxError('The original Ticket execution Runtime is unconfirmed. Keep the original Goal and request.', 'CONTROL_UNAVAILABLE')
       return identity.runtimeId
@@ -203,6 +214,7 @@ export function createGoalRuntime(options: {
         automation?.signal.throwIfAborted()
         const signal = automation?.signal && authority?.signal ? AbortSignal.any([automation.signal, authority.signal]) : automation?.signal ?? authority?.signal
         const client = exact(control.hostId)
+        if (control.expectedRuntimeId) await assertRuntime(client, control.hostId, control.expectedRuntimeId)
         const originalAuthority = authority && control.hostId === 'local' ? { assertCurrent: async () => { await authority.assertCurrent?.(); await runtime.authorizeFutureIntent({ ...control, providerId: client.agentSession(control.agentSessionId).providerId, workspacePath: client.agentSession(control.agentSessionId).workspacePath }, authority) } } : undefined
         const submit = (input: import('@agentmux/core').AgentMuxAgentPromptInput) => {
           const dispatch = () => {
@@ -233,9 +245,11 @@ export function createGoalRuntime(options: {
     },
     sessionTimeline: async target => await exact(target.hostId).sessionTimeline(target.agentSessionId),
     saveGoalAttention: async input => {
+      const client = exact(input.hostId)
+      if (input.expectedRuntimeId) await assertRuntime(client, input.hostId, input.expectedRuntimeId)
       const observed = await status(input.hostId, input.supervisorAgentSessionId)
-      if (observed.session.run.runId !== input.supervisorRunId) throw new AgentMuxError('The original Goal reminder Run changed; inspect its saved intent.', 'STALE_AGENT_SESSION')
-      await exact(input.hostId).saveAgentFuturePromptIntent({ agentSessionId: input.supervisorAgentSessionId, intentId: input.intentId,
+      if (observed.session.run.runId !== input.supervisorRunId || exact(input.hostId) !== client) throw new AgentMuxError('The original Goal reminder Run changed; inspect its saved intent.', 'STALE_AGENT_SESSION')
+      await client.saveAgentFuturePromptIntent({ agentSessionId: input.supervisorAgentSessionId, intentId: input.intentId,
         operationId: input.operationId, ...optionalInputEpoch(input.inputEpoch), prompt: '', agentMuxNote: input.agentMuxNote, active: true, expectedRun: { runId: input.supervisorRunId } })
     },
     disableGoalAttention: async input => {

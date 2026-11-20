@@ -5,6 +5,7 @@ import { demandPatrolScope, completedGoalPlanRequest, currentGoalConfirmationNot
 import { parseDemandDispatch, parseDemandDispatchIntent, parseDemandDispatchRequest, parseDemandDispatches, qualifiedDemandDispatch, runBoundDemandDispatch, sameDemandDispatchIntent, type DemandDispatch, type DemandDispatchIntent, type DemandDispatchRequest, type DemandDispatchRejection } from './dispatch.js'
 import { parseDemandDelegationRuntimeIdentity, type DemandDelegationRuntimeIdentity, parseDemandDelegationIntent, parseDemandDelegations, parseDemandDelegationReportInput, parseDemandDelegationCollectionInput, parseDemandDelegationCollector, sameDemandDelegationIntent, validateDemandDelegationReport,
   parseDemandDelegationAttentionInput, sameDemandDelegationAttention, delegationWorkerHostId, sameGoalPlanPredecessors,
+  parseGoalWorkflowReviewer, parseGoalWorkflowReviewInput, type GoalWorkflowReviewer, type GoalWorkflowReviewInput,
   type GoalDeliveryScope, type DemandDelegation, type DemandDelegationIntent, type DemandDelegationReportInput, type DemandDelegationCollectionInput, type DemandDelegationCollector, type DemandDelegationAttentionInput } from './delegations.js'
 import { optionalDemandInputEpoch, parseDemandParticipations, parseDemandCreationOrigin, parseDemandParticipationSource, type DemandParticipationSource } from './collaboration.js'
 import { appendDemandContentReferences, parseDemandContentReferences } from './content-references.js'
@@ -41,7 +42,7 @@ import {
 } from './demand-types.js'
 import { DemandStoreError } from './errors.js'
 import { GoalActiveIndex, type GoalActivePlan } from './goal-active-index.js'
-import { assertGoalPlanKeepsRecordedNodes, goalPlanChangedNodes, goalPlanDelegationIssue, goalTicketTask, matchesGoalPlanReviewInput, parseGoalPlan, parseGoalPlanReviewInput, parseGoalPlanRevisionInput, projectGoalPlan,
+import { assertGoalPlanKeepsRecordedNodes, currentGoalWorkflowDelivery, goalPlanChangedNodes, goalPlanDelegationIssue, goalTicketTask, matchesGoalPlanReviewInput, parseGoalPlan, parseGoalPlanReviewInput, parseGoalPlanRevisionInput, projectGoalPlan,
   type GoalPlanAssignmentChange, type GoalPlanRevisionRecord, type GoalPlanOwner, type GoalPlanReviewer, type GoalPlanReviewInput, type GoalPlanRevisionInput, type GoalPlanProposalReceipt } from './goal-plan.js'
 import { assertIssuedGoalTicket, freezeGoalTicketDependencies, issueGoalTickets } from './goal-ticket-issuance.js'
 import type { GoalTicketProof, GoalTicketSigner } from './goal-ticket-proof.js'
@@ -866,7 +867,8 @@ export class DemandStore {
   }
 
   /** The host admits the caller and original Session/Run identities before preparing. */
-  async prepareDelegation(id: string, input: DemandDelegationIntent, actorSessionId: string, participants?: { ownerRuntimeId: string; workerRuntimeId: string }): Promise<DemandReceipt> {
+  async prepareDelegation(id: string, input: DemandDelegationIntent, actorSessionId: string, participants?: { ownerRuntimeId: string; workerRuntimeId: string },
+    workflowBudget?: { maxConcurrent: number; maxAttempts: number }): Promise<DemandReceipt> {
     const intent = parseDemandDelegationIntent(input)
     const signing = intent.planNodeId ? await this.readTicketSigner() : undefined
     return this.mutate('delegation.prepare', snapshot => {
@@ -889,9 +891,23 @@ export class DemandStore {
       let dispatchProof: GoalTicketProof | undefined
       if (intent.planNodeId !== undefined) {
         if (!demand.plan) this.rejectDelegation('This Goal has no plan; delegate without a plan node or revise the plan first.')
-        const target = projectGoalPlan(demand.plan, demand.delegations ?? [], alignment.criteria, undefined, alignment.revision).nodes.find(item => item.node.id === intent.planNodeId)
+        const projection = projectGoalPlan(demand.plan, demand.delegations ?? [], alignment.criteria, undefined, alignment.revision)
+        const target = projection.nodes.find(item => item.node.id === intent.planNodeId)
         const issue = goalPlanDelegationIssue(target, intent.planNodeId, { hostId: delegationWorkerHostId(intent), agentSessionId: intent.workerAgentSessionId })
         if (issue) this.rejectDelegation(issue)
+        if (intent.workflowLoopId) {
+          if (!workflowBudget) this.rejectDelegation('The original Goal workflow budget is unavailable for this new attempt. Inspect the Goal continuation before dispatch.')
+          if (alignment.confirmedAt === null || demand.status === 'blocked' || demand.status === 'done' || demand.status === 'cancelled')
+            this.rejectDelegation('This Goal no longer qualifies for a new automatic Ticket dispatch. Read its current status and confirmed scope.')
+          const { maxConcurrent, maxAttempts } = workflowBudget
+          const attempts = maxAttempts > 0 ? (demand.delegations ?? []).filter(attempt => attempt.workflowLoopId === intent.workflowLoopId).length : 0
+          if (maxAttempts > 0 && attempts >= maxAttempts)
+            this.rejectDelegation(`The original Goal continuation has used ${attempts} of ${maxAttempts} workflow attempts. Read the plan for delivered and remaining Tickets. Increase the saved Workflows budget or manage the original continuation before another automatic dispatch.`)
+          const inFlight = projection.nodes.filter(({ delegation, state }) => delegation && delegation.workflowLoopId === intent.workflowLoopId &&
+            !delegation.report && (state === 'working' || state === 'unknown')).length
+          if (maxConcurrent > 0 && inFlight >= maxConcurrent)
+            this.rejectDelegation(`The original Goal continuation has ${inFlight} of ${maxConcurrent} workflow attempts in flight. Read the plan and wait for the current reports or reconcile their original operations before another automatic dispatch.`)
+        }
         const { node } = target!
         if (target!.state === 'ready') {
           for (let index = demand.plan.history.length - 1; index >= 0; index--) {
@@ -1226,8 +1242,9 @@ export class DemandStore {
   }
 
   /** Explicit collection proposes results; it never supplies human acceptance. */
-  async collectDelegationReport(id: string, delegationOperationId: string, input: DemandDelegationCollectionInput, admittedCollector: DemandDelegationCollector): Promise<DemandReceipt> {
+  async collectDelegationReport(id: string, delegationOperationId: string, input: DemandDelegationCollectionInput, admittedCollector: DemandDelegationCollector, workflowReviewer?: GoalWorkflowReviewer): Promise<DemandReceipt> {
     const request = parseDemandDelegationCollectionInput(input), collector = parseDemandDelegationCollector(admittedCollector)
+    const reviewer = workflowReviewer && parseGoalWorkflowReviewer(workflowReviewer)
     return this.mutate('delegation.collect', snapshot => {
       const demand = findDemand(snapshot, id, this.storePath), entry = this.findDelegation(demand, delegationOperationId)
       if (collector.kind === 'agent' && collector.id !== entry.ownerAgentSessionId && collector.id !== demand.supervisorSessionId)
@@ -1242,6 +1259,12 @@ export class DemandStore {
         return { unchanged: demand }
       }
       entry.collection = { ...request, collector, collectedAt: Date.now() }
+      const delivery = entry.report.delivery
+      if (reviewer && delivery && currentGoalWorkflowDelivery(demand, entry) &&
+          (reviewer.runtimeId !== delivery.authorRuntimeId || reviewer.agentSessionId !== entry.workerAgentSessionId)) {
+        const operationId = 'goal-workflow-review-' + createHash('sha256').update(JSON.stringify([id, entry.operationId, delivery.hash])).digest('hex')
+        entry.collection.workflowReview = { operationId, deliveryHash: delivery.hash, reviewer }
+      }
       const alignment = demand.alignment
       if (alignment?.revision === entry.alignmentRevision && !(demand.grounding?.alignmentRevision === alignment.revision && demand.grounding.acceptedAt !== null)) {
         const reports = (demand.delegations ?? []).filter(delegation => delegation.collection && delegation.report && delegation.alignmentRevision === alignment.revision)
@@ -1262,6 +1285,32 @@ export class DemandStore {
       validateNewDemand(demand, this.storePath)
       return demand
     }, undefined, request.operationId)
+  }
+
+  /** Freeze the exact Core input and give just one caller authority to submit it. */
+  async saveWorkflowReviewInput(id: string, delegationOperationId: string, operationId: string,
+    action: { kind: 'prepare'; input: GoalWorkflowReviewInput } | { kind: 'claim' }): Promise<DemandReceipt> {
+    const input = action.kind === 'prepare' ? parseGoalWorkflowReviewInput(action.input) : undefined
+    return this.mutate(input ? 'workflow-review.prepare' : 'workflow-review.claim', snapshot => {
+      const demand = findDemand(snapshot, id, this.storePath), entry = this.findDelegation(demand, delegationOperationId)
+      const request = entry.collection?.workflowReview
+      if (!request || request.operationId !== operationId || !currentGoalWorkflowDelivery(demand, entry))
+        this.rejectDelegation('This workflow review is no longer the current Ticket delivery. Inspect the original attempt.')
+      if (input) {
+        if (request.input) {
+          const { attemptedAt: _, ...original } = request.input
+          if (!isDeepStrictEqual(original, input)) this.rejectDelegation('The original reviewer Run and input are frozen. Inspect the original review request.')
+          return { unchanged: demand }
+        }
+        request.input = input
+      } else {
+        if (!request.input) this.rejectDelegation('The original workflow review input is not prepared.')
+        if (request.input.attemptedAt !== undefined) return { unchanged: demand }
+        request.input.attemptedAt = Date.now()
+      }
+      demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
+      return demand
+    }, undefined, operationId)
   }
 
   /** Trusted Main captures one exact existing Supervisor input, never a new queue. */

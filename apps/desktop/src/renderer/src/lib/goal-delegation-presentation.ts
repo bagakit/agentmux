@@ -8,6 +8,7 @@ export type GoalDelegationRow = {
   replyMessageId?: string
   report?: import('@agentmux/demand').DemandDelegationReportInput
   attention?: NonNullable<DemandRecord['delegationObservations']>[number]['attention']
+  workflowReview?: NonNullable<DemandRecord['delegationObservations']>[number]['workflowReview']
   previousAttempt?: true
   closedTicket?: 'done' | 'cancelled'
 }
@@ -30,10 +31,14 @@ export function goalDelegationRows(goal: Pick<DemandRecord, 'delegations' | 'del
     const original = { delegation, ...(issue ? { issue } : {}), ...(report ? { report } : {}),
       ...(planNode && planNode.attempt?.delegationOperationId !== delegation.operationId ? { previousAttempt: true as const } : {}),
       ...(planNode?.state === 'done' || planNode?.state === 'cancelled' ? { closedTicket: planNode.state } : {}),
-      ...(observation?.attention ? { attention: observation.attention } : {}) }
+      ...(observation?.attention ? { attention: observation.attention } : {}),
+      ...(observation?.workflowReview ? { workflowReview: observation.workflowReview } : {}) }
     if (delegation.collection) {
       const accepted = goal.grounding?.acceptedAt != null && goal.grounding.submissionId === delegation.collection.groundingSubmissionId
-      return { ...original, state: accepted ? 'accepted' : 'collected', next: accepted ? 'Result accepted' : 'Collected · Awaiting your review',
+      const review = observation?.workflowReview?.state
+      const next = review === 'confirmed' ? 'Collected · Awaiting independent verdict'
+        : review === 'prepared' ? 'Collected · Reviewer input pending' : review === 'unknown' ? 'Collected · Reviewer input unconfirmed' : 'Collected · Awaiting your review'
+      return { ...original, state: accepted ? 'accepted' : 'collected', next: accepted ? 'Result accepted' : next,
         replyMessageId: delegation.collection.replyMessageId }
     }
     if (report) return { ...original, state: 'report', next: 'Report ready to collect', replyMessageId: report.replyMessageId }

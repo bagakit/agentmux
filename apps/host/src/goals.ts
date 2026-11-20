@@ -7,6 +7,7 @@ import { deriveBoundGoalId } from '@agentmux/core/sharing'
 import { assertNewGoalSourceRelations, goalSourceRpc } from './goal-source-relations.js'
 import { createHostGoalDiscussions } from './goal-discussions.js'
 import { resolveGoalsPreferences, type GoalsPreferences } from './goals-preferences.js'
+import { readGoalWorkflowPlan, readGoalWorkflowPreferences } from './goal-workflow-settings.js'
 import { goalPmoOperation } from './goal-pmo-origin.js'
 import { dirname, join } from 'node:path'
 import { AgentMuxError, agentPromptCondition, type AgentMuxHeadlessRuntime, type AgentMuxRpcCallContext,
@@ -16,6 +17,7 @@ import type { AgentMuxNameContext } from '@agentmux/core/spatial-graph'
 import { isDemandStoreError, openDemandStore, runBoundDemandDispatch, type Demand, type DemandParticipationSource, type DemandStore, type DemandReceipt } from '@agentmux/demand'
 import type { GoalDelegationCorePort, GoalDelegationCoreMethod } from './goal-delegation-owner.js'
 import { GoalDelegationOwner } from './goal-delegation-owner.js'
+import { GoalWorkflowReviewOwner } from './goal-workflow-review.js'
 import { GoalDelegationAttentionOwner } from './goal-delegation-attention.js'
 import { GoalStartResponsibilityOwner } from './goal-start-responsibility.js'
 import { GoalResponsibilityOwner } from './goal-responsibility-owner.js'
@@ -116,6 +118,10 @@ export function createHostGoals(options: {
     (...args) => deliverContinuousProgress(runtime, ...args), undefined,
     (loop, tickId, now, signal) => runtime.observeContinuousProgress(loop, tickId, now, signal), runtime,
     { read: id => demands.get(id), subscribe: listener => demands.subscribe((snapshot, _ids, changes) => listener(changes, snapshot.revision, snapshot.demands)),
+      workflowGuidance: async loopId => {
+        const { maxConcurrent, maxAttempts } = await readGoalWorkflowPreferences(options.configurationPath)
+        return maxConcurrent || maxAttempts ? `For each new automatic Ticket dispatch in this continuation, set intent.workflowLoopId to ${JSON.stringify(loopId)}. The original owner enforces the Workflows budget (parallel: ${maxConcurrent || 'unlimited'}, new attempts: ${maxAttempts || 'unlimited'}). If it is exhausted, report the original completed and remaining Tickets without changing the dispatch origin or resending the task.` : ''
+      },
       inspectInitial: loop => runtime.inspectContinuousProgressInitial(loop) })
   const dispatch = new GoalDispatchInputOwner(demands, runtime)
   const automaticInput = createGoalAutomationPause({ ownerInstanceId: () => options.runtime().ownerIdentity().ownerInstanceId,
@@ -129,20 +135,31 @@ export function createHostGoals(options: {
   const core: GoalDelegationCorePort = { call: options.coreCall, observeRun: (hostId, runId) => runtime.observeOriginalRun(hostId, runId),
     readDispatch: (hostId, sourceMessageId) => options.coreCall(hostId, 'message.dispatch.read', { sourceMessageId }, { principal: person }),
     syncDispatch: (ownerHostId, sourceMessageId, workerHostId) => options.coreCall(ownerHostId, 'message.dispatch.sync', { sourceMessageId, hostId: workerHostId }, { principal: person }) }
+  const workflowReview = new GoalWorkflowReviewOwner(demands, runtime, options.configurationPath, planOwner, changed)
   const delegations = new GoalDelegationOwner(demands, runtime, options.files, core,
     (goalId, saved) => attention.observe(goalId, saved), (goal, saved) => starts.observe(goal, saved),
     { observe: (goal, work) => responsibility.observe(goal, work), progress: (id, input, context, authority) => responsibility.progress(id, input, context, authority) },
     { request: (id, op, context, authority) => patrol.request(id, op, context, authority),
       continue: (id, patrolId, op, run, context, authority) => patrol.continue(id, patrolId, op, run, context, authority),
-      report: (id, patrolId, report, authority) => patrol.report(id, patrolId, report, authority), observe: goal => patrol.observe(goal) }, planOwner)
+      report: (id, patrolId, report, authority) => patrol.report(id, patrolId, report, authority), observe: goal => patrol.observe(goal) }, planOwner, workflowReview)
+  delegations.workflowBudget = async (goalId, intent) => {
+    const loop = (await progress.listGoals(goalId)).find(item => item.loopId === intent.workflowLoopId)
+    if (loop?.status !== 'active' || loop.hostId !== intent.hostId || loop.agentSessionId !== intent.ownerAgentSessionId ||
+        loop.initialDelivery?.condition.expectedRun.runId !== intent.ownerRunId ||
+        loop.taskSource?.kind !== 'goal' || loop.taskSource.alignmentRevision !== intent.alignmentRevision)
+      throw new AgentMuxError('This workflow attempt does not name the active original Goal continuation. Inspect that Goal and its original input; manual work remains available.', 'CONTROL_REQUEST_CONFLICT')
+    return readGoalWorkflowPreferences(options.configurationPath).catch(() => {
+      throw new AgentMuxError('The saved Workflow budget is unconfirmed. Inspect Goals → Workflows before a new automatic dispatch; original work remains available.', 'CONTROL_UNAVAILABLE')
+    })
+  }
   const readDelegations = (goalId: string, context: AgentMuxRpcCallContext) => delegations.call('goal.delegations', { goalId }, context, { actor: person })
   attention = new GoalDelegationAttentionOwner(demands, runtime, delegations, changed)
   starts = new GoalStartResponsibilityOwner(demands, runtime, changed)
   responsibility = new GoalResponsibilityOwner(demands, runtime, readDelegations, changed)
-  patrol = new GoalPatrolOwner(demands, runtime, readDelegations, changed)
+  patrol = new GoalPatrolOwner(demands, runtime, readDelegations, changed, () => readGoalWorkflowPlan(options.configurationPath))
   let starting: Promise<void> | undefined
   const start = () => starting ??= (async () => {
-    const outcomes = await Promise.allSettled([progress.start(), attention.start(), starts.start(), responsibility.start(), patrol.start()])
+    const outcomes = await Promise.allSettled([progress.start(), attention.start(), starts.start(), responsibility.start(), patrol.start(), workflowReview.start()])
     const failures = outcomes.filter(result => result.status === 'rejected').map(result => result.reason)
     if (failures.length) throw new AggregateError(failures, 'Some original Goal observers could not start; healthy domains and Agents remain available.')
   })()
@@ -412,5 +429,5 @@ export function createHostGoals(options: {
       return hostNameHistory(options.spatial, demands, query)
     }, demands, runtime, start,
     list: async () => projectGoals(await demands.list()),
-    async dispose() { releaseStoreChanges(); changeReaders.clear(); attention.dispose(); starts.dispose(); responsibility.dispose(); patrol.dispose(); await progress.stop() } }
+    async dispose() { releaseStoreChanges(); changeReaders.clear(); attention.dispose(); starts.dispose(); responsibility.dispose(); patrol.dispose(); workflowReview.dispose(); await progress.stop() } }
 }
