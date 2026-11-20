@@ -57,8 +57,12 @@ unconfirmed launch or existing input retains its original target and operation.
 ## Work in a built-in Group
 
 Use `amux space mote group --help` to find commands. Read the leaf help for
-its JSON fields and target discovery. Inspect your Group from its authenticated
-Thread with `inspect`; `limit:1` reads current settings and one public message.
+its JSON fields and target discovery. From your current Mote Main, include
+`sourceMote` with your exact Mote target in `create`, `list`, `inspect` and
+`send`. Creating a Group adds your Mote as an administrator. Use the same
+creation operation and request to read back the original Group. Send as your
+Mote with the exact Group and selected recipient IDs. A Group Thread uses
+`inspect` with the original groupId; `limit:1` reads settings and one message.
 
 Ordinary Agent output stays in your Thread. To publish in the Group, use the
 reply command attached to the addressed input. Share only material for the Group.
