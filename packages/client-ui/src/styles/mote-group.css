@@ -89,16 +89,95 @@
 .mote-group__send > button { min-height: 35px; flex: none; }
 .mote-group__quote-preview { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .mote-group__quote-preview > span { margin: 0; }
-.mote-group__create { display: grid; align-content: start; gap: 16px; overflow: auto; padding: 7px var(--group-inset) 20px; }
+.mote-group--create {
+  container: mote-create / inline-size;
+  align-items: center;
+}
+.mote-group--create > :is(header, form) {
+  box-sizing: border-box;
+  inline-size: min(100%, 740px);
+}
+.mote-group--create > header { padding-block: 19px 14px; }
+.mote-group--create > header h2 { font-size: 20px; }
+.mote-group__create { display: flex; flex: 1; flex-direction: column; min-block-size: 0; }
+.mote-group__create-body {
+  display: grid;
+  flex: 1;
+  align-content: start;
+  align-items: start;
+  gap: 14px;
+  min-block-size: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 2px var(--group-inset) 16px;
+}
 .mote-group__field { display: grid; gap: 7px; font-weight: 600; }
+.mote-group__field input { box-sizing: border-box; }
 .mote-group__create fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
-.mote-group__create legend { padding: 0; margin-bottom: 7px; font-weight: 600; }
-.mote-group__candidate-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(145px, 100%), 1fr)); gap: 6px; }
-.mote-group__candidate { display: flex; align-items: center; gap: 7px; padding: 7px; border-radius: 10px; background: var(--surface-1); cursor: pointer; }
+.mote-group__create legend { padding: 0; margin-bottom: 8px; font-weight: 600; }
+.mote-group__people { display: grid; gap: 8px; }
+.mote-group__candidate-list { display: grid; gap: 2px; }
+.mote-group__candidate {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-block-size: 42px;
+  padding: 4px 8px;
+  border-radius: 9px;
+  cursor: pointer;
+}
+.mote-group__candidate:hover { background: var(--surface-1); }
+.mote-group__candidate:focus-within { outline: 2px solid var(--accent, var(--blue)); outline-offset: -2px; }
 .mote-group__candidate:has(:checked) { background: var(--group-wash); }
-.mote-group__candidate strong { min-width: 0; overflow-wrap: anywhere; }
+.mote-group__candidate:has(:disabled) { cursor: default; }
+.mote-group__candidate strong { min-width: 0; font-weight: 550; overflow-wrap: anywhere; }
 .mote-group__candidate input { margin-inline-start: auto; accent-color: var(--accent, var(--blue)); }
-.mote-group__create-actions { justify-content: space-between; }
+.mote-group__people .mote-group__avatar { inline-size: 30px; block-size: 30px; border-radius: 9px; background: var(--surface-2); }
+.mote-group__picker-status { margin: 4px 0; padding: 10px 8px; color: var(--text-2); }
+.mote-group__create-draft {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  min-inline-size: 0;
+  padding: 14px;
+  border-radius: 14px;
+  background: var(--surface-1);
+}
+.mote-group__create-preview { display: flex; align-items: center; gap: 10px; min-inline-size: 0; }
+.mote-group__create-preview > div { display: grid; gap: 4px; min-inline-size: 0; overflow-wrap: anywhere; }
+.mote-group__create-preview strong { color: var(--text); font-size: 15px; font-weight: 650; }
+.mote-group__selected { display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; margin: 0; padding: 0; list-style: none; }
+.mote-group__selected li { display: flex; align-items: center; gap: 5px; min-inline-size: 0; max-inline-size: 100%; padding: 2px 3px 2px 5px; border-radius: 8px; background: var(--surface-2); }
+.mote-group__selected li > span:not(.mote-group__avatar) { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mote-group__selected .mote-group__avatar { inline-size: 21px; block-size: 21px; border-radius: 6px; background: var(--surface-3); }
+.mote-group__selected .icon-button { flex: none; inline-size: 26px; block-size: 26px; }
+.mote-group__create > .ui-notice { margin: 0 var(--group-inset) 8px; }
+.mote-group__create-actions { justify-content: space-between; padding: 10px var(--group-inset) 14px; border-top: 1px solid var(--line-soft); background: var(--surface-0); }
+.mote-group__create-actions .primary-button { min-inline-size: 100px; }
+@container mote-create (min-width: 460px) {
+  .mote-group__create-body {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+    grid-template-rows: minmax(0, 1fr);
+    gap: 18px;
+    overflow: hidden;
+  }
+  .mote-group__people { display: flex; flex-direction: column; max-block-size: 100%; }
+  .mote-group__candidate-list { min-block-size: 0; overflow: auto; scrollbar-width: thin; }
+  .mote-group__create-draft { max-block-size: 100%; box-sizing: border-box; overflow-y: auto; scrollbar-width: thin; }
+  .mote-group__create-preview {
+    position: sticky;
+    z-index: 1;
+    inset-block-start: -14px;
+    margin-block-start: -14px;
+    padding-block: 14px 8px;
+    background: var(--surface-1);
+  }
+  .mote-group--create .mote-group-settings__faces > .mote-group-avatar { display: none; }
+}
+@container mote-create (max-width: 400px) {
+  .mote-group__create-actions .primary-button { min-inline-size: 112px; }
+  .mote-group__selected .icon-button { inline-size: 34px; block-size: 34px; }
+}
 @media (pointer: coarse) {
   .mote-group__views button, .mote-group__recipients button, .mote-group__header-actions button { min-height: 40px; }
   .mote-group__quote-action { min-height: 28px; }

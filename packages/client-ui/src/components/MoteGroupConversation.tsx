@@ -4,6 +4,8 @@ import { MOTE_GROUP_MAX_BODY_LENGTH, type MoteGroupMember, type MoteGroupMessage
 import type { MotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { Button } from './Button.js'
+import { IconButton } from './IconButton.js'
+import { SearchInput } from '../input/SearchInput.js'
 import { Notice } from './Notice.js'
 import { MoteGroupAvatar, MoteGroupDetails, MoteGroupSettingsFields, type MoteGroupSettingsValue } from './MoteGroupSettings.js'
 export { MoteGroupAvatar } from './MoteGroupSettings.js'
@@ -105,7 +107,10 @@ export function MoteGroupConversation(props: Props) {
 function GroupCreate({ call, candidates, topicCandidates = [], renderMoteAvatar, onOpen, onChanged, onClose, creation }: Props) {
   const [saved] = useState(() => creation?.read() ?? null)
   const [name, setName] = useState(saved?.name ?? '')
-  const [selected, setSelected] = useState<string[]>(saved?.members.map(member => member.spaceId) ?? [])
+  const [selected, setSelected] = useState<MoteGroupCandidate[]>(() => (saved?.members ?? []).map(target => ({
+    target, name: candidates.find(candidate => candidate.target.spaceId === target.spaceId)?.name ?? '待识别的 Mote'
+  })))
+  const [query, setQuery] = useState('')
   const [setup, setSetup] = useState<MoteGroupSettingsValue>(() => ({
     avatarMoteIds: saved?.avatarMoteIds ?? [], announcement: saved?.announcement ?? '', topic: saved?.topic ?? null
   }))
@@ -115,13 +120,25 @@ function GroupCreate({ call, candidates, topicCandidates = [], renderMoteAvatar,
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const submitting = useRef(false)
   const [pending, setPending] = useState(false)
+  const locked = attempted.current !== null
+  const needle = query.trim().toLocaleLowerCase()
+  const matching = candidates.filter(candidate => candidate.name.toLocaleLowerCase().includes(needle))
+  const members = selected.map(({ target, name }) => ({
+    moteId: target.spaceId,
+    name: candidates.find(candidate => candidate.target.spaceId === target.spaceId)?.name ?? name
+  }))
+  const groupName = name.trim() || '未命名群聊'
+  function remove(id: string) {
+    setSelected(current => current.filter(member => member.target.spaceId !== id))
+    setSetup(current => ({ ...current, avatarMoteIds: current.avatarMoteIds.filter(member => member !== id) }))
+  }
   async function create(event: FormEvent) {
     event.preventDefault()
     if (submitting.current) return
-    const selectedAvatars = setup.avatarMoteIds.filter(id => selected.includes(id))
+    const selectedAvatars = setup.avatarMoteIds.filter(id => members.some(member => member.moteId === id))
     const input = attempted.current ?? {
       operationId: mintObjectId(), name: name.trim(),
-      members: candidates.filter(candidate => selected.includes(candidate.target.spaceId)).map(member => member.target),
+      members: selected.map(member => member.target),
       ...(selectedAvatars.length ? { avatarMoteIds: selectedAvatars } : {}),
       ...(setup.announcement.trim() ? { announcement: setup.announcement.trim() } : {}),
       ...(setup.topic ? { topic: setup.topic } : {})
@@ -139,32 +156,49 @@ function GroupCreate({ call, candidates, topicCandidates = [], renderMoteAvatar,
     } catch (error) { setIssue(errorText(error)) }
     finally { submitting.current = false; setPending(false) }
   }
-  return <section className="mote-group">
-    <header className="mote-group__header"><div><h2>创建群聊</h2><p>选择可以参与这段对话的 Mote</p></div><Button type="button" onClick={onClose}>返回</Button></header>
-    <form className="mote-group__create" onSubmit={create}>
-      <label className="mote-group__field">群名称<input value={name} autoFocus maxLength={120} placeholder="为这段对话命名" disabled={attempted.current !== null} onChange={event => setName(event.target.value)} /></label>
-      <fieldset><legend>成员</legend>
-        {candidates.length ? <div className="mote-group__candidate-list">{candidates.map(candidate => {
-          const id = candidate.target.spaceId
-          return <label key={id} className="mote-group__candidate"><span className="mote-group__avatar" aria-hidden="true">{renderMoteAvatar?.(id, candidate.name) ?? initial(candidate.name)}</span><strong>{candidate.name}</strong>
-            <input type="checkbox" checked={selected.includes(id)} disabled={attempted.current !== null} onChange={event => {
-              if (event.target.checked) setSelected([...selected, id])
-              else {
-                setSelected(selected.filter(member => member !== id))
-                setSetup(current => ({ ...current, avatarMoteIds: current.avatarMoteIds.filter(member => member !== id) }))
-              }
-            }} /></label>
-        })}</div> : <p className="mote-group__muted">正在等待可用的 Mote 目录。</p>}
-      </fieldset>
-      <details className="mote-group-settings__create">
-        <summary>头像、公告与群文件</summary>
-        <MoteGroupSettingsFields value={setup} disabled={attempted.current !== null}
-          members={candidates.filter(candidate => selected.includes(candidate.target.spaceId)).map(candidate => ({ moteId: candidate.target.spaceId, name: candidate.name }))}
-          topicCandidates={topicCandidates} renderMoteAvatar={renderMoteAvatar} onChange={setSetup} />
-      </details>
-      {issue ? <Notice tone="warning" density="compact" heading="等候原建群请求确认" messageRole="status">{issue}</Notice> : null}
-      <div className="mote-group__create-actions"><span className="mote-group__muted">已选 {selected.length} 位成员</span>
-        <Button type="submit" variant="primary" disabled={pending || !name.trim() || selected.length === 0}>{pending ? '正在创建…' : attempted.current ? '确认建群' : '创建群聊'}</Button>
+  return <section className="mote-group mote-group--create" aria-label="创建群聊">
+    <header className="mote-group__header"><h2>创建群聊</h2><Button type="button" onClick={onClose}>返回</Button></header>
+    <form className="mote-group__create" onSubmit={create} aria-busy={pending}>
+      <div className="mote-group__create-body">
+        <fieldset className="mote-group__people">
+          <legend>选择成员</legend>
+          <SearchInput aria-label="搜索 Mote" clearLabel="清空成员搜索" placeholder="搜索 Mote" value={query} onValueChange={setQuery}
+            onKeyDown={event => { if (event.key === 'Enter') event.preventDefault() }} />
+          {matching.length ? <div className="mote-group__candidate-list">{matching.map(candidate => {
+            const id = candidate.target.spaceId
+            const checked = members.some(member => member.moteId === id)
+            return <label key={id} className="mote-group__candidate">
+              <span className="mote-group__avatar" aria-hidden="true">{renderMoteAvatar?.(id, candidate.name) ?? initial(candidate.name)}</span>
+              <strong>{candidate.name}</strong>
+              <input type="checkbox" checked={checked} disabled={locked} onChange={event => {
+                if (event.target.checked) setSelected(current => [...current, candidate])
+                else remove(id)
+              }} />
+            </label>
+          })}</div> : <p className="mote-group__picker-status" role="status">{needle ? '没有匹配的 Mote' : '暂未读到可选成员'}</p>}
+        </fieldset>
+        <section className="mote-group__create-draft" aria-label="群资料预览">
+          <div className="mote-group__create-preview">
+            <MoteGroupAvatar memberIds={setup.avatarMoteIds} members={members} renderMoteAvatar={renderMoteAvatar} />
+            <div><strong>{groupName}</strong></div>
+          </div>
+          {members.length > 0 && <ul className="mote-group__selected" aria-label="已选成员">{members.map(member => <li key={member.moteId}>
+            <span className="mote-group__avatar" aria-hidden="true">{renderMoteAvatar?.(member.moteId, member.name) ?? initial(member.name)}</span>
+            <span>{member.name}</span>
+            <IconButton type="button" aria-label={`移除 ${member.name}`} disabled={locked} onClick={() => remove(member.moteId)}><SemanticIcon name="action.close" size={12} /></IconButton>
+          </li>)}</ul>}
+          <label className="mote-group__field">群名称<input value={name} maxLength={120} placeholder="输入群名称" disabled={locked} onChange={event => setName(event.target.value)} /></label>
+          <details className="mote-group-settings__create">
+            <summary>头像、公告与群文件</summary>
+            <MoteGroupSettingsFields value={setup} disabled={locked} members={members}
+              topicCandidates={topicCandidates} renderMoteAvatar={renderMoteAvatar} onChange={setSetup} />
+          </details>
+        </section>
+      </div>
+      {issue ? <Notice tone="warning" density="compact" heading="建群请求待核对" messageRole="status">{issue}</Notice> : null}
+      <div className="mote-group__create-actions">
+        <output className="mote-group__muted">已选 {members.length} 位成员</output>
+        <Button type="submit" variant="primary" disabled={pending || !name.trim() || selected.length === 0}>{pending ? '正在创建…' : locked ? '核对原建群请求' : '创建群聊'}</Button>
       </div>
     </form>
   </section>
