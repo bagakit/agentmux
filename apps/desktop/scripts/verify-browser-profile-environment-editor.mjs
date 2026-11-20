@@ -59,7 +59,9 @@ for (const file of [
 ])
   await source(join(root, file))
 try {
-  for (const name of textDrafts ? ['candidate', 'mutation'] : process.argv.includes('--mutations') ? ['mutation', 'restored'] : ['candidate']) {
+  const variants = textDrafts ? ['candidate', 'mutation']
+    : process.argv.includes('--mutations') ? (fingerprint ? ['candidate', 'mutation', 'restored'] : ['mutation', 'restored']) : ['candidate']
+  for (const name of variants) {
     const compiled = join(out, name)
     await mkdir(compiled)
     const home = await mkdtemp('/tmp/amux-profile-editor-')
@@ -119,8 +121,16 @@ try {
                 mutation = { file: relative(root, file), before: sha(code), after: sha(changed), behavior: 'Do not restore the original Desktop Profile text drafts on load' }
                 return changed
               }
+              if (fingerprint && name === 'mutation' &&
+                  file === join(desktop, 'src/renderer/src/components/settings/ProfileEnvironmentFieldsEditor.tsx')) {
+                const anchor = 'seed: String(seed), surfaces: value?.surfaces ?? []'
+                assert.equal(code.split(anchor).length - 1, 1)
+                const changed = code.replace(anchor, 'seed: String(seed), surfaces: value?.surfaces ?? [...BROWSER_PROFILE_FINGERPRINT_SURFACES]')
+                mutation = { file: relative(root, file), before: sha(code), after: sha(changed), behavior: 'Automatically enable all fingerprint overrides at first generation' }
+                return changed
+              }
               if (
-                !textDrafts && name === 'mutation' &&
+                !textDrafts && !fingerprint && name === 'mutation' &&
                 file === join(desktop, 'src/renderer/src/lib/browser-profile-environment-form.ts')
               ) {
                 const anchor = 'timeZone: fields.timeZone.trim()'
@@ -247,7 +257,9 @@ try {
         assert.equal(actual.passed, true, actual.failure?.message)
       } else if (name === 'mutation') {
         assert.equal(actual.passed, false)
-        assert.match(actual.failure?.message ?? '', textDrafts ? /Original conflicting draft/ : /Europe\/Paris/)
+        const expected = fingerprint ? /Generating the first seed keeps every override off/
+          : textDrafts ? /Original conflicting draft/ : /Europe\/Paris/
+        assert.match(actual.failure?.message ?? '', expected)
         assert.ok(mutation)
       } else {
         assert.equal(processResult.exitCode, 0, actual.failure?.message)

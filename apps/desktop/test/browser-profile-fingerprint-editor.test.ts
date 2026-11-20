@@ -328,7 +328,7 @@ describe('Profile environment editor on the original update API', () => {
     expect(container.textContent).toContain('Applied to 1 Browser')
     expect(container.textContent).toContain('First-script, subdocument and Worker coverage is unconfirmed')
     expect(container.textContent).toContain(
-      'Canvas, WebGL, fonts, TLS and device memory overrides are not supported'
+      'TLS, device memory and engine-wide fingerprint overrides are unsupported'
     )
     await click('Apply environment')
     expect(port.update).toHaveBeenLastCalledWith(profile.id,
