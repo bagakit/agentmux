@@ -170,6 +170,28 @@ it('original Goal continuation initial input keeps the request paused when its S
   expect(f.host.native.input).toHaveBeenCalledTimes(0)
 })
 
+it('original Goal continuation initial input preserves draft pause when the same Start is repeated', async () => {
+  const f = await originalContinuation('goal-initial-draft-pause')
+  await f.turn('working')
+  const start = await f.host.call(null, f.args), loopId = start.continuation.loopId
+  expect(start.continuation).toMatchObject({ status: 'paused', pause: { reason: 'preparation' }, initialDelivery: { state: 'prepared' } })
+  const paused = await f.host.call(null, ['agent', 'automation', 'pause', '--session', 'supervisor', '--run', f.expectedRun.runId,
+    '--owner', f.host.identity.ownerInstanceId, '--operation-id', 'original-presented-draft'])
+  expect(paused.receipt).toMatchObject({ status: 'confirmed', pausedLoopIds: [loopId] })
+  const before = await f.inspect()
+  expect(before.goalContinuations).toMatchObject([{ loopId, status: 'paused', pause: { reason: 'manual' },
+    initialDelivery: { operationId: f.operationId, state: 'prepared' } }])
+
+  await f.turn('done')
+  const readback = await f.host.call(null, f.args)
+  expect(f.host.native.input).not.toHaveBeenCalled()
+  expect(await f.input()).toBeNull()
+  expect(readback.continuation).toEqual(before.goalContinuations[0])
+  const after = await f.inspect()
+  expect(after.goalContinuations).toEqual(before.goalContinuations)
+  expect(after.goal.dispatches).toEqual(before.goal.dispatches)
+})
+
 it.each([false, true])('original Goal continuation initial input keeps unknown after lost acknowledgment (Core wrote %s)', async applied => {
   const f = await originalContinuation(applied ? 'goal-initial-lost-after' : 'goal-initial-lost-before')
   await f.turn('done')
