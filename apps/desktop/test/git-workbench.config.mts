@@ -1,10 +1,12 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { defaultExclude, defineConfig } from 'vitest/config'
+import { bundleIdentityRuntime } from '../../../packages/identity/scripts/runtime-bundle.mjs'
 
 // Resolve the owning workspace graph from this checkout (or the private mutation copy).
 // Third-party dependencies may be shared; incidental main-tree dist cannot certify this source.
 const root = resolve(import.meta.dirname, '../../..')
+const identityRuntimeModule = '\0git-workbench-identity-runtime'
 const aliases = ['packages/core', 'packages/demand', 'packages/layout', 'packages/git', 'packages/capsule', 'packages/relay', 'packages/diagnostic-evidence', 'apps/host'].flatMap(directory => {
   const manifest = JSON.parse(readFileSync(resolve(root, directory, 'package.json'), 'utf8'))
   return Object.entries(manifest.exports).map(([key, value]: [string, any]) => ({
@@ -16,12 +18,20 @@ const aliases = ['packages/core', 'packages/demand', 'packages/layout', 'package
 
 export default defineConfig({
   root,
-  plugins: [{ name: 'git-current-workspace-sources', enforce: 'pre', transform(_source, id) {
-    // A copied mutation suite must not follow workspace symlinks back into the author's tree.
-    if (/\/(?:packages\/(?:core|demand|layout|git|identity|capsule|relay|diagnostic-evidence|client-ui)|apps\/(?:host|desktop))\/(?:src|dist)\//.test(id)) {
-      if (!id.startsWith(root + '/') || /\/dist\//.test(id)) throw new Error('Git tests require current workspace source: ' + id)
+  plugins: [{ name: 'git-current-workspace-sources', enforce: 'pre',
+    resolveId(id) { if (id === '@agentmux/identity/runtime-source') return identityRuntimeModule },
+    async load(id) {
+      if (id !== identityRuntimeModule) return
+      const { source } = await bundleIdentityRuntime()
+      return `export const identityRuntimeSource = ${JSON.stringify(source)}`
+    },
+    transform(_source, id) {
+      // A copied mutation suite must not follow workspace symlinks back into the author's tree.
+      if (/\/(?:packages\/(?:core|demand|layout|git|identity|capsule|relay|diagnostic-evidence|client-ui)|apps\/(?:host|desktop))\/(?:src|dist)\//.test(id)) {
+        if (!id.startsWith(root + '/') || /\/dist\//.test(id)) throw new Error('Git tests require current workspace source: ' + id)
+      }
     }
-  } }],
+  }],
   define: { __AGENTMUX_WEB_PREVIEW__: 'true' },
   resolve: { alias: [
     { find: /^@agentmux\/identity$/, replacement: resolve(root, 'packages/identity/src/index.ts') },
