@@ -1,20 +1,19 @@
-import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { Button } from '@agentmux/client-ui/components/Button'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { restoreComposerInput } from '@agentmux/client-ui/composer-semantic-reference'
 import { originalInputDeliveryConfirmed } from '@agentmux/client-ui/input-receipt-projection'
 import { currentCoreSpatialGraph, useAppStore } from '../store'
+import { mainRegionReference, workbenchSelectionCatalog } from '../lib/desktop-focus-navigation'
+import { sameWorkbenchProjectionSelection, type WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { localRetainedInputs, type LocalInputTarget, type LocalRetainedInput } from '../lib/local-retained-inputs'
 import { useWorkbenchInputArchive } from '../lib/use-workbench-input-archive'
 import { archivedInputMatchesSession } from '../lib/workbench-input-archive'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { useWorkbenchDocumentVisibility } from '../lib/workbench-window-registry'
-
-const DraftIcon = semanticIconComponent('object.file')
 
 function savedInputReceipt(entry: NonNullable<LocalRetainedInput['entry']>): string {
   const receipt = entry.inputReceipt
@@ -28,14 +27,16 @@ function savedInputReceipt(entry: NonNullable<LocalRetainedInput['entry']>): str
   return receipt ? `${receipt.status} · ${receipt.persistence}` : entry.resumeInputReceipt?.state ?? 'Not recorded here'
 }
 
-function LocalInput({ input, archived = false }: { input: LocalRetainedInput; archived?: boolean }) {
+function LocalInput({ input, archived = false, draftPreview = false }: {
+  input: LocalRetainedInput; archived?: boolean; draftPreview?: boolean
+}) {
   const [copied, setCopied] = useState(false)
   const [open, setOpen] = useState(false)
   const body = open ? restoreComposerInput(input.text, input.entry?.inputImages) : ''
   const source = input.entry?.originalMember?.target
   return <details className="local-input-record" onToggle={event => setOpen(event.currentTarget.open)}>
-    <summary><strong>{input.kind === 'draft' ? 'Draft' : 'Queue entry'}</strong><span>{input.text.slice(0, 100) || 'Saved image input'}</span>
-      <small>{source?.runtimeId ?? input.target?.hostId ?? 'Association unknown'}</small></summary>
+    <summary>{draftPreview ? null : <strong>{input.kind === 'draft' ? 'Draft' : 'Queue entry'}</strong>}<span>{input.text.slice(0, 100) || 'Saved image input'}</span>
+      {draftPreview ? null : <small>{source?.runtimeId ?? input.target?.hostId ?? 'Association unknown'}</small>}</summary>
     {open ? <>
       <dl className="session-record-details__facts"><div><dt>Original key</dt><dd>{input.key}</dd></div>
         {input.entry ? <><div><dt>Operation</dt><dd>{input.entry.operationId}</dd></div>
@@ -51,7 +52,11 @@ function LocalInput({ input, archived = false }: { input: LocalRetainedInput; ar
 }
 
 /** Mounted only by an explicit reader. It never edits or re-admits the original intent. */
-export function LocalRetainedInputs({ target }: { target?: LocalInputTarget }) {
+export function LocalRetainedInputs({ target, onOpenDraft, canOpenDraft }: {
+  target?: LocalInputTarget
+  onOpenDraft?(key: string): void
+  canOpenDraft?: ((key: string) => boolean) | undefined
+}) {
   const [drafts, queues, graph] = useAppStore(useShallow(state => [state.agentComposerDrafts, state.agentSteerQueues, currentCoreSpatialGraph()] as const))
   const [limit, setLimit] = useState(30)
   const document = useWorkbenchDocument()
@@ -65,12 +70,25 @@ export function LocalRetainedInputs({ target }: { target?: LocalInputTarget }) {
     return [{ kind: 'queue', key: ownerKey, text: entry.text, entry,
       ...(original ? { target: { hostId: original.hostId, agentSessionId: original.agentSessionId } } : {}) }]
   }), [archive.entries, queues, target?.hostId, target?.agentSessionId])
+  const preview = inputs.slice(0, limit)
+  const inputKey = (input: LocalRetainedInput) => JSON.stringify([input.kind, input.key, input.entry?.operationId])
+  const savedQueues = [...preview.filter(input => input.kind === 'queue'), ...archived]
   return <div className="local-retained-inputs" aria-label={target ? 'Local inputs for original Session' : 'All saved local inputs'}>
-    <p>Saved in this client. Copying does not send, retry or restore an Agent.</p>
-    {!target ? <p className="muted">Old entries without a confirmed binding keep their original key and remain available here.</p> : null}
-    {inputs.slice(0, limit).map((input, index) => <LocalInput key={JSON.stringify([input.kind, input.key, input.entry?.operationId, index])} input={input} />)}
-    {archived.map(input => <LocalInput key={JSON.stringify([input.key, input.entry!.operationId])} input={input} archived />)}
-    {!inputs.length && !archived.length && !archive.loading && !archive.error && archive.nextCursor === null ? <p>{target ? 'No exactly associated local inputs are listed. Unassociated entries remain in Focus → Drafts & queue.' : 'No saved drafts or queue entries are listed in this client.'}</p> : null}
+    {onOpenDraft ? <>
+      <div className="focus-draft-list">
+        {preview.filter(input => input.kind === 'draft').map(input => <div key={inputKey(input)} className="focus-draft-list__entry">
+          <LocalInput input={input} draftPreview />
+          {canOpenDraft?.(input.key) ? <Button type="button" onClick={() => onOpenDraft(input.key)}>Continue writing</Button> : null}
+        </div>)}
+      </div>
+      <details className="focus-draft-queues"><summary>Queue records</summary>
+        {savedQueues.length ? savedQueues.map(input => <LocalInput key={inputKey(input)} input={input} archived={archived.includes(input)} />) : <p>No saved queue records.</p>}
+      </details>
+    </> : <>
+      {preview.map(input => <LocalInput key={inputKey(input)} input={input} />)}
+      {archived.map(input => <LocalInput key={inputKey(input)} input={input} archived />)}
+    </>}
+    {!inputs.length && !archived.length && !archive.loading && !archive.error && archive.nextCursor === null ? <p>{target ? 'No exactly associated local inputs. All saved inputs are available from Focus actions.' : 'No saved drafts or queue entries in this client.'}</p> : null}
     {inputs.length > limit ? <Button type="button" onClick={() => setLimit(value => value + 30)}>Show more ({inputs.length - limit})</Button> : null}
     {archive.loading ? <p role="status">Reading saved inputs…</p> : null}
     {archive.error ? <div role="status"><p>{archive.error}</p><Button type="button" onClick={() => void archive.refresh()}>Retry saved inputs</Button></div> : null}
@@ -84,16 +102,50 @@ export function LocalRetainedInputDetails({ target, visible = true }: { target: 
     {open && visible ? <LocalRetainedInputs target={target} /> : null}</details>
 }
 
-export function LocalRetainedInputsPanel() {
-  const [open, setOpen] = useState(false)
-  return <Dialog.Root open={open} onOpenChange={setOpen}>
-    <Dialog.Trigger asChild><button type="button" className="focus-local-inputs-trigger" title="Saved drafts and retained queue entries" aria-label="Drafts & queue"><DraftIcon size={14} /><span>Drafts<span className="focus-local-inputs-trigger__queue"> &amp; queue</span></span></button></Dialog.Trigger>
+function draftLocations(state: ReturnType<typeof useAppStore.getState>, locations: ReturnType<typeof workbenchSelectionCatalog>['locations']) {
+  const exact = new Map<string, WorkbenchProjectionSelection | null>()
+  for (const location of locations) {
+    const key = location.regionId
+    const region = state.tabs[location.tabId]?.regions[key]
+    if (state.agentComposerDrafts[key] && (region?.kind === 'agent' || region?.kind === 'launcher'))
+      exact.set(key, exact.has(key) ? null : location)
+  }
+  return exact
+}
+
+export function LocalRetainedInputsPanel({ open, onOpenChange, onOpenLocation, onClose }: {
+  open: boolean
+  onOpenChange(open: boolean): void
+  onOpenLocation?: ((reference: WorkbenchProjectionSelection) => boolean | void) | undefined
+  onClose(restoreFocus: boolean): void
+}) {
+  const navigated = useRef(false)
+  const [issue, setIssue] = useState<string | null>(null)
+  const [catalog, draftTexts] = useAppStore(useShallow(state => open ? [workbenchSelectionCatalog(state), state.agentComposerDrafts] as const : [null, null] as const))
+  const availableDrafts = useMemo(() => catalog && draftTexts ? draftLocations(useAppStore.getState(), catalog.locations) : null, [catalog, draftTexts])
+  function continueDraft(key: string) {
+    const state = useAppStore.getState()
+    const reference = draftLocations(state, workbenchSelectionCatalog(state).locations).get(key)
+    if (reference && onOpenLocation && onOpenLocation(reference) !== false &&
+      sameWorkbenchProjectionSelection(mainRegionReference(useAppStore.getState().workbenchSpaceSelection), reference)) {
+      navigated.current = true
+      onOpenChange(false)
+    } else setIssue('The original input location could not be opened. You can still copy the saved draft.')
+  }
+  return <Dialog.Root open={open} onOpenChange={onOpenChange}>
     <DocumentOverlayPortal component={Dialog.Portal}>
       <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
-      <Dialog.Content className="dialog-surface session-record-dialog focus-local-inputs" onPointerDownCapture={event => event.stopPropagation()}>
-        <header><Dialog.Title>Saved drafts &amp; queue</Dialog.Title><Dialog.Close asChild><Button type="button">Close</Button></Dialog.Close></header>
-        <Dialog.Description>Saved drafts and retained queue entries in this client.</Dialog.Description>
-        {open ? <LocalRetainedInputs /> : null}
+      <Dialog.Content className="dialog-surface session-record-dialog focus-local-inputs" aria-describedby={undefined}
+        onPointerDownCapture={event => event.stopPropagation()}
+        onCloseAutoFocus={event => {
+          event.preventDefault()
+          onClose(!navigated.current)
+          navigated.current = false
+          setIssue(null)
+        }}>
+        <header><Dialog.Title>Saved inputs</Dialog.Title><Dialog.Close asChild><Button type="button">Close</Button></Dialog.Close></header>
+        {issue ? <p role="status">{issue}</p> : null}
+        {open ? <LocalRetainedInputs onOpenDraft={continueDraft} canOpenDraft={key => Boolean(onOpenLocation && availableDrafts?.get(key))} /> : null}
       </Dialog.Content>
     </DocumentOverlayPortal>
   </Dialog.Root>

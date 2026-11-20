@@ -1,4 +1,5 @@
 import { Button } from '@agentmux/client-ui/components/Button'
+import { focusTopicContextKey } from '../lib/focus-collection-lanes'
 import { HostBadge } from './HostBadge'
 import { FocusLaneHeadingMenu } from './FocusLaneHeadingMenu'
 import { hostIdentityProjection } from '../lib/region-execution-host'
@@ -12,6 +13,7 @@ import { ProjectIcon } from './ProjectIcon'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { useAppStore } from '../store'
 import { usePathDisplay } from '../hooks/usePathDisplay'
+import { FocusInteractionAge } from './FocusInteractionAge'
 import { formatRelativeAge } from '../lib/relative-age'
 import type { FocusLaneOrigin } from '../lib/focus-lane-origin'
 import { FocusSavedTaskRow } from './FocusSavedTaskRow'
@@ -64,7 +66,8 @@ function FocusCollectionHeadingIcon({ lane, icons, resourceMenus }: { lane: Focu
 }
 
 
-export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, revealRequestId, onSelect, renderLane, rowsRef, boardHistory = EMPTY_PROJECT_HISTORY, revealHistory = false, onRead, visible = true, origins, leading, resourceMenus = false, quietLanes, protectedLanes, forceExpanded = false, revealedLaneIds, renderDiscussion }: {
+export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, revealRequestId, onSelect, renderLane, rowsRef, boardHistory = EMPTY_PROJECT_HISTORY, revealHistory = false, onRead, visible = true, origins, leading, resourceMenus = false, quietLanes, protectedLanes, forceExpanded = false, revealedLaneIds, renderDiscussion, interactionTimes }: {
+  interactionTimes?: ReadonlyMap<string, number> | undefined
   quietLanes?: ReadonlySet<string>; protectedLanes?: ReadonlySet<string>; forceExpanded?: boolean; revealedLaneIds?: ReadonlySet<string>
   /** Only a real resource consumer opts in; Settings examples remain static. */
   resourceMenus?: boolean
@@ -81,6 +84,12 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, re
   revealHistory?: boolean
   onRead?(at: number): void
 }) {
+  function interactionAt(lanes: readonly FocusScanLane[]) {
+    let latest = 0
+    for (const lane of lanes) for (const ref of lane.contextRefs)
+      latest = Math.max(latest, interactionTimes?.get(focusTopicContextKey(ref.hostId, ref.id)) ?? 0)
+    return latest
+  }
   const displayPath = usePathDisplay()
   const icons = useAppStore(state => state.spaceObjectIcons)
   const hosts = useAppStore(state => state.config?.hosts)
@@ -232,7 +241,7 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, re
             {frame.lanes.length === 1 ? <>{origins?.get(first.id)?.kind === 'unknown' ? <FocusProjectOrigin origin={origins?.get(first.id)} /> : null}
               {first.summary ? <span className="focus-project-lanes__summary" title={first.summary}>{first.summary}</span> : null}
               {first.recovery ? <span className="focus-project-lanes__recovery">{first.recovery === 'removed' ? 'Worktree removed' : 'Workspace unregistered'}</span> : null}</> : null}
-            <FocusProjectActivity at={activityAt} now={now} />
+            <FocusProjectActivity at={activityAt} now={now} interactionAt={interactionTimes ? interactionAt(frame.lanes) : undefined} />
             {resourceMenus ? <><FocusZoneLayoutToggle containerKey={containerKey} name={name} presentation={mode} defaultPresentation={focusZonePresentation(null, 'project', undefined)} />
               {groupPreferences}</> : null}
           </header>
@@ -277,7 +286,7 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, re
             {!frame.project ? <HostBadge context="Host" compact host={hostIdentityProjection(lane.hostId, hosts?.find(host => host.id === lane.hostId))} /> : null}
           </button></FocusLaneHeadingMenu> : null}
           {lane.summary ? <span id={descriptionId + lane.id} className="focus-project-lanes__summary">{lane.summary}</span> : null}</>}
-          {!frame.project || lane.labels.length > 1 ? <FocusProjectActivity at={lane.lastActivityAt ?? null} now={now} /> : null}
+          {!frame.project || lane.labels.length > 1 ? <FocusProjectActivity at={lane.lastActivityAt ?? null} now={now} interactionAt={interactionTimes ? interactionAt([lane]) : undefined} /> : null}
           {lane.locationUnconfirmed ? <span className="focus-project-lanes__recovery">Location unconfirmed</span> : null}
           {lane.recovery ? <span className="focus-project-lanes__recovery">{lane.recovery === 'removed' ? 'Worktree removed' : 'Workspace unregistered'}</span> : null}
           {lane.collection && resourceMenus ? <><FocusZoneLayoutToggle containerKey={containerKey} name={lane.name} presentation={mode} defaultPresentation={focusZonePresentation(null, 'collection', undefined, authoredTopicPresentation)}
@@ -324,9 +333,10 @@ function FocusProjectOrigin({ origin }: { origin: FocusLaneOrigin | undefined })
   </span>
 }
 
-function FocusProjectActivity({ at, now }: { at: number | null; now: number }) {
+function FocusProjectActivity({ at, now, interactionAt }: { at: number | null; now: number; interactionAt?: number | undefined }) {
   const zone = useAppStore(state => state.focusTimelineRuler.timeZone)
   const time = useMemo(() => createFocusTimeFormatters(zone), [zone])
+  if (interactionAt !== undefined) return interactionAt > 0 ? <FocusInteractionAge at={interactionAt} /> : null
   return <span className="focus-project-lanes__activity" title={at === null ? 'Project task activity not recorded' : `Latest task activity across project Sessions · ${time.detailed(at)}`}>
     {at === null ? 'Activity unknown' : <>Active <time dateTime={new Date(at).toISOString()}>{formatRelativeAge(Math.max(now, Date.now()) - at, ' ago')}</time></>}
   </span>

@@ -14,6 +14,7 @@ import { focusContextHeat, focusContextVisit } from '../lib/focus-attention'
 import { focusTopicContextKey, type FocusTopicHeading } from '../lib/focus-collection-lanes'
 import { FocusTopicLabel } from './FocusTopicLabel'
 import { FocusZoneFooter } from './FocusZoneFooter'
+import { FocusInteractionAge } from './FocusInteractionAge'
 import { FocusTaskListContent, focusTaskListDescription } from './FocusTaskListContent'
 
 const contextKey = (context: FocusContext) => JSON.stringify([context.hostId, context.id])
@@ -78,7 +79,8 @@ function cardScrollport(scrollRef: RefObject<HTMLDivElement | null>, element: HT
 
 /** Slots stay in the natural CSS grid. Actual intersection controls only a
  * body's first creation; visited bodies retain their original React parent. */
-export function FocusContextCards({ contexts, viewport, scrollRef, visible, list = false, allowPin, layoutReady = true, replyLines = 2, selectedId, selectedKey, revealRequest, onRevealed, goalLinks, identities, onSelect, topics, sections, visits, activity }: {
+export function FocusContextCards({ contexts, viewport, scrollRef, visible, list = false, allowPin, layoutReady = true, replyLines = 2, selectedId, selectedKey, revealRequest, onRevealed, goalLinks, identities, onSelect, topics, sections, visits, activity, interactionTimes }: {
+  interactionTimes?: ReadonlyMap<string, number> | undefined
   activity?: ReadonlyMap<string, FocusListActivity> | undefined
   visits?: ReadonlyMap<string, number>
   contexts: readonly FocusContext[]; viewport: ReturnType<typeof createFocusCardViewport>; scrollRef: RefObject<HTMLDivElement | null>; visible: boolean
@@ -233,13 +235,14 @@ export function FocusContextCards({ contexts, viewport, scrollRef, visible, list
     const goals = goalLinks.get(focusGoalCardKey(context.hostId, context.id))
     const selected = selectedKey === undefined ? selectedId === context.id : selectedKey === key
     const sourceKey = focusTopicContextKey(context.hostId, context.id), topic = topics?.get(sourceKey), section = sections?.get(sourceKey)
+    const interactionAt = interactionTimes?.get(sourceKey)
     return <Fragment key={key}>{section ? <div className="focus-topic-section" data-focus-topic-section={section.kind === 'worktree' ? undefined : section.id} aria-label={`${section.kind === 'worktree' ? 'Zone' : 'Topic'} · ${section.name}`} data-focus-zone-section={section.kind === 'worktree' ? section.id : undefined}>{section.content ?? <FocusTopicLabel topic={section} />}</div> : null}
     <FocusCardSlot cardKey={key} register={register} className="focus-context-card" style={list ? { minHeight: cardHeight } : { display: 'flex', flexDirection: 'column', minHeight: cardHeight + (topic ? 22 : 0) }}
       data-focus-card-body={full ? 'mounted' : 'pending'} data-focus-heat={focusContextHeat(context, visits ? focusContextVisit(context, visits) : undefined, Date.now())}
       data-focus-agent-host={context.control?.hostId ?? context.hostId} data-focus-agent-session={context.control?.agentSessionId ?? context.id}
       data-focus-presentation-session={context.id} data-focus-agent-selected={selected ? 'true' : undefined}>
       {full ? <FocusContextCardBody context={context} list={list} allowPin={allowPin} topic={list ? topic : undefined} summaryActive={visible} goalLinks={goals}
-        identity={identities.get(focusContextIdentityKey(context.hostId, context.id))} selected={selected} activity={activity?.get(focusListActivityKey(context))} onSelect={onSelect} />
+        identity={identities.get(focusContextIdentityKey(context.hostId, context.id))} selected={selected} activity={activity?.get(focusListActivityKey(context))} interactionAt={interactionAt} onSelect={onSelect} />
         : <button type="button" className={`focus-context focus-context--card${list ? ' focus-context--list' : ''}${selected ? ' is-selected' : ''}`}
           data-session-id={context.id} data-state={context.state} data-bucket={context.bucket} data-activity={context.activitySemantic}
           data-focus-list-goal={list && Boolean(goals) || undefined} aria-pressed={selected} aria-label={`${context.name} · ${context.stateLabel}${!list && context.detailKind === 'service' ? ` · ${context.detail}` : ''}${topic ? ` · ${topic.kind === 'worktree' ? 'Zone' : 'Topic'} · ${topic.name}` : ''}`} aria-description={list ? focusTaskListDescription(context) : context.originAddress}
@@ -251,7 +254,7 @@ export function FocusContextCards({ contexts, viewport, scrollRef, visible, list
             const button = reveal(context, event.currentTarget.parentElement as HTMLDivElement)
             button?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: event.clientX, clientY: event.clientY }))
           }}>
-            {list ? <FocusTaskListContent context={context} placeholder /> : <span className="focus-context__copy"><strong>{context.name}</strong>{context.kind === 'agent' ? <AgentWorkModeBadge source={context} embedded /> : null}<span className="focus-context__detail">{context.stateLabel}</span></span>}
+            {list ? <FocusTaskListContent context={context} interactionAt={interactionAt} placeholder /> : <span className="focus-context__copy"><strong>{context.name}</strong>{interactionAt ? <FocusInteractionAge at={interactionAt} /> : null}{context.kind === 'agent' ? <AgentWorkModeBadge source={context} embedded /> : null}<span className="focus-context__detail">{context.stateLabel}</span></span>}
           </button>}
       {topic?.notice ? <div className="focus-zone-notices" data-focus-zone-notices="" role="status">{topic.notice}</div> : null}
       <FocusZoneFooter zone={topic} />

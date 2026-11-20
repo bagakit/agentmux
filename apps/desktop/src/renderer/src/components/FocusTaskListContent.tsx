@@ -3,6 +3,7 @@ import type { FocusContext } from '../lib/focus-context'
 import { createFocusTimeFormatters } from '../lib/focus-timeline-ruler'
 import { useAppStore } from '../store'
 import { AgentContextAvatar, mandatoryAgentContextDetails } from './AgentContextContent'
+import { FocusInteractionAge } from './FocusInteractionAge'
 import { FocusContextStateMark } from './FocusContextState'
 import { AgentWorkModeBadge } from './AgentWorkModeBadge'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -37,7 +38,8 @@ function LastActivity({ at }: { at: number }) {
 }
 
 /** The same presentation in a lightweight slot and in the original task button. */
-export function FocusTaskListContent({ context, identity, placeholder = false }: {
+export function FocusTaskListContent({ context, identity, placeholder = false, interactionAt }: {
+  interactionAt?: number | undefined
   context: FocusContext
   identity?: ReactNode
   placeholder?: boolean
@@ -70,7 +72,7 @@ export function FocusTaskListContent({ context, identity, placeholder = false }:
           <span className="focus-task-list__subagent-states">{subagents.summary}</span>
         </span> : null}
         {context.kind === 'agent' && !context.access ? <AgentWorkModeBadge source={context} embedded /> : null}
-        <span className="focus-task-list__clock">{hasTime ? <LastActivity at={activity} /> : null}</span>
+        <span className="focus-task-list__clock">{interactionAt ? <FocusInteractionAge at={interactionAt} /> : hasTime ? <LastActivity at={activity} /> : null}</span>
       </span>
     </span>
     {showStatus || explanation ? <span className="focus-task-list__detail">

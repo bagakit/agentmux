@@ -134,7 +134,8 @@
   outline-offset: -2px;
 }
 @container focus-task-rows (max-width: 399px) {
-  .focus-task-list__clock, .focus-task-list__time { display: none; }
+  .focus-task-list__clock:not(:has(.focus-interaction-age)), .focus-task-list__time { display: none; }
+  .focus-task-list__clock:has(.focus-interaction-age) { inline-size: auto; }
 }
 @container focus-task-rows (max-width: 559px) {
   .focus-task-list__summary--excerpt { display: none; }

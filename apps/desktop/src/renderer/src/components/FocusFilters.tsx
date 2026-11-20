@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type ButtonHTMLAttributes, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import * as Menu from './HoverDropdownMenu'
@@ -16,11 +16,6 @@ const TYPE_ICONS = {
   mote: semanticIconComponent('object.team'), survey: semanticIconComponent('navigation.survey'), unknown: semanticIconComponent('status.neutral')
 }
 
-function ExplicitFilterTrigger({ onClick, ...props }: ButtonHTMLAttributes<HTMLButtonElement>) {
-  const branch = Menu.useHoverMenuBranch()
-  return <button {...props} onClick={event => { branch.enterKeyboard(); onClick?.(event) }} />
-}
-
 /** Only presentation conditions live here. Original owner facts and card membership stay at Focus. */
 export function FocusFilters({ value, onChange, onInspectChange, options, visible, onClear, onHistory, historyAvailable, search }: {
   value: Selection; onChange(value: Selection): void; options: FocusFilterOptions; visible: boolean
@@ -30,11 +25,9 @@ export function FocusFilters({ value, onChange, onInspectChange, options, visibl
 }) {
   const [open, setOpen] = useState(false)
   const [optionQuery, setOptionQuery] = useState('')
-  const triggerRef = useRef<HTMLButtonElement>(null)
   const optionSearchRef = useRef<HTMLInputElement>(null)
   const interactionRef = useRef<HTMLInputElement>(null)
   const interactionId = useId()
-  const originRef = useRef<HTMLButtonElement | null>(null)
   const selectedNames = useRef(new Map<string, string>())
   useEffect(() => {
     const selected = new Set(value.projects.map(item => item.id))
@@ -67,24 +60,18 @@ export function FocusFilters({ value, onChange, onInspectChange, options, visibl
     {item.id !== 'all' ? <span className="focus-filter-menu__count">{item.count}</span> : null}
   </Menu.CheckboxItem>
   const chip = (label: string, names: readonly string[], clear: () => void) => names.length ? <span className="focus-filter-chip" key={label}
-    data-focus-interaction-chip={label === 'Interaction' || undefined} data-focus-project-scope-control={label === 'Project' || undefined}>
-    <ExplicitFilterTrigger type="button" className="focus-filter-chip__value" title={names.join(' or ')} aria-label={`Edit ${label} filter: ${names.join(' or ')}`} onClick={event => { originRef.current = event.currentTarget; setOptionQuery(''); changeOpen(true) }}><span>{label}</span><strong>{names.length > 1 ? `${names[0]} +${names.length - 1}` : names[0]}</strong></ExplicitFilterTrigger>
-    <button type="button" className="focus-filter-chip__remove" aria-label={`Remove ${label} filter`} onClick={() => { clear(); triggerRef.current?.focus() }}><CloseIcon size={11} /></button>
+    data-focus-project-scope-control={label === 'Project' || undefined}>
+    <span className="focus-filter-chip__value" title={names.join(' or ')}><span>{label}</span><strong>{names.length > 1 ? `${names[0]} +${names.length - 1}` : names[0]}</strong></span>
+    <Menu.Item asChild onSelect={event => { event.preventDefault(); clear(); interactionRef.current?.focus() }}><button type="button" className="focus-filter-chip__remove" aria-label={`Remove ${label} filter`}><CloseIcon size={11} /></button></Menu.Item>
   </span> : null
   return <Menu.Root open={visible && open} onOpenChange={changeOpen}>
     <div className={search ? 'focus-search-group' : undefined}>
       {search}
-      <Menu.Trigger asChild><button ref={triggerRef} type="button" className="focus-filter-trigger" data-focus-project-scope-control aria-label="Focus filters" aria-description={summary} title={summary} data-active={count > 0 || undefined} onPointerDown={() => { originRef.current = triggerRef.current }} onKeyDown={() => { originRef.current = triggerRef.current }}>
+      <Menu.Trigger asChild><button type="button" className="focus-filter-trigger" data-focus-project-scope-control aria-label="Focus filters" aria-description={summary} title={summary} data-active={count > 0 || undefined}>
         <FilterIcon size={14} /><span className="focus-filter-trigger__summary">Filter</span>
         {activeRange.minutes === undefined ? null : <span className="focus-filter-trigger__range">{activeRange.short}</span>}
         {count ? <span className="focus-filter-trigger__count" data-focus-single-range={count === 1 && activeRange.minutes !== undefined || undefined}>{count}</span> : null}
       </button></Menu.Trigger>
-    </div>
-    <div className="focus-filter-chips" aria-label="Applied Focus filters">
-      {chip('Interaction', activeRange.minutes === undefined ? [] : [activeRange.short], () => onChange({ ...value, interactionMinutes: undefined }))}
-      {chip('Project', projectNames, () => onChange({ ...value, projects: [] }))}
-      {chip('State', stateNames, () => onChange({ ...value, states: [] }))}
-      {chip('Type', typeNames, () => onChange({ ...value, types: [] }))}
     </div>
       <Menu.Portal><Menu.Content className="tab-context-menu focus-filter-menu" align="end" sideOffset={4} collisionPadding={8} onKeyDown={event => {
         if (event.key !== 'Tab') return
@@ -97,15 +84,16 @@ export function FocusFilters({ value, onChange, onInspectChange, options, visibl
         const focused = document.activeElement
         if (focused instanceof HTMLElement && focused.isConnected && focused !== document.body
           && !focused.closest('[hidden], [inert]') && event.target instanceof HTMLElement && !event.target.contains(focused)) event.preventDefault()
-        if (!event.defaultPrevented && originRef.current) {
-          event.preventDefault()
-          const origin = originRef.current
-          ;(origin.isConnected && origin.getClientRects().length ? origin : triggerRef.current)?.focus()
-        }
       }}>
         <Menu.Label className="focus-filter-menu__heading">Filter contexts</Menu.Label>
         <div className="focus-interaction-filter">
-          <label htmlFor={interactionId}>Interacted within <span>{activeRange.label}</span></label>
+          <div className="focus-interaction-filter__heading">
+            <label htmlFor={interactionId}>Interacted within</label>
+            <strong>{activeRange.label}</strong>
+            {activeRange.minutes === undefined ? null : <Menu.Item asChild onSelect={event => {
+              event.preventDefault(); onChange({ ...value, interactionMinutes: undefined }); interactionRef.current?.focus()
+            }}><button type="button" className="focus-filter-chip__remove" aria-label="Remove Interaction filter" title="Any time"><CloseIcon size={12} /></button></Menu.Item>}
+          </div>
           <input ref={interactionRef} id={interactionId} type="range" min={0} max={FOCUS_INTERACTION_RANGES.length - 1} step={1}
             value={rangeIndex} aria-label="Interacted within" aria-valuetext={activeRange.label}
             style={{ '--focus-interaction-progress': `${rangeIndex / (FOCUS_INTERACTION_RANGES.length - 1) * 100}%` } as CSSProperties}
@@ -114,6 +102,11 @@ export function FocusFilters({ value, onChange, onInspectChange, options, visibl
           <div aria-hidden="true"><span>15 min</span><span>Any time</span></div>
           <small>Opened here or sent a message</small>
         </div>
+        {count > Number(activeRange.minutes !== undefined) ? <div role="group" className="focus-filter-chips" aria-label="Applied Focus filters">
+          {chip('Project', projectNames, () => onChange({ ...value, projects: [] }))}
+          {chip('State', stateNames, () => onChange({ ...value, states: [] }))}
+          {chip('Type', typeNames, () => onChange({ ...value, types: [] }))}
+        </div> : null}
         <div className="focus-filter-menu__search"><TextInput ref={optionSearchRef} aria-label="Find Focus filter options" placeholder="Find a project, state or type…" value={optionQuery} onChange={event => setOptionQuery(event.target.value)} onKeyDown={event => {
           if (event.key === 'ArrowDown') { event.preventDefault(); event.currentTarget.closest('[role="menu"]')?.querySelector<HTMLElement>('[role="menuitemcheckbox"]')?.focus() }
           else if (event.key !== 'Escape' && event.key !== 'Tab') event.stopPropagation()
