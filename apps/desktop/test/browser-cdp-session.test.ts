@@ -277,6 +277,23 @@ it('the actual ref dispatcher consumes one stable child sender and refuses its r
 })
 
 describe('independent native network scope and original connection retention', () => {
+  it('releases the last debugger only after the native detach callback unwinds', async () => {
+    const contents = fakeContents({ sendCommand: async method => {
+      if (method === 'Target.getTargetInfo') return { targetInfo: { targetId: 'original-native' } }
+      if (method === 'Target.attachToTarget') return { sessionId: 'original-network' }
+      return {}
+    } })
+    const program = BrowserCdpSession.attach(contents), reader = BrowserCdpSession.attach(contents)
+    await program.openNetworkSession()
+    program.detach()
+    contents.debugger.emit('message', 'Target.detachedFromTarget', { sessionId: 'original-network' })
+    expect(reader.isSoleConsumer).toBe(true)
+    reader.detach()
+    expect(contents.debugger.isAttached()).toBe(true)
+    await new Promise<void>(resolve => setImmediate(resolve))
+    expect(contents.debugger.isAttached()).toBe(false)
+  })
+
   it('keeps the original environment connection protected after the program lease ends, until that exact scope closes', async () => {
     const contents = fakeContents({sendCommand: async (method) => method === 'Target.getTargetInfo' ? {targetInfo: {targetId: 'original-native'}} : method === 'Target.attachToTarget' ? {sessionId: 'original-network'} : {}})
     const environment = BrowserCdpSession.attach(contents), program = BrowserCdpSession.attach(contents)
