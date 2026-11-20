@@ -102,6 +102,19 @@ it.each(['preparing', 'creating'] as const)('only %s carries the original visibl
   noSideEffects()
 })
 
+it('explains automatic account recovery and keeps the last original diagnostic and draft', async () => {
+  const session = startup('preparing')
+  session.terminalFrontend.initialization.failure = { step: 'preflight', code: -32603, message: 'Private original diagnostic' }
+  await mount(session)
+  const surface = dom.container.querySelector('.full-page-loading')!
+  expect(surface.textContent).toContain('Retrying setup')
+  expect(surface.textContent).toContain('The original backend will check its account again automatically.')
+  expect(surface.querySelector('.session-frontend-diagnostic')?.textContent).toContain('Private original diagnostic')
+  expect(button('Check progress')).toBeDefined()
+  expect(dom.draft(session.id)).toBe('Original unsent thought')
+  noSideEffects()
+})
+
 it('retains the same original recovery operation across repeated checks with no input or creation', async () => {
   const recover = vi.spyOn(useAppStore.getState(), 'recoverSession').mockResolvedValue(undefined)
   await mount(startup('unknown'))

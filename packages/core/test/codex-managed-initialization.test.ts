@@ -21,6 +21,8 @@ const mutations: Record<string, [string, string]> = {
   'keep-stale-preflight-step': ["setInitialization({ ...initialization, failure: { ...initialization.failure, step: initializationStep } })", 'void initializationStep'],
   'deadline-preflight': ["connection.request('account/read', { refreshToken: false }, { retainPending: true })", "connection.request('account/read', { refreshToken: false })"],
   'drop-preflight-retry': ['if (nativeRequested || !live()) return Promise.resolve()', "if (initialization.phase === 'failed' || nativeRequested || !live()) return Promise.resolve()"],
+  'exhaust-preflight-retry': ['error.code !== -32603 || !live()', 'error.code !== -32603 || backoff !== PREFLIGHT_RETRY_INITIAL_MS || !live()'],
+  'skip-preflight-backoff': ['await delay(backoff * (0.5 + Math.random() * 0.5), undefined, { signal: lifetime.signal })', 'await Promise.resolve()'],
   'repeat-unknown': ['if (nativeRequested || !live()) return Promise.resolve()', 'if (!live()) return Promise.resolve()'],
   'drop-settled-resume': ['if (plan.resume && error instanceof JSONRPCErrorException && [-32600, -32602].includes(error.code)) nativeRequested = false', 'if (false) nativeRequested = false'],
   'repeat-rejected-start': ['plan.resume && error instanceof JSONRPCErrorException', 'error instanceof JSONRPCErrorException'],
@@ -42,8 +44,10 @@ beforeAll(async () => {
     plugins: [{ name: 'bounded-observer-clock', setup(builder) {
       builder.onLoad({ filter: /codex-(managed-run|native-rpc)\.ts$/ }, async ({ path }) => {
         const original = await readFile(path, 'utf8')
-        // Observation time only; keep the original request and every business fact unchanged.
+        // Shorten local clocks without changing the protocol or backoff shape.
         let contents = original.replace('const INITIALIZATION_OBSERVATION_MS = 8_000', 'const INITIALIZATION_OBSERVATION_MS = 1000')
+          .replace('const PREFLIGHT_RETRY_INITIAL_MS = 2_000', 'const PREFLIGHT_RETRY_INITIAL_MS = 400')
+          .replace('const PREFLIGHT_RETRY_MAX_MS = 30_000', 'const PREFLIGHT_RETRY_MAX_MS = 800')
         const mutation = process.env.AGENTMUX_CODEX_INITIALIZATION_MUTATION
         const change = mutation ? (path.endsWith('codex-managed-run.ts') ? mutations : rpcMutations)[mutation] : undefined
         if (mutation && !mutations[mutation] && !rpcMutations[mutation]) throw new Error('Unknown initialization mutation: ' + mutation)
@@ -85,7 +89,7 @@ if(args.includes('app-server')){
  setInterval(()=>writeFileSync(${JSON.stringify(heartbeat)},JSON.stringify({pid:process.pid,time:Date.now()})),40);
  let effective, accountReads=0;const server=new WebSocketServer({port:0,host:'127.0.0.1'});
  server.on('connection',(socket,req)=>{if(req.headers.authorization!=='Bearer '+process.env.${CODEX_NATIVE_TOKEN_ENV})process.exit(9);
- socket.on('message',async bytes=>{const r=JSON.parse(String(bytes));appendFileSync(${JSON.stringify(log)},JSON.stringify(r)+String.fromCharCode(10));if(!Object.hasOwn(r,'id'))return;
+ socket.on('message',async bytes=>{const r=JSON.parse(String(bytes));appendFileSync(${JSON.stringify(log)},JSON.stringify({...r,receivedAt:performance.now()})+String.fromCharCode(10));if(!Object.hasOwn(r,'id'))return;
  const reply=result=>socket.send(JSON.stringify({jsonrpc:'2.0',id:r.id,result}));
  const error=(code,message)=>socket.send(JSON.stringify({jsonrpc:'2.0',id:r.id,error:{code,message}}));
  if(r.method==='initialize')while(existsSync(${JSON.stringify(connectionGate)}))await new Promise(resolve=>setTimeout(resolve,10));
@@ -146,31 +150,50 @@ if(args.includes('app-server')){
     catch (cause) { throw new Error(JSON.stringify({ latest, stderr, methods: (await rows(log)).map(row => row.method), exitCode: child.exitCode }), { cause }) }
     return latest!
   }
-  return { child, context, plan, log, events, heartbeat, fail, gate, readGate, connectionGate, rejected, loaded, directory, executable, wait,
+  return { child, ended, context, plan, log, events, heartbeat, fail, gate, readGate, connectionGate, rejected, loaded, directory, executable, wait,
     current: () => latest!, stderr: () => stderr, methods: async () => (await rows(log)).map(row => row.method) }
 }
 
-it.runIf(process.platform === 'darwin')('retries a settled account internal error once before starting the original thread', async () => {
-  const f = await fixture({ accountInternalErrors: 1 })
-  const ready = await f.wait(value => value.initialization?.phase === 'ready')
-  expect(ready.initialization?.native).toEqual({ state: 'confirmed', sessionId: sid })
-  const methods = await f.methods()
-  expect(methods.filter(method => method === 'account/read' || method === 'thread/start')).toEqual(['account/read', 'account/read', 'thread/start'])
-  expect(methods.filter(method => method === 'initialize')).toHaveLength(1)
-  expect(f.child.exitCode).toBeNull()
+it.runIf(process.platform === 'darwin')('continues independent original startups through repeated settled account errors with bounded retry pacing', async () => {
+  const [f, resumed, healthy] = await Promise.all([fixture({ accountInternalErrors: 5 }), fixture({ accountInternalErrors: 3, resume: true }), fixture()])
+  const preparing = await f.wait(value => value.initialization?.failure?.code === -32603)
+  expect(preparing.initialization).toMatchObject({ phase: 'preparing', native: { state: 'not-created' },
+    failure: { step: 'preflight', message: 'Private workspace routing discovery timed out' } })
+  const before = JSON.parse(await readFile(f.heartbeat, 'utf8'))
+  const checks = Promise.all(['first-check', 'second-check'].map(operationId =>
+    reconnectCodexTerminalFrontend(f.context, { operationId, expectedFrontendId: preparing.frontendId,
+      target: { kind: 'initialization', lifecycleOperationId: 'original-lifecycle' } })))
+  await healthy.wait(value => value.initialization?.phase === 'ready')
+  expect(await healthy.methods()).toContain('thread/start')
+  for (const observation of await checks) {
+    expect(observation.initialization).toEqual(preparing.initialization)
+  }
+  const [ready, resumeReady] = await Promise.all([f, resumed].map(actor => actor.wait(value => value.initialization?.phase === 'ready')))
+  for (const observation of [ready, resumeReady]) {
+    expect(observation.initialization).toEqual({ lifecycleOperationId: 'original-lifecycle', phase: 'ready',
+      native: { state: 'confirmed', sessionId: sid } })
+  }
+  expect(JSON.parse(await readFile(f.heartbeat, 'utf8')).pid).toBe(before.pid)
+  for (const [actor, count, mutation] of [[f, 6, 'thread/start'], [resumed, 4, 'thread/resume']] as const) {
+    // Bootstrap carries configuration. The later TUI join only names the loaded object.
+    const requests = (await rows(actor.log)).filter(row => ['initialize', 'account/read', 'thread/start'].includes(row.method) ||
+      row.method === 'thread/resume' && Object.hasOwn(row.params, 'cwd'))
+    expect(requests.map(row => row.method)).toEqual(['initialize', ...Array(count).fill('account/read'), mutation])
+    const reads = requests.slice(1, -1)
+    for (const [index, request] of reads.entries()) {
+      expect(request.params).toEqual({ refreshToken: false })
+      if (index) expect(request.receivedAt - reads[index - 1].receivedAt).toBeGreaterThanOrEqual(index === 1 ? 180 : 380)
+    }
+  }
 })
 
-it.runIf(process.platform === 'darwin')('keeps the exact backend and explicit retry when automatic account retries are exhausted', async () => {
-  const f = await fixture({ accountInternalErrors: 2 })
-  const failed = await f.wait(value => value.initialization?.phase === 'failed')
-  expect(failed.initialization).toMatchObject({ native: { state: 'not-created' }, failure: { step: 'preflight', code: -32603 } })
-  expect((await f.methods()).filter(method => method === 'account/read' || method === 'thread/start')).toEqual(['account/read', 'account/read'])
-  const before = JSON.parse(await readFile(f.heartbeat, 'utf8'))
-  await reconnectCodexTerminalFrontend(f.context, { operationId: 'retry-exhausted', expectedFrontendId: failed.frontendId,
-    target: { kind: 'initialization', lifecycleOperationId: 'original-lifecycle' } })
-  await f.wait(value => value.initialization?.phase === 'ready')
-  expect(JSON.parse(await readFile(f.heartbeat, 'utf8')).pid).toBe(before.pid)
-  expect((await f.methods()).filter(method => method === 'thread/start')).toHaveLength(1)
+it.runIf(process.platform === 'darwin')('ends the original startup during repeated preflight failures without creating a thread', async () => {
+  const f = await fixture({ accountInternalErrors: 100 })
+  await f.wait(value => value.initialization?.phase === 'preparing' && value.initialization.failure?.code === -32603)
+  expect(f.child.kill('SIGTERM')).toBe(true)
+  await f.ended
+  expect(new Set(await f.methods())).toEqual(new Set(['initialize', 'initialized', 'account/read']))
+  expect(await rows(f.events)).toHaveLength(0)
 })
 
 it.runIf(process.platform === 'darwin').each(['initialize', 'account/read'] as const)('keeps the original slow %s response beyond ten seconds and automatically continues without a second request', async method => {
