@@ -19,6 +19,9 @@ import { createHostMoteGroups, type HostMoteGroupFiles } from '../src/mote-group
 import { createHostMoteDirect } from '../src/mote-direct.js'
 import type { MoteChatResourcePort } from '../src/mote-resources.js'
 import type { MoteMainReader } from '@agentmux/core/mote-dialogue'
+import { ContinuousProgressLoopManager } from '../src/continuous-progress-loop-manager.js'
+import { ContinuousProgressLoopStore } from '../src/continuous-progress-loop-store.js'
+import { createGoalRuntime } from '../src/goal-runtime.js'
 
 const closes: (() => void | Promise<void>)[] = []
 afterEach(async () => {
@@ -94,13 +97,14 @@ async function fixture(retainedRoot?: string, initialSessions: string[] = []) {
     }
   } })
   const dbPath = join(workspacePath, 'groups.sqlite'), socketPath = join(f.root, 'group.sock')
-  const start = async (files?: HostMoteGroupFiles, main?: MoteMainReader) => {
+  const start = async (files?: HostMoteGroupFiles, main?: MoteMainReader, schedules?: ContinuousProgressLoopManager) => {
     const port = createHostMoteGroups({ store: new MoteGroupStore(dbPath), agents, client: () => f.client,
       ...(files ? { files } : {}), ...(main ? { main } : {}) })
     const direct = main ? createHostMoteDirect(createHostMoteGroups({
       store: new MoteGroupStore(join(workspacePath, 'direct.sqlite'), 'direct'), agents, client: () => f.client, main
-    })) : undefined
-    const server = new core.AgentMuxControlServer({ socketPath, coreClients: f.coreClients, moteGroups: port, ...(direct ? { moteDirect: direct } : {}) })
+    }), { main, readPeer: agents.readTarget, client: f.client }) : undefined
+    const server = new core.AgentMuxControlServer({ socketPath, coreClients: f.coreClients, moteGroups: port,
+      ...(direct ? { moteDirect: direct } : {}), ...(schedules ? { schedules } : {}) })
     await server.start()
     closes.push(() => server.stop())
     const rpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })
@@ -226,6 +230,74 @@ it('reuses one private Mote thread across directions, Main rotation and Host reo
   const timeline = await reopened.call('space.mote.direct.inspect', { threadId, mote: a })
   expect(timeline.messages.map(entry => entry.id)).toEqual([sent.message.id, reply.message.id, reverse.message.id])
   expect(timeline.thread.participants.find(p => p.moteId === 'mote-b')?.thread).toEqual(peer.thread)
+})
+
+it('schedules recurring private assignments on the original clock and deduplicates each due turn', async () => {
+  const f = await fixture(undefined, ['assignment-owner', 'assignment-peer'])
+  const a = f.target('mote-a'), b = f.target('mote-b')
+  const main = boundMains(new Map([['mote-a', 'assignment-owner'], ['mote-b', 'assignment-peer']]))
+  const runtime = createGoalRuntime({ clients: f.coreClients, checkIn: async () => ({ known: false, reason: 'No check-in requested.' }) })
+  let now = 100
+  const delivered: core.ContinuousProgressLoop[] = []
+  const manager = new ContinuousProgressLoopManager(new ContinuousProgressLoopStore(join(f.root, 'schedules.json')),
+    async (loop, operationId, _current, _signal, onDispatch) => {
+      expect(loop.pendingCompletion?.operationId).toBe(operationId)
+      onDispatch()
+      delivered.push(structuredClone(loop))
+      return 'sent'
+    }, () => now, async (loop, tickId) => {
+      const session = f.client.agentSession(loop.agentSessionId)
+      const status = { state: 'done' as const, source: 'native-hook' as const, observedAt: now }
+      const intent = loop.futureIntentId ? await f.client.readAgentFuturePromptIntent(loop.agentSessionId, loop.futureIntentId) : null
+      return { session: { ...session, semanticStatus: status, ...(intent ? { futurePromptIntents: { [loop.futureIntentId!]: intent } } : {}) },
+        observation: core.observeAgent({ process: 'running', status, timelineCapability: 'complete-events', awaitingRequest: false, terminalCapabilityUnverified: false }, now),
+        tickId, now, inputByte: 0, inputOccupied: false }
+    }, runtime)
+  closes.push(() => manager.stop())
+  await manager.start()
+  const { rpc } = await f.start(undefined, main, manager)
+  f.unblockSecond()
+  const assignment = { mote: a, peer: b, operationId: 'recurring-homework', body: 'Review the newest release notes.', everyMs: 60_000 }
+  const original = await f.cli('schedule', assignment, 'assignment-owner', 'direct')
+  expect(original.code, original.stderr).toBe(0)
+  const { schedule } = JSON.parse(original.stdout).result
+  expect(schedule).toMatchObject({ agentSessionId: 'assignment-owner', creationOperationId: assignment.operationId, everyMs: assignment.everyMs, nextCheckAt: now + assignment.everyMs })
+  expect((await rpc.call('space.mote.direct.list', { mote: a })).threads).toEqual([])
+  await manager.check(schedule.nextCheckAt - 1, schedule.loopId)
+  expect(delivered).toEqual([])
+
+  // The model is the consumer at this boundary. Exercise its documented exact
+  // due-turn command against the same real CLI and conversation owner.
+  const runDue = async (at: number) => {
+    now = at
+    await manager.check(now, schedule.loopId)
+    const original = await rpc.call('schedule.inspect', { operationId: assignment.operationId })
+    const occurredAt = original.schedule.lastInputRef?.futureIntent.occurrenceAt
+    expect(occurredAt).toBe(now)
+    const prompt = delivered.at(-1)?.pendingCompletion?.prompt
+    expect(prompt).toContain('scheduled/<loopId>/<occurrenceAt>')
+    const { operationId: saved, ...source } = JSON.parse(prompt!.split('\n').at(-1)!)
+    expect(saved).toBe(assignment.operationId)
+    const request = { ...source, operationId: `scheduled/${schedule.loopId}/${occurredAt}` }
+    const send = await f.cli('send', request, 'assignment-owner', 'direct')
+    expect(send.code, send.stderr).toBe(0)
+    const again = await f.cli('send', request, 'assignment-owner', 'direct')
+    expect(again.code, again.stderr).toBe(0)
+    expect(JSON.parse(again.stdout).result.message.id).toBe(JSON.parse(send.stdout).result.message.id)
+    return JSON.parse(send.stdout).result
+  }
+  const first = await runDue(schedule.nextCheckAt)
+  const second = await runDue(schedule.nextCheckAt + assignment.everyMs)
+  expect(delivered).toHaveLength(2)
+  expect(first.threadId).toBe(second.threadId)
+  const page = await rpc.call('space.mote.direct.inspect', { threadId: first.threadId, mote: a })
+  expect(page.messages.map(message => [message.id, message.body, message.deliveries[0]?.moteId]))
+    .toEqual([[first.message.id, assignment.body, 'mote-b'], [second.message.id, assignment.body, 'mote-b']])
+  const current = await rpc.call('schedule.inspect', { scheduleId: schedule.loopId })
+  await rpc.call('schedule.pause', { scheduleId: schedule.loopId, expectedRevision: current.schedule.revision!, operationId: 'pause-assignments' })
+  now += assignment.everyMs
+  await manager.check(now, schedule.loopId)
+  expect(delivered).toHaveLength(2)
 })
 
 it('saves one original public message, starts only invited members and reuses exact member input through public RPC', async () => {

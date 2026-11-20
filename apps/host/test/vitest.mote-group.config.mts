@@ -5,6 +5,8 @@ import { resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '../../..')
 const variants = {
+  'direct-schedule-wrong-peer': ['packages/core/src/mote/direct.ts',
+    'peer: target(input.peer)', 'peer: target(input.mote)'],
   'direct-pair-order': ['apps/host/src/mote-direct.ts',
     'const members = [mote, peer].sort((left, right) => left.spaceId < right.spaceId ? -1 : 1)',
     'const members = [mote, peer]'],
