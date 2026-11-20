@@ -110,6 +110,44 @@ describe('original Mote cooperation Editor and explicit new Launcher', () => {
     expect(details().textContent).not.toContain('Save there to apply it')
     await studio(); expect(dialog().querySelector<HTMLInputElement>('input[value="N"]')!.checked).toBe(true); expect(dialog().textContent).toContain('MBTI style · INFJ'); expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
   })
+  it.each(['same', 'changed'] as const)('checks a behavior save against the $0 version after an Editor refresh', async (observed) => {
+    const key = documentKey(SCRATCH_WORKSPACE_ID, path)
+    let refreshes = 0
+    const read = vi.mocked(api.files.readPublic)
+    read.mockImplementation(async params => {
+      const result = publicRead(params)
+      const saved = useAppStore.getState().documents[key]
+      if (!refreshes && params.path === 'BEHAVIOR.md' && saved?.revision === diskRevision && diskRevision !== revision) {
+        refreshes += 1
+        if (observed === 'changed') {
+          disk += '\nLater edit from the original file owner.\n'
+          diskRevision = 'sha256:' + 'c'.repeat(64)
+        }
+        await useAppStore.getState().refreshDocument(SCRATCH_WORKSPACE_ID, path)
+        const current = useAppStore.getState().documents[key]
+        expect(current).not.toBe(saved)
+        expect(current?.revision).toBe(diskRevision)
+      }
+      return result
+    })
+    await app.mount()
+    await studio()
+    await choices()
+    await moteClick(button('Save'))
+    expect(refreshes).toBe(1)
+    expect(api.files.write).toHaveBeenCalledTimes(1)
+    if (observed === 'same') {
+      expect(dialog()).toBeNull()
+      expect(parseMoteBehaviorDocument(disk)).toMatchObject({ status: 'valid', code: 'INFJ' })
+    } else {
+      expect(dialog().textContent).toContain('The saved file could not be confirmed')
+      expect(dialog().textContent).toContain('MBTI style · INFJ')
+      expect(disk).toContain('Later edit from the original file owner.')
+    }
+    expect(useAppStore.getState().agentComposerDrafts[defaultAgent.id]).toBe('Default unsent')
+    expect(app.launch).not.toHaveBeenCalled()
+    expect(app.stop).not.toHaveBeenCalled()
+  })
   it('refuses a new Launcher whose execution resource changes during publication without replacing its later target', async () => {
     await app.mount(); const before = useAppStore.getState()
     const unsubscribe = useAppStore.subscribe(current => {
