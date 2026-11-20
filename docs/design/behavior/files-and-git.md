@@ -159,6 +159,7 @@ History 的单行阅读、分支颜色与连线唯一见密度 SSOT[《Explorer 
 - 多个 Agent 共享工作树时怎样暂存、提交与协调，归[AGENTS《并行协作与交付》](../../../AGENTS.md#并行协作与交付)，已发生的事故与证据见 [`docs/casestudy/`](../../casestudy)；本节不另定义协作规则。
 - 远程操作：push 默认推送 `origin HEAD` 并设置上游；强制推送只用 `--force-with-lease`，不提供裸 `--force`。pull 可指定 ff-only／merge／rebase；未指定时遵循原 Git 配置，只执行一次，被拒绝后保留原 HEAD 与错误，由用户明确选择策略。fetch 带 `--prune`。ahead／behind 对有效上游计算：先用实际存在的 push 目标，再用存在的 upstream 目标，因此覆盖"分支跟踪 `origin/main` 却 push 到 `origin/<branch>`"与"上游是本地分支"两种情形。探测失败不能当作无上游或 0/0。Git 调用的当前机制见[架构《Git 仓库操作》](../../architecture/files-and-git.md#git-仓库操作)。
 - PR 当前只支持 GitHub 托管仓库，经 `gh` CLI 创建：正文经私有临时文件传入，不放进命令参数（当前机制见[架构《PR 创建》](../../architecture/files-and-git.md#pr-创建)）。认证完全委托 `gh auth`，AgentMux 只探测 `gh auth status`，不读取、不持久化任何 token，也不新增自己的凭据存储（`gh` 自行读取 `GH_TOKEN`／`GITHUB_TOKEN`）。`gh` 缺失与未认证是两种可区分的结果，各自给出可操作的说明，不混成一个笼统错误。
+- Git 变更作为 Goal 交付时，使用[原 Ticket 地址](goal-plans-and-tickets.md#ticket-的身份与地址)关联提交，沿[原 Ticket 的交付与核验](goal-plans-and-tickets.md#交付核验与自动接续)提交固定版本及检查证据。
 - 以下四条约束保护用户仓库与凭据，后续改动不得削弱：
   1. 参数不拼 shell。Git 调用一律以数组传参；路径用 `--` 终结符与 `:(literal)` pathspec；以 `-` 开头的用户可控输入（路径、分支名、remote、refspec）一律拒绝。`clean` 是唯一会从磁盘删除文件的操作，调用前额外校验目标位于 worktree 内，不在 worktree 之外执行。
   2. 远程错误先擦除凭据再显示。Git 会把远程 URL 回显进错误文本，所有向上传递错误文本的路径都先经同一个纯函数擦除。擦除 http(s) URL 的全部 userinfo：既包括 `user:pass@`，也包括没有冒号、整个 userinfo 就是 token 的 `https://<token>@host`（CI 与 `git remote set-url` 嵌入 PAT 的常见写法）。ssh 的 `git@host` 保留，它是身份而不是秘密，也是错误里定位远端的唯一线索。错误文本只用于擦除凭据后给人看，不授权重试、合并或状态迁移。"没有仓库"须由同主机文件系统事实确认；权限、损坏或观测不可用保留为错误，不能从文案推断无仓库、无上游或 0/0。
