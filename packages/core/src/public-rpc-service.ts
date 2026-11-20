@@ -4793,7 +4793,7 @@ export class AgentMuxRpcService {
           }
           const handover = agentTakeoverInput({ hostId: old.hostId, agentSessionId: old.sessionId, executorId: page?.session?.executorId,
             diagnostic: sourceIssue ?? undefined }, sameCore ? 'local' : null, page ?? undefined)
-          result.handoverInput=await stage('handoverInputKey',{operationId,prompt:handover.agentMuxNote+'\\n\\n'+handover.prompt})
+          result.handoverInput=await stage('handoverInputKey',{operationId,prompt:handover.agentMuxNote+'\n\n'+handover.prompt})
         }
         if(!['admitted','terminal-confirmed'].includes(agentPromptSubmissionOutcome(result.handoverInput.record)))result.issue=[result.issue,'The original handover input is unconfirmed; inspect its exact key. The separate Query retains its own Core input qualification.'].filter(Boolean).join('\n')
       } catch(cause) { retainIssue(cause) }
