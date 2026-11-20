@@ -997,7 +997,7 @@ export function staleManualSteerDraftKey(entry: AgentSteerQueueEntry,
   return { kind: 'prompt', agentSessionId: control.agentSessionId, expectedRun: binding.expectedRun, submissionId: entry.operationId }
 }
 
-function manualComposerBinding(sessionId: string, origin?: 'manual', options?: AgentSteerOptions): AgentSteerQueueEntry['directInputBinding'] {
+function manualComposerBinding(sessionId: string, text: string, origin?: 'manual', options?: AgentSteerOptions): AgentSteerQueueEntry['directInputBinding'] {
   const session = options?.originalSession ?? useAppStore.getState().sessions.find(item => item.id === sessionId)
   // This is the direct user's new producer contract, not a recovered queue tag
   // or an inference from authorHuman, current predecessor or the message body.
@@ -1014,8 +1014,7 @@ function manualComposerBinding(sessionId: string, origin?: 'manual', options?: A
   if (session.pendingInteraction) return interactionNativeComposerBinding(session)
   if (session.structuredPromptInput) return { expectedRun: { ...session.control.run },
     ...(session.inputEpoch === undefined ? {} : { inputEpoch: session.inputEpoch }), admissionIntent: { kind: 'session-conversation' } }
-  return initialNativeComposerBinding(session) ??
-    // Main role routing is frozen separately; this new human Send still uses the current terminal.
+  return initialNativeComposerBinding(session, options?.inputImages?.length ? undefined : text) ??
     { expectedRun: { ...session.control.run }, ...(session.inputEpoch === undefined ? {} : { inputEpoch: session.inputEpoch }), admissionIntent: { kind: 'manual-actor' } }
 }
 
@@ -13317,7 +13316,7 @@ export const useAppStore = create<AppState>()<[['zustand/persist', PersistedAppS
   enqueueAgentSteer(sessionId, text, onRejected, operationId, origin, agentMuxNote, options) {
     // An explicit immediate click selects this original Run before any local wait.
     // Queue-only Enter remains unbound until its own explicit Send selection.
-    const binding = options?.execution === 'immediate' ? manualComposerBinding(sessionId, origin, options) : undefined
+    const binding = options?.execution === 'immediate' ? manualComposerBinding(sessionId, text, origin, options) : undefined
     return admitAgentSteer(sessionId, text, onRejected, operationId, origin, agentMuxNote, options, binding) !== false
   },
   async moveQueuedAgentSteerToDraft(sessionId, operationId, expectedText, expectedRunId, moteDraftKey) {
@@ -13516,7 +13515,7 @@ export const useAppStore = create<AppState>()<[['zustand/persist', PersistedAppS
     const session = get().sessions.find(item => item.id === sessionId)
     if (entry?.freshComposerIntent && !entry.resumeInputIntent && !entry.directInputBinding && !entry.inputIntakeStarted && entry.promptCondition === null &&
         get().agentSteerInFlight[sessionId] !== operationId && !entry.goalContinuation && !entry.goalPmo && !entry.goalDispatch) {
-      const binding = manualComposerBinding(sessionId, 'manual', { ...(entry.moteMain ? { moteMain: entry.moteMain } : {}), ...(entry.execution === undefined ? {} : { execution: entry.execution }), ...(entry.browserInput ? { browserInput: entry.browserInput } : {}), ...(entry.browserRecipient ? { browserRecipient: entry.browserRecipient } : {}) })
+      const binding = manualComposerBinding(sessionId, entry.text, 'manual', { ...(entry.moteMain ? { moteMain: entry.moteMain } : {}), ...(entry.execution === undefined ? {} : { execution: entry.execution }), ...(entry.browserInput ? { browserInput: entry.browserInput } : {}), ...(entry.browserRecipient ? { browserRecipient: entry.browserRecipient } : {}), ...(entry.inputImages ? { inputImages: entry.inputImages } : {}) })
       if (binding && session?.kind === 'agent') {
         entry = { ...entry, directInputBinding: binding, directInputControl: structuredClone(entry.browserRecipient ?? entry.browserInput?.control ?? session.control), runId: binding.expectedRun.runId, execution: 'immediate' }
         const selected = entry
@@ -14064,7 +14063,7 @@ export const useAppStore = create<AppState>()<[['zustand/persist', PersistedAppS
   send(sessionId, text, onRejected, origin, agentMuxNote, options) {
     // Admission transfers ownership from draft to queue; transport completion is a separate fact.
     const operationId = mintObjectId(), session = options?.originalSession ?? get().sessions.find(item => item.id === sessionId)
-    const binding = manualComposerBinding(sessionId, origin, options)
+    const binding = manualComposerBinding(sessionId, text, origin, options)
     const seed = startDeliveryAttempt({ agentSessionId: session?.kind === 'agent' ? session.control.agentSessionId : sessionId,
       operationId, hostId: session?.hostId ?? null, expectedRun: binding?.expectedRun, prompt: composeAgentPrompt(text, agentMuxNote).text })
     const reject = (error: unknown) => {
