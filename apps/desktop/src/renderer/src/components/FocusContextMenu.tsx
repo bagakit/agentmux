@@ -8,7 +8,7 @@ import type { FocusContext } from '../lib/focus-context'
 import { agentRosterMenuActions } from '../lib/agent-roster-menu'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { useAppStore } from '../store'
-import { FOCUS_AGENT_PIN_SCOPE, focusAgentPinKey, setFocusAgentPinned } from '../lib/focus-agent-pins'
+import { focusAgentPinKey, setFocusAgentPinned, type FocusAgentPinGroup } from '../lib/focus-agent-pins'
 import { AgentMenuIdentityActions } from './AgentMenuIdentityActions'
 import { createRegionCopyModel, regionCopyLinkActions, RegionMenuEntryView } from './RegionContextMenu'
 import { AgentSessionReadingSurface } from './AgentSessionReadingSurface'
@@ -46,19 +46,19 @@ export function FocusContextMenu(props: Parameters<typeof LocalFocusContextMenu>
 const PinInFocus = semanticIconComponent('action.pin')
 const UnpinFromFocus = semanticIconComponent('action.unpin')
 
-function FocusAgentPinItem({ pinKey }: { pinKey: string }) {
-  const pinned = useAppStore(state => state.pinnedItems[FOCUS_AGENT_PIN_SCOPE]?.includes(pinKey) === true)
+function FocusAgentPinItem({ group, pinKey }: { group: FocusAgentPinGroup; pinKey: string }) {
+  const pinned = useAppStore(state => state.pinnedItems[group.scope]?.includes(pinKey) === true) || group.originalPins.includes(pinKey)
   const Icon = pinned ? UnpinFromFocus : PinInFocus
-  return <ContextMenu.Item className="tab-context-menu__item" onSelect={() => setFocusAgentPinned(pinKey, !pinned)}>
-    <Icon size={14} aria-hidden="true" /><span>{pinned ? 'Unpin from Focus' : 'Pin in Focus'}</span>
+  return <ContextMenu.Item className="tab-context-menu__item" onSelect={() => setFocusAgentPinned(group, pinKey, !pinned)}>
+    <Icon size={14} aria-hidden="true" /><span>{pinned ? 'Unpin from group' : 'Pin in group'}</span>
   </ContextMenu.Item>
 }
 
-function LocalFocusContextMenu({ open, context, children, onOpenChange, onRename, onRestoreFocus, allowPin }: {
-  open: boolean; context: FocusContext; children: ReactNode; onOpenChange(open: boolean): void; onRename(): void; onRestoreFocus(): void; allowPin?: boolean | undefined
+function LocalFocusContextMenu({ open, context, children, onOpenChange, onRename, onRestoreFocus, pinGroup }: {
+  open: boolean; context: FocusContext; children: ReactNode; onOpenChange(open: boolean): void; onRename(): void; onRestoreFocus(): void; pinGroup?: FocusAgentPinGroup | undefined
 }) {
   const active = useWorkbenchPresentationActive()
-  const pinKey = open && allowPin ? focusAgentPinKey(context) : undefined
+  const pinKey = open && pinGroup ? focusAgentPinKey(context) : undefined
   const settings = useContext(SettingsNavigation)
   const activeRef = useRef(active); activeRef.current = active
   const sessionId = context.id
@@ -194,7 +194,7 @@ function LocalFocusContextMenu({ open, context, children, onOpenChange, onRename
                 Sub={ContextMenu.Sub} SubTrigger={ContextMenu.SubTrigger} SubContent={ContextMenu.SubContent} Portal={ContextMenu.Portal} /> : null,
               identityActions: <><ContextMenu.Item className="tab-context-menu__item" onSelect={() => {
               actionOwnsFocus.current = true; onRename()
-            }}><ThemeActionEditIcon size={14} /><span>Rename Agent</span></ContextMenu.Item>{pinKey ? <FocusAgentPinItem pinKey={pinKey} /> : null}</> }} />
+            }}><ThemeActionEditIcon size={14} /><span>Rename Agent</span></ContextMenu.Item>{pinKey && pinGroup ? <FocusAgentPinItem group={pinGroup} pinKey={pinKey} /> : null}</> }} />
         </WorkbenchMenuSubmit.Provider></WorkbenchMenuScope.Provider>
       </ContextMenu.Content>
     </DocumentOverlayPortal> : null}
@@ -205,9 +205,9 @@ function LocalFocusContextMenu({ open, context, children, onOpenChange, onRename
 
 
 /** The common menu body consumes source-qualified capabilities; no local Session lookup. */
-function SourceFocusContextMenu({ context, children, open, onOpenChange, onRename, onRestoreFocus, allowPin }: Parameters<typeof LocalFocusContextMenu>[0]) {
+function SourceFocusContextMenu({ context, children, open, onOpenChange, onRename, onRestoreFocus, pinGroup }: Parameters<typeof LocalFocusContextMenu>[0]) {
   const access = context.access!, active = useWorkbenchPresentationActive()
-  const pinKey = open && allowPin ? focusAgentPinKey(context) : undefined
+  const pinKey = open && pinGroup ? focusAgentPinKey(context) : undefined
   const [reading, setReading] = useState(false)
   const trigger = useRef<HTMLElement | null>(null), actionOwnsFocus = useRef(false)
   return <><ContextMenu.Root modal={false} open={active && open} onOpenChange={onOpenChange}>
@@ -237,7 +237,7 @@ function SourceFocusContextMenu({ context, children, open, onOpenChange, onRenam
           onCloseWorkface={access.close ? () => { actionOwnsFocus.current = true; access.close?.() } : undefined}
           extensions={{ workspace: <ContextMenu.Item className="tab-context-menu__item" onSelect={() => access.open()}>View in Space</ContextMenu.Item>,
             identityActions: <>{access.rename && access.nameRevision !== undefined ? <ContextMenu.Item className="tab-context-menu__item" onSelect={() => { actionOwnsFocus.current = true; onRename() }}><ThemeActionEditIcon size={14} /><span>Rename Agent</span></ContextMenu.Item> : null}
-              {pinKey ? <FocusAgentPinItem pinKey={pinKey} /> : null}</>,
+              {pinKey && pinGroup ? <FocusAgentPinItem group={pinGroup} pinKey={pinKey} /> : null}</>,
             observation: access.observation !== 'current' || access.issue ? <ContextMenu.Label className="agent-region-menu__notice">
               <InformationIcon size={14} /><span>{focusSourceObservationLabel(access.observation)}</span>
             </ContextMenu.Label> : undefined,

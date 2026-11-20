@@ -3,6 +3,7 @@ import { FocusCommunicationFeedback } from './FocusCommunicationFeedback'
 import type { FocusListActivity } from '../lib/focus-list-activity'
 import { memo, useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import type { FocusContext } from '../lib/focus-context'
+import type { FocusAgentPinGroup } from '../lib/focus-agent-pins'
 import { FocusContextMenu } from './FocusContextMenu'
 import { FocusCreationMark } from './FocusCreationConnections'
 import { FocusInteractionAge } from './FocusInteractionAge'
@@ -35,7 +36,7 @@ function moveTaskFocus(button: HTMLButtonElement, forward: boolean) {
   next?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
 }
 
-export const FocusContextRow = memo(function FocusContextRow({ context, identity, goalLinks, selected, compact = false, list = false, allowPin, resolvePreview, disclosure, onSelect, onOpenWorkface, topic, activity, interactionAt, creationLabel, creationMark }: { creationLabel?: string | undefined; creationMark?: boolean; interactionAt?: number | undefined; context: FocusContext; identity?: FocusContextIdentity | undefined; goalLinks?: GoalLinks | undefined; selected: boolean; compact?: boolean; list?: boolean; allowPin?: boolean | undefined; resolvePreview?: (() => FocusContext) | undefined; disclosure?: { status: number; summary: number } | undefined; onSelect(id: string): void; onOpenWorkface?: ((id: string) => void) | undefined; topic?: FocusTopicHeading | undefined; activity?: FocusListActivity | undefined }) {
+export const FocusContextRow = memo(function FocusContextRow({ context, identity, goalLinks, selected, compact = false, list = false, pinGroup, resolvePreview, disclosure, onSelect, onOpenWorkface, topic, activity, interactionAt, creationLabel, creationMark }: { creationLabel?: string | undefined; creationMark?: boolean; interactionAt?: number | undefined; context: FocusContext; identity?: FocusContextIdentity | undefined; goalLinks?: GoalLinks | undefined; selected: boolean; compact?: boolean; list?: boolean; pinGroup?: FocusAgentPinGroup | undefined; resolvePreview?: (() => FocusContext) | undefined; disclosure?: { status: number; summary: number } | undefined; onSelect(id: string): void; onOpenWorkface?: ((id: string) => void) | undefined; topic?: FocusTopicHeading | undefined; activity?: FocusListActivity | undefined }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [rename, setRename] = useState<{ name: string; revision: number; owner: FocusNameEditor } | null>(null)
   const [goalOpen, setGoalOpen] = useState(false)
@@ -90,6 +91,6 @@ export const FocusContextRow = memo(function FocusContextRow({ context, identity
       <AgentContextContent context={context} identity={hover.position} presentation="card" disclosure={disclosure} topic={topic} metadata={<>{creationMark && creationLabel ? <FocusCreationMark label={creationLabel} /> : null}{interactionAt ? <FocusInteractionAge at={interactionAt} /> : null}</>}
         headingAccessory={goalLinks ? <span className="focus-goal__space" aria-hidden="true"><FocusGoalMark links={goalLinks} /></span> : undefined} />}
   </button>
-  const main = context.kind === 'agent' ? <FocusContextMenu open={active && menuOpen} context={context} onOpenChange={setMenuOpen} onRestoreFocus={hover.suppressRestoredFocus} onRename={beginRename} allowPin={allowPin}>{card}</FocusContextMenu> : card
+  const main = context.kind === 'agent' ? <FocusContextMenu open={active && menuOpen} context={context} onOpenChange={setMenuOpen} onRestoreFocus={hover.suppressRestoredFocus} onRename={beginRename} pinGroup={pinGroup}>{card}</FocusContextMenu> : card
   return <><div className="focus-context-card">{main}{activity ? <FocusCommunicationFeedback activity={activity} /> : null}{context.kind === 'agent' && (context.access || context.control) ? <FocusTakeoverFeedback context={context} active={active} onOpen={hover.close} /> : null}{goalLinks ? <FocusGoalLinks links={goalLinks} onOpenChange={goalDisclosure} /> : null}</div></>
 })

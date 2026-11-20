@@ -1,7 +1,7 @@
 import { useMemo, useRef, type RefObject } from 'react'
 import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { focusAgentPinKey, focusAgentPinLabel, setFocusAgentPinned } from '../lib/focus-agent-pins'
+import { focusAgentPinKey, focusAgentPinLabel, setFocusAgentPinned, type FocusAgentPinGroup } from '../lib/focus-agent-pins'
 import type { FocusContext } from '../lib/focus-context'
 import { FocusContextStateMark } from './FocusContextState'
 
@@ -9,8 +9,8 @@ const Pin = semanticIconComponent('action.pin')
 const Unpin = semanticIconComponent('action.unpin')
 const Unavailable = semanticIconComponent('status.warning')
 
-export function FocusPinnedAgents({ pins, contexts, filtering, onOpen, searchRef }: {
-  pins: readonly string[]; contexts: readonly FocusContext[]; filtering: boolean
+export function FocusPinnedAgents({ group, name, pins, contexts, filtering, onOpen, searchRef }: {
+  group: FocusAgentPinGroup; name: string; pins: readonly string[]; contexts: readonly FocusContext[]; filtering: boolean
   onOpen(context: FocusContext): void; searchRef: RefObject<HTMLInputElement | null>
 }) {
   const region = useRef<HTMLElement>(null)
@@ -30,24 +30,25 @@ export function FocusPinnedAgents({ pins, contexts, filtering, onOpen, searchRef
     })
   }, [pins, contexts, filtering])
   if (!entries.length) return null
-  return <section ref={region} className="focus-agent-pins" aria-label="Pinned Agents">
-    <h3><Pin size={12} aria-hidden="true" />Pinned</h3>
+  return <section ref={region} className="focus-agent-pins" aria-label={`Pinned Agents · ${name}`} data-focus-pin-group={group.scope}>
+    <Pin className="focus-agent-pins__mark" size={12} aria-hidden="true" />
     <ul>
       {entries.map(({ key, context, label }) => <li key={key} data-focus-agent-pin="">
         {context ? <button type="button" className="focus-agent-pin__open" title={`${label} · ${context.workspaceName} · ${context.stateLabel}`}
           aria-label={`Open ${label} · ${context.workspaceName} · ${context.stateLabel}`} onClick={() => onOpen(context)}>
-          <FocusContextStateMark context={context} /><strong>{label}</strong><span className="focus-agent-pin__workspace">{context.workspaceName}</span>
+          <FocusContextStateMark context={context} /><strong>{label}</strong>
         </button> : <div className="focus-agent-pin__open" title={label}>
           <Unavailable size={13} aria-hidden="true" /><strong>{label}</strong><span>Unavailable</span>
         </div>}
-        <IconButton type="button" className="focus-agent-pin__remove" aria-label={`Unpin ${label} from Focus`} title="Unpin from Focus"
+        <IconButton type="button" className="focus-agent-pin__remove" aria-label={`Unpin ${label} from ${name}`} title="Unpin from group"
           onClick={event => {
             const origin = event.currentTarget, document = origin.ownerDocument
             const focused = document.activeElement === origin
-            setFocusAgentPinned(key, false)
+            const heading = region.current?.closest('.focus-project-lanes__track')?.querySelector<HTMLButtonElement>('[data-focus-project-scope-control]')
+            setFocusAgentPinned(group, key, false)
             if (focused) document.defaultView?.requestAnimationFrame(() => {
               if (origin.isConnected || document.activeElement !== document.body) return
-              const target = region.current?.querySelector<HTMLButtonElement>('button') ?? searchRef.current
+              const target = region.current?.querySelector<HTMLButtonElement>('button.focus-agent-pin__open') ?? heading ?? searchRef.current
               target?.focus({ preventScroll: true })
             })
           }}><Unpin size={13} aria-hidden="true" /></IconButton>

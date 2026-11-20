@@ -514,45 +514,42 @@ button.recent-focus__scope:focus-visible { color: var(--text); background: var(-
 .recent-focus__identity { display: flex; flex-direction: column; justify-content: center; min-width: 0; padding-inline-start: 12px; }
 .recent-focus__identity > small { padding-inline-start: 22px; }
 
-.focus-agent-pins { flex: none; padding: 4px var(--sp-2) var(--sp-2); border-block-end: 1px solid var(--line); }
-.focus-agent-pins h3 {
+.focus-agent-pins {
   display: flex;
-  align-items: center;
-  gap: var(--sp-1);
-  margin: 2px 0 5px;
-  color: var(--text-2);
-  font-size: var(--fs-micro);
-  font-weight: 600;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding: 2px var(--sp-2) 4px;
 }
+.focus-agent-pins__mark { flex: none; margin-block-start: 7px; color: var(--text-3); }
 .focus-agent-pins ul {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
   gap: var(--sp-1);
-  max-block-size: 112px;
+  max-block-size: 56px;
   margin: 0;
   padding: 0;
   overflow-y: auto;
   list-style: none;
 }
 .focus-agent-pins li {
-  container: focus-agent-pin / inline-size;
   display: flex;
   min-width: 0;
-  min-height: 30px;
+  max-inline-size: min(100%, 244px);
+  min-height: 26px;
   align-items: center;
   border: 1px solid var(--line-soft);
   border-radius: var(--radius-sm);
-  background: var(--surface-1);
+  background: transparent;
 }
 .focus-agent-pin__open {
-  display: grid;
-  grid-template-columns: 14px minmax(0, 1fr) minmax(0, auto);
+  display: flex;
   flex: 1;
   align-items: center;
   gap: 6px;
   min-width: 0;
-  min-height: 28px;
-  padding: 3px 6px;
+  min-height: 24px;
+  padding: 2px 6px;
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -563,13 +560,10 @@ button.recent-focus__scope:focus-visible { color: var(--text); background: var(-
 button.focus-agent-pin__open { cursor: pointer; }
 button.focus-agent-pin__open:hover { background: var(--surface-2); }
 .focus-agent-pin__open:focus-visible, .focus-agent-pins .focus-agent-pin__remove:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; }
-.focus-agent-pin__open .focus-state-mark { width: 14px; height: 14px; background: transparent; }
+.focus-agent-pin__open .focus-state-mark { flex: none; width: 14px; height: 14px; background: transparent; }
 .focus-agent-pin__open strong, .focus-agent-pin__open > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .focus-agent-pin__open strong { color: var(--text); font-weight: 550; }
 .focus-agent-pin__open > span:last-child { max-inline-size: 16ch; font-size: var(--fs-micro); }
-.focus-agent-pins .focus-agent-pin__remove { flex: none; width: 26px; min-height: 28px; margin-inline-end: 2px; color: var(--text-3); }
+.focus-agent-pins .focus-agent-pin__remove { flex: none; width: 24px; min-height: 24px; color: var(--text-3); }
 .focus-agent-pins .focus-agent-pin__remove:is(:hover, :focus-visible) { color: var(--text); }
-@container focus-agent-pin (max-width: 299px) {
-  .focus-agent-pin__workspace { display: none; }
-}
 [data-task-layout='list'] .focus-project-lanes__groups > .focus-context-group { width: 100%; min-width: 0; }

@@ -2,6 +2,7 @@ import { AgentWorkModeBadge } from './AgentWorkModeBadge'
 import { Fragment, useCallback, useLayoutEffect, useReducer, useRef, type ComponentPropsWithoutRef, type CSSProperties, type RefObject } from 'react'
 import { flushSync } from 'react-dom'
 import type { FocusContext } from '../lib/focus-context'
+import type { FocusAgentPinGroup } from '../lib/focus-agent-pins'
 import { focusContextIdentityKey, type FocusContextIdentity } from '../lib/focus-context-identity'
 import { focusGoalCardKey, type FocusGoalLinks } from '../lib/focus-goal-links'
 import { FocusContextCardBody } from './FocusContextCardBody'
@@ -84,7 +85,7 @@ function cardScrollport(scrollRef: RefObject<HTMLDivElement | null>, element: HT
 
 /** Slots stay in the natural CSS grid. Actual intersection controls only a
  * body's first creation; visited bodies retain their original React parent. */
-export function FocusContextCards({ contexts, viewport, scrollRef, visible, list = false, allowPin, layoutReady = true, replyLines = 2, selectedId, selectedKey, revealRequest, onRevealed, goalLinks, identities, onSelect, topics, sections, visits, activity, interactionTimes,
+export function FocusContextCards({ contexts, viewport, scrollRef, visible, list = false, pinGroup, layoutReady = true, replyLines = 2, selectedId, selectedKey, revealRequest, onRevealed, goalLinks, identities, onSelect, topics, sections, visits, activity, interactionTimes,
   creation, creationRows, onToggleCreation, onOpenRelated }: {
   creation?: FocusAgentCreations | undefined
   creationRows?: ReadonlyMap<string, FocusCreationRow> | undefined
@@ -95,7 +96,7 @@ export function FocusContextCards({ contexts, viewport, scrollRef, visible, list
   visits?: ReadonlyMap<string, number>
   contexts: readonly FocusContext[]; viewport: ReturnType<typeof createFocusCardViewport>; scrollRef: RefObject<HTMLDivElement | null>; visible: boolean
   list?: boolean
-  allowPin?: boolean
+  pinGroup?: FocusAgentPinGroup | undefined
   layoutReady?: boolean
   replyLines?: FocusReplyLines
   selectedKey?: string | undefined
@@ -261,7 +262,7 @@ export function FocusContextCards({ contexts, viewport, scrollRef, visible, list
       data-focus-card-body={full ? 'mounted' : 'pending'} data-focus-heat={focusContextHeat(context, visits ? focusContextVisit(context, visits) : undefined, Date.now())}
       data-focus-agent-host={context.control?.hostId ?? context.hostId} data-focus-agent-session={context.control?.agentSessionId ?? context.id}
       data-focus-presentation-session={context.id} data-focus-agent-selected={selected ? 'true' : undefined}>
-      {full ? <FocusContextCardBody context={context} list={list} allowPin={allowPin} topic={list ? topic : undefined} summaryActive={visible} goalLinks={goals}
+      {full ? <FocusContextCardBody context={context} list={list} pinGroup={pinGroup} topic={list ? topic : undefined} summaryActive={visible} goalLinks={goals}
         identity={identities.get(focusContextIdentityKey(context.hostId, context.id))} selected={selected} activity={activity?.get(focusListActivityKey(context))} interactionAt={interactionAt} creationLabel={creationLabel} creationMark={Boolean(creationLabel && (!list || parent && !branch?.depth && !branch?.childCount))} onSelect={onSelect} />
         : <button type="button" className={`focus-context focus-context--card${list ? ' focus-context--list' : ''}${selected ? ' is-selected' : ''}`}
           data-session-id={context.id} data-state={context.state} data-bucket={context.bucket} data-activity={context.activitySemantic}

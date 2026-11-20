@@ -9,8 +9,9 @@ import type { FocusLaneCounts, FocusLaneMetrics } from '../lib/focus-lane-layout
 import { resolveFocusTopicPresentation, type FocusReplyLines, type FocusTopicPresentation } from '../../../shared/focus-preferences'
 
 /** The actual scan and its settings example share grouping, state heads and Topic presentation. */
-export function FocusScanLaneContent({ lane, contexts, heading, metrics, replyLines = 2, topicPresentation = resolveFocusTopicPresentation(undefined), renderCards, list = false, compact = false, creation, visibleKeys, revealKey }: {
+export function FocusScanLaneContent({ lane, contexts, heading, pins, metrics, replyLines = 2, topicPresentation = resolveFocusTopicPresentation(undefined), renderCards, list = false, compact = false, creation, visibleKeys, revealKey }: {
   list?: boolean
+  pins?: ReactNode
   creation?: FocusAgentCreations | undefined
   visibleKeys?: ReadonlySet<string> | undefined
   revealKey?: string | undefined
@@ -62,7 +63,7 @@ export function FocusScanLaneContent({ lane, contexts, heading, metrics, replyLi
       const meta = FOCUS_BUCKET_PRESENTATION[bucket], Icon = meta.icon
       return <span className="focus-context-group__header" data-bucket={bucket} title={`${meta.label} · 0`} aria-label={`${meta.label} · 0`} key={bucket}><Icon size={12} aria-hidden="true" /></span>
     })}
-  </div></div>{contexts.length > 0 ? <FocusLaneGroups list={list} counts={counts} metrics={metrics} replyLines={replyLines} groupsRef={groupsRef}>{layout =>
+  </div></div>{pins}{contexts.length > 0 ? <FocusLaneGroups list={list} counts={counts} metrics={metrics} replyLines={replyLines} groupsRef={groupsRef}>{layout =>
     FOCUS_BUCKETS.map((bucket, index) => {
       const grouped = displayed[bucket]
       if (!grouped.length) return null
