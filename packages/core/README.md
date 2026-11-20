@@ -302,6 +302,8 @@ tar -xzf agentmux-core-<version>-linux-x64.tar.gz
 
 安装器把 Core 放进与远端升级相同的 `state/core-releases/<digest>/` 发行目录（含 `deployment.json` 与 `launcher/amux`），只用升级可以重建的环境启动 `serve`，最后打印要填入 Host「Connection options」的 Service command 与 Service socket path。已有 Core 在服务时不再启动第二个 owner；重复安装不删除状态、Session 或 Run。机器重启后执行打印出的 `start.sh`，之后的版本更新使用 Desktop 的 Core 升级。Agent CLI 必须在启动 Core 的用户 `PATH` 上。
 
+用 systemd 管理时，分别监督 `ctxmuxd` 和 `agentmux-runtime serve`。两者使用同一系统用户。Native 服务用原 socket、状态目录和随包二进制，Core 服务等原 socket 可连接后启动。启动检查直接观察 Unix socket，避免在 Native 启动期间由 CLI 再启动一个 daemon。更新 Core 后单独重启它，并核对原 ctxmux 实例、Run 和进程仍在；Native 更新按[原 Runtime 升级合同](../../docs/design/behavior/session-recovery.md#分层更新与回切)独立处理。
+
 ### 连接远端
 
 `connectHostedAgentMux` 是统一的公共 Runtime SDK，本地服务、SSH 与宿主 HTTP 连接使用同一服务合同；`connectSshAgentMux` 在它之上组合系统 SSH，客户端不会复制 Provider、Session Store 或 Run owner。独立的 Core Headless 服务和宿主服务共用同一个语义 owner，宿主额外注入私网、设备与 Desktop 能力。每次调用分别核验传输授权、持久 owner 和当前进程代次；托管 Agent 的 capability 不授予完整的 Runtime SDK 权限。Tailcat 与 Relay 端点通过 `connectAgentMuxRpc` 和 `amux --endpoint` 使用，见[公共 JSON-RPC 服务](#公共-json-rpc-服务)。
