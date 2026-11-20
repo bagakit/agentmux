@@ -6,6 +6,7 @@ import { resolve, relative } from 'node:path'
 
 const root = resolve(import.meta.dirname, '../../..')
 const variants = {
+  'drop-wire-reference': ['packages/core/src/agent-outbound-message.ts', 'if (focus) segments.push(focus.reference)', 'if (focus) segments.push(amuxEnvelope(focus.reference))'],
   'truncate-cohort': ['packages/core/src/focus-task-guidance.ts', 'offset < task.selection.references.length', 'offset < Math.min(task.selection.references.length, FOCUS_READ_MAX_REFERENCES)'],
   'broaden-empty': ['packages/core/src/focus-task-guidance.ts', "return [parseFocusParams('focus.read', task)]", "return [parseFocusParams('focus.read', { ...task, selection: { kind: 'all' } })]"],
   'unsafe-shell': ['packages/core/src/focus-task-guidance.ts', 'shellQuote(JSON.stringify(parsed))', 'JSON.stringify(parsed)'],

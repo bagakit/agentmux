@@ -5,9 +5,9 @@ import { resolve, relative } from 'node:path'
 import base from './vitest.focus-project-appearance.config.mts'
 const root = resolve(import.meta.dirname, '../../..')
 const mutations = {
-  'no-confirmation': ['renderer/src/lib/focus-group-task.ts', '${confirmation}', ''],
-  'wrong-project': ['renderer/src/components/FocusGroupDiscussion.tsx', 'openFocusGroupAgentLauncher(project, prompt, current)', 'openFocusGroupAgentLauncher(useAppStore.getState().config!.workspaces.find(p => p.id === useAppStore.getState().activeWorkspaceId)!, prompt, current)'],
-  'all-members': ['renderer/src/lib/focus-group-task.ts', 'const byKey = new Map(contexts.map', 'refs.splice(0, refs.length, ...contexts.map(context => ({hostId: context.hostId, id: context.id}))); const byKey = new Map(contexts.map']
+  'no-task': ['renderer/src/lib/focus-group-task.ts', "if (kind !== 'learn') return instructions[kind]", "if (kind !== 'learn') return 'Read the original Focus selection.'"],
+  'wrong-project': ['renderer/src/components/FocusGroupDiscussion.tsx', 'openFocusGroupAgentLauncher(project, prompt, current, focusTask)', 'openFocusGroupAgentLauncher(useAppStore.getState().config!.workspaces.find(p => p.id === useAppStore.getState().activeWorkspaceId)!, prompt, current, focusTask)'],
+  'stale-launcher-reference': ['renderer/src/store.ts', 'if (clearFocusReference) delete notes[owner]', 'if (false) delete notes[owner]']
 } as const
 const selected = process.env.AGENTMUX_FOCUS_GROUP_MUTANT as keyof typeof mutations | undefined
 if (selected && !mutations[selected]) throw Error('Unknown Focus group source inverse')

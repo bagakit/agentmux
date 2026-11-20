@@ -142,6 +142,27 @@ it('New Agent prepares the exact non-active project Launcher with its own prompt
   expect(state.agentSteerQueues['main-ui']).toBeUndefined()
 })
 
+it('keeps the reference while editing and detaches it when replacing the Launcher draft', async () => {
+  const before = useAppStore.getState()
+  await showGroup(); await chooseNewAgent()
+  await click('[data-mote-task-action-id="learn"]')
+  const state = useAppStore.getState()
+  const launcher = Object.values(state.tabs).find(tab => !before.tabs[tab.id])!
+  const region = launcher.layout.activeRegionId
+  const note = state.agentComposerNotes[region]
+  expect(note).toContain('local/first、local/second')
+  expect(state.agentComposerDrafts[region]).toContain('对本项目后续工作有用的方法')
+  expect(state.agentComposerDrafts[region]).not.toContain('与你职责相关')
+  await act(async () => state.setAgentComposerDraft(region, state.agentComposerDrafts[region] + '\n补充一个例子。'))
+  expect(useAppStore.getState().agentComposerNotes[region]).toBe(note)
+  await act(async () => {
+    state.setAgentComposerDraft(region, '')
+    state.setAgentComposerDraft(region, 'Write a standalone project README.')
+  })
+  expect(useAppStore.getState().agentComposerDrafts[region]).toBe('Write a standalone project README.')
+  expect(useAppStore.getState().agentComposerNotes[region]).toBeUndefined()
+})
+
 it('the exact Launcher adapter rejects changed or same-ID cross-Host resources without borrowing the active project', () => {
   const before = useAppStore.getState()
   expect(() => openFocusGroupAgentLauncher({ ...project, hostId: 'different-host' }, 'Original task', () => true)).toThrow('selected project')
