@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { delimiter, dirname, join } from 'node:path'
 import { CTXMUX_VERSION } from './ctxmux-run-adapter.js'
 import { AgentMuxError } from './errors.js'
-import { removeHostColorSignals } from './terminal-environment-policy.js'
+import { AGENTMUX_TERMINAL_PROGRAM, removeHostColorSignals } from './terminal-environment-policy.js'
 import { defaultAgentMuxMessageQueuePath, defaultAgentMuxStateDirectory, resolveCoreBinPath } from './runtime-paths.js'
 import type { AgentProviderId, AgentMuxAgentSession, AgentMuxRunRef, AgentTerminalHandshake } from './types.js'
 const AGENTMUX_CLI_PATH = resolveCoreBinPath('amux')
@@ -53,7 +53,7 @@ export function terminalEnvironment(
   const resolved: Record<string, string> = {
     TERM: 'xterm-256color',
     COLORTERM: 'truecolor',
-    TERM_PROGRAM: 'AgentMux',
+    TERM_PROGRAM: AGENTMUX_TERMINAL_PROGRAM,
     // Bound to the SHA-verified vendored runtime version, not a hand-copied literal — see
     // CTXMUX_VERSION in ctxmux-run-adapter.ts. Bumping the vendored artifact must not leave this
     // TERM_PROGRAM_VERSION frozen at a stale string.

@@ -49,7 +49,7 @@ import { projectRunStorageFacts, projectStorageFailure, type AgentMuxRunStorageF
 import { classifyReplayGap } from './ctxmux-replay-gap.js'
 import { classifyStreamEnd } from './ctxmux-stream-end.js'
 import { probeSocketLiveness } from './socket-liveness.js'
-import { missingHostEnvironmentKeys, removeInheritedHostSignals } from './terminal-environment-policy.js'
+import { AGENTMUX_TERMINAL_PROGRAM, missingHostEnvironmentKeys, removeInheritedHostSignals } from './terminal-environment-policy.js'
 import type { AgentMuxRuntimeCompatibilityInput, AgentMuxRunInputData, AgentMuxRuntimeResourceSnapshot, AgentMuxRunAttachmentView, AgentMuxTerminalContinuation, AgentMuxNativeService, AgentMuxNativeServiceFailure, AgentMuxOutputGapCauses, AgentMuxAttachmentGapObservation } from './types.js'
 import {
   CTXMUX_MANIFEST_SHA256,
@@ -329,7 +329,7 @@ function localProcessEnvironment(): Record<string, string> {
     ...process.env,
     TERM: 'xterm-256color',
     COLORTERM: 'truecolor',
-    TERM_PROGRAM: 'AgentMux',
+    TERM_PROGRAM: AGENTMUX_TERMINAL_PROGRAM,
     // Same SHA-verified source as everywhere else — CTXMUX_VERSION is asserted against manifest.json
     // above; a hand-copied '0.1.0' here would drift on the next artifact bump.
     TERM_PROGRAM_VERSION: CTXMUX_VERSION,
