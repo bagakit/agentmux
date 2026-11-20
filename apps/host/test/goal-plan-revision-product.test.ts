@@ -221,31 +221,35 @@ it('returns a human executor change and independent review with their original T
   expect(f.owner.native.stop).not.toHaveBeenCalled()
 })
 
+const resultEvidence = (attempt: string) => ['checks/' + attempt + '.log']
+async function deliverPlanResult(owner: Awaited<ReturnType<typeof fixture>>['owner'], goalId: string,
+  target: Awaited<ReturnType<typeof fixture>>['node'], attempt: string, alignmentRevision: number, outcome: 'gap' | 'met', verdict: 'pass' | 'changes') {
+  await owner.call('supervisor', ['goal', 'delegate', '--input', '-'], { goalId, intent: {
+    operationId: attempt, sourceMessageId: attempt + '-source', threadId: attempt + '-thread', hostId: 'local',
+    ownerAgentSessionId: 'supervisor', ownerRunId: 'run-supervisor', workerAgentSessionId: 'worker-a', workerRunId: 'run-worker-a',
+    text: target.outcome, alignmentRevision, criterionIds: target.criterionIds, planNodeId: target.id,
+  } })
+  const replyMessageId = attempt + '-reply'
+  const reported = await owner.call('worker-a', ['goal', 'report', '--input', '-'], { goalId, operationId: attempt, report: {
+    operationId: attempt + '-report', replyMessageId, authorAgentSessionId: 'worker-a',
+    grounding: { alignmentRevision, summary: attempt, checks: target.criterionIds.map(criterionId =>
+      ({ criterionId, outcome, evidence: resultEvidence(attempt), note: outcome === 'gap' ? attempt + ' found a remaining problem' : '' })) },
+  } })
+  const deliveryHash = reported.delegations.find((value: { operationId: string }) => value.operationId === attempt).report.delivery.hash
+  await owner.call('supervisor', ['goal', 'collect', '--input', '-'], { goalId, operationId: attempt,
+    collection: { operationId: attempt + '-collection', replyMessageId } })
+  return owner.call('reviewer', ['goal', 'plan', 'review', '--input', '-'], { goalId, review: {
+    operationId: attempt + '-review', nodeId: target.id, delegationOperationId: attempt, deliveryHash, verdict,
+    check: { command: target.check, result: 'Reviewed this delivery', evidence: resultEvidence(attempt) },
+    note: verdict === 'changes' ? 'Resolve the reported gap' : '',
+  } })
+}
+
 it('reads current result evidence from reviewed Ticket attempts through the Goal CLI and Host', async () => {
   const { owner, goalId, node, read } = await fixture()
   const inspect = () => owner.call(null, ['goal', 'inspect', '--goal', goalId])
-  const evidence = (attempt: string) => ['checks/' + attempt + '.log']
-  const deliver = async (target: typeof node, attempt: string, alignmentRevision: number, outcome: 'gap' | 'met', verdict: 'pass' | 'changes') => {
-    await owner.call('supervisor', ['goal', 'delegate', '--input', '-'], { goalId, intent: {
-      operationId: attempt, sourceMessageId: attempt + '-source', threadId: attempt + '-thread', hostId: 'local',
-      ownerAgentSessionId: 'supervisor', ownerRunId: 'run-supervisor', workerAgentSessionId: 'worker-a', workerRunId: 'run-worker-a',
-      text: target.outcome, alignmentRevision, criterionIds: target.criterionIds, planNodeId: target.id,
-    } })
-    const replyMessageId = attempt + '-reply'
-    const reported = await owner.call('worker-a', ['goal', 'report', '--input', '-'], { goalId, operationId: attempt, report: {
-      operationId: attempt + '-report', replyMessageId, authorAgentSessionId: 'worker-a',
-      grounding: { alignmentRevision, summary: attempt, checks: target.criterionIds.map(criterionId =>
-        ({ criterionId, outcome, evidence: evidence(attempt), note: outcome === 'gap' ? attempt + ' found a remaining problem' : '' })) },
-    } })
-    const deliveryHash = reported.delegations.find((value: { operationId: string }) => value.operationId === attempt).report.delivery.hash
-    await owner.call('supervisor', ['goal', 'collect', '--input', '-'], { goalId, operationId: attempt,
-      collection: { operationId: attempt + '-collection', replyMessageId } })
-    return owner.call('reviewer', ['goal', 'plan', 'review', '--input', '-'], { goalId, review: {
-      operationId: attempt + '-review', nodeId: target.id, delegationOperationId: attempt, deliveryHash, verdict,
-      check: { command: target.check, result: 'Reviewed this delivery', evidence: evidence(attempt) },
-      note: verdict === 'changes' ? 'Resolve the reported gap' : '',
-    } })
-  }
+  const evidence = resultEvidence
+  const deliver = deliverPlanResult.bind(undefined, owner, goalId)
   const originalGap = await deliver(node, 'first-gap', 1, 'gap', 'changes')
   expect(originalGap.grounding.checks[0]).toMatchObject({ outcome: 'gap', evidence: evidence('first-gap') })
   const reworked = await deliver(node, 'current-rework', 1, 'met', 'pass')
@@ -309,4 +313,94 @@ it('retains an unaccepted Done result without a Goal plan', async () => {
   expect(inspected.goal).toMatchObject({ status: 'done', grounding: { ...proposal, acceptedAt: null } })
   expect(inspected.goal.plan).toBeUndefined()
   expect((await owner.call(null, ['goal', 'plan', '--goal', goal.id])).grounding).toEqual(updated.goal.grounding)
+})
+
+it('keeps independent Goal and PMO results in the exact current submission through the CLI', async () => {
+  const { owner, goalId, node, read } = await fixture()
+  await owner.call('supervisor', ['goal', 'confirm', '--goal', goalId, '--revision', '1'])
+  const reviewed = await deliverPlanResult(owner, goalId, node, 'verified-ticket', 1, 'met', 'pass')
+  const accept = (id: string, ...flags: string[]) => ['goal', 'accept', '--goal', goalId, '--revision', '1', '--submission', id, ...flags]
+  const update = (grounding: unknown) => owner.call(null, ['goal', 'update', '--goal', goalId, '--grounding', JSON.stringify(grounding)])
+  const goalReport = (label: string, outcome: 'met' | 'gap', evidence = resultEvidence(label)) => ({
+    alignmentRevision: 1, summary: label, checks: [{ criterionId: 'original', outcome, evidence, note: outcome === 'gap' ? label + ' remains open' : '' }],
+  })
+  const before = reviewed.grounding
+  const direct = (await update(goalReport('independent-direct', 'gap'))).goal.grounding
+  expect(direct.checks).toMatchObject([{ outcome: 'gap', evidence: [...resultEvidence('verified-ticket'), ...resultEvidence('independent-direct')] }])
+  expect((await owner.rpc.call('goal.ls', { goalId })).goals[0]?.grounding).toEqual(direct)
+  expect((await owner.cli(null, accept(before.submissionId))).stderr).toContain('results changed')
+  expect((await owner.cli(null, accept(direct.submissionId))).stderr).toContain('remaining gaps')
+  const unsupported = (await update(goalReport('unsupported-gap', 'gap', []))).goal.grounding
+  expect(unsupported.checks[0].outcome).toBe('unknown')
+  expect((await owner.cli(null, accept(unsupported.submissionId, '--accept-gaps'))).stderr).toContain('unknown')
+  const current = (await update(goalReport('independent-direct', 'gap'))).goal.grounding
+
+  const operationId = 'original-unreported-execution'
+  await owner.call('supervisor', ['goal', 'delegate', '--input', '-'], { goalId, intent: {
+    operationId, sourceMessageId: operationId + '-source', threadId: operationId + '-thread', hostId: 'local',
+    ownerAgentSessionId: 'supervisor', ownerRunId: 'run-supervisor', workerAgentSessionId: 'worker-b', workerRunId: 'run-worker-b',
+    text: 'Check the independent original Goal result', alignmentRevision: 1, criterionIds: ['original'],
+  } })
+  const execution = { kind: 'delegation', operationId, hostId: 'local', agentSessionId: 'worker-b', runId: 'run-worker-b' }
+  const work = () => owner.call('supervisor', ['goal', 'delegations', '--goal', goalId])
+  const scope = (await work()).responsibility.scope
+  expect(JSON.parse(scope).grounding).toBe(current.submissionId)
+  const reviewProgress = { operationId: 'manager-current-result', expectedScope: scope, execution, phase: 'review',
+    summary: 'Manager checked this exact Goal result', evidence: resultEvidence('independent-direct'), nextAction: 'Review the exact evidence' }
+  const progressArgs = ['goal', 'progress', '--input', '-']
+  const staleProgress = await owner.cli('supervisor', progressArgs, { goalId, progress: { ...reviewProgress, groundingSubmissionId: before.submissionId } })
+  expect(staleProgress.stderr).toContain('current result explicitly associated')
+  await owner.call('supervisor', progressArgs, { goalId, progress: { ...reviewProgress, groundingSubmissionId: current.submissionId } })
+
+  const patrolId = 'original-current-inspection'
+  const requested = await owner.call(null, ['goal', 'patrol', '--goal', goalId, '--operation-id', patrolId])
+  const patrol = requested.patrols.find((item: { operationId: string }) => item.operationId === patrolId)
+  const frozen = JSON.parse(patrol.context)
+  expect(frozen.groundingSubmissionId).toBe(current.submissionId)
+  expect(JSON.parse(patrol.expectedScope).grounding).toBe(current.submissionId)
+  const pmoReport = goalReport('independent-pmo', 'gap')
+  const finished = await owner.call('supervisor', ['goal', 'patrol', 'report', '--input', '-'], { goalId, patrolOperationId: patrolId, report: {
+    operationId: 'original-inspection-report', summary: 'Actual PMO inspection', grounding: pmoReport,
+    progress: [{ ...reviewProgress, operationId: 'pmo-result-association', expectedScope: patrol.expectedScope, evidence: resultEvidence('independent-pmo') }],
+    nextOwner: { kind: 'human', agentSessionId: null, action: 'Read the original independent inspection' },
+  } })
+  const pmo = finished.grounding
+  expect(pmo.checks).toMatchObject([{ outcome: 'gap', evidence: [...resultEvidence('verified-ticket'), ...resultEvidence('independent-pmo')] }])
+  expect(finished.progressUpdates.find((item: { operationId: string }) => item.operationId === 'pmo-result-association'))
+    .toMatchObject({ managerVerified: true, groundingSubmissionId: pmo.submissionId })
+  expect(finished.patrols.find((item: { operationId: string }) => item.operationId === patrolId))
+    .toMatchObject({ context: patrol.context, expectedScope: patrol.expectedScope, report: { applied: true, grounding: pmoReport } })
+  expect((await read()).grounding).toEqual(pmo)
+  const inspected = await owner.call(null, ['goal', 'inspect', '--goal', goalId])
+  expect(inspected.goal.grounding).toEqual(pmo)
+  expect((await owner.cli(null, accept(pmo.submissionId))).stderr).toContain('remaining gaps')
+  const accepted = await owner.call(null, accept(pmo.submissionId, '--accept-gaps'))
+  expect(accepted.receipt).toMatchObject({ submissionId: pmo.submissionId, acceptedWithGaps: true })
+  expect((await update(pmoReport)).goal.grounding).toEqual(accepted.goal.grounding)
+
+  await owner.call('supervisor', ['goal', 'plan', 'append', '--goal', goalId, '--alignment-revision', '1', '--operation-id', 'append-unverified',
+    '--runtime', reviewed.address.runtimeId, '--namespace', reviewed.address.namespace, '--input', '-'], {
+    nodes: [{ ...node, id: 'unverified', title: 'Independent work still needs review' }],
+  })
+  expect((await read()).grounding).toEqual(accepted.goal.grounding)
+  const pending = (await update(goalReport('positive-goal-report', 'met'))).goal.grounding
+  expect(pending.checks[0]).toMatchObject({ outcome: 'unknown', evidence: expect.arrayContaining(resultEvidence('positive-goal-report')) })
+  expect((await owner.cli(null, accept(pending.submissionId, '--accept-gaps'))).stderr).toContain('unknown')
+
+  const lateId = 'inspection-before-plan-change'
+  const lateRequest = await owner.call(null, ['goal', 'patrol', '--goal', goalId, '--operation-id', lateId])
+  const late = lateRequest.patrols.find((item: { operationId: string }) => item.operationId === lateId)
+  const newer = await owner.call('supervisor', ['goal', 'plan', 'append', '--goal', goalId, '--alignment-revision', '1', '--operation-id', 'append-during-inspection',
+    '--runtime', reviewed.address.runtimeId, '--namespace', reviewed.address.namespace, '--input', '-'], {
+    nodes: [{ ...node, id: 'added-during-inspection', title: 'Added during original inspection' }],
+  })
+  expect(newer.grounding.submissionId).not.toBe(pending.submissionId)
+  const lateResult = await owner.call('supervisor', ['goal', 'patrol', 'report', '--input', '-'], { goalId, patrolOperationId: lateId, report: {
+    operationId: 'late-inspection-report', summary: 'The original inspection finished after a plan change',
+    grounding: goalReport('late-pmo', 'met'), progress: [],
+    nextOwner: { kind: 'human', agentSessionId: null, action: 'Read the retained original inspection' },
+  } })
+  expect(lateResult.grounding).toEqual(newer.grounding)
+  expect(lateResult.patrols.find((item: { operationId: string }) => item.operationId === lateId))
+    .toMatchObject({ context: late.context, expectedScope: late.expectedScope, report: { applied: false, grounding: goalReport('late-pmo', 'met') } })
 })
