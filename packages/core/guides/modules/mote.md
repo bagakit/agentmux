@@ -98,6 +98,15 @@ and observed delivery. A private Thread replies with the command attached to its
 addressed input. The reply stays in the private thread. Keep each original
 operation and exact request when checking an uncertain result.
 
+For a user-authorized timed assignment, `direct schedule` takes the same
+`mote`, `peer`, `operationId` and `body`, plus one timing form from
+`amux schedule create --help`. The original Host schedules a turn in this
+Main. On that turn use the exact due reference and the included assignment
+to send privately. A schedule receipt confirms the arrangement. Read the
+private Thread to confirm the separate delivery and any reply. If the
+original Main changes, inspect or pause its existing schedule before
+arranging future work from the new Main.
+
 ## Know your part in this Mote
 
 [supervision](../shared/mote-supervision.md "amux:include")
