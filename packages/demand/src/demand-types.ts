@@ -123,6 +123,8 @@ export type Demand = {
   decisions: DemandDecision[]
   alignment?: DemandAlignment
   grounding?: DemandGrounding
+  /** Original Goal report retained when a combined result is accepted. */
+  acceptedGroundingSource?: DemandGrounding
   createdAt: number
   updatedAt: number
 }

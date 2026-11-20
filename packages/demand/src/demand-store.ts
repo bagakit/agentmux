@@ -48,7 +48,7 @@ import { assertIssuedGoalTicket, freezeGoalTicketDependencies, issueGoalTickets 
 import type { GoalTicketProof, GoalTicketSigner } from './goal-ticket-proof.js'
 import { demandNameContext, parseDemandNameChange } from './demand-name-change.js'
 import { alignmentConfirmationIssue, deriveBoundGoalId, groundingAcceptanceIssue, parseAlignment, parseAlignmentProposal, parseGrounding, parseGroundingProposal, type DemandAlignmentConfirmer, type DemandAlignmentProposal, type DemandGroundingProposal } from './goals.js'
-import { currentGoalGrounding } from './goal-grounding.js'
+import { currentGoalGrounding, independentGoalGrounding } from './goal-grounding.js'
 
 const requireNative = createRequire(import.meta.url)
 const WRITER_LOCK_MARKER = 'agentmux.demand-writer-lock.v1\n'
@@ -217,9 +217,10 @@ function parseDemand(value: unknown, label: string): Demand {
     'decisions',
     'alignment',
     'grounding',
+    'acceptedGroundingSource',
     'createdAt',
     'updatedAt',
-  ], label, ['tags', 'plannedStartAt', 'targetAt', 'parentDemandId', 'phaseIndex', 'alignment', 'grounding', 'contentRefs', 'assigneeSessionIds', 'supervisorSessionId', 'participations', 'creationOrigin', 'discussionOperationId', 'discussionIntent', 'discussionInputs', 'dispatches', 'delegations', 'progressUpdates', 'patrols', 'plan'])
+  ], label, ['tags', 'plannedStartAt', 'targetAt', 'parentDemandId', 'phaseIndex', 'alignment', 'grounding', 'acceptedGroundingSource', 'contentRefs', 'assigneeSessionIds', 'supervisorSessionId', 'participations', 'creationOrigin', 'discussionOperationId', 'discussionIntent', 'discussionInputs', 'dispatches', 'delegations', 'progressUpdates', 'patrols', 'plan'])
   if (!isDemandStatus(record.status)) throw new Error(`${label}.status is invalid`)
   if (!isDemandPriority(record.priority)) throw new Error(`${label}.priority is invalid`)
   if (!Array.isArray(record.activities)) throw new Error(`${label}.activities must be an array`)
@@ -266,6 +267,7 @@ function parseDemand(value: unknown, label: string): Demand {
     decisions: record.decisions.map((entry, index) => parseDecision(entry, `${label}.decisions[${index}]`)),
     ...(record.alignment === undefined ? {} : { alignment: parseAlignment(record.alignment) }),
     ...(record.grounding === undefined ? {} : { grounding: parseGrounding(record.grounding) }),
+    ...(record.acceptedGroundingSource === undefined ? {} : { acceptedGroundingSource: parseGrounding(record.acceptedGroundingSource) }),
     createdAt: timestamp(record.createdAt, `${label}.createdAt`),
     updatedAt: timestamp(record.updatedAt, `${label}.updatedAt`),
   }
@@ -611,8 +613,9 @@ export class DemandStore {
       this.rejectDelegation('External waiting needs an observed original state basis and evidence for its condition; existing Agent input remains available.')
     if (input.phase === 'review') {
       const delegation = input.execution.kind === 'delegation' ? goal.delegations?.find(item => item.operationId === input.execution.operationId) : undefined
-      const grounding = managerVerified && input.groundingSubmissionId && goal.grounding?.submissionId === input.groundingSubmissionId && goal.grounding.alignmentRevision === goal.alignment?.revision
-      if (!delegation?.report && !grounding) this.rejectDelegation('Review requires this worker report or a current result explicitly associated by its manager. Goal-level result timing is not attribution.')
+      const grounding = managerVerified && input.groundingSubmissionId ? currentGoalGrounding(goal) : undefined
+      const associated = grounding && grounding.submissionId === input.groundingSubmissionId && grounding.alignmentRevision === goal.alignment?.revision
+      if (!delegation?.report && !associated) this.rejectDelegation('Review requires this worker report or a current result explicitly associated by its manager. Goal-level result timing is not attribution.')
     }
     if (input.handoffExecution) {
       const target = demandExecutionReferences(goal).find(ref => sameDemandExecution(ref, input.handoffExecution!))
@@ -721,14 +724,15 @@ export class DemandStore {
       const now = Date.now()
       if (applied) {
         if (report.grounding) goal.grounding = { ...report.grounding, submissionId: mintObjectId(), acceptedAt: null }
+        const grounding = currentGoalGrounding(goal)
         for (const declared of report.progress) {
-          const update = declared.phase === 'review' && !declared.groundingSubmissionId && goal.grounding ? { ...declared, groundingSubmissionId: goal.grounding.submissionId } : declared
+          const update = declared.phase === 'review' && !declared.groundingSubmissionId && grounding ? { ...declared, groundingSubmissionId: grounding.submissionId } : declared
           this.applyProgress(goal, update, { author: { kind: 'agent', id: author.agentSessionId }, reportingRunId: author.runId, reviewForHuman: report.nextOwner.kind === 'human' },
             bases.get(JSON.stringify(update.execution)) ?? { stateEnteredAt: null, activityRevision: null, inputSubmissionId: null })
           const delegation = update.execution.kind === 'delegation' && update.phase === 'review' ? goal.delegations?.find(d => d.operationId === update.execution.operationId) : undefined
           if (delegation?.report && !delegation.collection) delegation.collection = { operationId: 'patrol-collect:' + report.operationId + ':' + delegation.operationId,
             replyMessageId: delegation.report.replyMessageId, collector: { kind: 'agent', id: author.agentSessionId }, collectedAt: now,
-            ...(goal.grounding ? { groundingSubmissionId: goal.grounding.submissionId } : {}) }
+            ...(grounding ? { groundingSubmissionId: grounding.submissionId } : {}) }
         }
         if (report.status !== undefined) goal.status = report.status
       }
@@ -765,7 +769,7 @@ export class DemandStore {
         ...(expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt }), rejection }
         : { ...request, execution: 'finite', stage: 'requested', prompt: demand.description.trim() || demand.title,
           request: { requestedAt, goalUpdatedAt, ...(requestedBy ? { requestedBy } : {}) }, resultBasis: { alignmentRevision: demand.alignment?.revision ?? null,
-            criteria: clone(demand.alignment?.criteria ?? []), groundingSubmissionId: demand.grounding?.submissionId ?? null } }
+            criteria: clone(demand.alignment?.criteria ?? []), groundingSubmissionId: currentGoalGrounding(demand)?.submissionId ?? null } }
       demand.dispatches = [...(demand.dispatches ?? []), saved]
       demand.updatedAt = Math.max(requestedAt, demand.updatedAt + 1)
       return demand
@@ -795,7 +799,7 @@ export class DemandStore {
       }
       demand.dispatches = [...(demand.dispatches ?? []), { ...intent, stage: 'prepared', preparedAt: Date.now(),
         ...(intent.execution === 'finite' ? { resultBasis: { alignmentRevision: demand.alignment?.revision ?? null,
-          criteria: clone(demand.alignment?.criteria ?? []), groundingSubmissionId: demand.grounding?.submissionId ?? null } } : {}) }]
+          criteria: clone(demand.alignment?.criteria ?? []), groundingSubmissionId: currentGoalGrounding(demand)?.submissionId ?? null } } : {}) }]
       demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
       return demand
     }, undefined, intent.operationId)
@@ -1442,10 +1446,11 @@ export class DemandStore {
           if (!alignment || proposal.alignmentRevision !== alignment.revision) throw new Error('Grounding must reference the current goal revision.')
           const criterionIds = new Set(alignment.criteria.map(criterion => criterion.id))
           if (proposal.checks.some(check => !criterionIds.has(check.criterionId))) throw new Error('Grounding references an unknown success criterion.')
-          const current = demand.grounding
-          const content = current && { alignmentRevision: current.alignmentRevision, summary: current.summary, checks: current.checks }
-          if (JSON.stringify(proposal) !== JSON.stringify(content)) {
+          const matches = (saved: Demand['grounding']) => saved && isDeepStrictEqual(proposal,
+            { alignmentRevision: saved.alignmentRevision, summary: saved.summary, checks: saved.checks })
+          if (!matches(demand.grounding) && !matches(demand.acceptedGroundingSource)) {
             demand.grounding = { ...proposal, submissionId: mintObjectId(), acceptedAt: null }
+            delete demand.acceptedGroundingSource
           }
         }
       } catch (error) {
@@ -1595,6 +1600,9 @@ export class DemandStore {
       if (issue) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, issue)
       if (grounding.acceptedAt === null) {
         const acceptedAt = Date.now()
+        const original = independentGoalGrounding(demand)
+        delete demand.acceptedGroundingSource
+        if (original && original.submissionId !== grounding.submissionId) demand.acceptedGroundingSource = original
         demand.grounding = { ...grounding, acceptedAt }
         demand.activities.push({ id: mintObjectId(), kind: 'results-accepted', message: acceptGaps ? 'User accepted these results while retaining the reported gaps.' : 'User accepted these results.', createdAt: acceptedAt, actorId: null })
       }

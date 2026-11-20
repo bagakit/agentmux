@@ -3,7 +3,19 @@ import type { Demand } from './demand-types.js'
 import { projectGoalPlan, type GoalPlanProjection } from './goal-plan.js'
 import { isDemandEvidenceReference, type DemandEvidence, type DemandGrounding, type DemandGroundingCheck } from './goals.js'
 
-type GoalGroundingFacts = Pick<Demand, 'id' | 'alignment' | 'grounding' | 'plan' | 'delegations'>
+type GoalGroundingFacts = Pick<Demand, 'id' | 'alignment' | 'grounding' | 'plan' | 'delegations' | 'patrols'>
+
+/** Distinguish an original Goal report from the prior flat collection of worker reports. */
+export function independentGoalGrounding(goal: GoalGroundingFacts): DemandGrounding | undefined {
+  const { alignment, grounding, delegations, patrols } = goal
+  if (!alignment || !grounding || grounding.alignmentRevision !== alignment.revision || grounding.acceptedAt !== null) return undefined
+  if (!delegations?.some(attempt => attempt.collection?.groundingSubmissionId === grounding.submissionId)) return grounding
+  // A patrol could attach this same Goal report to a collected worker. The original
+  // applied inspection, with its full reported check content, remains on the Goal.
+  const { alignmentRevision, summary, checks } = grounding
+  return patrols?.some(({ report }) => report?.applied &&
+    JSON.stringify(report.grounding) === JSON.stringify({ alignmentRevision, summary, checks })) ? grounding : undefined
+}
 
 /** Reuse the Demand owner's current attempts and receipts without rewriting original reports. */
 export function currentGoalGrounding(goal: GoalGroundingFacts, projection?: GoalPlanProjection): DemandGrounding | undefined {
@@ -40,10 +52,20 @@ export function currentGoalGrounding(goal: GoalGroundingFacts, projection?: Goal
     }
   }
 
+  const independent = independentGoalGrounding(goal)
+  const independentChecks = new Map(independent?.checks.map(check => [check.criterionId, check]))
   const checks = alignment.criteria.map(({ id }): DemandGroundingCheck => {
     const contributions = byCriterion.get(id) ?? []
     const resolved = new Set(contributions.flatMap(source => source.replaces))
-    const sources = contributions.filter(source => source.outcome !== 'gap' || !resolved.has(source.nodeId))
+    const sources: DemandGroundingCheck[] = contributions.filter(source => source.outcome !== 'gap' || !resolved.has(source.nodeId))
+    const check = independentChecks.get(id)
+    if (independent && check) {
+      const supported = check.evidence.length > 0 && check.evidence.every(isDemandEvidenceReference) &&
+        (check.outcome !== 'gap' || Boolean(check.note.trim()))
+      sources.push({ ...check, outcome: supported ? check.outcome : 'unknown',
+        note: [`Independent Goal report ${independent.submissionId}.`, check.note,
+          !supported && check.outcome !== 'unknown' ? 'The reported outcome needs locatable evidence and any gap needs a description.' : ''].filter(Boolean).join(' ') })
+    }
     if (!sources.length) return { criterionId: id, outcome: 'unknown', evidence: [], note: 'No current Ticket verifies this success criterion.' }
     const evidence = new Map<string, DemandEvidence>()
     for (const source of sources) for (const ref of source.evidence) evidence.set(JSON.stringify(ref), ref)
@@ -51,6 +73,8 @@ export function currentGoalGrounding(goal: GoalGroundingFacts, projection?: Goal
       outcome: sources.some(source => source.outcome === 'unknown') ? 'unknown' : sources.some(source => source.outcome === 'gap') ? 'gap' : 'met',
       evidence: [...evidence.values()], note: sources.map(source => source.note).join('\n') }
   })
-  const proposal = { alignmentRevision: alignment.revision, summary: 'Current evidence from the original Goal plan.', checks }
-  return { ...proposal, submissionId: deriveObjectId('agentmux.goal-current-grounding.v1', JSON.stringify([goal.id, proposal, basis])), acceptedAt: null }
+  const summary = independent ? `Current evidence from the original Goal plan.\n${independent.summary}` : 'Current evidence from the original Goal plan.'
+  const proposal = { alignmentRevision: alignment.revision, summary, checks }
+  const identity = independent ? [goal.id, proposal, basis, independent.submissionId] : [goal.id, proposal, basis]
+  return { ...proposal, submissionId: deriveObjectId('agentmux.goal-current-grounding.v1', JSON.stringify(identity)), acceptedAt: null }
 }

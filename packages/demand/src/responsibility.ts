@@ -2,6 +2,7 @@ import type { Demand } from './demand-types.js'
 import { delegationWorkerHostId } from './delegations.js'
 import { demandAgentReferenceKey, parseDemandAgentReference, type DemandSpaceMemberReference } from './agent-reference.js'
 import { qualifiedDemandDispatch, runBoundDemandDispatch } from './dispatch.js'
+import { currentGoalGrounding } from './goal-grounding.js'
 
 /** Business responsibility references original execution; it never owns Runtime state. */
 export type DemandLegacyExecutionReference = {
@@ -156,9 +157,10 @@ export function demandHandoffDestinations(goal: Pick<Demand, 'dispatches' | 'del
   return destinations
 }
 /** Unrelated activity and record timestamps do not invalidate a scoped business inspection. */
-export function demandResponsibilityScope(goal: Pick<Demand, 'id' | 'status' | 'supervisorSessionId' | 'alignment' | 'grounding' | 'dispatches' | 'delegations' | 'progressUpdates'>): string {
+export function demandResponsibilityScope(goal: Pick<Demand, 'id' | 'status' | 'supervisorSessionId' | 'alignment' | 'grounding' | 'dispatches' | 'delegations' | 'progressUpdates' | 'plan' | 'patrols'>): string {
+  const grounding = currentGoalGrounding(goal)
   return JSON.stringify({ id: goal.id, status: goal.status, supervisor: goal.supervisorSessionId,
-    alignment: goal.alignment?.revision ?? null, confirmedAt: goal.alignment?.confirmedAt ?? null, grounding: goal.grounding?.submissionId ?? null, acceptedAt: goal.grounding?.acceptedAt ?? null,
+    alignment: goal.alignment?.revision ?? null, confirmedAt: goal.alignment?.confirmedAt ?? null, grounding: grounding?.submissionId ?? null, acceptedAt: grounding?.acceptedAt ?? null,
     starts: (goal.dispatches ?? []).filter(runBoundDemandDispatch).filter(item => item.execution === 'finite').map(item => qualifiedDemandDispatch(item)
       ? [item.operationId, item.target, item.runId, item.stage, item.receipt ?? null]
       : [item.operationId, item.hostId, item.agentSessionId, item.runId, item.stage, item.receipt ?? null]),

@@ -2,7 +2,7 @@ import { getAmuxProtocolTemplate } from '@agentmux/core/amux-protocol'
 import { optionalInputEpoch } from '@agentmux/core/prompt-condition'
 import { createHash } from 'node:crypto'
 import { agentPromptCondition, decideFutureProgress, type AgentMuxClientEvent, type AgentPromptSubmissionRecord } from '@agentmux/core'
-import type { Demand, DemandDispatch, DemandStore, DemandStoreChanges, DemandStoreSnapshot, GoalStartObservation } from '@agentmux/demand'
+import { currentGoalGrounding, type Demand, type DemandDispatch, type DemandStore, type DemandStoreChanges, type DemandStoreSnapshot, type GoalStartObservation } from '@agentmux/demand'
 import type { GoalRuntimePort } from './goal-runtime.js'
 
 export type GoalStartRuntimePort = Pick<GoalRuntimePort, 'agentCreation' | 'observeCoreEvents' | 'observeOriginalRun' |
@@ -12,8 +12,6 @@ export type GoalStartRuntimePort = Pick<GoalRuntimePort, 'agentCreation' | 'obse
 type Reference = { goalId: string; operationId: string }
 const key = (first: string, second: string) => JSON.stringify([first, second])
 const describe = (error: unknown) => error instanceof Error ? error.message : String(error)
-const newResult = (goal: Demand, start: DemandDispatch) => Boolean(start.resultBasis && goal.grounding &&
-  goal.grounding.submissionId !== start.resultBasis.groundingSubmissionId && goal.grounding.alignmentRevision === goal.alignment?.revision)
 const closed = (goal: Demand) => goal.status === 'done' || goal.status === 'cancelled'
 
 /** Finite Start keeps its original Core prompt provenance; it never becomes an A2A report. */
@@ -74,6 +72,7 @@ export class GoalStartResponsibilityOwner {
       }
       this.indexed.set(goalId, { operations: [...current.keys()], remove: () => { for (const remove of removals) remove() } })
       if (closed(goal)) continue
+      const grounding = current.size ? currentGoalGrounding(goal) : undefined
       for (const [operationId, start] of current) {
         const id = key(goalId, operationId)
         const ref = { goalId: goal.id, operationId: start.operationId }
@@ -81,7 +80,7 @@ export class GoalStartResponsibilityOwner {
         add(this.sessions, key(start.hostId, start.agentSessionId), ref)
         if (typeof goal.supervisorSessionId === 'string' && goal.supervisorSessionId !== start.agentSessionId) add(this.sessions, key(start.hostId, goal.supervisorSessionId), ref)
         add(this.hosts, start.hostId, ref)
-        const epoch = JSON.stringify([goal.supervisorSessionId, goal.grounding?.submissionId, start])
+        const epoch = JSON.stringify([goal.supervisorSessionId, grounding?.submissionId, start])
         if (this.epochs.get(id) !== epoch) queueMicrotask(() => { if (!this.controller.signal.aborted) void this.check(ref) })
         this.epochs.set(id, epoch)
       }
@@ -191,9 +190,10 @@ export class GoalStartResponsibilityOwner {
     } else { value.input.reason = describe(input.reason); issues.push(value.input.reason) }
     if (run.status === 'fulfilled' && run.value.runId === start.runId) value.originalRun = run.value
     else issues.push(run.status === 'rejected' ? describe(run.reason) : 'The Run observation is not this original Start.')
-    if (goal.grounding) value.goalResult = { grounding: goal.grounding, association: 'unknown', basis: start.resultBasis ? 'captured' : 'unknown',
-      changedSinceStart: start.resultBasis ? goal.grounding.submissionId !== start.resultBasis.groundingSubmissionId : null }
-    if (newResult(goal, start)) value.responsibility = 'goal-result-review'
+    const grounding = currentGoalGrounding(goal)
+    if (grounding) value.goalResult = { grounding, association: 'unknown', basis: start.resultBasis ? 'captured' : 'unknown',
+      changedSinceStart: start.resultBasis ? grounding.submissionId !== start.resultBasis.groundingSubmissionId : null }
+    if (value.goalResult?.changedSinceStart && grounding?.alignmentRevision === goal.alignment?.revision) value.responsibility = 'goal-result-review'
     else if (value.originalRun?.state === 'exited' || value.originalRun?.state === 'interrupted') value.responsibility = 'original-worker-continuation'
     else if (value.originalRun?.state === 'running' && value.input.state === 'confirmed') value.responsibility = 'working'
     const issue = this.issues.get(key(goal.id, start.operationId)) ?? this.startupIssue

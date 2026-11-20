@@ -8,7 +8,7 @@ import { deriveObjectId } from '@agentmux/core/object-id'
 import type { AgentMuxControlRequest, AgentMuxControlResult } from '@agentmux/core/control'
 import type { Demand, DemandStore, DemandDiscussionIntent } from '@agentmux/demand'
 import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
-import { isDemandStoreError } from '@agentmux/demand'
+import { currentGoalGrounding, isDemandStoreError } from '@agentmux/demand'
 import { goalPmoOperation } from './goal-pmo-origin.js'
 import { goalProjectContext, goalProjectContextText } from './goal-project-context.js'
 import type { ProjectWorkspace } from './workspace-projects.js'
@@ -110,7 +110,7 @@ export function createHostGoalDiscussions(options: {
     const source = await primaryMote(request.executorId)
     const body = request.mode === 'open' ? undefined : discussionTask(goal, request.mode)
     const note = [goalRoleGuidance({ role: 'manager', goalId: goal.id, source: { kind: 'goal-pmo-launch', operationId } }),
-      body, await projectContext(goal), renderAmuxProtocol('goal-task', 'facts', { facts: JSON.stringify({ id: goal.id, title: goal.title, description: goal.description, projectId: goal.projectId, assigneeSessionIds: goal.assigneeSessionIds, supervisorSessionId: goal.supervisorSessionId, alignment: goal.alignment, grounding: goal.grounding }) })].filter(Boolean).join('\n\n')
+      body, await projectContext(goal), renderAmuxProtocol('goal-task', 'facts', { facts: JSON.stringify({ id: goal.id, title: goal.title, description: goal.description, projectId: goal.projectId, assigneeSessionIds: goal.assigneeSessionIds, supervisorSessionId: goal.supervisorSessionId, alignment: goal.alignment, grounding: currentGoalGrounding(goal) }) })].filter(Boolean).join('\n\n')
     const birth = goal.discussionOperationId ? goal.creationOrigin : { ...optionalInputEpoch(await options.runtime.readInputEpoch('local')) }
     const value: DemandDiscussionIntent = { ...optionalInputEpoch(birth?.inputEpoch), ...(birth && 'inputRuntimeId' in birth && typeof birth.inputRuntimeId === 'string' ? { inputRuntimeId: birth.inputRuntimeId } : {}), requestOperationId: request.requestId, mode: request.mode, ...source, agentMuxNote: note,
       ...(context.caller ? { callerAgentSessionId: context.caller.agentSessionId } : {}),

@@ -3,7 +3,7 @@ import { formatGoalConfirmation } from '@agentmux/core/agent-message-render'
 import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
 import { createHash } from 'node:crypto'
 import { AgentMuxError, agentPromptCondition, decideFutureProgress, type AgentMuxClientEvent, type AgentMuxRpcCallContext } from '@agentmux/core'
-import { demandExecutionReferences, demandPatrolScope, completedGoalPlanRequest, type Demand, type DemandPatrol, type DemandPatrolAttempt,
+import { currentGoalGrounding, demandExecutionReferences, demandPatrolScope, completedGoalPlanRequest, type Demand, type DemandPatrol, type DemandPatrolAttempt,
   type DemandPatrolReportInput, type DemandPatrolTarget, type DemandStore, type DemandStoreChanges, type DemandStoreSnapshot } from '@agentmux/demand'
 import type { GoalDelegationAuthority, GoalDelegationResult } from '@agentmux/core/goal-delegation'
 import type { GoalPatrolObservation } from '@agentmux/core/goal-patrol'
@@ -156,14 +156,15 @@ export class GoalPatrolOwner {
       const resolved = await this.runtime.resolveGoalAgent(goal.supervisorSessionId, planningHost), session = resolved.status.session
       target = { hostId: resolved.hostId, agentSessionId: session.agentSessionId, runId: session.run.runId, providerId: session.providerId, workspacePath: session.workspacePath }
     } catch (e) { this.issues.set(key(goalId, operationId), describe(e)) } }
+    const grounding = purpose === 'plan' ? undefined : currentGoalGrounding(goal)
     const frozen = purpose === 'plan' ? JSON.stringify({ goalId, expectedScope, title: goal.title, description: goal.description,
       requestedBy: authority.actor, requester: authority, requestOperationId: operationId, supervisorAgentSessionId: goal.supervisorSessionId,
       alignment: goal.alignment ?? null, planRevision: goal.plan?.revision ?? 0,
       ...(this.workflowPlan ? { workflow: await this.workflowPlan().catch(error => ({ status: 'unknown', reason: describe(error) })) } : {}) }) : JSON.stringify({ goalId, expectedScope, alignmentRevision: goal.alignment?.revision ?? null, executions: demandExecutionReferences(goal),
       alerts: work?.responsibility?.executions.filter(row => row.alert).map(row => ({ execution: row.execution, phase: row.phase, alert: row.alert, basis: row.basis })) ?? [],
       reports: (goal.delegations ?? []).filter(d => d.report).map(d => ({ delegationOperationId: d.operationId, sourceMessageId: d.sourceMessageId, reportOperationId: d.report!.operationId, replyMessageId: d.report!.replyMessageId })),
-      progressOperations: (goal.progressUpdates ?? []).map(update => update.operationId), groundingSubmissionId: goal.grounding?.submissionId ?? null,
-      evidence: [...new Map([...(goal.grounding?.checks ?? []).flatMap(c => c.evidence), ...(goal.progressUpdates ?? []).flatMap(p => p.evidence)].map(evidence => [JSON.stringify(evidence), evidence])).values()] })
+      progressOperations: (goal.progressUpdates ?? []).map(update => update.operationId), groundingSubmissionId: grounding?.submissionId ?? null,
+      evidence: [...new Map([...(grounding?.checks ?? []).flatMap(c => c.evidence), ...(goal.progressUpdates ?? []).flatMap(p => p.evidence)].map(evidence => [JSON.stringify(evidence), evidence])).values()] })
     const receipt = await this.demands.preparePatrol(goalId, { operationId, expectedScope, ...(purpose === 'plan' ? { purpose, planRevision: goal.plan?.revision ?? 0 } : {}), supervisorAgentSessionId: goal.supervisorSessionId,
       executions: purpose === 'plan' ? [] : demandExecutionReferences(goal), context: frozen, requestedBy: authority.actor,
       ...(target ? { attempt: this.attempt(goalId, operationId, target, frozen, operationId, purpose) } : {}) })
