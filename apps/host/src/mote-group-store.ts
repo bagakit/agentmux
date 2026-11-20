@@ -182,10 +182,16 @@ export class MoteGroupStore {
     return this.read({ groups: [], nextBeforeSequence: null }, db => {
       const rows = moteId === undefined
         ? db.prepare('SELECT * FROM groups WHERE sequence < ? ORDER BY sequence DESC LIMIT ?').all(before, limit + 1)
+        : this.kind === 'direct'
+        ? db.prepare(`SELECT groups.*, latest.sequence AS activity FROM members
+          JOIN groups ON groups.id=members.group_id
+          JOIN messages latest ON latest.sequence=(SELECT max(sequence) FROM messages WHERE group_id=groups.id)
+          WHERE members.mote_id=? AND latest.sequence < ? ORDER BY latest.sequence DESC LIMIT ?`).all(moteId, before, limit + 1)
         : db.prepare(`SELECT groups.* FROM members JOIN groups ON groups.id=members.group_id
           WHERE members.mote_id=? AND coalesce(json_extract(members.data,'$.member.state'),'active')='active' AND groups.sequence < ? ORDER BY groups.sequence DESC LIMIT ?`).all(moteId, before, limit + 1)
+      const last = rows[limit - 1]
       return { groups: rows.slice(0, limit).map(row => this.group(db, row)),
-        nextBeforeSequence: rows.length > limit ? Number(rows[limit - 1]!.sequence) : null }
+        nextBeforeSequence: rows.length > limit && last ? Number(last.activity ?? last.sequence) : null }
     })
   }
 
