@@ -297,7 +297,7 @@ it('unavailable original context keeps its exact Host and SID while the independ
  const {f,old,reference}=await handoverSnapshotFixture(true)
  await f.start('unknown_core_handover','Healthy independent Query',true)
  const result=await f.settledSetup('unknown_core_handover'),text=handoverText(result)
- expect(result.issue).toContain('original handover context read is unconfirmed');expect(text).toContain('Original Host: old-route');expect(text).toContain('Original source: source')
+ expect(text).toContain('original handover context read is unconfirmed');expect(text).toContain('Original Host: old-route');expect(text).toContain('Original source: source')
  expect(text).not.toContain('agent context --host');expect(text).not.toContain('One bounded history page');expect(text).toContain('Original old-Core source temporarily unreadable')
  expect(agentPromptSubmissionOutcome(result.deferredInput?.record)).toBe('terminal-confirmed');expect(result.deferredInput?.route?.reference.hostId).toBe('local');expect(result.deferredInput?.route?.reference.sessionId).not.toBe(reference.sessionId)
  expect(old.inner.kernel.input).not.toHaveBeenCalled();expect(old.inner.kernel.stop).not.toHaveBeenCalled();expect(f.h.inner.kernel.stop).not.toHaveBeenCalled()
@@ -339,7 +339,7 @@ it('a matching durable runtime ID with a different Core instance never grants a 
 it('a malformed direct context port cannot embed another subject and does not block the independent Query',async()=>{
  const {f,old}=await handoverSnapshotFixture(false,true)
  await f.start('malformed_context','Original Query remains eligible',true);const result=await f.settledSetup('malformed_context'),text=handoverText(result)
- expect(agentPromptSubmissionOutcome(result.deferredInput?.record)).toBe('terminal-confirmed');expect(result.issue).toContain('original handover context read is unconfirmed')
+ expect(agentPromptSubmissionOutcome(result.deferredInput?.record)).toBe('terminal-confirmed');expect(text).toContain('original handover context read is unconfirmed')
  expect(text).not.toContain('One bounded history page');expect(text).not.toContain('WRONG_CONTEXT_SUBJECT');expect(text).toContain('Original Host: old-route');expect(text).toContain('Original source: source')
  expect(old.inner.kernel.input).not.toHaveBeenCalled();expect(old.inner.kernel.stop).not.toHaveBeenCalled()
 },45000)
