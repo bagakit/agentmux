@@ -39,25 +39,29 @@ try {
       rollupOptions: { input: join(fixture, 'index.html') } } })
   await build({ absWorkingDir: root, entryPoints: ['apps/desktop/src/preload/index.ts'], outfile: join(compiled, 'preload.cjs'),
     platform: 'browser', format: 'cjs', target: 'node24', bundle: true, external: ['electron'], logLevel: 'silent' })
-  for (const name of process.argv.includes('--mutations') ? ['original', 'missing-source', 'restored'] : ['original']) {
-    const origin = await mkdtemp(join(tmpdir(), 'amux-native-traffic-'))
+  for (const name of process.argv.includes('--mutations') ? ['original', 'missing-source', 'missing-notification', 'restored'] : ['original']) {
     const capture = join(evidence, name)
     await mkdir(capture)
     const module = join(compiled, `${name}.mjs`), boot = join(compiled, `${name}.cjs`)
     const result = await build({ absWorkingDir: root, entryPoints: ['apps/desktop/scripts/fixtures/browser-traffic/main.ts'], outfile: module,
       bundle: true, platform: 'node', packages: 'external', metafile: true, format: 'esm', target: 'node24', logLevel: 'silent',
       banner: { js: "import{createRequire as __proofRequire}from'node:module';const require=__proofRequire(import.meta.url);" },
-      plugins: name === 'missing-source' ? [{ name, setup(builder) {
-        builder.onLoad({ filter: /browser-traffic\.ts$/ }, args => {
+      plugins: name.startsWith('missing-') ? [{ name, setup(builder) {
+        builder.onLoad({ filter: /[\\/]main[\\/]browser-traffic\.ts$/ }, args => {
           assert.equal(args.path, join(root, captureSource))
-          const anchor = 'const original = await this.ports.attach(source.target.id, controller.signal)'
+          const anchor = name === 'missing-source'
+            ? 'const original = await this.ports.attach(source.target.id, controller.signal)'
+            : 'this.capture = capture\n    this.ports.changed()'
           assert.equal(source.split(anchor).length, 2)
-          const changed = source.replace(anchor, "throw new Error('Mutated original native lease')")
+          const changed = source.replace(anchor, name === 'missing-source'
+            ? "throw new Error('Mutated original native lease')"
+            : 'this.capture = capture')
           return { contents: changed, loader: 'ts', resolveDir: dirname(args.path) }
         })
       } }] : [] })
     for (const path of [captureSource, 'apps/desktop/src/main/browser-traffic-ipc.ts', 'apps/desktop/src/main/browser-view-manager.ts'])
       assert.ok(Object.hasOwn(result.metafile.inputs, path), 'Native candidate consumes ' + path)
+    const origin = await mkdtemp(join(tmpdir(), 'amux-native-traffic-'))
     await writeFile(boot, `const{app}=require('electron'),fs=require('node:fs'),path=require('node:path');const home=${JSON.stringify(origin)};for(const key of ['appData','userData','sessionData']){const p=path.join(home,key);fs.mkdirSync(p,{recursive:true});app.setPath(key,p)}app.whenReady().then(()=>import(${JSON.stringify(pathToFileURL(module).href)})).catch(e=>{console.error(e);app.exit(1)});`)
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(AGENTMUX_|CTXMUX_)/u.test(key) && key !== 'ELECTRON_RUN_AS_NODE'))
     Object.assign(env, { AGENTMUX_TRAFFIC_HOME: origin, AGENTMUX_TRAFFIC_RENDERER: compiled, AGENTMUX_TRAFFIC_OUTPUT: capture,
@@ -70,9 +74,9 @@ try {
       report.variants.push({ name, process: processReceipt, actual, main: hash(await readFile(module)) })
       assert.equal(processReceipt.timedOut, false)
       assert.deepEqual(actual.cleanup, [])
-      if (name === 'missing-source') {
+      if (name.startsWith('missing-')) {
         assert.equal(actual.passed, false)
-        assert.match(actual.failure, /actual Traffic UI did not start/)
+        assert.match(actual.failure, name === 'missing-source' ? /actual Traffic UI did not start/ : /second Traffic panel missed the start/)
       } else { assert.equal(actual.passed, true, actual.failure); assert.equal(processReceipt.exitCode, 0) }
     } finally {
       await stopProbeProcesses(processReceipt?.originalPid, origin)

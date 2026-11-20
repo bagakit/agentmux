@@ -9,6 +9,7 @@ createRoot(document.getElementById('root')!).render(
     <div className="browser-body">
       <div className="browser-stage" style={{ flex: '1 1 auto' }} />
       <BrowserTrafficPanel browserId="traffic-main-page" visible={true} onClose={() => {}} />
+      <BrowserTrafficPanel browserId="traffic-excluded-page" visible={true} onClose={() => {}} />
     </div>
   </main>
 )
