@@ -135,9 +135,16 @@ it('keeps the exact pending destination after a lost write reply and checks the 
     throw new Error('Reply lost for the original file')
   })
   await expect(saveRecallCard(card, catalog.pages['selected-note']!, date)).rejects.toThrow('Reply lost')
-  expect(Object.values(workbench.useAppStore.getState().recallCardIntents)[0]?.phase).toBe('checking')
+  const originalIntent = Object.values(workbench.useAppStore.getState().recallCardIntents)[0]!
+  expect(originalIntent.phase).toBe('checking')
+  const history = vi.spyOn(api.files, 'historyPublic').mockImplementation(async input => {
+    expect(input.eventId).toBe(originalIntent.writeAttempt)
+    return { resource: mapping(path), result: { status: 'read', noteId: 'selected-note', resource: resource(path),
+      batches: [], hasMore: false, entries: [{ eventId: input.eventId, status: 'committed' }] } } as Awaited<ReturnType<typeof api.files.historyPublic>>
+  })
   const same = await saveRecallCard(card, null, new Date())
   expect(same.page.resource.path).toBe(path)
+  expect(history).toHaveBeenCalledTimes(1)
   expect(api.files.writePublic).toHaveBeenCalledTimes(1)
   expect(api.files.createPublic).not.toHaveBeenCalled()
   expect(workbench.useAppStore.getState().recallCardIntents).toEqual({})
