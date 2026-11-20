@@ -268,7 +268,7 @@
 .goal-execution-time__row[data-selected] { background: color-mix(in srgb, var(--green) 9%, var(--surface-1)); }
 .goal-execution-time__task { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; overflow-wrap: anywhere; }
 .goal-execution-time__row--action { width: 100%; border-inline: 0; border-block-end: 0; background: transparent; font-family: inherit; text-align: start; cursor: pointer; }
-.goal-execution-time__row--action:hover:not([data-selected]) { background: var(--surface-2); }
+.goal-execution-time__row--action:hover:not([data-selected]) { background: color-mix(in srgb, var(--text) 7%, transparent); }
 .goals-surface .goal-execution-time__row--action:focus-visible { outline-offset: -2px; }
 .goal-execution-time__row--action strong { color: var(--text); font-weight: 560; }
 .goal-execution-time__open { margin-inline-start: var(--sp-1); color: var(--text-3); vertical-align: middle; }
