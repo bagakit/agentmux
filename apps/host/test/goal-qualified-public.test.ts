@@ -16,6 +16,7 @@ import { AgentMuxHostedRuntimeService } from '../../../packages/core/src/hosted-
 import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-server.js'
 import { AgentHookServer } from '../../../packages/core/src/hook-server.js'
 import { AgentMuxFileAgentSessionStore } from '../../../packages/core/src/agent-session-store.js'
+import type { AgentMuxAcpBinding, AgentMuxAcpBridge } from '../../../packages/core/src/acp-adapter.js'
 import { connectAgentMuxRpc } from '../../../packages/core/src/public-rpc-client.js'
 import type { AgentProvider } from '../../../packages/core/src/agent-provider.js'
 import type { AgentMuxHeadlessRuntime } from '../../../packages/core/src/headless-runtime.js'
@@ -142,6 +143,45 @@ it('links an original permission answer to the selected Start when two inputs sh
   expect(goal.goal.approvalObservations).toEqual([{ operationId: original.operationId, requestId: 'explicit-native-permission',
     attribution: original.goalApproval, decision: 'approved', delivery: 'hook-written', nativeCompleted: false }])
 
+  const interrupted = await permission('before-dispatch-native-permission')
+  const inlet = f.d.core as unknown as { respondPermissionHook(...args: unknown[]): Promise<void> }
+  const interruption = vi.spyOn(inlet, 'respondPermissionHook').mockRejectedValueOnce(new Error('temporary failure before original permission transport'))
+  const originalIntent = { ...interrupted.input, goalApproval: selection }
+  await expect(f.rpc.call('agent.interaction.respond', originalIntent)).rejects.toThrow('temporary failure before original permission transport')
+  expect(hooks.hasPermissionCallback(sessionId, run.runId, 'before-dispatch-native-permission')).toBe(true)
+  const saved = (await f.rpc.call('agent.interaction.inspect', { agentSessionId: sessionId, operationId: originalIntent.operationId })).receipt
+  expect(saved).toMatchObject({ delivery: 'saved', goalApproval: { ...selection, inputKey: first } })
+  expect(await f.rpc.call('agent.interaction.respond', interrupted.input)).toEqual(saved)
+  await expect(f.rpc.call('agent.interaction.respond', { ...originalIntent, goalApproval: { ...selection, dispatchOperationId: second.submissionId } }))
+    .rejects.toMatchObject({ code: 'AGENT_INTERACTION_RESPONSE_CONFLICT' })
+  await expect(f.rpc.call('agent.interaction.respond', { ...originalIntent, response: { ...originalIntent.response, decision: { outcome: 'cancelled' } } }))
+    .rejects.toMatchObject({ code: 'AGENT_INTERACTION_RESPONSE_CONFLICT' })
+  expect(interruption).toHaveBeenCalledTimes(1)
+  interruption.mockRestore()
+  const resumed = await cli(['agent', 'interaction', 'respond', '--input', '-'], originalIntent)
+  expect(resumed).toEqual({ ...saved, delivery: 'hook-written' })
+  expect(await (await interrupted.pending).json()).toHaveProperty('hookSpecificOutput.decision.behavior', 'allow')
+
+  const shared = await permission('concurrent-native-permission')
+  const sharedIntent = { ...shared.input, goalApproval: selection }
+  const originalHook = inlet.respondPermissionHook.bind(inlet)
+  let release!: () => void
+  const barrier = new Promise<void>(resolve => { release = resolve })
+  const contenders = vi.spyOn(inlet, 'respondPermissionHook').mockImplementation(async (...args) => {
+    await barrier
+    return await originalHook(...args)
+  })
+  const transport = vi.spyOn(hooks, 'respondPermission')
+  const submissions = Promise.allSettled([f.rpc.call('agent.interaction.respond', sharedIntent), f.rpc.call('agent.interaction.respond', sharedIntent)])
+  try { await expect.poll(() => contenders.mock.calls.length).toBe(2) }
+  finally { release() }
+  expect((await submissions).filter(result => result.status === 'fulfilled')).not.toHaveLength(0)
+  expect(await (await shared.pending).json()).toHaveProperty('hookSpecificOutput.decision.behavior', 'allow')
+  expect(transport).toHaveBeenCalledTimes(1)
+  const sharedReceipt = (await f.rpc.call('agent.interaction.inspect', { agentSessionId: sessionId, operationId: sharedIntent.operationId })).receipt!
+  expect(sharedReceipt).toMatchObject({ delivery: 'hook-written', goalApproval: { ...selection, inputKey: first } })
+  contenders.mockRestore(); transport.mockRestore()
+
   const uncertain = await permission('unknown-native-permission'), respond = hooks.respondPermission.bind(hooks)
   const lost = vi.spyOn(hooks, 'respondPermission').mockImplementation(async (...args) => {
     await respond(...args)
@@ -172,11 +212,56 @@ it('links an original permission answer to the selected Start when two inputs sh
   const reopenedStore = new AgentMuxFileAgentSessionStore(f.d.store.path)
   expect(await reopenedStore.readMetadata(sessionId)).toBeNull()
   expect((await reopenedStore.readRetiredAgentSession(sessionId))?.interactionOperations).toEqual({
-    [original.operationId]: original, [unknown.operationId]: unknown
+    [original.operationId]: original, [resumed.operationId]: resumed, [sharedReceipt.operationId]: sharedReceipt, [unknown.operationId]: unknown
   })
   expect(await cli(['agent', 'interaction', 'inspect', '--session', sessionId, '--operation-id', unknown.operationId])).toEqual({ receipt: unknown })
-  expect((await cli(['goal', 'inspect', '--goal', f.goal.id])).goal.approvalObservations).toHaveLength(2)
+  expect((await cli(['goal', 'inspect', '--goal', f.goal.id])).goal.approvalObservations).toHaveLength(4)
 }, 60_000)
+
+it('concurrent responses share one original ACP permission dispatch', async () => {
+  const f = await fixture(true), agentSessionId = f.session.agentSessionId, expectedRun = f.session.run
+  const acp = Reflect.get(f.d.core, 'acp') as AgentMuxAcpBridge
+  let emit!: Parameters<AgentMuxAcpBinding['onEvent']>[0]
+  let acknowledge!: () => void
+  const acknowledgement = new Promise<void>(resolve => { acknowledge = resolve })
+  const owner = vi.fn(async () => { await acknowledgement })
+  const native = { adapterId: 'original-acp-adapter', sessionId: 'original-D-native',
+    onEvent(listener: typeof emit) { emit = listener; return () => {} }, respondPermission: owner, close: async () => {} }
+  await acp.bind(agentSessionId, native, expectedRun, { providerId: 'codex', actorId: 'original-D-actor' })
+  emit({ type: 'permission', requestId: 'original-acp-request', title: 'Original ACP permission',
+    options: [{ id: 'deny', kind: 'reject-once', label: 'Deny' }] })
+  const request = async () => (await f.rpc.call('agent.inspect', { target: { kind: 'agent-session', agentSessionId } })).session.pendingInteraction?.request
+  await expect.poll(async () => (await request())?.evidence.source).toBe('acp')
+  const expectedRequest = (await request())!
+  const input = { agentSessionId, expectedRun, expectedRequest, operationId: 'original-acp-decision',
+    response: { kind: 'permission' as const, requestId: expectedRequest.id, decision: { outcome: 'selected' as const, optionId: 'deny' } } }
+  const bridge = vi.spyOn(acp, 'respondPermission')
+  const coreDispatch = f.d.core as unknown as { dispatchAgentInteraction(...args: unknown[]): Promise<void> }
+  const originalDispatch = coreDispatch.dispatchAgentInteraction.bind(coreDispatch)
+  let release!: () => void
+  const barrier = new Promise<void>(resolve => { release = resolve })
+  const entrants = vi.spyOn(coreDispatch, 'dispatchAgentInteraction').mockImplementation(async (...args) => {
+    await barrier
+    return await originalDispatch(...args)
+  })
+  const submissions = [f.rpc.call('agent.interaction.respond', input), f.rpc.call('agent.interaction.respond', input)]
+  const settled = Promise.allSettled(submissions)
+  try {
+    await expect.poll(() => entrants.mock.calls.length).toBe(2)
+    release()
+    expect(await Promise.race(submissions)).toMatchObject({ operationId: input.operationId, delivery: 'unknown' })
+    expect(bridge).toHaveBeenCalledTimes(1)
+    expect(owner).toHaveBeenCalledTimes(1)
+    expect(owner).toHaveBeenCalledWith('original-acp-request', input.response.decision, expect.any(AbortSignal))
+  } finally { release(); acknowledge() }
+  expect(await settled).toEqual(expect.arrayContaining([
+    { status: 'fulfilled', value: expect.objectContaining({ delivery: 'acp-acknowledged' }) },
+    { status: 'fulfilled', value: expect.objectContaining({ delivery: 'unknown' }) }
+  ]))
+  expect((await f.rpc.call('agent.interaction.inspect', { agentSessionId, operationId: input.operationId })).receipt).toMatchObject({ delivery: 'acp-acknowledged' })
+  expect(f.raw).not.toHaveBeenCalled()
+  expect(f.stop).not.toHaveBeenCalled()
+})
 
 it('a public local-member Goal input outlives its temporary reader while retaining the original Core claim', async () => {
   const f = await fixture(true), provider = f.d.core.providers.get('codex'), prepare = provider.prepareNativeInput!
