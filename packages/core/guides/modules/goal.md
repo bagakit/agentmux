@@ -22,9 +22,9 @@ Read the chosen command's `--help` for exact inputs.
 
 ## Open or share the original Goal
 
-Copy `goal.address.goalUrl` or `planUrl` from `goal inspect`. These identify the
-original Runtime, Goal store namespace and Goal. If `addressIssue` is present,
-keep reading the Goal and recheck the source before sharing.
+Copy `goal.address.goalUrl` or `planUrl` from `goal inspect`. Bound Goals have a
+short link. The reading owner checks the original creation binding when opened.
+If `addressIssue` is present, recheck the original source before sharing.
 
 <!-- amux:generated command:goal.focus -->
 
