@@ -175,7 +175,7 @@ it('keeps a durable report without a definition readable through the public relo
 it('presents a normal confirmed goal without a report as one closed compact reading, preserving its secondary recovery actions', async () => {
   await seed({ confirmed: true }); await mount()
   expect(disclosure().open).toBe(false)
-  expect(disclosure().querySelector('summary')?.textContent).toContain('Confirmed by you · 2 success criteria · No report yet')
+  expect(disclosure().querySelector('summary')?.textContent).toContain('Goal confirmed · 2 success criteria · No report yet')
   expect(body().querySelector('.goal-review--compact')).toBeTruthy()
   expect(body().querySelector('.goals-no-results')?.closest('.goal-review__body')).toBeNull()
   const discussion = document.querySelector<HTMLButtonElement>('.goals-detail__overview-heading [aria-label="Open discussion for Read one current result"]')!

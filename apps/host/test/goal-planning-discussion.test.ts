@@ -14,6 +14,36 @@ vi.setConfig({ testTimeout: 60_000 })
 const cleanup: CrossHostCleanup = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
 
+it('the current authenticated Supervisor confirms its exact Goal through CLI and the Host retains the original actor', async () => {
+  vi.stubEnv('NODE_OPTIONS', [process.env.NODE_OPTIONS, '--import ' + resolve('apps/host/test/goal-planning-discussion-node-loader.mjs')].filter(Boolean).join(' '))
+  const f = await crossHostOwner(cleanup, 'supervisor-confirmation', ['supervisor', 'other'])
+  const goalId = 'supervisor-confirmation-goal'
+  await f.call(null, ['goal', 'create', '--goal', goalId, '--title', 'Deliver a checked outcome',
+    '--assignees', '["supervisor","other"]', '--supervisor', 'supervisor', '--risk', 'low', '--confirm', 'user'])
+  const proposal = { summary: 'Deliver a checked outcome.', criteria: [{ id: 'result', text: 'The result has an independent check.' }], openQuestions: [] }
+  await f.call('supervisor', ['goal', 'update', '--goal', goalId, '--alignment', JSON.stringify(proposal)])
+  const confirm = ['goal', 'confirm', '--goal', goalId, '--revision', '1', '--operation-id', 'supervisor-confirmation']
+  const denied = await f.cli('other', confirm)
+  expect(denied.code).toBe(1)
+  expect(denied.stderr).toContain('CONTROL_PERMISSION_DENIED')
+  const continuation = await f.cli('supervisor', [...confirm, '--continue-with', '{"hostId":"local","agentSessionId":"supervisor"}'])
+  expect(continuation.code).toBe(1)
+  expect(continuation.stderr).toContain('CONTROL_PERMISSION_DENIED')
+  const confirmed = await f.call('supervisor', confirm)
+  const saved = confirmed.goal.alignment
+  expect(saved).toMatchObject({ revision: 1, confirmedAt: expect.any(Number),
+    confirmedBy: { kind: 'agent', id: 'supervisor', hostId: 'local', runtimeId: f.identity.runtimeId } })
+  expect((await f.call(null, confirm)).goal.alignment).toEqual(saved)
+  expect((await f.call(null, ['goal', 'inspect', '--goal', goalId])).goal.alignment).toEqual(saved)
+  const accepted = await f.cli('supervisor', ['goal', 'accept', '--goal', goalId, '--revision', '1', '--submission', 'report'])
+  expect(accepted.code).toBe(1)
+  expect(accepted.stderr).toContain('CONTROL_PERMISSION_DENIED')
+  await f.call(null, ['goal', 'update', '--goal', goalId, '--alignment', JSON.stringify({ ...proposal, summary: 'New scope' })])
+  const stale = await f.cli('supervisor', confirm)
+  expect(stale.code).toBe(1)
+  expect((await f.call(null, ['goal', 'inspect', '--goal', goalId])).goal.alignment).toMatchObject({ revision: 2, confirmedAt: null })
+})
+
 it('the public CLI submits and reconciles an original managed planning input, then only the legal author can save the unconfirmed Goal plan', async () => {
   vi.stubEnv('NODE_OPTIONS', [process.env.NODE_OPTIONS, '--import ' + resolve('apps/host/test/goal-planning-discussion-node-loader.mjs')].filter(Boolean).join(' '))
   const f = await crossHostOwner(cleanup, 'planning', ['supervisor', 'discussion'])

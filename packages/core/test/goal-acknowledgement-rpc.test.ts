@@ -26,13 +26,16 @@ function original(request: AgentMuxControlRequest): AgentMuxControlResult {
   throw new Error('Unexpected original request ' + request.operation)
 }
 
-it.each(['goal.confirm', 'goal.accept'] as const)('%s requires an authenticated human principal before forwarding or execution', async method => {
+it.each(['goal.confirm', 'goal.accept'] as const)('%s rejects unverified principals before forwarding or execution', async method => {
   const forward = vi.fn(), execute = vi.fn()
   const service = new AgentMuxRpcService({ forwardControl: forward, execute, coreClients: () => [] })
   const input = method === 'goal.confirm' ? { goalId: goal.id, expectedRevision: 3 } : { goalId: goal.id, expectedAlignmentRevision: 3, expectedSubmissionId: 'exact-report', acceptGaps: false, finish: true }
-  for (const context of [{}, { principal: { kind: 'user', id: '' } }, { principal: { kind: 'device', id: '  ' } }, { principal: { kind: 'user', id: 'bad\0id' } }, { principal: { kind: 'user', id: {} } }, { principal: { kind: 'agent', id: 'claim' } }, { principal: { kind: 'user', id: 'person' }, caller: { agentSessionId: 'managed', capability: 'agent-token' } }]) {
+  for (const context of [{}, { principal: { kind: 'user', id: '' } }, { principal: { kind: 'device', id: '  ' } }, { principal: { kind: 'user', id: 'bad\0id' } }, { principal: { kind: 'user', id: {} } }, { principal: { kind: 'agent', id: 'claim' } }]) {
     await expect(service.call(method, input as any, context as any)).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
   }
+  await expect(service.call(method, input as any, { principal: { kind: 'user', id: 'person' },
+    caller: { agentSessionId: 'managed', capability: 'agent-token' } })).rejects.toMatchObject({
+      code: method === 'goal.accept' ? 'CONTROL_PERMISSION_DENIED' : 'UNKNOWN_AGENT_SESSION' })
   expect(forward).not.toHaveBeenCalled(); expect(execute).not.toHaveBeenCalled()
   forward.mockResolvedValue({ original: true })
   await service.call(method, input as any, { principal: { kind: 'device', id: 'approved-phone' } })

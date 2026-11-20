@@ -3,10 +3,13 @@ import { createHash } from 'node:crypto'
 import { relative } from 'node:path'
 import { repositoryRoot } from './goal-cross-host-source.mjs'
 
-export const planningOwners = ['apps/host/src/goal-discussions.ts', 'apps/host/src/goal-pmo-origin.ts', 'packages/demand/src/discussion.ts', 'packages/demand/src/demand-store.ts',
+export const planningOwners = ['apps/host/src/goal-discussions.ts', 'apps/host/src/goal-pmo-origin.ts', 'apps/host/src/goals.ts', 'packages/demand/src/discussion.ts', 'packages/demand/src/demand-store.ts',
   'packages/core/src/control.ts', 'packages/core/src/control-codec.ts', 'packages/core/src/agentmux-cli-commands.ts',
   'packages/core/src/goal-role-guidance.ts', 'packages/core/src/generated/agentmux-guides.ts']
 export const planningMutations = {
+  'unrelated-agent-confirms': { path: 'apps/host/src/goals.ts',
+    anchor: "if (!matches) throw new AgentMuxError('Only the current authenticated Supervisor",
+    replacement: "if (false) throw new AgentMuxError('Only the current authenticated Supervisor" },
   'planning-body': { path: 'apps/host/src/goal-discussions.ts',
     anchor: '`Make and save a dependency plan inside the existing Goal ${goal.id}.`',
     replacement: '`Inspect the existing Goal ${goal.id}.`' },
