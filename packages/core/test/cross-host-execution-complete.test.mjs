@@ -88,6 +88,7 @@ test('project Native replacement cannot be certified by a Core restart or a repl
     name: 'remote-agent', bindingId: 'binding', agentSessionId: 'agent', originalRun: { runId: 'agent-run' },
     originalAgentPid: 3, currentAgent: { sessionId: 'agent', run: 'agent-run', pid: 3 }, originalHelperRuns: ['frontend', 'executor'],
     originalFrontendPid: 4, currentFrontend: { run: 'frontend', pid: 4 }, successorExecutorRunId: 'new-executor',
+    stoppedOriginalExecutor: { runId: 'executor', pid: 5, state: 'exited' },
     projectRestart: { previousNativePid: 1, currentNativePid: 2, previousInstance: 'old', currentInstance: 'new',
       originalResourceRuntime: 'project', currentResourceRuntime: 'project', originalExecutorState: 'interrupted' },
     confirmed: { bindingId: 'binding', state: 'connected' }, originalEffectCount: 1, originalOperationUnchanged: true, freshNativeFileRead: true,
@@ -95,6 +96,7 @@ test('project Native replacement cannot be certified by a Core restart or a repl
   validateRemote(proof, 'executor-recovery', commit)
   for (const change of [result => { result.projectRestart.currentNativePid = 1 }, result => { result.projectRestart.currentInstance = 'old' },
     result => { result.currentAgent.pid = 5 }, result => { result.currentFrontend.run = 'replacement' },
+    result => { result.stoppedOriginalExecutor.state = 'running' },
     result => { result.originalEffectCount = 2 }, result => { result.freshNativeFileRead = false }]) {
     const invalid = structuredClone(proof); change(invalid.results[0])
     assert.throws(() => validateRemote(invalid, 'executor-recovery', commit))

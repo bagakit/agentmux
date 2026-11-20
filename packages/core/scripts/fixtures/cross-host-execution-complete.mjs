@@ -91,6 +91,8 @@ export function validateRemote(summary, mode, commit) {
     assert.deepEqual(result.currentAgent, { sessionId: result.agentSessionId, run: result.originalRun.runId, pid: result.originalAgentPid })
     assert(result.originalHelperRuns?.length === 2 && result.originalHelperRuns.every(Boolean))
     assert.deepEqual(result.currentFrontend, { run: result.originalHelperRuns[0], pid: result.originalFrontendPid })
+    assert(result.stoppedOriginalExecutor?.runId === result.originalHelperRuns[1] && result.stoppedOriginalExecutor.state === 'exited' &&
+      Number.isInteger(result.stoppedOriginalExecutor.pid), 'The original project helper must have a confirmed exit before Native is replaced')
     assert(result.successorExecutorRunId && result.successorExecutorRunId !== result.originalHelperRuns[1] && result.confirmed?.bindingId === result.bindingId &&
       result.confirmed?.state === 'connected' && result.originalEffectCount === 1 && result.originalOperationUnchanged === true && result.freshNativeFileRead === true)
     return

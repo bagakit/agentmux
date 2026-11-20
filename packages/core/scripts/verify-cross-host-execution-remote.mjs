@@ -396,6 +396,12 @@ try {
             const originalAgent = await agent.client.statusAgent(agentSessionId);
             const frontendUrl = originalFrames.find(frame => frame.type === 'ready')?.url;
             assert(typeof frontendUrl === 'string' && new URL(frontendUrl).hostname === '127.0.0.1');
+            // Simulate project machine restart: both the exact helper process and
+            // Native stop. A daemon restart alone can leave the old PTY process alive.
+            const originalExecutor = before.executor.run;
+            await resource.client.stopTerminal({ runId: originalExecutor.runId });
+            const stopped = await resource.client.runtimeSubject({ kind: 'terminal-run', runId: originalExecutor.runId });
+            assert.equal(stopped.run.state, 'exited');
             resource.releaseDiagnostics?.();
             await resource.client.dispose();
             await resource.rpc.dispose();
@@ -460,6 +466,7 @@ try {
             results.push({ ...nativeResult, projectRestart: { previousNativePid: projectRestart.oldPid, currentNativePid: resource.nativePid,
               previousInstance: before.executor.ctxmux.instanceId, currentInstance: nativeInstance, originalExecutorState: retired.run.state,
               originalResourceRuntime: before.executor.core.runtimeId, currentResourceRuntime: resource.client.runtimeOwnerIdentity().runtimeId },
+              stoppedOriginalExecutor: { runId: originalExecutor.runId, pid: originalExecutor.pid, state: stopped.run.state },
               originalAgentPid: originalAgent.run.pid, currentAgent: { sessionId: currentAgent.session.agentSessionId, run: currentAgent.run.runId, pid: currentAgent.run.pid },
               originalFrontendPid: before.frontend.run.pid, currentFrontend: { run: after.frontend.run.runId, pid: after.frontend.run.pid },
               successorExecutorRunId: successor.executor.runId, confirmed, freshNativeFileRead: true,
