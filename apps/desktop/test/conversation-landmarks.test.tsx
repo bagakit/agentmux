@@ -6,6 +6,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ConversationLandmarkStore } from '@agentmux/core'
+import { applyNotebookChange, emptyNotebookState } from '@agentmux/core/notebook-catalog'
 import type { ConversationItemRef, ConversationLandmarkPage } from '@agentmux/core/conversation'
 import type { AgentSessionHistoryPage } from '@agentmux/core'
 import { StaticConversationView as ConversationView } from './helpers/conversation-static-fixture'
@@ -51,6 +52,57 @@ beforeEach(async () => {
   host = document.createElement('div'); document.body.append(host); root = createClientUiRoot(host)
 })
 afterEach(async () => { getSelection()?.removeAllRanges(); await act(async () => root.unmount()); host.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); await rm(directory, { recursive: true, force: true }) })
+
+it('looks up Recall links only on demand, shares one request, and cancels it when the list closes', async () => {
+  await saved()
+  const noteId = 'research-note'
+  const catalog = applyNotebookChange(emptyNotebookState(), {
+    expectedRevision: 0, operationId: 'register-research',
+    change: { kind: 'register', noteId, title: 'Research note', resource: {
+      hostId: scope.hostId, workspaceId: 'original-workspace', workspacePath: directory, path: 'research.note.md'
+    } }
+  }, actor, _historyFixtureEpoch(0))
+  const snapshot: Awaited<ReturnType<typeof api.notebooks.graph>> = {
+    catalog, graph: { catalogRevision: catalog.revision, scope: { kind: 'catalog' }, scannedScope: 'catalog',
+      completeness: 'complete', observations: [], hierarchy: [], duplicateNoteIds: [], references: [], recallCards: [
+        { source: { noteId, blockId: 'wrong-block' }, card: { id: 'original-point', title: 'Original point', reference: ref(), routeHostId: 'different-host' } },
+        { source: { noteId, blockId: 'research-block' }, card: { id: 'original-point', title: 'Original point', reference: ref(), routeHostId: scope.hostId } }
+      ] }
+  }
+  let finish!: (snapshot: Awaited<ReturnType<typeof api.notebooks.graph>>) => void
+  const graph = vi.spyOn(api.notebooks, 'graph')
+    .mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    .mockResolvedValueOnce(snapshot)
+    .mockRejectedValueOnce(new Error('Original Notebook unavailable'))
+    .mockResolvedValueOnce({ ...snapshot, graph: { ...snapshot.graph, recallCards: [] } })
+  await render(<ConversationLandmarkList reference={scope} reveal={vi.fn()} active/>)
+  await click(named('Reading points'))
+  await until(() => expect(button('Find Recall links')).toBeDefined())
+  expect(graph).not.toHaveBeenCalled()
+  expect(button('Open Research note')).toBeUndefined()
+
+  await click(button('Find Recall links'))
+  expect(button('Looking up Recall links…').disabled).toBe(true)
+  expect(graph).toHaveBeenCalledTimes(1)
+  const signal = graph.mock.calls[0]![1]!.signal!
+  await click(named('Close Reading points'))
+  expect(signal.aborted).toBe(true)
+  await act(async () => finish(snapshot))
+  await click(named('Reading points'))
+  expect(button('Open Research note')).toBeUndefined()
+  expect(graph).toHaveBeenCalledTimes(1)
+
+  await click(button('Find Recall links'))
+  await until(() => expect(button('Open Research note')).toBeDefined())
+  expect(Array.from(document.querySelectorAll('button')).filter(node => node.textContent === 'Open Research note')).toHaveLength(1)
+  await click(button('Find Recall links'))
+  expect(button('Open Research note')).toBeDefined()
+  expect(document.body.textContent).toContain('Previously found links are still available.')
+  await click(button('Retry link lookup'))
+  expect(button('Open Research note')).toBeUndefined()
+  expect(document.body.textContent).toContain('No Recall links found for this conversation.')
+  expect(graph).toHaveBeenCalledTimes(4)
+})
 it('names the actual common native record without reading metadata on mount or replacing its body/Range', async () => {
   await render(<ConversationView page={page()} sessionId={scope.agentSessionId} executionHostId={scope.hostId} renderRecordActions={renderConversationLandmarkAction}/>)
   expect(api.landmarks.list).not.toHaveBeenCalled(); expect(host.querySelectorAll('[aria-label="Name reading point"]')).toHaveLength(3)

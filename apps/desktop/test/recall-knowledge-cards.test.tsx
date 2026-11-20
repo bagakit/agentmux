@@ -5,25 +5,30 @@ import { applyNotebookChange, DEFAULT_NOTEBOOK_ID, emptyNotebookState, type Note
 import { parseNotebookGraph, readRecallCard, recallCardBlocks, recallCardHref, type RecallCard } from '@agentmux/core/notebook-observation'
 import { fileUploadRevision } from '@agentmux/core/files'
 import { NOTES_WORKSPACE_ID } from '@agentmux/host/notes-library'
+import { createWorkspaceLayout } from '@agentmux/layout'
 import { newNoteDocument, readNoteDocument, serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { NotebookObservationOwner } from '../../host/src/notebook-observation-owner'
+import { FileResourceOwner } from '../../host/src/file-resource'
 import { api } from '../src/renderer/src/lib/api'
 import { saveRecallCard } from '../src/renderer/src/lib/recall-card-capture'
+import { recallBacklinks } from '../src/renderer/src/lib/recall-card-navigation'
 import { restoreRecallCardIntents } from '../src/renderer/src/lib/recall-card-intent'
 import { ConversationRecallCard } from '../src/renderer/src/components/ConversationRecallCard'
 import { NoteFileView } from '../src/renderer/src/components/NoteFileView'
 import { useNotebookLibrary } from '../src/renderer/src/lib/notebook-library'
+import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
+import { directoryIdentity, workspaceZoneId } from '../src/shared/space-addresses'
 import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import * as workbench from '../src/renderer/src/store'
 
 const workspace = { ...composerConfig.workspaces[0]!, id: NOTES_WORKSPACE_ID }
 const workface = { zoneId: 'original-note-zone', workspaceId: workspace.id }
+const spaceId = directoryIdentity(workspace.hostId, workspace.path)
 const actor = { kind: 'user', id: 'reader' } as const
 const date = new Date(2032, 0, 7, 2)
 const path = 'original.note.md'
 const resource = (path: string): NoteResource => ({ path, hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path })
-const mapping = (path: string) => ({ ...resource(path), zoneId: workface.zoneId, zonePath: workspace.path })
 const card: RecallCard = { id: 'reading-point', title: 'Where we decided [why]', routeHostId: 'reader-route',
   reference: { hostId: 'native-source', agentSessionId: 'original-agent', source: { kind: 'native', providerId: 'provider', nativeSessionId: 'source', recordId: 'original-record' } } }
 const body = serializeNoteDocument(newNoteDocument('Keep existing bytes.', 'selected-note', 'source-block', 'Research note'))
@@ -39,6 +44,22 @@ const read = (requested: string) => {
 }
 const originalObservation = new NotebookObservationOwner({ workspace: id => id === workspace.id ? workspace : undefined,
   files: { read: async (_, requested) => read(requested) } })
+const originalFiles = new FileResourceOwner({
+  catalog: async () => spatialCatalog(workbench.useAppStore.getState(), []),
+  workspace: id => id === workspace.id ? workspace : undefined,
+  files: {
+    read: async (_, requested) => read(requested),
+    listFiles: async () => { throw new Error('Unexpected directory listing') },
+    async write(_, input) {
+      const actual = files.get(input.path)
+      const observedRevision = actual === undefined ? null : revision(actual)
+      if (input.expectedRevision !== observedRevision) return { status: 'conflict', observedRevision }
+      if (input.baseContent !== undefined) expect(input.baseContent).toBe(actual)
+      files.set(input.path, input.content)
+      return { status: 'written', revision: revision(input.content) }
+    }
+  }
+})
 const settle = async () => { await act(async () => { await Promise.resolve() }) }
 async function display(node: ReactNode) {
   if (!root) {
@@ -59,8 +80,11 @@ beforeEach(() => {
     catalog = applyNotebookChange(catalog, { expectedRevision: catalog.revision, operationId, change }, actor, date.getTime())
   }
   changeBook({ kind: 'bind', notebookId: DEFAULT_NOTEBOOK_ID, workface }, 'bind-notes')
-  changeBook({ kind: 'register', noteId: 'selected-note', title: 'Research note', resource: resource(path), workface }, 'selected-note-register')
-  workbench.useAppStore.setState({ config: { ...composerConfig, workspaces: [workspace] }, recallCardIntents: {} })
+  changeBook({ kind: 'register', noteId: 'selected-note', title: 'Research note', resource: resource(path) }, 'selected-note-register')
+  workbench.useAppStore.setState({
+    config: { ...composerConfig, workspaces: [workspace] }, recallCardIntents: {}, tabs: {}, sessions: [],
+    spaceZoneBindings: { [workface.zoneId]: { spaceId, workspaceId: workspace.id, directoryPath: workspace.path, relations: { [spaceId]: false } } }
+  })
   useNotebookLibrary.setState({ state: catalog })
   vi.spyOn(workbench, 'persistRecallCardIntent').mockImplementation(async (intent, settled) => {
     const key = JSON.stringify([intent.card.routeHostId, intent.card.reference.agentSessionId, intent.card.id])
@@ -70,20 +94,9 @@ beforeEach(() => {
   })
   vi.spyOn(api.notebooks, 'read').mockImplementation(async () => catalog)
   vi.spyOn(api.notebooks, 'apply').mockImplementation(async input => { changeBook(input.change, input.operationId); return catalog })
-  vi.spyOn(api.files, 'readPublic').mockImplementation(async input => ({ resource: mapping(input.path), result: read(input.path) }))
-  vi.spyOn(api.files, 'createPublic').mockImplementation(async input => {
-    expect(input.expectedResource).toEqual(mapping(input.path))
-    if (files.has(input.path)) return { resource: mapping(input.path), result: { status: 'conflict', observedRevision: revision(files.get(input.path)!) } }
-    files.set(input.path, input.content)
-    return { resource: mapping(input.path), result: { status: 'written', revision: revision(input.content) } }
-  })
-  vi.spyOn(api.files, 'writePublic').mockImplementation(async input => {
-    expect(input.expectedResource).toEqual(mapping(input.path))
-    expect(input.baseContent).toBe(files.get(input.path))
-    expect(input.expectedRevision).toBe(revision(input.baseContent!))
-    files.set(input.path, input.content)
-    return { resource: mapping(input.path), result: { status: 'written', revision: revision(input.content) } }
-  })
+  vi.spyOn(api.files, 'readPublic').mockImplementation(input => originalFiles.read(input))
+  vi.spyOn(api.files, 'createPublic').mockImplementation(input => originalFiles.create(input))
+  vi.spyOn(api.files, 'writePublic').mockImplementation(input => originalFiles.write(input))
 })
 
 afterEach(async () => {
@@ -101,8 +114,31 @@ it('writes the chosen original file and projects one exact card from the Noteboo
   const graph = parseNotebookGraph(await originalObservation.graph(catalog, {}), {})
   expect(graph.recallCards).toEqual([{ source: { noteId: saved.page.noteId, blockId: saved.blockId }, card }])
   expect(readRecallCard(recallCardHref(card), card.title)).toEqual(card)
-  await display(<ConversationRecallCard card={card} observed={{ catalog, graph }} />)
+  const backlinks = recallBacklinks({ catalog, graph }, { hostId: card.routeHostId, agentSessionId: card.reference.agentSessionId })
+  await display(<ConversationRecallCard card={card} backlinks={backlinks} />)
   expect(container!.querySelector('.recall-knowledge-card')?.textContent).toContain('Open Research note')
+  const beforeNoteOpen = workbench.useAppStore.getState()
+  const openFile = vi.fn(async () => true)
+  const originalRead = vi.spyOn(api.files, 'read').mockImplementation(async (_, requested) => read(requested))
+  try {
+    workbench.useAppStore.setState({
+      openFile, layouts: {},
+      prepareWorkbenchLayout: () => createWorkspaceLayout('notes-group', []),
+      setMainSurface: mainSurface => workbench.useAppStore.setState({ mainSurface }),
+      setRecallNotebook: (recallNotebookId, recallNoteId) => workbench.useAppStore.setState({ recallNotebookId, recallNoteId: recallNoteId ?? null }),
+      setRecallZoneSelection: recallZoneSelection => workbench.useAppStore.setState({ recallZoneSelection })
+    })
+    const link = [...container!.querySelectorAll('button')].find(button => button.textContent === 'Open Research note')!
+    await act(async () => link.click())
+    expect(originalRead).toHaveBeenCalledWith(workspace.id, path)
+    expect(openFile).toHaveBeenCalledWith(path, 'notes-group', {
+      line: 1, noteBlock: { noteId: saved.page.noteId, blockId: saved.blockId }
+    }, workspace.id, true, expect.objectContaining({
+      space: expect.objectContaining({ zoneId: workspaceZoneId(spaceId, workspace.id) })
+    }), undefined)
+  } finally {
+    workbench.useAppStore.setState(beforeNoteOpen)
+  }
   const actual = read(path)
   expect(actual.status).toBe('read')
   if (actual.status !== 'read') throw new Error('Fixture note must be readable')
@@ -146,7 +182,7 @@ it('creates one default Daily per local day and appends different cards to its o
 
 it('keeps the exact pending destination after a lost write reply and checks the same file without a duplicate write', async () => {
   vi.mocked(api.files.writePublic).mockImplementationOnce(async input => {
-    files.set(input.path, input.content)
+    await originalFiles.write(input)
     throw new Error('Reply lost for the original file')
   })
   await expect(saveRecallCard(card, catalog.pages['selected-note']!, date)).rejects.toThrow('Reply lost')
@@ -154,7 +190,7 @@ it('keeps the exact pending destination after a lost write reply and checks the 
   expect(originalIntent.phase).toBe('checking')
   const history = vi.spyOn(api.files, 'historyPublic').mockImplementation(async input => {
     expect(input.eventId).toBe(originalIntent.writeAttempt)
-    return { resource: mapping(path), result: { status: 'read', noteId: 'selected-note', resource: resource(path),
+    return { resource: input.expectedResource, result: { status: 'read', noteId: 'selected-note', resource: resource(path),
       batches: [], hasMore: false, entries: [{ eventId: input.eventId, status: 'committed' }] } } as Awaited<ReturnType<typeof api.files.historyPublic>>
   })
   const same = await saveRecallCard(card, null, new Date())
@@ -163,4 +199,62 @@ it('keeps the exact pending destination after a lost write reply and checks the 
   expect(api.files.writePublic).toHaveBeenCalledTimes(1)
   expect(api.files.createPublic).not.toHaveBeenCalled()
   expect(workbench.useAppStore.getState().recallCardIntents).toEqual({})
+})
+
+it('writes an explicitly selected nested Note using the original Zone-relative address', async () => {
+  const nested = { ...workface, zoneId: 'journal-zone' }
+  const nestedPath = 'journal/decisions.note.md'
+  workbench.useAppStore.setState(state => ({ spaceZoneBindings: { ...state.spaceZoneBindings, [nested.zoneId]: {
+    spaceId, workspaceId: workspace.id, directoryPath: workspace.path + '/journal', relations: { [spaceId]: false }
+  } } }))
+  files.set(nestedPath, serializeNoteDocument(newNoteDocument('Decisions', 'decisions', 'existing-block', 'Decisions')))
+  await api.notebooks.apply({ expectedRevision: catalog.revision, operationId: 'register-decisions',
+    change: { kind: 'register', noteId: 'decisions', title: 'Decisions', resource: resource(nestedPath), workface: nested } })
+
+  const saved = await saveRecallCard(card, catalog.pages.decisions!, date)
+  expect(saved.page.resource.path).toBe(nestedPath)
+  expect(api.files.readPublic).toHaveBeenCalledWith(expect.objectContaining({ zoneId: nested.zoneId, path: 'decisions.note.md' }))
+  const nestedNote = readNoteDocument(files.get(nestedPath)!)
+  expect(nestedNote.status === 'valid' && recallCardBlocks(nestedNote.note.content)).toEqual([{ blockId: saved.blockId, card }])
+  expect(files.get(path)).toBe(body)
+  expect(files.has('journal/' + nestedPath)).toBe(false)
+})
+
+it('continues the same Daily after the original file and catalog entry move', async () => {
+  const first = await saveRecallCard(card, null, date)
+  const from = first.page.resource, to = resource('journal/renamed.note.md')
+  files.set(to.path, files.get(from.path)!)
+  files.delete(from.path)
+  await api.notebooks.apply({ expectedRevision: catalog.revision, operationId: 'move-daily',
+    change: { kind: 'relocate', noteId: first.page.noteId, from, resource: to } })
+  const second = await saveRecallCard({ ...card, id: 'another-reading-point' }, null, date)
+  expect(second.page.noteId).toBe(first.page.noteId)
+  expect(second.page.resource).toEqual(to)
+  expect(api.files.createPublic).toHaveBeenCalledTimes(1)
+  expect(files.has(from.path)).toBe(false)
+  const moved = readNoteDocument(files.get(to.path)!)
+  expect(moved.status === 'valid' && recallCardBlocks(moved.note.content)).toHaveLength(2)
+})
+
+it('permits choosing another destination after the first Note cannot be read', async () => {
+  files.delete(path)
+  await expect(saveRecallCard(card, catalog.pages['selected-note']!, date)).rejects.toThrow('cannot be read')
+  expect(workbench.persistRecallCardIntent).not.toHaveBeenCalled()
+  expect(api.files.writePublic).not.toHaveBeenCalled()
+  const saved = await saveRecallCard(card, null, date)
+  expect(saved.page.resource.path).not.toBe(path)
+  expect(files.has(path)).toBe(false)
+})
+
+it('permits choosing another destination after a confirmed revision conflict', async () => {
+  const edited = body + '\nIndependent edit\n'
+  vi.mocked(api.files.writePublic).mockImplementationOnce(input => {
+    files.set(path, edited)
+    return originalFiles.write(input)
+  })
+  await expect(saveRecallCard(card, catalog.pages['selected-note']!, date)).rejects.toThrow('destination changed')
+  expect(workbench.useAppStore.getState().recallCardIntents).toEqual({})
+  const saved = await saveRecallCard(card, null, date)
+  expect(saved.page.resource.path).not.toBe(path)
+  expect(files.get(path)).toBe(edited)
 })
