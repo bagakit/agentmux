@@ -1,9 +1,10 @@
+import { DocumentationNavigation } from '../documentation/DocumentationNavigation'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
 import { PROMPT_REACTION_ICONS, PROMPT_REACTION_STARTERS, type PromptReactionIcon } from '@agentmux/core/prompt-reaction'
 import { PromptReactionIconView } from '@agentmux/client-ui/components/ConversationReactionActions'
 import { resolveComposerInputConfig } from '@agentmux/client-ui/composer-input-config'
-import { useEffect, useId, useRef, useState } from 'react'
+import { useContext, useEffect, useId, useRef, useState } from 'react'
 import { BUILT_IN_AGENT_PROVIDER_IDS } from '@agentmux/core/provider-id'
 import { Button } from '@agentmux/client-ui/components/Button'
 import type { AppConfig, ComposerShortcut } from '../../../../shared/contracts'
@@ -57,6 +58,7 @@ export function ShortcutSettingsPane({ config, active, onOpenGoals }: {
   const [scope, setScope] = useState<PromptScope>({ kind: 'all' })
   const [usageOpen, setUsageOpen] = useState<Record<string, boolean>>({})
   const [expanded, setExpanded] = useState(false)
+  const documentation = useContext(DocumentationNavigation)
   const { view, narrow, host, rememberFocus, openEditor, returnToLibrary } = useSettingsLibraryView(active)
   const [recentDelete, setRecentDelete] = useState<{ prompt: ComposerShortcut } | null>(null)
   const nameInput = useRef<HTMLInputElement>(null)
@@ -184,7 +186,11 @@ export function ShortcutSettingsPane({ config, active, onOpenGoals }: {
 
   return (
     <div ref={host} className="settings-pane-stack prompt-workbench" data-view={view} data-creation-empty={!drafts.length}>
-      <div className="prompt-goals-link"><span>Manage Goals shortcuts, order and visibility in Goals settings.</span><Button type="button" onClick={onOpenGoals}>Goals common actions</Button></div>
+      <div className="prompt-goals-link">
+        <span>Manage Goals shortcuts, order and visibility in Goals settings.</span>
+        <Button type="button" onClick={onOpenGoals}>Goals common actions</Button>
+        {documentation ? <Button type="button" onClick={() => documentation.open('protocols')}>amux Protocols</Button> : null}
+      </div>
       <div className="prompt-scope" role="group" aria-label="Prompt authoring scope" onFocusCapture={() => rememberFocus('library')}>
         <button type="button" data-prompt-scope="all" aria-pressed={scope.kind === 'all'} onClick={() => setScope({ kind: 'all' })}>All prompts <span>{drafts.length}</span></button>
         <button type="button" data-prompt-scope="shared" aria-pressed={scope.kind === 'shared'} onClick={() => setScope({ kind: 'shared' })}>Shared <span>{drafts.filter(candidate => candidate.providerId === undefined).length}</span></button>

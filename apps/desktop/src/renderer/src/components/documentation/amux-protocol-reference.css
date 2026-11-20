@@ -28,7 +28,7 @@
 .amux-protocols__comparison { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-0); overflow: hidden; }
 .amux-protocols__wire, .amux-protocols__rendered { min-width: 0; padding: var(--sp-3); }
 .amux-protocols__wire { background: var(--surface-1); border-right: 1px solid var(--line); }
-.amux-protocols__wire > pre { margin: 0; color: var(--text-2); font: var(--fs-meta)/1.65 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.amux-protocols__wire > pre, .amux-protocols__source > pre { margin: 0; color: var(--text-2); font: var(--fs-meta)/1.65 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .amux-protocols__preview-label { display: block; margin-bottom: var(--sp-3); color: var(--text-3); font-size: var(--fs-micro); }
 .amux-protocols__preview { min-width: 0; overflow-wrap: anywhere; }
 .amux-protocols__preview pre { max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -47,3 +47,6 @@
   .amux-protocols__row > summary > span { gap: var(--sp-2); }
   .amux-protocols__body { padding: 0 var(--sp-3) var(--sp-3); }
 }
+.amux-protocols__source { min-width: 0; padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-0); }
+.amux-protocols__templates { margin-top: var(--sp-4); color: var(--text-2); font-size: var(--fs-meta); }
+.amux-protocols__templates > summary { padding-block: var(--sp-2); cursor: pointer; }

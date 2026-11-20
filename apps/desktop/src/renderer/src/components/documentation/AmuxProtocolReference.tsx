@@ -28,16 +28,24 @@ function ProtocolExamples({ entry }: { entry: AgentMuxProtocolCatalogEntry }) {
   </ClientUiProvider>
 }
 
+function PromptExamples({ entry }: { entry: AgentMuxProtocolCatalogEntry }) {
+  return entry.examples.map((example, index) => <section key={index} className="amux-protocols__example">
+    <h4>{example.label}</h4>
+    <div className="amux-protocols__source" data-protocol-example={entry.id}><pre>{example.wire}</pre></div>
+  </section>)
+}
+
 function ProtocolRow({ entry, active, rowRef }: { entry: AgentMuxProtocolCatalogEntry; active: boolean; rowRef?: RefObject<HTMLDetailsElement | null> | undefined }) {
   const [open, setOpen] = useState(false)
+  const [showTemplates, setShowTemplates] = useState(false)
   return <details ref={rowRef} className="amux-protocols__row" data-protocol-entry={entry.id} onToggle={event => setOpen(event.currentTarget.open)}>
     <summary><SemanticIcon name="navigation.disclosure" size={13} aria-hidden="true" /><span><strong>{entry.title}</strong><code>{entry.form}</code></span></summary>
-    {open && active ? <div className="amux-protocols__body"><p className="amux-protocols__description">{entry.description}</p><ProtocolExamples entry={entry} />
-      <details>
+    {open && active ? <div className="amux-protocols__body"><p className="amux-protocols__description">{entry.description}</p>{entry.form === 'prompt' ? <PromptExamples entry={entry} /> : <ProtocolExamples entry={entry} />}
+      <details className="amux-protocols__templates" onToggle={event => setShowTemplates(event.currentTarget.open)}>
         <summary>Templates</summary>
-        {entry.templates.map(template => <section key={template.name} className="amux-protocols__example">
-          <h4>{template.name}</h4><div className="amux-protocols__wire"><pre>{template.text}</pre></div>
-        </section>)}
+        {showTemplates ? entry.templates.map(template => <section key={template.name} className="amux-protocols__example">
+          <h4>{template.name}</h4><div className="amux-protocols__source"><pre>{template.text}</pre></div>
+        </section>) : null}
       </details></div> : null}
   </details>
 }
@@ -47,7 +55,8 @@ export function AmuxProtocolReference({ active }: { active: boolean }) {
   const search = useRef<HTMLInputElement>(null), firstExample = useRef<HTMLDetailsElement>(null)
   const visible = useMemo(() => {
     const normalized = query.trim().toLowerCase()
-    return normalized ? AGENTMUX_PROTOCOL_CATALOG.filter(entry => `${entry.id} ${entry.title} ${entry.description} ${entry.form} ${entry.examples.map(example => `${example.label} ${example.wire}`).join(' ')}`.toLowerCase().includes(normalized)) : AGENTMUX_PROTOCOL_CATALOG
+    return normalized ? AGENTMUX_PROTOCOL_CATALOG.filter(entry => `${entry.id} ${entry.title} ${entry.description} ${entry.form} ${entry.examples.map(example => `${example.label} ${example.wire}`).join(' ')}`.toLowerCase().includes(normalized) ||
+      entry.templates.some(template => template.name.includes(normalized) || template.text.toLowerCase().includes(normalized))) : AGENTMUX_PROTOCOL_CATALOG
   }, [query])
   function openFirstExample() {
     if (!firstExample.current) return
@@ -56,13 +65,13 @@ export function AmuxProtocolReference({ active }: { active: boolean }) {
   }
   return <section className="amux-protocols" aria-label="amux protocol reference">
     <div className="amux-protocols__toolbar">
-      <label className="amux-protocols__search"><SemanticIcon name="action.search" size={15} aria-hidden="true" /><TextInput ref={search} data-documentation-search aria-label="Search amux Protocols" placeholder="Find a format or example…" value={query} onChange={event => setQuery(event.target.value)} />
+      <label className="amux-protocols__search"><SemanticIcon name="action.search" size={15} aria-hidden="true" /><TextInput ref={search} data-documentation-search aria-label="Search amux Protocols" placeholder="Find a format or template…" value={query} onChange={event => setQuery(event.target.value)} />
         {query ? <button type="button" className="icon-button" aria-label="Clear documentation search" onClick={() => { setQuery(''); search.current?.focus() }}><SemanticIcon name="action.clear" size={13} /></button> : null}</label>
-      <span className="amux-protocols__count" role="status">{visible.length === AGENTMUX_PROTOCOL_CATALOG.length ? `${visible.length} formats` : `${visible.length} of ${AGENTMUX_PROTOCOL_CATALOG.length} formats`}</span>
+      <span className="amux-protocols__count" role="status">{visible.length === AGENTMUX_PROTOCOL_CATALOG.length ? `${visible.length} entries` : `${visible.length} of ${AGENTMUX_PROTOCOL_CATALOG.length} entries`}</span>
       {visible.length ? <Button type="button" onClick={openFirstExample}>View first example</Button> : null}
     </div>
     <p className="amux-protocols__read-only">Read-only examples do not contact Agents, open links or execute protocol hints.</p>
     <div className="amux-protocols__index">{visible.length ? <div className="amux-protocols__list">{visible.map((entry, index) => <ProtocolRow key={entry.id} entry={entry} active={active} rowRef={index === 0 ? firstExample : undefined} />)}</div>
-      : <p className="amux-protocols__empty">No formats match “{query}”. Try a name, format or example text.</p>}</div>
+      : <p className="amux-protocols__empty">No entries match “{query}”. Try a name, format or template.</p>}</div>
   </section>
 }
