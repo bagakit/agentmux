@@ -330,7 +330,7 @@ export const AMUX_PROTOCOL_TEMPLATES = {
   "schedule-input": {
     "note": "Original schedule: {{schedule}}. Use amux schedule inspect --help to read it.",
     "check-in": "Ask at most one short, concrete question about the user’s confirmed goal or unfinished commitment in this conversation. Say when relevant context is missing. Finish quietly when there is nothing useful to ask.",
-    "automation": "Original continuation: {{automation}}. Use amux agent automation inspect --help to read it."
+    "automation": "Original continuation: {{automation}}."
   },
   "sharing": {
     "wire": "--- amux : {{kind}} ---\n{{body}}\n-----"

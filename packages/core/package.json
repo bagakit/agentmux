@@ -587,6 +587,7 @@
     "src/ctxmux-artifact-contract.json",
     "examples",
     "guides",
+    "protocols",
     "vendor",
     "THIRD_PARTY_NOTICES.md"
   ],

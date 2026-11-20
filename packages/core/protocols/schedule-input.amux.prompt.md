@@ -27,5 +27,5 @@ Ask at most one short, concrete question about the user’s confirmed goal or un
 ## automation
 
 ~~~text
-Original continuation: {{automation}}. Use amux agent automation inspect --help to read it.
+Original continuation: {{automation}}.
 ~~~
