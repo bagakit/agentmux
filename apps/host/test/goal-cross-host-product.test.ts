@@ -216,7 +216,7 @@ test('the received original report retains its worker signature and exact Goal c
   expect(b.native.stop).not.toHaveBeenCalled()
 })
 
-it.each(['active original Supervisor', 'retired original Supervisor', 'active original Supervisor unmounted', 'active original Supervisor with queued Core input', 'reassignment after collection'] as const)('retains the original report through current Supervisor collection with %s', async scenario => {
+it.each(['active original Supervisor', 'retired original Supervisor', 'active original Supervisor unmounted', 'active original Supervisor with queued Core input', 'reassignment after collection', 'input saved during final Desktop check', 'new Goal duty before Stop admission', 'lost original Native Stop ACK'] as const)('retains the original report through current Supervisor collection with %s', async scenario => {
   const host = await crossHostOwner(cleanup, 'worker-closeout', ['supervisor', 'worker', 'reviewer', 'successor'])
   const { goal } = await host.call(null, ['goal', 'create', '--title', 'Verify worker closeout',
     '--status', 'in_progress', '--assignees', '["supervisor","worker","successor"]', '--supervisor', 'supervisor', '--risk', 'low', '--confirm', 'user'])
@@ -298,12 +298,19 @@ it.each(['active original Supervisor', 'retired original Supervisor', 'active or
   await host.original.store.compareAndSwapMetadata(metadata, { ...metadata, semanticStatus: { state: 'done', source: 'native-hook',
     observedAt: now, stateEnteredAt: now, nativeTurnId: 'original-completed-turn' }, updatedAt: now })
   await (host.client() as unknown as { registry: { load(hostId: string): Promise<void> } }).registry.load('local')
-  let known = false, pending = false
+  let known = false, pending = false, scheduleInput = false, desktopReads = 0
   const drafts: Record<string, string> = {}
   const owners = mounted ? ['worker', 'work-region'] : ['worker']
   const desktop = new AgentMuxControlServer({ socketPath: join(directory, 'absent-desktop.sock'),
     coreClients: () => [{ hostId: 'local', client: host.client() }], execute: async request => {
       if (request.operation !== 'message.pending.ls' || request.closeoutRunId !== 'run-worker' || request.agentSessionId !== 'worker') throw new Error('Unexpected private Desktop request')
+      if (scheduleInput && ++desktopReads === 2) {
+        await host.call('successor', ['agent', 'send', '--to-session', 'worker', '--expect-run', 'run-worker', '--message-id', 'input-saved-after-core-check',
+          '--operation-id', 'save-concurrent-original-input', '--text', 'Original work routed while closeout was checking Desktop'])
+        const saved = await host.call('successor', ['message', 'read', '--message-id', 'input-saved-after-core-check'])
+        expect(saved.message).toMatchObject({ envelope: { recipientSessionId: 'worker', recipientRunId: 'run-worker' }, delivery: { state: 'queued' } })
+        expect(host.native.stop).not.toHaveBeenCalled()
+      }
       return { operation: request.operation, agentSessionId: 'worker', messages: [],
         occupation: { runId: request.closeoutRunId, state: desktopRunInputOccupation({ known, owners, drafts, notes: {}, pending }) } }
     } })
@@ -338,6 +345,58 @@ it.each(['active original Supervisor', 'retired original Supervisor', 'active or
       '--operation-id', 'queue-another-input', '--text', 'An unrelated original input'])
     expect(await host.call('worker', args)).toMatchObject({ state: 'retained', reason: 'pending' })
     expect(host.native.stop).not.toHaveBeenCalled()
+    return
+  }
+  if (scenario === 'input saved during final Desktop check') {
+    scheduleInput = true
+    expect(await host.call('worker', args)).toMatchObject({ state: 'retained', reason: 'pending' })
+    expect(desktopReads).toBe(2)
+    expect(host.native.stop).not.toHaveBeenCalled()
+    const original = await host.call('worker', ['agent', 'inspect', '--session', 'worker'])
+    expect(original.session.run.runId).toBe('run-worker')
+    return
+  }
+  if (scenario === 'new Goal duty before Stop admission') {
+    const prepare = host.native.prepareStop as ReturnType<typeof vi.fn<(runId: string, operationKey: string) => Promise<unknown>>>
+    const original = prepare.getMockImplementation()!
+    prepare.mockImplementationOnce(async (runId, operationKey) => {
+      await host.call(null, ['goal', 'create', '--title', 'Another original duty before Stop admission', '--status', 'in_progress',
+        '--assignees', '["worker"]', '--risk', 'low', '--confirm', 'user'])
+      return await original(runId, operationKey)
+    })
+    expect(await host.call('worker', args)).toMatchObject({ state: 'retained', reason: 'other-work' })
+    expect(host.native.stop).not.toHaveBeenCalled()
+    return
+  }
+  if (scenario === 'lost original Native Stop ACK') {
+    const stop = host.native.stop as ReturnType<typeof vi.fn<(operation: { runId: string }) => Promise<unknown>>>
+    const status = host.native.status as ReturnType<typeof vi.fn<(runId: string) => Promise<ReturnType<typeof host.original.run>>>>
+    const originalStop = stop.getMockImplementation()!, originalStatus = status.getMockImplementation()!
+    const inspectStop = ['agent', 'stop', 'inspect', '--session', 'worker', '--run', 'run-worker', '--operation-id', 'closeout-stop']
+    stop.mockImplementationOnce(async operation => {
+      const refused = await host.cli('successor', ['agent', 'send', '--to-session', 'worker', '--expect-run', 'run-worker',
+        '--message-id', 'input-after-stop-admission', '--operation-id', 'input-after-stop-operation', '--text', 'Keep this request if it cannot be submitted.'])
+      expect(refused.code).toBe(1)
+      expect(refused.stderr).toContain('AGENT_INPUT_RUN_STOPPING')
+      expect((await host.call('successor', ['message', 'read', '--message-id', 'input-after-stop-admission'])).message).toBeNull()
+      const local = await host.cli(null, ['agent', 'send', '--to-session', 'worker', '--expect-run', 'run-worker',
+        '--message-id', 'local-input-after-stop-admission', '--operation-id', 'local-input-after-stop-operation', '--text', 'Keep this local request.'])
+      expect(local.code).toBe(1)
+      expect(local.stderr).toContain('AGENT_INPUT_RUN_STOPPING')
+      expect((await host.call(null, ['message', 'read', '--host', 'local', '--message-id', 'local-input-after-stop-admission'])).message).toBeNull()
+      await originalStop(operation)
+      status.mockImplementation(async id => id === operation.runId
+        ? { ...await originalStatus(id), state: { type: 'exited', code: 0, signal: null } } : originalStatus(id))
+      throw new Error('Private original Native Stop ACK lost')
+    })
+    expect(await host.call('worker', args)).toMatchObject({ state: 'retained', reason: 'unknown', operationId: 'closeout-stop' })
+    expect(await host.call(null, inspectStop)).toMatchObject({ phase: 'stopping', operationIdMatched: true,
+      failure: { stage: 'runtime-stop', message: 'Private original Native Stop ACK lost' } })
+    expect(await host.call('worker', args)).toMatchObject({ state: 'retained', reason: 'unknown', operationId: 'closeout-stop' })
+    await host.call(null, ['agent', 'stop', '--session', 'worker', '--run', 'run-worker', '--operation-id', 'closeout-stop'])
+    expect(await host.call(null, inspectStop)).toMatchObject({ phase: 'retired', operationIdMatched: true })
+    expect(host.native.prepareStop).toHaveBeenCalledTimes(1)
+    expect(stop).toHaveBeenCalledTimes(1)
     return
   }
   const incorrect = await host.cli('worker', closeout('different-run', 'closeout-wrong-run'))

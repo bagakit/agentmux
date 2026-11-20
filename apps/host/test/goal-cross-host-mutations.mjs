@@ -46,5 +46,11 @@ export const crossHostMutations = {
     anchor: "current?.attempt?.delegationOperationId !== attempt.operationId ||\n          (current.state !== 'review' && current.state !== 'done') ||",
     replacement: 'goal?.delegations?.filter(item => item.planNodeId === attempt.planNodeId).at(-1) !== attempt ||',
     test: 'reassignment after collection'
+  },
+  'closeout-input-admission': {
+    path: 'packages/core/src/agent-global-message-queue.ts',
+    anchor: 'if (directMessage || this.pendingNotification(agentSessionId, sourceMessageId)) throw new AgentMuxError(',
+    replacement: 'if (false) throw new AgentMuxError(',
+    test: 'input saved during final Desktop check'
   }
 }
