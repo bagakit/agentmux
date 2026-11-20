@@ -131,6 +131,8 @@ CODEX_HOME="$private_seed" pnpm test:real-codex # 显式使用独立 seed，与�
 pnpm check           # typecheck + fast + native + all builds
 ```
 
+跨设备执行有独立 Gate。本机入口 `node packages/core/scripts/verify-cross-host-execution.mjs --mutations` 编译 Core，运行变异、公开 CLI／RPC 与原生工具样例。双机入口 `node packages/core/scripts/verify-cross-host-execution-remote.mjs --receipt "$receipt"` 消费同一已安装候选和原目标授权，核对两种分端方向的 Reader Gap、性能及 Desktop 重启证据。项目侧 Native 更换可单独用 `--mode executor-recovery --direction remote-agent` 验证，核对原 Agent 和 frontend 的 Run、PID、旧工具效果及新连接的真实文件回包。该模式的结果只覆盖项目在协调器本机的方向，以及原 frontend 接受新 Provider 连接的能力。覆盖范围与原生证据见 [本机 Gate](../../packages/core/scripts/verify-cross-host-execution.mjs)、[双机 Gate](../../packages/core/scripts/verify-cross-host-execution-remote.mjs)和[验收汇合](../../packages/core/scripts/fixtures/cross-host-execution-complete.mjs)。
+
 Fast 与 Native 分开是为了让失败归因清晰，不允许用 Mock 代替 Native proof。Native fixture 使用独立 runtime/state 与真实 packaged `ctxmuxd`、真实 PTY；具体隔离方法以 harness 为准。产品进程级路径策略由 runtime-paths.ts 持有，不能把某一版 fixture 的 synthetic uid 方案写成「产品不支持 override」。清理只针对已证明归属的测试资源。 每个已登记的清理动作须按原依赖顺序尝试完成，某一步失败不能跳过后续资源释放或 mock／环境恢复；保留所有原始错误并在收尾后汇总报告。失败变异的兜底清理仍只操作其精确私有资源，不能把兜底成功计为被验证收尾路径已经成功。
 
 验证进程必须在报告结束前真正回收，因为用户内存有限。验证失败、超时或中断后不得留下 Electron、文件 observer 或测试 Runtime；runner 须确认本次进程已经退出，一条超时日志不算进程结束。一次验证尚未完成回收时，不启动下一份 Electron 验证。清理只针对本次验证的进程组、独立临时目录和 Runtime 身份，不影响正式应用和用户 Agent；先回收进程，再删除它们依赖的临时目录。观察失败必须明确报告，不能当作零残留。验证模式的启动落点只决定初始选择，不持续覆盖用户或 probe 随后的 Workspace 切换，也不能让项目切换在测试模式下失效。
