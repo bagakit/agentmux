@@ -167,7 +167,7 @@ export async function observePromptInput<T>(signal: AbortSignal, read: () => Pro
 
 function promptMessageIdentity(message: AgentPromptMessageContent | undefined): string {
   return JSON.stringify(message === undefined ? null : [message.userContent, message.systemContext,
-    message.authorAgentSessionId, message.authorHuman === true, message.sourceDevice, message.sourceChannel, message.authorExternal, message.questionReply, message.a2aNotificationId, message.inputContext, message.inputContextSource, message.inputContextCaptureProof, message.inputImages])
+    message.authorAgentSessionId, message.authorHuman === true, message.sourceDevice, message.sourceChannel, message.authorExternal, message.questionReply, message.a2aNotificationId, message.inputContext, message.inputContextSource, message.inputContextCaptureProof, message.inputImages, ...(message.focusTask === undefined ? [] : [message.focusTask])])
 }
 
 /**
@@ -235,6 +235,7 @@ type PromptSubmissionDeps = {
 
 /** Invocation-local authenticated author; never persisted as a reusable grant. */
 export type AgentPromptInputAuthority = Readonly<{
+  focusTask?: import('./focus-control.js').AgentMuxFocusTaskReference
   /** Producer attribution only; it never grants dispatch or Browser control. */
   inputContextSource?: import('./browser-input-context.js').BrowserInputContextSource
   authorProfile?: import('./author-profile.js').AgentPreparedAuthorProfile

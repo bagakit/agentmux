@@ -8129,15 +8129,16 @@ export class AgentMuxClient {
     context?: AgentInputCallContext): import('./prompt-submission.js').AgentPromptInputAuthority | undefined {
     const assertCurrent = context?.assertCurrent
     const retain = context?.retainAcceptedInputAuthority
+    const focusTask = context?.focusTask ?? authority?.focusTask
     const inputContextSource = authority?.inputContextSource ?? (context?.inputContextSource === undefined ? undefined : parseBrowserInputContextSource(context.inputContextSource))
-    if (!assertCurrent && !retain && inputContextSource === undefined) return authority
+    if (!assertCurrent && !retain && inputContextSource === undefined && focusTask === undefined) return authority
     return { ...authority, assertCurrent: async () => {
       await authority?.assertCurrent()
       await assertCurrent?.()
     }, ...(retain ? { retainForAcceptedInput: async (key: import('./agent-prompt-condition.js').AgentPromptInputKey) => {
       const accepted = await retain(key)
       return { assertCurrent: async () => { await authority?.assertCurrent(); await accepted.assertCurrent() }, release: accepted.release }
-    } } : {}), ...(inputContextSource === undefined ? {} : { inputContextSource }) }
+    } } : {}), ...(inputContextSource === undefined ? {} : { inputContextSource }), ...(focusTask === undefined ? {} : { focusTask }) }
   }
 
   private isRetainedHumanInput(intent: AgentInputJournalIntent): boolean {
@@ -8792,6 +8793,7 @@ export class AgentMuxClient {
     const capturedImages = waitingSource?.inputImages ?? authority?.inputImages
     const capturedProfile = waitingSource?.authorProfile ?? authority?.authorProfile
     const authored: AgentPromptMessageContent = platformNotification ? { systemContext: platformNotification.wire, a2aNotificationId: platformNotification.notificationId } : {
+      ...(!input.admissionIntent && authority?.focusTask ? { focusTask: authority.focusTask } : {}),
       ...(!authorAgentSessionId && !authority?.externalAuthor && input.authorHuman === true && capturedProfile ? { authorProfile: capturedProfile } : {}),
       ...(capturedImages === undefined ? {} : { inputImages: capturedImages }),
       ...(inputContext ? { inputContext, inputContextSource: waitingSource?.inputContextSource ?? authority?.inputContextSource ?? 'caller-declared',

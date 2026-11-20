@@ -7,7 +7,7 @@ import { parseAgentInputMoteSource, type AgentInputMoteSource } from './mote/inp
 import { rpcRecord } from './rpc-data.js'
 import { validateAgentDirectedPromptTarget, validateAgentPromptCondition, validateAgentPromptInputKey, optionalInputEpoch, type AgentPromptCondition, type AgentDirectedPromptTarget } from './agent-prompt-condition.js'
 import { parseBrowserInputContext, type BrowserInputContext } from './browser-input-context.js'
-import type { AgentMuxRunRef, AgentPromptExecution, AgentPromptSubmissionRecord } from './types.js'
+import type { AgentMuxRunRef, AgentPromptExecution, AgentPromptMessageContent, AgentPromptSubmissionRecord } from './types.js'
 import type { AgentInputSubmissionReceipt } from './agent-input-wait.js'
 import { parseAgentInputContextCaptureReference, type AgentInputContextCaptureReference } from './agent-input-context-capture.js'
 import { normalizeMessageChannel } from './message-origin.js'
@@ -75,11 +75,12 @@ export function parseAgentInputSubmit(value: unknown): AgentInputSubmit {
 }
 
 /** Only the original input producer selects these fixed guides; wire composition stays in its existing owner. */
-export function agentInputGuidance(input: Pick<AgentInputSubmit, 'moteGuidance' | 'focusTask' | 'preparationRetry'>, retainedNote?: string): string {
-  if (!input.focusTask) return input.moteGuidance
-    ? (input.preparationRetry ? retainedNote : undefined) ?? MOTE_INPUT_GUIDANCE
-    : ''
-  if (input.preparationRetry && retainedNote !== undefined &&
-      matchesLegacyFocusTaskNote(input.focusTask, retainedNote, input.moteGuidance)) return retainedNote
+export function agentInputGuidance(input: Pick<AgentInputSubmit, 'moteGuidance' | 'focusTask' | 'preparationRetry'>,
+  original?: Pick<AgentPromptMessageContent, 'focusTask' | 'systemContext'>): string {
+  const retained = input.preparationRetry ? original?.systemContext : undefined
+  if (!input.focusTask) return input.moteGuidance ? retained ?? MOTE_INPUT_GUIDANCE : ''
+  if (retained !== undefined && (original?.focusTask === undefined
+    ? matchesLegacyFocusTaskNote(input.focusTask, retained, input.moteGuidance)
+    : JSON.stringify(original.focusTask) === JSON.stringify(input.focusTask))) return retained
   return focusTaskHandoffNote(input.focusTask)
 }

@@ -8,6 +8,7 @@ import { browserInputContextFields } from './browser-input-context.js'
 import { agentInputDeliveryKey, validateAgentInputControlId, validateAgentInputDeliveryKey, validateAgentInputWaitRef } from './agent-input-wait.js'
 import { agentPromptInputId, validateAgentLaunchPromptInputPlan, validateAgentPromptAdmissionIntent, validateAgentPromptInputKey } from './agent-prompt-condition.js'
 import { normalizeMessageChannel } from './message-origin.js'
+import { parseFocusTaskReference } from './focus-control.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import { dequal } from 'dequal'
 import { nativeInputCorrelationKey } from './native-input-correlation.js'
@@ -608,6 +609,7 @@ export function normalizePromptInputIntent(value: unknown): NonNullable<NonNulla
       return {
         ...(message.a2aNotificationId === undefined ? {} : { a2aNotificationId: string(message.a2aNotificationId, 'original A2A notification identity') }),
         ...preparedAuthorProfileFields(message.authorProfile),
+        ...(message.focusTask === undefined ? {} : { focusTask: parseFocusTaskReference(message.focusTask) }),
         ...(message.inputImages === undefined ? {} : { inputImages: parseAgentInputImages(message.inputImages) }),
         ...browserInputContextFields(message), ...agentInputContextCaptureProofFields(message),
         ...(message.userContent === undefined ? {} : { userContent: bytes(message.userContent) }),

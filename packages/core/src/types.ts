@@ -1378,6 +1378,8 @@ export type AgentMuxAgentCreationFact = {
 
 /** Original message segments and verified authors captured before Input dispatch. */
 export type AgentPromptMessageContent = {
+  /** Original Focus selection qualified by the exact input owner. */
+  focusTask?: import('./focus-control.js').AgentMuxFocusTaskReference
   authorProfile?: import('./author-profile.js').AgentPreparedAuthorProfile
   inputImages?: import('./agent-input-resource.js').AgentInputImage[]
   /** Original Core notification input identity; the encoded text does not establish this fact. */

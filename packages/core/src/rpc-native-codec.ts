@@ -850,7 +850,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         if (p.record !== null) {
           const original = parsePromptSubmissionRecord(p.record), message = original.admission?.intent?.message ?? original.launch?.message
           const expectedContext = packet ? message?.inputContext : submitted.inputContext
-          const expectedNote = composeAgentPrompt(undefined, packet ? packet.agentMuxNote : agentInputGuidance(submitted, message?.systemContext)).systemContext
+          const expectedNote = composeAgentPrompt(undefined, packet ? packet.agentMuxNote : agentInputGuidance(submitted, message)).systemContext
           if (packet) {
             if (!expectedContext) fail()
             const {schema:_schema,inputContext:_context,...proof} = createAgentInputContextCaptureRecord({reference:packet.reference,
@@ -861,7 +861,8 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
           if (original.agentSessionId !== key.agentSessionId || !isDeepStrictEqual(original.run, key.expectedRun) ||
               (original.admission?.submissionId ?? original.launch?.input.submissionId) !== key.submissionId ||
               original.admission?.inputKey && !isDeepStrictEqual(original.admission.inputKey, key) ||
-              !message || message.userContent !== input.prompt || !isDeepStrictEqual(message.inputContext, expectedContext) ||
+              !message || message.focusTask !== undefined && !isDeepStrictEqual(message.focusTask, submitted.focusTask) ||
+              message.userContent !== input.prompt || !isDeepStrictEqual(message.inputContext, expectedContext) ||
               !isDeepStrictEqual(message.inputImages?.map(({ observation: _observation, ...reference }) => reference), input.inputImages) ||
               message.authorHuman !== (submitted.moteGuidance === true || packet ? true : undefined) || message.authorAgentSessionId !== undefined || message.authorExternal !== undefined ||
               submitted.sourceChannel !== undefined && message.sourceChannel !== submitted.sourceChannel ||

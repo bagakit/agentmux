@@ -4651,13 +4651,16 @@ export class AgentMuxRpcService {
     const device = this.ports.operationSource?.(context)
     const {moteGuidance,focusTask,capturedContext,...prompt} = input
     const key = {kind:'prompt' as const,agentSessionId:input.agentSessionId,expectedRun:input.expectedRun,submissionId:input.operationId}
-    const retainedNote = input.preparationRetry && (moteGuidance || focusTask)
-      ? (await scope.client.inspectAgentPromptSubmission(key))?.admission?.intent?.message?.systemContext
+    const original = input.preparationRetry && (moteGuidance || focusTask)
+      ? (await scope.client.inspectAgentPromptSubmission(key))?.admission?.intent?.message
       : undefined
+    // Historical receipts without typed selection keep their existing identity check.
+    const selection = !input.admissionIntent && (!original || original.focusTask) ? focusTask : undefined
     const receipt = await scope.client.submitAgentPrompt({ ...prompt,
       ...(capturedContext ? {inputContextCapture:capturedContext.reference, ...(capturedContext.agentMuxNote === undefined ? {} : {agentMuxNote:capturedContext.agentMuxNote}),authorHuman:true} : {}),
-      ...((moteGuidance || focusTask) ? {agentMuxNote:agentInputGuidance(input,retainedNote),...(moteGuidance ? {authorHuman:true} : {})} : {}), sourceChannel: input.sourceChannel ?? (context.transport === 'unix' ? 'cli' : 'api'),
-      ...(device ? {sourceDevice:normalizeOperationDevice(device)} : {}) },{...this.inputCallContext(context), ...(this.ports.inputContextCaptures ? {captureReader:this.ports.inputContextCaptures} : {})})
+      ...((moteGuidance || focusTask) ? {agentMuxNote:agentInputGuidance(input,original),...(moteGuidance ? {authorHuman:true} : {})} : {}), sourceChannel: input.sourceChannel ?? (context.transport === 'unix' ? 'cli' : 'api'),
+      ...(device ? {sourceDevice:normalizeOperationDevice(device)} : {}) },{...this.inputCallContext(context),
+        ...(selection === undefined ? {} : {focusTask:selection}), ...(this.ports.inputContextCaptures ? {captureReader:this.ports.inputContextCaptures} : {})})
     const observed = await scope.client.inspectAgentInput({key}) ?? (receipt && 'key' in receipt ? receipt : undefined)
     const record = observed ? observed.admission : await scope.client.inspectAgentPromptSubmission(key)
     return {key,record,...(observed ? {input:observed} : {}),...(receipt?.moteObservationId ? {moteObservationId:receipt.moteObservationId} : {})}
