@@ -13,6 +13,7 @@ import { nativeInputCorrelationKey } from '../src/native-input-correlation.js'
 import type { DurableAgentMuxMessageQueue } from '../src/agent-global-message-queue.js'
 import { AGENTMUX_A2A_REFERENCE_REMINDER as sourceReferenceReminder } from '../src/agent-messaging-guidance.js'
 import { renderAgentMuxMessageReferences } from '../src/agent-message-render.js'
+import { MAX_A2A_NOTIFICATION_BYTES } from '../src/agent-message-notification.js'
 
 const entry = process.env.AGENTMUX_TEST_RPC_CORE_ENTRY
 const compiled = entry ? await import(entry) : null
@@ -119,7 +120,10 @@ async function fixture(outcome: 'admitted' | 'unknown' = 'admitted', withActor =
 }
 
 it('delivers a budget-fitting original Queue reference and continues the next native input', async () => {
-  const prepared = fixture('admitted', false, true, 's'.repeat(65_300))
+  const sample = { senderSessionId: 's', messageId: 'original-message' }
+  const overhead = Buffer.byteLength(renderAgentMuxMessageReferences([sample])) - 1
+  const sender = 's'.repeat(MAX_A2A_NOTIFICATION_BYTES - overhead)
+  const prepared = fixture('admitted', false, true, sender)
   await expect(prepared).resolves.toBeDefined()
   const f = await prepared, first = f.notification
   expect(Buffer.byteLength(first.wire)).toBeLessThanOrEqual(64 * 1024)
@@ -130,7 +134,7 @@ it('delivers a budget-fitting original Queue reference and continues the next na
   const ReopenedQueue = f.queue.constructor as new (path: string) => DurableAgentMuxMessageQueue
   const reopened = new ReopenedQueue(f.queue.path)
   expect((await reopened.readNotification(id))?.wire).toBe(first.wire)
-  expect((await reopened.readByMessageId('original-message'))?.envelope.senderSessionId).toBe('s'.repeat(65_300))
+  expect((await reopened.readByMessageId('original-message'))?.envelope.senderSessionId).toBe(sender)
   await f.appendReference('next-message')
   const current = f.client.agentSession('recipient')
   const next = (await f.queue.prepareNotification({ notificationId: 'next-notification', agentSessionId: 'recipient',
@@ -390,7 +394,8 @@ it.each(['before-claim', 'before-dispatch'] as const)('keeps exact source rechec
   if (phase === 'before-claim') f.assertCurrent.mockRejectedValueOnce(error)
   else f.assertCurrent.mockResolvedValueOnce(undefined).mockRejectedValueOnce(error)
   if (phase === 'before-claim') {
-    await expect(f.submit()).rejects.toBe(error)
+    await expect(f.submit()).rejects.toMatchObject({ code: 'AGENT_NATIVE_INPUT_UNAVAILABLE', cause: error,
+      controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
     expect(await f.read()).toBeNull()
   } else {
     await expect(f.submit()).rejects.toMatchObject({ code: 'AGENT_PROMPT_INPUT_NOT_APPLIED', cause: error })
