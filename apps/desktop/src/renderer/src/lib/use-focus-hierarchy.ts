@@ -33,6 +33,7 @@ export function useFocusHierarchy(rows: readonly FocusContext[], config: AppConf
   const failedRequests = useRef(new Set<string>())
   const [retrySequence, retry] = useState(0)
   const [errors, setErrors] = useState<string[]>([])
+  const [completedReads, finishRead] = useState(0)
   const refresh = useCallback(() => {
     if (!active) return
     for (const key of failedRequests.current) requests.current.delete(key)
@@ -60,6 +61,7 @@ export function useFocusHierarchy(rows: readonly FocusContext[], config: AppConf
     })
     void Promise.all(jobs).then(snapshots => {
       if (!attached) return
+      finishRead(value => value + 1)
       setErrors(snapshots.flatMap(snapshot => snapshot.error ? [snapshot.error] : []))
       setFacts(previous => {
         const topics = { ...previous.topics }
@@ -78,5 +80,5 @@ export function useFocusHierarchy(rows: readonly FocusContext[], config: AppConf
     return () => { attached = false }
     // Immutable signature includes each owned scope and its revision; byte/state changes don't query again.
   }, [active, signature, scratchTopics, scratchError, retrySequence])
-  return { facts, errors, refresh }
+  return { facts, errors, completedReads, refresh }
 }

@@ -10,7 +10,7 @@ const ThemeNavigationCollapseIcon = semanticIconComponent('navigation.up')
 
 
 /** A presentation/read receipt owner. It never clears, retries or reclassifies the supplied facts. */
-export function ServiceNoticeDisclosure({ scope, notices, available = true, complete = true, visible = true, title, detailsTitle, persistentTitle = false, children, actions, inlineActions, className }: {
+export function ServiceNoticeDisclosure({ scope, notices, available = true, complete = true, visible = true, title, detailsTitle, persistentTitle = false, compact = false, children, actions, inlineActions, className }: {
   scope: string
   notices: readonly ServiceNoticeItem[]
   available?: boolean
@@ -21,6 +21,7 @@ export function ServiceNoticeDisclosure({ scope, notices, available = true, comp
   detailsTitle?: string
   /** Keep the source recognizable after acknowledgement without reopening its details. */
   persistentTitle?: boolean
+  compact?: boolean
   children: ReactNode
   actions?: ReactNode
   inlineActions?: ReactNode
@@ -118,11 +119,11 @@ export function ServiceNoticeDisclosure({ scope, notices, available = true, comp
       popoverTarget={id} popoverTargetAction="toggle"
       onPointerDown={rememberFocus} onClick={positionDetails}>
       <ThemeStatusInfoIcon size={14} aria-hidden="true" />
-      {inbox.unread.length || persistentTitle ? <span className="service-disclosure__summary"
+      {!compact && (inbox.unread.length || persistentTitle) ? <span className="service-disclosure__summary"
         role={inbox.unread.length ? 'status' : undefined} aria-live={inbox.unread.length ? 'polite' : undefined}>{heading}</span> : null}
       {notices.length > 1 ? <span className="service-disclosure__count">{notices.length}</span> : null}
     </button>
-    {inbox.unread.length ? <button type="button" className="service-disclosure__close" aria-label={`Collapse service notice: ${heading}`}
+    {!compact && inbox.unread.length ? <button type="button" className="service-disclosure__close" aria-label={`Collapse service notice: ${heading}`}
       title="Collapse service notice" onPointerDown={rememberFocus} onClick={collapse}><ThemeNavigationCollapseIcon size={14} /></button> : null}
     {inlineActions ? <div className="service-disclosure__inline-actions">{inlineActions}</div> : null}
     {/* Details accompany the original workface and its existing auto-popover. */}

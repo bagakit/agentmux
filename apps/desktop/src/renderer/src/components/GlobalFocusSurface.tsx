@@ -330,7 +330,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     window.addEventListener('blur', stop)
     return () => { stop(); window.removeEventListener('pointermove', onPointerMove); window.removeEventListener('pointerup', stop); window.removeEventListener('pointercancel', stop); window.removeEventListener('blur', stop) }
   }, [visible])
-  const { facts, errors: hierarchyErrors, refresh: refreshHierarchy } = useFocusHierarchy(laneContexts, config, visible)
+  const { facts, errors: hierarchyErrors, completedReads: hierarchyReads, refresh: refreshHierarchy } = useFocusHierarchy(laneContexts, config, visible)
   const taskLayout = useAppStore(state => state.focusTaskLayout)
   const list = taskLayout === 'list'
   const boardRowsRef = useRef<HTMLDivElement>(null)
@@ -497,6 +497,9 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     observe(); document.addEventListener('visibilitychange', observe)
     return () => document.removeEventListener('visibilitychange', observe)
   }, [])
+  const sourceStatus = useMemo(() => <FocusSourceStatus catalogue={catalogue} laneErrors={hierarchyErrors}
+    laneReads={hierarchyReads} onRetryLanes={refreshHierarchy} visible={visible && documentActive} />,
+  [catalogue, hierarchyErrors, hierarchyReads, refreshHierarchy, visible, documentActive])
   const activitySubjects = useMemo(() => new Set([...filterContexts, ...(revealedContext ? [revealedContext.context] : [])]
     .filter(context => context.kind === 'agent').map(focusListActivityKey)), [filterContexts, revealedContext])
   const activityScope = useRef<ReadonlySet<string>>(activitySubjects)
@@ -644,8 +647,6 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
             </>}
             options={{ projects: projectOptions.map(option => ({ ...option, count: projectCounts.get(option.id) ?? 0 })), states: stateCounts, types: typeCounts }} />
           <FocusScanActions active={visible} order={projectOrder.by} onOrderChange={by => setProjectOrder(current => ({ by, revision: current.revision + 1 }))} onOpenLocation={onSelectLocation} />
-          <FocusSourceStatus sourceError={catalogue.error} loading={catalogue.loading} laneErrors={hierarchyErrors}
-            onRetrySources={catalogue.refresh} onRetryLanes={refreshHierarchy} visible={visible && documentActive} />
         </div>
       </div>
     </FocusToolbar>
@@ -759,7 +760,8 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
           </div> : <><AgentTopologySummary sessionIds={selectedSessionIds} sessions={sessions} tabs={tabs} config={config} /><SessionObservationRegions sessionIds={selectedSessionIds} contextId={`agent:${selectedId}`} /></>}
     </aside></> : null}
     </div>
-    <RecentFocusTimeline projectScope={timelineProjectScope} onToggleProjectScope={!filters.projects.length && timelineProject ? toggleTimelineProjects : undefined} entries={executionHistory} currentSessionId={selectedId} currentContext={currentContext} contexts={executionRows} lanes={allLanes} hierarchy={facts} onSelect={focusExecutionSession} onSelectContext={selectTimelineContext} onReveal={revealFocusRecord} historyWindowRequest={historyWindowRequest} catalogue={catalogue} visible={visible} />
+    <RecentFocusTimeline projectScope={timelineProjectScope} onToggleProjectScope={!filters.projects.length && timelineProject ? toggleTimelineProjects : undefined} entries={executionHistory} currentSessionId={selectedId} currentContext={currentContext} contexts={executionRows} lanes={allLanes} hierarchy={facts} onSelect={focusExecutionSession} onSelectContext={selectTimelineContext} onReveal={revealFocusRecord} historyWindowRequest={historyWindowRequest} catalogue={catalogue} visible={visible}
+      sourceStatus={sourceStatus} />
     {visible && requestId ? <AttentionRequestPanel sessionId={requestId} onClose={() => setRequestId(null)} onReturnFocus={() => {
       if (useAppStore.getState().mainSurface === 'agents') searchRef.current?.focus()
     }} onSessionChange={focusExecutionSession} /> : null}

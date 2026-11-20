@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentSessionHistoryDescriptor, AgentSessionRecordDeletionReceipt } from '@agentmux/core'
+import type { RuntimeEndpointWarning } from '../../../shared/contracts'
 import { api } from './api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 
@@ -7,6 +8,8 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 export function useFocusHistorySources(enabled: boolean) {
   const [sources, setSources] = useState<readonly AgentSessionHistoryDescriptor[]>([])
   const [loading, setLoading] = useState(false)
+  const [warnings, setWarnings] = useState<readonly RuntimeEndpointWarning[]>([])
+  const [completedReads, finishRead] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [documentVisible, setDocumentVisible] = useState(document.visibilityState !== 'hidden')
   const [revision, retry] = useState(0)
@@ -46,13 +49,13 @@ export function useFocusHistorySources(enabled: boolean) {
         if (!terminals.length) return observed
         return [...observed.filter(source => !terminals.some(value => value.hostId === source.hostId && value.agentSessionId === source.agentSessionId)), ...terminals]
       })
-      setError(warnings.length ? warnings.map(warning => `${warning.hostId}: ${warning.message}`).join(' · ') : null)
+      setWarnings(warnings); setError(null)
     }).catch(cause => {
       if (!current()) return
       observed.current = requested; setError(presentError(cause))
     }).finally(() => {
       reading.current = false
-      if (current()) setLoading(false)
+      if (current()) { setLoading(false); finishRead(value => value + 1) }
       // A lifecycle event during a read belongs to a later observation, never to this result.
       readCatalogue()
     })
@@ -85,7 +88,8 @@ export function useFocusHistorySources(enabled: boolean) {
     return () => { active.current = false; generation.current++ }
   }, [enabled, documentVisible, read])
   useEffect(() => { read() }, [revision, read])
-  const available = loaded.current && !loading && error === null
-  return useMemo(() => ({ sources, loading, error, refresh, acceptDeletion, available }), [sources, loading, error, refresh, acceptDeletion, available])
+  const coverageError = error ?? (warnings.length ? warnings.map(warning => `${warning.hostId}: ${warning.message}`).join(' · ') : null)
+  const available = loaded.current && !loading && error === null && warnings.length === 0
+  return useMemo(() => ({ sources, loading, error: coverageError, readError: error, warnings, completedReads, refresh, acceptDeletion, available }), [sources, loading, coverageError, error, warnings, completedReads, refresh, acceptDeletion, available])
 }
 export type FocusHistoryCatalogue = ReturnType<typeof useFocusHistorySources>

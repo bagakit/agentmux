@@ -9,7 +9,7 @@ import { TIMELINE_MARKER_HEIGHT, TIMELINE_MARKER_SIZE } from '../lib/timeline-ma
 import { conversationItemRef, type ConversationWindowSnapshot } from '@agentmux/core/conversation'
 import { focusMessageMarkers } from '../lib/focus-message-markers'
 import { usePathDisplay } from '../hooks/usePathDisplay'
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { describeConversationWindow, projectConversationWindow, type ConversationRecord } from '@agentmux/client-ui/conversation-records'
 import { EMPTY_FOCUS_WORK_ITEMS, MAX_FOCUS_WORK_RECORDS, clipFocusWorkInterval, createFocusWorkSelector, mergeFocusWorkItems, projectFocusWorkHistory, type FocusWorkFacts, type FocusWorkInterval } from '../lib/focus-work-history'
@@ -576,7 +576,8 @@ function FocusWorkingObservation({ segment, track, anchor, time, onClose }: {
   </DocumentOverlayPortal></Dialog.Root>
 }
 
-export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, currentSessionId, currentContext = null, contexts, lanes, hierarchy, onSelect, onSelectContext, onReveal, historyWindowRequest, catalogue: sharedCatalogue, projectScope, onToggleProjectScope, visible = true }: {
+export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, currentSessionId, currentContext = null, contexts, lanes, hierarchy, onSelect, onSelectContext, onReveal, historyWindowRequest, catalogue: sharedCatalogue, projectScope, onToggleProjectScope, sourceStatus, visible = true }: {
+  sourceStatus?: ReactNode
   entries: readonly AgentFocusHistoryEntry[]; currentSessionId: string | null; contexts: readonly FocusContext[]
   /** Pure main-Region presentation input; the Reader continues using currentSessionId. */
   currentContext?: Pick<FocusContext, 'id' | 'hostId'> | null | undefined
@@ -1107,6 +1108,7 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
         event.stopPropagation()
         if (control instanceof HTMLButtonElement) event.preventDefault()
       }}>
+        {sourceStatus}
         {mode !== 'collapsed' ? <><FocusTimelineLegend active={documentVisible} reading={nativeWindow.window} sources={inputSources.length} serviceNotice={inputObservationNotice} latestIncomplete={!historical && latest.windowIncomplete} onRead={openInputRecords} /><IconButton data-focus-window-control type="button" aria-label="Locate current Context track" title="Scroll to the current Context without changing the time window" disabled={!currentContext || !currentTrackPresent} onClick={locateCurrentTrack}><ThemeActionLocateIcon size={12} /></IconButton><IconButton type="button" aria-label="View conversation records" aria-expanded={readerOpen} title={`Conversation records${inputSource ? ` · ${inputSource.name}` : ''}, including speech without a recorded time${inputObservationNotice ? ` · ${inputObservationNotice}` : ''}`} onClick={event => openInputRecords(event.currentTarget)}><ThemeObjectConversationIcon size={12} /></IconButton><TextInput data-focus-window-control type="datetime-local" className="recent-focus__date" aria-label="Focus history date and time" aria-invalid={dateError !== null} title={`Clock time in ${time.zone}`} value={dateDraft ?? time.dateInput(anchor ?? now)} onChange={event => inspectDate(event.target.value)} />
         <button data-focus-window-control type="button" className="icon-button" aria-label="Previous focus window" onClick={() => inspectWindow((anchor ?? now) - hours * HOUR_MS)}><ThemeNavigationPreviousIcon size={12} /></button>
         <IconButton data-focus-window-control type="button" aria-label="Zoom out Focus timeline" title="Zoom out · wider time window" disabled={zoomIndex === FOCUS_WINDOW_HOURS.length - 1} onClick={() => setHours(FOCUS_WINDOW_HOURS[zoomIndex + 1]!)}><ThemeActionZoomOutIcon size={12} /></IconButton>
