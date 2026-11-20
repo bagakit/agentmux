@@ -214,19 +214,27 @@ export async function saveMoteFile(scope: MoteWorkfaceScope, path: string, saved
       throw new Error('The original Editor revision changed. Your form and original draft are kept; reread the file.')
     return next
   }, open, stillCurrent, exact)
+  const lifetime = documentLifetime(key)
   onWrite?.()
   await useAppStore.getState().saveDocument(selected.tabId, selected.regionId)
-  const state = useAppStore.getState(), document = state.documents[key]
-  const region = state.tabs[selected.tabId]?.regions[selected.regionId]
-  const resource = state.config?.workspaces.find(item => item.id === scope.workspace.id)
-  if (!stillCurrent() || resource?.hostId !== scope.workspace.hostId || resource.path !== scope.workspace.path ||
-      region?.kind !== 'file' || region.path !== path || region.workspaceId !== scope.workspace.id || !document ||
-      document.content !== next || state.dirtyDocuments[key] || state.documentIssues[key] || state.savingDocuments[key])
+  const savedInOriginalEditor = () => {
+    const state = useAppStore.getState(), document = state.documents[key]
+    const region = state.tabs[selected.tabId]?.regions[selected.regionId]
+    const resource = state.config?.workspaces.find(item => item.id === scope.workspace.id)
+    if (stillCurrent() && documentLifetime(key) === lifetime && resource?.hostId === scope.workspace.hostId &&
+        resource.path === scope.workspace.path && region?.kind === 'file' && region.path === path &&
+        region.workspaceId === scope.workspace.id && document?.content === next &&
+        !state.dirtyDocuments[key] && !state.documentIssues[key] && !state.savingDocuments[key]) return document
+  }
+  const document = savedInOriginalEditor()
+  if (!document)
     throw new Error('Saving is unconfirmed. Your choices and original Editor draft are kept; inspect its save status before retrying.')
   const read = await readMoteMaterial(scope, path)
-  if (!stillCurrent() || read.result.status !== 'read' || read.result.document.content !== next ||
-      read.result.document.revision !== document.revision || useAppStore.getState().documents[key] !== document ||
-      useAppStore.getState().documentIssues[key]) throw new Error('The saved file could not be confirmed. Your choices are kept; inspect the original file and read it again before retrying.')
+  const current = savedInOriginalEditor()
+  // File observation may refresh the Editor's projection without changing its saved version.
+  if (!current || current.path !== document.path || current.revision !== document.revision ||
+      read.result.status !== 'read' || read.result.document.content !== next || read.result.document.revision !== document.revision)
+    throw new Error('The saved file could not be confirmed. Your choices are kept; inspect the original file and read it again before retrying.')
   return read.result.document
 }
 
