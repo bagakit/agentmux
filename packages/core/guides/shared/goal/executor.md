@@ -48,9 +48,12 @@ exact Run with `agent inspect`, and the original draft and in-flight input
 observations. Use `agent input ls` for recorded inputs and `message pending ls`
 for the original pending queue when one is present. An empty mailbox only covers
 the inputs it records. Keep the Run available if any fact is unknown, or another
-duty or input remains. When the handoff and all those checks are confirmed, use
-`amux agent stop --session SID --run RUN --operation-id OP` for your own original
-Run at its owner. If the Stop result is uncertain, preserve that operation ID.
+duty or input remains. Use
+`amux goal closeout --goal ID --attempt OP --session SID --run RUN --operation-id STOP`
+for your own original Run at the Goal and Core's shared local owner. The command
+checks the saved handoff, other Goal duties and exact input occupation, including
+the original Desktop's draft and queue even if the Session's view is detached.
+A retained result names the blocking fact. If the Stop result is uncertain, preserve that operation ID.
 The original authorized person or device can read it with
 `agent stop inspect --session SID --run RUN --operation-id OP`.
 The collection and Stop receipts preserve the report's independent review and
