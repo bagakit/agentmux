@@ -120,14 +120,14 @@ it('reconciles a committed intake with a lost ACK and retains the exact signed t
 })
 
 it('takes a remote worker source report through the public Goal owner, signed pull, collection and independent review before unlocking its dependent node', async () => {
-  const a = await crossHostOwner(cleanup, 'goal-owner', ['same-session', 'independent-reviewer'])
+  const a = await crossHostOwner(cleanup, 'goal-owner', ['same-session', 'current-supervisor', 'independent-reviewer'])
   const b = await crossHostOwner(cleanup, 'goal-worker', ['same-session'])
   // The original Goal predates connecting another same-SID Runtime. The saved
   // local Supervisor must retain its identity when the remote route is added.
   a.routes([]); b.routes([])
   await trust(a, b); await trust(b, a)
   const goalId = (await a.call('same-session', ['goal', 'create', '--title', 'Ship the original result', '--description', 'Preserve the original human intent.',
-    '--status', 'in_progress', '--session', 'same-session', '--assignees', JSON.stringify(['same-session', 'independent-reviewer']), '--supervisor', 'same-session', '--risk', 'low', '--confirm', 'user', '--operation-id', 'create-original-goal'])).goal.id
+    '--status', 'in_progress', '--session', 'same-session', '--assignees', JSON.stringify(['same-session', 'current-supervisor', 'independent-reviewer']), '--supervisor', 'same-session', '--risk', 'low', '--confirm', 'user', '--operation-id', 'create-original-goal'])).goal.id
   const alignment = { summary: 'Deliver and independently verify the original result.', criteria: [{ id: 'original-criterion', text: 'The original result is independently checked.' }], openQuestions: [] }
   const aligned = await a.call(null, ['goal', 'update', '--goal', goalId, '--alignment', JSON.stringify(alignment)])
   const alignmentRevision = aligned.goal.alignment.revision
@@ -139,26 +139,49 @@ it('takes a remote worker source report through the public Goal owner, signed pu
     criterionIds: ['original-criterion'], check: 'node --test checks/' + id + '.test.mjs', executor: { hostId: 'worker-b', agentSessionId: 'same-session' } }))
   const published = await a.call('same-session', ['goal', 'plan', 'revise', '--input', '-'], { goalId, revision: { operationId: 'original-plan-revision', expectedRevision: 0, alignmentRevision, nodes } })
   const ids = new Map(nodes.map((node, index) => [node.id, published.plan.nodes[index].id as string]))
-  const intent = (nodeId: string) => ({ operationId: 'delegate-' + nodeId, sourceMessageId: 'source-' + nodeId, hostId: 'local', workerHostId: 'worker-b', ownerAgentSessionId: 'same-session', workerAgentSessionId: 'same-session',
-    ownerRunId: 'run-same-session', workerRunId: 'run-same-session', threadId: 'thread-' + nodeId, text: 'Deliver the original ' + nodeId + ' task.', alignmentRevision, criterionIds: ['original-criterion'], planNodeId: ids.get(nodeId)! })
+  const intent = (nodeId: string, ownerAgentSessionId = 'same-session') => ({ operationId: 'delegate-' + nodeId, sourceMessageId: 'source-' + nodeId, hostId: 'local', workerHostId: 'worker-b', ownerAgentSessionId, workerAgentSessionId: 'same-session',
+    ownerRunId: 'run-' + ownerAgentSessionId, workerRunId: 'run-same-session', threadId: 'thread-' + nodeId, text: 'Deliver the original ' + nodeId + ' task.', alignmentRevision, criterionIds: ['original-criterion'], planNodeId: ids.get(nodeId)! })
   const blocked = await a.cli('same-session', ['goal', 'delegate', '--input', '-'], { goalId, intent: intent('dependent') })
   expect(blocked.code).toBe(1); expect(blocked.stderr).toContain('only a ready node')
   const delegated = await a.call('same-session', ['goal', 'delegate', '--input', '-'], { goalId, intent: intent('first') })
   expect(delegated.delegations[0]).toMatchObject({ operationId: 'delegate-first', sourceMessageId: 'source-first', hostId: 'local', workerHostId: 'worker-b', linkedAt: expect.any(Number),
     runtimeIdentity: { ownerRuntimeId: a.identity.runtimeId, workerRuntimeId: b.identity.runtimeId } })
+  const source = await b.call('same-session', ['message', 'read', '--host', 'local', '--message-id', 'source-first'])
+  expect(source.message.envelope.body).toContain('At the start of each work turn')
+  expect(source.message.envelope.body).toContain('Check your current responsibility across authorized work')
   expect((await b.call(null, ['goal', 'ls', '--all'])).goals).toEqual([])
   const report = { operationId: 'report-first', replyMessageId: 'reply-first', authorAgentSessionId: 'same-session', grounding: { alignmentRevision, summary: 'The worker reports the original criterion with evidence.',
     checks: [{ criterionId: 'original-criterion', outcome: 'met', evidence: ['checks/first.log:1'], note: '' }] } }
   const reportInput = { goalId, operationId: 'delegate-first', sourceMessageId: 'source-first', report }
-  const submitted = await b.call('same-session', ['goal', 'report', '--input', '-'], reportInput)
-  expect(submitted).toMatchObject({ kind: 'report-submission', goalId, delegationOperationId: 'delegate-first', sourceMessageId: 'source-first', submission: { messageId: 'reply-first', transport: { state: 'outbox', targetRuntimeId: a.identity.runtimeId } } })
+  const replacement = await a.call(null, ['goal', 'update', '--goal', goalId, '--supervisor', 'current-supervisor'])
+  expect(replacement.goal.supervisorSessionId).toBe('current-supervisor')
+  const collect = { goalId, operationId: 'delegate-first', collection: { operationId: 'collect-first', replyMessageId: 'reply-first' } }
+  a.routes([])
+  const unavailable = await a.cli('current-supervisor', ['goal', 'collect', '--input', '-'], collect)
+  expect(unavailable.code).toBe(1)
+  expect((await a.call('current-supervisor', ['goal', 'plan', '--goal', goalId])).delegations[0].collection).toBeUndefined()
+  expect(b.native.stop).not.toHaveBeenCalled()
+  a.routes([{ hostId: 'worker-b', client: b.reader }])
+  const reported = await b.cli('same-session', ['goal', 'report', '--input', '-'], reportInput)
+  expect(reported.code, reported.stderr).toBe(0)
+  const submitted = JSON.parse(reported.stdout)
+  expect(submitted.result).toMatchObject({ kind: 'report-submission', goalId, delegationOperationId: 'delegate-first', sourceMessageId: 'source-first', submission: { messageId: 'reply-first', transport: { state: 'outbox', targetRuntimeId: a.identity.runtimeId } } })
+  expect(submitted.guidance).toContain('Read back the handoff')
+  expect(submitted.guidance).toContain('"replyMessageId":"reply-first"')
+  expect(b.native.stop).not.toHaveBeenCalled()
   expect((await b.call(null, ['goal', 'ls', '--all'])).goals).toEqual([])
   const originalReply = await b.call('same-session', ['message', 'read', '--host', 'local', '--message-id', 'reply-first'])
-  const collected = await a.call('same-session', ['goal', 'collect', '--input', '-'], { goalId, operationId: 'delegate-first', collection: { operationId: 'collect-first', replyMessageId: 'reply-first' } })
-  expect(collected.delegations[0]).toMatchObject({ report: { ...report, submittedAt: expect.any(Number) }, collection: { operationId: 'collect-first', replyMessageId: 'reply-first' } })
+  const collectedCli = await a.cli('current-supervisor', ['goal', 'collect', '--input', '-'], collect)
+  expect(collectedCli.code, collectedCli.stderr).toBe(0)
+  const collectionReceipt = JSON.parse(collectedCli.stdout)
+  const collected = collectionReceipt.result
+  expect(collected.delegations[0]).toMatchObject({ ownerAgentSessionId: 'same-session', report: { ...report, submittedAt: expect.any(Number) },
+    collection: { operationId: 'collect-first', replyMessageId: 'reply-first', collector: { kind: 'agent', id: 'current-supervisor' } } })
+  expect(collectionReceipt.guidance).toContain('"collectionOperationId":"collect-first"')
+  expect(collectionReceipt.guidance).toContain(collected.delegations[0].report.delivery.hash)
   const received = await a.call('same-session', ['message', 'read', '--host', 'local', '--message-id', 'reply-first'])
   expect(received.message.provenance).toEqual(originalReply.message.provenance)
-  const stillBlocked = await a.cli('same-session', ['goal', 'delegate', '--input', '-'], { goalId, intent: intent('dependent') })
+  const stillBlocked = await a.cli('current-supervisor', ['goal', 'delegate', '--input', '-'], { goalId, intent: intent('dependent', 'current-supervisor') })
   expect(stillBlocked.code).toBe(1); expect(stillBlocked.stderr).toContain('only a ready node')
   const checks = join(a.original.root, 'checks'); await mkdir(checks)
   await writeFile(join(checks, 'worker.json'), JSON.stringify(originalReply.message))
@@ -173,15 +196,79 @@ test('the received original report retains its worker signature and exact Goal c
   const foreignWorker = await a.cli('same-session', ['goal', 'plan', 'review', '--input', '-'], { goalId, review: { ...review, operationId: 'foreign-worker-review' } }, b.original.capability)
   expect(foreignWorker.code).toBe(1); expect(foreignWorker.stderr).toContain('AGENT_CAPABILITY_INVALID')
   await a.call('independent-reviewer', ['goal', 'plan', 'review', '--input', '-'], { goalId, review })
-  const unlocked = await a.call('same-session', ['goal', 'delegate', '--input', '-'], { goalId, intent: intent('dependent') })
+  const unlocked = await a.call('current-supervisor', ['goal', 'delegate', '--input', '-'], { goalId, intent: intent('dependent', 'current-supervisor') })
   expect(unlocked.plan.reviews[0]).toMatchObject({ ...review, reviewer: { kind: 'agent', id: 'independent-reviewer', hostId: 'local', runtimeId: a.identity.runtimeId } })
   const completion = unlocked.plan.reviews[0].completion
   const fingerprint = (await a.client().agentCreationAuthority()).fingerprint
   expect((await b.cli(null, ['goal', 'plan', 'verify', '--input', '-', '--goal', goalId, '--hash', completion.hash, '--fingerprint', fingerprint], completion)).code).toBe(0)
   expect(unlocked.delegations[1].dispatchProof.record).toMatchObject({ executor: { runtimeId: b.identity.runtimeId }, predecessors: [{ ticketId: ids.get('first'), completionHash: completion.hash }] })
   expect(unlocked.delegations.map((item: { operationId: string }) => item.operationId)).toEqual(['delegate-first', 'delegate-dependent'])
+  expect(unlocked.planState.nodes).toMatchObject([{ id: ids.get('first'), state: 'done' }, { id: ids.get('dependent'), state: 'working' }])
+  const dependentInput = await b.call('same-session', ['message', 'read', '--message-id', 'source-dependent'])
+  expect(dependentInput.message).toMatchObject({ envelope: { recipientRunId: 'run-same-session' }, delivery: { state: 'queued' } })
   const final = await a.call(null, ['goal', 'inspect', '--goal', goalId])
   expect(final.goal).toMatchObject({ status: 'in_progress', description: 'Preserve the original human intent.', alignment: { confirmedAt: null }, grounding: { acceptedAt: null } })
   expect(await a.original.store.readMetadata('independent-reviewer')).not.toBeNull()
   expect(await b.original.store.readMetadata('independent-reviewer')).toBeNull()
+  expect(b.native.stop).not.toHaveBeenCalled()
+})
+
+it('retains the original report through current Supervisor collection and an explicit worker Stop', async () => {
+  const host = await crossHostOwner(cleanup, 'worker-closeout', ['supervisor', 'worker', 'reviewer'])
+  const { goal } = await host.call(null, ['goal', 'create', '--title', 'Verify worker closeout',
+    '--status', 'in_progress', '--assignees', '["supervisor","worker"]', '--supervisor', 'supervisor', '--risk', 'low', '--confirm', 'user'])
+  const goalId = goal.id
+  const alignment = { summary: 'Save the original delivery', criteria: [{ id: 'saved', text: 'Read the original evidence' }], openQuestions: [] }
+  const proposal = await host.call(null, ['goal', 'update', '--goal', goalId, '--alignment', JSON.stringify(alignment)])
+  const alignmentRevision = proposal.goal.alignment.revision
+  const plan = await host.call('supervisor', ['goal', 'plan', 'revise', '--input', '-'], { goalId, revision: {
+    operationId: 'closeout-plan', expectedRevision: 0, alignmentRevision,
+    nodes: [{ id: 'deliver', title: 'Deliver', outcome: 'A verified delivery', criterionIds: ['saved'], dependsOn: [],
+      check: 'Read the artifact', executor: { hostId: 'local', agentSessionId: 'worker' } }],
+  } })
+  const nodeId = plan.plan.nodes[0].id
+  const operationId = 'closeout-dispatch', sourceMessageId = 'closeout-source', replyMessageId = 'closeout-reply'
+  await host.call('supervisor', ['goal', 'delegate', '--input', '-'], { goalId, intent: {
+    operationId, sourceMessageId, threadId: 'closeout-thread', hostId: 'local', ownerAgentSessionId: 'supervisor',
+    ownerRunId: 'run-supervisor', workerAgentSessionId: 'worker', workerRunId: 'run-worker', text: 'Deliver the original artifact.',
+    alignmentRevision, criterionIds: ['saved'], planNodeId: nodeId,
+  } })
+  const report = { operationId: 'closeout-report', replyMessageId, authorAgentSessionId: 'worker', grounding: {
+    alignmentRevision, summary: 'Original delivery saved', checks: [{ criterionId: 'saved', outcome: 'met', evidence: ['artifact.log'], note: '' }],
+  } }
+  const delivered = await host.cli('worker', ['goal', 'report', '--input', '-'], { goalId, operationId, report })
+  expect(delivered.code, delivered.stderr).toBe(0)
+  expect(JSON.parse(delivered.stdout)).toMatchObject({ guidance: expect.stringContaining('"sourceMessageId":"closeout-source"') })
+  const waiting = await host.call('worker', ['goal', 'plan', '--goal', goalId])
+  expect(waiting.delegations[0].collection).toBeUndefined()
+  expect(waiting.planState.nodes[0].state).toBe('review')
+  expect(host.native.stop).not.toHaveBeenCalled()
+
+  const signed = waiting.delegations[0].report
+  const collected = await host.call('supervisor', ['goal', 'collect', '--input', '-'], { goalId, operationId, collection: {
+    operationId: 'closeout-collection', replyMessageId,
+  } })
+  expect(collected.delegations[0]).toMatchObject({ report: signed, collection: { collector: { kind: 'agent', id: 'supervisor' }, replyMessageId } })
+  expect(collected.goalState.supervisorSessionId).toBe('supervisor')
+  const mailbox = await host.call('worker', ['agent', 'input', 'ls', '--host-id', 'local', '--session', 'worker'])
+  expect(mailbox).toMatchObject({ hostId: 'local', agentSessionId: 'worker', items: [], nextCursor: null,
+    coverage: { kind: 'recorded-inputs', unrecorded: 'unconfirmed' } })
+  const originalRun = await host.call('worker', ['agent', 'inspect', '--session', 'worker'])
+  expect(originalRun.session).toMatchObject({ agentSessionId: 'worker', run: { runId: 'run-worker' } })
+  expect(host.native.stop).not.toHaveBeenCalled()
+
+  const incorrect = await host.cli('worker', ['agent', 'stop', '--session', 'worker', '--run', 'different-run', '--operation-id', 'closeout-wrong-run'])
+  expect(incorrect.code).toBe(1)
+  expect(host.native.stop).not.toHaveBeenCalled()
+  const stopped = await host.call('worker', ['agent', 'stop', '--session', 'worker', '--run', 'run-worker', '--operation-id', 'closeout-stop'])
+  expect(stopped.receipt).toMatchObject({ operationId: 'closeout-stop', agentSessionId: 'worker', expectedRun: { runId: 'run-worker' } })
+  expect(host.native.stop).toHaveBeenCalledTimes(1)
+  expect(host.native.stop).toHaveBeenCalledWith(expect.objectContaining({ runId: 'run-worker' }))
+  const retained = await host.call(null, ['agent', 'stop', 'inspect', '--session', 'worker', '--run', 'run-worker', '--operation-id', 'closeout-stop'])
+  expect(retained).toMatchObject({ phase: 'retired', operationIdMatched: true })
+  await host.stop(); await host.start()
+  const historical = await host.call('supervisor', ['goal', 'plan', '--goal', goalId])
+  expect(historical.delegations[0]).toMatchObject({ report: signed, collection: { operationId: 'closeout-collection' } })
+  expect(historical.planState.nodes[0].state).toBe('review')
+  expect(historical.grounding.acceptedAt).toBeNull()
 })

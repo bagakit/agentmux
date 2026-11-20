@@ -50,6 +50,9 @@ export async function crossHostOwner(cleanup: CrossHostCleanup, name: string, id
   await writeFile(join(original.root, 'native.jsonl'), '')
   await writeFile(configurationPath, JSON.stringify({ workspaces: [{ id: 'original-project', name: 'Original project', kind: 'folder', hostId: 'local', path: original.root }], executors: {}, hosts: [{ id: 'local', kind: 'local', label: name }] }))
   const native = original.inner.kernel
+  native.prepareStop = vi.fn(async (runId: string, operationKey: string) => ({
+    daemonInstance: 'fixture-runtime', operationKey, runId,
+  }))
   await original.client.dispose()
   let clients: { hostId: string; client: AgentMuxHostedClient }[] = []
   let host: Awaited<ReturnType<typeof startAgentMuxHost>> | undefined
@@ -64,7 +67,7 @@ export async function crossHostOwner(cleanup: CrossHostCleanup, name: string, id
     const connect = vi.spyOn(core.AgentMuxClient.prototype, 'connect').mockImplementationOnce(async function () {
       const inner = this as unknown as typeof original.inner
       await inner.registry.load('local'); inner.connected = true
-      for (const key of ['connect', 'isConnected', 'status', 'identity', 'input', 'openInput', 'observeOutput', 'attach', 'detach', 'stop']) inner.kernel[key] = native[key]
+      for (const key of ['connect', 'isConnected', 'status', 'identity', 'input', 'openInput', 'observeOutput', 'attach', 'detach', 'prepareStop', 'stop']) inner.kernel[key] = native[key]
       this.providers.get('claude').planPromptInput = text => ({ kind: 'single-phase', data: text + '\r' })
     })
     try {

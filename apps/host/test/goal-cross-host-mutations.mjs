@@ -22,5 +22,11 @@ export const crossHostMutations = {
     anchor: "else state = node.dependsOn.every(dependency => stateOf(byId.get(dependency)!) === 'done') ? 'ready' : 'waiting'",
     replacement: "else state = 'ready'",
     test: 'takes a remote worker'
+  },
+  'worker-handoff-guidance': {
+    path: 'packages/core/src/agentmux.ts',
+    anchor: "method === 'goal.report' ? goalReportGuidance(result as GoalReportResult, invocation.params as GoalDelegationParamsMap['goal.report'])",
+    replacement: "method === 'goal.report' ? undefined",
+    test: 'retains the original report through current Supervisor collection'
   }
 }
