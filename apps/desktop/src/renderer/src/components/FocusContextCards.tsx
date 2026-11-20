@@ -15,6 +15,7 @@ import { focusContextHeat, focusContextVisit } from '../lib/focus-attention'
 import { focusTopicContextKey, type FocusTopicHeading } from '../lib/focus-collection-lanes'
 import { FocusTopicLabel } from './FocusTopicLabel'
 import { FocusZoneFooter } from './FocusZoneFooter'
+import { FocusPlacementCard } from './FocusPlacementCard'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { FocusAgentCreations, FocusCreationRow } from '../lib/focus-agent-creations'
 import { FOCUS_BUCKET_PRESENTATION } from './FocusContextState'
@@ -74,7 +75,7 @@ function FocusCardSlot({ cardKey, register, ...props }: ComponentPropsWithoutRef
   const ref = useCallback((node: HTMLDivElement | null) => {
     if (node) return register(cardKey, node)
   }, [cardKey, register])
-  return <div {...props} ref={ref} data-focus-card-key={cardKey} />
+  return <FocusPlacementCard {...props} ref={ref} cardKey={cardKey} />
 }
 
 function cardScrollport(scrollRef: RefObject<HTMLDivElement | null>, element: HTMLDivElement) {

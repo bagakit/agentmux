@@ -4,7 +4,7 @@ import { focusCollectionTopics, focusTopicContextKey, focusTopicSections, type F
 import { focusCreationTree, type FocusAgentCreations, type FocusCreationRow } from '../lib/focus-agent-creations'
 import { FocusLaneGroups } from './FocusLaneGroups'
 import { FOCUS_BUCKET_PRESENTATION } from './FocusContextState'
-import { useFocusContextPlacements } from '../lib/use-focus-context-placements'
+import { FocusPlacementScope, useFocusContextPlacements } from '../lib/use-focus-context-placements'
 import type { FocusLaneCounts, FocusLaneMetrics } from '../lib/focus-lane-layout'
 import { resolveFocusTopicPresentation, type FocusReplyLines, type FocusTopicPresentation } from '../../../shared/focus-preferences'
 
@@ -25,7 +25,7 @@ export function FocusScanLaneContent({ lane, contexts, heading, pins, metrics, r
   const organized = Boolean(lane.collection || lane.zones)
   const groupsRef = useRef<HTMLDivElement>(null)
   const actual = groupFocusContexts(contexts)
-  const { groups, pending } = useFocusContextPlacements(contexts, groupsRef)
+  const { groups, pending, scope } = useFocusContextPlacements(contexts, groupsRef)
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
   const withSections = organized && organization === 'sections'
   const hasLocalCreator = list && creation?.children.size && contexts.some(context => creation.children.has(focusTopicContextKey(context.hostId, context.id)))
@@ -63,7 +63,7 @@ export function FocusScanLaneContent({ lane, contexts, heading, pins, metrics, r
       const meta = FOCUS_BUCKET_PRESENTATION[bucket], Icon = meta.icon
       return <span className="focus-context-group__header" data-bucket={bucket} title={`${meta.label} · 0`} aria-label={`${meta.label} · 0`} key={bucket}><Icon size={12} aria-hidden="true" /></span>
     })}
-  </div></div>{pins}{contexts.length > 0 ? <FocusLaneGroups list={list} counts={counts} metrics={metrics} replyLines={replyLines} groupsRef={groupsRef}>{layout =>
+  </div></div>{pins}{contexts.length > 0 ? <FocusPlacementScope.Provider value={scope}><FocusLaneGroups list={list} counts={counts} metrics={metrics} replyLines={replyLines} groupsRef={groupsRef}>{layout =>
     FOCUS_BUCKETS.map((bucket, index) => {
       const grouped = displayed[bucket]
       if (!grouped.length) return null
@@ -76,5 +76,5 @@ export function FocusScanLaneContent({ lane, contexts, heading, pins, metrics, r
         {renderCards(sectioned?.contexts ?? grouped, layout.columns[index]!, organized && !sectioned ? topics : undefined, sectioned?.sections, tree?.rows, tree ? toggle : undefined)}
       </section>
     })
-  }</FocusLaneGroups> : null}</>
+  }</FocusLaneGroups></FocusPlacementScope.Provider> : null}</>
 }
