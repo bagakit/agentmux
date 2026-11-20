@@ -23,23 +23,22 @@ import { goalDelegationRows } from './goal-delegation-presentation'
 export function moteGoalContext(state: ReturnType<typeof useAppStore.getState>, scope: MoteWorkfaceScope,
   reference?: WorkbenchProjectionSelection | null, graph?: AgentMuxSpatialGraph | null, locator?: SpaceAuthorityRef | null) {
   const sourceLocator = locator === undefined ? moteGoalSourceLocator(state, scope, graph) : locator
-  const resourceKey = moteGoalResourceKey(state, scope)
+  const resourceKey = moteGoalResourceKey(state, scope), spaceId = moteGoalSpaceId(state, scope)
   const workspace = state.config?.workspaces.find(item => item.id === scope.workspace.id)
   if (workspace?.hostId !== scope.workspace.hostId || workspace.path !== scope.workspace.path || scratchTopicLogicalPath(workspace, scope.topic) !== scope.rootPath)
-    return { ...emptyQualified(), sourceUnconfirmed: true, resourceKey, sourceLocator, contentRef: null as DemandContentReference | null, sessionIds: [] as string[], selectedSessionId: undefined as string | undefined, issue: 'The original Mote resource is unconfirmed. Its work is retained.' }
+    return { ...emptyQualified(), sourceUnconfirmed: true, resourceKey, spaceId, sourceLocator, contentRef: null as DemandContentReference | null, sessionIds: [] as string[], selectedSessionId: undefined as string | undefined, issue: 'The original Mote resource is unconfirmed. Its work is retained.' }
   const topics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, scope.workspace)
   // Membership is structural; an unavailable directory retains the original scope.
   const catalog = topics !== null && scope.workspace.id === SCRATCH_WORKSPACE_ID ? workbenchSelectionCatalog(state)
     : spatialCatalog({ ...state, sessions: [] }, topics ?? [scope.topic])
   const original = originalTopicAddress(scope.workspace, scope.topic, state.spaceZoneBindings)
-  const spaceId = original?.spaceId ?? directoryIdentity(scope.workspace.hostId, scratchTopicIdentityPath(scope.workspace, scope.topic))
   const home = original ? catalog.zones.filter(zone => zone.zoneId === homeZoneId(original.spaceId)) : []
   const contentRef: DemandContentReference | null = home.length === 1 && home[0]!.kind === 'home' && !home[0]!.issue &&
     home[0]!.hostId === scope.workspace.hostId && home[0]!.workspaceId === scope.workspace.id &&
     catalog.spaces.filter(space => space.spaceId === spaceId && space.kind === 'mote' && space.hostId === scope.workspace.hostId).length === 1
     ? { hostId: scope.workspace.hostId, workspaceId: scope.workspace.id, zoneId: home[0]!.zoneId } : null
   const zoneIds = new Set(catalog.bindings.filter(binding => binding.spaceId === spaceId).map(binding => binding.zoneId))
-  if (!zoneIds.size) return { ...emptyQualified(), sourceUnconfirmed: true, resourceKey, sourceLocator, contentRef, sessionIds: [] as string[], selectedSessionId: undefined as string | undefined,
+  if (!zoneIds.size) return { ...emptyQualified(), sourceUnconfirmed: true, resourceKey, spaceId, sourceLocator, contentRef, sessionIds: [] as string[], selectedSessionId: undefined as string | undefined,
     issue: 'The original Mote bindings are unconfirmed. Its work is retained.' }
   const tabIds = new Set(catalog.tabs.filter(tab => tab.zoneId !== null && zoneIds.has(tab.zoneId)).map(tab => tab.tabId))
   const sessionIds = [...new Set(catalog.regions.filter(region => tabIds.has(region.tabId) && region.kind === 'agent')
@@ -49,9 +48,16 @@ export function moteGoalContext(state: ReturnType<typeof useAppStore.getState>, 
   const region = selected ? state.tabs[selected.tabId]?.regions[selected.regionId] : undefined
   const selectedSessionId = region?.kind === 'agent' && sessionIds.includes(region.sessionId) ? region.sessionId : undefined
   const qualified = moteQualifiedMembers(state, scope, spaceId, graph, sourceLocator)
-  const unconfirmed = qualified.unconfirmedMembers.length > 0 || qualified.sourceUnconfirmed && Object.values(state.demands).some(goal =>
-    goal.sessionIds.some(ref => typeof ref !== 'string' && ref.source.spaceId === spaceId))
-  return { ...qualified, resourceKey, sourceLocator, contentRef, sessionIds, selectedSessionId, issue: scope.issue ?? (unconfirmed ? referenceIssue : undefined) }
+  return { ...qualified, resourceKey, spaceId, sourceLocator, contentRef, sessionIds, selectedSessionId, issue: scope.issue }
+}
+
+/** A discussion read gap affects this work summary only through an original Goal relation. */
+export function moteGoalReferenceIssue(context: ReturnType<typeof moteGoalContext>, records: Readonly<Record<string, DemandRecord>>): string | undefined {
+  if (!context.sourceUnconfirmed && !context.unconfirmedMembers.length) return undefined
+  const unresolved = new Set(context.unconfirmedMembers.map(member => JSON.stringify([member.regionId, member.operationId])))
+  const affected = Object.values(records).some(goal => goal.sessionIds.some(ref => typeof ref !== 'string' &&
+    ref.source.spaceId === context.spaceId && (context.sourceUnconfirmed || unresolved.has(JSON.stringify([ref.source.regionId, ref.source.admission.operationId])))))
+  return affected ? referenceIssue : undefined
 }
 
 export function goalsForMote(records: Readonly<Record<string, DemandRecord>>, sessionIds: readonly string[], contentRef?: DemandContentReference | null, agentReferences: readonly DemandSpaceMemberReference[] = []): DemandRecord[] {
@@ -184,7 +190,7 @@ export function retainMoteGoalContext(previous: ReturnType<typeof moteGoalContex
     (current.sourceUnconfirmed && !current.unconfirmedMembers.length || unresolved.has(JSON.stringify([ref.source.regionId, ref.source.admission.operationId]))))
   const reading = current.issue && !current.sessionIds.length && !current.contentRef ? { ...current, contentRef: previous.contentRef, sessionIds: previous.sessionIds } : current
   if (!held.length) return reading
-  return { ...reading, sourceLocator: current.sourceLocator ?? originalSource, agentReferences: mergeDemandAgentReferences(current.agentReferences, held) as DemandSpaceMemberReference[], issue: current.issue ?? referenceIssue }
+  return { ...reading, sourceLocator: current.sourceLocator ?? originalSource, agentReferences: mergeDemandAgentReferences(current.agentReferences, held) as DemandSpaceMemberReference[] }
 
 }
 

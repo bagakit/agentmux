@@ -16,7 +16,7 @@ import { useObservedAppStore } from '../lib/use-observed-app-store'
 import { moteMembers, moteMemberSnapshot, type MoteMember } from '../lib/mote-team'
 import type { MoteWorkfaceScope } from '../lib/mote-workface'
 import { sameWorkbenchProjectionSelection, type WorkbenchProjectionSelection } from '../lib/workbench-projection'
-import { moteCurrentGoals, goalsForMote, moteGoalContext, moteGoalSourceLocator, moteGoalSourceFacts, retainMoteGoalContext } from '../lib/mote-goals'
+import { moteCurrentGoals, goalsForMote, moteGoalContext, moteGoalReferenceIssue, moteGoalSourceLocator, moteGoalSourceFacts, retainMoteGoalContext } from '../lib/mote-goals'
 import { demandAgentReferenceKey } from '@agentmux/demand/relations'
 import { ResolvedAgentAvatar } from './AgentAvatar'
 import { MoteQuickModeDialog } from './MoteQuickMode'
@@ -100,6 +100,7 @@ export function MoteCooperation({ scope, active, reference, onSelect, actions, p
   }
   const attention = members.filter(member => requestFor(member))
   const demands = useAppStore(state => state.demands)
+  const workIssue = goalContext && (goalContext.issue ?? moteGoalReferenceIssue(goalContext, demands))
   const index = agentSessionPresentationIndex(useAppStore.getState().sessions)
   const identities = members.map(member => ({ hostId: sessions[member.key]?.control.hostId ?? member.hostId,
     agentSessionId: sessions[member.key]?.control.agentSessionId ?? member.agentSessionId,
@@ -214,7 +215,7 @@ export function MoteCooperation({ scope, active, reference, onSelect, actions, p
   function main() { setExpanded(false); conversation?.onMain() }
   const membersPanel = presentation === 'navigation' ? <div className="mote-cooperation__team-body" id={id} data-mote-team>
       <div className="mote-cooperation__team-heading"><strong>原工作对话</strong><span>{ordered.length}</span></div>
-      {scope.issue || !spaceId || goalContext?.issue ? <p className="mote-cooperation__issue" role="status">{goalContext?.issue ?? (spaceId ? '显示最后确认的成员及其原对话。' : '原团队绑定尚未确认，已有成员和对话都保留。')}</p> : null}
+      {scope.issue || !spaceId || workIssue ? <p className="mote-cooperation__issue" role="status">{workIssue ?? (spaceId ? '显示最后确认的成员及其原对话。' : '原团队绑定尚未确认，已有成员和对话都保留。')}</p> : null}
       {humanGoals.map(goal => <button key={goal.id} type="button" className="mote-cooperation__goal" onClick={() => openGoal(goal.id)}>
         <span>待你审阅</span><strong>{goal.title}</strong><Forward size={14} /></button>)}
       {shown.map(member => {

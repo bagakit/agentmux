@@ -7,7 +7,7 @@ import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { MoteWorkfaceScope } from '../lib/mote-workface'
 import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
-import { goalsForMote, moteCurrentGoals, moteGoalContext, moteGoalSummary, moteGoalSourceFacts, moteGoalSourceLocator, retainMoteGoalContext } from '../lib/mote-goals'
+import { goalsForMote, moteCurrentGoals, moteGoalContext, moteGoalReferenceIssue, moteGoalSummary, moteGoalSourceFacts, moteGoalSourceLocator, retainMoteGoalContext } from '../lib/mote-goals'
 import { sessionPresentationById } from '../lib/session-presentation'
 import { currentCoreSpatialGraph, fileNavigationSelection, useAppStore } from '../store'
 import { MoteBehaviorAction } from './MoteBehaviorDialog'
@@ -47,6 +47,7 @@ export function MoteCurrentWork({ scope, reference, active = true }: {
   const retainedContext = useRef({ identity: resourceIdentity, value: observedContext })
   const context = retainedContext.current.identity === resourceIdentity ? retainMoteGoalContext(retainedContext.current.value, observedContext) : observedContext
   retainedContext.current = { identity: resourceIdentity, value: context }
+  const workIssue = context.issue ?? moteGoalReferenceIssue(context, demands)
   const visibleContext = context
   const visibleSessionIds = visibleContext.sessionIds
   const qualifiedKeys = useMemo(() => new Set(visibleContext.agentReferences.map(demandAgentReferenceKey)), [visibleContext.agentReferences])
@@ -138,7 +139,7 @@ export function MoteCurrentWork({ scope, reference, active = true }: {
       <MoteBehaviorAction label="Refresh this Mote’s goals" onClick={() => void refresh()}><ThemeActionRefreshIcon size={13} /></MoteBehaviorAction>
       <MoteBehaviorAction label="Choose or create a goal" expanded={chooser} onClick={() => { associationIntent.current = {}; setChooser(value => !value) }}><ThemeActionCreateGoalIcon size={14} /></MoteBehaviorAction>
     </div></div>
-    {context.issue || issue ? <p role="status" className="mote-details__issue">{issue ?? context.issue} Last confirmed goals are kept.</p> : null}
+    {workIssue || issue ? <p role="status" className="mote-details__issue">{issue ?? workIssue} Last confirmed goals are kept.</p> : null}
     {loading ? <p role="status" className="mote-details__hint">Reading original goals…</p> : null}
     {visibleGoals.map(goal => {
       const summary = moteGoalSummary(goal), open = expanded === goal.id
@@ -154,7 +155,7 @@ export function MoteCurrentWork({ scope, reference, active = true }: {
         {open ? <GoalContinuationControl demand={goal} active={active} onRefresh={() => void refresh()} /> : null}
       </div>
     })}
-    {!loading && !context.issue && !issue && !goals.length ? <p className="mote-current-work__empty">No linked work yet. Start with a question, or choose a goal.</p> : null}
+    {!loading && !workIssue && !issue && !goals.length ? <p className="mote-current-work__empty">No linked work yet. Start with a question, or choose a goal.</p> : null}
     {!showAll && goals.length && !currentGoals.length ? <p className="mote-details__hint">No current work. Original results are kept below.</p> : null}
     {showAll || goals.length > visibleGoals.length ? <button type="button" className="mote-current-work__navigation mote-current-work__all" aria-expanded={showAll}
       onClick={() => { associationIntent.current = {}; setShowAll(value => !value) }}>{showAll ? 'Current summary' : 'All work'}<span>{showAll ? currentGoals.length : goals.length}<ThemeNavigationDownIcon size={12} /></span></button> : null}
