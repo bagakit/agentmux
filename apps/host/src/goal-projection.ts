@@ -1,11 +1,24 @@
 import { formatGoalAddress, type AmuxGoalAddress } from '@agentmux/core/sharing'
-import type { Demand } from '@agentmux/demand'
+import { currentGoalGrounding, type Demand } from '@agentmux/demand'
 import { goalPlanState, projectGoalPlan, type GoalPlanOwner } from '@agentmux/demand/goal-plan'
 import type { AgentMuxDemand } from '@agentmux/core/control'
 
 /** Every plan this owner returns carries its derivation of the node states. */
 export function hostGoalPlan(goal: Pick<Demand, 'id' | 'plan' | 'delegations' | 'alignment'>, owner?: Pick<AmuxGoalAddress, 'runtimeId' | 'namespace'>): Pick<AgentMuxDemand, 'plan' | 'planState'> {
-  return goal.plan ? { plan: goal.plan, planState: goalPlanState(projectGoalPlan(goal.plan, goal.delegations ?? [], goal.alignment?.criteria ?? [], owner ? { ...owner, goalId: goal.id } : undefined, goal.alignment?.revision)) } : {}
+  const { plan } = goal
+  return plan ? { plan, planState: goalPlanState(hostPlanProjection(goal, plan, owner)) } : {}
+}
+
+function hostPlanProjection(goal: Pick<Demand, 'id' | 'delegations' | 'alignment'>, plan: NonNullable<Demand['plan']>, owner?: Pick<AmuxGoalAddress, 'runtimeId' | 'namespace'>) {
+  return projectGoalPlan(plan, goal.delegations ?? [], goal.alignment?.criteria ?? [],
+    owner ? { ...owner, goalId: goal.id } : undefined, goal.alignment?.revision)
+}
+
+export function hostGoalResult(goal: Demand, owner?: Pick<AmuxGoalAddress, 'runtimeId' | 'namespace'>): Pick<AgentMuxDemand, 'plan' | 'planState' | 'grounding'> {
+  const { plan } = goal
+  const projection = plan ? hostPlanProjection(goal, plan, owner) : undefined
+  const grounding = currentGoalGrounding(goal, projection)
+  return { ...(plan && projection ? { plan, planState: goalPlanState(projection) } : {}), ...(grounding ? { grounding } : {}) }
 }
 
 /** Project the original durable record; no Renderer selection or cached board facts. */
@@ -18,10 +31,10 @@ export function projectHostGoal(goal: Demand, address?: AmuxGoalAddress): AgentM
     plannedStartAt: goal.plannedStartAt, targetAt: goal.targetAt, parentDemandId: goal.parentDemandId, phaseIndex: goal.phaseIndex ?? null,
     decisions: goal.decisions, activityLog: goal.activities.map(activity => `${activity.kind}: ${activity.message}`), activities: goal.activities,
     ...(goal.delegations ? { delegations: goal.delegations } : {}), ...(goal.dispatches ? { dispatches: goal.dispatches } : {}),
-    ...(goal.progressUpdates ? { progressUpdates: goal.progressUpdates } : {}), ...(goal.patrols ? { patrols: goal.patrols } : {}), ...hostGoalPlan(goal, address),
+    ...(goal.progressUpdates ? { progressUpdates: goal.progressUpdates } : {}), ...(goal.patrols ? { patrols: goal.patrols } : {}), ...hostGoalResult(goal, address),
     sessionIds: [...goal.sessionIds], ...(goal.contentRefs ? { contentRefs: goal.contentRefs } : {}),
     createdAt: goal.createdAt, updatedAt: goal.updatedAt, source: 'default-topic',
-    ...(goal.alignment ? { alignment: goal.alignment } : {}), ...(goal.grounding ? { grounding: goal.grounding } : {}) }
+    ...(goal.alignment ? { alignment: goal.alignment } : {}) }
 }
 
 /** Original board facts; private Host launch context is not a client-owned fact. */

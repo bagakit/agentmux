@@ -48,6 +48,7 @@ import { assertIssuedGoalTicket, freezeGoalTicketDependencies, issueGoalTickets 
 import type { GoalTicketProof, GoalTicketSigner } from './goal-ticket-proof.js'
 import { demandNameContext, parseDemandNameChange } from './demand-name-change.js'
 import { alignmentConfirmationIssue, deriveBoundGoalId, groundingAcceptanceIssue, parseAlignment, parseAlignmentProposal, parseGrounding, parseGroundingProposal, type DemandAlignmentConfirmer, type DemandAlignmentProposal, type DemandGroundingProposal } from './goals.js'
+import { currentGoalGrounding } from './goal-grounding.js'
 
 const requireNative = createRequire(import.meta.url)
 const WRITER_LOCK_MARKER = 'agentmux.demand-writer-lock.v1\n'
@@ -1288,7 +1289,16 @@ export class DemandStore {
         entry.collection.workflowReview = { operationId, deliveryHash: delivery.hash, reviewer }
       }
       const alignment = demand.alignment
-      if (alignment?.revision === entry.alignmentRevision && !(demand.grounding?.alignmentRevision === alignment.revision && demand.grounding.acceptedAt !== null)) {
+      if (demand.plan?.nodes.length) {
+        if (alignment && entry.planNodeId) {
+          const plan = projectGoalPlan(demand.plan, demand.delegations ?? [], alignment.criteria, undefined, alignment.revision)
+          const row = plan.nodes.find(({ node }) => node.id === entry.planNodeId)
+          if (row?.delegation?.operationId === entry.operationId && row.state !== 'cancelled') {
+            const current = currentGoalGrounding(demand, plan)
+            if (current?.acceptedAt === null) entry.collection.groundingSubmissionId = current.submissionId
+          }
+        }
+      } else if (alignment?.revision === entry.alignmentRevision && !(demand.grounding?.alignmentRevision === alignment.revision && demand.grounding.acceptedAt !== null)) {
         const reports = (demand.delegations ?? []).filter(delegation => delegation.collection && delegation.report && delegation.alignmentRevision === alignment.revision)
         const proposal: DemandGroundingProposal = { alignmentRevision: alignment.revision, summary: reports.map(delegation => `${delegation.sourceMessageId}: ${delegation.report!.grounding.summary}`).join('\n'),
           checks: alignment.criteria.map(criterion => {
@@ -1575,16 +1585,18 @@ export class DemandStore {
   async acceptGrounding(id: string, expectedAlignmentRevision: number, expectedSubmissionId: string, acceptGaps = false, finish = false): Promise<DemandReceipt> {
     return this.mutate('accept-grounding', snapshot => {
       const demand = findDemand(snapshot, id, this.storePath)
-      if (demand.alignment?.revision !== expectedAlignmentRevision || demand.grounding?.submissionId !== expectedSubmissionId) {
+      const grounding = currentGoalGrounding(demand)
+      if (demand.alignment?.revision !== expectedAlignmentRevision || grounding?.submissionId !== expectedSubmissionId) {
         throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'The goal or results changed. Read the current results before accepting them.')
       }
       if (typeof acceptGaps !== 'boolean') throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'Accepting with gaps requires an explicit boolean choice.')
       if (typeof finish !== 'boolean') throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'Finishing a goal requires an explicit boolean choice.')
-      const issue = groundingAcceptanceIssue(demand.alignment, demand.grounding, acceptGaps)
+      const issue = groundingAcceptanceIssue(demand.alignment, grounding, acceptGaps)
       if (issue) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, issue)
-      if (demand.grounding.acceptedAt === null) {
-        demand.grounding.acceptedAt = Date.now()
-        demand.activities.push({ id: mintObjectId(), kind: 'results-accepted', message: acceptGaps ? 'User accepted these results while retaining the reported gaps.' : 'User accepted these results.', createdAt: demand.grounding.acceptedAt, actorId: null })
+      if (grounding.acceptedAt === null) {
+        const acceptedAt = Date.now()
+        demand.grounding = { ...grounding, acceptedAt }
+        demand.activities.push({ id: mintObjectId(), kind: 'results-accepted', message: acceptGaps ? 'User accepted these results while retaining the reported gaps.' : 'User accepted these results.', createdAt: acceptedAt, actorId: null })
       }
       if (finish && demand.status !== 'done') {
         demand.status = 'done'

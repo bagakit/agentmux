@@ -10,7 +10,7 @@ import type { GoalDelegationAuthority, GoalDelegationMethod, GoalDelegationParam
   GoalDelegationResult, GoalDelegationResultMap, GoalActivePlanQuery, GoalActivePlanResult, GoalDelegationObservation, GoalDelegationsOwner } from '@agentmux/core/goal-delegation'
 import type { AgentMuxRpcMethod, AgentMuxRpcParams, AgentMuxRpcResult, AgentMuxRun, AgentMuxRpcCallContext } from '@agentmux/core'
 import { delegationWorkerHostId, validateDemandDelegationReport, type DemandDelegation, type DemandDelegationIntent, type DemandDelegationReportInput, type GoalDeliveryScope } from '@agentmux/demand/delegations'
-import { hostGoalAddress, hostGoalPlan } from './goal-projection.js'
+import { hostGoalAddress, hostGoalResult } from './goal-projection.js'
 import { submitGoalSourceReport } from './goal-source-report.js'
 import { assertPlanWorkRole, changeGoalPlanAssignment } from './goal-plan-assignment.js'
 import { isGoalSupervisor } from './goal-supervisor-identity.js'
@@ -331,7 +331,7 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
     const goal = await this.demands.get(input.goalId)
     if (!goal) throw new AgentMuxError('The original Goal is unavailable. Original Sessions and input remain available.', 'CONTROL_UNAVAILABLE')
     const quiet = method === 'goal.plan.assignment' || method === 'goal.plan.claim' || method === 'goal.delegation.prepare' || method === 'goal.plan' || method === 'goal.plan.revise' || method === 'goal.plan.review'
-    const plan = hostGoalPlan(goal, owner)
+    const plan = hostGoalResult(goal, owner)
     const reviewing = new Set(plan.planState?.nodes.filter(node => node.state === 'review').map(node => node.attempt?.delegationOperationId))
     const observations = quiet ? undefined
       : await Promise.all((goal.delegations ?? []).map(delegation => this.observeDelegation(input.goalId, delegation, context, authority, goal, reviewing.has(delegation.operationId))))
@@ -346,7 +346,7 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
       ...(observations ? { observations } : {}),
       ...(goal.progressUpdates ? { progressUpdates: goal.progressUpdates } : {}),
       ...(goal.patrols ? { patrols: goal.patrols, ...(this.patrol ? { patrolObservations: await this.patrol.observe(goal) } : {}) } : {}),
-      ...(goal.grounding ? { grounding: goal.grounding } : {}), diskDurability: 'confirmed' }
+      diskDurability: 'confirmed' }
     if (this.responsibility && !quiet) result.responsibility = await this.responsibility.observe(goal, result)
     return result as GoalDelegationResultMap[M]
   }
