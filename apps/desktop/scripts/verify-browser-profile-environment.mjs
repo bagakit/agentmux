@@ -7,6 +7,7 @@ import { mkdtemp, mkdir, readFile, writeFile, realpath, rm, symlink, stat } from
 import { join, resolve, relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { runProbeProcess, stopProbeProcesses, listProbeProcesses } from './probe-process.mjs'
+import { documentSample, workerSample } from './fixtures/browser-profile-environment/fingerprint-samples.mjs'
 
 const root = resolve(import.meta.dirname, '../../..'), require = createRequire(join(root, 'apps/desktop/package.json'))
 const { build } = browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
@@ -43,6 +44,31 @@ const receipt = { schema: 'agentmux.browser-profile-environment.native.v1', pass
 for(const file of ['packages/core/src/browser-profile-control.ts','packages/core/src/agentmux-cli-commands.ts','packages/core/dist/browser-profile-control.js','packages/core/dist/agentmux.js'])receipt.sources[file]=sha(await readFile(join(root,file)))
 const pageServer = createServer((request, response) => {
   if(scopeMode)console.log('Native scope HTTP request: '+request.url)
+  if (fingerprintProof && request.url === '/fingerprint-worker.js') {
+    response.setHeader('Content-Type', 'text/javascript')
+    response.end(workerSample)
+    return
+  }
+  if (fingerprintProof && (request.url === '/' || request.url === '/fingerprint-same' || request.url === '/fingerprint-cross')) {
+    response.setHeader('Content-Type', 'text/html; charset=utf-8')
+    if (request.url === '/') {
+      response.end(`<!doctype html><title>Original fingerprint documents</title><body><input value="Original draft"><script>
+        globalThis.firstFingerprint = {};
+        ${documentSample}.then(value => { firstFingerprint.top = value })
+        addEventListener('message', e => {
+          if (e.data?.scope === 'same' || e.data?.scope === 'cross') firstFingerprint[e.data.scope] = e.data.value
+        })
+        const worker = new Worker('/fingerprint-worker.js')
+        worker.onmessage = e => { firstFingerprint.worker = e.data; worker.terminate() }
+      </script><iframe src="/fingerprint-same"></iframe><iframe src="http://localhost:${pageServer.address().port}/fingerprint-cross"></iframe>`)
+    } else {
+      const scope = request.url === '/fingerprint-same' ? 'same' : 'cross'
+      response.end(`<!doctype html><body><script>
+        ${documentSample}.then(value => parent.postMessage({ scope: '${scope}', value }, '*'))
+      </script>`)
+    }
+    return
+  }
   if(scopeMode && request.url === '/worker.js'){response.setHeader('Content-Type','application/javascript');response.end('postMessage({locale:Intl.DateTimeFormat().resolvedOptions().locale,timeZone:Intl.DateTimeFormat().resolvedOptions().timeZone,hardware:navigator.hardwareConcurrency,userAgent:navigator.userAgent})');return}
   if(scopeMode && (request.url === '/same'||request.url === '/cross')){response.setHeader('Content-Type','text/html');response.end('<script>parent.postMessage({scopeKind:'+JSON.stringify(request.url.slice(1))+',locale:Intl.DateTimeFormat().resolvedOptions().locale,timeZone:Intl.DateTimeFormat().resolvedOptions().timeZone,hardware:navigator.hardwareConcurrency},"*")</script>');return}
   if (request.url === '/headers') { response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify(request.headers)); return }
@@ -52,7 +78,7 @@ const pageServer = createServer((request, response) => {
 await new Promise(done => pageServer.listen(0, '127.0.0.1', done))
 const url = `http://127.0.0.1:${pageServer.address().port}/`
 try {
-  for (const name of fingerprintProof ? (process.argv.includes('--mutations') ? ['candidate', 'fingerprint-mutant', 'restored'] : ['candidate']) : scopeMode ? bindingProof&&process.argv.includes('--mutations') ? ['scope-binding-mutant','scope-switch-screen-mutant','restored'] : hardwareProof ? ['scope-hardware-baseline-mutant','restored'] : releaseProof ? ['scope-screen-mutant','restored'] : process.argv.includes('--mutations') ? ['candidate','scope-locale-mutant','scope-screen-mutant','restored'] : ['candidate'] : ['candidate','mutation','restored']) {
+  for (const name of fingerprintProof ? (process.argv.includes('--mutations') ? ['candidate', 'fingerprint-mutant', 'fingerprint-receipt-mutant', 'restored'] : ['candidate']) : scopeMode ? bindingProof&&process.argv.includes('--mutations') ? ['scope-binding-mutant','scope-switch-screen-mutant','restored'] : hardwareProof ? ['scope-hardware-baseline-mutant','restored'] : releaseProof ? ['scope-screen-mutant','restored'] : process.argv.includes('--mutations') ? ['candidate','scope-locale-mutant','scope-screen-mutant','restored'] : ['candidate'] : ['candidate','mutation','restored']) {
     const compiled = join(out, name); await mkdir(compiled)
     await symlink(join(root, 'apps/desktop/node_modules'), join(compiled, 'node_modules'))
     let mutation
@@ -68,6 +94,13 @@ try {
             assert.equal(code.split(anchor).length, 2, 'Exact original canvas override')
             const before = sha(code)
             code = code.replace(anchor, 'if (false) {')
+            mutation = { file: relative(root, args.path), before, after: sha(code) }
+          }
+          if (name === 'fingerprint-receipt-mutant' && args.path === join(root, 'apps/desktop/src/main/browser-profile-page-environment.ts')) {
+            const anchor = 'Document-start script registered on this native page target. Frame coverage is unconfirmed. Workers retain their native behavior.'
+            assert.equal(code.split(anchor).length, 2, 'Exact scope receipt mutated')
+            const before = sha(code)
+            code = code.replace(anchor, 'All documents and Workers applied.')
             mutation = { file: relative(root, args.path), before, after: sha(code) }
           }
           if(scopeMode && name.startsWith('scope-') && name!=='scope-switch-screen-mutant' && args.path===join(root,'apps/desktop/src/main/browser-profile-page-environment.ts')){
@@ -90,7 +123,7 @@ try {
           return { contents: code, loader: args.path.endsWith('.tsx') ? 'tsx' : args.path.endsWith('.ts') ? 'ts' : 'js' }
         })
       } }] })
-    const isMutation = name === 'mutation' || name.startsWith('scope-') || name === 'fingerprint-mutant'
+    const isMutation = name === 'mutation' || name.startsWith('scope-') || (name.startsWith('fingerprint-') && name.endsWith('-mutant'))
     const isolatedHome = isMutation ? await mkdtemp('/tmp/amux-env-mutation-') : home
     try {
       for (const phase of name === 'candidate' && !process.argv.includes('--cold-target') && !bindingProof ? ['seed', 'restart'] : ['seed']) {
@@ -98,7 +131,8 @@ try {
         // exact Profile file and descriptor. No new IDs or saved configuration are planted on restart.
         const runHome = name === 'restored' ? await mkdtemp('/tmp/amux-env-restored-') : isolatedHome
         const resultFile = join(compiled, phase + '.json'), bootstrap = join(compiled, phase + '.cjs')
-        await writeFile(bootstrap, `const{app}=require('electron'),fs=require('node:fs'),path=require('node:path');const home=${JSON.stringify(runHome)};for(const key of ['appData','userData','sessionData']){const p=path.join(home,key);fs.mkdirSync(p,{recursive:true});app.setPath(key,p)}app.whenReady().then(()=>import(${JSON.stringify(pathToFileURL(join(compiled, 'main.mjs')).href)})).catch(e=>{console.error(e);app.exit(1)});`)
+        const isolate = fingerprintProof ? "app.commandLine.appendSwitch('site-per-process');" : ''
+        await writeFile(bootstrap, `const{app}=require('electron'),fs=require('node:fs'),path=require('node:path');${isolate}const home=${JSON.stringify(runHome)};for(const key of ['appData','userData','sessionData']){const p=path.join(home,key);fs.mkdirSync(p,{recursive:true});app.setPath(key,p)}app.whenReady().then(()=>import(${JSON.stringify(pathToFileURL(join(compiled, 'main.mjs')).href)})).catch(e=>{console.error(e);app.exit(1)});`)
         const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(AGENTMUX_|CTXMUX_)/u.test(key) && key !== 'ELECTRON_RUN_AS_NODE'))
         Object.assign(env, { AGENTMUX_RUNTIME_DIRECTORY: runHome, AGENTMUX_STATE_DIRECTORY: join(runHome, 'state'),
           AGENTMUX_AGENT_SESSION_STORE: join(runHome, 'sessions.json'), AGENTMUX_MESSAGE_QUEUE_PATH: join(runHome, 'messages.ndjson'),
@@ -125,7 +159,9 @@ try {
         if (isMutation) {
           assert.ok(mutation && mutation.before !== mutation.after)
           assert.equal(processResult.exitCode, 1)
-          assert.match(actual.failure?.message ?? '', fingerprintProof ? /Native canvas readback must change/ : scopeMode ? name==='scope-binding-mutant'?/A prepared candidate must not claim/:name==='scope-switch-screen-mutant'?/committed native view must keep/:name==='scope-hardware-baseline-mutant'?/Native hardware clear must restore/:name==='scope-locale-mutant'?/Native locale command/:/Original native screen application/ : /Public targets retain the exact affected Profile warning/)
+          const expectedFingerprint = name === 'fingerprint-receipt-mutant' ? /Fingerprint application must report the original native scope/
+            : /Native canvas readback must change/
+          assert.match(actual.failure?.message ?? '', fingerprintProof ? expectedFingerprint : scopeMode ? name==='scope-binding-mutant'?/A prepared candidate must not claim/:name==='scope-switch-screen-mutant'?/committed native view must keep/:name==='scope-hardware-baseline-mutant'?/Native hardware clear must restore/:name==='scope-locale-mutant'?/Native locale command/:/Original native screen application/ : /Public targets retain the exact affected Profile warning/)
         } else { assert.equal(processResult.exitCode, 0, JSON.stringify(actual.failure)); assert.equal(actual.passed, true) }
         if (name === 'restored') await rm(runHome, { recursive: true, force: true })
       }
