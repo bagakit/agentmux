@@ -39,11 +39,15 @@ export function recallCardBlocks(node: CardBlock): { blockId: string; card: Reca
   const cards: { blockId: string; card: RecallCard }[] = []
   function visit(block: CardBlock): void {
     const blockId = block.attrs?.blockId
-    if (block.type === 'paragraph' && typeof blockId === 'string' && block.content?.length === 1) {
-      const [label] = block.content
-      const href = label?.marks?.find(mark => mark.type === 'link')?.attrs?.href
-      const card = typeof href === 'string' && label?.type === 'text' && label.text ? readRecallCard(href, label.text) : null
-      if (card) cards.push({ blockId, card })
+    if (block.type === 'paragraph' && typeof blockId === 'string' && block.content?.length) {
+      const fragments = block.content
+      const href = fragments[0]?.marks?.find(mark => mark.type === 'link')?.attrs?.href
+      if (typeof href === 'string' && href.startsWith('amux://recall-card/') &&
+        fragments.every(fragment => fragment.type === 'text' && typeof fragment.text === 'string' &&
+          fragment.marks?.find(mark => mark.type === 'link')?.attrs?.href === href)) {
+        const card = readRecallCard(href, fragments.map(fragment => fragment.text).join(''))
+        if (card) cards.push({ blockId, card })
+      }
     }
     block.content?.forEach(visit)
   }
