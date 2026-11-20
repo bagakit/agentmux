@@ -241,6 +241,7 @@ export * from './goal-participation.js'
 export * from './goal-approval.js'
 
 export type { AgentInputImageReference, AgentInputImage, AgentInputResourceRead, AgentInputResourceResult, AgentInputResourceOwner } from './agent-input-resource.js'
+export { privateImageMetadata } from './mote/private-images.js'
 export { parseAgentInputResourceRead, parseAgentInputResourceResult, inputImageMatches } from './agent-input-resource.js'
 export * from './v8-profile.js'
 export * from './runtime-v8-profile.js'

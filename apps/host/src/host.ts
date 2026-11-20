@@ -234,7 +234,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
         if (hostId !== 'local') throw new AgentMuxError('The original private thread Host is unavailable.', 'CONTROL_UNAVAILABLE')
         return originalRuntime().client
       }
-    }), { store: moteDirectStore, main: moteMain, readPeer: conversationAgents.readTarget,
+    }), { store: moteDirectStore, main: moteMain, readPeer: conversationAgents.readTarget, files: fileUploads,
       client: { readAgentSession: id => originalRuntime().client.readAgentSession(id),
         readMessage: input => originalRuntime().client.readMessage(input),
         enqueuePublishedMoteReport: (input, assertCurrent) => originalRuntime().client.enqueuePublishedMoteReport(input, assertCurrent) } }) : undefined

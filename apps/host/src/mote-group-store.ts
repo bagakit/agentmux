@@ -111,7 +111,7 @@ export class MoteGroupStore {
   private message(db: DatabaseSync, row: Row): MoteGroupMessage {
     const deliveries = db.prepare('SELECT data FROM deliveries WHERE message_id=? ORDER BY rowid').all(row.id!)
       .map(entry => decode<GroupDeliveryRecord>(entry.data).delivery)
-    const message = parseMoteGroupMessage({ ...decode<MessageBody>(row.data), sequence: row.sequence, deliveries })
+    const message = parseMoteGroupMessage({ ...decode<MessageBody>(row.data), sequence: row.sequence, deliveries }, this.kind)
     if (message.id !== row.id || message.groupId !== row.group_id)
       return groupFailure('The original public message has another Group identity.', 'MOTE_GROUP_STORE_UNCONFIRMED')
     return message
@@ -146,7 +146,7 @@ export class MoteGroupStore {
       invitation ? { ...member, invitation: invitation.input?.delivery ??
         { moteId: member.moteId, operationId: invitation.operationId, status: 'pending' } } : member)
     return parseMoteGroupSummary({ id: row.id, name: row.name, ...this.settings(db, row.id!), members,
-      lastMessage: recent ? this.message(db, recent) : null })
+      lastMessage: recent ? this.message(db, recent) : null }, this.kind)
   }
 
   private originalGroup(db: DatabaseSync, groupId: string): Row {

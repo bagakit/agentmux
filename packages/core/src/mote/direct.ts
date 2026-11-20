@@ -6,12 +6,17 @@ import { parseMotePreferencesTarget, sameMotePreferencesTarget, type MotePrefere
 import { parseAgentScheduleTiming, type AgentScheduleTiming } from '../agent-schedule.js'
 import { scheduleMatchesCreation, validateScheduleRpcResult, type ScheduleResultMap } from '../public-rpc-schedules.js'
 import type { MoteScheduleContext } from './scheduled-work.js'
+import { parseMotePrivateImageRead, parseMotePrivateImageResult, parsePrivateImageMetadata, parsePrivateImageUploads, privateImageMetadata,
+  type MotePrivateImage, type MotePrivateImageRead, type MotePrivateImageResult } from './private-images.js'
+import type { FileUploadIdentity } from '../public-rpc-files.js'
 
 type Page = { beforeSequence?: number; limit?: number }
 export type MoteDirectParticipant = Pick<MoteGroupMember, 'moteId' | 'target' | 'name' | 'thread'>
-export type MoteDirectMessage = Omit<MoteGroupMessage, 'groupId' | 'author' | 'event'> & {
+export type MoteDirectMessage = Omit<MoteGroupMessage, 'groupId' | 'author' | 'event' | 'privateImages' | 'privatePriority'> & {
   threadId: string
   author: Extract<MoteGroupMessage['author'], { kind: 'mote' }>
+  images?: MotePrivateImage[]
+  priority?: true
 }
 export type MoteDirectThread = {
   id: string
@@ -27,9 +32,10 @@ export type MoteDirectMainNotification = {
 export type MoteDirectParamsMap = {
   'space.mote.direct.list': Page & { mote: MotePreferencesTarget }
   'space.mote.direct.inspect': Page & { threadId: string; mote?: MotePreferencesTarget; messageId?: string }
-  'space.mote.direct.send': { mote: MotePreferencesTarget; peer: MotePreferencesTarget; operationId: string; body: string; replyToMessageId?: string }
-  'space.mote.direct.schedule': Omit<MoteDirectParamsMap['space.mote.direct.send'], 'replyToMessageId'> & AgentScheduleTiming & { checkIn?: never }
-  'space.mote.direct.reply': { threadId: string; operationId: string; inputOperationId: string; body: string }
+  'space.mote.direct.send': { mote: MotePreferencesTarget; peer: MotePreferencesTarget; operationId: string; body: string; replyToMessageId?: string; images?: FileUploadIdentity[]; priority?: true }
+  'space.mote.direct.schedule': Omit<MoteDirectParamsMap['space.mote.direct.send'], 'replyToMessageId' | 'images' | 'priority'> & AgentScheduleTiming & { checkIn?: never }
+  'space.mote.direct.reply': { threadId: string; operationId: string; inputOperationId: string; body: string; images?: FileUploadIdentity[] }
+  'space.mote.direct.image.read': MotePrivateImageRead & { mote?: MotePreferencesTarget }
 }
 export type MoteDirectResultMap = {
   'space.mote.direct.list': { threads: MoteDirectThread[]; nextBeforeSequence: number | null }
@@ -37,6 +43,7 @@ export type MoteDirectResultMap = {
   'space.mote.direct.send': { threadId: string; message: MoteDirectMessage }
   'space.mote.direct.schedule': ScheduleResultMap['schedule.create']
   'space.mote.direct.reply': { message: MoteDirectMessage; mainNotification: MoteDirectMainNotification }
+  'space.mote.direct.image.read': MotePrivateImageResult
 }
 export type MoteDirectMethod = keyof MoteDirectParamsMap
 export const MOTE_DIRECT_METHODS = {
@@ -44,7 +51,8 @@ export const MOTE_DIRECT_METHODS = {
   'space.mote.direct.inspect': 'short',
   'space.mote.direct.send': 'long',
   'space.mote.direct.schedule': 'long',
-  'space.mote.direct.reply': 'short'
+  'space.mote.direct.reply': 'short',
+  'space.mote.direct.image.read': 'short'
 } as const satisfies Record<MoteDirectMethod, 'short' | 'long'>
 
 export const isMoteDirectMethod = (method: unknown): method is MoteDirectMethod =>
@@ -83,16 +91,23 @@ export function parseMoteDirectParams<M extends MoteDirectMethod>(method: M, val
     const { mote, threadId, ...page } = rpcRecord(value, ['mote', 'threadId', 'beforeSequence', 'limit', 'messageId'], code)
     if (mote !== undefined) parseMotePreferencesTarget(mote, code)
     parseMoteGroupParams('space.mote.group.inspect', { ...page, groupId: threadId })
+  } else if (method === 'space.mote.direct.image.read') {
+    const { mote, ...image } = rpcRecord(value, ['mote', 'threadId', 'messageId', 'imageOperationId'], code)
+    if (mote !== undefined) parseMotePreferencesTarget(mote, code)
+    parseMotePrivateImageRead(image)
   } else if (method === 'space.mote.direct.send' || method === 'space.mote.direct.schedule') {
     const planned = method === 'space.mote.direct.schedule'
-    const { mote, peer, calendar, afterMs, everyMs, ...send } = rpcRecord(value,
-      ['mote', 'peer', 'operationId', 'body', ...(planned ? ['calendar', 'afterMs', 'everyMs'] : ['replyToMessageId'])], code)
+    const { mote, peer, calendar, afterMs, everyMs, images, priority, ...send } = rpcRecord(value,
+      ['mote', 'peer', 'operationId', 'body', ...(planned ? ['calendar', 'afterMs', 'everyMs'] : ['replyToMessageId', 'images', 'priority'])], code)
     const source = parseMotePreferencesTarget(mote, code), recipient = parseMotePreferencesTarget(peer, code)
     if (source.spaceId === recipient.spaceId) return invalid(code)
     parseMoteGroupParams('space.mote.group.send', { ...send, groupId: 'private-thread', recipientIds: [recipient.spaceId] })
+    if (images !== undefined) parsePrivateImageUploads(images, code)
+    if (priority !== undefined && priority !== true) return invalid(code)
     if (planned) parseAgentScheduleTiming({ calendar, afterMs, everyMs }, code)
   } else {
-    const { threadId, ...reply } = rpcRecord(value, ['threadId', 'operationId', 'inputOperationId', 'body'], code)
+    const { threadId, images, ...reply } = rpcRecord(value, ['threadId', 'operationId', 'inputOperationId', 'body', 'images'], code)
+    if (images !== undefined) parsePrivateImageUploads(images, code)
     parseMoteGroupParams('space.mote.group.reply', { ...reply, groupId: threadId })
   }
   return value as MoteDirectParamsMap[M]
@@ -102,6 +117,8 @@ export function parseMoteDirectParams<M extends MoteDirectMethod>(method: M, val
 // receipts. The public private-thread boundary has its own audience and shape.
 export function parseMoteDirectResult<M extends MoteDirectMethod>(method: M, value: unknown, input: MoteDirectParamsMap[M]): MoteDirectResultMap[M] {
   const code = 'CONTROL_PROTOCOL_ERROR'
+  if (method === 'space.mote.direct.image.read') return parseMotePrivateImageResult(value,
+    input as MoteDirectParamsMap['space.mote.direct.image.read']) as MoteDirectResultMap[M]
   if (method === 'space.mote.direct.schedule') {
     const request = input as MoteDirectParamsMap['space.mote.direct.schedule']
     const result = validateScheduleRpcResult('schedule.create', value), { schedule } = result
@@ -115,9 +132,25 @@ export function parseMoteDirectResult<M extends MoteDirectMethod>(method: M, val
     return result as MoteDirectResultMap[M]
   }
   const message = (raw: unknown) => {
-    const { threadId, ...entry } = rpcRecord(raw, ['threadId', 'id', 'sequence', 'createdAt', 'author', 'body', 'replyToMessageId', 'deliveries'], code)
+    const { threadId, images, priority, ...entry } = rpcRecord(raw, ['threadId', 'id', 'sequence', 'createdAt', 'author', 'body', 'replyToMessageId', 'deliveries', 'images', 'priority'], code)
     if (rpcRecord(entry.author, ['kind', 'moteId', 'name'], code).kind !== 'mote') return invalid(code)
+    if (priority !== undefined && priority !== true) return invalid(code)
+    if (images !== undefined) {
+      if (!Array.isArray(images) || images.length < 1 || images.length > 4) return invalid(code)
+      const references = Array.from(images, parsePrivateImageMetadata)
+      if (new Set(references.map(image => image.operationId)).size !== references.length) return invalid(code)
+    }
     return { ...entry, groupId: threadId }
+  }
+  const confirmImages = (raw: unknown, selected: FileUploadIdentity[] | undefined) => {
+    const images = rpcRecord(raw, undefined, code).images
+    if (selected === undefined) return images === undefined
+    if (!Array.isArray(images) || images.length !== selected.length) return false
+    return selected.every((upload, index) => {
+      const image = parsePrivateImageMetadata(images[index]), expected = privateImageMetadata(upload)
+      return image.operationId === expected.operationId && image.revision === expected.revision && image.name === expected.name &&
+        image.mimeType === expected.mimeType && image.byteLength === expected.byteLength
+    })
   }
   const thread = (raw: unknown, mote?: MotePreferencesTarget) => {
     const { id, participants, lastMessage } = rpcRecord(raw, ['id', 'participants', 'lastMessage'], code)
@@ -142,12 +175,14 @@ export function parseMoteDirectResult<M extends MoteDirectMethod>(method: M, val
     parseMoteGroupResult('space.mote.group.inspect', { group: thread(response.thread, mote), messages: response.messages.map(message),
       nextBeforeSequence: response.nextBeforeSequence, viewerId: mote?.spaceId ?? 'participant' }, { ...page, groupId: threadId })
   } else if (method === 'space.mote.direct.send') {
-    const response = rpcRecord(value, ['threadId', 'message'], code), { mote, peer, ...send } = input as MoteDirectParamsMap['space.mote.direct.send']
+    const response = rpcRecord(value, ['threadId', 'message'], code), { mote, peer, images, priority, ...send } = input as MoteDirectParamsMap['space.mote.direct.send']
     if (typeof response.threadId !== 'string' || !response.threadId) return invalid(code)
+    if (rpcRecord(response.message, undefined, code).priority !== priority || !confirmImages(response.message, images)) return invalid(code)
     parseMoteGroupResult('space.mote.group.send', { message: message(response.message) },
       { ...send, groupId: response.threadId, recipientIds: [peer.spaceId], sourceMote: mote })
   } else {
-    const response = rpcRecord(value, ['message', 'mainNotification'], code), { threadId, ...reply } = input as MoteDirectParamsMap['space.mote.direct.reply']
+    const response = rpcRecord(value, ['message', 'mainNotification'], code), { threadId, images, ...reply } = input as MoteDirectParamsMap['space.mote.direct.reply']
+    if (!confirmImages(response.message, images)) return invalid(code)
     parseMoteGroupResult('space.mote.group.reply', { message: message(response.message) }, { ...reply, groupId: threadId })
     const notification = rpcRecord(response.mainNotification, ['messageId', 'status', 'issue'], code)
     if (typeof notification.messageId !== 'string' || !notification.messageId || /[\0\r\n]/u.test(notification.messageId) ||

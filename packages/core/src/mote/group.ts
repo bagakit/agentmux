@@ -1,11 +1,12 @@
 import { AgentMuxError } from '../errors.js'
 import { rpcRecord } from '../rpc-data.js'
 import { parseFileListParams, parseFileListResult, parseFileReadParams, parseFileReadResult,
-  type FileListResult, type FileReadResult } from '../public-rpc-files.js'
+  type FileListResult, type FileReadResult, type FileUploadIdentity } from '../public-rpc-files.js'
 import { parseMotePreferencesTarget, sameMotePreferencesTarget, type MotePreferencesTarget } from './preferences.js'
 import { parseAgentScheduleTiming, type AgentScheduleTiming } from '../agent-schedule.js'
 import { scheduleMatchesCreation, validateScheduleRpcResult, type ScheduleResultMap } from '../public-rpc-schedules.js'
 import type { MoteScheduleContext, MoteScheduledRecipient } from './scheduled-work.js'
+import { parsePrivateImageUploads } from './private-images.js'
 
 /** Maximum message length in UTF-16 code units, shared with Group composers. */
 export const MOTE_GROUP_MAX_BODY_LENGTH = 64 * 1024
@@ -35,6 +36,8 @@ export type MoteGroupMessage = {
   event?: { kind: 'announcement-updated' }
   replyToMessageId?: string
   deliveries: MoteGroupDelivery[]
+  privateImages?: FileUploadIdentity[]
+  privatePriority?: true
 }
 export type MoteGroupSettings = {
   revision: number
@@ -101,6 +104,9 @@ export type MoteGroupCallContext = Partial<MoteScheduleContext> & {
   actor: { kind: 'human'; id: string } | { kind: 'agent'; agentSessionId: string; hostId: string; runId: string; sourceRuns: readonly string[] }
   assertCurrent(): Promise<void>
   scheduledRecipients?: readonly MoteScheduledRecipient[]
+  recoverPublication?: true
+  privateImages?: FileUploadIdentity[]
+  privatePriority?: true
 }
 export interface MoteGroupPort {
   call<M extends MoteGroupMethod>(method: M, input: MoteGroupParamsMap[M], context: MoteGroupCallContext): Promise<MoteGroupResultMap[M]>
@@ -263,11 +269,14 @@ export function parseMoteGroupDelivery(value: unknown): MoteGroupDelivery {
   if (p.issue !== undefined) string(p.issue, code, 4096, true)
   return p as MoteGroupDelivery
 }
-export function parseMoteGroupMessage(value: unknown): MoteGroupMessage {
-  const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['id', 'sequence', 'groupId', 'createdAt', 'body', 'author', 'event', 'replyToMessageId', 'deliveries'], code)
+export function parseMoteGroupMessage(value: unknown, scope?: 'group' | 'direct'): MoteGroupMessage {
+  const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['id', 'sequence', 'groupId', 'createdAt', 'body', 'author', 'event', 'replyToMessageId', 'deliveries',
+    ...(scope === 'direct' ? ['privateImages', 'privatePriority'] : [])], code)
   string(p.id, code); string(p.groupId, code); string(p.body, code, MOTE_GROUP_MAX_BODY_LENGTH, true)
   number(p.sequence, code, 1); number(p.createdAt, code, 0)
   if (p.replyToMessageId !== undefined) string(p.replyToMessageId, code)
+  if (p.privateImages !== undefined) parsePrivateImageUploads(p.privateImages, code)
+  if (p.privatePriority !== undefined && p.privatePriority !== true) return invalid(code)
   const author = rpcRecord(p.author, undefined, code), deliveries = list(p.deliveries, code, 32, parseMoteGroupDelivery)
   if (author.kind === 'human') {
     rpcRecord(author, ['kind', 'id'], code); string(author.id, code)
@@ -297,7 +306,7 @@ function member(value: unknown): MoteGroupMember {
   }
   return p as MoteGroupMember
 }
-export function parseMoteGroupSummary(value: unknown): MoteGroupSummary {
+export function parseMoteGroupSummary(value: unknown, scope?: 'group' | 'direct'): MoteGroupSummary {
   const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['id', 'name', 'members', 'lastMessage', 'revision', 'avatarMoteIds', 'announcement', 'topic'], code)
   string(p.id, code); string(p.name, code, 120)
   number(p.revision, code, 1)
@@ -310,7 +319,7 @@ export function parseMoteGroupSummary(value: unknown): MoteGroupSummary {
     string(announcement.body, code, MOTE_GROUP_MAX_BODY_LENGTH, true); number(announcement.updatedAt, code, 0); string(announcement.operationId, code)
   }
   if (p.topic !== null) target(p.topic, code)
-  if (!members.length || p.lastMessage !== null && parseMoteGroupMessage(p.lastMessage).groupId !== p.id) return invalid(code)
+  if (!members.length || p.lastMessage !== null && parseMoteGroupMessage(p.lastMessage, scope).groupId !== p.id) return invalid(code)
   unique(members.map(entry => entry.moteId), code)
   return p as MoteGroupSummary
 }

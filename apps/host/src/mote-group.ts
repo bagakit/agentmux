@@ -29,11 +29,12 @@ const currentIssue = (error: unknown): string =>
   (error instanceof Error ? error.message : String(error)).replaceAll('\0', '').slice(0, 4096) || 'The original member delivery is unconfirmed.'
 
 function inputNote(thread: { kind: 'group' | 'direct'; id: string }, operationId: string,
-  quoted: Pick<MoteGroupMessage, 'id' | 'body'> | undefined, author: MoteGroupMessage['author']): string {
+  quoted: Pick<MoteGroupMessage, 'id' | 'body'> | undefined, message: MoteGroupMessage): string {
   const direct = thread.kind === 'direct'
   return renderAmuxProtocol('mote-task', direct ? 'private-input' : 'group-input', {
     original: JSON.stringify({ [direct ? 'threadId' : 'groupId']: thread.id, inputOperationId: operationId,
-      operationId: stable(direct ? 'direct-reply' : 'reply', thread.id, operationId), sender: author }),
+      operationId: stable(direct ? 'direct-reply' : 'reply', thread.id, operationId), sender: message.author,
+      ...(direct && message.privateImages ? { messageId: message.id, images: message.privateImages.map(({ operationId, name }) => ({ operationId, name })) } : {}) }),
     quote: quoted ? '\n\n' + renderAmuxProtocol('mote-task', 'thread-quote', {
       original: JSON.stringify({ messageId: quoted.id, body: quoted.body })
     }) : ''
@@ -82,7 +83,9 @@ export async function ownsMoteWork(main: MoteMainReader, client: Pick<AgentMuxCl
     const selected = await main.readCurrentMoteMain(work.mote)
     if (selected.status !== 'ready' || selected.current?.sessionId !== caller.agentSessionId) return false
     const session = await client.authorizeRetainedAgentCaller(caller.capability, caller.agentSessionId)
-    return selected.current.hostId === session.hostId && selected.identity?.moteId === work.mote.spaceId
+    if (selected.current.hostId !== session.hostId || selected.identity?.moteId !== work.mote.spaceId) return false
+    await main.assertCurrent(selected)
+    return true
   } catch { return false }
 }
 
@@ -217,7 +220,7 @@ export function createHostMoteGroups(options: {
     }
   }
 
-  async function freshDelivery(message: MoteGroupMessage, moteId: string, retry: boolean): Promise<MoteGroupDelivery> {
+  async function freshDelivery(message: MoteGroupMessage, moteId: string, retry: boolean | 'pending'): Promise<MoteGroupDelivery> {
     return memberLane(message.groupId, moteId, async () => {
       let record = await store.delivery(message.groupId, message.id, moteId)
       if (!record) return groupFailure('This message did not invite that original Group member.', 'UNKNOWN_MOTE_GROUP_DELIVERY')
@@ -227,12 +230,12 @@ export function createHostMoteGroups(options: {
         const membership = await store.member(message.groupId, moteId)
         requireActive(membership, generation)
         if (record.key) {
-          if (retry && membership.member.thread) await advanceInvitation(message.groupId, moteId, generation, membership.member.thread)
+          if (retry === true && membership.member.thread) await advanceInvitation(message.groupId, moteId, generation, membership.member.thread)
           const receipt = await readReceipt(message.groupId, record)
           if (receipt) {
             const { member } = await store.member(message.groupId, moteId)
-            if (retry && receipt.persistence === 'confirmed' && (
-                receipt.status === 'not-applied' || receipt.status === 'stopped' || receipt.continuation !== undefined)) {
+            if (receipt.persistence === 'confirmed' && (retry === true && (receipt.status === 'not-applied' || receipt.status === 'stopped' || receipt.continuation !== undefined) ||
+                retry === 'pending' && receipt.status === 'waiting' && receipt.control.state === 'enabled' && receipt.continuation !== undefined)) {
               requireActive(await store.member(message.groupId, moteId), generation)
               const joined = await options.client(member.thread!.hostId).rejoinAgentInputWaiting({ ref: receipt.ref }, inputAuthority(message.groupId, moteId, generation))
               if (!receiptMatches(joined, record.key)) return groupFailure('The original Group input continuation returned another receipt.', 'MOTE_GROUP_MEMBER_UNCONFIRMED')
@@ -254,7 +257,7 @@ export function createHostMoteGroups(options: {
           const session = await groupSession(thread)
           const key: GroupInputKey = { kind: 'prompt', agentSessionId: session.agentSessionId, expectedRun: session.run, submissionId: record.delivery.operationId }
           const quoted = message.replyToMessageId ? await store.messageById(message.groupId, message.replyToMessageId) : undefined
-          const note = inputNote({ kind: store.kind, id: message.groupId }, key.submissionId, quoted, message.author)
+          const note = inputNote({ kind: store.kind, id: message.groupId }, key.submissionId, quoted, message)
           record = { ...record, key, note,
             ...(session.inputEpoch ? { inputEpoch: session.inputEpoch } : {}) }
           await store.saveDelivery(message.id, record)
@@ -265,7 +268,9 @@ export function createHostMoteGroups(options: {
         const result = await client.submitAgentPrompt({ agentSessionId: key.agentSessionId, expectedRun: key.expectedRun,
           operationId: key.submissionId, prompt: message.body, agentMuxNote: note,
           admissionIntent: { kind: 'session-conversation' }, execution: 'immediate', authorHuman: message.author.kind === 'human',
-          ...(record.inputEpoch ? { inputEpoch: record.inputEpoch } : {}) }, inputAuthority(message.groupId, moteId, generation))
+          ...(record.inputEpoch ? { inputEpoch: record.inputEpoch } : {}) }, {
+          ...inputAuthority(message.groupId, moteId, generation), ...(message.privatePriority ? { backgroundPriority: true } : {})
+        })
         const receipt = result && 'control' in result ? result : await readReceipt(message.groupId, record)
         if (receipt && !receiptMatches(receipt, key)) return groupFailure('The Group received a foreign Core receipt.', 'MOTE_GROUP_MEMBER_UNCONFIRMED')
         record = { ...record, delivery: project(record.delivery, receipt) }
@@ -335,22 +340,24 @@ export function createHostMoteGroups(options: {
     return original
   }
 
-  async function publish(input: MoteGroupParamsMap['space.mote.group.reply'], actor: GroupAgent, assertCurrent: () => Promise<void>) {
+  async function publish(input: MoteGroupParamsMap['space.mote.group.reply'], actor: GroupAgent, context: MoteGroupCallContext) {
     const source = await addressedSource(actor, input.groupId, input.inputOperationId)
     const { member } = source.membership
+    const privateImages = store.kind === 'direct' ? context.privateImages : undefined
+    const hash = (author: MoteGroupMessage['author']) => digest({ input, author, ...(privateImages ? { privateImages } : {}) })
     const prior = await store.messageOperation(input.groupId, input.operationId)
     if (prior) {
       const { author } = prior.message
-      if (author.kind !== 'mote' || author.moteId !== member.moteId || prior.digest !== digest({ input, author }))
+      if (author.kind !== 'mote' || author.moteId !== member.moteId || prior.digest !== hash(author))
         return groupFailure('This Group operation already has another original message.', 'MOTE_GROUP_OPERATION_CONFLICT')
-      await assertCurrent()
+      await context.assertCurrent()
       return prior.message
     }
     const original = await confirmedAddressedInput(actor, input.groupId, source)
-    await assertCurrent()
+    await context.assertCurrent()
     const author = { kind: 'mote' as const, moteId: member.moteId, name: member.name }
-    return (await store.append(input.operationId, digest({ input, author }), { id: mintObjectId(), groupId: input.groupId,
-      createdAt: Date.now(), body: input.body, author, replyToMessageId: original.id }, [], memberAuthority(source.membership),
+    return (await store.append(input.operationId, hash(author), { id: mintObjectId(), groupId: input.groupId,
+      createdAt: Date.now(), body: input.body, author, replyToMessageId: original.id, ...(privateImages ? { privateImages } : {}) }, [], memberAuthority(source.membership),
       store.kind === 'direct' ? { senderSessionId: actor.agentSessionId, senderRunId: actor.runId } : undefined)).message
   }
 
@@ -445,7 +452,7 @@ export function createHostMoteGroups(options: {
       const session = await groupSession({ agentSessionId: selected.current.sessionId, hostId: selected.current.hostId })
       const { message } = await this.call('space.mote.group.send', { groupId: work.groupId, body, operationId, sourceMote: work.mote,
         recipientIds: work.recipients.map(member => member.moteId) }, { actor: { kind: 'agent', hostId: selected.current.hostId,
-        agentSessionId: session.agentSessionId, runId: session.run.runId, sourceRuns: [] }, scheduledRecipients: work.recipients,
+        agentSessionId: session.agentSessionId, runId: session.run.runId, sourceRuns: [] }, scheduledRecipients: work.recipients, recoverPublication: true,
         assertCurrent: async () => { await assertCurrent(); await main.assertCurrent(selected) } })
       return { conversationId: work.groupId, messageId: message.id }
     },
@@ -454,7 +461,7 @@ export function createHostMoteGroups(options: {
       const { actor } = context
       if (method === 'space.mote.group.reply') {
         if (actor.kind !== 'agent') return groupFailure('A Group reply requires its original member Agent.', 'CONTROL_PERMISSION_DENIED')
-        return { message: await publish(raw as MoteGroupParamsMap['space.mote.group.reply'], actor, context.assertCurrent) } as MoteGroupResultMap[M]
+        return { message: await publish(raw as MoteGroupParamsMap['space.mote.group.reply'], actor, context) } as MoteGroupResultMap[M]
       }
       if (method === 'space.mote.group.update' || method === 'space.mote.group.members.add' ||
           method === 'space.mote.group.members.remove' || method === 'space.mote.group.members.leave')
@@ -556,14 +563,22 @@ export function createHostMoteGroups(options: {
       const id = stable('message', input.groupId, input.operationId)
       const recipients = input.recipientIds.map(moteId => ({ moteId, operationId: stable('input', input.groupId, id, moteId), status: 'pending' as const }))
       const generations = context.scheduledRecipients ? new Map(context.scheduledRecipients.map(({ moteId, generation }) => [moteId, generation])) : undefined
+      const privateImages = store.kind === 'direct' ? context.privateImages : undefined
+      const privatePriority = store.kind === 'direct' ? context.privatePriority : undefined
       const hash = digest({ input, actor: membership ? { kind: 'mote', moteId: membership.member.moteId } : actor,
-        ...(context.scheduledRecipients ? { recipients: context.scheduledRecipients } : {}) })
+        ...(context.scheduledRecipients ? { recipients: context.scheduledRecipients } : {}), ...(privateImages ? { privateImages } : {}),
+        ...(privatePriority ? { privatePriority } : {}) })
       const append = () => store.append(input.operationId, hash, { id, groupId: input.groupId,
-        createdAt: Date.now(), body: input.body, author, ...(input.replyToMessageId ? { replyToMessageId: input.replyToMessageId } : {}) },
+        createdAt: Date.now(), body: input.body, author, ...(input.replyToMessageId ? { replyToMessageId: input.replyToMessageId } : {}),
+        ...(privateImages ? { privateImages } : {}), ...(privatePriority ? { privatePriority } : {}) },
       recipients, membership && memberAuthority(membership), undefined, generations)
       if (!main) await context.assertCurrent()
       const { message, fresh } = await (main ? main.commit(append) : append())
-      if (!fresh) return { message: await readMessage(message) } as MoteGroupResultMap[M]
+      if (!fresh) {
+        if (context.recoverPublication) await Promise.allSettled(message.deliveries.filter(delivery => delivery.status === 'pending')
+          .map(delivery => freshDelivery(message, delivery.moteId, 'pending')))
+        return { message: await readMessage(message) } as MoteGroupResultMap[M]
+      }
       // The public message has been committed once. One failing member cannot stop other recipients.
       const deliveries = await Promise.allSettled(message.deliveries.map(delivery => freshDelivery(message, delivery.moteId, false)))
       return { message: { ...message, deliveries: deliveries.map((result, index) => result.status === 'fulfilled' ? result.value

@@ -6,7 +6,7 @@ import * as Dialog from './Modal.js'
 import { Notice } from './Notice.js'
 import '../styles/mote-direct.css'
 
-type Method = 'space.mote.direct.list' | 'space.mote.direct.inspect'
+type Method = 'space.mote.direct.list' | 'space.mote.direct.inspect' | 'space.mote.direct.image.read'
 export type ReadMoteDirect = <M extends Method>(method: M, params: AgentMuxRpcParams<M>) => Promise<AgentMuxRpcResult<M>>
 type List = AgentMuxRpcResult<'space.mote.direct.list'>
 type Detail = AgentMuxRpcResult<'space.mote.direct.inspect'>
@@ -92,7 +92,7 @@ export function MoteDirectThreads({ mote, active, read, renderAvatar }: {
     const id = returnToReport.current
     if (!report && id) {
       returnToReport.current = null
-      dialog.current?.querySelector<HTMLButtonElement>(`[data-direct-message-id="${CSS.escape(id)}"] button`)?.focus()
+      dialog.current?.querySelector<HTMLButtonElement>(`[data-direct-message-id="${CSS.escape(id)}"] [data-open-assignment]`)?.focus()
     }
   }, [report])
 
@@ -181,13 +181,13 @@ export function MoteDirectThreads({ mote, active, read, renderAvatar }: {
         {report ? <div className="mote-direct-panel__body mote-direct-assignment">
           {assignmentIssue && <Notice density="compact" heading="原作业暂未读到">{assignmentIssue}</Notice>}
           {!assignment && !assignmentIssue && <p role="status">正在读取原作业…</p>}
-          {assignment && <DirectMessage message={assignment} ownMoteId={mote.spaceId} label="原作业" />}
-          <DirectMessage message={report} ownMoteId={mote.spaceId} label="回报" />
+          {assignment && <DirectMessage message={assignment} mote={mote} read={read} label="原作业" />}
+          <DirectMessage message={report} mote={mote} read={read} label="回报" />
         </div> : selected ? <div className="mote-direct-panel__body" aria-label="私聊消息">
           {detailIssue && <Notice density="compact" heading="私聊暂未更新">{detailIssue}</Notice>}
           {!detail && !detailIssue && <p role="status">正在读取私聊…</p>}
           {moreMessages && <Button disabled={pageLoading} onClick={() => void loadOlder()}>更早的消息</Button>}
-          {mergeMessages(older, detail?.messages ?? []).map(message => <DirectMessage key={message.id} message={message} ownMoteId={mote.spaceId}
+          {mergeMessages(older, detail?.messages ?? []).map(message => <DirectMessage key={message.id} message={message} mote={mote} read={read}
             onOpenAssignment={message.replyToMessageId && message.deliveries.length === 0 ? () => focusReport(message) : undefined} />)}
         </div> : <div className="mote-direct-panel__body">
           {issue && <Notice density="compact" heading="私聊列表暂未更新">{issue}</Notice>}
@@ -213,17 +213,41 @@ function mergeMessages(previous: readonly MoteDirectMessage[], next: readonly Mo
   return [...messages.values()].sort((left, right) => left.sequence - right.sequence)
 }
 
-function DirectMessage({ message, ownMoteId, label, onOpenAssignment }: {
-  message: MoteDirectMessage; ownMoteId: string; label?: string; onOpenAssignment?: (() => void) | undefined
+function DirectMessage({ message, mote, read, label, onOpenAssignment }: {
+  message: MoteDirectMessage; mote: MotePreferencesTarget; read: ReadMoteDirect; label?: string; onOpenAssignment?: (() => void) | undefined
 }) {
   const delivered = status(message)
-  return <article data-direct-message-id={message.id} className="mote-direct-message" data-own={message.author.moteId === ownMoteId || undefined}>
+  return <article data-direct-message-id={message.id} className="mote-direct-message" data-own={message.author.moteId === mote.spaceId || undefined}>
     {label && <h3>{label}</h3>}
     <div><strong>{message.author.name}</strong><time dateTime={new Date(message.createdAt).toISOString()}>{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></div>
     <p>{message.body}</p>
+    {message.images?.map(image => <PrivateImage key={image.operationId} image={image} load={async () => {
+      const original = await read('space.mote.direct.image.read', { threadId: message.threadId, messageId: message.id, imageOperationId: image.operationId, mote })
+      if (original.image.revision !== image.revision) throw new Error('图片版本暂未核对。')
+      return `data:${original.image.mimeType};base64,${original.dataBase64}`
+    }} />)}
     <footer>
-      {delivered && <small title={message.deliveries[0]?.issue}>{delivered}</small>}
-      {onOpenAssignment && <Button onClick={onOpenAssignment}>查看原作业</Button>}
+      {(delivered || message.priority) && <small title={message.deliveries[0]?.issue}>{[message.priority && '优先投递', delivered].filter(Boolean).join(' · ')}</small>}
+      {onOpenAssignment && <Button data-open-assignment onClick={onOpenAssignment}>查看原作业</Button>}
     </footer>
   </article>
+}
+
+function PrivateImage({ image, load }: { image: NonNullable<MoteDirectMessage['images']>[number]; load(): Promise<string> }) {
+  const [source, setSource] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [issue, setIssue] = useState('')
+  const toggle = async () => {
+    if (source) { setSource(null); return }
+    setLoading(true); setIssue('')
+    try { setSource(await load()) }
+    catch (error) { setIssue(issueText(error)) }
+    finally { setLoading(false) }
+  }
+  return <figure className="mote-direct-image">
+    <Button aria-expanded={Boolean(source)} disabled={loading} onClick={() => void toggle()}>{image.name}</Button>
+    {loading && <small role="status">读取图片中…</small>}
+    {issue && <small role="status">{issue}</small>}
+    {source && <img src={source} alt={image.name} onError={() => { setSource(null); setIssue('图片格式暂时无法预览。') }} />}
+  </figure>
 }

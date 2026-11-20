@@ -1,15 +1,17 @@
 import { createHash } from 'node:crypto'
-import { AgentMuxError, moteDirectScheduleSourceMatches, type AgentMuxClient, type ContinuousProgressLoop, type MoteDirectCallContext, type MoteDirectMainNotification, type MoteDirectMethod, type MoteDirectMessage, type MoteDirectParamsMap, type MoteDirectPort, type MoteGroupCallContext,
+import { AgentMuxError, moteDirectScheduleSourceMatches, privateImageMetadata, type AgentMuxClient, type AgentMuxMessageReadView, type ContinuousProgressLoop, type MoteDirectCallContext, type MoteDirectMainNotification, type MoteDirectMethod, type MoteDirectMessage, type MoteDirectParamsMap, type MoteDirectPort, type MoteGroupCallContext,
   type MoteDirectResultMap, type MoteDirectThread, type MoteGroupMessage, type MoteGroupPort, type MoteGroupSummary } from '@agentmux/core'
 import { renderAmuxProtocol } from '@agentmux/core/amux-protocol'
 import { sameMotePreferencesTarget, type MotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import type { MoteMainReader } from '@agentmux/core/mote-dialogue'
 import { authorizeMoteConversationMain } from './mote-group.js'
 import type { MoteGroupStore, MotePrivateReportOrigin } from './mote-group-store.js'
+import type { AgentMuxRpcFileUploadsOwner, FileUploadIdentity } from '@agentmux/core/files'
 
-function privateMessage({ groupId, author, event, ...message }: MoteGroupMessage): MoteDirectMessage {
+function privateMessage({ groupId, author, event, privateImages, privatePriority, ...message }: MoteGroupMessage): MoteDirectMessage {
   if (author.kind !== 'mote' || event) throw new AgentMuxError('The original private message has no authenticated Mote author.', 'CONTROL_PROTOCOL_ERROR')
-  return { ...message, author, threadId: groupId }
+  return { ...message, author, threadId: groupId, ...(privateImages ? { images: privateImages.map(privateImageMetadata) } : {}),
+    ...(privatePriority ? { priority: true } : {}) }
 }
 
 function privateThread(original: MoteGroupSummary): MoteDirectThread {
@@ -28,7 +30,10 @@ export function createHostMoteDirect(ledger: MoteGroupPort, owner: {
   main: MoteMainReader
   store: MoteGroupStore
   readPeer(target: MotePreferencesTarget): Promise<unknown>
-  client: Pick<AgentMuxClient, 'readAgentSession' | 'readMessage' | 'enqueuePublishedMoteReport'>
+  files?: Pick<AgentMuxRpcFileUploadsOwner, 'inspect' | 'read'>
+  client: Pick<AgentMuxClient, 'readAgentSession' | 'enqueuePublishedMoteReport'> & {
+    readMessage(input: { messageId: string }): Promise<AgentMuxMessageReadView | null>
+  }
 }): MoteDirectPort & { start(): void; dispose(): Promise<void>; dispatchWork(work: Extract<NonNullable<ContinuousProgressLoop['moteWork']>, { kind: 'direct' }>, body: string, operationId: string,
   assertCurrent: () => Promise<void>): Promise<{ conversationId: string; messageId: string }> } {
   const activeReports = new Map<string, Promise<MoteDirectMainNotification>>()
@@ -105,13 +110,39 @@ export function createHostMoteDirect(ledger: MoteGroupPort, owner: {
     timer.unref?.()
   }
 
+  async function retainImageSelection(groupId: string, operationId: string, images: FileUploadIdentity[] | undefined,
+    context: MoteGroupCallContext): Promise<MoteGroupCallContext> {
+    if (!images) return context
+    const prior = await owner.store.messageOperation(groupId, operationId)
+    if (prior) return { ...context, privateImages: images } // The original publication verifies the exact operation digest.
+    const { actor } = context
+    if (actor.kind !== 'agent' || images.some(image => image.hostId !== actor.hostId || image.agentSessionId !== actor.agentSessionId || image.expectedRun.runId !== actor.runId))
+      throw new AgentMuxError('Only uploads from this original Agent Run can be selected for the private message.', 'CONTROL_PERMISSION_DENIED')
+    await Promise.all(images.map(async image => {
+      const receipt = await owner.files?.inspect(image)
+      if (receipt?.status !== 'uploaded') throw new AgentMuxError('An original private image has not been confirmed. Keep the selection and message.', 'CONTROL_UNAVAILABLE')
+    }))
+    return { ...context, privateImages: images }
+  }
+
+  async function inspectPrivate(threadId: string, mote: MotePreferencesTarget | undefined, query: { messageId?: string; beforeSequence?: number; limit?: number },
+    context: MoteGroupCallContext) {
+    const result = await ledger.call('space.mote.group.inspect', { ...query, groupId: threadId,
+      ...(context.actor.kind === 'agent' && mote ? { sourceMote: mote } : {}) }, context)
+    if (mote && !belongsTo(result.group, mote))
+      throw new AgentMuxError('The selected Mote does not participate in this private thread.', 'CONTROL_PERMISSION_DENIED')
+    return result
+  }
+
   async function sendPrivate(input: MoteDirectParamsMap['space.mote.direct.send'], context: MoteGroupCallContext) {
-    const { mote, peer, ...send } = input
+    const { mote, peer, images, priority, ...send } = input
     const members = [mote, peer].sort((left, right) => left.spaceId < right.spaceId ? -1 : 1)
     const pair = members.map(target => [target.expectedResource.hostId, target.spaceId])
     const threadId = 'mote-direct-' + createHash('sha256').update(JSON.stringify(pair)).digest('hex')
     await ledger.call('space.mote.group.create', { name: 'Private conversation', operationId: threadId, sourceMote: mote, members }, context)
-    const result = await ledger.call('space.mote.group.send', { ...send, groupId: threadId, sourceMote: mote, recipientIds: [peer.spaceId] }, context)
+    const selected = await retainImageSelection(threadId, send.operationId, images, context)
+    const result = await ledger.call('space.mote.group.send', { ...send, groupId: threadId, sourceMote: mote, recipientIds: [peer.spaceId] },
+      priority ? { ...selected, privatePriority: true } : selected)
     return { threadId, message: privateMessage(result.message) }
   }
 
@@ -129,7 +160,7 @@ export function createHostMoteDirect(ledger: MoteGroupPort, owner: {
         throw new AgentMuxError('The scheduled assignment is saved and awaiting its coordinating Main.', 'CONTROL_UNAVAILABLE')
       const session = await owner.client.readAgentSession(selected.current.sessionId)
       if (!session || session.hostId !== selected.current.hostId) throw new AgentMuxError('The coordinating Main Session is unconfirmed.', 'CONTROL_UNAVAILABLE')
-      const { threadId, message } = await sendPrivate({ mote: work.mote, peer: work.peer, body, operationId }, { actor: { kind: 'agent', hostId: session.hostId,
+      const { threadId, message } = await sendPrivate({ mote: work.mote, peer: work.peer, body, operationId }, { recoverPublication: true, actor: { kind: 'agent', hostId: session.hostId,
         agentSessionId: session.agentSessionId, runId: session.run.runId, sourceRuns: [] }, assertCurrent: async () => {
         await assertCurrent()
         await owner.main.assertCurrent(selected)
@@ -147,16 +178,24 @@ export function createHostMoteDirect(ledger: MoteGroupPort, owner: {
       }
       if (method === 'space.mote.direct.inspect') {
         const { threadId, mote, ...page } = raw as MoteDirectParamsMap['space.mote.direct.inspect']
-        const result = await ledger.call('space.mote.group.inspect', { ...page, groupId: threadId,
-          ...(actor.kind === 'agent' && mote ? { sourceMote: mote } : {}) }, context)
-        if (mote && !belongsTo(result.group, mote))
-          throw new AgentMuxError('The selected Mote does not participate in this private thread.', 'CONTROL_PERMISSION_DENIED')
+        const result = await inspectPrivate(threadId, mote, page, context)
         return { thread: privateThread(result.group), messages: result.messages.map(privateMessage),
           nextBeforeSequence: result.nextBeforeSequence } as MoteDirectResultMap[M]
       }
+      if (method === 'space.mote.direct.image.read') {
+        const { mote, ...image } = raw as MoteDirectParamsMap['space.mote.direct.image.read']
+        const { messages } = await inspectPrivate(image.threadId, mote, { messageId: image.messageId }, context)
+        const original = messages[0]?.privateImages?.find(entry => entry.operationId === image.imageOperationId)
+        if (!original) throw new AgentMuxError('This private image does not belong to the original message.', 'CONTROL_PERMISSION_DENIED')
+        const bytes = await owner.files?.read?.(original, original.byteLength)
+        if (!bytes) throw new AgentMuxError('The original private image is temporarily unavailable. The message is retained.', 'CONTROL_UNAVAILABLE')
+        await context.assertCurrent()
+        return { ...image, image: privateImageMetadata(original), dataBase64: bytes.dataBase64 } as MoteDirectResultMap[M]
+      }
       if (method === 'space.mote.direct.reply') {
-        const { threadId, ...reply } = raw as MoteDirectParamsMap['space.mote.direct.reply']
-        const { message } = await ledger.call('space.mote.group.reply', { ...reply, groupId: threadId }, context)
+        const { threadId, images, ...reply } = raw as MoteDirectParamsMap['space.mote.direct.reply']
+        const selected = await retainImageSelection(threadId, reply.operationId, images, context)
+        const { message } = await ledger.call('space.mote.group.reply', { ...reply, groupId: threadId }, selected)
         const published = privateMessage(message)
         const origin = await owner.store.privateReport(message.id)
         wakeReports()
