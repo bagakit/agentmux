@@ -5,6 +5,7 @@ import { AGENTMUX_PROTOCOL_CATALOG, AMUX_PROTOCOL_DEFINITIONS, parseAgentMuxMess
 import { composeAgentPrompt, composeOutboundMessage, formatAmuxTriggerNote } from '../src/agent-outbound-message.js'
 import { DEFAULT_AGENT_CONTINUITY_CONTINUATION } from '../src/agent-session-recovery/continuity-contract.js'
 import { promptReactionMessage, PROMPT_REACTION_STARTERS } from '../src/prompt-reaction.js'
+import { formatGoalConfirmation } from '../src/goal-confirmation.js'
 import { parseAmuxObjectLink } from '../src/sharing.js'
 
 describe('source-owned amux reading catalog', () => {
@@ -69,6 +70,16 @@ describe('source-owned amux reading catalog', () => {
     expect(reading).toMatchObject({ kind: 'content', sourceLabel: '', declaredAgentSessionId: null,
       body: '', protocol: { raw: wire, body: null } })
     expect(reading?.protocol?.id).toBe(id)
+  })
+
+  it('reads an adjacent extension and a Goal declaration with previously written prose', () => {
+    const extension = '<amux:quote-note>opaque</amux:quote-note>'
+    expect(parseAgentMuxMessagePrefix(extension)?.protocol).toMatchObject({ tag: 'amux:quote-note', raw: extension, body: 'opaque' })
+    const current = formatGoalConfirmation({ goalUrl: 'amux://goal/GOAL?runtime=RUNTIME&namespace=NAMESPACE', alignmentRevision: 2, operationId: 'original-confirmation' })
+    const older = current.slice(0, current.indexOf('>') + 1) + '\nEarlier wording &amp; the original owner.\n</amux:goal>'
+    expect(parseAgentMuxMessagePrefix(older)?.protocol).toMatchObject({ id: 'goal-confirmation', raw: older, body: 'Earlier wording &amp; the original owner.' })
+    expect(composeAgentPrompt(undefined, older).text).toBe(older)
+    expect(parseAgentMuxMessagePrefix(older.replace('&amp;', '&missing;'))).toBeNull()
   })
 
   it('decodes only header attributes, preserving opaque body including entities and nested protocol samples', () => {
