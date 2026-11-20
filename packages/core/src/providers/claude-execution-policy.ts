@@ -30,7 +30,12 @@ function argumentsOf(event) {
 
 function nativeResult(remote) {
   if (typeof remote.deny === 'string') return { deny: remote.deny }
-  if (remote.isError === true) return { isError: true, result: remote.result, text: remote.text }
+  if (remote.isError === true) {
+    // Tool errors are not successful outputs that satisfy the native schema.
+    const message = typeof remote.text === 'string' ? remote.text : typeof remote.result === 'string' ? remote.result :
+      Array.isArray(remote.result) ? remote.result.find(item => item?.type === 'text' && typeof item.text === 'string')?.text : undefined
+    return { deny: message || unavailable }
+  }
   // Native mcp serve returns its original typed tool record as one JSON text block.
   // Returning that record lets Claude validate and render the native result itself.
   if (!Array.isArray(remote.result) || remote.result.length !== 1 || remote.result[0]?.type !== 'text' || typeof remote.result[0].text !== 'string')

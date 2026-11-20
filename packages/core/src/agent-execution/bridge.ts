@@ -5,6 +5,7 @@ import type { AgentMuxClientEvent, AgentMuxRunDataEvent, AgentMuxRunInputOperati
 import { AgentMuxError } from '../errors.js'
 import { observeRead } from '../observation-read.js'
 import { EXECUTION_FRAME_LIMIT } from './channel.js'
+import { frontendRequestSequence } from './protocol.js'
 
 export type AgentExecutionBridgeSide = 'frontend' | 'executor'
 type Side = AgentExecutionBridgeSide
@@ -22,11 +23,13 @@ export interface AgentExecutionBridgePosition {
   ownerInstanceId: string
   outputByte: number
   inputByte: number
+  requestSequence?: number
 }
-type PendingInput = { source: Side; sourceStartByte: number; sourceEndByte: number; digest: string; operation: Omit<AgentMuxRunInputOperation, 'data'>; chunk?: { offset: number; bytes: number } }
+type PendingInput = { source: Side; sourceStartByte: number; sourceEndByte: number; digest: string; operation: Omit<AgentMuxRunInputOperation, 'data'>; chunk?: { offset: number; bytes: number }; requestSequence?: number }
 export interface AgentExecutionBridgeState {
   bindingId: string
   projectRecoveryId?: string
+  retireFrontendThrough?: number
   frontend: AgentExecutionBridgePosition
   executor: AgentExecutionBridgePosition
   pending?: PendingInput
@@ -247,11 +250,14 @@ export class AgentExecutionBridge {
       if (newline < 0) break
       const line = Buffer.concat(partial.parts, partial.bytes)
       partial.parts = []; partial.bytes = 0
-      let frame: { type?: unknown }
-      try { frame = JSON.parse(line.toString('utf8')) as { type?: unknown } }
+      let frame: { type?: unknown; through?: unknown }
+      try { frame = JSON.parse(line.toString('utf8')) as typeof frame }
       catch (error) { throw this.fail(new ExecutionProtocolFrameError(side, { startByte: this.state[side].outputByte, endByte: data.startByte + newline + 1, bytes: line.length, sha256: createHash('sha256').update(line).digest('hex'), syntax: 'invalid-json' }, error), side) }
       const sourceEndByte = data.startByte + newline + 1
-      const forward = side === 'frontend' ? ['request', 'closed', 'agent-rpc-context', 'agent-rpc-response', 'agent-rpc-closed'].includes(String(frame.type)) : ['response', 'agent-rpc-request', 'agent-rpc-close'].includes(String(frame.type))
+      const retirement = frame.type === 'retire-frontend-requests' && this.state.projectRecoveryId !== undefined &&
+        this.state.retireFrontendThrough !== undefined && frame.through === this.state.retireFrontendThrough
+      const forward = side === 'frontend' ? ['request', 'closed', 'agent-rpc-context', 'agent-rpc-response', 'agent-rpc-closed'].includes(String(frame.type)) :
+        retirement || ['response', 'agent-rpc-request', 'agent-rpc-close'].includes(String(frame.type))
       if (forward) {
         const target = opposite(side)
         const operationId = chunkOperationId(this.state, side, sourceEndByte, 0)
@@ -259,7 +265,9 @@ export class AgentExecutionBridge {
           expectedByte: this.state[target].inputByte }
         const original = Buffer.concat([line, Buffer.from('\n')])
         const digest = createHash('sha256').update(original).digest('hex')
-        await this.save(state => setPending(state, side, { source: side, sourceStartByte: state[side].outputByte, sourceEndByte, digest, operation, chunk: { offset: 0, bytes: inputChunkBytes(state[target].runId, operation) } }))
+        const requestSequence = side === 'frontend' ? frontendRequestSequence(frame) : undefined
+        await this.save(state => setPending(state, side, { source: side, sourceStartByte: state[side].outputByte, sourceEndByte, digest, operation,
+          chunk: { offset: 0, bytes: inputChunkBytes(state[target].runId, operation) }, ...(requestSequence === undefined ? {} : { requestSequence }) }))
         await this.deliverPending(side, original)
       } else {
         try { await observeRead(this.options.onFrame(side, frame), this.reader.signal) }
@@ -332,7 +340,7 @@ export class AgentExecutionBridge {
       } else {
         const sourceEndByte = current.sourceEndByte
         await this.save(state => setPending({ ...state, [target]: { ...state[target], inputByte: end },
-          [side]: { ...state[side], outputByte: sourceEndByte } }, side))
+          [side]: { ...state[side], outputByte: sourceEndByte, ...(current.requestSequence === undefined ? {} : { requestSequence: current.requestSequence }) } }, side))
         this.readThrough[side] = Math.max(this.readThrough[side], sourceEndByte)
       }
     }

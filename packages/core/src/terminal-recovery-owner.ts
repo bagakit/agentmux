@@ -172,8 +172,10 @@ export class TerminalRecoveryOwner {
     finally { if (timer) clearTimeout(timer) }
   }
   /** Initial SDK dispatch. A previous key can only observe; it never submits Start again. */
-  async createInitial(value: AgentMuxPreparedTerminal): Promise<AgentMuxRun> {
+  async createInitial(value: AgentMuxPreparedTerminal, expectedInstanceId?: string): Promise<AgentMuxRun> {
     const prepared = parsePreparedTerminal(value), runtime = this.port.runtime(), id = prepared.createOperationId
+    if (expectedInstanceId !== undefined && runtime.instanceId !== expectedInstanceId)
+      throw new AgentMuxError('The project Native instance changed before the prepared Start. No Start was submitted.', 'TERMINAL_INITIAL_RUNTIME_CHANGED')
     const admitted = await this.admission.locked(id, async()=>{
       if(await this.admission.hasRetirement(id) && !await this.readInitialMarker(id)) throw failure('This key already has an explicit retirement admission; no new Start was authorized.')
       return await this.initialLock(id, async (handle, fresh) => {

@@ -1,4 +1,5 @@
 import { isAbsolute, win32 } from 'node:path'
+import { isDeepStrictEqual } from 'node:util'
 
 type ObjectValue = Record<string, unknown>
 type RequestId = string | number
@@ -10,7 +11,7 @@ type ClaudeExecutionIntent = {
 }
 type ClaudeExecutionMessage =
   | { kind: 'request'; requestId: RequestId; method: string; params: ObjectValue | null; payload: ObjectValue; intent: ClaudeExecutionIntent }
-  | { kind: 'notification'; method: string; payload: ObjectValue }
+  | { kind: 'notification'; method: string; payload: ObjectValue; cancels?: RequestId }
   | { kind: 'response'; requestId: RequestId; payload: ObjectValue }
   | { kind: 'rejected'; requestId?: RequestId; code: number; reason: string; payload: unknown }
 
@@ -40,8 +41,10 @@ export function parseClaudeExecutionMessage(payload: unknown): ClaudeExecutionMe
   const p = payload.params === undefined ? {} : payload.params
   if (!object(p)) return reject(-32602, 'Native MCP parameters must be an object')
   if (!Object.hasOwn(payload, 'id')) {
-    if (payload.method !== 'notifications/initialized' && !(payload.method === 'notifications/cancelled' && id(p.requestId))) return reject(-32601, 'Unsupported native MCP notification')
-    return { kind: 'notification', method: payload.method, payload }
+    if (payload.method === 'notifications/initialized') return { kind: 'notification', method: payload.method, payload }
+    if (payload.method === 'notifications/cancelled' && id(p.requestId))
+      return { kind: 'notification', method: payload.method, payload, cancels: p.requestId }
+    return reject(-32601, 'Unsupported native MCP notification')
   }
   if (requestId === undefined) return reject(-32600, 'Invalid native MCP request identity')
   const intent: ClaudeExecutionIntent = { kind: 'control', paths: [] }
@@ -89,6 +92,27 @@ export function parseClaudeExecutionServerMessage(payload: unknown): ClaudeExecu
     return { kind: 'notification', method: payload.method as string, payload }
   }
   return { kind: 'rejected', code: -32600, reason: 'Unsupported native MCP server message', payload }
+}
+
+/** The resource server has no session handles in MCP initialization. A new
+ * stdio connection may stand behind the same client only with the same contract. */
+export function restoreClaudeExecutionConnection(request: unknown, response: unknown) {
+  const initial = parseClaudeExecutionMessage(request)
+  const reply = parseClaudeExecutionServerMessage(response)
+  if (initial.kind !== 'request' || !initial.intent.initialize || reply.kind !== 'response' ||
+      reply.requestId !== initial.requestId || !object(reply.payload.result)) return
+  const result = reply.payload.result
+  if (!text(result.protocolVersion) || !object(result.capabilities) || !object(result.serverInfo) ||
+      !text(result.serverInfo.name) || !text(result.serverInfo.version)) return
+  return {
+    requestId: initial.requestId,
+    request: initial.payload,
+    initialized: { jsonrpc: '2.0', method: 'notifications/initialized' },
+    accepts(candidate: unknown) {
+      const next = parseClaudeExecutionServerMessage(candidate)
+      return next.kind === 'response' && next.requestId === initial.requestId && isDeepStrictEqual(next.payload.result, result)
+    },
+  }
 }
 
 /** Listing is presentation, while parse() independently enforces the same exact tool surface. */

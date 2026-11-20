@@ -1,5 +1,11 @@
 /** Provider interpretation of native protocol facts; none of these fields grants authority. */
 export type AgentExecutionRequestId = string | number
+export function frontendRequestSequence(frame: unknown): number | undefined {
+  if (!frame || typeof frame !== 'object') return
+  const value = frame as { type?: unknown; requestSequence?: unknown }
+  if (value.type === 'request' && typeof value.requestSequence === 'number' && Number.isSafeInteger(value.requestSequence) && value.requestSequence > 0)
+    return value.requestSequence
+}
 export interface AgentExecutionIntent {
   kind: 'read' | 'write' | 'process' | 'control'
   paths: { path: string; access: 'read' | 'write'; sandbox?: unknown }[]
@@ -15,7 +21,7 @@ export interface AgentExecutionIntent {
 }
 export type AgentExecutionMessage =
   | { kind: 'request'; requestId: AgentExecutionRequestId; method: string; params: Record<string, unknown> | null; payload: Record<string, unknown>; intent: AgentExecutionIntent }
-  | { kind: 'notification'; method: string; payload: Record<string, unknown> }
+  | { kind: 'notification'; method: string; payload: Record<string, unknown>; cancels?: AgentExecutionRequestId }
   | { kind: 'response'; requestId: AgentExecutionRequestId; payload: Record<string, unknown> }
   | { kind: 'rejected'; requestId?: AgentExecutionRequestId; code: number; reason: string; payload: unknown }
 
@@ -25,6 +31,13 @@ export interface AgentExecutionProtocol {
   parseServer(input: unknown): AgentExecutionMessage
   /** Native clients with independent execution connections, such as MCP subagents. */
   concurrentConnections?: true
+  /** A fresh native transport can negotiate the same contract for an existing client. */
+  restoreConnection?(request: unknown, response: unknown): {
+    request: Record<string, unknown>
+    requestId: AgentExecutionRequestId
+    accepts(response: unknown): boolean
+    initialized: Record<string, unknown>
+  } | undefined
   /** Provider projection after the original native response is durably recorded. */
   projectResponse?(request: Extract<AgentExecutionMessage, { kind: 'request' }>, response: Record<string, unknown>): Record<string, unknown>
   /** Optional Provider effects under the same resource journal and original generation. */

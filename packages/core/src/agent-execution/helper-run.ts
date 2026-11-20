@@ -29,6 +29,7 @@ export async function runAgentExecutionHelper(
   context: AgentExecutionHelperContext,
   io: AgentExecutionHelperIo,
   protocol: (context: AgentExecutionHelperContext) => import('./protocol.js').AgentExecutionProtocol,
+  options?: { projectConnectionRecovery?: true },
 ): Promise<{ close(): Promise<void> }> {
   // Dedicated ctxmux helper PTY only. The ordinary Agent's terminal is never
   // parsed as a machine channel, and ready cannot precede disabling echo.
@@ -43,7 +44,9 @@ export async function runAgentExecutionHelper(
     diagnosticPending = true
     io.output.write(JSON.stringify({ type: 'diagnostic', scope: 'helper', code: 'NATIVE_EXECUTION_HELPER_OBSERVATION_UNCONFIRMED' }) + '\n', () => { diagnosticPending = false })
   }
-  if (context.role === 'frontend') return await runAgentExecutionFrontend({ input: io.input, output: io.output, onError: diagnostic, ...(context.agentSessionId ? { agentSessionId: context.agentSessionId } : {}) })
+  if (context.role === 'frontend') return await runAgentExecutionFrontend({ input: io.input, output: io.output, onError: diagnostic,
+    ...(options?.projectConnectionRecovery ? { projectConnectionRecovery: true } : {}),
+    ...(context.agentSessionId ? { agentSessionId: context.agentSessionId } : {}) })
 
   const journal = await AgentExecutionJournal.open(context.journalDirectory, context.journalIdentity)
   const stderr = createWriteStream(join(context.journalDirectory, 'native-executor.stderr.log'), { flags: 'a', mode: 0o600 })
@@ -65,7 +68,13 @@ export async function runAgentExecutionHelper(
     },
     onError: diagnostic,
   })
-  await new Promise<void>((resolveReady, reject) => io.output.write(JSON.stringify({ type: 'ready', bindingId: context.bindingId, journalIdentity: journal.identity }) + '\n', error => error ? reject(error) : resolveReady()))
+  const frames: unknown[] = [{ type: 'ready', bindingId: context.bindingId, journalIdentity: journal.identity }]
+  let recoveryCut: unknown
+  try { recoveryCut = JSON.parse(process.env.AGENTMUX_RETIRED_PROJECT_REQUESTS ?? 'null') }
+  catch { diagnostic() }
+  const through = Array.isArray(recoveryCut) && recoveryCut[0] === bindingId ? recoveryCut[1] : undefined
+  if (Number.isSafeInteger(through) && through > 0) frames.push({ type: 'retire-frontend-requests', through })
+  await new Promise<void>((resolveReady, reject) => io.output.write(frames.map(frame => JSON.stringify(frame) + '\n').join(''), error => error ? reject(error) : resolveReady()))
   return { async close() { await executor.dispose(); await journal.close(); await new Promise<void>(resolveClosed => stderr.end(resolveClosed)) } }
 }
 

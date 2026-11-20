@@ -231,10 +231,11 @@ export class AgentExecutionJournal {
     })
   }
   /** Only a durable first transition returns dispatch=true. Never infer it from inspect. */
-  async dispatch(target: AgentExecutionOperationKey, payloadDigest: string): Promise<{ dispatch: boolean; operation: AgentExecutionOperation }> {
+  async dispatch(target: AgentExecutionOperationKey, payloadDigest: string, admitted?: () => boolean): Promise<{ dispatch: boolean; operation: AgentExecutionOperation }> {
     target = freezeKey(target); originalDigest(payloadDigest)
     return this.mutate<{ dispatch: boolean; operation: AgentExecutionOperation }>(() => {
       const previous = this.expected(target, payloadDigest)
+      if (admitted && !admitted()) return { value: { dispatch: false, operation: previous }, changed: false }
       if (previous.phase !== 'prepared') return { value: { dispatch: false, operation: previous }, changed: false }
       this.db.prepare("UPDATE operations SET phase='dispatched',revision=revision+1 WHERE binding_id=? AND stream_generation=? AND request_id=?").run(...key(target))
       return { value: { dispatch: true, operation: this.lookup(target)! }, changed: true }
@@ -250,13 +251,17 @@ export class AgentExecutionJournal {
       return { value: this.lookup(target)!, changed: true }
     })
   }
-  async complete(target: AgentExecutionOperationKey, payloadDigest: string, response: string | Uint8Array): Promise<AgentExecutionOperation> {
+  async complete(target: AgentExecutionOperationKey, payloadDigest: string, response: string | Uint8Array,
+    initialization?: Record<string, unknown>): Promise<AgentExecutionOperation> {
     target = freezeKey(target); originalDigest(payloadDigest)
     // Freeze caller-owned bytes before awaiting the writer, including offset views.
     const body = Buffer.from(bytes(response)), resultDigest = digest(body)
+    const request = initialization && Buffer.from(JSON.stringify(initialization))
+    if (request && digest(request) !== payloadDigest) throw fail('The native initialization has different original request bytes.')
     return this.mutate(() => {
       const previous = this.expected(target, payloadDigest)
       if (previous.phase === 'prepared') throw fail('A native response cannot complete an undispatched request.')
+      if (request) this.storeConnectionInitialization(target, request)
       if (previous.phase === 'completed') {
         if (previous.resultDigest !== resultDigest || previous.resultBytes !== body.byteLength) throw fail('The original native response already contains different bytes.')
         return { value: previous, changed: false }
@@ -276,6 +281,41 @@ export class AgentExecutionJournal {
       throw fail('The original native response bytes are unconfirmed; no replacement was returned.', 'AGENT_EXECUTION_JOURNAL_INVALID')
     }
     return Uint8Array.from(row.result)
+  }
+
+  /** The recovery fact and original response share the same commit. */
+  private storeConnectionInitialization(target: AgentExecutionOperationKey, bytes: Buffer): void {
+    this.db.exec(`CREATE TABLE IF NOT EXISTS connection_initializations (
+      binding_id TEXT NOT NULL, stream_generation TEXT NOT NULL, request_id TEXT NOT NULL, request BLOB NOT NULL,
+      PRIMARY KEY(binding_id, stream_generation)
+    ) WITHOUT ROWID`)
+    const prior = this.db.prepare('SELECT request_id,request FROM connection_initializations WHERE binding_id=? AND stream_generation=?')
+      .get(target.bindingId, target.streamGeneration)
+    if (prior) {
+      if (prior.request_id !== JSON.stringify(target.nativeRequestId) || !(prior.request instanceof Uint8Array) || !bytes.equals(prior.request))
+        throw fail('The native connection has a different original initialization.')
+    } else this.db.prepare('INSERT INTO connection_initializations VALUES (?,?,?,?)').run(...key(target), bytes)
+  }
+
+  private hasConnectionInitializations(): boolean {
+    return !!this.db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='connection_initializations'").get()
+  }
+
+  async retireConnectionInitialization(bindingId: string, streamGeneration: string): Promise<void> {
+    await this.mutate(() => ({ value: undefined, changed: this.hasConnectionInitializations() &&
+      this.db.prepare('DELETE FROM connection_initializations WHERE binding_id=? AND stream_generation=?').run(bindingId, streamGeneration).changes !== 0 }))
+  }
+
+  async readConnectionInitialization(bindingId: string, streamGeneration: string): Promise<{ request: unknown; response: unknown } | null> {
+    await this.tail; this.assertOpen()
+    if (!this.hasConnectionInitializations()) return null
+    const row = this.db.prepare('SELECT request_id,request FROM connection_initializations WHERE binding_id=? AND stream_generation=?').get(bindingId, streamGeneration)
+    if (!row) return null
+    if (typeof row.request_id !== 'string' || !(row.request instanceof Uint8Array))
+      throw fail('The original native initialization is unconfirmed.', 'AGENT_EXECUTION_JOURNAL_INVALID')
+    const response = await this.readResult({ bindingId, streamGeneration, nativeRequestId: JSON.parse(row.request_id) }, digest(row.request))
+    if (!response) throw fail('The original native initialization response is unconfirmed.', 'AGENT_EXECUTION_JOURNAL_INVALID')
+    return { request: JSON.parse(Buffer.from(row.request).toString('utf8')), response: JSON.parse(Buffer.from(response).toString('utf8')) }
   }
   async close(): Promise<void> { await this.tail; if (!this.closed) { this.closed = true; this.db.close() } }
 }

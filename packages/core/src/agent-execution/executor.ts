@@ -4,12 +4,17 @@ import type { Readable, Writable } from 'node:stream'
 import { createExecutionFrameChannel } from './channel.js'
 import { AgentExecutionJournal, type AgentExecutionOperationKey } from './journal.js'
 import type { AgentExecutionIntent, AgentExecutionMessage, AgentExecutionProtocol } from './protocol.js'
+import { nativeConnectionRecovery } from './native-connection-recovery.js'
 
 type Request = Extract<AgentExecutionMessage, { kind: 'request' }>
 type Channel = ReturnType<typeof createExecutionFrameChannel>
-type Pending = { key: AgentExecutionOperationKey; digest: string; request: Request; response?: Uint8Array; nativeDispatch?: true }
+type Pending = { key: AgentExecutionOperationKey; digest: string; request: Request; recoverableConnection?: true; response?: Uint8Array;
+  nativeDispatch?: true; awaitingDispatch?: true; cancelled?: true }
 type Generation = {
   id: string; child: ChildProcessWithoutNullStreams; channel: Channel; alive: boolean; initialized: boolean; initializing: boolean
+  handshake?: ReturnType<typeof nativeConnectionRecovery>
+  recovery?: Promise<boolean>
+  firstRecoveredResult?: true
   pending: Map<string, Pending>; handles: Set<string>; creating: Set<string>; notifications: Set<string>
 }
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -18,8 +23,8 @@ const handleKey = (handle: NonNullable<AgentExecutionIntent['handle']>) => JSON.
 
 /**
  * One resource binding's Provider connections, inside its existing ctxmux helper Run.
- * The Core attaches that original Run; it must not recreate a helper with this
- * binding after native-process loss. No PTY, Run state or replay is owned here.
+ * Core owns the helper Run. This executor owns only its native child transports
+ * and the receipt of each operation at the original resource binding.
  */
 export function createAgentExecutionExecutor(options: {
   bindingId: string
@@ -73,8 +78,20 @@ export function createAgentExecutionExecutor(options: {
   })
   const settle = async (pending: Pending, state?: Generation): Promise<void> => {
     if (!pending.response) return
+    const payload: unknown = JSON.parse(Buffer.from(pending.response).toString('utf8'))
+    const success = object(payload) && Object.hasOwn(payload, 'result')
+    const generation = pending.key.streamGeneration
     try {
-      await options.journal.complete(pending.key, pending.digest, pending.response)
+      const recoverable = success && pending.recoverableConnection && pending.request.intent.initialize && !closed.has(generation) &&
+        options.protocol.restoreConnection?.(pending.request.payload, payload)
+      if (recoverable) {
+        try { await options.journal.complete(pending.key, pending.digest, pending.response, pending.request.payload) }
+        catch {
+          // Commit/reconcile the same response even if optional recovery evidence cannot be saved.
+          await options.journal.complete(pending.key, pending.digest, pending.response)
+          void report(generation, 'NATIVE_CONNECTION_RECOVERY_EVIDENCE_UNCONFIRMED')
+        }
+      } else await options.journal.complete(pending.key, pending.digest, pending.response)
     } catch {
       // The reply ends the current wait. The native response stays associated
       // with the original operation for an exact persistence retry.
@@ -82,30 +99,33 @@ export function createAgentExecutionExecutor(options: {
       return
     }
     if (state) {
-      const payload: unknown = JSON.parse(Buffer.from(pending.response).toString('utf8'))
-      const success = object(payload) && Object.hasOwn(payload, 'result')
       const handle = pending.request.intent.handle
       if (handle?.action === 'create') {
         state.creating.delete(handleKey(handle))
         if (success) state.handles.add(handleKey(handle))
       } else if (handle?.action === 'close' && success) state.handles.delete(handleKey(handle))
-      if (pending.request.intent.initialize) { state.initializing = false; if (success) state.initialized = true }
+      if (pending.request.intent.initialize) {
+        state.initializing = false
+        if (success) state.initialized = true
+      }
     }
-    const generation = pending.key.streamGeneration
     const operations = retained.get(generation)
     operations?.delete(requestKey(pending.key.nativeRequestId))
     if (!operations?.size) retained.delete(generation)
     await replyCommitted(pending.key, pending.response, pending.request)
-    if (state?.initialized && pending.request.intent.initialize)
+    if (success && state?.initialized && (pending.request.intent.initialize || state.firstRecoveredResult)) {
+      delete state.firstRecoveredResult
       await channel.send({ type: 'native-connection-ready', generation: state.id })
+    }
   }
-  const start = (generation: string): Generation => {
+  const start = (generation: string, handshake?: ReturnType<typeof nativeConnectionRecovery>): Generation => {
     const spec = options.protocol.executor
     // stderr is never connected to the helper Run's machine-protocol stdout.
     const child = spawn(spec.command, spec.args, { cwd: spec.cwd, env: { ...process.env, ...spec.env, ...options.control?.environment(generation) }, stdio: ['pipe', 'pipe', 'pipe'] })
     if (options.stderr) child.stderr.pipe(options.stderr, { end: false })
     else child.stderr.resume()
     const state: Generation = { id: generation, child, channel: undefined as unknown as Channel, alive: true, initialized: false, initializing: false,
+      ...(handshake ? { handshake } : {}),
       pending: new Map(), handles: new Set(), creating: new Set(), notifications: new Set() }
     state.channel = createExecutionFrameChannel({ input: child.stdout, output: child.stdin,
       onError: () => { void report(generation, 'NATIVE_PROTOCOL_OBSERVATION_UNCONFIRMED') },
@@ -113,9 +133,11 @@ export function createAgentExecutionExecutor(options: {
         try {
         const message = options.protocol.parseServer(payload)
         if (message.kind === 'notification') {
+          if (state.handshake) return
           await channel.send({ type: 'response', generation, payload: message.payload }); return
         }
         if (message.kind !== 'response') { await report(generation, 'UNEXPECTED_NATIVE_MESSAGE'); return }
+        if (state.handshake?.receive(message.requestId, message.payload)) return
         const pending = state.pending.get(requestKey(message.requestId))
         if (!pending || !pending.nativeDispatch) { await report(generation, 'UNMATCHED_NATIVE_RESPONSE'); return }
         if (pending.response && !Buffer.from(pending.response).equals(rawLine)) {
@@ -128,7 +150,10 @@ export function createAgentExecutionExecutor(options: {
     const ended = () => {
       if (!state.alive) return
       const wasConnected = !closed.has(generation)
-      state.alive = false; closed.add(generation); state.handles.clear(); state.creating.clear(); children.delete(generation)
+      state.handshake?.cancel()
+      state.alive = false
+      if (!state.handshake) closed.add(generation)
+      state.handles.clear(); state.creating.clear(); children.delete(generation)
       void (async () => {
         // Exit can precede the last stdout frames. Let the original reader
         // settle those replies before identifying the operations still missing one.
@@ -155,6 +180,19 @@ export function createAgentExecutionExecutor(options: {
     child.stdin.on('error', () => { void report(generation, 'NATIVE_INPUT_UNCONFIRMED') })
     child.stderr.on('error', () => { void report(generation, 'NATIVE_STDERR_OBSERVATION_UNCONFIRMED') })
     children.set(generation, state)
+    if (handshake) {
+      state.recovery = handshake.negotiate(frame => state.channel.send(frame)).then(accepted => {
+        if (!accepted || !state.alive || closed.has(generation) || disposed) {
+          if (state.alive) state.child.kill('SIGTERM')
+          return false
+        }
+        delete state.handshake
+        delete state.recovery
+        state.initialized = true
+        state.firstRecoveredResult = true
+        return true
+      })
+    }
     return state
   }
   const channel = createExecutionFrameChannel({ input: options.input, output: options.output, onError: options.onError,
@@ -170,6 +208,11 @@ export function createAgentExecutionExecutor(options: {
         // Core reader detach is not this fact and cannot terminate its child.
         if (!closed.has(frame.generation)) {
           closed.add(frame.generation)
+          children.get(frame.generation)?.handshake?.cancel()
+          if (options.protocol.restoreConnection) {
+            try { await options.journal.retireConnectionInitialization(bindingId, frame.generation) }
+            catch { void report(frame.generation, 'NATIVE_CONNECTION_RECOVERY_EVIDENCE_UNCONFIRMED') }
+          }
           await channel.send({ type: 'generation', generation: frame.generation, state: 'detached' })
         }
         return
@@ -182,6 +225,10 @@ export function createAgentExecutionExecutor(options: {
       if (message.kind === 'response') { await report(generation, 'UNEXPECTED_CLIENT_RESPONSE'); return }
       if (message.kind === 'notification') {
         const state = children.get(generation)
+        if (message.cancels !== undefined) {
+          const pending = state?.pending.get(requestKey(message.cancels))
+          if (pending?.awaitingDispatch) { pending.cancelled = true; return }
+        }
         if (!state?.alive || closed.has(generation) || !state.initialized) { await report(generation, 'NATIVE_CONNECTION_NOT_INITIALIZED'); return }
         const hash = createHash('sha256').update(JSON.stringify(message.payload)).digest('hex')
         if (!state.notifications.has(hash)) {
@@ -217,13 +264,20 @@ export function createAgentExecutionExecutor(options: {
           return
         }
       }
-      const current = children.get(generation)
+      let current = children.get(generation)
       if (!current) {
         const anotherConnected = !options.protocol.concurrentConnections && [...children.values()].some(value => value.alive && !closed.has(value.id))
-        if (anotherConnected || closed.has(generation) || !message.intent.initialize || message.intent.resumeSessionId != null) {
+        if (!anotherConnected && !closed.has(generation) && !message.intent.initialize && options.protocol.restoreConnection) {
+          try {
+            const retained = await options.journal.readConnectionInitialization(bindingId, generation)
+            const plan = retained && options.protocol.restoreConnection(retained.request, retained.response)
+            if (plan) current = start(generation, nativeConnectionRecovery(plan))
+          } catch { await report(generation, 'NATIVE_CONNECTION_RECOVERY_EVIDENCE_UNCONFIRMED') }
+        }
+        if (!current && (anotherConnected || closed.has(generation) || !message.intent.initialize || message.intent.resumeSessionId != null)) {
           await reject(generation, message.requestId, -32002, 'The exact original native connection is unavailable for this request'); return
         }
-      } else if (closed.has(generation) || (message.intent.initialize ? current.initialized || current.initializing : !current.initialized)) {
+      } else if (closed.has(generation) || (message.intent.initialize ? current.initialized || current.initializing || current.recovery : !current.initialized && !current.recovery)) {
         await reject(generation, message.requestId, -32002, 'The original native connection has not accepted this initialization state'); return
       }
       const handle = message.intent.handle
@@ -234,15 +288,42 @@ export function createAgentExecutionExecutor(options: {
       try { prepared = await options.journal.prepare(key, bytes) }
       catch { await outcomeUnconfirmed(key, 'ORIGINAL_REQUEST_STORAGE_UNCONFIRMED'); return }
       const state = current ?? start(generation)
-      let dispatch
-      try { dispatch = await options.journal.dispatch(key, prepared.payloadDigest) }
-      catch { await outcomeUnconfirmed(key, 'ORIGINAL_DISPATCH_STORAGE_UNCONFIRMED'); return }
-      if (!dispatch.dispatch) { await outcomeUnconfirmed(key, 'ORIGINAL_OPERATION_OUTCOME_UNKNOWN'); return }
-      const pending: Pending = { key, digest: prepared.payloadDigest, request: message }
+      if (state.pending.has(requestKey(message.requestId))) return
+      const recovery = state.recovery
+      const dispatch = async (admitted?: () => boolean) => {
+        try {
+          if ((await options.journal.dispatch(key, prepared.payloadDigest, admitted)).dispatch) return true
+          if (admitted && !admitted()) {
+            if (!disposed && !closed.has(generation)) await reject(generation, message.requestId, -32002, 'The original tool request was cancelled before dispatch')
+            return false
+          }
+          await outcomeUnconfirmed(key, 'ORIGINAL_OPERATION_OUTCOME_UNKNOWN')
+        } catch { await outcomeUnconfirmed(key, 'ORIGINAL_DISPATCH_STORAGE_UNCONFIRMED') }
+        return false
+      }
+      if (!recovery && !await dispatch()) return
+      const pending: Pending = { key, digest: prepared.payloadDigest, request: message,
+        ...(frame.recoverableConnection === true && message.intent.initialize ? { recoverableConnection: true } : {}),
+        ...(recovery ? { awaitingDispatch: true } : {}) }
       state.pending.set(requestKey(message.requestId), pending); retained.set(generation, state.pending)
       if (message.intent.initialize) state.initializing = true
       if (handle?.action === 'create') state.creating.add(handleKey(handle))
       const deliver = async () => {
+        if (recovery) {
+          const ready = await recovery && state.alive && !closed.has(generation) && !disposed
+          const admit = () => {
+            if (!state.alive || closed.has(generation) || disposed || pending.cancelled) return false
+            delete pending.awaitingDispatch
+            return true
+          }
+          if (!ready || !await dispatch(admit)) {
+            state.pending.delete(requestKey(message.requestId))
+            if (!state.pending.size && retained.get(generation) === state.pending) retained.delete(generation)
+            if (!ready && !disposed) await reject(generation, message.requestId, -32002,
+              'The original native connection could not be recovered; this tool request was not dispatched')
+            return
+          }
+        }
         try {
           const response = await options.protocol.execute?.(message, generation, { ...options.protocol.executor.env, ...options.control?.environment(generation) })
           if (response !== undefined) {
@@ -271,6 +352,7 @@ export function createAgentExecutionExecutor(options: {
     closeObservation() { channel.close() },
     async dispose() {
       disposed = true; channel.close()
+      for (const state of children.values()) state.handshake?.cancel()
       await options.protocol.dispose?.()
       await Promise.all([...executions])
       await options.control?.close()

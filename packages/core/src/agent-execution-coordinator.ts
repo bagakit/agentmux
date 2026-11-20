@@ -19,7 +19,8 @@ import { parseAgentExecutionNotices, type AgentExecutionNotice } from './agent-e
 import { prepareProjectExecutorSuccessor, projectRecoveryError, readFrontendRecoveryCut, type ProjectExecutionRecovery } from './agent-execution/project-recovery.js'
 
 export type AgentExecutionHostPort = AgentExecutionBridgePort & Pick<AgentMuxClient,
-  'prepareAgentExecutionHelper' | 'inspectPreparedTerminal' | 'createPreparedTerminal' | 'createHostAgentWithDelivery' | 'cancelAgentCreation' | 'inspectAgentCreationCancellation' | 'listHostExecutors' | 'readAgentSession'>
+  'prepareAgentExecutionHelper' | 'inspectPreparedTerminal' | 'createPreparedTerminal' | 'createHostAgentWithDelivery' | 'cancelAgentCreation' | 'inspectAgentCreationCancellation' | 'listHostExecutors' | 'readAgentSession'> &
+  Partial<Pick<AgentMuxClient, 'runtimeSubject'>>
 export interface AgentExecutionOpenInput {
   bindingId: string
   agentHostId: string
@@ -110,6 +111,9 @@ function executionFailure(error: unknown, input: AgentExecutionOpenInput, step: 
 
 export interface AgentExecutionCoordinatorOptions {
   localProjectExecutor?(input: AgentExecutionOpenInput): Promise<import('./agent-execution-helper.js').AgentExecutionHelperPreparation>
+  startLocalProjectExecutor?(prepared: import('./prepared-run.js').PreparedRun, expectedInstanceId: string): Promise<import('./types.js').AgentMuxRun>
+  reconcileLocalProjectExecutor?(prepared: import('./prepared-run.js').PreparedRun, expectedInstanceId: string):
+    Promise<NonNullable<ProjectExecutionRecovery['previousAttemptSettled']>>
   resolveHost(hostId: string, adoptedRoute?: AdoptedHostRoute, access?: HostRouteExecutionAccess): Promise<{ runtimeId: string; client: AgentExecutionHostPort; adoptedRoute?: AdoptedHostRoute; dispose?(): Promise<void> }>
   authorize?(input: AgentExecutionOpenInput, context: AgentMuxRpcCallContext | undefined, retained: HostRouteExecutionAuthorization | undefined, existing: boolean): Promise<HostRouteExecutionAuthorization | undefined>
   onObservation?(value: AgentExecutionInspection): void
@@ -359,7 +363,7 @@ export class AgentExecutionCoordinator {
   private hasConnectedBridge(bindingId: string): boolean {
     return this.bridges.has(bindingId) && !this.connectionDiagnostic(bindingId)
   }
-  private async rejoinOriginal(bindingId: string, context: AgentMuxRpcCallContext | undefined, attempt: number, recoverProject = false): Promise<AgentExecutionInspection> {
+  private async rejoinOriginal(bindingId: string, context: AgentMuxRpcCallContext | undefined, attempt: number, recoverProject = false, automatic = false): Promise<AgentExecutionInspection> {
     const record = this.read(bindingId)
     if (!record?.bridge) throw fail('The original execution bridge has no confirmed helper pair.', 'EXECUTION_HELPER_UNAVAILABLE')
     await this.options.authorize?.(record.input, context, record.routeAuthorization, true)
@@ -370,7 +374,13 @@ export class AgentExecutionCoordinator {
       try {
         if (recoverProject && hosts.resource.runtimeIdentity().instanceId !== record.bridge.executor.ownerInstanceId) {
           attemptingProjectRecovery = true
-          await this.recoverProjectExecutor(bindingId, hosts, context)
+          if (automatic) await this.confirmActiveRecoverySession(record, hosts)
+          try { await this.recoverProjectExecutor(bindingId, hosts, context) }
+          catch (error) {
+            if (error instanceof AgentMuxError && ['EXECUTION_RUNTIME_CHANGED', 'TERMINAL_INITIAL_RUNTIME_CHANGED'].includes(error.code))
+              throw executionFailure(error, record.input, { hostId: record.input.resourceHostId, role: 'executor', stage: 'start' })
+            throw error
+          }
           attemptingProjectRecovery = false
         }
         // Hosted can independently restore its attachment while the route is opening.
@@ -384,9 +394,20 @@ export class AgentExecutionCoordinator {
     }
   }
 
+  private async confirmActiveRecoverySession(record: RecordValue, hosts: ResolvedHosts): Promise<void> {
+    const input = record.input
+    const subject = await hosts.agent.runtimeSubject?.({ kind: 'agent-session', agentSessionId: input.agent.agentSessionId })
+    if (subject?.kind !== 'agent' || subject.run.state !== 'running' ||
+        subject.agentSession.agentSessionId !== input.agent.agentSessionId || subject.run.runId !== subject.agentSession.run.runId ||
+        subject.agentSession.toolExecution?.bindingId !== input.bindingId ||
+        subject.agentSession.toolExecution.resourceRuntimeId !== input.resourceRuntimeId ||
+        subject.agentSession.toolExecution.workspacePath !== input.resourceWorkspacePath)
+      throw projectRecoveryError('Automatic recovery could not confirm the running Agent on its original project binding.')
+  }
+
   private async recoverProjectExecutor(bindingId: string, hosts: ResolvedHosts, context: AgentMuxRpcCallContext | undefined): Promise<void> {
     const before = this.read(bindingId)!
-    if (!this.options.localProjectExecutor || before.input.resourceHostId !== 'local' || before.input.resourceRoute)
+    if (!this.options.localProjectExecutor || !this.options.startLocalProjectExecutor || before.input.resourceHostId !== 'local' || before.input.resourceRoute)
       throw projectRecoveryError('This recovery must be performed by the original project Runtime.')
     const previousBridge = before.bridge!
     const preparation = await this.options.localProjectExecutor(before.input)
@@ -396,39 +417,54 @@ export class AgentExecutionCoordinator {
     if (current.instanceId === previousBridge.executor.ownerInstanceId)
       throw projectRecoveryError('The original project helper instance returned during recovery. Rejoin its retained connection.')
     const previous = before.projectRecoveries?.at(-1)
-    const pending = previous?.original.executor.runId === previousBridge.executor.runId ? previous : undefined
-    const installed = before.projectRecoveries?.at(pending ? -2 : -1)
+    let pending = previous?.original.executor.runId === previousBridge.executor.runId && !previous.previousAttemptSettled ? previous : undefined
+    const installed = before.projectRecoveries?.find(value => value.operationId === previousBridge.projectRecoveryId)
     const oldPrepared = installed ? prepareProjectExecutorSuccessor(bindingId, preparation.prepared,
-      installed.original.executor.runId, installed.ownerInstanceId) : preparation.prepared
+      installed.original.executor.runId, installed.ownerInstanceId, installed.frontend.requestSequence) : preparation.prepared
     const oldRun = await hosts.resource.inspectPreparedTerminal(oldPrepared, { runId: previousBridge.executor.runId })
     if (oldRun && oldRun.state !== 'exited' && oldRun.state !== 'interrupted')
       throw projectRecoveryError('The original project helper still has a nonterminal Run.')
     await this.closeBridge(bindingId)
     const record = this.read(bindingId)!
     const original = record.bridge!
-    const successor = prepareProjectExecutorSuccessor(bindingId, preparation.prepared, original.executor.runId, current.instanceId)
+    if (pending && pending.ownerInstanceId !== current.instanceId) {
+      if (!this.options.reconcileLocalProjectExecutor) throw projectRecoveryError('The original replacement Start must be reconciled before selecting another project helper.')
+      const abandoned = prepareProjectExecutorSuccessor(bindingId, preparation.prepared, pending.original.executor.runId,
+        pending.ownerInstanceId, pending.frontend.requestSequence)
+      const disposition = await this.options.reconcileLocalProjectExecutor(abandoned, pending.ownerInstanceId)
+      record.projectRecoveries!.at(-1)!.previousAttemptSettled = disposition
+      this.save(record)
+      pending = undefined
+    }
+    const cut = await readFrontendRecoveryCut(hosts.agent, original)
+    const successor = prepareProjectExecutorSuccessor(bindingId, preparation.prepared, original.executor.runId, current.instanceId,
+      (pending?.frontend ?? cut).requestSequence)
     if (pending && (pending.ownerInstanceId !== current.instanceId || pending.operationId !== successor.createOperationId || pending.journalIdentity !== preparation.journalIdentity))
       throw projectRecoveryError('The original replacement Start must be reconciled before selecting another project helper.')
-    const cut = await readFrontendRecoveryCut(hosts.agent, original)
     const recovery = pending ?? { original, frontend: cut, ownerInstanceId: current.instanceId, operationId: successor.createOperationId, journalIdentity: preparation.journalIdentity }
     if (!pending) { record.projectRecoveries = [...(record.projectRecoveries ?? []), recovery]; this.save(record) }
     context?.signal?.throwIfAborted(); await context?.assertCurrent?.()
     this.assertNotCancelled(bindingId)
     if (hosts.resource.runtimeIdentity().instanceId !== recovery.ownerInstanceId)
-      throw projectRecoveryError('The project Runtime changed before the original replacement Start.')
-    const run = await hosts.resource.inspectPreparedTerminal(successor) ?? await hosts.resource.createPreparedTerminal(successor)
+      throw fail('The project Runtime changed before the original replacement Start.', 'EXECUTION_RUNTIME_CHANGED')
+    const run = await hosts.resource.inspectPreparedTerminal(successor) ?? await this.options.startLocalProjectExecutor(successor, recovery.ownerInstanceId)
     if (run.state !== 'running' || hosts.resource.runtimeIdentity().instanceId !== recovery.ownerInstanceId)
-      throw projectRecoveryError('The original replacement project helper is not confirmed running.')
+      throw fail('The original replacement project helper is not confirmed running.',
+        hosts.resource.runtimeIdentity().instanceId !== recovery.ownerInstanceId ? 'EXECUTION_RUNTIME_CHANGED' : 'EXECUTION_PROJECT_RECOVERY_UNCONFIRMED')
     record.executor = { runId: run.runId, ownerInstanceId: recovery.ownerInstanceId, inputByte: 0, outputByte: 0 }
-    record.bridge = { bindingId, frontend: recovery.frontend, executor: record.executor, projectRecoveryId: recovery.operationId }
+    record.bridge = { bindingId, frontend: recovery.frontend, executor: record.executor, projectRecoveryId: recovery.operationId,
+      ...(recovery.frontend.requestSequence === undefined ? {} : { retireFrontendThrough: recovery.frontend.requestSequence }) }
+    if (record.agentControl?.state === 'available') record.agentControl = { generation: record.agentControl.generation, state: 'unverified' }
     this.save(record)
   }
   private clearReaderRecovery(bindingId: string): void {
     clearTimeout(this.readerRecovery.get(bindingId))
     this.readerRecovery.delete(bindingId)
   }
-  private scheduleReaderRecovery(bindingId: string, code: string, attempt = 0): void {
-    if (this.disposed || this.readerRecovery.has(bindingId) || !readerTransportFailures.has(code)) return
+  private scheduleReaderRecovery(bindingId: string, code: string, attempt = 0, side?: AgentExecutionBridgeSide): void {
+    const record = (code === 'EXECUTION_RUNTIME_CHANGED' || code === 'TERMINAL_INITIAL_RUNTIME_CHANGED') && side === 'executor' ? this.read(bindingId) : undefined
+    const project = !!(record?.bridge && this.options.localProjectExecutor && this.options.startLocalProjectExecutor && record.input.resourceHostId === 'local' && !record.input.resourceRoute)
+    if (this.disposed || this.readerRecovery.has(bindingId) || (!project && !readerTransportFailures.has(code))) return
     // The binding owns reader lifetime. No polling is needed after attachment,
     // and RPC transports still make single attempts on behalf of this reader.
     const window = Math.min(250 * 2 ** attempt, 30_000)
@@ -436,9 +472,10 @@ export class AgentExecutionCoordinator {
       void this.serialize(bindingId, async () => {
         if (this.readerRecovery.get(bindingId) !== timer) return
         this.readerRecovery.delete(bindingId)
-        try { await this.rejoinOriginal(bindingId, undefined, attempt + 1) }
+        try { await this.rejoinOriginal(bindingId, undefined, attempt + 1, project, project) }
         catch (error) {
-          if (error instanceof AgentMuxError && error.executionFailure) this.scheduleReaderRecovery(bindingId, error.code, attempt + 1)
+          if (error instanceof AgentMuxError && error.executionFailure)
+            this.scheduleReaderRecovery(bindingId, error.code, attempt + 1, error.executionFailure.role === 'executor' ? 'executor' : undefined)
         }
       }).catch(() => { /* This owner may have closed while the lane was queued. */ })
     }, Math.floor(window * (0.5 + Math.random() * 0.5)))
@@ -448,7 +485,8 @@ export class AgentExecutionCoordinator {
   private observeFailure(input: AgentExecutionOpenInput, error: unknown, side?: AgentExecutionBridgeSide): void {
     const frame = error instanceof ExecutionProtocolFrameError ? error : error instanceof Error && error.cause instanceof ExecutionProtocolFrameError ? error.cause : undefined
     const canRecoverProject = error instanceof AgentMuxError && error.code === 'EXECUTION_RUNTIME_CHANGED' &&
-      (side === 'executor' || error.executionFailure?.role === 'executor') && input.resourceHostId === 'local' && !input.resourceRoute && this.options.localProjectExecutor
+      (side === 'executor' || error.executionFailure?.role === 'executor') && input.resourceHostId === 'local' && !input.resourceRoute &&
+      this.options.localProjectExecutor && this.options.startLocalProjectExecutor
     this.observe(input, { code: error instanceof AgentMuxError ? error.code : 'EXECUTION_OBSERVATION_UNCONFIRMED',
       message: error instanceof Error ? error.message : String(error),
       ...(canRecoverProject ? { nextAction: 'recover-project' } : {}),
@@ -495,10 +533,10 @@ export class AgentExecutionCoordinator {
     Object.assign(record, latest)
     this.helperConnections.set(id, new Map())
     let attachedAt: number | undefined
-    const recoverReader = (code: string) => {
+    const recoverReader = (code: string, side?: AgentExecutionBridgeSide) => {
       if (attachedAt === undefined) return
       const stable = performance.now() - attachedAt >= 30_000
-      this.scheduleReaderRecovery(id, code, stable ? 0 : attempt)
+      this.scheduleReaderRecovery(id, code, stable ? 0 : attempt, side)
     }
     const bridge = new AgentExecutionBridge({ state: record.bridge!, ports: { frontend: hosts.agent, executor: hosts.resource },
       persist: async state => {
@@ -568,13 +606,13 @@ export class AgentExecutionCoordinator {
         // fact. Retain their revision without rereading the durable creation intent.
         if (!isDeepStrictEqual(before, after)) this.observe(record.input)
         if (connection.process === 'running' && connection.reader === 'unavailable' && connection.readerDiagnostic)
-          recoverReader(connection.readerDiagnostic.code)
+          recoverReader(connection.readerDiagnostic.code, side)
         // The Hosted attachment may independently recover before the binding retry.
         if (before && !after) this.clearReaderRecovery(id)
       },
       onError: error => {
         this.observeFailure(record.input, error, bridge.failureSide)
-        if (bridge.failureSide && error instanceof AgentMuxError) recoverReader(error.code)
+        if (bridge.failureSide && error instanceof AgentMuxError) recoverReader(error.code, bridge.failureSide)
       } })
     this.bridges.set(id, { bridge, dispose: hosts.dispose }); hosts.adopted = true
     try { await bridge.start() }
@@ -785,7 +823,8 @@ export class AgentExecutionCoordinator {
     await Promise.all(ids.map(async id => {
       try { await this.rejoin(id) }
       catch (error) {
-        if (error instanceof AgentMuxError && error.executionFailure) this.scheduleReaderRecovery(id, error.code)
+        if (error instanceof AgentMuxError && error.executionFailure)
+          this.scheduleReaderRecovery(id, error.code, 0, error.executionFailure.role === 'executor' ? 'executor' : undefined)
       }
     }))
   }

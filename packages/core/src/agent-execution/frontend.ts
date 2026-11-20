@@ -7,6 +7,7 @@ import { createExecutionFrameChannel } from './channel.js'
 
 const DEFAULT_FRAME_BYTES = 32 * 1024 * 1024
 type NativeId = string | number
+type PendingRequest = { bytes: number; sequence?: number }
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value)
 const nativeId = (value: unknown): value is NativeId => typeof value === 'string' || (typeof value === 'number' && Number.isSafeInteger(value))
 
@@ -16,6 +17,7 @@ export interface AgentExecutionFrontendOptions {
   onError: (error: Error) => void
   maxFrameBytes?: number
   agentSessionId?: string
+  projectConnectionRecovery?: true
   /** Maximum unresolved native requests per original socket. */
   maxPendingRequests?: number
 }
@@ -58,7 +60,8 @@ export async function runAgentExecutionFrontend(options: AgentExecutionFrontendO
   // ws enforces its native 1009 frame-size boundary before JSON decoding. That
   // protocol failure affects this socket only, not other sockets or the Run.
   const server = new WebSocketServer({ noServer: true, maxPayload: maxFrameBytes, perMessageDeflate: false })
-  const connections = new Map<string, { socket: WebSocket; pending: Map<NativeId, number>; pendingBytes: number; initializations: Set<NativeId>; controlStarted: boolean; claim: AgentExecutionRelayContext | undefined; registrationFailure: string | undefined }>()
+  const connections = new Map<string, { socket: WebSocket; pending: Map<NativeId, PendingRequest>; pendingBytes: number; initializations: Set<NativeId>; controlStarted: boolean; claim: AgentExecutionRelayContext | undefined; registrationFailure: string | undefined }>()
+  let requestSequence = 0
   let closing = false
   const sendNative = async (socket: WebSocket, payload: unknown): Promise<void> => {
     if (socket.readyState !== WebSocket.OPEN) return
@@ -73,6 +76,20 @@ export async function runAgentExecutionFrontend(options: AgentExecutionFrontendO
     onError: report,
     onFrame: async frame => {
       try { if (await relay?.receive(frame)) return } catch { report(new Error('Agent control frame was refused')); return }
+      if (object(frame) && frame.type === 'retire-frontend-requests' && typeof frame.through === 'number' &&
+          Number.isSafeInteger(frame.through) && frame.through > 0 && frame.through <= requestSequence) {
+        for (const connection of connections.values()) for (const [id, pending] of connection.pending) {
+          if (pending.sequence === undefined || pending.sequence > frame.through) continue
+          try {
+            await sendNative(connection.socket, { jsonrpc: '2.0', id, error: { code: -32603,
+              message: 'Project tools reconnected. The previous tool outcome is unconfirmed; inspect its original operation before repeating it.' } })
+            connection.pendingBytes -= pending.bytes
+            connection.pending.delete(id)
+            connection.initializations.delete(id)
+          } catch (error) { report(error) }
+        }
+        return
+      }
       if (!object(frame) || frame.type !== 'response' || typeof frame.generation !== 'string' || !object(frame.payload)) {
         report(new Error('Invalid native frontend response frame'))
         return
@@ -90,7 +107,7 @@ export async function runAgentExecutionFrontend(options: AgentExecutionFrontendO
         }
         await sendNative(connection.socket, payload)
         if (response && nativeId(payload.id)) {
-          connection.pendingBytes -= connection.pending.get(payload.id) ?? 0
+          connection.pendingBytes -= connection.pending.get(payload.id)?.bytes ?? 0
           connection.pending.delete(payload.id)
         }
       } catch (error) { report(error) }
@@ -118,7 +135,7 @@ export async function runAgentExecutionFrontend(options: AgentExecutionFrontendO
   server.on('connection', socket => {
     const claim = claims.get(socket)
     const generation = claim?.generation ?? randomUUID()
-    const connection = { socket, pending: new Map<NativeId, number>(), pendingBytes: 0, initializations: new Set<NativeId>(), controlStarted: false, claim, registrationFailure: registrationFailures.get(socket) }
+    const connection = { socket, pending: new Map<NativeId, PendingRequest>(), pendingBytes: 0, initializations: new Set<NativeId>(), controlStarted: false, claim, registrationFailure: registrationFailures.get(socket) }
     connections.set(generation, connection)
     const stream = createWebSocketStream(socket, { readableObjectMode: true, readableHighWaterMark: 1 })
     stream.on('error', report)
@@ -131,6 +148,9 @@ export async function runAgentExecutionFrontend(options: AgentExecutionFrontendO
       // ws pauses its socket when the stream cannot accept more messages. Await
       // the machine pipe and socket callbacks rather than accumulating payloads.
       for await (const bytes of stream) {
+        // Buffered messages from a closed connection must never follow its
+        // retirement frame, including while Core is choosing a new executor.
+        if (connections.get(generation) !== connection || socket.readyState !== WebSocket.OPEN) break
         let payload: unknown
         try { payload = JSON.parse(String(bytes)) } catch {
           report(new Error('Invalid native JSON; no request ID is available'))
@@ -141,7 +161,9 @@ export async function runAgentExecutionFrontend(options: AgentExecutionFrontendO
           continue
         }
         const request = typeof payload.method === 'string' && Object.hasOwn(payload, 'id')
-        const frame = { type: 'request', generation, payload }
+        const sequence = request && options.projectConnectionRecovery ? ++requestSequence : undefined
+        const frame = { type: 'request', generation, payload, ...(sequence === undefined ? {} : { requestSequence: sequence }),
+          ...(options.projectConnectionRecovery && payload.method === 'initialize' ? { recoverableConnection: true } : {}) }
         // The machine envelope adds bytes to the native WS payload. Reject a
         // known, not-yet-enqueued request locally rather than leaving it pending
         // after the channel's frame-size check rejects that larger envelope.
@@ -166,7 +188,7 @@ export async function runAgentExecutionFrontend(options: AgentExecutionFrontendO
             await sendNative(socket, { id: payload.id, error: { code: -32001, message: 'Native execution request capacity reached; request was not forwarded' } })
             continue
           }
-          connection.pending.set(payload.id, idBytes)
+          connection.pending.set(payload.id, { bytes: idBytes, ...(sequence === undefined ? {} : { sequence }) })
           if (payload.method === 'initialize') connection.initializations.add(payload.id)
           connection.pendingBytes += idBytes
         }

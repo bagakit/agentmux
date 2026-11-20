@@ -5344,6 +5344,30 @@ export class AgentMuxClient {
     return await this.withExecutionDirectoryAdmission(prepared.workspacePath, () => this.terminalRecoveryOwner().createInitial(prepared))
   }
 
+  /** In-process Core only. The frozen project instance is checked at Native Start. */
+  async startPreparedProjectExecutor(input: AgentMuxPreparedTerminal, expectedInstanceId: string): Promise<AgentMuxRun> {
+    const prepared = parsePreparedTerminal(input)
+    return await this.withExecutionDirectoryAdmission(prepared.workspacePath,
+      () => this.terminalRecoveryOwner().createInitial(prepared, expectedInstanceId))
+  }
+
+  async reconcilePreparedProjectExecutor(input: AgentMuxPreparedTerminal,
+    expectedInstanceId: string): Promise<'not-admitted' | 'retired' | 'terminal'> {
+    const prepared = parsePreparedTerminal(input), owner = this.terminalRecoveryOwner()
+    const current = this.terminalCreationRuntimeIdentity()
+    if (current.instanceId === expectedInstanceId) throw new AgentMuxError('The original project Start instance still serves this Runtime.', 'EXECUTION_PROJECT_RECOVERY_UNCONFIRMED')
+    const fact = await owner.inspectInitial(prepared.createOperationId, current.runtimeId)
+    if (!fact.known) return 'not-admitted' // The exact admission marker always precedes Native Start.
+    if (!fact.admission) throw new AgentMuxError('The original project Start admission is unconfirmed.', 'EXECUTION_PROJECT_RECOVERY_UNCONFIRMED')
+    const original = fact.admission.runtime
+    if (original.instanceId !== expectedInstanceId || fact.admission.workspacePath !== prepared.workspacePath)
+      throw new AgentMuxError('The retained project Start has another original target.', 'EXECUTION_PROJECT_RECOVERY_UNCONFIRMED')
+    const retired = await owner.retireInitialPrepared(prepared, original)
+    if (retired.outcome === 'retired') return 'retired'
+    if (retired.run.state === 'exited' || retired.run.state === 'interrupted') return 'terminal'
+    throw new AgentMuxError('The original project Start still has a retained nonterminal Run.', 'EXECUTION_PROJECT_RECOVERY_UNCONFIRMED')
+  }
+
   async retireTerminalCreation(value: import('./terminal-creation.js').TerminalCreationRetire): Promise<TerminalCreationInspection> {
     const input=parseTerminalCreationRetire(value)
     if(input.hostId!=='local') throw new AgentMuxError('Use the original Terminal execution Host.','INVALID_CONTROL_REQUEST')

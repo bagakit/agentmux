@@ -3,7 +3,7 @@ import { createClaudeExecutionOperations } from './claude-execution-operations.j
 import { pathToFileURL } from 'node:url'
 import type { AgentExecutionHelperContext } from '../agent-execution-helper.js'
 import { runAgentExecutionHelper, runAgentExecutionHelperCli, type AgentExecutionHelperIo } from '../agent-execution/helper-run.js'
-import { parseClaudeExecutionMessage, parseClaudeExecutionServerMessage, projectClaudeExecutionResponse, buildClaudeNativeExecutorLaunchSpec } from '@agentmux/providers/claude/execution-protocol'
+import { parseClaudeExecutionMessage, parseClaudeExecutionServerMessage, projectClaudeExecutionResponse, buildClaudeNativeExecutorLaunchSpec, restoreClaudeExecutionConnection } from '@agentmux/providers/claude/execution-protocol'
 
 export function parseClaudeExecutionRunArguments(args: readonly string[]): AgentExecutionHelperContext {
   if (args.length !== 2 || args[0] !== '--agentmux-execution-helper') throw new Error('Claude execution requires the original packaged helper arguments')
@@ -22,12 +22,13 @@ export function runClaudeExecutionHelper(context: AgentExecutionHelperContext, i
   return runAgentExecutionHelper(context, io, value => ({
     parse: parseClaudeExecutionMessage, parseServer: parseClaudeExecutionServerMessage,
     projectResponse: projectClaudeExecutionResponse,
+    restoreConnection: restoreClaudeExecutionConnection,
     concurrentConnections: true,
     ...createClaudeExecutionOperations({ workspacePath: value.workspacePath, outputDirectory: join(value.journalDirectory, 'shell-output'), ...(value.agentSessionId ? { agentSessionId: value.agentSessionId } : {}) }),
     executor: (() => { const spec = buildClaudeNativeExecutorLaunchSpec({ executable: value.executable, cwd: value.workspacePath }); return {
       command: spec.program, args: spec.args, cwd: spec.cwd, env: { AGENTMUX_TOOL_CONTEXT: 'unconfigured', AGENTMUX_AGENT_SESSION_ID: value.agentSessionId, AGENTMUX_AGENT_CAPABILITY: undefined }
     } })(),
-  }))
+  }), { projectConnectionRecovery: true })
 }
 
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {

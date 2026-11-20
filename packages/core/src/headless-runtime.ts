@@ -238,13 +238,16 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
           runtimeIdentity: original.runtimeIdentity.bind(original), readRunReplay: original.readRunReplay.bind(original), writeTerminal: original.writeTerminal.bind(original),
           prepareAgentExecutionHelper: original.prepareAgentExecutionHelper.bind(original), inspectPreparedTerminal: original.inspectPreparedTerminal.bind(original),
           createPreparedTerminal: original.createPreparedTerminal.bind(original), createHostAgentWithDelivery: original.createHostAgentWithDelivery.bind(original), cancelAgentCreation: original.cancelAgentCreation.bind(original), inspectAgentCreationCancellation: original.inspectAgentCreationCancellation.bind(original),
-          listHostExecutors: original.listHostExecutors.bind(original), readAgentSession: original.readAgentSession.bind(original)
+          listHostExecutors: original.listHostExecutors.bind(original), readAgentSession: original.readAgentSession.bind(original),
+          ...(original.runtimeSubject ? { runtimeSubject: original.runtimeSubject.bind(original) } : {}),
         }
         return { runtimeId: identity.runtimeId, client: original, executionPort: scoped }
     }
     executionBindings = options.service?.executionBindings ? undefined : new AgentExecutionBindingService(join(stateDirectory, 'execution-bindings'), {
       authorize: (input, context, retained, existing) => (options.service?.hostRoutes ?? hostRoutes!).retainExecution(input, context, retained, existing),
       localProjectExecutor: input => client!.readProjectExecutionHelperPreparation(input.bindingId, input.resourceWorkspacePath, input.agent.agentSessionId),
+      startLocalProjectExecutor: (prepared, expectedInstanceId) => client!.startPreparedProjectExecutor(prepared, expectedInstanceId),
+      reconcileLocalProjectExecutor: (prepared, expectedInstanceId) => client!.reconcilePreparedProjectExecutor(prepared, expectedInstanceId),
       resolveHost: async (hostId, route, access) => { const host = await executionHost(hostId, route, access); return { runtimeId: host.runtimeId, client: host.executionPort,
         ...(host.adoptedRoute ? { adoptedRoute: host.adoptedRoute } : {}), ...(host.dispose ? { dispose: host.dispose } : {}) } }
     }, options.service?.spatialState ? { spatial: options.service.spatialState, runtimeId: () => runtimeId } : undefined)
