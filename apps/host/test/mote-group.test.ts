@@ -17,6 +17,7 @@ import { registerKnowledgeTopic } from '../src/topic-spatial-owner.js'
 import { topicContentZoneId } from '../src/topic-categories.js'
 import { createHostMoteGroups, type HostMoteGroupFiles } from '../src/mote-group.js'
 import type { MoteChatResourcePort } from '../src/mote-resources.js'
+import type { MoteMainReader } from '@agentmux/core/mote-dialogue'
 
 const closes: (() => void | Promise<void>)[] = []
 afterEach(async () => {
@@ -30,7 +31,7 @@ function cliError(result: { stdout: string; stderr: string }) {
   return JSON.parse(failure!).error
 }
 
-async function fixture(retainedRoot?: string) {
+async function fixture(retainedRoot?: string, initialSessions: string[] = []) {
   const originalCore = retainedRoot ? {
     AgentMuxClient: class extends core.AgentMuxClient {
       constructor(options: ConstructorParameters<typeof core.AgentMuxClient>[0]) {
@@ -42,7 +43,7 @@ async function fixture(retainedRoot?: string) {
       constructor(_path: string) { super(join(retainedRoot, 'sessions.json')) }
     }
   } : core
-  const f = await rpcOwnerFixture([], originalCore)
+  const f = await rpcOwnerFixture(initialSessions, originalCore)
   const workspacePath = retainedRoot ?? f.root
   closes.push(f.close)
   let blockSecond = true
@@ -92,8 +93,9 @@ async function fixture(retainedRoot?: string) {
     }
   } })
   const dbPath = join(workspacePath, 'groups.sqlite'), socketPath = join(f.root, 'group.sock')
-  const start = async (files?: HostMoteGroupFiles) => {
-    const port = createHostMoteGroups({ store: new MoteGroupStore(dbPath), agents, client: () => f.client, ...(files ? { files } : {}) })
+  const start = async (files?: HostMoteGroupFiles, main?: MoteMainReader) => {
+    const port = createHostMoteGroups({ store: new MoteGroupStore(dbPath), agents, client: () => f.client,
+      ...(files ? { files } : {}), ...(main ? { main } : {}) })
     const server = new core.AgentMuxControlServer({ socketPath, coreClients: f.coreClients, moteGroups: port })
     await server.start()
     closes.push(() => server.stop())
@@ -106,6 +108,73 @@ async function fixture(retainedRoot?: string) {
       objectCliEnvironment(f.root, agentSessionId ? { AGENTMUX_AGENT_SESSION_ID: agentSessionId, AGENTMUX_AGENT_CAPABILITY: f.capability } : {}), JSON.stringify(body))
   return { ...f, start, target, created, send, cli, preparedTargets, holdNative: (barrier: Promise<void>) => { nativeBarrier = barrier }, unblockSecond: () => { blockSecond = false } }
 }
+
+it('allows the authenticated Mote Main to create a Group and publish to exact recipients through CLI', async () => {
+  const f = await fixture(undefined, ['main-a', 'main-b', 'rotated-a', 'standalone'])
+  const sourceMote = f.target('mote-a')
+  const bindings = new Map([['mote-a', 'main-a'], ['mote-b', 'main-b']])
+  const { rpc } = await f.start(undefined, {
+    async readCurrentMoteMain(target) {
+      const sessionId = bindings.get(target.spaceId)
+      return { status: 'ready', target, identity: { hostId: 'local', moteId: target.spaceId }, roleRevision: sessionId ?? 'unbound',
+        resource: null, documentRevision: null, issue: null,
+        current: sessionId ? { hostId: 'local', sessionId, displayWorkspaceId: 'scratch', groupId: 'group', tabId: 'tab', regionId: 'main' } : null }
+    },
+    async assertCurrent(snapshot) {
+      expect(snapshot.current?.sessionId).toBe(bindings.get(snapshot.target.spaceId))
+    }
+  })
+  const create = { sourceMote, operationId: 'coordinator-create', name: 'Homework', members: [f.target('mote-b')], announcement: 'Compare the changes.' }
+  const denied = await f.cli('create', create, 'standalone')
+  expect(denied.code).not.toBe(0)
+  expect(cliError(denied)).toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  const forged = await f.cli('create', create)
+  expect(forged.code).not.toBe(0)
+  expect(cliError(forged)).toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  const unrelated = (await rpc.call('space.mote.group.create', {
+    operationId: 'unrelated-group', name: 'Unrelated', members: [f.target('mote-b')]
+  })).group
+  const created = await f.cli('create', create, 'main-a')
+  expect(created.code, created.stderr).toBe(0)
+  const { group } = JSON.parse(created.stdout).result
+  expect(group.members).toMatchObject([{ moteId: 'mote-a', role: 'admin', thread: null }, { moteId: 'mote-b', role: 'member', thread: null }])
+  expect(group.announcement.body).toBe(create.announcement)
+  const listed = await f.cli('list', { sourceMote }, 'main-a')
+  expect(listed.code, listed.stderr).toBe(0)
+  expect(JSON.parse(listed.stdout).result.groups.map((entry: { id: string }) => entry.id)).toEqual([group.id])
+  const inspected = await f.cli('inspect', { sourceMote, groupId: unrelated.id }, 'main-a')
+  expect(inspected.code).not.toBe(0)
+  const post = { groupId: group.id, sourceMote, operationId: 'coordinator-post', body: 'Please compare the changes.', recipientIds: ['mote-b'] }
+  const forgedPost = await f.cli('send', post, 'main-b')
+  expect(forgedPost.code).not.toBe(0)
+  expect(cliError(forgedPost)).toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  f.unblockSecond()
+  const sent = await f.cli('send', post, 'main-a')
+  expect(sent.code, sent.stderr).toBe(0)
+  const { message } = JSON.parse(sent.stdout).result
+  expect(message.author).toEqual({ kind: 'mote', moteId: 'mote-a', name: 'First Mote' })
+  expect(message.deliveries.map((entry: { moteId: string }) => entry.moteId)).toEqual(['mote-b'])
+  await vi.waitFor(async () => expect((await rpc.call('space.mote.group.inspect', { groupId: group.id })).messages[0]!.deliveries[0]!.status).toBe('accepted'))
+  expect(f.preparedTargets.mock.calls).toEqual([['mote-b']])
+  const thread = (await rpc.call('space.mote.group.inspect', { groupId: group.id })).group.members[1]!.thread!
+  const reply = await f.cli('reply', { groupId: group.id, operationId: 'member-report',
+    inputOperationId: message.deliveries[0].operationId, body: 'Compared the changes.' }, thread.agentSessionId)
+  expect(reply.code, reply.stderr).toBe(0)
+  expect(JSON.parse(reply.stdout).result.message).toMatchObject({ replyToMessageId: message.id, author: { moteId: 'mote-b' } })
+
+  bindings.set('mote-a', 'rotated-a')
+  const stale = await f.cli('send', { ...post, operationId: 'stale-coordinator' }, 'main-a')
+  expect(stale.code).not.toBe(0)
+  expect(cliError(stale)).toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  const replayed = await f.cli('send', post, 'rotated-a')
+  expect(replayed.code, replayed.stderr).toBe(0)
+  expect(JSON.parse(replayed.stdout).result.message.id).toBe(message.id)
+  const reopened = await f.cli('create', create, 'rotated-a')
+  expect(reopened.code, reopened.stderr).toBe(0)
+  expect(JSON.parse(reopened.stdout).result.group.id).toBe(group.id)
+  expect((await rpc.call('space.mote.group.inspect', { groupId: group.id })).messages.map(entry => entry.id))
+    .toEqual([message.id, JSON.parse(reply.stdout).result.message.id])
+})
 
 it('saves one original public message, starts only invited members and reuses exact member input through public RPC', async () => {
   const f = await fixture(), { rpc, server } = await f.start()
