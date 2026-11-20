@@ -41,13 +41,21 @@ root.render(<Fixture />)
     activeElement: document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.getAttribute('role') ?? document.activeElement?.tagName }),
   menu(triggerName: string, option: string) {
     const trigger = [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.getAttribute('aria-label') === triggerName && button.getBoundingClientRect().width > 0)
-    const contentId = trigger?.getAttribute('aria-controls'), content = contentId ? document.getElementById(contentId) : null
-    if (trigger?.getAttribute('aria-expanded') !== 'true' || trigger.getAttribute('data-state') !== 'open' ||
-      content?.getAttribute('role') !== 'menu' || content.getAttribute('data-state') !== 'open') return null
-    const openContents = document.querySelectorAll('[role=menu][data-state=open]')
-    if (openContents.length !== 1 || openContents[0] !== content) return null
-    const radios = [...content.querySelectorAll<HTMLElement>('[role=menuitemradio]')], item = radios.find(item => item.textContent?.trim().startsWith(option))
-    if (!item || radios.length !== 4) return null
+    if (trigger?.getAttribute('aria-expanded') !== 'true' || trigger.getAttribute('data-state') !== 'open') return null
+    const narrow = triggerName === 'More browser tools'
+    const rootId = trigger.getAttribute('aria-controls')
+    const parent = rootId ? document.getElementById(rootId) : null
+    const submenu = narrow ? [...parent?.querySelectorAll<HTMLElement>('[role=menuitem]') ?? []]
+      .find(item => item.textContent?.trim() === 'Viewport' && item.getAttribute('aria-expanded') === 'true') : null
+    const contentId = narrow ? submenu?.getAttribute('aria-controls') : rootId
+    const content = contentId ? document.getElementById(contentId) : null
+    if (content?.getAttribute('role') !== 'menu' || content.getAttribute('data-state') !== 'open') return null
+    const openContents = [...document.querySelectorAll('[role=menu][data-state=open]')]
+    if (openContents.length !== (narrow ? 2 : 1) || !openContents.includes(content)) return null
+    const radios = [...content.querySelectorAll<HTMLElement>('[role=menuitemradio]')]
+    const item = radios.find(item => item.textContent?.trim().startsWith(option))
+    if (!item) return null
+    item.scrollIntoView({ block: 'nearest' })
     const box = item.getBoundingClientRect(), point = { x: box.x + box.width / 2, y: box.y + box.height / 2 }
     return { contentId, triggerState: trigger.getAttribute('data-state'), contentState: content.getAttribute('data-state'),
       contentBounds: content.getBoundingClientRect().toJSON(), point, itemBounds: box.toJSON(), hit: item.contains(document.elementFromPoint(point.x, point.y)),

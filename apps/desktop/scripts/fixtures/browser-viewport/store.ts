@@ -10,14 +10,15 @@ export const state: any = {
     executors: {}, workspaces: [], appearance: { terminalTheme: 'graphite' },
     browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } }
   },
-  tab: null, released: false, toolsOpen: false, browserAnnotationsByBrowserId: {}, noticeReadReceipts: {},
+  tab: null, released: false, toolsOpen: false, browserAnnotationsByBrowserId: {}, browserOpinionDrafts: {}, noticeReadReceipts: {},
   applyBrowserEvent(event: any) {
     if (event.type !== 'updated' || event.browser.id !== state.tab?.browserId) return
     state.tab = { ...state.tab, ...event.browser }; applied.push(event); notify()
   },
   reportError(error: unknown) { errors.push(String(error)); notify() },
   executeControl: async () => ({ operation: 'browser.history', operations: [] }),
-  addBrowserAnnotation() {}, clearRegionCaretFocus() {}
+  addBrowserAnnotation() {}, clearRegionCaretFocus() {},
+  async saveBrowserOpinionDraft() {}
 }
 export function initialize(snapshot: any) {
   state.tab = { ...snapshot, browserId: snapshot.id, kind: 'browser', regionId: 'private-viewport-region', workspaceId: 'private-viewport-workspace' }
@@ -38,3 +39,17 @@ export const useAppStore = Object.assign((selector: (value: any) => unknown) => 
 export function agentSteerCanEdit() { throw new Error('Agent steering is outside this viewport fixture') }
 export function agentSteerExecution() { throw new Error('Agent execution is outside this viewport fixture') }
 export function fileNavigationSelection() { throw new Error('File navigation is outside this viewport fixture') }
+
+// These imported controls are outside the native Viewport scenario.
+function outsideViewport(): never { throw new Error('This action is outside the native Viewport fixture') }
+export {
+  outsideViewport as staleManualSteerDraftKey,
+  outsideViewport as compareAndSwapCapsuleQuestionEditor,
+  outsideViewport as flushCapsuleQuestionEditors,
+  outsideViewport as retainBrowserAgentIntent,
+  outsideViewport as checkpointAgentOperations,
+  outsideViewport as checkpointSpatialWorkbench,
+  outsideViewport as currentCoreSpatialGraph,
+  outsideViewport as currentDisplayNameRevision,
+  outsideViewport as retainMailboxNotificationIntent
+}

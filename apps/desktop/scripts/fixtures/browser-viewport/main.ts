@@ -8,15 +8,21 @@ import { app, BrowserWindow, ipcMain, nativeImage, type NativeImage, type WebCon
 import { AgentMuxControlServer, connectAgentMuxRpc } from '@agentmux/core'
 import { createWorkspaceLayout } from '@agentmux/core/spatial-layout'
 import { parseAgentMuxSpatialGraph, spatialCatalog } from '@agentmux/core/spatial-state'
+import { browserColdDescriptor } from '../../../src/main/browser-cold-descriptor'
+import { browserViewportSize, browserViewportsEqual } from '../../../src/shared/browser-viewport'
 import { BrowserViewManager } from '../../../src/main/browser-view-manager'
 import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
 import { NativeOverlaySurfaces } from '../../../src/main/native-overlay-surfaces'
 import { installNativeOverlayFocus } from '../../../src/main/native-overlay-focus'
+import { reducePersistedTab } from '../../../src/renderer/src/lib/workbench-persistence'
+import { ipcResult } from '../../../src/shared/ipc-result'
 import { normalizeBrowserBounds } from '../../../src/shared/browser-bounds'
 import { BROWSER_EVENT_CHANNEL, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_BROWSER_VISIBILITY_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL,
-  BROWSER_VIEWPORT_PRESETS, type BrowserViewport } from '../../../src/shared/contracts'
+  type BrowserViewport } from '../../../src/shared/contracts'
 
 const root = process.env.AGENTMUX_VIEWPORT_ROOT!, out = process.env.AGENTMUX_VIEWPORT_OUT!, label = process.env.AGENTMUX_VIEWPORT_LABEL!
+const deviceOnly = process.env.AGENTMUX_VIEWPORT_DEVICE_ONLY === '1'
+const restart = process.env.AGENTMUX_VIEWPORT_RESTART === '1'
 const preflight = process.env.AGENTMUX_VIEWPORT_RETURN_PREFLIGHT === '1'
 assert.ok(root.includes('agentmux-viewport-'))
 app.setPath('userData', join(root, 'user-data'))
@@ -42,13 +48,17 @@ async function pointer(type: string, point: { x: number; y: number }) {
     ...(type === 'mouseMoved' ? {} : { button: 'left', clickCount: 1 }) })
 }
 async function clickUi(selector: string, name: string) {
-  const point = await evaluate(`(()=>{const nodes=[...document.querySelectorAll(${JSON.stringify(selector)})];const e=nodes.find(n=>(n.getAttribute('aria-label')===${JSON.stringify(name)}||n.textContent.trim().startsWith(${JSON.stringify(name)}))&&n.getBoundingClientRect().width>0);if(!e)return null;const r=e.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2,hit=document.elementFromPoint(x,y);return{x,y,hit:e.contains(hit),hitTag:hit?.tagName}})()`)
+  const point = await until('actual Chrome control exists: ' + name, () => evaluate(`(()=>{const nodes=[...document.querySelectorAll(${JSON.stringify(selector)})];const e=nodes.find(n=>(n.getAttribute('aria-label')===${JSON.stringify(name)}||n.textContent.trim().startsWith(${JSON.stringify(name)}))&&n.getBoundingClientRect().width>0);if(!e)return null;if(e.getAttribute('role')==='menuitem')e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2,hit=document.elementFromPoint(x,y);return{x,y,hit:e.contains(hit),hitTag:hit?.tagName}})()`))
   assert.ok(point, 'Actual Viewport control exists: ' + name)
   assert.equal(point.hit, true, 'The actual Chrome trigger owns its Renderer hit: ' + name)
   await pointer('mouseMoved', point); await pointer('mousePressed', point); await pointer('mouseReleased', point)
 }
-async function choose(mode: BrowserViewport, narrow = false) {
-  const title = mode[0].toUpperCase() + mode.slice(1), trigger = narrow ? 'More browser tools' : 'Viewport'
+function viewportTitle(mode: BrowserViewport) {
+  if (browserViewportSize(mode)?.device === 'phone') return 'Phone · touch'
+  return typeof mode === 'string' ? mode[0].toUpperCase() + mode.slice(1) : 'Custom'
+}
+async function choose(mode: BrowserViewport, narrow = false, title = viewportTitle(mode), imageName?: string) {
+  const trigger = narrow ? 'More browser tools' : 'Viewport'
   app.focus({ steal: true }); window.focus()
   await until('the native application window is active before page focus', async () => window.isFocused())
   original.webContents.focus()
@@ -66,9 +76,10 @@ async function choose(mode: BrowserViewport, narrow = false) {
   await until('the real Chrome owns native focus before its trigger', async () => window.webContents.isFocused() && await evaluate('document.hasFocus()'))
   transition.chromeFocus = { fixturePrerequisite: 'native-Chrome-focus-before-trigger', renderer: window.webContents.isFocused(), document: await evaluate('document.hasFocus()'), original: original.webContents.isFocused() }
   await clickUi('button', trigger)
+  if (narrow) await clickUi('[role=menuitem][aria-haspopup]', 'Viewport')
   const readMenu = () => evaluate(`window.viewportProbe.menu(${JSON.stringify(trigger)},${JSON.stringify(title)})`)
   const menu = await until('the exact Viewport Root and Content are currently open', readMenu)
-  const previousTitle = before.viewport[0].toUpperCase() + before.viewport.slice(1)
+  const previousTitle = viewportTitle(before.viewport)
   assert.equal(menu.radios.find((radio: any) => radio.text.startsWith(previousTitle))?.checked, 'true', 'The original Content selects the previously applied mode')
   const zoom = window.webContents.getZoomFactor()
   const nativeBounds = (bounds: any) => normalizeBrowserBounds({ x: bounds.x * zoom, y: bounds.y * zoom, width: bounds.width * zoom, height: bounds.height * zoom })!
@@ -92,6 +103,7 @@ async function choose(mode: BrowserViewport, narrow = false) {
   assert.equal(current?.hit, true, 'The original Renderer hit names this exact current Radio')
   assert.deepEqual(nativeBounds(current.contentBounds), prepared.layer.getBounds(), 'The current Content still matches its new physical projection')
   transition.geometry = current
+  if (imageName) await saveImage(imageName, await window.webContents.capturePage(), 'actual-renderer-viewport-menu', { menu: current })
   const contents = prepared.layer.webContents, bounds = prepared.layer.getBounds(), point = { x: Math.round(current.point.x * zoom - bounds.x), y: Math.round(current.point.y * zoom - bounds.y) }
   transition.projection = { webContentsId: contents.id, bounds, localPoint: point, windowZoom: zoom, publication: prepared.publication,
     association: 'unique open Content and matching new native/publication bounds', interactiveBeforeInput: 'unknown: public receipt exposes no per-projection interactive state' }
@@ -119,7 +131,7 @@ async function choose(mode: BrowserViewport, narrow = false) {
     assert.equal(contents.isDestroyed(), false, 'The original projection retains the accepted button until release')
     contents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 })
     await until('menu-call-must-apply-original-viewport: ' + mode, async () => {
-      const current = await uiFacts(); return current.viewport === mode && !current.menus
+      const current = await uiFacts(); return browserViewportsEqual(current.viewport, mode) && !current.menus
     })
     await settle()
   } finally {
@@ -136,8 +148,34 @@ async function choose(mode: BrowserViewport, narrow = false) {
   'The exact Radio consumes one complete trusted native click for this choice')
   transition.projection.inputConsumerConfirmed = true
 }
+// Chrome input exercises the same menu, preload and native viewport even when the
+// private Electron app cannot become the OS foreground window.
+async function chooseFromChrome(mode: BrowserViewport, narrow: boolean, title: string, imageName?: string) {
+  const trigger = narrow ? 'More browser tools' : 'Viewport'
+  const start = receipt.calls.length
+  const before = await uiFacts()
+  window.webContents.focus()
+  await clickUi('button', trigger)
+  if (narrow) await clickUi('[role=menuitem][aria-haspopup]', 'Viewport')
+  const menu = await until('the original Chrome menu option is visible and owns its hit', async () => {
+    const value = await evaluate(`window.viewportProbe.menu(${JSON.stringify(trigger)},${JSON.stringify(title)})`)
+    return value?.hit ? value : null
+  })
+  if (imageName) await saveImage(imageName, await window.webContents.capturePage(), 'actual-renderer-viewport-menu', { menu })
+  for (const kind of ['mouseMoved', 'mousePressed', 'mouseReleased']) await pointer(kind, menu.point)
+  await until('menu-call-must-apply-original-viewport: ' + title, async () => {
+    const current = await uiFacts()
+    return browserViewportsEqual(current.viewport, mode) && !current.menus
+  })
+  assert.deepEqual(receipt.calls.slice(start).filter((call: any) => call.channel === 'browser:setViewport')
+    .map((call: any) => call.args), [[originalId, mode]])
+  const events = (await uiFacts()).events.slice(before.events.length)
+  assert.ok(events.some((event: any) => event.type === 'click' && event.trusted && event.target?.startsWith(title)))
+  receipt.transitions.push({ mode, narrow, input: 'trusted-Chromium-Chrome', menu })
+}
+
 async function ordinaryWindowBlur() {
-  const mode = (await uiFacts()).viewport, title = mode[0].toUpperCase() + mode.slice(1)
+  const mode = (await uiFacts()).viewport, title = viewportTitle(mode)
   window.webContents.focus(); await until('ordinary blur starts in focused Chrome', async () => window.webContents.isFocused())
   await clickUi('button', 'Viewport')
   await until('ordinary blur starts with the exact open menu', async () => evaluate(`window.viewportProbe.menu('Viewport',${JSON.stringify(title)})`))
@@ -153,7 +191,7 @@ async function ordinaryWindowBlur() {
 }
 async function returnChoices(page: string) {
   for (const narrow of [false, true]) {
-    await resize(narrow ? 330 : 800, 650)
+    await resize(narrow ? 330 : 900, 650)
     const fixedBounds = manager.nativeOwner(originalId)!.bounds
     for (const [index, mode] of (['mobile', 'tablet', 'mobile', 'desktop', 'mobile', 'responsive'] as BrowserViewport[]).entries()) {
       const name = 'return-' + page + '-' + (narrow ? 'narrow-' : 'wide-') + index + '-' + mode
@@ -169,9 +207,13 @@ async function returnChoices(page: string) {
 }
 async function resize(width: number, height: number) {
   await evaluate(`window.viewportProbe.resize(${width},${height})`); await settle()
-  await until('the original Pane publishes its resized native bounds', async () => {
-    const owner = manager.nativeOwner(originalId); return owner && Math.abs(owner.bounds.width - width) <= 2 && owner.bounds.height < height ? owner : null
-  })
+  const bounds = await evaluate(`document.querySelector('[data-native-browser-stage="${originalId}"]').getBoundingClientRect().toJSON()`)
+  const measured = normalizeBrowserBounds(bounds)
+  assert.ok(measured && Math.abs(measured.width - width) <= 2 && measured.height < height, 'Product Stage has the requested pane geometry')
+  // This fixture owns one native presentation. Apply the rendered Stage's measured
+  // geometry through the original View manager, preserving its input and fit paths.
+  manager.setBounds(originalId, measured)
+  assert.deepEqual(manager.nativeOwner(originalId)?.bounds, measured)
   await settle()
 }
 async function identity(name: string) {
@@ -206,7 +248,7 @@ async function observe(name: string, mode: BrowserViewport, save = false) {
   const metrics = await pageFacts(), owner = manager.nativeOwner(originalId)!, image = await original.webContents.capturePage()
   const marks = corners(image)
   for (const [corner, mark] of Object.entries<any>(marks)) assert.ok(mark.count >= 4, 'fixed-viewport-must-fit-all-four-corners: ' + name + '/' + corner)
-  const expected = BROWSER_VIEWPORT_PRESETS[mode]
+  const expected = browserViewportSize(mode)
   if (expected) {
     assert.equal(metrics.screen.width, expected.width, 'native-apply-must-change-layout-width: ' + name)
     assert.equal(metrics.screen.height, expected.height, 'native-apply-must-change-layout-height: ' + name)
@@ -288,11 +330,102 @@ async function publicRead(name: string, useCli: boolean) {
     assert.equal(result.result.browserId, originalId); assert.equal(result.result.navigationId, baseline.navigationId)
     assert.ok(result.result.image.width > 0 && result.result.image.height > 0)
   }
-  receipt.public.push({ label: name, sdk, cli: consumed }); await identity(name + '-public')
+  receipt.public.push({ label: name, sdk, cli: consumed })
+  assert.equal(manager.takeControl(originalId).control?.owner, 'human')
+  await identity(name + '-public')
 }
 function html(meta: boolean, siblingPage = false) {
-  return `<!doctype html>${meta ? '<meta name="viewport" content="width=device-width, initial-scale=1">' : ''}<title>${siblingPage ? 'Sibling' : meta ? 'Viewport meta page' : 'Viewport standard mobile layout'}</title><style>html,body{margin:0;background:${siblingPage ? '#173e34' : '#f4f6fb'};color:${siblingPage ? '#fff' : '#233248'};font:18px system-ui}main{padding:72px 55px}h1{font-size:24px}input{width:70%;font:16px system-ui;padding:10px}button{position:fixed;width:32px;height:32px;border:0;padding:0;font:9px system-ui;color:#111}#tl{left:8px;top:8px;background:rgb(0,230,230)}#tr{right:8px;top:8px;background:rgb(255,220,0)}#bl{left:8px;bottom:8px;background:rgb(0,220,70)}#br{right:8px;bottom:8px;background:rgb(230,0,220)}</style><main><h1>${siblingPage ? 'Retained sibling' : meta ? 'Responsive document' : 'Standard mobile layout'}</h1><p>The same page stays available.</p><input value="retained ${siblingPage ? 'sibling' : 'original'} draft"></main>${Object.keys(colors).map(key => `<button id="${key}" aria-label="Corner ${key}">${key}</button>`).join('')}<script>window.cornerClicks=[];document.addEventListener('click',event=>{if(event.target.matches('button'))cornerClicks.push({corner:event.target.id,trusted:event.isTrusted})});window.viewportFacts=()=>({innerWidth,innerHeight,visual:{width:visualViewport.width,height:visualViewport.height,scale:visualViewport.scale},screen:{width:screen.width,height:screen.height},hasMeta:!!document.querySelector('meta[name=viewport]'),draft:document.querySelector('input').value,clicks:cornerClicks.slice()})</script>`
+  return `<!doctype html>${meta ? '<meta name="viewport" content="width=device-width, initial-scale=1">' : ''}<title>${siblingPage ? 'Sibling' : meta ? 'Viewport meta page' : 'Viewport standard mobile layout'}</title><style>html,body{margin:0;background:${siblingPage ? '#173e34' : '#f4f6fb'};color:${siblingPage ? '#fff' : '#233248'};font:18px system-ui}main{padding:72px 55px}h1{font-size:24px}input{width:70%;font:16px system-ui;padding:10px}button{position:fixed;width:32px;height:32px;border:0;padding:0;font:9px system-ui;color:#111}#tl{left:8px;top:8px;background:rgb(0,230,230)}#tr{right:8px;top:8px;background:rgb(255,220,0)}#bl{left:8px;bottom:8px;background:rgb(0,220,70)}#br{right:8px;bottom:8px;background:rgb(230,0,220)}</style><main><h1>${siblingPage ? 'Retained sibling' : meta ? 'Responsive document' : 'Standard mobile layout'}</h1><p>The same page stays available.</p><input value="retained ${siblingPage ? 'sibling' : 'original'} draft"></main>${Object.keys(colors).map(key => `<button id="${key}" aria-label="Corner ${key}">${key}</button>`).join('')}<script>window.cornerClicks=[];window.touches=[];document.addEventListener('click',event=>{if(event.target.matches('button'))cornerClicks.push({corner:event.target.id,trusted:event.isTrusted})});document.addEventListener('pointerdown',event=>{if(event.pointerType==='touch')touches.push({corner:event.target.id,trusted:event.isTrusted})});window.viewportFacts=()=>({innerWidth,innerHeight,dpr:devicePixelRatio,touchPoints:navigator.maxTouchPoints,coarse:matchMedia('(pointer:coarse)').matches,portrait:matchMedia('(orientation:portrait)').matches,touches:touches.slice(),visual:{width:visualViewport.width,height:visualViewport.height,scale:visualViewport.scale},screen:{width:screen.width,height:screen.height},hasMeta:!!document.querySelector('meta[name=viewport]'),draft:document.querySelector('input').value,clicks:cornerClicks.slice()})</script>`
 }
+async function verifyPhoneFit(orientation: string) {
+  const bounds = manager.nativeOwner(originalId)!.bounds
+  const image = await original.webContents.capturePage()
+  const marks = corners(image)
+  for (const [corner, mark] of Object.entries<{ count: number }>(marks)) {
+    assert.ok(mark.count >= 4, 'fixed-viewport-must-fit-all-four-corners: phone-' + orientation + '/' + corner)
+  }
+  await identity('phone-' + orientation)
+  receipt.cases.push({ label: 'phone-fit-' + orientation, bounds, marks, imageSize: image.getSize() })
+}
+
+async function verifyPhone(spatial: ReturnType<typeof parseAgentMuxSpatialGraph>) {
+  await manager.navigate(originalId, baseUrl + '/meta')
+  await until('original test document ready for phone input', async () => !original.webContents.isLoading() && (await pageFacts()).hasMeta)
+  baseline = { ...await manager.create(originalId, baseUrl + '/meta', workspaceId), zoom: original.webContents.getZoomFactor() }
+  const normal = await pageFacts()
+  await resize(900, 650)
+  const select = deviceOnly ? chooseFromChrome : choose
+  await select('phone', false, 'Phone · touch', 'phone-menu-wide')
+  await settle()
+  const phone = await pageFacts()
+  assert.equal(phone.dpr, 3, 'phone-native-dpr-is-three')
+  assert.equal(phone.touchPoints, 5, 'phone-native-touch-points-are-five')
+  assert.equal(phone.coarse, true)
+  assert.equal(phone.portrait, true)
+  assert.deepEqual(phone.screen, { width: 390, height: 844 })
+  if (deviceOnly) await verifyPhoneFit('portrait')
+  else await observe('phone-portrait', 'phone', true)
+  await resize(330, 620)
+  const landscape = { width: 844, height: 390, screenPosition: 'mobile', device: 'phone' } as const
+  await select(landscape, true, 'Landscape', 'phone-menu-narrow')
+  await settle()
+  const rotated = await pageFacts()
+  assert.deepEqual(rotated.screen, { width: 844, height: 390 })
+  assert.equal(rotated.portrait, false)
+  assert.equal(rotated.touchPoints, 5)
+  assert.equal(rotated.dpr, 3)
+  if (deviceOnly) await verifyPhoneFit('landscape')
+  else await observe('phone-landscape', landscape, true)
+  const siblingEnvironment = await sibling.webContents.executeJavaScript('window.viewportFacts()')
+  assert.equal(siblingEnvironment.touchPoints, normal.touchPoints)
+  assert.equal(siblingEnvironment.dpr, normal.dpr)
+  const tap = await cli(['browser', 'run', '--browser', originalId, '--operation-id', 'viewport-cli-phone-tap'],
+    "const tree=await snapshot({interactiveOnly:true,maxNodes:64}); const node=tree.nodes.find(n=>n.name==='Corner br'); if(!node)throw Error('Missing touch target'); await tap(node.ref); return await js('window.viewportFacts()')")
+  assert.equal(tap.result.result.outcome.kind, 'completed')
+  assert.deepEqual(tap.result.result.result.touches.at(-1), { corner: 'br', trusted: true }, 'phone-native-tap-reaches-fit-original-corner')
+  assert.equal(tap.result.result.result.portrait, false)
+  const cliPhone = await cli(['browser', 'viewport', '--browser', originalId, '--preset', 'phone', '--operation-id', 'viewport-cli-phone'])
+  assert.equal(cliPhone.result.result.outcome.kind, 'completed')
+  assert.equal(cliPhone.result.result.result.viewport, 'phone')
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: rpcServer.path } })
+  try {
+    const result = await rpc.call('browser.run', { browserId: originalId, operationId: 'viewport-save-phone-landscape',
+      code: "return await setViewport({width:844,height:390,screenPosition:'mobile',device:'phone'})" })
+    assert.equal(result.outcome.kind, 'completed')
+    assert.equal(result.result.browserId, originalId)
+    assert.equal(result.result.navigationId, baseline.navigationId)
+    assert.ok(browserViewportsEqual(result.result.viewport, landscape))
+  } finally { await rpc.dispose() }
+  const selected = await manager.create(originalId, baseUrl + '/meta', workspaceId)
+  await original.webContents.executeJavaScript("document.cookie='viewportRestore=original-profile; Max-Age=3600; Path=/'")
+  await original.webContents.session.cookies.flushStore()
+  const regionId = 'private-viewport-region'
+  const layout = spatial.tabLayouts['viewport-tab']
+  const persisted = reducePersistedTab({ id: 'viewport-tab', workspaceId, titleRegionId: regionId, layout,
+    regions: { [regionId]: { ...selected, kind: 'browser', browserId: originalId, regionId, workspaceId } } })
+  const graph = { ...spatial, regions: spatial.regions.map(region => ({ ...region, browserId: originalId })),
+    resources: { ['region:' + regionId]: persisted.regions[regionId] } }
+  await writeFile(join(root, 'saved-browser.json'), JSON.stringify({ pid: process.pid, url: baseline.url, profileId: selected.profileId, viewport: selected.viewport, graph }))
+  receipt.phone = { phone, rotated, siblingEnvironment, cliPhone, tap }
+  await assert.rejects(manager.setViewport(originalId, 'responsive'), /An Agent program owns this Browser/)
+  assert.equal(manager.takeControl(originalId).control?.owner, 'human')
+  await resize(900, 650)
+  await select('responsive', false, 'Responsive')
+  await until('responsive restores original native DPR and touch after leaving phone', async () => {
+    const actual = await pageFacts(); return actual.touchPoints === normal.touchPoints && actual.dpr === normal.dpr
+  })
+  const debuggerApi = original.webContents.debugger
+  const sendCommand = debuggerApi.sendCommand
+  debuggerApi.sendCommand = (method, ...params) => method === 'Emulation.setTouchEmulationEnabled'
+    ? Promise.reject(new Error('Fixture native touch rejection'))
+    : sendCommand.call(debuggerApi, method, ...params)
+  try {
+    await assert.rejects(manager.setViewport(originalId, 'phone'), /Fixture native touch rejection/)
+    assert.equal((await manager.create(originalId, baseline.url, workspaceId)).viewport, 'responsive')
+    await identity('phone-rejection-keeps-original-responsive-page')
+  } finally { debuggerApi.sendCommand = sendCommand }
+}
+
 async function run() {
   const stage = async (value: string) => {
     receipt.stages ??= []; receipt.stages.push(value)
@@ -307,29 +440,65 @@ async function run() {
   await stage('electron-ready')
   receipt.compiled = Object.fromEntries(await Promise.all(['main.mjs', 'renderer.js', 'renderer.css', 'preload.cjs'].map(async name => [name, sha(await readFile(join(root, name)))])))
   server = createServer((request, response) => { response.setHeader('content-type', 'text/html; charset=utf-8'); response.end(html(request.url !== '/no-meta', request.url === '/sibling')) })
-  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve)); baseUrl = 'http://127.0.0.1:' + (server.address() as any).port
+  const saved = restart ? JSON.parse(await readFile(join(root, 'saved-browser.json'), 'utf8')) : null
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(saved ? Number(new URL(saved.url).port) : 0, '127.0.0.1', resolve)
+  })
+  baseUrl = 'http://127.0.0.1:' + (server.address() as { port: number }).port
+  ipcMain.on('ui:themeBootstrap', event => { event.returnValue = null })
   window = new BrowserWindow({ width: 1200, height: 800, useContentSize: true, show: false, backgroundColor: '#171d24', webPreferences: { preload: join(root, 'preload.cjs'), sandbox: true, contextIsolation: true, backgroundThrottling: false } })
   for (const event of ['focus', 'blur'] as const) window.on(event, () => receipt.windowFocus.push({ event,
     at: performance.now(), transition: receipt.transitions.length, focused: window.isFocused() }))
   window.webContents.on('console-message', event => { if (event.level === 'error') receipt.warnings.push({ kind: 'renderer', message: event.message }) })
-  manager = new BrowserViewManager(window, { defaultProfileId: () => 'private-viewport-profile', resolvePartition: () => 'viewport-' + process.pid }, new BrowserRefLedgerStore(join(root, 'refs.json')),
+  manager = new BrowserViewManager(window, { defaultProfileId: () => 'private-viewport-profile', resolvePartition: () => 'persist:private-viewport-profile' }, new BrowserRefLedgerStore(join(root, 'refs.json')),
     { rememberedSchemes: async () => ({}), rememberScheme: async () => {}, openExternal: async () => { throw new Error('Private viewport fixture cannot open system links') } })
   overlays = new NativeOverlaySurfaces(window, manager, message => { receipt.warnings.push({ kind: 'native-overlay', message }); window.webContents.send(NATIVE_OVERLAY_WARNING_CHANNEL, message) }, input => window.webContents.send(NATIVE_BROWSER_INPUT_CHANNEL, input))
   uninstallNativeOverlayFocus = installNativeOverlayFocus(window, overlays)
   manager.onNativeVisibilityChange = visibility => window.webContents.send(NATIVE_BROWSER_VISIBILITY_CHANNEL, visibility)
   manager.onNativeInput = (owner, input) => overlays.forwardBrowserInput(owner, input)
+  if (saved) {
+    await window.loadURL('about:blank')
+    window.showInactive()
+    await stage('restart-chrome-ready')
+    const graph = parseAgentMuxSpatialGraph(saved.graph)
+    await stage('restart-graph-parsed')
+    const restored = await manager.ensure(originalId, async () => browserColdDescriptor(graph, originalId), { workspaceId })
+    await stage('restart-original-owner-ensured')
+    manager.setBounds(originalId, { x: 20, y: 110, width: 900, height: 590 })
+    original = manager.nativeOwner(originalId)!.view
+    const metrics = await until('phone viewport reapplies on the restored native page', async () => {
+      if (original.webContents.isLoading()) return null
+      const facts = await original.webContents.executeJavaScript('window.viewportFacts?.()')
+      return facts?.touchPoints === 5 && facts.dpr === 3 ? facts : null
+    })
+    assert.equal(restored.id, originalId)
+    assert.equal(restored.url, saved.url)
+    assert.equal(restored.profileId, saved.profileId)
+    assert.ok(browserViewportsEqual(restored.viewport, saved.viewport))
+    assert.equal(metrics.dpr, 3)
+    assert.equal(metrics.touchPoints, 5)
+    assert.deepEqual(metrics.screen, { width: 844, height: 390 })
+    assert.equal(metrics.portrait, false)
+    assert.equal(await original.webContents.executeJavaScript('document.cookie'), 'viewportRestore=original-profile')
+    assert.notEqual(process.pid, saved.pid)
+    receipt.restart = { originalPid: saved.pid, graph: { tabId: graph.tabs[0]?.tabId, regionId: graph.regions[0]?.regionId }, restored, metrics }
+    receipt.passed = true
+    return
+  }
   await manager.create(originalId, baseUrl + '/meta', workspaceId); await manager.create(siblingId, baseUrl + '/sibling', workspaceId)
-  manager.setBounds(originalId, { x: 20, y: 110, width: 800, height: 590 }); manager.setBounds(siblingId, { x: 930, y: 80, width: 240, height: 600 })
+  manager.setBounds(originalId, { x: 20, y: 110, width: 900, height: 590 }); manager.setBounds(siblingId, { x: 930, y: 80, width: 240, height: 600 })
   original = manager.nativeOwner(originalId)!.view; sibling = manager.nativeOwner(siblingId)!.view
   await stage('native-pages-created')
   await until('both original native pages ready', async () => !original.webContents.isLoading() && !sibling.webContents.isLoading() && await pageFacts())
   baseline = { ...await manager.create(originalId, baseUrl + '/meta', workspaceId), zoom: original.webContents.getZoomFactor() }
   siblingBaseline = { ...await manager.create(siblingId, baseUrl + '/sibling', workspaceId), zoom: sibling.webContents.getZoomFactor() }
-  ipcMain.on('ui:themeBootstrap', event => { event.returnValue = null })
   ipcMain.handle('viewport:setup', () => ({ original: baseline }))
   const handle = (channel: string, action: (...args: any[]) => any) => ipcMain.handle(channel, (event, ...args) => {
     assert.equal(event.sender, window.webContents); receipt.calls.push({ channel, args }); return action(...args)
   })
+  handle('browser:readProfiles', () => ipcResult(() => ({ revision: 1, sequence: 1, folders: [], views: [],
+    profiles: [{ id: baseline.profileId, label: 'Fixture profile', isDefault: true, agentAccess: true }] })))
   handle('browser:setViewport', (id, mode) => manager.setViewport(id, mode))
   handle('browser:setBounds', (id, bounds) => manager.setBounds(id, bounds))
   handle('browser:cancelElementSelection', id => manager.cancelElementSelection(id))
@@ -349,7 +518,7 @@ async function run() {
     regions: [{ regionId: 'private-viewport-region', tabId: 'viewport-tab', kind: 'browser', agentSessionId: null, runId: null, execution: null }], bindings: [],
     layouts: { [workspaceId]: createWorkspaceLayout('viewport-group', ['viewport-tab']) }, tabLayouts: { 'viewport-tab': { root: { type: 'leaf', regionId: 'private-viewport-region' }, activeRegionId: 'private-viewport-region' } }, resources: { 'viewport-tab': { browserId: originalId } } })
   rpcServer = new AgentMuxControlServer({ coreClients: () => [], execute: async request => {
-    if (request.operation === 'browser.targets') return { operation: 'browser.targets', targets: manager.targets() }
+    if (request.operation === 'browser.targets') return { operation: 'browser.targets', coverage: 'complete', targets: manager.targets() }
     if (request.operation === 'space.inspect') return { operation: 'space.inspect', catalog: spatialCatalog(spatial, request.target as any) }
     assert.equal(request.operation, 'browser.run'); if (request.operation !== 'browser.run') throw new Error('Outside the bounded viewport public fixture')
     const result = await manager.runScript(request.browserId, request.code, undefined, undefined, request.operationId)
@@ -364,22 +533,33 @@ async function run() {
     assert.ok(receipt.discovery.targets.result.result.targets.some((row: any) => row.id === originalId))
     assert.equal(receipt.discovery.space.result.result.catalog.regions[0].regionId, 'private-viewport-region')
   }
+  if (deviceOnly) {
+    await verifyPhone(spatial)
+    assert.deepEqual((await uiFacts()).errors, [])
+    assert.deepEqual(receipt.warnings, [])
+    receipt.passed = true
+    return
+  }
   for (const page of ['meta', 'no-meta']) {
     if (page === 'no-meta') { await manager.navigate(originalId, baseUrl + '/no-meta'); await until('second generic document ready', async () => !original.webContents.isLoading() && (await pageFacts()).hasMeta === false) }
     baseline = { ...await manager.create(originalId, baseUrl + '/' + page, workspaceId), zoom: original.webContents.getZoomFactor() }
     await returnChoices(page)
     if (preflight) continue
     for (const mode of ['mobile', 'tablet', 'desktop', 'responsive'] as BrowserViewport[]) {
-      await resize(800, 650); await choose(mode); await observe(page + '-wide-' + mode, mode, true)
+      await resize(900, 650); await choose(mode); await observe(page + '-wide-' + mode, mode, true)
       await publicRead(page + '-' + mode, mode === 'mobile' || mode === 'desktop')
       await resize(650, 510); await observe(page + '-resized-' + mode, mode)
     }
     await resize(330, 620); await choose('desktop', true); await observe(page + '-narrow-desktop', 'desktop', true)
     await choose('responsive', true); await observe(page + '-narrow-responsive', 'responsive')
   }
-  await resize(800, 650); await ordinaryWindowBlur()
+  await resize(900, 650); await ordinaryWindowBlur()
   if (preflight) { receipt.events = (await uiFacts()).events; assert.deepEqual((await uiFacts()).errors, []); assert.deepEqual(receipt.warnings, []); receipt.passed = true; return }
-  await resize(800, 650); await choose('tablet')
+  await verifyPhone(spatial)
+  await manager.navigate(originalId, baseUrl + '/no-meta')
+  await until('original second document ready', async () => !original.webContents.isLoading() && !(await pageFacts()).hasMeta)
+  baseline = { ...await manager.create(originalId, baseUrl + '/no-meta', workspaceId), zoom: original.webContents.getZoomFactor() }
+  await choose('tablet')
   const beforeReload = baseline.navigationId
   await manager.reload(originalId); await until('actual reload applies the retained viewport', async () => !original.webContents.isLoading() && (await pageFacts()).innerWidth > 0)
   baseline = { ...await manager.create(originalId, baseUrl + '/no-meta', workspaceId), zoom: original.webContents.getZoomFactor() }
@@ -397,10 +577,12 @@ async function run() {
 }
 void run().catch(async error => {
   receipt.failure = { message: error.message, stack: error.stack }
-  try { receipt.failure.windowFocused = window.isFocused(); receipt.failure.ui = await uiFacts(); receipt.failure.layers = window.contentView.children.filter(view => view.getVisible()).map(view => ({ bounds: view.getBounds(), original: view === original, sibling: view === sibling })) } catch {}
+  if (!restart && window && !window.isDestroyed()) {
+    try { receipt.failure.windowFocused = window.isFocused(); receipt.failure.ui = await uiFacts(); receipt.failure.menus = await evaluate(`[...document.querySelectorAll('[role=menu]')].map(e=>({state:e.getAttribute('data-state'),children:[...e.querySelectorAll('[role=menuitem],[role=menuitemradio]')].map(n=>({name:n.textContent.trim(),popup:n.getAttribute('aria-haspopup'),expanded:n.getAttribute('aria-expanded')}))}))`); receipt.failure.layers = window.contentView.children.filter(view => view.getVisible()).map(view => ({ bounds: view.getBounds(), original: view === original, sibling: view === sibling })) } catch {}
+  }
 }).finally(async () => {
   await writeFile(join(out, label + '.json'), JSON.stringify(receipt, null, 2))
-  if (window && !window.isDestroyed()) { await evaluate('window.viewportProbe?.dispose()').catch(() => {}); await delay(40) }
+  if (!restart && window && !window.isDestroyed()) { await evaluate('window.viewportProbe?.dispose()').catch(() => {}); await delay(40) }
   await rpcServer?.stop(); uninstallNativeOverlayFocus?.(); overlays?.dispose(); manager?.dispose(); await new Promise<void>(resolve => server ? server.close(() => resolve()) : resolve())
   if (window && !window.isDestroyed() && window.webContents.debugger.isAttached()) window.webContents.debugger.detach()
   window?.destroy(); app.exit(receipt.passed ? 0 : 1)

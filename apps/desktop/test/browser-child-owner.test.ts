@@ -201,7 +201,7 @@ describe('Native child pages use the ordinary Browser owner', () => {
     const f = await fixture(), warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
     vi.spyOn(f.window.contentView, 'addChildView').mockImplementationOnce(() => { throw new Error('Original host temporarily unavailable') })
     const child = await f.child(), source = f.manager.target(child.id)!.openedFrom
-    expect(f.manager.setViewport(child.id, 'responsive').activity.warning).toContain('host attachment')
+    expect((await f.manager.setViewport(child.id, 'responsive')).activity.warning).toContain('host attachment')
     const recovered = await f.manager.switchProfile(child.id, 'another-profile')
     expect(recovered.activity.warning ?? '').not.toContain('host attachment')
     expect(f.manager.target(child.id)?.openedFrom).toEqual(source)
@@ -242,10 +242,10 @@ describe('Native child pages use the ordinary Browser owner', () => {
     page.emit('page-title-updated')
     expect(f.window.webContents.send.mock.calls.filter(([, event]) => event.type === 'native-opened')).toHaveLength(projected.length)
     if (['visibility', 'bounds', 'placement'].includes(failedEvent)) {
-      expect(f.manager.setViewport(target.id, 'responsive').activity.warning).toContain('host attachment')
+      expect((await f.manager.setViewport(target.id, 'responsive')).activity.warning).toContain('host attachment')
       f.manager.setBounds(target.id, { x: 0, y: 0, width: 840, height: 620 })
     }
-    const recovered = f.manager.setViewport(target.id, 'responsive')
+    const recovered = await f.manager.setViewport(target.id, 'responsive')
     expect(recovered.activity.warning ?? '', 'A recovered projection retires only its own failure warning').not.toContain('Original sender unavailable')
     await expect(f.manager.runScript(target.id, 'return 17')).rejects.toThrow('original-child-transport-observed')
     expect(page.debugger.attach).toHaveBeenCalledOnce()
@@ -258,7 +258,7 @@ describe('Native child pages use the ordinary Browser owner', () => {
     const f = await fixture(), child = await f.child()
     const source = { browserId: 'original-parent', navigationId: f.manager.target('original-parent')!.navigationId }
     expect(f.manager.target(child.id)).toMatchObject({ id: child.id, url: child.page.url, openedFrom: source, status: 'ready' })
-    expect(f.manager.setViewport(child.id, 'responsive').source).toEqual(source)
+    expect((await f.manager.setViewport(child.id, 'responsive')).source).toEqual(source)
     await expect(f.manager.runScript(child.id, 'return 17')).rejects.toThrow('original-child-transport-observed')
     expect(child.page.debugger.attach).toHaveBeenCalledOnce()
     expect(f.parent.debugger.attach).not.toHaveBeenCalled()
@@ -347,7 +347,7 @@ describe('Native child pages use the ordinary Browser owner', () => {
       expect(firstFailure).toContain('is unconfirmed')
       expect(child.page.close).toHaveBeenCalledTimes(1)
       expect(f.manager.target(child.id)?.status).toBe('ready')
-      expect(f.manager.setViewport(child.id, 'responsive').activity.warning).toContain('is unconfirmed')
+      expect((await f.manager.setViewport(child.id, 'responsive')).activity.warning).toContain('is unconfirmed')
       const again = Promise.resolve(f.manager.close(child.id)).then(() => '', error => String(error))
       await vi.advanceTimersByTimeAsync(1_000)
       expect(await again).toBe(firstFailure)

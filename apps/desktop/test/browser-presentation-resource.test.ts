@@ -992,7 +992,7 @@ it('fits a sole responsive Mote preview without taking native input or resizing 
 
 it('does not resize a fixed viewport to fit a lone Mote preview', async () => {
   const f = await fixture()
-  f.manager.setViewport('browser', 'mobile')
+  await f.manager.setViewport('browser', 'mobile')
   const initial = f.source.getBounds()
   f.manager.registerPresentation(f.app as never, f.frame as never, { browserId: 'browser',
     occurrence: { ...occurrence('mote'), layoutHost: 'sole' }, geometry }, f.identity())
