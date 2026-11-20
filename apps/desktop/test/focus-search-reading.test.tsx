@@ -27,11 +27,28 @@ const source = (hostId: string): AgentSessionHistoryDescriptor => ({ hostId, age
  observedNativeHandle: { kind: 'provider', providerId: 'generic', sessionId: hostId + '-observed' },
  previousNativeHandle: { kind: 'provider', providerId: 'generic', sessionId: hostId + '-previous' }
 } })
+const archivedInput = (operationId: string, text: string): AgentSteerQueueEntry => {
+ const key = { kind: 'prompt' as const, agentSessionId: 'original-agent', expectedRun: { runId: 'original-run' }, submissionId: operationId }
+ const ref = { key, waitGeneration: 1 }
+ return { operationId, text, status: 'deferred', archived: true,
+  directInputControl: { kind: 'agent', hostId: 'original-host', agentSessionId: 'original-agent', run: { runId: 'original-run' } },
+  directInputBinding: { expectedRun: { runId: 'original-run' } },
+  inputReceipt: { key, ref, status: 'terminal-confirmed', persistence: 'confirmed', observation: 'closed', admission: null,
+   control: { ref, state: 'dispatch-authorized', gateId: 'original-gate', at: 2 } } }
+}
 const click = async (button: HTMLElement) => act(async () => button.click())
 const query = async (text: string) => act(async () => {
  const input = dom.container.querySelector<HTMLInputElement>('[aria-label="Search contexts"]')!
  expect(input).not.toBeNull(); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, text); input.dispatchEvent(new Event('input', { bubbles: true }))
 })
+const savedQuery = async (text: string) => act(async () => {
+ const input = document.querySelector<HTMLInputElement>('[aria-label="Search saved inputs"]')!
+ expect(input).not.toBeNull(); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, text); input.dispatchEvent(new Event('input', { bubbles: true }))
+})
+const discloseDiagnostics = async (row: HTMLDetailsElement) => {
+ const details = row.querySelector<HTMLDetailsElement>('.local-input-record__diagnostics')!
+ expect(details).not.toBeNull(); await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')) })
+}
 
 it('one result area retains every exact location and exposes full provenance only through its details', async () => {
  const locations = ['first', 'second'].map(groupId => ({ address: JSON.stringify(['workspace', groupId, 'original-tab', 'original-region']), name: 'original-region', kind: 'agent', sessionId: 'same-session',
@@ -111,6 +128,7 @@ it('drafts and queue remain readable and copy-only with unknown keys and origina
  const rows = [...document.querySelectorAll<HTMLDetailsElement>('.local-input-record')]; expect(rows).toHaveLength(2)
  expect(document.querySelector('textarea')).toBeNull()
  for (const row of rows) await act(async () => { row.open = true; row.dispatchEvent(new Event('toggle')) })
+ for (const row of rows) await discloseDiagnostics(row)
  expect(rows[0]!.querySelector('textarea')!.value).toBe(draft)
  expect(rows[0]!.textContent).toContain('orphan-original-region'); expect(rows[0]!.textContent).toContain('Unknown · original key kept'); expect(rows[1]!.textContent).toContain('original-input')
  expect(rows[1]!.textContent).toContain('original-host / original-agent'); expect(rows[1]!.textContent).toContain('explicit send required')
@@ -119,6 +137,67 @@ it('drafts and queue remain readable and copy-only with unknown keys and origina
  expect(expandComposerInput(copy.mock.calls.at(-1)![0])).toEqual({ text, inputImages: [image] })
  expect(useAppStore.getState().agentComposerDrafts).toBe(before.drafts); expect(useAppStore.getState().agentSteerQueues).toBe(before.queues)
  expect(submit).not.toHaveBeenCalled(); expect(reopen).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled()
+})
+
+it('saved input search keeps archive paging explicit and presents attachments without raw paths', async () => {
+ const earlier = archivedInput('earlier-design', 'Earlier design note')
+ const read = vi.spyOn(api.ui, 'readWorkbenchInputArchive')
+  .mockResolvedValueOnce({ entries: [], nextCursor: 'earlier-page' })
+  .mockResolvedValueOnce({ entries: [{ ownerKey: 'original-agent', entry: earlier }], nextCursor: null })
+ useAppStore.setState({ sessions: [], tabs: {}, agentSteerQueues: {},
+  agentComposerDrafts: { 'orphan-original-region': '@' + fixturePath('retained-draft-home/.agentmux/pasted/paste-example.png') + '   message tool\n refinement' } })
+ const submit = vi.spyOn(api.sessions, 'submitPrompt')
+ await dom.render(<FocusScanActions order="priority" onOrderChange={() => {}} />)
+ await click(dom.container.querySelector<HTMLButtonElement>('[aria-label="Drafts"]')!)
+ expect(read).toHaveBeenCalledExactlyOnceWith({ limit: 30 })
+ expect(document.querySelector('.local-input-record__excerpt')?.textContent).toBe('message tool refinement')
+ expect(document.querySelector('.local-input-record__attachment')?.textContent).toBe('paste-example.png')
+ expect(document.querySelector('.local-input-record summary')?.textContent).not.toContain(fixturePath('retained-draft-home'))
+
+ await savedQuery('Earlier design')
+ expect(document.querySelector('.local-input-record')).toBeNull()
+ expect(document.querySelector('[role="dialog"]')?.textContent).toContain('No matches in loaded inputs')
+ expect(document.querySelector('[role="dialog"]')?.textContent).toContain('earlier inputs available')
+ expect(read).toHaveBeenCalledExactlyOnceWith({ limit: 30 })
+ const loadEarlier = [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Load earlier saved inputs')!
+ await click(loadEarlier)
+ expect(read).toHaveBeenLastCalledWith({ limit: 30, after: 'earlier-page' })
+ await vi.waitFor(() => expect(document.querySelector('.local-input-record__excerpt')?.textContent).toBe('Earlier design note'))
+
+ await click(document.querySelector<HTMLButtonElement>('[aria-label="Clear saved input search"]')!)
+ expect(read).toHaveBeenCalledTimes(2)
+ expect(document.querySelectorAll('.local-input-record')).toHaveLength(2)
+ await savedQuery('paste-example.png')
+ expect([...document.querySelectorAll('.local-input-record__excerpt')].map(node => node.textContent)).toEqual(['message tool refinement'])
+ expect(read).toHaveBeenCalledTimes(2)
+ expect(submit).not.toHaveBeenCalled()
+})
+
+it('Continue opens only the exact eligible draft location while orphan and archived inputs stay copy-only', async () => {
+ const workspace = composerConfig.workspaces[0]!, session = composerSession('draft-location')
+ const tab = createWorkbenchTab('draft-tab', { kind: 'agent', phase: 'attached', workspaceId: workspace.id, regionId: 'draft-region', sessionId: session.id })
+ const archived: AgentSteerQueueEntry = { operationId: 'copy-only-archive', text: 'Copy only archive', status: 'deferred', archived: true,
+  directInputControl: { kind: 'agent', hostId: 'original-host', agentSessionId: 'original-agent', run: { runId: 'original-run' } } }
+ useAppStore.setState({ config: composerConfig, activeWorkspaceId: workspace.id, sessions: [session], tabs: { [tab.id]: tab },
+  layouts: { [workspace.id]: createWorkspaceLayout('draft-group', [tab.id]) }, agentSteerQueues: { 'original-agent': [archived] },
+  agentComposerDrafts: { 'draft-region': 'Exact original draft', 'orphan-region': 'Orphan original draft' },
+  workbenchSpaceSelection: { workspaceId: workspace.id, spaceId: null, zoneId: null, topicId: null, groupId: 'draft-group', tabId: tab.id, regionId: 'draft-region' } })
+ const openLocation = vi.fn(() => true), submit = vi.spyOn(api.sessions, 'submitPrompt'), reopen = vi.spyOn(api.sessions, 'reopen')
+ await dom.render(<FocusScanActions order="priority" onOrderChange={() => {}} onOpenLocation={openLocation} />)
+ await click(dom.container.querySelector<HTMLButtonElement>('[aria-label="Drafts"]')!)
+ const rows = [...document.querySelectorAll<HTMLDetailsElement>('.local-input-record')]
+ expect(rows).toHaveLength(3)
+ const exact = rows.find(row => row.querySelector('.local-input-record__excerpt')?.textContent === 'Exact original draft')!
+ const copyOnly = rows.filter(row => row !== exact)
+ const continueButton = [...exact.parentElement!.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Continue writing')!
+ expect(continueButton).toBeDefined()
+ for (const row of copyOnly) expect(row.parentElement!.textContent).not.toContain('Continue writing')
+ await click(continueButton)
+ expect(openLocation).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ displayWorkspaceId: workspace.id, groupId: 'draft-group', tabId: tab.id, regionId: 'draft-region' }))
+ expect(document.querySelector('[role="dialog"]')).toBeNull()
+ expect(useAppStore.getState().agentComposerDrafts).toMatchObject({ 'draft-region': 'Exact original draft', 'orphan-region': 'Orphan original draft' })
+ expect(useAppStore.getState().agentSteerQueues['original-agent']).toEqual([archived])
+ expect(submit).not.toHaveBeenCalled(); expect(reopen).not.toHaveBeenCalled()
 })
 
 it('an exactly scoped empty shelf keeps the all-inputs route and unknown association honest', async () => {

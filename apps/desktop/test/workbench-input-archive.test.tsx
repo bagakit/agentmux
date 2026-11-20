@@ -155,6 +155,7 @@ it('Focus opens the global cold archive for copying without an active Session', 
   const row = localRecords().find(item => item.textContent?.includes('Exact original archived message'))!
   expect(row).toBeDefined()
   await disclose(row)
+  await disclose(row.querySelector<HTMLDetailsElement>('.local-input-record__diagnostics')!)
   expect(row.textContent).toContain('Saved stateArchived')
   expect(row.textContent).toContain('Delivery receiptTerminal input confirmed')
   await click([...row.querySelectorAll('button')].find(button => button.textContent === 'Copy saved input') ?? null)
@@ -175,7 +176,7 @@ it('the deleted original Session reads its saved input only when disclosed and c
   expect(summary).toBeDefined()
   await disclose(summary.parentElement as HTMLDetailsElement)
   expect(read).toHaveBeenCalledExactlyOnceWith({ ownerKey: agent.id, limit: 30 })
-  expect(localRecords().map(record => record.querySelector('summary span')?.textContent)).toEqual([originalText])
+ expect(localRecords().map(record => record.querySelector('summary span')?.textContent)).toEqual(['Exact original archived message Prior authored paragraph 中🙂'])
 })
 
 it('compiled CLI and public RPC retain confirmed cold archives and exact operation semantics', async () => {
