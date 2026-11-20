@@ -68,7 +68,7 @@ Supervisor to save a plan. Choose a Supervisor explicitly when none exists. As t
 Supervisor, publish directly. Use `goal plan revise` against the version you read
 when editing existing nodes. Planning can
 use a real unconfirmed proposal. Clarify missing criteria first. Discussion and planning
-grant neither execution nor human confirmation. A delivered request or textual breakdown
+grant neither execution nor confirmation. A delivered request or textual breakdown
 does not prove a plan was saved. Read the current plan revision and keep OP when receipt
 is uncertain. Never-attempted requests can continue on the recovered same Session using
 `goal patrol continue`. Frozen or claimed older requests only reconcile their original

@@ -37,6 +37,10 @@ Check both navigation and `presentation.goal`. Opening the view only reads.
 Use `goal create --help` and `goal update --help` for creation, confirmation
 provenance and relationship edits. Assignment alone does not send input.
 
+The current Supervisor uses `goal confirm --goal ID --revision N` to record
+its own confirmation and continue work already authorized. Read `goal inspect`
+for the current revision and saved confirmer.
+
 A person can use `goal confirm --goal ID --revision N --continue-with JSON --operation-id OP`
 to confirm the displayed version and ask its original Supervisor to continue.
 `JSON` is `{hostId,agentSessionId}`. Read `goal inspect` for the saved confirmation

@@ -55,10 +55,11 @@ with `--id` and `--proposal <json>`. `update` also accepts `--alignment <json>` 
 `--grounding <json>`. Proposals cannot provide revisions, submission identities or
 acknowledgement timestamps. The owner generates those facts.
 
-Hosts expose `confirmAlignment(id, expectedRevision)` and
-`acceptGrounding(id, expectedAlignmentRevision, expectedSubmissionId, acceptGaps?)`
-only through explicit human actions. Changed goals invalidate confirmation; changed
-results invalidate acceptance. Same-content proposals retain acknowledgements.
+Hosts qualify the authenticated current Supervisor or person/device before
+`confirmAlignment` stores the exact proposal revision and confirmer.
+`acceptGrounding` uses an explicit authenticated human action. Changed goals
+invalidate confirmation. Changed results invalidate acceptance. Same-content
+proposals retain acknowledgements.
 Acceptance requires one known, evidenced result per current confirmed criterion;
 remaining gaps require the explicit `acceptGaps` choice and stay recorded as gaps.
 A locatable evidence reference does not claim that the owner verified its contents.
