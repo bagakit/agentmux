@@ -1,3 +1,4 @@
+import { observeLandmarkWrites, publishLandmarkWrite } from '../lib/conversation-landmark-observation'
 import { ConversationRecallCard } from './ConversationRecallCard'
 import type { NotebookGraphSnapshot } from '../../../shared/notebook-observation'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
@@ -33,12 +34,16 @@ function useLandmarks(reference: ConversationRef, active: boolean, retainedKey?:
   const [intent, setIntent] = useState<ConversationLandmarkWrite | null>(() => retainedKey ? retainedInput(retainedKey) : null)
   const [busy, setBusy] = useState(false), busyRef = useRef(false)
   const [issue, setIssue] = useState<string | null>(null), [confirmed, setConfirmed] = useState<string | null>(null)
+  const [observed, setObserved] = useState(false)
   const [conflict, setConflict] = useState<'revision' | 'missing' | null>(null)
   const valid = () => current.current === owner
   async function load(operationId?: string) {
     const next = await api.landmarks.list({ hostId: reference.hostId, agentSessionId: reference.agentSessionId, ...(operationId ? { operationId } : {}) })
-    if (valid()) setPage(next)
+    if (valid()) adopt(next)
     return next
+  }
+  function adopt(next: ConversationLandmarkPage) {
+    setPage(previous => previous && previous.revision > next.revision ? previous : next)
   }
   async function run(action: () => Promise<void>) {
     if (busyRef.current || !active) return
@@ -49,7 +54,8 @@ function useLandmarks(reference: ConversationRef, active: boolean, retainedKey?:
   function accept(next: ConversationLandmarkPage, original: ConversationLandmarkWrite) {
     if (!valid()) return
     if (!next.recordedOperation || JSON.stringify(next.recordedOperation.input) !== JSON.stringify(original)) throw new Error('The original save receipt is unconfirmed. Keep this same operation and check again.')
-    setPage(next); setConfirmed(original.operationId); setIntent(null); setConflict(null); onAccepted?.(next)
+    adopt(next); setConfirmed(original.operationId); setIntent(null); setConflict(null); setObserved(false); onAccepted?.(next)
+    publishLandmarkWrite(next)
     void clearConversationLandmarkIntent(original)
   }
   function apply(change: ConversationLandmarkChange) { return run(async () => {
@@ -68,14 +74,22 @@ function useLandmarks(reference: ConversationRef, active: boolean, retainedKey?:
     if (!intent) { await load(); return }
     const observed = await load(intent.operationId)
     if (!valid()) return
-    if (observed.recordedOperation) accept(observed, intent)
+    if (observed.recordedOperation && JSON.stringify(observed.recordedOperation.input) === JSON.stringify(intent)) {
+      setObserved(true)
+      setIssue('The original operation was found. Confirm its durable save using the same operation.')
+    }
     else setIssue('The original operation is not recorded in this observation. Its intent is kept; retry the same operation to obtain its result.')
   }) }
   function refreshAfterConflict() { return run(async () => {
     if (!intent || !conflict) return
     const observed = await load(intent.operationId)
     if (!valid()) return
-    if (observed.recordedOperation) accept(observed, intent)
+    if (observed.recordedOperation) {
+      if (JSON.stringify(observed.recordedOperation.input) !== JSON.stringify(intent)) throw new Error('The original operation describes a different request.')
+      setObserved(true)
+      setConflict(null)
+      setIssue('The original operation was found. Confirm its durable save using the same operation.')
+    }
     else { await clearConversationLandmarkIntent(intent); setIntent(null); setConflict(null); setIssue(conflict === 'missing' ? 'The original write was rejected because its point no longer exists. The list is refreshed; review the available points before a new action.' : 'The original write was rejected by a revision conflict. The list is refreshed; review your name and explicitly save a new intent.') }
   }) }
   const restoreRetained = () => {
@@ -87,7 +101,7 @@ function useLandmarks(reference: ConversationRef, active: boolean, retainedKey?:
     return null
   }
   const beginNewConfirmedIntent = () => { if (confirmed && !intent && !busyRef.current) { setConfirmed(null); setIssue(null); return true } return false }
-  return { page, intent, busy, issue, confirmed, conflict, beginNewConfirmedIntent, restoreRetained, adopt: setPage, refresh: () => run(async () => { await load(intent?.operationId) }), apply, check, refreshAfterConflict }
+  return { page, intent, busy, issue, confirmed, observed, conflict, beginNewConfirmedIntent, restoreRetained, adopt, refresh: () => run(async () => { await load(intent?.operationId) }), apply, check, refreshAfterConflict }
 }
 
 function LandmarkPopover({ title, trigger, active, onOpen, onClose, children }: {
@@ -118,7 +132,7 @@ function Pending({ state }: { state: ReturnType<typeof useLandmarks> }) {
   return <>{state.issue ? <p className="conversation-landmark__issue" role="status">{state.issue}</p> : null}
     {state.intent ? <div className="conversation-landmark__pending"><p>Original save intent retained. Availability of its record is checked separately.</p><code className="conversation-landmark__operation">{state.intent.operationId}</code>
       <Button type="button" disabled={state.busy} onClick={() => { void state.check() }}>Check original save</Button>
-      <Button type="button" disabled={state.busy} onClick={() => { void state.apply(state.intent!.change) }}>Retry original save</Button>
+      <Button type="button" disabled={state.busy} onClick={() => { void state.apply(state.intent!.change) }}>{state.observed ? 'Confirm original save' : 'Retry original save'}</Button>
       {state.conflict ? <Button type="button" disabled={state.busy} onClick={() => { void state.refreshAfterConflict() }}>{state.conflict === 'missing' ? 'Review missing point' : 'Refresh after conflict'}</Button> : null}
     </div> : null}</>
 }
@@ -145,6 +159,12 @@ function ConversationLandmarkListInner({ reference, reveal, active }: { referenc
   const state = useLandmarks(reference, active), [edit, setEdit] = useState<{ id: string; name: string } | null>(null), [navigation, setNavigation] = useState<string | null>(null)
   const [graph, setGraph] = useState<NotebookGraphSnapshot | null>(null), [graphIssue, setGraphIssue] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
+  useEffect(() => {
+    if (!active) return
+    const release = observeLandmarkWrites(reference, state.adopt)
+    void state.refresh()
+    return release
+  }, [active, reference.hostId, reference.agentSessionId])
   useEffect(() => { if (!active) setOpen(false) }, [active])
   const graphRead = useRef<AbortController | null>(null)
   const hasPoints = Boolean(state.page?.points.length)
@@ -176,7 +196,8 @@ function ConversationLandmarkListInner({ reference, reveal, active }: { referenc
     else if (result.kind === 'unavailable') setNavigation(result.message)
     else setNavigation('Navigation cancelled by your later reading intent. The point is kept.')
   }
-  return <LandmarkPopover title="Reading points" trigger={<><BookmarkIcon size={11}/><span>Reading points</span></>} active={active} onOpen={() => { setOpen(true); void state.refresh() }} onClose={() => setOpen(false)}>
+  const count = state.page?.points.length ?? 0
+  return <LandmarkPopover title="Reading points" trigger={<><BookmarkIcon size={13} aria-hidden="true"/>{count > 0 ? <span className="conversation-landmark__count">{count}</span> : null}</>} active={active} onOpen={() => { setOpen(true); void state.refresh() }} onClose={() => setOpen(false)}>
     <div className="conversation-landmark__list">
       {!state.page && !state.issue ? <p role="status">{state.busy ? 'Reading saved points…' : 'Open the list to read saved points.'}</p> : null}
       {state.page?.points.length === 0 ? <p>No named points in this conversation.</p> : null}

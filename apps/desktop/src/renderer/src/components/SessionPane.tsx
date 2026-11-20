@@ -1281,7 +1281,7 @@ export function SessionPane({
       session.kind === 'agent' && moteWorkface.mainService.hostId === session.control.hostId && moteWorkface.mainService.agentSessionId === session.control.agentSessionId &&
       moteWorkface.mainService.runId === session.control.run.runId), renderMessageActions,
     ...(session.kind === 'agent' ? { renderRecordActions: renderConversationLandmarkAction,
-      renderReadingTools: (active: boolean) => <ConversationLandmarkList reference={session.control} active={active} reveal={reference => revealConversationItem(reference)}/> } : {}),
+      renderReadingTools: (active: boolean) => <ConversationLandmarkList reference={session.control} active={active} reveal={(reference, routeHostId) => revealConversationItem(reference, undefined, undefined, undefined, routeHostId)}/> } : {}),
     ...(hasAgentComposer ? { questionReplyRoute: session.capabilities.asyncQuestionReply,
       questionReplyTarget: !nativeSourceUnconfirmed(session) && session.nativeHandle?.kind === 'provider' ? {
         source: { providerId: session.nativeHandle.providerId, nativeSessionId: session.nativeHandle.sessionId }, run: session.control.run
@@ -1355,7 +1355,7 @@ export function SessionPane({
       takeoverSurface={takeoverAt(presentationOrigin(target), target.visible !== false, workbenchSessionStageHostId(target, linkOrigin.regionId!))}
       sessionId={session.id} name={agentInputIdentity!} executorLabel={agentInputExecutor!}
       executionHost={regionExecutionHost(session, configuredExecutionHost)}
-      activity={{ ...activityProps, onQuestionReply: input => sendConversationQuestionReply(session.control, input, moteInputSource(session.id, presentationOrigin(target))), renderReadingTools: active => <ConversationLandmarkList reference={session.control} active={active} reveal={reference => revealConversationItem(reference, target)}/>, revealRequest: revealRequest?.displayId === workbenchSessionStageHostId(target, linkOrigin.regionId!) ? revealRequest : null }} eligible={presentationHistory?.displayId === workbenchSessionStageHostId(target, linkOrigin.regionId!) || viewMode !== 'terminal' && canReadConversation}
+      activity={{ ...activityProps, onQuestionReply: input => sendConversationQuestionReply(session.control, input, moteInputSource(session.id, presentationOrigin(target))), renderReadingTools: active => <ConversationLandmarkList reference={session.control} active={active} reveal={(reference, routeHostId) => revealConversationItem(reference, target, undefined, undefined, routeHostId)}/>, revealRequest: revealRequest?.displayId === workbenchSessionStageHostId(target, linkOrigin.regionId!) ? revealRequest : null }} eligible={presentationHistory?.displayId === workbenchSessionStageHostId(target, linkOrigin.regionId!) || viewMode !== 'terminal' && canReadConversation}
       recovery={pendingAgentRestore && !moteHistoryReading ? cloneElement(restoreSurface, { visible: target.visible !== false, supplement: null, actions: agentRecoveryActionAt(presentationOrigin(target), workbenchSessionStageHostId(target, linkOrigin.regionId!)), details: { ...restoreSurface.props.details, content: retainedDetailsAt(presentationOrigin(target), workbenchSessionStageHostId(target, linkOrigin.regionId!)) } }) : undefined}
       readOnly={readOnly} resourceOrigin={linkOrigin}
       {...(hasAgentComposer ? { onAnnotate: annotateMessage } : {})}
