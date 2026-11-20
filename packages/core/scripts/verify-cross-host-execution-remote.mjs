@@ -20,7 +20,7 @@ const flags = new Map();
 for (let index = 2; index < process.argv.length; index += 2) {
     const flag = process.argv[index];
     if (flag === '--help' && process.argv.length === 3) {
-        console.log('node verify-cross-host-execution-remote.mjs --receipt FILE [--mode full|native|recovery|reader-gap|performance] [--direction both|remote-agent|local-agent] [--retained-modes FILE]\nThe receipt must retain agentmux.cross-host-target-authorization.v1 and executionCandidate: {schema:"agentmux.cross-host-installed-candidate.v1", sourceCommit, scopeId, candidateReceipt, local:{packageRoot,nodePath,codexDirectory}, remote:{installedRoot,packageRoot,nodePath,codexDirectory,profileRoot,command,endpoint:{transport:"ssh",host,user?}}}. The installed root must contain .agentmux-cross-host-test-root.json with the same scopeId/sourceCommit/hostId/profileRoot/nodePath. No package installation occurs. --retained-modes explicitly revalidates original mode receipts against the current exact installed candidate and authorization; it never replays their operations.');
+        console.log('node verify-cross-host-execution-remote.mjs --receipt FILE [--mode full|native|recovery|executor-recovery|reader-gap|performance] [--direction both|remote-agent|local-agent] [--retained-modes FILE]\nExecutor recovery uses --direction remote-agent and replaces only its private project Native instance.\nThe receipt must retain agentmux.cross-host-target-authorization.v1 and executionCandidate: {schema:"agentmux.cross-host-installed-candidate.v1", sourceCommit, scopeId, candidateReceipt, local:{packageRoot,nodePath,codexDirectory}, remote:{installedRoot,packageRoot,nodePath,codexDirectory,profileRoot,command,endpoint:{transport:"ssh",host,user?}}}. The installed root must contain .agentmux-cross-host-test-root.json with the same scopeId/sourceCommit/hostId/profileRoot/nodePath. No package installation occurs. --retained-modes explicitly revalidates original mode receipts against the current exact installed candidate and authorization; it never replays their operations.');
         process.exit(0);
     }
     assert(['--receipt', '--mode', '--direction', '--retained-modes'].includes(flag) && !flags.has(flag) && process.argv[index + 1], 'Unknown, duplicate or incomplete verifier argument');
@@ -28,8 +28,9 @@ for (let index = 2; index < process.argv.length; index += 2) {
 }
 assert(flags.has('--receipt'), 'An original target authorization receipt is required; no service was created');
 const mode = flags.get('--mode') ?? 'full', direction = flags.get('--direction') ?? 'both';
-assert(['full', 'native', 'recovery', 'reader-gap', 'performance'].includes(mode), 'Unknown verification mode');
+assert(['full', 'native', 'recovery', 'executor-recovery', 'reader-gap', 'performance'].includes(mode), 'Unknown verification mode');
 assert(['both', 'remote-agent', 'local-agent'].includes(direction), 'Unknown verification direction');
+assert(mode !== 'executor-recovery' || direction === 'remote-agent', 'Project Native recovery requires the original local project Coordinator');
 assert(!flags.has('--retained-modes') || mode === 'full', 'Retained evidence belongs only to the full qualification join');
 const receiptPath = resolve(flags.get('--receipt'));
 const authorizationBytes = await fs.readFile(receiptPath);
@@ -390,6 +391,85 @@ try {
         assert.equal(binding.packet.result.state, 'connected');
         const stages = { initialMs: performance.now() - directionStarted };
         const nativeResult = { name, bindingId, agentSessionId, originalRun: session.run, toolExecution: session.toolExecution, agentPlatform: agent.platform, resourcePlatform: resource.platform, originalHelperRuns: [originalPair.frontend.runId, originalPair.executor.runId], resourcePathAbsentOnAgent: false, ...(collision?{samePathIsolation:collision}:{}), originalEffectCount: 1, agentControl:{original:originalControl,deviceRejected:true,missingCallerRejected:true}, operation: inspection.packet.result, stages };
+        if (mode === 'executor-recovery') {
+            const before = await helperFacts(agent, resource, originalPair);
+            const originalAgent = await agent.client.statusAgent(agentSessionId);
+            const frontendUrl = originalFrames.find(frame => frame.type === 'ready')?.url;
+            assert(typeof frontendUrl === 'string' && new URL(frontendUrl).hostname === '127.0.0.1');
+            resource.releaseDiagnostics?.();
+            await resource.client.dispose();
+            await resource.rpc.dispose();
+            const projectRestart = await control(resource, 'restart-project-native');
+            Object.assign(resource, projectRestart.receipt);
+            await connect(resource, resource.endpoint);
+            assert.equal(resource.client.runtimeOwnerIdentity().runtimeId, before.executor.core.runtimeId);
+            const nativeInstance = resource.client.runtimeIdentity().instanceId;
+            assert.notEqual(nativeInstance, before.executor.ctxmux.instanceId);
+            const retired = await resource.client.runtimeSubject({ kind: 'terminal-run', runId: originalPair.executor.runId });
+            assert.equal(retired.run.runId, originalPair.executor.runId);
+            assert(['exited', 'interrupted'].includes(retired.run.state), 'The old project helper must be terminal at the replacement Native owner');
+            await fs.writeFile(bindingFile, JSON.stringify({ bindingId, recoverProject: true }));
+            const repaired = await cli(resource, ['agent', 'execution', 'rejoin', '--input', bindingFile]);
+            assert.equal(repaired.code, 0, JSON.stringify(repaired.packet));
+            assert.equal(repaired.packet.result.diagnostic.nextAction, 'reconnect-provider');
+            const successor = pair(resource, bindingId);
+            assert.deepEqual(successor.input, originalPair.input);
+            assert.notEqual(successor.executor.runId, originalPair.executor.runId);
+            assert.equal(successor.executor.ownerInstanceId, nativeInstance);
+            const originalProjectOperation = await resource.client.inspectAgentExecutionOperation({ bindingId, streamGeneration: op.generation, nativeRequestId: op.payload.id });
+            assert.deepEqual(originalProjectOperation, inspection.packet.result);
+            const probe = `
+              import assert from 'node:assert/strict';
+              import { once } from 'node:events';
+              import { pathToFileURL } from 'node:url';
+              const socket = new WebSocket(process.argv[1]);
+              const timer = setTimeout(() => { console.error('No original frontend response'); process.exit(1); }, 20000);
+              const call = (id, method, params) => new Promise((resolve, reject) => {
+                const receive = event => {
+                  const reply = JSON.parse(event.data);
+                  if (reply.id !== id) return;
+                  socket.removeEventListener('message', receive);
+                  if (reply.error) reject(new Error(JSON.stringify(reply.error))); else resolve(reply.result);
+                };
+                socket.addEventListener('message', receive);
+                socket.send(JSON.stringify({ id, method, params }));
+              });
+              try {
+                await once(socket, 'open');
+                const initialized = await call(1, 'initialize', { clientName: 'project-native-recovery-proof', resumeSessionId: null });
+                assert.equal(initialized.environmentInfo.cwd, pathToFileURL(process.argv[2]).href);
+                socket.send(JSON.stringify({ method: 'initialized', params: {} }));
+                const reply = await call(2, 'fs/readFile', { path: pathToFileURL(process.argv[3]).href });
+                console.log(JSON.stringify(reply));
+              } finally { clearTimeout(timer); socket.close(); }
+            `;
+            const canonicalWorkspace = await fs.realpath(workspace);
+            const fileResult = JSON.parse(await ssh([remoteNodePath, '--input-type=module', '-e', probe, frontendUrl, canonicalWorkspace, join(canonicalWorkspace, 'effects.txt')])
+                .catch(error => { throw Error('Fresh project tool request failed: ' + String(error.stderr || error.code)); }));
+            assert.equal(Buffer.from(fileResult.dataBase64, 'base64').toString(), 'once\n');
+            let confirmed;
+            await until(async () => { confirmed = await resource.rpc.call('agent.execution.binding', { bindingId }); return confirmed.state === 'connected'; }, 'Fresh native initialization on the original binding');
+            const after = await helperFacts(agent, resource, successor);
+            const currentAgent = await agent.client.statusAgent(agentSessionId);
+            assert.equal(currentAgent.session.agentSessionId, originalAgent.session.agentSessionId);
+            assert.equal(currentAgent.run.runId, originalAgent.run.runId);
+            assert.equal(currentAgent.run.pid, originalAgent.run.pid);
+            assert.equal(after.frontend.run.runId, before.frontend.run.runId);
+            assert.equal(after.frontend.run.pid, before.frontend.run.pid);
+            assert.equal(await read(resource, join(workspace, 'effects.txt')), 'once\n');
+            results.push({ ...nativeResult, projectRestart: { previousNativePid: projectRestart.oldPid, currentNativePid: resource.nativePid,
+              previousInstance: before.executor.ctxmux.instanceId, currentInstance: nativeInstance, originalExecutorState: retired.run.state,
+              originalResourceRuntime: before.executor.core.runtimeId, currentResourceRuntime: resource.client.runtimeOwnerIdentity().runtimeId },
+              originalAgentPid: originalAgent.run.pid, currentAgent: { sessionId: currentAgent.session.agentSessionId, run: currentAgent.run.runId, pid: currentAgent.run.pid },
+              originalFrontendPid: before.frontend.run.pid, currentFrontend: { run: after.frontend.run.runId, pid: after.frontend.run.pid },
+              successorExecutorRunId: successor.executor.runId, confirmed, freshNativeFileRead: true,
+              originalOperationUnchanged: true });
+            await save('results.json', results);
+            await agent.client.stopAgent(agentSessionId, session.run);
+            release(); release = undefined;
+            terminal.dispose(); terminal = undefined;
+            continue;
+        }
         if (mode === 'native') {
             results.push(nativeResult);
             await save('results.json', results);
@@ -530,7 +610,7 @@ try {
     assert.equal(results.length, input.directions.length);
     assert(results.length > 0);
     assert.deepEqual(errors, []);
-    summary = { passed: true, mode, candidateCommit, actualMachines: 2, controlledModel: true, bothDirectionsPassed: results.length === 2, fullRemoteGatePassed: false, ...(mode==='performance'?{performance:{measurementChecksPassed:true,numericalBudgetVerdict:'unassigned',performanceAccepted:false}}:{}), scope: mode === 'performance' ? 'Two bindings per direction: cold/reused native requests, 1MiB file and long output, independent stopped reader, idle process/socket observations. Measurements do not assert universal latency/throughput budgets; fsync is unknown. Includes exact same-path resource isolation. Excludes full remote acceptance.' : mode === 'native' ? 'Native file and process operations only' : mode === 'recovery' ? 'Native file/process operations and original SID/native conversation after exact test Core restarts' : 'Native work, original SID/native conversation recovery and original exit notifications across an exact SSH reader byte gap; includes original native amux identity and explicit owner-change refusal; excludes strictly-dispatched unknown effects, hooks/MCP/skills qualification, performance and UI', results };
+    summary = { passed: true, mode, candidateCommit, actualMachines: 2, controlledModel: true, bothDirectionsPassed: results.length === 2, fullRemoteGatePassed: false, ...(mode==='performance'?{performance:{measurementChecksPassed:true,numericalBudgetVerdict:'unassigned',performanceAccepted:false}}:{}), scope: mode === 'performance' ? 'Two bindings per direction: cold/reused native requests, 1MiB file and long output, independent stopped reader, idle process/socket observations. Measurements do not assert universal latency/throughput budgets; fsync is unknown. Includes exact same-path resource isolation. Excludes full remote acceptance.' : mode === 'native' ? 'Native file and process operations only' : mode === 'recovery' ? 'Native file/process operations and original SID/native conversation after exact test Core restarts' : mode === 'executor-recovery' ? 'Project Native instance replacement with original Agent and frontend PIDs, durable completed operation and fresh original-frontend socket; does not assert the native CLI automatically reconnects' : 'Native work, original SID/native conversation recovery and original exit notifications across an exact SSH reader byte gap; includes original native amux identity and explicit owner-change refusal; excludes strictly-dispatched unknown effects, hooks/MCP/skills qualification, performance and UI', results };
 }
 catch (error) {
     await save('failure.json', { error: String(error), stack: error.stack, errors, owners: owners.map(ownerResult) });

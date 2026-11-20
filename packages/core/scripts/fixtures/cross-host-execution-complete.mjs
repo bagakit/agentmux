@@ -79,6 +79,22 @@ export function validateUi(receipt, candidate, expectedDist) {
   assert(receipt.cleanup?.errors?.length === 0 && receipt.cleanup.remaining?.length === 0, 'UI cleanup is unconfirmed')
 }
 export function validateRemote(summary, mode, commit) {
+  if (mode === 'executor-recovery') {
+    assert(summary.passed === true && summary.mode === mode && summary.actualMachines === 2 && summary.cleanupErrors?.length === 0)
+    assert.equal(summary.candidateCommit, commit, 'Project recovery ran against a different candidate')
+    assert.deepEqual(summary.results?.map(result => result.name), ['remote-agent'])
+    const result = summary.results[0], native = result.projectRestart
+    assert(Number.isInteger(native.previousNativePid) && Number.isInteger(native.currentNativePid) && native.previousNativePid !== native.currentNativePid)
+    assert(native.previousInstance && native.currentInstance && native.previousInstance !== native.currentInstance &&
+      native.originalResourceRuntime && native.originalResourceRuntime === native.currentResourceRuntime && ['exited', 'interrupted'].includes(native.originalExecutorState))
+    assert(result.agentSessionId && result.originalRun?.runId && Number.isInteger(result.originalAgentPid) && Number.isInteger(result.originalFrontendPid))
+    assert.deepEqual(result.currentAgent, { sessionId: result.agentSessionId, run: result.originalRun.runId, pid: result.originalAgentPid })
+    assert(result.originalHelperRuns?.length === 2 && result.originalHelperRuns.every(Boolean))
+    assert.deepEqual(result.currentFrontend, { run: result.originalHelperRuns[0], pid: result.originalFrontendPid })
+    assert(result.successorExecutorRunId && result.successorExecutorRunId !== result.originalHelperRuns[1] && result.confirmed?.bindingId === result.bindingId &&
+      result.confirmed?.state === 'connected' && result.originalEffectCount === 1 && result.originalOperationUnchanged === true && result.freshNativeFileRead === true)
+    return
+  }
   assert(summary.passed === true && summary.mode === mode && summary.actualMachines === 2 && summary.bothDirectionsPassed === true && summary.cleanupErrors?.length === 0, 'Both real directions and cleanup must pass')
   assert.equal(summary.candidateCommit, commit, 'Remote result belongs to a different candidate')
   assert.deepEqual(summary.results?.map(result => result.name).sort(), directions, 'One direction cannot substitute for the other')
@@ -163,7 +179,7 @@ async function coreEvidence(candidate, buildReceipt) {
     scope: 'One physical machine: original Input ACK loss and restart, exact-related-consumer cost, native identity and permission semantics. This is not a remote strictly-dispatched fault experiment.' } }
 }
 async function runMode(verifierPath, receiptPath, mode, root) {
-  const child = spawn(process.execPath, [verifierPath, '--receipt', receiptPath, '--mode', mode, '--direction', 'both'], { stdio: ['ignore', 'pipe', 'pipe'] })
+  const child = spawn(process.execPath, [verifierPath, '--receipt', receiptPath, '--mode', mode, '--direction', mode === 'executor-recovery' ? 'remote-agent' : 'both'], { stdio: ['ignore', 'pipe', 'pipe'] })
   const out = [], err = []
   child.stdout.on('data', bytes => out.push(bytes)); child.stderr.on('data', bytes => err.push(bytes))
   const result = await new Promise((done, reject) => { child.once('error', reject); child.once('close', (code, signal) => done({ code, signal })) })
@@ -179,7 +195,7 @@ export async function readRetainedMode(ref, mode, candidate, authorizationSha256
   const proof = await readEvidence(ref.summary), input = await readEvidence(ref.input), execution = await readEvidence(ref.execution)
   validateRemote(proof, mode, candidate.sourceCommit)
   assert.equal(input.mode, mode); assert.equal(input.candidateCommit, candidate.sourceCommit)
-  assert.deepEqual([...input.directions].sort(), directions)
+  assert.deepEqual([...input.directions].sort(), mode === 'executor-recovery' ? ['remote-agent'] : directions)
   assert.equal(input.authorization?.sha256, authorizationSha256, 'Retained mode used a different authorization or candidate receipt')
   assert.deepEqual(input.installedObservation, preflight.installedObservation, 'Retained mode used different installed artifacts')
   assert.equal(execution.schema, 'agentmux.remote-mode-execution.v1')
@@ -256,8 +272,9 @@ export async function runComplete({ authorization, receiptPath, candidate, build
     }
     await save()
     const retained = retainedModesPath ? JSON.parse(await readFile(retainedModesPath, 'utf8')) : []
-    assert(Array.isArray(retained) && retained.every(ref => ['reader-gap', 'performance'].includes(ref.mode)) && new Set(retained.map(ref => ref.mode)).size === retained.length)
-    for (const mode of ['reader-gap', 'performance']) {
+    const modes = ['reader-gap', 'executor-recovery', 'performance']
+    assert(Array.isArray(retained) && retained.every(ref => modes.includes(ref.mode)) && new Set(retained.map(ref => ref.mode)).size === retained.length)
+    for (const mode of modes) {
       const previous = retained.find(ref => ref.mode === mode)
       if (previous) { summary.modes.push(await readRetainedMode(previous, mode, candidate, initial, preflight)); await save(); continue }
       const result = await runMode(verifierPath, receiptPath, mode, root)

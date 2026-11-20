@@ -83,6 +83,23 @@ test('two-direction remote proof rejects duplicate directions, repeated effects 
   }
   assert.throws(() => validateRemote({ passed: true, results: [] }, 'performance', commit))
 })
+test('project Native replacement cannot be certified by a Core restart or a replacement Agent', () => {
+  const proof = { passed: true, mode: 'executor-recovery', candidateCommit: commit, actualMachines: 2, cleanupErrors: [], results: [{
+    name: 'remote-agent', bindingId: 'binding', agentSessionId: 'agent', originalRun: { runId: 'agent-run' },
+    originalAgentPid: 3, currentAgent: { sessionId: 'agent', run: 'agent-run', pid: 3 }, originalHelperRuns: ['frontend', 'executor'],
+    originalFrontendPid: 4, currentFrontend: { run: 'frontend', pid: 4 }, successorExecutorRunId: 'new-executor',
+    projectRestart: { previousNativePid: 1, currentNativePid: 2, previousInstance: 'old', currentInstance: 'new',
+      originalResourceRuntime: 'project', currentResourceRuntime: 'project', originalExecutorState: 'interrupted' },
+    confirmed: { bindingId: 'binding', state: 'connected' }, originalEffectCount: 1, originalOperationUnchanged: true, freshNativeFileRead: true,
+  }] }
+  validateRemote(proof, 'executor-recovery', commit)
+  for (const change of [result => { result.projectRestart.currentNativePid = 1 }, result => { result.projectRestart.currentInstance = 'old' },
+    result => { result.currentAgent.pid = 5 }, result => { result.currentFrontend.run = 'replacement' },
+    result => { result.originalEffectCount = 2 }, result => { result.freshNativeFileRead = false }]) {
+    const invalid = structuredClone(proof); change(invalid.results[0])
+    assert.throws(() => validateRemote(invalid, 'executor-recovery', commit))
+  }
+})
 test('performance qualifies the exact one-MiB and four-MiB streams without inventing a latency SLA', () => {
   const direction = name => ({ name, qualification: { independentBindings: 2, unchangedHelpers: true, oneInitializationPerBinding: true,
     exactFileAndOutputBytes: true, healthyRequestsDuringProducer: true, noNewIdleNativeRequests: true, noNewIdleProcesses: true },
