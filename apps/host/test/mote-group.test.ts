@@ -687,6 +687,64 @@ it('publishes a due Group assignment to the selected original membership generat
   expect((await restored.call('space.mote.group.inspect', { groupId: group.id })).messages.map(message => message.id)).toEqual([published.messageId])
 })
 
+it('reads saved Group history while a live Core receipt is still pending', async () => {
+  const f = await fixture(), { rpc } = await f.start()
+  const a = f.target('mote-a')
+  const { group } = await rpc.call('space.mote.group.create', { name: 'Read independently', operationId: 'original-room', members: [a] })
+  const { message } = await rpc.call('space.mote.group.send', { groupId: group.id, operationId: 'original-message', body: 'Read the original text.', recipientIds: [a.spaceId] })
+  const delivery = message.deliveries[0]!
+  await waitForDelivery(async () => expect((await rpc.call('space.mote.group.inspect', { groupId: group.id })).messages[0]?.deliveries[0]?.status).toBe('accepted'))
+  const db = new DatabaseSync(join(f.root, 'groups.sqlite'))
+  try { db.prepare(`UPDATE deliveries SET data=json_set(data,'$.delivery.status','pending') WHERE operation_id=?`).run(delivery.operationId) }
+  finally { db.close() }
+  const receipt = f.client.inspectAgentInput.bind(f.client)
+  const held = Promise.withResolvers<void>(), reached = Promise.withResolvers<void>()
+  const observe = vi.spyOn(f.client, 'inspectAgentInput').mockImplementation(async input => {
+    if ('key' in input && input.key.submissionId === delivery.operationId) { reached.resolve(); await held.promise }
+    return receipt(input)
+  })
+  const live = rpc.call('space.mote.group.inspect', { groupId: group.id })
+  const timeout = Promise.withResolvers<never>()
+  const timer = setTimeout(() => timeout.reject(new Error('Saved history waited for a live Core receipt.')), 3500)
+  try {
+    await reached.promise
+    const saved = await Promise.race([rpc.call('space.mote.group.inspect', { groupId: group.id, receiptProjection: 'stored' }), timeout.promise])
+    expect(saved.messages[0]).toMatchObject({ id: message.id, body: message.body, deliveries: [{ status: 'pending' }] })
+    const list = await rpc.call('space.mote.group.list', { receiptProjection: 'stored' })
+    expect(list.groups[0]?.lastMessage?.id).toBe(message.id)
+    expect(observe.mock.calls.filter(([input]) => 'key' in input && input.key.submissionId === delivery.operationId)).toHaveLength(1)
+  } finally { clearTimeout(timer); held.resolve(); await live.catch(() => {}) }
+  expect((await live).messages[0]?.deliveries[0]?.status).toBe('accepted')
+})
+
+it('freezes a contextual Group discussion audience and publishes replies without another invitation', async () => {
+  const f = await fixture(), { rpc } = await f.start()
+  f.unblockSecond()
+  const a = f.target('mote-a'), b = f.target('mote-b'), c = f.target('mote-c')
+  const { group } = await rpc.call('space.mote.group.create', { name: 'Review together', operationId: 'review-group', members: [a, b] })
+  const input = { groupId: group.id, operationId: 'review-question', body: 'Does the original evidence change our decision?',
+    recipientIds: [], participation: 'contextual' as const }
+  const { message } = await rpc.call('space.mote.group.send', input)
+  expect(message.participation).toBe('contextual')
+  expect(message.deliveries.map(item => item.moteId).sort()).toEqual([a.spaceId, b.spaceId].sort())
+  await rpc.call('space.mote.group.members.add', { groupId: group.id, operationId: 'invite-later', expectedRevision: group.revision, members: [c] })
+  const again = await rpc.call('space.mote.group.send', input)
+  expect(again.message.id).toBe(message.id)
+  expect(again.message.deliveries.map(item => item.operationId)).toEqual(message.deliveries.map(item => item.operationId))
+  await waitForDelivery(() => expect(f.send.mock.calls.filter(([prompt]) => prompt.includes(input.body))).toHaveLength(2))
+  const wires = f.send.mock.calls.filter(([prompt]) => prompt.includes(input.body)).map(([prompt]) => prompt)
+  expect(wires.every(wire => wire.includes('finish quietly') && wire.includes('"participation":"contextual"') && wire.includes(message.id))).toBe(true)
+  const latest = await rpc.call('space.mote.group.inspect', { groupId: group.id, messageId: message.id })
+  const worker = latest.group.members.find(member => member.moteId === a.spaceId)?.thread?.agentSessionId
+  expect(worker).toBeTruthy()
+  const reply = await f.cli('reply', { groupId: group.id, inputOperationId: message.deliveries.find(item => item.moteId === a.spaceId)!.operationId,
+    operationId: 'review-answer', body: 'The original scope is still valid.' }, worker!)
+  expect(reply.code, reply.stderr).toBe(0)
+  expect(JSON.parse(reply.stdout).result.message).toMatchObject({ replyToMessageId: message.id, deliveries: [] })
+  const savedOnly = await rpc.call('space.mote.group.send', { groupId: group.id, operationId: 'archive-note', body: 'Record this only.', recipientIds: [] })
+  expect(savedOnly.message.deliveries).toEqual([])
+})
+
 it('saves one original public message, starts only invited members and reuses exact member input through public RPC', async () => {
   const f = await fixture(), { rpc, server } = await f.start()
   const { group } = await rpc.call('space.mote.group.create', { operationId: 'original-group', name: 'Release room', members: [f.target('mote-a'), f.target('mote-b')] })

@@ -5,6 +5,8 @@ import { resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '../../..')
 const variants = {
+  'wait-for-live-group-history': ['apps/host/src/mote-group.ts', "const stored = input.receiptProjection === 'stored'", 'const stored = false'],
+  'drop-contextual-audience': ['apps/host/src/mote-group-store.ts', "const audience = body.participation === 'contextual'", 'const audience = false'],
   'handoff-without-binding': ['apps/host/src/mote-group.ts',
     'membership = await store.memberForThread(input.groupId, actor.hostId, actor.agentSessionId)',
     'membership = await store.member(input.groupId, input.memberMoteId)'],
