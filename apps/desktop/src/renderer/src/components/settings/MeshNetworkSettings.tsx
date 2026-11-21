@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Switch, Textarea, TextInput } from '@agentmux/client-ui/input'
 import { mintObjectId } from '@agentmux/core/object-id'
+import type { MeshPeerCode } from '@agentmux/core/mesh-peer-code'
 import type { MeshNetworkInspection, MeshNetworkSettings, MeshOwnerTarget } from '@agentmux/core/mesh-network'
 import { api } from '../../lib/api'
 import { useAppStore, updateMeshSettingsDraft } from '../../store'
 import { configValuesEqual } from '../../../../shared/config-edit'
-import { meshConfiguration, meshDraftForRuntime, meshForm, meshPeerCode, type MeshForm, type MeshSettingsDraft } from '../../lib/mesh-settings-draft'
+import { meshConfiguration, meshDraftForRuntime, meshForm, meshPeerCode, meshPeerFormPatch, type MeshForm, type MeshSettingsDraft } from '../../lib/mesh-settings-draft'
 import { SettingsSaveBar } from './SettingsSaveBar'
 import { MeshNetworkMap } from './MeshNetworkMap'
 import { MeshAccessLinks } from './MeshAccessLinks'
@@ -23,9 +24,11 @@ const retained = (edit: MeshSettingsDraft): MeshSettingsDraft | undefined => edi
 function confirmMeshDraft(edit: MeshSettingsDraft, confirmed: MeshNetworkSettings) {
   const form = meshForm(confirmed.configuration, confirmed.identity?.peerId)
   const pending = edit.pending!
-  if (pending.gatewayCode) {
+  if (pending.gatewayCode || pending.peerApproval) {
     const hadAdvancedEdits = !configValuesEqual(edit.form, meshForm(edit.baseline.configuration, edit.baseline.identity?.peerId))
-    return retained({ ...edit, pending: undefined, baseline: hadAdvancedEdits ? edit.baseline : confirmed, form: hadAdvancedEdits ? edit.form : form })
+    const updated = { ...edit, pending: undefined, baseline: hadAdvancedEdits ? edit.baseline : confirmed, form: hadAdvancedEdits ? edit.form : form }
+    if (pending.peerApproval && updated.pairingInput?.trim() === pending.peerApproval) delete updated.pairingInput
+    return retained(updated)
   }
   const later = !configValuesEqual(edit.form, pending.submittedForm) || confirmed.operation && confirmed.operation.revision !== confirmed.revision
   return retained({ ...edit, pending: undefined, baseline: confirmed, form: later ? edit.form : form })
@@ -96,7 +99,8 @@ function MeshNetworkEditor({ active, onConnections, showTopology = true, join, o
             if (value?.pending?.operationId !== operationId) return value
             return confirmMeshDraft(value, result)
           }, true)
-          if (result.operation.revision !== result.revision) setNewer(result)
+          const remaining = meshDraftForRuntime(useAppStore.getState().meshSettingsDrafts, result.owner.runtimeId)
+          if (!join && (result.operation.revision !== result.revision || remaining && remaining.baseline.revision !== result.revision)) setNewer(result)
           setNotice('Original Mesh save confirmed')
         } else setIssue(result.operation === null ? 'The original save is not recorded. Your draft and operation are retained; inspect the original Core before another save.' : 'The original save remains unconfirmed. Its input and operation are retained.')
       } else if (held?.pending) {
@@ -125,7 +129,7 @@ function MeshNetworkEditor({ active, onConnections, showTopology = true, join, o
     void updateMeshSettingsDraft(saved.owner.runtimeId, value => retained({ ...value, baseline: value?.baseline ?? saved,
       form: { ...(value?.form ?? form), ...patch }, ...(pairingInput !== undefined ? { pairingInput } : {}), ...(value?.pending ? { pending: value.pending } : {}) })).catch(cause => setIssue(message(cause)))
   }
-  async function save(connection?: { form: MeshForm; code: string }) {
+  async function save(connection?: { form: MeshForm; gatewayCode?: string; peerApproval?: string }) {
     const baseline = connection ? settings : saved
     if (!baseline || !form || saving || pending || (!connection && newer) || editIssue) return
     let sent = false, operationId = ''
@@ -137,7 +141,8 @@ function MeshNetworkEditor({ active, onConnections, showTopology = true, join, o
       await updateMeshSettingsDraft(runtimeId, value => {
         if (value?.pending) throw new Error('A Mesh save is already being checked. Continue with that save first.')
         return { ...value, baseline: value?.baseline ?? baseline, form: value?.form ?? form,
-          pending: { operationId, expectedRevision: baseline.revision, submitted: configuration, submittedForm, phase: 'in-flight', ...(connection ? { gatewayCode: connection.code } : {}) } }
+          pending: { operationId, expectedRevision: baseline.revision, submitted: configuration, submittedForm, phase: 'in-flight',
+            ...(connection?.gatewayCode ? { gatewayCode: connection.gatewayCode } : {}), ...(connection?.peerApproval ? { peerApproval: connection.peerApproval } : {}) } }
       }, true)
       sent = true
       const result = await api.mesh.call('settings.mesh.configure', { ...destination, expectedRevision: baseline.revision, operationId, configuration }, { expectedOwner: settings!.owner })
@@ -147,7 +152,9 @@ function MeshNetworkEditor({ active, onConnections, showTopology = true, join, o
         if (value?.pending?.operationId !== operationId) return value
         return confirmMeshDraft(value, result.settings)
       }, true)
-      current.current = result.settings; setSettings(result.settings); setNewer(undefined); setNotice('Mesh settings saved')
+      current.current = result.settings; setSettings(result.settings); setNotice('Mesh settings saved')
+      const held = meshDraftForRuntime(useAppStore.getState().meshSettingsDrafts, runtimeId)
+      setNewer(!join && held && held.baseline.revision !== result.settings.revision ? result.settings : undefined)
       if (visible.current) void inspectNetwork()
     } catch (cause) {
       const failure = cause as { code?: string; controlFailure?: { disposition?: string } }
@@ -160,14 +167,20 @@ function MeshNetworkEditor({ active, onConnections, showTopology = true, join, o
       setIssue(message(cause))
       if (visible.current && connection && (!notApplied || failure?.code === 'MESH_REVISION_CHANGED')) {
         const read = await inspect(notApplied ? undefined : operationId)
-        if (notApplied && read) setNotice('Settings refreshed. Confirm the selected gateway to connect.')
+        if (notApplied && read) setNotice(connection.peerApproval ? 'Settings refreshed. Confirm the device to approve it.' : 'Settings refreshed. Confirm the selected gateway to connect.')
       }
     } finally { setSaving(false) }
   }
   async function resolveDraft(keep: boolean) {
     if (!newer) return
-    await updateMeshSettingsDraft(newer.owner.runtimeId, value => value ? retained({ ...value, pending: undefined, baseline: newer, form: keep ? value.form : meshForm(newer.configuration, newer.identity?.peerId) }) : undefined, true)
+    await updateMeshSettingsDraft(newer.owner.runtimeId, value => value ? retained({ ...value, baseline: newer, form: keep ? value.form : meshForm(newer.configuration, newer.identity?.peerId) }) : undefined, true)
     setSettings(newer); setNewer(undefined); setIssue('')
+  }
+  function approvePeer(code: string, peer: MeshPeerCode) {
+    if (!settings) return
+    const latest = meshForm(settings.configuration, settings.identity?.peerId)
+    const patch = meshPeerFormPatch(latest, code, peer, settings.identity?.peerId, false)
+    void save({ form: { ...latest, ...patch }, peerApproval: code })
   }
   const peerCode = settings && settings.configuration.role !== 'disabled' ? meshPeerCode(settings) : null
   const hasTopology = Boolean(network && (network.peers.length || network.records.length || network.routes.length))
@@ -192,7 +205,7 @@ function MeshNetworkEditor({ active, onConnections, showTopology = true, join, o
 
   if (join) return <MeshGatewayJoin active={active} settings={settings} snapshot={snapshot} networkIssue={networkIssue} peerCode={peerCode}
     issue={issue} draftIssue={editIssue} notice={notice} reading={reading} saving={saving} pending={pending}
-    onConnect={(form, code) => void save({ form, code })} onCheck={refresh} onCopy={copy} copyFeedback={copyFeedback}
+    onConnect={(form, gatewayCode) => void save({ form, gatewayCode })} onCheck={refresh} onCopy={copy} copyFeedback={copyFeedback}
     onAccess={onAccess} onManage={onManage} onDone={onDone} onCheckSave={() => { if (pending) void inspect(pending.operationId) }}
     identityRecovery={identityRecovery} openSeparate={newIdentityWindow || target ? undefined : openIdentitySetup} openingSeparate={openingIdentity}
     separateIssue={identitySetupIssue} separateRequested={identitySetupRequested} />
@@ -239,7 +252,9 @@ function MeshNetworkEditor({ active, onConnections, showTopology = true, join, o
           <button type="button" aria-pressed={form.role === 'gateway'} onClick={() => change({ role: 'gateway' })}><span className="mesh-task-label"><strong>Provide a gateway</strong><span aria-hidden="true">{form.role === 'gateway' ? '✓' : '↗'}</span></span><span>Let devices connect here, including while this device uses an upstream gateway.</span></button>
         </div>
         <MeshPeerPairing input={edit?.pairingInput ?? ''} form={form} ownPeerId={settings?.identity?.peerId} inputRef={pairingField} allowNewNetwork={saved.configuration.role === 'disabled' && form.networkId === saved.configuration.networkId}
-          onInput={value => change({}, value)} onAdd={patch => change(patch, '')} />
+          onInput={value => change({}, value)} onAdd={patch => change(patch, '')}
+          onApprove={settings?.configuration.role === 'gateway' && snapshot?.source === 'managed' ? approvePeer : undefined} busy={saving || Boolean(pending)} />
+        {pending?.peerApproval ? pendingAction : null}
         <div className="mesh-code-action">{peerCode ? <><button className="small-button" onClick={() => void copy(peerCode)}>Copy saved connection code</button><span className="field-hint">{dirty ? 'Save changes before sharing the updated code.' : 'Exchange codes with the other device. Each device adds its peer and saves.'}</span></> : <p className="field-hint">Add the peer and save. Then copy this device’s code back to its operator.</p>}</div>
         <details className="mesh-advanced"><summary>Network name and peer codes{form.peers.trim() ? ` · ${form.peers.trim().split(/\s+/u).length} saved or pending` : ''}</summary>
           <label className="mesh-form-field"><span>Network name</span><TextInput aria-label="Mesh network" value={form.networkId} onChange={event => change({ networkId: event.target.value })} /></label>
@@ -255,7 +270,7 @@ function MeshNetworkEditor({ active, onConnections, showTopology = true, join, o
       </section>}
       {conflict}
       <SettingsSaveBar save={{ state: issue || editIssue ? 'error' : saving ? 'saving' : notice ? 'saved' : 'idle', error: issue || editIssue, saving }} dirty={dirty || Boolean(pending)} label="Save Mesh settings" scopeLabel="Mesh" onSave={() => void save()} blocked={pending ? 'Inspect the original save first' : newer ? 'Review the current saved version' : editIssue || undefined} />
-      {pendingAction}
+      {!pending?.peerApproval ? pendingAction : null}
       {notice ? <p role="status" className="mesh-network-notice">{notice}</p> : null}
     </> : null}
     {settings && form && saved ? <MeshAccessLinks active={active} target={target} deviceLabel={deviceLabel} snapshot={snapshot} offerText={originalOffer} copy={copy}

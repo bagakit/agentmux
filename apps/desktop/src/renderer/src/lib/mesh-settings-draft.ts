@@ -9,7 +9,7 @@ export type MeshForm = {
 }
 export type MeshSettingsDraft = {
   baseline: MeshNetworkSettings; form: MeshForm; linkInput?: string; pairingInput?: string
-  pending?: { operationId: string; expectedRevision: string; submitted: MeshNetworkConfiguration; submittedForm: MeshForm; phase: 'in-flight' | 'unknown'; gatewayCode?: string } | undefined
+  pending?: { operationId: string; expectedRevision: string; submitted: MeshNetworkConfiguration; submittedForm: MeshForm; phase: 'in-flight' | 'unknown'; gatewayCode?: string; peerApproval?: string } | undefined
 }
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value))
 const unreadable = (): never => { throw new Error('The original Mesh edit cannot be read. Its saved bytes and existing work are retained.') }
@@ -25,7 +25,8 @@ export function meshDraftForRuntime(value: unknown, runtimeId: string): MeshSett
   if (draft.linkInput !== undefined && typeof draft.linkInput !== 'string') return unreadable()
   if (draft.pending !== undefined && (!record(draft.pending) || typeof draft.pending.operationId !== 'string' || !draft.pending.operationId ||
       typeof draft.pending.expectedRevision !== 'string' || !record(draft.pending.submitted) || !readableForm(draft.pending.submittedForm) || !['in-flight', 'unknown'].includes(draft.pending.phase as string) ||
-      draft.pending.gatewayCode !== undefined && typeof draft.pending.gatewayCode !== 'string')) return unreadable()
+      draft.pending.gatewayCode !== undefined && typeof draft.pending.gatewayCode !== 'string' ||
+      draft.pending.peerApproval !== undefined && typeof draft.pending.peerApproval !== 'string')) return unreadable()
   try { if (!readableForm(meshForm(draft.baseline.configuration as MeshNetworkConfiguration))) return unreadable() } catch { return unreadable() }
   return draft as unknown as MeshSettingsDraft
 }

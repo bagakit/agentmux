@@ -3,10 +3,12 @@ import { TextInput } from '@agentmux/client-ui/input'
 import { useId, useState } from 'react'
 import { meshPeerFormPatch, type MeshForm } from '../../lib/mesh-settings-draft'
 
-export function MeshPeerPairing({ input, form, ownPeerId, allowNewNetwork, inputRef, onInput, onAdd }: {
+export function MeshPeerPairing({ input, form, ownPeerId, allowNewNetwork, inputRef, onInput, onAdd, onApprove, busy }: {
   input: string; form: MeshForm; ownPeerId?: string | undefined; allowNewNetwork: boolean; inputRef: React.RefObject<HTMLInputElement | null>
   onInput(value: string): void
   onAdd(patch: Partial<MeshForm>): void
+  onApprove?: ((code: string, peer: MeshPeerCode) => void) | undefined
+  busy?: boolean
 }) {
   const [error, setError] = useState('')
   const errorId = useId()
@@ -16,7 +18,8 @@ export function MeshPeerPairing({ input, form, ownPeerId, allowNewNetwork, input
   function add() {
     try {
       const next = decodeMeshPeerCode(code)
-      onAdd(meshPeerFormPatch(form, code, next, ownPeerId, allowNewNetwork))
+      if (onApprove) onApprove(code, next)
+      else onAdd(meshPeerFormPatch(form, code, next, ownPeerId, allowNewNetwork))
       setError('')
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
   }
@@ -25,7 +28,7 @@ export function MeshPeerPairing({ input, form, ownPeerId, allowNewNetwork, input
       aria-invalid={Boolean(error && !candidate) || undefined} aria-describedby={error ? errorId : undefined} spellCheck={false}
       placeholder="Paste its Mesh connection code" onChange={e => { setError(''); onInput(e.target.value) }} /></label>
     {candidate ? <MeshPeerPreview peer={candidate} /> : null}
-    {code ? <button type="button" className="small-button" onClick={add}>Add to network settings</button> : null}
+    {code ? <button type="button" className={onApprove ? 'primary-button' : 'small-button'} disabled={Boolean(onApprove && busy)} onClick={add}>{onApprove ? 'Approve device' : 'Add to network settings'}</button> : null}
     {error ? <p id={errorId} className="settings-inline-error" role="alert">{error}</p> : null}
   </div>
 }
