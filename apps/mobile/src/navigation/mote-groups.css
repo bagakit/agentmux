@@ -7,19 +7,20 @@
 .mobile-mote-groups__row :is(strong, small) { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mobile-mote-groups__row small { color: var(--text-3); font-size: var(--fs-meta); }
 .mobile-mote-groups__thread { min-width: 0; }
-.mobile-mote-groups :is(.agent-button, .mote-group__views button, .mote-group__recipients button, .mote-group__members button) { min-height: 44px; }
+.mobile-mote-groups :is(.agent-button, .mote-group__views button, .mote-group__recipients button, .mote-group__members button, .mote-group__quiet-action) { min-height: 44px; }
 .mobile-sheet--mote-groups { display: flex; flex-direction: column; }
 .mobile-sheet--mote-groups > .mobile-mote-groups { overflow: auto; }
 .mobile-mote-groups-entry { margin-inline: 12px; }
 .mobile-mote-groups-description { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .mobile-sheet--mote-groups .mote-group__header { padding-block: var(--sp-2); }
 .mobile-sheet--mote-groups .mote-group__header p { margin: var(--sp-1) 0 0; }
+.mobile-sheet--mote-groups .mote-group__conversation-header { flex-wrap: wrap; gap: var(--sp-2); }
+.mobile-sheet--mote-groups .mote-group__identity h2 { overflow-wrap: anywhere; white-space: normal; }
+.mobile-sheet--mote-groups .mote-group__conversation-header .mote-group__header-actions { margin-inline-start: auto; }
 .mobile-sheet--mote-groups .mote-group__quote { margin: 0 0 var(--sp-1); }
-.mobile-sheet--mote-groups .mote-group__send textarea { resize: none; }
 .mobile-mote-groups__content { min-height: 0; display: flex; flex-direction: column; }
 .mobile-mote-groups__content[hidden] { display: none; }
-.mobile-mote-groups__files-state { padding: var(--sp-2); }
-.mobile-mote-groups :is(.mote-group__quote-action, .mote-group__receipts button) { min-width: 44px; min-height: 44px; }
+.mobile-mote-groups :is(.mote-group__quote-action, .mote-group__receipts > li > button, .mote-group-files__list button) { min-width: 44px; min-height: 44px; }
 
 .mobile-mote-groups .mote-group-settings { max-block-size: none; padding: var(--sp-3); }
 .mobile-mote-groups .mote-group-settings > .mote-group__views > button { min-block-size: 44px; }
@@ -28,11 +29,12 @@
 .mobile-mote-groups .mote-group-settings__member-actions { justify-content: start; padding-inline-start: 47px; }
 .mobile-mote-groups .mote-group-settings__member-actions .agent-button { min-block-size: 44px; }
 
-@media (max-width: 360px) {
-  .mobile-sheet--mote-groups .mote-group__header:has(.mote-group__identity) {
-    flex-direction: column;
-    align-items: stretch;
-    gap: var(--sp-2);
-  }
-  .mobile-sheet--mote-groups .mote-group__header-actions { justify-content: end; }
+.mobile-sheet--mote-groups .mote-group__composer-footer { flex-wrap: wrap; justify-content: end; gap: var(--sp-1); }
+.mobile-sheet--mote-groups .mote-group__recipients {
+  flex: 1 0 auto;
+  max-inline-size: 100%;
+  flex-wrap: wrap;
+  max-block-size: 92px;
+  overflow: auto;
 }
+.mobile-sheet--mote-groups .mote-group__recipients button > span:last-child { overflow: hidden; text-overflow: ellipsis; }

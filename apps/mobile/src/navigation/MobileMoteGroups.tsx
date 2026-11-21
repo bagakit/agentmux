@@ -198,10 +198,10 @@ export function MobileMoteGroups({ client, connected, moteId, positions, openHtt
     {topicCandidates.error ? <Notice tone="warning" density="compact" messageRole="status"
       actions={<Button type="button" onClick={() => setCandidateRevision(value => value + 1)}>重读 Topics</Button>}>{topicCandidates.error}</Notice> : null}
     {draftNotice ? <Notice tone="warning" density="compact" messageRole="status">{draftNotice}</Notice> : null}
-    <MoteGroupConversation call={call} candidates={candidates.values} topicCandidates={topicCandidates.values} groupId={groupId} creating={creating}
+    <MoteGroupConversation call={call} initialGroup={groups.groups.find(group => group.id === groupId)} candidates={candidates.values} topicCandidates={topicCandidates.values} groupId={groupId} creating={creating}
       renderMoteAvatar={renderMoteAvatar} onOpenTopicFiles={setFiles}
       {...(moteId ? { initialMoteId: moteId } : {})} initialMembers={view !== 'create' && view.members}
-      onOpen={groupId => setView({ groupId, members: false })} onClose={() => setView(null)} positions={positions} {...custody}
+      onOpen={groupId => setView({ groupId, members: false })} onChanged={groups.observe} onClose={() => setView(null)} positions={positions} {...custody}
       renderThread={thread => <MobileMoteGroupThread client={connected && sourceMatches() ? client : null} thread={thread} />} />
     </div>
     {files && groupId && <MoteGroupFiles key={groupId} target={files} groupId={groupId} call={call}

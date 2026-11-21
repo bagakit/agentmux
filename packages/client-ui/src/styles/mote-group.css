@@ -1,5 +1,6 @@
 .mote-group {
   --group-inset: clamp(14px, 3vw, 24px);
+  --group-reading-width: 840px;
   --group-wash: color-mix(in srgb, var(--accent, var(--blue)) 10%, var(--surface-1));
   display: flex;
   flex: 1;
@@ -25,17 +26,32 @@
 .mote-group__identity > div { min-width: 0; }
 .mote-group__identity h2 { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .mote-group__header-actions, .mote-group__create-actions { display: flex; align-items: center; flex: none; gap: 6px; }
-.mote-group__hero-icon, .mote-group__avatar {
+.mote-group__avatar {
   display: inline-grid; place-items: center; flex: none; width: 34px; height: 34px; border-radius: 12px;
   background: var(--group-wash); color: var(--text); font-weight: 650;
 }
-.mote-group__hero-icon { width: 38px; height: 38px; border-radius: 13px; }
+.mote-group__avatar[data-initial]::before { content: attr(data-initial); }
+.mote-group__avatar[data-size="small"] { inline-size: 22px; block-size: 22px; border-radius: 50%; font-size: 11px; }
+.mote-group__avatar[data-size="small"] .space-object-icon { inline-size: 22px; block-size: 22px; }
+.mote-group__conversation-header h2 { font-size: 17px; }
+.mote-group__conversation-header .mote-group-avatar { inline-size: 42px; block-size: 42px; }
+.mote-group__quiet-action { display: inline-flex; align-items: center; gap: 5px; min-inline-size: 36px; min-block-size: 32px; padding: 4px 8px; border: 0; border-radius: 8px; background: transparent; color: var(--text-2); font: inherit; white-space: nowrap; cursor: pointer; }
+.mote-group__quiet-action:hover, .mote-group__quiet-action[aria-expanded="true"] { background: var(--surface-2); color: var(--text); }
+.mote-group__quiet-action span { max-inline-size: 15ch; overflow: hidden; text-overflow: ellipsis; }
+.mote-group__current-announcement { flex: none; margin: 0 var(--group-inset) 6px; padding: 8px 12px; border-radius: 10px; background: var(--surface-1); color: var(--text-2); }
+.mote-group__current-announcement summary { display: flex; align-items: baseline; gap: 10px; cursor: pointer; list-style: none; }
+.mote-group__current-announcement summary::after { content: '＋'; margin-inline-start: auto; }
+.mote-group__current-announcement[open] summary::after { content: '−'; }
+.mote-group__current-announcement summary strong { flex: none; color: var(--text); }
+.mote-group__current-announcement summary span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mote-group__current-announcement[open] summary span { visibility: hidden; }
+.mote-group__current-announcement p { max-block-size: 18vh; overflow: auto; margin: 6px 0 2px; overflow-wrap: anywhere; white-space: pre-wrap; }
 .mote-group__views, .mote-group__recipients {
   display: flex; align-items: center; flex: none; gap: 5px; min-width: 0; overflow-x: auto;
   padding: 0 var(--group-inset) 8px; scrollbar-width: thin;
 }
 .mote-group__views button, .mote-group__recipients button {
-  flex: none; max-width: 12rem; min-height: 28px; padding: 4px 9px; border: 0; border-radius: 8px;
+  display: inline-flex; align-items: center; gap: 5px; flex: none; max-width: 12rem; min-height: 32px; padding: 4px 9px; border: 0; border-radius: 8px;
   background: transparent; color: var(--text-2); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; cursor: pointer;
 }
 .mote-group__views button:hover, .mote-group__recipients button:hover { background: var(--surface-2); color: var(--text); }
@@ -52,6 +68,7 @@
 .mote-group-settings__member > button > :last-child { margin-inline-start: auto; font-size: var(--fs-meta, 12px); color: var(--text-2); }
 .mote-group > .ui-notice { margin: 0 var(--group-inset) 8px; }
 .mote-group__timeline { flex: 1; min-height: 0; overflow: auto; padding: 12px var(--group-inset) 16px; overscroll-behavior: contain; }
+.mote-group__timeline > :is(article, .mote-group__announcement, .mote-group__thread) { max-inline-size: var(--group-reading-width); margin-inline: auto; }
 .mote-group__timeline > .agent-button { display: block; margin: 0 auto 14px; }
 .mote-group__empty, .mote-group--empty { box-sizing: border-box; display: grid; place-content: center; justify-items: center; min-height: 100%; padding: 15px; gap: 8px; color: var(--text-2); text-align: center; }
 .mote-group__empty p { max-width: 29ch; margin: 0; line-height: 1.55; }
@@ -69,27 +86,46 @@
   padding: 2px 3px; border: 0; border-radius: 4px; background: transparent; color: var(--text-2); font: inherit; cursor: pointer;
 }
 .mote-group__quote-action:hover, .mote-group__receipts button:hover { color: var(--text); background: var(--surface-2); }
-.mote-group__receipts { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: var(--fs-meta, 12px); color: var(--text-2); }
-.mote-group__receipts li { padding: 2px 6px; border-radius: 6px; background: var(--surface-1); }
-.mote-group__receipts li[data-status="failed"], .mote-group__receipts li[data-status="unknown"] { color: var(--amber-text, var(--text)); }
+.mote-group__receipts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 4px; inline-size: min(100%, 380px); margin: 2px 0 0; padding: 0; list-style: none; color: var(--text-2); }
+.mote-group__receipts li { display: flex; gap: 7px; align-items: flex-start; min-inline-size: 0; padding: 6px 8px; border-radius: 9px; background: var(--surface-1); }
+.mote-group__progress-copy { display: grid; flex: 1; gap: 3px; min-inline-size: 0; font-size: var(--fs-meta, 12px); }
+.mote-group__progress-copy > span { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 5px; row-gap: 1px; }
+.mote-group__progress-copy strong { color: var(--text); font-weight: 600; }
+.mote-group__progress-copy small, .mote-group__progress-preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: start; font: inherit; }
+.mote-group__milestone { display: inline-flex; gap: 4px; align-items: center; white-space: nowrap; animation: mote-group-milestone-in 180ms ease-out both; }
+.mote-group__milestone i { inline-size: 5px; block-size: 5px; border-radius: 50%; background: currentColor; }
+.mote-group__receipts li[data-status="pending"] i { animation: mote-group-pending 1200ms ease-in-out 3; }
+.mote-group__receipts li[data-status="reported"] .mote-group__milestone { color: var(--accent-text, var(--text)); }
+.mote-group__receipts li:is([data-status="failed"], [data-status="unknown"]) .mote-group__milestone { color: var(--amber-text, var(--text)); }
+@keyframes mote-group-milestone-in { from { opacity: .55; transform: translateY(2px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes mote-group-pending { 50% { opacity: .48; transform: scale(.82); } }
+@media (prefers-reduced-motion: reduce) {
+  .mote-group__milestone, .mote-group__receipts li[data-status="pending"] i { animation: none; }
+}
 .mote-group__thread { margin-block-start: 16px; padding: 11px; border-radius: 12px; background: var(--surface-1); }
 .mote-group__thread summary { font-weight: 600; cursor: pointer; }
 .mote-group__thread > :not(summary) { margin-top: 8px; min-height: 160px; max-height: 55vh; }
-.mote-group__composer { position: relative; display: grid; gap: 5px; flex: none; margin: 0 var(--group-inset) 12px; padding: 8px; border-radius: 14px; background: var(--surface-1); }
-.mote-group__recipients { padding: 0; }
-.mote-group__recipients > span { flex: none; padding-inline: 3px; color: var(--text-2); font-size: var(--fs-meta, 12px); }
-.mote-group__recipients button { background: var(--surface-2); }
-.mote-group__send { display: flex; align-items: end; gap: 6px; }
-.mote-group__message-input { flex: 1; min-width: 0; }
-.mote-group__mention-menu { position: absolute; inset-inline: 8px; bottom: calc(100% + 6px); z-index: 2; display: grid; gap: 2px; padding: 4px; border-radius: 10px; max-height: 12rem; overflow: auto; background: var(--surface-2); box-shadow: var(--shadow-popover, 0 8px 25px #0003); }
-.mote-group__mention-menu button { justify-content: flex-start; text-align: start; }
-.mote-group__send textarea, .mote-group__field input {
-  min-width: 0; width: 100%; padding: 9px; border: 1px solid transparent; border-radius: 8px; background: var(--surface-2); color: var(--text);
-  font: inherit; line-height: 1.4;
+.mote-group__composer {
+  position: relative; display: grid; gap: 4px; align-self: center; flex: none; box-sizing: border-box;
+  inline-size: min(calc(100% - 2 * var(--group-inset)), var(--group-reading-width)); margin-block: 3px 12px;
+  padding: 7px 9px; border-radius: 16px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line-soft);
 }
-.mote-group__send textarea { box-sizing: border-box; display: block; resize: vertical; max-height: 170px; }
-.mote-group__send textarea:focus, .mote-group__field input:focus { outline: none; border-color: var(--accent, var(--blue)); }
-.mote-group__send > button { min-height: 35px; flex: none; }
+.mote-group__composer:focus-within { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent, var(--blue)) 55%, var(--line-soft)); }
+.mote-group__composer-footer { display: flex; align-items: center; gap: 8px; min-inline-size: 0; }
+.mote-group__recipients { flex: 1; padding: 0; }
+.mote-group__recipients > span { flex: none; order: -2; padding-inline: 3px; color: var(--text-2); font-size: var(--fs-meta, 12px); }
+.mote-group__recipients button { border-radius: 20px; }
+.mote-group__recipients button[aria-pressed="true"] { order: -1; }
+.mote-group__send { min-inline-size: 0; }
+.mote-group__send .composer__editor { padding: 3px 3px 0; background: transparent; border: 0; box-shadow: none; }
+.mote-group__send .tiptap { min-block-size: 44px; max-block-size: 132px; padding: 5px 3px; line-height: 1.5; outline: none; }
+.mote-group__send .tiptap:focus-visible { outline: none; box-shadow: none; }
+.composer-semantic-token--mote, .mote-group__mention { border-radius: 5px; color: var(--text); background: color-mix(in srgb, var(--accent, var(--blue)) 25%, var(--surface-2)); }
+.mote-group__send .composer__editor .composer-semantic-token--mote { padding-inline: 3px; text-decoration: none; }
+.mote-group__mention { padding-inline: 3px; font: inherit; }
+.mote-group__field input { min-width: 0; width: 100%; padding: 9px; border: 1px solid transparent; border-radius: 8px; background: var(--surface-2); color: var(--text); font: inherit; line-height: 1.4; }
+.mote-group__field input:focus { outline: none; border-color: var(--accent, var(--blue)); }
+.mote-group__composer-footer > button { min-height: 34px; flex: none; }
 .mote-group__quote-preview { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .mote-group__quote-preview > span { margin: 0; }
 .mote-group--create {
@@ -195,6 +231,7 @@
 .mote-group-avatar[data-faces="3"], .mote-group-avatar[data-faces="4"] { grid-template-rows: repeat(2, minmax(0, 1fr)); }
 .mote-group-avatar[data-faces="3"] > span:first-child { grid-row: span 2; }
 .mote-group-avatar[data-faces] > span {
+  border-radius: 0;
   display: grid; place-content: center; overflow: hidden; inline-size: 100%; block-size: 100%;
   background: color-mix(in srgb, var(--surface-3) 86%, var(--text)); line-height: 1;
 }

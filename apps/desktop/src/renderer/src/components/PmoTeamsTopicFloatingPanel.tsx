@@ -361,22 +361,25 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
   const spaceZoneBindings = useAppStore(state => state.spaceZoneBindings)
   const groupSelection = floating.groupSelection
   const showingGroup = visible && (creatingGroup || Boolean(groupSelection))
-  const groupCandidates = useMemo(() => visible && scratch ? motes.flatMap(topic => {
+  const groupMoteIdentities = useMemo(() => visible && scratch ? motes.flatMap(topic => {
     const rootPath = scratchTopicLogicalPath(scratch, topic)
-    if (rootPath === null || topic.moteArchive?.state === 'archived') return []
+    if (rootPath === null) return []
     const original = moteConnectionTarget({ workspace: scratch, topic, rootPath }, spaceZoneBindings)
     return original ? [{ target: original, name: topic.title, topic }] : []
   }) : [], [visible, scratch, motes, spaceZoneBindings])
+  const groupCandidates = useMemo(() => groupMoteIdentities.filter(({ topic }) => topic.moteArchive?.state !== 'archived'), [groupMoteIdentities])
   const groupTopicCandidates = useMemo(() => showingGroup && scratch ? (topics ?? []).flatMap(topic => {
     if (scratchTopicKind(topic.id, topics) !== 'topic') return []
     const address = originalTopicAddress(scratch, topic, spaceZoneBindings)
     return address ? [{ name: topic.title, topicId: topic.id, target: { ...address,
       expectedResource: { hostId: scratch.hostId, workspaceId: scratch.id, workspacePath: scratch.path } } }] : []
   }) : [], [showingGroup, scratch, topics, spaceZoneBindings])
-  const renderGroupMoteAvatar = useCallback((moteId: string) => {
-    const candidate = groupCandidates.find(item => item.target.spaceId === moteId)
+  const renderGroupMoteAvatar = useCallback((moteId: string, _name: string, target?: (typeof groupMoteIdentities)[number]['target']) => {
+    const candidate = groupMoteIdentities.find(item => item.target.spaceId === moteId || target && item.target.zoneId === target.zoneId &&
+      item.target.expectedResource.hostId === target.expectedResource.hostId && item.target.expectedResource.workspaceId === target.expectedResource.workspaceId &&
+      item.target.expectedResource.workspacePath === target.expectedResource.workspacePath)
     return candidate && scratch ? <DesktopGroupMoteAvatar workspace={scratch} topic={candidate.topic} /> : null
-  }, [groupCandidates, scratch])
+  }, [groupMoteIdentities, scratch])
   const readingMote = visible && !showingGroup
   const groupReadingPositions = useRef<MoteGroupReadingPositions>(new Map())
   const groupDirectory = useMoteGroups(api.moteGroup.call, { enabled: visible })
@@ -876,7 +879,8 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
     </div> : null}
     <div className="pmo-teams-topic-floating__body">
       {showingGroup ? <DesktopMoteGroup groupId={groupSelection?.groupId ?? null} moteId={groupSelection?.moteId} members={groupSelection?.members}
-        candidates={groupCandidates} topicCandidates={groupTopicCandidates} renderMoteAvatar={renderGroupMoteAvatar} creating={creatingGroup} onOpen={openGroup} onClose={creatingGroup ? () => setCreatingGroup(false) : exitGroup} onChanged={groupDirectory.refresh} positions={groupReadingPositions.current}
+        initialGroup={groupDirectory.groups.find(group => group.id === groupSelection?.groupId)}
+        candidates={groupCandidates} topicCandidates={groupTopicCandidates} renderMoteAvatar={renderGroupMoteAvatar} creating={creatingGroup} onOpen={openGroup} onClose={creatingGroup ? () => setCreatingGroup(false) : exitGroup} onChanged={groupDirectory.observe} positions={groupReadingPositions.current}
         onPerspectiveChange={moteId => { if (groupSelection) setFloating({ groupSelection: { groupId: groupSelection.groupId, moteId } }) }} /> : null}
       <div className="pmo-teams-topic-floating__mote" hidden={showingGroup}>
       {floating.agentTarget ? <OriginalAgentConversation floating={floating} target={target} projectionState={projectionState} visible={readingMote}

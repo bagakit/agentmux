@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import type { AgentMuxRpcParams, AgentMuxRpcResult } from '@agentmux/core'
 import { MOTE_GROUP_MAX_BODY_LENGTH, type MoteGroupMember, type MoteGroupMessage, type MoteGroupMethod, type MoteGroupSummary } from '@agentmux/core/mote/group'
 import type { MotePreferencesTarget } from '@agentmux/core/mote-preferences'
@@ -8,15 +8,17 @@ import { IconButton } from './IconButton.js'
 import { SearchInput } from '../input/SearchInput.js'
 import { Notice } from './Notice.js'
 import { MoteAssignmentButton } from './MoteAssignment.js'
-import { MoteGroupAvatar, MoteGroupDetails, MoteGroupSettingsFields, type MoteGroupSettingsValue } from './MoteGroupSettings.js'
-export { MoteGroupAvatar } from './MoteGroupSettings.js'
+import { MoteGroupAvatar, MoteGroupDetails, MoteGroupMemberAvatar, MoteGroupSettingsFields, type MoteGroupSettingsValue, type RenderMoteGroupAvatar } from './MoteGroupSettings.js'
+export { MoteGroupAvatar, type RenderMoteGroupAvatar } from './MoteGroupSettings.js'
+import { groupDraftBody, groupDraftRecipients, MoteGroupMessageInput, MoteGroupMessageText } from './MoteGroupMessageInput.js'
+import { MoteGroupProgress } from './MoteGroupProgress.js'
 import { SemanticIcon } from '../theme/semantic-icon.js'
 import '../styles/mote-group.css'
 
 type ClientMethod = Exclude<MoteGroupMethod, 'space.mote.group.reply'>
 export type MoteGroupCall = <M extends ClientMethod>(method: M, input: AgentMuxRpcParams<M>) => Promise<AgentMuxRpcResult<M>>
 export type MoteGroupCandidate = { target: MotePreferencesTarget; name: string }
-export type MoteGroupDraft = { body: string; recipientIds: string[]; operationId?: string; replyToMessageId?: string }
+export type MoteGroupDraft = { body: string; recipientIds: string[]; selectedMentions?: string[]; participation?: 'contextual'; operationId?: string; replyToMessageId?: string }
 export type MoteGroupReadingPositions = Map<string, { top: number; atTail: boolean }>
 export type MoteGroupCreation = AgentMuxRpcParams<'space.mote.group.create'>
 type DraftOwner = {
@@ -33,14 +35,15 @@ type Props = {
   call: MoteGroupCall
   candidates: readonly MoteGroupCandidate[]
   topicCandidates?: readonly MoteGroupCandidate[]
-  renderMoteAvatar?(moteId: string, name: string): ReactNode
+  renderMoteAvatar?: RenderMoteGroupAvatar
+  initialGroup?: MoteGroupSummary | undefined
   onOpenTopicFiles?(target: MotePreferencesTarget): void
   groupId: string | null
   creating?: boolean
   initialMoteId?: string
   initialMembers?: boolean
   onOpen(groupId: string): void
-  onChanged?(): void
+  onChanged?(group?: MoteGroupSummary): void
   onPerspectiveChange?(moteId: string | undefined): void
   onClose(): void
   onCreate?(): void
@@ -51,7 +54,6 @@ type Props = {
 }
 
 const EMPTY_DRAFT: MoteGroupDraft = { body: '', recipientIds: [] }
-const STATUS = { pending: '等待接收', accepted: '已接收', failed: '投递失败', unknown: '待核对' } as const
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error)
 
 export function useMoteGroups(call: MoteGroupCall, { enabled = true, moteId }: { enabled?: boolean; moteId?: string } = {}) {
@@ -66,15 +68,20 @@ export function useMoteGroups(call: MoteGroupCall, { enabled = true, moteId }: {
     const current = ++version.current
     if (!quiet) setLoading(true)
     try {
-      const result = await call('space.mote.group.list', { ...(moteId ? { moteId } : {}), ...(cursor === undefined ? {} : { beforeSequence: cursor }), limit: 30 })
+      const result = await call('space.mote.group.list', { ...(moteId ? { moteId } : {}), ...(cursor === undefined ? {} : { beforeSequence: cursor }), limit: 30, receiptProjection: 'stored' })
       if (current !== version.current) return
       setPage(previous => {
-        if (cursor !== undefined && previous.key === moteId) return { key: moteId, groups: [...new Map([...previous.groups, ...result.groups].map(group => [group.id, group])).values()], next: result.nextBeforeSequence }
-        if (previous.key === moteId && previous.groups.length > result.groups.length) {
-          const visible = new Set(result.groups.map(group => group.id))
-          return { key: moteId, groups: [...result.groups, ...previous.groups.filter(group => !visible.has(group.id))], next: previous.next }
+        const byId = new Map(previous.groups.map(group => [group.id, group]))
+        const observed = result.groups.map(group => {
+          const known = byId.get(group.id)
+          return known && known.revision > group.revision ? known : group
+        })
+        if (cursor !== undefined && previous.key === moteId) return { key: moteId, groups: [...new Map([...previous.groups, ...observed].map(group => [group.id, group])).values()], next: result.nextBeforeSequence }
+        if (previous.key === moteId && previous.groups.length > observed.length) {
+          const visible = new Set(observed.map(group => group.id))
+          return { key: moteId, groups: [...observed, ...previous.groups.filter(group => !visible.has(group.id))], next: previous.next }
         }
-        return { key: moteId, groups: result.groups, next: result.nextBeforeSequence }
+        return { key: moteId, groups: observed, next: result.nextBeforeSequence }
       })
       setError(null)
     } catch (issue) {
@@ -88,11 +95,19 @@ export function useMoteGroups(call: MoteGroupCall, { enabled = true, moteId }: {
     const timer = enabled ? setInterval(() => void read(undefined, true), 5000) : undefined
     return () => { ++version.current; inFlight.current = false; clearInterval(timer) }
   }, [enabled, read])
+  const observe = useCallback((confirmed?: MoteGroupSummary) => {
+    if (confirmed && (!moteId || confirmed.members.some(member => member.moteId === moteId && member.state === 'active'))) {
+      setPage(previous => previous.key === moteId ? { ...previous, groups: previous.groups.some(group => group.id === confirmed.id)
+        ? previous.groups.map(group => group.id === confirmed.id && confirmed.revision >= group.revision ? confirmed : group)
+        : [confirmed, ...previous.groups] } : previous)
+    }
+    void read()
+  }, [moteId, read])
   const refresh = useCallback(() => { void read() }, [read])
   const loadMore = useCallback(() => {
     if (page.key === moteId && page.next !== null) void read(page.next)
   }, [read, moteId, page])
-  return { groups: page.key === moteId ? page.groups : [], error, loading, refresh, loadMore, hasMore: page.key === moteId && page.next !== null }
+  return { groups: page.key === moteId ? page.groups : [], error, loading, refresh, observe, loadMore, hasMore: page.key === moteId && page.next !== null }
 }
 
 export function MoteGroupConversation(props: Props) {
@@ -125,7 +140,7 @@ function GroupCreate({ call, candidates, topicCandidates = [], renderMoteAvatar,
   const needle = query.trim().toLocaleLowerCase()
   const matching = candidates.filter(candidate => candidate.name.toLocaleLowerCase().includes(needle))
   const members = selected.map(({ target, name }) => ({
-    moteId: target.spaceId,
+    moteId: target.spaceId, target,
     name: candidates.find(candidate => candidate.target.spaceId === target.spaceId)?.name ?? name
   }))
   const groupName = name.trim() || '未命名群聊'
@@ -151,7 +166,7 @@ function GroupCreate({ call, candidates, topicCandidates = [], renderMoteAvatar,
     try {
       await creation?.write(input)
       const receipt = await call('space.mote.group.create', input)
-      onChanged?.()
+      onChanged?.(receipt.group)
       await creation?.clear(input.operationId)
       if (mounted.current) onOpen(receipt.group.id)
     } catch (error) { setIssue(errorText(error)) }
@@ -169,7 +184,7 @@ function GroupCreate({ call, candidates, topicCandidates = [], renderMoteAvatar,
             const id = candidate.target.spaceId
             const checked = members.some(member => member.moteId === id)
             return <label key={id} className="mote-group__candidate">
-              <span className="mote-group__avatar" aria-hidden="true">{renderMoteAvatar?.(id, candidate.name) ?? initial(candidate.name)}</span>
+              <MoteGroupMemberAvatar member={{ moteId: id, name: candidate.name, target: candidate.target }} render={renderMoteAvatar} />
               <strong>{candidate.name}</strong>
               <input type="checkbox" checked={checked} disabled={locked} onChange={event => {
                 if (event.target.checked) setSelected(current => [...current, candidate])
@@ -184,7 +199,7 @@ function GroupCreate({ call, candidates, topicCandidates = [], renderMoteAvatar,
             <div><strong>{groupName}</strong></div>
           </div>
           {members.length > 0 && <ul className="mote-group__selected" aria-label="已选成员">{members.map(member => <li key={member.moteId}>
-            <span className="mote-group__avatar" aria-hidden="true">{renderMoteAvatar?.(member.moteId, member.name) ?? initial(member.name)}</span>
+            <MoteGroupMemberAvatar member={member} render={renderMoteAvatar} />
             <span>{member.name}</span>
             <IconButton type="button" aria-label={`移除 ${member.name}`} disabled={locked} onClick={() => remove(member.moteId)}><SemanticIcon name="action.close" size={12} /></IconButton>
           </li>)}</ul>}
@@ -213,9 +228,9 @@ function bySequence(messages: MoteGroupMessage[]) {
   return [...new Map(messages.map(message => [message.id, message])).values()].sort((left, right) => left.sequence - right.sequence)
 }
 
-function GroupView({ call, groupId, initialMoteId, initialMembers, onChanged, onClose, onPerspectiveChange, draft, renderThread, positions, candidates, topicCandidates = [], renderMoteAvatar, onOpenTopicFiles }: Props & { groupId: string }) {
-  const [group, setGroup] = useState<MoteGroupSummary | null>(null)
-  const [messages, setMessages] = useState<MoteGroupMessage[]>([])
+function GroupView({ call, groupId, initialGroup, initialMoteId, initialMembers, onChanged, onClose, onPerspectiveChange, draft, renderThread, positions, candidates, topicCandidates = [], renderMoteAvatar, onOpenTopicFiles }: Props & { groupId: string }) {
+  const [group, setGroup] = useState<MoteGroupSummary | null>(initialGroup ?? null)
+  const [messages, setMessages] = useState<MoteGroupMessage[]>(initialGroup?.lastMessage ? [initialGroup.lastMessage] : [])
   const [viewerId, setViewerId] = useState<string>()
   const [newerAvailable, setNewerAvailable] = useState(false)
   const [cursor, setCursor] = useState<number | null>(null)
@@ -239,6 +254,18 @@ function GroupView({ call, groupId, initialMoteId, initialMembers, onChanged, on
   const keepTail = useRef(readingPositions.get(positionKey)?.atTail ?? true)
   const readingView = useRef<string | undefined>(undefined)
   const focusMessage = useRef<string | null>(null)
+  const roster = useMemo(() => new Map(group?.members.map(member => [member.moteId, member])), [group])
+  const byMessage = useMemo(() => new Map(messages.map(message => [message.id, message])), [messages])
+  const byReply = useMemo(() => {
+    const threads = new Map<string, Map<string, MoteGroupMessage>>()
+    for (const message of messages) {
+      if (!message.replyToMessageId || message.author.kind !== 'mote') continue
+      const replies = threads.get(message.replyToMessageId) ?? new Map<string, MoteGroupMessage>()
+      replies.set(message.author.moteId, message)
+      threads.set(message.replyToMessageId, replies)
+    }
+    return threads
+  }, [messages])
   const member = group?.members.find(item => item.moteId === moteId)
   const activeMembers = group?.members.filter(item => (item.state ?? 'active') === 'active') ?? []
   const visibleMessages = moteId ? messages.filter(message => message.deliveries.some(delivery => delivery.moteId === moteId) || (message.author.kind === 'mote' && message.author.moteId === moteId)) : messages
@@ -250,9 +277,11 @@ function GroupView({ call, groupId, initialMoteId, initialMembers, onChanged, on
     if (!quiet) setLoading(true)
     const height = list.current?.scrollHeight ?? 0
     try {
-      const result = await call('space.mote.group.inspect', { groupId, limit: 60, ...(beforeSequence === undefined ? {} : { beforeSequence }) })
+      const stored = !loaded.current || replace || beforeSequence !== undefined
+      const result = await call('space.mote.group.inspect', { groupId, limit: quiet ? 12 : 60,
+        ...(stored ? { receiptProjection: 'stored' } : {}), ...(beforeSequence === undefined ? {} : { beforeSequence }) })
       if (request !== observing.current) return
-      setGroup(result.group)
+      setGroup(known => !known || result.group.revision >= known.revision ? result.group : known)
       setViewerId(result.viewerId)
       const first = result.messages[0]?.sequence
       if (!replace && beforeSequence === undefined && first !== undefined && latestSequence.current !== null && first > latestSequence.current) {
@@ -311,21 +340,26 @@ function GroupView({ call, groupId, initialMoteId, initialMembers, onChanged, on
   }
   async function send(event: FormEvent) {
     event.preventDefault()
-    if (sendingRef.current || !value.body.trim()) return
-    const receiverIds = value.operationId ? value.recipientIds : value.recipientIds.filter(id => activeMembers.some(member => member.moteId === id))
+    const body = groupDraftBody(value.body)
+    if (sendingRef.current || !body.trim() || body.length > MOTE_GROUP_MAX_BODY_LENGTH) return
+    const requested = groupDraftRecipients(value)
+    const receiverIds = value.operationId ? value.recipientIds : requested.filter(id => activeMembers.some(member => member.moteId === id))
     sendingRef.current = true
     setSending(true)
     setSendIssue(null)
-    const exact = { ...value, recipientIds: receiverIds, operationId: value.operationId ?? mintObjectId() }
+    const operationId = value.operationId ?? mintObjectId()
+    const participation = value.operationId ? value.participation : requested.length ? undefined : 'contextual'
+    const exact: MoteGroupDraft = { ...value, recipientIds: receiverIds, operationId, ...(participation ? { participation } : {}) }
     try {
       await change(exact)
-      const receipt = await call('space.mote.group.send', { groupId, ...exact })
+      const receipt = await call('space.mote.group.send', { groupId, body, recipientIds: receiverIds, operationId,
+        ...(participation ? { participation } : {}), ...(value.replyToMessageId ? { replyToMessageId: value.replyToMessageId } : {}) })
       keepTail.current = true
       setMessages(previous => bySequence([...previous, receipt.message]))
       onChanged?.()
-      if (draft?.clear) await draft.clear(groupId, exact.operationId)
-      else if (draft?.read(groupId)?.operationId === exact.operationId) await draft.write(groupId, EMPTY_DRAFT)
-      setValue(current => current.operationId === exact.operationId ? EMPTY_DRAFT : current)
+      if (draft?.clear) await draft.clear(groupId, operationId)
+      else if (draft && draft.read(groupId)?.operationId === operationId) await draft.write(groupId, EMPTY_DRAFT)
+      setValue(current => current.operationId === operationId ? EMPTY_DRAFT : current)
       void read()
     } catch (error) { setSendIssue(errorText(error)) }
     finally { sendingRef.current = false; setSending(false) }
@@ -351,23 +385,40 @@ function GroupView({ call, groupId, initialMoteId, initialMembers, onChanged, on
     onPerspectiveChange?.(next)
   }
   const locked = Boolean(value.operationId)
+  const recipients = groupDraftRecipients(value)
+  const body = groupDraftBody(value.body)
+  const overLimit = body.length > MOTE_GROUP_MAX_BODY_LENGTH
+  const boundTopic = group?.topic
+  const topicName = boundTopic && topicCandidates.find(candidate => candidate.target.zoneId === boundTopic.zoneId)?.name
+  const revealReply = (id: string) => {
+    const article = Array.from(list.current?.querySelectorAll<HTMLElement>('[data-group-message-id]') ?? []).find(node => node.dataset.groupMessageId === id)
+    if (article) { article.scrollIntoView({ block: 'nearest' }); article.focus({ preventScroll: true }) }
+  }
   const author = (message: MoteGroupMessage) => message.author.kind === 'system' ? '群公告' : message.author.kind === 'mote' ? message.author.name : message.author.id === viewerId ? '我' : '用户'
   return <section className="mote-group" aria-label={group?.name ?? '群聊'}>
-    <header className="mote-group__header">
-      <div className="mote-group__identity"><MoteGroupAvatar memberIds={group?.avatarMoteIds ?? []} members={group?.members ?? []} renderMoteAvatar={renderMoteAvatar} /><div><h2>{group?.name ?? '群聊'}</h2>
-        {group ? <p>{member ? `正在查看 ${member.name} 的群内视角` : `${activeMembers.length} 位 Mote`}</p> : null}</div></div>
+    <header className="mote-group__header mote-group__conversation-header">
+      <div className="mote-group__identity"><MoteGroupAvatar memberIds={group?.avatarMoteIds ?? []} members={group?.members ?? []} renderMoteAvatar={renderMoteAvatar} />
+        <div><h2>{group?.name ?? '群聊'}</h2>
+          {group ? <p>{member ? `正在查看 ${member.name} 的群内视角` : `${activeMembers.length} 位 Mote`}</p> : null}</div></div>
       <div className="mote-group__header-actions">
-        {group?.topic && onOpenTopicFiles ? <Button onClick={() => onOpenTopicFiles(group.topic!)}>群文件</Button> : null}
-        {group ? <Button aria-expanded={membersOpen} onClick={() => setMembersOpen(open => !open)}>群资料</Button> : null}
-        <Button onClick={membersOpen ? () => setMembersOpen(false) : onClose}>返回</Button>
+        {boundTopic && onOpenTopicFiles ? <button type="button" className="mote-group__quiet-action" aria-label="群文件" title={topicName || '群文件'}
+          onClick={() => onOpenTopicFiles(boundTopic)}><SemanticIcon name="object.folder" size={15} /><span>{topicName || '群文件'}</span></button> : null}
+        {group ? <button type="button" className="mote-group__quiet-action" aria-expanded={membersOpen} onClick={() => setMembersOpen(open => !open)}>群资料</button> : null}
+        <button type="button" className="mote-group__quiet-action" onClick={membersOpen ? () => setMembersOpen(false) : onClose}>返回</button>
       </div>
     </header>
-    {group ? <nav className="mote-group__views" aria-label="会话视角">
-      <button type="button" aria-pressed={!moteId} onClick={() => selectView(undefined)}>群聊</button>
-      {group.members.map(item => <button type="button" key={item.moteId} aria-pressed={item.moteId === moteId} onClick={() => selectView(item.moteId)}>{item.name}</button>)}
+    {group && !membersOpen ? <nav className="mote-group__views" aria-label="会话视角">
+      <button type="button" aria-pressed={!moteId} onClick={() => selectView(undefined)}><SemanticIcon name="object.team" size={15} />群聊</button>
+      {group.members.map(item => <button type="button" key={item.moteId} aria-pressed={item.moteId === moteId} onClick={() => selectView(item.moteId)}>
+        <MoteGroupMemberAvatar member={item} render={renderMoteAvatar} size="small" /><span>{item.name}</span>
+      </button>)}
     </nav> : null}
+    {!membersOpen && group?.announcement ? <details className="mote-group__current-announcement">
+      <summary><strong>群公告</strong><span>{group.announcement.body}</span></summary>
+      <p>{group.announcement.body}</p>
+    </details> : null}
     {membersOpen && group ? <MoteGroupDetails group={group} candidates={candidates} topicCandidates={topicCandidates} call={call}
-      onReload={() => void read()} onUpdated={summary => { ++observing.current; setGroup(summary); onChanged?.(); void read() }}
+      onReload={() => void read()} onUpdated={summary => { ++observing.current; setGroup(summary); onChanged?.(summary); void read() }}
       onPerspective={selectView} renderMoteAvatar={renderMoteAvatar} /> : null}
     {newerAvailable ? <Notice tone="info" density="compact" messageRole="status" actions={<Button onClick={() => {
       keepTail.current = true
@@ -381,18 +432,19 @@ function GroupView({ call, groupId, initialMoteId, initialMembers, onChanged, on
     }} role="region" tabIndex={0} aria-label={moteId ? '群内消息' : '公开群聊记录'}>
       {cursor !== null ? <Button type="button" disabled={loading} onClick={() => void read(cursor)}>更早的消息</Button> : null}
       {!visibleMessages.length && !issue ? <div className="mote-group__empty">
-        <h3>{!group ? '正在读取群聊' : member ? '尚无参与记录' : '开始群聊'}</h3>
-        {group ? <p>{member ? `发给 ${member.name} 的消息和它在群里的回复会显示在这里。` : '你可以直接发言，也可以选择希望回答的 Mote。'}</p> : null}
+        <h3>{!loaded.current ? '正在读取消息' : member ? '尚无参与记录' : '开始群聊'}</h3>
+        {loaded.current ? <p>{member ? `发给 ${member.name} 的消息和它在群里的回复会显示在这里。` : '你可以直接发言，也可以选择希望回答的 Mote。'}</p> : null}
       </div> : null}
       {visibleMessages.map(message => {
         if (message.author.kind === 'system') return <Notice key={message.id} className="mote-group__announcement" density="compact" heading="群公告已更新">
           {message.body}
         </Notice>
         const own = message.author.kind === 'human' && message.author.id === viewerId
-        const reply = messages.find(earlier => earlier.id === message.replyToMessageId)
+        const reply = message.replyToMessageId ? byMessage.get(message.replyToMessageId) : undefined
         const deliveries = moteId ? message.deliveries.filter(delivery => delivery.moteId === moteId) : message.deliveries
         return <article className="mote-group__message" data-own={own || undefined} data-group-message-id={message.id} tabIndex={-1} key={message.id}>
-          <span className="mote-group__avatar" aria-hidden="true">{(message.author.kind === 'mote' ? renderMoteAvatar?.(message.author.moteId, message.author.name) : null) ?? initial(author(message))}</span>
+          {message.author.kind === 'mote' ? <MoteGroupMemberAvatar member={roster.get(message.author.moteId) ?? message.author} render={renderMoteAvatar} />
+            : <span className="mote-group__avatar" aria-hidden="true">{initial(author(message))}</span>}
           <div className="mote-group__message-content"><div className="mote-group__byline"><strong>{author(message)}</strong><time dateTime={new Date(message.createdAt).toISOString()}>{time(message.createdAt)}</time>
             {moteId && message.author.kind === 'mote' ? <button className="mote-group__quote-action" type="button" onClick={() => {
               focusMessage.current = message.id
@@ -401,12 +453,10 @@ function GroupView({ call, groupId, initialMoteId, initialMembers, onChanged, on
             {!moteId && !locked ? <button className="mote-group__quote-action" type="button" aria-label={`回复 ${author(message)} 的消息`} onClick={() => edit({ ...value, replyToMessageId: message.id })}>回复</button> : null}</div>
             <div className="mote-group__bubble">
               {message.replyToMessageId ? <p className="mote-group__quote">{reply ? `${author(reply)} · ${reply.body}` : '回复一条较早的消息'}</p> : null}
-              <div>{message.body}</div>
+              <div><MoteGroupMessageText body={message.body} recipients={message.deliveries.map(delivery => delivery.moteId)} members={group?.members ?? []} /></div>
             </div>
-            {deliveries.length ? <ul className="mote-group__receipts" aria-label="投递回执">{deliveries.map(delivery => <li key={delivery.moteId} data-status={delivery.status} title={delivery.issue}>
-              <span>{group?.members.find(item => item.moteId === delivery.moteId)?.name ?? delivery.moteId} · {STATUS[delivery.status]}</span>
-              {delivery.status !== 'accepted' ? <button type="button" disabled={retrying !== null} onClick={() => void retry(message.id, delivery.moteId)}>{delivery.status === 'failed' ? '重试' : '核对'}</button> : null}
-            </li>)}</ul> : null}
+            {deliveries.length ? <MoteGroupProgress deliveries={deliveries} members={roster} replies={byReply.get(message.id)} contextual={message.participation === 'contextual'}
+              renderAvatar={renderMoteAvatar} retrying={retrying !== null} onRetry={id => void retry(message.id, id)} onOpenReply={revealReply} /> : null}
             {!moteId && message.author.kind === 'mote' && message.deliveries.length > 0
               ? <MoteAssignmentButton target={{ kind: 'group', conversationId: groupId, messageId: message.id, read: call }} /> : null}
           </div>
@@ -414,66 +464,27 @@ function GroupView({ call, groupId, initialMoteId, initialMembers, onChanged, on
       })}
       {member?.thread && renderThread ? <ThreadDetails key={member.moteId} thread={member.thread} renderThread={renderThread} /> : null}
     </div>
-    {group && !moteId && !membersOpen ? <form className="mote-group__composer" onSubmit={send}>
+    {group && !moteId && !membersOpen ? <form className="mote-group__composer" data-completion-anchor onSubmit={send}>
       {sendIssue || (locked && !sending) ? <Notice tone="warning" density="compact" heading="原发送结果待确认" messageRole="status">{sendIssue ?? '继续确认同一个发送请求。'}</Notice> : null}
       {value.replyToMessageId ? <div className="mote-group__quote-preview"><span>{messages.find(message => message.id === value.replyToMessageId)?.body ?? '回复原消息'}</span>
-        <Button type="button" aria-label="取消引用" disabled={locked} onClick={() => edit({ body: value.body, recipientIds: value.recipientIds })}>取消</Button></div> : null}
-      <div className="mote-group__recipients" role="group" aria-label="选择参与成员">
-        <span>请谁参与</span>
-        {activeMembers.map(item => {
-          const selected = value.recipientIds.includes(item.moteId)
-          return <button type="button" key={item.moteId} aria-pressed={selected} disabled={locked} onClick={() => edit({ ...value,
-            recipientIds: selected ? value.recipientIds.filter(id => id !== item.moteId) : [...value.recipientIds, item.moteId] })}>{item.name}</button>
-        })}
-      </div>
-      <div className="mote-group__send"><GroupMessageInput value={value} members={activeMembers} locked={locked} onEdit={edit} />
-        <Button type="submit" variant="primary" disabled={sending || !value.body.trim()}>{sending ? '发送中…' : locked ? '确认发送' : '发送'}</Button>
+        <Button type="button" aria-label="取消引用" disabled={locked} onClick={() => { const { replyToMessageId: _, ...rest } = value; edit(rest) }}>取消</Button></div> : null}
+      <div className="mote-group__send"><MoteGroupMessageInput value={value} members={activeMembers} locked={locked} onEdit={edit} renderAvatar={renderMoteAvatar} /></div>
+      {overLimit && <small role="status">群消息最多 {MOTE_GROUP_MAX_BODY_LENGTH} 个字符。</small>}
+      <div className="mote-group__composer-footer">
+        <div className="mote-group__recipients" role="group" aria-label="选择参与成员">
+          <span title={recipients.length ? undefined : '当前成员可根据内容选择回应'}>{recipients.length ? '参与' : '按需回应'}</span>
+          {activeMembers.map(item => {
+            const selected = recipients.includes(item.moteId)
+            return <button type="button" key={item.moteId} aria-pressed={selected} disabled={locked} onClick={() => edit({ ...value,
+              recipientIds: selected ? value.recipientIds.filter(id => id !== item.moteId) : [...value.recipientIds, item.moteId],
+              ...(selected ? { body: groupDraftBody(value.body, item.moteId), selectedMentions: value.selectedMentions?.filter(id => id !== item.moteId) ?? [] } : {})
+            })}><MoteGroupMemberAvatar member={item} render={renderMoteAvatar} size="small" /><span>{item.name}</span></button>
+          })}
+        </div>
+        <Button type="submit" variant="primary" disabled={sending || !body.trim() || overLimit}>{sending ? '发送中…' : locked ? '确认发送' : '发送'}</Button>
       </div>
     </form> : null}
   </section>
-}
-
-function GroupMessageInput({ value, members, locked, onEdit }: {
-  value: MoteGroupDraft; members: readonly MoteGroupMember[]; locked: boolean; onEdit(value: MoteGroupDraft): void
-}) {
-  const input = useRef<HTMLTextAreaElement>(null)
-  const options = useRef<HTMLDivElement>(null)
-  const [caret, setCaret] = useState<number | null>(null)
-  const [composing, setComposing] = useState(false)
-  const mention = !locked && !composing && caret !== null
-    ? /(?:^|[\s，。！？、])@([^\s@]{0,48})$/u.exec(value.body.slice(0, caret)) : null
-  const choices = mention ? members.filter(member =>
-    member.name.toLocaleLowerCase().includes(mention[1]!.toLocaleLowerCase())).slice(0, 8) : []
-  function choose(member: MoteGroupMember) {
-    if (!mention || caret === null) return
-    const start = caret - mention[1]!.length - 1
-    const name = '@' + member.name + ' '
-    const body = value.body.slice(0, start) + name + value.body.slice(caret)
-    if (body.length > MOTE_GROUP_MAX_BODY_LENGTH) return
-    onEdit({ ...value, body, recipientIds: [...new Set([...value.recipientIds, member.moteId])] })
-    setCaret(null)
-    requestAnimationFrame(() => { input.current?.focus(); input.current?.setSelectionRange(start + name.length, start + name.length) })
-  }
-  return <div className="mote-group__message-input" onBlur={event => {
-    if (!event.currentTarget.contains(event.relatedTarget)) setCaret(null)
-  }}>
-    {choices.length ? <div ref={options} className="mote-group__mention-menu" role="group" aria-label="点名成员"
-      onKeyDown={event => {
-        if (event.key === 'Escape') { event.stopPropagation(); setCaret(null); input.current?.focus() }
-      }}>{choices.map(member => <Button type="button" key={member.moteId} onClick={() => choose(member)}>{member.name}</Button>)}</div> : null}
-    <textarea ref={input} aria-label="群消息" value={value.body} maxLength={MOTE_GROUP_MAX_BODY_LENGTH} rows={2}
-      readOnly={locked} placeholder="以「我」发言，输入 @ 点名成员…" onCompositionStart={() => setComposing(true)}
-      onCompositionEnd={event => { setComposing(false); setCaret(event.currentTarget.selectionStart) }}
-      onSelect={event => {
-        if (caret !== null && event.currentTarget.selectionStart !== caret) setCaret(null)
-      }}
-      onChange={event => { setCaret(event.currentTarget.selectionStart); onEdit({ ...value, body: event.currentTarget.value }) }}
-      onKeyDown={event => {
-        if (event.nativeEvent.isComposing) return
-        if (event.key === 'Escape' && choices.length) { event.stopPropagation(); setCaret(null) }
-        if (event.key === 'ArrowDown' && choices.length) { event.preventDefault(); options.current?.querySelector('button')?.focus() }
-      }} />
-  </div>
 }
 
 function ThreadDetails({ thread, renderThread }: {

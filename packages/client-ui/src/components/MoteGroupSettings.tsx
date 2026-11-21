@@ -8,20 +8,30 @@ import { Notice } from './Notice.js'
 import { SemanticIcon } from '../theme/semantic-icon.js'
 import type { MoteGroupCall, MoteGroupCandidate } from './MoteGroupConversation.js'
 
-type RenderAvatar = (moteId: string, name: string) => ReactNode
+export type RenderMoteGroupAvatar = (moteId: string, name: string, target?: MotePreferencesTarget) => ReactNode
+type GroupFace = Pick<MoteGroupMember, 'moteId' | 'name'> & Partial<Pick<MoteGroupMember, 'target'>>
+
+export function MoteGroupMemberAvatar({ member, render, size }: {
+  member: GroupFace; render?: RenderMoteGroupAvatar | undefined; size?: 'small' | 'medium'
+}) {
+  const face = render?.(member.moteId, member.name, member.target)
+  return <span className="mote-group__avatar" data-size={size} data-initial={face == null ? Array.from(member.name.trim())[0] ?? '·' : undefined} aria-hidden="true">
+    {face}
+  </span>
+}
 
 export function MoteGroupAvatar({ memberIds, members, renderMoteAvatar }: {
   memberIds: readonly string[]
-  members: readonly Pick<MoteGroupMember, 'moteId' | 'name'>[]
-  renderMoteAvatar?: RenderAvatar | undefined
+  members: readonly GroupFace[]
+  renderMoteAvatar?: RenderMoteGroupAvatar | undefined
 }) {
   const faces = memberIds.flatMap(id => {
     const member = members.find(item => item.moteId === id)
     return member ? [member] : []
   }).slice(0, 4)
   return <span className="mote-group-avatar" data-faces={faces.length} aria-hidden="true">
-    {faces.length ? faces.map(member => <span key={member.moteId}>{renderMoteAvatar?.(member.moteId, member.name)
-      ?? Array.from(member.name.trim())[0] ?? '·'}</span>) : <SemanticIcon name="object.team" size={20} />}
+    {faces.length ? faces.map(member => <MoteGroupMemberAvatar key={member.moteId} member={member} render={renderMoteAvatar} />)
+      : <SemanticIcon name="object.team" size={20} />}
   </span>
 }
 
@@ -33,9 +43,9 @@ export type MoteGroupSettingsValue = {
 
 export function MoteGroupSettingsFields({ value, members, topicCandidates, renderMoteAvatar, disabled, onChange }: {
   value: MoteGroupSettingsValue
-  members: readonly Pick<MoteGroupMember, 'moteId' | 'name'>[]
+  members: readonly GroupFace[]
   topicCandidates: readonly MoteGroupCandidate[]
-  renderMoteAvatar?: RenderAvatar | undefined
+  renderMoteAvatar?: RenderMoteGroupAvatar | undefined
   disabled?: boolean
   onChange(value: MoteGroupSettingsValue): void
 }) {
@@ -50,7 +60,7 @@ export function MoteGroupSettingsFields({ value, members, topicCandidates, rende
             return <button className="mote-group-settings__face-pick" type="button" key={member.moteId} aria-pressed={chosen}
               disabled={!chosen && value.avatarMoteIds.length === 4} onClick={() => onChange({ ...value, avatarMoteIds:
                 chosen ? value.avatarMoteIds.filter(id => id !== member.moteId) : [...value.avatarMoteIds, member.moteId] })}>
-              {renderMoteAvatar?.(member.moteId, member.name)}<span>{member.name}</span>
+              <MoteGroupMemberAvatar member={member} render={renderMoteAvatar} size="small" /><span>{member.name}</span>
             </button>
           })}
         </div>
@@ -98,7 +108,7 @@ export function MoteGroupDetails({ group, candidates, topicCandidates, call, onR
   onReload(): void
   onUpdated(group: MoteGroupSummary): void
   onPerspective(moteId: string): void
-  renderMoteAvatar?: RenderAvatar | undefined
+  renderMoteAvatar?: RenderMoteGroupAvatar | undefined
 }) {
   const [page, setPage] = useState<'members' | 'settings'>('members')
   const [invite, setInvite] = useState<string[]>([])
@@ -158,7 +168,7 @@ export function MoteGroupDetails({ group, candidates, topicCandidates, call, onR
     {page === 'members' ? <>
       <div className="mote-group-settings__members">{group.members.map(member => <div className="mote-group-settings__member" key={member.moteId}>
         <button type="button" onClick={() => onPerspective(member.moteId)}>
-          <span className="mote-group__avatar" aria-hidden="true">{renderMoteAvatar?.(member.moteId, member.name) ?? Array.from(member.name.trim())[0] ?? '·'}</span>
+          <MoteGroupMemberAvatar member={member} render={renderMoteAvatar} />
           <strong>{member.name}</strong>
           <span title={member.invitation?.issue} aria-description={member.invitation ? invitationLabel[member.invitation.status] : undefined}>{memberSummary(member)}</span>
         </button>

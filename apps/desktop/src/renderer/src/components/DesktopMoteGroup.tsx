@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { Button } from '@agentmux/client-ui/components/Button'
-import { MoteGroupAvatar, MoteGroupConversation, useMoteGroups, type MoteGroupDraft, type MoteGroupCreation, type MoteGroupCandidate, type MoteGroupReadingPositions } from '@agentmux/client-ui/components/MoteGroupConversation'
+import { MoteGroupAvatar, MoteGroupConversation, useMoteGroups, type MoteGroupDraft, type MoteGroupCreation, type MoteGroupCandidate, type MoteGroupReadingPositions, type RenderMoteGroupAvatar } from '@agentmux/client-ui/components/MoteGroupConversation'
 import type { MoteGroupSummary } from '@agentmux/core/mote/group'
 import type { MotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import { MoteGroupFiles } from '@agentmux/client-ui/components/MoteGroupFiles'
@@ -53,8 +53,6 @@ const creation = {
 }
 
 type TopicCandidate = MoteGroupCandidate & { topicId: string }
-type AvatarRenderer = (moteId: string, name: string) => ReactNode
-
 export function DesktopGroupMoteAvatar({ workspace, topic }: { workspace: WorkspaceRecord; topic: ScratchTopicSnapshot }) {
   const bindings = useAppStore(state => state.spaceZoneBindings)
   const target = topicSpaceIconTarget(workspace, topic, bindings)
@@ -63,17 +61,18 @@ export function DesktopGroupMoteAvatar({ workspace, topic }: { workspace: Worksp
     avatarWorkspaceId={target?.avatarTarget?.workspaceId} avatarTopicId={target?.avatarTarget?.topicId} />
 }
 
-export function DesktopMoteGroup({ groupId, moteId, members, creating, candidates, topicCandidates, renderMoteAvatar, onOpen, onClose, onChanged, onPerspectiveChange, positions }: {
+export function DesktopMoteGroup({ groupId, initialGroup, moteId, members, creating, candidates, topicCandidates, renderMoteAvatar, onOpen, onClose, onChanged, onPerspectiveChange, positions }: {
   groupId: string | null
+  initialGroup?: MoteGroupSummary | undefined
   moteId?: string | undefined
   members?: boolean | undefined
   creating: boolean
   candidates: readonly MoteGroupCandidate[]
   topicCandidates: readonly TopicCandidate[]
-  renderMoteAvatar: AvatarRenderer
+  renderMoteAvatar: RenderMoteGroupAvatar
   onOpen(groupId: string): void
   onClose(): void
-  onChanged(): void
+  onChanged(group?: MoteGroupSummary): void
   positions: MoteGroupReadingPositions
   onPerspectiveChange(moteId: string | undefined): void
 }) {
@@ -87,7 +86,7 @@ export function DesktopMoteGroup({ groupId, moteId, members, creating, candidate
         }).catch(error => useAppStore.getState().reportError(error instanceof Error ? error.message : String(error)))
       }}>打开 Topic</Button>} />
   }
-  return <MoteGroupConversation call={api.moteGroup.call} candidates={candidates} topicCandidates={topicCandidates} renderMoteAvatar={renderMoteAvatar}
+  return <MoteGroupConversation call={api.moteGroup.call} initialGroup={initialGroup} candidates={candidates} topicCandidates={topicCandidates} renderMoteAvatar={renderMoteAvatar}
     onOpenTopicFiles={target => setFiles({ groupId, target })} groupId={groupId} creating={creating}
     {...(moteId === undefined ? {} : { initialMoteId: moteId })} {...(members === undefined ? {} : { initialMembers: members })}
     onOpen={onOpen} onClose={onClose} onChanged={onChanged} onPerspectiveChange={onPerspectiveChange} draft={draft} creation={creation} positions={positions}
@@ -98,7 +97,7 @@ export function DesktopMoteGroupRail({ groups, selectedId, avatars, renderMoteAv
   groups: readonly MoteGroupSummary[]
   selectedId?: string | undefined
   avatars: boolean
-  renderMoteAvatar: AvatarRenderer
+  renderMoteAvatar: RenderMoteGroupAvatar
   open(groupId: string, members: boolean): void
 }) {
   return groups.map(group => <div className="mote-chooser__row" key={group.id}>
