@@ -4,6 +4,7 @@ const { join } = require('node:path')
 const assert = require('node:assert/strict')
 
 const [html, evidence] = process.argv.slice(2)
+const assignmentProof = process.argv.includes('--assignments')
 assert(evidence?.includes('/capture-'))
 app.setPath('userData', join(evidence, 'userData'))
 Menu.setApplicationMenu(null)
@@ -16,7 +17,7 @@ app.whenReady().then(async () => {
     const win = new BrowserWindow({ width: 1440, height: 900, show: false, useContentSize: true,
       webPreferences: { sandbox: true, contextIsolation: true, backgroundThrottling: false } })
     win.webContents.on('console-message', (_event, info) => { if (info.level === 'error') result.errors.push(info.message) })
-    await win.loadFile(html, { query: { workspacePath: join(evidence, 'workspace'), scenario: 'calendar-density' } })
+    await win.loadFile(html, { query: { workspacePath: join(evidence, 'workspace'), scenario: assignmentProof ? 'calendar-assignments' : 'calendar-density' } })
     win.webContents.focus()
     const read = async script => {
       try { return await win.webContents.executeJavaScript(script) }
@@ -93,6 +94,61 @@ app.whenReady().then(async () => {
     }
     await waitFor(`!!${control('[role="tab"]', 'Calendar')}`, 'Calendar tab')
     await click(control('[role="tab"]', 'Calendar'))
+    if (assignmentProof) {
+      await view('Upcoming')
+      const direct = { scheduleId: 'calendar-direct-work', method: 'space.mote.direct.inspect', sourceId: 'original-private-assignment',
+        replyId: 'original-private-report', target: 'threadId', conversationId: 'private-work-review' }
+      const group = { scheduleId: 'calendar-group-work', method: 'space.mote.group.inspect', sourceId: 'calendar-original-group-assignment',
+        replyId: 'calendar-original-group-report', target: 'groupId', conversationId: 'calendar-public-work' }
+      const facts = () => read('window.moteCalendarScene.facts()')
+      await waitFor(`!!${locator('[data-schedule-id="calendar-direct-work"]')}`, 'published assignment in original schedule row')
+      const before = await facts()
+      const assignmentCalls = snapshot => snapshot.calls.filter(call => call.method.startsWith('space.mote.direct.') || call.method.startsWith('space.mote.group.'))
+      assert.deepEqual(assignmentCalls(before), [], 'Calendar listing does not read conversation bodies')
+      await settleMotion()
+      await capture('calendar-published-assignments')
+      result.observations.assignments = []
+      for (const item of [direct, group]) {
+        const { scheduleId, method, sourceId, replyId, target, conversationId } = item
+        const requestsBefore = assignmentCalls(await facts()).length
+        const row = '[data-schedule-id="' + scheduleId + '"]'
+        const trigger = control(row + ' button', '查看作业与回报')
+        assert.ok((await read(`${locator(row)}.innerText`)).includes('Last assignment published'))
+        await click(trigger)
+        const detail = '.mote-direct-panel[data-view="assignment"]'
+        const source = locator(detail + ' [data-direct-message-id="' + sourceId + '"]')
+        const reply = locator(detail + ' [data-direct-message-id="' + replyId + '"]')
+        await waitFor(`${source}?.innerText.includes("资料整理 · 已接收") && !!${reply}`, 'original assignment audience and exact correlated report')
+        const visible = await read(`[...document.querySelectorAll(${JSON.stringify(detail + ' [data-direct-message-id]')})].map(e=>e.dataset.directMessageId)`)
+        assert.deepEqual(visible, [sourceId, replyId], 'Only the original assignment and its own report are presented')
+        await settleMotion()
+        await capture(scheduleId)
+        if (item === direct) await click(locator(detail + ' [aria-label="关闭作业详情"]'))
+        else key('Escape')
+        await waitFor(`!${locator(detail)} && document.activeElement === ${trigger}`, 'dismissal restores the exact published arrangement action')
+        const observed = assignmentCalls(await facts()).slice(requestsBefore)
+        const occurrence = before.records.find(record => record.loopId === scheduleId)
+        assert.ok(occurrence?.lastMotePublication)
+        const address = { [target]: conversationId, ...(item === direct ? { mote: occurrence.moteWork.mote } : {}) }
+        assert.deepEqual([...new Map(observed.map(call => [JSON.stringify(call), call])).values()], [
+          { method, params: { ...address, messageId: sourceId } },
+          { method, params: { ...address, replyToMessageId: sourceId, limit: 12 } },
+        ])
+        result.observations.assignments.push({ scheduleId, publication: occurrence.lastMotePublication, observed, focusRestored: true })
+        if (item === direct) {
+          win.setContentSize(620, 680)
+          await read('window.moteCalendarScene.theme("light")')
+        }
+      }
+      const after = await facts()
+      assert.deepEqual(after.drafts, before.drafts)
+      assert.deepEqual(after.selection, before.selection)
+      assert.deepEqual(after.sessions, before.sessions)
+      assert.equal(after.calls.some(call => ['schedule.create', 'schedule.pause', 'schedule.resume', 'schedule.cancel'].includes(call.method)), false)
+      assert.deepEqual(result.errors, [])
+      result.passed = true
+      return
+    }
     await verifyEventSurface('.mote-calendar__point', 'border-inline-start:3px solid currentColor!important', /one-sided stripe/)
     const heartbeatPoint = locator('.mote-calendar__point[data-heartbeat="true"]')
     await waitFor(`${heartbeatPoint}?.querySelector('[data-semantic-icon="object.heartbeat"]')`, 'original heartbeat symbol')

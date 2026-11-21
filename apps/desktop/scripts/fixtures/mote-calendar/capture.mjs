@@ -8,7 +8,7 @@ import { runProbeProcess } from '../../probe-process.mjs'
 import { radixOverlayAliases } from '../../../../../packages/client-ui/scripts/radix-overlay-aliases.ts'
 import { bundleIdentityRuntime } from '../../../../../packages/identity/scripts/runtime-bundle.mjs'
 
-const scenarios = { workspace: 'renderer-main.cjs', ideas: 'renderer-main.cjs', 'profile-personality': 'renderer-main.cjs', 'companion-navigation': 'renderer-navigation.cjs', 'discussion-files': 'renderer-discussion-files.cjs', 'calendar-density': 'renderer-density.cjs', 'floating-navigation': '../mote-surface-repair/context-main.cjs', 'mote-roster': '../mote-surface-repair/context-main.cjs' }
+const scenarios = { workspace: 'renderer-main.cjs', ideas: 'renderer-main.cjs', 'profile-personality': 'renderer-main.cjs', 'companion-navigation': 'renderer-navigation.cjs', 'discussion-files': 'renderer-discussion-files.cjs', 'calendar-density': 'renderer-density.cjs', 'calendar-assignments': 'renderer-density.cjs', 'floating-navigation': '../mote-surface-repair/context-main.cjs', 'mote-roster': '../mote-surface-repair/context-main.cjs' }
 const scenario = process.argv.length === 2 ? 'workspace' : process.argv.length === 3 && process.argv[2].startsWith('--scenario=') ? process.argv[2].slice('--scenario='.length) : null
 assert.ok(Object.hasOwn(scenarios, scenario), 'Unknown Mote capture scene: ' + scenario)
 const rendererRunner = scenarios[scenario]
@@ -103,6 +103,10 @@ try {
     assert.ok(receipt.source['apps/desktop/src/renderer/src/components/' + file + '.tsx'], 'Nonempty actual product input: ' + file)
   if (scenario === 'ideas') for (const file of ['components/Notice.tsx', 'styles/notice.css'])
     assert.ok(receipt.source['packages/client-ui/src/' + file], 'Ideas must consume the shared Client UI Notice: ' + file)
+  if (scenario === 'calendar-assignments') {
+    assert.ok(receipt.source['apps/desktop/src/renderer/src/components/ScheduleArrangementRow.tsx'])
+    assert.ok(receipt.source['packages/client-ui/src/components/MoteAssignment.tsx'])
+  }
   await fs.writeFile(path.join(directory, 'compile-inputs.json'), JSON.stringify(built.metafile, null, 2))
   await fs.writeFile(path.join(compiled, 'index.html'), '<!doctype html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="entry.css"></head><body><div id="root"></div><script type="module" src="entry.js"></script></body></html>')
   receipt.compiled = Object.fromEntries(await Promise.all((await fs.readdir(compiled)).map(async file => [file, sha(await fs.readFile(path.join(compiled, file)))])))
@@ -115,7 +119,7 @@ try {
   receipt.engine = { executable, sha256: sha(await fs.readFile(executable)), version: require('electron/package.json').version,
     override: process.env.ELECTRON_OVERRIDE_DIST_PATH ?? null }
   const logs = []
-  const flags = { 'floating-navigation': ['--calendar-navigation'], 'mote-roster': ['--mote-roster'], ideas: ['--ideas'], 'profile-personality': ['--profile-personality'] }
+  const flags = { 'floating-navigation': ['--calendar-navigation'], 'mote-roster': ['--mote-roster'], ideas: ['--ideas'], 'profile-personality': ['--profile-personality'], 'calendar-assignments': ['--assignments'] }
   receipt.process = await runProbeProcess(executable, [path.join(fixture, rendererRunner), path.join(compiled, 'index.html'), directory, ...(flags[scenario] ?? [])],
     { cwd: root, env, timeoutMs: 120_000, onLine: line => logs.push(line) })
   await fs.writeFile(path.join(directory, 'renderer.log'), logs.join('\n') + '\n')

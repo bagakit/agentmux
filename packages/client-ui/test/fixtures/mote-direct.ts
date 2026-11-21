@@ -26,9 +26,10 @@ export function moteDirectCapture(mote: MotePreferencesTarget, now = Date.now())
   }
   return {
     list: { threads: [thread], nextBeforeSequence: null },
-    inspect(id: string, messageId?: string) {
+    inspect(id: string, messageId?: string, replyToMessageId?: string) {
       if (id !== threadId) throw Error('Wrong original private thread')
-      const messages = messageId ? [assignment, laterAssignment, reply].filter(message => message.id === messageId) : [laterAssignment, reply]
+      const messages = messageId ? [assignment, laterAssignment, reply].filter(message => message.id === messageId)
+        : replyToMessageId ? [reply].filter(message => message.replyToMessageId === replyToMessageId) : [laterAssignment, reply]
       return { thread, messages, nextBeforeSequence: null }
     },
     image(input: { threadId: string; messageId: string; imageOperationId: string }) {

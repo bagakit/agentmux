@@ -99,7 +99,7 @@ async function fixture(retainedRoot?: string, initialSessions: string[] = []) {
     }
   } })
   const dbPath = join(workspacePath, 'groups.sqlite'), socketPath = join(f.root, 'group.sock')
-  const start = async (files?: HostMoteGroupFiles, main?: MoteMainReader, schedules?: ContinuousProgressLoopManager) => {
+  const start = async (files?: HostMoteGroupFiles, main?: MoteMainReader, schedules?: ContinuousProgressLoopManager, startRecoveries = true) => {
     const directStore = new MoteGroupStore(join(workspacePath, 'direct.sqlite'), 'direct')
     const fileUploads = new FileUploadOwner(join(workspacePath, 'attachments'))
     const port = createHostMoteGroups({ store: new MoteGroupStore(dbPath), agents, client: () => f.client,
@@ -116,11 +116,13 @@ async function fixture(retainedRoot?: string, initialSessions: string[] = []) {
       ...(direct ? { moteDirect: direct } : {}), ...(schedules ? { schedules } : {}) })
     await server.start()
     closes.push(() => server.stop())
+    if (startRecoveries) port.start()
+    closes.push(() => port.dispose())
     direct?.start()
     if (direct) closes.push(() => direct.dispose())
     const rpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })
     closes.push(() => rpc.dispose())
-    return { server, rpc, direct }
+    return { server, rpc, direct, port }
   }
   const cli = (action: string, body: unknown, agentSessionId?: string, kind = 'group') =>
     runSourceObjectCli(['--endpoint', 'unix:' + socketPath, 'space', 'mote', kind, ...action.split(' '), '--input', '-'],
@@ -171,6 +173,8 @@ it('hands off a public Group message from the original ordinary member Thread', 
     expect(observed.map(message => message.id)).toEqual([source.id, handoff.id])
     expect(observed[1]?.deliveries[0]?.status).toBe('accepted')
   })
+  const replies = await rpc.call('space.mote.group.inspect', { groupId: group.id, replyToMessageId: source.id, limit: 1 })
+  expect(replies.messages.map(message => message.id)).toEqual([handoff.id])
   expect(f.preparedTargets.mock.calls).toEqual([['mote-a'], ['mote-b']])
   const exact = await rpc.call('space.mote.group.inspect', { groupId: group.id, messageId: source.id })
   expect(exact.messages.map(message => message.id)).toEqual([source.id])
@@ -269,6 +273,10 @@ it('reuses one private Mote thread across directions, Main rotation and Host reo
   const reply = await direct('reply', { threadId, operationId: 'original-private-reply',
     inputOperationId: sent.message.deliveries[0].operationId, body: 'Draft ready for review.' }, peer.thread!.agentSessionId)
   expect(reply.message).toMatchObject({ threadId, replyToMessageId: sent.message.id, author: { moteId: 'mote-b' } })
+  const exactReplies = await direct('inspect', { threadId, mote: a, replyToMessageId: sent.message.id, limit: 1 }, 'main-a')
+  expect(exactReplies.messages.map((message: core.MoteDirectMessage) => message.id)).toEqual([reply.message.id])
+  await expect(rpc.call('space.mote.direct.inspect', { threadId, mote: a, replyToMessageId: sent.message.id, messageId: sent.message.id }))
+    .rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
   expect((await direct('list', { mote: a }, 'main-a')).threads[0]?.lastMessage.id).toBe(reply.message.id)
   await expect(rpc.call('space.mote.group.inspect', { groupId: threadId })).rejects.toMatchObject({ code: 'UNKNOWN_MOTE_GROUP' })
   expect((await rpc.call('space.mote.group.list', {})).groups).toEqual([])
@@ -285,6 +293,9 @@ it('reuses one private Mote thread across directions, Main rotation and Host reo
   expect(reverse.threadId).toBe(threadId)
   const timeline = await reopened.call('space.mote.direct.inspect', { threadId, mote: a })
   expect(timeline.messages.map(entry => entry.id)).toEqual([sent.message.id, reply.message.id, reverse.message.id])
+  expect((await reopened.call('space.mote.direct.inspect', { threadId, mote: b, replyToMessageId: reverse.message.id })).messages).toEqual([])
+  await expect(reopened.call('space.mote.direct.inspect', { threadId, mote: a, replyToMessageId: 'foreign-message' }))
+    .rejects.toMatchObject({ code: 'UNKNOWN_MOTE_GROUP_MESSAGE' })
   expect(timeline.thread.participants.find(p => p.moteId === 'mote-b')?.thread).toEqual(peer.thread)
 })
 
@@ -415,6 +426,56 @@ it('keeps one private assignment arrangement and occurrence across Main rotation
   expect(JSON.parse(retry.stdout).result.schedule).toMatchObject({ loopId: saved.schedule.loopId, prompt: frozen })
   const conflict = await f.cli('schedule', { ...prior, body: 'A different private assignment' }, 'assignment-owner', 'direct')
   expect(cliError(conflict)).toMatchObject({ code: 'SCHEDULE_OPERATION_CONFLICT' })
+})
+
+it('recovers the original missed private assignment after Host reopen without treating a replay as a send', async () => {
+  const f = await fixture(undefined, ['assigner', 'recipient'])
+  const mote = f.target('mote-a'), peer = f.target('mote-b')
+  const main = boundMains(new Map([['mote-a', 'assigner'], ['mote-b', 'recipient']]))
+  const runtime = createGoalRuntime({ clients: f.coreClients, checkIn: async () => ({ known: false, reason: 'No check-in requested.' }) })
+  let now = 100
+  const manager = new ContinuousProgressLoopManager(new ContinuousProgressLoopStore(join(f.root, 'schedules.json')),
+    vi.fn(async () => 'sent' as const), () => now, undefined, runtime)
+  closes.push(() => manager.stop())
+  await manager.start()
+  const { rpc, server, direct, port } = await f.start(undefined, main, manager)
+  const request = { mote, peer, operationId: 'scheduled-assignment', body: 'Inspect the original assignment.', everyMs: 60_000 }
+  const created = await f.cli('schedule', request, 'assigner', 'direct')
+  expect(created.code, created.stderr).toBe(0)
+  const { schedule } = JSON.parse(created.stdout).result
+
+  now = schedule.nextCheckAt
+  await manager.check(now, schedule.loopId)
+  const { schedule: first } = await rpc.call('schedule.inspect', { scheduleId: schedule.loopId })
+  const { conversationId: threadId, messageId, operationId } = first!.lastMotePublication!
+  const original = (await rpc.call('space.mote.direct.inspect', { threadId, mote, messageId })).messages[0]!
+  expect(original.deliveries[0]).toMatchObject({ status: 'failed' })
+  expect(f.send).not.toHaveBeenCalled()
+
+  f.unblockSecond()
+  const replay = await f.cli('send', { mote, peer, operationId, body: request.body }, 'assigner', 'direct')
+  expect(replay.code, replay.stderr).toBe(0)
+  expect(JSON.parse(replay.stdout).result.message).toMatchObject({
+    id: messageId, deliveries: [{ status: 'failed', operationId: original.deliveries[0]!.operationId }]
+  })
+  await direct!.dispose(); await port.dispose(); await rpc.dispose(); await server.stop()
+
+  const reopened = (await f.start(undefined, main, manager)).rpc
+  const read = (id: string) => reopened.call('space.mote.direct.inspect', { threadId, mote, messageId: id })
+  now += request.everyMs
+  await manager.check(now, schedule.loopId)
+  const { schedule: second } = await reopened.call('schedule.inspect', { scheduleId: schedule.loopId })
+  const secondId = second!.lastMotePublication!.messageId
+  expect(secondId).not.toBe(messageId)
+  await vi.waitFor(async () => {
+    expect((await read(messageId)).messages[0]).toMatchObject({
+      id: messageId, deliveries: [{ status: 'accepted', operationId: original.deliveries[0]!.operationId }]
+    })
+    expect((await read(secondId)).messages[0]?.deliveries[0]?.status).toBe('accepted')
+  }, { timeout: 10_000 })
+  expect(f.send).toHaveBeenCalledTimes(2)
+  const timeline = await reopened.call('space.mote.direct.inspect', { threadId, mote })
+  expect(timeline.messages.map(message => message.id)).toEqual([messageId, secondId])
 })
 
 it('reads immutable private image bytes through the original addressed Thread only', async () => {
@@ -730,7 +791,7 @@ const restartStage = process.env.MOTE_GROUP_RESTART_STAGE
 it.skipIf(!restartStage)('rejoins the exact frozen input in a new Host process after pre-Core termination', async () => {
   const root = process.env.MOTE_GROUP_RESTART_ROOT!
   const witnessPath = join(root, 'before-core.json'), invitationCut = process.env.MOTE_GROUP_RESTART_CUT === 'invitation'
-  const f = await fixture(root), { rpc } = await f.start()
+  const f = await fixture(root), { rpc, port } = await f.start(undefined, undefined, undefined, restartStage === 'seed')
   if (restartStage === 'seed') {
     const { group } = await rpc.call('space.mote.group.create', { operationId: 'restart-group', name: 'Durable Group',
       members: [f.target('mote-a')], ...(invitationCut ? { announcement: 'Original announcement survives' } : {}) })
@@ -765,10 +826,9 @@ it.skipIf(!restartStage)('rejoins the exact frozen input in a new Host process a
     expect(message.deliveries[0]).toMatchObject({ status: 'pending' })
   } else expect(message.deliveries[0]).toMatchObject({ status: 'pending', operationId: originalOperationId })
   expect(await f.client.inspectAgentInput({ key: original.key })).toBeNull()
-  const request = { groupId: original.groupId, messageId: message.id, memberId: 'mote-a' }
-  await rpc.call('space.mote.group.retry', request)
+  port.start()
   await vi.waitFor(async () => expect((await f.client.inspectAgentInput({ key: original.key }))?.status).toBe('admitted'))
-  await vi.waitFor(async () => expect((await rpc.call('space.mote.group.retry', request)).delivery)
+  await vi.waitFor(async () => expect((await rpc.call('space.mote.group.inspect', { groupId: original.groupId, messageId: message.id })).messages[0]?.deliveries[0])
     .toMatchObject({ status: 'accepted', operationId: message.deliveries[0]!.operationId }))
   if (invitationCut) {
     const receipt = await f.client.inspectAgentInput({ key: original.key })

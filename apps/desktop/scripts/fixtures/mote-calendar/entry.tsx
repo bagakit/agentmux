@@ -3,7 +3,10 @@ import { fixtureEpoch as _batchFixtureEpoch } from "../../../../../test/fixture-
 import { createRoot } from 'react-dom/client'
 import { useState } from 'react'
 import { createWorkspaceLayout } from '@agentmux/layout'
-import type { ContinuousProgressLoop, ContinuousProgressTarget, FileReadResult, ScheduleParamsMap } from '@agentmux/core'
+import type { AgentMuxRpcParams, AgentMuxRpcResult, ContinuousProgressLoop, ContinuousProgressTarget, FileReadResult,
+  MoteDirectParamsMap, MoteGroupMessage, MoteGroupParamsMap, MoteGroupSummary, ScheduleParamsMap } from '@agentmux/core'
+import { parseMoteGroupResult } from '@agentmux/core/mote/group'
+import { parseMoteDirectResult } from '../../../../../packages/core/src/mote/direct'
 import { validateScheduleRpcResult, type ScheduleHistoryEntry, type ScheduleHistoryBucket } from '@agentmux/core/schedule-rpc'
 import { parseMoteChatResult } from '@agentmux/core/mote-chat'
 import { parseConnectionResult } from '@agentmux/core/connections'
@@ -24,7 +27,8 @@ import { useMoteWorkfaceScope } from '../../../src/renderer/src/lib/mote-workfac
 import { DEFAULT_MOTE_BEHAVIOR, serializeMoteBehaviorDocument, type MoteBehaviorDraft } from '../../../src/renderer/src/lib/mote-behavior'
 import { DEFAULT_MOTE_SOUL, PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName, DEFAULT_MOTE_MEMORY } from '@agentmux/host/mote-model'
 import { directoryIdentity, homeZoneId } from '../../../src/shared/space-addresses'
-import type { Demand, ScratchTopicSnapshot, SessionSnapshot, WorkspaceRecord } from '../../../src/shared/contracts'
+import type { Demand, MoteGroupClientMethod, ScratchTopicSnapshot, SessionSnapshot, WorkspaceRecord } from '../../../src/shared/contracts'
+import { moteDirectCapture } from '../../../../../packages/client-ui/test/fixtures/mote-direct'
 import '../../../src/renderer/src/styles/index.css'
 import './scene.css'
 
@@ -35,7 +39,8 @@ if (!workspacePath || !workspacePath.includes('/capture-')) throw new Error('An 
 const scenario = new URLSearchParams(location.search).get('scenario')
 const discussionFilesProof = scenario === 'discussion-files'
 const densityProof = scenario === 'calendar-density'
-const navigationProof = discussionFilesProof || scenario === 'companion-navigation' || densityProof
+const assignmentProof = scenario === 'calendar-assignments'
+const navigationProof = discussionFilesProof || scenario === 'companion-navigation' || densityProof || assignmentProof
 mountThemeRuntime(window, { appAppearance: 'dark' })
 const workspace: WorkspaceRecord = { id: SCRATCH_WORKSPACE_ID, hostId: 'local', path: workspacePath, name: 'Motes', kind: 'folder' }
 const rootPath = scratchTopicDirectoryName(PMO_TEAMS_TOPIC_ID)
@@ -71,7 +76,35 @@ const policies = { gap: 'skip' as const, fold: 'earlier' as const, monthEnd: 'cl
 const calendar = { kind: 'daily' as const, time: (new Date(_batchFixtureEpoch(0, 32400)).toISOString().slice(11, 16)), timezone: 'Asia/Shanghai', policies }
 const make = (id: string, index: number, prompt: string, due: number, rest: Partial<ContinuousProgressLoop> = {}): ContinuousProgressLoop => ({ ...targets[index]!,
   loopId: id, creationOperationId: 'original-' + id, futureIntentId: 'private-intent-' + id, revision: 2, intervalMs: 60_000, calendar, prompt, status: 'active', nextCheckAt: due, ...rest })
+const assignmentMote = { spaceId, zoneId, expectedResource: { hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path } }
+const directFixture = assignmentProof ? moteDirectCapture(assignmentMote, now) : null
+const assignmentPeer = directFixture?.list.threads[0]!.participants[1]!.target
+const groupAssignment: MoteGroupMessage = { id: 'calendar-original-group-assignment', groupId: 'calendar-public-work', sequence: 1,
+  createdAt: now - minute, body: '请把发布前还需要确认的事项放回群里。', author: { kind: 'mote', moteId: spaceId, name: '协调 Mote' },
+  deliveries: [{ moteId: 'assigned-mote', operationId: 'calendar-group-delivery', status: 'accepted' }] }
+const groupReply: MoteGroupMessage = { id: 'calendar-original-group-report', groupId: groupAssignment.groupId, sequence: 2,
+  createdAt: now - minute / 2, body: '名单已确认。发布前只剩一项签核。', author: { kind: 'mote', moteId: 'assigned-mote', name: '资料整理' },
+  deliveries: [], replyToMessageId: groupAssignment.id }
+const groupFixture: MoteGroupSummary | null = assignmentPeer ? {
+  id: groupAssignment.groupId, name: '发布准备', revision: 1, avatarMoteIds: [], announcement: null, topic: null, lastMessage: groupReply,
+  members: [
+    { moteId: spaceId, name: '协调 Mote', target: assignmentMote, state: 'active', role: 'admin', thread: null },
+    { moteId: assignmentPeer.spaceId, name: '资料整理', target: assignmentPeer, state: 'active', role: 'member', thread: null },
+  ]
+} : null
 function sceneRecords(): ContinuousProgressLoop[] {
+  if (directFixture && assignmentPeer) {
+    const occurrenceAt = now - 2 * minute
+    const arranged = (loopId: string, prompt: string, work: NonNullable<ContinuousProgressLoop['moteWork']>, conversationId: string, messageId: string) =>
+      make(loopId, 0, prompt, nextNine, { futureIntentId: undefined, moteWork: work, lastOccurrenceAt: occurrenceAt, lastOutcome: 'sent',
+        lastMotePublication: { conversationId, messageId, occurrenceAt, operationId: 'scheduled/' + loopId + '/' + occurrenceAt } })
+    return [
+      arranged('calendar-direct-work', '核对发布手册', { kind: 'direct', mote: assignmentMote, peer: assignmentPeer },
+        directFixture.list.threads[0]!.id, 'original-private-assignment'),
+      arranged('calendar-group-work', '汇总发布确认', { kind: 'group', mote: assignmentMote, groupId: groupAssignment.groupId,
+        recipients: [{ moteId: assignmentPeer.spaceId, generation: 'original' }] }, groupAssignment.groupId, groupAssignment.id),
+    ]
+  }
   if (densityProof && new URLSearchParams(location.search).has('empty')) return []
   if (densityProof) {
     const anchor = Math.floor(now / 60_000) * 60_000 + 60_000
@@ -96,6 +129,22 @@ function sceneRecords(): ContinuousProgressLoop[] {
 }
 let records = sceneRecords()
 const clone = <T,>(value: T): T => structuredClone(value)
+if (directFixture && groupFixture) api.moteGroup.call = async <M extends MoteGroupClientMethod>(method: M, params: AgentMuxRpcParams<M>) => {
+  calls.push({ method, params: clone(params) })
+  if (method === 'space.mote.direct.inspect') {
+    const request = params as MoteDirectParamsMap['space.mote.direct.inspect']
+    if (!request.messageId && !request.replyToMessageId) throw new Error('Expected an exact private assignment read')
+    return parseMoteDirectResult(method, directFixture.inspect(request.threadId, request.messageId, request.replyToMessageId), request) as AgentMuxRpcResult<M>
+  }
+  if (method === 'space.mote.group.inspect') {
+    const request = params as MoteGroupParamsMap['space.mote.group.inspect']
+    if (request.groupId !== groupFixture.id || (request.messageId ?? request.replyToMessageId) !== groupAssignment.id)
+      throw new Error('Expected the exact scheduled group assignment')
+    return parseMoteGroupResult(method, { group: groupFixture, messages: request.messageId ? [groupAssignment] : [groupReply],
+      nextBeforeSequence: null, viewerId: spaceId }, request) as AgentMuxRpcResult<M>
+  }
+  throw new Error('This Calendar fixture only observes original assignments.')
+}
 const assertTarget = (target: ContinuousProgressTarget) => {
   if (!targets.some(value => (['hostId', 'agentSessionId', 'providerId', 'workspacePath'] as const).every(key => value[key] === target[key]))) throw new Error('PRIVATE_FIXTURE_TARGET_MISMATCH')
 }

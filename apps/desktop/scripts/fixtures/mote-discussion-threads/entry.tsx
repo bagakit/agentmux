@@ -27,7 +27,8 @@ if (query.has('directThreads')) {
   api.moteGroup.call = async <M extends MoteGroupClientMethod>(method: M, input: AgentMuxRpcParams<M>): Promise<AgentMuxRpcResult<M>> => {
     calls.push({ method, input })
     if (method === 'space.mote.direct.list') return direct.list as AgentMuxRpcResult<M>
-    if (method === 'space.mote.direct.inspect' && 'threadId' in input) return direct.inspect(input.threadId, 'messageId' in input ? input.messageId : undefined) as AgentMuxRpcResult<M>
+    if (method === 'space.mote.direct.inspect' && 'threadId' in input) return direct.inspect(input.threadId, 'messageId' in input ? input.messageId : undefined,
+      'replyToMessageId' in input ? input.replyToMessageId : undefined) as AgentMuxRpcResult<M>
     if (method === 'space.mote.direct.image.read' && 'imageOperationId' in input) return direct.image(input) as AgentMuxRpcResult<M>
     return original(method, input)
   }
