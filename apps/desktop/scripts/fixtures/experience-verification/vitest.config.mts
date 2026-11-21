@@ -66,7 +66,7 @@ const owning = [
   'apps/desktop/src/renderer/src/components/performance/PerformanceHostResources.tsx',
   'apps/desktop/src/renderer/src/components/SessionMailbox.tsx',
   'apps/desktop/src/renderer/src/components/ServiceNoticeRow.tsx',
-  'packages/client-ui/src/components/MailboxRecordRow.tsx'
+  'packages/client-ui/src/components/MailboxRecordRow.tsx',
   'apps/desktop/src/renderer/src/components/MailboxNavigation.tsx'
 ]
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex')
