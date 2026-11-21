@@ -26,18 +26,20 @@ export function readRecallCard(href: string, title: string): RecallCard | null {
   } catch { return null }
 }
 
-type CardBlock = {
+type CardBlock<Child> = {
   type?: string | undefined
   attrs?: Record<string, unknown> | undefined
   text?: string | undefined
   marks?: readonly { type?: string | undefined; attrs?: Record<string, unknown> | undefined }[] | undefined
-  content?: readonly CardBlock[] | undefined
+  content?: readonly Child[] | undefined
 }
 
-/** Project only explicitly marked paragraphs, keeping code and pasted lookalikes as ordinary text. */
-export function recallCardBlocks(node: CardBlock): { blockId: string; card: RecallCard }[] {
-  const cards: { blockId: string; card: RecallCard }[] = []
-  function visit(block: CardBlock): void {
+/** The first source paragraph of an anchored quote owns the card and its remaining Note blocks. */
+export function recallCardBlocks<Block extends CardBlock<Block>>(
+  node: Block
+): { blockId: string; card: RecallCard; body?: readonly Block[] }[] {
+  const cards: { blockId: string; card: RecallCard; body?: readonly Block[] }[] = []
+  function visit(block: Block, container?: readonly Block[]): void {
     const blockId = block.attrs?.blockId
     if (block.type === 'paragraph' && typeof blockId === 'string' && block.content?.length) {
       const fragments = block.content
@@ -46,10 +48,12 @@ export function recallCardBlocks(node: CardBlock): { blockId: string; card: Reca
         fragments.every(fragment => fragment.type === 'text' && typeof fragment.text === 'string' &&
           fragment.marks?.find(mark => mark.type === 'link')?.attrs?.href === href)) {
         const card = readRecallCard(href, fragments.map(fragment => fragment.text).join(''))
-        if (card) cards.push({ blockId, card })
+        if (card) cards.push({ blockId, card, ...(container && container.length > 1 ? { body: container.slice(1) } : {}) })
       }
     }
-    block.content?.forEach(visit)
+    const children = block.content
+    const quote = block.type === 'blockquote' && typeof blockId === 'string' ? children : undefined
+    children?.forEach((child, index) => visit(child, index === 0 ? quote : undefined))
   }
   visit(node)
   return cards

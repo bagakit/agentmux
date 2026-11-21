@@ -1,5 +1,6 @@
 import type { JSONContent } from '@tiptap/core'
 import { NOTE_SCHEMA } from './note-format.js'
+import { recallCardHref, type RecallCard } from '@agentmux/core/notebook-observation'
 import type { NoteSharedMetadata } from '@agentmux/core/note-format'
 export type { NoteLinkTarget, NoteInlineLinkAttributes } from '@agentmux/core/note-links'
 export type { NoteBlockAuthorship, NoteBlockProvenance } from './note-provenance.js'
@@ -29,4 +30,11 @@ export function newNoteDocument(draft: string, noteId: string, blockId: string, 
     if (text) content.push({ type: 'text', text })
   }
   return { schema: NOTE_SCHEMA, noteId, ...(title === undefined ? {} : { title }), content: { type: 'doc', content: [{ type: 'paragraph', attrs: { blockId }, ...(content.length ? { content } : {}) }] } }
+}
+
+/** Keep an existing source anchor when adding ordinary Note content to a card. */
+export function recallCardNoteBlock(card: RecallCard, sourceId: string, body?: { containerId: string; blocks: readonly JSONContent[] }): JSONContent {
+  const source: JSONContent = { type: 'paragraph', attrs: { blockId: sourceId },
+    content: [{ type: 'text', text: card.title, marks: [{ type: 'link', attrs: { href: recallCardHref(card) } }] }] }
+  return body?.blocks.length ? { type: 'blockquote', attrs: { blockId: body.containerId }, content: [source, ...body.blocks] } : source
 }
