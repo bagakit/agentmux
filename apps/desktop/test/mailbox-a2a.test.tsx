@@ -38,6 +38,17 @@ const notificationStates: { label: string; notification?: NonNullable<AgentMuxMe
   { label: 'Saved to inbox · Notification unconfirmed', notification: { state: 'unconfirmed' } },
   { label: 'Saved to inbox · Notification unconfirmed', notification: { state: 'unconfirmed', notificationId: 'notice-input', key: notificationKey, reason: 'Original notification input remains unknown' } }
 ]
+
+it('keeps the same peer identity in the list and original detail when its display name is its recorded ID', async () => {
+  const record = { ...original, envelope: { ...original.envelope, senderSessionId: 'Research reviewer', sender: { kind: 'agent-session' as const, agentSessionId: 'Research reviewer' } } }
+  const item = metadata(record), p = { ...props(), items: [item], readMessage: vi.fn(async () => record) }
+  await dom.render(<MailboxA2A {...p} />)
+  expect(dom.container.querySelector('.composer-mailbox__record-identity')?.textContent).toContain('From Research reviewer')
+  await dom.render(<MailboxA2A {...p} selectedKey={a2aMessageKey(item)} />)
+  await vi.waitFor(() => expect(dom.container.querySelector('.log-turn__who')?.textContent).toBe('Research reviewer'))
+  expect(dom.container.querySelector('.log-turn__who')?.textContent).not.toBe('Agent')
+})
+
 it.each(notificationStates.flatMap(state => (['incoming', 'outgoing'] as const).map(direction => ({ ...state, direction }))))(
   'shows $label for reference $direction without confusing notification and body delivery', async ({ label, notification, direction }) => {
     const phase = notification?.key && direction === 'outgoing' ? { ...notification, key: { ...notification.key, agentSessionId: 'peer', expectedRun: { runId: 'run-peer' } } } : notification

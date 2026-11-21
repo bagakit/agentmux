@@ -53,7 +53,7 @@ it('mounts only bounded current-page prefixes, then one complete selectable orig
   expect(panel().textContent).not.toContain(longText.slice(0,60))
 })
 
-it('keeps real pending order and exact inline actions without switching away from adjacent records', async () => {
+it('keeps real pending order and exact actions through independent queue details', async () => {
   const send = vi.fn(),copy = vi.fn(),remove = vi.fn(async () => {})
   await dom.render(<SessionMailbox system={system} queued={[
     {id:'old',text:'Old Run exact words',status:'queued',deliverable:false,enqueuedAt:_tailFixtureEpoch(0, 0, 900)},
@@ -62,8 +62,11 @@ it('keeps real pending order and exact inline actions without switching away fro
   ]} onSendQueued={send} onCopyQueued={copy} onArchiveQueued={remove} />)
   await open();await choose('user')
   expect([...panel().querySelectorAll('.composer-outbox [data-record-key]')].map(row => (row as HTMLElement).dataset.recordKey)).toEqual(['queue:old','queue:next','queue:later'])
-  await read('queue:later');expect(panel().querySelector('.composer-mailbox__back')).toBeNull();expect(panel().querySelectorAll('.composer-outbox .composer-mailbox__row')).toHaveLength(3)
+  await read('queue:later');expect(panel().querySelector('.composer-mailbox__back')).not.toBeNull();expect(panel().querySelectorAll('.composer-outbox .composer-mailbox__row')).toHaveLength(0)
+  expect(panel().querySelectorAll('.composer-outbox__inline .log-turn__body')).toHaveLength(1)
+  expect(panel().querySelector('.composer-outbox__inline .log-turn__body')!.textContent).toBe('Later original text')
   await dom.click('.log-turn__action');expect(copy).toHaveBeenCalledExactlyOnceWith('Later original text')
+  await back();expect([...panel().querySelectorAll('.composer-outbox [data-record-key]')].map(row => (row as HTMLElement).dataset.recordKey)).toEqual(['queue:old','queue:next','queue:later'])
   await read('queue:next')
   const button = panel().querySelector<HTMLButtonElement>('li[data-operation-id="next"] [aria-label="Send queued message"]')!;await act(async()=>button.click())
   expect(send).toHaveBeenCalledExactlyOnceWith('next');expect(remove).not.toHaveBeenCalled()
@@ -119,7 +122,7 @@ it('keeps any sending request from competing Send and preserves exact archive/mo
   expect(buttons().find(b=>b.getAttribute('aria-label')==='Send queued message')!.disabled).toBe(true)
   await read('queue:first');expect(buttons().find(b=>b.getAttribute('aria-label')==='归档这条待发消息')!.disabled).toBe(true)
   expect(buttons().find(b=>b.getAttribute('aria-label')==='Send queued message')!.disabled).toBe(true)
-  await read('queue:second');expect(buttons().find(b=>b.getAttribute('aria-label')==='Move up')!.disabled).toBe(true)
+  await back();await read('queue:second');expect(buttons().find(b=>b.getAttribute('aria-label')==='Move up')!.disabled).toBe(true)
   const down=buttons().find(b=>b.getAttribute('aria-label')==='Move down')!;await act(async()=>down.click());expect(move).toHaveBeenCalledExactlyOnceWith('second','down')
   const deleting=buttons().find(b=>b.getAttribute('aria-label')==='归档这条待发消息')!;await act(async()=>deleting.click());expect(remove).toHaveBeenCalledExactlyOnceWith('second','Exact second retained words',true);expect(send).not.toHaveBeenCalled()
 })
@@ -291,15 +294,15 @@ it('keeps Archived beside active Pending, preserves unknown cause and locates on
     timeline={{agentSessionId:'agent-1',revision:1,items:[outgoingItem('prompt:confirmed','Original confirmed History')]}} />)
   await open();await choose('user');expect(panel().querySelector('[id$="-user-tab"]')!.getAttribute('aria-label')).toBe('Inputs: 1 pending')
   expect([...panel().querySelectorAll<HTMLElement>('li[data-operation-id]')].map(row => row.dataset.operationId)).toEqual(['active','unknown','confirmed'])
-  await read('queue:unknown');expect(panel().querySelector('.composer-mailbox__back')).toBeNull()
-  expect(panel().querySelectorAll('.composer-mailbox__row')).toHaveLength(4)
+  await read('queue:unknown');expect(panel().querySelector('.composer-mailbox__back')).not.toBeNull()
+  expect(panel().querySelectorAll('.composer-mailbox__row')).toHaveLength(0)
   expect(panel().querySelector('.composer-outbox__inline')!.textContent).toContain('此前是否已输入仍待核实')
   expect(panel().querySelector('.composer-outbox__inline')!.textContent).toContain('Original transport cause')
   const unknown=panel().querySelector<HTMLElement>('li[data-operation-id="unknown"]')!
   expect(unknown.querySelector('[aria-label="Send queued message"]')).toBeNull()
   await act(async()=>unknown.querySelector<HTMLButtonElement>('[aria-label="恢复为待发"]')!.click())
   expect(archive).toHaveBeenCalledExactlyOnceWith('unknown','Original possibly input',false);expect(send).not.toHaveBeenCalled()
-  await read('queue:confirmed')
+  await back();await read('queue:confirmed')
   const confirmed=panel().querySelector<HTMLElement>('li[data-operation-id="confirmed"]')!
   expect(confirmed.querySelector('.composer-mailbox__risk')).toBeNull()
   expect(confirmed.textContent).toContain('输入已确认')
@@ -309,7 +312,7 @@ it('keeps Archived beside active Pending, preserves unknown cause and locates on
   expect(archive).toHaveBeenCalledTimes(1);expect(send).not.toHaveBeenCalled()
 })
 
-it('copies the exact inline row with a truthful Check and edits it without jumping to a detail page or moving neighbors', async () => {
+it('copies the exact row and edits it in the independent detail without moving neighbors', async () => {
   const copy=vi.fn(async()=>true),edit=vi.fn(async()=>{}),send=vi.fn(),queued=[{id:'first',text:'First exact',status:'queued' as const,deliverable:true,editable:true},{id:'second',text:'Second original\nExact full tail',status:'queued' as const,deliverable:true,editable:true}]
   await dom.render(<SessionMailbox system={system} queued={queued} onCopyQueued={copy} onEditQueued={edit} onSendQueued={send} />)
   await open();await choose('user');const row=panel().querySelector<HTMLElement>('li[data-operation-id="second"]')!
@@ -317,12 +320,13 @@ it('copies the exact inline row with a truthful Check and edits it without jumpi
   expect(copy).toHaveBeenCalledExactlyOnceWith(queued[1]!.text)
   expect(row.querySelector('[data-copy-state="copied"] [data-semantic-icon="status.copied"]')).not.toBeNull()
   await act(async()=>row.querySelector<HTMLButtonElement>('[aria-label="编辑这条待发消息"]')!.click())
-  expect(panel().querySelector('.composer-mailbox__back')).toBeNull();expect(panel().querySelectorAll('.composer-mailbox__row')).toHaveLength(2)
-  expect(row.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe(queued[1]!.text)
-  const textarea=row.querySelector<HTMLTextAreaElement>('textarea')!
+  expect(panel().querySelector('.composer-mailbox__back')).not.toBeNull();expect(panel().querySelectorAll('.composer-mailbox__row')).toHaveLength(0)
+  const detailRow=panel().querySelector<HTMLElement>('li[data-operation-id="second"]')!
+  expect(detailRow.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe(queued[1]!.text)
+  const textarea=detailRow.querySelector<HTMLTextAreaElement>('textarea')!
   await act(async()=>textarea.dispatchEvent(new KeyboardEvent('keydown',{key:'Home',bubbles:true})))
-  expect(row.querySelector('[data-editing-id]')!.getAttribute('data-editing-id')).toBe('second')
-  await act(async()=>row.querySelector<HTMLButtonElement>('[aria-label="保存待发消息"]')!.click())
+  expect(detailRow.querySelector('[data-editing-id]')!.getAttribute('data-editing-id')).toBe('second')
+  await act(async()=>detailRow.querySelector<HTMLButtonElement>('[aria-label="保存待发消息"]')!.click())
   expect(edit).toHaveBeenCalledExactlyOnceWith('second',queued[1]!.text,queued[1]!.text)
   expect(send).not.toHaveBeenCalled()
 })
@@ -351,7 +355,7 @@ it('reveals the exact last original row only for an explicit floating More, with
   expect(revealed.filter(key=>key.startsWith('queue:'))).toEqual(['queue:original-99'])
   const ownCopy=panel().querySelector<HTMLButtonElement>('li[data-operation-id="original-99"] .log-turn__action')!
   const originalContainer=panel().querySelector<HTMLElement>('li[data-operation-id="original-99"]')!
-  expect(revealTargets).toContain(originalContainer)
+  expect(revealTargets).toContain(panel().querySelector('.composer-outbox__inline'))
   expect(originalContainer.contains(ownCopy)).toBe(true)
   expect(originalContainer.contains(panel().querySelector('.composer-outbox__inline'))).toBe(true)
   await act(async()=>ownCopy.click())
