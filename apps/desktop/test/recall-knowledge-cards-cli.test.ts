@@ -4,8 +4,8 @@ import { join } from 'node:path'
 import { expect, it } from 'vitest'
 import { AgentMuxControlServer, fileUploadRevision } from '@agentmux/core'
 import { AgentMuxNotebookStore } from '@agentmux/core/notebook-store'
-import { recallCardHref, type RecallCard } from '@agentmux/core/notebook-observation'
-import { newNoteDocument, serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
+import { recallCardBlocks, recallCardHref, type RecallCard } from '@agentmux/core/notebook-observation'
+import { newNoteDocument, readNoteDocument, recallCardNoteBlock, serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { NotebookObservationOwner } from '../../host/src/notebook-observation-owner'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc'
 
@@ -43,6 +43,23 @@ it('derives saved Recall occurrences from original files through the shipping No
     }
     expect((await graph()).recallCards).toEqual([{ source: { noteId: note.noteId, blockId: 'capture-block' }, card }])
 
+    const title = note.content.content![0]!
+    note.content.content = [recallCardNoteBlock(card, 'capture-block', { containerId: 'original-card-container', blocks: [
+      { type: 'heading', attrs: { blockId: 'section', level: 3 }, content: [{ type: 'text', text: 'Recorded details' }] },
+      { type: 'bulletList', content: [{ type: 'listItem', attrs: { blockId: 'entry' },
+        content: [{ type: 'paragraph', attrs: { blockId: 'entry-text' }, content: [{ type: 'text', text: 'Keep one original anchor.' }] }] }] },
+      { type: 'codeBlock', attrs: { blockId: 'example', language: 'text' }, content: [{ type: 'text', text: 'original source bytes' }] }
+    ] })]
+    const grouped = serializeNoteDocument(note)
+    const reopened = readNoteDocument(grouped)
+    expect(reopened.status === 'valid' && recallCardBlocks(reopened.note.content)[0]?.body?.map(block => block.type))
+      .toEqual(['heading', 'bulletList', 'codeBlock'])
+    await writeFile(join(root, path), grouped)
+    const observed = await graph()
+    expect(observed.recallCards).toEqual([{ source: { noteId: note.noteId, blockId: 'capture-block' }, card }])
+    expect(JSON.stringify(observed)).not.toContain('original source bytes')
+
+    note.content.content = [title]
     note.content.content![0]!.content = [
       { type: 'text', text: 'Selected', marks: [link, { type: 'bold' }] },
       { type: 'text', text: ' conversation record', marks: [link] }

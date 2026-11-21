@@ -8,6 +8,8 @@ import { NOTES_WORKSPACE_ID } from '@agentmux/host/notes-library'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { newNoteDocument, readNoteDocument, serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { NotebookObservationOwner } from '../../host/src/notebook-observation-owner'
+import { fixture as conversationFixture, session as conversationSession } from '../../mobile/test/conversation-fixture'
+import { installConversationReading } from '../../mobile/test/conversation-reading-fixture'
 import { FileResourceOwner } from '../../host/src/file-resource'
 import { api } from '../src/renderer/src/lib/api'
 import { saveRecallCard } from '../src/renderer/src/lib/recall-card-capture'
@@ -180,6 +182,47 @@ it('creates one default Daily per local day and appends different cards to its o
   const tomorrow = new Date(date); tomorrow.setDate(date.getDate() + 1)
   const third = await saveRecallCard(card, null, tomorrow)
   expect(third.page.noteId).not.toBe(first.page.noteId)
+})
+
+it('saves the exact message text inside the card in one original write and displays it with its link', async () => {
+  const conversation = conversationFixture()
+  const reference = card.reference
+  if (reference.source.kind !== 'native') throw new Error('The fixture uses an original native message.')
+  conversation.sessions.set(reference.agentSessionId, { ...conversationSession(), hostId: reference.hostId })
+  const exactText = 'The decision preserves the original file.\n\nA later edit can still refer to it.'
+  conversation.setPage({ agentSessionId: reference.agentSessionId, sourceHostId: reference.hostId,
+    source: { providerId: reference.source.providerId, nativeSessionId: reference.source.nativeSessionId }, nextCursor: null,
+    items: [
+      { id: 'adjacent-record', kind: 'assistant-message', contentParts: [{ kind: 'text', text: 'Unselected neighbour.' }] },
+      { id: reference.source.recordId, kind: 'user-message', contentParts: [{ kind: 'text', text: exactText }] }
+    ] })
+  installConversationReading(conversation)
+  const readOriginal = vi.spyOn(api.conversation, 'readAgentConversation').mockImplementation(conversation.client.readAgentConversation)
+  const release = vi.spyOn(api.conversation, 'releaseConversationView').mockImplementation(conversation.client.releaseConversationView)
+
+  const saved = await saveRecallCard(card, catalog.pages['selected-note']!, date)
+  expect(saved.text).toBe('saved')
+  expect(readOriginal).toHaveBeenCalledWith(expect.objectContaining({ hostId: card.routeHostId, record: reference }))
+  expect(release).toHaveBeenCalledTimes(1)
+  expect(api.files.writePublic).toHaveBeenCalledTimes(1)
+  const document = read(path)
+  if (document.status !== 'read') throw new Error('Saved Note is unavailable.')
+  expect(document.document.content.startsWith(body)).toBe(true)
+  expect(document.document.content).not.toContain('Unselected neighbour.')
+  const persisted = readNoteDocument(document.document.content)
+  const occurrence = persisted.status === 'valid' && recallCardBlocks(persisted.note.content)[0]
+  expect(occurrence).toMatchObject({ blockId: saved.blockId, card, body: [{ content: [{ type: 'text', text: exactText }] }] })
+
+  await display(<NoteFileView document={document.document} resource={resource(path)} knowledge={{ scope: 'complete', sources: [], invalid: [], references: [] }}
+    onChange={() => {}} onSave={() => {}} onOpen={() => {}} />)
+  expect(container!.querySelector('.recall-knowledge-card .note-embedded-content')).toBeNull()
+  const disclosure = container!.querySelector<HTMLDetailsElement>('.recall-knowledge-card details')!
+  await act(async () => {
+    disclosure.open = true
+    disclosure.dispatchEvent(new Event('toggle'))
+  })
+  await vi.waitFor(() => expect(container!.querySelector('.recall-knowledge-card .note-embedded-content')?.textContent).toContain('A later edit'))
+  expect(container!.querySelector('.recall-knowledge-card__actions button')?.textContent).toBe('Open original message')
 })
 
 it('keeps the directory usable until the user creates today’s Daily, then captures into the same file', async () => {
