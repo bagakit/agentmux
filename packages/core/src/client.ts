@@ -9662,7 +9662,7 @@ export class AgentMuxClient {
     requestSignal?.throwIfAborted()
     let current = await this.registry.refresh(session.agentSessionId, session.run)
     const currentRun = await this.requireCurrentAgentRun(current)
-    if (!sameNativeHandle(current.nativeHandle, handle) || !isDeepStrictEqual(current.nativeActor, session.nativeActor) ||
+    if (!matchesProviderNativeSessionTarget(handle, current.nativeHandle) || !isDeepStrictEqual(current.nativeActor, session.nativeActor) ||
         currentRun.state.type !== 'running' || currentRun.pid !== run.pid) throw new AgentMuxError(
       'The original native information source changed. Its Session and input are kept.', 'STALE_AGENT_SESSION')
     let snapshot = this.retainedNativeInformation(current)?.snapshot ?? null
@@ -9671,7 +9671,7 @@ export class AgentMuxClient {
       if (information.nativeSessionId !== handle.sessionId) throw new AgentMuxError('Native information belongs to another Session.', 'CONTROL_PROTOCOL_ERROR')
       const observed = information
       const saved = await this.updateExactAgentSession(session.agentSessionId, session.run, current => {
-        if (!sameNativeHandle(current.nativeHandle, handle) || !isDeepStrictEqual(current.nativeActor, session.nativeActor)) return current
+        if (!matchesProviderNativeSessionTarget(handle, current.nativeHandle) || !isDeepStrictEqual(current.nativeActor, session.nativeActor)) return current
         const latest = this.retainedNativeInformation(current)
         const recoveryInformation = latest && latest.snapshot.observedAt > observed.observedAt ? latest : {
           run: current.run, snapshot: observed, ...(current.nativeActor ? { actorId: current.nativeActor.actorId } : {}) }
@@ -9708,7 +9708,7 @@ export class AgentMuxClient {
       signal: AbortSignal.timeout(1_500) }, session.nativeHandle.sessionId)
     const snapshot = observed === null ? null : this.parseNativeConfiguration(session, observed)
     const current = await this.registry.refresh(session.agentSessionId, session.run)
-    if (!sameNativeHandle(current.nativeHandle, session.nativeHandle) || !isDeepStrictEqual(current.nativeActor, actor)) throw new AgentMuxError('The original configuration source changed.', 'STALE_AGENT_SESSION')
+    if (!matchesProviderNativeSessionTarget(session.nativeHandle, current.nativeHandle) || !isDeepStrictEqual(current.nativeActor, actor)) throw new AgentMuxError('The original configuration source changed.', 'STALE_AGENT_SESSION')
     // Ordered native reads can enrich their same-stream sample with its catalog.
     // Unordered reads keep the existing no-overwrite guard, including null.
     if (this.acceptNativeConfigurationRead(current, snapshot, previous)) {
@@ -9740,7 +9740,7 @@ export class AgentMuxClient {
     const assertCurrent = async () => {
       signal.throwIfAborted(); await context.assertCurrent?.(); signal.throwIfAborted()
       const current = await this.registry.refresh(session.agentSessionId, session.run)
-      if (!isDeepStrictEqual(current.nativeActor, nativeActor) || !sameNativeHandle(current.nativeHandle, session.nativeHandle) ||
+      if (!isDeepStrictEqual(current.nativeActor, nativeActor) || !matchesProviderNativeSessionTarget(session.nativeHandle, current.nativeHandle) ||
           this.terminalCreationRuntimeIdentity().instanceId !== runtime.instanceId) throw new AgentMuxError(
         'The original configuration target changed.', 'STALE_AGENT_SESSION', undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
     }
@@ -9763,7 +9763,7 @@ export class AgentMuxClient {
       let sameRuntime = false
       try { sameRuntime = this.terminalCreationRuntimeIdentity().instanceId === runtime.instanceId }
       catch { /* A failed current Runtime observation cannot reverse the original native ACK. */ }
-      if (current?.agentSessionId === session.agentSessionId && sameNativeHandle(current.nativeHandle, session.nativeHandle) &&
+      if (current?.agentSessionId === session.agentSessionId && matchesProviderNativeSessionTarget(session.nativeHandle, current.nativeHandle) &&
           isDeepStrictEqual(current.nativeActor, nativeActor) && sameRuntime &&
           snapshot.observation?.state !== 'unconfirmed' &&
           this.acceptNativeConfigurationRead(current, snapshot, before)) {
