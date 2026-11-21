@@ -10,8 +10,7 @@ import { checkRecallCard, saveRecallCard } from '../lib/recall-card-capture'
 import { openRecallCardNote, type RecallBacklinks, type RecallDestination } from '../lib/recall-card-navigation'
 import { recallIntentKey } from '../lib/recall-card-intent'
 import { refreshNotebookLibrary, useNotebookLibrary } from '../lib/notebook-library'
-import { RecallCardLink, RecallKnowledgeCard } from './RecallKnowledgeCard'
-import { RecallCardBody } from './RecallCardBody'
+import { RecallCardReference, RecallKnowledgeCard } from './RecallKnowledgeCard'
 import { SavedRecallCardBody } from './SavedRecallCardBody'
 
 const Chevron = semanticIconComponent('navigation.down')
@@ -50,9 +49,9 @@ export function ConversationRecallCard({ card, backlinks, inNamedRow = false }: 
     {links.map(destination => {
       const { page, blockId } = destination
       const title = destination.title ?? card.title
-      return <RecallKnowledgeCard key={JSON.stringify([href, page.noteId, blockId, page.resource])} kind="Recall" title={title} showTitle={!inNamedRow || title !== card.title} actions={
-        <RecallCardLink onOpen={document => { void openRecallCardNote(page, blockId, document).catch(error => setIssue(presentError(error))) }}>Open {page.title}</RecallCardLink>
-      }><RecallCardBody><SavedRecallCardBody destination={destination} href={href} /></RecallCardBody></RecallKnowledgeCard>
+      return <RecallKnowledgeCard key={JSON.stringify([href, page.noteId, blockId, page.resource])} title={title} showTitle={!inNamedRow || title !== card.title} reference={
+        <RecallCardReference label={page.title} openLabel={`Open ${page.title}`} onOpen={document => { void openRecallCardNote(page, blockId, document).catch(error => setIssue(presentError(error))) }} />
+      }><SavedRecallCardBody destination={destination} href={href} /></RecallKnowledgeCard>
     })}
     <details className="recall-card-capture__save" onToggle={event => {
       if (event.currentTarget.open) void refreshNotebookLibrary().catch(error => setIssue(presentError(error)))

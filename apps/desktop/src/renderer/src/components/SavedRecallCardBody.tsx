@@ -26,7 +26,7 @@ async function readSavedBody({ page, blockId }: RecallDestination, href: string,
   return { knowledge, body: card.body }
 }
 
-/** The exact Note occurrence is read only while its saved content is expanded. */
+/** Observe the exact Note occurrence while the card is visible in the conversation UI. */
 export function SavedRecallCardBody({ destination, href }: { destination: RecallDestination; href: string }) {
   const { page, blockId } = destination
   const [attempt, retry] = useState(0)

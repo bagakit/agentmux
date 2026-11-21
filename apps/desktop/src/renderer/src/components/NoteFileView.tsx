@@ -1,7 +1,7 @@
 import { RecallOriginalRecord } from './RecallOriginalRecord'
 import { recallCardBlocks, type RecallCard } from '@agentmux/core/notebook-observation'
 import { openRecallCardRecord } from '../lib/recall-card-navigation'
-import { RecallCardLink, RecallKnowledgeCard } from './RecallKnowledgeCard'
+import { RecallCardReference, RecallKnowledgeCard } from './RecallKnowledgeCard'
 import { RecallCardBody, RecallCardContent } from './RecallCardBody'
 import { presentKnowledgeSurface } from '../lib/knowledge-surface-navigation'
 import { useWorkbenchDocument } from '../lib/workbench-document'
@@ -167,8 +167,8 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
   const identityIcon = <NoteFileIdentity key={sourceIdentity} scope={sourceIdentity} document={document} resource={resource} dirty={dirty} active={presentation.active} />
   const cardSection = cards.length ? <section className="recall-knowledge-cards" aria-label="Knowledge cards">
     <h2>Knowledge cards</h2>
-    {cards.map(({ blockId, card, body }) => <RecallKnowledgeCard kind="Reading point" key={blockId} title={card.title} actions={
-      <RecallCardLink onOpen={() => { void openRecallCardRecord(card).then(opened => { if (!opened) setOriginalRecord(card) }).catch(error => setIssue(presentError(error))) }}>Open original message</RecallCardLink>
+    {cards.map(({ blockId, card, body }) => <RecallKnowledgeCard key={blockId} title={card.title} reference={
+      <RecallCardReference label="Original message" openLabel="Open original message" onOpen={() => { void openRecallCardRecord(card).then(opened => { if (!opened) setOriginalRecord(card) }).catch(error => setIssue(presentError(error))) }} />
     }>{presentation.active && body?.length ? <RecallCardBody><RecallCardContent blocks={body} /></RecallCardBody> : null}</RecallKnowledgeCard>)}
   </section> : null
   return <NoteFileLinkContext.Provider value={openAttachment}><NoteFileContext.Provider value={resource ?? parentResource}><div className="note-file-view">

@@ -1,21 +1,40 @@
 .recall-knowledge-card {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: start;
-  gap: 9px;
-  padding: 10px;
-  border: 1px solid var(--line-soft);
-  border-radius: 7px;
-  font-size: 12px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-1);
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-inline-start: 2px solid color-mix(in srgb, var(--green) 54%, var(--line));
+  background: var(--wash-1);
+  overflow-wrap: anywhere;
 }
-.recall-knowledge-card > svg { margin-top: 3px; }
-.recall-knowledge-card__body { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
-.recall-knowledge-card__kind { color: var(--text-3); font-size: 11px; }
+.recall-knowledge-card__title { font-size: var(--fs-body); }
+.recall-knowledge-card__reference {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-2);
+  justify-self: start;
+  min-height: 28px;
+  max-width: 100%;
+  padding: var(--sp-1) 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--green);
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-meta);
+  text-align: start;
+  cursor: pointer;
+}
+.recall-knowledge-card__reference > svg:last-child { color: var(--text-3); }
+.recall-knowledge-card__reference:hover > span { text-decoration: underline; text-underline-offset: 3px; }
+.recall-knowledge-card__reference:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+.recall-knowledge-card > p[role="status"] { font-size: var(--fs-meta); }
 .recall-knowledge-card__excerpt > summary { width: fit-content; padding-block: var(--sp-2); cursor: pointer; color: var(--text-2); }
 .recall-knowledge-card__excerpt[open] > summary { margin-bottom: var(--sp-2); }
 .recall-knowledge-card .note-embedded-content { min-width: 0; font-size: var(--fs-body); }
-.recall-knowledge-card__actions { display: flex; flex-wrap: wrap; gap: 4px; }
-.recall-knowledge-card__actions button { max-width: 100%; height: auto; white-space: normal; text-align: start; }
+.recall-card-capture .note-embedded-content { margin-top: 0; }
 .recall-knowledge-cards { display: grid; gap: 6px; }
 .recall-knowledge-cards > h2 { margin: 0; font-size: 12px; }
 .recall-card-capture { grid-column: 1 / -1; display: grid; gap: var(--sp-2); }
@@ -37,6 +56,9 @@
 .recall-card-capture__save > summary::-webkit-details-marker { display: none; }
 .recall-card-capture__save[open] > summary svg { transform: rotate(180deg); }
 .recall-card-capture label { display: grid; gap: 4px; }
+@media (pointer: coarse) {
+  .recall-knowledge-card__reference { min-height: 44px; }
+}
 @container (max-width: 420px) {
   .note-original-editor > .recall-knowledge-cards { width: calc(100% - var(--sp-4) - var(--sp-4)); }
 }
