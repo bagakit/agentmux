@@ -9,7 +9,6 @@ import { AgentConfigurationRequestError } from '../lib/agent-configuration-reque
 
 const ThemeStatusAuthorizedIcon = semanticIconComponent('status.authorized')
 const SessionSettingsIcon = semanticIconComponent('object.settings')
-const DisclosureIcon = semanticIconComponent('navigation.disclosure')
 
 
 /**
