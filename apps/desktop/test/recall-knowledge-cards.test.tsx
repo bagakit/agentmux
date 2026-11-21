@@ -1,18 +1,20 @@
 // @vitest-environment happy-dom
 import { act, type ReactNode } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import type { AgentSessionHistoryItem } from '@agentmux/core'
 import { applyNotebookChange, DEFAULT_NOTEBOOK_ID, emptyNotebookState, type NoteResource } from '@agentmux/core/notebook-catalog'
 import { parseNotebookGraph, readRecallCard, recallCardBlocks, recallCardHref, type RecallCard } from '@agentmux/core/notebook-observation'
 import { fileUploadRevision } from '@agentmux/core/files'
 import { NOTES_WORKSPACE_ID } from '@agentmux/host/notes-library'
 import { createWorkspaceLayout } from '@agentmux/layout'
-import { newNoteDocument, readNoteDocument, serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
+import { newNoteDocument, readNoteDocument, recallCardNoteBlock, serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
+import { noteKnowledge } from '@agentmux/client-ui/note/note-knowledge'
 import { NotebookObservationOwner } from '../../host/src/notebook-observation-owner'
 import { fixture as conversationFixture, session as conversationSession } from '../../mobile/test/conversation-fixture'
 import { installConversationReading } from '../../mobile/test/conversation-reading-fixture'
 import { FileResourceOwner } from '../../host/src/file-resource'
 import { api } from '../src/renderer/src/lib/api'
-import { saveRecallCard } from '../src/renderer/src/lib/recall-card-capture'
+import { checkRecallCard, saveRecallCard } from '../src/renderer/src/lib/recall-card-capture'
 import { createRecallDaily, recallDailyAddress } from '../src/renderer/src/lib/recall-daily'
 import { recallBacklinks } from '../src/renderer/src/lib/recall-card-navigation'
 import { restoreRecallCardIntents } from '../src/renderer/src/lib/recall-card-intent'
@@ -65,6 +67,27 @@ const originalFiles = new FileResourceOwner({
   }
 })
 const settle = async () => { await act(async () => { await Promise.resolve() }) }
+async function openSavedContent() {
+  const disclosure = container!.querySelector<HTMLDetailsElement>('.recall-knowledge-card details')!
+  await act(async () => {
+    disclosure.open = true
+    disclosure.dispatchEvent(new Event('toggle'))
+  })
+}
+function originalConversation(parts: AgentSessionHistoryItem['contentParts']) {
+  const conversation = conversationFixture()
+  const reference = card.reference
+  if (reference.source.kind !== 'native') throw new Error('The fixture uses an original native message.')
+  conversation.sessions.set(reference.agentSessionId, { ...conversationSession(), hostId: reference.hostId })
+  conversation.setPage({ agentSessionId: reference.agentSessionId, sourceHostId: reference.hostId,
+    source: { providerId: reference.source.providerId, nativeSessionId: reference.source.nativeSessionId }, nextCursor: null,
+    items: [
+      { id: 'adjacent-record', kind: 'assistant-message', contentParts: [{ kind: 'text', text: 'Unselected neighbour.' }] },
+      { id: reference.source.recordId, kind: 'user-message', contentParts: parts }
+    ] })
+  installConversationReading(conversation)
+  return conversation
+}
 async function display(node: ReactNode) {
   if (!root) {
     container = document.createElement('div')
@@ -185,18 +208,9 @@ it('creates one default Daily per local day and appends different cards to its o
 })
 
 it('saves the exact message text inside the card in one original write and displays it with its link', async () => {
-  const conversation = conversationFixture()
   const reference = card.reference
-  if (reference.source.kind !== 'native') throw new Error('The fixture uses an original native message.')
-  conversation.sessions.set(reference.agentSessionId, { ...conversationSession(), hostId: reference.hostId })
   const exactText = 'The decision preserves the original file.\n\nA later edit can still refer to it.'
-  conversation.setPage({ agentSessionId: reference.agentSessionId, sourceHostId: reference.hostId,
-    source: { providerId: reference.source.providerId, nativeSessionId: reference.source.nativeSessionId }, nextCursor: null,
-    items: [
-      { id: 'adjacent-record', kind: 'assistant-message', contentParts: [{ kind: 'text', text: 'Unselected neighbour.' }] },
-      { id: reference.source.recordId, kind: 'user-message', contentParts: [{ kind: 'text', text: exactText }] }
-    ] })
-  installConversationReading(conversation)
+  const conversation = originalConversation([{ kind: 'text', text: exactText }])
   const readOriginal = vi.spyOn(api.conversation, 'readAgentConversation').mockImplementation(conversation.client.readAgentConversation)
   const release = vi.spyOn(api.conversation, 'releaseConversationView').mockImplementation(conversation.client.releaseConversationView)
 
@@ -216,13 +230,32 @@ it('saves the exact message text inside the card in one original write and displ
   await display(<NoteFileView document={document.document} resource={resource(path)} knowledge={{ scope: 'complete', sources: [], invalid: [], references: [] }}
     onChange={() => {}} onSave={() => {}} onOpen={() => {}} />)
   expect(container!.querySelector('.recall-knowledge-card .note-embedded-content')).toBeNull()
-  const disclosure = container!.querySelector<HTMLDetailsElement>('.recall-knowledge-card details')!
-  await act(async () => {
-    disclosure.open = true
-    disclosure.dispatchEvent(new Event('toggle'))
-  })
+  await openSavedContent()
   await vi.waitFor(() => expect(container!.querySelector('.recall-knowledge-card .note-embedded-content')?.textContent).toContain('A later edit'))
   expect(container!.querySelector('.recall-knowledge-card__actions button')?.textContent).toBe('Open original message')
+})
+
+it('opens a reference in a saved card body using the original Note citation scope', async () => {
+  const note = newNoteDocument('Original file.', 'selected-note', 'source-block', 'Research note')
+  const target = { noteId: 'supporting-note', blockId: 'evidence-block' }
+  note.content.content!.push(recallCardNoteBlock(card, 'reading-anchor', { containerId: 'card-container',
+    blocks: [{ type: 'blockReference', attrs: { blockId: 'quoted-evidence', referenceId: 'quoted-evidence-link', mode: 'reference', target } }] }))
+  const content = serializeNoteDocument(note)
+  const original = { path, content, revision: revision(content) }
+  const supportingPath = 'supporting.note.md'
+  const supporting = serializeNoteDocument(newNoteDocument('Keep the original evidence.', target.noteId, target.blockId, 'Evidence'))
+  const knowledge = noteKnowledge([
+    { location: { workspaceId: workspace.id, path }, document: original },
+    { location: { workspaceId: workspace.id, path: supportingPath }, document: { path: supportingPath, content: supporting, revision: revision(supporting) } }
+  ], 'complete')
+  const open = vi.fn()
+  await display(<NoteFileView document={original} resource={resource(path)} knowledge={knowledge}
+    onChange={() => {}} onSave={() => {}} onOpen={open} />)
+  await openSavedContent()
+  const preview = container!.querySelector('.recall-knowledge-card .note-reference')
+  expect(preview?.querySelector('.note-reference__excerpt')?.textContent).toBe('Keep the original evidence.')
+  await act(async () => preview!.querySelector('button')!.click())
+  expect(open).toHaveBeenCalledWith(expect.objectContaining({ location: { workspaceId: workspace.id, path: supportingPath } }), target.blockId)
 })
 
 it('keeps the directory usable until the user creates today’s Daily, then captures into the same file', async () => {
@@ -284,6 +317,12 @@ it('checks the same Daily after midnight without replaying its unconfirmed creat
 })
 
 it('keeps the exact pending destination after a lost write reply and checks the same file without a duplicate write', async () => {
+  const conversation = originalConversation([
+    { kind: 'text', text: 'The visible text.' },
+    { kind: 'resource', resourceType: 'image', reference: 'opaque:image' }
+  ])
+  vi.spyOn(api.conversation, 'readAgentConversation').mockImplementation(conversation.client.readAgentConversation)
+  vi.spyOn(api.conversation, 'releaseConversationView').mockImplementation(conversation.client.releaseConversationView)
   vi.mocked(api.files.writePublic).mockImplementationOnce(async input => {
     await originalFiles.write(input)
     throw new Error('Reply lost for the original file')
@@ -293,15 +332,42 @@ it('keeps the exact pending destination after a lost write reply and checks the 
   expect(originalIntent.phase).toBe('checking')
   const history = vi.spyOn(api.files, 'historyPublic').mockImplementation(async input => {
     expect(input.eventId).toBe(originalIntent.writeAttempt)
+    expect(input.path).toBe(path)
     return { resource: input.expectedResource, result: { status: 'read', noteId: 'selected-note', resource: resource(path),
       batches: [], hasMore: false, entries: [{ eventId: input.eventId, status: 'committed' }] } } as Awaited<ReturnType<typeof api.files.historyPublic>>
   })
-  const same = await saveRecallCard(card, null, new Date())
-  expect(same.page.resource.path).toBe(path)
+  await expect(saveRecallCard(card, null, date)).rejects.toThrow('Check the original Recall save')
+  await display(<ConversationRecallCard card={card} />)
+  const check = [...container!.querySelectorAll('button')].find(button => button.textContent === 'Check original save')!
+  await act(async () => check.click())
+  expect(container!.textContent).toContain('Open Research note')
+  expect(container!.textContent).toContain('Saved the available text.')
   expect(history).toHaveBeenCalledTimes(1)
   expect(api.files.writePublic).toHaveBeenCalledTimes(1)
   expect(api.files.createPublic).not.toHaveBeenCalled()
   expect(workbench.useAppStore.getState().recallCardIntents).toEqual({})
+})
+
+it('keeps overlapping requests for two destinations distinct', async () => {
+  let release = () => {}
+  const confirmFirst = new Promise<void>(resolve => { release = resolve })
+  vi.mocked(api.files.writePublic).mockImplementationOnce(async input => {
+    await confirmFirst
+    return originalFiles.write(input)
+  })
+  const selected = catalog.pages['selected-note']!
+  const first = saveRecallCard(card, selected, date)
+  await vi.waitFor(() => expect(api.files.writePublic).toHaveBeenCalledTimes(1))
+  expect(saveRecallCard(card, selected, date)).toBe(first)
+  const originalIntent = Object.values(workbench.useAppStore.getState().recallCardIntents)[0]!
+  expect(checkRecallCard(card, originalIntent.operationId)).toBe(first)
+  const second = saveRecallCard(card, null, date)
+  const secondResult = expect(second).rejects.toThrow('another Note is already in progress')
+  release()
+  await expect(first).resolves.toMatchObject({ page: { noteId: selected.noteId } })
+  await secondResult
+  expect(api.files.createPublic).not.toHaveBeenCalled()
+  await expect(saveRecallCard(card, null, date)).resolves.toMatchObject({ page: { noteId: recallDailyAddress(date).noteId } })
 })
 
 it('writes an explicitly selected nested Note using the original Zone-relative address', async () => {
