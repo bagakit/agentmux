@@ -299,7 +299,8 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
       </div> : null}
       {scope && visible && section === 'discussion' && presentation === 'conversation' && dialogue?.page ? <MoteActiveWorkShortcut links={dialogue.page.links} members={currentThreads.working} onOpen={eventId => showThreads('work', { eventId, token: crypto.randomUUID() })} /> : null}
       {dialogue?.target && section === 'discussion' && presentation === 'conversation' && !calendarOpen &&
-        <MoteDirectThreads key={JSON.stringify(dialogue.target)} mote={dialogue.target} active={visible} read={api.moteGroup.call} />}
+        <MoteDirectThreads key={JSON.stringify(dialogue.target)} mote={dialogue.target} active={visible}
+          read={api.moteGroup.call} readGroup={api.moteGroup.call} />}
       {calendarOpen ? null : notice}
       <div className="mote-composer-stage" hidden={calendarOpen} inert={calendarOpen} data-phase={showOriginal ? 'conversation' : entry === 'welcome' ? 'welcome' : 'reading'}>
       {readingMain && selectedMain && showOriginal && section === 'discussion' && presentation === 'conversation' ? <MoteStartupStatus reference={readingMain} active={visible && (!sharedFrame || sharedFrame.section === 'discussion')} onOpenTerminal={sessionId => {

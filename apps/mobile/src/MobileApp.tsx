@@ -27,7 +27,7 @@ import type { MobileMoteRolloverQuery } from './conversation/mote-main-input'
 import type { MoteDialogueLink } from '@agentmux/core/mote-dialogue'
 import { MobileMoteThreads } from './navigation/MobileMoteThreads'
 import { MobileMoteGroups, type MoteGroupReadingPositions } from './navigation/MobileMoteGroups'
-import { MoteDirectThreads, type ReadMoteDirect } from '@agentmux/client-ui/components/MoteDirectThreads'
+import { MoteDirectThreads, type ReadMoteConversationWork } from '@agentmux/client-ui/components/MoteDirectThreads'
 import { MobileMoteContext, MobileMoteTeamPanel, mobileMoteRecipient } from './navigation/MobileMoteTeam'
 import { useMobileMoteTeam } from './navigation/use-mobile-mote-team'
 import { mobileMoteMainIdentity, mobileMoteMemberName, type MobileMoteMember } from './navigation/mobile-mote-team'
@@ -179,8 +179,8 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
     if (!client?.forwardRpc) return Promise.reject(new Error('连接暂不可用，连上 Mac 后可继续。'))
     return client.forwardRpc(method, params)
   }, [client])
-  const readDirect = useCallback<ReadMoteDirect>((method, params) => {
-    if (!client?.forwardRpc || !connected) return Promise.reject(new Error('连接原 Mac 后可继续查看私聊。'))
+  const readMoteConversation = useCallback<ReadMoteConversationWork>((method, params) => {
+    if (!client?.forwardRpc || !connected) return Promise.reject(new Error('连接原 Mac 后可继续查看 Mote 会话。'))
     const runtime = client.runtimeOwnerIdentity?.()
     const fence = runtime?.ownerInstanceId ? { runtimeId: runtime.runtimeId, ownerInstanceId: runtime.ownerInstanceId } : undefined
     return client.forwardRpc(method, params, undefined, fence)
@@ -787,7 +787,7 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
         {!historyVisible && moteConversation && !moteDirectAgent && moteTarget &&
           <ClientUiProvider platform={platform}><MoteDirectThreads
             key={JSON.stringify([client?.runtimeOwnerIdentity?.()?.runtimeId, moteTarget])}
-            mote={moteTarget} active={exposed && conversationVisible} read={readDirect} /></ClientUiProvider>}
+            mote={moteTarget} active={exposed && conversationVisible} read={readMoteConversation} readGroup={readMoteConversation} /></ClientUiProvider>}
         <div hidden={welcomeVisible || historyVisible} className={`mobile-conversation-slot${workface.selectedSessionId ? ' is-active' : ''}`}>
 
           {workface.selectedSessionId && <MobileConversationSurface client={conversationClient} draftScope={memberSelection ? mobileMemberDraftScope(memberSelection, workface.selectedSessionId, objectIdentity?.context) : undefined} memberIssue={memberSelection ? member.issue : undefined} onRetryMember={member.issue ? member.retry : undefined} attachmentOwner={attachmentOwner} agentSessionId={workface.selectedSessionId} onStatusChange={reportConversationStatus} moteMemberName={moteMemberName} moteTarget={moteTarget} moteDialogue={moteDialogue} moteDirectAgent={moteConversation ? moteDirectAgent : undefined} moteName={moteTitle} moteAppearance={team?.appearance ?? objectIdentity?.mote?.appearance}

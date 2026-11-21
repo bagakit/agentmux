@@ -135,3 +135,12 @@
 @media (pointer: coarse), (max-width: 540px) {
   .mote-direct-message footer button, .mote-direct-image button { min-height: 44px; }
 }
+.mote-assignment-progress-list { display: grid; gap: 4px; flex: none; max-inline-size: 572px; padding: 4px 16px; }
+.mote-assignment-progress { display: grid; gap: 4px; padding: 6px 10px 10px; min-width: 0; border-radius: 12px; background: var(--surface-2); }
+.mote-assignment-progress > div { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+.mote-assignment-progress strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mote-assignment-progress button { flex: none; }
+.mote-assignment-progress ul { display: flex; flex-wrap: wrap; gap: 4px 14px; list-style: none; padding: 0; margin: 0; }
+.mote-assignment-progress li { display: flex; gap: 5px; align-items: baseline; overflow-wrap: anywhere; }
+.mote-assignment-progress small { color: var(--text-2, currentColor); }
+@media (max-width: 540px) { .mote-assignment-progress button { min-height: 44px; } }

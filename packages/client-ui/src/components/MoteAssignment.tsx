@@ -25,11 +25,15 @@ async function assignmentSource(target: MoteAssignmentTarget): Promise<Assignmen
   const { conversationId, messageId } = target
   if (target.kind === 'direct') {
     const source = await target.read('space.mote.direct.inspect', { threadId: conversationId, mote: target.mote, messageId })
-    return { original: source.messages[0]!,
+    const original = source.messages.find(message => message.id === messageId)
+    if (!original) throw new Error('未读到原作业。')
+    return { original,
       recipientNames: new Map(source.thread.participants.map(member => [member.moteId, member.name])) }
   }
   const source = await target.read('space.mote.group.inspect', { groupId: conversationId, messageId })
-  return { original: source.messages[0]!, recipientNames: new Map(source.group.members.map(member => [member.moteId, member.name])) }
+  const original = source.messages.find(message => message.id === messageId)
+  if (!original) throw new Error('未读到原作业。')
+  return { original, recipientNames: new Map(source.group.members.map(member => [member.moteId, member.name])) }
 }
 
 async function assignmentReplies(target: MoteAssignmentTarget, beforeSequence?: number): Promise<ReplyPage> {
@@ -92,10 +96,10 @@ export function MoteAssignmentDetails({ target, initialReply }: { target: MoteAs
   </div>
 }
 
-export function MoteAssignmentButton({ target }: { target: MoteAssignmentTarget }) {
+export function MoteAssignmentButton({ target, label = '查看作业与回报' }: { target: MoteAssignmentTarget; label?: string }) {
   const [selection, setSelection] = useState<MoteAssignmentTarget | null>(null)
   return <Dialog.Root open={selection !== null} onOpenChange={open => setSelection(open ? target : null)}>
-    <Dialog.Trigger asChild><Button type="button">查看作业与回报</Button></Dialog.Trigger>
+    <Dialog.Trigger asChild><Button type="button">{label}</Button></Dialog.Trigger>
     <Dialog.Portal>
       <Dialog.Overlay className="mote-direct-overlay" />
       <Dialog.Content className="mote-direct-panel" data-view="assignment" aria-describedby={undefined}>
@@ -104,6 +108,45 @@ export function MoteAssignmentButton({ target }: { target: MoteAssignmentTarget 
       </Dialog.Content>
     </Dialog.Portal>
   </Dialog.Root>
+}
+
+export function MoteAssignmentProgress({ target, coordinatorId, openPrivate }: { target: MoteAssignmentTarget; coordinatorId: string;
+  openPrivate?: ((conversationId: string, messageId: string, button: HTMLButtonElement) => void) | undefined }) {
+  const [reading, setReading] = useState<{ source?: AssignmentSource; replies?: ReplyPage; issue: boolean }>({ issue: false })
+  useEffect(() => {
+    let active = true
+    let timer: ReturnType<typeof setTimeout>
+    async function observe() {
+      const [source, replies] = await Promise.allSettled([assignmentSource(target), assignmentReplies(target)])
+      if (!active) return
+      setReading(previous => ({
+        ...previous, ...(source.status === 'fulfilled' ? { source: source.value } : {}),
+        ...(replies.status === 'fulfilled' ? { replies: replies.value } : {}),
+        issue: source.status === 'rejected' || replies.status === 'rejected'
+      }))
+      timer = setTimeout(observe, 8000)
+    }
+    void observe()
+    return () => { active = false; clearTimeout(timer) }
+  }, [target])
+  const { source, replies, issue } = reading
+  if (source && (source.original.author.kind !== 'mote' || source.original.author.moteId !== coordinatorId ||
+    !source.original.deliveries.length)) return null
+  const reporters = new Set(replies?.messages.flatMap(reply => reply.author.kind === 'mote' &&
+    reply.replyToMessageId === target.messageId ? [reply.author.moteId] : []))
+  const original = source?.original
+  return <section className="mote-assignment-progress" aria-label="作业进展">
+    <div><strong>{original?.body.split('\n')[0] || '作业进展'}</strong>
+      {openPrivate && target.kind === 'direct' ? <Button type="button" onClick={event =>
+        openPrivate(target.conversationId, target.messageId, event.currentTarget)}>查看原作业</Button>
+        : <MoteAssignmentButton target={target} label="查看原作业" />}</div>
+    {source ? <ul>{source.original.deliveries.map(delivery => <li key={delivery.moteId}>
+      <span>{source.recipientNames.get(delivery.moteId) ?? delivery.moteId}</span>
+      <small data-status={delivery.status}>{reporters.has(delivery.moteId) ? '已回报'
+        : replies?.nextBeforeSequence != null ? `${moteAssignmentDeliveryLabel[delivery.status]} · 回报未读全` : moteAssignmentDeliveryLabel[delivery.status]}</small>
+    </li>)}</ul> : null}
+    {issue ? <small role="status">部分进展暂未核对</small> : !source ? <small role="status">正在读取原作业…</small> : null}
+  </section>
 }
 
 export function MoteAssignmentMessage({ message, own, readImage, label, recipientNames, onOpenAssignment, opensFromReply }: {
