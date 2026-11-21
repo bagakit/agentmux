@@ -548,7 +548,16 @@ it('orders private priority ahead of waiting background work while preserving us
     expect(f.send.mock.calls.some(([prompt]) => prompt.includes('explicit-priority-input'))).toBe(false)
   } finally { release() }
   const bodies = ['original-claim', 'background-before-person', 'person-input', 'explicit-priority-input', 'background-after-person']
-  await vi.waitFor(() => expect(f.send.mock.calls.map(([prompt]) => bodies.find(body => prompt.includes(body))).filter(Boolean)).toEqual(bodies))
+  await vi.waitFor(
+    async () => {
+      expect(f.send.mock.calls.map(([prompt]) => bodies.find(body => prompt.includes(body))).filter(Boolean)).toEqual(bodies)
+      const { messages } = await rpc.call('space.mote.direct.inspect', { threadId: opened.threadId })
+      expect(messages.map(message => message.deliveries[0]?.status)).toEqual(Array(5).fill('accepted'))
+      expect(await f.client.inspectAgentInput({ key: { kind: 'prompt', agentSessionId: worker,
+        expectedRun: { runId: 'run-' + worker }, submissionId: 'original-person-input' } })).toMatchObject({ status: 'admitted' })
+    },
+    { timeout: 15_000, interval: 100 }
+  )
   const priorityInput = (await rpc.call('space.mote.direct.inspect', { threadId: opened.threadId })).messages.find(message => message.priority)!
   const receipt = await f.client.inspectAgentInput({ key: { kind: 'prompt', agentSessionId: worker, expectedRun: { runId: 'run-' + worker },
     submissionId: priorityInput.deliveries[0]!.operationId } })

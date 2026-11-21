@@ -61,4 +61,4 @@ export default defineConfig({ ...source, plugins: [...source.plugins ?? [], {
     return body.replace(before, after)
   }
 }], test: { ...source.test, include: ['apps/host/test/mote-group.test.ts'], passWithNoTests: false,
-  maxWorkers: 1, fileParallelism: false, testTimeout: 30000 } })
+  maxWorkers: 1, fileParallelism: false, testTimeout: 120000 } })
