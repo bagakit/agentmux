@@ -14,6 +14,18 @@ it('every declared product meaning has actual default geometry and a collision-f
   expect(hrefs.size).toBe(SEMANTIC_ICON_IDS.length)
 })
 
+it('gives the Session Messages button a filled face independent of ordinary mail', () => {
+  const id = 'object.session-messages'
+  expect(getSemanticIconCatalog().icons.find(icon => icon.id === id)?.defaultGlyph).toBe('messages-envelope')
+  const face = iconShapes(id)
+  expect(face).toHaveLength(1)
+  expect(face[0]).toMatchObject(['path', { fill: 'currentColor', stroke: 'none', 'fill-rule': 'evenodd' }])
+  expect(iconShapes(id, { 'object.mail': { kind: 'glyph', glyph: 'x' } })).toBe(face)
+  const overrides = { [id]: { kind: 'glyph', glyph: 'mail' } } as const
+  expect(iconShapes(id, overrides)).toBe(ICON_GLYPHS.mail)
+  expect(iconShapes('object.mail', { 'object.session-messages': { kind: 'glyph', glyph: 'x' } })).toBe(ICON_GLYPHS.mail)
+})
+
 it('discovers Automation as an object and applies its theme glyph to the retained sprite identity', () => {
   expect(getSemanticIconCatalog().icons.find(icon => icon.id === 'object.automation')).toMatchObject({ label: 'Automation', groupId: 'object', defaultGlyph: 'automation-route' })
   const id = semanticIconHref('object.automation').slice(1)
