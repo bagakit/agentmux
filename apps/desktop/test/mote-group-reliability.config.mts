@@ -14,8 +14,11 @@ const mutations = {
   'invite-gone': ['MoteGroupSettings.tsx', 'disabled={changing || !selectedInvitees.length}', 'disabled={changing || !invite.length}'],
   'keep-inactive-avatar': ['MoteGroupSettings.tsx', 'const retained = changes.avatarMoteIds.filter(id => active.some(member => member.moteId === id))',
     'const retained = changes.avatarMoteIds'],
-  'miss-exact-mention': ['MoteGroupConversation.tsx', '...value.recipientIds, member.moteId', '...value.recipientIds'],
+  'miss-exact-mention': ['MoteGroupMessageInput.tsx', 'if (completing.current) confirmed.add(completing.current)', 'if (false) confirmed.add("unconfirmed")'],
   'conflate-reports': ['MoteAssignment.tsx', 'reply.replyToMessageId === target.messageId ? [reply.author.moteId]', 'true ? [reply.author.moteId]'],
+  'mix-group-progress': ['MoteGroupConversation.tsx', 'replies={byReply.get(message.id)}', 'replies={new Map([...byReply.values()].flatMap(replies => [...replies]))}'],
+  'stale-group-identity': ['MoteGroupConversation.tsx', 'result.group.revision >= known.revision', 'true'],
+  'wrong-group-attachment-root': ['MoteGroupFiles.tsx', 'resource.zoneId !== target.zoneId', 'false'],
 } as const
 const mutation = variant ? mutations[variant as keyof typeof mutations] : undefined
 if (variant && !mutation) throw Error('Unknown Mote Group reliability mutant')

@@ -3,6 +3,13 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
   const sheet = '.mobile-sheet--mote-groups'
   const originalDraft = '主对话仍保留这份原草稿。'
   const groupDraft = '确认这周的工期后再回到群里。'
+  const groupDraftPresent = `(() => {
+    const editor = document.querySelector('${sheet} [aria-label="群消息"]')
+    const mention = editor?.querySelector('[data-tool-reference=mote]')
+    const plain = editor?.textContent.replace(/\u00a0/g, ' ').replace(/\u200b/g, '').trim()
+    return mention?.textContent === '@资料协作' && plain.startsWith(mention.textContent) &&
+      plain.slice(mention.textContent.length).trim() === ${JSON.stringify(groupDraft)}
+  })()`
   const checkWorkface = async () => {
     const record = await read('mobileProductScene.facts().record')
     assert.equal(record.selectedSessionId, 'session-mote')
@@ -19,7 +26,7 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
     await button('群聊', '.mobile-mote-threads-panel')
     await button('下周实验方向', sheet)
     await button('群聊', sheet + ' [aria-label="会话视角"]')
-    await until(`document.querySelector('${sheet} [aria-label="群消息"]')?.value===${JSON.stringify(groupDraft)}`)
+    await until(groupDraftPresent)
     await capture('mobile-mote-group-restored-332-light')
     return
   }
@@ -43,20 +50,32 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
   await until(`document.querySelector('${sheet} .mote-group__identity .mote-group-avatar')?.dataset.faces === '2'`)
   await read(`document.querySelector('${sheet} .mote-group__timeline').scrollTop = 0`)
   await until(`document.querySelector('${sheet} .mote-group__announcement')?.textContent.includes('群公告已更新')`)
+  await until(`(() => { const title = document.querySelector('${sheet} .mote-group__identity h2')
+    return title.textContent === '下周实验方向' && title.scrollWidth <= title.clientWidth
+  })()`)
   await capture('mobile-mote-group-public-390-dark')
   await resize(332, 670)
   await read('mobileProductScene.setAppearance("light")')
   await tap(sheet + ' [aria-label="群消息"]', '在本群点名资料协作')
   win.webContents.insertText('@资料')
-  await until(`document.querySelector('${sheet} [aria-label="点名成员"]')?.textContent === '资料协作'`)
+  await until(`document.querySelector('[aria-label="点名成员"]')?.textContent === '资料协作'`)
   await capture('mobile-mote-group-mention-332-light')
-  await button('资料协作', sheet + ' [aria-label="点名成员"]')
+  await tap('[aria-label="点名成员"] [role="option"]', '选择资料协作')
   await until(`document.querySelector('${sheet} [aria-label="选择参与成员"] button[aria-pressed="true"]')?.textContent === '资料协作'`)
-  await read(`document.querySelector('${sheet} [aria-label="群消息"]').select()`)
+  await until(`document.querySelector('${sheet} [data-tool-reference=mote]')?.textContent === '@资料协作'`)
+  await until('document.activeElement?.getAttribute("aria-label") === "群消息"')
   win.webContents.insertText(groupDraft)
   await until(`mobileProductScene.facts().record.conversation.drafts.some(([,body])=>body.includes(${JSON.stringify(groupDraft)}))`)
   const bounds = await read(`(()=>{const n=document.querySelector('${sheet}');const composer=n.querySelector('.mote-group__composer');return {sheet:n.getBoundingClientRect().toJSON(), composer:composer.getBoundingClientRect().toJSON(), width:innerWidth,height:innerHeight}})()`)
   assert.ok(bounds.composer.bottom <= bounds.height && bounds.sheet.right <= bounds.width)
+  const fullRecipientNames = await read(`(() => {
+    const group = document.querySelector('${sheet} .mote-group__recipients')
+    const labels = [...group.querySelectorAll('button > span:last-child')]
+    const rail = group.getBoundingClientRect()
+    return labels.length === 2 && labels.every(label => label.scrollWidth <= label.clientWidth
+      && label.getBoundingClientRect().right <= rail.right + 1)
+  })()`)
+  assert.ok(fullRecipientNames, 'Both visible recipient names fit in the narrow Composer')
   const fit = await read(`(()=>{const timeline=document.querySelector('${sheet} .mote-group__timeline');const right=timeline.getBoundingClientRect().right;return [...timeline.querySelectorAll('.mote-group__bubble')].every(bubble=>bubble.getBoundingClientRect().right<=right+1)})()`)
   assert.ok(fit, 'Quoted message bubbles remain inside the original narrow reading pane')
   await capture('mobile-mote-group-compose-332-light')
@@ -66,19 +85,19 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
   await button('公告与设置', sheet + ' [aria-label="群资料分区"]')
   await until(`document.querySelector('${sheet} .mote-group-settings select')?.selectedOptions[0]?.textContent === '实验资料'`)
   await capture('mobile-mote-group-settings-332-light')
-  await button('群文件', sheet + ' .mote-group__header-actions')
-  const files = sheet + ' .mobile-topic-source-reader'
-  await until(`document.querySelector('${files}')?.textContent.includes('已确认目录')`)
+  await tap(sheet + ' .mote-group__header-actions [aria-label="群文件"]', '原群文件')
+  const files = sheet + ' .mote-group-files'
+  await until(`document.querySelector('${files}')?.textContent.includes('实验决策.md')`)
   await capture('mobile-mote-group-files-332-light')
   await button('实验决策.md', files)
   await until(`document.querySelector('${files} article h1')?.textContent === '实验决策'`)
   await capture('mobile-mote-group-file-reader-332-light')
   await button('返回上层来源', files)
-  await until(`document.querySelector('${files}')?.textContent.includes('已确认目录')`)
+  await until(`document.querySelector('${files}')?.textContent.includes('实验决策.md')`)
   await button('返回群聊', files)
   await until(`!document.querySelector('${sheet} .mobile-mote-groups__content').hidden`)
   await button('返回', sheet + ' .mote-group__header-actions')
-  await until(`document.querySelector('${sheet} [aria-label="群消息"]')?.value === ${JSON.stringify(groupDraft)}`)
+  await until(groupDraftPresent)
   await button('我的 Mote', sheet + ' [aria-label="会话视角"]')
   await until(`document.querySelector('${sheet} .mote-group')?.textContent.includes('正在查看 我的 Mote 的群内视角')`)
   assert.equal(await read(`!!document.querySelector('${sheet} [aria-label="群消息"]')`), false)
@@ -97,14 +116,12 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
   const calls = await read('mobileProductScene.facts().calls')
   assert.equal(calls.some(call => ['space.mote.group.send', 'sdk.submitAgentPrompt', 'sdk.ensureAgentContinuity'].includes(call.method)), false)
   assert.ok(calls.some(call => call.method === 'space.mote.group.list' && call.params.moteId === 'mote-original'))
-  const topicReads = calls.filter(call => call.method === 'topic.inspect' && call.params.topicId === 'topic-group-files')
-  assert.equal(topicReads.length, 1)
-  const fileReads = calls.filter(call => call.method.startsWith('file.') && call.params.zoneId === 'zone-group-files')
+  const fileReads = calls.filter(call => call.method.startsWith('space.mote.group.file.'))
   assert.ok(fileReads.length >= 3)
-  assert.ok(fileReads.every(call => call.params.expectedResource.workspaceId === 'workspace-group-files'))
-  assert.equal(calls.some(call => call.method.startsWith('file.') && call.params.zoneId === 'zone-group-project'), false)
-  assert.ok(fileReads.some(call => call.method === 'file.read' && call.params.path === '实验决策.md'))
-  result.groupFiles = { topicReads, fileReads, quoteHeight }
+  assert.ok(fileReads.every(call => call.params.groupId === 'mobile-product-group'))
+  assert.equal(calls.some(call => call.method.startsWith('file.') && call.params.zoneId === 'zone-group-files'), false)
+  assert.ok(fileReads.some(call => call.method === 'space.mote.group.file.read' && call.params.path === '实验决策.md'))
+  result.groupFiles = { fileReads, quoteHeight }
   result.groupBounds = bounds
   await checkWorkface()
 }

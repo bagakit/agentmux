@@ -1,8 +1,11 @@
-import { act } from 'react'
+import { act, type ReactNode } from 'react'
+import type { Editor } from '@tiptap/core'
+import { ClientUiProvider, type ClientUiPlatform } from '../../../packages/client-ui/src/platform'
 import { createRoot } from 'react-dom/client'
 import { afterEach, expect, it, vi } from 'vitest'
 import { MoteGroupConversation, type MoteGroupCall } from '../../../packages/client-ui/src/components/MoteGroupConversation'
 import { MoteGroupDetails } from '../../../packages/client-ui/src/components/MoteGroupSettings'
+import { MoteGroupFiles } from '../../../packages/client-ui/src/components/MoteGroupFiles'
 import { MoteDirectThreads, type ReadMoteConversationWork } from '../../../packages/client-ui/src/components/MoteDirectThreads'
 import type { MoteGroupMessage, MoteGroupSummary } from '@agentmux/core/mote/group'
 import { ipcResult, unwrapIpcResult } from '../src/shared/ipc-result'
@@ -18,7 +21,11 @@ function mount() {
   document.body.append(container)
   const root = createRoot(container)
   disposals.push(async () => { await act(async () => root.unmount()); container.remove() })
-  return { root, container, button: (name: string) => [...container.querySelectorAll('button')].find(button => button.textContent === name) }
+  const platform: ClientUiPlatform = { overlayContainer: () => container, copyText: async () => true,
+    bindComposerFocus: () => () => {}, renderMessageAvatar: () => null, renderProjectIcon: () => null,
+    renderProjectLabel: () => null, renderIcon: () => null }
+  return { root: { render: (node: ReactNode) => root.render(<ClientUiProvider platform={platform}>{node}</ClientUiProvider>) },
+    container, button: (name: string) => [...container.querySelectorAll('button')].find(button => button.textContent === name) }
 }
 afterEach(async () => {
   for (const dispose of disposals.splice(0)) await dispose()
@@ -35,23 +42,93 @@ it('selects an exact active recipient from a typed group mention', async () => {
     : { group: room, viewerId: 'user', messages: [], nextBeforeSequence: null })
   await act(async () => root.render(<MoteGroupConversation call={rpc as MoteGroupCall} groupId={room.id}
     candidates={[]} onOpen={() => {}} onClose={() => {}} />))
-  const textarea = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="群消息"]')!
-  await act(async () => {
-    textarea.focus()
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, '请 @Original')
-    textarea.setSelectionRange(textarea.value.length, textarea.value.length)
-    textarea.dispatchEvent(new Event('input', { bubbles: true }))
-  })
+  const input = container.querySelector<HTMLElement & { editor: Editor }>('[aria-label="群消息"]')!
+  await act(async () => { input.editor.commands.focus(); input.editor.commands.insertContent('请 @Original') })
   const menu = container.querySelector('[aria-label="点名成员"]')!
   expect(menu.textContent).toBe('Original member')
-  await act(async () => textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
+  await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })))
   expect(document.activeElement).toBe(menu.querySelector('button'))
   await act(async () => menu.querySelector('button')!.click())
-  expect(textarea.value).toBe('请 @Original member ')
+  expect(input.querySelector('[data-tool-reference="mote"]')?.textContent).toBe('@Original member')
   expect(container.querySelector('[aria-label="选择参与成员"] [aria-pressed="true"]')?.textContent).toBe('Original member')
   await act(async () => button('发送')!.click())
   expect(rpc).toHaveBeenCalledWith('space.mote.group.send', expect.objectContaining({ groupId: room.id,
     body: '请 @Original member ', recipientIds: ['member'] }))
+  expect(rpc.mock.calls.find(([method]) => method === 'space.mote.group.send')?.[1]).not.toHaveProperty('selectedMentions')
+})
+
+it('uses the saved group identity and retains it against an older observation', async () => {
+  const { root, container } = mount()
+  const member = group.members[0]!
+  const topic = { ...member.target, zoneId: 'files-origin' }
+  const saved = { ...group, revision: 4, avatarMoteIds: [member.moteId], topic,
+    announcement: { body: 'Publish the original scope', operationId: 'saved-announcement', updatedAt: 1 } }
+  const rpc = vi.fn(async () => ({ group, messages: [], nextBeforeSequence: null, viewerId: 'user' }))
+  await act(async () => root.render(<MoteGroupConversation initialGroup={saved} call={rpc as MoteGroupCall} groupId={group.id}
+    candidates={[]} topicCandidates={[{ target: topic, name: 'Research sources' }]} onOpenTopicFiles={() => {}}
+    renderMoteAvatar={id => <span data-original-face={id} />} onOpen={() => {}} onClose={() => {}} />))
+  expect(container.querySelector('.mote-group__identity [data-original-face="member"]')).not.toBeNull()
+  expect(container.querySelector('[aria-label="群文件"]')?.textContent).toBe('Research sources')
+  expect(container.querySelector('.mote-group__current-announcement summary')?.textContent).toContain('Publish the original scope')
+  for (const label of ['会话视角', '选择参与成员']) {
+    expect(container.querySelector(`[aria-label="${label}"] [data-original-face="member"]`)).not.toBeNull()
+  }
+})
+
+it.each([
+  [[], undefined, 'contextual'],
+  [[], 'original-frozen', undefined],
+  [['departed-member'], undefined, undefined],
+] as const)('uses contextual participation for a new unaddressed draft only (%j, %j)', async (recipientIds, operationId, participation) => {
+  const { root, button } = mount()
+  const rpc = vi.fn(async (method: string, request: { body?: string; participation?: string }) => method === 'space.mote.group.send'
+    ? { message: { id: 'sent', groupId: group.id, sequence: 1, body: request.body, createdAt: 1, author: { kind: 'human', id: 'user' }, deliveries: [] } }
+    : { group, viewerId: 'user', messages: [], nextBeforeSequence: null })
+  await act(async () => root.render(<MoteGroupConversation initialGroup={group} groupId={group.id} call={rpc as MoteGroupCall} candidates={[]}
+    draft={{ read: () => ({ body: 'Can anyone confirm the result?', recipientIds: [...recipientIds], ...(operationId ? { operationId } : {}) }), write() {} }}
+    onOpen={() => {}} onClose={() => {}} />))
+  await act(async () => button(operationId ? '确认发送' : '发送')!.click())
+  const sent = rpc.mock.calls.find(([method]) => method === 'space.mote.group.send')?.[1]
+  expect(sent).toMatchObject({ body: 'Can anyone confirm the result?', recipientIds: [] })
+  expect(sent?.participation).toBe(participation)
+})
+
+it('uses the precise original reply and shows each member’s delivery milestone', async () => {
+  const { root, container } = mount()
+  const member = group.members[0]!
+  const other = { ...member, moteId: 'other', name: 'Other member' }
+  const sent: MoteGroupMessage = { id: 'original', groupId: group.id, sequence: 1, createdAt: 1, body: 'Check this',
+    author: { kind: 'human', id: 'viewer' }, deliveries: [
+      { moteId: member.moteId, operationId: 'first-delivery', status: 'accepted' },
+      { moteId: other.moteId, operationId: 'other-delivery', status: 'pending' },
+    ] }
+  const reply: MoteGroupMessage = { ...sent, id: 'known-reply', sequence: 2, body: 'Original result', deliveries: [], replyToMessageId: sent.id,
+    author: { kind: 'mote', moteId: member.moteId, name: member.name } }
+  const unrelated: MoteGroupMessage = { ...reply, id: 'unrelated', sequence: 3, replyToMessageId: 'another-original', body: 'Unrelated result',
+    author: { kind: 'mote', moteId: other.moteId, name: other.name } }
+  const rpc = vi.fn(async () => ({ group: { ...group, members: [member, other] }, messages: [sent, reply, unrelated], nextBeforeSequence: null, viewerId: 'viewer' }))
+  await act(async () => root.render(<MoteGroupConversation call={rpc as MoteGroupCall} groupId={group.id} candidates={[]} onOpen={() => {}} onClose={() => {}} />))
+  const progress = container.querySelector('[data-group-message-id="original"] [aria-label="投递进展"]')!
+  expect(progress.querySelector('[data-status="reported"]')?.textContent).toContain('Original result')
+  expect(progress.querySelector('[data-status="pending"]')?.textContent).toContain('正在送往群内会话')
+  expect(progress.textContent).not.toContain('Unrelated result')
+  await act(async () => progress.querySelector('button')!.click())
+  expect(document.activeElement?.getAttribute('data-group-message-id')).toBe(reply.id)
+})
+
+it('opens Group Topic files by group identity with relative paths and rejects a changed binding', async () => {
+  const { root, container, button } = mount()
+  const target = group.members[0]!.target
+  const resource = { ...target.expectedResource, zoneId: target.zoneId, zonePath: '/scratch/research', path: 'research' }
+  const rpc = vi.fn(async (method: string, request: { path?: string }) => method.endsWith('.list')
+    ? { resource, result: { status: 'directory-listed', complete: true, entries: [{ name: 'Notes.md', path: 'research/Notes.md', isDirectory: false }] } }
+    : { resource: { ...resource, zoneId: 'new-binding' }, result: { status: 'read', document: { path: request.path, content: 'Another Topic content' } } })
+  await act(async () => root.render(<MoteGroupFiles groupId={group.id} target={target} call={rpc as MoteGroupCall} onBack={() => {}} />))
+  expect(rpc).toHaveBeenCalledWith('space.mote.group.file.list', { groupId: group.id, path: '.', limit: 100 })
+  await act(async () => button('Notes.md')!.click())
+  expect(rpc).toHaveBeenLastCalledWith('space.mote.group.file.read', { groupId: group.id, path: 'Notes.md' })
+  expect(container.textContent).toContain('群文件绑定已变化')
+  expect(container.textContent).not.toContain('Another Topic content')
 })
 
 it('shows the exact group assignment and its reported recipient after unrelated messages', async () => {

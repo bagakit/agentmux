@@ -34,7 +34,8 @@ export function createMoteGroupCapture(catalog: AgentMuxSpaceCatalog) {
     { id: 'announcement-initial', groupId: original.id, sequence: 1, body: original.announcement!.body, createdAt: fixtureEpoch(2),
       author: { kind: 'system' }, event: { kind: 'announcement-updated' }, deliveries: [] },
     { id: 'scope-message', groupId: original.id, sequence: 2, body: '我的 Mote，先核对原始材料，再比较两个实验方向。', createdAt: fixtureEpoch(2, 1_000), author: { kind: 'human', id: 'phone-viewer' },
-      deliveries: [{ moteId: 'mote-original', operationId: 'scope-delivery', status: 'accepted' }] },
+      deliveries: [{ moteId: 'mote-original', operationId: 'scope-delivery', status: 'accepted' },
+        { moteId: second.spaceId, operationId: 'waiting-delivery', status: 'pending' }] },
     { id: 'public-reply', groupId: original.id, sequence: 3, body: '原始材料已核对。我整理了成本和验证范围，两份计划都能继续比较。', createdAt: fixtureEpoch(2, 1_200),
       author: { kind: 'mote', moteId: 'mote-original', name: members[0]!.name }, deliveries: [], replyToMessageId: 'scope-message' },
   ]
@@ -43,23 +44,22 @@ export function createMoteGroupCapture(catalog: AgentMuxSpaceCatalog) {
     if (method === 'app.snapshot') return { agents: [], projects: [], executors: [], workspaces: [filesWorkspace], unavailable: [] }
     if (method === 'topic.ls') return { topics: [topic], unavailable: [] }
     if (method === 'topic.inspect' && params.topicId === topic.topicId) return { topic, unavailable: [] }
-    if ((method === 'file.read' || method === 'file.list') && params.zoneId !== 'zone-mote') {
-      const requested = params.expectedResource as typeof expectedResource | undefined
-      if (params.zoneId !== topic.zoneId || requested?.hostId !== expectedResource.hostId ||
-          requested?.workspaceId !== expectedResource.workspaceId || requested?.workspacePath !== expectedResource.workspacePath) {
-        throw new Error('群文件必须使用同一原 Topic 的文件授权。')
-      }
+    if (method === 'space.mote.group.file.list' || method === 'space.mote.group.file.read') {
+      if (params.groupId !== original.id) throw new Error('群文件必须沿原群读取。')
       const path = params.path
       const resource = { ...expectedResource, zoneId: filesZone.zoneId, zonePath: filesZone.directoryPath, path }
-      if (method === 'file.list' && path === '.') return { resource, result: { status: 'listed', complete: true, partialReason: null, omitted: 'none',
-        files: ['实验决策.md', '验证范围.md', '资料索引.md'] } }
-      if (method === 'file.read' && path === '.') return { resource, result: { status: 'directory' } }
-      if (method === 'file.read' && path === '实验决策.md') return { resource, result: { status: 'read', document: {
+      if (method.endsWith('.list') && path === '.') return { resource, result: {
+        status: 'directory-listed', complete: true, partialReason: null,
+        entries: ['实验决策.md', '验证范围.md', '资料索引.md'].map(name => ({ name, path: '实验资料/' + name, isDirectory: false, isSymlink: false }))
+      } }
+      if (method.endsWith('.read') && path === '实验决策.md') return { resource, result: { status: 'read', document: {
         path, revision: 'sha256:' + 'e'.repeat(64),
         content: '# 实验决策\n\n先核对原始成本，再选一项本周能验证的实验。\n\n## 本周交付\n\n- 保留每份材料的来源与更新时间。\n- 记录比较范围、验证结果和未解决的疑点。'
       } } }
-      throw new Error('Unexpected exact Topic file request')
+      throw new Error('Unexpected exact Group file request')
     }
+    if ((method === 'file.read' || method === 'file.list') && params.zoneId === filesZone.zoneId)
+      throw new Error('A group binding is not a presentation Space binding')
     if (method === 'space.mote.group.list') return { groups: !params.moteId || members.some(member => member.moteId === params.moteId) ? [original] : [], nextBeforeSequence: null }
     if (method === 'space.mote.group.inspect' && params.groupId === original.id) return { group: original, messages, nextBeforeSequence: null, viewerId: 'phone-viewer' }
     return undefined

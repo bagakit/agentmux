@@ -20,16 +20,11 @@ export function connectGroupFixture(target: MotePreferencesTarget) {
     return { scratchTopicSnapshots: { ...state.scratchTopicSnapshots, [workspace.id]: { ...snapshot, topics: [...(snapshot.topics ?? []), topic] } } }
   })
   const topicTarget = { ...originalTopicAddress(workspace, topic, useAppStore.getState().spaceZoneBindings)!, expectedResource: target.expectedResource }
-  const fileList = api.files.listPublic, fileRead = api.files.readPublic
-  api.files.listPublic = input => input.zoneId !== topicTarget.zoneId ? fileList(input) : Promise.resolve({
-    resource: { ...topicTarget.expectedResource, zoneId: topicTarget.zoneId, zonePath: directoryPath, path: input.path },
-    result: { status: 'directory-listed', complete: true, partialReason: null,
-      entries: [{ name: '研究记录.md', path: '研究记录.md', isDirectory: false, isSymlink: false }] }
-  })
-  api.files.readPublic = input => input.zoneId !== topicTarget.zoneId ? fileRead(input) : Promise.resolve({
-    resource: { ...topicTarget.expectedResource, zoneId: topicTarget.zoneId, zonePath: directoryPath, path: input.path },
-    result: { status: 'read', document: { path: input.path, content: '这一份资料来自群绑定的原 Topic。', revision: 'sha256:' + '1'.repeat(64) } }
-  })
+  const fileList = api.files.listPublic
+  api.files.listPublic = input => {
+    if (input.zoneId === topicTarget.zoneId) throw new Error('The requested Space is not bound to this original Zone.')
+    return fileList(input)
+  }
   const groupId = 'visual-mote-group'
   const viewerId = 'local-owner'
   const createdAt = Date.now() - 120_000
@@ -41,11 +36,12 @@ export function connectGroupFixture(target: MotePreferencesTarget) {
   const human = { kind: 'human', id: viewerId } as const
   const researcher = { kind: 'mote', moteId: target.spaceId, name: '研究搭档' } as const
   const messages: MoteGroupMessage[] = [
-    { id: 'initial', sequence: 1, groupId, createdAt, author: human, body: '我们先把新手第一次找到群聊的路径走一遍。研究搭档，能帮忙对照一下现有会话列表吗？', deliveries: [{ moteId: target.spaceId, operationId: 'original-input', status: 'accepted' }] },
+    { id: 'initial', sequence: 1, groupId, createdAt, author: human, body: '我们先把新手第一次找到群聊的路径走一遍。研究搭档，能帮忙对照一下现有会话列表吗？', deliveries: [{ moteId: target.spaceId, operationId: 'original-input', status: 'accepted' },
+      { moteId: 'design-mote', operationId: 'waiting-input', status: 'pending' }] },
     { id: 'public-reply', sequence: 2, groupId, createdAt: createdAt + 45_000, author: researcher, replyToMessageId: 'initial', body: '看过了。可以先让群聊和其他会话出现在同一个列表里，展开成员时再展示各自的工作进展。', deliveries: [] },
     { id: 'public-only', sequence: 3, groupId, createdAt: createdAt + 90_000, author: human, body: '好，先用这条路径做第一轮体验验证。', deliveries: [] }
   ]
-  const group = (): MoteGroupSummary => ({ id: groupId, name: '协作体验研究', members, revision: 1, avatarMoteIds: [], announcement: null, topic: null, lastMessage: messages.at(-1) ?? null })
+  const group = (): MoteGroupSummary => ({ id: groupId, name: '协作体验研究', members, revision: 1, avatarMoteIds: [target.spaceId], announcement: { body: '比较新成员找到群聊的路径，把验证记录留在群资料。', updatedAt: createdAt, operationId: 'original-announcement' }, topic: topicTarget, lastMessage: messages.at(-1) ?? null })
   const created: MoteGroupSummary[] = []
   const notifications = new Map<string, MoteGroupMessage[]>()
   let revisionConflict = false
@@ -56,6 +52,16 @@ export function connectGroupFixture(target: MotePreferencesTarget) {
     if (method === 'space.mote.group.inspect') {
       const original = created.find(item => item.id === (input as MoteGroupParamsMap['space.mote.group.inspect']).groupId)
       return { group: original ?? group(), messages: original ? notifications.get(original.id) ?? [] : [...messages], nextBeforeSequence: null, viewerId }
+    }
+    if (method === 'space.mote.group.file.list' || method === 'space.mote.group.file.read') {
+      const request = input as MoteGroupParamsMap[typeof method]
+      const original = request.groupId === groupId ? group() : created.find(item => item.id === request.groupId)
+      if (original?.topic?.zoneId !== topicTarget.zoneId) throw new Error('Wrong group file owner')
+      const resource = { ...topicTarget.expectedResource, zoneId: topicTarget.zoneId, zonePath: directoryPath, path: request.path }
+      if (method.endsWith('.list')) return { resource, result: { status: 'directory-listed', complete: true, partialReason: null,
+        entries: [{ name: '研究记录.md', path: '原话题/研究记录.md', isDirectory: false, isSymlink: false }] } }
+      if (request.path !== '研究记录.md') throw new Error('Expected the original Topic-relative path')
+      return { resource, result: { status: 'read', document: { path: request.path, content: '# 研究记录\n\n这一份资料来自群绑定的原 Topic。', revision: 'sha256:' + '1'.repeat(64) } } }
     }
     if (method === 'space.mote.group.create') {
       const request = input as MoteGroupParamsMap['space.mote.group.create']

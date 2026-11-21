@@ -19,8 +19,9 @@ app.whenReady().then(async () => {
    await read('window.__connectionsTrustedEvents=window.moteDiscussionCapture.facts().trustedEvents'); app.focus({ steal: true }); win.show(); win.focus(); win.webContents.focus(); if (!initialDelay) await until('document.hasFocus()'); await settle()
   }
   const facts = () => read('window.moteDiscussionCapture.facts()')
-  async function capture(name, selector = panel) {
-   await settle(); const current = await facts()
+  async function capture(name, selector = panel, settleMotion = true) {
+   if (settleMotion) await settle(); else await read('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+   const current = await facts()
    assert.deepEqual(current.writes, [], 'No input, Start or Stop through actual Session ports')
    const dom = await read(`(()=>{const n=${selector};return{layout:[...n.querySelectorAll('.mote-workface__original,.workspace-workbench,.pane-group,.pane-content,.agent-body,.activity-feed')].slice(0,24).map(n=>({class:n.className,hidden:n.hidden,rect:n.getBoundingClientRect().toJSON(),display:getComputedStyle(n).display,visibility:getComputedStyle(n).visibility})),viewport:{width:innerWidth,height:innerHeight},body:n?.innerText,rect:n?.getBoundingClientRect().toJSON(),navigation:[...document.querySelectorAll('.mote-space-frame__header,.mote-workface__navigation')].filter(n=>n.checkVisibility()).map(n=>({text:n.innerText,rect:n.getBoundingClientRect().toJSON()})),visibleTabbars:[...n.querySelectorAll('.pane-tabbar')].filter(n=>n.checkVisibility()).length,loading:[...n.querySelectorAll('[role=status]')].filter(n=>n.checkVisibility()).map(n=>n.innerText)}})()`)
    assert.ok(dom.rect?.width > 0, 'Nonempty complete product surface')

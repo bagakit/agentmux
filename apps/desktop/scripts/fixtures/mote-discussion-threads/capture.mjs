@@ -103,7 +103,7 @@ try {
   await fs.writeFile(path.join(directory, 'renderer.log'), logs.join('\n'))
   receipt.renderer = JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8'))
   assert.equal(receipt.process.exitCode, 0); assert.equal(receipt.renderer.passed, true)
-  assert.equal(receipt.renderer.images.length, direct ? 10 : navigation ? 15 : advanced ? 10 : groups ? 8 : process.argv.includes('--notice-only') ? 2 : 15, 'Every named real product scene must be captured')
+  assert.equal(receipt.renderer.images.length, direct ? 10 : navigation ? 15 : advanced ? 10 : groups ? 10 : process.argv.includes('--notice-only') ? 2 : 15, 'Every named real product scene must be captured')
   if (navigation) {
     receipt.restartProcess = await runProbeProcess(require('electron'), [path.join(fixture, 'renderer-main.cjs'), path.join(compiled, 'index.html'), directory, directory, '--restore'], { cwd: root, env, timeoutMs: 45000, onLine: line => logs.push(line) })
     receipt.restart = JSON.parse(await fs.readFile(path.join(directory, 'renderer-restart-result.json'), 'utf8'))
