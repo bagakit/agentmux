@@ -7,6 +7,7 @@ import { HostSettingsPane, type HostAddRequest } from './HostSettingsPane'
 import { MeshPathsPane } from './MeshPathsPane'
 import { ClusterMachinesPane } from './ClusterMachinesPane'
 import type { SettingsNavigationRequest } from '../SettingsNavigation'
+import { useAppStore } from '../../store'
 
 /** Observation tasks share one homepage; visited editors retain their original drafts and requests. */
 type MeshView = 'paths' | 'machines' | 'join' | 'network' | 'connections' | 'access'
@@ -17,6 +18,7 @@ const subpages: Partial<Record<MeshView, string>> = { join: 'mesh-join', machine
 export function MeshSettingsPane({ onSubpageChange, ...props }: React.ComponentProps<typeof HostSettingsPane> & {
   onSubpageChange?: ((field: string | undefined) => void) | undefined
 }) {
+  const separateRuntimeId = useAppStore(state => state.meshGatewayRuntimeId) ?? undefined
   const appliedNavigation = useRef(props.navigationRequest)
   const [chosenView, setChosenView] = useState<MeshView>(() => requestedView(props.navigationRequest))
   const pendingNavigation = appliedNavigation.current !== props.navigationRequest
@@ -52,12 +54,13 @@ export function MeshSettingsPane({ onSubpageChange, ...props }: React.ComponentP
         <Button type="button" variant="primary" onClick={() => choose('join')}>Connect to a Relay Gateway</Button>
         <Button type="button" onClick={() => choose('access')}>Use another device</Button>
       </nav> : null}
-      <div hidden={view !== 'paths'}>{mounted('paths') ? <MeshPathsPane active={props.active && view === 'paths'} hosts={props.config.hosts} locations={props.config.meshMapLocations} onDevice={openConnection} onGateway={() => choose('network')} /> : null}</div>
+      <div hidden={view !== 'paths'}>{separateRuntimeId ? <p className="mesh-network-note">This map uses the separate Mesh identity selected in the connection guide.</p> : null}
+        {mounted('paths') ? <MeshPathsPane key={separateRuntimeId ?? 'original'} separateRuntimeId={separateRuntimeId} active={props.active && view === 'paths'} hosts={props.config.hosts} locations={props.config.meshMapLocations} onDevice={openConnection} onGateway={() => choose('network')} /> : null}</div>
       {mounted('paths') || mounted('machines') ? <ClusterMachinesPane hosts={props.config.hosts} active={props.active && observing}
         compact={view !== 'machines'} onAddDevice={addDevice} onConnections={openConnection} /> : null}
     </div>
     <div data-mesh-view="join" hidden={view !== 'join'}>{mounted('join') ? <MeshNetworkSettings join active={props.active && view === 'join'} onDone={() => choose('paths')} onAccess={() => choose('access')} onManage={() => choose('network')} /> : null}</div>
-    <div data-mesh-view="network" hidden={view !== 'network'}>{mounted('network') ? <MeshNetworkSettings active={props.active && view === 'network'} showTopology={false} onConnections={() => choose('connections')} /> : null}</div>
+    <div data-mesh-view="network" hidden={view !== 'network'}>{mounted('network') ? <MeshNetworkSettings active={props.active && view === 'network'} showTopology={false} onConnections={() => choose('connections')} onJoin={() => choose('join')} /> : null}</div>
     <div data-mesh-view="access" hidden={view !== 'access'}>{mounted('access') ? <section data-settings-field="mesh-access-work"><MeshDeviceAccess /></section> : null}</div>
     <div data-mesh-view="connections" hidden={view !== 'connections'}>{mounted('connections') ? <HostSettingsPane {...props} navigationRequest={pendingNavigation ? props.navigationRequest : connectionRequest ?? props.navigationRequest} addHostRequest={addHostNavigation.current === props.navigationRequest ? addHostRequest : undefined} active={props.active && view === 'connections'} /> : null}</div>
   </div>

@@ -15,6 +15,7 @@ export type DesktopRuntimeConnector = (config: HostConfig, store: AgentMuxAgentS
 const launches = new Map<string, Promise<MacosHostServiceOwner>>()
 type HostConfiguration = {
   path: string; connectorDirectory: string
+  environment?: Readonly<Record<string, string | undefined>>
   installedHost?: { executable: string; check?: Promise<void>; issue?: string }
 }
 type OriginalDesktopTransport = {
@@ -72,10 +73,10 @@ function hostService(storePath: string, socketPath: string, executable: string, 
   return macosHostService({ executable, entrypoint: join(import.meta.dirname, 'agentmux-host.js'), storePath, socketPath,
     mobileBuildDirectory: join(import.meta.dirname, '../mobile'),
     workspaceMoveHelper: resolve(import.meta.dirname, '../../resources/bin/agentmux-workspace-move'),
-    ...(configuration ? { configuration } : {}) })
+    ...(configuration ? { configuration } : {}), ...(configuration?.environment ? { environment: configuration.environment } : {}) })
 }
 
-async function ensureHost(storePath: string, socketPath: string, configuration?: HostConfiguration): Promise<void> {
+export async function ensureDesktopHost(storePath: string, socketPath: string, configuration?: HostConfiguration): Promise<void> {
   const installed = configuration?.installedHost
   if (installed) {
     installed.check ??= (async () => {
@@ -122,7 +123,7 @@ async function connectOriginalDesktopHost(config: HostConfig, store: AgentMuxAge
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath },
     prepareUnixConnection: async signal => {
       signal.throwIfAborted()
-      await observeRead(ensureHost(store.path, socketPath, configuration), signal)
+      await observeRead(ensureDesktopHost(store.path, socketPath, configuration), signal)
     } })
   const port: AgentMuxHostedRpcPort = {
     call: rpc.call.bind(rpc),

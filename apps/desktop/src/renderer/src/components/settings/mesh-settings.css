@@ -159,3 +159,35 @@
 .mesh-join-result { display: grid; gap: var(--sp-2); padding-block: var(--sp-2); font-size: var(--fs-body); overflow-wrap: anywhere; }
 .mesh-join-result p { margin: 0; color: var(--text-2); line-height: 1.5; }
 .mesh-join-footer { border-top: 1px solid var(--line-soft); padding-top: var(--sp-3); }
+
+/* The stage follows acknowledged facts. All of the signal motion is decorative and finite. */
+.mesh-join-landing { --mesh-flow-ease: cubic-bezier(.22, .72, .27, 1); }
+.mesh-join-identity-progress { display: inline-flex; align-items: center; gap: var(--sp-2); color: #cbeade; font-size: var(--fs-meta); }
+.mesh-join-signal { position: absolute; z-index: 1; pointer-events: none; inset-inline: 9% 10%; inset-block-end: 17%; height: 2px; isolation: isolate; }
+.mesh-join-signal > i { position: absolute; border-radius: 50%; width: 6px; height: 6px; inset-block-start: -2px; inset-inline-start: 0; opacity: 0; background: #d1ffe9; box-shadow: 0 0 10px #9affda; }
+.mesh-join-signal > i:last-child { inset-inline-start: auto; inset-inline-end: 0; }
+.mesh-join-signal > b { position: absolute; inset: 0; border-radius: 2px; opacity: 0; transform-origin: left; background: linear-gradient(90deg, #6eaa9c80, #b6ffe0, #6eaa9c80); }
+.mesh-join-signal > b::after { position: absolute; content: ''; inset: -2px 0; background: linear-gradient(100deg, transparent, #dcfff3, transparent); opacity: 0; }
+.mesh-join-landing:is([data-mesh-phase='identity'], [data-mesh-phase='connecting']) .mesh-join-signal > i:first-child { animation: mesh-join-port 620ms var(--mesh-flow-ease) both; }
+.mesh-join-landing:is([data-mesh-phase='identity'], [data-mesh-phase='connecting']) .mesh-join-signal > b::after { animation: mesh-join-sweep 900ms var(--mesh-flow-ease) 2; }
+.mesh-join-landing:is([data-mesh-phase='identity'], [data-mesh-phase='connecting']) .mesh-join-signal > b { opacity: .48; }
+.mesh-join-landing[data-mesh-phase='review'] .mesh-join-signal > i:first-child { animation: mesh-join-port 740ms var(--mesh-flow-ease) both; }
+.mesh-join-landing[data-mesh-phase='connected'] .mesh-join-signal > b { animation: mesh-join-draw 720ms var(--mesh-flow-ease) both; }
+.mesh-join-landing[data-mesh-phase='connected'] .mesh-join-signal > i { animation: mesh-join-port 720ms var(--mesh-flow-ease) both; }
+.mesh-join-landing[data-mesh-phase='connected'] .mesh-join-signal > i:last-child { animation-delay: 240ms; }
+.mesh-join-steps li { display: flex; align-items: center; gap: var(--sp-2); transition: background-color 260ms ease, border-color 260ms ease, color 260ms ease; }
+.mesh-join-step-dot { flex: none; inline-size: 7px; block-size: 7px; border-radius: 50%; border: 1px solid currentColor; }
+.mesh-join-steps li[aria-current] .mesh-join-step-dot { box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 13%, transparent); }
+.mesh-join-steps li[data-complete] .mesh-join-step-dot { color: var(--green); background: currentColor; animation: mesh-join-step-confirm 360ms var(--ease-enter) both; }
+.mesh-join-resolution[aria-busy='true'] { border-color: color-mix(in srgb, var(--green) 30%, var(--line-soft)); }
+.mesh-join-result, .mesh-join-target { animation: mesh-join-enter 320ms var(--ease-enter) both; }
+@keyframes mesh-join-sweep { 0% { transform: translateX(-28%) scaleX(.13); opacity: 0; } 25% { opacity: 1; } 100% { transform: translateX(44%) scaleX(.13); opacity: 0; } }
+@keyframes mesh-join-port { 0% { transform: scale(.4); opacity: 0; } 46% { transform: scale(1.9); opacity: 1; } 100% { transform: scale(1); opacity: .8; } }
+@keyframes mesh-join-draw { from { transform: scaleX(0); opacity: .4; } to { transform: scaleX(1); opacity: .74; } }
+@keyframes mesh-join-step-confirm { from { transform: scale(.4); } 65% { transform: scale(1.28); } to { transform: scale(1); } }
+@keyframes mesh-join-enter { from { opacity: .25; transform: translateY(5px); } }
+@media (prefers-reduced-motion: reduce) {
+  .mesh-gateway-join :is(.mesh-join-result, .mesh-join-target, .mesh-join-steps li, .mesh-join-step-dot, .mesh-join-signal *) { animation: none !important; transition: none !important; }
+  .mesh-join-signal > b::after { animation: none !important; }
+  .mesh-join-landing[data-mesh-phase='connected'] .mesh-join-signal > :is(b, i) { opacity: .74; }
+}

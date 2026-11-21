@@ -4,7 +4,7 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import type { MeshPeerCode } from '@agentmux/core/mesh-peer-code'
 import type { MeshNetworkInspection, MeshNetworkSettings, MeshOwnerTarget } from '@agentmux/core/mesh-network'
 import { api } from '../../lib/api'
-import { useAppStore, updateMeshSettingsDraft } from '../../store'
+import { setAuthoredWorkbench, useAppStore, updateMeshSettingsDraft } from '../../store'
 import { configValuesEqual } from '../../../../shared/config-edit'
 import { meshConfiguration, meshDraftForRuntime, meshForm, meshPeerCode, meshPeerFormPatch, type MeshForm, type MeshSettingsDraft } from '../../lib/mesh-settings-draft'
 import { SettingsSaveBar } from './SettingsSaveBar'
@@ -14,7 +14,6 @@ import { MeshOperatorTarget } from './MeshOperatorTarget'
 import { MeshPeerPairing } from './MeshPeerPairing'
 import { MeshGatewayJoin } from './MeshGatewayJoin'
 import { ServiceWindowNotice } from '../ServiceWindowNotice'
-import { ConfirmationDialog } from '../ConfirmationDialog'
 import { useLocalRuntimeRecovery } from '../../lib/use-local-runtime-recovery'
 import './mesh-settings.css'
 
@@ -34,22 +33,23 @@ function confirmMeshDraft(edit: MeshSettingsDraft, confirmed: MeshNetworkSetting
   return retained({ ...edit, pending: undefined, baseline: confirmed, form: later ? edit.form : form })
 }
 
-type EditorProps = { active: boolean; onConnections?: () => void; showTopology?: boolean; join?: boolean; onAccess?: () => void; onManage?: () => void; onDone?: () => void }
+type EditorProps = { active: boolean; onConnections?: () => void; showTopology?: boolean; join?: boolean; onAccess?: () => void; onManage?: () => void; onDone?: () => void; onJoin?: () => void }
 
 export function MeshNetworkSettings(props: EditorProps) {
-  if (props.join) return <MeshNetworkEditor {...props} target={undefined} deviceLabel="This device" />
+  const separateRuntimeId = useAppStore(state => state.meshGatewayRuntimeId) ?? undefined
+  if (props.join) return <MeshNetworkEditor key={separateRuntimeId ?? "original"} {...props} target={undefined} separateRuntimeId={separateRuntimeId} deviceLabel="This device" />
   return <MeshOperatorTarget label="Device to manage" active={props.active}>{(target, label) =>
-    <MeshNetworkEditor {...props} target={target} deviceLabel={label} />
+    <MeshNetworkEditor key={target?.hostId ?? separateRuntimeId ?? "original"} {...props} target={target} separateRuntimeId={target ? undefined : separateRuntimeId} deviceLabel={label} />
   }</MeshOperatorTarget>
 }
 
-function MeshNetworkEditor({ active, onConnections, showTopology = true, join, onAccess, onManage, onDone, target, deviceLabel }: EditorProps & { target: MeshOwnerTarget | undefined; deviceLabel: string }) {
+function MeshNetworkEditor({ active, onConnections, showTopology = true, join, onAccess, onManage, onDone, onJoin, target, deviceLabel, separateRuntimeId }: EditorProps & { target: MeshOwnerTarget | undefined; deviceLabel: string; separateRuntimeId: string | undefined }) {
   const [settings, setSettings] = useState<MeshNetworkSettings>(), [networkSnapshot, setSnapshot] = useState<MeshNetworkInspection>()
   const [issue, setIssue] = useState(''), [networkIssue, setNetworkIssue] = useState(''), [notice, setNotice] = useState('')
   const [saving, setSaving] = useState(false), [reading, setReading] = useState(false), [newer, setNewer] = useState<MeshNetworkSettings>()
   const [copyFeedback, setCopyFeedback] = useState('')
-  const [openingIdentity, setOpeningIdentity] = useState(false), [identitySetupIssue, setIdentitySetupIssue] = useState(''), [identitySetupRequested, setIdentitySetupRequested] = useState(false)
-  const [confirmNewIdentity, setConfirmNewIdentity] = useState(false)
+  const [preparingIdentity, setPreparingIdentity] = useState(false), [identitySetupIssue, setIdentitySetupIssue] = useState('')
+  const preparing = useRef(false)
   const pairingField = useRef<HTMLInputElement>(null)
   const edits = useAppStore(state => state.meshSettingsDrafts)
   const current = useRef(settings); current.current = settings
@@ -74,11 +74,11 @@ function MeshNetworkEditor({ active, onConnections, showTopology = true, join, o
     networkReading.current = true
     try {
       const original = current.current?.owner
-      const result = await api.mesh.call('mesh.inspect', destination, { ...(signal ? { signal } : {}), ...(original ? { expectedOwner: original } : {}) })
+      const result = await api.mesh.call('mesh.inspect', destination, { ...(signal ? { signal } : {}), ...(original ? { expectedOwner: original } : {}), ...(separateRuntimeId ? { separateRuntimeId } : {}) })
       if (!signal?.aborted && (!current.current || result.owner.runtimeId === current.current.owner.runtimeId && result.owner.ownerInstanceId === current.current.owner.ownerInstanceId)) { setSnapshot(result); setNetworkIssue('') }
     } catch (cause) { if (!signal?.aborted) setNetworkIssue(message(cause)) }
     finally { networkReading.current = false }
-  }, [target?.hostId, target?.expectedRuntimeId])
+  }, [target?.hostId, target?.expectedRuntimeId, separateRuntimeId])
 
   async function inspect(operationId?: string) {
     reader.current?.abort(); const controller = new AbortController(); reader.current = controller
@@ -88,7 +88,7 @@ function MeshNetworkEditor({ active, onConnections, showTopology = true, join, o
     void inspectNetwork(controller.signal)
     try {
       // A restarted original Core may have a new process fence, never a replacement Runtime.
-      const result = await api.mesh.call('settings.mesh.inspect', { ...destination, ...(operationId ? { operationId } : {}) }, { signal: controller.signal })
+      const result = await api.mesh.call('settings.mesh.inspect', { ...destination, ...(operationId ? { operationId } : {}) }, { signal: controller.signal, ...(separateRuntimeId ? { separateRuntimeId } : {}) })
       if (controller.signal.aborted || epoch !== readEpoch.current) return
       if (originalRuntime && result.owner.runtimeId !== originalRuntime) throw new Error('Another Core answered. The original Mesh draft and request are retained for their Runtime.')
       current.current = result; setSettings(result)
@@ -145,7 +145,7 @@ function MeshNetworkEditor({ active, onConnections, showTopology = true, join, o
             ...(connection?.gatewayCode ? { gatewayCode: connection.gatewayCode } : {}), ...(connection?.peerApproval ? { peerApproval: connection.peerApproval } : {}) } }
       }, true)
       sent = true
-      const result = await api.mesh.call('settings.mesh.configure', { ...destination, expectedRevision: baseline.revision, operationId, configuration }, { expectedOwner: settings!.owner })
+      const result = await api.mesh.call('settings.mesh.configure', { ...destination, expectedRevision: baseline.revision, operationId, configuration }, { expectedOwner: settings!.owner, ...(separateRuntimeId ? { separateRuntimeId } : {}) })
       if (result.settings.owner.runtimeId !== runtimeId) throw new Error('Mesh save returned another Runtime. The original request is retained.')
       if (result.diskDurability !== 'confirmed') throw new Error('The original Mesh disk acknowledgement is unknown. Inspect this save before trying again.')
       await updateMeshSettingsDraft(runtimeId, value => {
@@ -184,21 +184,18 @@ function MeshNetworkEditor({ active, onConnections, showTopology = true, join, o
   }
   const peerCode = settings && settings.configuration.role !== 'disabled' ? meshPeerCode(settings) : null
   const hasTopology = Boolean(network && (network.peers.length || network.records.length || network.routes.length))
-  const identityRecovery = useLocalRuntimeRecovery(active && !target && !settings, () => { void inspect() })
-  const refresh = () => { if (!settings && !target) identityRecovery.refresh(); void inspect() }
-  const newIdentityWindow = !target && api.ui.isNewIdentityWindow
-  async function openIdentitySetup(code?: string) {
-    setOpeningIdentity(true); setIdentitySetupIssue('')
-    try { if (code) await api.ui.openLocalIdentitySetup(code); else await api.ui.openLocalIdentitySetup(); setIdentitySetupRequested(true) }
-    catch (cause) { setIdentitySetupIssue(message(cause)) }
-    finally { setOpeningIdentity(false) }
+  const identityRecovery = useLocalRuntimeRecovery(active && !target && !separateRuntimeId && !settings, () => { void inspect() })
+  const refresh = () => { if (!settings && !target && !separateRuntimeId) identityRecovery.refresh(); void inspect() }
+  async function prepareIdentity() {
+    if (preparing.current) return
+    preparing.current = true; setPreparingIdentity(true); setIdentitySetupIssue('')
+    try {
+      const owner = await api.ui.prepareMeshIdentity(separateRuntimeId)
+      if (separateRuntimeId) await inspect()
+      else setAuthoredWorkbench({ meshGatewayRuntimeId: owner.runtimeId })
+    } catch (cause) { setIdentitySetupIssue(message(cause)) }
+    finally { preparing.current = false; setPreparingIdentity(false) }
   }
-  const identitySetupAction = newIdentityWindow || target ? null : <button
-    className={identityRecovery.notice ? 'primary-button' : 'small-button'} type="button"
-    disabled={openingIdentity || identityRecovery.restoring} onClick={() => setConfirmNewIdentity(true)}>
-    {openingIdentity ? 'Opening setup…' : 'Set up a new identity…'}
-  </button>
-  const identitySetupError = identitySetupIssue ? <p className="settings-inline-error" role="alert">{identitySetupIssue}</p> : null
   const recoveryNotice = identityRecovery.notice?.notice
   const conflict = newer ? <div className="mesh-conflict" role="alert"><span>The saved version changed. Your edit is retained.</span><button className="small-button" onClick={() => void resolveDraft(false)}>Use saved</button><button className="small-button" onClick={() => void resolveDraft(true)}>Keep my draft</button></div> : null
   const pendingAction = pending ? <div className="mesh-pending"><button className="small-button" disabled={saving || reading} onClick={() => void inspect(pending.operationId)}>Inspect original save</button><code>{pending.operationId}</code></div> : null
@@ -207,37 +204,30 @@ function MeshNetworkEditor({ active, onConnections, showTopology = true, join, o
     issue={issue} draftIssue={editIssue} notice={notice} reading={reading} saving={saving} pending={pending}
     onConnect={(form, gatewayCode) => void save({ form, gatewayCode })} onCheck={refresh} onCopy={copy} copyFeedback={copyFeedback}
     onAccess={onAccess} onManage={onManage} onDone={onDone} onCheckSave={() => { if (pending) void inspect(pending.operationId) }}
-    identityRecovery={identityRecovery} openSeparate={newIdentityWindow || target ? undefined : openIdentitySetup} openingSeparate={openingIdentity}
-    separateIssue={identitySetupIssue} separateRequested={identitySetupRequested} />
+    identityRecovery={identityRecovery} separate={Boolean(separateRuntimeId)} onPrepareIdentity={() => void prepareIdentity()}
+    preparingIdentity={preparingIdentity} identitySetupIssue={identitySetupIssue}
+    onOriginalIdentity={() => setAuthoredWorkbench({ meshGatewayRuntimeId: null })} />
 
   return <div className="mesh-network-settings" data-mesh-settings data-settings-field="mesh-configuration">
-    <ConfirmationDialog open={active && confirmNewIdentity} intent="neutral" title="Create a separate identity?"
-      description="AgentMux opens a new window with its own identity. Your current window and saved work stay available. Enter the gateway code in the new window."
-      confirmLabel="Create and open setup" onCancel={() => setConfirmNewIdentity(false)}
-      onConfirm={() => { setConfirmNewIdentity(false); void openIdentitySetup() }} />
     {!identityRecovery.notice ? <header className="mesh-network-heading">
-      {newIdentityWindow ? <div className="mesh-connection-intro"><div><h3>New identity setup</h3><p>Pair this window with your gateway. Your original work stays in its own window.</p></div></div> : <div className="mesh-connection-intro"><div><h3>{deviceLabel}’s network</h3><p>Add a trusted peer or publish a gateway address for other devices.</p></div></div>}
+      <div className="mesh-connection-intro"><div><h3>{separateRuntimeId ? 'Separate Mesh identity' : `${deviceLabel}’s network`}</h3><p>Add a trusted peer or publish a gateway address for other devices.</p></div></div>
       {settings || !issue ? <button className="small-button" onClick={refresh} disabled={reading || saving}>{reading ? 'Reading…' : 'Refresh'}</button> : null}
     </header> : null}
     {identityRecovery.notice ? <div className="mesh-identity-recovery">
-      <ServiceWindowNotice notice={recoveryNotice && identitySetupAction
-        ? { ...recoveryNotice, notice: { ...recoveryNotice.notice,
-          restore: `${recoveryNotice.notice.restore} A new identity opens in a separate window.` } }
-        : recoveryNotice ?? null}
+      <ServiceWindowNotice notice={recoveryNotice ?? null}
         actions={<div className="mesh-recovery-actions">
-          {identitySetupAction}
+          {onJoin ? <button className="primary-button" type="button" onClick={onJoin}>Open gateway setup</button> : null}
           <button className="small-button" type="button" onClick={refresh} disabled={identityRecovery.restoring}>Check again</button>
           {identityRecovery.canImport ? <button className="small-button" type="button" disabled={identityRecovery.restoring} onClick={identityRecovery.notice.action?.run}>{identityRecovery.notice.action?.label}</button> : null}
           {onConnections ? <button className="small-button" type="button" onClick={onConnections}>Open saved connections</button> : null}
         </div>} />
-      {identitySetupError}
       <details className="mesh-advanced"><summary>Technical details</summary><p>{identityRecovery.notice.detail}</p></details>
     </div>
     : !settings ? <section className="mesh-availability" role={issue ? 'alert' : 'status'}>
       <span className="mesh-section-kicker">{issue ? 'Setup unavailable' : 'Connecting to this Core'}</span>
       <h3>{issue ? 'Couldn’t read Mesh settings.' : 'Reading your network settings…'}</h3>
       <p>{issue ? 'Check this Core’s connection and version, then refresh. Your saved device connections are still available.' : 'You can keep using your saved connections while this Core responds.'}</p>
-      <div className="mesh-recovery-actions">{issue ? <button className="primary-button" onClick={refresh} disabled={reading}>{reading ? 'Reading…' : 'Refresh Mesh'}</button> : null}{onConnections ? <button className="small-button" onClick={onConnections}>Open saved connections</button> : null}</div>
+      <div className="mesh-recovery-actions">{issue ? <button className="primary-button" onClick={separateRuntimeId && onJoin ? onJoin : refresh} disabled={reading}>{reading ? 'Reading…' : separateRuntimeId && onJoin ? 'Check Mesh identity' : 'Refresh Mesh'}</button> : null}{onConnections ? <button className="small-button" onClick={onConnections}>Open saved connections</button> : null}</div>
       {issue ? <details className="mesh-advanced"><summary>Technical details</summary><p>{issue}</p>{networkIssue ? <p>Network observation: {networkIssue}</p> : null}</details> : null}
     </section> : null}
     {snapshot ? <div className="mesh-network-status" role="status"><strong>{networkIssue ? 'Last confirmed · ' : ''}{snapshot.source === 'static' ? 'Startup configuration active' : snapshot.apply.state === 'active' ? 'Mesh active' : snapshot.apply.state === 'disabled' ? 'Mesh disabled' : snapshot.apply.state === 'starting' ? 'Applying settings…' : 'Mesh apply unavailable'}</strong>{network ? <span>{network.peers.filter(peer => peer.state === 'connected').length} authenticated peer{network.peers.filter(peer => peer.state === 'connected').length === 1 ? '' : 's'} · {network.routes.length} known route{network.routes.length === 1 ? '' : 's'}</span> : null}{snapshot.gateway.state === 'listening' ? <span>Listening on {snapshot.gateway.listener?.host}:{snapshot.gateway.listener?.port}</span> : null}{snapshot.apply.issue ? <span className="settings-inline-error">{snapshot.apply.issue.message}</span> : null}{snapshot.activeRevision && snapshot.desiredRevision !== snapshot.activeRevision ? <span>Saved settings differ from the active network.</span> : null}</div> : null}
@@ -248,7 +238,7 @@ function MeshNetworkEditor({ active, onConnections, showTopology = true, join, o
       {editIssue ? <p role="alert" className="settings-inline-error">{editIssue}</p> : <section className="mesh-network-section">
         <header><h4>Network participation</h4>{form.role === 'participant' ? <button className="small-button" onClick={() => change({ role: 'disabled' })}>Leave network</button> : null}</header>
         <div className="mesh-task-options" role="group" aria-label="Network participation">
-          <button type="button" aria-pressed={form.role !== 'disabled'} onClick={() => { change({ role: form.role === 'gateway' ? 'gateway' : 'participant' }); pairingField.current?.focus() }}><span className="mesh-task-label"><strong>Connect to a gateway</strong><span aria-hidden="true">→</span></span><span>This device can join using an outbound connection.</span></button>
+          {!target && onJoin ? <button type="button" onClick={onJoin}><span className="mesh-task-label"><strong>Open connection guide</strong><span aria-hidden="true">→</span></span><span>Connect this Mac to an existing gateway.</span></button> : <button type="button" aria-pressed={form.role !== 'disabled'} onClick={() => { change({ role: form.role === 'gateway' ? 'gateway' : 'participant' }); pairingField.current?.focus() }}><span className="mesh-task-label"><strong>Connect this device upstream</strong><span aria-hidden="true">→</span></span><span>This device can join using an outbound connection.</span></button>}
           <button type="button" aria-pressed={form.role === 'gateway'} onClick={() => change({ role: 'gateway' })}><span className="mesh-task-label"><strong>Provide a gateway</strong><span aria-hidden="true">{form.role === 'gateway' ? '✓' : '↗'}</span></span><span>Let devices connect here, including while this device uses an upstream gateway.</span></button>
         </div>
         <MeshPeerPairing input={edit?.pairingInput ?? ''} form={form} ownPeerId={settings?.identity?.peerId} inputRef={pairingField} allowNewNetwork={saved.configuration.role === 'disabled' && form.networkId === saved.configuration.networkId}
@@ -273,14 +263,9 @@ function MeshNetworkEditor({ active, onConnections, showTopology = true, join, o
       {!pending?.peerApproval ? pendingAction : null}
       {notice ? <p role="status" className="mesh-network-notice">{notice}</p> : null}
     </> : null}
-    {settings && form && saved ? <MeshAccessLinks active={active} target={target} deviceLabel={deviceLabel} snapshot={snapshot} offerText={originalOffer} copy={copy}
+    {settings && form && saved ? <MeshAccessLinks active={active} target={target} separateRuntimeId={separateRuntimeId} deviceLabel={deviceLabel} snapshot={snapshot} offerText={originalOffer} copy={copy}
       onInput={text => { void updateMeshSettingsDraft(saved.owner.runtimeId, value => retained({ ...value, baseline: value?.baseline ?? saved,
         form: value?.form ?? form, linkInput: text })).catch(cause => setIssue(message(cause))) }} /> : null}
-    {settings && identitySetupAction ? <details className="mesh-advanced">
-      <summary>Separate identity setup</summary>
-      <p>Open the separate setup again, or start it and pair a new identity with your gateway.</p>
-      {identitySetupAction}{identitySetupError}
-    </details> : null}
     {copyFeedback ? <p role="status" className="mesh-copy-feedback">{copyFeedback}</p> : null}
   </div>
 }

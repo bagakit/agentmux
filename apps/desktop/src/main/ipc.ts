@@ -2,7 +2,7 @@ import { CaptureSequenceOwner } from './capture-sequence.js'
 import { parseAgentProgressParams, parseMoteDirectParams, parseSpaceLinkParams, parseSpaceLinkResult } from '@agentmux/core'
 import { registerAgentTakeoverIpc } from './agent-takeover-ipc.js'
 import { registerMeshNetworkIpc } from './mesh-network-ipc.js'
-import { decodeMeshPeerCode } from '@agentmux/core/mesh-peer-code'
+import type { localMeshIdentity } from './local-identity-setup.js'
 import { openMeshDeviceWindow } from './mesh-device-window.js'
 import { registerSourceFilesIpc } from './source-files-ipc.js'
 import { SpaceObjectAvatarOwner } from './space-object-avatar.js'
@@ -379,8 +379,7 @@ export async function registerIpc(args: {
   workbenchCloseOwner?: WorkbenchCloseOwner
   storageRecoveryExports?: DesktopStorageRecoveryExports
   runtimeIdentityRecovery?: ReturnType<typeof import('./local-runtime-recovery.js').localRuntimeRecovery>
-  openIdentitySetup?: (assertCurrent: () => void, gatewayCode?: string) => Promise<void>
-  readIdentityGateway?: () => string | undefined
+  meshIdentity?: ReturnType<typeof localMeshIdentity>
 
   workspaceFiles?: WorkspaceFiles
   scratchTopics: ScratchTopics
@@ -1093,7 +1092,7 @@ export async function registerIpc(args: {
   handle('config:save', (next: AppConfig, expected: AppConfig) => sessionInputOperationResult(() => configOwner.edit(expected, next)))
   const sourceFileReads = registerSourceFilesIpc({ handle: handleWithEvent, runtime: args.runtime })
   const spaceMountReads = registerSpaceMountIpc({ handle: handleWithEvent, runtime: args.runtime, config: () => configOwner.current })
-  const meshReads = registerMeshNetworkIpc({ handle: handleWithEvent, call: callUserRpc })
+  const meshReads = registerMeshNetworkIpc({ handle: handleWithEvent, call: callUserRpc, ...(args.meshIdentity ? { separate: args.meshIdentity.call } : {}) })
   handleWithEvent('mesh:openDevice', (_event, url: string) => openMeshDeviceWindow(url))
   const nodePublishingReads = registerNodePublishingIpc({ handle: handleWithEvent, deviceLocation: readMeshDeviceLocation, call: callUserRpc, owner: (target, method, params, context) => args.runtime.callNodeOwner(target, method, params, context) })
   const hostRouteReads = registerHostRoutesIpc({ handle: handleWithEvent, call: (target, method, params, signal) => args.runtime.callHostRoute(target, method, params, signal) })
@@ -1740,16 +1739,13 @@ export async function registerIpc(args: {
     assertAppDocumentSender(event, contents, args.appDocumentSources())
     return choice.canceled ? null : choice.filePaths[0] ?? null
   }) ?? { state: 'unchanged' })
-  handleWithEvent('ui:openLocalIdentitySetup', async (event, gatewayCode?: string) => {
-    const assertCurrent = () => assertAppDocumentSender(event, contents, args.appDocumentSources())
-    assertCurrent()
-    if (gatewayCode !== undefined) decodeMeshPeerCode(gatewayCode)
-    if (!args.openIdentitySetup) throw new Error('New identity setup is available from the original AgentMux window.')
-    await args.openIdentitySetup(assertCurrent, gatewayCode)
-  })
-  handleWithEvent('ui:readIdentityGateway', event => {
+  handleWithEvent('ui:prepareMeshIdentity', async (event, runtimeId?: string) => {
     assertAppDocumentSender(event, contents, args.appDocumentSources())
-    return args.readIdentityGateway?.()
+    if (runtimeId !== undefined && (typeof runtimeId !== 'string' || !runtimeId.trim() || runtimeId.length > 200)) throw new Error('The original Mesh identity reference is invalid.')
+    if (!args.meshIdentity) throw new Error('Separate Mesh identity setup requires AgentMux Desktop.')
+    const owner = await args.meshIdentity.prepare(runtimeId)
+    assertAppDocumentSender(event, contents, args.appDocumentSources())
+    return owner
   })
   handleWithEvent('ui:createStorageBackup', (_event, owner: import('@agentmux/core').AgentMuxRuntimeFence) => args.runtime.createStorageBackup(owner))
   handleWithEvent('ui:importWorkbenchState', (_event, value: string) => workbenchUserState.importIfAbsent(value))

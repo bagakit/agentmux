@@ -21,11 +21,11 @@ import { WorkbenchCloseOwner } from './workbench-close-owner.js'
 import { DesktopStorageRecoveryExports } from './storage-recovery-exports.js'
 import { recoverWorkbenchBeforeLoad } from './workbench-recovery-bootstrap.js'
 import { localRuntimeRecovery } from './local-runtime-recovery.js'
-import { openNewIdentityWindow } from './local-identity-setup.js'
+import { localMeshIdentity } from './local-identity-setup.js'
 import { applicationMenuTemplate } from './application-menu.js'
 import { ZoomCommands } from './zoom-commands.js'
 import { installTextEditContextMenu } from './text-edit-context-menu.js'
-import { isScratchWorkspaceId, NEW_IDENTITY_WINDOW_ARGUMENT } from '../shared/contracts.js'
+import { isScratchWorkspaceId } from '../shared/contracts.js'
 import { desktopAgentSessionStorePath } from './agent-session-store-path.js'
 import { offerSessionDatabaseMigration } from './session-database-migration-prompt.js'
 import { CrashLog } from './crash-log.js'
@@ -62,9 +62,6 @@ import { installRecoverySeedBeforeLoad, summarizeRecoverySessionStore, summarize
 
 const startupAttemptId = mintObjectId()
 const packagedUserDataPath = join(app.getPath('appData'), 'dev.agentmux.desktop')
-const newIdentityWindow = process.env.AGENTMUX_DESKTOP_NEW_IDENTITY === '1'
-let newIdentityGatewayCode = newIdentityWindow ? process.env.AGENTMUX_DESKTOP_NEW_IDENTITY_GATEWAY : undefined
-delete process.env.AGENTMUX_DESKTOP_NEW_IDENTITY_GATEWAY
 
 // Development launches and packaged launches must address the same durable user-data root. Electron's
 // default path is derived from the app name and differs between a Vite dev process and the signed App;
@@ -91,7 +88,7 @@ registerCrashCapture({
 // RuntimeController、各自 spawn/adopt daemon，在会话存储和运行时状态目录上互相踩。会话存储内部的
 // 跨进程 PID 锁只缩小了爆炸半径，没有阻止双实例本身。这里用 Electron 官方的单实例锁：拿不到锁的
 // 第二实例立刻退出，把窗口带到前台交给已在运行的主实例——绝不静默退出让用户以为点了没反应。
-if (instanceRoleFromLock(app.requestSingleInstanceLock(newIdentityGatewayCode ? { gatewayCode: newIdentityGatewayCode } : {})).role === 'secondary') {
+if (instanceRoleFromLock(app.requestSingleInstanceLock()).role === 'secondary') {
   // 在构造任何运行时 owner 之前退出。晚一步就已经踩上了会话存储和 daemon。退出码 0：这是预期行为
   // （用户又点了一次图标），不是错误。真正的「把窗口抬到前台」由主实例的 second-instance 处理器完成。
   app.quit()
@@ -104,12 +101,7 @@ if (instanceRoleFromLock(app.requestSingleInstanceLock(newIdentityGatewayCode ? 
  * 都不会构造。运行时 owner、窗口、IPC、崩溃后的清理全在这个闭包里，第二实例一样都碰不到。
  */
 function startPrimaryInstance(): void {
-  // The originating Settings action owns the confirmation. Main checks the App sender again before launching.
-  const openIdentitySetup = newIdentityWindow ? undefined : singleFlight(async (assertCurrent: () => void, gatewayCode?: string) => {
-    assertCurrent()
-    await openNewIdentityWindow({ userData: app.getPath('userData'), executable: process.execPath, gatewayCode,
-      ...(app.isPackaged ? {} : { application: app.getAppPath() }) })
-  })
+  const meshIdentity = localMeshIdentity(app.getPath('userData'))
   const spatialLinks = new SpatialLinkIngress(), webLinks = new WebUrlIngress(), webFiles = new WebFileIngress()
   registerSystemWebFileEvents(app, webFiles, () => { void app.whenReady().then(async () => {
     const window = workbenchWindow
@@ -239,10 +231,9 @@ function startPrimaryInstance(): void {
       minWidth: 980,
       minHeight: 660,
       icon: appIconPath(initialConfig.appearance.appIcon),
-      ...(newIdentityWindow ? { title: 'AgentMux · Separate identity' } : {}),
       titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
       backgroundColor: resolveTheme(initialConfig.appearance, nativeTheme.shouldUseDarkColors).variant.colors.background,
-      webPreferences: windowSecurityWebPreferences(join(import.meta.dirname, '../preload/index.cjs'), newIdentityWindow ? NEW_IDENTITY_WINDOW_ARGUMENT : undefined)
+      webPreferences: windowSecurityWebPreferences(join(import.meta.dirname, '../preload/index.cjs'))
     })
     workbenchWindow = window
     const windows = new WorkbenchWindows(window, workbenchWindowStore, liveVisibleAreas)
@@ -322,8 +313,7 @@ function startPrimaryInstance(): void {
     disposeIpc = await registerIpc({ window, appDocumentSources: () => appDocuments.read(), workbenchWindows: windows, configStore, initialConfig, runtime, applicationAccess, workbenchUserState, workbenchCloseOwner, storageRecoveryExports, runtimeIdentityRecovery, scratchTopics, workspaceFiles, spatialLinks, webLinks, webFiles, zoomCommands,
       ...(process.env.AGENTMUX_DESKTOP_RESOURCE_WORKFACE
         ? { resourceProbeTerminalReader: (read: ResourceProbeTerminalReader) => { resourceProbeTerminalReader = read } } : {}),
-      ...(openIdentitySetup ? { openIdentitySetup } : {}),
-      ...(newIdentityWindow ? { readIdentityGateway: () => newIdentityGatewayCode } : {}),
+      meshIdentity,
       performanceScene, appMemory, performanceHeap, clientIncidents, loadedAppVersion: app.getVersion(), loadedPackage: packageIdentity, loadedRenderer: () => rendererUpdates?.loadedRenderer() ?? null,
       onRendererStartupFailure: failure => startupCapture.recordRenderer(failure),
       onRendererUpdateReady: (token) => { if (updateReady?.token === token) { startupCapture.ready(token); updateReady.resolve() } }, environmentWarning: () => environmentWarning })
@@ -541,13 +531,9 @@ function startPrimaryInstance(): void {
 
   // 第二实例来敲门时把已有窗口带到用户眼前。最小化的先还原再聚焦，否则聚焦一个最小化窗口用户还是
   // 看不见；窗口全关了（macOS 上 app 还活着）则新开一个。决策在纯函数里，这里只执行动作。
-  app.on('second-instance', (_event, argv, _cwd, data) => {
+  app.on('second-instance', (_event, argv) => {
     receiveDesktopUrlArguments(spatialLinks, webLinks, argv)
     const existing = workbenchWindow ?? undefined
-    if (newIdentityWindow && data && typeof data === 'object' && 'gatewayCode' in data && typeof data.gatewayCode === 'string') {
-      newIdentityGatewayCode = data.gatewayCode
-      existing?.webContents.send('ui:newIdentityGateway', newIdentityGatewayCode)
-    }
     const actions = foregroundActionsForSecondInstance({
       exists: existing !== undefined,
       minimized: existing?.isMinimized() ?? false

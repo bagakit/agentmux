@@ -13,10 +13,11 @@ import { useAppStore } from '../../store'
 import './mesh-paths.css'
 
 /** The mesh-paths discovery address opens the continuous Mesh overview, never a second network owner. */
-export function MeshPathsPane({ active, hosts, locations, onGateway, onDevice }: {
+export function MeshPathsPane({ active, hosts, locations, separateRuntimeId, onGateway, onDevice }: {
   active: boolean
   hosts: readonly HostConfig[]
   locations?: MeshMapLocations | undefined
+  separateRuntimeId?: string | undefined
   onGateway: () => void
   onDevice: (hostId: string) => void
 }) {
@@ -38,17 +39,18 @@ export function MeshPathsPane({ active, hosts, locations, onGateway, onDevice }:
     if (!active || !visible) return
     const controller = new AbortController()
     setBusy(true)
-    void api.mesh.call('mesh.inspect', {}, { signal: controller.signal }).then(next => {
+    const options = { signal: controller.signal, ...(separateRuntimeId ? { separateRuntimeId } : {}) }
+    void api.mesh.call('mesh.inspect', {}, options).then(next => {
       if (controller.signal.aborted) return
       if (source.current && source.current.owner.runtimeId !== next.owner.runtimeId) throw Error('Another Core answered this network read. The original network view is retained.')
       source.current = next; setSnapshot(next); setIssue('')
     }).catch(cause => { if (!controller.signal.aborted) setIssue(cause instanceof Error ? cause.message : String(cause)) })
       .finally(() => { if (!controller.signal.aborted) setBusy(false) })
-    void api.mesh.call('settings.mesh.inspect', {}, { signal: controller.signal }).then(next => {
+    void api.mesh.call('settings.mesh.inspect', {}, options).then(next => {
       if (!controller.signal.aborted) { setSettings(next); setSettingsIssue('') }
     }).catch(cause => { if (!controller.signal.aborted) setSettingsIssue(cause instanceof Error ? cause.message : String(cause)) })
     return () => { controller.abort(); setBusy(false) }
-  }, [active, visible, revision])
+  }, [active, visible, revision, separateRuntimeId])
   const [geographicVisible, setGeographicVisible] = useState(true)
   const observedLocations = useMeshDeviceLocations(hosts, active && visible && geographicVisible, revision,
     !meshLocationValue(locations, 'local'), snapshot?.network?.networkId)
@@ -67,7 +69,7 @@ export function MeshPathsPane({ active, hosts, locations, onGateway, onDevice }:
   ], [devices, hosts, snapshot, networkId])
   const editHost = (id: string) => editLocation(targets.find(t => t.field === 'meshMapLocations' && t.key === id))
   const editPeer = (id: string) => editLocation(targets.find(t => t.field === 'meshNetworkMapLocations' && networkId && t.key === meshPeerLocationKey(networkId, id)))
-  const actions = <><Button type="button" aria-expanded={editingLocation !== undefined} onClick={() => editHost('local')}>Device locations</Button>
+  const actions = <><Button type="button" aria-expanded={editingLocation !== undefined} onClick={() => editHost('local')}>My map annotations</Button>
     <Button type="button" disabled={busy} onClick={() => setRevision(value => value + 1)}>{busy ? 'Reading…' : 'Refresh network'}</Button></>
   return <section className="mesh-paths-pane" aria-label="Mesh network overview" data-settings-field="mesh-paths">
     {issue ? <div className="mesh-paths-issue" role="status"><strong>Network observation unavailable.</strong><p>{snapshot ? 'Showing the last confirmed network.' : 'Current network state is unknown.'}</p><details><summary>Read details</summary><p>{issue}</p></details></div> : null}

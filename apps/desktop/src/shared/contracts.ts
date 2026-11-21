@@ -136,7 +136,6 @@ export type { AgentExecutorId, AgentTimelineItem, AgentTimelineSnapshot }
  * compile error at the one place each semantic question is decided (see `isFolderWorkspace` /
  * `isWorktreeWorkspace`).
  */
-export const NEW_IDENTITY_WINDOW_ARGUMENT = '--agentmux-new-identity-window'
 export const WORKSPACE_KINDS = ['folder', 'worktree'] as const
 
 /**
@@ -2023,10 +2022,7 @@ export type AgentMuxDesktopApi = {
     readStorageRecovery(): Promise<import('./storage-recovery').DesktopStorageRecoveryRead>
     readLocalRuntimeRecovery(): Promise<import('@agentmux/core').SemanticIdentityRecoveryResult>
     restoreLocalRuntimeIdentity(): Promise<import('@agentmux/core').SemanticIdentityRecoveryResult>
-    isNewIdentityWindow: boolean
-    readIdentityGateway(): Promise<string | undefined>
-    onNewIdentityGateway(listener: (gatewayCode: string) => void): () => void
-    openLocalIdentitySetup(gatewayCode?: string): Promise<void>
+    prepareMeshIdentity(runtimeId?: string): Promise<import('@agentmux/core/mesh-network').MeshOwner>
     openMeshDevice(url: string): Promise<void>
     createStorageBackup(owner: import('@agentmux/core').AgentMuxRuntimeFence): Promise<import('./storage-recovery').DesktopStorageRecoveryRead>
     importWorkbenchState(value: string): Promise<string>

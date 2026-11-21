@@ -17,7 +17,7 @@ export const hostsSettingsModule = {
   group: 'cluster',
   title: 'Mesh',
   description: 'Connect devices, manage Relay gateways and see network status.',
-  subpages: [gatewayJoin, { field: 'mesh-configuration', title: 'Manage gateways' }, { field: 'mesh-devices', title: 'Saved devices' }, { field: 'mesh-machines', title: 'Machine status' }],
+  subpages: [gatewayJoin, { field: 'mesh-configuration', title: 'Relay settings' }, { field: 'mesh-devices', title: 'Device connections' }, { field: 'mesh-machines', title: 'Machine status' }],
   icon: ThemeObjectHostIcon,
   keywords: 'machines CPU memory storage volume resources cluster paths mesh gateway participant peer network route topology monitor runtime host hosts ssh tailcat tunnel listener remote hostname user port key test connection apps access trust permission environment project folder workspace worktree register open',
   searchTargets: [{ id: gatewayJoin.field, title: gatewayJoin.title, description: gatewayJoin.description, kind: 'action' }, { id: 'mesh-paths', title: 'Mesh network overview', description: 'Network topology, paths and saved devices.', kind: 'info' }, { id: 'mesh-machines', title: 'Cluster machine resources', description: 'CPU, memory, storage volume and sample coverage.', kind: 'info' }, { id: 'mesh-configuration', title: 'Mesh participation', description: 'Network role, peer trust and device access.', kind: 'field' }, { id: 'mesh-link', title: 'Original node access link', description: 'Reach an original endpoint through this Mesh gateway.', kind: 'action' }, { id: 'mesh-access-work', title: 'Use another device', description: 'Open its gateway access link.', kind: 'action' }, { id: 'incoming', title: 'Incoming connections and client keys', kind: 'field' }],

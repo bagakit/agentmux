@@ -13,7 +13,7 @@ import { createPreloadNotebookObservation } from './notebook-observation'
 import { readInputObservation } from '@agentmux/core/control'
 import type { BrowserResultArtifactChunk, BrowserResultReadOptions } from '@agentmux/browser/model'
 import type { BrowserTaskAssetRunInput, BrowserTaskContent, BrowserTaskBatchInput } from '../shared/browser-task-assets'
-import { NATIVE_BROWSER_VISIBILITY_CHANNEL, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL, NEW_IDENTITY_WINDOW_ARGUMENT } from '../shared/contracts'
+import { NATIVE_BROWSER_VISIBILITY_CHANNEL, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts'
 import type { ContinuousProgressLoop, ContinuousProgressTarget } from '@agentmux/core'
 import type { DesktopControlRequest } from '../shared/contracts'
 import { contextBridge, ipcRenderer, webFrame, webUtils } from 'electron'
@@ -206,7 +206,7 @@ const api: AgentMuxPreloadApi = {
     }
   },
   mesh: { call: async (method, params, context) => {
-    const token = mintObjectId(), pending = ipcRenderer.invoke('mesh:call', token, method, params, context?.expectedOwner)
+    const token = mintObjectId(), pending = ipcRenderer.invoke('mesh:call', token, method, params, context?.expectedOwner, context?.separateRuntimeId)
     const release = context?.onAbort?.(() => { void ipcRenderer.invoke('mesh:cancel', token).catch(() => {}) })
     try { return await pending } finally { release?.() }
   } },
@@ -526,14 +526,7 @@ const api: AgentMuxPreloadApi = {
     readStorageRecovery: () => ipcRenderer.invoke('ui:readStorageRecovery'),
     readLocalRuntimeRecovery: () => ipcRenderer.invoke('ui:readLocalRuntimeRecovery'),
     restoreLocalRuntimeIdentity: () => ipcRenderer.invoke('ui:restoreLocalRuntimeIdentity'),
-    isNewIdentityWindow: process.argv.includes(NEW_IDENTITY_WINDOW_ARGUMENT),
-    readIdentityGateway: () => ipcRenderer.invoke('ui:readIdentityGateway'),
-    onNewIdentityGateway(listener) {
-      const receive = (_event: Electron.IpcRendererEvent, code: string) => listener(code)
-      ipcRenderer.on('ui:newIdentityGateway', receive)
-      return () => ipcRenderer.off('ui:newIdentityGateway', receive)
-    },
-    openLocalIdentitySetup: gatewayCode => ipcRenderer.invoke('ui:openLocalIdentitySetup', gatewayCode),
+    prepareMeshIdentity: runtimeId => ipcRenderer.invoke('ui:prepareMeshIdentity', runtimeId),
     openMeshDevice: (url: string) => ipcRenderer.invoke('mesh:openDevice', url),
     createStorageBackup: owner => ipcRenderer.invoke('ui:createStorageBackup', owner),
     importWorkbenchState: value => ipcRenderer.invoke('ui:importWorkbenchState', value),

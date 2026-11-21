@@ -33,27 +33,23 @@ type Props = {
   onManage: (() => void) | undefined
   onDone: (() => void) | undefined
   identityRecovery: ReturnType<typeof useLocalRuntimeRecovery>
-  openSeparate: ((code?: string) => void) | undefined
-  openingSeparate: boolean
-  separateIssue: string
-  separateRequested: boolean
+  separate: boolean
+  onPrepareIdentity(): void
+  preparingIdentity: boolean
+  identitySetupIssue: string
+  onOriginalIdentity(): void
 }
 
 export function MeshGatewayJoin({ active, settings, snapshot, networkIssue, peerCode, issue, draftIssue, notice, reading, saving, pending,
-  onConnect, onCheck, onCheckSave, onCopy, copyFeedback, onAccess, onManage, onDone, identityRecovery, openSeparate, openingSeparate, separateIssue, separateRequested }: Props) {
+  onConnect, onCheck, onCheckSave, onCopy, copyFeedback, onAccess, onManage, onDone, identityRecovery, separate, onPrepareIdentity, preparingIdentity, identitySetupIssue, onOriginalIdentity }: Props) {
   const authored = useAppStore(state => state.meshGatewayCode)
-  const handoff = useAppStore(state => state.meshGatewayHandoff)
-  const incoming = api.ui.isNewIdentityWindow ? handoff : undefined
-  const [reviewed, setReviewed] = useState<string>()
-  const [confirmIdentity, setConfirmIdentity] = useState<{ kind: 'import' } | { kind: 'new'; gatewayCode?: string }>()
+  const [confirmIdentity, setConfirmIdentity] = useState<'import' | 'new'>()
   const [clipboardIssue, setClipboardIssue] = useState('')
   const [pasting, setPasting] = useState(false)
   const field = useRef<HTMLInputElement>(null)
-  const reviewedIncoming = reviewed === incoming
-  const code = pending?.gatewayCode ?? (authored || (!reviewedIncoming ? incoming : undefined) || '')
+  const code = pending?.gatewayCode ?? authored
   const trimmed = code.trim()
   function change(value: string) {
-    setReviewed(incoming)
     setClipboardIssue('')
     setAuthoredWorkbench({ meshGatewayCode: value })
   }
@@ -99,7 +95,7 @@ export function MeshGatewayJoin({ active, settings, snapshot, networkIssue, peer
     snapshot?.network?.peers.some(peer => peer.peerId === gateway?.peerId && peer.state === 'connected')
   const recovery = identityRecovery.notice
   const unverifiedMesh = snapshot?.apply.issue?.code === 'MESH_IDENTITY_UNCONFIRMED'
-  const identityIssue = Boolean(recovery || unverifiedMesh)
+  const identityIssue = Boolean(recovery || unverifiedMesh || separate && !settings)
   const staticGateway = snapshot?.source === 'static'
   const needsNetworkCheck = Boolean(settings && !snapshot && !configured)
   const checking = reading || identityRecovery.restoring
@@ -108,41 +104,50 @@ export function MeshGatewayJoin({ active, settings, snapshot, networkIssue, peer
   const canPaste = canEnterCode && !pasting
   const applyIssue = snapshot?.apply.issue?.message
   const applying = !networkIssue && !applyIssue && (snapshot?.apply.state === 'starting' || snapshot?.activeRevision !== settings?.revision)
-  const stage = identityIssue ? 'Device identity' : configured || saving || pending ? 'Connection' : gateway ? 'Review' : 'Gateway code'
+  const steps = ['Device identity', 'Gateway code', 'Review', 'Connection']
+  const step = identityIssue || !settings ? 0 : configured || saving || pending ? 3 : gateway ? 2 : 1
+  const phase = connected ? 'connected' : preparingIdentity || identityRecovery.restoring ? 'identity' : saving || applying && configured ? 'connecting'
+    : identityIssue || !settings ? 'attention' : configured ? 'waiting' : gateway ? 'review' : 'ready'
   const codeField = <label className="mesh-form-field mesh-join-code" data-settings-field="mesh-join"><span>Gateway connection code</span>
     <TextInput ref={field} aria-label="Gateway connection code" placeholder="amux-mesh:…" spellCheck={false}
       value={code} onChange={event => change(event.target.value)} disabled={!canEnterCode} aria-invalid={Boolean(codeIssue || reviewIssue)} /></label>
 
   return <div className="mesh-network-settings mesh-gateway-join" data-mesh-settings>
-    <header className="mesh-join-landing">
+    <header className="mesh-join-landing" data-mesh-phase={phase}>
       <div className="mesh-join-lead">
         <h3>Bring this Mac into your network.</h3>
-        <p>{api.ui.isNewIdentityWindow
-          ? incoming ? 'This is your new identity. Review the gateway brought from the original window.' : 'This is your new identity. Paste the gateway code to connect.'
-          : 'Connect through a Relay Gateway to reach approved devices and their work.'}</p>
-        {identityIssue ? <span className="mesh-join-identity-flag"><i aria-hidden="true" />Device identity needs attention</span> : null}
+        <p>Connect through a Relay Gateway to reach approved devices and their work.</p>
+        {identityIssue && !preparingIdentity ? <span className="mesh-join-identity-flag"><i aria-hidden="true" />Device identity needs attention</span> : null}
+        {preparingIdentity ? <span className="mesh-join-identity-progress" role="status">Verifying the separate identity…</span> : null}
+        {separate && settings && !identityIssue ? <span className="mesh-join-identity-progress" role="status"><SemanticIcon name="object.node" size={14} />Using separate Mesh identity</span> : null}
       </div>
-      <div className="mesh-join-art" aria-hidden="true"><img src={meshArt} alt="" width="1100" height="619" draggable={false} /></div>
+      <div className="mesh-join-art" aria-hidden="true"><img src={meshArt} alt="" width="1100" height="619" draggable={false} />
+        <div className="mesh-join-signal" key={phase}><i /><b /><i /></div>
+      </div>
     </header>
-    {identityIssue ? <section className="mesh-identity-recovery mesh-join-resolution" aria-label="Device identity">
+    {identityIssue ? <section className="mesh-identity-recovery mesh-join-resolution" aria-label="Device identity" aria-busy={preparingIdentity || identityRecovery.restoring}>
       <div className="mesh-join-result" role="status">
-        <strong>{recovery ? 'Confirm this Mac’s identity to continue' : 'This Mac’s Mesh identity couldn’t be verified'}</strong>
-        <p>{recovery?.notice.notice.restore ?? 'Check the original Mesh identity again, or start a separate setup with a new identity.'}</p>
+        <strong>{preparingIdentity ? 'Preparing a separate identity' : separate ? 'Check the separate Mesh identity' : recovery ? 'Confirm this Mac’s identity to continue' : 'This Mac’s Mesh identity couldn’t be verified'}</strong>
+        <p>{preparingIdentity ? 'AgentMux is verifying its background service. You can continue here once the identity is ready.'
+          : recovery?.notice.notice.restore ?? (separate ? 'Check its background service, or switch back to the original identity.' : 'Check the original Mesh identity again, or prepare a separate one here.')}</p>
         <div className="mesh-recovery-actions">
-          {identityRecovery.canImport && recovery ? <Button type="button" variant="primary" disabled={identityRecovery.restoring || openingSeparate}
-            onClick={() => setConfirmIdentity({ kind: 'import' })}>Import original backup…</Button> : null}
-          {openSeparate ? <Button type="button" variant={identityRecovery.canImport && recovery ? 'secondary' : 'primary'}
-            disabled={openingSeparate || identityRecovery.restoring} onClick={() => setConfirmIdentity(gateway ? { kind: 'new', gatewayCode: trimmed } : { kind: 'new' })}>{separateRequested ? 'Reopen new identity setup…' : 'Create a new identity…'}</Button> : null}
-          <Button type="button" onClick={onCheck} disabled={identityRecovery.restoring || openingSeparate}>Check this Mac again</Button>
+          {identityRecovery.canImport && recovery ? <Button type="button" variant="primary" disabled={identityRecovery.restoring || preparingIdentity}
+            onClick={() => setConfirmIdentity('import')}>Import original backup…</Button> : null}
+          {separate ? <Button type="button" variant="primary" disabled={preparingIdentity} onClick={onPrepareIdentity}>Check this identity</Button> :
+            <Button type="button" variant={identityRecovery.canImport && recovery ? 'secondary' : 'primary'}
+              disabled={preparingIdentity || identityRecovery.restoring} onClick={() => setConfirmIdentity('new')}>{identitySetupIssue ? 'Retry new identity…' : 'Create a new identity…'}</Button>}
+          {separate ? <Button type="button" disabled={preparingIdentity} onClick={onOriginalIdentity}>Use original identity</Button> :
+            <Button type="button" onClick={onCheck} disabled={identityRecovery.restoring || preparingIdentity}>Check this Mac again</Button>}
         </div>
-        {separateRequested ? <p>New setup was launched. Continue in its window when it opens.</p> : null}
-        {separateIssue ? <p role="alert" className="settings-inline-error">{separateIssue}</p> : null}
-        <details className="mesh-advanced"><summary>Technical details</summary><p>{recovery?.detail ?? applyIssue}</p></details>
+        {identitySetupIssue ? <p role="alert" className="settings-inline-error">Couldn't verify this identity. Check it again.</p> : null}
+        {recovery || applyIssue || identitySetupIssue || issue ? <details className="mesh-advanced"><summary>Technical details</summary><p>{identitySetupIssue || recovery?.detail || applyIssue || issue}</p></details> : null}
       </div>
     </section> : null}
     <ol className="mesh-join-steps" aria-label="Connection steps">
-      {['Device identity', 'Gateway code', 'Review', 'Connection'].map(step => <li key={step}
-        data-waiting={identityIssue && step !== stage ? '' : undefined} aria-current={step === stage ? 'step' : undefined}>{step}</li>)}
+      {steps.map((label, index) => <li key={label} data-complete={index < step || connected ? '' : undefined}
+        data-waiting={identityIssue && index > step ? '' : undefined} aria-current={index === step ? 'step' : undefined}>
+        <span className="mesh-join-step-dot" aria-hidden="true" /><span>{label}</span>
+      </li>)}
     </ol>
     <form className="mesh-network-section mesh-join-form" aria-busy={saving || reading} onSubmit={event => {
       event.preventDefault()
@@ -150,7 +155,6 @@ export function MeshGatewayJoin({ active, settings, snapshot, networkIssue, peer
       else if (!gateway && canPaste) void paste()
     }}>
       {!configured ? codeField : null}
-      {incoming && authored && authored !== incoming && !reviewedIncoming && canEnterCode ? <Button type="button" onClick={() => change(incoming)}>Use the gateway from the original window</Button> : null}
       {gateway ? <div className="mesh-join-target mesh-peer-preview">
         <SemanticIcon name="object.node" size={18} aria-hidden="true" />
         <div><h4>{gateway.networkId}</h4>
@@ -163,7 +167,7 @@ export function MeshGatewayJoin({ active, settings, snapshot, networkIssue, peer
       {!identityIssue && (codeIssue || reviewIssue || clipboardIssue) ? <p className="settings-inline-error" role="alert">{codeIssue || reviewIssue || clipboardIssue}</p> : null}
       {!gateway && canEnterCode ? <>
         <Button type="submit" variant="primary" disabled={!canPaste}>{pasting ? 'Reading clipboard…' : 'Paste gateway code'}</Button>
-        <details><summary>Where do I get a code?</summary><p>Ask the operator to copy the saved gateway connection code from Mesh → Manage gateways.</p>
+        <details><summary>Where do I get a code?</summary><p>Ask the operator to copy the saved gateway connection code from Mesh → Relay settings.</p>
           {onManage ? <Button type="button" onClick={onManage}>Open gateway settings</Button> : null}</details>
       </> : null}
       {submit ? <Button type="submit" variant="primary">Connect</Button> : null}
@@ -199,19 +203,22 @@ export function MeshGatewayJoin({ active, settings, snapshot, networkIssue, peer
       {!identityIssue && notice && !configured ? <p role="status">{notice}</p> : null}
       {copyFeedback ? <p role="status" className="mesh-copy-feedback">{copyFeedback}</p> : null}
     </form>
-    {!connected && onAccess ? <footer className="mesh-recovery-actions mesh-join-footer"><Button type="button" onClick={onAccess}>Open a device with an access link</Button></footer> : null}
+    {separate && !identityIssue || !connected && onAccess ? <footer className="mesh-recovery-actions mesh-join-footer">
+      {!connected && onAccess ? <Button type="button" onClick={onAccess}>Open a device with an access link</Button> : null}
+      {separate && !identityIssue ? <Button type="button" onClick={onOriginalIdentity}>Use original identity</Button> : null}
+    </footer> : null}
     <ConfirmationDialog open={active && identityIssue && !!confirmIdentity} intent="neutral"
-      title={confirmIdentity?.kind === 'import' ? 'Import this Mac’s original identity?' : 'Create a separate identity?'}
-      description={confirmIdentity?.kind === 'import'
+      title={confirmIdentity === 'import' ? 'Import this Mac’s original identity?' : 'Create a separate identity?'}
+      description={confirmIdentity === 'import'
         ? 'Choose this Mac’s backup in the file picker. AgentMux verifies it before reconnecting to your original work.'
-        : `AgentMux opens a new window with its own identity. Your current window and saved work stay available. ${confirmIdentity?.kind === 'new' && confirmIdentity.gatewayCode ? 'The selected gateway comes with you for review.' : 'Enter the gateway code in the new window.'}`}
-      confirmLabel={confirmIdentity?.kind === 'import' ? 'Choose backup…' : 'Create and open setup'}
+        : 'AgentMux will verify a separate background identity and continue here. Your original work stays with its current identity.'}
+      confirmLabel={confirmIdentity === 'import' ? 'Choose backup…' : 'Create identity'}
       onCancel={() => setConfirmIdentity(undefined)}
       onConfirm={() => {
         const action = confirmIdentity
         setConfirmIdentity(undefined)
-        if (action?.kind === 'import') recovery?.action?.run()
-        if (action?.kind === 'new') openSeparate?.(action.gatewayCode)
+        if (action === 'import') recovery?.action?.run()
+        if (action === 'new') onPrepareIdentity()
       }} />
   </div>
 }

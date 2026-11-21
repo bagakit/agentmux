@@ -1332,7 +1332,7 @@ export type AppState = GitReadingActions & {
   nodePublicationDrafts: unknown
   meshSettingsDrafts: unknown
   meshGatewayCode: string
-  meshGatewayHandoff?: string | undefined
+  meshGatewayRuntimeId: string | null
   meshDeviceLinks: { draft: string; saved: string[] }
   hostRouteDrafts: unknown
   tailcatConnectionDrafts: unknown
@@ -4403,6 +4403,7 @@ type PersistedAppState = {
   nodePublicationDrafts?: unknown
   meshSettingsDrafts?: unknown
   meshGatewayCode?: string
+  meshGatewayRuntimeId?: string | null
   meshDeviceLinks?: AppState['meshDeviceLinks']
   hostRouteDrafts?: unknown
   tailcatConnectionDrafts?: unknown
@@ -4740,6 +4741,7 @@ function workbenchSaveSources(state: AppState) {
     nodePublicationDrafts: state.nodePublicationDrafts,
     meshSettingsDrafts: state.meshSettingsDrafts,
     meshGatewayCode: state.meshGatewayCode,
+    meshGatewayRuntimeId: state.meshGatewayRuntimeId,
     meshDeviceLinks: state.meshDeviceLinks,
     hostRouteDrafts: state.hostRouteDrafts,
     tailcatConnectionDrafts: state.tailcatConnectionDrafts,
@@ -6776,6 +6778,7 @@ export const useAppStore = create<AppState>()<[['zustand/persist', PersistedAppS
   nodePublicationDrafts: {},
   meshSettingsDrafts: {},
   meshGatewayCode: '',
+  meshGatewayRuntimeId: null,
   meshDeviceLinks: { draft: '', saved: [] },
   hostRouteDrafts: {},
   tailcatConnectionDrafts: {},

@@ -137,9 +137,8 @@ const desktopSettingsSectionIds = ['overview', ...settingsModules.map(module => 
 
 function DesktopApp() {
   const documentation = useDocumentationOwner()
-  const [settingsRoute, setSettingsRoute] = useState<SettingsNavigationRequest | null>(
-    () => api.ui.isNewIdentityWindow ? { section: 'hosts', field: 'mesh-join' } : null)
-  const [settingsOpen, setSettingsOpen] = useState(api.ui.isNewIdentityWindow)
+  const [settingsRoute, setSettingsRoute] = useState<SettingsNavigationRequest | null>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsInputPolicy, setSettingsInputPolicy] = useState<'preserve' | 'target'>('target')
   const settingsObservation = useRef<{ sectionId: string; visible: boolean; hostId?: string | null } | null>(null)
   const navigateSettings = useCallback((request: SettingsNavigationRequest, inputPolicy: 'preserve' | 'target' = 'target'): void => {
@@ -147,19 +146,6 @@ function DesktopApp() {
     setSettingsRoute(normalizeSettingsNavigationRequest(request, useAppStore.getState().config?.hosts ?? []))
     setSettingsOpen(true)
   }, [])
-  useEffect(() => {
-    if (!api.ui.isNewIdentityWindow) return
-    let original = true
-    const detach = api.ui.onNewIdentityGateway(gatewayCode => {
-      original = false
-      useAppStore.setState({ meshGatewayHandoff: gatewayCode })
-      navigateSettings({ section: 'hosts', field: 'mesh-join' }, 'preserve')
-    })
-    void api.ui.readIdentityGateway().then(gatewayCode => {
-      if (original && gatewayCode) useAppStore.setState({ meshGatewayHandoff: gatewayCode })
-    }).catch(error => console.error('Could not read the gateway for this identity setup', error))
-    return () => { original = false; detach() }
-  }, [navigateSettings])
   const openSettings = useCallback((section: SettingsPageId, executorId?: string, field?: string, hostId?: string): void => navigateSettings({ section, executorId, field, ...(hostId === undefined ? {} : { hostId }) }), [navigateSettings])
   const closeSettings = useCallback((): void => setSettingsOpen(false), [])
   const openToolkit = useCallback((toolId: string): void => navigateSettings({ section: 'toolkit', toolId }), [navigateSettings])
