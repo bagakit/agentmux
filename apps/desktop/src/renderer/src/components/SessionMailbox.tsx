@@ -690,6 +690,7 @@ export function SessionMailbox({ pendingLayout, system, queued: workbenchQueue, 
       <div className="composer-mailbox__heading">
         {folder === 'progress' ? <button type="button" className="composer-tool" aria-label="Back to messages" title="Back to messages"
           onClick={returnToMessages}><ThemeNavigationBackIcon size={15} /></button> : null}
+        {folder === 'progress' ? <ThemeObjectAutomationIcon className="composer-mailbox__heading-icon" size={15} aria-hidden="true" /> : <ThemeObjectMailIcon className="composer-mailbox__heading-icon" size={15} aria-hidden="true" />}
         <strong>{folder === 'progress' ? 'Automation' : 'Messages'}</strong><span className="composer-mailbox__subject" title={mailboxSessionId}>{mailboxSessionId ? reading?.describeSpeaker?.({ role: 'agent', id: mailboxSessionId }, 18)?.name || mailboxSessionId : 'Agent unknown'}</span>
         <button type="button" className="composer-tool" aria-label="Close mailbox" popoverTarget={id} popoverTargetAction="hide"
           onClick={() => trigger.current!.focus({ preventScroll: true })}><ThemeActionCloseIcon size={14} /></button></div>

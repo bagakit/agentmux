@@ -1,5 +1,6 @@
 import { Tabs } from '@agentmux/client-ui/components/Tabs'
 import type { ReactNode } from 'react'
+import { LiquidSelectionSurface } from './LiquidSelectionSurface'
 
 type MailboxTab<Key extends string> = { key: Key; label: string; description: string; icon: ReactNode; count: number }
 
@@ -12,8 +13,10 @@ export function MailboxNavigation<Key extends string>({ id, items, selected, onS
     aria-label={label} value={selected} onValueChange={onSelect} options={items.map(item => ({
       value: item.key,
       panelId: `${id}-${item.key}`,
-      button: { id: `${id}-${item.key}-tab`, title: item.description, 'aria-label': item.description },
+      button: { id: `${id}-${item.key}-tab`, title: item.description, 'aria-label': item.description, 'data-mailbox-folder': item.key },
       label: <>{item.icon}<span className="composer-mailbox__folder-label">{item.label}</span>
         {item.count > 0 ? <span className="composer-mailbox__count" aria-hidden="true">{item.count > 99 ? '99+' : item.count}</span> : null}</>
-    }))} />
+    }))}>
+    <LiquidSelectionSurface selected={selected} active targetAttribute="data-mailbox-folder" />
+  </Tabs>
 }

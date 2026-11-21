@@ -1,6 +1,7 @@
 @import './composer-editor.css';.composer-mailbox__heading, .composer-mailbox__messages header { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
-.composer-mailbox__heading { min-height: 28px; padding: var(--sp-1) var(--sp-3); min-width: 0; }
+.composer-mailbox__heading { min-height: 40px; padding: var(--sp-2) var(--sp-3); min-width: 0; }
 .composer-mailbox__heading > strong { flex-shrink: 0; color: var(--text); font-size: var(--fs-body); font-weight: 600; }
+.composer-mailbox__heading-icon { box-sizing: content-box; flex: none; padding: 5px; border-radius: 7px; color: var(--green-text); background: var(--green-bg); }
 .composer-mailbox__heading > .composer-tool { flex-shrink: 0; justify-content: center; width: var(--sp-7); height: var(--sp-7); padding: 0; }
 .composer-mailbox__messages { list-style: none; margin: 0; padding: 0; }
 
@@ -13,12 +14,16 @@
 @keyframes composer-mailbox-return { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .composer-mailbox { transition: none; } .composer-pending[data-mailbox-returning='true'] { animation: none; } }
 .composer-mailbox__heading, .composer-mailbox__folders, .composer-mailbox__back { flex: 0 0 auto; }
-.composer-mailbox__content { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.composer-mailbox__content { min-height: 0; overflow-y: auto; overscroll-behavior: contain; background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--surface-1) 24%, transparent)); }
+.composer-mailbox__content [role='tabpanel']:not([hidden]) { animation: composer-mailbox-page-arrive 200ms var(--ease-enter); }
 .composer-mailbox__content > [role="region"] { padding: 0 var(--sp-3) var(--sp-3); }
 .composer-mailbox__back { padding: 0 var(--sp-3) var(--sp-2); }
 .composer-mailbox__back > button { padding: 0 var(--sp-2); min-height: var(--sp-7); }
-.composer-mailbox__messages { list-style: none; margin: 0; padding: 0; }
-.composer-mailbox__messages > li { margin: 0; padding: 0; border-top: 1px solid var(--line-soft); }
+.composer-mailbox__messages { display: grid; gap: 2px; list-style: none; margin: 0; padding: 3px 6px; }
+.composer-mailbox__messages > li { margin: 0; padding: 0; border: 0; border-radius: var(--radius); animation: composer-record-arrive 220ms var(--ease-enter); }
+.composer-mailbox__messages > li:nth-child(2) { animation-delay: 24ms; }
+.composer-mailbox__messages > li:nth-child(3) { animation-delay: 40ms; }
+.composer-mailbox__messages > li[data-unread] { background: linear-gradient(100deg, color-mix(in srgb, var(--green) 5%, transparent), transparent 72%); }
 .composer-mailbox__record { position: relative; min-width: 0; }
 .composer-mailbox__record-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-1) var(--sp-2); padding: 0 var(--sp-3) var(--sp-2); }
 .composer-mailbox__record-status { flex: 1 1 8em; min-width: 0; color: var(--text-3); font-size: var(--fs-micro); overflow-wrap: anywhere; }
@@ -47,13 +52,16 @@
 .composer-mailbox__notification-journal .composer-tool { padding: var(--sp-1); }
 .composer-mailbox__navigation-feedback, .composer-mailbox__pending-location { color: var(--text-3); font-size: var(--fs-meta); }
 .composer-mailbox__pending-location { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
-.composer-mailbox__row { width: 100%; display: grid; gap: var(--sp-1); padding: var(--sp-3); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text); text-align: left; font-size: var(--fs-body); cursor: pointer; }
-.composer-mailbox__row:hover { background: var(--surface-3); }
+.composer-mailbox__row { width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: var(--sp-3); padding: var(--sp-3); border: 0; border-radius: var(--radius); background: transparent; color: var(--text); text-align: left; font-size: var(--fs-body); cursor: pointer; transition: background var(--dur-fast) ease, transform var(--dur-fast) var(--ease-enter); }
+.composer-mailbox__row:hover { background: color-mix(in srgb, var(--surface-3) 74%, transparent); }
+.composer-mailbox__row:active { transform: scale(.995); }
 .composer-mailbox__row:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; background: var(--surface-3); }
-.composer-mailbox__row-head { order: 2; display: flex; align-items: baseline; gap: var(--sp-2); min-width: 0; color: var(--text-3); }
+.composer-mailbox__record-body { display: grid; gap: var(--sp-1); min-width: 0; }
+.composer-mailbox__row-head { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; color: var(--text-3); }
 .composer-mailbox__record-identity { display: flex; flex: 1; flex-wrap: wrap; align-items: center; gap: var(--sp-2); min-width: 0; }
-.composer-mailbox__row-head > strong, .composer-mailbox__record-identity > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-micro); font-weight: 400; }
-.composer-mailbox__row-head > :is(.agent-avatar, .conversation-speaker-avatar, .conversation-message-avatar, .space-object-icon) { flex-shrink: 0; }
+.composer-mailbox__row-head > strong, .composer-mailbox__record-identity > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: var(--fs-meta); font-weight: 560; }
+.composer-mailbox__avatar { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 28px; height: 28px; color: var(--text-2); }
+.composer-mailbox__avatar > :is(.agent-avatar, .conversation-speaker-avatar, .conversation-message-avatar, .space-object-icon) { flex-shrink: 0; }
 .composer-mailbox__record-avatar { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 var(--sp-6); width: var(--sp-6); height: var(--sp-6); }
 .composer-mailbox__record-avatar > * { max-width: 100%; max-height: 100%; }
 .composer-mailbox__row-head > .composer-mailbox__metadata { margin-left: auto; flex-shrink: 0; }
@@ -63,9 +71,9 @@
 .composer-mailbox__channel-room { min-width: 0; overflow-wrap: anywhere; }
 .composer-mailbox__channel-quote { flex: none; }
 .composer-mailbox__channel-issue { flex-basis: 100%; overflow-wrap: anywhere; }
-.composer-mailbox__preview { order: 1; line-height: 1.55; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+.composer-mailbox__preview { color: var(--text-2); font-size: var(--fs-meta); line-height: 1.55; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
 .composer-mailbox__metadata { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); color: var(--text-3); font-size: var(--fs-micro); }
-.composer-mailbox__detail { padding: var(--sp-3); font-size: var(--fs-body); overflow-wrap: anywhere; }
+.composer-mailbox__detail { padding: var(--sp-3); font-size: var(--fs-body); overflow-wrap: anywhere; animation: composer-mailbox-detail-arrive 220ms var(--ease-enter); }
 .composer-mailbox__detail header { display: grid; gap: var(--sp-2); }
 .composer-outbox > h3 { margin: var(--sp-2) var(--sp-3); color: var(--text-3); font-size: var(--fs-micro); font-weight: 600; }
 .composer-outbox ol { list-style: none; padding: 0; }
@@ -249,6 +257,8 @@
 .composer-mailbox__automation { display: flex; flex: 0 0 auto; align-items: center; gap: var(--sp-2); min-width: 0; min-height: 28px; padding: var(--sp-2) var(--sp-3); border: 0; border-top: 1px solid var(--line-soft); color: var(--text-2); background: var(--surface-1); font: inherit; text-align: left; cursor: pointer; }
 .composer-mailbox__automation > svg { flex: none; color: var(--text-3); }
 .composer-mailbox__automation:hover { color: var(--text); background: var(--surface-2); }
+.composer-mailbox__automation > span:last-child { transition: transform var(--dur-fast) var(--ease-enter); }
+.composer-mailbox__automation:hover > span:last-child { transform: translateX(2px); }
 .composer-mailbox__automation:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -3px; }
 .composer-mailbox__automation-status { margin-inline-start: auto; color: var(--text-3); font-size: var(--fs-micro); }
 .composer-mailbox__automation-status[data-status="active"] { color: var(--green-text); }
@@ -264,12 +274,13 @@
 .composer-notice { animation: composer-notice-arrive 200ms var(--ease-enter); }
 .composer-notice .composer-mailbox__record { position: relative; }
 .composer-notice .composer-mailbox__row { position: relative; gap: var(--sp-2); padding: var(--sp-4) var(--sp-4) var(--sp-3) 44px; }
+.composer-notice .composer-mailbox__avatar { display: contents; }
 .composer-notice .composer-mailbox__row-head { align-items: flex-start; }
 .composer-notice .composer-mailbox__record-identity { column-gap: var(--sp-2); row-gap: var(--sp-1); }
 .composer-notice .composer-mailbox__record-identity > strong { flex: 1 1 150px; font-size: var(--fs-body); font-weight: 560; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; }
 .composer-notice .composer-mailbox__preview { color: var(--text-2); font-size: var(--fs-meta); line-height: 1.55; }
 .composer-notice .composer-mailbox__metadata { padding-top: 2px; }
-.composer-notice__glyph { position: absolute; top: var(--sp-4); left: var(--sp-4); display: grid; place-items: center; width: 18px; height: 18px; color: var(--amber-text); }
+.composer-notice__glyph { position: absolute; top: var(--sp-4); left: var(--sp-4); display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; color: var(--amber-text); background: color-mix(in srgb, var(--amber) 8%, transparent); }
 .composer-notice[data-kind='indeterminate'] .composer-notice__glyph { color: var(--text-3); }
 .composer-notice__unread { position: absolute; top: -2px; right: -3px; width: 6px; height: 6px; border: 2px solid var(--surface-2); border-radius: 50%; background: var(--green); box-sizing: content-box; }
 .composer-notice__state { display: inline-flex; flex: none; align-items: center; min-height: 18px; padding: 0 var(--sp-2); border-radius: var(--radius-sm); color: var(--amber-text); background: color-mix(in srgb, var(--amber) 8%, transparent); font-size: var(--fs-micro); line-height: 1.4; }
@@ -283,7 +294,10 @@
 .composer-mailbox__detail.composer-notice { animation: composer-notice-detail-arrive 180ms var(--ease-enter); }
 @keyframes composer-notice-arrive { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes composer-notice-detail-arrive { from { opacity: 0; transform: translateX(5px); } to { opacity: 1; transform: none; } }
-@media (prefers-reduced-motion: reduce) { .composer-notice, .composer-mailbox__detail.composer-notice { animation: none; } .composer-notice__action { transition: none; } }
+@keyframes composer-mailbox-page-arrive { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes composer-record-arrive { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+@keyframes composer-mailbox-detail-arrive { from { opacity: 0; transform: translateX(6px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .composer-notice, .composer-mailbox__detail, .composer-mailbox__detail.composer-notice, .composer-mailbox__messages > li, .composer-mailbox__content [role='tabpanel']:not([hidden]) { animation: none; } .composer-notice__action, .composer-mailbox__row, .composer-mailbox__automation > span:last-child { transition: none; } .composer-mailbox__row:active { transform: none; } }
 @media (hover: hover) and (pointer: fine) {
   .composer-mailbox__record:not(:has(.composer-mailbox__record-status, .composer-outbox__send, .composer-notice__action, [role="status"])) > .composer-mailbox__record-footer { position: absolute; right: var(--sp-2); bottom: var(--sp-2); padding: 0; opacity: 0; pointer-events: none; border-radius: var(--radius-sm); background: var(--surface-2); }
   .composer-mailbox__record:is(:hover, :focus-within) > .composer-mailbox__record-footer { opacity: 1; pointer-events: auto; }

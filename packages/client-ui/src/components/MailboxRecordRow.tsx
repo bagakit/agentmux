@@ -23,11 +23,14 @@ export function MailboxRecordRow({ recordKey, label, preview, avatar, metadata, 
     <button type="button" className="composer-mailbox__row" data-record-key={recordKey}
       aria-label={`Read ${label}: ${preview}`} aria-expanded={expanded} aria-controls={controls}
       onClick={event => onOpen(recordKey, event)}>
-      <span className="composer-mailbox__row-head"><span className="composer-mailbox__record-identity">{avatar}<strong title={label}>{label}</strong>
-        {context ? <span className="composer-mailbox__record-context">{context}</span> : null}</span>
-        <span className="composer-mailbox__metadata">{metadata}</span></span>
-      <span className="composer-mailbox__preview">{preview}</span>
-      {source ? <span className="composer-mailbox__source">{source}</span> : null}
+      {avatar ? <span className="composer-mailbox__avatar">{avatar}</span> : null}
+      <span className="composer-mailbox__record-body">
+        <span className="composer-mailbox__row-head"><span className="composer-mailbox__record-identity"><strong title={label}>{label}</strong>
+          {context ? <span className="composer-mailbox__record-context">{context}</span> : null}</span>
+          <span className="composer-mailbox__metadata">{metadata}</span></span>
+        <span className="composer-mailbox__preview">{preview}</span>
+        {source ? <span className="composer-mailbox__source">{source}</span> : null}
+      </span>
     </button>
     {status || actions ? <div className="composer-mailbox__record-footer">
       {status ? <span className="composer-mailbox__record-status">{status}</span> : null}
