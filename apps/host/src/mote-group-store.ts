@@ -501,7 +501,10 @@ export class MoteGroupStore {
       if (actor) this.assertActive(this.originalMember(db, body.groupId, actor.moteId), actor.generation)
       if (body.replyToMessageId && !db.prepare('SELECT id FROM messages WHERE group_id=? AND id=?').get(body.groupId, body.replyToMessageId))
         return groupFailure('The original reply message belongs to another Group or is unavailable.', 'UNKNOWN_MOTE_GROUP_MESSAGE')
-      const selected = recipients.flatMap(delivery => {
+      const audience = body.participation === 'contextual' ? this.members(db, body.groupId).flatMap(({ member }) =>
+        member.state === 'active' ? [{ moteId: member.moteId, operationId: groupStableId('input', body.groupId, body.id, member.moteId),
+          status: 'pending' as const }] : []) : recipients
+      const selected = audience.flatMap(delivery => {
         const record = this.originalMember(db, body.groupId, delivery.moteId)
         const memberGeneration = groupMemberGeneration(record)
         if (scheduledGenerations && (record.member.state !== 'active' || scheduledGenerations.get(delivery.moteId) !== memberGeneration)) return []

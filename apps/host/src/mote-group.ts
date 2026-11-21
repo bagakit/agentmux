@@ -31,9 +31,10 @@ const currentIssue = (error: unknown): string =>
 function inputNote(thread: { kind: 'group' | 'direct'; id: string }, operationId: string,
   quoted: Pick<MoteGroupMessage, 'id' | 'body'> | undefined, message: MoteGroupMessage): string {
   const direct = thread.kind === 'direct'
-  return renderAmuxProtocol('mote-task', direct ? 'private-input' : 'group-input', {
+  return renderAmuxProtocol('mote-task', direct ? 'private-input' : message.participation === 'contextual' ? 'group-contextual-input' : 'group-input', {
     original: JSON.stringify({ [direct ? 'threadId' : 'groupId']: thread.id, inputOperationId: operationId,
       operationId: stable(direct ? 'direct-reply' : 'reply', thread.id, operationId), sender: message.author,
+      ...(message.participation ? { messageId: message.id, participation: message.participation } : {}),
       ...(direct && message.privateImages ? { messageId: message.id, images: message.privateImages.map(({ operationId, name }) => ({ operationId, name })) } : {}) }),
     quote: quoted ? '\n\n' + renderAmuxProtocol('mote-task', 'thread-quote', {
       original: JSON.stringify({ messageId: quoted.id, body: quoted.body })
@@ -526,7 +527,7 @@ export function createHostMoteGroups(options: {
           return groupFailure('A Mote Main can only list its own Groups.', 'CONTROL_PERMISSION_DENIED')
         const page = await store.list(main?.target.spaceId ?? input.moteId, input.beforeSequence ?? Number.MAX_SAFE_INTEGER, input.limit ?? 20,
           input.includeLastAssignment)
-        const groups = await Promise.all(page.groups.map(group => readSummary(group)))
+        const groups = input.receiptProjection === 'stored' ? page.groups : await Promise.all(page.groups.map(group => readSummary(group)))
         await main?.assertCurrent()
         return { ...page, groups } as MoteGroupResultMap[M]
       }
@@ -536,8 +537,9 @@ export function createHostMoteGroups(options: {
           : actor.kind === 'agent' ? await store.memberForThread(input.groupId, actor.hostId, actor.agentSessionId) : undefined
         if (membership) requireActive(membership)
         const page = await store.inspect(input.groupId, input.beforeSequence ?? Number.MAX_SAFE_INTEGER, input.limit ?? 30, input)
-        const messages = await Promise.all(page.messages.map(readMessage))
-        const group = await readSummary(page.group, messages.find(message => message.id === page.group.lastMessage?.id))
+        const stored = input.receiptProjection === 'stored'
+        const messages = stored ? page.messages : await Promise.all(page.messages.map(readMessage))
+        const group = stored ? page.group : await readSummary(page.group, messages.find(message => message.id === page.group.lastMessage?.id))
         await context.assertCurrent()
         await main?.assertCurrent()
         if (membership) requireActive(await store.member(input.groupId, membership.member.moteId), groupMemberGeneration(membership))
@@ -609,6 +611,9 @@ export function createHostMoteGroups(options: {
       }
       const author = membership ? { kind: 'mote' as const, moteId: membership.member.moteId, name: membership.member.name }
         : actor.kind === 'human' ? actor : groupFailure('Supply sourceMote from your current Main or memberMoteId from your Group Thread.', 'CONTROL_PERMISSION_DENIED')
+      const participation = input.participation
+      if (participation && (author.kind !== 'human' || store.kind !== 'group'))
+        return groupFailure('Only a person can invite a Group to respond as relevant.', 'CONTROL_PERMISSION_DENIED')
       const id = stable('message', input.groupId, input.operationId)
       const recipients = input.recipientIds.map(moteId => ({ moteId, operationId: stable('input', input.groupId, id, moteId), status: 'pending' as const }))
       const generations = context.scheduledRecipients ? new Map(context.scheduledRecipients.map(({ moteId, generation }) => [moteId, generation])) : undefined
@@ -618,13 +623,14 @@ export function createHostMoteGroups(options: {
         ...(context.scheduledRecipients ? { recipients: context.scheduledRecipients } : {}), ...(privateImages ? { privateImages } : {}),
         ...(privatePriority ? { privatePriority } : {}) })
       const append = () => store.append(input.operationId, hash, { id, groupId: input.groupId,
-        createdAt: Date.now(), body: input.body, author, ...(input.replyToMessageId ? { replyToMessageId: input.replyToMessageId } : {}),
+        createdAt: Date.now(), body: input.body, author, ...(participation ? { participation } : {}), ...(input.replyToMessageId ? { replyToMessageId: input.replyToMessageId } : {}),
         ...(privateImages ? { privateImages } : {}), ...(privatePriority ? { privatePriority } : {}) },
       recipients, membership && memberAuthority(membership), undefined, generations, context.scheduledOccurrence)
       if (!main) await context.assertCurrent()
       const { message, fresh } = await (main ? main.commit(append) : append())
-      if (!fresh) return { message: await readMessage(message) } as MoteGroupResultMap[M]
+      if (!fresh) return { message: participation ? message : await readMessage(message) } as MoteGroupResultMap[M]
       wakeRecoveries()
+      if (participation) return { message } as MoteGroupResultMap[M]
       // The public message has been committed once. One failing member cannot stop other recipients.
       const deliveries = await Promise.allSettled(message.deliveries.map(delivery => freshDelivery(message, delivery.moteId, 'initial')))
       return { message: { ...message, deliveries: deliveries.map((result, index) => result.status === 'fulfilled' ? result.value

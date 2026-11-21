@@ -34,6 +34,7 @@ export type MoteGroupMessage = {
   body: string
   author: { kind: 'human'; id: string } | { kind: 'mote'; moteId: string; name: string } | { kind: 'system' }
   event?: { kind: 'announcement-updated' }
+  participation?: 'contextual'
   replyToMessageId?: string
   deliveries: MoteGroupDelivery[]
   privateImages?: FileUploadIdentity[]
@@ -56,10 +57,11 @@ type Page = { beforeSequence?: number; limit?: number }
 type GroupEdit = { groupId: string; operationId: string; expectedRevision: number }
 type GroupFile = { groupId: string; inputOperationId?: string }
 type GroupMainSource = { sourceMote?: MotePreferencesTarget }
+type GroupReceiptProjection = { receiptProjection?: 'stored' }
 const groupEdits = ['groupId', 'operationId', 'expectedRevision'] as const
 const groupFiles = ['groupId', 'inputOperationId'] as const
 export type MoteGroupParamsMap = {
-  'space.mote.group.list': Page & GroupMainSource & { moteId?: string; includeLastAssignment?: true }
+  'space.mote.group.list': Page & GroupMainSource & GroupReceiptProjection & { moteId?: string; includeLastAssignment?: true }
   'space.mote.group.create': { operationId: string; name: string; members: MotePreferencesTarget[];
     avatarMoteIds?: string[]; announcement?: string; topic?: MotePreferencesTarget; adminMoteIds?: string[] } & GroupMainSource
   'space.mote.group.update': GroupEdit & { avatarMoteIds?: string[]; announcement?: string | null;
@@ -69,9 +71,9 @@ export type MoteGroupParamsMap = {
   'space.mote.group.members.leave': GroupEdit
   'space.mote.group.file.list': GroupFile & { path?: string; limit?: number }
   'space.mote.group.file.read': GroupFile & { path: string; maxBytes?: number }
-  'space.mote.group.inspect': Page & GroupMainSource & { groupId: string; messageId?: string; replyToMessageId?: string }
+  'space.mote.group.inspect': Page & GroupMainSource & GroupReceiptProjection & { groupId: string; messageId?: string; replyToMessageId?: string }
   'space.mote.group.send': { groupId: string; operationId: string; body: string; recipientIds: string[]; replyToMessageId?: string;
-    memberMoteId?: string } & GroupMainSource
+    memberMoteId?: string; participation?: 'contextual' } & GroupMainSource
   'space.mote.group.schedule': { groupId: string; operationId: string; body: string; recipientIds: string[]; sourceMote: MotePreferencesTarget } & AgentScheduleTiming & { checkIn?: never }
   'space.mote.group.retry': { groupId: string; messageId: string; memberId: string }
   'space.mote.group.reply': { groupId: string; operationId: string; inputOperationId: string; body: string }
@@ -151,7 +153,7 @@ function page(p: Record<string, unknown>): void {
   if (p.beforeSequence !== undefined) field('beforeSequence', 'Use the original positive page cursor.', () => number(p.beforeSequence, requestCode, 1))
 }
 const requestFields = {
-  'space.mote.group.list': ['moteId', 'beforeSequence', 'limit', 'sourceMote', 'includeLastAssignment'],
+  'space.mote.group.list': ['moteId', 'beforeSequence', 'limit', 'sourceMote', 'includeLastAssignment', 'receiptProjection'],
   'space.mote.group.create': ['operationId', 'name', 'members', 'avatarMoteIds', 'announcement', 'topic', 'adminMoteIds', 'sourceMote'],
   'space.mote.group.update': [...groupEdits, 'avatarMoteIds', 'announcement', 'topic', 'adminMoteIds'],
   'space.mote.group.members.add': [...groupEdits, 'members'],
@@ -159,8 +161,8 @@ const requestFields = {
   'space.mote.group.members.leave': groupEdits,
   'space.mote.group.file.list': [...groupFiles, 'path', 'limit'],
   'space.mote.group.file.read': [...groupFiles, 'path', 'maxBytes'],
-  'space.mote.group.inspect': ['groupId', 'beforeSequence', 'limit', 'sourceMote', 'messageId', 'replyToMessageId'],
-  'space.mote.group.send': ['groupId', 'operationId', 'body', 'recipientIds', 'replyToMessageId', 'sourceMote', 'memberMoteId'],
+  'space.mote.group.inspect': ['groupId', 'beforeSequence', 'limit', 'sourceMote', 'messageId', 'replyToMessageId', 'receiptProjection'],
+  'space.mote.group.send': ['groupId', 'operationId', 'body', 'recipientIds', 'replyToMessageId', 'sourceMote', 'memberMoteId', 'participation'],
   'space.mote.group.schedule': ['groupId', 'operationId', 'body', 'recipientIds', 'sourceMote', 'calendar', 'afterMs', 'everyMs'],
   'space.mote.group.retry': ['groupId', 'messageId', 'memberId'],
   'space.mote.group.reply': ['groupId', 'operationId', 'inputOperationId', 'body']
@@ -194,6 +196,8 @@ export function parseMoteGroupParams<M extends MoteGroupMethod>(method: M, value
   const id = (name: string) => field(name, 'Use a nonempty original ID.', () => string(p[name], code))
   if (p.sourceMote !== undefined) field('sourceMote', 'Use your exact current Mote target with spaceId, zoneId and expectedResource.',
     () => target(p.sourceMote, code))
+  if (p.receiptProjection !== undefined) field('receiptProjection', 'Use stored to read retained receipts without a live refresh.',
+    () => { if (p.receiptProjection !== 'stored') invalid(code) })
   const numeric = (name: string, max = Number.MAX_SAFE_INTEGER) => field(name, `Use a positive integer up to ${max}.`, () => number(p[name], code, 1, max))
   const members = () => field('members', 'Use 1 to 32 distinct Mote targets with spaceId, zoneId and expectedResource.',
     () => nonemptyUnique(list(p.members, code, 32, entry => target(entry, code)), member => member.spaceId, code))
@@ -257,6 +261,8 @@ export function parseMoteGroupParams<M extends MoteGroupMethod>(method: M, value
         parseAgentScheduleTiming({ calendar: p.calendar, afterMs: p.afterMs, everyMs: p.everyMs }, code)
       } else {
         ids('recipientIds', false)
+        if (p.participation !== undefined) field('participation', 'A person uses contextual with an empty recipientIds list.',
+          () => { if (p.participation !== 'contextual' || (p.recipientIds as string[]).length || p.sourceMote !== undefined || p.memberMoteId !== undefined) invalid(code) })
         if (p.replyToMessageId !== undefined) id('replyToMessageId')
         if (p.memberMoteId !== undefined) {
           id('memberMoteId')
@@ -276,14 +282,16 @@ export function parseMoteGroupDelivery(value: unknown): MoteGroupDelivery {
   return p as MoteGroupDelivery
 }
 export function parseMoteGroupMessage(value: unknown, scope?: 'group' | 'direct'): MoteGroupMessage {
-  const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['id', 'sequence', 'groupId', 'createdAt', 'body', 'author', 'event', 'replyToMessageId', 'deliveries',
+  const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['id', 'sequence', 'groupId', 'createdAt', 'body', 'author', 'event', 'replyToMessageId', 'deliveries', 'participation',
     ...(scope === 'direct' ? ['privateImages', 'privatePriority'] : [])], code)
   string(p.id, code); string(p.groupId, code); string(p.body, code, MOTE_GROUP_MAX_BODY_LENGTH, true)
   number(p.sequence, code, 1); number(p.createdAt, code, 0)
   if (p.replyToMessageId !== undefined) string(p.replyToMessageId, code)
   if (p.privateImages !== undefined) parsePrivateImageUploads(p.privateImages, code)
   if (p.privatePriority !== undefined && p.privatePriority !== true) return invalid(code)
-  const author = rpcRecord(p.author, undefined, code), deliveries = list(p.deliveries, code, 32, parseMoteGroupDelivery)
+  const author = rpcRecord(p.author, undefined, code)
+  if (p.participation !== undefined && (p.participation !== 'contextual' || author.kind !== 'human' || scope === 'direct')) return invalid(code)
+  const deliveries = list(p.deliveries, code, p.participation === 'contextual' ? Number.MAX_SAFE_INTEGER : 32, parseMoteGroupDelivery)
   if (author.kind === 'human') {
     rpcRecord(author, ['kind', 'id'], code); string(author.id, code)
   } else if (author.kind === 'mote') {
@@ -393,9 +401,9 @@ export function parseMoteGroupResult<M extends MoteGroupMethod>(method: M, value
     if ('recipientIds' in request) {
       const moteId = request.sourceMote?.spaceId ?? request.memberMoteId
       const authored = moteId ? message.author.kind === 'mote' && message.author.moteId === moteId : message.author.kind === 'human'
-      if (!authored || message.replyToMessageId !== request.replyToMessageId ||
-          message.deliveries.length !== request.recipientIds.length ||
-          message.deliveries.some((entry, index) => entry.moteId !== request.recipientIds[index])) return invalid(code)
+      if (!authored || message.replyToMessageId !== request.replyToMessageId || message.participation !== request.participation ||
+          (!request.participation && (message.deliveries.length !== request.recipientIds.length ||
+          message.deliveries.some((entry, index) => entry.moteId !== request.recipientIds[index])))) return invalid(code)
     } else if (message.author.kind !== 'mote' || !message.replyToMessageId || message.deliveries.length) return invalid(code)
   }
   return structuredClone(value) as MoteGroupResultMap[M]
