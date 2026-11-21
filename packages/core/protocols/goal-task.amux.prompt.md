@@ -155,7 +155,7 @@ As Supervisor of original Goal {{goal}} at confirmed revision {{revision}}, use 
 ~~~text
 Review passed for Goal {{goal}}, Ticket {{ticket}}, attempt {{attempt}}. The original executor is Session {{session}}, Run {{run}}, Host {{host}}, Runtime {{runtime}}.
 Independent reviewer: use amux goal inspect on the original Goal owner to confirm its current Supervisor. Give them this receipt through the authorized route and finish your review.
-Current Supervisor: verify the exact attempt, report collection and remaining work. Assign the next ready Ticket when appropriate. Once the handoff is confirmed, check the executor's other work and pending input on this Run before asking them to use amux goal closeout for this exact attempt and Run.
+Current Supervisor: verify the exact attempt, report collection and remaining work. Assign the next ready Ticket when appropriate. When your temporary worker has no other duty and is idle, use amux goal closeout with this attempt and the current exact Run. The owner verifies creation, input and any startup resume. Check the returned reason if the Run is retained.
 Keep the original Run and operation if any check or receipt is unknown. An authorized person or device can use amux agent stop inspect for the exact Stop receipt. See amux goal --skill.
 ~~~
 
@@ -180,7 +180,7 @@ This Core saved your report submission. The Goal owner’s receipt and collectio
 ## collection-result
 
 ~~~text
-If you remain the Goal’s Supervisor, acknowledge this saved collection to the original executor: {{handoff}}. Check review and closeout through their own receipts. People accept the Goal result through the original Goal. See amux goal --skill.
+If you remain the Goal’s Supervisor, acknowledge this saved collection to the original executor: {{handoff}}. Check review. After it passes, assign ready work or close out your idle temporary worker. People accept the Goal result through the original Goal. See amux goal --skill.
 ~~~
 
 ## workflow-budget
