@@ -26,7 +26,7 @@ const settle = () => act(async () => { await new Promise(resolve => setTimeout(r
 const confirm = () => document.querySelector<HTMLButtonElement>('[role="dialog"] [data-confirm-label]')!
 async function open() {
   await act(async () => container.querySelector('button')!.click()); await settle()
-  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Original work')
+  expect(document.querySelector('[role="dialog"]')).not.toBeNull()
 }
 function result(operationId: string, phase: 'unconfirmed' | 'restarted' | 'not-found' | 'failed' = 'restarted', canRetry = false) {
   return { agentSessionId: target.id, expectedRun: target.control.run, operationId, previousRun: target.control.run,
@@ -56,6 +56,24 @@ it('opens and cancels without stopping, resuming or restarting; cancellation kee
   await act(async () => document.querySelector<HTMLButtonElement>('.confirmation-dialog__cancel')!.click()); await settle()
   expect(api.sessions.restart).not.toHaveBeenCalled()
   for (const key of ['sessions', 'tabs', 'layouts', 'agentComposerDrafts', 'timelines'] as const) expect(useAppStore.getState()[key]).toBe(before[key])
+})
+
+it('distinguishes the configured Executor and owning Project with shared identity icons', async () => {
+  await open()
+  const executor = document.querySelector('[data-confirmation-object="executor"]')
+  const project = document.querySelector('[data-confirmation-object="project"]')
+  expect(executor?.getAttribute('aria-label')).toBe('Executor: Codex')
+  expect(executor?.querySelector('[data-agent-provider="codex"]')).not.toBeNull()
+  expect(project?.getAttribute('aria-label')).toBe('Project: Project')
+  expect(project?.querySelector('[data-semantic-icon="object.folder"]')).not.toBeNull()
+  expect(document.querySelector('.confirmation-dialog__subject')?.textContent).toBe('Codex·Project')
+})
+
+it('retains the original object text when the Session has no confirmed Workspace', async () => {
+  await act(async () => useAppStore.setState({ config: { ...composerConfig, workspaces: [] } }))
+  await open()
+  expect(document.querySelector('.confirmation-dialog__subject')?.textContent).toBe('Original work')
+  expect(document.querySelector('.confirmation-dialog__object')).toBeNull()
 })
 
 it('restarts one frozen exact Run once and retains Session, neighbor, workface and drafts', async () => {

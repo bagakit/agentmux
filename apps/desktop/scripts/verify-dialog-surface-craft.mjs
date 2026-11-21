@@ -8,16 +8,16 @@ import { runProbeProcess, listProbeProcesses, signalOwnedProbeProcess } from './
 
 const desktop=resolve(import.meta.dirname,'..'), repository=resolve(desktop,'../..'), sourceRoot=join(desktop,'src/renderer/src')
 const require=createRequire(import.meta.url), {build}=await import('vite'), ts=require('typescript'), postcss=createRequire(require.resolve('vite'))('postcss')
-const fixture=join(desktop,'scripts/fixtures/dialog-surface-craft'), recovery=process.argv.includes('--recovery'), candidateOnly=process.argv.includes('--candidate-only')
+const fixture=join(desktop,'scripts/fixtures/dialog-surface-craft'), recovery=process.argv.includes('--recovery'), candidateOnly=process.argv.includes('--candidate-only'), restartOnly=process.argv.includes('--restart-only')
 const privateRoot=await mkdtemp(_hygiene_fixturePath("tmp/amx-dialog-craft-")), evidence=join(repository,'.tmp/dialog-surface-craft',("attempt-" + (globalThis.crypto.randomUUID()) + "" + (recovery?'-recovery':'') + ""))
 const hash=value=>createHash('sha256').update(value).digest('hex')
-const files=['components/ConfirmationDialog.tsx','components/WorkspaceWorkbench.tsx','components/GoalDetail.tsx','components/QuickSwitcher.tsx','components/SpaceIconPicker.tsx','styles/overlays.css','styles/source-control.css','styles/session-region-host.css','styles/space-object-appearance.css']
+const files=['components/ConfirmationDialog.tsx','components/SessionRestart.tsx','components/WorkspaceWorkbench.tsx','components/GoalDetail.tsx','components/QuickSwitcher.tsx','components/SpaceIconPicker.tsx','styles/overlays.css','styles/source-control.css','styles/session-region-host.css','styles/space-object-appearance.css']
 const result={schema:'agentmux.dialog-surface-craft.v1',passed:false,recovery,candidateOnly,userRunTouched:false,
   boundary:'Actual isolated production Renderer, original Workbench/Store/confirmation and navigation callers. Controlled preview API and gallery facts; no real CLI, installed App, user Run, TCC or durable restart claim.',
   aestheticReview:'Root self-review only; independent image review pending under user no-messaging instruction',mutations:[],callers:[]}
 // The no-write invariant belongs to the production files this harness mutates.
  // Concurrent caller edits are separately bound by each build identity; they are not a probe write.
-async function sources(){return Object.fromEntries(await Promise.all(['components/ConfirmationDialog.tsx','styles/overlays.css'].map(async file=>[file,hash(await readFile(join(sourceRoot,file)))])))}
+async function sources(){return Object.fromEntries(await Promise.all(['components/ConfirmationDialog.tsx','components/SessionRestart.tsx','styles/overlays.css'].map(async file=>[file,hash(await readFile(join(sourceRoot,file)))])))}
 async function observedInputs(){return Object.fromEntries(await Promise.all(files.map(async file=>[file,hash(await readFile(join(sourceRoot,file)))])))}
 function replaceOne(source,from,to){assert.equal(source.split(from).length,2,'Private mutation anchors one real production block');return source.replace(from,to)}
 const mutations=[
@@ -29,6 +29,9 @@ const mutations=[
       'onInteractOutside={(event) => { if (busy) event.preventDefault() }}','onInteractOutside={(event) => {}}')},
   {label:'long-subject-clipped',file:'styles/overlays.css',expected:/long subject wraps|horizontal overflow/,
     change:source=>replaceOne(source,'overflow-wrap: anywhere; user-select: text;','overflow-wrap: normal; user-select: text;')},
+  {label:'restart-object-icons',file:'components/SessionRestart.tsx',expected:/Restart confirmation distinguishes Executor and Project/,
+    change:source=>replaceOne(replaceOne(source,'<AgentProviderIcon providerId={request.identity.providerId} size={15} />','{null}'),
+      '<ProjectIcon size={15} aria-hidden="true" />','{null}')},
   {label:'busy-action-shifts',file:'styles/overlays.css',expected:/Busy action keeps its original size/,
     change:source=>replaceOne(source,'button[data-confirm-label] { display: grid;', 'button[data-confirm-label] { display: inline-flex;')}
 ]
@@ -40,7 +43,7 @@ async function renderer(label,mutation=null){
 export class Terminal extends xterm.Terminal { constructor(...args){super(...args);const entries=globalThis.resultReadyTerminals??=[];this.probeIdentity={id:entries.length,terminal:this,disposed:false};entries.push(this.probeIdentity)} dispose(){this.probeIdentity.disposed=true;return super.dispose()} }
 `)
   const loadedSources={},importedStyles={},changes=[]
-  await build({configFile:false,root:fixture,base:'./',logLevel:'error',resolve:{alias:[{find:/^@xterm\/xterm$/,replacement:wrapper}]},
+  await build({configFile:false,root:fixture,base:'./',logLevel:'error',worker:{format:'es'},resolve:{alias:[{find:/^@xterm\/xterm$/,replacement:wrapper}]},
     plugins:[{name:'chrome-craft-owned-private-transform',enforce:'pre',async transform(source,id){
       if(id.startsWith(join(desktop,'src')+'/')&&!id.includes('?'))loadedSources[id.slice(repository.length+1)]=hash(source)
       if(mutation&&!mutation.file.endsWith('.css')&&id===join(sourceRoot,mutation.file)){
@@ -72,7 +75,7 @@ export class Terminal extends xterm.Terminal { constructor(...args){super(...arg
   assert.ok(Object.keys(compiled).length>0)
   const identity={loadedSources,importedStyles,compiled,changes,mainSha256:hash(mainBytes)};await writeFile(join(directory,'compiled.json'),JSON.stringify(identity,null,2))
   const env={...process.env};delete env.ELECTRON_RUN_AS_NODE
-  const lines=[],outcome=await runProbeProcess(require('electron'),[main,join(outDir,'index.html'),processRoot,directory,recovery?'recovery':'terminal'],{
+  const lines=[],outcome=await runProbeProcess(require('electron'),[main,join(outDir,'index.html'),processRoot,directory,restartOnly?'restart':recovery?'recovery':'terminal'],{
     temporaryRoot:processRoot,cwd:repository,env,timeoutMs:90_000,onLine:line=>lines.push(line)})
   await writeFile(join(directory,'process.log'),lines.join('\n'));assert.equal(outcome.timedOut,false);assert.equal(outcome.interruption,null)
   const rendered=JSON.parse(await readFile(join(directory,'render.json'),'utf8'))
@@ -82,7 +85,7 @@ export class Terminal extends xterm.Terminal { constructor(...args){super(...arg
   return {directory,outcome,rendered,identity}
 }
 async function callers(){
-  for(const caller of ['components/WorkspaceWorkbench.tsx','components/WorkspaceSidebar.tsx','components/BranchesPanel.tsx','components/FileExplorer.tsx','components/settings/HostSettingsPane.tsx','components/GoalDetail.tsx']){
+  for(const caller of ['components/SessionRestart.tsx','components/WorkspaceWorkbench.tsx','components/WorkspaceSidebar.tsx','components/BranchesPanel.tsx','components/FileExplorer.tsx','components/settings/HostSettingsPane.tsx','components/GoalDetail.tsx']){
     const file=join(sourceRoot,caller),text=await readFile(file,'utf8'),source=ts.createSourceFile(file,text,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX),hits=[]
     function visit(node){if((ts.isJsxOpeningElement(node)||ts.isJsxSelfClosingElement(node))&&node.tagName.getText(source)==='ConfirmationDialog')hits.push(node.getText(source));ts.forEachChild(node,visit)}
     visit(source);assert.ok(hits.length>0,'Non-definition actual confirmation caller: '+caller);result.callers.push({symbol:'ConfirmationDialog',caller,hits,sha256:hash(text)})
@@ -93,7 +96,7 @@ try{
   await mkdir(evidence,{recursive:true});result.sourceBefore=await sources();result.observedInputsBefore=await observedInputs();await callers();result.candidate=await renderer('candidate')
   assert.equal(result.candidate.outcome.exitCode,0,result.candidate.rendered.failure?.message);assert.equal(result.candidate.rendered.passed,true)
   console.log('Candidate actual scenes GREEN: '+evidence)
-  if(!candidateOnly)for(const mutation of mutations.filter(m=>(!process.argv.includes('--long-subject-only')||m.label==='long-subject-clipped')&&(!process.argv.includes('--busy-action-only')||m.label==='busy-action-shifts'))){
+  if(!candidateOnly)for(const mutation of mutations.filter(m=>(!restartOnly||m.label==='restart-object-icons')&&(!process.argv.includes('--long-subject-only')||m.label==='long-subject-clipped')&&(!process.argv.includes('--busy-action-only')||m.label==='busy-action-shifts'))){
     const red=await renderer(mutation.label+'-red',mutation);assert.equal(red.outcome.exitCode,1,'Mutant must fail in the actual scene')
     assert.equal(red.rendered.failure.name,'AssertionError');assert.match(red.rendered.failure.message,mutation.expected)
     assert.deepEqual(await sources(),result.sourceBefore,'Mutations do not write production source')

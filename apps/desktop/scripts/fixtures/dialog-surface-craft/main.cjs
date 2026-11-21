@@ -1,6 +1,7 @@
 const { app, BrowserWindow } = require('electron')
 const assert = require('node:assert/strict'), fs = require('node:fs/promises'), path = require('node:path')
-const [html, root, evidence] = process.argv.slice(2)
+const [html, root, evidence, mode] = process.argv.slice(2)
+const restartOnly = mode === 'restart'
 app.setPath('userData', path.join(root, 'user-data')); app.setPath('sessionData', path.join(root, 'session-data'))
 let win
 const report = { passed: false, frames: [], scenarios: [], userRunTouched: false }
@@ -77,11 +78,47 @@ async function galleryScenes() {
     report.scenarios.push({ kind,width,height,theme,facts,passed:true })
   }
 }
+async function restartScenes() {
+  for (const [kind,width,height,theme,busy] of [
+    ['restart',640,480,'dark',false], ['restart',360,560,'light',false],
+    ['restart-long',320,300,'light',false], ['restart',640,480,'dark',true]
+  ]) {
+    report.stage = { kind,width,height,theme,busy }
+    const before = await call(() => dialogCraft.facts())
+    await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width,height,deviceScaleFactor:1,mobile:false })
+    await call((kind,theme) => dialogCraft.show(kind,theme),kind,theme)
+    await call(() => document.querySelector('[data-restart-confirmation-trigger]').click())
+    await wait(() => document.querySelector('.confirmation-dialog__title')?.textContent === 'Restart Session?')
+    const identity = await call(() => {
+      const executor = document.querySelector('[data-confirmation-object="executor"]'), project = document.querySelector('[data-confirmation-object="project"]')
+      return { executor:executor?.textContent, executorLabel:executor?.getAttribute('aria-label'), provider:executor?.querySelector('[data-agent-provider]')?.getAttribute('data-agent-provider'),
+        project:project?.lastElementChild?.textContent, projectLabel:project?.getAttribute('aria-label'), folder:project?.querySelector('[data-semantic-icon]')?.getAttribute('data-semantic-icon') }
+    })
+    assert.ok(identity.executor && identity.project && identity.provider && identity.folder === 'object.folder','Restart confirmation distinguishes Executor and Project')
+    assert.equal(identity.executorLabel,'Executor: ' + identity.executor); assert.equal(identity.projectLabel,'Project: ' + identity.project)
+    if (busy) {
+      await call(() => dialogCraft.busy(true)); await button('Restart Session')
+      await wait(() => document.querySelector('.confirmation-dialog [data-confirm-label]')?.textContent === 'Working…')
+    }
+    const geometry = await call(() => { const dialog = document.querySelector('.confirmation-dialog'), subject = document.querySelector('.confirmation-dialog__subject')
+      const box = dialog.getBoundingClientRect(); return { left:box.left,right:box.right,top:box.top,bottom:box.bottom,client:dialog.clientWidth,scroll:dialog.scrollWidth,
+        subjectClient:subject.clientWidth,subjectScroll:subject.scrollWidth } })
+    assert.ok(geometry.left >= -1 && geometry.right <= width + 1 && geometry.top >= -1 && geometry.bottom <= height + 1,'Restart dialog stays within the viewport')
+    assert.equal(geometry.client,geometry.scroll,'Restart dialog has no horizontal overflow'); assert.equal(geometry.subjectClient,geometry.subjectScroll,'Restart object names wrap without clipping')
+    await frame(kind + '-' + width + '-' + theme + (busy?'-busy':''))
+    if (busy) { await call(() => dialogCraft.busy(false)); await wait(() => document.querySelector('.confirmation-dialog [data-confirm-label]')?.textContent === 'Check restart') }
+    await button('Cancel'); await wait(() => !document.querySelector('.confirmation-dialog'))
+    const after = await call(() => dialogCraft.facts())
+    assert.deepEqual(after.sessions,before.sessions,'Restart presentation preserves the original Sessions'); assert.deepEqual(after.drafts,before.drafts,'Restart presentation preserves drafts')
+    assert.equal(after.restarts.length,before.restarts.length + (busy?1:0),'Only explicit Restart reaches the controlled original operation')
+    report.scenarios.push({ kind,width,height,theme,busy,identity,geometry,passed:true })
+  }
+}
 app.whenReady().then(async () => {
   try {
     await fs.mkdir(evidence,{recursive:true}); win = new BrowserWindow({show:false,width:1440,height:900,webPreferences:{backgroundThrottling:false,sandbox:false}})
     await win.loadFile(html); win.webContents.debugger.attach('1.3'); await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true})
-    await wait(() => !!window.dialogCraft); await originalScenes(); await galleryScenes(); assert.ok(report.scenarios.length > 0); report.passed = true
+    await wait(() => !!window.dialogCraft); if (!restartOnly) { await originalScenes(); await galleryScenes() } await restartScenes(); assert.ok(report.scenarios.length > 0); report.passed = true
   } catch(error) { report.failure = { name:error.name,message:error.message,stack:error.stack,stage:report.stage } }
   finally { await fs.writeFile(path.join(evidence,'render.json'),JSON.stringify(report,null,2)); win?.destroy(); app.exit(report.passed ? 0 : 1) }
 })

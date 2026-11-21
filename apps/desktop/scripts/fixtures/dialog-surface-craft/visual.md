@@ -12,5 +12,8 @@ node apps/desktop/scripts/verify-dialog-surface-craft.mjs
 2. 同一生产确认组件呈现完整长路径及不可断开的对象标识，分别在 640px 暗色和 320×300px 亮色窗口查看；逐个滚动到 Cancel、Keep、Stop，检查内容完整、动作可达及 hover 几何稳定。窄窗截图记录滚动后的动作区，不代表首屏标题被裁掉。
 3. 呈现实际图标选择器、QuickSwitcher、快捷键帮助和 GoalDetail 删除入口。Goal 的 Store 删除方法由观察 spy 替换，证明确认前和取消不调用、明确确认调用一次；不证明删除 API 的持久化或失败处理。
 4. 私有编译分别改坏危险 autofocus、busy 关闭保护、实际长对象换行规则和 busy 按钮的尺寸保留；必须由对应场景报 AssertionError，再编译未变异源码恢复通过。
+5. 通过真实挂载的 `useSessionRestart` 触发 Restart Session，分别采集默认深浅、窄窗、长 Executor／项目名与忙碌场景；断言共享 Provider／folder 图形、结构化名称、换行和原取消路径。私有编译移除两个对象图标时必须变红，恢复后通过。
+
+仅需本轮 Restart 场景时运行 `node apps/desktop/scripts/verify-dialog-surface-craft.mjs --restart-only`；该入口不代签共享 Stop 或其他弹层场景。
 
 Workbench 使用既有 preview API 受控事实及真实 xterm；图标、导航和 Goal 使用受控样例。图片、每轮加载来源/编译身份及失败记录一起保留。`passed` 只代表上述行为与几何断言通过；采图不是独立审美通过，安装版、真实 CLI、系统截图授权与 durable 重启均不在本场景证明范围。
