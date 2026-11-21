@@ -75,16 +75,19 @@
 .mote-group__thread { margin-block-start: 16px; padding: 11px; border-radius: 12px; background: var(--surface-1); }
 .mote-group__thread summary { font-weight: 600; cursor: pointer; }
 .mote-group__thread > :not(summary) { margin-top: 8px; min-height: 160px; max-height: 55vh; }
-.mote-group__composer { display: grid; gap: 5px; flex: none; margin: 0 var(--group-inset) 12px; padding: 8px; border-radius: 14px; background: var(--surface-1); }
+.mote-group__composer { position: relative; display: grid; gap: 5px; flex: none; margin: 0 var(--group-inset) 12px; padding: 8px; border-radius: 14px; background: var(--surface-1); }
 .mote-group__recipients { padding: 0; }
 .mote-group__recipients > span { flex: none; padding-inline: 3px; color: var(--text-2); font-size: var(--fs-meta, 12px); }
 .mote-group__recipients button { background: var(--surface-2); }
 .mote-group__send { display: flex; align-items: end; gap: 6px; }
+.mote-group__message-input { flex: 1; min-width: 0; }
+.mote-group__mention-menu { position: absolute; inset-inline: 8px; bottom: calc(100% + 6px); z-index: 2; display: grid; gap: 2px; padding: 4px; border-radius: 10px; max-height: 12rem; overflow: auto; background: var(--surface-2); box-shadow: var(--shadow-popover, 0 8px 25px #0003); }
+.mote-group__mention-menu button { justify-content: flex-start; text-align: start; }
 .mote-group__send textarea, .mote-group__field input {
   min-width: 0; width: 100%; padding: 9px; border: 1px solid transparent; border-radius: 8px; background: var(--surface-2); color: var(--text);
   font: inherit; line-height: 1.4;
 }
-.mote-group__send textarea { resize: vertical; max-height: 170px; }
+.mote-group__send textarea { box-sizing: border-box; display: block; resize: vertical; max-height: 170px; }
 .mote-group__send textarea:focus, .mote-group__field input:focus { outline: none; border-color: var(--accent, var(--blue)); }
 .mote-group__send > button { min-height: 35px; flex: none; }
 .mote-group__quote-preview { display: flex; align-items: center; justify-content: space-between; gap: 8px; }

@@ -426,11 +426,54 @@ function GroupView({ call, groupId, initialMoteId, initialMembers, onChanged, on
             recipientIds: selected ? value.recipientIds.filter(id => id !== item.moteId) : [...value.recipientIds, item.moteId] })}>{item.name}</button>
         })}
       </div>
-      <div className="mote-group__send"><textarea aria-label="群消息" value={value.body} maxLength={MOTE_GROUP_MAX_BODY_LENGTH} rows={2} readOnly={locked} placeholder="以「我」发言…" onChange={event => edit({ ...value, body: event.target.value })} />
+      <div className="mote-group__send"><GroupMessageInput value={value} members={activeMembers} locked={locked} onEdit={edit} />
         <Button type="submit" variant="primary" disabled={sending || !value.body.trim()}>{sending ? '发送中…' : locked ? '确认发送' : '发送'}</Button>
       </div>
     </form> : null}
   </section>
+}
+
+function GroupMessageInput({ value, members, locked, onEdit }: {
+  value: MoteGroupDraft; members: readonly MoteGroupMember[]; locked: boolean; onEdit(value: MoteGroupDraft): void
+}) {
+  const input = useRef<HTMLTextAreaElement>(null)
+  const options = useRef<HTMLDivElement>(null)
+  const [caret, setCaret] = useState<number | null>(null)
+  const [composing, setComposing] = useState(false)
+  const mention = !locked && !composing && caret !== null
+    ? /(?:^|[\s，。！？、])@([^\s@]{0,48})$/u.exec(value.body.slice(0, caret)) : null
+  const choices = mention ? members.filter(member =>
+    member.name.toLocaleLowerCase().includes(mention[1]!.toLocaleLowerCase())).slice(0, 8) : []
+  function choose(member: MoteGroupMember) {
+    if (!mention || caret === null) return
+    const start = caret - mention[1]!.length - 1
+    const name = '@' + member.name + ' '
+    const body = value.body.slice(0, start) + name + value.body.slice(caret)
+    if (body.length > MOTE_GROUP_MAX_BODY_LENGTH) return
+    onEdit({ ...value, body, recipientIds: [...new Set([...value.recipientIds, member.moteId])] })
+    setCaret(null)
+    requestAnimationFrame(() => { input.current?.focus(); input.current?.setSelectionRange(start + name.length, start + name.length) })
+  }
+  return <div className="mote-group__message-input" onBlur={event => {
+    if (!event.currentTarget.contains(event.relatedTarget)) setCaret(null)
+  }}>
+    {choices.length ? <div ref={options} className="mote-group__mention-menu" role="group" aria-label="点名成员"
+      onKeyDown={event => {
+        if (event.key === 'Escape') { event.stopPropagation(); setCaret(null); input.current?.focus() }
+      }}>{choices.map(member => <Button type="button" key={member.moteId} onClick={() => choose(member)}>{member.name}</Button>)}</div> : null}
+    <textarea ref={input} aria-label="群消息" value={value.body} maxLength={MOTE_GROUP_MAX_BODY_LENGTH} rows={2}
+      readOnly={locked} placeholder="以「我」发言，输入 @ 点名成员…" onCompositionStart={() => setComposing(true)}
+      onCompositionEnd={event => { setComposing(false); setCaret(event.currentTarget.selectionStart) }}
+      onSelect={event => {
+        if (caret !== null && event.currentTarget.selectionStart !== caret) setCaret(null)
+      }}
+      onChange={event => { setCaret(event.currentTarget.selectionStart); onEdit({ ...value, body: event.currentTarget.value }) }}
+      onKeyDown={event => {
+        if (event.nativeEvent.isComposing) return
+        if (event.key === 'Escape' && choices.length) { event.stopPropagation(); setCaret(null) }
+        if (event.key === 'ArrowDown' && choices.length) { event.preventDefault(); options.current?.querySelector('button')?.focus() }
+      }} />
+  </div>
 }
 
 function ThreadDetails({ thread, renderThread }: {
