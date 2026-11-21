@@ -249,6 +249,7 @@ function GoalDetail({ goalId, goal, factScope, presented, decisions, client, con
   const alignment = goal.alignment, grounding = goal.grounding
   const agentConfirmer = alignment?.confirmedAt != null && alignment.confirmedBy?.kind === 'agent' ? alignment.confirmedBy : null
   const currentReport = !!alignment && grounding?.alignmentRevision === alignment.revision
+  const closingReasons = new Map(grounding?.unknownDecision?.checks.map(check => [check.criterionId, check.reason]))
   return <article aria-label="目标详情" hidden={!presented}>
     {!editing && <><h2>{goal.title || '待定义目标'}</h2><p className="mobile-goals-body">{goal.description || '还没有目标说明。'}</p></>}
     {editor}
@@ -267,12 +268,10 @@ function GoalDetail({ goalId, goal, factScope, presented, decisions, client, con
         {(!alignment || grounding.alignmentRevision !== alignment.revision) && <MobileNotice identity={[goal.id,grounding.alignmentRevision,alignment?.revision]} role="status">此报告尚不能对应当前目标标准，请核对目标版本。</MobileNotice>}
         {(currentReport ? alignment?.criteria : [])?.filter(criterion => !grounding.checks.some(check => check.criterionId === criterion.id)).map(criterion => <p key={criterion.id}>缺少结果检查：{criterion.text}</p>)}
         <ul>{grounding.checks.map(check => <li key={check.criterionId}><strong>{currentReport ? alignment?.criteria.find(criterion => criterion.id === check.criterionId)?.text ?? check.criterionId : `旧报告标准 ${check.criterionId}`}</strong><p>{mobileGoalOutcome[check.outcome]}</p><p>{check.note}</p>
+          {closingReasons.has(check.criterionId) && <p><strong>结案原因</strong> {closingReasons.get(check.criterionId)}</p>}
           <MobileGoalEvidence evidence={check.evidence} client={client} copyText={copyText} />{!check.evidence.length && <p>暂无定位证据。</p>}
         </li>)}</ul><p>{grounding.acceptedAt === null ? '尚未验收。' : withMobileTime(
           grounding.unknownDecision ? '结案时保留未核实结果' : currentReport ? '已验收' : '旧报告曾通过验收，当前结果尚未验收', grounding.acceptedAt)}</p>
-        {grounding.unknownDecision && <><h4>结案原因</h4><ul>{grounding.unknownDecision.checks.map(check => <li key={check.criterionId}>
-          <strong>{currentReport ? alignment?.criteria.find(item => item.id === check.criterionId)?.text ?? check.criterionId : check.criterionId}</strong><p>{check.reason}</p>
-        </li>)}</ul></>}
       </> : <p>{goal.status === 'done' ? '工作状态已完成，结果尚未核验。' : '尚无结果报告。'}</p>}
     </section>
     {children}
