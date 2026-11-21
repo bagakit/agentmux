@@ -958,6 +958,7 @@ export function projectRuntimeEvent(
       nativeSubagents: _nativeSubagents,
       structuredPromptInput: _structuredPromptInput,
       nativeConfiguration: _nativeConfiguration,
+      nativeInformation: _nativeInformation,
       contextWindowUsage: _contextWindowUsage,
       inputEpoch: _inputEpoch,
       terminalFrontend: _terminalFrontend,
@@ -1023,6 +1024,7 @@ export function projectRuntimeEvent(
       ...(core.session.nativeSubagents ? { nativeSubagents: structuredClone(core.session.nativeSubagents) } : {}),
       ...(core.session.structuredPromptInput ? { structuredPromptInput: true as const } : {}),
       ...(core.session.nativeConfiguration ? { nativeConfiguration: structuredClone(core.session.nativeConfiguration) } : {}),
+      ...(core.session.nativeInformation ? { nativeInformation: structuredClone(core.session.nativeInformation) } : {}),
       ...(core.session.contextWindowUsage ? { contextWindowUsage: { ...core.session.contextWindowUsage } } : {}),
       ...(core.session.terminalFrontend ? { terminalFrontend: structuredClone(core.session.terminalFrontend) } : {}),
       ...projectContinuityFacts(core.session, item.hostId === core.session.hostId &&

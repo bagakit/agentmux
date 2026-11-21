@@ -24,7 +24,7 @@
 .agent-identity-popover--actions > header { flex: none; }
 .agent-identity-popover__controls { display: inline-flex; flex: none; gap: var(--sp-1); }
 .agent-state-face { display: flex; flex-direction: column; min-height: 0; }
-.agent-state-face__summary { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-1); flex: none; padding: var(--sp-1) 0; }
+.agent-state-face__summary { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--sp-1) var(--sp-3); flex: none; padding: var(--sp-2) 0; }
 .agent-state-face__summary > strong { font-size: var(--fs-meta); font-weight: 500; }
 .agent-state-face .agent-state-face__summary p { margin: 0; color: var(--text-3); font-size: var(--fs-micro); }
 .agent-state-face__body { min-height: 0; overflow: auto; overscroll-behavior: contain; }
@@ -32,6 +32,46 @@
 .agent-state-face__facts { margin-top: var(--sp-3); padding-top: var(--sp-3); border-top: 1px solid var(--line-soft); }
 .agent-state-face__facts summary { color: var(--text-3); cursor: pointer; font-size: var(--fs-micro); }
 .agent-state-face__facts dd small { display: block; color: var(--text-3); }
+.agent-state-face__provider { color: var(--text-3); font-size: var(--fs-micro); text-align: right; }
+.agent-state-face__input-notice { flex-basis: 100%; }
+.agent-identity-popover--actions .agent-state-face__facts dl { display: grid; grid-template-columns: minmax(70px, 30%) minmax(0, 1fr); gap: var(--sp-2) var(--sp-3); }
+.agent-state-face__facts dt { color: var(--text-3); }
+.agent-state-face__facts dd { margin: 0; overflow-wrap: anywhere; }
+.agent-native-information { display: grid; gap: var(--sp-3); padding: var(--sp-3) 0; }
+.agent-native-information__session { display: grid; gap: var(--sp-3); margin: 0; }
+.agent-identity-popover .agent-native-information__session { grid-template-columns: minmax(0, 1fr); margin: 0; }
+.agent-native-information__session > div { display: grid; grid-template-columns: minmax(70px, 25%) minmax(0, 1fr); gap: var(--sp-3); align-items: baseline; }
+.agent-native-information__session dt { color: var(--text-3); font-size: var(--fs-meta); }
+.agent-native-information__session dd { margin: 0; color: var(--text); font-size: var(--fs-meta); font-weight: 500; overflow-wrap: anywhere; }
+.agent-native-information small { display: block; color: var(--text-3); font-size: var(--fs-micro); font-weight: 400; }
+.agent-native-information__limits { display: grid; gap: var(--sp-3); border-top: 1px solid var(--line-soft); padding-top: var(--sp-3); }
+.agent-native-information__limits h3 { margin: 0; color: var(--text-3); font-size: var(--fs-micro); font-weight: 500; }
+.agent-native-information__limit { display: grid; gap: var(--sp-1); }
+.agent-native-information__limit > div { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-3); font-size: var(--fs-meta); }
+.agent-native-information__limit strong { flex: none; color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
+.agent-native-information__limit progress { display: block; width: 100%; height: 4px; border: 0; border-radius: var(--radius-sm); overflow: hidden; appearance: none; }
+.agent-native-information__limit progress::-webkit-progress-bar { background: var(--surface-3); }
+.agent-native-information__limit progress::-webkit-progress-value { background: var(--text-3); border-radius: var(--radius-sm); }
+.agent-native-information .agent-native-information__missing { margin: 0; color: var(--text-3); font-size: var(--fs-micro); }
+.agent-native-information .agent-native-information__issue { margin: 0; color: var(--amber); font-size: var(--fs-micro); overflow-wrap: anywhere; }
+.agent-native-information footer { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-3); color: var(--text-3); font-size: var(--fs-micro); }
+.agent-native-information__refresh { display: inline-flex; align-items: center; gap: var(--sp-1); padding: var(--sp-1); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font: inherit; cursor: pointer; }
+.agent-native-information__refresh:hover { background: var(--surface-3); }
+.agent-native-information__refresh:disabled { opacity: .5; cursor: default; }
+.agent-native-information__refresh:focus-visible, .model-picker__feedback button:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
+.composer-session-controls .composer-model-picker { display: inline-flex; align-items: center; gap: var(--sp-1); padding-inline: var(--sp-2); max-width: 150px; min-width: 0; color: var(--text-2); }
+.composer-model-picker__name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--fs-micro); }
+.composer-model-picker > svg, .composer-model-picker__mark { flex: none; }
+.composer-model-picker__mark { color: var(--amber); font-size: var(--fs-micro); }
+.model-picker { min-width: 220px; max-width: min(360px, calc(100vw - 20px)); }
+.model-picker__choice { gap: var(--sp-2); }
+.model-picker__choice > span:last-child { overflow-wrap: anywhere; }
+.model-picker__choice[data-state='checked'] { background: var(--surface-3); color: var(--text); }
+.model-picker__unavailable, .model-picker__feedback { margin: 0; padding: var(--sp-2) var(--sp-3); color: var(--text-3); font-size: var(--fs-micro); line-height: 1.45; }
+.model-picker__feedback { display: grid; gap: var(--sp-2); color: var(--amber); }
+.model-picker__feedback button { justify-self: start; border: 0; padding: 0; background: transparent; color: var(--text-2); font: inherit; text-decoration: underline; cursor: pointer; }
+@container composer (max-width: 560px) { .composer-session-controls .composer-model-picker { max-width: 110px; } }
+@container composer (max-width: 400px) { .composer-session-controls .composer-model-picker { max-width: 74px; } }
 .agent-state-face__summary .small-button { padding: 0; margin: 0; }
 .agent-state-face .small-button { box-shadow: none; border: 0; background: transparent; }
 .agent-state-face .small-button:hover:not(:disabled) { background: var(--surface-3); }

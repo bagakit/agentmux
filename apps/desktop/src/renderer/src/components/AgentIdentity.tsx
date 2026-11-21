@@ -1,6 +1,7 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { agentEvidenceStale } from '@agentmux/core/agent-status'
+import type { ComponentProps } from 'react'
 import { Button } from '@agentmux/client-ui/components/Button'
 import type { AgentAvatarAppearance, ComposerShortcut, SessionSnapshot } from '../../../shared/contracts'
 import { describeAgentDisplayState } from '../../../shared/agent-state-presentation'
@@ -10,6 +11,7 @@ import { agentProviderLabel } from '@agentmux/client-ui/components/AgentProvider
 import { useObservedAppStore } from '../lib/use-observed-app-store'
 import { sessionPresentationById } from '../lib/session-presentation'
 import { useShallow } from 'zustand/react/shallow'
+import { AgentNativeInformation } from './AgentNativeInformation'
 
 const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
@@ -21,16 +23,18 @@ type AgentIdentitySession = Pick<AgentSession, 'id' | 'control' | 'processState'
 }
 type AgentStatusDetails = Pick<AgentSession, 'status' | 'semanticStatus' | 'terminalPromptDelivery'>
 
-function AgentStateFace({ session, originalStatus, executorLabel, prompts, disabled, inputAction, onSelect, resultReview, close }: {
+function AgentStateFace({ session, originalStatus, executorLabel, prompts, disabled, inputAction, inputNotice, onSelect, resultReview, close, information }: {
   session: AgentIdentitySession
   originalStatus?: AgentStatusDetails | undefined
   executorLabel: string
   prompts: readonly ComposerShortcut[]
   disabled: boolean
   inputAction: string
+  inputNotice?: boolean | undefined
   onSelect(prompt: ComposerShortcut): boolean
   resultReview?: ((onNavigate: () => void) => ReactNode) | undefined
   close(restoreInput?: boolean): void
+  information?: ComponentProps<typeof AgentNativeInformation> | undefined
 }) {
   const [review, setReview] = useState(false)
   const face = useRef<HTMLDivElement>(null)
@@ -54,31 +58,29 @@ function AgentStateFace({ session, originalStatus, executorLabel, prompts, disab
   }))
   const details = originalStatus ?? observedStatus
   const statement = details?.semanticStatus
+  const providerLabel = agentProviderLabel(session.providerId)
   return <div ref={face} className="agent-state-face">
     <div className="agent-state-face__summary">
       <strong>{meaning.label}</strong>
       {review && reviewReady ? <Button type="button" aria-label="Back to Agent status" onClick={(event) => { transferFocus.current = document.activeElement === event.currentTarget; setReview(false) }}><ThemeNavigationBackIcon size={12} /><span>Back to Agent status</span></Button>
-        : <p>{inputAction}</p>}
+        : <span className="agent-state-face__provider">{providerLabel === executorLabel ? providerLabel : `${providerLabel} · ${executorLabel}`}</span>}
+      {!review && inputNotice ? <p className="agent-state-face__input-notice" role="status">{inputAction}</p> : null}
     </div>
     <div className="agent-state-face__body">
       {review && reviewReady ? resultReview?.(() => close()) : <>
+        <AgentNativeInformation {...information} />
         <AgentStatusPromptActions prompts={prompts} state={session.status.state} disabled={disabled}
           disabledReason={disabled ? inputAction : undefined} onSelect={(prompt) => { if (onSelect(prompt)) close(true) }} />
         {reviewReady ? <Button type="button" className="agent-state-face__review" onClick={(event) => { transferFocus.current = document.activeElement === event.currentTarget; setReview(true) }}>
           <span>Review result</span><ThemeNavigationDisclosureIcon size={13} aria-hidden="true" />
         </Button> : null}
-        <details className="agent-state-face__facts"><summary>State details</summary>
-          <p>{meaning.description}</p>
+        <details className="agent-state-face__facts"><summary>State and source</summary>
           <dl><dt>Process</dt><dd>{session.processState}</dd>
-            <dt>Shown status</dt><dd>{session.status.state}{details ? ` · ${details.status.source}` : ''}</dd>
-            <dt>Observed</dt><dd>{details ? new Date(details.status.observedAt).toLocaleString() : 'Unconfirmed'}</dd>
-            <dt>Agent statement</dt><dd>{statement
+            <dt>Last activity</dt><dd>{statement
               ? <>{describeAgentDisplayState(statement.state).label} · {statement.source}<small>{new Date(statement.observedAt).toLocaleString()}{agentEvidenceStale(statement, Date.now()) ? ' · Observation is old' : ''}</small></>
               : session.capabilities.timeline === 'unavailable' ? 'Not supported by this Provider' : 'Not reported'}</dd>
-            <dt>Prompt readiness</dt><dd>Not reported</dd>
-            <dt>Input action</dt><dd>{inputAction} Final admission is decided by Core.</dd>
-            <dt>Provider</dt><dd>{agentProviderLabel(session.providerId)}</dd>
-            <dt>Executor</dt><dd>{executorLabel} · {session.executorId}</dd></dl>
+            {!inputNotice ? <><dt>Input</dt><dd>{inputAction}</dd></> : null}
+            <dt>Executor</dt><dd>{session.executorId}</dd></dl>
           {session.status.detail ? <p>{session.status.detail}</p> : null}
           {details?.terminalPromptDelivery ? <p>Prompt delivery is unverified: {details.terminalPromptDelivery.reason}. This is separate from input readiness.</p> : null}
         </details>
@@ -88,7 +90,7 @@ function AgentStateFace({ session, originalStatus, executorLabel, prompts, disab
 }
 
 /** The existing receiver avatar is the single state, Prompt and result entrance. */
-export function AgentIdentity({ session, originalStatus, name, executorLabel, appearance, prompts = [], disabled = false, inputAction = 'Send a message to this Session.', onSelect = () => false, resultReview, visible = true }: {
+export function AgentIdentity({ session, originalStatus, name, executorLabel, appearance, prompts = [], disabled = false, inputAction = 'Send a message to this Session.', inputNotice, onSelect = () => false, resultReview, visible = true, information }: {
   session: AgentIdentitySession
   originalStatus?: AgentStatusDetails | undefined
   name: string
@@ -97,12 +99,14 @@ export function AgentIdentity({ session, originalStatus, name, executorLabel, ap
   prompts?: readonly ComposerShortcut[]
   disabled?: boolean
   inputAction?: string
+  inputNotice?: boolean | undefined
   onSelect?: (prompt: ComposerShortcut) => boolean
   resultReview?: ((onNavigate: () => void) => ReactNode) | undefined
   visible?: boolean
+  information?: ComponentProps<typeof AgentNativeInformation> | undefined
 }) {
   return <span className="composer-agent-identity"><AgentAvatar sessionId={session.id} executorId={session.executorId}
     providerId={session.providerId} state={session.status.state} detail={session.status.detail} label={name} appearance={appearance} visible={visible}
     actionDisclosure={({ close }) => <AgentStateFace key={session.id} session={session} originalStatus={originalStatus} executorLabel={executorLabel} prompts={prompts}
-      disabled={disabled} inputAction={inputAction} onSelect={onSelect} resultReview={resultReview} close={close} />} /></span>
+      disabled={disabled} inputAction={inputAction} inputNotice={inputNotice} onSelect={onSelect} resultReview={resultReview} close={close} information={information} />} /></span>
 }

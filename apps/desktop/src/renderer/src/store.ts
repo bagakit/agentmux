@@ -873,7 +873,7 @@ export const MAX_AGENT_STEER_QUEUE_ENTRIES = 100
 const agentSteerDrains = new Map<string, { promise: Promise<void>; wake: boolean; explicitSteers: Set<string>; submitted: Set<string>; failures: Map<string, unknown>; waitingForInteraction: Set<string> }>()
 type SteerDeliveryAttempt = { seed: DeliveryAttemptSeed; stage: string; diagnostic?: { logId: string; notice: string } }
 // A click's diagnostic follows its one ordered consumer; it never grants input.
-const configurationAttempts = new Map<string, { operationId: string; pending: Promise<void> | null }>()
+const configurationAttempts = new Map<string, { operationId: string; pending: Promise<import('@agentmux/core').AgentConfigurationReceipt | undefined> | null }>()
 const postureAttempts = new Map<string, { operationId: string; pending: Promise<void> | null }>()
 const preparationRetryCalls = new Map<string, AbortController>()
 const manualSteerAttempts = new Map<string, SteerDeliveryAttempt>()
@@ -1932,7 +1932,7 @@ export type AppState = GitReadingActions & {
   send(sessionId: string, text: string, onRejected?: (error: unknown) => void, origin?: 'manual', agentMuxNote?: string, options?: AgentSteerOptions): boolean
   inspectInteraction(sessionId: string, operationId: string): Promise<import('@agentmux/core').AgentMuxInteractionOperationReceipt | null>
   respondInteraction(sessionId: string, response: AgentMuxInteractionResponse, intent: import('@agentmux/core').AgentMuxInteractionOperationIntent & { moteSource?: import('@agentmux/core').AgentInputMoteSource }): Promise<import('@agentmux/core').AgentMuxInteractionOperationReceipt>
-  setConfiguration(sessionId: string, expectedRevision: string, configId: string, value: string | boolean): Promise<void>
+  setConfiguration(sessionId: string, expectedRevision: string, configId: string, value: string | boolean): Promise<import('@agentmux/core').AgentConfigurationReceipt | undefined>
   setPosture(sessionId: string, modeId: string): Promise<void>
   interrupt(sessionId: string, originalMember?: SpaceMountMemberTarget): Promise<void>
   controlSessionContinuity(sessionId: string, intentOperationId: string, action: 'continue' | 'cancel', additionalAttempts?: number): Promise<DesktopContinuityControlResult>
@@ -14214,11 +14214,12 @@ export const useAppStore = create<AppState>()<[['zustand/persist', PersistedAppS
           get().reportError(new Error(`Session settings operation ${attempt.operationId} is ${receipt.outcome}. ${receipt.issue ?? ''}`))
         }
         if (receipt.outcome === 'applied' && receipt.diskDurability === 'confirmed' || receipt.outcome === 'not-applied') configurationAttempts.delete(key)
+        return receipt
       } catch (error) {
         get().reportError(new Error(`Original session settings operation ${attempt.operationId}. ${presentError(error)}`))
       } finally { attempt.pending = null }
     })()
-    await attempt.pending
+    return await attempt.pending
   },
   async setPosture(sessionId, modeId) {
     const session = get().sessions.find((item) => item.id === sessionId)

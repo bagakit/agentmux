@@ -1,9 +1,13 @@
 import * as DropdownMenu from './HoverDropdownMenu'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AgentPostureControl } from '@agentmux/core'
+import { agentCurrentModel, agentModelOption } from '@agentmux/core/agent-information'
+import type { AgentConfigurationReceipt, AgentConfigurationSnapshot, AgentInformationSnapshot } from '@agentmux/core'
+import { useState } from 'react'
 
 const ThemeStatusAuthorizedIcon = semanticIconComponent('status.authorized')
 const SessionSettingsIcon = semanticIconComponent('object.settings')
+const DisclosureIcon = semanticIconComponent('navigation.disclosure')
 
 
 /**
@@ -75,15 +79,72 @@ export function PosturePicker({
 
 export function NativeConfigurationPicker({
   snapshot,
+  information,
   disabled,
-  onSet
+  loading,
+  onSet,
+  onRefresh
 }: {
-  snapshot: import('@agentmux/core').AgentConfigurationSnapshot
+  snapshot?: AgentConfigurationSnapshot | undefined
+  information?: AgentInformationSnapshot | undefined
   disabled?: boolean
-  onSet(configId: string, value: string | boolean): void
+  loading?: boolean
+  onSet(configId: string, value: string | boolean, expectedRevision: string): Promise<AgentConfigurationReceipt | undefined>
+  onRefresh?(): Promise<void>
 }) {
-  if (!snapshot.options.length) return null
-  return (
+  const model = agentModelOption(snapshot), current = agentCurrentModel(information, snapshot)
+  const others = snapshot?.options.filter(option => option !== model) ?? []
+  const [operation, setOperation] = useState<{ configId: string; value: string | boolean; revision: string;
+    pending: boolean; outcome?: AgentConfigurationReceipt['outcome']; message?: string; operationId?: string }>()
+  async function select(configId: string, value: string | boolean, revision: string) {
+    if (operation?.pending) return
+    const request = { configId, value, revision, pending: true }
+    setOperation(request)
+    try {
+      const receipt = await onSet(configId, value, revision)
+      if (receipt?.outcome === 'applied' && receipt.diskDurability === 'confirmed') { setOperation(undefined); return }
+      setOperation({ ...request, pending: false, outcome: receipt?.outcome ?? 'unknown',
+        ...(receipt ? { operationId: receipt.operationId } : {}),
+        message: receipt?.issue ?? (receipt?.outcome === 'not-applied' ? 'The model was not changed.' : 'The model change is not confirmed.') })
+    } catch (error) {
+      setOperation({ ...request, pending: false, outcome: 'unknown', message: error instanceof Error ? error.message : 'The model change is not confirmed.' })
+    }
+  }
+  const feedback = operation ? <div className="model-picker__feedback" role="status">
+    <span>{operation.pending ? 'Changing model…' : operation.message}</span>
+    {!operation.pending && operation.outcome === 'unknown' ? <DropdownMenu.Item asChild onSelect={event => {
+      event.preventDefault(); void select(operation.configId, operation.value, operation.revision)
+    }}><button type="button">Check original change</button></DropdownMenu.Item> : null}
+  </div> : null
+  const chooseModel = (value: string) => { if (model && snapshot && value !== model.currentValue) void select(model.id, value, snapshot.revision) }
+  return <>
+    <DropdownMenu.Root onOpenChange={open => { if (open && !snapshot && !loading) void onRefresh?.() }}>
+      <DropdownMenu.Trigger asChild>
+        <button type="button" className="composer-tool composer-model-picker" disabled={disabled}
+          data-pending={operation?.pending || undefined} aria-label={`Model: ${current?.name ?? current?.id ?? 'not reported'}${operation ? operation.pending ? ', changing' : ', change unconfirmed' : ''}`}
+          title={operation ? operation.pending ? 'Changing model…' : operation.message : current ? `${current.name ?? current.id}${current.scope === 'next-turn' ? ' · next turn' : ''}` : 'Read native model and available choices'}>
+          <span className="composer-model-picker__name">{current?.name ?? current?.id ?? 'Model'}</span><DisclosureIcon size={10} aria-hidden="true" />
+          {operation ? <span className="composer-model-picker__mark" aria-hidden="true">{operation.pending ? '…' : '?'}</span> : null}
+        </button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content className="tab-context-menu model-picker" aria-label="Model" align="end" side="top" sideOffset={6} collisionPadding={8}>
+          <DropdownMenu.Label>Model {current?.scope === 'next-turn' ? '· next turn' : ''}</DropdownMenu.Label>
+          {model ? <DropdownMenu.RadioGroup value={model.currentValue} onValueChange={chooseModel}>
+            {model.choices.map((choice, index) => <div key={choice.value}>
+              {choice.group && choice.group.id !== model.choices[index - 1]?.group?.id ? <DropdownMenu.Label>{choice.group.name}</DropdownMenu.Label> : null}
+              <DropdownMenu.RadioItem value={choice.value} className="tab-context-menu__item model-picker__choice" title={choice.description}
+                disabled={operation?.pending || operation?.outcome === 'unknown' && operation.revision === snapshot?.revision}>
+                <DropdownMenu.ItemIndicator>✓</DropdownMenu.ItemIndicator><span>{choice.name}</span>
+              </DropdownMenu.RadioItem>
+            </div>)}
+          </DropdownMenu.RadioGroup> : <p className="model-picker__unavailable">{loading ? 'Reading native models…' : current ? 'This Session reports its model without model switching.' : 'Native model choices are not available.'}</p>}
+          {feedback}
+          {onRefresh ? <DropdownMenu.Item className="tab-context-menu__item" disabled={Boolean(loading || operation?.pending)} onSelect={() => void onRefresh()}>Refresh model choices</DropdownMenu.Item> : null}
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+    {others.length && snapshot ? (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
         <button type="button" className="composer-tool composer-tool--session-settings" disabled={disabled} aria-label="Session settings" title="Session settings">
@@ -93,7 +154,7 @@ export function NativeConfigurationPicker({
       <DropdownMenu.Portal>
         <DropdownMenu.Content className="tab-context-menu posture-menu" aria-label="Session settings"
           align="end" side="top" sideOffset={6} collisionPadding={8}>
-          {snapshot.options.map(option => (
+          {others.map(option => (
             <DropdownMenu.Sub key={option.id}>
               <DropdownMenu.SubTrigger className="tab-context-menu__item" title={option.description}>
                 {option.name}
@@ -102,12 +163,12 @@ export function NativeConfigurationPicker({
                 <DropdownMenu.SubContent className="tab-context-menu posture-menu" aria-label={option.name} collisionPadding={8}>
                   {option.type === 'boolean'
                     ? <DropdownMenu.CheckboxItem checked={option.currentValue} className="tab-context-menu__item"
-                        onCheckedChange={() => onSet(option.id, !option.currentValue)}>
+                        onCheckedChange={() => void onSet(option.id, !option.currentValue, snapshot.revision)}>
                         <DropdownMenu.ItemIndicator>✓ </DropdownMenu.ItemIndicator>
                         {option.name}
                       </DropdownMenu.CheckboxItem>
                     : <DropdownMenu.RadioGroup value={option.currentValue} onValueChange={value => {
-                        if (value !== option.currentValue) onSet(option.id, value)
+                        if (value !== option.currentValue) void onSet(option.id, value, snapshot.revision)
                       }}>
                         {option.choices.map((choice, index) => (
                           <div key={choice.value}>
@@ -127,5 +188,6 @@ export function NativeConfigurationPicker({
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
-  )
+    ) : null}
+  </>
 }

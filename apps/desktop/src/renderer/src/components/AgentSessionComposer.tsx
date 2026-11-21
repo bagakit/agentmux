@@ -9,6 +9,7 @@ import { useObservedAppStore, useObservedConsumerCommit } from '../lib/use-obser
 import { reportMessageDeliveryDiagnostics } from '../lib/message-delivery-diagnostics'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { NativeConfigurationPicker, PosturePicker } from './PosturePicker'
+import { useAgentNativeInformation } from '../lib/use-agent-native-information'
 import { createFirstPromptSelector, createSessionViewModeSelector, sessionPresentationById } from '../lib/session-presentation'
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { useShallow } from 'zustand/react/shallow'
@@ -89,7 +90,7 @@ function composerSessionFields(session: SessionSnapshot | undefined, includeReco
     ...(nativeService === undefined ? {} : { nativeService }) }
   if (session.kind === 'terminal') return { ...common, kind: session.kind, control: session.control }
   const { control, providerId, executorId, label, capabilities, inputEpoch, structuredPromptInput, nativeHandle, terminalFrontend,
-    toolExecution, workPlacement, pendingInteraction, nativeConfiguration, turnUsage, contextWindowUsage } = session
+    toolExecution, workPlacement, pendingInteraction, nativeConfiguration, nativeInformation, turnUsage, contextWindowUsage } = session
   return { ...common, kind: session.kind, control, providerId, executorId, label, capabilities,
     detail: status.detail, continuity: status.continuity, continuityReason: status.continuityReason,
     ...(includeRecoveryFacts && session.continuityOperations ? { continuityOperations: session.continuityOperations } : {}),
@@ -97,7 +98,7 @@ function composerSessionFields(session: SessionSnapshot | undefined, includeReco
     ...(nativeHandle ? { nativeHandle } : {}), ...(terminalFrontend ? { terminalFrontend } : {}),
     ...(toolExecution ? { toolExecution } : {}), ...(workPlacement ? { workPlacement } : {}),
     ...(pendingInteraction ? { pendingInteraction } : {}), ...(nativeConfiguration ? { nativeConfiguration } : {}),
-    turnUsage, contextWindowUsage }
+    nativeInformation, turnUsage, contextWindowUsage }
 }
 
 /** Keep the original service outcome live, including diagnostic times carried by an actual notice. */
@@ -276,6 +277,9 @@ export function AgentSessionComposer({
     ? { target: moteDialogue.target, expectedRoleRevision: main.roleRevision } : undefined
   const configuredService = useRunService(source ? undefined : session)
   const nativeService = source ? session?.nativeService : configuredService
+  const nativeInformation = useAgentNativeInformation(session?.kind === 'agent' ? session.control : undefined, visible,
+    session?.kind === 'agent' ? session.nativeInformation : undefined, session?.kind === 'agent' ? session.nativeConfiguration : undefined,
+    session?.kind === 'agent' ? session.nativeHandle?.sessionId : undefined)
   const viewModeSelector = useMemo(() => createSessionViewModeSelector(sessionId), [sessionId])
   const viewMode = useObservedAppStore('composer', visible, consumerScope, viewModeSelector)
   const setViewMode = useAppStore.getState().setViewMode
@@ -329,8 +333,6 @@ export function AgentSessionComposer({
   const interrupt = useAppStore.getState().interrupt
   const setPosture = useAppStore.getState().setPosture
   const setConfiguration = useAppStore.getState().setConfiguration
-  const nativeConfiguration = !source && session?.kind === 'agent' && session.processState === 'running' &&
-    session.status.state !== 'disconnected' ? session.nativeConfiguration : undefined
   const reportError = useAppStore.getState().reportError
   // One decision answers three questions the old `availability + isWorking` pair conflated: can the user
   // type, does the surface permit a submit (true while working — that IS steer), and is the primary button
@@ -564,7 +566,11 @@ export function AgentSessionComposer({
         originalStatus={source?.session?.kind === 'agent' ? source.session : undefined}
         executorLabel={executors?.[session.executorId]?.label ?? session.executorId}
         appearance={executors?.[session.executorId]?.avatar} prompts={completion.prompts} visible={visible}
+        information={{ information: nativeInformation.information, configuration: nativeInformation.configuration,
+          loading: nativeInformation.loading, issue: nativeInformation.issue, onRefresh: nativeInformation.refresh,
+          usage: session.turnUsage, contextWindowUsage: session.contextWindowUsage }}
         disabled={!submitMode.canSubmit}
+        inputNotice={requestPending || !submitMode.canSubmit || session.processState !== 'running' || session.status.state === 'disconnected'}
         inputAction={!submitMode.canType ? 'Messages are unavailable on this surface.' : requestPending
           ? nativeQueuePending ? 'Send to the Agent’s message queue. The request remains open.' : `${SEND_AFTER_REQUEST_ENDS}.` : !submitMode.canSubmit ? submitMode.placeholder
             : session.processState !== 'running' || session.status.state === 'disconnected'
@@ -619,10 +625,17 @@ export function AgentSessionComposer({
       // buffered or replayed through that restoration boundary. Core writes it like any terminal input, so
       // while a request is pending it would land in the open native dialog and be recorded as native input
       // on that request, retiring the card's answer. It is offered only when no request owns the input.
-      {...(nativeConfiguration?.options.length ? {
-        configurationTool: <NativeConfigurationPicker snapshot={nativeConfiguration} disabled={!submitMode.canType}
-          onSet={(configId, value) => void setConfiguration(sessionId, nativeConfiguration.revision, configId, value)} />
-      } : postureControl && submitMode.canSubmit && session?.kind === 'agent' && !session.pendingInteraction &&
+      {...(session?.kind === 'agent' ? {
+        configurationTool: <NativeConfigurationPicker key={JSON.stringify([session.control, session.nativeHandle?.sessionId])}
+          snapshot={nativeInformation.configuration} information={nativeInformation.information} loading={nativeInformation.loading}
+          disabled={readOnly || disabled || Boolean(source) || session.processState !== 'running'} onRefresh={nativeInformation.refresh}
+          onSet={async (configId, value, revision) => {
+            const receipt = await setConfiguration(sessionId, revision, configId, value)
+            if (receipt?.outcome === 'applied' && receipt.acknowledgement) nativeInformation.adoptConfiguration(receipt.acknowledgement)
+            return receipt
+          }} />
+      } : {})}
+      {...(!nativeInformation.configuration?.options.length && postureControl && submitMode.canSubmit && session?.kind === 'agent' && !session.pendingInteraction &&
         session.processState === 'running' && session.status.state !== 'disconnected'
         ? { postureTool: <PosturePicker control={postureControl} disabled={!submitMode.canType} onSet={(modeId: string) => void setPosture(sessionId, modeId)} /> } : {})}
       {...(session?.kind === 'agent' && (moteDraftKey || text.trim()) && (session.pendingInteraction || submitMode.primaryAction === 'stop') ? {

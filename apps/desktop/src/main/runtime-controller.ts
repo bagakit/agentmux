@@ -340,6 +340,7 @@ function projectSession(
       status,
       ...(subject.agentSession.structuredPromptInput ? { structuredPromptInput: true as const } : {}),
       ...(subject.agentSession.nativeConfiguration ? { nativeConfiguration: structuredClone(subject.agentSession.nativeConfiguration) } : {}),
+      ...(subject.agentSession.nativeInformation ? { nativeInformation: structuredClone(subject.agentSession.nativeInformation) } : {}),
       ...(subject.agentSession.contextWindowUsage ? { contextWindowUsage: { ...subject.agentSession.contextWindowUsage } } : {}),
       ...(activeRequest ? { pendingInteraction: structuredClone(activeRequest) } : {}),
       ...(pending?.response && activeRequest?.id !== pending.request.id ? { completedInteractionResponse: {
@@ -2228,6 +2229,16 @@ export class RuntimeController {
 
   async inspectInteraction(control: Extract<SessionControl, { kind: 'agent' }>, operationId: string): Promise<import('@agentmux/core').AgentMuxInteractionOperationReceipt | null> {
     return await this.configuredClient(control.hostId).inspectAgentInteractionOperation({ agentSessionId: control.agentSessionId, operationId })
+  }
+
+  async inspectInformation(control: Extract<SessionControl, { kind: 'agent' }>): Promise<import('@agentmux/core').AgentInformationInspection> {
+    return await this.trackHostOperation(control.hostId, async () => {
+      const client = await this.connectedClient(control.hostId)
+      const result = await callOriginalDesktopHost(client, 'agent.information.inspect', { hostId: 'local',
+        agentSessionId: control.agentSessionId, expectedRun: control.run }, { transport: 'unix' })
+      // The original owner returns its local address; the Desktop consumer uses this exact configured route.
+      return { ...result, target: { ...result.target, hostId: control.hostId } }
+    })
   }
 
   async setConfiguration(control: Extract<SessionControl, { kind: 'agent' }>,
