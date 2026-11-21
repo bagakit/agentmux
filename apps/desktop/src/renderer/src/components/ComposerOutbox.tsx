@@ -181,7 +181,7 @@ export function QueuedDeliveryFailure({ entry, copy }: { entry: ComposerQueuedMe
     preparationReason={entry.preparationWait?.reason} copyText={copy ?? (async () => false)} />
 }
 
-export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onArchive, onMoveToDraft, onHistory, onMove, onSend, onCancelPreparation, onEdit, sendImmediately = false, reading, sessionId, pendingInteraction = false, onFill, hideHeading = false, rowsOnly = false, query = '' }: {
+export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onArchive, onMoveToDraft, onHistory, onMove, onSend, onCancelPreparation, onEdit, sendImmediately = false, reading, sessionId, pendingInteraction = false, onFill, hideHeading = false, rowsOnly = false, query = '', editingId: controlledEditingId, onEditingIdChange, historyConfirmed = false }: {
   pendingInteraction?: boolean
   hideHeading?: boolean
   rowsOnly?: boolean
@@ -202,25 +202,26 @@ export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onArchive
   onCancelPreparation?: ((id: string) => void) | undefined
   onEdit?: EditQueuedMessage
   sendImmediately?: boolean
+  editingId?: string | null
+  onEditingIdChange?: (id: string | null) => void
+  historyConfirmed?: boolean
 }) {
-  const [editingId, setEditingId] = useState<string | null>(null)
+  const [localEditingId, setLocalEditingId] = useState<string | null>(null)
+  const editingId = controlledEditingId === undefined ? localEditingId : controlledEditingId
+  const setEditingId = (id: string | null) => { if (controlledEditingId === undefined) setLocalEditingId(id); onEditingIdChange?.(id) }
   const [failure, setFailure] = useState<{id:string;text:string;message:string} | null>(null)
   if (!queued.some(entry => !query || entry.text.includes(query))) return null
   const rows = queued.map((entry,index) => {
         if (query && !entry.text.includes(query)) return null
         const selected = selectedId === entry.id, state = queuedMessageState(entry,pendingInteraction)
+        if (selectedId && !selected) return null
         const moveToDraft = entry.errorCode === 'AGENT_PROMPT_CONDITION_CHANGED'
         const launchCarried = entry.inputReceipt?.persistence === 'confirmed' && entry.inputReceipt.status === 'launch-carried'
         const continuation = queuedInputContinuationLabel(entry)
-        const confirmed = entry.confirmed || launchCarried
+        const confirmed = entry.confirmed || launchCarried || historyConfirmed
         const canSend = !moveToDraft && !launchCarried && !entry.archived && !state.busy && editingId !== entry.id
         const ownFailure = failure?.id === entry.id && failure.text === entry.text ? failure.message : null
-        return <li key={entry.id} data-state={entry.status} data-operation-id={entry.id} data-archived={Boolean(entry.archived)}
-          data-queue-editing={editingId === entry.id || undefined}>
-          <MailboxRecordRow recordKey={`queue:${entry.id}`} label={state.label}
-            avatar={<ConversationSpeakerAvatar speaker={{role:'unknown',id:UNKNOWN_SPEAKER_ID}} name="Author unknown" size={18} />}
-            text={entry.text} metadata={<MailboxTime value={entry.enqueuedAt} />} source={entry.archived ? 'Archived original message' : 'Pending original message'}
-            onOpen={(_key,event) => { if (!editingId) onSelect(entry.id,event) }} actions={<>
+        const actions = <>
             {!moveToDraft && !launchCarried && !entry.archived && onSend ? <button key="send" type="button" className="composer-tool composer-outbox__send" disabled={!canSend}
               aria-label={continuation ?? ((entry.immediateSend ?? sendImmediately) ? 'Send queued message immediately' : 'Send queued message')} title={canSend ? continuation ?? '只发送这条原消息' : state.detail}
               onClick={() => onSend(entry.id)}><ThemeActionSubmitIcon size={14} /></button> : null}
@@ -244,16 +245,21 @@ export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onArchive
                 try { await onArchive(entry.id,entry.text,!entry.archived) } catch(error) { setFailure({id:entry.id,text:entry.text,message:presentError(error)}) }
               }}>{entry.archived ? <ThemeActionRestoreIcon size={14} /> : <ThemeActionArchiveIcon size={14} />}</button> : null}
             {entry.archived && confirmed && onHistory ? <button key="history" type="button" className="composer-tool" aria-label="读取原记录" title="读取原记录" onClick={() => onHistory(entry.id)}><ReadIcon size={14} aria-hidden="true" /></button> : null}
-          </>} />
-          {ownFailure ? <p role="alert" className="composer-mailbox__risk">{ownFailure}</p> : null}
-          {selected ? <MailboxLocationContext sessionId={sessionId} pending>{(_summary,executionDetails) => <article className="composer-outbox__inline" data-record-key={`queue:${entry.id}`}>
+        </>
+        return <li key={entry.id} data-state={entry.status} data-operation-id={entry.id} data-archived={Boolean(entry.archived)}
+          data-queue-editing={editingId === entry.id || undefined}>
+          {selected ? <MailboxLocationContext sessionId={sessionId} pending>{(_summary,executionDetails) => <article className="composer-outbox__inline composer-mailbox__detail" data-record-key={`queue:${entry.id}`}>
             {editingId === entry.id && onEdit ? <ComposerQueuedMessageEditor key={entry.id} entry={entry} onSave={onEdit} onCancel={() => setEditingId(null)} /> : null}
             {queuedInputFailure(entry) || entry.error || entry.logId || entry.unconfirmed ? <QueuedDeliveryFailure entry={entry} copy={onCopy} /> : !entry.preparationWait && !entry.inputReceipt && (state.busy || !entry.deliverable || entry.archived) ? <p className={entry.archived && (entry.confirmed || !entry.unconfirmed) ? 'composer-mailbox__record-note' : 'composer-mailbox__risk'} data-kind={state.busy ? 'working' : 'attention'}>{state.detail}</p> : null}
             {entry.preparationWait || entry.inputReceipt ? <p className="composer-pending__retry" role="status">{state.detail}</p> : null}
-            <ConversationMessage {...reading} compact recordedIdentity detailsOnlyMetadata messageId={`queue:${entry.id}`} speaker={{role:'unknown',id:UNKNOWN_SPEAKER_ID}} content={entry.text}
+            <ConversationMessage {...reading} compact recordedIdentity detailsOnlyMetadata messageId={`queue:${entry.id}`} speaker={{role:'unknown',id:UNKNOWN_SPEAKER_ID}} content={entry.text} recordTitle={state.label} messageActions={actions}
               {...(entry.enqueuedAt === undefined ? {} : {createdAt:entry.enqueuedAt})} {...(onCopy ? {onCopy} : {})}
               messageDetails={<><dl className="composer-mailbox__record-facts"><dt>Record</dt><dd>{entry.archived ? 'Archived original message' : 'Pending original message'}</dd><dt>Enqueued</dt><dd><MailboxTime value={entry.enqueuedAt} complete /></dd><dt>Delivery</dt><dd>{state.detail}</dd>{entry.errorCode ? <><dt>Code</dt><dd>{entry.errorCode}</dd></> : null}</dl>{executionDetails}</>} />
-          </article>}</MailboxLocationContext> : null}
+          </article>}</MailboxLocationContext> : <MailboxRecordRow recordKey={`queue:${entry.id}`} label={state.label}
+            avatar={<ConversationSpeakerAvatar speaker={{role:'unknown',id:UNKNOWN_SPEAKER_ID}} name="Author unknown" size={18} />}
+            text={entry.text} metadata={<MailboxTime value={entry.enqueuedAt} />} source={entry.archived ? 'Archived original message' : 'Pending original message'}
+            onOpen={(_key,event) => { if (!editingId) onSelect(entry.id,event) }} actions={actions} />}
+          {ownFailure ? <p role="alert" className="composer-mailbox__risk">{ownFailure}</p> : null}
         </li>
       })
   return rowsOnly ? <>{rows}</> : <section className="composer-outbox" aria-label={queued[0]?.archived ? 'Archived messages' : 'Queued messages'}>

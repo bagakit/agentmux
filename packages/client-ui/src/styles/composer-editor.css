@@ -252,7 +252,7 @@
 .composer-mailbox__progress { align-self: center; flex-shrink: 0; color: var(--text-2); pointer-events: none; }
 .composer__mailbox[data-progress-state='active'] .composer-mailbox__progress { color: var(--green); }
 .composer__mailbox[data-progress-state='unconfirmed'] .composer-mailbox__progress { color: var(--amber); }
-.composer-mailbox__folders { position: relative; isolation: isolate; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.55fr) minmax(0, 1fr); gap: var(--sp-1); padding: 3px; margin: 0 var(--sp-3) var(--sp-2); border-radius: var(--radius); background: color-mix(in srgb, var(--surface-1) 76%, transparent); }
+.composer-mailbox__folders { position: relative; isolation: isolate; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.55fr) minmax(0, 1fr); gap: var(--sp-1); padding: 0; margin: 0 var(--sp-3) var(--sp-2); border-radius: var(--radius); background: transparent; }
 .composer-mailbox__folders > button { position: relative; z-index: 1; display: inline-flex; justify-content: center; align-items: center; gap: var(--sp-1); min-width: 0; min-height: var(--sp-7); padding: var(--sp-1); border: 0; border-radius: var(--radius-sm); font-size: var(--fs-meta); color: var(--text-3); background: transparent; cursor: pointer; transition: color var(--dur-fast) ease, background var(--dur-fast) ease; }
 .composer-mailbox__folders > button[aria-selected='true'] { background: transparent; color: var(--text); font-weight: 600; }
 .composer-mailbox__folders > .liquid-selection { border: 0; background: linear-gradient(135deg, color-mix(in srgb, var(--green) 7%, transparent), transparent 58%), var(--surface-3); box-shadow: var(--hl); }

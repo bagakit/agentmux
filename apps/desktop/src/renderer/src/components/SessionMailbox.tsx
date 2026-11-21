@@ -322,6 +322,7 @@ export function SessionMailbox({ pendingLayout, system, queued: workbenchQueue, 
     return record ? renderReveal(record, `a2a:${messageId}`) : null
   }
   const [selection, setSelection] = useState<MailboxSelection | null>(null)
+  const [queueEditingId, setQueueEditingId] = useState<string | null>(null)
   const body = useRef<HTMLDivElement>(null)
   const explicitUserReveal = useRef<{ scope: string; operationId: string } | null>(null)
   const back = useRef<HTMLButtonElement>(null)
@@ -451,6 +452,7 @@ export function SessionMailbox({ pendingLayout, system, queued: workbenchQueue, 
     (row.kind === 'journal' ? row.group.messages.length > 0 || inputMailboxPresentation(row.item).text?.includes(query)
       : row.kind === 'local' ? row.item.text.includes(query) : true))
   const { journalRows } = inputProjection
+  const selectedQueueHistory = selectedQueue ? rows.find(row => row.kind === 'local' && row.item.id === selectedQueue.id)?.history : undefined
   const groupedMailbox = { ...inputMailbox, items: journalRows.map(row => row.item),
     failures: inputMailbox.failures.filter(item => journalRows.some(row => row.key === inputMailboxItemKey(inputMailboxHost, item))) }
   const journalFailures = new Map(groupedMailbox.failures.map(item => [inputMailboxItemKey(inputMailboxHost, item), item]))
@@ -462,7 +464,7 @@ export function SessionMailbox({ pendingLayout, system, queued: workbenchQueue, 
     primary: selectedOriginal, messages: [selectedOriginal, ...selectedGroup?.messages.filter(message => !sameOriginalReading(message, selectedOriginal)) ?? []],
     mailbox: [], author: selectedGroup?.author ?? selectedOriginal.author }], sourceHostId)[0] : undefined
   const selectedJournal = wanted && folder === 'user' ? journalRows.find(row => row.key === wanted) : undefined
-  const detail = Boolean(selectedNotice || selectedMessage || selectedJournal || (folder === 'inbox' || folder === 'outbox') && wanted?.startsWith('a2a:'))
+  const detail = Boolean(selectedNotice || selectedQueue || selectedMessage || selectedJournal || (folder === 'inbox' || folder === 'outbox') && wanted?.startsWith('a2a:'))
   const channelGroups = folder !== 'user' ? [] : selectedJournal ? [selectedJournal.group] : selectedMessage?.group ? [selectedMessage.group]
     : rows.flatMap(row => row.kind === 'local' ? [] : [row.group])
   const channelAuthors = channelGroups.flatMap(group => [group.author,
@@ -485,13 +487,15 @@ export function SessionMailbox({ pendingLayout, system, queued: workbenchQueue, 
   }, [originalMail, reading])
   function queueRecordProps() {
     return { sessionId: mailboxSessionId, selectedId: selectedQueue?.id ?? null, reading, pendingInteraction,
+      editingId: queueEditingId, onEditingIdChange: setQueueEditingId, historyConfirmed: Boolean(selectedQueueHistory),
       onSelect: (key: string) => { focusAfter.current = null; setSelection({ scope, folder: 'user', key: `queue:${key}` }) },
       ...(onArchiveQueued ? { onArchive: onArchiveQueued } : {}), ...(onCopyQueued ? { onCopy: onCopyQueued } : {}),
+      ...(selectedQueueHistory ? { onHistory: () => setSelection({ scope, folder: 'user', key: messageKey({ message: selectedQueueHistory }), original: selectedQueueHistory }) } : {}),
       ...(inputHistory && inputHistory.canFill !== false ? { onFill: inputHistory.fillText } : {}) }
   }
-  function renderPending() {
+  function renderPending(records = pending) {
     const query = inputHistory?.history.query ?? ''
-    return <ComposerOutbox {...queueRecordProps()} queued={pending} query={query} hideHeading
+    return <ComposerOutbox {...queueRecordProps()} queued={records} query={query} hideHeading
       onCancelPreparation={onCancelQueuedPreparation} {...(onMoveQueued ? { onMove: onMoveQueued } : {})} onMoveToDraft={onMoveQueuedToDraft}
       {...(onEditQueued ? { onEdit: onEditQueued } : {})} sendImmediately={sendImmediately} {...(onSendQueued ? { onSend: onSendQueued } : {})} />
   }
@@ -541,6 +545,7 @@ export function SessionMailbox({ pendingLayout, system, queued: workbenchQueue, 
   useLayoutEffect(() => {
     if (previousScope.current !== scope) {
       previousScope.current = scope
+      setQueueEditingId(null)
       const ownedFocus = document.activeElement === document.body && lastReadingFocus.current && !lastReadingFocus.current.isConnected
       positions.current = {}; lastReadingFocus.current = null; focusAfter.current = null
       agentFolder.current = 'inbox'; automationReturn.current = null; automationFocus.current = null
@@ -625,9 +630,9 @@ export function SessionMailbox({ pendingLayout, system, queued: workbenchQueue, 
     if (intent.scope !== scope) { explicitUserReveal.current = null; return }
     if (!open || folder !== 'user') return
     explicitUserReveal.current = null
-    const row = Array.from(body.current?.querySelectorAll<HTMLElement>('.composer-mailbox__row[data-record-key]') ?? [])
+    const row = Array.from(body.current?.querySelectorAll<HTMLElement>('[data-record-key]') ?? [])
       .find(node => node.dataset.recordKey === `queue:${intent.operationId}`)
-    row?.closest<HTMLElement>('li[data-operation-id]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    row?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   }, [open, folder, scope, selection])
   const mailboxLabel = `Mailbox: Agent messages ${unread} unread in loaded messages, Inputs ${pendingCount} pending, Notices ${system.unread.length} need attention${hasProgress ? `. ${progressLabel}` : ''}`
   function showUserMessages(operationId: string) {
@@ -721,8 +726,8 @@ export function SessionMailbox({ pendingLayout, system, queued: workbenchQueue, 
       <div id={`${id}-user`} role="tabpanel" aria-labelledby={`${id}-user-tab`} aria-busy={Boolean(inputHistory?.history.loading || inputMailbox.loading || archive.loading)} hidden={folder !== 'user'}>
         {readingMounted && folder === 'user' ? <>
           <InputMailboxFrame compact refreshInParent={Boolean(inputHistory)} coverageInParent={Boolean(inputHistory)}
-            selected={Boolean(selectedJournal)} mailbox={groupedMailbox} hostId={inputMailboxHost}>
-          {selectedJournal ? renderJournal(selectedJournal, true) : selectedMessage ? <MessageHistory hostId={inputMailboxHost} mailboxOrigin={mailboxOrigin} items={[selectedMessage]} selectedKey={wanted}
+            selected={Boolean(selectedJournal || selectedQueue)} mailbox={groupedMailbox} hostId={inputMailboxHost}>
+          {selectedQueue ? renderPending(queued) : selectedJournal ? renderJournal(selectedJournal, true) : selectedMessage ? <MessageHistory hostId={inputMailboxHost} mailboxOrigin={mailboxOrigin} items={[selectedMessage]} selectedKey={wanted}
             originalInput={selectedGroup?.mailbox.length === 1 ? selectedGroup.mailbox[0] : undefined}
             inputFailure={selectedGroup?.mailbox.length === 1 ? journalFailures.get(inputMailboxItemKey(inputMailboxHost, selectedGroup.mailbox[0]!)) : undefined}
             onOpen={selectRecord} onCopy={onCopyQueued} reading={reading} sessionId={mailboxSessionId} renderNavigation={renderNavigation}

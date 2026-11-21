@@ -274,7 +274,7 @@ export function ConversationMessage({
   const described = speaker?.role === 'external' ? describeSpeaker?.(speaker)
     : agentReference && !recordedUnknown ? describeSpeaker?.(agentReference.speaker) : undefined
   const referenceName = described?.name && described.name !== agentReference?.speaker.id ? described.name : undefined
-  const senderName = referenceName ?? (agentReference?.declared ? prefix?.packet?.name : name && name !== agentReference?.speaker.id ? name : undefined) ?? 'Agent'
+  const senderName = referenceName ?? (agentReference?.declared ? prefix?.packet?.name : name) ?? 'Agent'
   const avatarSpeaker = recordedUnknown ? recordedSpeaker : agentReference?.speaker ?? (isDeclaredSender ? recordedSpeaker : speaker)
   const displayProvider = recordedUnknown ? undefined : agentReference
     ? described?.providerId ?? (!agentReference.declared && agentReference.speaker.id === conversationSessionId ? providerId : undefined)
