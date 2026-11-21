@@ -13,7 +13,7 @@ async function ensurePrivateDirectory(path: string): Promise<void> {
 }
 
 /** Reuse the application entry with its own Store, native state and local sockets. */
-export async function openNewIdentityWindow(input: { userData: string; executable: string; application?: string }): Promise<void> {
+export async function openNewIdentityWindow(input: { userData: string; executable: string; application?: string; gatewayCode?: string | undefined }): Promise<void> {
   const userData = await realpath(input.userData) + '.new-identity'
   const key = createHash('sha256').update(userData).digest('hex').slice(0, 20)
   const runtime = join(process.platform === 'darwin' ? '/private/tmp' : tmpdir(), `amux-setup-${process.getuid?.()}-${key}`)
@@ -25,6 +25,7 @@ export async function openNewIdentityWindow(input: { userData: string; executabl
     !/^(?:AGENTMUX_|CTXMUX_|ELECTRON_RUN_AS_NODE$|NODE_OPTIONS$|NODE_PATH$)/u.test(key)))
   Object.assign(env, {
     AGENTMUX_DESKTOP_NEW_IDENTITY: '1',
+    ...(input.gatewayCode ? { AGENTMUX_DESKTOP_NEW_IDENTITY_GATEWAY: input.gatewayCode } : {}),
     AGENTMUX_DESKTOP_USER_DATA: userData,
     AGENTMUX_RUNTIME_DIRECTORY: runtime,
     AGENTMUX_STATE_DIRECTORY: state

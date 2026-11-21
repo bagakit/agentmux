@@ -11,6 +11,7 @@ import { MeshNetworkMap } from './MeshNetworkMap'
 import { MeshAccessLinks } from './MeshAccessLinks'
 import { MeshOperatorTarget } from './MeshOperatorTarget'
 import { MeshPeerPairing } from './MeshPeerPairing'
+import { MeshGatewayJoin } from './MeshGatewayJoin'
 import { ServiceWindowNotice } from '../ServiceWindowNotice'
 import { useLocalRuntimeRecovery } from '../../lib/use-local-runtime-recovery'
 import './mesh-settings.css'
@@ -18,15 +19,16 @@ import './mesh-settings.css'
 const message = (cause: unknown) => cause instanceof Error ? cause.message : String(cause)
 const retained = (edit: MeshSettingsDraft): MeshSettingsDraft | undefined => edit.pending || edit.linkInput || edit.pairingInput || !configValuesEqual(edit.form, meshForm(edit.baseline.configuration, edit.baseline.identity?.peerId)) ? edit : undefined
 
-type EditorProps = { active: boolean; onConnections?: () => void; showTopology?: boolean }
+type EditorProps = { active: boolean; onConnections?: () => void; showTopology?: boolean; join?: boolean; onAccess?: () => void; onManage?: () => void; onDone?: () => void }
 
 export function MeshNetworkSettings(props: EditorProps) {
+  if (props.join) return <MeshNetworkEditor {...props} target={undefined} deviceLabel="This device" />
   return <MeshOperatorTarget label="Device to manage" active={props.active}>{(target, label) =>
     <MeshNetworkEditor {...props} target={target} deviceLabel={label} />
   }</MeshOperatorTarget>
 }
 
-function MeshNetworkEditor({ active, onConnections, showTopology = true, target, deviceLabel }: EditorProps & { target: MeshOwnerTarget | undefined; deviceLabel: string }) {
+function MeshNetworkEditor({ active, onConnections, showTopology = true, join, onAccess, onManage, onDone, target, deviceLabel }: EditorProps & { target: MeshOwnerTarget | undefined; deviceLabel: string }) {
   const [settings, setSettings] = useState<MeshNetworkSettings>(), [networkSnapshot, setSnapshot] = useState<MeshNetworkInspection>()
   const [issue, setIssue] = useState(''), [networkIssue, setNetworkIssue] = useState(''), [notice, setNotice] = useState('')
   const [saving, setSaving] = useState(false), [reading, setReading] = useState(false), [newer, setNewer] = useState<MeshNetworkSettings>()
@@ -93,7 +95,7 @@ function MeshNetworkEditor({ active, onConnections, showTopology = true, target,
     } catch (cause) { if (!controller.signal.aborted && epoch === readEpoch.current) setIssue(message(cause)) }
     finally { if (epoch === readEpoch.current) setReading(false) }
   }
-  useEffect(() => { if (active && !current.current) void inspect(); return () => { reader.current?.abort(); setReading(false) } }, [active])
+  useEffect(() => { if (active && (join || !current.current)) void inspect(); return () => { reader.current?.abort(); setReading(false) } }, [active])
   useEffect(() => {
     if (!active || !settings) return
     const controller = new AbortController()
@@ -108,22 +110,23 @@ function MeshNetworkEditor({ active, onConnections, showTopology = true, target,
     void updateMeshSettingsDraft(saved.owner.runtimeId, value => retained({ ...value, baseline: value?.baseline ?? saved,
       form: { ...(value?.form ?? form), ...patch }, ...(pairingInput !== undefined ? { pairingInput } : {}), ...(value?.pending ? { pending: value.pending } : {}) })).catch(cause => setIssue(message(cause)))
   }
-  async function save() {
+  async function save(connectForm?: MeshForm) {
     if (!saved || !form || saving || pending || newer || editIssue) return
     let sent = false, operationId = ''
     setIssue(''); setNotice(''); setSaving(true); reader.current?.abort(); ++readEpoch.current
     try {
-      const configuration = meshConfiguration(form, saved.configuration, settings?.identity ?? undefined), runtimeId = saved.owner.runtimeId
+      const submittedForm = connectForm ?? form
+      const configuration = meshConfiguration(submittedForm, saved.configuration, settings?.identity ?? undefined), runtimeId = saved.owner.runtimeId
       operationId = mintObjectId()
-      await updateMeshSettingsDraft(runtimeId, value => ({ ...value, baseline: value?.baseline ?? saved, form: value?.form ?? form,
-        pending: { operationId, expectedRevision: saved.revision, submitted: configuration, submittedForm: form, phase: 'in-flight' } }), true)
+      await updateMeshSettingsDraft(runtimeId, value => ({ ...value, baseline: value?.baseline ?? saved, form: connectForm ?? value?.form ?? form,
+        pending: { operationId, expectedRevision: saved.revision, submitted: configuration, submittedForm, phase: 'in-flight' } }), true)
       sent = true
       const result = await api.mesh.call('settings.mesh.configure', { ...destination, expectedRevision: saved.revision, operationId, configuration }, { expectedOwner: settings!.owner })
       if (result.settings.owner.runtimeId !== runtimeId) throw new Error('Mesh save returned another Runtime. The original request is retained.')
       if (result.diskDurability !== 'confirmed') throw new Error('The original Mesh disk acknowledgement is unknown. Inspect this save before trying again.')
       await updateMeshSettingsDraft(runtimeId, value => {
         if (value?.pending?.operationId !== operationId) return value
-        const later = !configValuesEqual(value.form, form)
+        const later = !configValuesEqual(value.form, submittedForm)
         return retained({ ...value, pending: undefined, baseline: result.settings, form: later ? value.form : meshForm(result.settings.configuration, result.settings.identity?.peerId) })
       }, true)
       current.current = result.settings; setSettings(result.settings); setNewer(undefined); setNotice('Mesh settings saved')
@@ -133,7 +136,8 @@ function MeshNetworkEditor({ active, onConnections, showTopology = true, target,
       if (saved && operationId) await updateMeshSettingsDraft(saved.owner.runtimeId, value => {
         if (value?.pending?.operationId !== operationId) return value
         if (!notApplied) return { ...value, pending: { ...value.pending, phase: 'unknown' } }
-        const { pending: _request, ...rest } = value; return retained(rest)
+        const { pending: _request, ...rest } = value
+        return retained({ ...rest, form: connectForm && configValuesEqual(rest.form, connectForm) ? form : rest.form })
       }, true).catch(() => {})
       setIssue(message(cause))
     } finally { setSaving(false) }
@@ -148,9 +152,9 @@ function MeshNetworkEditor({ active, onConnections, showTopology = true, target,
   const identityRecovery = useLocalRuntimeRecovery(active && !target && !settings, () => { void inspect() })
   const refresh = () => { if (!settings && !target) identityRecovery.refresh(); void inspect() }
   const newIdentityWindow = !target && api.ui.isNewIdentityWindow
-  async function openIdentitySetup() {
+  async function openIdentitySetup(code?: string) {
     setOpeningIdentity(true); setIdentitySetupIssue('')
-    try { await api.ui.openLocalIdentitySetup() }
+    try { if (code) await api.ui.openLocalIdentitySetup(code); else await api.ui.openLocalIdentitySetup() }
     catch (cause) { setIdentitySetupIssue(message(cause)) }
     finally { setOpeningIdentity(false) }
   }
@@ -161,6 +165,15 @@ function MeshNetworkEditor({ active, onConnections, showTopology = true, target,
   </button>
   const identitySetupError = identitySetupIssue ? <p className="settings-inline-error" role="alert">{identitySetupIssue}</p> : null
   const recoveryNotice = identityRecovery.notice?.notice
+  const conflict = newer ? <div className="mesh-conflict" role="alert"><span>The saved version changed. Your edit is retained.</span><button className="small-button" onClick={() => void resolveDraft(false)}>Use saved</button><button className="small-button" onClick={() => void resolveDraft(true)}>Keep my draft</button></div> : null
+  const pendingAction = pending ? <div className="mesh-pending"><button className="small-button" disabled={saving || reading} onClick={() => void inspect(pending.operationId)}>Inspect original save</button><code>{pending.operationId}</code></div> : null
+
+  if (join) return <MeshGatewayJoin settings={settings} snapshot={snapshot} networkIssue={networkIssue} form={form} saved={saved} peerCode={peerCode}
+    issue={issue || editIssue} reading={reading} saving={saving} blocked={Boolean(newer || pending || editIssue)} hasUnsavedEdit={dirty}
+    onConnect={save} onCheck={refresh} onCopy={copy} copyFeedback={copyFeedback} onAccess={onAccess} onManage={onManage} onDone={onDone}
+    resolution={<>{conflict}{pendingAction}</>}
+    identityRecovery={identityRecovery} openSeparate={newIdentityWindow || target ? undefined : openIdentitySetup} openingSeparate={openingIdentity} separateIssue={identitySetupError} />
+
   return <div className="mesh-network-settings" data-mesh-settings data-settings-field="mesh-configuration">
     {!identityRecovery.notice ? <header className="mesh-network-heading">
       {newIdentityWindow ? <div className="mesh-connection-intro"><div><h3>New identity setup</h3><p>Pair this window with your gateway. Your original work stays in its own window.</p></div></div> : <div className="mesh-connection-intro"><div><h3>{deviceLabel}’s network</h3><p>Add a trusted peer or publish a gateway address for other devices.</p></div></div>}
@@ -213,9 +226,9 @@ function MeshNetworkEditor({ active, onConnections, showTopology = true, target,
         </details>
         <details className="mesh-advanced"><summary>Advanced network settings</summary><div className="mesh-form-grid"><label><span>TLS key file</span><TextInput aria-label="Mesh TLS key path" value={form.keyPath} onChange={event => change({ keyPath: event.target.value })} /></label><label><span>TLS certificate file</span><TextInput aria-label="Mesh TLS certificate path" value={form.certPath} onChange={event => change({ certPath: event.target.value })} /></label></div><label className="mesh-form-field"><span>Additional publisher grants</span><Textarea aria-label="Mesh publisher grants" value={form.publishers} onChange={event => change({ publishers: event.target.value })} rows={3} /></label><p className="field-hint">Server IDs and token hashes for separately hosted publishers. Host deployments connect their own endpoint automatically.</p><code>{settings?.identity?.peerId ?? 'Network identity not created'}</code></details>
       </section>}
-      {newer ? <div className="mesh-conflict" role="alert"><span>The saved version changed. Your edit is retained.</span><button className="small-button" onClick={() => void resolveDraft(false)}>Use saved</button><button className="small-button" onClick={() => void resolveDraft(true)}>Keep my draft</button></div> : null}
+      {conflict}
       <SettingsSaveBar save={{ state: issue || editIssue ? 'error' : saving ? 'saving' : notice ? 'saved' : 'idle', error: issue || editIssue, saving }} dirty={dirty || Boolean(pending)} label="Save Mesh settings" scopeLabel="Mesh" onSave={() => void save()} blocked={pending ? 'Inspect the original save first' : newer ? 'Review the current saved version' : editIssue || undefined} />
-      {pending ? <div className="mesh-pending"><code>{pending.operationId}</code><button className="small-button" disabled={saving || reading} onClick={() => void inspect(pending.operationId)}>Inspect original save</button></div> : null}
+      {pendingAction}
       {notice ? <p role="status" className="mesh-network-notice">{notice}</p> : null}
     </> : null}
     {settings && form && saved ? <MeshAccessLinks active={active} target={target} deviceLabel={deviceLabel} snapshot={snapshot} offerText={originalOffer} copy={copy}

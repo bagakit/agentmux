@@ -527,7 +527,13 @@ const api: AgentMuxPreloadApi = {
     readLocalRuntimeRecovery: () => ipcRenderer.invoke('ui:readLocalRuntimeRecovery'),
     restoreLocalRuntimeIdentity: () => ipcRenderer.invoke('ui:restoreLocalRuntimeIdentity'),
     isNewIdentityWindow: process.argv.includes(NEW_IDENTITY_WINDOW_ARGUMENT),
-    openLocalIdentitySetup: () => ipcRenderer.invoke('ui:openLocalIdentitySetup'),
+    readIdentityGateway: () => ipcRenderer.invoke('ui:readIdentityGateway'),
+    onNewIdentityGateway(listener) {
+      const receive = (_event: Electron.IpcRendererEvent, code: string) => listener(code)
+      ipcRenderer.on('ui:newIdentityGateway', receive)
+      return () => ipcRenderer.off('ui:newIdentityGateway', receive)
+    },
+    openLocalIdentitySetup: gatewayCode => ipcRenderer.invoke('ui:openLocalIdentitySetup', gatewayCode),
     openMeshDevice: (url: string) => ipcRenderer.invoke('mesh:openDevice', url),
     createStorageBackup: owner => ipcRenderer.invoke('ui:createStorageBackup', owner),
     importWorkbenchState: value => ipcRenderer.invoke('ui:importWorkbenchState', value),

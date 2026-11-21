@@ -1329,6 +1329,8 @@ export type AppState = GitReadingActions & {
   /** Opaque unrelated/invalid records stay in the original user document until explicitly resolved. */
   nodePublicationDrafts: unknown
   meshSettingsDrafts: unknown
+  meshGatewayCode: string
+  meshGatewayHandoff?: string | undefined
   meshDeviceLinks: { draft: string; saved: string[] }
   hostRouteDrafts: unknown
   tailcatConnectionDrafts: unknown
@@ -4396,6 +4398,7 @@ type PersistedAppState = {
   agentLearningReviewDrafts?: Record<string, AgentLearningReviewDraft>
   nodePublicationDrafts?: unknown
   meshSettingsDrafts?: unknown
+  meshGatewayCode?: string
   meshDeviceLinks?: AppState['meshDeviceLinks']
   hostRouteDrafts?: unknown
   tailcatConnectionDrafts?: unknown
@@ -4732,6 +4735,7 @@ function workbenchSaveSources(state: AppState) {
     agentLearningReviewDrafts: state.agentLearningReviewDrafts,
     nodePublicationDrafts: state.nodePublicationDrafts,
     meshSettingsDrafts: state.meshSettingsDrafts,
+    meshGatewayCode: state.meshGatewayCode,
     meshDeviceLinks: state.meshDeviceLinks,
     hostRouteDrafts: state.hostRouteDrafts,
     tailcatConnectionDrafts: state.tailcatConnectionDrafts,
@@ -6767,6 +6771,7 @@ export const useAppStore = create<AppState>()<[['zustand/persist', PersistedAppS
   agentLearningReviewDrafts: {},
   nodePublicationDrafts: {},
   meshSettingsDrafts: {},
+  meshGatewayCode: '',
   meshDeviceLinks: { draft: '', saved: [] },
   hostRouteDrafts: {},
   tailcatConnectionDrafts: {},

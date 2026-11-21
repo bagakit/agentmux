@@ -2,6 +2,7 @@ import { CaptureSequenceOwner } from './capture-sequence.js'
 import { parseAgentProgressParams, parseMoteDirectParams, parseSpaceLinkParams, parseSpaceLinkResult } from '@agentmux/core'
 import { registerAgentTakeoverIpc } from './agent-takeover-ipc.js'
 import { registerMeshNetworkIpc } from './mesh-network-ipc.js'
+import { decodeMeshPeerCode } from '@agentmux/core/mesh-peer-code'
 import { openMeshDeviceWindow } from './mesh-device-window.js'
 import { registerSourceFilesIpc } from './source-files-ipc.js'
 import { SpaceObjectAvatarOwner } from './space-object-avatar.js'
@@ -378,7 +379,8 @@ export async function registerIpc(args: {
   workbenchCloseOwner?: WorkbenchCloseOwner
   storageRecoveryExports?: DesktopStorageRecoveryExports
   runtimeIdentityRecovery?: ReturnType<typeof import('./local-runtime-recovery.js').localRuntimeRecovery>
-  openIdentitySetup?: (window: BrowserWindow, assertCurrent: () => void) => Promise<void>
+  openIdentitySetup?: (window: BrowserWindow, assertCurrent: () => void, gatewayCode?: string) => Promise<void>
+  readIdentityGateway?: () => string | undefined
 
   workspaceFiles?: WorkspaceFiles
   scratchTopics: ScratchTopics
@@ -1738,9 +1740,15 @@ export async function registerIpc(args: {
     assertAppDocumentSender(event, contents, args.appDocumentSources())
     return choice.canceled ? null : choice.filePaths[0] ?? null
   }) ?? { state: 'unchanged' })
-  handleWithEvent('ui:openLocalIdentitySetup', async event => {
+  handleWithEvent('ui:openLocalIdentitySetup', async (event, gatewayCode?: string) => {
     const assertCurrent = () => assertAppDocumentSender(event, contents, args.appDocumentSources())
-    await args.openIdentitySetup?.(args.window, assertCurrent)
+    assertCurrent()
+    if (gatewayCode !== undefined) decodeMeshPeerCode(gatewayCode)
+    await args.openIdentitySetup?.(args.window, assertCurrent, gatewayCode)
+  })
+  handleWithEvent('ui:readIdentityGateway', event => {
+    assertAppDocumentSender(event, contents, args.appDocumentSources())
+    return args.readIdentityGateway?.()
   })
   handleWithEvent('ui:createStorageBackup', (_event, owner: import('@agentmux/core').AgentMuxRuntimeFence) => args.runtime.createStorageBackup(owner))
   handleWithEvent('ui:importWorkbenchState', (_event, value: string) => workbenchUserState.importIfAbsent(value))

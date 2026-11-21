@@ -2023,7 +2023,9 @@ export type AgentMuxDesktopApi = {
     readLocalRuntimeRecovery(): Promise<import('@agentmux/core').SemanticIdentityRecoveryResult>
     restoreLocalRuntimeIdentity(): Promise<import('@agentmux/core').SemanticIdentityRecoveryResult>
     isNewIdentityWindow: boolean
-    openLocalIdentitySetup(): Promise<void>
+    readIdentityGateway(): Promise<string | undefined>
+    onNewIdentityGateway(listener: (gatewayCode: string) => void): () => void
+    openLocalIdentitySetup(gatewayCode?: string): Promise<void>
     openMeshDevice(url: string): Promise<void>
     createStorageBackup(owner: import('@agentmux/core').AgentMuxRuntimeFence): Promise<import('./storage-recovery').DesktopStorageRecoveryRead>
     importWorkbenchState(value: string): Promise<string>

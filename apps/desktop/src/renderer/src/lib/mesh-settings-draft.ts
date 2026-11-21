@@ -1,4 +1,4 @@
-import { meshPeerCode, decodeMeshPeerCode } from '@agentmux/core/mesh-peer-code'
+import { meshPeerCode, decodeMeshPeerCode, type MeshPeerCode } from '@agentmux/core/mesh-peer-code'
 export { meshPeerCode } from '@agentmux/core/mesh-peer-code'
 import type { MeshNetworkConfiguration, MeshNetworkSettings } from '@agentmux/core/mesh-network'
 
@@ -48,6 +48,22 @@ export function meshForm(configuration: MeshNetworkConfiguration, ownPeerId?: st
     peers: codes.join('\n'), clientKeys: configuration.endpointAccess.allowedClientKeys.join('\n'),
     keyPath: configuration.listen?.tls?.keyPath ?? '', certPath: configuration.listen?.tls?.certPath ?? '', publishers: JSON.stringify(configuration.publishers, null, 2) }
 }
+
+/** Build the same proposed peer edit for the settings editor and the guided connection. */
+export function meshPeerFormPatch(form: MeshForm, code: string, peer: MeshPeerCode, ownPeerId: string | undefined, allowNewNetwork: boolean): Pick<MeshForm, 'networkId' | 'role' | 'peers'> {
+  if (peer.peerId === ownPeerId) throw new Error('This code belongs to this device. Paste the other device’s code.')
+  if (!allowNewNetwork && peer.networkId !== form.networkId) throw new Error('This code belongs to another network. Check the network name before adding the peer.')
+  const codes = form.peers.split(/\s+/u).filter(Boolean)
+  const trusted = codes.map(decodeMeshPeerCode)
+  if (trusted.some(item => item.networkId !== peer.networkId || item.peerId === peer.peerId && item.publicKey !== peer.publicKey)) {
+    throw new Error('This code conflicts with the network or an existing peer. Review the saved peers before adding it.')
+  }
+  const index = trusted.findIndex(item => item.peerId === peer.peerId)
+  if (index === -1) codes.push(code)
+  else codes[index] = code
+  return { networkId: peer.networkId, role: form.role === 'disabled' ? 'participant' : form.role, peers: codes.join('\n') }
+}
+
 /** This converts form input only. It neither declares valid membership nor admits a connection. */
 export function meshConfiguration(form: MeshForm, baseline: MeshNetworkConfiguration, own?: { peerId: string; publicKey: string }): MeshNetworkConfiguration {
   const before = meshForm(baseline, own?.peerId), configuration = structuredClone(baseline)

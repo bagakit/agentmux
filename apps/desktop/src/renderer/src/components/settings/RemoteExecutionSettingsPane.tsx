@@ -24,7 +24,7 @@ const ToolsIcon = semanticIconComponent('object.folder')
 const BackIcon = semanticIconComponent('navigation.back')
 const RoutesIcon = semanticIconComponent('object.topology')
 const remoteTasks = [
-  { value: 'routes', Icon: RoutesIcon, title: 'Routes', description: 'Direct & cascading access' },
+  { value: 'routes', Icon: RoutesIcon, title: 'Work routes', description: 'Direct and delegated access' },
   { value: 'start', Icon: ToolsIcon, title: 'Prepare', description: 'Choose a Space and Agent' },
   { value: 'existing', Icon: AgentIcon, title: 'Work', description: 'Return to original Sessions' }
 ] as const
