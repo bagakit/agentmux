@@ -27,6 +27,22 @@ observation does not complete a task or permit idle-only input while child work 
 After an owner restart, mainSessionActivity retains the original main observation;
 currentActivity remains separately qualified for live input decisions.
 
+For the original native model, plan and quota windows, use agent information inspect
+--host HOST --session SID --run RUN. Each snapshot names its native source and original
+observation time. Ordinary agent inspect/status consume the retained Session projection;
+they do not poll account endpoints. A source gap keeps the last sample with unconfirmed
+fields. Quota windows and context usage are independent; missing information is unknown
+or explicitly unsupported, never an inferred subscription or balance.
+
+For session configuration, agent configuration inspect returns the original Provider's
+native options and revision. The unique select option with category=model defines runtime
+model choices; startup defaults and display labels do not. Set using agent configuration
+set --input FILE|- with that original target, expectedRevision and a new operationId.
+A confirmed next-turn model is the configured choice for following turns, not proof that
+an already-running response used it. Inspect the original configuration operation after
+an unknown result; do not replay it or restart the Session. Unsupported Providers expose
+their limitation without changing defaults or sending a model command through user input.
+
 For startup waits, agent input inspect exposes control.waiting.initialization on the
 original saved input: reason, source, scope, original Provider/Run and observedAt.
 A prerequisite reports native configuration or account requirements; request means
