@@ -52,7 +52,7 @@ publisher 准入、peer 准入、终点 client 准入与每次资源操作各有
 
 ## Mesh 工作面与配置
 
-Cluster 分组按接入、发布、使用的顺序提供 Mesh、Node、Remote。Mesh 承接设备连接、Relay Gateway、网络观察和按已保存设备管理原 Host。Node 承接该节点向访问方发布的身份、目录、位置及资源策略。Remote 承接从哪个项目和 Agent 开始或继续工作，以及该工作的签名委托路线。每种设置有一个编辑入口及原配置 owner。相邻页面可展示相关事实和定位原对象的入口，修改回到原编辑工作面。机器资源总览沿 Mesh，原 Node 的发布资格与该节点的准确诊断沿 Node。仅提供盲转发的 peer 不取得工作委托或 Session 所有权。Mobile 和其他配置分组沿原职责。
+Cluster 依次提供 Mesh、Node、Quick。默认打开 Mesh，以同页地图、网关／路径、已保存设备和机器资源回答当前实例如何参与网络及已确认的网络事实。Node 默认管理本机身份、权限和发布，Gateway、Tailcat、SSH 各有自己的设置入口。原已保存 Host 的连接、项目与维护沿准确 Host 进入。Quick 按用户任务组织首次接入、允许另一设备访问、打开设备、开始与继续工作。多个入口可以定位同一设置，编辑和保存仍沿唯一原 owner。仅盲转发的 peer 不取得工作委托或 Session 所有权。
 
 Mesh 首页提供“连接 Relay Gateway”和“使用另一台设备”两个工作入口，注明当前从哪个 Core 观察。连接已有 Relay Gateway 依次提供选择与预览、确认连接和查看结果。材料与双方准入齐备时一次确认即可连接。尚需网关批准、本机身份恢复或网络检查时，在同一流程保留选定网关、输入和当前进度，说明缺少的条件与对应动作。已连接取自准确双方的认证事实。
 
@@ -95,7 +95,7 @@ Mesh 总览的连接图同时呈现已保存的 Host 路由、已保存的设备
 
 ### 原 Host 工作台的入口与范围
 
-Mesh 在 Settings 中有可发现的独立网络入口，搜索、Overview、Host 身份入口及原设置深链都能到达准确对象。原连接、项目和信任管理能力沿同一 Host owner 承接。Cluster 各页均能独立直达，Remote 沿原 Host 编辑入口定位准确连接。Mesh 保留原 Host 对象、稳定 ID 与准确导航目标。Phone、外部对话应用和全局 Executor 模板继续由原 owner 管理。
+Mesh、Node 与 Quick 在设置目录、搜索和原深链均可独立到达。Mesh 的已保存设备和机器观察进入准确 Host 的 Node 设置，项目和信任继续沿该 Host 的原工作台。Quick 的连接入口返回同一向导。原 Host 对象、稳定模块、Host、Runtime、field 与草稿身份保持。其他设备和 Executor 模板沿原管理面。
 
 同一 Host 工作台按总览与监控、项目、应用与访问、连接配置组织任务。切换任务仍持有同一个准确 Host、原草稿与已访问操作，不建立三套选择器、清单或配置副本。总览承接拓扑与分源观察；连接配置承接原编辑、Test 与 Core 维护；应用与访问承接该 Host 的真实执行器盘点及跨 Host 来源核验、真人批准。全局模板不冒充远端已安装应用。
 
@@ -121,7 +121,7 @@ Mesh 在 Settings 中有可发现的独立网络入口，搜索、Overview、Hos
 
 Tailcat 通过官方 CLI 的双向 stdio 复用现有 JSON-RPC 和 Runtime 绑定。接收端必须已经安装并运行 AgentMux；本机接入开关只监听并将连接桥接到原 `amux system endpoint --stdio`，不安装远程核心。开关使用已保存的 server key（含 PSK 和固定 DERP region）及明确的非空 client public key allowlist；关闭只停止监听。发送端使用保存的 client key 和对方 `tc…` 地址。地址属于凭据，不进入日志、拓扑标签或公开示例。
 
-本机 listener 唯一位于 **Mesh > Connections > This device > Connection** 的 `incoming` 字段；远端 client 仍在各自 Host 的 Connection。canonical `{section:'hosts',field:'incoming'}` 省略 Host 时只解析已配置的唯一 `kind=local` Host；legacy `{section:'network-node',field:'incoming'}` 仅在目标确为该 local Host 或省略目标时规范到同一路由。App 路由入口与 SettingsPanel 初始化、搜索及 focus 共用一个纯 normalizer，先揭示 Connections、准确 Host 与 Connection，再聚焦唯一可见字段。显式 missing／remote target 不得替换为 `config.hosts[0]` 或本机；没有唯一 local Host 时也不得猜测。普通 `network-node` 导航仍管理原 Node 发布与监控，`hosts` 的 `resources` 仍进入 Overview，稳定模块、view、Host、Runtime、field 与 draft 身份不变。
+本机 listener 位于 **Node > Tailcat** 的 `incoming` 字段；远端 client 在准确 Host 的连接编辑页。App 与 Settings 使用同一导航解析，将原入口规范到 Node。未指定 Host 时只解析唯一配置的本机；显式缺失／远端目标不得替换为本机。原 Host 的 `resources` 进入该 Host 的 Overview；公开 `app focus --settings-section hosts --host` 保持稳定地址和准确 Host 回执，界面在 Node 呈现同一 Overview。
 
 CLI 缺失、启动失败和监听观察未知必须可见并可重新检查；进程启动不代签已连接。Tailcat 失败不能撤销健康 SSH、Agent 或 Run。现有 Linux x64 headless Core 升级范围保持不变，Tailcat 接入不授予 Mac 远程安装、主动扫描或绕过安全策略的权限。
 
@@ -151,7 +151,7 @@ Tailcat 依赖缺失、密钥准备或入站监听失败时，就地说明下一
 
 ## 本节点的发布与访问边界
 
-Settings 的 **Node** 管“所管理节点对外提供什么”，**Mesh** 管“我连接谁、路径与准入分别确认到哪一步”，**Remote** 管“在哪里开始或继续工作”。连接、监控与浏览不以选择或登记项目为前提。Node 默认本机；显式选择已保存 Host 或从该 Host 进入 Node 设置后，页头、观察、草稿与保存均绑定其准确 Core／Runtime，不把远端节点冒充本机。
+Node 的显式已保存 Host 设置始终在页内标明准确目标。该 Host 的观察、草稿和写入均沿其原 Core／Runtime。机器观察及设备访问不以选择或登记项目为前提。独立 Mesh 身份的 Gateway 配置继续沿该身份的准确后台 owner。
 
 节点管理沿原 Core 的 owner 接口与传输认证的原 user operator 资格执行。同一 owner 已认证的 managed Agent 可在该原用户管理通道上执行用户授权的准确 Node inspect／configure，入口保留真实 Agent 认证；目标 Core 独立认证原 operator carrier。现有 Node 保存回执记录策略与操作，不另造审核主体。远端只借用已保存且由接收者确认 operator 资格的 carrier，固定 Runtime 与 owner 实例；来源 caller 先在原 Core 认证，其 capability 不成为目标 Core 的本机 Agent 身份。configure 保留完整策略、expectedRevision 和原 operationId，回执未知沿同一操作读取。device、guest、有限发布 scope 与 route delegation 不因 Agent 在场而取得 owner 资格；私有 owner-resources、密钥和来源信任仍按各自权限合同执行。不得剥离 caller 后重试被拒请求，也不把对话文字当作传输 principal。
 
@@ -223,7 +223,7 @@ Host 的公共配置链支持按稳定 ID 新增、读取、完整 expected/CAS 
 
 - 修复连接不等于重建工作。原 Session、Run、消费者、附件、历史观察与字节游标的保全及恢复资格唯一见[同身份路由修复](session-recovery.md#同身份路由修复)。管理台分别表达“配置已保存”“原 Runtime 身份已确认”与“原读者已恢复”；身份确认不能代签当前 Run 或阅读恢复，局部观察失败不拖垮其他读者和健康环境。不暗中部署、升级、重新授权、自动故障转移或重发未知输入。
 
-- Mesh 与 Remote 中的环境库按稳定 Host ID 展开对象子菜单，分别查看连接配置与已登记项目。展开或关闭只改变导航；项目依据原 Workspace 的 `hostId` 投影，不以同名、同路径或当前焦点猜归属，不产生第二个项目编辑器。切换对象、子页和手机设备分区继续保留原全库草稿、按对象持有的高级展开选择、保存期间输入及冲突，窄窗返回准确当前子页入口。
+- 从 Mesh 或 Quick 进入已保存环境时，原 Host 工作台按稳定 Host ID 展开连接、项目和维护。项目依据原 Workspace 的 `hostId` 投影；对象、子页和窗口尺寸切换继续保留原全库草稿、对象级展开选择、保存期间输入及冲突。
 
 ## 公共能力与当前基线
 
