@@ -33,15 +33,27 @@ observation time. Ordinary agent inspect/status consume the retained Session pro
 they do not poll account endpoints. A source gap keeps the last sample with unconfirmed
 fields. Quota windows and context usage are independent; missing information is unknown
 or explicitly unsupported, never an inferred subscription or balance.
+Information inspection refreshes account information independently of configuration;
+its configuration field is the retained projection, not another model-directory query.
 
 For session configuration, agent configuration inspect returns the original Provider's
 native options and revision. The unique select option with category=model defines runtime
 model choices; startup defaults and display labels do not. Set using agent configuration
 set --input FILE|- with that original target, expectedRevision and a new operationId.
+Session events and agent inspect expose nativeConfiguration from the same Core owner.
+When the original producer supports native configuration observation, TUI changes update
+that projection without polling accounts or reloading the model directory. Otherwise
+continuous observation is explicitly unsupported; configuration inspect remains an
+independent read. An observation gap keeps the original sample time and choices while
+marking current configuration unconfirmed. A confirmed model absent from the catalog is
+still current; it does not become an invented selectable option.
 A confirmed next-turn model is the configured choice for following turns, not proof that
 an already-running response used it. Inspect the original configuration operation after
 an unknown result; do not replay it or restart the Session. Unsupported Providers expose
 their limitation without changing defaults or sending a model command through user input.
+An old revision or a refusal before native mutation is not an unknown outcome. A later
+current model does not acknowledge an earlier unknown operation. A native applied receipt
+remains the result of that original operation even if the current model changes again.
 
 For startup waits, agent input inspect exposes control.waiting.initialization on the
 original saved input: reason, source, scope, original Provider/Run and observedAt.
