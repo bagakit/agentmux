@@ -55,9 +55,11 @@ async function fixture(retainedRoot?: string, initialSessions: string[] = []) {
   let blockSecond = true
   const created = vi.fn(), preparedTargets = vi.fn()
   let nativeBarrier: Promise<void> | undefined
-  const send = vi.fn(async (_prompt: string) => {
+  const send = vi.fn(async (_prompt: string, plan: { operation: string }) => {
     await nativeBarrier
-    return { outcome: 'admitted' as const, turnId: 'original-native-turn' }
+    return plan.operation === 'queue-idle'
+      ? { outcome: 'admitted' as const, queuedSubmissionId: 'original-priority-queue-entry' }
+      : { outcome: 'admitted' as const, turnId: 'original-native-turn' }
   })
   const provider = f.client.providers.get('codex')
   vi.spyOn(provider, 'prepareNativeInput').mockImplementation(async (_context, input) => ({
@@ -564,7 +566,9 @@ it('orders private priority ahead of waiting background work while preserving us
   const priorityInput = (await rpc.call('space.mote.direct.inspect', { threadId: opened.threadId })).messages.find(message => message.priority)!
   const receipt = await f.client.inspectAgentInput({ key: { kind: 'prompt', agentSessionId: worker, expectedRun: { runId: 'run-' + worker },
     submissionId: priorityInput.deliveries[0]!.operationId } })
-  expect(receipt?.admission?.admission?.native?.plan.operation).toBe('queue-idle')
+  expect(receipt?.admission?.admission?.native).toMatchObject({
+    plan: { operation: 'queue-idle' }, outcome: 'admitted', queuedSubmissionId: 'original-priority-queue-entry'
+  })
 })
 
 it('publishes a due Group assignment to the selected original membership generations only', async () => {
