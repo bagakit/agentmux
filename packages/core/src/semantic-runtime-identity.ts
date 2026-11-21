@@ -16,9 +16,9 @@ type SemanticRuntimeIdentity = {
   schema: 'agentmux.semantic-runtime.v1'; runtimeId: string; authority: string; creationIdentity?: CreationIdentity
 }
 
-export function semanticRuntimeAuthority(stateDirectory: string, storePath: string | null): string {
+export function semanticRuntimeAuthority(stateDirectory: string, storePath: string | null, environment?: Readonly<Record<string, string | undefined>>): string {
   return createHash('sha256').update(JSON.stringify({ stateDirectory, storePath,
-    ctxmuxSocket: defaultCtxmuxSocketPath(), ctxmuxState: defaultCtxmuxStateDirectory(), hookPort: defaultAgentMuxHookPort() })).digest('hex')
+    ctxmuxSocket: defaultCtxmuxSocketPath(environment), ctxmuxState: defaultCtxmuxStateDirectory(environment), hookPort: defaultAgentMuxHookPort(environment) })).digest('hex')
 }
 
 export function parseSemanticRuntimeIdentity(bytes: string, authority: string): SemanticRuntimeIdentity {
@@ -36,8 +36,8 @@ export function parseSemanticRuntimeIdentity(bytes: string, authority: string): 
 
 /** A replacement may require the primary so it need not publish one after shutting down the live Host. */
 export async function inspectSemanticRuntimeIdentity(location: SemanticRuntimeLocation,
-  options: { requirePrimary?: boolean } = {}): Promise<string | null> {
-  const authority = semanticRuntimeAuthority(location.stateDirectory, location.storePath)
+  options: { requirePrimary?: boolean; environment?: Readonly<Record<string, string | undefined>> } = {}): Promise<string | null> {
+  const authority = semanticRuntimeAuthority(location.stateDirectory, location.storePath, options.environment)
   const identity = await inspectImmutableIdentity(join(location.stateDirectory, semanticRuntimeIdentityName),
     bytes => parseSemanticRuntimeIdentity(bytes, authority), { ...options, maxBytes: semanticRuntimeIdentityMaxBytes })
   return identity?.runtimeId ?? null

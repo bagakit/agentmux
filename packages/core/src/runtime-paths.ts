@@ -64,8 +64,8 @@ export function defaultAgentMuxRuntimeDirectory(env: Readonly<Record<string, str
   return join(root, `amx-${uid}-${CTXMUX_RUNTIME_ID}`)
 }
 
-export function defaultCtxmuxSocketPath(): string {
-  return join(defaultAgentMuxRuntimeDirectory(), 'ctxmux.sock')
+export function defaultCtxmuxSocketPath(env: Readonly<Record<string, string | undefined>> = process.env): string {
+  return join(defaultAgentMuxRuntimeDirectory(env), 'ctxmux.sock')
 }
 
 export function defaultAgentMuxStateDirectory(env: Readonly<Record<string, string | undefined>> = process.env): string {
@@ -78,8 +78,8 @@ export function defaultAgentMuxStateDirectory(env: Readonly<Record<string, strin
   return join(homedir(), '.agentmux', 'state', `amx-${uid}-${CTXMUX_RUNTIME_ID}`)
 }
 
-export function defaultCtxmuxStateDirectory(): string {
-  return join(defaultAgentMuxStateDirectory(), 'ctxmux')
+export function defaultCtxmuxStateDirectory(env: Readonly<Record<string, string | undefined>> = process.env): string {
+  return join(defaultAgentMuxStateDirectory(env), 'ctxmux')
 }
 
 export function defaultAgentMuxControlSocketPath(env: Readonly<Record<string, string | undefined>> = process.env): string {
@@ -102,8 +102,8 @@ export function defaultAgentMuxMessageQueuePath(
   return join(homedir(), '.agentmux', 'state', 'global-messages.ndjson')
 }
 
-export function defaultAgentMuxHookPort(): number {
-  const digest = createHash('sha256').update(defaultAgentMuxRuntimeDirectory()).digest()
+export function defaultAgentMuxHookPort(env: Readonly<Record<string, string | undefined>> = process.env): number {
+  const digest = createHash('sha256').update(defaultAgentMuxRuntimeDirectory(env)).digest()
   return 40_000 + (digest.readUInt16BE(0) % 20_000)
 }
 
