@@ -50,6 +50,7 @@ export function GoalAlignment({ demand, emphasis, onGrill, onGrounding, motePend
   const alignment = demand.alignment, grounding = demand.grounding
   const active = useWorkbenchPresentationActive()
   const heading = useRef<HTMLHeadingElement>(null)
+  const resultSection = useRef<HTMLElement>(null)
   const cue = useIconFeedback(JSON.stringify([demand.id, alignment?.revision]), active, heading)
   const focus = emphasis === undefined ? goalNextStepFact(demand).source.kind : emphasis
   const confirmIssue = alignmentConfirmationIssue(alignment)
@@ -137,7 +138,7 @@ export function GoalAlignment({ demand, emphasis, onGrill, onGrounding, motePend
     else counts.unchecked++
     return counts
   }, { met: 0, gaps: 0, unchecked: 0 })
-  const report = grounding ? <section className="goals-grounding goal-review goal-review--report" aria-label="Goal result" tabIndex={-1}
+  const report = grounding ? <section ref={resultSection} className="goals-grounding goal-review goal-review--report" aria-label="Goal result" tabIndex={-1}
     data-goal-id={demand.id} data-goal-alignment-revision={currentReport ? alignment!.revision : undefined}
     data-goal-confirmation-state={currentReport ? alignment!.confirmedAt ? 'confirmed' : 'unconfirmed' : undefined}
     data-goal-grounding-submission={grounding.submissionId} data-goal-result-state={reportState}>
@@ -178,7 +179,10 @@ export function GoalAlignment({ demand, emphasis, onGrill, onGrounding, motePend
         if (!currentCloseout) return
         const unknownResults = closeout.checks.map(({ criterionId, reason }) => ({ criterionId, reason: reason.trim() }))
         void acknowledge({ kind: 'accept', revision: closeout.revision, submissionId: closeout.submissionId, gaps: closeout.gaps, finish: true, unknownResults })
-          .finally(() => setClosing(false))
+          .finally(() => {
+            setClosing(false)
+            requestAnimationFrame(() => resultSection.current?.focus({ preventScroll: true }))
+          })
       }} feedback={<div className="goal-closeout__checks">
         {!currentCloseout && !pending ? <p role="status">The report changed. Return to results to review the current version.</p> : null}
         {closeout.checks.map(check => <div key={check.criterionId}>
