@@ -7,6 +7,15 @@ import { useMemo, useRef, useState, type RefObject } from 'react'
 import { Button } from '@agentmux/client-ui/components/Button'
 import './amux-protocol-reference.css'
 
+const formTitles = {
+  envelope: 'Envelopes',
+  prompt: 'Prompts',
+  marker: 'Markers',
+  frame: 'Frames',
+  link: 'Links',
+  extension: 'Extensions'
+} satisfies Record<AgentMuxProtocolCatalogEntry['form'], string>
+
 /** Examples use the real reader without resolving fictional objects or user identities. */
 function ProtocolExamples({ entry }: { entry: AgentMuxProtocolCatalogEntry }) {
   const host = useClientUiPlatform()
@@ -39,7 +48,7 @@ function ProtocolRow({ entry, active, rowRef }: { entry: AgentMuxProtocolCatalog
   const [open, setOpen] = useState(false)
   const [showTemplates, setShowTemplates] = useState(false)
   return <details ref={rowRef} className="amux-protocols__row" data-protocol-entry={entry.id} onToggle={event => setOpen(event.currentTarget.open)}>
-    <summary><SemanticIcon name="navigation.disclosure" size={13} aria-hidden="true" /><span><strong>{entry.title}</strong><code>{entry.form}</code></span></summary>
+    <summary><SemanticIcon name="navigation.disclosure" size={13} aria-hidden="true" /><strong>{entry.title}</strong></summary>
     {open && active ? <div className="amux-protocols__body"><p className="amux-protocols__description">{entry.description}</p>{entry.form === 'prompt' ? <PromptExamples entry={entry} /> : <ProtocolExamples entry={entry} />}
       <details className="amux-protocols__templates" open={showTemplates} onToggle={event => setShowTemplates(event.currentTarget.open)}>
         <summary>Templates</summary>
@@ -58,6 +67,18 @@ export function AmuxProtocolReference({ active }: { active: boolean }) {
     return normalized ? AGENTMUX_PROTOCOL_CATALOG.filter(entry => `${entry.id} ${entry.title} ${entry.description} ${entry.form} ${entry.examples.map(example => `${example.label} ${example.wire}`).join(' ')}`.toLowerCase().includes(normalized) ||
       entry.templates.some(template => template.name.includes(normalized) || template.text.toLowerCase().includes(normalized))) : AGENTMUX_PROTOCOL_CATALOG
   }, [query])
+  const groups = useMemo(() => {
+    const byForm = new Map<string, AgentMuxProtocolCatalogEntry[]>()
+    for (const entry of visible) {
+      const entries = byForm.get(entry.form)
+      if (entries) entries.push(entry)
+      else byForm.set(entry.form, [entry])
+    }
+    return Object.entries(formTitles).flatMap(([form, title]) => {
+      const entries = byForm.get(form)
+      return entries ? [{ form, title, entries }] : []
+    })
+  }, [visible])
   function openFirstExample() {
     if (!firstExample.current) return
     firstExample.current.open = true
@@ -71,7 +92,12 @@ export function AmuxProtocolReference({ active }: { active: boolean }) {
       {visible.length ? <Button type="button" onClick={openFirstExample}>View first example</Button> : null}
     </div>
     <p className="amux-protocols__read-only">Read-only examples do not contact Agents, open links or execute protocol hints.</p>
-    <div className="amux-protocols__index">{visible.length ? <div className="amux-protocols__list">{visible.map((entry, index) => <ProtocolRow key={entry.id} entry={entry} active={active} rowRef={index === 0 ? firstExample : undefined} />)}</div>
+    <div className="amux-protocols__index">{groups.length ? <div className="amux-protocols__groups">{groups.map(({ form, title, entries }, groupIndex) =>
+      <section key={form} data-protocol-form={form} aria-labelledby={`amux-protocol-form-${form}`}>
+        <h3 id={`amux-protocol-form-${form}`}>{title}</h3>
+        <div className="amux-protocols__list">{entries.map((entry, index) =>
+          <ProtocolRow key={entry.id} entry={entry} active={active} rowRef={groupIndex === 0 && index === 0 ? firstExample : undefined} />)}</div>
+      </section>)}</div>
       : <p className="amux-protocols__empty">No entries match “{query}”. Try a name, format or template.</p>}</div>
   </section>
 }

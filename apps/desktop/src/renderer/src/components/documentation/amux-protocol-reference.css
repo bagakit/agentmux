@@ -9,6 +9,9 @@
 .amux-protocols__index { min-height: 0; min-width: 0; flex: 1; overflow: auto; }
 .amux-protocols__empty { margin: 0; padding-block: var(--sp-5); color: var(--text-2); font-size: var(--fs-body); line-height: 1.6; }
 .amux-protocols__read-only { margin: 0; flex: none; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; }
+.amux-protocols__groups { display: grid; gap: var(--sp-5); min-width: 0; }
+.amux-protocols__groups > section { min-width: 0; }
+.amux-protocols__groups h3 { margin: 0 0 var(--sp-2); padding-inline: var(--sp-1); color: var(--text-2); font-size: var(--fs-meta); font-weight: 600; line-height: 1.5; }
 .amux-protocols__list { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
 .amux-protocols__row { min-width: 0; border-top: 1px solid var(--line-soft); }
 .amux-protocols__row:first-child { border-top: 0; }
@@ -17,9 +20,7 @@
 .amux-protocols__row > summary::-webkit-details-marker { display: none; }
 .amux-protocols__row > summary > svg { flex: none; color: var(--text-3); transition: transform var(--dur-fast); }
 .amux-protocols__row[open] > summary > svg { transform: rotate(90deg); }
-.amux-protocols__row > summary > span { min-width: 0; flex: 1; display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3); }
-.amux-protocols__row strong { color: var(--text); font-size: var(--fs-body); font-weight: 600; overflow-wrap: anywhere; }
-.amux-protocols__row summary code { flex: none; color: var(--text-3); font: var(--fs-micro)/1.6 var(--font-mono); }
+.amux-protocols__row > summary > strong { min-width: 0; color: var(--text); font-size: var(--fs-body); font-weight: 600; overflow-wrap: anywhere; }
 .amux-protocols__row > summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -3px; border-radius: var(--radius-sm); }
 .amux-protocols__body { min-width: 0; padding: 0 var(--sp-4) var(--sp-4); }
 .amux-protocols__description { margin: 0 0 var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; }
@@ -44,7 +45,6 @@
   .amux-protocols__search { grid-column: 1 / -1; }
   .amux-protocols__toolbar > button { justify-self: end; }
   .amux-protocols__row > summary { padding: var(--sp-3); gap: var(--sp-2); }
-  .amux-protocols__row > summary > span { gap: var(--sp-2); }
   .amux-protocols__body { padding: 0 var(--sp-3) var(--sp-3); }
 }
 .amux-protocols__source { min-width: 0; padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-0); }
