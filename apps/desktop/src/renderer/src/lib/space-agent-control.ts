@@ -81,13 +81,19 @@ function issue(step: string, code: string, error: unknown): AgentMuxSpatialIssue
 const unsaved = (layoutApplied = false): AgentMuxSpatialSave => ({ layoutApplied, clientStateWritten: false,
   storageFlushRequested: false, diskDurability: 'unconfirmed', reason: 'No save has been observed by this read.' })
 
-/** Metadata only; every durable entity is indexed once, independent of display. */
-export function spatialCatalog(state: SpatialReadFacts, topics: readonly ScratchTopicSnapshot[], categorySeeds?: ReadonlyMap<string, string | null>): AgentMuxSpaceCatalog {
-  const sources = spatialSources(state.config, topics, state.spaceZoneBindings,
+function readSpatialSources(state: Pick<SpatialReadFacts, 'config' | 'tabs' | 'spaceZoneBindings' | 'topicCategories'>,
+  topics: readonly ScratchTopicSnapshot[], categorySeeds?: ReadonlyMap<string, string | null>) {
+  return spatialSources(state.config, topics, state.spaceZoneBindings,
     // Source Tabs are display projections. Their Workspace cannot contribute an
     // execution resource for the original Zone (including a same-Runtime view).
     Object.values(state.tabs).flatMap(tab => tab.space && !tab.source ? [{ workspaceId: tab.workspaceId, space: tab.space }] : []), state.topicCategories, categorySeeds)
+}
+
+/** Metadata only; every durable entity is indexed once, independent of display. */
+export function spatialCatalog(state: SpatialReadFacts, topics: readonly ScratchTopicSnapshot[], categorySeeds?: ReadonlyMap<string, string | null>): AgentMuxSpaceCatalog {
+  const sources = readSpatialSources(state, topics, categorySeeds)
   const catalog: AgentMuxSpaceCatalog = { ...sources, ...(state.projectGroups ? { projectGroups: state.projectGroups } : {}), tabs: [], regions: [], locations: [] }
+  const zonesById = new Map(sources.zones.map(zone => [zone.zoneId, zone]))
   const sessions = new Map(state.sessions.map(session => [session.id, session]))
   const originalRegions = new Map(state.originalSpatialGraph?.regions.map(region => [JSON.stringify([region.tabId, region.regionId]), region]))
   const tabs = new Map<string, AgentMuxSpaceCatalog['tabs'][number]>()
@@ -106,7 +112,7 @@ export function spatialCatalog(state: SpatialReadFacts, topics: readonly Scratch
       ? source?.zoneId ?? null
       : tab.workspaceId === SCRATCH_WORKSPACE_ID ? homeZoneId(directoryIdentity(workspace.hostId, workspace.path))
         : workspaceZoneId(directoryIdentity(workspace.hostId, workspace.repoPath ?? workspace.path), workspace.id) : null)
-    const resolvedZone = sources.zones.find(zone => zone.zoneId === referencedZoneId)
+    const resolvedZone = referencedZoneId === null ? undefined : zonesById.get(referencedZoneId)
     const zoneId = resolvedZone?.workspaceId === tab.workspaceId ? referencedZoneId : null
     const contextIssue = zoneId === null ? 'The original Zone membership is unknown or contradicts its resource Workspace; the Tab identity is retained.' : undefined
     const ids = regionIds(tab.layout.root).filter(id => Object.hasOwn(tab.regions, id))
@@ -192,19 +198,19 @@ export function zoneContext(state: SpatialReadFacts, topics: readonly ScratchTop
 }
 
 /** Pure creation on the original Zone owner; callers choose when its complete graph is committed. */
-export function planSpatialZone(state: SpatialWorkbench, topics: readonly ScratchTopicSnapshot[],
+export function planSpatialZone(state: Pick<SpatialReadFacts, 'config' | 'tabs' | 'spaceZoneBindings' | 'topicCategories' | 'originalSpatialGraph'>, topics: readonly ScratchTopicSnapshot[],
   input: { zoneId: string; workspaceId: string; spaceIds: readonly string[] }): { zone: AgentMuxZoneFact; spaceZoneBindings: SpaceZoneBindings } {
   const workspace = state.config?.workspaces.find(workspace => workspace.id === input.workspaceId)
   if (!workspace) failure('SPACE_RESOURCE_UNKNOWN', 'Choose an existing resource Workspace before creating a Zone.')
-  const catalog = spatialCatalog(state, topics)
-  if (catalog.zones.some(zone => zone.zoneId === input.zoneId) || state.originalSpatialGraph?.zones.some(zone => zone.zoneId === input.zoneId) || state.spaceZoneBindings[input.zoneId])
+  const sources = readSpatialSources(state, topics)
+  if (sources.zones.some(zone => zone.zoneId === input.zoneId) || state.originalSpatialGraph?.zones.some(zone => zone.zoneId === input.zoneId) || state.spaceZoneBindings[input.zoneId])
     failure('SPACE_TARGET_CHANGED', 'The reserved Zone identity is already held. Existing content is kept; choose a new creation intent.')
-  for (const spaceId of input.spaceIds) if (!catalog.spaces.some(space => space.spaceId === spaceId)) failure('SPACE_TARGET_UNKNOWN', 'The exact initial Space is not known.')
+  for (const spaceId of input.spaceIds) if (!sources.spaces.some(space => space.spaceId === spaceId)) failure('SPACE_TARGET_UNKNOWN', 'The exact initial Space is not known.')
   const spaceId = directoryIdentity(workspace.hostId, workspace.repoPath ?? workspace.path)
   const spaceZoneBindings = { ...state.spaceZoneBindings, [input.zoneId]: {
     workspaceId: workspace.id, spaceId, relations: { [spaceId]: false, ...Object.fromEntries(input.spaceIds.map(id => [id, true])) }
   } }
-  const zone = spatialCatalog({ ...state, spaceZoneBindings }, topics).zones.find(zone => zone.zoneId === input.zoneId)!
+  const zone = readSpatialSources({ ...state, spaceZoneBindings }, topics).zones.find(zone => zone.zoneId === input.zoneId)!
   return { zone, spaceZoneBindings }
 }
 

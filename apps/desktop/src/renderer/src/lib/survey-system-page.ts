@@ -29,12 +29,12 @@ export async function openSystemPageInSurvey(host: SystemPageHost, request: { ur
   let focus: Promise<boolean> | undefined
   const unsubscribe = host.subscribe(() => { if (!presenting && !current()) navigationChanged = true })
   let preparation: SurveyBrowserPreparation | null = null
-  const present = (choose: () => void) => {
+  const present = (choose?: () => void) => {
     if (signal.aborted || latestPresentation.get(get) !== presentation || navigationChanged || !current()) return
     presenting = true
     try {
-      choose()
-      focus ??= presentKnowledgeSurface('survey', get().setMainSurface, { inputPolicy: 'target' })
+      choose?.()
+      focus ??= presentKnowledgeSurface('survey', get().setMainSurface, { inputPolicy: 'target' }).catch(() => false)
       navigation = host.navigation(); surveySelection = get().surveyZoneSelection; profile = get().surveyProfileView
     } finally { presenting = false }
   }
@@ -52,7 +52,10 @@ export async function openSystemPageInSurvey(host: SystemPageHost, request: { ur
     const hasMatch = surveyPageReuseCandidates(get(), request.url).length > 0
     // The default can change while no Renderer observes Profile pushes. Only a
     // possible reuse needs a fresh default observation before choosing its page.
-    if (hasMatch) await browserProfiles.refresh()
+    if (hasMatch) {
+      present()
+      await browserProfiles.refresh()
+    }
     if (signal.aborted) return { state: 'unconfirmed', browserId: null, reference: null, message: 'The original system request is no longer available.' }
     const profiles = browserProfiles.get()
     const defaultProfileId = !profiles.error ? profiles.profiles?.find(item => item.isDefault)?.id : undefined
