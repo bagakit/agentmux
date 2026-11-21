@@ -116,7 +116,9 @@ containing `nodeId`, `delegationOperationId` and `replyMessageId`.
   records the original report. Preserve those identities if retrieval is unavailable.
 - Continuous progress freezes the plan revision, actionable nodes and original attempt
   references for each input. Follow that frozen scope after an uncertain input.
-  When every node passes, wait for the person's Goal acceptance.
+  When every relevant Ticket passes and execution is complete, move the original Goal
+  to `in_review` with `goal update --goal ID --status in_review`. Report the evidence
+  still missing or the exact result ready for the person's acceptance.
 
 ### Recheck only the affected work
 
