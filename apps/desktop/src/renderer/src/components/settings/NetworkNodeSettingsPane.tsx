@@ -215,12 +215,12 @@ function NodePublicationEditor({ host, target, active }: { host: HostConfig; tar
           description="A readable locator. Original Runtime identity remains unchanged.">
           {field => <TextInput {...field} name="alias" value={draft.alias} onChange={event => patch({ alias: event.target.value })} placeholder="Optional lowercase name" />}
         </FormRow>
-        <FormRow className="network-node-switch" label="Share system resources"
+        <FormRow className="network-node-switch" label="Publish resource metrics"
           description="Let authorized Node readers see this device’s real resource measurements.">
           {field => <Switch {...field} name="shareResources" checked={draft.shareResources} onChange={event => patch({ shareResources: event.target.checked })} />}
         </FormRow>
         <details className="network-node-identities">
-          <summary>Map location</summary>
+          <summary>Published map location</summary>
           <FormRow className="network-node-field" layout="stacked" label="Place name">
             {field => <TextInput {...field} name="mapPlace" value={map.label} onChange={event => patch({ mapLocation: { ...map, label: event.target.value } })} />}
           </FormRow>
