@@ -59,7 +59,8 @@ Input already present retains the Run. Edits after Desktop admission remain
 available, and a later send stays in its original queue for explicit review.
 A retained result names the blocking fact. If the Stop result is uncertain,
 preserve that operation ID and inspect it before retrying.
-The original authorized person or device can read it with
-`agent stop inspect --session SID --run RUN --operation-id OP`.
+The current Supervisor can read it with `goal closeout --inspect` and the same
+Goal, attempt, Session, Run and operation. An authorized person or device can
+also use `agent stop inspect --session SID --run RUN --operation-id OP`.
 The collection and Stop receipts preserve the report's independent review and
 human acceptance as separate steps.
