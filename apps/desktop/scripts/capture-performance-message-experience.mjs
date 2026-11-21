@@ -24,10 +24,22 @@ const owning = [
   'apps/desktop/src/renderer/src/components/performance/PerformanceMetric.tsx',
   'apps/desktop/src/renderer/src/components/performance/PerformanceTrend.tsx',
   'apps/desktop/src/renderer/src/components/performance/PerformanceResourceDetails.tsx',
+  'apps/desktop/src/renderer/src/components/performance/PerformanceHostResources.tsx',
+  'apps/desktop/src/renderer/src/components/performance/PerformanceReclaim.tsx',
+  'apps/desktop/src/renderer/src/components/performance/PerformanceCapture.tsx',
+  'apps/desktop/src/renderer/src/components/performance/PerformanceProfileImport.tsx',
+  'apps/desktop/src/renderer/src/components/performance/PerformanceScene.tsx',
+  'apps/desktop/src/renderer/src/components/performance/PerformanceHeapSnapshot.tsx',
   'apps/desktop/src/renderer/src/components/performance/use-performance-app-trend.ts',
   'apps/desktop/src/renderer/src/components/SessionMailbox.tsx',
   'apps/desktop/src/renderer/src/components/ServiceNoticeRow.tsx',
   'apps/desktop/src/renderer/src/components/MailboxReading.tsx',
+  'apps/desktop/src/renderer/src/components/MailboxA2A.tsx',
+  'apps/desktop/src/renderer/src/components/ComposerOutbox.tsx',
+  'apps/desktop/src/renderer/src/components/MailboxNavigation.tsx',
+  'apps/desktop/src/renderer/src/components/MailboxWorkspaceNavigation.tsx',
+  'apps/desktop/src/renderer/src/components/LiquidSelectionSurface.tsx',
+  'apps/desktop/src/renderer/src/components/use-mailbox-motion.ts',
   'apps/desktop/src/renderer/src/styles/performance-toolkit.css',
   'packages/client-ui/src/components/MailboxRecordRow.tsx',
   'packages/client-ui/src/styles/composer.css'
@@ -72,7 +84,8 @@ for (const file of owning) {
 for (const file of ['apps/desktop/scripts/capture-performance-message-experience.mjs',
   'apps/desktop/scripts/fixtures/performance-message-experience/entry.tsx',
   'apps/desktop/scripts/fixtures/performance-message-experience/main.cjs',
-  'apps/desktop/scripts/fixtures/performance-message-experience/index.html']) {
+  'apps/desktop/scripts/fixtures/performance-message-experience/index.html',
+  'apps/desktop/scripts/fixtures/performance-message-experience/store.ts']) {
   const digest = hash(await readFile(join(root, file))); sources[file] = { file: digest, consumed: digest }
 }
 const outputs = {}

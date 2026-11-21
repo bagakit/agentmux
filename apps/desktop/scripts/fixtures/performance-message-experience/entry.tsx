@@ -10,6 +10,8 @@ import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore } from '../../../src/renderer/src/store'
 import type { ToolkitMetricsSnapshot } from '../../../src/shared/toolkit'
 import type { useServiceNotices } from '../../../src/renderer/src/lib/use-service-notices'
+import type { SessionMailReading } from '../../../src/renderer/src/lib/use-session-messages'
+import type { AgentMuxMessageMetadata, DurableAgentMuxMessage } from '@agentmux/core'
 import { performanceAttributionSnapshots } from '../performance-panel/data'
 import '../../../src/renderer/src/styles/index.css'
 
@@ -65,8 +67,42 @@ const notices: ReturnType<typeof useServiceNotices> = {
     summary: { step: 'Output connection interrupted', mode: 'Your Agent is still running. Reconnect to resume reading.', restore: 'Reconnect the original output channel.' }
   }]
 }
+const reference = { hostId: 'local', agentSessionId: 'Design review' }
+const originalMessages: DurableAgentMuxMessage[] = [{
+  sequence: 2,
+  envelope: { schema: 'agentmux.a2a.v1', messageId: 'agent-inbox', operationId: 'operation-agent-inbox', createdAt: 2000,
+    sender: { kind: 'agent-session', agentSessionId: 'Research reviewer' }, recipient: { kind: 'agent-session', agentSessionId: reference.agentSessionId },
+    senderSessionId: 'Research reviewer', recipientSessionId: reference.agentSessionId, senderRunId: 'run-research', recipientRunId: 'run-design',
+    threadId: 'thread-design', correlationId: 'correlation-design', replyTo: null, workspaceId: null,
+    body: 'The revised hierarchy is much clearer. I would keep the selected sample visible and let the supporting details stay quiet.' },
+  delivery: { state: 'delivered', at: 2100 }
+}, {
+  sequence: 1,
+  envelope: { schema: 'agentmux.a2a.v1', messageId: 'agent-outbox', operationId: 'operation-agent-outbox', createdAt: 1000,
+    sender: { kind: 'agent-session', agentSessionId: reference.agentSessionId }, recipient: { kind: 'agent-session', agentSessionId: 'Research reviewer' },
+    senderSessionId: reference.agentSessionId, recipientSessionId: 'Research reviewer', senderRunId: 'run-design', recipientRunId: 'run-research',
+    threadId: 'thread-design', correlationId: 'correlation-design', replyTo: null, workspaceId: null,
+    body: 'Please review the original interaction receipts and keep the reading layout stable while the selection moves.' },
+  delivery: { state: 'accepted', at: 1100 }
+}]
+function metadata(value: DurableAgentMuxMessage): AgentMuxMessageMetadata {
+  const { body, ...envelope } = value.envelope
+  return { sequence: value.sequence, envelope, delivery: value.delivery, bodyPreview: body.slice(0, 240), bodyBytes: new TextEncoder().encode(body).byteLength }
+}
+const originalMail: SessionMailReading = {
+  identity: 'controlled-design-review', runtimeId: 'runtime-design-review', reference,
+  list: async ({ direction }) => ({ hostId: reference.hostId, participantSessionId: reference.agentSessionId, direction,
+    messages: originalMessages.filter(message => direction === 'incoming' ? message.envelope.recipientSessionId === reference.agentSessionId && message.envelope.senderSessionId !== reference.agentSessionId
+      : message.envelope.senderSessionId === reference.agentSessionId && message.envelope.recipientSessionId !== reference.agentSessionId).map(metadata), nextBeforeSequence: null }),
+  read: async messageId => ({ hostId: reference.hostId, message: structuredClone(originalMessages.find(message => message.envelope.messageId === messageId)!) }),
+  dispatches: async () => ({ hostId: reference.hostId, participantSessionId: reference.agentSessionId, dispatches: [], nextSourceMessageId: null }),
+  dispatch: async () => { throw Error('This controlled reading has no Dispatch record.') }
+}
 function renderMessages() {
-  flushSync(() => root.render(<DesktopClientUiProvider><div className="composer experience-composer"><SessionMailbox system={notices} queued={[]}
+  flushSync(() => root.render(<DesktopClientUiProvider><div className="composer experience-composer"><SessionMailbox system={notices} originalMail={originalMail}
+    queued={[{ id: 'hierarchy-pass', text: 'Tighten the visual hierarchy once more, then keep this exact input available for review.', enqueuedAt: 3000,
+      status: 'queued', deliverable: true, editable: true, awaitingExplicitSend: true }]}
+    onSendQueued={id => actions.push(`send:${id}`)} onCopyQueued={async text => { actions.push(`copy:${text.length}`); return true }}
     timeline={{ agentSessionId: 'Design review', revision: 1, items: [] }}
     progressUnavailable={{ message: 'Automation metadata is not confirmed.', onRefresh: () => actions.push('refresh-automation') }} /></div></DesktopClientUiProvider>))
 }
