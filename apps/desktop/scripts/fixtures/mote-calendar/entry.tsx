@@ -100,7 +100,7 @@ function sceneRecords(): ContinuousProgressLoop[] {
         lastMotePublication: { conversationId, messageId, occurrenceAt, operationId: 'scheduled/' + loopId + '/' + occurrenceAt } })
     return [
       arranged('calendar-direct-work', '核对发布手册', { kind: 'direct', mote: assignmentMote, peer: assignmentPeer },
-        directFixture.list.threads[0]!.id, 'original-private-assignment'),
+        directFixture.list.threads[0]!.id, 'another-private-assignment'),
       arranged('calendar-group-work', '汇总发布确认', { kind: 'group', mote: assignmentMote, groupId: groupAssignment.groupId,
         recipients: [{ moteId: assignmentPeer.spaceId, generation: 'original' }] }, groupAssignment.groupId, groupAssignment.id),
     ]
@@ -176,6 +176,19 @@ api.schedule.history = async params => {
   calls.push({ method: 'schedule.history', params: clone(params) })
   const record = records.find(item => item.loopId === params.scheduleId)
   if (!record) throw new Error('PRIVATE_FIXTURE_HISTORY_SCOPE_MISMATCH')
+  if (record.moteWork) {
+    const original = record.lastMotePublication!
+    const previousAt = original.occurrenceAt - 2 * minute
+    const publications = record.moteWork.kind === 'direct' ? [original, { ...original,
+      occurrenceAt: previousAt, messageId: 'original-private-assignment', operationId: `scheduled/${record.loopId}/${previousAt}` }] : [original]
+    return validateScheduleRpcResult('schedule.history', { scheduleId: params.scheduleId, from: params.from, to: params.to,
+      executionScope: 'connected-host', coverage: 'recorded-publications', entries: [], nextCursor: null,
+      ...(params.bucketStarts ? { buckets: [], publicationBuckets: params.bucketStarts.flatMap((from, index, starts) => {
+        const to = starts[index + 1] ?? params.to
+        const within = publications.filter(row => row.occurrenceAt >= from && row.occurrenceAt < to)
+        return within.length ? [{ from, to, count: within.length, firstAt: within.at(-1)!.occurrenceAt, lastAt: within[0]!.occurrenceAt }] : []
+      }) } : { publications: publications.filter(row => row.occurrenceAt >= params.from && row.occurrenceAt < params.to) }) }, params)
+  }
   const entries: ScheduleHistoryEntry[] = []
   function add(at: number, input: string, failed = false) {
     if (at < params.from || at >= params.to) return

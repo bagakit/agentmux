@@ -96,8 +96,8 @@ app.whenReady().then(async () => {
     await click(control('[role="tab"]', 'Calendar'))
     if (assignmentProof) {
       await view('Upcoming')
-      const direct = { scheduleId: 'calendar-direct-work', method: 'space.mote.direct.inspect', sourceId: 'original-private-assignment',
-        replyId: 'original-private-report', target: 'threadId', conversationId: 'private-work-review' }
+      const direct = { scheduleId: 'calendar-direct-work', method: 'space.mote.direct.inspect', sourceId: 'another-private-assignment',
+        target: 'threadId', conversationId: 'private-work-review' }
       const group = { scheduleId: 'calendar-group-work', method: 'space.mote.group.inspect', sourceId: 'calendar-original-group-assignment',
         replyId: 'calendar-original-group-report', target: 'groupId', conversationId: 'calendar-public-work' }
       const facts = () => read('window.moteCalendarScene.facts()')
@@ -117,10 +117,11 @@ app.whenReady().then(async () => {
         await click(trigger)
         const detail = '.mote-direct-panel[data-view="assignment"]'
         const source = locator(detail + ' [data-direct-message-id="' + sourceId + '"]')
-        const reply = locator(detail + ' [data-direct-message-id="' + replyId + '"]')
-        await waitFor(`${source}?.innerText.includes("资料整理 · 已接收") && !!${reply}`, 'original assignment audience and exact correlated report')
+        const state = item === direct ? '等待接收' : '已接收'
+        const reply = replyId ? `!!${locator(detail + ' [data-direct-message-id="' + replyId + '"]')}` : `${locator(detail)}?.innerText.includes('暂无回报')`
+        await waitFor(`${source}?.innerText.includes(${JSON.stringify('资料整理 · ' + state)}) && ${reply}`, 'original assignment audience and exact correlated report')
         const visible = await read(`[...document.querySelectorAll(${JSON.stringify(detail + ' [data-direct-message-id]')})].map(e=>e.dataset.directMessageId)`)
-        assert.deepEqual(visible, [sourceId, replyId], 'Only the original assignment and its own report are presented')
+        assert.deepEqual(visible, replyId ? [sourceId, replyId] : [sourceId], 'Only the original assignment and its own report are presented')
         await settleMotion()
         await capture(scheduleId)
         if (item === direct) await click(locator(detail + ' [aria-label="关闭作业详情"]'))
@@ -140,6 +141,28 @@ app.whenReady().then(async () => {
           await read('window.moteCalendarScene.theme("light")')
         }
       }
+      win.setContentSize(1180, 800)
+      await view('Month')
+      const saved = before.records.find(record => record.loopId === direct.scheduleId).lastMotePublication
+      const earlierAt = saved.occurrenceAt - 120_000
+      const date = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(earlierAt)
+      await click(locator(`[data-mote-date="${date}"]`))
+      const earlierButton = `.mote-calendar__event[data-event-schedule="${direct.scheduleId}"][data-event-occurrence="${earlierAt}"]`
+      await click(locator(earlierButton))
+      const originalTrigger = control('li:has(' + earlierButton + ') button', '查看作业与回报')
+      await waitFor(`!${calendar}.innerText.includes('Reading recorded events…') && !${calendar}.innerText.includes('Recorded events partially available')`,
+        'The visible history is confirmed')
+      const directCell = locator('[data-calendar-schedule-id="calendar-direct-work"][title*="published"]')
+      await waitFor(`${directCell}?.innerText.includes('核对发布手册') && ${directCell}?.innerText.includes('2 published')`,
+        'Calendar uses the original assignment title and counts both rounds')
+      await settleMotion()
+      await capture('calendar-earlier-round')
+      await click(originalTrigger)
+      const originalDetail = locator('.mote-direct-panel[data-view="assignment"]')
+      await waitFor(`${originalDetail}?.querySelector('[data-direct-message-id=original-private-report]')`, 'older round opens its own private report')
+      assert.equal(await read(`!!${originalDetail}?.querySelector('[data-direct-message-id=another-private-assignment]')`), false)
+      await capture('calendar-earlier-round-details')
+      await click(locator('.mote-direct-panel[data-view="assignment"] [aria-label="关闭作业详情"]'))
       const after = await facts()
       assert.deepEqual(after.drafts, before.drafts)
       assert.deepEqual(after.selection, before.selection)

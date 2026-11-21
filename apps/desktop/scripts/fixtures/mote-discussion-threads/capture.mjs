@@ -14,7 +14,7 @@ const direct = process.argv.includes('--direct-threads')
 const fixture = navigation ? path.join(import.meta.dirname, '../mote-thread-navigation') : import.meta.dirname
 const require = createRequire(path.join(root, 'apps/desktop/package.json'))
 const { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
-const directory = path.join(process.env.AMUX_DESKTOP_CAPTURE_ROOT ?? path.join(root, '.bagakit/mote-discussion-threads/desktop-ui'), 'capture-' + crypto.randomUUID())
+const directory = path.resolve(process.env.AMUX_DESKTOP_CAPTURE_ROOT ?? path.join(root, '.bagakit/mote-discussion-threads/desktop-ui'), 'capture-' + crypto.randomUUID())
 const compiled = path.join(directory, 'compiled')
 await fs.mkdir(compiled, { recursive: true }); await fs.mkdir(path.join(directory, 'userData'))
 const receipt = { passed: false, captureOnly: true, aestheticReview: 'not-performed', captureSubset: groups ? 'mote-native-groups-full-app' : 'mote-discussion-threads-full-app', source: {}, images: {},
@@ -90,7 +90,7 @@ try {
   }
   const built = await build({ absWorkingDir: root, entryPoints: [path.join(fixture, 'entry.tsx')], outdir: compiled, bundle: true,
     format: 'esm', platform: 'browser', conditions: ['browser', 'production'], target: 'esnext', jsx: 'automatic', logLevel: 'error', metafile: true, alias, plugins: [...(mutant ? [groupMutation] : []), clientSources, rendererDemand, workers],
-    loader: { '.png': 'file', '.gif': 'file', '.svg': 'file', '.avif': 'file', '.woff': 'file', '.woff2': 'file', '.ttf': 'file' }, define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' } })
+    loader: { '.png': 'file', '.jpg': 'file', '.gif': 'file', '.svg': 'file', '.avif': 'file', '.woff': 'file', '.woff2': 'file', '.ttf': 'file' }, define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' } })
   for (const file of Object.keys({ ...built.metafile.inputs, ...workerInputs }).filter(file => !file.startsWith('original-worker:') && !file.startsWith('original-url:') && !file.startsWith('original-raw:'))) receipt.source[file] = sha(await fs.readFile(path.resolve(root, file)))
   for (const file of [import.meta.filename, path.join(fixture, 'renderer-main.cjs'), ...navigation ? [] : [path.join(fixture, 'thread-discovery.cjs'), ...(groups ? [path.join(fixture, 'native-groups.cjs')] : []), ...(advanced ? [path.join(fixture, 'group-management.cjs')] : [])]]) receipt.source[path.relative(root, file)] = sha(await fs.readFile(file))
   for (const file of ['apps/desktop/src/renderer/src/App.tsx', 'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/components/PmoTeamsTopicFloatingPanel.tsx', 'apps/desktop/src/renderer/src/components/MoteSpaceFrame.tsx', 'apps/desktop/src/renderer/src/components/WorkspaceWorkbench.tsx', 'apps/desktop/src/renderer/src/components/SessionPane.tsx', 'apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx', 'apps/desktop/src/renderer/src/components/MoteCooperation.tsx'])
@@ -103,7 +103,7 @@ try {
   await fs.writeFile(path.join(directory, 'renderer.log'), logs.join('\n'))
   receipt.renderer = JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8'))
   assert.equal(receipt.process.exitCode, 0); assert.equal(receipt.renderer.passed, true)
-  assert.equal(receipt.renderer.images.length, direct ? 9 : navigation ? 15 : advanced ? 10 : groups ? 7 : process.argv.includes('--notice-only') ? 2 : 15, 'Every named real product scene must be captured')
+  assert.equal(receipt.renderer.images.length, direct ? 10 : navigation ? 15 : advanced ? 10 : groups ? 8 : process.argv.includes('--notice-only') ? 2 : 15, 'Every named real product scene must be captured')
   if (navigation) {
     receipt.restartProcess = await runProbeProcess(require('electron'), [path.join(fixture, 'renderer-main.cjs'), path.join(compiled, 'index.html'), directory, directory, '--restore'], { cwd: root, env, timeoutMs: 45000, onLine: line => logs.push(line) })
     receipt.restart = JSON.parse(await fs.readFile(path.join(directory, 'renderer-restart-result.json'), 'utf8'))

@@ -22,7 +22,13 @@ module.exports = async ({ win, panel, findButton, read, until, click, type, capt
  await capture('04-group-original-work-wide-dark')
  await click(named('群聊原文'))
  assert.equal(await read('document.activeElement.dataset.groupMessageId'), 'public-reply', 'Mote perspective links to the exact canonical public reply')
- await click('js:' + panel + '.querySelector(".mote-group__recipients button")')
+ await type('textarea[aria-label="群消息"]', '@研究')
+ const mention = 'js:' + panel + '.querySelector(".mote-group__mention-menu button")'
+ await until(panel + '.querySelector(".mote-group__mention-menu button")?.textContent === "研究搭档"', 'Typed mention resolves the active Mote')
+ await capture('group-mention-wide-dark')
+ await click(mention)
+ const selected = `Array.from(${panel}.querySelectorAll('.mote-group__recipients [aria-pressed="true"]')).map(button=>button.textContent)`
+ assert.deepEqual(await read(selected), ['研究搭档'])
  await type('textarea[aria-label="群消息"]', '请核对这条消息只发布一次。')
  await click(named('发送'))
  await until(panel + '.innerText.includes("首次确认响应中断")', 'Exact original operation remains visible after a lost acknowledgement')

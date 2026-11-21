@@ -3,7 +3,8 @@ import { createRoot } from 'react-dom/client'
 import { afterEach, expect, it, vi } from 'vitest'
 import { MoteGroupConversation, type MoteGroupCall } from '../../../packages/client-ui/src/components/MoteGroupConversation'
 import { MoteGroupDetails } from '../../../packages/client-ui/src/components/MoteGroupSettings'
-import type { MoteGroupSummary } from '@agentmux/core/mote/group'
+import { MoteDirectThreads, type ReadMoteConversationWork } from '../../../packages/client-ui/src/components/MoteDirectThreads'
+import type { MoteGroupMessage, MoteGroupSummary } from '@agentmux/core/mote/group'
 import { ipcResult, unwrapIpcResult } from '../src/shared/ipc-result'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
@@ -14,13 +15,72 @@ const group: MoteGroupSummary = { id: 'room', name: 'Readable original group', l
 const disposals: Array<() => Promise<void>> = []
 function mount() {
   const container = document.createElement('div')
+  document.body.append(container)
   const root = createRoot(container)
-  disposals.push(async () => act(async () => root.unmount()))
+  disposals.push(async () => { await act(async () => root.unmount()); container.remove() })
   return { root, container, button: (name: string) => [...container.querySelectorAll('button')].find(button => button.textContent === name) }
 }
 afterEach(async () => {
   for (const dispose of disposals.splice(0)) await dispose()
   vi.useRealTimers()
+})
+
+it('selects an exact active recipient from a typed group mention', async () => {
+  const { root, container, button } = mount()
+  const removed = { ...group.members[0]!, moteId: 'removed', name: 'Original departed', state: 'removed' as const }
+  const room = { ...group, members: [...group.members, removed] }
+  const rpc = vi.fn(async (method: string, params: { body?: string }) => method === 'space.mote.group.send'
+    ? { message: { id: 'sent', groupId: room.id, sequence: 1, createdAt: 1, body: params.body,
+      author: { kind: 'human', id: 'user' }, deliveries: [] } }
+    : { group: room, viewerId: 'user', messages: [], nextBeforeSequence: null })
+  await act(async () => root.render(<MoteGroupConversation call={rpc as MoteGroupCall} groupId={room.id}
+    candidates={[]} onOpen={() => {}} onClose={() => {}} />))
+  const textarea = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="群消息"]')!
+  await act(async () => {
+    textarea.focus()
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, '请 @Original')
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length)
+    textarea.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  const menu = container.querySelector('[aria-label="点名成员"]')!
+  expect(menu.textContent).toBe('Original member')
+  await act(async () => textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
+  expect(document.activeElement).toBe(menu.querySelector('button'))
+  await act(async () => menu.querySelector('button')!.click())
+  expect(textarea.value).toBe('请 @Original member ')
+  expect(container.querySelector('[aria-label="选择参与成员"] [aria-pressed="true"]')?.textContent).toBe('Original member')
+  await act(async () => button('发送')!.click())
+  expect(rpc).toHaveBeenCalledWith('space.mote.group.send', expect.objectContaining({ groupId: room.id,
+    body: '请 @Original member ', recipientIds: ['member'] }))
+})
+
+it('shows the exact group assignment and its reported recipient after unrelated messages', async () => {
+  const { root, container } = mount()
+  const member = group.members[0]!
+  const coordinator = { ...member, moteId: 'coordinator', name: 'Coordinator', target: { ...member.target, spaceId: 'coordinator' } }
+  const other = { ...member, moteId: 'other', name: 'Another member', target: { ...member.target, spaceId: 'other' } }
+  const assignment: MoteGroupMessage = { id: 'frozen-assignment', groupId: group.id, sequence: 1, createdAt: 1,
+    body: 'Review the launch checklist', author: { kind: 'mote', moteId: coordinator.moteId, name: coordinator.name },
+    deliveries: [{ moteId: member.moteId, operationId: 'admitted', status: 'accepted' }, { moteId: other.moteId, operationId: 'failed', status: 'failed' }] }
+  const report: MoteGroupMessage = { ...assignment, id: 'report', sequence: 2, createdAt: 2, body: 'Ready for launch',
+    author: { kind: 'mote', moteId: member.moteId, name: member.name }, deliveries: [], replyToMessageId: assignment.id }
+  const differentReport: MoteGroupMessage = { ...report, id: 'other-report', replyToMessageId: 'another-assignment',
+    author: { kind: 'mote', moteId: other.moteId, name: other.name } }
+  const room = { ...group, members: [coordinator, member, other],
+    lastMessage: { ...report, id: 'ordinary', author: { kind: 'human', id: 'user' }, body: 'Unrelated discussion' },
+    lastAssignment: { messageId: assignment.id, createdAt: assignment.createdAt } }
+  const rpc = vi.fn(async (method: string, params: { messageId?: string; replyToMessageId?: string }) => {
+    if (method === 'space.mote.direct.list') return { threads: [], nextBeforeSequence: null }
+    if (method === 'space.mote.group.list') return { groups: [room], nextBeforeSequence: null }
+    return { group: room, messages: params.messageId === assignment.id ? [assignment] : [report, differentReport], nextBeforeSequence: null }
+  })
+  const read = rpc as ReadMoteConversationWork
+  await act(async () => root.render(<MoteDirectThreads mote={coordinator.target} active read={read} readGroup={read} />))
+  const progress = container.querySelector('[aria-label="作业进展"]')!
+  expect(progress.textContent).toContain(assignment.body)
+  expect([...progress.querySelectorAll('li')].map(item => item.textContent)).toEqual(['Original member已回报', 'Another member交付失败'])
+  expect(rpc).toHaveBeenCalledWith('space.mote.group.inspect', { groupId: room.id, messageId: assignment.id })
+  expect(rpc).toHaveBeenCalledWith('space.mote.group.inspect', { groupId: room.id, replyToMessageId: assignment.id, limit: 12 })
 })
 
 it('shows valid slow observations without overlapping background polls', async () => {

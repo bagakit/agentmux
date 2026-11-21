@@ -59,7 +59,8 @@ export function createMoteDialogueCapture(threadLayout = false) {
     unconfirm() { unknown = true },
     facts: () => ({ target, page, maintenance, defaults }),
     rpc(method: string, input: any) {
-      if (method === 'space.mote.direct.list') return direct.list
+      if (method === 'space.mote.direct.list') return input.includeLastAssignment ? direct.assignments : direct.list
+      if (method === 'space.mote.group.list' && input.includeLastAssignment) return { groups: [], nextBeforeSequence: null }
       if (method === 'space.mote.direct.inspect') return direct.inspect(input.threadId, input.messageId, input.replyToMessageId)
       if (method === 'space.mote.direct.image.read') return direct.image(input)
       if (method === 'space.state') return { state: { graph: { resources: setup?.record ? { 'core:agent-open': { schema: 'agentmux.spatial-agent-open.v1', requests: { [setup.operationId]: setup.record } } } : {} } } }

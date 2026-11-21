@@ -14,6 +14,8 @@ const mutations = {
   'invite-gone': ['MoteGroupSettings.tsx', 'disabled={changing || !selectedInvitees.length}', 'disabled={changing || !invite.length}'],
   'keep-inactive-avatar': ['MoteGroupSettings.tsx', 'const retained = changes.avatarMoteIds.filter(id => active.some(member => member.moteId === id))',
     'const retained = changes.avatarMoteIds'],
+  'miss-exact-mention': ['MoteGroupConversation.tsx', '...value.recipientIds, member.moteId', '...value.recipientIds'],
+  'conflate-reports': ['MoteAssignment.tsx', 'reply.replyToMessageId === target.messageId ? [reply.author.moteId]', 'true ? [reply.author.moteId]'],
 } as const
 const mutation = variant ? mutations[variant as keyof typeof mutations] : undefined
 if (variant && !mutation) throw Error('Unknown Mote Group reliability mutant')

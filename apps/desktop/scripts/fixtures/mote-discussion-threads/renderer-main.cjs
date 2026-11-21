@@ -92,10 +92,12 @@ app.whenReady().then(async () => {
    await captureMotion('button[aria-label="关闭私聊"]', 'mote-direct-exit', 'desktop-private-exit-motion.png')
    await until('!document.querySelector(".mote-direct-panel")', 'Returns to original Main')
    assert.equal(await read('document.activeElement?.matches(".mote-direct-entry__summary")'), true, 'Focus returns to exact Main summary')
-   await click('.mote-direct-entry__assignment')
-   await until('document.querySelector(".mote-direct-assignment")?.innerText.includes("资料整理 · 已接收")', 'Main action opens the original assignment with its recipient')
+   await until('document.querySelector(".mote-assignment-progress")?.innerText.includes("等待接收")', 'Confirmed recent assignment is present in Main')
+   await capture('desktop-main-assignment-progress')
+   await click('.mote-assignment-progress button')
+   await until('document.querySelector(".mote-direct-assignment")?.innerText.includes("资料整理 · 等待接收")', 'Main action opens the original assignment with its recipient')
    await click('button[aria-label="关闭私聊"]')
-   await until('document.activeElement?.matches(".mote-direct-entry__assignment")', 'Focus returns to the exact Main shortcut')
+   await until('document.activeElement?.matches(".mote-assignment-progress button")', 'Focus returns to the exact Main shortcut')
    result.final = await facts(); assert.deepEqual(result.final.identities, before.identities); assert.deepEqual(result.final.drafts, before.drafts)
    result.passed = true
    return

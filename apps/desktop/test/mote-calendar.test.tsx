@@ -177,6 +177,41 @@ describe('Mote calendar original schedule consumer', () => {
     expect((await fixture!.store.load()).find(loop => loop.loopId === original.loopId)).toMatchObject({ status: 'stopped', revision: original.revision })
   })
 
+  it('opens the exact earlier assignment from the calendar instead of its latest publication', async () => {
+    const day = DateTime.fromMillis(now, { zone: 'UTC' })
+    const firstAt = day.startOf('day').plus({ hours: 1 }).toMillis()
+    const mote = { spaceId: 'mote', zoneId: 'home', expectedResource: { hostId: 'local', workspaceId: 'scratch', workspacePath: '/scratch' } }
+    const work = { kind: 'group' as const, mote, groupId: 'work-group', recipients: [{ moteId: 'peer', generation: 'original' }] }
+    const publication = (occurrenceAt: number, messageId: string) => ({ conversationId: work.groupId, messageId, occurrenceAt,
+      operationId: `scheduled/assignment/${occurrenceAt}` })
+    const first = publication(firstAt, 'morning-assignment'), second = publication(firstAt + 3600000, 'later-assignment')
+    const { futureIntentId: _nativeInput, ...assignment } = saved('assignment', {
+      moteWork: work, prompt: '核对发布稿', lastOccurrenceAt: second.occurrenceAt, lastMotePublication: second
+    })
+    await owner([assignment])
+    vi.spyOn(api.schedule, 'history').mockImplementation(async query => ({
+      scheduleId: query.scheduleId, from: query.from, to: query.to, entries: [], executionScope: 'connected-host',
+      coverage: 'recorded-publications', nextCursor: null,
+      ...(query.bucketStarts ? { buckets: [], publicationBuckets: query.bucketStarts.flatMap((from, index, starts) => {
+        const to = starts[index + 1] ?? query.to
+        const times = [first.occurrenceAt, second.occurrenceAt].filter(at => at >= from && at < to)
+        return times.length ? [{ from, to, firstAt: times[0]!, lastAt: times.at(-1)!, count: times.length }] : []
+      }) } : { publications: [second, first].filter(item => item.occurrenceAt >= query.from && item.occurrenceAt < query.to) })
+    }))
+    const read = vi.spyOn(api.moteGroup, 'call').mockRejectedValue(new Error('Original fixture ends at the owner read'))
+    await dom.render(<MoteCalendar scope={scope} reference={reference} active />)
+    await vi.waitFor(() => expect(dom.container.querySelector(`[data-mote-date="${day.toISODate()}"]`)).not.toBeNull())
+    await vi.waitFor(() => expect(dom.container.querySelector('[data-calendar-schedule-id="assignment"][title*="published"]')?.textContent)
+      .toContain('核对发布稿2 published'))
+    await act(async () => dom.container.querySelector<HTMLButtonElement>(`[data-mote-date="${day.toISODate()}"]`)!.click())
+    const rows = () => [...dom.container.querySelectorAll<HTMLButtonElement>('button[data-event-schedule="assignment"]')]
+    await vi.waitFor(() => expect(rows().filter(item => item.textContent?.includes('Assignment published'))).toHaveLength(2))
+    await act(async () => rows().find(item => item.textContent?.includes('01:00'))!.click())
+    await button('查看作业与回报')
+    await vi.waitFor(() => expect(read).toHaveBeenCalledWith('space.mote.group.inspect', { groupId: work.groupId, messageId: first.messageId }))
+    expect(read).not.toHaveBeenCalledWith('space.mote.group.inspect', { groupId: work.groupId, messageId: second.messageId })
+  })
+
   it('counts earlier recorded inputs across summary pages in the grid and opens the same hour', async () => {
     const day = DateTime.fromMillis(now, { zone: 'UTC' })
     const start = day.startOf('hour').minus({ hours: 1 })
