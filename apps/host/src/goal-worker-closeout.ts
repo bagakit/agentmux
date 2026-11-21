@@ -1,5 +1,5 @@
 import { AgentMuxError, type AgentMuxClient, type AgentMuxRpcCallContext, type AgentMuxSpatialStateStore } from '@agentmux/core'
-import { clearTimeout, setTimeout } from 'node:timers'
+import { setTimeout as delay } from 'node:timers/promises'
 import type { GoalCloseout, GoalCloseoutResult, GoalDelegationAuthority } from '@agentmux/core/goal-delegation'
 import { runBoundDemandDispatch, type Demand, type DemandStore } from '@agentmux/demand'
 import { delegationWorkerHostId, type DemandDelegation, type GoalCloseoutContext } from '@agentmux/demand/delegations'
@@ -12,13 +12,11 @@ type DesktopOccupation = GoalCloseoutContext['desktopInput']
 const closeoutObservationBudgetMs = 250
 
 async function withinObservationBudget<T>(work: () => Promise<T>): Promise<T | undefined> {
-  let timer: ReturnType<typeof setTimeout> | undefined
+  const timer = new AbortController()
   try {
-    return await Promise.race([work(), new Promise<undefined>(resolve => {
-      timer = setTimeout(resolve, closeoutObservationBudgetMs)
-    })])
+    return await Promise.race([work(), delay(closeoutObservationBudgetMs, undefined, { signal: timer.signal })])
   } finally {
-    clearTimeout(timer)
+    timer.abort()
   }
 }
 
