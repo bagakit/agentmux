@@ -281,10 +281,17 @@ it('the unknown original model operation is reachable and checkable through the 
   const receipt = { outcome: 'unknown', phase: 'settled', diskDurability: 'confirmed', operationId: 'keyboard-original', issue: 'Original acknowledgement unavailable' } as AgentConfigurationReceipt
   const set = vi.fn().mockResolvedValue(receipt)
   await dom.render(<NativeConfigurationPicker snapshot={configuration} onSet={set} onRefresh={async () => {}} />)
-  await openModel()
+  async function openWithKeyboard(phase: string) {
+    const trigger = dom.container.querySelector<HTMLButtonElement>('.composer-model-picker')!
+    await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })) })
+    await vi.waitFor(() => expect(document.querySelector('[role="menu"][aria-label="Model"]'), phase).not.toBeNull())
+  }
+  await openWithKeyboard('initial keyboard open')
   const next = [...document.querySelectorAll('[role="menuitemradio"]')].find(item => item.textContent?.includes('Next Native Model'))!
   await act(async () => { next.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0, pointerType: 'mouse' })); (next as HTMLElement).click() })
-  await openModel()
+  await vi.waitFor(() => expect(document.querySelector('[role="menu"][aria-label="Model"]')).toBeNull())
+  await vi.waitFor(() => expect(document.activeElement).toBe(dom.container.querySelector('.composer-model-picker')))
+  await openWithKeyboard('reopen after original focus returns')
   const menu = document.querySelector<HTMLElement>('[role="menu"][aria-label="Model"]')!
   await act(async () => menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true })))
   await vi.waitFor(() => expect(document.activeElement?.textContent).toBe('Check original change'))
