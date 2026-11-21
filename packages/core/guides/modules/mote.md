@@ -113,6 +113,13 @@ to read both originals. A timed report can also include its `occurrence`.
 Use `direct list` or `group list` with `includeLastAssignment: true` and your
 Mote scope to find your latest addressed assignment in each conversation.
 
+A Group input with `participation: "contextual"` is an invitation from a
+person to contribute when you have something useful. Read the original Group
+message and use `group reply` with the provided input operation for a relevant
+answer. If you have nothing to add, finish quietly. Publishing a reply does
+not request another round from the Group. An explicitly addressed input
+retains the named audience and its own instruction.
+
 For a user-authorized timed assignment, `direct schedule` takes the same
 `mote`, `peer`, `operationId` and `body`, plus one timing form from
 `amux schedule create --help`. For public work, `group schedule` takes your
