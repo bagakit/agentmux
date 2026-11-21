@@ -54,7 +54,7 @@ export type ContinuousProgressLoop = ContinuousProgressTarget & {
   managedScheduleNote?: string
   managedSource?: import('./automatic-input-source.js').AutomaticInputSource
   moteWork?: import('./mote/scheduled-work.js').MoteScheduledWork
-  lastMotePublication?: { conversationId: string; messageId: string; operationId: string; occurrenceAt: number }
+  lastMotePublication?: import('./mote/scheduled-work.js').MoteWorkPublication
   taskSource?: ContinuousProgressTaskSource
   loopId: string
   calendar?: AgentScheduleCalendar

@@ -18,7 +18,8 @@ function privateThread(original: MoteGroupSummary): MoteDirectThread {
   return {
     id: original.id,
     participants: original.members.map(({ moteId, target, name, thread }) => ({ moteId, target, name, thread })),
-    lastMessage: original.lastMessage ? privateMessage(original.lastMessage) : null
+    lastMessage: original.lastMessage ? privateMessage(original.lastMessage) : null,
+    ...(original.lastAssignment !== undefined ? { lastAssignment: original.lastAssignment } : {})
   }
 }
 
@@ -34,7 +35,7 @@ export function createHostMoteDirect(ledger: MoteGroupPort & { start(): void; di
   client: Pick<AgentMuxClient, 'readAgentSession' | 'enqueuePublishedMoteReport'> & {
     readMessage(input: { messageId: string }): Promise<AgentMuxMessageReadView | null>
   }
-}): MoteDirectPort & { start(): void; dispose(): Promise<void>; dispatchWork(work: Extract<NonNullable<ContinuousProgressLoop['moteWork']>, { kind: 'direct' }>, body: string, operationId: string,
+}): MoteDirectPort & { start(): void; dispose(): Promise<void>; dispatchWork(work: Extract<NonNullable<ContinuousProgressLoop['moteWork']>, { kind: 'direct' }>, body: string, occurrence: NonNullable<MoteGroupCallContext['scheduledOccurrence']>,
   assertCurrent: () => Promise<void>): Promise<{ conversationId: string; messageId: string }> } {
   const activeReports = new Map<string, Promise<MoteDirectMainNotification>>()
   const retryMs = 5000
@@ -67,8 +68,9 @@ export function createHostMoteDirect(ledger: MoteGroupPort & { start(): void; di
       const main = await owner.main.readCurrentMoteMain(member.target)
       if (!matchesMoteMainTarget(main, member.target) || main.current?.hostId !== 'local')
         throw new AgentMuxError('The coordinating Mote has no confirmed local Main yet. Its report is saved.', 'CONTROL_UNAVAILABLE')
+      const occurrence = await owner.store.scheduledOccurrenceForMessage(original)
       const text = renderAmuxProtocol('mote-task', 'private-report', {
-        original: JSON.stringify({ threadId, assignmentMessageId: original.id, replyMessageId, reporter: reply.author })
+        original: JSON.stringify({ threadId, assignmentMessageId: original.id, replyMessageId, reporter: reply.author, occurrence })
       })
       return await owner.client.enqueuePublishedMoteReport({ messageId, threadId, assignmentMessageId: original.id, replyMessageId,
         senderSessionId, senderRunId, recipientSessionId: main.current.sessionId, text, createdAt: reply.createdAt }, () => owner.main.assertCurrent(main))
@@ -155,17 +157,17 @@ export function createHostMoteDirect(ledger: MoteGroupPort & { start(): void; di
       await Promise.all(activeReports.values())
       await ledger.dispose()
     },
-    async dispatchWork(work, body, operationId, assertCurrent) {
+    async dispatchWork(work, body, occurrence, assertCurrent) {
       const selected = await owner.main.readCurrentMoteMain(work.mote)
       if (!matchesMoteMainTarget(selected, work.mote) || !selected.current)
         throw new AgentMuxError('The scheduled assignment is saved and awaiting its coordinating Main.', 'CONTROL_UNAVAILABLE')
       const session = await owner.client.readAgentSession(selected.current.sessionId)
       if (!session || session.hostId !== selected.current.hostId) throw new AgentMuxError('The coordinating Main Session is unconfirmed.', 'CONTROL_UNAVAILABLE')
-      const { threadId, message } = await sendPrivate({ mote: work.mote, peer: work.peer, body, operationId }, { actor: { kind: 'agent', hostId: session.hostId,
+      const { threadId, message } = await sendPrivate({ mote: work.mote, peer: work.peer, body, operationId: occurrence.operationId }, { actor: { kind: 'agent', hostId: session.hostId,
         agentSessionId: session.agentSessionId, runId: session.run.runId, sourceRuns: [] }, assertCurrent: async () => {
         await assertCurrent()
         await owner.main.assertCurrent(selected)
-      } })
+      }, scheduledOccurrence: occurrence })
       return { conversationId: threadId, messageId: message.id }
     },
     async call<M extends MoteDirectMethod>(method: M, raw: MoteDirectParamsMap[M], context: MoteDirectCallContext): Promise<MoteDirectResultMap[M]> {

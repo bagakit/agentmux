@@ -15,6 +15,7 @@ import { decideCheckIn, type CheckInObservation } from './agent-schedule-check-i
 import type { ContinuousProgressDefinitionReference, ContinuousProgressGuidanceAdoption } from '@agentmux/core'
 import { agentPromptInputId, projectContinuousProgressInput, type ContinuousProgressInputReading } from '@agentmux/core'
 import { scheduledDefinitionOperation } from './scheduled-input-source.js'
+import type { MoteWorkOccurrence, MoteWorkPublication } from '@agentmux/core/schedule-rpc'
 
 export type LoopTickOutcome = 'sent' | 'skipped' | 'unknown' | 'not-applied'
 export type LoopTickHandler = (loop: ContinuousProgressLoop, operationId: string, isCurrent: () => boolean, signal: AbortSignal, onDispatch: () => void, authority?: AgentMuxRpcCallContext) => Promise<LoopTickOutcome>
@@ -29,7 +30,8 @@ export type GoalProgressOwner = {
 /** In-process producer context for the original managed schedule. Public schedule.create cannot set it. */
 type ScheduleOwnerContext = AgentMuxRpcCallContext & { managedScheduleNote?: string; moteWork?: NonNullable<ContinuousProgressLoop['moteWork']> }
 type MoteWorkOwner = {
-  dispatch(work: NonNullable<ContinuousProgressLoop['moteWork']>, body: string, operationId: string, assertCurrent: () => Promise<void>): Promise<{ conversationId: string; messageId: string }>
+  dispatch(work: NonNullable<ContinuousProgressLoop['moteWork']>, body: string, occurrence: MoteWorkOccurrence & { previous?: MoteWorkPublication }, assertCurrent: () => Promise<void>): Promise<{ conversationId: string; messageId: string }>
+  readHistory(work: NonNullable<ContinuousProgressLoop['moteWork']>, query: ScheduleHistoryQuery, latest?: MoteWorkPublication): Promise<ScheduleHistoryReading>
   owns(work: NonNullable<ContinuousProgressLoop['moteWork']>, caller: NonNullable<AgentMuxRpcCallContext['caller']>): Promise<boolean>
 }
 export type GoalProgressStart = ContinuousProgressTarget & { goalId: string; alignmentRevision: number; intervalMs: number; operationId: string; prompt: string; inputEpoch?:string }
@@ -601,8 +603,8 @@ export class ContinuousProgressLoopManager {
     try { return await operation } finally { if (this.mutations.get(key) === operation) this.mutations.delete(key) }
   }
   private async readHistory(query: ScheduleHistoryQuery, context?: AgentMuxRpcCallContext): Promise<ScheduleHistoryPage> {
-    if (context?.caller || !context?.principal || !['user', 'device'].includes(context.principal.kind))
-      throw new AgentMuxError('Schedule history requires its authorized user or device.', 'CONTROL_PERMISSION_DENIED')
+    if (!context?.caller && (!context?.principal || !['user', 'device'].includes(context.principal.kind)))
+      throw new AgentMuxError('Schedule history requires its authorized reader.', 'CONTROL_PERMISSION_DENIED')
     const starting = this.started
     if (!starting) throw new AgentMuxError('The original schedule owner is not ready for observation.', 'CONTROL_UNAVAILABLE')
     const signal = context.signal ?? new AbortController().signal
@@ -611,11 +613,16 @@ export class ContinuousProgressLoopManager {
     signal.throwIfAborted()
     const loop = this.scheduler.get(query.scheduleId)
     if (!loop || !isAgentSchedule(loop)) throw new AgentMuxError('The original schedule is unknown here.', 'UNKNOWN_SCHEDULE')
-    if (loop.moteWork) await this.authorizeCaller(loop, context)
+    const work = loop.moteWork
+    if (work) await this.authorizeCaller(loop, context)
+    else if (context?.caller) throw new AgentMuxError('Native schedule history requires its authorized user or device.', 'CONTROL_PERMISSION_DENIED')
     const { scheduleId, from, to } = query
     let result: Awaited<ReturnType<NonNullable<FutureProgressInputOwner['readHistory']>>> | undefined
     try {
-      result = await awaitUntilCancelled(async () => await this.futureInputs?.readHistory?.(loop, query, context), signal)
+      const owner = this.moteWorkOwner
+      result = await awaitUntilCancelled(async () => work
+        ? owner?.readHistory(work, query, loop.lastMotePublication)
+        : this.futureInputs?.readHistory?.(loop, query, context), signal)
     } catch (error) {
       signal.throwIfAborted()
       if (error instanceof AgentMuxError && error.code === 'INVALID_CONTROL_REQUEST') throw error
@@ -1395,7 +1402,8 @@ export class ContinuousProgressLoopManager {
     try {
       await assertCurrent()
       delivery.inputStarted = true
-      const publication = await owner.dispatch(moteWork, loop.prompt, operationId, assertCurrent)
+      const publication = await owner.dispatch(moteWork, loop.prompt, { scheduleId: loopId, occurrenceAt, operationId,
+        ...(loop.lastMotePublication ? { previous: loop.lastMotePublication } : {}) }, assertCurrent)
       const { pendingCompletion: _, ...settled } = this.require(loopId)
       const status = settled.status
       this.completeScheduledOccurrence(settled, occurrenceAt, checkAt)

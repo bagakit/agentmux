@@ -9,6 +9,17 @@ export type MoteScheduledWork = { mote: MotePreferencesTarget } & (
   { kind: 'direct'; peer: MotePreferencesTarget } |
   { kind: 'group'; groupId: string; recipients: MoteScheduledRecipient[] })
 
+export type MoteWorkOccurrence = {
+  scheduleId: string
+  occurrenceAt: number
+  operationId: string
+}
+
+export type MoteWorkPublication = Omit<MoteWorkOccurrence, 'scheduleId'> & {
+  conversationId: string
+  messageId: string
+}
+
 export type MoteScheduleContext = {
   schedule(input: ScheduleParamsMap['schedule.create'], work?: MoteScheduledWork): Promise<ScheduleResultMap['schedule.create']>
   readSchedule(input: ScheduleParamsMap['schedule.inspect']): Promise<ScheduleResultMap['schedule.inspect']>

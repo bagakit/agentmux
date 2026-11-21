@@ -8,7 +8,8 @@ import { parseAgentScheduleCheckIn, parseAgentScheduleTiming, type AgentSchedule
 import { optionalInputEpoch, agentPromptInputId, validateAgentPromptCondition } from './agent-prompt-condition.js'
 import { continuousProgressRequestDigest, isAgentSchedule, validateContinuousProgressPause, type ContinuousProgressLoop, type ContinuousProgressTarget } from './continuous-progress-scheduler.js'
 import type { AgentMuxRpcCallContext } from './public-rpc-service.js'
-import { parseMoteScheduledWork, type MoteScheduledWork } from './mote/scheduled-work.js'
+import { parseMoteScheduledWork, type MoteScheduledWork, type MoteWorkPublication } from './mote/scheduled-work.js'
+export type { MoteWorkOccurrence, MoteWorkPublication } from './mote/scheduled-work.js'
 
 export type ScheduleMutation = { scheduleId: string; expectedRevision: number; operationId: string }
 export type ScheduleScope = Pick<ContinuousProgressTarget, 'hostId' | 'workspacePath'>
@@ -44,14 +45,17 @@ export type ScheduleHistoryGroup = {
   lastAt: number
 }
 export type ScheduleHistoryBucket = { from: number; to: number; groups: ScheduleHistoryGroup[] }
+export type SchedulePublicationBucket = { from: number; to: number; count: number; firstAt: number; lastAt: number }
 export type ScheduleHistoryPage = Pick<ScheduleHistoryQuery, 'scheduleId' | 'from' | 'to'> & {
   executionScope: 'connected-host'
-  coverage: 'recorded-inputs' | 'unconfirmed'
+  coverage: 'recorded-inputs' | 'recorded-publications' | 'unconfirmed'
   entries: ScheduleHistoryEntry[]
+  publications?: MoteWorkPublication[]
+  publicationBuckets?: SchedulePublicationBucket[]
   nextCursor: string | null
   buckets?: ScheduleHistoryBucket[]
 }
-export type ScheduleHistoryReading = Pick<ScheduleHistoryPage, 'coverage' | 'entries' | 'nextCursor' | 'buckets'>
+export type ScheduleHistoryReading = Pick<ScheduleHistoryPage, 'coverage' | 'entries' | 'publications' | 'publicationBuckets' | 'nextCursor' | 'buckets'>
 export function unconfirmedScheduleHistory(query: ScheduleHistoryQuery): ScheduleHistoryReading {
   return { coverage: 'unconfirmed', entries: [], nextCursor: null, ...(query.bucketStarts ? { buckets: [] } : {}) }
 }
@@ -289,14 +293,49 @@ export function validateScheduleRpcResult<M extends ScheduleMethod>(method: M, v
 
 function parseScheduleHistoryPage(value: unknown, request?: ScheduleHistoryQuery): ScheduleHistoryPage {
   const code = 'CONTROL_PROTOCOL_ERROR'
-  const p = rpcRecord(value, ['scheduleId', 'from', 'to', 'executionScope', 'coverage', 'entries', 'nextCursor', 'buckets'], code)
+  const p = rpcRecord(value, ['scheduleId', 'from', 'to', 'executionScope', 'coverage', 'entries', 'nextCursor', 'buckets', 'publications', 'publicationBuckets'], code)
   const grouped = p.buckets !== undefined
   const window = historyWindow(p, code, grouped ? maxSummaryWindowMs : historyMaxMs)
-  if (p.executionScope !== 'connected-host' || p.coverage !== 'recorded-inputs' && p.coverage !== 'unconfirmed' ||
+  if (p.executionScope !== 'connected-host' || p.coverage !== 'recorded-inputs' && p.coverage !== 'recorded-publications' && p.coverage !== 'unconfirmed' ||
       request && (request.scheduleId !== window.scheduleId || request.from !== window.from || request.to !== window.to) ||
       request && grouped !== !!request.bucketStarts ||
       !Array.isArray(p.entries) || (grouped && p.entries.length !== 0) || p.entries.length > (request ? scheduleHistoryPageSize(request) : 100))
     invalid('The schedule history page does not match its requested scope.', code)
+  let publications: MoteWorkPublication[] | undefined
+  if (p.coverage === 'recorded-publications' && !grouped) {
+    if (!Array.isArray(p.publications) || p.entries.length || p.publications.length > (request ? scheduleHistoryPageSize(request) : summaryPageSize))
+      invalid('Expected a bounded page of original Mote publications.', code)
+    let before = window.to
+    publications = p.publications.map(value => {
+      const row = rpcRecord(value, ['operationId', 'occurrenceAt', 'conversationId', 'messageId'], code)
+      const { operationId, occurrenceAt, conversationId, messageId } = row
+      integer(occurrenceAt, code)
+      string(conversationId, code)
+      string(messageId, code)
+      if (occurrenceAt < window.from || occurrenceAt >= before || operationId !== `scheduled/${window.scheduleId}/${occurrenceAt}`)
+        return invalid('A publication does not match the original schedule occurrence.', code)
+      before = occurrenceAt
+      return { operationId, occurrenceAt, conversationId, messageId }
+    })
+  } else if (p.publications !== undefined) invalid('Mote publications require publication coverage.', code)
+  let publicationBuckets: SchedulePublicationBucket[] | undefined
+  if (p.coverage === 'recorded-publications' && grouped) {
+    if (!Array.isArray(p.publicationBuckets) || p.publicationBuckets.length > maxBucketCount ||
+      !Array.isArray(p.buckets) || p.buckets.length || p.nextCursor !== null)
+      invalid('Expected grouped Mote publications without native input history.', code)
+    const ends = request?.bucketStarts && new Map(request.bucketStarts.map((at, i, starts) => [at, starts[i + 1] ?? window.to]))
+    let previousEnd = window.from
+    publicationBuckets = p.publicationBuckets.map(value => {
+      const row = rpcRecord(value, ['from', 'to', 'count', 'firstAt', 'lastAt'], code)
+      const { from, to, count, firstAt, lastAt } = row
+      integer(from, code); integer(to, code); integer(count, code, 1); integer(firstAt, code); integer(lastAt, code)
+      if (from < previousEnd || from >= to || to > window.to || firstAt < from || lastAt >= to || firstAt > lastAt ||
+          (count === 1) !== (firstAt === lastAt) || ends && ends.get(from) !== to)
+        return invalid('A publication bucket does not match the original schedule window.', code)
+      previousEnd = to
+      return { from, to, count, firstAt, lastAt }
+    })
+  } else if (p.publicationBuckets !== undefined) invalid('Mote publication buckets require grouped publication coverage.', code)
   if (p.nextCursor !== null) {
     historyCursor(p.nextCursor, code)
     if (p.nextCursor === request?.cursor) invalid('The schedule history cursor did not advance.', code)
@@ -323,7 +362,8 @@ function parseScheduleHistoryPage(value: unknown, request?: ScheduleHistoryQuery
       ...parseContinuousProgressDelivery(original.delivery, original.nativeResult) }
   })
   const buckets = grouped ? parseHistoryBuckets(p.buckets, window, request) : undefined
-  return { ...window, executionScope: 'connected-host', coverage: p.coverage, entries, nextCursor: p.nextCursor, ...(buckets ? { buckets } : {}) }
+  return { ...window, executionScope: 'connected-host', coverage: p.coverage, entries, nextCursor: p.nextCursor,
+    ...(publications ? { publications } : {}), ...(publicationBuckets ? { publicationBuckets } : {}), ...(buckets ? { buckets } : {}) }
 }
 
 function parseHistoryBuckets(value: unknown, window: { from: number; to: number }, request?: ScheduleHistoryQuery): ScheduleHistoryBucket[] {

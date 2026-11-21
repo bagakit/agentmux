@@ -100,7 +100,7 @@ export function createHostMoteGroups(options: {
   client(hostId: string): Core
   files?: HostMoteGroupFiles
   main?: MoteMainReader
-}): MoteGroupPort & { start(): void; dispose(): Promise<void>; dispatchWork(work: Extract<NonNullable<ContinuousProgressLoop['moteWork']>, { kind: 'group' }>, body: string, operationId: string,
+}): MoteGroupPort & { start(): void; dispose(): Promise<void>; dispatchWork(work: Extract<NonNullable<ContinuousProgressLoop['moteWork']>, { kind: 'group' }>, body: string, occurrence: NonNullable<MoteGroupCallContext['scheduledOccurrence']>,
   assertCurrent: () => Promise<void>): Promise<{ conversationId: string; messageId: string }> } {
   const { store, agents } = options
   const lanes = new Map<string, Promise<unknown>>()
@@ -492,16 +492,16 @@ export function createHostMoteGroups(options: {
       wakeAt = Infinity
       await recovering
     },
-    async dispatchWork(work, body, operationId, assertCurrent) {
+    async dispatchWork(work, body, occurrence, assertCurrent) {
       const main = options.main
       const selected = await main?.readCurrentMoteMain(work.mote)
       if (!main || !selected || !matchesMoteMainTarget(selected, work.mote) || !selected.current)
         return groupFailure('The scheduled assignment is saved and awaiting its coordinating Main.', 'CONTROL_UNAVAILABLE')
       const session = await groupSession({ agentSessionId: selected.current.sessionId, hostId: selected.current.hostId })
-      const { message } = await this.call('space.mote.group.send', { groupId: work.groupId, body, operationId, sourceMote: work.mote,
+      const { message } = await this.call('space.mote.group.send', { groupId: work.groupId, body, operationId: occurrence.operationId, sourceMote: work.mote,
         recipientIds: work.recipients.map(member => member.moteId) }, { actor: { kind: 'agent', hostId: selected.current.hostId,
         agentSessionId: session.agentSessionId, runId: session.run.runId, sourceRuns: [] }, scheduledRecipients: work.recipients,
-        assertCurrent: async () => { await assertCurrent(); await main.assertCurrent(selected) } })
+        scheduledOccurrence: occurrence, assertCurrent: async () => { await assertCurrent(); await main.assertCurrent(selected) } })
       return { conversationId: work.groupId, messageId: message.id }
     },
     async call<M extends MoteGroupMethod>(method: M, raw: MoteGroupParamsMap[M], context: MoteGroupCallContext): Promise<MoteGroupResultMap[M]> {
@@ -524,7 +524,8 @@ export function createHostMoteGroups(options: {
         const input = raw as MoteGroupParamsMap['space.mote.group.list']
         if (main && input.moteId !== undefined && input.moteId !== main.target.spaceId)
           return groupFailure('A Mote Main can only list its own Groups.', 'CONTROL_PERMISSION_DENIED')
-        const page = await store.list(main?.target.spaceId ?? input.moteId, input.beforeSequence ?? Number.MAX_SAFE_INTEGER, input.limit ?? 20)
+        const page = await store.list(main?.target.spaceId ?? input.moteId, input.beforeSequence ?? Number.MAX_SAFE_INTEGER, input.limit ?? 20,
+          input.includeLastAssignment)
         const groups = await Promise.all(page.groups.map(group => readSummary(group)))
         await main?.assertCurrent()
         return { ...page, groups } as MoteGroupResultMap[M]
@@ -619,7 +620,7 @@ export function createHostMoteGroups(options: {
       const append = () => store.append(input.operationId, hash, { id, groupId: input.groupId,
         createdAt: Date.now(), body: input.body, author, ...(input.replyToMessageId ? { replyToMessageId: input.replyToMessageId } : {}),
         ...(privateImages ? { privateImages } : {}), ...(privatePriority ? { privatePriority } : {}) },
-      recipients, membership && memberAuthority(membership), undefined, generations)
+      recipients, membership && memberAuthority(membership), undefined, generations, context.scheduledOccurrence)
       if (!main) await context.assertCurrent()
       const { message, fresh } = await (main ? main.commit(append) : append())
       if (!fresh) return { message: await readMessage(message) } as MoteGroupResultMap[M]

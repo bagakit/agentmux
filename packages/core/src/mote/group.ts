@@ -50,6 +50,7 @@ export type MoteGroupSummary = MoteGroupSettings & {
   name: string
   members: MoteGroupMember[]
   lastMessage: MoteGroupMessage | null
+  lastAssignment?: { messageId: string; createdAt: number } | null
 }
 type Page = { beforeSequence?: number; limit?: number }
 type GroupEdit = { groupId: string; operationId: string; expectedRevision: number }
@@ -58,7 +59,7 @@ type GroupMainSource = { sourceMote?: MotePreferencesTarget }
 const groupEdits = ['groupId', 'operationId', 'expectedRevision'] as const
 const groupFiles = ['groupId', 'inputOperationId'] as const
 export type MoteGroupParamsMap = {
-  'space.mote.group.list': Page & GroupMainSource & { moteId?: string }
+  'space.mote.group.list': Page & GroupMainSource & { moteId?: string; includeLastAssignment?: true }
   'space.mote.group.create': { operationId: string; name: string; members: MotePreferencesTarget[];
     avatarMoteIds?: string[]; announcement?: string; topic?: MotePreferencesTarget; adminMoteIds?: string[] } & GroupMainSource
   'space.mote.group.update': GroupEdit & { avatarMoteIds?: string[]; announcement?: string | null;
@@ -104,6 +105,9 @@ export type MoteGroupCallContext = Partial<MoteScheduleContext> & {
   actor: { kind: 'human'; id: string } | { kind: 'agent'; agentSessionId: string; hostId: string; runId: string; sourceRuns: readonly string[] }
   assertCurrent(): Promise<void>
   scheduledRecipients?: readonly MoteScheduledRecipient[]
+  scheduledOccurrence?: import('./scheduled-work.js').MoteWorkOccurrence & {
+    previous?: import('./scheduled-work.js').MoteWorkPublication
+  }
   privateImages?: FileUploadIdentity[]
   privatePriority?: true
 }
@@ -147,7 +151,7 @@ function page(p: Record<string, unknown>): void {
   if (p.beforeSequence !== undefined) field('beforeSequence', 'Use the original positive page cursor.', () => number(p.beforeSequence, requestCode, 1))
 }
 const requestFields = {
-  'space.mote.group.list': ['moteId', 'beforeSequence', 'limit', 'sourceMote'],
+  'space.mote.group.list': ['moteId', 'beforeSequence', 'limit', 'sourceMote', 'includeLastAssignment'],
   'space.mote.group.create': ['operationId', 'name', 'members', 'avatarMoteIds', 'announcement', 'topic', 'adminMoteIds', 'sourceMote'],
   'space.mote.group.update': [...groupEdits, 'avatarMoteIds', 'announcement', 'topic', 'adminMoteIds'],
   'space.mote.group.members.add': [...groupEdits, 'members'],
@@ -202,6 +206,8 @@ export function parseMoteGroupParams<M extends MoteGroupMethod>(method: M, value
   if (method === 'space.mote.group.list') {
     page(p)
     if (p.moteId !== undefined) id('moteId')
+    if (p.includeLastAssignment !== undefined) field('includeLastAssignment', 'Use true with a Mote scope to include the latest original assignment.',
+      () => { if (p.includeLastAssignment !== true || (p.moteId === undefined && p.sourceMote === undefined)) invalid(code) })
   } else if (method === 'space.mote.group.create') {
     id('operationId')
     field('name', 'Use a nonempty name up to 120 characters.', () => string(p.name, code, 120))
@@ -307,7 +313,7 @@ function member(value: unknown): MoteGroupMember {
   return p as MoteGroupMember
 }
 export function parseMoteGroupSummary(value: unknown, scope?: 'group' | 'direct'): MoteGroupSummary {
-  const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['id', 'name', 'members', 'lastMessage', 'revision', 'avatarMoteIds', 'announcement', 'topic'], code)
+  const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['id', 'name', 'members', 'lastMessage', 'revision', 'avatarMoteIds', 'announcement', 'topic', 'lastAssignment'], code)
   string(p.id, code); string(p.name, code, 120)
   number(p.revision, code, 1)
   const members = list(p.members, code, Number.MAX_SAFE_INTEGER, member)
@@ -319,6 +325,10 @@ export function parseMoteGroupSummary(value: unknown, scope?: 'group' | 'direct'
     string(announcement.body, code, MOTE_GROUP_MAX_BODY_LENGTH, true); number(announcement.updatedAt, code, 0); string(announcement.operationId, code)
   }
   if (p.topic !== null) target(p.topic, code)
+  if (p.lastAssignment !== undefined && p.lastAssignment !== null) {
+    const assignment = rpcRecord(p.lastAssignment, ['messageId', 'createdAt'], code)
+    string(assignment.messageId, code); number(assignment.createdAt, code, 0)
+  }
   if (!members.length || p.lastMessage !== null && parseMoteGroupMessage(p.lastMessage, scope).groupId !== p.id) return invalid(code)
   unique(members.map(entry => entry.moteId), code)
   return p as MoteGroupSummary
@@ -340,6 +350,7 @@ export function parseMoteGroupResult<M extends MoteGroupMethod>(method: M, value
     unique(groups.map(group => group.id), code)
     const memberId = query.sourceMote?.spaceId ?? query.moteId
     if (memberId && groups.some(group => !group.members.some(entry => entry.moteId === memberId && entry.state === 'active'))) return invalid(code)
+    if (groups.some(group => (group.lastAssignment !== undefined) !== (query.includeLastAssignment === true))) return invalid(code)
     if (p.nextBeforeSequence !== null) number(p.nextBeforeSequence, code, 1, query.beforeSequence === undefined ? Number.MAX_SAFE_INTEGER : query.beforeSequence - 1)
   } else if (method === 'space.mote.group.create') {
     const p = rpcRecord(value, ['group'], code), request = input as MoteGroupParamsMap['space.mote.group.create'], group = parseMoteGroupSummary(p.group)

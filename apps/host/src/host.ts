@@ -213,8 +213,10 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     ...(motePresence ? { maintenance: motePresence.read, changed: motePresence.invalidate, adoptGuidance: motePresence.adoptGuidance } : {}) }) : undefined
   const conversationAgents = configurationPath && options.store instanceof AgentMuxFileAgentSessionStore
     ? createHostMoteChat({ configurationPath, spatial: spatialState, runtime: originalRuntime }).agents : undefined
-  const moteGroups = conversationAgents && options.store instanceof AgentMuxFileAgentSessionStore ? createHostMoteGroups({
-    store: new MoteGroupStore(join(dirname(options.store.path), 'mote-groups.sqlite')),
+  const moteGroupStore = options.store instanceof AgentMuxFileAgentSessionStore
+    ? new MoteGroupStore(join(dirname(options.store.path), 'mote-groups.sqlite')) : undefined
+  const moteGroups = conversationAgents && moteGroupStore ? createHostMoteGroups({
+    store: moteGroupStore,
     agents: conversationAgents,
     ...(moteMain ? { main: moteMain } : {}),
     ...(content ? { files: content.moteGroupFiles } : {}),
@@ -238,11 +240,12 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
       client: { readAgentSession: id => originalRuntime().client.readAgentSession(id),
         readMessage: input => originalRuntime().client.readMessage(input),
         enqueuePublishedMoteReport: (input, assertCurrent) => originalRuntime().client.enqueuePublishedMoteReport(input, assertCurrent) } }) : undefined
-  if (moteDirect && moteGroups && moteMain) {
+  if (moteDirect && moteGroups && moteMain && moteGroupStore && moteDirectStore) {
     const main = moteMain
     goals?.schedules.setMoteWorkOwner({
       dispatch: (work, body, operationId, assertCurrent) => work.kind === 'group'
         ? moteGroups.dispatchWork(work, body, operationId, assertCurrent) : moteDirect.dispatchWork(work, body, operationId, assertCurrent),
+      readHistory: (work, query, latest) => (work.kind === 'group' ? moteGroupStore : moteDirectStore).scheduledHistory(query, latest),
       owns: (work, caller) => ownsMoteWork(main, originalRuntime().client, work, caller)
     })
   }

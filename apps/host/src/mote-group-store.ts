@@ -6,6 +6,9 @@ import { AgentMuxError, parseMoteGroupMessage, parseMoteGroupSummary, type MoteG
   type MoteGroupMember, type MoteGroupMessage, type MoteGroupSettings, type MoteGroupSummary } from '@agentmux/core'
 import { sameMotePreferencesTarget, type MotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import type { MoteChatPreparedLaunch } from '@agentmux/connectors'
+import type { MoteWorkOccurrence, MoteWorkPublication, ScheduleHistoryQuery, ScheduleHistoryReading } from '@agentmux/core/schedule-rpc'
+import type { MoteGroupCallContext } from '@agentmux/core'
+import { readMotePublicationHistory } from './mote-publication-history.js'
 
 const applicationIds = { group: 0x414d4752, direct: 0x414d444d }
 export type GroupInputKey = { kind: 'prompt'; agentSessionId: string; expectedRun: { runId: string }; submissionId: string }
@@ -87,7 +90,13 @@ export class MoteGroupStore {
           FOREIGN KEY(group_id,mote_id) REFERENCES members(group_id,mote_id));
         CREATE INDEX IF NOT EXISTS deliveries_due ON deliveries ((${recoverAt}),message_id,mote_id) WHERE (${recoverAt}) IS NOT NULL;
         CREATE INDEX IF NOT EXISTS messages_by_reply ON messages(group_id,json_extract(data,'$.replyToMessageId'),sequence)
-          WHERE json_extract(data,'$.replyToMessageId') IS NOT NULL;`)
+          WHERE json_extract(data,'$.replyToMessageId') IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS messages_by_mote_author ON messages(group_id,json_extract(data,'$.author.moteId'),sequence);
+        CREATE TABLE IF NOT EXISTS scheduled_publications (
+          schedule_id TEXT NOT NULL, occurrence_at INTEGER NOT NULL, message_id TEXT NOT NULL REFERENCES messages(id),
+          PRIMARY KEY(schedule_id, occurrence_at)
+        );
+        CREATE INDEX IF NOT EXISTS scheduled_publications_by_message ON scheduled_publications(message_id);`)
       if (write && this.kind === 'direct') db.exec(`
         CREATE TABLE IF NOT EXISTS private_reports (message_id TEXT PRIMARY KEY REFERENCES messages(id), data TEXT NOT NULL, next_at INTEGER);
         CREATE INDEX IF NOT EXISTS pending_private_reports ON private_reports(next_at) WHERE next_at IS NOT NULL;`)
@@ -191,7 +200,7 @@ export class MoteGroupStore {
     })
   }
 
-  async list(moteId: string | undefined, before: number, limit: number): Promise<{ groups: MoteGroupSummary[]; nextBeforeSequence: number | null }> {
+  async list(moteId: string | undefined, before: number, limit: number, includeLastAssignment?: true): Promise<{ groups: MoteGroupSummary[]; nextBeforeSequence: number | null }> {
     return this.read({ groups: [], nextBeforeSequence: null }, db => {
       const rows = moteId === undefined
         ? db.prepare('SELECT * FROM groups WHERE sequence < ? ORDER BY sequence DESC LIMIT ?').all(before, limit + 1)
@@ -203,7 +212,15 @@ export class MoteGroupStore {
         : db.prepare(`SELECT groups.* FROM members JOIN groups ON groups.id=members.group_id
           WHERE members.mote_id=? AND coalesce(json_extract(members.data,'$.member.state'),'active')='active' AND groups.sequence < ? ORDER BY groups.sequence DESC LIMIT ?`).all(moteId, before, limit + 1)
       const last = rows[limit - 1]
-      return { groups: rows.slice(0, limit).map(row => this.group(db, row)),
+      const latestAssignment = includeLastAssignment && moteId !== undefined ? db.prepare(`SELECT id, json_extract(data,'$.createdAt') AS created_at
+        FROM messages WHERE group_id=? AND json_extract(data,'$.author.moteId')=?
+        AND EXISTS(SELECT 1 FROM deliveries WHERE message_id=messages.id) ORDER BY sequence DESC LIMIT 1`) : null
+      return { groups: rows.slice(0, limit).map(row => {
+        const group = this.group(db, row)
+        if (!latestAssignment || moteId === undefined) return group
+        const original = latestAssignment.get(group.id, moteId)
+        return { ...group, lastAssignment: original ? { messageId: String(original.id), createdAt: Number(original.created_at) } : null }
+      }),
         nextBeforeSequence: rows.length > limit && last ? Number(last.activity ?? last.sequence) : null }
     })
   }
@@ -411,14 +428,74 @@ export class MoteGroupStore {
     return this.read(null, db => this.publishedMessage(db, groupId, operationId))
   }
 
+  async scheduledHistory(query: ScheduleHistoryQuery, latest?: MoteWorkPublication): Promise<ScheduleHistoryReading> {
+    if (!query.bucketStarts) return readMotePublicationHistory(query, (before, limit) => this.scheduledPublications(query, before, limit), latest)
+    if (query.cursor) throw new AgentMuxError('Grouped Mote publications are returned in a single page.', 'INVALID_CONTROL_REQUEST')
+    const latestAt = latest?.occurrenceAt
+    const ranges = query.bucketStarts.map((from, index, starts) => ({ from, to: starts[index + 1] ?? query.to }))
+    const summarize = (db: DatabaseSync | null) => {
+      const read = db?.prepare(`SELECT count(*) AS count, min(occurrence_at) AS first_at, max(occurrence_at) AS last_at
+        FROM scheduled_publications WHERE schedule_id=? AND occurrence_at>=? AND occurrence_at<?`)
+      const extra = latestAt !== undefined && !db?.prepare('SELECT 1 FROM scheduled_publications WHERE schedule_id=? AND occurrence_at=?')
+        .get(query.scheduleId, latestAt) ? latestAt : undefined
+      return ranges.flatMap(({ from, to }) => {
+        const row = read?.get(query.scheduleId, from, to)
+        const addition = extra !== undefined && extra >= from && extra < to ? extra : undefined
+        const count = Number(row?.count ?? 0) + (addition === undefined ? 0 : 1)
+        return count ? [{ from, to, count,
+          firstAt: Math.min(Number(row?.first_at ?? Infinity), addition ?? Infinity),
+          lastAt: Math.max(Number(row?.last_at ?? -Infinity), addition ?? -Infinity) }] : []
+      })
+    }
+    const publicationBuckets = await this.read(null, db => summarize(this.hasPublicationIndex(db) ? db : null)) ?? summarize(null)
+    return { coverage: 'recorded-publications', publicationBuckets, entries: [], buckets: [], nextCursor: null }
+  }
+
+  private hasPublicationIndex(db: DatabaseSync): boolean {
+    return !!db.prepare("SELECT 1 FROM sqlite_master WHERE name='scheduled_publications' AND type='table'").get()
+  }
+
+  private async scheduledPublications({ scheduleId, from }: ScheduleHistoryQuery, before: number, limit: number): Promise<MoteWorkPublication[]> {
+    return this.read([], db => {
+      if (!this.hasPublicationIndex(db)) return []
+      return db.prepare(`SELECT publication.occurrence_at, message.id, message.group_id, message.operation_id
+        FROM scheduled_publications publication JOIN messages message ON message.id=publication.message_id
+        WHERE publication.schedule_id=? AND publication.occurrence_at>=? AND publication.occurrence_at<?
+        ORDER BY publication.occurrence_at DESC LIMIT ?`).all(scheduleId, from, before, limit)
+        .map(row => ({ occurrenceAt: Number(row.occurrence_at), messageId: String(row.id),
+          conversationId: String(row.group_id), operationId: String(row.operation_id) }))
+    })
+  }
+
+  async scheduledOccurrenceForMessage(message: MoteGroupMessage): Promise<MoteWorkOccurrence | undefined> {
+    return this.read(undefined, db => {
+      if (!this.hasPublicationIndex(db)) return undefined
+      const row = db.prepare(`SELECT publication.schedule_id, publication.occurrence_at, message.operation_id
+        FROM scheduled_publications publication JOIN messages message ON message.id=publication.message_id
+        WHERE message.id=? AND message.group_id=?`).get(message.id, message.groupId)
+      if (row) return { scheduleId: String(row.schedule_id), occurrenceAt: Number(row.occurrence_at), operationId: String(row.operation_id) }
+    })
+  }
+
   async append(operationId: string, digest: string, body: MessageBody, recipients: MoteGroupDelivery[], actor?: GroupMemberAuthority,
     reportSender?: Pick<MotePrivateReportOrigin, 'senderSessionId' | 'senderRunId'>,
-    scheduledGenerations?: ReadonlyMap<string, string>): Promise<{ message: MoteGroupMessage; fresh: boolean }> {
+    scheduledGenerations?: ReadonlyMap<string, string>,
+    occurrence?: MoteGroupCallContext['scheduledOccurrence']): Promise<{ message: MoteGroupMessage; fresh: boolean }> {
     return this.write(db => {
       this.originalGroup(db, body.groupId)
+      const remember = (scheduleId: string, at: number, messageId: string) => {
+        const result = db.prepare(`INSERT INTO scheduled_publications(schedule_id,occurrence_at,message_id) VALUES (?,?,?)
+          ON CONFLICT(schedule_id, occurrence_at) DO UPDATE SET message_id=excluded.message_id
+          WHERE message_id=excluded.message_id`).run(scheduleId, at, messageId)
+        if (!result.changes) groupFailure('The original scheduled occurrence belongs to another publication.', 'MOTE_GROUP_OPERATION_CONFLICT')
+      }
+      const previous = occurrence?.previous
+      if (occurrence && previous && db.prepare('SELECT 1 FROM messages WHERE id=? AND group_id=? AND operation_id=?')
+        .get(previous.messageId, previous.conversationId, previous.operationId)) remember(occurrence.scheduleId, previous.occurrenceAt, previous.messageId)
       const prior = this.publishedMessage(db, body.groupId, operationId)
       if (prior) {
         if (prior.digest !== digest) return groupFailure('This Group operation already has another original message.', 'MOTE_GROUP_OPERATION_CONFLICT')
+        if (occurrence) remember(occurrence.scheduleId, occurrence.occurrenceAt, prior.message.id)
         return { message: prior.message, fresh: false }
       }
       if (actor) this.assertActive(this.originalMember(db, body.groupId, actor.moteId), actor.generation)
@@ -433,6 +510,7 @@ export class MoteGroupStore {
       })
       db.prepare('INSERT INTO messages(id,group_id,operation_id,digest,data) VALUES (?,?,?,?,?)')
         .run(body.id, body.groupId, operationId, digest, JSON.stringify(body))
+      if (occurrence) remember(occurrence.scheduleId, occurrence.occurrenceAt, body.id)
       const insert = db.prepare('INSERT INTO deliveries(message_id,mote_id,operation_id,data) VALUES (?,?,?,?)')
       for (const record of selected) insert.run(body.id, record.delivery.moteId, record.delivery.operationId, JSON.stringify(record))
       if (reportSender && this.kind === 'direct') db.prepare('INSERT INTO private_reports(message_id,data,next_at) VALUES (?,?,0)')

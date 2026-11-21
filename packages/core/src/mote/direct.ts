@@ -1,6 +1,6 @@
 import { AgentMuxError } from '../errors.js'
 import { rpcRecord } from '../rpc-data.js'
-import { parseMoteGroupParams, parseMoteGroupResult, type MoteGroupCallContext, type MoteGroupMember, type MoteGroupMessage } from './group.js'
+import { parseMoteGroupParams, parseMoteGroupResult, type MoteGroupCallContext, type MoteGroupMember, type MoteGroupMessage, type MoteGroupSummary } from './group.js'
 import { parseMotePreferencesTarget, sameMotePreferencesTarget, type MotePreferencesTarget } from './preferences.js'
 import { parseAgentScheduleTiming, type AgentScheduleTiming } from '../agent-schedule.js'
 import { scheduleMatchesCreation, validateScheduleRpcResult, type ScheduleResultMap } from '../public-rpc-schedules.js'
@@ -21,6 +21,7 @@ export type MoteDirectThread = {
   id: string
   participants: MoteDirectParticipant[]
   lastMessage: MoteDirectMessage | null
+  lastAssignment?: MoteGroupSummary['lastAssignment']
 }
 export type MoteDirectMainNotification = {
   messageId: string
@@ -29,7 +30,7 @@ export type MoteDirectMainNotification = {
 }
 
 export type MoteDirectParamsMap = {
-  'space.mote.direct.list': Page & { mote: MotePreferencesTarget }
+  'space.mote.direct.list': Page & { mote: MotePreferencesTarget; includeLastAssignment?: true }
   'space.mote.direct.inspect': Page & { threadId: string; mote?: MotePreferencesTarget; messageId?: string; replyToMessageId?: string }
   'space.mote.direct.send': { mote: MotePreferencesTarget; peer: MotePreferencesTarget; operationId: string; body: string; replyToMessageId?: string; images?: FileUploadIdentity[]; priority?: true }
   'space.mote.direct.schedule': Omit<MoteDirectParamsMap['space.mote.direct.send'], 'replyToMessageId' | 'images' | 'priority'> & AgentScheduleTiming & { checkIn?: never }
@@ -79,9 +80,8 @@ const invalid = (code: 'INVALID_CONTROL_REQUEST' | 'CONTROL_PROTOCOL_ERROR'): ne
 export function parseMoteDirectParams<M extends MoteDirectMethod>(method: M, value: unknown): MoteDirectParamsMap[M] {
   const code = 'INVALID_CONTROL_REQUEST'
   if (method === 'space.mote.direct.list') {
-    const { mote, ...page } = rpcRecord(value, ['mote', 'beforeSequence', 'limit'], code)
-    parseMotePreferencesTarget(mote, code)
-    parseMoteGroupParams('space.mote.group.list', page)
+    const { mote, ...page } = rpcRecord(value, ['mote', 'beforeSequence', 'limit', 'includeLastAssignment'], code)
+    parseMoteGroupParams('space.mote.group.list', { ...page, moteId: parseMotePreferencesTarget(mote, code).spaceId })
   } else if (method === 'space.mote.direct.inspect') {
     const { mote, threadId, ...page } = rpcRecord(value, ['mote', 'threadId', 'beforeSequence', 'limit', 'messageId', 'replyToMessageId'], code)
     if (mote !== undefined) parseMotePreferencesTarget(mote, code)
@@ -148,7 +148,7 @@ export function parseMoteDirectResult<M extends MoteDirectMethod>(method: M, val
     })
   }
   const thread = (raw: unknown, mote?: MotePreferencesTarget) => {
-    const { id, participants, lastMessage } = rpcRecord(raw, ['id', 'participants', 'lastMessage'], code)
+    const { id, participants, lastMessage, lastAssignment } = rpcRecord(raw, ['id', 'participants', 'lastMessage', 'lastAssignment'], code)
     if (!Array.isArray(participants) || participants.length !== 2) return invalid(code)
     const members = participants.map(raw => {
       const entry = rpcRecord(raw, ['moteId', 'target', 'name', 'thread'], code)
@@ -156,6 +156,7 @@ export function parseMoteDirectResult<M extends MoteDirectMethod>(method: M, val
     })
     if (mote && !members.some(entry => sameMotePreferencesTarget(entry.target, mote))) return invalid(code)
     return { id, name: 'Private conversation', members, lastMessage: lastMessage === null ? null : message(lastMessage),
+      ...(lastAssignment !== undefined ? { lastAssignment } : {}),
       revision: 1, avatarMoteIds: [], announcement: null, topic: null }
   }
   if (method === 'space.mote.direct.list') {
