@@ -1617,6 +1617,8 @@ export type AgentPrivateNativeActor = Readonly<{ protocolId: string; actorId: st
   frontendControl?: true;
   /** Frozen ability to reconcile this original native initialization without replaying input. */
   initializationControl?: true;
+  /** Frozen ability to observe configuration on this original producer's native subscription. */
+  configurationObservation?: true;
   /** Original Provider invocation, distinct from Runtime's bootstrap plan. No bootstrap JSON decoding. */
   launch: { command: string; args: string[] } }>
 

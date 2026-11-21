@@ -6,6 +6,7 @@ import { readCodexPromptExecutionEvidence, createCodexPromptExecutionTransportVe
 import { readCodexResumedTurnInterruption } from './codex-resumed-turn-interruption.js'
 import { readCodexInformation } from './codex-information.js'
 import { readCodexConfiguration, setCodexConfiguration } from './codex-configuration.js'
+import { observeCodexConfiguration } from './codex-configuration-observer.js'
 import { createCodexNativeCatalog } from '@agentmux/providers/codex/native-catalog'
 import { assertNativeCatalogPath, nativeCatalogFiles, nativeCatalogIssue, readNativeCatalogFile } from './native-session-catalog-files.js'
 import { AgentMuxError } from '../errors.js'
@@ -48,6 +49,7 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
     readInformation: readCodexInformation,
     readConfiguration: readCodexConfiguration,
     setConfiguration: setCodexConfiguration,
+    observeConfiguration: observeCodexConfiguration,
     planQuestionReply: planCodexQuestionReply,
     observeTerminalFrontend: observeCodexTerminalFrontend,
     reconnectTerminalFrontend: reconnectCodexTerminalFrontend,

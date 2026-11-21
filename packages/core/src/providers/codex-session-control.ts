@@ -4,6 +4,7 @@ import { connectCodexNativeActor } from '@agentmux/providers/codex/native-rpc'
 import { nativeProcessBirth, nativeProcessTcpListeners } from '../agent-native-process.js'
 import type { AgentProviderNativeInputPreparationContext } from '../agent-provider.js'
 import { AgentMuxError } from '../errors.js'
+import { codexConfigurationSourceId, codexConfigurationText } from './codex-configuration-source.js'
 
 const unavailable = () => new AgentMuxError('The original native Session control is unconfirmed. Existing terminal input remains available.', 'AGENT_CONFIGURATION_UNAVAILABLE')
 export type CodexControlledThread = { id: string; sessionId: string; model: unknown; modelProvider: unknown }
@@ -40,6 +41,12 @@ export async function connectCodexSessionControl(context: AgentProviderNativeInp
     await readThread()
     const sourceId = createHash('sha256').update(JSON.stringify([nativeActor.actorId, nativeActor.lifecycleOperationId,
       nativeSessionId, runtimeSessionId, birth, actorBirth])).digest('base64url')
-    return { ...connection, sourceId, readThread, assertCurrent }
+    const configurationSource = (thread: CodexControlledThread) => {
+      if (!codexConfigurationText(thread.modelProvider)) throw unavailable()
+      return { nativeSessionId, sourceId: codexConfigurationSourceId({ actorId: nativeActor.actorId,
+        lifecycleOperationId: nativeActor.lifecycleOperationId, nativeSessionId,
+        nativeRuntimeSessionId: thread.sessionId, modelProvider: thread.modelProvider }), observedAt: Date.now() }
+    }
+    return { ...connection, sourceId, readThread, assertCurrent, configurationSource }
   } catch (error) { connection.dispose(); throw error }
 }

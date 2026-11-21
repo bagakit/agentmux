@@ -183,6 +183,15 @@ export type AgentProviderNativeInputPreparationContext = Omit<AgentProviderNativ
   nativeActor?: AgentPrivateNativeActor
   nativeHandle?: Readonly<AgentNativeSessionHandle>
 }
+/** Same original actor, never a transcript-derived or newly loaded observer Session. */
+export type AgentProviderConfigurationObservationContext = AgentProviderNativeInputPreparationContext & {
+  getConfiguration(): import('./agent-configuration.js').AgentConfigurationSnapshot | null
+  /** Sequence increases within this watch, including catalog source changes and explicit read barriers. */
+  onConfiguration(snapshot: import('./agent-configuration.js').AgentConfigurationObservedSnapshot): void
+  /** AGENT_NATIVE_CONFIGURATION_GAP retains the stream; AGENT_CONFIGURATION_OBSERVATION_UNSUPPORTED
+   * waits for a different source. Other failures retry locally. */
+  onUnavailable(code: string, message: string, source?: { sourceId: string; sequence: number }): void
+}
 /** Read the frozen original turn through the actor of an already successful native resume. */
 export type AgentProviderResumedTurnInterruptionContext = AgentProviderNativeInputContext & {
   nativeHandle: Readonly<AgentNativeSessionHandle>
@@ -236,7 +245,13 @@ export type AgentProvider = {
   /** Read only the exact original native Session/backend. No launch configuration substitutes. */
   readInformation?(context: AgentProviderNativeInputPreparationContext, nativeSessionId: string): Promise<import('./agent-information.js').AgentInformationSnapshot>
   readConfiguration?(context: AgentProviderNativeInputPreparationContext, nativeSessionId: string): Promise<import('./agent-configuration.js').AgentConfigurationSnapshot | null>
-  setConfiguration?(context: AgentProviderNativeInputPreparationContext, nativeSessionId: string, request: Pick<import('./agent-configuration.js').AgentConfigurationSet, 'configId' | 'value' | 'expectedRevision'> & { requestId: string }): Promise<import('./agent-configuration.js').AgentConfigurationSnapshot>
+  /** Returns the original applied selection. An unconfirmed observation is a historical ACK, not a current projection. */
+  setConfiguration?(context: AgentProviderNativeInputPreparationContext, nativeSessionId: string, request: Pick<import('./agent-configuration.js').AgentConfigurationSet, 'configId' | 'value' | 'expectedRevision'> & {
+    requestId: string
+    /** Already observed same-object choices; the Provider must requalify source and current values. */
+    configuration?: import('./agent-configuration.js').AgentConfigurationSnapshot
+  }): Promise<import('./agent-configuration.js').AgentConfigurationSnapshot>
+  observeConfiguration?(context: AgentProviderConfigurationObservationContext, nativeSessionId: string): Promise<{ dispose(): void }>
   /** This contribution is the native history capability; its absence is explicitly unsupported. */
   discoverNativeSession?(context: AgentProviderNativeSessionDiscoveryContext): Promise<AgentProviderNativeSessionDiscovery | null>
   /** Persisted conversation discovery is independent of a currently managed Run. */
@@ -346,6 +361,7 @@ export type AgentProviderDefinition = {
   planQuestionReply?: AgentProvider['planQuestionReply']
   prepareNativeInput?: AgentProvider['prepareNativeInput']
   observeTerminalFrontend?: AgentProvider['observeTerminalFrontend']
+  observeConfiguration?: AgentProvider['observeConfiguration']
   reconnectTerminalFrontend?: AgentProvider['reconnectTerminalFrontend']
   planPromptInput?: (prompt: string, context?: { execution?: AgentPromptExecution; currentTerminal?: true }) => AgentPromptInputPlan
   inspectPromptExecution?: (screen: AgentTerminalScreenSnapshot, strategy?: NonNullable<AgentCatalogEntry['capabilities']['promptExecution']>['immediate']) => AgentPromptExecutionContext
@@ -580,6 +596,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     ...(definition.readInputInitialization ? { readInputInitialization: definition.readInputInitialization } : {}),
     ...(definition.readResumedTurnInterruption ? { readResumedTurnInterruption: definition.readResumedTurnInterruption } : {}),
     ...(definition.observeTerminalFrontend ? { observeTerminalFrontend: definition.observeTerminalFrontend } : {}),
+    ...(definition.observeConfiguration ? { observeConfiguration: definition.observeConfiguration } : {}),
     ...(definition.reconnectTerminalFrontend ? { reconnectTerminalFrontend: definition.reconnectTerminalFrontend } : {}),
     ...(definition.observeSessionStatus ? { observeSessionStatus: definition.observeSessionStatus } : {}),
     ...(definition.discoverNativeSession ? { discoverNativeSession: definition.discoverNativeSession } : {}),

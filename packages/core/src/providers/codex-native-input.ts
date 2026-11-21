@@ -33,7 +33,8 @@ export const prepareCodexManagedLaunch: NonNullable<AgentProvider['prepareManage
   // In 0.171 the first admitted prompt materializes the rollout that the TUI
   // joins. Empty creates in this release still need the ordinary terminal.
   if (context.kind === 'create' && (release === 'codex-cli 0.165.0' || release === 'codex-cli 0.171.0' && !carriesPrompt)) return { plan }
-  const nativeActor = { protocolId: PROTOCOL_ID, actorId: mintObjectId(), lifecycleOperationId, token: randomBytes(32).toString('hex'), frontendControl: true as const, initializationControl: true as const, launch: { command: plan.command, args: [...plan.args] } }
+  const nativeActor = { protocolId: PROTOCOL_ID, actorId: mintObjectId(), lifecycleOperationId, token: randomBytes(32).toString('hex'), frontendControl: true as const,
+    initializationControl: true as const, configurationObservation: true as const, launch: { command: plan.command, args: [...plan.args] } }
   const managed: CodexManagedRunPlan = { command: plan.command, serverConfig, frontendArgs,
     ...(prepared ? { resume: prepared.resume } : { create: creation!.configuration,
       // The CLI's remote frontend and AgentMux's original history reader both

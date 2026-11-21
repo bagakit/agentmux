@@ -69,7 +69,12 @@ export function agentModelOption(configuration?: AgentConfigurationSnapshot | nu
 
 export function agentCurrentModel(information?: AgentInformationSnapshot | null, configuration?: AgentConfigurationSnapshot | null): AgentInformationModel | undefined {
   const option = agentModelOption(configuration)
-  return option ? { id: option.currentValue, name: option.choices.find(choice => choice.value === option.currentValue)!.name, scope: 'next-turn' } : information?.issues.some(issue => issue.field === 'model') ? undefined : information?.model
+  if (option) {
+    if (configuration?.observation?.state === 'unconfirmed') return undefined
+    const name = option.choices.find(choice => choice.value === option.currentValue)?.name
+    return { id: option.currentValue, ...(name ? { name } : {}), scope: 'next-turn' }
+  }
+  return information?.issues.some(issue => issue.field === 'model') ? undefined : information?.model
 }
 
 export function parseAgentInformationInspect(value: unknown): AgentInformationInspect {

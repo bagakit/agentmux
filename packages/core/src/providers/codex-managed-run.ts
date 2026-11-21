@@ -10,8 +10,10 @@ import type { AgentTerminalFrontendObservation, AgentTerminalInitialization } fr
 import { resolve } from 'node:path'
 import { nativeProcessTcpListeners } from '../agent-native-process.js'
 import type { CodexManagedRunPlan } from '@agentmux/providers/codex/input-protocol'
+import { isCodexLoadedThread } from '@agentmux/providers/codex/input-protocol'
 import { connectCodexNativeActor } from '@agentmux/providers/codex/native-rpc'
 import { codexDiagnosticStream, formatCodexManagedDiagnostic } from '@agentmux/providers/codex/managed-diagnostics'
+import { createCodexConfigurationSource, codexConfigurationText } from './codex-configuration-source.js'
 
 export { CODEX_NATIVE_TOKEN_ENV } from './codex-managed-frontend.js'
 const INITIALIZATION_OBSERVATION_MS = 8_000
@@ -58,6 +60,18 @@ export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number
   server.once('error', error => { serverError = error })
   let frontend: AgentTerminalFrontendObservation = { frontendId: mintObjectId(), state: 'starting', backendState: 'running', source: 'managed-process', observedAt: Date.now() }
   let control: Awaited<ReturnType<typeof openCodexFrontendControl>> | undefined
+  const configuration = createCodexConfigurationSource({ actorId, lifecycleOperationId,
+    publish: value => control?.publishConfiguration(value),
+    read: async () => {
+      const connection = nativeConnection, expectedId = nativeSessionId, runtime = nativeRuntimeSessionId
+      if (!expectedId || !runtime || !connection?.isConnected()) throw new ManagedNativeLaunchError('The original subscribed native configuration source is unavailable.')
+      const loaded = await connection.request('thread/read', { threadId: expectedId, includeTurns: false })
+      if (connection !== nativeConnection || expectedId !== nativeSessionId || runtime !== nativeRuntimeSessionId ||
+          !isCodexLoadedThread(loaded, expectedId) || loaded.thread.sessionId !== runtime ||
+          !codexConfigurationText(loaded.thread.model) || !codexConfigurationText(loaded.thread.modelProvider)) throw new ManagedNativeLaunchError('The original loaded configuration identity is unconfirmed.')
+      return { nativeSessionId: expectedId, nativeRuntimeSessionId: runtime, model: loaded.thread.model, modelProvider: loaded.thread.modelProvider }
+    }
+  })
   const publish = (value: AgentTerminalFrontendObservation): void => { frontend = { ...value, initialization }; control?.publish(frontend) }
   const setInitialization = (value: AgentTerminalInitialization): void => {
     if (stopping || backendEnded) return
@@ -148,7 +162,7 @@ export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number
           if (!nativeConnection?.isConnected()) {
             nativeConnection?.dispose()
             nativeConnection = await connectCodexNativeActor(await locateEndpoint(), token, lifetime.signal, 'agentmux_managed_initialization',
-              { retainPendingInitialization: true, onNotification: observeNativeProgress })
+              { retainPendingInitialization: true, onNotification: observeNativeProgress, onUnavailable: () => configuration.unavailable() })
           }
           const connection = nativeConnection
           await joinCodexNativeFrontend({ request: (method, params) => connection.request(method, params, { retainPending: true }) }, target, assertCurrent)
@@ -172,6 +186,10 @@ export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number
       return pending
     }
     const observeNativeProgress = (method: string, params: Record<string, unknown>): void => {
+      if (method === 'thread/settings/updated' && params.threadId === nativeSessionId) {
+        // Native notifications have no revision. A delayed payload cannot overwrite a later read.
+        configuration.invalidate()
+      }
       // Native turn notifications only wake the original join. They never attest
       // that a record exists or that a TUI attached, and join's own notifications
       // cannot feed a polling loop.
@@ -189,7 +207,7 @@ export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number
           const address = await locateEndpoint()
           nativeConnection?.dispose()
           nativeConnection = await connectCodexNativeActor(address, token, lifetime.signal, 'agentmux_managed_initialization',
-            { retainPendingInitialization: true, onNotification: observeNativeProgress })
+            { retainPendingInitialization: true, onNotification: observeNativeProgress, onUnavailable: () => configuration.unavailable() })
           // Read-only preflight may be retried before any native creation request exists.
           initializationStep = 'preflight'
           if (initialization.phase === 'unknown' && initialization.failure?.code === 'AGENT_NATIVE_INITIALIZATION_OBSERVATION_UNCONFIRMED') {
@@ -285,6 +303,10 @@ export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number
     const operations = new Map<string, Operation>()
     control = await openCodexFrontendControl(token, { actorId, lifecycleOperationId, processId: process.pid }, {
       current: () => ({ ...frontend, initialization }),
+      configuration: expectedId => {
+        if (expectedId !== nativeSessionId) throw new ManagedNativeLaunchError('The original initialized configuration target is unconfirmed.')
+        return configuration.read()
+      },
       reconnect: request => {
         const key = JSON.stringify(request), previous = operations.get(request.operationId)
         if (previous && previous.request !== key) throw new ManagedNativeLaunchError('The original frontend operation has another immutable target.')

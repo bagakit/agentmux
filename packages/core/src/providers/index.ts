@@ -89,7 +89,8 @@ function createAntigravityProvider(defineAgentProvider: ProviderFactory): AgentP
     async setConfiguration({ nativeActor, processId, signal }, nativeSessionId, request) {
       if (nativeActor?.protocolId !== ANTIGRAVITY_ACP_ACTOR_PROTOCOL) throw new AgentMuxError('The original native configuration actor is unavailable.', 'AGENT_CONFIGURATION_UNAVAILABLE')
       const { actorId, lifecycleOperationId, token } = nativeActor
-      return await antigravityAcpActor.setConfiguration({ actorId, lifecycleOperationId, processId }, token, nativeSessionId, request, signal)
+      return await antigravityAcpActor.setConfiguration({ actorId, lifecycleOperationId, processId }, token, nativeSessionId,
+        { configId: request.configId, value: request.value, expectedRevision: request.expectedRevision, requestId: request.requestId }, signal)
     },
     managedAcp: {
       protocolId: ANTIGRAVITY_ACP_ACTOR_PROTOCOL,

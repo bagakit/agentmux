@@ -15,7 +15,25 @@ export type AgentConfigurationOption = {
   | { type: 'boolean'; currentValue: boolean }
 )
 
-export type AgentConfigurationSnapshot = { revision: string; options: AgentConfigurationOption[] }
+/** Machine observation of the original configuration, independent of its available choices. */
+export type AgentConfigurationObservation = {
+  nativeSessionId: string
+  sourceId?: string
+  /** When present, ordered by the original Provider observation stream, including explicit reads. */
+  sequence?: number
+  observedAt: number
+  state: 'confirmed' | 'unconfirmed'
+  issue?: { code: string; message: string }
+}
+
+export type AgentConfigurationSnapshot = {
+  revision: string
+  options: AgentConfigurationOption[]
+  observation?: AgentConfigurationObservation
+}
+export type AgentConfigurationObservedSnapshot = AgentConfigurationSnapshot & {
+  observation: AgentConfigurationObservation & { state: 'confirmed'; sourceId: string; sequence: number }
+}
 
 export type AgentConfigurationTarget = PostureTarget
 export type AgentConfigurationSet = { target: AgentConfigurationTarget; operationId: string; configId: string; value: string | boolean; expectedRevision: string }
@@ -42,7 +60,7 @@ const description = (value: unknown): string => {
 }
 
 export function parseAgentConfigurationSnapshot(value: unknown): AgentConfigurationSnapshot {
-  const p = rpcRecord(value, ['revision', 'options'], protocol)
+  const p = rpcRecord(value, ['revision', 'options', 'observation'], protocol)
   const revision = text(p.revision, 'Original configuration revision')
   if (!Array.isArray(p.options) || p.options.length > 256) throw invalid()
   const ids = new Set<string>()
@@ -67,10 +85,25 @@ export function parseAgentConfigurationSnapshot(value: unknown): AgentConfigurat
         ...(c.description === undefined ? {} : { description: description(c.description) }),
         ...(group === undefined ? {} : { group: { id: text(group.id, 'Configuration group'), name: text(group.name, 'Configuration group name') } }) }
     })
-    if (typeof o.currentValue !== 'string' || !choiceIds.has(o.currentValue)) throw invalid()
-    return { ...fields, type: 'select', currentValue: o.currentValue, choices }
+    // A native configured value can remain current after it leaves the selectable catalog.
+    // Reporting it never invents an available choice or authorizes setting it.
+    return { ...fields, type: 'select', currentValue: text(o.currentValue, 'Current configuration value'), choices }
   })
-  return { revision, options }
+  const observation = p.observation === undefined ? undefined : parseAgentConfigurationObservation(p.observation)
+  return { revision, options, ...(observation ? { observation } : {}) }
+}
+
+export function parseAgentConfigurationObservation(value: unknown): AgentConfigurationObservation {
+  const p = rpcRecord(value, ['nativeSessionId', 'sourceId', 'sequence', 'observedAt', 'state', 'issue'], protocol)
+  if (!Number.isSafeInteger(p.observedAt) || Number(p.observedAt) < 0 ||
+      p.sequence !== undefined && (!Number.isSafeInteger(p.sequence) || Number(p.sequence) <= 0) ||
+      !['confirmed', 'unconfirmed'].includes(String(p.state)) || p.state === 'confirmed' && p.sourceId === undefined) throw invalid()
+  const issue = p.issue === undefined ? undefined : rpcRecord(p.issue, ['code', 'message'], protocol)
+  return { nativeSessionId: text(p.nativeSessionId, 'Original configuration Session'),
+    ...(p.sourceId === undefined ? {} : { sourceId: text(p.sourceId, 'Original configuration source') }),
+    observedAt: p.observedAt as number, state: p.state as AgentConfigurationObservation['state'],
+    ...(p.sequence === undefined ? {} : { sequence: p.sequence as number }),
+    ...(issue ? { issue: { code: text(issue.code, 'Configuration observation issue'), message: text(issue.message, 'Configuration observation issue') } } : {}) }
 }
 
 export function parseAgentConfigurationSet(value: unknown): AgentConfigurationSet {

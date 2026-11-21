@@ -7,6 +7,7 @@ import { AgentMuxError } from '../errors.js'
 import { nativeProcessBirth, nativeProcessTcpListeners } from '../agent-native-process.js'
 import { connectCodexNativeActor } from '@agentmux/providers/codex/native-rpc'
 import { parseTerminalFrontendObservation, type AgentTerminalFrontendObservation, type AgentTerminalFrontendRecoveryRequest } from '../agent-terminal-frontend.js'
+import { parseCodexConfigurationPacket, type CodexConfigurationPacket } from './codex-configuration-source.js'
 
 export const CODEX_NATIVE_TOKEN_ENV = 'AGENTMUX_CODEX_ACTOR_TOKEN'
 export const CODEX_ACTOR_ID_ENV = 'AGENTMUX_CODEX_ACTOR_ID'
@@ -17,17 +18,19 @@ const unavailable = (message = 'The original managed frontend control is unconfi
 type Identity = { actorId: string; lifecycleOperationId: string; processId: number }
 // Keep the declared native-session wire stable for already running actors.
 // The new initialization action has its own frozen capability and target field.
-type Request = Identity & { token: string; method: 'observe' | 'reconnect'; operationId?: string;
+type Request = Identity & { token: string; method: 'observe' | 'observe-configuration' | 'reconnect'; operationId?: string;
   expectedFrontendId?: string; nativeSessionId?: string; initializationOperationId?: string }
 
 /** Private Provider control only. Runtime remains the sole Run/PTY/byte owner. */
 export async function openCodexFrontendControl(token: string, identity: Identity, handlers: {
   current(): AgentTerminalFrontendObservation
   reconnect(request: AgentTerminalFrontendRecoveryRequest): Promise<AgentTerminalFrontendObservation>
+  configuration?(nativeSessionId: string): Promise<CodexConfigurationPacket>
 }) {
   const watchers = new Set<Socket>(), sockets = new Set<Socket>()
+  const configurationWatchers = new Map<Socket, string>()
   const server = createServer(socket => {
-    sockets.add(socket); socket.once('close', () => { watchers.delete(socket); sockets.delete(socket) })
+    sockets.add(socket); socket.once('close', () => { watchers.delete(socket); configurationWatchers.delete(socket); sockets.delete(socket) })
     socket.on('error', () => socket.destroy())
     let buffer = '', admitted = false
     socket.setTimeout(10_000, () => { if (!admitted) socket.destroy() })
@@ -44,6 +47,15 @@ export async function openCodexFrontendControl(token: string, identity: Identity
             p.actorId !== identity.actorId || p.lifecycleOperationId !== identity.lifecycleOperationId || p.processId !== identity.processId) return
           if (p.method === 'observe') { watchers.add(socket); socket.write(JSON.stringify({ frontend: handlers.current() }) + '\n'); return }
           const id = (value: unknown) => typeof value === 'string' && value.length > 0 && value.length < 512
+          if (p.method === 'observe-configuration') {
+            if (!handlers.configuration) throw new AgentMuxError('The original producer does not expose native configuration observation.', 'AGENT_CONFIGURATION_OBSERVATION_UNSUPPORTED')
+            if (!id(p.nativeSessionId)) throw unavailable('The original native configuration target is invalid.')
+            // Register before the original source read; its source sequence fences an interleaved push.
+            configurationWatchers.set(socket, p.nativeSessionId!)
+            const configuration = await handlers.configuration(p.nativeSessionId!)
+            if (configuration.nativeSessionId !== p.nativeSessionId) throw unavailable('The original configuration source differs from this request.')
+            socket.write(JSON.stringify({ configuration, configurationBarrier: true }) + '\n'); return
+          }
           if (p.method !== 'reconnect' || !id(p.operationId) || !id(p.expectedFrontendId) ||
             (id(p.nativeSessionId) ? p.initializationOperationId !== undefined : !id(p.initializationOperationId) || p.nativeSessionId !== undefined)) throw unavailable('The original frontend recovery target is invalid.')
           const target: AgentTerminalFrontendRecoveryRequest['target'] = p.nativeSessionId
@@ -51,8 +63,9 @@ export async function openCodexFrontendControl(token: string, identity: Identity
             : { kind: 'initialization', lifecycleOperationId: p.initializationOperationId! }
           const frontend = await handlers.reconnect({ operationId: p.operationId!, expectedFrontendId: p.expectedFrontendId!, target })
           socket.end(JSON.stringify({ frontend }) + '\n')
-        } catch (error) { socket.end(JSON.stringify({ error: error instanceof Error ? error.message : 'Original frontend control failed.' }) + '\n') }
-        finally { if (!watchers.has(socket) && !socket.writableEnded) socket.destroy() }
+        } catch (error) { configurationWatchers.delete(socket); socket.end(JSON.stringify({ error: error instanceof Error ? error.message : 'Original frontend control failed.',
+          ...(error instanceof AgentMuxError ? { errorCode: error.code } : {}) }) + '\n') }
+        finally { if (!watchers.has(socket) && !configurationWatchers.has(socket) && !socket.writableEnded) socket.destroy() }
       })()
     })
   })
@@ -63,6 +76,12 @@ export async function openCodexFrontendControl(token: string, identity: Identity
       const bytes = JSON.stringify({ frontend }) + '\n'
       for (const socket of watchers) if (!socket.write(bytes)) { watchers.delete(socket); socket.destroy() }
     },
+    publishConfiguration(configuration: CodexConfigurationPacket): void {
+      const bytes = JSON.stringify({ configuration }) + '\n'
+      for (const [socket, nativeSessionId] of configurationWatchers) {
+        if (configuration.nativeSessionId === nativeSessionId && !socket.write(bytes)) { configurationWatchers.delete(socket); socket.destroy() }
+      }
+    },
     async close(): Promise<void> {
       for (const socket of sockets) socket.destroy()
       await new Promise<void>(resolve => server.close(() => resolve()))
@@ -71,15 +90,17 @@ export async function openCodexFrontendControl(token: string, identity: Identity
   }
 }
 
-async function connect(context: Parameters<NonNullable<AgentProvider['observeTerminalFrontend']>>[0], method: Request['method'],
-  extra: Partial<Request>, onFrontend: (value: AgentTerminalFrontendObservation) => void, onUnavailable: (message: string) => void) {
+async function connect(context: Pick<Parameters<NonNullable<AgentProvider['observeTerminalFrontend']>>[0], 'nativeActor' | 'processId' | 'signal'>, method: Request['method'],
+  extra: Partial<Request>, onPacket: (value: { frontend?: unknown; configuration?: unknown; configurationBarrier?: unknown }) => void | boolean, onUnavailable: (message: string) => void) {
   context.signal.throwIfAborted()
   const socket = createConnection(codexFrontendSocketPath(context.nativeActor.token))
-  let closed = false, buffer = '', ready = false
-  const dispose = (): void => { if (closed) return; closed = true; context.signal.removeEventListener('abort', dispose); socket.destroy() }
+  let closed = false, buffer = '', ready = false, rejectInitial: ((error: unknown) => void) | undefined
+  const dispose = (): void => { if (closed) return; closed = true; context.signal.removeEventListener('abort', dispose); socket.destroy()
+    if (!ready) rejectInitial?.(context.signal.aborted ? context.signal.reason : unavailable()) }
   context.signal.addEventListener('abort', dispose, { once: true })
   const initial = new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => reject(unavailable()), 10_000)
+    rejectInitial = error => { clearTimeout(timer); reject(error) }
     const fail = (error: unknown) => { clearTimeout(timer); if (!ready) reject(error); else if (!closed) onUnavailable(error instanceof Error ? error.message : String(error)) }
     socket.on('error', fail); socket.on('close', () => { if (!closed) fail(unavailable()) })
     socket.on('data', bytes => {
@@ -88,8 +109,13 @@ async function connect(context: Parameters<NonNullable<AgentProvider['observeTer
         for (;;) {
           const newline = buffer.indexOf('\n'); if (newline < 0) break
           const packet = JSON.parse(buffer.slice(0, newline)); buffer = buffer.slice(newline + 1)
-          if (packet.error) throw unavailable(packet.error)
-          onFrontend(parseTerminalFrontendObservation(packet.frontend)); ready = true; clearTimeout(timer); resolve()
+          if (packet.error) {
+            if (method === 'observe-configuration' && packet.errorCode === 'AGENT_CONFIGURATION_OBSERVATION_UNSUPPORTED') throw new AgentMuxError(
+              packet.error, 'AGENT_CONFIGURATION_OBSERVATION_UNSUPPORTED')
+            throw unavailable(packet.error)
+          }
+          if (onPacket(packet) === false) continue
+          ready = true; clearTimeout(timer); resolve()
         }
       } catch (error) { fail(error); dispose() }
     })
@@ -99,7 +125,32 @@ async function connect(context: Parameters<NonNullable<AgentProvider['observeTer
   try { await initial; return { dispose } } catch (error) { dispose(); throw error }
 }
 export const observeCodexTerminalFrontend: NonNullable<AgentProvider['observeTerminalFrontend']> = async context =>
-  await connect(context, 'observe', {}, context.onFrontend, context.onUnavailable)
+  await connect(context, 'observe', {}, packet => context.onFrontend(parseTerminalFrontendObservation(packet.frontend)), context.onUnavailable)
+
+export async function observeCodexConfigurationControl(context: Pick<Parameters<NonNullable<AgentProvider['observeTerminalFrontend']>>[0], 'nativeActor' | 'processId' | 'signal'>,
+  nativeSessionId: string, onConfiguration: (value: CodexConfigurationPacket) => void, onUnavailable: (message: string) => void) {
+  return await connect(context, 'observe-configuration', { nativeSessionId }, packet => {
+    const value = parseCodexConfigurationPacket(packet.configuration)
+    if (!value || value.nativeSessionId !== nativeSessionId) throw unavailable('The original native configuration packet is invalid.')
+    onConfiguration(value)
+  }, onUnavailable)
+}
+
+/** A current-value barrier on the original producer, using its existing fixed observation method. */
+export async function readCodexConfigurationControl(context: Parameters<typeof observeCodexConfigurationControl>[0],
+  nativeSessionId: string): Promise<CodexConfigurationPacket> {
+  let result: CodexConfigurationPacket | undefined
+  const handle = await connect(context, 'observe-configuration', { nativeSessionId }, packet => {
+    // An earlier push may arrive while the requested source read is pending.
+    if (packet.configurationBarrier !== true) return false
+    const value = parseCodexConfigurationPacket(packet.configuration)
+    if (!value || value.nativeSessionId !== nativeSessionId) throw unavailable('The original native configuration barrier is invalid.')
+    result = value
+  }, () => {})
+  handle.dispose()
+  if (!result || result.state !== 'confirmed') throw unavailable('The original producer could not confirm the current configuration ordering.')
+  return result
+}
 
 /** Loaded membership and a same-object resume receipt are separate native facts. */
 export async function joinCodexNativeFrontend(connection: Pick<Awaited<ReturnType<typeof connectCodexNativeActor>>, 'request'>,
@@ -146,7 +197,7 @@ export const reconnectCodexTerminalFrontend: NonNullable<AgentProvider['reconnec
   const wire = { operationId: request.operationId, expectedFrontendId: request.expectedFrontendId,
     ...(request.target.kind === 'native-session' ? { nativeSessionId: request.target.nativeSessionId }
       : { initializationOperationId: request.target.lifecycleOperationId }) }
-  const handle = await connect({ ...context, onFrontend() {}, onUnavailable() {} }, 'reconnect', wire, value => { result = value }, () => {})
+  const handle = await connect(context, 'reconnect', wire, packet => { result = parseTerminalFrontendObservation(packet.frontend) }, () => {})
   handle.dispose()
   if (!result) throw unavailable()
   return result
