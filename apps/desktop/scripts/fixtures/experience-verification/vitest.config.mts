@@ -42,6 +42,18 @@ const changes: Record<string, { file: string; before: string; after: string }> =
   'action-disconnected': {
     file: 'apps/desktop/src/renderer/src/components/ServiceNoticeRow.tsx',
     before: 'onClick={() => item.action!.run()}', after: 'onClick={() => {}}'
+  },
+  'mailbox-liquid': {
+    file: 'apps/desktop/src/renderer/src/components/MailboxNavigation.tsx',
+    before: '<LiquidSelectionSurface selected={selected} active targetAttribute="data-mailbox-folder" />', after: '{null}'
+  },
+  'mailbox-record-structure': {
+    file: 'packages/client-ui/src/components/MailboxRecordRow.tsx',
+    before: 'className="composer-mailbox__record-body"', after: 'className="composer-mailbox__record-body-removed"'
+  },
+  'mailbox-heading': {
+    file: 'apps/desktop/src/renderer/src/components/SessionMailbox.tsx',
+    before: '<ThemeObjectMailIcon className="composer-mailbox__heading-icon" size={15} aria-hidden="true" />', after: 'null'
   }
 }
 const change = mutation === 'baseline' ? undefined : changes[mutation]
@@ -55,6 +67,7 @@ const owning = [
   'apps/desktop/src/renderer/src/components/SessionMailbox.tsx',
   'apps/desktop/src/renderer/src/components/ServiceNoticeRow.tsx',
   'packages/client-ui/src/components/MailboxRecordRow.tsx'
+  'apps/desktop/src/renderer/src/components/MailboxNavigation.tsx'
 ]
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex')
 const consumed = new Map<string, unknown>(), applied: unknown[] = []

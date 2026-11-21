@@ -26,7 +26,11 @@ it('separates unread and unconfirmed state from the exact original action and de
   await open(); await chooseNotices()
   await act(async () => panel().dispatchEvent(new Event('pointerdown', { bubbles: true })))
   expect(acknowledge).toHaveBeenCalledWith(['delivery'])
+  expect(panel().querySelector('.composer-mailbox__heading-icon')).not.toBeNull()
+  expect(panel().querySelector('.composer-mailbox__folders > .liquid-selection')).not.toBeNull()
   const row = panel().querySelector<HTMLButtonElement>('.composer-mailbox__row')!
+  expect(row.querySelector('.composer-mailbox__record-body')).not.toBeNull()
+  expect(row.querySelector('.composer-mailbox__avatar')).not.toBeNull()
   expect(panel().querySelector('.composer-notice__state')!.textContent).toBe('Result unconfirmed')
   expect(panel().querySelector('.composer-notice__unread')!.getAttribute('aria-label')).toBe('Unread')
   expect(row.textContent).toContain('Input delivery needs confirmation')
@@ -40,6 +44,13 @@ it('separates unread and unconfirmed state from the exact original action and de
   expect(panel().textContent).toContain('Check delivery')
   await dom.click('.composer-notice__action')
   expect(action).toHaveBeenCalledTimes(2)
+  await dom.click('[role="tab"][id$="-user-tab"]')
+  expect(panel().querySelector<HTMLElement>('[id$="-user"]')!.hidden).toBe(false)
+  await dom.click('[role="tab"][id$="-agents-tab"]')
+  expect(panel().querySelector<HTMLElement>('[id$="-agents"]')!.hidden).toBe(false)
+  expect(panel().querySelector('[role="tab"][id$="-inbox-tab"]')).not.toBeNull()
+  await chooseNotices()
+  expect(panel().querySelector<HTMLElement>('[id$="-system"]')!.hidden).toBe(false)
 })
 
 it('keeps a degraded notice readable without inventing a recovery action', async () => {

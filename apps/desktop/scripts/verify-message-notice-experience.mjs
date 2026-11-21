@@ -10,11 +10,14 @@ const root = resolve(import.meta.dirname, '../../..'), execute = promisify(execF
 const test = 'apps/desktop/test/service-notice-row.test.tsx'
 const config = 'apps/desktop/scripts/fixtures/experience-verification/vitest.config.mts'
 const component = 'apps/desktop/src/renderer/src/components/'
-const required = [component + 'SessionMailbox.tsx', component + 'ServiceNoticeRow.tsx', 'packages/client-ui/src/components/MailboxRecordRow.tsx']
+const required = [component + 'SessionMailbox.tsx', component + 'ServiceNoticeRow.tsx', 'packages/client-ui/src/components/MailboxRecordRow.tsx', component + 'MailboxNavigation.tsx']
 const productPaths = ['apps/desktop/src/renderer/src/App.tsx', component + 'MountedSpaceAgent.tsx', component + 'AgentSessionComposer.tsx', component + 'GlobalSystemNotices.tsx', ...required]
 const cases = [
   { mutation: 'unconfirmed-copy', title: 'separates unread and unconfirmed state', file: component + 'ServiceNoticeRow.tsx' },
-  { mutation: 'action-disconnected', title: 'separates unread and unconfirmed state', file: component + 'ServiceNoticeRow.tsx' }
+  { mutation: 'action-disconnected', title: 'separates unread and unconfirmed state', file: component + 'ServiceNoticeRow.tsx' },
+  { mutation: 'mailbox-liquid', title: 'separates unread and unconfirmed state', file: component + 'MailboxNavigation.tsx' },
+  { mutation: 'mailbox-record-structure', title: 'separates unread and unconfirmed state', file: 'packages/client-ui/src/components/MailboxRecordRow.tsx' },
+  { mutation: 'mailbox-heading', title: 'separates unread and unconfirmed state', file: component + 'SessionMailbox.tsx' }
 ]
 const base = join(process.env.AGENTMUX_EXPERIENCE_EVIDENCE_HOME ?? join(root, '.bagakit/verification'), 'message-notice-experience')
 await mkdir(base, { recursive: true })
@@ -42,7 +45,9 @@ async function traceCallers() {
   await collect(required[0], jsx('ServiceWindowNotice'))
   await collect(required[0], (node, ast) => ts.isPropertyAccessExpression(node) && node.getText(ast) === 'selectedNotice.action.run')
   await collect(required[1], jsx('MailboxRecordRow'))
-  assert.ok(calls.length >= 9)
+  await collect(required[0], jsx('MailboxWorkspaceNavigation'))
+  await collect(required[3], jsx('LiquidSelectionSurface'))
+  assert.ok(calls.length >= 11)
   return calls
 }
 
