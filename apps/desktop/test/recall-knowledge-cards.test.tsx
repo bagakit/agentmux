@@ -280,9 +280,47 @@ it('reads the exact original card body directly from Conversation without expand
   expect(preview.textContent).not.toContain('Outside the card.')
   expect(content).toHaveBeenCalledExactlyOnceWith('selected-note', { signal: expect.any(AbortSignal) })
   await display(null)
-  expect(content.mock.calls[0]![1]!.signal?.aborted).toBe(true)
   expect(container!.querySelector('.recall-knowledge-card .note-embedded-content')).toBeNull()
   expect(api.files.writePublic).not.toHaveBeenCalled()
+})
+
+it('shares an original Note read across cards and cancels it only after the final card leaves', async () => {
+  const other = { ...card, id: 'another-reading-point', title: 'Second finding' }
+  const note = newNoteDocument('Outside the cards.', 'selected-note', 'intro', 'Research note')
+  for (const [point, words] of [[card, 'First saved body.'], [other, 'Second saved body.']] as const) {
+    note.content.content!.push(recallCardNoteBlock(point, point.id, { containerId: point.id + '-quote',
+      blocks: [{ type: 'paragraph', attrs: { blockId: point.id + '-body' }, content: [{ type: 'text', text: words }] }] }))
+  }
+  files.set(path, serializeNoteDocument(note))
+  const graph = await originalObservation.graph(catalog, {})
+  const original = await originalObservation.content(catalog, note.noteId)
+  const backlinks = recallBacklinks({ catalog, graph }, { hostId: card.routeHostId, agentSessionId: card.reference.agentSessionId })
+  const requests: { signal: AbortSignal; complete: () => void }[] = []
+  const read = vi.spyOn(api.notebooks, 'content').mockImplementation((_, options) => new Promise(resolve => {
+    requests.push({ signal: options!.signal!, complete: () => resolve(original) })
+  }))
+  const cards = (points: RecallCard[]) => <>{points.map(point => <ConversationRecallCard key={point.id} card={point} backlinks={backlinks} />)}</>
+  const previews = () => [...container!.querySelectorAll('.recall-knowledge-card .note-embedded-content')].map(node => node.textContent)
+
+  await display(cards([card, other]))
+  expect(read).toHaveBeenCalledTimes(1)
+  await act(async () => requests[0]!.complete())
+  expect(previews()).toEqual(['First saved body.', 'Second saved body.'])
+
+  await display(null)
+  await display(cards([card, other]))
+  expect(read).toHaveBeenCalledTimes(2)
+  await display(cards([other]))
+  expect(requests[1]!.signal.aborted).toBe(false)
+  await display(null)
+  expect(requests[1]!.signal.aborted).toBe(true)
+
+  await display(cards([other]))
+  expect(read).toHaveBeenCalledTimes(3)
+  await act(async () => requests[1]!.complete())
+  expect(previews()).toEqual([])
+  await act(async () => requests[2]!.complete())
+  expect(previews()).toEqual(['Second saved body.'])
 })
 
 it('shows a confirmed link-only card and keeps the Note action when its saved body cannot be checked', async () => {
