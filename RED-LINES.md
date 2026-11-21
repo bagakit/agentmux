@@ -48,6 +48,7 @@
 ## 历史依据
 
 - [健康 Agent 永久收不到消息](docs/casestudy/prompt-refused-after-readiness-consumed.md)：readiness 被永久消费、断线漏续期和错误恢复建议的事故证据。
+- 对退役 Run 的保护误伤了原 Session 中尚未派发的普通消息。[同一 Session 恢复后，待发消息只能移至草稿](docs/casestudy/same-session-pending-message-forced-to-draft.md)
 - [做过的功能看起来消失](docs/casestudy/stale-package-feature-disappearance.md)：源码、磁盘安装副本与实际运行实例身份不能互相代签。
 
 复盘中的版本、行号、症状和当时措施只解释对应现场。当前策略以 owning SSOT 和当前源码为准，不把历史止血动作当成今天的授权。
