@@ -12898,10 +12898,9 @@ export class AgentMuxClient {
     // native idle, live or durable. Only a start can; a late end still settles its exact request.
     const retiresNativeIdle = normalized.lifecycleEvent !== 'tool-use-end'
     if (updatesSemanticStatus && acceptsAgentActivityState(session.activityCommit, session.run, normalized.status)) {
-      // This bounded lookup is only for a candidate transition, never each tool/output observation.
+      // A replay can outlive the recent display window. Only inspect its original activity.
       try {
-        const history = await this.store.loadTimeline(session.agentSessionId)
-        if (history.items.some(item => item.id === activityId && item.activityState)) {
+        if (await this.store.hasCapturedActivity(session.agentSessionId, activityId)) {
           await this.flushAgentActivity(session)
           return
         }

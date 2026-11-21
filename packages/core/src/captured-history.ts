@@ -61,13 +61,28 @@ function accepted(db: DatabaseSync, id: string): StreamRow {
 }
 function decode(row: Record<string, unknown>): AgentCapturedTimelineRecord {
   const header = { firstSequence: Number(row.first_sequence), sequence: Number(row.sequence), revision: String(row.revision) };
-  return row.item_json === 'null' ? { ...header, item: null, recordId: String(row.record_id) }
+  return row.item_json === 'null' || row.item_json === null ? { ...header, item: null, recordId: String(row.record_id) }
     : { ...header, item: normalizeAgentTimelineItem(JSON.parse(String(row.item_json))) };
 }
 function decodeHead(row: Record<string, unknown>) {
   const record = decode(row);
   if (record.item === null) throw new AgentMuxError('The current captured head body is unavailable. Retain its original stream.', 'INVALID_AGENT_TIMELINE');
   return record;
+}
+
+function capturedHead(db: DatabaseSync, id: string, epoch: string, recordId: string) {
+  const row = db.prepare(`SELECT v.*,h.first_sequence FROM captured_record_heads h LEFT JOIN captured_record_versions v
+  ON v.session_id=h.session_id AND v.epoch=h.epoch AND v.record_id=h.record_id AND v.sequence=h.latest_sequence
+  WHERE h.session_id=? AND h.epoch=? AND h.record_id=?`).get(id, epoch, recordId);
+  if (row === undefined) return undefined;
+  const record = decodeHead(row);
+  if (record.item.id !== recordId || record.item.agentSessionId !== id)
+    throw new AgentMuxError('The current captured head body disagrees with its original record identity.', 'INVALID_AGENT_TIMELINE');
+  return record;
+}
+
+export function hasCapturedActivity(db: DatabaseSync, id: string, epoch: string, recordId: string): boolean {
+  return capturedHead(db, id, epoch, recordId)?.item.activityState !== undefined;
 }
 /** Read-local disclosure, never one persistent gap per retired version. */
 export function capturedBodyGaps(records: readonly AgentCapturedTimelineRecord[]): AgentCapturedTimelineStream['gaps'] {
@@ -82,17 +97,15 @@ export function capturedStreamMetadata(db: DatabaseSync, id: string, cut?: numbe
 export function commitCapturedMutation(db: DatabaseSync, mutation: AgentTimelineMutation, preparing = false): AgentTimelineCommit {
   const id = mutation.agentSessionId, stream = preparing ? capturedStream(db, id)! : accepted(db, id);
   const recordId = mutation.type === 'update' ? mutation.itemId : mutation.item.id;
-  const previousRow = db.prepare(`SELECT v.*,h.first_sequence FROM captured_record_heads h JOIN captured_record_versions v
-  ON v.session_id=h.session_id AND v.epoch=h.epoch AND v.sequence=h.latest_sequence
-  WHERE h.session_id=? AND h.epoch=? AND h.record_id=?`).get(id, stream.epoch, recordId);
-  const previous = previousRow ? decodeHead(previousRow).item : undefined;
+  const head = capturedHead(db, id, stream.epoch, recordId);
+  const previous = head?.item;
   const items = previous ? [previous] : [];
   const next = applyNormalizedTimelineMutation(items, mutation);
   const changed = next !== items;
   const header = { epoch: stream.epoch, sequence: stream.sequence, revision: stream.revision, origin: stream.origin, gaps: JSON.parse(stream.gaps_json) };
   if (!changed)
     return { agentSessionId: id, revision: stream.revision, changed: false, mutation, stream: header,
-      position: { id: recordId, firstSequence: Number(previousRow!.first_sequence), sequence: Number(previousRow!.sequence), revision: String(previousRow!.revision) } };
+      position: { id: recordId, firstSequence: head!.firstSequence, sequence: head!.sequence, revision: head!.revision } };
   if (!Number.isSafeInteger(stream.sequence + 1) || !Number.isSafeInteger(stream.revision + 1))
     throw new AgentMuxError('Captured stream sequence limit reached.', 'AGENT_TIMELINE_REVISION_LIMIT');
   const item = next[0]!, sequence = stream.sequence + 1, revision = stream.revision + 1, itemRevision = conversationRevision(item);
@@ -121,12 +134,12 @@ export function commitCapturedMutation(db: DatabaseSync, mutation: AgentTimeline
   db.prepare(`INSERT INTO captured_record_heads VALUES (?,?,?,?,?,?,?) ON CONFLICT(session_id,epoch,record_id)
   DO UPDATE SET latest_sequence=excluded.latest_sequence,kind=excluded.kind,activity=excluded.activity`)
     .run(id, stream.epoch, recordId, sequence, sequence, item.kind, Number(item.activityState !== undefined));
-  if (previousRow && retirementAfter !== undefined && Number(previousRow.sequence) > retirementAfter)
+  if (head && retirementAfter !== undefined && head.sequence > retirementAfter)
     db.prepare("UPDATE captured_record_versions SET item_json='null' WHERE session_id=? AND epoch=? AND sequence=?")
-      .run(id, stream.epoch, Number(previousRow.sequence));
+      .run(id, stream.epoch, head.sequence);
   db.prepare('UPDATE captured_streams SET sequence=?,revision=? WHERE session_id=?').run(sequence, revision, id);
   return { agentSessionId: id, revision, changed: true, mutation, stream: { ...header, sequence, revision },
-    position: { id: recordId, firstSequence: previousRow ? Number(previousRow.first_sequence) : sequence, sequence, revision: itemRevision } };
+    position: { id: recordId, firstSequence: head?.firstSequence ?? sequence, sequence, revision: itemRevision } };
 }
 export function readCapturedInputProjection(db: DatabaseSync, id: string, after = '') {
   if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='captured_input_projection'").get()) return { cut: null, pending: [], next: null }

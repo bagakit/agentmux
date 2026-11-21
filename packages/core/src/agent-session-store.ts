@@ -58,7 +58,7 @@ import { continuityExecutorEntries } from './agent-session-recovery/executor.js'
 import { isPermissionOptionKind, isPromptDeliveryDegradedReason, RISK_TIERS } from './types.js'
 import { applyNormalizedTimelineMutation } from './session-timeline-reducer.js'
 import { conversationRevision } from './conversation-stream.js'
-import { beginCapturedStream, capturedHistorySchema, capturedStream, capturedBodyGaps, commitCapturedMutation, readCapturedPage, readRecentCaptured, readyCapturedStream, readCapturedInputProjection, writeCapturedInputProjection } from './captured-history.js'
+import { beginCapturedStream, capturedHistorySchema, capturedStream, capturedBodyGaps, commitCapturedMutation, hasCapturedActivity, readCapturedPage, readRecentCaptured, readyCapturedStream, readCapturedInputProjection, writeCapturedInputProjection } from './captured-history.js'
 import { archiveCapturedOriginal, capturedFileWitness, importCapturedFile } from './captured-history-import.js'
 import {
   normalizeAgentTimelineMutation
@@ -470,6 +470,7 @@ export type AgentMuxAgentSessionStore = {
   readCapturedHistory(agentSessionId: string, input?: AgentCapturedTimelineRead): Promise<AgentCapturedTimelinePage>
   readInputConversationProjection(agentSessionId: string, after?: string): Promise<ReturnType<typeof readCapturedInputProjection>>
   recordInputConversationProjection(agentSessionId: string, cut: import('./agent-input-conversation.js').AgentInputJournalCut): Promise<void>
+  hasCapturedActivity(agentSessionId: string, activityId: string): Promise<boolean>
   loadTimeline(agentSessionId: string): Promise<AgentTimelineSnapshot>
   applyTimelineMutation(
     mutation: AgentTimelineMutation,
@@ -2797,6 +2798,11 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     return structuredClone({ agentSessionId: id, stream: { ...stream, sequence: cut, revision: cut, gaps: [...stream.gaps, ...capturedBodyGaps(records)] }, records, nextBeforeFirstSequence: more && input.afterSequence === undefined ? records.at(-1)!.firstSequence : null, more });
   }
 
+  async hasCapturedActivity(agentSessionId: string, activityId: string): Promise<boolean> {
+    this.assertMemoryRecordReadable(agentSessionId)
+    return this.timelines.get(agentSessionId)?.heads.get(activityId)?.item.activityState !== undefined
+  }
+
   async loadTimeline(agentSessionId: string): Promise<AgentTimelineSnapshot> {
     if (!this.timelines.has(agentSessionId) && !this.sessions.has(agentSessionId) && !this.retiredAgentSessions.some(session => session.agentSessionId === agentSessionId))
       return { agentSessionId, revision: 0, items: [] };
@@ -4210,6 +4216,10 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     }, undefined, true)
   }
 
+  private readCapturedStream(db: DatabaseSync, id: string): ReturnType<typeof capturedStream> {
+    return db.prepare("SELECT 1 FROM sqlite_schema WHERE name='captured_streams'").get() ? capturedStream(db, id) : undefined
+  }
+
   private async prepareCapturedHistory(id: string, signal?: AbortSignal): Promise<AgentCapturedTimelinePage['stream']['gaps']> {
     if (await this.readRecordDeletion(id, signal)) deletedAgentSessionRecord(id)
 
@@ -4222,7 +4232,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       const committed = await readCurrentSessionDatabase(this.path);
       let existing: ReturnType<typeof capturedStream>;
       try {
-        existing = committed?.prepare("SELECT 1 FROM sqlite_schema WHERE name='captured_streams'").get() ? capturedStream(committed, id) : undefined;
+        existing = committed ? this.readCapturedStream(committed, id) : undefined;
       }
       finally {
         committed?.close();
@@ -4330,6 +4340,23 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     const page = await this.withCapturedRead(db => { this.assertRecordReadable(db, agentSessionId); return readCapturedPage(db, agentSessionId, input) });
     page.stream.gaps.push(...observedGaps);
     return page;
+  }
+
+  async hasCapturedActivity(agentSessionId: string, activityId: string): Promise<boolean> {
+    await this.timelineTails.get(agentSessionId)
+    await this.sessionWrites(agentSessionId)
+    const read = (db: DatabaseSync) => {
+      this.assertRecordReadable(db, agentSessionId)
+      const stream = this.readCapturedStream(db, agentSessionId)
+      return stream?.state === 'ready' ? hasCapturedActivity(db, agentSessionId, stream.epoch, activityId) : undefined
+    }
+    const current = await this.withCapturedRead(read)
+    if (current !== undefined) return current
+    await this.prepareCapturedHistory(agentSessionId)
+    const prepared = await this.withCapturedRead(read)
+    if (prepared === undefined)
+      throw new AgentMuxError('Captured history handover is unconfirmed; retain the original read and retry.', 'AGENT_SESSION_HISTORY_CAPTURE_UNCONFIRMED')
+    return prepared
   }
 
   async loadTimeline(agentSessionId: string): Promise<AgentTimelineSnapshot> {
