@@ -19,6 +19,7 @@ import { FocusGoalLinks, FocusGoalMark } from './FocusGoalLinks'
 import type { FocusGoalLinks as GoalLinks } from '../lib/focus-goal-links'
 import type { FocusTopicHeading } from '../lib/focus-collection-lanes'
 import { agentWorkfaceLocationLabel } from '../lib/desktop-focus-navigation'
+import { FocusExecutionDevice, useFocusExecutionDevice } from './FocusExecutionDevice'
 
 /** Move between task buttons in actual project and section order, including lazy slots. */
 function moveTaskFocus(button: HTMLButtonElement, forward: boolean) {
@@ -41,6 +42,8 @@ export const FocusContextRow = memo(function FocusContextRow({ context, identity
   const [menuOpen, setMenuOpen] = useState(false)
   const [rename, setRename] = useState<{ name: string; revision: number; owner: FocusNameEditor } | null>(null)
   const [goalOpen, setGoalOpen] = useState(false)
+  const device = useFocusExecutionDevice(context)
+  const deviceLabel = device && <FocusExecutionDevice device={device} />
   const active = useWorkbenchPresentationActive()
   useEffect(() => { if (!active) setMenuOpen(false) }, [active])
   const restoreRenameFocus = useRef(false)
@@ -86,12 +89,12 @@ export const FocusContextRow = memo(function FocusContextRow({ context, identity
   }
   const workfaceStatus = context.kind === 'agent' && identity && identity.locations.occurrences.length === 0
     ? agentWorkfaceLocationLabel(identity.locations.status === 'confirmed' ? { state: 'confirmed', count: 0 } : { state: 'unconfirmed' }) : undefined
-  const card = <button ref={hover.anchor} type="button" className={className} data-session-id={context.id} data-state={context.state} data-bucket={context.bucket} data-activity={context.activitySemantic} data-focus-list-goal={list && Boolean(goalLinks) || undefined} aria-pressed={selected} aria-label={`${context.name} · ${context.stateLabel}${topic ? ` · ${topic.kind === 'worktree' ? 'Zone' : 'Topic'} · ${topic.name}` : ''}${list ? '' : ` · ${description}`}`} aria-description={[list ? focusTaskListDescription(context) : context.originAddress, creationLabel, workfaceStatus].filter(Boolean).join(' · ') || undefined} aria-describedby={hover.describedBy} {...hover.triggerEvents}
+  const card = <button ref={hover.anchor} type="button" className={className} data-session-id={context.id} data-state={context.state} data-bucket={context.bucket} data-activity={context.activitySemantic} data-focus-list-goal={list && Boolean(goalLinks) || undefined} aria-pressed={selected} aria-label={`${context.name} · ${context.stateLabel}${topic ? ` · ${topic.kind === 'worktree' ? 'Zone' : 'Topic'} · ${topic.name}` : ''}${list ? '' : ` · ${description}`}`} aria-description={[list ? focusTaskListDescription(context) : context.originAddress, creationLabel, workfaceStatus, device?.description].filter(Boolean).join(' · ') || undefined} aria-describedby={hover.describedBy} {...hover.triggerEvents}
     onFocus={list ? undefined : hover.triggerEvents.onFocus}
     onKeyDown={list ? listKey : hover.triggerEvents.onKeyDown}
     aria-keyshortcuts={list ? 'ArrowUp ArrowDown Space Enter' : hover.triggerEvents['aria-keyshortcuts']} onClick={() => { hover.close(); onSelect(context.id) }} onContextMenu={hover.close}>
-    {list ? <FocusTaskListContent context={context} identity={hover.position} interactionAt={interactionAt} creationLabel={creationMark ? creationLabel : undefined} /> :
-      <AgentContextContent context={context} identity={hover.position} presentation="card" disclosure={disclosure} topic={topic} metadata={<>{creationMark && creationLabel ? <FocusCreationMark label={creationLabel} /> : null}{interactionAt ? <FocusInteractionAge at={interactionAt} /> : null}</>}
+    {list ? <FocusTaskListContent context={context} identity={hover.position} device={deviceLabel} interactionAt={interactionAt} creationLabel={creationMark ? creationLabel : undefined} /> :
+      <AgentContextContent context={context} identity={hover.position} device={deviceLabel} presentation="card" disclosure={disclosure} topic={topic} metadata={<>{creationMark && creationLabel ? <FocusCreationMark label={creationLabel} /> : null}{interactionAt ? <FocusInteractionAge at={interactionAt} /> : null}</>}
         headingAccessory={goalLinks ? <span className="focus-goal__space" aria-hidden="true"><FocusGoalMark links={goalLinks} /></span> : undefined} />}
   </button>
   const main = context.kind === 'agent' ? <FocusContextMenu open={active && menuOpen} context={context} onOpenChange={setMenuOpen} onRestoreFocus={hover.suppressRestoredFocus} onRename={beginRename} pinGroup={pinGroup}>{card}</FocusContextMenu> : card

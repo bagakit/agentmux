@@ -17,6 +17,8 @@ export type FocusContextAccess = {
   observation?: 'current' | 'unconfirmed' | 'unavailable' | 'changed'
   /** Host ID in the original Source's namespace, separate from its Runtime ID. */
   executionHostId?: string
+  /** Exact Desktop route witnessed at the Agent's execution Runtime. */
+  executionRouteHostId?: string
   timeline?: AgentTimelineSnapshot
   nameRevision?: number
   issue?: string

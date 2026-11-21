@@ -560,12 +560,32 @@ function projectSourceCandidate(candidate: Candidate, ordinary: FocusContext | u
   const originalHosts = candidate.locations.map(location => location.member.region.execution?.hostId
     ? JSON.stringify([location.source.reference.runtimeId, location.member.region.execution.hostId]) : null)
   const executionHostId = originalHosts.every(Boolean) && new Set(originalHosts).size === 1 ? first.member.region.execution?.hostId : undefined
+  const confirmedRoutes = new Set<string>()
+  if (candidate.runtimeId) {
+    for (const location of candidate.locations) {
+      if (location.source.reference.runtimeId === candidate.runtimeId && location.member.region.execution?.hostId === 'local') {
+        confirmedRoutes.add(location.source.hostId)
+      }
+    }
+    for (const [hostId, runtimeId] of runtimes) if (runtimeId === candidate.runtimeId) confirmedRoutes.add(hostId)
+    // A retained Source snapshot cannot report the connection of a replacement Runtime.
+    for (const hostId of confirmedRoutes) {
+      const host = config?.hosts.find(item => item.id === hostId)
+      const observedRuntime = runtimes.get(hostId)
+      const boundRuntime = host?.kind === 'ssh' ? host.runtimeId : undefined
+      if (!host || (observedRuntime && observedRuntime !== candidate.runtimeId) || (boundRuntime && boundRuntime !== candidate.runtimeId)) {
+        confirmedRoutes.delete(hostId)
+      }
+    }
+  }
+  const executionRouteHostId = confirmedRoutes.size === 1 ? confirmedRoutes.values().next().value : undefined
   const access: FocusContextAccess = { identity: { runtimeId: candidate.runtimeId ?? null, agentSessionId: candidate.sid },
     locations: candidate.locations, ...(session ? { session } : {}),
     ...(current?.session ? { retainedSession: current.session } : {}),
     observation: session ? 'current' : current?.session?.kind === 'agent' && candidate.target &&
       current.session.control.run.runId !== candidate.target.target.expectedRun.runId ? 'changed' : candidate.target ? 'unavailable' : 'unconfirmed',
     ...(executionHostId ? { executionHostId } : {}),
+    ...(executionRouteHostId ? { executionRouteHostId } : {}),
     ...(current?.name ? { nameRevision: current.name.current.nameRevision } : {}),
     ...(current?.rename ? { rename: current.rename } : {}),
     isCurrent: () => Boolean(session && candidate.target && session.control.run.runId === candidate.target.target.expectedRun.runId),

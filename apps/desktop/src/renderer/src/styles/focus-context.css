@@ -191,6 +191,25 @@
 .focus-context--card { align-items: flex-start; }
 .focus-context--card .focus-context__identity { align-items: center; gap: 5px; min-height: 18px; }
 .focus-context--card .focus-context__copy { gap: 5px; }
+.focus-execution-device {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 4px;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  color: var(--text-2);
+  font-size: var(--fs-micro);
+  line-height: 1.35;
+  white-space: nowrap;
+}
+.focus-execution-device > svg, .focus-execution-device__status { flex: none; }
+.focus-execution-device__name { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; }
+.focus-execution-device__status { color: var(--text-3); }
+.focus-execution-device__status::before { content: '·'; margin-inline-end: 4px; }
+.focus-execution-device[data-connection='disconnected'] { padding-inline: 4px; border-radius: 4px; background: var(--amber-bg); }
+.focus-execution-device[data-connection='disconnected'] > svg,
+.focus-execution-device[data-connection='disconnected'] .focus-execution-device__status { color: var(--amber-text); }
 .focus-context--card .focus-context__recap { display: block; }
 .focus-context--card .focus-context__activity { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; white-space: normal; }
 .focus-context__position { display: inline-flex; flex: none; min-width: 0; max-width: 72px; }

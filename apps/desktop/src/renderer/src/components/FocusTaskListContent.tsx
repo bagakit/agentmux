@@ -39,11 +39,12 @@ function LastActivity({ at }: { at: number }) {
 }
 
 /** The same presentation in a lightweight slot and in the original task button. */
-export function FocusTaskListContent({ context, identity, placeholder = false, interactionAt, creationLabel }: {
+export function FocusTaskListContent({ context, identity, device, placeholder = false, interactionAt, creationLabel }: {
   creationLabel?: string | undefined
   interactionAt?: number | undefined
   context: FocusContext
   identity?: ReactNode
+  device?: ReactNode
   placeholder?: boolean
 }) {
   const inlineRecovery = context.bucket === 'idle' && context.processState === 'interrupted'
@@ -64,6 +65,7 @@ export function FocusTaskListContent({ context, identity, placeholder = false, i
       <span className="focus-task-list__mark" title={inlineStatus ? context.detail : context.stateLabel}><FocusContextStateMark context={context} /></span>
       <span className="focus-task-list__copy">
         <strong className="focus-task-list__title">{context.name}</strong>
+        {device}
         {inlineStatus ? <span className={`focus-task-list__summary${inlineRecovery ? ' focus-task-list__summary--recovery' : ''}`} title={context.detail}>{context.stateLabel}</span>
           : recap ? <span className="focus-task-list__summary focus-task-list__summary--excerpt"><MarkdownExcerpt content={launcherRecapExcerpt(recap)} /></span>
           : work ? <span className="focus-task-list__summary focus-task-list__summary--excerpt">{work}</span> : null}

@@ -63,6 +63,8 @@
 .focus-task-list__mark { display: inline-flex; justify-content: center; }
 .focus-task-list__mark .focus-state-mark { width: 14px; height: 14px; background: transparent; }
 .focus-task-list__copy { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.focus-task-list__copy .focus-execution-device { align-self: center; max-inline-size: 64%; }
+.focus-task-list__copy:has(.focus-execution-device) .focus-task-list__title { flex-shrink: 2; }
 .focus-task-list__title, .focus-task-list__summary {
   min-width: 0;
   overflow: hidden;
@@ -138,6 +140,17 @@
   .focus-task-list__clock:has(.focus-interaction-age) { inline-size: auto; }
 }
 @container focus-task-rows (max-width: 559px) {
+  .focus-task-list__copy:has(.focus-execution-device) {
+    display: grid;
+    grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+    gap: 2px 8px;
+  }
+  .focus-task-list__copy .focus-execution-device {
+    grid-row: 2;
+    grid-column: 1 / -1;
+    justify-self: start;
+    max-inline-size: 100%;
+  }
   .focus-task-list__summary--excerpt { display: none; }
   .focus-task-list__subagent-states { display: none; }
   .focus-task-list__subagent-count { display: inline; }
