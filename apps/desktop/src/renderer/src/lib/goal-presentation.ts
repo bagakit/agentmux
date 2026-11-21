@@ -27,7 +27,7 @@ export type GoalNextStepSource =
   | { kind: 'patrol'; operationId: string }
   | { kind: 'goal' }
 export type GoalNextStepFact = { stage: GoalStage; text: string; source: GoalNextStepSource; mark?: 'unknown' }
-type GoalNextStepInput = Pick<DemandRecord, 'id' | 'alignment' | 'grounding' | 'status' | 'delegations' | 'delegationObservations' | 'delegationObservationIssue' | 'dispatches' | 'startObservations' | 'patrols' | 'patrolObservations' | 'plan' | 'planState'>
+type GoalNextStepInput = Pick<DemandRecord, 'id' | 'alignment' | 'grounding' | 'status' | 'supervisorSessionId' | 'delegations' | 'delegationObservations' | 'delegationObservationIssue' | 'dispatches' | 'startObservations' | 'patrols' | 'patrolObservations' | 'plan' | 'planState'>
 
 const DELEGATION_STAGE: Record<GoalDelegationRow['state'], GoalStage> = {
   // A worker report is collected and verified by the Supervisor Agent before a person reviews it.
