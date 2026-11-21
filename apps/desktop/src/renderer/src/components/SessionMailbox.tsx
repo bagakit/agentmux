@@ -652,12 +652,12 @@ export function SessionMailbox({ pendingLayout, system, queued: workbenchQueue, 
       title={mailboxLabel} popoverTarget={id} popoverTargetAction="toggle"
       onPointerEnter={enter} onPointerLeave={leave}
       onClick={(event) => { if (preview.current && popover.current!.matches(':popover-open')) { event.preventDefault(); pin() } }}>
-      <ThemeObjectMailIcon size={14} aria-hidden="true" />
-      {hasProgress && progressStatus !== 'inactive' ? <ProgressIcon size={10} className="composer-mailbox__progress" aria-hidden="true" /> : null}
-      {system.unread.length ? <ThemeObjectNotificationsIcon size={10} className="composer-mailbox__attention" aria-hidden="true" /> : null}
-      {unread ? <span className="composer-mailbox__inbox-count" aria-hidden="true">
-        <span className="composer-mailbox__unread">{unread > 99 ? '99+' : unread}</span>
-      </span> : null}
+      <span className="composer-mailbox__mark" aria-hidden="true">
+        <ThemeObjectMailIcon size={12} className="composer-mailbox__envelope" />
+        {hasProgress && progressStatus !== 'inactive' ? <ProgressIcon size={8} className="composer-mailbox__progress" /> : null}
+        {system.unread.length ? <ThemeObjectNotificationsIcon size={8} className="composer-mailbox__attention" /> : null}
+        {unread ? <span className="composer-mailbox__unread">{unread > 99 ? '99+' : unread}</span> : null}
+      </span>
     </button>
     <div ref={attachPopover} id={id} popover="auto" className="composer-mailbox" aria-label="Mailbox" data-view={folder === 'progress' ? 'automation' : 'messages'}
       data-state={open && visible ? 'open' : 'closed'} inert={!open || !visible}
