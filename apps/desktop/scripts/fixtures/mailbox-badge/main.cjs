@@ -168,6 +168,9 @@ async function verify(count, notices, automation) {
     assert.ok(contains(g.mark, hint), 'Hints stay within the fixed mark')
     assert.ok(separated(hint, g.avatar), 'Messages hints do not invade the Agent avatar')
   }
+  for (const status of [g.attention, g.progress].filter(Boolean)) {
+    assert.ok(status.y >= g.mark.y + 1, 'A status mark leaves room below the button edge')
+  }
   if (g.badge) {
     assert.equal(g.text.content, count > 99 ? '99+' : String(count))
     assert.equal(g.text.font, '10px')
@@ -193,7 +196,11 @@ async function verify(count, notices, automation) {
     assert.ok(separated(g.attention, g.envelope), 'Notices does not overlap the envelope')
   }
   if (g.progress) {
-    assert.ok(g.progress.right <= g.envelope.x + 0.1, 'Automation stays upper-left of the envelope')
+    if (g.attention) {
+      assert.ok(g.progress.right <= g.envelope.x + 0.1, 'Automation yields the upper-right corner to Notices')
+    } else {
+      assert.ok(g.progress.x >= g.envelope.right - 0.1, 'Standalone Automation stays in the upper-right corner')
+    }
     assert.ok(separated(g.progress, g.envelope), 'Automation does not overlap the envelope')
   }
   for (const [a, b] of [
@@ -211,39 +218,32 @@ async function frame(scene, name) {
   await fs.writeFile(path.join(evidence, file), bytes, { flag: 'wx' })
   result.frames.push({ scene, file, sha256: createHash('sha256').update(bytes).digest('hex') })
 }
-async function cssMutation() {
+async function cssMutation({ name, selector, inset, failure, count, notices }) {
   const declaration = await evaluate(
     `
       ;(() => {
         const matches = []
         function walk(rules, sheet) {
           for (const rule of rules) {
-            if (
-              rule.selectorText === '.composer-mailbox__attention' &&
-              rule.style.getPropertyValue('inset-inline-end')
-            )
-              matches.push({ rule, sheet })
+            if (rule.selectorText === ${JSON.stringify(selector)}) matches.push({ rule, sheet })
             if (rule.cssRules) walk(rule.cssRules, sheet)
           }
         }
         for (const sheet of document.styleSheets) walk(sheet.cssRules, sheet)
-        if (matches.length !== 1)
-          throw Error('The original imported Notices CSS declaration must be unique')
+        if (matches.length !== 1) throw Error('The original imported status CSS rule must be unique')
         const { rule, sheet } = matches[0]
         globalThis.mailboxOriginalRule = {
           rule,
-          value: rule.style.getPropertyValue('inset-inline-end'),
-          priority: rule.style.getPropertyPriority('inset-inline-end'),
+          declarations: rule.style.cssText,
           cssText: rule.cssText
         }
         const original = rule.cssText
-        rule.style.setProperty('inset-inline-end', '8px')
+        rule.style.setProperty('inset-inline', ${JSON.stringify(inset)})
         return {
           href: sheet.href,
           selector: rule.selectorText,
-          property: 'inset-inline-end',
-          originalValue: mailboxOriginalRule.value,
-          mutatedValue: rule.style.getPropertyValue('inset-inline-end'),
+          property: 'inset-inline',
+          mutatedValue: rule.style.getPropertyValue('inset-inline'),
           original,
           mutated: rule.cssText
         }
@@ -253,7 +253,7 @@ async function cssMutation() {
   await painted()
   let failed
   try {
-    await verify(100, true, true)
+    await verify(count, notices, true)
   } catch (error) {
     failed = { name: error.name, message: error.message }
   }
@@ -262,21 +262,21 @@ async function cssMutation() {
     'AssertionError',
     'The loaded CSS mutant must fail an actual geometry assertion'
   )
-  assert.match(failed.message, /Notices.*(?:envelope|upper-right)/)
+  assert.match(failed.message, failure)
   await evaluate(
     `
       ;(() => {
         const saved = mailboxOriginalRule
-        saved.rule.style.setProperty('inset-inline-end', saved.value, saved.priority)
+        saved.rule.style.cssText = saved.declarations
         if (saved.rule.cssText !== saved.cssText)
           throw Error('The exact original CSS declaration was not restored')
       })()
     `
   )
   await painted()
-  await verify(100, true, true)
+  await verify(count, notices, true)
   result.mutations.push({
-    name: 'notices-moved-onto-envelope',
+    name,
     actualImportedCSS: true,
     declaration,
     failed,
@@ -351,8 +351,19 @@ async function scene(s) {
     `
   )
   await waitFor(`${trigger}&&${trigger}.title.includes('Agent messages 25 unread')`)
-  // Read the four legitimate 25-message pages through the actual mailbox consumer first.
-  if (s.width === 640) await frame(s, 'automation-unconfirmed')
+  if (s.width === 640 || (!s.touch && s.appearance === 'light')) {
+    await evaluate('mailboxBadge.unread(1)')
+    await waitFor(`${trigger}.dataset.progressState === 'unconfirmed' && ${trigger}.title.includes('Agent messages 1 unread')`)
+    await verify(1, false, true)
+    await frame(s, 'unread-1-automation-unconfirmed')
+    if (s.width === 640) await cssMutation({
+      name: 'standalone-automation-returned-to-left',
+      selector: '.composer-mailbox__progress', inset: '0 auto', count: 1, notices: false,
+      failure: /Standalone Automation stays in the upper-right corner/
+    })
+    await evaluate('mailboxBadge.unread(100)')
+  }
+  // Read the four legitimate 25-message pages through the actual mailbox consumer.
   await click(trigger)
   await waitFor(popover)
   for (let page = 1; page < 4; page++) {
@@ -406,7 +417,11 @@ async function scene(s) {
   const mixed = await verify(100, true, true)
   stable(baseline, mixed)
   await frame(s, 'mixed')
-  if (s.width === 640) await cssMutation()
+  if (s.width === 640) await cssMutation({
+    name: 'notices-moved-onto-envelope',
+    selector: '.composer-mailbox__attention', inset: 'auto 8px', count: 100, notices: true,
+    failure: /Notices.*(?:envelope|upper-right)/
+  })
   result.scenes.push({ scene: s, baseline, observations, noticesOnly, mixed })
 }
 app.whenReady().then(async () => {
@@ -446,7 +461,7 @@ app.whenReady().then(async () => {
     ])
       await scene(s)
     assert.equal(result.scenes.length, 4)
-    assert.equal(result.mutations.length, 1)
+    assert.equal(result.mutations.length, 2)
     assert.equal(result.keyboard.length, 1)
     result.passed = true
   } catch (error) {

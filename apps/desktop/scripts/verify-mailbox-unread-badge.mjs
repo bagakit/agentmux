@@ -143,9 +143,11 @@ try {
   assert.equal(result.process.exitCode, 0, result.render.failure?.message)
   assert.equal(result.render.passed, true)
   assert.equal(result.render.keyboard.length, 1)
-  assert.equal(result.render.mutations.length, 1)
-  assert.equal(result.render.mutations[0].failed.name, 'AssertionError')
-  assert.equal(result.render.mutations[0].restored, 'same-page geometry green')
+  assert.equal(result.render.mutations.length, 2)
+  for (const mutation of result.render.mutations) {
+    assert.equal(mutation.failed.name, 'AssertionError')
+    assert.equal(mutation.restored, 'same-page geometry green')
+  }
   for (const file of ['apps/desktop/src/renderer/src/components/SessionMailbox.tsx', css])
     assert.equal(
       hash(await readFile(join(root, file))),
