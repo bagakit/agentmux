@@ -96,6 +96,8 @@ captured 历史由 Session Store 持有，当前或近期窗口只是查询，�
 
 已有的 captured JSONL 只接管一次（[captured-history-import.ts](../../packages/core/src/captured-history-import.ts) 的 `importCapturedFile`）：沿 writer、事务、source generation 与 durability 边界进行，保留全部完整记录与原文件（`archiveCapturedOriginal` 按内容摘要归档），确认同一个 source witness，之后只有一个活跃的事实 owner，没有双写或 fallback reader。确认结果不确定时，按原事务对账。末尾不完整的记录保留字节与诊断，之前完整的历史照常保留。
 
+Hook 的活动查重沿原 Session、captured 流及活动 ID 核对一个已提交记录。流已接管时，同一数据库快照确认删除状态、原流和记录。近期阅读窗口独立于查重，旧活动离开阅读窗口后仍可按原 ID 核对。准确活动的记录或来源读失败时，沿已有活动历史缺口处理，保留已确认状态和健康 Run。
+
 ### Provider 原生来源
 
 对话读取的公共合同在[对话协议](../specs/conversation-protocol.md)。下表列出部分内置 Provider 实际打开的原生来源与变化观察（核自各 history／session 适配器）；是否提供原生读取以该 Provider 是否实现 `readSessionHistoryPage`／`observeSessionHistory` 为准，不代表任意安装或厂商版本已验收。
