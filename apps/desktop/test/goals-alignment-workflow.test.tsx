@@ -452,3 +452,63 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
     expect(commits.mock.calls.length).toBe(count)
   })
 })
+
+it.each(['saved', 'lost receipt'] as const)('closes a reviewed Goal with the original unverified check and a reason (%s)', async mode => {
+  await save(proposal, true, report('unknown'))
+  await useAppStore.getState().updateDemand('goal', { status: 'in_review' })
+  await mount()
+  const submission = (await owner.get('goal'))!.grounding!.submissionId
+  await click('Review results')
+  expect(document.activeElement?.getAttribute('data-goal-grounding-submission')).toBe(submission)
+  await click('Close with unverified results')
+  const dialog = document.querySelector('[role="dialog"]')!
+  expect(dialog.textContent).toContain(proposal.criteria[1]!.text)
+  const submit = dialog.querySelector<HTMLButtonElement>('[data-confirm-label="Keep unknowns and close"]')!
+  expect(submit.disabled).toBe(true)
+  expect(host.bodies('demand.accept')).toHaveLength(0)
+  const input = dialog.querySelector<HTMLTextAreaElement>('textarea')!
+  const reason = 'The original pre-Stop input observation was not recorded.'
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, '  ' + reason + '  ')
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  expect(submit.disabled).toBe(false)
+  if (mode === 'lost receipt') host.once('demand.accept', { kind: 'lose-receipt' })
+  await act(async () => { submit.click(); await host.settle() })
+  expect(host.bodies('demand.accept')).toEqual([{ ...accepted(submission, false),
+    finish: true, unknownResults: [{ criterionId: 'agent', reason }] }])
+  expect((await owner.get('goal'))!).toMatchObject({ status: 'done', grounding: { submissionId: submission,
+    unknownDecision: { checks: [{ criterionId: 'agent', reason }] }, checks: report('unknown').checks } })
+  if (mode === 'lost receipt') {
+    await eventually(() => expect(container.querySelector('[data-goal-acknowledgement-failure]')).not.toBeNull())
+    await click('Reload current proposal', false)
+  }
+  await eventually(() => expect(container.querySelector('[data-goal-result-state="closed-unverified"]')).not.toBeNull())
+  expect(host.executed('demand.accept')).toHaveLength(1)
+})
+
+it('opens the Goal card context menu and copies its original link without selecting it', async () => {
+  await save(proposal, true)
+  const goal = useAppStore.getState().demands.goal!
+  expect(goal.address?.goalUrl).toBeTruthy()
+  await owner.revisePlan('goal', { operationId: 'card-workflow', expectedRevision: 0, alignmentRevision: 1, nodes: [
+    { id: 'prepare', title: 'Prepare', outcome: 'Ready materials', executor: null, dependsOn: [], criterionIds: ['tabs'], check: 'Inspect materials' },
+    { id: 'verify', title: 'Verify', outcome: 'Verified work', executor: null, dependsOn: ['prepare'], criterionIds: ['agent'], check: 'Inspect original Session' },
+  ] }, { kind: 'user', id: 'reviewer' })
+  await useAppStore.getState().refreshDemand('goal')
+  useAppStore.setState({ selectedDemandId: null })
+  const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+  await mount()
+  await click('Board view', false)
+  const card = container.querySelector<HTMLElement>('[data-demand-id="goal"]')!
+  const preview = card.querySelector('[data-goal-workflow-preview]')!
+  expect([...preview.querySelectorAll('[data-ticket-state]')].map(node => node.getAttribute('data-ticket-state'))).toEqual(['ready', 'waiting'])
+  expect(preview.querySelector('path')?.getAttribute('d')?.match(/M /gu)).toHaveLength(3)
+  await act(async () => card.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 24, clientY: 80 })))
+  const menuItem = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent?.trim() === 'Copy goal link')!
+  expect(menuItem).toBeDefined()
+  await act(async () => menuItem.click())
+  await eventually(() => expect(copy).toHaveBeenCalledExactlyOnceWith(goal.address!.goalUrl))
+  expect(useAppStore.getState().selectedDemandId).toBeNull()
+  expect(card.querySelector('[role="status"]')?.textContent).toBe('Goal link copied')
+})

@@ -111,7 +111,7 @@ describe('the same typed current source and original work reading budget', () =>
       patrolObservations: [{ operationId: request.operationId, state: 'prepared', reason: 'readiness-unconfirmed' }],
       planState: { revision: 1, done: 1, total: 1, next: [], nodes: [] } }
     expect(goalNextStepFact(goal), 'A prepared inspection cannot replace an existing Goal evidence gap').toEqual({
-      stage: 'attention', text: 'Results need checking', source: { kind: 'results', submissionId: 'report', revision: 1 }
+      stage: 'you', mark: 'unknown', text: 'Review results · 1 unverified', source: { kind: 'results', submissionId: 'report', revision: 1 }
     })
     expect(goalNextStepFact({ ...goal, status: 'in_progress', planState: { ...goal.planState!, done: 0 } }).source)
       .toEqual({ kind: 'patrol', operationId: request.operationId })
