@@ -2,11 +2,14 @@ import assert from 'node:assert/strict'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { WebContentsView, type BrowserWindow } from 'electron'
+import type { SystemWebUrlResult } from '../../../src/shared/system-web-url'
 
-export async function surveyBrowsingCase({ phase, directory, window, evaluate, result, receipt, pageUrl, holdSurveyReply }: {
+export async function surveyBrowsingCase({ phase, directory, window, evaluate, result, receipt, pageUrl, holdSurveyReply, openSystemUrl, until }: {
   phase: string; directory: string; window: BrowserWindow; evaluate(expression: string): Promise<any>
   result(args: string[]): Promise<any>; receipt: any; pageUrl: string
-  holdSurveyReply(channel: 'browser:readProfiles' | 'browser:create'): { arrived: Promise<void>; release(): void }
+  holdSurveyReply(channel: 'browser:readProfiles' | 'browser:create' | 'spatial:commit'): { arrived: Promise<void>; release(): void }
+  openSystemUrl(url: string): Promise<SystemWebUrlResult>
+  until<T>(read: () => Promise<T> | T, label: string, budget?: number): Promise<T>
 }) {
   const contents = window.webContents
   contents.debugger.attach('1.3')
@@ -77,18 +80,44 @@ export async function surveyBrowsingCase({ phase, directory, window, evaluate, r
   const identityPath = join(directory, 'survey-browsing-identity.json')
   if (phase === 'first') {
     assert.deepEqual(await getSettings(), { reuseOpenPages: true, pageGrouping: 'none', groupGapMinutes: 30 })
-    const heldCreate = holdSurveyReply('browser:create')
+    const heldCreate = holdSurveyReply('browser:create'), heldPosition = holdSurveyReply('spatial:commit')
+    const firstUrl = pageUrl + '?source=one#evidence'
     await startFrameObservation()
-    const firstPending = open(pageUrl + '?source=one#evidence')
+    const start = performance.now()
+    let completed = false
+    const firstPending = openSystemUrl(firstUrl).then(value => { completed = true; return value })
     try {
-      await Promise.race([heldCreate.arrived, firstPending.then(value => { throw Error('Browser create completed before hold: ' + JSON.stringify(value)) })])
+      await until(() => Promise.race([Promise.all([heldCreate.arrived, heldPosition.arrived]).then(() => true),
+        new Promise<false>(resolve => setTimeout(() => resolve(false), 30))]), 'native creation while the position write is held')
+      const guest = await until(() => window.contentView.children.find((view): view is WebContentsView => view instanceof WebContentsView &&
+        !view.webContents.isDestroyed() && view.webContents.getURL() === firstUrl && view.webContents.getTitle() === 'Profile workface'),
+      'the real webpage delivered before the Core position write')
+      const loadedAtMs = performance.now() - start
       await waitForOpening()
       assert.equal((await profileSelection()).selection, null)
       await capture('opening-new-page', 'light', 1180, 800)
-    } finally { heldCreate.release() }
-    const first = await firstPending
+      heldCreate.release()
+      await until(() => guest.getVisible() && guest.getBounds().width > 100 && !guest.webContents.isLoading(),
+        'the same guest visible before the Core position write')
+      const visibleAtMs = performance.now() - start
+      assert.equal(completed, false)
+      const browserId = (await profileSelection()).selection.browserId
+      receipt.newPageTransition = await finishFrameObservation(browserId)
+      assert.equal(await guest.webContents.executeJavaScript('document.querySelector("h1").textContent'), 'Website workface')
+      const guestImage = await guest.webContents.capturePage(), guestFile = 'first-survey-browsing-native-before-position-saved.png'
+      assert.ok(!guestImage.isEmpty(), 'The original native webpage must paint before the position write')
+      await writeFile(join(directory, guestFile), guestImage.toPNG())
+      await capture('page-before-position-saved', 'light', 1180, 800)
+      assert.equal(completed, false)
+      receipt.pageBeforePositionSave = { browserId, loadedAtMs, visibleAtMs, contentsId: guest.webContents.id,
+        bounds: guest.getBounds(), guestFile, positionReleasedAtMs: performance.now() - start }
+    } finally { heldCreate.release(); heldPosition.release() }
+    const { requestId, operation, ...first } = await firstPending
     assert.equal(first.state, 'opened', JSON.stringify(first))
-    receipt.newPageTransition = await finishFrameObservation(first.browserId)
+    assert.equal(first.browserId, receipt.pageBeforePositionSave.browserId)
+    receipt.pageBeforePositionSave.requestId = requestId
+    receipt.pageBeforePositionSave.operation = operation
+    receipt.pageBeforePositionSave.resultAtMs = performance.now() - start
     const second = await open(pageUrl + '?source=two#evidence')
     const localHost = new URL(pageUrl)
     localHost.hostname = 'localhost'

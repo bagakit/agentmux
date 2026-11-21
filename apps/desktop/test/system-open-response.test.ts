@@ -9,6 +9,7 @@ import { useAppStore, checkpointSpatialWorkbench } from '../src/renderer/src/sto
 import { agentBookmarks } from '../src/renderer/src/lib/agent-bookmarks'
 import { desktopUserFragments } from '../src/renderer/src/lib/desktop-user-state'
 import { openSystemUrlInSurvey } from '../src/renderer/src/lib/survey-system-url'
+import type { SurveyBrowserPreparation } from '../src/renderer/src/lib/survey-browser-creation'
 import { WebUrlIngress } from '../src/main/web-url-ingress'
 import { planSpatialZone } from '../src/renderer/src/lib/space-agent-control'
 import { startWorkfaceFixture, tabId } from './helpers/workface-control-fixture'
@@ -69,9 +70,6 @@ it.each(['http', 'https'])('system-open: %s reaches an exact durable page withou
   const savingBookmark = agentBookmarks.flush()
   await vi.waitFor(() => expect(bookmarkHeld).toBe(true))
   const calls = vi.spyOn(api.browser, 'create').mockImplementation(async (id, url) => {
-    const graph = (await api.spatial.read())!.graph
-    const prepared = graph.regions.find(region => region.regionId === id)!
-    expect(prepared.kind).toBe('launcher'); expect(graph.tabs.find(tab => tab.tabId === prepared.tabId)!.zoneId).not.toBeNull()
     nativeStarted = true; await nativeGate.promise
     return snapshot(id, url)
   })
@@ -86,6 +84,10 @@ it.each(['http', 'https'])('system-open: %s reaches an exact durable page withou
     expect(bookmarkHeld && !released).toBe(true)
     nativeGate.release(); await vi.waitFor(() => expect(flow.outcomes).toHaveLength(1))
     expect(flow.outcomes[0].state).toBe('opened'); expect(calls).toHaveBeenCalledTimes(1)
+    const { reference } = flow.outcomes[0]
+    const graph = (await api.spatial.read())!.graph
+    expect(graph.regions.find(region => region.regionId === reference.regionId)?.tabId).toBe(reference.tabId)
+    expect(graph.tabs.find(tab => tab.tabId === reference.tabId)?.zoneId).toEqual(expect.any(String))
     expect(useAppStore.getState().surveyPageReferences).toHaveLength(1)
     expect(useAppStore.getState().surveyCollectedZones).toEqual({})
     expect(useAppStore.getState().pinnedItems).toEqual(original.pinnedItems)
@@ -95,11 +97,11 @@ it.each(['http', 'https'])('system-open: %s reaches an exact durable page withou
     const saved = JSON.parse(desktopUserFragments.read('agentBookmarks')!)
     expect(saved.bookmarks.some((item: any) => item.key === key && item.excerpt === 'Keep this reading excerpt')).toBe(true)
     receipt('unrelated-owner', { scheme, frameworkAtMs, resultAtMs: performance.now() - origin,
-      directoryUnresolved: true, bookmarkUnresolvedAtNative: true, bookmarkLaterSaved: true, durableLauncherBeforeNative: true })
+      directoryUnresolved: true, bookmarkUnresolvedAtNative: true, bookmarkLaterSaved: true, durableOriginalPosition: true })
   } finally { released = true; bookmarkGate.release(); nativeGate.release(); await savingBookmark; flow.ingress.unavailable(); agentBookmarks.remove(key); await agentBookmarks.flush() }
 })
 
-it('system-open: the framework appears before Core acknowledgement, while Native creation requires that exact preparation acknowledgement', async () => {
+it('system-open: navigation and presentation proceed during the exact Core save, but success still waits for the position', async () => {
   const commit = api.spatial.commit, durableGate = gate(), nativeGate = gate()
   let blocked = false, nativeStarted = false
   vi.spyOn(api.spatial, 'commit').mockImplementation(async input => {
@@ -110,18 +112,60 @@ it('system-open: the framework appears before Core acknowledgement, while Native
   const flow = system()
   try {
     flow.ingress.receive('https://system-latency.invalid/ack')
-    await vi.waitFor(() => expect(blocked).toBe(true))
-    expect(useAppStore.getState().mainSurface).toBe('survey'); expect(nativeStarted).toBe(false)
+    await vi.waitFor(() => { expect(blocked).toBe(true); expect(nativeStarted).toBe(true) })
+    expect(useAppStore.getState().mainSurface).toBe('survey')
     expect(useAppStore.getState().surveyPageOpening).toEqual({ url: 'https://system-latency.invalid/ack' })
     expect(useAppStore.getState().surveyZoneSelection).toBeNull()
-    durableGate.release(); await vi.waitFor(() => expect(nativeStarted).toBe(true))
-    expect(useAppStore.getState().surveyPageOpening).toEqual({ url: 'https://system-latency.invalid/ack' })
-    expect(useAppStore.getState().surveyZoneSelection).toBeNull()
-    nativeGate.release(); await vi.waitFor(() => expect(flow.outcomes).toHaveLength(1))
-    expect(flow.outcomes[0].state).toBe('opened')
+    nativeGate.release()
+    await vi.waitFor(() => expect(useAppStore.getState().surveyZoneSelection).toMatchObject({ kind: 'page' }))
     expect(useAppStore.getState().surveyPageOpening).toBeNull()
-    receipt('durable-fence', { targetBeforeAck: true, launcherUnselected: true, nativeAfterExactAck: true })
+    expect(useAppStore.getState().surveyPageReferences).toHaveLength(0)
+    expect(flow.outcomes).toHaveLength(0)
+    durableGate.release(); await vi.waitFor(() => expect(flow.outcomes).toHaveLength(1))
+    expect(flow.outcomes[0].state).toBe('opened')
+    receipt('parallel-position-save', { targetBeforeAck: true, launcherUnselected: true, nativeAndPresentationBeforeExactAck: true, receiptAfterAck: true })
   } finally { durableGate.release(); nativeGate.release(); flow.ingress.unavailable() }
+})
+
+it('system-open: a failed position save preserves the original Browser for retry without another navigation', async () => {
+  const commit = api.spatial.commit, held = gate()
+  let rejectSave = true, preparation: SurveyBrowserPreparation | null = null
+  vi.spyOn(api.spatial, 'commit').mockImplementation(async input => {
+    if (rejectSave && input.graph.tabs.some(tab => tab.workspaceId === SCRATCH_WORKSPACE_ID)) {
+      await held.promise
+      throw new Error('Original position writer unavailable')
+    }
+    return commit(input)
+  })
+  const creates = vi.spyOn(api.browser, 'create').mockImplementation(async (id, url) => snapshot(id, url))
+  const close = vi.spyOn(api.browser, 'close').mockResolvedValue(undefined)
+  const create = useAppStore.getState().createSurveyBrowser
+  const input = { workspaceId: SCRATCH_WORKSPACE_ID, url: 'https://system-latency.invalid/save-failed',
+    onPrepared(value: SurveyBrowserPreparation) { preparation = value } }
+  const opening = create({ ...input, preparation })
+  const failed = expect(opening).rejects.toThrow('Original position writer unavailable')
+  try {
+    await vi.waitFor(() => {
+      const original = preparation?.reference
+      expect(original && useAppStore.getState().tabs[original.tabId]?.regions[original.regionId]?.kind).toBe('browser')
+    })
+    held.release()
+    await failed
+    const retained = preparation!
+    expect(retained.createdBrowser?.id).toBe(creates.mock.calls[0]![0])
+    expect(useAppStore.getState().surveyPageReferences).toHaveLength(0)
+    rejectSave = false
+    const retry = await create({ ...input, preparation: retained })
+    expect(retry.reference).toEqual(retained.reference)
+    expect(retry.createdBrowser).toEqual(retained.createdBrowser)
+    expect(creates).toHaveBeenCalledTimes(1)
+    expect(close).not.toHaveBeenCalled()
+    expect(useAppStore.getState().surveyPageReferences[0]?.browserId).toBe(retained.createdBrowser?.id)
+    receipt('position-save-retry', { oneNativeCreate: true, failedSaveKeptPage: true, originalReferenceRecovered: true })
+  } finally {
+    held.release()
+    await opening.catch(() => {})
+  }
 })
 
 it('system-open: an attached original Browser becomes visible before its reference save acknowledgement, without stealing a later user choice', async () => {

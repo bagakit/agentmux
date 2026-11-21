@@ -23,14 +23,11 @@ it('survey-opening boundary: the actual Store prepares and persists its original
   const generic = vi.spyOn(useAppStore.getState(), 'createWorkbenchZone')
   const fragments = vi.spyOn(desktopUserFragments, 'checkpoint')
   const topics = vi.mocked(api.scratch.listTopics); topics.mockClear()
-  const native = vi.spyOn(api.browser, 'create').mockImplementation(async (id, url) => {
-    const graph = (await api.spatial.read())!.graph, region = graph.regions.find(value => value.regionId === id)!
-    expect(region.kind).toBe('launcher')
-    expect(graph.tabs.find(tab => tab.tabId === region.tabId)!.zoneId).not.toBeNull()
-    return { id, url, title: 'Original prepared page', mode: 'normal', profileId: '11111111-1111-4111-8111-111111111111',
+  const native = vi.spyOn(api.browser, 'create').mockImplementation(async (id, url) => ({
+    id, url, title: 'Original prepared page', mode: 'normal', profileId: '11111111-1111-4111-8111-111111111111',
       navigationId: id + '-navigation', canGoBack: false, canGoForward: false, loading: true,
-      viewport: 'responsive', error: null, driving: false, appLinkPrompt: null }
-  })
+    viewport: 'responsive', error: null, driving: false, appLinkPrompt: null
+  }))
   const result = await useAppStore.getState().createSurveyBrowser({ workspaceId: 'resource', url: 'https://opening.example.test/original',
     preparation: null, onPrepared() {} })
   expect(generic).not.toHaveBeenCalled()
@@ -38,6 +35,9 @@ it('survey-opening boundary: the actual Store prepares and persists its original
   expect(topics).not.toHaveBeenCalled()
   expect(native).toHaveBeenCalledTimes(1)
   expect(result.admission?.outcome).toBe('registered')
+  const graph = (await api.spatial.read())!.graph
+  expect(graph.regions.find(region => region.regionId === result.reference.regionId)).toMatchObject({ kind: 'browser', tabId: result.reference.tabId })
+  expect(graph.tabs.find(tab => tab.tabId === result.reference.tabId)?.zoneId).toBe(result.zone.zoneId)
   expect(useAppStore.getState().surveyPageReferences).toEqual([{ regionId: result.reference.regionId, browserId: result.createdBrowser!.id }])
   fixture.noLifecycle()
 })

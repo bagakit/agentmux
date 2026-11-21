@@ -135,8 +135,13 @@ try {
   const generic = exactMutation(root, 'apps/desktop/src/renderer/src/store.ts',
     '      prepareZone(workspaceId) {', '      prepareZone(workspaceId) {\n        void get().createWorkbenchZone({ workspaceId, spaceIds: [] })')
   await run('generic-save-reintroduced', generic, '^survey-opening boundary:')
-  const checkpoint = exactMutation(root, flows[0], '  await checkpointPreparation()', '  await Promise.resolve()')
-  await run('required-checkpoint-omitted', checkpoint, '^system-open: the framework appears before Core acknowledgement')
+  const parallelCase = '^system-open: navigation and presentation proceed'
+  const checkpoint = exactMutation(root, flows[0], '[visible, checkpointPreparation()]', '[visible, Promise.resolve()]')
+  await run('required-checkpoint-omitted', checkpoint, parallelCase)
+  const sequential = exactMutation(root, flows[0], '  const navigation = attached', '  await checkpointPreparation()\n  const navigation = attached')
+  await run('navigation-waits-for-save', sequential, parallelCase)
+  const launcherOnly = exactMutation(root, flows[0], '  if (!attached) await checkpointPreparation()', '  // Discard the attached Browser checkpoint.')
+  await run('attached-browser-checkpoint-omitted', launcherOnly, '^survey-opening boundary: the actual Store prepares')
   if (checks === 'all') {
     const directory = exactMutation(root, 'apps/desktop/src/renderer/src/store.ts',
       '      checkpointPreparation: checkpointSpatialWorkbench',
@@ -154,7 +159,7 @@ try {
     const missingTarget = exactMutation(root, flows[1], '    present(() => get().setSurveyPageOpening(presentation))', '    present(() => {})')
     await run('opening-target-hidden', missingTarget, 'a held default Profile read shows Survey promptly')
     const launcherFlash = exactMutation(root, flows[1], '    if (!page && !(recovering && launcher)) return', '    if (!page && !launcher) return')
-    await run('launcher-visible-during-opening', launcherFlash, '^system-open: the framework appears before Core acknowledgement')
+    await run('launcher-visible-during-opening', launcherFlash, parallelCase)
     const wholeDirectory = exactMutation(root, spatialOwner, '  const sources = readSpatialSources(state, topics)\n  if (sources.zones.some',
       '  const sources = spatialCatalog(state as SpatialWorkbench, topics)\n  if (sources.zones.some')
     await run('zone-preparation-scans-directory', wholeDirectory, '^system-open: preparing a Survey Zone')

@@ -29,6 +29,9 @@ import { WorkbenchWindowStore } from '../../../src/main/workbench-window-store'
 import { WorkbenchUserStateStore } from '../../../src/main/workbench-user-state'
 import { createDesktopApplicationAccessOwner } from '../../../src/main/application-access-owner'
 import { desktopBusinessSocketPath } from '../../../src/main/desktop-host'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
+import { WebUrlIngress } from '../../../src/main/web-url-ingress'
+import type { SystemWebUrlResult } from '../../../src/shared/system-web-url'
 
 const directory = process.env.AGENTMUX_PROFILE_SURVEY_ROOT!, source = process.env.AGENTMUX_PROFILE_SURVEY_SOURCE!, phase = process.env.AGENTMUX_PROFILE_SURVEY_PHASE!
 const selectedCase = process.env.AGENTMUX_PROFILE_SURVEY_CASE!, workspaceId = 'profile-survey-workspace', legacyWorkspaceId = 'profile-survey-legacy-workspace', pageUrl = process.env.AGENTMUX_PROFILE_SURVEY_PAGE_URL!
@@ -119,19 +122,34 @@ async function run() {
  const completeObserver=['complete','context-menu','address-selection'].includes(selectedCase)?completePorts(receipt):null
  const completeReaders:ReturnType<typeof cliFollow>[]=[]
  let holdProbeAck=false, releaseProbeAck: ((lose:boolean)=>void)|undefined
- let surveyReply: { channel: string; acknowledge(): void; resume: Promise<void>; release(): void } | undefined
- const holdSurveyReply = (channel: 'browser:readProfiles' | 'browser:create') => {
+ const surveyReplies = new Map<string, { acknowledge(): void; resume: Promise<void>; release(): void }>()
+ const holdSurveyReply = (channel: 'browser:readProfiles' | 'browser:create' | 'spatial:commit') => {
+  assert.ok(!surveyReplies.has(channel))
   let acknowledge!: () => void, resolveReply!: () => void
   const arrived = new Promise<void>(resolve => { acknowledge = resolve })
   const resume = new Promise<void>(resolve => { resolveReply = resolve })
-  const release = () => { surveyReply = undefined; resolveReply() }
-  surveyReply = { channel, acknowledge, resume, release }
+  const release = () => { surveyReplies.delete(channel); resolveReply() }
+  surveyReplies.set(channel, { acknowledge, resume, release })
   return { arrived, release }
  }
  let releaseAddressDetails: (() => void) | undefined
  const releaseDetails = () => { receipt.addressDetailsReleased = true; releaseAddressDetails?.() }
  const probeAck={hold(){holdProbeAck=true},release(lose:boolean){releaseProbeAck?.(lose)}}
- releaseObservationFaults=()=>{switchPorts?.dispose();completeObserver?.dispose();for(const reader of completeReaders)void reader.dispose();rejectSurveyWrites=false;loseProfileDirectoryAck=false;probeAck.release(false);surveyReply?.release()}
+ releaseObservationFaults=()=>{switchPorts?.dispose();completeObserver?.dispose();for(const reader of completeReaders)void reader.dispose();rejectSurveyWrites=false;loseProfileDirectoryAck=false;probeAck.release(false);for(const reply of surveyReplies.values())reply.release()}
+ const webLinks = new WebUrlIngress(), systemUrlReceipts = new Map<string, (result: SystemWebUrlResult) => void>()
+ const ready = webLinks.ready.bind(webLinks)
+ webLinks.ready = (execute, report) => ready(async (request, signal) => {
+  const result = await execute(request, signal)
+  assert.equal(result.operation, 'browser.openFromSystem')
+  systemUrlReceipts.get(request.url)?.(result as SystemWebUrlResult)
+  systemUrlReceipts.delete(request.url)
+  return result
+ }, report)
+ const openSystemUrl = (url: string) => new Promise<SystemWebUrlResult>(resolve => {
+  assert.ok(!systemUrlReceipts.has(url))
+  systemUrlReceipts.set(url, resolve)
+  webLinks.receive(url)
+ })
  const userState=new WorkbenchUserStateStore(join(directory,'workbench-user-state.json'))
  const originalSend=contents.send.bind(contents);contents.send=(channel,...args)=>{completeObserver?.event(channel,args);if(loseProfileDirectoryAck&&channel==='browser:profilesChanged'){receipt.droppedProfileListPushes=(receipt.droppedProfileListPushes??0)+1;return}if(switchPorts?.observeSend(channel,args,originalSend))return;originalSend(channel,...args)}
  const originalHandle=ipcMain.handle.bind(ipcMain);ipcMain.handle=(channel,handler)=>originalHandle(channel,async(event,...args)=>{
@@ -148,6 +166,12 @@ async function run() {
    receipt.addressDetailsHeld = true
    await new Promise<void>(resolve => { releaseAddressDetails = resolve })
   }
+  const positionWrite = channel === 'spatial:commit' && args[0].graph.tabs.some((tab: { workspaceId: string }) => tab.workspaceId === SCRATCH_WORKSPACE_ID)
+    ? surveyReplies.get(channel) : undefined
+  if (positionWrite) {
+   positionWrite.acknowledge()
+   await positionWrite.resume
+  }
   const close=channel==='browser:close'?{browserId:args[0],ack:'pending'}:null
   if(close)receipt.closeCalls.push(close)
   let observed
@@ -156,15 +180,15 @@ async function run() {
   if(channel==='browser:create'&&rejectSurveyWrites)rejectedSurveyBrowserId=observed.id
   if(channel==='browser:choosePageMenu')(receipt.pageMenuChoices??=[]).push({choice:args[1],accepted:observed})
   if(['browser:listProfiles','browser:readProfiles'].includes(channel)&&loseProfileDirectoryAck)throw new Error('Private fixture lost the original Profile directory read ACK')
-  const reply = surveyReply
-  if (reply?.channel === channel) {
+  const reply = channel === 'spatial:commit' ? undefined : surveyReplies.get(channel)
+  if (reply) {
    reply.acknowledge()
    await reply.resume
   }
   if(channel==='browser:probeProfileNetwork'&&holdProbeAck){receipt.originalProbeReply=observed;const lose=await new Promise<boolean>(resolve=>{releaseProbeAck=resolve});holdProbeAck=false;if(lose)throw new Error('Private fixture lost the original probe ACK; inspect the same operation')}
   return observed
  })
- releaseIpc=await registerIpc({appDocumentSources:()=>({current:{mode:'prod',filePath:join(directory,'renderer/index.html')},loading:null}),window,workbenchWindows:windows,initialConfig:config,configStore,runtime,applicationAccess:access,workbenchUserState:userState,scratchTopics:new ScratchTopics()})
+ releaseIpc=await registerIpc({appDocumentSources:()=>({current:{mode:'prod',filePath:join(directory,'renderer/index.html')},loading:null}),window,workbenchWindows:windows,initialConfig:config,configStore,runtime,applicationAccess:access,workbenchUserState:userState,scratchTopics:new ScratchTopics(),webLinks})
  await window.loadFile(join(directory,'renderer/index.html'));window.showInactive()
  receipt.loadedPrograms={main:import.meta.url,cli:process.env.AGENTMUX_PROFILE_SURVEY_CLI,preloadConfigured:join(directory,'preload.cjs'),renderer:contents.getURL()}
  const evaluate=(expression:string)=>contents.executeJavaScript(expression)
@@ -199,7 +223,7 @@ async function run() {
  }
  if(selectedCase==='settings'){await settingsCase({phase,directory,window,evaluate,result,receipt,probeAck});receipt.businessPassed=true;receipt.passed=true;return}
  if (selectedCase === 'survey-browsing') {
-  await surveyBrowsingCase({ phase, directory, window, evaluate, result, receipt, pageUrl, holdSurveyReply })
+  await surveyBrowsingCase({ phase, directory, window, evaluate, result, receipt, pageUrl, holdSurveyReply, openSystemUrl, until })
   receipt.businessPassed = true; receipt.passed = true; return
  }
  if (selectedCase === 'survey-drag') {
