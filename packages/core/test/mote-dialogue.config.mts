@@ -21,6 +21,7 @@ const variants = {
   'recovery-replay': ['packages/core/src/public-rpc-service.ts', 'if (submit && (firstIntake || recovery?.reconcile === true))', 'if (submit)'],
   'recovery-wrong-carrier': ['packages/core/src/public-rpc-service.ts', 'const key = retained?.launchInput?.key', 'const key = route.key'],
   'focus-retry-recomposed': ['packages/core/src/public-rpc-service.ts', 'agentInputGuidance(input,original)', 'agentInputGuidance(input)'],
+  'drop-combined-source': ['packages/core/src/agent-outbound-message.ts', "reference: source ? source.reference + '\\n' : ''", "reference: ''"],
   'focus-retry-result-recomposed': ['packages/core/src/rpc-native-codec.ts', 'agentInputGuidance(submitted, message)', 'agentInputGuidance(submitted)'],
   'focus-recovery-recomposed': ['packages/core/src/public-rpc-service.ts', 'originalLaunch ? originalLaunch.input.agentMuxNote : agentInputGuidance(submit)', 'agentInputGuidance(submit)'],
   'recovery-reconcile-missing': ['packages/core/src/public-rpc-service.ts', 'firstIntake || recovery?.reconcile === true', 'firstIntake'],

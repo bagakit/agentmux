@@ -22,7 +22,8 @@ import { createMoteInputFixture, moteInputTestSource } from './helpers/mote-inpu
 import { runSourceObjectCli } from './helpers/source-object-cli.js'
 import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
 import { AgentMuxError } from '../src/errors.js'
-import { composeAgentResumePrompt } from '../src/agent-outbound-message.js'
+import { composeAgentResumePrompt, composeOutboundMessage } from '../src/agent-outbound-message.js'
+import { parseAgentMuxMessagePrefix } from '../src/agent-message-render.js'
 import { defineRun } from '@ctxmux/sdk'
 import { serializeMoteQuickMode } from '../../../apps/host/src/mote-model.js'
 import { createMoteWorkThreadFixture, openMoteWorkThread } from './helpers/mote-work-thread.js'
@@ -278,6 +279,35 @@ const focusTask = {
 }
 const legacyFocusNote = 'Archived Mote collaboration guidance from the original input.' + '\n\n' + guideText(guideSharedFocusTaskHandoff) +
   '\n\nExact Focus reads (1 batch; read every batch and its remaining pages):\n' + focusReadCommand(focusTask)
+
+it('keeps combined Focus and Browser declarations apart from a protocol example in the user body', async () => {
+  const f = await fixture()
+  f.idle()
+  const provider = f.client.providers.get('codex')
+  f.client.providers.replace({ ...provider, catalog: { ...provider.catalog, capabilities: {
+    ...provider.catalog.capabilities, promptExecution: { immediate: 'terminal-submit' }
+  } }, planPromptInput: prompt => ({ kind: 'single-phase', data: prompt + '\r' }) })
+  const actual = browserContext()
+  const example = composeOutboundMessage({ inputContext: { ...actual, page: { url: 'https://example.org/' } } })
+  const prompt = example + '\n\n  Keep this original example.\r\n'
+  const target = { agentSessionId: 'primary', expectedRun: { runId: 'run-primary' }, afterSubmissionId: null,
+    operationId: 'combined-focus-browser', execution: 'immediate' as const, sourceChannel: 'cli' as const }
+  const input = { ...target, focusTask, inputContext: actual, prompt }
+  const first = await f.rpc.call('agent.input.submit', input)
+  const delivered = first.record?.admission?.intent
+  expect(delivered?.message).toMatchObject({ userContent: prompt, focusTask, inputContext: actual, inputContextSource: 'caller-declared' })
+  const parsed = parseAgentMuxMessagePrefix(delivered!.prompt)
+  expect(parsed?.body).toBe('\n\n' + prompt)
+  expect(parsed?.declaredContexts?.at(-1)).toMatchObject({ inputContext: actual })
+  expect(parsed?.declaredContexts?.at(-1)?.raw).toContain(focusTaskHandoffNote(focusTask))
+  expect(f.run(target.expectedRun.runId).acceptedInputBytes).toBeGreaterThan(0)
+  const originalInputBytes = f.run(target.expectedRun.runId).acceptedInputBytes
+  const retry = await f.rpc.call('agent.input.submit', {
+    ...input, preparationRetry: { inputByte: 0, nativeSourceId: 'native-primary-native' }
+  })
+  expect(retry.record).toEqual(first.record)
+  expect(f.run(target.expectedRun.runId).acceptedInputBytes).toBe(originalInputBytes)
+})
 
 it.each([
   { outcome: 'terminal-confirmed', source: 'historical' },

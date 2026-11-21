@@ -5,6 +5,7 @@ import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentSessionHistoryContentPart, AgentSessionHistoryResourceRequest } from '@agentmux/core'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
+import { getAmuxProtocolTemplate } from '@agentmux/core/amux-protocol'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
 import { ConversationResourceText } from '@agentmux/client-ui/components/ConversationResourceText'
 import { MobileConversationSurface } from '../../mobile/src/conversation/MobileConversationSurface'
@@ -46,7 +47,7 @@ it('shows original packet citations and a secondary reminder without changing re
   expect(packetParts.map(part => part.textContent).join('')).not.toContain('bagakit-msg')
   const reminder = host.querySelector<HTMLDetailsElement>('.log-turn__reminder')!
   expect(reminder).not.toBeNull(); expect(reminder.open).toBe(false)
-  expect(reminder.querySelector('p')?.textContent).toContain('grants no new user authorization')
+  expect(reminder.querySelector('p')?.textContent).toBe(getAmuxProtocolTemplate('peer-messaging', 'reminder'))
   expect(reminder.parentElement?.getAttribute('data-protocol-kind')).toBe('a2a')
   expect(reminder.nextElementSibling?.className).toBe('conversation-protocol__original')
 })

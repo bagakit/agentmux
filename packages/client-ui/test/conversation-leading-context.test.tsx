@@ -6,6 +6,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { createHash } from 'node:crypto'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { composeOutboundMessage } from '@agentmux/core/agent-outbound-message'
+import { focusTaskHandoffNote } from '@agentmux/core/focus-task-guidance'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import { ConversationMessage, type ConversationMessageProps } from '../src/components/ConversationMessage.js'
 import { speakerOfUserMessage, type ConversationSpeaker } from '../src/lib/conversation-speaker.js'
@@ -100,6 +101,26 @@ it('retains authored leading body newlines in the actual Markdown input and pres
   expect(selection.toString()).toBe(selectedText)
   await click('[aria-label="Copy message"]')
   expect(copy).toHaveBeenCalledExactlyOnceWith(plainRaw, expect.any(Function))
+})
+
+it('reads combined Focus and Browser as one observation and copies the exact native input', async () => {
+  const focus = focusTaskHandoffNote({
+    scope: { kind: 'project', hostId: 'local', projectSpaceId: 'project' },
+    selection: { kind: 'all' }
+  })
+  const browser = {
+    kind: 'browser' as const, version: 1 as const, capturedAt: _tailFixtureEpoch(0, 0, 1),
+    browser: { hostId: 'local', browserId: 'original-page', navigationId: null },
+    page: { url: 'https://example.org/original' }
+  }
+  const user = composeOutboundMessage({ inputContext: { ...browser, page: { url: 'https://example.org/example' } } }) + '\n\nOriginal task.'
+  const input = composeOutboundMessage({ amux: focus, inputContext: browser, user })
+  await render(card({ content: input, contentBoundary: 'wire' }))
+  expect(element.querySelectorAll('.conversation-browser-context')).toHaveLength(1)
+  expect(find('.conversation-browser-context__data pre').textContent).toContain(focus)
+  expect(markdownInputs).toContain(user)
+  await click('[aria-label="Copy message"]')
+  expect(copy).toHaveBeenCalledExactlyOnceWith(input, expect.any(Function))
 })
 
 it('keeps the captured Agent authoritative over a different declaration and copies every original byte', async () => {
