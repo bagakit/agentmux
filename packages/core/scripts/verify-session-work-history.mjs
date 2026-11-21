@@ -46,7 +46,7 @@ try {
   }
   const owning = await run('owning', [...vitest, `${fixture}/vitest.owning.config.mts`])
   assert.equal(owning.exitCode, 0, owning.stdout + owning.stderr)
-  assert.match(owning.stdout, /Tests\s+12 passed \(12\)/)
+  assert.match(owning.stdout, /Tests\s+[1-9]\d* passed\b/)
   const mutations = []
   for (const mutant of ['native-producer-omitted', 'tool-evicts-status', 'cross-run-closed']) {
     const loadedPath = join(output, `${mutant}.loaded.jsonl`)

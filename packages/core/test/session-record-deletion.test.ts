@@ -377,6 +377,7 @@ it('Memory active body and input read fences do not scan unrelated retired Sessi
   vi.spyOn(internal.retiredAgentSessions, 'find').mockImplementation(() => { throw new Error('Unrelated retired scan on active path') })
   expect(await store.readRecordDeletion(active.agentSessionId)).toBeNull()
   expect((await store.readCapturedHistory(active.agentSessionId)).records).toEqual([])
+  expect(await store.hasCapturedActivity(active.agentSessionId, 'missing')).toBe(false)
   expect(await store.readPromptAdmission(active.agentSessionId, active.run, 'missing')).toBeNull()
 })
 
@@ -399,6 +400,7 @@ for (const memory of [false, true]) it(`${memory ? 'Memory' : 'File'} cleanup re
     try { expect(db.prepare('SELECT * FROM captured_retirement_cuts WHERE session_id=?').all(f.session.agentSessionId), 'delete-keeps-original-SQL-G-cut').toEqual(before) } finally { db.close() }
   }
   await expect(store.readCapturedHistory(f.session.agentSessionId)).rejects.toMatchObject({ code: 'AGENT_SESSION_RECORD_DELETED' })
+  await expect(store.hasCapturedActivity(f.session.agentSessionId, 'activity')).rejects.toMatchObject({ code: 'AGENT_SESSION_RECORD_DELETED' })
   await expect(store.applyTimelineMutation({ type: 'append', agentSessionId: f.session.agentSessionId, item: { id: 'late-item', agentSessionId: f.session.agentSessionId,
     kind: 'user_message', source: 'user', status: 'complete', title: 'Late synthetic write', content: 'Must not reactivate original stream', createdAt: 900, updatedAt: 900 } })).rejects.toMatchObject({ code: 'AGENT_SESSION_RECORD_DELETED' })
   for (const read of [() => client.listMessages({ participantSessionId: f.session.agentSessionId, direction: 'incoming' }), () => client.listMessageEvents({ participantSessionId: f.session.agentSessionId }),

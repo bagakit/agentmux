@@ -901,6 +901,7 @@ const resumeRollbackStore = {
   reserveLifecycle: async (reservation) => await resumeRollbackDelegate.reserveLifecycle(reservation),
   claimStaleLifecycles: async (claim, target) => await resumeRollbackDelegate.claimStaleLifecycles(claim, target),
   retireRuns: async (runs) => await resumeRollbackDelegate.retireRuns(runs),
+  hasCapturedActivity: (id, activityId) => resumeRollbackDelegate.hasCapturedActivity(id, activityId),
   loadTimeline: async (agentSessionId) => await resumeRollbackDelegate.loadTimeline(agentSessionId),
   applyTimelineMutation: async (...args) => await resumeRollbackDelegate.applyTimelineMutation(...args),
   async commitLifecycle(reservation, next) {

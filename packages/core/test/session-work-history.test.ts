@@ -1,11 +1,14 @@
 import { fixturePath } from './helpers/fixture-values.js'
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxFileAgentSessionStore, AgentMuxMemoryAgentSessionStore, loadAgentSessions, type AgentMuxAgentSessionStore } from '../src/agent-session-store.js'
+import { commitCapturedMutation } from '../src/captured-history.js'
+import type { AgentHookServer } from '../src/hook-server.js'
 import { advanceAgentActivityCommit, agentActivityTimelineItem } from '../src/agent-activity-state.js'
 import { applyAgentTimelineMutation, normalizeAgentTimeline, projectAgentWorkHistory, MAX_AGENT_TIMELINE_STATUS_ITEMS } from '../src/session-timeline.js'
 import type { AgentMuxAcpBridge } from '../src/acp-adapter.js'
@@ -22,8 +25,8 @@ afterEach(async () => {
 })
 const sid = 'work-history-agent'
 function session(root = fixturePath("repo")): AgentMuxStoredAgentSession {
-  return { kind: 'agent', agentSessionId: sid, providerId: 'codex', executorId: 'codex', hostId: 'local',
-    workspacePath: root, run: { runId: 'work-run' }, retiredRuns: [], hookBindingId: 'work-binding', hookToken: 'private-token', createdAt: 1, updatedAt: 1 }
+  return { kind: 'agent', agentSessionId: sid, providerId: 'cursor', executorId: 'cursor', hostId: 'local',
+    workspacePath: root, run: { runId: 'work-run' }, retiredRuns: [], hookBindingId: 'b'.repeat(43), hookToken: 't'.repeat(43), createdAt: 1, updatedAt: 1 }
 }
 type Internals = {
   registry: AgentMuxAgentSessionRegistry
@@ -42,7 +45,7 @@ async function harness(store: AgentMuxAgentSessionStore = new AgentMuxMemoryAgen
   const events: AgentMuxClientEvent[] = []
   client.onEvent(event => events.push(event))
   const hook = (eventName: string, receiptId: string) => inner.acceptHookEvent({ receiptId, agentSessionId: sid,
-    providerId: 'codex', runId: 'work-run', eventName, payload: { hook_event_name: eventName } }, AbortSignal.timeout(5_000))
+    providerId: 'cursor', runId: 'work-run', eventName, payload: { hook_event_name: eventName, status: 'completed' } }, AbortSignal.timeout(5_000))
   return { store, client, inner, events, hook, current: () => inner.registry.get(sid),
     history: async () => (await client.sessionTimeline(sid)).items }
 }
@@ -69,15 +72,15 @@ async function retire(store: AgentMuxAgentSessionStore, value: AgentMuxStoredAge
 it('accepted native Hook transitions retain two exact work rounds without per-tool history scans or byte writes', async () => {
   const clock = vi.spyOn(Date, 'now').mockReturnValue(100)
   const h = await harness()
-  await h.hook('UserPromptSubmit', 'round-one')
-  clock.mockReturnValue(200); await h.hook('Stop', 'done-one')
+  await h.hook('beforeSubmitPrompt', 'round-one')
+  clock.mockReturnValue(200); await h.hook('stop', 'done-one')
   const loads = vi.spyOn(h.store, 'loadTimeline')
-  for (let i = 0; i < 40; i++) await h.hook('PreToolUse', `late-tool-${i}`)
+  for (let i = 0; i < 40; i++) await h.hook('preToolUse', `late-tool-${i}`)
   expect(loads).not.toHaveBeenCalled()
-  clock.mockReturnValue(300); await h.hook('UserPromptSubmit', 'round-two')
-  clock.mockReturnValue(350); await h.hook('UserPromptSubmit', 'same-working')
+  clock.mockReturnValue(300); await h.hook('beforeSubmitPrompt', 'round-two')
+  clock.mockReturnValue(350); await h.hook('beforeSubmitPrompt', 'same-working')
   h.inner.acceptKernelEvent({ type: 'data', runId: 'work-run', startByte: 0, endByte: 4, data: 'text', dataBytes: Buffer.from('text') })
-  clock.mockReturnValue(400); await h.hook('Stop', 'done-two')
+  clock.mockReturnValue(400); await h.hook('stop', 'done-two')
   const typed = (await h.history()).filter(item => item.activityState)
   expect(typed.map(item => [item.createdAt, 'state' in item.activityState! ? item.activityState.state : null])).toEqual([[100, 'working'], [200, 'done'], [300, 'working'], [400, 'done']])
   expect(projectAgentWorkHistory(typed).segments).toEqual([
@@ -110,51 +113,131 @@ it('true FileStore I/O failure preserves the first accepted identity/time throug
   const clock = vi.spyOn(Date, 'now').mockReturnValue(100)
   const h = await fileHarness()
   await mkdir(h.timelinePath, { recursive: true }) // real invalid-file I/O, not a mocked exception
-  await h.hook('UserPromptSubmit', 'failed-working')
+  await h.hook('beforeSubmitPrompt', 'failed-working')
   const accepted = (await loadAgentSessions(h.store))[0]!.activityCommit!.latest
   expect(h.client.agentSession(sid).semanticStatus?.state).toBe('working')
   expect(h.events.some(e => e.type === 'agent-error' && e.code === 'AGENT_WORK_HISTORY_PERSIST_FAILED')).toBe(true)
-  clock.mockReturnValue(200); await h.hook('Stop', 'accepted-done')
+  clock.mockReturnValue(200); await h.hook('stop', 'accepted-done')
   expect(h.current().activityCommit?.pending).toEqual(accepted)
   expect(h.client.agentSession(sid).semanticStatus?.state).toBe('done')
   await rm(h.timelinePath, { recursive: true })
-  clock.mockReturnValue(999); await h.hook('UserPromptSubmit', 'failed-working')
+  clock.mockReturnValue(999); await h.hook('beforeSubmitPrompt', 'failed-working')
   expect(h.client.agentSession(sid).semanticStatus).toMatchObject({ state: 'done', observedAt: 200, stateEnteredAt: 200 })
   const typed = (await h.history()).filter(item => item.activityState)
   expect(typed.map(item => [item.id, item.createdAt])).toEqual([[accepted.id, 100], [h.current().activityCommit!.latest.id, 200]])
   expect(projectAgentWorkHistory(typed).segments[0]).toMatchObject({ startAt: 100, endAt: 200 })
   const before = await readFile(h.timelinePath, 'utf8')
-  await h.hook('UserPromptSubmit', 'failed-working')
+  await h.hook('beforeSubmitPrompt', 'failed-working')
   expect(await readFile(h.timelinePath, 'utf8')).toBe(before)
 })
 
 it('already committed older native receipt cannot roll back latest done after its pending slot was cleared', async () => {
   const clock = vi.spyOn(Date, 'now').mockReturnValue(100)
   const h = await harness()
-  await h.hook('UserPromptSubmit', 'old-working')
-  clock.mockReturnValue(200); await h.hook('Stop', 'new-done')
+  await h.hook('beforeSubmitPrompt', 'old-working')
+  clock.mockReturnValue(200); await h.hook('stop', 'new-done')
   const before = await h.history()
-  clock.mockReturnValue(900); await h.hook('UserPromptSubmit', 'old-working')
+  clock.mockReturnValue(900); await h.hook('beforeSubmitPrompt', 'old-working')
   expect(h.client.agentSession(sid).semanticStatus?.state).toBe('done')
-  await h.hook('PreToolUse', 'still-late-tool')
+  await h.hook('preToolUse', 'still-late-tool')
   expect(h.client.agentSession(sid).semanticStatus?.state).toBe('done')
   expect((await h.history()).filter(item => item.activityState)).toEqual(before.filter(item => item.activityState))
+})
+
+it('Hook exact activity reads one committed snapshot after the original receipt leaves the recent window', async () => {
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(100)
+  const h = await fileHarness()
+  const server = Reflect.get(h.client, 'hookServer') as AgentHookServer
+  Object.defineProperty(server, 'port', { value: 0 })
+  const reopen = async () => {
+    await server.stop()
+    await server.start()
+    const original = h.current()
+    const binding = server.createBinding(sid, 'cursor', original.hookBindingId, original.hookToken)
+    await binding.bindRun(original.run.runId)
+    return binding.endpoint
+  }
+  let endpoint = await reopen()
+  const submit = async (eventName: string, receiptId: string) => {
+    const response = await fetch(endpoint.url, {
+      method: 'POST',
+      headers: { authorization: 'Bearer ' + endpoint.token, 'content-type': 'application/json' },
+      body: JSON.stringify({ receiptId, eventName, payload: { hook_event_name: eventName, status: 'completed' } })
+    })
+    expect(response.status).toBe(204)
+  }
+  await submit('beforeSubmitPrompt', 'old-working')
+  const oldActivity = h.current().activityCommit!.latest.id
+  clock.mockReturnValue(200)
+  await submit('stop', 'new-done')
+  expect(h.current().semanticStatus?.state).toBe('done')
+
+  const db = new DatabaseSync(h.path)
+  try {
+    db.exec('BEGIN')
+    for (let index = 0; index < 200; index++) {
+      const at = index + 1
+      for (const item of [observation('unrelated-activity-' + index, at, 'working'), ...(['user_message', 'tool_call'] as const).map(kind => ({
+        id: kind + index, agentSessionId: sid, kind, source: 'native-hook' as const, status: 'complete' as const,
+        title: 'Unrelated history', content: 'x'.repeat(4096), createdAt: at, updatedAt: at
+      }))]) commitCapturedMutation(db, { type: 'append', agentSessionId: sid, item })
+    }
+    db.exec('COMMIT')
+  } finally { db.close() }
+  const preview = await h.history()
+  expect(preview).toHaveLength(600)
+  expect(preview.some(item => item.id === oldActivity)).toBe(false)
+
+  const fullRead = vi.spyOn(h.store, 'loadTimeline')
+  const databasePath = await realpath(h.path)
+  const close = DatabaseSync.prototype.close
+  let handles = 0
+  vi.spyOn(DatabaseSync.prototype, 'close').mockImplementation(function(this: DatabaseSync) {
+    if (this.location('main') === databasePath) handles++
+    close.call(this)
+  })
+  const exactReads: Array<{ id: string; handles: number; exists: boolean }> = []
+  const read = h.store.hasCapturedActivity.bind(h.store)
+  vi.spyOn(h.store, 'hasCapturedActivity').mockImplementation(async (id, activityId) => {
+    const before = handles
+    const exists = await read(id, activityId)
+    exactReads.push({ id: activityId, handles: handles - before, exists })
+    return exists
+  })
+  clock.mockReturnValue(900)
+  endpoint = await reopen()
+  await submit('beforeSubmitPrompt', 'old-working')
+  expect(fullRead).not.toHaveBeenCalled()
+  expect(exactReads).toEqual([{ id: oldActivity, handles: 1, exists: true }])
+  expect(h.current().semanticStatus).toMatchObject({ state: 'done', observedAt: 200 })
+  expect(h.current().run).toEqual({ runId: 'work-run' })
+
+  const source = new DatabaseSync(h.path)
+  try {
+    source.prepare("UPDATE captured_record_versions SET item_json='null' WHERE session_id=? AND record_id=?")
+      .run(sid, oldActivity)
+  } finally { source.close() }
+  endpoint = await reopen()
+  await submit('beforeSubmitPrompt', 'old-working')
+  expect(h.current().semanticStatus).toMatchObject({ state: 'done', observedAt: 200 })
+  expect(h.current().activityCommit?.latest.activityState).toMatchObject({ boundary: 'history-gap' })
+  expect(h.events.some(event => event.type === 'agent-error' && event.code === 'AGENT_WORK_HISTORY_PERSIST_FAILED')).toBe(true)
 })
 
 it('committed old working replay under a now-unreadable Timeline preserves done and marks an explicit gap', async () => {
   const clock = vi.spyOn(Date, 'now').mockReturnValue(100)
   const h = await fileHarness()
-  await h.hook('UserPromptSubmit', 'committed-working')
-  clock.mockReturnValue(200); await h.hook('Stop', 'committed-done')
+  await h.hook('beforeSubmitPrompt', 'committed-working')
+  clock.mockReturnValue(200); await h.hook('stop', 'committed-done')
   const bytes = await readFile(h.timelinePath)
   await rm(h.timelinePath); await mkdir(h.timelinePath)
-  clock.mockReturnValue(900); await h.hook('UserPromptSubmit', 'committed-working')
+  clock.mockReturnValue(900); await h.hook('beforeSubmitPrompt', 'committed-working')
   expect(h.current().semanticStatus).toMatchObject({ state: 'done', observedAt: 200, stateEnteredAt: 200 })
   expect(h.current().activityCommit?.latest.activityState).toMatchObject({ boundary: 'history-gap' })
-  await h.hook('UserPromptSubmit', 'committed-working')
+  await h.hook('beforeSubmitPrompt', 'committed-working')
   expect(h.current().semanticStatus?.state).toBe('done')
   await rm(h.timelinePath, { recursive: true }); await writeFile(h.timelinePath, bytes)
-  await h.hook('UserPromptSubmit', 'committed-working')
+  await h.hook('beforeSubmitPrompt', 'committed-working')
   const history = await h.history()
   expect(history.filter(item => item.activityState && 'state' in item.activityState && item.activityState.state === 'working').map(item => item.createdAt)).toEqual([100])
   expect(projectAgentWorkHistory(history).coverage.gaps).toBe(true)
@@ -214,11 +297,11 @@ it('typed JSONL metadata survives fresh store reads and original compaction, wit
 
 it('actual process end closes its exact Run, while lost/restored never invent completion or working continuation', async () => {
   const clock = vi.spyOn(Date, 'now').mockReturnValue(100)
-  const h = await harness(); await h.hook('UserPromptSubmit', 'before-gap')
+  const h = await harness(); await h.hook('beforeSubmitPrompt', 'before-gap')
   await h.inner.persistActivityBoundary(h.current(), 'lost', 150)
   await h.inner.persistActivityBoundary(h.current(), 'restored', 200)
   expect(projectAgentWorkHistory(await h.history(), { now: 250, current: { run: h.current().run, processState: 'running', semanticStatus: h.current().semanticStatus!, available: true } }).segments).toMatchObject([{ startAt: 100, endAt: 150, end: 'observation-gap' }])
-  clock.mockReturnValue(300); await h.hook('UserPromptSubmit', 'confirmed-after-gap')
+  clock.mockReturnValue(300); await h.hook('beforeSubmitPrompt', 'confirmed-after-gap')
   h.inner.acceptKernelEvent({ type: 'exit', runId: 'work-run', state: { type: 'exited', code: 0, signal: null }, observedAt: 400 })
   await vi.waitFor(async () => { expect((await h.history()).some(item => item.activityState && 'boundary' in item.activityState && item.activityState.boundary === 'exited')).toBe(true) })
   expect(projectAgentWorkHistory(await h.history()).segments.map(segment => [segment.startAt, segment.endAt, segment.end, segment.startKnown])).toEqual([[100, 150, 'observation-gap', true], [300, 400, 'run-ended', false]])
@@ -242,10 +325,10 @@ it('pure projection respects exact current entry identity, predecessor links, cl
 it('bounded pending metadata reveals an unretained intermediate state instead of fabricating a continuous round', async () => {
   const clock = vi.spyOn(Date, 'now').mockReturnValue(100)
   const h = await fileHarness(); await mkdir(h.timelinePath, { recursive: true })
-  await h.hook('UserPromptSubmit', 'work-1'); clock.mockReturnValue(200); await h.hook('Stop', 'done-1')
-  clock.mockReturnValue(300); await h.hook('UserPromptSubmit', 'work-2'); clock.mockReturnValue(400); await h.hook('Stop', 'done-2')
+  await h.hook('beforeSubmitPrompt', 'work-1'); clock.mockReturnValue(200); await h.hook('stop', 'done-1')
+  clock.mockReturnValue(300); await h.hook('beforeSubmitPrompt', 'work-2'); clock.mockReturnValue(400); await h.hook('stop', 'done-2')
   expect(Object.keys(h.current().activityCommit!)).toEqual(['latest', 'latestCommitted', 'pending'])
-  await rm(h.timelinePath, { recursive: true }); clock.mockReturnValue(999); await h.hook('UserPromptSubmit', 'work-1')
+  await rm(h.timelinePath, { recursive: true }); clock.mockReturnValue(999); await h.hook('beforeSubmitPrompt', 'work-1')
   const projection = projectAgentWorkHistory(await h.history())
   expect(projection.segments[0]).toMatchObject({ startAt: 100, endAt: null, end: 'unknown' })
   expect(projection.coverage).toEqual({ recorded: true, truncated: true, gaps: true })

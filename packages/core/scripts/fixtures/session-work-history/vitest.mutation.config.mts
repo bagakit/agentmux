@@ -11,7 +11,10 @@ const patches = {
     "item.activityState ? ++states : item.kind === 'user_message' ? ++inputs : ++activity",
     "item.kind === 'user_message' ? ++inputs : ++activity"],
   'cross-run-closed': ['packages/core/src/session-timeline.ts',
-    'next.activityState!.run.runId === activity.run.runId', 'true']
+    'next.activityState!.run.runId === activity.run.runId', 'true'],
+  'hook-reads-recent-window': ['packages/core/src/client.ts',
+    'await this.store.hasCapturedActivity(session.agentSessionId, activityId)',
+    '(await this.store.loadTimeline(session.agentSessionId)).items.some(item => item.id === activityId && item.activityState)']
 } as const
 if (!name || !(name in patches) || !process.env.AGENTMUX_WORK_HISTORY_MUTANT_RECEIPT) throw new Error('Explicit loaded work-history mutation required')
 const [path, needle, replacement] = patches[name as keyof typeof patches]

@@ -17,6 +17,7 @@ const store = {
   claimStaleLifecycles: async (claim, target) => await delegate.claimStaleLifecycles(claim, target),
   releaseLifecycle: async (reservation, runs) => await delegate.releaseLifecycle(reservation, runs),
   retireRuns: async (runs) => await delegate.retireRuns(runs),
+  hasCapturedActivity: (id, activityId) => delegate.hasCapturedActivity(id, activityId),
   loadTimeline: async (agentSessionId) => await delegate.loadTimeline(agentSessionId),
   applyTimelineMutation: async (mutation, signal) => (
     await delegate.applyTimelineMutation(mutation, signal)

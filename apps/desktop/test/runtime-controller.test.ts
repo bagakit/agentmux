@@ -337,6 +337,7 @@ const store: AgentMuxAgentSessionStore = {
   async releaseLifecycle() {},
   async retireRuns() {},
   async commitLifecycle() {},
+  async hasCapturedActivity() { return false },
   async loadTimeline(agentSessionId: string) { return { agentSessionId, revision: 0, items: [] } },
   async applyTimelineMutation(mutation: { agentSessionId: string }) {
     return { agentSessionId: mutation.agentSessionId, revision: 1, changed: true, mutation }
