@@ -66,41 +66,53 @@ export async function createSurveyBrowser({ get, prepareZone, checkpointPreparat
     preparation.surface = launcher.regions[preparation.reference.regionId]!
     input.onPrepared(preparation)
   }
-  // Confirm the original Zone, Tab, Region and display before sending Native
-  // creation. A fast frame never trades away the durable preparation identity.
-  await checkpointPreparation()
   const reference = preparation.reference, tab = get().tabs[reference.tabId], surface = tab?.regions[reference.regionId]
   const attached = surface?.kind === 'browser' && preparation.createdBrowser?.id === surface.browserId && tab?.space?.zoneId === preparation.zone.zoneId
   if (surface?.kind === 'browser' && !attached) {
     throw new Error('Another Browser now occupies this original preparation. Both identities are kept; this retry cannot adopt or replace it.')
   }
-  if (!attached) {
-    if (!tab || Object.keys(tab.regions).length !== 1 || surface !== preparation.surface || preparation.surface?.kind !== 'launcher') {
-      throw new Error('The original preparation is unavailable or has changed. Its content and exact reference are kept; review it before retrying.')
+  if (!attached && (tab?.space?.zoneId !== preparation.zone.zoneId || Object.keys(tab.regions).length !== 1 ||
+    surface !== preparation.surface || preparation.surface?.kind !== 'launcher')) {
+    throw new Error('The original preparation is unavailable or has changed. Its content and exact reference are kept; review it before retrying.')
+  }
+  const prepared = preparation
+  function confirmAttachment() {
+    const confirmedTab = get().tabs[reference.tabId]
+    const confirmed = confirmedTab?.regions[reference.regionId]
+    if (confirmed?.kind !== 'browser' || confirmedTab?.space?.zoneId !== prepared.zone.zoneId ||
+      !prepared.createdBrowser || confirmed.browserId !== prepared.createdBrowser.id) {
+      throw new Error('The original Browser owner has not confirmed attachment. Recover this same page.')
     }
-    await get().createBrowser(reference.groupId, { tabId: reference.tabId, regionId: reference.regionId }, preparation.url,
-      undefined, input.workspaceId, reference.displayWorkspaceId, preparation.mode, undefined, preparation.profileId, {
-        onCreated(browser) {
-          // Freeze only the original Main receipt, never a later Region occupant.
-          if (!preparation!.createdBrowser) preparation!.createdBrowser = { id: browser.id, mode: browser.mode,
-            profileId: browser.profileId, navigationId: browser.navigationId }
-          input.onPrepared(preparation!)
-        }
-      })
+    const browser = prepared.createdBrowser
+    if (browser.mode !== prepared.mode || prepared.profileId !== undefined && browser.profileId !== prepared.profileId) {
+      throw new Error('The attached original page did not confirm the frozen environment. It is kept; inspect this same Browser before another action.')
+    }
+    return browser
   }
-  const confirmed = get().tabs[reference.tabId]?.regions[reference.regionId]
-  if (confirmed?.kind !== 'browser' || !preparation.createdBrowser || confirmed.browserId !== preparation.createdBrowser.id) throw new Error('The original Browser owner has not confirmed attachment. Recover this same page.')
-  const expectedProfile = preparation.profileId
-  if (preparation.createdBrowser.mode !== preparation.mode || expectedProfile !== undefined && preparation.createdBrowser.profileId !== expectedProfile) {
-    throw new Error('The attached original page did not confirm the frozen environment. It is kept; inspect this same Browser before another action.')
-  }
-  input.onPrepared(preparation)
+  // Navigation uses the exact locally placed Region and Main-owned Profile. Saving that
+  // position can run while the same page loads; it only gates the successful receipt.
+  const navigation = attached ? Promise.resolve() : get().createBrowser(reference.groupId,
+    { tabId: reference.tabId, regionId: reference.regionId }, prepared.url,
+    undefined, input.workspaceId, reference.displayWorkspaceId, prepared.mode, undefined, prepared.profileId, {
+      onCreated(browser) {
+        // Freeze only the original Main receipt, never a later Region occupant.
+        prepared.createdBrowser ??= { id: browser.id, mode: browser.mode, profileId: browser.profileId, navigationId: browser.navigationId }
+      }
+    })
+  const visible = navigation.then(() => { confirmAttachment(); input.onPrepared(prepared) })
+  const [page, position] = await Promise.allSettled([visible, checkpointPreparation()])
+  if (page.status === 'rejected') throw page.reason
+  if (position.status === 'rejected') throw position.reason
+  // If Core saved the Launcher before Main returned, drain the same writer
+  // through the attached Browser before reporting success or saving its Survey reference.
+  if (!attached) await checkpointPreparation()
+  const browser = confirmAttachment()
   if (preparation.entry !== 'research') {
     // This freshly minted page has never been admitted. Another independent
     // page's completed registration is not a withdrawal of this exact original.
     // Retry keeps its frozen generation so a later explicit removal stays removed.
     if (!preparation.admission) preparation.membership = get().surveyPageReferences
-    const attempt = await admitPreparedSurveyPage(get, { regionId: reference.regionId, browserId: preparation.createdBrowser.id }, preparation.createdBrowser, preparation.membership)
+    const attempt = await admitPreparedSurveyPage(get, { regionId: reference.regionId, browserId: browser.id }, browser, preparation.membership)
     preparation.admission = attempt.admission
     preparation.membership = attempt.membership
     input.onPrepared(preparation)
