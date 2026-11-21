@@ -18,10 +18,17 @@ let settings: MeshNetworkSettings = { owner: { runtimeId: 'core-original-review'
  configuration: { role: 'gateway', networkId: 'work-machines', endpointAccess: { allowedClientKeys: [] }, members: [], peers: [], publishers: [], listen: { host: '127.0.0.1', port: 8444 }, advertisedIngress: [{ endpoint: 'cn1.example.com', useTls: true }] } }
 const originalOffer = { v: 2 as const, serverId: target, daemonPublicKeyB64: 'Hx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8=', relay: { endpoint: 'original-edge.local:7443', useTls: true } }
 let state = new URLSearchParams(location.search).get('scenario') ?? 'active'
-if (['initial', 'gateway-join', 'runtime-identity', 'separate-gateway-identity', 'separate-identity-no-gateway'].includes(state)) settings = { ...settings, configuration: { ...settings.configuration, role: 'disabled', networkId: 'my-devices', listen: undefined, advertisedIngress: [] } }
+if (['initial', 'gateway-join', 'runtime-identity'].includes(state)) settings = { ...settings, configuration: { ...settings.configuration, role: 'disabled', networkId: 'my-devices', listen: undefined, advertisedIngress: [] } }
 api.ui.readLocalRuntimeRecovery = async () => state === 'runtime-identity' ? { state: 'needs-backup', code: 'IDENTITY_SOURCE_MISSING' }
   : state === 'runtime-identity-blocked' ? { state: 'blocked', code: 'IDENTITY_TARGET_UNCONFIRMED' } : { state: 'unchanged' }
 api.ui.restoreLocalRuntimeIdentity = async () => { state = 'initial'; return { state: 'restored' } }
+let confirmSeparate: (() => void) | undefined
+api.ui.prepareMeshIdentity = async () => {
+  await new Promise<void>(resolve => { confirmSeparate = resolve })
+  state = 'gateway-join'
+  settings = { ...settings, owner: { runtimeId: 'separate-review', ownerInstanceId: 'separate-process' } }
+  return settings.owner
+}
 function observation(): MeshNetworkInspection {
  const record = (originPeerId: string, neighbors: number[], index: number) => ({ version: 1 as const, networkId: 'work-machines', originPeerId, epoch: 3, revision: 8, signature: 'fixture', publishers: index === 2 ? [{ serverId: target, generation: 'generation-original' }] : [], advertisedIngress: [], neighbors: neighbors.map(n => ({ peerId: ids[n]!, peerEpoch: 3, connectionId: `link-${Math.min(index,n)}-${Math.max(index,n)}`, rttMs: 23 })) })
  return { owner: settings.owner, identity: own, source: 'managed', desiredRevision: settings.revision, activeRevision: state === 'failure' ? 'saved-8' : settings.revision, apply: state === 'failure' ? { state: 'unavailable', issue: { code: 'EADDRINUSE', message: 'The new listener address is already in use. The previous listener remains active.' } } : { state: 'active' }, gateway: { state: 'listening', listener: { host: '127.0.0.1', port: 8444, protocol: 'http' } } as never,
@@ -91,9 +98,5 @@ else if (state === 'gateway-join') void useAppStore.getState().initialize().then
   useAppStore.setState({ config: fixtureConfig, meshSettingsDrafts: {}, meshGatewayCode: '' })
   render()
 })
-else if (state === 'separate-gateway-identity' || state === 'separate-identity-no-gateway') {
-  api.ui.isNewIdentityWindow = true
-  useAppStore.setState({ meshGatewayHandoff: state === 'separate-gateway-identity' ? workflowCode ?? undefined : undefined })
-  render({ section: 'hosts', field: 'mesh-join' })
-} else render()
-Object.assign(window, { meshFixture: { originalOffer, workflowCode, workflowDeviceCode, confirmGateway: () => { state = 'gateway-connected' }, endpoint: () => { state = 'endpoint' }, localOnly: () => showHosts(true), allHosts: () => showHosts(false), theme: (mode: 'dark' | 'light') => updateThemeSelection({ appAppearance: mode }), failure: () => { state = 'failure'; settings = { ...settings, revision: 'saved-9' } } } })
+else render()
+Object.assign(window, { meshFixture: { originalOffer, workflowCode, workflowDeviceCode, confirmSeparate: () => confirmSeparate?.(), seedGatewayCode: () => useAppStore.setState({ meshGatewayCode: workflowCode ?? '' }), confirmGateway: () => { state = 'gateway-connected' }, endpoint: () => { state = 'endpoint' }, localOnly: () => showHosts(true), allHosts: () => showHosts(false), theme: (mode: 'dark' | 'light') => updateThemeSelection({ appAppearance: mode }), failure: () => { state = 'failure'; settings = { ...settings, revision: 'saved-9' } } } })

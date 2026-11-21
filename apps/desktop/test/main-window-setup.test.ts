@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
-import { tmpdir } from 'node:os'
-import { createHash } from 'node:crypto'
-import { openNewIdentityWindow } from '../src/main/local-identity-setup.js'
 import {
   foregroundActionsForSecondInstance,
   instanceRoleFromLock
@@ -29,39 +26,6 @@ function stripComments(source: string): string {
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/(^|[^:])\/\/.*$/gm, '$1')
 }
-
-it('launches an isolated new identity process with the selected gateway and the original profile untouched', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'amux-identity-launch-test-'))
-  const original = join(directory, 'agentmux'), originalState = join(original, 'original.json')
-  await mkdir(original)
-  const separate = (await realpath(original)) + '.new-identity'
-  const runtime = join(process.platform === 'darwin' ? '/private/tmp' : tmpdir(),
-    `amux-setup-${process.getuid?.()}-${createHash('sha256').update(separate).digest('hex').slice(0, 20)}`)
-  const witness = join(separate, 'witness.json'), application = join(directory, 'observe.mjs')
-  const gatewayCode = 'amux-mesh:original-gateway-code'
-  try {
-    await writeFile(originalState, JSON.stringify({ original: true }))
-    await writeFile(application, `import { renameSync, writeFileSync } from 'node:fs';
-const { AGENTMUX_DESKTOP_USER_DATA, AGENTMUX_STATE_DIRECTORY, AGENTMUX_RUNTIME_DIRECTORY, AGENTMUX_DESKTOP_NEW_IDENTITY_GATEWAY } = process.env;
-const witness = AGENTMUX_DESKTOP_USER_DATA + '/witness.json';
-writeFileSync(witness + '.tmp', JSON.stringify({ pid: process.pid, userData: AGENTMUX_DESKTOP_USER_DATA,
-  state: AGENTMUX_STATE_DIRECTORY, runtime: AGENTMUX_RUNTIME_DIRECTORY, code: AGENTMUX_DESKTOP_NEW_IDENTITY_GATEWAY }));
-renameSync(witness + '.tmp', witness);`)
-    await openNewIdentityWindow({ userData: original, executable: process.execPath, application, gatewayCode })
-    await expect.poll(async () => JSON.parse(await readFile(witness, 'utf8').catch(() => 'null'))).toMatchObject({
-      userData: separate, state: join(separate, 'runtime-state'), runtime, code: gatewayCode
-    })
-    const pid = JSON.parse(await readFile(witness, 'utf8')).pid
-    expect(pid).not.toBe(process.pid)
-    await expect.poll(() => {
-      try { process.kill(pid, 0); return false } catch (error) { return (error as NodeJS.ErrnoException).code === 'ESRCH' }
-    }).toBe(true)
-    expect(JSON.parse(await readFile(originalState, 'utf8'))).toEqual({ original: true })
-  } finally {
-    await rm(runtime, { recursive: true, force: true })
-    await rm(directory, { recursive: true, force: true })
-  }
-})
 
 describe('main window setup wiring', () => {
   it('lets RendererUpdates own normal startup navigation so healthy Sessions do not stay Connecting', async () => {

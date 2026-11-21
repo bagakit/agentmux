@@ -11,9 +11,9 @@ const root = fileURLToPath(new URL('../../../../../', import.meta.url))
 export async function privateCore(options = {}) {
  const deviceKeyPair = generateKeyPair(), relays = []
  const directory = await mkdtemp('/tmp/amux-mesh-ui-')
- const runtime = join(directory,'r'), state = join(directory,'s')
- await Promise.all([mkdir(runtime,{mode:0o700}),mkdir(join(state,'ctxmux'),{recursive:true,mode:0o700}),mkdir(join(directory,'home'),{mode:0o700})])
- const env = { ...Object.fromEntries(Object.entries(process.env).filter(([key])=>!key.startsWith('AGENTMUX_')&&!key.startsWith('CTXMUX_'))), HOME:join(directory,'home'), AGENTMUX_RUNTIME_DIRECTORY:runtime, AGENTMUX_STATE_DIRECTORY:state, AGENTMUX_AGENT_SESSION_STORE:join(state,'sessions.json'), AGENTMUX_MESSAGE_QUEUE_PATH:join(state,'messages.ndjson') }
+ const runtime = options.namespace?.runtime ?? join(directory,'r'), state = options.namespace?.state ?? join(directory,'s')
+ await Promise.all([mkdir(runtime,{recursive:true,mode:0o700}),mkdir(join(state,'ctxmux'),{recursive:true,mode:0o700}),mkdir(join(directory,'home'),{mode:0o700})])
+ const env = { ...Object.fromEntries(Object.entries(process.env).filter(([key])=>!key.startsWith('AGENTMUX_')&&!key.startsWith('CTXMUX_'))), HOME:join(directory,'home'), AGENTMUX_RUNTIME_DIRECTORY:runtime, AGENTMUX_STATE_DIRECTORY:state, AGENTMUX_AGENT_SESSION_STORE:options.namespace?.storePath ?? join(state,'sessions.json'), AGENTMUX_MESSAGE_QUEUE_PATH:join(state,'messages.ndjson') }
  let native, core, client; const children=[]
  const stop = async child => { if (child?.pid && child.exitCode===null && child.signalCode===null) { child.kill('SIGTERM'); await once(child,'exit') } }
  async function close() { for(const relay of relays)await relay.dispose();await client?.dispose(); await stop(core); await stop(native); await rm(directory,{recursive:true,force:true}) }

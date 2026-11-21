@@ -15,7 +15,7 @@ const observation = (value = settings): MeshNetworkInspection => ({ owner: value
 let dispose: (() => void) | undefined
 beforeAll(async () => { dispose = await useAppStore.getState().initialize() })
 afterAll(() => dispose?.())
-beforeEach(() => { useAppStore.setState({ meshSettingsDrafts: {}, meshGatewayCode: '' }) })
+beforeEach(() => { useAppStore.setState({ meshSettingsDrafts: {}, meshGatewayCode: '', meshGatewayRuntimeId: null }) })
 async function ready() { for (let i = 0; i < 150 && !dom.container.querySelector('[aria-label="Mesh network"]'); i++) await act(async () => { await new Promise(done => setTimeout(done, 10)) }); expect(dom.container.querySelector('[aria-label="Mesh network"]'), dom.container.textContent ?? '').not.toBeNull() }
 async function settled(check: () => boolean) { for (let i=0;i<200;i++) { if (check()) return; await act(async()=>{await new Promise(done=>setTimeout(done,15))}) }; throw Error('GUI did not settle: '+dom.container.textContent) }
 async function clickRecovery(label: string) {
@@ -166,26 +166,41 @@ it('opens the guided connection from the Mesh homepage and submits one original 
   expect(call.mock.calls.filter(([method]) => method === 'settings.mesh.configure')).toHaveLength(1)
 })
 
-it('takes the chosen gateway into separate identity setup only after an explicit choice', async () => {
-  const read = vi.spyOn(api.ui, 'readLocalRuntimeRecovery').mockResolvedValue({ state: 'needs-backup', code: 'IDENTITY_SOURCE_MISSING' })
-  const open = vi.spyOn(api.ui, 'openLocalIdentitySetup').mockResolvedValue(undefined)
-  const call = vi.spyOn(api.mesh, 'call').mockRejectedValue(Error('The original Host is unavailable'))
-  try {
-    useAppStore.setState({ meshGatewayCode: gatewayCode })
-    await dom.render(<Editor active join />)
-    await settled(() => Boolean(dom.container.querySelector('.mesh-join-identity-flag')))
-    expect(dom.container.textContent).toContain('relay.example:8444')
-    expect(dom.container.querySelector<HTMLInputElement>(guidedInput)?.disabled).toBe(true)
-    expect(open).not.toHaveBeenCalled()
-    await clickRecovery('Create a new identity…')
-    expect(open).not.toHaveBeenCalled()
-    const confirm = document.querySelector<HTMLButtonElement>('[data-confirm-label="Create and open setup"]')
-    expect(confirm).not.toBeNull()
-    await act(async () => confirm!.click())
-    expect(open).toHaveBeenCalledExactlyOnceWith(gatewayCode)
-    expect(dom.container.querySelector<HTMLInputElement>(guidedInput)?.value).toBe(gatewayCode)
-    expect(call.mock.calls.some(([method]) => method === 'settings.mesh.configure')).toBe(false)
-  } finally { read.mockRestore(); open.mockRestore(); call.mockRestore() }
+it('verifies a separate identity and keeps the chosen gateway in the current wizard', async () => {
+  vi.spyOn(api.ui, 'readLocalRuntimeRecovery').mockResolvedValue({ state: 'needs-backup', code: 'IDENTITY_SOURCE_MISSING' })
+  const owner = { runtimeId: 'separate-runtime', ownerInstanceId: 'separate-process' }
+  const separate = { ...settings, owner }
+  let ready!: (value: typeof owner) => void
+  const preparation = new Promise<typeof owner>(resolve => { ready = resolve })
+  const prepare = vi.spyOn(api.ui, 'prepareMeshIdentity').mockReturnValue(preparation)
+  const call = vi.spyOn(api.mesh, 'call').mockImplementation(async (method, _params, context) => {
+    if (context?.separateRuntimeId !== owner.runtimeId) throw Error('The original Host is unavailable')
+    return (method === 'mesh.inspect' ? observation(separate) : separate) as never
+  })
+  useAppStore.setState({ meshGatewayCode: gatewayCode })
+  await dom.render(<Editor active join />)
+  await settled(() => Boolean(dom.container.querySelector('.mesh-join-identity-flag')))
+  expect(dom.container.querySelector<HTMLInputElement>(guidedInput)?.disabled).toBe(true)
+  await clickRecovery('Create a new identity…')
+  expect(prepare).not.toHaveBeenCalled()
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-confirm-label="Create identity"]')!.click())
+  expect(prepare).toHaveBeenCalledOnce()
+  expect(dom.container.querySelector('[data-mesh-phase="identity"]')).not.toBeNull()
+  expect(useAppStore.getState().meshGatewayRuntimeId).toBeNull()
+  await act(async () => ready(owner))
+  await settled(() => dom.container.textContent?.includes('Using separate Mesh identity') ?? false)
+  expect(useAppStore.getState().meshGatewayRuntimeId).toBe(owner.runtimeId)
+  expect(dom.container.querySelector<HTMLInputElement>(guidedInput)?.value).toBe(gatewayCode)
+  expect(call.mock.calls.some(([method]) => method === 'settings.mesh.configure')).toBe(false)
+  await dom.render(null)
+  await dom.render(<Editor active join />)
+  await settled(() => dom.container.querySelector(guidedSubmit)?.textContent === 'Connect')
+  expect(prepare).toHaveBeenCalledOnce()
+  expect(call.mock.calls.some(([method, _input, context]) => method === 'settings.mesh.inspect' && context?.separateRuntimeId === owner.runtimeId)).toBe(true)
+  await clickRecovery('Use original identity')
+  await settled(() => Boolean(dom.container.querySelector('.mesh-join-identity-flag')))
+  expect(useAppStore.getState().meshGatewayRuntimeId).toBeNull()
+  expect(dom.container.querySelector<HTMLInputElement>(guidedInput)?.value).toBe(gatewayCode)
 })
 
 it('confirms original identity import before opening the picker and restores the same gateway draft', async () => {
@@ -231,7 +246,7 @@ it('Mesh shows the App recovery action before Host answers, and reopens setup af
     await ready()
     expect(choose.mock.calls).toEqual([[], []])
     expect(call.mock.calls.filter(([method]) => method === 'settings.mesh.inspect')).toHaveLength(2)
-    expect(dom.container.textContent).toContain('Connect to a gateway')
+    expect(dom.container.textContent).toContain('Connect this device upstream')
   } finally { read.mockRestore(); choose.mockRestore(); call.mockRestore() }
 })
 it('refreshing Mesh after the offline owner lease releases shows the App recovery action', async () => {
@@ -263,7 +278,7 @@ it.each(['restored', 'unchanged'] as const)('Mesh reopens setup when identity re
     expect(dom.container.textContent).toContain('Refresh Mesh')
     await act(async () => finish())
     await ready()
-    expect(dom.container.textContent).toContain('Connect to a gateway')
+    expect(dom.container.textContent).toContain('Connect this device upstream')
   } finally { read.mockRestore(); call.mockRestore() }
 })
 it('Mesh describes an unconfirmed local identity without asking for a different backup', async () => {
@@ -281,26 +296,22 @@ it('Mesh describes an unconfirmed local identity without asking for a different 
     expect(dom.container.textContent).toContain('IDENTITY_TARGET_UNCONFIRMED')
   } finally { read.mockRestore(); pick.mockRestore(); call.mockRestore() }
 })
-it('opens new identity setup independently of the original backup picker and keeps original actions visible', async () => {
-  const read = vi.spyOn(api.ui, 'readLocalRuntimeRecovery').mockResolvedValue({ state: 'needs-backup', code: 'IDENTITY_SOURCE_UNCONFIRMED' })
+it('keeps recovery in the wizard after failed preparation and exposes the same retry', async () => {
+  vi.spyOn(api.ui, 'readLocalRuntimeRecovery').mockResolvedValue({ state: 'needs-backup', code: 'IDENTITY_SOURCE_UNCONFIRMED' })
   const pick = vi.spyOn(api.ui, 'restoreLocalRuntimeIdentity')
-  const open = vi.spyOn(api.ui, 'openLocalIdentitySetup').mockRejectedValueOnce(Error('Setup window could not open'))
-    .mockResolvedValueOnce(undefined)
-  const call = vi.spyOn(api.mesh, 'call').mockRejectedValue(Error('The original Host is unavailable'))
-  try {
-    await dom.render(<Editor active onConnections={vi.fn()} />)
-    await settled(() => dom.container.textContent?.includes('Set up a new identity…') ?? false)
-    await clickRecovery('Set up a new identity…')
-    expect(open).not.toHaveBeenCalled()
-    await act(async () => document.querySelector<HTMLButtonElement>('[data-confirm-label="Create and open setup"]')!.click())
-    expect(dom.container.querySelector('.settings-inline-error')?.textContent).toContain('Setup window could not open')
-    await clickRecovery('Set up a new identity…')
-    await act(async () => document.querySelector<HTMLButtonElement>('[data-confirm-label="Create and open setup"]')!.click())
-    expect(open.mock.calls).toEqual([[], []])
-    expect(pick).not.toHaveBeenCalled()
-    expect(dom.container.textContent).toContain('Import original backup…')
-    expect(dom.container.textContent).toContain('Open saved connections')
-  } finally { read.mockRestore(); pick.mockRestore(); open.mockRestore(); call.mockRestore() }
+  const prepare = vi.spyOn(api.ui, 'prepareMeshIdentity').mockRejectedValue(Error('Separate identity could not be verified'))
+  vi.spyOn(api.mesh, 'call').mockRejectedValue(Error('The original Host is unavailable'))
+  await dom.render(<Editor active join />)
+  await settled(() => Boolean(dom.container.querySelector('.mesh-join-identity-flag')))
+  await clickRecovery('Create a new identity…')
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-confirm-label="Create identity"]')!.click())
+  expect(dom.container.querySelector('.settings-inline-error')?.textContent).toContain('Check it again')
+  await clickRecovery('Retry new identity…')
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-confirm-label="Create identity"]')!.click())
+  expect(prepare).toHaveBeenCalledTimes(2)
+  expect(pick).not.toHaveBeenCalled()
+  expect(useAppStore.getState().meshGatewayRuntimeId).toBeNull()
+  expect(dom.container.textContent).toContain('Import original backup…')
 })
 it('the original Settings section exposes Mesh and a real editor; saved connection identities keep their original route', async () => {
   inspectOnly(); expect(hostsSettingsModule.id).toBe('hosts'); expect(hostsSettingsModule.title).toBe('Mesh')

@@ -4,7 +4,9 @@ Uses the production SettingsPanel, Mesh components, theme and layout inside a pr
 
 Read docs/design/behavior/mesh.md and docs/design/presentation/settings-and-observation.md#mesh-网络工作面. Inspect actual configured network, selected route, dark/light, narrow view, failed new listener preserving previous observation, lower fields, endpoint offer and saved connections. Added first-use disabled, unavailable settings+network, and settings unavailable with authenticated network observed. Initial/unavailable include wide dark/light and narrow dark/light.
 
-Use capture.cjs with the private preview URL, absolute or relative private userData directory and an existing output directory. The script never starts/stops user Agents, modifies installed App configuration or installs a package. A screenshot/fixture is not proof of UI aesthetics; an independent Agent opens the full images and records approval. New visual code requires a fresh build and recapture. No animation is added by this change.
+Use capture.cjs with the private preview URL, absolute or relative private userData directory and an existing output directory. The script never starts/stops user Agents, modifies installed App configuration or installs a package. A screenshot/fixture is not proof of UI aesthetics; an independent Agent opens the full images and records approval. New visual code requires a fresh build and recapture.
+
+`--gateway-join` follows the original connection, confirmation, and in-place identity setup in wide and narrow Settings. The isolated identity receipt is controlled. The driver samples an active intermediate animation, checks the original gateway selection after the identity becomes ready, then emulates reduced motion and verifies the signal has no active animations. A real Host restart, configuration receipt, and identity fence are tested independently.
 
 ## Runtime Settings inputs
 
