@@ -70,7 +70,7 @@ app.whenReady().then(async()=>{try{
  }
  if(scope!=='geography'){
  await window.loadURL(url);await wait('[data-mesh-topology]');await delay(1100)
- assert.deepEqual(await evaluate("Array.from(document.querySelectorAll('.settings-nav-children[aria-label=\"Mesh\"] button')).map(e=>e.textContent.trim())"),['Manage gateways','Saved devices','Machine status'])
+ assert.deepEqual(await evaluate("Array.from(document.querySelectorAll('.settings-nav-children[aria-label=\"Mesh\"] button')).map(e=>e.textContent.trim())"),['Connect to gateway','Manage gateways','Saved devices','Machine status'])
  assert.equal(await evaluate("document.querySelectorAll('[data-cluster-host]').length"),6)
  assert.equal(await evaluate("Boolean(document.querySelector('[aria-label=\"Selected network object\"]'))"),false)
  await button('Connections');await wait('.mesh-explorer-edge path')

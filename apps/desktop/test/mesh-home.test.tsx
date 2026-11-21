@@ -33,7 +33,7 @@ it('the actual SettingsPanel opens a continuous Mesh homepage with saved connect
   await dom.render(<SettingsPanel initialSection="hosts" onClose={vi.fn()} />); await ready()
   expect(dom.container.querySelector('[data-mesh-home-view]')?.getAttribute('data-mesh-home-view')).toBe('paths')
   expect([...dom.container.querySelectorAll('.settings-nav-section[data-settings-group="cluster"] .settings-nav-items > button')].map(button => button.textContent)).toEqual(['Mesh', 'Node', 'Remote'])
-  expect([...dom.container.querySelectorAll('.settings-nav-children[aria-label="Mesh"] button')].map(button => button.textContent)).toEqual(['Manage gateways', 'Saved devices', 'Machine status'])
+  expect([...dom.container.querySelectorAll('.settings-nav-children[aria-label="Mesh"] button')].map(button => button.textContent)).toEqual(['Connect to gateway', 'Manage gateways', 'Saved devices', 'Machine status'])
   const map = dom.container.querySelector('[aria-label="Network relationship canvas"]')!
   expect(map).not.toBeNull()
   expect(map.closest('[hidden]')).toBeNull()
@@ -65,6 +65,28 @@ it('the actual SettingsPanel opens a continuous Mesh homepage with saved connect
   expect(dom.container.querySelector('[aria-label="Network scope"]')).toBeNull()
   expect(vi.mocked(api.mesh.call).mock.calls).toHaveLength(reads)
   expect(save).not.toHaveBeenCalled()
+})
+
+it('selects the gateway wizard in the sidebar and keeps the map and original draft on return', async () => {
+  useAppStore.setState({ meshGatewayCode: '' })
+  await dom.render(<SettingsPanel initialSection="hosts" onClose={vi.fn()} />)
+  await ready()
+  const item = (id: string) => `.settings-sidebar [data-settings-target="${id}"]`
+  const child = item('hosts:mesh-join'), parent = item('hosts')
+  await dom.click(child)
+  expect(dom.container.querySelector(child)?.getAttribute('aria-current')).toBe('page')
+  expect(dom.container.querySelector('.settings-section-picker')?.textContent).toBe('Connect to gateway')
+  expect(dom.container.querySelector<HTMLElement>('[data-mesh-view="join"]')?.hidden).toBe(false)
+  const draft = dom.container.querySelector<HTMLInputElement>('[aria-label="Gateway connection code"]')!
+  await input(draft, 'original partially entered gateway code')
+  await dom.click(parent)
+  expect(dom.container.querySelector(parent)?.getAttribute('aria-current')).toBe('page')
+  expect(dom.container.querySelector('[aria-label="Network relationship canvas"]')?.closest('[hidden]')).toBeNull()
+  await dom.click('.mesh-home-actions .primary-button')
+  expect(dom.container.querySelector(child)?.getAttribute('aria-current')).toBe('page')
+  expect(dom.container.querySelector('[aria-label="Gateway connection code"]')).toBe(draft)
+  expect(draft.value).toBe('original partially entered gateway code')
+  expect(vi.mocked(api.mesh.call).mock.calls.some(([method]) => method === 'settings.mesh.configure')).toBe(false)
 })
 
 it('a saved-device action reaches its exact original Host despite duplicate labels and neighboring reordering', async () => {

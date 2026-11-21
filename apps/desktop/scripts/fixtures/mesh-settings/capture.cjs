@@ -11,6 +11,33 @@ app.whenReady().then(async()=>{try{
  const openGateway=()=>evaluate(`document.querySelector('.settings-sidebar nav [data-settings-target="hosts:mesh-configuration"]')?.click()`)
  const paint=async()=>{await evaluate('document.fonts.ready');await delay(400)}
  const frame=async name=>{await paint();const file=name+'.png';await fs.writeFile(path.join(output,file),(await window.webContents.capturePage()).toPNG());receipt.frames.push(file)}
+ if (scenario === '--gateway-navigation') {
+   const until = async test => { for (let i=0;i<120;i++) { if (await evaluate(test)) return; await delay(50) }; throw Error(test) }
+   const child = '[data-settings-target="hosts:mesh-join"]'
+   const sidebar = `.settings-sidebar nav ${child}`
+   const pickerItem = `document.querySelector(${JSON.stringify(`.settings-section-menu ${child}`)})`
+   const click = selector => evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`)
+   await window.loadURL(url+'?scenario=initial')
+   await until(`document.querySelector(${JSON.stringify(sidebar)})?.checkVisibility() && document.querySelector('.mesh-explorer__canvas')?.checkVisibility()`)
+   await frame('mesh-map-and-gateway-navigation')
+   await click(sidebar)
+   await until(`document.querySelector(${JSON.stringify(sidebar)})?.getAttribute('aria-current') === 'page' && document.querySelector('.mesh-join-landing')?.checkVisibility()`)
+   await frame('gateway-wizard-sidebar-selected')
+   await click('.settings-sidebar nav [data-settings-target="hosts"]')
+   await until("document.querySelector('.mesh-explorer__canvas')?.checkVisibility()")
+   window.setContentSize(520,870)
+   await evaluate('meshFixture.theme("light")')
+   await until("document.querySelector('.settings-section-picker')?.checkVisibility()")
+   await evaluate("(() => { const picker = document.querySelector('.settings-section-picker'); picker.focus(); picker.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true})); })()")
+   await until(`${pickerItem}?.checkVisibility()`)
+   await evaluate(`${pickerItem}.scrollIntoView({block:'center'})`)
+   await frame('gateway-wizard-narrow-menu')
+   await evaluate(`${pickerItem}.click()`)
+   await until("document.querySelector('.settings-section-picker')?.textContent === 'Connect to gateway' && document.querySelector('.mesh-join-landing')?.checkVisibility()")
+   await frame('gateway-wizard-narrow-selected')
+   receipt.passed = true
+   return
+ }
  if (scenario === '--gateway-join') {
    const until = async test => { for (let i=0;i<120;i++) { if (await evaluate(test)) return; await delay(50) }; throw Error(test) }
    const codeField = 'document.querySelector(\'[aria-label="Gateway connection code"]\')'

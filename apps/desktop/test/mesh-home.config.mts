@@ -8,6 +8,7 @@ mkdirSync(evidence, { recursive: true })
 process.env.AGENTMUX_RESOURCE_LIBRARY_SECTION = 'hosts'
 const mutant = process.env.AGENTMUX_MESH_HOME_MUTANT
 const mutations: Record<string, [string, string, string]> = {
+  'unselected-gateway-wizard': ['MeshSettingsPane.tsx', "{ join: 'mesh-join', machines:", '{ machines:'],
   'wrong-home': ['MeshSettingsPane.tsx', "request?.field?.startsWith('mesh-') ? 'network' : 'paths'", "request?.field?.startsWith('mesh-') ? 'network' : 'network'"],
   'wrong-host': ['MeshSettingsPane.tsx', 'onConnections={openConnection}', 'onConnections={() => openConnection(props.config.hosts[0]!.id)}'],
   'unmount-editor': ['MeshSettingsPane.tsx', "mounted('connections') ? <HostSettingsPane", "view === 'connections' ? <HostSettingsPane"],
