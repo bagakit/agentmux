@@ -41,13 +41,15 @@ A new passing `goal plan review` receipt carries an `<amux>` note with the exact
 attempt and executor. As the independent reviewer, use `goal inspect --goal ID`
 to find the current Supervisor. Pass them the original receipt and keep your review role.
 
-As the current Supervisor, read the original plan and delegations to verify the
-current attempt and the collection of its original report. Confirm the executor's
-Host, Runtime, Session and Run. Check current assignments and authorized work across
-Goals, the original Agent status, and known pending work and input. Assign the next
-ready Ticket when appropriate. When the handoff is confirmed and no work remains,
-give the original executor the exact Goal, attempt and Run for `amux goal closeout`.
-The original owners check drafts and queued or in-flight input at closeout.
+As the current Supervisor, verify the current attempt, original collection and
+independent review. Check the executor's Host, Runtime, Session, current Run and
+other authorized work. Assign the next ready Ticket when appropriate. For a local
+temporary executor you created, run `amux goal closeout --goal ID --attempt OP
+--session SID --run RUN --operation-id STOP` once its review passes and it is idle.
+The owner checks the current exact Run, creation, any original startup resume,
+drafts and queued or in-flight input. Read the Stop receipt before reporting
+closeout. Record a retained reason against the original Goal and check it again
+when the corresponding duty or input changes.
 Keep the original Run and operation if any check or receipt is unknown. Only an authorized
 person or device can read the exact Stop receipt with
 `amux agent stop inspect --session SID --run RUN --operation-id OP`.
