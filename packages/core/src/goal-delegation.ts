@@ -9,7 +9,7 @@ import { parseDemandDispatch, parseDemandDispatches, runBoundDemandDispatch, typ
 import { parseFileReadParams, type FileReadParams } from './public-rpc-files.js'
 import { parseDemandDelegationIntent, parseDemandDelegations, parseDemandDelegationReportInput, parseDemandDelegationCollectionInput, parseGoalPlanPredecessors, sameGoalPlanPredecessors, validateDemandDelegationReport } from '@agentmux/demand/delegations'
 import { parseAlignment, parseGrounding } from '@agentmux/demand/goals'
-import { GOAL_PLAN_UNKNOWN_REASONS, matchesGoalPlanReviewInput, parseGoalPlanAssignment, type GoalPlanAssignment, parseGoalPlan, parseGoalPlanReviewInput, parseGoalPlanRevisionInput, type GoalPlan, type GoalPlanReviewInput, type GoalPlanRevisionInput, type GoalPlanState } from '@agentmux/demand/goal-plan'
+import { GOAL_PLAN_NODE_STATES, GOAL_PLAN_UNKNOWN_REASONS, matchesGoalPlanReviewInput, parseGoalPlanAssignment, type GoalPlanAssignment, parseGoalPlan, parseGoalPlanReviewInput, parseGoalPlanRevisionInput, type GoalPlan, type GoalPlanNodeState, type GoalPlanReviewInput, type GoalPlanRevisionInput, type GoalPlanState } from '@agentmux/demand/goal-plan'
 import { parseOwnerGoalPlanState } from './goal-plan-state.js'
 import type { DemandDelegation, DemandDelegationIntent, DemandDelegationReportInput, DemandDelegationCollectionInput } from '@agentmux/demand/delegations'
 import type { DemandGrounding } from '@agentmux/demand/goals'
@@ -18,7 +18,7 @@ import type { AgentMuxRun } from './types.js'
 import type { DurableAgentMuxMessage } from './agent-global-message-queue.js'
 import type { DispatchObservation } from './agent-handoff.js'
 import { AgentMuxError } from './errors.js'
-import { parseAgentStopReceipt } from './agent-stop-receipt.js'
+import { parseAgentStopInspection, parseAgentStopReceipt, type AgentMuxAgentStopInspection } from './agent-stop-receipt.js'
 import { parseGoalAddress, formatGoalTicketLink, type AmuxGoalAddress } from './sharing.js'
 import { demandExecutionReferences, parseDemandProgressInput, parseDemandProgressUpdates, type DemandProgress, type DemandProgressInput } from '@agentmux/demand/responsibility'
 import { parseGoalResponsibility, type GoalResponsibilityObservation } from './goal-responsibility.js'
@@ -36,10 +36,23 @@ export type GoalActivePlanResult = {
   goals: { goalId: string; goalUpdatedAt: number; nodes: (Omit<import('@agentmux/demand').GoalActiveNode, 'claim'> & { claimToken?: string })[] }[]
 }
 type GoalPlanNodeWrite = GoalPlanTarget & { nodeId: string; operationId: string }
-export type GoalCloseout = { goalId: string; attempt: string; agentSessionId: string; runId: string; operationId: string }
+export type GoalCloseout = { goalId: string; attempt: string; agentSessionId: string; runId: string; operationId: string; inspect?: true }
+export type GoalCloseoutContext = {
+  sourceMessageId: string
+  ticketId: string | null
+  reportReplyMessageId: string | null
+  collectionOperationId: string | null
+  handoff: 'unreported' | 'reported' | 'collected'
+  ticketState: GoalPlanNodeState | null
+  otherGoalWork: boolean | null
+  coreInput: 'clear' | 'pending' | 'other-work' | 'unknown'
+  desktopInput: 'clear' | 'draft' | 'pending' | 'unknown'
+}
 export type GoalCloseoutResult = GoalCloseout & (
   | { state: 'retained'; reason: 'handoff' | 'other-work' | 'draft' | 'pending' | 'unknown' }
-  | { state: 'stopped'; receipt: import('./agent-stop-receipt.js').AgentMuxAgentStopReceipt }
+  | { state: 'stopped'; receipt: import('./agent-stop-receipt.js').AgentMuxAgentStopReceipt; observations?: GoalCloseoutContext }
+  | { state: 'observed'; stop: AgentMuxAgentStopInspection; observations: GoalCloseoutContext; error?: { code: string; message: string } }
+  | { state: 'unknown'; observations: GoalCloseoutContext; error: { code: string; message: string } }
 )
 
 /** Goal owns business intent and reports; this port never owns a message queue. */
@@ -88,8 +101,10 @@ function id(value: unknown): string {
 }
 export function parseGoalDelegationParams<M extends GoalDelegationMethod>(method: M, value: unknown): GoalDelegationParamsMap[M] {
   if (method === 'goal.closeout') {
-    const p = record(value, ['goalId', 'attempt', 'agentSessionId', 'runId', 'operationId'])
-    return { goalId: id(p.goalId), attempt: id(p.attempt), agentSessionId: id(p.agentSessionId), runId: id(p.runId), operationId: id(p.operationId) } as GoalDelegationParamsMap[M]
+    const p = record(value, ['goalId', 'attempt', 'agentSessionId', 'runId', 'operationId', 'inspect'])
+    if (p.inspect !== undefined && p.inspect !== true) throw new AgentMuxError('Closeout inspect must be true when supplied.', 'INVALID_CONTROL_REQUEST')
+    return { goalId: id(p.goalId), attempt: id(p.attempt), agentSessionId: id(p.agentSessionId), runId: id(p.runId), operationId: id(p.operationId),
+      ...(p.inspect ? { inspect: true } : {}) } as GoalDelegationParamsMap[M]
   }
   if (method === 'goal.plan.active') {
     const p = record(value, ['goalId', 'view', 'expectedOwner'])
@@ -155,15 +170,33 @@ export function parseGoalDelegationParams<M extends GoalDelegationMethod>(method
 export function parseGoalDelegationRpcResult<M extends GoalDelegationMethod>(method: M, value: unknown, input: GoalDelegationParamsMap[M]): GoalDelegationResultMap[M] {
   if (method === 'goal.closeout') {
     const request = input as GoalCloseout
-    const p = record(value, [...Object.keys(request), 'state', 'reason', 'receipt'])
+    const p = record(value, [...Object.keys(request), 'state', 'reason', 'receipt', 'observations', 'stop', 'error'])
     const invalid = () => { throw new AgentMuxError('The original worker closeout result is unconfirmed.', 'CONTROL_PROTOCOL_ERROR') }
     if (Object.entries(request).some(([key, expected]) => p[key] !== expected)) return invalid()
-    if (p.state === 'retained' && p.receipt === undefined && ['handoff', 'other-work', 'draft', 'pending', 'unknown'].includes(String(p.reason)))
+    if (p.state === 'retained' && !request.inspect && p.receipt === undefined && p.stop === undefined && p.observations === undefined && p.error === undefined &&
+        ['handoff', 'other-work', 'draft', 'pending', 'unknown'].includes(String(p.reason)))
       return { ...request, state: p.state, reason: p.reason } as GoalDelegationResultMap[M]
-    if (p.state !== 'stopped' || p.reason !== undefined) return invalid()
-    const receipt = parseAgentStopReceipt(p.receipt, request)
-    if (receipt.expectedRun.runId !== request.runId || receipt.operationId !== request.operationId) return invalid()
-    return { ...request, state: p.state, receipt } as GoalDelegationResultMap[M]
+    const observations = p.observations === undefined ? undefined
+      : record(p.observations, ['sourceMessageId', 'ticketId', 'reportReplyMessageId', 'collectionOperationId', 'handoff', 'ticketState', 'otherGoalWork', 'coreInput', 'desktopInput'])
+    if (observations && (typeof observations.sourceMessageId !== 'string' || !observations.sourceMessageId ||
+        [observations.ticketId, observations.reportReplyMessageId, observations.collectionOperationId].some(value => value !== null && (typeof value !== 'string' || !value)) ||
+        !['unreported', 'reported', 'collected'].includes(String(observations.handoff)) ||
+        observations.ticketState !== null && !GOAL_PLAN_NODE_STATES.some(state => state === observations.ticketState) ||
+        observations.otherGoalWork !== null && typeof observations.otherGoalWork !== 'boolean' ||
+        !['clear', 'pending', 'other-work', 'unknown'].includes(String(observations.coreInput)) ||
+        !['clear', 'draft', 'pending', 'unknown'].includes(String(observations.desktopInput)))) return invalid()
+    const error = p.error === undefined ? undefined : record(p.error, ['code', 'message'])
+    if (error && (typeof error.code !== 'string' || typeof error.message !== 'string')) return invalid()
+    if (p.state === 'observed' && observations && p.receipt === undefined && p.reason === undefined) {
+      const stop = parseAgentStopInspection(p.stop, { agentSessionId: request.agentSessionId, expectedRun: { runId: request.runId }, operationId: request.operationId })
+      return { ...request, state: p.state, observations, stop, ...(error ? { error } : {}) } as GoalDelegationResultMap[M]
+    }
+    if (p.state === 'unknown' && observations && error && p.stop === undefined && p.receipt === undefined && p.reason === undefined)
+      return { ...request, state: p.state, observations, error } as GoalDelegationResultMap[M]
+    if (p.state !== 'stopped' || request.inspect || p.reason !== undefined || p.stop !== undefined || error) return invalid()
+    const receipt = parseAgentStopReceipt(p.receipt, observations ? { agentSessionId: request.agentSessionId } : request)
+    if (receipt.expectedRun.runId !== request.runId || !observations && receipt.operationId !== request.operationId) return invalid()
+    return { ...request, state: p.state, receipt, ...(observations ? { observations } : {}) } as GoalDelegationResultMap[M]
   }
   if (method === 'goal.plan.active') return parseGoalActivePlanResult(value, input as GoalActivePlanQuery) as GoalDelegationResultMap[M]
   const request = input as GoalDelegationParamsMap['goal.report']

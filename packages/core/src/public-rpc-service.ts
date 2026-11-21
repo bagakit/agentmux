@@ -476,7 +476,7 @@ const NATIVE_FIELDS = {
   'system.metrics.host-profile.capture': ['hostId', 'fence', 'processId', 'durationMs'],
   'goal.delegation.prepare': ['goalId', 'intent', 'materials'], 'goal.delegation.bind': ['goalId', 'intent'], 'goal.delegate': ['goalId', 'intent', 'materials'],
   'goal.report': ['goalId', 'operationId', 'sourceMessageId', 'report'], 'goal.collect': ['goalId', 'operationId', 'collection'], 'goal.delegations': ['goalId'],
-  'goal.closeout': ['goalId', 'attempt', 'agentSessionId', 'runId', 'operationId'],
+  'goal.closeout': ['goalId', 'attempt', 'agentSessionId', 'runId', 'operationId', 'inspect'],
   'goal.progress': ['goalId', 'progress'],
   'goal.patrol': ['goalId', 'operationId'],
   'goal.patrol.continue': ['goalId', 'patrolOperationId', 'operationId', 'expectedRunId'],

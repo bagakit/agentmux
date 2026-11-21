@@ -1,23 +1,13 @@
-import { AgentMuxError, sessionSemanticResumeSourceRuns, type AgentMuxAgentSession, type AgentMuxClient,
-  type AgentMuxRpcCallContext, type AgentMuxSpatialStateStore } from '@agentmux/core'
-import type { GoalCloseout, GoalCloseoutResult, GoalDelegationAuthority } from '@agentmux/core/goal-delegation'
+import { AgentMuxError, type AgentMuxClient, type AgentMuxRpcCallContext, type AgentMuxSpatialStateStore } from '@agentmux/core'
+import type { GoalCloseout, GoalCloseoutContext, GoalCloseoutResult, GoalDelegationAuthority } from '@agentmux/core/goal-delegation'
 import { runBoundDemandDispatch, type Demand, type DemandStore } from '@agentmux/demand'
 import { delegationWorkerHostId } from '@agentmux/demand/delegations'
-import { goalSupervisorHostWitnesses, goalSupervisorRuntimeWitnesses } from '@agentmux/demand/relations'
 import { hostGoalPlan } from './goal-projection.js'
+import { isGoalSupervisor } from './goal-supervisor-identity.js'
+import type { GoalRuntimePort } from './goal-runtime.js'
 
 type Retained = Extract<GoalCloseoutResult, { state: 'retained' }>
 type DesktopOccupation = 'clear' | 'draft' | 'pending' | 'unknown'
-
-function supervisorOwnsCloseout(goal: Demand, worker: AgentMuxAgentSession, authority: GoalDelegationAuthority): boolean {
-  const id = authority.actor.id
-  const creator = worker.creation?.createdBy
-  if (goal.supervisorSessionId !== id || creator?.owner.kind !== 'local' || creator.agentSessionId !== id) return false
-  const runtimes = goalSupervisorRuntimeWitnesses(goal, id)
-  if (runtimes.size) return runtimes.size === 1 && runtimes.has(authority.runtimeId!)
-  const hosts = goalSupervisorHostWitnesses(goal)
-  return hosts.length === 1 && hosts[0] === 'local'
-}
 
 function otherGoalWork(goals: readonly Demand[], input: GoalCloseout, sourceRuns: readonly string[], runtimeId: string | undefined): boolean {
   return goals.some(goal => {
@@ -46,6 +36,7 @@ function otherGoalWork(goals: readonly Demand[], input: GoalCloseout, sourceRuns
 export function createGoalWorkerCloseout(options: {
   demands: DemandStore
   client(): AgentMuxClient
+  runtime: Pick<GoalRuntimePort, 'resolveGoalAgent'>
   spatial?: AgentMuxSpatialStateStore
   desktopOccupation?(agentSessionId: string, runId: string, context: AgentMuxRpcCallContext,
     closeout?: { action: 'admit' | 'reconcile'; operationId: string }): Promise<DesktopOccupation>
@@ -54,15 +45,67 @@ export function createGoalWorkerCloseout(options: {
     const retain = (reason: Retained['reason']): Retained => ({ ...input, state: 'retained', reason })
     const caller = context.caller
     const self = authority.actor.id === input.agentSessionId
-    if (authority.actor.kind !== 'agent' || authority.hostId !== 'local' || !authority.runtimeId || !authority.runId || !caller ||
-        self && authority.runId !== input.runId)
+    if (authority.actor.kind !== 'agent' || authority.hostId !== 'local' || !authority.runtimeId || !authority.runId || !caller)
       throw new AgentMuxError('Closeout requires the original local worker or its current local Supervisor.', 'CONTROL_PERMISSION_DENIED')
     const client = options.client()
     const run = { runId: input.runId }
     // The Host checks occupation for this authorized action; draft contents stay at Desktop.
     const desktopContext: AgentMuxRpcCallContext = { transport: 'unix', ...(context.signal ? { signal: context.signal } : {}) }
-    let worker: AgentMuxAgentSession | undefined
-    let sourceRuns: readonly string[] = [input.runId]
+    const sourceRuns = [input.runId]
+    const goal = await options.demands.get(input.goalId)
+    const supervisor = goal?.supervisorSessionId
+    const supervisorId = typeof supervisor === 'string' ? supervisor : supervisor?.execution.agentSessionId
+    if (!self || input.inspect || supervisorId === authority.actor.id) {
+      const attempt = goal?.delegations?.find(item => item.operationId === input.attempt)
+      const authorized = goal && (supervisor && typeof supervisor !== 'string'
+        ? supervisor.execution.agentSessionId === authority.actor.id && supervisor.execution.runtimeId === authority.runtimeId
+        : await isGoalSupervisor(goal, authority, options.runtime))
+      if (!goal || !authorized || !attempt || attempt.workerAgentSessionId !== input.agentSessionId ||
+          delegationWorkerHostId(attempt) !== 'local' ||
+          attempt.runtimeIdentity && attempt.runtimeIdentity.workerRuntimeId !== authority.runtimeId)
+        throw new AgentMuxError('Closeout requires the current Supervisor and the exact Goal delegation worker.', 'CONTROL_PERMISSION_DENIED')
+      const stopIdentity = { agentSessionId: input.agentSessionId, expectedRun: run, operationId: input.operationId }
+      const observations: GoalCloseoutContext = {
+        sourceMessageId: attempt.sourceMessageId,
+        ticketId: attempt.planNodeId ?? null,
+        reportReplyMessageId: attempt.report?.replyMessageId ?? null,
+        collectionOperationId: attempt.collection?.operationId ?? null,
+        handoff: attempt.collection ? 'collected' : attempt.report ? 'reported' : 'unreported',
+        ticketState: attempt.planNodeId ? hostGoalPlan(goal).planState?.nodes.find(node => node.id === attempt.planNodeId)?.state ?? null : null,
+        otherGoalWork: null, coreInput: 'unknown', desktopInput: 'unknown',
+      }
+      if (!input.inspect) {
+        const otherRuns = input.runId === attempt.workerRunId ? sourceRuns : [input.runId, attempt.workerRunId]
+        // These are observations for the caller, never a precondition for its explicit Stop.
+        void options.demands.list().then(goals => { observations.otherGoalWork = otherGoalWork(goals, input, otherRuns, authority.runtimeId) }).catch(() => {})
+        void client.readAgentCloseoutInput(input.agentSessionId, run, attempt.sourceMessageId)
+          .then(result => { observations.coreInput = result.state }).catch(() => {})
+        void options.desktopOccupation?.(input.agentSessionId, input.runId, desktopContext)
+          .then(state => { observations.desktopInput = state }).catch(() => {})
+      }
+      let error: { code: string; message: string } | undefined
+      if (!input.inspect) {
+        context.signal?.throwIfAborted()
+        await context.assertCurrent?.()
+        try {
+          const receipt = await client.stopAgent(input.agentSessionId, run, { operationId: input.operationId })
+          return { ...input, state: 'stopped', receipt, observations: { ...observations } }
+        } catch (failure) {
+          error = { code: failure instanceof AgentMuxError ? failure.code : 'AGENT_STOP_FAILED',
+            message: failure instanceof Error ? failure.message : String(failure) }
+        }
+      }
+      try {
+        const stop = await client.inspectAgentStop(stopIdentity)
+        return { ...input, state: 'observed', stop, observations: { ...observations }, ...(stop.phase === 'retired' && stop.operationIdMatched || !error ? {} : { error }) }
+      } catch (failure) {
+        return { ...input, state: 'unknown', observations: { ...observations }, error: error ?? {
+          code: failure instanceof AgentMuxError ? failure.code : 'CONTROL_UNAVAILABLE',
+          message: failure instanceof Error ? failure.message : String(failure) } }
+      }
+    }
+    if (authority.runId !== input.runId)
+      throw new AgentMuxError('A worker can close only its own original Run.', 'CONTROL_PERMISSION_DENIED')
     const inspect = (goals: readonly Demand[]) => {
       const goal = goals.find(item => item.id === input.goalId)
       const attempt = goal?.delegations?.find(item => item.operationId === input.attempt)
@@ -70,27 +113,18 @@ export function createGoalWorkerCloseout(options: {
         ? hostGoalPlan(goal).planState?.nodes.find(node => node.id === attempt.planNodeId)
         : undefined
       if (!goal || !attempt?.planNodeId || !current || current.attempt?.delegationOperationId !== attempt.operationId ||
-          (current.state !== 'done' && (!self || current.state !== 'review')) || !sourceRuns.includes(attempt.workerRunId) ||
+          (current.state !== 'done' && current.state !== 'review') || attempt.workerRunId !== input.runId ||
           attempt.workerAgentSessionId !== input.agentSessionId || delegationWorkerHostId(attempt) !== 'local' ||
           !attempt.report?.delivery || attempt.report.delivery.authorRuntimeId !== authority.runtimeId ||
           !attempt.collection || attempt.collection.replyMessageId !== attempt.report.replyMessageId ||
           attempt.collection.collector.kind !== 'agent' || attempt.collection.collector.id !== goal.supervisorSessionId ||
-          goal.alignment?.revision !== attempt.alignmentRevision ||
-          (!self && (!worker || !supervisorOwnsCloseout(goal, worker, authority))))
+          goal.alignment?.revision !== attempt.alignmentRevision)
         return { reason: 'handoff' as const }
       if (otherGoalWork(goals, input, sourceRuns, authority.runtimeId)) return { reason: 'other-work' as const }
       return { attempt }
     }
     let core, collectionOperationId: string | undefined
     try {
-      if (!self) {
-        worker = (await client.readAgentSession(input.agentSessionId)) ?? undefined
-        if (!worker || worker.run.runId !== input.runId) return retain('unknown')
-        // Preserve an explicit user reopen. Only the original startup resume may
-        // carry a completed attempt's custody into this new Run.
-        if (!worker.reopenedFrom && worker.continuity?.trigger === 'startup')
-          sourceRuns = sessionSemanticResumeSourceRuns(worker)
-      }
       const first = inspect(await options.demands.list())
       if (first.reason) return retain(first.reason)
       const stop = await client.inspectAgentStop({ agentSessionId: input.agentSessionId, expectedRun: run, operationId: input.operationId })

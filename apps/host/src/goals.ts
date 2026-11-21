@@ -169,7 +169,7 @@ export function createHostGoals(options: {
       continue: (id, patrolId, op, run, context, authority) => patrol.continue(id, patrolId, op, run, context, authority),
       report: (id, patrolId, report, authority) => patrol.report(id, patrolId, report, authority), observe: goal => patrol.observe(goal) }, planOwner, workflowReview)
   delegations.closeout = createGoalWorkerCloseout({
-    demands, client: () => options.runtime().client, ...(options.spatial ? { spatial: options.spatial } : {}),
+    demands, runtime, client: () => options.runtime().client, ...(options.spatial ? { spatial: options.spatial } : {}),
     ...(options.desktopCloseoutOccupation ? { desktopOccupation: options.desktopCloseoutOccupation } : {}),
   })
   delegations.workflowBudget = async (goalId, intent) => {
