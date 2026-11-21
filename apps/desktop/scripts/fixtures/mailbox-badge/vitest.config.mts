@@ -1,20 +1,15 @@
 import { defineConfig } from 'vitest/config'
-import sourceConfig from '../settings-overview/vitest.config.mts'
+import owning from '../../../test/vitest.ui-controls-owning.config.mts'
 
-// Actual Core/Demand sources and normal setup; this slice does not certify compiled Runtime.
+// Keep independent mounted source tests on the same current package exports as Desktop.
+// Their historical business assertions are separate from this fixture's native geometry gate.
 export default defineConfig({
-  ...sourceConfig,
-  resolve: {
-    ...sourceConfig.resolve,
-    alias: [
-      { find: /^@agentmux\/client-ui\/components\/(.+)$/, replacement: new URL('../../../../../packages/client-ui/src/components/$1.tsx', import.meta.url).pathname },
-      { find: /^@agentmux\/client-ui\/platform$/, replacement: new URL('../../../../../packages/client-ui/src/platform.tsx', import.meta.url).pathname },
-      { find: /^@agentmux\/client-ui\/(.+)$/, replacement: new URL('../../../../../packages/client-ui/src/lib/$1.ts', import.meta.url).pathname },
-      ...(sourceConfig.resolve?.alias ?? [])
-    ]
-  },
+  ...owning,
   test: {
-    ...sourceConfig.test,
-    include: ['apps/desktop/test/session-mailbox.test.tsx', 'apps/desktop/test/session-mailbox-receipts.test.tsx']
+    ...owning.test,
+    include: [
+      'apps/desktop/test/session-mailbox.test.tsx',
+      'apps/desktop/test/session-mailbox-receipts.test.tsx'
+    ]
   }
 })
