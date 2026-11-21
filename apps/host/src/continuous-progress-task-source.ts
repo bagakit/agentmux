@@ -1,11 +1,14 @@
 import { renderAmuxProtocol } from '@agentmux/core/amux-protocol'
-import type { DemandAgentReference } from '@agentmux/demand/relations'
+import type { Demand } from '@agentmux/demand/types'
+import { currentGoalGrounding } from '@agentmux/demand/goal-grounding'
+import { goalPlanReviewState } from '@agentmux/demand/goals'
+import { currentGoalWorkStatus } from '@agentmux/demand/responsibility'
 import { execFile } from 'node:child_process'
 import { isAbsolute } from 'node:path'
 import { promisify } from 'node:util'
 import type { ContinuousProgressTaskSource } from '@agentmux/core'
-import { delegationWorkerHostId, type DemandDelegation } from '@agentmux/demand/delegations'
-import { projectGoalPlan, type GoalPlan, type GoalPlanProjection } from '@agentmux/demand/goal-plan'
+import { delegationWorkerHostId } from '@agentmux/demand/delegations'
+import { projectGoalPlan, type GoalPlanProjection } from '@agentmux/demand/goal-plan'
 
 const execute = promisify(execFile)
 export function validateContinuousProgressTaskSource(value: unknown): asserts value is ContinuousProgressTaskSource {
@@ -51,7 +54,8 @@ export async function readContinuousProgressTaskSource(source: ContinuousProgres
   throw new Error('Task source lifecycle is unconfirmed; manual input remains available.')
 }
 
-export type GoalProgressRecord = { id: string; title: string; description: string; status: string; sessionIds: DemandAgentReference[]; assigneeSessionIds: DemandAgentReference[]; supervisorSessionId: DemandAgentReference | null; alignment?: { revision: number; confirmedAt: number | null; criteria: Array<{ id: string; text: string }> }; plan?: GoalPlan; delegations?: DemandDelegation[] }
+export type GoalProgressRecord = Pick<Demand, 'id' | 'title' | 'description' | 'status' | 'sessionIds' | 'assigneeSessionIds' | 'supervisorSessionId' |
+  'alignment' | 'plan' | 'delegations' | 'dispatches' | 'progressUpdates' | 'patrols' | 'grounding' | 'acceptedGroundingSource'>
 export type GoalProgressReader = (goalId: string) => Promise<GoalProgressRecord | null>
 export type GoalProgressDecision = { action: 'continue' | 'pause' | 'stop'; reason: string; continuation?: string }
 
@@ -62,7 +66,10 @@ export function decideGoalProgressSource(source: Extract<ContinuousProgressTaskS
   if (goal.status === 'done' || goal.status === 'cancelled') return { action: 'stop', reason: prefix + goal.status + '; the Agent Run is kept.' }
   if (goal.status === 'blocked') return { action: 'pause', reason: prefix + 'blocked; review the original Goal.' }
   if (goal.alignment?.revision !== source.alignmentRevision || goal.alignment.confirmedAt === null) return { action: 'pause', reason: prefix + 'the original confirmed scope changed. Stop this loop before explicitly starting the new scope.' }
-  if (goal.plan) return decideGoalPlanProgress(prefix, goal.plan, goal.delegations ?? [], goal.alignment.criteria, source)
+  if (goal.plan) {
+    const projection = projectGoalPlan(goal.plan, goal.delegations ?? [], goal.alignment.criteria, undefined, goal.alignment.revision)
+    return decideGoalPlanProgress(prefix, goal, projection, source)
+  }
   return { action: 'continue', reason: prefix + `confirmed scope r${source.alignmentRevision}; source checked.` }
 }
 
@@ -71,15 +78,22 @@ export function decideGoalProgressSource(source: Extract<ContinuousProgressTaskS
  * are unknown (the Supervisor reconciles them from the original receipt); pause only when the
  * human must accept results or the plan needs a revision to move.
  */
-function decideGoalPlanProgress(prefix: string, plan: GoalPlan, delegations: readonly DemandDelegation[], criteria: Array<{ id: string; text: string }>, source: Extract<ContinuousProgressTaskSource, { kind: 'goal' }>): GoalProgressDecision {
-  const projection = projectGoalPlan(plan, delegations, criteria)
+function decideGoalPlanProgress(prefix: string, goal: GoalProgressRecord, projection: GoalPlanProjection, source: Extract<ContinuousProgressTaskSource, { kind: 'goal' }>): GoalProgressDecision {
   const named = (states: readonly string[]) => projection.nodes.filter(item => states.includes(item.state)).map(item => item.node.id)
   const open = { ready: named(['ready']), changes: named(['changes']), working: named(['working']), review: named(['review']), unknown: named(['unknown']) }
   const parts = Object.entries(open).filter(([, ids]) => ids.length).map(([state, ids]) => `${state}: ${ids.join(', ')}`)
-  const progress = `plan r${plan.revision} ${projection.done}/${projection.total} done`
+  const progress = `plan r${projection.revision} ${projection.done}/${projection.total} done`
   if (parts.length) return { action: 'continue', reason: `${prefix}${progress}; ${parts.join('; ')}.${open.unknown.length ? ' Reconcile unknown nodes from their original delegation receipts before acting on them.' : ''}`,
     continuation: goalPlanContinuation(source, projection) }
-  if (projection.total > 0 && projection.done === projection.total) return { action: 'pause', reason: `${prefix}${progress}; every node passed review. Waiting for a person to accept the Goal results.` }
+  if (projection.total > 0 && projection.done === projection.total) {
+    const status = currentGoalWorkStatus(goal, projection)
+    if (status === 'in_progress') return { action: 'continue', reason: `${prefix}${progress}; independent execution still needs attention. Inspect its original responsibility.` }
+    const state = goalPlanReviewState(status, goal.alignment, currentGoalGrounding(goal, projection))
+    const reason = state === 'awaiting-acceptance' ? 'Waiting for a person to accept the Goal results.'
+      : state === 'accepted' ? 'The current results have been accepted.'
+      : state === 'awaiting-report' ? 'Awaiting a Goal result report.' : 'The Goal result still needs evidence review.'
+    return { action: 'pause', reason: `${prefix}${progress}; ${reason}` }
+  }
   return { action: 'pause', reason: `${prefix}${progress}; remaining nodes wait on cancelled dependencies (${named(['waiting']).join(', ')}). Revise the plan to move them.` }
 }
 

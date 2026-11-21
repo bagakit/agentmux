@@ -125,6 +125,7 @@ export type Demand = {
   grounding?: DemandGrounding
   /** Original Goal report retained when a combined result is accepted. */
   acceptedGroundingSource?: DemandGrounding
+  acceptedResults?: DemandGrounding[]
   createdAt: number
   updatedAt: number
 }

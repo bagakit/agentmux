@@ -338,7 +338,12 @@ export function createHostGoals(options: {
       return { operation: req.operation, demand: await projectGoal(saved.demand), receipt: { demandId: goal.id, confirmedRevision: saved.demand.alignment!.revision, confirmedAt: saved.demand.alignment!.confirmedAt! } }
     }
     if (req.operation === 'demand.accept') {
-      const saved = await demands.acceptGrounding(goal.id, req.expectedAlignmentRevision, req.expectedSubmissionId, req.acceptGaps, req.finish)
+      const actor = context.principal
+      if (context.caller || !actor || actor.kind !== 'user' && actor.kind !== 'device' || !actor.id.trim())
+        throw new AgentMuxError('Goal result acceptance requires an authenticated person or device.', 'CONTROL_PERMISSION_DENIED')
+      await current(context)
+      const saved = await demands.acceptGrounding(goal.id, req.expectedAlignmentRevision, req.expectedSubmissionId, req.acceptGaps, req.finish,
+        req.unknownResults && { by: { kind: actor.kind, id: actor.id }, checks: req.unknownResults })
       return { operation: req.operation, demand: await projectGoal(saved.demand), receipt: { demandId: goal.id, alignmentRevision: saved.demand.grounding!.alignmentRevision, submissionId: saved.demand.grounding!.submissionId, acceptedAt: saved.demand.grounding!.acceptedAt!, acceptedWithGaps: saved.demand.grounding!.checks.some(check => check.outcome === 'gap') } }
     }
     if (req.operation === 'demand.delete') {

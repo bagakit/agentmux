@@ -6,6 +6,7 @@ import { parseDemandDispatch, parseDemandDispatchIntent, parseDemandDispatchRequ
 import { parseDemandDelegationRuntimeIdentity, type DemandDelegationRuntimeIdentity, parseDemandDelegationIntent, parseDemandDelegations, parseDemandDelegationReportInput, parseDemandDelegationCollectionInput, parseDemandDelegationCollector, sameDemandDelegationIntent, validateDemandDelegationReport,
   parseDemandDelegationAttentionInput, sameDemandDelegationAttention, delegationWorkerHostId, sameGoalPlanPredecessors,
   parseGoalWorkflowReviewer, parseGoalWorkflowReviewInput, type GoalWorkflowReviewer, type GoalWorkflowReviewInput,
+  parseDemandCloseoutObservation, type DemandCloseoutObservation,
   type GoalDeliveryScope, type DemandDelegation, type DemandDelegationIntent, type DemandDelegationReportInput, type DemandDelegationCollectionInput, type DemandDelegationCollector, type DemandDelegationAttentionInput } from './delegations.js'
 import { optionalDemandInputEpoch, parseDemandParticipations, parseDemandCreationOrigin, parseDemandParticipationSource, type DemandParticipationSource } from './collaboration.js'
 import { appendDemandContentReferences, parseDemandContentReferences } from './content-references.js'
@@ -47,7 +48,7 @@ import { assertGoalPlanKeepsRecordedNodes, currentGoalWorkflowDelivery, goalPlan
 import { assertIssuedGoalTicket, freezeGoalTicketDependencies, issueGoalTickets } from './goal-ticket-issuance.js'
 import type { GoalTicketProof, GoalTicketSigner } from './goal-ticket-proof.js'
 import { demandNameContext, parseDemandNameChange } from './demand-name-change.js'
-import { alignmentConfirmationIssue, deriveBoundGoalId, groundingAcceptanceIssue, parseAlignment, parseAlignmentProposal, parseGrounding, parseGroundingProposal, type DemandAlignmentConfirmer, type DemandAlignmentProposal, type DemandGroundingProposal } from './goals.js'
+import { alignmentConfirmationIssue, deriveBoundGoalId, groundingAcceptanceIssue, parseAcceptedGoalResults, parseAlignment, parseAlignmentProposal, parseGrounding, parseGroundingProposal, parseUnknownGoalResultDecision, type DemandAlignmentConfirmer, type DemandAlignmentProposal, type DemandGroundingProposal, type UnknownGoalResultDecision } from './goals.js'
 import { currentGoalGrounding, independentGoalGrounding } from './goal-grounding.js'
 
 const requireNative = createRequire(import.meta.url)
@@ -218,9 +219,10 @@ function parseDemand(value: unknown, label: string): Demand {
     'alignment',
     'grounding',
     'acceptedGroundingSource',
+    'acceptedResults',
     'createdAt',
     'updatedAt',
-  ], label, ['tags', 'plannedStartAt', 'targetAt', 'parentDemandId', 'phaseIndex', 'alignment', 'grounding', 'acceptedGroundingSource', 'contentRefs', 'assigneeSessionIds', 'supervisorSessionId', 'participations', 'creationOrigin', 'discussionOperationId', 'discussionIntent', 'discussionInputs', 'dispatches', 'delegations', 'progressUpdates', 'patrols', 'plan'])
+  ], label, ['tags', 'plannedStartAt', 'targetAt', 'parentDemandId', 'phaseIndex', 'alignment', 'grounding', 'acceptedGroundingSource', 'acceptedResults', 'contentRefs', 'assigneeSessionIds', 'supervisorSessionId', 'participations', 'creationOrigin', 'discussionOperationId', 'discussionIntent', 'discussionInputs', 'dispatches', 'delegations', 'progressUpdates', 'patrols', 'plan'])
   if (!isDemandStatus(record.status)) throw new Error(`${label}.status is invalid`)
   if (!isDemandPriority(record.priority)) throw new Error(`${label}.priority is invalid`)
   if (!Array.isArray(record.activities)) throw new Error(`${label}.activities must be an array`)
@@ -268,9 +270,18 @@ function parseDemand(value: unknown, label: string): Demand {
     ...(record.alignment === undefined ? {} : { alignment: parseAlignment(record.alignment) }),
     ...(record.grounding === undefined ? {} : { grounding: parseGrounding(record.grounding) }),
     ...(record.acceptedGroundingSource === undefined ? {} : { acceptedGroundingSource: parseGrounding(record.acceptedGroundingSource) }),
+    ...(record.acceptedResults === undefined ? {} : { acceptedResults: parseAcceptedGoalResults(record.acceptedResults) }),
     createdAt: timestamp(record.createdAt, `${label}.createdAt`),
     updatedAt: timestamp(record.updatedAt, `${label}.updatedAt`),
   }
+}
+
+function replaceGoalGrounding(goal: Demand, next: NonNullable<Demand['grounding']>) {
+  const previous = goal.grounding
+  if (previous?.acceptedAt != null && previous.submissionId !== next.submissionId &&
+      !goal.acceptedResults?.some(item => item.submissionId === previous.submissionId))
+    goal.acceptedResults = [...goal.acceptedResults ?? [], previous]
+  goal.grounding = next
 }
 
 function parseSnapshot(value: unknown, storePath: string): DemandStoreSnapshot {
@@ -585,7 +596,7 @@ export class DemandStore {
 
   /** Authenticated Host supplies author and observed basis; an editable phase cannot release work. */
   async recordProgress(id: string, raw: DemandProgressInput, authority: {
-    author: DemandProgress['author']; reportingRunId: string | null; basis: DemandResponsibilityBasis
+    author: DemandProgress['author']; reportingRunId: string | null; basis: DemandResponsibilityBasis; runtimeId?: string
   }): Promise<DemandReceipt> {
     const input = parseDemandProgressInput(raw), basis = parseDemandResponsibilityBasis(authority.basis)
     return this.mutate('responsibility.progress', snapshot => {
@@ -604,9 +615,12 @@ export class DemandStore {
     }, undefined, input.operationId)
   }
 
-  private applyProgress(goal: Demand, input: DemandProgressInput, authority: { author: DemandProgress['author']; reportingRunId: string | null; reviewForHuman?: boolean }, basis: DemandResponsibilityBasis): void {
+  private applyProgress(goal: Demand, input: DemandProgressInput, authority: { author: DemandProgress['author']; reportingRunId: string | null; reviewForHuman?: boolean; runtimeId?: string }, basis: DemandResponsibilityBasis): void {
     if (!demandExecutionReferences(goal).some(ref => sameDemandExecution(ref, input.execution))) this.rejectDelegation('Progress is not for an original execution in this Goal.')
-    const managerVerified = authority.author.kind !== 'agent' || authority.author.id === goal.supervisorSessionId
+    const supervisor = goal.supervisorSessionId
+    const { author, reportingRunId } = authority
+    const managerVerified = author.kind !== 'agent' || (typeof supervisor === 'string' ? author.id === supervisor :
+      author.id === supervisor?.execution.agentSessionId && authority.runtimeId === supervisor.execution.runtimeId)
     if (!managerVerified && ('target' in input.execution || authority.author.id !== input.execution.agentSessionId || authority.reportingRunId !== input.execution.runId))
       this.rejectDelegation('Only the original worker Run or current management authority can record this progress.')
     if (input.phase === 'waiting-external' && (basis.stateEnteredAt === null || !input.evidence.length))
@@ -624,7 +638,7 @@ export class DemandStore {
       if (!confirmed || sameDemandExecution(input.execution, input.handoffExecution)) this.rejectDelegation('Handoff requires a different already-bound original execution, not a proposed next Agent.')
     }
     const now = Date.now()
-    const updates = [...goal.progressUpdates ?? [], { ...input, ...authority, basis, managerVerified, recordedAt: now, ...(input.phase === 'review' ? { reviewForHuman: managerVerified && (authority.reviewForHuman ?? true) } : {}) }]
+    const updates = [...goal.progressUpdates ?? [], { ...input, author, reportingRunId, basis, managerVerified, recordedAt: now, ...(input.phase === 'review' ? { reviewForHuman: managerVerified && (authority.reviewForHuman ?? true) } : {}) }]
     if (input.handoffExecution && managerVerified && demandHandoffDestinations({ ...goal, progressUpdates: updates }).get(demandExecutionKey(input.execution)) === null)
       this.rejectDelegation('Accepted handoffs cannot form a cycle or lose the actual responsible execution.')
     goal.progressUpdates = updates
@@ -718,12 +732,15 @@ export class DemandStore {
         if (update.expectedScope !== patrol.expectedScope || !patrol.executions.some(ref => sameDemandExecution(ref, update.execution))) this.rejectDelegation('Inspection progress must name this patrol’s exact original execution scope.')
         if (snapshot.demands.some(g => g.progressUpdates?.some(u => u.operationId === update.operationId))) this.rejectDelegation('This inspection progress operation was already used. Keep the original declaration.')
       }
-      const applied = demandPatrolScope(goal, patrol.purpose) === patrol.expectedScope && goal.supervisorSessionId === author.agentSessionId && goal.grounding?.acceptedAt == null
+      const applied = demandPatrolScope(goal, patrol.purpose) === patrol.expectedScope && goal.supervisorSessionId === author.agentSessionId && currentGoalGrounding(goal)?.acceptedAt == null
       if (applied && report.nextOwner.kind === 'agent' && report.nextOwner.agentSessionId !== goal.supervisorSessionId &&
         !demandExecutionReferences(goal).some(ref => !('target' in ref) && ref.agentSessionId === report.nextOwner.agentSessionId)) this.rejectDelegation('The next responsible Agent must be bound to this original Goal.')
       const now = Date.now()
       if (applied) {
-        if (report.grounding) goal.grounding = { ...report.grounding, submissionId: mintObjectId(), acceptedAt: null }
+        if (report.grounding) {
+          replaceGoalGrounding(goal, { ...report.grounding, submissionId: mintObjectId(), acceptedAt: null })
+          delete goal.acceptedGroundingSource
+        }
         const grounding = currentGoalGrounding(goal)
         for (const declared of report.progress) {
           const update = declared.phase === 'review' && !declared.groundingSubmissionId && grounding ? { ...declared, groundingSubmissionId: grounding.submissionId } : declared
@@ -1030,6 +1047,10 @@ export class DemandStore {
       }
       const changedNodes = appending ? issued.nodes.map(node => node.id) : goalPlanChangedNodes(current?.nodes ?? [], issued.nodes)
       const savedNodes = appending ? [...(current?.nodes ?? []), ...issued.nodes] : issued.nodes
+      if (!current?.nodes.length && savedNodes.length && demand.grounding?.acceptedAt != null) {
+        const { unknownDecision: _decision, ...originalReport } = demand.grounding
+        demand.acceptedGroundingSource = { ...originalReport, acceptedAt: null }
+      }
       demand.plan = { revision: next, alignmentRevision: revision.alignmentRevision, nodes: clone(savedNodes), reviews: current?.reviews ?? [],
         history: [...(current?.history ?? []), { operationId: revision.operationId, revision: next, author, revisedAt: now, requestHash, ...(changedNodes.length ? { changedNodes } : {}),
           ...(issued.createdTickets.length ? { createdTickets: issued.createdTickets } : {}), ...(issued.proposals.length ? { proposals: issued.proposals } : {}) }] }
@@ -1268,6 +1289,21 @@ export class DemandStore {
     }, undefined, report.operationId)
   }
 
+  async freezeCloseoutObservation(id: string, attemptId: string, value: DemandCloseoutObservation): Promise<DemandReceipt> {
+    const observation = parseDemandCloseoutObservation(value)
+    return this.mutate('closeout.observe', snapshot => {
+      const goal = findDemand(snapshot, id, this.storePath), attempt = this.findDelegation(goal, attemptId)
+      const previous = attempt.closeoutObservations?.find(item => item.operationId === observation.operationId)
+      if (previous?.runId === observation.runId) return { unchanged: goal }
+      if (snapshot.demands.some(goal => goal.delegations?.some(entry => entry.closeoutObservations?.some(item =>
+        item.operationId === observation.operationId && entry.workerAgentSessionId === attempt.workerAgentSessionId))))
+        this.rejectDelegation('The original Closeout observation belongs to another operation scope.')
+      attempt.closeoutObservations = [...attempt.closeoutObservations ?? [], observation]
+      validateNewDemand(goal, this.storePath)
+      return goal
+    }, undefined, observation.operationId)
+  }
+
   /** Explicit collection proposes results; it never supplies human acceptance. */
   async collectDelegationReport(id: string, delegationOperationId: string, input: DemandDelegationCollectionInput, admittedCollector: DemandDelegationCollector, workflowReviewer?: GoalWorkflowReviewer): Promise<DemandReceipt> {
     const request = parseDemandDelegationCollectionInput(input), collector = parseDemandDelegationCollector(admittedCollector)
@@ -1314,7 +1350,7 @@ export class DemandStore {
           }) }
         const current = demand.grounding
         if (!current || JSON.stringify({ alignmentRevision: current.alignmentRevision, summary: current.summary, checks: current.checks }) !== JSON.stringify(proposal))
-          demand.grounding = { ...proposal, submissionId: mintObjectId(), acceptedAt: null }
+          replaceGoalGrounding(demand, { ...proposal, submissionId: mintObjectId(), acceptedAt: null })
         entry.collection.groundingSubmissionId = demand.grounding!.submissionId
       }
       demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
@@ -1449,7 +1485,7 @@ export class DemandStore {
           const matches = (saved: Demand['grounding']) => saved && isDeepStrictEqual(proposal,
             { alignmentRevision: saved.alignmentRevision, summary: saved.summary, checks: saved.checks })
           if (!matches(demand.grounding) && !matches(demand.acceptedGroundingSource)) {
-            demand.grounding = { ...proposal, submissionId: mintObjectId(), acceptedAt: null }
+            replaceGoalGrounding(demand, { ...proposal, submissionId: mintObjectId(), acceptedAt: null })
             delete demand.acceptedGroundingSource
           }
         }
@@ -1587,7 +1623,9 @@ export class DemandStore {
   }
 
   /** Acceptance binds the exact result shown to the user; retaining gaps is a distinct choice. */
-  async acceptGrounding(id: string, expectedAlignmentRevision: number, expectedSubmissionId: string, acceptGaps = false, finish = false): Promise<DemandReceipt> {
+  async acceptGrounding(id: string, expectedAlignmentRevision: number, expectedSubmissionId: string, acceptGaps = false, finish = false,
+    unknown?: UnknownGoalResultDecision): Promise<DemandReceipt> {
+    const decision = unknown && parseUnknownGoalResultDecision(unknown)
     return this.mutate('accept-grounding', snapshot => {
       const demand = findDemand(snapshot, id, this.storePath)
       const grounding = currentGoalGrounding(demand)
@@ -1596,15 +1634,22 @@ export class DemandStore {
       }
       if (typeof acceptGaps !== 'boolean') throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'Accepting with gaps requires an explicit boolean choice.')
       if (typeof finish !== 'boolean') throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'Finishing a goal requires an explicit boolean choice.')
-      const issue = groundingAcceptanceIssue(demand.alignment, grounding, acceptGaps)
+      if (decision && !finish)
+        throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'An unknown result disposition requires explicitly finishing this Goal.')
+      if (grounding.acceptedAt !== null && !isDeepStrictEqual(decision?.checks, grounding.unknownDecision?.checks))
+        throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'The original accepted decision is frozen. Read the original Goal result.')
+      const issue = groundingAcceptanceIssue(demand.alignment, grounding, acceptGaps, decision?.checks)
       if (issue) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, issue)
+      if (grounding.acceptedAt !== null && (!finish || demand.status === 'done')) return { unchanged: demand }
       if (grounding.acceptedAt === null) {
         const acceptedAt = Date.now()
         const original = independentGoalGrounding(demand)
         delete demand.acceptedGroundingSource
         if (original && original.submissionId !== grounding.submissionId) demand.acceptedGroundingSource = original
-        demand.grounding = { ...grounding, acceptedAt }
-        demand.activities.push({ id: mintObjectId(), kind: 'results-accepted', message: acceptGaps ? 'User accepted these results while retaining the reported gaps.' : 'User accepted these results.', createdAt: acceptedAt, actorId: null })
+        replaceGoalGrounding(demand, parseGrounding({ ...grounding, acceptedAt, ...(decision ? { unknownDecision: decision } : {}) }))
+        const message = decision ? 'User closed this Goal with explicitly recorded unverified results.' :
+          acceptGaps ? 'User accepted these results while retaining the reported gaps.' : 'User accepted these results.'
+        demand.activities.push({ id: mintObjectId(), kind: 'results-accepted', message, createdAt: acceptedAt, actorId: decision?.by.id ?? null })
       }
       if (finish && demand.status !== 'done') {
         demand.status = 'done'

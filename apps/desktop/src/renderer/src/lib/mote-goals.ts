@@ -1,4 +1,4 @@
-import { groundingAcceptanceIssue } from '@agentmux/demand/goals'
+import { isCurrentGroundingAccepted } from '@agentmux/demand/goals'
 import { demandAgentReferenceKey, mergeDemandAgentReferences, type DemandSpaceMemberReference } from '@agentmux/demand/relations'
 import type { DemandContentReference } from '@agentmux/demand'
 import { spatialAgentOpenRecord, spatialAgentAssociationRecord, type AgentMuxSpatialGraph } from '@agentmux/core/spatial-graph'
@@ -208,7 +208,7 @@ export function moteCurrentGoals(goals: readonly DemandRecord[]): DemandRecord[]
   for (const goal of goals) {
     if (goal.status === 'cancelled') continue
     const rows = goalDelegationRows(goal).filter(row => !isHistoricalGoalDelegation(row))
-    if (goal.status === 'done' && goal.grounding?.acceptedAt != null && groundingAcceptanceIssue(goal.alignment, goal.grounding, true) === null &&
+    if (goal.status === 'done' && isCurrentGroundingAccepted(goal.alignment, goal.grounding) &&
         rows.every(row => row.state === 'accepted')) continue
     const priority = goal.status === 'blocked' || rows.some(row => row.state === 'report' || row.state === 'exited' || row.state === 'question') ? 0
       : goal.status === 'in_review' || goal.grounding?.acceptedAt === null || !goal.alignment || goal.alignment.confirmedAt === null ? 1 : 2

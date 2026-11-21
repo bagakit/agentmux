@@ -1,13 +1,29 @@
 import { AgentMuxError, type AgentMuxClient, type AgentMuxRpcCallContext, type AgentMuxSpatialStateStore } from '@agentmux/core'
-import type { GoalCloseout, GoalCloseoutContext, GoalCloseoutResult, GoalDelegationAuthority } from '@agentmux/core/goal-delegation'
+import type { GoalCloseout, GoalCloseoutResult, GoalDelegationAuthority } from '@agentmux/core/goal-delegation'
 import { runBoundDemandDispatch, type Demand, type DemandStore } from '@agentmux/demand'
-import { delegationWorkerHostId } from '@agentmux/demand/delegations'
+import { delegationWorkerHostId, type DemandDelegation, type GoalCloseoutContext } from '@agentmux/demand/delegations'
 import { hostGoalPlan } from './goal-projection.js'
 import { isGoalSupervisor } from './goal-supervisor-identity.js'
 import type { GoalRuntimePort } from './goal-runtime.js'
 
 type Retained = Extract<GoalCloseoutResult, { state: 'retained' }>
-type DesktopOccupation = 'clear' | 'draft' | 'pending' | 'unknown'
+type DesktopOccupation = GoalCloseoutContext['desktopInput']
+const closeoutObservationBudgetMs = 250
+
+async function withinObservationBudget<T>(work: () => Promise<T>): Promise<T | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([work(), new Promise<undefined>(resolve => {
+      timer = setTimeout(resolve, closeoutObservationBudgetMs)
+    })])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+function capturedCloseout(attempt: DemandDelegation | undefined, input: GoalCloseout) {
+  return attempt?.closeoutObservations?.find(item => item.operationId === input.operationId && item.runId === input.runId)?.observations
+}
 
 function otherGoalWork(goals: readonly Demand[], input: GoalCloseout, sourceRuns: readonly string[], runtimeId: string | undefined): boolean {
   return goals.some(goal => {
@@ -65,31 +81,46 @@ export function createGoalWorkerCloseout(options: {
           attempt.runtimeIdentity && attempt.runtimeIdentity.workerRuntimeId !== authority.runtimeId)
         throw new AgentMuxError('Closeout requires the current Supervisor and the exact Goal delegation worker.', 'CONTROL_PERMISSION_DENIED')
       const stopIdentity = { agentSessionId: input.agentSessionId, expectedRun: run, operationId: input.operationId }
-      const observations: GoalCloseoutContext = {
-        sourceMessageId: attempt.sourceMessageId,
-        ticketId: attempt.planNodeId ?? null,
-        reportReplyMessageId: attempt.report?.replyMessageId ?? null,
-        collectionOperationId: attempt.collection?.operationId ?? null,
-        handoff: attempt.collection ? 'collected' : attempt.report ? 'reported' : 'unreported',
-        ticketState: attempt.planNodeId ? hostGoalPlan(goal).planState?.nodes.find(node => node.id === attempt.planNodeId)?.state ?? null : null,
-        otherGoalWork: null, coreInput: 'unknown', desktopInput: 'unknown',
-      }
-      if (!input.inspect) {
-        const otherRuns = input.runId === attempt.workerRunId ? sourceRuns : [input.runId, attempt.workerRunId]
-        // These are observations for the caller, never a precondition for its explicit Stop.
-        void options.demands.list().then(goals => { observations.otherGoalWork = otherGoalWork(goals, input, otherRuns, authority.runtimeId) }).catch(() => {})
-        void client.readAgentCloseoutInput(input.agentSessionId, run, attempt.sourceMessageId)
-          .then(result => { observations.coreInput = result.state }).catch(() => {})
-        void options.desktopOccupation?.(input.agentSessionId, input.runId, desktopContext)
-          .then(state => { observations.desktopInput = state }).catch(() => {})
-      }
+      let observations = capturedCloseout(attempt, input)
+      let observationIssue = observations ? undefined : 'No original pre-Stop observation was recorded for this operation.'
+      const observation = () => ({ ...(observations ? { observations } : {}), ...(observationIssue ? { observationIssue } : {}) })
       let error: { code: string; message: string } | undefined
       if (!input.inspect) {
+        if (!observations) {
+          try {
+            const original = await withinObservationBudget(() => client.inspectAgentStop(stopIdentity))
+            if (original?.phase === 'not-requested') {
+              const sample: GoalCloseoutContext = {
+                capturedAt: Date.now(), sourceMessageId: attempt.sourceMessageId, ticketId: attempt.planNodeId ?? null,
+                reportReplyMessageId: attempt.report?.replyMessageId ?? null, collectionOperationId: attempt.collection?.operationId ?? null,
+                handoff: attempt.collection ? 'collected' : attempt.report ? 'reported' : 'unreported',
+                ticketState: attempt.planNodeId ? hostGoalPlan(goal).planState?.nodes.find(node => node.id === attempt.planNodeId)?.state ?? null : null,
+                otherGoalWork: null, coreInput: 'unknown', desktopInput: 'unknown',
+              }
+              const otherRuns = input.runId === attempt.workerRunId ? sourceRuns : [input.runId, attempt.workerRunId]
+              await withinObservationBudget(() => Promise.allSettled([
+                options.demands.list().then(goals => { sample.otherGoalWork = otherGoalWork(goals, input, otherRuns, authority.runtimeId) }),
+                client.readAgentCloseoutInput(input.agentSessionId, run, attempt.sourceMessageId).then(result => { sample.coreInput = result.state }),
+                options.desktopOccupation?.(input.agentSessionId, input.runId, desktopContext)?.then(state => { sample.desktopInput = state }),
+              ]))
+              // Promise callbacks that finish after the sampling window cannot change this receipt.
+              const frozen = { ...sample, capturedAt: Date.now() }
+              const saved = await withinObservationBudget(() => options.demands.freezeCloseoutObservation(input.goalId, input.attempt,
+                { operationId: input.operationId, runId: input.runId, observations: frozen }))
+              observations = capturedCloseout(saved?.demand.delegations?.find(item => item.operationId === input.attempt), input)
+              observationIssue = observations ? undefined : 'The original pre-Stop observation save is unconfirmed.'
+            }
+          } catch {
+            observationIssue = 'The original pre-Stop observation could not be confirmed.'
+          }
+        }
         context.signal?.throwIfAborted()
         await context.assertCurrent?.()
         try {
           const receipt = await client.stopAgent(input.agentSessionId, run, { operationId: input.operationId })
-          return { ...input, state: 'stopped', receipt, observations: { ...observations } }
+          if (receipt.operationId !== input.operationId)
+            return { ...input, state: 'stopped', receipt, observationIssue: 'Core returned a different original Stop operation. Inspect that operation for its observations.' }
+          return { ...input, state: 'stopped', receipt, ...observation() }
         } catch (failure) {
           error = { code: failure instanceof AgentMuxError ? failure.code : 'AGENT_STOP_FAILED',
             message: failure instanceof Error ? failure.message : String(failure) }
@@ -97,9 +128,12 @@ export function createGoalWorkerCloseout(options: {
       }
       try {
         const stop = await client.inspectAgentStop(stopIdentity)
-        return { ...input, state: 'observed', stop, observations: { ...observations }, ...(stop.phase === 'retired' && stop.operationIdMatched || !error ? {} : { error }) }
+        return { ...input, state: 'observed', stop,
+          ...(stop.operationIdMatched === false && stop.phase !== 'not-requested'
+            ? { observationIssue: 'Core reports a different original Stop operation.' } : observation()),
+          ...(stop.phase === 'retired' && stop.operationIdMatched || !error ? {} : { error }) }
       } catch (failure) {
-        return { ...input, state: 'unknown', observations: { ...observations }, error: error ?? {
+        return { ...input, state: 'unknown', ...observation(), error: error ?? {
           code: failure instanceof AgentMuxError ? failure.code : 'CONTROL_UNAVAILABLE',
           message: failure instanceof Error ? failure.message : String(failure) } }
       }

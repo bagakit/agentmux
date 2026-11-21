@@ -383,10 +383,9 @@ export function GoalPlanGraph({ demand, projection: provided, planLink, planning
   const reviewNoticeKey = JSON.stringify([demand.id, reviewKey])
   const { progress } = projection
   const accepted = demand.status === 'done' && isCurrentGroundingAccepted(demand.alignment, demand.grounding)
-  const review = demand.status === 'done' || demand.status === 'cancelled' ? undefined
-    : goalPlanReviewState(progress, demand.alignment, demand.grounding)
+  const review = goalPlanReviewState(demand.status, demand.alignment, demand.grounding)
   const finishState = demand.status === 'cancelled' ? 'Cancelled' : demand.status !== 'done' ? review ? planFinishLabels[review] : 'Pending'
-    : !accepted ? 'Unverified' : demand.grounding?.checks.some(check => check.outcome === 'gap') ? 'Closed with gaps' : 'Succeeded'
+    : !accepted || demand.grounding?.unknownDecision ? 'Unverified' : demand.grounding?.checks.some(check => check.outcome === 'gap') ? 'Closed with gaps' : 'Succeeded'
   const FinishIcon = finishIcons[finishState]
   return <section className={`goal-plan${wholeGoal || progress ? '' : ' goal-plan--unavailable'}`} aria-label="Goal plan" data-goal-plan-revision={projection.revision ?? undefined}>
     <div className="goals-section-heading">

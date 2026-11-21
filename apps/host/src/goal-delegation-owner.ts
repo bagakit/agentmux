@@ -344,7 +344,7 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
     const goal = await this.demands.get(input.goalId)
     if (!goal) throw new AgentMuxError('The original Goal is unavailable. Original Sessions and input remain available.', 'CONTROL_UNAVAILABLE')
     const quiet = replaySavedReceipt || method === 'goal.plan.assignment' || method === 'goal.plan.claim' || method === 'goal.delegation.prepare' || method === 'goal.plan' || method === 'goal.plan.revise' || method === 'goal.plan.review'
-    const plan = hostGoalResult(goal, owner)
+    const { status, ...plan } = hostGoalResult(goal, owner)
     const reviewing = new Set(plan.planState?.nodes.filter(node => node.state === 'review').map(node => node.attempt?.delegationOperationId))
     const observations = quiet ? undefined
       : await Promise.all((goal.delegations ?? []).map(delegation => this.observeDelegation(input.goalId, delegation, context, authority, goal, reviewing.has(delegation.operationId))))
@@ -354,7 +354,7 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
     const ticketLinks = address && goal.plan ? goal.plan.nodes.map(node => formatGoalTicketLink(goal.id, address, node.id)) : undefined
     const result: GoalDelegationResult = { ...(address && ticketLinks ? { address, ticketLinks } : {}), goalId: goal.id, goalUpdatedAt: goal.updatedAt, delegations: goal.delegations ?? [], ...plan,
       ...(passRecorded ? { passRecorded: true } : {}),
-      goalState: { status: goal.status, supervisorSessionId: goal.supervisorSessionId, ...(goal.alignment ? { alignment: goal.alignment } : {}) },
+      goalState: { status, supervisorSessionId: goal.supervisorSessionId, ...(goal.alignment ? { alignment: goal.alignment } : {}) },
       ...(startObservations ? { dispatches: goal.dispatches ?? [], startObservations } : {}),
       ...(observations ? { observations } : {}),
       ...(goal.progressUpdates ? { progressUpdates: goal.progressUpdates } : {}),

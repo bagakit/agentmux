@@ -421,9 +421,10 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
         }
       }
       if (request.operation === 'demand.accept') {
-        const goal = actual.demand as { status: string; alignment?: { revision: number }; grounding?: { alignmentRevision: number; submissionId: string; acceptedAt: number; checks: { outcome: string }[] } }
+        const goal = actual.demand as AgentMuxDemand
         const receipt = actual.receipt as Record<string, unknown>
         if (receipt.alignmentRevision !== request.expectedAlignmentRevision || receipt.submissionId !== request.expectedSubmissionId || goal.alignment?.revision !== request.expectedAlignmentRevision || goal.grounding?.alignmentRevision !== request.expectedAlignmentRevision || goal.grounding.submissionId !== request.expectedSubmissionId || goal.grounding.acceptedAt !== receipt.acceptedAt || !(Number(receipt.acceptedAt) > 0) || receipt.acceptedWithGaps !== goal.grounding.checks.some(check => check.outcome === 'gap') || receipt.acceptedWithGaps === true && !request.acceptGaps || request.finish === true && goal.status !== 'done') fail()
+        if (JSON.stringify(goal.grounding?.unknownDecision?.checks) !== JSON.stringify(request.unknownResults)) fail()
       }
       if (actual.goalContinuations && (actual.goalContinuations as import('./continuous-progress-scheduler.js').ContinuousProgressLoop[]).some(loop => loop.taskSource?.kind !== 'goal' || loop.taskSource.goalId !== request.demandId)) fail()
       if (request.operation === 'demand.start' && Boolean(request.continuation) !== Boolean(actual.continuation)) fail()

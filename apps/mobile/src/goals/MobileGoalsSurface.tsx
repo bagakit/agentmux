@@ -268,7 +268,11 @@ function GoalDetail({ goalId, goal, factScope, presented, decisions, client, con
         {(currentReport ? alignment?.criteria : [])?.filter(criterion => !grounding.checks.some(check => check.criterionId === criterion.id)).map(criterion => <p key={criterion.id}>缺少结果检查：{criterion.text}</p>)}
         <ul>{grounding.checks.map(check => <li key={check.criterionId}><strong>{currentReport ? alignment?.criteria.find(criterion => criterion.id === check.criterionId)?.text ?? check.criterionId : `旧报告标准 ${check.criterionId}`}</strong><p>{mobileGoalOutcome[check.outcome]}</p><p>{check.note}</p>
           <MobileGoalEvidence evidence={check.evidence} client={client} copyText={copyText} />{!check.evidence.length && <p>暂无定位证据。</p>}
-        </li>)}</ul><p>{grounding.acceptedAt === null ? '尚未验收。' : withMobileTime(currentReport ? '已验收' : '旧报告曾通过验收，当前结果尚未验收', grounding.acceptedAt)}</p>
+        </li>)}</ul><p>{grounding.acceptedAt === null ? '尚未验收。' : withMobileTime(
+          grounding.unknownDecision ? '结案时保留未核实结果' : currentReport ? '已验收' : '旧报告曾通过验收，当前结果尚未验收', grounding.acceptedAt)}</p>
+        {grounding.unknownDecision && <><h4>结案原因</h4><ul>{grounding.unknownDecision.checks.map(check => <li key={check.criterionId}>
+          <strong>{currentReport ? alignment?.criteria.find(item => item.id === check.criterionId)?.text ?? check.criterionId : check.criterionId}</strong><p>{check.reason}</p>
+        </li>)}</ul></>}
       </> : <p>{goal.status === 'done' ? '工作状态已完成，结果尚未核验。' : '尚无结果报告。'}</p>}
     </section>
     {children}

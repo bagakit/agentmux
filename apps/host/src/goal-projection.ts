@@ -1,5 +1,6 @@
 import { formatGoalAddress, type AmuxGoalAddress } from '@agentmux/core/sharing'
 import { currentGoalGrounding } from '@agentmux/demand/goal-grounding'
+import { currentGoalWorkStatus } from '@agentmux/demand/responsibility'
 import { goalPlanState, projectGoalPlan, type GoalPlanOwner } from '@agentmux/demand/goal-plan'
 import type { Demand } from '@agentmux/demand/types'
 import type { AgentMuxDemand } from '@agentmux/core/control'
@@ -15,16 +16,21 @@ function hostPlanProjection(goal: Pick<Demand, 'id' | 'delegations' | 'alignment
     owner ? { ...owner, goalId: goal.id } : undefined, goal.alignment?.revision)
 }
 
-export function hostGoalResult(goal: Demand, owner?: Pick<AmuxGoalAddress, 'runtimeId' | 'namespace'>): Pick<AgentMuxDemand, 'plan' | 'planState' | 'grounding'> {
+export function hostGoalResult(goal: Demand, owner?: Pick<AmuxGoalAddress, 'runtimeId' | 'namespace'>): Pick<AgentMuxDemand, 'status' | 'plan' | 'planState' | 'grounding'> {
   const { plan } = goal
   const projection = plan ? hostPlanProjection(goal, plan, owner) : undefined
   const grounding = currentGoalGrounding(goal, projection)
-  return { ...(plan && projection ? { plan, planState: goalPlanState(projection) } : {}), ...(grounding ? { grounding } : {}) }
+  const planState = projection && goalPlanState(projection)
+  return { status: currentGoalWorkStatus(goal, planState), ...(plan && planState ? { plan, planState } : {}), ...(grounding ? { grounding } : {}) }
 }
 
 /** Project the original durable record; no Renderer selection or cached board facts. */
 export function projectHostGoal(goal: Demand, address?: AmuxGoalAddress): AgentMuxDemand {
-  return { id: goal.id, ...(address === undefined ? {} : { address }), title: goal.title, description: goal.description, status: goal.status, priority: goal.priority,
+  const result = hostGoalResult(goal, address)
+  const history = (goal.acceptedResults ?? []).filter(item => item.submissionId !== result.grounding?.submissionId)
+  if (goal.grounding?.acceptedAt != null && goal.grounding.submissionId !== result.grounding?.submissionId &&
+      !history.some(item => item.submissionId === goal.grounding?.submissionId)) history.push(goal.grounding)
+  return { id: goal.id, ...(address === undefined ? {} : { address }), title: goal.title, description: goal.description, priority: goal.priority,
     projectId: goal.projectId, projectName: goal.projectName, executorId: goal.executorId, assigneeSessionIds: [...goal.assigneeSessionIds],
     supervisorSessionId: goal.supervisorSessionId, participations: [...goal.participations],
     ...(goal.creationOrigin ? { creationOrigin: goal.creationOrigin } : {}),
@@ -32,7 +38,8 @@ export function projectHostGoal(goal: Demand, address?: AmuxGoalAddress): AgentM
     plannedStartAt: goal.plannedStartAt, targetAt: goal.targetAt, parentDemandId: goal.parentDemandId, phaseIndex: goal.phaseIndex ?? null,
     decisions: goal.decisions, activityLog: goal.activities.map(activity => `${activity.kind}: ${activity.message}`), activities: goal.activities,
     ...(goal.delegations ? { delegations: goal.delegations } : {}), ...(goal.dispatches ? { dispatches: goal.dispatches } : {}),
-    ...(goal.progressUpdates ? { progressUpdates: goal.progressUpdates } : {}), ...(goal.patrols ? { patrols: goal.patrols } : {}), ...hostGoalResult(goal, address),
+    ...(goal.progressUpdates ? { progressUpdates: goal.progressUpdates } : {}), ...(goal.patrols ? { patrols: goal.patrols } : {}), ...result,
+    ...(history.length ? { acceptedResults: history } : {}),
     sessionIds: [...goal.sessionIds], ...(goal.contentRefs ? { contentRefs: goal.contentRefs } : {}),
     createdAt: goal.createdAt, updatedAt: goal.updatedAt, source: 'default-topic',
     ...(goal.alignment ? { alignment: goal.alignment } : {}) }

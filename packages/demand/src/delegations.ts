@@ -1,6 +1,7 @@
 import { isGoalTicketHash, parseGoalTicketProof, type GoalTicketProof } from './goal-ticket-proof.js'
 import { optionalDemandInputEpoch } from './collaboration.js'
 import { parseGroundingProposal, type DemandCriterion, type DemandGroundingProposal } from './goals.js'
+import { GOAL_PLAN_NODE_STATES, type GoalPlanNodeState } from './goal-plan.js'
 
 /** Task material provenance. Discovery and actual adoption are separate claims. */
 export type DemandDelegationContextSource = {
@@ -151,6 +152,21 @@ export function parseGoalPlanPredecessors(value: unknown): GoalPlanPredecessor[]
   return refs
 }
 
+export type GoalCloseoutContext = {
+  capturedAt: number
+  sourceMessageId: string
+  ticketId: string | null
+  reportReplyMessageId: string | null
+  collectionOperationId: string | null
+  handoff: 'unreported' | 'reported' | 'collected'
+  ticketState: GoalPlanNodeState | null
+  otherGoalWork: boolean | null
+  coreInput: 'clear' | 'pending' | 'other-work' | 'unknown'
+  desktopInput: 'clear' | 'draft' | 'pending' | 'unknown'
+}
+
+export type DemandCloseoutObservation = { operationId: string; runId: string; observations: GoalCloseoutContext }
+
 export type DemandDelegation = DemandDelegationIntent & {
   predecessors?: GoalPlanPredecessor[]
   claimOperationId?: string
@@ -164,6 +180,27 @@ export type DemandDelegation = DemandDelegationIntent & {
   report?: DemandDelegationReport
   collection?: DemandDelegationCollection
   attention?: DemandDelegationAttention
+  closeoutObservations?: DemandCloseoutObservation[]
+}
+
+export function parseGoalCloseoutContext(value: unknown): GoalCloseoutContext {
+  const p = record(value, 'Goal closeout observations', ['capturedAt', 'sourceMessageId', 'ticketId', 'reportReplyMessageId', 'collectionOperationId', 'handoff', 'ticketState', 'otherGoalWork', 'coreInput', 'desktopInput'])
+  const optionalId = (value: unknown) => value === null ? null : identity(value, 'Closeout source identity')
+  const { handoff, ticketState, otherGoalWork, coreInput, desktopInput } = p
+  if ((handoff !== 'unreported' && handoff !== 'reported' && handoff !== 'collected') ||
+      (ticketState !== null && !GOAL_PLAN_NODE_STATES.some(state => state === ticketState)) ||
+      (otherGoalWork !== null && typeof otherGoalWork !== 'boolean') ||
+      (coreInput !== 'clear' && coreInput !== 'pending' && coreInput !== 'other-work' && coreInput !== 'unknown') ||
+      (desktopInput !== 'clear' && desktopInput !== 'draft' && desktopInput !== 'pending' && desktopInput !== 'unknown'))
+    throw new Error('Goal closeout observation is invalid')
+  return { capturedAt: positive(p.capturedAt, 'Closeout observation time'), sourceMessageId: identity(p.sourceMessageId, 'Closeout source message'),
+    ticketId: optionalId(p.ticketId), reportReplyMessageId: optionalId(p.reportReplyMessageId), collectionOperationId: optionalId(p.collectionOperationId), handoff,
+    ticketState: ticketState as GoalPlanNodeState | null, otherGoalWork, coreInput, desktopInput }
+}
+
+export function parseDemandCloseoutObservation(value: unknown): DemandCloseoutObservation {
+  const p = record(value, 'Goal closeout operation', ['operationId', 'runId', 'observations'])
+  return { operationId: identity(p.operationId, 'Closeout operation'), runId: identity(p.runId, 'Closeout Run'), observations: parseGoalCloseoutContext(p.observations) }
 }
 
 function record(value: unknown, label: string, allowed: readonly string[], optional: readonly string[] = []): Record<string, unknown> {
@@ -247,7 +284,7 @@ export function sameDemandDelegationIntent(left: DemandDelegationIntent, right: 
     .every(key => JSON.stringify(left[key as keyof DemandDelegationIntent]) === JSON.stringify(right[key as keyof DemandDelegationIntent]))
 }
 export function parseDemandDelegation(value: unknown): DemandDelegation {
-  const data = record(value, 'delegation', [...intentKeys, 'preparedAt', 'capturedCriteria', 'linkedAt', 'runtimeIdentity', 'report', 'collection', 'attention', 'predecessors', 'claimOperationId', 'dispatchProof'], [...optionalIntentKeys, 'linkedAt', 'runtimeIdentity', 'report', 'collection', 'attention', 'predecessors', 'claimOperationId', 'dispatchProof'])
+  const data = record(value, 'delegation', [...intentKeys, 'preparedAt', 'capturedCriteria', 'linkedAt', 'runtimeIdentity', 'report', 'collection', 'attention', 'predecessors', 'claimOperationId', 'dispatchProof', 'closeoutObservations'], [...optionalIntentKeys, 'linkedAt', 'runtimeIdentity', 'report', 'collection', 'attention', 'predecessors', 'claimOperationId', 'dispatchProof', 'closeoutObservations'])
   const intent = parseDemandDelegationIntent(Object.fromEntries(intentKeys.filter(key => data[key] !== undefined).map(key => [key, data[key]])))
   if (!Array.isArray(data.capturedCriteria)) throw new Error('delegation.capturedCriteria must be an array')
   const capturedCriteria = data.capturedCriteria.map(value => {
@@ -296,12 +333,20 @@ export function parseDemandDelegation(value: unknown): DemandDelegation {
       dispatchProof.record.operationId !== intent.operationId || data.claimOperationId !== undefined))
     throw new Error('Goal Ticket dispatch proof belongs to another execution')
   if ((data.predecessors !== undefined || data.claimOperationId !== undefined) && !intent.planNodeId) throw new Error('Goal plan predecessors require an original node')
+  const closeoutObservations = data.closeoutObservations === undefined ? undefined : (() => {
+    if (!Array.isArray(data.closeoutObservations)) throw new Error('Goal closeout observations must be an array')
+    const observations = data.closeoutObservations.map(parseDemandCloseoutObservation)
+    if (observations.some(({ observations }) => observations.sourceMessageId !== intent.sourceMessageId || observations.ticketId !== (intent.planNodeId ?? null)))
+      throw new Error('Goal closeout observation differs from its original delegation')
+    return observations
+  })()
   return { ...intent, capturedCriteria, ...(dispatchProof ? { dispatchProof } : {}), preparedAt: positive(data.preparedAt, 'delegation.preparedAt'),
     ...(data.predecessors === undefined ? {} : { predecessors: parseGoalPlanPredecessors(data.predecessors) }),
     ...(data.claimOperationId === undefined ? {} : { claimOperationId: identity(data.claimOperationId, 'delegation.claimOperationId') }),
     ...(data.linkedAt === undefined ? {} : { linkedAt: positive(data.linkedAt, 'delegation.linkedAt') }),
     ...(runtimeIdentity ? { runtimeIdentity } : {}),
-    ...(report === undefined ? {} : { report }), ...(collection === undefined ? {} : { collection }), ...(attention === undefined ? {} : { attention }) }
+    ...(report === undefined ? {} : { report }), ...(collection === undefined ? {} : { collection }), ...(attention === undefined ? {} : { attention }),
+    ...(closeoutObservations === undefined ? {} : { closeoutObservations }) }
 }
 export function validateDemandDelegationReport(intent: DemandDelegationIntent, report: DemandDelegationReportInput): void {
   const checks = report.grounding.checks
@@ -322,5 +367,7 @@ export function parseDemandDelegations(value: unknown): DemandDelegation[] {
   const attention = result.flatMap(item => item.attention ? [item.attention] : [])
   for (const select of [(item: DemandDelegationAttention) => item.operationId, (item: DemandDelegationAttention) => item.intentId])
     if (new Set(attention.map(select)).size !== attention.length) throw new Error('delegation attention contains duplicate original identities')
+  const stops = result.flatMap(item => item.closeoutObservations?.map(stop => stop.operationId) ?? [])
+  if (new Set(stops).size !== stops.length) throw new Error('delegations contain duplicate Goal closeout operations')
   return result
 }

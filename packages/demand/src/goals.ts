@@ -1,7 +1,6 @@
 /** Pure Goal facts and validation. Safe to consume from a browser. */
 import { deriveObjectId } from '@agentmux/identity'
 import { parseDemandEvidence, type DemandEvidence } from './evidence.js'
-import type { GoalPlanState } from './goal-plan.js'
 export { parseDemandEvidence, demandEvidenceText, demandEvidenceLabel, type DemandEvidence, type DemandFileEvidence } from './evidence.js'
 export type DemandCriterion = { id: string; text: string }
 export function deriveBoundGoalId(runtimeId: string, namespace: string, creationOperationId: string): string {
@@ -31,15 +30,43 @@ export type DemandGroundingProposal = {
   summary: string
   checks: DemandGroundingCheck[]
 }
+export type UnknownGoalResult = { criterionId: string; reason: string }
+export type UnknownGoalResultDecision = { by: { kind: 'user' | 'device'; id: string }; checks: UnknownGoalResult[] }
 export type DemandGrounding = DemandGroundingProposal & {
   submissionId: string
   acceptedAt: number | null
+  unknownDecision?: UnknownGoalResultDecision
+}
+
+export function parseUnknownGoalResults(value: unknown): UnknownGoalResult[] {
+  if (!Array.isArray(value) || !value.length) throw new Error('Name each unverified criterion and why its evidence cannot be recovered')
+  const checks = value.map(item => {
+    const p = record(item, 'Unknown result disposition', ['criterionId', 'reason'])
+    return { criterionId: text(p.criterionId, 'Criterion ID'), reason: text(p.reason, 'Reason') }
+  }).sort((left, right) => left.criterionId < right.criterionId ? -1 : left.criterionId === right.criterionId ? 0 : 1)
+  if (new Set(checks.map(check => check.criterionId)).size !== checks.length) throw new Error('Use one disposition per criterion')
+  return checks
+}
+
+export function parseUnknownGoalResultDecision(value: unknown): UnknownGoalResultDecision {
+  const p = record(value, 'Unknown result decision', ['by', 'checks'])
+  const by = record(p.by, 'Original decision author', ['kind', 'id'])
+  if (by.kind !== 'user' && by.kind !== 'device') throw new Error('Only an authenticated person or device can close with an unknown result')
+  return { by: { kind: by.kind, id: text(by.id, 'Original decision author ID') }, checks: parseUnknownGoalResults(p.checks) }
+}
+
+export function parseAcceptedGoalResults(value: unknown): DemandGrounding[] {
+  if (!Array.isArray(value)) throw new Error('Accepted Goal results must be an array')
+  const results = value.map(parseGrounding)
+  if (results.some(result => result.acceptedAt === null) || new Set(results.map(result => result.submissionId)).size !== results.length)
+    throw new Error('Accepted Goal results need distinct, accepted submissions')
+  return results
 }
 
 /** The next result step once the original owner confirms the plan's work has passed. */
-export function goalPlanReviewState(plan: Pick<GoalPlanState, 'done' | 'total'> | null | undefined,
+export function goalPlanReviewState(status: string,
   alignment: DemandAlignment | undefined, grounding: DemandGrounding | undefined) {
-  if (!plan?.total || plan.done !== plan.total) return undefined
+  if (status !== 'in_review') return undefined
   if (isCurrentGroundingAccepted(alignment, grounding)) return 'accepted'
   if (!grounding) return 'awaiting-report'
   return groundingAcceptanceIssue(alignment, grounding, true) ? 'awaiting-evidence' : 'awaiting-acceptance'
@@ -117,9 +144,16 @@ export function parseGroundingProposal(value: unknown): DemandGroundingProposal 
 }
 
 export function parseGrounding(value: unknown): DemandGrounding {
-  const source = record(value, 'grounding', ['alignmentRevision', 'summary', 'checks', 'submissionId', 'acceptedAt'])
+  const source = record(value, 'grounding', ['alignmentRevision', 'summary', 'checks', 'submissionId', 'acceptedAt'], ['unknownDecision'])
   const proposal = parseGroundingProposal({ alignmentRevision: source.alignmentRevision, summary: source.summary, checks: source.checks })
-  return { ...proposal, submissionId: text(source.submissionId, 'grounding.submissionId'), acceptedAt: acknowledgement(source.acceptedAt, 'grounding.acceptedAt') }
+  const acceptedAt = acknowledgement(source.acceptedAt, 'grounding.acceptedAt')
+  const unknownDecision = source.unknownDecision === undefined ? undefined : parseUnknownGoalResultDecision(source.unknownDecision)
+  const unknown = new Set(proposal.checks.filter(check => check.outcome === 'unknown').map(check => check.criterionId))
+  if (acceptedAt !== null && unknown.size && !unknownDecision ||
+      unknownDecision && (acceptedAt === null || unknownDecision.checks.length !== unknown.size ||
+        unknownDecision.checks.some(check => !unknown.has(check.criterionId))))
+    throw new Error('The decision must cover the exact accepted unknown results')
+  return { ...proposal, submissionId: text(source.submissionId, 'grounding.submissionId'), acceptedAt, ...(unknownDecision ? { unknownDecision } : {}) }
 }
 
 /** A location is not a proof: callers still show the Agent's claim and its source. */
@@ -145,7 +179,8 @@ export function alignmentConfirmationIssue(alignment: DemandAlignment | undefine
   return null
 }
 
-export function groundingAcceptanceIssue(alignment: DemandAlignment | undefined, grounding: DemandGrounding | undefined, acceptGaps = false): string | null {
+export function groundingAcceptanceIssue(alignment: DemandAlignment | undefined, grounding: DemandGrounding | undefined, acceptGaps = false,
+  dispositions: readonly UnknownGoalResult[] = []): string | null {
   const goalIssue = alignmentConfirmationIssue(alignment)
   if (goalIssue) return goalIssue
   if (!alignment || alignment.confirmedAt === null) return 'Confirm the current goal before accepting results.'
@@ -153,10 +188,16 @@ export function groundingAcceptanceIssue(alignment: DemandAlignment | undefined,
   if (grounding.alignmentRevision !== alignment.revision) return 'These results refer to an earlier goal. Ask Mote to check the current goal.'
   const checks = new Map(grounding.checks.map(check => [check.criterionId, check]))
   if (checks.size !== alignment.criteria.length || grounding.checks.length !== checks.size) return 'Every current success criterion needs exactly one result check.'
+  const resolved = new Set(dispositions.map(item => item.criterionId))
+  if (dispositions.some(item => checks.get(item.criterionId)?.outcome !== 'unknown'))
+    return 'Each disposition must name a currently unknown result.'
   for (const criterion of alignment.criteria) {
     const check = checks.get(criterion.id)
     if (!check) return `Missing result for: ${criterion.text}`
-    if (check.outcome === 'unknown') return `Result is still unknown: ${criterion.text}`
+    if (check.outcome === 'unknown') {
+      if (!resolved.has(criterion.id)) return `Result is still unknown: ${criterion.text}`
+      continue
+    }
     if (check.evidence.length === 0 || !check.evidence.every(isDemandEvidenceReference)) return `Missing locatable evidence for: ${criterion.text}`
     if (check.outcome === 'gap' && !check.note.trim()) return `Describe the remaining gap: ${criterion.text}`
     if (check.outcome === 'gap' && !acceptGaps) return 'There are remaining gaps. Review them and explicitly accept with gaps.'

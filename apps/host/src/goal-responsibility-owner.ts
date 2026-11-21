@@ -216,6 +216,7 @@ export class GoalResponsibilityOwner {
         throw new AgentMuxError('Handoff requires the actual verified target execution. A proposed next Agent is not a handoff.', 'CONTROL_REQUEST_CONFLICT')
     }
     await this.demands.recordProgress(goalId, input, { author: authority.actor,
+      ...(authority.runtimeId ? { runtimeId: authority.runtimeId } : {}),
       reportingRunId: authority.actor.kind === 'agent' ? authority.runId ?? null : null, basis: goalResponsibilityBasis(observed) })
   }
 }

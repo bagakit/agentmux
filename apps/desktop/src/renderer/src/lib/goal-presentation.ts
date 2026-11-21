@@ -59,11 +59,12 @@ export function goalNextStepFact(demand: GoalNextStepInput, retainedInput?: unkn
   const retained = readGoalFiniteStartIntent(retainedInput, demand.id)
   const retainedStart = retained?.phase === 'selecting-access' ? undefined : retained
   const { alignment, grounding } = demand
-  const planReview = goalPlanReviewState(demand.planState, alignment, grounding)
+  const planReview = goalPlanReviewState(demand.status, alignment, grounding)
   const resultSource: GoalNextStepSource = { kind: 'results', submissionId: grounding?.submissionId ?? null, revision: alignment?.revision ?? null }
   const definitionSource: GoalNextStepSource = { kind: 'definition', revision: alignment?.revision ?? null }
   if (demand.status === 'cancelled') return { stage: 'finished', text: 'Cancelled', source: { kind: 'goal' } }
   if (planReview ? planReview === 'accepted' : isCurrentGroundingAccepted(alignment, grounding)) {
+    if (grounding!.unknownDecision) return { stage: 'finished', text: 'Closed with unverified results', source: resultSource }
     const result = grounding!.checks.some(check => check.outcome === 'gap') ? 'Accepted with gaps' : 'Accepted'
     return { stage: 'finished', text: demand.status === 'done' ? `${result} · Finished` : result, source: resultSource }
   }

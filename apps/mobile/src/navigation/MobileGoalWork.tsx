@@ -4,7 +4,7 @@ import { TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { MobileGoalEvidence } from '../goals/MobileGoalEvidence'
-import { mobileGoalStatus as goalStatusText, mobileGoalOutcome } from '../goals/presentation'
+import { mobileGoalConclusion, mobileGoalClosedUnverified, mobileGoalOutcome } from '../goals/presentation'
 import type { AgentMuxRpcGoal, ContinuousProgressLoop } from '@agentmux/core'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { getDeviceWorkface, type GoalWorkSelection, type MobileGoalOperation } from '../recovery/device-workface'
@@ -146,7 +146,21 @@ export function MobileGoalWork({ client, agentSessionId, connected, visible }: {
     } catch (error) { if (current.current === token) setNotice(error instanceof Error ? error.message : String(error)) }
   }
 
-  const goalResults = actual?.goal ? (<section key="results" className="mobile-goal-section"><h2><SemanticIcon name="object.goal" size={16} />成果与验收</h2>{actual.goal.grounding ? <><p className="mobile-goal-summary">{actual.goal.grounding.summary}</p><p className="mobile-goal-meta">{actual.goal.grounding.acceptedAt != null ? '已由人确认验收' : '成果已提交，等待人验收'} · 范围 v{actual.goal.grounding.alignmentRevision}{actual.goal.alignment?.revision !== actual.goal.grounding.alignmentRevision ? '（与当前范围不同）' : ''}</p>{actual.goal.grounding.checks.map(item => <div className="mobile-goal-result" key={item.criterionId}><strong>{actual.goal?.alignment?.revision !== undefined && actual.goal.alignment.revision === actual.goal.grounding?.alignmentRevision ? actual.goal?.alignment?.criteria.find(criterion => criterion.id === item.criterionId)?.text ?? item.criterionId : item.criterionId}</strong><small>{mobileGoalOutcome[item.outcome]}</small><p>{item.note}</p><MobileGoalEvidence evidence={item.evidence} client={client} /></div>)}</> : <p className="mobile-goal-meta">尚未提交验收成果。完成状态不会代替人的验收。</p>}
+  const grounding = actual?.goal?.grounding
+  const alignment = actual?.goal?.alignment
+  const closingReasons = new Map(grounding?.unknownDecision?.checks.map(check => [check.criterionId, check.reason]))
+  const goalResults = actual?.goal ? (<section key="results" className="mobile-goal-section"><h2><SemanticIcon name="object.goal" size={16} />成果与验收</h2>
+    {grounding ? <>
+      <p className="mobile-goal-summary">{grounding.summary}</p>
+      <p className="mobile-goal-meta">{grounding.unknownDecision ? mobileGoalClosedUnverified : grounding.acceptedAt != null ? '已由人确认验收' : '成果已提交，等待人验收'}
+        {' · '}范围 v{grounding.alignmentRevision}{alignment?.revision !== grounding.alignmentRevision ? '（与当前范围不同）' : ''}</p>
+      {grounding.checks.map(item => <div className="mobile-goal-result" key={item.criterionId}>
+        <strong>{(alignment?.revision === grounding.alignmentRevision ? alignment.criteria.find(criterion => criterion.id === item.criterionId)?.text : undefined) ?? item.criterionId}</strong>
+        <small>{mobileGoalOutcome[item.outcome]}</small><p>{item.note}</p>
+        {closingReasons.has(item.criterionId) && <p>结案原因 · {closingReasons.get(item.criterionId)}</p>}
+        <MobileGoalEvidence evidence={item.evidence} client={client} />
+      </div>)}
+    </> : <p className="mobile-goal-meta">尚未提交验收成果。完成状态不会代替人的验收。</p>}
           {actual.goal.activityLog?.length ? <details><summary>最近工作记录</summary>{actual.goal.activityLog.slice(-5).map((item, index) => <p key={index}>{item}</p>)}</details> : null}</section>) : null
 
   return <div className="mobile-goal-work">
@@ -154,7 +168,7 @@ export function MobileGoalWork({ client, agentSessionId, connected, visible }: {
     {goalId ? <>
       <button className="mobile-text-button" onClick={showList}><SemanticIcon name="navigation.back" size={15} />全部目标</button>
       {actual?.goal ? <>
-        <section className="mobile-goal-section"><div className="mobile-goal-kicker"><SemanticIcon name="object.goal" size={14} /><span>{goalStatusText[actual.goal.status]} · {actual.goal.alignment?.confirmedAt != null ? `范围已确认 · v${actual.goal.alignment.revision}` : '范围待确认'}</span></div>
+        <section className="mobile-goal-section"><div className="mobile-goal-kicker"><SemanticIcon name="object.goal" size={14} /><span>{mobileGoalConclusion(actual.goal)} · {actual.goal.alignment?.confirmedAt != null ? `范围已确认 · v${actual.goal.alignment.revision}` : '范围待确认'}</span></div>
           <p className="mobile-goal-summary">{actual.goal.alignment?.summary || actual.goal.description}</p>
           {actual.goal.alignment?.criteria.length ? <ul className="mobile-goal-criteria">{actual.goal.alignment.criteria.map(item => <li key={item.id}>{item.text}</li>)}</ul> : null}
           <button className="mobile-text-button" disabled={!sourceConfirmed} onClick={() => { void focusOriginal() }}><SemanticIcon name="action.open-external" size={14} />在 Mac 查看目标</button></section>

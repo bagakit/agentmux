@@ -3,6 +3,7 @@ import { delegationWorkerHostId } from './delegations.js'
 import { demandAgentReferenceKey, parseDemandAgentReference, type DemandSpaceMemberReference } from './agent-reference.js'
 import { qualifiedDemandDispatch, runBoundDemandDispatch } from './dispatch.js'
 import { currentGoalGrounding } from './goal-grounding.js'
+import type { GoalPlanState } from './goal-plan.js'
 
 /** Business responsibility references original execution; it never owns Runtime state. */
 export type DemandLegacyExecutionReference = {
@@ -124,16 +125,38 @@ export function sameDemandExecution(left: DemandExecutionReference, right: Deman
 export const demandExecutionKey = (reference: DemandExecutionReference) => 'target' in reference
   ? JSON.stringify(['space-member', reference.kind, reference.operationId, demandAgentReferenceKey(reference.target), reference.runId])
   : JSON.stringify([reference.kind, reference.operationId, reference.hostId, reference.agentSessionId, reference.runId])
+
+/** A planned Goal's work phase follows its verified Tickets and independent responsibilities. */
+export function currentGoalWorkStatus(goal: Pick<Demand, 'status' | 'alignment' | 'supervisorSessionId' | 'dispatches' | 'delegations' | 'progressUpdates'>,
+  plan: Pick<GoalPlanState, 'done' | 'total'> | undefined): Demand['status'] {
+  if (!plan?.total || goal.status !== 'in_progress' && goal.status !== 'in_review') return goal.status
+  if (plan.done !== plan.total || goal.delegations?.some(item => !item.planNodeId && !item.collection))
+    return 'in_progress'
+  const starts = demandExecutionReferences(goal).filter(ref => ref.kind === 'start')
+  if (starts.length) {
+    const latest = latestDemandProgress(goal)
+    const destinations = demandHandoffDestinations(goal, latest)
+    const collected = new Set(goal.delegations?.filter(attempt => attempt.collection).map(attempt => attempt.operationId))
+    for (const start of starts) {
+      const destination = destinations.get(demandExecutionKey(start))
+      if (destination?.kind === 'delegation' && collected.has(destination.operationId)) continue
+      const update = destination && latest.get(demandExecutionKey(destination))
+      if (!update?.managerVerified || update.phase !== 'review' || !update.reviewForHuman || !demandProgressBusinessCurrent(goal, update))
+        return 'in_progress'
+    }
+  }
+  return 'in_review'
+}
 export function latestDemandProgress(goal: Pick<Demand, 'progressUpdates'>): Map<string, DemandProgress> {
   const latest = new Map<string, DemandProgress>()
   for (const update of goal.progressUpdates ?? []) latest.set(demandExecutionKey(update.execution), update)
   return latest
 }
 export function demandProgressBusinessCurrent(goal: Pick<Demand, 'alignment' | 'supervisorSessionId'>, update: DemandProgress): boolean {
-  let scope: { alignment?: number | null }
+  let scope: { alignment?: number | null; supervisor?: Demand['supervisorSessionId'] }
   try { scope = JSON.parse(update.expectedScope) } catch { return false }
   return scope.alignment === (goal.alignment?.revision ?? null) &&
-    (update.author.kind !== 'agent' || !update.managerVerified || update.author.id === goal.supervisorSessionId)
+    (update.author.kind !== 'agent' || !update.managerVerified || JSON.stringify(scope.supervisor) === JSON.stringify(goal.supervisorSessionId))
 }
 /** Derived accepted handoff endpoints. A cycle or absent target preserves an unresolved responsibility. */
 export function demandHandoffDestinations(goal: Pick<Demand, 'dispatches' | 'delegations' | 'progressUpdates' | 'alignment' | 'supervisorSessionId'>,
@@ -157,7 +180,7 @@ export function demandHandoffDestinations(goal: Pick<Demand, 'dispatches' | 'del
   return destinations
 }
 /** Unrelated activity and record timestamps do not invalidate a scoped business inspection. */
-export function demandResponsibilityScope(goal: Pick<Demand, 'id' | 'status' | 'supervisorSessionId' | 'alignment' | 'grounding' | 'dispatches' | 'delegations' | 'progressUpdates' | 'plan' | 'patrols'>): string {
+export function demandResponsibilityScope(goal: Pick<Demand, 'id' | 'status' | 'supervisorSessionId' | 'alignment' | 'grounding' | 'acceptedGroundingSource' | 'dispatches' | 'delegations' | 'progressUpdates' | 'plan' | 'patrols'>): string {
   const grounding = currentGoalGrounding(goal)
   return JSON.stringify({ id: goal.id, status: goal.status, supervisor: goal.supervisorSessionId,
     alignment: goal.alignment?.revision ?? null, confirmedAt: goal.alignment?.confirmedAt ?? null, grounding: grounding?.submissionId ?? null, acceptedAt: grounding?.acceptedAt ?? null,

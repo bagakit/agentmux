@@ -3,11 +3,12 @@ import type { Demand } from './demand-types.js'
 import { projectGoalPlan, type GoalPlanProjection } from './goal-plan.js'
 import { isDemandEvidenceReference, type DemandEvidence, type DemandGrounding, type DemandGroundingCheck } from './goals.js'
 
-type GoalGroundingFacts = Pick<Demand, 'id' | 'alignment' | 'grounding' | 'plan' | 'delegations' | 'patrols'>
+type GoalGroundingFacts = Pick<Demand, 'id' | 'alignment' | 'grounding' | 'acceptedGroundingSource' | 'plan' | 'delegations' | 'patrols'>
 
 /** Distinguish an original Goal report from the prior flat collection of worker reports. */
 export function independentGoalGrounding(goal: GoalGroundingFacts): DemandGrounding | undefined {
-  const { alignment, grounding, delegations, patrols } = goal
+  const { alignment, delegations, patrols } = goal
+  const grounding = goal.grounding?.acceptedAt != null ? goal.acceptedGroundingSource : goal.grounding
   if (!alignment || !grounding || grounding.alignmentRevision !== alignment.revision || grounding.acceptedAt !== null) return undefined
   if (!delegations?.some(attempt => attempt.collection?.groundingSubmissionId === grounding.submissionId)) return grounding
   // A patrol could attach this same Goal report to a collected worker. The original
@@ -20,8 +21,7 @@ export function independentGoalGrounding(goal: GoalGroundingFacts): DemandGround
 /** Reuse the Demand owner's current attempts and receipts without rewriting original reports. */
 export function currentGoalGrounding(goal: GoalGroundingFacts, projection?: GoalPlanProjection): DemandGrounding | undefined {
   const { alignment, grounding, plan, delegations = [] } = goal
-  if (!alignment || !plan?.nodes.length || grounding?.acceptedAt != null && grounding.alignmentRevision === alignment.revision)
-    return grounding
+  if (!alignment || !plan?.nodes.length) return grounding
   if (!grounding && !delegations.some(attempt => attempt.planNodeId && attempt.report)) return undefined
 
   const current = projection ?? projectGoalPlan(plan, delegations, alignment.criteria, undefined, alignment.revision)
@@ -76,5 +76,6 @@ export function currentGoalGrounding(goal: GoalGroundingFacts, projection?: Goal
   const summary = independent ? `Current evidence from the original Goal plan.\n${independent.summary}` : 'Current evidence from the original Goal plan.'
   const proposal = { alignmentRevision: alignment.revision, summary, checks }
   const identity = independent ? [goal.id, proposal, basis, independent.submissionId] : [goal.id, proposal, basis]
-  return { ...proposal, submissionId: deriveObjectId('agentmux.goal-current-grounding.v1', JSON.stringify(identity)), acceptedAt: null }
+  const submissionId = deriveObjectId('agentmux.goal-current-grounding.v1', JSON.stringify(identity))
+  return grounding?.submissionId === submissionId ? grounding : { ...proposal, submissionId, acceptedAt: null }
 }

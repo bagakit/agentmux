@@ -502,6 +502,7 @@ export type AgentMuxDemand = {
   source: 'default-topic' | 'session'
   alignment?: DemandAlignment
   grounding?: DemandGrounding
+  acceptedResults?: DemandGrounding[]
 }
 export type AgentMuxDemandDecision = {
   input: string
@@ -552,7 +553,7 @@ export type AgentMuxControlGoalDiscussRequest = RequestBase & { operation: 'dema
 export type AgentMuxControlGoalPatrolAllRequest = RequestBase & { operation: 'demand.patrol-all'; executorId?: string; caller?: { agentSessionId: string; capability?: string } }
 export type AgentMuxControlGoalConfirmRequest = RequestBase & { operation: 'demand.confirm'; demandId: string; expectedRevision: number;
   continueWith?: import('@agentmux/demand/goal-patrol').GoalConfirmationRecipient }
-export type AgentMuxControlGoalAcceptRequest = RequestBase & { operation: 'demand.accept'; demandId: string; expectedAlignmentRevision: number; expectedSubmissionId: string; acceptGaps: boolean; finish?: boolean }
+export type AgentMuxControlGoalAcceptRequest = RequestBase & { operation: 'demand.accept'; demandId: string; expectedAlignmentRevision: number; expectedSubmissionId: string; acceptGaps: boolean; finish?: boolean; unknownResults?: import('@agentmux/demand/goals').UnknownGoalResult[] }
 export type AgentMuxControlDemandAssignRequest = RequestBase & {
   operation: 'demand.assign'
   inputEpoch?: string

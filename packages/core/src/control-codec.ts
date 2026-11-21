@@ -33,7 +33,7 @@ import { parseDemandParticipations, parseDemandCreationOrigin } from '@agentmux/
 import { parseDemandContentReferences } from '@agentmux/demand/content-references'
 import { parseGoalContinuationLoop } from './continuous-progress-scheduler.js'
 import { isPendingMessageOperation, parsePendingMessage } from './pending-message-control.js'
-import { parseAlignment, parseAlignmentProposal, parseGrounding, parseGroundingProposal } from '@agentmux/demand/goals'
+import { parseAcceptedGoalResults, parseAlignment, parseAlignmentProposal, parseGrounding, parseGroundingProposal, parseUnknownGoalResults } from '@agentmux/demand/goals'
 import { validateAgentPromptCondition } from './agent-prompt-condition.js'
 import { parseBrowserResultReadInput, parseBrowserResultReadProjection } from './browser-result-read.js'
 import { BROWSER_COMPLETION_UNAVAILABLE_WARNING, parseBrowserCompletionFacts } from './browser-completion-facts.js'
@@ -703,7 +703,13 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     }
     if (typeof source.acceptGaps !== 'boolean') throw new AgentMuxError('Result gaps require an explicit acceptance choice.', 'INVALID_CONTROL_REQUEST')
     if (source.finish !== undefined && typeof source.finish !== 'boolean') throw new AgentMuxError('Finishing a Goal requires an explicit boolean choice.', 'INVALID_CONTROL_REQUEST')
-    return { ...base, operation: source.operation, expectedAlignmentRevision: revision as number, expectedSubmissionId: id(source.expectedSubmissionId, 'Goal submission id is invalid.', 'INVALID_CONTROL_REQUEST'), acceptGaps: source.acceptGaps, ...(source.finish === undefined ? {} : { finish: source.finish }) }
+    let unknownResults: ReturnType<typeof parseUnknownGoalResults> | undefined
+    if (source.unknownResults !== undefined) {
+      if (source.finish !== true) throw new AgentMuxError('An unknown result disposition requires explicitly finishing this Goal.', 'INVALID_CONTROL_REQUEST')
+      try { unknownResults = parseUnknownGoalResults(source.unknownResults) }
+      catch (error) { throw new AgentMuxError(error instanceof Error ? error.message : 'Invalid unknown result disposition.', 'INVALID_CONTROL_REQUEST') }
+    }
+    return { ...base, operation: source.operation, expectedAlignmentRevision: revision as number, expectedSubmissionId: id(source.expectedSubmissionId, 'Goal submission id is invalid.', 'INVALID_CONTROL_REQUEST'), acceptGaps: source.acceptGaps, ...(source.finish === undefined ? {} : { finish: source.finish }), ...(unknownResults ? { unknownResults } : {}) }
   }
   if (source.operation === 'demand.assign') {
     if (typeof source.start !== 'boolean') throw new AgentMuxError('Demand assignment start flag is invalid.', 'INVALID_CONTROL_REQUEST')
@@ -1117,7 +1123,7 @@ function parseDemand(value: unknown): AgentMuxDemand {
   const relatedKeys = new Set(sessionIds.map(demandAgentReferenceKey)), assignedKeys = new Set(assigneeSessionIds.map(demandAgentReferenceKey))
   if (assigneeSessionIds.some(ref => !relatedKeys.has(demandAgentReferenceKey(ref))) || supervisorSessionId !== null && !assignedKeys.has(demandAgentReferenceKey(supervisorSessionId))) throw new AgentMuxError('Control Goal collaboration relations are inconsistent.', 'CONTROL_PROTOCOL_ERROR')
   let participations: AgentMuxDemand['participations'], creationOrigin: AgentMuxDemand['creationOrigin']
-  let goalFacts: Pick<AgentMuxDemand, 'alignment' | 'grounding' | 'dispatches' | 'delegations' | 'progressUpdates' | 'patrols' | 'plan'> = {}
+  let goalFacts: Pick<AgentMuxDemand, 'alignment' | 'grounding' | 'acceptedResults' | 'dispatches' | 'delegations' | 'progressUpdates' | 'patrols' | 'plan'> = {}
   try {
     participations = parseDemandParticipations(source.participations)
     creationOrigin = source.creationOrigin === undefined ? undefined : parseDemandCreationOrigin(source.creationOrigin)
@@ -1129,7 +1135,8 @@ function parseDemand(value: unknown): AgentMuxDemand {
       ...(source.patrols === undefined ? {} : { patrols: parseDemandPatrols(source.patrols) }),
       ...(source.plan === undefined ? {} : { plan: parseGoalPlan(source.plan) }),
       ...(source.alignment === undefined ? {} : { alignment: parseAlignment(source.alignment) }),
-      ...(source.grounding === undefined ? {} : { grounding: parseGrounding(source.grounding) })
+      ...(source.grounding === undefined ? {} : { grounding: parseGrounding(source.grounding) }),
+      ...(source.acceptedResults === undefined ? {} : { acceptedResults: parseAcceptedGoalResults(source.acceptedResults) })
     }
   } catch (error) {
     throw new AgentMuxError(error instanceof Error ? error.message : 'Control Goal facts are invalid.', 'CONTROL_PROTOCOL_ERROR')

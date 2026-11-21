@@ -1267,7 +1267,12 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     if (f.values.has('--continue-with') && !f.values.has('--operation-id')) invalid('Confirm and continue requires the original --operation-id. --continue-with is {hostId,agentSessionId}. Read goal inspect and goal delegations for the saved request and its input receipt.')
     return { ...numbers(f, { '--revision': 'expectedRevision' }), ...(f.values.has('--continue-with') ? { continueWith: jsonValue(value(f, '--continue-with', true)!, '--continue-with') } : {}) }
   }, true),
-  goal('accept', '--goal ID --revision N --submission ID [--accept-gaps] [--finish]', 'Accept the exact original result submission as an authenticated person; --finish also ends this Goal, keeping gaps and original Runs.', { '--revision': 'value', '--submission': 'data', '--accept-gaps': 'boolean', '--finish': 'boolean' }, f => ({ ...numbers(f, { '--revision': 'expectedAlignmentRevision' }), expectedSubmissionId: id(f, '--submission', true), acceptGaps: f.booleans.has('--accept-gaps'), ...(f.booleans.has('--finish') ? { finish: true } : {}) }), true),
+  goal('accept', '--goal ID --revision N --submission ID [--accept-gaps] [--finish [--close-with-unknown JSON]]',
+    'Accept the exact result as an authenticated person. With --finish, use --close-with-unknown to give a [{criterionId,reason}] decision for each result whose evidence cannot be recovered.',
+    { '--revision': 'value', '--submission': 'data', '--accept-gaps': 'boolean', '--finish': 'boolean', '--close-with-unknown': 'data' },
+    f => ({ ...numbers(f, { '--revision': 'expectedAlignmentRevision' }), expectedSubmissionId: id(f, '--submission', true),
+      acceptGaps: f.booleans.has('--accept-gaps'), ...(f.booleans.has('--finish') ? { finish: true } : {}),
+      ...(f.values.has('--close-with-unknown') ? { unknownResults: jsonValue(value(f, '--close-with-unknown', true)!, '--close-with-unknown') } : {}) }), true),
   goal('handoff', '--goal ID [--assignees JSON] [--session ID] [--supervisor SESSION|--supervisor-ref JSON|--clear-supervisor] [--relation-access JSON] [--expected-updated-at MS]', 'Save accurate handoff relations without starting or rebinding an existing Loop.', { '--session': 'data', '--expected-updated-at': 'value', ...RELATION_FLAGS }, f => ({ ...fields(f, { '--session': 'sessionId' }), ...relationFields(f), ...numbers(f, { '--expected-updated-at': 'expectedUpdatedAt' }) }), true),
   command('goal.focus', '--goal ID [--runtime ID --namespace ID] [--section plan] | --link URL', 'Read the original Goal, plan or Ticket while preserving eligible conversation input.', {
     '--goal': 'data', '--runtime': 'data', '--namespace': 'data', '--section': 'value', '--link': 'data', ...OP,
@@ -1298,7 +1303,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     { '--goal': 'data', '--attempt': 'data', '--session': 'data', '--run': 'data', '--inspect': 'boolean', ...OP },
     f => ({ goalId: id(f, '--goal', true), attempt: id(f, '--attempt', true), agentSessionId: id(f, '--session', true),
       runId: id(f, '--run', true), operationId: id(f, '--operation-id', true), ...(f.booleans.has('--inspect') ? { inspect: true } : {}) }),
-    'An explicit Supervisor Stop returns the Core receipt and observations about handoff, other work and input. Unknown observations are reported. Add --inspect with the same exact identities to read the original Stop without issuing it. A worker’s own conditional closeout still retains an occupied Run.'),
+    'An explicit Supervisor Stop returns the Core receipt and the saved pre-Stop observations. If observations are unavailable, the receipt explains why. Add --inspect with the same identities to read the original operation. Worker self-closeout still checks for other work and pending input.'),
   ...(['goal.delegate', 'goal.report', 'goal.collect'] as const).map(method => command(method, '--input FILE|-',
     method === 'goal.delegate' ? 'Save frozen task input, reconcile the original Core message and associate its dispatch with this Goal.'
       : method === 'goal.report' ? 'Report every delegated criterion under its original source. A remote worker can persist a signed reply without a local Goal store.'

@@ -90,8 +90,10 @@ export function GoalAlignment({ demand, emphasis, onGrill, onGrounding, motePend
   const goalRequestButton = <button type="button" className={!failure && needsDefinition && (!alignment || confirmIssue) ? 'primary-button' : 'small-button'} data-goal-grill disabled={Boolean(motePending)} onClick={onGrill}>{motePending === 'grill' ? 'Sending request…' : useBrief ? 'Draft criteria from brief' : recipient.requestLabel('grill')}</button>
   const goalRequestNote = <span className="goals-request-action goals-caption">{recipient.description}</span>
   const resultRequest = alignment?.confirmedAt ? <button type="button" className={!failure && focus === 'results' && demand.status === 'done' && !grounding ? 'primary-button' : 'small-button'} data-goal-grounding disabled={Boolean(motePending)} onClick={onGrounding}>{motePending === 'grounding' ? 'Sending request…' : recipient.requestLabel('grounding')}</button> : null
-  const reportCaption = accepted ? hasGaps ? 'Accepted with gaps' : 'Accepted by you' : stale ? 'Report needs updating' : 'Agent report · Not accepted yet'
-  const reportState = accepted ? (hasGaps ? 'accepted-with-gaps' : 'accepted') : stale ? 'stale' : 'reported'
+  const unknownDecision = grounding?.unknownDecision
+  const closingReasons = new Map(unknownDecision?.checks.map(check => [check.criterionId, check.reason]))
+  const reportCaption = accepted ? unknownDecision ? 'Closed with unverified results' : hasGaps ? 'Accepted with gaps' : 'Accepted by you' : stale ? 'Report needs updating' : 'Agent report · Not accepted yet'
+  const reportState = accepted ? unknownDecision ? 'closed-unverified' : hasGaps ? 'accepted-with-gaps' : 'accepted' : stale ? 'stale' : 'reported'
   const reportActions = grounding ? <>
     {!accepted && !stale && resultExplanation ? <p className="goals-condition">{resultExplanation}</p> : null}
     {accepted && hasGaps ? <p className="goals-condition">You accepted this result with the reported gaps. Those gaps remain part of the record.</p> : null}
@@ -137,11 +139,11 @@ export function GoalAlignment({ demand, emphasis, onGrill, onGrounding, motePend
       <div className="goal-review__body">
         {currentReport ? <p className="goals-proposal" data-goal-summary>{alignment!.summary}</p> : stale ? <p className="goals-proposal">{grounding.summary}</p> : null}
         {currentReport ? <>
-          <div className="goals-result-checks">{resultChecks.map(criterion => <GoalResultCheck key={criterion.id} criterionId={criterion.id} criterion={criterion.text} check={criterion.check} stale={false} currentCriterion />)}</div>
+          <div className="goals-result-checks">{resultChecks.map(criterion => <GoalResultCheck key={criterion.id} criterionId={criterion.id} criterion={criterion.text} check={criterion.check} stale={false} currentCriterion closingReason={closingReasons.get(criterion.id)} />)}</div>
           {extraChecks.length ? <div className="goal-review__extra-checks"><h3>Additional reported checks</h3>{extraChecks.map(check => <GoalResultCheck key={check.criterionId} criterionId={check.criterionId} criterion={`Reported criterion: ${check.criterionId}`} check={check} stale={false} />)}</div> : null}
           {alignment!.openQuestions.length ? <div className="goals-open-questions"><h3>Decisions needed</h3><ul>{alignment!.openQuestions.map((question, i) => <li key={i}>{question}</li>)}</ul></div> : null}
           {definitionActions}
-        </> : grounding.checks.map(check => <GoalResultCheck key={check.criterionId} criterionId={check.criterionId} criterion={`Reported criterion: ${check.criterionId}`} check={check} stale={false} />)}
+        </> : grounding.checks.map(check => <GoalResultCheck key={check.criterionId} criterionId={check.criterionId} criterion={`Reported criterion: ${check.criterionId}`} check={check} stale={false} closingReason={closingReasons.get(check.criterionId)} />)}
       </div>
     </details>
     {reportActions}
@@ -181,7 +183,7 @@ export function GoalAlignment({ demand, emphasis, onGrill, onGrounding, motePend
 
 }
 
-function GoalResultCheck({ criterionId, criterion, check, stale, currentCriterion = false }: { criterionId: string; criterion: string; check: DemandGroundingCheck | undefined; stale: boolean; currentCriterion?: boolean }) {
+function GoalResultCheck({ criterionId, criterion, check, stale, closingReason, currentCriterion = false }: { criterionId: string; criterion: string; check: DemandGroundingCheck | undefined; stale: boolean; closingReason?: string | undefined; currentCriterion?: boolean }) {
   const [evidenceRead, setEvidenceRead] = useState(false)
   const outcome = stale ? 'stale' : check?.outcome ?? 'missing'
   const Icon = outcome === 'met' ? ThemeStatusCompletedIcon : outcome === 'gap' ? ThemeStatusGapIcon : ThemeStatusUnknownIcon
@@ -189,6 +191,7 @@ function GoalResultCheck({ criterionId, criterion, check, stale, currentCriterio
   return <div className="goals-result-check" data-goal-criterion-id={criterionId} data-goal-outcome={outcome}>
     <div className="goals-result-check__heading"><strong {...(currentCriterion ? { 'data-goal-success-criterion': criterionId } : {})}>{criterion}</strong><span><Icon size={12} />{label}</span></div>
     {check?.note ? <p className="goals-result-note">{check.note}</p> : null}
+    {closingReason ? <p className="goals-result-note"><strong>Reason for closing</strong> {closingReason}</p> : null}
     {check?.evidence.length ? <details className="goal-review__evidence" onToggle={event => { if (event.currentTarget.open) setEvidenceRead(true) }}>
       <summary>{check.evidence.length} {check.evidence.length === 1 ? 'evidence reference' : 'evidence references'}</summary>
       {evidenceRead ? <GoalEvidence evidence={check.evidence} criterion={criterion} /> : null}
