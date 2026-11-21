@@ -6,7 +6,7 @@ import { NoteFileContext, useNoteFileResource, resolveNoteSourceResource } from 
 import { retainNoteDraftEditor, retainNoteDraftNavigation, observeNoteDraftNavigation, notePendingSourceDecorations, observeNotePendingSource } from '../lib/note-share-staging'
 import { NoteSharedContext } from '../lib/note-shared-context'
 import { RovingToolbar, RovingToolbarButton } from '@agentmux/client-ui/components/RovingToolbar'
-import { createContext, lazy, Suspense, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type Ref } from 'react'
+import { createContext, lazy, Suspense, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type Ref } from 'react'
 import { Decoration, Extension, isTextSelection, type Editor, type JSONContent } from '@tiptap/core'
 import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, useEditorState, type NodeViewProps } from '@tiptap/react'
 import { useWorkbenchDocument } from '../lib/workbench-document'
@@ -128,12 +128,13 @@ export function ReadOnlyBlock({ content }: { content: JSONContent }) {
 }
 
 export type NoteEditorHandle = { onNavigationReady?: (listener: () => void) => () => void; editor: Editor; focusBlock: (blockId: string, focus?: boolean, reveal?: boolean) => boolean; bindLink: (link: NoteLinkOpenRequest, target: NoteLinkTarget) => boolean }
-export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onIssue, handleRef, onSelectedBlock, onOpenLink, onCompositionChange, onSnapshotIssue, onKeepDisplayedDraft, active = true, showBacklinks = true, sourceIdentity = note.noteId }: {
+export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onIssue, handleRef, onSelectedBlock, onOpenLink, onCompositionChange, onSnapshotIssue, onKeepDisplayedDraft, active = true, showBacklinks = true, sourceIdentity = note.noteId, afterEditor }: {
   note: NoteDocument; knowledge: NoteKnowledge; onChange: (raw: string, editorBefore?: string) => void; onOpen: (source: NoteSource, blockId: string) => void
   onSave: () => void; onIssue: (message: string | null) => void; handleRef?: Ref<NoteEditorHandle | null>; onSelectedBlock?: (target: NoteBlockTarget) => void
   onOpenLink?: ((link: NoteLinkOpenRequest) => void) | undefined; onCompositionChange?: ((composing: boolean) => void) | undefined; active?: boolean; showBacklinks?: boolean; sourceIdentity?: string
   onSnapshotIssue?: ((displayedRaw: string, incomingRaw: string, reason: string) => void) | undefined
   onKeepDisplayedDraft?: ((displayedRaw: string, incomingRaw: string) => void) | undefined
+  afterEditor?: ReactNode
 }) {
   const resource = useNoteFileResource()
   const attachments = useNoteAttachments(resource ?? undefined)
@@ -466,5 +467,5 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
         : <p className="note-scope">Select a block to see its exact incoming references.</p>}
       {knowledge.invalid.length ? <p className="note-knowledge-notice" role="status">{knowledge.invalid.length} Note file could not be indexed. Its original source is preserved.</p> : null}
     </details> : null}
-  </div></ReferenceContext.Provider>
+  </div>{afterEditor}</ReferenceContext.Provider>
 }

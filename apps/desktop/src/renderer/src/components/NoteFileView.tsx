@@ -174,6 +174,12 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
   if (read.status === 'invalid') return <div className="note-file-view"><div className="note-invalid" role="status"><strong>Note source needs attention</strong>
     <p>{read.message}</p><p>The original source is preserved. Use Source to inspect it; no block identities have been repaired.</p></div>{footer}</div>
   const identityIcon = <NoteFileIdentity key={sourceIdentity} scope={sourceIdentity} document={document} resource={resource} dirty={dirty} active={presentation.active} />
+  const cardSection = cards.length ? <section className="recall-knowledge-cards" aria-label="Knowledge cards">
+    <h2>Knowledge cards</h2>
+    {cards.map(({ blockId, card, body }) => <RecallKnowledgeCard kind="Reading point" key={blockId} title={card.title} actions={
+      <RecallCardLink onOpen={() => { void openRecallCardRecord(card).then(opened => { if (!opened) setOriginalRecord(card) }).catch(error => setIssue(presentError(error))) }}>Open original message</RecallCardLink>
+    }>{presentation.active && body?.length ? <RecallSavedBody body={body} /> : null}</RecallKnowledgeCard>)}
+  </section> : null
   return <NoteFileLinkContext.Provider value={openAttachment}><NoteFileContext.Provider value={resource ?? parentResource}><div className="note-file-view">
     {restoreIssue || issue ? <div className="note-knowledge-notice" role="status">{restoreIssue || issue}</div> : null}
     {resource && catalog?.pages[read.note.noteId] && sameNoteResource(catalog.pages[read.note.noteId]!.resource, resource) ? <NotebookPageDetails key={read.note.noteId} page={catalog.pages[read.note.noteId]!} savedEditors={savedEditors}
@@ -182,7 +188,7 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
     {resource && catalog?.pages[read.note.noteId] && !sameNoteResource(catalog.pages[read.note.noteId]!.resource, resource) ? <p className="note-knowledge-notice" role="status">This file has a different recorded Note location. Editing stays available; recover its Notebook history or inspect the original resource.</p> : null}
     {resource && registered && toolbar && toolbar.documentKey === documentKey(resource.workspaceId, document.path) ? createPortal(identityIcon, toolbar.element) : null}
     <div className="note-original-editor">
-    <NoteBlockEditor note={read.note} knowledge={knowledge} onChange={onChange} onSave={onSave} onOpen={onOpen} onIssue={setIssue} handleRef={attachHandle} onOpenLink={links.openLink} active={presentation.active} showBacklinks={!hasLinkedReferences} sourceIdentity={sourceIdentity} {...(onSelectedBlock ? { onSelectedBlock } : {})} {...(onCompositionChange ? { onCompositionChange } : {})}
+    <NoteBlockEditor note={read.note} knowledge={knowledge} onChange={onChange} onSave={onSave} onOpen={onOpen} onIssue={setIssue} handleRef={attachHandle} onOpenLink={links.openLink} active={presentation.active} showBacklinks={!hasLinkedReferences} sourceIdentity={sourceIdentity} afterEditor={cardSection} {...(onSelectedBlock ? { onSelectedBlock } : {})} {...(onCompositionChange ? { onCompositionChange } : {})}
       {...(onSnapshotIssue ? { onSnapshotIssue: (displayedRaw: string, incomingRaw: string, reason: string) => {
         // The PM snapshot is canonical, while a file edited outside the app may
         // use different Markdown whitespace. Fence the canonical target, then
@@ -195,12 +201,6 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
     </div>
     {links.dialog}
     {originalRecord && presentation.active ? <RecallOriginalRecord key={originalRecord.id} card={originalRecord} onClose={() => setOriginalRecord(null)} /> : null}
-    {cards.length ? <section className="recall-knowledge-cards" aria-label="Knowledge cards">
-      <h2>Knowledge cards</h2>
-      {cards.map(({ blockId, card, body }) => <RecallKnowledgeCard kind="Reading point" key={blockId} title={card.title} actions={
-        <RecallCardLink onOpen={() => { void openRecallCardRecord(card).then(opened => { if (!opened) setOriginalRecord(card) }).catch(error => setIssue(presentError(error))) }}>Open original message</RecallCardLink>
-      }>{presentation.active && body?.length ? <RecallSavedBody body={body} /> : null}</RecallKnowledgeCard>)}
-    </section> : null}
     {footer}
   </div></NoteFileContext.Provider></NoteFileLinkContext.Provider>
 }
