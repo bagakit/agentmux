@@ -12,6 +12,11 @@ describe('Terminal OSC color query replies', () => {
     expect(cssColorToOscRgb('rgb(40 44 52)')).toBe('rgb:2828/2c2c/3434')
   })
 
+  it('reports no work for ordinary bytes but clears a split escape that does not continue', () => {
+    expect(scanTerminalOscColorQueries('正常输出\x1b[31mnormal\x1b[0m', '', colors)).toBeNull()
+    expect(scanTerminalOscColorQueries('ordinary text', '\x1b', colors)).toEqual({ remainder: '', replies: [] })
+  })
+
   it('answers foreground and background queries without touching normal output', () => {
     const result = scanTerminalOscColorQueries(
       `before\x1b]10;?\x07middle\x1b]11;?\x1b\\after`,
@@ -31,7 +36,7 @@ describe('Terminal OSC color query replies', () => {
     const first = scanTerminalOscColorQueries('prompt\x1b]10;?;', '', colors)
     expect(first).toEqual({ remainder: '\x1b]10;?;', replies: [] })
 
-    const second = scanTerminalOscColorQueries('?\x1b\\tail', first.remainder, colors)
+    const second = scanTerminalOscColorQueries('?\x1b\\tail', first!.remainder, colors)
     expect(second).toEqual({
       remainder: '',
       replies: [

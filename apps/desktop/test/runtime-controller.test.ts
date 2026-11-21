@@ -2907,6 +2907,43 @@ describe('RuntimeController configuration transaction', () => {
     }
   })
 
+  it('live byte traffic does not construct a decoder and reaches the Desktop intact', async () => {
+    const controller = await configuredController()
+    const renderer = webContentsFixture()
+    const detach = controller.attach(renderer)
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const data = '普通终端输出\r\n'
+    const dataBytes = Buffer.from(data)
+    const count = 512
+    const constructed = vi.fn()
+    const OriginalDecoder = globalThis.TextDecoder
+    vi.stubGlobal('TextDecoder', class extends OriginalDecoder {
+      constructor(...args: ConstructorParameters<typeof OriginalDecoder>) {
+        super(...args)
+        constructed()
+      }
+    })
+    try {
+      for (let index = 0; index < count; index++) {
+        client.eventListener?.({
+          type: 'terminal-output', run: { runId: 'run-1' }, agentSessionId: 'agent-1', data, dataBytes,
+          evidence: { source: 'terminal-output', observedAt: 1,
+            outputByteRange: { startByte: index * dataBytes.length, endByte: (index + 1) * dataBytes.length } }
+        } satisfies AgentMuxClientEvent)
+      }
+      expect(renderer.send).toHaveBeenCalledTimes(count)
+      expect(vi.mocked(renderer.send).mock.calls.at(-1)?.[1]).toMatchObject({
+        type: 'core', hostId: 'local', event: { type: 'terminal-output', run: { runId: 'run-1' },
+          dataBytes, evidence: { outputByteRange: { endByte: count * dataBytes.length } } }
+      })
+      expect(client.writeAgent).not.toHaveBeenCalled()
+      expect(constructed).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllGlobals()
+      detach()
+    }
+  })
+
   it('answers split Codex color queries only after Core publishes the ready Agent Session', async () => {
     const controller = await configuredController()
     controller.setTerminalViewColors({ foreground: '#ffffff', background: '#000000' })
@@ -2968,13 +3005,17 @@ describe('RuntimeController configuration transaction', () => {
       evidence:{source:'terminal-output',observedAt:_reshape_fixtureEpoch(0, 0, 1),outputByteRange:{startByte:100,endByte:afterByte}}} satisfies AgentMuxClientEvent)
     await vi.waitFor(()=>expect(client.writeAgent).toHaveBeenCalledExactlyOnceWith({ agentSessionId: 'agent-1', expectedRun: { runId: 'run-1' }, source: 'terminal-protocol', data: '\x1b]11;rgb:0000/0000/0000\x1b\\' }))
     client.writeAgent.mockClear()
-    const data=old+'?\x07'
+    const data=old+'?'
+    const beforeTerminator=100+Buffer.byteLength(data)
     client.eventListener?.({type:'terminal-snapshot',agentSessionId:'agent-1',afterByte,
       run:{runId:'run-1',kind:'agent',providerId:'codex',executorId:'codex',agentSessionId:'agent-1',workspacePath:_hygiene_fixturePath("repo"),
-        pid:123,state:'running',cols:80,rows:24,observedAt:_reshape_fixtureEpoch(0, 0, 2),latestOutputBytes:100+Buffer.byteLength(data),acceptedInputBytes:0},
+        pid:123,state:'running',cols:80,rows:24,observedAt:_reshape_fixtureEpoch(0, 0, 2),latestOutputBytes:beforeTerminator+1,acceptedInputBytes:0},
       terminal:{type:'basic-vt',checkpoint:{runId:'run-1',throughByte:100,resizeRevision:0,size:{cols:80,rows:24}},
         restoreBytes:Buffer.from('\x1b]10;?\x07'),resizes:[]},gap:null,resizeRevision:0,
-      replay:[{type:'data',runId:'run-1',startByte:100,endByte:100+Buffer.byteLength(data),data,dataBytes:Buffer.from(data)}]} satisfies AgentMuxClientEvent)
+      replay:[
+        {type:'data',runId:'run-1',startByte:100,endByte:beforeTerminator,data,dataBytes:Buffer.from(data)},
+        {type:'data',runId:'run-1',startByte:beforeTerminator,endByte:beforeTerminator+1,data:'\x07',dataBytes:Buffer.from('\x07')}
+      ]} satisfies AgentMuxClientEvent)
     await vi.waitFor(()=>expect(client.writeAgent).toHaveBeenCalledExactlyOnceWith({ agentSessionId: 'agent-1', expectedRun: { runId: 'run-1' }, source: 'terminal-protocol', data: '\x1b]10;rgb:ffff/ffff/ffff\x1b\\' }))
   })
 
