@@ -49,6 +49,8 @@ Goal 的委派沿 Core 原通信 dispatch 和实际独立 AgentSession，保存�
 
 当前 Supervisor 管理其 Goal 中的执行者。它可给短期执行者安排下一项已就绪的工作，也可显式关闭原委派所绑定 Session 的准确当前 Run。原 Host 核对当前 Supervisor、原委派及执行 owner，Core 核对所指 Run。原委派消息、Ticket、交付与回收的身份，及已知的其他职责、草稿和在途输入随结果返回，供 Supervisor 决定和跟进。关闭使用原 Stop，保留原报告、工作面输入及恢复身份。Supervisor 可沿同一 Goal 和原操作读取 Stop 回执，未知仍按未知返回。
 
+Supervisor 显式关闭时，Goal owner 在实际发起 Stop 前冻结这次操作已经查到的责任及输入观察，并按原操作回读。采样有界，未知或观察保存失败随回执说明，已获授权的 Stop 继续执行。已有 Stop 回执缺少原采样时保留未知；重试和进程重启不得以新的观察补写历史。
+
 执行者确认交接后，可为自己的原 Run 发起条件收尾。原 Host 查当前尝试、现任回收、其他职责与原空间绑定。原 Desktop 在与 composer 编辑、文字组成和客户端队列相同的输入顺序中，为准确 Session、Run 和 Stop 操作取得一次准入。关闭工作面或没有挂载不代表草稿清空。先于该准入的原草稿、正在组成的输入、待发或正在保存的提交会保留 Run。准入后的编辑仍可进行，新的发送意图留在原队列，供用户核对并显式发送。Desktop 只把不含正文的准入回执交给 Host。
 
 Core 在准确 Run 的 Stop 预约时核对原输入 journal，Goal owner 在同一段预约期保持原责任快照。先保存的在途输入和已有新职责保留 Run。预约后，原 journal 对目标 Run 的新提交返回明确的未提交结果。Desktop、Host 或回执失联时沿同一 Stop 操作核对，保留原草稿、队列、交付和操作身份。Desktop 的准入记录保持为可核对的输入事实，最终停止状态由 Core 原回执确定。独立评审继续决定 Ticket 的完成和后继解锁，人的验收沿原 Goal 结果合同。
