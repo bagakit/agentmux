@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
-import { createHash } from 'node:crypto'
-import { copyFile, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
+import { candidateHash as hash, fingerprintSources, nativeCandidateSources, compileNativeCandidate, runCandidateProgram } from './lib/native-candidate.mjs'
 
 const root = resolve(import.meta.dirname, '../../..'), mode = process.argv[2]
 assert.ok(['contract', 'codex', 'claude', 'surface', 'integration'].includes(mode), 'Choose contract, codex, claude, surface or integration.')
@@ -10,40 +9,13 @@ const evidence = join(root, '.bagakit/agent-information-model/verification', mod
 // All modes reuse one private candidate. Source changes invalidate its compile receipt.
 const candidate = join(root, '.local/agent-information/candidate')
 const config = 'packages/core/test/agent-information-gate.config.mts'
-const hash = value => createHash('sha256').update(value).digest('hex')
 const read = path => readFile(join(root, path))
 await mkdir(evidence, { recursive: true })
 
-async function fingerprints(directory, nested = false) {
-  const result = {}
-  for (const entry of await readdir(join(root, directory), { withFileTypes: true })) {
-    const path = directory + '/' + entry.name
-    if (entry.isDirectory()) Object.assign(result, await fingerprints(path, true))
-    else if (/\.(?:ts|tsx|json|css|svg)$/u.test(entry.name)) result[path] = hash(await read(path))
-  }
-  if (!nested) assert.ok(Object.keys(result).length, 'A candidate source collection must be nonempty: ' + directory)
-  return result
-}
-function runProgram(program, args, env = {}, timeoutMs = 120000) {
-  return new Promise((done, reject) => {
-    const child = spawn(program, args, { cwd: root, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] })
-    let stdout = '', stderr = ''
-    child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8')
-    child.stdout.on('data', value => { stdout += value }); child.stderr.on('data', value => { stderr += value })
-    const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs)
-    child.once('error', error => { clearTimeout(timer); reject(error) })
-    child.once('close', (code, signal) => { clearTimeout(timer); done({ code, signal, stdout, stderr }) })
-  })
-}
-const run = (args, env, timeout) => runProgram(process.execPath, args, env, timeout)
-const before = { ...await fingerprints('packages/core/src'), ...await fingerprints('packages/providers/src') }
-const productionSources = { ...before }
-for (const path of ['tsconfig.base.json', 'packages/core/tsconfig.json', 'packages/core/tsconfig.build.json',
-  'packages/providers/tsconfig.json', 'packages/core/package.json', 'packages/providers/package.json',
-  'packages/core/bin/amux', 'packages/core/native/native-socket-peer.c']) before[path] = hash(await read(path))
-const compileDigest = hash(JSON.stringify(before))
-const providersDigest = hash(JSON.stringify(Object.fromEntries(Object.entries(before).filter(([path]) =>
-  path.startsWith('packages/providers/') || path === 'tsconfig.base.json'))))
+const fingerprints = directory => fingerprintSources(root, directory)
+const run = (args, env, timeout) => runCandidateProgram(root, process.execPath, args, env, timeout)
+const { sources: productionSources, inputs: compileInputs } = await nativeCandidateSources(root)
+const before = { ...compileInputs }
 const oldMode = process.env.AMX_INFORMATION_MODE
 process.env.AMX_INFORMATION_MODE = mode
 const { informationTests, informationMutations } = await import('../test/agent-information-gate.config.mts')
@@ -63,68 +35,7 @@ if (mode === 'surface' || mode === 'integration') {
     'apps/desktop/scripts/fixtures/conversation-latest-auto/vitest.owning.config.mts']) before[path] = hash(await read(path))
 }
 
-let compiledReceipt
-try { compiledReceipt = JSON.parse(await readFile(join(candidate, 'compiled.json'), 'utf8')) } catch { /* No reusable candidate. */ }
-const reused = compiledReceipt?.digest === compileDigest
-if (!reused) {
-  for (const name of ['core', 'providers']) {
-    await mkdir(join(candidate, name, 'dist'), { recursive: true })
-    await copyFile(join(root, 'packages', name, 'package.json'), join(candidate, name, 'package.json'))
-    try { await symlink(join(root, 'packages', name, 'node_modules'), join(candidate, name, 'node_modules'), 'dir') }
-    catch (error) { if (error.code !== 'EEXIST') throw error }
-  }
-  await mkdir(join(candidate, 'core/bin'), { recursive: true })
-  await copyFile(join(root, 'packages/core/bin/amux'), join(candidate, 'core/bin/amux'))
-  try { await symlink(join(root, 'packages/core/vendor'), join(candidate, 'core/vendor'), 'dir') }
-  catch (error) { if (error.code !== 'EEXIST') throw error }
-  let previousProviders
-  try { previousProviders = JSON.parse(await readFile(join(candidate, 'providers-compiled.json'), 'utf8')) } catch { /* No previous Provider compile. */ }
-  if (previousProviders?.digest !== providersDigest) {
-    await rm(join(candidate, 'providers/dist'), { recursive: true, force: true })
-    const providers = await run(['node_modules/typescript/bin/tsc', '-p', 'packages/providers/tsconfig.json',
-      '--incremental', 'false', '--composite', 'false', '--outDir', join(candidate, 'providers/dist')])
-    await writeFile(join(evidence, 'providers-compile.log'), providers.stdout + providers.stderr)
-    assert.equal(providers.code, 0, 'The exact candidate Providers must compile; see providers-compile.log.')
-    await writeFile(join(candidate, 'providers-compiled.json'), JSON.stringify({ digest: providersDigest }) + '\n')
-  }
-  // Core consumes declarations compiled from this same Provider source, even when node_modules is shared.
-  const manifest = JSON.parse(await read('packages/providers/package.json'))
-  const paths = Object.fromEntries(Object.entries(manifest.exports).flatMap(([key, entry]) => entry.types ? [[
-    '@agentmux/providers' + (key === '.' ? '' : key.slice(1)), [resolve(candidate, 'providers', entry.types)]
-  ]] : []))
-  const project = join(candidate, 'core.build.json')
-  await writeFile(project, JSON.stringify({ extends: join(root, 'packages/core/tsconfig.build.json'),
-    compilerOptions: { paths, incremental: false, composite: false, outDir: join(candidate, 'core/dist') } }))
-  await rm(join(candidate, 'core/dist'), { recursive: true, force: true })
-  const core = await run(['node_modules/typescript/bin/tsc', '-p', project])
-  await writeFile(join(evidence, 'core-compile.log'), core.stdout + core.stderr)
-  assert.equal(core.code, 0, 'The exact candidate Core must compile; see core-compile.log.')
-  let helper
-  if (process.platform === 'darwin') {
-    const executable = join(candidate, 'core/dist/native-socket-peer-darwin')
-    const result = await runProgram('cc', ['-std=c11', '-Wall', '-Wextra', '-Werror', '-O2',
-      join(root, 'packages/core/native/native-socket-peer.c'), '-o', executable], {}, 10000)
-    await writeFile(join(evidence, 'native-helper-compile.log'), result.stdout + result.stderr)
-    assert.equal(result.code, 0, 'The private native helper must compile with the production flags.')
-    helper = { sourceSHA256: before['packages/core/native/native-socket-peer.c'], executableSHA256: hash(await readFile(executable)) }
-  }
-  compiledReceipt = { digest: compileDigest, ...(helper ? { helper } : {}) }
-  await writeFile(join(candidate, 'compiled.json'), JSON.stringify(compiledReceipt, null, 2) + '\n')
-}
-const compiledInputs = {}
-for (const name of ['core', 'providers']) {
-  const walk = async directory => {
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
-      const path = join(directory, entry.name)
-      if (entry.isDirectory()) await walk(path)
-      else if (entry.name.endsWith('.js')) compiledInputs[relative(candidate, path)] = hash(await readFile(path))
-    }
-  }
-  await walk(join(candidate, name, 'dist'))
-}
-assert.ok(Object.keys(compiledInputs).length && compiledInputs['core/dist/agentmux.js'], 'The compiled product CLI must exist.')
-assert.ok(compiledInputs['core/dist/public-rpc-server.js'] && compiledInputs['core/dist/control-endpoint-listener-worker.js'],
-  'The real public Server and its package-owned listener worker must belong to this candidate.')
+const { receipt: compiledReceipt, compiled: compiledInputs, reused } = await compileNativeCandidate(root, candidate, evidence, compileInputs)
 process.stdout.write(JSON.stringify({ mode, compiled: 'ready', reused }) + '\n')
 
 async function execute(label, mutation) {
@@ -182,7 +93,7 @@ async function execute(label, mutation) {
     const implementations = [...loaded, ...compiled].filter(input => input.mutation === mutation && input.sha256 !== input.originalSHA256)
     const failed = report.testResults.flatMap(file => file.assertionResults).filter(test => test.status === 'failed')
     assert.ok(implementations.length, 'The actual mutant implementation must load: ' + mutation)
-    assert.ok(result.code !== 0 && failed.some(test => test.failureMessages.some(message => /AssertionError|expected |promise resolved .* instead of rejecting/u.test(message))),
+    assert.ok(result.code !== 0 && failed.some(test => test.failureMessages.some(message => /AssertionError|expected |promise (?:resolved .* instead of rejecting|rejected .* instead of resolving)/u.test(message))),
       'The mutation must fail a behavior assertion, rather than collection or a timeout: ' + mutation)
     return { mutation, result: 'assertion-red', failed: failed.map(test => test.fullName), implementations }
   }
@@ -196,7 +107,7 @@ process.stdout.write(JSON.stringify({ mode, baseline }) + '\n')
 const mutations = mode === 'contract' ? ['wrong-native-information', 'fake-model-ack', 'public-information-detached']
   : mode === 'codex' ? ['codex-native-identity', 'codex-fake-ack', 'codex-original-request-id', 'codex-reset-unit', 'codex-duplicate-dispatch']
   : mode === 'claude' ? ['claude-information-detached', 'claude-information-repeated', 'claude-reset-unit', 'claude-information-not-saved', 'claude-old-sequence', 'claude-gap-ignored']
-  : mode === 'surface' ? ['surface-old-run-adopted', 'surface-unknown-ack-applied', 'surface-remote-host-detached']
+  : mode === 'surface' ? ['surface-push-disconnected', 'surface-unknown-ack-applied', 'surface-remote-host-detached']
   : ['owner-sdk-reference', 'owner-null-retained', 'owner-newer-ack-erased']
 const reds = []
 for (const mutation of mutations) {
