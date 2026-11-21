@@ -267,6 +267,8 @@ Core 仍登记的 Session 没有任何已确认 Region 时，Focus 只说明缺�
 
 #### Space 关系与显示项目
 
+Focus 卡片和紧凑列表用原 Session 的准确执行 Host 显示远端设备。跨 Core 成员的 Host ID 属于原 Runtime 的命名空间，通过已核对属于该 Runtime 的连接表达执行设备。连接状态读取该设备现有的 Runtime RPC 通道观察，区分确认断开、正在连接和未确认。连接、执行活动、Space 归属分别判断。断开时保留原卡片、已有归属、最近已知的工作内容和原草稿，连接诊断沿同一 Host 查阅。重连继续按原 Host 刷新归属，卡片复用既有观察。
+
 Focus 分别保留原业务 Space／Zone 绑定、窗口中的显示位置，以及 Agent 与工具资源的执行位置。业务关系由原 Core 持有；显示位置沿已确认的 display Workspace／Group／Tab／Region occurrence；Agent 启动 Host／cwd、工具目录、当前焦点和标题均不替代这两种关系。原业务 Space 与显示项目不同须能分别核对，显示在一个项目窗口不自动把成员写入该业务 Space，也不迁移资源或改写原分端绑定。
 
 Focus 的项目分组和筛选优先使用完整、已确认的显示关系；显示项目所在 Host 与成员 Agent 所在 Host 可以不同。同一 Context 的多个合法位置按集合保留。普通 Agent 没有已知显示位置时，使用原 Core 确认的 Folder 绑定；无该绑定时，使用原 Session 执行 Host 上登记且与执行目录精确匹配的工作区作为执行项目。原业务归属继续独立可读，只有它能声明共享业务成员关系。归组不补写位置，工作面为空与位置观察未确认分别可读。内容类型、Topic／Mote 身份及 Branch／worktree 关系仍沿各自原事实。
