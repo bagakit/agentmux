@@ -332,6 +332,36 @@ describe('actual Mote caller uses the shared Space workbench frame', () => {
     expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
   })
 
+  it('lets the focused Terminal receive Escape without dismissing the Mote', async () => {
+    await open()
+    const panel = app.panel()
+    // The full App fixture substitutes the native terminal; supply its focusable DOM.
+    const terminal = document.createElement('div')
+    const textarea = document.createElement('textarea')
+    terminal.classList.add('xterm')
+    terminal.append(textarea)
+    panel.append(terminal)
+    textarea.focus()
+    expect(document.activeElement).toBe(textarea)
+
+    const receive = vi.fn()
+    textarea.addEventListener('keydown', receive)
+    const pressEscape = (target: HTMLElement) => act(async () => {
+      target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    })
+    await pressEscape(textarea)
+    expect(receive).toHaveBeenCalledOnce()
+    expect(readPmoTeamsTopicFloatingState().open).toBe(true)
+    expect(document.activeElement).toBe(textarea)
+    expect(useAppStore.getState().agentComposerDrafts[defaultAgent.id]).toBe('Default unsent')
+    expect(app.stop).not.toHaveBeenCalled()
+
+    const close = panel.querySelector<HTMLButtonElement>('[aria-label="Close Mote"]')!
+    close.focus()
+    await pressEscape(close)
+    expect(readPmoTeamsTopicFloatingState().open).toBe(false)
+  })
+
   it('lets an open inner popover own Escape while its invoker holds focus', async () => {
     await open()
     await act(async () => updateFloating({ reference: { displayWorkspaceId: 'project', groupId: 'missing-group', tabId: defaultTab.id, regionId: 'default-region' } }))
