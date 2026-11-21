@@ -43,6 +43,19 @@ export const AUTHORED_ICON_DEFINITIONS = {
       motion: { kind: "still", animation: "none", description: "对象轮廓与连接保持静止，当前活动由独立状态槽表达。", trigger: "原Workflow对象或目的地显示；不表示当前执行、阶段数或进度。" }
     }
   },
+  "messages-envelope": {
+    shapes: [
+      ["path", {
+        d: "M3.25 3.25H20.75Q23.25 3.25 23.25 5.75V19.25Q23.25 21.75 20.75 21.75H3.25Q.75 21.75 .75 19.25V5.75Q.75 3.25 3.25 3.25Z " +
+           "M3.3 5.05 11.37 8.56Q12 8.84 12.63 8.56L20.7 5.05Q21.35 4.77 21.62 5.36Q21.86 5.93 21.24 6.24L13.01 10.03Q12 10.49 10.99 10.03L2.76 6.24Q2.14 5.93 2.38 5.36Q2.65 4.77 3.3 5.05Z",
+        fill: "currentColor", stroke: "none", "fill-rule": "evenodd"
+      }]
+    ],
+    design: {
+      rest: "Filled envelope with a recessed flap. The uninterrupted lower face carries the Session Inbox count.",
+      motion: { kind: "still", animation: "none", description: "Static envelope.", trigger: "Session Messages button." }
+    }
+  },
   "agent-unit": {
     shapes: [["path", {"d":"M8 3h8a5 5 0 0 1 5 5v8a5 5 0 0 1-5 5H8a5 5 0 0 1-5-5V8a5 5 0 0 1 5-5Z M8.5 10.2a1.5 2 0 1 0 0 4 1.5 2 0 1 0 0-4Z M15.5 10.2a1.5 2 0 1 0 0 4 1.5 2 0 1 0 0-4Z", "fill":"currentColor", "stroke":"none", "fill-rule":"evenodd"}]],
     design: {

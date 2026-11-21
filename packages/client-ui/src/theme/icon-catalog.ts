@@ -307,6 +307,7 @@ export const SEMANTIC_ICON_CATALOG = {
   'object.boundary': { label: 'Boundary', glyph: 'square-dashed' },
   'action.repeat': { label: 'Repeat', glyph: 'repeat-2' },
   'object.mail': { label: 'Mail', glyph: 'mail' },
+  'object.session-messages': { label: 'Session Messages', glyph: 'messages-envelope' },
   'status.host-unavailable': { label: 'Host Unavailable', glyph: 'server-off' },
   'object.criteria': { label: 'Criteria', glyph: 'list-checks' },
   'object.board': { label: 'Board', glyph: 'layout-dashboard' },
