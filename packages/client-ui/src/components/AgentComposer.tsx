@@ -185,8 +185,8 @@ export function AgentComposer({
         </div>
         <div>
           <div className="composer-session-controls" role="group" aria-label="Session controls">
-            {configurationTool}
-            {contextUsage}
+            {configurationTool || contextUsage ? <div className="composer-session-controls__settings">{configurationTool}{contextUsage}</div> : null}
+            {mailbox || identity ? <div className="composer-session-controls__activity">{mailbox}{identity}</div> : null}
             <button
               type="button"
               className={`composer-send${primaryAction === 'stop' ? ' composer-send--working' : ''}`}
@@ -199,8 +199,6 @@ export function AgentComposer({
                 ? <SemanticIcon name="action.stop" size={12} fill="currentColor" strokeWidth={0} aria-hidden="true" />
                 : <SemanticIcon name="action.submit" size={15} aria-hidden="true" />}
             </button>
-            {mailbox}
-            {identity}
           </div>
         </div>
       </div>

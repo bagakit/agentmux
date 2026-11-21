@@ -178,7 +178,7 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
     keepOpen()
     clearTimeout(openTimer.current)
     if (disclosure && (!trigger.current?.isConnected || trigger.current.closest('[inert]') || document.visibilityState === 'hidden')) return
-    if (!visible) return
+    if (!visible || actionDisclosure && position) return
     if (!position && document.activeElement?.nodeType === 1 && document.activeElement !== trigger.current) previousFocus.current = document.activeElement as HTMLElement
     const bounds = trigger.current?.getBoundingClientRect()
     if (bounds) {
@@ -216,7 +216,7 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
     return listenForAvatarDisclosureDismissal(document, trigger, panel, latestClose, closeTimer, openTimer)
   }, [disclosure?.scope, document])
   useEffect(() => {
-    if (!position) return
+    if (!position || actionDisclosure) return
     // A fixed portal becomes stale when the dock or page scrolls. Dismiss it so the
     // next hover/focus computes a fresh anchor instead of leaving a panel detached
     // from its identity mark (especially important beside native Browser surfaces).
@@ -225,7 +225,7 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
       // Scrolling the panel itself must remain possible for long executor details;
       // a scroll of the trigger's ancestor invalidates the fixed anchor.
       if (panel.current?.contains(event.target as Node)) return
-      if (actionDisclosure && pinned.current || inlineLabel !== undefined &&
+      if (inlineLabel !== undefined &&
         (document.activeElement === trigger.current || panel.current?.contains(document.activeElement))) show()
       else closeNow()
     }
@@ -235,7 +235,7 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
       window.removeEventListener('resize', dismiss)
       window.removeEventListener('scroll', dismiss, true)
     }
-  }, [position, document, overlayHost])
+  }, [position, Boolean(actionDisclosure), document, overlayHost])
   useLayoutEffect(() => {
     const reference = controlledReference.current, surface = panel.current
     if (!position || !reference || !surface) return
@@ -257,54 +257,72 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
     return () => { disposed = true; stop() }
   }, [position, document, overlayHost])
   useLayoutEffect(() => {
-    if (!position || !panel.current || controlledReference.current) return
-    let bounds = panel.current.getBoundingClientRect()
+    if (!position || !panel.current || controlledReference.current || actionDisclosure) return
+    const bounds = panel.current.getBoundingClientRect()
     const triggerBounds = trigger.current?.getBoundingClientRect()
-    let left = position.left, top = position.top
-    if (actionDisclosure) {
-      const surface = trigger.current?.closest<HTMLElement>('.agent-surface')
-      const regionBounds = trigger.current?.closest<HTMLElement>('[data-workbench-region-id]')?.getBoundingClientRect()
-      const composer = surface?.querySelector<HTMLElement>('.composer')?.getBoundingClientRect()
-      const terminal = surface?.querySelector<HTMLElement>('.terminal-view__xterm')?.getBoundingClientRect()
-      const regionMinTop = Math.max(8, (regionBounds?.top ?? 0) + 8)
-      const composerEdge = Math.min(window.innerHeight - 8, composer?.top ?? triggerBounds?.top ?? window.innerHeight) - 6
-      const aboveBottom = Math.min(composerEdge, terminal ? terminal.bottom - 32 - 6 : composerEdge)
-      // A short lower split borrows window space above its Region, preserving its input edge.
-      const aboveTop = aboveBottom - regionMinTop < Math.min(360, bounds.height) ? 8 : regionMinTop
-      const belowTop = Math.max(regionMinTop, terminal ? terminal.bottom + 6 : composerEdge)
-      const belowBottom = composerEdge
-      // The native input band and Composer are separate protected areas; a pending card can lie between them.
-      const useBelow = belowBottom - belowTop > aboveBottom - aboveTop
-      const minTop = useBelow ? belowTop : aboveTop
-      const protectedBottom = useBelow ? belowBottom : aboveBottom
+    const region = trigger.current?.closest('.workbench-region')?.getBoundingClientRect()
+    const regionCanContainPanel = region && region.width >= bounds.width + 16
+    const minLeft = regionCanContainPanel ? region.left + 8 : 8
+    const maxLeft = regionCanContainPanel ? region.right - bounds.width - 8 : Math.max(8, window.innerWidth - bounds.width - 8)
+    const left = Math.min(Math.max(minLeft, position.left), maxLeft)
+    let top = Math.min(Math.max(8, position.top), Math.max(8, window.innerHeight - bounds.height - 8))
+    if (bounds.bottom > window.innerHeight - 8 && triggerBounds) top = Math.max(8, triggerBounds.top - bounds.height - 6)
+    if (top + bounds.height > window.innerHeight - 8) top = Math.max(8, window.innerHeight - bounds.height - 8)
+    if (left !== position.left || top !== position.top) setPosition({ left, top })
+  }, [position, Boolean(actionDisclosure), document, overlayHost])
+  useLayoutEffect(() => {
+    const anchor = trigger.current, face = panel.current
+    if (!position || !actionDisclosure || !anchor || !face) return
+    const surface = anchor.closest('.agent-surface')
+    const region = anchor.closest('[data-workbench-region-id]')
+    const composer = anchor.closest('.composer')
+    const terminal = surface?.querySelector('.terminal-view__xterm')
+    let frame = 0
+    const place = () => {
+      frame = 0
+      const triggerBounds = anchor.getBoundingClientRect(), regionBounds = region?.getBoundingClientRect()
+      const terminalBounds = terminal?.getBoundingClientRect()
+      const terminalBottom = terminalBounds && terminalBounds.height > 0 ? terminalBounds.bottom : undefined
+      const regionTop = Math.max(8, (regionBounds?.top ?? 0) + 8)
+      const composerEdge = Math.min(window.innerHeight - 8, composer?.getBoundingClientRect().top ?? triggerBounds.top) - 6
+      const near = terminalBottom === undefined ? undefined : { top: Math.max(regionTop, terminalBottom + 6), bottom: composerEdge }
+      const farBottom = terminalBottom === undefined ? composerEdge : Math.min(composerEdge, terminalBottom - 32 - 6)
       const minLeft = Math.max(8, (regionBounds?.left ?? 0) + 8)
       const maxRight = Math.min(window.innerWidth - 8, (regionBounds?.right ?? window.innerWidth) - 8)
-      panel.current.style.width = `${Math.min(296, Math.max(0, maxRight - minLeft))}px`
-      panel.current.style.maxHeight = `${Math.max(0, Math.min(360, protectedBottom - minTop))}px`
-      panel.current.dataset.compact = String(protectedBottom - minTop < 160)
-      bounds = panel.current.getBoundingClientRect()
-      left = Math.min(Math.max(minLeft, (triggerBounds?.right ?? left) - bounds.width), maxRight - bounds.width)
-      top = Math.max(minTop, protectedBottom - bounds.height)
-    } else {
-      const region = trigger.current?.closest('.workbench-region')?.getBoundingClientRect()
-      const regionCanContainPanel = region && region.width >= bounds.width + 16
-      const minLeft = regionCanContainPanel ? region.left + 8 : 8
-      const maxLeft = regionCanContainPanel ? region.right - bounds.width - 8 : Math.max(8, window.innerWidth - bounds.width - 8)
-      left = Math.min(Math.max(minLeft, position.left), maxLeft)
-      top = Math.min(Math.max(8, position.top), Math.max(8, window.innerHeight - bounds.height - 8))
-      if (bounds.bottom > window.innerHeight - 8 && triggerBounds) top = Math.max(8, triggerBounds.top - bounds.height - 6)
-      if (top + bounds.height > window.innerHeight - 8) top = Math.max(8, window.innerHeight - bounds.height - 8)
+      const width = Math.min(296, Math.max(0, maxRight - minLeft))
+      face.style.width = `${width}px`
+      face.style.maxHeight = '360px'
+      delete face.dataset.compact
+      const naturalHeight = face.getBoundingClientRect().height
+      // Prefer the slot adjacent to the Composer if it fits. Short lower Regions may borrow room above.
+      const farTop = farBottom - regionTop < naturalHeight ? 8 : regionTop
+      const far = { top: farTop, bottom: farBottom }
+      const slot = near && (near.bottom - near.top >= naturalHeight || near.bottom - near.top > far.bottom - far.top) ? near : far
+      const availableHeight = Math.max(0, slot.bottom - slot.top)
+      face.style.maxHeight = `${Math.min(360, availableHeight)}px`
+      face.dataset.compact = String(availableHeight < 160)
+      const bounds = face.getBoundingClientRect()
+      face.style.left = `${Math.min(Math.max(minLeft, triggerBounds.right - bounds.width), maxRight - bounds.width)}px`
+      face.style.top = `${Math.max(slot.top, slot.bottom - bounds.height)}px`
+      face.style.visibility = 'visible'
     }
-    if (left !== position.left || top !== position.top) { setPosition({ left, top }); return }
-  }, [position, actionDisclosure, document, overlayHost])
-  useEffect(() => {
-    if (!position || !actionDisclosure || !panel.current) return
-    const observer = new window.ResizeObserver(() => show())
-    observer.observe(panel.current)
-    const surface = trigger.current?.closest('.agent-surface')
-    if (surface) observer.observe(surface)
-    return () => observer.disconnect()
-  }, [Boolean(position), Boolean(actionDisclosure), document])
+    const schedule = () => { if (!frame) frame = window.requestAnimationFrame(place) }
+    place()
+    const observer = new window.ResizeObserver(schedule)
+    for (const element of [anchor, face, composer, terminal, region]) if (element) observer.observe(element)
+    const scroll = (event: Event) => {
+      const target = event.target
+      if (target === document || target === window || target instanceof window.Node && target.contains(anchor)) schedule()
+    }
+    window.addEventListener('resize', schedule)
+    window.addEventListener('scroll', scroll, true)
+    return () => {
+      observer.disconnect()
+      if (frame) window.cancelAnimationFrame(frame)
+      window.removeEventListener('resize', schedule)
+      window.removeEventListener('scroll', scroll, true)
+    }
+  }, [Boolean(position), Boolean(actionDisclosure), document, overlayHost])
 
   const face = <AgentAvatarFace provider={provider} displayState={displayState} avatar={avatar} count={count} size={size} mark={identityMark ?? disclosure?.mark} tintMark={identityMark === undefined} active={visible && session?.active === true} />
   return <>
@@ -339,7 +357,7 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
       {inlineLabel === undefined ? face : <><span className="agent-avatar__face">{face}</span><span className="agent-avatar__label">{inlineLabel}</span></>}
     </Element>
     {position && overlayHost ? createPortal(<div ref={panel} id={panelId} className={`agent-identity-popover${actionDisclosure ? ' agent-identity-popover--actions' : disclosure ? ' recent-focus__context-preview' : ''}`} role={disclosure ? 'tooltip' : 'dialog'} aria-label={actionDisclosure ? 'Agent status and actions' : disclosure?.label ?? (inlineLabel === undefined ? 'Executor details' : 'Linked Agent details')}
-      style={{ ...position, ...(disclosure ? { visibility: 'hidden' } : {}) }} onPointerEnter={keepOpen} onPointerLeave={hideSoon} onFocus={keepOpen}
+      style={actionDisclosure ? { visibility: 'hidden' } : { ...position, ...(disclosure ? { visibility: 'hidden' } : {}) }} onPointerEnter={keepOpen} onPointerLeave={hideSoon} onFocus={keepOpen}
       onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) hideSoon() }}
       onKeyDown={(event) => { if (event.key === 'Escape' && !isImeOwnedKeyboardEvent(event)) { closeToTrigger(); event.stopPropagation() } }}
       onPointerDown={() => { if (actionDisclosure) pinned.current = true }}

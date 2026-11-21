@@ -9,7 +9,6 @@ import { useObservedAppStore, useObservedConsumerCommit } from '../lib/use-obser
 import { reportMessageDeliveryDiagnostics } from '../lib/message-delivery-diagnostics'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { NativeConfigurationPicker, PosturePicker } from './PosturePicker'
-import { useAgentNativeInformation } from '../lib/use-agent-native-information'
 import { useAgentNativeConfiguration } from '../lib/use-agent-native-configuration'
 import { createFirstPromptSelector, createSessionViewModeSelector, sessionPresentationById } from '../lib/session-presentation'
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
@@ -278,8 +277,6 @@ export function AgentSessionComposer({
     ? { target: moteDialogue.target, expectedRoleRevision: main.roleRevision } : undefined
   const configuredService = useRunService(source ? undefined : session)
   const nativeService = source ? session?.nativeService : configuredService
-  const nativeInformation = useAgentNativeInformation(session?.kind === 'agent' ? session.control : undefined, visible,
-    session?.kind === 'agent' ? session.nativeInformation : undefined, session?.kind === 'agent' ? session.nativeHandle?.sessionId : undefined)
   const nativeConfiguration = useAgentNativeConfiguration(session?.kind === 'agent' ? session.control : undefined, visible,
     session?.kind === 'agent' ? session.nativeConfiguration : undefined, session?.kind === 'agent' ? session.nativeHandle?.sessionId : undefined)
   const viewModeSelector = useMemo(() => createSessionViewModeSelector(sessionId), [sessionId])
@@ -568,8 +565,8 @@ export function AgentSessionComposer({
         originalStatus={source?.session?.kind === 'agent' ? source.session : undefined}
         executorLabel={executors?.[session.executorId]?.label ?? session.executorId}
         appearance={executors?.[session.executorId]?.avatar} prompts={completion.prompts} visible={visible}
-        information={{ information: nativeInformation.information, configuration: nativeConfiguration.snapshot,
-          loading: nativeInformation.loading, issue: nativeInformation.issue, onRefresh: nativeInformation.refresh,
+        information={{ information: session.nativeInformation, configuration: nativeConfiguration.snapshot,
+          control: session.control, nativeSessionId: session.nativeHandle?.sessionId,
           usage: session.turnUsage, contextWindowUsage: session.contextWindowUsage }}
         disabled={!submitMode.canSubmit}
         inputNotice={requestPending || !submitMode.canSubmit || session.processState !== 'running' || session.status.state === 'disconnected'}
@@ -625,7 +622,7 @@ export function AgentSessionComposer({
       {...(submitMode.canSubmit ? { onSubmit: () => void submit() } : {})}
       {...(session?.kind === 'agent' ? {
         configurationTool: <NativeConfigurationPicker key={JSON.stringify([session.control, session.nativeHandle?.sessionId])}
-          snapshot={nativeConfiguration.snapshot} information={nativeInformation.information} loading={nativeConfiguration.loading} issue={nativeConfiguration.issue}
+          snapshot={nativeConfiguration.snapshot} information={session.nativeInformation} loading={nativeConfiguration.loading} issue={nativeConfiguration.issue}
           disabled={readOnly || disabled || Boolean(source) || session.processState !== 'running'} onRefresh={async () => { await nativeConfiguration.refresh().catch(() => {}) }}
           onInspect={operationId => useAppStore.getState().inspectConfigurationOperation(sessionId, operationId)}
           onSet={async (configId, value, revision) => {
