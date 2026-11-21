@@ -1459,7 +1459,7 @@ export type AppState = GitReadingActions & {
   requestDemandPmoTask(demandId: string, mode: GoalDiscussionTaskMode, options?: { newRequest?: boolean; creationOperationId?: string | undefined; onReceipt?: ((receipt: GoalPmoReceipt) => void) | undefined }): Promise<string | null>
   refreshDemand(demandId: string): Promise<void>
   confirmDemandGoal(demandId: string, expectedRevision: number, continueWith?: import('@agentmux/demand/goal-patrol').GoalConfirmationRecipient): Promise<void>
-  acceptDemandResult(demandId: string, expectedAlignmentRevision: number, expectedSubmissionId: string, acceptGaps?: boolean, finish?: boolean): Promise<void>
+  acceptDemandResult(demandId: string, expectedAlignmentRevision: number, expectedSubmissionId: string, acceptGaps?: boolean, finish?: boolean, unknownResults?: import('@agentmux/demand/goals').UnknownGoalResult[]): Promise<void>
   createDemand(input: {
     title: string
     description?: string
@@ -10178,8 +10178,8 @@ export const useAppStore = create<AppState>()<[['zustand/persist', PersistedAppS
     set(state => ({ demands: { ...state.demands, [id]: demandRecordFromFilesystem(hostGoalRecord(result.demand), state.demands[id]) } }))
     refreshKnownGoalResponsibilities([id])
   },
-  async acceptDemandResult(id, expectedAlignmentRevision, expectedSubmissionId, acceptGaps, finish) {
-    const result = await api.goals.execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, operation: 'demand.accept', requestId: mintObjectId(), demandId: id, expectedAlignmentRevision, expectedSubmissionId, acceptGaps: acceptGaps ?? false, ...(finish === undefined ? {} : { finish }) })
+  async acceptDemandResult(id, expectedAlignmentRevision, expectedSubmissionId, acceptGaps, finish, unknownResults) {
+    const result = await api.goals.execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, operation: 'demand.accept', requestId: mintObjectId(), demandId: id, expectedAlignmentRevision, expectedSubmissionId, acceptGaps: acceptGaps ?? false, ...(finish === undefined ? {} : { finish }), ...(unknownResults ? { unknownResults } : {}) })
     if (result.operation !== 'demand.accept') throw controlFailure('CONTROL_PROTOCOL_ERROR', 'The original Goal acceptance changed.')
     set(state => ({ demands: { ...state.demands, [id]: demandRecordFromFilesystem(hostGoalRecord(result.demand), state.demands[id]) } }))
     refreshKnownGoalResponsibilities([id])

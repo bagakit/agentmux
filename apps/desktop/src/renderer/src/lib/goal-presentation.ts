@@ -129,7 +129,16 @@ export function goalNextStepFact(demand: GoalNextStepInput, retainedInput?: unkn
   const gapsAllowed = planReview ? planReview === 'awaiting-acceptance' : groundingAcceptanceIssue(alignment, grounding, true) === null
   const hasGaps = grounding.checks.some(check => check.outcome === 'gap')
   if (gapsAllowed) return { stage: 'you', text: hasGaps ? 'Results have known gaps' : 'Results ready for review', source: resultSource }
+  const unverified = goalUnknownResultsForClosure(demand).length
+  if (unverified) return { stage: 'you', mark: 'unknown', text: `Review results · ${unverified} unverified`, source: resultSource }
   return { stage: 'attention', text: 'Results need checking', source: resultSource }
+}
+
+/** A person can decide these outstanding results. The owner validates the actual reasons on write. */
+export function goalUnknownResultsForClosure({ status, alignment, grounding }: Pick<DemandRecord, 'status' | 'alignment' | 'grounding'>) {
+  if (status !== 'in_review' || !grounding || isCurrentGroundingAccepted(alignment, grounding)) return []
+  const unknown = grounding.checks.filter(check => check.outcome === 'unknown')
+  return unknown.length && groundingAcceptanceIssue(alignment, grounding, true, unknown.map(({ criterionId }) => ({ criterionId, reason: '' }))) === null ? unknown : []
 }
 
 /** Short reading feedback only. Acceptance authority remains in the domain validator. */

@@ -279,6 +279,7 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
   const next = acknowledgementFeedback.failure ? 'Acknowledgement unconfirmed' : fact.text
   const missingDoneReport = demand.status === 'done' && !demand.grounding
   const readReport = Boolean(demand.grounding) && (fact.source.kind === 'results' || fact.source.kind === 'definition' && !demand.alignment)
+  const reviewResults = demand.status === 'in_review' && readReport
   const readDefinition = Boolean(demand.alignment) && (fact.source.kind === 'definition' || missingDoneReport && !demand.alignment?.confirmedAt)
   const reviewFromPlan = readDefinition && fact.stage === 'you' && projection.revision !== null && visibleSection === 'plan' && !showSupervisor && !acknowledgementFeedback.failure
   const requestFeedback = moteError ? <div className="goals-service" role="status">
@@ -334,7 +335,7 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
                 {projection.progress.done} of {projection.progress.total} Tickets passed</span> : null}
               {currentDelivery ? <Button variant="primary" onClick={event => revealAttempt(currentDelivery.node.id, currentDelivery.delegation.operationId, event.currentTarget)}>View delivery<ThemeNavigationForwardIcon size={13} aria-hidden="true" /></Button> : null}
               {(readReport || readDefinition && !reviewFromPlan) && !acknowledgementFeedback.failure
-                ? <Button type="button" onClick={() => revealGoalReview(readDefinition)}>{readReport ? 'Read results' : demand.alignment?.criteria.length ? 'Read success criteria' : 'Read proposal'}</Button> : null}
+                ? <Button type="button" variant={reviewResults && !currentDelivery ? 'primary' : 'secondary'} onClick={() => revealGoalReview(readDefinition)}>{reviewResults ? 'Review results' : readReport ? 'Read results' : demand.alignment?.criteria.length ? 'Read success criteria' : 'Read proposal'}</Button> : null}
               {queue && queue.total > 1 ? <span className="goals-detail__queue" data-goal-queue><span>{GOAL_GROUP_LABELS[queue.stage]} · {queue.index} of {queue.total}</span>{queue.nextId ? <Button type="button" data-goal-queue-next aria-label={`Next goal that ${QUEUE_NAMES[queue.stage]}`} onClick={() => onOpenGoal?.(queue.nextId!)}>Next<ThemeNavigationForwardIcon size={13} /></Button> : null}</span> : null}
             </div>
             <p className="goals-detail__edit-status" aria-live="polite">{hasEditDraft ? draftIssue ? 'Edits kept · Save unconfirmed' : 'Unsaved edits' : null}</p>

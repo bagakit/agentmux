@@ -1,17 +1,18 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useRef, useState } from 'react'
-import { alignmentConfirmationIssue, groundingAcceptanceIssue, isCurrentGroundingAccepted, type DemandGroundingCheck } from '@agentmux/demand/goals'
+import { alignmentConfirmationIssue, groundingAcceptanceIssue, isCurrentGroundingAccepted, type DemandGroundingCheck, type UnknownGoalResult } from '@agentmux/demand/goals'
 import { currentGoalConfirmationNotice, type GoalConfirmationRecipient } from '@agentmux/demand/goal-patrol'
 import { Button } from '@agentmux/client-ui/components/Button'
 import { useAppStore } from '../store'
 import type { DemandProjection } from '../lib/global-demand-board'
 import { useIconFeedback } from '../lib/use-icon-feedback'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
-import { goalNextStepFact, goalResultExplanation } from '../lib/goal-presentation'
+import { goalNextStepFact, goalResultExplanation, goalUnknownResultsForClosure } from '../lib/goal-presentation'
 import { GoalEvidence } from './GoalEvidence'
 import { GoalConfirmationSupervisorAvatar, useGoalConfirmationSupervisor } from './GoalAgentGroup'
 import { refreshGoalDelegations } from '../lib/goal-delegation-work'
 import { useGoalDiscussionRecipient } from '../lib/goal-discussion-recipient'
+import { ConfirmationDialog } from './ConfirmationDialog'
 import '../styles/goal-review.css'
 
 const ThemeObjectGoalIcon = semanticIconComponent('object.goal')
@@ -22,7 +23,8 @@ const ThemeStatusGapIcon = semanticIconComponent('status.gap')
 const ThemeStatusUnknownIcon = semanticIconComponent('status.unknown')
 
 
-type Acknowledgement = { kind: 'confirm'; revision: number; continueWith?: GoalConfirmationRecipient } | { kind: 'accept'; revision: number; submissionId: string; gaps: boolean; finish?: boolean }
+type Acknowledgement = { kind: 'confirm'; revision: number; continueWith?: GoalConfirmationRecipient } | { kind: 'accept'; revision: number; submissionId: string; gaps: boolean; finish?: boolean; unknownResults?: UnknownGoalResult[] }
+type CloseoutDraft = { revision: number; submissionId: string; gaps: boolean; checks: { criterionId: string; text: string; note: string; reason: string }[] }
 export type GoalAcknowledgementFeedback = { pending: boolean; failure: { attempt: Acknowledgement; message: string } | null; reloadError: string | null }
 export const EMPTY_GOAL_ACKNOWLEDGEMENT: GoalAcknowledgementFeedback = { pending: false, failure: null, reloadError: null }
 export function GoalAcknowledgementRecovery({ goalId, feedback, onFeedbackChange }: {
@@ -59,6 +61,18 @@ export function GoalAlignment({ demand, emphasis, onGrill, onGrounding, motePend
   const stale = Boolean(alignment && grounding && grounding.alignmentRevision !== alignment.revision)
   const accepted = isCurrentGroundingAccepted(alignment, grounding)
   const hasGaps = Boolean(grounding?.checks.some(check => check.outcome === 'gap'))
+  const unknown = goalUnknownResultsForClosure(demand)
+  const canCloseWithUnknown = unknown.length > 0
+  const [closing, setClosing] = useState(false)
+  const [closeout, setCloseout] = useState<CloseoutDraft>()
+  const currentCloseout = canCloseWithUnknown && closeout?.revision === alignment?.revision && closeout?.submissionId === grounding?.submissionId
+  function openCloseout() {
+    if (!canCloseWithUnknown || !alignment || !grounding) return
+    if (!currentCloseout) setCloseout({ revision: alignment.revision, submissionId: grounding.submissionId, gaps: hasGaps,
+      checks: unknown.map(check => ({ criterionId: check.criterionId, note: check.note, reason: '',
+        text: alignment.criteria.find(item => item.id === check.criterionId)!.text })) })
+    setClosing(true)
+  }
   const { pending, failure } = feedback
   const acknowledgementPending = useRef(false)
   async function acknowledge(attempt: Acknowledgement) {
@@ -73,7 +87,7 @@ export function GoalAlignment({ demand, emphasis, onGrill, onGrounding, motePend
           cue.play(JSON.stringify([demand.id, attempt.revision]), 'confirm')
         }
       }
-      else await acceptDemandResult(demand.id, attempt.revision, attempt.submissionId, attempt.gaps, attempt.finish)
+      else await acceptDemandResult(demand.id, attempt.revision, attempt.submissionId, attempt.gaps, attempt.finish, attempt.unknownResults)
     } catch (error) { onFeedbackChange({ failure: { attempt, message: error instanceof Error ? error.message : String(error) } }) }
     finally { acknowledgementPending.current = false; onFeedbackChange({ pending: false }) }
   }
@@ -95,12 +109,13 @@ export function GoalAlignment({ demand, emphasis, onGrill, onGrounding, motePend
   const reportCaption = accepted ? unknownDecision ? 'Closed with unverified results' : hasGaps ? 'Accepted with gaps' : 'Accepted by you' : stale ? 'Report needs updating' : 'Agent report · Not accepted yet'
   const reportState = accepted ? unknownDecision ? 'closed-unverified' : hasGaps ? 'accepted-with-gaps' : 'accepted' : stale ? 'stale' : 'reported'
   const reportActions = grounding ? <>
-    {!accepted && !stale && resultExplanation ? <p className="goals-condition">{resultExplanation}</p> : null}
+    {!accepted && !stale && resultExplanation ? <p className="goals-condition">{canCloseWithUnknown ? 'Request another check, or close the Goal if the missing evidence cannot be recovered.' : resultExplanation}</p> : null}
     {accepted && hasGaps ? <p className="goals-condition">You accepted this result with the reported gaps. Those gaps remain part of the record.</p> : null}
     {accepted ? <p className="goals-caption" data-goal-completion-state>{demand.status === 'done' ? 'Goal finished · Results and original work are kept.' : 'Results accepted · Goal remains open.'}</p> : null}
     <div className="goals-inline-actions">
       {!failure && alignment && gapIssue === null && demand.status !== 'done' ? <button type="button" className={focus === 'results' ? 'primary-button' : 'small-button'} data-goal-finish disabled={pending} onClick={() => void acknowledge({ kind: 'accept', revision: alignment.revision, submissionId: grounding.submissionId, gaps: hasGaps, finish: true })}>{pending ? 'Saving…' : accepted ? 'Finish goal' : hasGaps ? 'Accept with gaps and finish' : 'Accept and finish'}<ThemeActionAcceptResultsIcon size={13} /></button> : null}
       {!failure && !accepted && alignment && gapIssue === null ? <button type="button" className={focus === 'results' && demand.status === 'done' ? 'primary-button' : 'small-button'} {...(hasGaps ? { 'data-goal-accept-gaps': true } : { 'data-goal-accept': true })} disabled={pending} onClick={() => void acknowledge({ kind: 'accept', revision: alignment.revision, submissionId: grounding.submissionId, gaps: hasGaps })}>{pending ? 'Saving…' : hasGaps ? 'Accept results, keep gaps' : 'Accept results'}<ThemeActionAcceptResultsIcon size={13} /></button> : null}
+      {!failure && canCloseWithUnknown ? <Button type="button" disabled={pending} onClick={openCloseout}>Close with unverified results</Button> : null}
       {resultRequest}
     </div>
     {!accepted && gapIssue === null && demand.status !== 'done' ? <p className="goals-caption">Accept and finish also closes the goal.</p> : null}
@@ -132,8 +147,9 @@ export function GoalAlignment({ demand, emphasis, onGrill, onGrounding, motePend
     {currentReport && resultChecks.length ? <p className="goal-review__counts">
       {reportCounts.met ? <span><ThemeStatusCompletedIcon size={13} aria-hidden="true" />{reportCounts.met} reported met</span> : null}
       {reportCounts.gaps ? <span><ThemeStatusGapIcon size={13} aria-hidden="true" />{reportCounts.gaps} reported {reportCounts.gaps === 1 ? 'gap' : 'gaps'}</span> : null}
-      {reportCounts.unchecked ? <span><ThemeStatusUnknownIcon size={13} aria-hidden="true" />{reportCounts.unchecked} {unknownDecision ? 'unverified' : 'need checking'}</span> : null}
+      {reportCounts.unchecked ? <span><ThemeStatusUnknownIcon size={13} aria-hidden="true" />{reportCounts.unchecked} {unknownDecision || canCloseWithUnknown ? 'unverified' : 'need checking'}</span> : null}
     </p> : null}
+    {demand.status === 'in_review' ? reportActions : null}
     <details className={`goal-review__disclosure${stale ? ' goals-previous-report' : ''}`}>
       <summary>{stale ? `Previous report · v${grounding.alignmentRevision}` : currentReport && !alignment!.confirmedAt ? 'Review success criteria' : 'Criteria and evidence'}</summary>
       <div className="goal-review__body">
@@ -146,7 +162,7 @@ export function GoalAlignment({ demand, emphasis, onGrill, onGrounding, motePend
         </> : grounding.checks.map(check => <GoalResultCheck key={check.criterionId} criterionId={check.criterionId} criterion={`Reported criterion: ${check.criterionId}`} check={check} stale={false} closingReason={closingReasons.get(check.criterionId)} />)}
       </div>
     </details>
-    {reportActions}
+    {demand.status !== 'in_review' ? reportActions : null}
   </section> : null
   const noResults = <div className={`goals-no-results${compactAgreement ? ' goal-review__no-results--compact' : ''}`} data-goal-result-state="missing">
     {!compactAgreement && !missingDoneReport ? <div className="goals-section-heading"><h2>Results review</h2><span className="goals-caption">No report yet</span></div> : null}
@@ -155,6 +171,26 @@ export function GoalAlignment({ demand, emphasis, onGrill, onGrounding, motePend
     {resultRequest ? <div className="goals-inline-actions">{resultRequest}</div> : null}
   </div>
   return <>
+    {closing && closeout ? <ConfirmationDialog open title="Close with unverified results?" intent="neutral" busy={pending}
+      description={closeout.gaps ? 'Explain why each unknown cannot be verified. Closing keeps the unknown results and the reported gaps.' : 'Explain why each unknown cannot be verified. Closing keeps these results marked unknown.'}
+      confirmLabel="Keep unknowns and close" confirmDisabled={!currentCloseout || Boolean(failure) || closeout.checks.some(check => !check.reason.trim())}
+      onCancel={() => setClosing(false)} onConfirm={() => {
+        if (!currentCloseout) return
+        const unknownResults = closeout.checks.map(({ criterionId, reason }) => ({ criterionId, reason: reason.trim() }))
+        void acknowledge({ kind: 'accept', revision: closeout.revision, submissionId: closeout.submissionId, gaps: closeout.gaps, finish: true, unknownResults })
+          .finally(() => setClosing(false))
+      }} feedback={<div className="goal-closeout__checks">
+        {!currentCloseout && !pending ? <p role="status">The report changed. Return to results to review the current version.</p> : null}
+        {closeout.checks.map(check => <div key={check.criterionId}>
+          <strong>{check.text}</strong>
+          {check.note ? <p>{check.note}</p> : null}
+          <label>Reason for closing<textarea aria-label={`Reason for closing: ${check.text}`} rows={2} disabled={pending || !currentCloseout}
+            value={check.reason} onChange={event => {
+              const reason = event.target.value
+              setCloseout(draft => draft && { ...draft, checks: draft.checks.map(item => item.criterionId === check.criterionId ? { ...item, reason } : item) })
+            }} /></label>
+        </div>)}
+      </div>} /> : null}
     {confirmation ? <div className="goal-review__notification" data-goal-confirmation-notification={notification?.state ?? 'checking'}>
       <span role="status" title={notification?.reason}>{notification?.state === 'delivered' ? notification.reason
         : notification?.state === 'stale' ? notification.reason

@@ -27,5 +27,12 @@
 .goal-review--report > .goal-review__disclosure > summary, .goal-review__evidence > summary { width: fit-content; max-width: 100%; padding-block: var(--sp-2); cursor: pointer; color: var(--text-2); }
 .goal-review--report > .goal-review__disclosure > summary { font-size: var(--fs-body); font-weight: 570; }
 .goal-review--report .goal-review__body { padding-top: var(--sp-2); }
+.goal-closeout__checks { display: grid; gap: var(--sp-4); margin-block-start: var(--sp-4); }
+.goal-closeout__checks > div { padding-block-start: var(--sp-3); border-top: 1px solid var(--line-soft); }
+.goal-closeout__checks :is(strong, p, label) { overflow-wrap: anywhere; }
+.goal-closeout__checks strong { font-size: var(--fs-body); }
+.goal-closeout__checks p { margin: var(--sp-2) 0; color: var(--text-2); font-size: var(--fs-meta); max-height: 8em; overflow: auto; white-space: pre-wrap; }
+.goal-closeout__checks label { display: grid; gap: var(--sp-1); color: var(--text-2); font-size: var(--fs-meta); }
+.goal-closeout__checks textarea { box-sizing: border-box; min-width: 0; width: 100%; padding: var(--sp-2); resize: vertical; font: inherit; color: var(--text); background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--radius-sm); }
 .goal-review__evidence { color: var(--text-3); font-size: var(--fs-meta); }
 .goal-review__evidence > .goals-evidence { padding-inline-start: var(--sp-3); border-inline-start: 1px solid var(--line); }
