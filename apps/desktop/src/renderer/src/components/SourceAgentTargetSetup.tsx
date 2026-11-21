@@ -163,7 +163,8 @@ export function SourceAgentTargetSetup({ config, active, initialSelection, fixed
   return <div ref={setupRef} tabIndex={-1} className="agent-work-setup" data-source-arrangement data-presentation={presentation} aria-busy={pending || undefined}>
     <div className="agent-work-setup__body">
     {fixedResourceWorkspaceId ? <AgentWorkProjectAnchor project={project} hostLabel={host?.label} compact={anchored} />
-      : showRoleLabels ? <div className="agent-work-project-choice"><span className="agent-work-end__label">Project &amp; tools</span>{projectChoice}</div> : projectChoice}
+      : showRoleLabels ? <div className="agent-work-project-choice"><span className="agent-work-end__label">Project &amp; tools</span>{projectChoice}
+        {!project ? <p className="agent-work-setup__note">Choose the folder that holds your files.</p> : null}</div> : projectChoice}
     <div className="agent-work-device-choice">
       {anchored || showRoleLabels ? <div className="agent-work-device-choice__label"><span className="agent-work-end__label">Agent runs on</span>
         {anchored ? <IconButton type="button" aria-label="Refresh Agent device choices" title="Refresh Agent devices known by the project device" disabled={!active || pending} onClick={() => setRefresh(value => value + 1)}><RefreshIcon size={13} /></IconButton> : null}</div> : null}
@@ -180,7 +181,7 @@ export function SourceAgentTargetSetup({ config, active, initialSelection, fixed
         ...(localHost && host?.kind !== 'local' ? [{ value: 'independent-coordinator', label: localHost.label, description: 'Reach · Agent here, files on the project device' }] : []),
         ...(choices?.hosts.filter(host => host.kind !== 'local').map(host => ({ value: JSON.stringify(['host', host.hostId]), label: host.label, description: 'Agent device known by the project device' })) ?? []),
         ...(routes?.routes.map(route => ({ value: JSON.stringify(['route', route.agentTarget]), label: route.id, description: `Saved route · ${route.agentTarget.adoptedRoute.hops.length} hops` })) ?? [])]} />
-      <p className="agent-work-setup__note">{!project ? 'Choose the folder that holds your files.' : !target ? 'Waiting for the project device to confirm where the Agent can run.' : independent ? 'Reach · Agent here, files and tools on the project device.' : target.runtimeId === resources?.runtimeId ? 'Agent and files on this project’s device.' : 'Outpost · files and tools stay with this project.'}</p>
+      <p className="agent-work-setup__note">{!project && showRoleLabels ? null : !project ? 'Choose the folder that holds your files.' : !target ? 'Waiting for the project device to confirm where the Agent can run.' : independent ? 'Reach · Agent here, files and tools on the project device.' : target.runtimeId === resources?.runtimeId ? 'Agent and files on this project’s device.' : 'Outpost · files and tools stay with this project.'}</p>
       {independent && !coordinator ? <p role="status">{coordinatorIssue ? `This device’s Coordinator is unconfirmed: ${coordinatorIssue}` : 'Reading this device’s original Coordinator and home…'}</p> : null}
     </div>
     {project && !(independent ? description?.contracts.externalAssociation : description?.contracts.ordinaryLaunch) ? <p className="agent-work-setup__note" role="status">{description

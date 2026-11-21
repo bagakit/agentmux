@@ -37,7 +37,7 @@ type WorkAgent = Extract<SessionSnapshot, { kind: 'agent' }>
 type WorkItem = { session: WorkAgent; placement: ReturnType<typeof agentWorkPlacement>; name: string }
 
 /** Work discovery includes ordinary remote Sessions; a tool binding is one supported arrangement. */
-export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigate, navigationRequest }: SettingsPaneProps) {
+export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigate, navigationRequest, embedded = false }: SettingsPaneProps & { embedded?: boolean }) {
   const sessions = useAppStore(state => active ? state.sessions : NO_SESSIONS)
   const names = useAppStore(state => active ? state.agentNames : NO_NAMES)
   const activeWorkspaceId = useAppStore(state => state.activeWorkspaceId)
@@ -52,7 +52,7 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
   }), [sessions, names, referenceHostId])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [view, setView] = useState<'library' | 'detail'>('library')
-  const requestedTask = navigationRequest?.field === 'prepare' ? 'start' : navigationRequest?.field === 'routes' ? 'routes' : 'existing'
+  const requestedTask = navigationRequest?.field === 'prepare' || navigationRequest?.field === 'guide' ? 'start' : navigationRequest?.field === 'routes' ? 'routes' : 'existing'
   const [chosenTask, setTask] = useState<RemoteTask | null>(null)
   const appliedNavigation = useRef<SettingsPaneProps['navigationRequest']>(undefined)
   const pendingNavigation = appliedNavigation.current !== navigationRequest
@@ -105,8 +105,8 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
   }, [config.workspaces])
   const projectName = (item: WorkItem) => projectNames.get(JSON.stringify([item.placement.projectHostId, item.placement.projectPath]))?.join(' · ')
   const rows = work.filter(item => `${item.name} ${item.session.id} ${item.session.toolExecution?.bindingId ?? ''} ${agentWorkModeLabel(item.placement.mode)} ${hostName(item.placement.agentHostId)} ${item.placement.agentHostId} ${hostName(item.placement.projectHostId)} ${item.placement.projectHostId} ${item.placement.projectPath} ${projectName(item) ?? ''}`.toLowerCase().includes(query.trim().toLowerCase()))
-  function openHost(id: string | null) { if (!id) return; if (navigation) navigation.openHost(id); else onNavigate('hosts') }
-  function connectDevice() { if (navigation) navigation.open('hosts', undefined, 'mesh-join'); else onNavigate('hosts') }
+  function openHost(id: string | null) { if (!id) return; if (navigation) navigation.openHost(id); else onNavigate('network-node', 'connection', id) }
+  function connectDevice() { onNavigate('remote-execution', 'mesh-join') }
   function prepare(selection: LauncherExecutionSelection) {
     setActionError(null)
     const tabId = useAppStore.getState().openLauncher({ workspaceId: selection.resourceWorkspaceId, reveal: true, initialExecution: selection })
@@ -124,18 +124,18 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
   }
   function changeTask(next: RemoteTask) { setTask(next); if (next === 'start') setPrepareVisited(true); if (next === 'routes') setRoutesVisited(true); setActionError(null) }
   return <div ref={container} className="settings-pane-stack remote-execution-settings">
-    <header className="remote-work-header"><div><h3>Work across your machines</h3><p>Start work on a connected device or return to an original Session.</p></div><button type="button" className="remote-work-hosts" onClick={() => onNavigate('hosts')}>Manage connections</button></header>
+    {!embedded ? <><header className="remote-work-header"><div><h3>Work across your machines</h3><p>Start work on a connected device or return to an original Session.</p></div><button type="button" className="remote-work-hosts" onClick={() => onNavigate('network-node', 'mesh-devices')}>Manage connections</button></header>
     <div className="remote-work-toolbar">
       <Tabs as="nav" className="remote-work-tasks remote-work-tasks--primary" aria-label="Remote work task"
         value={task} onValueChange={changeTask} options={remoteTasks.map(({ value, Icon, title, description }) => ({
           value, panelId: `${taskId}-${value}`, button: { id: `${taskId}-${value}-tab` },
           label: <><Icon size={18} /><span><strong>{title}{value === 'existing' ? <> <small>{work.length}</small></> : null}</strong><small>{description}</small></span></>
         }))} />
-    </div>
-    <section hidden={task !== 'start'} id={`${taskId}-start`} role="tabpanel" aria-labelledby={`${taskId}-start-tab`} className="remote-execution-prepare" data-settings-field="prepare">
-      <div className="remote-work-intro remote-work-intro--illustrated"><div><h3>Choose where work happens.</h3><p>Run the Agent where the project lives, or run it elsewhere while the files and tools stay with the project.</p></div>
+    </div></> : null}
+    <section hidden={task !== 'start'} id={`${taskId}-start`} role={embedded ? undefined : "tabpanel"} aria-labelledby={embedded ? undefined : `${taskId}-start-tab`} className="remote-execution-prepare" data-settings-field="prepare">
+      {!embedded ? <div className="remote-work-intro remote-work-intro--illustrated"><div><h3>Choose where work happens.</h3><p>Run the Agent where the project lives, or run it elsewhere while the files and tools stay with the project.</p></div>
         <figure className="remote-work-placement-art" aria-hidden="true"><img src={remoteArt} alt="" width="1100" height="619" loading="lazy" decoding="async" draggable={false} />
-          <figcaption><span><ToolsIcon size={14} />Project &amp; tools</span><span><AgentIcon size={14} />Agent</span></figcaption></figure></div>
+          <figcaption><span><ToolsIcon size={14} />Project &amp; tools</span><span><AgentIcon size={14} />Agent</span></figcaption></figure></div> : null}
       {!config.hosts.some(host => host.id !== referenceHostId) ? <div className="remote-execution-feedback" role="status"><p>Connect another device to work across machines.</p>
         <Button type="button" variant="primary" onClick={connectDevice}>Connect another device</Button></div> : null}
       {prepareVisited || task === 'start' ? <AgentWorkModeSetup sourceTargets showRoleLabels config={config} active={active && task === 'start'} initialMode={initialProject && initialProject.hostId !== referenceHostId ? 'remote-project' : 'remote-agent'} initialSelection={initialSelection} actionLabel="Open in Launcher" onApply={prepare} onOpenHost={openHost} /> : null}
@@ -143,11 +143,11 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
     {actionError ? <div className="remote-execution-feedback" role="status"><p>{actionError}</p>
       {task === 'existing' && selected ? <Button type="button" onClick={() => openHost(selected.placement.agentHostId)}>Check the Agent device</Button> : null}
     </div> : null}
-    <section hidden={task !== 'existing'} id={`${taskId}-existing`} role="tabpanel" aria-labelledby={`${taskId}-existing-tab`} className="remote-execution-bindings" data-settings-field="bindings">
+    <section hidden={task !== 'existing'} id={`${taskId}-existing`} role={embedded ? undefined : "tabpanel"} aria-labelledby={embedded ? undefined : `${taskId}-existing-tab`} className="remote-execution-bindings" data-settings-field="bindings">
       <p className="remote-work-scope">Continue work in its original workspace. Connecting to or browsing a Host does not require a project.</p>
       {narrow && view === 'detail' ? <Button type="button" className="remote-execution-back" onClick={() => { setView('library'); setReturnFocus({ id: selectedId }) }}><BackIcon size={14} />Back to work</Button> : null}
       {!work.length && !selectedId ? <div className="remote-execution-empty"><h3>No remote work is visible here yet</h3><p>Connect the device that has your work, or choose where to start a new task.</p><div className="remote-execution-empty__actions">
-        <Button type="button" variant="primary" onClick={connectDevice}>Connect another device</Button><Button type="button" onClick={() => changeTask('start')}>Set up new work</Button>
+        <Button type="button" variant="primary" onClick={connectDevice}>Connect another device</Button><Button type="button" onClick={() => embedded ? onNavigate('remote-execution', 'prepare') : changeTask('start')}>Set up new work</Button>
       </div></div> : <div className="remote-execution-bindings__body">
         <div hidden={narrow && view === 'detail'} className="remote-execution-library">
           <SettingsResourceLibrary label="Remote work" query={query} onQuery={setQuery} selectedId={selectedId} focusRequest={returnFocus}
@@ -168,9 +168,9 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
           {selectedId ? <Button type="button" variant="primary" onClick={missingHost ? () => openHost(missingHost) : connectDevice}>{missingHost ? 'Check the original Agent device' : 'Connect another device'}</Button> : null}</div>}
       </div>}
     </section>
-    <section hidden={task !== 'routes'} id={`${taskId}-routes`} role="tabpanel" aria-labelledby={`${taskId}-routes-tab`} data-settings-field="routes">
+    <section hidden={task !== 'routes'} id={`${taskId}-routes`} role={embedded ? undefined : "tabpanel"} aria-labelledby={embedded ? undefined : `${taskId}-routes-tab`} data-settings-field="routes">
       {routesVisited || task === 'routes' ? <RemoteRoutesPane config={config} active={active && task === 'routes'} /> : null}
     </section>
-    <RemoteExecutionGuide active={active} />
+    {!embedded || navigationRequest?.field === 'guide' ? <RemoteExecutionGuide active={active} /> : null}
   </div>
 }

@@ -17,12 +17,13 @@ import type { SettingsPaneProps } from './settings-catalog'
 import './network-node.css'
 
 /** Selection is presentation; only the answering original Core supplies its identity. */
-export function NetworkNodeSettingsPane({ config, active, onNavigate, navigationRequest }: SettingsPaneProps) {
+export function NetworkNodeSettingsPane({ config, active, navigationRequest }: SettingsPaneProps) {
   const publication = useNodePublicationReporter()
-  const local = config.hosts.find(host => host.kind === 'local')
+  const locals = config.hosts.filter(host => host.kind === 'local')
+  const local = locals.length === 1 ? locals[0] : undefined
   const fieldId = useId(), labelId = `node-to-manage-label-${fieldId}`, hintId = `node-to-manage-hint-${fieldId}`
   const [selected, setSelected] = useState(navigationRequest?.hostId ?? local?.id ?? '')
-  useEffect(() => { if (navigationRequest?.hostId) setSelected(navigationRequest.hostId) }, [navigationRequest])
+  useEffect(() => { if (navigationRequest) setSelected(navigationRequest.hostId ?? local?.id ?? '') }, [navigationRequest, local?.id])
   const host = config.hosts.find(item => item.id === selected)
   const route = host ? JSON.stringify((({ label: _label, ...value }) => value)(host)) : ''
   const [identity, setIdentity] = useState<{ route: string; target?: NodeOwnerTarget; error?: string }>()
@@ -46,7 +47,6 @@ export function NetworkNodeSettingsPane({ config, active, onNavigate, navigation
   }, [route, active, refresh, publication])
   const target = identity?.route === route ? identity.target : undefined
   return <div className="settings-pane-stack network-node-settings" data-settings-host={host?.id}>
-    <div className="network-node-intro"><h3>Manage a node</h3><p>Select a saved Host to manage what its original Core publishes. Connecting and starting work stay separate.</p><button type="button" className="small-button" onClick={() => onNavigate('hosts')}>Open Mesh</button></div>
     <label className="network-node-field"><span id={labelId}>Node to manage</span><SelectionField label="Node to manage" labelledBy={labelId} describedBy={hintId} value={selected} missingOptionLabel="Original saved Host unavailable" missingOptionDescription="Select an original saved Host; no replacement target is selected automatically." options={config.hosts.map(item => ({ value: item.id, label: `${item.label} · ${item.kind === 'local' ? 'This device' : 'Remote Host'} · ${item.id}` }))} onValueChange={setSelected} /><small id={hintId}>{host ? `${host.id}${target ? ` · Runtime ${target.expectedRuntimeId}` : ' · Identity not confirmed'}` : 'Select an original saved Host; no replacement target is selected automatically.'}</small></label>
     {host && target ? <NodePublicationEditor key={route + target.expectedRuntimeId} host={host} target={target} active={active} /> : <section className="network-node-section"><p role="status">{identity?.route === route && identity.error ? identity.error : host ? 'Reading the selected Node identity…' : 'The requested saved Host is unavailable. Original drafts are retained.'}</p><button type="button" className="small-button" onClick={() => setRefresh(value => value + 1)}>Refresh Node identity</button></section>}
   </div>

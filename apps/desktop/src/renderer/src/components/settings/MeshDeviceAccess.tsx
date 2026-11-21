@@ -56,7 +56,7 @@ export function MeshDeviceAccess() {
     finally { setOpening(false) }
   }
   return <section className="mesh-network-section" aria-label="Use another device">
-    <div className="mesh-join-landing"><div className="mesh-join-lead"><h3>Open work on another device.</h3><p>Choose a saved device or paste the access link shared by its owner.</p></div>
+    <div className="mesh-join-landing"><div className="mesh-join-lead"><h3>Open work on another device.</h3><p>{saved.length ? 'Choose a saved device or paste an access link from its owner.' : 'Paste the access link shared by the device owner.'}</p></div>
       <div className="mesh-join-art" aria-hidden="true"><img src={meshArt} alt="" width="1100" height="619" draggable={false} /></div></div>
     <label className="mesh-form-field"><span>Device access link</span><TextInput ref={field} aria-label="Device access link" value={links.draft}
       onChange={event => edit(event.target.value)} /></label>

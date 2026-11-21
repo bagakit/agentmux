@@ -1,9 +1,4 @@
-.mesh-settings-pane { min-width: 0; height: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-.mesh-settings-pane > [data-mesh-view] { flex: 1; min-height: 0; }
-.mesh-settings-pane > [data-mesh-view="network"] { overflow: auto; overscroll-behavior: contain; padding-bottom: var(--sp-4); scroll-padding-bottom: var(--sp-4); }
 .mesh-network-settings > .settings-pane-actions { position: static; margin-top: 0; }
-.mesh-settings-pane > [data-mesh-view="connections"] { overflow: hidden; }
-.mesh-settings-pane > [hidden] { display: none; }
 .mesh-network-settings { display: grid; gap: var(--sp-4); min-width: 0; max-width: 1060px; padding-right: 2px; container-type: inline-size; }
 .mesh-network-heading, .mesh-network-section > header, .mesh-network-map > header { display: flex; justify-content: space-between; align-items: start; gap: var(--sp-3); }
 .mesh-network-settings h3, .mesh-network-settings h4, .mesh-network-settings h5 { margin: 0; font-weight: 600; }
@@ -107,22 +102,14 @@
 @container (max-width: 580px) { .mesh-connection-intro { display: block; } .mesh-task-options { grid-template-columns: 1fr; } .mesh-network-heading { gap: 8px; } .mesh-availability { padding: 16px; } }
 .mesh-recovery-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 
-.mesh-home-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-3); }
-.mesh-settings-pane > [data-mesh-view="access"] { overflow: auto; }
 .mesh-peer-pairing { display: grid; gap: var(--sp-2); }
 .mesh-peer-pairing > button { justify-self: start; }
 .mesh-peer-preview { display: grid; grid-template-columns: auto 1fr; gap: var(--sp-1) var(--sp-3); margin: 0; font-size: var(--fs-meta); }
 .mesh-peer-preview dt { color: var(--text-3); }
 .mesh-peer-preview dd { margin: 0; overflow-wrap: anywhere; }
-.mesh-settings-pane [data-mesh-view="network"] > .mesh-form-field { max-width: 32rem; margin-bottom: var(--sp-4); }
-.mesh-settings-pane [data-settings-field="mesh-access-work"] .mesh-network-section { max-width: 44rem; border: 0; }
-.mesh-settings-pane [data-settings-field="mesh-access-work"] h4 { margin: 0; }
-.mesh-settings-pane [data-settings-field="mesh-access-work"] p { margin: 0; line-height: 1.55; }
-.mesh-settings-pane [data-settings-field="mesh-access-work"] button { justify-self: start; }
 .mesh-endpoint-source { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); overflow-wrap: anywhere; }
 .mesh-gateway-fields > button { justify-self: start; }
 .mesh-peer-preview summary { cursor: pointer; }
-.mesh-settings-pane > [data-mesh-view="join"] { overflow: auto; }
 .mesh-gateway-join { max-width: 52rem; gap: var(--sp-3); }
 .mesh-join-landing { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); align-items: center; overflow: hidden; border: 1px solid var(--line-soft); border-radius: 12px; background: radial-gradient(ellipse at 92% 95%, #3b3125, transparent 65%), #1d1b18; color: #fbf3e7; }
 .mesh-join-lead { z-index: 1; display: grid; gap: var(--sp-3); padding: var(--sp-6); }

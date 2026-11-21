@@ -2,7 +2,7 @@
 .settings-page:is([data-settings-page='agents'], [data-settings-page='hosts']) .settings-content__header {
   width: min(100%, calc(1200px + var(--sp-7) * 2));
 }
-.settings-content__scroll:is([data-settings-pane='agents'], [data-settings-pane='hosts']) {
+.settings-content__scroll[data-settings-pane='agents'] {
   container: settings-resource / inline-size;
   padding-inline: max(var(--sp-7), calc((100% - 1200px) / 2));
   overflow: hidden;
@@ -140,7 +140,7 @@
   .settings-resource-editor .host-settings-card > header > .check-pill { grid-column: 2 / -1; grid-row: 2; width: fit-content; }
 }
 @media (max-width: 640px) {
-  .settings-content__scroll:is([data-settings-pane='agents'], [data-settings-pane='hosts']) { padding-inline: var(--sp-5); }
+  .settings-content__scroll[data-settings-pane='agents'] { padding-inline: var(--sp-5); }
 }
 
 .settings-executor-preview {

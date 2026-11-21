@@ -2,7 +2,6 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import { parseHostConfigurations } from '@agentmux/host/host-configuration'
 import { Button } from '@agentmux/client-ui/components/Button'
 import { HostTailcatClientFields } from './HostTailcatClientFields'
-import { LocalIncomingConnections } from './LocalIncomingConnections'
 import { hostConnectionSummary } from '../../lib/host-transport'
 import { SearchInput, TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -52,13 +51,14 @@ const NO_HOST_CHECKS: Record<string, HostCheckState> = {}
 
 export type HostAddRequest = { readonly intentId: string }
 
-export function HostSettingsPane({ config, onSave, active, onClose, navigationRequest, onRemoteWork, addHostRequest }: {
+export function HostSettingsPane({ config, onSave, active, onClose, navigationRequest, onRemoteWork, onIncoming, addHostRequest }: {
   config: AppConfig
   active: boolean
   onClose?: (() => void) | undefined
   onRemoteWork?: (() => void) | undefined
   navigationRequest?: SettingsNavigationRequest | undefined
   /** One explicit presentation intent; creation and persistence stay with addHost. */
+  onIncoming?: ((hostId: string) => void) | undefined
   addHostRequest?: HostAddRequest | undefined
   onSave: (hosts: HostConfig[], workspaces: WorkspaceRecord[], expected: Pick<AppConfig, 'hosts' | 'workspaces'>) => Promise<void>
 }) {
@@ -72,7 +72,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
   const hosts = useMemo(() => orderedHosts(resource.value), [resource.value, config.hosts])
   const setHosts = (update: (current: HostConfig[]) => HostConfig[]) => resource.setValue((current) =>
     Object.fromEntries(update(orderedHosts(current)).map((host) => [host.id, host])))
-  const requestedHostId = navigationRequest?.section === 'hosts' ? navigationRequest.hostId : undefined
+  const requestedHostId = navigationRequest?.hostId
   const appliedNavigation = useRef<SettingsNavigationRequest | undefined>(undefined)
   const appliedAddRequest = useRef<string | undefined>(undefined)
   const pendingHostNavigation = requestedHostId !== undefined && appliedNavigation.current !== navigationRequest
@@ -84,7 +84,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
   const panel = pendingHostNavigation ? navigationRequest?.field === 'resources' ? 'overview' : 'connection' : selectedPanel
   const [projectHosts, setProjectHosts] = useState<string[]>([])
   const [maintenanceHosts, setMaintenanceHosts] = useState<string[]>(() => initialHost == null ? [] : [initialHost])
-  const [mode, setMode] = useState<'topology' | 'list'>('topology')
+  const [mode, setMode] = useState<'topology' | 'list'>('list')
   const [measuredWide, setWide] = useState<boolean | null>(null)
   const wide = measuredWide !== false
   const container = useRef<HTMLDivElement>(null)
@@ -154,7 +154,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
 
   useEffect(() => {
     appliedNavigation.current = navigationRequest
-    if (navigationRequest?.section !== 'hosts' || navigationRequest.hostId === undefined) return
+    if (navigationRequest?.hostId === undefined) return
     const id = navigationRequest.hostId
     setRequestedHost(id)
     setMaintenanceHosts(current => current.includes(id) ? current : [...current, id])
@@ -269,12 +269,10 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
   }
 
   const selectedNetworkHost = hosts.find(host => host.id === selectedId)
-  const selectedSavedLocal = config.hosts.find(host => host.kind === 'local' && host.id === selectedId)
-  const localConnectionVisible = active && view === 'editor' && panel === 'connection' && selectedSavedLocal !== undefined && hosts.some(host => host.id === selectedSavedLocal.id && host.kind === 'local')
   return (
     <div ref={container} className="settings-pane-stack settings-resource-workbench remote-management" data-resource-view={view} data-remote-mode={showTopology ? 'topology' : 'list'} data-remote-wide={wide}
       data-settings-host={active && view === 'editor' && !pendingHostNavigation && hosts.some(host => host.id === selectedId) ? selectedId ?? undefined : undefined}>
-      <div className="remote-foundation"><div><strong>Your connected machines</strong><p>Select a Host to see its service, resources and access. Use Remote to choose where work runs.</p></div>{onRemoteWork ? <Button type="button" onClick={onRemoteWork}>Remote work</Button> : null}</div>
+      <div className="remote-foundation"><div><strong>Saved connections</strong><p>Open a Host to edit its connection, projects or access.</p></div>{onRemoteWork ? <Button type="button" onClick={onRemoteWork}>Start remote work</Button> : null}</div>
       <div className="settings-pane-toolbar remote-management__toolbar">
         {view === 'editor' && <Button type="button" className="settings-resource-back" onClick={backToLibrary}><ThemeNavigationBackIcon size={14} /> All hosts</Button>}
         <div className="remote-management__scope"><strong>{hosts.length}</strong><span>{hosts.length === 1 ? 'host' : 'hosts'}</span><small>{hosts.filter(host => host.kind === 'ssh').length} remote</small></div>
@@ -324,13 +322,12 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
                 {host.kind === 'ssh' ? <button className="icon-button icon-button--danger" aria-label={`Remove ${host.label}`} title={`Remove ${host.label}`} disabled={sessionCount > 0} onClick={() => setRemoveRequest(host)}><ThemeActionRemoveIcon size={14} /></button> : null}
                 </span>
               </header>
-              <nav className="remote-detail-tabs" aria-label={`Sections for ${host.label}`}>
+              <nav className="remote-detail-tabs" hidden={measuredWide === true && !showTopology} aria-label={`Sections for ${host.label}`}>
                 {HOST_PANELS.map(({ id: page, title }) => <button type="button" key={page} data-host-panel={page}
                   aria-current={panel === page ? 'page' : undefined} onClick={() => selectHostPanel(host.id, page)}>
                   {title}</button>)}
               </nav>
               {panel === 'overview' ? <div className="remote-overview">
-                <div className="remote-overview__actions"><Button type="button" onClick={() => selectHostPanel(host.id, 'connection')}>Connection settings</Button><Button type="button" onClick={() => selectHostPanel(host.id, 'projects')}>View projects</Button></div>
                 <p className="remote-overview__counts">{projectFacts.get(host.id)?.count ?? 0} registered projects <span aria-hidden="true">·</span> {sessionCount} Session references</p>
                 <div className="remote-overview__identity"><span>Last connection test</span><strong>{hostCheckLabel(check ?? { state: 'idle' })}</strong>
                   {check?.observedAt ? <time dateTime={new Date(check.observedAt).toISOString()}>{new Date(check.observedAt).toLocaleString()}</time> : null}
@@ -368,12 +365,11 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
                   onChange={(patch) => update(host.id, patch)}
                   onClear={(field) => clear(host.id, field)}
                 />
-              ) : <div className="settings-local-host"><strong>This device’s node</strong><p>Publishing and shared folders are managed in Node.</p><Button type="button" onClick={() => settingsNavigation?.open('network-node', undefined, 'publishing', host.id)}>Open Node publishing</Button></div> : null}
+              ) : <div className="settings-local-host"><strong>This device’s node</strong><p>Publishing and shared folders are managed in Node.</p><Button type="button" onClick={() => settingsNavigation?.open('network-node', undefined, 'publishing', host.id)}>Open Node publishing</Button>{onIncoming ? <Button type="button" onClick={() => onIncoming(host.id)}>Tailcat listener</Button> : null}</div> : null}
               {panel === 'connection' && sessionCount > 0 ? <p className="field-hint">{sessionCount} Session reference{sessionCount === 1 ? '' : 's'}. Removal is protected while this connection is referenced.</p> : null}
             </section>
           )
         })}
-          <LocalIncomingConnections config={config} active={localConnectionVisible} visible={localConnectionVisible} />
           {maintenanceHosts.map(id => {
             const draft = hosts.find(host => host.id === id)
             if (!draft) return null

@@ -1,5 +1,5 @@
 import { NativeSelect } from '@agentmux/client-ui/input'
-import { Fragment, useEffect, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { MeshOwnerTarget } from '@agentmux/core/mesh-network'
 import type { HostConfig } from '../../../../shared/contracts'
 import { api } from '../../lib/api'
@@ -10,16 +10,30 @@ function routeKey({ label: _label, ...route }: HostConfig) {
 }
 
 /** Resolve only the selected saved Host. Its own Core still authorizes every operator request. */
-export function MeshOperatorTarget({ label, active, initial, children }: {
+export function MeshOperatorTarget({ label, active, initial, request, localLabel = 'This device', children }: {
   label: string; active: boolean; initial?: MeshOwnerTarget | undefined
+  localLabel?: string
+  request?: { hostId?: string | undefined } | undefined
   children(target: MeshOwnerTarget | undefined, label: string): ReactNode
 }) {
   const hosts = useAppStore(state => state.config?.hosts)
   const remotes = (hosts ?? []).filter(host => host.kind === 'ssh')
-  const [selection, setSelection] = useState(() => {
+  const requestedSelection = () => {
+    if (request) {
+      if (request.hostId === undefined || hosts?.some(host => host.id === request.hostId && host.kind === 'local')) return ''
+      const saved = remotes.find(host => host.id === request.hostId)
+      return saved ? routeKey(saved) : JSON.stringify({ hostId: request.hostId })
+    }
     const match = initial && remotes.find(host => host.id === initial.hostId && (!host.runtimeId || host.runtimeId === initial.expectedRuntimeId))
     return match ? routeKey(match) : initial ? JSON.stringify(initial) : ''
-  })
+  }
+  const applied = useRef(request)
+  const [chosen, setSelection] = useState(requestedSelection)
+  const selection = applied.current !== request && request ? requestedSelection() : chosen
+  useLayoutEffect(() => {
+    if (applied.current !== request && request) setSelection(selection)
+    applied.current = request
+  }, [request, selection])
   const selected = remotes.find(host => routeKey(host) === selection)
   const option = (host: HostConfig) => JSON.stringify([host.id])
   const choice = selected ? option(selected) : selection ? 'unavailable' : ''
@@ -42,11 +56,11 @@ export function MeshOperatorTarget({ label, active, initial, children }: {
       const host = remotes.find(item => option(item) === event.target.value)
       setSelection(host ? routeKey(host) : '')
     }}>
-      <option value="">This device</option>
+      <option value="">{localLabel}</option>
       {selection && !selected ? <option value="unavailable">Previously selected Host unavailable</option> : null}
       {remotes.map(host => <option key={host.id} value={option(host)}>{host.label} · {host.id}</option>)}
     </NativeSelect></label> : null}
-    {!selection || target ? <Fragment key={JSON.stringify([selection, runtime])}>{children(target, selected?.label ?? 'This device')}</Fragment>
+    {!selection || target ? <Fragment key={JSON.stringify([selection, runtime])}>{children(target, selected?.label ?? localLabel)}</Fragment>
       : <div role="status">{!selected ? 'Select a saved Host to continue.' : resolved?.route === selection && resolved.error
         ? <>{resolved.error} <button type="button" className="small-button" onClick={() => setRetry(value => value + 1)}>Check selected Host</button></> : 'Reading the selected Host identity…'}</div>}
   </>

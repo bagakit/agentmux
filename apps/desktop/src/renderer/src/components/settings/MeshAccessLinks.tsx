@@ -86,6 +86,6 @@ function GatewayLink({ active, observe, target, separateRuntimeId, sameDevice, s
         <button type="button" className="small-button" onClick={() => copy(link.url)}>Copy access link</button>
       </InputGroup>
       <details><summary>Original endpoint identity</summary><dl><dt>Server</dt><dd><code>{link.offer.serverId}</code></dd><dt>Encryption public key</dt><dd><code>{link.offer.daemonPublicKeyB64}</code></dd></dl></details>
-      <small>On the accessing Mac, open Mesh → Use another device and paste this link.</small></div> : null}
+      <small>On the accessing Mac, open Quick → Open a device and paste this link.</small></div> : null}
   </section>
 }

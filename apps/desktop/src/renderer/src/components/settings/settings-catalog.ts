@@ -25,7 +25,7 @@ export type SettingsPaneProps = {
   config: AppConfig
   onClose: () => void
   active: boolean
-  onNavigate(section: SettingsPageId): void
+  onNavigate(section: SettingsPageId, field?: string, hostId?: string): void
   onSubpageChange?: ((field: string | undefined) => void) | undefined
   executorId?: string | undefined
   toolId?: string | undefined

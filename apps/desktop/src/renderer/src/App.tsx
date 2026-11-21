@@ -212,7 +212,7 @@ function DesktopApp() {
       settings: { sectionIds: desktopSettingsSectionIds,
         read: () => settingsObservation.current,
         open: (sectionId, hostId) => navigateSettings({ section: sectionId as SettingsPageId,
-          ...(hostId === undefined ? {} : { hostId, ...(sectionId === 'hosts' ? { field: 'resources' } : {}) }) }, 'preserve'),
+          ...(hostId === undefined ? {} : { hostId, ...(sectionId === 'hosts' ? { field: 'resources', publicSectionId: 'hosts' as const } : {}) }) }, 'preserve'),
         close: () => { setSettingsInputPolicy('preserve'); closeSettings() } },
       survey: { select: selectSurveyTarget },
       focusWorkface: { reveal: (expected, intent) => {

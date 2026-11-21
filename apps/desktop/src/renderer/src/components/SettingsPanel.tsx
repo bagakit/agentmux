@@ -36,7 +36,7 @@ function unmatchedChannel(request: SettingsNavigationRequest | undefined): strin
 
 function sameNormalizedNavigationRequest(a: SettingsNavigationRequest | undefined, b: SettingsNavigationRequest | undefined): boolean {
   return a === b || Boolean(a && b && a.section === b.section && a.field === b.field && a.executorId === b.executorId
-    && a.toolId === b.toolId && a.hostId === b.hostId && a.channelOrigin === b.channelOrigin && a.moteConnectionOrigin === b.moteConnectionOrigin)
+    && a.toolId === b.toolId && a.hostId === b.hostId && a.publicSectionId === b.publicSectionId && a.channelOrigin === b.channelOrigin && a.moteConnectionOrigin === b.moteConnectionOrigin)
 }
 
 function SettingsPanelView({ onClose, visible = true, initialSection = 'overview', executorId, toolId, navigationRequest, observationRef, inputPolicy = 'target' }: {
@@ -82,7 +82,14 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
   preserveInputRef.current = preserveInput
   useLayoutEffect(() => {
     if (!observationRef) return
-    observationRef.current = { sectionId: active,
+    observationRef.current = {
+      get sectionId() {
+        // The Host-qualified public address keeps its stable module ID after its editor moves to Node.
+        const alias = active === 'network-node' && (!destination || destination.request === normalizedNavigationRequest)
+          && normalizedNavigationRequest?.publicSectionId
+        const host = originalScroll(active)?.querySelector<HTMLElement>('[data-settings-host]:has([data-host-view="overview"])')
+        return alias && host && !host.closest('[hidden], [inert]') ? alias : active
+      },
       get visible() {
         const pane = originalScroll(active)
         return Boolean(config) && visible && !showResults && (active === 'overview'
@@ -90,9 +97,13 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
       },
       // Presentation only: the original Host pane supplies its actual selection,
       // independently of a requested route. This never grants resource access.
-      get hostId() { return active === 'hosts' || active === 'network-node' ? originalScroll(active)?.querySelector<HTMLElement>('[data-settings-host]')?.dataset.settingsHost ?? null : null } }
+      get hostId() {
+        if (active !== 'network-node') return null
+        const targets = originalScroll(active)?.querySelectorAll<HTMLElement>('[data-settings-host]') ?? []
+        return Array.from(targets).find(element => !element.closest('[hidden], [inert]'))?.dataset.settingsHost ?? null
+      } }
     return () => { observationRef.current = null }
-  }, [active, config, observationRef, showResults, visible])
+  }, [active, config, destination, normalizedNavigationRequest, observationRef, showResults, visible])
 
   function originalScroll(section: SettingsPageId): HTMLElement | null {
     return section === 'overview' ? page.current?.querySelector('[data-settings-overview]') ?? null
@@ -120,20 +131,23 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
     setTargetIssue('')
   }
 
-  function chooseSection(section: SettingsPageId, target?: string, fromSidebar = false): void {
-    setActive(section)
+  function chooseSection(section: SettingsPageId, target?: string, fromSidebar = false, hostId?: string, revealTarget = false): void {
+    const field = target ?? (section === 'hosts' ? 'mesh-paths' : section === 'agents' ? 'executors' : undefined)
+    const request = normalizeSettingsNavigationRequest({ section, field, hostId }, config?.hosts ?? [])
+    setActive(request.section)
     setShowResults(false)
     setTargetIssue('')
-    const field = target ?? (section === 'hosts' ? 'mesh-paths' : section === 'agents' ? 'executors' : undefined)
-    const hasSubpages = settingsModules.some(module => module.id === section && Boolean((module as SettingsModule).subpages?.length))
-    setDestination(searching || fromSidebar && (target || hasSubpages) || section === 'hosts' || section === 'agents' ? { section, ...(target && !fromSidebar ? { target } : {}), route,
-      request: normalizeSettingsNavigationRequest({ section, field }, config?.hosts ?? []) } : null)
+    const hasSubpages = settingsModules.some(module => module.id === request.section && Boolean((module as SettingsModule).subpages?.length))
+    const hasRequest = searching || target || hostId !== undefined || fromSidebar && hasSubpages
+      || section === 'hosts' || section === 'agents' || section === 'network-node' || section === 'remote-execution'
+    setDestination(hasRequest ? { section: request.section,
+      ...(request.field && revealTarget ? { target: request.field } : {}), route, request } : null)
   }
 
   function chooseSearchResult(section: SettingsPageId, target?: string): void {
     const results = page.current?.querySelector<HTMLElement>('[data-settings-search-results]')
     searchResultOrigin.current = { section, target, scrollTop: results?.scrollTop ?? 0 }
-    chooseSection(section, target)
+    chooseSection(section, target, false, undefined, true)
   }
 
   function returnToSearchResults(): void {
@@ -294,7 +308,7 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
     return <div key={pane} className="settings-content__scroll" data-settings-pane={pane} hidden={!paneVisible} inert={!paneVisible}>
       {paneVisible && searching ? <div className="settings-search-return"><Button type="button" onClick={returnToSearchResults}>Search results</Button><span>“{query}”</span>{targetIssue ? <span role="status">{targetIssue}</span> : null}</div>
         : paneVisible && targetIssue ? <p className="settings-target-issue" role="status" data-settings-target-issue>{targetIssue}</p> : null}
-      <Pane config={config} onClose={onClose} onNavigate={chooseSection} active={paneVisible} executorId={executorId} toolId={toolId} navigationRequest={paneNavigationRequest} onSubpageChange={paneVisible && module.subpages ? setActiveSubpage : undefined} />
+      <Pane config={config} onClose={onClose} onNavigate={(section, field, hostId) => chooseSection(section, field, false, hostId)} active={paneVisible} executorId={executorId} toolId={toolId} navigationRequest={paneNavigationRequest} onSubpageChange={paneVisible && module.subpages ? setActiveSubpage : undefined} />
     </div>
   }
 

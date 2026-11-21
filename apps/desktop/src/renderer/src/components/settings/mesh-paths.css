@@ -2,8 +2,6 @@
 .mesh-paths-issue { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; background: var(--surface-1); padding: 8px 12px; border-radius: var(--radius); }
 .mesh-paths-issue p { color: var(--text-2); line-height: 1.5; overflow-wrap: anywhere; margin: 0; }
 .mesh-paths-issue details { color: var(--text-3); font-size: var(--fs-meta); }
-.mesh-settings-pane > [data-mesh-view=paths], .mesh-settings-pane > [data-mesh-view=machines] { overflow: auto; overscroll-behavior: contain; }
-.mesh-editor-navigation { flex: none; display: flex; align-items: center; padding-bottom: var(--sp-3); }
 .mesh-locations-panel {
   min-width: 0;
   padding: 14px 16px;

@@ -1,0 +1,215 @@
+.settings-content__scroll:is([data-settings-pane="hosts"], [data-settings-pane="network-node"], [data-settings-pane="remote-execution"]),
+.settings-content:is([data-settings-active="hosts"], [data-settings-active="network-node"], [data-settings-active="remote-execution"]) > .settings-content__header {
+  width: 100%;
+  padding-inline: max(var(--sp-5), calc((100% - 1080px) / 2));
+}
+.cluster-workspace {
+  --cluster-ease: cubic-bezier(.22, 1, .36, 1);
+  --cluster-line: color-mix(in srgb, var(--line-soft), var(--text) 5%);
+  container: cluster / inline-size;
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+  padding: 6px 0 var(--sp-7);
+}
+.cluster-workspace h2, .cluster-workspace h3, .cluster-workspace p { margin: 0; }
+.cluster-workspace h2 { font-size: clamp(22px, 4.5cqi, 35px); letter-spacing: -.045em; line-height: 1.09; }
+.cluster-workspace p { color: var(--text-3); line-height: 1.5; }
+.cluster-workspace button { max-width: 100%; }
+.cluster-overview-header, .cluster-section-heading, .cluster-actions, .cluster-journey-nav, .cluster-quick-links {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+}
+.cluster-overview-header > div:first-child, .cluster-section-heading > div { display: grid; gap: 5px; }
+.cluster-actions { justify-content: flex-start; gap: 7px; }
+.cluster-network-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--cluster-line);
+  border: 1px solid var(--cluster-line);
+  border-radius: 12px;
+  overflow: hidden;
+  margin: 0 0 7px;
+}
+.cluster-network-facts > div { display: grid; align-content: start; gap: 4px; padding: 11px 14px; min-width: 0; background: var(--surface-1); }
+.cluster-network-facts dt { color: var(--text-3); font-size: var(--fs-meta); }
+.cluster-network-facts dd { margin: 0; color: var(--text); font-weight: 620; overflow-wrap: anywhere; }
+.cluster-network-facts small { display: block; color: var(--text-3); font-weight: 400; }
+.cluster-overview .mesh-paths-pane { margin: 0; }
+.cluster-overview .cluster-machines { margin: 0; }
+.cluster-task-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  color: var(--text);
+  border: 1px solid var(--cluster-line);
+  background: linear-gradient(150deg, color-mix(in srgb, var(--surface-1), #73af9b 18%), var(--surface-1));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .09);
+}
+.cluster-inline-link {
+  color: var(--text-2);
+  font-size: var(--fs-meta);
+  padding: 7px 4px;
+  text-underline-offset: 3px;
+}
+.cluster-node [data-cluster-node-panel]:not([data-cluster-node-panel="mesh-devices"]) { width: min(100%, 810px); }
+.cluster-node .remote-detail-tabs[hidden] { display: none; }
+.cluster-node .mesh-task-options[data-guided] { grid-template-columns: minmax(0, 360px); }
+.cluster-node .mesh-task-options:empty { display: none; }
+.cluster-node .tailcat-setup-flow__caption { color: var(--text-2); font-size: var(--fs-meta); font-weight: 600; }
+.cluster-node .host-tailcat-preparation__action button { color: var(--text); border-color: var(--line-strong); background: var(--surface-2); }
+.cluster-node-tabs {
+  display: grid;
+  grid-template-columns: minmax(max-content, 1.35fr) repeat(3, minmax(max-content, 1fr));
+  justify-self: start;
+  min-width: min(100%, 420px);
+  gap: 3px;
+  border-radius: 11px;
+  border: 1px solid var(--cluster-line);
+  background: var(--surface-1);
+  padding: 4px;
+}
+.cluster-node-tabs button {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-2);
+  border-radius: 7px;
+  padding: 7px 10px;
+  cursor: pointer;
+  transition: background-color 200ms var(--cluster-ease), color 200ms var(--cluster-ease), border-color 200ms var(--cluster-ease);
+}
+.cluster-node-tabs button:hover { background: var(--surface-2); }
+.cluster-node-tabs button[aria-selected="true"] {
+  background: var(--surface-2);
+  border-color: var(--cluster-line);
+  color: var(--text);
+  font-weight: 620;
+  box-shadow: 0 2px 5px rgb(0 0 0 / .08);
+}
+.cluster-panel[hidden] { display: none; }
+.cluster-panel:not([hidden]) { animation: cluster-arrive 320ms var(--cluster-ease) both; }
+.cluster-panel:not([hidden]) .cluster-landing img { animation: cluster-art-arrive 660ms var(--cluster-ease) both; }
+.cluster-panel:not([hidden]) .cluster-landing > div { animation: cluster-copy-arrive 380ms var(--cluster-ease) 65ms both; }
+.cluster-panel:not([hidden]) .cluster-task-grid > button { animation: cluster-copy-arrive 415ms var(--cluster-ease) calc(75ms + var(--task-order, 0) * 34ms) both; }
+.cluster-task-grid > button:nth-child(2) { --task-order: 1; }
+.cluster-task-grid > button:nth-child(3) { --task-order: 2; }
+.cluster-task-grid > button:nth-child(4) { --task-order: 3; }
+.cluster-panel > [data-settings-field] { min-width: 0; }
+.cluster-panel > .cluster-section-heading { margin-bottom: 12px; }
+.cluster-section-heading + .host-local-incoming { margin-top: 0; }
+.cluster-section-heading + .remote-management { margin-top: 12px; }
+.cluster-section-heading + .remote-management > .remote-foundation { display: none; }
+.cluster-workspace .settings-resource-workbench { height: auto; container: settings-resource / inline-size; }
+.cluster-workspace .remote-management__body { min-height: 310px; }
+.cluster-workspace .settings-pane-stack { padding-bottom: 0; }
+.cluster-landing {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  align-content: end;
+  overflow: hidden;
+  min-height: 265px;
+  color: #f2f4ed;
+  background: #182724;
+  border: 1px solid rgb(129 171 151 / .36);
+  border-radius: 17px;
+}
+.cluster-landing::after, .cluster-landing img { position: absolute; inset: 0; width: 100%; height: 100%; }
+.cluster-landing img { object-fit: cover; object-position: 71% 53%; z-index: -2; }
+.cluster-landing::after { content: ""; z-index: -1; background: linear-gradient(90deg, #111c1af5 0%, #172520e8 33%, #15251e42 69%, transparent 100%); }
+.cluster-landing > div { display: grid; justify-items: start; gap: 10px; max-width: 54%; padding: clamp(16px, 4cqi, 38px); }
+.cluster-landing h2 { font-size: clamp(26px, 5.4cqi, 48px); font-weight: 640; text-wrap: balance; }
+.cluster-landing p { color: #cfdbd4; text-wrap: pretty; }
+.cluster-landing button { margin-top: 6px; }
+.cluster-landing--compact { min-height: 174px; }
+.cluster-landing--compact h2 { font-size: clamp(22px, 4.3cqi, 35px); }
+.cluster-task-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin-top: 12px; }
+.cluster-task-grid > button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 13px;
+  color: var(--text);
+  background: var(--surface-1);
+  border: 1px solid var(--cluster-line);
+  border-radius: 12px;
+  min-width: 0;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 220ms var(--cluster-ease), border-color 220ms var(--cluster-ease), translate 260ms var(--cluster-ease);
+}
+.cluster-task-grid > button:hover { translate: 0 -2px; background: var(--surface-2); border-color: var(--line); }
+.cluster-task-grid > button:active { translate: 0 1px; }
+.cluster-task-grid strong { display: block; font-size: var(--fs-body); margin-bottom: 3px; }
+.cluster-task-grid small { display: block; color: var(--text-3); line-height: 1.38; }
+.cluster-task-icon { width: 39px; height: 39px; border-radius: 10px; }
+.cluster-task-arrow { color: var(--text-3); transition: translate 220ms var(--cluster-ease); }
+.cluster-task-grid > button:hover .cluster-task-arrow { translate: 2px -2px; }
+.cluster-quick-links { margin-top: 13px; justify-content: flex-start; gap: 8px; }
+.cluster-quick-links button[data-quick-task="routes"] { margin-right: auto; }
+.cluster-journey-nav { justify-content: flex-start; }
+.cluster-journey-nav:focus { outline: none; }
+.cluster-task-content { display: grid; gap: 14px; }
+.cluster-task-content > button { justify-self: start; }
+.cluster-checklist { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; counter-reset: cluster-step; }
+.cluster-checklist li {
+  display: grid;
+  align-items: center;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 12px;
+  counter-increment: cluster-step;
+  border-radius: 11px;
+  border: 1px solid var(--cluster-line);
+  background: var(--surface-1);
+}
+.cluster-checklist li::before {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--cluster-line);
+  border-radius: 50%;
+  color: var(--text-2);
+  content: counter(cluster-step);
+}
+.cluster-checklist p { margin-top: 3px; }
+.cluster-settings-share, .cluster-workspace .mesh-device-access { scroll-margin-block: 16px; }
+@keyframes cluster-arrive {
+  from { opacity: .58; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes cluster-art-arrive {
+  from { transform: scale(1.055) translateX(5px); }
+  to { transform: scale(1) translateX(0); }
+}
+@keyframes cluster-copy-arrive {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@container cluster (max-width: 690px) {
+  .cluster-landing > div { max-width: 67%; }
+  .cluster-task-grid { grid-template-columns: 1fr; }
+}
+@container cluster (max-width: 440px) {
+  .cluster-network-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cluster-node-tabs { min-width: 0; justify-self: stretch; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cluster-node-tabs button { white-space: normal; padding-inline: 6px; }
+  .cluster-landing { min-height: 260px; }
+  .cluster-landing--compact { min-height: 190px; }
+  .cluster-landing img { object-position: 72% 40%; }
+  .cluster-landing::after { background: linear-gradient(0deg, #101b18 0%, #13201cec 39%, #13201c22 93%); }
+  .cluster-landing > div { max-width: 100%; padding: 18px; }
+  .cluster-checklist li { grid-template-columns: 24px minmax(0, 1fr); }
+  .cluster-checklist li > button { grid-column: 2; justify-self: start; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cluster-panel:not([hidden]), .cluster-panel:not([hidden]) .cluster-landing :is(img, div),
+  .cluster-panel:not([hidden]) .cluster-task-grid > button { animation: none; }
+  .cluster-node-tabs button, .cluster-task-grid > button, .cluster-task-grid span { transition: none; translate: none; }
+}

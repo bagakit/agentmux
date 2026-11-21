@@ -21,8 +21,8 @@ function Measurement({ label, value, ratio, note }: { label: string; value: stri
 }
 
 /** Saved Host routes are compared here; their names/IPs are not physical-device IDs. */
-export function ClusterMachinesPane({ hosts, active, compact = false, onAddDevice, onConnections }: {
-  hosts: HostConfig[]; active: boolean; compact?: boolean
+export function ClusterMachinesPane({ hosts, active, onAddDevice, onConnections }: {
+  hosts: HostConfig[]; active: boolean
   onAddDevice?: () => void; onConnections?: (hostId: string) => void
 }) {
   const [rows, setRows] = useState<Record<string, Row>>({}), latest = useRef(rows); latest.current = rows
@@ -74,19 +74,19 @@ export function ClusterMachinesPane({ hosts, active, compact = false, onAddDevic
     }
     request.current = schedule
     let observer: IntersectionObserver | undefined
-    if (!compact) schedule()
-    else if (section.current && typeof IntersectionObserver !== 'undefined') {
+    if (section.current && typeof IntersectionObserver !== 'undefined') {
       observer = new IntersectionObserver(entries => {
         if (entries.some(entry => entry.isIntersecting)) { observer?.disconnect(); schedule() }
       })
       observer.observe(section.current)
     }
+    else schedule()
     return () => {
       observer?.disconnect()
       controller.abort(); request.current = () => {}; setReading(false)
       setRows(current => Object.fromEntries(Object.entries(current).map(([id, row]) => [id, pending.has(id) ? { ...row, phase: 'idle' as const } : row])))
     }
-  }, [active, visible, fingerprint, compact])
+  }, [active, visible, fingerprint])
   const originals = hosts.map(host => ({ host, row: rows[host.id]?.key === clusterHostKey(host) ? rows[host.id] : undefined }))
   const observed = originals.filter(({ row }) => row?.phase === 'observed' && row.read?.reply.status === 'available').length
   const attention = ({ row }: { row?: Row | undefined }) => row?.phase === 'unavailable' || row?.read?.reply.status === 'withheld' || row?.read?.reply.status === 'unavailable' || row?.read?.reply.status === 'available' && partialSample(row.read.reply.sample)
@@ -96,18 +96,18 @@ export function ClusterMachinesPane({ hosts, active, compact = false, onAddDevic
     const { host, row } = item
     const fields = [host.label, host.id, hostConnectionSummary(host), row?.read?.reply.node.runtimeId ?? '']
     if (host.kind === 'ssh') fields.push(host.runtimeId ?? '', ...(host.transport === 'tailcat' ? [] : [host.hostname, host.port?.toString() ?? '']))
-    return fields.some(field => field.toLocaleLowerCase().includes(needle)) && (compact || inFilter(item))
+    return fields.some(field => field.toLocaleLowerCase().includes(needle)) && inFilter(item)
   })
-  return <section ref={section} className="cluster-machines" aria-label="Cluster machine resources" data-settings-field="mesh-machines">
+  return <section ref={section} className="cluster-machines" id="cluster-machine-resources" tabIndex={-1} aria-label="Cluster machine resources" data-settings-field="mesh-machines">
     <header className="cluster-machines-heading">
-      <div>{compact ? <h3>Machines</h3> : null}<div className="cluster-machines-coverage" role="status">{observed} / {hosts.length} sampled <span>· Saved connections</span></div></div>
+      <div><h3>Machines</h3><div className="cluster-machines-coverage" role="status">{observed} / {hosts.length} sampled <span>· Saved connections</span></div></div>
       <div className="cluster-machines-actions">
         <TextInput type="search" aria-label="Filter saved devices" value={query} onChange={event => setQuery(event.target.value)} placeholder="Find a machine" />
         <Button type="button" disabled={reading} onClick={() => request.current()}>{reading ? 'Reading resources…' : 'Refresh resources'}</Button>
         {onAddDevice ? <Button type="button" className="cluster-add-device" onClick={onAddDevice}>Add SSH connection</Button> : null}
       </div>
     </header>
-    {!compact ? <div className="cluster-machines-toolbar" role="group" aria-label="Machine status filter">{(['all', 'observed', 'attention'] as const).map(value => <button type="button" className="small-button" key={value} aria-pressed={filter === value} onClick={() => setFilter(value)}>{value === 'all' ? 'All hosts' : value === 'observed' ? 'With samples' : 'Needs attention'}</button>)}</div> : null}
+    <div className="cluster-machines-toolbar" role="group" aria-label="Machine status filter">{(['all', 'observed', 'attention'] as const).map(value => <button type="button" className="small-button" key={value} aria-pressed={filter === value} onClick={() => setFilter(value)}>{value === 'all' ? 'All hosts' : value === 'observed' ? 'With samples' : 'Needs attention'}</button>)}</div>
     {shown.length ? <div className="cluster-machines-column-headings" aria-hidden="true"><span>Device / saved connection</span><span>CPU</span><span>Memory</span><span>Storage</span><span>Sample</span><span /></div> : null}
     <div className="cluster-machines-grid">{shown.map(({ host, row }) => <MachineCard key={host.id} host={host} row={row} onRefresh={() => request.current(host.id)} onConnections={onConnections} />)}</div>
     {!shown.length ? <p className="cluster-machines-empty">{hosts.length ? `No saved devices match this filter. ${hosts.length} saved connections remain available.` : 'No saved connections yet.'}{needle ? <> <Button type="button" onClick={() => setQuery('')}>Clear filter</Button></> : null}</p> : null}

@@ -69,9 +69,20 @@ export function MeshPathsPane({ active, hosts, locations, separateRuntimeId, onG
   ], [devices, hosts, snapshot, networkId])
   const editHost = (id: string) => editLocation(targets.find(t => t.field === 'meshMapLocations' && t.key === id))
   const editPeer = (id: string) => editLocation(targets.find(t => t.field === 'meshNetworkMapLocations' && networkId && t.key === meshPeerLocationKey(networkId, id)))
-  const actions = <><Button type="button" aria-expanded={editingLocation !== undefined} onClick={() => editHost('local')}>My map annotations</Button>
+  const actions = <><Button type="button" aria-expanded={editingLocation !== undefined} onClick={() => { const local = hosts.find(host => host.kind === 'local'); if (local) editHost(local.id) }}>My map annotations</Button>
     <Button type="button" disabled={busy} onClick={() => setRevision(value => value + 1)}>{busy ? 'Reading…' : 'Refresh network'}</Button></>
+  const network = issue || !snapshot ? 'Unknown' : { active: 'Active', disabled: 'Disabled', starting: 'Starting', unavailable: 'Unavailable' }[snapshot.apply.state]
+  const connected = !issue && snapshot?.network
+    ? snapshot.network.peers.filter(peer => peer.state === 'connected').length : undefined
   return <section className="mesh-paths-pane" aria-label="Mesh network overview" data-settings-field="mesh-paths">
+    <dl className="cluster-network-facts" aria-label="Current network participation">
+      <div><dt>Network identity</dt><dd>{separateRuntimeId ? 'Separate Mesh identity' : 'This Mac'}</dd></div>
+      <div><dt>Participation</dt><dd>{network}{!issue && snapshot?.network ? <small title={snapshot.network.networkId ?? undefined}>{snapshot.network.networkId}</small> : null}</dd></div>
+      <div><dt>Connected peers</dt><dd>{connected ?? 'Unobserved'}</dd></div>
+      <div><dt>{issue && snapshot ? 'Last confirmed' : 'Observed'}</dt><dd>{snapshot
+        ? <time dateTime={new Date(snapshot.observedAt).toISOString()}>{new Date(snapshot.observedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time>
+        : busy ? 'Reading…' : 'Unobserved'}</dd></div>
+    </dl>
     {issue ? <div className="mesh-paths-issue" role="status"><strong>Network observation unavailable.</strong><p>{snapshot ? 'Showing the last confirmed network.' : 'Current network state is unknown.'}</p><details><summary>Read details</summary><p>{issue}</p></details></div> : null}
     <div ref={locationEditor} hidden={editingLocation === undefined}>
       <MeshLocationsPanel targets={targets} peerLocations={peerLocations} locations={locations} active={active} editing={editingLocation} onEdit={editLocation} />

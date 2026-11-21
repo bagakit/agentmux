@@ -17,13 +17,14 @@ export function TailcatSetupFlow({ role, peerName }: { role: TailcatKeyRole; pee
     ['Save & test', 'Save hosts, then test this connection.']
   ]
   return <section className="tailcat-setup-flow" data-tailcat-flow={role} aria-label="Tailcat connection setup">
-    <div className="tailcat-setup-flow__heading"><span>Tailcat</span><small>Connection setup</small></div>
+    <div className="tailcat-setup-flow__heading"><span>Connection direction</span><small>{receiving ? "Incoming" : "Outgoing"}</small></div>
     <div className="tailcat-setup-flow__direction" aria-label="Connection direction">
       <span><DeviceIcon size={18} /><strong>{receiving ? 'The other Mac' : 'This Mac'}</strong></span>
       <svg viewBox="0 0 64 16" aria-hidden="true"><path d="M2 8h57m-6-5 6 5-6 5" /></svg>
       <span><DeviceIcon size={18} /><strong>{receiving ? 'This Mac' : peerName}</strong></span>
     </div>
-    <ol aria-label="Setup steps">{steps.map(([title, detail], index) => <li key={title}>
+    <p className="tailcat-setup-flow__caption">Steps on this Mac</p>
+    <ol aria-label="Setup steps on this Mac">{steps.map(([title, detail], index) => <li key={title}>
       <span className="tailcat-setup-flow__number" aria-hidden="true">{index + 1}</span>
       <div><strong>{title}</strong><p>{detail}</p></div>
     </li>)}</ol>
