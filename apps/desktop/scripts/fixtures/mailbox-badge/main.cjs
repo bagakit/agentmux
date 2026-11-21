@@ -101,7 +101,8 @@ async function geometry() {
               bottom: r.bottom
             }
           },
-          b = t.querySelector('.composer-mailbox__unread')
+          b = t.querySelector('.composer-mailbox__unread'),
+          envelope = t.querySelector('.composer-mailbox__envelope')
         let text = null
         if (b) {
           const range = document.createRange()
@@ -110,6 +111,7 @@ async function geometry() {
             content: b.textContent,
             rect: rect(range),
             font: getComputedStyle(b).fontSize,
+            color: getComputedStyle(b).color,
             background: getComputedStyle(b).backgroundColor,
             transform: getComputedStyle(b).transform
           }
@@ -117,7 +119,10 @@ async function geometry() {
         return {
           trigger: rect(t),
           mark: rect(t.querySelector('.composer-mailbox__mark')),
-          envelope: rect(t.querySelector('.composer-mailbox__envelope')),
+          envelope: rect(envelope),
+          face: rect(envelope.querySelector('use')),
+          envelopeColor: getComputedStyle(envelope).color,
+          envelopeIcon: envelope.dataset.semanticIcon,
           badge: rect(b),
           attention: rect(t.querySelector('.composer-mailbox__attention')),
           progress: rect(t.querySelector('.composer-mailbox__progress')),
@@ -137,10 +142,17 @@ async function geometry() {
 const separated = (a, b) =>
   a.right <= b.x + 0.1 || b.right <= a.x + 0.1 || a.bottom <= b.y + 0.1 || b.bottom <= a.y + 0.1
 function stable(a, b) {
-  for (const name of ['trigger', 'mark', 'composer', 'editor', 'avatar', 'terminal'])
+  for (const name of ['trigger', 'mark', 'envelope', 'face', 'composer', 'editor', 'avatar', 'terminal'])
     assert.deepEqual(b[name], a[name], 'Original geometry/terminal preserved: ' + name)
   for (const name of ['sessions', 'tab', 'layout', 'drafts', 'resizes', 'writes'])
     assert.deepEqual(b.facts[name], a.facts[name], 'Original workface preserved: ' + name)
+}
+function luminance(rgb) {
+  const [red, green, blue] = rgb.match(/[\d.]+/g).map(value => {
+    const channel = Number(value) / 255
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
+  })
+  return 0.2126 * red + 0.7152 * green + 0.0722 * blue
 }
 async function verify(count, notices, automation) {
   const g = await geometry(),
@@ -153,8 +165,10 @@ async function verify(count, notices, automation) {
   assert.equal(g.trigger.height, g.coarse ? 44 : 24, 'Original fine/coarse hit height')
   assert.equal(g.mark.width, 28)
   assert.equal(g.mark.height, 24)
-  assert.equal(g.envelope.width, 12)
-  assert.equal(g.envelope.height, 12)
+  assert.equal(g.envelopeIcon, 'object.session-messages')
+  assert.equal(g.envelope.width, 24)
+  assert.equal(g.envelope.height, 24)
+  assert.ok(g.face.width > 0 && g.face.height > 0, 'The referenced filled envelope draws a face')
   assert.ok(contains(g.trigger, g.mark))
   assert.ok(contains(g.mark, g.envelope))
   assert.equal(Boolean(g.badge), count > 0, 'Only actual journal unread creates a number')
@@ -176,36 +190,36 @@ async function verify(count, notices, automation) {
     assert.equal(g.text.font, '10px')
     assert.equal(g.text.background, 'rgba(0, 0, 0, 0)')
     assert.equal(g.text.transform, 'none')
-    assert.ok(g.badge.y >= g.envelope.bottom - 0.1, 'Unread is below the envelope')
     assert.ok(
       g.text.rect.x >= g.badge.x - 0.5 && g.text.rect.right <= g.badge.right + 0.5,
       'Complete unread horizontal glyphs remain inside the count'
     )
-    assert.ok(contains(g.mark, g.text.rect), 'Natural unread glyphs stay within the fixed mark')
-    assert.ok(separated(g.text.rect, g.envelope), 'Unread glyphs do not overlap the envelope')
+    assert.ok(contains(g.face, g.text.rect), 'Unread glyphs stay on the filled envelope face')
+    assert.ok(g.badge.y >= g.face.y + g.face.height / 3, 'Unread stays below the fold of the envelope')
+    const textLightness = luminance(g.text.color), faceLightness = luminance(g.envelopeColor)
+    assert.ok(
+      (Math.max(textLightness, faceLightness) + 0.05) / (Math.min(textLightness, faceLightness) + 0.05) >= 4.5,
+      'Unread text has sufficient contrast against the filled envelope'
+    )
     assert.ok(
       Math.abs(g.badge.x + g.badge.width / 2 - (g.mark.x + g.mark.width / 2)) < 0.6,
       'Unread is centered'
     )
   }
+  const center = g.mark.x + g.mark.width / 2
   if (g.attention) {
-    assert.ok(
-      g.attention.x >= g.envelope.right - 0.1,
-      'Notices stays in the upper-right corner without crossing the envelope'
-    )
-    assert.ok(separated(g.attention, g.envelope), 'Notices does not overlap the envelope')
+    assert.ok(g.attention.x >= center, 'Notices stays in the upper-right corner')
   }
   if (g.progress) {
     if (g.attention) {
-      assert.ok(g.progress.right <= g.envelope.x + 0.1, 'Automation yields the upper-right corner to Notices')
+      assert.ok(g.progress.right <= center, 'Automation yields the upper-right corner to Notices')
     } else {
-      assert.ok(g.progress.x >= g.envelope.right - 0.1, 'Standalone Automation stays in the upper-right corner')
+      assert.ok(g.progress.x >= center, 'Standalone Automation stays in the upper-right corner')
     }
-    assert.ok(separated(g.progress, g.envelope), 'Automation does not overlap the envelope')
   }
   for (const [a, b] of [
-    [g.badge, g.attention],
-    [g.badge, g.progress],
+    [g.text?.rect, g.attention],
+    [g.text?.rect, g.progress],
     [g.attention, g.progress]
   ])
     if (a && b) assert.ok(separated(a, b), 'Independent Messages hints remain separate')
@@ -218,7 +232,7 @@ async function frame(scene, name) {
   await fs.writeFile(path.join(evidence, file), bytes, { flag: 'wx' })
   result.frames.push({ scene, file, sha256: createHash('sha256').update(bytes).digest('hex') })
 }
-async function cssMutation({ name, selector, inset, failure, count, notices }) {
+async function cssMutation({ name, selector, property = 'inset-inline', value, failure, count, notices }) {
   const declaration = await evaluate(
     `
       ;(() => {
@@ -230,7 +244,7 @@ async function cssMutation({ name, selector, inset, failure, count, notices }) {
           }
         }
         for (const sheet of document.styleSheets) walk(sheet.cssRules, sheet)
-        if (matches.length !== 1) throw Error('The original imported status CSS rule must be unique')
+        if (matches.length !== 1) throw Error('The original imported CSS rule must be unique')
         const { rule, sheet } = matches[0]
         globalThis.mailboxOriginalRule = {
           rule,
@@ -238,12 +252,13 @@ async function cssMutation({ name, selector, inset, failure, count, notices }) {
           cssText: rule.cssText
         }
         const original = rule.cssText
-        rule.style.setProperty('inset-inline', ${JSON.stringify(inset)})
+        const property = ${JSON.stringify(property)}
+        rule.style.setProperty(property, ${JSON.stringify(value)})
         return {
           href: sheet.href,
           selector: rule.selectorText,
-          property: 'inset-inline',
-          mutatedValue: rule.style.getPropertyValue('inset-inline'),
+          property,
+          mutatedValue: rule.style.getPropertyValue(property),
           original,
           mutated: rule.cssText
         }
@@ -356,11 +371,18 @@ async function scene(s) {
     await waitFor(`${trigger}.dataset.progressState === 'unconfirmed' && ${trigger}.title.includes('Agent messages 1 unread')`)
     await verify(1, false, true)
     await frame(s, 'unread-1-automation-unconfirmed')
-    if (s.width === 640) await cssMutation({
-      name: 'standalone-automation-returned-to-left',
-      selector: '.composer-mailbox__progress', inset: '0 auto', count: 1, notices: false,
-      failure: /Standalone Automation stays in the upper-right corner/
-    })
+    if (s.width === 640) {
+      await cssMutation({
+        name: 'standalone-automation-returned-to-left',
+        selector: '.composer-mailbox__progress', value: '0 auto', count: 1, notices: false,
+        failure: /Standalone Automation stays in the upper-right corner/
+      })
+      await cssMutation({
+        name: 'unread-falls-off-the-envelope',
+        selector: '.composer-mailbox__unread', property: 'inset-block-end', value: '0px',
+        count: 1, notices: false, failure: /Unread glyphs stay on the filled envelope face/
+      })
+    }
     await evaluate('mailboxBadge.unread(100)')
   }
   // Read the four legitimate 25-message pages through the actual mailbox consumer.
@@ -418,9 +440,9 @@ async function scene(s) {
   stable(baseline, mixed)
   await frame(s, 'mixed')
   if (s.width === 640) await cssMutation({
-    name: 'notices-moved-onto-envelope',
-    selector: '.composer-mailbox__attention', inset: 'auto 8px', count: 100, notices: true,
-    failure: /Notices.*(?:envelope|upper-right)/
+    name: 'notices-moved-out-of-corner',
+    selector: '.composer-mailbox__attention', value: 'auto 8px', count: 100, notices: true,
+    failure: /Notices stays in the upper-right corner/
   })
   result.scenes.push({ scene: s, baseline, observations, noticesOnly, mixed })
 }
@@ -461,7 +483,7 @@ app.whenReady().then(async () => {
     ])
       await scene(s)
     assert.equal(result.scenes.length, 4)
-    assert.equal(result.mutations.length, 2)
+    assert.equal(result.mutations.length, 3)
     assert.equal(result.keyboard.length, 1)
     result.passed = true
   } catch (error) {

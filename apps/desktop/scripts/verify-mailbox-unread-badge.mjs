@@ -143,7 +143,7 @@ try {
   assert.equal(result.process.exitCode, 0, result.render.failure?.message)
   assert.equal(result.render.passed, true)
   assert.equal(result.render.keyboard.length, 1)
-  assert.equal(result.render.mutations.length, 2)
+  assert.equal(result.render.mutations.length, 3)
   for (const mutation of result.render.mutations) {
     assert.equal(mutation.failed.name, 'AssertionError')
     assert.equal(mutation.restored, 'same-page geometry green')
