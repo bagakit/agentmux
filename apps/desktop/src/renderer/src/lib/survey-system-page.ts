@@ -9,9 +9,12 @@ import { surveyPageReuseCandidates } from './survey-page-navigation'
 import { isSurveyPage } from './survey-page-references'
 import { samePage } from './survey-list'
 
+export type SurveyPageOpening = { url: string }
+
 export type SystemPageState = Pick<AppState,
   'config' | 'tabs' | 'layouts' | 'surveyPageReferences' | 'createSurveyBrowser' | 'surveyProfileView' |
-  'setSurveyProfileView' | 'surveyZoneSelection' | 'setSurveyZoneSelection' | 'setMainSurface'>
+  'setSurveyProfileView' | 'surveyZoneSelection' | 'setSurveyZoneSelection' | 'setMainSurface' |
+  'surveyPageOpening' | 'setSurveyPageOpening'>
 export type SystemPageHost = { get(): SystemPageState; navigation(): string; subscribe(listener: () => void): () => void }
 // Presentation priority only; requests, resource creation and saving keep their original owners.
 const latestPresentation = new WeakMap<SystemPageHost['get'], object>()
@@ -20,42 +23,52 @@ const latestPresentation = new WeakMap<SystemPageHost['get'], object>()
 export async function openSystemPageInSurvey(host: SystemPageHost, request: { url: string }, signal: AbortSignal): Promise<SystemPageOutcome> {
   if (signal.aborted) throw new Error('System page opening was not started because its original request is no longer available.')
   const get = host.get
-  const presentation = {}
+  const presentation: SurveyPageOpening = { url: request.url }
   latestPresentation.set(get, presentation)
   let navigation = host.navigation(), presenting = false
   let surveySelection = get().surveyZoneSelection, profile = get().surveyProfileView
   const current = () => host.navigation() === navigation && get().surveyZoneSelection === surveySelection && get().surveyProfileView === profile
   let navigationChanged = false
   let focus: Promise<boolean> | undefined
-  const unsubscribe = host.subscribe(() => { if (!presenting && !current()) navigationChanged = true })
+  const clearOpening = () => {
+    if (get().surveyPageOpening === presentation) get().setSurveyPageOpening(null)
+  }
+  const unsubscribe = host.subscribe(() => {
+    if (!presenting && !navigationChanged && !current()) {
+      navigationChanged = true
+      clearOpening()
+    }
+  })
+  signal.addEventListener('abort', clearOpening, { once: true })
   let preparation: SurveyBrowserPreparation | null = null
-  const present = (choose?: () => void) => {
+  const present = (choose: () => void) => {
     if (signal.aborted || latestPresentation.get(get) !== presentation || navigationChanged || !current()) return
     presenting = true
     try {
-      choose?.()
+      choose()
       focus ??= presentKnowledgeSurface('survey', get().setMainSurface, { inputPolicy: 'target' }).catch(() => false)
       navigation = host.navigation(); surveySelection = get().surveyZoneSelection; profile = get().surveyProfileView
     } finally { presenting = false }
   }
-  const reveal = (prepared: SurveyBrowserPreparation): void => {
+  const reveal = (prepared: SurveyBrowserPreparation, recovering = false): void => {
     if (!prepared.reference || prepared.admission?.outcome === 'unknown') return
     const { tabId, regionId } = prepared.reference
     const browser = get().tabs[tabId]?.regions[regionId]
     const page = browser?.kind === 'browser' && prepared.createdBrowser?.id === browser.browserId
     const launcher = browser?.kind === 'launcher' && browser === prepared.surface
-    if (!page && !launcher) return
-    present(() => get().setSurveyZoneSelection(page ? { kind: 'page', regionId, browserId: browser.browserId }
-      : { zoneId: prepared.zone.zoneId, selection: [{ tabId, regionId }], active: { tabId, regionId } }))
+    if (!page && !(recovering && launcher)) return
+    present(() => {
+      get().setSurveyZoneSelection(page ? { kind: 'page', regionId, browserId: browser.browserId }
+        : { zoneId: prepared.zone.zoneId, selection: [{ tabId, regionId }], active: { tabId, regionId } })
+      clearOpening()
+    })
   }
   try {
+    present(() => get().setSurveyPageOpening(presentation))
     const hasMatch = surveyPageReuseCandidates(get(), request.url).length > 0
     // The default can change while no Renderer observes Profile pushes. Only a
     // possible reuse needs a fresh default observation before choosing its page.
-    if (hasMatch) {
-      present()
-      await browserProfiles.refresh()
-    }
+    if (hasMatch) await browserProfiles.refresh()
     if (signal.aborted) return { state: 'unconfirmed', browserId: null, reference: null, message: 'The original system request is no longer available.' }
     const profiles = browserProfiles.get()
     const defaultProfileId = !profiles.error ? profiles.profiles?.find(item => item.isDefault)?.id : undefined
@@ -69,6 +82,7 @@ export async function openSystemPageInSurvey(host: SystemPageHost, request: { ur
           saveView = state.setSurveyProfileView({ kind: 'default' }).then(save => save.reason, () => 'Saving the original environment view was unconfirmed.')
         const selected = get().surveyZoneSelection
         if (!isSurveyPage(selected) || !samePage(selected, page)) state.setSurveyZoneSelection({ kind: 'page', ...page })
+        clearOpening()
       })
       if (focus && !await focus) return { state: 'unconfirmed', browserId: page.browserId, reference, message: 'The existing page is available. Bringing its Survey window forward was unconfirmed.' }
       const issue = await saveView
@@ -85,9 +99,14 @@ export async function openSystemPageInSurvey(host: SystemPageHost, request: { ur
     return { state: 'opened', browserId: browser.browserId, reference: prepared.reference }
   } catch (error) {
     const prepared = preparation as SurveyBrowserPreparation | null
-    if (prepared) reveal(prepared)
+    if (prepared) reveal(prepared, true)
     const reference = prepared?.reference ?? null, browser = reference ? get().tabs[reference.tabId]?.regions[reference.regionId] : null
     return { state: 'unconfirmed', browserId: browser?.kind === 'browser' ? browser.browserId : null, reference,
       message: `System page opening is unconfirmed. ${error instanceof Error ? error.message : String(error)} ${prepared ? `Original Survey item: ${formatAmuxObjectLink({ kind: 'zone', zoneId: prepared.zone.zoneId })}. ` : ''}The prepared Survey item is kept; inspect it and retry from its original page. Other pages, drafts and healthy Agents are kept.` }
-  } finally { unsubscribe(); if (latestPresentation.get(get) === presentation) latestPresentation.delete(get) }
+  } finally {
+    unsubscribe()
+    signal.removeEventListener('abort', clearOpening)
+    clearOpening()
+    if (latestPresentation.get(get) === presentation) latestPresentation.delete(get)
+  }
 }

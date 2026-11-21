@@ -54,6 +54,8 @@ import { TopicKnowledgeCapture } from './TopicKnowledgeEditor'
 import { SurveyRecallCapture } from './SurveyRecallCapture'
 import type { SurveyRecallCapture as RecallCaptureTarget } from '../lib/survey-recall-capture'
 import { WorkspaceWorkbench } from './WorkspaceWorkbench'
+import { SurveyOpeningPage } from './SurveyOpeningPage'
+import type { SurveyPageOpening } from '../lib/survey-system-page'
 import { WorkbenchZone } from './WorkbenchZone'
 import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { SURVEY_SIDEBAR_DEFAULT_WIDTH, surveySidebarBounds } from '../lib/survey-sidebar-width'
@@ -88,7 +90,7 @@ const ThemeActionCloseIcon = semanticIconComponent('action.close')
 const emptyZoneTabs: ReadonlyMap<string, readonly string[]> = new Map()
 
 
-export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAction, visible = true, observeWork = visible, controlsCoverPage = false, unconfirmedBrowserRegionIds, catalog, projection, selection, pageSelection = null, viewTargets, onSelectReference }: {
+export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAction, visible = true, observeWork = visible, controlsCoverPage = false, unconfirmedBrowserRegionIds, catalog, projection, selection, pageSelection = null, pageOpening, viewTargets, onSelectReference }: {
   observeWork?: boolean
   windowAction?: import('react').ReactNode
   visible?: boolean
@@ -98,6 +100,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAct
   projection: WorkbenchProjection | null
   selection: ResolvedSurveyZoneSelection | null
   pageSelection?: SurveyPageSelection | null
+  pageOpening?: SurveyPageOpening | null
   onSelectReference?: (reference: WorkbenchProjectionSelection) => void
   viewTargets?: Parameters<typeof WorkspaceWorkbench>[0]['viewTargets']
 }) {
@@ -325,7 +328,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAct
   useLayoutEffect(() => { intent.current += 1 }, [visible, selectionKey, activeWorkspaceId, profileViewKey])
   useEffect(() => { if (toolsOpen) setToolsVisited(true) }, [toolsOpen])
   useEffect(() => {
-    if (controlNavigation) return
+    if (controlNavigation || pageOpening) return
     const surface = surfaceRef.current
     const document = ownerDocument
     if (!visible) { if (surface?.contains(document.activeElement)) (document.activeElement as HTMLElement).blur(); return }
@@ -357,7 +360,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAct
     })
     observer.observe(surface, { childList: true, subtree: true })
     return () => observer.disconnect()
-  }, [visible, selectionKey, toolsOpen, currentBrowser?.browserId, currentBrowser?.url === 'about:blank', controlNavigation, ownerDocument])
+  }, [visible, selectionKey, toolsOpen, currentBrowser?.browserId, currentBrowser?.url === 'about:blank', controlNavigation, ownerDocument, pageOpening])
 
   function itemTitle(zone: AgentMuxZoneFact): string {
     return surveyExplorationName(explorationNames[zone.zoneId], (tabsByZone.get(zone.zoneId) ?? []).flatMap(id => tabs[id] ? [tabs[id]!] : []))
@@ -871,7 +874,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAct
           <span>{recovery.message}</span>
           <div className="survey-error__actions"><Button type="button" disabled={recovery.pending} onClick={() => void createItemBrowser(recovery.preparation)}>{recovery.pending ? 'Retrying original page…' : 'Retry original page'}</Button></div>
         </div>)}
-        {pageSelection ? <>{pageSelection.presentationReadRecovery ? <div className="survey-relation-notice" role="status">{pageSelection.presentationReadRecovery.issue}</div> : null}
+        {pageOpening ? <SurveyOpeningPage opening={pageOpening} /> : pageSelection ? <>{pageSelection.presentationReadRecovery ? <div className="survey-relation-notice" role="status">{pageSelection.presentationReadRecovery.issue}</div> : null}
           {projection ? <WorkspaceWorkbench workspaceId={projection.displayWorkspaceId}
           projection={projection} viewOwnership="projection" viewTargets={viewTargets} visible={visible && !controlsCoverPage}
           projectionHeader={pageHeaderOwner?.surface.kind === 'browser' ? <SurveyPageTabHeader tabId={pageHeaderOwner.tab.id} browser={pageHeaderOwner.surface}

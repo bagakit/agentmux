@@ -149,7 +149,7 @@ import { retainSurveyComposition, surveyCompositionTargetConfirmed, restoreSurve
 import { readSurveyProfileView, surveySelectionProfileMatch, type SurveyProfileView, type SurveyProfileViewRecovery } from './lib/survey-profile-view'
 import { admitPreparedSurveyPage, switchBrowserProfileForSurvey, repairSurveyProfileAdmission, type SurveyProfileBindingReceipt } from './lib/survey-profile-binding'
 import { openSystemUrlInSurvey } from './lib/survey-system-url'
-import { openSystemPageInSurvey, type SystemPageHost } from './lib/survey-system-page'
+import { openSystemPageInSurvey, type SurveyPageOpening, type SystemPageHost } from './lib/survey-system-page'
 import { isSystemWebUrl, type SystemPageOutcome } from '../../shared/system-web-url'
 import { openSystemFileInSurvey } from './lib/survey-system-file'
 import { isToolkitRequest, isBrowserProfileControlRequest } from '@agentmux/core/control'
@@ -1373,6 +1373,7 @@ export type AppState = GitReadingActions & {
   setRecallSidebarWidth(width: number): void
   setRecallNotebook(notebookId: string | null, noteId?: string | null): void
   refreshNotesStorage(): Promise<void>
+  surveyPageOpening: SurveyPageOpening | null
   surveyZoneSelection: SurveySelection | null
   /** Explicit Survey creation or saved display membership; Browser existence does not imply membership. */
   surveyProfileView: SurveyProfileView
@@ -1398,6 +1399,7 @@ export type AppState = GitReadingActions & {
   surveySidebarCollapsed: boolean
   setSurveySidebarCollapsed(collapsed: boolean): void
   setSurveySidebarWidth(width: number): void
+  setSurveyPageOpening(opening: SurveyPageOpening | null): void
   setSurveyZoneSelection(selection: SurveySelection | null): void
   setSurveyToolsOpen(open: boolean): void
   createSurveyBrowser(input: Parameters<typeof createSurveyBrowser>[1]): ReturnType<typeof createSurveyBrowser>
@@ -6784,6 +6786,8 @@ export const useAppStore = create<AppState>()<[['zustand/persist', PersistedAppS
     try { await applyNotesStorageSnapshot(await api.notesStorage.inspect()) }
     catch (error) { get().reportError(new Error('The original Note and draft are kept. File observation is unconfirmed; reopen this same Note to reconnect it. ' + presentError(error))) }
   },
+  surveyPageOpening: null,
+  setSurveyPageOpening(surveyPageOpening) { set({ surveyPageOpening }) },
   surveyZoneSelection: null,
   surveyProfileView: { kind: 'default' },
   surveyProfileViewReadRecovery: null,

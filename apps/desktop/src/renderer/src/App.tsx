@@ -78,6 +78,7 @@ import type { WorkbenchViewTarget, WorkbenchViewTargets } from './lib/workbench-
 import { ordinaryWorkbenchViewTargets, workbenchResourceTabs, workbenchDisplayReferenceMatches } from './lib/workbench-resource-display'
 import { useWorkbenchObjectLayout } from './hooks/useWorkbenchObjectLayout'
 import { useDeferredSurface } from './hooks/useDeferredSurface'
+import { SurveyOpeningPage } from './components/SurveyOpeningPage'
 import { workbenchNavigationTabs } from './lib/workbench-navigation-catalog'
 import { mainRegionReference, workbenchZoneProjection } from './lib/desktop-focus-navigation'
 import { layoutForLogicalRegionFocus } from './lib/region-focus'
@@ -232,6 +233,7 @@ function DesktopApp() {
   })
   const recallSelection = useAppStore(state => state.recallZoneSelection)
   const surveySelection = useAppStore((state) => state.surveyZoneSelection)
+  const surveyPageOpening = useAppStore(state => state.surveyPageOpening)
   const recallNotebookId = useAppStore(state => state.recallNotebookId)
   const recallNoteId = useAppStore(state => state.recallNoteId)
   const surveyToolsOpen = useAppStore((state) => state.surveyToolsOpen)
@@ -612,7 +614,7 @@ function DesktopApp() {
     for (const [tabId, occurrences] of Object.entries(moteViewTargets ?? {})) {
       targets[tabId] = targets[tabId] ? [...targets[tabId]!, ...occurrences] : occurrences
     }
-    if (surveyVisible && surveyProjection) {
+    if (surveyVisible && !surveyPageOpening && surveyProjection) {
       const projection = surveyProjection
       const projected = projectWorkbenchProjection(layouts[projection.displayWorkspaceId], tabs, projection)
       for (const reference of projected.selection) {
@@ -644,7 +646,7 @@ function DesktopApp() {
       })
     }
     return targets
-  }, [config?.browser.startPage, moteViewTargets, surveyVisible, surveyProjection, surveySelection, surveyCurrentSelection, layouts, tabs, surveyToolsOpen, narrowControls, selectSurveyReference,
+  }, [config?.browser.startPage, moteViewTargets, surveyVisible, surveyPageOpening, surveyProjection, surveySelection, surveyCurrentSelection, layouts, tabs, surveyToolsOpen, narrowControls, selectSurveyReference,
     focusVisible, focusProjection, focusTab, selectFocusReference, ordinaryTargets, recallVisible, recallProjection, recallCurrentSelection, selectRecallReference])
   const compactSidebars = windowWidth <= 760 && mainSurface === 'workbench' && Boolean(config?.workspaces.some(item => item.id === activeWorkspaceId))
   const windowSidebars = useWindowSidebarLayout(compactSidebars)
@@ -968,9 +970,10 @@ function DesktopApp() {
                     windowAction={surveyDetached ? null : <SurfaceWindowButton surface="survey" />}
                     visible={surveyVisible} observeWork={observeSurvey} controlsCoverPage={surveyToolsOpen && narrowControls}
                     onSelectReference={selectSurveyReference} unconfirmedBrowserRegionIds={unconfirmedBrowserRegionIds}
-                    catalog={surveyCatalog} projection={surveyProjection} selection={surveyCurrentSelection}
+                    catalog={surveyCatalog} projection={surveyProjection} selection={surveyCurrentSelection} pageOpening={surveyPageOpening}
                     pageSelection={isSurveyPage(surveySelection) ? surveySelection : null} viewTargets={viewTargets} />
-                    : surveyVisible ? <SurfaceLoadNotice name="Survey" detached={surveyDetached} failure={surveyEntry?.status === 'failed' ? surveyEntry : undefined} /> : null}
+                    : surveyVisible && (surveyPageOpening && surveyEntry?.status !== 'failed' ? <SurveyOpeningPage opening={surveyPageOpening} />
+                      : <SurfaceLoadNotice name="Survey" detached={surveyDetached} failure={surveyEntry?.status === 'failed' ? surveyEntry : undefined} />)}
                 </WorkbenchSurfaceHost>
               </div>
               <div id="recall-surface-home" className="knowledge-surface-home" hidden={mainSurface !== 'recall'}>
