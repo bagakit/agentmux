@@ -15,7 +15,7 @@ const observation = (value = settings): MeshNetworkInspection => ({ owner: value
 let dispose: (() => void) | undefined
 beforeAll(async () => { dispose = await useAppStore.getState().initialize() })
 afterAll(() => dispose?.())
-beforeEach(() => { useAppStore.setState({ meshSettingsDrafts: {} }) })
+beforeEach(() => { useAppStore.setState({ meshSettingsDrafts: {}, meshGatewayCode: '' }) })
 async function ready() { for (let i = 0; i < 150 && !dom.container.querySelector('[aria-label="Mesh network"]'); i++) await act(async () => { await new Promise(done => setTimeout(done, 10)) }); expect(dom.container.querySelector('[aria-label="Mesh network"]'), dom.container.textContent ?? '').not.toBeNull() }
 async function settled(check: () => boolean) { for (let i=0;i<200;i++) { if (check()) return; await act(async()=>{await new Promise(done=>setTimeout(done,15))}) }; throw Error('GUI did not settle: '+dom.container.textContent) }
 async function clickRecovery(label: string) {
@@ -25,6 +25,71 @@ async function clickRecovery(label: string) {
 }
 async function input(label: string, value: string) { await act(async () => { const element = dom.container.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[aria-label="${label}"]`)!; Object.getOwnPropertyDescriptor(element.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value')!.set!.call(element, value); element.dispatchEvent(new Event('input', { bubbles: true })) }) }
 function inspectOnly() { return vi.spyOn(api.mesh, 'call').mockImplementation(async method => structuredClone(method === 'mesh.inspect' ? observation() : settings) as never) }
+
+const gatewayCode = meshPeerCode({ ...settings, identity: { peerId: 'office-gateway', publicKey: 'original-gateway-key', epoch: 1 },
+  configuration: { ...configuration, advertisedIngress: [{ endpoint: 'relay.example:8444', useTls: true }] } })!
+const guidedInput = '[aria-label="Gateway connection code"]'
+
+it('opens the guided connection from the Mesh homepage and submits one original settings operation', async () => {
+  let remembered = { ...settings, identity: { peerId: 'new-local-peer', publicKey: 'local-public-key', epoch: 1 }, configuration: { ...configuration, role: 'disabled' as const } } as MeshNetworkSettings
+  let connected = false
+  const call = vi.spyOn(api.mesh, 'call').mockImplementation(async (method, params) => {
+    if (method === 'settings.mesh.configure' && 'configuration' in params) {
+      remembered = { ...remembered, configuration: params.configuration, revision: 'joined-revision' }
+      return { settings: remembered, diskDurability: 'confirmed' } as never
+    }
+    if (method === 'mesh.inspect') return {
+      ...observation(remembered), network: { protocol: 1, state: 'active', networkId: 'original-network', identity: remembered.identity,
+        peers: [{ peerId: connected ? 'office-gateway' : 'unrelated-peer', state: 'connected', connectionId: 'original-connection', rttMs: 5 }],
+        records: [], routes: [], circuits: [] }
+    } as never
+    return remembered as never
+  })
+  const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+  await dom.render(<hostsSettingsModule.Pane config={useAppStore.getState().config!} active onClose={vi.fn()} onNavigate={vi.fn()} />)
+  await settled(() => Boolean(dom.container.querySelector('.mesh-home-actions button:first-child')))
+  await dom.click('.mesh-home-actions button:first-child')
+  await settled(() => Boolean(dom.container.querySelector('.mesh-join-form button[type="submit"]')))
+  expect(dom.container.querySelector('[data-mesh-view="join"][hidden]')).toBeNull()
+  expect(dom.container.querySelector('[aria-label="Device to manage"]')).toBeNull()
+  await input('Gateway connection code', gatewayCode)
+  expect(dom.container.querySelector('.mesh-peer-preview')?.textContent).toContain('relay.example:8444')
+  expect(call.mock.calls.filter(([method]) => method === 'settings.mesh.configure')).toHaveLength(0)
+  await dom.click('.mesh-join-form button[type="submit"]')
+  await vi.waitFor(() => expect(call.mock.calls.filter(([method]) => method === 'settings.mesh.configure')).toHaveLength(1))
+  await vi.waitFor(() => expect(dom.container.querySelector('.mesh-join-result strong')?.textContent).toBe('Gateway connection not yet confirmed'))
+  const submissions = call.mock.calls.filter(([method]) => method === 'settings.mesh.configure')
+  expect(submissions).toHaveLength(1)
+  expect(submissions[0]?.slice(1)).toEqual([expect.objectContaining({
+    expectedRevision: 'r1', operationId: expect.any(String), configuration: expect.objectContaining({ role: 'participant',
+      members: [{ peerId: 'office-gateway', publicKey: 'original-gateway-key' }, { peerId: 'new-local-peer', publicKey: 'local-public-key' }],
+      peers: [{ peerId: 'office-gateway', endpoints: [{ endpoint: 'relay.example:8444', useTls: true }] }] })
+  }), { expectedOwner: settings.owner }])
+  expect(dom.container.textContent).not.toContain('Connected to gateway')
+  await dom.click('.mesh-join-result button:last-child')
+  expect(clipboard).toHaveBeenCalledWith(meshPeerCode(remembered))
+  connected = true
+  await dom.click('.mesh-join-result button:first-child')
+  await settled(() => dom.container.textContent?.includes('Connected to gateway') ?? false)
+  expect(call.mock.calls.filter(([method]) => method === 'settings.mesh.configure')).toHaveLength(1)
+})
+
+it('takes the chosen gateway into separate identity setup only after an explicit choice', async () => {
+  const read = vi.spyOn(api.ui, 'readLocalRuntimeRecovery').mockResolvedValue({ state: 'needs-backup', code: 'IDENTITY_SOURCE_MISSING' })
+  const open = vi.spyOn(api.ui, 'openLocalIdentitySetup').mockResolvedValue(undefined)
+  const call = vi.spyOn(api.mesh, 'call').mockRejectedValue(Error('The original Host is unavailable'))
+  try {
+    await dom.render(<Editor active join />)
+    await input('Gateway connection code', gatewayCode)
+    await settled(() => dom.container.textContent?.includes('Continue with a separate identity') ?? false)
+    expect(dom.container.textContent).toContain('relay.example:8444')
+    expect(open).not.toHaveBeenCalled()
+    await dom.click('.mesh-identity-recovery details button')
+    expect(open).toHaveBeenCalledExactlyOnceWith(gatewayCode)
+    expect(dom.container.querySelector<HTMLInputElement>(guidedInput)?.value).toBe(gatewayCode)
+    expect(call.mock.calls.some(([method]) => method === 'settings.mesh.configure')).toBe(false)
+  } finally { read.mockRestore(); open.mockRestore(); call.mockRestore() }
+})
 it('Mesh shows the App recovery action before Host answers, and reopens setup after recovery', async () => {
   let restored = false
   const read = vi.spyOn(api.ui, 'readLocalRuntimeRecovery').mockResolvedValue({ state: 'needs-backup', code: 'IDENTITY_SOURCE_MISSING' })
@@ -191,7 +256,7 @@ it('opaque unreadable authored records remain retained; form code exchanges pres
   expect(meshConfiguration(form, configuration)).toMatchObject({ members: [{ peerId: 'peer-original', publicKey: 'public-key' }], peers: [{ peerId: 'peer-original', endpoints: [{ endpoint: 'gateway.example', useTls: true }] }], endpointAccess: { allowedClientKeys: ['device-public-key'] } })
   expect(() => meshConfiguration({ ...form, networkId: 'different-network' }, configuration)).toThrow('belong to this network')
 })
-it('production Mesh editors exchange codes and save through Renderer/Main into two real original Unix Cores; outbound-only participant authenticates and CAS rejection recovers', async () => {
+it('the production gateway join saves through Renderer and Main into two real Unix Cores, then authenticates the outbound-only participant', async () => {
   const { pathToFileURL } = await import('node:url'), { resolve } = await import('node:path'), { EventEmitter } = await import('node:events')
   const { createRequire } = await import('node:module')
   const { privateCore, privateGatewayOperator } = createRequire(import.meta.url)(resolve('apps/desktop/scripts/fixtures/mesh-settings/private-core.mjs'))
@@ -244,14 +309,21 @@ it('production Mesh editors exchange codes and save through Renderer/Main into t
     await settled(()=>dom.container.textContent?.includes('Mesh settings saved') ?? false)
     const aCode=await copyCode()
     expect(aCode).toBe(meshPeerCode(savedA))
-    bridge.mockRestore();bridge=connect(b);await dom.render(<Editor active key="real-b"/>);await ready()
-    await addPeer(aCode)
-    expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Mesh network"]')!.value).toBe('gui-original-network')
-    await input('Mesh device public keys',b.devicePublicKey);await dom.click('[data-settings-save-bar] button')
+    bridge.mockRestore();bridge=connect(b);await dom.render(<Editor active join key="real-b"/>);
+    await settled(() => Boolean(dom.container.querySelector('.mesh-join-form button[type="submit"]')))
+    await input('Gateway connection code', aCode)
+    expect(dom.container.querySelector('.mesh-peer-preview')?.textContent).toContain('gui-original-network')
+    const beforeJoin = calls.filter(row => row.method === 'settings.mesh.configure').length
+    await dom.click('.mesh-join-form button[type="submit"]')
     const savedB=await wait(()=>b.client.call('settings.mesh.inspect',{}),v=>v.revision!==initialB.revision)
     expect(savedB.configuration.peers).toEqual([{peerId:initialA.identity.peerId,endpoints:savedA.configuration.advertisedIngress}])
-    await settled(()=>dom.container.textContent?.includes('Mesh settings saved') ?? false)
-    const bCode=await copyCode()
+    expect(savedB.configuration.endpointAccess.allowedClientKeys).toEqual([])
+    await settled(() => dom.container.textContent?.includes('Gateway connection not yet confirmed') ?? false)
+    expect(calls.filter(row => row.method === 'settings.mesh.configure')).toHaveLength(beforeJoin + 1)
+    const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+    await dom.click('.mesh-join-result button:last-child')
+    const bCode = clipboard.mock.calls.at(-1)![0]
+    clipboard.mockRestore()
     expect(bCode).toBe(meshPeerCode(savedB))
     bridge.mockRestore();bridge=connect(operator);await dom.render(<Editor active key="real-a-approve"/>);await selectHost('Device to manage',operator.host.id);await ready()
     await chooseRole('participant')
@@ -262,6 +334,11 @@ it('production Mesh editors exchange codes and save through Renderer/Main into t
     const joined=await wait(()=>a.client.call('mesh.inspect',{}),v=>v.network?.peers.some((p:any)=>p.peerId===initialB.identity.peerId&&p.state==='connected'))
     expect(joined.network.peers[0].state).toBe('connected')
     expect((await b.client.call('settings.mesh.inspect',{})).configuration.listen).toBeUndefined()
+    bridge.mockRestore();bridge=connect(b);await dom.render(<Editor active join key="real-b-confirmed"/>);
+    await settled(() => dom.container.textContent?.includes('Connected to gateway') ?? false)
+    bridge.mockRestore();bridge=connect(b);await dom.render(<Editor active key="real-b-allow-device"/>);await ready()
+    await input('Mesh device public keys',b.devicePublicKey);await dom.click('[data-settings-save-bar] button')
+    await settled(()=>dom.container.textContent?.includes('Mesh settings saved') ?? false)
     const originalBEndpoint=await wait(()=>b.client.call('mesh.inspect',{}),v=>v.endpoint.state==='available')
     bridge.mockRestore();bridge=connect(operator);await dom.render(<Editor active key="real-a-link"/>);await ready()
     await selectHost('Issuing gateway',operator.host.id)

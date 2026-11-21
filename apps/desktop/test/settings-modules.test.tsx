@@ -236,7 +236,7 @@ it('presents Mods beside Preferences through the actual shell and preserves the 
   expect(channelIndex).toBeGreaterThan(groups.findIndex(group => group.id === 'cluster'))
   expect(channelIndex).toBeLessThan(groups.findIndex(group => group.id === 'toolkit'))
   expect(groups[channelIndex]!.items.map(item => item.id)).toEqual(['inapp-conversation', 'lark', 'discord', 'telegram'])
-  expect(groups.find(group => group.id === 'cluster')!.items.map(item => item.id)).toEqual(['network-node', 'hosts', 'remote-execution'])
+  expect(groups.find(group => group.id === 'cluster')!.items.map(item => item.id)).toEqual(['hosts', 'network-node', 'remote-execution'])
   expect(groups.find(group => group.title === 'Mods')!.items.map(item => item.id)).toEqual(['toolkit'])
   expect(groups.find(group => group.title === 'Preferences')!.items.map(item => item.id)).not.toContain('toolkit')
   await section('Toolkit Library')

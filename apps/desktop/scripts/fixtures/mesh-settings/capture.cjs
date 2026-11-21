@@ -11,6 +11,42 @@ app.whenReady().then(async()=>{try{
  const openGateway=()=>evaluate(`document.querySelector('.settings-sidebar nav [data-settings-target="hosts:mesh-configuration"]')?.click()`)
  const paint=async()=>{await evaluate('document.fonts.ready');await delay(400)}
  const frame=async name=>{await paint();const file=name+'.png';await fs.writeFile(path.join(output,file),(await window.webContents.capturePage()).toPNG());receipt.frames.push(file)}
+ if (scenario === '--gateway-join') {
+   const until = async test => { for (let i=0;i<120;i++) { if (await evaluate(test)) return; await delay(50) }; throw Error(test) }
+   const codeField = 'document.querySelector(\'[aria-label="Gateway connection code"]\')'
+   const start = async () => {
+     await until("Boolean(document.querySelector('.mesh-home-actions .primary-button'))")
+     await evaluate("document.querySelector('.mesh-home-actions .primary-button').click()")
+     await until(`Boolean(${codeField})`)
+     await evaluate(`(() => { const field=${codeField}; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(field,meshFixture.workflowCode);field.dispatchEvent(new Event('input',{bubbles:true})) })()`)
+     await until("document.querySelector('.mesh-peer-preview')?.textContent.includes('gateway.example')")
+   }
+   await window.loadURL(url+'?scenario=gateway-join')
+   await until("Boolean(document.querySelector('.mesh-home-actions .primary-button'))")
+   await frame('gateway-entry-dark')
+   await start()
+   await until("document.querySelector('.mesh-join-form [type=submit]')?.disabled === false")
+   await frame('gateway-preview-dark')
+   await evaluate("document.querySelector('.mesh-join-form [type=submit]').click()")
+   await until("document.querySelector('.mesh-join-result')?.textContent.includes('Gateway connection not yet confirmed')")
+   await frame('gateway-approval-dark')
+   await evaluate("meshFixture.confirmGateway();document.querySelector('.mesh-join-result button.primary-button').click()")
+   await until("document.querySelector('.mesh-join-result')?.textContent.includes('Connected to gateway')")
+   await frame('gateway-connected-dark')
+   await evaluate("document.querySelector('.mesh-join-result button.primary-button').click()")
+   await until("Boolean(document.querySelector('.mesh-home-actions'))")
+   window.setContentSize(570,870)
+   await window.loadURL(url+'?scenario=runtime-identity');await evaluate('meshFixture.theme("light")')
+   await start()
+   await until("Boolean(document.querySelector('.mesh-identity-recovery details'))")
+   await evaluate("document.querySelector('.mesh-identity-recovery details').open=true")
+   await frame('gateway-recovery-light-narrow')
+   await window.loadURL(url+'?scenario=separate-gateway-identity');await evaluate('meshFixture.theme("light")')
+   await until(`Boolean(${codeField}?.value)`)
+   await frame('gateway-separate-light-narrow')
+   receipt.passed = true
+   return
+ }
  if (scenario === '--settings-inputs') {
    receipt.providerToolbarGaps = []
    const element = selector => `document.querySelector(${JSON.stringify(selector)})`
@@ -148,12 +184,12 @@ app.whenReady().then(async()=>{try{
    await evaluate("document.querySelector('.mesh-editor-navigation button').click()")
    await until("Boolean(document.querySelector('.mesh-home-actions button'))")
    await evaluate("document.querySelector('.mesh-home-actions button').click()")
-   await until(`Boolean(${field('Paste a connection code')})`)
-   await evaluate(`(()=>{const e=${field('Paste a connection code')};Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,meshFixture.workflowCode);e.dispatchEvent(new Event('input',{bubbles:true}))})()`)
+   await until(`Boolean(${field('Gateway connection code')})`)
+   await evaluate(`(()=>{const e=${field('Gateway connection code')};Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,meshFixture.workflowCode);e.dispatchEvent(new Event('input',{bubbles:true}))})()`)
    await until("document.querySelector('.mesh-peer-preview')?.textContent.includes('gateway.example')")
    await frame('join-preview')
    window.setContentSize(550,900);await evaluate('meshFixture.theme("light")')
-   await evaluate("document.querySelector('.mesh-peer-pairing').scrollIntoView({block:'center'})");await frame('join-preview-narrow')
+   await evaluate("document.querySelector('.mesh-join-form').scrollIntoView({block:'center'})");await frame('join-preview-narrow')
    window.setContentSize(1280,980);await window.loadURL(url+'?scenario=workflow-gateway');await openGateway()
    await until(`Boolean(${field('Device to manage')})`)
    await evaluate(`(()=>{const e=${field('Device to manage')};e.value=e.options[1].value;e.dispatchEvent(new Event('change',{bubbles:true}))})()`)

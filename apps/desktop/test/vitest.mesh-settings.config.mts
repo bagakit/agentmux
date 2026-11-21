@@ -18,6 +18,9 @@ const edits: Record<string, [string, string, string]> = {
   'lost-fence': ['main/mesh-network-ipc.ts', '...(original ? { runtimeFence: original } : {})', ''],
   'lost-draft': ['renderer/src/components/settings/MeshNetworkSettings.tsx', 'form: later ? value.form : meshForm(result.settings.configuration, result.settings.identity?.peerId)', 'form: meshForm(result.settings.configuration, result.settings.identity?.peerId)'],
   'new-identity-imports-backup': ['renderer/src/components/settings/MeshNetworkSettings.tsx', 'await api.ui.openLocalIdentitySetup()', 'await api.ui.restoreLocalRuntimeIdentity()'],
+  'join-skips-save': ['renderer/src/components/settings/MeshGatewayJoin.tsx', 'change(code); onConnect(submit)', 'change(code)'],
+  'join-false-connected': ['renderer/src/components/settings/MeshGatewayJoin.tsx', "peer.peerId === gateway?.peerId && peer.state === 'connected'", "peer.state === 'connected'"],
+  'join-drops-gateway': ['renderer/src/components/settings/MeshGatewayJoin.tsx', 'openSeparate(gateway ? trimmed : undefined)', 'openSeparate()'],
   'lost-unknown': ['renderer/src/components/settings/MeshNetworkSettings.tsx', "if (!notApplied) return { ...value, pending: { ...value.pending, phase: 'unknown' } }", 'if (false) return value'],
   'wrong-method': ['renderer/src/lib/mesh-network-client.ts', 'preload.call(method, params,', "preload.call('mesh.inspect' as typeof method, params,"],
   'relocation': ['renderer/src/components/settings/HostSettingsPane.tsx', '          <LocalIncomingConnections config={config} active={localConnectionVisible} visible={localConnectionVisible} />', ''],
@@ -35,6 +38,9 @@ const edits: Record<string, [string, string, string]> = {
 }
 if (mutant && !edits[mutant]) throw Error('Unknown Mesh UI mutant')
 const targetedIncludes: Record<string, string[]> = {
+  'join-skips-save': ['apps/desktop/test/mesh-settings.test.tsx'],
+  'join-false-connected': ['apps/desktop/test/mesh-settings.test.tsx'],
+  'join-drops-gateway': ['apps/desktop/test/mesh-settings.test.tsx'],
   'save-on-entry': ['apps/desktop/test/mesh-settings.test.tsx'],
   'join-drops-listener': ['apps/desktop/test/mesh-settings.test.tsx'],
   'lost-fence': ['apps/desktop/test/mesh-network-ipc.test.ts'], 'wrong-method': ['apps/desktop/test/mesh-network-ipc.test.ts'],

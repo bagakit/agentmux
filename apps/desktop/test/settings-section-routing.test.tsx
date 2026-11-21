@@ -84,6 +84,7 @@ it.each([
     { id: 'local', kind: 'local', label: 'This device' }
   ] } })
   await dom.render(<SettingsPanel onClose={() => {}} initialSection={request.section} navigationRequest={request} />)
+  await vi.waitFor(() => expect(pane('hosts')?.querySelector('[data-settings-field="incoming"]')).toBeTruthy(), { timeout: 6000 })
   await settle()
   const mesh = pane('hosts')
   expect(mesh, 'the request must normalize to the real Mesh module').not.toBeNull()
@@ -110,7 +111,7 @@ it.each([{ start: 'fresh' }, { start: 'gateway' }] as const)('search reveals and
   const initial = start === 'gateway' ? { section: 'hosts', field: 'mesh-configuration' } as const : undefined
   await dom.render(<SettingsPanel onClose={() => {}} initialSection={initial?.section ?? 'overview'} navigationRequest={initial} />)
   await settle()
-  if (start === 'gateway') expect(pane('hosts')!.querySelector('[data-mesh-home-view]')?.getAttribute('data-mesh-home-view')).toBe('network')
+  if (start === 'gateway') await vi.waitFor(() => expect(pane('hosts')?.querySelector('[data-mesh-home-view]')?.getAttribute('data-mesh-home-view')).toBe('network'), { timeout: 6000 })
   await act(async () => {
     const search = dom.container.querySelector<HTMLInputElement>('[aria-label="Search settings"]')!
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, 'Incoming connections and client keys')
@@ -119,6 +120,7 @@ it.each([{ start: 'fresh' }, { start: 'gateway' }] as const)('search reveals and
   expect(dom.container.querySelector('[data-settings-search-result="hosts:incoming"]'), 'the canonical search contribution must exist').not.toBeNull()
   expect(dom.container.querySelector('[data-settings-search-result="network-node:incoming"]')).toBeNull()
   await dom.click('[data-settings-search-result="hosts:incoming"]')
+  await vi.waitFor(() => expect(pane('hosts')?.querySelector('[data-settings-field="incoming"]')).toBeTruthy(), { timeout: 6000 })
   await settle()
   const mesh = pane('hosts')!
   expect(mesh.hidden).toBe(false)
@@ -139,8 +141,12 @@ it.each([{ start: 'fresh' }, { start: 'gateway' }] as const)('search reveals and
   const back = mesh.querySelector<HTMLButtonElement>('.mesh-editor-navigation button')!
   await act(async () => back.click())
   expect(connections.hidden).toBe(true)
-  const reconnect = [...mesh.querySelectorAll<HTMLButtonElement>('.mesh-overview-actions button')].find(button => button.textContent === 'Manage devices')!
-  await act(async () => reconnect.click())
+  await act(async () => {
+    const search = dom.container.querySelector<HTMLInputElement>('[aria-label="Search settings"]')!
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, '')
+    search.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await choose('hosts:mesh-devices')
   expect(connections.querySelector('[data-settings-field="incoming"]')).toBe(visible[0])
   expect(allowed.value).toBe('nodekey:authored-draft\n  ')
 })

@@ -32,7 +32,8 @@ async function ready() { await vi.waitFor(() => expect(dom.container.querySelect
 it('the actual SettingsPanel opens a continuous Mesh homepage with saved connection nodes, gateways and machines when Mesh is disabled', async () => {
   await dom.render(<SettingsPanel initialSection="hosts" onClose={vi.fn()} />); await ready()
   expect(dom.container.querySelector('[data-mesh-home-view]')?.getAttribute('data-mesh-home-view')).toBe('paths')
-  expect([...dom.container.querySelectorAll('.settings-nav-children[aria-label="Mesh"] button')].map(button => button.textContent)).toEqual(['Gateways', 'Machines', 'Device connections'])
+  expect([...dom.container.querySelectorAll('.settings-nav-section[data-settings-group="cluster"] .settings-nav-items > button')].map(button => button.textContent)).toEqual(['Mesh', 'Node', 'Remote'])
+  expect([...dom.container.querySelectorAll('.settings-nav-children[aria-label="Mesh"] button')].map(button => button.textContent)).toEqual(['Manage gateways', 'Saved devices', 'Machine status'])
   const map = dom.container.querySelector('[aria-label="Network relationship canvas"]')!
   expect(map).not.toBeNull()
   expect(map.closest('[hidden]')).toBeNull()
