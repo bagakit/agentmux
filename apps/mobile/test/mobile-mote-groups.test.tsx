@@ -80,21 +80,22 @@ it('opens an independent group from the Mobile Mote directory and the exact part
     topic: filesTarget, members: [{ moteId: spaceId, name: '研究', target, role: 'admin', state: 'active', thread: { hostId, agentSessionId: 'peer' } },
       { moteId: secondId, name: '设计', target: second, role: 'member', state: 'active', thread: null }] }
   const messages: MoteGroupMessage[] = []
-  let inspectBoundTopic = false
+  let confirmBoundTopic = false
   let created = false, loseCreateReceipt = true, loseFirstReceipt = true
   const rpc = vi.fn(async (method: string, input: unknown, _options?: unknown, _fence?: unknown) => {
     if (method === 'space.ls' || method === 'space.inspect') return { catalog }
     if (method === 'space.mote.dialogue.read') return mainPage
     if (method === 'app.snapshot') return { agents: [], projects: [], executors: [], workspaces: [filesWorkspace], unavailable: [] }
     if (method === 'topic.ls') return { topics: [topic, { ...topic, topicId: 'mote-as-topic', contentKind: 'mote' }], unavailable: [] }
-    if (method === 'topic.inspect') return { topic: inspectBoundTopic ? topic : { ...topic, zoneId: 'parent-zone' }, unavailable: [] }
-    if (method === 'file.read' || method === 'file.list') {
-      const { path, ...scope } = input as { zoneId: string; path: string; expectedResource: typeof filesResource }
-      expect(scope).toEqual({ zoneId: filesTarget.zoneId, expectedResource: filesResource })
-      const resource = { ...filesResource, zoneId: filesZone.zoneId, zonePath: filesZone.directoryPath, path }
-      if (method === 'file.list') return { resource, result: { status: 'listed', files: ['决策.md'], complete: true, omitted: 'none', partialReason: null } }
-      return path === '.' ? { resource, result: { status: 'directory' } }
-        : { resource, result: { status: 'read', document: { path, revision: 'owner-revision', content: '# 原项目决策\n\n先确认实验范围。' } } }
+    if (method === 'space.mote.group.file.read' || method === 'space.mote.group.file.list') {
+      const request = input as MoteGroupParamsMap[typeof method]
+      expect(request.groupId).toBe(groupId)
+      const path = request.path
+      const resource = { ...filesResource, zoneId: confirmBoundTopic ? filesZone.zoneId : 'parent-zone', zonePath: filesZone.directoryPath, path }
+      if (method === 'space.mote.group.file.list') return { resource, result: {
+        status: 'directory-listed', entries: [{ name: '决策.md', path: 'materials/决策.md', isDirectory: false, isSymlink: false }], complete: true, partialReason: null,
+      } }
+      return { resource, result: { status: 'read', document: { path, revision: 'owner-revision', content: '# 原项目决策\n\n先确认实验范围。' } } }
     }
     if (method === 'space.mote.group.list') return { groups: created ? [structuredClone(group)] : [], nextBeforeSequence: null }
     if (method === 'space.mote.group.create') {
@@ -119,7 +120,8 @@ it('opens an independent group from the Mobile Mote directory and the exact part
   const view = await mount(<MobileApp client={f.client} platform={platform} connection={connected} restoreWorkface />)
   await paste(view.element, '原主对话的草稿')
   const originalEditor = editor(view.element)
-  expect(rpc.mock.calls.some(([method]) => method.startsWith('space.mote.group.'))).toBe(false)
+  expect(rpc.mock.calls.filter(([method]) => method.startsWith('space.mote.group.'))
+    .every(([method]) => method === 'space.mote.group.list')).toBe(true)
   await click(button(view.element, '返回 Mote'))
   const directory = await waitForElement(view.element, '.mobile-space-navigation')
   await click(button(directory, '群聊'))
@@ -153,8 +155,7 @@ it('opens an independent group from the Mobile Mote directory and the exact part
   await submit(await waitForElement(sheet(), '.mote-group__create'))
   await vi.waitFor(() => expect(createCalls()).toHaveLength(2))
   expect(createCalls()[1]?.[1]).toEqual(createCalls()[0]?.[1])
-  const text = await waitForElement<HTMLTextAreaElement>(sheet(), '[aria-label="群消息"]')
-  await enter(text, '这条消息只请研究参与')
+  await paste(await waitForElement<HTMLElement>(sheet(), '.mote-group__send'), '这条消息只请研究参与')
   const recipients = await waitForElement(sheet(), '[aria-label="选择参与成员"]')
   await click(button(recipients, '研究'))
   await submit(await waitForElement(sheet(), '.mote-group__composer'))
@@ -178,30 +179,27 @@ it('opens an independent group from the Mobile Mote directory and the exact part
   expect(topicPicker.value).toBe(filesTarget.spaceId)
   expect((await waitForElement<HTMLTextAreaElement>(detailsPanel, 'textarea')).value).toBe('先确认资料再做比较')
   await click(button(sheet(), '群文件'))
-  await vi.waitFor(() => expect(sheet().textContent).toContain('群聊绑定的原 Topic 文件范围暂未确认'))
-  expect(rpc.mock.calls.filter(([method]) => method.startsWith('file.'))).toHaveLength(0)
-  inspectBoundTopic = true
-  await click(button(sheet(), '重读文件范围'))
-  const reader = await waitForElement(sheet(), '.mobile-topic-source-reader')
+  await vi.waitFor(() => expect(sheet().textContent).toContain('群文件绑定已变化'))
+  const reader = await waitForElement(sheet(), '.mote-group-files')
+  expect(queryButton(reader, '决策.md')).toBeUndefined()
+  confirmBoundTopic = true
+  await click(button(reader, '重读'))
   await vi.waitFor(() => expect(queryButton(reader, '决策.md')).toBeDefined())
   await click(button(reader, '决策.md'))
   await vi.waitFor(() => expect(reader.querySelector('article h1')?.textContent).toBe('原项目决策'))
-  expect(rpc.mock.calls.filter(([method]) => method === 'topic.inspect')).toEqual([
-    ['topic.inspect', { topicId: filesTarget.spaceId }, expect.anything(), undefined],
-    ['topic.inspect', { topicId: filesTarget.spaceId }, expect.anything(), undefined],
-  ])
-  expect(rpc.mock.calls.filter(([method]) => method.startsWith('file.')).map(([method, input]) => [method, input])).toEqual([
-    ['file.read', { zoneId: filesTarget.zoneId, expectedResource: filesResource, path: '.' }],
-    ['file.list', { zoneId: filesTarget.zoneId, expectedResource: filesResource, path: '.' }],
-    ['file.read', { zoneId: filesTarget.zoneId, expectedResource: filesResource, path: '决策.md' }],
+  expect(rpc.mock.calls.filter(([method]) => method === 'topic.inspect' || method.startsWith('file.'))).toHaveLength(0)
+  expect(rpc.mock.calls.filter(([method]) => method.startsWith('space.mote.group.file.')).map(([method, input]) => [method, input])).toEqual([
+    ['space.mote.group.file.list', { groupId, path: '.', limit: 100 }],
+    ['space.mote.group.file.list', { groupId, path: '.', limit: 100 }],
+    ['space.mote.group.file.read', { groupId, path: '决策.md' }],
   ])
   await click(button(reader, '返回上层来源'))
   await vi.waitFor(() => expect(queryButton(reader, '决策.md')).toBeDefined())
   await click(button(reader, '返回群聊'))
   expect(detailsPanel.closest('[hidden]')).toBeNull()
   await click(button(sheet(), '返回'))
-  const restored = await waitForElement<HTMLTextAreaElement>(sheet(), '[aria-label="群消息"]')
-  expect(restored.value).toBe('这条消息只请研究参与')
+  const restored = await waitForElement<HTMLElement>(sheet(), '[aria-label="群消息"]')
+  expect(restored.textContent).toBe('这条消息只请研究参与')
   await submit(await waitForElement(sheet(), '.mote-group__composer'))
   await vi.waitFor(() => expect(writes()).toHaveLength(2))
   expect(writes()[1]?.[1]).toEqual(originalRequest)
@@ -215,7 +213,7 @@ it('opens an independent group from the Mobile Mote directory and the exact part
   await click(button(threads, '群聊'))
   await vi.waitFor(() => expect(queryButton(sheet(), group.name + messages[0]?.body)).toBeDefined())
   await click(queryButton(sheet(), group.name + messages[0]?.body)!)
-  await vi.waitFor(() => expect(rpc.mock.calls.map(([method, input]) => [method, input])).toContainEqual(['space.mote.group.list', { moteId: spaceId, limit: 30 }]))
+  await vi.waitFor(() => expect(rpc.mock.calls.map(([method, input]) => [method, input])).toContainEqual(['space.mote.group.list', { moteId: spaceId, limit: 30, receiptProjection: 'stored' }]))
   await vi.waitFor(() => expect(sheet().textContent).toContain('正在查看 研究 的群内视角'))
   expect(sheet().querySelector('[aria-label="群消息"]')).toBeNull()
   const details = await waitForElement<HTMLDetailsElement>(sheet(), '.mote-group__thread')
@@ -281,9 +279,8 @@ it('creates, publishes, and manages a Mobile group through the public Core and o
       topicPicker.dispatchEvent(new Event('change', { bubbles: true }))
     })
     await submit(await waitForElement(sheet(), '.mote-group__create'))
-    await vi.waitFor(() => expect(sheet().textContent, sheet().textContent ?? '').toContain('请谁参与'), { timeout: 1800 })
-    const text = await waitForElement<HTMLTextAreaElement>(sheet(), '[aria-label="群消息"]')
-    await enter(text, '从手机发给这个群')
+    await vi.waitFor(() => expect(sheet().textContent, sheet().textContent ?? '').toContain('按需回应'), { timeout: 1800 })
+    await paste(await waitForElement<HTMLElement>(sheet(), '.mote-group__send'), '从手机发给这个群')
     await click(button(await waitForElement(sheet(), '[aria-label="选择参与成员"]'), '研究'))
     await submit(await waitForElement(sheet(), '.mote-group__composer'))
     await vi.waitFor(() => expect(sheet().querySelector('.mote-group__message[data-own] strong')?.textContent).toBe('我'))
