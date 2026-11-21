@@ -72,7 +72,7 @@
 }
 .agent-operation-feedback__readout:hover { color: var(--text-2); background: transparent; }
 .agent-operation-feedback__quick-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; margin-inline-start: auto; }
-.agent-operation-feedback__quick-actions :is(.agent-button, .agent-operation-feedback__more) {
+.agent-operation-feedback__quick-actions :is(.agent-button, .icon-button) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -86,10 +86,10 @@
   font: inherit;
   white-space: nowrap;
 }
-.agent-operation-feedback__quick-actions .agent-operation-feedback__more { width: 24px; padding: 0; }
-.agent-operation-feedback__quick-actions :is(.agent-button, .agent-operation-feedback__more):hover:not(:disabled),
+.agent-operation-feedback__quick-actions .icon-button { width: 24px; padding: 0; }
+.agent-operation-feedback__quick-actions :is(.agent-button, .icon-button):hover:not(:disabled),
 .agent-operation-feedback__quick-actions .agent-operation-feedback__more[aria-expanded='true'] { color: var(--text); background: var(--wash-2); }
-.agent-operation-feedback__quick-actions :is(.agent-button, .agent-operation-feedback__more):focus-visible { outline: 1px solid var(--focus-line); outline-offset: 1px; }
+.agent-operation-feedback__quick-actions :is(.agent-button, .icon-button):focus-visible { outline: 1px solid var(--focus-line); outline-offset: 1px; }
 .agent-operation-feedback__quick-actions .agent-button:disabled { opacity: .55; cursor: default; }
 .agent-operation-feedback__action-note { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.45; }
 .agent-operation-feedback__popover[data-kind='takeover'] { width: 336px; border-radius: var(--radius-lg); box-shadow: var(--elev-2); }

@@ -22,7 +22,9 @@ type OperationBase = {
   callerOperationIds?: string[]
 }
 export type AgentOperationFeedback = OperationBase & (
-  { kind: 'stop'; control: AgentSessionControl; inputCloseout?: true } | { kind: 'takeover'; takeoverSource: TakeoverSource; cancellation?: TakeoverCancellation } | { kind: 'fork' }
+  { kind: 'stop'; control: AgentSessionControl; inputCloseout?: true }
+  | { kind: 'takeover'; takeoverSource: TakeoverSource; cancellation?: TakeoverCancellation; cardFeedbackDismissed?: true }
+  | { kind: 'fork' }
 )
 export type AgentOperationReferences = Record<string, AgentOperationFeedback>
 /** Historical records have only the original read action. Active and custom actions stay in feedback. */
@@ -32,6 +34,11 @@ export function isRetainedTakeoverRecord(operation: AgentOperationFeedback): boo
 }
 export const agentOperationKey = (operation: Pick<AgentOperationFeedback, 'kind' | 'operationId' | 'subject'>) =>
   JSON.stringify([operation.subject.hostId, operation.subject.agentSessionId ?? operation.subject.regionId, operation.kind, operation.operationId])
+
+export function canDismissTakeoverCardFeedback(operation: Extract<AgentOperationFeedback, { kind: 'takeover' }>): boolean {
+  const result = operation.cancellation?.result
+  return result?.outcome === 'created' && result.diskDurability === 'confirmed'
+}
 
 export function isDurableTakeoverCancellation(result: AgentTakeoverCancellationResult | undefined): boolean {
   return result?.outcome === 'cancelled' && result.diskDurability === 'confirmed'

@@ -6,7 +6,7 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import type { TakeoverSource } from './session-takeover'
 import type { AgentMuxAgentStopReceipt } from '@agentmux/core'
 
-import { agentOperationKey, isRetainedTakeoverRecord, withoutCancellationFeedback, type AgentOperationFeedback } from './agent-operation'
+import { agentOperationKey, canDismissTakeoverCardFeedback, isRetainedTakeoverRecord, withoutCancellationFeedback, type AgentOperationFeedback } from './agent-operation'
 export { agentOperationKey, restoredAgentOperations } from './agent-operation'
 export type { AgentOperationFeedback, AgentOperationKind, AgentOperationPhase, AgentOperationReferences, AgentOperationSubject } from './agent-operation'
 
@@ -56,6 +56,15 @@ export function dismissAgentOperation(operation: AgentOperationFeedback) {
     if (held?.phase !== 'succeeded' || isRetainedTakeoverRecord(held) || held.kind === 'takeover' && held.cancellation) return state
     const { [key]: _finished, ...agentOperations } = state.agentOperations
     return { agentOperations }
+  })
+}
+
+export function dismissTakeoverCardFeedback(operation: AgentOperationFeedback) {
+  const key = agentOperationKey(operation)
+  useAppStore.setState(state => {
+    const held = state.agentOperations[key]
+    if (held?.kind !== 'takeover' || held.cardFeedbackDismissed || !canDismissTakeoverCardFeedback(held)) return state
+    return { agentOperations: { ...state.agentOperations, [key]: { ...held, cardFeedbackDismissed: true } } }
   })
 }
 

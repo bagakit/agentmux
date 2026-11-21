@@ -6,9 +6,9 @@ import { useVisibleWork } from '@agentmux/client-ui/use-visible-work'
 import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
 import { useAppStore } from '../store'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
-import { agentOperationKey, dismissAgentOperation, inspectAgentOperation, type AgentOperationFeedback as Operation, type AgentOperationSubject } from '../lib/agent-operation-feedback'
+import { agentOperationKey, dismissAgentOperation, dismissTakeoverCardFeedback, inspectAgentOperation, type AgentOperationFeedback as Operation, type AgentOperationSubject } from '../lib/agent-operation-feedback'
 import { stopSessionInBackground } from '../lib/session-stop-background'
-import { agentOperationsForSubject, isDurableTakeoverCancellation, isRetainedTakeoverRecord } from '../lib/agent-operation'
+import { agentOperationsForSubject, canDismissTakeoverCardFeedback, isDurableTakeoverCancellation, isRetainedTakeoverRecord } from '../lib/agent-operation'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { ContentCopyButton } from '@agentmux/client-ui/components/ContentCopyButton'
 import { useSessionStop } from './SessionStop'
@@ -61,16 +61,20 @@ function label(operation: Operation) {
 }
 
 /** Both the real card and Region header read these exact original references. */
-export function AgentOperationFeedback({ subject, compact = false }: { subject: AgentOperationSubject; compact?: boolean }) {
+type FeedbackProps = { subject: AgentOperationSubject; compact?: boolean; onCardDismiss?: (() => void) | undefined }
+
+export function AgentOperationFeedback({ subject, compact = false, onCardDismiss }: FeedbackProps) {
   const operations = useAppStore(useShallow(state => agentOperationsForSubject(state.agentOperations, subject).filter(operation =>
     !isRetainedTakeoverRecord(operation) &&
+    (compact || operation.kind !== 'takeover' || !operation.cardFeedbackDismissed || !canDismissTakeoverCardFeedback(operation)) &&
     (operation.kind !== 'takeover' || !isDurableTakeoverCancellation(operation.cancellation?.result) || operation.cancellation?.settlingFeedback))))
   const active = useWorkbenchPresentationActive()
   if (!operations.length) return null
-  return <AgentOperationFeedbackBody operations={operations} compact={compact} active={active} />
+  return <AgentOperationFeedbackBody operations={operations} compact={compact} active={active} onCardDismiss={onCardDismiss} />
 }
 
-function AgentOperationFeedbackBody({ operations, compact, active }: { operations: Operation[]; compact: boolean; active: boolean }) {
+type Presentation = { compact: boolean; active: boolean; onCardDismiss: FeedbackProps['onCardDismiss'] }
+function AgentOperationFeedbackBody({ operations, compact, active, onCardDismiss }: Presentation & { operations: Operation[] }) {
   const { ref, visible } = useVisibleWork<HTMLDivElement>(active)
   const decoration = useMemo(() => operations.find(operation => operation.phase === 'pending' && operation.kind === 'stop') ??
     operations.find(operation => operation.phase === 'pending') ?? operations.at(-1)!, [operations])
@@ -78,11 +82,11 @@ function AgentOperationFeedbackBody({ operations, compact, active }: { operation
   return <div ref={ref} className={`agent-operation-feedback${compact ? ' agent-operation-feedback--compact' : ''}`}
     data-kind={decoration.kind} data-phase={feedbackPhase(decoration)} data-motion-active={visible && feedbackPhase(decoration) === 'pending'}
     style={{ '--operation-phase': `${phase}s` } as CSSProperties} onClick={event => event.stopPropagation()}>
-    {operations.map(operation => <OperationFeedbackItem key={agentOperationKey(operation)} operation={operation} compact={compact} active={active} visible={visible} />)}
+    {operations.map(operation => <OperationFeedbackItem key={agentOperationKey(operation)} operation={operation} compact={compact} active={active} visible={visible} onCardDismiss={onCardDismiss} />)}
   </div>
 }
 
-function OperationFeedbackItem({ operation, compact, active, visible }: { operation: Operation; compact: boolean; active: boolean; visible: boolean }) {
+function OperationFeedbackItem({ operation, compact, active, visible, onCardDismiss }: Presentation & { operation: Operation; visible: boolean }) {
   const [open, setOpen] = useState(false)
   const [checking, setChecking] = useState(false)
   const [continuing, setContinuing] = useState(false)
@@ -213,6 +217,8 @@ function OperationFeedbackItem({ operation, compact, active, visible }: { operat
           {!compact && !retainedOnly ? quickActions : null}
           <CompactOperationDetail operation={operation} active={active} open={open} onOpenChange={changeOpen} status={status}
             iconOnly={!compact} retainedOnly={retainedOnly} onAnimationEnd={onAnimationEnd}>{detail}</CompactOperationDetail>
+          {!compact && takeover && canDismissTakeoverCardFeedback(takeover) ? <button type="button" className="icon-button" aria-label="关闭接手提示" title="关闭接手提示"
+            onClick={() => { dismissTakeoverCardFeedback(takeover); onCardDismiss?.() }}><CloseIcon size={14} /></button> : null}
         </div>
       </div>
       {!compact && (cancelPreparationIssue || showSaveGap) ? <span className="agent-operation-feedback__action-note" role="status">

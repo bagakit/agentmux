@@ -89,7 +89,7 @@ function RecipientGroup({ recipients, onOpen }: { recipients: readonly FocusTake
 }
 
 /** The same Focus card can show a known outcome and another original request still in flight. */
-export function FocusTakeoverFeedback({ context, active, onOpen }: { context: FocusContext; active: boolean; onOpen(): void }) {
+export function FocusTakeoverFeedback({ context, active, onOpen, onCardDismiss }: { context: FocusContext; active: boolean; onOpen(): void; onCardDismiss?(): void }) {
   const recipients = useAppStore(state => {
     if (!active) return NONE
     const regions = agentRegionLocationBindings()
@@ -102,6 +102,6 @@ export function FocusTakeoverFeedback({ context, active, onOpen }: { context: Fo
   })
   return <>
     {recipients.length ? <RecipientGroup recipients={recipients} onOpen={onOpen} /> : null}
-    {!context.access && context.control ? <AgentOperationFeedback subject={context.control} /> : null}
+    {!context.access && context.control ? <AgentOperationFeedback subject={context.control} onCardDismiss={onCardDismiss} /> : null}
   </>
 }
