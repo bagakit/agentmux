@@ -51,9 +51,11 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
   async call<M extends GoalDelegationMethod>(method: M, request: GoalDelegationParamsMap[M],
     context: AgentMuxRpcCallContext, authority: GoalDelegationAuthority): Promise<GoalDelegationResultMap[M]> {
     context.signal?.throwIfAborted()
+    let replaySavedReceipt = false
     if (method === 'goal.closeout') {
       const input = request as GoalDelegationParamsMap['goal.closeout']
-      return (this.closeout ? await this.closeout(input, context, authority) : { ...input, state: 'retained', reason: 'unknown' }) as GoalDelegationResultMap[M]
+      if (!this.closeout) throw new AgentMuxError('The original Goal Host has no worker closeout owner.', 'CONTROL_UNAVAILABLE')
+      return await this.closeout(input, context, authority) as GoalDelegationResultMap[M]
     }
     if (method === 'goal.plan.active') return await this.readActivePlan(request as GoalActivePlanQuery, authority) as GoalDelegationResultMap[M]
     const input = request as GoalDelegationParamsMap[Exclude<GoalDelegationMethod, 'goal.plan.active'>]
@@ -141,10 +143,11 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
         if (!goal || !await isGoalSupervisor(goal, authority, this.runtime)) throw new AgentMuxError(
           'A new delegation requires this Goal\'s exact current Supervisor Host and Session. Original messages and native input remain available.', 'CONTROL_PERMISSION_DENIED')
       }
-      const existingSource = method === 'goal.delegation.bind'
+      const alreadyLinked = original?.linkedAt !== undefined
+      const existingSource = method === 'goal.delegation.bind' && !alreadyLinked
         ? (await this.requireCore().call(intent.hostId, 'message.read', { hostId: intent.hostId, operationId: intent.operationId }, context)).message
         : null
-      if (method === 'goal.delegation.bind') {
+      if (method === 'goal.delegation.bind' && !alreadyLinked) {
         if (!existingSource) throw new AgentMuxError('The original message is absent at this exact Host. Binding does not create or resend it.', 'CONTROL_UNAVAILABLE')
         this.assertSource(intent, existingSource, input.goalId)
         if (intent.requestText !== undefined && intent.requestText !== intent.text) throw new AgentMuxError('An existing opaque input cannot attest a different original request. Keep its frozen body.', 'CONTROL_REQUEST_CONFLICT')
@@ -211,7 +214,8 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
         budget = await this.workflowBudget(input.goalId, intent)
       }
       await this.demands.prepareDelegation(input.goalId, intent, authority.actor.id, participants, budget)
-      if (method === 'goal.delegate' || method === 'goal.delegation.bind') {
+      replaySavedReceipt = alreadyLinked
+      if (!alreadyLinked && (method === 'goal.delegate' || method === 'goal.delegation.bind')) {
         const saved = (await this.demands.inspectDelegation(input.goalId, intent.operationId))!
         const core = this.requireCore()
         // A successful exact journal read is the only proof that an original logical message
@@ -260,7 +264,6 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
       const request = input as GoalDelegationParamsMap['goal.report'] | GoalDelegationParamsMap['goal.collect']
       const saved = await this.demands.inspectDelegation(input.goalId, request.operationId)
       if (!saved) throw new AgentMuxError('The original delegation is unavailable. Do not replace its identity.', 'CONTROL_UNAVAILABLE')
-      const core = this.requireCore()
       if (method === 'goal.report') {
         const report = (input as GoalDelegationParamsMap['goal.report']).report
         let workerMatches = authority.actor.kind === 'agent' && this.participant(saved, authority, 'worker')
@@ -272,65 +275,75 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
           throw new AgentMuxError('Only the authenticated original worker can report this delegation.', 'CONTROL_PERMISSION_DENIED')
         validateDemandDelegationReport(saved, report)
         if (!saved.linkedAt) throw new AgentMuxError('The original dispatch association is not yet confirmed. The worker and its results are retained.', 'CONTROL_UNAVAILABLE')
-        if (saved.report && goalDelegationReportBody(input.goalId, saved.operationId, saved.report) !== goalDelegationReportBody(input.goalId, saved.operationId, report))
-          throw new AgentMuxError('The original worker report is frozen. Read it before continuing.', 'CONTROL_REQUEST_CONFLICT')
-        const body = goalDelegationReportBody(input.goalId, saved.operationId, report)
-        const existing = await core.call(delegationWorkerHostId(saved), 'message.read', { hostId: delegationWorkerHostId(saved), operationId: report.operationId }, context)
-        let retainedOnly = Boolean(existing.message?.notification?.state === 'inbox-only' && existing.message.provenance &&
-          existing.message.provenance.source.runtimeId === existing.message.provenance.target.runtimeId)
-        if (existing.message) await this.assertReply(saved, report, existing.message, body)
-        else {
-          if (saved.hostId === 'local' && delegationWorkerHostId(saved) === 'local' && context.caller)
-            retainedOnly = await core.retainRetiredLocalReply?.({ caller: context.caller, expectedRun: { runId: authority.runId! },
-              sourceMessageId: saved.sourceMessageId, sourceAuthor: { agentSessionId: saved.ownerAgentSessionId, runId: saved.ownerRunId },
-              threadId: saved.threadId, operationId: report.operationId, messageId: report.replyMessageId,
-              text: body, application: goalReportApplication(input.goalId, saved.operationId, report) }, context) ?? false
+        if (saved.report) {
+          if (goalDelegationReportBody(input.goalId, saved.operationId, saved.report) !== goalDelegationReportBody(input.goalId, saved.operationId, report))
+            throw new AgentMuxError('The original worker report is frozen. Read it before continuing.', 'CONTROL_REQUEST_CONFLICT')
+          replaySavedReceipt = true
+        } else {
+          const core = this.requireCore()
+          const body = goalDelegationReportBody(input.goalId, saved.operationId, report)
+          const existing = await core.call(delegationWorkerHostId(saved), 'message.read', { hostId: delegationWorkerHostId(saved), operationId: report.operationId }, context)
+          let retainedOnly = Boolean(existing.message?.notification?.state === 'inbox-only' && existing.message.provenance &&
+            existing.message.provenance.source.runtimeId === existing.message.provenance.target.runtimeId)
+          if (existing.message) await this.assertReply(saved, report, existing.message, body)
+          else {
+            if (saved.hostId === 'local' && delegationWorkerHostId(saved) === 'local' && context.caller)
+              retainedOnly = await core.retainRetiredLocalReply?.({ caller: context.caller, expectedRun: { runId: authority.runId! },
+                sourceMessageId: saved.sourceMessageId, sourceAuthor: { agentSessionId: saved.ownerAgentSessionId, runId: saved.ownerRunId },
+                threadId: saved.threadId, operationId: report.operationId, messageId: report.replyMessageId,
+                text: body, application: goalReportApplication(input.goalId, saved.operationId, report) }, context) ?? false
+          }
+          if (!existing.message && !retainedOnly) {
+            const owner = await this.runtime.agentCreation(saved.hostId, saved.ownerAgentSessionId)
+            if (owner.kind === 'retired-agent') throw new AgentMuxError(
+              'The original report recipient is closed. Keep the worker report and its original operation; explicitly recover the recipient before sending.', 'AGENT_SESSION_RETIRED')
+            if (owner.kind !== 'agent') throw new AgentMuxError('The original report recipient creation is unconfirmed. Keep its exact report and operation.', 'CONTROL_UNAVAILABLE')
+            if (!sessionSemanticResumeSourceRuns(owner).includes(saved.ownerRunId)) throw new AgentMuxError(
+              'The original report recipient has no confirmed semantic recovery to its current Run. Inspect that Session recovery; the report, operation and healthy input are retained.', 'CONTROL_REQUEST_CONFLICT')
+            await core.call(delegationWorkerHostId(saved), 'agent.send', { target: { kind: 'agent-session', agentSessionId: saved.ownerAgentSessionId, hostId: saved.hostId },
+              operationId: report.operationId, messageId: report.replyMessageId, threadId: saved.threadId, correlationId: saved.sourceMessageId,
+              replyTo: saved.sourceMessageId, text: body, application: goalReportApplication(input.goalId, saved.operationId, report), expectedRun: owner.run }, context)
+          }
+          if (!retainedOnly) await core.call(saved.hostId, 'message.dispatch.report', { sourceMessageId: saved.sourceMessageId, replyMessageId: report.replyMessageId, kind: 'worker_done' }, context)
+          const observed = await core.call(saved.hostId, 'message.dispatch.read', { hostId: saved.hostId, sourceMessageId: saved.sourceMessageId }, context)
+          this.assertSource(saved, observed.source, input.goalId)
+          const reply = observed.replies.find(message => message.envelope.messageId === report.replyMessageId)
+          if (!reply) throw new AgentMuxError('The original report reply is unconfirmed. Keep the same report identity and evidence.', 'CONTROL_UNAVAILABLE')
+          await this.assertReply(saved, report, reply, body, observed.source)
+          await this.demands.submitDelegationReport(input.goalId, saved.operationId, report, authority.actor.id,
+            await this.deliveryScope(saved, reply, authority.runtimeId))
         }
-        if (!existing.message && !retainedOnly) {
-          const owner = await this.runtime.agentCreation(saved.hostId, saved.ownerAgentSessionId)
-          if (owner.kind === 'retired-agent') throw new AgentMuxError(
-            'The original report recipient is closed. Keep the worker report and its original operation; explicitly recover the recipient before sending.', 'AGENT_SESSION_RETIRED')
-          if (owner.kind !== 'agent') throw new AgentMuxError('The original report recipient creation is unconfirmed. Keep its exact report and operation.', 'CONTROL_UNAVAILABLE')
-          if (!sessionSemanticResumeSourceRuns(owner).includes(saved.ownerRunId)) throw new AgentMuxError(
-            'The original report recipient has no confirmed semantic recovery to its current Run. Inspect that Session recovery; the report, operation and healthy input are retained.', 'CONTROL_REQUEST_CONFLICT')
-          await core.call(delegationWorkerHostId(saved), 'agent.send', { target: { kind: 'agent-session', agentSessionId: saved.ownerAgentSessionId, hostId: saved.hostId },
-            operationId: report.operationId, messageId: report.replyMessageId, threadId: saved.threadId, correlationId: saved.sourceMessageId,
-            replyTo: saved.sourceMessageId, text: body, application: goalReportApplication(input.goalId, saved.operationId, report), expectedRun: owner.run }, context)
-        }
-        if (!retainedOnly) await core.call(saved.hostId, 'message.dispatch.report', { sourceMessageId: saved.sourceMessageId, replyMessageId: report.replyMessageId, kind: 'worker_done' }, context)
-        const observed = await core.call(saved.hostId, 'message.dispatch.read', { hostId: saved.hostId, sourceMessageId: saved.sourceMessageId }, context)
-        this.assertSource(saved, observed.source, input.goalId)
-        const reply = observed.replies.find(message => message.envelope.messageId === report.replyMessageId)
-        if (!reply) throw new AgentMuxError('The original report reply is unconfirmed. Keep the same report identity and evidence.', 'CONTROL_UNAVAILABLE')
-        await this.assertReply(saved, report, reply, body, observed.source)
-        await this.demands.submitDelegationReport(input.goalId, saved.operationId, report, authority.actor.id,
-          await this.deliveryScope(saved, reply, authority.runtimeId))
       } else {
         const collection = (input as GoalDelegationParamsMap['goal.collect']).collection
         const goal = await this.demands.get(input.goalId)
         const originalOwner = this.participant(saved, authority, 'owner')
         if (authority.actor.kind === 'agent' && !originalOwner && (!goal || !await isGoalSupervisor(goal, authority, this.runtime)))
           throw new AgentMuxError('Only the original responsibility owner or current Supervisor can collect this report.', 'CONTROL_PERMISSION_DENIED')
-        const { communication: observed, syncIssue } = await this.readDispatch(saved, context, authority, goal)
-        this.assertSource(saved, observed.source, input.goalId)
-        const reply = observed.replies.find(message => message.envelope.messageId === collection.replyMessageId)
-        if (!reply)
-          throw new AgentMuxError(syncIssue ?? 'The original worker report reply is unconfirmed. No result was accepted.', 'CONTROL_UNAVAILABLE')
-        const report = saved.report ?? await this.readReport(input.goalId, saved, reply, observed.source)
-        if (report.replyMessageId !== collection.replyMessageId) throw new AgentMuxError('Collection refers to another original report.', 'CONTROL_REQUEST_CONFLICT')
-        await this.assertReply(saved, report, reply, goalDelegationReportBody(input.goalId, saved.operationId, report), observed.source)
-        if (!saved.report) await this.demands.recoverDelegationReport(input.goalId, saved.operationId, report, authority.actor,
-          await this.deliveryScope(saved, reply))
-        const reviewer = saved.planNodeId && !saved.collection ? await this.workflowReview?.reviewer().catch(error => {
-          console.warn('Original Goal workflow configuration could not be read. Independent manual review remains available.', error)
-          return undefined
-        }) : undefined
-        await this.demands.collectDelegationReport(input.goalId, saved.operationId, collection, authority.actor, reviewer)
+        if (saved.collection) {
+          await this.demands.collectDelegationReport(input.goalId, saved.operationId, collection, authority.actor)
+          replaySavedReceipt = true
+        } else {
+          const { communication: observed, syncIssue } = await this.readDispatch(saved, context, authority, goal)
+          this.assertSource(saved, observed.source, input.goalId)
+          const reply = observed.replies.find(message => message.envelope.messageId === collection.replyMessageId)
+          if (!reply)
+            throw new AgentMuxError(syncIssue ?? 'The original worker report reply is unconfirmed. No result was accepted.', 'CONTROL_UNAVAILABLE')
+          const report = saved.report ?? await this.readReport(input.goalId, saved, reply, observed.source)
+          if (report.replyMessageId !== collection.replyMessageId) throw new AgentMuxError('Collection refers to another original report.', 'CONTROL_REQUEST_CONFLICT')
+          await this.assertReply(saved, report, reply, goalDelegationReportBody(input.goalId, saved.operationId, report), observed.source)
+          if (!saved.report) await this.demands.recoverDelegationReport(input.goalId, saved.operationId, report, authority.actor,
+            await this.deliveryScope(saved, reply))
+          const reviewer = saved.planNodeId ? await this.workflowReview?.reviewer().catch(error => {
+            console.warn('Original Goal workflow configuration could not be read. Independent manual review remains available.', error)
+            return undefined
+          }) : undefined
+          await this.demands.collectDelegationReport(input.goalId, saved.operationId, collection, authority.actor, reviewer)
+        }
       }
     }
     const goal = await this.demands.get(input.goalId)
     if (!goal) throw new AgentMuxError('The original Goal is unavailable. Original Sessions and input remain available.', 'CONTROL_UNAVAILABLE')
-    const quiet = method === 'goal.plan.assignment' || method === 'goal.plan.claim' || method === 'goal.delegation.prepare' || method === 'goal.plan' || method === 'goal.plan.revise' || method === 'goal.plan.review'
+    const quiet = replaySavedReceipt || method === 'goal.plan.assignment' || method === 'goal.plan.claim' || method === 'goal.delegation.prepare' || method === 'goal.plan' || method === 'goal.plan.revise' || method === 'goal.plan.review'
     const plan = hostGoalResult(goal, owner)
     const reviewing = new Set(plan.planState?.nodes.filter(node => node.state === 'review').map(node => node.attempt?.delegationOperationId))
     const observations = quiet ? undefined
