@@ -35,6 +35,10 @@
       "types": "./dist/src/goals.d.ts",
       "import": "./dist/src/goals.js"
     },
+    "./goal-grounding": {
+      "types": "./dist/src/goal-grounding.d.ts",
+      "import": "./dist/src/goal-grounding.js"
+    },
     "./delegations": {
       "types": "./dist/src/delegations.d.ts",
       "import": "./dist/src/delegations.js"

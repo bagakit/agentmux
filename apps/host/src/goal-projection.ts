@@ -1,6 +1,7 @@
 import { formatGoalAddress, type AmuxGoalAddress } from '@agentmux/core/sharing'
-import { currentGoalGrounding, type Demand } from '@agentmux/demand'
+import { currentGoalGrounding } from '@agentmux/demand/goal-grounding'
 import { goalPlanState, projectGoalPlan, type GoalPlanOwner } from '@agentmux/demand/goal-plan'
+import type { Demand } from '@agentmux/demand/types'
 import type { AgentMuxDemand } from '@agentmux/core/control'
 
 /** Every plan this owner returns carries its derivation of the node states. */
