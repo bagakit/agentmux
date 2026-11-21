@@ -4,11 +4,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentExecutionInspection } from '@agentmux/core'
 import type { AppConfig } from '../src/shared/contracts'
 import { RemoteExecutionSettingsPane } from '../src/renderer/src/components/settings/RemoteExecutionSettingsPane'
+import { SettingsNavigation } from '../src/renderer/src/components/SettingsNavigation'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
 
 const dom = composerDOM()
+const navigation = { open: vi.fn(), openToolkit: vi.fn(), openHost: vi.fn(), openChannel: vi.fn(), channelEntries: [], channelPresentation: vi.fn(), openMoteConnection: vi.fn(), chooseAgent: vi.fn() }
 const sessions = Array.from({ length: 26 }, (_, index) => ({ ...composerSession(`retained-${index}`), hostId: index === 25 ? 'local' : 'remote', control: { ...composerSession(`retained-${index}`).control, hostId: index === 25 ? 'local' : 'remote' },
   workPlacement: { agentHostId: index === 25 ? 'local' : 'remote', resourceHostId: index === 25 ? 'remote' : 'local' },
   toolExecution: { bindingId: `binding-${index}`, resourceHostId: index === 25 ? 'remote' : 'local', workspacePath: '/original/project' } }))
@@ -16,6 +18,7 @@ let config: AppConfig
 let width = 600
 let resize: () => void
 beforeEach(() => {
+  navigation.open.mockClear(); navigation.openHost.mockClear()
   width = 600
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({ width } as DOMRect))
   vi.stubGlobal('ResizeObserver', class { constructor(private callback: ResizeObserverCallback) {} observe(target: Element) { if (target.classList.contains('remote-execution-settings')) resize = () => this.callback([{ target, contentRect: target.getBoundingClientRect() } as ResizeObserverEntry], this as unknown as ResizeObserver) } unobserve() {} disconnect() {} })
@@ -25,7 +28,7 @@ beforeEach(() => {
   useAppStore.setState({ config, sessions, activeWorkspaceId: 'remote-project' })
 })
 async function pane(active = true) {
-  await dom.render(<RemoteExecutionSettingsPane config={config} active={active} onClose={() => {}} onNavigate={() => {}} />)
+  await dom.render(<SettingsNavigation.Provider value={navigation}><RemoteExecutionSettingsPane config={config} active={active} onClose={() => {}} onNavigate={() => {}} /></SettingsNavigation.Provider>)
 }
 async function search(value: string) {
   const input = dom.container.querySelector<HTMLInputElement>('input[type="search"]')!
@@ -92,9 +95,22 @@ describe('Remote execution reading and navigation', () => {
     await pane(true)
     expect(dom.container.querySelector('[data-remote-open]')).toBeNull()
     expect(dom.container.textContent).toContain('Work not observed')
+    await dom.click('.remote-execution-empty button')
+    expect(navigation.openHost).toHaveBeenCalledExactlyOnceWith('local')
     await dom.click('.remote-execution-back')
     expect(dom.container.querySelector<HTMLElement>('.remote-execution-library')!.hidden).toBe(false)
     expect(document.activeElement).toBe(dom.container.querySelector('input[type="search"]'))
+  })
+
+  it('starts network setup from remote work with no connected device and retains the preparation page', async () => {
+    config = { ...config, hosts: config.hosts.filter(host => host.id === 'local'), workspaces: config.workspaces.filter(project => project.hostId === 'local') }
+    useAppStore.setState({ config, sessions: [], activeWorkspaceId: 'local-project' })
+    await pane()
+    const setup = dom.container.querySelector('.agent-work-setup')
+    expect(setup).not.toBeNull()
+    await dom.click('.remote-execution-prepare > .remote-execution-feedback button')
+    expect(navigation.open).toHaveBeenCalledExactlyOnceWith('hosts', undefined, 'mesh-join')
+    expect(dom.container.querySelector('.agent-work-setup')).toBe(setup)
   })
 
   it('searches the exact resource project and includes its path in the row', async () => {

@@ -24,6 +24,7 @@ const edits: Record<string, [string, string, string][]> = {
   'null-erase': [['components/AgentToolExecutionNotice.tsx', 'if (value === null) {', 'if (false) {']],
   'narrow-detail': [['components/settings/RemoteExecutionSettingsPane.tsx', 'hidden={narrow && view === \'detail\'} className="remote-execution-library"', 'hidden={false} className="remote-execution-library"']],
   'hidden-selection': [['components/settings/RemoteExecutionSettingsPane.tsx', 'const selected = active ? observedSelected : retainedSelected.current', 'const selected = observedSelected']],
+  'missing-session-host': [['components/settings/RemoteExecutionSettingsPane.tsx', 'lastObservedSelection.current.agentHostId : null', 'null : null']],
   'project-search': [['components/settings/RemoteExecutionSettingsPane.tsx', "${resourceProject(session) ?? ''}", '']],
   'prepare-identity': [['components/settings/RemoteExecutionSettingsPane.tsx', '<code>{preparedProject.path}</code>', '']]
 }
