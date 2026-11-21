@@ -45,7 +45,7 @@
 原用户正文
 ```
 
-容器只持有一个 `context` 子项，属性顺序与拼写固定为 `kind="browser" version="1"`；不与 A2A、reminder 或平台说明混装。开头、JSON、结束标签分别由单个 LF 分隔，外部正文由两个 LF 接上，正文逐字节保留。平台说明确有需要时使用其原独立前导容器。场景 JSON 由 [BrowserInputContext](../../packages/core/src/browser-input-context.ts) 严格解码后按该类型字段顺序编码；对象未知字段、未知版本或不完整格式保持原文可读。字符串中的 `<`、`>`、`&` 分别编码为 `\u003c`、`\u003e`、`\u0026`，控制字符使用 JSON escaping，不能用页面数据闭合标签。
+容器持有一个 `context` 子项，属性顺序与拼写固定为 `kind="browser" version="1"`。同次输入附带来源引用时，发送端将一个完整 `amux:ref` 放在 `</context>` 之后、`</amux>` 之前，声明之间以单个 LF 分隔。平台说明和 A2A 各使用独立容器。容器结束后由两个 LF 接原正文，正文逐字节保留。场景 JSON 由 [BrowserInputContext](../../packages/core/src/browser-input-context.ts) 严格解码后按该类型字段顺序编码；对象未知字段、未知版本或不完整格式保持原文可读。字符串中的 `<`、`>`、`&` 分别编码为 `\u003c`、`\u003e`、`\u0026`，控制字符使用 JSON escaping，不能用页面数据闭合标签。
 
 场景只携数据，不携指令、作者、授权或投递回执，不进入 `systemContext`。Browser operation 与输入 operation 是不同身份；step 缺失用 `null`，不合成 0。selection 自持捕获来源和关联强度，外层较新场景不能覆盖它；图片只持宿主无关的持久资源引用，Core 不取图、不内联像素、不把像素矩形升级成 DOM ref。捕获跨边界时保留 observationEnd，无法证明准确步骤时不声明 exact-step。
 
@@ -224,7 +224,7 @@ Focus 引用的起始行是 `<amux:ref kind="focus-selection" read-via="focus re
 
 Agent 来源使用 `kind="agent-context"` 和 `read-via="agent context --help"`，正文携可读取原 Session 的准确 Host 与 SID。只持有已保存的 Provider 对话时使用 `kind="native-context"` 和 `read-via="agent native history --help"`，正文携读取该对话的原 locator。跨 Core 缺少可读路由时，交接可携原 owner 的有界历史页和读取缺口。本次任务与原资料分别交付。
 
-声明可跟在原平台说明后，之后以两个 LF 接原任务正文。阅读器保留原声明和任务正文，读取用法沿实际注册的 `focus read --help`。原输入冻结后的引用与重试沿[输入环境判定与复用边界](../design/behavior/agent-capabilities-and-messaging.md#输入环境判定与复用边界)。Focus 组范围与咨询行为沿[项目组讨论与建议](../design/behavior/focus-context.md#项目组讨论与建议)。
+独立声明可跟在原平台说明后，之后以两个 LF 接原任务正文。同次附带 Browser 观察时按上文容器边界一并交付。阅读器保留原声明和任务正文，读取用法沿实际注册的 `focus read --help`。原输入冻结后的引用与重试沿[输入环境判定与复用边界](../design/behavior/agent-capabilities-and-messaging.md#输入环境判定与复用边界)。Focus 组范围与咨询行为沿[项目组讨论与建议](../design/behavior/focus-context.md#项目组讨论与建议)。
 
 ## 内容分享外框
 
