@@ -84,7 +84,9 @@ async function mountInputReview() {
   render(reviewCases[new URLSearchParams(location.search).get('case') ?? ''])
 }
 const workflowCode = meshPeerCode({ identity: { peerId: ids[1]!, publicKey: 'fixture-public-peer', epoch: 1 }, configuration: { ...settings.configuration, networkId: 'work-machines', advertisedIngress: [{ endpoint: 'gateway.example', useTls: true }] } })
+const workflowDeviceCode = meshPeerCode({ identity: { peerId: ids[2]!, publicKey: 'fixture-device-public-peer', epoch: 1 }, configuration: settings.configuration }, false)
 if (state === 'settings-inputs') void mountInputReview()
+else if (state === 'remote-landing') render({ section: 'remote-execution', field: 'prepare' })
 else if (state === 'gateway-join') void useAppStore.getState().initialize().then(() => {
   useAppStore.setState({ config: fixtureConfig, meshSettingsDrafts: {}, meshGatewayCode: '' })
   render()
@@ -94,4 +96,4 @@ else if (state === 'separate-gateway-identity' || state === 'separate-identity-n
   useAppStore.setState({ meshGatewayHandoff: state === 'separate-gateway-identity' ? workflowCode ?? undefined : undefined })
   render({ section: 'hosts', field: 'mesh-join' })
 } else render()
-Object.assign(window, { meshFixture: { originalOffer, workflowCode, confirmGateway: () => { state = 'gateway-connected' }, endpoint: () => { state = 'endpoint' }, localOnly: () => showHosts(true), allHosts: () => showHosts(false), theme: (mode: 'dark' | 'light') => updateThemeSelection({ appAppearance: mode }), failure: () => { state = 'failure'; settings = { ...settings, revision: 'saved-9' } } } })
+Object.assign(window, { meshFixture: { originalOffer, workflowCode, workflowDeviceCode, confirmGateway: () => { state = 'gateway-connected' }, endpoint: () => { state = 'endpoint' }, localOnly: () => showHosts(true), allHosts: () => showHosts(false), theme: (mode: 'dark' | 'light') => updateThemeSelection({ appAppearance: mode }), failure: () => { state = 'failure'; settings = { ...settings, revision: 'saved-9' } } } })

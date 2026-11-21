@@ -11,6 +11,22 @@ app.whenReady().then(async()=>{try{
  const openGateway=()=>evaluate(`document.querySelector('.settings-sidebar nav [data-settings-target="hosts:mesh-configuration"]')?.click()`)
  const paint=async()=>{await evaluate('document.fonts.ready');await delay(400)}
  const frame=async name=>{await paint();const file=name+'.png';await fs.writeFile(path.join(output,file),(await window.webContents.capturePage()).toPNG());receipt.frames.push(file)}
+ if (scenario === '--remote-landing') {
+   const until = async test => { for (let i=0;i<120;i++) { if (await evaluate(test)) return; await delay(50) }; throw Error(test) }
+   await window.loadURL(url+'?scenario=remote-landing')
+   await until("document.querySelector('.remote-work-intro--illustrated img')?.naturalWidth > 0")
+   await frame('remote-prepare-wide-dark')
+   await evaluate("document.querySelector('.remote-work-tasks [aria-controls$=\"-existing\"]').click()")
+   await until("document.querySelector('.remote-execution-empty__actions button')?.checkVisibility()")
+   await frame('remote-work-empty-wide-dark')
+   await evaluate("document.querySelector('.remote-work-tasks [aria-controls$=\"-start\"]').click()")
+   window.setContentSize(540,870)
+   await evaluate('meshFixture.theme("light"); meshFixture.localOnly()')
+   await until("document.querySelector('.remote-execution-prepare > .remote-execution-feedback button')?.checkVisibility()")
+   await frame('remote-prepare-no-device-narrow-light')
+   receipt.passed = true
+   return
+ }
  if (scenario === '--gateway-navigation') {
    const until = async test => { for (let i=0;i<120;i++) { if (await evaluate(test)) return; await delay(50) }; throw Error(test) }
    const child = '[data-settings-target="hosts:mesh-join"]'
@@ -232,6 +248,9 @@ app.whenReady().then(async()=>{try{
    await evaluate(`(()=>{const e=${field('Device to manage')};e.value=e.options[1].value;e.dispatchEvent(new Event('change',{bubbles:true}))})()`)
    await until("document.querySelector('.mesh-network-heading h3')?.textContent.includes('Office gateway')")
    await frame('managed-gateway')
+   await evaluate(`(()=>{const e=${field('Paste a connection code')};Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,meshFixture.workflowDeviceCode);e.dispatchEvent(new Event('input',{bubbles:true})); e.scrollIntoView({block:'center'})})()`)
+   await until("document.querySelector('.mesh-peer-pairing button')?.textContent === 'Approve device'")
+   await frame('gateway-membership-approval')
    await until(`Boolean(${field('Mesh device public keys')})`)
    await evaluate("document.querySelector('.mesh-device-access').open=true;document.querySelector('.mesh-device-access').scrollIntoView({block:'center'})")
    await frame('endpoint-approval')
