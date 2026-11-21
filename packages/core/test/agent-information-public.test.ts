@@ -1,5 +1,5 @@
 import { fixtureEpoch } from '../../../test/fixture-values.mjs'
-import { fork } from 'node:child_process'
+import { fork, spawn } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -10,23 +10,25 @@ import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })
 
-async function owner() {
+async function owner(originalRoot?: string, ownerMode: 'create' | 'restore' = 'create', nativeProcessId?: number) {
   const candidate = process.env.AMX_INFORMATION_CANDIDATE
   if (!candidate) throw new Error('The public product test requires the exact compiled gate candidate.')
-  const root = await mkdtemp(join(tmpdir(), 'amx-information-public-'))
-  cleanup.push(() => rm(root, { recursive: true, force: true }))
+  const root = originalRoot ?? await mkdtemp(join(tmpdir(), 'amx-information-public-'))
+  if (!originalRoot) cleanup.push(() => rm(root, { recursive: true, force: true }))
   const env = objectCliEnvironment(root, { HOME: root, USERPROFILE: root,
     NODE_OPTIONS: '--import=' + pathToFileURL(resolve(import.meta.dirname, 'fixtures/agent-information-loader.mjs')).href,
     AGENTMUX_TEST_OBJECT_CLI: join(candidate, 'core/bin/amux') })
-  const worker = fork(resolve(import.meta.dirname, 'fixtures/agent-information-owner.mjs'), [root], {
+  const worker = fork(resolve(import.meta.dirname, 'fixtures/agent-information-owner.mjs'), [root, ownerMode,
+    ...(nativeProcessId === undefined ? [] : [String(nativeProcessId)])], {
     env, execArgv: [], stdio: ['ignore', 'pipe', 'pipe', 'ipc'] })
   let stderr = ''; worker.stderr!.setEncoding('utf8'); worker.stderr!.on('data', chunk => { stderr += chunk })
   const exited = new Promise<number | null>(done => worker.once('exit', done))
-  cleanup.push(async () => {
+  const stop = async () => {
     if (worker.exitCode !== null || worker.signalCode !== null) return
     worker.send({ type: 'close' }); const timeout = setTimeout(() => worker.kill('SIGKILL'), 3000)
     try { expect(await exited, stderr).toBe(0) } finally { clearTimeout(timeout) }
-  })
+  }
+  cleanup.push(stop)
   const message = () => new Promise<any>((done, reject) => {
     const timeout = setTimeout(() => reject(new Error('The isolated compiled information owner did not reply: ' + stderr)), 10000)
     worker.once('message', value => { clearTimeout(timeout); done(value) })
@@ -42,7 +44,7 @@ async function owner() {
   }
   const mode = async (value: string) => { const pending = message(); worker.send({ type: 'native-mode', mode: value }); await pending }
   const stats = async () => { const pending = message(); worker.send({ type: 'stats' }); return await pending }
-  return { root, cli, mode, stats }
+  return { root, cli, mode, stats, stop, pid: worker.pid }
 }
 
 it('the compiled information CLI reads the actual Core owner and its agent.inspect projection', async () => {
@@ -73,4 +75,28 @@ it('the compiled configuration CLI changes the original model once and inspects 
   const retained = await f.cli(['agent', 'configuration', 'inspect', '--host', 'local', '--session', 'information-original', '--operation-id', input.operationId])
   expect(retained).toMatchObject({ kind: 'operation', operation: receipt })
   const stats = await f.stats(); expect(stats.writes).toHaveLength(1); expect(stats.runtimeWrites).toBe(0)
+})
+
+it('a new Core owner reads the same original information and clock from FileStore without rereading or reseeding', async () => {
+  // The isolated original Agent process remains alive while the two real Core owners exit/start.
+  const native = spawn(process.execPath, ['-e', "process.on('SIGTERM', () => process.exit(0)); setInterval(() => {}, 1000)"],
+    { env: { PATH: process.env.PATH, NODE_OPTIONS: '' }, stdio: 'ignore' })
+  const nativeExited = new Promise(done => native.once('exit', done))
+  cleanup.push(async () => {
+    if (native.exitCode !== null || native.signalCode !== null) return
+    native.kill('SIGTERM'); const timeout = setTimeout(() => native.kill('SIGKILL'), 3000)
+    try { await nativeExited } finally { clearTimeout(timeout) }
+  })
+  expect(native.pid).toBeGreaterThan(0)
+  const first = await owner(undefined, 'create', native.pid)
+  const information = await first.cli(['agent', 'information', 'inspect', '--host', 'local', '--session', 'information-original', '--run', 'information-run-original'])
+  expect(information.snapshot).toMatchObject({ nativeSessionId: 'information-native-original', observedAt: fixtureEpoch(2, 0, 123) })
+  await first.stop()
+  expect(native.exitCode).toBeNull(); expect(native.signalCode).toBeNull()
+  const restored = await owner(first.root, 'restore', native.pid)
+  expect(restored.pid).not.toBe(first.pid)
+  const inspected = await restored.cli(['agent', 'inspect', '--session', 'information-original'])
+  expect(inspected.status.session).toMatchObject({ agentSessionId: 'information-original', run: { runId: 'information-run-original' },
+    nativeHandle: { kind: 'provider', sessionId: 'information-native-original' }, nativeInformation: information.snapshot })
+  const stats = await restored.stats(); expect(stats.reads).toBe(0); expect(stats.runtimeWrites).toBe(0)
 })

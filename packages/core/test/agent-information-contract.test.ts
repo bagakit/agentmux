@@ -2,7 +2,7 @@ import { fixtureEpoch } from '../../../test/fixture-values.mjs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
 import { defineAgentProvider } from '../src/agent-provider.js'
@@ -53,6 +53,74 @@ it('a read failure preserves the last native observation and its original time w
   expect((await f.client.statusAgent(f.id)).session).toMatchObject({ agentSessionId: f.id, run: { runId: f.runId },
     nativeInformation: { observedAt: fixtureEpoch(2, 0, 123) } })
   expect(f.state.runtimeWrites).toBe(0)
+})
+
+it('an explicit null configuration withdraws its old projection while a rejected read retains the original configuration', async () => {
+  const f = await fixture(), original = await f.client.inspectAgentInformation(f.input)
+  f.state.configurationUnavailable = true
+  const failed = await f.client.inspectAgentInformation(f.input)
+  expect(failed.configuration).toEqual(original.configuration)
+  expect(failed.issue).toBeDefined()
+  f.state.configurationUnavailable = 'null'; f.state.mode = 'unavailable'
+  const withdrawn = await f.client.inspectAgentInformation(f.input)
+  expect(withdrawn.configuration).toBeNull(); expect(withdrawn.snapshot).toEqual(original.snapshot)
+  const session = (await f.client.statusAgent(f.id)).session
+  expect(session.nativeConfiguration).toBeUndefined(); expect(session.nativeInformation).toEqual(original.snapshot)
+  expect(f.state.runtimeWrites).toBe(0)
+})
+
+it('an explicit null from configuration.inspect withdraws the original cached configuration without losing native information', async () => {
+  const f = await fixture(), original = await f.client.inspectAgentInformation(f.input)
+  expect(original.configuration).not.toBeNull()
+  f.state.configurationUnavailable = 'null'
+  const result = await f.client.inspectAgentConfiguration(f.input)
+  expect(result).toMatchObject({ kind: 'configuration', snapshot: null })
+  const session = (await f.client.statusAgent(f.id)).session
+  expect(session.nativeConfiguration).toBeUndefined()
+  expect(session.nativeInformation).toEqual(original.snapshot)
+  expect(session.run).toEqual({ runId: f.runId })
+  expect(f.state.runtimeWrites).toBe(0)
+})
+
+it('mutating a direct SDK information DTO cannot modify its original owner facts or Run', async () => {
+  const f = await fixture(), result = await f.client.inspectAgentInformation(f.input)
+  const original = structuredClone(result)
+  result.snapshot!.model!.id = 'caller-tampered-model'
+  result.snapshot!.plan!.name = 'caller-tampered-plan'
+  result.configuration!.options[0]!.currentValue = 'caller-tampered-selection'
+  result.target.expectedRun.runId = 'caller-tampered-run'
+  f.state.mode = 'unavailable'; f.state.configurationUnavailable = true
+  const session = (await f.client.statusAgent(f.id)).session
+  expect(session.run).toEqual({ runId: f.runId })
+  expect(session.nativeInformation).toEqual(original.snapshot)
+  expect(session.nativeConfiguration).toEqual(original.configuration)
+  const retained = await f.client.inspectAgentInformation(f.input)
+  expect(retained.target.expectedRun).toEqual({ runId: f.runId })
+  expect(retained.snapshot).toEqual(original.snapshot)
+  expect(retained.configuration).toEqual(original.configuration)
+  expect(f.state.runtimeWrites).toBe(0)
+})
+
+it('a late null configuration read preserves a newer original model ACK and returns its confirmed snapshot', async () => {
+  const f = await fixture(), initial = await f.client.inspectAgentInformation(f.input)
+  const provider = f.client.providers.get('information-fixture')
+  let beginRead!: () => void, finishRead!: (value: null) => void
+  const entered = new Promise<void>(resolve => { beginRead = resolve })
+  const deferred = new Promise<null>(resolve => { finishRead = resolve })
+  const read = vi.spyOn(provider, 'readConfiguration').mockImplementationOnce(async () => { beginRead(); return deferred })
+  const pending = f.client.inspectAgentConfiguration(f.input)
+  try {
+    await entered
+    const receipt = await f.client.setAgentConfiguration({ target: initial.target, operationId: 'model-operation-before-late-null',
+      configId: 'model', value: 'model-large', expectedRevision: initial.configuration!.revision },
+    { actor: { kind: 'user', id: 'fixture-person' } })
+    expect(receipt.outcome).toBe('applied')
+    finishRead(null)
+    expect(await pending).toMatchObject({ kind: 'configuration', snapshot: receipt.acknowledgement })
+    expect((await f.client.statusAgent(f.id)).session.nativeConfiguration).toEqual(receipt.acknowledgement)
+    expect(f.state.writes).toHaveLength(1)
+    expect(f.state.runtimeWrites).toBe(0)
+  } finally { finishRead(null); await pending.catch(() => {}); read.mockRestore() }
 })
 
 it('the same native Session name on a different original actor cannot expose the previous account or model cache', async () => {

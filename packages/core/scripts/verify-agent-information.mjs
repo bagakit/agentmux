@@ -14,14 +14,14 @@ const hash = value => createHash('sha256').update(value).digest('hex')
 const read = path => readFile(join(root, path))
 await mkdir(evidence, { recursive: true })
 
-async function fingerprints(directory) {
+async function fingerprints(directory, nested = false) {
   const result = {}
   for (const entry of await readdir(join(root, directory), { withFileTypes: true })) {
     const path = directory + '/' + entry.name
-    if (entry.isDirectory()) Object.assign(result, await fingerprints(path))
-    else if (/\.(?:ts|tsx|json)$/u.test(entry.name)) result[path] = hash(await read(path))
+    if (entry.isDirectory()) Object.assign(result, await fingerprints(path, true))
+    else if (/\.(?:ts|tsx|json|css|svg)$/u.test(entry.name)) result[path] = hash(await read(path))
   }
-  assert.ok(Object.keys(result).length, 'A candidate source collection must be nonempty: ' + directory)
+  if (!nested) assert.ok(Object.keys(result).length, 'A candidate source collection must be nonempty: ' + directory)
   return result
 }
 function runProgram(program, args, env = {}, timeoutMs = 120000) {
@@ -37,6 +37,7 @@ function runProgram(program, args, env = {}, timeoutMs = 120000) {
 }
 const run = (args, env, timeout) => runProgram(process.execPath, args, env, timeout)
 const before = { ...await fingerprints('packages/core/src'), ...await fingerprints('packages/providers/src') }
+const productionSources = { ...before }
 for (const path of ['tsconfig.base.json', 'packages/core/tsconfig.json', 'packages/core/tsconfig.build.json',
   'packages/providers/tsconfig.json', 'packages/core/package.json', 'packages/providers/package.json',
   'packages/core/bin/amux', 'packages/core/native/native-socket-peer.c']) before[path] = hash(await read(path))
@@ -54,12 +55,18 @@ for (const path of tests) await read(path)
 for (const path of [config, 'packages/core/scripts/verify-agent-information.mjs',
   'packages/core/test/fixtures/agent-information-loader.mjs', 'packages/core/test/fixtures/agent-information-native.mjs',
   'packages/core/test/fixtures/agent-information-owner.mjs', ...tests]) before[path] = hash(await read(path))
-if (mode === 'surface' || mode === 'integration') Object.assign(before,
-  await fingerprints('packages/client-ui/src'), await fingerprints('apps/desktop/src/renderer/src'))
+if (mode === 'codex' || mode === 'integration') before['packages/core/test/fixtures/codex-information-native-owner.mjs'] =
+  hash(await read('packages/core/test/fixtures/codex-information-native-owner.mjs'))
+if (mode === 'surface' || mode === 'integration') {
+  Object.assign(before, await fingerprints('packages/client-ui/src'), await fingerprints('apps/desktop/src'))
+  for (const path of ['apps/desktop/test/agent-information-surface.config.mts', 'apps/desktop/test/vitest.ui-controls-owning.config.mts',
+    'apps/desktop/scripts/fixtures/conversation-latest-auto/vitest.owning.config.mts']) before[path] = hash(await read(path))
+}
 
 let compiledReceipt
 try { compiledReceipt = JSON.parse(await readFile(join(candidate, 'compiled.json'), 'utf8')) } catch { /* No reusable candidate. */ }
-if (compiledReceipt?.digest !== compileDigest) {
+const reused = compiledReceipt?.digest === compileDigest
+if (!reused) {
   for (const name of ['core', 'providers']) {
     await mkdir(join(candidate, name, 'dist'), { recursive: true })
     await copyFile(join(root, 'packages', name, 'package.json'), join(candidate, name, 'package.json'))
@@ -116,7 +123,9 @@ for (const name of ['core', 'providers']) {
   await walk(join(candidate, name, 'dist'))
 }
 assert.ok(Object.keys(compiledInputs).length && compiledInputs['core/dist/agentmux.js'], 'The compiled product CLI must exist.')
-process.stdout.write(JSON.stringify({ mode, compiled: 'ready', reused: compiledReceipt.digest === compileDigest }) + '\n')
+assert.ok(compiledInputs['core/dist/public-rpc-server.js'] && compiledInputs['core/dist/control-endpoint-listener-worker.js'],
+  'The real public Server and its package-owned listener worker must belong to this candidate.')
+process.stdout.write(JSON.stringify({ mode, compiled: 'ready', reused }) + '\n')
 
 async function execute(label, mutation) {
   const loadedPath = join(evidence, label + '.loaded.jsonl'), compiledPath = join(evidence, label + '.compiled-loaded.jsonl')
@@ -126,7 +135,11 @@ async function execute(label, mutation) {
   assert.ok(!mutation || edit, 'A real implementation edit must define the mutation: ' + mutation)
   const compiledEdit = edit && mutation === 'public-information-detached' ? { ...edit, mutation,
     path: edit.path.replace(/^packages\/(core|providers)\/src\//u, '$1/dist/').replace(/\.ts$/u, '.js') } : undefined
-  const result = await run(['node_modules/vitest/vitest.mjs', 'run', '--config', config, '--reporter=json', '--outputFile', reportPath], {
+  const ownerSubset = mode === 'integration' && (mutation || label === 'restored')
+  const result = await run(['node_modules/vitest/vitest.mjs', 'run', '--config', config, '--reporter=json', '--outputFile', reportPath,
+    ...((mutation || label === 'restored') && mode === 'codex' ? ['packages/core/test/codex-information.test.ts'] : []),
+    ...((mutation || label === 'restored') && mode === 'claude' ? ['packages/core/test/claude-information.test.ts'] : []),
+    ...(ownerSubset ? ['packages/core/test/agent-information-contract.test.ts'] : [])], {
     AMX_INFORMATION_MODE: mode, AMX_INFORMATION_MUTATION: mutation ?? '', AMX_INFORMATION_LOADED: loadedPath,
     AMX_INFORMATION_CANDIDATE: candidate, AMX_INFORMATION_COMPILED_LOADED: compiledPath,
     AMX_INFORMATION_COMPILED_EDIT: compiledEdit ? JSON.stringify(compiledEdit) : '',
@@ -140,9 +153,11 @@ async function execute(label, mutation) {
   assert.ok(loaded.length, 'The tests must load the actual candidate source.')
   for (const input of loaded) assert.equal(input.originalSHA256, before[input.path], 'The source candidate changed or escaped its worktree: ' + input.path)
   for (const input of compiled) assert.equal(input.originalSHA256, compiledInputs[input.path], 'The wrong compiled candidate loaded: ' + input.path)
-  if (['contract', 'integration'].includes(mode)) for (const path of ['core/dist/client.js', 'core/dist/public-rpc-service.js', 'core/dist/agentmux.js']) {
+  if (['contract', 'integration'].includes(mode) && !ownerSubset) for (const path of ['core/dist/client.js', 'core/dist/public-rpc-service.js', 'core/dist/agentmux.js']) {
     assert.ok(compiled.some(input => input.path === path), 'The public product consumer must actually load: ' + path)
   }
+  if (mode === 'surface') assert.ok(compiled.some(input => input.path === 'core/dist/public-rpc-server.js'),
+    'The production Main route must consume the actual compiled Server and its private listener asset.')
   if (mutation) {
     const implementations = [...loaded, ...compiled].filter(input => input.mutation === mutation && input.sha256 !== input.originalSHA256)
     const failed = report.testResults.flatMap(file => file.assertionResults).filter(test => test.status === 'failed')
@@ -159,7 +174,10 @@ async function execute(label, mutation) {
 const baseline = await execute('baseline')
 process.stdout.write(JSON.stringify({ mode, baseline }) + '\n')
 const mutations = mode === 'contract' ? ['wrong-native-information', 'fake-model-ack', 'public-information-detached']
-  : mode === 'surface' ? ['surface-old-run-adopted', 'surface-unknown-ack-applied'] : []
+  : mode === 'codex' ? ['codex-native-identity', 'codex-fake-ack', 'codex-original-request-id', 'codex-reset-unit', 'codex-duplicate-dispatch']
+  : mode === 'claude' ? ['claude-information-detached', 'claude-information-repeated', 'claude-reset-unit', 'claude-information-not-saved', 'claude-old-sequence', 'claude-gap-ignored']
+  : mode === 'surface' ? ['surface-old-run-adopted', 'surface-unknown-ack-applied', 'surface-remote-host-detached']
+  : ['owner-sdk-reference', 'owner-null-retained', 'owner-newer-ack-erased']
 const reds = []
 for (const mutation of mutations) {
   reds.push(await execute('mutation-' + mutation, mutation))
@@ -167,6 +185,8 @@ for (const mutation of mutations) {
 }
 const restored = mutations.length ? await execute('restored') : baseline
 for (const [path, sha] of Object.entries(before)) assert.equal(hash(await read(path)), sha, 'The candidate changed during qualification: ' + path)
+assert.deepEqual({ ...await fingerprints('packages/core/src'), ...await fingerprints('packages/providers/src') }, productionSources,
+  'New or removed production sources invalidate this exact candidate qualification.')
 await writeFile(join(evidence, 'qualification.json'), JSON.stringify({ schema: 'agentmux.agent-information.v1', mode,
   passed: true, inputs: before, compiled: { ...compiledReceipt, inputs: compiledInputs }, baseline, mutations: reds, restored,
   boundary: 'Exact candidate Core and Providers, real Control/RPC and compiled CLI, with isolated Provider/Runtime fixture inputs. Native vendor validation and rendered visual review remain separately attributed evidence; no user Run or installed Desktop is operated.' }, null, 2) + '\n')
