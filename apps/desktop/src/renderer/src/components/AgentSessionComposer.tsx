@@ -32,7 +32,7 @@ import {
   caretAtLastLine
 } from '../lib/composer-history'
 import { ComposerResubmitGuard } from '../lib/composer-resubmit-guard'
-import { useAppStore, agentSteerCanEdit, agentSteerExecution, type AgentSteerQueueEntry } from '../store'
+import { useAppStore, agentSteerCanEdit, agentSteerExecution, originalMoteRecoveryNotSent, type AgentSteerQueueEntry } from '../store'
 import { originalInputDeliveryConfirmed } from '@agentmux/client-ui/input-receipt-projection'
 import { steerEntryTargetsRun, steerEntryWakesItself, steerQueueCanEverDrain } from '../lib/agent-steer-queue-drain'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
@@ -82,7 +82,7 @@ function createComposerSessionReader(sessionId: string, owner: ComposerSessionOw
   }
 }
 
-function composerSessionFields(session: SessionSnapshot | undefined) {
+function composerSessionFields(session: SessionSnapshot | undefined, includeRecoveryFacts: boolean) {
   if (!session) return undefined
   const { id, hostId, workspacePath, nativeService, processState, status } = session
   const common = { id, hostId, workspacePath, processState, state: status.state,
@@ -92,6 +92,7 @@ function composerSessionFields(session: SessionSnapshot | undefined) {
     toolExecution, workPlacement, pendingInteraction, nativeConfiguration, turnUsage, contextWindowUsage } = session
   return { ...common, kind: session.kind, control, providerId, executorId, label, capabilities,
     detail: status.detail, continuity: status.continuity, continuityReason: status.continuityReason,
+    ...(includeRecoveryFacts && session.continuityOperations ? { continuityOperations: session.continuityOperations } : {}),
     ...(inputEpoch === undefined ? {} : { inputEpoch }), ...(structuredPromptInput ? { structuredPromptInput } : {}),
     ...(nativeHandle ? { nativeHandle } : {}), ...(terminalFrontend ? { terminalFrontend } : {}),
     ...(toolExecution ? { toolExecution } : {}), ...(workPlacement ? { workPlacement } : {}),
@@ -262,8 +263,9 @@ export function AgentSessionComposer({
   }, [visible, queuedEntries, memberInput, moteWorkface?.startRollover])
   const executors = useObservedAppStore('composer', visible, consumerScope, (state) => state.config?.executors)
   const readSession = useMemo(() => createComposerSessionReader(sessionId, paneSession), [sessionId, paneSession])
+  const includeRecoveryFacts = queuedEntries.some(entry => entry.resumeInputIntent && entry.errorCode === 'AGENT_NATIVE_IDENTITY_UNCONFIRMED')
   const fields = useObservedAppStore('composer', visible, consumerScope, useShallow(state =>
-    source ? undefined : composerSessionFields(readSession(state))))
+    source ? undefined : composerSessionFields(readSession(state), includeRecoveryFacts)))
   const observedSession = useMemo(() => fields && (fields.kind === 'terminal' ? { ...fields, status: { state: fields.state } }
     : { ...fields, status: { state: fields.state, ...(fields.detail === undefined ? {} : { detail: fields.detail }),
       ...(fields.continuity === undefined ? {} : { continuity: fields.continuity }),
@@ -472,39 +474,44 @@ export function AgentSessionComposer({
   const capabilities = session?.kind === 'agent' ? session.capabilities : undefined
   const runId = control?.run.runId
   const canDrain = session?.kind === 'agent' && steerQueueCanEverDrain(session.processState)
-  const presentQueueEntry = useCallback((entry: AgentSteerQueueEntry) => ({
-    id: entry.operationId,
-    ...(entry.directInputControl && entry.directInputBinding ? { inputOrigin: {
-      hostId: entry.directInputControl.hostId, key: entry.inputReceipt?.key ?? { kind: 'prompt' as const,
-        agentSessionId: entry.directInputControl.agentSessionId, expectedRun: entry.directInputBinding.expectedRun, submissionId: entry.operationId }
-    } } : entry.resumeInputIntent && entry.resumeInputReceipt?.key ? { inputOrigin: {
-      hostId: entry.resumeInputIntent.control.hostId, key: entry.resumeInputReceipt.key
-    } } : {}),
-    text: entry.text,
-    ...(entry.archived ? { archived: true as const } : {}),
-    inputControlled: Boolean(entry.directInputBinding || entry.resumeInputIntent),
-    confirmed: Boolean(entry.resumeInputReceipt && ['launch-carried', 'terminal-confirmed'].includes(entry.resumeInputReceipt.state)) || originalInputDeliveryConfirmed(entry.inputReceipt) || !entry.directInputBinding && Boolean(confirmedSteerDelivery(timeline, control, entry.operationId)),
-    ...(entry.inputReceipt ? { inputReceipt: entry.inputReceipt } : {}),
-    ...(entry.resumeInputReceipt ? { resumeInputReceipt: entry.resumeInputReceipt } : {}),
-    ...(entry.inputStopReceipt ? { inputStopReceipt: entry.inputStopReceipt } : {}),
-    ...(entry.enqueuedAt !== undefined ? { enqueuedAt: entry.enqueuedAt } : {}),
-    status: entry.status,
-    editable: agentSteerCanEdit(entry, sendingId),
-    immediateSend: capabilities !== undefined && agentSteerExecution(entry, capabilities) === 'immediate',
-    preparing: !entry.archived && entry.operationId === sendingId && sendingPhase !== 'submitting',
-    sending: !entry.archived && entry.operationId === sendingId && sendingPhase === 'submitting',
-    unconfirmed: entry.resumeInputReceipt ? !['launch-carried', 'terminal-confirmed', 'not-applied'].includes(entry.resumeInputReceipt.state) : entry.inputReceipt ? entry.inputReceipt.persistence === 'observed' || entry.inputReceipt.status === 'unknown'
-      : Boolean(entry.inputIntakeStarted) || entry.promptCondition !== null && !entry.preparationInputNotApplied && (entry.status === 'deferred' || entry.status === 'failed'),
-    ...(entry.awaitingExplicitSend ? { awaitingExplicitSend: true as const } : {}),
-    wakesItself: runId !== undefined && steerEntryWakesItself(entry, runId),
-    deliverable: runId !== undefined && (entry.runId === undefined ||
-      canDrain && (steerEntryTargetsRun(entry, runId) ||
-        agentSteerCanEdit(entry, sendingId) && entry.goalContinuation === undefined)),
-    ...(entry.errorCode ? { errorCode: entry.errorCode } : {}),
-    ...(entry.logId ? { logId: entry.logId } : {}),
-    ...(entry.error ? { error: entry.error } : {}),
-    ...(entry.preparationWait ? { preparationWait: entry.preparationWait } : {}),
-  }), [control, capabilities, runId, canDrain, sendingId, sendingPhase, timeline, timelineRevision])
+  const continuityOperations = session?.kind === 'agent' ? session.continuityOperations : undefined
+  const presentQueueEntry = useCallback((entry: AgentSteerQueueEntry) => {
+    const recoveryNotSent = originalMoteRecoveryNotSent(control, continuityOperations, entry)
+    return {
+      id: entry.operationId,
+      ...(entry.directInputControl && entry.directInputBinding ? { inputOrigin: {
+        hostId: entry.directInputControl.hostId, key: entry.inputReceipt?.key ?? { kind: 'prompt' as const,
+          agentSessionId: entry.directInputControl.agentSessionId, expectedRun: entry.directInputBinding.expectedRun, submissionId: entry.operationId }
+      } } : entry.resumeInputIntent && entry.resumeInputReceipt?.key ? { inputOrigin: {
+        hostId: entry.resumeInputIntent.control.hostId, key: entry.resumeInputReceipt.key
+      } } : {}),
+      text: entry.text,
+      ...(entry.archived ? { archived: true as const } : {}),
+      inputControlled: Boolean(entry.directInputBinding || entry.resumeInputIntent),
+      confirmed: Boolean(entry.resumeInputReceipt && ['launch-carried', 'terminal-confirmed'].includes(entry.resumeInputReceipt.state)) || originalInputDeliveryConfirmed(entry.inputReceipt) || !entry.directInputBinding && Boolean(confirmedSteerDelivery(timeline, control, entry.operationId)),
+      ...(entry.inputReceipt ? { inputReceipt: entry.inputReceipt } : {}),
+      ...(entry.resumeInputReceipt ? { resumeInputReceipt: entry.resumeInputReceipt } : {}),
+      ...(entry.inputStopReceipt ? { inputStopReceipt: entry.inputStopReceipt } : {}),
+      ...(entry.enqueuedAt !== undefined ? { enqueuedAt: entry.enqueuedAt } : {}),
+      status: entry.status,
+      editable: agentSteerCanEdit(entry, sendingId),
+      immediateSend: capabilities !== undefined && agentSteerExecution(entry, capabilities) === 'immediate',
+      preparing: !entry.archived && entry.operationId === sendingId && sendingPhase !== 'submitting',
+      sending: !entry.archived && entry.operationId === sendingId && sendingPhase === 'submitting',
+      recoveryNotSent,
+      unconfirmed: entry.resumeInputReceipt ? !['launch-carried', 'terminal-confirmed', 'not-applied'].includes(entry.resumeInputReceipt.state) : entry.inputReceipt ? entry.inputReceipt.persistence === 'observed' || entry.inputReceipt.status === 'unknown'
+        : !recoveryNotSent && (Boolean(entry.inputIntakeStarted) || entry.promptCondition !== null && !entry.preparationInputNotApplied && (entry.status === 'deferred' || entry.status === 'failed')),
+      ...(entry.awaitingExplicitSend ? { awaitingExplicitSend: true as const } : {}),
+      wakesItself: runId !== undefined && steerEntryWakesItself(entry, runId),
+      deliverable: runId !== undefined && (entry.runId === undefined ||
+        canDrain && (steerEntryTargetsRun(entry, runId) ||
+          agentSteerCanEdit(entry, sendingId) && entry.goalContinuation === undefined)),
+      ...(entry.errorCode ? { errorCode: entry.errorCode } : {}),
+      ...(entry.logId ? { logId: entry.logId } : {}),
+      ...(entry.error ? { error: entry.error } : {}),
+      ...(entry.preparationWait ? { preparationWait: entry.preparationWait } : {}),
+    }
+  }, [control, continuityOperations, capabilities, runId, canDrain, sendingId, sendingPhase, timeline, timelineRevision])
   const queued = useMemo(() => queuedEntries.map(presentQueueEntry), [queuedEntries, presentQueueEntry])
   const sendImmediately = useMemo(() => queued.some(entry => entry.immediateSend), [queued])
 

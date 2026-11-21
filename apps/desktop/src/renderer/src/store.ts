@@ -254,6 +254,7 @@ import type {
   DesktopContinuityControlResult,
   LaunchOptionSelection,
   AgentSessionControl,
+  DesktopContinuityFacts,
   AgentInputTarget,
   AgentSessionRecoveryCandidate,
   AgentTimelineSnapshot,
@@ -1020,12 +1021,11 @@ function originalInputRoute(entry: Pick<AgentSteerQueueEntry, 'originalMember' |
   return { kind: 'space-member-target', target: { hostId: member.hostId, target: { ...member.target, expectedAdmission } } }
 }
 
-/** Associate a Core receipt with its original client intent; never infer carriage from a current Run. */
-function originalResumeInputReceipt(session: SessionSnapshot, entry: AgentSteerQueueEntry): AgentSteerQueueEntry['resumeInputReceipt'] {
+/** Bind the Core operation to the frozen client intent and its original Run. */
+function originalResumeInputOperation(control: AgentSessionControl | undefined, operations: DesktopContinuityFacts['continuityOperations'], entry: AgentSteerQueueEntry) {
   const original = entry.resumeInputIntent
-  if (!original || session.kind !== 'agent' || session.hostId !== original.control.hostId ||
-      session.control.agentSessionId !== original.control.agentSessionId) return
-  const operation = session.continuityOperations?.[entry.operationId], receipt = operation?.launchInput
+  if (!original || control?.hostId !== original.control.hostId || control.agentSessionId !== original.control.agentSessionId) return
+  const operation = operations?.[entry.operationId], receipt = operation?.launchInput
   if (!receipt || operation?.agentSessionId !== original.control.agentSessionId || operation.operationId !== entry.operationId ||
       receipt.input.inputContextCapture?.hostId !== original.input.inputContextCapture?.hostId ||
       receipt.input.inputContextCapture?.operationId !== original.input.inputContextCapture?.operationId ||
@@ -1035,6 +1035,23 @@ function originalResumeInputReceipt(session: SessionSnapshot, entry: AgentSteerQ
       // The returned Core launch owns those bytes; a client version is not its proof.
       (!(entry.moteMain && !original.input.inputContextCapture) && receipt.input.agentMuxNote !== entry.agentMuxNote) || receipt.input.authorHuman !== original.input.authorHuman ||
       receipt.input.sourceChannel !== original.input.sourceChannel || operation?.previousRun.runId !== original.control.run.runId) return
+  return { operation, receipt }
+}
+
+export function originalMoteRecoveryNotSent(control: AgentSessionControl | undefined, operations: DesktopContinuityFacts['continuityOperations'], entry: AgentSteerQueueEntry): boolean {
+  if (entry.inputReceipt || entry.resumeInputReceipt || !entry.moteMain || entry.errorCode !== 'AGENT_NATIVE_IDENTITY_UNCONFIRMED') return false
+  const original = originalResumeInputOperation(control, operations, entry)
+  return Boolean(original && original.operation.kind === 'unavailable' && original.operation.reason === 'native-handle-unavailable' &&
+    original.operation.evidence.kind === 'run-ended' && !original.operation.newRun &&
+    original.receipt.state === 'prepared' && !original.receipt.key && !original.receipt.receipt)
+}
+
+/** Associate a Core receipt with its original client intent; never infer carriage from a current Run. */
+function originalResumeInputReceipt(session: SessionSnapshot, entry: AgentSteerQueueEntry): AgentSteerQueueEntry['resumeInputReceipt'] {
+  if (session.kind !== 'agent') return
+  const original = originalResumeInputOperation(session.control, session.continuityOperations, entry)
+  if (!original) return
+  const { operation, receipt } = original
   if (receipt.state === 'not-applied') return receipt
   if (operation.newRun?.runId !== session.control.run.runId ||
       receipt.key?.kind !== 'prompt' || receipt.key.agentSessionId !== session.id || receipt.key.submissionId !== entry.operationId ||

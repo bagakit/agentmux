@@ -46,6 +46,7 @@ export type ComposerQueuedMessage = {
   preparing?: boolean
   sending?: boolean
   unconfirmed?: boolean
+  recoveryNotSent?: boolean
   errorCode?: string
   error?: string
   logId?: string
@@ -57,6 +58,7 @@ export type ComposerQueuedMessage = {
 }
 
 export function queuedInputContinuationLabel(entry: ComposerQueuedMessage): string | undefined {
+  if (entry.recoveryNotSent) return '核对原对话的接续'
   if (entry.inputReceipt?.persistence !== 'confirmed') return undefined
   if (entry.inputReceipt.continuation === 'continue-handoff') return '继续原投递'
   if (entry.inputReceipt.continuation === 'rejoin-wait') return '接回原等待'
@@ -110,6 +112,7 @@ export function queuedMessageState(entry: ComposerQueuedMessage, pendingInteract
   }
   if (entry.preparing) return { label: entry.status === 'restoring' ? '恢复中' : '准备发送', detail: '正在准备本次发送；原消息和已有投递记录会保留。', busy: true }
   if (entry.sending) return { label: '发送中', detail: '正在提交原消息，等待投递确认。', busy: true }
+  if (entry.recoveryNotSent) return { label: '待接续', detail: '消息未送出，原文已保留。请查看主对话的接续选项。', busy: false }
   if (!entry.unconfirmed && entry.errorCode === 'AGENT_PROMPT_PREPARATION_FAILED') return { label: '本次准备未完成', detail: `${entry.error ?? '本次发送的准备步骤未完成。'}${entry.unconfirmed ? '\n这条消息此前是否已提交仍待核实；会保留原操作，不会自动重发。' : ''}${entry.awaitingExplicitSend ? '\n重启后等待你明确发送这条原消息。' : ''}`, busy: false }
   if (entry.unconfirmed) return { label: '发送结果待核实', detail: `${entry.error ?? '可能已经输入，但尚未拿到完整确认；请检查原对话和操作，不会自动重发。'}${entry.awaitingExplicitSend ? '\n重启后等待你明确发送这条原消息。' : ''}`, busy: false }
   if (!entry.deliverable) return { label: '原 Run 不可投递', detail: entry.error ?? '绑定的 Run 不可用或已改变，不会投递到其他 Run。', busy: false }
