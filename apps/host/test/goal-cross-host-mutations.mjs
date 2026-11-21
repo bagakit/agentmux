@@ -55,8 +55,20 @@ export const crossHostMutations = {
   },
   'desktop-closeout-admission': {
     path: 'apps/host/src/goal-worker-closeout.ts',
-    anchor: "const desktop = await options.desktopOccupation?.(input.agentSessionId, input.runId, context, { action: 'admit', operationId: input.operationId })",
+    anchor: "const desktop = await options.desktopOccupation?.(input.agentSessionId, input.runId, desktopContext, { action: 'admit', operationId: input.operationId })",
     replacement: "const desktop = 'clear'",
     test: 'Desktop draft before admission'
+  },
+  'supervisor-closeout-authority': {
+    path: 'apps/host/src/goal-worker-closeout.ts',
+    anchor: 'if (!goal || !authorized || !attempt ||',
+    replacement: 'if (!goal || !attempt ||',
+    test: 'with explicit Supervisor stop$'
+  },
+  'saved-collection-reopens-communication': {
+    path: 'apps/host/src/goal-delegation-owner.ts',
+    anchor: 'if (saved.collection) {',
+    replacement: 'if (false) {',
+    test: 'read saved receipts without Core messaging'
   }
 }

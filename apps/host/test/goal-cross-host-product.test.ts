@@ -219,10 +219,10 @@ test('the received original report retains its worker signature and exact Goal c
 })
 
 it.each(['active original Supervisor', 'retired original Supervisor', 'active original Supervisor unmounted', 'active original Supervisor with queued Core input', 'reassignment after collection', 'input saved during final Desktop check', 'new Goal duty before Stop admission', 'lost original Native Stop ACK', 'Desktop draft before admission', 'Desktop draft after admission', 'lost Desktop admission ACK',
-  'commissioning Supervisor', 'commissioning Supervisor after startup resume'] as const)('retains the original report through current Supervisor collection with %s', async scenario => {
+  'explicit Supervisor stop', 'explicit Supervisor stop after startup resume', 'read saved receipts without Core messaging'] as const)('retains the original report through current Supervisor collection with %s', async scenario => {
   const host = await crossHostOwner(cleanup, 'worker-closeout', ['supervisor', 'worker', 'reviewer', 'successor'])
-  const managed = scenario.startsWith('commissioning Supervisor')
-  const resumed = scenario === 'commissioning Supervisor after startup resume'
+  const managed = scenario.startsWith('explicit Supervisor stop')
+  const resumed = scenario === 'explicit Supervisor stop after startup resume'
   const { goal } = await host.call(null, ['goal', 'create', '--title', 'Verify worker closeout',
     '--status', 'in_progress', '--assignees', '["supervisor","worker","successor"]', '--supervisor', 'supervisor', '--risk', 'low', '--confirm', 'user'])
   const goalId = goal.id
@@ -236,11 +236,12 @@ it.each(['active original Supervisor', 'retired original Supervisor', 'active or
   } })
   const nodeId = plan.plan.nodes[0].id
   const operationId = 'closeout-dispatch', sourceMessageId = 'closeout-source', replyMessageId = 'closeout-reply'
-  await host.call('supervisor', ['goal', 'delegate', '--input', '-'], { goalId, intent: {
+  const intent = {
     operationId, sourceMessageId, threadId: 'closeout-thread', hostId: 'local', ownerAgentSessionId: 'supervisor',
     ownerRunId: 'run-supervisor', workerAgentSessionId: 'worker', workerRunId: 'run-worker', text: 'Deliver the original artifact.',
     alignmentRevision, criterionIds: ['saved'], planNodeId: nodeId,
-  } })
+  }
+  await host.call('supervisor', ['goal', 'delegate', '--input', '-'], { goalId, intent })
   const report = { operationId: 'closeout-report', replyMessageId, authorAgentSessionId: 'worker', grounding: {
     alignmentRevision, summary: 'Original delivery saved', checks: [{ criterionId: 'saved', outcome: 'met', evidence: ['artifact.log'], note: '' }],
   } }
@@ -267,6 +268,29 @@ it.each(['active original Supervisor', 'retired original Supervisor', 'active or
   } })
   expect(collected.delegations[0]).toMatchObject({ report: signed, collection: { collector: { kind: 'agent', id: supervisor }, replyMessageId } })
   expect(collected.goalState.supervisorSessionId).toBe(supervisor)
+  if (scenario === 'read saved receipts without Core messaging') {
+    const read = vi.spyOn(host.client(), 'readMessage').mockRejectedValue(Error('Private original message source unavailable'))
+    const dispatch = vi.spyOn(host.client(), 'readDispatch').mockRejectedValue(Error('Private original dispatch reader unavailable'))
+    const replay = await host.call(supervisor, ['goal', 'delegate', '--input', '-'], { goalId, intent })
+    expect(replay.delegations[0]).toEqual(collected.delegations[0])
+    const bound = await host.call(supervisor, ['goal', 'delegation', 'bind', '--input', '-'], { goalId, intent })
+    expect(bound.delegations[0]).toEqual(collected.delegations[0])
+    const repeatedReport = await host.call('worker', ['goal', 'report', '--input', '-'], { goalId, operationId, report })
+    expect(repeatedReport.delegations[0]).toEqual(collected.delegations[0])
+    const collection = { operationId: 'closeout-collection', replyMessageId }
+    const reread = await host.call(supervisor, ['goal', 'collect', '--input', '-'], { goalId, operationId, collection })
+    expect(reread.delegations[0]).toEqual(collected.delegations[0])
+    const changed = await host.cli(supervisor, ['goal', 'collect', '--input', '-'], { goalId, operationId, collection: { ...collection, replyMessageId: 'another-reply' } })
+    expect(changed.code).toBe(1)
+    const changedIntent = await host.cli(supervisor, ['goal', 'delegate', '--input', '-'], { goalId, intent: { ...intent, text: 'Changed original body' } })
+    expect(changedIntent.code).toBe(1)
+    const changedReport = await host.cli('worker', ['goal', 'report', '--input', '-'], { goalId, operationId, report: { ...report, grounding: { ...report.grounding, summary: 'Changed original report' } } })
+    expect(changedReport.code).toBe(1)
+    expect(read).not.toHaveBeenCalled()
+    expect(dispatch).not.toHaveBeenCalled()
+    expect(host.native.stop).not.toHaveBeenCalled()
+    return
+  }
   if (retired) {
     const reply = (await host.call('worker', ['message', 'read', '--message-id', replyMessageId])).message
     expect(reply).toMatchObject({ envelope: { messageId: replyMessageId, replyTo: sourceMessageId, operationId: report.operationId,
@@ -289,18 +313,13 @@ it.each(['active original Supervisor', 'retired original Supervisor', 'active or
     '--session', 'worker', '--run', runId, '--operation-id', stopOperationId]
   const workerRun = resumed ? 'resumed-worker' : 'run-worker'
   const args = closeout(workerRun, 'closeout-stop')
-  if (managed) {
-    const worker = (await host.original.store.readMetadata('worker'))!
-    await host.original.store.compareAndSwapMetadata(worker, { ...worker,
-      creation: { createOperationId: 'original-worker-create', initialPrompt: 'not-requested', createdRun: worker.run,
-        createdBy: { agentSessionId: 'supervisor', run: { runId: 'run-supervisor' }, owner: { kind: 'local' } } } })
-    expect(await host.call('supervisor', closeout('run-worker', 'before-review-stop'))).toMatchObject({ state: 'retained', reason: 'handoff' })
+  if (resumed) {
     await host.call('reviewer', ['goal', 'plan', 'review', '--input', '-'], { goalId, review: {
       operationId: 'review-closeout-delivery', nodeId, delegationOperationId: operationId, deliveryHash: signed.delivery.hash,
       verdict: 'pass', note: '', check: { command: 'Read the artifact', result: 'Passed', evidence: ['artifact.log'] },
     } })
   }
-  expect(await host.call(managed ? 'supervisor' : 'worker', closeout('run-worker', 'closeout-stop'))).toMatchObject({ state: 'retained', reason: 'unknown' })
+  if (!managed) expect(await host.call('worker', args)).toMatchObject({ state: 'retained', reason: 'unknown' })
   const spatial = new AgentMuxSpatialStateStore(), directory = host.original.root
   const mounted = scenario === 'active original Supervisor' || scenario === 'Desktop draft after admission'
   await spatial.commit({ expectedRevision: 0, graph: {
@@ -356,31 +375,48 @@ it.each(['active original Supervisor', 'retired original Supervisor', 'active or
     } })
   await desktop.start()
   cleanup.push(() => desktop.stop())
-  const closer = managed ? 'supervisor' : 'worker'
-  expect(await host.call(closer, args)).toMatchObject({ state: 'retained', reason: 'unknown' })
-  known = true
-  drafts[owners.at(-1)!] = 'original unsent draft'
-  expect(await host.call(closer, args)).toMatchObject({ state: 'retained', reason: 'draft' })
-  delete drafts[owners.at(-1)!]
-  pending = true
-  expect(await host.call(closer, args)).toMatchObject({ state: 'retained', reason: 'pending' })
-  pending = false
   if (managed) {
-    expect(await host.call('reviewer', args)).toMatchObject({ state: 'retained', reason: 'handoff' })
+    const before = await host.call('supervisor', [...args, '--inspect'])
+    expect(before).toMatchObject({ state: 'observed', stop: { phase: 'not-requested' },
+      observations: { handoff: 'collected', ticketState: resumed ? 'done' : 'review' } })
+    const unauthorized = await host.cli('reviewer', args)
+    expect(unauthorized.code).toBe(1)
+    expect(unauthorized.stderr).toContain('CONTROL_PERMISSION_DENIED')
+    const anotherWorker = args.map(value => value === 'worker' ? 'successor' : value)
+    expect((await host.cli('supervisor', anotherWorker)).code).toBe(1)
     if (resumed) {
       expect(await host.call('supervisor', closeout('run-worker', 'closeout-stale-run')))
-        .toMatchObject({ state: 'retained', reason: 'unknown' })
-      const original = (await host.original.store.readMetadata('worker'))!
-      const reopened = { ...original, reopenedFrom: { run: metadata.run, source: 'user' as const, observedAt: now } }
-      await host.original.store.compareAndSwapMetadata(original, reopened)
-      expect(await host.call('supervisor', args)).toMatchObject({ state: 'retained', reason: 'handoff' })
-      await host.original.store.compareAndSwapMetadata(reopened, original)
+        .toMatchObject({ state: 'observed', stop: { phase: 'unconfirmed' }, error: { code: 'STALE_AGENT_SESSION' } })
     }
-    const another = await host.call(null, ['goal', 'create', '--title', 'Another active duty', '--status', 'in_progress',
+    expect(host.native.stop).not.toHaveBeenCalled()
+    await host.call(null, ['goal', 'create', '--title', 'Another active duty', '--status', 'in_progress',
       '--assignees', '["worker"]', '--risk', 'low', '--confirm', 'user'])
-    expect(await host.call('supervisor', args)).toMatchObject({ state: 'retained', reason: 'other-work' })
-    await host.call(null, ['goal', 'update', '--goal', another.goal.id, '--status', 'cancelled'])
+    known = resumed
+    drafts.worker = 'original unsent draft'
+    const stopped = await host.call('supervisor', args)
+    expect(stopped).toMatchObject({ state: 'stopped', receipt: { operationId: 'closeout-stop', agentSessionId: 'worker', expectedRun: { runId: workerRun } },
+      observations: { sourceMessageId, ticketId: nodeId, reportReplyMessageId: replyMessageId, collectionOperationId: 'closeout-collection',
+        handoff: 'collected', ticketState: resumed ? 'done' : 'review', otherGoalWork: true, desktopInput: resumed ? 'draft' : 'unknown' } })
+    expect(drafts.worker).toBe('original unsent draft')
+    expect(desktopAdmitted.size).toBe(0)
+    expect(await host.call('supervisor', [...args, '--inspect'])).toMatchObject({ state: 'observed', stop: { phase: 'retired', operationIdMatched: true } })
+    expect(host.native.stop).toHaveBeenCalledTimes(1)
+    expect(host.native.stop).toHaveBeenCalledWith(expect.objectContaining({ runId: workerRun }))
+    const historical = await host.call('supervisor', ['goal', 'plan', '--goal', goalId])
+    expect(historical.delegations[0]).toMatchObject({ report: signed, collection: { operationId: 'closeout-collection' } })
+    await host.stop(); await host.start()
+    expect(await host.call('supervisor', [...args, '--inspect'])).toMatchObject({ state: 'observed', stop: { phase: 'retired', operationIdMatched: true } })
+    expect(await host.original.store.readMetadata('worker')).toBeNull()
+    return
   }
+  expect(await host.call('worker', args)).toMatchObject({ state: 'retained', reason: 'unknown' })
+  known = true
+  drafts[owners.at(-1)!] = 'original unsent draft'
+  expect(await host.call('worker', args)).toMatchObject({ state: 'retained', reason: 'draft' })
+  delete drafts[owners.at(-1)!]
+  pending = true
+  expect(await host.call('worker', args)).toMatchObject({ state: 'retained', reason: 'pending' })
+  pending = false
   if (scenario === 'reassignment after collection') {
     const revised = await host.call('supervisor', ['goal', 'plan', 'revise', '--input', '-'], { goalId, revision: {
       operationId: 'closeout-reassign', expectedRevision: collected.plan.revision, alignmentRevision,
@@ -489,7 +525,7 @@ it.each(['active original Supervisor', 'retired original Supervisor', 'active or
   const incorrect = await host.cli('worker', closeout('different-run', 'closeout-wrong-run'))
   expect(incorrect.code).toBe(1)
   expect(host.native.stop).not.toHaveBeenCalled()
-  const stopped = await host.call(closer, args)
+  const stopped = await host.call('worker', args)
   expect(stopped).toMatchObject({ state: 'stopped', receipt: { operationId: 'closeout-stop', agentSessionId: 'worker', expectedRun: { runId: workerRun } } })
   if (scenario === 'Desktop draft after admission') {
     expect(drafts[owners.at(-1)!]).toBe('new mounted draft after Desktop admission')
@@ -502,6 +538,6 @@ it.each(['active original Supervisor', 'retired original Supervisor', 'active or
   await host.stop(); await host.start()
   const historical = await host.call('supervisor', ['goal', 'plan', '--goal', goalId])
   expect(historical.delegations[0]).toMatchObject({ report: signed, collection: { operationId: 'closeout-collection' } })
-  expect(historical.planState.nodes[0].state).toBe(managed ? 'done' : 'review')
+  expect(historical.planState.nodes[0].state).toBe('review')
   expect(historical.grounding.acceptedAt).toBeNull()
 })
