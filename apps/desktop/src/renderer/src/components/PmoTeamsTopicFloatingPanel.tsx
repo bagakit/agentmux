@@ -577,7 +577,10 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
   useEffect(() => {
     if (!visible) return
     const dismiss = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented || isImeOwnedKeyboardEvent(event) || foreignFloatOwnsKeyboardEvent(event, panelRef.current)) return
+      if (event.key !== 'Escape' || event.defaultPrevented || isImeOwnedKeyboardEvent(event)) return
+      // Escape is terminal input when xterm has focus. Leave it on the native path.
+      if (event.target instanceof Element && event.target.closest('.xterm')) return
+      if (foreignFloatOwnsKeyboardEvent(event, panelRef.current)) return
       event.preventDefault(); event.stopPropagation(); spaceActionRef.current?.abort()
       requestPmoTeamsTopicFloatingClose({ restoreFocus: floatingRef.current.open })
     }
