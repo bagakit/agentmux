@@ -100,6 +100,8 @@ original assignment as `body` with an `operationId`. Keep the returned
 `threadId` and message reference. Both Motes use the same private thread.
 Use `list` with your Mote and `inspect` with its exact threadId to read messages
 and observed delivery. Add `messageId` to inspect one exact assignment or reply.
+Use `replyToMessageId` with `inspect` in either conversation to page through
+replies to that exact original message.
 A private Thread replies with the command attached to its addressed input.
 The original reply stays in the private thread. The returned `mainNotification`
 describes the message to the coordinating Main's ordinary Inbox. If that step is
@@ -116,6 +118,9 @@ The original Host publishes once per due occurrence. A Group arrangement
 addresses only its selected active membership generations. Use `schedule
 inspect` to find `lastMotePublication`, then read its original message for
 delivery and progress. Pause or cancel the same arrangement through `schedule`.
+Publication and recipient acceptance have separate receipts. The Host continues
+saved work on the original recipient when preparation was temporarily unavailable.
+Keep the operation and read its delivery again when the outcome is unconfirmed.
 
 To include private images, use `file upload` for your own Session and Run.
 Pass each confirmed upload identity in `images` with `direct send` or
