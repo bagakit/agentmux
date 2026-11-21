@@ -2,7 +2,7 @@
 .conversation-landmark__count { font-variant-numeric: tabular-nums; }
 .conversation-landmark__trigger:hover { background: var(--surface-2); color: var(--text); }
 .conversation-landmark__trigger:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
-.conversation-landmark { position: fixed; z-index: var(--layer-popover); width: 310px; max-width: calc(100vw - 20px); max-height: min(480px, calc(100vh - 20px)); overflow: auto; padding: var(--sp-3); border: 0; border-radius: var(--radius); background: var(--surface-2); color: var(--text); box-shadow: var(--elev-2), var(--hl); font-size: var(--fs-meta); }
+.conversation-landmark { position: fixed; z-index: var(--layer-popover); box-sizing: border-box; width: 310px; max-width: calc(100vw - 20px); max-height: min(480px, var(--conversation-landmark-available-height, calc(100vh - 20px))); overflow: auto; padding: var(--sp-3); border: 0; border-radius: var(--radius); background: var(--surface-2); color: var(--text); box-shadow: var(--elev-2), var(--hl); font-size: var(--fs-meta); }
 .conversation-landmark > header { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); margin-bottom: var(--sp-2); }
 .conversation-landmark > header h2 { margin: 0; font-size: var(--fs-body); font-weight: 600; }
 .conversation-landmark p { margin: var(--sp-2) 0; line-height: 1.5; }

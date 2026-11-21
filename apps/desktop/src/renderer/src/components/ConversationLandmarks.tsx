@@ -2,7 +2,7 @@ import { observeLandmarkWrites, publishLandmarkWrite } from '../lib/conversation
 import { ConversationRecallCard } from './ConversationRecallCard'
 import { recallBacklinks, type RecallBacklinks } from '../lib/recall-card-navigation'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
-import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
+import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { parseConversationLandmarkWrite, type ConversationItemRef, ConversationRef, ConversationLandmark, ConversationLandmarkChange, ConversationLandmarkPage, ConversationLandmarkWrite } from '@agentmux/core/conversation'
@@ -126,10 +126,17 @@ function LandmarkPopover({ title, trigger, active, onOpen, onClose, children }: 
   useLayoutEffect(() => {
     if (!open || !active || !anchor || !content) return
     let current = true
-    const update = async () => { const result = await computePosition(anchor, content, { strategy: 'fixed', placement: 'bottom-end', middleware: [offset(6), flip(), shift({ padding: 10 })] }); if (current) {
-      Object.assign(content.style, { left: result.x + 'px', top: result.y + 'px', visibility: 'visible' })
-      if (focusPending.current) { focusPending.current = false; (content.querySelector<HTMLElement>('input:not([disabled])') ?? content.querySelector<HTMLElement>('button:not([disabled])'))?.focus({ preventScroll: true }) }
-    } }
+    const update = async () => {
+      const padding = 10
+      const result = await computePosition(anchor, content, { strategy: 'fixed', placement: 'bottom-end',
+        middleware: [offset(6), flip({ padding }), shift({ padding }), size({ padding, apply({ availableHeight }) {
+          if (current) content.style.setProperty('--conversation-landmark-available-height', `${Math.max(0, availableHeight)}px`)
+        } })] })
+      if (current) {
+        Object.assign(content.style, { left: result.x + 'px', top: result.y + 'px', visibility: 'visible' })
+        if (focusPending.current) { focusPending.current = false; (content.querySelector<HTMLElement>('input:not([disabled])') ?? content.querySelector<HTMLElement>('button:not([disabled])'))?.focus({ preventScroll: true }) }
+      }
+    }
     const release = autoUpdate(anchor, content, () => { void update() })
     return () => { current = false; release() }
   }, [open, active, anchor, content])
