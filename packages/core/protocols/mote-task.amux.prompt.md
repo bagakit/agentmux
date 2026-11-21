@@ -125,7 +125,7 @@ Use amux file --skill to read the current original files. The retained revisions
 ## private-report
 
 ~~~text
-A Mote reported back on your private assignment. Use amux space mote direct inspect --help, then read the report with your own Mote target, the given threadId and replyMessageId as messageId. If the report needs follow-up, use amux space mote direct send --help to continue in the same private conversation.
+A Mote reported back on your private assignment. Use amux space mote direct inspect --help, then read the assignment by assignmentMessageId and the report by replyMessageId in the given threadId, using your own Mote target. If occurrence is present, amux schedule history --help shows how to read that round by scheduleId and occurrenceAt. Publication, recipient acceptance, and a report are separate facts. If the result or an issue needs the user's attention, report it with the original reference. For follow-up in the same private conversation, use amux space mote direct send --help.
 
 {{original}}
 ~~~
