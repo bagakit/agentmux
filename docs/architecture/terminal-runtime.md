@@ -169,6 +169,8 @@ ctxmux 是完整、独立的 Runtime 产品。它的 daemon、CLI、协议和 SD
 | Provider 终端能力握手 | `AgentMuxClient` | `ensureTerminalHandshake` |
 | 主题、palette 与 OSC 10/11 颜色回复 | Desktop（Renderer 与 Main 各负责一种场景） | 见 [Terminal 外观](terminal-appearance.md#外观所有权) |
 
+实时终端 IPC 传递原 Run 的有序字节及字节范围。Core 的解码文本由 Main 及语义消费者使用。普通 Desktop 与成员工作面共用 [Desktop 事件投影](../../apps/desktop/src/main/session-continuity-display.ts)。Renderer 把字节交给 xterm，解析状态随原终端跨块延续。
+
 Session Store、Timeline 与快照观察的持久事实见[系统职责地图《持久事实与观察投影》](system-ownership.md#持久事实与观察投影)。
 
 Provider-specific 的 executable probe、session id、native resume argv、semantic replay、working／waiting／done、Permission、Hook 和 A2A 都不进入 ctxmux。Provider-native Resume 由 AgentMux 物化通用 `RunSpec` 后交给 ctxmux；Level B 的 provenance 不足时失败关闭，不能自动改成 Level A restart。反过来，daemon activation、Run wait、权威生命周期时间与 revision 等不理解 Agent 也成立的能力，由 ctxmux 公共 SDK 提供，AgentMux 不长期维护第二份实现。
