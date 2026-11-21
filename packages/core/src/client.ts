@@ -7600,11 +7600,11 @@ export class AgentMuxClient {
                 input.inputContext === undefined && authority === undefined ? { recoveryAuthorization: 'local-human' as const } : {}),
             sourceChannel: normalizeMessageChannel(input.sourceChannel ?? 'api'),
             ...(input.sourceDevice === undefined ? {} : { sourceDevice: normalizeOperationDevice(input.sourceDevice) }) } }
-        const original = await this.messageQueue.savePromptInput(intent, claimsAbsent)
+        const original = await this.messageQueue.savePromptInput(intent, claimsAbsent, context?.requestSignal)
         if (original) {
           const { authorHuman: _requestedAuthor, ...content } = input
           return await this.acceptInputWaiting(original.control.ref, { ...content, ...(authorHuman === undefined ? {} : { authorHuman }) },
-            'prompt', undefined, authority, context?.requestSignal)
+            'prompt', undefined, authority)
         }
       }
     }
@@ -8109,7 +8109,7 @@ export class AgentMuxClient {
       prompt.authorAgentSessionId, recipientContinuation ? { ...authority, assertCurrent: async () => {
         await recipientContinuation()
         await authority?.assertCurrent()
-      } } : authority, context?.requestSignal, Boolean(recipientContinuation || authority?.externalAuthor || prompt.localHumanMessage), continueGate)
+      } } : authority, Boolean(recipientContinuation || authority?.externalAuthor || prompt.localHumanMessage), continueGate)
   }
 
   private async inputWaitingPrompt(intent: AgentInputJournalIntent, caller?: { agentSessionId: string; capability: string }, context?: AgentInputCallContext): Promise<{
@@ -8332,70 +8332,57 @@ export class AgentMuxClient {
 
   private async acceptInputWaiting(ref: AgentInputWaitRef, input: AgentMuxAgentPromptInput, producer: 'prompt' | 'message',
     authorAgentSessionId?: string, authority?: import('./prompt-submission.js').AgentPromptInputAuthority,
-    requestSignal?: AbortSignal, messageContinuation = false, continueGate = false): Promise<AgentInputSubmissionReceipt> {
-    let releaseRequest = () => {}
-    try {
-      const saved = await this.messageQueue.inspectInput({ key: ref.key })
-      if (!saved) throw new AgentMuxError('Original input persistence is unconfirmed.', 'AGENT_INPUT_NOT_FOUND')
-      if (isDeepStrictEqual(saved.control.ref, ref) && (saved.control.state === 'enabled' || continueGate && saved.control.state === 'dispatch-authorized' && saved.control.handoff) && !await this.inspectAgentPromptSubmission(agentInputDeliveryKey(saved.control)) && !this.inputWaitingDisposed) {
-        const id = agentInputJournalKey(ref.key)
-        const previous = this.inputWaitingContexts.get(id)
-        if (previous?.storageRetry && isDeepStrictEqual(previous.ref, ref)) {
-          clearTimeout(previous.storageRetry)
-          previous.storageRetry = undefined
-          previous.requested = true
-        }
-        if (!previous) {
-          // Only this original durable input can receive the live restrictions.
-          // Completed RPC readers and persisted attribution are not grant owners.
-          const accepted = authority?.retainForAcceptedInput ? await authority.retainForAcceptedInput(ref.key) : undefined
-          const current = accepted ? await this.messageQueue.inspectInput({ key: ref.key }).catch(error => { accepted.release(); throw error }) : saved
-          if (!current || !isDeepStrictEqual(current.control.ref, ref) ||
-              current.control.state !== 'enabled' && !(continueGate && current.control.state === 'dispatch-authorized' && current.control.handoff) ||
-              this.inputWaitingDisposed || this.inputWaitingContexts.has(id)) accepted?.release()
-          else {
-            const ownedAuthority = authority && { ...authority, ...(accepted ? { assertCurrent: accepted.assertCurrent } : {}) }
-            if (ownedAuthority) delete ownedAuthority.retainForAcceptedInput
-            const controller = new AbortController(), context: InputWaitingContext = { ref, input, producer, messageContinuation, ...(continueGate ? { continueGate: true as const } : {}),
-              controller, runtimeWake: true, sessionWake: this.isRetainedHumanInput(saved.intent) || messageContinuation, requested: true, active: false, sequence: saved.sequence,
-              backgroundOrder: saved.intent.source.kind !== 'prompt' || saved.intent.source.authorHuman !== false ? 'protected' : saved.intent.source.backgroundPriority ? 'priority' : 'ordinary',
-              ...(authorAgentSessionId ? { authorAgentSessionId } : {}), ...(ownedAuthority ? { authority: ownedAuthority } : {}) }
-            this.inputWaitingContexts.set(id, context)
-            const ids = this.inputWaitingByRecipient.get(ref.key.agentSessionId) ?? new Set<string>()
-            ids.add(id); this.inputWaitingByRecipient.set(ref.key.agentSessionId, ids)
-            controller.signal.addEventListener('abort', () => {
-              const interruptedRecheck = context.storageRetry !== undefined
-              clearTimeout(context.storageRetry)
-              context.storageRetry = undefined
-              accepted?.release()
-              if (this.inputWaitingContexts.get(id) === context) this.inputWaitingContexts.delete(id)
-              const ids = this.inputWaitingByRecipient.get(ref.key.agentSessionId)
-              ids?.delete(id)
-              if (!ids?.size) this.inputWaitingByRecipient.delete(ref.key.agentSessionId)
-              else if (interruptedRecheck && !this.inputWaitingDisposed) void this.scheduleInputWaiting(ref.key.agentSessionId)
-            }, { once: true })
-            if (input.signal?.aborted) controller.abort(input.signal.reason)
-            else input.signal?.addEventListener('abort', () => controller.abort(input.signal!.reason), { once: true, signal: controller.signal })
-            const cancelRequest = () => controller.abort(requestSignal!.reason)
-            if (requestSignal?.aborted) cancelRequest()
-            else if (requestSignal) {
-              requestSignal.addEventListener('abort', cancelRequest, { once: true })
-              releaseRequest = () => requestSignal.removeEventListener('abort', cancelRequest)
-            }
-          }
-        }
-        // The durable firstsave ACK does not wait for Native qualification or a
-        // prior input's network reply. The original Core owner continues observing.
-        void this.scheduleInputWaiting(ref.key.agentSessionId)
+    messageContinuation = false, continueGate = false): Promise<AgentInputSubmissionReceipt> {
+    const saved = await this.messageQueue.inspectInput({ key: ref.key })
+    if (!saved) throw new AgentMuxError('Original input persistence is unconfirmed.', 'AGENT_INPUT_NOT_FOUND')
+    if (isDeepStrictEqual(saved.control.ref, ref) && (saved.control.state === 'enabled' || continueGate && saved.control.state === 'dispatch-authorized' && saved.control.handoff) && !await this.inspectAgentPromptSubmission(agentInputDeliveryKey(saved.control)) && !this.inputWaitingDisposed) {
+      const id = agentInputJournalKey(ref.key)
+      const previous = this.inputWaitingContexts.get(id)
+      if (previous?.storageRetry && isDeepStrictEqual(previous.ref, ref)) {
+        clearTimeout(previous.storageRetry)
+        previous.storageRetry = undefined
+        previous.requested = true
       }
-      const receipt = (await this.inspectAgentInput({ key: ref.key }))!
-      await this.publishInputReceipt(receipt)
-      return receipt
-    } finally {
-      // The original Core owns any accepted waiting context after this receipt.
-      // Releasing a normal unary reply reader cannot cancel that owner.
-      releaseRequest()
+      if (!previous) {
+        // Only this original durable input can receive the live restrictions.
+        // Completed RPC readers and persisted attribution are not grant owners.
+        const accepted = authority?.retainForAcceptedInput ? await authority.retainForAcceptedInput(ref.key) : undefined
+        const current = accepted ? await this.messageQueue.inspectInput({ key: ref.key }).catch(error => { accepted.release(); throw error }) : saved
+        if (!current || !isDeepStrictEqual(current.control.ref, ref) ||
+            current.control.state !== 'enabled' && !(continueGate && current.control.state === 'dispatch-authorized' && current.control.handoff) ||
+            this.inputWaitingDisposed || this.inputWaitingContexts.has(id)) accepted?.release()
+        else {
+          const ownedAuthority = authority && { ...authority, ...(accepted ? { assertCurrent: accepted.assertCurrent } : {}) }
+          if (ownedAuthority) delete ownedAuthority.retainForAcceptedInput
+          const controller = new AbortController(), context: InputWaitingContext = { ref, input, producer, messageContinuation, ...(continueGate ? { continueGate: true as const } : {}),
+            controller, runtimeWake: true, sessionWake: this.isRetainedHumanInput(saved.intent) || messageContinuation, requested: true, active: false, sequence: saved.sequence,
+            backgroundOrder: saved.intent.source.kind !== 'prompt' || saved.intent.source.authorHuman !== false ? 'protected' : saved.intent.source.backgroundPriority ? 'priority' : 'ordinary',
+            ...(authorAgentSessionId ? { authorAgentSessionId } : {}), ...(ownedAuthority ? { authority: ownedAuthority } : {}) }
+          this.inputWaitingContexts.set(id, context)
+          const ids = this.inputWaitingByRecipient.get(ref.key.agentSessionId) ?? new Set<string>()
+          ids.add(id); this.inputWaitingByRecipient.set(ref.key.agentSessionId, ids)
+          controller.signal.addEventListener('abort', () => {
+            const interruptedRecheck = context.storageRetry !== undefined
+            clearTimeout(context.storageRetry)
+            context.storageRetry = undefined
+            accepted?.release()
+            if (this.inputWaitingContexts.get(id) === context) this.inputWaitingContexts.delete(id)
+            const ids = this.inputWaitingByRecipient.get(ref.key.agentSessionId)
+            ids?.delete(id)
+            if (!ids?.size) this.inputWaitingByRecipient.delete(ref.key.agentSessionId)
+            else if (interruptedRecheck && !this.inputWaitingDisposed) void this.scheduleInputWaiting(ref.key.agentSessionId)
+          }, { once: true })
+          if (input.signal?.aborted) controller.abort(input.signal.reason)
+          else input.signal?.addEventListener('abort', () => controller.abort(input.signal!.reason), { once: true, signal: controller.signal })
+        }
+      }
+      // The durable journal owns this wait before the reply is read.
+      // Closing the RPC reader does not revoke the original input authority.
+      void this.scheduleInputWaiting(ref.key.agentSessionId)
     }
+    const receipt = (await this.inspectAgentInput({ key: ref.key }))!
+    await this.publishInputReceipt(receipt)
+    return receipt
   }
 
   private scheduleInputWaiting(recipient: string): Promise<void> {
@@ -9254,7 +9241,7 @@ export class AgentMuxClient {
       if (admissionIntent.kind === 'exact-condition') throw new AgentMuxError('The caller condition cannot replace the original controlled manual input.', 'AGENT_PROMPT_OPERATION_CONFLICT')
       const original = await this.inputWaitingPrompt(queued.input.intent, input.caller, context)
       return await this.acceptInputWaiting(waitingRef(queued.input), original.input, 'message', original.authorAgentSessionId,
-        this.inputCallAuthority(original.authority, context), context?.requestSignal, Boolean(original.authority?.externalAuthor || original.localHumanMessage))
+        this.inputCallAuthority(original.authority, context), Boolean(original.authority?.externalAuthor || original.localHumanMessage))
     }
     if (admissionIntent.kind !== 'exact-condition') throw new AgentMuxError('The original controlled input could not be confirmed. Its message and historical claims are retained; no legacy direct dispatch was started.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
     if (['delivered', 'accepted', 'replied'].includes(queued.delivery.state)) return

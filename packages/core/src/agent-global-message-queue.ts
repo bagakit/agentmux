@@ -943,7 +943,7 @@ export class DurableAgentMuxMessageQueue {
   }
 
   /** The original journal preserves SDK content and its platform note separately. */
-  async savePromptInput(intent: AgentInputJournalIntent, originalClaimAbsent?: () => Promise<boolean>): Promise<AgentInputJournalEntry | null> {
+  async savePromptInput(intent: AgentInputJournalIntent, originalClaimAbsent?: () => Promise<boolean>, requestSignal?: AbortSignal): Promise<AgentInputJournalEntry | null> {
     return this.withLock(async () => {
       const key = validateAgentPromptInputKey(intent.key), existing = this.input(key)
       if (!isDeepStrictEqual(this.inputOwnerKey(key), key)) throw new AgentMuxError(
@@ -958,6 +958,7 @@ export class DurableAgentMuxMessageQueue {
       if (intent.source.kind !== 'prompt') throw new AgentMuxError('Prompt journal requires its original prompt producer.', 'INVALID_AGENT_INPUT_CONTROL')
       if (originalClaimAbsent && !await originalClaimAbsent()) return null
       await this.assertNewInputRun?.(key.agentSessionId, key.expectedRun.runId)
+      requestSignal?.throwIfAborted()
       await this.appendRecord({ kind: 'input-intent', sequence: this.nextSequence, intent: structuredClone(intent), at: Date.now() })
       return this.input(key)!
     }, true)
