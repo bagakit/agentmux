@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { observeAgent, type AgentMuxClientEvent, type AgentMuxRun, type ContinuousProgressObservation } from '@agentmux/core'
 import { composeAgentPrompt } from '@agentmux/core/agent-outbound-message'
-import { openDemandStore } from '@agentmux/demand'
+import { goalTickets } from '../../../packages/demand/test/helpers/goal-tickets'
 import type { DemandDelegationAttention, DemandDelegationIntent } from '@agentmux/demand/delegations'
 import { GoalDelegationAttentionOwner } from '@agentmux/host/goal-delegation-attention'
 import type { GoalDelegationOwner } from '@agentmux/host/goal-delegation-owner'
@@ -27,13 +27,17 @@ async function record(scenario: string, proof: unknown) {
   await fs.writeFile(join(directory, `${scenario}.json`), JSON.stringify({ schema: 'agentmux.goal-delegation-attention-owner.v1', scenario,
     proofBoundary: 'Actual event owner and Demand persistence; Runtime, native completion, input cursor and Core observation are explicit isolated ports. Does not prove installed Native input or GUI consumption.', proof }, null, 2) + '\n')
 }
-async function fixture() {
+async function fixture(ticket = false) {
   const root = await fs.mkdtemp(join(tmpdir(), 'goal-attention-owner-'))
   cleanup.push(() => fs.rm(root, { recursive: true, force: true }))
-  const demands = openDemandStore({ root: join(root, 'goals') })
+  const tickets = goalTickets(join(root, 'goals')), { store: demands } = tickets
   await seedStoredDemand(demands, { id: 'goal', title: 'Original Goal', status: 'in_progress', assigneeSessionIds: ['owner', 'worker', 'next-owner'], supervisorSessionId: 'owner' })
   await demands.proposeAlignment('goal', { summary: 'Original scope', criteria: [{ id: 'AC', text: 'Original result' }], openQuestions: [] })
-  await demands.prepareDelegation('goal', task, 'owner'); await demands.linkDelegation('goal', task.operationId, task.sourceMessageId, 'owner')
+  if (ticket) await tickets.revise('goal', { operationId: 'plan', expectedRevision: 0, alignmentRevision: 1,
+    nodes: [{ id: 'work', title: 'Original Ticket', outcome: 'Original result', criterionIds: ['AC'], dependsOn: [], check: 'Inspect result', executor: null }] },
+    { kind: 'agent', id: 'owner' })
+  await demands.prepareDelegation('goal', ticket ? { ...task, planNodeId: tickets.id('work') } : task, 'owner')
+  await demands.linkDelegation('goal', task.operationId, task.sourceMessageId, 'owner')
   const pending = new Set<Promise<unknown>>()
   const track = <T,>(promise: Promise<T>): Promise<T> => {
     pending.add(promise); promise.then(() => pending.delete(promise), () => pending.delete(promise)); return promise
@@ -124,10 +128,27 @@ async function fixture() {
   const proof = async () => ({ goal: await demands.get('goal'), actualInputs, notes: [...notes.values()], runtimeCalls: { read: readOwner.observeDelegation.mock.calls.length,
     agentCreation: runtime.agentCreation.mock.calls.length, save: runtime.saveGoalAttention.mock.calls.length, observe: runtime.observeContinuousProgress.mock.calls.length,
     submit: runtime.submitPrompt.mock.calls.length, inspect: runtime.inspectGoalAttention.mock.calls.length, stop: runtime.stop.mock.calls.length } })
-  return { root, demands, owner, createOwner, runtime, readOwner, state, actualInputs, notes, receipts, changed, emit, nativeCompletion, idle, proof, holdNative, release, inputOccupation, admissionSignal: () => admissionSignal }
+  return { root, demands, tickets, owner, createOwner, runtime, readOwner, state, actualInputs, notes, receipts, changed, emit, nativeCompletion, idle, proof, holdNative, release, inputOccupation, admissionSignal: () => admissionSignal }
 }
 
 describe('event-driven original Goal responsibility notice', () => {
+  it('retires a deferred report reminder after the exact Ticket passes, while keeping the original notice readable', async () => {
+    const f = await fixture(true)
+    f.state.mode = 'busy'
+    await f.owner.start(); await f.idle()
+    await f.tickets.submit('goal', task.operationId, { operationId: 'report', replyMessageId: 'reply', authorAgentSessionId: 'worker',
+      grounding: { alignmentRevision: 1, summary: 'Original report', checks: [{ criterionId: 'AC', outcome: 'met', evidence: ['checks/original.log'], note: '' }] } }, 'worker')
+    await vi.waitFor(async () => expect((await f.demands.inspectDelegation('goal', task.operationId))?.attention).toBeDefined())
+    const original = (await f.demands.inspectDelegation('goal', task.operationId))!.attention
+    await f.tickets.review('goal', { operationId: 'review', nodeId: 'work', delegationOperationId: task.operationId, verdict: 'pass',
+      note: '', check: { command: 'Inspect result', result: 'Passed', evidence: ['checks/original.log'] } }, { kind: 'agent', id: 'reviewer' })
+    f.state.mode = 'idle'; f.nativeCompletion()
+    await f.idle()
+    expect(f.runtime.submitPrompt, 'Reviewed Tickets must not send deferred collection reminders').not.toHaveBeenCalled()
+    expect((await f.demands.inspectDelegation('goal', task.operationId))?.attention).toEqual(original)
+    expect(f.runtime.stop).not.toHaveBeenCalled()
+  })
+
   it.each(['prepared-agent-creation', 'closed-agent-creation'] as const)('retains %s without preparing a Run-bound notice, then continues the same delegation', async kind => {
     const f = await fixture(), original = f.runtime.agentCreation.getMockImplementation()!
     f.state.receiptConfirmed = true; f.state.workerRun = 'exited'

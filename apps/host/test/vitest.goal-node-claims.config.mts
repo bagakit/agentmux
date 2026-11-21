@@ -11,6 +11,10 @@ const changes = {
   'trust-altered-ticket': { path: 'packages/demand/src/goal-ticket-crypto.ts', from: '!verify(null, original, key, signature)', to: 'false' },
   'omit-claim-completion': { path: 'packages/demand/src/demand-store.ts', from: 'predecessors: freezeGoalTicketDependencies(signer, id, plan, basis.predecessors)', to: 'predecessors: []' },
   'ignore-absent-completion': { path: 'packages/demand/src/goal-plan.ts', from: "review?.verdict === 'pass' && !review.completion", to: 'false' },
+  'ignore-ticket-responsibility': { path: 'apps/host/src/goal-responsibility-owner.ts',
+    from: 'if (ticketState !== undefined) fact.ticketState = ticketState', to: 'void ticketState' },
+  'remind-reviewed-attempt': { path: 'apps/host/src/goal-delegation-attention.ts',
+    from: "if (!isClosedGoalPlanAttempt(state) && state !== 'changes') result.set", to: 'if (true) result.set' },
   'ignore-older-grounding': { path: 'packages/demand/src/goal-grounding.ts',
     from: "staleCriteria.includes(criterionId) || unknown.includes('predecessors')",
     to: "delegation?.alignmentRevision !== alignment.revision || staleCriteria.includes(criterionId) || unknown.includes('predecessors')" },
@@ -44,5 +48,5 @@ export default defineConfig({ ...crossHost, plugins: [...(crossHost.plugins ?? [
     if (source.split(change.from).length !== 2) throw new Error('Claim mutation must match one exact original expression')
     process.stderr.write('Goal claim mutation loaded: ' + change.path + '\n')
     return source.replace(change.from, change.to)
-  } }], test: { ...crossHost.test, testTimeout: 120_000, include: ['apps/host/test/goal-claim-role.test.ts', 'apps/host/test/goal-node-claims.test.ts',
+  } }], test: { ...crossHost.test, testTimeout: 120_000, include: ['apps/desktop/test/goal-delegation-attention.test.ts', 'apps/host/test/goal-claim-role.test.ts', 'apps/host/test/goal-node-claims.test.ts',
       'apps/host/test/goal-active-cost.test.ts', 'apps/host/test/goal-ticket-journeys.test.ts', 'apps/host/test/goal-plan-revision-product.test.ts', 'packages/demand/test/goal-plan-revision.test.ts', 'packages/demand/test/goal-plan.test.ts', 'packages/demand/test/demand-delegation-hosts.test.ts'] } })

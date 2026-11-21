@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
+import { createHash, generateKeyPairSync } from 'node:crypto'
 import { chooseGoalSection, copyOriginalGoalLink, goalOutlineTrigger, openGoalMenu, pressGoalMenuKey } from './helpers/goal-reading-menu'
 import { formatGoalAddress } from '@agentmux/core/sharing'
 import { editGoalDraft } from '../src/renderer/src/lib/goal-edit-drafts'
@@ -8,6 +9,7 @@ import type { DemandAlignment } from '@agentmux/demand/goals'
 import type { DemandDelegation } from '@agentmux/demand/delegations'
 import type { GoalPlan, GoalPlanNodeInput } from '@agentmux/demand/goal-plan'
 import { goalPlanState, projectGoalPlan } from '@agentmux/demand/goal-plan'
+import { goalTicketSigner } from '@agentmux/demand/goal-ticket-crypto'
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface'
 import { GoalDetail } from '../src/renderer/src/components/GoalDetail'
 import { goalExecutionRows } from '../src/renderer/src/components/GoalExecutionTimeline'
@@ -23,6 +25,9 @@ import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
  * The view reads the Goal owner's derivation only.
  */
 const dom = composerDOM()
+const keys = generateKeyPairSync('ed25519'), publicKey = keys.publicKey.export({ type: 'spki', format: 'der' })
+const signer = goalTicketSigner({ runtimeId: 'preview-runtime', namespace: 'preview-goals' },
+  publicKey.toString('base64url'), createHash('sha256').update(publicKey).digest('hex'), keys.privateKey)
 const criteria = [{ id: 'api', text: 'API' }, { id: 'ui', text: 'UI' }]
 const alignment: DemandAlignment = { summary: 'Plan inside the Goal', criteria, openQuestions: [], revision: 1, confirmedAt: 10 }
 const node = (id: string, dependsOn: string[] = [], patch: Partial<GoalPlanNodeInput> = {}): GoalPlanNodeInput =>
@@ -35,8 +40,16 @@ const reported = (nodeId: string) => attempt(nodeId, { report: { operationId: `r
   grounding: { alignmentRevision: 1, summary: `Delivered ${nodeId}`, checks: [{ criterionId: nodeId === 'ui' ? 'ui' : 'api', outcome: 'met', evidence: ['log:1'], note: '' }] } } })
 const pass = (nodeId: string) => ({ operationId: `rv-${nodeId}`, nodeId, delegationOperationId: `d-${nodeId}`, verdict: 'pass' as const,
   check: { command: `pnpm test ${nodeId}`, result: '12 passed', evidence: ['ci:1'] }, note: '', reviewer: { kind: 'agent' as const, id: 'reviewer' }, reviewedAt: 4 })
-const plan = (nodes: GoalPlanNodeInput[], reviews: GoalPlan['reviews'] = []): GoalPlan =>
-  ({ revision: 2, alignmentRevision: 1, nodes, reviews, history: [1, 2].map(revision => ({ operationId: `p${revision}`, revision, author: { kind: 'agent' as const, id: 'mote' }, revisedAt: revision })) })
+const plan = (nodes: GoalPlanNodeInput[], reviews: GoalPlan['reviews'] = []): GoalPlan => ({
+  revision: 2, alignmentRevision: 1, nodes,
+  reviews: reviews.map(review => review.verdict !== 'pass' ? review : { ...review, completion: signer.issue({
+    kind: 'completed', scope: { ...signer.owner, goalId: 'goal' }, operationId: review.operationId, actor: review.reviewer,
+    ticketId: createHash('sha256').update(review.nodeId).digest('base64url'), attemptId: review.delegationOperationId,
+    executionHash: createHash('sha256').update(review.delegationOperationId).digest('base64url'),
+    deliveryHash: createHash('sha256').update(review.delegationOperationId).digest('hex'), check: review.check, note: review.note
+  }) }),
+  history: [1, 2].map(revision => ({ operationId: `p${revision}`, revision, author: { kind: 'agent' as const, id: 'mote' }, revisedAt: revision }))
+})
 /** A record as its Goal owner returns it: every plan carries the owner's derivation. */
 const owned = (record: DemandRecord): DemandRecord => record.plan
   ? { ...record, planState: goalPlanState(projectGoalPlan(record.plan, record.delegations ?? [], record.alignment?.criteria ?? [])) } : record
@@ -56,7 +69,7 @@ describe('Goal plan graph', () => {
     const detail = dom.container.querySelector('.goals-detail')!
     const main = detail.querySelector('.goals-detail__main')!
     expect(main.firstElementChild?.contains(graph())).toBe(true)
-    expect(detail.querySelector('[data-goal-meta-plan]')?.textContent).toBe('Plan 1 of 4 done')
+    expect(detail.querySelector('[data-goal-meta-plan]')?.textContent).toBe('1 of 4 Tickets passed')
     expect(detail.querySelector('.goals-detail__side .goal-collaboration')).not.toBeNull()
     const side = detail.querySelector('.goals-detail__side')!
     expect(side.firstElementChild).toBe(side.querySelector('.goal-supervisor-rail'))
@@ -373,7 +386,7 @@ describe('Goal plan graph', () => {
     const columns = [...graph()!.querySelectorAll<HTMLElement>('[data-goal-plan-column]')]
       .map(column => [...column.querySelectorAll<HTMLElement>('[data-goal-plan-node]')].map(item => `${item.dataset.goalPlanNode}:${item.dataset.goalPlanState}`))
     expect(columns).toEqual([['api:review', 'docs:ready'], ['ui:waiting'], ['release:waiting']])
-    expect(dom.container.querySelector('[data-goal-meta-plan]')?.textContent).toBe('Plan 0 of 4 done')
+    expect(dom.container.querySelector('[data-goal-meta-plan]')?.textContent).toBe('0 of 4 Tickets passed')
     expect(graph()!.querySelector('[data-goal-plan-node="ui"] .goal-plan-node__state')!.textContent).toBe('Waiting')
     expect(graph()!.querySelector('[data-goal-plan-node="ui"] .goal-plan-node__depends')!.textContent).toBe('Depends on · Node api')
     expect(graph()!.querySelector('[aria-label="Execution graph"]')?.getAttribute('tabindex')).toBe('0')
@@ -401,7 +414,7 @@ describe('Goal plan graph', () => {
     const highlighted = () => [...graph()!.querySelectorAll<HTMLElement>('.goal-plan-node--next')].map(item => item.dataset.goalPlanNode)
     // docs and ui are both ready; docs comes first in plan order.
     expect(highlighted()).toEqual(['docs'])
-    expect(dom.container.querySelector('[data-goal-meta-plan]')?.textContent).toBe('Plan 1 of 4 done')
+    expect(dom.container.querySelector('[data-goal-meta-plan]')?.textContent).toBe('1 of 4 Tickets passed')
     // ui is reworked after review; docs is still ready and earlier in order, yet the rework wins.
     const changes = { ...pass('ui'), verdict: 'changes' as const, note: 'The graph misses cancelled nodes' }
     await act(async () => useAppStore.setState(state => ({ demands: { goal: owned({ ...state.demands.goal!, delegations: [reported('api'), reported('ui')], plan: plan(nodes, [pass('api'), changes]) }) } })))
@@ -460,7 +473,7 @@ describe('Goal plan graph', () => {
     seed(goal({ plan: plan([node('api'), node('docs'), node('gone', [], { cancelled: true })]), delegations: [prepared as DemandDelegation] }))
     await dom.render(<GlobalBoardSurface />)
     expect(graph()!.querySelector<HTMLElement>('[data-goal-plan-node="docs"]')!.textContent).toContain('Delivery unconfirmed')
-    expect(dom.container.querySelector('[data-goal-meta-plan]')?.textContent).toBe('Plan 0 of 2 done')
+    expect(dom.container.querySelector('[data-goal-meta-plan]')?.textContent).toBe('0 of 2 Tickets passed')
     expect(graph()!.querySelector<HTMLElement>('[data-goal-plan-node="gone"]')!.dataset.goalPlanState).toBe('cancelled')
   })
 
@@ -490,7 +503,7 @@ describe('Goal plan graph', () => {
     await dom.render(<GlobalBoardSurface />)
     expect(graph()!.querySelector<HTMLElement>('[data-goal-plan-node="api"]')!.dataset.goalPlanState).toBe('done')
     expect(graph()!.querySelector('[data-goal-plan-node="api"] .goal-plan-node__state')!.textContent).toBe('Done')
-    expect(dom.container.querySelector('[data-goal-meta-plan]')?.textContent).toBe('Plan 1 of 4 done')
+    expect(dom.container.querySelector('[data-goal-meta-plan]')?.textContent).toBe('1 of 4 Tickets passed')
   })
 
   it('reads every node state as unavailable when the owner returned no derivation, and never guesses one', async () => {
@@ -779,7 +792,7 @@ describe('plan graph navigation and list progress', () => {
     await dom.render(<GlobalBoardSurface />)
     const ring = dom.container.querySelector<HTMLElement>('[data-demand-id="goal"] [data-goal-plan-ring]')!
     expect(ring.dataset.goalPlanRing).toBe('1/4')
-    expect(ring.getAttribute('aria-label')).toBe('Plan 1 of 4 done')
+    expect(ring.getAttribute('aria-label')).toBe('1 of 4 Tickets passed')
   })
 
   it('draws a dependency as a smooth left-to-right curve between its anchors', () => {

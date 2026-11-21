@@ -176,6 +176,31 @@ export function goalPlanPreview(seed: (mode: string) => void, render: () => void
         render()
       })
     },
+    ticketOutcome(outcome: 'unchecked' | 'accepted' | 'cancelled') {
+      this.seed(false, true, false, 'confirmed')
+      const accepted = outcome === 'accepted'
+      const store = useAppStore.getState(), goal = store.demands[store.selectedDemandId!]!
+      const node = goal.plan!.nodes[0]!, attempt = goal.delegations!.find(item => item.planNodeId === node.id)!
+      const plan = { ...goal.plan!, nodes: [node] }
+      const planState = { ...goal.planState!, done: 1, total: 1, next: [],
+        nodes: [{ ...goal.planState!.nodes[0]!, state: 'done' as const }] }
+      const grounding = { submissionId: 'preview-final-result', alignmentRevision: goal.alignment!.revision,
+        summary: accepted ? 'Recovery and closeout are verified.' : 'Recovery is verified. The separate closeout check remains open.',
+        acceptedAt: accepted ? goal.updatedAt : null,
+        checks: goal.alignment!.criteria.map(criterion => ({ criterionId: criterion.id, outcome: accepted ? 'met' as const : 'unknown' as const,
+          note: accepted ? 'The original inputs and workface are retained.' : 'The original pre-stop input still needs verification.',
+          evidence: ['artifacts/recovery/final-check.log'] })) }
+      const status = outcome === 'cancelled' ? 'cancelled' as const : accepted ? 'done' as const : 'in_progress' as const
+      const saved = { ...goal, status, plan, planState, grounding, delegations: [attempt], delegationObservations: [] }
+      const responsibility = { ...goal.responsibility!, scope: demandResponsibilityScope(saved),
+        executions: goal.responsibility!.executions.filter(row => row.execution.operationId === attempt.operationId)
+          .map(row => ({ ...row, phase: 'closed' as const, reason: 'This Ticket passed its independent review.', alert: null })) }
+      api.demands.delegation = async (operation, input) => input.goalId === goal.id && operation === 'goal.delegations'
+        ? { goalId: goal.id, goalUpdatedAt: goal.updatedAt, diskDurability: 'confirmed' as const, delegations: saved.delegations,
+          goalState: { status, supervisorSessionId: goal.supervisorSessionId!, alignment: goal.alignment! }, plan, planState, grounding, responsibility }
+        : originalDelegation(operation, input)
+      flushSync(() => { useAppStore.setState({ demands: { [goal.id]: { ...saved, responsibility } } }); render() })
+    },
     activeTickets(unavailable = false) {
       seed('many')
       const { demands } = useAppStore.getState()

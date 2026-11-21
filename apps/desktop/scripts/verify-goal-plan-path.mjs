@@ -21,7 +21,8 @@ for (const [mutation, assertion] of [
   ['collapse-ports', 'Parallel dependencies need distinct ports on their shared task.'],
   ['reverse-child', 'The child must follow the hovered task downstream.'],
   ['wrong-reader', 'The reading pane belongs to the selected task.'],
-  ['reverse-handoff', 'A report travels from the original executor to the recorded task owner.']
+  ['reverse-handoff', 'A report travels from the original executor to the recorded task owner.'],
+  ['omit-handoff-review', 'A completed Ticket reports the verdict and the collected transfer separately.']
 ]) {
   const mutant = run(mutation)
   const killed = mutant.report.testResults.flatMap(file => file.assertionResults)

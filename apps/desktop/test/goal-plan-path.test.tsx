@@ -56,8 +56,9 @@ it('reads the original task handoff and reverses direction only for a report fro
   delete pending.report
   delete pending.linkedAt
   const delegations = [attempt, pending]
-  const { head } = await board({ ...record, supervisorSessionId: 'supervisor', delegations,
-    planState: goalPlanState(projectGoalPlan(plan, delegations, criteria)) })
+  const crossHostPlan = { ...plan, nodes: [{ ...nodes[0]!, executor: { hostId: 'worker-host', agentSessionId: 'agent-1' } }, ...nodes.slice(1)] }
+  const { head } = await board({ ...record, plan: crossHostPlan, supervisorSessionId: 'supervisor', delegations,
+    planState: goalPlanState(projectGoalPlan(crossHostPlan, delegations, criteria)) })
   const handoff = () => dom.container.querySelector('[aria-label="Task handoff"]')
   const actors = () => [...handoff()!.querySelectorAll('.goal-plan-handoff__agent')].map(person => [
     person.querySelector('small')?.textContent, person.querySelector('strong')?.title.split('\n')[0]
@@ -74,6 +75,37 @@ it('reads the original task handoff and reverses direction only for a report fro
   expect(actors()).toEqual([['Task owner', 'previous-owner'], ['Executor', 'agent-2']])
   await act(async () => head('other').click())
   expect(handoff()).toBeNull()
+})
+
+it('reads a collected and reviewed attempt while keeping the whole Goal finish pending', async () => {
+  const attempt: DemandDelegation = {
+    operationId: 'reviewed-attempt', sourceMessageId: 'dispatch', planNodeId: 'source', hostId: 'local',
+    ownerAgentSessionId: 'supervisor', workerAgentSessionId: 'agent-1',
+    ownerRunId: 'manager-run', workerRunId: 'worker-run', threadId: 'execution-thread', text: 'Verify recovery',
+    alignmentRevision: 1, criterionIds: ['check'], capturedCriteria: criteria, preparedAt: 2, linkedAt: 3,
+    report: { operationId: 'delivery', replyMessageId: 'reply', authorAgentSessionId: 'agent-1', submittedAt: 4,
+      grounding: { alignmentRevision: 1, summary: 'Original workspace recovered', checks: [] } },
+    collection: { operationId: 'collected', replyMessageId: 'reply', collector: { kind: 'user', id: 'collector' }, collectedAt: 5 }
+  }
+  const only = { ...plan, nodes: [nodes[0]!] }
+  const ownerState = goalPlanState(projectGoalPlan(only, [attempt], criteria))
+  const { head, canvas } = await board({ ...record, plan: only, delegations: [attempt],
+    planState: { ...ownerState, done: 1, nodes: ownerState.nodes.map(node => ({ ...node, state: 'done' })) } })
+  expect(dom.container.querySelector('[aria-label="Task handoff"]')).toBeNull()
+  await act(async () => head('source').click())
+  const handoff = dom.container.querySelector('[aria-label="Task handoff"]')
+  expect(handoff?.textContent, 'A completed Ticket reports the verdict and the collected transfer separately.').toContain('Review passed')
+  expect(handoff?.textContent).toContain('Delivery reported')
+  expect(canvas.querySelector('[data-goal-plan-boundary="finish"]')?.getAttribute('data-goal-finish-state')).toBe('Pending')
+  expect(dom.container.querySelector('[data-goal-meta-plan]')?.textContent).toBe('1 of 1 Tickets passed')
+  const collection = dom.container.querySelector<HTMLButtonElement>('[data-goal-time-event="Report collected"]')!
+  await act(async () => collection.click())
+  const reading = dom.container.querySelector('.goal-execution-time__detail')!
+  expect(reading.textContent).toContain('User collector')
+  expect(reading.textContent).toContain('collected')
+  const openOriginal = [...reading.querySelectorAll('button')].find(button => button.textContent === 'Open original record')!
+  await act(async () => openOriginal.click())
+  expect(document.activeElement?.closest('[data-goal-coordination]')?.getAttribute('data-goal-coordination')).toBe('collection:reviewed-attempt')
 })
 
 it('traces only actual ancestors and descendants of a hovered node in the mounted board', async () => {
@@ -164,7 +196,7 @@ it('draws distinct dependency ports on the original source and target cards', as
 
 it('keeps an unverified original Goal distinct from a successful finish and opens it from the empty timeline', async () => {
   const { plan: _plan, planState: _planState, ...original } = record
-  const goal: DemandRecord = { ...original, status: 'done', sessionIds: ['recorded-member'] }
+  const goal: DemandRecord = { ...original, alignment: { ...original.alignment!, confirmedAt: null }, status: 'done', sessionIds: ['recorded-member'] }
   useAppStore.setState({ demands: { [goal.id]: goal }, selectedDemandId: goal.id, mainSurface: 'board' })
   await dom.render(<GlobalBoardSurface />)
   const graph = dom.container.querySelector('[aria-label="Goal plan"]')!

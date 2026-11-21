@@ -124,9 +124,9 @@ it('a direct Ticket brings the current criteria within reach and keeps optional 
     section: 'plan', phase: 'ready', token: 'open-original-ticket', ticketNodeId: nodeId } }))
   expect(container.querySelector(`[data-goal-plan-detail="${nodeId}"]`)).not.toBeNull()
 
-  const review = action('Review to confirm')
-  expect(review.closest('.goals-detail__toolbar')).not.toBeNull()
-  expect(review.getAttribute('aria-label')).toBe('Review goal criteria before confirming')
+  expect(container.querySelector('[data-goal-detail-stage]')?.textContent).toBe('Supervisor can confirm the goal')
+  const review = action('Read success criteria')
+  expect(review.closest('.goals-detail__actions')).not.toBeNull()
   const confirmation = container.querySelector('[data-goal-confirm]')!
   await act(async () => review.click())
   const criteria = container.querySelector('[aria-label="Criteria and results"]')!

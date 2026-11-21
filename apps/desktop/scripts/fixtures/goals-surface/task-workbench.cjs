@@ -117,4 +117,27 @@ module.exports = async ({ evaluate, size, click, pointer, capture, waitFor, pain
   assert.equal(await evaluate("document.querySelectorAll('.goal-plan__depth, [data-claim-open]').length"), 0,
     'Missing owner states keep saved tasks without presenting readiness or invented dependency groups')
   await capture('620-light-unavailable', 620)
+
+  for (const [width, theme] of [[1600, 'dark'], [390, 'light']]) {
+    await size(width)
+    for (const [outcome, finish, conclusion] of [
+      ['unchecked', 'Pending', 'Results need checking'], ['accepted', 'Succeeded', 'Accepted · Finished'], ['cancelled', 'Cancelled', 'Cancelled']
+    ]) {
+      await evaluate(`goalsPlan.ticketOutcome(${JSON.stringify(outcome)}); goalsVisual.appearance(${JSON.stringify(theme)})`)
+      await waitFor(`Boolean(${query('[data-goal-finish-state="' + finish + '"]')})`)
+      await evaluate("document.querySelector('.goals-detail').scrollTop = 0")
+      const header = await evaluate(`[...document.querySelectorAll('[data-goal-detail-stage], [data-goal-meta-plan]')].map(node => [node.textContent, node.getBoundingClientRect().bottom])`)
+      assert.deepEqual(header.map(([text]) => text), [conclusion, '1 of 1 Tickets passed'])
+      assert.ok(header.every(([, bottom]) => bottom < 500), 'Both facts are visible near the top in wide and narrow views')
+      await capture(`${width}-${theme}-tickets-passed-${outcome}`, width)
+    }
+    await evaluate(`goalsPlan.seed(false, true, false, 'confirmed'); goalsVisual.appearance(${JSON.stringify(theme)})`)
+    const deliveryButton = "[...document.querySelectorAll('.goals-detail__actions button')].find(node => node.textContent === 'View delivery')"
+    await waitFor(`Boolean(${deliveryButton})`)
+    await click(deliveryButton)
+    const report = query('[data-goal-delivery="attempt:outline"] [data-goal-delivery-report]')
+    await waitFor(`Boolean(${report})`)
+    await evaluate(`${report}.scrollIntoView({block:'center'})`)
+    await capture(`${width}-${theme}-original-delivery-evidence`, width)
+  }
 }

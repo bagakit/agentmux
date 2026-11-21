@@ -114,10 +114,11 @@ beforeAll(async () => {
   process.env.AGENTMUX_PRIVATE_LISTENER_ASSET = join(listenerPackage, 'dist/control-endpoint-listener-worker.js')
   await build({ entryPoints: [worker], outfile: join(listenerPackage, 'dist/control-endpoint-listener-worker.js'), bundle: true, platform: 'node', format: 'esm', logLevel: 'error' })
   if (proof) appendFileSync(proof, JSON.stringify({ file: relative(repository, worker), sha256: createHash('sha256').update(readFileSync(worker)).digest('hex'), consumer: 'actual-source-listener-worker' }) + '\n')
-  const demandAliases = Object.fromEntries(['delegations', 'goals', 'goal-plan', 'goal-patrol', 'goal-ticket-crypto', 'relations'].map(name =>
-    [`@agentmux/demand/${name}`, resolve(repository, `packages/demand/src/${name}.ts`)]))
+  const demandExports: Record<string, { import: string }> = require('../../../../packages/demand/package.json').exports
+  const demandAliases = Object.fromEntries(Object.entries(demandExports).map(([name, entry]) =>
+    ['@agentmux/demand' + name.slice(1), resolve(repository, 'packages/demand', entry.import.replace('./dist/src/', './src/').replace(/\.js$/u, '.ts'))]))
   await build({ entryPoints: [resolve(repository, 'packages/core/src/agentmux.ts')], outfile: sourceCli,
-    alias: { ...demandAliases, '@agentmux/demand': resolve(repository, 'packages/demand/src/index.ts'),
+    alias: { ...demandAliases,
       '@scure/base': resolve(repository, 'node_modules/.pnpm/@scure+base@2.2.0/node_modules/@scure/base/index.js') },
     bundle: true, platform: 'node', format: 'esm', logLevel: 'error', banner: { js: "import { createRequire as bundleRequire } from 'node:module'; const require=bundleRequire(import.meta.url);" },
     plugins: [{ name: 'actual-daily-goal-cli-imports', setup(builder: { onLoad(filter: { filter: RegExp }, handler: (args: { path: string }) => { contents: string; loader: 'ts' } | null): void }) { builder.onLoad({ filter: /\.(ts|json)$/ }, args => {

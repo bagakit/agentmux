@@ -13,6 +13,7 @@ it('Current Demand: stored confirmation requires the original Core prompt refere
 })
 
 import { currentDemandIndex, currentDemandKey } from '../src/renderer/src/lib/goal-current-work'
+import type { GoalPlanStateNode } from '@agentmux/demand/goal-plan'
 it('Current Demand: only exact confirmed business input selects work; unrelated Goal changes preserve target references', () => {
   const receipt = { kind: 'core-prompt' as const, itemId: 'prompt:original', createdAt: 3 }
   const dispatch = { ...intent, stage: 'confirmed' as const, preparedAt: 1, submittedAt: 2, receipt }
@@ -29,4 +30,21 @@ it('Current Demand: only exact confirmed business input selects work; unrelated 
   expect(currentDemandIndex({ goal: { ...goal, status: 'done' } }).has(key)).toBe(false)
   expect(currentDemandIndex({ goal }).has(currentDemandKey('other-host', 'canonical'))).toBe(false)
   expect(currentDemandIndex({ goal: { ...goal, dispatches: [{ ...dispatch, receipt: { ...receipt, itemId: 'prompt:forged' } }] } }).get(key)).toMatchObject({ state: 'unconfirmed' })
+})
+
+it('keeps only the active Ticket attempt in the Agent’s current work', () => {
+  const attempt = {
+    operationId: 'dispatch', sourceMessageId: 'dispatch-message', planNodeId: 'ticket', hostId: 'local',
+    ownerAgentSessionId: 'supervisor', ownerRunId: 'supervisor-run', workerAgentSessionId: 'worker', workerRunId: 'worker-run',
+    threadId: 'thread', text: 'Verify the report', alignmentRevision: 1, criterionIds: ['criterion'], preparedAt: 1, linkedAt: 2
+  }
+  const current = { ...attempt, operationId: 'rework', workerAgentSessionId: 'new-worker' }
+  const node: GoalPlanStateNode = { id: 'ticket', state: 'working', column: 0, attempts: 2, staleCriteria: [], unknown: [],
+    attempt: { delegationOperationId: current.operationId, reported: false } }
+  const goal = { id: 'ticket-goal', title: 'Tracked work', status: 'in_progress' as const, delegations: [attempt, current],
+    planState: { revision: 1, done: 0, total: 1, next: [], nodes: [node] } }
+  const oldKey = currentDemandKey('local', 'worker'), currentKey = currentDemandKey('local', 'new-worker')
+  expect(currentDemandIndex({ goal }).has(oldKey)).toBe(false)
+  expect(currentDemandIndex({ goal }).get(currentKey)?.goals[0]?.operationIds).toEqual(['rework'])
+  expect(currentDemandIndex({ goal: { ...goal, planState: { ...goal.planState, done: 1, nodes: [{ ...node, state: 'done' }] } } }).has(currentKey)).toBe(false)
 })

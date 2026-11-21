@@ -5,6 +5,11 @@ export default defineConfig({
   ...original,
   plugins: [...original.plugins ?? [], {
     name: 'goal-plan-path-mutation', enforce: 'pre', transform(source, id) {
+      if (process.env.GOAL_PLAN_PATH_MUTATION === 'omit-handoff-review' && id.endsWith('/GoalPlanGraph.tsx')) {
+        const conclusion = "state === 'done' ? 'Review passed'"
+        if (source.split(conclusion).length !== 2) throw Error('Expected the signed Ticket verdict.')
+        return source.replace(conclusion, "state === 'done' ? undefined")
+      }
       if (process.env.GOAL_PLAN_PATH_MUTATION === 'reverse-handoff' && id.endsWith('/GoalPlanGraph.tsx')) {
         const direction = 'reported ? [worker, owner] : [owner, worker]'
         if (source.split(direction).length !== 2) throw Error('Expected the original task handoff.')

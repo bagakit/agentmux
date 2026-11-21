@@ -92,6 +92,10 @@ it('signs original Tickets, claims and completions through the public CLI', asyn
     ] },
   } })
   const deliveryHash = submitted.delegations[0].report.delivery.hash
+  const responsibilities = () => owner.call(null, ['goal', 'delegations', '--goal', goalId])
+  expect((await responsibilities()).responsibility.executions).toMatchObject([
+    { execution: { operationId: 'dispatch-git-ticket' }, phase: 'report-review', alert: 'manager-review' },
+  ])
   const reviewRequest = { goalId, review: {
     operationId: 'review-git-ticket', nodeId, delegationOperationId: 'dispatch-git-ticket', deliveryHash, verdict: 'pass' as const, note: '',
     check: { command: check, result: 'Confirmed the commit content and its original Ticket trailer', evidence: [commitEvidence.href] },
@@ -108,6 +112,11 @@ it('signs original Tickets, claims and completions through the public CLI', asyn
     expect(refused.stderr).toContain('original delivery contents fail the Ticket digest check')
   } finally { await writeFile(snapshotPath, originalSnapshot) }
   const reviewed = await owner.call('reviewer', reviewArgs, reviewRequest)
+  const postReview = await responsibilities()
+  expect(postReview.responsibility.executions, 'A signed pass closes responsibility for this exact attempt').toMatchObject([
+    { execution: { operationId: 'dispatch-git-ticket' }, phase: 'closed', alert: null },
+  ])
+  expect(postReview.grounding.acceptedAt).toBeNull()
   const completion = reviewed.plan.reviews[0].completion
   expect(completion.record).toMatchObject({ kind: 'completed', ticketId: nodeId, attemptId: 'dispatch-git-ticket',
     executionHash: claimed.hash, deliveryHash, actor: { id: 'reviewer' } })
@@ -127,10 +136,13 @@ it('signs original Tickets, claims and completions through the public CLI', asyn
       { id: childId, state: 'waiting' },
       { id: nodeId, state: 'unknown', unknown: ['completion-proof'] },
     ])
+    expect((await responsibilities()).responsibility.executions).toMatchObject([{ phase: 'unknown', alert: 'unknown' }])
   } finally { await writeFile(snapshotPath, completedSnapshot) }
 
   await owner.call(null, assign, { goalId, nodeId: childId, expectedRevision: reviewed.plan.revision,
     operationId: 'open-successor', assignment: { kind: 'open' } })
+  expect((await responsibilities()).responsibility.scope, 'A new plan revision supersedes the previous responsibility scope')
+    .not.toBe(postReview.responsibility.scope)
   const ready = await owner.call('worker', ['goal', 'plan', 'active'])
   const childClaim = await owner.call('worker', ['goal', 'plan', 'claim', '--goal', goalId, '--node', childId,
     '--claim-token', ready.goals[0].nodes[0].claimToken, '--operation-id', 'claim-successor'])
@@ -142,12 +154,22 @@ it('signs original Tickets, claims and completions through the public CLI', asyn
   })
   expect(collected.goalState.status).toBe('in_progress')
   expect(collected.grounding.acceptedAt).toBeNull()
+  expect((await responsibilities()).responsibility.executions).toMatchObject([{ phase: 'closed', alert: null }])
   await owner.stop(); await owner.start()
   const historical = await owner.call('reviewer', ['goal', 'plan', '--goal', goalId])
   expect(historical.ticketLinks[1]).toBe(ticketLink)
   expect(historical.plan.history.at(-1).claim.proof).toEqual(childProof)
   expect(historical.plan.reviews[0]).toMatchObject({ deliveryHash, reviewer: { id: 'reviewer' } })
-  const accept = ['goal', 'accept', '--goal', goalId, '--revision', '1', '--submission', collected.grounding.submissionId, '--finish']
-  expect((await owner.cli('reviewer', accept)).code).toBe(1)
-  expect((await owner.call(null, accept)).goal.status).toBe('done')
+  expect((await responsibilities()).responsibility.executions).toMatchObject([{ phase: 'closed', alert: null }])
+  const accept = (submissionId: string) => ['goal', 'accept', '--goal', goalId, '--revision', '1', '--submission', submissionId, '--finish']
+  expect((await owner.cli('reviewer', accept(collected.grounding.submissionId))).code).toBe(1)
+  const incomplete = await owner.cli(null, accept(collected.grounding.submissionId))
+  expect(incomplete.code).toBe(1)
+  expect(incomplete.stderr).toContain('Result is still unknown')
+  const remaining = await owner.call('supervisor', revise, { goalId, revision: {
+    operationId: 'cancel-successor', expectedRevision: historical.plan.revision, alignmentRevision: 1,
+    nodes: historical.plan.nodes.map((node: { id: string }) => node.id === childId ? { ...node, cancelled: true } : node),
+  } })
+  expect(remaining.planState).toMatchObject({ done: 1, total: 1 })
+  expect((await owner.call(null, accept(remaining.grounding.submissionId))).goal.status).toBe('done')
 })

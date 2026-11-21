@@ -97,6 +97,12 @@ describe('the same typed current source and original work reading budget', () =>
     expect(goalNextStepFact({ ...base, id: 'another-goal' }, retained).source.kind).toBe('definition')
   })
 
+  it('shows a cancelled Goal as closed even when its proposal and original work are retained', () => {
+    const cancelled = { ...base, status: 'cancelled' as const, alignment: alignment({ confirmedAt: null }), delegations: [delegation] }
+    expect(goalNextStepFact(cancelled)).toEqual({ stage: 'finished', text: 'Cancelled', source: { kind: 'goal' } })
+    expect(goalHasOriginalWork(cancelled)).toBe(true)
+  })
+
   it('only the original current Ticket attempt can take priority over Goal result review', () => {
     const planNodeId = 'original-ticket', report = { operationId: 'r', replyMessageId: 'reply', authorAgentSessionId: 'worker',
       submittedAt: 3, grounding: grounding(['met']) }
@@ -106,6 +112,9 @@ describe('the same typed current source and original work reading budget', () =>
       attempt: { delegationOperationId: delegation.operationId, reported: true } }
     const planState = { revision: 1, done: 0, total: 1, next: [], nodes: [node] }
     expect(goalNextStepFact({ ...original, planState }).source).toMatchObject({ kind: 'delegation', operationId: delegation.operationId })
+    const rework = { ...original, planState: { ...planState, nodes: [{ ...node, state: 'changes' as const }] } }
+    expect(goalNextStepFact(rework)).toMatchObject({ text: 'Changes requested · Continue this Ticket',
+      source: { kind: 'delegation', operationId: delegation.operationId } })
     const passed = { ...original, planState: { ...planState, done: 1, nodes: [{ ...node, state: 'done' as const }] } }
     expect(goalNextStepFact(passed)).toEqual({ stage: 'you', text: 'Results ready for review', source: { kind: 'results', submissionId: 'report', revision: 1 } })
     const { grounding: _report, ...unreported } = passed

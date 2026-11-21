@@ -134,7 +134,7 @@ async function expectSavedGraph() {
     expect([...container.querySelectorAll<HTMLElement>('[data-goal-plan-edge]')].map(edge => edge.dataset.goalPlanEdge)).toEqual(['inspect>preserve'])
     // States and progress are the Host owner's derivation returned with the record.
     expect(renderedStates()).toEqual([['inspect', 'ready'], ['preserve', 'waiting']])
-    expect(container.querySelector('[data-goal-meta-plan]')?.textContent).toBe('Plan 0 of 2 done')
+    expect(container.querySelector('[data-goal-meta-plan]')?.textContent).toBe('0 of 2 Tickets passed')
     expect(container.querySelector('[data-goal-plan-progress]')?.textContent).toBe('Revision 1')
   })
   const goal = (await fixture.host.demands.get('discovery'))!

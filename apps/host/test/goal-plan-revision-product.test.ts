@@ -252,8 +252,14 @@ it('reads current result evidence from reviewed Ticket attempts through the Goal
   const deliver = deliverPlanResult.bind(undefined, owner, goalId)
   const originalGap = await deliver(node, 'first-gap', 1, 'gap', 'changes')
   expect(originalGap.grounding.checks[0]).toMatchObject({ outcome: 'gap', evidence: evidence('first-gap') })
+  const responsibility = async () => (await owner.call(null, ['goal', 'delegations', '--goal', goalId])).responsibility.executions
+  expect(await responsibility()).toMatchObject([{ execution: { operationId: 'first-gap' }, phase: 'rework', alert: null }])
   const reworked = await deliver(node, 'current-rework', 1, 'met', 'pass')
   expect(reworked.grounding.checks[0]).toMatchObject({ outcome: 'met', evidence: evidence('current-rework') })
+  expect(await responsibility()).toMatchObject([
+    { execution: { operationId: 'first-gap' }, phase: 'closed', alert: null },
+    { execution: { operationId: 'current-rework' }, phase: 'closed', alert: null },
+  ])
 
   const reviseAlignment = (text: string, summary: string) => owner.call(null, ['goal', 'update', '--goal', goalId, '--alignment',
     JSON.stringify({ summary, criteria: [{ id: 'original', text }], openQuestions: [] })])
