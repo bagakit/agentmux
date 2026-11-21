@@ -26,6 +26,7 @@ const mutations = {
   'unregister-settings': ['apps/desktop/src/renderer/src/components/settings/ShortcutSettingsPane.tsx', "documentation.open('protocols')", 'undefined'],
   'detach-focus-template': ['apps/desktop/src/renderer/src/lib/focus-group-task.ts', "if (kind !== 'learn') return getAmuxProtocolTemplate('focus-task', kind)", "if (kind !== 'learn') return 'Detached task'"],
   'omit-search-target': ['apps/desktop/src/renderer/src/components/documentation/AmuxProtocolReference.tsx', 'AGENTMUX_PROTOCOL_CATALOG.filter(entry =>', "AGENTMUX_PROTOCOL_CATALOG.filter(entry => entry.id !== ('catalog-extension-probe' as string)).filter(entry =>"],
+  'group-by-wrong-form': ['apps/desktop/src/renderer/src/components/documentation/AmuxProtocolReference.tsx', 'else byForm.set(entry.form, [entry])', "else byForm.set('envelope', [entry])"],
   'eager-preview': ['apps/desktop/src/renderer/src/components/documentation/AmuxProtocolReference.tsx', '{open && active ? <div', '{active ? <div']
 } as Record<string, readonly [string, string, string]>
 

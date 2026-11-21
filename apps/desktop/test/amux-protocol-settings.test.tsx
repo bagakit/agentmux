@@ -63,6 +63,7 @@ it('document-local search discovers a new Core contribution and opens its real o
   expect(document.querySelectorAll('[data-protocol-example]')).toHaveLength(0)
   await search('catalog-extension-probe')
   expect(document.querySelectorAll('[data-protocol-entry]')).toHaveLength(1)
+  expect([...document.querySelectorAll('[data-protocol-form]')].map(group => group.getAttribute('data-protocol-form'))).toEqual(['marker'])
   const row = connected<HTMLDetailsElement>('[data-protocol-entry="catalog-extension-probe"]')
   expect(row.open).toBe(false)
   await button('View first example'); expect(row.open).toBe(true)
@@ -84,6 +85,13 @@ it('all catalog examples demand-mount the original reader, and closing the docum
   const effects = [vi.spyOn(api.sessions, 'readHistory'), vi.spyOn(api.sessions, 'historyPage'), vi.spyOn(api.sessions, 'historyResource'), vi.spyOn(api.sessions, 'historySources'), vi.spyOn(api.sessions, 'submitPrompt'), vi.spyOn(api.ui, 'openObjectLink'), vi.spyOn(api.config, 'save')]
   await mount()
   expect(document.querySelectorAll('[data-protocol-entry]')).toHaveLength(AGENTMUX_PROTOCOL_CATALOG.length)
+  const groups = [...document.querySelectorAll<HTMLElement>('[data-protocol-form]')]
+  expect(new Set(groups.map(group => group.dataset.protocolForm))).toEqual(new Set(AGENTMUX_PROTOCOL_CATALOG.map(entry => entry.form)))
+  for (const group of groups) {
+    expect([...group.querySelectorAll<HTMLElement>('[data-protocol-entry]')].map(row => row.dataset.protocolEntry))
+      .toEqual(AGENTMUX_PROTOCOL_CATALOG.filter(entry => entry.form === group.dataset.protocolForm).map(entry => entry.id))
+    expect(group.querySelector('h3')?.getAttribute('id')).toBe(group.getAttribute('aria-labelledby'))
+  }
   for (const entry of AGENTMUX_PROTOCOL_CATALOG) {
     const row = await toggle(entry.id, true)
     expect(row.querySelectorAll('[data-protocol-example]')).toHaveLength(entry.examples.length)
