@@ -1,4 +1,5 @@
 import { AgentMuxError, type AgentMuxClient, type AgentMuxRpcCallContext, type AgentMuxSpatialStateStore } from '@agentmux/core'
+import { clearTimeout, setTimeout } from 'node:timers'
 import type { GoalCloseout, GoalCloseoutResult, GoalDelegationAuthority } from '@agentmux/core/goal-delegation'
 import { runBoundDemandDispatch, type Demand, type DemandStore } from '@agentmux/demand'
 import { delegationWorkerHostId, type DemandDelegation, type GoalCloseoutContext } from '@agentmux/demand/delegations'
