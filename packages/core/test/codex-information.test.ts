@@ -1,9 +1,12 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { once } from 'node:events'
 import { WebSocketServer } from 'ws'
+import { randomBytes } from 'node:crypto'
+import { openCodexFrontendControl } from '../src/providers/codex-managed-frontend.js'
+import { createCodexConfigurationSource } from '../src/providers/codex-configuration-source.js'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
 import { parseAgentInformationSnapshot } from '../src/agent-information.js'
-import { parseAgentConfigurationSnapshot } from '../src/agent-configuration.js'
+import { parseAgentConfigurationSnapshot, type AgentConfigurationSnapshot } from '../src/agent-configuration.js'
 
 const location = vi.hoisted(() => ({ endpoint: '', reads: 0, changed: false, foreignListener: false }))
 vi.mock('../src/agent-native-process.js', async original => ({ ...await original<typeof import('../src/agent-native-process.js')>(),
@@ -15,7 +18,7 @@ vi.mock('../src/agent-native-process.js', async original => ({ ...await original
 const closes: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of closes.splice(0).reverse()) await close(); Object.assign(location, { endpoint: '', reads: 0, changed: false, foreignListener: false }) })
 
-async function fixture() {
+async function fixture(options: { observation?: boolean } = {}) {
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 }); await once(server, 'listening')
   const address = server.address(); if (typeof address === 'string' || !address) throw new Error('Original actor did not listen')
   location.endpoint = `ws://127.0.0.1:${address.port}`
@@ -29,7 +32,9 @@ async function fixture() {
   } }
   const models = ['model-original', 'model-selected'].map((model, i) => ({ model, id: 'catalog-id-' + i, displayName: 'Native ' + model, description: 'Native catalog entry', hidden: false }))
   const controls = { accountError: false, limitsError: false, changedAccount: false, accountReads: 0, setApplied: true, setError: false,
-    missingModel: false, pageLoop: false, smallPages: false, changingRuntime: false, reads: 0 }
+    missingModel: false, pageLoop: false, smallPages: false, changingRuntime: false, reads: 0,
+    catalogError: false, modelDuringCatalog: false, providerDuringCatalog: false, barrierError: false,
+    modelAtBarrier: undefined as string | undefined, providerAtBarrier: undefined as string | undefined, barrierReads: 0, providerAtRead: 0 }
   server.on('connection', (socket, request) => {
     authorization.push(request.headers.authorization)
     socket.on('message', bytes => {
@@ -39,18 +44,23 @@ async function fixture() {
       const error = () => socket.send(JSON.stringify({ jsonrpc: '2.0', id: value.id, error: { code: -32603, message: 'Private native observation failure' } }))
       switch (value.method) {
         case 'initialize': return reply({})
-        case 'thread/read': controls.reads++; return reply({ thread: { ...thread,
+        case 'thread/read': controls.reads++
+          if (controls.providerAtRead === controls.reads) thread.modelProvider = 'late-native-provider'
+          return reply({ thread: { ...thread,
           ...(controls.changingRuntime && controls.reads > 1 ? { sessionId: 'replacement-runtime-session' } : {}) } })
         case 'account/read': controls.accountReads++; return controls.accountError ? error() : reply(controls.changedAccount && controls.accountReads > 1
           ? { ...account, userId: 'another-native-user' } : account)
         case 'account/rateLimits/read': return controls.limitsError ? error() : reply(limits)
         case 'model/list': {
+          if (controls.catalogError) return error()
+          if (controls.modelDuringCatalog) thread.model = 'native-unlisted-model'
+          if (controls.providerDuringCatalog) thread.modelProvider = 'provider-new'
           if (controls.smallPages) {
             const index = value.params.cursor ? Number(value.params.cursor) : 0
             return reply({ data: [models[index]], nextCursor: index + 1 < models.length ? String(index + 1) : null })
           }
           return reply({ data: controls.missingModel ? [models[1]] : value.params.cursor ? [models[1]] : [models[0]],
-            nextCursor: controls.pageLoop || !value.params.cursor ? 'original-next-page' : null })
+            nextCursor: controls.missingModel ? null : controls.pageLoop || !value.params.cursor ? 'original-next-page' : null })
         }
         case 'thread/settings/update':
           if (controls.setError) return error()
@@ -63,11 +73,27 @@ async function fixture() {
   const provider = new AgentProviderRegistry().get('codex')
   const context = { processId: 100, workspacePath: '/original-workspace', signal: AbortSignal.timeout(10000),
     nativeHandle: { kind: 'provider' as const, providerId: 'codex', sessionId: thread.id },
-    nativeActor: { protocolId: 'codex-app-server-v2-0.163', actorId: 'original-actor', lifecycleOperationId: 'original-lifecycle', token: 'private-original-token', launch: { command: 'codex', args: ['--model', 'stale-launch-model'] } } }
+    nativeActor: { protocolId: 'codex-app-server-v2-0.163', actorId: 'original-actor', lifecycleOperationId: 'original-lifecycle', token: 'private-original-token', launch: { command: 'codex', args: ['--model', 'stale-launch-model'] },
+      ...(options.observation ? { token: randomBytes(32).toString('hex'), frontendControl: true as const, configurationObservation: true as const } : {}) } }
+  if (options.observation) {
+    const source = createCodexConfigurationSource({ actorId: context.nativeActor.actorId,
+      lifecycleOperationId: context.nativeActor.lifecycleOperationId, read: async () => {
+        controls.barrierReads++
+        if (controls.barrierError) throw new Error('Original producer read unavailable')
+        if (controls.modelAtBarrier) thread.model = controls.modelAtBarrier
+        if (controls.providerAtBarrier) thread.modelProvider = controls.providerAtBarrier
+        return { nativeSessionId: thread.id, nativeRuntimeSessionId: thread.sessionId, model: thread.model, modelProvider: thread.modelProvider }
+      }, publish: packet => producer.publishConfiguration(packet) })
+    const producer = await openCodexFrontendControl(context.nativeActor.token, { actorId: context.nativeActor.actorId,
+      lifecycleOperationId: context.nativeActor.lifecycleOperationId, processId: context.processId }, {
+      current: () => { throw new Error('No frontend action belongs to a configuration read') },
+      reconnect: async () => { throw new Error('No frontend action belongs to a configuration read') }, configuration: () => source.read() })
+    closes.push(() => producer.close())
+  }
   const read = () => provider.readInformation!(context, 'native-original')
   const configuration = () => provider.readConfiguration!(context, 'native-original')
-  const set = (revision: string, value = 'model-selected') => provider.setConfiguration!(context, 'native-original',
-    { configId: 'model', value, expectedRevision: revision, requestId: 'original-model-operation' })
+  const set = (revision: string, value = 'model-selected', configuration?: AgentConfigurationSnapshot) => provider.setConfiguration!(context, 'native-original',
+    { configId: 'model', value, expectedRevision: revision, requestId: 'original-model-operation', ...(configuration ? { configuration } : {}) })
   return { provider, context, read, configuration, set, requests, authorization, thread, account, limits, controls, models }
 }
 
@@ -154,10 +180,66 @@ it('a stale or invalid model selection is refused before native settings dispatc
   expect(h.requests.filter(request => request.method === 'thread/settings/update')).toEqual([])
 })
 
+it('a late provider change with the same model string cannot send a retained catalog selection to another source', async () => {
+  const h = await fixture(), before = (await h.configuration())!
+  h.controls.providerAtRead = h.controls.reads + 3
+  await expect(h.set(before.revision, 'model-selected', before)).rejects.toMatchObject({ controlFailure: { disposition: 'not_applied' } })
+  expect(h.thread.modelProvider).toBe('late-native-provider')
+  expect(h.thread.model).toBe('model-original')
+  expect(h.requests.filter(request => request.method === 'thread/settings/update')).toEqual([])
+})
+
 it('an empty native setter reply is not a confirmed model application', async () => {
   const h = await fixture(), before = (await h.configuration())!; h.controls.setApplied = false
   await expect(h.set(before.revision)).rejects.toMatchObject({ code: 'AGENT_CONFIGURATION_UNAVAILABLE' })
   expect(h.requests.filter(request => request.method === 'thread/settings/update')).toHaveLength(1)
+})
+
+it('a direct read adopts its final original-producer barrier and retains the same-source catalog', async () => {
+  const h = await fixture({ observation: true }); h.controls.modelAtBarrier = 'native-unlisted-current'
+  const value = (await h.configuration())!
+  expect(value).toMatchObject({ observation: { state: 'confirmed', sequence: 1 },
+    options: [{ currentValue: 'native-unlisted-current', choices: [{ value: 'model-original' }, { value: 'model-selected' }] }] })
+  expect(h.controls.barrierReads).toBe(1)
+  expect(h.requests.filter(request => request.method === 'model/list')).toHaveLength(2)
+})
+
+it('a provider change at the source barrier withdraws the prior provider catalog', async () => {
+  const h = await fixture({ observation: true }); h.controls.providerAtBarrier = 'another-native-provider'
+  expect(await h.configuration()).toMatchObject({ observation: { state: 'confirmed', sequence: 1 },
+    options: [{ currentValue: 'model-original', choices: [] }] })
+})
+
+it('a confirmed setter followed by a newer model retains its historical receipt without borrowing the later source sequence', async () => {
+  const h = await fixture({ observation: true }), before = (await h.configuration())!
+  h.controls.modelAtBarrier = 'model-later'; h.controls.catalogError = true
+  const count = h.requests.filter(request => request.method === 'model/list').length
+  const receipt = await h.set(before.revision, 'model-selected', before)
+  expect(receipt).toMatchObject({ observation: { state: 'unconfirmed', issue: { code: 'AGENT_NATIVE_CONFIGURATION_SUPERSEDED' } },
+    options: [{ currentValue: 'model-selected' }] })
+  expect(receipt.observation!.sequence).toBeUndefined()
+  expect(h.thread.model).toBe('model-later')
+  expect(h.requests.filter(request => request.method === 'model/list')).toHaveLength(count)
+  expect(h.requests.filter(request => request.method === 'thread/settings/update')).toHaveLength(1)
+})
+
+it('a source-barrier failure preserves read samples and acknowledged setter history as explicitly unordered', async () => {
+  const h = await fixture({ observation: true }), before = (await h.configuration())!
+  h.controls.barrierError = true
+  expect(await h.configuration()).toMatchObject({ observation: { state: 'unconfirmed',
+    issue: { code: 'AGENT_NATIVE_CONFIGURATION_ORDERING_UNAVAILABLE' } }, options: [{ currentValue: 'model-original' }] })
+  const receipt = await h.set(before.revision, 'model-selected', before)
+  expect(receipt).toMatchObject({ observation: { state: 'unconfirmed', issue: { code: 'AGENT_NATIVE_CONFIGURATION_ORDERING_UNAVAILABLE' } },
+    options: [{ currentValue: 'model-selected' }] })
+  expect(receipt.observation!.sequence).toBeUndefined()
+  expect(h.requests.filter(request => request.method === 'thread/settings/update')).toHaveLength(1)
+})
+
+it('an old actor exposes a confirmed point sample and its lack of continuous observation without disabling selection', async () => {
+  const h = await fixture(), before = (await h.configuration())!
+  expect(before.observation).toMatchObject({ state: 'confirmed', issue: { code: 'AGENT_CONFIGURATION_OBSERVATION_UNSUPPORTED' } })
+  expect(before.observation!.sequence).toBeUndefined()
+  expect((await h.set(before.revision, 'model-selected', before)).options[0]!.currentValue).toBe('model-selected')
 })
 
 it('a native internal setter failure is unknown and is never retried by the Provider', async () => {
@@ -166,12 +248,55 @@ it('a native internal setter failure is unknown and is never retried by the Prov
   expect(h.requests.filter(request => request.method === 'thread/settings/update')).toHaveLength(1)
 })
 
-it.each(['missing-current-model', 'repeated-cursor'] as const)('does not offer a picker from a %s native catalog', async scenario => {
-  const h = await fixture()
-  if (scenario === 'missing-current-model') h.controls.missingModel = true
-  else h.controls.pageLoop = true
+it('an unlisted native current model remains readable without inventing a selectable catalog row', async () => {
+  const h = await fixture(); h.controls.missingModel = true
+  const current = (await h.configuration())!
+  expect(parseAgentConfigurationSnapshot(current)).toEqual(current)
+  expect(current.options[0]).toMatchObject({ currentValue: 'model-original', choices: [{ value: 'model-selected' }] })
+  expect(current.options[0]!.type === 'select' && current.options[0]!.choices.some(choice => choice.value === 'model-original')).toBe(false)
+})
+
+it('a repeated native cursor does not create an unbounded model catalog read', async () => {
+  const h = await fixture(); h.controls.pageLoop = true
   await expect(h.configuration()).rejects.toMatchObject({ code: 'AGENT_CONFIGURATION_UNAVAILABLE' })
   expect(h.requests.filter(request => request.method === 'model/list').length).toBeLessThanOrEqual(2)
+})
+
+it('catalog labels, descriptions and order cannot stale the same native model selection', async () => {
+  const h = await fixture(), before = (await h.configuration())!
+  h.models.reverse(); for (const row of h.models) { row.displayName += ' renamed'; row.description += ' changed' }
+  const after = (await h.configuration())!
+  expect(after.revision).toBe(before.revision)
+  expect(after.options).not.toEqual(before.options)
+})
+
+it('a same-source Core catalog lets a setter confirm its native ACK without repeating model/list', async () => {
+  const h = await fixture(), before = (await h.configuration())!
+  const count = h.requests.filter(request => request.method === 'model/list').length
+  h.controls.catalogError = true
+  const after = await h.set(before.revision, 'model-selected', before)
+  expect(after.options[0]?.currentValue).toBe('model-selected')
+  expect(after.observation?.sourceId).toBe(before.observation?.sourceId)
+  expect(h.requests.filter(request => request.method === 'model/list')).toHaveLength(count)
+  expect(h.requests.filter(request => request.method === 'thread/settings/update')).toHaveLength(1)
+})
+
+it('a catalog failure before native dispatch proves not-applied rather than an unknown setter', async () => {
+  const h = await fixture(); h.controls.catalogError = true
+  await expect(h.set('unqualified-revision')).rejects.toMatchObject({ controlFailure: { disposition: 'not_applied' } })
+  expect(h.requests.filter(request => request.method === 'thread/settings/update')).toEqual([])
+})
+
+it('a native model change during catalog reading preserves the final current value', async () => {
+  const h = await fixture(); h.controls.modelDuringCatalog = true
+  expect((await h.configuration())?.options[0]?.currentValue).toBe('native-unlisted-model')
+})
+
+it('a native model-provider change during catalog reading cannot inherit the old provider choices', async () => {
+  const h = await fixture(); h.controls.providerDuringCatalog = true
+  const snapshot = (await h.configuration())!
+  expect(snapshot.options[0]).toMatchObject({ currentValue: 'model-original', choices: [] })
+  expect(snapshot.observation).toMatchObject({ state: 'confirmed', issue: { code: 'AGENT_NATIVE_CONFIGURATION_CATALOG_UNAVAILABLE' } })
 })
 
 it('valid model pages are bounded by the public choice contract rather than an invented page count', async () => {
