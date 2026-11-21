@@ -132,7 +132,7 @@ export function GoalAlignment({ demand, emphasis, onGrill, onGrounding, motePend
     {currentReport && resultChecks.length ? <p className="goal-review__counts">
       {reportCounts.met ? <span><ThemeStatusCompletedIcon size={13} aria-hidden="true" />{reportCounts.met} reported met</span> : null}
       {reportCounts.gaps ? <span><ThemeStatusGapIcon size={13} aria-hidden="true" />{reportCounts.gaps} reported {reportCounts.gaps === 1 ? 'gap' : 'gaps'}</span> : null}
-      {reportCounts.unchecked ? <span><ThemeStatusUnknownIcon size={13} aria-hidden="true" />{reportCounts.unchecked} need checking</span> : null}
+      {reportCounts.unchecked ? <span><ThemeStatusUnknownIcon size={13} aria-hidden="true" />{reportCounts.unchecked} {unknownDecision ? 'unverified' : 'need checking'}</span> : null}
     </p> : null}
     <details className={`goal-review__disclosure${stale ? ' goals-previous-report' : ''}`}>
       <summary>{stale ? `Previous report · v${grounding.alignmentRevision}` : currentReport && !alignment!.confirmedAt ? 'Review success criteria' : 'Criteria and evidence'}</summary>

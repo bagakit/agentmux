@@ -325,7 +325,7 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
             <div className="goals-detail__identity">
               <div className="goals-detail__title">
                 <ComposerTextarea className="goals-title" aria-label="Goal title" value={title} onValueChange={value => editGoalDraft(demand.id, 'title', value)} rows={1} onBlur={() => { if (titleDirty && title.trim()) void saveGoalDrafts(demand.id, ['title']) }} />
-                <p className="goals-detail__stage"><span className="goals-detail__status"><GoalStageMark stage={stage} cancelled={demand.status === 'cancelled'} /><strong data-goal-detail-stage>{next}</strong></span>{currentWork ? <button type="button" className="goals-detail__current-work" onClick={() => revealOriginalWork(currentWork)}>{currentWork.kind === 'patrol' ? 'View original inspection' : 'View current work'}<ThemeNavigationForwardIcon size={12} aria-hidden="true" /></button> : null}</p>
+                <p className="goals-detail__stage"><span className="goals-detail__status"><GoalStageMark stage={acknowledgementFeedback.failure ? stage : fact.mark ?? stage} cancelled={demand.status === 'cancelled'} /><strong data-goal-detail-stage>{next}</strong></span>{currentWork ? <button type="button" className="goals-detail__current-work" onClick={() => revealOriginalWork(currentWork)}>{currentWork.kind === 'patrol' ? 'View original inspection' : 'View current work'}<ThemeNavigationForwardIcon size={12} aria-hidden="true" /></button> : null}</p>
               </div>
             </div>
             <div className="goals-detail__actions">

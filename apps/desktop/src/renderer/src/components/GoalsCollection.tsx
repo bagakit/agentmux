@@ -102,7 +102,7 @@ export function GoalRow({ demand, selected, selectedSessionId, acknowledgementFa
     if (event.target !== event.currentTarget) return
     if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect() }
   }}>
-    <GoalStageMark stage={stage} cancelled={demand.status === 'cancelled'} />
+    <GoalStageMark stage={acknowledgementFailed ? stage : fact.mark ?? stage} cancelled={demand.status === 'cancelled'} />
     <div className="goals-row__copy">
       <strong title={demand.title}>{demand.title}</strong>
       <span className="goals-row__next">{nextStep}</span>

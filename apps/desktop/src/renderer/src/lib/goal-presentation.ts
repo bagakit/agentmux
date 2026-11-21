@@ -26,7 +26,7 @@ export type GoalNextStepSource =
   | { kind: 'delegation'; operationId: string; sourceMessageId: string; hostId: string; agentSessionId: string; runId: string; replyMessageId?: string }
   | { kind: 'patrol'; operationId: string }
   | { kind: 'goal' }
-export type GoalNextStepFact = { stage: GoalStage; text: string; source: GoalNextStepSource }
+export type GoalNextStepFact = { stage: GoalStage; text: string; source: GoalNextStepSource; mark?: 'unknown' }
 type GoalNextStepInput = Pick<DemandRecord, 'id' | 'alignment' | 'grounding' | 'status' | 'delegations' | 'delegationObservations' | 'delegationObservationIssue' | 'dispatches' | 'startObservations' | 'patrols' | 'patrolObservations' | 'plan' | 'planState'>
 
 const DELEGATION_STAGE: Record<GoalDelegationRow['state'], GoalStage> = {
@@ -64,7 +64,7 @@ export function goalNextStepFact(demand: GoalNextStepInput, retainedInput?: unkn
   const definitionSource: GoalNextStepSource = { kind: 'definition', revision: alignment?.revision ?? null }
   if (demand.status === 'cancelled') return { stage: 'finished', text: 'Cancelled', source: { kind: 'goal' } }
   if (planReview ? planReview === 'accepted' : isCurrentGroundingAccepted(alignment, grounding)) {
-    if (grounding!.unknownDecision) return { stage: 'finished', text: 'Closed with unverified results', source: resultSource }
+    if (grounding!.unknownDecision) return { stage: 'finished', mark: 'unknown', text: 'Closed with unverified results', source: resultSource }
     const result = grounding!.checks.some(check => check.outcome === 'gap') ? 'Accepted with gaps' : 'Accepted'
     return { stage: 'finished', text: demand.status === 'done' ? `${result} · Finished` : result, source: resultSource }
   }
