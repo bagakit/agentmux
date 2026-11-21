@@ -5,6 +5,8 @@ import { useWorkbenchWindows, WorkbenchWindowNotices } from '../../../src/render
 import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { addWorkbenchRegion, createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
+import { spatialCatalog } from '../../../src/renderer/src/lib/space-agent-control'
+import { workbenchRegionProjectionSlotId, type WorkbenchProjection } from '../../../src/renderer/src/lib/workbench-projection'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { updateThemeSelection } from '@agentmux/client-ui/theme'
 import '../../../src/renderer/src/styles/index.css'
@@ -33,6 +35,12 @@ updateThemeSelection({ appAppearance: 'dark' })
 api.browser.onEvent(event => useAppStore.getState().applyBrowserEvent(event))
 const target = { kind: 'tab' as const, displayWorkspaceId: displayId, groupId: 'native-display-group', tabId: tab.id }
 const region = { ...target, kind: 'region' as const, regionId: 'http-region' }
+const focusReference = { displayWorkspaceId: resource.id, groupId: target.groupId, tabId: tab.id, regionId: region.regionId }
+const focusProjection: WorkbenchProjection = { entity: { kind: 'region', regionId: region.regionId },
+  presentationId: 'focus-workbench', displayWorkspaceId: resource.id, catalog: spatialCatalog(useAppStore.getState(), []),
+  selection: [focusReference], onSelect: () => {} }
+const focusPrefix = 'focus-workbench-slot'
+const focusSlot = workbenchRegionProjectionSlotId(focusPrefix, focusReference)
 const assert = (value: unknown, message: string) => { if (!value) throw new Error(message) }
 const wait = async (name: string, read: () => any) => {
   const until = Date.now() + 15000
@@ -42,6 +50,7 @@ const wait = async (name: string, read: () => any) => {
 function Proof() {
   const windows = useWorkbenchWindows(true)
   const [visible, show] = useState(false)
+  const [focusRegion, showFocusRegion] = useState(false)
   const started = useRef(false)
   useEffect(() => {
     if (started.current || phase === 'restore' && !windows.some(item => item.target)) return
@@ -53,10 +62,21 @@ function Proof() {
       const child = await wait('same child descriptor', async () => (await call('app.window.ls', {})).windows.find((row: any) => row.target?.kind === 'tab' && row.documentGeneration))
       assert(phase !== 'seed' || open.recordedOperation.state === 'confirmed', 'Original Tab opening is confirmed')
       if (phase === 'restore') assert(child.windowId === localStorage.getItem('durable-native-window'), 'Real restart restores the same durable window identity')
-      const document = { windowId: child.windowId, documentGeneration: child.documentGeneration }
-      const detached = await bridge.inspect(phase + '-tab-detached', 'child', { ids: data.pages.map((page: any) => page.id), window: document })
+      const childDocument = { windowId: child.windowId, documentGeneration: child.documentGeneration }
+      const detached = await bridge.inspect(phase + '-tab-detached', 'child', { ids: data.pages.map((page: any) => page.id), window: childDocument })
       assert(detached.every((page: any) => page.form.draft === 'Unsubmitted draft ' + page.id && page.form.title === 'Unsent title ' + page.id), 'Same-process native forms remain unsubmitted after detaching')
-      const returned = await call('app.window.return', { operationId: phase + '-tab-return', ...document })
+      showFocusRegion(true)
+      await wait('the visible original Tab notice in Focus Region', () => {
+        const title = document.getElementById(focusSlot)?.querySelector('.detached-workface__title')
+        const bounds = title?.getBoundingClientRect()
+        return title?.textContent === 'This Tab is in a separate window.' && bounds &&
+          document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2) === title
+      })
+      const focused = await bridge.inspect(phase + '-focus-region', 'child', { ids: data.pages.map((page: any) => page.id), window: childDocument })
+      assert(focused.every((page: any) => page.form.draft === 'Unsubmitted draft ' + page.id), 'Focus Region retains both drafts in the independent Tab')
+      showFocusRegion(false)
+      await wait('Focus Region closed', () => !document.getElementById(focusSlot))
+      const returned = await call('app.window.return', { operationId: phase + '-tab-return', ...childDocument })
       assert(returned.recordedOperation.state === 'confirmed', 'Original Tab return is confirmed')
       await bridge.inspect(phase + '-tab-return-hidden', 'hidden', { ids: data.pages.map((page: any) => page.id) })
       if (phase === 'seed') {
@@ -83,7 +103,10 @@ function Proof() {
   }, [windows.length])
   return <><header style={{ height: 48, padding: 14, fontWeight: 600 }}>Main workface — detached pages must stay in their original window</header>
     <div style={{ height: 'calc(100% - 74px)', position: 'relative' }}>
-      <WorkspaceWorkbench workspaceId={resource.id} visible={visible} viewTargets={{}} windowTargets={windows} />
+      <div hidden={!visible} style={{ height: '100%' }}><WorkspaceWorkbench workspaceId={resource.id} visible={visible} viewTargets={focusRegion ? { [tab.id]: [
+        { hostId: focusSlot, projection: focusProjection, reference: focusReference, surface: 'focus', active: true, visible: true }
+      ] } : {}} windowTargets={windows} /></div>
+      {focusRegion ? <WorkspaceWorkbench workspaceId={resource.id} viewOwnership="projection" projection={focusProjection} viewHostPrefix={focusPrefix} /> : null}
     </div><footer className="window-status-bar"><WorkbenchWindowNotices /></footer></>
 }
 createClientUiRoot(document.getElementById('root')!).render(<Proof />)

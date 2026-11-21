@@ -8,6 +8,9 @@ capture, annotations and window requests cross the actual preload bridge and Mai
 A separate hidden cold Browser Tab has no native WebContents and must receive zero prepare, presentation registration or restore requests during all phases. A two-Region Tab contains an HTTP form and a file-URL form. While its main workface is
 not selected, open the exact cross-display Tab in an independent window. Both original
 native views must be physically attached to that child, with no copies left in Main.
+In Region-only Focus, both native pages and their drafts stay in the same child. The
+selected Focus Region shows the containing Tab's window notice. Check this before
+and after restarting the private Electron process.
 Return it, then display its original main occurrence. Detach only the HTTP Region;
 the file page stays in Main. Return that Region and verify both original documents,
 navigation identities and unsubmitted title/draft values survive without submission.

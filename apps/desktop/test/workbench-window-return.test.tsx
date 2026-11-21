@@ -5,7 +5,7 @@ import { act, createElement } from 'react'
 import { expect, it, vi } from 'vitest'
 vi.mock('react-resizable-panels', () => createRequire(import.meta.url)('../node_modules/react-resizable-panels/dist/react-resizable-panels.browser.development.cjs.js'))
 import { createClientUiRoot } from './helpers/client-ui-render'
-import { placeWorkbenchWindow, registerWorkbenchDocument } from '../src/renderer/src/lib/workbench-window-registry'
+import { placeWorkbenchWindow, registerWorkbenchDocument, workbenchWindowPlacement } from '../src/renderer/src/lib/workbench-window-registry'
 
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
@@ -13,6 +13,8 @@ import { StableWorkbenchView } from '../src/renderer/src/components/StableWorkbe
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { addWorkbenchRegion, createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
+import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
+import { workbenchRegionProjectionSlotId, type WorkbenchProjection } from '../src/renderer/src/lib/workbench-projection'
 import type { BrowserPresentationGeometry, BrowserPresentationOccurrence } from '../src/shared/contracts'
 import type { WorkbenchWindowDocument } from '../src/shared/workbench-windows'
 
@@ -109,7 +111,8 @@ it.each(['tab', 'region', 'cross-display-tab', 'cross-display-region'] as const)
   useAppStore.setState({ ...before, config: { ...config, workspaces: [workspace] }, loading: false, sessions: [], activeWorkspaceId: workspace.id, mainSurface: 'workbench', tabs: { [tab.id]: tab, [launcher.id]: launcher }, layouts: { [workspace.id]: layout, ...(crossDisplay ? { [reference.displayWorkspaceId]: layout } : {}) }, toolsOpen: false, projectRailOpen: false, warmTerminals: {}, prewarmTerminal: vi.fn(), detectExecutors: vi.fn().mockResolvedValue(undefined), workbenchNavigationInputPolicy: null, workbenchSpaceSelection: null }, true)
   const root = createClientUiRoot(container)
   try {
-    await act(async () => root.render(createElement(WorkspaceWorkbench, { workspaceId: workspace.id, visible: false, viewTargets: {}, windowTargets: [{ windowId: childScope.windowId, target }] })))
+    await act(async () => root.render(createElement('div', null,
+      createElement(WorkspaceWorkbench, { workspaceId: workspace.id, visible: false, viewTargets: {}, windowTargets: [{ windowId: childScope.windowId, target }] }))))
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)) })
     expect(activate).not.toHaveBeenCalled()
     expect(register, 'Hidden primary stages must not wake cold Browser resources').not.toHaveBeenCalled()
@@ -134,13 +137,48 @@ it.each(['tab', 'region', 'cross-display-tab', 'cross-display-region'] as const)
     const childRegions = register.mock.calls.filter(([request]) => request.window?.windowId === childScope.windowId && request.geometry.visible)
       .map(([request]) => 'kind' in request.occurrence.location ? null : request.occurrence.location.regionId)
     expect(new Set(childRegions)).toEqual(new Set(windowKind === 'tab' ? [surface.regionId, sibling.regionId] : [surface.regionId]))
+    if (kind === 'tab') {
+      const region = { ...reference, regionId: surface.regionId }
+      const projection: WorkbenchProjection = { entity: { kind: 'region', regionId: region.regionId },
+        presentationId: 'focus-workbench', displayWorkspaceId: workspace.id, catalog: spatialCatalog(useAppStore.getState(), []),
+        selection: [region], onSelect: () => {} }
+      expect(projection.catalog.locations).toContainEqual(expect.objectContaining(region))
+      const prefix = 'focus-workbench-slot', hostId = workbenchRegionProjectionSlotId(prefix, region)
+      await act(async () => root.render(createElement('div', null,
+        createElement(WorkspaceWorkbench, { workspaceId: workspace.id, visible: false,
+          viewTargets: { [tab.id]: [{ hostId, projection, reference: region, surface: 'focus', active: true, visible: true }] },
+          windowTargets: [{ windowId: childScope.windowId, target }] }),
+        createElement(WorkspaceWorkbench, { workspaceId: workspace.id, viewOwnership: 'projection', viewHostPrefix: prefix, projection }))))
+      const focus = document.getElementById(hostId)!
+      expect(focus).toBeTruthy()
+      expect(child.querySelector(`[data-native-browser-stage="${page.id}"]`), 'Region-only Focus must leave the original stage inside its independent Tab').toBe(originalStage)
+      expect(focus.querySelector('[role="status"]')?.textContent).toBe('This Tab is in a separate window.')
+      expect(focus.querySelector('[data-native-browser-stage]')).toBeNull()
+      expect(child.querySelector('[aria-label="Browser address"]')).toBe(address)
+      expect(address.value).toBe('https://unsubmitted.invalid/original')
+      const call = vi.spyOn(api.ui.workbenchWindows, 'call').mockResolvedValue({ windows: [], recordedOperation: null })
+      try {
+        const buttons = [...focus.querySelectorAll('button')]
+        await act(async () => { buttons.find(button => button.textContent === 'Show window')!.click() })
+        await act(async () => { buttons.find(button => button.textContent === 'Bring back')!.click() })
+        expect(call).toHaveBeenCalledWith('app.window.focus', expect.objectContaining(childScope))
+        expect(call).toHaveBeenCalledWith('app.window.return', expect.objectContaining(childScope))
+      } finally { call.mockRestore() }
+    }
     let returned = false, returning!: Promise<void>
     await act(() => { returning = placeWorkbenchWindow(target, null); void returning.then(() => { returned = true }, () => {}) })
     await act(async () => {})
     expect(returned, 'the exact original host physically returns before its ACK').toBe(true)
     await returning
-    expect(container.querySelector(`[data-native-browser-stage="${page.id}"]`)).toBe(originalStage)
-    expect(container.querySelector('[aria-label="Browser address"]')).toBe(address)
+    if (kind === 'tab') {
+      const focus = document.getElementById(workbenchRegionProjectionSlotId('focus-workbench-slot', { ...reference, regionId: surface.regionId }))!
+      expect(focus.querySelector<HTMLInputElement>('[aria-label="Browser address"]')?.value).toBe('https://unsubmitted.invalid/original')
+      expect(focus.querySelector(`[data-native-browser-stage="${page.id}"]`)).toBeTruthy()
+      expect(focus.querySelector('.detached-workface')).toBeNull()
+    } else {
+      expect(container.querySelector(`[data-native-browser-stage="${page.id}"]`)).toBe(originalStage)
+      expect(container.querySelector('[aria-label="Browser address"]')).toBe(address)
+    }
     expect(address.value).toBe('https://unsubmitted.invalid/original')
     expect(child.querySelector(`[data-native-browser-stage="${page.id}"]`)).toBeNull()
     expect(useAppStore.getState().tabs[tab.id]).toBe(tab)
@@ -151,7 +189,8 @@ it.each(['tab', 'region', 'cross-display-tab', 'cross-display-region'] as const)
     const shownLayout = { ...layout, groups: layout.groups.map(group => ({ ...group, activeTabId: tab.id })) }
     await act(async () => {
       useAppStore.setState({ layouts: { ...useAppStore.getState().layouts, [workspace.id]: shownLayout } })
-      root.render(createElement(WorkspaceWorkbench, { workspaceId: workspace.id, visible: true, viewTargets: {}, windowTargets: [{ windowId: childScope.windowId, target }] }))
+      root.render(createElement('div', null,
+        createElement(WorkspaceWorkbench, { workspaceId: workspace.id, visible: true, viewTargets: {}, windowTargets: [{ windowId: childScope.windowId, target }] })))
     })
     await vi.waitFor(() => expect(register.mock.calls.some(([request]) => request.browserId === page.id && request.window?.windowId === mainScope.windowId && request.geometry.visible &&
       !('kind' in request.occurrence.location) && request.occurrence.location.displayWorkspaceId === workspace.id)).toBe(true))
@@ -159,6 +198,11 @@ it.each(['tab', 'region', 'cross-display-tab', 'cross-display-region'] as const)
       .every(([request]) => !('kind' in request.occurrence.location) && request.occurrence.location.displayWorkspaceId === workspace.id),
     'A detached occurrence never replaces Main’s already confirmed display address').toBe(true)
   } finally {
+    if (workbenchWindowPlacement(target)) {
+      let returning!: Promise<void>
+      await act(() => { returning = placeWorkbenchWindow(target, null) })
+      await act(async () => returning)
+    }
     adoption.forEach(spy => spy.mockRestore())
     await act(async () => root.unmount()); releaseChild(); releaseMain(); container.remove(); frame.remove(); useAppStore.setState(before, true)
     if (mediaDescriptor) Object.defineProperty(navigator, 'mediaDevices', mediaDescriptor)

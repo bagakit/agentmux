@@ -57,7 +57,13 @@ async function tests(label, mutant = '') {
   assert.equal(result.signal, null); assert.equal(result.killed, false)
   if (mutant) {
     assert.notEqual(result.exit, 0)
-    assert.ok(json.testResults.flatMap(file => file.assertionResults).some(test => test.fullName.includes('cross-display') && test.status === 'failed'), 'Actual cross-display target consumer must reject the removed binding')
+    const failed = json.testResults.flatMap(file => file.assertionResults).filter(test => test.status === 'failed')
+    if (mutant === 'extract-region-from-detached-tab') {
+      assert.ok(failed.some(test => test.failureMessages.some(message => message.includes('Region-only Focus must leave the original stage inside its independent Tab'))),
+        'The actual Focus Region projection must reject extraction from the original detached Tab')
+    } else {
+      assert.ok(failed.some(test => test.fullName.includes('cross-display')), 'Actual cross-display target consumer must reject the removed binding')
+    }
   } else { assert.equal(result.exit, 0, result.output); assert.equal(json.numFailedTests, 0); assert.equal(json.numPassedTests, 5) }
   receipt.tests.push({ label, exit: result.exit, passed: json.numPassedTests, failed: json.numFailedTests, graph })
   process.stdout.write(label + ': ' + (mutant ? 'expected consumer RED' : 'GREEN') + '\n')
@@ -116,8 +122,11 @@ try {
       receipt.tests = previous.tests; receipt.componentArtifacts = previous.componentArtifacts
       process.stdout.write('component and mutation proof: reused unchanged loaded source and receipts\n')
     } else {
-      await tests('baseline'); await tests('remove-original-target', 'remove-original-target'); await tests('restored')
-      receipt.componentArtifacts = Object.fromEntries(await Promise.all(['baseline', 'remove-original-target', 'restored'].flatMap(label => ['.json', '.loaded.jsonl'].map(suffix => join(evidence, label + suffix))).map(async file => [file, sha(await readFile(file))])))
+      const mutants = ['remove-original-target', 'extract-region-from-detached-tab']
+      await tests('baseline')
+      for (const mutant of mutants) await tests(mutant, mutant)
+      await tests('restored')
+      receipt.componentArtifacts = Object.fromEntries(await Promise.all(['baseline', ...mutants, 'restored'].flatMap(label => ['.json', '.loaded.jsonl'].map(suffix => join(evidence, label + suffix))).map(async file => [file, sha(await readFile(file))])))
     }
     receipt.componentPassed = true
     if (!process.argv.includes('--components-only')) {
