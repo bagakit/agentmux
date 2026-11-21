@@ -195,7 +195,7 @@ function outputForSession(event: RuntimeEvent, session: TerminalSessionSnapshot)
     core.type !== 'terminal-output' ||
     core.run.runId !== session.control.run.runId
   ) return null
-  return { ...core, ...core.evidence.outputByteRange }
+  return { dataBytes: core.dataBytes, ...core.evidence.outputByteRange }
 }
 
 const UNCONFIRMED_SOURCE_FILES: SessionProjectFileContext = { kind: 'unconfirmed', workspaceRoot: '', homeDir: '', issue: 'File navigation for this original source is not confirmed.' }
@@ -1757,11 +1757,7 @@ function TerminalViewOwner({
       } else if (resize) {
         if (resize.resizeRevision > resizeRevision) scheduleLiveOutputDrain(resize)
       }
-      else if (output) scheduleLiveOutputDrain({
-        dataBytes: output.dataBytes,
-        startByte: output.startByte,
-        endByte: output.endByte
-      })
+      else if (output) scheduleLiveOutputDrain(output)
     }
     let disposeEvents = () => {}
     try { disposeEvents = sessions.onEvent(event => { if (sessionSource) services.apply(event); accept(event) }, session.control) }

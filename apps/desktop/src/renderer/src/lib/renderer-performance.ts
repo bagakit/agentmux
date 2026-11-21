@@ -1,7 +1,7 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { createInputPerformanceRecorder, readInputObservation, RENDERER_SESSION_EVENT_TYPES, RENDERER_TIMING_KINDS } from '@agentmux/core/control'
 import type { RendererConsumerCost, RendererOverlayObservation, RendererPerformanceSnapshot, RendererSessionEventType, RendererSlowEvent, RendererTerminalCleanupContext, RendererTerminalCost, RendererTerminalWriteContext, RendererWorkSource, RendererWorkTiming } from '@agentmux/core/control'
-import type { AgentMuxClientEvent } from '@agentmux/core'
+import type { DesktopRuntimeEvent } from '../../../shared/contracts'
 import { tabSwitchObservation } from './tab-switch-observation'
 import { surfaceSwitchObservation } from './surface-switch-observation'
 
@@ -22,7 +22,7 @@ const copyEpoch = (value: ReturnType<typeof epoch>): ReturnType<typeof epoch> =>
   ...value, timings: Object.fromEntries(timingKinds.map(kind => [kind, { ...value.timings[kind] }])) as ReturnType<typeof epoch>['timings']
 })
 /** Original protocol fields only. No Session/Run lookup or event payload survives this call. */
-export function rendererSessionEventSource(hostId: string, event: AgentMuxClientEvent): RendererWorkSource {
+export function rendererSessionEventSource(hostId: string, event: DesktopRuntimeEvent): RendererWorkSource {
   const sessionId = event.type === 'agent-session' ? event.session.agentSessionId
     : event.type === 'agent-input' ? event.receipt.key.agentSessionId
     : event.type === 'interaction' ? event.request.agentSessionId

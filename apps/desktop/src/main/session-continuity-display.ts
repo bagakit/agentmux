@@ -30,6 +30,10 @@ export function projectDesktopRecoverySession(session: AgentMuxAgentSession): De
 }
 
 export function projectDesktopRuntimeEvent(event: AgentMuxClientEvent): DesktopRuntimeEvent {
+  if (event.type === 'terminal-output') {
+    const { data: _text, ...output } = event
+    return output
+  }
   if (event.type !== 'agent-session') return event
   const { promptCompletionAdmission, ...session } = projectDesktopRecoverySession(event.session)
   return { ...event, session: { ...session,

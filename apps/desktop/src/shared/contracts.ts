@@ -1088,7 +1088,8 @@ export type DesktopAgentSessionDisplay = Omit<DesktopRecoverySession, 'promptCom
   promptCompletionAdmission?: import('@agentmux/core/hosted').AgentMuxHostedPromptAdmissionSummary
   workPlacement?: AgentWorkPlacement
 }
-export type DesktopRuntimeEvent = Exclude<AgentMuxClientEvent, { type: 'agent-session' }> |
+export type DesktopRuntimeEvent = Exclude<AgentMuxClientEvent, { type: 'agent-session' | 'terminal-output' }> |
+  Omit<Extract<AgentMuxClientEvent, { type: 'terminal-output' }>, 'data'> |
   (Omit<Extract<AgentMuxClientEvent, { type: 'agent-session' }>, 'session'> & { session: DesktopAgentSessionDisplay })
 
 export type SessionSnapshot = SessionSnapshotBase & (
