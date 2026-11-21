@@ -38,6 +38,8 @@ export function ConversationRecallCard({ card, backlinks, inNamedRow = false }: 
       if (selected && !chosen && !pending) throw new Error('Choose the original Note again. Its selection is unavailable.')
       const destination = await saveRecallCard(card, chosen ?? null)
       setSaved({ destination, observation: backlinks })
+      if (destination.text === 'link-only') setIssue('Saved the source link. Message text wasn’t available to copy.')
+      else if (destination.text === 'partial') setIssue('Saved the available text. Open the original message for its other content.')
     } catch (error) { setIssue(presentError(error)) }
     finally { setSaving(false) }
   }

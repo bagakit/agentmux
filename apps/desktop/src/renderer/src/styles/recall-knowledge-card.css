@@ -11,6 +11,9 @@
 .recall-knowledge-card > svg { margin-top: 3px; }
 .recall-knowledge-card__body { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
 .recall-knowledge-card__kind { color: var(--text-3); font-size: 11px; }
+.recall-knowledge-card__excerpt > summary { width: fit-content; padding-block: var(--sp-2); cursor: pointer; color: var(--text-2); }
+.recall-knowledge-card__excerpt[open] > summary { margin-bottom: var(--sp-2); }
+.recall-knowledge-card .note-embedded-content { min-width: 0; font-size: var(--fs-body); }
 .recall-knowledge-card__actions { display: flex; flex-wrap: wrap; gap: 4px; }
 .recall-knowledge-card__actions button { max-width: 100%; height: auto; white-space: normal; text-align: start; }
 .recall-knowledge-cards { display: grid; gap: 6px; }

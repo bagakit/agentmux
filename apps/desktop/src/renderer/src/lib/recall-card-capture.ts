@@ -1,7 +1,7 @@
 import type { NotebookPage, NoteResource } from '@agentmux/core/notebook-catalog'
 import { recallCardBlocks, recallCardHref, type RecallCard } from '@agentmux/core/notebook-observation'
 import { mintObjectId } from '@agentmux/core/object-id'
-import { newNoteDocument, readNoteDocument, serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
+import { newNoteDocument, readNoteDocument, recallCardNoteBlock, serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { api } from './api'
 import { refreshNotebookLibrary, sameNoteResource } from './notebook-library'
 import { noteResourceReadParams } from './note-history-target'
@@ -9,8 +9,9 @@ import { newRecallDailyResource, recallDailyAddress, registerRecallDaily } from 
 import { scratchTopicsForConfig } from './scratch-topic-snapshots'
 import { persistRecallCardIntent, useAppStore } from '../store'
 import { recallIntentKey, type RecallCardIntent } from './recall-card-intent'
+import { readRecallSource } from './recall-card-source'
 
-type SavedCard = { page: NotebookPage; blockId: string }
+type SavedCard = { page: NotebookPage; blockId: string; text: 'saved' | 'partial' | 'link-only' }
 const pending = new Map<string, Promise<SavedCard>>()
 
 export function saveRecallCard(card: RecallCard, destination: NotebookPage | null, now = new Date()): Promise<SavedCard> {
@@ -77,13 +78,28 @@ async function capture(card: RecallCard, destination: NotebookPage | null, now: 
   if (!existing && intent.phase === 'checking') throw new Error('The original card could not be confirmed in this Note. This save and its exact destination are kept for checking.')
   const targetId = original?.status === 'valid' ? original.note.noteId : dailyId!
   const blockId = existing?.blockId ?? intent.operationId
+  let text: SavedCard['text'] = existing?.body ? 'saved' : 'link-only'
   if (!existing) {
-    const block = { type: 'paragraph', attrs: { blockId }, content: [{ type: 'text', text: intent.card.title, marks: [{ type: 'link', attrs: { href: recallCardHref(intent.card) } }] }] }
+    const source = await readRecallSource(intent.card)
     const note = newNoteDocument('', targetId, blockId, dailyTitle)
-    note.content.content = [block]
-    const serialized = serializeNoteDocument(note)
-    const body = serialized.slice(serialized.indexOf('\n---\n', 4) + 5)
-    const content = result.status === 'read' ? result.document.content + '\n\n' + body : serialized
+    const append = (block: ReturnType<typeof recallCardNoteBlock>) => {
+      note.content.content = [block]
+      const serialized = serializeNoteDocument(note)
+      return result.status === 'read' ? result.document.content + '\n\n' + serialized.slice(serialized.indexOf('\n---\n', 4) + 5) : serialized
+    }
+    let content: string | undefined
+    if (source) {
+      const bodyId = mintObjectId()
+      const candidate = append(recallCardNoteBlock(intent.card, blockId, { containerId: mintObjectId(),
+        blocks: [{ type: 'paragraph', attrs: { blockId: bodyId }, content: [{ type: 'text', text: source.text }] }] }))
+      const read = readNoteDocument(candidate)
+      const body = read.status === 'valid' && recallCardBlocks(read.note.content).find(entry => entry.blockId === blockId)?.body
+      if (body && body[0]?.attrs?.blockId === bodyId && body[0].content?.map(part => part.text).join('') === source.text) {
+        content = candidate
+        text = source.partial ? 'partial' : 'saved'
+      }
+    }
+    content ??= append(recallCardNoteBlock(intent.card, blockId))
     const proposed = readNoteDocument(content)
     if (proposed.status !== 'valid' || !recallCardBlocks(proposed.note.content).some(entry => entry.blockId === blockId && recallCardHref(entry.card) === recallCardHref(intent!.card))) {
       throw new Error('The card could not be added to the end of the original Markdown. Check its ending syntax or choose another Note.')
@@ -110,5 +126,5 @@ async function capture(card: RecallCard, destination: NotebookPage | null, now: 
   const page = catalog.pages[targetId]
   if (!page || !sameNoteResource(page.resource, resource)) throw new Error('The card is in its original file. The Notebook entry still needs to be confirmed.')
   await persistRecallCardIntent(intent, true)
-  return { page, blockId }
+  return { page, blockId, text }
 }
