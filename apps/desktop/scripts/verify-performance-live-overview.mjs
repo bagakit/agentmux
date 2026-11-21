@@ -10,11 +10,14 @@ const root = resolve(import.meta.dirname, '../../..'), execute = promisify(execF
 const test = 'apps/desktop/test/performance-workbench.test.tsx'
 const config = 'apps/desktop/scripts/fixtures/experience-verification/vitest.config.mts'
 const component = 'apps/desktop/src/renderer/src/components/performance/'
-const required = [component + 'PerformanceOverview.tsx', component + 'PerformanceLiveOverview.tsx', component + 'PerformanceMetric.tsx', component + 'PerformanceTrend.tsx']
+const required = [component + 'PerformanceOverview.tsx', component + 'PerformanceLiveOverview.tsx', component + 'PerformanceMetric.tsx', component + 'PerformanceTrend.tsx', component + 'PerformanceHostResources.tsx']
 const productPaths = ['apps/desktop/src/renderer/src/App.tsx', 'apps/desktop/src/renderer/src/components/toolkit/ToolkitStatusBar.tsx', component + 'PerformancePanel.tsx', ...required]
 const cases = [
   { mutation: 'live-trends', title: 'leads with measured App trends', file: component + 'PerformanceMetric.tsx' },
-  { mutation: 'history-unavailable', title: 'leads with measured App trends', file: component + 'PerformanceMetric.tsx' }
+  { mutation: 'history-unavailable', title: 'leads with measured App trends', file: component + 'PerformanceMetric.tsx' },
+  { mutation: 'trend-area', title: 'leads with measured App trends', file: component + 'PerformanceTrend.tsx' },
+  { mutation: 'host-meters', title: 'starts with a scoped overview', file: component + 'PerformanceHostResources.tsx' },
+  { mutation: 'liquid-navigation', title: 'switches accessible sections', file: component + 'PerformanceOverview.tsx' }
 ]
 const base = join(process.env.AGENTMUX_EXPERIENCE_EVIDENCE_HOME ?? join(root, '.bagakit/verification'), 'performance-live-overview')
 await mkdir(base, { recursive: true })

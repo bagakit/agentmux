@@ -23,6 +23,18 @@ const changes: Record<string, { file: string; before: string; after: string }> =
     file: 'apps/desktop/src/renderer/src/components/performance/PerformanceMetric.tsx',
     before: ' live={live} emptyLabel={emptyLabel}', after: ' live={live}'
   },
+  'trend-area': {
+    file: 'apps/desktop/src/renderer/src/components/performance/PerformanceTrend.tsx',
+    before: 'className="performance-trend__area"', after: 'className="performance-trend__area-removed"'
+  },
+  'host-meters': {
+    file: 'apps/desktop/src/renderer/src/components/performance/PerformanceHostResources.tsx',
+    before: '<ResourceMeter value={cpu?.percent} total={100} />', after: '{null}'
+  },
+  'liquid-navigation': {
+    file: 'apps/desktop/src/renderer/src/components/performance/PerformanceOverview.tsx',
+    before: '<LiquidSelectionSurface selected={section} active targetAttribute="data-performance-section-tab" />', after: '{null}'
+  },
   'unconfirmed-copy': {
     file: 'apps/desktop/src/renderer/src/components/ServiceNoticeRow.tsx',
     before: "indeterminate ? 'Result unconfirmed' : 'Needs attention'", after: "indeterminate ? 'Resolved' : 'Needs attention'"
@@ -39,6 +51,7 @@ const owning = [
   'apps/desktop/src/renderer/src/components/performance/PerformanceLiveOverview.tsx',
   'apps/desktop/src/renderer/src/components/performance/PerformanceMetric.tsx',
   'apps/desktop/src/renderer/src/components/performance/PerformanceTrend.tsx',
+  'apps/desktop/src/renderer/src/components/performance/PerformanceHostResources.tsx',
   'apps/desktop/src/renderer/src/components/SessionMailbox.tsx',
   'apps/desktop/src/renderer/src/components/ServiceNoticeRow.tsx',
   'packages/client-ui/src/components/MailboxRecordRow.tsx'

@@ -48,6 +48,10 @@ it('starts with a scoped overview and exposes the original resource owners only 
   expect(overview.textContent).toContain('23.5%'); expect(overview.textContent).toContain('19.0 GiB')
   expect(overview.textContent).toContain('Home volume'); expect(overview.textContent).toContain('18.4%')
   expect(overview.textContent).toContain('not a whole-computer total')
+  const hostMeters = overview.querySelectorAll<HTMLElement>('.performance-host-load .performance-resource-meter > span')
+  expect(hostMeters).toHaveLength(2)
+  expect(hostMeters[0]!.style.transform).toBe('scaleX(0.235)')
+  expect(hostMeters[1]!.style.transform).toBe('scaleX(0.9375)')
   await click('.performance-live__heading .performance-inline-action'); expect(node<HTMLElement>('[data-performance-section="resources"]').hidden).toBe(false)
   await click(tab('overview')); await click('.performance-overview-runs'); expect(node<HTMLElement>('[data-performance-section="resources"]').hidden).toBe(false)
   await click('[data-settings-target="runs"]'); expect(node('[data-run-totals]').textContent).toContain('All tracked Runs')
@@ -67,6 +71,7 @@ it('leads with measured App trends and keeps unavailable samples honest', async 
   expect(live.querySelectorAll('.performance-live-metric')).toHaveLength(2)
   expect(live.querySelectorAll('.performance-trend-reader[data-compact=true][data-live=true]')).toHaveLength(2)
   expect(live.querySelectorAll('.performance-trend__line')).toHaveLength(2)
+  expect(live.querySelectorAll('.performance-trend__area')).toHaveLength(2)
   expect(live.querySelectorAll('.performance-trend__latest')).toHaveLength(2)
   expect(live.querySelector('.performance-run-summary')).not.toBeNull()
 
@@ -85,6 +90,7 @@ it('leads with measured App trends and keeps unavailable samples honest', async 
 
 it('switches accessible sections by keyboard and restores each section reading position', async () => {
   await render()
+  expect(node('.performance-navigation > .liquid-selection')).toBeTruthy()
   const body = node('.performance-body'); body.scrollTop = 120
   await act(async () => body.dispatchEvent(new Event('scroll', { bubbles: true })))
   await act(async () => node(tab('overview')).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })))
