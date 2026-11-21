@@ -11,6 +11,8 @@ import { openRecallCardNote, type RecallBacklinks, type RecallDestination } from
 import { recallIntentKey } from '../lib/recall-card-intent'
 import { refreshNotebookLibrary, useNotebookLibrary } from '../lib/notebook-library'
 import { RecallCardLink, RecallKnowledgeCard } from './RecallKnowledgeCard'
+import { RecallCardBody } from './RecallCardBody'
+import { SavedRecallCardBody } from './SavedRecallCardBody'
 
 const Chevron = semanticIconComponent('navigation.down')
 
@@ -25,7 +27,8 @@ export function ConversationRecallCard({ card, backlinks, inNamedRow = false }: 
   const [issue, setIssue] = useState<string | null>(null)
   const [saved, setSaved] = useState<{ destination: RecallDestination; observation: RecallBacklinks | null | undefined } | null>(null)
   const pages = Object.values(library?.pages ?? {}).filter(page => !notebookPageArchiveRoot(library!.pages, page.noteId))
-  const links = [...(backlinks?.byCard.get(recallCardHref(card)) ?? [])]
+  const href = recallCardHref(card)
+  const links = [...(backlinks?.byCard.get(href) ?? [])]
   if (saved && (backlinks === saved.observation || !backlinks?.complete) &&
     !links.some(link => link.page.noteId === saved.destination.page.noteId && link.blockId === saved.destination.blockId)) {
     links.push(saved.destination)
@@ -44,10 +47,14 @@ export function ConversationRecallCard({ card, backlinks, inNamedRow = false }: 
     finally { setSaving(false) }
   }
   return <div className="recall-card-capture">
-    {links.length ? <RecallKnowledgeCard kind="Recall" title={card.title} showTitle={!inNamedRow} actions={links.map(({ page, blockId }) =>
-      <RecallCardLink key={JSON.stringify([page.noteId, blockId])} onOpen={document => { void openRecallCardNote(page, blockId, document).catch(error => setIssue(presentError(error))) }}>Open {page.title}</RecallCardLink>
-    )} /> : null}
-    <details onToggle={event => {
+    {links.map(destination => {
+      const { page, blockId } = destination
+      const title = destination.title ?? card.title
+      return <RecallKnowledgeCard key={JSON.stringify([href, page.noteId, blockId, page.resource])} kind="Recall" title={title} showTitle={!inNamedRow || title !== card.title} actions={
+        <RecallCardLink onOpen={document => { void openRecallCardNote(page, blockId, document).catch(error => setIssue(presentError(error))) }}>Open {page.title}</RecallCardLink>
+      }><RecallCardBody><SavedRecallCardBody destination={destination} href={href} /></RecallCardBody></RecallKnowledgeCard>
+    })}
+    <details className="recall-card-capture__save" onToggle={event => {
       if (event.currentTarget.open) void refreshNotebookLibrary().catch(error => setIssue(presentError(error)))
     }}>
       <summary><Chevron size={12} aria-hidden="true" />{pending ? 'Continue Recall save' : links.length ? 'Save to another Note' : 'Save to Recall'}</summary>

@@ -18,8 +18,9 @@
 .recall-knowledge-card__actions button { max-width: 100%; height: auto; white-space: normal; text-align: start; }
 .recall-knowledge-cards { display: grid; gap: 6px; }
 .recall-knowledge-cards > h2 { margin: 0; font-size: 12px; }
-.recall-card-capture { grid-column: 1 / -1; }
-.recall-card-capture summary { cursor: pointer; width: fit-content; color: var(--text-3); }
+.recall-card-capture { grid-column: 1 / -1; display: grid; gap: var(--sp-2); }
+/* Note authorship buttons sit just after the text and include a focus outline. */
+.recall-card-capture .note-embedded-content { padding-inline-end: 25px; }
 .conversation-landmark .recall-card-capture form { display: grid; gap: 7px; padding-block: 5px; }
 .recall-card-capture select { max-width: 100%; min-width: 0; }
 
@@ -32,9 +33,9 @@
   max-width: calc(var(--note-content-width, 760px) - var(--sp-8) - var(--sp-8));
   margin: var(--sp-4) auto;
 }
-.recall-card-capture summary { list-style: none; display: flex; align-items: center; gap: 4px; }
-.recall-card-capture summary::-webkit-details-marker { display: none; }
-.recall-card-capture details[open] summary svg { transform: rotate(180deg); }
+.recall-card-capture__save > summary { list-style: none; display: flex; align-items: center; gap: 4px; cursor: pointer; width: fit-content; color: var(--text-3); }
+.recall-card-capture__save > summary::-webkit-details-marker { display: none; }
+.recall-card-capture__save[open] > summary svg { transform: rotate(180deg); }
 .recall-card-capture label { display: grid; gap: 4px; }
 @container (max-width: 420px) {
   .note-original-editor > .recall-knowledge-cards { width: calc(100% - var(--sp-4) - var(--sp-4)); }

@@ -6,7 +6,7 @@ import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/d
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { parseConversationLandmarkWrite, type ConversationItemRef, ConversationRef, ConversationLandmark, ConversationLandmarkChange, ConversationLandmarkPage, ConversationLandmarkWrite } from '@agentmux/core/conversation'
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { Button } from '@agentmux/client-ui/components/Button'
 import { api } from '../lib/api'
@@ -194,15 +194,16 @@ function ConversationLandmarkListInner({ reference, reveal, active }: { referenc
     setLinkStatus(null)
   }
 
-  function findRecallLinks() {
-    if (!open || graphRead.current) return
+  const { hostId, agentSessionId } = reference
+  const findRecallCards = useCallback(() => {
+    if (graphRead.current) return
     const read = new AbortController()
     graphRead.current = read
     setLinkStatus(null)
     setLookingUpLinks(true)
     void api.notebooks.graph({}, { signal: read.signal }).then(snapshot => {
       if (read.signal.aborted) return
-      const observed = recallBacklinks(snapshot, reference)
+      const observed = recallBacklinks(snapshot, { hostId, agentSessionId })
       setBacklinks(observed)
       if (!observed.complete) setLinkStatus('partial')
       else if (!observed.byCard.size) setLinkStatus('empty')
@@ -213,7 +214,10 @@ function ConversationLandmarkListInner({ reference, reveal, active }: { referenc
       graphRead.current = null
       setLookingUpLinks(false)
     })
-  }
+  }, [hostId, agentSessionId])
+  useEffect(() => {
+    if (active && open && hasPoints) findRecallCards()
+  }, [active, open, hasPoints, findRecallCards])
   const request = useRef(0), source = JSON.stringify([reference.hostId, reference.agentSessionId, active]), currentSource = useRef(source); currentSource.current = source
   useEffect(() => () => { request.current++ }, [source])
   useEffect(() => { if (state.confirmed) setEdit(null) }, [state.confirmed])
@@ -227,11 +231,12 @@ function ConversationLandmarkListInner({ reference, reveal, active }: { referenc
     else setNavigation('Navigation cancelled by your later reading intent. The point is kept.')
   }
   const count = state.page?.points.length ?? 0
-  const linkMessage = linkStatus === 'partial' ? 'Some Note connections could not be checked.'
-    : linkStatus === 'empty' ? 'No Recall links found for this conversation.'
+  const linkMessage = lookingUpLinks ? 'Looking up Recall cards…'
+    : linkStatus === 'partial' ? 'Some Note connections could not be checked.'
+    : linkStatus === 'empty' ? 'No saved Recall cards found for this conversation.'
     : linkStatus === 'unavailable' ? (backlinks?.byCard.size
-      ? 'Couldn’t refresh Recall links. Previously found links are still available.'
-      : 'Couldn’t look up Recall links. Try again.') : null
+      ? 'Couldn’t refresh Recall cards. Previously found cards are still available.'
+      : 'Couldn’t look up Recall cards. Refresh points to retry.') : null
   return <LandmarkPopover title="Reading points" trigger={<><BookmarkIcon size={13} aria-hidden="true"/>{count > 0 ? <span className="conversation-landmark__count">{count}</span> : null}</>} active={active} onOpen={() => { setOpen(true); void state.refresh() }} onClose={closeList}>
     <div className="conversation-landmark__list">
       {!state.page && !state.issue ? <p role="status">{state.busy ? 'Reading saved points…' : 'Open the list to read saved points.'}</p> : null}
@@ -249,7 +254,7 @@ function ConversationLandmarkListInner({ reference, reveal, active }: { referenc
       {linkMessage && hasPoints ? <p role="status">{linkMessage}</p> : null}
     </div>
     <Pending state={state}/><RetainedLandmarkIntents reference={reference} active={active} onAccepted={state.adopt} excludeOperationId={state.intent?.operationId}/>{navigation ? <p role="status">{navigation}</p> : null}
-    <footer><Button type="button" disabled={state.busy} onClick={() => { void state.refresh() }}>Refresh points</Button>{hasPoints ? <Button type="button" disabled={lookingUpLinks} onClick={findRecallLinks}>{lookingUpLinks ? 'Looking up Recall links…' : linkStatus === 'unavailable' ? 'Retry link lookup' : 'Find Recall links'}</Button> : null}</footer>
+    <footer><Button type="button" disabled={state.busy} onClick={() => { void state.refresh(); if (hasPoints) findRecallCards() }}>Refresh points</Button></footer>
   </LandmarkPopover>
 }
 

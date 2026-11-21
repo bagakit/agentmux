@@ -2,13 +2,13 @@ import { RecallOriginalRecord } from './RecallOriginalRecord'
 import { recallCardBlocks, type RecallCard } from '@agentmux/core/notebook-observation'
 import { openRecallCardRecord } from '../lib/recall-card-navigation'
 import { RecallCardLink, RecallKnowledgeCard } from './RecallKnowledgeCard'
+import { RecallCardBody, RecallCardContent } from './RecallCardBody'
 import { presentKnowledgeSurface } from '../lib/knowledge-surface-navigation'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { NoteFileContext, NoteFileLinkContext, useNoteFileResource } from '@agentmux/client-ui/components/NoteFileContext'
 import { useDesktopNoteLinkOpener } from '../lib/note-file-link'
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import type { JSONContent } from '@tiptap/core'
 import { NoteViewToolbarContext } from '../lib/note-view-toolbar'
 import { documentKey } from '../lib/workbench-tabs'
 import type { FileDocument } from '../../../shared/contracts'
@@ -19,7 +19,7 @@ import { NotebookPageDetails } from './NotebookPageDetails'
 import { noteSavedEditors } from './NoteParticipants'
 import type { NotebookPage, NoteResource } from '@agentmux/core/notebook-catalog'
 import { sameNoteResource, useNotebookLibrary } from '../lib/notebook-library'
-import { NoteBlockEditor, ReadOnlyBlock, type NoteEditorHandle } from './NoteBlockEditor'
+import { NoteBlockEditor, type NoteEditorHandle } from './NoteBlockEditor'
 import { useWorkbenchBrowserPresentation } from '../lib/workbench-presentation'
 import { openNotebookPage } from '../lib/recall-notebooks'
 import { useAppStore } from '../store'
@@ -28,15 +28,6 @@ import { useNoteLinkNavigation } from '../lib/use-note-link-navigation'
 import { NoteLinksPanel } from './NoteLinksPanel'
 import { NoteFileIdentity } from './NoteFileIdentity'
 import type { NoteFileTarget } from '../lib/file-document-consumers'
-
-function RecallSavedBody({ body }: { body: readonly JSONContent[] }) {
-  const [open, setOpen] = useState(false)
-  const content = useMemo(() => ({ type: 'doc', content: [...body] }), [body])
-  return <details className="recall-knowledge-card__excerpt" onToggle={event => setOpen(event.currentTarget.open)}>
-    <summary>Saved content</summary>
-    {open ? <ReadOnlyBlock content={content} /> : null}
-  </details>
-}
 
 /** Only an in-flight explicit reveal observes its original editor and ancestor visibility. */
 function observeRevealDOM(handle: NoteEditorHandle, attempt: () => boolean): () => void {
@@ -178,7 +169,7 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
     <h2>Knowledge cards</h2>
     {cards.map(({ blockId, card, body }) => <RecallKnowledgeCard kind="Reading point" key={blockId} title={card.title} actions={
       <RecallCardLink onOpen={() => { void openRecallCardRecord(card).then(opened => { if (!opened) setOriginalRecord(card) }).catch(error => setIssue(presentError(error))) }}>Open original message</RecallCardLink>
-    }>{presentation.active && body?.length ? <RecallSavedBody body={body} /> : null}</RecallKnowledgeCard>)}
+    }>{presentation.active && body?.length ? <RecallCardBody><RecallCardContent blocks={body} /></RecallCardBody> : null}</RecallKnowledgeCard>)}
   </section> : null
   return <NoteFileLinkContext.Provider value={openAttachment}><NoteFileContext.Provider value={resource ?? parentResource}><div className="note-file-view">
     {restoreIssue || issue ? <div className="note-knowledge-notice" role="status">{restoreIssue || issue}</div> : null}

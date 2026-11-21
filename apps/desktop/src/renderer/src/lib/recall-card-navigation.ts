@@ -7,7 +7,7 @@ import { presentKnowledgeSurface } from './knowledge-surface-navigation'
 import { openNotebookPage, resolveNotebookPageWorkface } from './recall-notebooks'
 import { sessionPresentationById } from './session-presentation'
 
-export type RecallDestination = { page: NotebookPage; blockId: string }
+export type RecallDestination = { page: NotebookPage; blockId: string; title?: string }
 export type RecallBacklinks = {
   complete: boolean
   byCard: ReadonlyMap<string, readonly RecallDestination[]>
@@ -21,18 +21,18 @@ export function recallBacklinks(snapshot: NotebookGraphSnapshot, conversation: C
     const page = snapshot.catalog.pages[entry.source.noteId]
     if (!page) continue
     const key = recallCardHref(entry.card), links = byCard.get(key) ?? []
-    links.push({ page, blockId: entry.source.blockId })
+    links.push({ page, blockId: entry.source.blockId, title: entry.card.title })
     byCard.set(key, links)
   }
   return { complete: snapshot.graph.completeness === 'complete', byCard }
 }
 
-export async function openRecallCardNote(page: NotebookPage, blockId: string, sourceDocument: Document): Promise<void> {
+export async function openRecallCardNote(page: NotebookPage, blockId: string | undefined, sourceDocument: Document): Promise<void> {
   const state = useAppStore.getState()
   const original = resolveNotebookPageWorkface(page)
   state.setRecallNotebook(page.notebookId, page.noteId)
   if (!await presentKnowledgeSurface('recall', state.setMainSurface, { inputPolicy: 'target', sourceDocument }) ||
-    !await openNotebookPage(original, undefined, undefined, { noteId: page.noteId, blockId })) {
+    !await openNotebookPage(original, undefined, undefined, blockId === undefined ? undefined : { noteId: page.noteId, blockId })) {
     throw new Error('The original Note is kept. Its card position is not currently visible.')
   }
 }

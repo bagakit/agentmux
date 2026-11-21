@@ -45,6 +45,9 @@ const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
 
 type ReferenceContextValue = { knowledge: NoteKnowledge; trail: readonly string[]; sourceName: (source: NoteSource) => string | undefined; onOpen: (source: NoteSource, blockId: string) => void; onOpenLink?: ((link: NoteLinkOpenRequest) => void) | undefined }
 const ReferenceContext = createContext<ReferenceContextValue | null>(null)
+export function NoteReferenceScope({ children, ...scope }: Omit<ReferenceContextValue, 'trail'> & { children: ReactNode }) {
+  return <ReferenceContext.Provider value={{ ...scope, trail: [] }}>{children}</ReferenceContext.Provider>
+}
 const targetKey = (target: NoteBlockTarget) => JSON.stringify([target.noteId, target.blockId])
 function referenceExtension() {
   return NoteBlockReferenceNode.extend({ addNodeView() { return ReactNodeViewRenderer(NoteReferenceView) } })
@@ -403,7 +406,7 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
     else showBlockAction(editor.state.selection.from)
   }
   useEffect(() => { if (editor && !editor.isDestroyed && editor.view.hasFocus()) showSelectedAction() }, [editor, formatting?.from, formatting?.to])
-  return <ReferenceContext.Provider value={{ knowledge: shared?.knowledge ?? knowledge, trail: [], sourceName, onOpen, onOpenLink }}><div className="note-editor" data-note-empty={note.content.content?.length === 1 && note.content.content[0]?.type === 'paragraph' && !note.content.content[0].content?.length}>
+  return <NoteReferenceScope knowledge={shared?.knowledge ?? knowledge} sourceName={sourceName} onOpen={onOpen} onOpenLink={onOpenLink}><div className="note-editor" data-note-empty={note.content.content?.length === 1 && note.content.content[0]?.type === 'paragraph' && !note.content.content[0].content?.length}>
     {mappingIssue && <section className="note-knowledge-notice" aria-label="Incoming update recovery">
       <p>Both drafts are kept. If blocks moved or cannot be matched reliably, compare the drafts and choose which one to continue editing.</p>
       <Button type="button" onClick={() => snapshot.current?.retry()}>Retry incoming update</Button>
@@ -467,5 +470,5 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
         : <p className="note-scope">Select a block to see its exact incoming references.</p>}
       {knowledge.invalid.length ? <p className="note-knowledge-notice" role="status">{knowledge.invalid.length} Note file could not be indexed. Its original source is preserved.</p> : null}
     </details> : null}
-  </div>{afterEditor}</ReferenceContext.Provider>
+  </div>{afterEditor}</NoteReferenceScope>
 }
