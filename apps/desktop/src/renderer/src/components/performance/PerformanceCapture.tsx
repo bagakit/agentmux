@@ -83,8 +83,8 @@ export function PerformanceCapture({ observation, externalBusy = false, onBusyCh
   // Retained rows change only with their original result or the exact current target.
   const animationView = useMemo(() => animations ? <AnimationInspectionResult result={animations.result} sourceChanged={animations.key !== key}
     onExport={() => downloadPerformanceJSON(animations.result, 'renderer-animations.json')} /> : null, [animations, key])
-  return <details className="performance-disclosure performance-capture" data-performance-capture>
-    <summary>Analyse this window <span>Explicit diagnostics</span></summary>
+  return <section className="performance-scene performance-capture" data-performance-capture>
+    <div className="performance-section-heading"><strong>Analyse this window</strong><span>Explicit diagnostics</span></div>
     <p className="performance-note">Capture while reproducing the lag. V8 samples explain JavaScript; timeline records rendering stages. Neither is a leak verdict.</p>
     {!target ? <p className="performance-state">The current Renderer process instance is unconfirmed. Wait for matching window and process readings.</p> : null}
     <div className="performance-capture-actions">
@@ -92,9 +92,10 @@ export function PerformanceCapture({ observation, externalBusy = false, onBusyCh
       <button type="button" data-performance-action="trace" disabled={!target || busy !== null || externalBusy} onClick={() => void run('trace')}>{busy === 'trace' ? 'Tracing…' : 'Capture timeline · 2s'}</button>
       <button type="button" data-performance-action="animations" disabled={!target || busy !== null || externalBusy} onClick={() => void inspectAnimations()}>{busy === 'animations' ? 'Inspecting…' : 'Inspect animations'}</button>
     </div>
+    {!capture && !animations && !busy && !error ? <p className="performance-empty">No diagnostic capture yet. Choose a reading while reproducing the issue.</p> : null}
     {error ? <p className="performance-state" data-tone="warning">{error}</p> : null}
     {animationView}
     {capture && capture !== completedProfile ? <CaptureResult key="latest" capture={capture.value} sourceChanged={capture.key !== key} /> : null}
     {completedProfile ? <CaptureResult key={completedProfile.value.result.timing.requestedAt} capture={completedProfile.value} sourceChanged={completedProfile.key !== key} retained={capture !== completedProfile} /> : null}
-  </details>
+  </section>
 }

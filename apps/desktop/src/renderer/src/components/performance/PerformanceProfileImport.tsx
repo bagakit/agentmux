@@ -61,8 +61,8 @@ export const PerformanceProfileImport = memo(function PerformanceProfileImport()
     catch { failRead() }
   }
   const report = useMemo(() => imported ? summariseV8Profile({ data: imported.analysis, reason: null }, imported.source) : null, [imported])
-  return <details className="performance-disclosure" data-performance-profile-import>
-    <summary>Saved CPU profile <span>Local analysis</span></summary>
+  return <section className="performance-scene" data-performance-profile-import>
+    <div className="performance-section-heading"><strong>Saved CPU profile</strong><span>Local analysis</span></div>
     <p className="performance-note">Open an exported .cpuprofile to inspect its samples. The file stays on this device; importing does not start a capture.</p>
     <input ref={input} type="file" hidden accept=".cpuprofile,application/json" aria-label="Choose saved CPU profile" disabled={busy}
       onChange={event => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; if (file) importFile(file) }} />
@@ -70,6 +70,7 @@ export const PerformanceProfileImport = memo(function PerformanceProfileImport()
       <button type="button" disabled={busy} onClick={() => input.current?.click()}>Import CPU profile</button>
       {imported || busy || error ? <button type="button" onClick={clear}>Clear imported profile</button> : null}
     </div>
+    {!imported && !busy && !error ? <p className="performance-empty">No saved profile loaded. Import one to inspect it locally.</p> : null}
     {busy ? <p className="performance-state" role="status">Reading the selected local file…</p> : null}
     {error ? <div className="performance-state" data-tone="warning" role="alert"><strong>{error.name}</strong>: {error.reason}
       {imported ? ' The previous imported profile remains below.' : ''}
@@ -85,5 +86,5 @@ export const PerformanceProfileImport = memo(function PerformanceProfileImport()
       <PerformanceProfileView key={imported.source.sha256} analysis={imported.analysis} />
       <details className="performance-disclosure"><summary>File source</summary><p className="performance-note">{imported.source.bytes} original bytes<br />SHA-256 {imported.source.sha256}<br />No capture identity is present in the bare profile.</p></details>
     </section> : null}
-  </details>
+  </section>
 })
