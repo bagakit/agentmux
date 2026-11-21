@@ -5,6 +5,8 @@ import { createHash } from 'node:crypto'
 import assert from 'node:assert/strict'
 import source from './vitest.mote-context.config.mts'
 const mutations: Record<string, [string, string, string]> = {
+  'hide-device-disconnect': ['apps/desktop/src/renderer/src/components/FocusExecutionDevice.tsx', "transport && transport !== 'unopened' ? transport", "transport && transport !== 'unopened' ? (transport === 'disconnected' ? 'connected' : transport)"],
+  'borrow-replacement-device': ['apps/desktop/src/renderer/src/lib/use-focus-sources.tsx', ' || (boundRuntime && boundRuntime !== candidate.runtimeId)', ''],
   'source-skills-exclusion': ['apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx', 'loadSkills={completion.loadSkills}', 'loadSkills={source ? async () => { throw new Error("Original Skills excluded by the old Source branch") } : completion.loadSkills}'],
   'wrong-skills-route': ['apps/desktop/src/renderer/src/lib/use-composer-candidates.tsx', 'originalSkills ? await originalSkills() : sessionId && sessionHostId ? await api.ui.listAgentSkills(sessionHostId, sessionId)', 'originalSkills ? await api.ui.listAgentSkills("local", "same-original-sid") : sessionId && sessionHostId ? await api.ui.listAgentSkills(sessionHostId, sessionId)'],
   'source-history-exclusion': ['apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx', '...(source?.inputReading ? { originalReading: source.inputReading } : {})', '...{}'],

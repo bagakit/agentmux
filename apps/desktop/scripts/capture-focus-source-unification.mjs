@@ -215,7 +215,7 @@ try{
   const out=join(privateRoot,'out');await mkdir(out)
   const renderer=join(out,'app.js')
   const buildResult=await build({entryPoints:[join(fixture,'entry.mjs')],outfile:renderer,bundle:true,platform:'browser',format:'esm',conditions:['production'],target:'es2022',jsx:'automatic',metafile:true,plugins:[packageSources,observe],logLevel:'silent',
-    define:{__AGENTMUX_WEB_PREVIEW__:'true','process.env.NODE_ENV':'"production"'},loader:{'.avif':'file','.gif':'file','.png':'file','.svg':'file','.woff2':'file','.woff':'file','.ttf':'file'}})
+    define:{__AGENTMUX_WEB_PREVIEW__:'true','process.env.NODE_ENV':'"production"'},loader:{'.avif':'file','.gif':'file','.jpg':'file','.png':'file','.svg':'file','.woff2':'file','.woff':'file','.ttf':'file'}})
   receipt.metafile={inputCount:Object.keys(buildResult.metafile.inputs).length,outputs:Object.fromEntries(Object.entries(buildResult.metafile.outputs).map(([name,value])=>[relative(privateRoot,resolve(root,name)),{bytes:value.bytes}])),sha256:hash(JSON.stringify(buildResult.metafile))};receipt.inputs=Object.fromEntries([...inputs].map(([path,sha])=>[relative(root,path),sha]));receipt.transformations=transformations
   for(const suffix of ['App.tsx','GlobalFocusSurface.tsx','WorkspaceWorkbench.tsx','StableWorkbenchView.tsx','store.ts','focus-tab-projection.ts','agent-focus.ts'])assert.ok([...inputs.keys()].some(path=>path.endsWith('/'+suffix)),'Actual loaded '+suffix)
   if(agentPins)for(const suffix of ['FocusContextMenu.tsx','FocusPinnedAgents.tsx','focus-agent-pins.ts'])assert.ok([...inputs.keys()].some(path=>path.endsWith('/'+suffix)),'Actual pin consumer loaded '+suffix)

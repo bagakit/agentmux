@@ -17,6 +17,12 @@ export function prepareSourceConnection({api,snapshot,opening,useAppStore}) {
   lose(){const error={code:'HOST_SERVICE_UNCONFIRMED',message:'The platform service was registered but its original endpoint is not yet confirmed. Reconnect to the same namespace; its Runs were retained.'};for(const emit of spaceListeners)emit({type:'error',error});for(const emit of sessionListeners)emit({type:'error',error})},
   recover(){checking=true;ready('local')},
   finish(){checking=false;for(const release of releases.splice(0))release()},
+  transport(hostId,state){
+   useAppStore.setState(current=>({hostTransports:{...current.hostTransports,[hostId]:{
+    state,transport:'ssh',establishedAt:Date.now()-5000,observedAt:Date.now(),fallback:false
+   }}}))
+  },
+  layout(value){useAppStore.getState().setFocusTaskLayout(value)},
   unmounted(){
    const hosts=[{id:'original-mini-route',kind:'ssh',hostname:'mini.invalid',label:'Review Mac',runtimeId:'original-mini-runtime'},
     {id:'original-build-route',kind:'ssh',hostname:'build.invalid',label:'Build Host',runtimeId:'original-build-runtime'},

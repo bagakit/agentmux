@@ -30,6 +30,29 @@ module.exports = async ({ win, read, until, settle, click, capture, result }) =>
   assert.deepEqual(result.after.drafts, result.before.drafts)
 
   await read('window.sourceConnectionProof.unmounted()')
+  const device = '[data-focus-device="original-mini-route"]'
+  await read('window.sourceConnectionProof.transport("original-mini-route", "connected")')
+  await until('exact remote label on a connected card', () => at(device + '[data-connection="connected"]'))
+  await capture('execution-device-connected.png', 'Remote execution device remains visible while connected')
+  await read('window.sourceConnectionProof.transport("original-mini-route", "disconnected")')
+  await until('exact transport disconnect visible on the original card', () => at(device + '[data-connection="disconnected"]'))
+  await capture('execution-device-disconnected.png', 'Original remote task with a separate transport disconnect in Cards')
+  win.setContentSize(420,800)
+  await read('window.unifiedFocusProof.theme("light")')
+  await read('window.sourceConnectionProof.layout("list")')
+  await until('compact list maintains exact remote label and disconnect', () => at('.focus-context--list ' + device + '[data-connection="disconnected"]'))
+  await until('narrow row shows both the full task title and the remote device', () => read(`(() => {
+    const chip = ${query('.focus-context--list ' + device + '[data-connection="disconnected"]')};
+    const title = chip?.parentElement.querySelector('.focus-task-list__title');
+    const name = chip?.querySelector('.focus-execution-device__name');
+    return !!title && !!name && title.scrollWidth === title.clientWidth && name.scrollWidth === name.clientWidth &&
+      chip.getBoundingClientRect().top >= title.getBoundingClientRect().bottom;
+  })()`))
+  await capture('execution-device-disconnected-narrow.png', 'Compact list retains the remote device and disconnect at 420 px in light mode')
+  win.setContentSize(1440,900)
+  await read('window.unifiedFocusProof.theme("dark")')
+  await read('window.sourceConnectionProof.layout("cards")')
+  await read('window.sourceConnectionProof.transport("original-mini-route", "connected")')
   const hint = '.focus-core-upgrade'
   const multiple = hint + ' [aria-label="Update Core on 2 hosts"]'
   const dismiss = hint + ' [aria-label="Dismiss Core update hint"]'

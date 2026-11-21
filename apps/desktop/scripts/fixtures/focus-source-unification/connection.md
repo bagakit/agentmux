@@ -2,6 +2,8 @@
 
 Run `node apps/desktop/scripts/capture-focus-source-unification.mjs --evidence <private-directory> --source-connection` from the repository root.
 
+The current Electron scene also reads the execution device on a real Focus card, transitions its existing Host transport observation from connected to disconnected, then checks the same label in Compact list at 420 px in light mode. The Host snapshots are controlled inputs. The production Focus card, list, original transport presentation and layout render the snapshots. Behavior and visual boundaries are defined by the [Focus behavior](../../../../../docs/design/behavior/focus-context.md#space-关系与显示项目) and [Focus presentation](../../../../../docs/design/presentation/focus-context.md).
+
 This scene exercises the real App, Focus, shared Source readers, retained projection and service notice. Only original Host transport/events and terminal painting are controlled preview leaves; it does not operate a user Run, install an App or establish a historical incident cause.
 
 The scene first reads an original project, then ends its two observation streams. Only one existing Recent Focus control signals the retained source issue. Open it, publish that Host's ready event while holding its replacement reads, and release the real renderer read receipts. The original tasks and drafts stay available during recovery.

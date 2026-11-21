@@ -76,7 +76,7 @@ function MainFocusFixture({ navigate, regionOnly = false }: { navigate: (id: str
 /** Real original Core/Space and scoped Unix→Main→IPC→Preload→Renderer.
  * Native process state is the existing source fixture leaf. No unified hook,
  * Context, lane, card, filter, menu or preview implementation is mocked. */
-async function fixture(options: { foreign?: boolean; unavailable?: boolean; nativeUnavailable?: boolean; metadataUnknown?: boolean; sourceOnly?: boolean; legacyNoAdmission?: boolean; multiple?: boolean; missing?: boolean; unconfirmed?: boolean; staleRun?: boolean; unobservedRun?: boolean; largeHistory?: boolean; historyImage?: boolean; originalSkills?: boolean; unmountedKind?: 'folder' | 'topic' | 'mote'; occurrence?: 'none' | 'two' } = {}) {
+async function fixture(options: { foreign?: boolean; unavailable?: boolean; nativeUnavailable?: boolean; metadataUnknown?: boolean; sourceOnly?: boolean; legacyNoAdmission?: boolean; multiple?: boolean; missing?: boolean; unconfirmed?: boolean; staleRun?: boolean; unobservedRun?: boolean; largeHistory?: boolean; historyImage?: boolean; originalSkills?: boolean; unmountedKind?: 'folder' | 'topic' | 'mote'; occurrence?: 'none' | 'two'; separateLocalRuntime?: boolean } = {}) {
   const privateCleanup: Array<() => unknown | Promise<unknown>> = []
   const placementPath = options.originalSkills ? await mkdtemp(join(tmpdir(), 'amx-composer-skills-')) : '/b/project'
   if (options.originalSkills) privateCleanup.push(() => rm(placementPath, { recursive: true, force: true }))
@@ -138,7 +138,7 @@ async function fixture(options: { foreign?: boolean; unavailable?: boolean; nati
   const config = structuredClone(DEFAULT_CONFIG)
   config.hosts = [{ id: 'local', kind: 'local', label: 'Original local owner' }, { id: 'source-route', kind: 'ssh', label: 'Original source route', hostname: 'source.invalid' }]
   config.workspaces = [{ id: 'original-b-project', kind: 'folder', hostId: 'local', path: placementPath, name: 'Ordinary analysis project' }]
-  const localOwner = options.unmountedKind ? original.d : original.b
+  const localOwner = options.unmountedKind || options.separateLocalRuntime ? original.d : original.b
   if (options.unmountedKind) await localOwner.put(SID)
   const main = spaceMountTransport(cleanup, [
     { id: 'local', carrier: { forwardRpc: localOwner.rpc.call.bind(localOwner.rpc), subscribeRpc: localOwner.rpc.subscribe.bind(localOwner.rpc) } },
@@ -288,6 +288,57 @@ it.each(['mote', 'topic', 'folder'] as const)('reads a saved %s affiliation and 
   }))
   expect(useAppStore.getState().sessions.find(value => value.id === f.remote.id)!.control).toEqual(control)
   expect(useAppStore.getState().agentComposerDrafts[SID]).toBe('Keep this original local draft')
+})
+
+it('labels the exact execution device and distinguishes transport loss from the original Focus task', async () => {
+  const f = await fixture({ unmountedKind: 'mote' })
+  const selector = '[data-focus-device]'
+  const label = () => cardWith('Existing remote result').querySelector(selector)!
+  const connection = async (state: 'connected' | 'disconnected' | 'connecting') => {
+    const established = state !== 'connecting'
+    await act(async () => useAppStore.setState({ hostTransports: {
+      [f.target.hostId]: { state, transport: established ? 'ssh' : null, establishedAt: established ? 1 : null, observedAt: 2, fallback: false },
+      unrelated: { state: 'disconnected', transport: 'ssh', establishedAt: 1, observedAt: 2, fallback: false }
+    } }))
+  }
+  await vi.waitFor(() => expect(cardWith('Existing remote result').closest('.focus-project-lanes__row')?.textContent).toContain('Original Mote'))
+  const original = cardWith('Existing remote result'), state = original.dataset.state, bucket = original.dataset.bucket
+  const control = useAppStore.getState().sessions.find(item => item.id === f.remote.id)!.control
+  expect(label().getAttribute('data-focus-device')).toBe(f.target.hostId)
+  expect(label().getAttribute('data-connection')).toBe('unconfirmed')
+  expect(cardWith(localName).querySelector(selector)).toBeNull()
+  await connection('connected')
+  expect(label().getAttribute('data-connection')).toBe('connected')
+  await connection('disconnected')
+  expect(label().getAttribute('data-connection')).toBe('disconnected')
+  expect(label().textContent).toContain('Disconnected')
+  expect(original.getAttribute('aria-description')).toMatch(/Execution device: .*Connection disconnected/)
+  expect(cardWith('Existing remote result')).toBe(original)
+  expect(original.dataset).toMatchObject({ state, bucket })
+  expect(original.textContent).toContain(foreignRecap)
+  expect(useAppStore.getState().sessions.find(item => item.id === f.remote.id)!.control).toEqual(control)
+  expect(useAppStore.getState().agentComposerDrafts[SID]).toBe('Keep this original local draft')
+  await connection('connecting')
+  expect(label().textContent).toContain('Connecting')
+  await act(async () => useAppStore.getState().setFocusTaskLayout('list'))
+  expect(cardWith('Existing remote result').className).toContain('focus-context--list')
+  expect(label().getAttribute('data-connection')).toBe('connecting')
+  await connection('connected')
+  expect(label().getAttribute('data-connection')).toBe('connected')
+  expect(label().textContent).not.toMatch(/Disconnected|Connecting/)
+})
+
+it('does not attach a replacement Runtime connection to a retained Source card', async () => {
+  const f = await fixture({ sourceOnly: true, separateLocalRuntime: true })
+  await f.settle(1)
+  const device = '[data-focus-device]'
+  await vi.waitFor(() => expect(cardWith(localName).querySelector(device)?.getAttribute('data-focus-device')).toBe(f.target.hostId))
+  await act(async () => useAppStore.setState(state => ({
+    config: { ...state.config!, hosts: state.config!.hosts.map(host => host.id === f.target.hostId && host.kind === 'ssh'
+      ? { ...host, runtimeId: f.d.owner.runtimeId } : host) },
+    hostTransports: { [f.target.hostId]: { state: 'connected', transport: 'ssh', establishedAt: 1, observedAt: 2, fallback: false } }
+  })))
+  expect(cardWith(localName).querySelector(device)).toBeNull()
 })
 
 it('keeps confirmed Mote membership with no layout and exposes the same read in the actual CLI', async () => {
