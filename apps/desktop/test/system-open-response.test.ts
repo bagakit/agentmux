@@ -10,6 +10,7 @@ import { agentBookmarks } from '../src/renderer/src/lib/agent-bookmarks'
 import { desktopUserFragments } from '../src/renderer/src/lib/desktop-user-state'
 import { openSystemUrlInSurvey } from '../src/renderer/src/lib/survey-system-url'
 import { WebUrlIngress } from '../src/main/web-url-ingress'
+import { planSpatialZone } from '../src/renderer/src/lib/space-agent-control'
 import { startWorkfaceFixture, tabId } from './helpers/workface-control-fixture'
 
 const initial = useAppStore.getState()
@@ -43,6 +44,16 @@ function system() {
   ingress.ready(async (request, signal) => { const outcome = await openSystemUrlInSurvey(host, request, signal); outcomes.push(outcome); return outcome }, issue => issues.push(issue))
   return { ingress, outcomes, issues, navigate() { input++; useAppStore.getState().setMainSurface('board') } }
 }
+
+it('system-open: preparing a Survey Zone leaves unrelated Region projection out of address opening', () => {
+  const state = useAppStore.getState(), tab = state.tabs[tabId]!
+  const readRegions = vi.fn(() => tab.regions)
+  const tabs = { ...state.tabs, [tabId]: { ...tab, get regions() { return readRegions() } } }
+  const planned = planSpatialZone({ ...state, tabs }, [], { workspaceId: SCRATCH_WORKSPACE_ID, zoneId: 'new-zone-for-original-url', spaceIds: [] })
+  expect(planned.zone).toMatchObject({ zoneId: 'new-zone-for-original-url', workspaceId: SCRATCH_WORKSPACE_ID })
+  expect(planned.spaceZoneBindings[planned.zone.zoneId]?.workspaceId).toBe(SCRATCH_WORKSPACE_ID)
+  expect(readRegions).not.toHaveBeenCalled()
+})
 
 it.each(['http', 'https'])('system-open: %s reaches an exact durable page without waiting for an unrelated directory or pending bookmark', async scheme => {
   const original = useAppStore.getState(), bookmarkGate = gate(), nativeGate = gate()

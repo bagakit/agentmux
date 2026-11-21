@@ -3,9 +3,10 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { WebContentsView, type BrowserWindow } from 'electron'
 
-export async function surveyBrowsingCase({ phase, directory, window, evaluate, result, receipt, pageUrl }: {
+export async function surveyBrowsingCase({ phase, directory, window, evaluate, result, receipt, pageUrl, holdProfileRead }: {
   phase: string; directory: string; window: BrowserWindow; evaluate(expression: string): Promise<any>
   result(args: string[]): Promise<any>; receipt: any; pageUrl: string
+  holdProfileRead(): { arrived: Promise<void>; release(): void }
 }) {
   const contents = window.webContents
   contents.debugger.attach('1.3')
@@ -60,7 +61,27 @@ export async function surveyBrowsingCase({ phase, directory, window, evaluate, r
     const creates = receipt.ipc.filter((entry: { channel: string }) => entry.channel === 'browser:create').length
     const navigations = receipt.ipc.filter((entry: { channel: string }) => entry.channel === 'browser:navigate').length
     assert.ok(creates >= 3, 'The original pages must use native create IPC')
-    assert.deepEqual(await open(pageUrl + '?source=one#evidence'), first, 'The repeated link must return the original Browser and Region')
+    const visibleSurvey = 'document.querySelector("[data-knowledge-surface=\\"survey\\"]")?.checkVisibility()'
+    const switchToSpace = async () => {
+      await click('[aria-label="Space: show terminal and file workbench"]')
+      await wait('profileSurveyNative.read().mainSurface === "workbench"')
+    }
+    await switchToSpace()
+    const switchStarted = performance.now()
+    await click('[aria-label="Survey: browse and explore"]')
+    await wait(visibleSurvey)
+    assert.equal((await profileSelection()).selection.browserId, third.browserId)
+    receipt.manualSurveySwitchMs = performance.now() - switchStarted
+    await switchToSpace()
+    const held = holdProfileRead(), started = performance.now()
+    const repeated = open(pageUrl + '?source=one#evidence')
+    try {
+      await held.arrived
+      await wait(visibleSurvey)
+      assert.deepEqual((await profileSelection()).selection, { kind: 'page', browserId: third.browserId, regionId: third.reference.regionId })
+      receipt.surfaceBeforeProfileReadback = { elapsedMs: performance.now() - started, retainedBrowserId: third.browserId }
+    } finally { held.release() }
+    assert.deepEqual(await repeated, first, 'The repeated link must return the original Browser and Region')
     assert.deepEqual(await pageReferences(), original)
     assert.equal(receipt.ipc.filter((entry: { channel: string }) => entry.channel === 'browser:create').length, creates)
     assert.equal(receipt.ipc.filter((entry: { channel: string }) => entry.channel === 'browser:navigate').length, navigations)

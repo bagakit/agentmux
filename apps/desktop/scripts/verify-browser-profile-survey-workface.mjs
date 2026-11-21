@@ -58,7 +58,8 @@ assert.ok(mutation === null || Object.hasOwn(mutations, mutation), 'Only an exac
 assert.ok(args.every((arg, index) => ['--case', '--output', '--mutation'].includes(arg) || index === outputIndex + 1 && outputIndex >= 0 || index === caseIndex + 1 && caseIndex >= 0 || index === mutationIndex + 1 && mutationIndex >= 0), 'Only --case, --output and --mutation are supported')
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const output = resolve(outputIndex < 0 ? join(root, '.tmp/browser-profile-survey-workface', randomUUID()) : args[outputIndex + 1])
-const directory = await mkdtemp(fixturePath('tmp/amx-ps-'))
+const scratch = process.env.AGENTMUX_SURVEY_PROOF_TMPDIR
+const directory = await mkdtemp(scratch ? join(scratch, 'amx-ps-') : fixturePath('tmp/amx-ps-'))
 const fixtures = join(root, 'apps/desktop/scripts/fixtures/browser-profile-survey-workface')
 const packageRoot = join(directory, 'package'), dist = join(packageRoot, 'dist')
 const sources = new Map()

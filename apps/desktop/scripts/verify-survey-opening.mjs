@@ -19,7 +19,8 @@ const temporary = await realpath(await mkdtemp(join(tmpdir(), 'amux-survey-openi
 const identityRuntime = join(temporary, 'identity-runtime.ts')
 const require = createRequire(join(root, 'apps/desktop/package.json'))
 const ts = require('typescript'), { build } = createRequire(join(root, 'packages/core/package.json'))('esbuild')
-const owners = [...flows, 'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/main/system-page-ingress.ts']
+const spatialOwner = 'apps/desktop/src/renderer/src/lib/space-agent-control.ts'
+const owners = [...flows, spatialOwner, 'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/main/system-page-ingress.ts']
 const source = Object.fromEntries(owners.map(file => [file, hash(readFileSync(join(root, file)))]))
 const verificationFiles = ['apps/desktop/scripts/verify-survey-opening.mjs',
   ...['boundary.mjs', 'boundary.test.ts', 'vitest.config.mts'].map(file => 'apps/desktop/scripts/fixtures/survey-opening/' + file),
@@ -150,6 +151,11 @@ try {
     await run('slow-first-blocks-next', serial, '^system-open: a slow first Native creation')
     const delayed = exactMutation(root, flows[1], 'onPrepared(value) { preparation = value; reveal(value) }', 'onPrepared(value) { preparation = value }')
     await run('framework-reveal-delayed', delayed, '^system-open: the framework appears before Core acknowledgement')
+    const profileWait = exactMutation(root, flows[1], '      present()\n      await browserProfiles.refresh()', '      await browserProfiles.refresh()\n      present()')
+    await run('profile-read-delays-presentation', profileWait, 'a held default Profile read shows Survey promptly')
+    const wholeDirectory = exactMutation(root, spatialOwner, '  const sources = readSpatialSources(state, topics)\n  if (sources.zones.some',
+      '  const sources = spatialCatalog(state as SpatialWorkbench, topics)\n  if (sources.zones.some')
+    await run('zone-preparation-scans-directory', wholeDirectory, '^system-open: preparing a Survey Zone')
   }
   await run('restored')
   for (const [file, sha] of Object.entries(source)) assert.equal(hash(readFileSync(join(root, file))), sha, 'Candidate changed during qualification: ' + file)

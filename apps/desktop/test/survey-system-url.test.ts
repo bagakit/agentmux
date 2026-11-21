@@ -76,6 +76,24 @@ it('does not expose the old default environment after a different Profile become
   expect(f.state.setSurveyZoneSelection).not.toHaveBeenCalledWith({ kind: 'page', ...f.page })
 })
 
+it.each([false, true])('a held default Profile read shows Survey promptly and respects later navigation (%s)', async move => {
+  const f = existingPage()
+  let release!: () => void
+  f.read.mockReturnValueOnce(new Promise<void>(resolve => { release = resolve }))
+  const opening = openSystemUrlInSurvey(f.host, request, new AbortController().signal)
+  try {
+    expect(f.read).toHaveBeenCalledOnce()
+    expect(f.state.mainSurface).toBe('survey')
+    expect(f.state.surveyZoneSelection).toBeNull()
+    expect(f.state.createBrowser).not.toHaveBeenCalled()
+    if (move) f.move()
+  } finally { release() }
+  expect(await opening).toMatchObject({ state: 'opened', browserId: f.page.browserId })
+  expect(f.state.mainSurface).toBe(move ? 'workbench' : 'survey')
+  expect(f.state.surveyZoneSelection).toEqual(move ? null : { kind: 'page', ...f.page })
+  expect(f.state.createBrowser).not.toHaveBeenCalled()
+})
+
 it.each(['query', 'fragment', 'profile', 'private', 'location', 'disabled'] as const)(
   'keeps ordinary system creation for a saved candidate with a different %s', async difference => {
     const f = existingPage()
