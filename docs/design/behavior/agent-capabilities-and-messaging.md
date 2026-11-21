@@ -423,6 +423,8 @@ Readiness 是 Provider 协议提供并绑定原对象和用途的输入环境事
 
 - 所有显示 Executor／Provider 身份的地方，包括顶部 Tab、Project／Topic 列表、Session、Board 和 Browser 操作条，都使用同一个可复用 Executor identity 组件。Provider 图标、Executor 自定义图标、外轮廓和状态标记只由这一组件组合，调用方不各自画点、描边或叠加；组合方式与尺寸只见[状态标记与 Executor 叠加密度](../presentation/agent-capabilities-and-messaging.md#状态标记与-executor-叠加密度)。
 - Executor 面板在 hover 或键盘 focus 时以统一的 tooltip 信息面板出现，展示可读名称、Provider、当前状态和可用的上下文；不要求先点击才能看见。面板沿统一信息面板的密度与动作区（见[Executor identity 的统一密度](../presentation/agent-capabilities-and-messaging.md#executor-identity-的统一密度)），不因来源不同另立一套。
+- Agent 信息优先提供原生 status 中已确认的当前模型、套餐名和额度余量，与当前工作状态、上下文占用分别表达。额度保留原生窗口、单位、重置时刻及适用范围，不从 token 用量或上下文容量推算套餐余额。Provider 解释准确原生会话与账号来源，Core 统一发布来源、原观察时刻和未确认项；SDK、RPC、CLI 与客户端消费同一合同。读取仅随相关信息面、准确对象或显式刷新发生，不扫描无关 Session；读取失败保留已有观察及其原时刻，不影响草稿、输入、权限和健康 Run。
+- Message Tool 在 context 附近提供当前模型及便捷切换。模型和候选来自 Provider 核实的原会话配置；启动参数、历史回复模型和另一进程的配置不能代签当前值。设置复用原配置 owner、准确 Session／Run、配置修订与 operation，原生确认前不把拟选值显示为已生效；失败或未知保留原选择、原请求及可核对回执。原生不提供读取或切换时分别说明对应缺口，不从展示文案或盲发按键猜测成功，也不以重启或新建会话代替切换。
 - 自定义头像属于 Executor 配置，不属于 Appearance。面板只提供一个小型设置入口；点击后进入该 Executor 对应的模板设置，不能跳到 Appearance，也不能在信息面板内复制一套配置表单。身份 ID、Session 绑定和工作区事实保持稳定。
 - 头像编辑归属 Executor 模板；移动设置入口不能改变已有身份外观、丢弃已存头像，或因头像问题阻断应用启动。仍存在的 Appearance 头像按原 Executor ID 继续显示，新的 Executor 编辑写入其稳定配置；未匹配的旧记录保留原样，不猜测新身份。
 
