@@ -26,6 +26,8 @@ const variants = {
     'const messages = [await owner.store.messageById(image.threadId, image.messageId)]'],
   'direct-schedule-wrong-peer': ['packages/core/src/mote/direct.ts',
     'peer: target(input.peer)', 'peer: target(input.mote)'],
+  'direct-schedule-reuses-operation': ['apps/host/src/continuous-progress-loop-manager.ts',
+    'const operationId = `scheduled/${loopId}/${occurrenceAt}`', 'const operationId = `scheduled/${loopId}/first`'],
   'direct-pair-order': ['apps/host/src/mote-direct.ts',
     'const members = [mote, peer].sort((left, right) => left.spaceId < right.spaceId ? -1 : 1)',
     'const members = [mote, peer]'],

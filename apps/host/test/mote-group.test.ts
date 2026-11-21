@@ -396,7 +396,9 @@ it('keeps one private assignment arrangement and occurrence across Main rotation
     .toEqual([[first, assignment.body, 'mote-b'], [second, assignment.body, 'mote-b']])
   const current = await rpc.call('schedule.inspect', { scheduleId: schedule.loopId })
   expect(current.schedule).toMatchObject({ lastOccurrenceAt: now, lastOutcome: 'sent',
-    lastMotePublication: { conversationId: thread!.id, messageId: second } })
+    prompt: assignment.body, lastMotePublication: {
+      conversationId: thread!.id, messageId: second, operationId: `scheduled/${schedule.loopId}/${now}`, occurrenceAt: now
+    } })
   await rpc.call('schedule.pause', { scheduleId: schedule.loopId, expectedRevision: current.schedule.revision!, operationId: 'pause-assignments' })
   now += assignment.everyMs
   await manager.check(now, schedule.loopId)
@@ -404,8 +406,8 @@ it('keeps one private assignment arrangement and occurrence across Main rotation
   expect(nativeSchedule).not.toHaveBeenCalled()
   bindings.set(a.spaceId, 'assignment-owner')
   const prior = { ...assignment, operationId: 'original-archived-assignment' }
-  const expected = core.moteDirectSchedulePrompt(prior)
-  const frozen = 'Prior guidance carried by the original arrangement.' + expected.slice(expected.lastIndexOf('\n\n'))
+  const { operationId, mote, peer, body } = prior
+  const frozen = 'Prior guidance carried by the original arrangement.\n\n' + JSON.stringify({ operationId, mote, peer, body })
   const saved = await rpc.call('schedule.create', { operationId: prior.operationId, everyMs: prior.everyMs,
     target: { hostId: schedule.hostId, agentSessionId: schedule.agentSessionId, providerId: schedule.providerId, workspacePath: schedule.workspacePath }, prompt: frozen })
   const retry = await f.cli('schedule', prior, 'assignment-owner', 'direct')
