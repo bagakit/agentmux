@@ -18,14 +18,14 @@ let settings: MeshNetworkSettings = { owner: { runtimeId: 'core-original-review'
  configuration: { role: 'gateway', networkId: 'work-machines', endpointAccess: { allowedClientKeys: [] }, members: [], peers: [], publishers: [], listen: { host: '127.0.0.1', port: 8444 }, advertisedIngress: [{ endpoint: 'cn1.example.com', useTls: true }] } }
 const originalOffer = { v: 2 as const, serverId: target, daemonPublicKeyB64: 'Hx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8=', relay: { endpoint: 'original-edge.local:7443', useTls: true } }
 let state = new URLSearchParams(location.search).get('scenario') ?? 'active'
-if (['initial', 'gateway-join', 'runtime-identity', 'separate-gateway-identity'].includes(state)) settings = { ...settings, configuration: { ...settings.configuration, role: 'disabled', networkId: 'my-devices', listen: undefined, advertisedIngress: [] } }
+if (['initial', 'gateway-join', 'runtime-identity', 'separate-gateway-identity', 'separate-identity-no-gateway'].includes(state)) settings = { ...settings, configuration: { ...settings.configuration, role: 'disabled', networkId: 'my-devices', listen: undefined, advertisedIngress: [] } }
 api.ui.readLocalRuntimeRecovery = async () => state === 'runtime-identity' ? { state: 'needs-backup', code: 'IDENTITY_SOURCE_MISSING' }
   : state === 'runtime-identity-blocked' ? { state: 'blocked', code: 'IDENTITY_TARGET_UNCONFIRMED' } : { state: 'unchanged' }
 api.ui.restoreLocalRuntimeIdentity = async () => { state = 'initial'; return { state: 'restored' } }
 function observation(): MeshNetworkInspection {
  const record = (originPeerId: string, neighbors: number[], index: number) => ({ version: 1 as const, networkId: 'work-machines', originPeerId, epoch: 3, revision: 8, signature: 'fixture', publishers: index === 2 ? [{ serverId: target, generation: 'generation-original' }] : [], advertisedIngress: [], neighbors: neighbors.map(n => ({ peerId: ids[n]!, peerEpoch: 3, connectionId: `link-${Math.min(index,n)}-${Math.max(index,n)}`, rttMs: 23 })) })
- return { owner: settings.owner, identity: own, source: 'managed', desiredRevision: settings.revision, activeRevision: state === 'gateway-connected' ? settings.revision : 'saved-8', apply: state === 'failure' ? { state: 'unavailable', issue: { code: 'EADDRINUSE', message: 'The new listener address is already in use. The previous listener remains active.' } } : { state: 'active' }, gateway: { state: 'listening', listener: { host: '127.0.0.1', port: 8444, protocol: 'http' } } as never,
- network: { protocol: 1, state: 'active', networkId: 'work-machines', identity: own, peers: [{ peerId: ids[1]!, state: 'connected', connectionId: 'link-0-1', rttMs: 23 }], records: [record(peer,[1],0),record(ids[1]!,[0,2],1),record(ids[2]!,[1],2)], routes: [{ serverId: target, originPeerId: ids[2]!, publisherGeneration: 'generation-original', path: ids, hops: 2, rttMs: 46, advertisedIngress: [] }], circuits: [] },
+ return { owner: settings.owner, identity: own, source: 'managed', desiredRevision: settings.revision, activeRevision: state === 'failure' ? 'saved-8' : settings.revision, apply: state === 'failure' ? { state: 'unavailable', issue: { code: 'EADDRINUSE', message: 'The new listener address is already in use. The previous listener remains active.' } } : { state: 'active' }, gateway: { state: 'listening', listener: { host: '127.0.0.1', port: 8444, protocol: 'http' } } as never,
+ network: { protocol: 1, state: 'active', networkId: 'work-machines', identity: own, peers: state === 'gateway-join' ? [] : [{ peerId: ids[1]!, state: 'connected', connectionId: 'link-0-1', rttMs: 23 }], records: [record(peer,[1],0),record(ids[1]!,[0,2],1),record(ids[2]!,[1],2)], routes: [{ serverId: target, originPeerId: ids[2]!, publisherGeneration: 'generation-original', path: ids, hops: 2, rttMs: 46, advertisedIngress: [] }], circuits: [] },
  endpoint: state === 'endpoint' ? { state: 'available', offer: originalOffer } : { state: 'not-provided' }, observedAt: Date.now(), coverage: { configuredOrigins: 3, observedOrigins: 3, complete: true } }
 }
 api.mesh.call = (async (method: string, params: any) => {
@@ -89,9 +89,9 @@ else if (state === 'gateway-join') void useAppStore.getState().initialize().then
   useAppStore.setState({ config: fixtureConfig, meshSettingsDrafts: {}, meshGatewayCode: '' })
   render()
 })
-else if (state === 'separate-gateway-identity') {
+else if (state === 'separate-gateway-identity' || state === 'separate-identity-no-gateway') {
   api.ui.isNewIdentityWindow = true
-  useAppStore.setState({ meshGatewayHandoff: workflowCode ?? undefined })
+  useAppStore.setState({ meshGatewayHandoff: state === 'separate-gateway-identity' ? workflowCode ?? undefined : undefined })
   render({ section: 'hosts', field: 'mesh-join' })
 } else render()
 Object.assign(window, { meshFixture: { originalOffer, workflowCode, confirmGateway: () => { state = 'gateway-connected' }, endpoint: () => { state = 'endpoint' }, localOnly: () => showHosts(true), allHosts: () => showHosts(false), theme: (mode: 'dark' | 'light') => updateThemeSelection({ appAppearance: mode }), failure: () => { state = 'failure'; settings = { ...settings, revision: 'saved-9' } } } })

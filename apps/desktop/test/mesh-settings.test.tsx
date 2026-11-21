@@ -29,6 +29,69 @@ function inspectOnly() { return vi.spyOn(api.mesh, 'call').mockImplementation(as
 const gatewayCode = meshPeerCode({ ...settings, identity: { peerId: 'office-gateway', publicKey: 'original-gateway-key', epoch: 1 },
   configuration: { ...configuration, advertisedIngress: [{ endpoint: 'relay.example:8444', useTls: true }] } })!
 const guidedInput = '[aria-label="Gateway connection code"]'
+const guidedSubmit = '.mesh-join-form button[type="submit"]'
+
+it('connects from the latest saved Mesh settings and retains a conflicting advanced draft', async () => {
+  const advancedForm = { ...meshForm(settings.configuration), publishers: '{unfinished draft' }
+  let current = { ...settings, revision: 'newer-r2', configuration: { ...configuration,
+    publishers: [{ serverId: 'saved-publisher', tokenHash: 'saved-hash' }] } }
+  useAppStore.setState({ meshGatewayCode: gatewayCode, meshSettingsDrafts: { [settings.owner.runtimeId]: { baseline: settings, form: advancedForm } } })
+  const call = vi.spyOn(api.mesh, 'call').mockImplementation(async (method, params) => {
+    if (method === 'mesh.inspect') return observation(current) as never
+    if (method === 'settings.mesh.configure' && 'configuration' in params) {
+      current = { ...current, revision: 'connected-r3', configuration: params.configuration }
+      return { settings: current, diskDurability: 'confirmed' } as never
+    }
+    return current as never
+  })
+  await dom.render(<Editor active join />)
+  await settled(() => dom.container.querySelector(guidedSubmit)?.textContent === 'Connect')
+  expect(dom.container.textContent).not.toContain('Keep my draft')
+  await dom.click(guidedSubmit)
+  const requests = call.mock.calls.filter(([method]) => method === 'settings.mesh.configure')
+  expect(requests).toHaveLength(1)
+  expect(requests[0]?.[1]).toMatchObject({ expectedRevision: 'newer-r2', configuration: { publishers: [{ serverId: 'saved-publisher', tokenHash: 'saved-hash' }], peers: [{ peerId: 'office-gateway' }] } })
+  await vi.waitFor(() => expect(meshDraftForRuntime(useAppStore.getState().meshSettingsDrafts, settings.owner.runtimeId)).toEqual({ baseline: settings, form: advancedForm, pending: undefined }))
+})
+
+it.each(['revision rejected', 'unknown acknowledgement'])('keeps the selected gateway after a %s and uses the correct original receipt', async outcome => {
+  let current = settings
+  let originalOperationId = ''
+  const call = vi.spyOn(api.mesh, 'call').mockImplementation(async (method, params) => {
+    if (method === 'mesh.inspect') return observation(current) as never
+    if (method === 'settings.mesh.configure' && 'configuration' in params) {
+      originalOperationId ||= params.operationId
+      if (outcome === 'revision rejected') {
+        if (current.revision === 'r1') {
+          current = { ...settings, revision: 'newer-r2' }
+          throw Object.assign(Error('revision conflict'), { code: 'MESH_REVISION_CHANGED', controlFailure: { disposition: 'not_applied' } })
+        }
+        return { settings: { ...current, configuration: params.configuration }, diskDurability: 'confirmed' } as never
+      }
+      current = { ...settings, revision: 'joined-r2', configuration: params.configuration,
+        operation: { operationId: params.operationId, expectedRevision: params.expectedRevision, revision: 'joined-r2', status: 'confirmed', updatedAt: 1000 } }
+      throw Error('lost acknowledgement')
+    }
+    return current as never
+  })
+  useAppStore.setState({ meshGatewayCode: gatewayCode })
+  await dom.render(<Editor active join />)
+  await settled(() => Boolean(dom.container.querySelector(guidedSubmit)))
+  await dom.click(guidedSubmit)
+  const requests = () => call.mock.calls.filter(([method]) => method === 'settings.mesh.configure')
+  expect(requests()).toHaveLength(1)
+  if (outcome === 'revision rejected') {
+    await settled(() => dom.container.textContent?.includes('Settings refreshed') ?? false)
+    expect(dom.container.querySelector<HTMLInputElement>(guidedInput)?.value).toBe(gatewayCode)
+    await dom.click(guidedSubmit)
+    expect(requests()).toHaveLength(2)
+    expect(requests()[1]?.[1]).toMatchObject({ expectedRevision: 'newer-r2' })
+  } else {
+    await settled(() => Boolean(dom.container.querySelector('.mesh-join-code-disclosure')))
+    expect(call.mock.calls).toContainEqual(expect.arrayContaining(['settings.mesh.inspect', { operationId: originalOperationId }]))
+    expect(requests()).toHaveLength(1)
+  }
+})
 
 it('opens the guided connection from the Mesh homepage and submits one original settings operation', async () => {
   let remembered = { ...settings, identity: { peerId: 'new-local-peer', publicKey: 'local-public-key', epoch: 1 }, configuration: { ...configuration, role: 'disabled' as const } } as MeshNetworkSettings
@@ -79,16 +142,44 @@ it('takes the chosen gateway into separate identity setup only after an explicit
   const open = vi.spyOn(api.ui, 'openLocalIdentitySetup').mockResolvedValue(undefined)
   const call = vi.spyOn(api.mesh, 'call').mockRejectedValue(Error('The original Host is unavailable'))
   try {
+    useAppStore.setState({ meshGatewayCode: gatewayCode })
     await dom.render(<Editor active join />)
-    await input('Gateway connection code', gatewayCode)
-    await settled(() => dom.container.textContent?.includes('Continue with a separate identity') ?? false)
+    await settled(() => Boolean(dom.container.querySelector('.mesh-join-identity-flag')))
     expect(dom.container.textContent).toContain('relay.example:8444')
+    expect(dom.container.querySelector<HTMLInputElement>(guidedInput)?.disabled).toBe(true)
     expect(open).not.toHaveBeenCalled()
-    await dom.click('.mesh-identity-recovery details button')
+    await clickRecovery('Create a new identity…')
+    expect(open).not.toHaveBeenCalled()
+    const confirm = document.querySelector<HTMLButtonElement>('[data-confirm-label="Create and open setup"]')
+    expect(confirm).not.toBeNull()
+    await act(async () => confirm!.click())
     expect(open).toHaveBeenCalledExactlyOnceWith(gatewayCode)
     expect(dom.container.querySelector<HTMLInputElement>(guidedInput)?.value).toBe(gatewayCode)
     expect(call.mock.calls.some(([method]) => method === 'settings.mesh.configure')).toBe(false)
   } finally { read.mockRestore(); open.mockRestore(); call.mockRestore() }
+})
+
+it('confirms original identity import before opening the picker and restores the same gateway draft', async () => {
+  const read = vi.spyOn(api.ui, 'readLocalRuntimeRecovery').mockResolvedValue({ state: 'needs-backup', code: 'IDENTITY_SOURCE_MISSING' })
+  let restored = false
+  const choose = vi.spyOn(api.ui, 'restoreLocalRuntimeIdentity').mockImplementation(async () => { restored = true; return { state: 'restored' } })
+  vi.spyOn(api.mesh, 'call').mockImplementation(async method => {
+    if (!restored) throw Error('The original Host is unavailable')
+    return (method === 'mesh.inspect' ? observation() : settings) as never
+  })
+  useAppStore.setState({ meshGatewayCode: gatewayCode })
+  await dom.render(<Editor active join />)
+  await settled(() => Boolean(dom.container.querySelector('.mesh-join-identity-flag')))
+  await clickRecovery('Import original backup…')
+  expect(choose).not.toHaveBeenCalled()
+  const confirm = document.querySelector<HTMLButtonElement>('[data-confirm-label="Choose backup…"]')
+  expect(confirm).not.toBeNull()
+  await act(async () => confirm!.click())
+  expect(choose).toHaveBeenCalledOnce()
+  await settled(() => dom.container.querySelector(guidedSubmit)?.textContent === 'Connect')
+  expect(dom.container.querySelector<HTMLInputElement>(guidedInput)?.value).toBe(gatewayCode)
+  expect(dom.container.querySelector<HTMLInputElement>(guidedInput)?.disabled).toBe(false)
+  read.mockRestore()
 })
 it('Mesh shows the App recovery action before Host answers, and reopens setup after recovery', async () => {
   let restored = false
@@ -171,8 +262,11 @@ it('opens new identity setup independently of the original backup picker and kee
     await dom.render(<Editor active onConnections={vi.fn()} />)
     await settled(() => dom.container.textContent?.includes('Set up a new identity…') ?? false)
     await clickRecovery('Set up a new identity…')
+    expect(open).not.toHaveBeenCalled()
+    await act(async () => document.querySelector<HTMLButtonElement>('[data-confirm-label="Create and open setup"]')!.click())
     expect(dom.container.querySelector('.settings-inline-error')?.textContent).toContain('Setup window could not open')
     await clickRecovery('Set up a new identity…')
+    await act(async () => document.querySelector<HTMLButtonElement>('[data-confirm-label="Create and open setup"]')!.click())
     expect(open.mock.calls).toEqual([[], []])
     expect(pick).not.toHaveBeenCalled()
     expect(dom.container.textContent).toContain('Import original backup…')
