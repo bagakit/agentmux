@@ -85,11 +85,12 @@ export const informationMutations: Record<string, { path: string; before: string
 const mode = (process.env.AMX_INFORMATION_MODE ?? 'contract') as keyof typeof informationTests
 if (!(mode in informationTests)) throw new Error('Unknown Agent information verification mode: ' + mode)
 const mutation = process.env.AMX_INFORMATION_MUTATION
-const surface = mode === 'surface' || mode === 'integration'
+const surface = process.env.AMX_INFORMATION_SURFACE === '1'
+const desktopAliases = mode === 'surface' || mode === 'integration'
 
 export default defineConfig({ ...(surface ? surfaceConfig : {}), root,
   resolve: { ...(surface ? surfaceConfig.resolve : {}), alias: [...agentInformationAliases,
-    ...(surface ? surfaceConfig.resolve!.alias as [] : [])] },
+    ...(desktopAliases ? surfaceConfig.resolve!.alias as [] : [])] },
   define: { __AGENTMUX_WEB_PREVIEW__: 'true' },
   cacheDir: resolve(root, '.local/agent-information/vite-cache'), plugins: [...(surface ? surfaceConfig.plugins ?? [] : []), {
     name: 'agent-information-exact-source', enforce: 'pre', transform(code, id) {

@@ -1,5 +1,4 @@
 import { fixtureEpoch } from '../../../test/fixture-values.mjs'
-// @vitest-environment happy-dom
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'

@@ -136,17 +136,37 @@ async function execute(label, mutation) {
   const compiledEdit = edit && mutation === 'public-information-detached' ? { ...edit, mutation,
     path: edit.path.replace(/^packages\/(core|providers)\/src\//u, '$1/dist/').replace(/\.ts$/u, '.js') } : undefined
   const ownerSubset = mode === 'integration' && (mutation || label === 'restored')
-  const result = await run(['node_modules/vitest/vitest.mjs', 'run', '--config', config, '--reporter=json', '--outputFile', reportPath,
-    ...((mutation || label === 'restored') && mode === 'codex' ? ['packages/core/test/codex-information.test.ts'] : []),
-    ...((mutation || label === 'restored') && mode === 'claude' ? ['packages/core/test/claude-information.test.ts'] : []),
-    ...(ownerSubset ? ['packages/core/test/agent-information-contract.test.ts'] : [])], {
-    AMX_INFORMATION_MODE: mode, AMX_INFORMATION_MUTATION: mutation ?? '', AMX_INFORMATION_LOADED: loadedPath,
-    AMX_INFORMATION_CANDIDATE: candidate, AMX_INFORMATION_COMPILED_LOADED: compiledPath,
-    AMX_INFORMATION_COMPILED_EDIT: compiledEdit ? JSON.stringify(compiledEdit) : '',
-    AGENTMUX_TEST_RPC_CORE_ENTRY: '', AGENTMUX_TEST_OBJECT_CLI: join(candidate, 'core/bin/amux')
-  })
-  await writeFile(join(evidence, label + '.log'), result.stdout + result.stderr)
-  const report = JSON.parse(await readFile(reportPath, 'utf8'))
+  const selected = ownerSubset ? ['packages/core/test/agent-information-contract.test.ts']
+    : (mutation || label === 'restored') && mode === 'codex' ? ['packages/core/test/codex-information.test.ts']
+    : (mutation || label === 'restored') && mode === 'claude' ? ['packages/core/test/claude-information.test.ts'] : tests
+  // Node owners and mounted Renderer consumers require their original package conditions.
+  const rendered = new Set(informationTests.surface.filter(path => path.endsWith('.tsx')))
+  const batches = ['integration', 'surface'].includes(mode) && !ownerSubset
+    ? [{ name: 'node', files: selected.filter(path => !rendered.has(path)), surface: false },
+      { name: 'surface', files: selected.filter(path => rendered.has(path)), surface: true }]
+    : [{ name: mode, files: selected, surface: mode === 'surface' }]
+  const reports = [], results = []
+  for (const batch of batches) {
+    assert.ok(batch.files.length, 'Each execution environment must have an exact nonempty test set.')
+    const output = batches.length === 1 ? reportPath : join(evidence, label + '-' + batch.name + '.json')
+    results.push(await run(['node_modules/vitest/vitest.mjs', 'run', '--config', config, '--reporter=json', '--outputFile', output,
+      ...batch.files], {
+      AMX_INFORMATION_MODE: mode, AMX_INFORMATION_SURFACE: batch.surface ? '1' : '',
+      AMX_INFORMATION_MUTATION: mutation ?? '', AMX_INFORMATION_LOADED: loadedPath,
+      AMX_INFORMATION_CANDIDATE: candidate, AMX_INFORMATION_COMPILED_LOADED: compiledPath,
+      AMX_INFORMATION_COMPILED_EDIT: compiledEdit ? JSON.stringify(compiledEdit) : '',
+      AGENTMUX_TEST_RPC_CORE_ENTRY: '', AGENTMUX_TEST_OBJECT_CLI: join(candidate, 'core/bin/amux')
+    }))
+    reports.push(JSON.parse(await readFile(output, 'utf8')))
+  }
+  const result = { code: results.every(value => value.code === 0) ? 0 : 1 }
+  await writeFile(join(evidence, label + '.log'), results.map(value => value.stdout + value.stderr).join('\n'))
+  const report = reports.length === 1 ? reports[0] : {
+    success: reports.every(value => value.success), testResults: reports.flatMap(value => value.testResults),
+    ...Object.fromEntries(['numTotalTests', 'numPassedTests', 'numFailedTests', 'numPendingTests', 'numTodoTests',
+      'numTotalTestSuites', 'numPassedTestSuites', 'numFailedTestSuites', 'numPendingTestSuites'].map(key =>
+      [key, reports.reduce((sum, value) => sum + (value[key] ?? 0), 0)])) }
+  if (reports.length > 1) await writeFile(reportPath, JSON.stringify(report, null, 2) + '\n')
   assert.ok(report.numTotalTests > 0 && report.testResults.length > 0, 'The behavior set must be nonempty.')
   const lines = async path => (await readFile(path, 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line))
   const loaded = await lines(loadedPath), compiled = await lines(compiledPath)
