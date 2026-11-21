@@ -200,13 +200,14 @@ export function MoteCalendar({ scope, reference, active, openRequest, onSelectDi
   }
   function lineTitle(line: CalendarCellLine) {
     const heartbeat = isMoteHeartbeatSchedule(line.record, heartbeatSourceId)
-    if (!line.recorded || heartbeat) return scheduleCalendarLabel(line.record, heartbeat)
+    if (!line.recorded || heartbeat || line.record.moteWork) return scheduleCalendarLabel(line.record, heartbeat)
     return line.originalLabel ? scheduleCalendarLabel({ ...line.record, prompt: line.originalLabel }) : 'Scheduled input'
   }
   const localTime = useMemo(() => new Intl.DateTimeFormat('en-GB', { timeZone: timezone, hour: '2-digit', minute: '2-digit' }), [timezone])
   function lineText(line: CalendarCellLine) {
     if (line.planned && line.planned > 1) return formatCount.format(line.planned) + ' planned'
     const time = localTime.format(line.at)
+    if (line.record.moteWork && line.recorded && line.recorded > 1) return formatCount.format(line.recorded) + ' published'
     if (line.recorded && line.recorded > 1) return line.text + ' ×' + formatCount.format(line.recorded)
     return time + ' · ' + line.text
   }

@@ -3,7 +3,9 @@ import { validateScheduleRpcResult, type ScheduleHistoryQuery, type ScheduleHist
 import type { ContinuousProgressLoop } from '@agentmux/core/continuous-progress-scheduler'
 import { api } from './api'
 
-type Snapshot = { version: string; lastAt: number | null; buckets: Map<number, ScheduleHistoryGroup[]>; incomplete: boolean }
+type PublicationBucket = { count: number; firstAt: number; lastAt: number }
+type Snapshot = { version: string; lastAt: number | null; buckets: Map<number, ScheduleHistoryGroup[]>;
+  publications: Map<number, PublicationBucket>; incomplete: boolean }
 const empty = new Map<string, Snapshot>()
 function mergePage(into: Map<number, ScheduleHistoryGroup[]>, buckets: ScheduleHistoryBucket[]) {
   for (const bucket of buckets) {
@@ -61,6 +63,7 @@ export function useCalendarReceipts(records: readonly ContinuousProgressLoop[], 
         const first = later < 0 ? starts.length - 1 : Math.max(0, later - 1)
         const boundaries = starts.slice(first)
         const buckets = new Map<number, ScheduleHistoryGroup[]>()
+        const publications = new Map<number, PublicationBucket>()
         let cursor: string | null = null
         let incomplete = false
         try {
@@ -70,16 +73,19 @@ export function useCalendarReceipts(records: readonly ContinuousProgressLoop[], 
             if (cancelled) return
             if (!page.buckets) { incomplete = true; break }
             mergePage(buckets, page.buckets)
+            for (const publication of page.publicationBuckets ?? []) publications.set(publication.from, publication)
             if (page.coverage === 'unconfirmed') incomplete = true
             cursor = page.nextCursor
           } while (cursor)
         } catch { incomplete = true }
         if (cancelled) return
         const merged = new Map(prior?.buckets)
-        if (!incomplete) for (const start of boundaries) merged.delete(start)
+        const mergedPublications = new Map(prior?.publications)
+        if (!incomplete) for (const start of boundaries) { merged.delete(start); mergedPublications.delete(start) }
         // Partial reads do not replace previously confirmed complete buckets.
         for (const [key, value] of buckets) if (!incomplete || !merged.has(key)) merged.set(key, value)
-        rows.set(id, { version, lastAt, buckets: merged, incomplete })
+        for (const [key, value] of publications) if (!incomplete || !mergedPublications.has(key)) mergedPublications.set(key, value)
+        rows.set(id, { version, lastAt, buckets: merged, publications: mergedPublications, incomplete })
         update()
       }
     }

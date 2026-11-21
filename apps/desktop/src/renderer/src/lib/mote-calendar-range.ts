@@ -50,11 +50,17 @@ export function calendarScheduleGroups(items: readonly ScheduleOccurrence[], rec
 export type CalendarCellLine = { record: ContinuousProgressLoop; at: number; text: string; attention?: boolean; recorded?: number; lastAt?: number; originalLabel?: string | null; planned?: number }
 
 /** Index original receipt groups once per visible window, independent of rule forecasts. */
-export function calendarReceiptLines(rows: ReadonlyMap<string, { buckets: ReadonlyMap<number, ScheduleHistoryGroup[]> }>, byId: ReadonlyMap<string, CalendarSchedule>) {
+export function calendarReceiptLines(rows: ReadonlyMap<string, { buckets: ReadonlyMap<number, ScheduleHistoryGroup[]>;
+  publications?: ReadonlyMap<number, { count: number; firstAt: number; lastAt: number }> }>, byId: ReadonlyMap<string, CalendarSchedule>) {
   const byStart = new Map<number, CalendarCellLine[]>()
   for (const [id, row] of rows) {
     const record = byId.get(id)?.record
     if (!record) continue
+    for (const [start, publication] of row.publications ?? []) {
+      const lines = byStart.get(start) ?? []
+      lines.push({ record, at: publication.firstAt, lastAt: publication.lastAt, recorded: publication.count, text: 'Assignment published' })
+      byStart.set(start, lines)
+    }
     for (const [start, groups] of row.buckets) {
       const lines = byStart.get(start) ?? []
       const byStatus = new Map<string, CalendarCellLine>()
@@ -80,7 +86,8 @@ export function calendarCellLines(groups: ReturnType<typeof calendarScheduleGrou
   const recorded = new Set(receipts.map(line => line.record.loopId))
   for (const group of groups) {
     const { record, accepted, planned, due } = group
-    if (accepted && !recorded.has(record.loopId)) lines.push({ record, at: accepted.at, text: 'Input accepted', recorded: 1 })
+    if (accepted && !recorded.has(record.loopId)) lines.push({ record, at: accepted.at,
+      text: record.lastMotePublication?.occurrenceAt === accepted.at ? 'Assignment published' : 'Input accepted', recorded: 1 })
     if (planned && group.firstPlannedAt !== undefined) lines.push({ record, at: group.firstPlannedAt, text: 'planned', planned })
     else if (!accepted && due && !recorded.has(record.loopId)) lines.push({ record, at: due.at, text: dueLabel(record) })
   }

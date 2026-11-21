@@ -1,5 +1,6 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import type { ContinuousProgressLoop } from '@agentmux/core/continuous-progress-scheduler'
+import type { MoteWorkPublication } from '@agentmux/core/schedule-rpc'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@agentmux/client-ui/components/Button'
 import { MoteAssignmentButton } from '@agentmux/client-ui/components/MoteAssignment'
@@ -32,8 +33,10 @@ export function scheduleCalendarLabel(schedule: ContinuousProgressLoop, heartbea
   const headline = scheduleDisplayTitle(schedule)
   return headline.match(/^(.{2,16}?)(?:：|:\s)/u)?.[1]?.trim() || headline
 }
-export function MotePublishedAssignment({ schedule }: { schedule: ContinuousProgressLoop }) {
-  const { moteWork: work, lastMotePublication: publication } = schedule
+export function MotePublishedAssignment({ schedule, publication = schedule.lastMotePublication }: {
+  schedule: ContinuousProgressLoop; publication?: MoteWorkPublication
+}) {
+  const work = schedule.moteWork
   if (!work || !publication) return null
   const address = { conversationId: publication.conversationId, messageId: publication.messageId, read: api.moteGroup.call }
   return <MoteAssignmentButton target={work.kind === 'direct'

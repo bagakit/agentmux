@@ -14,8 +14,9 @@ import { MotePublishedAssignment, scheduleCalendarLabel, scheduleStateLabel } fr
 
 type Page = ScheduleResultMap['schedule.history']
 type Receipt = Page['entries'][number]
-type Reading = { entries: Receipt[]; next: string | null; retry?: { cursor: string | undefined } }
-type CalendarEvent = { at: number; saved: CalendarSchedule } & ({ receipt: Receipt } | { planned: ScheduleOccurrence })
+type Publication = NonNullable<Page['publications']>[number]
+type Reading = { entries: Receipt[]; publications: Publication[]; next: string | null; retry?: { cursor: string | undefined } }
+type CalendarEvent = { at: number; saved: CalendarSchedule } & ({ receipt: Receipt } | { planned: ScheduleOccurrence } | { publication: Publication })
 type Disclosure = { key: string; inFocus: boolean; open: boolean }
 
 const receiptKey = (receipt: Receipt) => JSON.stringify([receipt.runId, receipt.operationId])
@@ -36,16 +37,16 @@ function eventDetails(event: CalendarEvent, heartbeatSourceId: string, now: numb
   const state = planned?.kind === 'next-due' ? scheduleStateLabel(record, now) : undefined
   const result = receipt?.nativeResult.state
   const nativeStatus = result && turnLabel(result)
-  const published = !!record.moteWork && record.lastMotePublication?.occurrenceAt === at
-  const status = published ? 'Assignment published' : receipt ? nativeStatus ?? deliveryLabel(receipt.delivery)
+  const publication = 'publication' in event ? event.publication : record.lastMotePublication?.occurrenceAt === at ? record.lastMotePublication : undefined
+  const status = publication ? 'Assignment published' : receipt ? nativeStatus ?? deliveryLabel(receipt.delivery)
     : planned?.kind === 'last-accepted' ? 'Input accepted'
     : planned?.repeat && planned.repeat.count > 1 ? formatCount.format(planned.repeat.count) + ' planned'
     : state && state !== 'Active' ? state : 'Planned'
   const heartbeat = isMoteHeartbeatSchedule(record, heartbeatSourceId)
   const label = !heartbeat && receipt && !receipt.recap ? 'Scheduled input'
     : scheduleCalendarLabel(receipt?.recap ? { ...record, prompt: receipt.recap.text } : record, heartbeat)
-  return { at, record, receipt, planned, result, nativeStatus, status, heartbeat, label, published,
-    key: JSON.stringify([record.loopId, at, receipt ? receiptKey(receipt) : 'plan']),
+  return { at, record, receipt, planned, result, nativeStatus, status, heartbeat, label, publication,
+    key: JSON.stringify([record.loopId, at, publication?.operationId ?? (receipt ? receiptKey(receipt) : 'plan')]),
     attention: receipt ? needsAttention({ nativeState: receipt.nativeResult.state, delivery: receipt.delivery })
       : state === 'Delivery unconfirmed',
     upcoming: at >= now && (planned?.kind === 'projected' || state === 'Active') }
@@ -132,7 +133,9 @@ export function MoteCalendarEvents({ heartbeatSourceId, window, schedules, items
             entries.set(key, known ? { ...receipt, occurrenceAt: known.occurrenceAt, recap: known.recap ?? receipt.recap } : receipt)
           }
           const failed = !page || page.coverage === 'unconfirmed'
-          merged.set(id, { entries: [...entries.values()], next: page?.nextCursor ?? (failed ? prior?.next ?? null : null),
+          const publications = new Map(prior?.publications.map(publication => [publication.operationId, publication]))
+          for (const publication of page?.publications ?? []) publications.set(publication.operationId, publication)
+          merged.set(id, { entries: [...entries.values()], publications: [...publications.values()], next: page?.nextCursor ?? (failed ? prior?.next ?? null : null),
             ...(failed ? { retry: { cursor } } : {}) })
         }
         current.current = merged
@@ -158,6 +161,10 @@ export function MoteCalendarEvents({ heartbeatSourceId, window, schedules, items
         recorded.add(slotKey(id, receipt.occurrenceAt))
         timeline.push({ at: receipt.occurrenceAt, saved, receipt })
       }
+      for (const publication of page.publications) {
+        recorded.add(slotKey(id, publication.occurrenceAt))
+        timeline.push({ at: publication.occurrenceAt, saved, publication })
+      }
     }
     for (const planned of items) {
       const saved = schedules.get(planned.scheduleId)
@@ -173,7 +180,7 @@ export function MoteCalendarEvents({ heartbeatSourceId, window, schedules, items
     for (const row of rows) {
       if (row.attention) attention = row
       if (row.upcoming) upcoming ??= row
-      if (row.receipt || row.planned?.kind === 'last-accepted') recent = row
+      if (row.receipt || row.publication || row.planned?.kind === 'last-accepted') recent = row
       const group = groups.at(-1), previous = group?.[0]
       if (row.heartbeat && row.receipt && !row.attention && previous?.receipt && !previous.attention &&
         previous.record.loopId === row.record.loopId && previous.result === row.result && previous.receipt.delivery === row.receipt.delivery) {
@@ -187,14 +194,14 @@ export function MoteCalendarEvents({ heartbeatSourceId, window, schedules, items
     return disclosure?.key === event.key && disclosure.inFocus === inFocus && disclosure.open
   }
   function openEvent(event: EventDetails, inFocus: boolean) {
-    if (event.receipt || event.published) setDisclosure({ key: event.key, inFocus, open: !isExpanded(event, inFocus) })
+    if (event.receipt || event.publication) setDisclosure({ key: event.key, inFocus, open: !isExpanded(event, inFocus) })
     else onOpenRule(event.record.loopId)
   }
   function recap(event: EventDetails, inFocus: boolean) {
-    const { receipt, nativeStatus, record, published } = event
+    const { receipt, nativeStatus, record, publication } = event
     if (disclosure?.key !== event.key || disclosure.inFocus !== inFocus) return null
-    if (published) return <div className="mote-calendar__recap mote-calendar__reveal" hidden={!disclosure.open} inert={!disclosure.open}>
-      <MotePublishedAssignment schedule={record} />
+    if (publication) return <div className="mote-calendar__recap mote-calendar__reveal" hidden={!disclosure.open} inert={!disclosure.open}>
+      <MotePublishedAssignment schedule={record} publication={publication} />
     </div>
     if (!receipt) return null
     return <div className="mote-calendar__recap mote-calendar__reveal" hidden={!disclosure.open} inert={!disclosure.open}>
@@ -205,13 +212,14 @@ export function MoteCalendarEvents({ heartbeatSourceId, window, schedules, items
   }
   function eventRow(event: EventDetails) {
     const Icon = event.attention ? Warning : event.heartbeat ? Heartbeat : event.result === 'completed' ? Completed : event.upcoming ? CalendarTime : History
-    return <li key={event.key} data-event-result={event.result} data-event-kind={event.receipt ? 'recorded' : event.planned?.kind}>
+    return <li key={event.key} data-event-result={event.result} data-event-kind={event.receipt || event.publication ? 'recorded' : event.planned?.kind}>
       <button type="button" className="mote-calendar__event" data-event-schedule={event.record.loopId} data-attention={event.attention || undefined}
-        aria-expanded={event.receipt || event.published ? isExpanded(event, false) : undefined} onClick={() => openEvent(event, false)}>
+        data-event-occurrence={event.at}
+        aria-expanded={event.receipt || event.publication ? isExpanded(event, false) : undefined} onClick={() => openEvent(event, false)}>
         <EventTime at={event.at} timezone={timezone} />
         <Icon size={14} aria-hidden />
         <span className="mote-calendar__event-copy"><strong>{event.label}</strong><small>{event.status}</small></span>
-        {event.receipt || event.published ? <Down className="mote-calendar__event-arrow" size={12} aria-hidden /> : <Forward className="mote-calendar__event-arrow" size={12} aria-hidden />}
+        {event.receipt || event.publication ? <Down className="mote-calendar__event-arrow" size={12} aria-hidden /> : <Forward className="mote-calendar__event-arrow" size={12} aria-hidden />}
       </button>
       {recap(event, false)}
     </li>
@@ -221,11 +229,11 @@ export function MoteCalendarEvents({ heartbeatSourceId, window, schedules, items
   return <div className="mote-calendar__events" aria-busy={busy}>
     {focus ? <div className="mote-calendar__focus">
       <button type="button" className="mote-calendar__highlight" data-focus-event={focus.key} data-attention={focus.attention || undefined}
-        aria-expanded={focus.receipt || focus.published ? isExpanded(focus, true) : undefined} onClick={() => openEvent(focus, true)}>
+        aria-expanded={focus.receipt || focus.publication ? isExpanded(focus, true) : undefined} onClick={() => openEvent(focus, true)}>
         <span className="mote-calendar__highlight-heading"><FocusIcon size={15} aria-hidden /><span>{focusLabel}</span><EventTime at={focus.at} timezone={timezone} /></span>
         <strong>{focus.label}</strong>
         <small>{focus.status}</small>
-        {focus.receipt || focus.published ? <Down className="mote-calendar__event-arrow" size={14} aria-hidden /> : <Forward className="mote-calendar__event-arrow" size={14} aria-hidden />}
+        {focus.receipt || focus.publication ? <Down className="mote-calendar__event-arrow" size={14} aria-hidden /> : <Forward className="mote-calendar__event-arrow" size={14} aria-hidden />}
       </button>
       {recap(focus, true)}
     </div> : null}
