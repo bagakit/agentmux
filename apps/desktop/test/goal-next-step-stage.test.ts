@@ -120,7 +120,7 @@ describe('the same typed current source and original work reading budget', () =>
   it('keeps an explicitly closed Goal in Finished with an unverified status mark', () => {
     expect(goalNextStepFact({ ...base, status: 'done', alignment: alignment(),
       grounding: grounding(['met', 'unknown'], { acceptedAt: 20, unknownDecision: {
-        by: { kind: 'user', id: 'person' }, checks: [{ criterionId: 'new', reason: 'The original observation is gone.' }],
+        by: { kind: 'user', id: 'person' }, checks: [{ criterionId: 'b', reason: 'The original observation is gone.' }],
       } }) })).toMatchObject({ stage: 'finished', mark: 'unknown', text: 'Closed with unverified results' })
   })
 

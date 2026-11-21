@@ -1,4 +1,3 @@
-import { seedStoredDemand } from '../../../test/fixtures/stored-demand.mjs'
 import { stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -38,9 +37,10 @@ it('reads only current work at the original owner after a cold restart and keeps
   expect(initial.goals[0].nodes[0].claimToken).toBe(claimToken)
   const original = new DemandStore({ root: join(owner.original.root, 'demands') })
   const old = await stat(original.storePath)
-  for (const id of ['archive-a', 'archive-b', 'archive-c']) await original.create({
-    id, title: 'Unrelated archive', description: 'archived evidence '.repeat(30_000), status: 'done',
-  })
+  const archives = []
+  for (const title of ['Archived input', 'Archived handoff', 'Archived result']) archives.push(await original.create({
+    title, description: 'archived evidence '.repeat(30_000), status: 'done',
+  }))
   expect((await stat(original.storePath)).size).toBeGreaterThan(old.size + 1_000_000)
   await owner.stop(); await owner.start()
   const store = DemandStore.prototype as unknown as { readConfirmedSnapshot(): Promise<unknown> }
@@ -63,5 +63,6 @@ it('reads only current work at the original owner after a cold restart and keeps
   await owner.call('worker', ['goal', 'plan', 'claim', '--goal', goalId, '--node', id, '--claim-token', claimToken, '--operation-id', 'claim-work'])
   expect(await owner.call('worker', working)).toMatchObject({ goals: [] })
   expect((await owner.call(null, ['goal', 'plan', '--goal', goalId])).plan.nodes).toHaveLength(3)
-  expect((await owner.call(null, ['goal', 'inspect', '--goal', 'archive-a'])).goal.id).toBe('archive-a')
+  const archiveId = archives[0]!.demand.id
+  expect((await owner.call(null, ['goal', 'inspect', '--goal', archiveId])).goal.id).toBe(archiveId)
 })
