@@ -45,7 +45,7 @@ Codex 可能在 Renderer 尚未附着时就发出 OSC 10/11 查询。如果在 C
 
 ### Agent：Main 缓冲，Session ready 后再回复
 
-`RuntimeController.publish`（`runtime-controller.ts`）在每个 `terminal-output` 事件上用 `scanTerminalOscColorQueries` 识别完整或跨 chunk 分片的查询（分片剩余部分存在 `terminalColorQueryRemainders`）：
+`RuntimeController.publish`（`runtime-controller.ts`）用 Core 已解码的实时文本识别完整或跨块的查询。只有重连快照中超出已发布游标的原始尾段需要流式解码。普通输出没有 OSC 起始、也无需保留或清理分片时，扫描直接返回。分片保存在对应 Host 和 Run 的 `terminalColorQueryRemainders` 中。
 
 - 该 Run 还没有 ready 的 Agent Session（`readyAgentColorQueryRuns` 无记录）时，回复暂存进 `pendingAgentColorQueryReplies`，上限 4 KiB。
 - Core 发布 `agent-session` 事件后，该 Run 标记为 ready，暂存的回复经 `replyToAgentColorQuery` 写回。写回调用 `RuntimeController.write(…, 'terminal-protocol')`，与按键、粘贴共用 Host 在途 owner，不另开连接准备（见 [Terminal 运行时《输入顺序与等待成本》](terminal-runtime.md#12-输入顺序与等待成本)）。
