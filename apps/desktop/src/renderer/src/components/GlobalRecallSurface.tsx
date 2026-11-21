@@ -2,6 +2,7 @@ import { useWorkbenchDocument } from '../lib/workbench-document'
 import { KnowledgeSurfaceTitlebar, useKnowledgeWindowChrome } from './KnowledgeSurfaceWindow'
 import { DEFAULT_NOTEBOOK_ID, notebookPageArchiveRoot, type Notebook, type NotebookPage } from '@agentmux/core/notebook-catalog'
 import { NoteFileLinkContext, type NoteFileLinkOpener } from '@agentmux/client-ui/components/NoteFileContext'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { parseHttpLinkUrl } from '@agentmux/client-ui/link-url'
 import { resolveDesktopNoteFileLink } from '../lib/note-file-link'
 import { openNoteAgentLauncher } from '../lib/note-agent-context'
@@ -14,7 +15,8 @@ import { NotebookSelector } from './NotebookSelector'
 import { ConfirmationDialog } from './ConfirmationDialog'
 import { useNotebookOperation } from './NotebookOperation'
 import { changeNotebook, refreshNotebookLibrary, recordNotebookChanges, retryNotebookRecoveries, useNotebookLibrary, type NoteNotebookContext } from '../lib/notebook-library'
-import { openNotebookAttachment, openNotebookFile, openNotebookPage, prepareNotebookWorkface } from '../lib/recall-notebooks'
+import { openNotebookAttachment, openNotebookFile, openNotebookPage, prepareNotebookWorkface, resolveNotebookPageWorkface } from '../lib/recall-notebooks'
+import { createRecallDaily, recallDailyAddress } from '../lib/recall-daily'
 import type { CanvasFileTarget } from './NoteCanvas'
 import { spatialCatalog } from '../lib/space-agent-control'
 import { useLauncherState } from '../lib/launcher-state'
@@ -59,6 +61,7 @@ export const GlobalRecallSurface = memo(function GlobalRecallSurface({ windowAct
   const nativeWindowControls = windowChrome?.nativeControls ?? (isMacPlatform() && ownerDocument === document)
   const library = useNotebookLibrary(state => state.state), libraryIssue = useNotebookLibrary(state => state.issue)
   const notebookId = useAppStore(state => state.recallNotebookId), noteId = useAppStore(state => state.recallNoteId)
+  const restoring = useAppStore(state => state.loading)
   const config = useAppStore(state => state.config), recoveries = useAppStore(state => state.notebookRecoveries)
   const sidebarCollapsed = useAppStore(state => state.recallSidebarCollapsed), sidebarWidth = useAppStore(state => state.recallSidebarWidth)
   const setSidebarCollapsed = useAppStore(state => state.setRecallSidebarCollapsed), setSidebarWidth = useAppStore(state => state.setRecallSidebarWidth)
@@ -85,15 +88,13 @@ export const GlobalRecallSurface = memo(function GlobalRecallSurface({ windowAct
       .finally(() => { if (talkPending.current?.request === request) { talkPending.current = null; setTalkOpening(null) } })
   }, [onSelectReference])
   const [query, setQuery] = useState(''), [archived, setArchived] = useState(false)
-  useEffect(() => {
-    // Only first entry chooses a default. An original saved selection is never replaced.
-    if (visible && library && !libraryIssue && notebookId === null && !noteId && !selection && library.notebooks[DEFAULT_NOTEBOOK_ID])
-      useAppStore.getState().setRecallNotebook(DEFAULT_NOTEBOOK_ID)
-  }, [visible, library, libraryIssue, notebookId, noteId, selection])
+  const daily = library?.pages[recallDailyAddress().noteId]
+  const defaultEntry = useRef(false)
   const archiveRoot = noteId && library ? notebookPageArchiveRoot(library.pages, noteId)?.noteId : undefined
   useEffect(() => { setQuery(''); setArchived(false) }, [notebookId])
   useEffect(() => { if (noteId && library) setArchived(Boolean(archiveRoot)) }, [notebookId, noteId, archiveRoot])
   const [opening, setOpening] = useState(false), [error, setError] = useState<string | null>(null), [creationNotice, setCreationNotice] = useState<string | null>(null)
+  const [dailyAttempt, setDailyAttempt] = useState<{ date: Date; phase: 'creating' | 'checking' | 'unconfirmed' | 'absent'; issue?: string } | null>(null)
   const [createOpen, setCreateOpen] = useState(false), [deleteOpen, setDeleteOpen] = useState(false)
   const notebookTrigger = useRef<HTMLButtonElement>(null)
   const [deleteTarget, setDeleteTarget] = useState<(Notebook & { pageCount: number }) | null>(null)
@@ -146,7 +147,34 @@ export const GlobalRecallSurface = memo(function GlobalRecallSurface({ windowAct
   async function showPage(page: NotebookPage, blockId?: string) {
     setDirectoryOpen(false)
     intent.current += 1; useAppStore.getState().setRecallNotebook(page.notebookId, page.noteId); setError(null)
-    try { await openNotebookPage(page, onSelectReference, selection?.active, blockId ? { noteId: page.noteId, blockId } : undefined) } catch (cause) { setError(presentError(cause)) }
+    try {
+      const original = resolveNotebookPageWorkface(page)
+      await openNotebookPage(original, onSelectReference, selection?.active, blockId ? { noteId: page.noteId, blockId } : undefined)
+    } catch (cause) {
+      if (active.current && useAppStore.getState().recallNoteId === page.noteId) setError(presentError(cause))
+    }
+  }
+  useEffect(() => {
+    if (!visible || restoring || !library || libraryIssue || defaultEntry.current) return
+    defaultEntry.current = true
+    const state = useAppStore.getState()
+    if (state.recallNoteId || state.recallZoneSelection || selection || directoryOpen ||
+      (state.recallNotebookId && state.recallNotebookId !== DEFAULT_NOTEBOOK_ID)) return
+    if (daily) void showPage(daily)
+    else if (!state.recallNotebookId && library.notebooks[DEFAULT_NOTEBOOK_ID]) state.setRecallNotebook(DEFAULT_NOTEBOOK_ID)
+  }, [visible, restoring, library, libraryIssue, selection, directoryOpen, daily])
+  async function createToday() {
+    const request = ++intent.current
+    const checking = dailyAttempt?.phase === 'unconfirmed'
+    const date = checking ? dailyAttempt.date : new Date()
+    setDailyAttempt({ date, phase: checking ? 'checking' : 'creating', ...(checking && dailyAttempt.issue ? { issue: dailyAttempt.issue } : {}) })
+    try {
+      const page = await createRecallDaily(date, checking ? 'check' : 'create')
+      setDailyAttempt(page ? null : { date, phase: 'absent' })
+      if (page && active.current && request === intent.current) await showPage(page)
+    } catch (cause) {
+      setDailyAttempt({ date, phase: 'unconfirmed', issue: presentError(cause) })
+    }
   }
   async function showFile(file: CanvasFileTarget, blockId: string | undefined, signal: AbortSignal) {
     if (signal.aborted || !activeNotebook) return false
@@ -219,6 +247,10 @@ export const GlobalRecallSurface = memo(function GlobalRecallSurface({ windowAct
     <button className="survey-icon-button" aria-label="Save notebook to Topic" title="Save notebook to Topic" onClick={() => setCapture({ title: activeNotebook.name, sources: [{ kind: 'notebook', notebookId: activeNotebook.notebookId }], noteIds: pages.filter(page => page.notebookId === activeNotebook.notebookId).map(page => page.noteId) })}><CollectSourcesIcon size={14} /></button>
     {activeNotebook.notebookId !== DEFAULT_NOTEBOOK_ID ? <button className="survey-icon-button" aria-label="Delete notebook" title="Delete notebook" onClick={() => { if (!deletion.pending) setDeleteTarget({ ...activeNotebook, pageCount: pages.filter(page => page.notebookId === activeNotebook.notebookId).length }); setDeleteOpen(true) }}><ThemeActionRemoveIcon size={14} /></button> : null}
   </div> : null
+  const dailyPhase = dailyAttempt?.phase
+  const dailyBusy = dailyPhase === 'creating' || dailyPhase === 'checking'
+  const dailyButton = dailyPhase === 'creating' ? 'Creating today’s Daily…' : dailyPhase === 'checking'
+    ? 'Checking this Daily…' : dailyPhase === 'unconfirmed' ? 'Check this Daily' : 'Create today’s Daily'
   return <section ref={surfaceRef} data-knowledge-surface="recall" className="global-recall-surface" aria-label="Recall" hidden={!visible} inert={!visible} aria-hidden={!visible} data-sidebar-collapsed={sidebarCollapsed} data-navigation-stacked={navigationStacked} data-native-window-controls={nativeWindowControls} data-windowed={windowChrome ? '' : undefined} style={{ '--survey-navigation-width': `${sidebarCollapsed ? 40 : effectiveWidth}px` } as CSSProperties}>
     <NotebookCreateDialog active={visible} open={visible && createOpen} onClose={() => setCreateOpen(false)} restoreFocus={() => notebookTrigger.current?.focus()} onCreateIntent={() => { createIntent.current = intent.current }} onCreated={id => { setCreateOpen(false); if (active.current && intent.current === createIntent.current) chooseNotebook(id) }} />
     <ConfirmationDialog open={visible && deleteOpen} title="Delete notebook?" subject={deleteTarget?.name ?? ''} description={deleteTarget?.pageCount ? `${deleteTarget.pageCount} ${deleteTarget.pageCount === 1 ? 'page will' : 'pages will'} move to 随手记. Contents, page hierarchy and archived status stay intact.` : 'This empty notebook will be removed.'} confirmLabel={deletion.pending ? 'Retry deletion' : 'Delete notebook'} busy={deletion.busy} onCancel={() => setDeleteOpen(false)} onConfirm={() => void removeNotebook()} feedback={deletion.issue ? <p className="notebook-create-issue" role="status">{deletion.issue}</p> : null} />
@@ -243,6 +275,13 @@ export const GlobalRecallSurface = memo(function GlobalRecallSurface({ windowAct
       {recoveries.length ? <p className="survey-history-recovery" role="status"><span>History update pending. Your notes are saved.</span><button disabled={recovering} onClick={() => { setRecovering(true); void retryNotebookRecoveries().catch(cause => setError(presentError(cause))).finally(() => setRecovering(false)) }}>Retry history</button></p> : null}
       {libraryIssue ? <p className="survey-relation-notice" role="status">Notebook directory is unconfirmed. Original pages are kept. <button onClick={() => void refreshNotebookLibrary().catch(() => {})}>Refresh</button><details><summary>Details</summary>{libraryIssue}</details></p> : null}
       {talkOpening !== null && talkOpening === noteId ? <p className="survey-relation-notice" role="status">Opening this Note’s discussion Launcher…</p> : null}
+      {notebookId === DEFAULT_NOTEBOOK_ID && !noteId && !selection && !archived &&
+        ((!daily && !libraryIssue) || dailyAttempt && dailyPhase !== 'absent') ?
+        <div className={dailyAttempt?.issue ? 'survey-error' : 'survey-relation-notice'}>
+          {dailyAttempt?.issue ? <span role="status">{dailyAttempt.issue}</span> : null}
+          {dailyPhase === 'absent' ? <p role="status">The original Daily is absent. You can create today’s Daily.</p> : null}
+          <Button disabled={dailyBusy} onClick={() => void createToday()}>{dailyButton}</Button>
+        </div> : null}
       {directoryOpen && selection && noteId ? <button type="button" className="recall-return-note" onClick={() => setDirectoryOpen(false)}><ThemeObjectNoteIcon size={14} /><span>Return to note</span><small title={library?.pages[noteId]?.title}>{library?.pages[noteId]?.title}</small></button> : null}
       <div className="recall-preserved-workbench" hidden={directoryOpen || !selection} inert={directoryOpen || !selection}>
       {selection ? projection ? <WorkspaceWorkbench workspaceId={projection.displayWorkspaceId} projection={projection} viewOwnership="projection" viewTargets={viewTargets} onCreateTab={() => void createPage()} leadingChrome={nativeWindowControls ? <span className="survey-window-controls-inset" aria-hidden="true" /> : undefined} visible={visible && !directoryOpen} /> : <div className="workbench-zone-state" role="status"><h2>The original page is kept</h2><p>Its work surface is still restoring. Reopen this same page from its Notebook.</p><button className="note-text-button" onClick={() => noteId && library?.pages[noteId] ? void showPage(library.pages[noteId]!) : chooseNotebook(notebookId)}>Reopen page</button></div>

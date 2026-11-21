@@ -4,9 +4,7 @@ import type { ConversationRef } from '@agentmux/core/conversation'
 import type { NotebookGraphSnapshot } from '../../../shared/notebook-observation'
 import { useAppStore } from '../store'
 import { presentKnowledgeSurface } from './knowledge-surface-navigation'
-import { noteResourceReadParams } from './note-history-target'
-import { openNotebookPage } from './recall-notebooks'
-import { scratchTopicsForConfig } from './scratch-topic-snapshots'
+import { openNotebookPage, resolveNotebookPageWorkface } from './recall-notebooks'
 import { sessionPresentationById } from './session-presentation'
 
 export type RecallDestination = { page: NotebookPage; blockId: string }
@@ -31,9 +29,7 @@ export function recallBacklinks(snapshot: NotebookGraphSnapshot, conversation: C
 
 export async function openRecallCardNote(page: NotebookPage, blockId: string, sourceDocument: Document): Promise<void> {
   const state = useAppStore.getState()
-  const topics = scratchTopicsForConfig(state.config, state.scratchTopicSnapshots) ?? []
-  const { zoneId } = noteResourceReadParams(state, topics, page.resource, page.workface)
-  const original = { ...page, workface: { zoneId, workspaceId: page.resource.workspaceId } }
+  const original = resolveNotebookPageWorkface(page)
   state.setRecallNotebook(page.notebookId, page.noteId)
   if (!await presentKnowledgeSurface('recall', state.setMainSurface, { inputPolicy: 'target', sourceDocument }) ||
     !await openNotebookPage(original, undefined, undefined, { noteId: page.noteId, blockId })) {

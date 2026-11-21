@@ -4,7 +4,8 @@ import { fileNavigationSelection, useAppStore } from '../store'
 import { api } from './api'
 import { changeNotebook, notebookPageResourceMatches } from './notebook-library'
 import { spatialCatalog, zoneContext } from './space-agent-control'
-import { scratchTopicsForWorkspace } from './scratch-topic-snapshots'
+import { scratchTopicsForConfig, scratchTopicsForWorkspace } from './scratch-topic-snapshots'
+import { noteResourceReadParams } from './note-history-target'
 import { surveyInitialZoneSelection, surveySelectReference } from './survey-workface'
 import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { readNoteDocument, type NoteBlockTarget } from '@agentmux/client-ui/note/note-document'
@@ -18,6 +19,13 @@ export type NotePageOpenOrigin = { reference: WorkbenchProjectionSelection; spac
 function catalogNow() {
   const state = useAppStore.getState()
   return spatialCatalog(state, scratchTopicsForWorkspace(state.scratchTopicSnapshots, state.config?.workspaces.find(w => w.id === SCRATCH_WORKSPACE_ID)) ?? [])
+}
+
+export function resolveNotebookPageWorkface(page: NotebookPage): NotebookPage {
+  const state = useAppStore.getState()
+  const topics = scratchTopicsForConfig(state.config, state.scratchTopicSnapshots) ?? []
+  const { zoneId } = noteResourceReadParams(state, topics, page.resource, page.workface)
+  return { ...page, workface: { zoneId, workspaceId: page.resource.workspaceId } }
 }
 /** A Notebook's workface is the original shared Zone, created only when content is added. */
 export async function prepareNotebookWorkface(notebook: Notebook, workspaceId: string, onPrepared?: (workface: { zoneId: string; workspaceId: string }) => void) {

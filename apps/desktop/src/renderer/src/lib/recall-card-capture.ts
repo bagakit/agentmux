@@ -1,11 +1,11 @@
-import { DEFAULT_NOTEBOOK_ID, type NotebookPage, type NoteResource } from '@agentmux/core/notebook-catalog'
-import { recallCardBlocks, recallCardHref, recallDailyDate, type RecallCard } from '@agentmux/core/notebook-observation'
+import type { NotebookPage, NoteResource } from '@agentmux/core/notebook-catalog'
+import { recallCardBlocks, recallCardHref, type RecallCard } from '@agentmux/core/notebook-observation'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { newNoteDocument, readNoteDocument, serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
-import { NOTES_WORKSPACE_ID } from '@agentmux/host/notes-library'
 import { api } from './api'
-import { changeNotebook, refreshNotebookLibrary, sameNoteResource } from './notebook-library'
+import { refreshNotebookLibrary, sameNoteResource } from './notebook-library'
 import { noteResourceReadParams } from './note-history-target'
+import { newRecallDailyResource, recallDailyAddress, registerRecallDaily } from './recall-daily'
 import { scratchTopicsForConfig } from './scratch-topic-snapshots'
 import { persistRecallCardIntent, useAppStore } from '../store'
 import { recallIntentKey, type RecallCardIntent } from './recall-card-intent'
@@ -33,18 +33,16 @@ async function selectTarget(destination: NotebookPage | null, now: Date): Promis
     zoneId: originalFileRead(destination.resource, destination.workface).zoneId
   }
 
-  const day = recallDailyDate(now)
+  const address = recallDailyAddress(now)
   const catalog = await refreshNotebookLibrary()
-  const daily = catalog.pages['daily-' + day]
+  const daily = catalog.pages[address.noteId]
   if (daily) return {
     resource: daily.resource, noteId: daily.noteId,
     zoneId: originalFileRead(daily.resource, daily.workface).zoneId
   }
 
-  const workspace = useAppStore.getState().config?.workspaces.find(item => item.id === NOTES_WORKSPACE_ID)
-  if (!workspace) throw new Error('The default Notes library is unavailable. Choose an available Note or reconnect the library.')
-  const resource = { hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path, path: 'Daily-' + day + '.note.md' }
-  return { resource, noteId: null, zoneId: originalFileRead(resource).zoneId, dailyTitle: 'Daily · ' + day }
+  const resource = newRecallDailyResource(address.path)
+  return { resource, noteId: null, zoneId: originalFileRead(resource).zoneId, dailyTitle: address.title }
 }
 
 async function capture(card: RecallCard, destination: NotebookPage | null, now: Date): Promise<SavedCard> {
@@ -107,8 +105,7 @@ async function capture(card: RecallCard, destination: NotebookPage | null, now: 
   }
   let catalog = await refreshNotebookLibrary()
   if (!catalog.pages[targetId] && dailyTitle) {
-    catalog = await changeNotebook({ kind: 'register', noteId: targetId, title: dailyTitle, notebookId: DEFAULT_NOTEBOOK_ID, resource,
-      workface: { zoneId, workspaceId: resource.workspaceId } }, 'recall-daily:' + targetId)
+    catalog = await registerRecallDaily(catalog, targetId, dailyTitle, resource, zoneId)
   }
   const page = catalog.pages[targetId]
   if (!page || !sameNoteResource(page.resource, resource)) throw new Error('The card is in its original file. The Notebook entry still needs to be confirmed.')
