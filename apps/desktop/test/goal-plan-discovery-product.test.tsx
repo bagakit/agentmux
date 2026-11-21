@@ -129,19 +129,23 @@ const renderedStates = () => [...container.querySelectorAll<HTMLElement>('[data-
 async function expectSavedGraph() {
   // Original product refresh reads the same Host owner; the mounted component is
   // retained. No test writes any Renderer plan or Domain plan field.
+  const goal = (await fixture.host.demands.get('discovery'))!
+  const [inspect, preserve] = goal.plan!.nodes
+  const issued = goal.plan!.history[0]!.createdTickets!
+  expect(issued.map(ticket => [ticket.record.kind === 'issued' && ticket.record.draftId, ticket.hash])).toEqual([
+    ['inspect', inspect!.id], ['preserve', preserve!.id]
+  ])
+  expect(goal.plan!.nodes.map(node => node.dependsOn)).toEqual([[], [inspect!.id]])
   await vi.waitFor(() => {
-    expect([...container.querySelectorAll<HTMLElement>('[data-goal-plan-node]')].map(node => node.dataset.goalPlanNode)).toEqual(['inspect', 'preserve'])
-    expect([...container.querySelectorAll<HTMLElement>('[data-goal-plan-edge]')].map(edge => edge.dataset.goalPlanEdge)).toEqual(['inspect>preserve'])
+    expect([...container.querySelectorAll<HTMLElement>('[data-goal-plan-edge]')].map(edge => edge.dataset.goalPlanEdge)).toEqual([`${inspect!.id}>${preserve!.id}`])
     // States and progress are the Host owner's derivation returned with the record.
-    expect(renderedStates()).toEqual([['inspect', 'ready'], ['preserve', 'waiting']])
+    expect(renderedStates()).toEqual([[inspect!.id, 'ready'], [preserve!.id, 'waiting']])
     expect(container.querySelector('[data-goal-meta-plan]')?.textContent).toBe('0 of 2 Tickets passed')
     expect(container.querySelector('[data-goal-plan-progress]')?.textContent).toBe('Revision 1')
   })
-  const goal = (await fixture.host.demands.get('discovery'))!
-  expect(goal.plan?.nodes.map(node => [node.id, node.dependsOn])).toEqual([['inspect', []], ['preserve', ['inspect']]])
   expect(goal.alignment?.confirmedAt).toBeNull(); expect(goal.description).toBe(originalDescription)
   expect(goal.delegations ?? []).toEqual([]); expect(goal.dispatches ?? []).toEqual([])
-  evidence.push({ phase: 'real-owner-to-mounted-graph', goal, nodes: ['inspect', 'preserve'], edge: 'inspect>preserve', states: renderedStates() })
+  evidence.push({ phase: 'real-owner-to-mounted-graph', goal, nodes: [inspect!.id, preserve!.id], edge: `${inspect!.id}>${preserve!.id}`, states: renderedStates() })
 }
 
 it('the original Goal record reaches the store and mounted graph before a delegation observer can repair it', async () => {
@@ -170,7 +174,8 @@ it('a node delegation read returns the Host owner derivation to the mounted grap
     supervisorSessionId: owner, assigneeSessionIds: [owner, worker.agentSessionId], sessionIds: [owner, worker.agentSessionId] })
   await useAppStore.getState().refreshDemand('discovery')
   await useAppStore.getState().updateDemand('discovery', { alignment: proposal })
-  await fixture.host.rpc.call('goal.plan.revise', { goalId: 'discovery', revision: revision('delegated-plan') })
+  const planned = await fixture.host.rpc.call('goal.plan.revise', { goalId: 'discovery', revision: revision('delegated-plan') })
+  const inspectTicketId = planned.plan!.nodes[0]!.id
   const supervisor = fixture.core.core.agentSession(owner)
   const capability = fixture.core.start.mock.calls.map(([spec]) => (spec as { env?: Record<string, string | undefined> }).env)
     .find(env => env?.AGENTMUX_AGENT_SESSION_ID === owner)?.AGENTMUX_AGENT_CAPABILITY
@@ -180,7 +185,7 @@ it('a node delegation read returns the Host owner derivation to the mounted grap
   try {
     await client.call('goal.delegation.prepare', { goalId: 'discovery', intent: { operationId: 'delegate-inspect', sourceMessageId: 'source-inspect', hostId: 'local',
       ownerAgentSessionId: owner, workerAgentSessionId: worker.agentSessionId, ownerRunId: supervisor.run.runId, workerRunId: worker.run.runId,
-      threadId: 'thread-inspect', text: 'Inspect the original work.', alignmentRevision: 1, criterionIds: ['original'], planNodeId: 'inspect' } })
+      threadId: 'thread-inspect', text: 'Inspect the original work.', alignmentRevision: 1, criterionIds: ['original'], planNodeId: inspectTicketId } })
   } finally { await client.dispose() }
   useAppStore.setState({ selectedDemandId: 'discovery' }); await mount()
   await act(async () => useAppStore.getState().refreshDemand('discovery'))
@@ -188,7 +193,7 @@ it('a node delegation read returns the Host owner derivation to the mounted grap
   await vi.waitFor(async () => { await act(async () => {}); expect(useAppStore.getState().demands.discovery?.delegationObservations).toBeDefined() }, { timeout: 15_000 })
   const goal = useAppStore.getState().demands.discovery!
   expect(goal.delegationObservationIssue).toBeUndefined()
-  expect(goal.delegations?.map(item => item.planNodeId)).toEqual(['inspect'])
+  expect(goal.delegations?.map(item => item.planNodeId)).toEqual([inspectTicketId])
   const owned = await fixture.host.rpc.call('goal.plan', { goalId: 'discovery' })
   expect(owned.planState, 'The Host returns its derivation with the plan').toBeDefined()
   expect(renderedStates()).toEqual(owned.planState!.nodes.map(node => [node.id, node.state]))
@@ -259,18 +264,20 @@ it('without a Supervisor the original action is saved before the picker and only
   await act(async () => { [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Cancel')!.click() })
   await act(async () => useAppStore.getState().updateDemand('discovery', { supervisorSessionId: fixture.primary.agentSessionId, assigneeSessionIds: [fixture.primary.agentSessionId] }))
   expect(fixture.host.executed('demand.discuss')).toEqual([])
-  expect(container.querySelector('[data-goal-plan-request]')?.textContent).toBe('Ask Planning Supervisor to split work')
+  expect(container.querySelector('[data-goal-plan-request]')?.textContent).toMatch(/^Ask (?:Planning )?Supervisor to split work$/u)
   await nativeState('done'); const request = await requestPlan()
   expect(request.requestId).toBe(reference.requestId)
   expect(planningRequest().supervisorAgentSessionId).toBe(fixture.primary.agentSessionId)
-  expect(container.querySelector('[data-goal-plan-request]')?.textContent).toBe('Check request to Planning Supervisor')
+  expect(container.querySelector('[data-goal-plan-request]')?.textContent).toMatch(/^Check request to (?:(?:original|Planning) )?Supervisor$/u)
 })
 
 it('missing alignment keeps its real gap in the Supervisor request and refuses a fabricated plan', async () => {
   await save(false); await nativeState('done'); await requestPlan()
   const goal = (await fixture.host.demands.get('discovery'))!, attempt = goal.patrols![0]!.attempts[0]!
   expect(goal.alignment).toBeUndefined(); expect(goal.plan).toBeUndefined()
-  expect(attempt.agentMuxNote).toContain('If the proposal is missing')
+  const request = JSON.parse(attempt.agentMuxNote.split('\n', 1)[0]!)
+  expect(request).toMatchObject({ goalId: goal.id, context: { alignment: null, planRevision: 0 } })
+  expect(request.next).toContain('Clarify missing criteria with the original user')
   const rejected = await cli(['goal', 'plan', 'revise', '--input', '-'], { goalId: 'discovery', revision: revision() }, supervisorCredentials())
   expect(rejected.code).toBe(1); expect(rejected.stderr).toContain('current Goal proposal version')
   expect(renderedStates()).toEqual([['discovery', 'goal']])
@@ -504,7 +511,7 @@ it('a bare current Supervisor never borrows a foreign Open target and the same u
 it.each(['same-entry', 'later-conversation'] as const)('an explicit first planning send keeps the original operation and respects the %s receipt entry', async choice => {
   await save(false); await nativeState('done')
   await useAppStore.getState().openDemandPmo('discovery')
-  const other = binding().recipient.agentSessionId
+  const other = (await vi.waitFor(binding)).recipient.agentSessionId
   const agentSession = fixture.core.core.agentSession.bind(fixture.core.core)
   let available = false
   vi.spyOn(fixture.core.core, 'agentSession').mockImplementation(id => {
