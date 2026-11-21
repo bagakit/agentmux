@@ -6,7 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createWorkspaceLayout } from '@agentmux/layout'
-import { emptyNotebookState, type NotebookPage } from '@agentmux/core/notebook-catalog'
+import { DEFAULT_NOTEBOOK_ID, emptyNotebookState, type NotebookPage } from '@agentmux/core/notebook-catalog'
 import { newNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { directoryIdentity, workspaceZoneId } from '../src/shared/space-addresses'
 import { GlobalRecallSurface } from '../src/renderer/src/components/GlobalRecallSurface'
@@ -14,6 +14,7 @@ import { NoteCanvas } from '../src/renderer/src/components/NoteCanvas'
 import { api } from '../src/renderer/src/lib/api'
 import { noteCanvasScopeKey } from '../src/renderer/src/lib/note-canvas-state'
 import { useNotebookLibrary } from '../src/renderer/src/lib/notebook-library'
+import { recallDailyAddress } from '../src/renderer/src/lib/recall-daily'
 import { openNotebookFile } from '../src/renderer/src/lib/recall-notebooks'
 import { createWorkbenchTab, documentKey } from '../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../src/renderer/src/store'
@@ -50,6 +51,51 @@ beforeEach(() => {
   vi.spyOn(api.files, 'observe').mockResolvedValue(undefined)
 })
 afterEach(async () => { await act(async () => useNotebookLibrary.setState(initialLibrary, true)) })
+
+function addTodaysDaily() {
+  const daily = recallDailyAddress()
+  const catalog = useNotebookLibrary.getState().state!
+  const movedPath = 'journal/today.note.md'
+  const savedDaily = { ...page, noteId: daily.noteId, title: daily.title, notebookId: DEFAULT_NOTEBOOK_ID,
+    resource: { ...page.resource, path: movedPath } }
+  delete savedDaily.workface
+  useNotebookLibrary.setState({ state: { ...catalog, pages: { ...catalog.pages, [daily.noteId]: savedDaily } } })
+  const readDaily = { ...saved, path: movedPath,
+    content: serializeNoteDocument(newNoteDocument('Original daily body', daily.noteId, 'daily-block')) }
+  vi.mocked(api.files.read).mockImplementation(async (_, target) => ({ status: 'read', document: target === movedPath ? readDaily : saved }))
+  return savedDaily
+}
+
+it('opens the registered Daily from unselected Recall without graph reads or writes', async () => {
+  const daily = addTodaysDaily()
+  const original = useAppStore.getState().openFile
+  const openFile = vi.fn(async () => true)
+  const creates = vi.spyOn(api.files, 'createPublic')
+  useAppStore.setState({ recallNotebookId: DEFAULT_NOTEBOOK_ID, openFile })
+  try {
+    await dom.render(<GlobalRecallSurface catalog={null} projection={null} selection={null} />)
+    await vi.waitFor(() => expect(openFile).toHaveBeenCalled())
+    expect(useAppStore.getState().recallNoteId).toBe(daily.noteId)
+    expect(api.files.read).toHaveBeenCalledWith(workspace.id, daily.resource.path)
+    expect(openFile).toHaveBeenCalledWith(daily.resource.path, 'original-group', undefined, workspace.id, true,
+      expect.objectContaining({ space: expect.objectContaining({ zoneId }) }), undefined)
+    expect(api.notebooks.graph).not.toHaveBeenCalled()
+    expect(creates).not.toHaveBeenCalled()
+    expect(useAppStore.getState().documents[docKey]).toEqual(draft)
+  } finally { useAppStore.setState({ openFile: original }) }
+})
+
+it('keeps a retained Note when the Daily is available', async () => {
+  addTodaysDaily()
+  const current = useNotebookLibrary.getState().state!
+  useNotebookLibrary.setState({ state: { ...current, pages: { ...current.pages,
+    [noteId]: { ...page, notebookId: DEFAULT_NOTEBOOK_ID } } } })
+  useAppStore.setState({ recallNotebookId: DEFAULT_NOTEBOOK_ID, recallNoteId: noteId })
+  await dom.render(<GlobalRecallSurface catalog={null} projection={null} selection={null} />)
+  expect(useAppStore.getState().recallNoteId).toBe(noteId)
+  expect(api.files.read).not.toHaveBeenCalled()
+  expect(useAppStore.getState().documents[docKey]).toEqual(draft)
+})
 
 it('forwards a selected saved block through the real Global Recall, NotebookHome and original File consumer without replacing its draft', async () => {
   await dom.render(<GlobalRecallSurface catalog={null} projection={null} selection={null} />)

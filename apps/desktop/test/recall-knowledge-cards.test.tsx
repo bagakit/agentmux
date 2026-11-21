@@ -11,9 +11,11 @@ import { NotebookObservationOwner } from '../../host/src/notebook-observation-ow
 import { FileResourceOwner } from '../../host/src/file-resource'
 import { api } from '../src/renderer/src/lib/api'
 import { saveRecallCard } from '../src/renderer/src/lib/recall-card-capture'
+import { createRecallDaily, recallDailyAddress } from '../src/renderer/src/lib/recall-daily'
 import { recallBacklinks } from '../src/renderer/src/lib/recall-card-navigation'
 import { restoreRecallCardIntents } from '../src/renderer/src/lib/recall-card-intent'
 import { ConversationRecallCard } from '../src/renderer/src/components/ConversationRecallCard'
+import { GlobalRecallSurface } from '../src/renderer/src/components/GlobalRecallSurface'
 import { NoteFileView } from '../src/renderer/src/components/NoteFileView'
 import { useNotebookLibrary } from '../src/renderer/src/lib/notebook-library'
 import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
@@ -178,6 +180,64 @@ it('creates one default Daily per local day and appends different cards to its o
   const tomorrow = new Date(date); tomorrow.setDate(date.getDate() + 1)
   const third = await saveRecallCard(card, null, tomorrow)
   expect(third.page.noteId).not.toBe(first.page.noteId)
+})
+
+it('keeps the directory usable until the user creates today’s Daily, then captures into the same file', async () => {
+  const original = workbench.useAppStore.getState()
+  const openFile = vi.fn(async () => true)
+  vi.spyOn(api.files, 'read').mockImplementation(async (_, requested) => read(requested))
+  workbench.useAppStore.setState({
+    loading: false, mainSurface: 'recall', recallNotebookId: null, recallNoteId: null, recallZoneSelection: null,
+    notebookRecoveries: [], openFile, layouts: {},
+    prepareWorkbenchLayout: () => createWorkspaceLayout('notes-group', [])
+  })
+  try {
+    await display(<GlobalRecallSurface catalog={null} projection={null} selection={null} />)
+    const create = [...container!.querySelectorAll('button')].find(button => button.textContent === 'Create today’s Daily')!
+    expect(create).toBeDefined()
+    expect(api.files.createPublic).not.toHaveBeenCalled()
+    await act(async () => create.click())
+    await vi.waitFor(() => expect(openFile).toHaveBeenCalled())
+    const current = catalog.pages[workbench.useAppStore.getState().recallNoteId!]!
+    expect(current.notebookId).toBe(DEFAULT_NOTEBOOK_ID)
+    const captured = await saveRecallCard(card, null)
+    expect(captured.page.resource).toEqual(current.resource)
+    expect(await createRecallDaily()).toEqual(current)
+    expect(api.files.createPublic).toHaveBeenCalledTimes(1)
+    expect(api.files.writePublic).toHaveBeenCalledTimes(1)
+  } finally {
+    await display(null)
+    workbench.useAppStore.setState(original)
+  }
+})
+
+it('checks the same Daily after midnight without replaying its unconfirmed creation', async () => {
+  const original = workbench.useAppStore.getState()
+  const tomorrow = new Date(date); tomorrow.setDate(date.getDate() + 1)
+  const button = (label: string) => [...container!.querySelectorAll('button')].find(candidate => candidate.textContent === label)!
+  workbench.useAppStore.setState({
+    loading: false, mainSurface: 'recall', recallNotebookId: null, recallNoteId: null, recallZoneSelection: null, notebookRecoveries: []
+  })
+  vi.mocked(api.files.createPublic).mockResolvedValueOnce({
+    resource: null, result: { status: 'unknown', code: 'ACK_UNKNOWN', message: 'Original reply unavailable' }
+  })
+  vi.setSystemTime(date)
+  try {
+    await display(<GlobalRecallSurface catalog={null} projection={null} selection={null} />)
+    await act(async () => button('Create today’s Daily').click())
+    expect(button('Check this Daily')).toBeDefined()
+    vi.setSystemTime(tomorrow)
+    await act(async () => button('Check this Daily').click())
+    expect(api.files.readPublic).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(api.files.readPublic).mock.calls.map(([input]) => input.path))
+      .toEqual([recallDailyAddress(date).path, recallDailyAddress(date).path])
+    expect(api.files.createPublic).toHaveBeenCalledTimes(1)
+    expect(button('Create today’s Daily')).toBeDefined()
+  } finally {
+    vi.useRealTimers()
+    await display(null)
+    workbench.useAppStore.setState(original)
+  }
 })
 
 it('keeps the exact pending destination after a lost write reply and checks the same file without a duplicate write', async () => {
