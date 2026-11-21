@@ -67,10 +67,10 @@ const originalFiles = new FileResourceOwner({
   }
 })
 const settle = async () => { await act(async () => { await Promise.resolve() }) }
-async function openSavedContent() {
+async function openSavedContent(open = true) {
   const disclosure = container!.querySelector<HTMLDetailsElement>('.recall-knowledge-card details')!
   await act(async () => {
-    disclosure.open = true
+    disclosure.open = open
     disclosure.dispatchEvent(new Event('toggle'))
   })
 }
@@ -256,6 +256,57 @@ it('opens a reference in a saved card body using the original Note citation scop
   expect(preview?.querySelector('.note-reference__excerpt')?.textContent).toBe('Keep the original evidence.')
   await act(async () => preview!.querySelector('button')!.click())
   expect(open).toHaveBeenCalledWith(expect.objectContaining({ location: { workspaceId: workspace.id, path: supportingPath } }), target.blockId)
+})
+
+it('reads the exact original card body inline when expanded from Conversation', async () => {
+  const note = newNoteDocument('Outside the card.', 'selected-note', 'source-block', 'Research note')
+  note.content.content!.push(recallCardNoteBlock(card, 'saved-card', { containerId: 'saved-container',
+    blocks: [
+      { type: 'heading', attrs: { blockId: 'finding', level: 2 }, content: [{ type: 'text', text: 'Saved finding' }] },
+      { type: 'codeBlock', attrs: { blockId: 'example' }, content: [{ type: 'text', text: 'const example = true' }] },
+      { type: 'paragraph', attrs: { blockId: 'last-line' }, content: [{ type: 'text', text: 'The complete last paragraph.' }] }
+    ] }))
+  files.set(path, serializeNoteDocument(note))
+  const graph = await originalObservation.graph(catalog, {})
+  const content = vi.spyOn(api.notebooks, 'content').mockImplementation(noteId => originalObservation.content(catalog, noteId))
+  const backlinks = recallBacklinks({ catalog, graph }, { hostId: card.routeHostId, agentSessionId: card.reference.agentSessionId })
+  await display(<ConversationRecallCard card={{ ...card, title: 'Renamed reading point' }} backlinks={backlinks} inNamedRow />)
+  expect(container!.querySelector('.recall-knowledge-card strong')?.textContent).toBe(card.title)
+  expect(content).not.toHaveBeenCalled()
+  await openSavedContent()
+  const preview = container!.querySelector('.recall-knowledge-card .note-embedded-content')!
+  expect(preview.querySelector('h2')?.textContent).toBe('Saved finding')
+  expect(preview.querySelector('pre')?.textContent).toBe('const example = true')
+  expect(preview.textContent).toContain('The complete last paragraph.')
+  expect(preview.textContent).not.toContain('Outside the card.')
+  expect(content).toHaveBeenCalledExactlyOnceWith('selected-note', { signal: expect.any(AbortSignal) })
+  await openSavedContent(false)
+  expect(content.mock.calls[0]![1]!.signal?.aborted).toBe(true)
+  expect(container!.querySelector('.recall-knowledge-card .note-embedded-content')).toBeNull()
+  expect(api.files.writePublic).not.toHaveBeenCalled()
+})
+
+it('shows a confirmed link-only card and keeps the Note action when its saved body cannot be checked', async () => {
+  const saved = await saveRecallCard(card, catalog.pages['selected-note']!, date)
+  const graph = await originalObservation.graph(catalog, {})
+  const content = vi.spyOn(api.notebooks, 'content').mockImplementation(noteId => originalObservation.content(catalog, noteId))
+    .mockRejectedValueOnce(new Error('Original read unavailable'))
+  const backlinks = recallBacklinks({ catalog, graph }, { hostId: card.routeHostId, agentSessionId: card.reference.agentSessionId })
+  await display(<ConversationRecallCard card={card} backlinks={backlinks} />)
+  await openSavedContent()
+  expect(container!.querySelector('[role="status"]')?.textContent).toContain('Original read unavailable')
+  expect(container!.querySelector('.recall-knowledge-card__actions button')?.textContent).toBe('Open Research note')
+  const retry = [...container!.querySelectorAll('button')].find(button => button.textContent === 'Retry saved content')!
+  await act(async () => retry.click())
+  expect(container!.textContent).toContain('Only the source link was saved.')
+  files.set(path, body)
+  await display(null)
+  await display(<ConversationRecallCard card={card} backlinks={backlinks} />)
+  await openSavedContent()
+  expect(container!.textContent).toContain('This card could not be confirmed in its original Note.')
+  expect(container!.textContent).not.toContain('Only the source link was saved.')
+  expect(content).toHaveBeenCalledTimes(3)
+  expect(saved.page.noteId).toBe('selected-note')
 })
 
 it('keeps the directory usable until the user creates today’s Daily, then captures into the same file', async () => {

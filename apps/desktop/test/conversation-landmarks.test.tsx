@@ -53,7 +53,7 @@ beforeEach(async () => {
 })
 afterEach(async () => { getSelection()?.removeAllRanges(); await act(async () => root.unmount()); host.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); await rm(directory, { recursive: true, force: true }) })
 
-it('looks up Recall links only on demand, shares one request, and cancels it when the list closes', async () => {
+it('finds saved Recall cards when the list opens, shares its lookup and cancels it when closed', async () => {
   await saved()
   const noteId = 'research-note'
   const catalog = applyNotebookChange(emptyNotebookState(), {
@@ -76,31 +76,28 @@ it('looks up Recall links only on demand, shares one request, and cancels it whe
     .mockRejectedValueOnce(new Error('Original Notebook unavailable'))
     .mockResolvedValueOnce({ ...snapshot, graph: { ...snapshot.graph, recallCards: [] } })
   await render(<ConversationLandmarkList reference={scope} reveal={vi.fn()} active/>)
-  await click(named('Reading points'))
-  await until(() => expect(button('Find Recall links')).toBeDefined())
   expect(graph).not.toHaveBeenCalled()
+  await click(named('Reading points'))
+  await until(() => expect(document.body.textContent).toContain('Looking up Recall cards…'))
   expect(button('Open Research note')).toBeUndefined()
 
-  await click(button('Find Recall links'))
-  expect(button('Looking up Recall links…').disabled).toBe(true)
+  await click(button('Refresh points'))
   expect(graph).toHaveBeenCalledTimes(1)
   const signal = graph.mock.calls[0]![1]!.signal!
   await click(named('Close Reading points'))
   expect(signal.aborted).toBe(true)
   await act(async () => finish(snapshot))
+  expect(button('Open Research note')).toBeUndefined()
   await click(named('Reading points'))
-  expect(button('Open Research note')).toBeUndefined()
-  expect(graph).toHaveBeenCalledTimes(1)
-
-  await click(button('Find Recall links'))
   await until(() => expect(button('Open Research note')).toBeDefined())
+  expect(graph).toHaveBeenCalledTimes(2)
   expect(Array.from(document.querySelectorAll('button')).filter(node => node.textContent === 'Open Research note')).toHaveLength(1)
-  await click(button('Find Recall links'))
+  await click(button('Refresh points'))
   expect(button('Open Research note')).toBeDefined()
-  expect(document.body.textContent).toContain('Previously found links are still available.')
-  await click(button('Retry link lookup'))
+  expect(document.body.textContent).toContain('Previously found cards are still available.')
+  await click(button('Refresh points'))
   expect(button('Open Research note')).toBeUndefined()
-  expect(document.body.textContent).toContain('No Recall links found for this conversation.')
+  expect(document.body.textContent).toContain('No saved Recall cards found for this conversation.')
   expect(graph).toHaveBeenCalledTimes(4)
 })
 it('names the actual common native record without reading metadata on mount or replacing its body/Range', async () => {
