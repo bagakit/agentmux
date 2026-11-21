@@ -4,7 +4,7 @@ import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import { goalPlanAttemptState, type GoalPlanAttemptState, type GoalPlanNodeProjection } from '@agentmux/demand/goal-plan'
-import { isCurrentGroundingAccepted } from '@agentmux/demand/goals'
+import { goalPlanReviewState, isCurrentGroundingAccepted } from '@agentmux/demand/goals'
 import { Button } from '@agentmux/client-ui/components/Button'
 import { demandAgentReferenceLabel, goalSupervisorHostWitnesses, type DemandAgentReference } from '@agentmux/demand/relations'
 import { agentSessionPresentationIndex } from '../lib/session-presentation'
@@ -47,8 +47,15 @@ const finishIcons = {
   'Closed with gaps': semanticIconComponent('status.gap'),
   Unverified: semanticIconComponent('status.unknown'),
   Cancelled: semanticIconComponent('status.disabled'),
+  'Report needed': semanticIconComponent('status.queued'),
+  'Evidence needed': semanticIconComponent('status.unknown'),
+  'Awaiting acceptance': semanticIconComponent('action.review-source'),
+  Accepted: semanticIconComponent('action.review-source'),
   Pending: semanticIconComponent('status.queued')
 }
+const planFinishLabels = {
+  'awaiting-report': 'Report needed', 'awaiting-evidence': 'Evidence needed', 'awaiting-acceptance': 'Awaiting acceptance', accepted: 'Accepted'
+} as const
 
 /** Columns by dependency depth; within a column the plan order is kept. */
 export function goalPlanColumns(projection: GoalPlanView): GoalPlanNodeView[][] {
@@ -375,8 +382,10 @@ export function GoalPlanGraph({ demand, projection: provided, planLink, planning
   const reviewKey = selected?.delegation && goalPlanReviewDraftKey(selected.node.id, selected.delegation.operationId)
   const reviewNoticeKey = JSON.stringify([demand.id, reviewKey])
   const { progress } = projection
-  const accepted = isCurrentGroundingAccepted(demand.alignment, demand.grounding)
-  const finishState = demand.status === 'cancelled' ? 'Cancelled' : demand.status !== 'done' ? 'Pending'
+  const accepted = demand.status === 'done' && isCurrentGroundingAccepted(demand.alignment, demand.grounding)
+  const review = demand.status === 'done' || demand.status === 'cancelled' ? undefined
+    : goalPlanReviewState(progress, demand.alignment, demand.grounding)
+  const finishState = demand.status === 'cancelled' ? 'Cancelled' : demand.status !== 'done' ? review ? planFinishLabels[review] : 'Pending'
     : !accepted ? 'Unverified' : demand.grounding?.checks.some(check => check.outcome === 'gap') ? 'Closed with gaps' : 'Succeeded'
   const FinishIcon = finishIcons[finishState]
   return <section className={`goal-plan${wholeGoal || progress ? '' : ' goal-plan--unavailable'}`} aria-label="Goal plan" data-goal-plan-revision={projection.revision ?? undefined}>

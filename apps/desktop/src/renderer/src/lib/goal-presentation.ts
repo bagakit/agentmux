@@ -1,6 +1,6 @@
 import { demandAgentReferenceKey } from '@agentmux/demand/relations'
 import type { DemandSpaceMemberReference } from '@agentmux/demand/relations'
-import { alignmentConfirmationIssue, groundingAcceptanceIssue, isDemandEvidenceReference, isCurrentGroundingAccepted } from '@agentmux/demand/goals'
+import { alignmentConfirmationIssue, goalPlanReviewState, groundingAcceptanceIssue, isDemandEvidenceReference, isCurrentGroundingAccepted } from '@agentmux/demand/goals'
 import { delegationWorkerHostId } from '@agentmux/demand/delegations'
 import type { DemandRecord } from './global-demand-board'
 import { goalDelegationNextRow, type GoalDelegationRow } from './goal-delegation-presentation'
@@ -59,10 +59,11 @@ export function goalNextStepFact(demand: GoalNextStepInput, retainedInput?: unkn
   const retained = readGoalFiniteStartIntent(retainedInput, demand.id)
   const retainedStart = retained?.phase === 'selecting-access' ? undefined : retained
   const { alignment, grounding } = demand
+  const planReview = goalPlanReviewState(demand.planState, alignment, grounding)
   const resultSource: GoalNextStepSource = { kind: 'results', submissionId: grounding?.submissionId ?? null, revision: alignment?.revision ?? null }
   const definitionSource: GoalNextStepSource = { kind: 'definition', revision: alignment?.revision ?? null }
   if (demand.status === 'cancelled') return { stage: 'finished', text: 'Cancelled', source: { kind: 'goal' } }
-  if (isCurrentGroundingAccepted(alignment, grounding)) {
+  if (planReview ? planReview === 'accepted' : isCurrentGroundingAccepted(alignment, grounding)) {
     const result = grounding!.checks.some(check => check.outcome === 'gap') ? 'Accepted with gaps' : 'Accepted'
     return { stage: 'finished', text: demand.status === 'done' ? `${result} · Finished` : result, source: resultSource }
   }
@@ -93,7 +94,7 @@ export function goalNextStepFact(demand: GoalNextStepInput, retainedInput?: unkn
       break
     }
     const observed = patrol && demand.patrolObservations?.find(item => item.operationId === patrol.operationId)
-    if (patrol && !patrol.report && observed && observed.state !== 'stale' && observed.state !== 'reported' && observed.state !== 'planned') {
+    if (!planReview && patrol && !patrol.report && observed && observed.state !== 'stale' && observed.state !== 'reported' && observed.state !== 'planned') {
       const text = { unknown: 'Original inspection input unconfirmed', missing: 'Inspection saved · Not delivered',
         prepared: 'Inspection prepared · Awaiting input', delivered: 'Inspection delivered · Awaiting report' }[observed.state]
       return { stage: observed.state === 'unknown' ? 'unknown' : observed.state === 'missing' ? 'attention' : 'agents', text,
@@ -113,7 +114,7 @@ export function goalNextStepFact(demand: GoalNextStepInput, retainedInput?: unkn
     const { planState } = demand
     let text = 'Goal agreed · No result report'
     if (planState) {
-      if (planState.total > 0 && planState.done === planState.total) text = 'Plan complete · Awaiting result report'
+      if (planReview === 'awaiting-report') text = 'Plan complete · Awaiting result report'
       else {
         const ready = planState.nodes.find(node => node.state === 'ready')
         const nextTicket = ready && demand.plan?.nodes.find(node => node.id === ready.id)
@@ -124,7 +125,7 @@ export function goalNextStepFact(demand: GoalNextStepInput, retainedInput?: unkn
     return { stage: 'agents', text, source: { kind: 'goal' } }
   }
   if (grounding.alignmentRevision !== alignment.revision) return { stage: 'attention', text: 'Results need updating', source: resultSource }
-  const gapsAllowed = groundingAcceptanceIssue(alignment, grounding, true) === null
+  const gapsAllowed = planReview ? planReview === 'awaiting-acceptance' : groundingAcceptanceIssue(alignment, grounding, true) === null
   const hasGaps = grounding.checks.some(check => check.outcome === 'gap')
   if (gapsAllowed) return { stage: 'you', text: hasGaps ? 'Results have known gaps' : 'Results ready for review', source: resultSource }
   return { stage: 'attention', text: 'Results need checking', source: resultSource }

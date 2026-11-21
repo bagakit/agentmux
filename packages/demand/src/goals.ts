@@ -1,6 +1,7 @@
 /** Pure Goal facts and validation. Safe to consume from a browser. */
 import { deriveObjectId } from '@agentmux/identity'
 import { parseDemandEvidence, type DemandEvidence } from './evidence.js'
+import type { GoalPlanState } from './goal-plan.js'
 export { parseDemandEvidence, demandEvidenceText, demandEvidenceLabel, type DemandEvidence, type DemandFileEvidence } from './evidence.js'
 export type DemandCriterion = { id: string; text: string }
 export function deriveBoundGoalId(runtimeId: string, namespace: string, creationOperationId: string): string {
@@ -33,6 +34,15 @@ export type DemandGroundingProposal = {
 export type DemandGrounding = DemandGroundingProposal & {
   submissionId: string
   acceptedAt: number | null
+}
+
+/** The next result step once the original owner confirms the plan's work has passed. */
+export function goalPlanReviewState(plan: Pick<GoalPlanState, 'done' | 'total'> | null | undefined,
+  alignment: DemandAlignment | undefined, grounding: DemandGrounding | undefined) {
+  if (!plan?.total || plan.done !== plan.total) return undefined
+  if (isCurrentGroundingAccepted(alignment, grounding)) return 'accepted'
+  if (!grounding) return 'awaiting-report'
+  return groundingAcceptanceIssue(alignment, grounding, true) ? 'awaiting-evidence' : 'awaiting-acceptance'
 }
 
 function record(value: unknown, label: string, keys: readonly string[], optional: readonly string[] = []): Record<string, unknown> {

@@ -1,7 +1,7 @@
 import { demandAgentReferenceLabel } from '@agentmux/demand/relations'
 import { MobileAvatarNoticeOutlet, MobileNotice, MobileNoticeScope } from '../notices/MobileNotice'
 import { formatMobileTime, withMobileTime } from '../presentation/time'
-import { mobileGoalStatus as statuses, mobileGoalOutcome } from './presentation'
+import { mobileGoalStatus as statuses, mobileGoalConclusion, mobileGoalOutcome } from './presentation'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { Button } from '@agentmux/client-ui/components/Button'
@@ -205,7 +205,7 @@ export function MobileGoalsSurface({ client, connected, visible, wide = false, o
         <select aria-label="筛选工作状态" value={status} onChange={event => setStatus(event.target.value)}><option value="">全部状态</option>{AGENTMUX_DEMAND_STATUSES.map(value => <option key={value} value={value}>{statuses[value]}</option>)}</select></div>
       {goals === null ? <p>目标列表尚未确认。</p> : <>
         <ul className="mobile-goals-list">{(visibleGoals ?? []).map(goal => <li key={goal.id}>
-          <button aria-current={selected === goal.id ? 'true' : undefined} onClick={() => choose(goal)}><SemanticIcon name="object.goal" size={24} /><div className="mobile-goal-row-copy"><strong>{goal.title || '待定义目标'}</strong><span>{goal.projectName ?? goal.projectId ?? '未分配项目'} · {statuses[goal.status]}</span><small>{goal.description}</small></div><SemanticIcon name="navigation.submenu" size={16} /></button>
+          <button aria-current={selected === goal.id ? 'true' : undefined} onClick={() => choose(goal)}><SemanticIcon name="object.goal" size={24} /><div className="mobile-goal-row-copy"><strong>{goal.title || '待定义目标'}</strong><span>{goal.projectName ?? goal.projectId ?? '未分配项目'} · {mobileGoalConclusion(goal)}</span><small>{goal.description}</small></div><SemanticIcon name="navigation.submenu" size={16} /></button>
         </li>)}</ul>
         {!goals.length && !confirmedEmpty && <p>{status || query ? '已读列表中没有匹配的目标。可清除搜索或筛选。' : listStatus ? '上次筛选没有匹配的目标，当前列表尚未确认。' : '上次读取没有目标，可刷新核对。'}</p>}
         {!!goals.length && !visibleGoals?.length && <p>已读列表中没有匹配的目标。可清除搜索或筛选。</p>}
