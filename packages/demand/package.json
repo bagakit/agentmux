@@ -39,6 +39,14 @@
       "types": "./dist/src/delegations.d.ts",
       "import": "./dist/src/delegations.js"
     },
+    "./dispatch": {
+      "types": "./dist/src/dispatch.d.ts",
+      "import": "./dist/src/dispatch.js"
+    },
+    "./content-references": {
+      "types": "./dist/src/content-references.d.ts",
+      "import": "./dist/src/content-references.js"
+    },
     "./goal-ticket-crypto": {
       "types": "./dist/src/goal-ticket-crypto.d.ts",
       "import": "./dist/src/goal-ticket-crypto.js"

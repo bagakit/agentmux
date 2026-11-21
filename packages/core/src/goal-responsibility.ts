@@ -1,8 +1,10 @@
 import { parseGoalAgentReference } from './goal-agent-reference.js'
 import type { DemandSpaceMemberReference } from '@agentmux/demand/relations'
 import { isDemandEvidenceReference } from '@agentmux/demand/goals'
-import { demandExecutionKey, demandHandoffDestinations, demandProgressBusinessCurrent, latestDemandProgress, sameDemandExecution, type Demand, type DemandExecutionReference,
-  type DemandProgress, type DemandResponsibilityBasis } from '@agentmux/demand'
+import { demandExecutionKey, demandHandoffDestinations, demandProgressBusinessCurrent, latestDemandProgress, sameDemandExecution,
+  parseDemandExecutionReference, parseDemandProgress, parseDemandResponsibilityBasis, type DemandExecutionReference,
+  type DemandProgress, type DemandResponsibilityBasis } from '@agentmux/demand/responsibility'
+import type { Demand } from '@agentmux/demand/types'
 import type { AgentMuxAgentRuntimeStatus } from "./client-contract.js";
 import { currentAgentSemanticStatus } from './agent-status-freshness.js'
 import type { AgentObservation } from './agent-status-freshness.js'
@@ -133,7 +135,6 @@ function time(value: unknown): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) throw new AgentMuxError('Invalid Goal responsibility observation time.', 'CONTROL_PROTOCOL_ERROR')
   return value
 }
-import { parseDemandExecutionReference, parseDemandProgress, parseDemandResponsibilityBasis } from '@agentmux/demand'
 function qualified(value: Record<string, unknown>): { agentReference?: DemandSpaceMemberReference } {
   if (value.agentReference === undefined) return {}
   const ref = parseGoalAgentReference(value.agentReference, 'CONTROL_PROTOCOL_ERROR')
