@@ -379,7 +379,7 @@ export async function registerIpc(args: {
   workbenchCloseOwner?: WorkbenchCloseOwner
   storageRecoveryExports?: DesktopStorageRecoveryExports
   runtimeIdentityRecovery?: ReturnType<typeof import('./local-runtime-recovery.js').localRuntimeRecovery>
-  openIdentitySetup?: (window: BrowserWindow, assertCurrent: () => void, gatewayCode?: string) => Promise<void>
+  openIdentitySetup?: (assertCurrent: () => void, gatewayCode?: string) => Promise<void>
   readIdentityGateway?: () => string | undefined
 
   workspaceFiles?: WorkspaceFiles
@@ -1744,7 +1744,8 @@ export async function registerIpc(args: {
     const assertCurrent = () => assertAppDocumentSender(event, contents, args.appDocumentSources())
     assertCurrent()
     if (gatewayCode !== undefined) decodeMeshPeerCode(gatewayCode)
-    await args.openIdentitySetup?.(args.window, assertCurrent, gatewayCode)
+    if (!args.openIdentitySetup) throw new Error('New identity setup is available from the original AgentMux window.')
+    await args.openIdentitySetup(assertCurrent, gatewayCode)
   })
   handleWithEvent('ui:readIdentityGateway', event => {
     assertAppDocumentSender(event, contents, args.appDocumentSources())

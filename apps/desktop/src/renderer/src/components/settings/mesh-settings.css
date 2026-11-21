@@ -124,20 +124,28 @@
 .mesh-peer-preview summary { cursor: pointer; }
 .mesh-settings-pane > [data-mesh-view="join"] { overflow: auto; }
 .mesh-gateway-join { max-width: 52rem; gap: var(--sp-3); }
-.mesh-join-landing { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--sp-5); padding: var(--sp-5); border: 1px solid var(--line-soft); border-radius: var(--radius); background: linear-gradient(124deg, var(--surface-2), var(--surface-1)); }
-.mesh-join-landing h3 { font-size: var(--fs-title); letter-spacing: -.025em; line-height: 1.25; }
-.mesh-join-landing p { margin-top: var(--sp-2); max-width: 42ch; color: var(--text-2); }
-.mesh-join-link { display: grid; grid-template-columns: 5rem 3rem 5rem; align-items: start; color: var(--text-2); }
-.mesh-join-link > div { display: grid; justify-items: center; gap: var(--sp-1); color: var(--text); }
-.mesh-join-link > div > span { display: grid; place-items: center; width: 3rem; aspect-ratio: 1; background: linear-gradient(155deg, var(--surface-2), var(--surface-0)); border: 1px solid var(--line-soft); border-radius: var(--radius); box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 10%, transparent), 0 2px 4px color-mix(in srgb, var(--surface-0) 38%, transparent); }
-.mesh-join-link small { color: var(--text-2); font-size: var(--fs-meta); white-space: nowrap; }
-.mesh-join-link > i { margin-top: 1.5rem; border-top: 1px dashed var(--text-3); }
-.mesh-join-link[data-connected] > i { border-top-style: solid; border-top-color: var(--green); }
-.mesh-join-link[data-connected] > div > span { color: var(--green); }
-.mesh-join-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2); padding: 0; margin: 0; list-style: none; }
+.mesh-join-landing { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); align-items: center; overflow: hidden; border: 1px solid var(--line-soft); border-radius: 12px; background: radial-gradient(ellipse at 92% 95%, #3b3125, transparent 65%), #1d1b18; color: #fbf3e7; }
+.mesh-join-lead { z-index: 1; display: grid; gap: var(--sp-3); padding: var(--sp-6); }
+.mesh-join-landing h3 { margin: 0; font-size: clamp(22px, 3.1cqi, 34px); font-weight: 620; letter-spacing: -.04em; line-height: 1.1; text-wrap: balance; }
+.mesh-join-landing p { margin: 0; max-width: 34ch; color: #dcd4c7; line-height: 1.55; }
+.mesh-join-art { position: relative; min-width: 0; min-height: 100%; display: grid; align-items: center; }
+.mesh-join-art img { display: block; width: 100%; height: auto; mask-image: linear-gradient(to right, transparent, #000 10%); }
+.mesh-join-identity-flag { display: inline-flex; align-items: center; gap: var(--sp-2); color: #ffd0c8; font-size: var(--fs-meta); }
+.mesh-join-identity-flag i { inline-size: 7px; block-size: 7px; border-radius: 50%; background: #ff8f83; }
+.mesh-join-resolution { padding: var(--sp-2) var(--sp-4); border: 1px solid color-mix(in srgb, var(--red) 24%, var(--line-soft)); border-radius: var(--radius); background: var(--surface-1); }
+.mesh-join-steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-1); padding: 0; margin: 0; list-style: none; }
 .mesh-join-steps li { padding: var(--sp-2) var(--sp-3); border: 1px solid transparent; border-radius: var(--radius); color: var(--text-2); font-size: var(--fs-meta); }
 .mesh-join-steps li[aria-current="step"] { background: var(--surface-2); border-color: var(--line-soft); color: var(--text); font-weight: 650; }
-@container (max-width: 550px) { .mesh-join-landing { grid-template-columns: 1fr; gap: var(--sp-3); padding: var(--sp-4); } .mesh-join-link { grid-template-columns: 4.5rem minmax(1rem, 3rem) 4.5rem; } }
+.mesh-join-steps li[data-waiting], .mesh-join-code input:disabled { color: var(--text-3); }
+@container (max-width: 550px) {
+  .mesh-join-lead { padding: var(--sp-4); }
+  .mesh-join-landing { grid-template-columns: minmax(0, 1fr) 44%; }
+  .mesh-join-steps li { padding-inline: var(--sp-1); }
+}
+@container (max-width: 400px) {
+  .mesh-join-landing { grid-template-columns: 1fr; }
+  .mesh-join-art img { height: 112px; object-fit: cover; object-position: center 64%; mask-image: linear-gradient(to bottom, transparent, #000 20%); }
+}
 .mesh-join-form { padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); }
 .mesh-join-form > button, .mesh-join-result > button { justify-self: start; }
 .mesh-join-code input { font: var(--fs-meta)/1.4 var(--font-mono); }

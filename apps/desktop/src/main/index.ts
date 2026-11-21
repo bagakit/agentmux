@@ -104,15 +104,8 @@ if (instanceRoleFromLock(app.requestSingleInstanceLock(newIdentityGatewayCode ? 
  * 都不会构造。运行时 owner、窗口、IPC、崩溃后的清理全在这个闭包里，第二实例一样都碰不到。
  */
 function startPrimaryInstance(): void {
-  const openIdentitySetup = newIdentityWindow ? undefined : singleFlight(async (window: BrowserWindow, assertCurrent: () => void, gatewayCode?: string) => {
-    const answer = await dialog.showMessageBox(window, {
-      type: 'question', title: 'Use a separate AgentMux identity', message: 'Start a second AgentMux instance?',
-      detail: gatewayCode
-        ? 'The selected gateway will be ready to review in the new instance. Its connection will belong to the separate identity. Your original sessions, drafts, and approvals stay in this instance.'
-        : 'Connections you make in the new instance will belong to the separate identity. Your original sessions, drafts, and approvals stay in this instance.',
-      buttons: ['Cancel', 'Open separate instance'], defaultId: 0, cancelId: 0
-    })
-    if (answer.response !== 1) return
+  // The originating Settings action owns the confirmation. Main checks the App sender again before launching.
+  const openIdentitySetup = newIdentityWindow ? undefined : singleFlight(async (assertCurrent: () => void, gatewayCode?: string) => {
     assertCurrent()
     await openNewIdentityWindow({ userData: app.getPath('userData'), executable: process.execPath, gatewayCode,
       ...(app.isPackaged ? {} : { application: app.getAppPath() }) })
