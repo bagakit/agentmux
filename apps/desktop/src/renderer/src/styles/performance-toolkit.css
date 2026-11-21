@@ -189,7 +189,7 @@
 @keyframes performance-section-arrive { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
 .performance-workbench [role=tabpanel]:not([hidden]) { animation:performance-section-arrive 200ms var(--ease-enter); }
 @media (prefers-reduced-motion:reduce) {
- .performance-popover,.performance-trend__line,.performance-run-summary__arrow,.performance-next-actions > button > span { transition:none; }
+ .performance-popover,.performance-trend__line,.performance-run-summary__arrow,.performance-run-summary__meter > span,.performance-resource-meter > span,.performance-next-actions > button > span { transition:none; }
  .performance-popover,.performance-status__mark,.performance-metric__value,.performance-trend__line,.performance-trend__area,.performance-trend__latest-halo,.performance-workbench [role=tabpanel]:not([hidden]) { animation:none; }
  .performance-trend-reader[data-compact=true] .performance-trend-detail { transform:none; transition:opacity 0s; }
 }

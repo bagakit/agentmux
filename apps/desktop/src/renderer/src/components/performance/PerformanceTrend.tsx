@@ -66,9 +66,9 @@ export function PerformanceTrend({ points, color, label, unit, compact = false, 
         <circle className="performance-trend__latest-halo" cx={x(latestIndex)} cy={y(points[latestIndex]!.value!)} r="5" />
         <circle cx={x(latestIndex)} cy={y(points[latestIndex]!.value!)} r="2" />
       </g> : null}
-      {drawable.length ? drawable.map(values => {
+      {drawable.length ? drawable.map((values, segmentIndex) => {
         const d = line(values)
-        return <g key={d} className="performance-trend__series" aria-hidden="true"><path className="performance-trend__area" d={area(values)} fill={`url(#${gradientId})`} />
+        return <g key={segmentIndex} className="performance-trend__series" aria-hidden="true"><path className="performance-trend__area" d={area(values)} fill={`url(#${gradientId})`} />
           <path className="performance-trend__line" pathLength="1" d={d} /></g>
       }) : <text x="0" y="32">{emptyLabel}</text>}
       {point ? <g className="performance-trend__cursor" aria-hidden="true"><line x1={x(index)} x2={x(index)} y1="4" y2="43" />

@@ -695,7 +695,8 @@ export function SessionMailbox({ pendingLayout, system, queued: workbenchQueue, 
         <button type="button" className="composer-tool" aria-label="Close mailbox" popoverTarget={id} popoverTargetAction="hide"
           onClick={() => trigger.current!.focus({ preventScroll: true })}><ThemeActionCloseIcon size={14} /></button></div>
       {folder !== 'progress' ? <MailboxWorkspaceNavigation id={id} folder={folder} agentFolder={agentFolder.current}
-        onSelect={chooseFolder} unread={unread} pending={pendingCount} notices={system.unread.length} collaboration={Boolean(effectiveControl || originalMail)} /> : null}
+        onSelect={chooseFolder} unread={unread} pending={pendingCount} notices={system.unread.length} collaboration={Boolean(effectiveControl || originalMail)}
+        active={(open || motion.retaining) && visible && documentVisible} /> : null}
       {detail ? <div className="composer-mailbox__back"><button ref={back} type="button" className="composer-tool" aria-label={`Back to ${folderLabels[folder]}`} title={`Back to ${folderLabels[folder]}`} onClick={leaveRecord}><ThemeNavigationBackIcon size={14} aria-hidden="true" /><span>{folderLabels[folder]}</span></button></div> : null}
       <div ref={body} className="composer-mailbox__content" onFocusCapture={event => { lastReadingFocus.current = event.target }}>
       <div id={`${id}-agents`} role="tabpanel" aria-labelledby={`${id}-agents-tab`} hidden={!isAgentMessageFolder(folder)}>

@@ -144,8 +144,10 @@ export function LiquidSelectionSurface({ selected, active, targetAttribute }: {
     }
     update(true)
     sync()
-    reduced.addEventListener('change', sync)
-    document.addEventListener('visibilitychange', sync)
+    if (active) {
+      reduced.addEventListener('change', sync)
+      document.addEventListener('visibilitychange', sync)
+    }
     return () => {
       remember()
       alive = false
