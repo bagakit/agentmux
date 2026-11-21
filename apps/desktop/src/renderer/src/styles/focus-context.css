@@ -452,8 +452,31 @@
   height: 100%;
   pointer-events: none;
   clip-path: var(--focus-creation-clip, inset(0));
-  color: color-mix(in srgb, var(--green) 72%, var(--text-2));
+  color: color-mix(in srgb, var(--green) 86%, var(--text));
 }
-.focus-creation-line, .focus-creation-arrow { fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; }
-.focus-creation-line { stroke-width: 1.25px; stroke-dasharray: 3 3; }
-.focus-creation-arrow { stroke-width: 1.2px; }
+.focus-creation-edge { outline: none; }
+.focus-creation-hit, .focus-creation-underlay, .focus-creation-line, .focus-creation-pulse {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.focus-creation-hit { stroke: transparent; stroke-width: 10px; }
+.focus-creation-underlay { stroke: var(--surface-0); stroke-width: 3.25px; }
+.focus-creation-line { stroke: currentColor; stroke-width: 1.5px; }
+.focus-creation-dot { fill: var(--surface-0); stroke: context-stroke; stroke-width: 1.5px; }
+.focus-creation-arrow { fill: context-stroke; }
+.focus-creation-connections[data-preview] .focus-creation-edge:not([data-preview]) { opacity: .38; }
+.focus-creation-edge[data-preview] .focus-creation-line { stroke-width: 2px; }
+.focus-creation-pulse {
+  stroke: color-mix(in srgb, var(--text) 76%, var(--green));
+  stroke-width: 2.75px;
+  stroke-dasharray: 16 100;
+  animation: focus-creation-direction 620ms ease-out both;
+}
+@keyframes focus-creation-direction {
+  from { stroke-dashoffset: 16; opacity: 1; }
+  to { stroke-dashoffset: -100; opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .focus-creation-pulse { display: none; animation: none; }
+}
