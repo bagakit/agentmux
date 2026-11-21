@@ -46,8 +46,8 @@ the next ready Ticket when appropriate. To explicitly stop a delegated worker,
 run `amux goal closeout --goal ID --attempt OP --session SID --run RUN
 --operation-id STOP` with its current exact Run. The command reports the Stop,
 handoff, Ticket, other work and available input observations for your follow-up.
-Add `--inspect` to read the same operation without issuing Stop. Keep the
-original identity and report uncertainty if its effect remains unknown.
+Add `--inspect` to read the original Stop and its saved pre-Stop observations.
+Keep the original identity when the effect or its observations are unconfirmed.
 
 For a patrol, inspect the frozen scope, then record the inspection with `goal patrol report`
 and write back the resulting facts. A late report belongs to its earlier scope.

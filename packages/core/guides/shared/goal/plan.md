@@ -116,9 +116,12 @@ containing `nodeId`, `delegationOperationId` and `replyMessageId`.
   records the original report. Preserve those identities if retrieval is unavailable.
 - Continuous progress freezes the plan revision, actionable nodes and original attempt
   references for each input. Follow that frozen scope after an uncertain input.
-  When every relevant Ticket passes and execution is complete, move the original Goal
-  to `in_review` with `goal update --goal ID --status in_review`. Report the evidence
-  still missing or the exact result ready for the person's acceptance.
+  When every relevant Ticket passes and independent work is resolved, the Goal owner
+  reports `in_review`. Report any missing evidence or the exact result ready for the
+  person's acceptance. Appending work updates the current phase and retains prior results.
+  Identify the affected criteria and any remaining way to recover evidence. Only a
+  person can finish with irrecoverable unknowns using `goal accept --finish
+  --close-with-unknown JSON`, with one criterion ID and reason per unknown result.
 
 ### Recheck only the affected work
 
