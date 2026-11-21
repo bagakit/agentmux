@@ -249,9 +249,10 @@
 .composer-mailbox__mark { position: relative; display: grid; place-items: center; inline-size: var(--mailbox-mark-width); block-size: var(--sp-7); pointer-events: none; }
 .composer__mailbox[data-unread='true'] .composer-mailbox__envelope { align-self: start; }
 .composer-mailbox__unread { position: absolute; inset-block-end: 1px; color: var(--text-2); font-size: max(10px, var(--fs-micro)); font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.composer-mailbox__attention, .composer-mailbox__progress { position: absolute; inset-block-start: 0; }
-.composer-mailbox__attention { inset-inline-end: 0; color: var(--amber); }
-.composer-mailbox__progress { inset-inline-start: 0; color: var(--text-2); }
+.composer-mailbox__attention, .composer-mailbox__progress { position: absolute; inset-block-start: 1px; inset-inline-end: 0; }
+.composer-mailbox__attention { color: var(--amber); }
+.composer-mailbox__progress { color: var(--text-2); }
+.composer-mailbox__mark:has(> .composer-mailbox__attention) > .composer-mailbox__progress { inset-inline: 0 auto; }
 .composer__mailbox[data-progress-state='active'] .composer-mailbox__progress { color: var(--green); }
 .composer__mailbox[data-progress-state='unconfirmed'] .composer-mailbox__progress { color: var(--amber); }
 .composer-mailbox__folders { position: relative; isolation: isolate; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.55fr) minmax(0, 1fr); gap: var(--sp-1); padding: 0; margin: 0 var(--sp-3) var(--sp-2); border-radius: var(--radius); background: transparent; }
