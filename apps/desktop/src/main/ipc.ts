@@ -2816,7 +2816,7 @@ export async function registerIpc(args: {
   registerMoteChatIpc({ handleWithEvent, runtime: args.runtime })
   registerMoteConnectionIpc({ handleWithEvent, runtime: args.runtime })
   registerMoteDialogueIpc({ handleWithEvent, runtime: args.runtime })
-  handle('moteGroup:call', (method: unknown, params: unknown) => ipcResult(() => {
+  handle('moteGroup:call', (method: unknown, params: unknown) => ipcResult(async () => {
     if (method === 'space.mote.direct.list' || method === 'space.mote.direct.inspect' || method === 'space.mote.direct.image.read')
       return args.runtime.callOriginalCore('local', method, parseMoteDirectParams(method, params), { transport: 'unix' })
     if (!isMoteGroupMethod(method) || method === 'space.mote.group.reply') throw new Error('This is not a Mote Group client action.')
