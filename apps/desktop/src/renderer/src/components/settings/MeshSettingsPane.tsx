@@ -13,7 +13,7 @@ type MeshView = 'paths' | 'machines' | 'join' | 'network' | 'connections' | 'acc
 function requestedView(request?: SettingsNavigationRequest): MeshView {
   return request?.field === 'mesh-machines' ? 'machines' : request?.field === 'mesh-paths' ? 'paths' : request?.field === 'mesh-join' && (!request.hostId || request.hostId === 'local') ? 'join' : request?.field === 'mesh-access-work' ? 'access' : request?.hostId || request?.field === 'mesh-devices' ? 'connections' : request?.field?.startsWith('mesh-') ? 'network' : 'paths'
 }
-const subpages: Partial<Record<MeshView, string>> = { machines: 'mesh-machines', network: 'mesh-configuration', connections: 'mesh-devices' }
+const subpages: Partial<Record<MeshView, string>> = { join: 'mesh-join', machines: 'mesh-machines', network: 'mesh-configuration', connections: 'mesh-devices' }
 export function MeshSettingsPane({ onSubpageChange, ...props }: React.ComponentProps<typeof HostSettingsPane> & {
   onSubpageChange?: ((field: string | undefined) => void) | undefined
 }) {

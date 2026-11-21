@@ -5,6 +5,7 @@ import type { SettingsModule } from '../settings-catalog'
 import { saveConfigSlice } from '../save-config-slice'
 
 const ThemeObjectHostIcon = semanticIconComponent('object.hosts')
+const gatewayJoin = { field: 'mesh-join', title: 'Connect to gateway', description: 'Connect this Mac through an existing Relay Gateway.' } as const
 
 
 async function saveHosts(hosts: HostConfig[], workspaces: WorkspaceRecord[], expected: Pick<AppConfig, 'hosts' | 'workspaces'>): Promise<void> {
@@ -16,10 +17,10 @@ export const hostsSettingsModule = {
   group: 'cluster',
   title: 'Mesh',
   description: 'Connect devices, manage Relay gateways and see network status.',
-  subpages: [{ field: 'mesh-configuration', title: 'Manage gateways' }, { field: 'mesh-devices', title: 'Saved devices' }, { field: 'mesh-machines', title: 'Machine status' }],
+  subpages: [gatewayJoin, { field: 'mesh-configuration', title: 'Manage gateways' }, { field: 'mesh-devices', title: 'Saved devices' }, { field: 'mesh-machines', title: 'Machine status' }],
   icon: ThemeObjectHostIcon,
   keywords: 'machines CPU memory storage volume resources cluster paths mesh gateway participant peer network route topology monitor runtime host hosts ssh tailcat tunnel listener remote hostname user port key test connection apps access trust permission environment project folder workspace worktree register open',
-  searchTargets: [{ id: 'mesh-join', title: 'Connect to a Relay Gateway', description: 'Use a gateway connection code to join from this Mac.', kind: 'action' }, { id: 'mesh-paths', title: 'Mesh network overview', description: 'Network topology, paths and saved devices.', kind: 'info' }, { id: 'mesh-machines', title: 'Cluster machine resources', description: 'CPU, memory, storage volume and sample coverage.', kind: 'info' }, { id: 'mesh-configuration', title: 'Mesh participation', description: 'Network role, peer trust and device access.', kind: 'field' }, { id: 'mesh-link', title: 'Original node access link', description: 'Reach an original endpoint through this Mesh gateway.', kind: 'action' }, { id: 'mesh-access-work', title: 'Use another device', description: 'Open its gateway access link.', kind: 'action' }, { id: 'incoming', title: 'Incoming connections and client keys', kind: 'field' }],
+  searchTargets: [{ id: gatewayJoin.field, title: gatewayJoin.title, description: gatewayJoin.description, kind: 'action' }, { id: 'mesh-paths', title: 'Mesh network overview', description: 'Network topology, paths and saved devices.', kind: 'info' }, { id: 'mesh-machines', title: 'Cluster machine resources', description: 'CPU, memory, storage volume and sample coverage.', kind: 'info' }, { id: 'mesh-configuration', title: 'Mesh participation', description: 'Network role, peer trust and device access.', kind: 'field' }, { id: 'mesh-link', title: 'Original node access link', description: 'Reach an original endpoint through this Mesh gateway.', kind: 'action' }, { id: 'mesh-access-work', title: 'Use another device', description: 'Open its gateway access link.', kind: 'action' }, { id: 'incoming', title: 'Incoming connections and client keys', kind: 'field' }],
   savedSummary: (config) => `${config.hosts.length} saved ${config.hosts.length === 1 ? 'connection' : 'connections'}`,
   Pane({ config, active, onClose, onNavigate, navigationRequest, onSubpageChange }) {
     return <MeshSettingsPane config={config} onSave={saveHosts} active={active} onClose={onClose} navigationRequest={navigationRequest} onSubpageChange={onSubpageChange} onRemoteWork={() => onNavigate('remote-execution')} onBack={() => onNavigate('overview')} />
