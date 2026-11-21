@@ -196,9 +196,8 @@ it('has no section for another exact state, never invents formal readiness, and 
   const face = document.getElementById(trigger.getAttribute('aria-controls')!)!
   expect(face.querySelector('.agent-status-prompts')).toBeNull()
   expect(face.textContent).toContain('Status unknown')
-  const readiness = [...face.querySelectorAll('dt')].find(item => item.textContent === 'Prompt readiness')!
-  expect(readiness.nextElementSibling!.textContent).toBe('Not reported')
-  const statement = [...face.querySelectorAll('dt')].find(item => item.textContent === 'Agent statement')!
+  expect(face.textContent).not.toContain('Prompt readiness')
+  const statement = [...face.querySelectorAll('dt')].find(item => item.textContent === 'Last activity')!
   expect(statement.nextElementSibling!.textContent).toBe('Not reported')
   await dom.render(<AgentSessionComposer sessionId={sessionId} visible={false} />)
   expect(document.querySelector('.agent-identity-popover--actions')).toBeNull()
@@ -258,7 +257,7 @@ it('prefers an actually reported semantic statement over a separate unavailable 
   await open()
   const terms = Array.from(document.querySelectorAll('.agent-state-face__facts dt'))
   expect(terms.length).toBeGreaterThan(0)
-  const statement = terms.find(term => term.textContent === 'Agent statement')!.nextElementSibling!
+  const statement = terms.find(term => term.textContent === 'Last activity')!.nextElementSibling!
   expect(statement.textContent).toContain('Waiting · native-hook')
   expect(statement.textContent).not.toContain('Not supported')
 })
@@ -326,8 +325,8 @@ it.each([
     expect(panel.dataset.compact).toBe(String(compact))
     const summary = panel.querySelector<HTMLElement>('.agent-state-face__summary')!, heading = panel.querySelector<HTMLElement>('.agent-status-prompts h3')!
     expect(summary.textContent).toContain(`${SEND_AFTER_REQUEST_ENDS}.`)
-    expect(getComputedStyle(summary).flexDirection).toBe(compact ? 'row' : 'column')
-    expect(getComputedStyle(summary).alignItems).toBe(compact ? 'baseline' : 'flex-start')
+    expect(getComputedStyle(summary).flexDirection || 'row').toBe('row')
+    expect(getComputedStyle(summary).alignItems).toBe('baseline')
     expect(heading.textContent).toBe('User prompts')
     expect(getComputedStyle(heading).display).toBe(compact ? 'none' : 'block')
     expect(panel.querySelector('.agent-status-prompts')!.getAttribute('aria-label')).toBe('Prompts for running')

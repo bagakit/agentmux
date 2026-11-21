@@ -18,7 +18,7 @@ it('groups real Session controls and interrupts only the current reply', async (
   // 身份不再是这一组里的第 4 个 `<button>`：`bcd94ac3` 把 composer 自己那个带 popover 的按钮
   // 并进了 AgentAvatar 的 disclosure，于是它是个包着头像的 `<span>`。剩下三个才是真正的按钮。
   expect([...group.querySelectorAll(':scope > button')].map(button => button.getAttribute('aria-label'))).toEqual([
-    expect.stringContaining('Context usage'), 'Interrupt the current turn', expect.stringContaining('Mailbox:')
+    'Model: not reported', expect.stringContaining('Context usage'), 'Interrupt the current turn', expect.stringContaining('Mailbox:')
   ])
   expect(group.querySelector('.composer-agent-identity .agent-avatar')).not.toBeNull()
   expect(dom.container.querySelector('.composer__toolbar > div:last-child')?.contains(group)).toBe(true)
