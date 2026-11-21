@@ -1,4 +1,3 @@
-import { getAmuxProtocolTemplate } from '../amux-protocol.js'
 import { AgentMuxError } from '../errors.js'
 import { rpcRecord } from '../rpc-data.js'
 import { parseMoteGroupParams, parseMoteGroupResult, type MoteGroupCallContext, type MoteGroupMember, type MoteGroupMessage } from './group.js'
@@ -67,10 +66,6 @@ function privateAssignmentSource(input: MoteDirectParamsMap['space.mote.direct.s
   const target = ({ spaceId, zoneId, expectedResource: { hostId, workspaceId, workspacePath } }: MotePreferencesTarget) =>
     ({ spaceId, zoneId, expectedResource: { hostId, workspaceId, workspacePath } })
   return JSON.stringify({ operationId: input.operationId, mote: target(input.mote), peer: target(input.peer), body: input.body })
-}
-
-export function moteDirectSchedulePrompt(input: MoteDirectParamsMap['space.mote.direct.schedule']): string {
-  return getAmuxProtocolTemplate('mote-task', 'private-schedule') + '\n\n' + privateAssignmentSource(input)
 }
 
 /** The original structured suffix qualifies a retry independently of editable guidance. */

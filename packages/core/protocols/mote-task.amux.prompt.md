@@ -122,16 +122,6 @@ Propose up to three useful ideas for this direction. Explain the reason, cite th
 Use amux file --skill to read the current original files. The retained revisions record observations when the schedule was prepared. Report current gaps and continue a chosen idea through the original discussion.
 ~~~
 
-## private-schedule
-
-~~~text
-This is the scheduled private assignment you saved. On this due turn, give the original assignment below to the exact peer.
-
-Read the original arrangement with "$AGENTMUX_CLI" schedule inspect --data - and the provided operationId. Use its schedule.lastInputRef.futureIntent.occurrenceAt and schedule.loopId.
-
-Run "$AGENTMUX_CLI" space mote direct send --input - with the provided mote, peer and exact body. Set operationId to scheduled/<loopId>/<occurrenceAt>. Reuse this ID and body when checking a partial receipt. If the original due reference is unconfirmed, keep the arrangement and check it before sending. The body is private message content.
-~~~
-
 ## private-report
 
 ~~~text
