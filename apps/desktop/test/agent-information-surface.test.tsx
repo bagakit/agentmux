@@ -232,9 +232,61 @@ it('duplicate configuration reads share the exact mounted request; failures pres
 
 it('Context and account windows stay separate and quota bars use remaining values', async () => {
   await dom.render(<AgentNativeInformation information={information} contextWindowUsage={{ usedTokens: 250, capacityTokens: 1000, observedAt: 1000 }} />)
-  expect(dom.container.textContent).toContain('75% remaining')
+  expect(dom.container.textContent).toContain('25% used')
   expect([...dom.container.querySelectorAll('progress')].map(bar => bar.value)).toEqual([76, 40])
   expect(dom.container.querySelector('progress')?.getAttribute('aria-label')).toBe('Short window: 76% remaining')
+})
+
+it('refreshes the open account face on cadence and preserves source time on failure and while hidden', async () => {
+  vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] })
+  try {
+    const now = Date.now(), sample = { ...information, observedAt: now - 120_000 }
+    const original = { ...composerSession(), nativeHandle: { kind: 'provider' as const, providerId: 'codex', sessionId: information.nativeSessionId }, nativeInformation: sample }
+    const owner = vi.spyOn(api.sessions, 'inspectInformation')
+      .mockResolvedValueOnce({ ...informationInspection(), snapshot: sample })
+      .mockResolvedValueOnce({ ...informationInspection(), snapshot: null, issue: { code: 'AGENT_INFORMATION_READ_UNAVAILABLE', message: 'Account read timed out.' } })
+      .mockImplementation(async () => ({ ...informationInspection(), snapshot: { ...sample, observedAt: Date.now() } }))
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+    useAppStore.setState({ sessions: [original] })
+    await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+    const tick = (delay: number) => act(async () => { await vi.advanceTimersByTimeAsync(delay) })
+    const time = () => document.querySelector<HTMLTimeElement>('.agent-native-information footer time')
+    await tick(30_000)
+    expect(owner).not.toHaveBeenCalled()
+    await dom.click('.composer-agent-identity .agent-avatar')
+    expect(owner).toHaveBeenCalledExactlyOnceWith(original.control)
+    expect(time()?.dateTime).toBe(new Date(sample.observedAt).toISOString())
+    const modelReads = vi.mocked(api.sessions.inspectConfiguration).mock.calls.length
+    await tick(30_000)
+    expect(owner).toHaveBeenCalledTimes(2)
+    expect(time()?.dateTime).toBe(new Date(sample.observedAt).toISOString())
+    expect(document.querySelector('.agent-native-information [role="status"]')?.textContent).toContain('Account read timed out.')
+    visibility.mockReturnValue('hidden')
+    await tick(60_000)
+    expect(owner).toHaveBeenCalledTimes(2)
+    visibility.mockReturnValue('visible')
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')))
+    expect(owner).toHaveBeenCalledTimes(3)
+    expect(time()?.dateTime).toBe(new Date(Date.now()).toISOString())
+    expect(time()?.textContent).toBe('Just now')
+    expect(api.sessions.inspectConfiguration).toHaveBeenCalledTimes(modelReads)
+    await click(document.querySelector('[aria-label="Close Agent status"]')!)
+    await tick(60_000)
+    expect(owner).toHaveBeenCalledTimes(3)
+    expect(dom.draft()).toBe('Keep my draft')
+  } finally { vi.useRealTimers() }
+})
+
+it('reopening the same account face while a read is in flight reuses the original request', async () => {
+  const pending = deferred<AgentInformationInspection>()
+  const read = vi.spyOn(api.sessions, 'inspectInformation').mockReturnValue(pending.promise)
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  await dom.click('.composer-agent-identity .agent-avatar')
+  await click(document.querySelector('[aria-label="Close Agent status"]')!)
+  await dom.click('.composer-agent-identity .agent-avatar')
+  expect(read).toHaveBeenCalledExactlyOnceWith(composerSession().control)
+  await act(async () => pending.resolve(informationInspection()))
+  expect(document.querySelector('.agent-native-information')?.textContent).toContain('Native Team')
 })
 
 it('equal Provider and executor labels appear once and a distinct configured executor label stays visible', async () => {

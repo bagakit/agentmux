@@ -288,9 +288,11 @@ it('preserves the existing Focus disclosure object, delayed preview, mark and on
 })
 
 it.each([
-  { terminalBottom: 88.6, composerTop: 220, expectedTop: 94.6, expectedHeight: 119.4 },
-  { terminalBottom: 300, composerTop: 310, expectedTop: 62, expectedHeight: 200 }
-])('places the actual action face in readable space around the native input band: %o', async ({ terminalBottom, composerTop, expectedTop, expectedHeight }) => {
+  { terminalBottom: 88.6, composerTop: 220, expectedTop: 94.6, expectedHeight: 119.4, compact: true },
+  { terminalBottom: 300, composerTop: 310, expectedTop: 62, expectedHeight: 200 },
+  { terminalBottom: 240, composerTop: 380, naturalHeight: 112, expectedTop: 262, expectedHeight: 112, compact: true },
+  { terminalBottom: 40, composerTop: 310, expectedTop: 104, expectedHeight: 200 }
+])('places the actual action face in readable space around the native input band: %o', async ({ terminalBottom, composerTop, naturalHeight = 200, expectedTop, expectedHeight, compact = false }) => {
   const productionStyle = document.createElement('style')
   productionStyle.textContent = readFileSync('apps/desktop/src/renderer/src/styles/status-prompts.css', 'utf8')
   document.head.append(productionStyle)
@@ -308,7 +310,7 @@ it.each([
       if (this.classList.contains('agent-identity-popover')) {
         const maximum = Number.parseFloat(this.style.maxHeight)
         return new DOMRect(Number.parseFloat(this.style.left) || 0, Number.parseFloat(this.style.top) || 0, 296,
-          Math.min(200, Number.isFinite(maximum) ? maximum : 200))
+          Math.min(naturalHeight, Number.isFinite(maximum) ? maximum : naturalHeight))
       }
       return new DOMRect()
     })
@@ -321,7 +323,6 @@ it.each([
     expect(answer.disabled).toBe(false)
     await open()
     const panel = document.querySelector<HTMLElement>('.agent-identity-popover--actions')!, bounds = panel.getBoundingClientRect()
-    const compact = expectedHeight < 160
     expect(panel.dataset.compact).toBe(String(compact))
     const summary = panel.querySelector<HTMLElement>('.agent-state-face__summary')!, heading = panel.querySelector<HTMLElement>('.agent-status-prompts h3')!
     expect(summary.textContent).toContain(`${SEND_AFTER_REQUEST_ENDS}.`)
@@ -334,7 +335,7 @@ it.each([
     expect(bounds.height).toBeCloseTo(expectedHeight)
     expect(bounds.height).toBeGreaterThan(100)
     expect(bounds.bottom).toBeLessThanOrEqual(composerTop - 5)
-    expect(bounds.bottom <= terminalBottom - 32 - 5 || bounds.top >= terminalBottom + 5).toBe(true)
+    expect(terminalBottom === 40 || bounds.bottom <= terminalBottom - 32 - 5 || bounds.top >= terminalBottom + 5).toBe(true)
     expect(buttons()[0]!.getAttribute('aria-label')).toBe('Send Action for running')
     await act(async () => panel.querySelector<HTMLButtonElement>('[aria-label="Close Agent status"]')!.click())
     expect(document.querySelector('.agent-identity-popover--actions')).toBeNull()

@@ -23,10 +23,10 @@ it('shows and updates the actual Session identity, including same-provider sibli
   await dom.render(<AgentSessionComposer key="a" sessionId="a" tabName="Release" />)
   const identity = () => dom.container.querySelector('.composer-agent-identity')!
   expect(identity().textContent).toBe('')
-  expect(identity().parentElement).toBe(dom.container.querySelector('.composer-session-controls'))
+  expect(identity().parentElement).toBe(dom.container.querySelector('.composer-session-controls__activity'))
   expect(identity().closest('.composer__mailbox')).toBeNull()
   expect(dom.container.querySelector('.composer__mailbox')?.parentElement).toBe(identity().parentElement)
-  expect(identity().parentElement?.parentElement).toBe(dom.container.querySelector('.composer__toolbar > div:last-child'))
+  expect(identity().closest('.composer-session-controls')?.parentElement).toBe(dom.container.querySelector('.composer__toolbar > div:last-child'))
   expect(identity().parentElement?.querySelectorAll('.agent-avatar')).toHaveLength(1)
   expect(identityName(identity())).toBe('Review queue · Status unknown · Agent status and actions')
   const codex = identity().querySelector('.agent-avatar__mark')!.innerHTML
