@@ -138,6 +138,8 @@ Remote 先展示已有工作及能力说明，明确选择“开始新工作”�
 
 页面以当前客户端保存的非纯本地 AgentSession 为工作对象，包括显式双端绑定与无 binding 的普通远端同 Host 执行；同一 Host 可以承载多个绑定，绑定不等于 Host 连接、全局执行模板或新的常驻服务开关。列表沿当前管理入口可确认的 Session 与绑定引用组织，并标明观察范围；没有全域发现事实时不声称列出所有机器或全部工作。名称帮助阅读，准确 Agent Host、资源 Host／Workspace、Session 与 binding 身份负责定位。每个非纯本地 Agent 用同一紧凑关系标记表达项目端与 Agent 端，完整运行关系及路径按需展开；Region、Tab 对应 Agent 标记、Focus／Space 与恢复候选消费同一原绑定投影，不重复叠加机器名和长模式标签；多 Region Tab 不把活动 Agent 的 Host 冒充整张 Tab 的唯一归属。只有确认两端均本机时省略标记；缺失事实显式未知。名称、展示移动、观察失败与标签样式不改变 Session、Run、工具端或权限。工具桥接状态、Agent 运行状态与 Provider 分项能力分别呈现，`connected` 不能代签 Hooks、Skills、MCP 或 Agent control 全部可用。
 
+当前视图未发现远端工作时提供原连接入口及新建工作入口。已选 Session 暂时离开观察时保留该引用与已知的原 Agent 设备，给出检查该设备的动作和返回列表入口。打开原工作面失败也沿该设备检查。原连接和复查都不替换 Session 或改动项目位置。
+
 | 用户任务 | 页面动作与完成信号 | 复用与边界 |
 | --- | --- | --- |
 | 理解并开始 | 一处双端用途说明与明确的开始入口；进入可编辑的原 Launcher 后再由用户启动 | 复用已登记 Workspace、准确 Host 的 Executor inventory 与原创建路径，保留项目侧文件引用、草稿与 warm shell；不在设置另造创建表单或自动提交首输入 |
