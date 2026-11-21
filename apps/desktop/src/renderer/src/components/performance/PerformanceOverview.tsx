@@ -13,6 +13,7 @@ import { PerformanceCapture } from './PerformanceCapture'
 import { PerformanceProfileImport } from './PerformanceProfileImport'
 import { PerformanceScene } from './PerformanceScene'
 import { PerformanceHeapSnapshot } from './PerformanceHeapSnapshot'
+import { LiquidSelectionSurface } from '../LiquidSelectionSurface'
 import type { PerformanceHeapSnapshotState } from '../../lib/use-performance-heap-snapshot'
 import type { PerformanceSceneState } from '../../lib/use-performance-scene'
 
@@ -68,7 +69,9 @@ export function PerformanceOverview({ snapshot, close, paused = false, pending =
           panelId: navigationId + '-panel-' + id,
           button: { id: navigationId + '-' + id, 'data-performance-section-tab': id },
           label: <><strong>{label}</strong><small>{hint}</small></>
-        }))} />
+        }))}>
+      <LiquidSelectionSurface selected={section} active targetAttribute="data-performance-section-tab" />
+    </Tabs>
     <div ref={body} className="performance-body" onScroll={event => { scroll.current[section] = event.currentTarget.scrollTop }}>
       {error || snapshot?.reason ? <p className="performance-state" data-tone="warning">{error ?? snapshot?.reason}</p> : null}
       {snapshot?.state === 'unknown' && snapshot.run === null && startNewObservation ? <div className="performance-state">

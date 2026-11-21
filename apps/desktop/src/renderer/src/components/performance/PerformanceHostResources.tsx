@@ -4,6 +4,12 @@ import { performanceBytes as bytes, performanceReadingTime as readingTime } from
 
 const rate = (value: number | null | undefined) => value == null ? '—' : `${bytes(value)}/s`
 const interfaceKey = (value: Pick<HostNetworkInterface, 'name' | 'linkId'>) => JSON.stringify([value.name, value.linkId])
+
+function ResourceMeter({ value, total, tone = 'green' }: { value: number | null | undefined; total: number | null | undefined; tone?: 'green' | 'blue' }) {
+  const ratio = value != null && total != null && Number.isFinite(value) && Number.isFinite(total) && total > 0 ? Math.max(0, Math.min(1, value / total)) : null
+  return <span className="performance-resource-meter" data-tone={tone} data-available={ratio !== null || undefined} aria-hidden="true"><span style={{ transform: `scaleX(${ratio ?? 0})` }} /></span>
+}
+
 function HostSource({ label, metric, at }: { label: string; metric: HostMetric<unknown> | undefined; at: number | null | undefined }) {
   return <div><dt>{label}</dt><dd>{readingTime(metric?.observedAt, at)}{metric?.unavailable ? ` · ${metric.unavailable}` : ''}</dd></div>
 }
@@ -17,16 +23,18 @@ export function PerformanceHostResources({ observation, observedAt }: { observat
   return <section className="performance-host" aria-label="Local Host resources">
     <div className="performance-section-heading"><strong>This computer</strong><span>{observation?.scope.hostname ?? 'Host unconfirmed'}</span></div>
     <div className="performance-host-load">
-      <div><small>System CPU</small><strong>{cpu?.percent == null ? '—' : `${cpu.percent.toFixed(1)}%`}</strong><small>All {cpu?.logicalCpuCount ?? '—'} logical cores · interval</small></div>
-      <div><small>Physical memory</small><strong>{bytes(host?.memory.data?.totalBytes)}</strong><small>{bytes(host?.memory.data?.freeBytes)} OS free</small></div>
+      <div><small>System CPU</small><strong>{cpu?.percent == null ? '—' : `${cpu.percent.toFixed(1)}%`}</strong><small>All {cpu?.logicalCpuCount ?? '—'} logical cores · interval</small><ResourceMeter value={cpu?.percent} total={100} /></div>
+      <div><small>Physical memory</small><strong>{bytes(host?.memory.data?.totalBytes)}</strong><small>{bytes(host?.memory.data?.freeBytes)} OS free</small><ResourceMeter tone="blue" value={host?.memory.data && host.memory.data.totalBytes != null && host.memory.data.freeBytes != null ? host.memory.data.totalBytes - host.memory.data.freeBytes : null} total={host?.memory.data?.totalBytes} /></div>
     </div>
     <div className="performance-host-row" data-host-memory>
       <div><strong>Memory pressure</strong><small>OS pressure · not free memory</small></div>
       <div><strong data-memory-pressure={pressure ?? 'unknown'}>{pressure ? pressure[0]!.toUpperCase() + pressure.slice(1) : 'Unavailable'}</strong><small>Swap used {bytes(host?.swap.data?.usedBytes)}</small></div>
+      <span className="performance-host-row__signal" data-memory-pressure={pressure ?? 'unknown'} aria-hidden="true"><i /><i /><i /></span>
     </div>
     <div className="performance-host-row" data-host-volume>
       <div><strong>Disk available</strong><small>Home volume · available to this user</small></div>
       <div><strong>{bytes(storage?.availableBytes)}</strong><small>{storage ? `of ${bytes(storage.totalBytes)}` : 'Capacity unavailable'}</small></div>
+      <ResourceMeter tone="blue" value={storage?.availableBytes} total={storage?.totalBytes} />
     </div>
     <details className="performance-disclosure performance-network" data-host-network>
       <summary>Network <span>{network ? `${network.name} · ↓ ${rate(network.receiveBytesPerSecond)} · ↑ ${rate(network.sendBytesPerSecond)}` : `${interfaces.length} interfaces · choose one`}</span></summary>

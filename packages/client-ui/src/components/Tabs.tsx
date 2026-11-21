@@ -19,17 +19,19 @@ export type TabsProps<Value extends string> = {
   orientation?: 'horizontal' | 'vertical'
   keyboardOrientation?: 'both'
   options: readonly TabOption<Value>[]
+  children?: ReactNode
   value: Value
   onValueChange(value: NoInfer<Value>): void
 }
 
 /** Select a panel with one tab stop. The caller owns each panel's identity and lifetime. */
 export function Tabs<Value extends string>({
-  as: List = 'div', orientation = 'horizontal', keyboardOrientation, options, value, onValueChange, ...list
+  as: List = 'div', orientation = 'horizontal', keyboardOrientation, options, children, value, onValueChange, ...list
 }: TabsProps<Value>) {
   const enabled = options.filter(option => !option.button.disabled)
   const tabStop = enabled.find(option => option.value === value)?.value ?? enabled[0]?.value
   return <List {...list} role="tablist" aria-orientation={orientation} onKeyDown={event => moveSelection(event, 'tab', keyboardOrientation ?? orientation)}>
+    {children}
     {options.map(option => <button {...option.button} key={option.value} type="button" role="tab"
       aria-controls={option.panelId} aria-selected={value === option.value} tabIndex={tabStop === option.value ? 0 : -1}
       onClick={() => onValueChange(option.value)}>{option.label}</button>)}

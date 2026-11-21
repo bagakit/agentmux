@@ -14,6 +14,7 @@ export function PerformanceLiveOverview({ snapshot, paused, onInspectResources, 
   const observationKey = JSON.stringify([snapshot?.executionId, snapshot?.run?.hostId, snapshot?.run?.runId, observation?.scope.hostId])
   const trend = usePerformanceAppTrend(snapshot, paused, observationKey)
   const live = !paused && snapshot?.state === 'observing' && source?.state === 'available'
+  const coverage = totals && totals.coverage.trackedRuns > 0 ? Math.max(0, Math.min(1, totals.coverage.observedRoots / totals.coverage.trackedRuns)) : null
   return <>
     <section className="performance-live" aria-label="AgentMux current load" data-performance-live>
       <div className="performance-section-heading performance-live__heading"><div><strong>AgentMux</strong><span className="performance-reading-time">{readingTime(source?.lastSuccessAt, snapshot?.observedAt)}</span></div>
@@ -30,6 +31,7 @@ export function PerformanceLiveOverview({ snapshot, paused, onInspectResources, 
         <span className="performance-run-summary__label"><strong>Agent Runs</strong><small>{totals ? `${totals.coverage.observedRoots} / ${totals.coverage.trackedRuns} roots observed` : 'Coverage unavailable'}</small></span>
         <span className="performance-run-summary__value"><strong>{cpu(totals?.cpuPercent)}</strong><small>{memory(totals?.rssKib)} RSS</small></span>
         <span className="performance-run-summary__arrow" aria-hidden="true">→</span>
+        <span className="performance-run-summary__meter" data-available={coverage !== null || undefined} aria-hidden="true"><span style={{ transform: `scaleX(${coverage ?? 0})` }} /></span>
       </button>
       <PerformanceSourceNote source={observation?.process} />
       <details className="performance-measurement-note"><summary>Measurement scope</summary>
