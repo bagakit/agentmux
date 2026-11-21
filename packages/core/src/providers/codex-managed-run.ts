@@ -26,6 +26,8 @@ export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number
   const token = process.env[CODEX_NATIVE_TOKEN_ENV]
   const actorId = process.env[CODEX_ACTOR_ID_ENV], lifecycleOperationId = process.env[CODEX_ACTOR_LIFECYCLE_ENV]
   if (!token || !actorId || !lifecycleOperationId) throw new ManagedNativeLaunchError('The original native actor launch credential is missing.')
+  const options = plan.resume ?? plan.create
+  const workspacePath = resolve(options.cwd ?? process.cwd())
   const server = spawn(plan.command, [...plan.serverConfig, 'app-server', '--listen', 'ws://127.0.0.1:0',
     '--ws-auth', 'capability-token', '--ws-token-sha256', createHash('sha256').update(token).digest('hex')],
   { cwd: process.cwd(), env: process.env, detached: false, stdio: ['ignore', 'ignore', 'pipe'] })
@@ -77,7 +79,7 @@ export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number
   }
   const spawnTui = async (endpoint: string, args: string[], frontendId: string = mintObjectId()): Promise<AgentTerminalFrontendObservation> => {
     publish({ frontendId, state: 'starting', backendState: 'running', source: 'managed-process', observedAt: Date.now() })
-    const child = spawn(plan.command, ['--remote', endpoint, '--remote-auth-token-env', CODEX_NATIVE_TOKEN_ENV, ...args],
+    const child = spawn(plan.command, ['--remote', endpoint, '--remote-auth-token-env', CODEX_NATIVE_TOKEN_ENV, '--cd', workspacePath, ...args],
       { cwd: process.cwd(), env: process.env, detached: false, stdio: ['inherit', 'inherit', 'pipe'] })
     // Diagnostics explain this exact child generation; exit facts alone control its lifecycle.
     // Keep the complete original bytes in the Run's PTY, with stream backpressure, while
@@ -218,8 +220,7 @@ export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number
             throw new ManagedNativeLaunchError('The native account preflight did not confirm its required authentication.')
           }
           if (!live()) return
-          const options = plan.resume ?? plan.create
-          const expected = { ...options, cwd: resolve(options.cwd ?? process.cwd()),
+          const expected = { ...options, cwd: workspacePath,
             ...(plan.frontendArgs.includes('--dangerously-bypass-hook-trust') ? { config: { bypass_hook_trust: true } } : {}) }
           nativeRequested = true
           initializationStep = 'native-session'
