@@ -28,6 +28,8 @@ const variants = {
     'peer: target(input.peer)', 'peer: target(input.mote)'],
   'direct-schedule-reuses-operation': ['apps/host/src/continuous-progress-loop-manager.ts',
     'const operationId = `scheduled/${loopId}/${occurrenceAt}`', 'const operationId = `scheduled/${loopId}/first`'],
+  'publication-detached-from-message': ['apps/host/src/mote-group-store.ts',
+    'if (occurrence) remember(occurrence.scheduleId, occurrence.occurrenceAt, body.id)', 'if (false && occurrence) remember(occurrence.scheduleId, occurrence.occurrenceAt, body.id)'],
   'direct-pair-order': ['apps/host/src/mote-direct.ts',
     'const members = [mote, peer].sort((left, right) => left.spaceId < right.spaceId ? -1 : 1)',
     'const members = [mote, peer]'],
