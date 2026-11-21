@@ -580,7 +580,9 @@ export class AgentPromptSubmissionCoordinator {
     // Only this original input owner can confirm that a new operation has not reached any durable claim.
     let nativeClaimAttempted = frozen?.submissionId === submissionId || Boolean(inputDispatch)
     const nativePreparationFailure = (error: unknown): unknown => {
-      if (nativeClaimAttempted) return error
+      const preclaim = protocolInput?.preclaim
+      // The input lane recognizes the original yield by identity and waits for its ACK.
+      if (nativeClaimAttempted || (preclaim && error === preclaim.interruption)) return error
       const original = error instanceof AgentMuxError ? error : undefined
       const failure = new AgentMuxError(error instanceof Error ? error.message : String(error),
         original?.code ?? 'AGENT_NATIVE_INPUT_UNAVAILABLE', original?.detail, { disposition: 'not_applied', confirmedInputBytes: 0 },
