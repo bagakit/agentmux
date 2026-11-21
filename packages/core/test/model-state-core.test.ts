@@ -178,13 +178,21 @@ it('an ended original Run disposes its observer and ignores its later configurat
   const f = await owner(); await f.start()
   await f.emit(f.snapshot({ sequence: 1 }))
   const original = f.observers[0]
-  f.run.state = { type: 'exited', code: 0, signal: null }
-  f.client.acceptKernelEvent({ type: 'exit', runId: f.runId, state: f.run.state, observedAt: 2000 })
-  expect(original.disposed).toBe(true)
-  const before = f.client.agentSession(f.id).nativeConfiguration
-  original.context.onConfiguration(f.snapshot({ current: 'after-original-exit', sequence: 2 }))
-  expect(f.client.agentSession(f.id).nativeConfiguration).toEqual(before)
-  expect(f.state.runtimeWrites).toBe(0)
+  // The public exit is synchronous; its real durable activity commit finishes separately.
+  // Capture that original Promise so fixture removal cannot race its final FileStore write.
+  const persistence = vi.spyOn(f.client, 'persistActivityBoundary')
+  try {
+    f.run.state = { type: 'exited', code: 0, signal: null }
+    f.client.acceptKernelEvent({ type: 'exit', runId: f.runId, state: f.run.state, observedAt: 2000 })
+    expect(original.disposed).toBe(true)
+    const before = f.client.agentSession(f.id).nativeConfiguration
+    original.context.onConfiguration(f.snapshot({ current: 'after-original-exit', sequence: 2 }))
+    expect(f.client.agentSession(f.id).nativeConfiguration).toEqual(before)
+    expect(f.state.runtimeWrites).toBe(0)
+  } finally {
+    await Promise.all(persistence.mock.results.filter(result => result.type === 'return').map(result => result.value))
+    persistence.mockRestore()
+  }
 })
 
 
