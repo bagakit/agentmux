@@ -1,5 +1,5 @@
 import WebSocket from 'ws'
-import { JSONRPCClient } from 'json-rpc-2.0'
+import { JSONRPCClient, JSONRPCErrorException } from 'json-rpc-2.0'
 
 /** A connection to the already authenticated actor, not another native server or thread owner. */
 export async function connectCodexNativeActor(endpoint: string, token: string, signal: AbortSignal,
@@ -26,8 +26,14 @@ export async function connectCodexNativeActor(endpoint: string, token: string, s
     } catch { dispose() }
   })
   signal.addEventListener('abort', close, { once: true })
-  const request = async (method: string, params: Record<string, unknown>, options?: { retainPending?: true }): Promise<any> => {
+  const request = async (method: string, params: Record<string, unknown>, options?: { retainPending?: true; requestId?: string }): Promise<any> => {
     signal.throwIfAborted()
+    if (options?.requestId !== undefined) {
+      const requester = options.retainPending ? client : client.timeout(10_000)
+      const response = await requester.requestAdvanced({ jsonrpc: '2.0', id: options.requestId, method, params }, undefined)
+      if (response.error) throw new JSONRPCErrorException(response.error.message, response.error.code, response.error.data)
+      return response.result
+    }
     // The managed startup actor retains its original preparation and mutation
     // requests until a response or its lifetime ends. A bounded reader never resends them.
     return await (options?.retainPending ? client.request(method, params) : client.timeout(10_000).request(method, params))

@@ -4,6 +4,8 @@ import { codexProvider } from '@agentmux/providers/codex/provider'
 import { observeCodexTerminalFrontend, reconnectCodexTerminalFrontend } from './codex-managed-frontend.js'
 import { readCodexPromptExecutionEvidence, createCodexPromptExecutionTransportVerifier } from './codex-prompt-execution-evidence.js'
 import { readCodexResumedTurnInterruption } from './codex-resumed-turn-interruption.js'
+import { readCodexInformation } from './codex-information.js'
+import { readCodexConfiguration, setCodexConfiguration } from './codex-configuration.js'
 import { createCodexNativeCatalog } from '@agentmux/providers/codex/native-catalog'
 import { assertNativeCatalogPath, nativeCatalogFiles, nativeCatalogIssue, readNativeCatalogFile } from './native-session-catalog-files.js'
 import { AgentMuxError } from '../errors.js'
@@ -43,6 +45,9 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
     prepareExecutionHelper: prepareCodexExecutionHelper,
     prepareManagedLaunch: prepareCodexManagedLaunch,
     prepareNativeInput: prepareCodexNativeInput,
+    readInformation: readCodexInformation,
+    readConfiguration: readCodexConfiguration,
+    setConfiguration: setCodexConfiguration,
     planQuestionReply: planCodexQuestionReply,
     observeTerminalFrontend: observeCodexTerminalFrontend,
     reconnectTerminalFrontend: reconnectCodexTerminalFrontend,

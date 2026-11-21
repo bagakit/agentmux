@@ -117,9 +117,14 @@ type NativeInputPlan = { threadId: string; operation?: string; expectedTurnId?: 
 type InputThread = { thread?: { id?: string; canAcceptDirectInput?: unknown; status?: { type?: string } } }
 
 /** A saved thread can be readable while its live actor is unavailable. */
-export function isCodexDirectInputThread(value: InputThread | undefined, nativeSessionId: string): boolean {
-  return value?.thread?.id === nativeSessionId && value.thread.canAcceptDirectInput === true &&
+export function isCodexLoadedThread(value: InputThread | undefined, nativeSessionId: string): boolean {
+  return value?.thread?.id === nativeSessionId &&
     ['idle', 'active', 'systemError'].includes(value.thread.status?.type ?? '')
+}
+
+/** Reading live settings does not grant turn-input eligibility. */
+export function isCodexDirectInputThread(value: InputThread | undefined, nativeSessionId: string): boolean {
+  return isCodexLoadedThread(value, nativeSessionId) && value?.thread?.canAcceptDirectInput === true
 }
 
 export async function sendCodexNativeInput(call: Awaited<ReturnType<typeof connectCodexNativeActor>>['request'],
