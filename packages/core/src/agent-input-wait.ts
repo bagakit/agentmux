@@ -72,12 +72,16 @@ export type AgentInputJournalIntent = {
         promptWire?: string; representation?: import('./agent-message-input.js').AgentMessageInputRepresentation }
 }
 
+export function isHumanPromptAdmission(kind: string | undefined): boolean {
+  return kind === 'manual-actor' || kind === 'session-conversation'
+}
+
 /** Restore only authority retained by original local intake. This restores the
  * waiting observer, not permission to rebind a conversation input to another Run. */
 export function isRestorableLocalPromptInput(intent: AgentInputJournalIntent): boolean {
   return intent.source.kind === 'prompt' && intent.source.authorHuman === true &&
     intent.source.recoveryAuthorization === 'local-human' && intent.source.inputContext === undefined &&
-    (intent.admissionIntent.kind === 'manual-actor' || intent.admissionIntent.kind === 'session-conversation')
+    isHumanPromptAdmission(intent.admissionIntent.kind)
 }
 export type AgentInputDispatchLink = { ref: AgentInputWaitRef; gateId: string; deliveryKey?: AgentPromptInputKey }
 /** A confirmed whole-input refusal remains at previousKey; this successor has its own transport identity. */

@@ -8,7 +8,7 @@ export * from './agent-input-mailbox.js'
 import { consumeJsonReadEntry, type JsonReadAssembly, type JsonReadEntry } from './json-read-fragments.js'
 import { parseDeliveryFailure } from './delivery-attempt.js'
 import { decodeBase64, encodeBase64 } from './hosted-value.js'
-import { agentInputDeliveryKey, agentInputJournalKey } from './agent-input-wait.js'
+import { agentInputDeliveryKey, agentInputJournalKey, isHumanPromptAdmission } from './agent-input-wait.js'
 import { rpcRecord } from './rpc-data.js'
 import { agentPromptInputId, validateAgentPromptInputKey, validateAgentPromptAdmissionIntent } from './agent-prompt-condition.js'
 import { parseAgentInputMailboxRead, type AgentInputMailboxPage, type AgentInputMailboxRead, type AgentInputMailboxItem } from './agent-input-mailbox.js'
@@ -48,9 +48,9 @@ export function parseAgentInputMailboxItem(value: unknown, agentSessionId: strin
       // logical key and typed predecessor. Only Run rebinding has manual-author
       // eligibility; a fresh transport identity alone does not change the target.
       const rebound = receipt?.control.deliveryKey && deliveryKey.expectedRun.runId !== key.expectedRun.runId
-      if (rebound && admission.kind !== 'manual-actor') fail()
       if (source.kind === 'prompt') {
-        if (source.representation !== undefined || rebound && source.authorHuman !== true) fail()
+        if (source.representation !== undefined || rebound && (!isHumanPromptAdmission(admission.kind) ||
+            source.authorHuman !== true || source.inputContext !== undefined)) fail()
         if (source.authorProfile !== undefined) {
           const { authorProfile: _untrusted, ...fields } = source
           displaySource = { ...fields, ...preparedAuthorProfileFields(source.authorProfile) }
@@ -73,7 +73,7 @@ export function parseAgentInputMailboxItem(value: unknown, agentSessionId: strin
         string(source.originalControlOperationId)
         const message = object(entry.message, ['schema', 'messageId', 'operationId', 'createdAt', 'sender', 'recipient', 'threadId', 'correlationId', 'replyTo', 'workspaceId', 'senderSessionId', 'senderRunId', 'recipientSessionId', 'recipientRunId', 'body', 'channelProfile', 'channelQuote'])
         const envelope = validateAgentMuxMessageEnvelope(message as unknown as Parameters<typeof validateAgentMuxMessageEnvelope>[0])
-        if (rebound && envelope.sender.kind !== 'external') fail()
+        if (rebound && (admission.kind !== 'manual-actor' || envelope.sender.kind !== 'external' && envelope.sender.kind !== 'human')) fail()
         if (!messageInputWireMatches(envelope, source)) fail()
         if (key.kind !== 'message' || envelope.messageId !== key.messageId || envelope.operationId !== source.originalControlOperationId ||
           envelope.recipientSessionId !== key.agentSessionId || envelope.recipientRunId !== key.expectedRun.runId || receipt && receipt.originalControlOperationId !== envelope.operationId) fail()

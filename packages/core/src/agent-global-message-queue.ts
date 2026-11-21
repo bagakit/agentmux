@@ -42,7 +42,7 @@ import { assertAgentMessageRouteIntent, validateAgentMessageRoute, type AgentMes
 import { agentInputJournalKey, agentInputDeliveryKey, validateAgentInputRetry, validateAgentInputControlId, validateAgentInputDeliveryKey, validateAgentInputWaitRef, isRestorableLocalPromptInput,
   type AgentInputJournalIntent, type AgentInputJournalEntry, type AgentInputSelector, type AgentInputWaitControl,
   type AgentInputWaitJournalRecord, type AgentInputWaitReason, type AgentInputWaitRef,
-  type AgentInputWaitStopReceipt, type AgentInputDispatchLink } from './agent-input-wait.js'
+  type AgentInputWaitStopReceipt, type AgentInputDispatchLink, isHumanPromptAdmission } from './agent-input-wait.js'
 import { validateAgentPromptInputKey, type AgentPromptInputKey } from './agent-prompt-condition.js'
 import { parseAgentInputMailboxRead, type AgentInputMailboxRead } from './agent-input-mailbox.js'
 import { parseAgentMuxMessagePrefix, renderAgentMuxMessageReferences } from './agent-message-render.js'
@@ -1160,8 +1160,10 @@ export class DurableAgentMuxMessageQueue {
 
   /** Structural journal eligibility, not a grant: Core checks the current author and recovery target. */
   private canBindResumedInput(intent: AgentInputJournalIntent): boolean {
-    return intent.source.kind === 'prompt' ? intent.admissionIntent.kind === 'manual-actor' && intent.source.authorHuman === true
-      : this.message(intent.source.messageId)?.envelope.sender.kind === 'external'
+    if (intent.source.kind === 'prompt') return isHumanPromptAdmission(intent.admissionIntent.kind) &&
+      intent.source.authorHuman === true && intent.source.inputContext === undefined
+    const sender = this.message(intent.source.messageId)?.envelope.sender.kind
+    return sender === 'external' || sender === 'human' && intent.admissionIntent.kind === 'manual-actor'
   }
 
   /** Stop and this short gate share one original journal transaction; no Native await. */

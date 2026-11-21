@@ -98,7 +98,7 @@ import { noteProvenanceResourceKey } from './note-provenance.js'
 import type { NoteResource } from './notebook-catalog.js'
 import { parseControlDemandActivity } from './control-codec.js'
 import { parseDeliveryAttemptLookup, parseDeliveryFailure } from './delivery-attempt.js'
-import { agentInputDeliveryKey, validateAgentInputWaitRef, type AgentInputSubmissionReceipt } from './agent-input-wait.js'
+import { agentInputDeliveryKey, isHumanPromptAdmission, validateAgentInputWaitRef, type AgentInputSubmissionReceipt } from './agent-input-wait.js'
 
 import { parseFileUploadIdentity, parseFileUploadParams, parseFileUploadResult } from './public-rpc-files.js';
 
@@ -854,6 +854,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         if (observed && (!isDeepStrictEqual(observed.key, key) || !isDeepStrictEqual(observed.admission, p.record))) fail()
         if (p.record !== null) {
           const original = parsePromptSubmissionRecord(p.record), message = original.admission?.intent?.message ?? original.launch?.message
+          const deliveryKey = observed ? agentInputDeliveryKey(observed.control) : key
           const expectedContext = packet ? message?.inputContext : submitted.inputContext
           const expectedNote = composeAgentPrompt(undefined, packet ? packet.agentMuxNote : agentInputGuidance(submitted, message)).systemContext
           if (packet) {
@@ -863,13 +864,15 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
               ...(packet.agentMuxNote === undefined ? {} : {agentMuxNote:packet.agentMuxNote}),inputContext:expectedContext!})
             if (!isDeepStrictEqual(message?.inputContextCaptureProof,proof)) fail()
           } else if (message?.inputContextCaptureProof !== undefined) fail()
-          if (original.agentSessionId !== key.agentSessionId || !isDeepStrictEqual(original.run, key.expectedRun) ||
-              (original.admission?.submissionId ?? original.launch?.input.submissionId) !== key.submissionId ||
-              original.admission?.inputKey && !isDeepStrictEqual(original.admission.inputKey, key) ||
+          if (original.agentSessionId !== key.agentSessionId || !isDeepStrictEqual(original.run, deliveryKey.expectedRun) ||
+              (original.admission?.submissionId ?? original.launch?.input.submissionId) !== agentPromptInputId(deliveryKey) ||
+              original.admission?.inputKey && !isDeepStrictEqual(original.admission.inputKey, deliveryKey) ||
               !message || message.focusTask !== undefined && !isDeepStrictEqual(message.focusTask, submitted.focusTask) ||
               message.userContent !== input.prompt || !isDeepStrictEqual(message.inputContext, expectedContext) ||
               !isDeepStrictEqual(message.inputImages?.map(({ observation: _observation, ...reference }) => reference), input.inputImages) ||
-              message.authorHuman !== (submitted.moteGuidance === true || packet ? true : undefined) || message.authorAgentSessionId !== undefined || message.authorExternal !== undefined ||
+              (!isHumanPromptAdmission(submitted.admissionIntent?.kind) || packet || submitted.moteGuidance) &&
+                message.authorHuman !== (submitted.moteGuidance === true || packet ? true : undefined) ||
+              message.authorAgentSessionId !== undefined || message.authorExternal !== undefined ||
               submitted.sourceChannel !== undefined && message.sourceChannel !== submitted.sourceChannel ||
               message.systemContext !== expectedNote || message.inputContextSource !== (packet ? 'host-capture' : submitted.inputContext === undefined ? undefined : 'caller-declared')) fail()
         }

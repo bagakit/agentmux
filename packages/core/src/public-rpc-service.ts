@@ -51,7 +51,7 @@ import { messageApprovalCandidate, parseMessageApprovalCandidate, parseSignedMes
 import { parseMessageApplication } from './agent-message-envelope.js'
 import { parseConversationSnapshotInput, parseConversationSnapshotResult, type ConversationSnapshotInput, type ConversationSnapshotReleaseInput } from './conversation-snapshot.js'
 import { isImageMethod, parseImageParams, parseImageResult, type AgentMuxRpcImageOwner, type ImageMethod, type ImageActor, type ImageCallContext } from './public-rpc-image.js'
-import { agentPromptSubmissionOutcome } from './agent-input-wait.js'
+import { agentPromptSubmissionOutcome, isHumanPromptAdmission } from './agent-input-wait.js'
 import { moteMainHandoverInputId, moteMainBindingDefaults, moteMainBaseline, spatialAgentOpenRecord, isSpatialAgentAssociation, spatialAgentAssociationRecord } from './spatial-agent-open-contract.js'
 import { agentTakeoverInput } from './agent-takeover-context.js'
 import { composeAgentDerivedAction, isAgentBuiltInDerivedActionId, parseAgentDerivedActionFields } from './agent-derived-actions.js'
@@ -4685,6 +4685,7 @@ export class AgentMuxRpcService {
     // Historical receipts without typed selection keep their existing identity check.
     const selection = !input.admissionIntent && (!original || original.focusTask) ? focusTask : undefined
     const receipt = await scope.client.submitAgentPrompt({ ...prompt,
+      ...(isHumanPromptAdmission(input.admissionIntent?.kind) ? { authorHuman: true } : {}),
       ...(capturedContext ? {inputContextCapture:capturedContext.reference, ...(capturedContext.agentMuxNote === undefined ? {} : {agentMuxNote:capturedContext.agentMuxNote}),authorHuman:true} : {}),
       ...((moteGuidance || focusTask) ? {agentMuxNote:agentInputGuidance(input,original),...(moteGuidance ? {authorHuman:true} : {})} : {}), sourceChannel: input.sourceChannel ?? (context.transport === 'unix' ? 'cli' : 'api'),
       ...(device ? {sourceDevice:normalizeOperationDevice(device)} : {}) },{...this.inputCallContext(context),
