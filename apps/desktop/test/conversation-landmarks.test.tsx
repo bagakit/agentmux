@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ConversationLandmarkStore } from '@agentmux/core'
 import { applyNotebookChange, emptyNotebookState } from '@agentmux/core/notebook-catalog'
+import { newNoteDocument, recallCardNoteBlock, serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import type { ConversationItemRef, ConversationLandmarkPage } from '@agentmux/core/conversation'
 import type { AgentSessionHistoryPage } from '@agentmux/core'
 import { StaticConversationView as ConversationView } from './helpers/conversation-static-fixture'
@@ -69,6 +70,14 @@ it('finds saved Recall cards when the list opens, shares its lookup and cancels 
         { source: { noteId, blockId: 'research-block' }, card: { id: 'original-point', title: 'Original point', reference: ref(), routeHostId: scope.hostId } }
       ] }
   }
+  const note = newNoteDocument('Outside the card.', noteId, 'note-intro', 'Research note')
+  const originalCard = snapshot.graph.recallCards![1]!.card
+  note.content.content!.push(recallCardNoteBlock(originalCard, 'research-block', { containerId: 'card-container',
+    blocks: [{ type: 'paragraph', attrs: { blockId: 'complete-body' }, content: [{ type: 'text', text: 'Read the saved body without another click.' }] }] }))
+  const content = vi.spyOn(api.notebooks, 'content').mockResolvedValue({
+    noteId, resource: catalog.pages[noteId]!.resource, status: 'read', revision: 'original-revision',
+    content: serializeNoteDocument(note), actualNoteId: noteId, blockIds: ['research-block', 'complete-body']
+  })
   let finish!: (snapshot: Awaited<ReturnType<typeof api.notebooks.graph>>) => void
   const graph = vi.spyOn(api.notebooks, 'graph')
     .mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
@@ -77,9 +86,10 @@ it('finds saved Recall cards when the list opens, shares its lookup and cancels 
     .mockResolvedValueOnce({ ...snapshot, graph: { ...snapshot.graph, recallCards: [] } })
   await render(<ConversationLandmarkList reference={scope} reveal={vi.fn()} active/>)
   expect(graph).not.toHaveBeenCalled()
+  expect(content).not.toHaveBeenCalled()
   await click(named('Reading points'))
   await until(() => expect(document.body.textContent).toContain('Looking up Recall cards…'))
-  expect(button('Open Research note')).toBeUndefined()
+  expect(named('Open Research note')).toBeNull()
 
   await click(button('Refresh points'))
   expect(graph).toHaveBeenCalledTimes(1)
@@ -87,18 +97,20 @@ it('finds saved Recall cards when the list opens, shares its lookup and cancels 
   await click(named('Close Reading points'))
   expect(signal.aborted).toBe(true)
   await act(async () => finish(snapshot))
-  expect(button('Open Research note')).toBeUndefined()
+  expect(named('Open Research note')).toBeNull()
   await click(named('Reading points'))
-  await until(() => expect(button('Open Research note')).toBeDefined())
+  await until(() => expect(named('Open Research note')).not.toBeNull())
+  await until(() => expect(document.querySelector('.recall-knowledge-card .note-embedded-content')?.textContent).toBe('Read the saved body without another click.'))
   expect(graph).toHaveBeenCalledTimes(2)
-  expect(Array.from(document.querySelectorAll('button')).filter(node => node.textContent === 'Open Research note')).toHaveLength(1)
+  expect(document.querySelectorAll('button[aria-label="Open Research note"]')).toHaveLength(1)
   await click(button('Refresh points'))
-  expect(button('Open Research note')).toBeDefined()
-  expect(document.body.textContent).toContain('Previously found cards are still available.')
+  expect(named('Open Research note')).not.toBeNull()
+  await until(() => expect(document.body.textContent).toContain('Previously found cards are still available.'))
   await click(button('Refresh points'))
-  expect(button('Open Research note')).toBeUndefined()
-  expect(document.body.textContent).toContain('No saved Recall cards found for this conversation.')
+  await until(() => expect(document.body.textContent).toContain('No saved Recall cards found for this conversation.'))
+  expect(named('Open Research note')).toBeNull()
   expect(graph).toHaveBeenCalledTimes(4)
+  expect(content.mock.calls[0]![1]!.signal?.aborted).toBe(true)
 })
 it('names the actual common native record without reading metadata on mount or replacing its body/Range', async () => {
   await render(<ConversationView page={page()} sessionId={scope.agentSessionId} executionHostId={scope.hostId} renderRecordActions={renderConversationLandmarkAction}/>)

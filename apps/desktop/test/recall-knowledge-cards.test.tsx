@@ -143,7 +143,7 @@ it('writes the chosen original file and projects one exact card from the Noteboo
   expect(readRecallCard(recallCardHref(card), card.title)).toEqual(card)
   const backlinks = recallBacklinks({ catalog, graph }, { hostId: card.routeHostId, agentSessionId: card.reference.agentSessionId })
   await display(<ConversationRecallCard card={card} backlinks={backlinks} />)
-  expect(container!.querySelector('.recall-knowledge-card')?.textContent).toContain('Open Research note')
+  expect(container!.querySelector('.recall-knowledge-card__reference')?.textContent).toBe('Research note')
   const beforeNoteOpen = workbench.useAppStore.getState()
   const openFile = vi.fn(async () => true)
   const originalRead = vi.spyOn(api.files, 'read').mockImplementation(async (_, requested) => read(requested))
@@ -155,7 +155,7 @@ it('writes the chosen original file and projects one exact card from the Noteboo
       setRecallNotebook: (recallNotebookId, recallNoteId) => workbench.useAppStore.setState({ recallNotebookId, recallNoteId: recallNoteId ?? null }),
       setRecallZoneSelection: recallZoneSelection => workbench.useAppStore.setState({ recallZoneSelection })
     })
-    const link = [...container!.querySelectorAll('button')].find(button => button.textContent === 'Open Research note')!
+    const link = container!.querySelector<HTMLButtonElement>('button[aria-label="Open Research note"]')!
     await act(async () => link.click())
     expect(originalRead).toHaveBeenCalledWith(workspace.id, path)
     expect(openFile).toHaveBeenCalledWith(path, 'notes-group', {
@@ -172,7 +172,7 @@ it('writes the chosen original file and projects one exact card from the Noteboo
   await display(<NoteFileView document={actual.document} resource={resource(path)} knowledge={{ scope: 'complete', sources: [], invalid: [], references: [] }}
     onChange={() => {}} onSave={() => {}} onOpen={() => {}} />)
   await settle()
-  expect(container!.querySelector('.recall-knowledge-card')?.textContent).toContain('Open original message')
+  expect(container!.querySelector('.recall-knowledge-card__reference')?.textContent).toBe('Original message')
   expect(container!.querySelector('.recall-knowledge-card')?.textContent).toContain(card.title)
   const session = composerSession(card.reference.agentSessionId)
   const focus = vi.fn(() => true), reveal = vi.fn(async () => ({ kind: 'located' as const }))
@@ -180,7 +180,7 @@ it('writes the chosen original file and projects one exact card from the Noteboo
   try {
     workbench.useAppStore.setState({ sessions: [{ ...session, control: { ...session.control, hostId: card.routeHostId } }],
       focusExecutionSession: focus, revealConversationItem: reveal, setMainSurface: vi.fn() })
-    const source = [...container!.querySelectorAll('button')].find(button => button.textContent === 'Open original message')!
+    const source = container!.querySelector<HTMLButtonElement>('button[aria-label="Open original message"]')!
     await act(async () => source.click())
     expect(focus).toHaveBeenCalledWith(card.reference.agentSessionId)
     expect(reveal).toHaveBeenCalledWith(card.reference, card.routeHostId)
@@ -232,7 +232,7 @@ it('saves the exact message text inside the card in one original write and displ
   expect(container!.querySelector('.recall-knowledge-card .note-embedded-content')).toBeNull()
   await openSavedContent()
   await vi.waitFor(() => expect(container!.querySelector('.recall-knowledge-card .note-embedded-content')?.textContent).toContain('A later edit'))
-  expect(container!.querySelector('.recall-knowledge-card__actions button')?.textContent).toBe('Open original message')
+  expect(container!.querySelector('.recall-knowledge-card__reference')?.getAttribute('aria-label')).toBe('Open original message')
 })
 
 it('opens a reference in a saved card body using the original Note citation scope', async () => {
@@ -258,7 +258,7 @@ it('opens a reference in a saved card body using the original Note citation scop
   expect(open).toHaveBeenCalledWith(expect.objectContaining({ location: { workspaceId: workspace.id, path: supportingPath } }), target.blockId)
 })
 
-it('reads the exact original card body inline when expanded from Conversation', async () => {
+it('reads the exact original card body directly from Conversation without expanding', async () => {
   const note = newNoteDocument('Outside the card.', 'selected-note', 'source-block', 'Research note')
   note.content.content!.push(recallCardNoteBlock(card, 'saved-card', { containerId: 'saved-container',
     blocks: [
@@ -272,15 +272,14 @@ it('reads the exact original card body inline when expanded from Conversation', 
   const backlinks = recallBacklinks({ catalog, graph }, { hostId: card.routeHostId, agentSessionId: card.reference.agentSessionId })
   await display(<ConversationRecallCard card={{ ...card, title: 'Renamed reading point' }} backlinks={backlinks} inNamedRow />)
   expect(container!.querySelector('.recall-knowledge-card strong')?.textContent).toBe(card.title)
-  expect(content).not.toHaveBeenCalled()
-  await openSavedContent()
+  expect(container!.querySelector('.recall-knowledge-card summary')).toBeNull()
   const preview = container!.querySelector('.recall-knowledge-card .note-embedded-content')!
   expect(preview.querySelector('h2')?.textContent).toBe('Saved finding')
   expect(preview.querySelector('pre')?.textContent).toBe('const example = true')
   expect(preview.textContent).toContain('The complete last paragraph.')
   expect(preview.textContent).not.toContain('Outside the card.')
   expect(content).toHaveBeenCalledExactlyOnceWith('selected-note', { signal: expect.any(AbortSignal) })
-  await openSavedContent(false)
+  await display(null)
   expect(content.mock.calls[0]![1]!.signal?.aborted).toBe(true)
   expect(container!.querySelector('.recall-knowledge-card .note-embedded-content')).toBeNull()
   expect(api.files.writePublic).not.toHaveBeenCalled()
@@ -293,16 +292,14 @@ it('shows a confirmed link-only card and keeps the Note action when its saved bo
     .mockRejectedValueOnce(new Error('Original read unavailable'))
   const backlinks = recallBacklinks({ catalog, graph }, { hostId: card.routeHostId, agentSessionId: card.reference.agentSessionId })
   await display(<ConversationRecallCard card={card} backlinks={backlinks} />)
-  await openSavedContent()
   expect(container!.querySelector('[role="status"]')?.textContent).toContain('Original read unavailable')
-  expect(container!.querySelector('.recall-knowledge-card__actions button')?.textContent).toBe('Open Research note')
+  expect(container!.querySelector('.recall-knowledge-card__reference')?.getAttribute('aria-label')).toBe('Open Research note')
   const retry = [...container!.querySelectorAll('button')].find(button => button.textContent === 'Retry saved content')!
   await act(async () => retry.click())
   expect(container!.textContent).toContain('Only the source link was saved.')
   files.set(path, body)
   await display(null)
   await display(<ConversationRecallCard card={card} backlinks={backlinks} />)
-  await openSavedContent()
   expect(container!.textContent).toContain('This card could not be confirmed in its original Note.')
   expect(container!.textContent).not.toContain('Only the source link was saved.')
   expect(content).toHaveBeenCalledTimes(3)
@@ -391,7 +388,7 @@ it('keeps the exact pending destination after a lost write reply and checks the 
   await display(<ConversationRecallCard card={card} />)
   const check = [...container!.querySelectorAll('button')].find(button => button.textContent === 'Check original save')!
   await act(async () => check.click())
-  expect(container!.textContent).toContain('Open Research note')
+  expect(container!.querySelector('[aria-label="Open Research note"]')).not.toBeNull()
   expect(container!.textContent).toContain('Saved the available text.')
   expect(history).toHaveBeenCalledTimes(1)
   expect(api.files.writePublic).toHaveBeenCalledTimes(1)
