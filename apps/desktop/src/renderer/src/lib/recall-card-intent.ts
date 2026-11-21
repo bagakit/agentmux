@@ -7,6 +7,7 @@ export type RecallCardIntent = {
   location: { resource: NoteResource; noteId: string | null; zoneId: string; dailyTitle?: string }
   phase: 'ready' | 'checking'
   writeAttempt?: string
+  partialText?: true
 }
 export type RecallCardIntents = Record<string, RecallCardIntent>
 
@@ -27,7 +28,8 @@ export function restoreRecallCardIntents(value: unknown): RecallCardIntents {
       resource.path.startsWith('/') || resource.path.split(/[\\/]/u).includes('..')) continue
     try {
       const card = readRecallCard(recallCardHref(intent.card), intent.card.title)
-      if (card && recallIntentKey(card) === key) result[key] = { ...intent, card }
+      const { partialText, ...original } = intent
+      if (card && recallIntentKey(card) === key) result[key] = { ...original, card, ...(partialText === true ? { partialText } : {}) }
     } catch { continue }
   }
   return result

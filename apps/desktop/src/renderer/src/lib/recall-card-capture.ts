@@ -12,14 +12,36 @@ import { recallIntentKey, type RecallCardIntent } from './recall-card-intent'
 import { readRecallSource } from './recall-card-source'
 
 type SavedCard = { page: NotebookPage; blockId: string; text: 'saved' | 'partial' | 'link-only' }
-const pending = new Map<string, Promise<SavedCard>>()
+const pending = new Map<string, { selection: string | null; saving: Promise<SavedCard> }>()
 
 export function saveRecallCard(card: RecallCard, destination: NotebookPage | null, now = new Date()): Promise<SavedCard> {
   const key = recallIntentKey(card)
+  const selection = destination ? JSON.stringify([destination.noteId, destination.workface?.zoneId,
+    destination.resource.hostId, destination.resource.workspaceId, destination.resource.workspacePath, destination.resource.path])
+    : recallDailyAddress(now).noteId
   const inFlight = pending.get(key)
-  if (inFlight) return inFlight
-  const saving = capture(card, destination, now).finally(() => pending.delete(key))
-  pending.set(key, saving)
+  if (inFlight?.selection === selection) return inFlight.saving
+  if (inFlight) return Promise.reject(new Error('A save to another Note is already in progress. Once it finishes, try this destination again.'))
+  const retained = useAppStore.getState().recallCardIntents[key]
+  if (retained?.phase === 'checking') return Promise.reject(new Error('Check the original Recall save before starting another.'))
+  return runCapture(key, selection, async () => {
+    if (retained) await persistRecallCardIntent(retained, true)
+    return capture({ card, operationId: mintObjectId(), location: await selectTarget(destination, now), phase: 'ready' })
+  })
+}
+
+export function checkRecallCard(card: RecallCard, operationId: string): Promise<SavedCard> {
+  const key = recallIntentKey(card)
+  const retained = useAppStore.getState().recallCardIntents[key]
+  if (retained?.phase !== 'checking' || retained.operationId !== operationId) {
+    return Promise.reject(new Error('The original Recall save has changed. Check its latest status.'))
+  }
+  return pending.get(key)?.saving ?? runCapture(key, null, () => capture(retained))
+}
+
+function runCapture(key: string, selection: string | null, run: () => Promise<SavedCard>): Promise<SavedCard> {
+  const saving = run().finally(() => pending.delete(key))
+  pending.set(key, { selection, saving })
   return saving
 }
 
@@ -46,11 +68,7 @@ async function selectTarget(destination: NotebookPage | null, now: Date): Promis
   return { resource, noteId: null, zoneId: originalFileRead(resource).zoneId, dailyTitle: address.title }
 }
 
-async function capture(card: RecallCard, destination: NotebookPage | null, now: Date): Promise<SavedCard> {
-  const retained = useAppStore.getState().recallCardIntents[recallIntentKey(card)]
-  if (retained?.phase === 'ready') await persistRecallCardIntent(retained, true)
-  let intent: RecallCardIntent = retained?.phase === 'checking' ? retained
-    : { card, operationId: mintObjectId(), location: await selectTarget(destination, now), phase: 'ready' }
+async function capture(intent: RecallCardIntent): Promise<SavedCard> {
   const { resource, zoneId, noteId, dailyTitle } = intent.location
   const scope = originalFileRead(resource, { zoneId, exact: true })
   const { resource: mapping, result } = await api.files.readPublic(scope)
@@ -78,7 +96,7 @@ async function capture(card: RecallCard, destination: NotebookPage | null, now: 
   if (!existing && intent.phase === 'checking') throw new Error('The original card could not be confirmed in this Note. This save and its exact destination are kept for checking.')
   const targetId = original?.status === 'valid' ? original.note.noteId : dailyId!
   const blockId = existing?.blockId ?? intent.operationId
-  let text: SavedCard['text'] = existing?.body ? 'saved' : 'link-only'
+  let text: SavedCard['text'] = existing?.body ? intent.partialText ? 'partial' : 'saved' : 'link-only'
   if (!existing) {
     const source = await readRecallSource(intent.card)
     const note = newNoteDocument('', targetId, blockId, dailyTitle)
@@ -104,7 +122,9 @@ async function capture(card: RecallCard, destination: NotebookPage | null, now: 
     if (proposed.status !== 'valid' || !recallCardBlocks(proposed.note.content).some(entry => entry.blockId === blockId && recallCardHref(entry.card) === recallCardHref(intent!.card))) {
       throw new Error('The card could not be added to the end of the original Markdown. Check its ending syntax or choose another Note.')
     }
-    intent = { ...intent, phase: 'checking', ...(result.status === 'read' ? { writeAttempt: mintObjectId() } : {}) }
+    intent = { ...intent, phase: 'checking',
+      ...(result.status === 'read' ? { writeAttempt: mintObjectId() } : {}),
+      ...(text === 'partial' ? { partialText: true } : {}) }
     try { await persistRecallCardIntent(intent) }
     catch (error) { await persistRecallCardIntent(intent, true); throw error }
     const query = { ...scope, expectedResource: mapping }

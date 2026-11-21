@@ -6,7 +6,7 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import { notebookPageArchiveRoot } from '@agentmux/core/notebook-catalog'
 import { recallCardHref, type RecallCard } from '@agentmux/core/notebook-observation'
 import { useAppStore } from '../store'
-import { saveRecallCard } from '../lib/recall-card-capture'
+import { checkRecallCard, saveRecallCard } from '../lib/recall-card-capture'
 import { openRecallCardNote, type RecallBacklinks, type RecallDestination } from '../lib/recall-card-navigation'
 import { recallIntentKey } from '../lib/recall-card-intent'
 import { refreshNotebookLibrary, useNotebookLibrary } from '../lib/notebook-library'
@@ -36,7 +36,7 @@ export function ConversationRecallCard({ card, backlinks, inNamedRow = false }: 
     try {
       const chosen = selected ? library?.pages[selected] : null
       if (selected && !chosen && !pending) throw new Error('Choose the original Note again. Its selection is unavailable.')
-      const destination = await saveRecallCard(card, chosen ?? null)
+      const destination = pending ? await checkRecallCard(card, pending.operationId) : await saveRecallCard(card, chosen ?? null)
       setSaved({ destination, observation: backlinks })
       if (destination.text === 'link-only') setIssue('Saved the source link. Message text wasn’t available to copy.')
       else if (destination.text === 'partial') setIssue('Saved the available text. Open the original message for its other content.')
