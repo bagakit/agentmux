@@ -16,7 +16,7 @@ const creationRelations=process.argv[4]==='--creation-relations', creationMutati
 const taskLayout=process.argv[4]==='--task-layout'||creationRelations,inlineRename=process.argv[4]==='--inline-rename'
 const agentPins=process.argv[4]==='--agent-pins', pinMutation=process.env.AGENTMUX_FOCUS_PIN_MUTATION
 assert.ok(!agentPins || !pinMutation || ['unqualified-sid','unscoped-groups'].includes(pinMutation),'Known Focus Agent pin mutation')
-assert.ok(!creationRelations || !creationMutation || ['omit-creation', 'ignore-route-obstacles'].includes(creationMutation), 'Known Focus creation mutation')
+assert.ok(!creationRelations || !creationMutation || ['omit-creation', 'ignore-route-obstacles', 'omit-creation-hover'].includes(creationMutation), 'Known Focus creation mutation')
 const layoutMutation=process.env.AGENTMUX_FOCUS_LAYOUT_MUTATION
 assert.ok(!taskLayout || !layoutMutation || ['omit-layout','hide-mandatory','repeat-result-idle','unqualified-subagents','omit-row-summary','expand-known-recovery','omit-detail-motion','ignore-interaction-range'].includes(layoutMutation),'Known Focus task layout mutation')
 const sourceConnection=process.argv[4]==='--source-connection'
@@ -91,6 +91,13 @@ try{
       const code=source.replace(target,'const creator = undefined')
       transformations.push({path:relative(root,path),mutation:creationMutation,sourceSHA256:hash(source),loadedSHA256:hash(code)})
       return {contents:code,loader:'ts'}
+    }
+    if(creationRelations && creationMutation==='omit-creation-hover' && component==='FocusCreationConnections.tsx'){
+      const target='const index = targets.findIndex(path => path.isPointInStroke(point))'
+      assert.equal(source.split(target).length,2,'One product creation line hover hit test')
+      const code=source.replace(target,'const index = -1')
+      transformations.push({path:relative(root,path),mutation:creationMutation,sourceSHA256:hash(source),loadedSHA256:hash(code)})
+      return {contents:code,loader:'tsx'}
     }
     if(creationRelations && creationMutation==='ignore-route-obstacles' && component==='focus-card-link-path.ts'){
       const target='...obstacles.filter(box => box !== from && box !== to)'

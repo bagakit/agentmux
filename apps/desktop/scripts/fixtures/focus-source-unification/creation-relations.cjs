@@ -10,7 +10,7 @@ module.exports = async function exerciseCreationRelations({ win, read, until, se
   const view = '.focus-project-lanes__rows'
   const scrollTop = () => read(`document.querySelector(${JSON.stringify(view)}).scrollTop = 0`)
   const descendants = () => read(`[...document.querySelectorAll(${JSON.stringify(focus + ' [data-focus-creation-depth]')})].map(node => [node.dataset.focusPresentationSession, Number(node.dataset.focusCreationDepth)])`)
-  const lines = () => read(`[...document.querySelectorAll('.focus-creation-line')].map(line => ({from: JSON.parse(line.dataset.focusCreationFrom)[1], to: JSON.parse(line.dataset.focusCreationTo)[1], marker: Boolean(line.getAttribute('marker-end')), dash: getComputedStyle(line).strokeDasharray}))`)
+  const lines = () => read(`[...document.querySelectorAll('.focus-creation-line')].map(line => ({from: JSON.parse(line.dataset.focusCreationFrom)[1], to: JSON.parse(line.dataset.focusCreationTo)[1], start: Boolean(line.getAttribute('marker-start')), end: Boolean(line.getAttribute('marker-end')), dash: getComputedStyle(line).strokeDasharray}))`)
   const hasLine = (from, to) => lines().then(edges => edges.some(edge => edge.from === from && edge.to === to))
   const routeCollisions = () => read(`(() => {
       const board = document.querySelector(${JSON.stringify(view)})
@@ -57,7 +57,7 @@ module.exports = async function exerciseCreationRelations({ win, read, until, se
   await read('window.unifiedFocusProof.theme("dark")')
   await click(button('working'))
   await until('selected card draws both column relationships', async () => await hasLine('working', 'coverage') && await hasLine('working', 'reviews'))
-  assert.ok((await lines()).every(line => line.from === 'working' && line.marker && line.dash !== 'none'))
+  assert.ok((await lines()).every(line => line.from === 'working' && line.start && line.end && line.dash === 'none'))
   const attentionEndpointGap = () => read(`(() => {
     const line = [...document.querySelectorAll('.focus-creation-line')].find(line => JSON.parse(line.dataset.focusCreationTo)[1] === 'permission')
     if (!line) return Infinity
@@ -81,7 +81,7 @@ module.exports = async function exerciseCreationRelations({ win, read, until, se
   await expectClearRoutes()
   assert.equal(await read(`getComputedStyle(document.querySelector('.focus-creation-connections')).pointerEvents`), 'none')
   result.cardOutgoing = await lines()
-  await capture('cards-creation-outgoing.png', 'Selected creator links to the visible Agent it created using a dashed arrow')
+  await capture('cards-creation-outgoing.png', 'Selected creator links to visible Agents, with a start dot and arrowheads')
 
   await click(button('coverage'))
   await until('the selected child shows the incoming and staggered outgoing relations', async () => await hasLine('working', 'coverage') && await hasLine('coverage', 'audit'))
@@ -96,11 +96,63 @@ module.exports = async function exerciseCreationRelations({ win, read, until, se
   await capture('cards-creation-incoming.png', 'The staggered Results link follows the available gutter')
   result.cardIncoming = await lines()
 
+  const edge = `[...document.querySelectorAll('.focus-creation-line')].find(line => JSON.parse(line.dataset.focusCreationFrom)[1] === 'coverage' && JSON.parse(line.dataset.focusCreationTo)[1] === 'audit')`
+  const normalMotion = value => win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', {
+    features: [{name:'prefers-reduced-motion',value}],
+  })
+  const pointer = async point => win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', {type:'mouseMoved',...point})
+  const preview = () => read(`[...document.querySelectorAll('[role=tooltip]')].find(node => /Created /.test(node.textContent))?.textContent ?? null`)
+  const names = await read(`[${JSON.stringify(button('coverage'))}, ${JSON.stringify(button('audit'))}].map(selector => document.querySelector(selector).querySelector('strong').textContent)`)
+  const hintText = names[0] + 'Created ' + names[1]
+  const topology = await read('window.taskLayoutProof.topology()')
+  const selection = await read('window.taskLayoutProof.selection()')
+  const hoverPoint = await read(`(() => {
+    const line = ${edge}, rect = line.ownerSVGElement.getBoundingClientRect(), length = line.getTotalLength()
+    for (const fraction of [.48, .32, .62, .24, .76]) {
+      const p = line.getPointAtLength(length * fraction), x = p.x + rect.left, y = p.y + rect.top
+      const target = document.elementFromPoint(x, y)
+      if (target?.closest('.focus-project-lanes__rows') && !target.closest('[data-focus-card-key], button, a, .focus-context-group__bucket, .focus-project-lanes__axis')) return {x,y}
+    }
+    return null
+  })()`)
+  assert.ok(hoverPoint, 'The displayed route exposes a real gutter point to the pointer')
+  await normalMotion('no-preference')
+  await pointer(hoverPoint)
+  await until('Creation link hover shows both original names and direction', async () => await preview() === hintText)
+  const animation = await read(`(() => {
+    const pulse = (${edge}).parentElement.querySelector('.focus-creation-pulse')
+    const animation = pulse?.getAnimations().find(item => item.animationName === 'focus-creation-direction')
+    if (!animation) return null
+    animation.pause()
+    const timing = animation.effect.getTiming()
+    animation.currentTime = timing.duration * .2
+    const start = parseFloat(getComputedStyle(pulse).strokeDashoffset)
+    animation.currentTime = timing.duration * .44
+    const later = parseFloat(getComputedStyle(pulse).strokeDashoffset)
+    return { iterations: timing.iterations, start, later }
+  })()`)
+  assert.equal(animation?.iterations, 1)
+  assert.ok(animation.later < animation.start, 'The rendered pulse moves from creator toward target')
+  await capture('cards-creation-hover.png', 'Pointer preview names the exact relationship and a paused pulse shows its direction')
+  await pointer({x:7,y:7})
+  await until('leaving the board dismisses the relation preview', async () => await preview() === null)
+
   win.setContentSize(1200, 1000)
   await settle()
   await until('resizing keeps the selected relation visible', () => hasLine('coverage', 'audit'))
   await expectClearRoutes()
   await capture('cards-creation-reflow.png', 'Cards keep the same directed relationship after the pane narrows')
+  await normalMotion('reduce')
+  await read('window.unifiedFocusProof.theme("light")')
+  await read(`(${edge}).parentElement.focus()`)
+  await until('keyboard focus reads the same relation', async () => await preview() === hintText)
+  assert.equal(await read(`(${edge}).parentElement.querySelector('.focus-creation-pulse').getAnimations().length`), 0)
+  await capture('cards-creation-keyboard-reduced.png', 'Keyboard focus reads the same relation in a narrower light pane with reduced motion')
+  await key('Escape', 27)
+  await until('Escape dismisses the relation preview', async () => await preview() === null)
+  assert.deepEqual(await read('window.taskLayoutProof.topology()'), topology)
+  assert.deepEqual(await read('window.taskLayoutProof.selection()'), selection)
+  result.linkReading = { hover: true, keyboard: true, motion: animation, reducedMotion: true, exactNames: names }
   result.routing = { staggered: true, clearedCardsAndHeadings: true, reflow: true }
   win.setContentSize(1440, 900)
   await settle()
