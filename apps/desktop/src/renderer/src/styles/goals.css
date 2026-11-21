@@ -224,6 +224,15 @@
 .goals-board-column .goals-row__copy { grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); }
 .goals-board-column .goals-row__copy > strong { font-size: var(--fs-body); font-weight: 600; }
 .goals-board-column .goals-row__next { line-height: 1.35; }
+.goal-card-workflow { display: block; width: min(100%, 220px); height: 36px; color: var(--text-2); }
+.goal-card-workflow__edges { fill: none; stroke: color-mix(in srgb, var(--text-3) 75%, var(--line)); stroke-width: 1.2; }
+.goal-card-workflow__boundary { fill: var(--surface-1); stroke: var(--text-3); }
+.goal-card-workflow [data-ticket-state] { fill: var(--surface-2); stroke: currentColor; }
+.goal-card-workflow [data-ticket-state='done'] { fill: var(--green-text); stroke: var(--green-text); }
+.goal-card-workflow :is([data-ticket-state='ready'], [data-ticket-state='working']) { stroke: var(--blue-text); }
+.goal-card-workflow [data-ticket-state='working'] { fill: var(--blue-text); }
+.goal-card-workflow :is([data-ticket-state='review'], [data-ticket-state='changes'], [data-ticket-state='unknown']) { stroke: var(--amber-text); }
+.goal-card-workflow [data-ticket-state='cancelled'] { stroke: var(--text-3); stroke-dasharray: 2 2; }
 .goals-board-column .goals-row__footer { gap: var(--sp-1) var(--sp-3); }
 .goals-board-column .goals-row__facts { flex: 0 1 auto; }
 .goals-board-column .goal-agent-group--board { flex: 0 1 auto; min-width: 0; max-width: 100%; gap: var(--sp-3); margin-inline-start: 0; }

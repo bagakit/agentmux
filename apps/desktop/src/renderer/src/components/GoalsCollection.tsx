@@ -4,7 +4,8 @@ import { sameDemandExecution, type DemandExecutionReference } from '@agentmux/de
 import type { GoalResponsibilityRow } from '@agentmux/core/goal-responsibility'
 import { useGoalAgentPresentation } from '../lib/goal-discussion-recipient'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { useId, type ReactNode } from 'react'
+import { useId, useRef, useState, type ReactNode } from 'react'
+import * as ContextMenu from '@radix-ui/react-context-menu'
 import { useShallow } from 'zustand/react/shallow'
 import { Button } from '@agentmux/client-ui/components/Button'
 import { agentSessionPresentationIndex } from '../lib/session-presentation'
@@ -15,12 +16,17 @@ import { DEMAND_STATUS_LABELS, type DemandProjection, type DemandStatus } from '
 import { useAppStore } from '../store'
 import { GoalResponsibilitySummary } from './GoalResponsibilitySummary'
 import { GoalPlanRing } from './GoalPlanGraph'
+import { GoalPlanThumbnail } from './GoalPlanThumbnail'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
+import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { GoalAgentGroup } from './GoalAgentGroup'
 import { SurfaceState } from './SurfaceState'
 import goalsArtUrl from '@agentmux/client-ui/brand/illustrations/concepts/goals-companions.png'
 
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
+const CopyLinkIcon = semanticIconComponent('action.copy-address')
+const CopiedIcon = semanticIconComponent('status.copied')
 /** The four lifecycle reading positions and the two independent conditions all use the list's owner-derived grouping. */
 export function GoalBoardWorkflow({ groups, selected, onSelect }: { groups: readonly GoalGroup[]; selected: GoalStage | null; onSelect(stage: GoalStage | null): void }) {
   const counts = new Map(groups.map(group => [group.stage, group.goals.length]))
@@ -75,6 +81,9 @@ function BoardNextOwner({ row, demand }: { row: GoalResponsibilityRow; demand: D
 /** One Goal reading unit shared by the list and board. */
 export function GoalRow({ demand, selected, selectedSessionId, acknowledgementFailed, stageChanged, onSelect, compact = false, board = false }: { board?: boolean; demand: DemandProjection; selected: boolean; selectedSessionId: string | null; acknowledgementFailed: boolean; stageChanged: boolean; onSelect: () => void; compact?: boolean }) {
   const teamDescriptionId = useId()
+  const anchor = useRef<HTMLDivElement>(null)
+  const [copiedLink, setCopiedLink] = useState<string>()
+  const link = demand.address?.goalUrl
   const execution = useAppStore(useShallow((state) => {
     if (!demand.sessionIds.length && !selectedSessionId) return { unconfirmed: 0, context: null }
     const byId = agentSessionPresentationIndex(state.sessions)
@@ -98,14 +107,20 @@ export function GoalRow({ demand, selected, selectedSessionId, acknowledgementFa
   const stage = acknowledgementFailed ? 'you' : fact.stage
   const original = board && !acknowledgementFailed ? boardExecution(fact.source) : undefined
   const responsibility = original && demand.responsibility?.executions.find(row => sameDemandExecution(original, row.execution))
-  return <div role="button" tabIndex={0} className={`goals-row${!demand.alignment ? ' goals-row--undefined' : ''}${selected ? ' goals-row--selected' : ''}${compact ? ' goals-row--compact' : ''}`} data-demand-id={demand.id} data-demand-status={demand.status} {...(stageChanged ? { 'data-goal-stage-changed': true } : {})} {...(execution.context === 'Current execution' ? { 'data-session-context': true } : {})} aria-pressed={selected} aria-describedby={demand.supervisorSessionId || demand.assigneeSessionIds?.length ? teamDescriptionId : undefined} aria-label={`Open goal ${demand.title}. ${nextStep}`} onClick={onSelect} onKeyDown={(event) => {
+  const row = <div ref={anchor} role="button" tabIndex={0} className={`goals-row${!demand.alignment ? ' goals-row--undefined' : ''}${selected ? ' goals-row--selected' : ''}${compact ? ' goals-row--compact' : ''}`} data-demand-id={demand.id} data-demand-status={demand.status} {...(stageChanged ? { 'data-goal-stage-changed': true } : {})} {...(execution.context === 'Current execution' ? { 'data-session-context': true } : {})} aria-pressed={selected} aria-describedby={demand.supervisorSessionId || demand.assigneeSessionIds?.length ? teamDescriptionId : undefined} aria-label={`Open goal ${demand.title}. ${nextStep}`} onClick={onSelect} onKeyDown={(event) => {
     if (event.target !== event.currentTarget) return
+    if (board && (event.key === 'ContextMenu' || event.shiftKey && event.key === 'F10')) {
+      event.preventDefault()
+      const node = event.currentTarget, rect = node.getBoundingClientRect()
+      node.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: rect.left + 8, clientY: rect.bottom }))
+    }
     if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect() }
   }}>
     <GoalStageMark stage={acknowledgementFailed ? stage : fact.mark ?? stage} cancelled={demand.status === 'cancelled'} />
     <div className="goals-row__copy">
       <strong title={demand.title}>{demand.title}</strong>
       <span className="goals-row__next">{nextStep}</span>
+      {board ? <GoalPlanThumbnail demand={demand} /> : null}
       <div className="goals-row__footer">
         <div className="goals-row__facts">
           {responsibility ? <BoardNextOwner row={responsibility} demand={demand} /> : null}
@@ -118,8 +133,22 @@ export function GoalRow({ demand, selected, selectedSessionId, acknowledgementFa
       </div>
       {!compact ? <GoalResponsibilitySummary demand={demand} compact /> : null}
     </div>
-    {selected ? <ThemeStatusSelectedIcon className="goals-row__selected" size={13} aria-label="Selected goal" /> : <ThemeNavigationDisclosureIcon className="goals-row__open" size={14} aria-hidden="true" />}
+    {selected ? <ThemeStatusSelectedIcon className="goals-row__selected" size={13} aria-label="Selected goal" />
+      : board && link && copiedLink === link ? <CopiedIcon className="goals-row__open" size={14} aria-hidden="true" />
+      : <ThemeNavigationDisclosureIcon className="goals-row__open" size={14} aria-hidden="true" />}
+    {board && link && copiedLink === link ? <span className="goals-visually-hidden" role="status">Goal link copied</span> : null}
   </div>
+  return board ? <ContextMenu.Root modal={false} onOpenChange={open => { if (open) setCopiedLink(undefined) }}>
+    <ContextMenu.Trigger asChild>{row}</ContextMenu.Trigger>
+    <DocumentOverlayPortal component={ContextMenu.Portal}>
+      <ContextMenu.Content className="tab-context-menu" collisionPadding={8} aria-label="Goal card actions"
+        onCloseAutoFocus={event => { event.preventDefault(); anchor.current?.focus({ preventScroll: true }) }}>
+        <ContextMenu.Item className="tab-context-menu__item" disabled={!link} onSelect={() => {
+          if (link) void copyTextToClipboard(link, useAppStore.getState().reportError).then(saved => { if (saved) setCopiedLink(link) })
+        }}><CopyLinkIcon size={14} />{link ? 'Copy goal link' : 'Goal link unavailable'}</ContextMenu.Item>
+      </ContextMenu.Content>
+    </DocumentOverlayPortal>
+  </ContextMenu.Root> : row
 }
 
 /** The grouped list, the work-status board and the empty states of the same filtered collection. */
