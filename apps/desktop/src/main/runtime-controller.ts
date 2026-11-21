@@ -3490,34 +3490,19 @@ export class RuntimeController {
     const toolkit = ref ? this.toolkitRuns.get(terminalInputKey(hostId, ref.runId)) : undefined
     if (toolkit && (event.type === 'terminal-output' || event.type === 'terminal-snapshot')) { toolkit(event); return }
     if (event.type === 'terminal-output' || event.type === 'terminal-snapshot') {
-      const queryKey = terminalInputKey(hostId, event.run.runId)
-      // Only original tail bytes contain new CLI queries; restoration bytes are synthetic.
-      const decoder = new TextDecoder()
-      const outputs = event.type === 'terminal-output' ? [event.data] : event.replay
-        .filter(chunk => chunk.endByte > event.afterByte)
-        .map(chunk => {
+      const { runId } = event.run
+      const queryKey = terminalInputKey(hostId, runId)
+      if (event.type === 'terminal-output') {
+        this.observeTerminalColorOutput(hostId, runId, queryKey, event.data)
+      } else {
+        // Only new original tail bytes can contain unanswered queries.
+        let decoder: TextDecoder | undefined
+        for (const chunk of event.replay) {
+          if (chunk.endByte <= event.afterByte) continue
           const skip = Math.max(0, event.afterByte - chunk.startByte)
-          return decoder.decode(chunk.dataBytes.subarray(skip), { stream: true })
-        })
-      for (const data of outputs) {
-        const scan = scanTerminalOscColorQueries(
-          data,
-          this.terminalColorQueryRemainders.get(queryKey) ?? '',
-          this.terminalViewColors
-        )
-        if (scan.remainder) this.terminalColorQueryRemainders.set(queryKey, scan.remainder)
-        else this.terminalColorQueryRemainders.delete(queryKey)
-        if (scan.replies.length > 0) {
-          const replies = scan.replies.join('')
-          const readyAgentSessionId = this.readyAgentColorQueryRuns.get(queryKey)
-          if (readyAgentSessionId) {
-            void this.replyToAgentColorQuery(hostId, readyAgentSessionId, event.run.runId, replies)
-          } else {
-            const pending = `${this.pendingAgentColorQueryReplies.get(queryKey) ?? ''}${replies}`
-            if (Buffer.byteLength(pending) <= 4 * 1024) {
-              this.pendingAgentColorQueryReplies.set(queryKey, pending)
-            }
-          }
+          decoder ??= new TextDecoder()
+          const data = decoder.decode(chunk.dataBytes.subarray(skip), { stream: true })
+          this.observeTerminalColorOutput(hostId, runId, queryKey, data)
         }
       }
     } else if (event.type === 'agent-session') {
@@ -3632,6 +3617,25 @@ export class RuntimeController {
       } catch (error) {
         console.error('Failed to publish AgentMux Runtime event', error)
       }
+    }
+  }
+
+  private observeTerminalColorOutput(hostId: string, runId: string, key: string, data: string): void {
+    const remainder = this.terminalColorQueryRemainders.get(key) ?? ''
+    const scan = scanTerminalOscColorQueries(data, remainder, this.terminalViewColors)
+    if (!scan) return
+    if (scan.remainder !== remainder) {
+      if (scan.remainder) this.terminalColorQueryRemainders.set(key, scan.remainder)
+      else this.terminalColorQueryRemainders.delete(key)
+    }
+    if (!scan.replies.length) return
+    const replies = scan.replies.join('')
+    const readyAgentSessionId = this.readyAgentColorQueryRuns.get(key)
+    if (readyAgentSessionId) {
+      void this.replyToAgentColorQuery(hostId, readyAgentSessionId, runId, replies)
+    } else {
+      const pending = `${this.pendingAgentColorQueryReplies.get(key) ?? ''}${replies}`
+      if (Buffer.byteLength(pending) <= 4 * 1024) this.pendingAgentColorQueryReplies.set(key, pending)
     }
   }
 

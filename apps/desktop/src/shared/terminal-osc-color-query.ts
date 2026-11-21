@@ -162,18 +162,12 @@ export function scanTerminalOscColorQueries(
   chunk: string,
   remainder: string,
   colors: TerminalOscColorQueryReplyColors
-): TerminalOscColorQueryScan {
+): TerminalOscColorQueryScan | null {
   const data = remainder + chunk
+  let oscIndex = data.indexOf(OSC)
+  if (oscIndex === -1 && !remainder && !data.endsWith('\x1b')) return null
   const replies: string[] = []
-  let offset = 0
-  while (offset < data.length) {
-    const oscIndex = data.indexOf(OSC, offset)
-    if (oscIndex === -1) {
-      return {
-        replies,
-        remainder: data.endsWith('\x1b') ? '\x1b' : ''
-      }
-    }
+  while (oscIndex !== -1) {
     const query = parseTerminalOscColorQuery(data, oscIndex)
     if (query.kind === 'partial') return { replies, remainder: data.slice(oscIndex) }
     if (query.kind === 'match') {
@@ -181,10 +175,8 @@ export function scanTerminalOscColorQueries(
         const reply = terminalOscColorQueryReply(colors, slot)
         if (reply) replies.push(reply)
       }
-      offset = query.endIndex
-      continue
     }
-    offset = oscIndex + OSC.length
+    oscIndex = data.indexOf(OSC, query.kind === 'match' ? query.endIndex : oscIndex + OSC.length)
   }
-  return { replies, remainder: '' }
+  return { replies, remainder: data.endsWith('\x1b') ? '\x1b' : '' }
 }
