@@ -13,6 +13,7 @@ import { cliFollow } from './cli-follow'
 import { browserProfilePartition } from '../../../src/main/browser-profile-store'
 import { settingsCase } from './settings-case'
 import { surveyBrowsingCase } from './survey-browsing-case'
+import { surveyDragCase } from './survey-drag-case'
 import { settingsLayoutCase } from './settings-layout-case'
 import { spawn } from 'node:child_process'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
@@ -199,6 +200,10 @@ async function run() {
  if(selectedCase==='settings'){await settingsCase({phase,directory,window,evaluate,result,receipt,probeAck});receipt.businessPassed=true;receipt.passed=true;return}
  if (selectedCase === 'survey-browsing') {
   await surveyBrowsingCase({ phase, directory, window, evaluate, result, receipt, pageUrl, holdSurveyReply })
+  receipt.businessPassed = true; receipt.passed = true; return
+ }
+ if (selectedCase === 'survey-drag') {
+  await surveyDragCase({ phase, directory, window, evaluate, receipt, workspaceId, pageUrl })
   receipt.businessPassed = true; receipt.passed = true; return
  }
  if (selectedCase === 'settings-layout') {

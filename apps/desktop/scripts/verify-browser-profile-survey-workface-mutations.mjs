@@ -9,7 +9,7 @@ import { join, resolve } from 'node:path'
 const root = resolve(import.meta.dirname, '../../..')
 const args=process.argv.slice(2), onlyIndex=args.indexOf('--only'), caseIndex=args.indexOf('--case'), only=onlyIndex<0?null:args[onlyIndex+1], redOnly=args.includes('--red-only')
 const selectedCase=caseIndex<0?'admission':args[caseIndex+1]
-assert.ok(['admission','profile-switch','context-menu'].includes(selectedCase),'Choose an implemented exact business case')
+assert.ok(['admission','profile-switch','context-menu','survey-drag'].includes(selectedCase),'Choose an implemented exact business case')
 assert.ok(args.every((value,index)=>value==='--only'||value==='--red-only'||value==='--case'||onlyIndex>=0&&index===onlyIndex+1||caseIndex>=0&&index===caseIndex+1),'Only --case CASE, --only NAME and --red-only are supported')
 const output = join(root, '.tmp/browser-profile-survey-workface-mutations', randomUUID())
 const script = join(root, 'apps/desktop/scripts/verify-browser-profile-survey-workface.mjs')
@@ -26,6 +26,9 @@ const caseRules = { admission: [
   ['steal-environment-keyboard-focus', 'Changing the Survey environment keeps keyboard focus', native=>native.profileSwitch.cases.some(value=>value.kind==='default-no-custom-shared-native-sign-in')&&native.profileSwitch.input.some(value=>value.kind==='keyboard-select'&&value.steps.some(step=>step.changes?.some(change=>change.trusted)))]
 ], 'context-menu': [
   ['omit-context-profile-admission', 'Only the explicit context Profile page is admitted', native => native.contextMenu?.frameChild && native.contextMenu.hits.length === 2]
+], 'survey-drag': [
+  ['clip-survey-drag-preview', 'The same gesture and preview must survive leaving the sidebar', native => native.surveyDrag?.far?.active === true && native.surveyDrag.far.preview === false],
+  ['omit-research-tab-order', 'A sibling Tab must show its insertion edge', native => native.surveyDrag?.far?.active === true && native.surveyDrag.far.preview === true]
 ] }
 const rules=caseRules[selectedCase]
 assert.ok(rules.length>0,'An implemented case must have nonempty production mutation rules')

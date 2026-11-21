@@ -625,14 +625,20 @@ it('[drag-composition] actual PointerSensor moves only the dragged Tab into an e
   useAppStore.setState({ tabs: { ...state.tabs, [neighbor.id]: neighbor }, layouts: { ...state.layouts,
     [resource.id]: addTabOccurrence(state.layouts[resource.id]!, 'source-group', neighbor.id)! } })
   await checkpointSpatialWorkbench(); dragGeometry(); await dom.render(<App />)
-  const tab = document.querySelector<HTMLElement>('[data-survey-tab-id="composition-tab"]')!, row = [...document.querySelectorAll<HTMLElement>('[data-survey-zone-id]')].find(row => row.dataset.surveyZoneId === zones.target)!
-  expect(tab).not.toBeNull(); const rect = row.getBoundingClientRect(), before = (await core.read())!.graph
+  const tab = await vi.waitFor(() => {
+    const original = document.querySelector<HTMLElement>('[data-survey-tab-id="composition-tab"]')
+    expect(original).not.toBeNull()
+    return original!
+  }, { timeout: 5000 })
+  const row = [...document.querySelectorAll<HTMLElement>('[data-survey-zone-id]')].find(row => row.dataset.surveyZoneId === zones.target)!
+  const rect = row.getBoundingClientRect(), before = (await core.read())!.graph
   vi.mocked(api.spatial.commit).mockClear()
   await dragPointer(tab, { x: rect.left + 100, y: rect.top + 15 })
   await vi.waitFor(() => expect(catalog().tabs.find(tab => tab.tabId === 'composition-tab')!.zoneId).toBe(zones.target))
   expect(catalog().tabs.find(tab => tab.tabId === neighbor.id)!.zoneId).toBe(zones.source)
   expect((await core.read())!.graph.zones).toEqual(before.zones)
   expect(vi.mocked(api.spatial.commit)).toHaveBeenCalledOnce()
+  await vi.waitFor(() => expect(useAppStore.getState().surveyCompositionRecoveries).toEqual([]))
 })
 
 it.each(['occupied Zone', 'missing resource'] as const)('[drag-composition] new-research %s refuses before any composition submission', async failure => {
@@ -655,9 +661,15 @@ async function dragPagePair(options: { sameTab?: boolean; pagesOnly?: boolean } 
     surveyPageReferences: [{ regionId: 'composition-page', browserId: 'composition-page' }, { regionId: 'target-page', browserId: 'target-page' }],
     surveyZoneSelection: { kind: 'page', regionId: 'composition-page', browserId: 'composition-page' } })
   await checkpointSpatialWorkbench(); dragGeometry(); await dom.render(<App />)
-  await new Promise(resolve => setTimeout(resolve, 80)); await checkpointSpatialWorkbench()
-  const from = document.querySelector<HTMLElement>('[data-survey-page-region-id="composition-page"] [data-survey-content-key]')!
-  const to = document.querySelector<HTMLElement>('[data-survey-page-region-id="target-page"]')!, rect = to.getBoundingClientRect()
+  const { from, to } = await vi.waitFor(() => {
+    const from = document.querySelector<HTMLElement>('[data-survey-page-region-id="composition-page"] [data-survey-content-key]')
+    const to = document.querySelector<HTMLElement>('[data-survey-page-region-id="target-page"]')
+    expect(from).not.toBeNull()
+    expect(to).not.toBeNull()
+    return { from: from!, to: to! }
+  }, { timeout: 5000 })
+  await checkpointSpatialWorkbench()
+  const rect = to.getBoundingClientRect()
   return { from, to, destination: { x: rect.left + 90, y: rect.top + rect.height / 2 } }
 }
 
@@ -1466,6 +1478,34 @@ it('[detach] exact single-Tab selection has the same reachable list-group menu a
   expect(catalog().tabs.filter(tab => tab.zoneId === zoneId).map(tab => tab.tabId)).toEqual(['composition-tab'])
   expect(catalog().tabs.find(tab => tab.tabId === 'detach-neighbor')!.zoneId).toBe(zones.source)
   expect(vi.mocked(api.spatial.commit)).toHaveBeenCalledOnce()
+})
+
+it.each(['pointer', 'keyboard'] as const)('[research-tab-order] actual %s moves sibling thumbnails through the original layout without changing the Browser or selection', async input => {
+  const from = await prepareDetach()
+  const target = document.querySelector<HTMLElement>('[data-survey-tab-id="detach-neighbor"]')!
+  const before = useAppStore.getState(), group = before.layouts[resource.id]!.groups.find(group => group.id === 'source-group')!
+  const order = () => useAppStore.getState().layouts[resource.id]!.groups.find(group => group.id === 'source-group')!.tabOrder
+  const expected = group.tabOrder.map(id => id === 'composition-tab' ? 'detach-neighbor' : id === 'detach-neighbor' ? 'composition-tab' : id)
+  if (input === 'pointer') {
+    const rect = target.getBoundingClientRect()
+    await dragPointer(from, { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 })
+  } else {
+    const key = (name: string, code = name) => act(async () => from.dispatchEvent(new KeyboardEvent('keydown', { key: name, code, bubbles: true, cancelable: true })))
+    await act(async () => from.focus())
+    await key(' ', 'Space')
+    await vi.waitFor(() => expect(document.querySelector('.survey-page-list[data-dragging]')).not.toBeNull())
+    await new Promise(resolve => setTimeout(resolve, 35))
+    await key('ArrowDown')
+    await vi.waitFor(() => expect(target.closest('[data-tab-order-edge]')).not.toBeNull())
+    await key(' ', 'Space')
+  }
+  await vi.waitFor(() => expect(order()).toEqual(expected))
+  await vi.waitFor(async () => expect((await core.read())!.graph.layouts[resource.id]!.groups.find(group => group.id === 'source-group')!.tabOrder).toEqual(expected))
+  const after = useAppStore.getState()
+  expect(after.surveyZoneSelection).toEqual(before.surveyZoneSelection)
+  expect(after.tabs['composition-tab']!.regions).toEqual(before.tabs['composition-tab']!.regions)
+  expect(after.layouts[resource.id]!.groups.find(group => group.id === 'source-group')!.activeTabId).toBe(group.activeTabId)
+  expect(after.surveyOrganization).toEqual(before.surveyOrganization)
 })
 
 it('[detach] outside and keyboard cancellation keep the source when the explicit independent target exists', async () => {
@@ -2307,6 +2347,10 @@ it.each(['research', 'tab'] as const)('[headerless-drag] keyboard pickup keeps t
   const key = async (value: string, code: string) => act(async () => activator.dispatchEvent(new KeyboardEvent('keydown', { key: value, code, bubbles: true, cancelable: true })))
   await key(' ', 'Space'); await vi.waitFor(() => expect(document.querySelector('.survey-page-list')?.getAttribute('data-dragging')).toBe('true'))
   await new Promise(resolve => setTimeout(resolve, 30)); await key('ArrowDown', 'ArrowDown')
+  if (scope === 'tab') {
+    await vi.waitFor(() => expect(row.querySelector('[data-tab-order-edge]')).not.toBeNull())
+    await key('ArrowDown', 'ArrowDown')
+  }
   await new Promise(resolve => setTimeout(resolve, 30)); await key(' ', 'Space')
   await vi.waitFor(() => expect(catalog().tabs.find(tab => tab.tabId === 'composition-tab')!.zoneId).toBe(zones.target))
   expect(catalog().tabs.find(tab => tab.tabId === 'headerless-second-tab')!.zoneId).toBe(scope === 'research' ? zones.target : zones.source)

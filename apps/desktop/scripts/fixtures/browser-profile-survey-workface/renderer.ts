@@ -1,6 +1,6 @@
 // Actual production entrypoint; no gallery, bridge replacement or second Survey owner.
 import '../../../src/renderer/src/main'
-import { useAppStore, prepareRendererUpdate } from '../../../src/renderer/src/store'
+import { useAppStore, prepareRendererUpdate, checkpointSpatialWorkbench } from '../../../src/renderer/src/store'
 import { updateThemeSelection } from '@agentmux/client-ui/theme'
 import { useLauncherState, checkpointLauncherState } from '../../../src/renderer/src/lib/launcher-state'
 import { warmLauncherId } from '../../../src/renderer/src/lib/warm-terminal-preview'
@@ -15,6 +15,26 @@ Object.assign(window, { profileSurveyNative: {
  refreshProfiles() { return browserProfiles.refresh() },
  surveyBrowsingState() { const state = useAppStore.getState(); return { times: state.surveyPageAddedAt, selection: state.surveyZoneSelection } },
  openSurveyUrl(url: string) { return useAppStore.getState().openUrlInSurvey(url) },
+ async prepareSurveyDrag(workspaceId: string, pageUrl: string) {
+   await useAppStore.getState().selectWorkspace(workspaceId)
+   const original = await useAppStore.getState().createSurveyBrowser({ workspaceId, url: pageUrl + '?tab=one', entry: 'research', preparation: null, onPrepared() {} })
+   const { tabId, regionId, groupId } = original.reference
+   const target = { workspaceId, zoneId: original.zone.zoneId, tabGroupId: groupId, reveal: false }
+   const unrelated = useAppStore.getState().openLauncher({ workspaceId, tabGroupId: groupId, reveal: false })
+   const tabs = [tabId], regions = [regionId]
+   for (const label of ['two', 'three']) {
+     const id = useAppStore.getState().openLauncher(target)!
+     const region = useAppStore.getState().tabs[id]!.layout.activeRegionId
+     await useAppStore.getState().createBrowser(groupId, { tabId: id, regionId: region }, pageUrl + '?tab=' + label, undefined, workspaceId, workspaceId)
+     tabs.push(id); regions.push(region)
+   }
+   const active = { tabId: tabs[1]!, regionId: regions[1]! }
+   const state = useAppStore.getState()
+   state.setSurveyZoneSelection({ zoneId: target.zoneId, selection: [active], active })
+   state.setMainSurface('survey')
+   await checkpointSpatialWorkbench()
+   return { workspaceId, groupId, zoneId: target.zoneId, tabs, regions, unrelated }
+ },
  checkpoint() { return prepareRendererUpdate('quit') },
  api,
 } })

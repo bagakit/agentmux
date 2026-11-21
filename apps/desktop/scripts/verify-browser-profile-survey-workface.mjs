@@ -16,7 +16,7 @@ const { build } = browserSourceBuild(createRequire(join(root, 'packages/core/pac
 const { build: viteBuild } = require('vite')
 const args = process.argv.slice(2), outputIndex = args.indexOf('--output'), caseIndex = args.indexOf('--case'), mutationIndex = args.indexOf('--mutation')
 const selectedCase = caseIndex < 0 ? 'complete' : args[caseIndex + 1]
-assert.ok(['admission', 'profile-switch', 'settings', 'complete', 'surface-windows', 'context-menu', 'address-selection', 'survey-browsing', 'settings-layout'].includes(selectedCase), 'Choose an exact Browser workface case')
+assert.ok(['admission', 'profile-switch', 'settings', 'complete', 'surface-windows', 'context-menu', 'address-selection', 'survey-browsing', 'survey-drag', 'settings-layout'].includes(selectedCase), 'Choose an exact Browser workface case')
 const mutation = mutationIndex < 0 ? null : args[mutationIndex + 1]
 const mutationCases = { 'settings-layout': {
   'eager-browser-management': { file: 'apps/desktop/src/renderer/src/components/settings/BrowserSettingsPane.tsx',
@@ -26,6 +26,13 @@ const mutationCases = { 'settings-layout': {
     before: 'if (!state.surveyPageReferences.length', after: 'if (true || !state.surveyPageReferences.length' },
   'ignore-site': { file: 'apps/desktop/src/renderer/src/lib/survey-page-organization.ts',
     before: "id = site ? 'site:' + site : 'other'", after: "id = site ? 'site' : 'other'" }
+}, 'survey-drag': {
+  'clip-survey-drag-preview': { file: 'apps/desktop/src/renderer/src/components/SurveyItemList.tsx',
+    before: '    const y = top - initial.top',
+    after: '    const y = belowPointer' },
+  'omit-research-tab-order': { file: 'apps/desktop/src/renderer/src/components/SurveyItemList.tsx',
+    before: "  : data?.kind === 'tab-order' ? data : data?.kind === 'page-target'",
+    after: "  : data?.kind === 'tab-order' ? null : data?.kind === 'page-target'" }
 }, 'surface-windows': {
   'omit-recall-content-edge': { file: 'apps/desktop/src/renderer/src/components/GlobalRecallSurface.tsx',
     before: "useKnowledgeWindowChrome('recall')", after: "useKnowledgeWindowChrome('survey')" },
@@ -262,6 +269,7 @@ try {
     assert.equal(restart.businessPassed, true); assert.deepEqual(restart.recoveredIdentity, first.savedIdentity, 'Second PID must read original Profile/Browser/Region/Survey and mixed Task data without reseeding')
     if (selectedCase === 'surface-windows') for (const phase of [first, restart]) assert.ok(phase.cases.some(item => item.kind === 'surface-windows' && item.passed), 'The two-window workface must complete its own oracle')
     if (selectedCase === 'survey-browsing') for (const phase of [first, restart]) assert.ok(phase.cases.some(item => item.kind === 'survey-browsing' && item.passed))
+    if (selectedCase === 'survey-drag') for (const phase of [first, restart]) assert.ok(phase.cases.some(item => item.kind === 'survey-drag' && item.passed))
     if (selectedCase === 'settings-layout') for (const phase of [first, restart]) assert.ok(phase.cases.some(item => item.kind === 'settings-layout' && item.passed))
     if(selectedCase==='profile-switch')for(const phase of [first,restart]){assert.equal(phase.profileSwitch?.completed,true);assert.ok(phase.cases.some(item=>item.kind==='profile-switch-dedicated-oracle'&&item.passed),'No admission fallthrough can qualify profile-switch')}
     if(selectedCase==='complete')for(const phase of [first,restart]){assert.equal(phase.complete?.completed,true);assert.ok(phase.complete.cases.length>0);assert.ok(phase.cases.some(item=>item.kind==='complete-dedicated-oracle'&&item.passed),'No admission/profile-switch fallthrough can qualify complete')}
@@ -282,6 +290,6 @@ try {
   receipt.originRequests = origins.requests
   await save()
   await origins.close()
-  if (['surface-windows', 'context-menu', 'profile-switch', 'address-selection', 'survey-browsing', 'settings-layout'].includes(selectedCase)) await rm(directory, { recursive: true, force: true })
+  if (['surface-windows', 'context-menu', 'profile-switch', 'address-selection', 'survey-browsing', 'survey-drag', 'settings-layout'].includes(selectedCase)) await rm(directory, { recursive: true, force: true })
 }
 // Receipts and screenshots remain in the original evidence directory.
