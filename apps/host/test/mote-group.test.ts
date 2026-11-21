@@ -126,7 +126,7 @@ async function fixture(retainedRoot?: string, initialSessions: string[] = []) {
   }
   const cli = (action: string, body: unknown, agentSessionId?: string, kind = 'group') =>
     runSourceObjectCli(['--endpoint', 'unix:' + socketPath, 'space', 'mote', kind, ...action.split(' '), '--input', '-'],
-      objectCliEnvironment(f.root, agentSessionId ? { AGENTMUX_AGENT_SESSION_ID: agentSessionId, AGENTMUX_AGENT_CAPABILITY: f.capability } : {}), JSON.stringify(body))
+      objectCliEnvironment(f.root, agentSessionId ? { AGENTMUX_AGENT_SESSION_ID: agentSessionId, AGENTMUX_AGENT_CAPABILITY: f.capability } : {}), JSON.stringify(body), 45_000)
   return { ...f, start, target, created, send, cli, preparedTargets, holdNative: (barrier: Promise<void>) => { nativeBarrier = barrier }, unblockSecond: () => { blockSecond = false } }
 }
 
@@ -521,13 +521,13 @@ it('reads immutable private image bytes through the original addressed Thread on
 it('orders private priority ahead of waiting background work while preserving user input and the original native claim', async () => {
   const f = await fixture(undefined, ['priority-coordinator'])
   const mote = f.target('mote-a'), peer = f.target('mote-b')
-  const { rpc } = await f.start(undefined, boundMains(new Map([[mote.spaceId, 'priority-coordinator']])))
+  const { rpc, server } = await f.start(undefined, boundMains(new Map([[mote.spaceId, 'priority-coordinator']])))
   f.unblockSecond()
-  const post = async (body: string, priority?: true) => {
-    const sent = await f.cli('send', { mote, peer, operationId: body, body, ...(priority ? { priority } : {}) }, 'priority-coordinator', 'direct')
-    expect(sent.code, sent.stderr).toBe(0)
-    return JSON.parse(sent.stdout).result
-  }
+  const coordinator = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path },
+    credentials: { agentSessionId: 'priority-coordinator', capability: f.capability } })
+  closes.push(() => coordinator.dispose())
+  const post = (body: string, priority?: true) => coordinator.call('space.mote.direct.send',
+    { mote, peer, operationId: body, body, ...(priority ? { priority } : {}) })
   const opened = await post('baseline-input')
   await vi.waitFor(async () => expect((await rpc.call('space.mote.direct.inspect', { threadId: opened.threadId })).messages[0]?.deliveries[0]?.status).toBe('accepted'))
   const { thread } = await rpc.call('space.mote.direct.inspect', { threadId: opened.threadId })
@@ -541,7 +541,10 @@ it('orders private priority ahead of waiting background work while preserving us
     await f.client.submitAgentPrompt({ agentSessionId: worker, expectedRun: { runId: 'run-' + worker }, operationId: 'original-person-input',
       prompt: 'person-input', execution: 'immediate', admissionIntent: { kind: 'session-conversation' }, authorHuman: true })
     await post('background-after-person')
-    const prioritized = await post('explicit-priority-input', true)
+    const priority = { mote, peer, operationId: 'explicit-priority-input', body: 'explicit-priority-input', priority: true }
+    const sent = await f.cli('send', priority, 'priority-coordinator', 'direct')
+    expect(sent.code, sent.stderr).toBe(0)
+    const prioritized = JSON.parse(sent.stdout).result
     expect(prioritized.message.priority).toBe(true)
     const original = await post('explicit-priority-input', true)
     expect(original.message.id).toBe(prioritized.message.id)
