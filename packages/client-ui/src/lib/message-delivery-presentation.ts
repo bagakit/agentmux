@@ -66,10 +66,6 @@ export function presentMessageDeliveryFailure(input: MessageDeliveryDiagnostic) 
   if (code === 'AGENT_PROMPT_CONDITION_CHANGED') return { kind: 'condition-changed', title: '发送条件已变化',
     state: '本次尝试未写入输入；原消息此前的投递结果仍需核对。',
     action: '请先查看 Agent 回复。可将原文移至草稿，核对后作为新消息发送；原记录会保留。' }
-  if (code === 'STALE_AGENT_SESSION' && control?.disposition === 'not_applied' && control.confirmedInputBytes === 0) return {
-    kind: 'condition-changed', title: '消息绑定的 Run 已变更',
-    state: 'Core 在保存前拒绝了本次尝试。此前是否已投递仍需核对。',
-    action: '可查看原输入和原对话。原消息会保留。' }
   if (unknown) return { kind: 'unknown', title: '发送结果待核实',
     state: '这条消息此前是否已输入仍待核实，原消息和操作会保留。',
     action: '先查看原对话与投递记录，避免重复发送。' }

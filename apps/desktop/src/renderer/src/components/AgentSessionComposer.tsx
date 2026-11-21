@@ -32,7 +32,7 @@ import {
   caretAtLastLine
 } from '../lib/composer-history'
 import { ComposerResubmitGuard } from '../lib/composer-resubmit-guard'
-import { useAppStore, agentSteerCanEdit, agentSteerExecution, staleManualSteerDraftKey, type AgentSteerQueueEntry } from '../store'
+import { useAppStore, agentSteerCanEdit, agentSteerExecution, type AgentSteerQueueEntry } from '../store'
 import { originalInputDeliveryConfirmed } from '@agentmux/client-ui/input-receipt-projection'
 import { steerEntryTargetsRun, steerEntryWakesItself, steerQueueCanEverDrain } from '../lib/agent-steer-queue-drain'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
@@ -472,8 +472,6 @@ export function AgentSessionComposer({
   const capabilities = session?.kind === 'agent' ? session.capabilities : undefined
   const runId = control?.run.runId
   const canDrain = session?.kind === 'agent' && steerQueueCanEverDrain(session.processState)
-  const queueTarget = useMemo(() => control && session ? { kind: 'agent' as const, id: session.id, hostId: session.hostId, control } : undefined,
-    [control, session?.id, session?.hostId])
   const presentQueueEntry = useCallback((entry: AgentSteerQueueEntry) => ({
     id: entry.operationId,
     ...(entry.directInputControl && entry.directInputBinding ? { inputOrigin: {
@@ -506,8 +504,7 @@ export function AgentSessionComposer({
     ...(entry.logId ? { logId: entry.logId } : {}),
     ...(entry.error ? { error: entry.error } : {}),
     ...(entry.preparationWait ? { preparationWait: entry.preparationWait } : {}),
-    ...(staleManualSteerDraftKey(entry, queueTarget) ? { staleRunDraft: true } : {}),
-  }), [control, capabilities, queueTarget, runId, canDrain, sendingId, sendingPhase, timeline, timelineRevision])
+  }), [control, capabilities, runId, canDrain, sendingId, sendingPhase, timeline, timelineRevision])
   const queued = useMemo(() => queuedEntries.map(presentQueueEntry), [queuedEntries, presentQueueEntry])
   const sendImmediately = useMemo(() => queued.some(entry => entry.immediateSend), [queued])
 

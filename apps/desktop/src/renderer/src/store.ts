@@ -981,24 +981,6 @@ export function agentSteerCanEdit(entry: AgentSteerQueueEntry, inFlightId?: stri
   return !entry.browserInput && !entry.archived && !entry.inputIntakeStarted && !entry.inputReceipt && entry.promptCondition === null && entry.operationId !== inFlightId
 }
 
-/** A retired terminal target may release the user's text to a draft, never its input authority. */
-export function staleManualSteerDraftKey(entry: AgentSteerQueueEntry,
-  session: { kind: 'terminal' } | Pick<Extract<SessionSnapshot, { kind: 'agent' }>, 'kind' | 'id' | 'hostId' | 'control'> | undefined
-): Extract<import('@agentmux/core/prompt-condition').AgentPromptInputKey, { kind: 'prompt' }> | undefined {
-  const control = entry.directInputControl
-  const binding = entry.directInputBinding
-  if (entry.errorCode !== 'STALE_AGENT_SESSION' || entry.origin !== 'manual' || entry.inputReceipt ||
-      entry.originalMember || entry.recoveredSourceInput !== undefined || entry.browserInput || entry.browserRecipient ||
-      entry.goalContinuation || entry.goalPmo || entry.goalDispatch || entry.focusTask || entry.moteMain || entry.moteSource ||
-      entry.reaction || entry.resumeInputIntent || entry.resumeInputReceipt ||
-      binding?.admissionIntent.kind !== 'manual-actor' || control?.hostId !== 'local' ||
-      session?.kind !== 'agent' || session.hostId !== control.hostId || session.control.hostId !== control.hostId ||
-      session.control.agentSessionId !== control.agentSessionId || session.id !== control.agentSessionId ||
-      entry.runId !== control.run.runId || binding.expectedRun.runId !== control.run.runId ||
-      session.control.run.runId === control.run.runId) return
-  return { kind: 'prompt', agentSessionId: control.agentSessionId, expectedRun: binding.expectedRun, submissionId: entry.operationId }
-}
-
 function manualComposerBinding(sessionId: string, text: string, origin?: 'manual', options?: AgentSteerOptions): AgentSteerQueueEntry['directInputBinding'] {
   const session = options?.originalSession ?? useAppStore.getState().sessions.find(item => item.id === sessionId)
   // This is the direct user's new producer contract, not a recovered queue tag
@@ -13415,9 +13397,8 @@ export const useAppStore = create<AppState>()<[['zustand/persist', PersistedAppS
     const readOriginal = (state: ReturnType<typeof get>) => {
       const queue = state.agentSteerQueues[sessionId], entry = queue?.find(item => item.operationId === operationId)
       const session = state.sessions.find(item => item.id === sessionId)
-      const staleKey = entry ? staleManualSteerDraftKey(entry, session) : undefined
       if (!entry || entry.text !== expectedText ||
-          entry.errorCode !== 'AGENT_PROMPT_CONDITION_CHANGED' && !staleKey && !entry.movedToDraft) {
+          entry.errorCode !== 'AGENT_PROMPT_CONDITION_CHANGED' && !entry.movedToDraft) {
         throw controlFailure('CONTROL_REQUEST_CONFLICT', 'The original message changed or is unavailable. Read its current record before moving it to the draft.')
       }
       // A repeated activation only retries the save; never append the authored body twice.
@@ -13427,26 +13408,16 @@ export const useAppStore = create<AppState>()<[['zustand/persist', PersistedAppS
         throw controlFailure('CONTROL_REQUEST_CONFLICT', 'This message was archived without moving its text. Read the original archive before composing another message.')
       }
       if (session?.kind !== 'agent' || session.control.agentSessionId !== sessionId || session.hostId !== session.control.hostId ||
-          session.control.run.runId !== expectedRunId || !staleKey && (entry.runId !== expectedRunId || entry.promptCondition?.expectedRun.runId !== expectedRunId)) {
+          session.control.run.runId !== expectedRunId || entry.runId !== expectedRunId || entry.promptCondition?.expectedRun.runId !== expectedRunId) {
         throw controlFailure('STALE_AGENT_SESSION', 'The original Session or Run binding changed. Its message and current draft are kept.')
       }
       if (state.agentSteerInFlight[sessionId] === operationId) throw controlFailure('AGENT_PROMPT_SUBMISSION_BUSY', 'This original call is still active. Its message and draft are kept.')
       if (originalInputDeliveryConfirmed(entry.inputReceipt) || !entry.directInputBinding && confirmedSteerDelivery(state.timelines[sessionId], session.control, operationId)) {
         throw controlFailure('CONTROL_REQUEST_CONFLICT', 'Core confirmed this original input. Read its History before composing another message.')
       }
-      return { entry, session, staleKey }
+      return { entry, session }
     }
-    const first = readOriginal(get()), original = first.entry
-    if (!original.archived && first.staleKey) {
-      const receipt = await api.sessions.inspectInput(originalInputRoute(original), first.staleKey)
-      if (receipt) {
-        consumeInputReceipt(sessionId, receipt)
-        throw controlFailure('CONTROL_REQUEST_CONFLICT', 'Core found the original input. Check its receipt before composing a new message.')
-      }
-      const latest = readOriginal(get())
-      if (latest.entry !== original && !latest.entry.movedToDraft) throw controlFailure(
-        'CONTROL_REQUEST_CONFLICT', 'The original message changed during confirmation. Its text and delivery history are kept.')
-    }
+    const { entry: original } = readOriginal(get())
     const move = { operationId, sessionId, runId: expectedRunId, text: expectedText, body: restoreComposerInput(original.text, original.inputImages) }
     if (moteDraftKey && !original.archived) {
       if (!useLauncherState.getState().retainQueuedInputInDraft(moteDraftKey, move)) throw new Error('The original queued input remains available. Saving its destination draft is unconfirmed.')

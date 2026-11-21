@@ -248,7 +248,7 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, composerRe
             const state = queuedMessageState(entry, pendingInteraction)
             const immediate = entry.immediateSend ?? sendImmediately
             const continuation = queuedInputContinuationLabel(entry)
-            const moveToDraft = entry.staleRunDraft || entry.errorCode === 'AGENT_PROMPT_CONDITION_CHANGED'
+            const moveToDraft = entry.errorCode === 'AGENT_PROMPT_CONDITION_CHANGED'
             const canSend = !moveToDraft && entry.id !== editingId && !state.busy && Boolean(onSend)
             const Icon = state.busy ? ThemeStatusLoadingIcon : entry.unconfirmed ? ThemeStatusUnknownIcon : !entry.deliverable || entry.error || entry.status === 'failed' ? ThemeStatusWarningIcon : entry.archived ? ThemeHistoryIcon : ThemeQueuedIcon
             const editing = entry.id === editingId && Boolean(onEdit)

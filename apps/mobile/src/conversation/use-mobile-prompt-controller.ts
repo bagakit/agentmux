@@ -334,51 +334,6 @@ export function useMobilePromptController({ local, textDraft, isTextTargetCurren
       agentSessionId: original.manualInput!.agentSessionId, expectedRun: original.manualInput!.expectedRun })).input
       : mobileCapability(source, 'inspectAgentInput')({ key: manualKey(original) })
   }
-  function canMoveManualInputToDraft(original: PromptAttempt, target = session) {
-    const input = original.manualInput
-    return Boolean(input && target && input.runtimeId && client?.runtimeOwnerIdentity?.()?.runtimeId === input.runtimeId &&
-      input.agentSessionId === agentSessionId && target.agentSessionId === input.agentSessionId &&
-      target.hostId === original.originalHostId && target.run.runId !== input.expectedRun.runId &&
-      !textDraft && !moteSource && !moteMain && !original.moteSource && !original.moteMain && !original.textSource &&
-      !original.agentMuxNote && !original.admissionIntent && !original.movedToDraft && !original.inputReceipt &&
-      (original.phase === 'unknown' || original.phase === 'rejected'))
-  }
-  function moveManualInputToDraft(key: string, original: PromptAttempt) {
-    return protectPendingAction(key, 'retry', async action => {
-      if (!canMoveManualInputToDraft(original)) return
-      try {
-        const source = originalManualClient(original), input = original.manualInput!
-        const observed = await inspectOriginalManual(source, original)
-        if (action.cancelled || !mounted.current || attempts.current.get(key) !== original) return
-        if (observed) {
-          if (!observeInputReceipt(key, original, observed)) throw new Error('返回的是另一条消息的结果。原消息已保留。')
-          return
-        }
-        const target = await readSession(source, input.agentSessionId)
-        if (action.cancelled || !mounted.current || attempts.current.get(key) !== original ||
-            current.current.client !== source || current.current.agentSessionId !== input.agentSessionId ||
-            !canMoveManualInputToDraft(original, target) || isTextTargetCurrent && !isTextTargetCurrent()) return
-        const previous = drafts.current.get(draftKey) ?? ''
-        const body = previous === original.draft ? previous : [previous, original.draft].filter(Boolean).join('\n\n')
-        if (new TextEncoder().encode(body).byteLength > 65536) throw new Error('合并后超过草稿容量。原消息仍可复制。')
-        const retained = retainedPromptKey(input.agentSessionId, original.operationId)
-        original.movedToDraft = true
-        if (retained !== key) {
-          attempts.current.set(retained, original)
-          attempts.current.delete(key)
-        }
-        draftEdits.current++
-        drafts.current.set(draftKey, body)
-        action.dispatched = true
-        redraw(value => value + 1)
-        if (!await savePendingAction(action)) throw new Error('正文已移至当前草稿，设备保存仍未确认。')
-      } catch (error) {
-        if (!action.cancelled && mounted.current) setPreparationIssue({
-          client, sessionId: agentSessionId, message: errorMessage(error)
-        })
-      }
-    })
-  }
   async function retryManualInput(key: string, original: PromptAttempt, action: PendingInputAction) {
     try {
       const source = originalManualClient(original), input = original.manualInput!
@@ -394,7 +349,7 @@ export function useMobilePromptController({ local, textDraft, isTextTargetCurren
       if (action.cancelled) return
       const target = await readSession(source, input.agentSessionId)
       if (!mounted.current || action.cancelled || attempts.current.get(key) !== original) return
-      if (originalManualClient(original) !== source || !observed?.continuation && target.run.runId !== input.expectedRun.runId ||
+      if (originalManualClient(original) !== source || target.agentSessionId !== input.agentSessionId ||
           original.originalHostId && target.hostId !== original.originalHostId) throw Object.assign(
         new Error('这条消息所在的对话或 Mac 已改变，这次没有发送。'), { code: 'STALE_AGENT_SESSION' })
       const previousRequested = original.inputRequested
@@ -869,7 +824,6 @@ export function useMobilePromptController({ local, textDraft, isTextTargetCurren
     if (runtimeId && hostId && runId && sessionId) confirmedAttachmentPrompt = { operationId: attempt.operationId, body: attempt.draft, source: { runtimeId, hostId, sessionId, runId } }
   }
   return { draftKey, textDraftKey, draft, attempt, available, diagnostics, setDraft, submit, retryOriginalPrompt, stopManualInput,
-    canMoveManualInputToDraft, moveManualInputToDraft,
     confirmedAttachmentPrompt,
     sendBodyOnly: () => submit(true, undefined, draftKey, undefined, true),
     preparing: Boolean(preparingKeys.current.get(draftKey) && !preparingKeys.current.get(draftKey)!.cancelled),
