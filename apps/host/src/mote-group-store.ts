@@ -15,6 +15,7 @@ export type GroupDeliveryRecord = {
   note?: string
   inputEpoch?: string
   memberGeneration?: string
+  recoverAt?: number | null
 }
 type GroupInvitation = {
   operationId: string
@@ -39,6 +40,11 @@ type MessageBody = Omit<MoteGroupMessage, 'sequence' | 'deliveries'>
 type StoredMessage = { message: MoteGroupMessage; digest: string }
 type Row = Record<string, SQLInputValue>
 const decode = <T>(value: SQLInputValue | undefined): T => JSON.parse(String(value)) as T
+// Preserve the checkpoints written before recovery was scheduled explicitly.
+const recoverAt = `CASE WHEN json_type(data,'$.recoverAt') IS NULL AND
+  (json_extract(data,'$.delivery.status')='pending' OR
+    (json_extract(data,'$.delivery.status')='failed' AND json_type(data,'$.key') IS NULL))
+  THEN 0 ELSE json_extract(data,'$.recoverAt') END`
 export const groupFailure = (message: string, code: string): never => { throw new AgentMuxError(message, code) }
 
 /** Durable conversation streams, member bindings and addressed delivery references. */
@@ -78,7 +84,10 @@ export class MoteGroupStore {
         CREATE TABLE IF NOT EXISTS group_settings (group_id TEXT PRIMARY KEY REFERENCES groups(id), data TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS group_operations (group_id TEXT NOT NULL REFERENCES groups(id), operation_id TEXT NOT NULL, digest TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(group_id,operation_id));
         CREATE TABLE IF NOT EXISTS group_invitations (operation_id TEXT PRIMARY KEY, group_id TEXT NOT NULL, mote_id TEXT NOT NULL, data TEXT NOT NULL,
-          FOREIGN KEY(group_id,mote_id) REFERENCES members(group_id,mote_id));`)
+          FOREIGN KEY(group_id,mote_id) REFERENCES members(group_id,mote_id));
+        CREATE INDEX IF NOT EXISTS deliveries_due ON deliveries ((${recoverAt}),message_id,mote_id) WHERE (${recoverAt}) IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS messages_by_reply ON messages(group_id,json_extract(data,'$.replyToMessageId'),sequence)
+          WHERE json_extract(data,'$.replyToMessageId') IS NOT NULL;`)
       if (write && this.kind === 'direct') db.exec(`
         CREATE TABLE IF NOT EXISTS private_reports (message_id TEXT PRIMARY KEY REFERENCES messages(id), data TEXT NOT NULL, next_at INTEGER);
         CREATE INDEX IF NOT EXISTS pending_private_reports ON private_reports(next_at) WHERE next_at IS NOT NULL;`)
@@ -207,11 +216,15 @@ export class MoteGroupStore {
     return (result ?? groupFailure('The original Group was not found.', 'UNKNOWN_MOTE_GROUP')).topic
   }
 
-  async inspect(groupId: string, before: number, limit: number, messageId?: string): Promise<{ group: MoteGroupSummary; messages: MoteGroupMessage[]; nextBeforeSequence: number | null }> {
+  async inspect(groupId: string, before: number, limit: number, { messageId, replyToMessageId }: { messageId?: string; replyToMessageId?: string } = {}): Promise<{ group: MoteGroupSummary; messages: MoteGroupMessage[]; nextBeforeSequence: number | null }> {
     const result = await this.read(null, db => {
       const group = this.group(db, this.originalGroup(db, groupId))
       if (messageId !== undefined) return { group, messages: [this.originalMessage(db, groupId, messageId)], nextBeforeSequence: null }
-      const rows = db.prepare('SELECT * FROM messages WHERE group_id=? AND sequence < ? ORDER BY sequence DESC LIMIT ?').all(groupId, before, limit + 1)
+      if (replyToMessageId !== undefined) this.originalMessage(db, groupId, replyToMessageId)
+      const rows = replyToMessageId === undefined
+        ? db.prepare('SELECT * FROM messages WHERE group_id=? AND sequence < ? ORDER BY sequence DESC LIMIT ?').all(groupId, before, limit + 1)
+        : db.prepare(`SELECT * FROM messages WHERE group_id=? AND json_extract(data,'$.replyToMessageId')=?
+          AND sequence < ? ORDER BY sequence DESC LIMIT ?`).all(groupId, replyToMessageId, before, limit + 1)
       return { group, messages: rows.slice(0, limit).reverse().map(row => this.message(db, row)),
         nextBeforeSequence: rows.length > limit ? Number(rows[limit - 1]!.sequence) : null }
     })
@@ -416,7 +429,7 @@ export class MoteGroupStore {
         const memberGeneration = groupMemberGeneration(record)
         if (scheduledGenerations && (record.member.state !== 'active' || scheduledGenerations.get(delivery.moteId) !== memberGeneration)) return []
         this.assertActive(record, memberGeneration)
-        return [{ delivery, memberGeneration } satisfies GroupDeliveryRecord]
+        return [{ delivery, memberGeneration, recoverAt: 0 } satisfies GroupDeliveryRecord]
       })
       db.prepare('INSERT INTO messages(id,group_id,operation_id,digest,data) VALUES (?,?,?,?,?)')
         .run(body.id, body.groupId, operationId, digest, JSON.stringify(body))
@@ -454,6 +467,18 @@ export class MoteGroupStore {
     return this.read(null, db => {
       const row = db.prepare('SELECT deliveries.data FROM deliveries JOIN messages ON messages.id=deliveries.message_id WHERE messages.group_id=? AND message_id=? AND mote_id=?').get(gid, messageId, moteId)
       return row ? decode<GroupDeliveryRecord>(row.data) : null
+    })
+  }
+
+  async nextDeliveryRecoveries(now: number): Promise<{ due: { groupId: string; messageId: string; moteId: string }[]; nextAt: number | null }> {
+    return this.read({ due: [] as { groupId: string; messageId: string; moteId: string }[], nextAt: null as number | null }, db => {
+      const first = db.prepare(`SELECT (${recoverAt}) AS due_at FROM deliveries
+        WHERE (${recoverAt}) IS NOT NULL ORDER BY due_at LIMIT 1`).get()
+      const nextAt = typeof first?.due_at === 'number' ? first.due_at : null
+      const rows = nextAt !== null && nextAt <= now ? db.prepare(`SELECT messages.group_id, d.message_id, d.mote_id
+        FROM (SELECT message_id,mote_id,(${recoverAt}) AS due_at FROM deliveries WHERE (${recoverAt}) IS NOT NULL AND (${recoverAt})<=?
+          ORDER BY due_at,message_id,mote_id LIMIT 16) d JOIN messages ON messages.id=d.message_id`).all(now) : []
+      return { due: rows.map(row => ({ groupId: String(row.group_id), messageId: String(row.message_id), moteId: String(row.mote_id) })), nextAt }
     })
   }
 

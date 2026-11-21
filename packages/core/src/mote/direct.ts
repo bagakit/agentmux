@@ -30,7 +30,7 @@ export type MoteDirectMainNotification = {
 
 export type MoteDirectParamsMap = {
   'space.mote.direct.list': Page & { mote: MotePreferencesTarget }
-  'space.mote.direct.inspect': Page & { threadId: string; mote?: MotePreferencesTarget; messageId?: string }
+  'space.mote.direct.inspect': Page & { threadId: string; mote?: MotePreferencesTarget; messageId?: string; replyToMessageId?: string }
   'space.mote.direct.send': { mote: MotePreferencesTarget; peer: MotePreferencesTarget; operationId: string; body: string; replyToMessageId?: string; images?: FileUploadIdentity[]; priority?: true }
   'space.mote.direct.schedule': Omit<MoteDirectParamsMap['space.mote.direct.send'], 'replyToMessageId' | 'images' | 'priority'> & AgentScheduleTiming & { checkIn?: never }
   'space.mote.direct.reply': { threadId: string; operationId: string; inputOperationId: string; body: string; images?: FileUploadIdentity[] }
@@ -83,7 +83,7 @@ export function parseMoteDirectParams<M extends MoteDirectMethod>(method: M, val
     parseMotePreferencesTarget(mote, code)
     parseMoteGroupParams('space.mote.group.list', page)
   } else if (method === 'space.mote.direct.inspect') {
-    const { mote, threadId, ...page } = rpcRecord(value, ['mote', 'threadId', 'beforeSequence', 'limit', 'messageId'], code)
+    const { mote, threadId, ...page } = rpcRecord(value, ['mote', 'threadId', 'beforeSequence', 'limit', 'messageId', 'replyToMessageId'], code)
     if (mote !== undefined) parseMotePreferencesTarget(mote, code)
     parseMoteGroupParams('space.mote.group.inspect', { ...page, groupId: threadId })
   } else if (method === 'space.mote.direct.image.read') {

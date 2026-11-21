@@ -107,7 +107,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     mobileState = { state: 'unavailable', message: '原 Host 可选连接已停止；Agent 会话保留。' }
     const errors: unknown[] = []
     for (const close of [() => outbound?.close(), () => tailcat?.close(), () => relay?.stop(), () => local?.stop(), () => deviceAccess.flush(),
-      () => mobileIncidents?.flush(), () => moteDirect?.dispose(), () => motePresence?.dispose(), () => goals?.dispose(), () => connectionOwner?.close(), () => runtime?.stop()]) {
+      () => mobileIncidents?.flush(), () => moteDirect?.dispose(), () => moteGroups?.dispose(), () => motePresence?.dispose(), () => goals?.dispose(), () => connectionOwner?.close(), () => runtime?.stop()]) {
       try { await close() } catch (error) { errors.push(error) }
     }
     if (errors.length === 1) throw errors[0]
@@ -414,6 +414,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
       inputContextCaptureReader: options.inputContextCaptureReader ?? createDesktopInputContextCaptureReader({ desktopSocketPath: desktopPath, captureHostId: 'local', executionHostId: 'local' }),
       ...(externalInputAuthority ? { externalInputAuthority } : {}) })
     // The Core endpoint is already serving before this optional listener can accept a peer.
+    moteGroups?.start()
     moteDirect?.start()
     void outbound.start(runtime.server)
     void tailcat.start()

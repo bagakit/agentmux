@@ -26,7 +26,7 @@ const belongsTo = (thread: MoteGroupSummary, mote: MotePreferencesTarget) =>
   thread.members.some(member => sameMotePreferencesTarget(member.target, mote))
 
 /** Only this port can address the two-participant conversation ledger. */
-export function createHostMoteDirect(ledger: MoteGroupPort, owner: {
+export function createHostMoteDirect(ledger: MoteGroupPort & { start(): void; dispose(): Promise<void> }, owner: {
   main: MoteMainReader
   store: MoteGroupStore
   readPeer(target: MotePreferencesTarget): Promise<unknown>
@@ -125,7 +125,7 @@ export function createHostMoteDirect(ledger: MoteGroupPort, owner: {
     return { ...context, privateImages: images }
   }
 
-  async function inspectPrivate(threadId: string, mote: MotePreferencesTarget | undefined, query: { messageId?: string; beforeSequence?: number; limit?: number },
+  async function inspectPrivate(threadId: string, mote: MotePreferencesTarget | undefined, query: Omit<MoteDirectParamsMap['space.mote.direct.inspect'], 'mote' | 'threadId'>,
     context: MoteGroupCallContext) {
     const result = await ledger.call('space.mote.group.inspect', { ...query, groupId: threadId,
       ...(context.actor.kind === 'agent' && mote ? { sourceMote: mote } : {}) }, context)
@@ -147,12 +147,13 @@ export function createHostMoteDirect(ledger: MoteGroupPort, owner: {
   }
 
   return {
-    start() { running = true; wakeReports() },
+    start() { ledger.start(); running = true; wakeReports() },
     async dispose() {
       running = false
       clearTimeout(timer)
       await sweep
       await Promise.all(activeReports.values())
+      await ledger.dispose()
     },
     async dispatchWork(work, body, operationId, assertCurrent) {
       const selected = await owner.main.readCurrentMoteMain(work.mote)
@@ -160,7 +161,7 @@ export function createHostMoteDirect(ledger: MoteGroupPort, owner: {
         throw new AgentMuxError('The scheduled assignment is saved and awaiting its coordinating Main.', 'CONTROL_UNAVAILABLE')
       const session = await owner.client.readAgentSession(selected.current.sessionId)
       if (!session || session.hostId !== selected.current.hostId) throw new AgentMuxError('The coordinating Main Session is unconfirmed.', 'CONTROL_UNAVAILABLE')
-      const { threadId, message } = await sendPrivate({ mote: work.mote, peer: work.peer, body, operationId }, { recoverPublication: true, actor: { kind: 'agent', hostId: session.hostId,
+      const { threadId, message } = await sendPrivate({ mote: work.mote, peer: work.peer, body, operationId }, { actor: { kind: 'agent', hostId: session.hostId,
         agentSessionId: session.agentSessionId, runId: session.run.runId, sourceRuns: [] }, assertCurrent: async () => {
         await assertCurrent()
         await owner.main.assertCurrent(selected)

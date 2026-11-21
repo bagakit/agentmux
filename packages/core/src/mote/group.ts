@@ -68,7 +68,7 @@ export type MoteGroupParamsMap = {
   'space.mote.group.members.leave': GroupEdit
   'space.mote.group.file.list': GroupFile & { path?: string; limit?: number }
   'space.mote.group.file.read': GroupFile & { path: string; maxBytes?: number }
-  'space.mote.group.inspect': Page & GroupMainSource & { groupId: string; messageId?: string }
+  'space.mote.group.inspect': Page & GroupMainSource & { groupId: string; messageId?: string; replyToMessageId?: string }
   'space.mote.group.send': { groupId: string; operationId: string; body: string; recipientIds: string[]; replyToMessageId?: string;
     memberMoteId?: string } & GroupMainSource
   'space.mote.group.schedule': { groupId: string; operationId: string; body: string; recipientIds: string[]; sourceMote: MotePreferencesTarget } & AgentScheduleTiming & { checkIn?: never }
@@ -104,7 +104,6 @@ export type MoteGroupCallContext = Partial<MoteScheduleContext> & {
   actor: { kind: 'human'; id: string } | { kind: 'agent'; agentSessionId: string; hostId: string; runId: string; sourceRuns: readonly string[] }
   assertCurrent(): Promise<void>
   scheduledRecipients?: readonly MoteScheduledRecipient[]
-  recoverPublication?: true
   privateImages?: FileUploadIdentity[]
   privatePriority?: true
 }
@@ -156,7 +155,7 @@ const requestFields = {
   'space.mote.group.members.leave': groupEdits,
   'space.mote.group.file.list': [...groupFiles, 'path', 'limit'],
   'space.mote.group.file.read': [...groupFiles, 'path', 'maxBytes'],
-  'space.mote.group.inspect': ['groupId', 'beforeSequence', 'limit', 'sourceMote', 'messageId'],
+  'space.mote.group.inspect': ['groupId', 'beforeSequence', 'limit', 'sourceMote', 'messageId', 'replyToMessageId'],
   'space.mote.group.send': ['groupId', 'operationId', 'body', 'recipientIds', 'replyToMessageId', 'sourceMote', 'memberMoteId'],
   'space.mote.group.schedule': ['groupId', 'operationId', 'body', 'recipientIds', 'sourceMote', 'calendar', 'afterMs', 'everyMs'],
   'space.mote.group.retry': ['groupId', 'messageId', 'memberId'],
@@ -211,10 +210,11 @@ export function parseMoteGroupParams<M extends MoteGroupMethod>(method: M, value
   } else {
     id('groupId')
     if (method === 'space.mote.group.inspect') {
+      if (p.replyToMessageId !== undefined) id('replyToMessageId')
       if (p.messageId === undefined) page(p)
       else {
         id('messageId')
-        if (p.limit !== undefined || p.beforeSequence !== undefined)
+        if (p.limit !== undefined || p.beforeSequence !== undefined || p.replyToMessageId !== undefined)
           throw new AgentMuxError('Choose either one original messageId or a page of messages.', code)
       }
     }
@@ -368,6 +368,7 @@ export function parseMoteGroupResult<M extends MoteGroupMethod>(method: M, value
     const group = parseMoteGroupSummary(p.group), messages = list(p.messages, code, query.limit ?? 100, parseMoteGroupMessage)
     if (group.id !== query.groupId || (query.sourceMote && p.viewerId !== query.sourceMote.spaceId) || messages.some((entry, index) => entry.groupId !== group.id ||
       (query.beforeSequence !== undefined && entry.sequence >= query.beforeSequence) ||
+      (query.replyToMessageId !== undefined && entry.replyToMessageId !== query.replyToMessageId) ||
       (index > 0 && entry.sequence <= messages[index - 1]!.sequence))) return invalid(code)
     if (p.nextBeforeSequence !== null && (!messages.length || p.nextBeforeSequence !== messages[0]!.sequence)) return invalid(code)
     if (query.messageId && (messages.length !== 1 || messages[0]?.id !== query.messageId || p.nextBeforeSequence !== null)) return invalid(code)
