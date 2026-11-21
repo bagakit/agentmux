@@ -623,10 +623,6 @@ export function AgentSessionComposer({
         ...(activeFile ? { onReferenceActiveFile: () => { void attachments.referencePaths([activeFile]) } } : {})
       } : {})}
       {...(submitMode.canSubmit ? { onSubmit: () => void submit() } : {})}
-      // Typed Send may restore a Session. Posture is a raw keystroke for the current live Run; it cannot be
-      // buffered or replayed through that restoration boundary. Core writes it like any terminal input, so
-      // while a request is pending it would land in the open native dialog and be recorded as native input
-      // on that request, retiring the card's answer. It is offered only when no request owns the input.
       {...(session?.kind === 'agent' ? {
         configurationTool: <NativeConfigurationPicker key={JSON.stringify([session.control, session.nativeHandle?.sessionId])}
           snapshot={nativeConfiguration.snapshot} information={nativeInformation.information} loading={nativeConfiguration.loading} issue={nativeConfiguration.issue}
@@ -637,6 +633,10 @@ export function AgentSessionComposer({
             return await setConfiguration(sessionId, { target, expectedRevision: revision, configId, value })
           }} />
       } : {})}
+      // Typed Send may restore a Session. Posture is a raw keystroke for the current live Run; it cannot be
+      // buffered or replayed through that restoration boundary. Core writes it like any terminal input, so
+      // while a request is pending it would land in the open native dialog and be recorded as native input
+      // on that request, retiring the card's answer. It is offered only when no request owns the input.
       {...(!nativeConfiguration.snapshot?.options.length && postureControl && submitMode.canSubmit && session?.kind === 'agent' && !session.pendingInteraction &&
         session.processState === 'running' && session.status.state !== 'disconnected'
         ? { postureTool: <PosturePicker control={postureControl} disabled={!submitMode.canType} onSet={(modeId: string) => void setPosture(sessionId, modeId)} /> } : {})}
