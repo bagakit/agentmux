@@ -77,13 +77,16 @@ function splitSourceReference(note: string): { guidance: string; reference: stri
  */
 export function composeOutboundMessage(input: { amux?: string; user?: string; inputContext?: BrowserInputContext }): string {
   const segments: string[] = []
+  const source = input.amux ? splitSourceReference(input.amux) : undefined
   if (input.amux) {
-    const source = splitSourceReference(input.amux)
     const guidance = source ? source.guidance : input.amux
     if (guidance) segments.push(parseGoalConfirmation(guidance) ? guidance : amuxEnvelope(guidance))
-    if (source) segments.push(source.reference)
   }
-  if (input.inputContext) segments.push(renderAmuxProtocol('browser', 'wire', { json: browserInputContextJson(input.inputContext) }))
+  if (input.inputContext) segments.push(renderAmuxProtocol('browser', 'wire', {
+    json: browserInputContextJson(input.inputContext),
+    reference: source ? source.reference + '\n' : ''
+  }))
+  else if (source) segments.push(source.reference)
   if (input.user) segments.push(input.user)
   return segments.join('\n\n')
 }

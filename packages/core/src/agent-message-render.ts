@@ -214,7 +214,18 @@ function parseDeclaredContexts(text: string): AgentMuxMessagePrefix | null {
     const end = closing + '</amux>'.length
     const raw = text.slice(start, end)
     if (/<!|<\?/u.test(raw)) return null
-    let inputContext: BrowserInputContext | undefined
+    // A Browser declaration bounds its reference and ends before the opaque original body.
+    const browser = /^<amux>\n<context kind="browser" version="1">\n([^\r\n]+)\n<\/context>\n(?:([\s\S]+)\n)?<\/amux>$/u.exec(raw)
+    if (browser) {
+      const [, json, reference] = browser
+      if (reference !== undefined && readAmuxSourceReference(reference)?.tail !== '') return null
+      try {
+        const inputContext = parseBrowserInputContext(JSON.parse(json!))
+        if (browserInputContextJson(inputContext) !== json) return null
+        declaredContexts.push({ raw, inputContext })
+        return { kind: 'content', sourceLabel: '', declaredAgentSessionId: null, declaredContexts, body: text.slice(end) }
+      } catch { return null }
+    }
     let declaredTrigger: AmuxTriggerKind | undefined
     try {
       const document = new DOMParser({ onError: onWarningStopParsing }).parseFromString(raw, 'text/xml')
@@ -230,19 +241,12 @@ function parseDeclaredContexts(text: string): AgentMuxMessagePrefix | null {
         const note = (children[2]?.textContent ?? '').slice(1, -1)
         if (composeOutboundMessage({ amux: formatAmuxTriggerNote(trigger.kind, note) }) !== raw) return null
         declaredTrigger = trigger.kind
-      } else if (children.some(node => node.nodeType !== 3)) {
-        const match = /^<amux>\n<context kind="browser" version="1">\n([^\r\n]+)\n<\/context>\n<\/amux>$/u.exec(raw)
-        if (!match) return null
-        inputContext = parseBrowserInputContext(JSON.parse(match[1]!))
-        if (browserInputContextJson(inputContext) !== match[1]) return null
-      }
+      } else if (children.some(node => node.nodeType !== 3)) return null
     } catch {
       return null
     }
-    declaredContexts.push({ raw, ...(inputContext ? { inputContext } : {}) })
-    // A context container ends its producer boundary. The following user body
-    // is opaque, even when it starts with another complete envelope example.
-    if (inputContext || declaredTrigger) return { ...(declaredTrigger ? { declaredTrigger } : {}), kind: 'content', sourceLabel: '', declaredAgentSessionId: null, declaredContexts, body: text.slice(end) }
+    declaredContexts.push({ raw })
+    if (declaredTrigger) return { declaredTrigger, kind: 'content', sourceLabel: '', declaredAgentSessionId: null, declaredContexts, body: text.slice(end) }
     // Newline separators join declarations; the next line's indentation is authored tail.
     const next = end + (/^(?:\r?\n)*/u.exec(text.slice(end))?.[0].length ?? 0)
     // A partly authored or unknown second declaration keeps the entire input readable.
