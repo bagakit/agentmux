@@ -21,7 +21,9 @@ export type ComposerCompletionProps = {
   promptKeywords?: ComposerSuggestion[]
   onCompletionQuery?: (query: ComposerCompletionQuery | null) => void
   completionFeedback?: ReactNode
+  suggestionListLabel?: string
   onSelectSuggestion?: (text: string, kind: ComposerSuggestionKind, selected: ComposerSuggestion) => string | void
+  onSuggestionApplied?: (selected: ComposerSuggestion, replaced: boolean) => void
 }
 export type ComposerCompletionEditorProps = Omit<InlineComposerProps, 'onKeyDown' | 'keywords'> & ComposerCompletionProps & {
   onKeyDown(event: KeyboardEvent, caret: number, selectionEmpty: boolean, suggestionsOpen: boolean): void
@@ -29,7 +31,7 @@ export type ComposerCompletionEditorProps = Omit<InlineComposerProps, 'onKeyDown
 
 /** Shared editor completion; clients own discovery, the original editor owns selection and Undo. */
 export function ComposerCompletionEditor({ completionConfig, commands = [], skills = [], references = [], promptKeywords = [],
-  onCompletionQuery, completionFeedback, onSelectSuggestion, insertionRef, onKeyDown, onSelectionChange, ...editorProps }: ComposerCompletionEditorProps) {
+  onCompletionQuery, completionFeedback, suggestionListLabel, onSelectSuggestion, onSuggestionApplied, insertionRef, onKeyDown, onSelectionChange, ...editorProps }: ComposerCompletionEditorProps) {
   const platform = useClientUiPlatform()
   const overlayContainer = useModalOverlayContainer(platform.overlayContainer())
   const config = resolveComposerInputConfig(completionConfig)
@@ -52,7 +54,7 @@ export function ComposerCompletionEditor({ completionConfig, commands = [], skil
   const queryText = queryKind ? range!.query : ''
   const open = Boolean(queryKind && (suggestions.length || completionFeedback))
   useLayoutEffect(() => {
-    const anchor = shell.current?.closest<HTMLElement>('.composer') ?? shell.current, floating = panel.current
+    const anchor = shell.current?.closest<HTMLElement>('.composer, [data-completion-anchor]') ?? shell.current, floating = panel.current
     if (!open || !anchor || !floating) return
     let current = true
     const update = async () => {
@@ -78,6 +80,7 @@ export function ComposerCompletionEditor({ completionConfig, commands = [], skil
     const replacement = onSelectSuggestion?.(item.text, targetRange.kind, item) ?? item.insertText ?? item.text
     const suffix = item.keepOpen || /\s$/u.test(replacement) ? '' : ' '
     const replaced = insertion.current?.replaceRange?.(targetRange, replacement + suffix) ?? false
+    onSuggestionApplied?.(item, replaced)
     if (replaced) { setDismissed(null); focusEditor() }
     return replaced
   }
@@ -148,11 +151,11 @@ export function ComposerCompletionEditor({ completionConfig, commands = [], skil
       onPointerDownOutside={event => { if (shell.current?.contains(event.target as Node)) event.preventDefault() }}
       onEscapeKeyDown={event => { event.preventDefault(); if (!isImeOwnedKeyboardEvent(event)) { setDismissed(queryKey); focusEditor() } }}
       onDismiss={() => setDismissed(queryKey)}><div ref={panel} data-state="open" className="composer-completion-popover" style={{ position: 'fixed', visibility: 'hidden' }}>
-    {suggestions.length ? <div className="composer__suggestions" role="listbox" aria-label={`Agent ${range!.kind}`} onKeyDown={suggestionKeyDown}>
+    {suggestions.length ? <div className="composer__suggestions" role="listbox" aria-label={suggestionListLabel ?? `Agent ${range!.kind}`} onKeyDown={suggestionKeyDown}>
       {[...groups].map(([group, items]) => {
         const options = items.map((item, index) => <button type="button" role="option" aria-selected="false" key={item.id ?? `${group}:${index}:${item.text}`} {...composerChoiceReadingProps(`${item.label ?? item.text}\n${item.description}`)}
           onClick={() => choose(item)}>{item.icon ? <span className="composer__suggestion-icon">{item.icon}</span> : null}
-          <span className="composer__suggestion-label" data-choice-reading=""><span>{item.label ?? item.text}</span></span><small data-choice-reading=""><span>{item.description}</span></small></button>)
+          <span className="composer__suggestion-label" data-choice-reading=""><span>{item.label ?? item.text}</span></span>{item.description ? <small data-choice-reading=""><span>{item.description}</span></small> : null}</button>)
         const label = group || ({ command: 'Commands', skill: 'Skills', reference: 'Agents & files', keyword: 'Prompts' }[range!.kind])
         return <div className="composer__suggestion-group" role="group" aria-label={label} key={group}>{groups.size > 1 ? <h4>{label}<span>{items.length}</span></h4> : null}{options}</div>
       })}

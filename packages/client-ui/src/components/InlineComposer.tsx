@@ -201,6 +201,14 @@ export function composerExtensions(
         const { node, editor, getPos } = props
         if (node.attrs.kind === 'file' || node.attrs.kind === 'agent') return renderFile(props)
         const reference = node.attrs as ComposerSemanticReference
+        if (reference.kind === 'mote') {
+          const dom = props.view.dom.ownerDocument.createElement('span')
+          dom.contentEditable = 'false'
+          dom.className = 'composer-semantic-token composer-semantic-token--mote'
+          dom.dataset.toolReference = 'mote'
+          dom.textContent = reference.label
+          return { dom }
+        }
         const dom = props.view.dom.ownerDocument.createElement('button')
         dom.type = 'button'
         dom.contentEditable = 'false'

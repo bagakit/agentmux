@@ -1,7 +1,7 @@
 import { diffChars } from 'diff'
 import { fileUploadRevision, parseFileUploadIdentity, type FileUploadIdentity } from '@agentmux/core/files'
 import type { AgentInputImageReference } from '@agentmux/core'
-export type SemanticReferenceKind = 'skill' | 'component' | 'subcommand' | 'file' | 'agent' | 'image'
+export type SemanticReferenceKind = 'skill' | 'component' | 'subcommand' | 'file' | 'agent' | 'image' | 'mote'
 export type ComposerSemanticReference = {
   token: string
   label: string
@@ -18,7 +18,7 @@ export function encodeSemanticReference(item: ComposerSemanticReference): string
 export type ComposerDraftPart = { text: string } | { reference: ComposerSemanticReference; raw: string }
 export function parseComposerDraft(draft: string): ComposerDraftPart[] {
   const parts: ComposerDraftPart[] = []
-  const pattern = /\[([^\]\n]+)\]\(agentmux-(skill|component|subcommand|file|agent|image):([^\s)]*)\)/g
+  const pattern = /\[([^\]\n]+)\]\(agentmux-(skill|component|subcommand|file|agent|image|mote):([^\s)]*)\)/g
   let offset = 0
   for (const match of draft.matchAll(pattern)) {
     let reference: string
@@ -36,7 +36,12 @@ export function appendSemanticReference(draft: string, reference: ComposerSemant
 }
 
 export function expandSemanticReferences(draft: string): string {
-  return parseComposerDraft(draft).map((part) => 'text' in part ? part.text : part.reference.kind === 'image' ? selectedImageReference(part.reference)?.text ?? part.raw : part.reference.reference).join('')
+  return parseComposerDraft(draft).map(part => 'text' in part ? part.text : referenceText(part, selectedImageReference(part.reference))).join('')
+}
+
+function referenceText(part: Extract<ComposerDraftPart, { raw: string }>, image: ReturnType<typeof selectedImageReference>): string {
+  const { kind, label, reference } = part.reference
+  return kind === 'image' ? image?.text ?? part.raw : kind === 'mote' ? label : reference
 }
 
 export function semanticReferenceKind(reference: string): SemanticReferenceKind {
@@ -66,7 +71,7 @@ export function expandComposerInput(draft: string): { text: string; inputImages:
   const selected: Omit<AgentInputImageReference, 'bodyRevision'>[] = []
   for (const part of parseComposerDraft(draft)) {
     const image = 'reference' in part ? selectedImageReference(part.reference) : null
-    const body = 'text' in part ? part.text : part.reference.kind === 'image' ? image?.text ?? part.raw : part.reference.reference
+    const body = 'text' in part ? part.text : referenceText(part, image)
     if (image) selected.push({ start: text.length, end: text.length + body.length, upload: image.upload })
     text += body
   }
