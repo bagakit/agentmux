@@ -456,13 +456,14 @@ it('recovers the original missed private assignment after Host reopen without tr
   expect(original.deliveries[0]).toMatchObject({ status: 'failed' })
   expect(f.send).not.toHaveBeenCalled()
 
+  await direct!.dispose()
   f.unblockSecond()
   const replay = await f.cli('send', { mote, peer, operationId, body: request.body }, 'assigner', 'direct')
   expect(replay.code, replay.stderr).toBe(0)
   expect(JSON.parse(replay.stdout).result.message).toMatchObject({
     id: messageId, deliveries: [{ status: 'failed', operationId: original.deliveries[0]!.operationId }]
   })
-  await direct!.dispose(); await port.dispose(); await rpc.dispose(); await server.stop()
+  await port.dispose(); await rpc.dispose(); await server.stop()
 
   const reopened = (await f.start(undefined, main, manager)).rpc
   const read = (id: string) => reopened.call('space.mote.direct.inspect', { threadId, mote, messageId: id })
