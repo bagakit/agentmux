@@ -246,8 +246,8 @@
 .composer-mailbox .input-history__local > summary { padding-block: var(--sp-1); }
 
 /* Notification controls and transient results wrap below the recorded author. */
-.composer-mailbox__detail .log-turn__head:has(.composer-mailbox__action-feedback, .composer-mailbox__notification-controls) > .log-turn__actions { grid-column: 1 / -1; grid-row: 2; display: flex; flex-wrap: wrap; justify-content: flex-end; min-width: 0; width: 100%; margin-inline-start: 0; }
-.composer-mailbox__detail .log-turn__head:has(.composer-mailbox__action-feedback, .composer-mailbox__notification-controls) .conversation-input-details__body { grid-row: 3; }
+.composer-mailbox__detail:not(.composer-outbox__inline) .log-turn__head:has(.composer-mailbox__action-feedback, .composer-mailbox__notification-controls) > .log-turn__actions { grid-column: 1 / -1; grid-row: 2; display: flex; flex-wrap: wrap; justify-content: flex-end; min-width: 0; width: 100%; margin-inline-start: 0; }
+.composer-mailbox__detail:not(.composer-outbox__inline) .log-turn__head:has(.composer-mailbox__action-feedback, .composer-mailbox__notification-controls) .conversation-input-details__body { grid-row: 3; }
 
 .composer-mailbox__subject { margin-inline-start: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font-size: var(--fs-meta); }
 .composer-mailbox__reading-tools { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); padding: 0 var(--sp-3) var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }

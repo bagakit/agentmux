@@ -159,8 +159,8 @@ export function InputMailboxFrame({ mailbox, hostId, selected = false, compact =
     return failed && failed !== item
   })
   return <section className="input-history input-mailbox" aria-label="发送信箱" data-input-mailbox-scope={mailbox.scope} data-compact={compact || undefined}>
-    {!compact || !refreshInParent ? <div className="input-history__actions">{compact ? null : <strong>发送记录</strong>}{refreshInParent ? null : <button type="button" disabled={mailbox.loading} onClick={() => void mailbox.refresh()}>刷新发送记录</button>}</div> : null}
-    {coverageInParent ? null : <p className="input-history__coverage" role="status">{mailbox.loading ? '正在读取已登记输入…' : '已登记输入 · 更早历史未确认'}</p>}
+    {!selected && (!compact || !refreshInParent) ? <div className="input-history__actions">{compact ? null : <strong>发送记录</strong>}{refreshInParent ? null : <button type="button" disabled={mailbox.loading} onClick={() => void mailbox.refresh()}>刷新发送记录</button>}</div> : null}
+    {selected || coverageInParent ? null : <p className="input-history__coverage" role="status">{mailbox.loading ? '正在读取已登记输入…' : '已登记输入 · 更早历史未确认'}</p>}
     {mailbox.error ? <p className="input-history__notice" role="status">{mailbox.error}</p> : null}
     {mailbox.failures.length ? <p className="input-history__notice" role="status">{retainedPrior ? '当前观察未确认；此前已读记录保留。' : '部分输入当前观察未确认。'}</p> : null}
     {children}
