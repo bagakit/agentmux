@@ -20,7 +20,7 @@
 .agent-status-prompts__copy small { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.45; white-space: pre-wrap; }
 .agent-status-prompts__intent { flex: none; color: var(--text-3); font-size: var(--fs-micro); }
 .agent-status-prompts__reason { color: var(--text-3); font-size: var(--fs-micro); }
-.agent-identity-popover--actions { display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden; padding: var(--sp-4); border-radius: var(--radius); background: var(--surface-2); }
+.agent-identity-popover.agent-identity-popover--actions { display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden; padding: var(--sp-4); border-radius: var(--radius); background: var(--surface-2); }
 .agent-identity-popover--actions > header { flex: none; }
 .agent-identity-popover__controls { display: inline-flex; flex: none; gap: var(--sp-1); }
 .agent-state-face { display: flex; flex-direction: column; min-height: 0; }
@@ -28,6 +28,12 @@
 .agent-state-face__summary > strong { color: var(--text-2); font-size: var(--fs-micro); font-weight: 550; }
 .agent-state-face .agent-state-face__summary p { margin: 0; color: var(--text-3); font-size: var(--fs-micro); }
 .agent-state-face__body { min-height: 0; overflow: auto; overscroll-behavior: contain; }
+/* Put the overlay scrollbar in the panel inset, outside the text and controls. */
+.agent-state-face__body, .agent-identity-popover--actions[data-compact='true'] .agent-state-face {
+  padding-inline-end: var(--sp-4);
+  margin-inline-end: calc(-1 * var(--sp-4));
+}
+.agent-identity-popover--actions[data-compact='true'] .agent-state-face__body { padding-inline-end: 0; margin-inline-end: 0; }
 .agent-state-face__review { display: flex; justify-content: space-between; width: 100%; margin-top: var(--sp-3); }
 .agent-state-face__facts { margin-top: var(--sp-3); padding-top: var(--sp-3); border-top: 1px solid var(--line-soft); }
 .agent-state-face__facts summary { color: var(--text-3); cursor: pointer; font-size: var(--fs-micro); }
