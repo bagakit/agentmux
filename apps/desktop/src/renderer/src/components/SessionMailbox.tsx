@@ -59,6 +59,7 @@ const ThemeObjectAutomationIcon = semanticIconComponent('object.automation')
 const ThemeActionPauseIcon = semanticIconComponent('action.pause')
 const ThemeStatusUnknownIcon = semanticIconComponent('status.unknown')
 const ThemeObjectMailIcon = semanticIconComponent('object.mail')
+const ThemeSessionMessagesIcon = semanticIconComponent('object.session-messages')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
 const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
 const RevealIcon = semanticIconComponent('action.locate')
@@ -653,7 +654,7 @@ export function SessionMailbox({ pendingLayout, system, queued: workbenchQueue, 
       onPointerEnter={enter} onPointerLeave={leave}
       onClick={(event) => { if (preview.current && popover.current!.matches(':popover-open')) { event.preventDefault(); pin() } }}>
       <span className="composer-mailbox__mark" aria-hidden="true">
-        <ThemeObjectMailIcon size={12} className="composer-mailbox__envelope" />
+        <ThemeSessionMessagesIcon size={24} className="composer-mailbox__envelope" />
         {hasProgress && progressStatus !== 'inactive' ? <ProgressIcon size={8} className="composer-mailbox__progress" /> : null}
         {system.unread.length ? <ThemeObjectNotificationsIcon size={8} className="composer-mailbox__attention" /> : null}
         {unread ? <span className="composer-mailbox__unread">{unread > 99 ? '99+' : unread}</span> : null}
