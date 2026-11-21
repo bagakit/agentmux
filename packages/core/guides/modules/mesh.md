@@ -62,11 +62,14 @@ A minimal outbound participant can be constructed without reading source:
    configuration: COMPLETE_CONFIGURATION}` in a file and run
    `amux settings mesh configure --input FILE`. Inspect live adoption separately.
 
-For Desktop pairing, open Mesh and choose **Join this device to a network**.
-Paste the gateway’s saved connection code to see its network, public peer identity
-and advertised dial addresses. Add it and save. Copy this device’s saved code back
-to the gateway operator. On a managing Mac, the operator chooses the saved gateway under **Device to manage**, adds that peer and saves on the gateway. A gateway
-can dial its own upstream while keeping its dedicated listener and published addresses.
+For Desktop pairing, open **Mesh → Connect to a Relay Gateway**. Paste the gateway’s
+connection code, review the network and dial addresses, and choose **Connect**.
+If the gateway has yet to approve this Mac, use **Copy this Mac’s connection code**
+and send it to the operator. On their managing Mac, the operator opens **Mesh → Manage gateways**,
+selects the original gateway under **Device to manage**, adds the Mac’s code and
+saves on the gateway. Return to the connection page to check the result. It shows
+**Connected to gateway** once the original peers have authenticated. A gateway can dial
+its own upstream while keeping its dedicated listener and published addresses.
 The CLI reads the same public code with `amux mesh code`; `amux mesh code read CODE`
 previews it offline. Reading and sharing a code leaves both configurations untouched.
 
