@@ -2285,8 +2285,9 @@ export async function registerIpc(args: {
   })
   handle('sessions:inspectInteraction', async (session: AgentSessionControl, operationId: string) => await args.runtime.inspectInteraction(session, operationId))
   handle('sessions:inspectInformation', async (session: AgentSessionControl) => await args.runtime.inspectInformation(session))
-  handle('sessions:setConfiguration', async (session: AgentSessionControl, request: Omit<import('@agentmux/core').AgentConfigurationSet, 'target'>) =>
-    await args.runtime.setConfiguration(session, request))
+  handle('sessions:inspectConfiguration', async (session: AgentSessionControl, operationId?: string) => await args.runtime.inspectConfiguration(session, operationId))
+  handle('sessions:setConfiguration', async (session: AgentSessionControl, request: import('@agentmux/core').AgentConfigurationSet) =>
+    sessionInputOperationResult(() => args.runtime.setConfiguration(session, request)))
   handle('sessions:setPosture', async (session: AgentSessionControl, modeId: string, operationId: string) =>
     await args.runtime.setPosture(session, modeId, operationId))
   handle('sessions:confirmNativeSession', async (session: AgentSessionControl, input: import('@agentmux/core').AgentMuxNativeSessionConfirmationInput) => (

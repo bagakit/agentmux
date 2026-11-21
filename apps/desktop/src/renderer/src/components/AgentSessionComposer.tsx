@@ -10,6 +10,7 @@ import { reportMessageDeliveryDiagnostics } from '../lib/message-delivery-diagno
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { NativeConfigurationPicker, PosturePicker } from './PosturePicker'
 import { useAgentNativeInformation } from '../lib/use-agent-native-information'
+import { useAgentNativeConfiguration } from '../lib/use-agent-native-configuration'
 import { createFirstPromptSelector, createSessionViewModeSelector, sessionPresentationById } from '../lib/session-presentation'
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { useShallow } from 'zustand/react/shallow'
@@ -278,8 +279,9 @@ export function AgentSessionComposer({
   const configuredService = useRunService(source ? undefined : session)
   const nativeService = source ? session?.nativeService : configuredService
   const nativeInformation = useAgentNativeInformation(session?.kind === 'agent' ? session.control : undefined, visible,
-    session?.kind === 'agent' ? session.nativeInformation : undefined, session?.kind === 'agent' ? session.nativeConfiguration : undefined,
-    session?.kind === 'agent' ? session.nativeHandle?.sessionId : undefined)
+    session?.kind === 'agent' ? session.nativeInformation : undefined, session?.kind === 'agent' ? session.nativeHandle?.sessionId : undefined)
+  const nativeConfiguration = useAgentNativeConfiguration(session?.kind === 'agent' ? session.control : undefined, visible,
+    session?.kind === 'agent' ? session.nativeConfiguration : undefined, session?.kind === 'agent' ? session.nativeHandle?.sessionId : undefined)
   const viewModeSelector = useMemo(() => createSessionViewModeSelector(sessionId), [sessionId])
   const viewMode = useObservedAppStore('composer', visible, consumerScope, viewModeSelector)
   const setViewMode = useAppStore.getState().setViewMode
@@ -566,7 +568,7 @@ export function AgentSessionComposer({
         originalStatus={source?.session?.kind === 'agent' ? source.session : undefined}
         executorLabel={executors?.[session.executorId]?.label ?? session.executorId}
         appearance={executors?.[session.executorId]?.avatar} prompts={completion.prompts} visible={visible}
-        information={{ information: nativeInformation.information, configuration: nativeInformation.configuration,
+        information={{ information: nativeInformation.information, configuration: nativeConfiguration.snapshot,
           loading: nativeInformation.loading, issue: nativeInformation.issue, onRefresh: nativeInformation.refresh,
           usage: session.turnUsage, contextWindowUsage: session.contextWindowUsage }}
         disabled={!submitMode.canSubmit}
@@ -627,15 +629,15 @@ export function AgentSessionComposer({
       // on that request, retiring the card's answer. It is offered only when no request owns the input.
       {...(session?.kind === 'agent' ? {
         configurationTool: <NativeConfigurationPicker key={JSON.stringify([session.control, session.nativeHandle?.sessionId])}
-          snapshot={nativeInformation.configuration} information={nativeInformation.information} loading={nativeInformation.loading}
-          disabled={readOnly || disabled || Boolean(source) || session.processState !== 'running'} onRefresh={nativeInformation.refresh}
+          snapshot={nativeConfiguration.snapshot} information={nativeInformation.information} loading={nativeConfiguration.loading} issue={nativeConfiguration.issue}
+          disabled={readOnly || disabled || Boolean(source) || session.processState !== 'running'} onRefresh={async () => { await nativeConfiguration.refresh().catch(() => {}) }}
+          onInspect={operationId => useAppStore.getState().inspectConfigurationOperation(sessionId, operationId)}
           onSet={async (configId, value, revision) => {
-            const receipt = await setConfiguration(sessionId, revision, configId, value)
-            if (receipt?.outcome === 'applied' && receipt.acknowledgement) nativeInformation.adoptConfiguration(receipt.acknowledgement)
-            return receipt
+            const target = nativeConfiguration.target ?? (await nativeConfiguration.refresh()).target
+            return await setConfiguration(sessionId, { target, expectedRevision: revision, configId, value })
           }} />
       } : {})}
-      {...(!nativeInformation.configuration?.options.length && postureControl && submitMode.canSubmit && session?.kind === 'agent' && !session.pendingInteraction &&
+      {...(!nativeConfiguration.snapshot?.options.length && postureControl && submitMode.canSubmit && session?.kind === 'agent' && !session.pendingInteraction &&
         session.processState === 'running' && session.status.state !== 'disconnected'
         ? { postureTool: <PosturePicker control={postureControl} disabled={!submitMode.canType} onSet={(modeId: string) => void setPosture(sessionId, modeId)} /> } : {})}
       {...(session?.kind === 'agent' && (moteDraftKey || text.trim()) && (session.pendingInteraction || submitMode.primaryAction === 'stop') ? {

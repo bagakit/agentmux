@@ -2241,23 +2241,26 @@ export class RuntimeController {
     })
   }
 
-  async setConfiguration(control: Extract<SessionControl, { kind: 'agent' }>,
-    request: Omit<import('@agentmux/core').AgentConfigurationSet, 'target'>): Promise<import('@agentmux/core').AgentConfigurationReceipt> {
+  async inspectConfiguration(control: Extract<SessionControl, { kind: 'agent' }>, operationId?: string): Promise<import('@agentmux/core').AgentConfigurationInspection> {
     return await this.trackHostOperation(control.hostId, async () => {
       const client = await this.connectedClient(control.hostId)
-      const original = await callOriginalDesktopHost(client, 'agent.configuration.inspect', { hostId: 'local',
-        agentSessionId: control.agentSessionId, operationId: request.operationId }, { transport: 'unix' })
-      if (original.kind === 'operation' && original.operation) {
-        const receipt = original.operation
-        if (receipt.configId !== request.configId || receipt.value !== request.value || receipt.target.expectedRun.runId !== control.run.runId) throw new AgentMuxError(
-          'Keep the original configuration intent and operation.', 'RUN_CONTROL_OPERATION_CONFLICT')
-        return receipt
-      }
-      const observed = await callOriginalDesktopHost(client, 'agent.configuration.inspect', { hostId: 'local', agentSessionId: control.agentSessionId,
-        expectedRun: control.run }, { transport: 'unix' })
-      if (observed.kind !== 'configuration' || observed.snapshot?.revision !== request.expectedRevision) throw new AgentMuxError(
-        'The original native configuration changed. Select from the current choices.', 'AGENT_CONFIGURATION_CHANGED')
-      return await callOriginalDesktopHost(client, 'agent.configuration.set', { target: observed.target, ...request }, { transport: 'unix' })
+      const result = await callOriginalDesktopHost(client, 'agent.configuration.inspect', { hostId: 'local',
+        agentSessionId: control.agentSessionId, ...(operationId !== undefined ? { operationId } : { expectedRun: control.run }) }, { transport: 'unix' })
+      return result.kind === 'configuration' ? { ...result, target: { ...result.target, hostId: control.hostId } }
+        : { ...result, operation: result.operation ? { ...result.operation, target: { ...result.operation.target, hostId: control.hostId } } : null }
+    })
+  }
+
+  async setConfiguration(control: Extract<SessionControl, { kind: 'agent' }>,
+    request: import('@agentmux/core').AgentConfigurationSet): Promise<import('@agentmux/core').AgentConfigurationReceipt> {
+    const target = request.target
+    if (target.hostId !== control.hostId || target.agentSessionId !== control.agentSessionId || target.expectedRun.runId !== control.run.runId) {
+      throw new AgentMuxError('Keep the original configuration Host, Session and Run.', 'INVALID_CONTROL_REQUEST', undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
+    }
+    return await this.trackHostOperation(control.hostId, async () => {
+      const client = await this.connectedClient(control.hostId)
+      const receipt = await callOriginalDesktopHost(client, 'agent.configuration.set', { ...request, target: { ...target, hostId: 'local' } }, { transport: 'unix' })
+      return { ...receipt, target: { ...receipt.target, hostId: control.hostId } }
     })
   }
 

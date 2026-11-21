@@ -37,3 +37,5 @@
   .selection-field__clear { flex-basis: 44px; width: 44px; height: 44px; }
 }
 @media (forced-colors: active) { .selection-field:focus-visible { outline-color: Highlight; } }
+
+.selection-field__group { padding: var(--sp-2) var(--sp-4) var(--sp-1); color: var(--text-3); font-size: var(--fs-micro); line-height: 1.4; font-weight: 500; }

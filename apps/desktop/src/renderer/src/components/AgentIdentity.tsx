@@ -37,6 +37,7 @@ function AgentStateFace({ session, originalStatus, executorLabel, prompts, disab
   information?: ComponentProps<typeof AgentNativeInformation> | undefined
 }) {
   const [review, setReview] = useState(false)
+  useEffect(() => { void information?.onRefresh?.() }, [information?.onRefresh])
   const face = useRef<HTMLDivElement>(null)
   const transferFocus = useRef(false)
   useLayoutEffect(() => {

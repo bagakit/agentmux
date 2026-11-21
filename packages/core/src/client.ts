@@ -1345,6 +1345,9 @@ export class AgentMuxClient {
     key: string; controller: AbortController; observer?: { dispose(): void }; pending: Promise<void>
     recordId?: string; sequence?: number; unconfirmed?: boolean; ingressRecordId?: string; ingressSequence?: number | undefined
   }>()
+  private readonly nativeConfigurationWatches = new Map<string, {
+    key: string; runId: string; controller: AbortController; observer?: { dispose(): void }; starting?: Promise<boolean>; sequence?: number; unsupported?: true
+  }>()
   private readonly terminalFrontendWatches = new Map<string, TerminalFrontendWatch>()
   private readonly screenEvidence: AgentScreenEvidenceStore
   private readonly promptSubmission: AgentPromptSubmissionCoordinator
@@ -2192,6 +2195,8 @@ export class AgentMuxClient {
     this.sessionObservationRetries.clear()
     for (const watch of this.nativeStatusWatches.values()) { watch.controller.abort(); watch.observer?.dispose() }
     this.nativeStatusWatches.clear()
+    for (const watch of this.nativeConfigurationWatches.values()) { watch.controller.abort(); watch.observer?.dispose() }
+    this.nativeConfigurationWatches.clear()
     for (const watch of this.terminalFrontendWatches.values()) watch.controller.abort()
     this.terminalFrontendWatches.clear()
   }
@@ -2211,6 +2216,7 @@ export class AgentMuxClient {
         return current() && !this.currentHookIngressObservation(session)
       }
       if (kind === 'native-status') return await this.ensureNativeStatusObservation(session, true) && current()
+      if (kind === 'native-configuration') return await this.ensureNativeConfigurationObservation(session, true) && current()
       await this.ensureTerminalHandshakeOrDegrade(session, run)
       return current()
     } catch (error) {
@@ -9633,16 +9639,16 @@ export class AgentMuxClient {
     const target = { hostId: 'local', runtimeId: this.terminalCreationRuntimeIdentity().runtimeId,
       agentSessionId: session.agentSessionId, expectedRun: session.run, providerId: session.providerId }
     const provider = this.providers.get(session.providerId), handle = session.nativeHandle
+    void this.ensureNativeConfigurationObservation(session)
     const retained = session.recoveryInformation
     const previous = retained && sameRun(retained.run, session.run) && handle?.kind === 'provider' &&
       retained.snapshot.nativeSessionId === handle.sessionId && retained.actorId === session.nativeActor?.actorId ? retained.snapshot : null
-    const configuration = this.nativeConfigurations.get(session.agentSessionId)
     const oldConfiguration = this.retainedNativeConfiguration(session)
     const kept = structuredClone({ kind: 'information' as const, target, snapshot: previous, configuration: oldConfiguration })
     if (handle?.kind !== 'provider' || handle.providerId !== session.providerId) return { ...kept,
       issue: { code: 'AGENT_INFORMATION_SOURCE_UNCONFIRMED', message: 'The original native session is unconfirmed. Existing Agent capabilities remain available.' } }
-    if (!provider.readInformation && !provider.readConfiguration && previous) return kept
-    if (!provider.readInformation && !provider.readConfiguration) return { ...kept,
+    if (!provider.readInformation && previous) return kept
+    if (!provider.readInformation) return { ...kept,
       issue: { code: 'AGENT_INFORMATION_UNSUPPORTED', message: 'This Provider has no native session information reader.' } }
     const run = await this.requireCurrentAgentRun(session)
     if (run.state.type !== 'running' || run.pid === null) return { ...kept,
@@ -9650,21 +9656,20 @@ export class AgentMuxClient {
     const signal = requestSignal ? AbortSignal.any([requestSignal, AbortSignal.timeout(5_000)]) : AbortSignal.timeout(5_000)
     const context = { processId: run.pid, ...(session.nativeActor ? { nativeActor: session.nativeActor } : {}), nativeHandle: handle,
       workspacePath: session.workspacePath, signal }
-    const [information, settings] = await Promise.allSettled([
-      provider.readInformation ? provider.readInformation(context, handle.sessionId).then(parseAgentInformationSnapshot) : Promise.resolve(null),
-      provider.readConfiguration ? provider.readConfiguration(context, handle.sessionId).then(value => value === null ? null : parseAgentConfigurationSnapshot(value)) : Promise.resolve(null)
-    ])
+    let information: AgentInformationSnapshot | undefined, failed = false
+    try { information = parseAgentInformationSnapshot(await provider.readInformation(context, handle.sessionId)) }
+    catch { failed = true }
     requestSignal?.throwIfAborted()
     let current = await this.registry.refresh(session.agentSessionId, session.run)
     const currentRun = await this.requireCurrentAgentRun(current)
     if (!sameNativeHandle(current.nativeHandle, handle) || !isDeepStrictEqual(current.nativeActor, session.nativeActor) ||
         currentRun.state.type !== 'running' || currentRun.pid !== run.pid) throw new AgentMuxError(
       'The original native information source changed. Its Session and input are kept.', 'STALE_AGENT_SESSION')
-    let snapshot = this.retainedNativeInformation(current)?.snapshot ?? null, nextConfiguration = oldConfiguration
+    let snapshot = this.retainedNativeInformation(current)?.snapshot ?? null
     let issue: AgentInformationInspection['issue']
-    if (information.status === 'fulfilled' && information.value !== null) {
-      if (information.value.nativeSessionId !== handle.sessionId) throw new AgentMuxError('Native information belongs to another Session.', 'CONTROL_PROTOCOL_ERROR')
-      const observed = information.value
+    if (information) {
+      if (information.nativeSessionId !== handle.sessionId) throw new AgentMuxError('Native information belongs to another Session.', 'CONTROL_PROTOCOL_ERROR')
+      const observed = information
       const saved = await this.updateExactAgentSession(session.agentSessionId, session.run, current => {
         if (!sameNativeHandle(current.nativeHandle, handle) || !isDeepStrictEqual(current.nativeActor, session.nativeActor)) return current
         const latest = this.retainedNativeInformation(current)
@@ -9674,16 +9679,9 @@ export class AgentMuxClient {
       })
       current = saved
       snapshot = this.retainedNativeInformation(saved)?.snapshot ?? null
-    } else if (information.status === 'rejected') issue = { code: 'AGENT_INFORMATION_READ_UNAVAILABLE', message: 'Native information could not be refreshed. Any retained sample keeps its original observation time.' }
-    if (this.nativeConfigurations.get(session.agentSessionId) !== configuration) {
-      nextConfiguration = this.retainedNativeConfiguration(current)
-    } else if (settings.status === 'fulfilled') {
-      nextConfiguration = settings.value
-      if (nextConfiguration) this.nativeConfigurations.set(session.agentSessionId, { run: session.run, nativeSessionId: handle.sessionId, actorId: session.nativeActor?.actorId, observedAt: Date.now(), snapshot: nextConfiguration })
-      else this.nativeConfigurations.delete(session.agentSessionId)
-    } else if (settings.status === 'rejected') issue ??= { code: 'AGENT_CONFIGURATION_READ_UNAVAILABLE', message: 'The original native configuration could not be refreshed. Existing Agent capabilities remain available.' }
+    } else if (failed) issue = { code: 'AGENT_INFORMATION_READ_UNAVAILABLE', message: 'Native information could not be refreshed. Any retained sample keeps its original observation time.' }
     this.publishSession(current)
-    return structuredClone<AgentInformationInspection>({ kind: 'information', target, snapshot, configuration: nextConfiguration, ...(issue ? { issue } : {}) })
+    return structuredClone<AgentInformationInspection>({ kind: 'information', target, snapshot, configuration: this.retainedNativeConfiguration(current), ...(issue ? { issue } : {}) })
   }
 
   async inspectAgentConfiguration(value: AgentConfigurationInspect): Promise<AgentConfigurationInspection> {
@@ -9696,6 +9694,7 @@ export class AgentMuxClient {
     }
     const session = await this.registry.refresh(input.agentSessionId, input.expectedRun)
     if (!sameRun(session.run, input.expectedRun)) throw new AgentMuxError('The original configuration Run changed.', 'STALE_AGENT_SESSION')
+    void this.ensureNativeConfigurationObservation(session)
     const runtime = this.terminalCreationRuntimeIdentity()
     const target = { hostId: 'local', runtimeId: runtime.runtimeId, agentSessionId: session.agentSessionId,
       expectedRun: { ...session.run }, providerId: session.providerId }
@@ -9707,11 +9706,12 @@ export class AgentMuxClient {
     const previous = this.nativeConfigurations.get(session.agentSessionId)
     const observed = await provider.readConfiguration({ ...(actor ? { nativeActor: actor } : {}), nativeHandle: session.nativeHandle, processId: run.pid, workspacePath: session.workspacePath,
       signal: AbortSignal.timeout(1_500) }, session.nativeHandle.sessionId)
-    const snapshot = observed === null ? null : parseAgentConfigurationSnapshot(observed)
+    const snapshot = observed === null ? null : this.parseNativeConfiguration(session, observed)
     const current = await this.registry.refresh(session.agentSessionId, session.run)
     if (!sameNativeHandle(current.nativeHandle, session.nativeHandle) || !isDeepStrictEqual(current.nativeActor, actor)) throw new AgentMuxError('The original configuration source changed.', 'STALE_AGENT_SESSION')
-    // A later native acknowledgement or observation wins over this earlier read, including null.
-    if (this.nativeConfigurations.get(session.agentSessionId) === previous) {
+    // Ordered native reads can enrich their same-stream sample with its catalog.
+    // Unordered reads keep the existing no-overwrite guard, including null.
+    if (this.acceptNativeConfigurationRead(current, snapshot, previous)) {
       if (snapshot) this.nativeConfigurations.set(session.agentSessionId, { run: session.run, nativeSessionId: session.nativeHandle.sessionId,
         actorId: actor?.actorId, observedAt: Date.now(), snapshot })
       else this.nativeConfigurations.delete(session.agentSessionId)
@@ -9748,16 +9748,29 @@ export class AgentMuxClient {
     await operations.prepare(input, actor, runtime)
     const claim = await operations.claim(input, actor)
     if (!claim.dispatched) return claim.receipt
+    const before = this.nativeConfigurations.get(session.agentSessionId)
     try {
       await assertCurrent()
       const reply = await provider.setConfiguration({ processId: run.pid, ...(nativeActor ? { nativeActor } : {}), nativeHandle: session.nativeHandle, workspacePath: session.workspacePath, signal }, session.nativeHandle.sessionId,
-        { configId: input.configId, value: input.value, expectedRevision: input.expectedRevision, requestId: claim.receipt.nativeOperationId })
-      const snapshot = parseAgentConfigurationSnapshot(reply)
+        { configId: input.configId, value: input.value, expectedRevision: input.expectedRevision, requestId: claim.receipt.nativeOperationId,
+          ...(this.retainedNativeConfiguration(session) ? { configuration: structuredClone(this.retainedNativeConfiguration(session)!) } : {}) })
+      const snapshot = this.parseNativeConfiguration(session, reply)
       if (snapshot.options.find(option => option.id === input.configId)?.currentValue !== input.value) throw new AgentMuxError(
         'The native acknowledgement did not confirm the original configuration value.', 'CONTROL_PROTOCOL_ERROR')
-      await assertCurrent()
-      this.nativeConfigurations.set(session.agentSessionId, { run: session.run, nativeSessionId: session.nativeHandle.sessionId, actorId: nativeActor?.actorId, observedAt: Date.now(), snapshot })
-      this.publishSession(this.requireAgentSession(session.agentSessionId))
+      // The original native ACK remains an applied historical operation if its
+      // Session moves on. Only an unchanged current source receives its projection.
+      const current = this.registry.findByRun(session.run)
+      let sameRuntime = false
+      try { sameRuntime = this.terminalCreationRuntimeIdentity().instanceId === runtime.instanceId }
+      catch { /* A failed current Runtime observation cannot reverse the original native ACK. */ }
+      if (current?.agentSessionId === session.agentSessionId && sameNativeHandle(current.nativeHandle, session.nativeHandle) &&
+          isDeepStrictEqual(current.nativeActor, nativeActor) && sameRuntime &&
+          snapshot.observation?.state !== 'unconfirmed' &&
+          this.acceptNativeConfigurationRead(current, snapshot, before)) {
+        this.nativeConfigurations.set(session.agentSessionId, { run: session.run, nativeSessionId: session.nativeHandle.sessionId,
+          actorId: nativeActor?.actorId, observedAt: snapshot.observation?.observedAt ?? Date.now(), snapshot })
+        this.publishSession(current)
+      }
       return await operations.settle(input, actor, claim.receipt, { outcome: 'applied', acknowledgement: snapshot })
     } catch (error) {
       const notApplied = error instanceof AgentMuxError && error.controlFailure?.disposition === 'not_applied'
@@ -11637,12 +11650,105 @@ export class AgentMuxClient {
     }
   }
 
+  /** One source-scoped metadata reader; its failure never changes input or Agent activity. */
+  private async ensureNativeConfigurationObservation(requested: AgentMuxStoredAgentSession | AgentMuxAgentSession, retry = false): Promise<boolean> {
+    const session = this.registry.findByRun(requested.run)
+    if (session?.agentSessionId !== requested.agentSessionId || session.providerId !== requested.providerId ||
+        !sameNativeHandle(session.nativeHandle, requested.nativeHandle)) return false
+    const provider = this.providers.get(session.providerId), handle = session.nativeHandle
+    if (!provider.observeConfiguration || handle?.kind !== 'provider') return true
+    const target = { session, epoch: this.connectionEpoch }
+    if (!this.currentSessionObservation(target) || !retry && this.sessionObservationRetries.has(target, 'native-configuration')) return false
+    const key = sessionObservationSource(session)
+    const existing = this.nativeConfigurationWatches.get(session.agentSessionId)
+    if (existing?.key === key && !existing.controller.signal.aborted) return existing.starting ?? Boolean(existing.observer || existing.unsupported)
+    existing?.controller.abort(); existing?.observer?.dispose()
+    const watch: { key: string; runId: string; controller: AbortController; observer?: { dispose(): void }; starting?: Promise<boolean>; sequence?: number; unsupported?: true } = {
+      key, runId: session.run.runId, controller: new AbortController()
+    }
+    this.nativeConfigurationWatches.set(session.agentSessionId, watch)
+    const current = () => this.currentSessionObservation(target) && !watch.controller.signal.aborted && !watch.unsupported &&
+      this.nativeConfigurationWatches.get(session.agentSessionId) === watch
+    const unavailable = (code: string, message: string, source?: { sourceId: string; sequence: number }): void => {
+      if (!current() || source && (!Number.isSafeInteger(source.sequence) || source.sequence <= (watch.sequence ?? 0))) return
+      if (source) watch.sequence = source.sequence
+      const owner = this.registry.findByRun(session.run)!
+      const cached = this.nativeConfigurations.get(session.agentSessionId)
+      if (cached && this.retainedNativeConfiguration(owner)) {
+        const original = cached.snapshot.observation
+        this.nativeConfigurations.set(session.agentSessionId, { ...cached, snapshot: { ...cached.snapshot,
+          observation: { ...(original ?? { nativeSessionId: handle.sessionId, observedAt: cached.observedAt }),
+            state: 'unconfirmed', issue: { code, message } } } })
+      }
+      this.publishSession(owner)
+      if (code !== 'AGENT_CONFIGURATION_OBSERVATION_UNSUPPORTED') this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId, code,
+        message: message + ' The original Session, Run, model choices and input are retained.',
+        evidence: { source: 'agentmux', run: { ...session.run }, observedAt: Date.now() } })
+      if (code === 'AGENT_CONFIGURATION_OBSERVATION_UNSUPPORTED') {
+        // Frozen producer capabilities change with their source, not with a timer.
+        watch.unsupported = true
+        watch.observer?.dispose(); delete watch.observer
+        this.sessionObservationRetries.settle(target, 'native-configuration')
+      } else if (code !== 'AGENT_NATIVE_CONFIGURATION_GAP') {
+        this.nativeConfigurationWatches.delete(session.agentSessionId)
+        watch.controller.abort(); watch.observer?.dispose()
+        this.sessionObservationRetries.queue(target, 'native-configuration')
+      }
+    }
+    const starting = (async () => {
+      try {
+        const run = await this.requireCurrentAgentRun(session)
+        if (!current()) return false
+        if (run.state.type !== 'running' || run.pid === null) {
+          this.nativeConfigurationWatches.delete(session.agentSessionId)
+          watch.controller.abort()
+          return false
+        }
+        const observer = await provider.observeConfiguration!({ processId: run.pid, workspacePath: session.workspacePath,
+          ...(session.nativeActor ? { nativeActor: session.nativeActor } : {}), nativeHandle: handle,
+          signal: watch.controller.signal,
+          getConfiguration: () => current() ? structuredClone(this.retainedNativeConfiguration(this.registry.findByRun(session.run)!)) : null,
+          onConfiguration: value => {
+            if (!current()) return
+            try {
+              // A foreign thread notification is irrelevant to this original reader.
+              const nativeSessionId = value?.observation?.nativeSessionId
+              if (typeof nativeSessionId === 'string' && nativeSessionId !== handle.sessionId) return
+              const snapshot = this.parseNativeConfiguration(session, value), observation = snapshot.observation!
+              if (observation.state !== 'confirmed' || !observation.sourceId || observation.sequence === undefined)
+                throw new AgentMuxError('The native configuration stream has no ordered observation.', 'CONTROL_PROTOCOL_ERROR')
+              if (observation.sequence <= (watch.sequence ?? 0)) return
+              watch.sequence = observation.sequence
+              const before = this.retainedNativeConfiguration(this.registry.findByRun(session.run)!)
+              this.sessionObservationRetries.settle(target, 'native-configuration')
+              if (before?.revision === snapshot.revision && before.observation?.state === 'confirmed' &&
+                  before.observation.sourceId === observation.sourceId && isDeepStrictEqual(before.options, snapshot.options)) return
+              this.nativeConfigurations.set(session.agentSessionId, { run: session.run, nativeSessionId: handle.sessionId,
+                actorId: session.nativeActor?.actorId, observedAt: observation.observedAt, snapshot })
+              this.publishSession(this.registry.findByRun(session.run)!)
+            } catch (error) { unavailable('AGENT_CONFIGURATION_OBSERVATION_INVALID',
+              error instanceof Error ? error.message : 'The original configuration observation is unconfirmed.') }
+          }, onUnavailable: unavailable }, handle.sessionId)
+        if (!current() || watch.unsupported) { observer.dispose(); return Boolean(watch.unsupported) }
+        watch.observer = observer
+        return true
+      } catch (error) {
+        unavailable(error instanceof AgentMuxError ? error.code : 'AGENT_CONFIGURATION_OBSERVATION_UNAVAILABLE',
+          error instanceof Error ? error.message : 'The original configuration observer is unavailable.')
+        return Boolean(watch.unsupported)
+      }
+    })()
+    watch.starting = starting
+    try { return await starting } finally { delete watch.starting }
+  }
+
   private async ensureNativeStatusObservation(requested: AgentMuxStoredAgentSession | AgentMuxAgentSession, retry = false): Promise<boolean> {
     const session = this.registry.findByRun(requested.run)
     if (session?.agentSessionId !== requested.agentSessionId || session.providerId !== requested.providerId ||
         !sameNativeHandle(session.nativeHandle, requested.nativeHandle)) return false
     const target = { session, epoch: this.connectionEpoch }
     if (!retry && this.sessionObservationRetries.has(target, 'native-status')) return false
+    void this.ensureNativeConfigurationObservation(session)
     await this.ensureTerminalFrontendObservation(session)
     if (!this.currentSessionObservation(target)) return false
     const provider = this.providers.get(session.providerId)
@@ -12739,6 +12845,35 @@ export class AgentMuxClient {
     }
   }
 
+  private parseNativeConfiguration(session: AgentMuxStoredAgentSession, value: unknown): AgentConfigurationSnapshot {
+    const snapshot = parseAgentConfigurationSnapshot(value)
+    if (snapshot.observation && snapshot.observation.nativeSessionId !== session.nativeHandle?.sessionId)
+      throw new AgentMuxError('The native configuration observation belongs to another Session.', 'CONTROL_PROTOCOL_ERROR')
+    return snapshot
+  }
+
+  /** A Provider sequence belongs to its original observation stream, never a reader-local counter. */
+  private acceptNativeConfigurationRead(session: AgentMuxStoredAgentSession, snapshot: AgentConfigurationSnapshot | null,
+    before: unknown): boolean {
+    const sequence = snapshot?.observation?.sequence
+    const watch = this.nativeConfigurationWatches.get(session.agentSessionId)
+    if (!watch || watch.key !== sessionObservationSource(session) || watch.controller.signal.aborted)
+      return this.nativeConfigurations.get(session.agentSessionId) === before
+    if (sequence === undefined) {
+      const unchanged = this.nativeConfigurations.get(session.agentSessionId) === before
+      if (unchanged && snapshot?.observation?.state === 'unconfirmed' && !watch.unsupported) {
+        this.nativeConfigurationWatches.delete(session.agentSessionId)
+        watch.controller.abort(); watch.observer?.dispose()
+        this.sessionObservationRetries.queue({ session, epoch: this.connectionEpoch }, 'native-configuration')
+      }
+      return unchanged
+    }
+    const retained = this.retainedNativeConfiguration(session)?.observation
+    if (sequence < (watch.sequence ?? 0) || sequence < (retained?.sequence ?? 0)) return false
+    watch.sequence = sequence
+    return true
+  }
+
   /** All readers and projections qualify the same original configuration cache. */
   private retainedNativeConfiguration(session: AgentMuxStoredAgentSession): AgentConfigurationSnapshot | null {
     const configuration = this.nativeConfigurations.get(session.agentSessionId)
@@ -13675,6 +13810,11 @@ export class AgentMuxClient {
       if (watch && JSON.parse(watch.key)[0] === event.runId) {
         this.nativeStatusWatches.delete(agentSession.agentSessionId)
         watch.controller.abort(); watch.observer?.dispose()
+      }
+      const configurationWatch = this.nativeConfigurationWatches.get(agentSession.agentSessionId)
+      if (configurationWatch?.runId === event.runId) {
+        this.nativeConfigurationWatches.delete(agentSession.agentSessionId)
+        configurationWatch.controller.abort(); configurationWatch.observer?.dispose()
       }
       this.invalidateEndedRunReadiness(agentSession, runRef(event.runId))
       this.recovery.wake(agentSession.agentSessionId)

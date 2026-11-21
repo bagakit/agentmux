@@ -1,3 +1,4 @@
+import { AgentConfigurationRequestError } from './lib/agent-configuration-request'
 import { recallIntentKey, restoreRecallCardIntents, type RecallCardIntent, type RecallCardIntents } from './lib/recall-card-intent'
 import { sourceFilesQuery, sourceFilesMappingMatches } from '../../shared/source-files'
 import { topicFileDirectory, topicFilesTarget } from './lib/topic-files-address'
@@ -873,7 +874,7 @@ export const MAX_AGENT_STEER_QUEUE_ENTRIES = 100
 const agentSteerDrains = new Map<string, { promise: Promise<void>; wake: boolean; explicitSteers: Set<string>; submitted: Set<string>; failures: Map<string, unknown>; waitingForInteraction: Set<string> }>()
 type SteerDeliveryAttempt = { seed: DeliveryAttemptSeed; stage: string; diagnostic?: { logId: string; notice: string } }
 // A click's diagnostic follows its one ordered consumer; it never grants input.
-const configurationAttempts = new Map<string, { operationId: string; pending: Promise<import('@agentmux/core').AgentConfigurationReceipt | undefined> | null }>()
+const configurationAttempts = new Map<string, Promise<import('@agentmux/core').AgentConfigurationReceipt>>()
 const postureAttempts = new Map<string, { operationId: string; pending: Promise<void> | null }>()
 const preparationRetryCalls = new Map<string, AbortController>()
 const manualSteerAttempts = new Map<string, SteerDeliveryAttempt>()
@@ -1932,7 +1933,8 @@ export type AppState = GitReadingActions & {
   send(sessionId: string, text: string, onRejected?: (error: unknown) => void, origin?: 'manual', agentMuxNote?: string, options?: AgentSteerOptions): boolean
   inspectInteraction(sessionId: string, operationId: string): Promise<import('@agentmux/core').AgentMuxInteractionOperationReceipt | null>
   respondInteraction(sessionId: string, response: AgentMuxInteractionResponse, intent: import('@agentmux/core').AgentMuxInteractionOperationIntent & { moteSource?: import('@agentmux/core').AgentInputMoteSource }): Promise<import('@agentmux/core').AgentMuxInteractionOperationReceipt>
-  setConfiguration(sessionId: string, expectedRevision: string, configId: string, value: string | boolean): Promise<import('@agentmux/core').AgentConfigurationReceipt | undefined>
+  setConfiguration(sessionId: string, request: Omit<import('@agentmux/core').AgentConfigurationSet, 'operationId'>): Promise<import('@agentmux/core').AgentConfigurationReceipt>
+  inspectConfigurationOperation(sessionId: string, operationId: string): Promise<import('@agentmux/core').AgentConfigurationReceipt | null>
   setPosture(sessionId: string, modeId: string): Promise<void>
   interrupt(sessionId: string, originalMember?: SpaceMountMemberTarget): Promise<void>
   controlSessionContinuity(sessionId: string, intentOperationId: string, action: 'continue' | 'cancel', additionalAttempts?: number): Promise<DesktopContinuityControlResult>
@@ -14199,27 +14201,31 @@ export const useAppStore = create<AppState>()<[['zustand/persist', PersistedAppS
     await get().flushAgentSteerQueue(sessionId)
     return receipt
   },
-  async setConfiguration(sessionId, expectedRevision, configId, value) {
+  async setConfiguration(sessionId, request) {
     const session = get().sessions.find(item => item.id === sessionId)
-    if (!session || session.kind !== 'agent') return
-    const key = JSON.stringify([session.control, configId, value, expectedRevision])
-    const prior = configurationAttempts.get(key)
-    if (prior?.pending) return await prior.pending
-    const attempt = prior ?? { operationId: mintObjectId(), pending: null }
+    if (!session || session.kind !== 'agent') throw new Error('The original Agent Session is unavailable. No model change was requested.')
+    const target = request.target
+    if (target.hostId !== session.control.hostId || target.agentSessionId !== session.control.agentSessionId || target.expectedRun.runId !== session.control.run.runId) {
+      throw new Error('The original model target changed. Read this Session’s model choices again.')
+    }
+    const key = JSON.stringify([session.control, request])
+    const pending = configurationAttempts.get(key)
+    if (pending) return await pending
+    const original = { ...request, operationId: mintObjectId() }
+    const attempt = Promise.resolve().then(async () => {
+      try { return await api.sessions.setConfiguration(session.control, original) }
+      catch (error) { throw new AgentConfigurationRequestError(original, error) }
+      finally { if (configurationAttempts.get(key) === attempt) configurationAttempts.delete(key) }
+    })
     configurationAttempts.set(key, attempt)
-    attempt.pending = (async () => {
-      try {
-        const receipt = await api.sessions.setConfiguration(session.control, { configId, value, expectedRevision, operationId: attempt.operationId })
-        if (receipt.outcome !== 'applied' || receipt.diskDurability !== 'confirmed') {
-          get().reportError(new Error(`Session settings operation ${attempt.operationId} is ${receipt.outcome}. ${receipt.issue ?? ''}`))
-        }
-        if (receipt.outcome === 'applied' && receipt.diskDurability === 'confirmed' || receipt.outcome === 'not-applied') configurationAttempts.delete(key)
-        return receipt
-      } catch (error) {
-        get().reportError(new Error(`Original session settings operation ${attempt.operationId}. ${presentError(error)}`))
-      } finally { attempt.pending = null }
-    })()
-    return await attempt.pending
+    return await attempt
+  },
+  async inspectConfigurationOperation(sessionId, operationId) {
+    const session = get().sessions.find(item => item.id === sessionId)
+    if (!session || session.kind !== 'agent') throw new Error('The original Agent Session is unavailable. Its model operation is retained.')
+    const result = await api.sessions.inspectConfiguration(session.control, operationId)
+    if (result.kind !== 'operation') throw new Error('The original model operation inspection returned another result.')
+    return result.operation
   },
   async setPosture(sessionId, modeId) {
     const session = get().sessions.find((item) => item.id === sessionId)

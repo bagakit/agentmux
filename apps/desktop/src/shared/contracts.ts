@@ -2227,7 +2227,8 @@ export type AgentMuxDesktopApi = {
     // Set the Agent's live security posture in-band. The renderer sends the picked mode id; Core resolves
     // the Provider's declared keystroke and writes it over the PTY-input transport (bytes never cross IPC).
     inspectInformation(session: AgentSessionControl): Promise<import('@agentmux/core').AgentInformationInspection>
-    setConfiguration(session: AgentSessionControl, request: Omit<import('@agentmux/core').AgentConfigurationSet, 'target'>): Promise<import('@agentmux/core').AgentConfigurationReceipt>
+    inspectConfiguration(session: AgentSessionControl, operationId?: string): Promise<import('@agentmux/core').AgentConfigurationInspection>
+    setConfiguration(session: AgentSessionControl, request: import('@agentmux/core').AgentConfigurationSet): Promise<import('@agentmux/core').AgentConfigurationReceipt>
     setPosture(session: AgentSessionControl, modeId: string, operationId: string): Promise<import('@agentmux/core').PostureReceipt>
     reopen(reference: SessionHistoryReference, expectedRetiredAt: number, operationId: string): Promise<SessionSnapshot>
     reconcileReopen(reference: SessionHistoryReference, expectedRetiredAt: number, operationId: string): Promise<SessionSnapshot>
@@ -2512,7 +2513,7 @@ export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions'
   scratch: Omit<AgentMuxDesktopApi['scratch'], 'listTopics'> & {
     listTopics(workspaceId: string): Promise<import('@agentmux/host/mote-model').ScratchTopicListResponse>
   }
-  sessions: Omit<AgentMuxDesktopApi['sessions'], 'onEvent' | 'observeHistory' | 'readHistory' | 'readUsage' | 'inspectRecord' | 'deleteRecord' | 'write' | 'paste' | 'submitPrompt' | 'inspectInput' | 'inspectSubmission' | 'stopInputWaiting' | 'rejoinInputWaiting' | 'attach' | 'refreshAttachment' | 'replay' | 'restart' | 'controlContinuity' | 'recover' | 'stop' | 'inspectStop'> & {
+  sessions: Omit<AgentMuxDesktopApi['sessions'], 'onEvent' | 'observeHistory' | 'readHistory' | 'readUsage' | 'inspectRecord' | 'deleteRecord' | 'write' | 'paste' | 'submitPrompt' | 'inspectInput' | 'inspectSubmission' | 'stopInputWaiting' | 'rejoinInputWaiting' | 'attach' | 'refreshAttachment' | 'replay' | 'restart' | 'controlContinuity' | 'recover' | 'stop' | 'inspectStop' | 'setConfiguration'> & {
     recover(...args: Parameters<AgentMuxDesktopApi['sessions']['recover']>): Promise<import('./session-recovery-result').SessionRecoveryOperationReply>
     stop(...args: Parameters<AgentMuxDesktopApi['sessions']['stop']>): Promise<import('./session-stop-result').SessionStopReply>
     inspectStop(...args: Parameters<AgentMuxDesktopApi['sessions']['inspectStop']>): Promise<import('./session-observation-result').SessionObservationResult<Awaited<ReturnType<AgentMuxDesktopApi['sessions']['inspectStop']>>>>
@@ -2525,6 +2526,7 @@ export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions'
     write(...args: Parameters<AgentMuxDesktopApi['sessions']['write']>): Promise<SessionInputWriteResult>
     paste(...args: Parameters<AgentMuxDesktopApi['sessions']['paste']>): Promise<SessionInputWriteResult>
     submitPrompt(...args: Parameters<AgentMuxDesktopApi['sessions']['submitPrompt']>): Promise<SessionInputWriteResult>
+    setConfiguration(...args: Parameters<AgentMuxDesktopApi['sessions']['setConfiguration']>): Promise<SessionInputOperationResult<Awaited<ReturnType<AgentMuxDesktopApi['sessions']['setConfiguration']>>>>
     inspectInput(...args: Parameters<AgentMuxDesktopApi['sessions']['inspectInput']>): Promise<SessionInputOperationResult<Awaited<ReturnType<AgentMuxDesktopApi['sessions']['inspectInput']>>>>
     inspectSubmission(...args: Parameters<AgentMuxDesktopApi['sessions']['inspectSubmission']>): Promise<SessionInputOperationResult<Awaited<ReturnType<AgentMuxDesktopApi['sessions']['inspectSubmission']>>>>
     stopInputWaiting(...args: Parameters<AgentMuxDesktopApi['sessions']['stopInputWaiting']>): Promise<SessionInputOperationResult<Awaited<ReturnType<AgentMuxDesktopApi['sessions']['stopInputWaiting']>>>>

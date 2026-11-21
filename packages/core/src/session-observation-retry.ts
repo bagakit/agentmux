@@ -1,6 +1,6 @@
 import type { AgentMuxStoredAgentSession } from './types.js'
 
-export type SessionObservationKind = 'hook' | 'terminal' | 'native-status'
+export type SessionObservationKind = 'hook' | 'terminal' | 'native-status' | 'native-configuration'
 export type SessionObservationTarget = { session: AgentMuxStoredAgentSession; epoch: number }
 
 /** The immutable observation source, not a projection of whether the Agent is healthy. */

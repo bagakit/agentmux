@@ -1,11 +1,11 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { SearchInput } from '../input/SearchInput.js'
 import { focusChoice } from '../lib/choice-focus.js'
 import { isImeOwnedKeyboardEvent } from '../lib/ime-keyboard-event.js'
 import { SemanticIcon } from '../theme/semantic-icon.js'
 import { AnchoredChoice } from './AnchoredChoice.js'
 
-export type SelectionOption = { value: string; label: string; disabled?: boolean; icon?: ReactNode; description?: string }
+export type SelectionOption = { value: string; label: string; disabled?: boolean; icon?: ReactNode; description?: string; group?: { id: string; label: string } }
 export type SelectionFieldProps = {
   id?: string | undefined; label: string; value: string | null; options: readonly SelectionOption[]
   onValueChange(value: string): void; disabled?: boolean; className?: string; menuClassName?: string
@@ -60,7 +60,7 @@ export function SelectionField({ id, label, value, options, onValueChange, disab
     change(false)
   }
   const row = (option: SelectionOption, missing = false) => <button key={option.value} type="button" role="option"
-    aria-selected={option.value === value} aria-disabled={disabled || option.disabled || undefined} disabled={disabled || option.disabled}
+    aria-selected={option.value === value} aria-label={option.group ? [option.group.label, option.label, option.description].filter(Boolean).join(' · ') : undefined} aria-disabled={disabled || option.disabled || undefined} disabled={disabled || option.disabled}
     data-value={option.value} data-missing={missing || undefined} data-disabled={disabled || option.disabled ? '' : undefined}
     className="selection-field__option" tabIndex={-1} onClick={() => pick(option)}>
     <span className="selection-field__mark">{option.value === value && <SemanticIcon name="status.selected" size={13} />}</span>
@@ -127,8 +127,11 @@ export function SelectionField({ id, label, value, options, onValueChange, disab
       tabIndex={hasDialog ? 0 : undefined} onFocus={event => {
         if (event.target === event.currentTarget) available()[0]?.focus({ preventScroll: true })
       }}>
-      {open && value !== null && !selected && !needle ? row({ value, label: labelForValue }, true) : null}
-      {open && visible.map(option => row(option))}
+      {open && value !== null && !selected && !needle ? row({ value, label: labelForValue, ...(missingOptionDescription ? { description: missingOptionDescription } : {}) }, true) : null}
+      {open && visible.map((option, index) => <Fragment key={option.value}>
+        {option.group && option.group.id !== visible[index - 1]?.group?.id ? <div className="selection-field__group" role="presentation">{option.group.label}</div> : null}
+        {row(option)}
+      </Fragment>)}
     </div>
     {canSearch && !visible.length ? <p className="selection-field__empty" role="status">No matching options.</p> : null}
     {footer ? <div className="selection-field__footer">{footer}</div> : null}
