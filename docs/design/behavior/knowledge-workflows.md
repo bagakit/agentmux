@@ -108,7 +108,7 @@ Agent 的“转正”从一个准确原 Agent Session 的工作中提炼可复�
 
 ## Recall、Notebook 与块知识
 
-Recall 表达积累、连接与回顾知识，与 Survey 并列。Survey 左侧不再承载 Notebook／Note 目录，也不通过顶部模式切换才能进入笔记；Recall 直接进入当前 Notebook 的页面组织：恢复已保存的 Notebook 选择，尚未选择时使用「随手记」；当前 Notebook 信息是创建与切换 Notebook 的入口；已保存目标暂不可用时保原引用与恢复说明，不擅自换成另一个 Notebook。Notebook 是持久页面集合，Note 是页面内容，Tab／Region 是查看位置；关闭查看不删除页面，目录不从活跃窗口或已打开文件反推完整知识。
+Recall 表达积累、连接与回顾知识，与 Survey 并列。Survey 左侧不再承载 Notebook／Note 目录，也不通过顶部模式切换才能进入笔记。Recall 恢复已保存的目标，缺省进入「随手记」中当天的 Daily。当天尚无 Daily 时保留 Notebook 目录，提供创建当天 Daily 的明确动作，进入或刷新不会创建文件。当前 Notebook 信息是创建与切换 Notebook 的入口。明确选择的 Note 与未知的原恢复目标均保留原地址。Notebook 是持久页面集合，Note 是页面内容，Tab／Region 是查看位置。关闭查看不删除页面，目录不从活跃窗口或已打开文件反推完整知识。
 
 ### Daily 与可复用知识卡
 
