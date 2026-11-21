@@ -1,5 +1,6 @@
-import { returnWorkbenchWindow, focusWorkbenchWindow, openWorkbenchWindow } from '../lib/workbench-windows'
+import { returnWorkbenchWindow } from '../lib/workbench-windows'
 import { SpatialWindowGrip } from './SpatialWindowGrip'
+import { WorkbenchWindowPlaceholder } from './WorkbenchWindowPlaceholder'
 import { isMacPlatform } from '../lib/host-platform'
 import { DesktopClientUiProvider } from './DesktopClientUiProvider'
 import { Component, useContext, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
@@ -238,6 +239,7 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
   const parking = useRef<HTMLDivElement>(null)
   const showHomeNotice = Boolean(homeNotice)
   const [noticeHome, setNoticeHome] = useState<HTMLElement | null>(null)
+  const [noticeProjection, setNoticeProjection] = useState<HTMLElement | null>(null)
   const switchTarget = useMemo(() => reference ? { ...reference, presentationId: projection?.presentationId ?? surface ?? 'space' } : null,
     [reference?.displayWorkspaceId, reference?.groupId, reference?.tabId, reference?.regionId, projection?.presentationId, surface])
   // Reveal and spatial moves update this owner; cleanup means its exact identity departed.
@@ -319,9 +321,15 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
       }
       // Confirm the actual placement before describing it. Pending targets retain
       // the original View; a destination hint alone does not prove it moved.
-      setNoticeHome(windowPlacement || showHomeNotice && targetId !== null ? document.getElementById(homeId) : null)
+      setNoticeHome(windowPlacement || showHomeNotice && targetId !== null
+        ? parentDocument.getElementById(homeId) ?? document.getElementById(homeId) : null)
+      const projectionNotice = windowPlacement && targetId !== null && targetId !== homeId
+      const projectionSlot = projectionNotice
+        ? surfaceDocument.getElementById(targetId) ?? parentDocument.getElementById(targetId) ?? document.getElementById(targetId)
+        : null
+      setNoticeProjection(projectionSlot)
       if (switchTarget) tabSwitchObservation.observe(switchTarget)
-      return true
+      return !projectionNotice || !active || !visible || projectionSlot !== null
     }
     // Keep the already-mounted view in its last host while a Focus slot arrives.
     // Initial restoration has a private parking host, never a second view tree.
@@ -334,13 +342,12 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
     return () => observer.disconnect()
   }) // The original layout can replace a slot without changing its exact address.
   useLayoutEffect(() => () => host.remove(), [host])
+  const windowNotice = windowPlacement && originalTarget ? <WorkbenchWindowPlaceholder target={originalTarget} placement={windowPlacement} /> : null
   const content = <WorkbenchDocumentContext.Provider value={documentContext}><WorkbenchPresentationContext.Provider value={presentation}>
     <div ref={parking} className="retained-workbench-parking" aria-hidden="true" inert />{createPortal(<DesktopClientUiProvider document={hostDocument}><MotePresentationContext contextKey={moteContextKey} isolated={surface === 'mote'}>{spatialChrome ? <SpatialWindowGrip chrome={spatialChrome} /> : null}{children}</MotePresentationContext></DesktopClientUiProvider>, host)}
-    {windowPlacement && noticeHome ? createPortal(<div className="workbench-restore-notice" role="status">{originalTarget?.kind === 'surface' ? (originalTarget.surface === 'survey' ? 'Survey is open in its own window.' : 'Recall is open in its own window.') : `Original ${kind === 'tab' ? 'Tab' : 'Region'} is in its independent window.`}
-      <button className="small-button" onClick={() => void focusWorkbenchWindow(windowPlacement.window)}>Show window</button>
-      <button className="small-button" onClick={() => void returnWorkbenchWindow(windowPlacement.window)}>{originalTarget?.kind === 'surface' ? 'Return to main window' : workbenchReturnLabel(windowPlacement.returnContext)}</button>
-      {originalTarget && workbenchDocumentIdentity(windowPlacement.destination.ownerDocument) === null ? <button className="small-button" onClick={() => void openWorkbenchWindow(originalTarget)}>Recover original window</button> : null}
-    </div>, noticeHome) : targetId !== null && noticeHome && homeNotice ? createPortal(homeNotice, noticeHome) : null}
+    {noticeHome && (windowNotice ? createPortal(windowNotice, noticeHome)
+      : targetId !== null && homeNotice ? createPortal(homeNotice, noticeHome) : null)}
+    {windowNotice && noticeProjection && noticeProjection !== noticeHome ? createPortal(windowNotice, noticeProjection) : null}
   </WorkbenchPresentationContext.Provider></WorkbenchDocumentContext.Provider>
   // A whole surface stays in its own permanent slot until native transfer. Its
   // cross-document move captures reading once, at attach, for the actual move.
