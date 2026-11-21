@@ -1,5 +1,6 @@
+import { useDndContext, useDroppable } from '@dnd-kit/core'
 import { SurveyCompositionCheckbox } from './SurveyCompositionCheckbox'
-import type { SurveyCompositionSelectionControl } from '../lib/survey-composition-drag'
+import type { SurveyCompositionSelectionControl, SurveyContentDrag, SurveyTabDrop } from '../lib/survey-composition-drag'
 import { surveyContentKey, useSurveyContentDrag } from '../lib/survey-composition-drag'
 import { workReferenceHostId } from '../lib/agent-work-mode'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -21,8 +22,15 @@ const FileIcon = semanticIconComponent('file.text')
 const CloseIcon = semanticIconComponent('action.close')
 
 /** The same Tab naming owner as the workbench, scoped to this Tab's Sessions. */
-export function SurveyTabColumn({ tab, selected, onSelect, onClose, unconfirmedBrowserRegionIds, compositionEnabled = false, selection, active = true }: { tab: WorkbenchTab; selected: boolean; onSelect(): void; onClose(title: string): void; unconfirmedBrowserRegionIds?: ReadonlySet<string> | undefined; compositionEnabled?: boolean; selection?: SurveyCompositionSelectionControl | undefined; active?: boolean }) {
+export function SurveyTabColumn({ tab, zoneId, order, selected, onSelect, onClose, unconfirmedBrowserRegionIds, compositionEnabled = false, selection, active = true }: { tab: WorkbenchTab; zoneId: string; order: readonly string[]; selected: boolean; onSelect(): void; onClose(title: string): void; unconfirmedBrowserRegionIds?: ReadonlySet<string> | undefined; compositionEnabled?: boolean; selection?: SurveyCompositionSelectionControl | undefined; active?: boolean }) {
   const reference = { kind: 'tab' as const, tabId: tab.id }
+  const { active: dragActive } = useDndContext()
+  const source = (dragActive?.data.current as SurveyContentDrag | undefined)?.reference
+  const sourceIndex = source?.kind === 'tab' && source.tabId !== tab.id ? order.indexOf(source.tabId) : -1
+  const target: SurveyTabDrop = { kind: 'tab-order', zoneId, tabId: tab.id }
+  const { setNodeRef, isOver } = useDroppable({ id: JSON.stringify(['survey-tab-order', zoneId, tab.id]),
+    data: target, disabled: !compositionEnabled || !active || sourceIndex < 0 })
+  const edge = isOver && sourceIndex >= 0 ? sourceIndex < order.indexOf(tab.id) ? 'after' : 'before' : undefined
   const sessions = useWorkbenchTabSessions(tab)
   const metadata = useWorkbenchTabNameMetadata(tab)
   const names = useWorkbenchTabRecord('agentNames', tab)
@@ -53,7 +61,7 @@ export function SurveyTabColumn({ tab, selected, onSelect, onClose, unconfirmedB
     label.style.setProperty('--survey-title-travel', `${-travel}px`)
     label.style.setProperty('--survey-title-duration', `${Math.max(1, travel / 28)}s`)
   }
-  return <div className="survey-tab-cell" data-selectable={Boolean(selection) || undefined} data-content-dragging={drag.isDragging || undefined}>{selection ? <SurveyCompositionCheckbox selection={selection} label={`Select complete Tab: ${title}`} /> : null}<button ref={drag.setNodeRef} {...drag.attributes} {...drag.listeners} data-survey-content-key={surveyContentKey(reference)} type="button" className="survey-tab-column" data-survey-tab-id={tab.id} aria-label={`Show survey tab: ${title}`}
+  return <div ref={setNodeRef} className="survey-tab-cell" data-tab-order-edge={edge} data-selectable={Boolean(selection) || undefined} data-content-dragging={drag.isDragging || undefined}>{selection ? <SurveyCompositionCheckbox selection={selection} label={`Select complete Tab: ${title}`} /> : null}<button ref={drag.setNodeRef} {...drag.attributes} {...drag.listeners} data-survey-content-key={surveyContentKey(reference)} type="button" className="survey-tab-column" data-survey-tab-id={tab.id} aria-label={`Show survey tab: ${title}`}
     aria-current={selected ? 'true' : undefined} aria-description={status} title={status ? `${title}\n${status}` : title} onClick={onSelect}
     onPointerEnter={event => revealTitle(event.currentTarget)} onFocus={event => revealTitle(event.currentTarget)}>
     <SurveyTabPreview tab={tab} active={active} placeholders={placeholders}>

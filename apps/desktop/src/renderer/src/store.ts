@@ -144,6 +144,7 @@ import { acknowledgedNameProjection, projectedNameRevision } from './lib/name-au
 import type { AgentMuxDisplayLabel, AgentMuxNameTarget, AgentMuxDisplayLabelResult } from '@agentmux/core/spatial-graph'
 import { displayLabel, nameTargetKey } from '@agentmux/core/spatial-graph'
 import { createSurveyBrowser } from './lib/survey-browser-creation'
+import { reorderSurveyResearchTabs, type SurveyResearchTabOrder } from './lib/survey-research-tab-order'
 import { surveyPageTimes, type SurveyPageTimes } from './lib/survey-page-organization'
 import { planSurveyTabComposition, reconcileResearchCompositionSelection, type SurveyCompositionRequest, type SurveyCompositionReport } from './lib/survey-tab-composition'
 import { retainSurveyComposition, surveyCompositionTargetConfirmed, restoreSurveyCompositionRecoveries, changeSurveyCompositionRecovery, isSurveyCompositionRecovery, type SurveyCompositionRecovery, type SurveyCompositionReview } from './lib/survey-composition-recovery'
@@ -1423,6 +1424,7 @@ export type AppState = GitReadingActions & {
   setSurveyZoneSelection(selection: SurveySelection | null): void
   setSurveyToolsOpen(open: boolean): void
   createSurveyBrowser(input: Parameters<typeof createSurveyBrowser>[1]): ReturnType<typeof createSurveyBrowser>
+  reorderSurveyResearchTab(before: SurveyResearchTabOrder, target: string): Promise<void>
   composeSurveyTabs(request: SurveyCompositionRequest): Promise<SurveyCompositionReport>
   surveyCompositionRecoveries: unknown[]
   reviewSurveyComposition(requestId: string, repairReferences?: boolean): Promise<SurveyCompositionReview>
@@ -6935,6 +6937,13 @@ export const useAppStore = create<AppState>()<[['zustand/persist', PersistedAppS
       },
       checkpointPreparation: checkpointSpatialWorkbench
     }, input)
+  },
+  async reorderSurveyResearchTab(before, target) {
+    const state = get(), topics = scratchTopicsForConfig(state.config, state.scratchTopicSnapshots) ?? []
+    const layout = reorderSurveyResearchTabs(state, spatialCatalog(state, topics), before, target)
+    if (!layout) throw new Error('The original Tab order changed. The current order and content are kept.')
+    set({ layouts: { ...state.layouts, [before.workspaceId]: layout } })
+    await checkpointSpatialWorkbench()
   },
   async composeSurveyTabs(request) {
     let committed: import('@agentmux/core/spatial-graph').AgentMuxSpatialState | null = null

@@ -42,6 +42,7 @@ import { surveyCompositionDestinations, type SurveyCompositionDestinationIntent 
 import type { SurveyContentReference, SurveyCompositionDropTarget, SurveyCompositionSelectionControl } from '../lib/survey-composition-drag'
 import { SurveyItemList } from './SurveyItemList'
 import { useSurveyListOrganization } from '../hooks/useSurveyListOrganization'
+import { surveyResearchTabOrder, type SurveyResearchTabOrder } from '../lib/survey-research-tab-order'
 import { moveSurveyListItem, samePage } from '../lib/survey-list'
 import { BrowserStartPage } from './BrowserStartPage'
 import { resolveBrowserStartPage } from '../../../shared/browser-start-page'
@@ -194,7 +195,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAct
   const unresolvedCompositions = pendingCompositions.filter(isSurveyCompositionRecovery)
   const reviewingOperation = unresolvedCompositions.find(operation => operation.requestId === reviewingComposition)
   const compositionBusy = useRef(false)
-  const compositionDrag = useRef<{ requestId: string; reservedZoneId: string; sources: SurveyCompositionSource[]; researchZoneId: string | null; organization: typeof list.stored; editable: typeof list.editable } | null>(null)
+  const compositionDrag = useRef<{ requestId: string; reservedZoneId: string; sources: SurveyCompositionSource[]; tabOrder?: SurveyResearchTabOrder | null; researchZoneId: string | null; organization: typeof list.stored; editable: typeof list.editable } | null>(null)
   const zonesForComposition = useMemo(() => new Map(catalog?.zones.map(zone => [zone.zoneId, zone]) ?? []), [catalog])
   function captureContent(reference: SurveyContentReference): SurveyCompositionSource[] | null {
     if (!catalog) return null
@@ -224,7 +225,9 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAct
     const captured = !compositionBusy.current && captureContent(reference)
     const selected = captured && captured.every(source => selectedSources.some(original => sourceKey(original) === sourceKey(source)))
     const sources = captured ? selected ? selectedSources : captured : null
-    compositionDrag.current = sources ? { sources, requestId: mintObjectId(), reservedZoneId: mintObjectId(),
+    const tabOrder = reference.kind === 'tab' && sources?.length === 1 && sources[0]?.zoneId && catalog
+      ? surveyResearchTabOrder(useAppStore.getState(), catalog, sources[0].zoneId, reference.tabId) : null
+    compositionDrag.current = sources ? { sources, tabOrder, requestId: mintObjectId(), reservedZoneId: mintObjectId(),
       researchZoneId: reference.kind === 'research' && captured && sources.length === captured.length && sources.every(source => captured.some(original => sourceKey(original) === sourceKey(source))) ? reference.zoneId : null,
       organization: list.stored, editable: list.editable } : null
     return sources ? `${sources.length} ${sources.every(source => source.kind === 'page') ? sources.length === 1 ? 'page' : 'pages' : sources.every(source => source.kind === 'tab') ? sources.length === 1 ? 'Tab' : 'Tabs' : 'items'}` : null
@@ -241,6 +244,8 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAct
   function canCompose(target: SurveyCompositionDropTarget): boolean {
     const held = compositionDrag.current
     if (!held || !catalog || !visible || controlsCoverPage) return false
+    if (target.kind === 'tab-order') return held.tabOrder?.zoneId === target.zoneId
+      && held.tabOrder.tabId !== target.tabId && held.tabOrder.members.includes(target.tabId)
     if (target.kind === 'independent') return held.researchZoneId === null && completeResearch(held.sources) === null
     if (target.kind === 'list-group') {
       if (held.researchZoneId === null && !canGroupContent(held.sources)) return false
@@ -260,6 +265,10 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAct
     const held = compositionDrag.current
     if (!held || !target || !canCompose(target) || !catalog) { compositionDrag.current = null; return }
     compositionDrag.current = null
+    if (target.kind === 'tab-order') {
+      void useAppStore.getState().reorderSurveyResearchTab(held.tabOrder!, target.tabId).catch(cause => setError(presentError(cause)))
+      return
+    }
     let sources = held.sources
     const wholeZoneId = target.kind === 'list-group' ? held.researchZoneId ?? completeResearch(sources) : null
     if (target.kind === 'list-group' && wholeZoneId) {
@@ -830,7 +839,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ windowAct
             const itemOptions = itemOptionsFor(zone, status.details)
             return <SurveyZoneItem pinned={pinnedKeys.has(surveyPinKey({ kind: 'zone', zoneId }))} selection={selectionFor({ kind: 'research', zoneId: zone.zoneId })} compositionEnabled={compositionEnabled} dragHandle={dragHandle} key={zone.zoneId} zone={zone} title={itemTitle(zone)} glyph={itemGlyph(zone)} selected={selection?.zoneId === zone.zoneId || currentPageZoneId === zone.zoneId}
               showTitle={selectingContent || sidebarCollapsed || itemTabs.length < 2 || Boolean(explorationNames[zone.zoneId]?.trim())}
-              tabColumns={itemTabs.length > 1 ? <div className="survey-item-tabs" aria-label={`Tabs in ${itemTitle(zone)}`}>{itemTabs.map(tabId => <SurveyTabColumn active={observeWork && !controlsCoverPage && !sidebarCollapsed} selection={selectionFor({ kind: 'tab', tabId })} compositionEnabled={compositionEnabled} key={tabId} tab={tabs[tabId]!} unconfirmedBrowserRegionIds={unconfirmedBrowserRegionIds} selected={selection?.zoneId === zone.zoneId && selection.active?.tabId === tabId || currentPageOwner?.tab.id === tabId} onSelect={() => chooseTab(zone.zoneId, tabId)} onClose={title => closeItemTab(zone.zoneId, tabId, title)} />)}</div> : null}
+              tabColumns={itemTabs.length > 1 ? <div className="survey-item-tabs" aria-label={`Tabs in ${itemTitle(zone)}`}>{itemTabs.map(tabId => <SurveyTabColumn zoneId={zone.zoneId} order={itemTabs} active={observeWork && !controlsCoverPage && !sidebarCollapsed} selection={selectionFor({ kind: 'tab', tabId })} compositionEnabled={compositionEnabled} key={tabId} tab={tabs[tabId]!} unconfirmedBrowserRegionIds={unconfirmedBrowserRegionIds} selected={selection?.zoneId === zone.zoneId && selection.active?.tabId === tabId || currentPageOwner?.tab.id === tabId} onSelect={() => chooseTab(zone.zoneId, tabId)} onClose={title => closeItemTab(zone.zoneId, tabId, title)} />)}</div> : null}
               onCloseSingleTab={itemTabs.length === 1 ? () => closeItemTab(zone.zoneId, itemTabs[0]!, itemTitle(zone)) : undefined}
               options={<SurveyItemOptions {...itemOptions} rowAction compact />}
               onContextMenu={button => { contextOrigin.current = button; contextOrganization.current = list.stored; setContextItem({ kind: 'zone', zoneId: zone.zoneId }) }} activity={status.summary} activityDescription={status.description} editing={renamingZoneId === zone.zoneId} nameDraft={itemNameDraft.current?.zoneId === zone.zoneId ? itemNameDraft.current : undefined} onEdit={editing => editItemName(zone, editing)}
