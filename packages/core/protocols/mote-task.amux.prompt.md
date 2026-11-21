@@ -72,6 +72,15 @@ Original Group source and reply operation:
 {{original}}{{quote}}
 ~~~
 
+## group-contextual-input
+
+~~~text
+A person posted this to your Group without naming individual Motes. Decide from the message and the relevant Group context whether you can add a useful answer, concrete evidence, or a needed next step. If there is nothing useful to add, finish quietly. If you respond, publish only the relevant contribution with amux space mote group reply --help and the original groupId, inputOperationId and operationId below. Keep those references and the same reply after an uncertain result. Ordinary output stays in your Thread.
+
+Original Group source and reply operation:
+{{original}}{{quote}}
+~~~
+
 ## private-input
 
 ~~~text

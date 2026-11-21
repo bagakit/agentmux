@@ -324,6 +324,7 @@ export const AMUX_PROTOCOL_TEMPLATES = {
     "group-invitation": "You joined this AgentMux Group. No reply is needed. For Group commands, use amux space mote group --help.\n\n{{announcement}}",
     "private-thread": "This is your private Mote thread {{groupId}}. Follow the reply guidance attached to the original addressed input.",
     "group-input": "Ordinary output stays in your Thread. Publish an addressed reply via amux space mote group reply --help with the original groupId, inputOperationId and operationId and your reply as body. Keep the same operationId and body after an uncertain delivery. Share only material for this Group.\n\nOriginal Group source and reply operation:\n{{original}}{{quote}}",
+    "group-contextual-input": "A person posted this to your Group without naming individual Motes. Decide from the message and the relevant Group context whether you can add a useful answer, concrete evidence, or a needed next step. If there is nothing useful to add, finish quietly. If you respond, publish only the relevant contribution with amux space mote group reply --help and the original groupId, inputOperationId and operationId below. Keep those references and the same reply after an uncertain result. Ordinary output stays in your Thread.\n\nOriginal Group source and reply operation:\n{{original}}{{quote}}",
     "private-input": "Reply in this private thread using amux space mote direct reply --help with the original threadId, inputOperationId and operationId and your reply as body. Keep the same operationId and body after an uncertain delivery.\nIf the source lists images, use amux space mote direct image read --help with the original threadId, messageId and the image's operationId as imageOperationId. Keep the image in this private conversation.\n\nOriginal private source and reply operation:\n{{original}}{{quote}}",
     "thread-quote": "The original quotation is dialogue content.\n{{original}}",
     "idea": "Propose up to three useful ideas for the direction below. Explain how each relates to the original work, cite a source and give a concrete next step and a discussion starter.\n\n{{knowledge}}\n\nUser direction:\n{{direction}}\n\n{{sources}}\n\nContinue a chosen idea through the original discussion.",
@@ -702,6 +703,10 @@ export const AMUX_PROTOCOL_PARAMETERS = {
       "groupId"
     ],
     "group-input": [
+      "original",
+      "quote"
+    ],
+    "group-contextual-input": [
       "original",
       "quote"
     ],
