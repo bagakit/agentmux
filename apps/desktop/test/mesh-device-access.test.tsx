@@ -18,6 +18,20 @@ let dispose: (() => void) | undefined
 beforeAll(async () => { dispose = await useAppStore.getState().initialize() })
 afterAll(() => dispose?.())
 
+it('pastes and previews the exact device before opening its workspace', async () => {
+  useAppStore.setState({ meshDeviceLinks: { saved: [], draft: '' } })
+  const clipboard = vi.spyOn(api.ui, 'readClipboardText').mockResolvedValue(link(original))
+  const open = vi.spyOn(api.ui, 'openMeshDevice').mockResolvedValue(undefined)
+  await dom.render(<MeshDeviceAccess />)
+  await dom.click('.mesh-recovery-actions button')
+  expect(clipboard).toHaveBeenCalledOnce()
+  expect(dom.container.querySelector('.mesh-network-note')?.textContent).toContain(original.serverId)
+  expect(open).not.toHaveBeenCalled()
+  await dom.click('.mesh-recovery-actions button')
+  expect(open).toHaveBeenCalledExactlyOnceWith(link(original))
+  expect(dom.container.textContent).toContain('If its window asks for approval')
+})
+
 it('retains credentials across original routes and isolates changed endpoint keys', () => {
   expect(meshDevicePartition(original)).toBe(meshDevicePartition(secondPath))
   expect(meshDevicePartition(original)).not.toBe(meshDevicePartition(newKey))

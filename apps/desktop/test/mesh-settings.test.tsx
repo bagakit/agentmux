@@ -93,6 +93,35 @@ it.each(['revision rejected', 'unknown acknowledgement'])('keeps the selected ga
   }
 })
 
+it('resolving an advanced edit retains an in-flight device approval and its original receipt', async () => {
+  const gateway = { ...settings, revision: 'latest-gateway', configuration: { ...configuration, role: 'gateway' as const } }
+  const authored = { ...meshForm(settings.configuration), port: '9876' }
+  const peer = meshPeerCode({ ...settings, identity: { peerId: 'new-device', publicKey: 'device-public', epoch: 1 } }, false)!
+  useAppStore.setState({ meshSettingsDrafts: { [settings.owner.runtimeId]: { baseline: settings, form: authored, pairingInput: peer } } })
+  let acknowledge!: () => void
+  const delay = new Promise<void>(resolve => { acknowledge = resolve })
+  const call = vi.spyOn(api.mesh, 'call').mockImplementation(async (method, params) => {
+    if (method === 'mesh.inspect') return observation(gateway) as never
+    if (method === 'settings.mesh.configure' && 'configuration' in params) {
+      await delay
+      return { settings: { ...gateway, revision: 'approved', configuration: params.configuration }, diskDurability: 'confirmed' } as never
+    }
+    return gateway as never
+  })
+  await dom.render(<Editor active />)
+  await settled(() => dom.container.querySelector('.mesh-peer-pairing button')?.textContent === 'Approve device')
+  await dom.click('.mesh-peer-pairing button')
+  const held = () => meshDraftForRuntime(useAppStore.getState().meshSettingsDrafts, settings.owner.runtimeId)
+  const original = held()?.pending
+  expect(original?.peerApproval).toBe(peer)
+  await dom.click('.mesh-conflict button:last-child')
+  expect(held()?.pending).toEqual(original)
+  await act(async () => acknowledge())
+  expect(held()?.pending).toBeUndefined()
+  expect(held()?.form).toEqual(authored)
+  expect(call.mock.calls.filter(([method]) => method === 'settings.mesh.configure')).toHaveLength(1)
+})
+
 it('opens the guided connection from the Mesh homepage and submits one original settings operation', async () => {
   let remembered = { ...settings, identity: { peerId: 'new-local-peer', publicKey: 'local-public-key', epoch: 1 }, configuration: { ...configuration, role: 'disabled' as const } } as MeshNetworkSettings
   let connected = false
@@ -395,11 +424,6 @@ it('the production gateway join saves through Renderer and Main into two real Un
       clipboard.mockRestore()
       return code
     }
-    const addPeer = async (code: string) => {
-      await input('Paste a connection code', code)
-      expect(dom.container.querySelector('.mesh-peer-preview')?.textContent).toContain('gui-original-network')
-      await dom.click('.mesh-peer-pairing button')
-    }
     await settled(()=>dom.container.textContent?.includes('Mesh settings saved') ?? false)
     const aCode=await copyCode()
     expect(aCode).toBe(meshPeerCode(savedA))
@@ -421,7 +445,12 @@ it('the production gateway join saves through Renderer and Main into two real Un
     expect(bCode).toBe(meshPeerCode(savedB))
     bridge.mockRestore();bridge=connect(operator);await dom.render(<Editor active key="real-a-approve"/>);await selectHost('Device to manage',operator.host.id);await ready()
     await chooseRole('participant')
-    await addPeer(bCode);await dom.click('[data-settings-save-bar] button')
+    await input('Paste a connection code', bCode)
+    await settled(() => dom.container.querySelector('.mesh-peer-pairing button')?.textContent === 'Approve device')
+    const beforeApproval = calls.filter(row => row.method === 'settings.mesh.configure').length
+    await dom.click('.mesh-peer-pairing button')
+    await vi.waitFor(() => expect(calls.filter(row => row.method === 'settings.mesh.configure')).toHaveLength(beforeApproval + 1))
+    await settled(() => dom.container.textContent?.includes('Mesh settings saved') ?? false)
     expect(calls.filter(row=>row.method==='settings.mesh.configure').at(-1)?.params.target).toMatchObject({hostId:operator.host.id,expectedRuntimeId:initialA.owner.runtimeId,expectedOwnerInstanceId:initialA.owner.ownerInstanceId})
     const pairedA=await wait(()=>a.client.call('settings.mesh.inspect',{}),v=>v.revision!==savedA.revision)
     expect(pairedA.configuration).toMatchObject({role:'gateway',listen:savedA.configuration.listen,advertisedIngress:savedA.configuration.advertisedIngress,peers:[{peerId:initialB.identity.peerId,endpoints:[]}]})
