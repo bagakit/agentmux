@@ -123,10 +123,3 @@
 .mote-thread-groups__row:hover { background: var(--surface-2); }
 .mote-thread-groups__row > :last-child { margin-inline-start: auto; }
 .mote-thread-groups__issue { display: flex; align-items: center; gap: 8px; padding: 6px; color: var(--text-2); }
-
-.mote-group-files__body { display: grid; align-content: start; justify-items: start; gap: 8px; min-height: 0; overflow: auto; padding: 0 var(--group-inset) 12px; }
-.mote-group-files__body > section { min-width: 0; inline-size: 100%; }
-.mote-group-files__body pre { margin-block: 8px; padding: 10px; border-radius: 10px; background: var(--surface-2); overflow-wrap: anywhere; white-space: pre-wrap; }
-.mote-group-files__list { display: grid; gap: 2px; inline-size: 100%; margin: 0; padding: 0; list-style: none; }
-.mote-group-files__list button { display: flex; align-items: center; gap: 8px; inline-size: 100%; min-height: 32px; padding: 6px 8px; border: 0; border-radius: 8px; background: transparent; color: var(--text); text-align: start; cursor: pointer; }
-.mote-group-files__list button:hover { background: var(--surface-2); }

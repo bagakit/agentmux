@@ -4,8 +4,7 @@ import { Button } from '@agentmux/client-ui/components/Button'
 import { MoteGroupAvatar, MoteGroupConversation, useMoteGroups, type MoteGroupDraft, type MoteGroupCreation, type MoteGroupCandidate, type MoteGroupReadingPositions } from '@agentmux/client-ui/components/MoteGroupConversation'
 import type { MoteGroupSummary } from '@agentmux/core/mote/group'
 import type { MotePreferencesTarget } from '@agentmux/core/mote-preferences'
-import type { FileDirectoryEntry } from '@agentmux/core/files'
-import { Notice } from '@agentmux/client-ui/components/Notice'
+import { MoteGroupFiles } from '@agentmux/client-ui/components/MoteGroupFiles'
 import type { ScratchTopicSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import { useAppStore } from '../store'
 import { topicSpaceIconTarget } from '../lib/space-object-appearance'
@@ -79,9 +78,14 @@ export function DesktopMoteGroup({ groupId, moteId, members, creating, candidate
   onPerspectiveChange(moteId: string | undefined): void
 }) {
   const [files, setFiles] = useState<{ groupId: string | null; target: MotePreferencesTarget } | null>(null)
-  if (!creating && files && groupId === files.groupId) {
+  if (!creating && groupId && files && groupId === files.groupId) {
     const original = topicCandidates.find(candidate => candidate.target.spaceId === files.target.spaceId && candidate.target.zoneId === files.target.zoneId)
-    return <DesktopGroupTopicFiles key={files.target.spaceId} target={files.target} original={original} onClose={() => setFiles(null)} />
+    return <MoteGroupFiles key={groupId} call={api.moteGroup.call} groupId={groupId} target={files.target} name={original?.name} onBack={() => setFiles(null)}
+      actions={original && <Button onClick={() => {
+        void useAppStore.getState().openScratchTopic(original.topicId, files.target.expectedResource.workspaceId).then(opened => {
+          if (opened) { setFiles(null); requestPmoTeamsTopicFloatingClose({ restoreFocus: false }) }
+        }).catch(error => useAppStore.getState().reportError(error instanceof Error ? error.message : String(error)))
+      }}>打开 Topic</Button>} />
   }
   return <MoteGroupConversation call={api.moteGroup.call} candidates={candidates} topicCandidates={topicCandidates} renderMoteAvatar={renderMoteAvatar}
     onOpenTopicFiles={target => setFiles({ groupId, target })} groupId={groupId} creating={creating}
@@ -122,65 +126,4 @@ export function DesktopMoteThreadGroups({ moteId, active }: { moteId: string | u
     {directory.error ? <div role="status" className="mote-thread-groups__issue"><span>{directory.error}</span><Button onClick={directory.refresh}>重读群聊</Button></div> : null}
     {directory.hasMore ? <Button disabled={directory.loading} onClick={directory.loadMore}>更多群聊</Button> : null}
   </details>
-}
-
-
-function DesktopGroupTopicFiles({ target, original, onClose }: {
-  target: MotePreferencesTarget; original: TopicCandidate | undefined; onClose(): void
-}) {
-  const [directories, setDirectories] = useState<string[]>([])
-  const [document, setDocument] = useState<{ path: string; content: string } | null>(null)
-  const [list, setList] = useState<{ path: string; entries: FileDirectoryEntry[]; complete: boolean } | null>(null)
-  const [issue, setIssue] = useState<string | null>(null)
-  const [attempt, setAttempt] = useState(0)
-  const [selected, setSelected] = useState<string | null>(null)
-  const directory = directories.at(-1) ?? '.'
-  useEffect(() => {
-    let canceled = false
-    setIssue(null)
-    const input = { ...target, path: directory, mode: 'directory' as const, limit: 100 }
-    if (selected) {
-      const read = { ...target, path: selected }
-      void api.files.readPublic(read).then(({ result }) => {
-        if (canceled) return
-        if (result.status === 'read') setDocument(result.document)
-        else setIssue('message' in result ? result.message : '原文件不可读取。')
-      }).catch(error => { if (!canceled) setIssue(error instanceof Error ? error.message : String(error)) })
-    } else void api.files.listPublic(input).then(({ result }) => {
-      if (canceled) return
-      if (result.status === 'directory-listed') setList({ path: directory, entries: result.entries, complete: result.complete })
-      else setIssue('message' in result ? result.message : '原文件目录暂未确认。')
-    }).catch(error => { if (!canceled) setIssue(error instanceof Error ? error.message : String(error)) })
-    return () => { canceled = true }
-  }, [target, directory, selected, attempt])
-  return <section className="mote-group mote-group-files" aria-label="群文件">
-    <header className="mote-group__header"><div><h2>群文件</h2><p>{original?.name ?? '绑定的 Topic'}</p></div>
-      <Button onClick={onClose}>返回群聊</Button></header>
-    <div className="mote-group-files__body">
-      {selected || directories.length ? <Button onClick={() => {
-        if (selected) { setSelected(null); setDocument(null) } else setDirectories(value => value.slice(0, -1))
-      }}>返回上一级</Button> : null}
-      {original ? <Button onClick={() => {
-        void useAppStore.getState().openScratchTopic(original.topicId, target.expectedResource.workspaceId).then(opened => {
-          if (opened) {
-            onClose()
-            requestPmoTeamsTopicFloatingClose({ restoreFocus: false })
-          }
-        }).catch(error => setIssue(error instanceof Error ? error.message : String(error)))
-      }}>打开 Topic</Button> : null}
-      {issue ? <Notice tone="warning" messageRole="status" actions={<Button onClick={() => setAttempt(value => value + 1)}>重读</Button>}>{issue}</Notice> : null}
-      {selected ? document ? <section><h3>{document.path}</h3><pre>{document.content}</pre></section> :
-        !issue ? <p role="status">正在读取原文件…</p> : null :
-        list?.path === directory ? <>
-          <ul className="mote-group-files__list">{list.entries.map(entry => <li key={entry.path}>
-            <button type="button" onClick={() => {
-              if (entry.isDirectory) setDirectories(previous => [...previous, entry.path])
-              else setSelected(entry.path)
-            }}><SemanticIcon name={entry.isDirectory ? 'object.folder' : 'object.document'} size={16} />{entry.name}</button>
-          </li>)}</ul>
-          {!list.entries.length ? <p>这个目录暂无文件。</p> : null}
-          {!list.complete ? <p>已显示当前可读取的目录条目。</p> : null}
-        </> : !issue ? <p role="status">正在读取原目录…</p> : null}
-    </div>
-  </section>
 }

@@ -14,7 +14,7 @@ import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { useConversationView } from '@agentmux/client-ui/use-conversation-view'
 import { useMobileLocalDrafts } from '../conversation/local-drafts-owner'
 import { MobileMoteSpeakerAvatar } from '../conversation/MobileMoteSpeakerAvatar'
-import { MobileTopicSource } from '../topics/MobileTopicSource'
+import { MoteGroupFiles } from '@agentmux/client-ui/components/MoteGroupFiles'
 import { getDeviceWorkface } from '../recovery/device-workface'
 import './mote-groups.css'
 
@@ -204,7 +204,9 @@ export function MobileMoteGroups({ client, connected, moteId, positions, openHtt
       onOpen={groupId => setView({ groupId, members: false })} onClose={() => setView(null)} positions={positions} {...custody}
       renderThread={thread => <MobileMoteGroupThread client={connected && sourceMatches() ? client : null} thread={thread} />} />
     </div>
-    {files && <MobileMoteGroupFiles key={JSON.stringify(files)} target={files} request={request} onBack={closeFiles} onBackChange={registerFileBack}
+    {files && groupId && <MoteGroupFiles key={groupId} target={files} groupId={groupId} call={call}
+      name={topicCandidates.values.find(candidate => candidate.target.zoneId === files.zoneId)?.name}
+      onBack={closeFiles} onBackChange={registerFileBack}
       {...(openHttpLink ? { openHttpLink } : {})} />}
   </div>
   return <section className="mobile-mote-groups" aria-label={moteId ? 'Mote 的群聊' : '群聊列表'}>
@@ -230,36 +232,6 @@ function MobileMoteGroupMemberAvatar({ id, name, appearance, ensure }: {
     if (appearance === undefined || appearance?.image && !appearance.image.dataUrl) ensure(id)
   }, [appearance, ensure, id])
   return <MobileMoteSpeakerAvatar spaceId={id} name={name} appearance={appearance ?? undefined} size={18} />
-}
-
-function MobileMoteGroupFiles({ target, request, onBack, openHttpLink, onBackChange }: {
-  target: MotePreferencesTarget; request: NonNullable<AgentMuxHostedClient['forwardRpc']>; onBack(): void; openHttpLink?: OpenHttpLink
-  onBackChange(back: (() => void) | null): void
-}) {
-  const [state, setState] = useState<{ topic: { path: string; title: string } | null; issue: string | null }>({ topic: null, issue: null })
-  const [retry, setRetry] = useState(0)
-  useEffect(() => {
-    const controller = new AbortController()
-    void request('topic.inspect', { topicId: target.spaceId }, { signal: controller.signal }).then(({ topic }) => {
-      if (controller.signal.aborted) return
-      if (!topic || topic.topicId !== target.spaceId || topic.zoneId !== target.zoneId || topic.hostId !== target.expectedResource.hostId ||
-          topic.workspaceId && topic.workspaceId !== target.expectedResource.workspaceId || topic.contentKind === 'mote' || topic.readError) {
-        throw new Error('群聊绑定的原 Topic 文件范围暂未确认。')
-      }
-      setState({ topic: { path: topic.directoryPath, title: topic.title }, issue: null })
-    }).catch(error => {
-      if (!controller.signal.aborted) setState({ topic: null, issue: error instanceof Error ? error.message : String(error) })
-    })
-    return () => controller.abort()
-  }, [request, retry, target])
-  if (state.topic) return <MobileTopicSource source={{ kind: 'file', hostId: target.expectedResource.hostId, path: state.topic.path }}
-    expectedFileRoot={target} rpc={request} rootTitle={state.topic.title} presentation={{ presented: true, observed: true }} onBack={onBack} onBackChange={onBackChange} backLabel="返回群聊"
-    {...(openHttpLink ? { openHttpLink } : {})} />
-  return <div className="mobile-mote-groups__files-state"><Button type="button" onClick={onBack}>返回群聊</Button>
-    {state.issue ? <Notice tone="warning" density="compact" messageRole="status"
-      actions={<Button type="button" onClick={() => setRetry(value => value + 1)}>重读文件范围</Button>}>{state.issue}</Notice>
-      : <p role="status">正在核对群文件…</p>}
-  </div>
 }
 
 function MobileMoteGroupThread({ client, thread }: { client: AgentMuxHostedClient | null; thread: NonNullable<MoteGroupMember['thread']> }) {
