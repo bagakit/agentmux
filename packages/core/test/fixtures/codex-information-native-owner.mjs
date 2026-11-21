@@ -2,9 +2,10 @@ import './agent-information-loader.mjs'
 import assert from 'node:assert/strict'
 import { createHash, randomBytes } from 'node:crypto'
 import { spawn, execFileSync } from 'node:child_process'
+import { createReadStream } from 'node:fs'
 import { createServer } from 'node:http'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
+import { isAbsolute, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const [root] = process.argv.slice(2), candidate = process.env.AMX_INFORMATION_CANDIDATE
@@ -12,11 +13,20 @@ if (!root || !candidate) throw new Error('The native product test requires its e
 const load = name => import(pathToFileURL(join(candidate, 'core/dist', name + '.js')).href)
 const { AgentMuxClient } = await load('client'), { AgentMuxFileAgentSessionStore } = await load('agent-session-store')
 const { AgentMuxControlServer } = await load('public-rpc-server')
-const { nativeProcessTcpListeners } = await load('agent-native-process')
+const { nativeProcessTcpListeners, nativeProcessExecutable } = await load('agent-native-process')
 const { connectCodexNativeActor } = await import('@agentmux/providers/codex/native-rpc')
 const command = process.env.AGENTMUX_TEST_CODEX_BINARY ?? 'codex'
-const version = execFileSync(command, ['--version'], { encoding: 'utf8' }).trim()
 const home = join(root, 'native-home'); await mkdir(home)
+const nativeEnvironment = { PATH: process.env.PATH, HOME: home, CODEX_HOME: home, LANG: 'C' }
+const version = execFileSync(command, ['--version'], { env: nativeEnvironment, encoding: 'utf8' }).trim()
+const fingerprintIssues = []
+let launcher
+try {
+  const executable = await realpath(isAbsolute(command) ? command : execFileSync('which', [command], { env: nativeEnvironment, encoding: 'utf8' }).trim())
+  const digest = createHash('sha256')
+  for await (const bytes of createReadStream(executable)) digest.update(bytes)
+  launcher = { executable, sha256: digest.digest('hex') }
+} catch (error) { fingerprintIssues.push({ field: 'launcher', message: String(error) }) }
 const network = [], connections = new Set()
 const offline = createServer((request, response) => {
   network.push({ method: request.method, url: request.url })
@@ -31,12 +41,12 @@ await writeFile(configPath, 'model_provider="information_fixture"\n[model_provid
 const originalConfig = await readFile(configPath, 'utf8'), token = randomBytes(32).toString('hex')
 const native = spawn(command, ['app-server', '--listen', 'ws://127.0.0.1:0', '--ws-auth', 'capability-token',
   '--ws-token-sha256', createHash('sha256').update(token).digest('hex')], {
-  cwd: root, env: { PATH: process.env.PATH, HOME: home, CODEX_HOME: home, LANG: 'C' },
+  cwd: root, env: nativeEnvironment,
   detached: true, stdio: ['ignore', 'ignore', 'pipe'] })
 let diagnostics = '', exited = false
 native.stderr.on('data', bytes => { diagnostics = (diagnostics + bytes).slice(-4096) })
 const closed = new Promise(resolve => native.once('close', code => { exited = true; resolve(code) }))
-let control, client, original
+let control, client, original, nativeBackendProcessId
 const lifetime = AbortSignal.timeout(40000), nativeMethods = [], nativeNotifications = []
 let runtimeWrites = 0, closing = false
 const close = async () => {
@@ -58,6 +68,13 @@ try {
     await new Promise(resolve => setTimeout(resolve, 25))
   }
   if (!listener) throw new Error('The private original native listener is unavailable: ' + diagnostics)
+  nativeBackendProcessId = listener.processId
+  let nativeBinary
+  try {
+    const mapped = await nativeProcessExecutable(nativeBackendProcessId, lifetime), digest = createHash('sha256')
+    for await (const bytes of createReadStream(mapped.path)) digest.update(bytes)
+    nativeBinary = { executable: mapped.path, device: String(mapped.device), inode: String(mapped.inode), sha256: digest.digest('hex') }
+  } catch (error) { fingerprintIssues.push({ field: 'nativeBinary', message: String(error) }) }
   original = await connectCodexNativeActor(listener.endpoint, token, lifetime, 'agentmux_native_input', {
     onNotification: (method, params) => nativeNotifications.push({ method, params }) })
   const call = async (method, params) => { nativeMethods.push(method); return await original.request(method, params) }
@@ -68,6 +85,12 @@ try {
   const started = await call('thread/start', { cwd: root, modelProvider: 'information_fixture', model: initialModel,
     sandbox: 'read-only', approvalPolicy: 'never' })
   const nativeId = started.thread.id
+  const configMetadata = await stat(configPath, { bigint: true })
+  const configFileUnwritten = async () => {
+    const current = await stat(configPath, { bigint: true })
+    return ['dev', 'ino', 'mtimeNs', 'ctimeNs'].every(field => configMetadata[field] === current[field]) &&
+      await readFile(configPath, 'utf8') === originalConfig
+  }
   const store = new AgentMuxFileAgentSessionStore(join(root, 'sessions.json'))
   const id = 'codex-information-original', runId = 'codex-information-original-run'
   await store.compareAndSwap(null, { kind: 'agent', agentSessionId: id, providerId: 'codex', executorId: 'codex',
@@ -88,8 +111,12 @@ try {
   }
   control = new AgentMuxControlServer({ socketPath: join(root, 'native-information.sock'), coreClients: () => [{ hostId: 'local', client }] })
   await control.start()
+  const originalActor = (await store.readMetadata(id)).nativeActor
   process.send?.({ type: 'ready', endpoint: control.path, input: { hostId: 'local', agentSessionId: id, expectedRun: { runId } },
-    nativeId, nativePid: native.pid, initialModel, selectedModel, version })
+    nativeId, nativeRuntimeSessionId: started.thread.sessionId, nativePid: native.pid, initialModel, selectedModel, command, version,
+    launcher, nativeBinary, fingerprintIssues,
+    actor: { protocolId: originalActor.protocolId, actorId: originalActor.actorId, lifecycleOperationId: originalActor.lifecycleOperationId,
+      configurationObservationDeclared: originalActor.configurationObservation === true } })
   process.on('message', async message => {
     try {
       if (message?.type === 'stats') {
@@ -98,8 +125,19 @@ try {
         const value = await call('thread/read', { threadId: nativeId, includeTurns: false })
         process.send?.({ type: 'stats', thread: value.thread, runtimeWrites, network, nativeMethods,
           turnEvents: nativeNotifications.filter(event => ['turn/started', 'turn/completed'].includes(event.method)).length,
-          configUnchanged: await readFile(configPath, 'utf8') === originalConfig, exited })
-      } else if (message?.type === 'close') { await close(); process.exit(process.exitCode ?? 0) }
+          configUnchanged: await readFile(configPath, 'utf8') === originalConfig, configFileUnwritten: await configFileUnwritten(), exited })
+      } else if (message?.type === 'close') {
+        await close()
+        const gone = processId => {
+          try { process.kill(processId, 0); return false } catch (error) { if (error.code !== 'ESRCH') throw error; return true }
+        }
+        process.send?.({ type: 'closed', cleanup: { nativeExited: exited, nativeProcessGone: gone(native.pid),
+          nativeBackendGone: gone(nativeBackendProcessId), networkConnections: connections.size,
+          configUnchanged: await readFile(configPath, 'utf8') === originalConfig,
+          configFileUnwritten: await configFileUnwritten(),
+          modelHttpRequests: network.filter(request => request.method !== 'GET').length } },
+          () => process.exit(process.exitCode ?? 0))
+      }
     } catch (error) { process.stderr.write(String(error) + '\n'); await close(); process.exit(1) }
   })
 } catch (error) { process.stderr.write(String(error) + '\n'); await close(); process.exit(1) }

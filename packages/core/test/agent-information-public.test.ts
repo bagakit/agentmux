@@ -9,6 +9,8 @@ import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli
 
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })
+const qualification = ['contract', 'claude', 'integration'].includes(process.env.AMX_INFORMATION_MODE ?? '') ||
+  ['native', 'integration'].includes(process.env.AMX_MODEL_SYNC_MODE ?? '')
 
 async function owner(originalRoot?: string, ownerMode: 'create' | 'restore' = 'create', nativeProcessId?: number) {
   const candidate = process.env.AMX_INFORMATION_CANDIDATE
@@ -47,37 +49,43 @@ async function owner(originalRoot?: string, ownerMode: 'create' | 'restore' = 'c
   return { root, cli, mode, stats, stop, pid: worker.pid }
 }
 
-it('the compiled information CLI reads the actual Core owner and its agent.inspect projection', async () => {
+it.runIf(qualification)('the compiled information and configuration CLIs independently read the actual Core owner and its agent.inspect projections', async () => {
   const f = await owner()
   const information = await f.cli(['agent', 'information', 'inspect', '--host', 'local', '--session', 'information-original', '--run', 'information-run-original'])
   expect(information).toMatchObject({ kind: 'information', snapshot: { nativeSessionId: 'information-native-original',
     sourceId: 'native-source-original', observedAt: fixtureEpoch(2, 0, 123), plan: { id: 'team', name: 'Team' },
-    model: { id: 'model-small' }, limits: [{ usedPercent: 25 }] }, configuration: { options: [{ category: 'model' }] } })
+    model: { id: 'model-small' }, limits: [{ usedPercent: 25 }] }, configuration: null })
+  expect((await f.stats()).configurations).toBe(0)
+  const configuration = await f.cli(['agent', 'configuration', 'inspect', '--host', 'local', '--session', 'information-original', '--run', 'information-run-original'])
+  expect(configuration).toMatchObject({ kind: 'configuration', target: information.target,
+    snapshot: { options: [{ category: 'model', currentValue: 'model-small' }] } })
   const inspected = await f.cli(['agent', 'inspect', '--session', 'information-original'])
   expect(inspected.status.session.nativeInformation).toEqual(information.snapshot)
-  expect(inspected.status.session.nativeConfiguration).toEqual(information.configuration)
+  expect(inspected.status.session.nativeConfiguration).toEqual(configuration.snapshot)
   await f.mode('unavailable')
   const unavailable = await f.cli(['agent', 'information', 'inspect', '--host', 'local', '--session', 'information-original', '--run', 'information-run-original'])
   expect(unavailable.snapshot).toEqual(information.snapshot)
+  expect(unavailable.configuration).toEqual(configuration.snapshot)
   expect(unavailable.issue).toBeDefined()
-  const stats = await f.stats(); expect(stats.reads).toBe(2); expect(stats.runtimeWrites).toBe(0)
+  const stats = await f.stats(); expect(stats.reads).toBe(2); expect(stats.configurations).toBe(1); expect(stats.runtimeWrites).toBe(0)
 })
 
-it('the compiled configuration CLI changes the original model once and inspects the retained native ACK', async () => {
+it.runIf(qualification)('the compiled configuration CLI changes the original model once and inspects the retained native ACK independently of account reads', async () => {
   const f = await owner()
-  const initial = await f.cli(['agent', 'information', 'inspect', '--host', 'local', '--session', 'information-original', '--run', 'information-run-original'])
+  const initial = await f.cli(['agent', 'configuration', 'inspect', '--host', 'local', '--session', 'information-original', '--run', 'information-run-original'])
   const input = { target: initial.target, operationId: 'cli-model-original', configId: 'model', value: 'model-large',
-    expectedRevision: initial.configuration.revision }
+    expectedRevision: initial.snapshot.revision }
   const receipt = await f.cli(['agent', 'configuration', 'set', '--input', '-'], input)
   expect(receipt).toMatchObject({ outcome: 'applied', operationId: input.operationId, target: initial.target,
     acknowledgement: { options: [{ currentValue: 'model-large' }] }, diskDurability: 'confirmed' })
   expect(await f.cli(['agent', 'configuration', 'set', '--input', '-'], input)).toEqual(receipt)
   const retained = await f.cli(['agent', 'configuration', 'inspect', '--host', 'local', '--session', 'information-original', '--operation-id', input.operationId])
   expect(retained).toMatchObject({ kind: 'operation', operation: receipt })
-  const stats = await f.stats(); expect(stats.writes).toHaveLength(1); expect(stats.runtimeWrites).toBe(0)
+  const stats = await f.stats(); expect(stats.writes).toHaveLength(1); expect(stats.configurations).toBe(1)
+  expect(stats.reads).toBe(0); expect(stats.runtimeWrites).toBe(0)
 })
 
-it('a new Core owner reads the same original information and clock from FileStore without rereading or reseeding', async () => {
+it.runIf(qualification)('a new Core owner reads the same original information and clock from FileStore without rereading or reseeding', async () => {
   // The isolated original Agent process remains alive while the two real Core owners exit/start.
   const native = spawn(process.execPath, ['-e', "process.on('SIGTERM', () => process.exit(0)); setInterval(() => {}, 1000)"],
     { env: { PATH: process.env.PATH, NODE_OPTIONS: '' }, stdio: 'ignore' })
@@ -91,6 +99,8 @@ it('a new Core owner reads the same original information and clock from FileStor
   const first = await owner(undefined, 'create', native.pid)
   const information = await first.cli(['agent', 'information', 'inspect', '--host', 'local', '--session', 'information-original', '--run', 'information-run-original'])
   expect(information.snapshot).toMatchObject({ nativeSessionId: 'information-native-original', observedAt: fixtureEpoch(2, 0, 123) })
+  const configuration = await first.cli(['agent', 'configuration', 'inspect', '--host', 'local', '--session', 'information-original', '--run', 'information-run-original'])
+  expect(configuration.snapshot).not.toBeNull()
   await first.stop()
   expect(native.exitCode).toBeNull(); expect(native.signalCode).toBeNull()
   const restored = await owner(first.root, 'restore', native.pid)
@@ -98,5 +108,12 @@ it('a new Core owner reads the same original information and clock from FileStor
   const inspected = await restored.cli(['agent', 'inspect', '--session', 'information-original'])
   expect(inspected.status.session).toMatchObject({ agentSessionId: 'information-original', run: { runId: 'information-run-original' },
     nativeHandle: { kind: 'provider', sessionId: 'information-native-original' }, nativeInformation: information.snapshot })
-  const stats = await restored.stats(); expect(stats.reads).toBe(0); expect(stats.runtimeWrites).toBe(0)
+  expect(inspected.status.session.nativeConfiguration).toBeUndefined()
+  const stats = await restored.stats(); expect(stats.reads).toBe(0); expect(stats.configurations).toBe(0); expect(stats.runtimeWrites).toBe(0)
+  const freshConfiguration = await restored.cli(['agent', 'configuration', 'inspect', '--host', 'local', '--session', 'information-original', '--run', 'information-run-original'])
+  expect(freshConfiguration.snapshot).toEqual(configuration.snapshot)
+  const refreshed = await restored.cli(['agent', 'inspect', '--session', 'information-original'])
+  expect(refreshed.status.session.nativeInformation).toEqual(information.snapshot)
+  expect(refreshed.status.session.nativeConfiguration).toEqual(freshConfiguration.snapshot)
+  const finalStats = await restored.stats(); expect(finalStats.configurations).toBe(1); expect(finalStats.reads).toBe(0)
 })

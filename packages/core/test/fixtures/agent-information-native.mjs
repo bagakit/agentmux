@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 /** Only normalized Provider and Runtime protocol inputs are controlled here.
  * Actual candidate Core owns scope, persistence, receipts, projection and public RPC. */
-export async function informationNativeFixture(core, root, { mode = 'create', processId = process.pid } = {}) {
+export async function informationNativeFixture(core, root, { mode = 'create', processId = process.pid, observeConfiguration, readConfigurationSnapshot } = {}) {
   const { AgentMuxClient, AgentMuxFileAgentSessionStore, defineAgentProvider, AgentMuxError } = core
   const id = 'information-original', runId = 'information-run-original', nativeId = 'information-native-original'
   const state = { mode: 'ready', configurationUnavailable: false, current: 'model-small', reads: 0, configurations: 0, writes: [], runtimeWrites: 0,
@@ -18,6 +18,7 @@ export async function informationNativeFixture(core, root, { mode = 'create', pr
     hookStrategy: { kind: 'none' }, resumeStrategy: { kind: 'none' }, acpStrategy: { kind: 'none' },
     capabilities: { terminal: true, timeline: 'complete-events', permission: 'none', providerResume: false, replyCorrelation: 'none' } },
     hook: { nativeHandle: { sessionIdKeys: ['session_id'] }, rules: [] }, buildArgs: (_prompt, args) => [...args],
+    ...(observeConfiguration ? { observeConfiguration } : {}),
     async readInformation(context, nativeSessionId) {
       assert.equal(nativeSessionId, nativeId); assert.equal(context.processId, processId)
       context.signal.throwIfAborted(); state.reads++
@@ -30,12 +31,14 @@ export async function informationNativeFixture(core, root, { mode = 'create', pr
       assert.equal(nativeSessionId, nativeId); context.signal.throwIfAborted(); state.configurations++
       if (state.configurationUnavailable === 'null') return null
       if (state.configurationUnavailable) throw new AgentMuxError('The original configuration read is unavailable.', 'NATIVE_CONFIGURATION_UNAVAILABLE')
-      return configuration()
+      return readConfigurationSnapshot ? structuredClone(readConfigurationSnapshot()) : configuration()
     },
     async setConfiguration(context, nativeSessionId, request) {
       assert.equal(nativeSessionId, nativeId); context.signal.throwIfAborted()
       assert.equal(request.expectedRevision, configuration().revision)
       state.writes.push(structuredClone(request))
+      if (state.mode === 'refused') throw new AgentMuxError('The original native setting was explicitly refused.', 'AGENT_CONFIGURATION_NOT_APPLIED', undefined,
+        { disposition: 'not_applied', confirmedInputBytes: 0 })
       if (state.mode !== 'fake-ack') state.current = request.value
       return configuration()
     }
