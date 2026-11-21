@@ -15,6 +15,7 @@ import type { AgentMuxMessageEnvelope, AgentMuxMessageIdentity } from '../src/ag
 import type { AgentExternalMessageAuthor } from '../src/external-author.js'
 import type { DurableAgentMuxMessageQueue } from '../src/agent-global-message-queue.js'
 import type { AgentMuxClientEventPublisher } from '../src/client-event-publisher.js'
+import type { CtxmuxAdapterInputChannel } from '../src/ctxmux-run-adapter.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import { messageJournalIo } from './helpers/message-journal-io.js'
 
@@ -191,6 +192,80 @@ it.each(['same Run', 'semantic resume', 'semantic conversation', 'unverified tar
   await expect(submit()).resolves.toMatchObject({ key: h.key(id), input: { status: outcome } })
   expect(h.writes.mock.calls.map(([runId]) => runId)).toEqual(nativeSend ? [] : [run.runId, run.runId])
   if (nativeSend) expect(nativeSend).toHaveBeenCalledOnce()
+})
+
+it.each([
+  { source: 'terminal-protocol', reply: '\x1b[1;1R', acknowledged: true },
+  { source: 'user', reply: '\x1b[<0;1;1M', acknowledged: true },
+  { source: 'terminal-protocol', reply: '\x1b[1;1R', acknowledged: false }
+] as const)('continues native preclaim only after the original $source ACK (confirmed: $acknowledged)', async ({ source, reply, acknowledged }) => {
+  const h = await fixture(), id = 'native-preclaim-yield'
+  h.connect()
+  const status = h.inner.kernel.status.bind(h.inner.kernel)
+  h.inner.kernel.status = async runId => ({ ...await status(runId), pid: 1234 })
+  const openInput = h.inner.kernel.openInput as (runId: string) => Promise<CtxmuxAdapterInputChannel>
+  h.inner.kernel.openInput = async (runId: string) => {
+    const channel = await openInput(runId)
+    return { ...channel, run: { ...channel.run, pid: 1234 } }
+  }
+  let entered!: () => void, release!: () => void, applied!: () => void, returnAck!: () => void
+  const verifying = new Promise<void>(resolve => { entered = resolve })
+  const finishVerification = new Promise<void>(resolve => { release = resolve })
+  const rawApplied = new Promise<void>(resolve => { applied = resolve })
+  const finishReply = new Promise<void>(resolve => { returnAck = resolve })
+  const write = h.rawInput.getMockImplementation()!
+  h.rawInput.mockImplementationOnce(async (...args) => {
+    const ack = await write(...args)
+    applied()
+    await finishReply
+    if (!acknowledged) throw new Error('The original terminal reply ACK was lost')
+    return ack
+  })
+  const assertCurrent = vi.fn(async () => {})
+  assertCurrent.mockImplementationOnce(async () => { entered(); await finishVerification })
+  const send = vi.fn(async () => ({ outcome: 'admitted' as const, turnId: 'original-native-turn' }))
+  const provider = (Reflect.get(h.client, 'providers') as AgentProviderRegistry).get('codex')
+  const prepare = vi.spyOn(provider, 'prepareNativeInput').mockImplementation(async (_context, target) => ({
+    plan: { kind: 'native-rpc', protocolId: 'private-native-port', actorId: 'original-actor',
+      sourceId: JSON.stringify([target.providerId, target.nativeSessionId]), threadId: target.nativeSessionId, operation: 'start-or-steer' },
+    assertCurrent, dispose: async () => {}, send
+  }))
+  const { authorHuman: _authorHuman, ...original } = h.input(id)
+  const input = { ...original, admissionIntent: { kind: 'session-conversation' as const } }
+  const first = await h.rpc.call('agent.input.submit', input)
+  await verifying
+  const lane = Reflect.get(h.client, 'agentInputLanes').get('recipient') as {
+    renderObservations: Set<{ controller: AbortController }>
+  }
+  const observation = [...lane.renderObservations][0]!
+  const raw = h.client.writeAgent({ agentSessionId: 'recipient', expectedRun: h.original.run, source, data: reply })
+    .then(ack => ({ ack }), error => ({ error }))
+  try {
+    await vi.waitFor(() => expect(observation.controller.signal.aborted).toBe(true))
+    release()
+    await rawApplied
+    expect(first.input).toMatchObject({ key: h.key(id), persistence: 'confirmed', admission: null })
+    expect((await h.read(id)).admission).toBeNull()
+    expect(send).not.toHaveBeenCalled()
+  } finally { release(); returnAck() }
+  if (acknowledged) expect(await raw).toMatchObject({ ack: { appliedByteRange: { startByte: 0, endByte: Buffer.byteLength(reply) } } })
+  else expect(await raw).toHaveProperty('error')
+  await h.settled()
+
+  const receipt = await h.read(id)
+  if (!acknowledged) {
+    expect(receipt).toMatchObject({ key: h.key(id), status: 'waiting', admission: null,
+      control: { waiting: { phase: 'input-environment', failure: { code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' } } } })
+    expect(send).not.toHaveBeenCalled()
+  } else {
+    expect(receipt, JSON.stringify(receipt?.control.waiting)).toMatchObject({ key: h.key(id), status: 'admitted',
+      admission: { run: h.original.run, admission: { inputKey: h.key(id), native: { outcome: 'admitted' } } } })
+    expect(prepare).toHaveBeenCalledTimes(2)
+    expect((await h.rpc.call('agent.input.submit', input)).input).toMatchObject({ key: h.key(id), status: 'admitted' })
+    expect(send).toHaveBeenCalledExactlyOnceWith(input.prompt, expect.objectContaining({ clientCorrelation: expect.any(String) }), undefined)
+  }
+  expect(h.rawInput).toHaveBeenCalledTimes(1)
+  expect(h.writes).not.toHaveBeenCalled()
 })
 
 it('continues the saved public human message on the same recovered conversation', async () => {

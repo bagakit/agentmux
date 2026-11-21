@@ -8,6 +8,9 @@ import mailbox from './vitest.input-mailbox.config.mts'
 const root = resolve(import.meta.dirname, '../../..')
 const mutation = process.env.AGENTMUX_SESSION_INPUT_MUTATION
 const edits: Record<string, Array<{ path: string; before: string; after: string }>> = {
+  'wrap-native-preclaim-yield': [{ path: 'packages/core/src/prompt-submission.ts',
+    before: 'if (nativeClaimAttempted || (preclaim && error === preclaim.interruption)) return error',
+    after: 'if (nativeClaimAttempted) return error' }],
   'reject-uncaptured-resume': [{ path: 'packages/core/src/client.ts',
     before: 'if (!saved && changedRun && !recovered) throw new AgentMuxError(',
     after: 'if (!saved && changedRun) throw new AgentMuxError(' }],
