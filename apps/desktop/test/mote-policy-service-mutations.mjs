@@ -6,7 +6,8 @@ const output=resolve(process.env.MOTE_POLICY_MUTATIONS_OUTPUT??'.local/state/mot
 await mkdir(output,{recursive:true})
 const cases=[['borrow-settings','different'],['missing-is-automatic','the current Main'],['enabled-is-executing','saved automatic'],
   ['duplicate-original-faults','the current Main'],['hide-original-actions','the current Main'],['forget-creation-progress','unknown original creation'],
-  ['unknown-is-unavailable','unknown original recovery'],['mislabel-cause','original typed unavailable decision']]
+  ['unknown-is-unavailable','background recovery'],['mislabel-cause','original typed unavailable decision'],
+  ['drop-send-recovery-fact','a failed Main send'],['lose-unsent-queue-state','a failed Main send']]
 const result={passed:false,mutations:[]}
 for(const [name,pattern]of cases){
   const trace=join(output,name+'.ndjson'),json=join(output,name+'.json')

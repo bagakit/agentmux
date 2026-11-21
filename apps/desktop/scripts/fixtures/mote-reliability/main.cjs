@@ -121,36 +121,60 @@ app.whenReady().then(async () => {
     }
     if (process.env.MOTE_MAIN_POLICY_SERVICE === '1') {
       await until('window.moteRecoveryEscape?.ready')
-      const showMain = async () => {
+      const service = `[...document.querySelectorAll('[data-mote-main-service]')].find(e=>!e.closest('[hidden],[inert],[aria-hidden="true"]')&&e.getClientRects().length)`
+      const editor = `[...document.querySelectorAll('[data-mote-workface] [aria-label="Message Agent"]')].find(e=>!e.closest('[hidden],[inert],[aria-hidden="true"]')&&e.getClientRects().length)`
+      const showMain = async (text) => {
         const discussion = button('Discussion', 'document.querySelector(".mote-space-frame__header")')
         if (await read('Boolean('+discussion+')')) await click(discussion)
         const openMain = button('打开当前主对话')
+        await until(`(${openMain}) || (${editor})`)
         if (await read('Boolean('+openMain+')')) await click(openMain)
-        await until(`[...document.querySelectorAll('[data-mote-main-service]')].some(e=>!e.closest('[hidden],[inert],[aria-hidden="true"]')&&e.getClientRects().length)`)
+        if (text) await until(`(${service})?.textContent.includes(${JSON.stringify(text)})`)
       }
       result.presentation=[]
-      for (const [name,theme,width,policy,mode,split] of [
-        ['unconfigured-dark-split','dark',920,'unconfigured','unavailable',true],
-        ['automatic-light-split','light',920,'automatic','unavailable',true],
-        ['keep-current-light-wide','light',1180,'keep-current','unavailable',false],
-        ['unknown-dark-narrow','dark',420,'unconfigured','unknown',false]
+      for (const [name,theme,width,policy,policyText,split] of [
+        ['unconfigured-dark-split','dark',920,'unconfigured','尚未配置自动接续',true],
+        ['automatic-light-split','light',920,'automatic','已开启自动接续',true],
+        ['keep-current-light-wide','light',1180,'keep-current','已设为保留当前对话',false]
       ]) {
         win.setContentSize(width,width>600?820:740)
-        await read(`window.moteInit.theme(${JSON.stringify(theme)});window.moteRecoveryEscape.variant(${JSON.stringify(mode)});window.moteRecoveryEscape.policy(${JSON.stringify(policy)},${split})`)
-        await showMain()
+        await read(`window.moteInit.theme(${JSON.stringify(theme)});window.moteRecoveryEscape.variant("unavailable");window.moteRecoveryEscape.policy(${JSON.stringify(policy)},${split})`)
+        await showMain(policyText)
         result.baseline=await read('window.moteReliability.facts()')
         await pause(180)
         const facts=await read(`(()=>{const e=[...document.querySelectorAll('[data-mote-main-service]')].find(e=>!e.closest('[hidden],[inert],[aria-hidden="true"]')&&e.getClientRects().length);const r=e.getBoundingClientRect(),reader=e.closest('[data-mote-workface]').querySelector('.activity-feed');return {text:e.textContent,rect:r.toJSON(),readerRect:reader?.getBoundingClientRect().toJSON(),buttons:[...e.querySelectorAll('button')].map(b=>{const r=b.getBoundingClientRect();return {text:b.textContent,rect:r.toJSON(),hit:b.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}}),genericOutside:reader?.querySelectorAll('[data-original-session-actions]').length}})()`)
-        result.presentation.push({name,policy,mode,split,...facts})
+        result.presentation.push({name,policy,split,...facts})
         await capture(name)
+        assert.ok(facts.text.includes('尚未确认原会话的续接标识'))
         assert.ok(facts.rect.width>0 && facts.rect.right<=width)
         assert.equal(facts.genericOutside,0)
         assert.ok(facts.buttons.every(value=>value.hit))
         if(split)assert.ok(facts.rect.width<540,'Actual narrow Main Region beside real tools and rail')
       }
-      await click('document.querySelector(".mote-conversation__reading-tools summary")')
-      await capture('unknown-original-details-dark-narrow')
       win.setContentSize(1180,820)
+      await read('window.moteInit.theme("light");window.moteRecoveryEscape.variant("unreported");window.moteRecoveryEscape.policy("keep-current",false)')
+      await showMain()
+      await until(`!(${service})`)
+      result.baseline=await read('window.moteReliability.facts()')
+      await click(editor, 0)
+      const prompt = '请继续确认原对话里的事项'
+      await input('Input.insertText', { text: prompt })
+      const send = button('Send', `(${editor}).closest('[data-agent-composer]')`)
+      await until(`(${send})?.disabled === false`)
+      await click(send)
+      await until(`(${service})?.textContent.includes("已设为保留当前对话") &&
+        document.querySelector(".composer-feedback [role=alert]")?.textContent.includes("消息未送出") &&
+        document.querySelector(".composer-pending__state")?.textContent === "待接续"`)
+      const failed = await read('window.moteRecoveryEscape.facts()')
+      const [attempt] = failed.sendAttempts
+      assert.equal(failed.sendAttempts.length, 1)
+      assert.deepEqual(attempt.control, failed.session.control)
+      assert.equal(attempt.request.input.submissionId, attempt.operationId)
+      assert.equal(attempt.request.input.prompt, prompt)
+      assert.ok(failed.queue.some(item=>item.operationId===attempt.operationId && item.text===prompt && item.awaitingExplicitSend))
+      result.failedSend = { operationId: attempt.operationId, runId: attempt.control.run.runId, preserved: true }
+      await capture('failed-send-light-wide')
+      await profile()
       await read('window.moteInit.theme("dark");window.moteRecoveryEscape.variant("unavailable");window.moteRecoveryEscape.policy("automatic",false)')
       result.baseline=await read('window.moteReliability.facts()')
       await read('window.moteRecoveryEscape.floating()')

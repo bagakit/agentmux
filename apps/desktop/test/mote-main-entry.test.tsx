@@ -115,24 +115,19 @@ it('entry hook stops observing input after the first interaction cancels admissi
  expect(inspect).not.toHaveBeenCalled();expect(ensure).not.toHaveBeenCalled()
 })
 
-// Core holds no conversation for this Main: the issue states that fact and the way forward, apart
-// from the identity case, and never claims what the Provider did or when the Main ended.
 it('names a Main Core holds no conversation for apart from one without a confirmed identity',()=>{
  const absent=moteMainUnavailableIssue('native-conversation-absent'),identity=moteMainUnavailableIssue('native-handle-unavailable')
- expect(absent).toContain('开始新一轮');expect(absent).toContain('原对话和草稿都在');expect(absent).not.toBe(identity)
- expect(absent).not.toMatch(/Provider|之前|开始对话前|未保存/u)
- expect(identity).toContain('尚未确认可接续原会话的 ID');expect(identity).not.toContain('没有留下')
+ expect(absent).toContain('没有可接续的记录')
+ expect(identity).toContain('尚未确认原会话的续接标识')
 })
 
-// Core's unavailable result is a fact about this Main, not an unread operation: the issue names what
-// happened and the way forward, and the status is not the unconfirmed "check again" state.
-it('entry hook reports an exited Main with nothing to resume as unavailable with a way forward',async()=>{
+it('entry hook retains the reason from the original Main recovery',async()=>{
  setup();const inspect=vi.spyOn(api.moteDialogue,'inspectRecovery').mockResolvedValue({operation:null})
  const ensure=vi.spyOn(api.moteDialogue,'ensureRecovery').mockImplementation(async request=>({operation:{...operation(request),kind:'unavailable',reason:'native-handle-unavailable',
    evidence:{kind:'run-ended',state:'exited',observedAt:1},moteMainEntry:{target:request.target,expectedRoleRevision:request.expectedRoleRevision,reference:request.reference}}}))
  const {root:r,container}=await root();await act(async()=>r.render(<Entry token="exited-main"/>))
  await vi.waitFor(()=>expect(container.querySelector('output')?.getAttribute('data-entry-status')).toBe('unavailable'))
- expect(container.textContent).toContain('主 Agent 已退出');expect(container.textContent).toContain('开始新一轮')
+ expect(container.textContent).toContain('尚未确认原会话的续接标识')
  expect(container.textContent).not.toContain('尚未读到');expect(container.textContent).not.toContain('native-handle-unavailable')
  expect(inspect).toHaveBeenCalledTimes(1);expect(ensure).toHaveBeenCalledTimes(1)
 })

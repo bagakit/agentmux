@@ -12,6 +12,8 @@ const variants:Record<string,{file:string;edits:Array<[string,string]>}>={
   'hide-original-actions':{file:'components/ActivityView.tsx',edits:[["!moteConversation || moteMainService ? readingAction", "!moteConversation ? readingAction"]]},
   'forget-creation-progress':{file:'components/MoteMainActions.tsx',edits:[["onPending?.(pending)","onPending?.([])"]]},
   'unknown-is-unavailable':{file:'lib/mote-main-service.ts',edits:[["if (status === 'unconfirmed')", "if (false && status === 'unconfirmed')"]]},
+  'drop-send-recovery-fact':{file:'store.ts',edits:[["session.id === sessionId && sessionOwnsControl(session, recoveryControl)", "session.id === sessionId && sessionOwnsControl(session, recoveryControl) && !('inputFailure' in recovery)"]]},
+  'lose-unsent-queue-state':{file:'components/AgentSessionComposer.tsx',edits:[["const recoveryNotSent = originalMoteRecoveryNotSent(control, continuityOperations, entry)", "const recoveryNotSent = false"]]},
   'mislabel-cause':{file:'components/MoteConversationStart.tsx',edits:[["automatic.decision.policy.kind === 'continuity-unavailable'", "false && automatic.decision.policy.kind === 'continuity-unavailable'"]]}
 }
 if(mutant&&!variants[mutant])throw Error('Unknown Main service mutation')

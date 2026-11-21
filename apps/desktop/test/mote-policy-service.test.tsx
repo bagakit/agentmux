@@ -186,3 +186,58 @@ it('changing only service presentation retains the actual Composer DOM and origi
   expect(useLauncherState.getState().drafts[key]?.prompt).toBe('Original editable Mote draft')
   expect(calls.send).not.toHaveBeenCalled();expect(calls.open).not.toHaveBeenCalled()
 })
+
+it('a failed Main send shows the confirmed cause beside the conversation and keeps the original input', async () => {
+  const dispose = await useAppStore.getState().initialize()
+  dispose()
+  const calls = setup()
+  useAppStore.setState(state => ({ sessions: state.sessions.map(item => item.id === defaultAgent.id && item.kind === 'agent'
+    ? { ...item, continuity: undefined, continuityOperations: {}, status: { state: 'error', source: 'run-process', observedAt: 1 } } : item) }))
+  vi.spyOn(api.continuousProgress, 'pauseForInput').mockResolvedValue(undefined)
+  const submit = vi.spyOn(api.sessions, 'submitPrompt')
+  const recover = vi.spyOn(api.sessions, 'recover').mockImplementation(async (control, _cwd, operationId, request) => {
+    const evidence = { kind: 'run-ended' as const, state: 'exited' as const, observedAt: 2 }
+    const outcome = { kind: 'unavailable' as const, agentSessionId: defaultAgent.id, previousRun: control.run,
+      reason: 'native-handle-unavailable' as const, evidence }
+    const input = request!.input!
+    return { ...outcome, continuity: { ...outcome, operationId: operationId!, trigger: 'input',
+        policy: DEFAULT_AGENT_CONTINUITY_POLICY, admittedAt: 1, observedAt: 2, rechecks: 0,
+        launchInput: { input, prompt: input.prompt, message: { userContent: input.prompt }, digest: 'original-input',
+          delivery: 'post-launch', lifecycleOperationId: operationId!, state: 'prepared' } },
+      inputFailure: { name: 'AgentMuxError', code: 'AGENT_NATIVE_IDENTITY_UNCONFIRMED', message: '需要接续原会话',
+        controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } } }
+  })
+  const container = await mounted()
+  const service = () => container.querySelector('[data-mote-main-service]')
+  await vi.waitFor(() => expect(container.querySelector('.activity-feed[data-mote-conversation="true"]')).not.toBeNull())
+  expect(service()).toBeNull()
+  const prompt = '请继续处理原对话'
+  const composer = container.querySelector<HTMLElement>('[aria-label="Message Agent"]')!
+  await act(async () => {
+    composer.focus()
+    composer.replaceChildren(Object.assign(document.createElement('p'), { textContent: prompt }))
+    composer.dispatchEvent(new InputEvent('input', { inputType: 'insertText', data: prompt, bubbles: true }))
+  })
+  const sendButton = composer.closest('[data-agent-composer]')?.querySelector<HTMLButtonElement>('button[aria-label="Send"]')
+  expect(sendButton?.disabled).toBe(false)
+  await act(async () => sendButton!.click())
+  expect(calls.send).toHaveBeenCalledOnce()
+  await vi.waitFor(() => expect(recover).toHaveBeenCalledOnce())
+  await vi.waitFor(() => expect(service()?.textContent ?? '').toContain('尚未确认原会话的续接标识'))
+  await vi.waitFor(() => expect(useAppStore.getState().agentSteerQueues[defaultAgent.id]?.[0]).toMatchObject({
+    text: prompt, errorCode: 'AGENT_NATIVE_IDENTITY_UNCONFIRMED', awaitingExplicitSend: true }))
+  await vi.waitFor(() => expect(document.querySelector('.composer-feedback .message-delivery-failure__heading')?.textContent ?? '')
+    .toContain('消息未送出'))
+  expect(document.querySelector('.composer-pending__state')?.textContent).toBe('待接续')
+  expect(document.querySelector('.composer-pending__send')?.getAttribute('aria-label')).toBe('核对原对话的接续')
+  const [control, , operationId, request] = recover.mock.calls[0]!
+  expect(control).toEqual(defaultAgent.control)
+  expect(request).toMatchObject({ input: { submissionId: operationId, prompt },
+    moteMain: { expectedRoleRevision: moteMainRoleRevision(calls.defaults, 'original-file') } })
+  expect([...service()!.querySelectorAll('button')].map(item => item.textContent)).toEqual(['继续新对话'])
+  await act(async () => button(service()!, '继续新对话')!.click())
+  expect(container.textContent).toContain('旧对话和未确认的消息留在原处')
+  expect(useAppStore.getState().agentSteerQueues[defaultAgent.id]?.[0]).toMatchObject({ operationId, text: prompt })
+  expect(submit).not.toHaveBeenCalled()
+  expect(calls.open).not.toHaveBeenCalled()
+})

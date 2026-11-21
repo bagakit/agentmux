@@ -167,17 +167,37 @@ if (new URLSearchParams(location.search).get('main-recovery-escape') === '1' || 
   if (!topic) throw Error('Original Mote draft scope is unavailable')
   const draftKey = moteEntryDraftKey({workspace,topic,rootPath:scratchTopicLogicalPath(workspace,topic) ?? scratchTopicDirectoryName(topic.id)})
   let mode = 'unavailable'
+  const sendAttempts = []
   const originalRecovery = () => ({ operationId:'original-main-recovery',agentSessionId:session.id,previousRun:session.control.run,
     trigger:'manual',policy:{...DEFAULT_AGENT_CONTINUITY_POLICY},admittedAt:1,observedAt:2,rechecks:1,
     kind:mode === 'unknown' ? 'pending' : 'unavailable',reason:mode === 'unknown' ? 'operation-unconfirmed' : 'native-handle-unavailable',
     evidence:mode === 'unknown' ? {kind:'run-unknown',observedAt:2,message:'Original recovery reply is unconfirmed'} : {kind:'run-ended',state:'exited',observedAt:2} })
-  const apply = () => useAppStore.setState(state => ({ sessions:state.sessions.map(value => value.id === session.id ? { ...value,processState:'exited',continuity:originalRecovery(),
-    status:{state:'error',source:'run-process',observedAt:2,exitCode:0,exitReason:'unknown',...(mode === 'unknown' ? {} : {continuity:'unavailable',continuityReason:'native-handle-unavailable'})} } : value) }))
+  const apply = () => useAppStore.setState(state => ({ sessions:state.sessions.map(value => value.id === session.id ? { ...value,processState:'exited',continuity:mode === 'unreported' ? undefined : originalRecovery(),
+    status:{state:'error',source:'run-process',observedAt:2,exitCode:0,exitReason:'unknown',...(mode === 'unavailable' ? {continuity:'unavailable',continuityReason:'native-handle-unavailable'} : {})} } : value) }))
   apply()
   const refresh = api.sessions.refresh
   api.sessions.refresh = async control => control.agentSessionId === session.id ? useAppStore.getState().sessions.find(value => value.id === session.id) : refresh(control)
-  api.moteDialogue.inspectRecovery = async request => ({ operation:{...originalRecovery(),operationId:request.operationId,moteMainEntry:{target:request.target,expectedRoleRevision:request.expectedRoleRevision,reference:request.reference}} })
+  api.moteDialogue.inspectRecovery = async request => ({ operation: mode === 'unreported' ? null :
+    {...originalRecovery(),operationId:request.operationId,moteMainEntry:{target:request.target,expectedRoleRevision:request.expectedRoleRevision,reference:request.reference}} })
   api.moteDialogue.ensureRecovery = async () => { throw Error('This read-only failure scene does not admit a recovery mutation') }
+  if (new URLSearchParams(location.search).has('main-policy-service')) {
+    const groupCall = api.moteGroup.call
+    api.moteGroup.call = async (method, params) => method === 'space.mote.direct.list'
+      ? { threads: [], nextBeforeSequence: null } : groupCall(method, params)
+    const recover = api.sessions.recover
+    api.sessions.recover = async (control, workspacePath, operationId, request) => {
+      if (mode !== 'unreported' || control.agentSessionId !== session.id || !request?.moteMain || !request.input)
+        return recover(control, workspacePath, operationId, request)
+      sendAttempts.push({ control, operationId, request })
+      const continuity = { ...originalRecovery(), operationId, trigger: 'input',
+        launchInput: { input: request.input, prompt: request.input.prompt, message: { userContent: request.input.prompt },
+          digest: 'original-input', delivery: 'post-launch', lifecycleOperationId: operationId, state: 'prepared' } }
+      return { kind: continuity.kind, agentSessionId: continuity.agentSessionId, previousRun: continuity.previousRun,
+        reason: continuity.reason, evidence: continuity.evidence, continuity,
+        inputFailure: { name: 'AgentMuxError', code: 'AGENT_NATIVE_IDENTITY_UNCONFIRMED', message: '需要接续原会话。',
+          controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } } }
+    }
+  }
   window.moteRecoveryEscape = { ready:true, target, draftKey,
     floating() { requestPmoTeamsTopicFloatingOpen({targetTopicId:PMO_TEAMS_TOPIC_ID}) },
     variant(value) { mode=value;apply() },
@@ -196,6 +216,7 @@ if (new URLSearchParams(location.search).get('main-recovery-escape') === '1' || 
       await retainMoteMainCreationReference({target,operationId:'original-unknown-main-start',deferredInput:{operationId:'original-unknown-first-query',prompt}},null)
       fixtureWrites.push('seed-original-unknown-request')
     },
-    facts: () => ({ mainRequests:structuredClone(useAppStore.getState().moteMainCreationReferences),session:useAppStore.getState().sessions.find(value=>value.id===session.id) })
+    facts: () => ({ mainRequests:structuredClone(useAppStore.getState().moteMainCreationReferences),session:useAppStore.getState().sessions.find(value=>value.id===session.id),
+      sendAttempts, queue: useAppStore.getState().agentSteerQueues[session.id] ?? [] })
   }
 }

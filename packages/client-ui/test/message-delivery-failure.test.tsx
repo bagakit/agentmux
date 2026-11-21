@@ -90,6 +90,18 @@ it('keeps old generic failures honest and does not clip complete copy even beyon
   expect(JSON.parse(messageDeliveryDiagnosticExport({ error: raw })).error).toContain('final-marker')
 })
 
+it('shows confirmed recovery failure without opening technical details or suggesting a retry', async () => {
+  const message = '原生续接标识尚未确认。\nlogid: original-log'
+  const error = Object.assign(new Error(message), { code: 'AGENT_NATIVE_IDENTITY_UNCONFIRMED',
+    controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
+  await render(<MessageDeliveryFailure compact context="tool" error={error} copyText={async () => true} onRetry={vi.fn()} />)
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain('消息未送出 · 尚未确认原会话的续接标识')
+  expect(container.querySelector('details')?.open).toBe(false)
+  expect(container.querySelector('[aria-label="诊断摘要"]')?.textContent).toContain('original-log')
+  expect([...container.querySelectorAll('button')].some(button => button.textContent === '重试')).toBe(false)
+  expect(presentMessageDeliveryFailure({ error, inputUnconfirmed: true })).toMatchObject({ kind: 'unknown' })
+})
+
 it('separates a known condition refusal from the original unknown delivery without recommending the frozen retry', () => {
   const error = Object.assign(new Error('Original condition changed.'), { code: 'AGENT_PROMPT_CONDITION_CHANGED',
     controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })

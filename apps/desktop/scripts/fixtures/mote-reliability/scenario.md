@@ -10,4 +10,6 @@ CDP pointer actions open Profile and its actual Quick mode. Capture actual unkno
 
 Independent visual reviewer opens complete PNGs, checks hierarchy, branding, density, state honesty, actions/scroll/focus and draft retention, then records required corrections and final delivery verdict.
 
+For Main recovery feedback, add `MOTE_RECOVERY_VISUAL_ONLY=1 MOTE_MAIN_POLICY_SERVICE=1`. Read the original Main in split, wide and floating layouts. Submit one fresh message through the Composer while the controlled original recovery is unavailable. Capture the reason and available action in the conversation and the immediate send feedback. Check that the original operation and message remain in the queue without a replacement Run or second submission.
+
 For changes to the care perimeter, add `MOTE_HEARTBEAT_ICON=1` to capture the original 34 px launcher and 14 px Discussion symbol in one process. Check the low-poly face, ring coverage and independent status dot in both themes. Pause and attention have their own shaped segments. An original confirmed delivery lights the ring once. Inspect the rest, moving crest, settled and reduced-motion frames.
