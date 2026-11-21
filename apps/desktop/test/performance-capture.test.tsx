@@ -88,6 +88,20 @@ const click = async (selector: string) => act(async () => node<HTMLButtonElement
 const render = async (snapshot = samples.fresh) => act(async () => root.render(<PerformanceOverview snapshot={snapshot} close={() => {}} onConfigure={() => {}} onViewScript={() => {}} />))
 const sampleButton = '[data-performance-capture] [data-performance-action="profile"]'
 
+it('exposes diagnostic actions and explicit empty states without disclosure chrome', async () => {
+  await render(); await click('[data-performance-section-tab="diagnostics"]')
+  expect(node('[data-performance-capture]').tagName).toBe('SECTION')
+  expect(node('[data-performance-capture]').querySelector(':scope > summary')).toBeNull()
+  expect(node('[data-performance-capture]').textContent).toContain('No diagnostic capture yet')
+  expect(node<HTMLButtonElement>(sampleButton).disabled).toBe(false)
+  await click('[data-performance-section-tab="artifacts"]')
+  expect(node('[data-performance-profile-import]').tagName).toBe('SECTION')
+  expect(node('[data-performance-profile-import]').querySelector(':scope > summary')).toBeNull()
+  expect(node('[data-performance-profile-import]').textContent).toContain('No saved profile loaded')
+  expect(node<HTMLButtonElement>('[data-performance-profile-import] .performance-capture-actions > button').disabled).toBe(false)
+  expect(profilePort).not.toHaveBeenCalled(); expect(tracePort).not.toHaveBeenCalled(); expect(scenePort).not.toHaveBeenCalled()
+})
+
 function OverviewWithScene({ snapshot }: { snapshot: typeof samples.fresh }) {
   const scene = usePerformanceScene(true)
   return <PerformanceOverview snapshot={snapshot} close={() => {}} onConfigure={() => {}} onViewScript={() => {}} scene={scene} />
@@ -117,7 +131,7 @@ it('actual App popover sends its exact target through product preload and regist
     initialize: async () => () => {}, detectExecutors: vi.fn(async () => {}), checkHost: vi.fn(async () => {}), sessions: [composerSession('capture-session')],
     providerCatalog: await api.providers.list(), mainSurface: 'workbench', toolsOpen: false, tabs: {}, layouts: {} }, true)
   await act(async () => root.render(<App />)); await click('.performance-trigger')
-  expect(profilePort).not.toHaveBeenCalled(); await click('[data-performance-capture] > summary'); await click(sampleButton)
+  expect(profilePort).not.toHaveBeenCalled(); await click(sampleButton)
   const expected = { target: currentPerformanceCaptureTarget(samples.fresh.observation), durationMs: 2000 }
   expect(bridge.invoke).toHaveBeenCalledWith('metrics:captureProfile', expected); expect(profilePort).toHaveBeenCalledExactlyOnceWith(expected)
   expect(node('[aria-label="Module sample heatmap"]').textContent).toContain('2.5 ms')

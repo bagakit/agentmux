@@ -41,8 +41,10 @@ const owning = [
   'apps/desktop/src/renderer/src/components/LiquidSelectionSurface.tsx',
   'apps/desktop/src/renderer/src/components/use-mailbox-motion.ts',
   'apps/desktop/src/renderer/src/styles/performance-toolkit.css',
+  'packages/client-ui/src/components/ConversationMessage.tsx',
   'packages/client-ui/src/components/MailboxRecordRow.tsx',
-  'packages/client-ui/src/styles/composer.css'
+  'packages/client-ui/src/styles/composer.css',
+  'packages/client-ui/src/styles/composer-editor.css'
 ]
 const sources = {}, aliases = [], escape = value => value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
 for (const packagePath of ['packages/client-ui', 'packages/core', 'apps/host', 'packages/conversation', 'packages/demand', 'packages/layout']) {
