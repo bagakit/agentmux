@@ -81,16 +81,16 @@ export function createHostGoals(options: {
     const namespace = createHash('sha256').update(JSON.stringify(['agentmux.goal-namespace.v1', canonicalRoot])).digest('hex')
     return { runtimeId, namespace }
   }
-  const projectGoals = async (goals: Demand[]) => {
+  const projectGoals = async (goals: Demand[], includeResultHistory = false) => {
     if (!goals.length) return []
     try {
       const owner = await planOwner()
-      return goals.map(goal => projectHostGoal(goal, hostGoalAddress(goal, owner)))
+      return goals.map(goal => projectHostGoal(goal, hostGoalAddress(goal, owner), includeResultHistory))
     } catch (error) {
-      return goals.map(goal => ({ ...projectHostGoal(goal), addressIssue: `Goal link source is unconfirmed: ${error instanceof Error ? error.message : String(error)} The original Goal and work are retained.` }))
+      return goals.map(goal => ({ ...projectHostGoal(goal, undefined, includeResultHistory), addressIssue: `Goal link source is unconfirmed: ${error instanceof Error ? error.message : String(error)} The original Goal and work are retained.` }))
     }
   }
-  const projectGoal = async (goal: Demand) => (await projectGoals([goal]))[0]!
+  const projectGoal = async (goal: Demand) => (await projectGoals([goal], true))[0]!
   const approvals = createGoalApprovalOwner({ demands, runtimeId: () => options.runtime().ownerIdentity().runtimeId,
     client: () => options.runtime().client, changed: id => changed([id]) })
   const readGoal = async (goal: Demand) => ({ ...await projectGoal(goal), ...await approvals.read(goal) })

@@ -1,6 +1,7 @@
 /** Pure Goal facts and validation. Safe to consume from a browser. */
 import { deriveObjectId } from '@agentmux/identity'
 import { parseDemandEvidence, type DemandEvidence } from './evidence.js'
+import type { DemandStatus } from './demand-types.js'
 export { parseDemandEvidence, demandEvidenceText, demandEvidenceLabel, type DemandEvidence, type DemandFileEvidence } from './evidence.js'
 export type DemandCriterion = { id: string; text: string }
 export function deriveBoundGoalId(runtimeId: string, namespace: string, creationOperationId: string): string {
@@ -64,7 +65,7 @@ export function parseAcceptedGoalResults(value: unknown): DemandGrounding[] {
 }
 
 /** The next result step once the original owner confirms the plan's work has passed. */
-export function goalPlanReviewState(status: string,
+export function goalPlanReviewState(status: DemandStatus,
   alignment: DemandAlignment | undefined, grounding: DemandGrounding | undefined) {
   if (status !== 'in_review') return undefined
   if (isCurrentGroundingAccepted(alignment, grounding)) return 'accepted'

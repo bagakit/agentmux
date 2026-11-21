@@ -25,11 +25,12 @@ export function hostGoalResult(goal: Demand, owner?: Pick<AmuxGoalAddress, 'runt
 }
 
 /** Project the original durable record; no Renderer selection or cached board facts. */
-export function projectHostGoal(goal: Demand, address?: AmuxGoalAddress): AgentMuxDemand {
+export function projectHostGoal(goal: Demand, address?: AmuxGoalAddress, includeResultHistory = false): AgentMuxDemand {
   const result = hostGoalResult(goal, address)
-  const history = (goal.acceptedResults ?? []).filter(item => item.submissionId !== result.grounding?.submissionId)
-  if (goal.grounding?.acceptedAt != null && goal.grounding.submissionId !== result.grounding?.submissionId &&
-      !history.some(item => item.submissionId === goal.grounding?.submissionId)) history.push(goal.grounding)
+  const history = includeResultHistory ? (goal.acceptedResults ?? []).filter(item => item.submissionId !== result.grounding?.submissionId) : []
+  const stored = goal.grounding
+  if (includeResultHistory && stored?.acceptedAt != null && stored.submissionId !== result.grounding?.submissionId &&
+      !history.some(item => item.submissionId === stored.submissionId)) history.push(stored)
   return { id: goal.id, ...(address === undefined ? {} : { address }), title: goal.title, description: goal.description, priority: goal.priority,
     projectId: goal.projectId, projectName: goal.projectName, executorId: goal.executorId, assigneeSessionIds: [...goal.assigneeSessionIds],
     supervisorSessionId: goal.supervisorSessionId, participations: [...goal.participations],
