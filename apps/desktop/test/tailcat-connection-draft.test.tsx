@@ -2,7 +2,8 @@
 import { act } from 'react'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { HostSettingsPane } from '../src/renderer/src/components/settings/HostSettingsPane'
-import { MeshSettingsPane } from '../src/renderer/src/components/settings/MeshSettingsPane'
+import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
+import { LocalIncomingConnections } from '../src/renderer/src/components/settings/LocalIncomingConnections'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { tailcatConnectionDraft } from '../src/renderer/src/lib/tailcat-connection-draft'
@@ -25,8 +26,13 @@ beforeEach(()=>{
  vi.spyOn(api.mesh,'call').mockRejectedValue(Error('Network observation is independent of retained incoming edits'))
 })
 const show=()=>dom.render(<HostSettingsPane config={config} active onSave={save} navigationRequest={{section:'hosts',hostId:'studio'}}/>)
-const host=(hostId='local')=>dom.render(<HostSettingsPane config={config} active onSave={save} navigationRequest={{section:'hosts',hostId}}/>)
-const mesh=(hostId='local')=>dom.render(<MeshSettingsPane config={config} active onSave={save} navigationRequest={{section:'hosts',hostId}}/>)
+const host=()=>dom.render(<LocalIncomingConnections config={config} active/>)
+const mesh=(hostId='local')=>dom.render(<SettingsPanel onClose={vi.fn()} navigationRequest={hostId==='local'
+  ? {section:'network-node',hostId,field:'incoming'} : {section:'hosts',hostId,field:'connection'}}/>)
+const sshTab='.cluster-node-tabs [aria-controls$="-mesh-devices"]'
+const tailcatTab='.cluster-node-tabs [aria-controls$="-incoming"]'
+const meshNav='.settings-sidebar [data-settings-target="hosts"]'
+const nodeNav='.settings-sidebar [data-settings-target="network-node"]'
 async function fill(label:string,value:string){const input=dom.container.querySelector<HTMLInputElement|HTMLTextAreaElement>(`[aria-label="${label}"]`)!;expect(input).not.toBeNull();await act(async()=>{const detail=input.closest('details');if(detail)detail.open=true;Object.getOwnPropertyDescriptor(input instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}))})}
 async function click(text:string){const button=[...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent?.trim()===text);expect(button).toBeDefined();await act(async()=>button!.click())}
 const value=(label:string)=>dom.container.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!.value
@@ -76,7 +82,7 @@ it('the real receiving editor retains literal allowed-code text and key input ac
  expect(value('Tailcat allowed clients')).toBe(text);expect(value('Tailcat server key')).toBe('retained-server')
  expect(save).not.toHaveBeenCalled();expect((useAppStore.getState().config!.hosts[0]!).tailcat).toBeUndefined()
 })
-it('saved clean listener stops helper I/O while hidden and resumes it on the real local Connection',async()=>{
+it('saved clean listener stops helper I/O while hidden and resumes it in Node Tailcat',async()=>{
  const scratch={...composerConfig.workspaces[0]!,id:SCRATCH_WORKSPACE_ID,name:'Motes'}
  const leader:ScratchTopicSnapshot={id:PMO_TEAMS_TOPIC_ID,title:'Mote',summary:'',collaborators:[],kind:'mote',directoryPath:scratchTopicDirectoryName(PMO_TEAMS_TOPIC_ID),topicPath:scratchTopicDirectoryName(PMO_TEAMS_TOPIC_ID)+'/topic.md',soul:{path:scratchTopicDirectoryName(PMO_TEAMS_TOPIC_ID)+'/SOUL.md',content:'Helper',version:'v1'}}
  const plain:SshHostConfig={id:'studio',kind:'ssh',label:'Studio',hostname:'studio.invalid',runtimeId:'original-runtime'}
@@ -93,16 +99,15 @@ it('saved clean listener stops helper I/O while hidden and resumes it on the rea
  await mesh()
  await vi.waitFor(()=>{expect(inspect).toHaveBeenCalledTimes(1);expect(listTopics).toHaveBeenCalledTimes(1);expect(readAvatar).toHaveBeenCalledTimes(1)})
  expect(signal?.aborted).toBe(false)
- await dom.click('[data-resource-editor] [data-host-panel="agents"]')
+ await dom.click(sshTab)
  expect(signal?.aborted).toBe(true)
  await act(async()=>useAppStore.setState({workspaceFileRevisions:{[SCRATCH_WORKSPACE_ID]:1},scratchTopicSnapshots:{[SCRATCH_WORKSPACE_ID]:{scope:JSON.stringify([scratch.hostId,scratch.path]),revision:1,reading:true,error:null,topics:[leader]}}}))
  await mesh('studio')
  await act(async()=>useAppStore.setState({workspaceFileRevisions:{[SCRATCH_WORKSPACE_ID]:2}}))
- await dom.click('.mesh-editor-navigation button')
+ await dom.click(meshNav)
  expect(inspect).toHaveBeenCalledTimes(1);expect(listTopics).toHaveBeenCalledTimes(1);expect(readAvatar).toHaveBeenCalledTimes(1)
  await act(async()=>rejectAvatar(new Error('Hidden avatar read failed')))
  expect(report.mock.calls.filter(call=>String(call[0]).includes('Mote avatar'))).toHaveLength(0)
- await dom.click('.mesh-view-tabs button:nth-child(2)')
  await act(async()=>useAppStore.setState({workspaceFileRevisions:{[SCRATCH_WORKSPACE_ID]:3},scratchTopicSnapshots:{[SCRATCH_WORKSPACE_ID]:{scope:JSON.stringify([scratch.hostId,scratch.path]),revision:3,reading:true,error:null,topics:[leader]}}}))
  await mesh('local')
  await vi.waitFor(()=>{expect(inspect).toHaveBeenCalledTimes(2);expect(listTopics).toHaveBeenCalledTimes(2);expect(readAvatar).toHaveBeenCalledTimes(2)})
@@ -115,13 +120,13 @@ it('retains an in-flight incoming save and later literal edits across Host, pane
  await mesh();const initialReads=inspect.mock.calls.length
  await fill('Tailcat server key','submitted-server');await click('Save incoming connections')
  const text='  nodekey:'+'ef'.repeat(32)+'  \n\n';await fill('Tailcat allowed clients',text);await fill('Tailcat server key','later-server')
- await dom.click('[data-resource-editor] [data-host-panel="agents"]');expect(inspect).toHaveBeenCalledTimes(initialReads)
+ await dom.click(sshTab);expect(inspect).toHaveBeenCalledTimes(initialReads)
  await mesh('studio');expect(inspect).toHaveBeenCalledTimes(initialReads)
  const retainedIncoming=[...dom.container.querySelectorAll<HTMLElement>('[data-settings-field="incoming"]')]
  expect(retainedIncoming).toHaveLength(1)
  expect(retainedIncoming.every(node=>node.hidden||node.closest('[hidden]')||node.inert||node.closest('[inert]'))).toBe(true)
- await mesh('local');await dom.click('.mesh-editor-navigation button');expect(inspect).toHaveBeenCalledTimes(initialReads)
- await dom.click('.mesh-view-tabs button:nth-child(2)')
+ await dom.click(meshNav);expect(inspect).toHaveBeenCalledTimes(initialReads)
+ await dom.click(nodeNav); await dom.click(tailcatTab)
  expect(value('Tailcat allowed clients')).toBe(text);expect(value('Tailcat server key')).toBe('later-server')
  expect(dom.container.querySelector('[data-settings-field="incoming"] [data-settings-save-bar]')?.textContent).toContain('Saving Incoming connections')
  await act(async()=>finish())

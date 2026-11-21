@@ -72,7 +72,7 @@ import { localRuntimeConnector } from './helpers/local-runtime-connector'
 import { prepareSettingsIpcDirectory, settingsScratchTopics, settingsWorkbenchWindows, settingsWorkspaceFiles } from './helpers/settings-ipc-fixture'
 import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 import { testAppDocumentSources } from './helpers/app-document-fixture'
-import { hostsSettingsModule } from '../src/renderer/src/components/settings/modules/hosts'
+import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
@@ -136,15 +136,14 @@ afterEach(async () => {
 })
 
 async function show(hostId = 'local') {
-  const Pane = hostsSettingsModule.Pane
-  await dom.render(<Pane config={config} active onClose={vi.fn()} onNavigate={vi.fn()} navigationRequest={{ section: 'hosts', hostId }} />)
+  await dom.render(<SettingsPanel onClose={vi.fn()} navigationRequest={{ section: 'hosts', hostId, field: hostId === 'local' ? 'incoming' : 'connection' }} />)
 }
 function visibleIncoming() {
   return [...dom.container.querySelectorAll<HTMLElement>('[data-settings-field="incoming"]')]
     .filter(node => !node.hidden && !node.closest('[hidden]') && !node.inert && !node.closest('[inert]'))
 }
 
-it('the relocated local Connection saves exactly its original Tailcat slice through real preload, Main RPC and private config', async () => {
+it('Node Tailcat saves exactly its original Tailcat slice through real preload, Main RPC and private config', async () => {
   const before = JSON.parse(await readFile(configStore.filePath, 'utf8')) as AppConfig
   const diskWrites = vi.spyOn(configStore, 'save')
   const saveHosts = vi.spyOn(api.config, 'save')
@@ -152,7 +151,7 @@ it('the relocated local Connection saves exactly its original Tailcat slice thro
   await vi.waitFor(() => expect(visibleIncoming()).toHaveLength(1))
   const incoming = visibleIncoming()
   expect(incoming).toHaveLength(1)
-  expect(dom.container.querySelector('[data-resource-editor="local"][data-host-view="connection"]')).not.toBeNull()
+  expect(incoming[0]?.getAttribute('data-settings-host')).toBe('local')
   const toggle = incoming[0]!.querySelector<HTMLInputElement>('[aria-label="Allow Tailcat connections"]')
   expect(toggle?.checked).toBe(true)
   expect(toggle?.type).toBe('checkbox')

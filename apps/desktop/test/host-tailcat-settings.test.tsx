@@ -6,6 +6,8 @@ import type { AppConfig, HostConfig, SshHostConfig } from '../src/shared/contrac
 import { parseHostConfiguration, parseHostConfigurations } from '@agentmux/host/host-configuration'
 import { NetworkNodeSettingsPane } from '../src/renderer/src/components/settings/NetworkNodeSettingsPane'
 import { SettingsNavigation } from '../src/renderer/src/components/SettingsNavigation'
+import { LocalIncomingConnections } from '../src/renderer/src/components/settings/LocalIncomingConnections'
+import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { HostSettingsPane } from '../src/renderer/src/components/settings/HostSettingsPane'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
@@ -27,6 +29,7 @@ beforeEach(() => {
   vi.spyOn(api.nodePublishing, 'call').mockRejectedValue(new Error('No Node publication fixture'))
 })
 const show = (hostId = remote.id) => dom.render(<HostSettingsPane config={config} active={true} onSave={onSave} navigationRequest={{ section: 'hosts', hostId }} />)
+const incoming = () => dom.render(<LocalIncomingConnections config={config} active />)
 const node = (hostId = 'local') => dom.render(<NetworkNodeSettingsPane config={config} active={true} onClose={() => {}} onNavigate={() => {}} navigationRequest={{ section: 'network-node', hostId }} />)
 const visibleIncoming = () => [...dom.container.querySelectorAll<HTMLElement>('[data-settings-field="incoming"]')].filter(node => !node.hidden && !node.closest('[hidden]') && !node.inert && !node.closest('[inert]'))
 function input(label: string) {
@@ -144,7 +147,7 @@ it('the local switch remains a draft until Save incoming connections and display
   useAppStore.setState({ sessions: [original] })
   const inspect = vi.spyOn(api.hosts, 'inspect').mockResolvedValue({ routeHostId: 'local', configuration: local,
     tailcat: { state: 'failed', detail: 'Tailcat CLI could not start. Install it on PATH and re-enable this listener.' } } as never)
-  await show('local')
+  await incoming()
   expect(inspect.mock.calls[0]![0]).toEqual(local)
   expect(dom.container.querySelector('[data-tailcat-listener]')!.textContent).toContain('Tailcat listener · failed')
   expect(dom.container.querySelector('[data-tailcat-listener]')!.textContent).toContain('Install it on PATH')
@@ -157,20 +160,19 @@ it('the local switch remains a draft until Save incoming connections and display
   expect(drafts.incoming?.local?.value).toMatchObject({ kind: 'local', tailcat: { ...local.tailcat, enabled: false } })
   expect(drafts.incoming?.local?.allowedText).toBe(literalAllowed)
   expect(drafts.hosts?.local).toBeUndefined()
-  const saveHosts = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.trim() === 'Save hosts')!
-  expect(saveHosts.disabled).toBe(true)
+  expect(dom.container.textContent).not.toContain('Save hosts')
   await button('Save incoming connections')
   expect(api.hosts.configureTailcat).toHaveBeenCalledExactlyOnceWith({ hostId: 'local', expected: local.tailcat, candidate: { ...local.tailcat, enabled: false } })
   expect(onSave).not.toHaveBeenCalled()
   expect(useAppStore.getState().sessions).toEqual([original])
 })
 
-it('relocates the only visible local listener into the local Host Connection while remote and Node keep their own editors', async () => {
+it('shows one local listener in Node Tailcat and keeps the exact remote connection separate', async () => {
   const local = { ...config.hosts[0]!, tailcat: { enabled: false, keyFile: 'saved-server', allowedClients: [] } } as HostConfig
   config.hosts[0] = local
   vi.spyOn(api.hosts, 'inspect').mockImplementation(async host => ({ routeHostId: host.id, configuration: host, tailcat: { state: 'disabled' } }) as never)
-  await show('local')
-  expect(dom.container.querySelector('[data-resource-editor="local"][data-host-view="connection"]')).not.toBeNull()
+  await dom.render(<SettingsPanel onClose={vi.fn()} navigationRequest={{ section: 'network-node', field: 'incoming' }} />)
+  expect(dom.container.querySelector('[data-cluster-node-panel="incoming"]')?.closest('[hidden]')).toBeNull()
   expect(visibleIncoming()).toHaveLength(1)
   expect(visibleIncoming()[0]!.querySelector('[data-tailcat-listener]')).not.toBeNull()
   await show(remote.id)
@@ -189,13 +191,15 @@ it('removes the incoming editor from local and remote Node without removing Node
   expect(dom.container.querySelector('[data-settings-field="incoming"]')).toBeNull()
 })
 
-it('the local Node assistance link targets publishing while the listener stays in Connection', async () => {
+it('the local Host links to the original publishing and Tailcat settings', async () => {
   vi.spyOn(api.hosts, 'inspect').mockImplementation(async host => ({ routeHostId: host.id, configuration: host, tailcat: { state: 'disabled' } }) as never)
-  const open = vi.fn()
+  const open = vi.fn(), onIncoming = vi.fn()
   await dom.render(<SettingsNavigation.Provider value={{ open, openToolkit: vi.fn(), openHost: vi.fn(), openChannel: vi.fn(), channelEntries: [], channelPresentation: () => null, openMoteConnection: vi.fn(), chooseAgent: vi.fn() }}>
-    <HostSettingsPane config={config} active={true} onSave={onSave} navigationRequest={{ section: 'hosts', hostId: 'local' }} />
+    <HostSettingsPane config={config} active={true} onSave={onSave} onIncoming={onIncoming} navigationRequest={{ section: 'hosts', hostId: 'local' }} />
   </SettingsNavigation.Provider>)
-  expect(visibleIncoming()).toHaveLength(1)
+  expect(visibleIncoming()).toHaveLength(0)
+  await button('Tailcat listener')
+  expect(onIncoming).toHaveBeenCalledExactlyOnceWith('local')
   await button('Open Node publishing')
   expect(open).toHaveBeenCalledExactlyOnceWith('network-node', undefined, 'publishing', 'local')
 })
@@ -205,7 +209,7 @@ it('listener address is a masked credential and Copy uses the existing clipboard
   vi.spyOn(api.hosts, 'inspect').mockResolvedValue({ routeHostId: 'local', configuration: local,
     tailcat: { state: 'listening', address: 'tcfixturecredential' } } as never)
   const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
-  await show('local')
+  await incoming()
   expect(input('Private Tailcat address').type).toBe('password')
   expect(input('Private Tailcat address').readOnly).toBe(true)
   expect(dom.container.textContent).not.toContain('tcfixturecredential')
@@ -219,7 +223,7 @@ it('copies a confirmed private address once per attempt and clears stale feedbac
   vi.spyOn(api.hosts, 'inspect').mockImplementation(async () => ({ routeHostId: 'local', configuration: local,
     tailcat: { state: 'listening', address } }) as never)
   const write = vi.spyOn(api.ui, 'writeClipboardText').mockRejectedValueOnce(new Error('Clipboard unavailable')).mockResolvedValue(undefined)
-  await show('local')
+  await incoming()
   await button('Copy address')
   expect(dom.container.querySelector('[role="alert"]')?.textContent).toBe('Address copy failed. Select the private field and copy it again.')
   expect(input('Private Tailcat address').value).toBe(address)

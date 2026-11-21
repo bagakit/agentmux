@@ -3,7 +3,6 @@ import { act } from 'react'
 import { connectionLinkUrl } from '@agentmux/relay/offer'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
-import { MeshSettingsPane } from '../src/renderer/src/components/settings/MeshSettingsPane'
 import { HostSettingsPane } from '../src/renderer/src/components/settings/HostSettingsPane'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
 import { api } from '../src/renderer/src/lib/api'
@@ -25,15 +24,20 @@ beforeEach(() => {
   save.mockClear()
 })
 async function input(element: HTMLInputElement, value: string) { await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(element, value); element.dispatchEvent(new Event('input', { bubbles: true })) }) }
-function pane() { return <MeshSettingsPane config={config} active onSave={save} /> }
-function editor() { return dom.container.querySelector<HTMLInputElement>('[data-mesh-view="connections"] [data-host-name]')! }
+const meshNav = '.settings-sidebar [data-settings-target="hosts"]'
+const quickNav = '.settings-sidebar [data-settings-target="remote-execution"]'
+const nodeNav = '.settings-sidebar [data-settings-target="network-node"]'
+const join = '.cluster-overview-header .primary-button'
+function tab(field: string) { return `.cluster-node-tabs [role="tab"][aria-controls$="-${field}"]` }
+function pane(navigationRequest?: SettingsNavigationRequest) { return <SettingsPanel initialSection="hosts" onClose={vi.fn()} navigationRequest={navigationRequest} /> }
+function editor() { return dom.container.querySelector<HTMLInputElement>('[data-cluster-node-panel="mesh-devices"] [data-host-name]')! }
 async function ready() { await vi.waitFor(() => expect(dom.container.querySelector('[data-cluster-host="selected-farm"]')).not.toBeNull()) }
 
 it('the actual SettingsPanel opens a continuous Mesh homepage with saved connection nodes, gateways and machines when Mesh is disabled', async () => {
   await dom.render(<SettingsPanel initialSection="hosts" onClose={vi.fn()} />); await ready()
-  expect(dom.container.querySelector('[data-mesh-home-view]')?.getAttribute('data-mesh-home-view')).toBe('paths')
-  expect([...dom.container.querySelectorAll('.settings-nav-section[data-settings-group="cluster"] .settings-nav-items > button')].map(button => button.textContent)).toEqual(['Mesh', 'Node', 'Remote'])
-  expect([...dom.container.querySelectorAll('.settings-nav-children[aria-label="Mesh"] button')].map(button => button.textContent)).toEqual(['Connect to gateway', 'Relay settings', 'Device connections', 'Machine status'])
+  expect(dom.container.querySelector('[data-cluster-page="mesh"]')).not.toBeNull()
+  expect([...dom.container.querySelectorAll('.settings-nav-section[data-settings-group="cluster"] .settings-nav-items > button')].map(button => button.textContent)).toEqual(['Mesh', 'Node', 'Quick'])
+  expect([...dom.container.querySelectorAll('.settings-nav-children[aria-label="Mesh"] button')].map(button => button.textContent)).toEqual([])
   const map = dom.container.querySelector('[aria-label="Network relationship canvas"]')!
   expect(map).not.toBeNull()
   expect(map.closest('[hidden]')).toBeNull()
@@ -47,7 +51,7 @@ it('the actual SettingsPanel opens a continuous Mesh homepage with saved connect
   expect(dom.container.querySelector('[data-cluster-host="neighbor-farm"]')?.textContent).toContain('neighbor.internal')
   expect(dom.container.querySelector('[aria-label="Cluster machine resources"]')?.textContent).toContain('Saved connections')
   expect(dom.container.querySelector('[aria-label="Selected network object"]')).toBeNull()
-  expect(dom.container.querySelector('[data-mesh-view="network"]')?.hasAttribute('hidden')).toBe(true)
+  expect(dom.container.querySelector('[data-cluster-page="node"]')).toBeNull()
   const filter = dom.container.querySelector<HTMLInputElement>('[aria-label="Filter saved devices"]')!, reads = vi.mocked(api.mesh.call).mock.calls.length
   for (const value of ['NEIGHBOR.INTERNAL', 'neighbor-farm', 'neighbor-original-runtime']) {
     await input(filter, value)
@@ -67,23 +71,19 @@ it('the actual SettingsPanel opens a continuous Mesh homepage with saved connect
   expect(save).not.toHaveBeenCalled()
 })
 
-it('selects the gateway wizard in the sidebar and keeps the map and original draft on return', async () => {
+it('opens Quick from Mesh and keeps the map and original gateway input on return', async () => {
   useAppStore.setState({ meshGatewayCode: '' })
-  await dom.render(<SettingsPanel initialSection="hosts" onClose={vi.fn()} />)
-  await ready()
-  const item = (id: string) => `.settings-sidebar [data-settings-target="${id}"]`
-  const child = item('hosts:mesh-join'), parent = item('hosts')
-  await dom.click(child)
-  expect(dom.container.querySelector(child)?.getAttribute('aria-current')).toBe('page')
-  expect(dom.container.querySelector('.settings-section-picker')?.textContent).toBe('Connect to gateway')
-  expect(dom.container.querySelector<HTMLElement>('[data-mesh-view="join"]')?.hidden).toBe(false)
+  await dom.render(pane()); await ready()
+  await dom.click(join)
+  expect(dom.container.querySelector(quickNav)?.getAttribute('aria-current')).toBe('page')
+  expect(dom.container.querySelector('[data-quick-view="mesh-join"]')).not.toBeNull()
   const draft = dom.container.querySelector<HTMLInputElement>('[aria-label="Gateway connection code"]')!
   await input(draft, 'original partially entered gateway code')
-  await dom.click(parent)
-  expect(dom.container.querySelector(parent)?.getAttribute('aria-current')).toBe('page')
+  await dom.click(meshNav)
+  expect(dom.container.querySelector(meshNav)?.getAttribute('aria-current')).toBe('page')
   expect(dom.container.querySelector('[aria-label="Network relationship canvas"]')?.closest('[hidden]')).toBeNull()
-  await dom.click('.mesh-home-actions .primary-button')
-  expect(dom.container.querySelector(child)?.getAttribute('aria-current')).toBe('page')
+  await dom.click(join)
+  expect(dom.container.querySelector(quickNav)?.getAttribute('aria-current')).toBe('page')
   expect(dom.container.querySelector('[aria-label="Gateway connection code"]')).toBe(draft)
   expect(draft.value).toBe('original partially entered gateway code')
   expect(vi.mocked(api.mesh.call).mock.calls.some(([method]) => method === 'settings.mesh.configure')).toBe(false)
@@ -94,9 +94,9 @@ it('a saved-device action reaches its exact original Host despite duplicate labe
   expect(dom.container.querySelector('[data-resource-editor]')?.getAttribute('data-resource-editor')).toBe('selected-farm')
   expect(editor().value).toBe('Farm same label')
   config = { ...config, hosts: [config.hosts[2]!,config.hosts[0]!,config.hosts[1]!] }
-  await dom.render(pane())
+  await act(async () => useAppStore.setState({ config }))
   expect(dom.container.querySelector('[data-resource-editor]')?.getAttribute('data-resource-editor')).toBe('selected-farm')
-  await dom.click('.mesh-editor-navigation button'); await dom.click('[data-cluster-host="neighbor-farm"] button')
+  await dom.click(meshNav); await dom.click('[data-cluster-host="neighbor-farm"] button')
   expect(dom.container.querySelector('[data-resource-editor]')?.getAttribute('data-resource-editor')).toBe('neighbor-farm')
   expect(save).not.toHaveBeenCalled()
 })
@@ -104,9 +104,9 @@ it('a saved-device action reaches its exact original Host despite duplicate labe
 it('a visited editor remains mounted and consumes a late authored input after returning home without losing its exact draft', async () => {
   await dom.render(pane()); await ready(); await dom.click('[data-cluster-host="selected-farm"] button')
   const original = editor(); await input(original, 'early-authored')
-  await dom.click('.mesh-editor-navigation button')
+  await dom.click(meshNav)
   expect(original.isConnected).toBe(true)
-  expect(dom.container.querySelector('[data-mesh-view="connections"]')?.hasAttribute('hidden')).toBe(true)
+  expect(original.closest('[data-settings-pane]')?.hasAttribute('hidden')).toBe(true)
   await input(original, 'late original draft  ')
   await dom.click('[data-cluster-host="selected-farm"] button')
   expect(editor()).toBe(original)
@@ -134,9 +134,9 @@ it('the homepage Add device action opens the original unsaved editor and returni
   const first = dom.container.querySelector('[data-resource-editor]')?.getAttribute('data-resource-editor')
   expect(first).toBeTruthy(); expect(config.hosts.some(host => host.id === first)).toBe(false)
   await input(editor(), 'new original device draft  ')
-  await dom.click('.mesh-editor-navigation button')
+  await dom.click(meshNav)
   expect(dom.container.querySelectorAll('[data-cluster-host]')).toHaveLength(3)
-  await dom.click('.settings-nav-children [data-settings-target="hosts:mesh-devices"]')
+  await dom.click(nodeNav); await dom.click(tab('mesh-devices'))
   expect(dom.container.querySelector('[data-resource-editor]')?.getAttribute('data-resource-editor')).toBe(first)
   expect(editor().value).toBe('new original device draft  ')
   expect(save).not.toHaveBeenCalled()
@@ -145,9 +145,13 @@ it('the homepage Add device action opens the original unsaved editor and returni
 it.each(['saved-device', 'deep-link'] as const)('later %s navigation supersedes a deferred Add during the original save and retains both late drafts', async route => {
   config = { ...config, hosts: config.hosts.map(host => host.kind === 'ssh' && host.transport === 'ssh-tailcat' ? { ...host, tailcat: { ...host.tailcat!, address: 'tcfixture-private-credential' } } : host) }
   let release!: () => void, navigationRequest: SettingsNavigationRequest | undefined
-  const heldSave = vi.fn(async () => { await new Promise<void>(done => { release = done }) })
-  const render = () => dom.render(<MeshSettingsPane config={config} active navigationRequest={navigationRequest} onSave={heldSave} />)
-  const saveButton = '[data-mesh-view="connections"] .remote-management > [data-settings-save-bar] > button'
+  useAppStore.setState({ config })
+  const heldSave = vi.spyOn(api.config, 'save').mockImplementation(async next => {
+    await new Promise<void>(done => { release = done })
+    return next
+  })
+  const render = () => dom.render(pane(navigationRequest))
+  const saveButton = '[data-cluster-node-panel="mesh-devices"] .remote-management > [data-settings-save-bar] > button'
   await render(); await ready(); await dom.click('[data-cluster-host="selected-farm"] button')
   await input(editor(), 'submitted original label')
   expect(dom.container.querySelector<HTMLButtonElement>(saveButton)?.disabled).toBe(false)
@@ -155,10 +159,10 @@ it.each(['saved-device', 'deep-link'] as const)('later %s navigation supersedes 
   expect(heldSave).toHaveBeenCalledTimes(1)
   expect(dom.container.querySelector(saveButton)?.getAttribute('aria-busy')).toBe('true')
   await input(editor(), 'late original draft  ')
-  await dom.click('.mesh-editor-navigation button'); await dom.click('.cluster-add-device')
+  await dom.click(meshNav); await dom.click('.cluster-add-device')
   expect(dom.container.querySelector('[data-resource-editor]')?.getAttribute('data-resource-editor')).toBe('selected-farm')
   if (route === 'saved-device') {
-    await dom.click('.mesh-editor-navigation button'); await dom.click('[data-cluster-host="neighbor-farm"] button')
+    await dom.click(meshNav); await dom.click('[data-cluster-host="neighbor-farm"] button')
   } else {
     navigationRequest = { section: 'hosts', hostId: 'neighbor-farm', field: 'connection' }
     await render()
@@ -170,27 +174,36 @@ it.each(['saved-device', 'deep-link'] as const)('later %s navigation supersedes 
   expect(dom.container.querySelector('[data-resource-editor]')?.getAttribute('data-resource-editor')).toBe('neighbor-farm')
   expect(editor().value).toBe('new target late draft  ')
   expect([...dom.container.querySelectorAll('[data-host-disclosure]')].map(node => node.getAttribute('data-host-disclosure'))).toEqual(config.hosts.map(host => host.id))
-  await dom.click('.mesh-editor-navigation button'); await dom.click('[data-cluster-host="selected-farm"] button')
+  await dom.click(meshNav); await dom.click('[data-cluster-host="selected-farm"] button')
   expect(editor().value).toBe('late original draft  ')
   expect(heldSave).toHaveBeenCalledTimes(1)
 })
 
-it('left navigation opens each real Mesh subpage and Mesh restores the same overview controls', async () => {
-  await dom.render(<SettingsPanel initialSection="hosts" onClose={vi.fn()} />)
-  await ready()
+it('Node groups the three transports and Mesh restores its original filter and status', async () => {
+  await dom.render(pane()); await ready()
   const filter = dom.container.querySelector<HTMLInputElement>('[aria-label="Filter saved devices"]')!
   await input(filter, 'neighbor')
-  for (const [field, view] of [['mesh-machines', 'machines'], ['mesh-configuration', 'network'], ['mesh-devices', 'connections']] as const) {
-    const selector = `.settings-sidebar [data-settings-target="hosts:${field}"]`
-    await dom.click(selector)
-    expect(dom.container.querySelector('[data-mesh-home-view]')?.getAttribute('data-mesh-home-view')).toBe(view)
-    expect(dom.container.querySelector(selector)?.getAttribute('aria-current')).toBe('page')
+  await dom.click(nodeNav)
+  const tabs = dom.container.querySelector('[aria-label="Node settings"][role="tablist"]')
+  expect([...tabs!.querySelectorAll('button')].map(button => button.textContent)).toEqual(['Identity & access', 'Gateway', 'Tailcat', 'SSH'])
+  for (const field of ['mesh-configuration', 'incoming', 'mesh-devices']) {
+    await dom.click(tab(field))
+    expect(dom.container.querySelector(`[data-cluster-node-panel="${field}"]`)?.closest('[hidden]')).toBeNull()
+    expect(dom.container.querySelector(tab(field))?.getAttribute('aria-selected')).toBe('true')
   }
-  await dom.click('.settings-sidebar [data-settings-target="hosts"]')
-  expect(dom.container.querySelector('[data-mesh-home-view]')?.getAttribute('data-mesh-home-view')).toBe('paths')
+  await dom.click(meshNav)
+  expect(dom.container.querySelector('[data-settings-field="mesh-machines"]')?.closest('[hidden]')).toBeNull()
   expect(dom.container.querySelector('[aria-label="Filter saved devices"]')).toBe(filter)
   expect(filter.value).toBe('neighbor')
   expect(dom.container.querySelectorAll('[data-cluster-host]')).toHaveLength(1)
+})
+
+it('never substitutes the local Tailcat listener for another explicit Host', async () => {
+  await dom.render(pane({ section: 'hosts', field: 'incoming', hostId: 'neighbor-farm' }))
+  expect(dom.container.querySelector('.host-local-incoming')).toBeNull()
+  expect(dom.container.querySelector('[data-cluster-node-panel="incoming"]')?.textContent).toContain('The requested local Host is unavailable')
+  await dom.click('[data-cluster-node-panel="incoming"] > button')
+  expect(dom.container.querySelector('.host-local-incoming')?.closest('[hidden]')).toBeNull()
 })
 
 it('selects an exact saved Host from the diagram and shows its channel independently of a stale connection test', async () => {

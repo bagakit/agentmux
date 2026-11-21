@@ -8,6 +8,8 @@ Use capture.cjs with the private preview URL, absolute or relative private userD
 
 `--gateway-join` follows the original connection, confirmation, and in-place identity setup in wide and narrow Settings. The isolated identity receipt is controlled. The driver samples an active intermediate animation, checks the original gateway selection after the identity becomes ready, then emulates reduced motion and verifies the signal has no active animations. A real Host restart, configuration receipt, and identity fence are tested independently.
 
+`--cluster-settings` captures Mesh, its machine section, all four Node panels, and Quick’s landing and journeys. It also checks the 430 px section picker and horizontal overflow, then verifies that reduced motion removes the task entrance animation.
+
 ## Runtime Settings inputs
 
 Run `node apps/desktop/scripts/verify-settings-inputs-runtime.mjs` from the repository root. It verifies mounted form behavior and two product source mutations, then captures the original Settings panels in private Electron at 1280px dark and 520px light.

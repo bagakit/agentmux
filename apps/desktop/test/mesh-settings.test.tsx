@@ -3,7 +3,7 @@ import { act } from 'react'
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest'
 import type { MeshNetworkConfiguration, MeshNetworkSettings, MeshNetworkInspection } from '@agentmux/core/mesh-network'
 import { MeshNetworkSettings as Editor } from '../src/renderer/src/components/settings/MeshNetworkSettings'
-import { hostsSettingsModule } from '../src/renderer/src/components/settings/modules/hosts'
+import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { meshConfiguration, meshDraftForRuntime, meshForm, meshPeerCode, restoredMeshDrafts } from '../src/renderer/src/lib/mesh-settings-draft'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
@@ -138,11 +138,11 @@ it('opens the guided connection from the Mesh homepage and submits one original 
     return remembered as never
   })
   const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
-  await dom.render(<hostsSettingsModule.Pane config={useAppStore.getState().config!} active onClose={vi.fn()} onNavigate={vi.fn()} />)
-  await settled(() => Boolean(dom.container.querySelector('.mesh-home-actions button:first-child')))
-  await dom.click('.mesh-home-actions button:first-child')
+  await dom.render(<SettingsPanel initialSection="hosts" onClose={vi.fn()} />)
+  await settled(() => Boolean(dom.container.querySelector('.cluster-overview-header .primary-button')))
+  await dom.click('.cluster-overview-header .primary-button')
   await settled(() => Boolean(dom.container.querySelector('.mesh-join-form button[type="submit"]')))
-  expect(dom.container.querySelector('[data-mesh-view="join"][hidden]')).toBeNull()
+  expect(dom.container.querySelector('[data-quick-view="mesh-join"]')?.closest('[hidden]')).toBeNull()
   expect(dom.container.querySelector('[aria-label="Device to manage"]')).toBeNull()
   await input('Gateway connection code', gatewayCode)
   expect(dom.container.querySelector('.mesh-peer-preview')?.textContent).toContain('relay.example:8444')
@@ -313,14 +313,13 @@ it('keeps recovery in the wizard after failed preparation and exposes the same r
   expect(useAppStore.getState().meshGatewayRuntimeId).toBeNull()
   expect(dom.container.textContent).toContain('Import original backup…')
 })
-it('the original Settings section exposes Mesh and a real editor; saved connection identities keep their original route', async () => {
-  inspectOnly(); expect(hostsSettingsModule.id).toBe('hosts'); expect(hostsSettingsModule.title).toBe('Mesh')
-  await dom.render(<hostsSettingsModule.Pane config={useAppStore.getState().config!} active onClose={vi.fn()} onNavigate={vi.fn()} navigationRequest={{section:'hosts',field:'mesh-configuration'}} />)
-  await ready(); expect(dom.container.querySelector('[data-mesh-home-view]')?.getAttribute('data-mesh-home-view')).toBe('network')
-  expect(dom.container.querySelector('.mesh-editor-navigation')?.textContent).toContain('Mesh overview')
-  await dom.click('.mesh-editor-navigation button')
-  expect(dom.container.querySelector('[data-mesh-home-view]')?.getAttribute('data-mesh-home-view')).toBe('paths')
-  expect(dom.container.querySelector('[aria-label="Mesh network overview"]')).not.toBeNull()
+it('the original Gateway address reaches the editor in Node and Mesh still opens its topology', async () => {
+  inspectOnly()
+  await dom.render(<SettingsPanel initialSection="hosts" onClose={vi.fn()} navigationRequest={{ section: 'hosts', field: 'mesh-configuration' }} />)
+  await ready()
+  expect(dom.container.querySelector('[data-cluster-node-panel="mesh-configuration"]')?.closest('[hidden]')).toBeNull()
+  await dom.click('.settings-sidebar [data-settings-target="hosts"]')
+  await settled(() => Boolean(dom.container.querySelector('[aria-label="Mesh network overview"]')))
 })
 it('the Mesh code field announces an invalid submission and clears the error when edited', async () => {
   const call = inspectOnly()
@@ -543,17 +542,15 @@ it('hiding a pending route read releases its observer and allows an explicit fre
 
 it('unavailable setup offers recovery and the original saved connections without an invented empty network or dead link form', async () => {
   const call = vi.spyOn(api.mesh, 'call').mockRejectedValue(Object.assign(Error('Original owner did not answer'), { code: 'MESH_OWNER_UNAVAILABLE' }))
-  await dom.render(<hostsSettingsModule.Pane config={useAppStore.getState().config!} active onClose={vi.fn()} onNavigate={vi.fn()} navigationRequest={{section:'hosts',field:'mesh-configuration'}} />)
+  await dom.render(<SettingsPanel initialSection="hosts" onClose={vi.fn()} navigationRequest={{ section: 'hosts', field: 'mesh-configuration' }} />)
   await settled(() => Boolean(dom.container.querySelector('.mesh-availability details')))
   expect(dom.container.textContent).toContain('Couldn’t read Mesh settings.')
   expect(dom.container.textContent).not.toContain('Reading your network settings…')
   expect(dom.container.querySelector('.mesh-network-map')).toBeNull()
   expect(dom.container.querySelector('[data-settings-field="mesh-link"]')).toBeNull()
-  expect(dom.container.querySelector('[data-mesh-view="connections"]')?.hasAttribute('hidden')).toBe(true)
+  expect(dom.container.querySelector('[data-cluster-node-panel="mesh-devices"]')?.hasAttribute('hidden')).toBe(true)
   await dom.click('.mesh-recovery-actions button:last-child')
-  expect(dom.container.querySelector('[data-mesh-view="connections"]')?.hasAttribute('hidden')).toBe(false)
-  expect(dom.container.querySelector('[data-mesh-home-view]')?.getAttribute('data-mesh-home-view')).toBe('connections')
-  expect(dom.container.querySelector('.mesh-editor-navigation')?.textContent).toContain('Mesh overview')
+  expect(dom.container.querySelector('[data-cluster-node-panel="mesh-devices"]')?.closest('[hidden]')).toBeNull()
   expect(call.mock.calls.some(row => row[0] === 'settings.mesh.configure')).toBe(false)
 })
 

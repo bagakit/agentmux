@@ -10,11 +10,19 @@ app.whenReady().then(async()=>{try{
  const wait=async selector=>{for(let i=0;i<240;i++){if(await evaluate('Boolean(document.querySelector('+JSON.stringify(selector)+'))'))return;await delay(50)}throw Error('Missing rendered product '+selector)}
  const click=async selector=>{await wait(selector);await evaluate('document.querySelector('+JSON.stringify(selector)+').click()');await delay(180)}
  const type=async(selector,value)=>{await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});Object.getOwnPropertyDescriptor(e.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value').set.call(e,${JSON.stringify(value)});e.dispatchEvent(new Event('input',{bubbles:true}))})()`);await delay(150)}
- const button=async name=>{await evaluate(`(()=>{const e=Array.from(document.querySelectorAll('.mesh-settings-pane button')).find(e=>!e.closest('[hidden]')&&e.textContent.trim()===${JSON.stringify(name)});if(!e)throw Error('Missing visible action '+${JSON.stringify(name)});e.click()})()`);await delay(200)}
- const nav=field=>click('.settings-sidebar nav [data-settings-target="hosts'+(field?':'+field:'')+'"]')
+ const button=async name=>{await evaluate(`(()=>{const e=Array.from(document.querySelectorAll('[data-settings-pane]:not([hidden]) button')).find(e=>!e.closest('[hidden]')&&e.textContent.trim()===${JSON.stringify(name)});if(!e)throw Error('Missing visible action '+${JSON.stringify(name)});e.click()})()`);await delay(200)}
+ const nav=async field=>{
+  if(field==='mesh-configuration'){
+    await click('.settings-sidebar nav [data-settings-target="network-node"]')
+    await click('.cluster-node-tabs [aria-controls$="-mesh-configuration"]')
+    return
+  }
+  await click('.settings-sidebar nav [data-settings-target="hosts"]')
+  if(field==='mesh-machines')await click('.cluster-inline-link')
+ }
  const frame=async name=>{await evaluate('document.fonts.ready');await delay(350);await fs.writeFile(path.join(output,name+'.png'),(await window.webContents.capturePage()).toPNG());receipt.frames.push(name+'.png');receipt.frameOverflow??={};receipt.frameOverflow[name]=await evaluate('document.documentElement.scrollWidth>window.innerWidth')}
  const pathVisibility=async name=>{const value=await evaluate("(()=>{const c=document.querySelector('.mesh-explorer__canvas').getBoundingClientRect();return Array.from(document.querySelectorAll('.react-flow__node')).filter(e=>e.querySelector('[data-on-path]')).map(e=>{const r=e.getBoundingClientRect();return {id:e.dataset.id,inside:r.left>=c.left-1&&r.right<=c.right+1&&r.top>=c.top-1&&r.bottom<=c.bottom+1}})})()");assert.ok(value.length>=3&&value.every(e=>e.inside),'the selected '+name+' must be fully visible beside the inspector');receipt.pathVisibility??={};receipt.pathVisibility[name]=value}
- const top=()=>evaluate("document.querySelector('[data-mesh-view]:not([hidden])').scrollTop=0")
+ const top=()=>evaluate("document.querySelector('[data-settings-pane]:not([hidden])').scrollTop=0")
  await fs.mkdir(output,{recursive:true})
  if (scope === 'ip-location') {
   await window.loadURL(url+'?scenario=ip-location')
@@ -70,7 +78,7 @@ app.whenReady().then(async()=>{try{
  }
  if(scope!=='geography'){
  await window.loadURL(url);await wait('[data-mesh-topology]');await delay(1100)
- assert.deepEqual(await evaluate("Array.from(document.querySelectorAll('.settings-nav-children[aria-label=\"Mesh\"] button')).map(e=>e.textContent.trim())"),['Connect to gateway','Manage gateways','Saved devices','Machine status'])
+ assert.deepEqual(await evaluate("Array.from(document.querySelectorAll('[data-settings-group=cluster] > .settings-nav-items > button')).map(e=>e.textContent.trim())"),['Mesh','Node','Quick'])
  assert.equal(await evaluate("document.querySelectorAll('[data-cluster-host]').length"),6)
  assert.equal(await evaluate("Boolean(document.querySelector('[aria-label=\"Selected network object\"]'))"),false)
  await button('Connections');await wait('.mesh-explorer-edge path')
@@ -88,7 +96,7 @@ app.whenReady().then(async()=>{try{
  })()`)
  receipt.mixed = await graphFacts()
  assert.deepEqual(receipt.mixed,{graphs:1,hosts:5,saved:5,relay:5,sharedLocal:1,savedAtLocal:5,relayAtLocal:2,geography:false,savedDashed:true,relaySolid:true})
- for(let i=0;i<150;i++){if(await evaluate('document.querySelector(".cluster-machines-coverage").textContent.includes("4 / 6")'))break;await delay(50)}
+ await click('.cluster-inline-link');await wait('.cluster-machines-coverage');await top()
  await frame('overview-dark')
  window.setContentSize(560,930);await wait('.mesh-explorer__canvas[data-narrow]')
  for(let i=0;i<180;i++){
@@ -141,20 +149,21 @@ app.whenReady().then(async()=>{try{
  await type('[aria-label="Filter saved devices"]','studio');assert.equal(await evaluate("document.querySelectorAll('[data-cluster-host]').length"),1);await frame('devices-filter-narrow-dark')
  await type('[aria-label="Filter saved devices"]','no-such-device');assert.equal(await evaluate("document.querySelectorAll('[data-cluster-host]').length"),0);await frame('devices-filter-empty-narrow-dark');await type('[aria-label="Filter saved devices"]','')
  await evaluate(`(()=>{const element=document.querySelector('[aria-label="Settings section"]');element.focus();element.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));})()`)
- await wait('.settings-section-menu [data-settings-target="hosts:mesh-machines"]')
- await evaluate(`document.querySelector('.settings-section-menu [data-settings-target="hosts:mesh-machines"]').scrollIntoView({block:'center'})`)
+ await wait('.settings-section-menu [data-settings-target="hosts"]')
+ await evaluate(`document.querySelector('.settings-section-menu [data-settings-target="hosts"]').scrollIntoView({block:'center'})`)
  await frame('narrow-mesh-menu')
- await click('.settings-section-menu [data-settings-target="hosts:mesh-machines"]')
- assert.equal(await evaluate("document.querySelector('[data-mesh-home-view]').dataset.meshHomeView"),'machines')
+ await click('.settings-section-menu [data-settings-target="hosts"]')
+ await click('.cluster-inline-link')
+ assert.equal(await evaluate("document.activeElement.dataset.settingsField"),'mesh-machines')
  window.setContentSize(1440,1050);await top();await nav('mesh-machines');await wait('[data-cluster-host="farm-cn1"]');for(let i=0;i<160;i++){if(await evaluate('document.querySelector(".cluster-machines-coverage").textContent.includes("4 / 6")'))break;await delay(50)};assert.ok(await evaluate('document.querySelector(".cluster-machines-coverage").textContent.includes("4 / 6")'),'mixed observed/withheld/unavailable coverage');await frame('machines-dark')
  await evaluate('meshFixture.theme("light")');window.setContentSize(560,930);await frame('machines-narrow-light')
  window.setContentSize(1440,1050);await evaluate('meshFixture.theme("dark")');await nav();await top();await nav('mesh-configuration');await wait('[aria-label="Mesh network"]');await type('[aria-label="Mesh network"]','unsaved-network-draft');await frame('gateway-draft-dark')
- await button('← Mesh overview');await nav('mesh-machines');await nav();await nav('mesh-configuration');assert.equal(await evaluate('document.querySelector("[aria-label=\\"Mesh network\\"]").value'),'unsaved-network-draft','original Gateway draft retained after returning through homepage')
+ await nav();await nav('mesh-machines');await nav();await nav('mesh-configuration');assert.equal(await evaluate('document.querySelector("[aria-label=\\"Mesh network\\"]").value'),'unsaved-network-draft','original Gateway draft retained after returning through homepage')
  receipt.draftRetainedAcrossViews=true
- await button('← Mesh overview');await click('[data-cluster-host="farm-cn1"] .cluster-machine-manage');await wait('[data-resource-editor="farm-cn1"]');await type('[data-resource-editor="farm-cn1"] [data-host-name]','Farm CN1 draft');await frame('device-editor-dark')
- await button('← Mesh overview');await nav('mesh-machines');await nav();await click('[data-cluster-host="farm-cn1"] .cluster-machine-manage');assert.equal(await evaluate('document.querySelector("[data-resource-editor=\\"farm-cn1\\"] [data-host-name]").value'),'Farm CN1 draft');receipt.hostDraftRetainedAcrossViews=true
- await button('← Mesh overview');await button('Add SSH connection');await wait('[data-resource-editor] [data-host-name]');await frame('add-device-dark')
- await button('← Mesh overview');await top();await button('Connections');await button('Clear');await click('[aria-label="Network scope"] button:first-child');await click('[aria-label="Fit observed topology"]');await frame('overview-final-dark')
+ await nav();await click('[data-cluster-host="farm-cn1"] .cluster-machine-manage');await wait('[data-resource-editor="farm-cn1"]');await type('[data-resource-editor="farm-cn1"] [data-host-name]','Farm CN1 draft');await frame('device-editor-dark')
+ await nav();await nav('mesh-machines');await nav();await click('[data-cluster-host="farm-cn1"] .cluster-machine-manage');assert.equal(await evaluate('document.querySelector("[data-resource-editor=\\"farm-cn1\\"] [data-host-name]").value'),'Farm CN1 draft');receipt.hostDraftRetainedAcrossViews=true
+ await nav();await button('Add SSH connection');await wait('[data-resource-editor] [data-host-name]');await frame('add-device-dark')
+ await nav();await top();await button('Connections');await button('Clear');await click('[aria-label="Network scope"] button:first-child');await click('[aria-label="Fit observed topology"]');await frame('overview-final-dark')
  window.setContentSize(1440,720);await top();await frame('overview-short-dark')
  await evaluate('meshFixture.relayOff()');await button('Refresh network');await frame('relay-off-after-refresh')
  assert.equal((await graphFacts()).hosts,5)
@@ -163,7 +172,7 @@ app.whenReady().then(async()=>{try{
  await button('Connections');await wait('[aria-label="Saved gateway targets"]')
  const savedNodes = async () => (await graphFacts()).hosts
  assert.equal(await savedNodes(),8)
- for(let i=0;i<150;i++){if(await evaluate('document.querySelector(".cluster-machines-coverage").textContent.includes("4 / 9")'))break;await delay(50)}
+ await click('.cluster-inline-link');await wait('.cluster-machines-coverage');await top()
  window.setContentSize(1440,950);await frame('mesh-disabled-dark')
  window.setContentSize(560,930);await frame('mesh-disabled-narrow-unselected')
  window.setContentSize(1440,950)

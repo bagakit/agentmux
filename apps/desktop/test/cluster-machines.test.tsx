@@ -1,15 +1,23 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { NodeResourceSample, NodeResources } from '@agentmux/core/node-publishing'
 import type { HostConfig } from '../src/shared/contracts'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
-import { MeshSettingsPane } from '../src/renderer/src/components/settings/MeshSettingsPane'
+import { useAppStore } from '../src/renderer/src/store'
 import { composerConfig } from './helpers/composer-dom-fixture'
 import { ClusterMachinesPane } from '../src/renderer/src/components/settings/ClusterMachinesPane'
 import { api } from '../src/renderer/src/lib/api'
 import { composerDOM } from './helpers/composer-dom-fixture'
 const dom = composerDOM()
+beforeEach(() => {
+ vi.stubGlobal('IntersectionObserver', class {
+   constructor(private readonly notify: (entries: { isIntersecting: boolean }[]) => void) {}
+   observe() { this.notify([{ isIntersecting: true }]) }
+   disconnect() {}
+ })
+})
+afterEach(() => vi.unstubAllGlobals())
 const hosts: HostConfig[] = [{ id: 'local', kind: 'local', label: 'This device' }, { id: 'farm', kind: 'ssh', label: 'Farm original', hostname: 'farm.internal', runtimeId: 'farm-runtime' }]
 const node = (id: string, generation = 'process-1') => ({ runtimeId: id === 'farm' ? 'farm-runtime' : 'local-runtime', ownerInstanceId: generation, alias: id })
 function reply(id: string, step: number, generation = 'process-1'): NodeResources {
@@ -65,22 +73,23 @@ it('partial metric sources stay visibly unavailable rather than implying a pendi
 })
 
 it('exact Machines field navigation wins over a Host hint, and unrelated renders do not replay a chosen connection navigation', async () => {
- const f=instrument(), config={...composerConfig,hosts}, close=vi.fn(),save=vi.fn()
+ const f=instrument(), config={...composerConfig,hosts}, close=vi.fn()
  let request={section:'hosts' as const,field:'mesh-machines',hostId:'farm'}
- const render=(next=config)=>dom.render(<MeshSettingsPane config={next} active onSave={save} onClose={close} navigationRequest={request}/>)
- await render();expect(dom.container.querySelector('[data-mesh-home-view]')?.getAttribute('data-mesh-home-view')).toBe('machines')
- await settle(()=>dom.container.textContent?.includes('2 / 2 sampled')??false)
+ useAppStore.setState({config})
+ const render=()=>dom.render(<SettingsPanel onClose={close} initialSection="hosts" navigationRequest={request}/>)
+ await render();await settle(()=>Boolean(dom.container.querySelector('[data-settings-field="mesh-machines"]')))
+ expect(dom.container.querySelector('[data-settings-field="mesh-machines"]')?.closest('[hidden]')).toBeNull()
  await dom.click('[data-cluster-host="farm"] .cluster-machine-manage')
  await settle(()=>Boolean(dom.container.querySelector('[data-resource-editor="farm"] [data-host-panel="projects"]')))
  await dom.click('[data-resource-editor="farm"] [data-host-panel="projects"]')
  expect(dom.container.querySelector('[data-resource-editor="farm"] [data-host-panel="projects"]')?.getAttribute('aria-current')).toBe('page')
- await render({...config,hosts:hosts.map(h=>({...h,label:h.label+' updated'}))})
+ await act(async () => useAppStore.setState({config:{...config,hosts:hosts.map(h=>({...h,label:h.label+' updated'}))}}))
  expect(dom.container.querySelector('[data-resource-editor="farm"] [data-host-panel="projects"]')?.getAttribute('aria-current')).toBe('page')
- await dom.click('.mesh-editor-navigation button')
- expect(dom.container.querySelector('[data-mesh-home-view]')?.getAttribute('data-mesh-home-view')).toBe('paths')
+ await dom.click('.settings-sidebar [data-settings-target="hosts"]')
+ expect(dom.container.querySelector('[data-settings-field="mesh-paths"]')?.closest('[hidden]')).toBeNull()
  request = { ...request }
  await render()
- expect(dom.container.querySelector('[data-mesh-home-view]')?.getAttribute('data-mesh-home-view')).toBe('machines')
+ expect(dom.container.querySelector('[data-settings-field="mesh-machines"]')?.closest('[hidden]')).toBeNull()
  await dom.click('[data-cluster-host="farm"] .cluster-machine-manage')
  expect(dom.container.querySelector('[data-resource-editor="farm"] [data-host-panel="connection"]')?.getAttribute('aria-current')).toBe('page')
  expect(dom.container.querySelector('[data-resource-editor]')?.getAttribute('data-resource-editor')).toBe('farm')
@@ -88,10 +97,10 @@ it('exact Machines field navigation wins over a Host hint, and unrelated renders
 })
 
 it('the production SettingsPanel reveals and focuses the actual Machines discovery target',async()=>{
- instrument()
+ instrument(); useAppStore.setState({config:{...composerConfig,hosts}})
  await dom.render(<SettingsPanel onClose={vi.fn()} initialSection="hosts" navigationRequest={{section:'hosts',field:'mesh-machines'}} />)
  await settle(()=>Boolean(dom.container.querySelector('[data-settings-field="mesh-machines"]')))
- expect(dom.container.querySelector('.settings-nav-children [aria-current="page"]')?.textContent).toBe('Machines')
+ expect(dom.container.querySelector('.settings-sidebar [data-settings-target="hosts"]')?.getAttribute('aria-current')).toBe('page')
  expect(dom.container.textContent).not.toContain('This setting is not shown')
  expect(dom.container.querySelector('[data-settings-field="mesh-machines"]')?.closest('[hidden]')).toBeNull()
 })
@@ -108,7 +117,7 @@ it('opens the Mesh home without sampling machines below the viewport', async () 
     disconnect = disconnect
   })
   try {
-    await dom.render(<ClusterMachinesPane hosts={hosts} active compact />)
+    await dom.render(<ClusterMachinesPane hosts={hosts} active />)
     expect(reads.owner).not.toHaveBeenCalled()
     expect(visible).toBeDefined()
     await act(async () => visible!())

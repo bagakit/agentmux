@@ -1283,9 +1283,9 @@ describe('Settings semantic navigation', () => {
     for (const [section, hostId] of [['network-node', 'local'], ['hosts', undefined]] as const) {
       await act(async () => incomingAppFixture.open!(section, undefined, 'incoming', hostId))
       await settle()
-      expect(incomingAppFixture.request).toMatchObject({ section: 'hosts', hostId: 'local', field: 'incoming' })
-      expect((await readSettings()).overlays.settingsPage).toMatchObject({ sectionId: 'hosts', hostId: 'local', visible: true })
-      const connections = container.querySelector<HTMLElement>('[data-settings-pane="hosts"] [data-mesh-view="connections"]')!
+      expect(incomingAppFixture.request).toMatchObject({ section: 'network-node', hostId: 'local', field: 'incoming' })
+      expect((await readSettings()).overlays.settingsPage).toMatchObject({ sectionId: 'network-node', hostId: 'local', visible: true })
+      const connections = container.querySelector<HTMLElement>('[data-settings-pane="network-node"] [data-cluster-node-panel="incoming"]')!
       expect(connections.hidden).toBe(false)
       const visible = [...connections.querySelectorAll<HTMLElement>('[data-settings-field="incoming"]')]
         .filter(target => target.isConnected && !target.closest('[hidden], [inert]'))
@@ -1296,14 +1296,14 @@ describe('Settings semantic navigation', () => {
     await act(async () => incomingAppFixture.open!('network-node', undefined, 'incoming', 'remote-first'))
     await settle()
     expect(incomingAppFixture.request).toMatchObject({ section: 'network-node', hostId: 'remote-first', field: 'incoming' })
-    expect((await readSettings()).overlays.settingsPage).toMatchObject({ sectionId: 'network-node', hostId: 'remote-first', visible: true })
-    expect(container.querySelector('[data-settings-pane="network-node"] [data-settings-field="incoming"]')).toBeNull()
-    expect(container.querySelector('[data-settings-pane="network-node"] [data-settings-target-issue]')).not.toBeNull()
+    expect((await readSettings()).overlays.settingsPage).toMatchObject({ sectionId: 'network-node', hostId: null, visible: true })
+    expect(container.querySelector('[data-settings-pane="network-node"] .host-local-incoming')).toBeNull()
+    expect(container.querySelector('[data-settings-pane="network-node"] [role=status]')?.textContent).toContain('requested local Host is unavailable')
     await act(async () => incomingAppFixture.open!('hosts', undefined, 'incoming', 'missing-host'))
     await settle()
-    expect(incomingAppFixture.request).toMatchObject({ section: 'hosts', hostId: 'missing-host', field: 'incoming' })
-    expect(container.querySelector('[data-settings-pane="hosts"] [data-settings-host="local"]')).toBeNull()
-    expect(container.querySelector('[data-settings-pane="hosts"] [data-settings-target-issue]')).not.toBeNull()
+    expect(incomingAppFixture.request).toMatchObject({ section: 'network-node', hostId: 'missing-host', field: 'incoming' })
+    expect(container.querySelector('[data-settings-pane="network-node"] [data-settings-host="local"]')).toBeNull()
+    expect(container.querySelector('[data-settings-pane="network-node"] [role=status]')?.textContent).toContain('requested local Host is unavailable')
     expect(useAppStore.getState().agentComposerDrafts).toEqual(before.agentComposerDrafts)
     await control({ kind: 'settings', sectionId: null })
   })

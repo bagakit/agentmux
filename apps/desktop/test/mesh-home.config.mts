@@ -8,10 +8,9 @@ mkdirSync(evidence, { recursive: true })
 process.env.AGENTMUX_RESOURCE_LIBRARY_SECTION = 'hosts'
 const mutant = process.env.AGENTMUX_MESH_HOME_MUTANT
 const mutations: Record<string, [string, string, string]> = {
-  'unselected-gateway-wizard': ['MeshSettingsPane.tsx', "{ join: 'mesh-join', machines:", '{ machines:'],
-  'wrong-home': ['MeshSettingsPane.tsx', "request?.field?.startsWith('mesh-') ? 'network' : 'paths'", "request?.field?.startsWith('mesh-') ? 'network' : 'network'"],
-  'wrong-host': ['MeshSettingsPane.tsx', 'onConnections={openConnection}', 'onConnections={() => openConnection(props.config.hosts[0]!.id)}'],
-  'unmount-editor': ['MeshSettingsPane.tsx', "mounted('connections') ? <HostSettingsPane", "view === 'connections' ? <HostSettingsPane"],
+  'wrong-quick-task': ['MeshSettingsPane.tsx', "onNavigate('remote-execution', 'mesh-join')", "onNavigate('remote-execution', 'mesh-access-work')"],
+  'wrong-host': ['MeshSettingsPane.tsx', "onNavigate('network-node', 'connection', hostId)", "onNavigate('network-node', 'connection', config.hosts[0]!.id)"],
+  'unmount-editor': ['ClusterNodeSettingsPane.tsx', 'shown || visited.has(value) ?', 'shown ?'],
   'duplicate-add': ['HostSettingsPane.tsx', ' || appliedAddRequest.current === addHostRequest.intentId', ''],
   'filter-all': ['ClusterMachinesPane.tsx', 'fields.some(field => field.toLocaleLowerCase().includes(needle))', 'true'],
   'empty-saved-map': ['MeshNetworkMap.tsx', "...savedNodes.filter(node => node.type !== 'savedClient' || !sharedPeerId)", '...[]'],
@@ -28,9 +27,8 @@ const mutations: Record<string, [string, string, string]> = {
   'reload-remote-on-local-edit': ['use-mesh-device-locations.ts', '[active, key, refresh]', '[active, key, refresh, estimateLocal]'],
   'drop-local-during-refresh': ['use-mesh-device-locations.ts', 'previousLocal && !snapshot.has(SAVED_CLIENT_ID)', 'false'],
   'wrong-map-device': ['MeshSavedConnections.tsx', 'onClick={() => onDevice(host.id)}', 'onClick={() => onDevice("selected-farm")}'],
-  'hidden-machines': ['MeshSettingsPane.tsx', "mounted('paths') || mounted('machines')", "view === 'machines'"],
   'hidden-saved-gateways': ['MeshPathsPane.tsx', 'savedTargets={savedTargets}', 'savedTargets={undefined}'],
-  'stale-add-after-navigation': ['MeshSettingsPane.tsx', 'function supersedeAdd() { setAddHostRequest(undefined) }', 'function supersedeAdd() {}'],
+  'stale-add-after-navigation': ['ClusterNodeSettingsPane.tsx', '      setAddHost(undefined)', '      void addHost'],
 }
 if (mutant && !mutations[mutant]) throw Error('Unknown Mesh homepage mutant')
 export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, resolve: { alias: aliases }, plugins: [{ name: 'mesh-home-consumed', enforce: 'pre', resolveId: installedDependency,
@@ -43,9 +41,9 @@ export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }
     if (input.split(from).length !== 2) throw Error('Homepage mutation must bind once in actual loaded source')
     let output = input.replace(from, to)
     if (mutant === 'stale-add-after-navigation') {
-      const originalNavigation = 'addHostRequest={addHostNavigation.current === props.navigationRequest ? addHostRequest : undefined}'
+      const originalNavigation = 'addHostRequest={applied.current === request ? addHost : undefined}'
       if (output.split(originalNavigation).length !== 2) throw Error('Original navigation Add boundary must bind once')
-      output = output.replace(originalNavigation, 'addHostRequest={addHostRequest}')
+      output = output.replace(originalNavigation, 'addHostRequest={addHost}')
     }
     appendFileSync(resolve(evidence, 'mutation.jsonl'), JSON.stringify({ mutant, path, before: sha(input), after: sha(output) }) + '\n')
     return { code: output, map: null }

@@ -2,7 +2,7 @@
 import { act } from 'react'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { HostSettingsPane } from '../src/renderer/src/components/settings/HostSettingsPane'
-import { hostsSettingsModule } from '../src/renderer/src/components/settings/modules/hosts'
+import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { composerDOM, composerConfig } from './helpers/composer-dom-fixture'
 import type { SettingsNavigationRequest } from '../src/renderer/src/components/SettingsNavigation'
 import type { AppConfig } from '../src/shared/contracts'
@@ -17,9 +17,9 @@ beforeEach(() => {
   useAppStore.setState({ config, hostChecks: {}, sessions: [] })
 })
 const render = async (request: SettingsNavigationRequest) => {
-  const Pane = hostsSettingsModule.Pane
-  await dom.render(<Pane config={config} active={true} onClose={vi.fn()} onNavigate={vi.fn()} navigationRequest={request} />)
-  await vi.waitFor(() => expect(dom.container.querySelector('.mesh-settings-pane')).not.toBeNull(), { timeout: 5000 })
+  await act(async () => useAppStore.setState({ config }))
+  await dom.render(<SettingsPanel navigationRequest={request} onClose={vi.fn()} />)
+  expect(dom.container.querySelector('[data-cluster-node-panel="mesh-devices"]')?.closest('[hidden]')).toBeNull()
 }
 async function fill(input: HTMLInputElement, value: string) {
   await act(async () => {
@@ -58,7 +58,6 @@ it('does not launch maintenance for a hidden connection editor after returning t
   config = { ...config, hosts: config.hosts.map(host => host.id === 'a' ? { ...host, hostname: 'replacement.invalid' } : host) }
   await render(request)
   expect(call).toHaveBeenCalledTimes(1)
-  await dom.click('[aria-label="List"]')
   await dom.click('[data-host-disclosure="a"] [data-host-panel="connection"]')
   expect(call).toHaveBeenCalledTimes(2)
   expect(call.mock.calls[1]![0]).toMatchObject({ id: 'a', hostname: 'replacement.invalid' })

@@ -75,24 +75,23 @@ it('lands the Host executors request on its real anchor without an issue', async
 })
 
 it.each([
-  { name: 'canonical incoming without a Host ID', request: { section: 'hosts', field: 'incoming' } },
-  { name: 'legacy local Node incoming', request: { section: 'network-node', hostId: 'local', field: 'incoming' } }
-] as const)('reveals the exact local Connection before focusing $name', async ({ request }) => {
+  { name: 'original Mesh incoming without a Host ID', request: { section: 'hosts', field: 'incoming' } },
+  { name: 'canonical local Node incoming', request: { section: 'network-node', hostId: 'local', field: 'incoming' } }
+] as const)('reveals the exact local Tailcat editor before focusing $name', async ({ request }) => {
   const configured = useAppStore.getState().config!
   useAppStore.setState({ config: { ...configured, hosts: [
     { id: 'remote-first', kind: 'ssh', label: 'Remote first', hostname: 'remote.invalid' },
     { id: 'local', kind: 'local', label: 'This device' }
   ] } })
   await dom.render(<SettingsPanel onClose={() => {}} initialSection={request.section} navigationRequest={request} />)
-  await vi.waitFor(() => expect(pane('hosts')?.querySelector('[data-settings-field="incoming"]')).toBeTruthy(), { timeout: 6000 })
+  await vi.waitFor(() => expect(pane('network-node')?.querySelector('[data-settings-field="incoming"]')).toBeTruthy(), { timeout: 6000 })
   await settle()
-  const mesh = pane('hosts')
-  expect(mesh, 'the request must normalize to the real Mesh module').not.toBeNull()
+  const mesh = pane('network-node')
+  expect(mesh, 'the request must normalize to the real Node module').not.toBeNull()
   expect(mesh!.hidden).toBe(false)
-  const connections = mesh!.querySelector<HTMLElement>('[data-mesh-view="connections"]')
-  expect(connections, 'incoming must select Connections, not Paths or Gateway').not.toBeNull()
+  const connections = mesh!.querySelector<HTMLElement>('[data-cluster-node-panel="incoming"]')
+  expect(connections, 'incoming selects the Tailcat panel').not.toBeNull()
   expect(connections!.hidden).toBe(false)
-  expect(connections!.querySelector('[data-resource-editor="local"][data-host-view="connection"]')).not.toBeNull()
   const visible = [...connections!.querySelectorAll<HTMLElement>('[data-settings-field="incoming"]')]
     .filter(target => target.isConnected && !target.closest('[hidden], [inert]'))
   expect(visible, 'exactly one revealed local incoming editor').toHaveLength(1)
@@ -100,6 +99,17 @@ it.each([
   expect(document.activeElement).toBe(visible[0])
   expect(visible[0]!.hasAttribute('data-settings-search-highlight')).toBe(true)
   expect(mesh!.querySelector('[data-settings-target-issue]')).toBeNull()
+})
+
+it('reports an explicit remote listener target without opening the local editor', async () => {
+  const configured = useAppStore.getState().config!
+  useAppStore.setState({ config: { ...configured, hosts: [
+    { id: 'remote-first', kind: 'ssh', label: 'Remote first', hostname: 'remote.invalid' },
+    { id: 'local', kind: 'local', label: 'This device' }
+  ] } })
+  await dom.render(<SettingsPanel onClose={() => {}} navigationRequest={{ section: 'hosts', field: 'incoming', hostId: 'remote-first' }} />)
+  expect(pane('network-node')?.querySelector('[data-settings-field="incoming"]')?.textContent).toContain('requested local Host is unavailable')
+  expect(pane('network-node')?.querySelector('.host-local-incoming')).toBeNull()
 })
 
 it.each([{ start: 'fresh' }, { start: 'gateway' }] as const)('search reveals and focuses the only local incoming editor from a $start SettingsPanel without clearing its draft', async ({ start }) => {
@@ -111,22 +121,21 @@ it.each([{ start: 'fresh' }, { start: 'gateway' }] as const)('search reveals and
   const initial = start === 'gateway' ? { section: 'hosts', field: 'mesh-configuration' } as const : undefined
   await dom.render(<SettingsPanel onClose={() => {}} initialSection={initial?.section ?? 'overview'} navigationRequest={initial} />)
   await settle()
-  if (start === 'gateway') await vi.waitFor(() => expect(pane('hosts')?.querySelector('[data-mesh-home-view]')?.getAttribute('data-mesh-home-view')).toBe('network'), { timeout: 6000 })
+  if (start === 'gateway') await vi.waitFor(() => expect(pane('network-node')?.querySelector('[data-cluster-node-panel="mesh-configuration"]')?.closest('[hidden]')).toBeNull(), { timeout: 6000 })
   await act(async () => {
     const search = dom.container.querySelector<HTMLInputElement>('[aria-label="Search settings"]')!
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, 'Incoming connections and client keys')
     search.dispatchEvent(new Event('input', { bubbles: true }))
   })
-  expect(dom.container.querySelector('[data-settings-search-result="hosts:incoming"]'), 'the canonical search contribution must exist').not.toBeNull()
-  expect(dom.container.querySelector('[data-settings-search-result="network-node:incoming"]')).toBeNull()
-  await dom.click('[data-settings-search-result="hosts:incoming"]')
-  await vi.waitFor(() => expect(pane('hosts')?.querySelector('[data-settings-field="incoming"]')).toBeTruthy(), { timeout: 6000 })
+  expect(dom.container.querySelector('[data-settings-search-result="hosts:incoming"]')).toBeNull()
+  expect(dom.container.querySelector('[data-settings-search-result="network-node:incoming"]')).not.toBeNull()
+  await dom.click('[data-settings-search-result="network-node:incoming"]')
+  await vi.waitFor(() => expect(pane('network-node')?.querySelector('[data-settings-field="incoming"]')).toBeTruthy(), { timeout: 6000 })
   await settle()
-  const mesh = pane('hosts')!
+  const mesh = pane('network-node')!
   expect(mesh.hidden).toBe(false)
-  const connections = mesh.querySelector<HTMLElement>('[data-mesh-view="connections"]')!
+  const connections = mesh.querySelector<HTMLElement>('[data-cluster-node-panel="incoming"]')!
   expect(connections.hidden).toBe(false)
-  expect(connections.querySelector('[data-resource-editor="local"][data-host-view="connection"]')).not.toBeNull()
   const visible = [...connections.querySelectorAll<HTMLElement>('[data-settings-field="incoming"]')]
     .filter(target => target.isConnected && !target.closest('[hidden], [inert]'))
   expect(visible).toHaveLength(1)
@@ -138,15 +147,14 @@ it.each([{ start: 'fresh' }, { start: 'gateway' }] as const)('search reveals and
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(allowed, 'nodekey:authored-draft\n  ')
     allowed.dispatchEvent(new Event('input', { bubbles: true }))
   })
-  const back = mesh.querySelector<HTMLButtonElement>('.mesh-editor-navigation button')!
-  await act(async () => back.click())
+  await dom.click('.cluster-node-tabs button:first-child')
   expect(connections.hidden).toBe(true)
   await act(async () => {
     const search = dom.container.querySelector<HTMLInputElement>('[aria-label="Search settings"]')!
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, '')
     search.dispatchEvent(new Event('input', { bubbles: true }))
   })
-  await choose('hosts:mesh-devices')
+  await choose('network-node'); await dom.click('.cluster-node-tabs button[aria-controls$="-incoming"]')
   expect(connections.querySelector('[data-settings-field="incoming"]')).toBe(visible[0])
   expect(allowed.value).toBe('nodekey:authored-draft\n  ')
 })
@@ -160,7 +168,7 @@ it('keeps query, manual section and external focus stable when saved Hosts are r
   const request = { section: 'hosts', field: 'incoming' } as const
   await dom.render(<SettingsPanel onClose={() => {}} initialSection="hosts" navigationRequest={request} />)
   await settle()
-  expect(document.activeElement).toBe(pane('hosts')!.querySelector('[data-settings-field="incoming"]'))
+  expect(document.activeElement).toBe(pane('network-node')!.querySelector('[data-settings-field="incoming"]'))
   await act(async () => {
     const search = dom.container.querySelector<HTMLInputElement>('[aria-label="Search settings"]')!
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, 'Appearance')
@@ -177,7 +185,7 @@ it('keeps query, manual section and external focus stable when saved Hosts are r
     expect(useAppStore.getState().config!.hosts).not.toBe(previousHosts)
     expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Search settings"]')!.value).toBe('Appearance')
     expect(pane('appearance')!.hidden).toBe(false)
-    expect(pane('hosts')!.hidden).toBe(true)
+    expect(pane('network-node')!.hidden).toBe(true)
     expect(document.activeElement).toBe(outside)
   } finally { outside.remove() }
 })

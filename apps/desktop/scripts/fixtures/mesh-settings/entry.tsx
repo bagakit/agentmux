@@ -60,10 +60,10 @@ const reviewCases: Record<string, SettingsNavigationRequest> = {
   providers: { section: 'agents', field: 'providers' },
   executor: { section: 'agents', field: 'executors' },
   host: { section: 'hosts', field: 'connection', hostId: 'studio' },
-  incoming: { section: 'hosts', field: 'connection', hostId: 'local' },
+  incoming: { section: 'hosts', field: 'incoming', hostId: 'local' },
   mesh: { section: 'hosts', field: 'mesh-configuration' },
   node: { section: 'network-node' },
-  remote: { section: 'remote-execution' }
+  remote: { section: 'remote-execution', field: 'prepare' }
 }
 const render = (request?: SettingsNavigationRequest) => createRoot(document.getElementById('root')!).render(
   <DesktopClientUiProvider><div className="mesh-review-shell">
@@ -81,18 +81,21 @@ async function mountInputReview() {
   const policy: NodeSettings = { node, policyRevision: 'fixture-policy', operation: null,
     policy: { alias: node.alias, shareResources: true, allowedPaths: ['/workspace/shared', '/workspace/review'],
       deniedPaths: ['/workspace/shared/private'], defaultPath: '/workspace/shared' } }
-  api.nodePublishing.call = async () => ({ node, policyRevision: policy.policyRevision, resourcesShared: true, roots: [],
-    landing: null }) as never
+  api.nodePublishing.call = async method => (method === 'node.resources'
+    ? { node, status: 'withheld' }
+    : { node, policyRevision: policy.policyRevision, resourcesShared: true, roots: [], landing: null }) as never
   api.nodePublishing.owner = async () => structuredClone(policy) as never
-  api.hosts.inspect = async host => ({ routeHostId: host.id, configuration: host, tailcat: {
-    state: 'listening', address: 'private-review-credential'
-  } }) as never
+  const unobserved = { state: 'unavailable', message: 'Service observations are outside this visual fixture.', readAt: Date.now() }
+  api.hosts.inspect = async host => ({
+    routeHostId: host.id, configuration: host, requestedAt: unobserved.readAt, completedAt: unobserved.readAt, owner: unobserved, nativeIdentity: unobserved, diagnostics: unobserved, resources: unobserved,
+    tailcat: { state: 'listening', address: 'private-review-credential' }
+  }) as never
   useAppStore.setState({ config: { ...config, hosts }, providerCatalog: await api.providers.list() })
   render(reviewCases[new URLSearchParams(location.search).get('case') ?? ''])
 }
 const workflowCode = meshPeerCode({ identity: { peerId: ids[1]!, publicKey: 'fixture-public-peer', epoch: 1 }, configuration: { ...settings.configuration, networkId: 'work-machines', advertisedIngress: [{ endpoint: 'gateway.example', useTls: true }] } })
 const workflowDeviceCode = meshPeerCode({ identity: { peerId: ids[2]!, publicKey: 'fixture-device-public-peer', epoch: 1 }, configuration: settings.configuration }, false)
-if (state === 'settings-inputs') void mountInputReview()
+if (state === 'settings-inputs' || state === 'cluster-settings') void mountInputReview()
 else if (state === 'remote-landing') render({ section: 'remote-execution', field: 'prepare' })
 else if (state === 'gateway-join') void useAppStore.getState().initialize().then(() => {
   useAppStore.setState({ config: fixtureConfig, meshSettingsDrafts: {}, meshGatewayCode: '' })

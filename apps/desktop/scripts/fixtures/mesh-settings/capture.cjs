@@ -8,18 +8,95 @@ app.whenReady().then(async()=>{try{
  window.webContents.on('console-message',(_event,_level,text)=>{if(receipt.console.length<40)receipt.console.push(text.slice(0,500))})
  const evaluate=code=>window.webContents.executeJavaScript(code,true)
  await window.loadURL(url)
- const openGateway=()=>evaluate(`document.querySelector('.settings-sidebar nav [data-settings-target="hosts:mesh-configuration"]')?.click()`)
+ const openGateway=async()=> {
+  for(let i=0;i<120;i++){
+    if(await evaluate(`(() => { const button = document.querySelector('.mesh-gateways button'); if (!button) return false; button.click(); return true })()`))return
+    await delay(50)
+  }
+  throw Error('Mesh gateway action not rendered')
+ }
  const paint=async()=>{await evaluate('document.fonts.ready');await delay(400)}
  const frame=async name=>{await paint();const file=name+'.png';await fs.writeFile(path.join(output,file),(await window.webContents.capturePage()).toPNG());receipt.frames.push(file)}
+ if (scenario === '--cluster-settings') {
+   const until = async test => { for (let i = 0; i < 120; i++) { if (await evaluate(test)) return; await delay(50) } throw Error(test) }
+   const click = async selector => {
+     await until(`document.querySelector(${JSON.stringify(selector)})?.checkVisibility()`)
+     await evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`)
+   }
+   const page = target => `.settings-sidebar [data-settings-target="${target}"]`
+   const task = field => `[data-quick-task="${field}"]`
+   const tab = field => `[role="tab"][aria-controls$="-${field}"]`
+   await window.loadURL(url + '?scenario=cluster-settings')
+   await until("document.querySelector('.mesh-explorer__canvas')?.checkVisibility()")
+   await frame('cluster-mesh-dark')
+   await evaluate('document.querySelector(".cluster-machines").scrollIntoView({block:"end"})')
+   await frame('cluster-mesh-machines-dark')
+   await click(page('network-node'))
+   await until("document.querySelector('.network-node-section [aria-label]')?.checkVisibility()")
+   await frame('cluster-node-identity-dark')
+   await click(tab('mesh-configuration'))
+   await until("document.querySelector('.mesh-network-heading')?.checkVisibility()")
+   await frame('cluster-node-gateway-dark')
+   await click(tab('incoming'))
+   await frame('cluster-node-tailcat-dark')
+   await click(tab('mesh-devices'))
+   await frame('cluster-node-ssh-dark')
+   await click(page('remote-execution'))
+   await frame('cluster-quick-dark')
+   const motion = async (field, selector) => evaluate(`(async () => {
+     document.querySelector(${JSON.stringify(selector)}).click();
+     await new Promise(done => requestAnimationFrame(done));
+     return Array.from(document.querySelector('[data-quick-view="${field}"] .cluster-panel:not([hidden])')?.getAnimations() ?? []).map(item => item.animationName);
+   })()`)
+   receipt.enterMotion = await motion('mesh-share', task('mesh-share'))
+   assert.ok(receipt.enterMotion.includes('cluster-arrive'))
+   await frame('cluster-quick-share-dark')
+   await click('.cluster-journey-nav button')
+   await click(task('prepare'))
+   await frame('cluster-quick-start-dark')
+   await click('.cluster-journey-nav button')
+   await click(task('bindings'))
+   await frame('cluster-quick-continue-dark')
+   await click('.cluster-journey-nav button')
+   await click(task('mesh-access-work'))
+   await frame('cluster-quick-open-dark')
+   await click('.cluster-journey-nav button')
+   await click(task('mesh-join'))
+   await frame('cluster-quick-join-dark')
+   await click('.cluster-journey-nav button')
+   window.setContentSize(430, 844)
+   await evaluate('meshFixture.theme("light")')
+   await frame('cluster-quick-light-narrow')
+   window.webContents.debugger.attach('1.3')
+   await window.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
+   receipt.reducedMotion = await motion('mesh-share', task('mesh-share'))
+   assert.deepEqual(receipt.reducedMotion, [])
+   await frame('cluster-quick-share-light-narrow')
+   await click('.cluster-journey-nav button')
+   await evaluate("(() => { const picker = document.querySelector('.settings-section-picker'); picker.focus(); picker.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true})); })()")
+   await click('.settings-section-menu [data-settings-target="network-node"]')
+   await click(tab('incoming'))
+   await frame('cluster-node-tailcat-light-narrow')
+   await evaluate("(() => { const picker = document.querySelector('.settings-section-picker'); picker.focus(); picker.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true})); })()")
+   await click('.settings-section-menu [data-settings-target="hosts"]')
+   await evaluate('document.querySelector("[data-settings-pane=hosts]").scrollTop = 0')
+   await frame('cluster-mesh-light-narrow')
+   receipt.overflow = await evaluate('Array.from(document.querySelectorAll("[data-settings-pane]")).filter(el=>el.checkVisibility()).map(el=>el.scrollWidth-el.clientWidth)')
+   assert.deepEqual(receipt.overflow, [0])
+   receipt.passed = true
+   return
+ }
  if (scenario === '--remote-landing') {
    const until = async test => { for (let i=0;i<120;i++) { if (await evaluate(test)) return; await delay(50) }; throw Error(test) }
    await window.loadURL(url+'?scenario=remote-landing')
-   await until("document.querySelector('.remote-work-intro--illustrated img')?.naturalWidth > 0")
+   await until("document.querySelector('[data-quick-view=prepare] .cluster-landing img')?.naturalWidth > 0")
    await frame('remote-prepare-wide-dark')
-   await evaluate("document.querySelector('.remote-work-tasks [aria-controls$=\"-existing\"]').click()")
+   await evaluate("document.querySelector('.cluster-journey-nav button').click()")
+   await evaluate("document.querySelector('[data-quick-task=bindings]').click()")
    await until("document.querySelector('.remote-execution-empty__actions button')?.checkVisibility()")
    await frame('remote-work-empty-wide-dark')
-   await evaluate("document.querySelector('.remote-work-tasks [aria-controls$=\"-start\"]').click()")
+   await evaluate("document.querySelector('.cluster-journey-nav button').click()")
+   await evaluate("document.querySelector('[data-quick-task=prepare]').click()")
    window.setContentSize(540,870)
    await evaluate('meshFixture.theme("light"); meshFixture.localOnly()')
    await until("document.querySelector('.remote-execution-prepare > .remote-execution-feedback button')?.checkVisibility()")
@@ -29,14 +106,14 @@ app.whenReady().then(async()=>{try{
  }
  if (scenario === '--gateway-navigation') {
    const until = async test => { for (let i=0;i<120;i++) { if (await evaluate(test)) return; await delay(50) }; throw Error(test) }
-   const child = '[data-settings-target="hosts:mesh-join"]'
+   const child = '[data-settings-target="remote-execution"]'
    const sidebar = `.settings-sidebar nav ${child}`
    const pickerItem = `document.querySelector(${JSON.stringify(`.settings-section-menu ${child}`)})`
    const click = selector => evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`)
    await window.loadURL(url+'?scenario=initial')
    await until(`document.querySelector(${JSON.stringify(sidebar)})?.checkVisibility() && document.querySelector('.mesh-explorer__canvas')?.checkVisibility()`)
    await frame('mesh-map-and-gateway-navigation')
-   await click(sidebar)
+   await click('.cluster-overview-header .primary-button')
    await until(`document.querySelector(${JSON.stringify(sidebar)})?.getAttribute('aria-current') === 'page' && document.querySelector('.mesh-join-landing')?.checkVisibility()`)
    await frame('gateway-wizard-sidebar-selected')
    await click('.settings-sidebar nav [data-settings-target="hosts"]')
@@ -49,7 +126,9 @@ app.whenReady().then(async()=>{try{
    await evaluate(`${pickerItem}.scrollIntoView({block:'center'})`)
    await frame('gateway-wizard-narrow-menu')
    await evaluate(`${pickerItem}.click()`)
-   await until("document.querySelector('.settings-section-picker')?.textContent === 'Connect to gateway' && document.querySelector('.mesh-join-landing')?.checkVisibility()")
+   await until("document.querySelector('[data-quick-task=mesh-join]')?.checkVisibility()")
+   await click('[data-quick-task=mesh-join]')
+   await until("document.querySelector('.settings-section-picker')?.textContent === 'Quick' && document.querySelector('.mesh-join-landing')?.checkVisibility()")
    await frame('gateway-wizard-narrow-selected')
    receipt.passed = true
    return
@@ -58,14 +137,14 @@ app.whenReady().then(async()=>{try{
    const until = async test => { for (let i=0;i<120;i++) { if (await evaluate(test)) return; await delay(50) }; throw Error(test) }
    const codeField = 'document.querySelector(\'[aria-label="Gateway connection code"]\')'
    const start = async () => {
-     await until("Boolean(document.querySelector('.mesh-home-actions .primary-button'))")
-     await evaluate("document.querySelector('.mesh-home-actions .primary-button').click()")
+     await until("Boolean(document.querySelector('.cluster-overview-header .primary-button'))")
+     await evaluate("document.querySelector('.cluster-overview-header .primary-button').click()")
      await until(`Boolean(${codeField})`)
      await evaluate(`(() => { const field=${codeField}; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(field,meshFixture.workflowCode);field.dispatchEvent(new Event('input',{bubbles:true})) })()`)
      await until("document.querySelector('.mesh-peer-preview')?.textContent.includes('gateway.example')")
    }
    await window.loadURL(url+'?scenario=gateway-join')
-   await until("Boolean(document.querySelector('.mesh-home-actions .primary-button'))")
+   await until("Boolean(document.querySelector('.cluster-overview-header .primary-button'))")
    await frame('gateway-entry-dark')
    await start()
    await until("document.querySelector('.mesh-join-form [type=submit]')?.disabled === false")
@@ -77,11 +156,11 @@ app.whenReady().then(async()=>{try{
    await until("document.querySelector('.mesh-join-result')?.textContent.includes('Connected to gateway')")
    await frame('gateway-connected-dark')
    await evaluate("document.querySelector('.mesh-join-result button.primary-button').click()")
-   await until("Boolean(document.querySelector('.mesh-home-actions'))")
+   await until("Boolean(document.querySelector('.cluster-overview-header'))")
    window.setContentSize(570,870)
    await window.loadURL(url+'?scenario=runtime-identity');await evaluate('meshFixture.theme("light")')
-   await until("Boolean(document.querySelector('.mesh-home-actions .primary-button'))")
-   await evaluate("document.querySelector('.mesh-home-actions .primary-button').click()")
+   await until("Boolean(document.querySelector('.cluster-overview-header .primary-button'))")
+   await evaluate("document.querySelector('.cluster-overview-header .primary-button').click()")
    await until("Boolean(document.querySelector('.mesh-join-identity-flag') && document.querySelector('[aria-label=\"Gateway connection code\"]')?.disabled)")
    await frame('gateway-recovery-light-narrow')
    await evaluate("Array.from(document.querySelectorAll('.mesh-identity-recovery button')).find(button => button.textContent.startsWith('Create a new identity')).click()")
@@ -240,14 +319,14 @@ app.whenReady().then(async()=>{try{
    const until = async test => { for (let i=0;i<120;i++) { if (await evaluate(test)) return; await delay(50) }; throw Error(test) }
    const field = name => `document.querySelector('[aria-label="${name}"]')`
    await window.loadURL(url+'?scenario=initial')
-   await until("document.querySelector('.mesh-home-actions')?.textContent.includes('Use another device')")
+   await until("document.querySelector('.cluster-overview-header')?.textContent.includes('Open a device')")
    await frame('device-tasks')
-   await evaluate("document.querySelector('.mesh-home-actions button:last-child').click()")
+   await evaluate("document.querySelector('.cluster-overview-header button:last-of-type').click()")
    await until(`Boolean(${field('Device access link')})`)
    await frame('use-another-device')
-   await evaluate("document.querySelector('.mesh-editor-navigation button').click()")
-   await until("Boolean(document.querySelector('.mesh-home-actions button'))")
-   await evaluate("document.querySelector('.mesh-home-actions button').click()")
+   await evaluate("document.querySelector('.settings-sidebar [data-settings-target=hosts]').click()")
+   await until("Boolean(document.querySelector('.cluster-overview-header button'))")
+   await evaluate("document.querySelector('.cluster-overview-header button').click()")
    await until(`Boolean(${field('Gateway connection code')})`)
    await evaluate(`(()=>{const e=${field('Gateway connection code')};Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,meshFixture.workflowCode);e.dispatchEvent(new Event('input',{bubbles:true}))})()`)
    await until("document.querySelector('.mesh-peer-preview')?.textContent.includes('gateway.example')")
@@ -256,7 +335,7 @@ app.whenReady().then(async()=>{try{
    await evaluate("document.querySelector('.mesh-join-form').scrollIntoView({block:'center'})");await frame('join-preview-narrow')
    window.setContentSize(1280,980);await window.loadURL(url+'?scenario=workflow-gateway');await openGateway()
    await until(`Boolean(${field('Device to manage')})`)
-   await evaluate(`(()=>{const e=${field('Device to manage')};e.value=e.options[1].value;e.dispatchEvent(new Event('change',{bubbles:true}))})()`)
+   await evaluate(`(()=>{const e=${field('Device to manage')};e.value=Array.from(e.options).find(option => option.textContent.includes("Office gateway")).value;e.dispatchEvent(new Event('change',{bubbles:true}))})()`)
    await until("document.querySelector('.mesh-network-heading h3')?.textContent.includes('Office gateway')")
    await frame('managed-gateway')
    await evaluate(`(()=>{const e=${field('Paste a connection code')};Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,meshFixture.workflowDeviceCode);e.dispatchEvent(new Event('input',{bubbles:true})); e.scrollIntoView({block:'center'})})()`)
@@ -265,7 +344,7 @@ app.whenReady().then(async()=>{try{
    await until(`Boolean(${field('Mesh device public keys')})`)
    await evaluate("document.querySelector('.mesh-device-access').open=true;document.querySelector('.mesh-device-access').scrollIntoView({block:'center'})")
    await frame('endpoint-approval')
-   await evaluate("meshFixture.endpoint();document.querySelector('.mesh-network-heading button').click();document.querySelector('.mesh-access-links').open=true")
+   await evaluate("meshFixture.endpoint();document.querySelector('.mesh-network-heading button').click();document.querySelector('.mesh-settings-share').open=true")
    await until("!document.querySelector('[data-settings-field=mesh-link]>button')?.disabled")
    await evaluate("document.querySelector('[data-settings-field=mesh-link]>button').click()")
    await until(`Boolean(${field('Mesh access link')})`)
@@ -303,22 +382,22 @@ app.whenReady().then(async()=>{try{
  await frame('wide-dark')
  await evaluate('meshFixture.theme("light")');await frame('wide-light')
  window.setContentSize(520,900);await evaluate('meshFixture.theme("dark")');await frame('narrow-dark')
- const saveFlowGeometry=()=>evaluate(`(()=>{const view=document.querySelector('[data-mesh-view=network]'),peer=document.querySelector('[aria-label="Mesh peer codes"]').getBoundingClientRect(),field=document.querySelector('.mesh-gateway-fields').getBoundingClientRect(),barElement=document.querySelector('[data-mesh-settings] > .settings-pane-actions'),bar=barElement.getBoundingClientRect(),viewport=view.getBoundingClientRect(),button=barElement.querySelector('button'),buttonRect=button.getBoundingClientRect(),hit=document.elementFromPoint(buttonRect.left+buttonRect.width/2,buttonRect.top+buttonRect.height/2);return{position:getComputedStyle(barElement).position,paddingBottom:parseFloat(getComputedStyle(view).paddingBottom),scrollTop:view.scrollTop,scrollHeight:view.scrollHeight,clientHeight:view.clientHeight,peer:{top:peer.top,bottom:peer.bottom},fieldBottom:field.bottom,saveBarTop:bar.top,saveBarBottom:bar.bottom,viewTop:viewport.top,viewBottom:viewport.bottom,overlapsPeerCodes:peer.left<bar.right&&peer.right>bar.left&&peer.top<bar.bottom&&peer.bottom>bar.top,saveActionReachable:Boolean(hit&&button.contains(hit)),feedback:barElement.querySelector('[role=status],[role=alert]')?.textContent}})()`)
+ const saveFlowGeometry=()=>evaluate(`(()=>{const view=document.querySelector('[data-settings-pane=network-node]'),peer=document.querySelector('[aria-label="Mesh peer codes"]').getBoundingClientRect(),field=document.querySelector('.mesh-gateway-fields').getBoundingClientRect(),barElement=document.querySelector('[data-mesh-settings] > .settings-pane-actions'),bar=barElement.getBoundingClientRect(),viewport=view.getBoundingClientRect(),button=barElement.querySelector('button'),buttonRect=button.getBoundingClientRect(),hit=document.elementFromPoint(buttonRect.left+buttonRect.width/2,buttonRect.top+buttonRect.height/2);return{position:getComputedStyle(barElement).position,paddingBottom:parseFloat(getComputedStyle(view).paddingBottom),scrollTop:view.scrollTop,scrollHeight:view.scrollHeight,clientHeight:view.clientHeight,peer:{top:peer.top,bottom:peer.bottom},fieldBottom:field.bottom,saveBarTop:bar.top,saveBarBottom:bar.bottom,viewTop:viewport.top,viewBottom:viewport.bottom,overlapsPeerCodes:peer.left<bar.right&&peer.right>bar.left&&peer.top<bar.bottom&&peer.bottom>bar.top,saveActionReachable:Boolean(hit&&button.contains(hit)),feedback:barElement.querySelector('[role=status],[role=alert]')?.textContent}})()`)
  receipt.narrowInitialFlow=await saveFlowGeometry();assert.equal(receipt.narrowInitialFlow.position,'static','the Mesh save bar participates in normal document flow');assert.equal(receipt.narrowInitialFlow.overlapsPeerCodes,false,'the 520px first screen never covers peer codes with its save bar');assert.ok(receipt.narrowInitialFlow.paddingBottom<=17,'the former sticky-bar bottom reservation is removed')
- await evaluate('(()=>{const view=document.querySelector("[data-mesh-view=network]");view.scrollTop=(view.scrollHeight-view.clientHeight)*.55})()');await frame('narrow-middle-fields');receipt.narrowMiddleFlow=await saveFlowGeometry();assert.equal(receipt.narrowMiddleFlow.overlapsPeerCodes,false,'the 520px middle scroll position keeps peer codes clear of save feedback')
- await evaluate('(()=>{const view=document.querySelector("[data-mesh-view=network]");view.scrollTop=view.scrollHeight})()');await paint();receipt.narrowClearance=await saveFlowGeometry();assert.ok(receipt.narrowClearance.fieldBottom<=receipt.narrowClearance.saveBarTop+1,'the last Mesh field precedes the in-flow save bar at 520px');assert.ok(receipt.narrowClearance.saveBarTop>=receipt.narrowClearance.viewTop-1&&receipt.narrowClearance.saveBarBottom<=receipt.narrowClearance.viewBottom+1,'the complete save service window is reachable at the bottom');assert.equal(receipt.narrowClearance.saveActionReachable,true,'the real Save Mesh settings button is hit-testable');assert.ok(receipt.narrowClearance.feedback,'save feedback remains available in the in-flow service window');await frame('narrow-lower-fields')
- window.setContentSize(1280,980);await evaluate('meshFixture.failure();document.querySelector(".mesh-network-heading button").click();document.querySelector("[data-mesh-view=network]").scrollTop=0');await paint()
- receipt.failureWindow=await evaluate(`(()=>{const view=document.querySelector('[data-mesh-view=network]').getBoundingClientRect(),statusElement=document.querySelector('.mesh-network-status'),status=statusElement.getBoundingClientRect(),issueElement=statusElement.querySelector('.settings-inline-error'),issue=issueElement.getBoundingClientRect();return{text:statusElement.textContent,statusTop:status.top,statusBottom:status.bottom,issueTop:issue.top,issueBottom:issue.bottom,viewTop:view.top,viewBottom:view.bottom}})()`);assert.match(receipt.failureWindow.text,/Mesh apply unavailable/,'failed apply is stated without disguising it as a healthy apply');assert.match(receipt.failureWindow.text,/previous listener remains active/,'the original healthy listener remains explicitly available');assert.match(receipt.failureWindow.text,/Listening on 127\.0\.0\.1:8444/,'the active listener address stays beside the failure');assert.ok(receipt.failureWindow.statusTop>=receipt.failureWindow.viewTop&&receipt.failureWindow.issueBottom<=receipt.failureWindow.viewBottom,'failure issue and Mesh listening facts share the captured service window');await frame('failed-new-listener')
- window.webContents.debugger.attach('1.3'); const point=await evaluate('(()=>{const r=document.querySelector("[data-mesh-view=network]").getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()'); await window.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseWheel',...point,deltaY:2400,deltaX:0});await paint();assert.ok(await evaluate('document.querySelector("[data-mesh-view=network]").scrollTop>0'),'actual native wheel scrolls the Mesh network fields');await frame('lower-fields')
- await evaluate('document.querySelector(".mesh-access-links").open=true;meshFixture.endpoint();document.querySelector(".mesh-network-heading button").click()');await paint();await evaluate('document.querySelector("[data-settings-field=mesh-link]").scrollIntoView({block:"end"})');await frame('original-host-endpoint')
+ await evaluate('(()=>{const view=document.querySelector("[data-settings-pane=network-node]");view.scrollTop=(view.scrollHeight-view.clientHeight)*.55})()');await frame('narrow-middle-fields');receipt.narrowMiddleFlow=await saveFlowGeometry();assert.equal(receipt.narrowMiddleFlow.overlapsPeerCodes,false,'the 520px middle scroll position keeps peer codes clear of save feedback')
+ await evaluate('(()=>{const view=document.querySelector("[data-settings-pane=network-node]");view.scrollTop=view.scrollHeight})()');await paint();receipt.narrowClearance=await saveFlowGeometry();assert.ok(receipt.narrowClearance.fieldBottom<=receipt.narrowClearance.saveBarTop+1,'the last Mesh field precedes the in-flow save bar at 520px');assert.ok(receipt.narrowClearance.saveBarTop>=receipt.narrowClearance.viewTop-1&&receipt.narrowClearance.saveBarBottom<=receipt.narrowClearance.viewBottom+1,'the complete save service window is reachable at the bottom');assert.equal(receipt.narrowClearance.saveActionReachable,true,'the real Save Mesh settings button is hit-testable');assert.ok(receipt.narrowClearance.feedback,'save feedback remains available in the in-flow service window');await frame('narrow-lower-fields')
+ window.setContentSize(1280,980);await evaluate('meshFixture.failure();document.querySelector(".mesh-network-heading button").click();document.querySelector("[data-settings-pane=network-node]").scrollTop=0');await paint()
+ receipt.failureWindow=await evaluate(`(()=>{const view=document.querySelector('[data-settings-pane=network-node]').getBoundingClientRect(),statusElement=document.querySelector('.mesh-network-status'),status=statusElement.getBoundingClientRect(),issueElement=statusElement.querySelector('.settings-inline-error'),issue=issueElement.getBoundingClientRect();return{text:statusElement.textContent,statusTop:status.top,statusBottom:status.bottom,issueTop:issue.top,issueBottom:issue.bottom,viewTop:view.top,viewBottom:view.bottom}})()`);assert.match(receipt.failureWindow.text,/Mesh apply unavailable/,'failed apply is stated without disguising it as a healthy apply');assert.match(receipt.failureWindow.text,/previous listener remains active/,'the original healthy listener remains explicitly available');assert.match(receipt.failureWindow.text,/Listening on 127\.0\.0\.1:8444/,'the active listener address stays beside the failure');assert.ok(receipt.failureWindow.statusTop>=receipt.failureWindow.viewTop&&receipt.failureWindow.issueBottom<=receipt.failureWindow.viewBottom,'failure issue and Mesh listening facts share the captured service window');await frame('failed-new-listener')
+ window.webContents.debugger.attach('1.3'); const point=await evaluate('(()=>{const r=document.querySelector("[data-settings-pane=network-node]").getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()'); await window.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseWheel',...point,deltaY:2400,deltaX:0});await paint();assert.ok(await evaluate('document.querySelector("[data-settings-pane=network-node]").scrollTop>0'),'actual native wheel scrolls the Mesh network fields');await frame('lower-fields')
+ await evaluate('document.querySelector(".mesh-settings-share").open=true;meshFixture.endpoint();document.querySelector(".mesh-network-heading button").click()');await paint();await evaluate('document.querySelector("[data-settings-field=mesh-link]").scrollIntoView({block:"end"})');await frame('original-host-endpoint')
  await evaluate(`(()=>{const e=document.querySelector('[aria-label="Original Mesh endpoint offer"]');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(e,JSON.stringify(meshFixture.originalOffer));e.dispatchEvent(new Event('input',{bubbles:true}))})()`);await paint();await evaluate('document.querySelector("[data-settings-field=mesh-link]>button").click()');await paint();await evaluate('document.querySelector(".mesh-link-result details").open=true;document.querySelector(".mesh-link-result").scrollIntoView({block:"center"})');await frame('original-link-identity')
- await evaluate(`document.querySelector(".mesh-editor-navigation button").click();document.querySelector('[data-settings-target="hosts:mesh-devices"]').click()`);await frame('saved-connections')
- await evaluate('meshFixture.localOnly()');await paint();receipt.singleHost=await evaluate(`(()=>{const pane=document.querySelector('[data-mesh-view=connections]');return{scope:pane.querySelector('.remote-management__scope')?.textContent,local:Boolean(pane.querySelector('[data-host-disclosure=local]')),remote:Boolean(pane.querySelector('[data-host-disclosure=studio]')),view:pane.querySelector('[data-resource-view]')?.getAttribute('data-remote-mode')}})()`);assert.equal(receipt.singleHost.scope,'1host0 remote','the real Connections scope uses singular Host wording and zero remotes');assert.equal(receipt.singleHost.local,true,'the only local Host remains visible');assert.equal(receipt.singleHost.remote,false,'no remote Host leaks into the local-only scene');assert.equal(receipt.singleHost.view,'topology','the local-only scene is the real Connections topology');await frame('local-only-connections')
+ await evaluate(`document.querySelector('.cluster-node-tabs [aria-controls$="-mesh-devices"]').click()`);await frame('saved-connections')
+ await evaluate('meshFixture.localOnly()');await paint();receipt.singleHost=await evaluate(`(()=>{const pane=document.querySelector('[data-cluster-node-panel=mesh-devices]');return{scope:pane.querySelector('.remote-management__scope')?.textContent,local:Boolean(pane.querySelector('[data-host-disclosure=local]')),remote:Boolean(pane.querySelector('[data-host-disclosure=studio]')),view:pane.querySelector('[data-resource-view]')?.getAttribute('data-remote-mode')}})()`);assert.equal(receipt.singleHost.scope,'1host0 remote','the real Connections scope uses singular Host wording and zero remotes');assert.equal(receipt.singleHost.local,true,'the only local Host remains visible');assert.equal(receipt.singleHost.remote,false,'no remote Host leaks into the local-only scene');assert.equal(receipt.singleHost.view,'list','the local-only scene is the saved Host list');await frame('local-only-connections')
  await evaluate('meshFixture.allHosts()');await paint()
- await evaluate('document.querySelector("[data-host-disclosure=local] [data-host-panel=connection]").click();document.querySelector("[data-settings-field=incoming]").scrollIntoView({block:"center"})');await frame('local-incoming')
- receipt.localIncoming=await evaluate('Array.from(document.querySelectorAll("[data-settings-field=incoming]")).filter(element=>!element.closest("[hidden],[inert]")).map(element=>element.closest("[data-settings-host]")?.getAttribute("data-settings-host"))')
- assert.deepEqual(receipt.localIncoming,['local'],'the local Host owns the only visible Incoming editor')
- await evaluate('document.querySelector("[data-host-disclosure=studio] [data-host-panel=connection]").click()');await frame('remote-connection')
+ await evaluate('document.querySelector(".cluster-node-tabs [aria-controls$=-incoming]").click()');await frame('local-incoming')
+ receipt.localIncoming=await evaluate('Array.from(document.querySelectorAll("[data-settings-field=incoming]")).filter(element=>!element.closest("[hidden],[inert]")).map(element=>element.closest("[data-cluster-node-panel]")?.getAttribute("data-cluster-node-panel"))')
+ assert.deepEqual(receipt.localIncoming,['incoming'],'the local Host owns the only visible Incoming editor')
+ await evaluate('document.querySelector(".cluster-node-tabs [aria-controls$=-mesh-devices]").click();document.querySelector("[data-host-disclosure=studio] [data-host-panel=connection]").click()');await frame('remote-connection')
  assert.equal(await evaluate('Boolean(document.querySelector("[data-resource-editor=studio] [data-settings-field=incoming]"))'),false,'a remote Host never inherits the local Incoming editor')
  receipt.connectionOwnership=await evaluate('({local:document.querySelector("[data-resource-editor=local]")?.getAttribute("data-host-view"),remote:document.querySelector("[data-resource-editor=studio]")?.getAttribute("data-host-view")})')
  for (const scenario of ['initial','unavailable','settings-error']) {
