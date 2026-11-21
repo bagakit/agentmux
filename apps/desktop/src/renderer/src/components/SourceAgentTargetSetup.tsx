@@ -20,7 +20,7 @@ import type { LauncherSourceCoordinatorExecution } from '../lib/launcher-source'
 const RefreshIcon = semanticIconComponent('action.refresh')
 
 /** Chooses identities in the project's original Core realm. Preparation creates no Agent. */
-export function SourceAgentTargetSetup({ config, active, initialSelection, fixedResourceWorkspaceId, actionLabel, preparationNote, disabled, onApply, onCancel, onOpenHost, presentation, menuBoundary, onChooseCustom, setupRef }: {
+export function SourceAgentTargetSetup({ config, active, initialSelection, fixedResourceWorkspaceId, actionLabel, preparationNote, disabled, onApply, onCancel, onOpenHost, presentation, menuBoundary, onChooseCustom, setupRef, showRoleLabels }: {
   config: Pick<AppConfig, 'hosts' | 'workspaces'>; active: boolean; initialSelection?: LauncherExecutionSelection | undefined
   fixedResourceWorkspaceId?: string | undefined; actionLabel: string; disabled?: boolean | undefined
   preparationNote?: string | undefined
@@ -29,6 +29,7 @@ export function SourceAgentTargetSetup({ config, active, initialSelection, fixed
   presentation?: 'anchored-editor' | undefined; menuBoundary?: HTMLElement | null | undefined
   onChooseCustom?: (() => void) | undefined
   setupRef?: RefObject<HTMLDivElement | null> | undefined
+  showRoleLabels?: boolean
 }) {
   const [projectId, setProjectId] = useState(fixedResourceWorkspaceId ?? initialSelection?.resourceWorkspaceId ?? '')
   const project = config.workspaces.find(item => item.id === (fixedResourceWorkspaceId ?? projectId))
@@ -150,6 +151,9 @@ export function SourceAgentTargetSetup({ config, active, initialSelection, fixed
     finally { producer.current = false; setPending(false) }
   }
   const anchored = presentation === 'anchored-editor'
+  const projectChoice = <SelectionField label="Project for this arrangement" value={projectId} disabled={disabled || !active || pending} menuBoundary={menuBoundary ?? null}
+    options={[{ value: '', label: 'Choose a registered project…' }, ...config.workspaces.filter(item => !isScratchWorkspaceId(item.id)).map(item => ({ value: item.id, label: item.name, description: `${config.hosts.find(host => host.id === item.hostId)?.label ?? item.hostId} · ${item.path}` }))]}
+    onValueChange={id => { setProjectId(id); setSelected(undefined); setIndependent(false); setIssue(undefined) }} />
   const supported = description && (independent ? description.contracts.externalAssociation : description.contracts.ordinaryLaunch)
   const requiredContract = independent ? description?.contracts.externalAssociation : description?.contracts.ordinaryLaunch
   const hostRecovery = Boolean(description && !requiredContract) || Boolean(contractIssue)
@@ -159,12 +163,10 @@ export function SourceAgentTargetSetup({ config, active, initialSelection, fixed
   return <div ref={setupRef} tabIndex={-1} className="agent-work-setup" data-source-arrangement data-presentation={presentation} aria-busy={pending || undefined}>
     <div className="agent-work-setup__body">
     {fixedResourceWorkspaceId ? <AgentWorkProjectAnchor project={project} hostLabel={host?.label} compact={anchored} />
-      : <SelectionField label="Project for this arrangement" value={projectId} disabled={disabled || !active || pending} menuBoundary={menuBoundary ?? null}
-        options={[{ value: '', label: 'Choose a registered project…' }, ...config.workspaces.filter(item => !isScratchWorkspaceId(item.id)).map(item => ({ value: item.id, label: item.name, description: `${config.hosts.find(host => host.id === item.hostId)?.label ?? item.hostId} · ${item.path}` }))]}
-        onValueChange={id => { setProjectId(id); setSelected(undefined); setIndependent(false); setIssue(undefined) }} />}
+      : showRoleLabels ? <div className="agent-work-project-choice"><span className="agent-work-end__label">Project &amp; tools</span>{projectChoice}</div> : projectChoice}
     <div className="agent-work-device-choice">
-      {anchored ? <div className="agent-work-device-choice__label"><span className="agent-work-end__label">Agent runs on</span>
-        <IconButton type="button" aria-label="Refresh Agent device choices" title="Refresh Agent devices known by the project device" disabled={!active || pending} onClick={() => setRefresh(value => value + 1)}><RefreshIcon size={13} /></IconButton></div> : null}
+      {anchored || showRoleLabels ? <div className="agent-work-device-choice__label"><span className="agent-work-end__label">Agent runs on</span>
+        {anchored ? <IconButton type="button" aria-label="Refresh Agent device choices" title="Refresh Agent devices known by the project device" disabled={!active || pending} onClick={() => setRefresh(value => value + 1)}><RefreshIcon size={13} /></IconButton> : null}</div> : null}
       <SelectionField label="Agent runs on" value={choiceKey} disabled={disabled || !active || pending} menuBoundary={menuBoundary ?? null} onValueChange={value => {
         if (value === 'independent-coordinator') { setIndependent(true); setSelected(undefined); return }
         setIndependent(false)
@@ -178,7 +180,7 @@ export function SourceAgentTargetSetup({ config, active, initialSelection, fixed
         ...(localHost && host?.kind !== 'local' ? [{ value: 'independent-coordinator', label: localHost.label, description: 'Reach · Agent here, files on the project device' }] : []),
         ...(choices?.hosts.filter(host => host.kind !== 'local').map(host => ({ value: JSON.stringify(['host', host.hostId]), label: host.label, description: 'Agent device known by the project device' })) ?? []),
         ...(routes?.routes.map(route => ({ value: JSON.stringify(['route', route.agentTarget]), label: route.id, description: `Saved route · ${route.agentTarget.adoptedRoute.hops.length} hops` })) ?? [])]} />
-      <p className="agent-work-setup__note">{independent ? 'Reach · Agent here, files and tools on the project device.' : target?.runtimeId === resources?.runtimeId ? 'Agent and files on this project’s device.' : 'Outpost · files and tools stay with this project.'}</p>
+      <p className="agent-work-setup__note">{!project ? 'Choose the folder that holds your files.' : !target ? 'Waiting for the project device to confirm where the Agent can run.' : independent ? 'Reach · Agent here, files and tools on the project device.' : target.runtimeId === resources?.runtimeId ? 'Agent and files on this project’s device.' : 'Outpost · files and tools stay with this project.'}</p>
       {independent && !coordinator ? <p role="status">{coordinatorIssue ? `This device’s Coordinator is unconfirmed: ${coordinatorIssue}` : 'Reading this device’s original Coordinator and home…'}</p> : null}
     </div>
     {project && !(independent ? description?.contracts.externalAssociation : description?.contracts.ordinaryLaunch) ? <p className="agent-work-setup__note" role="status">{description

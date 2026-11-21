@@ -56,6 +56,7 @@ type AgentWorkModeSetupProps = {
   disabled?: boolean
   /** Ordinary Launcher/Remote only. Goal keeps its original finite arrangement contract. */
   sourceTargets?: boolean
+  showRoleLabels?: boolean
   onApply(selection: LauncherExecutionSelection): boolean | void | Promise<boolean | void>
   onCancel?: (() => void) | undefined
   onOpenHost?: ((hostId: string) => void) | undefined
