@@ -387,7 +387,7 @@ it('offers stale-Run Send for an unknown old operation but preserves its exact c
   expect(submit).not.toHaveBeenCalled()
 })
 
-it('recovers the original draft after a queue write failure and a Run change without sending again', async () => {
+it('offers the same manual operation after a queue write failure and a Run change', async () => {
   const initial = composerSession(), run = initial.control.run
   const replacement = { ...initial, control: { ...initial.control, run: { runId: 'resumed-run' } } }
   const binding = { admissionIntent: { kind: 'manual-actor' as const }, expectedRun: run }
@@ -416,22 +416,25 @@ it('recovers the original draft after a queue write failure and a Run change wit
   expect(messageDeliveryDiagnostics.get(logId)?.record).toMatchObject({
     expectedRunId: run.runId, error: { code: 'STALE_AGENT_SESSION', detail: stale.detail }
   })
-  expect(card().textContent).toContain('消息绑定的 Run 已变更')
-  expect(card().querySelector('button[aria-label="立即发送这条待发消息"]')).toBeNull()
+  expect(action(card(), '立即发送这条待发消息').disabled).toBe(false)
   await showMailbox()
-  expect(row().querySelector('button[aria-label="Send queued message immediately"]')).toBeNull()
+  expect(action(row(), 'Send queued message immediately').disabled).toBe(false)
   vi.mocked(api.sessions.inspectInput).mockRejectedValueOnce(new Error('Original journal temporarily unavailable'))
-  await click(action(row(), '移至草稿'))
-  await settled(() => expect(original().archived).toBeUndefined())
+  await click(action(row(), 'Send queued message immediately'))
+  await settled(() => expect(original().logId).not.toBe(logId))
+  expect(submit).toHaveBeenCalledTimes(2)
   expect(useAppStore.getState().agentComposerDrafts[sid]).toBe('Existing draft')
-  await click(action(row(), '移至草稿'))
-  await settled(() => expect(original()).toMatchObject({
-    archived: true, movedToDraft: true, operationId: originalOp, text: body, runId: run.runId, logId, inputIntakeStarted: true
-  }))
+  const key = { kind: 'prompt' as const, agentSessionId: sid, expectedRun: run, submissionId: originalOp }
+  const ref = { key, waitGeneration: 1 }
+  submit.mockResolvedValueOnce({ key, ref, persistence: 'confirmed', status: 'terminal-confirmed', observation: 'closed',
+    admission: null, control: { ref, state: 'dispatch-authorized', gateId: 'original-gate', at: 1 } })
+  await click(action(row(), 'Send queued message immediately'))
+  await settled(() => expect(original().inputReceipt?.status).toBe('terminal-confirmed'))
   expect(api.sessions.inspectInput).toHaveBeenLastCalledWith(initial.control,
     { kind: 'prompt', agentSessionId: sid, expectedRun: run, submissionId: originalOp })
-  expect(useAppStore.getState().agentComposerDrafts[sid]).toBe(`Existing draft\n\n${body}`)
-  expect(submit).toHaveBeenCalledTimes(2)
+  expect(useAppStore.getState().agentComposerDrafts[sid]).toBe('Existing draft')
+  expect(submit).toHaveBeenCalledTimes(3)
+  expect(submit.mock.calls[2]!.slice(0, 4)).toEqual([initial.control, body, originalOp, binding])
 })
 
 it('checks an observed handoff without rejoining until Core confirms the original continuation', async () => {

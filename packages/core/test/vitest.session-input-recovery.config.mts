@@ -8,6 +8,12 @@ import mailbox from './vitest.input-mailbox.config.mts'
 const root = resolve(import.meta.dirname, '../../..')
 const mutation = process.env.AGENTMUX_SESSION_INPUT_MUTATION
 const edits: Record<string, Array<{ path: string; before: string; after: string }>> = {
+  'reject-uncaptured-resume': [{ path: 'packages/core/src/client.ts',
+    before: 'if (!saved && changedRun && !recovered) throw new AgentMuxError(',
+    after: 'if (!saved && changedRun) throw new AgentMuxError(' }],
+  'compare-receipt-with-old-run': [{ path: 'packages/core/src/rpc-native-codec.ts',
+    before: 'original.agentSessionId !== key.agentSessionId || !isDeepStrictEqual(original.run, deliveryKey.expectedRun)',
+    after: 'original.agentSessionId !== key.agentSessionId || !isDeepStrictEqual(original.run, key.expectedRun)' }],
   'storage-recheck-disabled': [{ path: 'packages/core/src/client.ts',
     before: 'if (!context.continueGate && isInputStorageFailure(error) && delay !== undefined) {',
     after: 'if (false) {' }],

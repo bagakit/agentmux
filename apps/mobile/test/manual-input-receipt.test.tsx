@@ -158,9 +158,10 @@ it('rejoins a verified handoff under its original key after the Session changes 
   expect(attempt().draft).toBe(body)
 })
 
-it('retains the old operation and makes a new draft after an unaccepted manual input loses its Run', async () => {
+it('retries the original unsaved manual operation after the same Session replaces its Run', async () => {
   const f = fixture()
   f.submit.mockRejectedValueOnce(Object.assign(new Error('Original queue could not be opened'), { code: 'MESSAGE_QUEUE_UNAVAILABLE' }))
+  f.submit.mockImplementation(receiptFor)
   const previous = f.sessions.get('session-original')!
   const first = await mount(<MobileConversationSurface {...props(f)} />)
   await paste(first.element, body); await click(button(first.element, 'Send'))
@@ -169,23 +170,17 @@ it('retains the old operation and makes a new draft after an unaccepted manual i
   const unmount = mounted.pop()!; await act(async () => unmount.root.unmount()); unmount.element.remove()
   f.sessions.set(previous.agentSessionId, { ...previous, run: { runId: 'resumed-run' } })
   const reopened = await mount(<MobileConversationSurface {...props(f)} />)
-  await settled(() => expect(reopened.element.textContent).toContain('消息绑定的 Run 已变更'))
-  await click(button(reopened.element, '移至草稿'))
-  await settled(() => expect(getDeviceWorkface().snapshot().record.conversation.attempts).toMatchObject([
-    [JSON.stringify(['retained-prompt', 'session-original', original.operationId]), {
-      operationId: original.operationId, runId: original.runId, movedToDraft: true, draft: body, logId: original.logId
-    }]
-  ]))
+  await settled(() => expect(button(reopened.element, '重试发送')).toBeDefined())
+  await click(button(reopened.element, '重试发送'))
+  await settled(() => expect(attempt().phase).toBe('confirmed'))
   expect(f.inspectInput).toHaveBeenLastCalledWith({
     key: { kind: 'prompt', agentSessionId: previous.agentSessionId, expectedRun: previous.run, submissionId: original.operationId }
   })
-  expect(f.submit).toHaveBeenCalledOnce()
+  expect(f.submit).toHaveBeenCalledTimes(2)
+  expect(f.submit.mock.calls[1]![0]).toMatchObject({
+    agentSessionId: previous.agentSessionId, expectedRun: previous.run, operationId: original.operationId, prompt: body
+  })
   expect(f.rejoinInput).not.toHaveBeenCalled()
-  expect(editor(reopened.element).textContent).toBe(body)
-  await click(button(reopened.element, 'Send'))
-  await settled(() => expect(f.submit).toHaveBeenCalledTimes(2))
-  expect(f.submit.mock.calls[1]![0]).toMatchObject({ expectedRun: { runId: 'resumed-run' }, prompt: body })
-  expect(f.submit.mock.calls[1]![0].operationId).not.toBe(original.operationId)
 })
 
 it('preserves a lost stop ACK identity across cold read and honors its confirmed stop even if follow-up inspect fails', async () => {

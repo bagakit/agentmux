@@ -102,7 +102,8 @@ async function fixture() {
       evidence: { kind: 'run-ended', state: 'exited', observedAt: 1 } }
     const next: AgentMuxStoredAgentSession = { ...previous, run: operation.newRun!, retiredRuns: [...previous.retiredRuns, previous.run],
       nativeBinding: { source: 'semantic-resume-target', run: operation.newRun!, observedAt: 1 },
-      continuity: operation, continuityOperations: { ...previous.continuityOperations, [operation.operationId]: operation } }
+      continuity: operation, continuityOperations: { ...previous.continuityOperations, [operation.operationId]: operation },
+      continuityExecutors: { ...previous.continuityExecutors, [operation.operationId]: { providerId: previous.providerId, executorId: previous.executorId, source: 'provider' } } }
     delete next.promptCompletionAdmission
     delete next.terminalPromptSubmission
     delete next.terminalPromptDelivery
@@ -147,27 +148,65 @@ async function fixture() {
     loseReply: () => { loseReply = true }, connect: () => { Reflect.set(client, 'connected', true) } }
 }
 
-it.each(['same Run', 'new Run'])('rechecks the original input after its first queue write fails with %s', async target => {
+it.each(['same Run', 'semantic resume', 'semantic conversation', 'unverified target'])('rechecks the original input after its first queue write fails with %s', async target => {
   const h = await fixture(), id = 'write-refused'
   const write = vi.spyOn(h.queue, 'savePromptInput').mockRejectedValueOnce(Object.assign(
     new Error('Original journal write failed'), { code: 'MESSAGE_QUEUE_UNAVAILABLE' }))
+  const nativeSend = target === 'semantic conversation' ? vi.fn(async () => ({ outcome: 'admitted' as const, turnId: 'original-native-turn' })) : undefined
+  if (nativeSend) {
+    const status = h.inner.kernel.status.bind(h.inner.kernel)
+    h.inner.kernel.status = async runId => ({ ...await status(runId), pid: 1234 })
+    const provider = (Reflect.get(h.client, 'providers') as AgentProviderRegistry).get('codex')
+    vi.spyOn(provider, 'prepareNativeInput').mockImplementation(async (_context, source) => ({
+      plan: { kind: 'native-rpc', protocolId: 'private-native-port', actorId: 'original-actor',
+        sourceId: JSON.stringify([source.providerId, source.nativeSessionId]), threadId: source.nativeSessionId, operation: 'start-or-steer' },
+      assertCurrent: async () => {}, dispose: () => {}, send: nativeSend
+    }))
+  }
   const { authorHuman: _authorHuman, ...original } = h.input(id)
-  const submit = () => h.rpc.call('agent.input.submit', original)
+  const submit = () => h.rpc.call('agent.input.submit', target === 'semantic conversation'
+    ? { ...original, admissionIntent: { kind: 'session-conversation' } } : original)
   await expect(submit()).rejects.toMatchObject({ code: 'MESSAGE_QUEUE_UNAVAILABLE' })
   expect(await h.read(id)).toBeUndefined()
-  if (target === 'same Run') {
-    await expect(submit()).resolves.toMatchObject({ key: h.key(id), input: { persistence: 'confirmed' } })
-    expect(write).toHaveBeenCalledTimes(2)
-  } else {
-    const resumed = await h.resumeFacts()
+  if (target === 'unverified target') {
+    const resumed = await h.resumeFacts(next => ({ ...next, nativeBinding: undefined }))
     await expect(submit()).rejects.toMatchObject({
       code: 'STALE_AGENT_SESSION', controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 },
       detail: JSON.stringify({ stage: 'before-save', expectedRunId: h.original.run.runId, currentRunId: resumed.run.runId })
     })
     expect(await h.read(id)).toBeUndefined()
     expect(write).toHaveBeenCalledOnce()
+    expect(h.writes).not.toHaveBeenCalled()
+    return
   }
-  expect(h.writes).not.toHaveBeenCalled()
+  const run = target === 'same Run' ? h.original.run : (await h.resumeFacts(next => nativeSend
+    ? { ...next, nativeBinding: { source: 'native-hook', run: next.run, observedAt: next.updatedAt } }
+    : next)).run
+  await expect(submit()).resolves.toMatchObject({ key: h.key(id), input: { persistence: 'confirmed' } })
+  expect(write).toHaveBeenCalledTimes(2)
+  await h.wake()
+  const outcome = nativeSend ? 'admitted' : 'terminal-confirmed'
+  const receipt = await h.read(id)
+  expect(receipt, JSON.stringify(receipt?.control.waiting)).toMatchObject({ key: h.key(id), status: outcome, admission: { run } })
+  await expect(submit()).resolves.toMatchObject({ key: h.key(id), input: { status: outcome } })
+  expect(h.writes.mock.calls.map(([runId]) => runId)).toEqual(nativeSend ? [] : [run.runId, run.runId])
+  if (nativeSend) expect(nativeSend).toHaveBeenCalledOnce()
+})
+
+it('continues the saved public human message on the same recovered conversation', async () => {
+  const h = await fixture()
+  const payload = { operationId: 'original-human-message', messageId: 'original-human-mid', execution: 'immediate' as const,
+    text: 'Original saved message', target: { kind: 'agent-session' as const, agentSessionId: 'recipient' } }
+  const saved = await h.rpc.call('agent.send', payload)
+  expect(saved.inputReceipt).toMatchObject({ status: 'waiting', admission: null })
+  const resumed = await h.resumeFacts()
+  await h.wake()
+  const result = await h.rpc.call('agent.input.inspect', { key: saved.inputReceipt!.key })
+  expect(result.input).toMatchObject({ status: 'terminal-confirmed', key: saved.inputReceipt!.key,
+    control: { deliveryKey: { expectedRun: resumed.run } } })
+  expect(h.writes.mock.calls.map(([runId]) => runId)).toEqual([resumed.run.runId, resumed.run.runId])
+  expect((await h.rpc.call('agent.send', payload)).messageId).toBe(payload.messageId)
+  expect(h.writes).toHaveBeenCalledTimes(2)
 })
 
 it.each(['live', 'reopened'])('continues an enabled original wait after real SQLite read IO failure in a %s Core', async owner => {
