@@ -17,7 +17,8 @@ const cases = [
   { mutation: 'action-disconnected', title: 'separates unread and unconfirmed state', file: component + 'ServiceNoticeRow.tsx' },
   { mutation: 'mailbox-liquid', title: 'separates unread and unconfirmed state', file: component + 'MailboxNavigation.tsx' },
   { mutation: 'mailbox-record-structure', title: 'separates unread and unconfirmed state', file: 'packages/client-ui/src/components/MailboxRecordRow.tsx' },
-  { mutation: 'mailbox-heading', title: 'separates unread and unconfirmed state', file: component + 'SessionMailbox.tsx' }
+  { mutation: 'mailbox-heading', title: 'separates unread and unconfirmed state', file: component + 'SessionMailbox.tsx' },
+  { mutation: 'mailbox-activity', title: 'separates unread and unconfirmed state', file: component + 'SessionMailbox.tsx' }
 ]
 const base = join(process.env.AGENTMUX_EXPERIENCE_EVIDENCE_HOME ?? join(root, '.bagakit/verification'), 'message-notice-experience')
 await mkdir(base, { recursive: true })

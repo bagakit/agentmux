@@ -27,6 +27,10 @@ const changes: Record<string, { file: string; before: string; after: string }> =
     file: 'apps/desktop/src/renderer/src/components/performance/PerformanceTrend.tsx',
     before: 'className="performance-trend__area"', after: 'className="performance-trend__area-removed"'
   },
+  'trend-stable': {
+    file: 'apps/desktop/src/renderer/src/components/performance/PerformanceTrend.tsx',
+    before: 'key={segmentIndex}', after: 'key={d}'
+  },
   'host-meters': {
     file: 'apps/desktop/src/renderer/src/components/performance/PerformanceHostResources.tsx',
     before: '<ResourceMeter value={cpu?.percent} total={100} />', after: '{null}'
@@ -45,7 +49,7 @@ const changes: Record<string, { file: string; before: string; after: string }> =
   },
   'mailbox-liquid': {
     file: 'apps/desktop/src/renderer/src/components/MailboxNavigation.tsx',
-    before: '<LiquidSelectionSurface selected={selected} active targetAttribute="data-mailbox-folder" />', after: '{null}'
+    before: '<LiquidSelectionSurface selected={selected} active={active} targetAttribute="data-mailbox-folder" />', after: '{null}'
   },
   'mailbox-record-structure': {
     file: 'packages/client-ui/src/components/MailboxRecordRow.tsx',
@@ -54,6 +58,10 @@ const changes: Record<string, { file: string; before: string; after: string }> =
   'mailbox-heading': {
     file: 'apps/desktop/src/renderer/src/components/SessionMailbox.tsx',
     before: '<ThemeObjectMailIcon className="composer-mailbox__heading-icon" size={15} aria-hidden="true" />', after: 'null'
+  },
+  'mailbox-activity': {
+    file: 'apps/desktop/src/renderer/src/components/SessionMailbox.tsx',
+    before: 'active={(open || motion.retaining) && visible && documentVisible}', after: 'active'
   }
 }
 const change = mutation === 'baseline' ? undefined : changes[mutation]

@@ -52,6 +52,14 @@ it('starts with a scoped overview and exposes the original resource owners only 
   expect(hostMeters).toHaveLength(2)
   expect(hostMeters[0]!.style.transform).toBe('scaleX(0.235)')
   expect(hostMeters[1]!.style.transform).toBe('scaleX(0.9375)')
+  const series = overview.querySelector('.performance-trend__series')!
+  const previousPath = series.querySelector('.performance-trend__line')!.getAttribute('d')
+  const next = snapshot()
+  next.observedAt = next.observedAt! + 1000
+  next.trend = [...next.trend.slice(-59), { observedAt: next.observedAt, appCpuPercent: 19.5, appRssKib: 524288 }]
+  await render(next)
+  expect(overview.querySelector('.performance-trend__series')).toBe(series)
+  expect(series.querySelector('.performance-trend__line')!.getAttribute('d')).not.toBe(previousPath)
   await click('.performance-live__heading .performance-inline-action'); expect(node<HTMLElement>('[data-performance-section="resources"]').hidden).toBe(false)
   await click(tab('overview')); await click('.performance-overview-runs'); expect(node<HTMLElement>('[data-performance-section="resources"]').hidden).toBe(false)
   await click('[data-settings-target="runs"]'); expect(node('[data-run-totals]').textContent).toContain('All tracked Runs')

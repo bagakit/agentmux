@@ -16,6 +16,7 @@ const cases = [
   { mutation: 'live-trends', title: 'leads with measured App trends', file: component + 'PerformanceMetric.tsx' },
   { mutation: 'history-unavailable', title: 'leads with measured App trends', file: component + 'PerformanceMetric.tsx' },
   { mutation: 'trend-area', title: 'leads with measured App trends', file: component + 'PerformanceTrend.tsx' },
+  { mutation: 'trend-stable', title: 'starts with a scoped overview', file: component + 'PerformanceTrend.tsx' },
   { mutation: 'host-meters', title: 'starts with a scoped overview', file: component + 'PerformanceHostResources.tsx' },
   { mutation: 'liquid-navigation', title: 'switches accessible sections', file: component + 'PerformanceOverview.tsx' }
 ]

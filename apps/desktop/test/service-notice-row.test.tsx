@@ -7,6 +7,7 @@ import { SessionMailbox } from '../src/renderer/src/components/SessionMailbox'
 import { useAppStore } from '../src/renderer/src/store'
 
 const dom = composerDOM()
+const resizeObserve = vi.fn()
 const panel = () => dom.container.querySelector<HTMLElement>('.composer-mailbox')!
 const notice = (kind: 'indeterminate' | 'process-degraded', action?: { label: string; run(): void }) => ({
   id: 'delivery', cause: 'original', observedAt: 1000,
@@ -18,12 +19,20 @@ async function open() {
   await act(async () => panel().dispatchEvent(event))
 }
 async function chooseNotices() { await dom.click('[role="tab"][id$="-system-tab"]') }
-beforeEach(() => useAppStore.setState({ sessions: [], noticeReadReceipts: {} }))
+beforeEach(() => {
+  useAppStore.setState({ sessions: [], noticeReadReceipts: {} })
+  resizeObserve.mockClear()
+  vi.stubGlobal('ResizeObserver', class { observe = resizeObserve; unobserve() {} disconnect() {} })
+})
 
 it('separates unread and unconfirmed state from the exact original action and detail', async () => {
   const action = vi.fn(), acknowledge = vi.fn()
   await dom.render(<SessionMailbox system={{ available: true, notices: [notice('indeterminate', { label: 'Check delivery', run: action })], unread: ['delivery'], acknowledge }} queued={[]} />)
-  await open(); await chooseNotices()
+  const navigation = panel().querySelector('.composer-mailbox__folders')!
+  expect(resizeObserve.mock.calls.some(([target]) => target === navigation)).toBe(false)
+  await open()
+  expect(resizeObserve.mock.calls.some(([target]) => target === navigation)).toBe(true)
+  await chooseNotices()
   await act(async () => panel().dispatchEvent(new Event('pointerdown', { bubbles: true })))
   expect(acknowledge).toHaveBeenCalledWith(['delivery'])
   expect(panel().querySelector('.composer-mailbox__heading-icon')).not.toBeNull()
