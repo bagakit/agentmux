@@ -39,6 +39,12 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@xmldom/xmldom':
+        specifier: 0.9.12
+        version: 0.9.12
+      '@bufbuild/protobuf':
+        specifier: 1.10.1
+        version: 1.10.1
       '@agentmux/browser':
         specifier: workspace:*
         version: link:../../packages/browser
@@ -54,6 +60,9 @@ importers:
       '@agentmux/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@agentmux/relay':
+        specifier: workspace:*
+        version: link:../../packages/relay
       '@agentmux/demand':
         specifier: workspace:*
         version: link:../../packages/demand
@@ -75,12 +84,6 @@ importers:
       '@agentmux/native-desktop':
         specifier: workspace:*
         version: link:../../packages/native-desktop
-      '@agentmux/relay':
-        specifier: workspace:*
-        version: link:../../packages/relay
-      '@bufbuild/protobuf':
-        specifier: 1.10.1
-        version: 1.10.1
       '@dnd-kit/core':
         specifier: ^6.3.1
         version: 6.3.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -126,9 +129,6 @@ importers:
       '@viz-js/viz':
         specifier: 3.31.0
         version: 3.31.0
-      '@xmldom/xmldom':
-        specifier: 0.9.12
-        version: 0.9.12
       '@xterm/addon-fit':
         specifier: 0.12.0-beta.300
         version: 0.12.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=556d50ec9d2b290f6ce9cc4d38f996a5afd7b82b7bacbf716521bc8de1e559a5))
