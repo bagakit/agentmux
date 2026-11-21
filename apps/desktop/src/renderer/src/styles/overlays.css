@@ -46,6 +46,12 @@
 .confirmation-dialog__heading > svg { flex: none; color: var(--red-text); }
 .confirmation-dialog__title { min-width: 0; margin: 0; font-size: var(--fs-title); font-weight: 600; line-height: 1.4; letter-spacing: -.015em; overflow-wrap: anywhere; }
 .confirmation-dialog__subject { margin: var(--sp-3) 0 0; color: var(--text); font-size: var(--fs-body); font-weight: 500; line-height: 1.5; overflow-wrap: anywhere; user-select: text; }
+.confirmation-dialog__object { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--sp-2); }
+.confirmation-dialog__object-part { display: inline-flex; min-width: 0; max-width: 100%; align-items: flex-start; gap: 6px; }
+.confirmation-dialog__object-part > svg,
+.confirmation-dialog__object-part > .agent-provider-icon { flex: none; margin-top: 3px; color: var(--text-2); }
+.confirmation-dialog__object-part > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+.confirmation-dialog__object-separator { color: var(--text-3); }
 .confirmation-dialog__description { margin: var(--sp-4) 0 0; color: var(--text-2); font-size: var(--fs-body); line-height: 1.6; overflow-wrap: anywhere; }
 .confirmation-dialog footer { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-3); margin-top: var(--sp-6); }
 /* One label-above text field for every small form dialog. The input keeps the shared input skin and focus. */

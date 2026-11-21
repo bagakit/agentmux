@@ -26,7 +26,7 @@ export function ConfirmationDialog({
   open: boolean
   title: string
   description: string
-  subject?: string
+  subject?: ReactNode
   confirmLabel: string
   feedback?: ReactNode
   intent?: 'danger' | 'neutral'
