@@ -1698,7 +1698,7 @@ type WorkbenchContentHostProps = {
   targetId: string | null
   tabProjection: WorkbenchViewTarget | undefined
   regionTarget: WorkbenchViewTarget | undefined
-  nativeRegionHostId: string | undefined
+  tabDetached: boolean
   reference: WorkbenchViewTarget['reference']
   retainedRegionId: string | null
   groupId: string | undefined
@@ -1723,18 +1723,23 @@ export function WorkbenchSecondaryView({ target, children }: { target: Workbench
 }
 
 const WorkbenchContentHost = memo(function WorkbenchContentHost({ workspaceId, tab, targets, homeId, targetId,
-  tabProjection, regionTarget, nativeRegionHostId, reference, retainedRegionId, groupId, tabVisible,
+  tabProjection, regionTarget, tabDetached, reference, retainedRegionId, groupId, tabVisible,
   nativeSurfacesVisible, interactiveResize, showBorrowedNotice, missingPlacement, onBrowserControlConfirmation
 }: WorkbenchContentHostProps) {
   const windowTargets = useContext(WorkbenchWindowTargetsContext)
   const primaryHostId = targetId ?? homeId
-  return <WorkbenchBrowserTargetsContext.Provider value={targets}>
-        {targets.filter(target => target.hostId !== primaryHostId && target.hostId !== nativeRegionHostId && target.reference).map(target =>
+  // While the whole Tab is in its window, this Region projection carries the
+  // window notice. Native stage and input routing stay with the original Tab.
+  const windowNoticeProjection = tabDetached ? regionTarget : undefined
+  const contentTargets = windowNoticeProjection ? targets.filter(target => target !== windowNoticeProjection) : targets
+  return <WorkbenchBrowserTargetsContext.Provider value={contentTargets}>
+        {contentTargets.filter(target => target.hostId !== primaryHostId && target.hostId !== regionTarget?.hostId && target.reference).map(target =>
           <WorkbenchSecondaryView key={target.hostId} target={target}>
             <WorkbenchBrowserPresentationSlots tab={tab} target={target} node={target.projection?.entity.kind === 'region' ? { type: 'leaf', regionId: target.projection.entity.regionId } : tab.layout.root} />
           </WorkbenchSecondaryView>)}
         <StableWorkbenchView homeId={homeId} targetId={targetId} primaryTabId={tab.id}
           windowTarget={windowTargets.find(({ target }) => target?.kind === 'tab' && target.tabId === tab.id)?.target ?? undefined}
+          windowNoticeProjection={windowNoticeProjection}
           active={tabProjection?.active ?? true}
           visible={tabVisible}
           surface={tabProjection?.surface} returnSelection={tabProjection?.returnSelection} moteInputIntent={tabProjection?.moteInputIntent} moteContextKey={tabProjection?.moteContextKey}
@@ -1761,7 +1766,7 @@ const WorkbenchContentHost = memo(function WorkbenchContentHost({ workspaceId, t
               mode: 'The original Tab and Regions remain available. Group placement is not confirmed.',
               restore: 'Choose its original location in Space to restore placement-dependent actions.' } }} /> : null}
           <WorkbenchRegionTree
-            tab={tab} groupId={groupId} regionTarget={regionTarget}
+            tab={tab} groupId={groupId} regionTarget={windowNoticeProjection ? undefined : regionTarget}
             headerPortalTargetId={null}
             surfaceVisible={tabVisible}
             nativeSurfacesVisible={nativeSurfacesVisible}
@@ -2315,8 +2320,8 @@ export function WorkspaceWorkbench({
           ? { kind: 'tab', displayWorkspaceId: primaryReference.displayWorkspaceId, groupId: primaryReference.groupId, tabId: tab.id } : null))
         const tabVisible = Boolean(detached) || (targetId !== null && (tabProjection?.surface ? tabProjection.visible === true : true)) || (targetId === null && visible && projectedGroup?.activeTabId === tab.id)
         return <WorkbenchContentHost key={tab.id} workspaceId={workspaceId} tab={tab} targets={targets}
-          homeId={homeId} targetId={targetId} tabProjection={tabProjection} regionTarget={regionTarget}
-          nativeRegionHostId={nativeRegionTarget?.hostId} reference={primaryReference ?? undefined}
+          homeId={homeId} targetId={targetId} tabProjection={tabProjection} regionTarget={nativeRegionTarget}
+          tabDetached={Boolean(detached)} reference={primaryReference ?? undefined}
           retainedRegionId={retainedHere && (targetId === null || tabProjection?.surface === 'space')
             ? retainedSpatialFocus.regionId : tabProjection?.retainedRegionId ?? null}
           groupId={confirmedDisplayGroup ?? homeReference?.groupId} tabVisible={tabVisible}

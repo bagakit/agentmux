@@ -6,7 +6,7 @@ import { DesktopClientUiProvider } from './DesktopClientUiProvider'
 import { Component, useContext, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { MotePresentationContext } from '../lib/mote-presentation-context'
-import { WorkbenchPresentationContext, WorkbenchBrowserTargetsContext, type BrowserControlConfirmation } from '../lib/workbench-presentation'
+import { WorkbenchPresentationContext, WorkbenchBrowserTargetsContext, type BrowserControlConfirmation, type WorkbenchViewTarget } from '../lib/workbench-presentation'
 import { workbenchReturnContext } from '../lib/workbench-return-context'
 import { workbenchReturnLabel, type WorkbenchReturnSelection } from '../../../shared/workbench-windows'
 import { workbenchRegionProjectionSlotId } from '../lib/workbench-projection'
@@ -137,7 +137,7 @@ class WorkbenchReadingSnapshot extends Component<{ host: HTMLElement; active: bo
 }
 
 /** One React/terminal tree; only its existing DOM host changes spatial parent. */
-export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegionId, active, visible = true, retainHiddenPlacement = true, retainedRegionId, homeNotice, surface, moteInputIntent, moteContextKey, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference, returnSelection, windowTarget, kind = 'tab', children }: {
+export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegionId, active, visible = true, retainHiddenPlacement = true, retainedRegionId, homeNotice, surface, moteInputIntent, moteContextKey, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference, returnSelection, windowTarget, windowNoticeProjection, kind = 'tab', children }: {
   homeId: string
   /** Only the unique primary View carries an input-retention identity. */
   primaryTabId?: string | undefined
@@ -162,13 +162,14 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
   /** The window owner requests this exact occurrence without changing the presentation selection. */
   returnSelection?: WorkbenchReturnSelection | undefined
   windowTarget?: AppWindowTarget | undefined
+  /** A projection of content contained in this independent View. */
+  windowNoticeProjection?: Pick<WorkbenchViewTarget, 'hostId' | 'surface' | 'active' | 'visible'> | undefined
   /** The existing projection owner describes a borrowed View at its original slot. */
   homeNotice?: ReactNode
   children: ReactNode
 }) {
   const parentDocument = useWorkbenchDocument()
   const parentChrome = useWorkbenchWindowChrome()
-  const surfaceDocument = useWorkbenchSurfaceDocument(surface)
   const [host] = useState(() => {
     const element = document.createElement('div')
     element.className = kind === 'region' ? 'retained-workbench-region' : 'retained-workbench-view'
@@ -178,6 +179,9 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
   const wasVisible = useRef(false)
   const [placementRequest, setWindowPlacement] = useState<{ placement: WorkbenchWindowPlacement | null; revision: number }>({ placement: null, revision: 0 })
   const windowPlacement = placementRequest.placement
+  const noticeProjectionTarget = windowPlacement ? windowNoticeProjection : undefined
+  const noticeTargetId = noticeProjectionTarget?.hostId ?? targetId
+  const surfaceDocument = useWorkbenchSurfaceDocument(noticeProjectionTarget?.surface ?? surface)
   const placementRevision = useRef(0)
   const [hostDocument, setHostDocument] = useState(host.ownerDocument)
   const placementWaiters = useRef<Array<{ placement: WorkbenchWindowPlacement | null; resolve(): void; reject(error: Error): void }>>([])
@@ -323,13 +327,14 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
       // the original View; a destination hint alone does not prove it moved.
       setNoticeHome(windowPlacement || showHomeNotice && targetId !== null
         ? parentDocument.getElementById(homeId) ?? document.getElementById(homeId) : null)
-      const projectionNotice = windowPlacement && targetId !== null && targetId !== homeId
+      const projectionNotice = windowPlacement && noticeTargetId !== null && noticeTargetId !== homeId
       const projectionSlot = projectionNotice
-        ? surfaceDocument.getElementById(targetId) ?? parentDocument.getElementById(targetId) ?? document.getElementById(targetId)
+        ? surfaceDocument.getElementById(noticeTargetId) ?? parentDocument.getElementById(noticeTargetId) ?? document.getElementById(noticeTargetId)
         : null
       setNoticeProjection(projectionSlot)
       if (switchTarget) tabSwitchObservation.observe(switchTarget)
-      return !projectionNotice || !active || !visible || projectionSlot !== null
+      return !projectionNotice || projectionSlot !== null ||
+        !(noticeProjectionTarget?.active ?? active) || !(noticeProjectionTarget?.visible ?? visible)
     }
     // Keep the already-mounted view in its last host while a Focus slot arrives.
     // Initial restoration has a private parking host, never a second view tree.
