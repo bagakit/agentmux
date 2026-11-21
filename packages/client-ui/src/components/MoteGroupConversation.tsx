@@ -7,6 +7,7 @@ import { Button } from './Button.js'
 import { IconButton } from './IconButton.js'
 import { SearchInput } from '../input/SearchInput.js'
 import { Notice } from './Notice.js'
+import { MoteAssignmentButton } from './MoteAssignment.js'
 import { MoteGroupAvatar, MoteGroupDetails, MoteGroupSettingsFields, type MoteGroupSettingsValue } from './MoteGroupSettings.js'
 export { MoteGroupAvatar } from './MoteGroupSettings.js'
 import { SemanticIcon } from '../theme/semantic-icon.js'
@@ -406,6 +407,8 @@ function GroupView({ call, groupId, initialMoteId, initialMembers, onChanged, on
               <span>{group?.members.find(item => item.moteId === delivery.moteId)?.name ?? delivery.moteId} · {STATUS[delivery.status]}</span>
               {delivery.status !== 'accepted' ? <button type="button" disabled={retrying !== null} onClick={() => void retry(message.id, delivery.moteId)}>{delivery.status === 'failed' ? '重试' : '核对'}</button> : null}
             </li>)}</ul> : null}
+            {!moteId && message.author.kind === 'mote' && message.deliveries.length > 0
+              ? <MoteAssignmentButton target={{ kind: 'group', conversationId: groupId, messageId: message.id, read: call }} /> : null}
           </div>
         </article>
       })}

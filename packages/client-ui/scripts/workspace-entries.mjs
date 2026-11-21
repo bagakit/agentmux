@@ -55,6 +55,7 @@ export const workspaceSources = {
     'MarkdownReadingLayout',
     'MarkdownRemoteImage',
     'MessageDeliveryFailure',
+    'MoteAssignment',
     'MoteConversationStart',
     'MoteConversationThreads',
     'MoteDirectThreads',

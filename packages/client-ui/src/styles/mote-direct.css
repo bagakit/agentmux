@@ -15,6 +15,12 @@
   background: var(--surface-2);
 }
 
+@media (max-width: 540px) {
+  .mote-direct-entry { flex-wrap: wrap; gap: 6px; }
+  .mote-direct-entry .mote-direct-entry__summary { flex: 1 0 100%; }
+  .mote-direct-entry > button:not(.mote-direct-entry__summary) { min-height: 44px; }
+}
+
 .mote-direct-entry small,
 .mote-direct-row small,
 .mote-direct-message small,
@@ -37,7 +43,7 @@
   display: flex;
   flex-direction: column;
   width: min(680px, calc(100vw - 32px));
-  height: min(560px, calc(100dvh - 64px));
+  max-height: min(640px, calc(100dvh - 64px));
   border-radius: var(--radius-lg);
   background: var(--surface-1);
   color: var(--text);
@@ -45,6 +51,9 @@
   overflow: hidden;
 }
 .mote-direct-panel[data-view="list"] { width: min(520px, calc(100vw - 32px)); height: auto; max-height: min(480px, calc(100dvh - 64px)); }
+.mote-direct-panel[data-view="assignment"] {
+  width: min(640px, calc(100vw - 32px));
+}
 
 .mote-direct-panel[data-state="open"] { animation: mote-direct-enter 180ms ease-out both; }
 @keyframes mote-direct-enter {
@@ -116,8 +125,10 @@
 .mote-direct-message p { margin: 5px 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
 .mote-direct-message footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .mote-direct-message footer button { min-height: 36px; }
+.mote-direct-message__receipts { display: flex; gap: 4px 10px; flex-wrap: wrap; }
 .mote-direct-assignment .mote-direct-message { margin-inline: 0; }
 .mote-direct-assignment h3 { margin: 0 0 6px; font-size: var(--fs-body, 14px); }
+.mote-direct-assignment__empty { color: var(--text-2); font-size: var(--fs-body); margin: 12px 2px 2px; }
 .mote-direct-image { margin: 8px 0; display: grid; justify-items: start; gap: 6px; }
 .mote-direct-image button { max-width: 100%; overflow-wrap: anywhere; }
 .mote-direct-image img { display: block; max-width: 100%; max-height: 280px; object-fit: contain; border-radius: var(--radius-sm); }

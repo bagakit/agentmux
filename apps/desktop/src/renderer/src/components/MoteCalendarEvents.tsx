@@ -10,7 +10,7 @@ import type { ScheduleOccurrence, ScheduleOccurrenceWindow } from '@agentmux/cor
 import { deliveryLabel, needsAttention, turnLabel } from '../lib/mote-calendar-range'
 import { api } from '../lib/api'
 import type { CalendarSchedule } from '../lib/mote-calendar-range'
-import { scheduleCalendarLabel, scheduleStateLabel } from './ScheduleArrangementRow'
+import { MotePublishedAssignment, scheduleCalendarLabel, scheduleStateLabel } from './ScheduleArrangementRow'
 
 type Page = ScheduleResultMap['schedule.history']
 type Receipt = Page['entries'][number]
@@ -36,14 +36,15 @@ function eventDetails(event: CalendarEvent, heartbeatSourceId: string, now: numb
   const state = planned?.kind === 'next-due' ? scheduleStateLabel(record, now) : undefined
   const result = receipt?.nativeResult.state
   const nativeStatus = result && turnLabel(result)
-  const status = receipt ? nativeStatus ?? deliveryLabel(receipt.delivery)
+  const published = !!record.moteWork && record.lastMotePublication?.occurrenceAt === at
+  const status = published ? 'Assignment published' : receipt ? nativeStatus ?? deliveryLabel(receipt.delivery)
     : planned?.kind === 'last-accepted' ? 'Input accepted'
     : planned?.repeat && planned.repeat.count > 1 ? formatCount.format(planned.repeat.count) + ' planned'
     : state && state !== 'Active' ? state : 'Planned'
   const heartbeat = isMoteHeartbeatSchedule(record, heartbeatSourceId)
   const label = !heartbeat && receipt && !receipt.recap ? 'Scheduled input'
     : scheduleCalendarLabel(receipt?.recap ? { ...record, prompt: receipt.recap.text } : record, heartbeat)
-  return { at, record, receipt, planned, result, nativeStatus, status, heartbeat, label,
+  return { at, record, receipt, planned, result, nativeStatus, status, heartbeat, label, published,
     key: JSON.stringify([record.loopId, at, receipt ? receiptKey(receipt) : 'plan']),
     attention: receipt ? needsAttention({ nativeState: receipt.nativeResult.state, delivery: receipt.delivery })
       : state === 'Delivery unconfirmed',
@@ -186,12 +187,16 @@ export function MoteCalendarEvents({ heartbeatSourceId, window, schedules, items
     return disclosure?.key === event.key && disclosure.inFocus === inFocus && disclosure.open
   }
   function openEvent(event: EventDetails, inFocus: boolean) {
-    if (event.receipt) setDisclosure({ key: event.key, inFocus, open: !isExpanded(event, inFocus) })
+    if (event.receipt || event.published) setDisclosure({ key: event.key, inFocus, open: !isExpanded(event, inFocus) })
     else onOpenRule(event.record.loopId)
   }
   function recap(event: EventDetails, inFocus: boolean) {
-    const { receipt, nativeStatus, record } = event
-    if (!receipt || disclosure?.key !== event.key || disclosure.inFocus !== inFocus) return null
+    const { receipt, nativeStatus, record, published } = event
+    if (disclosure?.key !== event.key || disclosure.inFocus !== inFocus) return null
+    if (published) return <div className="mote-calendar__recap mote-calendar__reveal" hidden={!disclosure.open} inert={!disclosure.open}>
+      <MotePublishedAssignment schedule={record} />
+    </div>
+    if (!receipt) return null
     return <div className="mote-calendar__recap mote-calendar__reveal" hidden={!disclosure.open} inert={!disclosure.open}>
       <div><strong>Recap</strong><small>{deliveryLabel(receipt.delivery)}{nativeStatus ? ' · ' + nativeStatus : ''}</small></div>
       <p>{receipt.recap ? receipt.recap.text + (receipt.recap.truncated ? '…' : '') : 'Original input text is unavailable.'}</p>
@@ -202,11 +207,11 @@ export function MoteCalendarEvents({ heartbeatSourceId, window, schedules, items
     const Icon = event.attention ? Warning : event.heartbeat ? Heartbeat : event.result === 'completed' ? Completed : event.upcoming ? CalendarTime : History
     return <li key={event.key} data-event-result={event.result} data-event-kind={event.receipt ? 'recorded' : event.planned?.kind}>
       <button type="button" className="mote-calendar__event" data-event-schedule={event.record.loopId} data-attention={event.attention || undefined}
-        aria-expanded={event.receipt ? isExpanded(event, false) : undefined} onClick={() => openEvent(event, false)}>
+        aria-expanded={event.receipt || event.published ? isExpanded(event, false) : undefined} onClick={() => openEvent(event, false)}>
         <EventTime at={event.at} timezone={timezone} />
         <Icon size={14} aria-hidden />
         <span className="mote-calendar__event-copy"><strong>{event.label}</strong><small>{event.status}</small></span>
-        {event.receipt ? <Down className="mote-calendar__event-arrow" size={12} aria-hidden /> : <Forward className="mote-calendar__event-arrow" size={12} aria-hidden />}
+        {event.receipt || event.published ? <Down className="mote-calendar__event-arrow" size={12} aria-hidden /> : <Forward className="mote-calendar__event-arrow" size={12} aria-hidden />}
       </button>
       {recap(event, false)}
     </li>
@@ -216,11 +221,11 @@ export function MoteCalendarEvents({ heartbeatSourceId, window, schedules, items
   return <div className="mote-calendar__events" aria-busy={busy}>
     {focus ? <div className="mote-calendar__focus">
       <button type="button" className="mote-calendar__highlight" data-focus-event={focus.key} data-attention={focus.attention || undefined}
-        aria-expanded={focus.receipt ? isExpanded(focus, true) : undefined} onClick={() => openEvent(focus, true)}>
+        aria-expanded={focus.receipt || focus.published ? isExpanded(focus, true) : undefined} onClick={() => openEvent(focus, true)}>
         <span className="mote-calendar__highlight-heading"><FocusIcon size={15} aria-hidden /><span>{focusLabel}</span><EventTime at={focus.at} timezone={timezone} /></span>
         <strong>{focus.label}</strong>
         <small>{focus.status}</small>
-        {focus.receipt ? <Down className="mote-calendar__event-arrow" size={14} aria-hidden /> : <Forward className="mote-calendar__event-arrow" size={14} aria-hidden />}
+        {focus.receipt || focus.published ? <Down className="mote-calendar__event-arrow" size={14} aria-hidden /> : <Forward className="mote-calendar__event-arrow" size={14} aria-hidden />}
       </button>
       {recap(focus, true)}
     </div> : null}

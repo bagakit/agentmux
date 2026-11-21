@@ -2,6 +2,7 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import type { ContinuousProgressLoop } from '@agentmux/core/continuous-progress-scheduler'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@agentmux/client-ui/components/Button'
+import { MoteAssignmentButton } from '@agentmux/client-ui/components/MoteAssignment'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { api } from '../lib/api'
 import { useScheduleOperation } from '../lib/schedule-controller'
@@ -31,6 +32,13 @@ export function scheduleCalendarLabel(schedule: ContinuousProgressLoop, heartbea
   const headline = scheduleDisplayTitle(schedule)
   return headline.match(/^(.{2,16}?)(?:：|:\s)/u)?.[1]?.trim() || headline
 }
+export function MotePublishedAssignment({ schedule }: { schedule: ContinuousProgressLoop }) {
+  const { moteWork: work, lastMotePublication: publication } = schedule
+  if (!work || !publication) return null
+  const address = { conversationId: publication.conversationId, messageId: publication.messageId, read: api.moteGroup.call }
+  return <MoteAssignmentButton target={work.kind === 'direct'
+    ? { kind: 'direct', mote: work.mote, ...address } : { kind: 'group', ...address }} />
+}
 export function ScheduleArrangementRow({ schedule, timezone, now, onReceipt, discussion, onOpenDiscussion, quickActions = false, calendarSummary = false, heartbeat = false }: {
   schedule: ContinuousProgressLoop; timezone: string; now: number; calendarSummary?: boolean; heartbeat?: boolean
   onReceipt(schedule: ContinuousProgressLoop): void; discussion?: string | undefined
@@ -46,6 +54,7 @@ export function ScheduleArrangementRow({ schedule, timezone, now, onReceipt, dis
     full: new Intl.DateTimeFormat(undefined, { timeZone: timezone, dateStyle: 'medium', timeStyle: 'short' })
   }), [timezone])
   const at = schedule.nextCheckAt
+  const work = schedule.moteWork
   const date = formats.short.format(at)
   const phase = scheduleStateLabel(schedule, now)
   const nextLabel = phase === 'Active' ? 'Next planned' : phase === 'Due' ? 'Due since' : 'Original due'
@@ -82,12 +91,13 @@ export function ScheduleArrangementRow({ schedule, timezone, now, onReceipt, dis
           {phase !== 'Active' && phase !== 'Due' ? <span className="schedule-arrangement__state">{phase}</span> : null}
         </div> : null}
         <dl className="schedule-arrangement__times">
-          <div><dt>Last input accepted</dt><dd>{schedule.lastOccurrenceAt === undefined ? '—' : <time dateTime={new Date(schedule.lastOccurrenceAt).toISOString()}>{formats.short.format(schedule.lastOccurrenceAt)}</time>}</dd></div>
+          <div><dt>{work ? 'Last assignment published' : 'Last input accepted'}</dt><dd>{schedule.lastOccurrenceAt === undefined ? '—' : <time dateTime={new Date(schedule.lastOccurrenceAt).toISOString()}>{formats.short.format(schedule.lastOccurrenceAt)}</time>}</dd></div>
           {schedule.status !== 'stopped' ? <div><dt>{nextLabel}</dt><dd><time dateTime={new Date(at).toISOString()}>{date}</time></dd></div> : null}
         </dl>
       </> : null}
       {quickActions && schedule.status !== 'stopped' ? <button type="button" className="automation-button schedule-arrangement__toggle" disabled={operation.busy || !!operation.pending || schedule.revision === undefined} onClick={() => mutate(schedule.status === 'active' ? 'pause' : 'resume')}>{schedule.status === 'active' ? 'Pause' : 'Resume'}</button> : null}
     </div>
+    {work && schedule.lastMotePublication ? <div className="calendar-schedules__actions"><MotePublishedAssignment schedule={schedule} /></div> : null}
     {schedule.lastOutcome === 'skipped' ? <p className="schedule-arrangement__outcome">Last attempt skipped</p> : null}
     <details className="schedule-arrangement__details">
       <summary>Details and controls</summary>

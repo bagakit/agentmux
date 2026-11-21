@@ -338,30 +338,25 @@
       "browser": "./src/components/MessageDeliveryFailure.tsx",
       "import": "./dist/components/MessageDeliveryFailure.js"
     },
+    "./components/MoteAssignment": {
+      "types": "./src/components/MoteAssignment.tsx",
+      "browser": "./src/components/MoteAssignment.tsx",
+      "import": "./dist/components/MoteAssignment.js"
+    },
     "./components/MoteConversationStart": {
       "types": "./src/components/MoteConversationStart.tsx",
       "browser": "./src/components/MoteConversationStart.tsx",
       "import": "./dist/components/MoteConversationStart.js"
     },
-    "./components/MoteExecutorPriority": {
-      "types": "./src/components/MoteExecutorPriority.tsx",
-      "browser": "./src/components/MoteExecutorPriority.tsx",
-      "import": "./dist/components/MoteExecutorPriority.js"
-    },
-    "./components/MoteGroupConversation": {
-      "types": "./src/components/MoteGroupConversation.tsx",
-      "browser": "./src/components/MoteGroupConversation.tsx",
-      "import": "./dist/components/MoteGroupConversation.js"
+    "./components/MoteConversationThreads": {
+      "types": "./src/components/MoteConversationThreads.tsx",
+      "browser": "./src/components/MoteConversationThreads.tsx",
+      "import": "./dist/components/MoteConversationThreads.js"
     },
     "./components/MoteDirectThreads": {
       "types": "./src/components/MoteDirectThreads.tsx",
       "browser": "./src/components/MoteDirectThreads.tsx",
       "import": "./dist/components/MoteDirectThreads.js"
-    },
-    "./components/MoteConversationThreads": {
-      "types": "./src/components/MoteConversationThreads.tsx",
-      "browser": "./src/components/MoteConversationThreads.tsx",
-      "import": "./dist/components/MoteConversationThreads.js"
     },
     "./components/MoteFace": {
       "types": "./src/components/MoteFace.tsx",
@@ -372,6 +367,16 @@
       "types": "./src/components/MoteFirstMessage.tsx",
       "browser": "./src/components/MoteFirstMessage.tsx",
       "import": "./dist/components/MoteFirstMessage.js"
+    },
+    "./components/MoteGroupConversation": {
+      "types": "./src/components/MoteGroupConversation.tsx",
+      "browser": "./src/components/MoteGroupConversation.tsx",
+      "import": "./dist/components/MoteGroupConversation.js"
+    },
+    "./components/MoteExecutorPriority": {
+      "types": "./src/components/MoteExecutorPriority.tsx",
+      "browser": "./src/components/MoteExecutorPriority.tsx",
+      "import": "./dist/components/MoteExecutorPriority.js"
     },
     "./components/MoteIcon": {
       "types": "./src/components/MoteIcon.tsx",
