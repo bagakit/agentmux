@@ -573,6 +573,10 @@
     "./agent-takeover": {
       "types": "./dist/agent-takeover.d.ts",
       "import": "./dist/agent-takeover.js"
+    },
+    "./agent-information": {
+      "types": "./dist/agent-information.d.ts",
+      "import": "./dist/agent-information.js"
     }
   },
   "bin": {

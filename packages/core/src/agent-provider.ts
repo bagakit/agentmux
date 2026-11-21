@@ -216,8 +216,6 @@ export type AgentProviderManagedAcp = {
   attach(context: AgentProviderNativeInputContext & { waitForReady?: true }): Promise<import('./acp-adapter.js').AgentMuxAcpBinding>
   prepareInput?(context: AgentProviderNativeInputContext, plan: AgentNativePromptInputPlan, input: { hasImages: boolean }): Promise<AgentProviderPreparedNativeInput>
   interrupt?(context: AgentProviderNativeInputContext, nativeSessionId: string, expectedRequestId?: string): Promise<void>
-  readConfiguration?(context: AgentProviderNativeInputContext, nativeSessionId: string): Promise<import('./agent-configuration.js').AgentConfigurationSnapshot | null>
-  setConfiguration?(context: AgentProviderNativeInputContext, nativeSessionId: string, request: Pick<import('./agent-configuration.js').AgentConfigurationSet, 'configId' | 'value' | 'expectedRevision'> & { requestId: string }): Promise<import('./agent-configuration.js').AgentConfigurationSnapshot>
 }
 
 export type AgentProvider = {
@@ -235,6 +233,10 @@ export type AgentProvider = {
   readonly terminalHandshake?: AgentTerminalHandshake
   readonly terminalPromptRender?: AgentTerminalPromptRenderMatcher
   readonly promptPayloadConsumption?: AgentProviderPromptPayloadConsumption
+  /** Read only the exact original native Session/backend. No launch configuration substitutes. */
+  readInformation?(context: AgentProviderNativeInputPreparationContext, nativeSessionId: string): Promise<import('./agent-information.js').AgentInformationSnapshot>
+  readConfiguration?(context: AgentProviderNativeInputPreparationContext, nativeSessionId: string): Promise<import('./agent-configuration.js').AgentConfigurationSnapshot | null>
+  setConfiguration?(context: AgentProviderNativeInputPreparationContext, nativeSessionId: string, request: Pick<import('./agent-configuration.js').AgentConfigurationSet, 'configId' | 'value' | 'expectedRevision'> & { requestId: string }): Promise<import('./agent-configuration.js').AgentConfigurationSnapshot>
   /** This contribution is the native history capability; its absence is explicitly unsupported. */
   discoverNativeSession?(context: AgentProviderNativeSessionDiscoveryContext): Promise<AgentProviderNativeSessionDiscovery | null>
   /** Persisted conversation discovery is independent of a currently managed Run. */
@@ -310,6 +312,9 @@ export type AgentProviderDefinition = {
   terminalHandshake?: AgentTerminalHandshake
   terminalPromptRender?: AgentTerminalPromptRenderMatcher
   promptPayloadConsumption?: AgentProviderPromptPayloadConsumption
+  readInformation?: AgentProvider['readInformation']
+  readConfiguration?: AgentProvider['readConfiguration']
+  setConfiguration?: AgentProvider['setConfiguration']
   discoverNativeSession?: (context: AgentProviderNativeSessionDiscoveryContext) => Promise<AgentProviderNativeSessionDiscovery | null>
   listNativeSessions?: AgentProvider['listNativeSessions']
   assertNativeResumeSource?: AgentProvider['assertNativeResumeSource']
@@ -562,6 +567,9 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     ...(definition.planQuestionReply ? { planQuestionReply: definition.planQuestionReply } : {}),
     ...(definition.prepareNativeInput ? { prepareNativeInput: definition.prepareNativeInput } : {}),
     ...(definition.promptPayloadConsumption ? { promptPayloadConsumption: definition.promptPayloadConsumption } : {}),
+    ...(definition.readInformation ? { readInformation: definition.readInformation } : {}),
+    ...(definition.readConfiguration ? { readConfiguration: definition.readConfiguration } : {}),
+    ...(definition.setConfiguration ? { setConfiguration: definition.setConfiguration } : {}),
     ...(definition.terminalHandshake ? { terminalHandshake: { ...definition.terminalHandshake } } : {}),
     ...(definition.terminalPromptRender ? { terminalPromptRender: { ...definition.terminalPromptRender } } : {}),
     ...(definition.inspectPromptExecution ? { inspectPromptExecution: definition.inspectPromptExecution } : {}),

@@ -1,3 +1,5 @@
+import { parseAgentInformationSnapshot } from './agent-information.js'
+import { parseAgentConfigurationSnapshot } from './agent-configuration.js'
 import { parseInputRestoration } from './agent-input-epoch.js'
 import { parseGoalApprovalAttribution } from './goal-approval.js'
 import { parseAgentMuxCreationOrigin } from './agent-creation-admission.js'
@@ -1103,6 +1105,12 @@ export function parseRpcAgentSession(value: unknown): ReturnType<typeof normaliz
   if (Object.hasOwn(source, 'hookBindingId') || Object.hasOwn(source, 'hookToken') || Object.hasOwn(source, 'nativeActor') || Object.hasOwn(source, 'initialInput') || Object.hasOwn(source, 'executorInvocation')) fail()
   try {
     const session = normalizeAgentSession(source)
+    if (source.nativeConfiguration !== undefined) session.nativeConfiguration = parseAgentConfigurationSnapshot(source.nativeConfiguration)
+    if (source.nativeInformation !== undefined) {
+      const information = parseAgentInformationSnapshot(source.nativeInformation)
+      if (session.nativeHandle?.kind !== 'provider' || information.nativeSessionId !== session.nativeHandle.sessionId) fail()
+      session.nativeInformation = information
+    }
     if (source.terminalFrontend !== undefined) session.terminalFrontend = parseTerminalFrontend(source.terminalFrontend, session.run)
     if (source.turnUsage !== undefined) {
       const usage = record(source.turnUsage)

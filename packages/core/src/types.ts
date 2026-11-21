@@ -1262,6 +1262,7 @@ export type AgentMuxAgentSession = {
   /** This original Run accepts typed conversation prompts through a managed protocol. */
   structuredPromptInput?: true
   nativeConfiguration?: import('./agent-configuration.js').AgentConfigurationSnapshot
+  nativeInformation?: import('./agent-information.js').AgentInformationSnapshot
   /** Latest live report from this Run's native Session binding. */
   contextWindowUsage?: AgentContextWindowUsage
   nativeHandle?: AgentNativeSessionHandle
@@ -1568,7 +1569,7 @@ export type AgentHookDeliveryObservation = {
  * PTY, process, replay, terminal snapshot, terminal output bytes or ephemeral Hook observation. */
 export type AgentMuxNativeCreationKeys = { keys: readonly string[]; coverage: 'complete' | 'partial' }
 
-export type AgentMuxStoredAgentSession = Omit<AgentMuxAgentSession, 'hookIngressObservation' | 'hookDeliveryObservation' | 'nativeHandlePersistence' | 'currentActivity' | 'mainSessionActivity' | 'terminalFrontend' | 'contextWindowUsage'> & {
+export type AgentMuxStoredAgentSession = Omit<AgentMuxAgentSession, 'hookIngressObservation' | 'hookDeliveryObservation' | 'nativeHandlePersistence' | 'currentActivity' | 'mainSessionActivity' | 'terminalFrontend' | 'contextWindowUsage' | 'nativeInformation'> & {
   /** Private original adopted machine keys, not Native liveness or a public role catalog. */
   nativeCreationKeys?: AgentMuxNativeCreationKeys
   /** Original creation input frozen before Start; only its key is public. */

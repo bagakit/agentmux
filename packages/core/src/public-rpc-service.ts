@@ -1,3 +1,4 @@
+import { parseAgentInformationInspect, parseAgentInformationInspection } from './agent-information.js'
 import { originalConnectorRuntime } from './original-connector-runtime.js'
 import { parseGoalApprovalSelection } from './goal-approval.js'
 import { parseAgentTakeoverCancellation, parseAgentTakeoverCancellationResult } from './agent-takeover-cancellation.js'
@@ -234,6 +235,7 @@ export type AgentMuxRpcCorePort = import('./agent-execution-coordinator.js').Age
     inspectTerminalControl?: AgentMuxClient['inspectTerminalControl']
     retireTerminalCreation?: AgentMuxClient['retireTerminalCreation']
     inspectTerminalCreation?: AgentMuxClient['inspectTerminalCreation']
+    inspectAgentInformation?: AgentMuxClient['inspectAgentInformation']
     inspectAgentConfiguration?: AgentMuxClient['inspectAgentConfiguration']
     setAgentConfiguration?: AgentMuxClient['setAgentConfiguration']
     inspectAgentPosture?: AgentMuxClient['inspectAgentPosture']
@@ -519,6 +521,7 @@ const NATIVE_FIELDS = {
   'agent.execution.watch': ['bindingId'],
   'agent.execution.rejoin': ['bindingId', 'recoverProject'],
   'terminal.input': ['target', 'operationId', 'ownerInstanceId', 'expectedByte', 'dataBase64'], 'terminal.interrupt': ['target', 'operationId', 'ownerInstanceId'], 'terminal.stop': ['target', 'operationId', 'ownerInstanceId'], 'terminal.operation.inspect': ['hostId', 'run', 'operationId', 'runtimeId'],
+  'agent.information.inspect': ['hostId', 'agentSessionId', 'expectedRun'],
   'agent.configuration.inspect': ['hostId', 'agentSessionId', 'expectedRun', 'operationId'],
   'agent.configuration.set': ['target', 'operationId', 'configId', 'value', 'expectedRevision'],
   'agent.posture.set': ['target', 'operationId', 'controlId', 'modeId', 'expectedControlDigest'], 'agent.posture.inspect': ['hostId', 'agentSessionId', 'expectedRun', 'operationId'],
@@ -3780,6 +3783,19 @@ export class AgentMuxRpcService {
         if ((verified.state === 'active' ? verified.session.hostId : verified.retirement.hostId) !== 'local') throw new AgentMuxError(
           'The recovery control returned another original Host.', 'CONTROL_PROTOCOL_ERROR')
         return verified as AgentMuxRpcResult<M>
+      }
+      case 'agent.information.inspect': {
+        const input = parseAgentInformationInspect(p), scopes = (await this.clients()).filter(scope => scope.hostId === input.hostId)
+        if (scopes.length !== 1) throw new AgentMuxError('The original information Host is unconfirmed.', 'CONTROL_UNAVAILABLE')
+        const scope = scopes[0]!, original = { ...input, hostId: 'local' }
+        const routed = this.ports.callOriginalCore || scope.client.forwardRpc
+        if (!routed && !scope.client.inspectAgentInformation) throw new AgentMuxError('The original information owner is unavailable.', 'CONTROL_UNAVAILABLE')
+        const reply = this.ports.callOriginalCore ? await this.ports.callOriginalCore(input.hostId, 'agent.information.inspect', original, await this.inputForwardContext(context))
+          : scope.client.forwardRpc ? await scope.client.forwardRpc('agent.information.inspect', original, await this.inputForwardContext(context))
+          : await scope.client.inspectAgentInformation!(original)
+        const value = parseAgentInformationInspection(reply, original)
+        result = parseAgentInformationInspection({ ...value, target: { ...value.target, hostId: input.hostId } }, input)
+        break
       }
       case 'agent.configuration.inspect': {
         const input = parseAgentConfigurationInspect(p), scopes = (await this.clients()).filter(scope => scope.hostId === input.hostId)

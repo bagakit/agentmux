@@ -1,3 +1,4 @@
+import { parseAgentInformationInspect, parseAgentInformationInspection } from './agent-information.js'
 import { parseAgentTakeoverCancellation, parseAgentTakeoverCancellationResult } from './agent-takeover-cancellation.js'
 import { parseRpcAgentSession, normalizeAgentInteractionRequest } from './agent-session-codec.js'
 import { agentInteractionRequestTarget } from './agent-interaction-state.js'
@@ -530,6 +531,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     if (Object.hasOwn(SPACE_CLOSE_METHODS, method)) { const selected = method as SpaceCloseMethod; return parseSpaceCloseResult(selected, value, parseSpaceCloseParams(selected, params)) as unknown as Record<string, unknown> }
     if (method === 'terminal.operation.inspect') return parseTerminalControlInspection(value, parseTerminalControlInspect(params)) as unknown as Record<string, unknown>
     if (method === 'terminal.input' || method === 'terminal.interrupt' || method === 'terminal.stop') return parseTerminalControlResult(value, parseTerminalControl(params, method === 'terminal.input' ? 'terminal-input' : method === 'terminal.interrupt' ? 'terminal-interrupt' : 'terminal-stop')) as unknown as Record<string, unknown>
+    if (method === 'agent.information.inspect') return parseAgentInformationInspection(value, parseAgentInformationInspect(params)) as unknown as Record<string, unknown>
     if (method === 'agent.configuration.inspect') return parseAgentConfigurationInspection(value, parseAgentConfigurationInspect(params)) as unknown as Record<string, unknown>
     if (method === 'agent.configuration.set') return parseAgentConfigurationReceipt(value, parseAgentConfigurationSet(params)) as unknown as Record<string, unknown>
     if (method === 'agent.posture.inspect') return parsePostureInspection(value, parsePostureInspect(params)) as unknown as Record<string, unknown>

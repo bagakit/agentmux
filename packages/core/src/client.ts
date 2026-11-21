@@ -15,6 +15,7 @@ import { parseRunControlActor, type RunControlContext } from './run-control-cont
 import { captureExecutorInvocation, readExecutorInvocation } from './agent-executor-invocation.js'
 import { readContinuityExecutor } from './agent-session-recovery/executor.js'
 import { RunControlOperations } from './run-control-operations.js'
+import { parseAgentInformationInspect, parseAgentInformationSnapshot, type AgentInformationInspect, type AgentInformationInspection, type AgentInformationSnapshot } from './agent-information.js'
 import { parseAgentConfigurationInspect, parseAgentConfigurationSet, parseAgentConfigurationSnapshot,
   type AgentConfigurationInspect, type AgentConfigurationInspection, type AgentConfigurationReceipt, type AgentConfigurationSnapshot } from './agent-configuration.js'
 import { parsePostureSet, parsePostureInspect, postureControlDigest, type PostureInspect, type PostureInspection, type PostureReceipt } from './agent-posture.js'
@@ -1290,7 +1291,8 @@ export class AgentMuxClient {
   private readonly historyObservationPool = new SessionHistoryObservationPool()
   private providerReadsDisposed = false
   private readonly contextWindows = new Map<string, AgentContextWindowUsage>()
-  private readonly nativeConfigurations = new Map<string, { run: AgentMuxRunRef; observedAt: number; snapshot: AgentConfigurationSnapshot }>()
+  private readonly nativeConfigurations = new Map<string, { run: AgentMuxRunRef; observedAt: number; snapshot: AgentConfigurationSnapshot; nativeSessionId?: string; acpBindingId?: string | undefined; actorId: string | undefined }>()
+  private readonly nativeInformation = new Map<string, { run: AgentMuxRunRef; snapshot: AgentInformationSnapshot; actorId: string | undefined }>()
   private readonly nativeIdentityCaptures = new Map<string, { controller: AbortController; run: AgentMuxRunRef }>()
   private readonly nativeIdentityPending: Array<() => void> = []
   private nativeIdentityActive = 0
@@ -1526,7 +1528,7 @@ export class AgentMuxClient {
             const previous = this.nativeConfigurations.get(agentSessionId)
             if (previous && sameRun(previous.run, session.run) &&
                 (previous.observedAt > observed.observedAt || previous.snapshot.revision === event.snapshot.revision)) return
-            this.nativeConfigurations.set(agentSessionId, { run: session.run, observedAt: observed.observedAt,
+            this.nativeConfigurations.set(agentSessionId, { run: session.run, observedAt: observed.observedAt, acpBindingId: evidence.acpBindingId, actorId: session.nativeActor?.actorId,
               snapshot: parseAgentConfigurationSnapshot(event.snapshot) })
             this.publishSession(session)
             return
@@ -2610,6 +2612,7 @@ export class AgentMuxClient {
     this.nativeCurrentActivities.clear()
     this.pendingLifecycleBindings.clear()
     await this.acp.dispose()
+    this.nativeInformation.clear()
     this.nativeConfigurations.clear()
     this.contextWindows.clear()
     this.publisher.dispose()
@@ -9623,6 +9626,63 @@ export class AgentMuxClient {
       control, controlDigest: control ? postureControlDigest(control) : null, currentMode: { status: 'unknown' } }
   }
 
+  /** Explicit, bounded observation of this one native source; ordinary status reads use the retained projection. */
+  async inspectAgentInformation(value: AgentInformationInspect, requestSignal?: AbortSignal): Promise<AgentInformationInspection> {
+    const input = parseAgentInformationInspect(value)
+    if (input.hostId !== 'local') throw new AgentMuxError('Use the original information Host.', 'INVALID_CONTROL_REQUEST')
+    const session = await this.registry.refresh(input.agentSessionId, input.expectedRun)
+    if (!sameRun(session.run, input.expectedRun)) throw new AgentMuxError('The original information Run changed.', 'STALE_AGENT_SESSION')
+    const target = { hostId: 'local', runtimeId: this.terminalCreationRuntimeIdentity().runtimeId,
+      agentSessionId: session.agentSessionId, expectedRun: session.run, providerId: session.providerId }
+    const provider = this.providers.get(session.providerId), handle = session.nativeHandle
+    const retained = this.nativeInformation.get(session.agentSessionId)
+    const previous = retained && sameRun(retained.run, session.run) && handle?.kind === 'provider' &&
+      retained.snapshot.nativeSessionId === handle.sessionId && retained.actorId === session.nativeActor?.actorId ? retained.snapshot : null
+    const configuration = this.nativeConfigurations.get(session.agentSessionId)
+    const oldConfiguration = configuration && sameRun(configuration.run, session.run) &&
+      (!configuration.nativeSessionId || configuration.nativeSessionId === handle?.sessionId) &&
+      (configuration.actorId === session.nativeActor?.actorId) ? configuration.snapshot : null
+    const kept = { kind: 'information' as const, target, snapshot: previous, configuration: oldConfiguration }
+    if (handle?.kind !== 'provider' || handle.providerId !== session.providerId) return { ...kept,
+      issue: { code: 'AGENT_INFORMATION_SOURCE_UNCONFIRMED', message: 'The original native session is unconfirmed. Existing Agent capabilities remain available.' } }
+    if (!provider.readInformation && !provider.readConfiguration) return { ...kept,
+      issue: { code: 'AGENT_INFORMATION_UNSUPPORTED', message: 'This Provider has no native session information reader.' } }
+    const run = await this.requireCurrentAgentRun(session)
+    if (run.state.type !== 'running' || run.pid === null) return { ...kept,
+      issue: { code: 'AGENT_INFORMATION_RUN_UNAVAILABLE', message: 'The original Run is not available for a fresh native information read.' } }
+    const signal = requestSignal ? AbortSignal.any([requestSignal, AbortSignal.timeout(5_000)]) : AbortSignal.timeout(5_000)
+    const context = { processId: run.pid, ...(session.nativeActor ? { nativeActor: session.nativeActor } : {}), nativeHandle: handle,
+      workspacePath: session.workspacePath, signal }
+    const [information, settings] = await Promise.allSettled([
+      provider.readInformation ? provider.readInformation(context, handle.sessionId).then(parseAgentInformationSnapshot) : Promise.resolve(null),
+      provider.readConfiguration ? provider.readConfiguration(context, handle.sessionId).then(value => value === null ? null : parseAgentConfigurationSnapshot(value)) : Promise.resolve(null)
+    ])
+    requestSignal?.throwIfAborted()
+    const current = await this.registry.refresh(session.agentSessionId, session.run)
+    const currentRun = await this.requireCurrentAgentRun(current)
+    if (!sameNativeHandle(current.nativeHandle, handle) || !isDeepStrictEqual(current.nativeActor, session.nativeActor) ||
+        currentRun.state.type !== 'running' || currentRun.pid !== run.pid) throw new AgentMuxError(
+      'The original native information source changed. Its Session and input are kept.', 'STALE_AGENT_SESSION')
+    let snapshot = previous, nextConfiguration = oldConfiguration
+    let issue: AgentInformationInspection['issue']
+    if (information.status === 'fulfilled' && information.value !== null) {
+      if (information.value.nativeSessionId !== handle.sessionId) throw new AgentMuxError('Native information belongs to another Session.', 'CONTROL_PROTOCOL_ERROR')
+      const latest = this.nativeInformation.get(session.agentSessionId)
+      snapshot = latest && sameRun(latest.run, session.run) && latest.snapshot.nativeSessionId === handle.sessionId && latest.actorId === session.nativeActor?.actorId && latest.snapshot.observedAt > information.value.observedAt ? latest.snapshot : information.value
+      this.nativeInformation.set(session.agentSessionId, { run: session.run, snapshot, actorId: session.nativeActor?.actorId })
+    } else if (information.status === 'rejected') issue = { code: 'AGENT_INFORMATION_READ_UNAVAILABLE', message: 'Native information could not be refreshed. Any retained sample keeps its original observation time.' }
+    if (this.nativeConfigurations.get(session.agentSessionId) !== configuration) {
+      const latest = this.nativeConfigurations.get(session.agentSessionId)
+      nextConfiguration = latest && sameRun(latest.run, session.run) && (!latest.nativeSessionId || latest.nativeSessionId === handle.sessionId) &&
+        (latest.actorId === session.nativeActor?.actorId) ? latest.snapshot : null
+    } else if (settings.status === 'fulfilled' && settings.value !== null) {
+      nextConfiguration = settings.value
+      this.nativeConfigurations.set(session.agentSessionId, { run: session.run, nativeSessionId: handle.sessionId, actorId: session.nativeActor?.actorId, observedAt: Date.now(), snapshot: nextConfiguration })
+    } else if (settings.status === 'rejected') issue ??= { code: 'AGENT_CONFIGURATION_READ_UNAVAILABLE', message: 'The original native configuration could not be refreshed. Existing Agent capabilities remain available.' }
+    this.publishSession(current)
+    return { kind: 'information', target, snapshot, configuration: nextConfiguration, ...(issue ? { issue } : {}) }
+  }
+
   async inspectAgentConfiguration(value: AgentConfigurationInspect): Promise<AgentConfigurationInspection> {
     const input = parseAgentConfigurationInspect(value)
     if (input.hostId !== 'local') throw new AgentMuxError('Use the original configuration Host.', 'INVALID_CONTROL_REQUEST')
@@ -9632,16 +9692,23 @@ export class AgentMuxClient {
       return { kind: 'operation', agentSessionId: input.agentSessionId, operationId: input.operationId, operation }
     }
     const session = await this.registry.refresh(input.agentSessionId, input.expectedRun)
+    if (!sameRun(session.run, input.expectedRun)) throw new AgentMuxError('The original configuration Run changed.', 'STALE_AGENT_SESSION')
     const runtime = this.terminalCreationRuntimeIdentity()
     const target = { hostId: 'local', runtimeId: runtime.runtimeId, agentSessionId: session.agentSessionId,
       expectedRun: session.run, providerId: session.providerId }
-    const actor = session.nativeActor, managed = this.providers.get(session.providerId).managedAcp
-    if (!actor || managed?.protocolId !== actor.protocolId || !managed.readConfiguration ||
+    const actor = session.nativeActor, provider = this.providers.get(session.providerId)
+    if (!provider.readConfiguration ||
         session.nativeHandle?.kind !== 'provider' || session.nativeHandle.providerId !== session.providerId) return { kind: 'configuration', target, snapshot: null }
     const run = await this.requireCurrentAgentRun(session)
     if (run.state.type !== 'running' || run.pid === null) return { kind: 'configuration', target, snapshot: null }
-    const snapshot = await managed.readConfiguration({ nativeActor: actor, processId: run.pid, workspacePath: session.workspacePath,
+    const snapshot = await provider.readConfiguration({ ...(actor ? { nativeActor: actor } : {}), nativeHandle: session.nativeHandle, processId: run.pid, workspacePath: session.workspacePath,
       signal: AbortSignal.timeout(1_500) }, session.nativeHandle.sessionId)
+    const current = await this.registry.refresh(session.agentSessionId, session.run)
+    if (!sameNativeHandle(current.nativeHandle, session.nativeHandle) || !isDeepStrictEqual(current.nativeActor, actor)) throw new AgentMuxError('The original configuration source changed.', 'STALE_AGENT_SESSION')
+    if (snapshot) {
+      this.nativeConfigurations.set(session.agentSessionId, { run: session.run, nativeSessionId: session.nativeHandle.sessionId, actorId: actor?.actorId, observedAt: Date.now(), snapshot: parseAgentConfigurationSnapshot(snapshot) })
+      this.publishSession(current)
+    }
     return { kind: 'configuration', target, snapshot: snapshot === null ? null : parseAgentConfigurationSnapshot(snapshot) }
   }
 
@@ -9654,9 +9721,8 @@ export class AgentMuxClient {
     if (input.target.hostId !== 'local' || runtime.runtimeId !== input.target.runtimeId) throw new AgentMuxError(
       'The original configuration Runtime changed.', 'TERMINAL_RUNTIME_MISMATCH')
     const session = await this.registry.refresh(input.target.agentSessionId, input.target.expectedRun)
-    const provider = this.providers.get(session.providerId), nativeActor = session.nativeActor, managed = provider.managedAcp
-    if (session.providerId !== input.target.providerId || !nativeActor || managed?.protocolId !== nativeActor.protocolId ||
-        !managed.setConfiguration || session.nativeHandle?.kind !== 'provider' || session.nativeHandle.providerId !== provider.id) throw new AgentMuxError(
+    const provider = this.providers.get(session.providerId), nativeActor = session.nativeActor
+    if (session.providerId !== input.target.providerId || !provider.setConfiguration || session.nativeHandle?.kind !== 'provider' || session.nativeHandle.providerId !== provider.id) throw new AgentMuxError(
       'The original Session has no confirmed native configuration control.', 'AGENT_CONFIGURATION_UNAVAILABLE')
     const run = await this.requireCurrentAgentRun(session)
     if (run.state.type !== 'running' || run.pid === null) throw new AgentMuxError(
@@ -9675,11 +9741,14 @@ export class AgentMuxClient {
     if (!claim.dispatched) return claim.receipt
     try {
       await assertCurrent()
-      const reply = await managed.setConfiguration({ processId: run.pid, nativeActor, workspacePath: session.workspacePath, signal }, session.nativeHandle.sessionId,
+      const reply = await provider.setConfiguration({ processId: run.pid, ...(nativeActor ? { nativeActor } : {}), nativeHandle: session.nativeHandle, workspacePath: session.workspacePath, signal }, session.nativeHandle.sessionId,
         { configId: input.configId, value: input.value, expectedRevision: input.expectedRevision, requestId: claim.receipt.nativeOperationId })
       const snapshot = parseAgentConfigurationSnapshot(reply)
       if (snapshot.options.find(option => option.id === input.configId)?.currentValue !== input.value) throw new AgentMuxError(
         'The native acknowledgement did not confirm the original configuration value.', 'CONTROL_PROTOCOL_ERROR')
+      await assertCurrent()
+      this.nativeConfigurations.set(session.agentSessionId, { run: session.run, nativeSessionId: session.nativeHandle.sessionId, actorId: nativeActor?.actorId, observedAt: Date.now(), snapshot })
+      this.publishSession(this.requireAgentSession(session.agentSessionId))
       return await operations.settle(input, actor, claim.receipt, { outcome: 'applied', acknowledgement: snapshot })
     } catch (error) {
       const notApplied = error instanceof AgentMuxError && error.controlFailure?.disposition === 'not_applied'
@@ -10035,6 +10104,7 @@ export class AgentMuxClient {
     if (stored) {
       this.recovery.wake(agentSessionId)
       this.contextWindows.delete(session.run.runId)
+      if (this.nativeInformation.get(agentSessionId)?.run.runId === session.run.runId) this.nativeInformation.delete(agentSessionId)
       if (this.nativeConfigurations.get(agentSessionId)?.run.runId === session.run.runId) this.nativeConfigurations.delete(agentSessionId)
       this.runPids.delete(session.run.runId)
       if (!this.registry.has(agentSessionId) || sameRun(this.registry.get(agentSessionId).run, session.run)) {
@@ -10258,7 +10328,12 @@ export class AgentMuxClient {
     }
     const configuration = this.nativeConfigurations.get(session.agentSessionId)
     if (configuration && sameRun(configuration.run, session.run) && !this.endedRuns.has(session.run.runId) &&
-        this.acp.hasBinding(session.agentSessionId, session.run)) projected.nativeConfiguration = structuredClone(configuration.snapshot)
+        (!configuration.nativeSessionId || configuration.nativeSessionId === session.nativeHandle?.sessionId) &&
+        (configuration.actorId === session.nativeActor?.actorId) &&
+        (!configuration.acpBindingId || this.acp.hasBinding(session.agentSessionId, session.run))) projected.nativeConfiguration = structuredClone(configuration.snapshot)
+    const information = this.nativeInformation.get(session.agentSessionId)
+    if (information && sameRun(information.run, session.run) && !this.endedRuns.has(session.run.runId) &&
+        information.snapshot.nativeSessionId === session.nativeHandle?.sessionId && information.actorId === session.nativeActor?.actorId) projected.nativeInformation = structuredClone(information.snapshot)
     const watch = this.nativeStatusWatches.get(session.agentSessionId)
     if (projected.semanticStatus?.source === 'native-transcript' && this.providers.get(session.providerId).observeSessionStatus &&
         (!watch || watch.key !== JSON.stringify([session.run.runId, session.nativeHandle]) || watch.unconfirmed)) {

@@ -81,6 +81,16 @@ function createAntigravityProvider(defineAgentProvider: ProviderFactory): AgentP
           ...(origin ? { resumeSessionId: origin.nativeHandle.sessionId } : {}) })],
         env: { ...plan.env, ELECTRON_RUN_AS_NODE: '1', [ACP_ACTOR_TOKEN]: actor.token, [ACP_ACTOR_ID]: actor.actorId, [ACP_ACTOR_LIFECYCLE]: lifecycleOperationId } } }
     },
+    async readConfiguration({ nativeActor, processId, signal }, nativeSessionId) {
+      if (nativeActor?.protocolId !== ANTIGRAVITY_ACP_ACTOR_PROTOCOL) return null
+      const { actorId, lifecycleOperationId, token } = nativeActor
+      return await antigravityAcpActor.readConfiguration({ actorId, lifecycleOperationId, processId }, token, nativeSessionId, signal)
+    },
+    async setConfiguration({ nativeActor, processId, signal }, nativeSessionId, request) {
+      if (nativeActor?.protocolId !== ANTIGRAVITY_ACP_ACTOR_PROTOCOL) throw new AgentMuxError('The original native configuration actor is unavailable.', 'AGENT_CONFIGURATION_UNAVAILABLE')
+      const { actorId, lifecycleOperationId, token } = nativeActor
+      return await antigravityAcpActor.setConfiguration({ actorId, lifecycleOperationId, processId }, token, nativeSessionId, request, signal)
+    },
     managedAcp: {
       protocolId: ANTIGRAVITY_ACP_ACTOR_PROTOCOL,
       launchOption: ACP_LAUNCH_OPTION,
@@ -106,14 +116,6 @@ function createAntigravityProvider(defineAgentProvider: ProviderFactory): AgentP
             return await antigravityAcpActor.submitPrompt(identity, token, { sessionId: plan.threadId, requestId, prompt, ...(images ? { images } : {}) }, signal)
           }
         }
-      },
-      async readConfiguration({ nativeActor, processId, signal }, nativeSessionId) {
-        const { actorId, lifecycleOperationId, token } = nativeActor
-        return await antigravityAcpActor.readConfiguration({ actorId, lifecycleOperationId, processId }, token, nativeSessionId, signal)
-      },
-      async setConfiguration({ nativeActor, processId, signal }, nativeSessionId, request) {
-        const { actorId, lifecycleOperationId, token } = nativeActor
-        return await antigravityAcpActor.setConfiguration({ actorId, lifecycleOperationId, processId }, token, nativeSessionId, request, signal)
       },
       async interrupt({ nativeActor, processId, signal }, nativeSessionId, expectedRequestId) {
         const { actorId, lifecycleOperationId, token } = nativeActor
