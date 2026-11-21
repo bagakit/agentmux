@@ -105,9 +105,9 @@ it('cold actual Host/Main delivers original Agent and Terminal attachments befor
   await entering.promise
   expect(host.client.agentSessions()).toEqual([]) // Strong cold-load oracle: registry.load has not run.
   const kernel = (host.client as unknown as { kernel: {
-    input: (...args: unknown[]) => Promise<unknown>; start: (...args: unknown[]) => Promise<unknown>; hasAttachment(runId: string): boolean
+    input: (...args: unknown[]) => Promise<unknown>; startPrepared: (...args: unknown[]) => Promise<unknown>; hasAttachment(runId: string): boolean
   } }).kernel
-  const input = vi.spyOn(kernel, 'input'), start = vi.spyOn(kernel, 'start')
+  const input = vi.spyOn(kernel, 'input'), start = vi.spyOn(kernel, 'startPrepared')
   const events: AgentMuxClientEvent[] = []
   host.client.onEvent(event => events.push(event))
   const sessionObservation = deferred(), connect = host.client.connect.bind(host.client)
@@ -184,9 +184,10 @@ it('cold actual Host/Main delivers original Agent and Terminal attachments befor
         const live = () => delivered.slice(from).flatMap(event => event.type === 'core' && event.event.type === 'terminal-output' &&
           event.event.run.runId === target.run.runId ? [event.event] : [])
         await writeFile(target.file, marker)
-        const output = await until(live, values => values.map(event => event.data).join('').includes(marker), 'original Main live output')
+        const output = await until(live, values => Buffer.concat(values.map(event => event.dataBytes)).toString('utf8').includes(marker), 'original Main live output')
         let cursor = value.session.latestOutputBytes
         for (const event of output) {
+          expect(event).not.toHaveProperty('data')
           const range = event.evidence.outputByteRange
           expect(range.startByte).toBe(cursor)
           expect(range.endByte - range.startByte).toBe(event.dataBytes.length)
@@ -289,7 +290,7 @@ it('cold actual Main explicitly resumes the original native target without waiti
     if (method === 'runtime.events') throw new AgentMuxError('Private general observation remains pending.', 'CONTROL_UNAVAILABLE')
     return await subscribe(method, ...args)
   })
-  const starts = vi.spyOn((host.client as any).kernel, 'start')
+  const starts = vi.spyOn((host.client as any).kernel, 'startPrepared')
   const controller = new RuntimeController(store, connectDesktopAgentMuxHost); cleanup.push(() => controller.dispose())
   const config: AppConfig = { ...structuredClone(DEFAULT_CONFIG), executors: { ...structuredClone(DEFAULT_CONFIG.executors),
     codex: { ...structuredClone(DEFAULT_CONFIG.executors.codex!), command, args: [], env, injectAgentMuxGuide: false } },
@@ -351,8 +352,8 @@ it('cold actual Host/Main creates Terminal and Agent Runs during unrelated pendi
   const host = await startAgentMuxHost({ store, providers, socketPath: defaultAgentMuxControlSocketPath() }); cleanup.push(host.dispose)
   await entered.promise
   expect(host.client.agentSessions()).toEqual([])
-  const kernel = (host.client as unknown as { kernel: { input: (...args: unknown[]) => Promise<unknown>; start: (...args: unknown[]) => Promise<unknown> } }).kernel
-  const input = vi.spyOn(kernel, 'input'), start = vi.spyOn(kernel, 'start')
+  const kernel = (host.client as unknown as { kernel: { input: (...args: unknown[]) => Promise<unknown>; startPrepared: (...args: unknown[]) => Promise<unknown> } }).kernel
+  const input = vi.spyOn(kernel, 'input'), start = vi.spyOn(kernel, 'startPrepared')
   const fullConnect = deferred(), connect = host.client.connect.bind(host.client)
   const observation = vi.spyOn(host.client, 'connect').mockImplementation(() => { fullConnect.resolve(); return connect() })
   const controller = new RuntimeController(store, connectDesktopAgentMuxHost); cleanup.push(() => controller.dispose())
@@ -413,7 +414,8 @@ it('cold actual Host/Main creates Terminal and Agent Runs during unrelated pendi
         const from = delivered.length, marker = `private-${phase}-${target.id}-later`
         await writeFile(target.file, marker)
         const output = await until(() => delivered.slice(from).flatMap(event => event.type === 'core' && event.event.type === 'terminal-output' &&
-          event.event.run.runId === target.run.runId ? [event.event] : []), output => output.map(event => event.data).join('').includes(marker), 'new Main ordered output')
+          event.event.run.runId === target.run.runId ? [event.event] : []),
+          output => Buffer.concat(output.map(event => event.dataBytes)).toString('utf8').includes(marker), 'new Main ordered output')
         let cursor = attached.session.latestOutputBytes
         for (const event of output) { expect(event.evidence.outputByteRange.startByte).toBe(cursor)
           expect(event.evidence.outputByteRange.endByte - cursor).toBe(event.dataBytes.length); cursor = event.evidence.outputByteRange.endByte }

@@ -59,8 +59,12 @@ function surfaceState(current: SessionSnapshot = session, regionId = origin.regi
     activeWorkspaceId: origin.workspaceId, config: null, closingWorkbenchViews: {}, regionCaretFocus: null })
 }
 function replay(data: string): SessionAttachResult {
-  return { attachmentId: 'observed-attachment', session, currentSize: { cols: 80, rows: 24 }, gap: null,
-    replay: [{ type: 'data', runId: session.control.run.runId, startByte: 0, endByte: data.length, data, dataBytes: new TextEncoder().encode(data) }] }
+  const dataBytes = new TextEncoder().encode(data)
+  return {
+    attachmentId: 'observed-attachment', session: { ...session, latestOutputBytes: dataBytes.length },
+    currentSize: { cols: 80, rows: 24 }, gap: null, terminal: { type: 'unknown', reason: 'origin_unknown' }, resizeRevision: 0,
+    replay: [{ type: 'data', runId: session.control.run.runId, startByte: 0, endByte: dataBytes.length, data, dataBytes }]
+  }
 }
 async function render(current: SessionSnapshot = session, props: { visible?: boolean; readOnly?: boolean; regionId?: string } = {}) {
   await act(async () => root.render(createElement(TerminalView, { session: current, themeId: 'graphite',
@@ -107,7 +111,7 @@ it('actual Terminal replay and 64 live batches parse nonempty bytes without send
       for (let i=0;i<64;i++) {
         const text=`batch-${String(i).padStart(2,'0')}\r\n`
         fixture.receive!({type:'core',hostId:session.hostId,event:{type:'terminal-output',agentSessionId:session.id,
-          run:session.control.run,data:text,dataBytes:new TextEncoder().encode(text),evidence:{source:'terminal-output',observedAt:1,
+          run:session.control.run,dataBytes:new TextEncoder().encode(text),evidence:{source:'terminal-output',observedAt:1,
             run:session.control.run,outputByteRange:{startByte:firstByte+i*10,endByte:firstByte+(i+1)*10}}}})
       }
       await vi.waitFor(() => expect(terminal.buffer.active.getLine(64)?.translateToString(true)).toBe('batch-63'))

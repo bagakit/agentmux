@@ -17,7 +17,7 @@ function control(runId = 'target-run', hostId = 'target-host'): SessionControl {
 }
 function output(startByte = 0, runId = 'target-run', hostId = 'target-host'): RuntimeEvent {
   const dataBytes = new TextEncoder().encode(`bytes-${startByte}`)
-  return { type: 'core', hostId, event: { type: 'terminal-output', run: { runId }, data: `bytes-${startByte}`, dataBytes,
+  return { type: 'core', hostId, event: { type: 'terminal-output', run: { runId }, dataBytes,
     evidence: { source: 'terminal-output', observedAt: 1, run: { runId },
       outputByteRange: { startByte, endByte: startByte + dataBytes.length } } } }
 }
@@ -44,7 +44,7 @@ beforeEach(async () => {
     releases.push(release)
     return release
   })
-  const preload = { sessions: { onEvent: subscribe }, control: {}, hosts: {} } as unknown as AgentMuxPreloadApi
+  const preload = { sessions: { onEvent: subscribe }, control: {}, hosts: {}, browser: {} } as unknown as AgentMuxPreloadApi
   window.agentmux = preload
   api = (await import('../src/renderer/src/lib/api')).api
 })
@@ -224,14 +224,19 @@ it('the actual Store semantic subscription consumes status but receives no termi
     browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
   // These native methods isolate unrelated startup services; real API routing, Store.initialize and
   // Store.applyEvent execute. The raw source callback is still the exact actual API owner above.
-  Object.assign(api, { config: { get: async () => config }, providers: { list: async () => [] }, demands: { list: async () => [] },
-    browser: { onEvent: () => () => {} }, files: { onInvalidated: () => () => {} },
-    ui: { requestStorageFlush: async () => {} } })
-  api.sessions.snapshot = async () => ({ sessions: [session], timelines: {}, recoveryCandidates: [] })
+  const observeNothing = () => () => {}
+  Object.assign(api, { config: { get: async () => config }, providers: { list: async () => ({ catalog: [], warnings: [] }) },
+    demands: { list: async () => [], onChanged: observeNothing, onObservationIssue: observeNothing },
+    browser: { onEvent: observeNothing }, files: { onInvalidated: observeNothing },
+    notesStorage: { onChange: observeNothing, inspect: async () => { throw new Error('No notes directory in this fixture') } },
+    ui: { requestStorageFlush: async () => {}, spatialLinksReady: async () => {}, onEnvironmentWarning: observeNothing,
+      onAppIconIssue: observeNothing, onSpatialLinkIssue: observeNothing } })
+  api.sessions.endpointWarnings = async () => []
   window.agentmux!.control.onRequest = () => () => {}
   window.agentmux!.control.onCancellation = () => () => {}
   const { useAppStore } = await import('../src/renderer/src/store')
   const initial = useAppStore.getState()
+  useAppStore.setState({ sessions: [session] })
   const dispose = await initial.initialize()
   disposers.push(dispose)
   try {

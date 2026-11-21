@@ -2883,6 +2883,30 @@ describe('RuntimeController configuration transaction', () => {
     expect(client.writeTerminal.mock.calls[0]?.[1].expectedByte).toBe(4)
   })
 
+  it('copies only original terminal bytes to the Desktop event channel', async () => {
+    const controller = await configuredController()
+    const renderer = webContentsFixture()
+    const detach = controller.attach(renderer)
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const run = { runId: 'run-1' }
+    const chunk = {
+      type: 'terminal-output', run, data: '终端',
+      dataBytes: new TextEncoder().encode('终端'),
+      evidence: { source: 'terminal-output', observedAt: _reshape_fixtureEpoch(0, 0, 1),
+        outputByteRange: { startByte: 10, endByte: 16 } }
+    } satisfies AgentMuxClientEvent
+    try {
+      client.eventListener?.(chunk)
+      const publication = vi.mocked(renderer.send).mock.calls.at(-1)?.[1]
+      expect(publication).toEqual({ type: 'core', hostId: 'local', event: {
+        type: 'terminal-output', run, dataBytes: chunk.dataBytes, evidence: chunk.evidence
+      } })
+      expect(chunk.data).toBe('终端')
+    } finally {
+      detach()
+    }
+  })
+
   it('answers split Codex color queries only after Core publishes the ready Agent Session', async () => {
     const controller = await configuredController()
     controller.setTerminalViewColors({ foreground: '#ffffff', background: '#000000' })

@@ -137,7 +137,7 @@ vi.mock('@agentmux/client-ui/terminal/live-output', async original => {
 
 function output(startByte: number, data: string): RuntimeEvent {
   const dataBytes = new TextEncoder().encode(data)
-  return {type:'core',hostId:session.hostId,event:{type:'terminal-output',agentSessionId:session.id,run:session.control.run,data,dataBytes,
+  return {type:'core',hostId:session.hostId,event:{type:'terminal-output',agentSessionId:session.id,run:session.control.run,dataBytes,
     evidence:{source:'terminal-output',observedAt:1,outputByteRange:{startByte,endByte:startByte+dataBytes.byteLength}}}}
 }
 function contents(terminal: BrowserTerminal) {
@@ -157,6 +157,25 @@ function holdWrite(terminal: BrowserTerminal, marker: string) {
   releases.push(()=>{release();spy.mockRestore()})
   return {started,release:()=>release()}
 }
+
+it('renders split original UTF-8 from byte-only Desktop events', async () => {
+  const terminal = await ready(replay(''))
+  const bytes = new TextEncoder().encode('前景终端')
+  const deliver = (startByte: number, endByte: number) => receive({
+    type: 'core', hostId: session.hostId, event: {
+      type: 'terminal-output', run: session.control.run, dataBytes: bytes.subarray(startByte, endByte),
+      evidence: { source: 'terminal-output', observedAt: 1, outputByteRange: { startByte, endByte } }
+    }
+  })
+  await act(async () => {
+    deliver(0, 2)
+    await vi.waitFor(() => expect(fixture.writes.some(write => write.length === 2)).toBe(true))
+    deliver(2, bytes.length)
+    await vi.waitFor(() => expect(contents(terminal)).toContain('前景终端'))
+    terminal.input('ordinary input', true)
+  })
+  expect(write.mock.calls.map(([, data, source]) => [data, source])).toEqual([['ordinary input', 'user']])
+})
 
 it.each([128,256])('admits %i real held-parser items with linear boundary work and preserves exact output and healthy input', async count => {
   const terminal = await ready(replay(repaint))
