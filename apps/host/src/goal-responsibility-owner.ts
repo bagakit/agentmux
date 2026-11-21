@@ -4,6 +4,7 @@ import { demandExecutionReferences, demandHandoffDestinations, latestDemandProgr
 import type { GoalDelegationAuthority, GoalDelegationResult } from '@agentmux/core/goal-delegation'
 import { goalResponsibilityBasis, observeGoalExecution, type GoalExecutionFacts, type GoalResponsibilityObservation,
   type GoalSupervisorObservation } from '@agentmux/core/goal-responsibility'
+import { goalPlanAttemptState, isClosedGoalPlanAttempt } from '@agentmux/demand/goal-plan'
 import { goalSupervisorHost, isGoalSupervisor } from './goal-supervisor-identity.js'
 
 export interface GoalResponsibilityRuntime {
@@ -99,6 +100,7 @@ export class GoalResponsibilityOwner {
       if (this.disposed) return
       const original = this.observations.get(goalId)
       if (original) this.remember(goalId, { ...original, executions: original.executions.map(row => {
+        if (row.phase === 'closed') return row
         const { nextCheckAt: _deadline, ...retained } = row
         return { ...retained, phase: 'unknown', alert: 'unknown', reason: 'Reading this original responsibility failed: ' + describe(error) }
       }) })
@@ -140,6 +142,7 @@ export class GoalResponsibilityOwner {
     const starts = new Map((work.startObservations ?? []).map(item => [item.operationId, item]))
     const delegations = new Map((goal.delegations ?? []).map(item => [item.operationId, item]))
     const observations = new Map((work.observations ?? []).map(item => [item.operationId, item]))
+    const planNodes = new Map(work.planState?.nodes.map(node => [node.id, node]))
     const states = new Map<string, Promise<AgentMuxAgentRuntimeStatus>>()
     const status = (host: string, session: string) => {
       const id = key(host, session), prior = states.get(id)
@@ -174,8 +177,12 @@ export class GoalResponsibilityOwner {
         fact.inputConfirmed = Boolean(saved?.linkedAt && observed?.communication && observed.communication.source.delivery.state === 'delivered')
         if (observed?.workerRun) fact.originalRun = observed.workerRun
         fact.report = Boolean(saved?.report || observed?.recoverableReport); fact.collected = Boolean(saved?.collection)
+        const node = saved?.planNodeId ? planNodes.get(saved.planNodeId) : undefined
+        const ticketState = goalPlanAttemptState(node, execution.operationId)
+        if (ticketState !== undefined) fact.ticketState = ticketState
         if (observed?.unknown) fact.unknown = observed.unknown
       }
+      if (isClosedGoalPlanAttempt(fact.ticketState)) return fact
       if ('target' in execution) fact.unknown = 'Read this original execution using its current Source access. Its last input receipt and Agent remain retained.'
       else try { fact.status = await status(execution.hostId, execution.agentSessionId) }
       catch (error) { fact.unknown = [fact.unknown, describe(error)].filter(Boolean).join(' ') }
@@ -185,7 +192,7 @@ export class GoalResponsibilityOwner {
     await supervisorRead
     const unresolved = new Map<string, number>()
     const runKey = (fact: GoalExecutionFacts) => 'target' in fact.execution ? JSON.stringify(['runtime', fact.execution.target.execution.runtimeId, fact.execution.target.execution.agentSessionId, fact.execution.runId]) : JSON.stringify([fact.execution.hostId, fact.execution.agentSessionId, fact.execution.runId])
-    for (const fact of facts) if (fact.inputConfirmed && !fact.collected && !fact.report) unresolved.set(runKey(fact), (unresolved.get(runKey(fact)) ?? 0) + 1)
+    for (const fact of facts) if (fact.inputConfirmed && !fact.collected && !fact.report && !isClosedGoalPlanAttempt(fact.ticketState)) unresolved.set(runKey(fact), (unresolved.get(runKey(fact)) ?? 0) + 1)
     const progress = latestDemandProgress(goal), indexed = { progress, handoffs: demandHandoffDestinations(goal, progress) }
     const executions = facts.map(fact => observeGoalExecution(goal, fact, now, (unresolved.get(runKey(fact)) ?? 0) > 1, indexed))
     const result = { scope: demandResponsibilityScope(goal), observedAt: now, supervisor, executions }

@@ -161,6 +161,7 @@ export function demandResponsibilityScope(goal: Pick<Demand, 'id' | 'status' | '
   const grounding = currentGoalGrounding(goal)
   return JSON.stringify({ id: goal.id, status: goal.status, supervisor: goal.supervisorSessionId,
     alignment: goal.alignment?.revision ?? null, confirmedAt: goal.alignment?.confirmedAt ?? null, grounding: grounding?.submissionId ?? null, acceptedAt: grounding?.acceptedAt ?? null,
+    plan: goal.plan ? [goal.plan.revision, goal.plan.reviews.at(-1)?.operationId ?? null] : null,
     starts: (goal.dispatches ?? []).filter(runBoundDemandDispatch).filter(item => item.execution === 'finite').map(item => qualifiedDemandDispatch(item)
       ? [item.operationId, item.target, item.runId, item.stage, item.receipt ?? null]
       : [item.operationId, item.hostId, item.agentSessionId, item.runId, item.stage, item.receipt ?? null]),

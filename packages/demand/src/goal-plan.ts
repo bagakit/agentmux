@@ -440,6 +440,20 @@ export type GoalPlanStateAttempt = { delegationOperationId: string; reported: bo
 export type GoalPlanStateNode = { id: string; state: GoalPlanNodeState; column: number; attempts: number; staleCriteria: string[]; unknown: GoalPlanUnknownReason[]; attempt: GoalPlanStateAttempt | null; claimToken?: string }
 /** The read-only form of the derivation that the Goal owner returns with its plan. */
 export type GoalPlanState = { revision: number; done: number; total: number; next: string[]; nodes: GoalPlanStateNode[] }
+
+export type GoalPlanAttemptState = GoalPlanNodeState | 'previous'
+
+/** The owner projection decides whether an attempt still carries this Ticket's work. */
+export function goalPlanAttemptState(node: GoalPlanStateNode | undefined, operationId: string): GoalPlanAttemptState | undefined {
+  if (!node) return undefined
+  if (node.state === 'cancelled') return 'cancelled'
+  return node.attempt?.delegationOperationId === operationId ? node.state : 'previous'
+}
+
+export function isClosedGoalPlanAttempt(state: GoalPlanAttemptState | undefined): state is 'done' | 'cancelled' | 'previous' {
+  return state === 'done' || state === 'cancelled' || state === 'previous'
+}
+
 export function goalPlanState(projection: GoalPlanProjection): GoalPlanState {
   return { revision: projection.revision, done: projection.done, total: projection.total, next: projection.next,
     nodes: projection.nodes.map(item => ({ id: item.node.id, state: item.state, column: item.column, attempts: item.attempts, staleCriteria: item.staleCriteria, unknown: item.unknown,

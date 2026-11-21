@@ -2,7 +2,9 @@ import { createHash } from 'node:crypto'
 import { agentPromptCondition, decideFutureProgress, type AgentMuxClientEvent } from '@agentmux/core'
 import type { Demand, DemandStore, DemandStoreChanges, DemandStoreSnapshot } from '@agentmux/demand'
 import { delegationWorkerHostId, type DemandDelegation, type DemandDelegationAttention } from '@agentmux/demand/delegations'
+import { goalPlanAttemptState, isClosedGoalPlanAttempt } from '@agentmux/demand/goal-plan'
 import type { GoalDelegationOwner } from './goal-delegation-owner.js'
+import { hostGoalPlan } from './goal-projection.js'
 import type { GoalRuntimePort } from './goal-runtime.js'
 
 export type GoalAttentionObservation = { state: 'prepared' | 'confirmed' | 'unknown'; reason: string }
@@ -11,6 +13,20 @@ type Runtime = Pick<GoalRuntimePort, 'agentCreation' | 'observeCoreEvents' | 'ob
 type Reference = { goalId: string; operationId: string }
 const key = (hostId: string, id: string) => JSON.stringify([hostId, id])
 const describe = (error: unknown) => error instanceof Error ? error.message : String(error)
+
+function pendingAttention(goal: Demand | null | undefined, operationId?: string): Map<string, DemandDelegation> {
+  if (!goal || goal.status === 'done' || goal.status === 'cancelled') return new Map()
+  const pending = (goal.delegations ?? []).filter(delegation => !delegation.collection && (operationId === undefined || delegation.operationId === operationId))
+  const { planState } = pending.some(delegation => delegation.planNodeId) ? hostGoalPlan(goal) : {}
+  const nodes = new Map(planState?.nodes.map(node => [node.id, node]))
+  const result = new Map<string, DemandDelegation>()
+  for (const delegation of pending) {
+    const node = delegation.planNodeId ? nodes.get(delegation.planNodeId) : undefined
+    const state = goalPlanAttemptState(node, delegation.operationId)
+    if (!isClosedGoalPlanAttempt(state) && state !== 'changes') result.set(delegation.operationId, delegation)
+  }
+  return result
+}
 
 /** Original business references + exact Runtime events, with no timer, queue or new Agent. */
 export class GoalDelegationAttentionOwner {
@@ -58,11 +74,11 @@ export class GoalDelegationAttentionOwner {
     for (const [goalId, goal] of records) {
       const previous = this.indexed.get(goalId)
       previous?.remove(); this.indexed.delete(goalId)
-      const current = new Map((goal?.delegations ?? []).map(delegation => [delegation.operationId, delegation]))
+      const current = pendingAttention(goal)
       for (const operationId of previous?.operations ?? []) {
         const scope = this.scopes.get(key(goalId, operationId)), delegation = current.get(operationId)
-        if (scope && (!delegation || delegation.collection || goal?.supervisorSessionId !== scope.supervisor))
-          scope.controller.abort(new Error('The original Goal responsibility was collected or handed off before reminder admission.'))
+        if (scope && (!delegation || goal?.supervisorSessionId !== scope.supervisor))
+          scope.controller.abort(new Error('The original report no longer needs a collection reminder from this Supervisor.'))
       }
       if (!goal) { this.epochs.delete(goalId); continue }
       const removals: Array<() => void> = []
@@ -71,10 +87,9 @@ export class GoalDelegationAttentionOwner {
         removals.push(() => { const current = index.get(id)!; current.delete(ref); if (!current.size) index.delete(id) })
       }
       this.indexed.set(goalId, { operations: [...current.keys()], remove: () => { for (const remove of removals) remove() } })
-      const epoch = JSON.stringify([goal.supervisorSessionId, goal.delegations])
+      const epoch = JSON.stringify([goal.supervisorSessionId, [...current.values()]])
       const changed = this.epochs.get(goal.id) !== epoch; this.epochs.set(goal.id, epoch)
-      for (const delegation of goal.delegations ?? []) {
-        if (delegation.collection) continue
+      for (const delegation of current.values()) {
         const ref = { goalId: goal.id, operationId: delegation.operationId }
         add(this.workers, key(delegationWorkerHostId(delegation), delegation.workerRunId), ref)
         if (typeof goal.supervisorSessionId === 'string') add(this.supervisors, key(delegation.hostId, goal.supervisorSessionId), ref)
@@ -114,8 +129,8 @@ export class GoalDelegationAttentionOwner {
   private async run(ref: Reference): Promise<void> {
     this.controller.signal.throwIfAborted()
     const goal = await this.demands.get(ref.goalId)
-    const delegation = goal?.delegations?.find(item => item.operationId === ref.operationId)
-    if (!goal || !delegation?.linkedAt || delegation.collection || !goal.supervisorSessionId) return
+    const delegation = pendingAttention(goal, ref.operationId).get(ref.operationId)
+    if (!goal || !delegation?.linkedAt || !goal.supervisorSessionId) return
     if (typeof goal.supervisorSessionId !== 'string') { this.issue(ref, 'This Source-qualified Supervisor has no approved automatic reminder contract. The original request and Agent remain retained.'); return }
     const scope = { controller: new AbortController(), supervisor: goal.supervisorSessionId, runId: delegation.attention?.supervisorRunId }
     this.scopes.set(key(ref.goalId, ref.operationId), scope)
@@ -158,13 +173,13 @@ export class GoalDelegationAttentionOwner {
     const occurrence = { intentId: attention.intentId, occurrenceAt: attention.occurrenceAt }
     const decision = decideFutureProgress(observation, occurrence)
     if (decision.kind !== 'send') { this.issue(ref, 'The original Supervisor reminder is prepared: ' + decision.reason + '. Manual input and the Agent remain available.'); return }
-    const before = await this.demands.get(goal.id), current = before?.delegations?.find(item => item.operationId === delegation.operationId)
-    if (!current?.attention || current.attention.attemptedAt !== undefined || current.collection ||
+    const before = await this.demands.get(goal.id), current = pendingAttention(before, delegation.operationId).get(delegation.operationId)
+    if (!current?.attention || current.attention.attemptedAt !== undefined ||
       before?.supervisorSessionId !== attention.supervisorAgentSessionId) return
     this.issues.delete(key(ref.goalId, ref.operationId))
     await this.demands.markDelegationAttentionAttempt(goal.id, delegation.operationId, attention.operationId)
-    const attempted = await this.demands.get(goal.id), exact = attempted?.delegations?.find(item => item.operationId === delegation.operationId)
-    if (!attempted || exact?.collection || exact?.attention?.operationId !== attention.operationId ||
+    const attempted = await this.demands.get(goal.id), exact = pendingAttention(attempted, delegation.operationId).get(delegation.operationId)
+    if (!attempted || exact?.attention?.operationId !== attention.operationId ||
       attempted.supervisorSessionId !== attention.supervisorAgentSessionId) return
     const stillCurrent = () => !signal.aborted && !scope.controller.signal.aborted
     await this.runtime.submitPrompt({ kind: 'agent', hostId: attention.hostId, agentSessionId: attention.supervisorAgentSessionId,

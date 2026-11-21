@@ -1,6 +1,7 @@
 import { parseGoalAgentReference } from './goal-agent-reference.js'
 import type { DemandSpaceMemberReference } from '@agentmux/demand/relations'
 import { isDemandEvidenceReference } from '@agentmux/demand/goals'
+import { isClosedGoalPlanAttempt, type GoalPlanAttemptState } from '@agentmux/demand/goal-plan'
 import { demandExecutionKey, demandHandoffDestinations, demandProgressBusinessCurrent, latestDemandProgress, sameDemandExecution,
   parseDemandExecutionReference, parseDemandProgress, parseDemandResponsibilityBasis, type DemandExecutionReference,
   type DemandProgress, type DemandResponsibilityBasis } from '@agentmux/demand/responsibility'
@@ -22,7 +23,7 @@ export type GoalSupervisorObservation = {
   reason: string
 }
 export type GoalResponsibilityPhase = 'executing' | 'idle-grace' | 'stalled' | 'needs-input' | 'blocked' |
-  'waiting-external' | 'report-review' | 'result-review' | 'handed-off' | 'ended' | 'unknown' | 'closed'
+  'waiting-external' | 'report-review' | 'result-review' | 'rework' | 'handed-off' | 'ended' | 'unknown' | 'closed'
 export type GoalResponsibilityRow = {
   execution: DemandExecutionReference
   binding: 'confirmed' | 'unconfirmed' | 'ambiguous'
@@ -49,6 +50,7 @@ export type GoalExecutionFacts = {
   status?: AgentMuxAgentRuntimeStatus
   report?: boolean
   collected?: boolean
+  ticketState?: GoalPlanAttemptState
   unknown?: string
 }
 export function goalResponsibilityBasis(status: AgentMuxAgentRuntimeStatus | undefined): DemandResponsibilityBasis {
@@ -78,6 +80,15 @@ export function observeGoalExecution(goal: Demand, facts: GoalExecutionFacts, no
     return row
   }
   if (goal.status === 'done' || goal.status === 'cancelled') return set('closed', 'This Goal is closed; original execution and evidence are retained.', null)
+  if (isClosedGoalPlanAttempt(facts.ticketState)) {
+    const reason = { done: 'This Ticket has a signed passing review.', cancelled: 'This Ticket was cancelled.',
+      previous: 'This attempt was replaced in the current Ticket plan.' }[facts.ticketState]
+    return set('closed', reason, null, 'manager', 'Read the original attempt and its receipts in Goal history.')
+  }
+  if (facts.ticketState === 'changes') return set('rework', 'An independent review requested changes on this attempt.',
+    null, 'manager', 'Read the review and continue this Ticket on the original thread.')
+  if (facts.ticketState === 'unknown') return set('unknown', 'The Goal owner could not confirm the current Ticket state.',
+    'unknown', 'manager', 'Read the Ticket and reconcile the missing or changed receipts.')
   const grounding = goal.grounding
   if (current?.managerVerified && current.phase === 'review' && current.groundingSubmissionId &&
     grounding?.submissionId === current.groundingSubmissionId && grounding?.alignmentRevision === goal.alignment?.revision)
@@ -153,7 +164,7 @@ export function parseGoalResponsibility(value: unknown, references: readonly Dem
     if (!references.some(ref => sameDemandExecution(ref, execution)) || seen.has(key)) throw new AgentMuxError('Responsibility belongs to another or duplicate original execution.', 'CONTROL_PROTOCOL_ERROR')
     seen.add(key)
     if (!['confirmed', 'unconfirmed', 'ambiguous'].includes(String(r.binding)) ||
-      !['executing', 'idle-grace', 'stalled', 'needs-input', 'blocked', 'waiting-external', 'report-review', 'result-review', 'handed-off', 'ended', 'unknown', 'closed'].includes(String(r.phase)) ||
+      !['executing', 'idle-grace', 'stalled', 'needs-input', 'blocked', 'waiting-external', 'report-review', 'result-review', 'rework', 'handed-off', 'ended', 'unknown', 'closed'].includes(String(r.phase)) ||
       r.alert !== null && !['stalled', 'error', 'ended', 'manager-review', 'unknown'].includes(String(r.alert))) throw new AgentMuxError('Invalid original responsibility phase.', 'CONTROL_PROTOCOL_ERROR')
     const next = record(r.nextOwner, ['kind', 'agentSessionId', 'agentReference', 'action'])
     if (!['worker', 'manager', 'human', 'external'].includes(String(next.kind))) throw new AgentMuxError('Invalid next responsibility.', 'CONTROL_PROTOCOL_ERROR')
