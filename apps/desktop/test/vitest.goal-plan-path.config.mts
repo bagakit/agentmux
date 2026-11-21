@@ -5,6 +5,11 @@ export default defineConfig({
   ...original,
   plugins: [...original.plugins ?? [], {
     name: 'goal-plan-path-mutation', enforce: 'pre', transform(source, id) {
+      if (process.env.GOAL_PLAN_PATH_MUTATION === 'hide-finish-evidence' && id.endsWith('/GoalPlanGraph.tsx')) {
+        const conclusion = "'awaiting-evidence': 'Evidence needed'"
+        if (source.split(conclusion).length !== 2) throw Error('Expected the Goal evidence conclusion.')
+        return source.replace(conclusion, "'awaiting-evidence': 'Pending'")
+      }
       if (process.env.GOAL_PLAN_PATH_MUTATION === 'omit-handoff-review' && id.endsWith('/GoalPlanGraph.tsx')) {
         const conclusion = "state === 'done' ? 'Review passed'"
         if (source.split(conclusion).length !== 2) throw Error('Expected the signed Ticket verdict.')

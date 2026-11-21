@@ -22,7 +22,8 @@ for (const [mutation, assertion] of [
   ['reverse-child', 'The child must follow the hovered task downstream.'],
   ['wrong-reader', 'The reading pane belongs to the selected task.'],
   ['reverse-handoff', 'A report travels from the original executor to the recorded task owner.'],
-  ['omit-handoff-review', 'A completed Ticket reports the verdict and the collected transfer separately.']
+  ['omit-handoff-review', 'A completed Ticket reports the verdict and the collected transfer separately.'],
+  ['hide-finish-evidence', 'A completed Ticket exposes the missing Goal evidence']
 ]) {
   const mutant = run(mutation)
   const killed = mutant.report.testResults.flatMap(file => file.assertionResults)

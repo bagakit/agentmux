@@ -54,6 +54,19 @@ async function mount(initial = [original], onBackChange?: (back: (() => void) | 
 }
 
 describe('Mobile Goals original owner slice', () => {
+  it('shows the result step for completed Tickets in the actual Goal list', async () => {
+    const planned = { revision: 1, done: 1, total: 1, next: [], nodes: [] }
+    const alignment = { ...original.alignment!, revision: 2, openQuestions: [], confirmedAt: 3 }
+    const pending = { ...original, status: 'in_progress' as const, planState: planned, alignment }
+    const ready = { ...pending, id: 'ready-goal', title: '可接受的结果', grounding: { ...original.grounding!,
+      checks: alignment.criteria.map(criterion => ({ criterionId: criterion.id, outcome: 'met' as const, evidence: ['result.md'], note: '' })) } }
+    const view = await mount([pending, ready])
+    expect(view.element.textContent).toContain('结果待接受')
+    await view.click('原目标原项目 · 结果待核验原用户意图')
+    const report = view.element.querySelector('[aria-label="结果与证据"]')!
+    expect(report.textContent).toContain('结果未知')
+  })
+
   it('registers the original Goal edit Back before the first parent layout observation', async () => {
     const element = document.createElement('div'); document.body.append(element)
     const root = createRoot(element); mounts.push({ root, element })

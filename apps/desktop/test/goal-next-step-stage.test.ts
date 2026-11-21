@@ -103,6 +103,20 @@ describe('the same typed current source and original work reading budget', () =>
     expect(goalHasOriginalWork(cancelled)).toBe(true)
   })
 
+  it('opens the actual evidence gap when all Tickets passed and the old inspection input is still prepared', () => {
+    const request = { operationId: 'original-inspection', expectedScope: 'frozen',
+      supervisorAgentSessionId: 'manager', recipientHostId: 'local', requestedBy: { kind: 'user' as const, id: 'person' },
+      requestedAt: 8, context: '{}', attempts: [], executions: [] }
+    const goal: DemandRecord = { ...base, alignment: alignment(), grounding: grounding(['met', 'unknown']), patrols: [request],
+      patrolObservations: [{ operationId: request.operationId, state: 'prepared', reason: 'readiness-unconfirmed' }],
+      planState: { revision: 1, done: 1, total: 1, next: [], nodes: [] } }
+    expect(goalNextStepFact(goal), 'A prepared inspection cannot replace an existing Goal evidence gap').toEqual({
+      stage: 'attention', text: 'Results need checking', source: { kind: 'results', submissionId: 'report', revision: 1 }
+    })
+    expect(goalNextStepFact({ ...goal, planState: { ...goal.planState!, done: 0 } }).source)
+      .toEqual({ kind: 'patrol', operationId: request.operationId })
+  })
+
   it('only the original current Ticket attempt can take priority over Goal result review', () => {
     const planNodeId = 'original-ticket', report = { operationId: 'r', replyMessageId: 'reply', authorAgentSessionId: 'worker',
       submittedAt: 3, grounding: grounding(['met']) }

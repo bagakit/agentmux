@@ -91,7 +91,8 @@ if(goalBoardReading) ownedSources.push('scripts/verify-goal-board-reading.mjs', 
   'src/renderer/src/components/GoalExecutionTimeline.tsx', 'src/renderer/src/components/GoalWorkArea.tsx')
 if(goalTaskWorkbench)ownedSources.push('scripts/fixtures/goals-surface/task-workbench.cjs','scripts/fixtures/goals-surface/edge-geometry.cjs','src/renderer/src/components/useGoalPlanPath.ts',
   'src/renderer/src/components/GoalPlanAssignment.tsx','src/renderer/src/components/GoalPlanReadingPlacement.tsx',
-  'src/renderer/src/lib/goal-plan-routing.ts','src/renderer/src/lib/move-reading-host.ts')
+  'src/renderer/src/lib/goal-plan-routing.ts','src/renderer/src/lib/move-reading-host.ts',
+  '../../packages/demand/src/goals.ts','../../packages/demand/dist/src/goals.js')
 if(goalReadingOutline)ownedSources.push('src/renderer/src/components/GoalWorkArea.tsx','src/renderer/src/components/GoalSupervisorRail.tsx','src/renderer/src/components/GoalAgentPicker.tsx','src/renderer/src/styles/goal-supervisor-rail.css','src/renderer/src/components/GoalReadingOutline.tsx','src/renderer/src/components/useGoalPlanPath.ts','scripts/fixtures/goals-surface/workflow-restart.cjs','src/renderer/src/styles/goal-reading.css','scripts/fixtures/goals-surface/reading-outline.cjs')
 if(goalReadingOutline || goalBoardReading) ownedSources.push('src/renderer/src/components/GoalPatrolControl.tsx',
   'src/renderer/src/components/GoalContinuationControl.tsx', 'src/renderer/src/components/GoalResponsibilitySummary.tsx',

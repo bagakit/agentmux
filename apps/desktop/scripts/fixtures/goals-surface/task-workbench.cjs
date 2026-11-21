@@ -121,7 +121,7 @@ module.exports = async ({ evaluate, size, click, pointer, capture, waitFor, pain
   for (const [width, theme] of [[1600, 'dark'], [390, 'light']]) {
     await size(width)
     for (const [outcome, finish, conclusion] of [
-      ['unchecked', 'Pending', 'Results need checking'], ['accepted', 'Succeeded', 'Accepted · Finished'], ['cancelled', 'Cancelled', 'Cancelled']
+      ['unchecked', 'Evidence needed', 'Results need checking'], ['accepted', 'Succeeded', 'Accepted · Finished'], ['cancelled', 'Cancelled', 'Cancelled']
     ]) {
       await evaluate(`goalsPlan.ticketOutcome(${JSON.stringify(outcome)}); goalsVisual.appearance(${JSON.stringify(theme)})`)
       await waitFor(`Boolean(${query('[data-goal-finish-state="' + finish + '"]')})`)

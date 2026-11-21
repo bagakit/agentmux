@@ -89,14 +89,24 @@ it('reads a collected and reviewed attempt while keeping the whole Goal finish p
   }
   const only = { ...plan, nodes: [nodes[0]!] }
   const ownerState = goalPlanState(projectGoalPlan(only, [attempt], criteria))
-  const { head, canvas } = await board({ ...record, plan: only, delegations: [attempt],
-    planState: { ...ownerState, done: 1, nodes: ownerState.nodes.map(node => ({ ...node, state: 'done' })) } })
+  const completed = { ...record, plan: only, delegations: [attempt],
+    planState: { ...ownerState, done: 1, nodes: ownerState.nodes.map(node => ({ ...node, state: 'done' as const })) } }
+  const { head, canvas } = await board(completed)
   expect(dom.container.querySelector('[aria-label="Task handoff"]')).toBeNull()
   await act(async () => head('source').click())
   const handoff = dom.container.querySelector('[aria-label="Task handoff"]')
   expect(handoff?.textContent, 'A completed Ticket reports the verdict and the collected transfer separately.').toContain('Review passed')
   expect(handoff?.textContent).toContain('Delivery reported')
-  expect(canvas.querySelector('[data-goal-plan-boundary="finish"]')?.getAttribute('data-goal-finish-state')).toBe('Pending')
+  const finish = () => canvas.querySelector('[data-goal-plan-boundary="finish"]')?.getAttribute('data-goal-finish-state')
+  expect(finish()).toBe('Report needed')
+  const grounding = { submissionId: 'original-results', alignmentRevision: 1, summary: 'One missing observation', acceptedAt: null,
+    checks: [{ criterionId: 'check', outcome: 'unknown' as const, evidence: [], note: 'No original input observation' }] }
+  await act(async () => useAppStore.setState({ demands: { [record.id]: { ...completed, grounding } } }))
+  expect(finish(), 'A completed Ticket exposes the missing Goal evidence').toBe('Evidence needed')
+  await act(async () => useAppStore.setState({ demands: { [record.id]: { ...completed, grounding: {
+    ...grounding, checks: [{ criterionId: 'check', outcome: 'met', evidence: ['verified.log'], note: '' }]
+  } } } }))
+  expect(finish()).toBe('Awaiting acceptance')
   expect(dom.container.querySelector('[data-goal-meta-plan]')?.textContent).toBe('1 of 1 Tickets passed')
   const collection = dom.container.querySelector<HTMLButtonElement>('[data-goal-time-event="Report collected"]')!
   await act(async () => collection.click())
