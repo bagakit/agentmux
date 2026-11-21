@@ -1,8 +1,9 @@
 import type { DemandRecord } from './global-demand-board'
+import { goalPlanAttemptState } from '@agentmux/demand/goal-plan'
 
 export type GoalDelegationRow = {
   delegation: NonNullable<DemandRecord['delegations']>[number]
-  state: 'report' | 'collected' | 'accepted' | 'exited' | 'question' | 'working' | 'unknown'
+  state: 'report' | 'collected' | 'accepted' | 'changes' | 'exited' | 'question' | 'working' | 'unknown'
   next: string
   issue?: string
   replyMessageId?: string
@@ -28,12 +29,15 @@ export function goalDelegationRows(goal: Pick<DemandRecord, 'delegations' | 'del
       ? 'The original dispatch association is unconfirmed. The task and Agent are retained.'
       : observation && !observation.communication && !report ? 'Original communication has not been observed; report availability is unknown.' : undefined)
     const planNode = delegation.planNodeId ? planNodes.get(delegation.planNodeId) : undefined
+    const ticketState = goalPlanAttemptState(planNode, delegation.operationId)
     const original = { delegation, ...(issue ? { issue } : {}), ...(report ? { report } : {}),
-      ...(planNode && planNode.attempt?.delegationOperationId !== delegation.operationId ? { previousAttempt: true as const } : {}),
-      ...(planNode?.state === 'done' || planNode?.state === 'cancelled' ? { closedTicket: planNode.state } : {}),
+      ...(ticketState === 'previous' ? { previousAttempt: true as const } : {}),
+      ...(ticketState === 'done' || ticketState === 'cancelled' ? { closedTicket: ticketState } : {}),
       ...(observation?.attention ? { attention: observation.attention } : {}),
       ...(observation?.workflowReview ? { workflowReview: observation.workflowReview } : {}) }
+    if (ticketState === 'changes') return { ...original, state: 'changes', next: 'Changes requested · Continue this Ticket', ...(report ? { replyMessageId: report.replyMessageId } : {}) }
     if (delegation.collection) {
+      if (ticketState === 'unknown') return { ...original, state: 'unknown', next: 'Ticket state unconfirmed', replyMessageId: delegation.collection.replyMessageId }
       const accepted = goal.grounding?.acceptedAt != null && goal.grounding.submissionId === delegation.collection.groundingSubmissionId
       const review = observation?.workflowReview?.state
       const next = review === 'confirmed' ? 'Collected · Awaiting independent verdict'
@@ -82,7 +86,7 @@ export function goalDelegationNextStep(goal: Parameters<typeof goalDelegationRow
 /** The same priority as the visible next step, keeping the row state for reading projections. */
 export function goalDelegationNextRow(goal: Parameters<typeof goalDelegationRows>[0]): GoalDelegationRow | null {
   const rows = goalDelegationRows(goal).filter(row => !isHistoricalGoalDelegation(row))
-  for (const state of ['report', 'question', 'exited', 'collected', 'unknown', 'working'] as const) {
+  for (const state of ['report', 'question', 'exited', 'collected', 'changes', 'unknown', 'working'] as const) {
     const row = rows.find(item => item.state === state)
     if (row) return row
   }

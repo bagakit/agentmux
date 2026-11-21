@@ -17,7 +17,7 @@ const DisclosureIcon = semanticIconComponent('navigation.disclosure')
 export const GOAL_RESPONSIBILITY_LABELS: Record<GoalResponsibilityPhase, string> = {
   executing: 'Executing', 'idle-grace': 'Awaiting report', stalled: 'Execution stalled', 'needs-input': 'Needs a response', blocked: 'Blocked',
   'waiting-external': 'Waiting on external conditions', 'report-review': 'Report awaiting collection', 'result-review': 'Results need verification',
-  'handed-off': 'Handed off', ended: 'Original Run ended · Continue original work', unknown: 'Observation unconfirmed', closed: 'Closed'
+  rework: 'Changes requested', 'handed-off': 'Handed off', ended: 'Original Run ended · Continue original work', unknown: 'Observation unconfirmed', closed: 'Closed'
 }
 
 /** Shared source-qualified responsibility in list, detail and Mote; navigation preserves original input. */

@@ -18,6 +18,7 @@ export const GOAL_STAGE_ICON_NAMES = {
 } as const satisfies Record<GoalStage, string>
 const STAGE_ICONS = Object.fromEntries(Object.entries(GOAL_STAGE_ICON_NAMES).map(([stage, name]) => [stage, semanticIconComponent(name)])) as
   Record<GoalStage, ReturnType<typeof semanticIconComponent>>
+const CancelledIcon = semanticIconComponent('status.disabled')
 if (GOAL_GROUP_ORDER.length !== GOAL_STAGES.length) throw new Error('Every Goal stage needs one reading position.')
 
 export type GoalGroup = { stage: GoalStage; goals: DemandProjection[] }
@@ -40,7 +41,7 @@ export function groupGoals(goals: readonly DemandProjection[], acknowledgementFa
 export function goalGroupSummary(stage: GoalStage, count: number): string { return SUMMARY[stage](count) }
 
 /** A fixed-width stage glyph; the sentence beside it stays the primary reading. */
-export function GoalStageMark({ stage, size = 12 }: { stage: GoalStage; size?: number }) {
-  const Icon = STAGE_ICONS[stage]
-  return <span className="goal-stage-mark" data-goal-stage={stage} aria-hidden="true"><Icon size={size} strokeWidth={1.8} animation="none" /></span>
+export function GoalStageMark({ stage, size = 12, cancelled = false }: { stage: GoalStage; size?: number; cancelled?: boolean }) {
+  const Icon = cancelled ? CancelledIcon : STAGE_ICONS[stage]
+  return <span className="goal-stage-mark" data-goal-stage={cancelled ? 'cancelled' : stage} aria-hidden="true"><Icon size={size} strokeWidth={1.8} animation="none" /></span>
 }

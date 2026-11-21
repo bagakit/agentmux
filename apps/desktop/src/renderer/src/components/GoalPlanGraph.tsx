@@ -3,7 +3,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
-import type { GoalPlanNodeProjection } from '@agentmux/demand/goal-plan'
+import { goalPlanAttemptState, type GoalPlanAttemptState, type GoalPlanNodeProjection } from '@agentmux/demand/goal-plan'
 import { isCurrentGroundingAccepted } from '@agentmux/demand/goals'
 import { Button } from '@agentmux/client-ui/components/Button'
 import { demandAgentReferenceLabel, goalSupervisorHostWitnesses, type DemandAgentReference } from '@agentmux/demand/relations'
@@ -370,6 +370,8 @@ export function GoalPlanGraph({ demand, projection: provided, planLink, planning
   const selected = selectedAttempt && selectedReviewId ? { ...selectedAttempt, review: selectedReview ?? null } : selectedAttempt
   const handoff = selectedNode && !wholeGoal ? selected?.delegation : currentDelegation
   const handoffTitle = handoff?.planNodeId ? byId.get(handoff.planNodeId)?.node.title : demand.title
+  const handoffNode = handoff?.planNodeId ? demand.planState?.nodes.find(node => node.id === handoff.planNodeId) : undefined
+  const handoffState = handoff ? goalPlanAttemptState(handoffNode, handoff.operationId) : undefined
   const reviewKey = selected?.delegation && goalPlanReviewDraftKey(selected.node.id, selected.delegation.operationId)
   const reviewNoticeKey = JSON.stringify([demand.id, reviewKey])
   const { progress } = projection
@@ -403,7 +405,7 @@ export function GoalPlanGraph({ demand, projection: provided, planLink, planning
     </div> : null}
     <div className="goal-plan__workbench">
     <div className="goal-plan__stage">
-    {handoff && handoffTitle !== undefined ? <GoalPlanHandoff demand={demand} attempt={handoff} task={handoffTitle} /> : null}
+    {handoff && handoffTitle !== undefined ? <GoalPlanHandoff demand={demand} attempt={handoff} task={handoffTitle} state={handoffState} /> : null}
     <div className="goal-plan__canvas" data-single-task={projection.nodes.length === 1 || undefined} ref={canvas} tabIndex={0} aria-label="Execution graph">
       <svg className="goal-plan__edges" width={width} height={height} aria-hidden="true">
         <defs><marker id={arrowId} markerWidth="6" markerHeight="6" refX="6" refY="3" orient="auto" viewBox="0 0 6 6"><path d="M0 0 L6 3 L0 6 Z" fill="context-stroke" /></marker></defs>
@@ -474,7 +476,7 @@ export function GoalPlanGraph({ demand, projection: provided, planLink, planning
 }
 
 /** The arrow describes one recorded handoff, independently of the plan's task dependencies. */
-function GoalPlanHandoff({ demand, attempt, task }: { demand: DemandProjection; attempt: DemandDelegation; task: string }) {
+function GoalPlanHandoff({ demand, attempt, task, state }: { demand: DemandProjection; attempt: DemandDelegation; task: string; state: GoalPlanAttemptState | undefined }) {
   const active = useWorkbenchPresentationActive()
   const workerHost = delegationWorkerHostId(attempt)
   if (attempt.ownerAgentSessionId === attempt.workerAgentSessionId && attempt.hostId === workerHost) return null
@@ -486,6 +488,8 @@ function GoalPlanHandoff({ demand, attempt, task }: { demand: DemandProjection; 
   const owner = { id: attempt.ownerAgentSessionId, host: attempt.hostId, role: isSupervisor ? 'Supervisor' : 'Task owner' }
   const worker = { id: attempt.workerAgentSessionId, host: workerHost, role: 'Executor' }
   const reported = attempt.report?.authorAgentSessionId === worker.id
+  const conclusion = state === 'done' ? 'Review passed' : state === 'changes' ? 'Changes requested'
+    : state === 'cancelled' ? 'Ticket cancelled' : state === 'previous' ? 'Previous attempt' : attempt.collection ? 'Report collected' : undefined
   const phase = reported ? 'Delivery reported' : attempt.linkedAt !== undefined ? 'Dispatch linked' : 'Dispatch prepared'
   const [from, to] = reported ? [worker, owner] : [owner, worker]
   const participant = (actor: typeof owner) => <div className="goal-plan-handoff__agent">
@@ -493,7 +497,7 @@ function GoalPlanHandoff({ demand, attempt, task }: { demand: DemandProjection; 
     <GoalContinuationAgent agentSessionId={actor.id} hostId={actor.host} active={active} size={18} />
   </div>
   return <aside className="goal-plan-handoff" aria-label="Task handoff" data-goal-handoff={attempt.operationId}>
-    <span className="goal-plan-handoff__task" title={task}>{task}</span>
+    <span className="goal-plan-handoff__task" title={task}>{task}{conclusion ? ` · ${conclusion}` : null}</span>
     <div className="goal-plan-handoff__flow">
       {participant(from)}
       <span className="goal-plan-handoff__transfer">
@@ -509,7 +513,8 @@ export function GoalPlanRing({ demand }: { demand: Pick<DemandProjection, 'plan'
   const progress = demand.plan ? demand.planState : undefined
   if (!progress?.total) return null
   const circumference = 2 * Math.PI * 6, done = progress.done / progress.total
-  return <span className="goal-plan-ring" data-goal-plan-ring={`${progress.done}/${progress.total}`} aria-label={`Plan ${progress.done} of ${progress.total} done`}>
+  return <span className="goal-plan-ring" data-goal-plan-ring={`${progress.done}/${progress.total}`} aria-label={`${progress.done} of ${progress.total} Tickets passed`}
+    title={`${progress.done} of ${progress.total} Tickets passed`}>
     <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
       <circle cx="8" cy="8" r="6" className="goal-plan-ring__track" />
       <circle cx="8" cy="8" r="6" className="goal-plan-ring__done" strokeDasharray={`${circumference * done} ${circumference}`} transform="rotate(-90 8 8)" />

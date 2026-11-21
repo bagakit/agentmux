@@ -2,8 +2,9 @@ import { demandAgentReferenceKey, type DemandSpaceMemberReference } from '@agent
 import type { DemandDispatch, DemandDelegation } from '@agentmux/demand'
 import type { DemandRecord } from './global-demand-board'
 import { delegationWorkerHostId } from '@agentmux/demand/delegations'
+import { goalPlanAttemptState, isClosedGoalPlanAttempt } from '@agentmux/demand/goal-plan'
 
-type Goal = Pick<DemandRecord, 'id' | 'title' | 'status' | 'responsibility'> & { dispatches?: readonly DemandDispatch[]; delegations?: readonly DemandDelegation[] }
+type Goal = Pick<DemandRecord, 'id' | 'title' | 'status' | 'responsibility' | 'planState'> & { dispatches?: readonly DemandDispatch[]; delegations?: readonly DemandDelegation[] }
 export type CurrentGoalFact = {
   goalId: string
   title: string
@@ -26,6 +27,7 @@ function project(goal: Goal): Map<string, CurrentGoalFact> {
   const targets = new Map<string, CurrentGoalFact>()
   if (goal.status === 'done' || goal.status === 'cancelled') return targets
   const rows = new Map(goal.responsibility?.executions.map(row => [`${row.execution.kind}:${row.execution.operationId}`, row]))
+  const planNodes = new Map(goal.planState?.nodes.map(node => [node.id, node]))
   const add = (key: string, operationId: string, confirmed: boolean, pending: CurrentGoalFact['pending'], kind: 'start' | 'delegation') => {
     const original = targets.get(key), row = rows.get(`${kind}:${operationId}`)
     const combinedPending = original?.pending === 'unknown' || pending === 'unknown' ? 'unknown'
@@ -45,7 +47,10 @@ function project(goal: Goal): Map<string, CurrentGoalFact> {
       inputConfirmed ? null : dispatch.stage === 'prepared' ? 'prepared' : dispatch.stage === 'submitted' ? 'submitted' : 'unknown', 'start')
   }
   for (const delegation of goal.delegations ?? []) {
-    const row = rows.get(`delegation:${delegation.operationId}`), confirmed = Boolean(row && row.binding !== 'unconfirmed')
+    const row = rows.get(`delegation:${delegation.operationId}`)
+    const node = delegation.planNodeId ? planNodes.get(delegation.planNodeId) : undefined
+    if (isClosedGoalPlanAttempt(goalPlanAttemptState(node, delegation.operationId))) continue
+    const confirmed = Boolean(row && row.binding !== 'unconfirmed')
     add(currentDemandKey(delegationWorkerHostId(delegation), delegation.workerAgentSessionId), delegation.operationId, confirmed, confirmed ? null : 'unknown', 'delegation')
   }
   return targets

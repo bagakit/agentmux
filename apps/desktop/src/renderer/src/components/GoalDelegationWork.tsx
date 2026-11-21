@@ -98,9 +98,9 @@ export function GoalDelegationWork({ demand, active = true, compact = false, emb
         {row.delegation.attention ? <Button type="button" onClick={() => void openAgent(row.delegation.attention!.supervisorAgentSessionId, row.delegation.attention!.hostId)}>Open original Supervisor</Button> : null}
       </p> : null}
       <div className="goal-delegation__actions">
-        {row.state === 'report' ? <button type="button" className={!embedded || primary && focus?.kind === 'delegation' && focus.operationId === row.delegation.operationId ? 'primary-button' : 'small-button'} disabled={busy.has(row.delegation.operationId)}
+        {row.report && !row.delegation.collection ? <button type="button" className={!embedded || primary && focus?.kind === 'delegation' && focus.operationId === row.delegation.operationId ? 'primary-button' : 'small-button'} disabled={busy.has(row.delegation.operationId)}
           onClick={() => void collect(row.delegation.operationId, row.report!.replyMessageId)}>{busy.has(row.delegation.operationId) ? 'Collecting…' : 'Collect report'}</button> : null}
-        {row.state === 'collected' ? <button type="button" className={!embedded || primary && focus?.kind === 'delegation' && focus.operationId === row.delegation.operationId ? 'primary-button' : 'small-button'} onClick={() => void review()}>Review results</button> : null}
+        {row.state === 'collected' && !isHistoricalGoalDelegation(row) ? <button type="button" className={!embedded || primary && focus?.kind === 'delegation' && focus.operationId === row.delegation.operationId ? 'primary-button' : 'small-button'} onClick={() => void review()}>Review results</button> : null}
         <button type="button" className={embedded && primary && focus?.kind === 'delegation' && focus.operationId === row.delegation.operationId && !['report', 'collected'].includes(row.state) ? 'primary-button' : 'small-button'} title={`Host ${delegationWorkerHostId(row.delegation)} · Session ${row.delegation.workerAgentSessionId}`}
           onClick={() => void openAgent(row.delegation.workerAgentSessionId, delegationWorkerHostId(row.delegation))}>Open original Agent</button>
         <Button type="button" title={`Host ${row.delegation.hostId} · Session ${row.delegation.ownerAgentSessionId}`}

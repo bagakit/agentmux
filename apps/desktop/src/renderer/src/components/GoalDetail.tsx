@@ -325,13 +325,13 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
             <div className="goals-detail__identity">
               <div className="goals-detail__title">
                 <ComposerTextarea className="goals-title" aria-label="Goal title" value={title} onValueChange={value => editGoalDraft(demand.id, 'title', value)} rows={1} onBlur={() => { if (titleDirty && title.trim()) void saveGoalDrafts(demand.id, ['title']) }} />
-                <p className="goals-detail__stage"><span className="goals-detail__status"><GoalStageMark stage={stage} /><strong data-goal-detail-stage>{next}</strong></span>{currentWork ? <button type="button" className="goals-detail__current-work" onClick={() => revealOriginalWork(currentWork)}>{currentWork.kind === 'patrol' ? 'View original inspection' : 'View current work'}<ThemeNavigationForwardIcon size={12} aria-hidden="true" /></button> : null}</p>
+                <p className="goals-detail__stage"><span className="goals-detail__status"><GoalStageMark stage={stage} cancelled={demand.status === 'cancelled'} /><strong data-goal-detail-stage>{next}</strong></span>{currentWork ? <button type="button" className="goals-detail__current-work" onClick={() => revealOriginalWork(currentWork)}>{currentWork.kind === 'patrol' ? 'View original inspection' : 'View current work'}<ThemeNavigationForwardIcon size={12} aria-hidden="true" /></button> : null}</p>
               </div>
             </div>
             <div className="goals-detail__actions">
               {deliveries.length ? <span className="goals-detail__pending-review">{deliveries.length} awaiting review</span> : null}
               {projection.progress ? <span className="goals-detail__progress" data-goal-meta-plan={`${projection.progress.done}/${projection.progress.total}`}>
-                Plan {projection.progress.done} of {projection.progress.total} done</span> : null}
+                {projection.progress.done} of {projection.progress.total} Tickets passed</span> : null}
               {currentDelivery ? <Button variant="primary" onClick={event => revealAttempt(currentDelivery.node.id, currentDelivery.delegation.operationId, event.currentTarget)}>View delivery<ThemeNavigationForwardIcon size={13} aria-hidden="true" /></Button> : null}
               {(readReport || readDefinition && !reviewFromPlan) && !acknowledgementFeedback.failure
                 ? <Button type="button" onClick={() => revealGoalReview(readDefinition)}>{readReport ? 'Read results' : demand.alignment?.criteria.length ? 'Read success criteria' : 'Read proposal'}</Button> : null}

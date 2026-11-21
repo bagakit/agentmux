@@ -15,7 +15,7 @@ import { goalStartNextRow, type GoalStartRow } from './goal-start-presentation'
  * - agents: an Agent owns the next step and nothing is known to be wrong
  * - attention: something stopped, is stale or unverified and needs a decision
  * - unknown: the original observation is missing; nothing is inferred
- * - finished: the current result was accepted
+ * - finished: the current result was accepted, or work was cancelled
  */
 export const GOAL_STAGES = ['you', 'attention', 'define', 'agents', 'unknown', 'finished'] as const
 export type GoalStage = (typeof GOAL_STAGES)[number]
@@ -31,7 +31,7 @@ type GoalNextStepInput = Pick<DemandRecord, 'id' | 'alignment' | 'grounding' | '
 
 const DELEGATION_STAGE: Record<GoalDelegationRow['state'], GoalStage> = {
   // A worker report is collected and verified by the Supervisor Agent before a person reviews it.
-  report: 'agents', collected: 'agents', working: 'agents', accepted: 'finished',
+  report: 'agents', collected: 'agents', changes: 'agents', working: 'agents', accepted: 'finished',
   question: 'attention', exited: 'attention', unknown: 'unknown'
 }
 const START_STAGE: Record<GoalStartRow['state'], GoalStage> = { review: 'attention', continuation: 'attention', working: 'agents', unknown: 'unknown', requested: 'attention', rejected: 'attention' }
@@ -61,6 +61,7 @@ export function goalNextStepFact(demand: GoalNextStepInput, retainedInput?: unkn
   const { alignment, grounding } = demand
   const resultSource: GoalNextStepSource = { kind: 'results', submissionId: grounding?.submissionId ?? null, revision: alignment?.revision ?? null }
   const definitionSource: GoalNextStepSource = { kind: 'definition', revision: alignment?.revision ?? null }
+  if (demand.status === 'cancelled') return { stage: 'finished', text: 'Cancelled', source: { kind: 'goal' } }
   if (isCurrentGroundingAccepted(alignment, grounding)) {
     const result = grounding!.checks.some(check => check.outcome === 'gap') ? 'Accepted with gaps' : 'Accepted'
     return { stage: 'finished', text: demand.status === 'done' ? `${result} · Finished` : result, source: resultSource }
@@ -111,7 +112,7 @@ export function goalNextStepFact(demand: GoalNextStepInput, retainedInput?: unkn
   if (!grounding) {
     const { planState } = demand
     let text = 'Goal agreed · No result report'
-    if (planState && demand.status !== 'cancelled') {
+    if (planState) {
       if (planState.total > 0 && planState.done === planState.total) text = 'Plan complete · Awaiting result report'
       else {
         const ready = planState.nodes.find(node => node.state === 'ready')

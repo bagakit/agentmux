@@ -17,7 +17,7 @@ import { confirmedMoteReference } from './mote-materials-actions'
 import { workbenchSelectionCatalog } from './desktop-focus-navigation'
 import { goalNextStep } from './goal-presentation'
 import type { DemandRecord } from './global-demand-board'
-import { goalDelegationRows } from './goal-delegation-presentation'
+import { goalDelegationRows, isHistoricalGoalDelegation } from './goal-delegation-presentation'
 
 /** Read the original resource composition, including unplaced and unloaded Regions. */
 export function moteGoalContext(state: ReturnType<typeof useAppStore.getState>, scope: MoteWorkfaceScope,
@@ -204,10 +204,15 @@ export function moteGoalSummary(goal: DemandRecord): { next: string; detail: str
 
 /** A bounded reading summary; original Goal status and acceptance remain authoritative. */
 export function moteCurrentGoals(goals: readonly DemandRecord[]): DemandRecord[] {
-  const pending = (goal: DemandRecord) => goalDelegationRows(goal).some(row => row.state !== 'accepted')
-  const priority = (goal: DemandRecord) => goal.status === 'blocked' || goalDelegationRows(goal).some(row => row.state === 'report' || row.state === 'exited' || row.state === 'question') ? 0 : goal.status === 'in_review' ||
-    goal.grounding && goal.grounding.acceptedAt === null || !goal.alignment || goal.alignment.confirmedAt === null ? 1 : 2
-  return goals.filter(goal => goal.status !== 'cancelled' && (pending(goal) || goal.status !== 'done' || !goal.grounding ||
-    goal.grounding.acceptedAt === null || groundingAcceptanceIssue(goal.alignment, goal.grounding, true) !== null))
-    .sort((a, b) => priority(a) - priority(b) || b.updatedAt - a.updatedAt || a.id.localeCompare(b.id))
+  const current = []
+  for (const goal of goals) {
+    if (goal.status === 'cancelled') continue
+    const rows = goalDelegationRows(goal).filter(row => !isHistoricalGoalDelegation(row))
+    if (goal.status === 'done' && goal.grounding?.acceptedAt != null && groundingAcceptanceIssue(goal.alignment, goal.grounding, true) === null &&
+        rows.every(row => row.state === 'accepted')) continue
+    const priority = goal.status === 'blocked' || rows.some(row => row.state === 'report' || row.state === 'exited' || row.state === 'question') ? 0
+      : goal.status === 'in_review' || goal.grounding?.acceptedAt === null || !goal.alignment || goal.alignment.confirmedAt === null ? 1 : 2
+    current.push({ goal, priority })
+  }
+  return current.sort((a, b) => a.priority - b.priority || b.goal.updatedAt - a.goal.updatedAt || a.goal.id.localeCompare(b.goal.id)).map(({ goal }) => goal)
 }

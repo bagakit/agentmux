@@ -188,12 +188,12 @@
   }
   .goal-plan-handoff__transfer > svg { grid-row: 2; grid-column: 2; margin-inline-start: -5px; }
 }
-@container goal-plan (width < 370px) {
-  .goal-plan-handoff__flow { gap: var(--sp-2); }
-  .goal-plan-handoff__agent { grid-template-columns: minmax(0, 1fr); }
-  .goal-plan-handoff__agent > small { grid-column: 1; }
-  .goal-plan-handoff__agent > span { display: none; }
-  .goal-plan-handoff__transfer { max-width: 10ch; }
+@container goal-plan (width < 520px) {
+  .goal-plan-handoff__flow { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: start; gap: var(--sp-2); }
+  .goal-plan-handoff__agent > strong, .goal-plan-handoff__task { white-space: normal; overflow-wrap: anywhere; }
+  .goal-plan-handoff__transfer { display: contents; }
+  .goal-plan-handoff__transfer > svg { grid-area: 1 / 2; align-self: center; }
+  .goal-plan-handoff__transfer > span { grid-area: 2 / 1 / 3 / -1; text-align: center; color: var(--text-2); font-size: var(--fs-meta); }
 }
 .goal-plan__stage > .goal-plan__scroll-hint { margin: var(--sp-2) var(--sp-4); }
 .goal-plan__reader-dock .goal-plan__reading { margin-block-start: var(--sp-4); padding: var(--sp-5) var(--sp-6); border-radius: var(--radius-lg); background: var(--surface-0); }

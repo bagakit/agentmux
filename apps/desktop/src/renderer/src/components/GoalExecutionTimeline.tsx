@@ -126,6 +126,12 @@ export function goalExecutionRows(demand: TimelineSource): Row[] {
     if (attempt.report) row.events.push({ id: 'report', at: attempt.report.submittedAt, label: 'Report recorded',
       result: 'Worker report saved', actor: attempt.report.authorAgentSessionId + ' · ' + delegationWorkerHostId(attempt),
       reference: attempt.report.replyMessageId, note: attempt.report.grounding.summary })
+    if (attempt.collection) {
+      const { operationId, collector, collectedAt } = attempt.collection
+      row.events.push({ id: 'collection', at: collectedAt, label: 'Report collected', result: 'Original report collected',
+        ...(participantIdentity(collector) ?? { actor: collector.id }), reference: operationId,
+        original: { kind: 'coordination', key: `collection:${attempt.operationId}` } })
+    }
     const fact = live.get(attempt.operationId), observation = fact?.observation, from = fact?.stateSince, execution = fact?.execution
     if (!attempt.report && attempt.linkedAt !== undefined && from !== undefined && from >= attempt.linkedAt && fact?.binding === 'confirmed' &&
       fact.phase === 'executing' && observation?.semantic === 'active' && !observation.stale && observation.observedAt > from &&
