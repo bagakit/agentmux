@@ -107,14 +107,21 @@ describe('the same typed current source and original work reading budget', () =>
     const request = { operationId: 'original-inspection', expectedScope: 'frozen',
       supervisorAgentSessionId: 'manager', recipientHostId: 'local', requestedBy: { kind: 'user' as const, id: 'person' },
       requestedAt: 8, context: '{}', attempts: [], executions: [] }
-    const goal: DemandRecord = { ...base, alignment: alignment(), grounding: grounding(['met', 'unknown']), patrols: [request],
+    const goal: DemandRecord = { ...base, status: 'in_review', alignment: alignment(), grounding: grounding(['met', 'unknown']), patrols: [request],
       patrolObservations: [{ operationId: request.operationId, state: 'prepared', reason: 'readiness-unconfirmed' }],
       planState: { revision: 1, done: 1, total: 1, next: [], nodes: [] } }
     expect(goalNextStepFact(goal), 'A prepared inspection cannot replace an existing Goal evidence gap').toEqual({
       stage: 'attention', text: 'Results need checking', source: { kind: 'results', submissionId: 'report', revision: 1 }
     })
-    expect(goalNextStepFact({ ...goal, planState: { ...goal.planState!, done: 0 } }).source)
+    expect(goalNextStepFact({ ...goal, status: 'in_progress', planState: { ...goal.planState!, done: 0 } }).source)
       .toEqual({ kind: 'patrol', operationId: request.operationId })
+  })
+
+  it('keeps an explicitly closed Goal in Finished with an unverified status mark', () => {
+    expect(goalNextStepFact({ ...base, status: 'done', alignment: alignment(),
+      grounding: grounding(['met', 'unknown'], { acceptedAt: 20, unknownDecision: {
+        by: { kind: 'user', id: 'person' }, checks: [{ criterionId: 'new', reason: 'The original observation is gone.' }],
+      } }) })).toMatchObject({ stage: 'finished', mark: 'unknown', text: 'Closed with unverified results' })
   })
 
   it('only the original current Ticket attempt can take priority over Goal result review', () => {
@@ -129,7 +136,7 @@ describe('the same typed current source and original work reading budget', () =>
     const rework = { ...original, planState: { ...planState, nodes: [{ ...node, state: 'changes' as const }] } }
     expect(goalNextStepFact(rework)).toMatchObject({ text: 'Changes requested · Continue this Ticket',
       source: { kind: 'delegation', operationId: delegation.operationId } })
-    const passed = { ...original, planState: { ...planState, done: 1, nodes: [{ ...node, state: 'done' as const }] } }
+    const passed = { ...original, status: 'in_review' as const, planState: { ...planState, done: 1, nodes: [{ ...node, state: 'done' as const }] } }
     expect(goalNextStepFact(passed)).toEqual({ stage: 'you', text: 'Results ready for review', source: { kind: 'results', submissionId: 'report', revision: 1 } })
     const { grounding: _report, ...unreported } = passed
     expect(goalNextStepFact(unreported)).toEqual({ stage: 'agents', text: 'Plan complete · Awaiting result report', source: { kind: 'goal' } })

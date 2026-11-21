@@ -135,6 +135,17 @@ it('a plan whose live nodes passed review pauses without another Core input or h
   expect(f.submitted).not.toHaveBeenCalled(); expect((await f.goals.get('goal'))!.grounding?.acceptedAt).toBeUndefined()
 })
 
+it('the actual Supervisor loop stays active while an independent delegation remains open', async () => {
+  const f = await fixture(); await f.revise([node('done')]); await f.delegate('done')
+  const { planNodeId: _node, ...independent } = task('independent')
+  await f.goals.prepareDelegation('goal', independent, 'supervisor')
+  await f.goals.linkDelegation('goal', independent.operationId, independent.sourceMessageId, 'supervisor')
+  await f.report('done', 'pass')
+  expect(f.manager.list()[0]?.status).toBe('active')
+  await f.manager.check()
+  expect(f.submitted).toHaveBeenCalledOnce()
+})
+
 it('the authoritative Supervisor change pauses new planned manager input while keeping the original loop and healthy Agent', async () => {
   const f = await fixture(); await f.revise([node('ready')])
   const original = f.manager.list()[0]!, session = f.native.core.agentSession('supervisor')

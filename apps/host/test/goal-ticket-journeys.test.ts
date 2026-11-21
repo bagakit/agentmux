@@ -171,5 +171,74 @@ it('signs original Tickets, claims and completions through the public CLI', asyn
     nodes: historical.plan.nodes.map((node: { id: string }) => node.id === childId ? { ...node, cancelled: true } : node),
   } })
   expect(remaining.planState).toMatchObject({ done: 1, total: 1 })
-  expect((await owner.call(null, accept(remaining.grounding.submissionId))).goal.status).toBe('done')
+  expect(remaining.goalState.status).toBe('in_review')
+  const inspect = () => owner.call(null, ['goal', 'inspect', '--goal', goalId])
+  expect((await inspect()).goal.status).toBe('in_review')
+  const list = await owner.call(null, ['goal', 'ls', '--status', 'in_review'])
+  expect(list.goals.map((goal: { id: string }) => goal.id)).toContain(goalId)
+  const original = await owner.call(null, accept(remaining.grounding.submissionId).slice(0, -1))
+  const acceptedAt = original.goal.grounding.acceptedAt
+  const append = await owner.call('supervisor', ['goal', 'plan', 'append', '--goal', goalId, '--alignment-revision', '1',
+    '--operation-id', 'append-after-acceptance', '--input', '-'], {
+    nodes: [{ id: 'additional', title: 'Additional check', outcome: 'Verify another relevant artifact',
+      executor: null, criterionIds: [criterion.id], dependsOn: [nodeId], check }],
+  })
+  expect(append.goalState.status).toBe('in_progress')
+  const reopened = (await inspect()).goal
+  expect(reopened.grounding).toMatchObject({ acceptedAt: null, checks: [{ outcome: 'unknown' }] })
+  expect(reopened.acceptedResults).toMatchObject([{ submissionId: remaining.grounding.submissionId, acceptedAt }])
+  await owner.call(null, ['goal', 'update', '--goal', goalId, '--grounding', JSON.stringify({
+    alignmentRevision: 1, summary: 'The independent recheck is pending',
+    checks: [{ criterionId: criterion.id, outcome: 'unknown', note: 'Waiting for the follow-up artifact', evidence: [] }],
+  })])
+  expect((await inspect()).goal.acceptedResults).toEqual(reopened.acceptedResults)
+  const activeGoals = await owner.call(null, ['goal', 'ls', '--status', 'in_progress'])
+  expect(activeGoals.goals.find((goal: { id: string }) => goal.id === goalId)).not.toHaveProperty('acceptedResults')
+  expect((await owner.cli(null, accept(remaining.grounding.submissionId))).code).toBe(1)
+  const closeout = ['goal', 'closeout', '--goal', goalId, '--attempt', 'dispatch-git-ticket',
+    '--session', 'worker', '--run', 'run-worker', '--operation-id', 'stop-original-worker']
+  const stopped = await owner.call('supervisor', closeout)
+  expect(stopped).toMatchObject({ state: 'stopped', receipt: { operationId: 'stop-original-worker' },
+    observations: { sourceMessageId: 'source-git-ticket', ticketId: nodeId, handoff: 'collected',
+      collectionOperationId: 'collect-git-ticket', ticketState: 'done', otherGoalWork: false } })
+  await owner.stop(); await owner.start()
+  const observed = await owner.call('supervisor', [...closeout, '--inspect'])
+  expect(observed).toMatchObject({ state: 'observed', stop: { phase: 'retired', operationIdMatched: true },
+    observations: stopped.observations })
+  const different = closeout.slice(0, -1).concat('another-stop-operation', '--inspect')
+  expect(await owner.call('supervisor', different)).toMatchObject({
+    state: 'observed', stop: { phase: 'retired', operationIdMatched: false }, observationIssue: expect.any(String),
+  })
+})
+
+it('records a person’s exact decision to finish with irrecoverable unknowns through the public CLI', async () => {
+  const owner = await crossHostOwner(cleanup, 'unknown-result', ['supervisor'])
+  const { goal } = await owner.call(null, ['goal', 'create', '--title', 'Review a historical delivery', '--status', 'in_review',
+    '--risk', 'low', '--confirm', 'user'])
+  const target = ['--goal', goal.id]
+  await owner.call(null, ['goal', 'update', ...target, '--alignment', JSON.stringify({
+    summary: 'Reconcile two original input observations',
+    criteria: [{ id: 'composer', text: 'Confirm composer occupation' }, { id: 'queue', text: 'Confirm pending input' }], openQuestions: [],
+  })])
+  await owner.call(null, ['goal', 'confirm', ...target, '--revision', '1'])
+  const updated = await owner.call(null, ['goal', 'update', ...target, '--grounding', JSON.stringify({
+    alignmentRevision: 1, summary: 'Pre-Stop observations could not be recovered',
+    checks: ['composer', 'queue'].map(criterionId => ({ criterionId, outcome: 'unknown', note: 'No original observation exists', evidence: [] })),
+  })])
+  const submissionId = updated.goal.grounding.submissionId
+  const accept = ['goal', 'accept', ...target, '--revision', '1', '--submission', submissionId]
+  const checks = [{ criterionId: 'composer', reason: 'The original Desktop had no durable sample' },
+    { criterionId: 'queue', reason: 'The original Run was retired before the queue was sampled' }]
+  const dispose = (records: typeof checks) => ['--close-with-unknown', JSON.stringify(records)]
+  expect((await owner.cli(null, [...accept, '--finish', '--accept-gaps'])).code).toBe(1)
+  expect((await owner.cli(null, [...accept, ...dispose(checks)])).code).toBe(1)
+  expect((await owner.cli(null, [...accept, '--finish', ...dispose(checks.slice(0, 1))])).code).toBe(1)
+  expect((await owner.cli('supervisor', [...accept, '--finish', ...dispose(checks)])).code).toBe(1)
+  const result = await owner.call(null, [...accept, '--finish', ...dispose(checks)])
+  expect(result.goal).toMatchObject({ status: 'done', grounding: { submissionId, checks: [{ outcome: 'unknown' }, { outcome: 'unknown' }],
+    unknownDecision: { by: { kind: 'user', id: expect.any(String) }, checks } } })
+  expect((await owner.call(null, [...accept, '--finish', ...dispose(checks)])).goal.updatedAt).toBe(result.goal.updatedAt)
+  expect((await owner.cli(null, [...accept, '--finish', ...dispose([{ ...checks[0]!, reason: 'A different decision' }, checks[1]!])])).code).toBe(1)
+  await owner.stop(); await owner.start()
+  expect((await owner.call(null, ['goal', 'inspect', ...target])).goal.grounding).toEqual(result.goal.grounding)
 })

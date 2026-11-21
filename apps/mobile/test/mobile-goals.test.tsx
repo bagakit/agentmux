@@ -57,13 +57,27 @@ describe('Mobile Goals original owner slice', () => {
   it('shows the result step for completed Tickets in the actual Goal list', async () => {
     const planned = { revision: 1, done: 1, total: 1, next: [], nodes: [] }
     const alignment = { ...original.alignment!, revision: 2, openQuestions: [], confirmedAt: 3 }
-    const pending = { ...original, status: 'in_progress' as const, planState: planned, alignment }
+    const pending = { ...original, status: 'in_review' as const, planState: planned, alignment }
     const ready = { ...pending, id: 'ready-goal', title: '可接受的结果', grounding: { ...original.grounding!,
       checks: alignment.criteria.map(criterion => ({ criterionId: criterion.id, outcome: 'met' as const, evidence: ['result.md'], note: '' })) } }
-    const view = await mount([pending, ready])
+    const independent = { ...pending, id: 'independent-goal', title: '还有独立工作', status: 'in_progress' as const }
+    const view = await mount([pending, ready, independent])
     expect(view.element.textContent).toContain('结果待接受')
+    expect(view.element.textContent).toContain('还有独立工作原项目 · 进行中')
     await view.click('原目标原项目 · 结果待核验原用户意图')
     const report = view.element.querySelector('[aria-label="结果与证据"]')!
+    expect(report.textContent).toContain('结果未知')
+  })
+
+  it('shows the reason and the original unknown outcome after a person closes the Goal', async () => {
+    const goal = { ...original, alignment: { ...original.alignment!, revision: 2, openQuestions: [], confirmedAt: 3 },
+      grounding: { ...original.grounding!, acceptedAt: 4, unknownDecision: {
+        by: { kind: 'user' as const, id: 'reviewer' }, checks: [{ criterionId: 'criterion-original', reason: '原输入状态未保存，已无法重查。' }],
+      } } }
+    const view = await mount([goal])
+    await view.click('原目标原项目 · 已结案，仍有未核实结果原用户意图')
+    const report = view.element.querySelector('[aria-label="结果与证据"]')!
+    expect(report.textContent).toContain('原输入状态未保存，已无法重查。')
     expect(report.textContent).toContain('结果未知')
   })
 

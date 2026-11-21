@@ -23,7 +23,10 @@ const changes = {
   'ignore-independent-goal-grounding': { path: 'packages/demand/src/goal-grounding.ts',
     from: 'const independent = independentGoalGrounding(goal)', to: 'const independent = undefined as DemandGrounding | undefined' },
   'ignore-patrol-result': { path: 'packages/demand/src/demand-store.ts',
-    from: 'if (report.grounding) goal.grounding = { ...report.grounding, submissionId: mintObjectId(), acceptedAt: null }', to: 'void report.grounding' },
+    from: 'replaceGoalGrounding(goal, { ...report.grounding, submissionId: mintObjectId(), acceptedAt: null })', to: 'void report.grounding' },
+  'skip-owner-review': { path: 'packages/demand/src/responsibility.ts', from: "  return 'in_review'", to: "  return 'in_progress'" },
+  'forget-closeout-observation': { path: 'apps/host/src/goal-worker-closeout.ts', from: 'let observations = capturedCloseout(attempt, input)', to: 'let observations: GoalCloseoutContext | undefined' },
+  'discard-unknown-disposition': { path: 'packages/demand/src/demand-store.ts', from: '...(decision ? { unknownDecision: decision } : {})', to: '...{}' },
   'use-unprojected-review-result': { path: 'packages/demand/src/demand-store.ts',
     from: 'managerVerified && input.groundingSubmissionId ? currentGoalGrounding(goal) : undefined',
     to: 'managerVerified && input.groundingSubmissionId ? goal.grounding : undefined' },
@@ -49,4 +52,4 @@ export default defineConfig({ ...crossHost, plugins: [...(crossHost.plugins ?? [
     process.stderr.write('Goal claim mutation loaded: ' + change.path + '\n')
     return source.replace(change.from, change.to)
   } }], test: { ...crossHost.test, testTimeout: 120_000, include: ['apps/desktop/test/goal-delegation-attention.test.ts', 'apps/host/test/goal-claim-role.test.ts', 'apps/host/test/goal-node-claims.test.ts',
-      'apps/host/test/goal-active-cost.test.ts', 'apps/host/test/goal-ticket-journeys.test.ts', 'apps/host/test/goal-plan-revision-product.test.ts', 'packages/demand/test/goal-plan-revision.test.ts', 'packages/demand/test/goal-plan.test.ts', 'packages/demand/test/demand-delegation-hosts.test.ts'] } })
+      'apps/host/test/goal-active-cost.test.ts', 'apps/host/test/goal-ticket-journeys.test.ts', 'apps/host/test/goal-worker-closeout.test.ts', 'apps/host/test/goal-plan-revision-product.test.ts', 'packages/demand/test/goal-plan-revision.test.ts', 'packages/demand/test/goal-plan.test.ts', 'packages/demand/test/demand-delegation-hosts.test.ts'] } })

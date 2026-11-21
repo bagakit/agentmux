@@ -34,14 +34,19 @@ app.whenReady().then(async()=>{
     await size(1280); await evaluate('goalsVisual.seed("empty")'); await capture('1280-empty',1280)
     assert.deepEqual(await evaluate('goalsVisual.facts().runs'),original,'Original preview Run identities remain intact')
     assert.equal(result.frames.length,9);
-    for (const mode of ['proposal','questions','confirmed','results','gap','unknown','stale','accepted','accepted-gaps','receipt-failure','done-no-alignment','done-unconfirmed','done-confirmed','no-alignment-report','delivery-failure']) {
+    for (const mode of ['proposal','questions','confirmed','results','gap','unknown','stale','accepted','accepted-gaps','receipt-failure','done-no-alignment','done-unconfirmed','done-confirmed','done-with-unknowns','no-alignment-report','delivery-failure']) {
       await evaluate(`goalsVisual.seed(${JSON.stringify(mode)})`); await waitFor('Boolean(document.querySelector("[data-goal-id]"))'); await evaluate('document.querySelector(".goals-detail").scrollTop=0')
       if(mode.startsWith('done-') && await evaluate(`${button('Show finished')} !== undefined`)) await click(button('Show finished'))
       if(mode==='delivery-failure') { await click('document.querySelector("[data-goal-grill]")'); await waitFor('Boolean([...document.querySelectorAll(".goals-service")].find(node=>node.textContent.includes("The discussion service is unavailable")))') }
       if(mode==='receipt-failure') { await click('document.querySelector("[data-goal-confirm]")'); await waitFor('Boolean(document.querySelector("[data-goal-acknowledgement-failure]"))') }
+      if(mode==='done-with-unknowns') {
+        await click('document.querySelector("[data-goal-result-state=closed-unverified] summary")')
+        await evaluate('document.querySelector("[data-goal-result-state=closed-unverified]").scrollIntoView({block:"start"})')
+        assert.match(await evaluate('document.querySelector("[data-goal-outcome=unknown]").textContent'), /Reason for closing/)
+      }
       await capture('1280-'+mode,1280)
       if(mode==='unknown'||mode==='stale'){ assert.equal(await evaluate('Boolean(document.querySelector("[data-goal-accept], [data-goal-accept-gaps]"))'),false,'Ineligible results have no acceptance shortcut') }
-      if(['proposal','confirmed','results','gap','unknown','stale','accepted-gaps','receipt-failure','done-confirmed','no-alignment-report','delivery-failure'].includes(mode)) { await size(620); await capture('620-'+mode,620); await size(1280) }
+      if(['proposal','confirmed','results','gap','unknown','stale','accepted-gaps','receipt-failure','done-confirmed','done-with-unknowns','no-alignment-report','delivery-failure'].includes(mode)) { await size(620); await capture('620-'+mode,620); await size(1280) }
       if(mode==='receipt-failure') {
         assert.deepEqual(await evaluate('([...document.querySelectorAll(".goals-detail .primary-button")].map(node=>node.textContent.trim()))'),['Reload current proposal'],'Unknown acknowledgement has one visible primary recovery')
         await click(button('Back to goals')); await waitFor('Boolean(document.querySelector("[data-demand-id]"))')
@@ -50,7 +55,7 @@ app.whenReady().then(async()=>{
         await click('document.querySelector("[data-demand-id]")'); await waitFor('Boolean(document.querySelector("[data-goal-acknowledgement-failure]"))'); await capture('620-receipt-failure-reopened',620); await size(1280)
       }
     }
-    assert.equal(result.frames.length,38)
+    assert.equal(result.frames.length,40)
     for (const mode of ['empty','one','many','current','recent']) {
       await evaluate(`goalsVisual.seed(${JSON.stringify(mode)})`)
       for (const width of [1280,620]) {
@@ -61,7 +66,7 @@ app.whenReady().then(async()=>{
         await capture(`${width}-entry-${mode}`,width)
       }
     }
-    assert.equal(result.frames.length,48); assert.deepEqual(result.consoleErrors,[]); result.passed=true
+    assert.equal(result.frames.length,50); assert.deepEqual(result.consoleErrors,[]); result.passed=true
   } catch(error) { result.failure={name:error.name,message:error.message,stack:error.stack} }
   finally { await fs.writeFile(path.join(evidence,'render.json'),JSON.stringify(result,null,2)); win?.destroy(); app.exit(result.passed?0:1) }
 })

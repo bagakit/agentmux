@@ -89,7 +89,7 @@ it('reads a collected and reviewed attempt while keeping the whole Goal finish p
   }
   const only = { ...plan, nodes: [nodes[0]!] }
   const ownerState = goalPlanState(projectGoalPlan(only, [attempt], criteria))
-  const completed = { ...record, plan: only, delegations: [attempt],
+  const completed = { ...record, status: 'in_review' as const, plan: only, delegations: [attempt],
     planState: { ...ownerState, done: 1, nodes: ownerState.nodes.map(node => ({ ...node, state: 'done' as const })) } }
   const { head, canvas } = await board(completed)
   expect(dom.container.querySelector('[aria-label="Task handoff"]')).toBeNull()
@@ -107,6 +107,13 @@ it('reads a collected and reviewed attempt while keeping the whole Goal finish p
     ...grounding, checks: [{ criterionId: 'check', outcome: 'met', evidence: ['verified.log'], note: '' }]
   } } } }))
   expect(finish()).toBe('Awaiting acceptance')
+  await act(async () => useAppStore.setState({ demands: { [record.id]: { ...completed, status: 'in_progress', grounding } } }))
+  expect(finish(), 'The owner still has independent work to resolve').toBe('Pending')
+  await act(async () => useAppStore.setState({ demands: { [record.id]: { ...completed, status: 'done', grounding: {
+    ...grounding, acceptedAt: 9, unknownDecision: { by: { kind: 'user', id: 'person' },
+      checks: [{ criterionId: 'check', reason: 'The original composer observation was never recorded.' }] },
+  } } } }))
+  expect(finish(), 'An explicit closure preserves the unknown result').toBe('Unverified')
   expect(dom.container.querySelector('[data-goal-meta-plan]')?.textContent).toBe('1 of 1 Tickets passed')
   const collection = dom.container.querySelector<HTMLButtonElement>('[data-goal-time-event="Report collected"]')!
   await act(async () => collection.click())

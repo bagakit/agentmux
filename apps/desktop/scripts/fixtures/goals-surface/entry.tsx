@@ -60,7 +60,11 @@ function phase(mode: string): DemandRecord {
   if (['proposal', 'confirmed', 'receipt-failure'].includes(mode)) return base
   if (mode === 'stale') return { ...base, alignment: { ...base.alignment, revision: 2, criteria: [...alignment.criteria, { id: 'outage', text: 'A temporary Runtime outage preserves the current work surface.' }] }, grounding: { ...grounding, acceptedAt: _hygiene_fixtureTime(23734400000) } }
   if (mode === 'gap' || mode === 'accepted-gaps') return { ...base, grounding: { ...grounding, checks: [grounding.checks[0]!, { ...grounding.checks[1]!, outcome: 'gap', note: 'The draft is intact. Automatic resume still needs one manual retry.' }], acceptedAt: mode === 'accepted-gaps' ? _hygiene_fixtureTime(23734400000) : null } }
-  if (mode === 'unknown') return { ...base, grounding: { ...grounding, checks: [grounding.checks[0]!, { ...grounding.checks[1]!, outcome: 'unknown', evidence: [], note: 'The Session is preserved; resume could not be observed during the outage.' }] } }
+  if (mode === 'unknown' || mode === 'done-with-unknowns') return { ...base,
+    ...(mode === 'done-with-unknowns' ? { status: 'done' as const } : {}),
+    grounding: { ...grounding, checks: [grounding.checks[0]!, { ...grounding.checks[1]!, outcome: 'unknown', evidence: [], note: 'The Session is preserved. Resume was not observed during the outage.' }],
+      ...(mode === 'done-with-unknowns' ? { acceptedAt: _hygiene_fixtureTime(23734400000),
+        unknownDecision: { by: { kind: 'user' as const, id: 'reviewer' }, checks: [{ criterionId: 'session', reason: 'The original composition state was never recorded and cannot be recovered.' }] } } : {}) } }
   return { ...base, grounding: { ...grounding, acceptedAt: mode === 'accepted' ? _hygiene_fixtureTime(23734400000) : null } }
 }
 const confirm = api.demands.confirmAlignment

@@ -20,7 +20,7 @@ const attempt = (nodeId: string, patch: Partial<DemandDelegation> = {}): DemandD
 const pass = (nodeId: string) => ({ operationId: `rv-${nodeId}`, nodeId, delegationOperationId: `d-${nodeId}`, verdict: 'pass' as const,
   check: { command: 'c', result: 'ok', evidence: ['e'] }, note: '', reviewer: { kind: 'agent' as const, id: 'reviewer' }, reviewedAt: 3 })
 const goal = (patch: Partial<GoalProgressRecord> = {}): GoalProgressRecord => ({ id: 'goal', title: 'Goal', description: '', status: 'in_progress', sessionIds: ['mote'],
-  assigneeSessionIds: ['mote'], supervisorSessionId: 'mote', alignment: { revision: 1, confirmedAt: 5, criteria }, ...patch })
+  assigneeSessionIds: ['mote'], supervisorSessionId: 'mote', alignment: { revision: 1, confirmedAt: 5, criteria, summary: 'Original scope', openQuestions: [] }, ...patch })
 
 describe('Goal plan monitoring', () => {
   it('keeps a Goal without a plan on its existing decision', () => {
@@ -47,13 +47,15 @@ describe('Goal plan monitoring', () => {
     expect(decision.action).toBe('continue')
     const handoff = JSON.parse(decision.continuation!.split('\n\n')[1]!)
     expect(handoff.nodes).toEqual([{ id: 'a', state: 'unknown', executor: null, unknown: ['criteria', 'dispatch-link'],
+      next: { kind: 'reconcile', reasons: ['criteria', 'dispatch-link'] },
       attempt: { delegationOperationId: prepared.operationId, sourceMessageId: prepared.sourceMessageId, threadId: prepared.threadId,
         workerHostId: prepared.hostId, workerAgentSessionId: prepared.workerAgentSessionId } }])
   })
 
-  it('pauses for human acceptance once every live node passed review', () => {
+  it('continues verification when a passing verdict lacks the original completion proof', () => {
     const decision = decideGoalProgressSource(source, goal({ plan: plan([node('a'), node('b', [], { cancelled: true })], [pass('a')]), delegations: [attempt('a')] }))
-    expect(decision).toEqual({ action: 'pause', reason: 'Goal goal: plan r3 1/1 done; every node passed review. Waiting for a person to accept the Goal results.' })
+    expect(decision.action).toBe('continue')
+    expect(decision.reason).toContain('unknown: a')
   })
 
   it('pauses with the blocked nodes when the rest only wait on cancelled dependencies', () => {
@@ -64,6 +66,6 @@ describe('Goal plan monitoring', () => {
 
   it('still lets Goal status and scope changes win over the plan', () => {
     expect(decideGoalProgressSource(source, goal({ status: 'done', plan: plan([node('a')]) })).action).toBe('stop')
-    expect(decideGoalProgressSource(source, goal({ alignment: { revision: 2, confirmedAt: 5, criteria }, plan: plan([node('a')]) })).action).toBe('pause')
+    expect(decideGoalProgressSource(source, goal({ alignment: { ...goal().alignment!, revision: 2 }, plan: plan([node('a')]) })).action).toBe('pause')
   })
 })
