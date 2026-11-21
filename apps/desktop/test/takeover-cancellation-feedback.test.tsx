@@ -55,7 +55,9 @@ const current = () => useAppStore.getState().agentOperations[agentOperationKey(o
 const buttons = (label: string) => [...document.querySelectorAll<HTMLButtonElement>('button')].filter(button => button.textContent?.trim() === label || button.getAttribute('aria-label') === label)
 async function render(two = false) {
   await dom.render(<><input aria-label="Original draft" defaultValue="Keep the original draft and selection" />
-    <div className="focus-context-card"><AgentOperationFeedback subject={operation.subject} /></div>
+    <div className="focus-context-card"><button type="button" data-source-card>Original Agent</button>
+      <AgentOperationFeedback subject={operation.subject} onCardDismiss={() => dom.container.querySelector<HTMLButtonElement>('[data-source-card]')?.focus()} />
+    </div>
     {two ? <AgentOperationFeedback subject={operation.subject} compact /> : null}</>)
 }
 async function press(label: string) {
@@ -254,6 +256,7 @@ it('keeps the observed cancellation effect separate from its unconfirmed storage
   await render()
   expect(dom.container.textContent).toContain('已取消接手')
   expect(dom.container.textContent).toContain('原保存回执待确认')
+  expect(buttons('关闭接手提示')).toHaveLength(0)
   expect(document.querySelector('.agent-operation-feedback__popover')).toBeNull()
   const popup = await openDetails()
   const notice = popup.querySelector<HTMLElement>('.agent-operation-feedback__save-notice')!
@@ -695,6 +698,33 @@ it('two actual feedback projections share one cancellation while preserving the 
   expect(inputCalls.map(call => call.method)).toEqual(['agent.takeover.cancel'])
   expect(input.value).toBe('Keep the original draft and selection')
   expect([input.selectionStart, input.selectionEnd]).toEqual([5, 13])
+})
+
+it('closes only the saved creation feedback on the Focus card and keeps the original Agent and receipt', async () => {
+  const report = await f.rpc.call('agent.open', operation.takeoverSource.coreRequest!)
+  expect(report.outcome).toBe('opened')
+  await render(true)
+  expect(buttons('关闭接手提示')).toHaveLength(0)
+  await press('取消接手')
+  await vi.waitFor(() => expect(current().cancellation?.result).toMatchObject({ outcome: 'created', diskDurability: 'confirmed' }))
+  const before = useAppStore.getState(), originalCancellation = current().cancellation
+  const close = buttons('关闭接手提示')[0]
+  expect(close).toBeDefined()
+  close!.focus()
+  await press('关闭接手提示')
+  const card = dom.container.querySelector('.focus-context-card')!
+  expect(card.querySelector('.agent-operation-feedback')).toBeNull()
+  expect(document.activeElement).toBe(card.querySelector('[data-source-card]'))
+  expect(dom.container.querySelector('.agent-operation-feedback--compact')?.textContent).toContain('接手 Agent 已创建')
+  expect(current().cancellation).toBe(originalCancellation)
+  expect(inputCalls.map(call => call.method)).toEqual(['agent.takeover.cancel'])
+  preserved(before)
+  await act(async () => useAppStore.setState({ agentOperations: restoredAgentOperations(persistedAgentOperations(useAppStore.getState().agentOperations)) }))
+  expect(card.querySelector('.agent-operation-feedback')).toBeNull()
+  await act(async () => inspectAgentOperation(current()))
+  expect(card.querySelector('.agent-operation-feedback')).toBeNull()
+  expect(inputCalls.map(call => call.method)).toEqual(['agent.takeover.cancel', 'agent.takeover.cancel.inspect'])
+  expect(await f.client.readAgentSession(report.agent!.agentSessionId)).toMatchObject({ run: { runId: report.agent!.runId } })
 })
 
 it('an already-created target remains usable and only the existing explicit Stop confirmation can stop its exact Run', async () => {
