@@ -484,6 +484,7 @@ it.each(['saved', 'lost receipt'] as const)('closes a reviewed Goal with the ori
     await click('Reload current proposal', false)
   }
   await eventually(() => expect(container.querySelector('[data-goal-result-state="closed-unverified"]')).not.toBeNull())
+  if (mode === 'saved') await eventually(() => expect(document.activeElement).toBe(container.querySelector('[data-goal-result-state="closed-unverified"]')))
   expect(host.executed('demand.accept')).toHaveLength(1)
 })
 
