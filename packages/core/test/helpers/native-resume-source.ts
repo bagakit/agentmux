@@ -4,6 +4,7 @@ import { relative, resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '../../../..')
 const mutants: Record<string, [string, string, string]> = {
+  'omit-frontend-cwd': ['packages/core/src/providers/codex-managed-run.ts', "'--cd', workspacePath, ...args", '...args'],
   'ignore-backend-signal-exit': ['packages/core/src/providers/codex-managed-run.ts', "resolve({ code: code ?? (signal ? 1 : 0) })", "if (code !== null) resolve({ code })"],
   'kill-backend-on-detach': ['packages/core/src/providers/codex-managed-run.ts', '      tui = undefined', "      tui = undefined; server.kill('SIGTERM')"],
   'replay-initial-prompt': ['packages/core/src/providers/codex-managed-run.ts', "['resume', request.nativeSessionId, ...flags]", 'plan.args'],

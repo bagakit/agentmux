@@ -244,7 +244,7 @@ it.runIf(process.platform === 'darwin')('starts the real child TUI only after au
   expect(actual.connected).toBe(true)
   expect(actual.requests.filter((row: { method: string }) => row.method !== 'initialized').map((row: { method: string }) => row.method)).toEqual(['initialize', 'account/read', 'thread/resume', 'thread/read', 'thread/resume'])
   expect(actual.requests.find((row: { method: string }) => row.method === 'thread/resume').params).toEqual({ ...f.plan.resume, cwd: f.root, excludeTurns: true })
-  expect(actual.args.slice(4)).toEqual(['resume', f.plan.resume!.threadId, ...f.plan.frontendArgs])
+  expect(actual.args.slice(4)).toEqual(['--cd', f.root, 'resume', f.plan.resume!.threadId, ...f.plan.frontendArgs])
 })
 
 it.runIf(process.platform === 'darwin').each([
@@ -269,7 +269,7 @@ it.runIf(process.platform === 'darwin').each([
   expect(resume).toHaveLength(1)
   expect(resume[0].params).toEqual({ ...f.plan.resume, excludeTurns: true,
     ...(flag ? { config: { bypass_hook_trust: true } } : {}) })
-  expect(actual.args.slice(4)).toEqual(['resume', f.plan.resume!.threadId, ...f.plan.frontendArgs])
+  expect(actual.args.slice(4)).toEqual(['--cd', f.root, 'resume', f.plan.resume!.threadId, ...f.plan.frontendArgs])
   expect(original.args).toContain(prompt)
 })
 
@@ -326,7 +326,7 @@ it.runIf(process.platform === 'darwin')('keeps the original backend working afte
   expect(await reconnectCodexTerminalFrontend(context, request)).toEqual(resumed)
   const events = (await readFile(f.marker + '.events', 'utf8')).trim().split('\n').map(line => JSON.parse(line))
   expect(events).toHaveLength(2)
-  expect(events[1].args.slice(4)).toEqual(['resume', request.target.nativeSessionId])
+  for (const event of events) expect(event.args.slice(4)).toEqual(['--cd', f.root, 'resume', request.target.nativeSessionId])
   expect(JSON.stringify(events[1])).not.toContain('Original continuation prompt')
   const prejoins = (await readFile(f.log, 'utf8')).trim().split('\n').map(line => JSON.parse(line))
     .filter(row => row.method === 'thread/resume' && row.params.cwd === undefined)

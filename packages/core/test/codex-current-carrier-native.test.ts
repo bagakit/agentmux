@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
+import { appendFile, mkdir, mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
 import { appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
@@ -59,6 +59,7 @@ async function fixture(mode: 'ordinary' | 'queue' | 'managed-create') {
   vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'messages.ndjson'))
   const inputs: string[] = [], endpoint = native ? await offlineEndpoint(join(root, 'native-home'), inputs, root) : undefined
   if (endpoint) cleanups.push(async () => { for (const socket of endpoint.sockets) socket.destroy(); await new Promise<void>(resolve => endpoint.endpoint.close(() => resolve())) })
+  if (managedCreate) await appendFile(join(root, 'native-home', 'config.toml'), '\n[tui]\nresume_cwd = "current"\n')
   const provider = new AgentProviderRegistry().get(native ? 'codex' : 'pi')
   const entry = join(root, 'managed-entry.mjs')
   const nativeCommand = process.env.AGENTMUX_TEST_CODEX_BINARY ?? 'codex'
