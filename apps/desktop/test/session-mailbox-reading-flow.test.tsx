@@ -63,6 +63,7 @@ it('keeps real pending order and exact actions through independent queue details
   await open();await choose('user')
   expect([...panel().querySelectorAll('.composer-outbox [data-record-key]')].map(row => (row as HTMLElement).dataset.recordKey)).toEqual(['queue:old','queue:next','queue:later'])
   await read('queue:later');expect(panel().querySelector('.composer-mailbox__back')).not.toBeNull();expect(panel().querySelectorAll('.composer-outbox .composer-mailbox__row')).toHaveLength(0)
+  expect(panel().querySelector('.input-history__actions')).toBeNull();expect(panel().querySelector('.input-history__coverage')).toBeNull()
   expect(panel().querySelectorAll('.composer-outbox__inline .log-turn__body')).toHaveLength(1)
   expect(panel().querySelector('.composer-outbox__inline .log-turn__body')!.textContent).toBe('Later original text')
   await dom.click('.log-turn__action');expect(copy).toHaveBeenCalledExactlyOnceWith('Later original text')
