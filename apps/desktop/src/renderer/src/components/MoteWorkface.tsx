@@ -260,7 +260,8 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
     readingMain?.hostId === currentMain?.hostId && readingMain?.sessionId === currentMain?.sessionId && serviceSession?.kind === 'agent' &&
     serviceSession.control.hostId === currentMain?.hostId && serviceSession.control.agentSessionId === currentMain?.sessionId &&
     (entryRecovery.status === 'unavailable' || entryRecovery.status === 'unconfirmed') ? entryRecovery.status : null
-  const service = recovery && scope && main ? moteMainServicePresentation(recovery, moteMainServicePolicy(scope, main), pendingCreation) : null
+  const service = recovery && scope && main && entryRecovery.issue
+    ? moteMainServicePresentation(recovery, moteMainServicePolicy(scope, main), pendingCreation, entryRecovery.issue) : null
   const mainService = service && serviceSession?.kind === 'agent' ? { hostId: serviceSession.control.hostId, agentSessionId: serviceSession.control.agentSessionId,
     runId: serviceSession.control.run.runId, composerHint: service.hint } : undefined
   const context = useMemo(() => scope ? { ...scope, floating, defaultConversation: defaults.conversation, presentation, section, memberIntent, entryToken, bodyVisible: showOriginal && !calendarOpen, mainService,

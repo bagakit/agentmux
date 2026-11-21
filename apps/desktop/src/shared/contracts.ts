@@ -1368,7 +1368,10 @@ export type SessionRecoveryResult =
   | { kind: 'terminal-restarted'; session: SessionSnapshot }
   | { kind: 'terminal-pending'; recovery: Extract<import('@agentmux/core').AgentMuxTerminalRecoveryResult, { kind: 'pending' }> }
   | { kind: 'reattachable' | 'resumed'; session: SessionSnapshot }
-  | (Extract<AgentMuxAgentContinuityResult, { kind: 'unavailable' | 'retired' | 'conflict' | 'pending' }> extends infer Outcome
+  | (Omit<Extract<AgentMuxAgentContinuityResult, { kind: 'unavailable' }>, 'continuity'> & Pick<DesktopContinuityFacts, 'continuity'> & {
+      inputFailure?: import('@agentmux/core/delivery-attempt').DeliveryFailure & { code: string }
+    })
+  | (Extract<AgentMuxAgentContinuityResult, { kind: 'retired' | 'conflict' | 'pending' }> extends infer Outcome
     ? Outcome extends { kind: string } ? Omit<Outcome, 'continuity'> & Pick<DesktopContinuityFacts, 'continuity'> : never : never)
 
 export type HostCheckResult = {

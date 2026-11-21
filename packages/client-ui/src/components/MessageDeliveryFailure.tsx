@@ -43,7 +43,7 @@ export function MessageDeliveryFailure({ copyText, onRetry, onDismiss, compact =
     {!compact ? <><div className="message-delivery-failure__state" role={informational ? 'status' : 'alert'}>{summary.state}</div>
       <p className="message-delivery-failure__next">{summary.action}</p></> : null}
     <div className="message-delivery-failure__actions">
-      {onRetry && !['condition-changed', 'terminal-confirmed', 'admitted', 'launch-carried', 'not-applied'].includes(summary.kind) ? <button type="button" onClick={onRetry}>{retryLabel}</button> : null}
+      {onRetry && !['condition-changed', 'recovery-required', 'terminal-confirmed', 'admitted', 'launch-carried', 'not-applied'].includes(summary.kind) ? <button type="button" onClick={onRetry}>{retryLabel}</button> : null}
       <button type="button" className="message-delivery-failure__copy" onClick={() => void copyReport('summary')} disabled={copy.kind === 'summary' && copy.state === 'copying'} aria-label="复制诊断摘要">
         <SemanticIcon name={copy.kind === 'summary' && copy.state === 'copied' ? 'action.confirm' : 'action.copy'} size={13} aria-hidden="true" />{copyLabel('summary')}</button>
       {onDismiss ? <button type="button" className="message-delivery-failure__dismiss" onClick={onDismiss} aria-label="关闭操作说明" title="关闭操作说明"><SemanticIcon name="action.close" size={14} /></button> : null}

@@ -14603,7 +14603,7 @@ export const useAppStore = create<AppState>()<[['zustand/persist', PersistedAppS
         }
         set((state) => ({
           sessions: state.sessions.map((session) => (
-            session.id === sessionId && sessionOwnsControl(session, current.control)
+            session.id === sessionId && sessionOwnsControl(session, recoveryControl)
               ? {
                   ...session,
                   ...(session.kind === 'agent' && recovery.continuity ? projectContinuityFacts({ continuity: recovery.continuity,
@@ -14611,14 +14611,15 @@ export const useAppStore = create<AppState>()<[['zustand/persist', PersistedAppS
                   status: {
                     ...session.status,
                     state: 'error' as const,
-                    // 与 recoveryCandidateSession 同一处产出。这条路是**用户自己点「恢复」**走的，
-                    // 各写一遍时它正是被漏掉的那一处。
                     ...continuityStatusFields(recovery)
                   }
                 }
               : session
           ))
         }))
+        if (recovery.kind === 'unavailable' && recovery.inputFailure) {
+          throw Object.assign(new Error(recovery.inputFailure.message), recovery.inputFailure)
+        }
         return
       }
       if (current.kind === 'agent' && (recovery.session.kind !== 'agent' || recovery.session.control.hostId !== current.control.hostId || recovery.session.control.agentSessionId !== current.control.agentSessionId))

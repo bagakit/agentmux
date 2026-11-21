@@ -91,6 +91,9 @@ export function presentMessageDeliveryFailure(input: MessageDeliveryDiagnostic) 
     state: '原消息已保存，正在等待输入条件确认。', action: '可查看原输入记录。' }
   if (!receipt && input.inputSubmission?.status === 'stopped') return { kind: 'stopped', title: '已停止等待',
     state: '原输入已停止等待，原消息保留。', action: '可查看原输入记录。' }
+  if (code === 'AGENT_NATIVE_IDENTITY_UNCONFIRMED' && noInput) return { kind: 'recovery-required', title: '消息未送出',
+    compactCause: '尚未确认原会话的续接标识。', state: '尚未确认原会话的续接标识，本次消息未送出。',
+    action: '原文已保留。请到原对话查看接续选项。' }
   if (reason && noInput) return { kind: 'waiting',
     title: reason === 'context-compaction' ? '正在整理上下文' : 'Agent 暂时忙碌',
     state: '本次尝试尚未写入输入，原消息已保留。', action: '稍后重试这条原消息。' }

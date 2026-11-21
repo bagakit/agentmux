@@ -9,15 +9,15 @@ import { currentUnconfirmedResumeOperation } from './continuity-presentation'
 
 /** `unavailable` is Core's own result that this Main has nothing to resume; a new round is the way forward. */
 type EntryState = { status:'idle'|'reading'|'recovering'|'unconfirmed'|'unavailable'|'settled'; issue:string|null }
-/** Core's reason that the exact Main cannot be resumed, in words that name the way forward. */
+/** Human-readable cause for the original Main. The service notice supplies the current action. */
 export function moteMainUnavailableIssue(reason: string): string {
   switch (reason) {
-    case 'native-conversation-absent': return '主 Agent 已退出，AgentMux 没有它可接续的原生对话。原对话和草稿都在；可开始新一轮，由新的主 Agent 接上。'
-    case 'native-handle-unavailable': return '主 Agent 已退出，AgentMux 尚未确认可接续原会话的 ID。原对话和草稿仍可查看，也可以明确开始新一轮。'
-    case 'provider-resume-unsupported': return '这个主 Agent 的 Provider 不支持恢复原对话。原对话和草稿都在；可开始新一轮，由新的主 Agent 接上。'
-    case 'provider-unavailable': return '这台 Host 上找不到主 Agent 的 Provider。装好后可再次打开以恢复；原对话和草稿都在。'
-    case 'unknown-session': return 'Core 已不认识这个主 Agent 的 Session。原对话和草稿都在；可开始新一轮，由新的主 Agent 接上。'
-    default: return `主 Agent 无法恢复（${reason}）。原对话和草稿都在；可开始新一轮，由新的主 Agent 接上。`
+    case 'native-conversation-absent': return '主 Agent 已退出，原会话没有可接续的记录。'
+    case 'native-handle-unavailable': return '尚未确认原会话的续接标识。'
+    case 'provider-resume-unsupported': return '当前执行器不支持恢复原对话。'
+    case 'provider-unavailable': return '当前设备上的原执行器不可用。'
+    case 'unknown-session': return '找不到原主会话。'
+    default: return '暂时无法恢复原主会话。'
   }
 }
 /** One explicit UI entry consumes the original Core owner. This token grants no Core authority. */
