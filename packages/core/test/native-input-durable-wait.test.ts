@@ -93,6 +93,83 @@ it('the note-only SDK contract retains empty original body and reports current-t
   } finally { await h.close() }
 })
 
+it('continues the accepted input when the Unix reply socket fails before returning firstsave', async () => {
+  const h = await fixture(), id = 'lost-firstsave-reader', preparing = h.pauseRuntimeRead()
+  const reading = barrier(), returnReceipt = barrier(), closed = barrier()
+  const inspect = h.client.inspectAgentInput.bind(h.client)
+  vi.spyOn(h.client, 'inspectAgentInput').mockImplementationOnce(async (...args) => {
+    reading.release()
+    await returnReceipt.pending
+    return await inspect(...args)
+  })
+  const server = new AgentMuxControlServer({ socketPath: join(h.root, 'lost-firstsave.sock'), coreClients: h.coreClients })
+  const accept = Reflect.get(server, 'accept') as (socket: Socket) => void
+  let socket: Socket | undefined
+  Reflect.set(server, 'accept', function (this: InstanceType<typeof AgentMuxControlServer>, value: Socket) {
+    socket = value
+    value.once('close', () => closed.release())
+    accept.call(this, value)
+  })
+  let rpc: Awaited<ReturnType<typeof connectAgentMuxRpc>> | undefined
+  try {
+    h.restore()
+    await server.start()
+    rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
+    const { authorHuman: _authorHuman, agentMuxNote: _note, ...input } = h.input(id)
+    const call = rpc.call('agent.input.submit', input).then(result => ({ result }), error => ({ error }))
+    await Promise.all([reading.pending, preparing.entered.pending])
+    const saved = await h.queue.inspectInput({ key: h.key(id) })
+    expect(saved).toMatchObject({ control: { ref: { key: h.key(id), waitGeneration: 1 }, state: 'enabled' } })
+    expect(h.inner.kernel.input).not.toHaveBeenCalled()
+    socket!.destroy(new Error('The original Unix client lost its reply'))
+    await closed.pending
+    expect(await call).toHaveProperty('error')
+    returnReceipt.release()
+    preparing.proceed.release()
+    await vi.waitFor(async () => {
+      const receipt = await h.read(id)
+      expect(receipt, JSON.stringify(receipt.control.waiting)).toMatchObject({
+        status: 'terminal-confirmed', persistence: 'confirmed', ref: saved!.control.ref
+      })
+    })
+    expect(h.inner.kernel.input).toHaveBeenCalledTimes(2)
+    expect(h.inner.kernel.stop).not.toHaveBeenCalled()
+    expect((await h.read(id)).admission?.admission?.inputDispatch?.ref).toEqual(saved!.control.ref)
+  } finally {
+    returnReceipt.release()
+    preparing.proceed.release()
+    await rpc?.dispose()
+    await server.stop()
+    await h.close()
+  }
+})
+
+it('a transport cancellation before firstsave leaves no new input in the original journal', async () => {
+  const h = await fixture(), id = 'cancel-before-firstsave', request = new AbortController()
+  const queue = Reflect.get(h.client, 'messageQueue') as InstanceType<typeof DurableAgentMuxMessageQueue>
+  const gate = Reflect.get(queue, 'assertNewInputRun') as (id: string, run: string) => Promise<void>
+  const admitted = barrier(), allowSave = barrier()
+  Reflect.set(queue, 'assertNewInputRun', async (id: string, run: string) => {
+    await gate(id, run)
+    admitted.release()
+    await allowSave.pending
+  })
+  try {
+    const call = h.client.submitAgentPrompt(h.input(id), { requestSignal: request.signal }).then(
+      result => ({ result }), error => ({ error }))
+    await admitted.pending
+    request.abort()
+    allowSave.release()
+    expect(await call).toMatchObject({ error: { name: 'AbortError' } })
+    expect(await h.queue.inspectInput({ key: h.key(id) })).toBeNull()
+    expect(h.inner.kernel.input).not.toHaveBeenCalled()
+  } finally {
+    allowSave.release()
+    Reflect.set(queue, 'assertNewInputRun', gate)
+    await h.close()
+  }
+})
+
 it.each(['unix', 'http'] as const)('normal %s firstsave reply preserves the original Core input observer through real unary completion', async transport => {
   const h = await fixture(), paused = h.pauseRuntimeRead(), completed = barrier(), handled = barrier()
   const namespace = await lstat(h.root, { bigint: true }), cleanup: unknown[] = []
@@ -136,7 +213,9 @@ it.each(['unix', 'http'] as const)('normal %s firstsave reply preserves the orig
       invocation: encodeHostedValue(invocation) as AgentMuxHostedInvocation })
     const saved = decodeHostedValue(response.value) as AgentInputSubmissionReceipt
     expect(saved).toMatchObject({ status: 'waiting', persistence: 'confirmed', key: h.key(id), ref: { waitGeneration: 1 } })
-    // This is the original Socket.close or ServerResponse.finish, before any explicit disposal.
+    // Unix requests share a carrier. Release it after the normal reply.
+    // HTTP completes its own response without disposing the client.
+    if (transport === 'unix') await rpc.dispose()
     await completed.pending
     if (transport === 'http') await handled.pending
     const observer = Reflect.get(h.client, 'inputWaitingRecipients').get('recipient')?.pending as Promise<void> | undefined
