@@ -107,7 +107,11 @@ The original reply stays in the private thread. The returned `mainNotification`
 describes the message to the coordinating Main's ordinary Inbox. If that step is
 unconfirmed, the Host keeps the published report and continues checking its original
 target. Use the same request to read its receipt. An Inbox receipt confirms the
-saved notification. A separate native receipt confirms a new turn.
+saved notification. A separate native receipt confirms a new turn. In Main,
+use the notification's `threadId`, `assignmentMessageId` and `replyMessageId`
+to read both originals. A timed report can also include its `occurrence`.
+Use `direct list` or `group list` with `includeLastAssignment: true` and your
+Mote scope to find your latest addressed assignment in each conversation.
 
 For a user-authorized timed assignment, `direct schedule` takes the same
 `mote`, `peer`, `operationId` and `body`, plus one timing form from
@@ -115,9 +119,13 @@ For a user-authorized timed assignment, `direct schedule` takes the same
 `sourceMote`, `groupId`, `operationId`, `body` and explicit `recipientIds`,
 plus the same timing forms. The arrangement follows the coordinating Mote.
 The original Host publishes once per due occurrence. A Group arrangement
-addresses only its selected active membership generations. Use `schedule
-inspect` to find `lastMotePublication`, then read its original message for
-delivery and progress. Pause or cancel the same arrangement through `schedule`.
+addresses only its selected active membership generations. From the coordinating
+Main, use `amux schedule history --help` to read `recorded-publications` in a
+time range. Match `occurrenceAt`, then use the returned `conversationId` and
+`messageId` with `direct inspect` or `group inspect`. Read deliveries and replies
+from that original message. Coverage describes saved publications. An empty
+range leaves the outcome of an unpublished round unknown. Use `schedule inspect`
+to check the current arrangement. Pause or cancel it through `schedule`.
 Publication and recipient acceptance have separate receipts. The Host continues
 saved work on the original recipient when preparation was temporarily unavailable.
 Keep the operation and read its delivery again when the outcome is unconfirmed.
