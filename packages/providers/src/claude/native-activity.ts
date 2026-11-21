@@ -22,6 +22,8 @@ type Payload = Readonly<Record<string, unknown>>
 export const CLAUDE_ASKED_TOOL_END_EVENT = 'AgentMuxAskedToolEnded'
 /** A native child call's scoped permission/question wait, never a main-session request. */
 export const CLAUDE_CHILD_ACTIVITY_EVENT = 'AgentMuxChildActivity'
+/** Main-session model and quota figures read from the native observer, never transcript text. */
+export const CLAUDE_INFORMATION_EVENT = 'AgentMuxInformation'
 
 /** The managed module asks Core at each genuinely answered main turn end whether a notice is waiting. */
 export const CLAUDE_TURN_END_EVENT = 'AgentMuxTurnEnd'
@@ -58,6 +60,38 @@ function observationIdentity(payload: Readonly<Record<string, unknown>>) {
       typeof payload.sourceId !== 'string' || !payload.sourceId.trim() ||
       typeof payload.sequence !== 'number' || !Number.isSafeInteger(payload.sequence) || payload.sequence < 1) return
   return { nativeSessionId: payload.session_id, sourceId: payload.sourceId, sequence: payload.sequence }
+}
+
+/** Normalize only the original observer's typed main-session information. */
+export function claudeNativeInformation(eventName: string, payload: Payload) {
+  if (eventName !== CLAUDE_INFORMATION_EVENT || payload.agent_id !== undefined || payload.agentId !== undefined) return
+  const identity = observationIdentity(payload)
+  if (!identity || typeof payload.observedAt !== 'number' || !Number.isSafeInteger(payload.observedAt) || payload.observedAt < 0) return
+  const text = (value: unknown): value is string => typeof value === 'string' && !!value.trim() && !/[\0\r\n]/u.test(value)
+  const model = text(payload.model) ? { id: payload.model, scope: 'session' as const } : undefined
+  const ids = new Set<string>()
+  let validLimits = Array.isArray(payload.rateLimits)
+  const limits = (Array.isArray(payload.rateLimits) ? payload.rateLimits : []).flatMap(value => {
+    const row = value as Record<string, unknown> | null
+    const resetsAt = row?.resetsAt === undefined ? undefined : typeof row.resetsAt === 'string' ? Date.parse(row.resetsAt) : NaN
+    if (!row || !text(row.kind) || ids.has(row.kind) || typeof row.percentUsed !== 'number' || !Number.isFinite(row.percentUsed) ||
+        row.percentUsed < 0 || resetsAt !== undefined && (!Number.isFinite(resetsAt) || resetsAt < 0)) {
+      validLimits = false; return []
+    }
+    ids.add(row.kind)
+    const names: Record<string, string> = { five_hour: 'Five hours', seven_day: 'Seven days', spend_limit: 'Spend limit' }
+    return [{ id: row.kind, name: names[row.kind] ?? row.kind, usedPercent: row.percentUsed,
+      ...(resetsAt === undefined ? {} : { resetsAt }) }]
+  })
+  return { ...identity, observedAt: payload.observedAt, ...(model ? { model } : {}), ...(validLimits ? { limits } : {}),
+    issues: [
+      { field: 'plan' as const, kind: 'unsupported' as const, code: 'CLAUDE_PLAN_UNSUPPORTED', message: 'The original native observer does not expose the subscription plan to this plugin.' },
+      { field: 'configuration' as const, kind: 'unsupported' as const, code: 'CLAUDE_MODEL_CONFIGURATION_UNSUPPORTED', message: 'The original native protocol does not expose a session-only model selection contract.' },
+      ...(!model ? [{ field: 'model' as const, kind: payload.modelUnavailable === true ? 'unavailable' as const : 'unconfirmed' as const,
+        code: 'CLAUDE_MODEL_UNCONFIRMED', message: 'The original native observer could not confirm the main-session model.' }] : []),
+      ...(!validLimits || limits.length === 0 ? [{ field: 'limits' as const, kind: payload.limitsUnavailable === true ? 'unavailable' as const : 'unconfirmed' as const,
+        code: 'CLAUDE_LIMITS_UNCONFIRMED', message: 'The original native observer has no confirmed quota windows.' }] : [])
+    ] }
 }
 
 export function claudeNativeTurnIdentity(payload: Readonly<Record<string, unknown>>) {
@@ -131,8 +165,10 @@ let pending = 0
 let overflowReported = false
 let delivery = Promise.resolve()
 let mainTurn
+let lastInformation
 const ASKED_END = ${JSON.stringify(CLAUDE_ASKED_TOOL_END_EVENT)}
 const CHILD_ACTIVITY = ${JSON.stringify(CLAUDE_CHILD_ACTIVITY_EVENT)}
+const INFORMATION = ${JSON.stringify(CLAUDE_INFORMATION_EVENT)}
 
 // The launching Core names its own runner in the Run environment, so these files carry no install path.
 // --launch-scoped marks a call this launch declared; the runner ignores unmarked leftovers in such a Run.
@@ -166,6 +202,31 @@ async function send($, payload) {
   return result.exitCode === 0 && !result.stderr
 }
 
+// These built-ins read the native session in memory. No breakdown/token-count request,
+// account identity, transcript content or protected managed-only API is used.
+async function readInformation($, event) {
+  try {
+    const observedAt = await $.clock.now()
+    if (typeof observedAt !== 'number' || !Number.isSafeInteger(observedAt) || observedAt < 0) return
+    const reads = await Promise.allSettled([
+      Promise.resolve().then(() => $.session.model()),
+      event.rateLimits === undefined ? Promise.resolve().then(() => $.session.usage()).then(usage => usage.rateLimits) : Promise.resolve(event.rateLimits)
+    ])
+    const model = reads[0].status === 'fulfilled' ? reads[0].value : undefined
+    const rawRates = reads[1].status === 'fulfilled' ? reads[1].value : undefined
+    const scalar = value => typeof value === 'string' && value.trim() && !/[\\0\\r\\n]/u.test(value)
+    const validRates = Array.isArray(rawRates) && rawRates.every(row => row && scalar(row.kind) &&
+      typeof row.percentUsed === 'number' && Number.isFinite(row.percentUsed) && row.percentUsed >= 0 &&
+      (row.resetsAt === undefined || typeof row.resetsAt === 'string'))
+    return { observedAt,
+      ...(scalar(model) ? { model } : { modelUnavailable: true }),
+      ...(validRates ? { rateLimits: rawRates.map(row => ({ kind: row.kind, percentUsed: row.percentUsed,
+        ...(row.resetsAt === undefined ? {} : { resetsAt: row.resetsAt }) })) } : { limitsUnavailable: true }) }
+  } catch {
+    try { await $.ui.log('AgentMux native information read unconfirmed; original activity and input remain available.', { to: 'debug' }) } catch {}
+  }
+}
+
 async function deliver($, eventName, event, sourceSequence) {
   const identityUnavailable = eventName === 'AgentMuxActivityUnavailable' && event.reason === 'source-identity-unavailable'
   if (!initialSessionId && !identityUnavailable) return
@@ -185,6 +246,18 @@ async function deliver($, eventName, event, sourceSequence) {
   }
   if (eventName !== ASKED_END) {
     if (confirmed && eventName === 'turn.start' && sourceSequence > deliveryGapThrough) deliveryGapThrough = 0
+    let information, signature, skipInformation = false
+    if (eventName === INFORMATION && !identityUnavailable && !sourceChanged && deliveryGapThrough === 0) {
+      information = await readInformation($, event)
+      if (!information) skipInformation = true
+      else {
+        if (await $.session.id() !== initialSessionId) sourceChanged = true
+        // The observer retains only a change signature. Unchanged turn/model commands do not
+        // launch another Hook process or refresh the last sample's observation time.
+        signature = JSON.stringify({ ...information, observedAt: undefined })
+        if (!sourceChanged && signature === lastInformation) skipInformation = true
+      }
+    }
     const unavailable = identityUnavailable || sourceChanged || deliveryGapThrough > 0
     const payload = {
       hook_event_name: unavailable ? 'AgentMuxActivityUnavailable' : eventName,
@@ -192,6 +265,7 @@ async function deliver($, eventName, event, sourceSequence) {
       sourceId,
       sequence: sourceSequence,
       ...(unavailable ? { reason: identityUnavailable ? 'source-identity-unavailable' : sourceChanged ? 'source-changed' : 'delivery-gap' } : {
+        ...(eventName === INFORMATION ? information : {}),
         turnId: event.turnId,
         ...(event.agentId === undefined ? {} : { agent_id: event.agentId }),
         ...(eventName === CHILD_ACTIVITY ? { state: event.state, reason: event.reason, tool_use_id: event.toolUseId } : {}),
@@ -199,11 +273,13 @@ async function deliver($, eventName, event, sourceSequence) {
           ...(event.agentId === undefined ? { backgroundWork: event.backgroundWork } : {}) } : {})
       })
     }
-    if (!await send($, payload)) confirmed = false
+    if ((!skipInformation || unavailable) && !await send($, payload)) confirmed = false
+    else if (eventName === INFORMATION && !unavailable && !skipInformation) lastInformation = signature
   }
   if (!confirmed) {
 
     deliveryGapThrough = Math.max(deliveryGapThrough, sourceSequence)
+    lastInformation = undefined
     await $.ui.log('AgentMux activity observation delivery unconfirmed; the Agent remains available.', { to: 'debug' })
   }
 }
@@ -277,6 +353,7 @@ function observe($, eventName, event) {
   // An asked end dropped here keeps its position and goes ahead of the next delivered observation.
   if (pending >= 32) {
     deliveryGapThrough = sourceSequence
+    lastInformation = undefined
     if (!overflowReported) {
       overflowReported = true
       try { $.ui.log('AgentMux activity observation queue full; current activity remains unconfirmed.', { to: 'debug' }) } catch {}
@@ -288,6 +365,7 @@ function observe($, eventName, event) {
   // break the tail, prevent later observations, or escape into the native event's result.
   delivery = delivery.then(() => deliver($, eventName, event, sourceSequence)).catch(async () => {
     deliveryGapThrough = Math.max(deliveryGapThrough, sourceSequence)
+    lastInformation = undefined
     try { await $.ui.log('AgentMux activity observer unavailable; the Agent remains available.', { to: 'debug' }) } catch {}
   }).finally(() => { pending -= 1; if (pending === 0) overflowReported = false })
   return sourceSequence
@@ -301,7 +379,20 @@ export function register(on) {
       observe($, 'AgentMuxActivityUnavailable', { reason: 'source-identity-unavailable' })
       try { $.ui.log('AgentMux activity source identity unavailable; the Agent remains available.', { to: 'debug' }) } catch {}
     }
+    if (initialSessionId && !sourceChanged) observe($, INFORMATION, {})
     return next(event)
+  })
+  on('session.measure', ($, event, next) => {
+    if (initialSessionId && !sourceChanged) observe($, INFORMATION, { rateLimits: Array.isArray(event.rateLimits)
+      ? event.rateLimits.map(row => ({ kind: row?.kind, percentUsed: row?.percentUsed,
+        ...(row?.resetsAt === undefined ? {} : { resetsAt: row.resetsAt }) })) : event.rateLimits })
+    return next(event)
+  })
+  on('command.run', async ($, event, next) => {
+    try { return await next(event) }
+    finally {
+      if (event.command === 'model' && initialSessionId && !sourceChanged) observe($, INFORMATION, {})
+    }
   })
   on('classic.SessionStart', ($, event, next) => {
     if (initialSessionId && typeof event.session_id === 'string' && event.session_id !== initialSessionId) {
@@ -317,6 +408,7 @@ export function register(on) {
       childTurns.set(event.agentId, { agentId: event.agentId, turnId: event.turnId })
     }
     observe($, 'turn.start', event)
+    if (event?.agentId === undefined && initialSessionId && !sourceChanged) observe($, INFORMATION, {})
     return next(event)
   })
   // Claude's main run is serialized: start, awaited classic.Stop, then complete. The native

@@ -1,3 +1,4 @@
+import { parseRecoveryInformation } from './agent-information.js'
 import { parseAgentCreationCancellation, parseAgentCreationCancellationRecord, type AgentCreationCancellation } from './agent-creation-cancellation.js'
 import { MAX_ID_BYTES, MAX_PATH_BYTES, record, string, timestamp, positiveInteger, runRef, normalizeSessionHistoryMetadata, launchOptionSelection, nativeHandle, nativeConfirmation, nativeConfirmationMatchesSession, parseAgentCreationFact, normalizeAgentSession, normalizeInteractionOperationReceipt } from './agent-session-codec.js'
 import { agentLifecycleOperationIdentity } from './agent-session-identity.js'
@@ -1359,6 +1360,7 @@ export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgent
     ...(source.nativeCreationKeys===undefined?{}:{nativeCreationKeys:nativeCreationKeys(source.nativeCreationKeys)}),
     ...(initialInput ? { initialInput } : {}),
     ...(source.recoveryActivity === undefined ? {} : { recoveryActivity: recoveryActivity(source.recoveryActivity, session) }),
+    ...(source.recoveryInformation === undefined ? {} : { recoveryInformation: parseRecoveryInformation(source.recoveryInformation) }),
     ...(source.nativeActor === undefined ? {} : { nativeActor: normalizePrivateNativeActor(source.nativeActor) }),
     ...(source.continuityExecutors === undefined ? {} : { continuityExecutors: structuredClone(source.continuityExecutors) }),
     ...(source.executorInvocation === undefined ? {} : { executorInvocation: structuredClone(source.executorInvocation) }),

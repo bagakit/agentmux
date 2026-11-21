@@ -26,10 +26,29 @@ export type AgentInformationSnapshot = {
   nativeSessionId: string
   sourceId: string
   observedAt: number
+  sequence?: number
   model?: AgentInformationModel
   plan?: { id: string; name: string }
   limits?: AgentInformationLimit[]
   issues: AgentInformationIssue[]
+}
+
+/** Private original-Session metadata; the public projection contains only its native snapshot. */
+export type AgentRecoveryInformation = {
+  run: { runId: string }
+  actorId?: string
+  snapshot: AgentInformationSnapshot
+  invalidatedThrough?: number
+}
+
+export function parseRecoveryInformation(value: unknown): AgentRecoveryInformation {
+  const p = rpcRecord(value, ['run', 'actorId', 'snapshot', 'invalidatedThrough'], 'INVALID_AGENT_SESSION_STORE')
+  const run = rpcRecord(p.run, ['runId'], 'INVALID_AGENT_SESSION_STORE')
+  if (p.invalidatedThrough !== undefined && (!Number.isSafeInteger(p.invalidatedThrough) || Number(p.invalidatedThrough) < 0))
+    throw new AgentMuxError('Native information source ordering is invalid.', 'INVALID_AGENT_SESSION_STORE')
+  return { run: { runId: rpcString(run.runId, 'Original information Run') }, snapshot: parseAgentInformationSnapshot(p.snapshot),
+    ...(p.actorId === undefined ? {} : { actorId: rpcString(p.actorId, 'Original information actor') }),
+    ...(p.invalidatedThrough === undefined ? {} : { invalidatedThrough: p.invalidatedThrough as number }) }
 }
 
 export type AgentInformationInspect = { hostId: string; agentSessionId: string; expectedRun: { runId: string } }
@@ -50,7 +69,7 @@ export function agentModelOption(configuration?: AgentConfigurationSnapshot | nu
 
 export function agentCurrentModel(information?: AgentInformationSnapshot | null, configuration?: AgentConfigurationSnapshot | null): AgentInformationModel | undefined {
   const option = agentModelOption(configuration)
-  return option ? { id: option.currentValue, name: option.choices.find(choice => choice.value === option.currentValue)!.name, scope: 'next-turn' } : information?.model
+  return option ? { id: option.currentValue, name: option.choices.find(choice => choice.value === option.currentValue)!.name, scope: 'next-turn' } : information?.issues.some(issue => issue.field === 'model') ? undefined : information?.model
 }
 
 export function parseAgentInformationInspect(value: unknown): AgentInformationInspect {
@@ -74,7 +93,9 @@ export function parseAgentInformationSnapshot(value: unknown): AgentInformationS
   const invalid = (): never => { throw new AgentMuxError('The original native information is unconfirmed.', 'CONTROL_PROTOCOL_ERROR') }
   const text = (v: unknown) => rpcString(v, 'Native information')
   const number = (v: unknown) => { if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) invalid(); return v as number }
-  const p = rpcRecord(value, ['nativeSessionId', 'sourceId', 'observedAt', 'model', 'plan', 'limits', 'issues'], 'CONTROL_PROTOCOL_ERROR')
+  const time = (v: unknown) => { if (!Number.isSafeInteger(v) || Number(v) < 0) invalid(); return v as number }
+  const p = rpcRecord(value, ['nativeSessionId', 'sourceId', 'observedAt', 'sequence', 'model', 'plan', 'limits', 'issues'], 'CONTROL_PROTOCOL_ERROR')
+  if (p.sequence !== undefined && (!Number.isSafeInteger(p.sequence) || Number(p.sequence) <= 0)) invalid()
   const model = p.model === undefined ? undefined : rpcRecord(p.model, ['id', 'name', 'scope'], 'CONTROL_PROTOCOL_ERROR')
   if (model && !['session', 'next-turn'].includes(String(model.scope))) invalid()
   const plan = p.plan === undefined ? undefined : rpcRecord(p.plan, ['id', 'name'], 'CONTROL_PROTOCOL_ERROR')
@@ -87,7 +108,7 @@ export function parseAgentInformationSnapshot(value: unknown): AgentInformationS
     ids.add(id)
     return { id, name: text(row.name), usedPercent: number(row.usedPercent),
       ...(row.windowMinutes === undefined ? {} : { windowMinutes: number(row.windowMinutes) }),
-      ...(row.resetsAt === undefined ? {} : { resetsAt: number(row.resetsAt) }) }
+      ...(row.resetsAt === undefined ? {} : { resetsAt: time(row.resetsAt) }) }
   })
   const issues = (p.issues as unknown[]).map(value => {
     const issue = rpcRecord(value, ['field', 'kind', 'code', 'message'], 'CONTROL_PROTOCOL_ERROR')
@@ -96,7 +117,7 @@ export function parseAgentInformationSnapshot(value: unknown): AgentInformationS
     return { field: issue.field as AgentInformationIssue['field'], kind: issue.kind as AgentInformationIssue['kind'],
       code: text(issue.code), message: text(issue.message) }
   })
-  return { nativeSessionId: text(p.nativeSessionId), sourceId: text(p.sourceId), observedAt: number(p.observedAt),
+  return { nativeSessionId: text(p.nativeSessionId), sourceId: text(p.sourceId), observedAt: time(p.observedAt), ...(p.sequence === undefined ? {} : { sequence: p.sequence as number }),
     ...(model ? { model: { id: text(model.id), ...(model.name === undefined ? {} : { name: text(model.name) }), scope: model.scope as AgentInformationModel['scope'] } } : {}),
     ...(plan ? { plan: { id: text(plan.id), name: text(plan.name) } } : {}), ...(limits === undefined ? {} : { limits }), issues }
 }

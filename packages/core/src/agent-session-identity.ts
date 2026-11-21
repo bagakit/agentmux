@@ -41,7 +41,7 @@ export function agentNativeInteractionEnd(session: Parameters<typeof nativeInter
 }
 
 export function cloneSession(session: AgentMuxStoredAgentSession): AgentMuxAgentSession {
-  const { nativeCreationKeys: _privateCreationKeys, initialInput: _initialInput, nativeActor: _nativeActor, continuityExecutors: _executors, executorInvocation: _invocation, nativeTurnEnds: _nativeTurnEnds, nativeInteractionEnds: _nativeInteractionEnds, recoveryActivity: _recoveryActivity, interactionOperations: _interactionOperations, hookBindingId: _bindingId, hookToken: _token, activityCommit: _activityCommit, futurePromptIntents: _retainedBodies, ...publicSession } = session
+  const { nativeCreationKeys: _privateCreationKeys, initialInput: _initialInput, nativeActor: _nativeActor, continuityExecutors: _executors, executorInvocation: _invocation, nativeTurnEnds: _nativeTurnEnds, nativeInteractionEnds: _nativeInteractionEnds, recoveryActivity: _recoveryActivity, recoveryInformation: _recoveryInformation, interactionOperations: _interactionOperations, hookBindingId: _bindingId, hookToken: _token, activityCommit: _activityCommit, futurePromptIntents: _retainedBodies, ...publicSession } = session
   return structuredClone(publicSession)
 }
 

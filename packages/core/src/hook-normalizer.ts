@@ -1,3 +1,4 @@
+import { parseAgentInformationSnapshot } from './agent-information.js'
 import { Buffer } from 'node:buffer'
 import type { AgentProviderHookNormalizationContext } from './agent-provider.js'
 import type {
@@ -92,6 +93,9 @@ export type AgentNativeHookSpecification = {
   /** Pure diagnostic from the authenticated Run; it cannot promote an unknown native actor. */
   observationFailure?: (eventName: string, payload: Readonly<Record<string, unknown>>,
     context: AgentProviderHookNormalizationContext) => AgentHookObservationFailure | undefined
+  /** Read-only information from the exact verified main native subject; never an input or lifecycle fact. */
+  information?: (eventName: string, payload: Readonly<Record<string, unknown>>,
+    context: AgentProviderHookNormalizationContext) => import('./agent-information.js').AgentInformationSnapshot | undefined
   /** Ordered native main-turn activity, independent of task completion and permissions. */
   currentActivity?: (eventName: string, payload: Readonly<Record<string, unknown>>,
     context: AgentProviderHookNormalizationContext) => AgentNativeActivityEvent | undefined
@@ -654,6 +658,8 @@ export function normalizeNativeHook(
     nativeSessionMatches,
     childSubject
   )
+  const information = mainSubject ? specification.information?.(eventName, payload, context) : undefined
+  const nativeInformation = information ? parseAgentInformationSnapshot(information) : undefined
   const currentActivity = mainSubject ? specification.currentActivity?.(eventName, payload, context) : undefined
   const observationFailure = specification.observationFailure?.(eventName, payload, context)
   let continuity: AgentHookContinuityObservation | undefined, continuityObservationFailure: AgentHookObservationFailure | undefined
@@ -685,6 +691,7 @@ export function normalizeNativeHook(
     eventName,
     mainSubject,
     ...(currentActivity ? { currentActivity } : {}),
+    ...(nativeInformation ? { nativeInformation } : {}),
     ...(observationFailure ? { observationFailure } : {}),
     ...(continuity ? { continuity } : {}),
     ...(continuityObservationFailure ? { continuityObservationFailure } : {}),
@@ -707,7 +714,7 @@ export function normalizeNativeHook(
     semanticState,
     ...(subagentSessions ? { subagentSessions } : {}),
     status,
-    timeline: buildTimeline(specification, envelope, eventName, nativeLifecycleEvent, payload, tool, observedAt, toolSubject, childSpeaker),
+    timeline: nativeInformation && !nativeLifecycleEvent ? [] : buildTimeline(specification, envelope, eventName, nativeLifecycleEvent, payload, tool, observedAt, toolSubject, childSpeaker),
     ...(handle ? { nativeHandle: handle } : {}),
     ...(turnUsage ? { turnUsage } : {})
   }

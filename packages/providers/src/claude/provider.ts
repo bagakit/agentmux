@@ -3,7 +3,7 @@ import { CLAUDE_LAUNCH_OPTIONS } from './launch-options.js'
 import { CLAUDE_USAGE_CAPABILITY } from './usage.js'
 import {
   CLAUDE_ASKED_TOOL_END_EVENT, CLAUDE_CHILD_ACTIVITY_EVENT, CLAUDE_TURN_END_DECISION, CLAUDE_TURN_END_EVENT,
-  CLAUDE_NOTICE_ADMISSION_EVENT, claudeNativeActivity, claudeNativeObservationFailure, claudeNativeTurnIdentity
+  CLAUDE_NOTICE_ADMISSION_EVENT, CLAUDE_INFORMATION_EVENT, claudeNativeActivity, claudeNativeObservationFailure, claudeNativeTurnIdentity, claudeNativeInformation
 } from './native-activity.js'
 
 type Payload = Readonly<Record<string, unknown>>
@@ -87,6 +87,7 @@ export function claudeProvider({
     turnEndDecision: CLAUDE_TURN_END_DECISION,
     observationFailure: claudeNativeObservationFailure,
     currentActivity: claudeNativeActivity,
+    information: claudeNativeInformation,
     nativeTurnIdKeys: ['turnId'],
     nativeSessionTransition: (eventName: string, payload: Payload) => eventName === 'SessionStart' &&
       ['startup', 'resume', 'clear', 'compact', 'fork'].includes(String(payload.source)),
@@ -112,7 +113,7 @@ export function claudeProvider({
         matches: (payload: Payload) => payload.reason === 'error' && claudeNativeActivity('turn.complete', payload) !== undefined },
       { events: ['turn.start', 'turn.complete', 'AgentMuxActivityUnavailable'], state: 'unknown', lifecycleEvent: null },
       // An Inbox notice ask and its native queue report carry no activity: they leave semantic state as it was.
-      { events: [CLAUDE_TURN_END_EVENT, CLAUDE_NOTICE_ADMISSION_EVENT], state: 'unknown', lifecycleEvent: null },
+      { events: [CLAUDE_TURN_END_EVENT, CLAUDE_NOTICE_ADMISSION_EVENT, CLAUDE_INFORMATION_EVENT], state: 'unknown', lifecycleEvent: null },
       { events: ['PermissionRequest'], state: 'waiting' },
       { events: ['PreToolUse'], toolNames: ['askuserquestion'], state: 'waiting' },
       // Stop 与 SubagentStop 是 Claude Code 的决策前回调（可被其它 hook 否决或追加 context 继续），

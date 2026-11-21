@@ -1102,7 +1102,7 @@ export function parseRpcAgentSession(value: unknown): ReturnType<typeof normaliz
   function member(value: unknown, values: readonly unknown[]): void { if (!values.includes(value)) fail() }
   function runRef(value: unknown): Record<string, unknown> { const run = record(value, ['runId']); string(run.runId); return run }
   const source = record(value)
-  if (Object.hasOwn(source, 'hookBindingId') || Object.hasOwn(source, 'hookToken') || Object.hasOwn(source, 'nativeActor') || Object.hasOwn(source, 'initialInput') || Object.hasOwn(source, 'executorInvocation')) fail()
+  if (Object.hasOwn(source, 'hookBindingId') || Object.hasOwn(source, 'hookToken') || Object.hasOwn(source, 'nativeActor') || Object.hasOwn(source, 'recoveryInformation') || Object.hasOwn(source, 'initialInput') || Object.hasOwn(source, 'executorInvocation')) fail()
   try {
     const session = normalizeAgentSession(source)
     if (source.nativeConfiguration !== undefined) session.nativeConfiguration = parseAgentConfigurationSnapshot(source.nativeConfiguration)

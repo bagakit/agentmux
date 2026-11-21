@@ -1292,7 +1292,6 @@ export class AgentMuxClient {
   private providerReadsDisposed = false
   private readonly contextWindows = new Map<string, AgentContextWindowUsage>()
   private readonly nativeConfigurations = new Map<string, { run: AgentMuxRunRef; observedAt: number; snapshot: AgentConfigurationSnapshot; nativeSessionId?: string; acpBindingId?: string | undefined; actorId: string | undefined }>()
-  private readonly nativeInformation = new Map<string, { run: AgentMuxRunRef; snapshot: AgentInformationSnapshot; actorId: string | undefined }>()
   private readonly nativeIdentityCaptures = new Map<string, { controller: AbortController; run: AgentMuxRunRef }>()
   private readonly nativeIdentityPending: Array<() => void> = []
   private nativeIdentityActive = 0
@@ -2612,7 +2611,6 @@ export class AgentMuxClient {
     this.nativeCurrentActivities.clear()
     this.pendingLifecycleBindings.clear()
     await this.acp.dispose()
-    this.nativeInformation.clear()
     this.nativeConfigurations.clear()
     this.contextWindows.clear()
     this.publisher.dispose()
@@ -9635,16 +9633,18 @@ export class AgentMuxClient {
     const target = { hostId: 'local', runtimeId: this.terminalCreationRuntimeIdentity().runtimeId,
       agentSessionId: session.agentSessionId, expectedRun: session.run, providerId: session.providerId }
     const provider = this.providers.get(session.providerId), handle = session.nativeHandle
-    const retained = this.nativeInformation.get(session.agentSessionId)
+    const retained = session.recoveryInformation
     const previous = retained && sameRun(retained.run, session.run) && handle?.kind === 'provider' &&
       retained.snapshot.nativeSessionId === handle.sessionId && retained.actorId === session.nativeActor?.actorId ? retained.snapshot : null
     const configuration = this.nativeConfigurations.get(session.agentSessionId)
     const oldConfiguration = configuration && sameRun(configuration.run, session.run) &&
       (!configuration.nativeSessionId || configuration.nativeSessionId === handle?.sessionId) &&
-      (configuration.actorId === session.nativeActor?.actorId) ? configuration.snapshot : null
+      (configuration.actorId === session.nativeActor?.actorId) &&
+      (!configuration.acpBindingId || this.acp.hasBinding(session.agentSessionId, session.run)) ? configuration.snapshot : null
     const kept = { kind: 'information' as const, target, snapshot: previous, configuration: oldConfiguration }
     if (handle?.kind !== 'provider' || handle.providerId !== session.providerId) return { ...kept,
       issue: { code: 'AGENT_INFORMATION_SOURCE_UNCONFIRMED', message: 'The original native session is unconfirmed. Existing Agent capabilities remain available.' } }
+    if (!provider.readInformation && !provider.readConfiguration && previous) return kept
     if (!provider.readInformation && !provider.readConfiguration) return { ...kept,
       issue: { code: 'AGENT_INFORMATION_UNSUPPORTED', message: 'This Provider has no native session information reader.' } }
     const run = await this.requireCurrentAgentRun(session)
@@ -9658,26 +9658,35 @@ export class AgentMuxClient {
       provider.readConfiguration ? provider.readConfiguration(context, handle.sessionId).then(value => value === null ? null : parseAgentConfigurationSnapshot(value)) : Promise.resolve(null)
     ])
     requestSignal?.throwIfAborted()
-    const current = await this.registry.refresh(session.agentSessionId, session.run)
+    let current = await this.registry.refresh(session.agentSessionId, session.run)
     const currentRun = await this.requireCurrentAgentRun(current)
     if (!sameNativeHandle(current.nativeHandle, handle) || !isDeepStrictEqual(current.nativeActor, session.nativeActor) ||
         currentRun.state.type !== 'running' || currentRun.pid !== run.pid) throw new AgentMuxError(
       'The original native information source changed. Its Session and input are kept.', 'STALE_AGENT_SESSION')
-    let snapshot = previous, nextConfiguration = oldConfiguration
+    let snapshot = this.retainedNativeInformation(current)?.snapshot ?? null, nextConfiguration = oldConfiguration
     let issue: AgentInformationInspection['issue']
     if (information.status === 'fulfilled' && information.value !== null) {
       if (information.value.nativeSessionId !== handle.sessionId) throw new AgentMuxError('Native information belongs to another Session.', 'CONTROL_PROTOCOL_ERROR')
-      const latest = this.nativeInformation.get(session.agentSessionId)
-      snapshot = latest && sameRun(latest.run, session.run) && latest.snapshot.nativeSessionId === handle.sessionId && latest.actorId === session.nativeActor?.actorId && latest.snapshot.observedAt > information.value.observedAt ? latest.snapshot : information.value
-      this.nativeInformation.set(session.agentSessionId, { run: session.run, snapshot, actorId: session.nativeActor?.actorId })
+      const observed = information.value
+      const saved = await this.updateExactAgentSession(session.agentSessionId, session.run, current => {
+        if (!sameNativeHandle(current.nativeHandle, handle) || !isDeepStrictEqual(current.nativeActor, session.nativeActor)) return current
+        const latest = this.retainedNativeInformation(current)
+        const recoveryInformation = latest && latest.snapshot.observedAt > observed.observedAt ? latest : {
+          run: current.run, snapshot: observed, ...(current.nativeActor ? { actorId: current.nativeActor.actorId } : {}) }
+        return { ...current, recoveryInformation }
+      })
+      current = saved
+      snapshot = this.retainedNativeInformation(saved)?.snapshot ?? null
     } else if (information.status === 'rejected') issue = { code: 'AGENT_INFORMATION_READ_UNAVAILABLE', message: 'Native information could not be refreshed. Any retained sample keeps its original observation time.' }
     if (this.nativeConfigurations.get(session.agentSessionId) !== configuration) {
       const latest = this.nativeConfigurations.get(session.agentSessionId)
       nextConfiguration = latest && sameRun(latest.run, session.run) && (!latest.nativeSessionId || latest.nativeSessionId === handle.sessionId) &&
-        (latest.actorId === session.nativeActor?.actorId) ? latest.snapshot : null
-    } else if (settings.status === 'fulfilled' && settings.value !== null) {
+        (latest.actorId === session.nativeActor?.actorId) &&
+        (!latest.acpBindingId || this.acp.hasBinding(session.agentSessionId, session.run)) ? latest.snapshot : null
+    } else if (settings.status === 'fulfilled') {
       nextConfiguration = settings.value
-      this.nativeConfigurations.set(session.agentSessionId, { run: session.run, nativeSessionId: handle.sessionId, actorId: session.nativeActor?.actorId, observedAt: Date.now(), snapshot: nextConfiguration })
+      if (nextConfiguration) this.nativeConfigurations.set(session.agentSessionId, { run: session.run, nativeSessionId: handle.sessionId, actorId: session.nativeActor?.actorId, observedAt: Date.now(), snapshot: nextConfiguration })
+      else this.nativeConfigurations.delete(session.agentSessionId)
     } else if (settings.status === 'rejected') issue ??= { code: 'AGENT_CONFIGURATION_READ_UNAVAILABLE', message: 'The original native configuration could not be refreshed. Existing Agent capabilities remain available.' }
     this.publishSession(current)
     return { kind: 'information', target, snapshot, configuration: nextConfiguration, ...(issue ? { issue } : {}) }
@@ -10104,7 +10113,6 @@ export class AgentMuxClient {
     if (stored) {
       this.recovery.wake(agentSessionId)
       this.contextWindows.delete(session.run.runId)
-      if (this.nativeInformation.get(agentSessionId)?.run.runId === session.run.runId) this.nativeInformation.delete(agentSessionId)
       if (this.nativeConfigurations.get(agentSessionId)?.run.runId === session.run.runId) this.nativeConfigurations.delete(agentSessionId)
       this.runPids.delete(session.run.runId)
       if (!this.registry.has(agentSessionId) || sameRun(this.registry.get(agentSessionId).run, session.run)) {
@@ -10331,7 +10339,7 @@ export class AgentMuxClient {
         (!configuration.nativeSessionId || configuration.nativeSessionId === session.nativeHandle?.sessionId) &&
         (configuration.actorId === session.nativeActor?.actorId) &&
         (!configuration.acpBindingId || this.acp.hasBinding(session.agentSessionId, session.run))) projected.nativeConfiguration = structuredClone(configuration.snapshot)
-    const information = this.nativeInformation.get(session.agentSessionId)
+    const information = session.recoveryInformation
     if (information && sameRun(information.run, session.run) && !this.endedRuns.has(session.run.runId) &&
         information.snapshot.nativeSessionId === session.nativeHandle?.sessionId && information.actorId === session.nativeActor?.actorId) projected.nativeInformation = structuredClone(information.snapshot)
     const watch = this.nativeStatusWatches.get(session.agentSessionId)
@@ -12734,18 +12742,39 @@ export class AgentMuxClient {
     }
   }
 
-  /** Invalidate scoped activity declarations. Live PTY, input and original native identity remain usable. */
+  /** Retain one sample only at its original Session, Run, native identity and actor. */
+  private retainedNativeInformation(session: AgentMuxStoredAgentSession): import('./agent-information.js').AgentRecoveryInformation | undefined {
+    const original = session.recoveryInformation
+    return original && sameRun(original.run, session.run) && original.snapshot.nativeSessionId === session.nativeHandle?.sessionId &&
+      original.actorId === session.nativeActor?.actorId ? original : undefined
+  }
+
+  private invalidateNativeInformation(session: AgentMuxStoredAgentSession, issue: { code: string; message: string },
+    source?: Pick<AgentNativeActivityEvent, 'sourceId' | 'sequence'>): import('./agent-information.js').AgentRecoveryInformation | undefined {
+    const previous = this.retainedNativeInformation(session)
+    if (!previous || source && (source.sourceId !== previous.snapshot.sourceId ||
+        source.sequence <= Math.max(previous.snapshot.sequence ?? 0, previous.invalidatedThrough ?? 0))) return
+    const { snapshot } = previous
+    const fields = [snapshot.model ? 'model' : undefined, snapshot.plan ? 'plan' : undefined, snapshot.limits ? 'limits' : undefined]
+      .filter((field): field is 'model' | 'plan' | 'limits' => field !== undefined)
+    return { ...previous, ...(source ? { invalidatedThrough: source.sequence } : {}),
+      snapshot: { ...snapshot, issues: [...snapshot.issues.filter(item => item.code !== issue.code),
+        ...fields.map(field => ({ field, kind: 'unconfirmed' as const, ...issue }))] } }
+  }
+
   private async invalidateRecoveryActivity(session: AgentMuxStoredAgentSession, receiptId: string, observedAt: number,
     source?: Pick<AgentNativeActivityEvent, 'sourceId' | 'sequence'>): Promise<AgentMuxStoredAgentSession> {
-    if (!session.recoveryActivity && !subagentScopeMatches(session.nativeSubagents, session)) return session
+    if (!session.recoveryActivity && !subagentScopeMatches(session.nativeSubagents, session) && !session.recoveryInformation) return session
     return await this.updateExactAgentSession(session.agentSessionId, session.run, current => {
       if (!sameNativeHandle(current.nativeHandle, session.nativeHandle)) return current
+      const information = this.invalidateNativeInformation(current, { code: 'AGENT_INFORMATION_OBSERVATION_UNCONFIRMED',
+        message: 'The original information observer has an observation gap. The retained sample keeps its original time.' }, source)
       const children = subagentScopeMatches(current.nativeSubagents, current) ? invalidateSubagentSource(current.nativeSubagents, source) : undefined
       const main = current.recoveryActivity
       const invalidatesMain = main && (!source || main.sourceId === source.sourceId && source.sequence > main.sequence)
-      if (!invalidatesMain && !children) return current
+      if (!invalidatesMain && !children && !information) return current
       const next: AgentMuxStoredAgentSession = { ...current, updatedAt: Math.max(current.updatedAt, observedAt),
-        ...(children ? { nativeSubagents: children } : {}) }
+        ...(children ? { nativeSubagents: children } : {}), ...(information ? { recoveryInformation: information } : {}) }
       if (main && invalidatesMain) {
         const { interruption: _oldEnd, mainState: _oldMain, ...original } = main
         const revision = nextActivityEvidenceRevision(current)
@@ -13271,6 +13300,23 @@ export class AgentMuxClient {
             next.pendingInteraction = { request: request!, ...(remaining.length ? { additionalRequests: remaining } : {}) }
           } else next.pendingInteraction = { ...previous, additionalRequests }
         }
+      }
+      if (normalized.nativeInformation && normalized.mainSubject && !witnessTargetMismatch && next.hookReceipt?.id === receipt.id &&
+          next.nativeHandle?.kind === 'provider' && normalized.nativeInformation.nativeSessionId === next.nativeHandle.sessionId) {
+        const information = normalized.nativeInformation, previous = this.retainedNativeInformation(next)
+        if (previous && previous.snapshot.sourceId !== information.sourceId) {
+          const invalidated = this.invalidateNativeInformation(next, { code: 'AGENT_INFORMATION_SOURCE_CHANGED',
+            message: 'The original information observer changed. The retained sample is unconfirmed.' })
+          if (invalidated) next.recoveryInformation = invalidated
+        } else if (!previous || information.sequence !== undefined && information.sequence >
+          Math.max(previous.snapshot.sequence ?? 0, previous.invalidatedThrough ?? 0) || information.sequence === undefined && information.observedAt > previous.snapshot.observedAt) {
+          next.recoveryInformation = { run: next.run, snapshot: information, ...(next.nativeActor ? { actorId: next.nativeActor.actorId } : {}) }
+        }
+      }
+      if (normalized.observationFailure) {
+        const information = this.invalidateNativeInformation(next, { code: 'AGENT_INFORMATION_OBSERVATION_UNCONFIRMED',
+          message: 'The original information observer has an observation gap. The retained sample keeps its original time.' }, normalized.observationFailure.source)
+        if (information) next.recoveryInformation = information
       }
       return next
     }

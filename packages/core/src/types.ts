@@ -1576,6 +1576,7 @@ export type AgentMuxStoredAgentSession = Omit<AgentMuxAgentSession, 'hookIngress
   initialInput?: import('./agent-session-recovery/continuity-contract.js').AgentMuxContinuityLaunchInput
   /** Retained original-Run recovery evidence; never a live activity or input-authorization projection. */
   recoveryActivity?: AgentRecoveryActivity
+  recoveryInformation?: import('./agent-information.js').AgentRecoveryInformation
   /** Private native service credential, frozen with this original lifecycle launch. Never a public capability ACK. */
   nativeActor?: AgentPrivateNativeActor
   /** Private original invocation provenance; retained opaque and checked only at its exact root. Never public. */
@@ -2343,6 +2344,7 @@ export type NormalizedHookEvent = {
   /** Direct main-subject contribution; a child never synthesizes a parent end. */
   mainSubject: boolean
   currentActivity?: AgentNativeActivityEvent
+  nativeInformation?: import('./agent-information.js').AgentInformationSnapshot
   /** Provider diagnosis accompanying an ordered unknown activity; never a control predicate. */
   currentActivityIssue?: string
   observationFailure?: AgentHookObservationFailure
