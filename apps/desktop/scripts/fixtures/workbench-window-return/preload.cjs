@@ -10,5 +10,7 @@ contextBridge.exposeInMainWorld('windowProof', {
   respond: response => ipcRenderer.send('window-proof:response', response),
   onRequest: listener => listen('workbenchWindows:request', listener),
   onChanged: listener => listen('workbenchWindows:changed', listener),
+  snapshot: (name, width, height, reducedMotion) => ipcRenderer.invoke('window-proof:snapshot', name, width, height, reducedMotion),
+  click: selector => ipcRenderer.invoke('window-proof:click', selector),
   done: result => ipcRenderer.invoke('window-proof:done', result)
 })

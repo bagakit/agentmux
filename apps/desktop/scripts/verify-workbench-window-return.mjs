@@ -7,12 +7,13 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '../../..'), desktop = join(root, 'apps/desktop')
-const evidence = join(root, '.local/window-return/return-proof')
+const evidence = resolve(root, process.argv.find(value => value.startsWith('--evidence='))?.slice('--evidence='.length) ?? '.local/window-return/return-proof')
 await mkdir(evidence, { recursive: true })
 const require = createRequire(join(desktop, 'package.json'))
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const files = ['src/main/workbench-windows.ts', 'src/main/workbench-window-store.ts', 'src/shared/workbench-windows.ts',
   'src/renderer/src/lib/workbench-windows.tsx', 'src/renderer/src/components/StableWorkbenchView.tsx',
+  'src/renderer/src/components/WorkbenchWindowPlaceholder.tsx', 'src/renderer/src/styles/workbench-windows.css',
   'scripts/fixtures/workbench-window-return/main.ts', 'scripts/fixtures/workbench-window-return/entry.tsx',
   'scripts/fixtures/workbench-window-return/preload.cjs', 'scripts/fixtures/workbench-window-return/index.html',
   'src/renderer/src/components/WorkspaceWorkbench.tsx', 'src/renderer/src/lib/workbench-presentation.ts',
@@ -52,12 +53,12 @@ async function tests(label, mutant = '') {
   const json = JSON.parse(await readFile(report, 'utf8'))
   const graph = (await readFile(loaded, 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line))
   assert.ok(graph.length > 0 && graph.every(row => row.mutant === Boolean(mutant)), 'Nonempty actual product owner loaded with declared mutation')
-  assert.equal(json.numTotalTests, 4)
+  assert.equal(json.numTotalTests, 5)
   assert.equal(result.signal, null); assert.equal(result.killed, false)
   if (mutant) {
     assert.notEqual(result.exit, 0)
     assert.ok(json.testResults.flatMap(file => file.assertionResults).some(test => test.fullName.includes('cross-display') && test.status === 'failed'), 'Actual cross-display target consumer must reject the removed binding')
-  } else { assert.equal(result.exit, 0, result.output); assert.equal(json.numFailedTests, 0); assert.equal(json.numPassedTests, 4) }
+  } else { assert.equal(result.exit, 0, result.output); assert.equal(json.numFailedTests, 0); assert.equal(json.numPassedTests, 5) }
   receipt.tests.push({ label, exit: result.exit, passed: json.numPassedTests, failed: json.numFailedTests, graph })
   process.stdout.write(label + ': ' + (mutant ? 'expected consumer RED' : 'GREEN') + '\n')
 }
@@ -100,8 +101,10 @@ async function restart() {
     assert.ok(receipt.restart[0].durableSurveyWindowId)
     assert.equal(receipt.restart[0].durableSurveyWindowId, receipt.restart[1].durableSurveyWindowId, 'Same durable Survey window after real process restart')
     assert.deepEqual(receipt.restart.map(proof => [proof.reachedWillQuit, proof.expected.length, proof.closed.length]), [[true, 2, 2], [true, 1, 1]])
-    receipt.nativeReceipts = Object.fromEntries(await Promise.all(['seed', 'restore'].map(async phase => {
-      const file = join(evidence, phase + '-native.json'); return [file, sha(await readFile(file))]
+    const evidenceFiles = ['seed-native.json', 'restore-native.json', ...receipt.restart.flatMap(proof => proof.frames.map(frame => frame.file))]
+    receipt.nativeReceipts = Object.fromEntries(await Promise.all(evidenceFiles.map(async name => {
+      const file = join(evidence, name)
+      return [file, sha(await readFile(file))]
     })))
     receipt.restartPassed = true
     process.stdout.write('real Electron restart and original window return: GREEN\n')

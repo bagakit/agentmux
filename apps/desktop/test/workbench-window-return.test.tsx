@@ -9,11 +9,61 @@ import { placeWorkbenchWindow, registerWorkbenchDocument } from '../src/renderer
 
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
+import { StableWorkbenchView } from '../src/renderer/src/components/StableWorkbenchView'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { addWorkbenchRegion, createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import type { BrowserPresentationGeometry, BrowserPresentationOccurrence } from '../src/shared/contracts'
 import type { WorkbenchWindowDocument } from '../src/shared/workbench-windows'
+
+it('shows the original window in both Space and the selected Focus slot', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  const reference = { displayWorkspaceId: 'notice-workspace', groupId: 'notice-group', tabId: 'notice-tab', regionId: 'notice-region' }
+  const target = { kind: 'tab' as const, displayWorkspaceId: reference.displayWorkspaceId, groupId: reference.groupId, tabId: reference.tabId }
+  const identity = { windowId: 'notice-window', documentGeneration: 'notice-document' }
+  const container = document.createElement('div'), destination = document.createElement('div')
+  destination.id = 'notice-window-root'
+  document.body.append(container, destination)
+  const root = createClientUiRoot(container)
+  const call = vi.spyOn(api.ui.workbenchWindows, 'call').mockImplementation(async method => {
+    if (method === 'app.window.return') await placeWorkbenchWindow(target, null)
+    return { windows: [], recordedOperation: null }
+  })
+  try {
+    await act(async () => root.render(createElement('div', null,
+      createElement('div', { id: 'notice-space' }),
+      createElement('div', { id: 'notice-focus' }),
+      createElement(StableWorkbenchView, { homeId: 'notice-space', targetId: 'notice-focus', surface: 'focus', reference,
+        primaryTabId: reference.tabId, windowTarget: target, active: true, visible: true, retainedRegionId: reference.regionId,
+        children: createElement('input', { defaultValue: 'Original draft' })
+      }))))
+    const input = container.querySelector<HTMLInputElement>('#notice-focus input')!
+    expect(input).not.toBeNull()
+    let moving!: Promise<void>
+    await act(() => { moving = placeWorkbenchWindow(target, { destination, window: identity }) })
+    await act(async () => moving)
+    expect(destination.querySelector('input')).toBe(input)
+    const button = (slot: string, name: string) => Array.from(container.querySelectorAll<HTMLButtonElement>(`#notice-${slot} button`))
+      .find(item => item.textContent === name)
+    const show = button('focus', 'Show window')
+    expect(show, 'Focus must explain the confirmed move and expose the exact window').toBeDefined()
+    expect(button('space', 'Show window')).toBeDefined()
+    await act(async () => { show!.click() })
+    expect(call).toHaveBeenCalledWith('app.window.focus', expect.objectContaining(identity))
+    await act(async () => { button('focus', 'Bring back')!.click() })
+    expect(call).toHaveBeenCalledWith('app.window.return', expect.objectContaining(identity))
+    expect(container.querySelector('#notice-focus input')).toBe(input)
+    expect(input.value).toBe('Original draft')
+    expect(button('space', 'Show window')).toBeUndefined()
+    expect(button('focus', 'Show window')).toBeUndefined()
+  } finally {
+    call.mockRestore()
+    await act(async () => root.unmount())
+    container.remove()
+    destination.remove()
+    vi.unstubAllGlobals()
+  }
+})
 
 it.each(['tab', 'region', 'cross-display-tab', 'cross-display-region'] as const)('returns off-surface original %s to Main without a fabricated presentation slot', async kind => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)

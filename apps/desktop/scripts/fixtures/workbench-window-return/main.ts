@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { writeFileSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { WorkbenchWindows } from '../../../src/main/workbench-windows'
@@ -20,6 +20,37 @@ app.whenReady().then(async () => {
   ipcMain.handle('window-proof:call', (_event, method, input) => owner.call(method, input, { actor: { kind: 'user', id: 'private-proof' } }))
   ipcMain.handle('window-proof:ready', event => owner.rendererReady(event))
   ipcMain.on('window-proof:response', (event, response) => owner.accept(event, response))
+  const debug = window.webContents.debugger
+  const settle = () => window.webContents.executeJavaScript('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+  ipcMain.handle('window-proof:snapshot', async (_event, name, width, height, reducedMotion) => {
+    if (!debug.isAttached()) debug.attach('1.3')
+    window.setContentSize(width, height)
+    await debug.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: reducedMotion ? 'reduce' : 'no-preference' }] })
+    await settle()
+    const geometry = await window.webContents.executeJavaScript(`(() => {
+      const notice = [...document.querySelectorAll('.detached-workface')].find(node => node.checkVisibility())
+      return { title: notice?.querySelector('[role=status]')?.textContent, theme: document.documentElement.dataset.appearance,
+        animations: notice?.getAnimations({subtree:true}).map(animation=>({name:animation.animationName, time:animation.currentTime, state:animation.playState})),
+        reduced: matchMedia('(prefers-reduced-motion: reduce)').matches,
+        buttons: [...(notice?.querySelectorAll('button') ?? [])].map(button => {
+          const box=button.getBoundingClientRect()
+          return { label:button.textContent, hit:button.contains(document.elementFromPoint(box.x+box.width/2,box.y+box.height/2)) }
+        }) }
+    })()`)
+    await writeFile(join(dirname(receipt!), name), (await window.webContents.capturePage()).toPNG())
+    return geometry
+  })
+  ipcMain.handle('window-proof:click', async (_event, selector) => {
+    if (!debug.isAttached()) debug.attach('1.3')
+    const point = await window.webContents.executeJavaScript(`(() => {
+      const button=document.querySelector(${JSON.stringify(selector)})
+      const box=button.getBoundingClientRect(),x=box.x+box.width/2,y=box.y+box.height/2
+      if(!button.contains(document.elementFromPoint(x,y))) throw Error('Exact visible original action is not hittable')
+      return {x,y}
+    })()`)
+    for (const type of ['mousePressed', 'mouseReleased']) await debug.sendCommand('Input.dispatchMouseEvent', { type, ...point, button: 'left', clickCount: 1 })
+    await settle()
+  })
   window.webContents.setWindowOpenHandler(details => owner.windowOpen(details, () => { throw new Error('External navigation is outside the private proof') }))
   window.webContents.on('did-create-window', (child, details) => owner.createdWindow(child, details))
   ipcMain.handle('window-proof:done', async (_event, result) => {
