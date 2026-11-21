@@ -837,7 +837,7 @@ describe('mounted passive link readout', () => {
     const data = new TextEncoder().encode('later bytes')
     await act(async () => {
       receive({ type: 'core', hostId: session.hostId, event: { type: 'terminal-output', run: session.control.run,
-        data: 'later bytes', dataBytes: data, evidence: { source: 'terminal-output', observedAt: _tailFixtureEpoch(0, 0, 2), run: session.control.run,
+        dataBytes: data, evidence: { source: 'terminal-output', observedAt: _tailFixtureEpoch(0, 0, 2), run: session.control.run,
           outputByteRange: { startByte: 0, endByte: data.byteLength } } } })
       await vi.advanceTimersByTimeAsync(50)
     })
@@ -857,7 +857,7 @@ describe('mounted passive link readout', () => {
     const dataBytes = new TextEncoder().encode('pending old bytes')
     await act(async () => {
       receive({ type: 'core', hostId: session.hostId, event: { type: 'terminal-output', run: session.control.run,
-        data: 'pending old bytes', dataBytes, evidence: { source: 'terminal-output', observedAt: _tailFixtureEpoch(0, 0, 2), run: session.control.run,
+        dataBytes, evidence: { source: 'terminal-output', observedAt: _tailFixtureEpoch(0, 0, 2), run: session.control.run,
           outputByteRange: { startByte: 0, endByte: dataBytes.byteLength } } } })
       await vi.advanceTimersByTimeAsync(50)
     })

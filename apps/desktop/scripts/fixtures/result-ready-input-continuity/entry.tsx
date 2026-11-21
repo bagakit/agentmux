@@ -46,7 +46,7 @@ function echo(control: Parameters<typeof api.sessions.write>[0], text: string) {
   cursors.set(runId, endByte)
   const event: RuntimeEvent = { type: 'core', hostId: control.hostId, event: {
     type: 'terminal-output', run: control.run, ...(control.kind === 'agent' ? { agentSessionId: control.agentSessionId } : {}),
-    data: text, dataBytes, evidence: { source: 'terminal-output', observedAt: Date.now(), run: control.run, outputByteRange: { startByte, endByte } }
+    dataBytes, evidence: { source: 'terminal-output', observedAt: Date.now(), run: control.run, outputByteRange: { startByte, endByte } }
   } }
   for (const listener of listeners) listener(event)
 }

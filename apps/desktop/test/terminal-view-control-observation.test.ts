@@ -203,7 +203,7 @@ it('reads real alternate+vt200/normal transitions and current hidden/readOnly/pe
   const replayLength = lines.length + '\x1b[?1049h\x1b[?1000h\x1b[?1006h'.length
   await act(async () => {
     fixture.receive!({ type: 'core', hostId: session.hostId, event: { type: 'terminal-output',
-      run: { ...session.control.run }, data: hiddenData, dataBytes: hiddenBytes,
+      run: { ...session.control.run }, dataBytes: hiddenBytes,
       evidence: { source: 'terminal-output', observedAt: _reshape_fixtureEpoch(0, 0, 2), run: { ...session.control.run },
         outputByteRange: { startByte: replayLength, endByte: replayLength + hiddenBytes.length } } } })
     await vi.waitFor(() => expect(terminal.buffer.active.getLine(0)?.translateToString(true)).toContain('private-hidden-live-output'))

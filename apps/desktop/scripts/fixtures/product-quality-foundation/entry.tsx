@@ -154,7 +154,7 @@ const probe = {
     const data = '\x1b[2J\x1b[H' + line, dataBytes = new TextEncoder().encode(data)
     const targets = [...terminalEvents].filter(r => r.control?.hostId === session.hostId && r.control.run.runId === session.control.run.runId)
     if (targets.length !== 1) throw new Error('Exactly one original Terminal event consumer required')
-    targets[0]!.listener({ type: 'core', hostId: session.hostId, event: { type: 'terminal-output', run: session.control.run, data, dataBytes,
+    targets[0]!.listener({ type: 'core', hostId: session.hostId, event: { type: 'terminal-output', run: session.control.run, dataBytes,
       evidence: { source: 'terminal-output', observedAt: Date.now(), run: session.control.run,
         outputByteRange: { startByte: bytes.byteLength, endByte: bytes.byteLength + dataBytes.byteLength } } } })
     return { line, cols: terminal.cols, ownerCount: targets.length, startByte: bytes.byteLength, endByte: bytes.byteLength + dataBytes.byteLength }

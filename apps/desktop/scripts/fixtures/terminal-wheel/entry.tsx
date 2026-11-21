@@ -18,7 +18,7 @@ const session: Extract<SessionSnapshot, { kind: 'agent' }> ={id:'private-wheel-a
 const paint=()=> '\x1b[H'+Array.from({length:12},(_,i)=>`\x1b[${i+1};1Hprivate-TUI-row-${w.program.top+i}\x1b[K`).join('')
 const output=(data:string)=>{
   const dataBytes=new TextEncoder().encode(data),startByte=w.outputByte;w.outputByte+=dataBytes.length
-  const event={hostId:session.hostId,event:{type:'terminal-output',run:session.control.run,data,dataBytes,evidence:{outputByteRange:{startByte,endByte:w.outputByte}}}}
+  const event={hostId:session.hostId,event:{type:'terminal-output',run:session.control.run,dataBytes,evidence:{outputByteRange:{startByte,endByte:w.outputByte}}}}
   for(const observer of w.observers)observer(event)
 }
 w.agentmux={continuousProgress:{list:async()=>[],onChanged:()=>()=>{}},schedule:{list:async()=>({schedules:[]}),onChanged:()=>()=>{}},control:{},ui:{requestStorageFlush:async()=>{},setAgentAttentionCount:async()=>false},system:{platform:'darwin'},sessions:{

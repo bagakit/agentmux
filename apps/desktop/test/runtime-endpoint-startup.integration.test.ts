@@ -1,3 +1,4 @@
+import { publishedTerminalText } from './helpers/published-terminal-text'
 import { testWorkbenchUserState } from './helpers/workbench-user-state-fixture'
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
@@ -181,8 +182,7 @@ it('registers actual Main IPC and restores the durable Renderer workface with or
   const control = restored.sessions[0]!.control
   const attached = await native.sessions.attach(control, 0)
   await native.sessions.write(control, 'local-input-before-remote\n', 'user')
-  await until(() => events, values => values.some(event => event.hostId === 'local' && event.event.type === 'terminal-output' &&
-    event.event.data.includes('local-input-before-remote')), 'actual local terminal output')
+  await until(() => events, values => publishedTerminalText(values, 'local', scope.localRun.runId).includes('local-input-before-remote'), 'actual local terminal output')
   const originalLocal = (await scope.localClient.listRuns()).find(run => run.runId === scope.localRun.runId)
   expect([originalLocal?.pid, originalLocal?.state]).toEqual([scope.localRun.pid, 'running'])
   expect(originalLocal!.acceptedInputBytes).toBeGreaterThan(0)

@@ -358,7 +358,7 @@ const probe = {
     const data = '\u001b[?1049h\u001b[HOriginal full-screen output\r\n\u001b[?1003h', dataBytes = new TextEncoder().encode(data)
     menuOutputCursors.set(session.control.run.runId, startByte + dataBytes.length)
     const event = { type: 'core', hostId: session.hostId, event: { type: 'terminal-output', run: session.control.run,
-      data, dataBytes, evidence: { outputByteRange: { startByte, endByte: startByte + dataBytes.length } } } } as RuntimeEvent
+      dataBytes, evidence: { outputByteRange: { startByte, endByte: startByte + dataBytes.length } } } } as RuntimeEvent
     for (const listener of menuOutputListeners) listener(event)
     const deadline = Date.now() + 5000
     await new Promise<void>((done, reject) => { const check = () => {

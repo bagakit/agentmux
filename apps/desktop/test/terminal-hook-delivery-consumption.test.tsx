@@ -199,7 +199,7 @@ it('keeps the real TerminalView and input while one Hook delivery notice repeats
   expect(notice().dataset.unread).toBe('true')
   const suffix = new Uint8Array([0xb8, 0xad, ...new TextEncoder().encode(' original output')])
   await act(async () => fixture.receive!({ type: 'core', hostId: 'local', event: { type: 'terminal-output', run: session.control.run,
-    data: '中 original output', dataBytes: suffix, evidence: { outputByteRange: { startByte: 1, endByte: 1 + suffix.length } } } } as RuntimeEvent))
+    dataBytes: suffix, evidence: { outputByteRange: { startByte: 1, endByte: 1 + suffix.length } } } } as RuntimeEvent))
   await act(async () => await vi.waitFor(() => expect(terminal.buffer.active.getLine(0)?.translateToString(true)).toBe('中 original output')))
   fixture.write.mockClear()
   await act(async () => terminal.input('original healthy input', true))

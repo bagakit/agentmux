@@ -1,3 +1,4 @@
+import { publishedTerminalText } from './helpers/published-terminal-text'
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { execFile } from 'node:child_process'
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
@@ -68,6 +69,10 @@ function createFakeWebContents(id: number) {
         fn(...args)
       }
     },
+    terminalText: (hostId: string, runId: string) => publishedTerminalText(
+      sentEvents.flatMap(({ channel, args }) => channel === 'agentmux:session-event' ? [args[0] as RuntimeEvent] : []),
+      hostId, runId
+    ),
     sentEvents
   }
 }
@@ -472,54 +477,18 @@ describe('Desktop and Renderer Agent exact run continuity integration', () => {
 
     const expectedReloadComposerMarker = `codex-composer-rendered:${Buffer.byteLength(reloadInput)}`
     await waitFor('composer rendered on reloaded WebContents', () => {
-      const accumulatedOutput = webContents1.sentEvents
-        .filter((msg) => {
-          if (msg.channel !== 'agentmux:session-event') return false
-          const event = msg.args[0] as RuntimeEvent
-          return (
-            event.type === 'core' &&
-            event.event.type === 'terminal-output' &&
-            event.event.run.runId === initialRunId
-          )
-        })
-        .map((msg) => (msg.args[0] as RuntimeEvent & { type: 'core'; event: { type: 'terminal-output'; data: string } }).event.data)
-        .join('')
-      return accumulatedOutput.includes(expectedReloadComposerMarker)
+      return webContents1.terminalText('local', initialRunId).includes(expectedReloadComposerMarker)
     })
 
     // Submit the composer turn and wait for accepted submission
     await runtime1.write(reloadSession!.control, '\r')
     const expectedReloadSubmitMarker = `codex-submit:${reloadInput}:accepted`
     await waitFor('submission accepted on reloaded WebContents', () => {
-      const accumulatedOutput = webContents1.sentEvents
-        .filter((msg) => {
-          if (msg.channel !== 'agentmux:session-event') return false
-          const event = msg.args[0] as RuntimeEvent
-          return (
-            event.type === 'core' &&
-            event.event.type === 'terminal-output' &&
-            event.event.run.runId === initialRunId
-          )
-        })
-        .map((msg) => (msg.args[0] as RuntimeEvent & { type: 'core'; event: { type: 'terminal-output'; data: string } }).event.data)
-        .join('')
-      return accumulatedOutput.includes(expectedReloadSubmitMarker)
+      return webContents1.terminalText('local', initialRunId).includes(expectedReloadSubmitMarker)
     })
     await runtime1.write(reloadSession!.control, '\u001d')
     await waitFor('next controlled composer before Desktop restart', () => {
-      const accumulatedOutput = webContents1.sentEvents
-        .filter((msg) => {
-          if (msg.channel !== 'agentmux:session-event') return false
-          const event = msg.args[0] as RuntimeEvent
-          return (
-            event.type === 'core' &&
-            event.event.type === 'terminal-output' &&
-            event.event.run.runId === initialRunId
-          )
-        })
-        .map((msg) => (msg.args[0] as RuntimeEvent & { type: 'core'; event: { type: 'terminal-output'; data: string } }).event.data)
-        .join('')
-      return accumulatedOutput.includes('codex-composer-ready-frame')
+      return webContents1.terminalText('local', initialRunId).includes('codex-composer-ready-frame')
     })
 
     // ---------------------------------------------------------------------------------------------
@@ -600,38 +569,14 @@ describe('Desktop and Renderer Agent exact run continuity integration', () => {
 
     const expectedRestartComposerMarker = `codex-composer-rendered:${Buffer.byteLength(restartInput)}`
     await waitFor('composer rendered on restarted WebContents', () => {
-      const accumulatedOutput = webContents2.sentEvents
-        .filter((msg) => {
-          if (msg.channel !== 'agentmux:session-event') return false
-          const event = msg.args[0] as RuntimeEvent
-          return (
-            event.type === 'core' &&
-            event.event.type === 'terminal-output' &&
-            event.event.run.runId === initialRunId
-          )
-        })
-        .map((msg) => (msg.args[0] as RuntimeEvent & { type: 'core'; event: { type: 'terminal-output'; data: string } }).event.data)
-        .join('')
-      return accumulatedOutput.includes(expectedRestartComposerMarker)
+      return webContents2.terminalText('local', initialRunId).includes(expectedRestartComposerMarker)
     })
 
     // Submit the composer turn on restarted view and wait for accepted submission
     await runtime2.write(restartSession!.control, '\r')
     const expectedRestartSubmitMarker = `codex-submit:${restartInput}:accepted`
     await waitFor('submission accepted on restarted WebContents', () => {
-      const accumulatedOutput = webContents2.sentEvents
-        .filter((msg) => {
-          if (msg.channel !== 'agentmux:session-event') return false
-          const event = msg.args[0] as RuntimeEvent
-          return (
-            event.type === 'core' &&
-            event.event.type === 'terminal-output' &&
-            event.event.run.runId === initialRunId
-          )
-        })
-        .map((msg) => (msg.args[0] as RuntimeEvent & { type: 'core'; event: { type: 'terminal-output'; data: string } }).event.data)
-        .join('')
-      return accumulatedOutput.includes(expectedRestartSubmitMarker)
+      return webContents2.terminalText('local', initialRunId).includes(expectedRestartSubmitMarker)
     })
 
     // Cleanly stop session via Core exact control

@@ -99,7 +99,7 @@ describe('Renderer resource state owners', () => {
       type: 'terminal-output',
       agentSessionId: session.id,
       run: session.control.run,
-      data: 'Waiting for approval',
+      dataBytes: new TextEncoder().encode('Waiting for approval'),
       evidence: {
         source: 'terminal-output',
         observedAt: _reshape_fixtureEpoch(0, 0, 4),

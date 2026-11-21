@@ -1,3 +1,4 @@
+import { publishedTerminalText } from './helpers/published-terminal-text'
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { join } from 'node:path'
@@ -63,8 +64,7 @@ describe('Main uses original Core owners with per-endpoint failure isolation', (
     const detach = controller.attach(contents)
     const attached = await controller.attachSession(contents.id, created.control, 0, next)
     await controller.write(created.control, 'local-still-live\n', 'user')
-    await until(() => events, values => values.some(value => value.type === 'core' && value.hostId === 'local' &&
-      value.event.type === 'terminal-output' && value.event.data.includes('local-still-live')), 'actual local Run output')
+    await until(() => events, values => publishedTerminalText(values, 'local', created.control.run.runId).includes('local-still-live'), 'actual local Run output')
     expect((await controller.resolveSession(created.id, next))?.hostId).toBe('local')
     await expect(controller.resolveSession('unknown-session', next)).rejects.toBeTruthy()
     await controller.detachSession(contents.id, attached.attachmentId); detach()

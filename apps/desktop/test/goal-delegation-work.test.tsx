@@ -175,8 +175,11 @@ it('indexes one event bridge by exact source/Host/Run and changed Goal, ignoring
   const releaseFirst = observe('first', [delegation(), { ...delegation(), operationId: 'second-source', sourceMessageId: 'second-message' }], first)
   const releaseSecond = observe('second', [{ ...delegation(), hostId: 'another-host', sourceMessageId: 'another-message', workerRunId: 'another-run' }], second)
   expect(sessions).toHaveBeenCalledTimes(1); expect(demands).toHaveBeenCalledTimes(1)
+  const dataBytes = new TextEncoder().encode('output')
   for (let i = 0; i < 100; i++) {
-    session({ hostId: 'original-host', event: { type: 'terminal-output', run: { runId: 'original-run' }, data: 'output' } } as RuntimeEvent)
+    session({ type: 'core', hostId: 'original-host', event: { type: 'terminal-output', run: { runId: 'original-run' }, dataBytes,
+      evidence: { source: 'terminal-output', observedAt: i,
+        outputByteRange: { startByte: i * dataBytes.length, endByte: (i + 1) * dataBytes.length } } } })
     session({ hostId: 'original-host', event: { type: 'process-state', run: { runId: 'unrelated-' + i }, state: 'exited' } } as RuntimeEvent)
     domain(['unrelated-goal-' + i])
   }

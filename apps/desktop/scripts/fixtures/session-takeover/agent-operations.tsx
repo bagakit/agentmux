@@ -71,7 +71,7 @@ export function installOperationFixture({ snapshot, creations, boot, saveRuntime
     const startByte = new TextEncoder().encode(output[source.id]).length, dataBytes = new TextEncoder().encode(data)
     output[source.id] += data; source.latestOutputBytes = startByte + dataBytes.length
     emit({ type: 'core', hostId: source.hostId, event: { type: 'terminal-output', agentSessionId: source.id,
-      run: source.control.run, data, dataBytes, evidence: { source: 'terminal-output', observedAt: Date.now(), run: source.control.run,
+      run: source.control.run, dataBytes, evidence: { source: 'terminal-output', observedAt: Date.now(), run: source.control.run,
         outputByteRange: { startByte, endByte: source.latestOutputBytes } } } })
     counters.streamLines++
   }

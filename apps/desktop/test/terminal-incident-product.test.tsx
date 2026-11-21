@@ -310,7 +310,7 @@ function reportSink() {
 function output(startByte: number, data: string): RuntimeEvent {
   const dataBytes = new TextEncoder().encode(data)
   return { type: 'core', hostId: 'local', event: { type: 'terminal-output', agentSessionId: session.id, run: session.control.run,
-    data, dataBytes, evidence: { source: 'terminal-output', observedAt: 1, outputByteRange: { startByte, endByte: startByte + dataBytes.length } } } }
+    dataBytes, evidence: { source: 'terminal-output', observedAt: 1, outputByteRange: { startByte, endByte: startByte + dataBytes.length } } } }
 }
 it.each(['success', 'failure'] as const)('retains a pending reveal deadline and late original %s as distinct original observations', async outcome => {
   const sent = reportSink(), pending = deferred<SessionAttachResult>()
@@ -564,7 +564,7 @@ it('converges original restart resources with queued output and independent clea
   const encoder = new TextEncoder(), liveBytes = encoder.encode('\x1b[31mLIVE中\x1b[0m')
   const event = (runId: string, startByte: number, dataBytes: Uint8Array): RuntimeEvent => ({
     type: 'core', hostId: session.hostId, event: { type: 'terminal-output', agentSessionId: session.id,
-      run: { runId }, data: '', dataBytes, evidence: { source: 'terminal-output', observedAt: 1,
+      run: { runId }, dataBytes, evidence: { source: 'terminal-output', observedAt: 1,
         outputByteRange: { startByte, endByte: startByte + dataBytes.length } } }
   })
   await act(async () => root.render(<RestartTerminalConsumer />))
@@ -934,7 +934,7 @@ it('releases retired original restart views while their exact retained-history r
     const dataBytes = new TextEncoder().encode('AFTER ORIGINAL GAP')
     const startByte = new TextEncoder().encode(lines).length + 128
     await act(async () => fixture.receive!({ type: 'core', hostId: session.hostId,
-      event: { type: 'terminal-output', agentSessionId: session.id, run: { runId }, data: '', dataBytes,
+      event: { type: 'terminal-output', agentSessionId: session.id, run: { runId }, dataBytes,
         evidence: { source: 'terminal-output', observedAt: 1, outputByteRange: { startByte, endByte: startByte + dataBytes.length } } } }))
     await vi.waitFor(() => expect(requests).toHaveLength(index + 1))
     expect(history.mock.calls.at(-1)![0]).toBe(`pending-history-${runId}`)

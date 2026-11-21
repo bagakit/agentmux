@@ -298,7 +298,7 @@ describe('one Session owns one live queue drain', () => {
     useAppStore.getState().enqueueAgentSteer('other', 'other message')
     const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue(undefined)
     useAppStore.getState().applyEvent({ type: 'core', hostId: 'local', event: {
-      type: 'terminal-output', agentSessionId: 's', run: { runId: 's-run' }, data: 'output', dataBytes:new TextEncoder().encode('output'),
+      type: 'terminal-output', agentSessionId: 's', run: { runId: 's-run' }, dataBytes:new TextEncoder().encode('output'),
       evidence: { source: 'terminal-output', observedAt: 2, run: { runId: 's-run' }, outputByteRange:{startByte:0,endByte:6} }
     } })
     await Promise.resolve()

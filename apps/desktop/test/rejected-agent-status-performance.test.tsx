@@ -159,7 +159,7 @@ it('rejects old Run, stale and foreign-host events without waking the mounted ac
   expect({ collectionChanges, commits }).toEqual({ collectionChanges: 0, commits: 0 })
   // Existing raw transport isolation is a positive control, not another semantic no-op implementation.
   for (let i = 0; i < 8; i++) await emit({ type: 'core', hostId: 'local', event: { type: 'terminal-output',
-    run: { runId: `run-${ids[0]}` }, data: 'private-byte', dataBytes: new TextEncoder().encode('private-byte'),
+    run: { runId: `run-${ids[0]}` }, dataBytes: new TextEncoder().encode('private-byte'),
     evidence: { source: 'terminal-output', observedAt: 3000 + i, run: { runId: `run-${ids[0]}` }, outputByteRange: { startByte: i * 12, endByte: (i + 1) * 12 } } } })
   expect(useAppStore.getState()).toBe(before)
   expect({ collectionChanges, commits }).toEqual({ collectionChanges: 0, commits: 0 })

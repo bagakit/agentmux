@@ -148,7 +148,7 @@ function continuation(seed: string, tail = '', resizes: Extract<AgentMuxTerminal
 }
 function output(startByte: number, data: string): RuntimeEvent {
   const dataBytes = encoder.encode(data)
-  return {type:'core',hostId:'local',event:{type:'terminal-output',agentSessionId:session.id,run:session.control.run,data,dataBytes,
+  return {type:'core',hostId:'local',event:{type:'terminal-output',agentSessionId:session.id,run:session.control.run,dataBytes,
     evidence:{source:'terminal-output',observedAt:1,outputByteRange:{startByte,endByte:startByte+dataBytes.byteLength}}}}
 }
 function resized(throughByte: number, resizeRevision: number, cols: number, rows: number): RuntimeEvent {

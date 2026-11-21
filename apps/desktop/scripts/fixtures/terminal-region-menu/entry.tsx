@@ -58,7 +58,7 @@ Object.assign(window, { terminalMenu: {
     const data = '\u001b[?1049h\u001b[HFresh output while the menu is open\r\n', dataBytes = new TextEncoder().encode(data)
     outputCursors.set(session.control.run.runId, startByte + dataBytes.length)
     const event = { type: 'core', hostId: session.hostId, event: { type: 'terminal-output', run: session.control.run,
-      data, dataBytes, evidence: { outputByteRange: { startByte, endByte: startByte + dataBytes.length } } } } as RuntimeEvent
+      dataBytes, evidence: { outputByteRange: { startByte, endByte: startByte + dataBytes.length } } } } as RuntimeEvent
     for (const listener of outputListeners) listener(event)
   },
   select() { terminal().select(0, 0, 'src/original.txt'.length) },

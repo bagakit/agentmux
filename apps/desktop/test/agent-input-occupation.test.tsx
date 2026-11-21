@@ -82,9 +82,12 @@ it('reads drafts, queues and in-flight inputs from the same owner rule, skips cl
 
 it('does no additional Session-index work for one hundred unrelated Runtime events or unchanged input entries', () => {
   const index = vi.spyOn(presentations, 'agentSessionPresentationIndex')
+  const dataBytes = new TextEncoder().encode('output')
   for (let i = 0; i < 100; i++) {
-    useAppStore.getState().applyEvent({ hostId: original.hostId,
-      event: { type: 'terminal-output', run: original.control.run, data: 'output', sequence: i } } as unknown as RuntimeEvent)
+    useAppStore.getState().applyEvent({ type: 'core', hostId: original.hostId,
+      event: { type: 'terminal-output', run: original.control.run, dataBytes,
+        evidence: { source: 'terminal-output', observedAt: i,
+          outputByteRange: { startByte: i * dataBytes.length, endByte: (i + 1) * dataBytes.length } } } })
     useAppStore.setState({ sessions: [original, moteAgent('unrelated-' + i, null)] })
   }
   expect(index).not.toHaveBeenCalled()

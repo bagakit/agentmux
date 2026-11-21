@@ -200,7 +200,7 @@ it.each(['normal', 'alternate', 'Runtime gap', 'retained read failure', 'line bo
       const later = new TextEncoder().encode('Later live output')
       const startByte = dataBytes.length + 10, endByte = startByte + later.length
       await act(async () => fixture.receive!({ type: 'core', hostId: 'local', event: { type: 'terminal-output', run: session.control.run,
-        data: 'Later live output', dataBytes: later, evidence: { source: 'terminal-output', observedAt: _tailFixtureEpoch(0, 0, 2), run: session.control.run,
+        dataBytes: later, evidence: { source: 'terminal-output', observedAt: _tailFixtureEpoch(0, 0, 2), run: session.control.run,
           outputByteRange: { startByte, endByte } } } }))
       await act(async () => await vi.waitFor(() => expect(fixture.replay).toHaveBeenCalledExactlyOnceWith('retained-attachment', dataBytes.length)))
       await act(async () => await vi.waitFor(() => expect(document.body.textContent).toContain('Retained history could not be read')))
@@ -261,7 +261,7 @@ it('history open/live output/return keeps the actual xterm parser, Session and h
   const suffix=new Uint8Array([0xb8,0xad,...new TextEncoder().encode('\x1b[31mR\x1b[0m')])
   const endByte=1+suffix.byteLength
   await act(async()=>fixture.receive!({type:'core',hostId:'local',event:{type:'terminal-output',run:session.control.run,
-    data:'中\x1b[31mR\x1b[0m',dataBytes:suffix,evidence:{outputByteRange:{startByte:1,endByte}}}} as RuntimeEvent))
+    dataBytes:suffix,evidence:{outputByteRange:{startByte:1,endByte}}}} as RuntimeEvent))
   await act(async () => await vi.waitFor(() => expect(terminal.buffer.active.getLine(0)?.translateToString(true)).toBe('中R')))
   expect(terminal.buffer.active.getLine(0)?.translateToString(true)).toBe('中R')
   expect(terminal.buffer.active.getLine(0)?.getCell(2)?.getFgColor()).toBe(1)

@@ -121,7 +121,7 @@ async function write(terminal: BrowserTerminal, text: string) { await act(async 
 async function deliverOutput(startByte: number, data: string) {
   const dataBytes = new TextEncoder().encode(data), endByte = startByte + dataBytes.length
   const event: RuntimeEvent = { type: 'core', hostId: original.hostId, event: { type: 'terminal-output',
-    agentSessionId: original.control.agentSessionId, run: original.control.run, data, dataBytes,
+    agentSessionId: original.control.agentSessionId, run: original.control.run, dataBytes,
     evidence: { source: 'terminal-output', observedAt: 1, outputByteRange: { startByte, endByte } } } }
   expect(fixture.listeners.size, 'the original Run output consumer is subscribed').toBe(1)
   await act(async () => { for (const receive of fixture.listeners) receive(event) })
@@ -279,7 +279,7 @@ it('modal isolation and live output keep the original open terminal tools availa
   const data = '\u001b[?1049h\u001b[HLive menu output\r\n', dataBytes = new TextEncoder().encode(data)
   await act(async () => {
     const event = { type: 'core', hostId: original.hostId, event: { type: 'terminal-output', run: original.control.run,
-      data, dataBytes, evidence: { outputByteRange: { startByte: output.length, endByte: output.length + dataBytes.length } } } } as RuntimeEvent
+      dataBytes, evidence: { outputByteRange: { startByte: output.length, endByte: output.length + dataBytes.length } } } } as RuntimeEvent
     expect(fixture.listeners.size, 'the actual output consumer is subscribed').toBeGreaterThan(0)
     for (const listener of fixture.listeners) listener(event)
   })
@@ -464,7 +464,7 @@ it('closed live output reaches the real buffer without publishing terminal tools
     const data = `live-${i}\r\n`, startByte = afterByte; afterByte += data.length
     await act(async () => {
       const event = { type: 'core', hostId: original.hostId, event: { type: 'terminal-output', run: original.control.run,
-        data, dataBytes: new TextEncoder().encode(data), evidence: { outputByteRange: { startByte, endByte: afterByte } } } } as RuntimeEvent
+        dataBytes: new TextEncoder().encode(data), evidence: { outputByteRange: { startByte, endByte: afterByte } } } } as RuntimeEvent
       for (const listener of fixture.listeners) listener(event)
     })
   }

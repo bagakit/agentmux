@@ -211,7 +211,7 @@ function liveOutput(data: string): RuntimeEvent {
   const run = session.control.run
   const dataBytes = new TextEncoder().encode(data)
   const startByte = new TextEncoder().encode(retained).byteLength
-  return { type: 'core', hostId: session.hostId, event: { type: 'terminal-output', run, dataBytes, data,
+  return { type: 'core', hostId: session.hostId, event: { type: 'terminal-output', run, dataBytes,
     evidence: { source: 'terminal-output', observedAt: _tailFixtureEpoch(0, 0, 2), run,
       outputByteRange: { startByte, endByte: startByte + dataBytes.byteLength } } } }
 }

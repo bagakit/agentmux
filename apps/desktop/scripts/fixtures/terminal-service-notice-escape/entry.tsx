@@ -41,7 +41,7 @@ api.sessions.redraw = async () => { redrawCalls++; return undefined }
 function event(data: string, startByte: number) {
   const session = current(), dataBytes = new TextEncoder().encode(data), endByte = startByte + dataBytes.length
   const value: RuntimeEvent = { type: 'core', hostId: session.hostId, event: { type: 'terminal-output',
-    agentSessionId: session.id, run: session.control.run, data, dataBytes,
+    agentSessionId: session.id, run: session.control.run, dataBytes,
     evidence: { source: 'terminal-output', observedAt: Date.now(), run: session.control.run, outputByteRange: { startByte, endByte } } } }
   for (const listener of listeners) listener(value)
   return endByte

@@ -219,7 +219,7 @@ async function hiddenOutput(data: string, startByte: number) {
   expect(fixture.receive).not.toBeNull()
   await act(async () => {
     fixture.receive!({ type: 'core', hostId: 'local', event: {
-      type: 'terminal-output', run: session.control.run, data, dataBytes: new TextEncoder().encode(data),
+      type: 'terminal-output', run: session.control.run, dataBytes: new TextEncoder().encode(data),
       evidence: { outputByteRange: { startByte, endByte: startByte + data.length } }
     } } as RuntimeEvent)
     await vi.waitFor(() => expect(fixture.terminals[0]?.completed).toContain(data))
@@ -571,7 +571,7 @@ it('mounts an initially hidden terminal without allocating a GPU context', async
 function liveOutput(data: string | Uint8Array, startByte: number): RuntimeEvent {
   const dataBytes = typeof data === 'string' ? new TextEncoder().encode(data) : data
   return { type: 'core', hostId: 'local', event: { type: 'terminal-output', run: session.control.run,
-    data: typeof data === 'string' ? data : new TextDecoder().decode(data), dataBytes,
+    dataBytes,
     evidence: { outputByteRange: { startByte, endByte: startByte + dataBytes.byteLength } } } } as RuntimeEvent
 }
 
@@ -757,7 +757,7 @@ it('reports a visible terminal awaiting attachment as unready, then observes the
   await act(async () => root!.render(<TerminalView session={session} themeId="graphite" interactiveResize={false} visible autoFocus={false} linkOrigin={linkOrigin} />))
   expect(rendererPerformance.snapshot().terminals).toMatchObject([{ runId: 'run-retained', visible: true, revealed: false, liveReady: false, acceptsInput: true, replaying: true, readySinceAt: null }])
   await act(async () => fixture.receive!({ type: 'core', hostId: 'local', event: {
-    type: 'terminal-output', run: session.control.run, data: 'live', dataBytes: new TextEncoder().encode('live'),
+    type: 'terminal-output', run: session.control.run, dataBytes: new TextEncoder().encode('live'),
     evidence: { outputByteRange: { startByte: 7, endByte: 11 } }
   } } as RuntimeEvent))
   expect(rendererPerformance.snapshot().terminals[0]).toMatchObject({ pendingItems: 1, pendingBytes: 4 })
@@ -1228,7 +1228,7 @@ it.each([[true, false], [false, false], [true, true], [false, true]] as const)(
         const startByte = overlap ? 0 : cursor, endByte = startByte + dataBytes.byteLength
         await act(async () => {
           fixture.receive!({ type: 'core', hostId: 'local', event: { type: 'terminal-output', run: session.control.run,
-            data: new TextDecoder().decode(dataBytes), dataBytes,
+            dataBytes,
             evidence: { outputByteRange: { startByte, endByte } } } } as RuntimeEvent)
           await vi.waitFor(() => expect(terminal.completed.length).toBe(previous + 1))
         })
@@ -1481,10 +1481,10 @@ it('[terminal-owner-retention] releases retired Core input while the same actual
     restoreWrite = () => write.mockRestore()
     await act(async () => {
       fixture.receive!({ type: 'core', hostId: base.hostId, event: { type: 'terminal-output', run: base.control.run,
-        data: first, dataBytes: new TextEncoder().encode(first), evidence: { source: 'run-process', observedAt: 3, outputByteRange: { startByte: nextByte, endByte: nextByte + first.length } } } })
+        dataBytes: new TextEncoder().encode(first), evidence: { source: 'run-process', observedAt: 3, outputByteRange: { startByte: nextByte, endByte: nextByte + first.length } } } })
       await vi.waitFor(() => expect(resume).toBeTypeOf('function'))
       fixture.receive!({ type: 'core', hostId: base.hostId, event: { type: 'terminal-output', run: base.control.run,
-        data: second, dataBytes: new TextEncoder().encode(second), evidence: { source: 'run-process', observedAt: 4, outputByteRange: { startByte: nextByte + first.length, endByte: nextByte + first.length + second.length } } } })
+        dataBytes: new TextEncoder().encode(second), evidence: { source: 'run-process', observedAt: 4, outputByteRange: { startByte: nextByte + first.length, endByte: nextByte + first.length + second.length } } } })
     })
     expect(rendererPerformance.snapshot().terminals[0]!.queuedBytes, 'Real second output remains queued behind the outstanding parser acknowledgement').toBeGreaterThan(0)
     // Advance accepted Core facts and React alternate props; the current projection

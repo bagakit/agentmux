@@ -256,7 +256,7 @@ function burst(data: string, startByte: number) {
   expect(fixture.receive).not.toBeNull()
   let cursor=startByte
   for (const line of data.match(/[^\n]*\n/g) ?? []) {
-    fixture.receive!({type:'core',hostId:'local',event:{type:'terminal-output',run:control.run,data:line,dataBytes:new TextEncoder().encode(line),evidence:{outputByteRange:{startByte:cursor,endByte:cursor+line.length}}}} as RuntimeEvent)
+    fixture.receive!({type:'core',hostId:'local',event:{type:'terminal-output',run:control.run,dataBytes:new TextEncoder().encode(line),evidence:{outputByteRange:{startByte:cursor,endByte:cursor+line.length}}}} as RuntimeEvent)
     cursor+=line.length
   }
 }
@@ -292,7 +292,7 @@ it.each([
   const decoder=new TextDecoder()
   const receive=(dataBytes:Uint8Array,startByte:number)=>{
     fixture.receive!({type:'core',hostId:'local',event:{type:'terminal-output',run:control.run,
-      data:decoder.decode(dataBytes,{stream:true}),dataBytes,
+      dataBytes,
       evidence:{outputByteRange:{startByte,endByte:startByte+dataBytes.byteLength}}}} as RuntimeEvent)
   }
   await act(async()=>receive(headBytes.subarray(0,split),initial.length))
@@ -362,7 +362,7 @@ it('applies a dropped startup owner resize before replay parses alternate rows a
     fixture.receive!({type:'core',hostId:'local',event:{type:'terminal-resized',run:control.run,cols:132,rows:45,throughByte:initial.length,resizeRevision:1}} as RuntimeEvent)
     let cursor=initial.length
     for(const data of [alternate,...padding]) {
-      fixture.receive!({type:'core',hostId:'local',event:{type:'terminal-output',run:control.run,data,dataBytes:new TextEncoder().encode(data),evidence:{outputByteRange:{startByte:cursor,endByte:cursor+data.length}}}} as RuntimeEvent)
+      fixture.receive!({type:'core',hostId:'local',event:{type:'terminal-output',run:control.run,dataBytes:new TextEncoder().encode(data),evidence:{outputByteRange:{startByte:cursor,endByte:cursor+data.length}}}} as RuntimeEvent)
       cursor+=data.length
     }
   })

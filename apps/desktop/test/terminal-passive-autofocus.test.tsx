@@ -294,7 +294,7 @@ it('only allocates search for an actual query and releases it without remounting
   await act(async () => fixture.receive!({
     type: 'core', hostId: session.hostId,
     event: {
-      type: 'terminal-output', run: session.control.run, data, dataBytes,
+      type: 'terminal-output', run: session.control.run, dataBytes,
       evidence: { source: 'terminal-output', observedAt: 2, run: session.control.run,
         outputByteRange: { startByte: lines.length, endByte: lines.length + dataBytes.length } }
     }
